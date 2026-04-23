@@ -689,3 +689,31 @@ class TestResumeCfg(unittest.TestCase):
 			assert 'nuclei_1' in task_names
 			httpx_task = next(t for t in data['tasks'] if t['task_name'] == 'httpx_1')
 			assert httpx_task['status'] == 'SUCCESS'
+
+
+class TestResumeRunOpts(unittest.TestCase):
+	"""Verify _get_resume_run_opts returns correct opts based on resume_tasks state."""
+
+	def test_get_resume_run_opts_skip_success(self):
+		from secator.runners._base import Runner
+		runner = Runner.__new__(Runner)
+		runner.resume_tasks = {
+			'nmap_1': {'status': 'SUCCESS', 'resume_file_path': None},
+		}
+		assert runner._get_resume_run_opts('nmap_1') is None  # skip
+
+	def test_get_resume_run_opts_inject_for_paused(self):
+		from secator.runners._base import Runner
+		runner = Runner.__new__(Runner)
+		runner.resume_tasks = {
+			'httpx_1': {'status': 'PAUSED', 'resume_file_path': '/tmp/httpx_resume.cfg'},
+		}
+		opts = runner._get_resume_run_opts('httpx_1')
+		assert opts == {'resume': '/tmp/httpx_resume.cfg'}
+
+	def test_get_resume_run_opts_rerun_for_unknown(self):
+		from secator.runners._base import Runner
+		runner = Runner.__new__(Runner)
+		runner.resume_tasks = {}
+		opts = runner._get_resume_run_opts('nuclei_1')
+		assert opts == {}  # empty = run from scratch

@@ -102,6 +102,7 @@ class Runner:
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
+		self.resume_tasks = self.run_opts.pop('resume_tasks', {})
 
 		# Runner state
 		self.uuids = set()
@@ -561,6 +562,24 @@ class Runner:
 			self.debug(f'resume.cfg written to {resume_path}', sub='end')
 		except Exception as e:
 			self.debug(f'Failed to write resume.cfg: {e}', sub='end')
+
+	def _get_resume_run_opts(self, task_name):
+		"""Return run_opts for a task based on resume_tasks state.
+
+		Returns:
+			None: skip this task (already completed)
+			dict: run opts to inject (may be empty dict for re-run from scratch)
+		"""
+		if not self.resume_tasks:
+			return {}
+		task_resume = self.resume_tasks.get(task_name)
+		if not task_resume:
+			return {}
+		if task_resume.get('status') == 'SUCCESS':
+			return None
+		if task_resume.get('status') == 'PAUSED' and task_resume.get('resume_file_path'):
+			return {'resume': task_resume['resume_file_path']}
+		return {}
 
 	def join_threads(self):
 		"""Wait for all running threads to complete."""

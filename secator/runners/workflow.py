@@ -93,10 +93,19 @@ class Workflow(Runner):
 				# Get task class
 				task = Task.get_task_class(node.name)
 
+				# Check resume_tasks: skip completed, inject resume opts for paused
+				resume_run_opts = self._get_resume_run_opts(node.name)
+				if resume_run_opts is None:
+					debug(f'{node.id} skipped (resume: already completed)', sub=self.config.name)
+					self.add_result(Info(message=f'Skipped task [bold gold3]{node.name}[/] (resume: already completed)'))
+					return
+
 				# Merge task options (order of priority with overrides)
 				task_opts = merge_opts(self.config.default_options.toDict(), node.opts, opts)
 				if (ix == 0 or parent_ix == 0) and forwarded_opts:
 					task_opts.update(forwarded_opts)
+				if resume_run_opts:
+					task_opts.update(resume_run_opts)
 
 				# Create task signature
 				task_opts['name'] = node.name
