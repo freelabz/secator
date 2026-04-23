@@ -60,9 +60,14 @@ class wafw00f(Command):
 		if self.headers:
 			header_file = f'{self.reports_folder}/.inputs/headers.txt'
 			with open(header_file, 'w') as f:
-				for header in self.headers.split(';;'):
-					f.write(f'{header}\n')
-			self.cmd = self.cmd.replace(self.headers, header_file)
+				if isinstance(self.headers, dict):
+					for key, value in self.headers.items():
+						f.write(f'{key}:{value}\n')
+				else:
+					for header in self.headers.split(';;'):
+						f.write(f'{header}\n')
+			if isinstance(self.headers, str):
+				self.cmd = self.cmd.replace(self.headers, header_file)
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -80,12 +85,12 @@ class wafw00f(Command):
 			results = yaml.safe_load(f.read())
 
 		for result in results:
-			if not result['detected']:
+			if not result.get('detected'):
 				continue
 			waf_name = result['firewall']
 			url = result['url']
-			match = result['trigger_url']
-			manufacter = result['manufacturer']
+			match = result.get('trigger_url', '')
+			manufacter = result.get('manufacturer', '')
 			yield Tag(
 				category='info',
 				name='waf',
@@ -103,6 +108,10 @@ class wafw00f(Command):
 		temp_dir = tempfile.gettempdir()
 		header_file = f'{temp_dir}/headers.txt'
 		with open(header_file, 'w') as f:
+			if isinstance(headers, dict):
+				for key, value in headers.items():
+					f.write(f'{key}:{value}\n')
+				return header_file
 			for header in headers.split(';;'):
 				f.write(f'{header}\n')
 		return header_file
