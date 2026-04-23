@@ -1,9 +1,45 @@
+import json
 import os
 import re
+
+from pathlib import Path
 
 from dotmap import DotMap
 from secator.output_types import Error
 from secator.utils import deduplicate, debug
+
+
+def load_resume_cfg(resume_path):
+	"""Load a resume.cfg file and return parsed contents.
+
+	Returns:
+		tuple: (targets, run_options, resume_tasks, reports_folder)
+	Raises:
+		FileNotFoundError: if file not found
+		ValueError: if invalid JSON
+	"""
+	p = Path(resume_path)
+	if not p.exists():
+		raise FileNotFoundError(f'Resume file not found: {resume_path}')
+
+	try:
+		with open(p) as f:
+			data = json.load(f)
+	except json.JSONDecodeError as e:
+		raise ValueError(f'Invalid JSON in resume file: {e}')
+
+	targets = data.get('targets', [])
+	run_options = data.get('run_options', {})
+	reports_folder = data.get('reports_folder', '')
+	resume_tasks = {
+		task['task_name']: {
+			'status': task.get('status', 'UNKNOWN'),
+			'resume_file_path': task.get('resume_file_path'),
+		}
+		for task in data.get('tasks', [])
+		if task.get('task_name')
+	}
+	return targets, run_options, resume_tasks, reports_folder
 
 
 def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):

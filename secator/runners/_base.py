@@ -20,7 +20,7 @@ from secator.output_types import (
 )
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import get_task_folder_id, run_extractors
+from secator.runners._helpers import get_task_folder_id, load_resume_cfg, run_extractors
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
 from secator.tree import build_runner_tree
 from secator.loader import get_configs_by_type
@@ -102,7 +102,20 @@ class Runner:
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
+
+		# Resume handling: at scan/workflow level, --resume is a path to a resume.cfg JSON file.
+		# At task level, --resume is the tool's native resume flag value, passed through unchanged.
 		self.resume_tasks = self.run_opts.pop('resume_tasks', {})
+		runner_type = getattr(self.config, 'type', '')
+		if runner_type in ('scan', 'workflow') and self.run_opts.get('resume'):
+			r_targets, r_run_options, r_resume_tasks, _ = load_resume_cfg(self.run_opts.pop('resume'))
+			# Use targets from resume.cfg only when no inputs were provided
+			if not inputs and r_targets:
+				inputs = r_targets
+			# Merge resume run_options under user-supplied opts (user wins on conflict)
+			for k, v in r_run_options.items():
+				self.run_opts.setdefault(k, v)
+			self.resume_tasks = r_resume_tasks
 
 		# Runner state
 		self.uuids = set()

@@ -162,6 +162,45 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 0
 		assert 'Run a workflow.' in result.output
 
+	def test_scan_resume_option_exists(self):
+		result = self.runner.invoke(cli, ['s', 'domain', '--help'])
+		assert '--resume' in result.output
+
+	def test_workflow_resume_option_exists(self):
+		result = self.runner.invoke(cli, ['w', 'host_recon', '--help'])
+		assert '--resume' in result.output
+
+	def test_task_resume_option_exists(self):
+		result = self.runner.invoke(cli, ['x', 'nmap', '--help'])
+		assert '--resume' in result.output
+
+	def test_load_resume_cfg_returns_parsed_data(self):
+		import json
+		import tempfile
+		from secator.runners._helpers import load_resume_cfg
+
+		data = {
+			'runner_type': 'scan',
+			'runner_name': 'test',
+			'targets': ['example.com'],
+			'run_options': {'threads': 10},
+			'reports_folder': '/tmp/reports',
+			'tasks': [
+				{'task_name': 'nmap_1', 'status': 'SUCCESS', 'resume_file_path': None},
+				{'task_name': 'httpx_1', 'status': 'PAUSED', 'resume_file_path': '/tmp/httpx.cfg'},
+			],
+		}
+		with tempfile.NamedTemporaryFile(mode='w', suffix='.cfg', delete=False) as f:
+			json.dump(data, f)
+			path = f.name
+
+		targets, run_options, resume_tasks, reports_folder = load_resume_cfg(path)
+		assert targets == ['example.com']
+		assert run_options == {'threads': 10}
+		assert reports_folder == '/tmp/reports'
+		assert resume_tasks['nmap_1']['status'] == 'SUCCESS'
+		assert resume_tasks['httpx_1']['resume_file_path'] == '/tmp/httpx.cfg'
+
 	def test_scan_command(self):
 		result = self.runner.invoke(cli, ['scan'])
 		assert not result.exception
