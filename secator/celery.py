@@ -104,6 +104,47 @@ if IN_WORKER:
 	setup_handlers()
 
 
+def _update_workflow_checkpoint(completed_runner):
+	"""Mark this task as completed in the parent workflow's checkpoint."""
+	from secator.runners.checkpoint import Checkpoint
+	from secator.runners._base import Runner
+
+	# For chunked tasks, use the task_id context to find the parent runner
+	if completed_runner.chunk is not None:
+		parent_id = completed_runner.context.get('task_id')
+	else:
+		parent_id = completed_runner.context.get('workflow_id') or completed_runner.context.get('scan_id')
+	if not parent_id:
+		return
+	parent_folder = Runner.find_runner_folder(parent_id)
+	if not parent_folder:
+		return
+	cp = Checkpoint.load(parent_folder)
+	if cp is None:
+		return
+	task_name = completed_runner.name
+	if task_name in cp.task_states:
+		cp.task_states[task_name] = 'completed'
+	cp.completed_results_count += len(completed_runner.results)
+	cp.save(parent_folder)
+
+
+def save_celery_checkpoint(checkpoint):
+	"""Save a Checkpoint to the Celery result backend.
+
+	Stores under key 'checkpoint:<runner_id>' with 7-day TTL.
+	"""
+	from dataclasses import asdict
+	from secator.runners.checkpoint import CELERY_CHECKPOINT_PREFIX
+
+	key = f'{CELERY_CHECKPOINT_PREFIX}{checkpoint.runner_id}'
+	value = json.dumps(asdict(checkpoint), default=str)
+	try:
+		app.backend.set(key, value, expires=604800)  # 7 days
+	except Exception as e:
+		debug(f'Failed to save checkpoint to Celery backend: {e}', sub='celery.checkpoint')
+
+
 @retry(Exception, tries=3, delay=2)
 def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
@@ -129,7 +170,7 @@ def revoke_task(task_id, task_name=None):
 	message = f'Revoked task {task_id}'
 	if task_name:
 		message += f' ({task_name})'
-	app.control.revoke(task_id, terminate=True)
+	app.control.revoke(task_id, terminate=True, signal='SIGKILL')
 	console.print(Info(message=message))
 
 
@@ -219,9 +260,31 @@ def run_command(self, results, name, targets, opts={}):
 		return replace(self, workflow)
 
 	# Update state live
-	for _ in task:
-		update_state(self, task)
-	update_state(self, task, force=True)
+	try:
+		for _ in task:
+			update_state(self, task)
+		update_state(self, task, force=True)
+	except Exception:
+		# Save checkpoint on unexpected kill/revoke
+		if task.started and not task.done:
+			from secator.runners.checkpoint import Checkpoint
+			resume_files = {}
+			if getattr(task, 'resume_file', None):
+				resume_files[name] = task.resume_file
+			cp = Checkpoint(
+				runner_type='task',
+				runner_id=context.get('task_id', self.request.id),
+				runner_name=name,
+				targets=list(targets) if targets else [],
+				opts=opts,
+				context=context,
+				completed_inputs=list(getattr(task, 'completed_inputs', [])),
+				pause_method='kill',
+				resume_files=resume_files,
+			)
+			cp.save(task.reports_folder)
+			save_celery_checkpoint(cp)
+		raise
 
 	if CONFIG.addons.mongodb.enabled:
 		return [r._uuid for r in task.results]
@@ -348,6 +411,10 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 
 	# Run mark_completed (duplicate checks, db updates if enable_hooks is True)
 	runner.mark_completed()
+
+	# Update parent workflow/scan checkpoint
+	if runner.has_parent:
+		_update_workflow_checkpoint(runner)
 
 	# Log total time
 	total_time = time() - start_time

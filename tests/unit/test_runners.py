@@ -542,6 +542,34 @@ class TestCommandRunner(unittest.TestCase):
 						self.assertEqual(cmd.run_opts.get('timeout'), 100)
 
 
+def test_runner_paused_status():
+	from secator.runners._base import Runner
+	r = Runner.__new__(Runner)
+	r.started = True
+	r.done = False
+	r.revoked = False
+	r.skipped = False
+	r.paused = True
+	assert r.status == 'PAUSED'
+
+
+def test_runner_pid_file(tmp_path):
+	import os
+	import json
+	from secator.runners._base import Runner
+
+	runner = Runner.__new__(Runner)
+	runner._reports_folder = str(tmp_path)
+
+	Runner._write_pid_file(runner)
+	pid_path = tmp_path / 'runner.pid'
+	assert pid_path.exists()
+	data = json.loads(pid_path.read_text())
+	assert data['pid'] == os.getpid()
+
+	Runner._delete_pid_file(runner)
+	assert not pid_path.exists()
+
 class TestIsOwnSource(unittest.TestCase):
 	"""Verify _is_own_source correctly scopes errors to the owning runner."""
 

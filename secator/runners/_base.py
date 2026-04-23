@@ -119,6 +119,7 @@ class Runner:
 		self.celery_ids_map = {}
 		self.revoked = False
 		self.skipped = False
+		self.paused = False
 		self.results_buffer = []
 		self._hooks = hooks
 
@@ -364,6 +365,8 @@ class Runner:
 			return 'REVOKED'
 		if self.skipped:
 			return 'SKIPPED'
+		if self.paused:
+			return 'PAUSED'
 		if not self.done:
 			return 'RUNNING'
 		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
@@ -487,15 +490,27 @@ class Runner:
 				self.run_hooks('on_interval', sub='item')
 
 		except BaseException as e:
-			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
-			error = Error.from_exception(e)
-			self.add_result(error)
-			self.revoked = True
-			if not self.sync:  # yield latest results from Celery
-				self.stop_celery_tasks()
-				for item in self.yielder():
-					yield from self._process_item(item)
-					self.run_hooks('on_interval', sub='item')
+			if self.paused:
+				pass  # paused gracefully via signal, checkpoint already saved
+			elif isinstance(e, KeyboardInterrupt):
+				# CTRL+C reached here without going through the signal handler
+				# (e.g. signal handlers couldn't be installed, or a re-entrant interrupt
+				# fired after pause() already set self.paused but before the guard caught it).
+				# Treat it as a pause so the runner ends in PAUSED state, not FAILURE.
+				try:
+					self.pause()
+				except Exception:
+					self.paused = True  # last-resort: at least mark paused
+			else:
+				self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
+				error = Error.from_exception(e)
+				self.add_result(error)
+				self.revoked = True
+				if not self.sync:  # yield latest results from Celery
+					self.stop_celery_tasks()
+					for item in self.yielder():
+						yield from self._process_item(item)
+						self.run_hooks('on_interval', sub='item')
 
 		finally:
 			yield from self.results_buffer
@@ -506,6 +521,8 @@ class Runner:
 		"""Finalize the runner."""
 		self.join_threads()
 		gc.collect()
+		if self.paused:
+			return  # checkpoint already saved in pause(); skip completion/reporting
 		if self.sync:
 			self.mark_completed()
 		if self.enable_reports:
@@ -610,6 +627,12 @@ class Runner:
 			self._print_item(item)
 		if queue:
 			self.results_buffer.append(item)
+
+		# Track completed inputs for Command subclasses (for checkpoint/resume)
+		if hasattr(self, 'completed_inputs') and hasattr(item, '_input'):
+			inp = getattr(item, '_input', None)
+			if inp and inp in self.inputs and inp not in self.completed_inputs:
+				self.completed_inputs.append(inp)
 
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes.
@@ -986,6 +1009,9 @@ class Runner:
 		self.debug(f'started (sync: {self.sync}, hooks: {self.enable_hooks}), chunk: {self.chunk}, chunk_count: {self.chunk_count}', sub='start')  # noqa: E501
 		self.log_start()
 		self.run_hooks('on_start', sub='start')
+		self._write_pid_file()
+		if self.sync:
+			self._install_signal_handlers()
 
 	def mark_completed(self):
 		"""Mark runner as completed."""
@@ -1000,6 +1026,7 @@ class Runner:
 		self.run_hooks('on_end', sub='end')
 		self.export_profiler()
 		self.log_results()
+		self._delete_pid_file()
 
 	def log_start(self):
 		"""Log runner start."""
@@ -1044,6 +1071,115 @@ class Runner:
 			report.build()
 			report.send()
 			self.report = report
+
+	def _write_pid_file(self):
+		"""Write runner.pid to reports folder for pause/resume lookup."""
+		import os
+		pid_data = {
+			'pid': os.getpid(),
+			'runner_type': getattr(self.config, 'type', '') if hasattr(self, 'config') else '',
+			'runner_name': self.name if hasattr(self, 'name') else '',
+			'celery_id': self.context.get('celery_id', '') if hasattr(self, 'context') else '',
+		}
+		try:
+			pid_path = Path(self.reports_folder) / 'runner.pid'
+			with open(pid_path, 'w') as f:
+				json.dump(pid_data, f)
+		except Exception:
+			pass
+
+	def _delete_pid_file(self):
+		"""Remove runner.pid from reports folder (only if owned by current process)."""
+		import os
+		try:
+			pid_path = Path(self.reports_folder) / 'runner.pid'
+			if not pid_path.exists():
+				return
+			with open(pid_path) as f:
+				data = json.load(f)
+			if data.get('pid') != os.getpid():
+				return
+			pid_path.unlink()
+		except Exception:
+			pass
+
+	def pause(self):
+		"""Pause this runner: signal or kill subprocess, save checkpoint."""
+		from secator.runners.checkpoint import Checkpoint
+
+		# Guard against re-entrant calls (e.g. SIGINT re-delivered to parent when
+		# pause_process() sends os.killpg to the whole process group).
+		if self.paused:
+			return
+		self.paused = True
+
+		# Pause subprocess if this is a Command (sends signal, waits for cleanup)
+		if hasattr(self, 'pause_process'):
+			self.pause_process()
+			pause_method = self.pause_method or 'kill'
+			process_pid = self.process.pid if self.process else None
+		else:
+			pause_method = 'kill'
+			process_pid = None
+
+		# Build initial checkpoint (resume_files may be updated by on_interrupt hooks)
+		cp = Checkpoint(
+			runner_type=getattr(self.config, 'type', 'task'),
+			runner_id=self.context.get('task_id') or self.context.get('workflow_id') or self.context.get('scan_id', ''),
+			runner_name=self.name,
+			targets=list(self.inputs),
+			opts=self.run_opts.copy(),
+			context=self.context.copy(),
+			completed_inputs=list(getattr(self, 'completed_inputs', [])),
+			pause_method=pause_method,
+			process_pid=process_pid,
+		)
+
+		# Call on_interrupt hooks with the checkpoint so tasks can set resume files
+		# (and drivers like GCS can upload them and update checkpoint.resume_files)
+		if hasattr(self, 'run_hooks'):
+			self.run_hooks('on_interrupt', cp, sub='pause')
+
+		cp.save(self.reports_folder)
+		self._print(Info(message=f'Checkpoint saved to {self.reports_folder}'), rich=True)
+		self._print(Info(message=f'Runner paused. Resume with: secator resume {cp.runner_id}'), rich=True)
+
+	@classmethod
+	def find_runner_folder(cls, runner_id: str):
+		"""Scan reports directory for a runner.pid matching runner_id.
+
+		Args:
+			runner_id: Celery task ID or runner name to match.
+
+		Returns:
+			Path to reports folder containing runner.pid, or None.
+		"""
+		import glob
+		pattern = str(Path(CONFIG.dirs.reports) / '**' / 'runner.pid')
+		for pid_path_str in glob.glob(pattern, recursive=True):
+			try:
+				with open(pid_path_str) as f:
+					data = json.load(f)
+				if data.get('celery_id') == runner_id or data.get('runner_name') == runner_id:
+					return str(Path(pid_path_str).parent)
+			except (json.JSONDecodeError, OSError):
+				continue
+		return None
+
+	def _install_signal_handlers(self):
+		"""Install SIGINT (Ctrl+C), SIGTSTP (Ctrl+Z) and SIGUSR1 (remote pause) handlers."""
+		import signal as _signal
+
+		def _handle_pause(signum, frame):
+			self.pause()
+			raise KeyboardInterrupt  # stop the main loop after saving checkpoint
+
+		try:
+			_signal.signal(_signal.SIGINT, _handle_pause)
+			_signal.signal(_signal.SIGTSTP, _handle_pause)
+			_signal.signal(_signal.SIGUSR1, _handle_pause)
+		except (OSError, ValueError):
+			console.print(Warning(message='Cannot install signal handlers (not in main thread or unsupported platform)', _source=self.unique_name), highlight=False)  # noqa: E501
 
 	def export_profiler(self):
 		"""Export profiler."""

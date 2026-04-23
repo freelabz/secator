@@ -104,6 +104,7 @@ class Command(Runner):
 		'on_cmd_opts',
 		'on_cmd_done',
 		'on_line',
+		'on_interrupt',   # called after process is paused/killed (set self.resume_file here)
 	]
 
 	# Ignore return code
@@ -131,6 +132,12 @@ class Command(Runner):
 
 	# Profile
 	profile = 'small'
+
+	# Whether the subprocess supports SIGSTOP/SIGCONT pause (default: True)
+	supports_pause = True
+
+	# Path to the native resume file set by on_interrupt hook (None if not set)
+	resume_file = None
 
 	def __init__(self, inputs=[], **run_opts):
 
@@ -194,6 +201,8 @@ class Command(Runner):
 
 		# Process
 		self.process = None
+		self.completed_inputs = []    # inputs that produced >=1 result
+		self.pause_method = None      # 'signal' or 'kill'
 
 		# Monitor thread (lazy initialization)
 		self.monitor_thread = None
@@ -660,6 +669,35 @@ class Command(Runner):
 		if exit_ok:
 			self.exit_ok = True
 
+	def pause_process(self):
+		"""Pause the running subprocess by sending SIGINT, allowing tools to write resume files
+		before exiting."""
+		if self.process is None:
+			return
+		# Always use SIGINT so tools can perform cleanup (write resume files, etc.)
+		try:
+			self.stop_process(sig=signal.SIGINT)
+		except Exception:
+			self.process.terminate()
+		self.pause_method = 'kill'
+		# Wait for process to finish writing cleanup/resume files (up to 5 seconds)
+		try:
+			self.process.wait(timeout=5)
+		except Exception:
+			pass
+
+		self.paused = True
+
+	def resume_process(self):
+		"""Resume a SIGCONT-resumed subprocess (legacy SIGSTOP path, kept for compatibility)."""
+		if self.process is None or self.pause_method != 'signal':
+			return
+		try:
+			os.kill(self.process.pid, signal.SIGCONT)
+		except (OSError, ProcessLookupError):
+			pass
+		self.paused = False
+
 	def _stop_monitor_thread(self):
 		"""Stop monitor thread."""
 		if self.monitor_thread and self.monitor_thread.is_alive() and self.monitor_stop_event:
@@ -693,7 +731,7 @@ class Command(Runner):
 							warning = Warning(message=f'Memory limit {self.memory_limit_mb}MB exceeded (actual: {total_mem:.2f}MB)')
 							if self.monitor_queue is not None:
 								self.monitor_queue.put(warning)
-							self.stop_process(exit_ok=True, sig=signal.SIGTERM)
+							self.stop_process(exit_ok=True, sig=signal.SIGKILL)
 							break
 
 				# Check execution time
@@ -703,7 +741,7 @@ class Command(Runner):
 						warning = Warning(message=f'Task timeout {CONFIG.celery.task_max_timeout}s exceeded')
 						if self.monitor_queue is not None:
 							self.monitor_queue.put(warning)
-						self.stop_process(exit_ok=True, sig=signal.SIGTERM)
+						self.stop_process(exit_ok=True, sig=signal.SIGKILL)
 						break
 
 				# Check retry count

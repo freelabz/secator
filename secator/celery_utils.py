@@ -337,8 +337,21 @@ class CeleryData(object):
 
 		if isinstance(info, Exception):
 			if isinstance(info, TaskRevokedError):
-				data['results'] = [Error(message='Task was revoked', _source=data['name'])]
-				data['state'] = 'REVOKED'
+				# Check if a checkpoint was saved — if so, this is a pause not a hard revoke
+				state = 'REVOKED'
+				try:
+					from secator.runners.checkpoint import CELERY_CHECKPOINT_PREFIX
+					from secator.celery import app
+					raw = app.backend.get(f'{CELERY_CHECKPOINT_PREFIX}{task_id}')
+					if raw:
+						state = 'PAUSED'
+				except Exception:
+					pass
+				if state == 'PAUSED':
+					data['results'] = [Info(message='Task was paused', _source=data['name'])]
+				else:
+					data['results'] = [Error(message='Task was revoked', _source=data['name'])]
+				data['state'] = state
 				data['ready'] = True
 			else:
 				debug('unhandled exception', obj={'msg': str(info), 'tb': traceback_as_string(info)}, sub='celery.data', id=task_id)
@@ -355,7 +368,7 @@ class CeleryData(object):
 			data.update(info)
 
 		# Set ready flag and progress
-		ready = data['state'] in ['FAILURE', 'SUCCESS', 'REVOKED']
+		ready = data['state'] in ['FAILURE', 'SUCCESS', 'REVOKED', 'PAUSED']
 		data['ready'] = ready
 		ids_map[task_id]['ready'] = data['ready']
 		if data['ready']:

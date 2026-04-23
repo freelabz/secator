@@ -1490,6 +1490,354 @@ def report_delete(runner_id, workspace, driver, yes):
 # 	pass
 
 
+#--------------#
+# PAUSE/RESUME #
+#--------------#
+
+@cli.command(name='pause')
+@click.argument('runner_id')
+def pause_runner(runner_id):
+	"""Pause a running task, workflow, or scan by its ID."""
+	import signal
+	from pathlib import Path
+	from secator.runners._base import Runner
+
+	# 1. Try local runner via runner.pid file
+	folder = Runner.find_runner_folder(runner_id)
+	if folder:
+		pid_path = Path(folder) / 'runner.pid'
+		try:
+			data = json.loads(pid_path.read_text())
+			pid = data['pid']
+			os.kill(pid, signal.SIGUSR1)
+			console.print(Info(message=f'Sent pause signal to runner {runner_id} (PID {pid})'))
+			return
+		except (OSError, ProcessLookupError) as e:
+			console.print(Warning(message=f'Could not signal local process: {e}'))
+
+	# 2. Try Celery task (send SIGINT so worker can save checkpoint before exiting)
+	try:
+		from celery.result import AsyncResult
+		from secator.celery import app
+		result = AsyncResult(runner_id, app=app)
+		if result.state in ('PENDING', 'STARTED', 'RUNNING'):
+			result.revoke(terminate=True, signal='SIGINT')
+			console.print(Info(message=f'Paused Celery task {runner_id}. Resume with: secator resume {runner_id}'))
+		else:
+			console.print(Warning(message=f'Task {runner_id} is in state {result.state}, cannot pause'))
+	except Exception as e:
+		console.print(Error(message=f'Could not pause runner {runner_id}: {e}'))
+
+
+def _resolve_resume_file(resume_path, task_name):
+	"""Resolve a resume file path: download from GCS if needed, verify existence locally."""
+	if not resume_path:
+		return None
+	if resume_path.startswith('gs://'):
+		try:
+			from secator.hooks.gcs import download_resume_file
+			from secator.config import CONFIG
+			local_path = str(CONFIG.dirs.data / '.resume_files' / task_name / resume_path.split('/')[-1])
+			resume_path = download_resume_file(resume_path, local_path)
+			debug(f'Downloaded GCS resume file to {local_path}', sub='cli.resume')
+		except Exception as e:
+			debug(f'Could not download resume file from GCS: {e}', sub='cli.resume')
+			return None
+	return resume_path if os.path.exists(resume_path) else None
+
+
+def _build_checkpoint_from_report(folder, resume_file):
+	"""Build a synthetic Checkpoint from report.json when no checkpoint.json exists."""
+	from pathlib import Path as _Path
+	from secator.runners.checkpoint import Checkpoint
+
+	report_path = _Path(folder) / 'report.json'
+	if not report_path.exists():
+		return None
+
+	try:
+		with open(report_path) as f:
+			report_data = json.load(f)
+	except (json.JSONDecodeError, OSError):
+		return None
+
+	info = report_data.get('info', {})
+	runner_name = info.get('name', '')
+	targets = info.get('targets', [])
+	run_opts = info.get('run_opts', {}) or {}
+
+	if not runner_name or not targets:
+		return None
+
+	# Infer runner type from folder path structure (e.g. .../tasks/15 -> 'task')
+	runner_type = 'task'
+	for part in _Path(folder).parts:
+		if part in ('tasks', 'workflows', 'scans'):
+			runner_type = part.rstrip('s')
+			break
+
+	return Checkpoint(
+		runner_type=runner_type,
+		runner_id=runner_name,
+		runner_name=runner_name,
+		targets=targets,
+		opts=run_opts,
+		context={},
+		completed_inputs=[],
+		pause_method='kill',
+		resume_files={runner_name: resume_file},
+	)
+
+
+@cli.command(name='resume')
+@click.argument('runner_id')
+@click.option('--sync', is_flag=True, default=False, help='Run resumed task synchronously.')
+@click.option('--resume-file', 'resume_file_override', type=str, default=None,
+              help='Path to a native tool resume file (e.g. nuclei/httpx/nmap resume cfg). '
+                   'When no checkpoint exists, runner info is loaded from report.json.')
+@click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
+def resume_runner(runner_id, sync, resume_file_override, workspace):
+	"""Resume a paused task, workflow, or scan.
+
+	RUNNER_ID can be a runner UUID, a checkpoint file/folder path, or a
+	type/number shorthand like 'workflows/6' or 'scans/3'.
+
+	Use --workspace/-ws/-w to scope the lookup to a specific workspace.
+	Use --resume-file to supply a native tool resume file for tasks that were
+	interrupted before a checkpoint was saved (backwards-compatible fallback).
+	"""
+	import glob as _glob
+	import signal as _signal
+	from pathlib import Path
+	from secator.runners.checkpoint import Checkpoint, CELERY_CHECKPOINT_PREFIX
+	from secator.runners._base import Runner
+	from secator.template import TemplateLoader
+
+	# 1. Resolve checkpoint from various input formats
+	checkpoint = None
+	folder = None
+	workspace_name = workspace or CONFIG.workspace.default or 'default'
+
+	runner_id_path = Path(runner_id)
+
+	# a) Direct checkpoint file path
+	if runner_id_path.is_file() and runner_id_path.name == 'checkpoint.json':
+		folder = str(runner_id_path.parent)
+		checkpoint = Checkpoint.load(folder)
+
+	# b) Checkpoint folder path
+	elif runner_id_path.is_dir():
+		folder = str(runner_id_path)
+		checkpoint = Checkpoint.load(folder)
+
+	# c) "type/number" shorthand (e.g. workflows/6 or scans/3)
+	elif '/' in runner_id and not runner_id.startswith('/'):
+		parts = runner_id.split('/', 1)
+		if len(parts) == 2:
+			runner_type_part, runner_num = parts[0], parts[1]
+			# Try pluralized and non-pluralized folder names
+			for rtype in [runner_type_part + 's', runner_type_part]:
+				if workspace_name:
+					# Workspace resolved (explicit or default): look directly in that workspace folder
+					candidate = str(Path(CONFIG.dirs.reports) / workspace_name / rtype / runner_num)
+					matches = [candidate] if Path(candidate).is_dir() else []
+				else:
+					# No workspace at all: glob across all workspaces
+					pattern = str(Path(CONFIG.dirs.reports) / '**' / rtype / runner_num)
+					matches = _glob.glob(pattern, recursive=True)
+				for match in matches:
+					cp = Checkpoint.load(match)
+					if cp:
+						checkpoint = cp
+						folder = match
+						break
+					elif folder is None:
+						folder = match  # track folder even when no checkpoint
+				if checkpoint:
+					break
+
+	# d) runner.pid-based lookup (UUID or runner name)
+	if checkpoint is None:
+		runner_folder = Runner.find_runner_folder(runner_id)
+		if runner_folder:
+			if folder is None:
+				folder = runner_folder
+			checkpoint = Checkpoint.load(runner_folder)
+
+	# e) Celery backend fallback
+	if checkpoint is None:
+		try:
+			from secator.celery import app
+			raw = app.backend.get(f'{CELERY_CHECKPOINT_PREFIX}{runner_id}')
+			if raw:
+				checkpoint = Checkpoint(**json.loads(raw))
+		except Exception as e:
+			debug(f'Could not fetch checkpoint from Celery backend: {e}', sub='cli.resume')
+
+	# f) --resume-file: build synthetic checkpoint from report.json, or override existing
+	if resume_file_override:
+		if checkpoint is None:
+			if folder:
+				checkpoint = _build_checkpoint_from_report(folder, resume_file_override)
+				if checkpoint:
+					console.print(Info(message='No checkpoint found — loaded runner info from report.json'))
+				else:
+					console.print(Error(message=f'Could not load runner info from {folder}/report.json'))
+					return
+			else:
+				console.print(Error(message=f'Could not find runner folder for ID: {runner_id}'))
+				return
+		else:
+			# Override the resume file in the existing checkpoint
+			checkpoint.resume_files[checkpoint.runner_name] = resume_file_override
+
+	if checkpoint is None:
+		console.print(Error(message=f'No checkpoint found for runner ID: {runner_id}'))
+		return
+
+	console.print(Info(message=(
+		f'Resuming {checkpoint.runner_type} {checkpoint.runner_name} '
+		f'({len(checkpoint.remaining_inputs)} of {len(checkpoint.targets)} inputs remaining)'
+	)))
+
+	# 2. If SIGSTOP was used and PID is alive, send SIGCONT
+	if checkpoint.pause_method == 'signal' and checkpoint.process_pid:
+		try:
+			os.kill(checkpoint.process_pid, _signal.SIGCONT)
+			console.print(Info(message=f'Sent SIGCONT to PID {checkpoint.process_pid}'))
+			if folder:
+				checkpoint.delete(folder)
+			return
+		except (OSError, ProcessLookupError):
+			console.print(Warning(message=f'Process {checkpoint.process_pid} no longer alive, restarting task'))
+
+	# 3. Rebuild and restart with remaining inputs + original context
+	targets = checkpoint.remaining_inputs
+	if not targets:
+		console.print(Info(message='No remaining inputs — nothing to resume'))
+		if folder:
+			checkpoint.delete(folder)
+		return
+
+	from secator.runners.task import Task
+	from secator.runners.workflow import Workflow
+	from secator.runners.scan import Scan
+	runner_map = {'task': Task, 'workflow': Workflow, 'scan': Scan}
+	runner_cls = runner_map.get(checkpoint.runner_type)
+	if runner_cls is None:
+		console.print(Error(message=f'Unknown runner type: {checkpoint.runner_type}'))
+		return
+
+	if checkpoint.runner_type == 'task':
+		from secator.loader import get_configs_by_type
+		task_configs = get_configs_by_type('task')
+		config = next((c for c in task_configs if c.name == checkpoint.runner_name), None)
+		if config is None:
+			console.print(Error(message=f"Task '{checkpoint.runner_name}' not found in loaded tasks"))
+			return
+	else:
+		config = TemplateLoader(name=f'{checkpoint.runner_type}/{checkpoint.runner_name}')
+		if not isinstance(config.name, str) or not config.name:
+			return  # TemplateLoader already printed an error
+	run_opts = checkpoint.opts.copy()
+	context = checkpoint.context.copy()  # preserves original task_id/workflow_id/etc.
+
+	# Determine sync mode: follow the same logic as cli_helper.py
+	if not sync:
+		try:
+			from secator.celery import is_celery_worker_alive
+			worker_alive = is_celery_worker_alive()
+			sync = not worker_alive
+			debug(f'Worker alive: {worker_alive}, sync: {sync}', sub='resume')
+		except Exception as e:
+			debug(f'Could not check worker status, defaulting to sync: {e}', sub='resume')
+			sync = True
+	run_opts['sync'] = sync
+
+	# Use the same reports folder as the prior run so results consolidate into one report
+	if folder:
+		run_opts['reports_folder'] = str(folder)
+		debug(f'Using prior reports folder: {folder}', sub='resume')
+
+	# Ensure CLI print options are set for the resumed runner
+	run_opts.update({
+		'print_cmd': True,
+		'print_item': True,
+		'print_line': True,
+		'print_progress': True,
+		'print_start': True,
+		'print_end': True,
+		'caller': 'cli',
+	})
+
+	# Resolve resume files: download from GCS if remote, else verify local existence
+	debug('Resolving resume files from checkpoint', sub='resume')
+	resolved_resume_files = {}
+	for task_name, resume_path in (checkpoint.resume_files or {}).items():
+		local_path = _resolve_resume_file(resume_path, task_name)
+		if local_path:
+			resolved_resume_files[task_name] = local_path
+			debug(f'Resolved resume file for {task_name}: {local_path}', sub='resume')
+
+	# Pass native resume file to task opts (e.g. --resume flag for nuclei/httpx/nmap)
+	if checkpoint.runner_type == 'task' and resolved_resume_files:
+		resume_file = resolved_resume_files.get(checkpoint.runner_name)
+		if resume_file:
+			run_opts['resume_file'] = resume_file
+			console.print(Info(message=f'Using native resume file: {resume_file}'))
+
+	# Pass resume_files map for workflow/scan runners so tasks can pick them up
+	if checkpoint.runner_type in ('workflow', 'scan') and resolved_resume_files:
+		run_opts['resume_files'] = resolved_resume_files
+
+	# For workflows: skip already-completed tasks
+	if checkpoint.runner_type == 'workflow' and checkpoint.task_states:
+		completed = [name for name, state in checkpoint.task_states.items() if state == 'completed']
+		if completed:
+			run_opts['skip_tasks'] = completed
+			console.print(Info(message=f'Skipping already-completed tasks: {completed}'))
+
+	# Pre-load prior results from the workspace so the resumed runner has full context
+	prior_results = []
+	ws_from_context = context.get('workspace_name', '')
+	effective_workspace = ws_from_context or workspace_name
+	if workspace_name and not ws_from_context:
+		context['workspace_name'] = workspace_name
+	debug(f'Effective workspace: {effective_workspace}', sub='resume')
+	if effective_workspace:
+		try:
+			from secator.output_types import OUTPUT_TYPES
+			from secator.query import QueryEngine
+			debug('Starting pre-load of prior results from workspace', sub='resume')
+			type_map = {cls.get_name(): cls for cls in OUTPUT_TYPES}
+			qe = QueryEngine(effective_workspace, context=context)
+			debug('QueryEngine initialized, running search', sub='resume')
+			raw_results = qe.search({})
+			debug(f'QueryEngine returned {len(raw_results)} raw results', sub='resume')
+			for item in raw_results:
+				_type = item.get('_type') if isinstance(item, dict) else None
+				if _type and _type in type_map:
+					try:
+						prior_results.append(type_map[_type].load(item))
+					except Exception as e:
+						debug(f'Could not cast prior result of type {_type}: {e}', sub='resume')
+				elif not isinstance(item, dict):
+					prior_results.append(item)
+			debug(f'Pre-loaded {len(prior_results)} prior results (cast from {len(raw_results)} raw)', sub='resume')
+			if prior_results:
+				console.print(Info(message=f'Pre-loaded {len(prior_results)} prior results from workspace'))
+		except Exception as e:
+			debug(f'Could not pre-load prior results: {e}', sub='resume')
+
+	debug(f'Starting resumed runner: {checkpoint.runner_type}/{checkpoint.runner_name} with {len(targets)} inputs', sub='resume')
+	runner = runner_cls(config, inputs=targets, results=prior_results, run_opts=run_opts, context=context)
+	for _ in runner:
+		pass
+
+	if folder:
+		checkpoint.delete(folder)
+
+
 #--------#
 # HEALTH #
 #--------#

@@ -75,6 +75,39 @@ def download_blob(bucket_name, source_blob_name, destination_file_name):
 	debug(f'in {elapsed:.4f}s', obj={'blob': 'DOWNLOADED', 'blob_name': source_blob_name, 'bucket': bucket_name}, obj_after=False, sub='hooks.gcs')  # noqa: E501
 
 
+def on_interrupt(self, checkpoint):
+	"""Upload resume files to GCS and update checkpoint with GCS URLs."""
+	import os
+	resume_file = getattr(self, 'resume_file', None)
+	if not resume_file or not os.path.exists(resume_file):
+		return
+	if not GCS_BUCKET_NAME:
+		debug('skipped resume file upload since addons.gcs.bucket_name is empty.', sub='hooks.gcs')
+		return
+	blob_name = f'resume_files/{self.unique_name}/{os.path.basename(resume_file)}'
+	upload_blob(GCS_BUCKET_NAME, resume_file, blob_name)
+	gcs_url = f'gs://{GCS_BUCKET_NAME}/{blob_name}'
+	checkpoint.resume_files[self.name] = gcs_url
+	debug(f'Resume file uploaded to GCS: {gcs_url}', sub='hooks.gcs')
+
+
+def download_resume_file(gcs_url, local_path):
+	"""Download a resume file from GCS to local_path."""
+	if not gcs_url.startswith('gs://'):
+		return gcs_url
+	parts = gcs_url[5:].split('/', 1)
+	if len(parts) != 2:
+		return gcs_url
+	bucket_name, blob_name = parts
+	import os
+	os.makedirs(os.path.dirname(local_path), exist_ok=True)
+	download_blob(bucket_name, blob_name, local_path)
+	return local_path
+
+
 HOOKS = {
-	Task: {'on_item': [process_item]}
+	Task: {
+		'on_item': [process_item],
+		'on_interrupt': [on_interrupt],
+	}
 }

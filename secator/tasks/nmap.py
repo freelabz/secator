@@ -141,11 +141,20 @@ class nmap(ReconPort):
 
 	@staticmethod
 	def on_cmd(self):
+		# If resuming from a native nmap resume file, replace entire command
+		resume_file = self.run_opts.get('resume_file')
+		if resume_file and os.path.exists(resume_file):
+			self.cmd = f'nmap --resume {shlex.quote(resume_file)}'
+			self.output_path = resume_file
+			self._progress = {}
+			return
+
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {shlex.quote(self.output_path)}'
+
 		tcp_syn_stealth = self.cmd_options.get('tcp_syn_stealth')
 		tcp_connect = self.cmd_options.get('tcp_connect')
 		verbosity = self.get_opt_value('verbosity')
@@ -158,6 +167,16 @@ class nmap(ReconPort):
 		if CONFIG.runners.progress_update_frequency != -1:
 			self.cmd += f' --stats-every {CONFIG.runners.progress_update_frequency}s'
 		self._progress = {}
+
+	@staticmethod
+	def on_interrupt(self, checkpoint):
+		"""Set resume_file to the XML output path and update checkpoint."""
+		from secator.output_types import Info
+		output_path = getattr(self, 'output_path', None)
+		if output_path and os.path.exists(output_path):
+			self.resume_file = output_path
+			checkpoint.resume_files[self.name] = output_path
+			self._print(Info(message=f'Resume file saved: {output_path}'), rich=True)
 
 	@staticmethod
 	def on_line(self, line):

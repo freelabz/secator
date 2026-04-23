@@ -104,6 +104,7 @@ class httpx(Http):
 	proxy_socks5 = True
 	proxy_http = True
 	profile = lambda opts: httpx.dynamic_profile(opts)  # noqa: E731
+	supports_pause = False  # use SIGINT + native --resume instead of SIGSTOP
 
 	@staticmethod
 	def dynamic_profile(opts):
@@ -127,8 +128,33 @@ class httpx(Http):
 			self.cmd += f' -srd {shlex.quote(reports_folder_outputs)}'
 		if screenshot:
 			self.cmd += ' -esb -ehb'
+		# Add --resume flag if a resume file is available
+		resume_file = self.run_opts.get('resume_file')
+		if resume_file and os.path.exists(resume_file):
+			self.cmd += f' --resume {shlex.quote(resume_file)}'
 		self.domains = []
 		self._techs = {}
+
+	@staticmethod
+	def on_interrupt(self, checkpoint):
+		"""Find and move the httpx resume file to .outputs, then update checkpoint."""
+		import shutil
+		from secator.output_types import Info
+		# httpx writes resume.cfg to the current working directory
+		cwd = self.cwd or os.getcwd()
+		resume_src = os.path.join(cwd, 'resume.cfg')
+		if not os.path.exists(resume_src):
+			return
+		outputs_dir = f'{self.reports_folder}/.outputs'
+		os.makedirs(outputs_dir, exist_ok=True)
+		resume_dst = os.path.join(outputs_dir, 'httpx_resume.cfg')
+		try:
+			shutil.move(resume_src, resume_dst)
+			self.resume_file = resume_dst
+			checkpoint.resume_files[self.name] = resume_dst
+			self._print(Info(message=f'Resume file saved: {resume_dst}'), rich=True)
+		except OSError:
+			pass
 
 	@staticmethod
 	def on_json_loaded(self, item):
