@@ -717,3 +717,32 @@ class TestResumeRunOpts(unittest.TestCase):
 		runner.resume_tasks = {}
 		opts = runner._get_resume_run_opts('nuclei_1')
 		assert opts == {}  # empty = run from scratch
+
+
+class TestGcsResumeHooks(unittest.TestCase):
+	"""Verify GCS upload/download for resume files."""
+
+	def setUp(self):
+		from secator.definitions import ADDONS_ENABLED
+		if not ADDONS_ENABLED['gcs']:
+			self.skipTest('gcs addon not installed; run `secator install addons gcs`')
+
+	def test_gcs_upload_resume_file_updates_checkpoint_path(self):
+		import tempfile
+		from unittest.mock import MagicMock, patch
+		from secator.output_types import Checkpoint
+		from secator.hooks.gcs import upload_resume_file
+
+		with tempfile.NamedTemporaryFile(suffix='.cfg', delete=False) as f:
+			f.write(b'resume_data')
+			resume_path = f.name
+
+		cp = Checkpoint(task_id='t1', task_name='httpx_1', resume_file_path=resume_path)
+		mock_self = MagicMock()
+		mock_self.threads = []
+
+		with patch('secator.hooks.gcs.GCS_BUCKET_NAME', 'test-bucket'), \
+				patch('secator.hooks.gcs.upload_blob') as mock_upload:
+			result = upload_resume_file(mock_self, cp)
+			assert mock_upload.called
+			assert result.resume_file_path.startswith('gs://test-bucket/')
