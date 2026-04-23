@@ -118,6 +118,7 @@ class Runner:
 		self.celery_result = None
 		self.celery_ids_map = {}
 		self.revoked = False
+		self.paused = False
 		self.skipped = False
 		self.results_buffer = []
 		self._hooks = hooks
@@ -360,6 +361,8 @@ class Runner:
 	def status(self):
 		if not self.started:
 			return 'PENDING'
+		if self.paused:
+			return 'PAUSED'
 		if self.revoked:
 			return 'REVOKED'
 		if self.skipped:

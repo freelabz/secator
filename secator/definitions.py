@@ -37,7 +37,8 @@ STATE_COLORS = {
 	'SUCCESS': 'bold green',
 	'FAILURE': 'bold red',
 	'REVOKED': 'bold magenta',
-	'SKIPPED': 'dim'
+	'SKIPPED': 'dim',
+	'PAUSED': 'bold cyan',
 }
 
 # LLM

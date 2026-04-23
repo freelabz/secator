@@ -596,3 +596,25 @@ class TestIsOwnSource(unittest.TestCase):
 			cmd.unique_name = 'nmap'
 			cmd.results.append(chunk_error)
 			self.assertEqual(cmd.self_errors, [chunk_error])
+
+
+class TestRunnerStatus(unittest.TestCase):
+	"""Verify runner status property handles PAUSED state correctly."""
+
+	def test_runner_status_paused(self):
+		runner = Command.__new__(Command)
+		runner.started = True
+		runner.done = False
+		runner.revoked = False
+		runner.paused = True
+		runner.skipped = False
+		assert runner.status == 'PAUSED'
+
+	def test_runner_paused_takes_priority_over_revoked(self):
+		runner = Command.__new__(Command)
+		runner.started = True
+		runner.done = False
+		runner.revoked = True
+		runner.paused = True
+		runner.skipped = False
+		assert runner.status == 'PAUSED'
