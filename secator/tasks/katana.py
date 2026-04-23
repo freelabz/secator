@@ -39,6 +39,7 @@ class katana(HttpCrawler):
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit raw requests/responses from jsonl output'},  # noqa: E501
 		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'},
 		'no_sandbox': {'is_flag': True, 'short': 'ns', 'default': False, 'help': 'Disable sandboxing'},
+		'resume': {'type': str, 'default': None, 'help': 'Resume from filepath'},
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -62,6 +63,7 @@ class katana(HttpCrawler):
 		USER_AGENT: OPT_NOT_SUPPORTED,
 		'store_responses': 'sr',
 		'form_fill': 'aff',
+		'resume': '-resume',
 	}
 	opt_value_map = {DELAY: lambda x: int(x) if isinstance(x, float) else x}
 	item_loaders = [JSONSerializer()]
@@ -197,6 +199,30 @@ class katana(HttpCrawler):
 				fout.writelines('\n')
 				fout.writelines(first_line)
 		return item
+
+	@staticmethod
+	def on_cmd_interrupt(self):
+		"""Write checkpoint on interrupt."""
+		import shutil
+		from secator.output_types import Checkpoint
+
+		resume_src = self.get_opt_value('resume') or 'katana_resume.cfg'
+		resume_dst = f'{self.reports_folder}/.outputs/{self.unique_name}_resume.cfg'
+
+		if os.path.exists(resume_src) and resume_src != resume_dst:
+			os.makedirs(os.path.dirname(resume_dst), exist_ok=True)
+			shutil.move(resume_src, resume_dst)
+		elif not os.path.exists(resume_dst):
+			resume_dst = ''
+
+		self.paused = True
+		if resume_dst:
+			yield Checkpoint(
+				task_id=str(self.id),
+				task_name=self.unique_name,
+				resume_file_path=resume_dst,
+				_context=self.context,
+			)
 
 	@staticmethod
 	def on_end(self):

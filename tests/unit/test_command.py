@@ -312,6 +312,16 @@ class TestTaskResumeOpts(unittest.TestCase):
 		assert '--resume' in runner.cmd
 		assert '/tmp/nmap_results.xml' in runner.cmd
 
+	def test_katana_resume_opt_in_cmd(self):
+		from secator.tasks import katana
+		runner = katana(
+			'https://example.com',
+			resume='/tmp/katana_resume.cfg',
+			print_cmd=True, print_item=False, dry_run=True, no_process=True,
+		)
+		assert '-resume' in runner.cmd
+		assert '/tmp/katana_resume.cfg' in runner.cmd
+
 
 class TestCommandChunking(unittest.TestCase):
 
