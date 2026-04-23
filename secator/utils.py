@@ -1000,7 +1000,6 @@ def format_token_count(tokens, icon='', compact=False):
 		str: Formatted token string.
 	"""
 	prefix = f':{icon}: ' if icon else ''
-	suffix = '' if compact else ' tokens'
 	if tokens >= 1000:
 		return f'{prefix}{tokens / 1000:.1f}k tokens'
 	return f'{prefix}{tokens} tokens'
@@ -1474,6 +1473,7 @@ def remove_duplicates(items):
 		# Plain dict: try to load into the appropriate OutputType to use _compare_key()
 		if isinstance(item, dict):
 			from secator.output_types import OUTPUT_TYPES
+
 			_type = item.get('_type')
 			if _type:
 				for cls in OUTPUT_TYPES:
