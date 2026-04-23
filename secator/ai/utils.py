@@ -14,6 +14,64 @@ from secator.utils import format_token_count
 _llm_initialized = False
 
 
+def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
+	"""Insert synthetic tool_result messages for orphan assistant tool_use blocks.
+
+	Anthropic rejects requests where an assistant tool_use block is not
+	immediately followed by a matching tool_result. Mutates `messages` in place.
+
+	Args:
+		messages: List of message dicts in litellm/OpenAI format.
+
+	Returns:
+		Number of synthetic tool_results inserted.
+	"""
+	inserted = 0
+	i = 0
+	while i < len(messages):
+		msg = messages[i]
+		tool_calls = msg.get("tool_calls") if msg.get("role") == "assistant" else None
+		if not tool_calls:
+			i += 1
+			continue
+
+		# Scan the contiguous 'tool' messages that follow; record satisfied ids.
+		j = i + 1
+		satisfied = set()
+		while j < len(messages) and messages[j].get("role") == "tool":
+			tc_id = messages[j].get("tool_call_id")
+			if tc_id:
+				satisfied.add(tc_id)
+			j += 1
+
+		# Synthesize missing tool_results, inserting them just before the next
+		# non-tool message so they stay within the tool-response block.
+		to_insert = []
+		for tc in tool_calls:
+			tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+			if not tc_id or tc_id in satisfied:
+				continue
+			fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
+			if isinstance(fn, dict):
+				name = fn.get("name", "")
+			else:
+				name = getattr(fn, "name", "") if fn else ""
+			to_insert.append({
+				"role": "tool",
+				"tool_call_id": tc_id,
+				"name": name,
+				"content": '{"status":"acknowledged"}',
+			})
+
+		if to_insert:
+			messages[j:j] = to_insert
+			inserted += len(to_insert)
+			j += len(to_insert)
+
+		i = j
+	return inserted
+
+
 def init_llm(api_key: Optional[str] = None):
 	"""Initialize litellm once (singleton pattern to avoid callback accumulation)."""
 	global _llm_initialized
@@ -168,6 +226,10 @@ def call_llm(
 		if msg.get("role") == "assistant" and "content" not in msg:
 			msg["content"] = None
 
+	# Sanitize orphan tool_use blocks (Anthropic requires every tool_use to have
+	# a matching tool_result). Safety net in case the caller bypassed ChatHistory.
+	_repair_orphan_tool_uses(kwargs["messages"])
+
 	retryable = (
 		litellm.InternalServerError, litellm.RateLimitError,
 		litellm.ServiceUnavailableError, litellm.APIConnectionError, litellm.BadRequestError,
@@ -178,6 +240,15 @@ def call_llm(
 			response = litellm.completion(**kwargs)
 			break
 		except retryable as e:
+			# Detect the specific "orphan tool_use" error and repair before retry.
+			err_str = str(e)
+			if 'tool_use' in err_str and 'tool_result' in err_str:
+				repaired = _repair_orphan_tool_uses(kwargs["messages"])
+				if repaired:
+					console.print(Warning(
+						message=f"Repaired {repaired} orphan tool_use block(s); retrying LLM call."))
+					# Don't count this as a retry attempt — the repair is the real fix.
+					continue
 			if attempt < max_retries:
 				wait = 2 ** attempt
 				console.print(Warning(

@@ -721,6 +721,10 @@ class Command(Runner):
 				# 	self.stop_process(exit_ok=False, sig=signal.SIGTERM)
 				# 	break
 
+			except psutil.NoSuchProcess:
+				# Process exited between polls — nothing to monitor.
+				self.debug('Monitor: process exited', sub='monitor')
+				break
 			except Exception as e:
 				self.debug(f'Monitor thread error: {e}', sub='monitor')
 				warning = Warning(message=f'Monitor thread error: {e}')

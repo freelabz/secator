@@ -352,5 +352,125 @@ class TestPromptUserAllChoices(unittest.TestCase):
         self.assertEqual(result["answer"], expected)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestRepairOrphanToolUses(unittest.TestCase):
+    """Tests for _repair_orphan_tool_uses — safety net for Anthropic API."""
+
+    def _assistant_with_tool_calls(self, *ids):
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": tc_id, "type": "function", "function": {"name": "follow_up", "arguments": "{}"}}
+                for tc_id in ids
+            ],
+        }
+
+    def test_no_op_when_all_tool_results_present(self):
+        from secator.ai.utils import _repair_orphan_tool_uses
+        messages = [
+            self._assistant_with_tool_calls("toolu_1"),
+            {"role": "tool", "tool_call_id": "toolu_1", "name": "follow_up", "content": "ok"},
+            {"role": "user", "content": "next"},
+        ]
+        before = [dict(m) for m in messages]
+        inserted = _repair_orphan_tool_uses(messages)
+        self.assertEqual(inserted, 0)
+        self.assertEqual(messages, before)
+
+    def test_inserts_synthetic_result_for_orphan(self):
+        from secator.ai.utils import _repair_orphan_tool_uses
+        messages = [
+            self._assistant_with_tool_calls("toolu_orphan"),
+            {"role": "user", "content": "Continue to chat"},
+        ]
+        inserted = _repair_orphan_tool_uses(messages)
+        self.assertEqual(inserted, 1)
+        self.assertEqual(messages[1]["role"], "tool")
+        self.assertEqual(messages[1]["tool_call_id"], "toolu_orphan")
+        self.assertEqual(messages[2]["content"], "Continue to chat")
+
+    def test_inserts_only_missing_when_partial(self):
+        from secator.ai.utils import _repair_orphan_tool_uses
+        messages = [
+            self._assistant_with_tool_calls("toolu_a", "toolu_b"),
+            {"role": "tool", "tool_call_id": "toolu_a", "name": "follow_up", "content": "ok"},
+            {"role": "user", "content": "next"},
+        ]
+        inserted = _repair_orphan_tool_uses(messages)
+        self.assertEqual(inserted, 1)
+        tool_ids = [m.get("tool_call_id") for m in messages if m.get("role") == "tool"]
+        self.assertIn("toolu_a", tool_ids)
+        self.assertIn("toolu_b", tool_ids)
+
+    def test_idempotent(self):
+        from secator.ai.utils import _repair_orphan_tool_uses
+        messages = [
+            self._assistant_with_tool_calls("toolu_orphan"),
+            {"role": "user", "content": "Continue"},
+        ]
+        _repair_orphan_tool_uses(messages)
+        count_after_first = len(messages)
+        second = _repair_orphan_tool_uses(messages)
+        self.assertEqual(second, 0)
+        self.assertEqual(len(messages), count_after_first)
+
+    def test_call_llm_preemptively_repairs_orphan_tool_use(self):
+        """call_llm should repair orphan tool_use blocks before the first API call."""
+        from secator.ai.utils import call_llm
+
+        ok_response = MagicMock()
+        ok_response.choices = [MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+        ok_response.usage = None
+
+        messages = [
+            self._assistant_with_tool_calls("toolu_orphan"),
+            {"role": "user", "content": "Continue"},
+        ]
+
+        with patch('litellm.completion', return_value=ok_response) as mock_completion:
+            result = call_llm(messages, "claude")
+
+        self.assertEqual(result["content"], "ok")
+        self.assertEqual(mock_completion.call_count, 1)
+        sent_messages = mock_completion.call_args.kwargs["messages"]
+        tool_msgs = [m for m in sent_messages if m.get("role") == "tool"]
+        self.assertEqual(len(tool_msgs), 1)
+        self.assertEqual(tool_msgs[0]["tool_call_id"], "toolu_orphan")
+
+    def test_call_llm_retries_with_repair_on_error(self):
+        """If Anthropic rejects with orphan tool_use error, call_llm repairs and retries without sleep."""
+        import litellm
+        from secator.ai.utils import call_llm
+
+        ok_response = MagicMock()
+        ok_response.choices = [MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+        ok_response.usage = None
+
+        err = litellm.BadRequestError(
+            message="AnthropicException - tool_use ids were found without tool_result blocks",
+            model="claude", llm_provider="anthropic",
+        )
+
+        # Messages start clean (so pre-emptive repair is a no-op), but we mutate
+        # them between calls so the retry-branch repair has work to do.
+        messages = [{"role": "user", "content": "hi"}]
+        sleep_calls = []
+
+        def completion_side_effect(**kwargs):
+            if not sleep_calls:  # first call: inject orphan, then raise
+                kwargs["messages"].insert(0, self._assistant_with_tool_calls("toolu_late"))
+                sleep_calls.append(1)
+                raise err
+            return ok_response
+
+        with patch('litellm.completion', side_effect=completion_side_effect), \
+                patch('time.sleep') as mock_sleep:
+            result = call_llm(messages, "claude", max_retries=3)
+
+        self.assertEqual(result["content"], "ok")
+        mock_sleep.assert_not_called()  # repair branch should skip the backoff sleep
+
+
 if __name__ == '__main__':
     unittest.main()
