@@ -621,3 +621,71 @@ class TestRunnerStatus(unittest.TestCase):
 		runner.paused = True
 		runner.skipped = False
 		assert runner.status == 'PAUSED'
+
+
+class TestResumeCfg(unittest.TestCase):
+	"""Verify resume.cfg is correctly written on interrupt."""
+
+	def test_write_resume_cfg_creates_file(self):
+		import json
+		import os
+		import tempfile
+		from secator.output_types import Checkpoint
+
+		runner = Command.__new__(Command)
+		runner.config = MagicMock()
+		runner.config.name = 'test_scan'
+		runner.config.type = 'scan'
+		runner.inputs = ['example.com']
+		runner.run_opts = {'threads': 10}
+		runner.celery_ids_map = {}
+		runner.no_process = True
+		runner.sync = True
+		runner.context = {}
+
+		with tempfile.TemporaryDirectory() as tmpdir:
+			runner._reports_folder = tmpdir
+			cp = Checkpoint(task_id='t1', task_name='nmap_1', resume_file_path='/tmp/nmap.xml')
+			runner.checkpoints = [cp]
+			runner._write_resume_cfg()
+			resume_path = os.path.join(tmpdir, 'resume.cfg')
+			assert os.path.exists(resume_path)
+			with open(resume_path) as f:
+				data = json.load(f)
+			assert data['runner_type'] == 'scan'
+			assert data['runner_name'] == 'test_scan'
+			assert data['targets'] == ['example.com']
+			assert len(data['tasks']) == 1
+			assert data['tasks'][0]['task_name'] == 'nmap_1'
+			assert data['tasks'][0]['status'] == 'PAUSED'
+			assert data['tasks'][0]['resume_file_path'] == '/tmp/nmap.xml'
+
+	def test_write_resume_cfg_includes_celery_task_states(self):
+		import json
+		import os
+		import tempfile
+
+		runner = Command.__new__(Command)
+		runner.config = MagicMock()
+		runner.config.name = 'test_wf'
+		runner.config.type = 'workflow'
+		runner.inputs = ['10.0.0.1']
+		runner.run_opts = {}
+		runner.checkpoints = []
+		runner.celery_ids_map = {
+			'celery-id-1': {'name': 'httpx_1', 'id': 'celery-id-1', 'state': 'SUCCESS'},
+			'celery-id-2': {'name': 'nuclei_1', 'id': 'celery-id-2', 'state': 'RUNNING'},
+		}
+		runner.no_process = True
+		runner.sync = True
+		runner.context = {}
+		with tempfile.TemporaryDirectory() as tmpdir:
+			runner._reports_folder = tmpdir
+			runner._write_resume_cfg()
+			with open(os.path.join(tmpdir, 'resume.cfg')) as f:
+				data = json.load(f)
+			task_names = {t['task_name'] for t in data['tasks']}
+			assert 'httpx_1' in task_names
+			assert 'nuclei_1' in task_names
+			httpx_task = next(t for t in data['tasks'] if t['task_name'] == 'httpx_1')
+			assert httpx_task['status'] == 'SUCCESS'

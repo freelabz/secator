@@ -15,7 +15,9 @@ import humanize
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
+from secator.output_types import (
+	FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, Checkpoint
+)
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import get_task_folder_id, run_extractors
@@ -120,6 +122,7 @@ class Runner:
 		self.revoked = False
 		self.paused = False
 		self.skipped = False
+		self.checkpoints = []
 		self.results_buffer = []
 		self._hooks = hooks
 
@@ -511,8 +514,53 @@ class Runner:
 		gc.collect()
 		if self.sync:
 			self.mark_completed()
+		if self.revoked and self.checkpoints:
+			self._write_resume_cfg()
 		if self.enable_reports:
 			self.export_reports()
+
+	def _write_resume_cfg(self):
+		"""Write a resume.cfg JSON file to the reports folder on interrupt."""
+		import os
+
+		checkpoint_names = set()
+		tasks = []
+		for cp in self.checkpoints:
+			checkpoint_names.add(cp.task_name)
+			tasks.append({
+				'task_name': cp.task_name,
+				'task_id': cp.task_id,
+				'status': 'PAUSED',
+				'resume_file_path': cp.resume_file_path,
+			})
+
+		for task_id, info in self.celery_ids_map.items():
+			task_name = info.get('name', '')
+			if task_name and task_name not in checkpoint_names:
+				tasks.append({
+					'task_name': task_name,
+					'task_id': task_id,
+					'status': info.get('state', 'UNKNOWN'),
+					'resume_file_path': None,
+				})
+
+		data = {
+			'runner_type': getattr(self.config, 'type', ''),
+			'runner_name': self.config.name,
+			'targets': list(self.inputs) if hasattr(self, 'inputs') else [],
+			'run_options': dict(self.run_opts) if hasattr(self, 'run_opts') else {},
+			'reports_folder': str(self.reports_folder),
+			'tasks': tasks,
+		}
+
+		resume_path = f'{self.reports_folder}/resume.cfg'
+		try:
+			os.makedirs(self.reports_folder, exist_ok=True)
+			with open(resume_path, 'w') as f:
+				json.dump(data, f, indent=2)
+			self.debug(f'resume.cfg written to {resume_path}', sub='end')
+		except Exception as e:
+			self.debug(f'Failed to write resume.cfg: {e}', sub='end')
 
 	def join_threads(self):
 		"""Wait for all running threads to complete."""
@@ -567,6 +615,10 @@ class Runner:
 		# Set source
 		if not item._source:
 			item._source = self.unique_name
+
+		# Collect Checkpoint items for resume.cfg
+		if isinstance(item, Checkpoint):
+			self.checkpoints.append(item)
 
 		# Check for state updates
 		if isinstance(item, State) and self.celery_result and item.task_id == self.celery_result.id:
