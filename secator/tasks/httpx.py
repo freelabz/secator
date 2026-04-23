@@ -226,12 +226,11 @@ class httpx(Http):
 			index_rpath = f'{response_dir}/response/index.txt'
 			index_spath = f'{response_dir}/screenshot/index_screenshot.txt'
 			index_spath2 = f'{response_dir}/screenshot/screenshot.html'
-			if os.path.exists(index_rpath):
-				os.remove(index_rpath)
-			if os.path.exists(index_spath):
-				os.remove(index_spath)
-			if os.path.exists(index_spath2):
-				os.remove(index_spath2)
+			for path in [index_rpath, index_spath, index_spath2]:
+				try:
+					os.remove(path)
+				except FileNotFoundError:
+					pass
 
 	def _preprocess_url(self, item):
 		"""Replace time string by float, sanitize URL, get final redirect URL."""

@@ -164,14 +164,13 @@ INPUT_TYPES = [
 
 
 def is_importable(module_to_import):
-	import importlib
+	import importlib.util
 	try:
-		importlib.import_module(module_to_import)
-		return True
-	except ModuleNotFoundError:
+		return importlib.util.find_spec(module_to_import) is not None
+	except (ModuleNotFoundError, ValueError):
 		return False
 	except Exception as e:
-		print(f'Failed trying to import {module_to_import}: {str(e)}')
+		print(f'Failed trying to find {module_to_import}: {str(e)}')
 		return False
 
 

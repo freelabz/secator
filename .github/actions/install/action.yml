@@ -26,6 +26,12 @@ runs:
     shell: bash
     run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+  - name: Add pipx venv bin to $PATH (for safecmd/shfmt)
+    shell: bash
+    run: |
+      PIPX_VENVS=$(pipx environment --value PIPX_LOCAL_VENVS 2>/dev/null || echo "${HOME}/.local/share/pipx/venvs")
+      echo "${PIPX_VENVS}/secator/bin" >> "$GITHUB_PATH"
+
   - name: Add cargo to $PATH
     shell: bash
     run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"

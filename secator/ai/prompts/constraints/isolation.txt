@@ -1,0 +1,33 @@
+<isolation>
+When running exploits or PoCs, always use disposable Docker containers via the run_shell tool for isolation:
+
+<example>
+Clone and run a PoC:
+```
+echo 'apt-get update && apt-get install -y git python3 pip
+git clone https://github.com/author/CVE-XXXX-YYYY && cd CVE-XXXX-YYYY
+pip install -r requirements.txt
+python3 exploit.py --target TARGET_URL' | docker run --rm -i python:3.12-slim bash
+```
+</example>
+
+<example>
+Fix a PoC script before running:
+```
+echo 'apt-get update && apt-get install -y git curl
+git clone https://github.com/author/poc-repo && cd poc-repo
+sed -i "s|ATTACKER_IP|172.17.0.1|g" exploit.sh
+sed -i "s|TARGET_URL|http://target:8080|g" exploit.sh
+chmod +x exploit.sh && ./exploit.sh' | docker run --rm -i ubuntu bash
+```
+</example>
+
+<example>
+Compile and run a C exploit:
+```
+echo 'apt-get update && apt-get install -y git gcc make
+git clone https://github.com/author/cve-exploit && cd cve-exploit
+make && ./exploit TARGET_HOST TARGET_PORT' | docker run --rm -i gcc:latest bash
+```
+</example>
+</isolation>

@@ -130,6 +130,9 @@ class Command(Runner):
 	proxy_socks5 = False
 	proxy_http = False
 
+	# Print command icon
+	print_cmd_icon = ':zap:'
+
 	# Profile
 	profile = 'small'
 
@@ -189,6 +192,9 @@ class Command(Runner):
 
 		# Print cmd
 		self.print_cmd = self.run_opts.get('print_cmd', False)
+
+		# TTY availability (can be explicitly disabled for non-interactive contexts)
+		self.has_tty = self.run_opts.get('tty', sys.stdin.isatty())
 
 		# Stat update
 		self.last_updated_stat = None
@@ -629,10 +635,11 @@ class Command(Runner):
 	def print_command(self):
 		"""Print command."""
 		if self.print_cmd:
-			cmd_str = f':zap: {_s(self.cmd)}'
+			icon = self.run_opts.get('print_cmd_icon', self.print_cmd_icon)
+			cmd_str = f'{icon} [bold green]{_s(self.cmd)}[/]'
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
-			self._print(cmd_str, color='bold green', rich=True)
+			self._print(cmd_str, rich=True)
 		self.debug('command', obj={'cmd': self.cmd}, sub='start')
 		self.debug('options', obj=self.cmd_options, sub='start')
 
@@ -732,6 +739,10 @@ class Command(Runner):
 				# 	self.stop_process(exit_ok=False, sig=signal.SIGTERM)
 				# 	break
 
+			except psutil.NoSuchProcess:
+				# Process exited between polls — nothing to monitor.
+				self.debug('Monitor: process exited', sub='monitor')
+				break
 			except Exception as e:
 				self.debug(f'Monitor thread error: {e}', sub='monitor')
 				warning = Warning(message=f'Monitor thread error: {e}')
@@ -869,8 +880,12 @@ class Command(Runner):
 			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
 
 		# Check if we have a tty
-		if not sys.stdin.isatty():
-			error = 'No TTY detected. Sudo password prompt requires a TTY to proceed.'
+		if not self.has_tty:
+			error = (
+				"Sudo password required but no TTY available (non-interactive mode). "
+				"Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), "
+				"or configure passwordless sudo."
+			)
 			return -1, error
 
 		# If not, prompt the user for a password
