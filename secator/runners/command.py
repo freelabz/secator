@@ -658,12 +658,24 @@ class Command(Runner):
 		yield error
 
 	def stop_process(self, exit_ok=False, sig=signal.SIGINT):
-		"""Sends SIGINT to running process, if any."""
+		"""Sends signal to running process, if any.
+
+		Uses killpg only when the subprocess has its own process group (preexec_fn=os.setsid).
+		Otherwise (disable_preexec=True or sudo), the subprocess shares the worker's pgid and
+		killpg would also kill the worker.
+		"""
 		if not self.process:
 			return
 		self.debug(f'Sending signal {signal_to_name(sig)} to process {self.process.pid}.', sub='error')
 		if self.process and self.process.pid:
-			os.killpg(os.getpgid(self.process.pid), sig)
+			try:
+				pgid = os.getpgid(self.process.pid)
+				if pgid == self.process.pid:
+					os.killpg(pgid, sig)
+				else:
+					os.kill(self.process.pid, sig)
+			except (ProcessLookupError, PermissionError):
+				pass
 		if exit_ok:
 			self.exit_ok = True
 
