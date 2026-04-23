@@ -169,7 +169,7 @@ class JsonBackend(QueryBackend):
 		findings = self._load_all_findings()
 		return sum(1 for f in findings if match_query(f, query))
 
-	def update(self, query: dict, update: dict) -> int:
+	def _execute_update(self, query: dict, update: dict) -> int:
 		"""Update in-memory records matching query."""
 		if self._results is None:
 			return 0

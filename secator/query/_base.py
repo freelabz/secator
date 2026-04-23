@@ -72,5 +72,11 @@ class QueryBackend(ABC):
 		pass
 
 	def update(self, query: dict, update: dict) -> int:
-		"""Update records matching query."""
-		raise NotImplementedError
+		"""Update records matching query with enforced base query."""
+		safe_query = self._merge_query(query)
+		return self._execute_update(safe_query, update)
+
+	@abstractmethod
+	def _execute_update(self, query: dict, update: dict) -> int:
+		"""Backend-specific update implementation."""
+		pass

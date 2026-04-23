@@ -152,7 +152,11 @@ class ai(PythonRunner):
 			if result is None:
 				save_history(self.history, self.reports_folder, debug_fn=self.debug)
 				return
+			self.context["session_name"] = self.session_name
 			yield from result
+			yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
+			yield from self._run_loop()
+			return
 
 		# Get user prompt
 		self.prompt = self.run_opts.get("prompt", "")

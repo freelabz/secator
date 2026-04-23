@@ -22,6 +22,9 @@ class TestQueryBackendBase(unittest.TestCase):
 				self.last_count_query = query
 				return 0
 
+			def _execute_update(self, query, update):
+				return 0
+
 		return TestBackend(workspace_id=workspace_id)
 
 	def test_base_query_includes_workspace_id(self):

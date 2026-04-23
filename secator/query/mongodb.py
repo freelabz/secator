@@ -62,10 +62,8 @@ class MongoDBBackend(QueryBackend):
 			console.print(Warning(message=f'MongoDB count failed: {e}'))
 			return 0
 
-	def update(self, query: dict, update: dict) -> int:
+	def _execute_update(self, query: dict, update: dict) -> int:
 		"""Update documents matching query in MongoDB."""
-		full_query = self.get_base_query()
-		full_query.update(query)
 		client = self._get_client()
-		result = client.main.findings.update_one(full_query, update)
+		result = client.main.findings.update_one(query, update)
 		return result.modified_count

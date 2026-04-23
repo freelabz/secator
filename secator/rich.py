@@ -1,3 +1,4 @@
+import codecs
 import operator
 from contextlib import nullcontext
 from pathlib import Path
@@ -83,12 +84,15 @@ class FullScreenPrompt:
 		self.lines = [""]
 		self.cursor_line = 0
 		self.cursor_col = 0
+		self._decoder = codecs.getincrementaldecoder('utf-8')(errors='ignore')
 
 	def _read_key(self, fd):
 		"""Read a single keypress, handling escape sequences."""
 		import os
 		import select
-		ch = os.read(fd, 1).decode(errors='ignore')
+		ch = self._decoder.decode(os.read(fd, 1), final=False)
+		if not ch:
+			return 'ignore'
 		if ch == '\x1b':
 			if not select.select([fd], [], [], 0.03)[0]:
 				return 'escape'
@@ -316,12 +320,15 @@ class InteractiveMenu:
 		self.checked = set()
 		self.typed = ""
 		self.in_input_mode = False
+		self._decoder = codecs.getincrementaldecoder('utf-8')(errors='ignore')
 
 	def _read_key(self, fd):
 		"""Read a single keypress, handling escape sequences."""
 		import os
 		import select
-		ch = os.read(fd, 1).decode(errors='ignore')
+		ch = self._decoder.decode(os.read(fd, 1), final=False)
+		if not ch:
+			return 'ignore'
 		if ch == '\x1b':
 			# Plain ESC: no follow-up bytes within a short timeout.
 			if not select.select([fd], [], [], 0.03)[0]:
