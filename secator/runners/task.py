@@ -4,6 +4,11 @@ from secator.loader import discover_tasks
 from celery import chain
 
 
+class TaskNotFoundError(ValueError):
+	"""Raised when a task class cannot be found by name."""
+	pass
+
+
 class Task(Runner):
 
 	default_exporters = CONFIG.tasks.exporters
@@ -73,4 +78,4 @@ class Task(Runner):
 		for task_cls in tasks_classes:
 			if task_cls.__name__ == name:
 				return task_cls
-		raise ValueError(f'Task {name} not found. Aborting.')
+		raise TaskNotFoundError(f'Task {name} not found. Aborting.')

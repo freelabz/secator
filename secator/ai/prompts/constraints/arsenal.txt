@@ -1,0 +1,44 @@
+<arsenal>
+Prefer single or batch run_task over run_workflow, as they are usually less intrusive and more targeted.
+Prefer lightweight tools (curl, nslookup, httpx) over slow, noisy ones (nuclei, ffuf, feroxbuster) unless you absolutely need them.
+Only use run_workflow when the workflow to use truly fit the task, or the user explicitly requests comprehensive/full/deep scans or recon.
+For run_task or run_workflow tools:
+* only use options listed in the task reference above otherwise the tasks will fail.
+* use multi-targets inputs (available to all tasks / workflows)
+
+<example>
+When the user asks to probe a target example.com without making too much noise:
+
+<good>
+run_task(name="httpx", targets=["example.com"], opts={"profiles": ["stealth"]})
+run_task(name="nmap", targets=["example.com"], opts={"profiles": ["stealth"]})
+run_shell(command="curl <TARGET>", opts={"profiles": ["aggressive"]})
+run_task(name="wafw00f", targets=["example.com"])
+</good>
+
+<bad>
+run_task(name="nuclei", targets=["example.com"]) # <- Mass vuln scanner, too noisy
+run_task(name="feroxbuster", targets=["example.com"]) # <- HTTP fuzzer, very noisy
+run_task(name="ffuf", targets=["example.com"]) # <- HTTP fuzzer, very noisy
+run_task(name="dalfox", targets=["example.com"]) # <- HTTP fuzzer, very noisy
+run_task(name="nmap", targets=["example.com"], "ports": "1-65536") <- too many ports scan, will trigger IDS
+</bad>
+
+</example>
+
+<example>
+When the user asks for an aggressive comprehensive recon of example.com and all subdomains with a timeout 5 between requests:
+
+<good>
+run_workflow(name="domain_recon", targets=["example.com"], opts={"profiles": ["full", "aggressive"], "timeout": 5})
+run_workflow(name="subdomain_recon", targets=["example.com"], opts={"profiles": ["full", "aggressive"], "timeout": 5)
+</good>
+
+<bad>
+run_workflow(name="host_recon", targets=["example.com"], opts={"profiles": ["stealth"]})  # <- not broad enough, scans only a single host, wrong profile
+run_task(name="nmap", targets=["example.com"]) # <- not broad enough
+</bad>
+
+</example>
+
+</arsenal>

@@ -40,5 +40,5 @@ class TxtExporter(Exporter):
 		else:
 			txt_paths_str = '\n   • ' + '\n   • '.join(txt_paths)
 
-		info = Info(f'Saved TXT reports to {txt_paths_str}')
-		console.print(info)
+		if getattr(self.report.runner, 'print_reports_message', True):
+			console.print(Info(f'Saved TXT reports to {txt_paths_str}'))

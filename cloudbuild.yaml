@@ -13,3 +13,6 @@ substitutions:
 
 images:
 - '${_LOCATION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/secator:${_VERSION}'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
