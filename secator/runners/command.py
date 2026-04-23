@@ -103,6 +103,7 @@ class Command(Runner):
 		'on_cmd',
 		'on_cmd_opts',
 		'on_cmd_done',
+		'on_cmd_interrupt',
 		'on_line',
 	]
 
@@ -558,6 +559,11 @@ class Command(Runner):
 
 		except BaseException as e:
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
+			# Fire on_cmd_interrupt for intentional interruptions only
+			if isinstance(e, (KeyboardInterrupt, SystemExit)) or 'Revoked' in type(e).__name__:
+				result = self.run_hooks('on_cmd_interrupt', sub='end')
+				if result:
+					yield from result
 			self.stop_process()
 			yield Error.from_exception(e)
 

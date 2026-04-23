@@ -134,7 +134,10 @@ class TestCommandRunner(unittest.TestCase):
 
 		# Run the command using mock_command
 		with mock_command(MyCommand, TARGETS, {}, fixture, 'run'):
+			# on_cmd_interrupt only fires on interrupt — skip in normal-flow assertion
 			for hook, mock in mock_hooks.items():
+				if hook == 'on_cmd_interrupt':
+					continue
 				self.assertTrue(mock.called, f"Hook '{hook}' was not called")
 			self.assertEqual(mock_hooks['on_json_loaded'].call_count, 3)
 			self.assertGreaterEqual(mock_hooks['on_duplicate'].call_count, 1)

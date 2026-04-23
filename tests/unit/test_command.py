@@ -267,6 +267,9 @@ class TestCommandHooks(unittest.TestCase):
 				input = INPUTS_TASKS[HOST]
 				httpx(input, hooks=hooks, raise_on_error=True)
 
+	def test_on_cmd_interrupt_hook_is_in_hooks_list(self):
+		assert 'on_cmd_interrupt' in Command.hooks
+
 
 class TestCommandChunking(unittest.TestCase):
 
