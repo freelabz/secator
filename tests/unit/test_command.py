@@ -271,6 +271,28 @@ class TestCommandHooks(unittest.TestCase):
 		assert 'on_cmd_interrupt' in Command.hooks
 
 
+class TestTaskResumeOpts(unittest.TestCase):
+	"""Verify --resume opt is wired into the cmd line for tools that support it."""
+
+	def test_httpx_resume_opt_in_cmd(self):
+		from secator.tasks import httpx
+		runner = httpx(
+			'example.com',
+			resume='/tmp/resume.cfg',
+			print_cmd=True, print_item=False, dry_run=True, no_process=True,
+		)
+		assert '--resume' in runner.cmd
+		assert '/tmp/resume.cfg' in runner.cmd
+
+	def test_httpx_resume_opt_absent_when_not_provided(self):
+		from secator.tasks import httpx
+		runner = httpx(
+			'example.com',
+			print_cmd=True, print_item=False, dry_run=True, no_process=True,
+		)
+		assert '--resume' not in runner.cmd
+
+
 class TestCommandChunking(unittest.TestCase):
 
 	def test_needs_chunking_disabled_with_minus_one(self):
