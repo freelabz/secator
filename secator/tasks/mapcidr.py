@@ -1,7 +1,10 @@
 import validators
 
 from secator.decorators import task
-from secator.definitions import CIDR_RANGE, DELAY, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, SLUG, THREADS, TIMEOUT
+
+from secator.definitions import (
+    CIDR_RANGE, DELAY, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, SLUG, THREADS, TIMEOUT
+)  # fmt: off
 from secator.output_types import Ip
 from secator.tasks._categories import ReconIp
 
