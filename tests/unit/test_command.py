@@ -292,6 +292,16 @@ class TestTaskResumeOpts(unittest.TestCase):
 		)
 		assert '--resume' not in runner.cmd
 
+	def test_nuclei_resume_opt_in_cmd(self):
+		from secator.tasks import nuclei
+		runner = nuclei(
+			'example.com',
+			resume='/tmp/nuclei_resume.cfg',
+			print_cmd=True, print_item=False, dry_run=True, no_process=True,
+		)
+		assert '--resume' in runner.cmd
+		assert '/tmp/nuclei_resume.cfg' in runner.cmd
+
 
 class TestCommandChunking(unittest.TestCase):
 

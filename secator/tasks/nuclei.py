@@ -56,6 +56,7 @@ class nuclei(VulnMulti):
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
 		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
 		'template_condition': {'type': str, 'short': 'tc', 'help': 'Templates to run based on expression condition (ex: "contains(id, "ssh")")'},  # noqa: E501
+		'resume': {'type': str, 'default': None, 'help': 'Resume from filepath'},
 	}
 	opt_key_map = {
 		HEADER: 'header',
@@ -73,6 +74,7 @@ class nuclei(VulnMulti):
 		'templates': 't',
 		'response_size_read': 'rsr',
 		'template_condition': 'tc',
+		'resume': '--resume',
 	}
 	opt_value_map = {
 		'tags': lambda x: ','.join(x) if isinstance(x, list) else x,
@@ -183,3 +185,28 @@ class nuclei(VulnMulti):
 	def name_extractor(item):
 		name = item['template-id']
 		return name
+
+	@staticmethod
+	def on_cmd_interrupt(self):
+		"""Write checkpoint on interrupt."""
+		import os
+		import shutil
+		from secator.output_types import Checkpoint
+
+		resume_src = self.get_opt_value('resume') or 'resume.cfg'
+		resume_dst = f'{self.reports_folder}/.outputs/{self.unique_name}_resume.cfg'
+
+		if os.path.exists(resume_src) and resume_src != resume_dst:
+			os.makedirs(os.path.dirname(resume_dst), exist_ok=True)
+			shutil.move(resume_src, resume_dst)
+		elif not os.path.exists(resume_dst):
+			resume_dst = ''
+
+		self.paused = True
+		if resume_dst:
+			yield Checkpoint(
+				task_id=str(self.id),
+				task_name=self.unique_name,
+				resume_file_path=resume_dst,
+				_context=self.context,
+			)
