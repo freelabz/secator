@@ -1870,8 +1870,13 @@ def run_install(title=None, cmd=None, packages=None, next_steps=None):
 		sys.exit(1)
 	# with console.status(f'[bold yellow] Installing {title}...'):
 	if cmd:
+		import shlex
 		from secator.installer import SourceInstaller
 
+		# Quote the package specifier to prevent shell glob expansion of extras (e.g. secator[worker])
+		if '-m pip install' in cmd:
+			parts = cmd.rsplit(' ', 1)
+			cmd = parts[0] + ' ' + shlex.quote(parts[1])
 		status = SourceInstaller.install(cmd)
 	elif packages:
 		from secator.installer import PackageInstaller
@@ -2152,7 +2157,7 @@ def update(all):
 		if 'pipx' in sys.executable:
 			ret = Command.execute(f'pipx install secator=={latest_version} --force')
 		else:
-			ret = Command.execute(f'pip install secator=={latest_version}')
+			ret = Command.execute(f'{sys.executable} -m pip install secator=={latest_version}')
 		if not ret.return_code == 0:
 			sys.exit(1)
 
