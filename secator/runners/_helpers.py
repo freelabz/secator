@@ -6,6 +6,26 @@ from secator.output_types import Error
 from secator.utils import deduplicate, debug
 
 
+def _format_nested(template, data):
+	"""Format a string template supporting nested dot notation like {extra_data.password}.
+
+	Replaces {key} and {key.subkey} tokens by traversing nested dicts.
+	"""
+	def replace_token(match):
+		key = match.group(1)
+		keys = key.split('.')
+		value = data
+		for k in keys:
+			if isinstance(value, dict):
+				value = value.get(k)
+			else:
+				value = None
+			if value is None:
+				break
+		return str(value) if value is not None else ''
+	return re.sub(r'\{([\w.]+)\}', replace_token, template)
+
+
 def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 	"""Run extractors and merge extracted values with option dict.
 
@@ -212,15 +232,16 @@ def process_extractor(results, extractor, ctx=None):
 			_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
 			groups = {}
 			for item in results:
-				group_key = _group_by.format(**item.toDict())
-				value = _field.format(**item.toDict())
+				item_dict = item.toDict()
+				group_key = _format_nested(_group_by, item_dict)
+				value = _format_nested(_field, item_dict)
 				prefix = value.split('~')[0] if '~' in value else value
 				bucket = groups.setdefault(group_key, [])
 				if prefix not in bucket:
 					bucket.append(prefix)
 			results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
 		else:
-			results = [_field.format(**item.toDict()) for item in results]
+			results = [_format_nested(_field, item.toDict()) for item in results]
 	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
 	return results
 
