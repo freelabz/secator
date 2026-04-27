@@ -29,8 +29,6 @@ class whois(Command):
 	@staticmethod
 	def on_cmd_done(self):
 		output = self.output
-		# In worker mode, self.output may be prefixed with Info/Warning/Error reprs.
-		# Extract only the JSON portion starting from the first '{'.
 		json_start = output.find('{')
 		if json_start > 0:
 			output = output[json_start:]
