@@ -56,12 +56,15 @@ class Domain(OutputType):
 	def get_datetime(date):
 		if isinstance(date, datetime):
 			return date
-		try:
-			dt = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ")
-			dt = dt.replace(tzinfo=timezone.utc)
-			return dt
-		except (ValueError, TypeError):
-			return None
+		for fmt in ["%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S"]:
+			try:
+				dt = datetime.strptime(date, fmt)
+				if not dt.tzinfo:
+					dt = dt.replace(tzinfo=timezone.utc)
+				return dt
+			except (ValueError, TypeError):
+				continue
+		return None
 
 	def is_expired(self, months=0) -> bool:
 		if self.expiration_date:

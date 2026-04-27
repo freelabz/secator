@@ -1100,6 +1100,13 @@ class Runner:
 			if otypes:
 				output_types = [otypes[0]]
 				self.debug('discriminated output type with _type key', sub='item.convert', verbose=True)
+			else:
+				# Fall back to all known output types when self.output_types doesn't contain a match.
+				# This handles Scan/Workflow runners (output_types=[]) receiving dicts from tasks.
+				otypes = [o for o in OUTPUT_TYPES if o.get_name() == item['_type']]
+				if otypes:
+					output_types = [otypes[0]]
+					self.debug('discriminated output type with _type key (fallback to OUTPUT_TYPES)', sub='item.convert', verbose=True)
 
 		# Load item using picked output types
 		self.debug(f'output types to try: {[str(o) for o in output_types]}', sub='item.convert', verbose=True)
