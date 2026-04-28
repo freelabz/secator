@@ -4,11 +4,24 @@ from contextlib import nullcontext
 from pathlib import Path
 
 import yaml
-from rich.console import Console
+from rich.console import Console, ConsoleOptions, RenderResult
+from rich.markdown import Heading, Markdown
 from rich.table import Table
 
 console = Console(stderr=True, record=True)
 console_stdout = Console(record=True)
+
+
+class LeftJustifiedHeading(Heading):
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        yield from console.render(self.text, options=options.update(justify="left"))
+
+
+class CustomMarkdown(Markdown):
+    elements = {
+        **Markdown.elements,
+        "heading_open": LeftJustifiedHeading,
+    }
 
 
 def maybe_status(*args, **kwargs):

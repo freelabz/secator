@@ -103,7 +103,7 @@ def init_llm(api_key: Optional[str] = None):
 		def log_pre_api_call(self, model, messages, kwargs):
 			if "litellm" not in CONFIG.debug:
 				return
-			from rich.markdown import Markdown
+			from secator.rich import CustomMarkdown as Markdown
 			from rich.panel import Panel
 			from rich.text import Text
 			from rich.console import Group
@@ -167,7 +167,7 @@ def init_llm(api_key: Optional[str] = None):
 		def log_success_event(self, kwargs, response_obj, start_time, end_time):
 			if "litellm" not in CONFIG.debug:
 				return
-			from rich.markdown import Markdown
+			from secator.rich import CustomMarkdown as Markdown
 			from rich.panel import Panel
 			message = response_obj.choices[0].message
 			content = message.content or ""

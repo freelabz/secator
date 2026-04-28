@@ -13,7 +13,7 @@ from dotmap import DotMap
 from fp.fp import FreeProxy
 from jinja2 import Template
 from rich.live import Live
-from rich.markdown import Markdown
+from secator.rich import CustomMarkdown as Markdown
 from rich.rule import Rule
 from rich.table import Table
 
