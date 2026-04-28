@@ -65,6 +65,167 @@ def setup_logging(level):
 	return logger
 
 
+PIPE_CHAIN_MARKER = '#secator-pipe-chain:'
+
+
+def extract_pipe_chain(data):
+	"""Extract pipe chain metadata from piped input data, separating regular inputs from chain metadata.
+
+	When secator commands are chained via Unix pipes (e.g. ``secator x subfinder | secator x naabu``),
+	each command appends a ``#secator-pipe-chain:`` metadata line to its stdout. This function
+	detects and extracts that metadata, returning the regular input lines separately.
+
+	Args:
+		data (list): List of input lines from stdin.
+
+	Returns:
+		tuple: (regular_data, pipe_chain) where:
+			- regular_data: list of input lines with metadata lines removed
+			- pipe_chain: list of task dicts from the detected chain, or empty list if not a secator pipe.
+			  Each dict has keys: ``task`` (str), ``input_types`` (list), ``output_types`` (list).
+	"""
+	if not data or not isinstance(data, list):
+		return data or [], []
+
+	regular_data = []
+	pipe_chain = []
+
+	for line in data:
+		if line and line.startswith(PIPE_CHAIN_MARKER):
+			try:
+				metadata = json.loads(line[len(PIPE_CHAIN_MARKER):])
+				pipe_chain = metadata.get('chain', [])
+			except (json.JSONDecodeError, TypeError):
+				pass
+		else:
+			regular_data.append(line)
+
+	return regular_data, pipe_chain
+
+
+def get_pipe_targets_config(prev_output_type_names, curr_input_types):
+	"""Get the ``targets_`` configuration for chaining two tasks in a workflow YAML.
+
+	Given the output type names of the previous task and the input types of the current task,
+	returns a list of ``targets_`` entries suitable for embedding in a workflow YAML file.
+
+	Args:
+		prev_output_type_names (list): Output type names of the previous task (e.g. ``['subdomain']``).
+		curr_input_types (list): Input type strings of the current task (e.g. ``['host', 'ip']``).
+
+	Returns:
+		list: ``targets_`` configuration entries, each being either a string (simple field path like
+		``'subdomain.host'``) or a dict (formatted extraction like
+		``{'type': 'port', 'field': '{host}:{port}'}``). Returns an empty list if no mapping is found.
+	"""
+	from secator.definitions import HOST, IP, URL, HOST_PORT
+
+	# Priority-ordered mappings: (output_type_name, input_type, yaml_config)
+	# Higher entries take priority when an output type matches multiple input types.
+	mappings = [
+		('port', HOST_PORT, {'type': 'port', 'field': '{host}:{port}'}),
+		('subdomain', HOST, 'subdomain.host'),
+		('port', HOST, 'port.host'),
+		('port', IP, 'port.ip'),
+		('ip', HOST, 'ip.ip'),
+		('ip', IP, 'ip.ip'),
+		('url', URL, 'url.url'),
+		('url', HOST, 'url.host'),
+		('target', HOST, 'target.name'),
+		('domain', HOST, 'domain.name'),
+	]
+
+	targets = []
+	seen = set()
+
+	for out_type in prev_output_type_names:
+		for o_type, i_type, config in mappings:
+			if o_type == out_type and i_type in curr_input_types:
+				config_key = str(config)
+				if config_key not in seen:
+					seen.add(config_key)
+					targets.append(config)
+				break  # take best match per output type
+
+	return targets
+
+
+def build_pipe_workflow_yaml(chain):
+	"""Build a workflow YAML string from a detected pipe chain.
+
+	Generates a complete workflow YAML definition that replicates the pipe chain,
+	including proper ``targets_`` mappings between tasks. The resulting YAML can be
+	saved and reused with ``secator w <workflow_name>``.
+
+	Args:
+		chain (list): List of task dicts describing the pipe chain, each with keys:
+			- ``task`` (str): task name (e.g. ``'subfinder'``)
+			- ``input_types`` (list): task input type strings (e.g. ``['host', 'ip']``)
+			- ``output_types`` (list): task output type names (e.g. ``['subdomain']``)
+
+	Returns:
+		tuple: (yaml_content, workflow_name) where yaml_content is the YAML string and
+		workflow_name is the generated name (e.g. ``'pipe_subfinder_naabu_httpx'``).
+		Returns (None, None) if the chain is empty.
+	"""
+	if not chain:
+		return None, None
+
+	task_names = [entry['task'] for entry in chain]
+	workflow_name = 'pipe_' + '_'.join(task_names)
+
+	tasks_config = {}
+	for i, entry in enumerate(chain):
+		task_name = entry['task']
+		task_opts = {}
+
+		if i > 0:
+			prev_entry = chain[i - 1]
+			prev_output_types = prev_entry.get('output_types', [])
+			curr_input_types = entry.get('input_types', [])
+			targets = get_pipe_targets_config(prev_output_types, curr_input_types)
+			if targets:
+				task_opts['targets_'] = targets
+
+		tasks_config[task_name] = task_opts if task_opts else None
+
+	first_input_types = chain[0].get('input_types', ['host'])
+
+	workflow_data = {
+		'type': 'workflow',
+		'name': workflow_name,
+		'description': f'Auto-generated from pipe: {" | ".join(task_names)}',
+		'input_types': first_input_types,
+		'tasks': tasks_config,
+	}
+
+	yaml_content = yaml.dump(workflow_data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+	return yaml_content, workflow_name
+
+
+def save_pipe_workflow(chain):
+	"""Build and save a workflow YAML to the templates directory from a pipe chain.
+
+	Args:
+		chain (list): Pipe chain task list (see :func:`build_pipe_workflow_yaml`).
+
+	Returns:
+		tuple: (yaml_path, workflow_name) on success, or (None, None) on failure.
+	"""
+	yaml_content, workflow_name = build_pipe_workflow_yaml(chain)
+	if not yaml_content or not workflow_name:
+		return None, None
+
+	templates_dir = CONFIG.dirs.templates
+	Path(templates_dir).mkdir(parents=True, exist_ok=True)
+	yaml_path = Path(templates_dir) / f'{workflow_name}.yaml'
+
+	with open(yaml_path, 'w') as f:
+		f.write(yaml_content)
+
+	return yaml_path, workflow_name
+
+
 def expand_input(input, ctx):
 	"""Expand user-provided input on the CLI:
 	- If input is a path, read the file and return the lines.
@@ -91,7 +252,12 @@ def expand_input(input, ctx):
 			rlist, _, _ = select.select([sys.stdin], [], [], CONFIG.cli.stdin_timeout)
 			if rlist:
 				data = sys.stdin.read().splitlines()
-				return data
+				# Extract pipe chain metadata from secator-to-secator pipes
+				regular_data, pipe_chain = extract_pipe_chain(data)
+				if pipe_chain:
+					ctx.obj['is_secator_pipe'] = True
+					ctx.obj['pipe_chain'] = pipe_chain
+				return regular_data if regular_data else data
 			else:
 				console.print('No input passed on stdin.', style='bold red')
 				sys.exit(1)

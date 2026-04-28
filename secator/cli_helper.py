@@ -16,7 +16,7 @@ from secator.definitions import ADDONS_ENABLED, AVAILABLE_DRIVERS, AVAILABLE_EXP
 from secator.runners import Scan, Task, Workflow
 from secator.template import get_config_options
 from secator.tree import build_runner_tree
-from secator.utils import (deduplicate, expand_input, get_command_category)
+from secator.utils import (deduplicate, expand_input, get_command_category, save_pipe_workflow, PIPE_CHAIN_MARKER)
 from secator.loader import get_configs_by_type
 from secator.completion import complete_profiles, complete_workspaces, complete_drivers, complete_exporters
 
@@ -270,6 +270,10 @@ def register_runner(cli_endpoint, config):
 		# Expand input
 		inputs = opts.pop('inputs')
 		inputs = expand_input(inputs, ctx)
+		
+		# Check if we're in a secator pipe chain
+		is_secator_pipe = ctx.obj.get('is_secator_pipe', False)
+		pipe_chain = ctx.obj.get('pipe_chain', [])
 
 		# Build hooks from driver name
 		hooks = []
@@ -355,6 +359,14 @@ def register_runner(cli_endpoint, config):
 			'sync': sync,
 			'quiet': quiet
 		})
+		
+		# If we're in a secator pipe chain, adjust report options
+		piped_output = ctx.obj['piped_output']
+		if is_secator_pipe:
+			if piped_output:
+				opts['enable_reports'] = False
+			else:
+				opts['enable_reports'] = True
 
 		# Start runner
 		with contextmanager:
@@ -365,7 +377,11 @@ def register_runner(cli_endpoint, config):
 				)
 			item_count = 0
 			runner = runner_cls(
-				config, inputs, run_opts=opts, hooks=hooks, context=context
+				config,
+				inputs,
+				run_opts=opts,
+				hooks=hooks,
+				context=context
 			)
 			for item in runner:
 				del item
@@ -378,6 +394,36 @@ def register_runner(cli_endpoint, config):
 		if enable_memray:
 			console.print(f"[bold green]Memray output file: {output_file}[/]")
 			os.system(f"memray flamegraph {output_file}")
+
+		# Pipe chain handling: emit metadata or build workflow YAML
+		if runner_cls == Task:
+			import json as _json
+			task_cls_for_pipe = Task.get_task_class(config.name)
+			current_entry = {
+				'task': config.name,
+				'input_types': list(task_cls_for_pipe.input_types),
+				'output_types': [ot.get_name() for ot in task_cls_for_pipe.output_types],
+			}
+
+			if piped_output:
+				# Emit updated chain metadata for the next command in the pipe
+				updated_chain = pipe_chain + [current_entry]
+				chain_json = _json.dumps({'chain': updated_chain})
+				sys.stdout.write(f'{PIPE_CHAIN_MARKER}{chain_json}\n')
+				sys.stdout.flush()
+			elif is_secator_pipe:
+				# Last task in the chain: build and save the workflow YAML
+				full_chain = pipe_chain + [current_entry]
+				yaml_path, workflow_name = save_pipe_workflow(full_chain)
+				if yaml_path and not quiet:
+					task_chain_str = ' | '.join(e['task'] for e in full_chain)
+					console.print(
+						f'[bold cyan]⛓ Auto-detected pipe workflow:[/] {task_chain_str}'
+					)
+					console.print(
+						f'[bold cyan]  Saved as:[/] [green]{yaml_path}[/] '
+						f'([dim]run with: secator w {workflow_name} <target>[/])'
+					)
 
 	generate_cli_subcommand(cli_endpoint, func, **command_opts)
 	generate_rich_click_opt_groups(cli_endpoint, name, input_types, options)
