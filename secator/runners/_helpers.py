@@ -10,6 +10,7 @@ def _format_nested(template, data):
 	"""Format a string template supporting nested dot notation like {extra_data.password}.
 
 	Replaces {key} and {key.subkey} tokens by traversing nested dicts.
+	Raises KeyError for missing or non-traversable keys so misconfigured templates surface loudly.
 	"""
 	def replace_token(match):
 		key = match.group(1)
@@ -22,7 +23,9 @@ def _format_nested(template, data):
 				value = None
 			if value is None:
 				break
-		return str(value) if value is not None else ''
+		if value is None:
+			raise KeyError(f"Missing placeholder: {key}")
+		return str(value)
 	return re.sub(r'\{([\w.]+)\}', replace_token, template)
 
 
