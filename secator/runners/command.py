@@ -534,12 +534,15 @@ class Command(Runner):
 				cwd=self.cwd,
 			)
 
-			# Initialize monitor objects and start monitor thread
-			self._init_monitor_objects()
+			# Start monitor thread only if there's something to monitor
 			self.process_start_time = time()
-			self.monitor_stop_event.clear()
-			self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
-			self.monitor_thread.start()
+			has_memory_limit = self.memory_limit_mb and self.memory_limit_mb != -1
+			has_timeout = CONFIG.celery.task_max_timeout != -1
+			if self.print_stat or has_memory_limit or has_timeout:
+				self._init_monitor_objects()
+				self.monitor_stop_event.clear()
+				self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
+				self.monitor_thread.start()
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
@@ -697,16 +700,19 @@ class Command(Runner):
 				current_time = time()
 				self.debug('Collecting monitor items', sub='monitor')
 
-				# Collect and queue stats at regular intervals
-				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
+				# Collect and queue stats at regular intervals (only when needed)
+				has_memory_limit = self.memory_limit_mb and self.memory_limit_mb != -1
+				should_collect = (self.print_stat or has_memory_limit)
+				if should_collect and (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
 					stats_items = list(self._collect_stats())
-					for stat_item in stats_items:
-						if self.monitor_queue is not None:
-							self.monitor_queue.put(stat_item)
+					if self.print_stat:
+						for stat_item in stats_items:
+							if self.monitor_queue is not None:
+								self.monitor_queue.put(stat_item)
 					last_stats_time = current_time
 
 					# Check memory usage from collected stats
-					if self.memory_limit_mb and self.memory_limit_mb != -1:
+					if has_memory_limit:
 						total_mem = sum(stat_item.memory for stat_item in stats_items)
 						if total_mem > self.memory_limit_mb:
 							warning = Warning(message=f'Memory limit {self.memory_limit_mb}MB exceeded (actual: {total_mem:.2f}MB)')
@@ -758,8 +764,8 @@ class Command(Runner):
 			name = info['name']
 			pid = info['pid']
 			cpu_percent = info['cpu_percent']
-			# mem_percent = info['memory_percent']
-			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
+			mem_info = info.get('memory_info') or {}
+			mem_rss = round(mem_info.get('rss', 0) / 1024 / 1024, 2)
 			total_mem += mem_rss
 			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
 			net_conns = info.get('net_connections') or []
@@ -777,35 +783,6 @@ class Command(Runner):
 		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
 		# 	raise MemoryError(f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
 
-	def stats(self, memory_limit_mb=None):
-		"""Gather stats about the current running process, if any."""
-		if not self.process or not self.process.pid:
-			return
-		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True)
-		total_mem = 0
-		for info in stats:
-			name = info['name']
-			pid = info['pid']
-			cpu_percent = info['cpu_percent']
-			mem_percent = info['memory_percent']
-			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
-			total_mem += mem_rss
-			self.debug(f'process: {name} pid: {pid} memory: {mem_rss}MB', sub='stats')
-			net_conns = info.get('net_connections') or []
-			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
-			yield Stat(
-				name=name,
-				pid=pid,
-				cpu=cpu_percent,
-				memory=mem_percent,
-				net_conns=len(net_conns),
-				extra_data=extra_data,
-			)
-		self.debug(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}', sub='stats')
-		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
-			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
-
 	@staticmethod
 	def get_process_info(process, children=False):
 		"""Get process information from psutil.
@@ -814,14 +791,11 @@ class Command(Runner):
 			process (subprocess.Process): Process.
 			children (bool): Whether to gather stats about children processes too.
 		"""
+		_STAT_FIELDS = ['pid', 'name', 'cpu_percent', 'memory_info', 'net_connections']
 		try:
-			# fmt: off
-			data = {
-				k: v._asdict() if hasattr(v, '_asdict') else v
-				for k, v in process.as_dict().items()
-				if k not in ['memory_maps', 'open_files', 'environ']
-			}
-			# fmt: on
+			data = process.as_dict(attrs=_STAT_FIELDS)
+			if data.get('memory_info'):
+				data['memory_info'] = data['memory_info']._asdict()
 			yield data
 		except (psutil.Error, FileNotFoundError):
 			return
