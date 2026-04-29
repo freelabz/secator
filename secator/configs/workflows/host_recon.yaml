@@ -85,6 +85,10 @@ tasks:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
+      targets_:
+        - type: port
+          field: '{host}:{port}'
+          condition: item.state == 'open'
       if: opts.nuclei and not opts.passive
 
     nuclei/default-login:
@@ -93,6 +97,7 @@ tasks:
       targets_:
         - type: port
           field: '{host}:{port}'
+          condition: item.state == 'open'
       if: opts.nuclei and not opts.passive
 
     nuclei/url:
