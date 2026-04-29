@@ -1201,6 +1201,37 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 	report.send()
 
 
+def _load_report_data(path):
+	"""Read report JSON to extract info section and count vulnerability severities."""
+	info = {}
+	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+	with open(path, 'r') as f:
+		data = json.load(f)
+	info = data.get('info', {})
+	results = data.get('results', {})
+	for vuln in results.get('vulnerability', []):
+		severity = str(vuln.get('severity', '')).lower()
+		if severity in vuln_counts:
+			vuln_counts[severity] += 1
+	return info, vuln_counts
+
+
+def _format_vuln_counts(counts):
+	"""Format vulnerability counts as a colored rich string like '2H|10M|5L'."""
+	severity_labels = [
+		('critical', 'C', 'bold red'),
+		('high', 'H', 'red'),
+		('medium', 'M', 'yellow'),
+		('low', 'L', 'green'),
+	]
+	parts = []
+	for severity, label, color in severity_labels:
+		count = counts.get(severity, 0)
+		if count > 0:
+			parts.append(f'[{color}]{count}{label}[/]')
+	return '|'.join(parts) if parts else '-'
+
+
 @report.command('list')
 @click.option('-ws', '-w', '--workspace', type=str)
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
@@ -1214,15 +1245,16 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 
 	# Build table
 	table = Table()
-	table.add_column('Workspace', style='bold gold3')
-	table.add_column('Name')
-	table.add_column('Id')
-	table.add_column('Target')
-	table.add_column('Profiles')
-	table.add_column('Start Date')
-	table.add_column('End Date')
-	table.add_column('Elapsed')
-	table.add_column('Status', style='green')
+	table.add_column("Workspace", style="bold gold3")
+	table.add_column("Name")
+	table.add_column("Id")
+	table.add_column("Target")
+	table.add_column("Profiles")
+	table.add_column("Start Date")
+	table.add_column("End Date")
+	table.add_column("Elapsed")
+	table.add_column("Status", style="green")
+	table.add_column("Vulnerabilities")
 	if show_all:
 		table.add_column('Path')
 
@@ -1238,47 +1270,37 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	# Load each report
 	for path in paths:
 		try:
-			info = get_info_from_report_path(path)
-			with open(path, 'r') as f:
-				content = json.loads(f.read())
-			runner_id = info['type'] + '/' + info['id']
-			targets = content['info'].get('targets', [])
+			path_info = get_info_from_report_path(path)
+			report_info, vuln_counts = _load_report_data(path)
+			runner_id = path_info['type'] + '/' + path_info['id']
+			targets = report_info.get('targets', [])
 			first_target = str(targets[0]) if targets else ''
 			if len(targets) > 1:
 				first_target += f' (+{len(targets) - 1})'
-			profiles = content['info'].get('run_opts', {}).get('profiles', [])
+			profiles = report_info.get('run_opts', {}).get('profiles', [])
 			if isinstance(profiles, str):
 				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
 			profiles_str = ', '.join(profiles) if profiles else ''
-			data = {
-				'workspace': info['workspace'],
-				'name': f'[bold blue]{content["info"]["name"]}[/]',
-				'status': content['info'].get('status', ''),
-				'id': f'[link={Path(path).as_uri()}]{runner_id}[/link]',
-				'target': first_target,
-				'profiles': profiles_str,
-				'start_date': humanize_date(content['info'].get('start_time')),
-				'end_date': humanize_date(content['info'].get('end_time')),
-				'elapsed': content['info'].get('elapsed_human', ''),
-			}
-			status_color = STATE_COLORS[data['status']] if data['status'] in STATE_COLORS else 'white'
+			status = report_info.get('status', '')
+			status_color = STATE_COLORS[status] if status in STATE_COLORS else 'white'
 
 			# Update table
 			row = [
-				data['workspace'],
-				data['name'],
-				data['id'],
-				data['target'],
-				data['profiles'],
-				data['start_date'],
-				data['end_date'],
-				data['elapsed'],
-				f'[{status_color}]{data["status"]}[/]',
+				path_info['workspace'],
+				f"[bold blue]{report_info.get('name', '')}[/]",
+				f'[link={Path(path).as_uri()}]{runner_id}[/link]',
+				first_target,
+				profiles_str,
+				humanize_date(report_info.get('start_time')),
+				humanize_date(report_info.get('end_time')),
+				report_info.get('elapsed_human', ''),
+				f"[{status_color}]{status}[/]",
+				_format_vuln_counts(vuln_counts),
 			]
 			if show_all:
 				row.append(str(path))
 			table.add_row(*row)
-		except json.JSONDecodeError as e:
+		except Exception as e:
 			console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
 	if len(paths) > 0:
