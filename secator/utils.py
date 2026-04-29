@@ -759,7 +759,9 @@ def list_reports(workspace=None, type=None, timedelta=None):
 	for root, _, files in os.walk(CONFIG.dirs.reports):
 		for file in files:
 			path = Path(root) / file
-			if not path.parts[-1] == 'report.json':
+			is_completed = path.parts[-1] == 'report.json'
+			is_live = path.parts[-1] == 'report.meta.json' and not (path.parent / 'report.json').exists()
+			if not is_completed and not is_live:
 				continue
 			if workspace and path.parts[-4] != workspace:
 				continue

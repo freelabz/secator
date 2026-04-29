@@ -1123,17 +1123,21 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 			with open(path, 'r') as f:
 				content = json.loads(f.read())
 			runner_id = info['type'] + '/' + info['id']
-			targets = content['info'].get('targets', [])
+			# report.meta.json (live runner) stores runner dict directly; report.json wraps it under 'info'
+			is_live = path.name == 'report.meta.json'
+			report_info = content if is_live else content.get('info', {})
+			targets = report_info.get('targets', [])
 			first_target = str(targets[0]) if targets else ''
+			status = report_info.get('status', 'RUNNING' if is_live else '')
 			data = {
 				'workspace': info['workspace'],
-				'name': f"[bold blue]{content['info']['name']}[/]",
-				'status': content['info'].get('status', ''),
+				'name': f"[bold blue]{report_info.get('name', '')}[/]",
+				'status': status,
 				'id': f'[link={Path(path).as_uri()}]{runner_id}[/link]',
 				'target': first_target,
-				'start_date': _fmt_date(content['info'].get('start_time')),
-				'end_date': _fmt_date(content['info'].get('end_time')),
-				'elapsed': content['info'].get('elapsed_human', ''),
+				'start_date': _fmt_date(report_info.get('start_time')),
+				'end_date': _fmt_date(report_info.get('end_time')),
+				'elapsed': report_info.get('elapsed_human', ''),
 			}
 			status_color = STATE_COLORS[data['status']] if data['status'] in STATE_COLORS else 'white'
 
