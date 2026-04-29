@@ -221,14 +221,13 @@ class TestExtractorFunctions(unittest.TestCase):
         result = process_extractor(self.results, extractor)
         self.assertEqual(result, ['nested_value', 'nested_value', 'nested_value'])
 
-        # Test that missing nested key raises KeyError (no silent empty-string substitution)
+        # Test that missing nested key yields empty string, which is filtered from results
         extractor = {
             'type': 'mock',
             'field': '{nested.nonexistent}'
         }
-        with self.assertRaises(KeyError) as cm:
-            process_extractor(self.results, extractor)
-        self.assertIn('nested.nonexistent', str(cm.exception))
+        result = process_extractor(self.results, extractor)
+        self.assertEqual(result, [])
 
     def test_process_extractor_group_by_combines_hosts(self):
         """group_by groups items by key and joins matched_at values with comma."""

@@ -10,7 +10,7 @@ def _format_nested(template, data):
 	"""Format a string template supporting nested dot notation like {extra_data.password}.
 
 	Replaces {key} and {key.subkey} tokens by traversing nested dicts.
-	Raises KeyError for missing or non-traversable keys so misconfigured templates surface loudly.
+	Missing or non-traversable keys resolve to empty string.
 	"""
 	def replace_token(match):
 		key = match.group(1)
@@ -23,9 +23,7 @@ def _format_nested(template, data):
 				value = None
 			if value is None:
 				break
-		if value is None:
-			raise KeyError(f"Missing placeholder: {key}")
-		return str(value)
+		return str(value) if value is not None else ''
 	return re.sub(r'\{([\w.]+)\}', replace_token, template)
 
 
@@ -238,13 +236,17 @@ def process_extractor(results, extractor, ctx=None):
 				item_dict = item.toDict()
 				group_key = _format_nested(_group_by, item_dict)
 				value = _format_nested(_field, item_dict)
+				if not group_key or not value:
+					continue
 				prefix = value.split('~')[0] if '~' in value else value
+				if not prefix:
+					continue
 				bucket = groups.setdefault(group_key, [])
 				if prefix not in bucket:
 					bucket.append(prefix)
 			results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
 		else:
-			results = [_format_nested(_field, item.toDict()) for item in results]
+			results = [v for v in (_format_nested(_field, item.toDict()) for item in results) if v]
 	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
 	return results
 
