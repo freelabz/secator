@@ -97,6 +97,34 @@ _OP_MAP = {
     '~=': '$regex',
 }
 
+# Regex for the 'in' operator: "type.field in [val1, val2]"
+_IN_RE = re.compile(r'^(.+?)\s+in\s+\[(.*)\]\s*$', re.DOTALL | re.IGNORECASE)
+
+
+def _parse_list(values_str):
+    """Parse a comma-separated list of values, respecting quoted strings."""
+    values = []
+    current = []
+    in_quote = None
+    for ch in values_str:
+        if in_quote is None and ch in ('"', "'"):
+            in_quote = ch
+            current.append(ch)
+        elif ch == in_quote:
+            in_quote = None
+            current.append(ch)
+        elif in_quote is None and ch == ',':
+            val = ''.join(current).strip()
+            if val:
+                values.append(_parse_value(val))
+            current = []
+        else:
+            current.append(ch)
+    val = ''.join(current).strip()
+    if val:
+        values.append(_parse_value(val))
+    return values
+
 
 def _parse_single_expr(expr):
     """Parse one expression like 'vulnerability.severity_score > 7' into a query dict."""
@@ -114,6 +142,19 @@ def _parse_single_expr(expr):
     # Type-only: "domain" or "vulnerability"
     if re.match(r'^[a-z_]+$', expr):
         return {'_type': expr}
+
+    # Check for 'in' operator: "type.field in [val1, val2]"
+    m_in = _IN_RE.match(expr)
+    if m_in:
+        left, values_str = m_in.group(1).strip(), m_in.group(2)
+        parts = left.split('.', 1)
+        _type = parts[0].strip()
+        field = parts[1].strip() if len(parts) > 1 else None
+        values = _parse_list(values_str)
+        result = {'_type': _type}
+        if field:
+            result[field] = {'$in': values}
+        return result
 
     # Use regex to find the first operator (longest-first via alternation order).
     # This avoids mis-splitting on operators that appear inside quoted values.
