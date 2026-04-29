@@ -51,6 +51,8 @@ tasks:
     version_detection: true
     tcp_syn_stealth: false
     fragment: false
+    skip_host_discovery_:
+      condition: "'naabu' in opts.scanners or 'masscan' in opts.scanners"
     targets_:
     - type: target
       field: name

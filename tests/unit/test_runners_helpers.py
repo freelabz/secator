@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from secator.runners._helpers import (
     run_extractors,
+    resolve_conditional_opts,
     fmt_extractor,
     extract_from_results,
     parse_extractor,
@@ -365,6 +366,89 @@ class TestExtractorFunctions(unittest.TestCase):
         ]
         result = get_task_folder_id('/dummy/path')
         self.assertEqual(result, 4)  # Max numeric dir (3) + 1
+
+
+class TestResolveConditionalOpts(unittest.TestCase):
+
+    def test_condition_true_sets_base_key(self):
+        """When condition is True, set base key (without '_') to True by default."""
+        from dotmap import DotMap
+        opts = {'skip_host_discovery_': {'condition': "'masscan' in opts.scanners"}}
+        ctx = {'opts': DotMap({'scanners': ['masscan', 'nmap']})}
+        result = resolve_conditional_opts(opts, ctx)
+        self.assertNotIn('skip_host_discovery_', result)
+        self.assertTrue(result.get('skip_host_discovery'))
+
+    def test_condition_false_does_not_set_base_key(self):
+        """When condition is False, base key is not set."""
+        from dotmap import DotMap
+        opts = {'skip_host_discovery_': {'condition': "'masscan' in opts.scanners"}}
+        ctx = {'opts': DotMap({'scanners': ['nmap']})}
+        result = resolve_conditional_opts(opts, ctx)
+        self.assertNotIn('skip_host_discovery_', result)
+        self.assertNotIn('skip_host_discovery', result)
+
+    def test_condition_with_custom_value(self):
+        """When condition is True and a 'value' key is specified, use that value."""
+        from dotmap import DotMap
+        opts = {'rate_limit_': {'condition': 'opts.passive', 'value': 10}}
+        ctx = {'opts': DotMap({'passive': True})}
+        result = resolve_conditional_opts(opts, ctx)
+        self.assertEqual(result.get('rate_limit'), 10)
+
+    def test_invalid_condition_does_not_crash(self):
+        """An invalid condition expression is silently ignored."""
+        opts = {'some_opt_': {'condition': 'this is not valid python !!!'}}
+        result = resolve_conditional_opts(opts, {})
+        self.assertNotIn('some_opt_', result)
+        self.assertNotIn('some_opt', result)
+
+    def test_non_dict_value_not_treated_as_conditional(self):
+        """Keys ending with '_' but with list/string values are left alone (extractors)."""
+        opts = {'targets_': [{'type': 'url', 'field': 'url'}]}
+        result = resolve_conditional_opts(opts, {})
+        self.assertIn('targets_', result)
+
+    def test_dict_extractor_with_type_key_not_treated_as_conditional(self):
+        """Dict extractors with 'type' key must NOT be treated as conditional opts."""
+        # Reproduces the url_fuzz.yaml httpx.targets_ case:
+        # targets_:
+        #   type: url
+        #   field: url
+        #   condition: not url.verified
+        opts = {'targets_': {'type': 'url', 'field': 'url', 'condition': 'not url.verified'}}
+        result = resolve_conditional_opts(opts, {})
+        self.assertIn('targets_', result)
+        self.assertNotIn('targets', result)
+
+    def test_run_extractors_resolves_conditional_opts_first(self):
+        """run_extractors resolves conditional opts before processing extractors."""
+        from dotmap import DotMap
+        opts = {
+            'skip_host_discovery_': {'condition': "'masscan' in opts.scanners"},
+        }
+        ctx = {'opts': DotMap({'scanners': ['masscan']})}
+        _inputs, updated_opts, errors = run_extractors([], opts, ctx=ctx)
+        self.assertEqual(errors, [])
+        self.assertTrue(updated_opts.get('skip_host_discovery'))
+        self.assertNotIn('skip_host_discovery_', updated_opts)
+
+    def test_run_extractors_conditional_and_extractor_together(self):
+        """run_extractors handles conditional opts alongside standard extractors."""
+        from dotmap import DotMap
+        url1 = Url(url='http://example.com')
+        url2 = Url(url='http://example.org')
+        results = [url1, url2]
+        opts = {
+            'other_': ['url.url'],
+            'skip_host_discovery_': {'condition': 'True'},
+        }
+        ctx = {'opts': DotMap({})}
+        _inputs, updated_opts, errors = run_extractors(results, opts, ctx=ctx)
+        self.assertEqual(errors, [])
+        self.assertIn('other', updated_opts)
+        self.assertTrue(updated_opts.get('skip_host_discovery'))
+        self.assertNotIn('skip_host_discovery_', updated_opts)
 
 
 if __name__ == '__main__':
