@@ -286,9 +286,9 @@ class Runner:
 
 	@property
 	def file_name(self):
-		"""Filesystem-safe name for output files. Uses node_id when running inside a workflow/scan to avoid conflicts when the same task appears in multiple workflows."""
+		"""Filesystem-safe name for output files. Uses node_id when inside a workflow/scan to avoid conflicts."""
 		if self.config.node_id:
-			base = self.config.node_id.replace('.', '_')
+			base = self.config.node_id.replace('.', '_').replace('/', '_')
 		else:
 			base = self.name.replace('/', '_')
 		return f'{base}_{self.chunk}' if self.chunk else base
