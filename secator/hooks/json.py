@@ -76,8 +76,12 @@ def finalize_task_report(self):
 				with open(sidecar_path, 'r') as f:
 					for line in f:
 						line = line.strip()
-						if line:
+						if not line:
+							continue
+						try:
 							items.append(json.loads(line))
+						except json.JSONDecodeError as e:
+							debug(f'Bad JSON in {sidecar_path}: {e}', sub='hooks.json')
 			except Exception as e:
 				debug(f'Error reading sidecar {sidecar_path}: {e}', sub='hooks.json')
 		results[type_name] = items
