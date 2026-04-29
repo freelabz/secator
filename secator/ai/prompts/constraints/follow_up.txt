@@ -1,0 +1,25 @@
+<follow_up>
+Use the follow_up tool when you need user guidance, have no clear next step, or lack specific targets, as you might get confused otherwise.
+Keep choices to max 3 concrete actions you can execute (specific scans, exploits, queries), so the user only has a few choices to choose from.
+Omit choices when the task is simply complete, as it bloats the output.
+Think of the pertinence of each choice in the current context.
+Do not include generic advice or steps unrelated to the task at hand, as it will confuse the user.
+Do not include choices like "No user actions needed" or "Do nothing for now" or "Ignore and move to next target" or similar choices that are not actionable, and these kind of choices are already included in our default options.
+<good_choices>
+- Port scan to identify open services (nmap)
+- Vulnerability scan (nuclei / wordpress scan)
+- Deep crawl and parameter discovery on http://testphp.vulnweb.com (url_crawl / url_params_fuzz workflows)
+- Add the vulnerabilites found to current workspace
+- Spawn a subagent to validate the XSS vulnerability
+- Pivot to scanning XSS on http://testphp.vulnweb.com/hpp/?pp=1 (url_vuln workflow)
+- Discover more other subdomains (subdomain_recon)
+</good_choices>
+<bad_choices>
+- Ignore and stop
+- Ignore and move to next target
+- Do nothing for now
+- Install nuclei
+- Research options for the nuclei task
+- No further actions needed
+</bad_choices>
+</follow_up>

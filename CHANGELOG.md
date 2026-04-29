@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.31.0](https://github.com/freelabz/secator/compare/v0.30.1...v0.31.0) (2026-04-23)
+
+
+### Features
+
+* **cli:** add workspace rm/remove/delete and report delete/rm/remove commands ([#1038](https://github.com/freelabz/secator/issues/1038)) ([8be4d82](https://github.com/freelabz/secator/commit/8be4d82adb8588c34f41b45a9377596417fbf73d))
+* **tasks:** improve AI context management, add guardrails, remote interactivity ([#949](https://github.com/freelabz/secator/issues/949)) ([6d5b21f](https://github.com/freelabz/secator/commit/6d5b21f9d241badc3d9020190bb5587fbb63925f))
+
+
+### Bug Fixes
+
+* **cli:** {}-style --format strings broken when type name collides with field ([#1020](https://github.com/freelabz/secator/issues/1020)) ([91888a6](https://github.com/freelabz/secator/commit/91888a6c1848d28dbb37c49eaeeace18eb00807e))
+* **cli:** add Profiles column and multi-target display to report list ([#1036](https://github.com/freelabz/secator/issues/1036)) ([f4d3fd0](https://github.com/freelabz/secator/commit/f4d3fd0ef4399ed60b22cda02b8c2e4e9eae1e85))
+* **cli:** display runner tree to client in remote worker mode ([#1028](https://github.com/freelabz/secator/issues/1028)) ([8a82fb9](https://github.com/freelabz/secator/commit/8a82fb9bba23e097d059a42d070b52400d8e08ca))
+* **cli:** display vulnerability counts in secator r list ([#1040](https://github.com/freelabz/secator/issues/1040)) ([57d72fe](https://github.com/freelabz/secator/commit/57d72fe8805975b8485fd10a76c5d893ef9c3a02))
+* **cli:** dot-path --format broken when field name collides with type name ([#1027](https://github.com/freelabz/secator/issues/1027)) ([885c561](https://github.com/freelabz/secator/commit/885c561497b411f09bd41bfe3c7692d43dda505c))
+* **cli:** humanize dates in secator r list ([#1033](https://github.com/freelabz/secator/issues/1033)) ([075a6c5](https://github.com/freelabz/secator/commit/075a6c54d2f218d8cda8b79d20458b7b40e20655))
+* **cli:** remove secator report export command ([#1043](https://github.com/freelabz/secator/issues/1043)) ([9bbdd68](https://github.com/freelabz/secator/commit/9bbdd68f1beabe6af373bcb58f6f97fa02574930))
+* **cli:** stream cmd and description to client in remote worker mode ([#1041](https://github.com/freelabz/secator/issues/1041)) ([46cccca](https://github.com/freelabz/secator/commit/46cccca4e36c7cdae6e51f1a9bd72f5a319eef53))
+* **mapcidr:** prevent unsupported delay flag from being passed ([#1050](https://github.com/freelabz/secator/issues/1050)) ([6fb85f4](https://github.com/freelabz/secator/commit/6fb85f4e40ff763cded91ec5b206c7b33ea357fe))
+* **runner:** add fix for killing worker when CTRL + C on non-process grouped tasks ([#1053](https://github.com/freelabz/secator/issues/1053)) ([ec2d23f](https://github.com/freelabz/secator/commit/ec2d23fe7742d6fd4c190a8ebaa9a78e358d0ed1))
+
 ## [0.30.1](https://github.com/freelabz/secator/compare/v0.30.0...v0.30.1) (2026-04-21)
 
 

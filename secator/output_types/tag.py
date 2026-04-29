@@ -36,7 +36,7 @@ class Tag(OutputType):
 
 	def __rich__(self) -> str:
 		content = self.value
-		s = rf'🏷️  \[[bold yellow]{_s(self.category)}[/]] [bold magenta]{_s(self.name)}[/]'
+		s = rf'🏷️ \[[bold yellow]{_s(self.category)}[/]] [bold magenta]{_s(self.name)}[/]'
 		small_content = False
 		if len(content) < 100:
 			small_content = True

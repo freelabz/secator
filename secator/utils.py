@@ -988,12 +988,13 @@ def parse_raw_http_request(raw_request):
 	return {'method': method, 'url': url, 'headers': headers, 'data': body}
 
 
-def format_token_count(tokens, icon=''):
+def format_token_count(tokens, icon='', compact=False):
 	"""Format a token count as a human-readable string (e.g., '8.5k tokens').
 
 	Args:
 		tokens: Number of tokens.
 		icon: Optional Rich emoji icon prefix (e.g., 'arrow_up', 'arrow_down').
+		compact: If True, omit 'tokens' suffix (e.g., '8.5k' instead of '8.5k tokens').
 
 	Returns:
 		str: Formatted token string.
@@ -1472,6 +1473,7 @@ def remove_duplicates(items):
 		# Plain dict: try to load into the appropriate OutputType to use _compare_key()
 		if isinstance(item, dict):
 			from secator.output_types import OUTPUT_TYPES
+
 			_type = item.get('_type')
 			if _type:
 				for cls in OUTPUT_TYPES:
