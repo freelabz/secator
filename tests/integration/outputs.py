@@ -291,13 +291,13 @@ OUTPUTS_TASKS = {
             _source='trufflehog'
         ),
     ],
-    'urlfinder': [
-        Url(
-            url='https://xss-game.appspot.com/level4/frame',
-            host='xss-game.appspot.com',
-            _source='urlfinder'
-        )
-    ],
+    # 'urlfinder': [
+    #     Url(
+    #         url='https://xss-game.appspot.com/level4/frame',
+    #         host='xss-game.appspot.com',
+    #         _source='urlfinder'
+    #     )
+    # ],
     'wafw00f': [
         Tag(
             name='waf',
