@@ -9,7 +9,7 @@ from secator.utils import debug
 
 
 def _get_meta_path(runner):
-	if getattr(runner, 'has_parent', False):
+	if runner.has_parent:
 		# Sub-runner: use task name (sanitized) to avoid conflicts
 		task_name = runner.name.replace('/', '_')
 		return Path(runner.reports_folder) / f'report.meta.{task_name}.json'
@@ -72,7 +72,7 @@ def finalize_task_report(self):
 	"""Merge per-type .jsonl sidecars into report.json, then clean up."""
 	# Sub-tasks (with parents) should not create individual report.json files
 	# Only the main workflow/scan should create the final report
-	if getattr(self, 'has_parent', False):
+	if self.has_parent:
 		debug(f'Skipping report creation for sub-task {self.unique_name} (has_parent=True)', sub='hooks.json')
 		_cleanup_sidecars(self)
 		return
