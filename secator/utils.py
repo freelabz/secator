@@ -787,7 +787,6 @@ def list_reports(workspace=None, type=None, timedelta=None, include_subtasks=Fal
 			is_completed = path.parts[-1] == 'report.json'
 			is_live = (path.parts[-1].startswith('report.meta.') and path.parts[-1].endswith('.json')
 			          and not (path.parent / 'report.json').exists())
-			is_main_live = is_live and path.parts[-1] == 'report.meta.json'
 			is_subtask_live = is_live and path.parts[-1] != 'report.meta.json'
 
 			if not is_completed and not is_live:
