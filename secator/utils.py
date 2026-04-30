@@ -764,13 +764,14 @@ def should_update(update_frequency, last_updated=None, timestamp=None):
 	return True
 
 
-def list_reports(workspace=None, type=None, timedelta=None):
+def list_reports(workspace=None, type=None, timedelta=None, include_subtasks=False):
 	"""List all reports in secator reports dir.
 
 	Args:
 		workspace (str): Filter by workspace name.
 		type (str): Filter by runner type.
 		timedelta (None | datetime.timedelta): Keep results newer than timedelta.
+		include_subtasks (bool): Include sub-task meta files (report.meta.{name}.json).
 
 	Returns:
 		list: List all JSON reports.
@@ -783,7 +784,16 @@ def list_reports(workspace=None, type=None, timedelta=None):
 	for root, _, files in os.walk(CONFIG.dirs.reports):
 		for file in files:
 			path = Path(root) / file
-			if not path.parts[-1] == 'report.json':
+			is_completed = path.parts[-1] == 'report.json'
+			is_live = (path.parts[-1].startswith('report.meta.') and path.parts[-1].endswith('.json')
+			          and not (path.parent / 'report.json').exists())
+			is_subtask_live = is_live and path.parts[-1] != 'report.meta.json'
+
+			if not is_completed and not is_live:
+				continue
+
+			# Filter out sub-task meta files unless explicitly requested
+			if is_subtask_live and not include_subtasks:
 				continue
 			if workspace and path.parts[-4] != workspace:
 				continue

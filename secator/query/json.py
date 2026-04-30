@@ -113,7 +113,7 @@ class JsonBackend(QueryBackend):
 				debug(f'Available workspaces in {self.reports_dir}: {available}', sub='query.json')
 			return findings
 
-		# Search for report.json files in tasks/, workflows/, scans/
+		# Search for report.json (completed) or sidecar files (live run) in tasks/, workflows/, scans/
 		for runner_type in ['tasks', 'workflows', 'scans']:
 			runner_path = workspace_path / runner_type
 			if not runner_path.exists():
@@ -123,16 +123,19 @@ class JsonBackend(QueryBackend):
 				if not report_dir.is_dir():
 					continue
 
+				runner_type_singular = runner_type.rstrip('s')  # "tasks" -> "task", "scans" -> "scan"
+				runner_id = report_dir.name
+
 				report_file = report_dir / 'report.json'
+				meta_file = report_dir / 'report.meta.json'
+
 				if report_file.exists():
+					# Completed run: load full report
 					try:
 						with open(report_file, 'r') as f:
 							data = json.load(f)
 
 						results = data.get('results', {})
-						runner_type_singular = runner_type.rstrip('s')  # "tasks" -> "task", "scans" -> "scan"
-						runner_id = report_dir.name
-
 						for type_name, items in results.items():
 							if isinstance(items, list):
 								for item in items:
@@ -143,6 +146,27 @@ class JsonBackend(QueryBackend):
 					except (json.JSONDecodeError, IOError) as e:
 						debug(f'Error loading {report_file}: {e}', sub='query.json')
 						continue
+
+				elif meta_file.exists():
+					# Live run: load from per-type .jsonl sidecar files
+					for jsonl_file in sorted(report_dir.glob('report.*.jsonl')):
+						try:
+							with open(jsonl_file, 'r') as f:
+								for line in f:
+									line = line.strip()
+									if not line:
+										continue
+									try:
+										item = json.loads(line)
+										ctx = item.setdefault('_context', {})
+										if f'{runner_type_singular}_id' not in ctx:
+											ctx[f'{runner_type_singular}_id'] = runner_id
+										findings.append(item)
+									except json.JSONDecodeError:
+										continue
+						except IOError as e:
+							debug(f'Error reading {jsonl_file}: {e}', sub='query.json')
+							continue
 
 		debug(f'Loaded {len(findings)} findings from workspace', sub='query.json')
 		self._findings_cache = findings

@@ -55,7 +55,7 @@ LLM_SPINNER_MESSAGES = [
 ]
 
 # Available drivers and exporters
-AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord']
+AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord', 'json']
 AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'markdown', 'table', 'txt']
 
 # Vocab
@@ -189,6 +189,8 @@ for addon, module in [
 	('ai', 'litellm')
 ]:
 	ADDONS_ENABLED[addon] = is_importable(module)
+
+ADDONS_ENABLED['json'] = True  # stdlib, always available
 
 # Check dev package
 if os.path.exists(f'{ROOT_FOLDER}/pyproject.toml'):

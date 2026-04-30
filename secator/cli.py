@@ -1207,12 +1207,42 @@ def _load_report_data(path):
 	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
 	with open(path, 'r') as f:
 		data = json.load(f)
-	info = data.get('info', {})
-	results = data.get('results', {})
-	for vuln in results.get('vulnerability', []):
-		severity = str(vuln.get('severity', '')).lower()
-		if severity in vuln_counts:
-			vuln_counts[severity] += 1
+
+	# report.meta*.json (live runner) stores runner dict directly; report.json wraps it under 'info'
+	is_live = path.name.startswith('report.meta.') and path.name.endswith('.json')
+	info = data if is_live else data.get('info', {})
+
+	# For live runners, default status to 'RUNNING' if not present
+	if is_live and 'status' not in info:
+		info['status'] = 'RUNNING'
+
+	# Count vulnerabilities: for live runners, read from .jsonl sidecar files
+	if is_live:
+		# Look for report.vulnerability.jsonl in same directory
+		vuln_jsonl_path = path.parent / 'report.vulnerability.jsonl'
+		if vuln_jsonl_path.exists():
+			try:
+				with open(vuln_jsonl_path, 'r') as f:
+					for line in f:
+						line = line.strip()
+						if not line:
+							continue
+						try:
+							vuln = json.loads(line)
+							severity = str(vuln.get('severity', '')).lower()
+							if severity in vuln_counts:
+								vuln_counts[severity] += 1
+						except json.JSONDecodeError:
+							continue  # Skip malformed JSON lines
+			except Exception:
+				pass  # Ignore errors reading sidecar file
+	else:
+		# For completed reports, count from results section
+		results = data.get('results', {})
+		for vuln in results.get('vulnerability', []):
+			severity = str(vuln.get('severity', '')).lower()
+			if severity in vuln_counts:
+				vuln_counts[severity] += 1
 	return info, vuln_counts
 
 
@@ -1240,7 +1270,10 @@ def _format_vuln_counts(counts):
 @click.pass_context
 def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	"""List all secator reports."""
-	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
+	paths = list_reports(
+		workspace=workspace, type=runner_type,
+		timedelta=human_to_timedelta(time_delta), include_subtasks=show_all
+	)
 	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
 
 	# Build table
