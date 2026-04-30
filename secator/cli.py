@@ -1208,8 +1208,8 @@ def _load_report_data(path):
 	with open(path, 'r') as f:
 		data = json.load(f)
 
-	# report.meta.json (live runner) stores runner dict directly; report.json wraps it under 'info'
-	is_live = path.name == 'report.meta.json'
+	# report.meta*.json (live runner) stores runner dict directly; report.json wraps it under 'info'
+	is_live = path.name.startswith('report.meta.') and path.name.endswith('.json')
 	info = data if is_live else data.get('info', {})
 
 	# For live runners, default status to 'RUNNING' if not present
@@ -1248,7 +1248,7 @@ def _format_vuln_counts(counts):
 @click.pass_context
 def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	"""List all secator reports."""
-	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
+	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta), include_subtasks=show_all)
 	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
 
 	# Build table

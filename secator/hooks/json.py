@@ -9,7 +9,12 @@ from secator.utils import debug
 
 
 def _get_meta_path(runner):
-	return Path(runner.reports_folder) / 'report.meta.json'
+	if getattr(runner, 'has_parent', False):
+		# Sub-runner: use unique name to avoid conflicts
+		return Path(runner.reports_folder) / f'report.meta.{runner.unique_name}.json'
+	else:
+		# Main runner: use standard name
+		return Path(runner.reports_folder) / 'report.meta.json'
 
 
 def _get_sidecar_path(runner, type_name):
