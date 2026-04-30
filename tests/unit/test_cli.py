@@ -123,6 +123,42 @@ class TestApplyFormat(unittest.TestCase):
 		self.assertEqual(out.get('port'), ['1.2.3.4'])
 		self.assertEqual(out.get('url'), ['https://example.com'])
 
+	def test_newline_escape_in_format_string(self):
+		r"""Literal \n in format string should be converted to actual newlines in output."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		out = _apply_format(results, '{url.url}\\nStatus: {url.status_code}')
+		self.assertEqual(out, {'url': ['https://example.com\nStatus: 200']})
+
+	def test_tab_escape_in_format_string(self):
+		r"""Literal \t in format string should be converted to actual tabs in output."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		out = _apply_format(results, '{url.url}\\t{url.status_code}')
+		self.assertEqual(out, {'url': ['https://example.com\t200']})
+
+	def test_format_from_file(self):
+		"""--format accepts a file path and loads the template from disk."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+			f.write('{url.url}')
+			tmp_path = f.name
+		try:
+			out = _apply_format(results, tmp_path)
+			self.assertEqual(out, {'url': ['https://example.com']})
+		finally:
+			os.remove(tmp_path)
+
+	def test_format_from_file_with_newlines(self):
+		"""Template files may contain real newlines which should be preserved."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+			f.write('{url.url}\nStatus: {url.status_code}')
+			tmp_path = f.name
+		try:
+			out = _apply_format(results, tmp_path)
+			self.assertEqual(out, {'url': ['https://example.com\nStatus: 200']})
+		finally:
+			os.remove(tmp_path)
+
 
 class TestCli(unittest.TestCase):
 

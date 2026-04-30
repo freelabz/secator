@@ -1002,10 +1002,25 @@ def _apply_format(results, fmt):
 		results (dict): Report results keyed by type name.
 		fmt (str): Format spec(s), optionally pipe-separated per type.
 			E.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'
+			May also be a file path (< 255 chars, file must exist) to load the template from disk.
 
 	Returns:
 		dict: Results dict with items replaced by formatted strings (only matching types kept).
 	"""
+	fmt = fmt.strip()
+
+	# Auto-detect format file: if fmt looks like a path and the file exists, load it.
+	if len(fmt) < 255:
+		try:
+			p = Path(fmt)
+			if p.is_file():
+				fmt = p.read_text()
+		except Exception:
+			pass
+
+	# Unescape common escape sequences so CLI users can write \n, \t in their format strings.
+	fmt = fmt.replace('\\n', '\n').replace('\\t', '\t')
+
 	specs = [s.strip() for s in re.split(r'\s*\|\|\s*', fmt) if s.strip()]
 	new_results = {}
 
