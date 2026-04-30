@@ -70,6 +70,13 @@ def update_item(self, item):
 
 def finalize_task_report(self):
 	"""Merge per-type .jsonl sidecars into report.json, then clean up."""
+	# Sub-tasks (with parents) should not create individual report.json files
+	# Only the main workflow/scan should create the final report
+	if getattr(self, 'has_parent', False):
+		debug(f'Skipping report creation for sub-task {self.unique_name} (has_parent=True)', sub='hooks.json')
+		_cleanup_sidecars(self)
+		return
+
 	report_path = _get_report_path(self)
 	info = self.toDict()
 	results = {}
