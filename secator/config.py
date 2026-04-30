@@ -149,6 +149,10 @@ class Workspace(StrictModel):
 	default: str = ''
 
 
+class Logs(StrictModel):
+	enabled: bool = True
+
+
 class Payloads(StrictModel):
 	templates: Dict[str, str] = {
 		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
@@ -312,6 +316,7 @@ class SecatorConfig(StrictModel):
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()
+	logs: Logs = Logs()
 	offline_mode: bool = False
 
 

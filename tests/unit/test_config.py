@@ -181,3 +181,12 @@ class TestAIConfig(unittest.TestCase):
 		from secator.config import Config
 		config = Config.parse()
 		self.assertEqual(config.addons.api.finding_search_endpoint, 'findings/_search')
+
+
+@mock.patch('sys.stderr', devnull)
+class TestLogsConfig(unittest.TestCase):
+
+	def test_logs_defaults(self):
+		from secator.config import Config
+		config = Config.parse()
+		self.assertTrue(config.logs.enabled)

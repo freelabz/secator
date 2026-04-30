@@ -12,12 +12,12 @@ from time import time
 from dotmap import DotMap
 import humanize
 
-from secator.definitions import ADDONS_ENABLED, STATE_COLORS
+from secator.definitions import ADDONS_ENABLED, IN_WORKER, STATE_COLORS
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
 from secator.report import Report
-from secator.rich import console, console_stdout
+from secator.rich import console, console_stdout, _console_logger
 from secator.runners._helpers import get_task_folder_id, run_extractors
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
 from secator.tree import build_runner_tree
@@ -250,6 +250,18 @@ class Runner:
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
+
+	def __getstate__(self):
+		state = self.__dict__.copy()
+		handler = state.pop('_run_log_handler', None)
+		if handler:
+			from secator.rich import remove_log_handler
+			remove_log_handler(handler)
+		return state
+
+	def __setstate__(self, state):
+		self.__dict__.update(state)
+		self._run_log_handler = None
 
 	def _process_config(self, config):
 		"""Process the configuration in different formats (dict, TemplateLoader, DotMap).
@@ -611,6 +623,17 @@ class Runner:
 			self._print_item(item)
 		if queue:
 			self.results_buffer.append(item)
+
+		# Log findings directly to run log file (independent of print_item / ConsoleTee)
+		if getattr(self, '_run_log_handler', None) and isinstance(item, tuple(FINDING_TYPES)):
+			try:
+				from secator.utils import strip_rich_markup
+				if hasattr(item, '__rich__'):
+					clean = strip_rich_markup(item.__rich__()).strip()
+					if clean:
+						_console_logger.info(clean)
+			except Exception:
+				pass
 
 	def add_subtask(self, task_id, task_name, task_description):
 		"""Add a Celery subtask to the current runner for tracking purposes.
@@ -1008,6 +1031,11 @@ class Runner:
 			return
 		if self.has_parent:
 			return
+		if CONFIG.logs.enabled and not IN_WORKER:
+			from secator.rich import add_log_handler
+			log_path = self.reports_folder / 'secator.log'
+			self._run_log_handler = add_log_handler(log_path)
+			self._print(Info(message=f'Run log saved at {log_path}'), rich=True)
 		if self.config.type != 'task':
 			tree = textwrap.indent(build_runner_tree(self.config).render_tree(), '      ')
 			info = Info(message=f'{self.config.type.capitalize()} built:\n{tree}', _source=self.unique_name)
@@ -1021,9 +1049,11 @@ class Runner:
 
 	def log_results(self):
 		"""Log runner results."""
-		if not self.print_end:
-			return
-		if self.has_parent:
+		if not self.print_end or self.has_parent:
+			if getattr(self, '_run_log_handler', None):
+				from secator.rich import remove_log_handler
+				remove_log_handler(self._run_log_handler)
+				self._run_log_handler = None
 			return
 		# fmt: off
 		info = Info(
@@ -1034,6 +1064,10 @@ class Runner:
 		)
 		# fmt: on
 		self._print(info, rich=True)
+		if getattr(self, '_run_log_handler', None):
+			from secator.rich import remove_log_handler
+			remove_log_handler(self._run_log_handler)
+			self._run_log_handler = None
 
 	def export_reports(self):
 		"""Export reports."""

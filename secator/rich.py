@@ -1,14 +1,102 @@
 import codecs
 import operator
+import re
+import sys
+import logging
 from contextlib import nullcontext
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import yaml
 from rich.console import Console
 from rich.table import Table
 
-console = Console(stderr=True, record=True)
-console_stdout = Console(record=True)
+_ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-9;?]*[ -/]*[@-~])')
+_console_logger = logging.getLogger('secator.console')
+_console_logger.propagate = False
+_console_logger.setLevel(logging.DEBUG)
+
+
+class ConsoleTee:
+	"""File-like wrapper that forwards writes to both the original stream and the secator.console logger.
+
+	The stream is looked up dynamically via sys so that monkey-patching (e.g. Click's
+	CliRunner) is reflected at write-time rather than captured at import-time.
+	Writes are forwarded to the logger only when it has at least one handler attached.
+	"""
+
+	def __init__(self, stream_name):
+		self._stream_name = stream_name
+		self._buf = ''
+
+	@property
+	def _stream(self):
+		return getattr(sys, self._stream_name)
+
+	def write(self, data):
+		self._stream.write(data)
+		if data:
+			self._buf += data
+			if len(self._buf) > 10000:
+				self._buf = self._buf[-10000:]
+			if '\n' in self._buf:
+				lines = self._buf.split('\n')
+				if _console_logger.handlers:
+					for line in lines[:-1]:
+						clean = _ANSI_ESCAPE.sub('', line)
+						if clean.strip():
+							_console_logger.info(clean)
+				self._buf = lines[-1]
+
+	def flush(self):
+		self._stream.flush()
+		if self._buf and _console_logger.handlers:
+			clean = _ANSI_ESCAPE.sub('', self._buf)
+			if clean.strip():
+				_console_logger.info(clean)
+		self._buf = ''
+
+	def fileno(self):
+		return self._stream.fileno()
+
+	def isatty(self):
+		return self._stream.isatty()
+
+	@property
+	def encoding(self):
+		return getattr(self._stream, 'encoding', 'utf-8')
+
+	@property
+	def errors(self):
+		return getattr(self._stream, 'errors', 'strict')
+
+
+def add_log_handler(path):
+	"""Attach a RotatingFileHandler to the console logger for the given path.
+
+	Returns the handler so the caller can remove it later with remove_log_handler().
+	"""
+	path = Path(path)
+	path.parent.mkdir(parents=True, exist_ok=True)
+	handler = RotatingFileHandler(str(path), maxBytes=10 * 1024 * 1024, backupCount=5)
+	handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+	_console_logger.addHandler(handler)
+	return handler
+
+
+def remove_log_handler(handler):
+	"""Flush, close and detach a handler previously added with add_log_handler()."""
+	if not handler:
+		return
+	handler.flush()
+	handler.close()
+	_console_logger.removeHandler(handler)
+
+
+_stderr_tee = ConsoleTee('stderr')
+_stdout_tee = ConsoleTee('stdout')
+console = Console(file=_stderr_tee, record=True)
+console_stdout = Console(file=_stdout_tee, record=True)
 
 
 def maybe_status(*args, **kwargs):
@@ -17,7 +105,6 @@ def maybe_status(*args, **kwargs):
 	if IN_WORKER or console._live is not None:
 		return nullcontext()
 	return console.status(*args, **kwargs)
-# handler = RichHandler(rich_tracebacks=True)  # TODO: add logging handler
 
 
 def criticity_to_color(value):
