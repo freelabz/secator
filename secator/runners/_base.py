@@ -175,13 +175,15 @@ class Runner:
 
 		# Auto-enable JSON driver for retro-compatibility with JSON exporter
 		exporters_str = self.run_opts.get('output') or self.default_exporters
-		if exporters_str and 'json' in exporters_str.split(','):
-			self.debug('Auto-enabling JSON driver hooks for JSON exporter retro-compatibility', sub='init')
-			from secator.utils import import_dynamic
-			json_hooks = import_dynamic('secator.hooks.json', 'HOOKS')
-			if json_hooks:
-				from secator.utils import deep_merge_dicts
-				hooks = deep_merge_dicts(hooks, json_hooks)
+		if exporters_str:
+			exporters_list = exporters_str.split(',') if isinstance(exporters_str, str) else exporters_str
+			if 'json' in exporters_list:
+				self.debug('Auto-enabling JSON driver hooks for JSON exporter retro-compatibility', sub='init')
+				from secator.utils import import_dynamic
+				json_hooks = import_dynamic('secator.hooks.json', 'HOOKS')
+				if json_hooks:
+					from secator.utils import deep_merge_dicts
+					hooks = deep_merge_dicts(hooks, json_hooks)
 
 		# Hooks
 		self.resolved_hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
