@@ -285,8 +285,8 @@ class Runner:
 		return {k: v for k, v in self.run_opts.items() if k.endswith('_')}
 
 	@property
-	def file_name(self):
-		"""Filesystem-safe name for output files. Uses node_id when inside a workflow/scan to avoid conflicts."""
+	def fqn(self):
+		"""Fully qualified name. Uses node_id when inside a workflow/scan to avoid conflicts."""
 		if self.config.node_id:
 			base = self.config.node_id.replace('.', '_').replace('/', '_')
 		else:
@@ -1060,7 +1060,7 @@ class Runner:
 		if self.enable_pyinstrument:
 			self.debug('stopping profiler', sub='end')
 			self.profiler.stop()
-			profile_path = Path(self.reports_folder) / f'{self.file_name}_profile.html'
+			profile_path = Path(self.reports_folder) / f'{self.fqn}_profile.html'
 			with profile_path.open('w', encoding='utf-8') as f_html:
 				f_html.write(self.profiler.output_html())
 			self._print_item(Info(message=f'Wrote profile to {str(profile_path)}'), force=True)

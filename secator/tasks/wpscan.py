@@ -96,7 +96,7 @@ class wpscan(VulnHttp):
 	def on_init(self):
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
-			output_path = f'{self.reports_folder}/.outputs/{self.file_name}.json'
+			output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
 		self.output_path = output_path
 		self.cmd += f' -o {shlex.quote(self.output_path)}'
 

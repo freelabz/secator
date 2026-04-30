@@ -1229,7 +1229,7 @@ class Command(Runner):
 		# If inputs has multiple elements and the tool has input_flag set to OPT_PIPE_INPUT, use cat-piped_input input.
 		# Otherwise pass the file path to the tool.
 		else:
-			fpath = f'{self.reports_folder}/.inputs/{self.file_name}.txt'
+			fpath = f'{self.reports_folder}/.inputs/{self.fqn}.txt'
 
 			# Write the input to a file
 			with open(fpath, 'w') as f:
@@ -1238,7 +1238,7 @@ class Command(Runner):
 					f.write('\n')
 
 			if self.file_copy_sudo:
-				sudo_fpath = f'/tmp/{self.file_name}.txt'
+				sudo_fpath = f'/tmp/{self.fqn}.txt'
 				shutil.copy(fpath, sudo_fpath)
 				fpath = sudo_fpath
 
