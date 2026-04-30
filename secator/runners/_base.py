@@ -173,6 +173,16 @@ class Runner:
 		# Begin initialization
 		self.debug(f'begin initialization of {self.unique_name}', sub='init')
 
+		# Auto-enable JSON driver for retro-compatibility with JSON exporter
+		exporters_str = self.run_opts.get('output') or self.default_exporters
+		if exporters_str and 'json' in exporters_str.split(','):
+			self.debug('Auto-enabling JSON driver hooks for JSON exporter retro-compatibility', sub='init')
+			from secator.utils import import_dynamic
+			json_hooks = import_dynamic('secator.hooks.json', 'HOOKS')
+			if json_hooks:
+				from secator.utils import deep_merge_dicts
+				hooks = deep_merge_dicts(hooks, json_hooks)
+
 		# Hooks
 		self.resolved_hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		self.debug('registering hooks', obj=list(self.resolved_hooks.keys()), sub='init')
@@ -218,24 +228,6 @@ class Runner:
 		exporters_str = self.run_opts.get('output') or self.default_exporters
 		self.debug('resolving exporters', obj={'exporters': exporters_str}, sub='init')
 		self.exporters = self.resolve_exporters(exporters_str)
-
-		# Auto-enable JSON driver for retro-compatibility with JSON exporter
-		json_exporter_enabled = any(exporter.__name__ == 'JsonExporter' for exporter in self.exporters)
-		self.debug(f'JSON exporter check: enabled={json_exporter_enabled}, exporters={[e.__name__ for e in self.exporters]}', sub='init')
-		if json_exporter_enabled:
-			try:
-				from secator.hooks.json import HOOKS as JSON_HOOKS
-				for runner_type, runner_hooks in JSON_HOOKS.items():
-					if isinstance(self, runner_type):
-						for hook_name, hook_funcs in runner_hooks.items():
-							if hook_name in hooks:
-								hooks[hook_name].extend(hook_funcs)
-							else:
-								hooks[hook_name] = hook_funcs[:]
-						self.debug('auto-enabled JSON driver hooks for JSON exporter retro-compatibility', sub='init')
-						break
-			except Exception as e:
-				self.debug(f'failed to auto-enable JSON driver hooks: {e}', sub='init')
 
 		# Profiler
 		self.enable_pyinstrument = self.run_opts.get('enable_pyinstrument', False) and ADDONS_ENABLED['trace']
