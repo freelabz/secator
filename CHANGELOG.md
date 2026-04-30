@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.31.0](https://github.com/freelabz/secator/compare/v0.30.1...v0.31.0) (2026-04-23)
+
+
+### Features
+
+* **cli:** add workspace rm/remove/delete and report delete/rm/remove commands ([#1038](https://github.com/freelabz/secator/issues/1038)) ([8be4d82](https://github.com/freelabz/secator/commit/8be4d82adb8588c34f41b45a9377596417fbf73d))
+* **tasks:** improve AI context management, add guardrails, remote interactivity ([#949](https://github.com/freelabz/secator/issues/949)) ([6d5b21f](https://github.com/freelabz/secator/commit/6d5b21f9d241badc3d9020190bb5587fbb63925f))
+
+
+### Bug Fixes
+
+* **cli:** {}-style --format strings broken when type name collides with field ([#1020](https://github.com/freelabz/secator/issues/1020)) ([91888a6](https://github.com/freelabz/secator/commit/91888a6c1848d28dbb37c49eaeeace18eb00807e))
+* **cli:** add Profiles column and multi-target display to report list ([#1036](https://github.com/freelabz/secator/issues/1036)) ([f4d3fd0](https://github.com/freelabz/secator/commit/f4d3fd0ef4399ed60b22cda02b8c2e4e9eae1e85))
+* **cli:** display runner tree to client in remote worker mode ([#1028](https://github.com/freelabz/secator/issues/1028)) ([8a82fb9](https://github.com/freelabz/secator/commit/8a82fb9bba23e097d059a42d070b52400d8e08ca))
+* **cli:** display vulnerability counts in secator r list ([#1040](https://github.com/freelabz/secator/issues/1040)) ([57d72fe](https://github.com/freelabz/secator/commit/57d72fe8805975b8485fd10a76c5d893ef9c3a02))
+* **cli:** dot-path --format broken when field name collides with type name ([#1027](https://github.com/freelabz/secator/issues/1027)) ([885c561](https://github.com/freelabz/secator/commit/885c561497b411f09bd41bfe3c7692d43dda505c))
+* **cli:** humanize dates in secator r list ([#1033](https://github.com/freelabz/secator/issues/1033)) ([075a6c5](https://github.com/freelabz/secator/commit/075a6c54d2f218d8cda8b79d20458b7b40e20655))
+* **cli:** remove secator report export command ([#1043](https://github.com/freelabz/secator/issues/1043)) ([9bbdd68](https://github.com/freelabz/secator/commit/9bbdd68f1beabe6af373bcb58f6f97fa02574930))
+* **cli:** stream cmd and description to client in remote worker mode ([#1041](https://github.com/freelabz/secator/issues/1041)) ([46cccca](https://github.com/freelabz/secator/commit/46cccca4e36c7cdae6e51f1a9bd72f5a319eef53))
+* **mapcidr:** prevent unsupported delay flag from being passed ([#1050](https://github.com/freelabz/secator/issues/1050)) ([6fb85f4](https://github.com/freelabz/secator/commit/6fb85f4e40ff763cded91ec5b206c7b33ea357fe))
+* **runner:** add fix for killing worker when CTRL + C on non-process grouped tasks ([#1053](https://github.com/freelabz/secator/issues/1053)) ([ec2d23f](https://github.com/freelabz/secator/commit/ec2d23fe7742d6fd4c190a8ebaa9a78e358d0ed1))
+
+## [0.30.1](https://github.com/freelabz/secator/compare/v0.30.0...v0.30.1) (2026-04-21)
+
+
+### Bug Fixes
+
+* **exporters:** TXT exporter produces empty files in runner context ([#1016](https://github.com/freelabz/secator/issues/1016)) ([5d9fc45](https://github.com/freelabz/secator/commit/5d9fc453fba6a2aba99daea2d3b2103b0f8422c3))
+
+## [0.30.0](https://github.com/freelabz/secator/compare/v0.29.0...v0.30.0) (2026-04-21)
+
+
+### Features
+
+* **config:** support setting task-specific config overrides ([#1011](https://github.com/freelabz/secator/issues/1011)) ([f009dd6](https://github.com/freelabz/secator/commit/f009dd6345d068e0dfcc73826e1605a107467c01))
+
+
+### Bug Fixes
+
+* **core:** autodetect_type should not check file path if target is too long ([#1013](https://github.com/freelabz/secator/issues/1013)) ([1ed61cd](https://github.com/freelabz/secator/commit/1ed61cd3ec2662e9818b293482c6b95b978dc4ff))
+* **runner:** exact-match source check prevents prefix-collision task failures ([#1001](https://github.com/freelabz/secator/issues/1001)) ([cfea916](https://github.com/freelabz/secator/commit/cfea9163c040fe6eaf133771e6a3b99cc9689b93))
+
+## [0.29.0](https://github.com/freelabz/secator/compare/v0.28.0...v0.29.0) (2026-04-21)
+
+
+### Features
+
+* **cli:** improve report list and add report info command ([#997](https://github.com/freelabz/secator/issues/997)) ([cead276](https://github.com/freelabz/secator/commit/cead276e337b93b868e335c40b85315e5eed2b37))
+* **nuclei:** add -severity option ([#1009](https://github.com/freelabz/secator/issues/1009)) ([cf5453c](https://github.com/freelabz/secator/commit/cf5453c3c22191a0d3bad86af349fe2dd781e0a2))
+
+
+### Bug Fixes
+
+* **exporters:** stream items in TxtExporter, cast dicts to OutputType ([#994](https://github.com/freelabz/secator/issues/994)) ([b178c17](https://github.com/freelabz/secator/commit/b178c175267bf6b920356c42a6598b6799941baa))
+* **exporters:** Table exporter broken because of dict change ([#1005](https://github.com/freelabz/secator/issues/1005)) ([611ab84](https://github.com/freelabz/secator/commit/611ab840f93b2e135c3f2a5de088921190fd6451))
+* **query:** add --format to report show and improve query expression support ([#1006](https://github.com/freelabz/secator/issues/1006)) ([50748d2](https://github.com/freelabz/secator/commit/50748d233819eac5b0d66dc8947a2bd77896be51))
+* **query:** handle ~= regex operator in python_expr_to_mongo ([#989](https://github.com/freelabz/secator/issues/989)) ([70f4837](https://github.com/freelabz/secator/commit/70f4837d6051a2ce1bfe8e77c16a4b341b7a94bf))
+* **vulnerability:** compare id.lower() with name.lower() to avoid repetition ([#996](https://github.com/freelabz/secator/issues/996)) ([68ef960](https://github.com/freelabz/secator/commit/68ef9608a1c5eea7e38fbce097e4c6c19d5514f0))
+* **worker:** replace deprecated eventlet with gevent ([#1002](https://github.com/freelabz/secator/issues/1002)) ([e1e6662](https://github.com/freelabz/secator/commit/e1e666272f8086f3ed77ba5ba1fcb2558c6331f9))
+
+## [0.28.0](https://github.com/freelabz/secator/compare/v0.27.0...v0.28.0) (2026-04-20)
+
+
+### Features
+
+* **core:** add group_by and improve search_vulns grouping ([#983](https://github.com/freelabz/secator/issues/983)) ([502b17c](https://github.com/freelabz/secator/commit/502b17c7581549400075d8b7fd56c6a53e27a192))
+* **core:** chunk progress stream ([eecf3d8](https://github.com/freelabz/secator/commit/eecf3d85e55ca44df606b5fa10faab5e0e044568))
+* **core:** unify query backends ([#981](https://github.com/freelabz/secator/issues/981)) ([96bbe43](https://github.com/freelabz/secator/commit/96bbe43e85b65e6181e58a453846c17a9210b4a9))
+
+
+### Bug Fixes
+
+* add SKIPPED state color ([#979](https://github.com/freelabz/secator/issues/979)) ([5fd45b5](https://github.com/freelabz/secator/commit/5fd45b50fdd62e6a32011609cc0dccc2a4907260))
+* **command:** replace errors when invalid continuation bytes ([06acf63](https://github.com/freelabz/secator/commit/06acf63d6dc2cc62556de6acc60fe9f2f48ebb14))
+* mongodb _id making exporters fail ([#985](https://github.com/freelabz/secator/issues/985)) ([f8cea60](https://github.com/freelabz/secator/commit/f8cea6000bfe030638c7bf090189459ea3b4e50a))
+
 ## [0.27.0](https://github.com/freelabz/secator/compare/v0.26.1...v0.27.0) (2026-04-13)
 
 

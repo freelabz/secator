@@ -4,7 +4,10 @@
 import unittest
 from dataclasses import fields
 
+from secator.definitions import ADDONS_ENABLED
 
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestActionContext(unittest.TestCase):
     """Tests for the ActionContext dataclass."""
 
@@ -60,6 +63,7 @@ class TestActionContext(unittest.TestCase):
         self.assertEqual(ctx.scope, 'current')
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestDispatchAction(unittest.TestCase):
     """Tests for the dispatch_action function."""
 
@@ -138,6 +142,7 @@ class TestDispatchAction(unittest.TestCase):
         self.assertIsInstance(results, list)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestAITask(unittest.TestCase):
     """Tests for the ai task class."""
 
@@ -162,86 +167,6 @@ class TestAITask(unittest.TestCase):
 
         self.assertIn('ai', ai.tags)
         self.assertIn('pentest', ai.tags)
-
-
-class TestParseActions(unittest.TestCase):
-    """Tests for the parse_actions function."""
-
-    def test_parse_actions_code_block(self):
-        from secator.tasks.ai import parse_actions
-
-        response = '''Here is my analysis:
-```json
-[{"action": "task", "name": "nmap"}]
-```
-'''
-        actions = parse_actions(response)
-
-        self.assertEqual(len(actions), 1)
-        self.assertEqual(actions[0]['action'], 'task')
-        self.assertEqual(actions[0]['name'], 'nmap')
-
-    def test_parse_actions_raw_json(self):
-        from secator.tasks.ai import parse_actions
-
-        response = '''Let me scan the target.
-[{"action": "shell", "command": "curl http://example.com"}]
-'''
-        actions = parse_actions(response)
-
-        self.assertEqual(len(actions), 1)
-        self.assertEqual(actions[0]['action'], 'shell')
-
-    def test_parse_actions_empty(self):
-        from secator.tasks.ai import parse_actions
-
-        response = "This response has no actions."
-        actions = parse_actions(response)
-
-        self.assertEqual(actions, [])
-
-    def test_parse_actions_invalid_json(self):
-        from secator.tasks.ai import parse_actions
-
-        response = "```json\n[{invalid json}]\n```"
-        actions = parse_actions(response)
-
-        self.assertEqual(actions, [])
-
-
-class TestStripJsonFromResponse(unittest.TestCase):
-    """Tests for the strip_json_from_response function."""
-
-    def test_strip_code_block(self):
-        from secator.tasks.ai import strip_json_from_response
-
-        text = '''Here is my reasoning.
-```json
-[{"action": "task"}]
-```
-And more text.'''
-        result = strip_json_from_response(text)
-
-        self.assertNotIn('```', result)
-        self.assertNotIn('"action"', result)
-        self.assertIn('reasoning', result)
-        self.assertIn('more text', result)
-
-    def test_strip_raw_json(self):
-        from secator.tasks.ai import strip_json_from_response
-
-        text = 'Some text [{"action": "done"}] more text'
-        result = strip_json_from_response(text)
-
-        self.assertNotIn('"action"', result)
-        self.assertIn('Some text', result)
-        self.assertIn('more text', result)
-
-    def test_strip_empty(self):
-        from secator.tasks.ai import strip_json_from_response
-
-        self.assertEqual(strip_json_from_response(""), "")
-        self.assertEqual(strip_json_from_response(None), "")
 
 
 if __name__ == '__main__':

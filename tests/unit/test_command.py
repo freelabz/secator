@@ -308,3 +308,55 @@ class TestCommandChunking(unittest.TestCase):
 		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=TestCmd):
 			cmd = TestCmd(targets)
 			self.assertFalse(cmd.needs_chunking(sync=False))
+
+
+class TestCommandConfigOverrides(unittest.TestCase):
+
+	def test_config_override_input_chunk_size(self):
+		"""Test that task-specific config overrides apply to instance attributes."""
+		from secator.config import CONFIG
+
+		class OverrideTestCmd(Command):
+			cmd = 'test'
+			input_chunk_size = 100
+			file_flag = None
+
+		targets = ['target1', 'target2', 'target3']
+		original_overrides = CONFIG.tasks.overrides
+		CONFIG.tasks.overrides = {'OverrideTestCmd': {'input_chunk_size': 2}}
+		try:
+			with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=OverrideTestCmd):
+				cmd = OverrideTestCmd(targets)
+				self.assertEqual(cmd.input_chunk_size, 2)
+				self.assertTrue(cmd.needs_chunking(sync=False))
+		finally:
+			CONFIG.tasks.overrides = original_overrides
+
+	def test_config_override_does_not_affect_other_tasks(self):
+		"""Test that config overrides for one task don't affect other tasks."""
+		from secator.config import CONFIG
+
+		class TaskOverrideA(Command):
+			cmd = 'test_a'
+			input_chunk_size = 100
+			file_flag = None
+
+		class TaskOverrideB(Command):
+			cmd = 'test_b'
+			input_chunk_size = 100
+			file_flag = None
+
+		targets = ['t1', 't2', 't3']
+		original_overrides = CONFIG.tasks.overrides
+		CONFIG.tasks.overrides = {'TaskOverrideA': {'input_chunk_size': 2}}
+		try:
+			with unittest.mock.patch(
+				'secator.runners.task.Task.get_task_class',
+				side_effect=lambda x: TaskOverrideA if x == 'TaskOverrideA' else TaskOverrideB
+			):
+				cmd_a = TaskOverrideA(targets)
+				cmd_b = TaskOverrideB(targets)
+				self.assertEqual(cmd_a.input_chunk_size, 2)
+				self.assertEqual(cmd_b.input_chunk_size, 100)
+		finally:
+			CONFIG.tasks.overrides = original_overrides

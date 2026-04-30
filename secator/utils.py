@@ -664,6 +664,30 @@ def get_file_date(file_path):
 		return f'{mod_date.strftime("%B %d @ %H:%m")}'
 
 
+def humanize_date(dt):
+	"""Returns a human-readable format for a datetime object or ISO format string.
+
+	Args:
+		dt (datetime | str): Datetime object or ISO format string.
+
+	Returns:
+		str: Human-readable time format.
+	"""
+	if dt is None:
+		return ''
+	if isinstance(dt, str):
+		try:
+			dt = datetime.fromisoformat(dt)
+		except (ValueError, TypeError):
+			return str(dt)
+	dt_utc = dt.replace(tzinfo=None) if dt.tzinfo else dt
+	now = datetime.utcnow()
+	if (now - dt_utc).days < 7:
+		return humanize.naturaltime(now - dt_utc) + dt_utc.strftime(' @ %H:%M')
+	else:
+		return f'{dt_utc.strftime("%B %d @ %H:%M")}'
+
+
 def trim_string(s, max_length=30, mode='middle'):
 	"""Trims a long string with an ellipsis indicator.
 
@@ -964,12 +988,13 @@ def parse_raw_http_request(raw_request):
 	return {'method': method, 'url': url, 'headers': headers, 'data': body}
 
 
-def format_token_count(tokens, icon=''):
+def format_token_count(tokens, icon='', compact=False):
 	"""Format a token count as a human-readable string (e.g., '8.5k tokens').
 
 	Args:
 		tokens: Number of tokens.
 		icon: Optional Rich emoji icon prefix (e.g., 'arrow_up', 'arrow_down').
+		compact: If True, omit 'tokens' suffix (e.g., '8.5k' instead of '8.5k tokens').
 
 	Returns:
 		str: Formatted token string.
@@ -1040,7 +1065,7 @@ def autodetect_type(target):
 		return IBAN
 	elif validators.uuid(target):
 		return UUID
-	elif Path(target).exists():
+	elif len(target) < 255 and Path(target).exists():
 		return PATH
 	elif validators.slug(target):
 		return SLUG
@@ -1426,3 +1451,47 @@ def vhs_tap_to_tape(tap_file, output_tape, width=None, height=None, font_size=12
 	except Exception as e:
 		console.print(Error(message=f'Failed to write {output_tape}: {str(e)}'))
 		sys.exit(1)
+
+
+def remove_duplicates(items):
+	"""Remove duplicate items using hash-based grouping (O(n)).
+
+	Handles both OutputType instances (uses _compare_key()) and plain dicts
+	(loads into OutputType via _type field, then uses _compare_key()).
+
+	Args:
+		items (list): List of OutputType instances or dicts.
+
+	Returns:
+		list: Deduplicated list preserving first occurrence order.
+	"""
+	from collections import OrderedDict
+
+	def _get_key(item):
+		if hasattr(item, '_compare_key'):
+			return item._compare_key()
+		# Plain dict: try to load into the appropriate OutputType to use _compare_key()
+		if isinstance(item, dict):
+			from secator.output_types import OUTPUT_TYPES
+
+			_type = item.get('_type')
+			if _type:
+				for cls in OUTPUT_TYPES:
+					if cls.get_name() == _type:
+						try:
+							return cls.load(item)._compare_key()
+						except Exception as e:
+							debug(f'remove_duplicates: failed to load {_type}: {e}', sub='utils')
+			# Fallback: JSON-serialize sorted items
+			try:
+				return json.dumps(sorted(item.items()), sort_keys=True, default=str)
+			except Exception as e:
+				debug(f'remove_duplicates: JSON fallback failed: {e}', sub='utils')
+		return id(item)
+
+	seen = OrderedDict()
+	for item in items:
+		key = _get_key(item)
+		if key not in seen:
+			seen[key] = item
+	return list(seen.values())

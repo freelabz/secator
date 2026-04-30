@@ -105,6 +105,7 @@ tasks:
         - type: technology
           field: '{match}~{product} {version}'
           condition: item.version
+          group_by: '{product} {version}'
       if: "'searchsploit' in opts.exploiters"
 
     search_vulns:
@@ -116,4 +117,5 @@ tasks:
         - type: technology
           field: '{match}~{product} {version}'
           condition: item.version
+          group_by: '{product} {version}'
       if: "'search_vulns' in opts.exploiters"

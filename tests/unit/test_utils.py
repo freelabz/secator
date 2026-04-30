@@ -74,6 +74,7 @@ class TestExtractRootDomain(unittest.TestCase):
 			("https://github.com/example/example.git", URL),
 			("github.com/example/example.git", STRING),
 			("gs://example/example.txt", GCS_URL),
+			("a" * 255, SLUG),
 		]
 		for target, expected in targets:
 			with self.subTest(target=target):
@@ -151,3 +152,33 @@ Authorization: Bearer token"""
 Content-Type: text/html"""
 		result = parse_raw_http_request(raw_request)
 		self.assertEqual(result, {})
+
+
+from secator.utils import remove_duplicates
+from secator.output_types import Vulnerability
+
+
+def test_remove_duplicates_removes_equal_items():
+	v1 = Vulnerability(name='CVE-2021-1234', severity='high', cvss_score=8.0, matched_at='http://example.com', ip='1.2.3.4')
+	v2 = Vulnerability(name='CVE-2021-1234', severity='high', cvss_score=8.0, matched_at='http://example.com', ip='1.2.3.4')
+	result = remove_duplicates([v1, v2])
+	assert len(result) == 1
+
+
+def test_remove_duplicates_keeps_distinct_items():
+	v1 = Vulnerability(name='CVE-2021-1234', severity='high', cvss_score=8.0, matched_at='http://example.com', ip='1.2.3.4')
+	v2 = Vulnerability(name='CVE-2021-9999', severity='low', cvss_score=2.0, matched_at='http://other.com', ip='1.2.3.4')
+	result = remove_duplicates([v1, v2])
+	assert len(result) == 2
+
+
+def test_remove_duplicates_empty_list():
+	assert remove_duplicates([]) == []
+
+
+def test_remove_duplicates_dicts():
+	d1 = {'_type': 'domain', 'name': 'example.com'}
+	d2 = {'_type': 'domain', 'name': 'example.com'}
+	d3 = {'_type': 'domain', 'name': 'other.com'}
+	result = remove_duplicates([d1, d2, d3])
+	assert len(result) == 2
