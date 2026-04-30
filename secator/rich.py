@@ -62,6 +62,14 @@ class ConsoleTee:
 	def isatty(self):
 		return self._stream.isatty()
 
+	@property
+	def encoding(self):
+		return getattr(self._stream, 'encoding', 'utf-8')
+
+	@property
+	def errors(self):
+		return getattr(self._stream, 'errors', 'strict')
+
 
 def add_log_handler(path):
 	"""Attach a RotatingFileHandler to the console logger for the given path.

@@ -199,6 +199,9 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		cmd = f'{celery} -A {app_str} multi {subcmd} 5 {queues} -P {pool} {concur} --logfile={logfile} --pidfile={pidfile}'
 	else:
 		cmd = f'{celery} -A {app_str} worker -n {hostname} -Q {queue}'
+		if CONFIG.logs.enabled:
+			worker_log_path = CONFIG.dirs.data / 'worker.log'
+			cmd += f' --logfile={worker_log_path}'
 
 	cmd += f' -P {pool}' if pool else ''
 	cmd += f' -c {concurrency}' if concurrency else ''

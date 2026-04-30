@@ -63,11 +63,16 @@ def setup_idle_timer(timeout):
 	timer.start()
 
 
-def setup_logging(*args, **kwargs):
+def setup_logging(loglevel=None, logfile=None, **kwargs):
 	"""Override celery's logging setup to prevent it from altering our settings.
 	github.com/celery/celery/issues/1867
+
+	When --logfile is passed to the celery worker command, attach a RotatingFileHandler
+	to the secator.console logger so all Rich console output is saved to that file.
 	"""
-	pass
+	if logfile:
+		from secator.rich import add_log_handler
+		add_log_handler(logfile)
 
 
 def capture_worker_name(sender, instance, **kwargs):

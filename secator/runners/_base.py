@@ -12,7 +12,7 @@ from time import time
 from dotmap import DotMap
 import humanize
 
-from secator.definitions import ADDONS_ENABLED, STATE_COLORS
+from secator.definitions import ADDONS_ENABLED, IN_WORKER, STATE_COLORS
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
@@ -1031,7 +1031,7 @@ class Runner:
 			return
 		if self.has_parent:
 			return
-		if CONFIG.logs.enabled:
+		if CONFIG.logs.enabled and not IN_WORKER:
 			from secator.rich import add_log_handler
 			log_path = self.reports_folder / 'secator.log'
 			self._run_log_handler = add_log_handler(log_path)
