@@ -154,6 +154,7 @@ class Runner:
 		self.print_fmt = self.run_opts.get('fmt', '')
 		self.print_stat = self.run_opts.get('print_stat', False)
 		self.print_profiles = self.run_opts.get('print_profiles', False)
+		self.print_reports_message = self.run_opts.get('print_reports_message', True)
 
 		# Chunks
 		self.chunk = self.run_opts.get('chunk', None)
@@ -282,6 +283,15 @@ class Runner:
 	@property
 	def dynamic_opts(self):
 		return {k: v for k, v in self.run_opts.items() if k.endswith('_')}
+
+	@property
+	def fqn(self):
+		"""Fully qualified name. Uses node_id when inside a workflow/scan to avoid conflicts."""
+		if self.config.node_id:
+			base = self.config.node_id.replace('.', '_').replace('/', '_')
+		else:
+			base = self.name.replace('/', '_')
+		return f'{base}_{self.chunk}' if self.chunk else base
 
 	@property
 	def elapsed(self):
@@ -466,9 +476,11 @@ class Runner:
 			OutputType: runner result.
 		"""
 		try:
-			# If sync mode, set started
+			# If sync mode, set started; otherwise log start info to client console
 			if self.sync:
 				self.mark_started()
+			else:
+				self.log_start()
 
 			# Yield results buffer
 			yield from self.results_buffer
@@ -842,7 +854,7 @@ class Runner:
 			{
 				'config': self.config.toDict(),
 				'opts': self.config.supported_opts,
-				'profiles': [p.name for p in self.profiles],
+				'profiles': [p.name for p in self.profiles] if self.profiles else [],
 				'has_parent': self.has_parent,
 				'has_children': self.has_children,
 				'chunk': self.chunk,
@@ -1048,7 +1060,7 @@ class Runner:
 		if self.enable_pyinstrument:
 			self.debug('stopping profiler', sub='end')
 			self.profiler.stop()
-			profile_path = Path(self.reports_folder) / f'{self.unique_name}_profile.html'
+			profile_path = Path(self.reports_folder) / f'{self.fqn}_profile.html'
 			with profile_path.open('w', encoding='utf-8') as f_html:
 				f_html.write(self.profiler.output_html())
 			self._print_item(Info(message=f'Wrote profile to {str(profile_path)}'), force=True)

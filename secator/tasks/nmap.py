@@ -143,7 +143,7 @@ class nmap(ReconPort):
 	def on_cmd(self):
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
-			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.xml'
+			output_path = f'{self.reports_folder}/.outputs/{self.fqn}.xml'
 		self.output_path = output_path
 		self.cmd += f' -oX {shlex.quote(self.output_path)}'
 		tcp_syn_stealth = self.cmd_options.get('tcp_syn_stealth')

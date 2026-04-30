@@ -192,3 +192,18 @@ class JsonBackend(QueryBackend):
 		"""Count findings matching query."""
 		findings = self._load_all_findings()
 		return sum(1 for f in findings if match_query(f, query))
+
+	def _execute_update(self, query: dict, update: dict) -> int:
+		"""Update in-memory records matching query."""
+		if self._results is None:
+			return 0
+		set_fields = update.get("$set", {})
+		if not set_fields:
+			return 0
+		count = 0
+		for i, record in enumerate(self._results):
+			if match_query(record, query):
+				for k, v in set_fields.items():
+					self._results[i][k] = v
+				count += 1
+		return count

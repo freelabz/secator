@@ -38,6 +38,16 @@ class PythonRunner(Runner):
 	opts = {}
 	default_inputs = None
 	profile = 'small'
+	install_cmd = None
+	install_pre = None
+	install_post = None
+	install_cmd_pre = None
+	github_handle = None
+	install_github_bin = False
+	install_ignore_bin = []
+	install_binary_name = None
+	install_version = None
+	install_github_version_prefix = ''
 
 	def needs_chunking(self, sync):
 		return False
@@ -104,6 +114,23 @@ class PythonRunner(Runner):
 		if len(inputs) > 1:
 			return False
 		return True
+
+	def get_opt_value(self, opt_name):
+		"""Get option value with fallback to default from opts definition.
+
+		# TODO: align with Command.get_opt_value to support aliases, pre_process, process, and opt_key_map overrides.
+
+		Args:
+			opt_name (str): Option name.
+
+		Returns:
+			Any: Option value.
+		"""
+		val = self.run_opts.get(opt_name)
+		if val is not None:
+			return val
+		opt_conf = self.opts.get(opt_name, {})
+		return opt_conf.get('default')
 
 	def yielder(self):
 		"""Execute the Python task and yield its results.

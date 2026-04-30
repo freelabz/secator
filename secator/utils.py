@@ -664,6 +664,30 @@ def get_file_date(file_path):
 		return f'{mod_date.strftime("%B %d @ %H:%m")}'
 
 
+def humanize_date(dt):
+	"""Returns a human-readable format for a datetime object or ISO format string.
+
+	Args:
+		dt (datetime | str): Datetime object or ISO format string.
+
+	Returns:
+		str: Human-readable time format.
+	"""
+	if dt is None:
+		return ''
+	if isinstance(dt, str):
+		try:
+			dt = datetime.fromisoformat(dt)
+		except (ValueError, TypeError):
+			return str(dt)
+	dt_utc = dt.replace(tzinfo=None) if dt.tzinfo else dt
+	now = datetime.utcnow()
+	if (now - dt_utc).days < 7:
+		return humanize.naturaltime(now - dt_utc) + dt_utc.strftime(' @ %H:%M')
+	else:
+		return f'{dt_utc.strftime("%B %d @ %H:%M")}'
+
+
 def trim_string(s, max_length=30, mode='middle'):
 	"""Trims a long string with an ellipsis indicator.
 
@@ -966,12 +990,13 @@ def parse_raw_http_request(raw_request):
 	return {'method': method, 'url': url, 'headers': headers, 'data': body}
 
 
-def format_token_count(tokens, icon=''):
+def format_token_count(tokens, icon='', compact=False):
 	"""Format a token count as a human-readable string (e.g., '8.5k tokens').
 
 	Args:
 		tokens: Number of tokens.
 		icon: Optional Rich emoji icon prefix (e.g., 'arrow_up', 'arrow_down').
+		compact: If True, omit 'tokens' suffix (e.g., '8.5k' instead of '8.5k tokens').
 
 	Returns:
 		str: Formatted token string.
@@ -1450,6 +1475,7 @@ def remove_duplicates(items):
 		# Plain dict: try to load into the appropriate OutputType to use _compare_key()
 		if isinstance(item, dict):
 			from secator.output_types import OUTPUT_TYPES
+
 			_type = item.get('_type')
 			if _type:
 				for cls in OUTPUT_TYPES:

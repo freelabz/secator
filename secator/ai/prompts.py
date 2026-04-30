@@ -1,8 +1,16 @@
 """Compact prompt templates for AI task."""
 # flake8: noqa: E501
 import json
+import re
+from pathlib import Path
 from typing import Any, Dict, List
 from string import Template
+
+PROMPTS_DIR = Path(__file__).parent / "prompts"
+SECATOR_DIR = Path(__file__).parent.parent
+TASKS_PATH = SECATOR_DIR / "tasks"
+WORKFLOWS_PATH = SECATOR_DIR / "configs" / "workflows"
+PROFILES_PATH = SECATOR_DIR / "configs" / "profiles"
 
 OPTION_FORMATS = """header|key1:value1;;key2:value2|Multiple headers separated by ;;
 cookie|name1=val1;name2=val2|Standard cookie format
@@ -10,184 +18,147 @@ proxy|http://host:port|HTTP/SOCKS proxy URL
 wordlist|name_or_path|Use predefined name or file path
 ports|1-1000,8080,8443|Comma-separated ports or ranges"""
 
-# System prompt for attack mode (~400 tokens)
-SYSTEM_ATTACK = Template("""
-### PERSONA
-You are an autonomous penetration testing agent conducting authorized security testing.
 
-### ACTION
-Analyze findings, identify exploitable vulnerabilities, execute attacks using secator runners or shell commands, and validate exploits with proof-of-concept.
+def load_prompt(path: str) -> str:
+	"""Load a prompt file and resolve ${includes} from common/.
 
-### STEPS
-1. Analyze targets and any existing findings from previous iterations
-2. Plan an attack approach (for instance: "recon", "targeted attack", "exploitation", "post-exploitation")
-3. Propose actions (tasks, workflows, shell commands, queries, follow up)
-4. Analyze results from executed actions --> retry tasks that failed due to invalid options or parameters
-6. Otherwise, repeat 3 and 4 for the rest of the iterations, always be more and more specific with the actions you run as iterations increase
+	Include syntax: ${common_name} resolves to common/<common_name>.txt content.
+	Standard $variable substitution is handled later by string.Template.
 
-### CONTEXT
-$library_reference
+	Args:
+		path: Relative path within the prompts directory (e.g. 'modes/attack.txt')
 
-Queryable types: $query_types
-Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
+	Returns:
+		Prompt string with includes resolved.
+	"""
+	filepath = PROMPTS_DIR / path
+	content = filepath.read_text()
 
-### CONSTRAINTS
-- Keep responses concise: max 100 lines (unless user asks for more). Be direct and actionable.
-- NEVER INVENT details, rely on the user data
-- NEVER INVENT tool output
-- ALWAYS USE options listed above for each task
-- ALWAYS PREFER single Secator tasks over workflows/scans (less intrusive, more targeted)
-- ALWAYS PREFER to use light tasks and commands (e.g: curl, nslookup, httpx, etc...) over noisy and long Secator tasks like nuclei, ffuf, or feroxbuster.
-- ONLY use Secator workflows or scans when they truly fit the task at hand, or when the user explicitly requests "comprehensive", "full", or "deep" recon
-- RETRY tasks that fails due to bad options, unsupported flags, or incorrect parameters, analyze the error, fix the options and send a corrected action item so we can re-run it.
-- NEVER use placeholders in options like "<target>", "<url>", "<your_wordlist>". All values must be concrete and usable. The user cannot interact with actions - they run autonomously.
-- Use workspace queries to get historical data for context when needed
-- PII data are encrypted as [HOST:xxxx] - use as-is (we'll decrypt it client-side)
-- To use profiles, add "profiles": ["<profile1>", "<profile2>"] in opts
-- When finding a vulnerability, ALWAYS ASK the user what he wants to do with it using the follow_up action (see examples)
-- When making vulnerability summaries, include the matched_at targets so we know what is impacted
-- ONLY use the add_finding action when user request you to add a finding to the workspace explicitly or you have validated the finding with concrete evidence.
-- When in doubt about what to do next, or you have no specific targets, or the user ask you to give him guidance, use the follow_up action
-- When using the follow_up action:
-	- ONLY include choices that represent concrete pentesting direction you can act on (e.g: specific scans to run, vulnerabilities to exploit, queries to execute).
-	- Do NOT include choices for generic advice , troubleshooting steps, or things the user would do outside secator\
-	- MAXIMUM 3 well-thought options based on specific context
+	# Resolve ${include_name} patterns that match constraints/ files
+	common_dir = PROMPTS_DIR / "constraints"
+	available = {f.stem for f in common_dir.glob("*.txt")}
 
-### TEMPLATE
-Brief reasoning (2-3 sentences max), then a JSON array of actions, for instance:
-[{"action":"task","name":"<tool>","targets":[...],"opts":{}},
- {"action":"workflow","name":"<name>","targets":[...],"opts":{"profiles":["aggressive"]}},
- {"action":"shell","command":"<cmd>"},
- {"action":"query","query":{"_type":"<output_type>", ...},"limit":50},
- {"action":"add_finding","_type":"<output_type>","<field>":"<value>", ...},
-]
+	def _resolve(match):
+		name = match.group(1)
+		if name in available:
+			return (common_dir / f"{name}.txt").read_text().rstrip()
+		return match.group(0)  # Leave unresolved (it's a Template variable)
 
-OR, if following up is needed (choices are optional):
-[{"action":"follow_up","reason":"<why>","choices":["option1","option2"]}]
+	return re.sub(r'\$\{(\w+)\}', _resolve, content)
 
-### EXAMPLES
-Attack example:
-```
-Found a login form. Testing for SQL injection with curl and running dalfox.
 
-[{"action": "shell", "command": "curl ..."}, {"action": "task", "name": "dalfox", "targets": [...], "opts": {"rate_limit": 30, "timeout": 10}}]
-```
+# Load prompts from files
+COMMON_RULES = load_prompt("constraints/common.txt")
+QUERIES = load_prompt("constraints/queries.txt")
 
-User prompt example:
-```
-I'm not sure in which directions to go next.
+SYSTEM_ATTACK = Template(load_prompt("modes/attack.txt"))
+SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
+SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 
-[{"action": "follow_up", "reason": "Unsure about next directions", "choices": ["Continue exploring found SQLIs", "Go another direction"]}]
-```
-or
-```
-I found an exploitable vulnerability !
+# Mode configurations: system prompt, allowed actions, and iteration limits
+MODES = {
+	"attack": {
+		"system_prompt": SYSTEM_ATTACK,
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "stop"],
+		"max_iterations": 5,
+	},
+	"chat": {
+		"system_prompt": SYSTEM_CHAT,
+		"allowed_actions": ["query", "follow_up", "add_finding", "shell", "stop"],
+		"max_iterations": 5,
+	},
+	"exploit": {
+		"system_prompt": SYSTEM_EXPLOIT,
+		"allowed_actions": ["task", "workflow", "shell", "add_finding", "stop"],
+		"max_iterations": 5,
+	},
+}
 
-[{"action": "follow_up", "reason": "Vulnerability found.", "choices": ["Report and continue", "Validate it", "Exploit it further", "Ignore (false positive) and continue"]}]
-```
 
-Query example:
-```
-Querying vulnerabilities (critical, high) and URLs matching /admin regex.
+def get_mode_config(mode: str) -> dict:
+	"""Get full config for a mode.
 
-[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}},"limit":10}, {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}},"limit":50}]
-```
-""")
+	Args:
+		mode: The mode name (attack, chat, exploit)
 
-# System prompt for chat mode (~200 tokens)
-SYSTEM_CHAT = Template("""
-### PERSONA
-You are an autonomous penetration testing agent conducting authorized security testing.
+	Returns:
+		Mode configuration dict with system_prompt, allowed_actions, max_iterations
+	"""
+	return MODES.get(mode, MODES["chat"])
 
-### ACTION
-Answer user questions about their workspace by querying stored security data and providing clear analysis.
 
-### STEPS
-1. Analyze the user's question to determine what data is needed
-2. Query the workspace for relevant findings using MongoDB queries
-3. Analyze the returned results
-4. Provide a clear markdown summary with actionable insights
+def _format_opt_type(opt_config: dict) -> str:
+	"""Format option type as a compact string."""
+	opt_type = opt_config.get('type', 'flag' if opt_config.get('is_flag') else 'unknown')
+	if isinstance(opt_type, type):
+		opt_type = opt_type.__name__
+	return str(opt_type)
 
-### CONTEXT
-$output_types_reference
 
-Queryable types: $query_types
-Query operators: $$in, $$regex, $$contains, $$gt, $$lt, $$ne
+def _build_runner_reference(config_type: str) -> str:
+	"""Build compact runner reference: name|description|opts|meta:meta_opt_names.
 
-### CONSTRAINTS
-- Keep responses concise: max 100 lines (unless user asks for more). Be direct and actionable.
-- NEVER INVENT details, rely on the user data
-- If a query fails, analyze the error and retry with corrected parameters. Do NOT give up after a single failure.
-- If you hit a limit on the number of results, try to use more specific queries.
-- NEVER use placeholders in queries like "<target>", "<url>", "<your_wordlist>". All values must be concrete and usable. The user cannot interact with actions - they run autonomously.
-- ONLY use the add_finding action when user request you to add a finding to the workspace explicitly.
-- When making vulnerability summaries, include the matched_at targets so we know what is impacted
-- When in doubt about what to do next, or you have no specific targets, or the user ask you to give him guidance, use the follow_up action
-- When using the follow_up action:
-   	- only include choices that represent concrete pentesting direction you can act on (e.g: specific scans to run, vulnerabilities to exploit, queries to execute).
-	- Do NOT include choices for generic advice , troubleshooting steps, or things the user would do outside secator
-	- MAXIMUM 3 well-thought options based on specific context
+	Meta options (shared across tools) are listed by name only since their
+	definitions appear in the META_OPTIONS section.
 
-### TEMPLATE
-Markdown explanation, then a JSON array of actions:
-[{"action":"query","query":{"_type":"<output_type>", ...},"limit":50},
- {"action":"follow_up","reason":"<why>","choices":["option1","option2"]},
- {"action":"add_finding","_type":"<output_type>", "tags": ["ai"], "<field>":"<value>", ...},
-]
+	Args:
+		config_type: 'task' or 'workflow'
 
-IMPORTANT: When in doubt about what to do next, ALWAYS use the follow_up action to ask the user for guidance instead of guessing or stopping silently.
+	Returns:
+		Formatted reference string.
+	"""
+	from secator.loader import get_configs_by_type
+	from secator.template import get_config_options
 
-FOLLOW_UP CHOICES: "choices" is OPTIONAL. Only include choices when they represent concrete actions you can execute (e.g. specific queries to run, data to analyze, scans to suggest). Do NOT include choices for generic advice, troubleshooting steps, or things the user would do outside of secator. When the task is simply complete, use follow_up with just a reason and no choices.
+	lines = []
+	runner_refs = get_configs_by_type(config_type)
+	for r in sorted(runner_refs, key=lambda x: x.name):
+		desc = getattr(r, 'long_description', '') or getattr(r, 'description', '') or ''
+		desc = desc.strip().split('\n')[0][:50]
+		tags = getattr(r, 'tags', []) or []
+		tags_str = f"[{','.join(tags)}]" if tags else ""
+		opts = get_config_options(r)
+		non_meta = []
+		meta_names = []
+		for opt_name, opt_config in opts.items():
+			opt_name = opt_name.replace('-', '_')
+			if opt_config.get('prefix') == 'Meta':
+				meta_names.append(opt_name)
+			else:
+				non_meta.append(f"{opt_name}({_format_opt_type(opt_config)})")
+		line = f"{r.name}|{desc}|{tags_str}|{','.join(non_meta)}"
+		if meta_names:
+			line += f"|meta:{','.join(meta_names)}"
+		lines.append(line)
 
-### EXAMPLES
-```
-## Overview
-## Priority remediation plan
-## Vulnerabilities
-### VULN_ID + VULN_NAME [VULN_SEVERITY + VULN_CVSS_SCORE]
-<TABLE with FIELD + DETAIL with CVSS Score, EPSS Score, CVSS Vector, Targets, Tags, Description References>
+	return "\n\n".join(lines)
 
-[{"action":"query","query":{"_type":"vulnerability","severity":{"$$in":["critical","high"]}},"limit":10},
- {"action":"query","query":{"_type":"url","url":{"$$regex":"/admin"}},"limit":50},
-]
-```
-""")
+
+def build_meta_options_reference() -> str:
+	"""Build meta options reference: name(type) for all meta options across tasks and workflows."""
+	from secator.loader import get_configs_by_type
+	from secator.template import get_config_options
+
+	meta_opts = {}
+	for config_type in ('task', 'workflow'):
+		for r in get_configs_by_type(config_type):
+			opts = get_config_options(r)
+			for k, v in opts.items():
+				k = k.replace('-', '_')
+				if v.get('prefix') == 'Meta' and k not in meta_opts:
+					meta_opts[k] = _format_opt_type(v)
+
+	return ",".join(f"{k}({v})" for k, v in sorted(meta_opts.items()))
 
 
 def build_tasks_reference() -> str:
-	"""Build compact task reference: name|description|options."""
-	from secator.loader import discover_tasks
-	from secator.definitions import OPT_NOT_SUPPORTED
-
-	lines = []
-	for task_cls in sorted(discover_tasks(), key=lambda t: t.__name__):
-		if task_cls.__name__.lower() == "ai":
-			continue
-		name = task_cls.__name__
-		desc = (task_cls.__doc__ or "").strip().split('\n')[0][:50]
-
-		# Get task-specific options
-		task_opts = list(getattr(task_cls, 'opts', {}).keys())
-
-		# Get generic options that this task supports
-		opt_key_map = getattr(task_cls, 'opt_key_map', {})
-		generic_opts = [k for k, v in opt_key_map.items() if v is not None and v != OPT_NOT_SUPPORTED]
-
-		all_opts = ",".join(sorted(set(task_opts + generic_opts)))
-		lines.append(f"{name}|{desc}|{all_opts}")
-
-	return "\n".join(lines)
+	"""Build compact task reference: name|description|options|meta:meta_opts."""
+	return _build_runner_reference('task')
 
 
 def build_workflows_reference() -> str:
-	"""Build compact workflow reference: name|description."""
-	from secator.loader import get_configs_by_type
-	workflows = get_configs_by_type('workflow')
-	lines = []
-	for w in sorted(workflows, key=lambda x: x.name):
-		desc = getattr(w, 'description', '') or ''
-		lines.append(f"{w.name}|{desc}")
-	return "\n".join(lines)
+	"""Build compact workflow reference: name|description|options|meta:meta_opts."""
+	return _build_runner_reference('workflow')
 
 
 def build_profiles_reference() -> str:
@@ -208,18 +179,33 @@ def build_wordlists_reference() -> str:
 	if CONFIG.wordlists.templates:
 		for name in sorted(CONFIG.wordlists.templates.keys()):
 			lines.append(name)
+	lines.append("")
+	lines.append("You can also use any remote wordlist URL directly (e.g. from GitHub raw URLs).")
+	lines.append("Pick or find wordlists appropriate for the task: LFI, XSS, SQLi, directory brute-force, etc.")
 	return "\n".join(lines)
 
 
+def _type_name(tp) -> str:
+	"""Return a human-readable type name for a dataclass field type."""
+	type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+	if tp in type_names:
+		return type_names[tp]
+	origin = getattr(tp, '__origin__', None)
+	if origin in type_names:
+		return type_names[origin]
+	return getattr(tp, '__name__', str(tp))
+
+
 def build_output_types_reference() -> str:
-	"""Build compact output types reference: name|queryable_fields."""
+	"""Build compact output types reference: name|field:type,field:type,..."""
 	from secator.output_types import FINDING_TYPES
 	lines = []
 	for cls in FINDING_TYPES:
 		name = cls.get_name()
 		if hasattr(cls, '__dataclass_fields__'):
 			fields = ",".join(
-				f.name for f in cls.__dataclass_fields__.values()
+				f"{f.name}({_type_name(f.type)})"
+				for f in cls.__dataclass_fields__.values()
 				if not f.name.startswith('_')
 			)
 		else:
@@ -234,48 +220,65 @@ def build_query_types() -> str:
 	return ", ".join(cls.get_name() for cls in FINDING_TYPES)
 
 
-def get_system_prompt(mode: str) -> str:
+def get_system_prompt(mode: str, workspace_path: str = "", backend=None) -> str:
 	"""Get system prompt for mode with library reference filled in.
 
 	Args:
-		mode: Either "attack", "chat", or "summarize"
+		mode: One of "attack", "chat", or "exploit"
+		workspace_path: Path to the workspace/reports directory
+		backend: Optional interactivity backend to determine interaction rules
 
 	Returns:
 		Formatted system prompt string
 	"""
-	if mode not in ("attack", "chat"):
-		raise ValueError(f"Unsupported mode: {mode!r}. Expected 'attack' or 'chat'.")
-	query_types = build_query_types()
+	if mode not in MODES:
+		from secator.rich import console
+		from secator.output_types import Warning
+		console.print(Warning(message=f"Unknown mode {mode!r}, falling back to 'chat'. Valid modes: {list(MODES.keys())}"))
+		mode = "chat"
+
+	mode_config = MODES[mode]
+	system_prompt = mode_config["system_prompt"]
+	ws = workspace_path or "<workspace>"
+
+	path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 	if mode == "attack":
-		return SYSTEM_ATTACK.substitute(
-			library_reference=build_library_reference(),
-			query_types=query_types
-		)
-	return SYSTEM_CHAT.substitute(
-		query_types=query_types,
-		output_types_reference=build_output_types_reference()
-	)
+		result = system_prompt.safe_substitute(library_reference=build_library_reference(), **path_vars)
+	elif mode == "exploit":
+		result = system_prompt.safe_substitute(library_reference=build_library_reference(), **path_vars)
+	else:  # chat mode
+		result = system_prompt.safe_substitute(output_types_reference=build_output_types_reference())
+
+	# Determine interaction rules based on backend
+	# The mode templates already include ${follow_up} for interactive modes.
+	# For non-interactive backends, append stop rules instead.
+	if backend is not None:
+		excluded = backend.get_excluded_tools()
+		if "follow_up" in excluded:
+			result += "\n" + load_prompt("constraints/stop.txt")
+
+	return result.replace("$workspace_path", ws)
 
 
-def format_user_initial(targets: List[str], instructions: str, previous_results: List[Dict] = None) -> str:
-	"""Format initial user message as compact JSON.
+# def format_user_initial(targets: List[str], instructions: str, previous_results: List[Dict] = None) -> str:
+# 	"""Format initial user message as compact JSON.
 
-	Args:
-		targets: List of target hosts/URLs
-		instructions: User instructions for the task
-		previous_results: Optional list of result dicts from upstream tasks
+# 	Args:
+# 		targets: List of target hosts/URLs
+# 		instructions: User instructions for the task
+# 		previous_results: Optional list of result dicts from upstream tasks
 
-	Returns:
-		Compact JSON string (no whitespace)
-	"""
-	msg = {
-		"targets": targets,
-		"instructions": instructions or "Conduct security testing.",
-	}
-	if previous_results:
-		msg["previous_results"] = previous_results
-		msg["instructions"] += " Analyze the previous results and use them as context."
-	return json.dumps(msg, separators=(',', ':'), default=str)
+# 	Returns:
+# 		Compact JSON string (no whitespace)
+# 	"""
+# 	results_str = json.dumps(previous_results, default=str)
+# 	instructions_str = json.dumps(instructions or "Analyze the previous results first")
+# 	return f"""
+# <previous_results>
+# {instructions_str}
+# {results_str}
+# </previous_results>
+# 	"""
 
 
 def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = 100) -> str:
@@ -330,14 +333,23 @@ def format_continue(iteration: int, max_iterations: int, instruction="continue")
 	}, separators=(',', ':'))
 
 
+REFERENCE_FORMAT = """\
+Format: name|description|[tags]|options|meta:shared_options
+- Options: name(type) where type is str, int, float, flag, list, dict, or Choice([...])
+- Meta options are shared across tools and defined in <meta_options>. Each task/workflow lists which ones it supports.
+- Profiles can be applied to any task/workflow via opts: {"profiles": ["profile_name"]}"""
+
+
 def build_library_reference() -> str:
 	"""Build complete library reference in compact format."""
 	sections = [
-		"TASKS:\n" + build_tasks_reference(),
-		"WORKFLOWS:\n" + build_workflows_reference(),
-		"PROFILES:\n" + build_profiles_reference(),
-		"WORDLISTS:\n" + build_wordlists_reference(),
-		"OUTPUT_TYPES:\n" + build_output_types_reference(),
-		"OPTION_FORMATS:\n" + OPTION_FORMATS,
+		REFERENCE_FORMAT,
+		f"<meta_options>\n{build_meta_options_reference()}\n</meta_options>",
+		f"<tasks>\n{build_tasks_reference()}\n</tasks>",
+		f"<workflows>\n{build_workflows_reference()}\n</workflows>",
+		f"<profiles>\n{build_profiles_reference()}\n</profiles>",
+		f"<wordlists>\n{build_wordlists_reference()}\n</wordlists>",
+		f"<output_types>\n{build_output_types_reference()}\n</output_types>",
+		f"<option_formats>\n{OPTION_FORMATS}\n</option_formats>",
 	]
 	return "\n\n".join(sections)
