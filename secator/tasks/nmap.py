@@ -79,6 +79,7 @@ class nmap(ReconPort):
 		'disable_arp_ping': {'is_flag': True, 'short': 'dap', 'default': False, 'help': 'Disable ARP ping'},
 		# Misc
 		'output_path': {'type': str, 'short': 'oX', 'default': None, 'help': 'Output XML file path', 'internal': True, 'display': False},  # noqa: E501
+		'resume': {'type': str, 'default': None, 'help': 'Resume from XML filepath'},
 		'debug': {'is_flag': True, 'default': False, 'help': 'Enable debug mode'},
 		'verbosity': {'type': int, 'short': 'vo', 'default': None, 'internal': True, 'display': True, 'help': 'Enable verbose mode (1, 2, 3)'},  # noqa: E501
 		'timing': {'type': int, 'short': 'T', 'default': None, 'help': 'Timing template (0: paranoid, 1: sneaky, 2: polite, 3: normal, 4: aggressive, 5: insane)'},  # noqa: E501
@@ -126,6 +127,7 @@ class nmap(ReconPort):
 		'traceroute': '--traceroute',
 		'disable_arp_ping': '--disable-arp-ping',
 		'output_path': '-oX',
+		'resume': '--resume',
 	}
 	opt_value_map = {PORTS: lambda x: ','.join([str(p) for p in x]) if isinstance(x, list) else x}
 	install_pre = {
@@ -189,6 +191,25 @@ class nmap(ReconPort):
 			return
 		yield Info(message=f'XML results saved to {self.output_path}')
 		yield from self.xml_to_json()
+
+	@staticmethod
+	def on_cmd_interrupt(self):
+		"""Write checkpoint on interrupt. Parse partial XML first, then yield Checkpoint."""
+		from secator.output_types import Checkpoint
+
+		# Parse partial XML results before stopping (nmap writes XML continuously)
+		yield from nmap.on_cmd_done(self)
+
+		# The resume file for nmap is its existing XML output file
+		resume_path = getattr(self, 'output_path', '')
+		self.paused = True
+		if resume_path and os.path.exists(resume_path):
+			yield Checkpoint(
+				task_id=str(self.id),
+				task_name=self.unique_name,
+				resume_file_path=resume_path,
+				_context=self.context,
+			)
 
 	def xml_to_json(self):
 		results = []

@@ -1,6 +1,32 @@
 import unittest
 from secator.output_types import Vulnerability
 
+
+class TestCheckpoint(unittest.TestCase):
+	def test_checkpoint_fields(self):
+		from secator.output_types import Checkpoint
+		cp = Checkpoint(task_id='abc-123', task_name='nmap_1', resume_file_path='/tmp/nmap_1_resume.cfg')
+		assert cp.task_id == 'abc-123'
+		assert cp.task_name == 'nmap_1'
+		assert cp.resume_file_path == '/tmp/nmap_1_resume.cfg'
+		assert cp._type == 'checkpoint'
+
+	def test_checkpoint_serialization(self):
+		from secator.output_types import Checkpoint
+		cp = Checkpoint(task_id='abc', task_name='httpx_1', resume_file_path='/tmp/r.cfg')
+		d = cp.toDict()
+		assert d['task_id'] == 'abc'
+		assert d['task_name'] == 'httpx_1'
+		assert d['resume_file_path'] == '/tmp/r.cfg'
+		assert d['_type'] == 'checkpoint'
+
+	def test_checkpoint_context_passthrough(self):
+		from secator.output_types import Checkpoint
+		ctx = {'workflow_id': 'wf-1', 'scan_id': 'sc-1'}
+		cp = Checkpoint(task_id='x', task_name='y', resume_file_path='', _context=ctx)
+		assert cp._context['workflow_id'] == 'wf-1'
+
+
 class TestOutputTypes(unittest.TestCase):
 	def test_merge_with(self):
 		vuln1 = Vulnerability(name='CVE-2025-53020', severity='high', confidence='high', matched_at='2025-01-01')

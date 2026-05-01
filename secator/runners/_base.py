@@ -15,10 +15,12 @@ import humanize
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
+from secator.output_types import (
+	FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, Checkpoint
+)
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import get_task_folder_id, run_extractors
+from secator.runners._helpers import get_task_folder_id, load_resume_cfg, run_extractors
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
 from secator.tree import build_runner_tree
 from secator.loader import get_configs_by_type
@@ -101,6 +103,20 @@ class Runner:
 		self.sync = run_opts.get('sync', True)
 		self.context = context
 
+		# Resume handling: at scan/workflow level, --resume is a path to a resume.cfg JSON file.
+		# At task level, --resume is the tool's native resume flag value, passed through unchanged.
+		self.resume_tasks = self.run_opts.pop('resume_tasks', {})
+		runner_type = getattr(self.config, 'type', '')
+		if runner_type in ('scan', 'workflow') and self.run_opts.get('resume'):
+			r_targets, r_run_options, r_resume_tasks, _ = load_resume_cfg(self.run_opts.pop('resume'))
+			# Use targets from resume.cfg only when no inputs were provided
+			if not inputs and r_targets:
+				inputs = r_targets
+			# Merge resume run_options under user-supplied opts (user wins on conflict)
+			for k, v in r_run_options.items():
+				self.run_opts.setdefault(k, v)
+			self.resume_tasks = r_resume_tasks
+
 		# Runner state
 		self.uuids = set()
 		self.results = []
@@ -118,7 +134,9 @@ class Runner:
 		self.celery_result = None
 		self.celery_ids_map = {}
 		self.revoked = False
+		self.paused = False
 		self.skipped = False
+		self.checkpoints = []
 		self.results_buffer = []
 		self._hooks = hooks
 
@@ -370,6 +388,8 @@ class Runner:
 	def status(self):
 		if not self.started:
 			return 'PENDING'
+		if self.paused:
+			return 'PAUSED'
 		if self.revoked:
 			return 'REVOKED'
 		if self.skipped:
@@ -518,8 +538,71 @@ class Runner:
 		gc.collect()
 		if self.sync:
 			self.mark_completed()
+		if self.revoked and self.checkpoints:
+			self._write_resume_cfg()
 		if self.enable_reports:
 			self.export_reports()
+
+	def _write_resume_cfg(self):
+		"""Write a resume.cfg JSON file to the reports folder on interrupt."""
+		import os
+
+		checkpoint_names = set()
+		tasks = []
+		for cp in self.checkpoints:
+			checkpoint_names.add(cp.task_name)
+			tasks.append({
+				'task_name': cp.task_name,
+				'task_id': cp.task_id,
+				'status': 'PAUSED',
+				'resume_file_path': cp.resume_file_path,
+			})
+
+		for task_id, info in self.celery_ids_map.items():
+			task_name = info.get('name', '')
+			if task_name and task_name not in checkpoint_names:
+				tasks.append({
+					'task_name': task_name,
+					'task_id': task_id,
+					'status': info.get('state', 'UNKNOWN'),
+					'resume_file_path': None,
+				})
+
+		data = {
+			'runner_type': getattr(self.config, 'type', ''),
+			'runner_name': self.config.name,
+			'targets': list(self.inputs) if hasattr(self, 'inputs') else [],
+			'run_options': dict(self.run_opts) if hasattr(self, 'run_opts') else {},
+			'reports_folder': str(self.reports_folder),
+			'tasks': tasks,
+		}
+
+		resume_path = f'{self.reports_folder}/resume.cfg'
+		try:
+			os.makedirs(self.reports_folder, exist_ok=True)
+			with open(resume_path, 'w') as f:
+				json.dump(data, f, indent=2)
+			self.debug(f'resume.cfg written to {resume_path}', sub='end')
+		except Exception as e:
+			self.debug(f'Failed to write resume.cfg: {e}', sub='end')
+
+	def _get_resume_run_opts(self, task_name):
+		"""Return run_opts for a task based on resume_tasks state.
+
+		Returns:
+			None: skip this task (already completed)
+			dict: run opts to inject (may be empty dict for re-run from scratch)
+		"""
+		if not self.resume_tasks:
+			return {}
+		task_resume = self.resume_tasks.get(task_name)
+		if not task_resume:
+			return {}
+		if task_resume.get('status') == 'SUCCESS':
+			return None
+		if task_resume.get('status') == 'PAUSED' and task_resume.get('resume_file_path'):
+			return {'resume': task_resume['resume_file_path']}
+		return {}
 
 	def join_threads(self):
 		"""Wait for all running threads to complete."""
@@ -574,6 +657,10 @@ class Runner:
 		# Set source
 		if not item._source:
 			item._source = self.unique_name
+
+		# Collect Checkpoint items for resume.cfg
+		if isinstance(item, Checkpoint):
+			self.checkpoints.append(item)
 
 		# Check for state updates
 		if isinstance(item, State) and self.celery_result and item.task_id == self.celery_result.id:

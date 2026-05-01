@@ -267,6 +267,61 @@ class TestCommandHooks(unittest.TestCase):
 				input = INPUTS_TASKS[HOST]
 				httpx(input, hooks=hooks, raise_on_error=True)
 
+	def test_on_cmd_interrupt_hook_is_in_hooks_list(self):
+		assert 'on_cmd_interrupt' in Command.hooks
+
+
+class TestTaskResumeOpts(unittest.TestCase):
+	"""Verify --resume opt is wired into the cmd line for tools that support it."""
+
+	def test_httpx_resume_opt_in_cmd(self):
+		from secator.tasks import httpx
+		runner = httpx(
+			'example.com',
+			resume='/tmp/resume.cfg',
+			print_cmd=True, print_item=False, dry_run=True, no_process=True,
+		)
+		assert '--resume' in runner.cmd
+		assert '/tmp/resume.cfg' in runner.cmd
+
+	def test_httpx_resume_opt_absent_when_not_provided(self):
+		from secator.tasks import httpx
+		runner = httpx(
+			'example.com',
+			print_cmd=True, print_item=False, dry_run=True, no_process=True,
+		)
+		assert '--resume' not in runner.cmd
+
+	def test_nuclei_resume_opt_in_cmd(self):
+		from secator.tasks import nuclei
+		runner = nuclei(
+			'example.com',
+			resume='/tmp/nuclei_resume.cfg',
+			print_cmd=True, print_item=False, dry_run=True, no_process=True,
+		)
+		assert '--resume' in runner.cmd
+		assert '/tmp/nuclei_resume.cfg' in runner.cmd
+
+	def test_nmap_resume_opt_in_cmd(self):
+		from secator.tasks import nmap
+		runner = nmap(
+			'192.168.1.1',
+			resume='/tmp/nmap_results.xml',
+			print_cmd=True, print_item=False, dry_run=True, no_process=True,
+		)
+		assert '--resume' in runner.cmd
+		assert '/tmp/nmap_results.xml' in runner.cmd
+
+	def test_katana_resume_opt_in_cmd(self):
+		from secator.tasks import katana
+		runner = katana(
+			'https://example.com',
+			resume='/tmp/katana_resume.cfg',
+			print_cmd=True, print_item=False, dry_run=True, no_process=True,
+		)
+		assert '-resume' in runner.cmd
+		assert '/tmp/katana_resume.cfg' in runner.cmd
+
 
 class TestCommandChunking(unittest.TestCase):
 

@@ -49,6 +49,42 @@ def process_item(self, item):
 	return item
 
 
+def upload_resume_file(self, checkpoint):
+	"""Upload resume file to GCS and update checkpoint path."""
+	from secator.output_types import Checkpoint
+	if not isinstance(checkpoint, Checkpoint):
+		return checkpoint
+	if not GCS_BUCKET_NAME:
+		debug('skipped since addons.gcs.bucket_name is empty.', sub='hooks.gcs')
+		return checkpoint
+	resume_path = checkpoint.resume_file_path
+	if not resume_path or not Path(resume_path).exists():
+		return checkpoint
+	blob_name = f'resume/{checkpoint.task_name}_resume.cfg'
+	# Upload synchronously so path is updated before Checkpoint is yielded
+	upload_blob(GCS_BUCKET_NAME, resume_path, blob_name)
+	checkpoint.resume_file_path = f'gs://{GCS_BUCKET_NAME}/{blob_name}'
+	return checkpoint
+
+
+def download_resume_file(self, item):
+	"""Download GCS resume file to local reports_dir before tool runs."""
+	resume_path = self.get_opt_value('resume') or ''
+	if not resume_path.startswith('gs://'):
+		return item
+	if not GCS_BUCKET_NAME:
+		return item
+	parts = resume_path[5:].split('/', 1)
+	if len(parts) != 2:
+		return item
+	bucket_name, blob_name = parts
+	local_path = f'{self.reports_folder}/.outputs/{self.unique_name}_resume.cfg'
+	Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+	download_blob(bucket_name, blob_name, local_path)
+	self.run_opts['resume'] = local_path
+	return item
+
+
 def upload_blob(bucket_name, source_file_name, destination_blob_name):
 	"""Uploads a file to the bucket."""
 	start_time = time()
@@ -76,5 +112,9 @@ def download_blob(bucket_name, source_blob_name, destination_file_name):
 
 
 HOOKS = {
-	Task: {'on_item': [process_item]}
+	Task: {
+		'on_item': [process_item],
+		'on_cmd_interrupt': [upload_resume_file],
+		'on_cmd': [download_resume_file],
+	}
 }

@@ -1,0 +1,33 @@
+import time
+from dataclasses import dataclass, field
+
+from secator.output_types._base import OutputType
+from secator.utils import rich_to_ansi
+
+
+@dataclass
+class Checkpoint(OutputType):
+	"""Represents a paused task checkpoint with resume file information."""
+
+	task_id: str = field(default='')
+	task_name: str = field(default='')
+	resume_file_path: str = field(default='')
+	_type: str = field(default='checkpoint', repr=True)
+	_source: str = field(default='', repr=True, compare=False)
+	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
+	_uuid: str = field(default='', repr=True, compare=False)
+	_context: dict = field(default_factory=dict, repr=True, compare=False)
+	_tagged: bool = field(default=False, repr=True, compare=False)
+	_duplicate: bool = field(default=False, repr=True, compare=False)
+	_related: list = field(default_factory=list, compare=False)
+	_icon = '⏸'
+	_color = 'bold cyan'
+
+	def __str__(self) -> str:
+		return f"Checkpoint {self.task_name} ({self.task_id}): {self.resume_file_path}"
+
+	def __rich__(self) -> str:
+		return f"{self._icon} [bold {self._color}]PAUSED[/] {self.task_name} → {self.resume_file_path}"
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

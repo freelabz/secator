@@ -134,7 +134,10 @@ class TestCommandRunner(unittest.TestCase):
 
 		# Run the command using mock_command
 		with mock_command(MyCommand, TARGETS, {}, fixture, 'run'):
+			# on_cmd_interrupt only fires on interrupt — skip in normal-flow assertion
 			for hook, mock in mock_hooks.items():
+				if hook == 'on_cmd_interrupt':
+					continue
 				self.assertTrue(mock.called, f"Hook '{hook}' was not called")
 			self.assertEqual(mock_hooks['on_json_loaded'].call_count, 3)
 			self.assertGreaterEqual(mock_hooks['on_duplicate'].call_count, 1)
@@ -596,3 +599,150 @@ class TestIsOwnSource(unittest.TestCase):
 			cmd.unique_name = 'nmap'
 			cmd.results.append(chunk_error)
 			self.assertEqual(cmd.self_errors, [chunk_error])
+
+
+class TestRunnerStatus(unittest.TestCase):
+	"""Verify runner status property handles PAUSED state correctly."""
+
+	def test_runner_status_paused(self):
+		runner = Command.__new__(Command)
+		runner.started = True
+		runner.done = False
+		runner.revoked = False
+		runner.paused = True
+		runner.skipped = False
+		assert runner.status == 'PAUSED'
+
+	def test_runner_paused_takes_priority_over_revoked(self):
+		runner = Command.__new__(Command)
+		runner.started = True
+		runner.done = False
+		runner.revoked = True
+		runner.paused = True
+		runner.skipped = False
+		assert runner.status == 'PAUSED'
+
+
+class TestResumeCfg(unittest.TestCase):
+	"""Verify resume.cfg is correctly written on interrupt."""
+
+	def test_write_resume_cfg_creates_file(self):
+		import json
+		import os
+		import tempfile
+		from secator.output_types import Checkpoint
+
+		runner = Command.__new__(Command)
+		runner.config = MagicMock()
+		runner.config.name = 'test_scan'
+		runner.config.type = 'scan'
+		runner.inputs = ['example.com']
+		runner.run_opts = {'threads': 10}
+		runner.celery_ids_map = {}
+		runner.no_process = True
+		runner.sync = True
+		runner.context = {}
+
+		with tempfile.TemporaryDirectory() as tmpdir:
+			runner._reports_folder = tmpdir
+			cp = Checkpoint(task_id='t1', task_name='nmap_1', resume_file_path='/tmp/nmap.xml')
+			runner.checkpoints = [cp]
+			runner._write_resume_cfg()
+			resume_path = os.path.join(tmpdir, 'resume.cfg')
+			assert os.path.exists(resume_path)
+			with open(resume_path) as f:
+				data = json.load(f)
+			assert data['runner_type'] == 'scan'
+			assert data['runner_name'] == 'test_scan'
+			assert data['targets'] == ['example.com']
+			assert len(data['tasks']) == 1
+			assert data['tasks'][0]['task_name'] == 'nmap_1'
+			assert data['tasks'][0]['status'] == 'PAUSED'
+			assert data['tasks'][0]['resume_file_path'] == '/tmp/nmap.xml'
+
+	def test_write_resume_cfg_includes_celery_task_states(self):
+		import json
+		import os
+		import tempfile
+
+		runner = Command.__new__(Command)
+		runner.config = MagicMock()
+		runner.config.name = 'test_wf'
+		runner.config.type = 'workflow'
+		runner.inputs = ['10.0.0.1']
+		runner.run_opts = {}
+		runner.checkpoints = []
+		runner.celery_ids_map = {
+			'celery-id-1': {'name': 'httpx_1', 'id': 'celery-id-1', 'state': 'SUCCESS'},
+			'celery-id-2': {'name': 'nuclei_1', 'id': 'celery-id-2', 'state': 'RUNNING'},
+		}
+		runner.no_process = True
+		runner.sync = True
+		runner.context = {}
+		with tempfile.TemporaryDirectory() as tmpdir:
+			runner._reports_folder = tmpdir
+			runner._write_resume_cfg()
+			with open(os.path.join(tmpdir, 'resume.cfg')) as f:
+				data = json.load(f)
+			task_names = {t['task_name'] for t in data['tasks']}
+			assert 'httpx_1' in task_names
+			assert 'nuclei_1' in task_names
+			httpx_task = next(t for t in data['tasks'] if t['task_name'] == 'httpx_1')
+			assert httpx_task['status'] == 'SUCCESS'
+
+
+class TestResumeRunOpts(unittest.TestCase):
+	"""Verify _get_resume_run_opts returns correct opts based on resume_tasks state."""
+
+	def test_get_resume_run_opts_skip_success(self):
+		from secator.runners._base import Runner
+		runner = Runner.__new__(Runner)
+		runner.resume_tasks = {
+			'nmap_1': {'status': 'SUCCESS', 'resume_file_path': None},
+		}
+		assert runner._get_resume_run_opts('nmap_1') is None  # skip
+
+	def test_get_resume_run_opts_inject_for_paused(self):
+		from secator.runners._base import Runner
+		runner = Runner.__new__(Runner)
+		runner.resume_tasks = {
+			'httpx_1': {'status': 'PAUSED', 'resume_file_path': '/tmp/httpx_resume.cfg'},
+		}
+		opts = runner._get_resume_run_opts('httpx_1')
+		assert opts == {'resume': '/tmp/httpx_resume.cfg'}
+
+	def test_get_resume_run_opts_rerun_for_unknown(self):
+		from secator.runners._base import Runner
+		runner = Runner.__new__(Runner)
+		runner.resume_tasks = {}
+		opts = runner._get_resume_run_opts('nuclei_1')
+		assert opts == {}  # empty = run from scratch
+
+
+class TestGcsResumeHooks(unittest.TestCase):
+	"""Verify GCS upload/download for resume files."""
+
+	def setUp(self):
+		from secator.definitions import ADDONS_ENABLED
+		if not ADDONS_ENABLED['gcs']:
+			self.skipTest('gcs addon not installed; run `secator install addons gcs`')
+
+	def test_gcs_upload_resume_file_updates_checkpoint_path(self):
+		import tempfile
+		from unittest.mock import MagicMock, patch
+		from secator.output_types import Checkpoint
+		from secator.hooks.gcs import upload_resume_file
+
+		with tempfile.NamedTemporaryFile(suffix='.cfg', delete=False) as f:
+			f.write(b'resume_data')
+			resume_path = f.name
+
+		cp = Checkpoint(task_id='t1', task_name='httpx_1', resume_file_path=resume_path)
+		mock_self = MagicMock()
+		mock_self.threads = []
+
+		with patch('secator.hooks.gcs.GCS_BUCKET_NAME', 'test-bucket'), \
+				patch('secator.hooks.gcs.upload_blob') as mock_upload:
+			result = upload_resume_file(mock_self, cp)
+			assert mock_upload.called
+			assert result.resume_file_path.startswith('gs://test-bucket/')

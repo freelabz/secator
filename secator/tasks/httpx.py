@@ -66,6 +66,7 @@ class httpx(Http):
 		'rstr': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},
 		'rsts': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to save (bytes)'},
 		'filter_duplicates': {'is_flag': True, 'short': 'fd', 'default': False, 'help': 'Filter duplicates'},
+		'resume': {'type': str, 'default': None, 'help': 'Resume from filepath'},
 	}
 	opt_key_map = {
 		DATA: 'body',
@@ -90,6 +91,7 @@ class httpx(Http):
 		USER_AGENT: OPT_NOT_SUPPORTED,
 		'store_responses': 'sr',
 		'filter_duplicates': 'fd',
+		'resume': '--resume',
 	}
 	opt_value_map = {
 		DELAY: lambda x: str(x) + 's' if x else None,
@@ -191,6 +193,30 @@ class httpx(Http):
 			yield from self._create_subdomain_from_tls_cert(subject_cn, item['url'], cert)
 			for an in subject_an:
 				yield from self._create_subdomain_from_tls_cert(an, item['url'], cert)
+
+	@staticmethod
+	def on_cmd_interrupt(self):
+		"""Write checkpoint on interrupt."""
+		import shutil
+		from secator.output_types import Checkpoint
+
+		resume_src = self.get_opt_value('resume') or 'resume.cfg'
+		resume_dst = f'{self.reports_folder}/.outputs/{self.unique_name}_resume.cfg'
+
+		if os.path.exists(resume_src) and resume_src != resume_dst:
+			os.makedirs(os.path.dirname(resume_dst), exist_ok=True)
+			shutil.move(resume_src, resume_dst)
+		elif not os.path.exists(resume_dst):
+			resume_dst = ''
+
+		self.paused = True
+		if resume_dst:
+			yield Checkpoint(
+				task_id=str(self.id),
+				task_name=self.unique_name,
+				resume_file_path=resume_dst,
+				_context=self.context,
+			)
 
 	@staticmethod
 	def on_end(self):
