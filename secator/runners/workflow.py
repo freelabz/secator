@@ -100,8 +100,6 @@ class Workflow(Runner):
 				task_opts['context'] = self.context.copy()
 				task_opts['context']['node_id'] = node.id
 				task_opts['context']['ancestor_id'] = current_id
-				task_opts['context']['node_chain_start'] = (ix == 0 or parent_ix == 0)
-				task_opts['context']['parent_scope'] = scope_id
 				task_opts['node_chain_start'] = (ix == 0 or parent_ix == 0)
 				task_opts['parent_scope'] = scope_id
 				task_opts['aliases'] = [node.id, node.name]

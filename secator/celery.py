@@ -15,9 +15,10 @@ from retry import retry
 from secator.celery_signals import setup_handlers
 from secator.definitions import IN_WORKER
 from secator.config import CONFIG
-from secator.output_types import Info
+from secator.output_types import Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
+from secator.runners._helpers import run_extractors
 from secator.utils import debug, deduplicate, flatten, should_update
 
 
@@ -302,16 +303,11 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	# so all tasks in the chain can find the correct inputs via parent_scope filtering.
 	scope = runner.context.get('parent_scope')
 	if scope and runner.has_parent and getattr(runner.config, 'type', None) == 'workflow':
-		from secator.runners._helpers import run_extractors
-		from secator.output_types import Target as TargetOutput
 		target_extractor_opts = {
 			k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'
 		}
-		if target_extractor_opts:
-			ctx = {'ancestor_id': runner.ancestor_id, 'node_chain_start': True}
-			scoped_inputs, _, _ = run_extractors(runner.results, target_extractor_opts, runner.inputs, ctx=ctx)
-		else:
-			scoped_inputs = runner.inputs
+		ctx = {'ancestor_id': runner.ancestor_id, 'node_chain_start': True}
+		scoped_inputs, _, _ = run_extractors(runner.results, target_extractor_opts, runner.inputs, ctx=ctx)
 		for name in scoped_inputs:
 			t = TargetOutput(name=name)
 			t._context['scope'] = scope

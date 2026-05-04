@@ -344,8 +344,7 @@ class TestBuildCeleryWorkflowContext(unittest.TestCase):
             task_opts_list = [o for o in all_opts if o.get('name') in ('w2_1', 'w2_2', 'w2_3')]
             self.assertGreaterEqual(len(task_opts_list), 3)
             for opts in task_opts_list:
-                ctx = opts.get('context', {})
-                self.assertEqual(ctx.get('parent_scope'), 'workflow2',
+                self.assertEqual(opts.get('parent_scope'), 'workflow2',
                     f"Task {opts.get('name')} missing parent_scope='workflow2'")
 
     def test_all_tasks_have_ancestor_id_set(self):
@@ -365,7 +364,7 @@ class TestBuildCeleryWorkflowContext(unittest.TestCase):
             _, chain_sig = self._build_workflow2_chain(chain_previous_results=True)
             all_opts = get_all_task_opts(chain_sig)
             task_opts_list = [o for o in all_opts if o.get('name') in ('w2_1', 'w2_2', 'w2_3')]
-            self.assertTrue(task_opts_list[0].get('context', {}).get('node_chain_start'),
+            self.assertTrue(task_opts_list[0].get('node_chain_start'),
                 "First task must have node_chain_start=True")
 
     def test_subsequent_tasks_have_node_chain_start_false(self):
@@ -375,8 +374,7 @@ class TestBuildCeleryWorkflowContext(unittest.TestCase):
             all_opts = get_all_task_opts(chain_sig)
             task_opts_list = [o for o in all_opts if o.get('name') in ('w2_1', 'w2_2', 'w2_3')]
             for opts in task_opts_list[1:]:
-                ctx = opts.get('context', {})
-                self.assertFalse(ctx.get('node_chain_start'),
+                self.assertFalse(opts.get('node_chain_start'),
                     f"Task {opts.get('name')} (non-first) should have node_chain_start=False")
 
     def test_no_targets_extractor_forwarded_to_tasks(self):
@@ -412,8 +410,7 @@ class TestBuildCeleryWorkflowContext(unittest.TestCase):
             all_opts = get_all_task_opts(chain_sig)
             task_opts_list = [o for o in all_opts if o.get('name') in ('w2_1', 'w2_2', 'w2_3')]
             for opts in task_opts_list:
-                ctx = opts.get('context', {})
-                self.assertIsNone(ctx.get('parent_scope'),
+                self.assertIsNone(opts.get('parent_scope'),
                     f"Task {opts.get('name')} must not have parent_scope when no scan-level targets_ extractor")
 
 

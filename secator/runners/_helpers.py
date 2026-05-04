@@ -71,7 +71,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')
 		inputs = computed_inputs
 	elif parent_scope:
-		_meta_types = {'info', 'progress', 'state', 'error', 'target'}
+		_meta_types = {'info', 'progress', 'state', 'error', 'target'}  # 'target' handled separately via scoped_targets above
 		scoped_targets = [
 			item.name for item in results
 			if item._type == 'target' and item._context.get('scope') == parent_scope
