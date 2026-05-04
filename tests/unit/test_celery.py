@@ -339,3 +339,54 @@ class TestDelayMethods(unittest.TestCase):
 			context={}
 		)
 		self.assertIsNotNone(sig)
+
+
+class TestWorkflowChainForwardedOpts(unittest.TestCase):
+	"""Test that forwarded_opts (e.g. targets_) are applied to ALL tasks in a workflow
+	when chain_previous_results=True, not just the first task (regression for issue #1070).
+	"""
+
+	def _get_task_opts_from_chain(self, workflow_chain):
+		"""Extract opts dict for each run_command task in the Celery chain."""
+		opts_list = []
+		for sig in workflow_chain.tasks:
+			if 'opts' in sig.kwargs:
+				opts_list.append(sig.kwargs['opts'])
+		return opts_list
+
+	def test_all_tasks_receive_forwarded_targets_extractor(self):
+		"""Subsequent tasks in a workflow must receive targets_ when chain_previous_results=True."""
+		from secator.runners import Workflow
+		from secator.loader import get_configs_by_type
+
+		# Use a real multi-task workflow config
+		workflows = get_configs_by_type('workflow')
+		multi_task_workflows = [w for w in workflows if w.tasks and len(w.tasks) >= 2]
+		if not multi_task_workflows:
+			self.skipTest('No multi-task workflows available')
+
+		config = multi_task_workflows[0]
+
+		# Simulate a scan passing a targets_ extractor to this workflow
+		targets_extractor = [{'type': 'port', 'field': '{host}:{port}'}]
+		run_opts = {
+			'targets_': targets_extractor,
+			'has_parent': True,
+			'skip_if_no_inputs': True,
+			'caller': 'Scan',
+		}
+
+		workflow = Workflow(config, inputs=[], run_opts=run_opts)
+		workflow_chain = workflow.build_celery_workflow(chain_previous_results=True)
+
+		task_opts_list = self._get_task_opts_from_chain(workflow_chain)
+
+		# All tasks should have the targets_ extractor — not just the first one
+		self.assertGreaterEqual(len(task_opts_list), 2, 'Expected at least 2 task signatures in chain')
+		for ix, task_opts in enumerate(task_opts_list):
+			self.assertIn(
+				'targets_', task_opts,
+				f'Task {ix + 1} ({task_opts.get("name", "?")}) is missing targets_ extractor '
+				f'(regression for issue #1070)'
+			)
+			self.assertEqual(task_opts['targets_'], targets_extractor)

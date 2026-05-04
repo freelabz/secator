@@ -54,7 +54,7 @@ class Workflow(Runner):
 		# Remove dynamic opts from parent runner
 		opts = {k: v for k, v in opts.items() if k not in self.dynamic_opts}
 
-		# Forward workflow opts to first task if needed
+		# Forward workflow opts to all tasks if needed
 		forwarded_opts = {}
 		if chain_previous_results:
 			forwarded_opts = self.dynamic_opts
@@ -95,7 +95,7 @@ class Workflow(Runner):
 
 				# Merge task options (order of priority with overrides)
 				task_opts = merge_opts(self.config.default_options.toDict(), node.opts, opts)
-				if (ix == 0 or parent_ix == 0) and forwarded_opts:
+				if forwarded_opts:
 					task_opts.update(forwarded_opts)
 
 				# Create task signature
