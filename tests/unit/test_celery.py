@@ -342,9 +342,12 @@ class TestDelayMethods(unittest.TestCase):
 
 
 class TestWorkflowChainForwardedOpts(unittest.TestCase):
-	"""Test that forwarded_opts (e.g. targets_) are applied to ALL tasks in a workflow
-	when chain_previous_results=True, and that ancestor_id/node_chain_start are set correctly
-	(regression for issue #1070).
+	"""Test that workflow tasks receive correct context for scope-based target tracking
+	when chain_previous_results=True (regression for issue #1070).
+
+	The scan-level targets_ extractor is handled by mark_runner_started emitting scope-tagged
+	Targets, so it is NOT forwarded to individual tasks.  Instead every task receives
+	parent_scope in its context so it can query the workflow-scope Target pool directly.
 	"""
 
 	def _get_task_opts_from_chain(self, sig):
@@ -357,8 +360,9 @@ class TestWorkflowChainForwardedOpts(unittest.TestCase):
 			opts_list.append(sig.kwargs['opts'])
 		return opts_list
 
-	def test_all_tasks_receive_forwarded_targets_extractor(self):
-		"""All tasks in a workflow must receive targets_ and proper context when chain_previous_results=True."""
+	def test_all_tasks_receive_parent_scope_not_forwarded_targets_extractor(self):
+		"""Tasks must NOT receive the scan-level targets_ extractor (handled by mark_runner_started)
+		but MUST have parent_scope, ancestor_id, and node_chain_start in their context."""
 		from secator.runners import Workflow
 		from secator.loader import get_configs_by_type
 
@@ -384,25 +388,32 @@ class TestWorkflowChainForwardedOpts(unittest.TestCase):
 
 		task_opts_list = self._get_task_opts_from_chain(workflow_chain)
 
-		# All tasks should have the targets_ extractor and proper context
 		self.assertGreaterEqual(len(task_opts_list), 2, 'Expected at least 2 task signatures in chain')
 		for ix, task_opts in enumerate(task_opts_list):
 			task_name = task_opts.get('name', '?')
-			# All tasks must receive the forwarded targets_ extractor
-			self.assertIn(
-				'targets_', task_opts,
-				f'Task {ix + 1} ({task_name}) is missing targets_ extractor (regression for issue #1070)'
-			)
-			self.assertEqual(task_opts['targets_'], targets_extractor)
-
-			# All tasks must have ancestor_id set (non-None) in context
 			ctx = task_opts.get('context', {})
+
+			# The scan-level targets_ extractor must NOT be forwarded to tasks —
+			# mark_runner_started handles it by emitting scope-tagged Targets.
+			self.assertNotIn(
+				'targets_', task_opts,
+				f'Task {ix + 1} ({task_name}) incorrectly received targets_ — '
+				'scan-level target filtering should be done by mark_runner_started'
+			)
+
+			# Every task must know its workflow scope so it can query the right Target pool.
+			self.assertIsNotNone(
+				ctx.get('parent_scope'),
+				f'Task {ix + 1} ({task_name}) is missing parent_scope in context'
+			)
+
+			# ancestor_id must be set for non-target extractor scoping.
 			self.assertIsNotNone(
 				ctx.get('ancestor_id'),
-				f'Task {ix + 1} ({task_name}) has None ancestor_id — subsequent tasks cannot scope extractors'
+				f'Task {ix + 1} ({task_name}) has None ancestor_id'
 			)
 
-			# All tasks must have node_chain_start in context
+			# node_chain_start must be present for non-target extractor ordering.
 			self.assertIn(
 				'node_chain_start', ctx,
 				f'Task {ix + 1} ({task_name}) is missing node_chain_start in context'

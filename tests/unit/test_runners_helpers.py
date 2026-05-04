@@ -303,6 +303,38 @@ class TestExtractorFunctions(unittest.TestCase):
         self.assertEqual(updated_opts['other'], ['<DYNAMIC(url.url)>'])
         self.assertEqual(errors, [])
 
+    def test_run_extractors_scope_fallback_no_extractor(self):
+        """When no targets_ extractor is defined and parent_scope is set, run_extractors
+        should fall back to workflow-scope-tagged Targets as inputs (issue #1070)."""
+        scoped_target = Target(name='scopeme.example.com')
+        scoped_target._context['scope'] = 'workflow2'
+        unscoped_target = Target(name='other.example.com')
+        results = [scoped_target, unscoped_target]
+
+        # No targets_ extractor, but parent_scope is set
+        inputs, _, errors = run_extractors(
+            results, {}, inputs=['original.example.com'],
+            ctx={'parent_scope': 'workflow2'}
+        )
+        self.assertEqual(errors, [])
+        self.assertIn('scopeme.example.com', inputs)
+        self.assertNotIn('other.example.com', inputs)
+        self.assertNotIn('original.example.com', inputs)
+
+    def test_run_extractors_scope_fallback_no_targets_in_scope(self):
+        """When parent_scope is set but no matching scope-tagged Targets exist, fall back
+        to the original inputs rather than returning an empty list."""
+        unscoped_target = Target(name='other.example.com')
+        results = [unscoped_target]
+
+        inputs, _, errors = run_extractors(
+            results, {}, inputs=['original.example.com'],
+            ctx={'parent_scope': 'workflow2'}
+        )
+        self.assertEqual(errors, [])
+        # No scoped targets found → keep original inputs unchanged
+        self.assertEqual(inputs, ['original.example.com'])
+
     def test_run_extractors_with_group_by(self):
         """Full pipeline: Technology items → grouped search_vulns inputs via group_by extractor."""
         tech1 = Technology(match='10.0.0.1:80', product='apache httpd', version='2.4.50')

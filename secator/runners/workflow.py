@@ -54,10 +54,12 @@ class Workflow(Runner):
 		# Remove dynamic opts from parent runner
 		opts = {k: v for k, v in opts.items() if k not in self.dynamic_opts}
 
-		# Forward workflow opts to all tasks if needed
+		# Forward non-target dynamic opts to the first task in the chain (e.g. ports_).
+		# Target-based filtering is handled by mark_runner_started emitting scope-tagged Targets,
+		# so targets_ is excluded here to avoid overwriting each task's own targets_ extractor.
 		forwarded_opts = {}
 		if chain_previous_results:
-			forwarded_opts = self.dynamic_opts
+			forwarded_opts = {k: v for k, v in self.dynamic_opts.items() if k.rstrip('_') != 'targets'}
 
 		# Build workflow tree
 		tree = build_runner_tree(self.config)
@@ -104,6 +106,8 @@ class Workflow(Runner):
 				task_opts['context']['node_id'] = node.id
 				task_opts['context']['ancestor_id'] = current_id
 				task_opts['context']['node_chain_start'] = (ix == 0 or parent_ix == 0)
+				if chain_previous_results:
+					task_opts['context']['parent_scope'] = current_id
 				task_opts['aliases'] = [node.id, node.name]
 				if task.__name__ != node.name:
 					task_opts['aliases'].append(task.__name__)

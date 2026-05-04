@@ -45,6 +45,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 	computed_opts = {}
 	node_chain_start = ctx.get('node_chain_start', False)
 	ancestor_id = ctx.get('ancestor_id')
+	parent_scope = ctx.get('parent_scope')
 
 	for key, val in extractors.items():
 		key = key.rstrip('_')
@@ -63,6 +64,17 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 	if input_extractors:
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')
 		inputs = computed_inputs
+	elif parent_scope:
+		# No targets_ extractor defined: fall back to the workflow-scope Target pool so that
+		# tasks without an explicit extractor still receive the targets established by the
+		# workflow's mark_runner_started rather than the raw original inputs.
+		scoped_targets = deduplicate([
+			item.name for item in results
+			if item._type == 'target' and item._context.get('scope') == parent_scope
+		])
+		if scoped_targets:
+			debug('using scope-tagged targets as inputs', obj=scoped_targets, sub='extractors')
+			inputs = scoped_targets
 	if computed_opts:
 		debug('computed_opts', obj=computed_opts, sub='extractors')
 	return inputs, opts, errors
@@ -167,6 +179,7 @@ def process_extractor(results, extractor, ctx=None):
 	# debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
 	ancestor_id = ctx.get('ancestor_id')
 	node_chain_start = ctx.get('node_chain_start')
+	parent_scope = ctx.get('parent_scope')
 	key = ctx.get('key')
 
 	# Parse extractor, it can be a dict or a string (shortcut)
@@ -178,7 +191,12 @@ def process_extractor(results, extractor, ctx=None):
 	# Evaluate condition for each result
 	if _condition:
 		tmp_results = []
-		if ancestor_id and not node_chain_start:
+		# For target-type extractors with a parent scope, pre-filter by scope so that
+		# the task's own condition operates only on the workflow-scope Target pool.
+		# For non-target types (ports, urls, …) keep the existing ancestor_id mechanism.
+		if _type == 'target' and parent_scope:
+			_condition = _condition + f' and item._context.get("scope") == "{parent_scope}"'
+		elif ancestor_id and not node_chain_start:
 			_condition = _condition + f' and item._context.get("ancestor_id") == "{str(ancestor_id)}"'
 		for item in results:
 			if item._type != _type:
@@ -199,7 +217,11 @@ def process_extractor(results, extractor, ctx=None):
 		results = tmp_results
 	else:
 		results = [item for item in results if item._type == _type]
-		if ancestor_id and not node_chain_start:
+		# For target-type extractors use scope-based filtering (workflow-scope Target pool).
+		# For other types keep the existing ancestor_id mechanism.
+		if _type == 'target' and parent_scope:
+			results = [item for item in results if item._context.get('scope') == parent_scope]
+		elif ancestor_id and not node_chain_start:
 			results = [item for item in results if item._context.get('ancestor_id') == ancestor_id]
 
 	results_str = "\n".join([f'{repr(item)} [{str(item._context.get("ancestor_id", ""))}]' for item in results])

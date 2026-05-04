@@ -543,6 +543,7 @@ class Runner:
 			'targets': self.inputs,
 			'ancestor_id': self.ancestor_id,
 			'node_chain_start': self.context.get('node_chain_start', False),
+			'parent_scope': self.context.get('parent_scope'),
 		}
 		inputs, run_opts, errors = run_extractors(self.results, self.run_opts, self.inputs, ctx=ctx, dry_run=self.dry_run)
 		for error in errors:
