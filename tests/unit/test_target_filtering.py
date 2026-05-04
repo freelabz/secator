@@ -318,6 +318,28 @@ class TestRunExtractorsScopeFallback(unittest.TestCase):
         self.assertIn('http://extracted.com', inputs)
         self.assertNotIn('scope.com:80', inputs)
 
+    def test_chunk_task_scope_fallback_not_applied(self):
+        """Chunked sub-tasks must keep their pre-determined input, not be overridden by scope fallback.
+
+        Regression test for: break_task removes targets_ from opts, causing scope fallback to fire
+        and replace the chunk's single input with all scope-tagged targets (issue #1070 follow-up).
+        """
+        t1 = self._make_scope_target('host1.com', 'workflow2')
+        t2 = self._make_scope_target('host2.com', 'workflow2')
+        results = [t1, t2]
+        chunk_query = 'nginx 1.18.0~host1.com,host2.com'
+
+        # opts has no targets_ (break_task removes it) but has chunk=1 and parent_scope
+        inputs, _, errors = run_extractors(
+            results,
+            {'parent_scope': 'workflow2', 'chunk': 1},
+            inputs=[chunk_query],
+            ctx={'parent_scope': 'workflow2'}
+        )
+        self.assertEqual(errors, [])
+        self.assertEqual(inputs, [chunk_query],
+            "Chunk input must not be overridden by scope fallback")
+
 
 class TestBuildCeleryWorkflowContext(unittest.TestCase):
     """build_celery_workflow must set parent_scope, ancestor_id, node_chain_start correctly."""

@@ -70,7 +70,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 	if input_extractors:
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')
 		inputs = computed_inputs
-	elif parent_scope:
+	elif parent_scope and not opts.get('chunk'):
 		_meta_types = {'info', 'progress', 'state', 'error', 'target'}  # 'target' handled separately via scoped_targets above
 		scoped_targets = [
 			item.name for item in results
