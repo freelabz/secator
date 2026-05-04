@@ -63,17 +63,6 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 	if input_extractors:
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')
 		inputs = computed_inputs
-	elif not node_chain_start and ancestor_id:
-		# No targets_ extractor defined for this chained task — default to all Target
-		# objects tagged with the ancestor_id so subsequent tasks get their inputs
-		# automatically without requiring an explicit extractor definition.
-		ancestor_targets = deduplicate([
-			item.name for item in results
-			if item._type == 'target' and item._context.get('ancestor_id') == str(ancestor_id)
-		])
-		if ancestor_targets:
-			debug('defaulted to ancestor targets', obj=ancestor_targets, sub='extractors')
-			inputs = ancestor_targets
 	if computed_opts:
 		debug('computed_opts', obj=computed_opts, sub='extractors')
 	return inputs, opts, errors

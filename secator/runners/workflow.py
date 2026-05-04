@@ -95,7 +95,7 @@ class Workflow(Runner):
 
 				# Merge task options (order of priority with overrides)
 				task_opts = merge_opts(self.config.default_options.toDict(), node.opts, opts)
-				if forwarded_opts:
+				if (ix == 0 or parent_ix == 0) and forwarded_opts:
 					task_opts.update(forwarded_opts)
 
 				# Create task signature
