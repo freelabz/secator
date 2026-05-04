@@ -276,3 +276,4 @@ To go deeper with `secator`, check out:
     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=freelabz/secator&type=Date" />
   </picture>
 </a>
+
