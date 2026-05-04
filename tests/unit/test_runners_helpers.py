@@ -303,6 +303,43 @@ class TestExtractorFunctions(unittest.TestCase):
         self.assertEqual(updated_opts['other'], ['<DYNAMIC(url.url)>'])
         self.assertEqual(errors, [])
 
+    def test_run_extractors_chained_task_defaults_to_ancestor_targets(self):
+        """When no targets_ extractor is defined for a chained task, default to Target objects tagged with ancestor_id."""
+        import uuid
+        ancestor_id = str(uuid.uuid4())
+
+        t1 = Target(name='host1.example.com')
+        t1._context['ancestor_id'] = ancestor_id
+        t2 = Target(name='host2.example.com')
+        t2._context['ancestor_id'] = ancestor_id
+        t_other = Target(name='other.example.com')
+        t_other._context['ancestor_id'] = str(uuid.uuid4())
+
+        results = [t1, t2, t_other]
+        opts = {}
+        ctx = {'ancestor_id': ancestor_id, 'node_chain_start': False}
+
+        inputs, updated_opts, errors = run_extractors(results, opts, inputs=[], ctx=ctx)
+        self.assertEqual(sorted(inputs), ['host1.example.com', 'host2.example.com'])
+        self.assertEqual(errors, [])
+
+    def test_run_extractors_chain_start_does_not_default_to_ancestor_targets(self):
+        """Chain-start tasks must NOT use ancestor fallback so they get the original scan targets."""
+        import uuid
+        ancestor_id = str(uuid.uuid4())
+
+        t1 = Target(name='host1.example.com')
+        t1._context['ancestor_id'] = ancestor_id
+
+        results = [t1]
+        opts = {}
+        ctx = {'ancestor_id': ancestor_id, 'node_chain_start': True}
+        original_inputs = ['original.example.com']
+
+        inputs, _updated_opts, errors = run_extractors(results, opts, inputs=original_inputs, ctx=ctx)
+        self.assertEqual(inputs, original_inputs)
+        self.assertEqual(errors, [])
+
     def test_run_extractors_with_group_by(self):
         """Full pipeline: Technology items → grouped search_vulns inputs via group_by extractor."""
         tech1 = Technology(match='10.0.0.1:80', product='apache httpd', version='2.4.50')
