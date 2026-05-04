@@ -198,12 +198,16 @@ class Runner:
 		self.debug(f'resolving inputs with {len(self.dynamic_opts)} dynamic opts', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		self.inputs = list(set(self.inputs))
+
+		# Run extractors on results (before adding targets, so extractors can compute inputs from prior results)
+		self._run_extractors()
+
+		# Add targets to results (after extractors, so computed targets are emitted with correct ancestor_id)
 		targets = [Target(name=target) for target in self.inputs]
 		for target in targets:
 			self.add_result(target, print=False, output=False)
+			self.debug(f'added target {str(target)} (ancestor_id: {target._context.get("ancestor_id")})')
 
-		# Run extractors on results
-		self._run_extractors()
 		self._merge_opts_defaults()
 		self.debug(f'inputs ({len(self.inputs)})', obj=self.inputs, sub='init')
 		self.debug(f'run opts ({len(self.resolved_opts)})', obj=self.resolved_opts, sub='init')
@@ -534,7 +538,12 @@ class Runner:
 	def _run_extractors(self):
 		"""Run extractors on results and targets."""
 		self.debug('running extractors', sub='init')
-		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs, 'ancestor_id': self.ancestor_id}
+		ctx = {
+			'opts': DotMap(self.run_opts),
+			'targets': self.inputs,
+			'ancestor_id': self.ancestor_id,
+			'node_chain_start': self.context.get('node_chain_start', False),
+		}
 		inputs, run_opts, errors = run_extractors(self.results, self.run_opts, self.inputs, ctx=ctx, dry_run=self.dry_run)
 		for error in errors:
 			self.add_result(error)

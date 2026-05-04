@@ -343,19 +343,22 @@ class TestDelayMethods(unittest.TestCase):
 
 class TestWorkflowChainForwardedOpts(unittest.TestCase):
 	"""Test that forwarded_opts (e.g. targets_) are applied to ALL tasks in a workflow
-	when chain_previous_results=True, not just the first task (regression for issue #1070).
+	when chain_previous_results=True, and that ancestor_id/node_chain_start are set correctly
+	(regression for issue #1070).
 	"""
 
-	def _get_task_opts_from_chain(self, workflow_chain):
-		"""Extract opts dict for each run_command task in the Celery chain."""
+	def _get_task_opts_from_chain(self, sig):
+		"""Recursively extract opts for all run_command task sigs in a chain/group."""
 		opts_list = []
-		for sig in workflow_chain.tasks:
-			if 'opts' in sig.kwargs:
-				opts_list.append(sig.kwargs['opts'])
+		if hasattr(sig, 'tasks'):
+			for subtask in sig.tasks:
+				opts_list.extend(self._get_task_opts_from_chain(subtask))
+		elif hasattr(sig, 'kwargs') and 'opts' in sig.kwargs:
+			opts_list.append(sig.kwargs['opts'])
 		return opts_list
 
 	def test_all_tasks_receive_forwarded_targets_extractor(self):
-		"""Subsequent tasks in a workflow must receive targets_ when chain_previous_results=True."""
+		"""All tasks in a workflow must receive targets_ and proper context when chain_previous_results=True."""
 		from secator.runners import Workflow
 		from secator.loader import get_configs_by_type
 
@@ -381,12 +384,26 @@ class TestWorkflowChainForwardedOpts(unittest.TestCase):
 
 		task_opts_list = self._get_task_opts_from_chain(workflow_chain)
 
-		# All tasks should have the targets_ extractor — not just the first one
+		# All tasks should have the targets_ extractor and proper context
 		self.assertGreaterEqual(len(task_opts_list), 2, 'Expected at least 2 task signatures in chain')
 		for ix, task_opts in enumerate(task_opts_list):
+			task_name = task_opts.get('name', '?')
+			# All tasks must receive the forwarded targets_ extractor
 			self.assertIn(
 				'targets_', task_opts,
-				f'Task {ix + 1} ({task_opts.get("name", "?")}) is missing targets_ extractor '
-				f'(regression for issue #1070)'
+				f'Task {ix + 1} ({task_name}) is missing targets_ extractor (regression for issue #1070)'
 			)
 			self.assertEqual(task_opts['targets_'], targets_extractor)
+
+			# All tasks must have ancestor_id set (non-None) in context
+			ctx = task_opts.get('context', {})
+			self.assertIsNotNone(
+				ctx.get('ancestor_id'),
+				f'Task {ix + 1} ({task_name}) has None ancestor_id — subsequent tasks cannot scope extractors'
+			)
+
+			# All tasks must have node_chain_start in context
+			self.assertIn(
+				'node_chain_start', ctx,
+				f'Task {ix + 1} ({task_name}) is missing node_chain_start in context'
+			)

@@ -102,7 +102,8 @@ class Workflow(Runner):
 				task_opts['name'] = node.name
 				task_opts['context'] = self.context.copy()
 				task_opts['context']['node_id'] = node.id
-				task_opts['context']['ancestor_id'] = None if (ix == 0 or parent_ix == 0) else current_id
+				task_opts['context']['ancestor_id'] = current_id
+				task_opts['context']['node_chain_start'] = (ix == 0 or parent_ix == 0)
 				task_opts['aliases'] = [node.id, node.name]
 				if task.__name__ != node.name:
 					task_opts['aliases'].append(task.__name__)

@@ -164,6 +164,7 @@ def process_extractor(results, extractor, ctx=None):
 		ctx = {}
 	# debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
 	ancestor_id = ctx.get('ancestor_id')
+	node_chain_start = ctx.get('node_chain_start')
 	key = ctx.get('key')
 
 	# Parse extractor, it can be a dict or a string (shortcut)
@@ -175,7 +176,7 @@ def process_extractor(results, extractor, ctx=None):
 	# Evaluate condition for each result
 	if _condition:
 		tmp_results = []
-		if ancestor_id:
+		if ancestor_id and not node_chain_start:
 			_condition = _condition + f' and item._context.get("ancestor_id") == "{str(ancestor_id)}"'
 		for item in results:
 			if item._type != _type:
@@ -196,7 +197,7 @@ def process_extractor(results, extractor, ctx=None):
 		results = tmp_results
 	else:
 		results = [item for item in results if item._type == _type]
-		if ancestor_id:
+		if ancestor_id and not node_chain_start:
 			results = [item for item in results if item._context.get('ancestor_id') == ancestor_id]
 
 	results_str = "\n".join([f'{repr(item)} [{str(item._context.get("ancestor_id", ""))}]' for item in results])
