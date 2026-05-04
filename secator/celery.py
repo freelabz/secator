@@ -297,15 +297,16 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	for item in results:
 		runner.add_result(item, print=False)
 
-	# For workflow runners inside a scan (has_parent=True), emit scope-tagged Targets so that
-	# ALL tasks in this workflow can query the same target pool via parent_scope, regardless of
+	# For workflow runners inside a scan (has_parent=True), emit ancestor-tagged Targets so that
+	# ALL tasks in this workflow can query the same target pool via ancestor_id, regardless of
 	# whether they have their own targets_ extractor or not.
 	# This must happen after adding prior results so that scan-level target extractors (e.g.
 	# targets_: [{type: port, …}]) resolve correctly against the accumulated results.
 	if runner.has_parent and getattr(runner.config, 'type', None) == 'workflow':
 		from secator.runners._helpers import run_extractors
 		from secator.output_types import Target as TargetType
-		scope = runner.config.name
+		parent_ancestor = runner.ancestor_id  # scan name (set by scan.py)
+		scope = f'{parent_ancestor}.{runner.config.name}' if parent_ancestor else runner.config.name
 		target_dynamic_opts = {k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'}
 		if target_dynamic_opts:
 			ctx = {'ancestor_id': runner.ancestor_id, 'node_chain_start': True}
@@ -314,9 +315,9 @@ def mark_runner_started(results, runner, enable_hooks=True):
 			scoped_inputs = runner.inputs
 		for t in scoped_inputs:
 			target = TargetType(name=t)
-			target._context['scope'] = scope
+			target._context['ancestor_id'] = scope
 			runner.add_result(target, print=False)
-		debug(f'Runner {runner.unique_name}: emitted {len(scoped_inputs)} scope-tagged targets (scope={scope})', sub='celery')
+		debug(f'Runner {runner.unique_name}: emitted {len(scoped_inputs)} ancestor-tagged targets (ancestor_id={scope})', sub='celery')
 
 	# Run mark_started
 	runner.mark_started()

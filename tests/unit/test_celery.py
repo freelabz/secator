@@ -342,12 +342,12 @@ class TestDelayMethods(unittest.TestCase):
 
 
 class TestWorkflowChainForwardedOpts(unittest.TestCase):
-	"""Test that workflow tasks receive correct context for scope-based target tracking
+	"""Test that workflow tasks receive correct context for ancestor-based target tracking
 	when chain_previous_results=True (regression for issue #1070).
 
-	The scan-level targets_ extractor is handled by mark_runner_started emitting scope-tagged
-	Targets, so it is NOT forwarded to individual tasks.  Instead every task receives
-	parent_scope in its context so it can query the workflow-scope Target pool directly.
+	The scan-level targets_ extractor is handled by mark_runner_started emitting ancestor-tagged
+	Targets, so it is NOT forwarded to tasks.  Non-chain-start tasks without their own targets_
+	extractor receive an auto-injected default so they query the ancestor-tagged Target pool.
 	"""
 
 	def _get_task_opts_from_chain(self, sig):
@@ -358,11 +358,17 @@ class TestWorkflowChainForwardedOpts(unittest.TestCase):
 				opts_list.extend(self._get_task_opts_from_chain(subtask))
 		elif hasattr(sig, 'kwargs') and 'opts' in sig.kwargs:
 			opts_list.append(sig.kwargs['opts'])
+		elif hasattr(sig, 'kwargs') and sig.kwargs:
+			# Unwrap nested chain/group sigs (e.g., chord/chain inside the workflow)
+			for subtask in sig.kwargs.values():
+				if hasattr(subtask, 'tasks'):
+					opts_list.extend(self._get_task_opts_from_chain(subtask))
 		return opts_list
 
-	def test_all_tasks_receive_parent_scope_not_forwarded_targets_extractor(self):
-		"""Tasks must NOT receive the scan-level targets_ extractor (handled by mark_runner_started)
-		but MUST have parent_scope, ancestor_id, and node_chain_start in their context."""
+	def test_tasks_receive_ancestor_id_and_node_chain_start(self):
+		"""All tasks must have ancestor_id and node_chain_start set.
+		The first task (chain-start) must NOT receive the scan-level targets_ extractor.
+		Non-chain-start tasks without their own targets_ must receive an auto-injected default."""
 		from secator.runners import Workflow
 		from secator.loader import get_configs_by_type
 
@@ -375,9 +381,9 @@ class TestWorkflowChainForwardedOpts(unittest.TestCase):
 		config = multi_task_workflows[0]
 
 		# Simulate a scan passing a targets_ extractor to this workflow
-		targets_extractor = [{'type': 'port', 'field': '{host}:{port}'}]
+		scan_targets_extractor = [{'type': 'port', 'field': '{host}:{port}'}]
 		run_opts = {
-			'targets_': targets_extractor,
+			'targets_': scan_targets_extractor,
 			'has_parent': True,
 			'skip_if_no_inputs': True,
 			'caller': 'Scan',
@@ -392,28 +398,34 @@ class TestWorkflowChainForwardedOpts(unittest.TestCase):
 		for ix, task_opts in enumerate(task_opts_list):
 			task_name = task_opts.get('name', '?')
 			ctx = task_opts.get('context', {})
+			is_chain_start = ctx.get('node_chain_start', False)
 
-			# The scan-level targets_ extractor must NOT be forwarded to tasks —
-			# mark_runner_started handles it by emitting scope-tagged Targets.
-			self.assertNotIn(
-				'targets_', task_opts,
-				f'Task {ix + 1} ({task_name}) incorrectly received targets_ — '
-				'scan-level target filtering should be done by mark_runner_started'
-			)
+			# The scan-level targets_ extractor must NOT reach chain-start tasks directly —
+			# mark_runner_started handles it by emitting ancestor-tagged Targets.
+			if is_chain_start:
+				self.assertNotEqual(
+					task_opts.get('targets_'), scan_targets_extractor,
+					f'Task {ix + 1} ({task_name}) incorrectly received the scan-level targets_ extractor'
+				)
+			else:
+				# Non-chain-start tasks must have a targets_ extractor (own or auto-injected default)
+				# so they can query the ancestor-tagged Target pool from mark_runner_started.
+				self.assertIn(
+					'targets_', task_opts,
+					f'Task {ix + 1} ({task_name}) is missing targets_ (should be auto-injected for chained tasks)'
+				)
+				self.assertNotEqual(
+					task_opts.get('targets_'), scan_targets_extractor,
+					f'Task {ix + 1} ({task_name}) incorrectly received the scan-level targets_ extractor'
+				)
 
-			# Every task must know its workflow scope so it can query the right Target pool.
-			self.assertIsNotNone(
-				ctx.get('parent_scope'),
-				f'Task {ix + 1} ({task_name}) is missing parent_scope in context'
-			)
-
-			# ancestor_id must be set for non-target extractor scoping.
+			# ancestor_id must be set (non-None) for all tasks.
 			self.assertIsNotNone(
 				ctx.get('ancestor_id'),
 				f'Task {ix + 1} ({task_name}) has None ancestor_id'
 			)
 
-			# node_chain_start must be present for non-target extractor ordering.
+			# node_chain_start must be present in context for all tasks.
 			self.assertIn(
 				'node_chain_start', ctx,
 				f'Task {ix + 1} ({task_name}) is missing node_chain_start in context'

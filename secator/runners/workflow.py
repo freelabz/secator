@@ -55,7 +55,7 @@ class Workflow(Runner):
 		opts = {k: v for k, v in opts.items() if k not in self.dynamic_opts}
 
 		# Forward non-target dynamic opts to the first task in the chain (e.g. ports_).
-		# Target-based filtering is handled by mark_runner_started emitting scope-tagged Targets,
+		# Target-based filtering is handled by mark_runner_started emitting ancestor-tagged Targets,
 		# so targets_ is excluded here to avoid overwriting each task's own targets_ extractor.
 		forwarded_opts = {}
 		if chain_previous_results:
@@ -64,6 +64,12 @@ class Workflow(Runner):
 		# Build workflow tree
 		tree = build_runner_tree(self.config)
 		current_id = tree.root_nodes[0].id
+
+		# Compute fully-qualified ancestor_id for all tasks in this workflow.
+		# Using <scan_name>.<workflow_name> avoids conflicts when two workflows share the
+		# same task names or when the same workflow runs in different scan contexts.
+		parent_ancestor = self.ancestor_id  # set by scan.py when running inside a scan
+		full_current_id = f'{parent_ancestor}.{current_id}' if parent_ancestor else current_id
 		ix = 0
 		sigs = []
 
@@ -97,17 +103,20 @@ class Workflow(Runner):
 
 				# Merge task options (order of priority with overrides)
 				task_opts = merge_opts(self.config.default_options.toDict(), node.opts, opts)
-				if (ix == 0 or parent_ix == 0) and forwarded_opts:
+				is_chain_start = (ix == 0 or parent_ix == 0)
+				if is_chain_start and forwarded_opts:
 					task_opts.update(forwarded_opts)
+				elif chain_previous_results and 'targets_' not in task_opts:
+					# Non-chain-start task with no explicit targets_ extractor: auto-inject one so
+					# it picks up the ancestor-tagged Target pool from mark_runner_started.
+					task_opts['targets_'] = [{'type': 'target', 'field': 'name'}]
 
 				# Create task signature
 				task_opts['name'] = node.name
 				task_opts['context'] = self.context.copy()
 				task_opts['context']['node_id'] = node.id
-				task_opts['context']['ancestor_id'] = current_id
-				task_opts['context']['node_chain_start'] = (ix == 0 or parent_ix == 0)
-				if chain_previous_results:
-					task_opts['context']['parent_scope'] = current_id
+				task_opts['context']['ancestor_id'] = full_current_id
+				task_opts['context']['node_chain_start'] = is_chain_start
 				task_opts['aliases'] = [node.id, node.name]
 				if task.__name__ != node.name:
 					task_opts['aliases'].append(task.__name__)

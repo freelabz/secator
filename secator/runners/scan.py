@@ -58,14 +58,17 @@ class Scan(Runner):
 				self.add_result(Info(message=f'Skipped workflow {name} because condition is not met: {condition}'))
 				continue
 
-			# Build workflow
+			# Build workflow — pass scan name as ancestor_id so workflow tasks
+			# can build fully-qualified ancestor paths (<scan>.<workflow>)
+			workflow_context = self.context.copy()
+			workflow_context['ancestor_id'] = self.config.name
 			workflow = Workflow(
 				config,
 				self.inputs,
 				results=self.results,
 				run_opts=opts,
 				hooks=self._hooks,
-				context=self.context.copy()
+				context=workflow_context
 			)
 			celery_workflow = workflow.build_celery_workflow(chain_previous_results=True)
 			for task_id, task_info in workflow.celery_ids_map.items():
