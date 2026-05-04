@@ -54,14 +54,13 @@ class Workflow(Runner):
 		# Remove dynamic opts from parent runner
 		opts = {k: v for k, v in opts.items() if k not in self.dynamic_opts}
 
-		# Forward workflow opts to first task if needed
-		forwarded_opts = {}
-		if chain_previous_results:
-			forwarded_opts = self.dynamic_opts
-
 		# Build workflow tree
 		tree = build_runner_tree(self.config)
 		current_id = tree.root_nodes[0].id
+		scope_id = None
+		if chain_previous_results and self.dynamic_opts.get('targets_'):
+			scope_id = current_id
+			self.context['parent_scope'] = scope_id
 		ix = 0
 		sigs = []
 
@@ -95,14 +94,16 @@ class Workflow(Runner):
 
 				# Merge task options (order of priority with overrides)
 				task_opts = merge_opts(self.config.default_options.toDict(), node.opts, opts)
-				if (ix == 0 or parent_ix == 0) and forwarded_opts:
-					task_opts.update(forwarded_opts)
 
 				# Create task signature
 				task_opts['name'] = node.name
 				task_opts['context'] = self.context.copy()
 				task_opts['context']['node_id'] = node.id
-				task_opts['context']['ancestor_id'] = None if (ix == 0 or parent_ix == 0) else current_id
+				task_opts['context']['ancestor_id'] = current_id
+				task_opts['context']['node_chain_start'] = (ix == 0 or parent_ix == 0)
+				task_opts['context']['parent_scope'] = scope_id
+				task_opts['node_chain_start'] = (ix == 0 or parent_ix == 0)
+				task_opts['parent_scope'] = scope_id
 				task_opts['aliases'] = [node.id, node.name]
 				if task.__name__ != node.name:
 					task_opts['aliases'].append(task.__name__)
