@@ -297,6 +297,30 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	for item in results:
 		runner.add_result(item, print=False)
 
+	# Emit scope-tagged Targets for workflows with a scan-level targets_ extractor.
+	# This resolves the extractor at execution time (when Port/result data is available)
+	# so all tasks in the chain can find the correct inputs via parent_scope filtering.
+	scope = runner.context.get('parent_scope')
+	if scope and runner.has_parent and getattr(runner.config, 'type', None) == 'workflow':
+		from secator.runners._helpers import run_extractors
+		from secator.output_types import Target as TargetOutput
+		target_extractor_opts = {
+			k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'
+		}
+		if target_extractor_opts:
+			ctx = {'ancestor_id': runner.ancestor_id, 'node_chain_start': True}
+			scoped_inputs, _, _ = run_extractors(runner.results, target_extractor_opts, runner.inputs, ctx=ctx)
+		else:
+			scoped_inputs = runner.inputs
+		for name in scoped_inputs:
+			t = TargetOutput(name=name)
+			t._context['scope'] = scope
+			runner.add_result(t, print=False)
+		debug(
+			f'Runner {runner.unique_name}: emitted {len(scoped_inputs)} scope-tagged targets (scope={scope})',
+			sub='celery'
+		)
+
 	# Run mark_started
 	runner.mark_started()
 
