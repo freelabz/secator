@@ -44,15 +44,11 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		inputs = []
 	if ctx is None:
 		ctx = {}
-	# Pull parent_scope and node_chain_start from opts when not in ctx
-	# (_run_extractors in _base.py only adds ancestor_id to ctx)
 	if 'parent_scope' not in ctx:
 		ctx['parent_scope'] = opts.get('parent_scope')
 	if 'node_chain_start' not in ctx:
 		ctx['node_chain_start'] = opts.get('node_chain_start', False)
 	parent_scope = ctx.get('parent_scope')
-	ancestor_id = ctx.get('ancestor_id')
-	node_chain_start = ctx.get('node_chain_start', False)
 	extractors = {k: v for k, v in opts.items() if k.endswith('_')}
 	if dry_run:
 		input_extractors = {k: v for k, v in extractors.items() if k.rstrip('_') == 'targets'}
