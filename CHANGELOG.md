@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.31.1](https://github.com/freelabz/secator/compare/v0.31.0...v0.31.1) (2026-05-04)
+
+
+### Bug Fixes
+
+* **cli:** display vulnerability counts in secator r list ([#1048](https://github.com/freelabz/secator/issues/1048)) ([38dc777](https://github.com/freelabz/secator/commit/38dc7774d7428f93581007af41f346304dab5067))
+* **cli:** fix update and addon install in universal script / zsh envs ([#1058](https://github.com/freelabz/secator/issues/1058)) ([225b04e](https://github.com/freelabz/secator/commit/225b04ef81c856b449fa33cc70ca622c9ed1d43a))
+* **domain:** correctly deserialize Domain output type in Scan/Workflow runners ([#1060](https://github.com/freelabz/secator/issues/1060)) ([7519a04](https://github.com/freelabz/secator/commit/7519a047d6ddf1b1f0a6fa601f3b52b7811cf9ba))
+* **target-filtering:** fix issue [#1070](https://github.com/freelabz/secator/issues/1070) - workflow tasks after first receiving 0 inputs in scan context ([#1073](https://github.com/freelabz/secator/issues/1073)) ([22ef3b2](https://github.com/freelabz/secator/commit/22ef3b28fdac30f1584a1e8dc0df0e197d70e4fa))
+* **templates:** support nested dot notation in field extractor ([#1063](https://github.com/freelabz/secator/issues/1063)) ([f38575a](https://github.com/freelabz/secator/commit/f38575abef35a7053e98e4097f4e355a8a24268b))
+* **test:** remove urlfinder flaky test ([47d88b2](https://github.com/freelabz/secator/commit/47d88b271f6d410051d7edaa646a2a93cd6c3ae3))
+* **workflows:** use scan reports dir for storing results ([#1064](https://github.com/freelabz/secator/issues/1064)) ([fc8b21e](https://github.com/freelabz/secator/commit/fc8b21e7aa47bce1dc96d49d8eccef5db094ea72))
+
 ## [0.31.0](https://github.com/freelabz/secator/compare/v0.30.1...v0.31.0) (2026-04-23)
 
 
