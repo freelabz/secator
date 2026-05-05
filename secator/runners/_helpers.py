@@ -92,19 +92,11 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')
 		inputs = computed_inputs
 	elif parent_scope and not opts.get('chunk'):
-		_meta_types = {'info', 'progress', 'state', 'error', 'target'}  # 'target' handled separately via scoped_targets above
 		scoped_targets = [
 			item.name for item in results
 			if item._type == 'target' and item._context.get('scope') == parent_scope
 		]
-		if not node_chain_start and ancestor_id:
-			ancestor_results = [
-				str(item) for item in results
-				if item._context.get('ancestor_id') == str(ancestor_id) and item._type not in _meta_types
-			]
-			combined = deduplicate(scoped_targets + ancestor_results)
-		else:
-			combined = deduplicate(scoped_targets)
+		combined = deduplicate(scoped_targets)
 		if combined:
 			debug('using scope-tagged targets as inputs', obj=combined, sub='extractors')
 			inputs = combined
