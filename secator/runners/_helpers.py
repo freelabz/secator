@@ -125,13 +125,15 @@ def fmt_extractor(extractor):
 	parsed_extractor = parse_extractor(extractor)
 	if not parsed_extractor:
 		return '<DYNAMIC[INVALID_EXTRACTOR]>'
-	_type, _field, _condition, _group_by = parsed_extractor
+	_type, _field, _condition, _group_by, _group_by_collect = parsed_extractor
 	s = f'{_type}.{_field}'
 	if _condition:
 		_condition = _condition.replace("'", '').replace('"', '')
 		s = f'{s} if {_condition}'
 	if _group_by:
 		s = f'{s} group_by {_group_by}'
+	if _group_by_collect:
+		s = f'{s} group_by_collect {_group_by_collect}'
 	return f'<DYNAMIC({s})>'
 
 
@@ -177,7 +179,7 @@ def parse_extractor(extractor):
 		extractor (dict / str): extractor definition.
 
 	Returns:
-		tuple|None: type, field, condition, group_by or None if invalid.
+		tuple|None: type, field, condition, group_by, group_by_collect or None if invalid.
 	"""
 	# Parse extractor, it can be a dict or a string (shortcut)
 	if isinstance(extractor, dict):
@@ -185,6 +187,7 @@ def parse_extractor(extractor):
 		_field = extractor.get('field')
 		_condition = extractor.get('condition')
 		_group_by = extractor.get('group_by')
+		_group_by_collect = extractor.get('group_by_collect')
 	else:
 		parts = tuple(extractor.split('.'))
 		if len(parts) == 2:
@@ -192,9 +195,10 @@ def parse_extractor(extractor):
 			_field = parts[1]
 			_condition = None
 			_group_by = None
+			_group_by_collect = None
 		else:
 			return None
-	return _type, _field, _condition, _group_by
+	return _type, _field, _condition, _group_by, _group_by_collect
 
 
 def process_extractor(results, extractor, ctx=None):
@@ -219,7 +223,7 @@ def process_extractor(results, extractor, ctx=None):
 	parsed_extractor = parse_extractor(extractor)
 	if not parsed_extractor:
 		return results
-	_type, _field, _condition, _group_by = parsed_extractor
+	_type, _field, _condition, _group_by, _group_by_collect = parsed_extractor
 
 	# Evaluate condition for each result
 	if _condition:
@@ -260,7 +264,33 @@ def process_extractor(results, extractor, ctx=None):
 		already_formatted = '{' in _field and '}' in _field
 		_field = '{' + _field + '}' if not already_formatted else _field
 
-		if _group_by:
+		if _group_by_collect:
+			already_formatted_gbc = '{' in _group_by_collect and '}' in _group_by_collect
+			_group_by_collect_fmt = '{' + _group_by_collect + '}' if not already_formatted_gbc else _group_by_collect
+
+			# Phase 1: for each item, collect group_by_collect values per field value
+			field_to_collected = {}
+			for item in results:
+				field_val = _field.format(**item.toDict())
+				collect_val = _group_by_collect_fmt.format(**item.toDict())
+				bucket = field_to_collected.setdefault(field_val, [])
+				if collect_val not in bucket:
+					bucket.append(collect_val)
+
+			# Phase 2: group field values by their sorted fingerprint of collected values
+			def _sort_key(v):
+				try:
+					return (0, int(v))
+				except (ValueError, TypeError):
+					return (1, str(v))
+
+			fingerprint_to_fields = {}
+			for field_val, collected in field_to_collected.items():
+				fingerprint = ','.join(sorted(collected, key=_sort_key))
+				fingerprint_to_fields.setdefault(fingerprint, []).append(field_val)
+
+			results = [','.join(fields) + '~' + fp for fp, fields in fingerprint_to_fields.items()]
+		elif _group_by:
 			already_formatted_gb = '{' in _group_by and '}' in _group_by
 			_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
 			groups = {}

@@ -58,10 +58,7 @@ tasks:
     - type: port
       field: host
       condition: opts.scanners
-    ports_:
-    - type: port
-      field: port
-      condition: port.host in targets and opts.scanners
+      group_by_collect: port
     if: not opts.passive
 
   sshaudit:
