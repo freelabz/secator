@@ -4,39 +4,11 @@ from functools import cache
 
 from cpe import CPE
 
-from secator.definitions import (
-	CIDR_RANGE,
-	DATA,
-	DELAY,
-	DEPTH,
-	FILTER_CODES,
-	FILTER_REGEX,
-	FILTER_SIZE,
-	FILTER_WORDS,
-	FOLLOW_REDIRECT,
-	HEADER,
-	HOST,
-	IP,
-	MATCH_CODES,
-	MATCH_REGEX,
-	MATCH_SIZE,
-	MATCH_WORDS,
-	METHOD,
-	PATH,
-	PORTS,
-	PROXY,
-	RATE_LIMIT,
-	REQUEST,
-	RETRIES,
-	THREADS,
-	TIMEOUT,
-	TOP_PORTS,
-	URL,
-	USER_AGENT,
-	USERNAME,
-	WORDLIST,
-	REPLAY_PROXY,
-)
+from secator.definitions import (CIDR_RANGE, DATA, DELAY, DEPTH, FILTER_CODES,
+								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, HOST, IP,
+								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, PATH, PORTS, PROXY,
+								 RATE_LIMIT, REQUEST, RETRIES, SKIP_SSL_VERIFY, THREADS, TIMEOUT, TOP_PORTS, URL, USER_AGENT,
+								 USERNAME, WORDLIST, REPLAY_PROXY)
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator.config import CONFIG
 from secator.providers._base import CVEProvider
@@ -129,6 +101,7 @@ OPTS = {
 	RATE_LIMIT: {'type': int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
 	REQUEST: {'type': str, 'short': 'rf', 'help': 'Path to file containing raw HTTP request (Burp-style format)', 'pre_process': process_raw_request, 'internal': True},  # noqa: E501
 	RETRIES: {'type': int, 'help': 'Retries'},
+	SKIP_SSL_VERIFY: {'is_flag': True, 'short': 'k', 'help': 'Skip SSL certificate verification (insecure)'},
 	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': CONFIG.runners.threads},
 	TIMEOUT: {'type': int, 'short': 'to', 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
@@ -155,6 +128,7 @@ OPTS_HTTP_BASE = [
 	RATE_LIMIT,
 	REQUEST,
 	RETRIES,
+  SKIP_SSL_VERIFY,
 	THREADS,
 	TIMEOUT,
 	USER_AGENT,

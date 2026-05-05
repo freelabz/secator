@@ -8,8 +8,8 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-	DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
-	URL, USER_AGENT, WORDLIST
+	DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, RATE_LIMIT, RETRIES, SKIP_SSL_VERIFY, THREADS,
+  TIMEOUT, URL, USER_AGENT, WORDLIST
 )
 # fmt: on
 from secator.output_types import Info, Tag, Url, Warning
@@ -48,6 +48,7 @@ class arjun(HttpBase):
 		WORDLIST: 'w',
 		HEADER: '--headers',
 		FOLLOW_REDIRECT: '--follow-redirect',
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		'chunk_size': 'c',
 		'stable': '--stable',
 		'passive': '--passive',
