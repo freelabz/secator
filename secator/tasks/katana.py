@@ -66,7 +66,7 @@ class katana(HttpCrawler):
 	opt_value_map = {DELAY: lambda x: int(x) if isinstance(x, float) else x}
 	item_loaders = [JSONSerializer()]
 	install_pre = {'apk': ['libc6-compat']}
-	install_version = 'v1.3.0'
+	install_version = 'v1.6.0'
 	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@[install_version]'
 	github_handle = 'projectdiscovery/katana'
 	proxychains = False

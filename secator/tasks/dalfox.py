@@ -62,7 +62,7 @@ class dalfox(HttpBase):
 			SEVERITY: lambda x: x['severity'].lower()
 		}
 	}
-	install_version = 'v2.11.0'
+	install_version = 'v2.12.0'
 	install_cmd = 'go install -v github.com/hahwul/dalfox/v2@[install_version]'
 	github_handle = 'hahwul/dalfox'
 	encoding = 'ansi'
