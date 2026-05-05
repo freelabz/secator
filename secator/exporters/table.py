@@ -1,4 +1,4 @@
-from rich.markdown import Markdown
+from secator.rich import CustomMarkdown as Markdown
 
 from secator.exporters._base import Exporter
 from secator.output_types import OUTPUT_TYPES, OutputType
