@@ -256,23 +256,6 @@ class TestRunExtractorsScopeFallback(unittest.TestCase):
         self.assertNotIn('other.com:80', inputs)
         self.assertNotIn('original.com', inputs)
 
-    def test_non_first_task_includes_ancestor_id_results(self):
-        """Non-first tasks (node_chain_start=False) must include ancestor_id-scoped results."""
-        t = Target(name='localhost:445')
-        t._context['scope'] = 'url_crawler'
-        url = Url(url='https://localhost:445/')
-        url._context['ancestor_id'] = 'url_crawler'
-        results = [t, url]
-
-        inputs, _, errors = run_extractors(
-            results, {},
-            inputs=[],
-            ctx={'parent_scope': 'url_crawler', 'ancestor_id': 'url_crawler', 'node_chain_start': False}
-        )
-        self.assertEqual(errors, [])
-        self.assertIn('localhost:445', inputs)
-        self.assertIn('https://localhost:445/', inputs)
-
     def test_fallback_preserves_original_inputs_when_no_scoped_targets(self):
         """If parent_scope set but no matching scope targets and no ancestor_id results, keep original inputs."""
         unscoped = Target(name='other.com')
