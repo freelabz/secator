@@ -259,8 +259,21 @@ def register_runner(cli_endpoint, config):
 
 		# Show runner tree
 		if tree:
+			tree_opts = dict(opts)
+			profiles_str = tree_opts.get('profiles') or ''
+			profile_names = [p.strip() for p in profiles_str.split(',') if p.strip()]
+			for dp in (CONFIG.profiles.defaults or []):
+				if dp not in profile_names:
+					profile_names.append(dp)
+			if profile_names:
+				for profile in get_configs_by_type('profile'):
+					if profile.name not in profile_names:
+						continue
+					for k, v in profile.opts.items():
+						if profile.enforce or not tree_opts.get(k):
+							tree_opts[k] = v
 			tree = build_runner_tree(config)
-			prune_runner_tree(tree, opts, opts.get('inputs', []))
+			prune_runner_tree(tree, tree_opts, tree_opts.get('inputs', []))
 			console.print(tree.render_tree())
 			sys.exit(0)
 
