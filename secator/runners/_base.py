@@ -20,7 +20,7 @@ from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import get_task_folder_id, run_extractors
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
-from secator.tree import build_runner_tree
+from secator.tree import build_runner_tree, prune_runner_tree
 from secator.loader import get_configs_by_type
 
 
@@ -1018,7 +1018,9 @@ class Runner:
 		if self.has_parent:
 			return
 		if self.config.type != 'task':
-			tree = textwrap.indent(build_runner_tree(self.config).render_tree(), '      ')
+			tree = build_runner_tree(self.config)
+			prune_runner_tree(tree, self.run_opts, self.inputs)
+			tree = textwrap.indent(tree.render_tree(), '      ')
 			info = Info(message=f'{self.config.type.capitalize()} built:\n{tree}', _source=self.unique_name)
 			self._print(info, rich=True)
 		remote_str = 'started' if self.sync else 'started in worker'
