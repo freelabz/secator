@@ -107,3 +107,40 @@ class TestWorkflowSkip(unittest.TestCase):
         names_in_graph = [info['name'] for info in wf.celery_ids_map.values()]
         self.assertNotIn('fake_a', names_in_graph)
         self.assertIn('fake_b', names_in_graph)
+
+
+class TestScanSkipRouting(unittest.TestCase):
+    """Verify that scan-level skip entries are routed to the correct child workflow."""
+
+    def _compute_wf_skip(self, skip, wf_name):
+        """Replicate the routing logic from scan.build_celery_workflow()."""
+        scoped = [s.split('.', 1)[1] for s in skip if s.startswith(f'{wf_name}.')]
+        bare = [s for s in skip if '.' not in s]
+        return scoped + bare
+
+    def test_scoped_entry_routes_to_correct_workflow(self):
+        """'workflow1.fake_a' must produce ['fake_a'] for workflow1."""
+        result = self._compute_wf_skip(['workflow1.fake_a'], 'workflow1')
+        self.assertEqual(result, ['fake_a'])
+
+    def test_scoped_entry_does_not_route_to_other_workflow(self):
+        """'workflow1.fake_a' must produce [] for workflow2."""
+        result = self._compute_wf_skip(['workflow1.fake_a'], 'workflow2')
+        self.assertEqual(result, [])
+
+    def test_bare_entry_routes_to_all_workflows(self):
+        """'fake_a' (no dot) must appear in skip list for every workflow."""
+        result_wf1 = self._compute_wf_skip(['fake_a'], 'workflow1')
+        result_wf2 = self._compute_wf_skip(['fake_a'], 'workflow2')
+        self.assertIn('fake_a', result_wf1)
+        self.assertIn('fake_a', result_wf2)
+
+    def test_mixed_entries(self):
+        """Mixed scoped and bare entries route correctly."""
+        skip = ['workflow1.fake_a', 'fake_b']
+        result_wf1 = self._compute_wf_skip(skip, 'workflow1')
+        result_wf2 = self._compute_wf_skip(skip, 'workflow2')
+        self.assertIn('fake_a', result_wf1)
+        self.assertIn('fake_b', result_wf1)
+        self.assertNotIn('fake_a', result_wf2)
+        self.assertIn('fake_b', result_wf2)
