@@ -164,6 +164,9 @@ def prune_runner_tree(tree: RunnerTree, opts: dict, inputs: list = None) -> Runn
 	def prune_node(node: TaskNode):
 		for child in list(node.children):
 			prune_node(child)
+		if node.type == 'group' and not node.children:
+			node.remove()
+			return
 		if node.condition:
 			try:
 				if not eval(node.condition, safe_globals, local_ns):

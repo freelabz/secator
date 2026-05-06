@@ -72,3 +72,34 @@ class TestPruneRunnerTree(unittest.TestCase):
         tree = make_tree(make_node('nmap', condition='len(targets) > 0'))
         prune_runner_tree(tree, {}, inputs=[])
         self.assertEqual(len(tree.root_nodes), 0)
+
+    def test_empty_group_is_removed(self):
+        """A group whose only child is pruned is itself removed."""
+        child = TaskNode('httpx', 'task', 'httpx', condition='opts.run_httpx')
+        group = TaskNode('_group1', 'group', '_group1')
+        child.parent = group
+        group.add_child(child)
+        root = TaskNode('discovery', 'workflow', 'discovery')
+        group.parent = root
+        root.add_child(group)
+        tree = make_tree(root)
+        prune_runner_tree(tree, {'run_httpx': False})
+        self.assertEqual(root.children, [])
+
+    def test_group_with_surviving_child_is_kept(self):
+        """A group that still has children after pruning is not removed."""
+        child1 = TaskNode('httpx', 'task', 'httpx', condition='opts.run_httpx')
+        child2 = TaskNode('nmap', 'task', 'nmap')
+        group = TaskNode('_group1', 'group', '_group1')
+        for c in [child1, child2]:
+            c.parent = group
+            group.add_child(c)
+        root = TaskNode('discovery', 'workflow', 'discovery')
+        group.parent = root
+        root.add_child(group)
+        tree = make_tree(root)
+        prune_runner_tree(tree, {'run_httpx': False})
+        self.assertEqual(len(root.children), 1)
+        self.assertEqual(root.children[0].name, '_group1')
+        self.assertEqual(len(root.children[0].children), 1)
+        self.assertEqual(root.children[0].children[0].name, 'nmap')
