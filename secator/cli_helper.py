@@ -52,6 +52,8 @@ CLI_EXEC_OPTS = {
 	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
 	'enable_pyinstrument': {'is_flag': True, 'short': 'pyinstrument', 'default': False, 'help': 'Enable pyinstrument profiling'},  # noqa: E501
 	'enable_memray': {'is_flag': True, 'short': 'memray', 'default': False, 'help': 'Enable memray profiling'},
+	'from': {'type': str, 'default': None, 'short': 'f', 'help': 'Resume from a previous run by loading its results (e.g. workflows/6, scans/abc-uuid)'},  # noqa: E501
+	'skip': {'type': str, 'default': None, 'short': 'sk', 'help': 'Comma-separated task node names to skip (e.g. nmap/light,nmap for workflows; host_recon.nmap for scans)'},  # noqa: E501
 }
 
 CLI_TYPE_MAPPING = {
