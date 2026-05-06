@@ -47,8 +47,10 @@ class Scan(Runner):
 			# Route skip entries to this workflow
 			skip = self.run_opts.get('skip', [])
 			wf_name = name.split('/')[0]
-			wf_skip = [s.split('.', 1)[1] for s in skip if s.startswith(f'{wf_name}.')] \
-					  + [s for s in skip if '.' not in s]
+			wf_skip = (
+					[s.split('.', 1)[1] for s in skip if s.startswith(f'{wf_name}.')] +
+					[s for s in skip if '.' not in s]
+				)
 			run_opts['skip'] = wf_skip
 			opts = merge_opts(scan_opts, workflow_opts, run_opts)
 			name = name.split('/')[0]
