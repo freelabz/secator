@@ -108,6 +108,27 @@ class TestWorkflowSkip(unittest.TestCase):
         self.assertNotIn('fake_a', names_in_graph)
         self.assertIn('fake_b', names_in_graph)
 
+    def test_skip_with_slash_variant_name(self):
+        """Task node named 'fake_a/variant' in YAML must be skippable by full name."""
+        from secator.runners import Workflow
+        config = TemplateLoader(input={
+            'name': 'test_wf_variant',
+            'type': 'workflow',
+            'input_types': ['host'],
+            'tasks': {
+                '_group': {
+                    'fake_a/light': {'description': 'Light variant'},
+                    'fake_b': {'description': 'Full task'},
+                }
+            }
+        })
+        with patch('secator.runners.task.discover_tasks', side_effect=patched_discover):
+            wf = Workflow(config, inputs=['example.com'], run_opts={'skip': ['fake_a/light']})
+            wf.build_celery_workflow()
+        names_in_graph = [info['name'] for info in wf.celery_ids_map.values()]
+        self.assertNotIn('fake_a/light', names_in_graph)
+        self.assertIn('fake_b', names_in_graph)
+
 
 class TestScanSkipRouting(unittest.TestCase):
     """Verify that scan-level skip entries are routed to the correct child workflow."""

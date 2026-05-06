@@ -329,7 +329,7 @@ def register_runner(cli_endpoint, config):
 			from secator.query import QueryEngine
 			from secator.query.utils import parse_report_paths
 			query = parse_report_paths(from_ref)
-			prior_results = QueryEngine(ws, context=context).search(query) or []
+			prior_results = QueryEngine(ws, context=context).search(query) or [] if query else []
 
 		# Enable sync or not
 		if sync or dry_run:
