@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.2](https://github.com/freelabz/secator/compare/v0.31.1...v0.31.2) (2026-05-06)
+
+
+### Bug Fixes
+
+* **target-filtering:** secondary task should not take ancestor results as direct input ([#1075](https://github.com/freelabz/secator/issues/1075)) ([358338b](https://github.com/freelabz/secator/commit/358338b9088994eb235fd42a9250df87f9b820ab))
+
 ## [0.31.1](https://github.com/freelabz/secator/compare/v0.31.0...v0.31.1) (2026-05-04)
 
 
