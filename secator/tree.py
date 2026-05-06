@@ -153,34 +153,34 @@ def build_runner_tree(config: DotMap, condition: Optional[str] = None, parent: O
 
 
 def prune_runner_tree(tree: RunnerTree, opts: dict, inputs: list = None) -> RunnerTree:
-    """Remove nodes whose conditions evaluate to False against opts/inputs.
+	"""Remove nodes whose conditions evaluate to False against opts/inputs.
 
-    Walks bottom-up so child removals don't corrupt parent iteration.
-    On eval error the node is kept (err on the side of showing more).
-    """
-    safe_globals = {'__builtins__': {'len': len}}
-    local_ns = {'opts': DotMap(opts), 'targets': inputs or []}
+	Walks bottom-up so child removals don't corrupt parent iteration.
+	On eval error the node is kept (err on the side of showing more).
+	"""
+	safe_globals = {'__builtins__': {'len': len}}
+	local_ns = {'opts': DotMap(opts), 'targets': inputs or []}
 
-    def prune_node(node: TaskNode):
-        for child in list(node.children):
-            prune_node(child)
-        if node.condition:
-            try:
-                if not eval(node.condition, safe_globals, local_ns):
-                    node.remove()
-            except Exception:
-                pass
+	def prune_node(node: TaskNode):
+		for child in list(node.children):
+			prune_node(child)
+		if node.condition:
+			try:
+				if not eval(node.condition, safe_globals, local_ns):
+					node.remove()
+			except Exception:
+				pass
 
-    for root in list(tree.root_nodes):
-        prune_node(root)
-        if root.condition:
-            try:
-                if not eval(root.condition, safe_globals, local_ns):
-                    tree.root_nodes.remove(root)
-            except Exception:
-                pass
+	for root in list(tree.root_nodes):
+		prune_node(root)
+		if root.condition:
+			try:
+				if not eval(root.condition, safe_globals, local_ns):
+					tree.root_nodes.remove(root)
+			except Exception:
+				pass
 
-    return tree
+	return tree
 
 
 def walk_runner_tree(tree: RunnerTree, visit_func):

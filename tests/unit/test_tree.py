@@ -1,5 +1,4 @@
 import unittest
-from dotmap import DotMap
 from secator.tree import TaskNode, RunnerTree, prune_runner_tree
 
 
