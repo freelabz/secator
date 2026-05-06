@@ -319,6 +319,18 @@ def register_runner(cli_endpoint, config):
 		from secator.utils import deep_merge_dicts
 		hooks = deep_merge_dicts(*hooks)
 
+		# Resolve --from (load prior results) and --skip (task names to skip)
+		from_ref = opts.pop('from', None)
+		skip_raw = opts.pop('skip', None)
+		opts['skip'] = [s.strip() for s in skip_raw.split(',') if s.strip()] if skip_raw else []
+
+		prior_results = []
+		if from_ref:
+			from secator.query import QueryEngine
+			from secator.query.utils import parse_report_paths
+			query = parse_report_paths(from_ref)
+			prior_results = QueryEngine(ws, context=context).search(query) or []
+
 		# Enable sync or not
 		if sync or dry_run:
 			sync = True
@@ -367,7 +379,7 @@ def register_runner(cli_endpoint, config):
 				)
 			item_count = 0
 			runner = runner_cls(
-				config, inputs, run_opts=opts, hooks=hooks, context=context
+				config, inputs, results=prior_results, run_opts=opts, hooks=hooks, context=context
 			)
 			for item in runner:
 				del item
