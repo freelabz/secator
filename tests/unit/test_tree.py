@@ -103,3 +103,32 @@ class TestPruneRunnerTree(unittest.TestCase):
         self.assertEqual(root.children[0].name, '_group1')
         self.assertEqual(len(root.children[0].children), 1)
         self.assertEqual(root.children[0].children[0].name, 'nmap')
+
+    def test_scan_workflow_prefix_stripping(self):
+        """Scan-level opts like domain_recon_passive are visible as opts.passive inside domain_recon tasks."""
+        task = TaskNode('httpx', 'task', 'domain_recon.httpx', condition='not opts.passive')
+        task.parent = None  # will be set below
+        wf = TaskNode('domain_recon', 'workflow', 'domain_recon')
+        task.parent = wf
+        wf.add_child(task)
+        scan = TaskNode('domain', 'scan', 'domain')
+        wf.parent = scan
+        scan.add_child(wf)
+        tree = make_tree(scan)
+        # --domain-recon-passive sets domain_recon_passive=True in scan-level opts
+        prune_runner_tree(tree, {'domain_recon_passive': True})
+        # httpx should be pruned because not opts.passive == not True == False
+        self.assertEqual(wf.children, [])
+
+    def test_scan_workflow_prefix_stripping_keeps_when_false(self):
+        """Task is kept when the prefixed opt is False (passive not set for that workflow)."""
+        task = TaskNode('httpx', 'task', 'domain_recon.httpx', condition='not opts.passive')
+        wf = TaskNode('domain_recon', 'workflow', 'domain_recon')
+        task.parent = wf
+        wf.add_child(task)
+        scan = TaskNode('domain', 'scan', 'domain')
+        wf.parent = scan
+        scan.add_child(wf)
+        tree = make_tree(scan)
+        prune_runner_tree(tree, {'domain_recon_passive': False})
+        self.assertEqual(len(wf.children), 1)
