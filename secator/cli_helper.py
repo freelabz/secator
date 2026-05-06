@@ -15,7 +15,7 @@ from secator.click import CLICK_LIST
 from secator.definitions import ADDONS_ENABLED, AVAILABLE_DRIVERS, AVAILABLE_EXPORTERS
 from secator.runners import Scan, Task, Workflow
 from secator.template import get_config_options
-from secator.tree import build_runner_tree
+from secator.tree import build_runner_tree, prune_runner_tree
 from secator.utils import (deduplicate, expand_input, get_command_category)
 from secator.loader import get_configs_by_type
 from secator.completion import complete_profiles, complete_workspaces, complete_drivers, complete_exporters
@@ -260,6 +260,7 @@ def register_runner(cli_endpoint, config):
 		# Show runner tree
 		if tree:
 			tree = build_runner_tree(config)
+			prune_runner_tree(tree, opts, opts.get('inputs', []))
 			console.print(tree.render_tree())
 			sys.exit(0)
 
