@@ -28,6 +28,52 @@ DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_DRIVERS])
 DRIVER_DEFAULTS_STR = ','.join(CONFIG.drivers.defaults) if CONFIG.drivers.defaults else None
 PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.defaults else None
 WORKSPACE_DEFAULT_STR = CONFIG.workspace.default if CONFIG.workspace.default else 'default'
+
+
+def _convert_dicts_to_output_types(dicts):
+	"""Convert dict objects from QueryEngine to OutputType objects.
+
+	Uses the same pattern as MongoDB's load_finding function.
+
+	Args:
+		dicts (list[dict]): List of dict objects from QueryEngine.search()
+
+	Returns:
+		list[OutputType]: List of OutputType objects
+	"""
+	from secator.output_types import OUTPUT_TYPES
+
+	results = []
+	for obj in dicts:
+		if not isinstance(obj, dict):
+			# Already an OutputType object, keep it
+			results.append(obj)
+			continue
+
+		finding_type = obj.get('_type')
+		if not finding_type:
+			continue
+
+		# Find the matching OutputType class
+		klass = None
+		for otype in OUTPUT_TYPES:
+			if finding_type == otype.get_name():
+				klass = otype
+				break
+
+		if klass:
+			try:
+				item = klass.load(obj)
+				# Preserve the original _uuid if it exists, otherwise it will be generated
+				if '_uuid' in obj:
+					item._uuid = obj['_uuid']
+				results.append(item)
+			except Exception as e:
+				# If conversion fails, skip this item but log the error
+				from secator.utils import debug
+				debug(f'Failed to convert dict to {klass.__name__}: {e}', sub='cli_helper')
+
+	return results
 EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_EXPORTERS])
 
 CLI_OUTPUT_OPTS = {
@@ -329,7 +375,9 @@ def register_runner(cli_endpoint, config):
 			from secator.query import QueryEngine
 			from secator.query.utils import parse_report_paths
 			query = parse_report_paths(from_ref)
-			prior_results = QueryEngine(ws, context=context).search(query) or [] if query else []
+			prior_results_dicts = QueryEngine(ws, context=context).search(query) or [] if query else []
+			# Convert dict results to OutputType objects (same pattern as MongoDB backend)
+			prior_results = _convert_dicts_to_output_types(prior_results_dicts)
 
 		# Enable sync or not
 		if sync or dry_run:
