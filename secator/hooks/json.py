@@ -102,9 +102,9 @@ def finalize_task_report(self):
 		with open(report_path, 'w') as f:
 			json.dump({'info': info, 'results': results}, f, cls=DataclassEncoder, indent=2)
 		debug(f'Wrote final JSON report to {report_path}', sub='hooks.json')
-		_cleanup_sidecars(self)
 	except Exception as e:
 		debug(f'Error writing final report: {e}', sub='hooks.json')
+	_cleanup_sidecars(self)
 
 
 def finalize_composite_report(self):
@@ -123,14 +123,14 @@ def finalize_composite_report(self):
 		with open(report_path, 'w') as f:
 			json.dump({'info': info, 'results': results}, f, cls=DataclassEncoder, indent=2)
 		debug(f'Wrote final JSON report to {report_path}', sub='hooks.json')
-		meta_path = _get_meta_path(self)
-		if meta_path.exists():
-			try:
-				meta_path.unlink()
-			except Exception as e:
-				debug(f'Error removing meta file: {e}', sub='hooks.json')
 	except Exception as e:
 		debug(f'Error writing final report: {e}', sub='hooks.json')
+	meta_path = _get_meta_path(self)
+	if meta_path.exists():
+		try:
+			meta_path.unlink()
+		except Exception as e:
+			debug(f'Error removing meta file: {e}', sub='hooks.json')
 
 
 HOOKS = {

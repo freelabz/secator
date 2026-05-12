@@ -127,6 +127,7 @@ class JsonBackend(QueryBackend):
 				runner_id = report_dir.name
 
 				report_file = report_dir / 'report.json'
+				meta_file = report_dir / 'report.meta.json'
 
 				if report_file.exists():
 					# Completed run: load full report
@@ -139,15 +140,14 @@ class JsonBackend(QueryBackend):
 							if isinstance(items, list):
 								for item in items:
 									# Inject runner context from directory path if not already present
-									ctx = item.setdefault('_context', {})
-									if f'{runner_type_singular}_id' not in ctx:
-										ctx[f'{runner_type_singular}_id'] = runner_id
+									if f'{runner_type_singular}_id' not in item['_context']:
+										item['_context'][f'{runner_type_singular}_id'] = runner_id
 								findings.extend(items)
 					except (json.JSONDecodeError, IOError) as e:
 						debug(f'Error loading {report_file}: {e}', sub='query.json')
 						continue
 
-				elif any(report_dir.glob('report.meta*.json')):
+				elif meta_file.exists():
 					# Live run: load from per-type .jsonl sidecar files
 					for jsonl_file in sorted(report_dir.glob('report.*.jsonl')):
 						try:
