@@ -523,7 +523,7 @@ class Command(Runner):
 			# Isolated CWD
 			if not self.cwd and self.cwd_isolated:
 				self.cwd = f'{self.reports_folder}/.outputs/{self.fqn}'
-				os.makedirs(self.cwd)
+				os.makedirs(self.cwd, exist_ok=True)
 
 			# Run the command using subprocess
 			env = os.environ
