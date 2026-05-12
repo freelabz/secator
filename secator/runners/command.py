@@ -881,7 +881,10 @@ class Command(Runner):
 
 		# Check if we have a tty
 		if not self.has_tty:
-			error = 'Sudo password required but no TTY available (non-interactive mode). Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), or configure passwordless sudo.'
+			error = (
+				'Sudo password required but no TTY available (non-interactive mode). '
+				'Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), or configure passwordless sudo.'
+			)
 			return -1, error
 
 		# If not, prompt the user for a password
