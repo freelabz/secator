@@ -175,7 +175,7 @@ OUTPUTS_TASKS = {
         Url(url='http://xss-game.appspot.com/feedback/level1/file/level.py', _source='gau')
     ],
     'getasn': [
-        Tag(name='asn', category='info', value='AS14907', match='wikipedia.org', _source='getasn')
+        Tag(name='asn', category='info', value='AS51602', match='tesla', _source='getasn')
     ],
     'gf': [
         Tag(name='xss', category='url_pattern', value='http://localhost:3000?q=test', match='http://localhost:3000?q=test', _source='gf')
