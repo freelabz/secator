@@ -100,7 +100,7 @@ class search_vulns(Vuln):
 			confidence = 'high'
 			tags = search_vulns.extract_tags(vuln_data)
 			exploits = vuln_data.get('exploits', [])
-			cvss_score = float(vuln_data.get('cvss', 0))
+			cvss_score = float(vuln_data.get('severity', {}).get('CVSS', {}).get('score', 0))
 			extra_data = search_vulns.extract_extra_data(vuln_data)
 			extra_data['service_name'] = self.inputs[0] if self.inputs else ''
 			references = search_vulns.extract_references(vuln_data)

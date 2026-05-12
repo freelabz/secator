@@ -122,9 +122,9 @@ class httpx(Http):
 			self.cmd = self.cmd.replace('-silent', '')
 		screenshot = self.get_opt_value('screenshot')
 		store_responses = self.get_opt_value('store_responses')
+		output_folder = shlex.quote(f'{self.reports_folder}/.outputs')
 		if store_responses or screenshot:
-			reports_folder_outputs = f'{self.reports_folder}/.outputs'
-			self.cmd += f' -srd {shlex.quote(reports_folder_outputs)}'
+			self.cmd += f' -srd {output_folder}'
 		if screenshot:
 			self.cmd += ' -esb -ehb'
 		self.domains = []
