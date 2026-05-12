@@ -198,10 +198,10 @@ class Runner:
 		self.debug(f'resolving inputs with {len(self.dynamic_opts)} dynamic opts', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		self.inputs = list(set(self.inputs))
-		existing_target_names = {t.name for t in self.results if isinstance(t, Target)}
-		targets = [Target(name=target) for target in self.inputs if str(target) not in existing_target_names]
-		for target in targets:
-			self.add_result(target, print=False, output=False)
+		if self.caller != 'Task':
+			targets = [Target(name=target) for target in self.inputs]
+			for target in targets:
+				self.add_result(target, print=False, output=False)
 
 		# Run extractors on results
 		self._run_extractors()
