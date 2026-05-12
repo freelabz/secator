@@ -28,6 +28,47 @@ DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_DRIVERS])
 DRIVER_DEFAULTS_STR = ','.join(CONFIG.drivers.defaults) if CONFIG.drivers.defaults else None
 PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.defaults else None
 WORKSPACE_DEFAULT_STR = CONFIG.workspace.default if CONFIG.workspace.default else 'default'
+EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_EXPORTERS])
+
+CLI_OUTPUT_OPTS = {
+	'output': {'type': str, 'default': None, 'help': f'Output options [{EXPORTERS_STR}] [dim orange4](comma-separated)[/]', 'short': 'o', 'shell_complete': complete_exporters},  # noqa: E501
+	'fmt': {'default': '', 'short': 'fmt', 'internal_name': 'print_format', 'help': 'Output formatting string'},
+	'json': {'is_flag': True, 'short': 'json', 'internal_name': 'print_json', 'default': False, 'help': 'Print items as JSON lines'},  # noqa: E501
+	'raw': {'is_flag': True, 'short': 'raw', 'internal_name': 'print_raw', 'default': False, 'help': 'Print items in raw format'},  # noqa: E501
+	'stat': {'is_flag': True, 'short': 'stat', 'internal_name': 'print_stat', 'default': False, 'help': 'Print runtime statistics'},  # noqa: E501
+	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.cli.show_command_output, 'opposite': 'verbose', 'help': 'Hide or show original command output'},  # noqa: E501
+	'yaml': {'is_flag': True, 'short': 'yaml', 'default': False, 'help': 'Show runner yaml'},
+	'tree': {'is_flag': True, 'short': 'tree', 'default': False, 'help': 'Show runner tree'},
+	'dry_run': {'is_flag': True, 'short': 'dry', 'default': False, 'help': 'Show dry run'},
+	'process': {'is_flag': True, 'short': 'ps', 'default': True, 'help': 'Enable / disable secator processing', 'reverse': True},  # noqa: E501
+	'version': {'is_flag': True, 'help': 'Show runner version'},
+}
+
+CLI_EXEC_OPTS = {
+	'workspace': {'type': str, 'default': WORKSPACE_DEFAULT_STR, 'help': f'Workspace [{WORKSPACES_STR}|[dim orange4]<new>[/]]', 'short': 'ws', 'shell_complete': complete_workspaces},  # noqa: E501
+	'profiles': {'type': str, 'help': f'Profiles [{PROFILES_STR}] [dim orange4](comma-separated)[/]', 'default': PROFILE_DEFAULTS_STR, 'short': 'pf', 'shell_complete': complete_profiles},  # noqa: E501
+	'driver': {'type': str, 'help': f'Drivers [{DRIVERS_STR}] [dim orange4](comma-separated)[/]', 'default': DRIVER_DEFAULTS_STR, 'shell_complete': complete_drivers},  # noqa: E501
+	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},
+	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
+	'enable_pyinstrument': {'is_flag': True, 'short': 'pyinstrument', 'default': False, 'help': 'Enable pyinstrument profiling'},  # noqa: E501
+	'enable_memray': {'is_flag': True, 'short': 'memray', 'default': False, 'help': 'Enable memray profiling'},
+	'from': {'type': str, 'default': None, 'short': 'f', 'help': 'Resume from a previous run by loading its results (e.g. workflows/6, scans/abc-uuid)'},  # noqa: E501
+	'skip': {'type': str, 'default': None, 'short': 'sk', 'help': 'Comma-separated task node names to skip (e.g. nmap/light,nmap for workflows; host_recon.nmap for scans)'},  # noqa: E501
+}
+
+CLI_TYPE_MAPPING = {
+	'str': str,
+	'list': CLICK_LIST,
+	'int': int,
+	'float': float,
+	# 'choice': click.Choice,
+	# 'file': click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
+	# 'dir': click.Path(exists=True, file_okay=False, dir_okay=True, readable=True),
+	# 'path': click.Path(exists=True, file_okay=True, dir_okay=True, readable=True),
+	# 'url': click.URL,
+}
+
+DEFAULT_CLI_OPTIONS = list(CLI_OUTPUT_OPTS.keys()) + list(CLI_EXEC_OPTS.keys())
 
 
 def _convert_dicts_to_output_types(dicts):
@@ -74,47 +115,6 @@ def _convert_dicts_to_output_types(dicts):
 				debug(f'Failed to convert dict to {klass.__name__}: {e}', sub='cli_helper')
 
 	return results
-EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_EXPORTERS])
-
-CLI_OUTPUT_OPTS = {
-	'output': {'type': str, 'default': None, 'help': f'Output options [{EXPORTERS_STR}] [dim orange4](comma-separated)[/]', 'short': 'o', 'shell_complete': complete_exporters},  # noqa: E501
-	'fmt': {'default': '', 'short': 'fmt', 'internal_name': 'print_format', 'help': 'Output formatting string'},
-	'json': {'is_flag': True, 'short': 'json', 'internal_name': 'print_json', 'default': False, 'help': 'Print items as JSON lines'},  # noqa: E501
-	'raw': {'is_flag': True, 'short': 'raw', 'internal_name': 'print_raw', 'default': False, 'help': 'Print items in raw format'},  # noqa: E501
-	'stat': {'is_flag': True, 'short': 'stat', 'internal_name': 'print_stat', 'default': False, 'help': 'Print runtime statistics'},  # noqa: E501
-	'quiet': {'is_flag': True, 'short': 'q', 'default': not CONFIG.cli.show_command_output, 'opposite': 'verbose', 'help': 'Hide or show original command output'},  # noqa: E501
-	'yaml': {'is_flag': True, 'short': 'yaml', 'default': False, 'help': 'Show runner yaml'},
-	'tree': {'is_flag': True, 'short': 'tree', 'default': False, 'help': 'Show runner tree'},
-	'dry_run': {'is_flag': True, 'short': 'dry', 'default': False, 'help': 'Show dry run'},
-	'process': {'is_flag': True, 'short': 'ps', 'default': True, 'help': 'Enable / disable secator processing', 'reverse': True},  # noqa: E501
-	'version': {'is_flag': True, 'help': 'Show runner version'},
-}
-
-CLI_EXEC_OPTS = {
-	'workspace': {'type': str, 'default': WORKSPACE_DEFAULT_STR, 'help': f'Workspace [{WORKSPACES_STR}|[dim orange4]<new>[/]]', 'short': 'ws', 'shell_complete': complete_workspaces},  # noqa: E501
-	'profiles': {'type': str, 'help': f'Profiles [{PROFILES_STR}] [dim orange4](comma-separated)[/]', 'default': PROFILE_DEFAULTS_STR, 'short': 'pf', 'shell_complete': complete_profiles},  # noqa: E501
-	'driver': {'type': str, 'help': f'Drivers [{DRIVERS_STR}] [dim orange4](comma-separated)[/]', 'default': DRIVER_DEFAULTS_STR, 'shell_complete': complete_drivers},  # noqa: E501
-	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},
-	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
-	'enable_pyinstrument': {'is_flag': True, 'short': 'pyinstrument', 'default': False, 'help': 'Enable pyinstrument profiling'},  # noqa: E501
-	'enable_memray': {'is_flag': True, 'short': 'memray', 'default': False, 'help': 'Enable memray profiling'},
-	'from': {'type': str, 'default': None, 'short': 'f', 'help': 'Resume from a previous run by loading its results (e.g. workflows/6, scans/abc-uuid)'},  # noqa: E501
-	'skip': {'type': str, 'default': None, 'short': 'sk', 'help': 'Comma-separated task node names to skip (e.g. nmap/light,nmap for workflows; host_recon.nmap for scans)'},  # noqa: E501
-}
-
-CLI_TYPE_MAPPING = {
-	'str': str,
-	'list': CLICK_LIST,
-	'int': int,
-	'float': float,
-	# 'choice': click.Choice,
-	# 'file': click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
-	# 'dir': click.Path(exists=True, file_okay=False, dir_okay=True, readable=True),
-	# 'path': click.Path(exists=True, file_okay=True, dir_okay=True, readable=True),
-	# 'url': click.URL,
-}
-
-DEFAULT_CLI_OPTIONS = list(CLI_OUTPUT_OPTS.keys()) + list(CLI_EXEC_OPTS.keys())
 
 
 def decorate_command_options(opts):
