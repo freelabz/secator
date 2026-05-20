@@ -152,6 +152,53 @@ def build_runner_tree(config: DotMap, condition: Optional[str] = None, parent: O
 	return tree
 
 
+def prune_runner_tree(tree: RunnerTree, opts: dict, inputs: list = None) -> RunnerTree:
+	"""Remove nodes whose conditions evaluate to False against opts/inputs.
+
+	Walks bottom-up so child removals don't corrupt parent iteration.
+	On eval error the node is kept (err on the side of showing more).
+	When entering a workflow node, strips its name prefix from opts so that
+	scan-level options like domain_recon_passive are visible as opts.passive
+	inside that workflow's tasks (mirroring build_celery_workflow behaviour).
+	"""
+	safe_globals = {'__builtins__': {'len': len}}
+
+	def strip_prefix(parent_opts, workflow_name):
+		prefix = workflow_name.split('/')[0] + '_'
+		result = dict(parent_opts)
+		for k, v in parent_opts.items():
+			if k.startswith(prefix):
+				result[k[len(prefix):]] = v
+		return result
+
+	def prune_node(node: TaskNode, current_opts: dict):
+		child_opts = strip_prefix(current_opts, node.name) if node.type == 'workflow' else current_opts
+		for child in list(node.children):
+			prune_node(child, child_opts)
+		if node.type == 'group' and not node.children:
+			node.remove()
+			return
+		if node.condition:
+			local_ns = {'opts': DotMap(current_opts), 'targets': inputs or []}
+			try:
+				if not eval(node.condition, safe_globals, local_ns):
+					node.remove()
+			except Exception:
+				pass
+
+	for root in list(tree.root_nodes):
+		prune_node(root, opts)
+		if root.condition:
+			local_ns = {'opts': DotMap(opts), 'targets': inputs or []}
+			try:
+				if not eval(root.condition, safe_globals, local_ns):
+					tree.root_nodes.remove(root)
+			except Exception:
+				pass
+
+	return tree
+
+
 def walk_runner_tree(tree: RunnerTree, visit_func):
 	"""
 	Walk the RunnerTree and visit each node.

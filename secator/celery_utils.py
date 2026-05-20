@@ -15,7 +15,7 @@ from rich.padding import Padding
 from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from secator.config import CONFIG
 from secator.definitions import STATE_COLORS
-from secator.output_types import Error, Info, State
+from secator.output_types import Error, Info, Progress, State
 from secator.rich import console
 from secator.utils import debug, traceback_as_string
 
@@ -46,6 +46,10 @@ class CeleryData(object):
 			dict: Subtasks state and results.
 		"""
 		# Display live results if print_remote_info is set
+		# Pre-compute main_result_id here (before inner loop shadows 'result').
+		# exclude_main hides the workflow-level task from the panel when real subtasks are present.
+		main_result_id = result.id
+		exclude_main = any(tid != main_result_id for tid in ids_map)
 		if print_remote_info:
 
 			class PanelProgress(RichProgress):
@@ -82,16 +86,26 @@ class CeleryData(object):
 		with progress:
 			# Make initial progress
 			if print_remote_info:
-				progress_cache = CeleryData.init_progress(progress, ids_map)
+				progress_cache = CeleryData.init_progress(progress, ids_map, main_result_id if exclude_main else None)
+
+			# Track yielded UUIDs to avoid re-yielding items on subsequent polls
+			yielded_uuids = set()
 
 			# Get live results and print progress
 			for data in CeleryData.poll(result, ids_map, refresh_interval, revoked):
 				for result in data['results']:
+					# Skip already-yielded items (worker state accumulates all results each poll)
+					if result._uuid and result._uuid in yielded_uuids:
+						del result
+						continue
+					if result._uuid:
+						yielded_uuids.add(result._uuid)
 					# Add dynamic subtask to ids_map
 					if isinstance(result, Info):
 						message = result.message
-						if message.startswith('Celery chunked task created: '):
+						if message.startswith('Celery chunked task created'):
 							task_id = message.split(' ')[-1]
+							debug('chunked task recorded from remote info message', sub='celery.poll', id=task_id)
 							ids_map[task_id] = {
 								'id': task_id,
 								'name': result._source,
@@ -106,32 +120,52 @@ class CeleryData(object):
 
 				if print_remote_info:
 					task_id = data['id']
+					if exclude_main and task_id == main_result_id:
+						continue
+					is_chunk = ids_map.get(task_id, {}).get('chunk')
+					if is_chunk:
+						if exclude_main:
+							continue  # hide chunk tasks in workflow panel
+						# Show chunk tasks under main task for simple tasks
+						if task_id not in progress_cache:
+							progress_cache[task_id] = progress.add_task('', advance=0, **data)
+						CeleryData.update_progress(progress, progress_cache[task_id], data)
+						progress.refresh()
+						continue
 					if task_id not in progress_cache:
 						if CONFIG.runners.show_subtasks:
 							progress_cache[task_id] = progress.add_task('', advance=0, **data)
 						else:
 							continue
-					progress_id = progress_cache[task_id]
-					CeleryData.update_progress(progress, progress_id, data)
+					CeleryData.update_progress(progress, progress_cache[task_id], data)
 					progress.refresh()
 
 				# Garbage collect between polls
 				del data
 				gc.collect()
 
-			# Update all tasks to 100 %
+			# Update all tasks to final state
 			if print_remote_info:
-				for progress_id in progress_cache.values():
-					progress.update(progress_id, advance=100)
+				for task_id, progress_id in progress_cache.items():
+					task_data = ids_map.get(task_id, {})
+					task_state = task_data.get("state", "SUCCESS")
+					if task_state not in STATE_COLORS:
+						task_state = "SUCCESS"
+					colored_state = f"[{STATE_COLORS[task_state]}]{task_state}[/]"
+					progress.update(progress_id, state=colored_state, progress=100)
 				progress.refresh()
 
 	@staticmethod
-	def init_progress(progress, ids_map):
+	def init_progress(progress, ids_map, main_result_id=None):
 		cache = {}
 		for task_id, data in ids_map.items():
+			if task_id == main_result_id:
+				continue
 			pdata = data.copy()
 			state = data['state']
 			pdata['state'] = f'[{STATE_COLORS[state]}]{state}[/]'
+			if pdata.get('descr') and len(pdata['descr']) > 50:
+				pdata['descr'] = pdata['descr'][:50] + '...'
 			id = progress.add_task('', advance=0, **pdata)
 			cache[task_id] = id
 		return cache
@@ -142,6 +176,8 @@ class CeleryData(object):
 		pdata = data.copy()
 		state = data['state']
 		pdata['state'] = f'[{STATE_COLORS[state]}]{state}[/]'
+		if pdata.get('descr') and len(pdata['descr']) > 50:
+			pdata['descr'] = pdata['descr'][:50] + '...'
 		pdata = {k: v for k, v in pdata.items() if v}
 		progress.update(progress_id, **pdata)
 
@@ -174,7 +210,7 @@ class CeleryData(object):
 	def get_all_data(result, ids_map, revoked=False):
 		main_task = State(
 			task_id=result.id,
-			state='REVOKED' if revoked and result.state == 'PENDING' else result.state,
+			state='REVOKED' if revoked and result.state in ['PENDING', 'RUNNING'] else result.state,
 			_source='celery',
 		)
 		debug(f'Main task state: {result.id} - {result.state}', sub='celery.poll', verbose=True)
@@ -193,7 +229,7 @@ class CeleryData(object):
 			data = CeleryData.get_task_data(task_id, ids_map)
 			if not data:
 				continue
-			if revoked and data['state'] == 'PENDING':
+			if revoked and data['state'] in ['PENDING', 'RUNNING']:
 				data['state'] = 'REVOKED'
 			debug(
 				'POLL',
@@ -204,15 +240,55 @@ class CeleryData(object):
 			)
 			yield data
 
-		# Calculate and yield parent task progress
-		# if not datas:
-		# 	return
-		# total = len(datas)
-		# count_finished = sum([i['ready'] for i in datas if i])
-		# percent = int(count_finished * 100 / total) if total > 0 else 0
-		# parent_id = [c for c in ids_map.values() if c['full_name'] == datas[-1]]
-		# data['progress'] = percent
-		# yield data
+		# Compute chunk group completion from ids_map directly.
+		# Completed chunk tasks are skipped by get_task_data (ready=True early return),
+		# but their chunk/chunk_count/ready fields remain in ids_map from prior polls.
+		chunk_groups = {}
+		for tid, tdata in ids_map.items():
+			chunk = tdata.get('chunk')
+			chunk_count = tdata.get('chunk_count')
+			debug('chunk scan', sub='celery.poll', id=tid, obj={'chunk': chunk, 'chunk_count': chunk_count, 'ready': tdata.get('ready'), 'name': tdata.get('name')})  # noqa: E501
+			if chunk and chunk_count:
+				name = tdata.get('name', '')
+				if name not in chunk_groups:
+					chunk_groups[name] = {'chunk_count': chunk_count, 'completed': 0}
+				if tdata.get('ready', False):
+					chunk_groups[name]['completed'] += 1
+		debug('chunk_groups', sub='celery.poll', obj=chunk_groups)
+
+		# Yield aggregate chunk progress for parent tasks
+		for name, group in chunk_groups.items():
+			total = group['chunk_count']
+			completed = group['completed']
+			percent = round(completed / total * 100, 1)
+			parent_id = next(
+				(tid for tid, tdata in ids_map.items() if tdata.get('name') == name and not tdata.get('chunk')),
+				None,
+			)
+			debug('chunk progress', sub='celery.poll', obj={'name': name, 'percent': percent, 'parent_id': parent_id})
+			if not parent_id:
+				continue
+			parent_data = ids_map[parent_id]
+			if parent_data.get('state') in ['SUCCESS', 'FAILURE', 'REVOKED']:
+				continue
+			chunk_progress_states = parent_data.setdefault('_chunk_progress_states', set())
+			state = (percent, completed, total)
+			debug('chunk progress state', sub='celery.poll', obj={'state': state, 'already_seen': state in chunk_progress_states})  # noqa: E501
+			if state in chunk_progress_states:
+				continue
+			chunk_progress_states.add(state)
+			pg = Progress(percent=percent, extra_data={'completed': completed, 'total': total, 'force': True})
+			pg._source = parent_data.get('full_name', name)
+			yield {
+				'id': parent_id,
+				'name': name,
+				'full_name': parent_data.get('full_name', name),
+				'state': parent_data.get('state', 'RUNNING'),
+				'count': parent_data.get('count', 0),
+				'progress': percent,
+				'descr': parent_data.get('descr', ''),
+				'results': [pg],
+			}
 
 	@staticmethod
 	def get_task_data(task_id, ids_map):

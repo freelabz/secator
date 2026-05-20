@@ -1,3 +1,5 @@
+import shlex
+
 from secator.config import CONFIG
 from secator.cve import extract_software_and_version
 from secator.decorators import task
@@ -49,12 +51,15 @@ class nuclei(VulnMulti):
 		'interactsh_server': {'type': str, 'default': None, 'short': 'iserver', 'help': 'InteractSH server url for self-hosted instance (default: oast.pro,oast.live,oast.site,oast.online,oast.fun,oast.me)'},  # noqa: E501
 		'interactsh_token': {'type': str, 'default': None, 'short': 'itoken', 'help': 'InteractSH auth token for self-hosted instance'},  # noqa: E501
 		'no_interactsh': {'is_flag': True, 'default': False, 'short': 'ni', 'help': 'Disable InteractSH server for OAST testing, exclude OAST based templates'},  # noqa: E501
+		'logs': {'is_flag': True, 'internal': True, 'display': True, 'help': 'Log errors (-elog) and traces (-tlog) to output dir'},  # noqa: E501
 		'new_templates': {'type': str, 'short': 'nt', 'help': 'Run only new templates added in latest nuclei-templates release'},  # noqa: E501
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit requests/response pairs in the JSON, JSONL, and Markdown outputs (for findings only)'},  # noqa: E501
 		'response_size_read': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},  # noqa: E501
+		'severity': {'type': str, 'short': 's', 'help': 'Templates to run based on severity. Possible values: info, low, medium, high, critical, unknown'},  # noqa: E501
 		'stats': {'is_flag': True, 'short': 'stats', 'default': True, 'help': 'Display statistics about the running scan'},
 		'stats_json': {'is_flag': True, 'short': 'sj', 'default': True, 'help': 'Display statistics in JSONL(ines) format'},
 		'stats_interval': {'type': str, 'short': 'si', 'help': 'Number of seconds to wait between showing a statistics update'},  # noqa: E501
+		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store reponses'},
 		'tags': {'type': str, 'help': 'Tags'},
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
 		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
@@ -76,12 +81,15 @@ class nuclei(VulnMulti):
 		'exclude_severity': 'exclude-severity',
 		'templates': 't',
 		'response_size_read': 'rsr',
+		'store_responses': 'sr',
 		'template_condition': 'tc',
 	}
 	opt_value_map = {
 		'tags': lambda x: ','.join(x) if isinstance(x, list) else x,
 		'templates': lambda x: ','.join(x) if isinstance(x, list) else x,
 		'exclude_tags': lambda x: ','.join(x) if isinstance(x, list) else x,
+		'severity': lambda x: ','.join(x) if isinstance(x, list) else x,
+		'exclude_severity': lambda x: ','.join(x) if isinstance(x, list) else x,
 	}
 	item_loaders = [JSONSerializer()]
 	output_discriminator = output_discriminator
@@ -127,6 +135,18 @@ class nuclei(VulnMulti):
 	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
 	proxy_http = True  # same
 	profile = 'extra_large'
+
+	@staticmethod
+	def on_init(self):
+		store_responses = self.get_opt_value('store_responses')
+		output_folder = shlex.quote(f'{self.reports_folder}/.outputs')
+		if store_responses:
+			self.cmd += f' -srd {output_folder}'
+		logs = self.get_opt_value('logs')
+		if logs:
+			self.cmd += ' -ts'
+			self.cmd += f' -elog {output_folder}/{self.fqn}_error.json'
+			self.cmd += f' -tlog {output_folder}/{self.fqn}_trace.json'
 
 	@staticmethod
 	def id_extractor(item):

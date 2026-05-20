@@ -6,7 +6,7 @@ import sys
 from secator.runners import Command
 from secator.runners._base import HOOKS
 from secator.utils_test import mock_command
-from secator.output_types import OutputType, Url, Vulnerability, Tag, Target
+from secator.output_types import OutputType, Url, Vulnerability, Tag, Target, Error
 from secator.serializers.regex import RegexSerializer
 from secator.serializers.json import JSONSerializer
 
@@ -540,3 +540,59 @@ class TestCommandRunner(unittest.TestCase):
 						self.assertEqual(len(cmd.profiles), 1)
 						self.assertEqual(cmd.profiles[0].name, 'test_default')
 						self.assertEqual(cmd.run_opts.get('timeout'), 100)
+
+
+class TestIsOwnSource(unittest.TestCase):
+	"""Verify _is_own_source correctly scopes errors to the owning runner."""
+
+	def _make_cmd(self, name):
+		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
+			cmd.name = name
+			cmd.unique_name = name
+			return cmd
+
+	def test_exact_match(self):
+		cmd = self._make_cmd('nmap')
+		self.assertTrue(cmd._is_own_source('nmap'))
+
+	def test_chunk_suffix_digit(self):
+		cmd = self._make_cmd('nmap')
+		self.assertTrue(cmd._is_own_source('nmap_1'))
+		self.assertTrue(cmd._is_own_source('nmap_42'))
+
+	def test_rejects_prefix_sibling(self):
+		"""nmap_light must NOT be considered a chunk of nmap."""
+		cmd = self._make_cmd('nmap')
+		self.assertFalse(cmd._is_own_source('nmap_light'))
+
+	def test_rejects_unrelated(self):
+		cmd = self._make_cmd('nuclei')
+		self.assertFalse(cmd._is_own_source('nmap'))
+		self.assertFalse(cmd._is_own_source('nmap_light'))
+
+	def test_self_errors_excludes_prefix_sibling_errors(self):
+		"""Errors from nmap_light must not appear in nmap's self_errors (the prefix-collision bug)."""
+		prior_error = Error(message='nmap/light failed', _source='nmap_light')
+		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
+			cmd.name = 'nmap'
+			cmd.unique_name = 'nmap'
+			cmd.results.append(prior_error)
+			self.assertEqual(cmd.self_errors, [])
+
+	def test_self_errors_includes_own_errors(self):
+		"""Errors with the runner's own _source must appear in self_errors."""
+		own_error = Error(message='nmap failed', _source='nmap')
+		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
+			cmd.name = 'nmap'
+			cmd.unique_name = 'nmap'
+			cmd.results.append(own_error)
+			self.assertEqual(cmd.self_errors, [own_error])
+
+	def test_self_errors_includes_chunk_errors(self):
+		"""Errors from numeric chunks (nmap_1, nmap_2) must appear in nmap's self_errors."""
+		chunk_error = Error(message='chunk failed', _source='nmap_1')
+		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
+			cmd.name = 'nmap'
+			cmd.unique_name = 'nmap'
+			cmd.results.append(chunk_error)
+			self.assertEqual(cmd.self_errors, [chunk_error])

@@ -49,6 +49,7 @@ def get_configs_by_type(type):
 			'proxy_http': getattr(cls, 'proxy_http', True),
 			'default_cmd': getattr(cls, 'cmd', None),
 			'install_cmd': getattr(cls, 'install_cmd', None),
+			'tags': getattr(cls, 'tags', []),
 		}) for cls in tasks]  # noqa: E501
 		return sorted(task_config, key=lambda x: x['name'])
 	return sorted([t for t in find_templates() if t.type == type], key=lambda x: x.name)

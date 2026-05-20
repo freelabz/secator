@@ -1,7 +1,10 @@
 import validators
 
 from secator.decorators import task
-from secator.definitions import CIDR_RANGE, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, SLUG, THREADS, TIMEOUT
+
+from secator.definitions import (
+	CIDR_RANGE, DELAY, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, SLUG, THREADS, TIMEOUT
+)  # fmt: off
 from secator.output_types import Ip
 from secator.tasks._categories import ReconIp
 
@@ -24,6 +27,7 @@ class mapcidr(ReconIp):
 		'hide_ips': {'is_flag': True, 'short': 'hi', 'default': False, 'help': 'Hide IP addresses from output (too verbose)', 'internal': True, 'display': True},  # noqa: E501
 	}
 	opt_key_map = {
+		DELAY: OPT_NOT_SUPPORTED,
 		THREADS: OPT_NOT_SUPPORTED,
 		PROXY: OPT_NOT_SUPPORTED,
 		RATE_LIMIT: OPT_NOT_SUPPORTED,

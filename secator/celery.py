@@ -15,9 +15,10 @@ from retry import retry
 from secator.celery_signals import setup_handlers
 from secator.definitions import IN_WORKER
 from secator.config import CONFIG
-from secator.output_types import Info
+from secator.output_types import Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
+from secator.runners._helpers import run_extractors
 from secator.utils import debug, deduplicate, flatten, should_update
 
 
@@ -297,6 +298,25 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	for item in results:
 		runner.add_result(item, print=False)
 
+	# Emit scope-tagged Targets for workflows with a scan-level targets_ extractor.
+	# This resolves the extractor at execution time (when Port/result data is available)
+	# so all tasks in the chain can find the correct inputs via parent_scope filtering.
+	scope = runner.context.get('parent_scope')
+	if scope and runner.has_parent and getattr(runner.config, 'type', None) == 'workflow':
+		target_extractor_opts = {
+			k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'
+		}
+		ctx = {'ancestor_id': runner.ancestor_id, 'node_chain_start': True}
+		scoped_inputs, _, _ = run_extractors(runner.results, target_extractor_opts, runner.inputs, ctx=ctx)
+		for name in scoped_inputs:
+			t = TargetOutput(name=name)
+			t._context['scope'] = scope
+			runner.add_result(t, print=False)
+		debug(
+			f'Runner {runner.unique_name}: emitted {len(scoped_inputs)} scope-tagged targets (scope={scope})',
+			sub='celery'
+		)
+
 	# Run mark_started
 	runner.mark_started()
 
@@ -461,6 +481,7 @@ def break_task(task, task_opts, results=[]):
 
 	# Build signatures
 	sigs = []
+	chunk_infos = []
 	task.ids_map = {}
 	for ix, chunk in enumerate(chunks):
 		if not isinstance(chunk, list):
@@ -496,13 +517,17 @@ def break_task(task, task_opts, results=[]):
 		task.add_subtask(task_id, task.name, full_name)
 		if IN_WORKER:
 			info = Info(message=f'Celery chunked task created ({ix + 1} / {len(chunks)}): {task_id}')
-			task.add_result(info)
+			chunk_infos.append(info)
 		sigs.append(sig)
 
 	# Mark main task as async since it's being chunked
+	# Clear prior results (so they're not re-yielded), then re-add chunk Info items
+	# so they survive into celery_state['results'] for client-side polling.
 	task.sync = False
 	task.results = []
 	task.uuids = set()
+	for info in chunk_infos:
+		task.add_result(info)
 	if IN_WORKER:
 		console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
 	# console.print(Info(message=f'Results: {results}'))

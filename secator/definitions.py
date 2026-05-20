@@ -36,7 +36,8 @@ STATE_COLORS = {
 	'RUNNING': 'bold yellow3',
 	'SUCCESS': 'bold green',
 	'FAILURE': 'bold red',
-	'REVOKED': 'bold magenta'
+	'REVOKED': 'bold magenta',
+	'SKIPPED': 'dim'
 }
 
 # LLM
@@ -162,21 +163,20 @@ INPUT_TYPES = [
 
 
 def is_importable(module_to_import):
-	import importlib
+	import importlib.util
 	try:
-		importlib.import_module(module_to_import)
-		return True
-	except ModuleNotFoundError:
+		return importlib.util.find_spec(module_to_import) is not None
+	except (ModuleNotFoundError, ValueError):
 		return False
 	except Exception as e:
-		print(f'Failed trying to import {module_to_import}: {str(e)}')
+		print(f'Failed trying to find {module_to_import}: {str(e)}')
 		return False
 
 
 ADDONS_ENABLED = {}
 
 for addon, module in [
-	('worker', 'eventlet'),
+	('worker', 'gevent'),
 	('gdrive', 'gspread'),
 	('gcs', 'google.cloud.storage'),
 	('api', 'requests'),
