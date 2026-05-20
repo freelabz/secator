@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.32.0](https://github.com/freelabz/secator/compare/v0.31.2...v0.32.0) (2026-05-12)
+
+
+### Features
+
+* **command:** isolated run directory ([#1081](https://github.com/freelabz/secator/issues/1081)) ([3a87b09](https://github.com/freelabz/secator/commit/3a87b099ccf944b29c301f26b4aea59bf961c2ff))
+* **nuclei:** add -sr, -srd, and -logs option ([40c77bd](https://github.com/freelabz/secator/commit/40c77bdde96f9bd4ea27968dab1a67f747f1996a))
+* **tree:** prune condition-failing nodes from scan/workflow tree display ([#1077](https://github.com/freelabz/secator/issues/1077)) ([f76c343](https://github.com/freelabz/secator/commit/f76c3432516351378ccef44bf7ca10dc7d805033))
+
+
+### Bug Fixes
+
+* **nuclei:** add -sr, -srd, and -logs option ([33b7f74](https://github.com/freelabz/secator/commit/33b7f742522b4f646fd302c80637a2da0d135871))
+* **nuclei:** add -sr, -srd, and -logs option ([e3ff041](https://github.com/freelabz/secator/commit/e3ff041130b4cdb2530e14aaf072f282b10bf4a7))
+* **search_vulns:** cvss score not pulled properly ([#1082](https://github.com/freelabz/secator/issues/1082)) ([9d2ccf5](https://github.com/freelabz/secator/commit/9d2ccf5546dcb1909268d2a2b4249b0a607a28e1))
+* **tests:** update getasn integration test inputs and expected outputs ([#1084](https://github.com/freelabz/secator/issues/1084)) ([df01409](https://github.com/freelabz/secator/commit/df01409ebeb8309d3101ddc085456f175106f496))
+* typo in README ([#1079](https://github.com/freelabz/secator/issues/1079)) ([13353c1](https://github.com/freelabz/secator/commit/13353c198e63eee4baae7bf1315ac7ef771dd963))
+* **worker:** prevent target duplication when running in worker mode ([#1085](https://github.com/freelabz/secator/issues/1085)) ([b30e213](https://github.com/freelabz/secator/commit/b30e21355a5e85590ed1049fa1692d4d0ee25e19))
+
 ## [0.31.2](https://github.com/freelabz/secator/compare/v0.31.1...v0.31.2) (2026-05-06)
 
 

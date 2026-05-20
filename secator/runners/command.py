@@ -58,6 +58,7 @@ class Command(Runner):
 
 	# Current working directory
 	cwd = None
+	cwd_isolated = False
 
 	# Output encoding
 	encoding = 'utf-8'
@@ -486,7 +487,7 @@ class Command(Runner):
 					task_part = f'[bold gold3]{self.unique_name}[/]'
 				yield Info(
 					message=f'Started task {task_part} (cmd=[dim white]{cmd_str}[/])',
-					_source=self.unique_name
+					_source=self.unique_name,
 				)
 
 			# Check for sudo requirements and prepare the password if needed
@@ -518,6 +519,11 @@ class Command(Runner):
 			self.return_code = 0
 			self.killed = False
 			self.memory_limit_mb = CONFIG.celery.task_memory_limit_mb
+
+			# Isolated CWD
+			if not self.cwd and self.cwd_isolated:
+				self.cwd = f'{self.reports_folder}/.outputs/{self.fqn}'
+				os.makedirs(self.cwd, exist_ok=True)
 
 			# Run the command using subprocess
 			env = os.environ
@@ -876,9 +882,8 @@ class Command(Runner):
 		# Check if we have a tty
 		if not self.has_tty:
 			error = (
-				"Sudo password required but no TTY available (non-interactive mode). "
-				"Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), "
-				"or configure passwordless sudo."
+				'Sudo password required but no TTY available (non-interactive mode). '
+				'Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), or configure passwordless sudo.'
 			)
 			return -1, error
 

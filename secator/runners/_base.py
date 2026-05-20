@@ -20,7 +20,7 @@ from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import get_task_folder_id, run_extractors
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
-from secator.tree import build_runner_tree
+from secator.tree import build_runner_tree, prune_runner_tree
 from secator.loader import get_configs_by_type
 
 
@@ -198,9 +198,10 @@ class Runner:
 		self.debug(f'resolving inputs with {len(self.dynamic_opts)} dynamic opts', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		self.inputs = list(set(self.inputs))
-		targets = [Target(name=target) for target in self.inputs]
-		for target in targets:
-			self.add_result(target, print=False, output=False)
+		if self.caller != 'Task':
+			targets = [Target(name=target) for target in self.inputs]
+			for target in targets:
+				self.add_result(target, print=False, output=False)
 
 		# Run extractors on results
 		self._run_extractors()
@@ -1018,7 +1019,9 @@ class Runner:
 		if self.has_parent:
 			return
 		if self.config.type != 'task':
-			tree = textwrap.indent(build_runner_tree(self.config).render_tree(), '      ')
+			tree = build_runner_tree(self.config)
+			prune_runner_tree(tree, self.run_opts, self.inputs)
+			tree = textwrap.indent(tree.render_tree(), '      ')
 			info = Info(message=f'{self.config.type.capitalize()} built:\n{tree}', _source=self.unique_name)
 			self._print(info, rich=True)
 		remote_str = 'started' if self.sync else 'started in worker'
