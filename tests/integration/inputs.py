@@ -21,6 +21,7 @@ INPUTS_TASKS = {
     'httpx': 'http://localhost:3000/',
 	'h8mail': 'test@test.com',
 	'jswhois': 'wikipedia.org',
+	'nslookup': 'wikipedia.org',
 	'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
 	'subfinder': 'github.com',
