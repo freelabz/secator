@@ -42,11 +42,15 @@ class nuclei(VulnMulti):
 		'automatic_scan': {'is_flag': True, 'short': 'as', 'help': 'Automatic web scan using wappalyzer technology detection to tags mapping'},  # noqa: E501
 		'bulk_size': {'type': int, 'short': 'bs', 'help': 'Maximum number of hosts to be analyzed in parallel per template'},  # noqa: E501
 		'debug': {'type': str, 'help': 'Debug mode'},
+		'display_templates': {'is_flag': True, 'default': False, 'short': 'dt', 'help': 'Display loaded template names.'},
 		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
 		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude tags'},
 		'hang_monitor': {'is_flag': True, 'short': 'hm', 'default': True, 'help': 'Enable nuclei hang monitoring'},
 		'headless_bulk_size': {'type': int, 'short': 'hbs', 'help': 'Maximum number of headless hosts to be analzyed in parallel per template'},  # noqa: E501
 		'input_mode': {'type': str, 'short': 'im', 'help': 'Mode of input file (list, burp, jsonl, yaml, openapi, swagger)'},
+		'interactsh_server': {'type': str, 'default': None, 'short': 'iserver', 'help': 'InteractSH server url for self-hosted instance (default: oast.pro,oast.live,oast.site,oast.online,oast.fun,oast.me)'},  # noqa: E501
+		'interactsh_token': {'type': str, 'default': None, 'short': 'itoken', 'help': 'InteractSH auth token for self-hosted instance'},  # noqa: E501
+		'no_interactsh': {'is_flag': True, 'default': False, 'short': 'ni', 'help': 'Disable InteractSH server for OAST testing, exclude OAST based templates'},  # noqa: E501
 		'logs': {'is_flag': True, 'internal': True, 'display': True, 'help': 'Log errors (-elog) and traces (-tlog) to output dir'},  # noqa: E501
 		'new_templates': {'type': str, 'short': 'nt', 'help': 'Run only new templates added in latest nuclei-templates release'},  # noqa: E501
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit requests/response pairs in the JSON, JSONL, and Markdown outputs (for findings only)'},  # noqa: E501
@@ -72,6 +76,7 @@ class nuclei(VulnMulti):
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
 		# nuclei opts
+		'display_templates': 'vv',
 		'exclude_tags': 'exclude-tags',
 		'exclude_severity': 'exclude-severity',
 		'templates': 't',
