@@ -685,7 +685,7 @@ def humanize_date(dt):
 	dt_local = dt.astimezone(tz=None)
 	now = datetime.now(timezone.utc)
 	diff = now - dt
-	if diff.days < 7:
+	if diff.days < 1:
 		return humanize.naturaltime(diff) + dt_local.strftime(' @ %H:%M')
 	else:
 		return f'{dt_local.strftime("%B %d @ %H:%M")}'
