@@ -519,6 +519,16 @@ class Runner:
 		gc.collect()
 		if self.sync:
 			self.mark_completed()
+		elif self.celery_result and not self.done:
+			# Race condition: the last Celery poll can read 'PENDING' from the result
+			# backend while result.ready() simultaneously returns True (two separate
+			# backend reads per poll iteration). When this happens, the runner's
+			# started/done flags are never set. Sync from the backend here as a safety net.
+			try:
+				if self.celery_result.ready():
+					self.mark_completed()
+			except Exception as e:
+				self.debug(f'error checking celery result state in _finalize: {e}', sub='end')
 		if self.enable_reports:
 			self.export_reports()
 
