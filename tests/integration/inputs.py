@@ -6,7 +6,7 @@ INPUTS_TASKS = {
 	USERNAME: 'ocervell',
 	IP: '127.0.0.1',
 	CIDR_RANGE: '192.168.1.0/24',
-	'getasn': 'wikipedia.org',
+	'getasn': 'tesla',
 	'arjun': 'https://xss-game.appspot.com/level1/frame',
     'bbot': False, # disable bbot test
 	'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
