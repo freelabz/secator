@@ -61,7 +61,7 @@ class nuclei(VulnMulti):
 		'stats_interval': {'type': str, 'short': 'si', 'help': 'Number of seconds to wait between showing a statistics update'},  # noqa: E501
 		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store reponses'},
 		'tags': {'type': str, 'help': 'Tags'},
-		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
+		'templates': {'type': 'list', 'short': 't', 'help': 'Templates (comma-separated paths or directories)'},
 		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
 		'template_condition': {'type': str, 'short': 'tc', 'help': 'Templates to run based on expression condition (ex: "contains(id, "ssh")")'},  # noqa: E501
 	}
@@ -86,7 +86,6 @@ class nuclei(VulnMulti):
 	}
 	opt_value_map = {
 		'tags': lambda x: ','.join(x) if isinstance(x, list) else x,
-		'templates': lambda x: ','.join(x) if isinstance(x, list) else x,
 		'exclude_tags': lambda x: ','.join(x) if isinstance(x, list) else x,
 		'severity': lambda x: ','.join(x) if isinstance(x, list) else x,
 		'exclude_severity': lambda x: ','.join(x) if isinstance(x, list) else x,
