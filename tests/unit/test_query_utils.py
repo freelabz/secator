@@ -98,6 +98,47 @@ class TestPythonExprToMongo:
         result = python_expr_to_mongo("technology.product ~= 'xrdp'")
         assert result == {'_type': 'technology', 'product': {'$regex': 'xrdp'}}
 
+    def test_mixed_and_or_precedence(self):
+        # && binds tighter than ||
+        # "ip || port.extra_data.confidence == 'high' || url ||
+        #  vulnerability.severity_nb < 2 && vulnerability.confidence == 'high' || exploit"
+        query = (
+            "ip || port.extra_data.confidence == 'high' || url || "
+            "vulnerability.severity_nb < 2 && vulnerability.confidence == 'high' || exploit"
+        )
+        result = python_expr_to_mongo(query)
+        assert result == {
+            '$or': [
+                {'_type': 'ip'},
+                {'_type': 'port', 'extra_data.confidence': 'high'},
+                {'_type': 'url'},
+                {'_type': 'vulnerability', 'severity_nb': {'$lt': 2}, 'confidence': 'high'},
+                {'_type': 'exploit'},
+            ]
+        }
+
+    def test_mixed_and_within_or_simple(self):
+        result = python_expr_to_mongo("domain || port.state == 'open' && port.port < 1024")
+        assert result == {
+            '$or': [
+                {'_type': 'domain'},
+                {'_type': 'port', 'state': 'open', 'port': {'$lt': 1024}},
+            ]
+        }
+
+    def test_and_range_query_same_field(self):
+        result = python_expr_to_mongo('port.port > 80 && port.port < 1024')
+        assert result == {'_type': 'port', 'port': {'$gt': 80, '$lt': 1024}}
+
+    def test_mixed_and_or_preserves_same_field_range(self):
+        result = python_expr_to_mongo('domain || port.port > 80 && port.port < 1024')
+        assert result == {
+            '$or': [
+                {'_type': 'domain'},
+                {'_type': 'port', 'port': {'$gt': 80, '$lt': 1024}},
+            ]
+        }
+
     def test_passthrough_mongo_dict(self):
         query = {'_type': 'vulnerability', 'severity_score': {'$gte': 7}}
         assert python_expr_to_mongo(query) == query

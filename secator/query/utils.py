@@ -166,6 +166,17 @@ def _normalize_logical_ops(query):
     return ''.join(result)
 
 
+def _merge_clause_dicts(base, update):
+    """Merge two clause dicts, combining operator sub-dicts for the same field key."""
+    result = dict(base)
+    for key, value in update.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = {**result[key], **value}
+        else:
+            result[key] = value
+    return result
+
+
 def python_expr_to_mongo(query):
     """Translate a Python-like CLI query expression to a MongoDB-style query dict.
 
@@ -175,6 +186,9 @@ def python_expr_to_mongo(query):
         - JSON string (starts with '{') → parsed as dict
         - 'type' → {'_type': 'type'}
         - 'type.field > value' → {'_type': 'type', 'field': {'$gt': value}}
+        - 'expr1 && expr2' → merged dict (AND)
+        - 'expr1 || expr2' → {'$or': [...]}
+        - 'e1 || e2 && e3 || e4' → {'$or': [e1, {e2 merged e3}, e4]}  (&&  binds tighter than ||)
         - 'expr1 && expr2' or 'expr1 and expr2' → merged dict (AND)
         - 'expr1 || expr2' or 'expr1 or expr2' → {'$or': [...]}
     """
@@ -193,19 +207,27 @@ def python_expr_to_mongo(query):
     query = _normalize_logical_ops(query)
 
     or_parts = _split_logical_op(query, '||')
-    and_parts = _split_logical_op(query, '&&')
-
-    if len(or_parts) > 1 and len(and_parts) > 1:
-        raise ValueError("Cannot mix && and || in the same query expression")
 
     if len(or_parts) > 1:
-        result = {'$or': [_parse_single_expr(p) for p in or_parts]}
-    elif len(and_parts) > 1:
-        result = {}
-        for part in and_parts:
-            result.update(_parse_single_expr(part))
+        mongo_clauses = []
+        for or_part in or_parts:
+            and_parts = _split_logical_op(or_part, '&&')
+            if len(and_parts) > 1:
+                merged = {}
+                for ap in and_parts:
+                    merged = _merge_clause_dicts(merged, _parse_single_expr(ap))
+                mongo_clauses.append(merged)
+            else:
+                mongo_clauses.append(_parse_single_expr(or_part))
+        result = {'$or': mongo_clauses}
     else:
-        result = _parse_single_expr(query)
+        and_parts = _split_logical_op(query, '&&')
+        if len(and_parts) > 1:
+            result = {}
+            for part in and_parts:
+                result = _merge_clause_dicts(result, _parse_single_expr(part))
+        else:
+            result = _parse_single_expr(query)
 
     debug('python_expr_to_mongo', sub='query', obj={'input': query, 'output': result})
     return result
