@@ -313,13 +313,20 @@ def setup_ai():
 	from rich.prompt import Prompt
 
 	# Load all models, sort, build color map
-	all_models = sorted(litellm.model_list)
+	# all_models = sorted(litellm.model_list) # TODO: revise this, check why it doesn't list all models
+	all_models = []
 	all_parts = set()
-	for m in all_models:
-		parts = m.split('/')
-		for p in parts[:-1]:
-			all_parts.add(p)
+	for provider, model_names in litellm.models_by_provider.items():
+		model_names = sorted(model_names)
+		for name in model_names:
+			parts = name.split('/')
+			if parts[0] != provider:
+				parts = [provider] + parts
+			all_models.append('/'.join(parts))
+			for p in parts[:-1]:
+				all_parts.add(p)
 	part_colors = {p: MODEL_COLORS[i % len(MODEL_COLORS)] for i, p in enumerate(sorted(all_parts))}
+	print(part_colors)
 
 	def _format_model(m, idx=None):
 		parts = m.split('/')
