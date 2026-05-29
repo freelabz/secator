@@ -1017,6 +1017,9 @@ def _apply_format(results, fmt):
 				# Brace-style with type.field dot notation: {url.host} {port.port}
 				_type = m.group(1)
 				_template = spec
+			elif m and m.group(1) in FINDING_TYPES_LOWER:
+				# Known output type referenced but not present in results — skip this spec.
+				continue
 			else:
 				# Brace-style with direct field names or nested field access:
 				# {url} {host} {status_code} or {extra_data.published}
@@ -1071,7 +1074,27 @@ def _apply_format(results, fmt):
 					new_results[_actual_type] = formatted
 				else:
 					console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
-			# When _template is set the user gave an explicit type prefix — skip silently.
+			elif _type not in FINDING_TYPES_LOWER:
+				# Dotted field path (e.g. extra_data.published) where the first part is not a
+				# known output type. Treat the whole spec as a nested field path on the single
+				# non-empty result type, using DotMap for traversal.
+				nonempty_types = [k for k, v in results.items() if v]
+				if len(nonempty_types) == 1:
+					_actual_type = nonempty_types[0]
+					items = results[_actual_type]
+					formatted = []
+					path_parts = spec.split('.')
+					for item in items:
+						d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+						val = DotMap(d)
+						for part in path_parts:
+							val = getattr(val, part, None)
+							if val is None or (isinstance(val, DotMap) and not val):
+								val = None
+								break
+						if val is not None:
+							formatted.append(str(val))
+					new_results[_actual_type] = formatted
 			continue
 
 		items = results[_type]
