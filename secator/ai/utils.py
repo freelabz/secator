@@ -326,7 +326,6 @@ def setup_ai():
 			for p in parts[:-1]:
 				all_parts.add(p)
 	part_colors = {p: MODEL_COLORS[i % len(MODEL_COLORS)] for i, p in enumerate(sorted(all_parts))}
-	print(part_colors)
 
 	def _format_model(m, idx=None):
 		parts = m.split('/')
