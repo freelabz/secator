@@ -1012,14 +1012,16 @@ def _apply_format(results, fmt):
 	for spec in specs:
 		_field_only = False
 		if '{' in spec and '}' in spec:
-			m = re.search(r'\{(\w+)\.', spec)
-			if m and m.group(1) in results:
+			if re.search(r'\{\w+\.\w+', spec):
 				# Brace-style with type.field dot notation: {url.host} {port.port}
+				m = re.search(r'\{(\w+)\.', spec)
+				if not m:
+					continue
 				_type = m.group(1)
 				_template = spec
 			else:
-				# Brace-style with direct field names or nested field access:
-				# {url} {host} {status_code} or {extra_data.published}
+				# Brace-style with direct field names: {url} {host} {status_code}
+				# Only works when exactly one type is present in results.
 				_field_only = True
 				_type = None
 				_template = spec
@@ -1042,12 +1044,8 @@ def _apply_format(results, fmt):
 			formatted = []
 			for item in items:
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
-				# Wrap nested dicts with DotMap to support dotted access (e.g. {extra_data.published})
-				d_dotmaps = {k: DotMap(v) if isinstance(v, dict) else v for k, v in d.items()}
 				try:
-					value = _template.format(**d_dotmaps)
-					if 'DotMap()' in str(value):
-						continue
+					value = _template.format(**d)
 					formatted.append(value)
 				except (KeyError, AttributeError):
 					pass
