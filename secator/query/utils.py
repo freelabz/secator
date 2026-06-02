@@ -124,7 +124,11 @@ def _parse_single_expr(expr):
         parts = left.split('.', 1)
         _type = parts[0].strip()
         field = parts[1].strip() if len(parts) > 1 else None
-        value = _parse_value(right)
+        # Regex patterns must stay as strings — converting to int/float breaks re.search.
+        if mongo_op == '$regex':
+            value = right.strip().strip("'\"")
+        else:
+            value = _parse_value(right)
         result = {'_type': _type}
         if field:
             result[field] = value if mongo_op is None else {mongo_op: value}
