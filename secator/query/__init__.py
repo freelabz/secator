@@ -51,3 +51,7 @@ class QueryEngine:
     def count(self, query: dict) -> int:
         """Count findings matching query."""
         return self.backend.count(query)
+
+    def update(self, query: dict, update: dict) -> int:
+        """Update records matching query."""
+        return self.backend.update(query, update)

@@ -113,6 +113,98 @@ class TestApplyFormat(unittest.TestCase):
 		out = _apply_format(results, '{vulnerability.matched_at}')
 		self.assertEqual(out, {})
 
+	def test_brace_style_nested_dict_field(self):
+		"""Dotted notation for nested dict fields like {extra_data.published} should work (issue #1086)."""
+		results = {
+			'vulnerability': [
+				{
+					'id': 'CVE-2026-28780',
+					'matched_at': 'https://example.com',
+					'extra_data': {'published': '2026-01-01'},
+				}
+			],
+		}
+		out = _apply_format(results, '{id} {matched_at} {extra_data.published}')
+		self.assertEqual(out, {'vulnerability': ['CVE-2026-28780 https://example.com 2026-01-01']})
+
+	def test_brace_style_nested_dict_field_missing_key(self):
+		"""Items missing the nested key should be skipped gracefully."""
+		results = {
+			'vulnerability': [
+				{
+					'id': 'CVE-2026-28780',
+					'matched_at': 'https://example.com',
+					'extra_data': {'published': '2026-01-01'},
+				},
+				{
+					'id': 'CVE-2026-99999',
+					'matched_at': 'https://example.com',
+					'extra_data': {},
+				},
+			],
+		}
+		out = _apply_format(results, '{id} {extra_data.published}')
+		self.assertEqual(out, {'vulnerability': ['CVE-2026-28780 2026-01-01']})
+
+	def test_dotpath_style_nested_dict_field(self):
+		"""Dotted notation without braces (extra_data.published) should work (issue #1086)."""
+		results = {
+			'vulnerability': [
+				{
+					'id': 'CVE-2026-28780',
+					'matched_at': 'https://example.com',
+					'extra_data': {'published': '2026-01-01'},
+				}
+			],
+		}
+		out = _apply_format(results, 'extra_data.published')
+		self.assertEqual(out, {'vulnerability': ['2026-01-01']})
+
+	def test_dotpath_style_nested_dict_field_missing_key(self):
+		"""Dotted notation without braces skips items missing the nested key."""
+		results = {
+			'vulnerability': [
+				{
+					'id': 'CVE-2026-28780',
+					'matched_at': 'https://example.com',
+					'extra_data': {'published': '2026-01-01'},
+				},
+				{
+					'id': 'CVE-2026-99999',
+					'matched_at': 'https://example.com',
+					'extra_data': {},
+				},
+			],
+		}
+		out = _apply_format(results, 'extra_data.published')
+		self.assertEqual(out, {'vulnerability': ['2026-01-01']})
+
+	def _make_tag(self, name='net_cidr', ttl='300'):
+		return {'name': name, 'match': '10.0.0.0/24', 'extra_data': {'ttl': ttl}}
+
+	def test_dotpath_style_type_prefixed_nested_field(self):
+		"""tag.extra_data.ttl (type-prefixed, no braces) should resolve nested dict field."""
+		results = {'tag': [self._make_tag(ttl='300')]}
+		out = _apply_format(results, 'tag.extra_data.ttl')
+		self.assertEqual(out, {'tag': ['300']})
+
+	def test_dotpath_style_type_prefixed_nested_field_missing_key(self):
+		"""tag.extra_data.ttl skips items where the nested key is absent."""
+		results = {
+			'tag': [
+				self._make_tag(ttl='300'),
+				{'name': 'net_cidr', 'match': '10.0.0.0/24', 'extra_data': {}},
+			]
+		}
+		out = _apply_format(results, 'tag.extra_data.ttl')
+		self.assertEqual(out, {'tag': ['300']})
+
+	def test_dotpath_style_untyped_nested_field_on_tag(self):
+		"""extra_data.ttl (no type prefix) resolves against the single non-empty type (tag)."""
+		results = {'tag': [self._make_tag(ttl='300')], 'port': []}
+		out = _apply_format(results, 'extra_data.ttl')
+		self.assertEqual(out, {'tag': ['300']})
+
 	def test_pipe_separated_specs(self):
 		"""Multiple specs separated by || should each be applied independently."""
 		results = {

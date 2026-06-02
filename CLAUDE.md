@@ -114,4 +114,6 @@ secator test unit                                    # Run all unit tests
 secator test unit --test <test_name_or_regex>         # Run specific unit test(s)
 ```
 
+When needed, update appropriate tests to match the reflected changes.
+
 Flake8 config (`.flake8`): max-line-length=120, ignores W191, E101, E128, E265, W605

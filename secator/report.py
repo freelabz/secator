@@ -78,7 +78,9 @@ class Report:
 		engine = QueryEngine(self.workspace_name, context=context)
 		results = engine.search(query, dedupe=dedupe)
 
-		for output_type in FINDING_TYPES:
+		# Fill report (findings + targets)
+		from secator.output_types.target import Target
+		for output_type in list(FINDING_TYPES) + [Target]:
 			output_name = output_type.get_name()
 			data['results'][output_name] = [r for r in results if (r.get('_type') if isinstance(r, dict) else getattr(r, '_type', None)) == output_name]  # noqa: E501
 

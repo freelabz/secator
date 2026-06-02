@@ -1,34 +1,47 @@
 import tempfile
 from pathlib import Path
-from dotmap import DotMap
+from types import SimpleNamespace
 from secator.report import Report
+
+
+class _FakeRunner(SimpleNamespace):
+    """Test stub whose toDict() can actually be overridden.
+
+    DotMap silently stores `toDict` as a dict key instead of overriding the
+    built-in method, which masked missing fields in Report.build() output.
+    """
+    def toDict(self):
+        return self._to_dict
 
 
 class TestReportBuild:
 
     def _make_runner(self, results, workspace='test_ws', drivers=None):
-        runner = DotMap()
-        runner.config = DotMap({'name': 'test_runner', 'type': 'task'})
-        runner.workspace_name = workspace
-        runner.errors = []
-        runner.context = {
-            'workspace_id': workspace,
-            'workspace_name': workspace,
-            'drivers': drivers or [],
-            'results': results,
-        }
-        runner.reports_folder = Path(tempfile.mkdtemp())
-        runner.toDict = lambda: {
-            'name': 'test_runner',
-            'status': 'completed',
-            'targets': [],
-            'start_time': None,
-            'end_time': None,
-            'elapsed': None,
-            'elapsed_human': None,
-            'run_opts': {'profiles': ['aggressive']},
-            'results_count': 0,
-        }
+        config = SimpleNamespace(name='test_runner', type='task')
+        runner = _FakeRunner(
+            config=config,
+            workspace_name=workspace,
+            errors=[],
+            context={
+                'workspace_id': workspace,
+                'workspace_name': workspace,
+                'drivers': drivers or [],
+                'results': results,
+            },
+            reports_folder=Path(tempfile.mkdtemp()),
+            results=results,
+            _to_dict={
+                'name': 'test_runner',
+                'status': 'completed',
+                'targets': [],
+                'start_time': None,
+                'end_time': None,
+                'elapsed': None,
+                'elapsed_human': None,
+                'run_opts': {'profiles': ['aggressive']},
+                'results_count': 0,
+            },
+        )
         return runner
 
     def test_build_filters_by_type(self):

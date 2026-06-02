@@ -4,7 +4,7 @@ build-backend = 'hatchling.build'
 
 [project]
 name = 'secator'
-version = "0.30.1"
+version = "0.32.0"
 authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
 readme = 'README.md'
 description = "The pentester's swiss knife."
@@ -55,8 +55,7 @@ dependencies = [
   'tldextract < 6',
   'typing_extensions < 5',
   'validators < 1',
-  'xmltodict < 1',
-  'json-stream < 3'
+  'xmltodict < 1'
 ]
 
 [project.optional-dependencies]
@@ -92,7 +91,8 @@ gcs = [
 	'google-cloud-storage < 3'
 ]
 ai = [
-	'litellm < 2'
+	'litellm < 2',
+	'safecmd'
 ]
 
 [project.scripts]

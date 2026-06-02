@@ -208,13 +208,16 @@ class CeleryData(object):
 
 	@staticmethod
 	def get_all_data(result, ids_map, revoked=False):
+		state = result.state  # Read once to avoid inconsistency between checks
+		if revoked and state in ['PENDING', 'RUNNING']:
+			state = 'REVOKED'
 		main_task = State(
 			task_id=result.id,
-			state='REVOKED' if revoked and result.state in ['PENDING', 'RUNNING'] else result.state,
+			state=state,
 			_source='celery',
 		)
-		debug(f'Main task state: {result.id} - {result.state}', sub='celery.poll', verbose=True)
-		yield {'id': result.id, 'state': result.state, 'results': [main_task]}
+		debug(f'Main task state: {result.id} - {state}', sub='celery.poll', verbose=True)
+		yield {'id': result.id, 'state': state, 'results': [main_task]}
 		yield from CeleryData.get_tasks_data(ids_map, revoked=revoked)
 
 	@staticmethod
