@@ -269,8 +269,8 @@ class TestQueryOperators(unittest.TestCase):
 		self.assertTrue(match_query(item, {'url': {'$regex': r'example\.com'}}))
 		self.assertFalse(match_query(item, {'url': {'$regex': r'other\.com'}}))
 
-		# $regex with invalid pattern (starts with *) — should not raise, returns False
-		self.assertFalse(match_query(item, {'url': {'$regex': '*example'}}))
+		# $regex with pattern starting with * — leading * is stripped, remaining pattern matches
+		self.assertTrue(match_query(item, {'url': {'$regex': '*example'}}))
 
 		# $regex with numeric pattern — should convert to string, not raise TypeError
 		item_with_id = {'id': 'CVE-2026-12345', 'score': 9}

@@ -14,8 +14,9 @@ from secator.utils import debug
 def _regex_match(field, pattern):
 	if field is None:
 		return False
+	pattern = str(pattern).lstrip('*')
 	try:
-		return re.search(str(pattern), str(field)) is not None
+		return re.search(pattern, str(field)) is not None
 	except re.error:
 		return False
 
