@@ -1125,12 +1125,13 @@ def _apply_format(results, fmt):
 @click.pass_context
 def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe):
 	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
-	from secator.query.utils import parse_report_paths, python_expr_to_mongo
+	from secator.query.utils import parse_report_paths, python_expr_to_mongo, resolve_last_report_path
 
 	current = get_file_timestamp()
 	workspace_name = workspace or CONFIG.workspace.default or 'default'
 
-	# 1. Parse path-based runner filter
+	# 1. Resolve 'last' keyword to actual report IDs, then parse path-based runner filter
+	report_query = resolve_last_report_path(report_query, workspace_name)
 	runner_filter = parse_report_paths(report_query)
 	debug('runner paths filter', sub='query', obj=runner_filter)
 

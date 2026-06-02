@@ -245,3 +245,92 @@ class TestReportShowApiBackend(unittest.TestCase):
 
 		self.assertEqual(result.exit_code, 0)
 		self.assertEqual(captured.get('results', {}).get('vulnerability', []), [])
+
+
+class TestReportShowLastKeyword(unittest.TestCase):
+	"""End-to-end CLI tests for `secator r show last` / `tasks/last` / etc."""
+
+	def setUp(self):
+		self.cli_runner = CliRunner()
+		self.temp_dir = tempfile.mkdtemp()
+
+	def tearDown(self):
+		shutil.rmtree(self.temp_dir)
+
+	def _write_report(self, runner_type, report_id, vulns):
+		report_dir = Path(self.temp_dir) / WORKSPACE / runner_type / str(report_id)
+		report_dir.mkdir(parents=True)
+		with open(report_dir / 'report.json', 'w') as f:
+			json.dump({'info': {'name': 'test'}, 'results': {'vulnerability': vulns}}, f)
+
+	def _invoke(self, report_query_arg):
+		from secator.cli import cli
+
+		captured = {}
+
+		def capture_send(report_self):
+			captured['results'] = report_self.data['results']
+
+		args = ['r', 'show', '-w', WORKSPACE, '--driver', 'local']
+		if report_query_arg:
+			args += [report_query_arg]
+
+		with mock.patch('secator.query.json.CONFIG') as mock_json_cfg, \
+				mock.patch('secator.query.utils.CONFIG') as mock_utils_cfg, \
+				mock.patch('secator.report.Report.send', capture_send):
+			mock_json_cfg.dirs.reports = Path(self.temp_dir)
+			mock_utils_cfg.dirs.reports = Path(self.temp_dir)
+			result = self.cli_runner.invoke(cli, args)
+
+		return result, captured
+
+	def test_tasks_last_shows_highest_id_results(self):
+		"""tasks/last resolves to the task folder with the highest numeric ID."""
+		self._write_report('tasks', 1, [CRITICAL_VULN.copy()])
+		self._write_report('tasks', 2, [MEDIUM_VULN.copy()])
+		result, captured = self._invoke('tasks/last')
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(len(vulns), 1)
+		self.assertEqual(vulns[0]['name'], 'XSS')
+
+	def test_workflows_last_resolves(self):
+		"""workflows/last resolves to the workflow folder with the highest numeric ID."""
+		self._write_report('workflows', 0, [CRITICAL_VULN.copy()])
+		self._write_report('workflows', 3, [MEDIUM_VULN.copy()])
+		result, captured = self._invoke('workflows/last')
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(len(vulns), 1)
+		self.assertEqual(vulns[0]['name'], 'XSS')
+
+	def test_scans_last_resolves(self):
+		"""scans/last resolves to the scan folder with the highest numeric ID."""
+		self._write_report('scans', 5, [CRITICAL_VULN.copy()])
+		result, captured = self._invoke('scans/last')
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(len(vulns), 1)
+		self.assertEqual(vulns[0]['name'], 'SQL Injection')
+
+	def test_last_alone_shows_most_recently_modified(self):
+		"""'last' without a runner type shows the most recently written report."""
+		import time
+		self._write_report('tasks', 1, [CRITICAL_VULN.copy()])
+		time.sleep(0.05)
+		self._write_report('workflows', 1, [MEDIUM_VULN.copy()])
+		result, captured = self._invoke('last')
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(len(vulns), 1)
+		self.assertEqual(vulns[0]['name'], 'XSS')
+
+	def test_last_no_reports_exits_cleanly(self):
+		"""'last' with no reports exits cleanly (falls back to showing all)."""
+		result, captured = self._invoke('last')
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)

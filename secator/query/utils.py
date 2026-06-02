@@ -2,8 +2,76 @@
 
 import json
 import re
+from pathlib import Path
 
-from secator.utils import debug
+from secator.config import CONFIG
+from secator.utils import debug, sanitize_folder_name
+
+
+def resolve_last_report_path(report_query, workspace_name, reports_dir=None):
+    """Resolve the 'last' keyword in report_query to actual report IDs.
+
+    Scans the local filesystem to find the most recent report IDs.
+
+    Examples:
+        'last'           → 'tasks/5'    (most recently modified report across all types)
+        'workflows/last' → 'workflows/3'
+        'scans/last'     → 'scans/7'
+        'tasks/last'     → 'tasks/12'
+    """
+    if not report_query or 'last' not in report_query:
+        return report_query
+
+    reports_base = Path(reports_dir).expanduser() if reports_dir else Path(CONFIG.dirs.reports).expanduser()
+    workspace_folder = sanitize_folder_name(workspace_name)
+
+    resolved_parts = []
+    for part in [p.strip() for p in report_query.split(',') if p.strip()]:
+        if part == 'last':
+            best_mtime = None
+            best_part = None
+            for runner_type in ['tasks', 'workflows', 'scans']:
+                runner_path = reports_base / workspace_folder / runner_type
+                if not runner_path.exists():
+                    continue
+                for f in runner_path.iterdir():
+                    if not f.is_dir():
+                        continue
+                    try:
+                        int(f.name)
+                    except ValueError:
+                        continue
+                    report_file = f / 'report.json'
+                    if report_file.exists():
+                        mtime = report_file.stat().st_mtime
+                        if best_mtime is None or mtime > best_mtime:
+                            best_mtime = mtime
+                            best_part = f'{runner_type}/{f.name}'
+            if best_part:
+                resolved_parts.append(best_part)
+        elif '/' in part:
+            runner_type, runner_id = part.split('/', 1)
+            runner_id = runner_id.strip().rstrip('/')
+            if runner_id == 'last':
+                runner_path = reports_base / workspace_folder / runner_type.strip()
+                if runner_path.exists():
+                    ids = []
+                    for f in runner_path.iterdir():
+                        if f.is_dir():
+                            try:
+                                ids.append(int(f.name))
+                            except ValueError:
+                                continue
+                    if ids:
+                        resolved_parts.append(f'{runner_type}/{max(ids)}')
+            else:
+                resolved_parts.append(part)
+        else:
+            resolved_parts.append(part)
+
+    result = ','.join(resolved_parts) if resolved_parts else None
+    debug('resolve_last_report_path', sub='query', obj={'input': report_query, 'output': result})
+    return result
 
 
 def parse_report_paths(paths_str):
