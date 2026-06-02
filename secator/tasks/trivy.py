@@ -73,7 +73,7 @@ class trivy(Vuln):
 
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
-			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
+			output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
 		self.output_path = output_path
 		self.cmd = self.cmd.replace(f' -mode {mode}', '').replace('trivy', f'trivy {mode}')
 		self.cmd += f' -o {shlex.quote(self.output_path)}'
@@ -115,7 +115,7 @@ class trivy(Vuln):
 				if vuln_id.startswith('CVE'):
 					remote_data = Vuln.lookup_cve(vuln_id)
 					if remote_data:
-						data.update(remote_data)
+						data.update(remote_data.toDict() if hasattr(remote_data, 'toDict') else remote_data)
 				yield Vulnerability(**data)
 			for secret in item.get('Secrets', []):
 				code_context = '\n'.join([line['Content'] for line in secret.get('Code', {}).get('Lines') or []])

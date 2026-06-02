@@ -16,7 +16,7 @@ from time import time
 import psutil
 from fp.fp import FreeProxy
 
-from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
+from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
@@ -58,6 +58,7 @@ class Command(Runner):
 
 	# Current working directory
 	cwd = None
+	cwd_isolated = False
 
 	# Output encoding
 	encoding = 'utf-8'
@@ -129,6 +130,9 @@ class Command(Runner):
 	proxy_socks5 = False
 	proxy_http = False
 
+	# Print command icon
+	print_cmd_icon = ':zap:'
+
 	# Profile
 	profile = 'small'
 
@@ -189,6 +193,9 @@ class Command(Runner):
 		# Print cmd
 		self.print_cmd = self.run_opts.get('print_cmd', False)
 
+		# TTY availability (can be explicitly disabled for non-interactive contexts)
+		self.has_tty = self.run_opts.get('tty', sys.stdin.isatty())
+
 		# Stat update
 		self.last_updated_stat = None
 
@@ -205,6 +212,11 @@ class Command(Runner):
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
+
+		# Apply task-specific config overrides
+		task_name = self.__class__.__name__
+		for attr, value in CONFIG.tasks.overrides.get(task_name, {}).items():
+			setattr(self, attr, value)
 
 		# Build command input
 		self._build_cmd_input()
@@ -464,6 +476,20 @@ class Command(Runner):
 			self.print_description()
 			self.print_command()
 
+			# In remote worker mode, stream description and cmd back to the client
+			if IN_WORKER and self.print_cmd:
+				cmd_str = _s(self.cmd)
+				if self.chunk and self.chunk_count:
+					cmd_str += f' ({self.chunk}/{self.chunk_count})'
+				if self.description:
+					task_part = f'{self.description} ([bold gold3]{self.unique_name}[/])'
+				else:
+					task_part = f'[bold gold3]{self.unique_name}[/]'
+				yield Info(
+					message=f'Started task {task_part} (cmd=[dim white]{cmd_str}[/])',
+					_source=self.unique_name,
+				)
+
 			# Check for sudo requirements and prepare the password if needed
 			sudo_required = re.search(r'\bsudo\b', self.cmd)
 			sudo_password = None
@@ -494,6 +520,11 @@ class Command(Runner):
 			self.killed = False
 			self.memory_limit_mb = CONFIG.celery.task_memory_limit_mb
 
+			# Isolated CWD
+			if not self.cwd and self.cwd_isolated:
+				self.cwd = f'{self.reports_folder}/.outputs/{self.fqn}'
+				os.makedirs(self.cwd, exist_ok=True)
+
 			# Run the command using subprocess
 			env = os.environ
 			self.process = subprocess.Popen(
@@ -504,6 +535,7 @@ class Command(Runner):
 				universal_newlines=True,
 				preexec_fn=os.setsid if not (sudo_required or self.disable_preexec) else None,
 				shell=self.shell,
+				errors='replace',
 				env=env,
 				cwd=self.cwd,
 			)
@@ -606,10 +638,11 @@ class Command(Runner):
 	def print_command(self):
 		"""Print command."""
 		if self.print_cmd:
-			cmd_str = f':zap: {_s(self.cmd)}'
+			icon = self.run_opts.get('print_cmd_icon', self.print_cmd_icon)
+			cmd_str = f'{icon} [bold green]{_s(self.cmd)}[/]'
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
-			self._print(cmd_str, color='bold green', rich=True)
+			self._print(cmd_str, rich=True)
 		self.debug('command', obj={'cmd': self.cmd}, sub='start')
 		self.debug('options', obj=self.cmd_options, sub='start')
 
@@ -634,12 +667,24 @@ class Command(Runner):
 		yield error
 
 	def stop_process(self, exit_ok=False, sig=signal.SIGINT):
-		"""Sends SIGINT to running process, if any."""
+		"""Sends signal to running process, if any.
+
+		Uses killpg only when the subprocess has its own process group (preexec_fn=os.setsid).
+		Otherwise (disable_preexec=True or sudo), the subprocess shares the worker's pgid and
+		killpg would also kill the worker.
+		"""
 		if not self.process:
 			return
 		self.debug(f'Sending signal {signal_to_name(sig)} to process {self.process.pid}.', sub='error')
 		if self.process and self.process.pid:
-			os.killpg(os.getpgid(self.process.pid), sig)
+			try:
+				pgid = os.getpgid(self.process.pid)
+				if pgid == self.process.pid:
+					os.killpg(pgid, sig)
+				else:
+					os.kill(self.process.pid, sig)
+			except (ProcessLookupError, PermissionError):
+				pass
 		if exit_ok:
 			self.exit_ok = True
 
@@ -700,6 +745,10 @@ class Command(Runner):
 				# 	self.stop_process(exit_ok=False, sig=signal.SIGTERM)
 				# 	break
 
+			except psutil.NoSuchProcess:
+				# Process exited between polls — nothing to monitor.
+				self.debug('Monitor: process exited', sub='monitor')
+				break
 			except Exception as e:
 				self.debug(f'Monitor thread error: {e}', sub='monitor')
 				warning = Warning(message=f'Monitor thread error: {e}')
@@ -805,8 +854,11 @@ class Command(Runner):
 			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
 
 		# Check if we have a tty
-		if not sys.stdin.isatty():
-			error = 'No TTY detected. Sudo password prompt requires a TTY to proceed.'
+		if not self.has_tty:
+			error = (
+				'Sudo password required but no TTY available (non-interactive mode). '
+				'Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), or configure passwordless sudo.'
+			)
 			return -1, error
 
 		# If not, prompt the user for a password
@@ -1156,7 +1208,7 @@ class Command(Runner):
 		# If inputs has multiple elements and the tool has input_flag set to OPT_PIPE_INPUT, use cat-piped_input input.
 		# Otherwise pass the file path to the tool.
 		else:
-			fpath = f'{self.reports_folder}/.inputs/{self.unique_name}.txt'
+			fpath = f'{self.reports_folder}/.inputs/{self.fqn}.txt'
 
 			# Write the input to a file
 			with open(fpath, 'w') as f:
@@ -1165,7 +1217,7 @@ class Command(Runner):
 					f.write('\n')
 
 			if self.file_copy_sudo:
-				sudo_fpath = f'/tmp/{self.unique_name}.txt'
+				sudo_fpath = f'/tmp/{self.fqn}.txt'
 				shutil.copy(fpath, sudo_fpath)
 				fpath = sudo_fpath
 

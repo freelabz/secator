@@ -84,6 +84,7 @@ tasks:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
+      no_httpx: true
       if: opts.nuclei and not opts.passive
 
     nuclei/url:
@@ -105,6 +106,7 @@ tasks:
         - type: technology
           field: '{match}~{product} {version}'
           condition: item.version
+          group_by: '{product} {version}'
       if: "'searchsploit' in opts.exploiters"
 
     search_vulns:
@@ -116,4 +118,5 @@ tasks:
         - type: technology
           field: '{match}~{product} {version}'
           condition: item.version
+          group_by: '{product} {version}'
       if: "'search_vulns' in opts.exploiters"

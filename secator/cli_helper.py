@@ -15,8 +15,8 @@ from secator.click import CLICK_LIST
 from secator.definitions import ADDONS_ENABLED, AVAILABLE_DRIVERS, AVAILABLE_EXPORTERS
 from secator.runners import Scan, Task, Workflow
 from secator.template import get_config_options
-from secator.tree import build_runner_tree
-from secator.utils import (deduplicate, expand_input, get_command_category)
+from secator.tree import build_runner_tree, prune_runner_tree
+from secator.utils import deduplicate, expand_input, get_command_category
 from secator.loader import get_configs_by_type
 from secator.completion import complete_profiles, complete_workspaces, complete_drivers, complete_exporters
 
@@ -78,6 +78,7 @@ def decorate_command_options(opts):
 	Returns:
 		function: Decorator.
 	"""
+
 	def decorator(f):
 		reversed_opts = OrderedDict(list(opts.items())[::-1])
 		# Pre-pass in original order to assign each short opt to its first claimant.
@@ -121,7 +122,7 @@ def decorate_command_options(opts):
 					long += f'/--no-{opt_name}'
 					short += f'/-n{short_opt}' if short_opt else f'/-n{opt_name}'
 			if applies_to:
-				applies_to_str = ", ".join(f'[bold yellow3]{_}[/]' for _ in applies_to)
+				applies_to_str = ', '.join(f'[bold yellow3]{_}[/]' for _ in applies_to)
 				conf['help'] += rf' \[[dim]{applies_to_str}[/]]'
 			if default_from:
 				conf['help'] += rf' \[[dim]default from: [dim yellow3]{default_from}[/][/]]'
@@ -139,6 +140,7 @@ def decorate_command_options(opts):
 				args.append(internal_name)
 			f = click.option(*args, **conf)(f)
 		return f
+
 	return decorator
 
 
@@ -153,30 +155,22 @@ def register_runner(cli_endpoint, config):
 		'no_args_is_help': True,
 		'context_settings': {
 			'ignore_unknown_options': False,
-			'allow_extra_args': False
-		}
+			'allow_extra_args': False,
+		},
 	}
 
 	if cli_endpoint.name == 'scan':
 		runner_cls = Scan
 		short_help = config.description or ''
 		short_help += f' [dim]alias: {config.alias}' if config.alias else ''
-		command_opts.update({
-			'name': name,
-			'short_help': short_help,
-			'no_args_is_help': False
-		})
+		command_opts.update({'name': name, 'short_help': short_help, 'no_args_is_help': False})
 		input_types = config.input_types
 
 	elif cli_endpoint.name == 'workflow':
 		runner_cls = Workflow
 		short_help = config.description or ''
 		short_help = f'{short_help:<55} [dim](alias)[/][bold cyan] {config.alias}' if config.alias else ''
-		command_opts.update({
-			'name': name,
-			'short_help': short_help,
-			'no_args_is_help': False
-		})
+		command_opts.update({'name': name, 'short_help': short_help, 'no_args_is_help': False})
 		input_types = config.input_types
 
 	elif cli_endpoint.name == 'task':
@@ -184,14 +178,10 @@ def register_runner(cli_endpoint, config):
 		task_cls = Task.get_task_class(config.name)
 		task_category = get_command_category(task_cls)
 		short_help = f'[magenta]{task_category:<25}[/] {task_cls.__doc__}'
-		command_opts.update({
-			'name': name,
-			'short_help': short_help,
-			'no_args_is_help': False
-		})
+		command_opts.update({'name': name, 'short_help': short_help, 'no_args_is_help': False})
 		input_types = task_cls.input_types
 	else:
-		raise ValueError(f"Unrecognized runner endpoint name {cli_endpoint.name}")
+		raise ValueError(f'Unrecognized runner endpoint name {cli_endpoint.name}')
 	input_types_str = '|'.join(input_types) if input_types else 'targets'
 	default_inputs = None if config.default_inputs == {} else config.default_inputs
 	input_required = default_inputs is None
@@ -200,7 +190,7 @@ def register_runner(cli_endpoint, config):
 		config,
 		exec_opts=CLI_EXEC_OPTS,
 		output_opts=CLI_OUTPUT_OPTS,
-		type_mapping=CLI_TYPE_MAPPING
+		type_mapping=CLI_TYPE_MAPPING,
 	)
 
 	# TODO: maybe allow this in the future
@@ -259,7 +249,23 @@ def register_runner(cli_endpoint, config):
 
 		# Show runner tree
 		if tree:
+			tree_opts = dict(opts)
+			profiles_str = tree_opts.get('profiles') or ''
+			profile_names = [p.strip() for p in profiles_str.split(',') if p.strip()]
+			for dp in CONFIG.profiles.defaults or []:
+				if dp not in profile_names:
+					profile_names.append(dp)
+			if profile_names:
+				for profile in get_configs_by_type('profile'):
+					if profile.name not in profile_names:
+						continue
+					for k, v in profile.opts.items():
+						if profile.enforce or not tree_opts.get(k):
+							tree_opts[k] = v
 			tree = build_runner_tree(config)
+			raw_inputs = tree_opts.get('inputs')
+			tree_inputs = [raw_inputs] if isinstance(raw_inputs, str) else (raw_inputs or [])
+			prune_runner_tree(tree, tree_opts, tree_inputs)
 			console.print(tree.render_tree())
 			sys.exit(0)
 
@@ -283,6 +289,7 @@ def register_runner(cli_endpoint, config):
 					console.print(f'[bold red]Missing "{driver}" addon: please run `secator install addons {driver}`[/].')
 					sys.exit(1)
 				from secator.utils import import_dynamic
+
 				driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
 				if driver_hooks is None:
 					console.print(f'[bold red]Missing "secator.hooks.{driver}.HOOKS".[/]')
@@ -298,6 +305,7 @@ def register_runner(cli_endpoint, config):
 		if 'api' in context['drivers']:
 			try:
 				from secator.hooks.api import get_workspace_name
+
 				workspace_name = get_workspace_name(context.get('workspace_id'))
 				context['workspace_name'] = workspace_name
 			except Exception as e:
@@ -305,16 +313,16 @@ def register_runner(cli_endpoint, config):
 				sys.exit(1)
 
 		if enable_pyinstrument or enable_memray:
-			if not ADDONS_ENABLED["trace"]:
-				console.print(
-					'[bold red]Missing "trace" addon: please run `secator install addons trace`[/].'
-				)
+			if not ADDONS_ENABLED['trace']:
+				console.print('[bold red]Missing "trace" addon: please run `secator install addons trace`[/].')
 				sys.exit(1)
 			import memray
+
 			output_file = f'trace_memray_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.bin'
 			contextmanager = memray.Tracker(output_file)
 
 		from secator.utils import deep_merge_dicts
+
 		hooks = deep_merge_dicts(*hooks)
 
 		# Enable sync or not
@@ -322,6 +330,7 @@ def register_runner(cli_endpoint, config):
 			sync = True
 		else:
 			from secator.celery import is_celery_worker_alive
+
 			worker_alive = is_celery_worker_alive()
 			if not worker_alive and not sync:
 				sync = True
@@ -329,55 +338,51 @@ def register_runner(cli_endpoint, config):
 				sync = False
 				broker_protocol = CONFIG.celery.broker_url.split('://')[0]
 				backend_protocol = CONFIG.celery.result_backend.split('://')[0]
-				if CONFIG.celery.broker_url and \
-				   (broker_protocol == 'redis' or backend_protocol == 'redis') \
-				   and not ADDONS_ENABLED['redis']:
+				redis_required = broker_protocol == 'redis' or backend_protocol == 'redis'
+				if CONFIG.celery.broker_url and redis_required and not ADDONS_ENABLED['redis']:
 					Console().print('[bold red]Missing `redis` addon: please run `secator install addons redis`[/].')
 					sys.exit(1)
 
 		from secator.utils import debug
+
 		debug('Run options', obj=opts, sub='cli')
 
 		# Set run options
-		opts.update({
-			'print_cmd': True,
-			'print_item': True,
-			'print_line': True,
-			'print_progress': True,
-			'print_profiles': True,
-			'print_start': True,
-			'print_target': True,
-			'print_end': True,
-			'print_remote_info': not sync,
-			'piped_input': ctx.obj['piped_input'],
-			'piped_output': ctx.obj['piped_output'],
-			'caller': 'cli',
-			'sync': sync,
-			'quiet': quiet
-		})
+		opts.update(
+			{
+				'print_cmd': True,
+				'print_item': True,
+				'print_line': True,
+				'print_progress': True,
+				'print_profiles': True,
+				'print_start': True,
+				'print_target': True,
+				'print_end': True,
+				'print_remote_info': not sync,
+				'piped_input': ctx.obj['piped_input'],
+				'piped_output': ctx.obj['piped_output'],
+				'caller': 'cli',
+				'sync': sync,
+				'quiet': quiet,
+			}
+		)
 
 		# Start runner
 		with contextmanager:
 			if enable_memray:
 				process = psutil.Process()
-				console.print(
-					f"[bold yellow3]Initial RAM Usage: {process.memory_info().rss / 1024 ** 2} MB[/]"
-				)
+				console.print(f'[bold yellow3]Initial RAM Usage: {process.memory_info().rss / 1024**2} MB[/]')
 			item_count = 0
-			runner = runner_cls(
-				config, inputs, run_opts=opts, hooks=hooks, context=context
-			)
+			runner = runner_cls(config, inputs, run_opts=opts, hooks=hooks, context=context)
 			for item in runner:
 				del item
 				item_count += 1
 				if process and item_count % 100 == 0:
-					console.print(
-						f"[bold yellow3]RAM Usage: {process.memory_info().rss / 1024 ** 2} MB[/]"
-					)
+					console.print(f'[bold yellow3]RAM Usage: {process.memory_info().rss / 1024**2} MB[/]')
 
 		if enable_memray:
-			console.print(f"[bold green]Memray output file: {output_file}[/]")
-			os.system(f"memray flamegraph {output_file}")
+			console.print(f'[bold green]Memray output file: {output_file}[/]')
+			os.system(f'memray flamegraph {output_file}')
 
 	generate_cli_subcommand(cli_endpoint, func, **command_opts)
 	generate_rich_click_opt_groups(cli_endpoint, name, input_types, options)
@@ -410,19 +415,13 @@ def generate_rich_click_opt_groups(cli_endpoint, name, input_types, options):
 		},
 	]
 	for prefix in prefixes:
-		prefix_opts = [
-			opt for opt, conf in options.items()
-			if conf['prefix'] == prefix
-		]
+		prefix_opts = [opt for opt, conf in options.items() if conf['prefix'] == prefix]
 		if prefix not in ['Execution', 'Output']:
 			prefix_opts = sorted(prefix_opts)
 		opt_names = [f'--{opt_name}' for opt_name in prefix_opts]
 		if prefix == 'Output':
 			opt_names.append('--help')
-		opt_group.append({
-			'name': prefix + ' options',
-			'options': opt_names
-		})
+		opt_group.append({'name': prefix + ' options', 'options': opt_names})
 	aliases = [cli_endpoint.name, *cli_endpoint.aliases]
 	for alias in aliases:
 		endpoint_name = f'secator {alias} {name}'

@@ -24,7 +24,7 @@ class urlparser(PythonRunner):
         root_urls = set()
         base_urls = set()
         for input in self.inputs:
-            include = self.run_opts.get('include', [])
+            include = self.get_opt_value('include')
             if 'url' in include:
                 yield Url(url=input, tags=['computed'])
             parsed_url = urlparse(input)
