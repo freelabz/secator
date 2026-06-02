@@ -12,7 +12,7 @@ from secator.utils import debug
 
 
 def _regex_match(field, pattern):
-	if not field:
+	if field is None:
 		return False
 	try:
 		return re.search(str(pattern), str(field)) is not None
