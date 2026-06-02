@@ -163,5 +163,28 @@
       }
     ]
   },
+  "themes": {
+    "flavor": [
+      {
+        "severities": {
+          "high": [
+            {
+              "auth_type": "Auth",
+              "vulnerabilities": [
+                {
+                  "cve": "CVE-2025-64195",
+                  "cve_link": "https://www.cve.org/CVERecord?id=CVE-2025-64195",
+                  "cvss_score": 7.2,
+                  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N",
+                  "title": "Flavor Theme \u003c= 5.1.7 - Authenticated Stored XSS"
+                }
+              ]
+            }
+          ]
+        },
+        "version": "5.1.7"
+      }
+    ]
+  },
   "url": "https://example.com/wordpress"
 }

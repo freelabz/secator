@@ -11,6 +11,7 @@ __pycache__/
 # Others
 *.json
 *.yml
+*.tape
 resume.cfg
 
 # C extensions

@@ -1,3 +1,4 @@
+from sysconfig import get_config_h_filename
 import unittest
 from unittest.mock import patch, MagicMock
 from io import StringIO
@@ -5,7 +6,7 @@ import sys
 from secator.runners import Command
 from secator.runners._base import HOOKS
 from secator.utils_test import mock_command
-from secator.output_types import OutputType, Url, Vulnerability, Tag, Target
+from secator.output_types import OutputType, Url, Vulnerability, Tag, Target, Error
 from secator.serializers.regex import RegexSerializer
 from secator.serializers.json import JSONSerializer
 
@@ -203,7 +204,7 @@ class TestCommandRunner(unittest.TestCase):
 
 	# def test_inputs_validator_failed_wrong_input_type(self):
 	# 	MyCommand.input_types = [Url]
-	# 	targets = ['host1', 'host2'] 
+	# 	targets = ['host1', 'host2']
 	# 	cmd = MyCommand(targets)
 	# 	errors = cmd.errors
 	# 	messages = [e.message for e in errors]
@@ -230,8 +231,8 @@ class TestCommandRunner(unittest.TestCase):
 				fields=['name', 'id', 'matched_at']
 			),
 			RegexSerializer(
-				r'^(?P<name>.*?) \| TAG \| (?P<category>.*?) \| (?P<match>.*?) \| (?P<matched_at>.*?)$',
-				fields=['name', 'category', 'match', 'matched_at']
+				r'^(?P<name>.*?) \| TAG \| (?P<category>.*?) \| (?P<value>.*?) \| (?P<match>.*?)$',
+				fields=['name', 'category', 'match', 'value', 'match']
 			)
 		]
 		def on_regex_loaded(self, item):
@@ -303,7 +304,7 @@ class TestCommandRunner(unittest.TestCase):
 		json_output = [
 			{"url": "http://example.com", "status_code": 200},
 			{"name": "SQL Injection", "severity": "high", "matched_at": "http://example.com"},
-			{"name": "sensitive_data", "category": "PII", "match": "http://example.com", "extra_data": {"tag_type": "PII", "value": "SSN"}}
+			{"name": "sensitive_data", "value": "1234567890", "category": "PII", "match": "http://example.com", "extra_data": {"tag_type": "PII"}}
 		]
 
 		import json
@@ -331,7 +332,7 @@ class TestCommandRunner(unittest.TestCase):
 			self.assertIsInstance(results[1], Url)
 			self.assertIsInstance(results[2], Vulnerability)
 			self.assertIsInstance(results[3], Tag)
-	
+
 			# Check specific attributes
 			self.assertEqual(results[0].name, "host1")
 			self.assertEqual(results[1].url, "http://example.com")
@@ -406,6 +407,7 @@ class TestCommandRunner(unittest.TestCase):
 				'__test__': 'Item of type vulnerability with no _type hint should be incorrectly loaded as Tag',
 				'name': 'sensitive_data',
 				'match': 'http://example.com',
+				'value': 'sensitive',
 				'category': 'PII',
 				'extra_data': {
 					'tag_type': 'PII',
@@ -438,3 +440,159 @@ class TestCommandRunner(unittest.TestCase):
 					for k, v in expected_fields.items():
 						self.assertEqual(getattr(converted, k), v)
 		delattr(MyCommand, 'output_types')
+
+	def test_custom_profiles(self):
+		"""Test that custom profiles (TemplateLoader instances) can be passed to runners."""
+		from secator.template import TemplateLoader
+
+		# Create a custom profile using TemplateLoader
+		custom_profile = TemplateLoader(input={
+			'name': 'custom_test_profile',
+			'type': 'profile',
+			'description': 'Custom test profile',
+			'opts': {
+				'timeout': 120,
+				'retries': 3
+			}
+		})
+
+		# Create a command with the custom profile
+		with mock_command(MyCommand, TARGETS, {'profiles': [custom_profile]}, []) as cmd:
+			# Verify the profile was loaded
+			self.assertEqual(len(cmd.profiles), 1)
+			self.assertEqual(cmd.profiles[0].name, 'custom_test_profile')
+			# Verify the profile options were applied
+			self.assertEqual(cmd.run_opts.get('timeout'), 120)
+			self.assertEqual(cmd.run_opts.get('retries'), 3)
+
+	def test_mixed_profiles(self):
+		"""Test that both string profile names and TemplateLoader instances can be mixed."""
+		from secator.utils_test import clear_modules
+		clear_modules()
+
+		from secator.runners import Command
+		from secator.template import TemplateLoader
+		from secator.utils_test import mock_command
+		from unittest.mock import patch
+
+		class LocalMyCommand(Command):
+			input_types = ['slug']
+			cmd = 'dummy'
+			input_flag = '-u'
+			file_flag = None
+
+		custom_profile = TemplateLoader(input={
+			'name': 'custom_mixed_profile',
+			'type': 'profile',
+			'description': 'Custom mixed profile',
+			'opts': {'timeout': 90}
+		})
+		mock_profile = TemplateLoader(input={
+			'name': 'test_string_profile',
+			'type': 'profile',
+			'description': 'String profile',
+			'opts': {'retries': 2}
+		})
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
+			with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
+				mock_get_configs.return_value = [mock_profile]
+				with mock_command(LocalMyCommand, TARGETS, {'profiles': [custom_profile, 'test_string_profile']}, []) as cmd:
+					self.assertEqual(len(cmd.profiles), 2)
+					profile_names = [p.name for p in cmd.profiles]
+					self.assertIn('custom_mixed_profile', profile_names)
+					self.assertIn('test_string_profile', profile_names)
+					self.assertEqual(cmd.run_opts.get('timeout'), 90)
+					self.assertEqual(cmd.run_opts.get('retries'), 2)
+
+	def test_custom_profile_no_duplicate_defaults(self):
+		"""Test that custom profiles with same name as defaults don't get duplicated."""
+		from secator.utils_test import clear_modules
+		clear_modules()
+
+		from secator.runners import Command
+		from secator.template import TemplateLoader
+		from secator.utils_test import mock_command
+		from unittest.mock import patch
+
+		class LocalMyCommand(Command):
+			input_types = ['slug']
+			cmd = 'dummy'
+			input_flag = '-u'
+			file_flag = None
+
+		custom_profile = TemplateLoader(input={
+			'name': 'test_default',
+			'type': 'profile',
+			'description': 'Custom profile',
+			'opts': {'timeout': 100}
+		})
+
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
+			with patch('secator.runners._base.CONFIG.profiles.defaults', ['test_default']):
+				with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
+					default_profile = TemplateLoader(input={
+						'name': 'test_default',
+						'type': 'profile',
+						'opts': {'timeout': 50}
+					})
+					mock_get_configs.return_value = [default_profile]
+					with mock_command(LocalMyCommand, TARGETS, {'profiles': [custom_profile]}, []) as cmd:
+						self.assertEqual(len(cmd.profiles), 1)
+						self.assertEqual(cmd.profiles[0].name, 'test_default')
+						self.assertEqual(cmd.run_opts.get('timeout'), 100)
+
+
+class TestIsOwnSource(unittest.TestCase):
+	"""Verify _is_own_source correctly scopes errors to the owning runner."""
+
+	def _make_cmd(self, name):
+		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
+			cmd.name = name
+			cmd.unique_name = name
+			return cmd
+
+	def test_exact_match(self):
+		cmd = self._make_cmd('nmap')
+		self.assertTrue(cmd._is_own_source('nmap'))
+
+	def test_chunk_suffix_digit(self):
+		cmd = self._make_cmd('nmap')
+		self.assertTrue(cmd._is_own_source('nmap_1'))
+		self.assertTrue(cmd._is_own_source('nmap_42'))
+
+	def test_rejects_prefix_sibling(self):
+		"""nmap_light must NOT be considered a chunk of nmap."""
+		cmd = self._make_cmd('nmap')
+		self.assertFalse(cmd._is_own_source('nmap_light'))
+
+	def test_rejects_unrelated(self):
+		cmd = self._make_cmd('nuclei')
+		self.assertFalse(cmd._is_own_source('nmap'))
+		self.assertFalse(cmd._is_own_source('nmap_light'))
+
+	def test_self_errors_excludes_prefix_sibling_errors(self):
+		"""Errors from nmap_light must not appear in nmap's self_errors (the prefix-collision bug)."""
+		prior_error = Error(message='nmap/light failed', _source='nmap_light')
+		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
+			cmd.name = 'nmap'
+			cmd.unique_name = 'nmap'
+			cmd.results.append(prior_error)
+			self.assertEqual(cmd.self_errors, [])
+
+	def test_self_errors_includes_own_errors(self):
+		"""Errors with the runner's own _source must appear in self_errors."""
+		own_error = Error(message='nmap failed', _source='nmap')
+		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
+			cmd.name = 'nmap'
+			cmd.unique_name = 'nmap'
+			cmd.results.append(own_error)
+			self.assertEqual(cmd.self_errors, [own_error])
+
+	def test_self_errors_includes_chunk_errors(self):
+		"""Errors from numeric chunks (nmap_1, nmap_2) must appear in nmap's self_errors."""
+		chunk_error = Error(message='chunk failed', _source='nmap_1')
+		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
+			cmd.name = 'nmap'
+			cmd.unique_name = 'nmap'
+			cmd.results.append(chunk_error)
+			self.assertEqual(cmd.self_errors, [chunk_error])

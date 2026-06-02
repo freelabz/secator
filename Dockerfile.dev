@@ -1,0 +1,36 @@
+FROM python:3.12-alpine
+
+RUN apk add --no-cache \
+    flock \
+    gcc \
+    musl-dev \
+    linux-headers \
+    python3-dev \
+    sudo
+
+RUN adduser -D secator
+
+# Allow secator to run anything as root without password
+RUN echo "secator ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
+    chmod 0440 /etc/sudoers
+
+USER secator
+
+WORKDIR /code
+ENV PATH="${PATH}:/home/secator/.local/bin"
+ENV CARGO_HOME="/home/secator/.local"
+ENV GOBIN="/home/secator/.local/bin"
+ENV GOPATH="/home/secator/go"
+ENV TERM="xterm-256color"
+ENV SECATOR_SECURITY_PROMPT_SUDO_PASSWORD="0"
+
+COPY --chown=secator:secator . .
+RUN pip install --no-cache-dir -e ".[dev]" && \
+    secator install addons worker && \
+    secator install addons mongodb && \
+    secator install addons redis && \
+    secator install addons gcs && \
+    secator install addons ai
+
+ENTRYPOINT ["secator"]
+CMD ["worker", "-r"]

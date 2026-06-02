@@ -25,5 +25,8 @@ class State(OutputType):
 	def __str__(self) -> str:
 		return f"Task {self.task_id} is {self.state}"
 
+	def __rich__(self) -> str:
+		return f"{self._icon} [bold {self._color}]{self.state}[/] {self.task_id}"
+
 	def __repr__(self) -> str:
-		return rich_to_ansi(f"{self._icon} [bold {self._color}]{self.state}[/] {self.task_id}")
+		return rich_to_ansi(self.__rich__())

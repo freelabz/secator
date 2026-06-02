@@ -2,9 +2,17 @@ type: workflow
 name: url_dirsearch
 alias: dirfind
 description: URL directory search
-tags: [http, dir]
+long_description: |
+  Searches for hidden directories and files on web servers using content discovery techniques.
+  Probes URLs for directory listings, optionally bruteforces directories and crawls discovered
+  directory contents. Can hunt for sensitive files and secrets in HTTP responses.
+  Helpful for finding hidden admin panels, backup files, and exposed directories.
+tags: [http, dir, secrets]
 input_types:
   - url
+  - host
+  - host:port
+  - ip
 
 options:
   hunt_secrets:
@@ -29,6 +37,7 @@ tasks:
   httpx:
     description: Run HTTP probes on URLs
     tech_detect: True
+    follow_redirect: True
 
   ffuf:
     description: Search for HTTP directories
@@ -38,6 +47,7 @@ tasks:
     targets_:
       - type: target
         field: '{name}/FUZZ'
+        condition: item.type == 'url'
     if: opts.hunt_dirs
 
   katana:

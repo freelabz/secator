@@ -1,5 +1,6 @@
 type: profile
 name: http_headless
+category: network
 description: "Headless HTTP requests"
 opts:
     headless: true

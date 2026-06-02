@@ -1,6 +1,7 @@
 import click
 import os
 import yaml
+import shlex
 
 from pathlib import Path
 
@@ -48,10 +49,10 @@ class trivy(Vuln):
 	opt_value_map = {
 		'mode': lambda x: convert_mode(x)
 	}
-	install_version = 'v0.61.1'
+	install_version = 'v0.69.3'
 	install_cmd = (
 		'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh |'
-		f'sudo sh -s -- -b {CONFIG.dirs.bin} [install_version]'
+		f'sh -s -- -b {CONFIG.dirs.bin} [install_version]'
 	)
 	github_handle = 'aquasecurity/trivy'
 
@@ -72,10 +73,10 @@ class trivy(Vuln):
 
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
-			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
+			output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
 		self.output_path = output_path
 		self.cmd = self.cmd.replace(f' -mode {mode}', '').replace('trivy', f'trivy {mode}')
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -114,15 +115,16 @@ class trivy(Vuln):
 				if vuln_id.startswith('CVE'):
 					remote_data = Vuln.lookup_cve(vuln_id)
 					if remote_data:
-						data.update(remote_data)
+						data.update(remote_data.toDict() if hasattr(remote_data, 'toDict') else remote_data)
 				yield Vulnerability(**data)
 			for secret in item.get('Secrets', []):
 				code_context = '\n'.join([line['Content'] for line in secret.get('Code', {}).get('Lines') or []])
-				extra_data = {'content': secret['Match'], 'code_context': code_context}
+				extra_data = {'code_context': code_context}
 				extra_data.update({caml_to_snake(k): v for k, v in secret.items() if k not in ['RuleID', 'Match', 'Code']})
 				yield Tag(
 					category='secret',
 					name=secret['RuleID'].replace('-', '_'),
+					value=secret['Match'],
 					match=item['Target'],
 					extra_data=extra_data
 				)

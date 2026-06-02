@@ -1,5 +1,6 @@
 type: profile
 name: paranoid
+category: speed
 description: "Maximum stealth"
 opts:
     rate_limit: 5

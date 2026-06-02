@@ -154,3 +154,30 @@ class TestConfigEnv(unittest.TestCase):
 		# Check all dirs exist
 		for dir in CONFIG.dirs.values():
 			self.assertTrue(dir.exists())
+
+
+@mock.patch('sys.stderr', devnull)
+class TestAIConfig(unittest.TestCase):
+
+	def test_ai_config_defaults(self):
+		from secator.config import Config
+		config = Config.parse()
+		ai = config.addons.ai
+		self.assertIsNotNone(ai)
+		# Test enabled and api_key fields (following addon pattern)
+		self.assertEqual(ai.enabled, False)
+		self.assertEqual(ai.api_key, '')
+		# Test model configuration
+		self.assertEqual(ai.default_model, 'claude-sonnet-4-6')
+		self.assertEqual(ai.intent_model, 'claude-haiku-4-5')
+		# Test generation parameters
+		self.assertEqual(ai.temperature, 0.7)
+		self.assertEqual(ai.max_tokens, 30000)
+		# Test other settings
+		self.assertEqual(ai.max_results, 500)
+		self.assertEqual(ai.encrypt_pii, True)
+
+	def test_api_finding_search_endpoint(self):
+		from secator.config import Config
+		config = Config.parse()
+		self.assertEqual(config.addons.api.finding_search_endpoint, 'findings/_search')
