@@ -1012,16 +1012,17 @@ def _apply_format(results, fmt):
 	for spec in specs:
 		_field_only = False
 		if '{' in spec and '}' in spec:
-			if re.search(r'\{\w+\.\w+', spec):
+			m = re.search(r'\{(\w+)\.', spec)
+			if m and m.group(1) in results:
 				# Brace-style with type.field dot notation: {url.host} {port.port}
-				m = re.search(r'\{(\w+)\.', spec)
-				if not m:
-					continue
 				_type = m.group(1)
 				_template = spec
+			elif m and m.group(1) in FINDING_TYPES_LOWER:
+				# Known output type referenced but not present in results — skip this spec.
+				continue
 			else:
-				# Brace-style with direct field names: {url} {host} {status_code}
-				# Only works when exactly one type is present in results.
+				# Brace-style with direct field names or nested field access:
+				# {url} {host} {status_code} or {extra_data.published}
 				_field_only = True
 				_type = None
 				_template = spec
@@ -1044,8 +1045,12 @@ def _apply_format(results, fmt):
 			formatted = []
 			for item in items:
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+				# Wrap nested dicts with DotMap to support dotted access (e.g. {extra_data.published})
+				d_dotmaps = {k: DotMap(v) if isinstance(v, dict) else v for k, v in d.items()}
 				try:
-					value = _template.format(**d)
+					value = _template.format(**d_dotmaps)
+					if 'DotMap()' in str(value):
+						continue
 					formatted.append(value)
 				except (KeyError, AttributeError):
 					pass
@@ -1069,7 +1074,27 @@ def _apply_format(results, fmt):
 					new_results[_actual_type] = formatted
 				else:
 					console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
-			# When _template is set the user gave an explicit type prefix — skip silently.
+			elif _type not in FINDING_TYPES_LOWER:
+				# Dotted field path (e.g. extra_data.published) where the first part is not a
+				# known output type. Treat the whole spec as a nested field path on the single
+				# non-empty result type, using DotMap for traversal.
+				nonempty_types = [k for k, v in results.items() if v]
+				if len(nonempty_types) == 1:
+					_actual_type = nonempty_types[0]
+					items = results[_actual_type]
+					formatted = []
+					path_parts = spec.split('.')
+					for item in items:
+						d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+						val = DotMap(d)
+						for part in path_parts:
+							val = getattr(val, part, None)
+							if val is None or (isinstance(val, DotMap) and not val):
+								val = None
+								break
+						if val is not None:
+							formatted.append(str(val))
+					new_results[_actual_type] = formatted
 			continue
 
 		items = results[_type]
@@ -1083,9 +1108,13 @@ def _apply_format(results, fmt):
 			for item in items:
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
 				try:
-					# Brace-style ({type.field}) needs DotMap for attribute access.
-					# Dot-path style (type.field) uses direct field values to avoid clobbering.
-					kwargs = {**d, _type: DotMap(d)} if is_brace_style else d
+					# Brace-style ({type.field}): expose the item as a DotMap under the type key.
+					# Dot-path style (type.field): wrap nested dict values as DotMap so that
+					# templates like {extra_data.ttl} can resolve via attribute access.
+					if is_brace_style:
+						kwargs = {**d, _type: DotMap(d)}
+					else:
+						kwargs = {k: DotMap(v) if isinstance(v, dict) else v for k, v in d.items()}
 					value = _template.format(**kwargs)
 					# DotMap returns an empty DotMap() for missing nested paths; skip such items.
 					if 'DotMap()' in str(value):
