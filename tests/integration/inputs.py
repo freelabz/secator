@@ -8,17 +8,17 @@ INPUTS_TASKS = {
 	CIDR_RANGE: '192.168.1.0/24',
 	'getasn': 'tesla',
 	'arjun': 'https://xss-game.appspot.com/level1/frame',
-    'bbot': False, # disable bbot test
+	'bbot': False,  # disable bbot test
 	'bup': 'http://localhost:3000/ftp/coupons_2013.md.bak',
 	'dalfox': 'https://xss-game.appspot.com/level1/frame?query=',
 	'dnsx': 'wikipedia.org',
 	'ffuf': 'http://localhost:3000/FUZZ',
 	'gau': 'https://xss-game.appspot.com',
 	'gf': 'http://localhost:3000?q=test',
-    'gitleaks': str(ROOT_FOLDER),
+	'gitleaks': str(ROOT_FOLDER),
 	'gospider': 'https://danielmiessler.com/',
 	'grype': 'redis:7.4.1',
-    'httpx': 'http://localhost:3000/',
+	'httpx': 'http://localhost:3000/',
 	'h8mail': 'test@test.com',
 	'jswhois': 'wikipedia.org',
 	'nuclei': 'http://localhost:3000/',
@@ -31,7 +31,7 @@ INPUTS_TASKS = {
 	'urlfinder': 'xss-game.appspot.com',
 	'wpscan': 'http://localhost:8000/',
 	'wafw00f': 'https://netflix.com',
-	'whois': 'vulnweb.com',
+	'whois': 'wikipedia.org',
 	'whoisdomain': 'wikipedia.org',
 	'x8': 'https://xss-game.appspot.com/level1/frame',
 	'xurlfind3r': 'https://xss-game.appspot.com',
@@ -45,14 +45,20 @@ INPUTS_WORKFLOWS = {
 	'subdomain_recon': 'api.github.com',
 	'url_crawl': 'localhost:3000',
 	'url_fuzz': 'http://localhost:3000',
-	'url_nuclei': ['http://localhost:3000', 'http://localhost:8080'],
-	'url_vuln': ['https://xss-game.appspot.com/level1/frame?query=', 'https://www.hahwul.com/?q=123'],
-	'user_hunt': 'ocervell'
+	'url_nuclei': [
+		'http://localhost:3000',
+		'http://localhost:8080',
+	],
+	'url_vuln': [
+		'https://xss-game.appspot.com/level1/frame?query=',
+		'https://www.hahwul.com/?q=123',
+	],
+	'user_hunt': 'ocervell',
 }
 
 INPUTS_SCANS = {
 	'domain': 'testphp.vulnweb.com',
 	'host': ['localhost'],
 	'network': '127.0.0.1/24',
-	'url': ['http://localhost:3000', 'http://localhost:8080']
+	'url': ['http://localhost:3000', 'http://localhost:8080'],
 }

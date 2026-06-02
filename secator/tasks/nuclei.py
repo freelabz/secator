@@ -6,7 +6,7 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-	CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT, ID, IP,
+	CONFIDENCE, CVSS_SCORE, CVSS_VECTOR, DELAY, DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT, ID, IP,
 	MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT, PROVIDER, PROXY, RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS,
 	THREADS, TIMEOUT, URL, USER_AGENT
 )
@@ -101,6 +101,7 @@ class nuclei(VulnMulti):
 			SEVERITY: lambda x: x['info'][SEVERITY],
 			CONFIDENCE: lambda x: 'high',
 			CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
+			CVSS_VECTOR: lambda x: x['info'].get('classification', {}).get('cvss-metrics') or '',
 			MATCHED_AT: 'matched-at',
 			IP: 'ip',
 			TAGS: lambda x: x['info']['tags'],
