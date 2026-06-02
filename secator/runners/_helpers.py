@@ -6,6 +6,27 @@ from secator.output_types import Error
 from secator.utils import deduplicate, debug
 
 
+def _format_nested(template, data):
+	"""Format a string template supporting nested dot notation like {extra_data.password}.
+
+	Replaces {key} and {key.subkey} tokens by traversing nested dicts.
+	Missing or non-traversable keys resolve to empty string.
+	"""
+	def replace_token(match):
+		key = match.group(1)
+		keys = key.split('.')
+		value = data
+		for k in keys:
+			if isinstance(value, dict):
+				value = value.get(k)
+			else:
+				value = None
+			if value is None:
+				break
+		return str(value) if value is not None else ''
+	return re.sub(r'\{([\w.]+)\}', replace_token, template)
+
+
 def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 	"""Run extractors and merge extracted values with option dict.
 
@@ -23,6 +44,11 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		inputs = []
 	if ctx is None:
 		ctx = {}
+	if 'parent_scope' not in ctx:
+		ctx['parent_scope'] = opts.get('parent_scope')
+	if 'node_chain_start' not in ctx:
+		ctx['node_chain_start'] = opts.get('node_chain_start', False)
+	parent_scope = ctx.get('parent_scope')
 	extractors = {k: v for k, v in opts.items() if k.endswith('_')}
 	if dry_run:
 		input_extractors = {k: v for k, v in extractors.items() if k.rstrip('_') == 'targets'}
@@ -61,6 +87,15 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 	if input_extractors:
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')
 		inputs = computed_inputs
+	elif parent_scope and not opts.get('chunk'):
+		scoped_targets = [
+			item.name for item in results
+			if item._type == 'target' and item._context.get('scope') == parent_scope
+		]
+		combined = deduplicate(scoped_targets)
+		if combined:
+			debug('using scope-tagged targets as inputs', obj=combined, sub='extractors')
+			inputs = combined
 	if computed_opts:
 		debug('computed_opts', obj=computed_opts, sub='extractors')
 	return inputs, opts, errors
@@ -164,6 +199,8 @@ def process_extractor(results, extractor, ctx=None):
 		ctx = {}
 	# debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
 	ancestor_id = ctx.get('ancestor_id')
+	node_chain_start = ctx.get('node_chain_start', False)
+	parent_scope = ctx.get('parent_scope')
 	key = ctx.get('key')
 
 	# Parse extractor, it can be a dict or a string (shortcut)
@@ -175,7 +212,9 @@ def process_extractor(results, extractor, ctx=None):
 	# Evaluate condition for each result
 	if _condition:
 		tmp_results = []
-		if ancestor_id:
+		if _type == 'target' and parent_scope:
+			_condition = _condition + f' and item._context.get("scope") == "{parent_scope}"'
+		elif ancestor_id and not node_chain_start:
 			_condition = _condition + f' and item._context.get("ancestor_id") == "{str(ancestor_id)}"'
 		for item in results:
 			if item._type != _type:
@@ -196,7 +235,9 @@ def process_extractor(results, extractor, ctx=None):
 		results = tmp_results
 	else:
 		results = [item for item in results if item._type == _type]
-		if ancestor_id:
+		if _type == 'target' and parent_scope:
+			results = [item for item in results if item._context.get('scope') == parent_scope]
+		elif ancestor_id and not node_chain_start:
 			results = [item for item in results if item._context.get('ancestor_id') == ancestor_id]
 
 	results_str = "\n".join([f'{repr(item)} [{str(item._context.get("ancestor_id", ""))}]' for item in results])
@@ -212,15 +253,20 @@ def process_extractor(results, extractor, ctx=None):
 			_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
 			groups = {}
 			for item in results:
-				group_key = _group_by.format(**item.toDict())
-				value = _field.format(**item.toDict())
+				item_dict = item.toDict()
+				group_key = _format_nested(_group_by, item_dict)
+				value = _format_nested(_field, item_dict)
+				if not group_key or not value:
+					continue
 				prefix = value.split('~')[0] if '~' in value else value
+				if not prefix:
+					continue
 				bucket = groups.setdefault(group_key, [])
 				if prefix not in bucket:
 					bucket.append(prefix)
 			results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
 		else:
-			results = [_field.format(**item.toDict()) for item in results]
+			results = [v for v in (_format_nested(_field, item.toDict()) for item in results) if v]
 	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
 	return results
 

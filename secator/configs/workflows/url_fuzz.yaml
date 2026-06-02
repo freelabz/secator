@@ -53,7 +53,7 @@ tasks:
     targets_:
       type: url
       field: url
-      condition: not url.verified
+      condition: not url.verified or opts.hunt_secrets
 
   trufflehog:
     description: Find secrets in HTTP responses

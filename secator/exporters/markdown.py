@@ -18,4 +18,5 @@ class MarkdownExporter(Exporter):
 		with open(md_path, 'w') as f:
 			f.write('\n\n---\n\n'.join(sections))
 
-		console.print(Info(f'Saved Markdown report to {md_path}'))
+		if getattr(self.report.runner, 'print_reports_message', True):
+			console.print(Info(f'Saved Markdown report to {md_path}'))

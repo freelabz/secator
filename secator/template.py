@@ -297,7 +297,8 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		if isinstance(default, bool) and default is True:
 			v['reverse'] = True
 		if type_mapping and 'type' in v:
-			v['type'] = type_mapping.get(v['type'], str)
+			if isinstance(v['type'], str):
+				v['type'] = type_mapping.get(v['type'], str)
 		short = v.get('short')
 		k = k.replace('.', '-').replace('_', '-').replace('/', '-')
 		from_str = default_from.replace('.', '-').replace('_', '-').replace('/', '-') if default_from else None

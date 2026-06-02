@@ -216,7 +216,40 @@ class AiAddon(StrictModel):
 	max_tokens: int = 30000
 	max_tokens_total: int = 100000
 	max_results: int = 500
+	user_response_timeout: int = 600
 	encrypt_pii: bool = True
+	permissions: Dict = {
+		"allow": [
+			"target({targets})",
+			"read({workspace}/*,/dev/null,/tmp/*)",
+			"write({workspace}/.outputs/*,/dev/null,/tmp/*)",
+			"shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,"
+			"cd,git,diff,stat,du,df,tree,sort,uniq,cut,tr,echo,realpath,readlink,"
+			"file,strings,xxd,base64,for,while,which,true,timeout,"
+			"tee,cp,mv,mkdir,touch,chmod,sed,awk,xargs,docker,printf,"
+			"redis-cli,nc,ncat,nmap,sqlmap,nikto,gobuster,feroxbuster,ffuf,"
+			"socat,telnet,openssl,ssh,scp,rsync,ping,traceroute,tcpdump,ss,netstat)",
+			"task(*)",
+			"workflow(*)",
+		],
+		"deny": [
+			"target(169.254.169.254)",
+			"target(127.0.0.1)",
+			"target(localhost)",
+			"read(/etc/shadow)",
+			"read(~/.ssh/*)",
+			"read(~/.aws/*)",
+			"write(/etc/*)",
+			"write(/usr/*)",
+			"shell(rm -rf /*,dd,mkfs,env,printenv)",
+		],
+		"ask": [
+			"target(*)",
+			"shell(python,python3,bash,sh,exec,node,ruby,perl,gcc,g++,make,go,php,java,javac)",
+			"read(*)",
+			"write(*)",
+		],
+	}
 
 
 class Providers(StrictModel):
@@ -246,6 +279,8 @@ class ApiAddon(StrictModel):
 	finding_update_endpoint: str = 'finding/{finding_id}'
 	finding_search_endpoint: str = 'findings/_search'
 	workspace_get_endpoint: str = 'workspace/{workspace_id}'
+	workspace_delete_endpoint: str = 'workspace/{workspace_id}'
+	runner_delete_endpoint: str = '{runner_type}/{runner_id}'
 
 
 class Addons(StrictModel):

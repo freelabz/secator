@@ -83,8 +83,8 @@ class GdriveExporter(Exporter):
 		ws = sheet.get_worksheet(0)
 		sheet.del_worksheet(ws)
 
-		info = Info(message=f'Saved Google Sheets reports to [u magenta]{sheet.url}')
-		console.print(info)
+		if getattr(self.report.runner, 'print_reports_message', True):
+			console.print(Info(message=f'Saved Google Sheets reports to [u magenta]{sheet.url}'))
 
 	def create_folder(self, folder_name, parent_id=None):
 		from googleapiclient.discovery import build
