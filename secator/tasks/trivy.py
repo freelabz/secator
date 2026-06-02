@@ -73,7 +73,7 @@ class trivy(Vuln):
 
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
-			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
+			output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
 		self.output_path = output_path
 		self.cmd = self.cmd.replace(f' -mode {mode}', '').replace('trivy', f'trivy {mode}')
 		self.cmd += f' -o {shlex.quote(self.output_path)}'

@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.32.0](https://github.com/freelabz/secator/compare/v0.31.2...v0.32.0) (2026-05-12)
+
+
+### Features
+
+* **command:** isolated run directory ([#1081](https://github.com/freelabz/secator/issues/1081)) ([3a87b09](https://github.com/freelabz/secator/commit/3a87b099ccf944b29c301f26b4aea59bf961c2ff))
+* **nuclei:** add -sr, -srd, and -logs option ([40c77bd](https://github.com/freelabz/secator/commit/40c77bdde96f9bd4ea27968dab1a67f747f1996a))
+* **tree:** prune condition-failing nodes from scan/workflow tree display ([#1077](https://github.com/freelabz/secator/issues/1077)) ([f76c343](https://github.com/freelabz/secator/commit/f76c3432516351378ccef44bf7ca10dc7d805033))
+
+
+### Bug Fixes
+
+* **nuclei:** add -sr, -srd, and -logs option ([33b7f74](https://github.com/freelabz/secator/commit/33b7f742522b4f646fd302c80637a2da0d135871))
+* **nuclei:** add -sr, -srd, and -logs option ([e3ff041](https://github.com/freelabz/secator/commit/e3ff041130b4cdb2530e14aaf072f282b10bf4a7))
+* **search_vulns:** cvss score not pulled properly ([#1082](https://github.com/freelabz/secator/issues/1082)) ([9d2ccf5](https://github.com/freelabz/secator/commit/9d2ccf5546dcb1909268d2a2b4249b0a607a28e1))
+* **tests:** update getasn integration test inputs and expected outputs ([#1084](https://github.com/freelabz/secator/issues/1084)) ([df01409](https://github.com/freelabz/secator/commit/df01409ebeb8309d3101ddc085456f175106f496))
+* typo in README ([#1079](https://github.com/freelabz/secator/issues/1079)) ([13353c1](https://github.com/freelabz/secator/commit/13353c198e63eee4baae7bf1315ac7ef771dd963))
+* **worker:** prevent target duplication when running in worker mode ([#1085](https://github.com/freelabz/secator/issues/1085)) ([b30e213](https://github.com/freelabz/secator/commit/b30e21355a5e85590ed1049fa1692d4d0ee25e19))
+
+## [0.31.2](https://github.com/freelabz/secator/compare/v0.31.1...v0.31.2) (2026-05-06)
+
+
+### Bug Fixes
+
+* **target-filtering:** secondary task should not take ancestor results as direct input ([#1075](https://github.com/freelabz/secator/issues/1075)) ([358338b](https://github.com/freelabz/secator/commit/358338b9088994eb235fd42a9250df87f9b820ab))
+
+## [0.31.1](https://github.com/freelabz/secator/compare/v0.31.0...v0.31.1) (2026-05-04)
+
+
+### Bug Fixes
+
+* **cli:** display vulnerability counts in secator r list ([#1048](https://github.com/freelabz/secator/issues/1048)) ([38dc777](https://github.com/freelabz/secator/commit/38dc7774d7428f93581007af41f346304dab5067))
+* **cli:** fix update and addon install in universal script / zsh envs ([#1058](https://github.com/freelabz/secator/issues/1058)) ([225b04e](https://github.com/freelabz/secator/commit/225b04ef81c856b449fa33cc70ca622c9ed1d43a))
+* **domain:** correctly deserialize Domain output type in Scan/Workflow runners ([#1060](https://github.com/freelabz/secator/issues/1060)) ([7519a04](https://github.com/freelabz/secator/commit/7519a047d6ddf1b1f0a6fa601f3b52b7811cf9ba))
+* **target-filtering:** fix issue [#1070](https://github.com/freelabz/secator/issues/1070) - workflow tasks after first receiving 0 inputs in scan context ([#1073](https://github.com/freelabz/secator/issues/1073)) ([22ef3b2](https://github.com/freelabz/secator/commit/22ef3b28fdac30f1584a1e8dc0df0e197d70e4fa))
+* **templates:** support nested dot notation in field extractor ([#1063](https://github.com/freelabz/secator/issues/1063)) ([f38575a](https://github.com/freelabz/secator/commit/f38575abef35a7053e98e4097f4e355a8a24268b))
+* **test:** remove urlfinder flaky test ([47d88b2](https://github.com/freelabz/secator/commit/47d88b271f6d410051d7edaa646a2a93cd6c3ae3))
+* **workflows:** use scan reports dir for storing results ([#1064](https://github.com/freelabz/secator/issues/1064)) ([fc8b21e](https://github.com/freelabz/secator/commit/fc8b21e7aa47bce1dc96d49d8eccef5db094ea72))
+
 ## [0.31.0](https://github.com/freelabz/secator/compare/v0.30.1...v0.31.0) (2026-04-23)
 
 
