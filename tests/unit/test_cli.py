@@ -1,5 +1,6 @@
 import tempfile
 from click.testing import CliRunner
+import io
 import os
 import unittest
 from unittest import mock
@@ -250,6 +251,44 @@ class TestApplyFormat(unittest.TestCase):
 			self.assertEqual(out, {'url': ['https://example.com\nStatus: 200']})
 		finally:
 			os.remove(tmp_path)
+
+
+class TestConsoleExporterMarkdown(unittest.TestCase):
+
+	def test_markdown_rendering_triggered_by_heading(self):
+		"""ConsoleExporter renders formatted strings that contain Markdown headings via Rich Markdown."""
+		from secator.exporters.console import ConsoleExporter, _is_markdown
+		from secator.rich import console_stdout
+
+		markdown_text = '# Results\nhttps://example.com'
+		plain_text = 'https://example.com'
+
+		self.assertTrue(_is_markdown(markdown_text))
+		self.assertFalse(_is_markdown(plain_text))
+
+		# Verify ConsoleExporter calls Markdown rendering for heading-containing strings.
+		with mock.patch('secator.exporters.console.console_stdout') as mock_console:
+			report = mock.MagicMock()
+			report.data = {'results': {'url': [markdown_text]}}
+			exporter = ConsoleExporter(report)
+			exporter.send()
+			# Rich Markdown object should have been printed (not a plain string)
+			call_args = mock_console.print.call_args_list
+			self.assertEqual(len(call_args), 1)
+			from rich.markdown import Markdown
+			self.assertIsInstance(call_args[0][0][0], Markdown)
+
+	def test_plain_string_printed_without_markup(self):
+		"""ConsoleExporter prints plain strings with markup=False, highlight=False."""
+		from secator.exporters.console import ConsoleExporter
+
+		plain_text = 'https://example.com 200'
+		with mock.patch('secator.exporters.console.console_stdout') as mock_console:
+			report = mock.MagicMock()
+			report.data = {'results': {'url': [plain_text]}}
+			exporter = ConsoleExporter(report)
+			exporter.send()
+			mock_console.print.assert_called_once_with(plain_text, markup=False, highlight=False)
 
 
 class TestCli(unittest.TestCase):

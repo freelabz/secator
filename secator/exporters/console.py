@@ -22,7 +22,7 @@ class ConsoleExporter(Exporter):
 					if _is_markdown(item):
 						console_stdout.print(Markdown(item))
 					else:
-						console_stdout.print(item)
+						console_stdout.print(item, markup=False, highlight=False)
 				else:
 					if isinstance(item, dict):
 						cls = self._type_map.get(item.get('_type'))

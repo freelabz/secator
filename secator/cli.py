@@ -1011,12 +1011,12 @@ def _apply_format(results, fmt):
 
 	# Auto-detect format file: if fmt looks like a path and the file exists, load it.
 	if len(fmt) < 255:
-		try:
-			p = Path(fmt)
-			if p.is_file():
-				fmt = p.read_text()
-		except Exception:
-			pass
+		p = Path(fmt)
+		if p.is_file():
+			try:
+				fmt = p.read_text(encoding='utf-8')
+			except (OSError, UnicodeDecodeError) as exc:
+				raise click.UsageError(f'Could not read --format template file "{p}": {exc}') from exc
 
 	# Unescape common escape sequences so CLI users can write \n, \t in their format strings.
 	fmt = fmt.replace('\\n', '\n').replace('\\t', '\t')
