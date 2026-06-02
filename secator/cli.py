@@ -1108,9 +1108,13 @@ def _apply_format(results, fmt):
 			for item in items:
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
 				try:
-					# Brace-style ({type.field}) needs DotMap for attribute access.
-					# Dot-path style (type.field) uses direct field values to avoid clobbering.
-					kwargs = {**d, _type: DotMap(d)} if is_brace_style else d
+					# Brace-style ({type.field}): expose the item as a DotMap under the type key.
+					# Dot-path style (type.field): wrap nested dict values as DotMap so that
+					# templates like {extra_data.ttl} can resolve via attribute access.
+					if is_brace_style:
+						kwargs = {**d, _type: DotMap(d)}
+					else:
+						kwargs = {k: DotMap(v) if isinstance(v, dict) else v for k, v in d.items()}
 					value = _template.format(**kwargs)
 					# DotMap returns an empty DotMap() for missing nested paths; skip such items.
 					if 'DotMap()' in str(value):
