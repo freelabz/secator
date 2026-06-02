@@ -84,6 +84,7 @@ tasks:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
+      no_httpx: true
       if: opts.nuclei and not opts.passive
 
     nuclei/url:
