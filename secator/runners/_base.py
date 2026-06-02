@@ -520,6 +520,7 @@ class Runner:
 		if self.sync:
 			self.mark_completed()
 		elif self.celery_result and not self.done:
+			# TODO: cleaner fix than this
 			# Race condition: the last Celery poll can read 'PENDING' from the result
 			# backend while result.ready() simultaneously returns True (two separate
 			# backend reads per poll iteration). When this happens, the runner's
