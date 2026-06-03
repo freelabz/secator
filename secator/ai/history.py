@@ -21,17 +21,21 @@ def get_context_window(model: str) -> int:
         model: LLM model name
 
     Returns:
-        Context window size in tokens (default 128000 on error)
+        Context window size in tokens (falls back to CONFIG.addons.ai.context_window on error or empty info)
     """
+    from secator.config import CONFIG
     import litellm
     try:
         info = litellm.get_model_info(model)
-        context_window = info.get("max_input_tokens") or info.get("max_tokens", 128_000)
+        if not info:
+            debug('context_window=config fallback (empty model info)', sub='runner.ai.context', obj={'model': model})
+            return CONFIG.addons.ai.context_window
+        context_window = info.get("max_input_tokens") or info.get("max_tokens") or CONFIG.addons.ai.context_window
         debug(f'context_window={context_window}', sub='runner.ai.context', obj={'model': model})
         return context_window
     except Exception:
-        debug('context_window=128000 (fallback)', sub='runner.ai.context', obj={'model': model})
-        return 128_000  # Safe default
+        debug('context_window=config fallback (exception)', sub='runner.ai.context', obj={'model': model})
+        return CONFIG.addons.ai.context_window
 
 
 def truncate_to_tokens(

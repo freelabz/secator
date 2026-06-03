@@ -128,6 +128,11 @@ class ai(PythonRunner):
 		# Init all options
 		self._init_options()
 
+		# Verify model is configured and reachable
+		yield from self._verify_model()
+		if not self.model:
+			return
+
 		# Show prompt mode (diagnostic)
 		if self.run_opts.get("show_prompt", False):
 			show_mode = self.mode or "attack"
@@ -375,6 +380,11 @@ class ai(PythonRunner):
 					yield Error(message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`')
 					save_history(self.history, self.reports_folder, debug_fn=self.debug)
 					return
+				elif isinstance(e, litellm.APIConnectionError):
+					yield Error(message=f"Cannot connect to model '{self.model}': {e}")
+					yield Error(message='Check api_base and connectivity: `secator config set addons.ai.api_base <URL>`')
+					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					return
 				yield Error.from_exception(e)
 				save_history(self.history, self.reports_folder, debug_fn=self.debug)
 				return
@@ -445,6 +455,30 @@ class ai(PythonRunner):
 			self.print_info = False
 			self.print_warning = False
 			self.print_error = False
+
+	# -------------------------------------------------------------------------
+	# Model verification
+	# -------------------------------------------------------------------------
+
+	def _verify_model(self):
+		"""Check model is configured and that model info is available; yield Error/Warning if not."""
+		if not self.model:
+			yield Error(message='No AI model configured. Run `secator ai setup` or set `addons.ai.default_model`.')
+			return
+		try:
+			import litellm
+			info = litellm.get_model_info(self.model)
+			if not info:
+				yield Warning(
+					message=f'Model info not found for "{self.model}" in litellm registry. '
+					f'Context window defaults to {CONFIG.addons.ai.context_window} tokens. '
+					'If this is a custom/self-hosted model, set `addons.ai.context_window` accordingly.'
+				)
+		except Exception:
+			yield Warning(
+				message=f'Could not retrieve model info for "{self.model}". '
+				f'Context window defaults to {CONFIG.addons.ai.context_window} tokens.'
+			)
 
 	# -------------------------------------------------------------------------
 	# Mode detection
