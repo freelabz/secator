@@ -82,7 +82,7 @@ app.conf.update(
 			'secator.celery.run_scan': {'queue': 'celery'},
 			'secator.celery.run_task': {'queue': 'celery'},
 			'secator.celery.forward_results': {'queue': 'results'},
-			'secator.hooks.mongodb.*': {'queue': 'mongodb'},
+			'secator.drivers.mongodb.*': {'queue': 'mongodb'},
 		},
 		'task_store_eager_result': True,
 		'task_send_sent_event': CONFIG.celery.task_send_sent_event,
@@ -100,7 +100,7 @@ app.conf.update(
 		'worker_send_task_events': CONFIG.celery.worker_send_task_events,
 	}
 )
-app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
+app.autodiscover_tasks(['secator.drivers.mongodb'], related_name=None)
 if IN_WORKER:
 	setup_handlers()
 
@@ -144,7 +144,7 @@ def chunker(seq, size):
 
 
 @app.task(bind=True)
-def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, validators={}, context={}):
+def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, drivers=[], validators={}, context={}):
 	context = context or {}
 	context['celery_id'] = self.request.id
 	run_opts['sync'] = False
@@ -161,6 +161,7 @@ def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, valid
 		results=results,
 		run_opts=run_opts,
 		hooks=hooks,
+		drivers=drivers,
 		validators=validators,
 		context=context,
 	)

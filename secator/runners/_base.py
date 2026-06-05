@@ -90,7 +90,7 @@ class Runner:
 	# Run duplicate check
 	enable_duplicate_check = True
 
-	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
+	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}, drivers=[]):
 		# Runner config
 		self.serialize_config = run_opts.get('serialize_config', True)
 		self.config = self._process_config(config)
@@ -120,6 +120,13 @@ class Runner:
 		self.revoked = False
 		self.skipped = False
 		self.results_buffer = []
+
+		# Extract and merge hooks from driver instances
+		self._drivers = drivers
+		if drivers:
+			from secator.utils import deep_merge_dicts
+			driver_hook_dicts = [d.hooks for d in drivers if hasattr(d, 'hooks')]
+			hooks = deep_merge_dicts(hooks, *driver_hook_dicts)
 		self._hooks = hooks
 
 		# Runner process options
@@ -454,6 +461,7 @@ class Runner:
 		from secator.celery import start_runner
 
 		hooks = run_opts.pop('hooks', {})
+		drivers = run_opts.pop('drivers', [])
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
 		validators = run_opts.pop('validators', [])
@@ -464,6 +472,7 @@ class Runner:
 				'results': results,
 				'run_opts': run_opts,
 				'hooks': hooks,
+				'drivers': drivers,
 				'validators': validators,
 				'context': context,
 			},

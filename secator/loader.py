@@ -231,6 +231,44 @@ def get_available_drivers():
 	return AVAILABLE_DRIVERS + discover_external_drivers()
 
 
+def get_driver_instance(driver_name):
+	"""Instantiate a driver by name.
+
+	Tries to import from secator.drivers first (lazy import to avoid loading
+	optional dependencies like pymongo/google-cloud-storage unless needed), then
+	falls back to loading the HOOKS dict from secator.hooks for backward
+	compatibility with external drivers.
+
+	Args:
+		driver_name (str): Driver name (e.g. 'gcs', 'mongodb', 'api', 'discord').
+
+	Returns:
+		Driver instance or None if not found.
+	"""
+	import importlib
+	from secator.drivers import DRIVER_REGISTRY
+	if driver_name in DRIVER_REGISTRY:
+		module_path, class_name = DRIVER_REGISTRY[driver_name]
+		module = importlib.import_module(module_path)
+		cls = getattr(module, class_name)
+		return cls()
+
+	# Fall back to external driver (HOOKS-based): wrap in a compatible shim
+	from secator.utils import import_dynamic
+	hooks = import_dynamic(f'secator.hooks.{driver_name}', 'HOOKS')
+	if hooks is not None:
+		from secator.drivers._base import Driver
+
+		class _ExternalDriver(Driver):
+			@property
+			def hooks(self):
+				return hooks
+
+		_ExternalDriver.__name__ = f'{driver_name.capitalize()}Driver'
+		return _ExternalDriver()
+	return None
+
+
 @cache
 def get_available_exporters():
 	"""Get all available exporters (internal + external)."""
