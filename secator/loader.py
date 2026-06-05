@@ -11,9 +11,27 @@ import inspect
 import sys
 
 
+def _file_has_hooks(path):
+	"""Check if a Python file contains a HOOKS variable (driver indicator)."""
+	try:
+		return 'HOOKS =' in path.read_text()
+	except Exception:
+		return False
+
+
+def _file_has_exporter(path):
+	"""Check if a Python file contains an Exporter subclass."""
+	try:
+		return '(Exporter)' in path.read_text()
+	except Exception:
+		return False
+
+
 @cache
 def find_templates():
 	discover_tasks()  # always load tasks first
+	discover_external_drivers()  # load external drivers
+	discover_external_exporters()  # load external exporters
 	results = []
 	dirs = [CONFIGS_FOLDER]
 	if CONFIG.dirs.templates:
@@ -99,16 +117,18 @@ def discover_external_tasks():
 	prev_state = sys.dont_write_bytecode
 	sys.dont_write_bytecode = True
 	for path in CONFIG.dirs.templates.glob('**/*.py'):
+		if _file_has_hooks(path) or _file_has_exporter(path):
+			continue  # Skip driver/exporter files
 		try:
 			task_name = path.stem
 			module_name = f'secator.tasks.{task_name}'
 
 			# console.print(f'Importing module {module_name} from {path}')
 			spec = importlib.util.spec_from_file_location(module_name, path)
-			module = importlib.util.module_from_spec(spec)
 			if not spec:
 				console.print(f'[bold red]Could not load external module {path.name}: invalid import spec.[/] ({path})')
 				continue
+			module = importlib.util.module_from_spec(spec)
 			# console.print(f'Adding module "{module_name}" to sys path')
 			sys.modules[module_name] = module
 
@@ -127,3 +147,92 @@ def discover_external_tasks():
 			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')
 	sys.dont_write_bytecode = prev_state
 	return output
+
+
+@cache
+def discover_external_drivers():
+	"""Find external secator drivers."""
+	output = []
+	prev_state = sys.dont_write_bytecode
+	sys.dont_write_bytecode = True
+	for path in CONFIG.dirs.templates.glob('**/*.py'):
+		if not _file_has_hooks(path):
+			continue
+		try:
+			driver_name = path.stem
+			module_name = f'secator.hooks.{driver_name}'
+
+			spec = importlib.util.spec_from_file_location(module_name, path)
+			if not spec:
+				console.print(f'[bold red]Could not load external driver {path.name}: invalid import spec.[/] ({path})')
+				continue
+			module = importlib.util.module_from_spec(spec)
+			sys.modules[module_name] = module
+			spec.loader.exec_module(module)
+
+			if not hasattr(module, 'HOOKS'):
+				console.print(f'[bold orange1]Could not load external driver "{driver_name}" from {path.name}: missing HOOKS variable.[/] ({path})')  # noqa: E501
+				continue
+			console.print(f'[bold green]Successfully loaded external driver "{driver_name}"[/] ({path})')
+			output.append(driver_name)
+		except Exception as e:
+			console.print(f'[bold red]Could not load external driver from {path.name}. Reason: {str(e)}.[/] ({path})')
+	sys.dont_write_bytecode = prev_state
+	return output
+
+
+@cache
+def discover_external_exporters():
+	"""Find external secator exporters."""
+	import secator.exporters as exporters_pkg
+	from secator.exporters._base import Exporter
+	output = []
+	prev_state = sys.dont_write_bytecode
+	sys.dont_write_bytecode = True
+	for path in CONFIG.dirs.templates.glob('**/*.py'):
+		if not _file_has_exporter(path):
+			continue
+		try:
+			module_path = path.stem
+			module_name = f'secator.exporters.{module_path}'
+
+			spec = importlib.util.spec_from_file_location(module_name, path)
+			module = importlib.util.module_from_spec(spec)
+			if not spec:
+				console.print(f'[bold red]Could not load external exporter {path.name}: invalid import spec.[/] ({path})')
+				continue
+			sys.modules[module_name] = module
+			spec.loader.exec_module(module)
+
+			found = False
+			for attr_name in dir(module):
+				attr = getattr(module, attr_name)
+				if inspect.isclass(attr) and issubclass(attr, Exporter) and attr is not Exporter:
+					name_lower = attr_name.lower()
+					exporter_name = name_lower[:-8] if name_lower.endswith('exporter') else name_lower
+					lookup_name = exporter_name.capitalize() + 'Exporter'
+					setattr(exporters_pkg, lookup_name, attr)
+					console.print(f'[bold green]Successfully loaded external exporter "{exporter_name}"[/] ({path})')
+					output.append(exporter_name)
+					found = True
+
+			if not found:
+				console.print(f'[bold orange1]Could not load external exporter from {path.name}: no Exporter subclass found.[/] ({path})')  # noqa: E501
+		except Exception as e:
+			console.print(f'[bold red]Could not load external exporter from {path.name}. Reason: {str(e)}.[/] ({path})')
+	sys.dont_write_bytecode = prev_state
+	return output
+
+
+@cache
+def get_available_drivers():
+	"""Get all available drivers (internal + external)."""
+	from secator.definitions import AVAILABLE_DRIVERS
+	return AVAILABLE_DRIVERS + discover_external_drivers()
+
+
+@cache
+def get_available_exporters():
+	"""Get all available exporters (internal + external)."""
+	from secator.definitions import AVAILABLE_EXPORTERS
+	return AVAILABLE_EXPORTERS + discover_external_exporters()
