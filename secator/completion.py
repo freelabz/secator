@@ -4,8 +4,7 @@ import os
 from click.shell_completion import CompletionItem
 
 from secator.config import CONFIG
-from secator.definitions import AVAILABLE_DRIVERS, AVAILABLE_EXPORTERS
-from secator.loader import get_configs_by_type
+from secator.loader import get_configs_by_type, get_available_drivers, get_available_exporters
 
 
 def complete_profiles(ctx, param, incomplete):
@@ -36,7 +35,7 @@ def complete_drivers(ctx, param, incomplete):
 	"""Complete driver names."""
 	return [
 		CompletionItem(name)
-		for name in AVAILABLE_DRIVERS
+		for name in get_available_drivers()
 		if name.startswith(incomplete)
 	]
 
@@ -45,6 +44,6 @@ def complete_exporters(ctx, param, incomplete):
 	"""Complete exporter names."""
 	return [
 		CompletionItem(name)
-		for name in AVAILABLE_EXPORTERS
+		for name in get_available_exporters()
 		if name.startswith(incomplete)
 	]

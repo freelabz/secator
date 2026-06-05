@@ -12,23 +12,23 @@ from rich.console import Console
 
 from secator.config import CONFIG
 from secator.click import CLICK_LIST
-from secator.definitions import ADDONS_ENABLED, AVAILABLE_DRIVERS, AVAILABLE_EXPORTERS
+from secator.definitions import ADDONS_ENABLED
 from secator.runners import Scan, Task, Workflow
 from secator.template import get_config_options
 from secator.tree import build_runner_tree, prune_runner_tree
 from secator.utils import deduplicate, expand_input, get_command_category
-from secator.loader import get_configs_by_type
+from secator.loader import get_configs_by_type, get_available_drivers, get_available_exporters
 from secator.completion import complete_profiles, complete_workspaces, complete_drivers, complete_exporters
 
 
 WORKSPACES = next(os.walk(CONFIG.dirs.reports))[1]
 WORKSPACES_STR = '|'.join([f'[dim yellow3]{_}[/]' for _ in WORKSPACES])
 PROFILES_STR = ','.join([f'[dim yellow3]{_.name}[/]' for _ in get_configs_by_type('profile')])
-DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_DRIVERS])
+DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in get_available_drivers()])
 DRIVER_DEFAULTS_STR = ','.join(CONFIG.drivers.defaults) if CONFIG.drivers.defaults else None
 PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.defaults else None
 WORKSPACE_DEFAULT_STR = CONFIG.workspace.default if CONFIG.workspace.default else 'default'
-EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_EXPORTERS])
+EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in get_available_exporters()])
 
 CLI_OUTPUT_OPTS = {
 	'output': {'type': str, 'default': None, 'help': f'Output options [{EXPORTERS_STR}] [dim orange4](comma-separated)[/]', 'short': 'o', 'shell_complete': complete_exporters},  # noqa: E501
@@ -281,11 +281,11 @@ def register_runner(cli_endpoint, config):
 		hooks = []
 		drivers = driver.split(',') if driver else []
 		drivers = list(set(CONFIG.drivers.defaults + drivers))
-		supported_drivers = AVAILABLE_DRIVERS
+		supported_drivers = get_available_drivers()
 		context['drivers'] = []
 		for driver in drivers:
 			if driver in supported_drivers:
-				if not ADDONS_ENABLED[driver]:
+				if driver in ADDONS_ENABLED and not ADDONS_ENABLED[driver]:
 					console.print(f'[bold red]Missing "{driver}" addon: please run `secator install addons {driver}`[/].')
 					sys.exit(1)
 				from secator.utils import import_dynamic
