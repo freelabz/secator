@@ -3,6 +3,8 @@
 import json
 import re
 
+from secator.output_types import Error
+from secator.rich import console
 from secator.utils import debug
 
 
@@ -176,9 +178,10 @@ def _parse_single_expr(expr):
         field = parts[1].strip() if len(parts) > 1 else None
         values = _parse_list(values_str)
         if field is None:
-            raise ValueError(
-                f"'in' operator requires a field (e.g. 'type.field in [...]'): {expr!r}"
-            )
+            console.print(Error(
+                message=f"'in' operator requires a field (e.g. 'type.field in [...]'): {expr!r}"
+            ))
+            return {'_type': _type}
         result = {'_type': _type}
         result[field] = {'$in': values}
         return result
