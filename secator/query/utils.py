@@ -98,7 +98,31 @@ _OP_MAP = {
 }
 
 # Regex for the 'in' operator: "type.field in [val1, val2]"
-_IN_RE = re.compile(r'^(.+?)\s+in\s+\[(.*)\]\s*$', re.DOTALL | re.IGNORECASE)
+_IN_RE = re.compile(r'^(.+?)\s+in\s+\[(.*)\]\s*$', re.DOTALL)
+
+
+def _has_in_op_outside_quotes(expr):
+    """Return True if ' in [' appears outside of any quoted substring in expr."""
+    in_quote = None
+    i = 0
+    while i < len(expr):
+        ch = expr[i]
+        if in_quote is None and ch in ('"', "'"):
+            in_quote = ch
+            i += 1
+        elif ch == in_quote:
+            in_quote = None
+            i += 1
+        elif in_quote is None and expr[i:i + 4] == ' in ':
+            j = i + 4
+            while j < len(expr) and expr[j] == ' ':
+                j += 1
+            if j < len(expr) and expr[j] == '[':
+                return True
+            i += 1
+        else:
+            i += 1
+    return False
 
 
 def _parse_list(values_str):
@@ -144,16 +168,19 @@ def _parse_single_expr(expr):
         return {'_type': expr}
 
     # Check for 'in' operator: "type.field in [val1, val2]"
-    m_in = _IN_RE.match(expr)
+    m_in = _IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
     if m_in:
         left, values_str = m_in.group(1).strip(), m_in.group(2)
         parts = left.split('.', 1)
         _type = parts[0].strip()
         field = parts[1].strip() if len(parts) > 1 else None
         values = _parse_list(values_str)
+        if field is None:
+            raise ValueError(
+                f"'in' operator requires a field (e.g. 'type.field in [...]'): {expr!r}"
+            )
         result = {'_type': _type}
-        if field:
-            result[field] = {'$in': values}
+        result[field] = {'$in': values}
         return result
 
     # Use regex to find the first operator (longest-first via alternation order).

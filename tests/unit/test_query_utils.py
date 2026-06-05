@@ -145,7 +145,9 @@ class TestPythonExprToMongo:
         assert result == {'_type': 'url', 'status_code': {'$in': [200, 304]}, 'path': '/api'}
 
     def test_in_operator_with_python_and(self):
-        result = python_expr_to_mongo("vulnerability.severity in ['high', 'critical'] and vulnerability.severity_score > 7")
+        result = python_expr_to_mongo(
+            "vulnerability.severity in ['high', 'critical'] and vulnerability.severity_score > 7"
+        )
         assert result == {
             '_type': 'vulnerability',
             'severity': {'$in': ['high', 'critical']},
