@@ -6,9 +6,9 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-	CONFIDENCE, CVSS_SCORE, CVSS_VECTOR, DELAY, DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT, ID, IP,
-	MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT, PROVIDER, PROXY, RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS,
-	THREADS, TIMEOUT, URL, USER_AGENT
+	CONFIDENCE, CVSS_SCORE, CVSS_VECTOR, DELAY, DESCRIPTION, EPSS_SCORE, EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT,
+	ID, IMPACT, IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT, PROVIDER, PROXY, RATE_LIMIT, REFERENCES, REMEDIATION, RETRIES,
+	SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT
 )
 # fmt: on
 from secator.output_types import Progress, Tag, Technology, Vulnerability
@@ -97,16 +97,19 @@ class nuclei(VulnMulti):
 	output_map = {
 		Vulnerability: {
 			ID: lambda x: nuclei.id_extractor(x),
-			NAME: lambda x: nuclei.name_extractor(x),
+			NAME: lambda x: x['info']['name'],
 			DESCRIPTION: lambda x: x['info'].get('description'),
 			SEVERITY: lambda x: x['info'][SEVERITY],
 			CONFIDENCE: lambda x: 'high',
-			CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
+			CVSS_SCORE: lambda x: float(x['info'].get('classification', {}).get('cvss-score') or 0),
 			CVSS_VECTOR: lambda x: x['info'].get('classification', {}).get('cvss-metrics') or '',
+			EPSS_SCORE: lambda x: float(x['info'].get('classification', {}).get('epss-score') or 0),
+			IMPACT: lambda x: x['info'].get('impact') or '',
+			REMEDIATION: lambda x: x['info'].get('remediation') or '',
 			MATCHED_AT: 'matched-at',
 			IP: 'ip',
 			TAGS: lambda x: x['info']['tags'],
-			REFERENCES: lambda x: x['info'].get('reference', []),
+			REFERENCES: lambda x: [nuclei.get_github_template_url(x)] + x['info'].get('reference', []),
 			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
 			PROVIDER: 'nuclei',
 		},
@@ -164,17 +167,22 @@ class nuclei(VulnMulti):
 		data['type'] = item.get('type', '')
 		data['matcher_name'] = item.get('matcher-name', '')
 		data['template_id'] = item['template-id']
-		template = item.get('template')
-		template_url = item.get('template-url', '')
-		if template_url.startswith('https://cloud.projectdiscovery.io') and template:
-			template_url = 'https://github.com/projectdiscovery/nuclei-templates/blob/main/' + template
-		data['template_url'] = template_url
+		data['curl_command'] = item.get('curl-command', '')
+		data['template_url'] = nuclei.get_github_template_url(item)
 		for k, v in item.get('meta', {}).items():
 			data['data'].append(f'{k}: {v}')
 		data['metadata'] = item.get('metadata', {})
 		if with_tags:
 			data['tags'] = item.get('info', {}).get('tags', [])
 		return data
+
+	@staticmethod
+	def get_github_template_url(item):
+		template = item.get('template')
+		template_url = item.get('template-url', '')
+		if template_url.startswith('https://cloud.projectdiscovery.io') and template:
+			template_url = 'https://github.com/projectdiscovery/nuclei-templates/blob/main/' + template
+		return template_url
 
 	@staticmethod
 	def value_extractor(item):
