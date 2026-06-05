@@ -37,6 +37,7 @@ class PythonRunner(Runner):
 	tags = []
 	opts = {}
 	default_inputs = None
+	input_chunk_size = CONFIG.runners.input_chunk_size
 	profile = 'small'
 	install_cmd = None
 	install_pre = None
