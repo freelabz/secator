@@ -74,6 +74,16 @@ class TestConfig(unittest.TestCase):
 		self.assertEqual(config.addons.gdrive.enabled, True)
 		self.assertEqual(config._partial.addons.gdrive.enabled, True)
 
+	def test_unset_int_config_key(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('runners.progress_update_frequency', 10)
+		self.assertEqual(config.get('runners.progress_update_frequency'), 10)
+		self.assertIn('progress_update_frequency', config._partial.runners)
+		# Should not raise TypeError for int-typed config keys
+		config.unset('runners.progress_update_frequency')
+		self.assertNotIn('progress_update_frequency', config._partial.runners)
+
 	def test_parse_home_dir_reduce(self):
 		from secator.config import Config
 		with self.config_test.open('w') as f:

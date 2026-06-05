@@ -386,33 +386,34 @@ class Config(DotMap):
 
 		# Try to convert value to expected type
 		try:
-			if isinstance(existing_value, list):
-				if isinstance(value, str):
-					if value.startswith('[') and value.endswith(']'):
-						value = value[1:-1]
-					if ',' in value:
-						value = [c.strip() for c in value.split(',')]
-					elif value:
-						value = [value]
-					else:
-						value = []
-			elif isinstance(existing_value, dict):
-				if isinstance(value, str):
-					if value.startswith('{') and value.endswith('}'):
-						import json
+			if value is not None:
+				if isinstance(existing_value, list):
+					if isinstance(value, str):
+						if value.startswith('[') and value.endswith(']'):
+							value = value[1:-1]
+						if ',' in value:
+							value = [c.strip() for c in value.split(',')]
+						elif value:
+							value = [value]
+						else:
+							value = []
+				elif isinstance(existing_value, dict):
+					if isinstance(value, str):
+						if value.startswith('{') and value.endswith('}'):
+							import json
 
-						value = json.loads(value)
-			elif isinstance(existing_value, bool):
-				if isinstance(value, str):
-					value = value.lower() in ('true', '1', 't')
-				elif isinstance(value, (int, float)):
-					value = True if value == 1 else False
-			elif isinstance(existing_value, int):
-				value = int(value)
-			elif isinstance(existing_value, float):
-				value = float(value)
-			elif isinstance(existing_value, Path):
-				value = Path(value)
+							value = json.loads(value)
+				elif isinstance(existing_value, bool):
+					if isinstance(value, str):
+						value = value.lower() in ('true', '1', 't')
+					elif isinstance(value, (int, float)):
+						value = True if value == 1 else False
+				elif isinstance(existing_value, int):
+					value = int(value)
+				elif isinstance(existing_value, float):
+					value = float(value)
+				elif isinstance(existing_value, Path):
+					value = Path(value)
 		except ValueError:
 			pass
 
