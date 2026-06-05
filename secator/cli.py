@@ -679,7 +679,7 @@ def config_set(key, value, strategy):
 	  secator config set drivers.defaults redis --append  # append to list field
 	  secator config set wordlists.defaults.http mylist  # set a dict subkey
 	"""
-	CONFIG.set(key, value, strategy=strategy if strategy else None)
+	CONFIG.set(key, value, strategy=strategy or None)
 	config = CONFIG.validate()
 	if config:
 		CONFIG.get(key)

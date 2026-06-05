@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from subprocess import call, DEVNULL
@@ -349,7 +350,10 @@ class Config(DotMap):
 			return None
 		if print:
 			if key:
-				yaml_str = Config.dump(DotMap({key: value}), partial=False)
+				nested = value
+				for part in reversed(key.split('.')):
+					nested = {part: nested}
+				yaml_str = Config.dump(DotMap(nested), partial=False)
 			else:
 				yaml_str = Config.dump(self, partial=False)
 			Config.print_yaml(yaml_str)
@@ -416,6 +420,8 @@ class Config(DotMap):
 					return
 			value = current
 		else:
+			if strategy in ('append', 'remove'):
+				console.print(f'[bold orange1]Strategy "{strategy}" is only supported for list fields; ignoring for "{key}".[/]')
 			# Try to convert value to expected type
 			try:
 				if isinstance(existing_value, list):
@@ -431,14 +437,12 @@ class Config(DotMap):
 				elif isinstance(existing_value, dict):
 					if isinstance(value, str):
 						if value.startswith('{') and value.endswith('}'):
-							import json
-
 							value = json.loads(value)
 				elif isinstance(existing_value, bool):
 					if isinstance(value, str):
 						value = value.lower() in ('true', '1', 't')
 					elif isinstance(value, (int, float)):
-						value = True if value == 1 else False
+						value = value == 1
 				elif isinstance(existing_value, int):
 					value = int(value)
 				elif isinstance(existing_value, float):
@@ -449,12 +453,13 @@ class Config(DotMap):
 				pass
 
 		if set_partial:
-			if value is None or value == target[final_key]:
+			if value is None:
 				if final_key in partial:
 					del partial[final_key]
 				return
-			else:
-				partial[final_key] = value
+			if value == target[final_key] and final_key not in partial:
+				return
+			partial[final_key] = value
 		target[final_key] = value
 
 	def _set_dict_key(self, parent_parts, subkey, value, set_partial=True, strategy=None):
@@ -542,14 +547,18 @@ class Config(DotMap):
 		Args:
 			target_path (Path | None): If passed, saves the config to this path.
 			partial (bool): Save partial config.
+
+		Returns:
+			Path | None: Path where config was saved, or None if no path configured.
 		"""
 		if not target_path:
 			if not self._path:
-				return
+				return None
 			target_path = self._path
 		with target_path.open('w') as f:
 			f.write(Config.dump(self, partial=partial))
 		self._path = target_path
+		return target_path
 
 	def print(self, partial=True):
 		"""Print config.
