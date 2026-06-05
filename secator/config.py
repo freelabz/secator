@@ -1,4 +1,5 @@
 import os
+from collections.abc import MutableMapping
 from pathlib import Path
 from subprocess import call, DEVNULL
 from typing import Any, Dict, List
@@ -147,6 +148,8 @@ class Drivers(StrictModel):
 
 class Workspace(StrictModel):
 	default: str = ''
+	default_profile: List[str] = []
+	default_profiles: Dict[str, List[str]] = {}
 
 
 class Payloads(StrictModel):
@@ -369,9 +372,52 @@ class Config(DotMap):
 		# Convert dotted key path to the corresponding uppercase key used in _keymap
 		map_key = key.upper().replace('.', '_')
 
-		# Check if map key exists
+		# Check if map key exists; if not, try to find a dict ancestor for sub-key setting
 		if map_key not in self._keymap:
-			console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
+			anchor_path, remaining_parts = Config._find_dict_anchor(self._keymap, self, key)
+			if anchor_path is None:
+				console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
+				return
+
+			# Parse value without existing type info
+			value = Config._parse_new_value(value)
+
+			# Validate profile names before setting
+			if key == 'workspace.default_profile' or key.startswith('workspace.default_profiles.'):
+				profile_names = value if isinstance(value, list) else ([value] if value else [])
+				if profile_names and not Config._validate_profile_names(profile_names):
+					return
+
+			# Navigate to dict anchor
+			target = self
+			partial = self._partial
+			for part in anchor_path:
+				target = target[part]
+				partial = partial[part]
+
+			# Navigate through intermediate sub-parts, creating nested dicts as needed
+			for part in remaining_parts[:-1]:
+				if part not in target or not isinstance(target[part], dict):
+					target[part] = {}
+				if set_partial:
+					if part not in partial or not isinstance(partial[part], dict):
+						partial[part] = {}
+				target = target[part]
+				if set_partial:
+					partial = partial[part]
+
+			final_key = remaining_parts[-1]
+			if value is None:
+				if final_key in target:
+					del target[final_key]
+				if set_partial and final_key in partial:
+					del partial[final_key]
+			else:
+				target[final_key] = value
+				if set_partial:
+					partial[final_key] = value
+
+			self._keymap = Config.build_key_map(self)
 			return
 
 		# Traverse to the second last key to handle the setting correctly
@@ -416,6 +462,12 @@ class Config(DotMap):
 		except ValueError:
 			pass
 
+		# Validate profile names before setting
+		if key in ('workspace.default_profile', 'profiles.defaults'):
+			profile_names = value if isinstance(value, list) else ([value] if value else [])
+			if profile_names and not Config._validate_profile_names(profile_names):
+				return
+
 		if set_partial:
 			if value is None or value == target[final_key]:
 				if final_key in partial:
@@ -424,6 +476,75 @@ class Config(DotMap):
 			else:
 				partial[final_key] = value
 		target[final_key] = value
+
+	@staticmethod
+	def _find_dict_anchor(keymap, config, key):
+		"""Find the deepest dict ancestor in the keymap for a dotted key path.
+
+		Returns:
+			tuple: (anchor_path, remaining_parts) or (None, None) if not found.
+		"""
+		parts = key.split('.')
+		for i in range(len(parts) - 1, 0, -1):
+			candidate_key = '_'.join(parts[:i]).upper()
+			if candidate_key in keymap:
+				candidate_path = keymap[candidate_key]
+				candidate_value = config
+				for part in candidate_path:
+					candidate_value = candidate_value[part]
+				# Accept both plain dict and DotMap (MutableMapping) to handle both cases
+				if isinstance(candidate_value, MutableMapping) and not isinstance(candidate_value, str):
+					return candidate_path, parts[i:]
+		return None, None
+
+	@staticmethod
+	def _parse_new_value(value):
+		"""Parse a string value when no existing type information is available."""
+		if not isinstance(value, str):
+			return value
+		import json
+		stripped = value.strip()
+		if stripped.startswith('[') and stripped.endswith(']'):
+			try:
+				return json.loads(stripped)
+			except (json.JSONDecodeError, ValueError):
+				pass
+		if stripped.startswith('{') and stripped.endswith('}'):
+			try:
+				return json.loads(stripped)
+			except (json.JSONDecodeError, ValueError):
+				pass
+		if ',' in value:
+			return [c.strip() for c in value.split(',')]
+		if value.lower() in ('true', 'false'):
+			return value.lower() == 'true'
+		try:
+			return int(value)
+		except ValueError:
+			pass
+		try:
+			return float(value)
+		except ValueError:
+			pass
+		return value
+
+	@staticmethod
+	def _validate_profile_names(profile_names):
+		"""Validate that profile names exist. Returns True if all are valid."""
+		if not profile_names:
+			return True
+		try:
+			from secator.loader import get_configs_by_type
+			available_profiles = get_configs_by_type('profile')
+			available_names = {p.name for p in available_profiles}
+			invalid = [n for n in profile_names if n not in available_names]
+			if invalid:
+				for name in invalid:
+					console.print(f'[bold red]Profile "{name}" not found. Run [bold green]secator profiles list[/] to see available profiles.[/]')
+				return False
+		except Exception:
+			pass
+		return True
 
 	def unset(self, key, set_partial=True):
 		"""Unset a value in the configuration using a dotted path.
@@ -621,10 +742,12 @@ class Config(DotMap):
 			if key.startswith('_'):  # ignore
 				continue
 			current_path = base_path + [key]
-			if isinstance(value, dict):
+			map_key = '_'.join(current_path).upper()
+			if isinstance(value, MutableMapping) and not isinstance(value, str):
+				key_map[map_key] = current_path  # include dict itself so sub-keys can be set
 				key_map.update(Config.build_key_map(value, current_path))
 			else:
-				key_map['_'.join(current_path).upper()] = current_path
+				key_map[map_key] = current_path
 		return key_map
 
 	def apply_env_overrides(self, print_errors=True):

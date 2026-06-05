@@ -74,6 +74,52 @@ class TestConfig(unittest.TestCase):
 		self.assertEqual(config.addons.gdrive.enabled, True)
 		self.assertEqual(config._partial.addons.gdrive.enabled, True)
 
+	def test_set_dict_subkey_tasks_overrides(self):
+		"""Test that setting a sub-key within an empty dict field works."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('tasks.overrides.nuclei.input_chunk_size', '100')
+		self.assertEqual(config.tasks.overrides['nuclei']['input_chunk_size'], 100)
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['tasks']['overrides']['nuclei']['input_chunk_size'], 100)
+
+	def test_set_workspace_default_profiles(self):
+		"""Test setting per-workspace default profiles."""
+		from secator.config import Config
+		from unittest.mock import patch, MagicMock
+		config = Config.parse(path=self.config_test)
+		mock_profile = MagicMock()
+		mock_profile.name = 'aggressive'
+		mock_profile2 = MagicMock()
+		mock_profile2.name = 'passive'
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.default_profiles.my_ws', 'aggressive,passive')
+		self.assertEqual(config.workspace.default_profiles['my_ws'], ['aggressive', 'passive'])
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['workspace']['default_profiles']['my_ws'], ['aggressive', 'passive'])
+
+	def test_set_workspace_default_profile(self):
+		"""Test setting global default profile for all workspaces."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		with unittest.mock.patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.default_profile', 'aggressive,passive')
+		self.assertEqual(config.workspace.default_profile, ['aggressive', 'passive'])
+
+	def test_set_invalid_profile_name_blocked(self):
+		"""Test that setting a non-existent profile name is rejected."""
+		from secator.config import Config
+		from unittest.mock import patch, MagicMock
+		config = Config.parse(path=self.config_test)
+		mock_profile = MagicMock()
+		mock_profile.name = 'aggressive'
+		with patch('secator.loader.get_configs_by_type', return_value=[mock_profile]):
+			config.set('workspace.default_profiles.my_ws', 'nonexistent_profile')
+		# Should not have been set
+		self.assertEqual(config.workspace.default_profiles.get('my_ws'), None)
+
 	def test_parse_home_dir_reduce(self):
 		from secator.config import Config
 		with self.config_test.open('w') as f:
