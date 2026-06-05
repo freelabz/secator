@@ -102,6 +102,9 @@ app.conf.update(
 )
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
 if IN_WORKER:
+	from secator.loader import discover_external_drivers, discover_external_exporters
+	discover_external_drivers()
+	discover_external_exporters()
 	setup_handlers()
 
 

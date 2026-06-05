@@ -439,6 +439,34 @@ class Runner:
 		"""
 		return list(self.__iter__())
 
+	def __getstate__(self):
+		"""Custom pickle: strip hook functions so dynamically-loaded modules
+		(e.g. secator.hooks.cockpit) don't cause ModuleNotFoundError on workers.
+		Driver names in context['drivers'] are used to re-load hooks in __setstate__.
+		"""
+		state = self.__dict__.copy()
+		state['_hooks'] = {}
+		state['resolved_hooks'] = {name: [] for name in state['resolved_hooks']}
+		return state
+
+	def __setstate__(self, state):
+		"""Custom unpickle: restore runner state then re-register hooks."""
+		self.__dict__.update(state)
+		drivers = self.context.get('drivers', [])
+		if drivers:
+			from secator.loader import discover_external_drivers
+			discover_external_drivers()
+		hooks_list = []
+		for driver in drivers:
+			driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
+			if driver_hooks:
+				hooks_list.append(driver_hooks)
+		merged_hooks = {}
+		if hooks_list:
+			from secator.utils import deep_merge_dicts
+			merged_hooks = deep_merge_dicts(*hooks_list)
+		self.register_hooks(merged_hooks)
+
 	@classmethod
 	def delay(cls, config, targets, **run_opts):
 		"""Run runner asynchronously via Celery.
