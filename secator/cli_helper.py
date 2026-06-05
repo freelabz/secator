@@ -277,28 +277,22 @@ def register_runner(cli_endpoint, config):
 		inputs = opts.pop('inputs')
 		inputs = expand_input(inputs, ctx)
 
-		# Build hooks from driver name
-		hooks = []
-		drivers = driver.split(',') if driver else []
-		drivers = list(dict.fromkeys(CONFIG.drivers.defaults + drivers))
+		# Validate and collect driver names
+		resolved_drivers = []
+		drivers_input = driver.split(',') if driver else []
+		drivers_input = list(dict.fromkeys(CONFIG.drivers.defaults + drivers_input))
 		supported_drivers = get_available_drivers()
 		context['drivers'] = []
-		for driver in drivers:
-			if driver in supported_drivers:
-				if driver in ADDONS_ENABLED and not ADDONS_ENABLED[driver]:
-					console.print(f'[bold red]Missing "{driver}" addon: please run `secator install addons {driver}`[/].')
+		for driver_name in drivers_input:
+			if driver_name in supported_drivers:
+				if driver_name in ADDONS_ENABLED and not ADDONS_ENABLED[driver_name]:
+					console.print(f'[bold red]Missing "{driver_name}" addon: please run `secator install addons {driver_name}`[/].')
 					sys.exit(1)
-				from secator.utils import import_dynamic
-
-				driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
-				if driver_hooks is None:
-					console.print(f'[bold red]Missing "secator.hooks.{driver}.HOOKS".[/]')
-					sys.exit(1)
-				hooks.append(driver_hooks)
-				context['drivers'].append(driver)
+				resolved_drivers.append(driver_name)
+				context['drivers'].append(driver_name)
 			else:
 				supported_drivers_str = ', '.join([f'[bold green]{_}[/]' for _ in supported_drivers])
-				console.print(f'[bold red]Driver "{driver}" is not supported.[/]')
+				console.print(f'[bold red]Driver "{driver_name}" is not supported.[/]')
 				console.print(f'Supported drivers: {supported_drivers_str}')
 				sys.exit(1)
 
@@ -320,10 +314,6 @@ def register_runner(cli_endpoint, config):
 
 			output_file = f'trace_memray_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.bin'
 			contextmanager = memray.Tracker(output_file)
-
-		from secator.utils import deep_merge_dicts
-
-		hooks = deep_merge_dicts(*hooks)
 
 		# Enable sync or not
 		if sync or dry_run:
@@ -373,7 +363,7 @@ def register_runner(cli_endpoint, config):
 				process = psutil.Process()
 				console.print(f'[bold yellow3]Initial RAM Usage: {process.memory_info().rss / 1024**2} MB[/]')
 			item_count = 0
-			runner = runner_cls(config, inputs, run_opts=opts, hooks=hooks, context=context)
+			runner = runner_cls(config, inputs, run_opts=opts, drivers=resolved_drivers, context=context)
 			for item in runner:
 				del item
 				item_count += 1

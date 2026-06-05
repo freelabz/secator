@@ -64,7 +64,7 @@ class Scan(Runner):
 				self.inputs,
 				results=self.results,
 				run_opts=opts,
-				hooks=self._hooks,
+				drivers=self.drivers,
 				context=self.context.copy()
 			)
 			celery_workflow = workflow.build_celery_workflow(chain_previous_results=True)

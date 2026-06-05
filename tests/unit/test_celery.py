@@ -339,3 +339,55 @@ class TestDelayMethods(unittest.TestCase):
 			context={}
 		)
 		self.assertIsNotNone(sig)
+
+
+class TestRunnerDrivers(unittest.TestCase):
+	"""Test that runners accept and propagate driver names correctly."""
+
+	def test_runner_accepts_drivers_param(self):
+		"""Runner stores driver names from the drivers= parameter."""
+		from secator.runners import Workflow
+		from secator.loader import get_configs_by_type
+
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		config = workflows[0]
+		runner = Workflow(config, ['example.com'], run_opts={'dry_run': True}, drivers=['mongodb'])
+		self.assertEqual(runner.drivers, ['mongodb'])
+
+	def test_runner_drivers_from_context(self):
+		"""Runner falls back to context['drivers'] when drivers= is empty."""
+		from secator.runners import Workflow
+		from secator.loader import get_configs_by_type
+
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		config = workflows[0]
+		runner = Workflow(config, ['example.com'], run_opts={'dry_run': True}, context={'drivers': ['gcs']})
+		self.assertEqual(runner.drivers, ['gcs'])
+
+	def test_runner_pickle_strips_hook_functions(self):
+		"""Pickling a Runner strips resolved_hooks function objects from the state."""
+		import pickle
+		from secator.runners import Workflow
+		from secator.loader import get_configs_by_type
+
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		config = workflows[0]
+		runner = Workflow(config, ['example.com'], run_opts={'dry_run': True})
+
+		state = runner.__getstate__()
+		# All hook lists in the pickled state should be empty
+		for hook_list in state['resolved_hooks'].values():
+			self.assertEqual(hook_list, [])
+		# Pickle/unpickle should not raise
+		data = pickle.dumps(runner)
+		restored = pickle.loads(data)
+		self.assertIsNotNone(restored)

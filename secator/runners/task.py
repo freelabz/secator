@@ -41,9 +41,8 @@ class Task(Runner):
 		self.enable_hooks = False   # Celery will handle hooks
 		self.enable_reports = self.run_opts.get('enable_reports', True)  # Task will handle reports
 
-		# Get hooks
-		hooks = self._hooks.get(Task, {})
-		opts['hooks'] = hooks
+		# Forward driver names so child tasks reload hooks on the worker
+		opts['drivers'] = self.drivers
 		opts['context'] = self.context.copy()
 		opts['reports_folder'] = str(self.reports_folder)
 

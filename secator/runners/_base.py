@@ -90,7 +90,7 @@ class Runner:
 	# Run duplicate check
 	enable_duplicate_check = True
 
-	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
+	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}, drivers=[]):
 		# Runner config
 		self.serialize_config = run_opts.get('serialize_config', True)
 		self.config = self._process_config(config)
@@ -100,6 +100,7 @@ class Runner:
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
+		self.drivers = list(drivers) or list(context.get('drivers', []))
 
 		# Runner state
 		self.uuids = set()
@@ -121,6 +122,7 @@ class Runner:
 		self.skipped = False
 		self.results_buffer = []
 		self._hooks = hooks
+		self._validators = validators
 
 		# Runner process options
 		self.no_poll = self.run_opts.get('no_poll', False)
@@ -177,6 +179,7 @@ class Runner:
 		self.resolved_hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		self.debug('registering hooks', obj=list(self.resolved_hooks.keys()), sub='init')
 		self.register_hooks(hooks)
+		self._load_driver_hooks()
 
 		# Validators
 		self.resolved_validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
@@ -453,7 +456,7 @@ class Runner:
 		"""
 		from secator.celery import start_runner
 
-		hooks = run_opts.pop('hooks', {})
+		drivers = run_opts.pop('drivers', [])
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
 		validators = run_opts.pop('validators', [])
@@ -463,9 +466,9 @@ class Runner:
 				'targets': targets,
 				'results': results,
 				'run_opts': run_opts,
-				'hooks': hooks,
 				'validators': validators,
 				'context': context,
+				'drivers': drivers,
 			},
 			queue='celery',
 		)
@@ -977,6 +980,28 @@ class Runner:
 				fun = self.get_func_path(hook)
 				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
 			self.resolved_hooks[key].extend(user_hooks)
+
+	def _load_driver_hooks(self):
+		"""Load and register hooks from named drivers."""
+		for driver_name in self.drivers:
+			driver_hooks = import_dynamic(f'secator.hooks.{driver_name}', 'HOOKS')
+			if driver_hooks:
+				self.register_hooks(driver_hooks)
+
+	def __getstate__(self):
+		state = self.__dict__.copy()
+		state['resolved_hooks'] = {k: [] for k in state.get('resolved_hooks', {})}
+		state['resolved_validators'] = {k: [] for k in state.get('resolved_validators', {})}
+		return state
+
+	def __setstate__(self, state):
+		self.__dict__.update(state)
+		self.resolved_hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
+		self.register_hooks(getattr(self, '_hooks', {}))
+		self._load_driver_hooks()
+		self.resolved_validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
+		self.resolved_validators['validate_input'].append(self._validate_inputs)
+		self.register_validators(getattr(self, '_validators', {}))
 
 	def register_validators(self, validators):
 		"""Register validators.
