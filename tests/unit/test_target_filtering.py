@@ -509,8 +509,14 @@ class TestEndToEndTargetFilteringChain(unittest.TestCase):
         After clear_modules(), the module-level w1_1/w2_1/etc. classes have stale bases
         (PythonRunner from the old import). Celery's pickle fails because Target objects
         created via those stale classes don't match sys.modules classes.
-        We rebuild fresh classes and update MOCK_TASK_CLASSES in-place.
+        We rebuild fresh classes, update MOCK_TASK_CLASSES in-place, and register the
+        new classes in this module's globals so pickle can resolve them by qualified name
+        (required when needs_chunking() triggers break_task which builds a chord with
+        mark_runner_completed.s(runner=task), causing the task instance to be pickled).
         """
+        import sys as _sys
+        _this_module = _sys.modules[__name__]
+
         from secator.runners import PythonRunner as _PythonRunner
         from secator.output_types import Port as _Port, Tag as _Tag, Url as _Url
         from secator.output_types import Technology as _Technology
@@ -583,6 +589,14 @@ class TestEndToEndTargetFilteringChain(unittest.TestCase):
 
         _w2_3.__name__ = 'w2_3'
         _w2_3.__qualname__ = 'w2_3'
+
+        # Register rebuilt classes in module globals so Celery pickle can find them by
+        # __module__.__qualname__ (tests.unit.test_target_filtering.w2_2, etc.)
+        _this_module.w1_1 = _w1_1
+        _this_module.w1_2 = _w1_2
+        _this_module.w2_1 = _w2_1
+        _this_module.w2_2 = _w2_2
+        _this_module.w2_3 = _w2_3
 
         # Update MOCK_TASK_CLASSES in-place so patched_discover_tasks returns fresh classes
         MOCK_TASK_CLASSES.clear()
