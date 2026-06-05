@@ -35,9 +35,8 @@ class Workflow(Runner):
 		self.enable_reports = True  # Workflow will handle reports
 		self.print_item = not self.sync
 
-		# Get hooks
-		hooks = self._hooks.get(Task, {})
-		opts['hooks'] = hooks
+		# Forward driver names so child tasks reload hooks on the worker
+		opts['drivers'] = self.drivers
 		opts['context'] = self.context.copy()
 		opts['reports_folder'] = str(self.reports_folder)
 		opts['enable_reports'] = False  # Workflow will handle reports

@@ -150,6 +150,7 @@ class Command(Runner):
 
 		# Extract run opts
 		hooks = run_opts.pop('hooks', {})
+		drivers = run_opts.pop('drivers', [])
 		caller = run_opts.get('caller', None)
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
@@ -179,6 +180,7 @@ class Command(Runner):
 			hooks=hooks,
 			validators=validators,
 			context=context,
+			drivers=drivers,
 		)
 
 		# Cmd name

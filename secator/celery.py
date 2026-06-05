@@ -144,7 +144,7 @@ def chunker(seq, size):
 
 
 @app.task(bind=True)
-def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, validators={}, context={}):
+def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, validators={}, context={}, drivers=[]):
 	context = context or {}
 	context['celery_id'] = self.request.id
 	run_opts['sync'] = False
@@ -163,6 +163,7 @@ def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, valid
 		hooks=hooks,
 		validators=validators,
 		context=context,
+		drivers=drivers,
 	)
 	runner.run()
 
