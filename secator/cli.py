@@ -665,9 +665,21 @@ def config_get(user, key=None):
 @config.command('set')
 @click.argument('key')
 @click.argument('value')
-def config_set(key, value):
-	"""Set config value."""
-	CONFIG.set(key, value)
+@click.option('--append', 'strategy', flag_value='append', default=False, help='Append value to existing list field.')
+def config_set(key, value, strategy):
+	"""Set config value.
+
+	Use --append to append a value to a list field instead of replacing it.
+
+	Examples:
+
+	\b
+	  secator config set debug ''                     # set a scalar field
+	  secator config set drivers.defaults redis       # replace list field
+	  secator config set drivers.defaults redis --append  # append to list field
+	  secator config set wordlists.defaults.http mylist  # set a dict subkey
+	"""
+	CONFIG.set(key, value, strategy=strategy if strategy else None)
 	config = CONFIG.validate()
 	if config:
 		CONFIG.get(key)
@@ -681,9 +693,22 @@ def config_set(key, value):
 
 @config.command('unset')
 @click.argument('key')
-def config_unset(key):
-	"""Unset a config value."""
-	CONFIG.unset(key)
+@click.argument('value', required=False)
+def config_unset(key, value=None):
+	"""Unset a config value.
+
+	When VALUE is provided and KEY is a list field, removes that item from the list.
+	When VALUE is omitted, removes the entire field (resets to default).
+	Also supports removing dict subkeys: secator config unset wordlists.defaults.http
+
+	Examples:
+
+	\b
+	  secator config unset debug                      # reset scalar to default
+	  secator config unset drivers.defaults redis     # remove item from list
+	  secator config unset wordlists.defaults.http    # remove dict subkey
+	"""
+	CONFIG.unset(key, value=value)
 	config = CONFIG.validate()
 	if config:
 		saved = CONFIG.save()
