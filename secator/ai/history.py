@@ -33,8 +33,12 @@ def get_context_window(model: str) -> int:
         context_window = info.get("max_input_tokens") or info.get("max_tokens") or CONFIG.addons.ai.context_window
         debug(f'context_window={context_window}', sub='runner.ai.context', obj={'model': model})
         return context_window
-    except Exception:
-        debug('context_window=config fallback (exception)', sub='runner.ai.context', obj={'model': model})
+    except Exception as e:  # noqa: BLE001 - get_model_info() raises generic Exception for unmapped models
+        debug(
+            'context_window=config fallback (exception)',
+            sub='runner.ai.context',
+            obj={'model': model, 'error_type': e.__class__.__name__, 'error': str(e)}
+        )
         return CONFIG.addons.ai.context_window
 
 

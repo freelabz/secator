@@ -128,17 +128,17 @@ class ai(PythonRunner):
 		# Init all options
 		self._init_options()
 
-		# Verify model is configured and reachable
-		yield from self._verify_model()
-		if not self.model:
-			return
-
 		# Show prompt mode (diagnostic)
 		if self.run_opts.get("show_prompt", False):
 			show_mode = self.mode or "attack"
 			prompt = get_system_prompt(show_mode, workspace_path=str(self.reports_folder), backend=self.backend)
 			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
 			console.print(prompt, highlight=False, soft_wrap=True)
+			return
+
+		# Verify model is configured and reachable
+		yield from self._verify_model()
+		if not self.model:
 			return
 
 		# Resume session
