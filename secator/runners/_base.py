@@ -90,7 +90,14 @@ class Runner:
 	# Run duplicate check
 	enable_duplicate_check = True
 
-	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}, drivers=[]):
+	def __init__(self, config, inputs=None, results=None, run_opts=None, hooks=None, validators=None, context=None, drivers=None):
+		inputs = [] if inputs is None else inputs
+		results = [] if results is None else results
+		run_opts = {} if run_opts is None else run_opts
+		hooks = {} if hooks is None else hooks
+		validators = {} if validators is None else validators
+		context = {} if context is None else context
+		drivers = [] if drivers is None else drivers
 		# Runner config
 		self.serialize_config = run_opts.get('serialize_config', True)
 		self.config = self._process_config(config)

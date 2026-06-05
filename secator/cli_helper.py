@@ -280,7 +280,7 @@ def register_runner(cli_endpoint, config):
 		# Build driver instances from driver names
 		driver_instances = []
 		driver_names = driver.split(',') if driver else []
-		driver_names = list(dict.fromkeys(CONFIG.drivers.defaults + driver_names))
+		driver_names = list(dict.fromkeys((CONFIG.drivers.defaults or []) + driver_names))
 		supported_drivers = get_available_drivers()
 		context['drivers'] = []
 		for driver_name in driver_names:

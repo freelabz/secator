@@ -2,6 +2,7 @@ import warnings
 
 from pathlib import Path
 from time import time
+from uuid import uuid4
 
 from secator.config import CONFIG
 from secator.drivers._base import Driver
@@ -42,6 +43,11 @@ class GCSDriver(Driver):
 	def check(self) -> bool:
 		return bool(self.bucket_name)
 
+	def _upload_and_set_field(self, item, field, source_file, blob_name):
+		"""Upload blob and set field on item after successful upload."""
+		self.upload_blob(self.bucket_name, source_file, blob_name)
+		setattr(item, field, f'gs://{self.bucket_name}/{blob_name}')
+
 	def on_item(self, runner, item):
 		if item._type not in ITEMS_TO_SEND:
 			return item
@@ -55,11 +61,11 @@ class GCSDriver(Driver):
 				if not path.exists():
 					continue
 				ext = path.suffix
-				blob_name = f'{item._uuid}_{k}{ext}'
-				t = Thread(target=self.upload_blob, args=(self.bucket_name, v, blob_name))
+				item_id = getattr(item, '_uuid', None) or uuid4().hex
+				blob_name = f'{item_id}_{k}{ext}'
+				t = Thread(target=self._upload_and_set_field, args=(item, k, v, blob_name))
 				t.start()
 				runner.threads.append(t)
-				setattr(item, k, f'gs://{self.bucket_name}/{blob_name}')
 		return item
 
 	def upload_blob(self, bucket_name, source_file_name, destination_blob_name):

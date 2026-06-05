@@ -41,7 +41,12 @@ def _make_request(method, endpoint, data=None, api_url=None, api_key=None, api_h
 		verify=force_ssl,
 		timeout=api_timeout
 	)
-	result = response.json()
+	result = {}
+	if response.content:
+		try:
+			result = response.json()
+		except ValueError:
+			result = {}
 	debug('API response', sub='drivers.api', verbose=True, obj=result)
 	if not response.ok and result.get('detail'):
 		console.print(Error(message=f'API error: {result["detail"]}'))
@@ -152,7 +157,9 @@ class ApiDriver(Driver):
 		update = runner.toDict()
 		chunk = update.get('chunk')
 		_id = runner.context.get(f'{runner_type}_chunk_id') if chunk else runner.context.get(f'{runner_type}_id')
-		workspace_name = self.get_workspace_name(runner.context.get('workspace_id'))
+		workspace_name = runner.context.get('workspace_name')
+		if workspace_name is None:
+			workspace_name = self.get_workspace_name(runner.context.get('workspace_id'))
 		if workspace_name:
 			runner.context['workspace_name'] = workspace_name
 		debug(
@@ -204,7 +211,9 @@ class ApiDriver(Driver):
 		in_api = update.get('_context', {}).get('api', False)
 		_type = item._type
 		_uuid = item._uuid if hasattr(item, '_uuid') else None
-		workspace_name = self.get_workspace_name(runner.context.get('workspace_id'))
+		workspace_name = runner.context.get('workspace_name')
+		if workspace_name is None:
+			workspace_name = self.get_workspace_name(runner.context.get('workspace_id'))
 		if workspace_name:
 			runner.context['workspace_name'] = workspace_name
 			update['_context']['workspace_name'] = workspace_name

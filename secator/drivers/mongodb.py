@@ -11,22 +11,23 @@ from secator.utils import debug, escape_mongodb_url
 
 logger = logging.getLogger(__name__)
 
-_mongodb_client = None
+_mongodb_clients = {}
 
 
-def get_mongodb_client():
-	"""Get or create MongoDB client (module-level singleton, not pickled with driver instances)."""
-	global _mongodb_client
-	if _mongodb_client is None:
+def get_mongodb_client(url=None):
+	"""Get or create MongoDB client (module-level singleton per URL, not pickled with driver instances)."""
+	global _mongodb_clients
+	resolved_url = escape_mongodb_url(url or CONFIG.addons.mongodb.url)
+	if resolved_url not in _mongodb_clients:
 		import pymongo
-		_mongodb_client = pymongo.MongoClient(
-			escape_mongodb_url(CONFIG.addons.mongodb.url),
+		_mongodb_clients[resolved_url] = pymongo.MongoClient(
+			resolved_url,
 			maxPoolSize=CONFIG.addons.mongodb.max_pool_size,
 			serverSelectionTimeoutMS=CONFIG.addons.mongodb.server_selection_timeout_ms,
 			connect=False,
 			tz_aware=True
 		)
-	return _mongodb_client
+	return _mongodb_clients[resolved_url]
 
 
 def get_runner_dbg(runner):
@@ -244,7 +245,7 @@ class MongoDBDriver(Driver):
 		return bool(self.url)
 
 	def update_runner(self, runner):
-		client = get_mongodb_client()
+		client = get_mongodb_client(self.url)
 		db = client.main
 		type = runner.config.type
 		collection = f'{type}s'
@@ -273,7 +274,7 @@ class MongoDBDriver(Driver):
 		if type(item) not in OUTPUT_TYPES:
 			return item
 		start_time = time.time()
-		client = get_mongodb_client()
+		client = get_mongodb_client(self.url)
 		db = client.main
 		update = item.toDict()
 		_type = item._type
