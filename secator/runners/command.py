@@ -60,6 +60,9 @@ class Command(Runner):
 	cwd = None
 	cwd_isolated = False
 
+	# Extra environment variables for subprocess
+	extra_env = {}
+
 	# Output encoding
 	encoding = 'utf-8'
 
@@ -526,7 +529,7 @@ class Command(Runner):
 				os.makedirs(self.cwd, exist_ok=True)
 
 			# Run the command using subprocess
-			env = os.environ
+			env = {**os.environ, **self.extra_env}
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
