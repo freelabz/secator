@@ -145,7 +145,7 @@ class Runner:
 		# Runner print opts
 		self.print_item = self.run_opts.get('print_item', False) and not self.dry_run
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
-		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
+		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input
 		self.print_start = self.run_opts.get('print_start', False) and not self.dry_run  # noqa: E501
 		self.print_end = self.run_opts.get('print_end', False) and not self.dry_run  # noqa: E501
 		self.print_target = self.run_opts.get('print_target', False) and not self.dry_run and not self.has_parent
