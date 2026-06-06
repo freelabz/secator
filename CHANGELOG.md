@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.34.0](https://github.com/freelabz/secator/compare/v0.33.0...v0.34.0) (2026-06-06)
+
+
+### Features
+
+* **config:** add strategy flag to Config.set for list/dict append and remove ([#1129](https://github.com/freelabz/secator/issues/1129)) ([366df28](https://github.com/freelabz/secator/commit/366df286b04d6f5730106c403d53694d29729827))
+* dynamic driver and exporter loading ([#1116](https://github.com/freelabz/secator/issues/1116)) ([44ac519](https://github.com/freelabz/secator/commit/44ac519b3c59f6856e817675fbbc3b3b7ea92e87))
+* **output_types:** add epss_score, impact, remediation to Vulnerability type ([#1115](https://github.com/freelabz/secator/issues/1115)) ([4237cdc](https://github.com/freelabz/secator/commit/4237cdcac69a4671762a883efe3c29df10187bb3))
+* **runner:** support chunking for python runner ([#1113](https://github.com/freelabz/secator/issues/1113)) ([037df3e](https://github.com/freelabz/secator/commit/037df3ec7a95b0640a9e0893266abed349793ebb))
+
+
+### Bug Fixes
+
+* **cli:** driver order not respected in cli ([#1123](https://github.com/freelabz/secator/issues/1123)) ([f712990](https://github.com/freelabz/secator/commit/f712990df8bc3bdc5a86bf432dc3321e00c41322))
+* dynamic driver hooks not working in worker mode ([#1126](https://github.com/freelabz/secator/issues/1126)) ([f1f0ca2](https://github.com/freelabz/secator/commit/f1f0ca2d66460d933a3af1de4133aff1075dd16a))
+* **markdown:** left-aligned markdown headers ([#1068](https://github.com/freelabz/secator/issues/1068)) ([798de6e](https://github.com/freelabz/secator/commit/798de6e1d3c5604b0292044f124f4efaf5b1b965))
+* **runner:** show task source name even when output is piped ([#1121](https://github.com/freelabz/secator/issues/1121)) ([876819a](https://github.com/freelabz/secator/commit/876819ad5ec4cd223a0913f458bf05ba65f4849a))
+
 ## [0.33.0](https://github.com/freelabz/secator/compare/v0.32.0...v0.33.0) (2026-06-02)
 
 
