@@ -415,7 +415,10 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			_context=context
 		)
 		for result in results:
-			result["_context"].update(context)
+			if isinstance(result, OutputType):
+				result._context.update(context)
+			else:
+				result["_context"].update(context)
 			yield result
 
 	except Exception as e:
@@ -425,7 +428,7 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			extra_data={"results": "failed", "limit": limit},
 			_context=context
 		)
-		yield Error.from_exception(e)
+		yield Error.from_exception(e, _context=context)
 
 
 def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
