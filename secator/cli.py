@@ -1020,6 +1020,28 @@ def report():
 	pass
 
 
+# Operators / tokens that mark a string as a filter expression rather than natural language.
+_QUERY_EXPR_OPERATORS = ('==', '!=', '<=', '>=', '~=', '<', '>', '&&', '||')
+_QUERY_EXPR_WORD_OPERATORS = (' and ', ' or ', ' in ')
+
+
+def _looks_like_query_expr(value):
+	"""Return True if VALUE looks like a report filter expression (vs natural language).
+
+	Heuristics (any match => expression):
+	  - contains a comparison/logical operator (==, !=, <, >, <=, >=, ~=, &&, ||)
+	  - contains a word operator surrounded by spaces ( and / or / in )
+	  - matches a bare dotted field-access path like 'word.word' (e.g. extra_data.published)
+	"""
+	if not value:
+		return False
+	if any(op in value for op in _QUERY_EXPR_OPERATORS):
+		return True
+	if any(op in value for op in _QUERY_EXPR_WORD_OPERATORS):
+		return True
+	return bool(re.fullmatch(r'\w+(?:\.\w+)+', value.strip()))
+
+
 def _apply_format(results, fmt):
 	"""Apply a --format string to report results, returning formatted strings grouped by type.
 
