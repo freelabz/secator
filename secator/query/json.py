@@ -1,6 +1,5 @@
 # secator/query/json.py
 
-import json
 import json_stream
 import re
 from pathlib import Path
@@ -13,12 +12,12 @@ from secator.utils import debug
 
 
 def _collect(obj):
-    """Recursively convert a json_stream transient object to a standard Python type."""
-    if hasattr(obj, 'items'):
-        return {k: _collect(v) for k, v in obj.items()}
-    elif hasattr(obj, '__iter__') and not isinstance(obj, str):
-        return [_collect(v) for v in obj]
-    return obj
+	"""Recursively convert a json_stream transient object to a standard Python type."""
+	if hasattr(obj, 'items'):
+		return {k: _collect(v) for k, v in obj.items()}
+	elif hasattr(obj, '__iter__') and not isinstance(obj, str):
+		return [_collect(v) for v in obj]
+	return obj
 
 
 OPERATORS = {
@@ -146,7 +145,11 @@ class JsonBackend(QueryBackend):
 										yield item_dict
 							except KeyError:
 								pass
-					except (json.JSONDecodeError, IOError) as e:
+					# json_stream parses lazily, so malformed JSON surfaces as a
+					# ValueError raised *during* iteration above (json.JSONDecodeError
+					# is itself a ValueError subclass). Catch ValueError to keep the
+					# query fail-open: a corrupt report.json is skipped, not fatal.
+					except (ValueError, IOError) as e:
 						debug(f'Error loading {report_file}: {e}', sub='query.json')
 						continue
 

@@ -175,6 +175,32 @@ class TestJsonBackend(unittest.TestCase):
 		count = backend.count({'_type': 'vulnerability'})
 		self.assertEqual(count, 2)
 
+	def test_json_backend_skips_corrupt_report(self):
+		"""A corrupt report.json must be skipped (fail-open), not crash search/count.
+
+		json_stream parses lazily, so malformed JSON raises a ValueError *during*
+		iteration. This regression test ensures that error is caught and the valid
+		report is still returned.
+		"""
+		from pathlib import Path
+		from secator.query.json import JsonBackend
+
+		# Write a second task with an invalid (truncated) report.json
+		bad_dir = Path(self.temp_dir) / self.workspace_id / 'tasks' / '1'
+		bad_dir.mkdir(parents=True)
+		with open(bad_dir / 'report.json', 'w') as f:
+			# Malformed JSON: json_stream raises a bare ValueError (NOT a
+			# json.JSONDecodeError) lazily during iteration of this report.
+			f.write('{"results": {"vulnerability": [ }}}')
+
+		backend = JsonBackend(workspace_id=self.workspace_id, config={'reports_dir': self.temp_dir})
+
+		# Search and count must not raise and must still return the valid findings
+		results = backend.search({'_type': 'vulnerability'})
+		self.assertEqual(len(results), 2)
+		count = backend.count({'_type': 'vulnerability'})
+		self.assertEqual(count, 2)
+
 	def test_json_backend_injects_context_from_path(self):
 		"""Findings from tasks/{id}/report.json should have _context.task_id injected."""
 		results = self.backend.search({'_context.task_id': self.task_id})
