@@ -39,6 +39,11 @@ class TestLooksLikeQueryExpr(unittest.TestCase):
 			"vulnerability.severity == 'high' and vulnerability.confidence == 'high'",
 			"severity in ['high', 'critical']",
 			"extra_data.published",
+			# bare output type names
+			"url",
+			"vulnerability",
+			"domain",
+			"port",
 		]
 		for expr in exprs:
 			with self.subTest(expr=expr):
@@ -68,7 +73,7 @@ class TestRunAiChat(unittest.TestCase):
 			result = runner.invoke(cli, ['query', '-ws', 'myws', 'Analyze my workspace data'])
 		self.assertIsNone(result.exception, str(result.exception))
 		self.assertEqual(result.exit_code, 0)
-		self.assertTrue(mock_cb.called)
+		mock_cb.assert_called_once()
 		_, kwargs = mock_cb.call_args
 		self.assertEqual(kwargs.get('prompt'), 'Analyze my workspace data')
 		self.assertEqual(kwargs.get('mode'), 'chat')
@@ -96,7 +101,7 @@ class TestQueryDispatch(unittest.TestCase):
 			captured['results'] = report_self.data['results']
 
 		with mock.patch('secator.query.json.CONFIG') as mock_cfg, \
-				mock.patch('secator.report.Report.send', capture_send):
+			mock.patch('secator.report.Report.send', capture_send):
 			mock_cfg.dirs.reports = Path(self.temp_dir)
 			result = self.cli_runner.invoke(cli, args)
 		return result, captured

@@ -269,7 +269,7 @@ secator config unset queries.critical_vulns
 
 ```sh
 # Run a saved query, formatting the output
-secator query critical_vulns -ws secator.cloud -f "vulnerability.matched_at"
+secator query critical_vulns -ws secator.cloud -f "{vulnerability.matched_at}"
 
 # Run a raw filter expression directly
 secator query "vulnerability.severity == 'high' && vulnerability.tags ~= 'exploitable'"

@@ -1073,6 +1073,7 @@ def _looks_like_query_expr(value):
 	  - contains a comparison/logical operator (==, !=, <, >, <=, >=, ~=, &&, ||)
 	  - contains a word operator surrounded by spaces ( and / or / in )
 	  - matches a bare dotted field-access path like 'word.word' (e.g. extra_data.published)
+	  - is a bare known output type name (url, vulnerability, domain, etc.)
 	"""
 	if not value:
 		return False
@@ -1080,7 +1081,10 @@ def _looks_like_query_expr(value):
 		return True
 	if any(op in value for op in _QUERY_EXPR_WORD_OPERATORS):
 		return True
-	return bool(re.fullmatch(r'\w+(?:\.\w+)+', value.strip()))
+	if re.fullmatch(r'\w+(?:\.\w+)+', value.strip()):
+		return True
+	from secator.output_types import OUTPUT_TYPES
+	return value.strip() in {cls.get_name() for cls in OUTPUT_TYPES}
 
 
 def _apply_format(results, fmt):
