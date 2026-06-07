@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 
 from secator.config import CONFIG
 from secator.decorators import task
@@ -8,7 +9,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROVIDER,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
 							   SEVERITY, TAGS, THREADS, TIMEOUT,
-							   URL, USER_AGENT)
+							   URL, USER_AGENT, HOST, IP)
 from secator.output_types import Tag, Vulnerability, Info, Error
 from secator.tasks._categories import VulnHttp
 from secator.installer import parse_version
@@ -18,7 +19,7 @@ from secator.installer import parse_version
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
 	cmd = 'wpscan --force --verbose'
-	input_types = [URL]
+	input_types = [URL, HOST, IP]
 	output_types = [Vulnerability, Tag]
 	tags = ['vuln', 'scan', 'wordpress']
 	input_flag = '--url'
@@ -71,13 +72,12 @@ class wpscan(VulnHttp):
 			PROVIDER: 'wpscan',
 		},
 	}
-	install_pre = {
+	install_version = 'v3.8.28'
+	install_pre_cmd = {
 		'apt': ['make', 'kali:libcurl4t64', 'libffi-dev'],
 		'pacman': ['make', 'ruby-erb'],
 		'*': ['make']
 	}
-	install_github_handle = 'wpscanteam/wpscan'
-	install_version = 'v3.8.28'
 	install_cmd = f'gem install wpscan -v [install_version_strip] --user-install -n {CONFIG.dirs.bin}'
 	install_post = {
 		'kali': (
@@ -85,18 +85,20 @@ class wpscan(VulnHttp):
 			f'gem install nokogiri --user-install -n {CONFIG.dirs.bin} --platform=ruby'
 		)
 	}
+	install_github_bin = False
+	github_handle = 'wpscanteam/wpscan'
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def on_init(self):
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
-			output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
+			output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
 		self.output_path = output_path
-		self.cmd += f' -o {self.output_path}'
+		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -142,21 +144,24 @@ class wpscan(VulnHttp):
 				number = version['number']
 				latest_version = main_theme.get('latest_version') or 'unknown'
 				yield Tag(
-					name=f'Wordpress theme - {slug} {number}',
+					category='info',
+					name='wordpress_theme',
 					match=target,
+					value=slug + ':' + number,
 					extra_data={
 						'url': location,
 						'latest_version': latest_version
 					}
 				)
-				outdated = latest_version and parse_version(number) < parse_version(latest_version)
+				outdated = parse_version(number) < parse_version(latest_version) if latest_version != 'unknown' and number else False  # noqa: E501
 				if outdated:
 					yield Vulnerability(
 						matched_at=target,
 						name=f'Wordpress theme - {slug} {number} outdated',
 						description=f'The wordpress theme {slug} is outdated, consider updating to the latest version {latest_version}',
 						confidence='high',
-						severity='info'
+						severity='info',
+						tags=['wordpress', 'wordpress_theme']
 					)
 
 		# Interesting findings
@@ -174,19 +179,24 @@ class wpscan(VulnHttp):
 				number = version['number']
 				latest_version = data.get('latest_version') or 'unknown'
 				yield Tag(
-					name=f'Wordpress plugin - {slug} {number}',
+					category='info',
+					name='wordpress_plugin',
 					match=target,
+					value=slug + ':' + number,
 					extra_data={
 						'url': location,
+						'name': slug,
+						'version': number,
 						'latest_version': latest_version
 					}
 				)
-				outdated = latest_version and parse_version(number) < parse_version(latest_version)
+				outdated = parse_version(number) < parse_version(latest_version) if latest_version != 'unknown' and number else False  # noqa: E501
 				if outdated:
 					yield Vulnerability(
 						matched_at=target,
 						name=f'Wordpress plugin - {slug} {number} outdated',
 						description=f'The wordpress plugin {slug} is outdated, consider updating to the latest version {latest_version}.',
 						confidence='high',
-						severity='info'
+						severity='info',
+						tags=['wordpress', 'wordpress_plugin']
 					)

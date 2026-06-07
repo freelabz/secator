@@ -7,7 +7,7 @@ from rich.panel import Panel
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
-								 RETRIES, THREADS, TIMEOUT, USER_AGENT)
+								 RETRIES, THREADS, TIMEOUT, USER_AGENT, HOST_PORT, IP)
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class msfconsole(VulnMulti):
 	"""CLI to access and work with the Metasploit Framework."""
 	cmd = 'msfconsole --quiet'
-	input_types = [HOST]
+	input_types = [HOST, HOST_PORT, IP]
 	output_types = []
 	tags = ['exploit', 'attack']
 	version_flag = OPT_NOT_SUPPORTED
@@ -44,12 +44,12 @@ class msfconsole(VulnMulti):
 	}
 	encoding = 'ansi'
 	ignore_return_code = True
-	install_pre = {
+	install_version = '6.4.59'
+	install_cmd_pre = {
 		'apt|apk': ['libpq-dev', 'libpcap-dev', 'libffi-dev', 'g++', 'make'],
 		'pacman': ['ruby-erb', 'postgresql-libs', 'make'],
 		'yum|zypper': ['postgresql-devel', 'make'],
 	}
-	install_version = '6.4.59'
 	install_cmd = (
 		f'git clone --depth 1 --single-branch -b [install_version] https://github.com/rapid7/metasploit-framework.git {CONFIG.dirs.share}/metasploit-framework_[install_version] || true && '  # noqa: E501
 		f'cd {CONFIG.dirs.share}/metasploit-framework_[install_version] && '

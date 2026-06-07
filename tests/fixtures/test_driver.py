@@ -1,0 +1,5 @@
+HOOKS = {
+    'Task': {},
+    'Workflow': {},
+    'Scan': {},
+}

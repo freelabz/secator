@@ -12,7 +12,7 @@ class subfinder(ReconDns):
 	cmd = 'subfinder -cs'
 	input_types = [HOST]
 	output_types = [Subdomain]
-	tags = ['dns', 'recon']
+	tags = ['dns', 'recon', 'passive']
 	file_flag = '-dL'
 	input_flag = '-d'
 	json_flag = '-json'
@@ -35,14 +35,20 @@ class subfinder(ReconDns):
 	}
 	install_version = 'v2.7.0'
 	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@[install_version]'
-	install_github_handle = 'projectdiscovery/subfinder'
+	github_handle = 'projectdiscovery/subfinder'
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def validate_item(self, item):
 		if isinstance(item, dict):
 			return item['input'] != 'localhost'
 		return True
+
+	@staticmethod
+	def on_item(self, item):
+		if isinstance(item, Subdomain):
+			item.tags = ['passive']
+		return item

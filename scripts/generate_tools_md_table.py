@@ -26,7 +26,7 @@ def get_tools_data():
         'searchsploit': 'https://gitlab.com/exploit-database/exploitdb'
     }
     for task in discover_tasks():
-        url = task.install_github_handle
+        url = getattr(task, 'github_handle', None)
         if url:
             url = f'https://github.com/{url}'
         else:
@@ -61,15 +61,17 @@ def generate_tools_table_markdown(tools_data):
 
     for tool in tools_data:
         name = tool.get('name', 'N/A')
-        url = tool.get('url', '#') # Default to '#' if URL is missing
+        url = tool.get('url')
         description = tool.get('description', '')
         category = tool.get('category', '')
 
         # Format columns
-        name_md = f"[{name}]({url})"
-        # Pad based on the *visible* length of the markdown link for alignment
-        # This is an approximation, perfect alignment is tricky with variable link lengths
-        name_padded = name_md.ljust(name_col_width + len(name_md) - len(name))
+        if url:
+            name_md = f"[{name}]({url})"
+            name_padded = name_md.ljust(name_col_width + len(name_md) - len(name))
+        else:
+            name_padded = name.ljust(name_col_width) # Pad based on the *visible* length of the markdown link for alignment
+            # This is an approximation, perfect alignment is tricky with variable link lengths
 
         desc_padded = description.ljust(desc_col_width)
 

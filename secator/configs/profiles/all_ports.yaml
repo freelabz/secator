@@ -1,0 +1,8 @@
+type: profile
+name: all_ports
+category: network
+description: "Scan all ports"
+enforce: true
+opts:
+    ports: "-"
+    host_recon_nmap_ports: "-"

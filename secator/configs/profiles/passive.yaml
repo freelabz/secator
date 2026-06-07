@@ -1,0 +1,12 @@
+type: profile
+name: passive
+category: general
+description: "Passive scanning only (no requests to targets)"
+enforce: true
+opts:
+  passive: True
+  domain_recon_passive: True
+  subdomain_recon_passive: True
+  host_recon_passive: True
+  url_crawl_passive: True
+  url_vuln_passive: True
