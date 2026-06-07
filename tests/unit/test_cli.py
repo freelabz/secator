@@ -367,6 +367,13 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 0
 		assert 'Profile name' in result.output
 
+	def test_profile_list_command_aliases(self):
+		for alias in ['p', 'pf', 'profiles']:
+			result = self.runner.invoke(cli, [alias, 'list'])
+			assert not result.exception, f'alias {alias!r} raised {result.exception}'
+			assert result.exit_code == 0, f'alias {alias!r} exited {result.exit_code}'
+			assert 'Profile name' in result.output, f'alias {alias!r} output missing table'
+
 	def test_alias_list_command(self):
 		result = self.runner.invoke(cli, ['alias', 'list'])
 		assert not result.exception

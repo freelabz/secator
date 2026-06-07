@@ -888,7 +888,7 @@ def workspace_delete(name, driver, yes):
 # ----------#
 
 
-@cli.group(aliases=['p', 'profiles'])
+@cli.group(aliases=['p', 'pf', 'profiles'])
 @click.pass_context
 def profile(ctx):
 	"""Profiles"""
