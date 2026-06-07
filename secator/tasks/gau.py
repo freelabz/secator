@@ -21,7 +21,7 @@ class gau(HttpCrawler):
 	cmd = 'gau --verbose'
 	input_types = [URL, HOST]
 	output_types = [Url, Subdomain]
-	tags = ['pattern', 'scan']
+	tags = ['url', 'crawl', 'passive']
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'
@@ -60,12 +60,13 @@ class gau(HttpCrawler):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def on_init(self):
 		self.max_param_occurrences = self.get_opt_value('max_param_occurrences')
 		self.seen_params = defaultdict(lambda: defaultdict(int))
+		self.subdomains = []
 
 	@staticmethod
 	def on_line(self, line):
@@ -91,7 +92,11 @@ class gau(HttpCrawler):
 			if self.seen_params[base_url][param] > int(self.max_param_occurrences):
 				return
 		if self.get_opt_value('subs'):
-			domain = extract_domain_info(parsed_url.netloc, domain_only=True)
+			domain = extract_domain_info(parsed_url.hostname, domain_only=True)
 			if domain:
-				yield Subdomain(host=parsed_url.netloc, domain=domain)
-		yield Url(url=item['url'], host=parsed_url.netloc)
+				subdomain = Subdomain(host=parsed_url.hostname, domain=domain, tags=['passive'])
+				if subdomain not in self.subdomains:
+					self.subdomains.append(subdomain)
+					yield subdomain
+		else:
+			yield Url(url=item['url'], host=parsed_url.hostname, tags=['passive'])

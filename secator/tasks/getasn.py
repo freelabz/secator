@@ -40,10 +40,10 @@ class getasn(Command):
 	opt_value_map = {
 		DELAY: lambda x: str(x) + 's' if x else None,
 	}
-	install_version = 'latest'
-	install_cmd = 'go install github.com/Vulnpire/getasn@[install_version]'
-	install_github_bin = False
-	github_handle = 'Vulnpire/getasn'
+	install_version = 'v1.0.0'
+	# fork of Vulnpire/getasn, upstream PR: https://github.com/Vulnpire/getasn/pull/1
+	install_cmd = 'go install github.com/freelabz/getasn@[install_version]'
+	github_handle = 'freelabz/getasn'
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = False
@@ -54,7 +54,7 @@ class getasn(Command):
 			category='info',
 			name='asn',
 			match=self.inputs[0],
-			extra_data={'content': line.strip()}
+			value=line.strip(),
 		)
 		if tag not in self.self_results:
 			yield tag

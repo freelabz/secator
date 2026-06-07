@@ -14,17 +14,23 @@ runs:
       python-version: ${{ inputs.python-version }}
 
   - name: Setup golang
-    uses: actions/setup-go@v4
+    uses: actions/setup-go@v5
     with:
       go-version: 1.24.x
 
   - name: Install secator with pipx
     shell: bash
-    run: pipx install -e .[dev]
+    run: pipx install -e .[dev,ai]
 
   - name: Add secator to $PATH
     shell: bash
     run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+  - name: Add pipx venv bin to $PATH (for safecmd/shfmt)
+    shell: bash
+    run: |
+      PIPX_VENVS=$(pipx environment --value PIPX_LOCAL_VENVS 2>/dev/null || echo "${HOME}/.local/share/pipx/venvs")
+      echo "${PIPX_VENVS}/secator/bin" >> "$GITHUB_PATH"
 
   - name: Add cargo to $PATH
     shell: bash

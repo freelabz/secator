@@ -48,9 +48,9 @@ class maigret(ReconUser):
 	# 	'yum|zypper': ['cairo-devel'],
 	# 	'*': ['cairo']
 	# }
-	install_cmd = 'pipx install maigret==[install_version] --force'
+	install_cmd = 'pipx install git+https://github.com/freelabz/maigret.git@main --force'
 	socks5_proxy = True
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def on_init(self):

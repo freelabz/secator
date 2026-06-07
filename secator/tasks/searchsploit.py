@@ -4,7 +4,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
 								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED, STRING, SLUG)
-from secator.output_types import Exploit
+from secator.output_types import Exploit, Info
 from secator.runners import Command
 from secator.serializers import JSONSerializer
 
@@ -49,7 +49,7 @@ class searchsploit(Command):
 	proxychains = False
 	proxy_socks5 = False
 	proxy_http = False
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def tags_extractor(item):
@@ -65,6 +65,7 @@ class searchsploit(Command):
 
 	@staticmethod
 	def before_init(self):
+		self._targets_info_yielded = False
 		if len(self.inputs) == 0:
 			return
 		_in = self.inputs[0]
@@ -76,8 +77,18 @@ class searchsploit(Command):
 		self.inputs[0] = self.inputs[0].replace('httpd', '').replace('/', ' ')
 
 	@staticmethod
+	def on_json_loaded(self, item):
+		matched_ats = self.matched_at.split(',') if self.matched_at else [self.inputs[0] if self.inputs else '']
+		if not self._targets_info_yielded:
+			targets_str = ', '.join(matched_ats)
+			yield Info(message=f'Targets: {targets_str}')
+			self._targets_info_yielded = True
+		for matched_at in matched_ats:
+			yield {**item, MATCHED_AT: matched_at}
+
+	@staticmethod
 	def on_item_pre_convert(self, item):
-		if self.matched_at:
+		if self.matched_at and MATCHED_AT not in item:
 			item[MATCHED_AT] = self.matched_at
 		return item
 
@@ -105,4 +116,7 @@ class searchsploit(Command):
 			# 	self._print(f'[bold red]{item.name} ({item.reference}) did not quite match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501
 		input_tag = '-'.join(self.inputs[0].replace('\'', '').split(' '))
 		item.tags = [input_tag] + item.tags
+		item.matched_at = item.matched_at or (self.matched_at if self.matched_at else self.inputs[0] if self.inputs else '')
+		if self.inputs:
+			item.extra_data['service_name'] = self.inputs[0]
 		return item
