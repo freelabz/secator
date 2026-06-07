@@ -1,8 +1,25 @@
 """Unit tests for the `secator query` command and its dispatch helpers."""
 
+import json
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
+
 from click.testing import CliRunner
+
+WS = 'query_ws'
+CRIT = {
+	'_type': 'vulnerability', 'name': 'SQLi', 'severity': 'critical',
+	'matched_at': 'http://x/login', 'is_false_positive': False,
+	'_context': {'workspace_id': WS, 'workspace_duplicate': False},
+}
+MED = {
+	'_type': 'vulnerability', 'name': 'XSS', 'severity': 'medium',
+	'matched_at': 'http://x/search', 'is_false_positive': False,
+	'_context': {'workspace_id': WS, 'workspace_duplicate': False},
+}
 
 
 class TestLooksLikeQueryExpr(unittest.TestCase):
@@ -56,3 +73,47 @@ class TestRunAiChat(unittest.TestCase):
 		self.assertEqual(kwargs.get('prompt'), 'Analyze my workspace data')
 		self.assertEqual(kwargs.get('mode'), 'chat')
 		self.assertEqual(kwargs.get('workspace'), 'myws')
+
+
+class TestQueryDispatch(unittest.TestCase):
+
+	def setUp(self):
+		self.cli_runner = CliRunner()
+		self.temp_dir = tempfile.mkdtemp()
+		task_dir = Path(self.temp_dir) / WS / 'tasks' / '1'
+		task_dir.mkdir(parents=True)
+		with open(task_dir / 'report.json', 'w') as f:
+			json.dump({'info': {'name': 't'}, 'results': {'vulnerability': [CRIT.copy(), MED.copy()]}}, f)
+
+	def tearDown(self):
+		shutil.rmtree(self.temp_dir)
+
+	def _invoke(self, args):
+		from secator.cli import cli
+		captured = {}
+
+		def capture_send(report_self):
+			captured['results'] = report_self.data['results']
+
+		with mock.patch('secator.query.json.CONFIG') as mock_cfg, \
+				mock.patch('secator.report.Report.send', capture_send):
+			mock_cfg.dirs.reports = Path(self.temp_dir)
+			result = self.cli_runner.invoke(cli, args)
+		return result, captured
+
+	def test_named_query(self):
+		from secator.config import CONFIG
+		with mock.patch.dict(CONFIG.queries, {'crit': "vulnerability.severity == 'critical'"}, clear=False):
+			result, captured = self._invoke(['query', 'crit', '-ws', WS, '--driver', 'local'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi'])
+
+	def test_raw_expression(self):
+		result, captured = self._invoke(
+			['query', "vulnerability.severity == 'medium'", '-ws', WS, '--driver', 'local'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(sorted(v['name'] for v in vulns), ['XSS'])
