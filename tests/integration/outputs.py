@@ -35,6 +35,13 @@ OUTPUTS_TASKS = {
             _source='arjun'
         )
     ],
+    'asnmap': [
+        Subdomain(
+            host='hackerone.com',
+            domain='hackerone.com',
+            _source='asnmap'
+        )
+    ],
 	'bup': [
         Url(
             url='http://localhost:3000/ftp/coupons_2013.md.bak',

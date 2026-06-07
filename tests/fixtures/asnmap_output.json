@@ -1,0 +1,23 @@
+[
+    {
+        "timestamp": "2023-01-20T10:41:47.792815619Z",
+        "input": "hackerone.com",
+        "as_number": "AS13335",
+        "as_name": "CLOUDFLARENET",
+        "as_country": "US",
+        "as_range": [
+            "104.16.0.0/14",
+            "104.20.0.0/16"
+        ]
+    },
+    {
+        "timestamp": "2023-01-20T10:41:48.123456789Z",
+        "input": "8.8.8.8",
+        "as_number": "AS15169",
+        "as_name": "GOOGLE",
+        "as_country": "US",
+        "as_range": [
+            "8.8.8.0/24"
+        ]
+    }
+]
