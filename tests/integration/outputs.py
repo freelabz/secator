@@ -29,6 +29,23 @@ OUTPUTS_CHECKS = {
 }
 
 OUTPUTS_TASKS = {
+    'amass': [
+        Subdomain(
+            host='api.example.com',
+            domain='example.com',
+            _source='amass'
+        ),
+        Ip(
+            ip='93.184.216.34',
+            host='api.example.com',
+            _source='amass'
+        ),
+        Ip(
+            ip='2606:2800:220:1:248:1893:25c8:1946',
+            host='api.example.com',
+            _source='amass'
+        ),
+    ],
     'arjun': [
         Url(
             url='http://testphp.vulnweb.com/hpp',

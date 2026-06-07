@@ -1,6 +1,9 @@
+import validators
+
 from secator.decorators import task
 from secator.definitions import HOST
-from secator.output_types import Tag
+from secator.output_types import Ip, Subdomain
+from secator.output_types.ip import IpProtocol
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import ReconDns
 
@@ -10,7 +13,7 @@ class amass(ReconDns):
 	"""Amass is a subdomain enumeration tool that can be used to find subdomains of a domain."""
 	cmd = 'amass enum -nocolor -v'
 	input_types = [HOST]
-	output_types = [Tag]
+	output_types = [Subdomain, Ip]
 	tags = ['subdomain', 'enum']
 	file_flag = '-d'
 	input_flag = '-d'
@@ -67,3 +70,33 @@ class amass(ReconDns):
 	install_version = 'v5.0.1'
 	install_cmd = 'go install -v github.com/owasp-amass/amass/v5/cmd/amass@[install_version]'
 	install_github_handle = 'owasp-amass/amass'
+
+	@staticmethod
+	def on_json_loaded(self, item):
+		"""Map amass enum JSON output to Subdomain and Ip output types.
+
+		amass `enum -json` emits one JSON object per discovered name, e.g.:
+			{"name": "www.example.com", "domain": "example.com",
+			 "addresses": [{"ip": "93.184.216.34", "cidr": "93.184.216.0/24"}],
+			 "tag": "dns", "sources": ["DNS"]}
+		"""
+		host = item.get('name')
+		domain = item.get('domain')
+		if not host:
+			return
+		sources = item.get('sources', [])
+		yield Subdomain(
+			host=host,
+			domain=domain or host,
+			sources=sources,
+		)
+		for address in item.get('addresses', []):
+			ip = address.get('ip')
+			if not ip:
+				continue
+			protocol = IpProtocol.IPv6 if validators.ipv6(ip) else IpProtocol.IPv4
+			yield Ip(
+				ip=ip,
+				host=host,
+				protocol=protocol,
+			)

@@ -1,0 +1,22 @@
+{
+    "name": "api.example.com",
+    "domain": "example.com",
+    "addresses": [
+        {
+            "ip": "93.184.216.34",
+            "cidr": "93.184.216.0/24",
+            "asn": 15133,
+            "desc": "EDGECAST"
+        },
+        {
+            "ip": "2606:2800:220:1:248:1893:25c8:1946",
+            "cidr": "2606:2800:220::/48",
+            "asn": 15133,
+            "desc": "EDGECAST"
+        }
+    ],
+    "tag": "cert",
+    "sources": [
+        "crt.sh"
+    ]
+}
