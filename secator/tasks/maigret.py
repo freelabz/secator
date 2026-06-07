@@ -5,7 +5,7 @@ from secator.decorators import task
 from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, PROXY,
 								 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
 								 TIMEOUT, URL, STRING, SLUG)
-from secator.output_types import UserAccount, Info, Error
+from secator.output_types import UserAccount
 from secator.tasks._categories import ReconUser
 from secator.serializers.file import FileSerializer
 logger = logging.getLogger(__name__)

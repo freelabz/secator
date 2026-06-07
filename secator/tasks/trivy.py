@@ -7,7 +7,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT,
 								PATH, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT, STRING)
-from secator.output_types import Vulnerability, Tag, Info, Error
+from secator.output_types import Vulnerability, Tag, Info
 from secator.tasks._categories import Vuln
 from secator.utils import caml_to_snake
 from secator.rich import console

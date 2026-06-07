@@ -6,10 +6,10 @@ from pathlib import Path
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.runners import Command
-from secator.definitions import (OUTPUT_PATH, PATH)
+from secator.definitions import PATH
 from secator.utils import caml_to_snake
 from secator.serializers import FileSerializer
-from secator.output_types import Tag, Info, Error
+from secator.output_types import Tag, Info
 from secator.rich import console
 
 GITLEAKS_MODES = ['git', 'dir']

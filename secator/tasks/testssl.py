@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime
 
 from secator.config import CONFIG
@@ -8,7 +9,6 @@ from secator.definitions import (PROXY, HOST, USER_AGENT, HEADER, OUTPUT_PATH,
 								CERTIFICATE_STATUS_UNKNOWN, CERTIFICATE_STATUS_TRUSTED, CERTIFICATE_STATUS_REVOKED,
 								TIMEOUT)
 from secator.tasks._categories import Command, OPTS
-from secator.serializers import FileSerializer
 
 
 @task()
