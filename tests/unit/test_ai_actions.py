@@ -4,10 +4,17 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
-from secator.ai.actions import ActionContext, dispatch_action, _handle_follow_up, _handle_shell, _handle_query, _handle_add_finding, _run_runner, _decrypt_dict
-from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
+from secator.definitions import ADDONS_ENABLED
+
+if ADDONS_ENABLED['ai']:
+	from secator.ai.actions import (
+		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
+		_handle_query, _handle_add_finding, _run_runner, _decrypt_dict
+	)
+	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestDecryptDict(unittest.TestCase):
 	"""Tests for _decrypt_dict recursive decryption."""
 
@@ -74,6 +81,7 @@ class TestDecryptDict(unittest.TestCase):
 		encryptor.decrypt.assert_not_called()
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestHandleFollowUp(unittest.TestCase):
 	"""Tests for the _handle_follow_up action handler."""
 
@@ -113,6 +121,7 @@ class TestHandleFollowUp(unittest.TestCase):
 		self.assertEqual(results[0].extra_data['choices'], ['Scan deeper', 'Try SQL injection'])
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestHandleShell(unittest.TestCase):
 	"""Tests for the _handle_shell action handler."""
 
@@ -183,6 +192,7 @@ class TestHandleShell(unittest.TestCase):
 		encryptor.decrypt.assert_called_once_with('nmap ENCRYPTED')
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestHandleQuery(unittest.TestCase):
 	"""Tests for the _handle_query action handler."""
 
@@ -200,7 +210,7 @@ class TestHandleQuery(unittest.TestCase):
 
 		with patch.object(ctx, 'get_query_engine') as mock_get_engine:
 			mock_engine = MagicMock()
-			mock_engine.search.return_value = [{'host': 'a.com', 'port': 80}]
+			mock_engine.search.return_value = [{'host': 'a.com', 'port': 80, '_context': {}}]
 			mock_get_engine.return_value = mock_engine
 
 			results = list(_handle_query({'action': 'query', 'query': {'host': 'a.com'}}, ctx))
@@ -214,8 +224,8 @@ class TestHandleQuery(unittest.TestCase):
 	def test_query_success(self, mock_get_engine):
 		mock_engine = MagicMock()
 		mock_engine.search.return_value = [
-			{'host': 'a.com', 'port': 80, '_type': 'port'},
-			{'host': 'b.com', 'port': 443, '_type': 'port'},
+			{'host': 'a.com', 'port': 80, '_type': 'port', '_context': {}},
+			{'host': 'b.com', 'port': 443, '_type': 'port', '_context': {}},
 		]
 		mock_get_engine.return_value = mock_engine
 		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
@@ -258,6 +268,7 @@ class TestHandleQuery(unittest.TestCase):
 		self.assertEqual(call_args['host'], 'example.com')
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestRunRunner(unittest.TestCase):
 	"""Tests for the _run_runner function."""
 
@@ -300,6 +311,7 @@ class TestRunRunner(unittest.TestCase):
 		self.assertIn('default.com', results[0].message)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestGetQueryEngine(unittest.TestCase):
 	"""Tests for ActionContext.get_query_engine caching and backend selection."""
 
@@ -548,6 +560,7 @@ class TestGetQueryEngine(unittest.TestCase):
 		self.assertIsInstance(engine.backend, MongoDBBackend)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestHandleAddFinding(unittest.TestCase):
 	"""Tests for the _handle_add_finding action handler."""
 
@@ -642,6 +655,51 @@ class TestHandleAddFinding(unittest.TestCase):
 		self.assertEqual(len(results), 2)
 		self.assertIsInstance(results[1], Vulnerability)
 		self.assertEqual(results[1].matched_at, 'http://t.com/search')
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestRunBatch(unittest.TestCase):
+    """Tests for _run_batch parallel execution."""
+
+    def test_run_batch_executes_all_actions(self):
+        from secator.ai.actions import _run_batch, ActionContext
+
+        ctx = ActionContext(targets=["t.com"], model="m", dry_run=True, max_workers=3)
+        actions = [
+            {"action": "shell", "command": "echo a"},
+            {"action": "shell", "command": "echo b"},
+            {"action": "shell", "command": "echo c"},
+        ]
+
+        results = list(_run_batch(actions, ctx))
+
+        # Should have Info + 3x (Info dry run)
+        info_results = [r for r in results if isinstance(r, Info)]
+        self.assertGreaterEqual(len(info_results), 3)
+
+    def test_run_batch_uses_rich_progress(self):
+        from secator.ai.actions import _run_batch, ActionContext
+
+        ctx = ActionContext(targets=["t.com"], model="m", dry_run=True, max_workers=2)
+        actions = [
+            {"action": "shell", "command": "echo a"},
+            {"action": "shell", "command": "echo b"},
+        ]
+
+        results = list(_run_batch(actions, ctx))
+
+        # Should have dry run Info results (no batch Info since Rich progress handles display)
+        info_results = [r for r in results if isinstance(r, Info)]
+        self.assertGreaterEqual(len(info_results), 2)
+
+    def test_run_batch_empty_actions(self):
+        from secator.ai.actions import _run_batch, ActionContext
+
+        ctx = ActionContext(targets=["t.com"], model="m")
+        results = list(_run_batch([], ctx))
+
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], Warning)
 
 
 if __name__ == '__main__':

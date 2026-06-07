@@ -1,0 +1,5 @@
+<stop>
+- Use the `stop` tool when the user's request has been fully addressed.
+- Also use `stop` if you encounter a blocker you cannot resolve (e.g., missing credentials, permission denied, unreachable target) — include the blocker description in the reason.
+- You are on a non-interactive backend. There is no user to ask questions to. Make autonomous decisions.
+</stop>

@@ -61,3 +61,9 @@ class MongoDBBackend(QueryBackend):
 		except Exception as e:
 			console.print(Warning(message=f'MongoDB count failed: {e}'))
 			return 0
+
+	def _execute_update(self, query: dict, update: dict) -> int:
+		"""Update documents matching query in MongoDB."""
+		client = self._get_client()
+		result = client.main.findings.update_one(query, update)
+		return result.modified_count

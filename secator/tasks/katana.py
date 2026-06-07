@@ -90,9 +90,9 @@ class katana(HttpCrawler):
 		form_fill = self.get_opt_value('form_fill')
 		form_extraction = self.get_opt_value('form_extraction')
 		store_responses = self.get_opt_value('store_responses')
+		output_folder = shlex.quote(f'{self.reports_folder}/.outputs')
 		if form_fill or form_extraction or store_responses:
-			reports_folder_outputs = f'{self.reports_folder}/.outputs'
-			self.cmd += f' -srd {shlex.quote(reports_folder_outputs)}'
+			self.cmd += f' -srd {output_folder}'
 		self._techs = {}
 
 	@staticmethod

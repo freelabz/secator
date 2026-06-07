@@ -72,12 +72,14 @@ CONFIDENCE = 'confidence'
 CPES = 'cpes'
 CVES = 'cves'
 CVSS_SCORE = 'cvss_score'
+CVSS_VECTOR = 'cvss_vec'
 DATA = 'data'
 DELAY = 'delay'
 DESCRIPTION = 'description'
 DOCKER_IMAGE = 'docker_image'
 DOMAIN = 'domain'
 DEPTH = 'depth'
+EPSS_SCORE = 'epss_score'
 EXTRA_DATA = 'extra_data'
 EMAIL = 'email'
 FILENAME = 'filename'
@@ -93,6 +95,7 @@ HOST = 'host'
 HOST_PORT = 'host:port'
 IBAN = 'iban'
 ID = 'id'
+IMPACT = 'impact'
 IP = 'ip'
 PROTOCOL = 'protocol'
 LINES = 'lines'
@@ -116,6 +119,7 @@ RATE_LIMIT = 'rate_limit'
 RAW = 'raw'
 REFERENCE = 'reference'
 REFERENCES = 'references'
+REMEDIATION = 'remediation'
 REQUEST = 'request'
 REPLAY_PROXY = 'replay_proxy'
 RETRIES = 'retries'
@@ -164,14 +168,13 @@ INPUT_TYPES = [
 
 
 def is_importable(module_to_import):
-	import importlib
+	import importlib.util
 	try:
-		importlib.import_module(module_to_import)
-		return True
-	except ModuleNotFoundError:
+		return importlib.util.find_spec(module_to_import) is not None
+	except (ModuleNotFoundError, ValueError):
 		return False
 	except Exception as e:
-		print(f'Failed trying to import {module_to_import}: {str(e)}')
+		print(f'Failed trying to find {module_to_import}: {str(e)}')
 		return False
 
 
