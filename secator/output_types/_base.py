@@ -12,6 +12,27 @@ class OutputType:
 	_table_fields = []
 	_sort_by = ()
 
+	@classmethod
+	def fields(cls):
+		return [f.name for f in fields(cls)]
+
+	def merge_with(self, data: 'OutputType', exclude_fields=[]):
+		"""Enrich the OutputType object with the data from another object."""
+		for k, v in data.toDict(exclude_fields).items():
+			if v is None or v == '' or v == []:
+				continue
+			if isinstance(v, list):
+				existing = getattr(self, k, [])
+				new = [_ for _ in v if _ not in existing]
+				setattr(self, k, existing + new)
+			elif isinstance(v, dict):
+				setattr(self, k, {**getattr(self, k), **v})
+			else:
+				setattr(self, k, v)
+
+	def __str__(self):
+		return self.__class__.__name__
+
 	def __gt__(self, other):
 		if not self.__eq__(other):
 			return False
@@ -42,6 +63,20 @@ class OutputType:
 
 	def __le__(self, other):
 		return self == other
+
+	def _compare_key(self):
+		"""Return a hashable tuple of fields used for equality comparison.
+		Used by mark_duplicates for O(n) grouping instead of O(n²) pairwise comparison.
+		"""
+
+		def _hashable(v):
+			if isinstance(v, dict):
+				return tuple(sorted(v.items()))
+			if isinstance(v, list):
+				return tuple(v)
+			return v
+
+		return tuple(_hashable(getattr(self, f.name)) for f in fields(self) if f.compare)
 
 	def __post_init__(self):
 		"""Initialize default fields to their proper types."""
@@ -75,8 +110,8 @@ class OutputType:
 						if DEBUG > 1:
 							console.print_exception(show_locals=True)
 						raise TypeError(
-							f'Fail to transform value for "{key}" using output_map function. Exception: '
-							f'{type(e).__name__}: {str(e)}')
+							f'Fail to transform value for "{key}" using output_map function. Exception: {type(e).__name__}: {str(e)}',
+						)
 				else:
 					mapped_val = item.get(mapped_key)
 				new_item[key] = mapped_val
@@ -103,3 +138,46 @@ class OutputType:
 		if exclude:
 			return {k: v for k, v in data.items() if k not in exclude}
 		return data
+
+	@classmethod
+	def validate_fields(cls, data: dict) -> list:
+		"""Validate data types against dataclass field definitions.
+
+		Returns a list of error messages for invalid fields.
+		"""
+		errors = []
+		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+		for f in fields(cls):
+			if f.name.startswith('_') or f.name not in data:
+				continue
+			value = data[f.name]
+			if value is None:
+				continue
+			expected_type = f.type if isinstance(f.type, type) else None
+			if expected_type is None:
+				origin = getattr(f.type, '__origin__', None)
+				if origin is not None:
+					expected_type = origin
+			if expected_type and not isinstance(value, expected_type):
+				expected_name = type_names.get(expected_type, getattr(expected_type, '__name__', str(expected_type)))
+				actual_name = type_names.get(type(value), type(value).__name__)
+				errors.append(f"'{f.name}' expected {expected_name}, got {actual_name}: {repr(value)[:100]}")
+		return errors
+
+	@classmethod
+	def schema(cls) -> str:
+		"""Get a human-readable schema string for this OutputType class."""
+		lines = [f"{cls.__name__}("]
+		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+		for f in fields(cls):
+			if f.name.startswith('_'):
+				continue
+			type_name = type_names.get(f.type, str(f.type)) if isinstance(f.type, type) else str(f.type)
+			if not isinstance(f.default, _MISSING_TYPE):
+				lines.append(f"  {f.name}: {type_name} = {repr(f.default)},")
+			elif not isinstance(f.default_factory, _MISSING_TYPE):
+				lines.append(f"  {f.name}: {type_name} = {repr(f.default_factory())},")
+			else:
+				lines.append(f"  {f.name}: {type_name},  # required")
+		lines.append(")")
+		return "\n".join(lines)

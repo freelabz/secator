@@ -1,4 +1,8 @@
 type: workflow
 name: ls
+
+input_types:
+  - path
+
 tasks:
   ls:

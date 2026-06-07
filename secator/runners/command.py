@@ -2,24 +2,26 @@ import copy
 import getpass
 import logging
 import os
+import queue
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
-import uuid
+import threading
 
 from time import time
 
 import psutil
 from fp.fp import FreeProxy
 
-from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT
+from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
-from secator.output_types import Info, Warning, Error, Target, Stat
+from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.template import TemplateLoader
-from secator.utils import debug, rich_escape as _s
+from secator.utils import debug, rich_escape as _s, signal_to_name
 
 
 logger = logging.getLogger(__name__)
@@ -27,9 +29,54 @@ logger = logging.getLogger(__name__)
 
 class Command(Runner):
 	"""Base class to execute an external command."""
+
+	def __init_subclass__(cls, **kwargs):
+		"""Honor category MIXINS even though `Command` is the first base.
+
+		Tasks are declared as `class X(Command, SomeMixin)`. With that MRO,
+		`Command`'s own defaults (`meta_opts = {}`, `profile = 'small'`,
+		`enable_duplicate_check = True`) would shadow the values carried by the
+		mixin. This hook re-homes those mixin-provided attributes onto the task
+		class so the mixins design actually drives runtime behavior:
+
+		- `meta_opts` is merged across every `*Mixin` base (base -> derived),
+		  unless the task (or a non-mixin base) already defines its own.
+		- `profile` / `enable_duplicate_check` are copied from the nearest
+		  `*Mixin` that defines them, unless the task class set them explicitly.
+		"""
+		super().__init_subclass__(**kwargs)
+
+		mixin_bases = [b for b in cls.__mro__ if b.__name__.endswith('Mixin')]
+		if not mixin_bases:
+			return
+
+		# Merge meta_opts from mixins (least-derived first) when not set locally.
+		if 'meta_opts' not in cls.__dict__:
+			defines_meta = any(
+				'meta_opts' in b.__dict__ and not b.__name__.endswith('Mixin')
+				for b in cls.__mro__ if b not in (Command, Runner, object)
+			)
+			if not defines_meta:
+				merged = {}
+				for b in reversed(mixin_bases):
+					merged.update(getattr(b, 'meta_opts', {}) or {})
+				if merged:
+					cls.meta_opts = merged
+
+		# Promote mixin profile / enable_duplicate_check when not set locally.
+		for attr in ('profile', 'enable_duplicate_check'):
+			if attr in cls.__dict__:
+				continue
+			for b in mixin_bases:
+				if attr in b.__dict__:
+					setattr(cls, attr, b.__dict__[attr])
+					break
+
 	# Base cmd
 	cmd = None
 
+	# Tags
+	tags = []
 	# Meta options
 	meta_opts = {}
 
@@ -53,6 +100,7 @@ class Command(Runner):
 
 	# Current working directory
 	cwd = None
+	cwd_isolated = False
 
 	# Output encoding
 	encoding = 'utf-8'
@@ -66,11 +114,10 @@ class Command(Runner):
 	# Input chunk size
 	input_chunk_size = CONFIG.runners.input_chunk_size
 
-	# Input required
-	input_required = True
-
 	# Flag to take a file as input
 	file_flag = None
+	file_eof_newline = False
+	file_copy_sudo = False
 
 	# Flag to enable output JSON
 	json_flag = None
@@ -81,8 +128,14 @@ class Command(Runner):
 	# Install
 	install_pre = None
 	install_post = None
+	install_cmd_pre = None
 	install_cmd = None
-	install_github_handle = None
+	install_github_bin = True
+	github_handle = None
+	install_github_version_prefix = ''
+	install_ignore_bin = []
+	install_version = None
+	install_binary_name = None
 
 	# Serializer
 	item_loader = None
@@ -91,15 +144,25 @@ class Command(Runner):
 	# Hooks
 	hooks = [
 		'on_cmd',
+		'on_cmd_opts',
 		'on_cmd_done',
-		'on_line'
+		'on_line',
 	]
 
 	# Ignore return code
 	ignore_return_code = False
 
+	# Disable pre-exec
+	disable_preexec = False
+
+	# Sudo
+	requires_sudo = False
+
 	# Return code
 	return_code = -1
+
+	# Exit ok
+	exit_ok = False
 
 	# Output
 	output = ''
@@ -109,24 +172,37 @@ class Command(Runner):
 	proxy_socks5 = False
 	proxy_http = False
 
+	# Print command icon
+	print_cmd_icon = ':zap:'
+
 	# Profile
-	profile = 'io'
+	profile = 'small'
 
 	def __init__(self, inputs=[], **run_opts):
 
 		# Build runnerconfig on-the-fly
-		config = TemplateLoader(input={
-			'name': self.__class__.__name__,
-			'type': 'task',
-			'description': run_opts.get('description', None)
-		})
+		config = TemplateLoader(
+			input={
+				'name': self.__class__.__name__,
+				'type': 'task',
+				'input_types': self.input_types,
+				'description': run_opts.get('description', None),
+			}
+		)
 
 		# Extract run opts
 		hooks = run_opts.pop('hooks', {})
 		caller = run_opts.get('caller', None)
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
+		node_id = context.get('node_id', None)
+		node_name = context.get('node_name', None)
+		if node_id:
+			config.node_id = node_id
+		if node_name:
+			config.node_name = context.get('node_name')
 		self.skip_if_no_inputs = run_opts.pop('skip_if_no_inputs', False)
+		self.enable_validators = run_opts.pop('enable_validators', True)
 
 		# Prepare validators
 		input_validators = []
@@ -144,7 +220,8 @@ class Command(Runner):
 			run_opts=run_opts,
 			hooks=hooks,
 			validators=validators,
-			context=context)
+			context=context,
+		)
 
 		# Cmd name
 		self.cmd_name = self.__class__.cmd.split(' ')[0]
@@ -158,18 +235,30 @@ class Command(Runner):
 		# Print cmd
 		self.print_cmd = self.run_opts.get('print_cmd', False)
 
+		# TTY availability (can be explicitly disabled for non-interactive contexts)
+		self.has_tty = self.run_opts.get('tty', sys.stdin.isatty())
+
 		# Stat update
 		self.last_updated_stat = None
 
 		# Process
 		self.process = None
 
-		# Sudo
-		self.requires_sudo = False
+		# Monitor thread (lazy initialization)
+		self.monitor_thread = None
+		self.monitor_stop_event = None
+		self.monitor_queue = None
+		self.process_start_time = None
+		# self.retry_count = 0  # TODO: remove this
 
 		# Proxy config (global)
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
+
+		# Apply task-specific config overrides
+		task_name = self.__class__.__name__
+		for attr, value in CONFIG.tasks.overrides.get(task_name, {}).items():
+			setattr(self, attr, value)
 
 		# Build command input
 		self._build_cmd_input()
@@ -178,7 +267,7 @@ class Command(Runner):
 		self._build_cmd()
 
 		# Run on_cmd hook
-		self.run_hooks('on_cmd')
+		self.run_hooks('on_cmd', sub='init')
 
 		# Add sudo to command if it is required
 		if self.requires_sudo:
@@ -191,52 +280,102 @@ class Command(Runner):
 			item_loaders.append(instance_func)
 		self.item_loaders = item_loaders
 
+	def _init_monitor_objects(self):
+		"""Initialize monitor thread objects when needed (lazy initialization)."""
+		if self.monitor_stop_event is None:
+			self.monitor_stop_event = threading.Event()
+		if self.monitor_queue is None:
+			self.monitor_queue = queue.Queue()
+
 	def toDict(self):
 		res = super().toDict()
-		res.update({
-			'cmd': self.cmd,
-			'cwd': self.cwd,
-			'return_code': self.return_code
-		})
+		res.update(
+			{
+				'cmd': self.cmd,
+				'cwd': self.cwd,
+				'return_code': self.return_code,
+			}
+		)
 		return res
 
 	def needs_chunking(self, sync):
 		many_targets = len(self.inputs) > 1
-		targets_over_chunk_size = self.input_chunk_size and len(self.inputs) > self.input_chunk_size
+		targets_over_chunk_size = self.input_chunk_size and self.input_chunk_size != -1 and len(self.inputs) > self.input_chunk_size  # noqa: E501
 		has_file_flag = self.file_flag is not None
-		chunk_it = (sync and many_targets and not has_file_flag) or (not sync and many_targets and targets_over_chunk_size)
+		is_chunk = self.chunk
+		chunk_it = (sync and many_targets and not has_file_flag and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501
 		return chunk_it
 
 	@classmethod
 	def delay(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
+
 		results = kwargs.get('results', [])
 		kwargs['sync'] = False
 		name = cls.__name__
-		return run_command.apply_async(args=[results, name] + list(args), kwargs={'opts': kwargs}, queue=cls.profile)
+		profile = cls.profile(kwargs) if callable(cls.profile) else cls.profile
+		return run_command.apply_async(args=[results, name] + list(args), kwargs={'opts': kwargs}, queue=profile)
 
 	@classmethod
 	def s(cls, *args, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
-		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
+
+		profile = cls.profile(kwargs) if callable(cls.profile) else cls.profile
+		return run_command.s(cls.__name__, *args, opts=kwargs).set(queue=profile)
 
 	@classmethod
-	def si(cls, *args, results=[], **kwargs):
+	def si(cls, *args, results=None, **kwargs):
 		# TODO: Move this to TaskBase
 		from secator.celery import run_command
-		return run_command.si(results, cls.__name__, *args, opts=kwargs).set(queue=cls.profile)
 
-	def get_opt_value(self, opt_name):
+		profile = cls.profile(kwargs) if callable(cls.profile) else cls.profile
+		return run_command.si(results or [], cls.__name__, *args, opts=kwargs).set(queue=profile)
+
+	def get_opt_value(self, opt_name, preprocess=False, process=False):
+		"""Get option value as inputed by the user.
+
+		Args:
+			opt_name (str): Option name.
+			preprocess (bool): Preprocess the value with the option preprocessor function if it exists.
+			process (bool): Process the value with the option processor function if it exists.
+
+		Returns:
+			Any: Option value.
+		"""
 		return Command._get_opt_value(
 			self.run_opts,
 			opt_name,
 			dict(self.opts, **self.meta_opts),
-			opt_prefix=self.config.name)
+			opt_aliases=self.opt_aliases,
+			preprocess=preprocess,
+			process=process,
+		)
+
+	@classmethod
+	def get_version_flag(cls):
+		if cls.version_flag == OPT_NOT_SUPPORTED:
+			return None
+		return cls.version_flag or f'{cls.opt_prefix}version'
+
+	@classmethod
+	def get_version_info(cls, bleeding=False):
+		from secator.installer import get_version_info
+
+		return get_version_info(
+			cls.cmd.split(' ')[0],
+			cls.get_version_flag(),
+			cls.github_handle,
+			cls.install_github_version_prefix,
+			cls.install_cmd,
+			cls.install_version,
+			bleeding=bleeding,
+		)
 
 	@classmethod
 	def get_supported_opts(cls):
+		# TODO: Replace this with get_command_options called on the command class
 		def convert(d):
 			for k, v in d.items():
 				if hasattr(v, '__name__') and v.__name__ in ['str', 'int', 'float']:
@@ -261,9 +400,9 @@ class Command(Runner):
 		opts.update(meta_opts)
 		return opts
 
-	#---------------#
+	# ---------------#
 	# Class methods #
-	#---------------#
+	# ---------------#
 
 	@classmethod
 	def execute(cls, cmd, name=None, cls_attributes={}, run=True, **kwargs):
@@ -285,8 +424,11 @@ class Command(Runner):
 		name = name or cmd.split(' ')[0]
 		kwargs['print_cmd'] = not kwargs.get('quiet', False)
 		kwargs['print_line'] = True
-		kwargs['no_process'] = kwargs.get('no_process', True)
-		cmd_instance = type(name, (Command,), {'cmd': cmd, 'input_required': False})(**kwargs)
+		kwargs['process'] = kwargs.get('process', False)
+		kwargs['cwd'] = kwargs.get('cwd', None)
+		kwargs['enable_validators'] = False
+		kwargs['serialize_config'] = False
+		cmd_instance = type(name, (Command,), {'cmd': cmd})(**kwargs)
 		for k, v in cls_attributes.items():
 			setattr(cmd_instance, k, v)
 		if run:
@@ -301,7 +443,8 @@ class Command(Runner):
 		related to core functionality.
 		"""
 		opt_key_map = self.opt_key_map
-		proxy_opt = opt_key_map.get('proxy', False)
+		meta_opts = self.meta_opts
+		proxy_opt = opt_key_map.get('proxy', False) or 'proxy' in meta_opts
 		support_proxy_opt = proxy_opt and proxy_opt != OPT_NOT_SUPPORTED
 		proxychains_flavor = getattr(self, 'proxychains_flavor', CONFIG.http.proxychains_command)
 		proxy = False
@@ -324,12 +467,12 @@ class Command(Runner):
 			self.run_opts['proxy'] = proxy
 
 		if proxy != 'proxychains' and self.proxy and not proxy:
-			self._print(
-				f'[bold red]Ignoring proxy "{self.proxy}" for {self.cmd_name} (not supported).[/]', rich=True)
+			warning = Warning(message=rf'Ignoring proxy "{self.proxy}" (reason: not supported) \[[bold yellow3]{self.unique_name}[/]]')  # noqa: E501
+			self._print(repr(warning))
 
-	#----------#
+	# ----------#
 	# Internal #
-	#----------#
+	# ----------#
 	def yielder(self):
 		"""Run command and yields its output in real-time. Also saves the command line, return code and output to the
 		database.
@@ -348,62 +491,81 @@ class Command(Runner):
 			dict: Serialized object.
 		"""
 		try:
-
 			# Abort if it has children tasks
 			if self.has_children:
 				return
 
 			# Abort if dry run
 			if self.dry_run:
+				self.print_description()
 				self.print_command()
+				yield Info(message=self.cmd)
 				return
-
-			# Print task description
-			self.print_description()
 
 			# Abort if no inputs
-			if len(self.inputs) == 0 and self.skip_if_no_inputs:
-				yield Warning(message=f'{self.unique_name} skipped (no inputs)', _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			if len(self.inputs) == 0 and self.skip_if_no_inputs and self.default_inputs != '':
+				# self.print_description()
+				# self.print_command()
+				self.add_result(Warning(message=f'{self.unique_name} skipped (no inputs)'), print=False)
+				for item in self.warnings:
+					self._print_item(item)
+				for item in self.errors:
+					self._print_item(item)
+				self.skipped = True
 				return
 
-			# Yield targets
-			for input in self.inputs:
-				yield Target(name=input, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			# Print command
+			self.print_description()
+			self.print_command()
+
+			# In remote worker mode, stream description and cmd back to the client
+			if IN_WORKER and self.print_cmd:
+				cmd_str = _s(self.cmd)
+				if self.chunk and self.chunk_count:
+					cmd_str += f' ({self.chunk}/{self.chunk_count})'
+				if self.description:
+					task_part = f'{self.description} ([bold gold3]{self.unique_name}[/])'
+				else:
+					task_part = f'[bold gold3]{self.unique_name}[/]'
+				yield Info(
+					message=f'Started task {task_part} (cmd=[dim white]{cmd_str}[/])',
+					_source=self.unique_name,
+				)
 
 			# Check for sudo requirements and prepare the password if needed
-			sudo_password, error = self._prompt_sudo(self.cmd)
-			if error:
-				yield Error(
-					message=error,
-					_source=self.unique_name,
-					_uuid=str(uuid.uuid4())
-				)
-				return
+			sudo_required = re.search(r'\bsudo\b', self.cmd)
+			sudo_password = None
+			if CONFIG.security.prompt_sudo_password and sudo_required:
+				self.debug('prompting for sudo password', sub='start')
+				sudo_password, error = self._prompt_sudo(self.cmd)
+				if error:
+					yield Error(message=error)
+					return
 
 			# Prepare cmds
 			command = self.cmd if self.shell else shlex.split(self.cmd)
 
 			# Check command is installed and auto-install
 			if not self.no_process and not self.is_installed():
+				self.debug('command is not installed, auto-installing', sub='start')
 				if CONFIG.security.auto_install_commands:
 					from secator.installer import ToolInstaller
-					yield Info(
-						message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set',  # noqa: E501
-						_source=self.unique_name,
-						_uuid=str(uuid.uuid4())
-					)
+
+					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
 					status = ToolInstaller.install(self.__class__)
 					if not status.is_ok():
-						yield Error(
-							message=f'Failed installing {self.cmd_name}',
-							_source=self.unique_name,
-							_uuid=str(uuid.uuid4())
-						)
+						yield Error(message=f'Failed installing {self.cmd_name}')
 						return
 
 			# Output and results
 			self.return_code = 0
 			self.killed = False
+			self.memory_limit_mb = CONFIG.celery.task_memory_limit_mb
+
+			# Isolated CWD
+			if not self.cwd and self.cwd_isolated:
+				self.cwd = f'{self.reports_folder}/.outputs/{self.fqn}'
+				os.makedirs(self.cwd, exist_ok=True)
 
 			# Run the command using subprocess
 			env = os.environ
@@ -413,14 +575,23 @@ class Command(Runner):
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
+				preexec_fn=os.setsid if not (sudo_required or self.disable_preexec) else None,
 				shell=self.shell,
+				errors='replace',
 				env=env,
-				cwd=self.cwd)
-			self.print_command()
+				cwd=self.cwd,
+			)
+
+			# Initialize monitor objects and start monitor thread
+			self._init_monitor_objects()
+			self.process_start_time = time()
+			self.monitor_stop_event.clear()
+			self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
+			self.monitor_thread.start()
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
-				self.process.stdin.write(f"{sudo_password}\n")
+				self.process.stdin.write(f'{sudo_password}\n')
 				self.process.stdin.flush()
 
 			# Process the output in real-time
@@ -429,9 +600,10 @@ class Command(Runner):
 				if not line:
 					break
 				yield from self.process_line(line)
+				yield from self.process_monitor_queue()
 
 			# Run hooks after cmd has completed successfully
-			result = self.run_hooks('on_cmd_done')
+			result = self.run_hooks('on_cmd_done', sub='end')
 			if result:
 				yield from result
 
@@ -439,9 +611,9 @@ class Command(Runner):
 			yield from self.handle_file_not_found(e)
 
 		except BaseException as e:
-			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='error')
+			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
 			self.stop_process()
-			yield Error.from_exception(e, _source=self.unique_name, _uuid=str(uuid.uuid4()))
+			yield Error.from_exception(e)
 
 		finally:
 			yield from self._wait_for_end()
@@ -455,7 +627,8 @@ class Command(Runner):
 		Returns:
 			bool: True if the command is installed, False otherwise.
 		"""
-		result = subprocess.Popen(["which", self.cmd_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		cmd = ['which', self.cmd_name]
+		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		result.communicate()
 		return result.returncode == 0
 
@@ -472,43 +645,45 @@ class Command(Runner):
 			line = line.replace('\\x0d\\x0a', '\n')
 
 		# Run on_line hooks
-		line = self.run_hooks('on_line', line)
+		line = self.run_hooks('on_line', line, sub='line.process')
 		if line is None:
 			return
 
-		# Yield line if no items were yielded
-		yield line
+		# Turn line into generator if it's raw string
+		line = [line] if isinstance(line, str) else line
 
-		# Run item_loader to try parsing as dict
-		for item in self.run_item_loaders(line):
-			yield item
+		# Run item loaders on generator
+		for sub in line:
+			yield sub
+			if isinstance(sub, str):
+				yield from self.run_item_loaders(sub)
 
-		# Skip rest of iteration (no process mode)
-		if self.no_process:
+	def process_monitor_queue(self):
+		"""Process and yield any queued items from monitor thread."""
+		if self.monitor_queue is None:
 			return
-
-		# Yield command stats (CPU, memory, conns ...)
-		# TODO: enable stats support with timer
-		if self.last_updated_stat and (time() - self.last_updated_stat) < CONFIG.runners.stat_update_frequency:
-			return
-
-		yield from self.stats()
-		self.last_updated_stat = time()
+		while not self.monitor_queue.empty():
+			try:
+				monitor_item = self.monitor_queue.get_nowait()
+				yield monitor_item
+			except queue.Empty:
+				break
 
 	def print_description(self):
 		"""Print description"""
-		if self.sync and not self.has_children and self.caller and self.description:
+		if self.sync and not self.has_children and self.caller and self.description and self.print_cmd:
 			self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
 
 	def print_command(self):
 		"""Print command."""
 		if self.print_cmd:
-			cmd_str = _s(self.cmd)
+			icon = self.run_opts.get('print_cmd_icon', self.print_cmd_icon)
+			cmd_str = f'{icon} [bold green]{_s(self.cmd)}[/]'
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
-			self._print(cmd_str, color='bold cyan', rich=True)
-		self.debug('Command', obj={'cmd': self.cmd}, sub='init')
-		self.debug('Options', obj={'opts': self.cmd_options}, sub='init')
+			self._print(cmd_str, rich=True)
+		self.debug('command', obj={'cmd': self.cmd}, sub='start')
+		self.debug('options', obj=self.cmd_options, sub='start')
 
 	def handle_file_not_found(self, exc):
 		"""Handle case where binary is not found.
@@ -519,6 +694,7 @@ class Command(Runner):
 		Yields:
 			secator.output_types.Error: the error.
 		"""
+		self.debug('command not found', sub='end')
 		self.return_code = 127
 		if self.config.name in str(exc):
 			message = 'Executable not found.'
@@ -527,28 +703,143 @@ class Command(Runner):
 			error = Error(message=message)
 		else:
 			error = Error.from_exception(exc)
-		error._source = self.unique_name
-		error._uuid = str(uuid.uuid4())
 		yield error
 
-	def stop_process(self):
-		"""Sends SIGINT to running process, if any."""
+	def stop_process(self, exit_ok=False, sig=signal.SIGINT):
+		"""Sends signal to running process, if any.
+
+		Uses killpg only when the subprocess has its own process group (preexec_fn=os.setsid).
+		Otherwise (disable_preexec=True or sudo), the subprocess shares the worker's pgid and
+		killpg would also kill the worker.
+		"""
 		if not self.process:
 			return
-		self.debug(f'Sending SIGINT to process {self.process.pid}.', sub='error')
-		self.process.send_signal(signal.SIGINT)
+		self.debug(f'Sending signal {signal_to_name(sig)} to process {self.process.pid}.', sub='error')
+		if self.process and self.process.pid:
+			try:
+				pgid = os.getpgid(self.process.pid)
+				if pgid == self.process.pid:
+					os.killpg(pgid, sig)
+				else:
+					os.kill(self.process.pid, sig)
+			except (ProcessLookupError, PermissionError):
+				pass
+		if exit_ok:
+			self.exit_ok = True
 
-	def stats(self):
+	def _stop_monitor_thread(self):
+		"""Stop monitor thread."""
+		if self.monitor_thread and self.monitor_thread.is_alive() and self.monitor_stop_event:
+			self.monitor_stop_event.set()
+			self.monitor_thread.join(timeout=2.0)
+
+	def _monitor_process(self):
+		"""Monitor thread that checks process health and kills if necessary."""
+		last_stats_time = 0
+
+		while not self.monitor_stop_event.is_set():
+			if not self.process or not self.process.pid:
+				break
+
+			try:
+				current_time = time()
+				self.debug('Collecting monitor items', sub='monitor')
+
+				# Collect and queue stats at regular intervals
+				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
+					stats_items = list(self._collect_stats())
+					for stat_item in stats_items:
+						if self.monitor_queue is not None:
+							self.monitor_queue.put(stat_item)
+					last_stats_time = current_time
+
+					# Check memory usage from collected stats
+					if self.memory_limit_mb and self.memory_limit_mb != -1:
+						total_mem = sum(stat_item.memory for stat_item in stats_items)
+						if total_mem > self.memory_limit_mb:
+							warning = Warning(message=f'Memory limit {self.memory_limit_mb}MB exceeded (actual: {total_mem:.2f}MB)')
+							if self.monitor_queue is not None:
+								self.monitor_queue.put(warning)
+							self.stop_process(exit_ok=True, sig=signal.SIGTERM)
+							break
+
+				# Check execution time
+				if self.process_start_time and CONFIG.celery.task_max_timeout != -1:
+					elapsed_time = current_time - self.process_start_time
+					if elapsed_time > CONFIG.celery.task_max_timeout:
+						warning = Warning(message=f'Task timeout {CONFIG.celery.task_max_timeout}s exceeded')
+						if self.monitor_queue is not None:
+							self.monitor_queue.put(warning)
+						self.stop_process(exit_ok=True, sig=signal.SIGTERM)
+						break
+
+				# Check retry count
+				# TODO: remove this
+				# if CONFIG.celery.task_max_retries and self.retry_count >= CONFIG.celery.task_max_retries:
+				# 	warning = Warning(message=f'Max retries {CONFIG.celery.task_max_retries} exceeded (actual: {self.retry_count})')
+				# 	self.monitor_queue.put(warning)
+				# 	self.stop_process(exit_ok=False, sig=signal.SIGTERM)
+				# 	break
+
+			except psutil.NoSuchProcess:
+				# Process exited between polls — nothing to monitor.
+				self.debug('Monitor: process exited', sub='monitor')
+				break
+			except Exception as e:
+				self.debug(f'Monitor thread error: {e}', sub='monitor')
+				warning = Warning(message=f'Monitor thread error: {e}')
+				if self.monitor_queue is not None:
+					self.monitor_queue.put(warning)
+				break
+
+			# Sleep for a short interval before next check (stat update frequency)
+			self.monitor_stop_event.wait(CONFIG.runners.stat_update_frequency)
+
+	def _collect_stats(self):
+		"""Collect stats about the current running process, if any."""
+		if not self.process or not self.process.pid:
+			return
+		proc = psutil.Process(self.process.pid)
+		stats = Command.get_process_info(proc, children=True)
+		total_mem = 0
+		for info in stats:
+			name = info['name']
+			pid = info['pid']
+			cpu_percent = info['cpu_percent']
+			# mem_percent = info['memory_percent']
+			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
+			total_mem += mem_rss
+			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
+			net_conns = info.get('net_connections') or []
+			# extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
+			yield Stat(
+				name=name,
+				pid=pid,
+				cpu=cpu_percent,
+				memory=mem_rss,
+				memory_limit=self.memory_limit_mb,
+				net_conns=len(net_conns),
+				# extra_data=extra_data
+			)
+		# self.debug(f'Total mem: {total_mem}MB, memory limit: {self.memory_limit_mb}', sub='monitor')
+		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
+		# 	raise MemoryError(f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
+
+	def stats(self, memory_limit_mb=None):
 		"""Gather stats about the current running process, if any."""
 		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
 		stats = Command.get_process_info(proc, children=True)
+		total_mem = 0
 		for info in stats:
 			name = info['name']
 			pid = info['pid']
 			cpu_percent = info['cpu_percent']
 			mem_percent = info['memory_percent']
+			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
+			total_mem += mem_rss
+			self.debug(f'process: {name} pid: {pid} memory: {mem_rss}MB', sub='stats')
 			net_conns = info.get('net_connections') or []
 			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
 			yield Stat(
@@ -557,8 +848,11 @@ class Command(Runner):
 				cpu=cpu_percent,
 				memory=mem_percent,
 				net_conns=len(net_conns),
-				extra_data=extra_data
+				extra_data=extra_data,
 			)
+		self.debug(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}', sub='stats')
+		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
+			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
 
 	@staticmethod
 	def get_process_info(process, children=False):
@@ -569,11 +863,13 @@ class Command(Runner):
 			children (bool): Whether to gather stats about children processes too.
 		"""
 		try:
+			# fmt: off
 			data = {
 				k: v._asdict() if hasattr(v, '_asdict') else v
 				for k, v in process.as_dict().items()
 				if k not in ['memory_maps', 'open_files', 'environ']
 			}
+			# fmt: on
 			yield data
 		except (psutil.Error, FileNotFoundError):
 			return
@@ -590,13 +886,16 @@ class Command(Runner):
 		if self.no_process:
 			return
 		for item_loader in self.item_loaders:
-			if (callable(item_loader)):
+			if callable(item_loader):
+				self.debug('running item loader', obj={'name': item_loader.__name__, 'func': self.get_func_path(item_loader)}, sub='item_loader')  # noqa: E501
 				yield from item_loader(self, line)
 			elif item_loader:
 				name = item_loader.__class__.__name__.replace('Serializer', '').lower()
 				default_callback = lambda self, x: [(yield x)]  # noqa: E731
 				callback = getattr(self, f'on_{name}_loaded', None) or default_callback
+				self.debug('running item loader', obj={'name': name, 'class': item_loader.__class__.__name__}, sub='item_loader')  # noqa: E501
 				for item in item_loader.run(line):
+					self.debug(f'running on_{name}_loaded callback', obj={'name': callback.__name__, 'fun': self.get_func_path(callback)}, sub='item_loader')  # noqa: E501
 					yield from callback(self, item)
 
 	def _prompt_sudo(self, command):
@@ -623,8 +922,11 @@ class Command(Runner):
 			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
 
 		# Check if we have a tty
-		if not os.isatty(sys.stdin.fileno()):
-			error = "No TTY detected. Sudo password prompt requires a TTY to proceed."
+		if not self.has_tty:
+			error = (
+				'Sudo password required but no TTY available (non-interactive mode). '
+				'Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), or configure passwordless sudo.'
+			)
 			return -1, error
 
 		# If not, prompt the user for a password
@@ -635,59 +937,58 @@ class Command(Runner):
 			sudo_password = getpass.getpass()
 			result = subprocess.run(
 				['sudo', '-S', '-p', '', 'true'],
-				input=sudo_password + "\n",
+				input=sudo_password + '\n',
 				text=True,
-				capture_output=True
+				capture_output=True,
 			)
 			if result.returncode == 0:
 				return sudo_password, None  # Password is correct
-			self._print("Sorry, try again.")
-		error = "Sudo password verification failed after 3 attempts."
+			self._print('Sorry, try again.')
+		error = 'Sudo password verification failed after 3 attempts.'
 		return -1, error
 
 	def _wait_for_end(self):
 		"""Wait for process to finish and process output and return code."""
+		self._stop_monitor_thread()
+		yield from self.process_monitor_queue()
 		if not self.process:
 			return
 		for line in self.process.stdout.readlines():
 			yield from self.process_line(line)
 		self.process.wait()
-		self.return_code = self.process.returncode
+		self.return_code = 0 if self.exit_ok else self.process.returncode
 		self.process.stdout.close()
 		self.return_code = 0 if self.ignore_return_code else self.return_code
-		self.output = self.output.strip()
+		self.output = self.output.rstrip()
 		self.killed = self.return_code == -2 or self.killed
-		self.debug(f'Command {self.cmd} finished with return code {self.return_code}', sub='command')
+		self.debug(f'return code: {self.return_code}', sub='end')
 
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
-			yield Error(
-				message=error,
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
+			yield Error(message=error)
 
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}'
 			last_lines = self.output.split('\n')
-			last_lines = last_lines[max(0, len(last_lines) - 2):]
+			last_lines = last_lines[max(0, len(last_lines) - 10) :]
 			last_lines = [line for line in last_lines if line != '']
-			yield Error(
-				message=error,
-				traceback='\n'.join(last_lines),
-				traceback_title='Last stdout lines',
-				_source=self.unique_name,
-				_uuid=str(uuid.uuid4())
-			)
+			errors = Command.parse_errors('\n'.join(last_lines))
+			if not errors:
+				errors = [error]
+			for error in errors:
+				yield Error(message=error, traceback='Traceback (from command output):\n' + '\n'.join(last_lines))
 
 	@staticmethod
 	def _process_opts(
-			opts,
-			opts_conf,
-			opt_key_map={},
-			opt_value_map={},
-			opt_prefix='-',
-			command_name=None):
+		opts,
+		opts_conf,
+		opt_key_map={},
+		opt_value_map={},
+		opt_prefix='-',
+		opt_aliases=None,
+		preprocess=False,
+		process=True,
+	):
 		"""Process a dict of options using a config, option key map / value map and option character like '-' or '--'.
 
 		Args:
@@ -696,56 +997,63 @@ class Command(Runner):
 			opt_key_map (dict[str, str | Callable]): A dict to map option key with their actual values.
 			opt_value_map (dict, str | Callable): A dict to map option values with their actual values.
 			opt_prefix (str, default: '-'): Option prefix.
-			command_name (str | None, default: None): Command name.
+			opt_aliases (str | None, default: None): Aliases to try.
+			preprocess (bool, default: True): Preprocess the value with the option preprocessor function if it exists.
+			process (bool, default: True): Process the value with the option processor function if it exists.
 
 		Returns:
 			dict: Processed options dict.
 		"""
 		opts_dict = {}
 		for opt_name, opt_conf in opts_conf.items():
-			debug('before get_opt_value', obj={'name': opt_name, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+			debug('before get_opt_value', obj={'name': opt_name, 'conf': opt_conf}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 
 			# Save original opt name
 			original_opt_name = opt_name
 
+			# Copy opt conf
+			conf = opt_conf.copy()
+
 			# Get opt value
-			default_val = opt_conf.get('default')
+			default_val = conf.get('default')
 			opt_val = Command._get_opt_value(
 				opts,
 				opt_name,
 				opts_conf,
-				opt_prefix=command_name,
-				default=default_val)
+				opt_aliases=opt_aliases,
+				default=default_val,
+				preprocess=preprocess,
+				process=process,
+			)
 
-			debug('after get_opt_value', obj={'name': opt_name, 'value': opt_val, 'conf': opt_conf}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+			debug('after get_opt_value', obj={'name': opt_name, 'value': opt_val, 'conf': conf}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 
 			# Skip option if value is falsy
 			if opt_val in [None, False, []]:
-				debug('skipped (falsy)', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+				debug('skipped (falsy)', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 				continue
-
-			# Apply process function on opt value
-			if 'process' in opt_conf:
-				func = opt_conf['process']
-				opt_val = func(opt_val)
 
 			# Convert opt value to expected command opt value
 			mapped_opt_val = opt_value_map.get(opt_name)
 			if mapped_opt_val:
+				conf.pop('pre_process', None)
+				conf.pop('process', None)
 				if callable(mapped_opt_val):
 					opt_val = mapped_opt_val(opt_val)
 				else:
 					opt_val = mapped_opt_val
+			elif 'pre_process' in conf:
+				opt_val = conf['pre_process'](opt_val)
 
 			# Convert opt name to expected command opt name
 			mapped_opt_name = opt_key_map.get(opt_name)
 			if mapped_opt_name is not None:
 				if mapped_opt_name == OPT_NOT_SUPPORTED:
-					debug('skipped (unsupported)', obj={'name': opt_name, 'value': opt_val}, sub='command.options', verbose=True)  # noqa: E501
+					debug('skipped (unsupported)', obj={'name': opt_name, 'value': opt_val}, sub='init.options', verbose=True)  # noqa: E501
 					continue
 				else:
 					opt_name = mapped_opt_name
-			debug('mapped key / value', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+			debug('mapped key / value', obj={'name': opt_name, 'value': opt_val}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 
 			# Avoid shell injections and detect opt prefix
 			opt_name = str(opt_name).split(' ')[0]  # avoid cmd injection
@@ -759,14 +1067,14 @@ class Command(Runner):
 
 			# Append opt name + opt value to option string.
 			# Note: does not append opt value if value is True (flag)
-			opts_dict[original_opt_name] = {'name': opt_name, 'value': opt_val, 'conf': opt_conf}
-			debug('final', obj={'name': original_opt_name, 'value': opt_val}, sub='command.options', obj_after=False, verbose=True)  # noqa: E501
+			opts_dict[original_opt_name] = {'name': opt_name, 'value': opt_val, 'conf': conf}
+			debug('final', obj={'name': original_opt_name, 'value': opt_val}, sub='init.options', obj_after=False, verbose=True)  # noqa: E501
 
 		return opts_dict
 
 	@staticmethod
 	def _validate_chunked_input(self, inputs):
-		"""Command does not suport multiple inputs in non-worker mode. Consider running with a remote worker instead."""
+		"""Command does not support multiple inputs in non-worker mode. Consider running with a remote worker instead."""
 		if len(inputs) > 1 and self.sync and self.file_flag is None:
 			return False
 		return True
@@ -774,7 +1082,7 @@ class Command(Runner):
 	@staticmethod
 	def _validate_input_nonempty(self, inputs):
 		"""Input is empty."""
-		if not self.input_required:
+		if self.default_inputs is not None:
 			return True
 		if not inputs or len(inputs) == 0:
 			return False
@@ -786,28 +1094,79 @@ class Command(Runner):
 
 	@staticmethod
 	def _get_opt_default(opt_name, opts_conf):
+		"""Get the default value of an option.
+
+		Args:
+			opt_name (str): The name of the option to get the default value of (no aliases allowed).
+			opts_conf (dict): The options configuration, indexed by option name.
+
+		Returns:
+			any: The default value of the option.
+		"""
 		for k, v in opts_conf.items():
 			if k == opt_name:
 				return v.get('default', None)
 		return None
 
 	@staticmethod
-	def _get_opt_value(opts, opt_name, opts_conf={}, opt_prefix='', default=None):
+	def _get_opt_value(opts, opt_name, opts_conf={}, opt_aliases=None, default=None, preprocess=False, process=False):
+		"""Get the value of an option.
+
+		Args:
+			opts (dict): The options dict to search (input opts).
+			opt_name (str): The name of the option to get the value of.
+			opts_conf (dict): The options configuration, indexed by option name.
+			opt_aliases (list): The aliases to try.
+			default (any): The default value to return if the option is not found.
+			preprocess (bool): Whether to preprocess the value using the option preprocessor function.
+			process (bool): Whether to process the value using the option processor function.
+
+		Returns:
+			any: The value of the option.
+
+		Example:
+			opts = {'target': 'example.com'}
+			opts_conf = {'target': {'type': 'str', 'short': 't', 'default': 'example.com', 'pre_process': lambda x: x.upper()}}  # noqa: E501
+			opt_aliases = ['prefix_target', 'target']
+
+			# Example 1:
+			opt_name = 'target'
+			opt_value = Command._get_opt_value(opts, opt_name, opts_conf, opt_aliases, preprocess=True)  # noqa: E501
+			print(opt_value)
+			# Output: EXAMPLE.COM
+
+			# Example 2:
+			opt_name = 'prefix_target'
+			opt_value = Command._get_opt_value(opts, opt_name, opts_conf, opt_aliases)
+			print(opt_value)
+			# Output: example.com
+		"""
 		default = default or Command._get_opt_default(opt_name, opts_conf)
-		opt_names = [
-			f'{opt_prefix}.{opt_name}',
-			f'{opt_prefix}_{opt_name}',
-			opt_name,
-		]
+		opt_aliases = opt_aliases or []
+		opt_names = []
+		for prefix in opt_aliases:
+			opt_names.extend([f'{prefix}.{opt_name}', f'{prefix}_{opt_name}'])
+		opt_names.append(opt_name)
+		opt_names = list(dict.fromkeys(opt_names))
 		opt_values = [opts.get(o) for o in opt_names]
-		alias = [conf.get('short') for _, conf in opts_conf.items() if conf.get('short') in opts and _ == opt_name]
-		if alias:
-			opt_values.append(opts.get(alias[0]))
+		opt_conf = [conf for _, conf in opts_conf.items() if _ == opt_name]
+		if opt_conf:
+			opt_conf = opt_conf[0]
+			alias = opt_conf.get('short')
+			if alias:
+				opt_values.append(opts.get(alias))
 		if OPT_NOT_SUPPORTED in opt_values:
-			debug('skipped (unsupported)', obj={'name': opt_name}, obj_after=False, sub='command.options', verbose=True)
+			debug('skipped (unsupported)', obj={'name': opt_name}, obj_after=False, sub='init.options', verbose=True)
 			return None
 		value = next((v for v in opt_values if v is not None), default)
-		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='command.options', verbose=True)  # noqa: E501
+		if opt_conf:
+			preprocessor = opt_conf.get('pre_process')
+			processor = opt_conf.get('process')
+			if preprocess and preprocessor:
+				value = preprocessor(value)
+			if process and processor:
+				value = processor(value)
+		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 		return value
 
 	def _build_cmd(self):
@@ -815,7 +1174,9 @@ class Command(Runner):
 
 		# Add JSON flag to cmd
 		if self.json_flag:
-			self.cmd += f' {self.json_flag}'
+			parts = self.json_flag.split(' ')
+			for part in parts:
+				self.cmd += f' {shlex.quote(part)}'
 
 		# Opts str
 		opts_str = ''
@@ -828,7 +1189,10 @@ class Command(Runner):
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.config.name)
+			opt_aliases=self.opt_aliases,
+			preprocess=False,
+			process=False,
+		)
 
 		# Add meta options to cmd
 		meta_opts_dict = Command._process_opts(
@@ -837,19 +1201,32 @@ class Command(Runner):
 			self.opt_key_map,
 			self.opt_value_map,
 			self.opt_prefix,
-			command_name=self.config.name)
+			opt_aliases=self.opt_aliases,
+			preprocess=False,
+			process=False,
+		)
 
 		if opts_dict:
 			opts.update(opts_dict)
 		if meta_opts_dict:
 			opts.update(meta_opts_dict)
 
+		opts = self.run_hooks('on_cmd_opts', opts, sub='init')
+
 		if opts:
 			for opt_conf in opts.values():
 				conf = opt_conf['conf']
+				process = conf.get('process')
+				if process:
+					opt_conf['value'] = process(opt_conf['value'])
+				internal = conf.get('internal', False)
+				if internal:
+					continue
 				if conf.get('requires_sudo', False):
 					self.requires_sudo = True
 				opts_str += ' ' + Command._build_opt_str(opt_conf)
+				if '{target}' in opts_str:
+					opts_str = opts_str.replace('{target}', self.inputs[0])
 		self.cmd_options = opts
 		self.cmd += opts_str
 
@@ -857,14 +1234,21 @@ class Command(Runner):
 	def _build_opt_str(opt):
 		"""Build option string."""
 		conf = opt['conf']
-		opts_str = f'{opt["name"]}'
 		shlex_quote = conf.get('shlex', True)
 		value = opt['value']
-		if value is not True:
-			if shlex_quote:
-				value = shlex.quote(str(value))
-			opts_str += f' {value}'
-		return opts_str
+		opt_name = opt['name']
+		opts_str = ''
+		value = [value] if not isinstance(value, list) else value
+		for val in value:
+			if val is True:
+				opts_str += f'{opt_name}'
+			elif val is None:
+				continue
+			else:
+				if shlex_quote:
+					val = shlex.quote(str(val))
+				opts_str += f'{opt_name} {val} '
+		return opts_str.strip()
 
 	def _build_cmd_input(self):
 		"""Many commands take as input a string or a list. This function facilitate this based on whether we pass a
@@ -892,14 +1276,23 @@ class Command(Runner):
 		# If inputs has multiple elements and the tool has input_flag set to OPT_PIPE_INPUT, use cat-piped_input input.
 		# Otherwise pass the file path to the tool.
 		else:
-			fpath = f'{self.reports_folder}/.inputs/{self.unique_name}.txt'
+			fpath = f'{self.reports_folder}/.inputs/{self.fqn}.txt'
 
 			# Write the input to a file
 			with open(fpath, 'w') as f:
 				f.write('\n'.join(inputs))
+				if self.file_eof_newline:
+					f.write('\n')
+
+			if self.file_copy_sudo:
+				sudo_fpath = f'/tmp/{self.fqn}.txt'
+				shutil.copy(fpath, sudo_fpath)
+				fpath = sudo_fpath
 
 			if self.file_flag == OPT_PIPE_INPUT:
 				cmd = f'cat {fpath} | {cmd}'
+			elif self.file_flag == OPT_SPACE_SEPARATED:
+				cmd += ' ' + ' '.join(inputs)
 			elif self.file_flag:
 				cmd += f' {self.file_flag} {fpath}'
 			else:
@@ -909,3 +1302,32 @@ class Command(Runner):
 
 		self.cmd = cmd
 		self.shell = ' | ' in self.cmd
+
+	@staticmethod
+	def parse_errors(output):
+		"""Searches for error messages in the provided multi-line string.
+		Errors can be indicated by specific keywords or red ANSI color codes.
+
+		Args:
+			output (str): Multi-line string containing the output of many commands.
+
+		Returns:
+			list: A list of strings, each an identified error message.
+		"""
+		error_messages = []
+		ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+		# Define a regex pattern for error indicators and ANSI red text
+		error_pattern = re.compile(
+			r'^(.*\b(?:err|error|ftl|fatal|traceback|exceptions?|exc)\b.*|\x1b\[31m.*\x1b\[0m)$',
+			re.IGNORECASE | re.MULTILINE,
+		)
+
+		# Search the output for any matches to the error pattern
+		matches = error_pattern.findall(output)
+		for match in matches:
+			match = ansi_escape.sub('', match).strip()
+			if match not in error_messages:
+				error_messages.append(match)
+
+		return error_messages

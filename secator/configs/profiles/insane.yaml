@@ -1,0 +1,9 @@
+type: profile
+name: insane
+category: speed
+description: "Local LAN scanning or stress scanning"
+opts:
+    rate_limit: 100000
+    delay: 0
+    timeout: 1
+    retries: 0

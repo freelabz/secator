@@ -1,0 +1,19 @@
+[
+    {
+        "method": "GET",
+        "url": "http://testphp.vulnweb.com/hpp/?pp=1",
+        "status": 200,
+        "size": 602,
+        "found_params": [
+            {
+                "name": "pp",
+                "value": null,
+                "diffs": "",
+                "status": 200,
+                "size": 617,
+                "reason_kind": "Reflected"
+            }
+        ],
+        "injection_place": "Path"
+    }
+]

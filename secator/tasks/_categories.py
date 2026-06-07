@@ -1,88 +1,273 @@
-import json
 import os
-import re
 
 from functools import cache
 
-import requests
-from bs4 import BeautifulSoup
 from cpe import CPE
 
-from secator.definitions import (CVSS_SCORE, DELAY, DEPTH, DESCRIPTION, FILTER_CODES,
-								 FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, FOLLOW_REDIRECT, HEADER, ID,
-								 MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD, NAME, PROVIDER, PROXY,
-								 RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, USER_AGENT,
-								 WORDLIST)
+from secator.definitions import (
+	DATA,
+	DELAY,
+	DEPTH,
+	FILTER_CODES,
+	FILTER_REGEX,
+	FILTER_SIZE,
+	FILTER_WORDS,
+	FOLLOW_REDIRECT,
+	HEADER,
+	MATCH_CODES,
+	MATCH_REGEX,
+	MATCH_SIZE,
+	MATCH_WORDS,
+	METHOD,
+	PORTS,
+	PROXY,
+	RATE_LIMIT,
+	REQUEST,
+	RETRIES,
+	THREADS,
+	TIMEOUT,
+	TOP_PORTS,
+	USER_AGENT,
+	WORDLIST,
+	REPLAY_PROXY,
+)
 from secator.config import CONFIG
-from secator.utils import debug, process_wordlist
+from secator.providers._base import CVEProvider
+from secator.runners import Command  # noqa: F401  (re-exported for tasks importing Command from this module)
+from secator.utils import debug, process_wordlist, headers_to_dict, parse_raw_http_request
+
+
+# -----------------#
+# Helper functions #
+# -----------------#
+
+
+def process_headers(headers_dict):
+	headers = []
+	for key, value in headers_dict.items():
+		headers.append(f'{key}:{value}')
+	return headers
+
+
+def process_raw_request(file_path):
+	"""Process raw HTTP request file and return parsed request data.
+
+	Args:
+		file_path (str): Path to file containing raw HTTP request.
+
+	Returns:
+		dict: Parsed request data with method, url, headers, and data.
+	"""
+	if not file_path:
+		return None
+	if not os.path.exists(file_path):
+		raise ValueError(f'Raw request file not found: {file_path}')
+	with open(file_path, 'r') as f:
+		raw_request = f.read()
+	return parse_raw_http_request(raw_request)
+
+
+def apply_raw_request_options(self):
+	"""Apply raw HTTP request options to task if raw option is provided.
+
+	This function is shared across the HTTP mixins (HttpBaseMixin, HttpMixin,
+	HttpCrawlerMixin, HttpFuzzerMixin) through their ``before_init`` hook.
+
+	Args:
+		self: Task instance.
+	"""
+	raw_request_data = self.get_opt_value(REQUEST, preprocess=True)
+	if raw_request_data:
+		# Set method from raw request
+		if raw_request_data.get('method') and not self.get_opt_value(METHOD):
+			self.run_opts[METHOD] = raw_request_data['method']
+
+		# Set URL from raw request if not already provided
+		if raw_request_data.get('url') and (not self.inputs or len(self.inputs) == 0):
+			self.inputs = [raw_request_data['url']]
+
+		# Merge headers from raw request with existing headers
+		if raw_request_data.get('headers'):
+			existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
+			# Raw request headers take precedence
+			merged_headers = {**existing_headers, **raw_request_data['headers']}
+			self.run_opts[HEADER] = merged_headers
+
+		# Set data from raw request
+		if raw_request_data.get('data') and not self.get_opt_value(DATA):
+			self.run_opts[DATA] = raw_request_data['data']
 
 
 OPTS = {
-	HEADER: {'type': str, 'help': 'Custom header to add to each request in the form "KEY1:VALUE1; KEY2:VALUE2"'},
+	HEADER: {
+		'type': str,
+		'short': 'H',
+		'help': 'Custom header to add to each request in the form "KEY1:VALUE1;; KEY2:VALUE2"',
+		'pre_process': headers_to_dict,
+		'process': process_headers,
+		'default': CONFIG.http.default_header,
+	},  # noqa: E501
+	DATA: {'type': str, 'help': 'Data to send in the request body'},
 	DELAY: {'type': float, 'short': 'd', 'help': 'Delay to add between each requests'},
-	DEPTH: {'type': int, 'help': 'Scan depth', 'default': 2},
+	DEPTH: {'type': int, 'help': 'Scan depth'},
 	FILTER_CODES: {'type': str, 'short': 'fc', 'help': 'Filter out responses with HTTP codes'},
 	FILTER_REGEX: {'type': str, 'short': 'fr', 'help': 'Filter out responses with regular expression'},
-	FILTER_SIZE: {'type': str, 'short': 'fs', 'help': 'Filter out responses with size'},
-	FILTER_WORDS: {'type': str, 'short': 'fw', 'help': 'Filter out responses with word count'},
+	FILTER_SIZE: {'type': int, 'short': 'fs', 'help': 'Filter out responses with size'},
+	FILTER_WORDS: {'type': int, 'short': 'fw', 'help': 'Filter out responses with word count'},
 	FOLLOW_REDIRECT: {'is_flag': True, 'short': 'frd', 'help': 'Follow HTTP redirects'},
 	MATCH_CODES: {'type': str, 'short': 'mc', 'help': 'Match HTTP status codes e.g "201,300,301"'},
 	MATCH_REGEX: {'type': str, 'short': 'mr', 'help': 'Match responses with regular expression'},
-	MATCH_SIZE: {'type': str, 'short': 'ms', 'help': 'Match respones with size'},
-	MATCH_WORDS: {'type': str, 'short': 'mw', 'help': 'Match responses with word count'},
-	METHOD: {'type': str, 'help': 'HTTP method to use for requests'},
+	MATCH_SIZE: {'type': int, 'short': 'ms', 'help': 'Match responses with size'},
+	MATCH_WORDS: {'type': int, 'short': 'mw', 'help': 'Match responses with word count'},
+	METHOD: {'type': str, 'short': 'X', 'help': 'HTTP method to use for requests'},
 	PROXY: {'type': str, 'help': 'HTTP(s) / SOCKS5 proxy'},
-	RATE_LIMIT: {'type':  int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
+	RATE_LIMIT: {'type': int, 'short': 'rl', 'help': 'Rate limit, i.e max number of requests per second'},
+	REQUEST: {'type': str, 'short': 'rf', 'help': 'Path to file containing raw HTTP request (Burp-style format)', 'pre_process': process_raw_request, 'internal': True},  # noqa: E501
 	RETRIES: {'type': int, 'help': 'Retries'},
-	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': 50},
-	TIMEOUT: {'type': int, 'help': 'Request timeout'},
+	THREADS: {'type': int, 'help': 'Number of threads to run', 'default': CONFIG.runners.threads},
+	TIMEOUT: {'type': int, 'short': 'to', 'help': 'Request timeout'},
 	USER_AGENT: {'type': str, 'short': 'ua', 'help': 'User agent, e.g "Mozilla Firefox 1.0"'},
-	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use'}
+	WORDLIST: {'type': str, 'short': 'w', 'default': 'http', 'process': process_wordlist, 'help': 'Wordlist to use for HTTP requests'},  # noqa: E501
+	PORTS: {'type': str, 'short': 'p', 'help': 'Only scan specific ports (comma separated list, "-" for all ports)'},  # noqa: E501
+	REPLAY_PROXY: {'type': str, 'short': 'P', 'help': 'Proxy to use for replay requests'},
+	TOP_PORTS: {'type': str, 'short': 'tp', 'help': 'Scan <number> most common ports'},
 }
 
-OPTS_HTTP = [
-	HEADER, DELAY, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
+WORDLIST_PARAMS = {
+	WORDLIST: {'type': str, 'short': 'w', 'default': 'http_params', 'process': process_wordlist, 'help': 'Wordlist to use for HTTP requests'},  # noqa: E501
+}
+
+WORDLIST_DNS = {
+	WORDLIST: {'type': str, 'short': 'w', 'default': 'dns', 'process': process_wordlist, 'help': 'Wordlist to use for DNS requests'},  # noqa: E501
+}
+
+OPTS_HTTP_BASE = [
+	HEADER,
+	DELAY,
+	FOLLOW_REDIRECT,
+	METHOD,
+	PROXY,
+	RATE_LIMIT,
+	REQUEST,
+	RETRIES,
+	THREADS,
+	TIMEOUT,
+	USER_AGENT,
+	DATA,
+]
+OPTS_HTTP_FILTERS = [
+	DEPTH,
+	MATCH_REGEX,
+	MATCH_SIZE,
+	MATCH_WORDS,
+	FILTER_REGEX,
+	FILTER_CODES,
+	FILTER_SIZE,
+	FILTER_WORDS,
+	MATCH_CODES,
 ]
 
-OPTS_HTTP_CRAWLERS = OPTS_HTTP + [
-	DEPTH, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FILTER_REGEX, FILTER_CODES, FILTER_SIZE, FILTER_WORDS,
-	MATCH_CODES
-]
+OPTS_HTTP = OPTS_HTTP_BASE + OPTS_HTTP_FILTERS
 
-OPTS_HTTP_FUZZERS = OPTS_HTTP_CRAWLERS + [WORDLIST]
+OPTS_HTTP_FUZZERS = OPTS_HTTP + [WORDLIST, DATA, REPLAY_PROXY]
 
-OPTS_RECON = [
-	DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT
-]
+OPTS_HTTP_CRAWLERS = OPTS_HTTP_FUZZERS.copy()
+OPTS_HTTP_CRAWLERS.remove(DATA)
+OPTS_HTTP_CRAWLERS.remove(METHOD)
+OPTS_HTTP_CRAWLERS.remove(WORDLIST)
 
-OPTS_VULN = [
-	HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
-]
+OPTS_RECON = [DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT]
+
+OPTS_RECON_PORT = [PORTS, TOP_PORTS, DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT]
+
+OPTS_VULN = [HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT]
 
 
-class HttpMixin:
+# ---------------#
+# HTTP mixins   #
+# ---------------#
+#
+# These category classes are pure MIXINS (PR #585 design): they carry shared
+# `meta_opts` plus shared hooks/helpers, but do NOT inherit from `Command`.
+# Tasks compose them as `class X(Command, HttpMixin)` and declare their own
+# `input_types` / `output_types` locally.
+
+
+class HttpBaseMixin:
+	"""Shared HTTP options (base) and raw-request handling."""
+	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_BASE}
+
+	@staticmethod
+	def before_init(self):
+		"""Process raw HTTP request if provided and set appropriate options."""
+		apply_raw_request_options(self)
+
+
+class HttpMixin(HttpBaseMixin):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP}
 
-class HttpCrawlerMixin:
+
+class HttpCrawlerMixin(HttpBaseMixin):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
 
-class HttpFuzzerMixin:
+
+class HttpFuzzerMixin(HttpBaseMixin):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_FUZZERS}
+	enable_duplicate_check = False
+
+	@classmethod
+	def profile(cls, opts):
+		"""Dynamic Celery queue profile based on wordlist size.
+
+		Defined as a classmethod so that, when mixed into a concrete `Command`
+		task, `cls` resolves the task's own `_get_opt_value` / `opts` while the
+		sizing logic stays homed on the mixin.
+		"""
+		wordlist = cls._get_opt_value(
+			opts,
+			'wordlist',
+			opts_conf=dict(cls.opts, **cls.meta_opts),
+			opt_aliases=opts.get('aliases', []),
+			preprocess=True,
+			process=True,
+		)
+		if not wordlist:
+			return 'medium'
+		wordlist_size_mb = os.path.getsize(wordlist) / (1024 * 1024)
+		return 'large' if wordlist_size_mb > 5 else 'medium'
+
+
+class HttpParamsFuzzerMixin(HttpFuzzerMixin):
+	meta_opts = {**{k: OPTS[k] for k in OPTS_HTTP_FUZZERS}, **WORDLIST_PARAMS}
+
+
+# ----------------#
+# Recon mixins   #
+# ----------------#
+
 
 class ReconMixin:
 	meta_opts = {k: OPTS[k] for k in OPTS_RECON}
 
-class VulnMixin:
-	meta_opts = {k: OPTS[k] for k in OPTS_VULN}
 
-	@staticmethod
-	def lookup_local_cve(cve_id):
-		cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
-		if os.path.exists(cve_path):
-			with open(cve_path, 'r') as f:
-				return json.load(f)
-		debug(f'CVE {cve_id} not found in cache', sub='cve')
-		return None
+class ReconPortMixin(ReconMixin):
+	meta_opts = {k: OPTS[k] for k in OPTS_RECON_PORT}
+
+
+# ---------------#
+# Vuln mixin    #
+# ---------------#
+
+
+class VulnMixin:
+	"""Shared vulnerability options plus CVE/CPE lookup helpers.
+
+	CVE data resolution is delegated to ``secator.providers.CVEProvider`` (the
+	extraction that landed on main); this mixin keeps only the CPE matching glue
+	and the public ``lookup_cve`` / ``lookup_cve_from_ghsa`` entry points used by
+	the vuln tasks.
+	"""
+	meta_opts = {k: OPTS[k] for k in OPTS_VULN}
 
 	@staticmethod
 	def create_cpe_string(product_name, version):
@@ -96,12 +281,12 @@ class VulnMixin:
 		Returns:
 			str: A CPE string formatted according to the CPE 2.3 specification.
 		"""
-		cpe_version = "2.3"  # CPE Specification version
-		part = "a"           # 'a' for application
+		cpe_version = '2.3'  # CPE Specification version
+		part = 'a'  # 'a' for application
 		vendor = product_name.lower()  # Vendor name, using product name
 		product = product_name.lower()  # Product name
 		version = version  # Product version
-		cpe_string = f"cpe:{cpe_version}:{part}:{vendor}:{product}:{version}:*:*:*:*:*:*:*"
+		cpe_string = f'cpe:{cpe_version}:{part}:{vendor}:{product}:{version}:*:*:*:*:*:*:*'
 		return cpe_string
 
 	@staticmethod
@@ -125,7 +310,7 @@ class VulnMixin:
 
 	@staticmethod
 	def get_cpe_fs(cpe):
-		""""Return formatted string for given CPE.
+		""" "Return formatted string for given CPE.
 
 		Args:
 			cpe (string): Input CPE
@@ -140,76 +325,6 @@ class VulnMixin:
 
 	@cache
 	@staticmethod
-	def lookup_cve_from_vulners_exploit(exploit_id, *cpes):
-		"""Search for a CVE corresponding to an exploit by extracting the CVE id from the exploit HTML page.
-
-		Args:
-			exploit_id (str): Exploit ID.
-			cpes (tuple[str], Optional): CPEs to match for.
-
-		Returns:
-			dict: vulnerability data.
-		"""
-		if CONFIG.runners.skip_exploit_search:
-			debug(f'Skip remote query for {exploit_id} since config.runners.skip_exploit_search is set.', sub='cve')
-			return None
-		if CONFIG.offline_mode:
-			debug(f'Skip remote query for {exploit_id} since config.offline_mode is set.', sub='cve')
-			return None
-		try:
-			resp = requests.get(f'https://vulners.com/githubexploit/{exploit_id}', timeout=5)
-			resp.raise_for_status()
-			soup = BeautifulSoup(resp.text, 'lxml')
-			title = soup.title.get_text(strip=True)
-			h1 = [h1.get_text(strip=True) for h1 in soup.find_all('h1')]
-			if '404' in h1:
-				raise requests.RequestException("404 [not found or rate limited]")
-			code = [code.get_text(strip=True) for code in soup.find_all('code')]
-			elems = [title] + h1 + code
-			content = '\n'.join(elems)
-			cve_regex = re.compile(r'(CVE(?:-|_)\d{4}(?:-|_)\d{4,7})', re.IGNORECASE)
-			matches = cve_regex.findall(str(content))
-			if not matches:
-				debug(f'{exploit_id}: No CVE found in https://vulners.com/githubexploit/{exploit_id}.', sub='cve')
-				return None
-			cve_id = matches[0].replace('_', '-').upper()
-			cve_data = VulnMixin.lookup_cve(cve_id, *cpes)
-			if cve_data:
-				return cve_data
-
-		except requests.RequestException as e:
-			debug(f'Failed remote query for {exploit_id} ({str(e)}).', sub='cve')
-			return None
-
-	@cache
-	@staticmethod
-	def lookup_cve_from_cve_circle(cve_id):
-		"""Get CVE data from vulnerability.circl.lu.
-
-		Args:
-			cve_id (str): CVE id.
-
-		Returns:
-			dict | None: CVE data, None if no response or empty response.
-		"""
-		try:
-			resp = requests.get(f'https://vulnerability.circl.lu/api/cve/{cve_id}', timeout=5)
-			resp.raise_for_status()
-			cve_info = resp.json()
-			if not cve_info:
-				debug(f'Empty response from https://vulnerability.circl.lu/api/cve/{cve_id}', sub='cve')
-				return None
-			cve_path = f'{CONFIG.dirs.data}/cves/{cve_id}.json'
-			with open(cve_path, 'w') as f:
-				f.write(json.dumps(cve_info, indent=2))
-			debug(f'Downloaded {cve_id} to {cve_path}', sub='cve')
-			return cve_info
-		except requests.RequestException as e:
-			debug(f'Failed remote query for {cve_id} ({str(e)}).', sub='cve')
-			return None
-
-	@cache
-	@staticmethod
 	def lookup_cve(cve_id, *cpes):
 		"""Search for a CVE info and return vulnerability data.
 
@@ -218,61 +333,29 @@ class VulnMixin:
 			cpes (tuple[str], Optional): CPEs to match for.
 
 		Returns:
-			dict: vulnerability data.
+			Vulnerability: Vulnerability object.
 		"""
-		cve_info = VulnMixin.lookup_local_cve(cve_id)
-
-		# Online CVE lookup
-		if not cve_info:
-			if CONFIG.runners.skip_cve_search:
-				debug(f'Skip remote query for {cve_id} since config.runners.skip_cve_search is set.', sub='cve')
+		# Lookup CVE data (delegated to CVEProvider, see secator.providers)
+		vuln = CVEProvider.lookup_local_cve(cve_id)
+		if not vuln:
+			vuln = CVEProvider.lookup_external_cve(cve_id)
+			if not vuln:
 				return None
-			if CONFIG.offline_mode:
-				debug(f'Skip remote query for {cve_id} since config.offline_mode is set.', sub='cve')
-				return None
-			cve_info = VulnMixin.lookup_cve_from_cve_circle(cve_id)
-			if not cve_info:
-				return None
-
-		# Convert cve info to easy format
-		cve_id = cve_info['cveMetadata']['cveId']
-		cna = cve_info['containers']['cna']
-		metrics = cna.get('metrics', [])
-		cvss_score = 0
-		for metric in metrics:
-			for name, value in metric.items():
-				if 'cvss' in name:
-					cvss_score = metric[name]['baseScore']
-		description = cna.get('descriptions', [{}])[0].get('value')
-		cwe_id = cna.get('problemTypes', [{}])[0].get('descriptions', [{}])[0].get('cweId')
-		cpes_affected = []
-		for product in cna['affected']:
-			cpes_affected.extend(product.get('cpes', []))
-		references = [u['url'] for u in cna['references']]
-		cve_info = {
-			'id': cve_id,
-			'cwe_id': cwe_id,
-			'cvss_score': cvss_score,
-			'description': description,
-			'cpes': cpes_affected,
-			'references': references
-		}
 
 		# Match the CPE string against the affected products CPE FS strings from the CVE data if a CPE was passed.
 		# This allow to limit the number of False positives (high) that we get from nmap NSE vuln scripts like vulscan
 		# and ensure we keep only right matches.
 		# The check is not executed if no CPE was passed (sometimes nmap cannot properly detect a CPE) or if the CPE
 		# version cannot be determined.
+		cpes_affected = vuln.extra_data.get('cpes', [])
 		cpe_match = False
-		tags = [cve_id]
-		if cpes:
+		if cpes and cpes_affected:
 			for cpe in cpes:
 				cpe_fs = VulnMixin.get_cpe_fs(cpe)
 				if not cpe_fs:
 					debug(f'{cve_id}: Failed to parse CPE {cpe} with CPE parser', sub='cve.match', verbose=True)
-					tags.append('cpe-invalid')
+					vuln.tags.append('cpe-invalid')
 					continue
-				# cpe_version = cpe_obj.get_version()[0]
 				for cpe_affected in cpes_affected:
 					cpe_affected_fs = VulnMixin.get_cpe_fs(cpe_affected)
 					if not cpe_affected_fs:
@@ -281,86 +364,49 @@ class VulnMixin:
 					debug(f'{cve_id}: Testing {cpe_fs} against {cpe_affected_fs}', sub='cve.match', verbose=True)
 					cpe_match = VulnMixin.match_cpes(cpe_fs, cpe_affected_fs)
 					if cpe_match:
-						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve')
-						tags.append('cpe-match')
+						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve.match')
+						vuln.tags.append('cpe-match')
 						break
 
 				if not cpe_match:
-					debug(f'{cve_id}: no CPE match found for {cpe}.', sub='cve')
+					debug(f'{cve_id}: no CPE match found for {cpe}.', sub='cve.match')
 
-		# Parse CVE id and CVSS
-		name = id = cve_info['id']
-		# exploit_ids = cve_info.get('refmap', {}).get('exploit-db', [])
-		# osvdb_ids = cve_info.get('refmap', {}).get('osvdb', [])
-
-		# Get description
-		description = cve_info['description']
-		if description is not None:
-			description = description.replace(id, '').strip()
-
-		# Get references
-		references = cve_info.get(REFERENCES, [])
-		cve_ref_url = f'https://vulnerability.circl.lu/cve/{id}'
-		references.append(cve_ref_url)
-
-		# Get CWE ID
-		cwe_id = cve_info['cwe_id']
-		if cwe_id is not None:
-			tags.append(cwe_id)
-
-		# Set vulnerability severity based on CVSS score
-		severity = None
-		cvss = cve_info['cvss_score']
-		if cvss:
-			severity = VulnMixin.cvss_to_severity(cvss)
-
-		# Set confidence
-		vuln = {
-			ID: id,
-			NAME: name,
-			PROVIDER: 'vulnerability.circl.lu',
-			SEVERITY: severity,
-			CVSS_SCORE: cvss,
-			TAGS: tags,
-			REFERENCES: [f'https://vulnerability.circl.lu/cve/{id}'] + references,
-			DESCRIPTION: description,
-		}
 		return vuln
 
 	@cache
 	@staticmethod
-	def lookup_ghsa(ghsa_id):
-		"""Search for a GHSA on Github and and return associated CVE vulnerability data.
+	def lookup_cve_from_ghsa(ghsa_id):
+		"""Search for a GHSA and return associated CVE vulnerability data.
 
 		Args:
-			ghsa (str): CVE ID in the form GHSA-*
+			ghsa_id (str): GHSA ID in the form GHSA-*
 
 		Returns:
-			dict: vulnerability data.
+			dict | None: Vulnerability data dict, or None if not found.
 		"""
-		try:
-			resp = requests.get(f'https://github.com/advisories/{ghsa_id}', timeout=5)
-			resp.raise_for_status()
-		except requests.RequestException as e:
-			debug(f'Failed remote query for {ghsa_id} ({str(e)}).', sub='cve')
-			return None
-		soup = BeautifulSoup(resp.text, 'lxml')
-		sidebar_items = soup.find_all('div', {'class': 'discussion-sidebar-item'})
-		cve_id = sidebar_items[2].find('div').text.strip()
-		vuln = VulnMixin.lookup_cve(cve_id)
+		from secator.providers.ghsa import ghsa
+
+		vuln = ghsa.lookup_cve(ghsa_id)
 		if vuln:
-			vuln[TAGS].append('ghsa')
-			return vuln
+			return vuln.toDict()
 		return None
 
-	@staticmethod
-	def cvss_to_severity(cvss):
-		if cvss < 4:
-			severity = 'low'
-		elif cvss < 7:
-			severity = 'medium'
-		elif cvss < 9:
-			severity = 'high'
-		else:
-			severity = 'critical'
-		return severity
+
+# --------------#
+# Tag mixin    #
+# --------------#
+
+
+class TaggerMixin:
+	"""Marker mixin for URL tagging tasks (kept for API symmetry)."""
+	pass
+
+
+# ----------------#
+# OSInt mixin    #
+# ----------------#
+
+
+class OSIntMixin:
+	"""Marker mixin for OSINT / user-account tasks (kept for API symmetry)."""
+	pass

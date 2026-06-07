@@ -1,0 +1,9 @@
+[
+  {
+    "detected": true,
+    "firewall": "Envoy",
+    "manufacturer": "EnvoyProxy",
+    "trigger_url": "https://www.netflix.com/fr-en/?qvkljxql=%3Cscript%3Ealert%28%22XSS%22%29%3B%3C%2Fscript%3E&zelspuab=UNION+SELECT+ALL+FROM+information_schema+AND+%22+or+SLEEP%285%29+or+%22&fpxcwplg=..%2F..%2Fetc%2Fpasswd",
+    "url": "https://netflix.com"
+  }
+]

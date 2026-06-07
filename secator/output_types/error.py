@@ -20,24 +20,27 @@ class Error(OutputType):
 	_table_fields = ['message', 'traceback']
 	_sort_by = ('_timestamp',)
 
+	@staticmethod
 	def from_exception(e, **kwargs):
 		errtype = type(e).__name__
-		message = errtype
 		if str(e):
-			message += f': {str(e)}'
+			errtype += f': {str(e)}'
+		message = kwargs.pop('message', errtype)
 		traceback = traceback_as_string(e) if errtype not in ['KeyboardInterrupt', 'GreenletExit'] else ''
-		error = Error(message=message, traceback=traceback, **kwargs)
+		error = Error(message=_s(message), traceback=traceback, **kwargs)
 		return error
 
 	def __str__(self):
 		return self.message
 
-	def __repr__(self):
-		s = rf"\[[bold red]ERR[/]] {_s(self.message)}"
+	def __rich__(self):
+		s = rf"\[[bold red]ERR[/]] {self.message}"
 		if self.traceback:
-			s += ':'
 			traceback_pretty = '   ' + _s(self.traceback).replace('\n', '\n   ')
 			if self.traceback_title:
 				traceback_pretty = f'   {self.traceback_title}:\n{traceback_pretty}'
 			s += f'\n[dim]{_s(traceback_pretty)}[/]'
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self):
+		return rich_to_ansi(self.__rich__())

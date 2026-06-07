@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 import time
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, rich_escape as _s
+from secator.utils import rich_to_ansi
 
 
 @dataclass
@@ -19,6 +19,12 @@ class Info(OutputType):
 	_table_fields = ['message', 'task_id']
 	_sort_by = ('_timestamp',)
 
+	def __str__(self):
+		return self.message
+
+	def __rich__(self):
+		s = rf'\[[blue]INF[/]] {self.message}'
+		return s
+
 	def __repr__(self):
-		s = rf"\[[blue]INF[/]] {_s(self.message)}"
-		return rich_to_ansi(s)
+		return rich_to_ansi(self.__rich__())

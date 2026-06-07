@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ .Values.redis.name }}
-  namespace: {{ .Values.namespace }}
 spec:
   selector:
     matchLabels:
@@ -13,10 +12,15 @@ spec:
     metadata:
       labels:
         app: redis
-    spec:
+    spec:      
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
       containers:
       - name: {{ .Values.redis.name }}
         image: {{ .Values.redis.image }}
+        securityContext:
+{{- toYaml .Values.redis.securityContext | nindent 10 }}
+        resources:
+{{- toYaml .Values.redis.resources | nindent 10 }}
         ports:
         - containerPort: {{ .Values.redis.port }}
           name: client

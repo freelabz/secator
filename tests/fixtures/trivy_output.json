@@ -1,0 +1,206 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2025-04-21T10:27:02.927032033-04:00",
+  "ArtifactName": "https://github.com/blacklanternsecurity/bbot",
+  "ArtifactType": "repository",
+  "Metadata": {
+    "ImageConfig": {
+      "architecture": "",
+      "created": "0001-01-01T00:00:00Z",
+      "os": "",
+      "rootfs": {
+        "type": "",
+        "diff_ids": null
+      },
+      "config": {}
+    }
+  },
+  "Results": [
+    {
+      "Target": "poetry.lock",
+      "Class": "lang-pkgs",
+      "Type": "poetry",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-8775",
+          "PkgID": "ansible-core@2.15.13",
+          "PkgName": "ansible-core",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/ansible-core@2.15.13",
+            "UID": "c985ed129f948996"
+          },
+          "InstalledVersion": "2.15.13",
+          "FixedVersion": "2.17.6, 2.16.13",
+          "Status": "fixed",
+          "Layer": {},
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2024-8775",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Title": "ansible-core: Exposure of Sensitive Information in Ansible Vault Files Due to Improper Logging",
+          "Description": "A flaw was found in Ansible, where sensitive information stored in Ansible Vault files can be exposed in plaintext during the execution of a playbook. This occurs when using tasks such as include_vars to load vaulted variables without setting the no_log: true parameter, resulting in sensitive data being printed in the playbook output or logs. This can lead to the unintentional disclosure of secrets like passwords or API keys, compromising security and potentially allowing unauthorized access or actions.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-532"
+          ],
+          "VendorSeverity": {
+            "amazon": 2,
+            "ghsa": 3,
+            "redhat": 2
+          },
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N",
+              "V3Score": 5.5
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N",
+              "V3Score": 5.5
+            }
+          },
+          "References": [
+            "https://access.redhat.com/errata/RHSA-2024:10762",
+            "https://access.redhat.com/errata/RHSA-2024:8969",
+            "https://access.redhat.com/errata/RHSA-2024:9894",
+            "https://access.redhat.com/errata/RHSA-2025:1249",
+            "https://access.redhat.com/security/cve/CVE-2024-8775",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2312119",
+            "https://github.com/advisories/GHSA-jpxc-vmjf-9fcj",
+            "https://github.com/ansible/ansible",
+            "https://github.com/ansible/ansible/blob/v2.16.13/changelogs/CHANGELOG-v2.16.rst#security-fixes",
+            "https://github.com/ansible/ansible/blob/v2.17.6/changelogs/CHANGELOG-v2.17.rst#security-fixes",
+            "https://github.com/ansible/ansible/commit/8a87e1c5d37422bc99d27ad4237d185cc233e035",
+            "https://nvd.nist.gov/vuln/detail/CVE-2024-8775",
+            "https://www.cve.org/CVERecord?id=CVE-2024-8775"
+          ],
+          "PublishedDate": "2024-09-14T03:15:08.987Z",
+          "LastModifiedDate": "2025-02-10T19:15:39.603Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-11079",
+          "PkgID": "ansible-core@2.15.13",
+          "PkgName": "ansible-core",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/ansible-core@2.15.13",
+            "UID": "c985ed129f948996"
+          },
+          "InstalledVersion": "2.15.13",
+          "FixedVersion": "2.18.1rc1, 2.17.7rc1, 2.16.14rc1",
+          "Status": "fixed",
+          "Layer": {},
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2024-11079",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Title": "ansible-core: Unsafe Tagging Bypass via hostvars Object in Ansible-Core",
+          "Description": "A flaw was found in Ansible-Core. This vulnerability allows attackers to bypass unsafe content protections using the hostvars object to reference and execute templated content. This issue can lead to arbitrary code execution if remote data or module outputs are improperly templated within playbooks.",
+          "Severity": "LOW",
+          "CweIDs": [
+            "CWE-20"
+          ],
+          "VendorSeverity": {
+            "amazon": 2,
+            "ghsa": 1,
+            "redhat": 2
+          },
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:C/C:L/I:L/A:L",
+              "V3Score": 5.5
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:C/C:L/I:L/A:L",
+              "V3Score": 5.5
+            }
+          },
+          "References": [
+            "https://access.redhat.com/errata/RHSA-2024:10770",
+            "https://access.redhat.com/errata/RHSA-2024:11145",
+            "https://access.redhat.com/security/cve/CVE-2024-11079",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2325171",
+            "https://github.com/ansible/ansible",
+            "https://github.com/ansible/ansible/blob/v2.18.1/changelogs/CHANGELOG-v2.18.rst#security-fixes",
+            "https://github.com/ansible/ansible/commit/2936b80dbbc7efb889934aeec80f6142c10266ce",
+            "https://github.com/ansible/ansible/commit/70e83e72b43e05e57eb42a6d52d01a4d9768f510",
+            "https://github.com/ansible/ansible/commit/98774d15d7748ebaaaf2e83942cc7e8d39f7280e",
+            "https://github.com/ansible/ansible/pull/84299",
+            "https://github.com/ansible/ansible/pull/84339",
+            "https://nvd.nist.gov/vuln/detail/CVE-2024-11079",
+            "https://www.cve.org/CVERecord?id=CVE-2024-11079"
+          ],
+          "PublishedDate": "2024-11-12T00:15:15.543Z",
+          "LastModifiedDate": "2024-12-18T04:15:06.31Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-12797",
+          "PkgID": "cryptography@43.0.3",
+          "PkgName": "cryptography",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/cryptography@43.0.3",
+            "UID": "db88f1e83865fb8"
+          },
+          "InstalledVersion": "43.0.3",
+          "FixedVersion": "44.0.1",
+          "Status": "fixed",
+          "Layer": {},
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2024-12797",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Title": "openssl: RFC7250 handshakes with unauthenticated servers don't abort as expected",
+          "Description": "Issue summary: Clients using RFC7250 Raw Public Keys (RPKs) to authenticate a\nserver may fail to notice that the server was not authenticated, because\nhandshakes don't abort as expected when the SSL_VERIFY_PEER verification mode\nis set.\n\nImpact summary: TLS and DTLS connections using raw public keys may be\nvulnerable to man-in-middle attacks when server authentication failure is not\ndetected by clients.\n\nRPKs are disabled by default in both TLS clients and TLS servers.  The issue\nonly arises when TLS clients explicitly enable RPK use by the server, and the\nserver, likewise, enables sending of an RPK instead of an X.509 certificate\nchain.  The affected clients are those that then rely on the handshake to\nfail when the server's RPK fails to match one of the expected public keys,\nby setting the verification mode to SSL_VERIFY_PEER.\n\nClients that enable server-side raw public keys can still find out that raw\npublic key verification failed by calling SSL_get_verify_result(), and those\nthat do, and take appropriate action, are not affected.  This issue was\nintroduced in the initial implementation of RPK support in OpenSSL 3.2.\n\nThe FIPS modules in 3.4, 3.3, 3.2, 3.1 and 3.0 are not affected by this issue.",
+          "Severity": "LOW",
+          "CweIDs": [
+            "CWE-392"
+          ],
+          "VendorSeverity": {
+            "alma": 3,
+            "azure": 3,
+            "cbl-mariner": 3,
+            "ghsa": 1,
+            "oracle-oval": 3,
+            "redhat": 3,
+            "ubuntu": 3
+          },
+          "CVSS": {
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+              "V3Score": 7.4
+            }
+          },
+          "References": [
+            "http://www.openwall.com/lists/oss-security/2025/02/11/3",
+            "http://www.openwall.com/lists/oss-security/2025/02/11/4",
+            "https://access.redhat.com/errata/RHSA-2025:1330",
+            "https://access.redhat.com/security/cve/CVE-2024-12797",
+            "https://bugzilla.redhat.com/2342757",
+            "https://errata.almalinux.org/9/ALSA-2025-1330.html",
+            "https://github.com/openssl/openssl/commit/738d4f9fdeaad57660dcba50a619fafced3fd5e9",
+            "https://github.com/openssl/openssl/commit/798779d43494549b611233f92652f0da5328fbe7",
+            "https://github.com/openssl/openssl/commit/87ebd203feffcf92ad5889df92f90bb0ee10a699",
+            "https://github.com/pyca/cryptography",
+            "https://github.com/pyca/cryptography/security/advisories/GHSA-79v4-65xg-pq4g",
+            "https://linux.oracle.com/cve/CVE-2024-12797.html",
+            "https://linux.oracle.com/errata/ELSA-2025-1330.html",
+            "https://nvd.nist.gov/vuln/detail/CVE-2024-12797",
+            "https://openssl-library.org/news/secadv/20250211.txt",
+            "https://security.netapp.com/advisory/ntap-20250214-0001/",
+            "https://ubuntu.com/security/notices/USN-7264-1",
+            "https://www.cve.org/CVERecord?id=CVE-2024-12797"
+          ],
+          "PublishedDate": "2025-02-11T16:15:38.827Z",
+          "LastModifiedDate": "2025-02-18T14:15:27.107Z"
+        }
+      ]
+    }
+  ]
+}

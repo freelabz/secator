@@ -1,18 +1,33 @@
 type: scan
 name: domain
 description: Domain scan
+long_description: |
+  Comprehensive security assessment of a domain, combining multiple workflows for complete coverage.
+  Performs domain reconnaissance, subdomain discovery, host reconnaissance, URL crawling, and
+  vulnerability scanning. Provides a full picture of the domain's attack surface, infrastructure,
+  and potential security issues. Ideal for thorough domain-level security assessments.
 profile: default
+tags: [recon, dns, ssl, network, http, crawl, takeovers, vuln, secrets]
 input_types:
   - host
+
 workflows:
+  domain_recon:
   subdomain_recon:
   host_recon:
     targets_:
-    - target.name
-    - subdomain.host
+    - type: target
+      field: name
+      condition: target.type == 'host'
+    - type: subdomain
+      field: host
   url_crawl:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified
   url_vuln:
     targets_:
-    - url.url
+    - type: url
+      field: url
+      condition: url.verified

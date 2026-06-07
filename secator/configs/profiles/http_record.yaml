@@ -1,0 +1,9 @@
+type: profile
+name: http_record
+category: network
+description: "Record HTTP requests / responses and take screenshots"
+opts:
+    screenshot: true
+    store_responses: true
+    system_chrome: true
+    no_sandbox: true

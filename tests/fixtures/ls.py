@@ -1,3 +1,4 @@
+from secator.definitions import PATH
 from secator.runners import Command
 from secator.decorators import task
 from secator.output_types import Vulnerability
@@ -6,6 +7,7 @@ from secator.output_types import Vulnerability
 @task()
 class ls(Command):
     cmd = 'ls -al'
+    input_types = [PATH]
     output_types = [Vulnerability]
     output_map = {
         Vulnerability: {}

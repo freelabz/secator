@@ -1,9 +1,0 @@
-type: profile
-name: default
-options:
-  rate_limit: 1000
-  delay: 1
-  proxy: null
-  user_agent: 'Mozilla ...'
-  nuclei.retries: 5
-  nuclei.timeout: 15

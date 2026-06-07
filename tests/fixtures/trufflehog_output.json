@@ -1,0 +1,25 @@
+{
+    "SourceMetadata": {
+        "Data": {
+            "Filesystem": {
+                "file": ".venv/lib/python3.11/site-packages/flower/utils/__pycache__/broker.cpython-311.pyc",
+                "line": 1
+            }
+        }
+    },
+    "SourceID": 1,
+    "SourceType": 15,
+    "SourceName": "trufflehog - filesystem",
+    "DetectorType": 17,
+    "DetectorName": "URI",
+    "DetectorDescription": "This detector identifies URLs with embedded credentials, which can be used to access web resources without explicit user interaction.",
+    "DecoderName": "PLAIN",
+    "Verified": false,
+    "VerificationError": "dialing local IP addresses is not allowed",
+    "VerificationFromCache": true,
+    "Raw": "http://guest:guest@localhost:15672",
+    "RawV2": "http://guest:guest@localhost:15672/api",
+    "Redacted": "http://guest:********@localhost:15672/api",
+    "ExtraData": null,
+    "StructuredData": null
+}

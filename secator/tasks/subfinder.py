@@ -11,9 +11,11 @@ from secator.runners import Command
 class subfinder(Command, ReconMixin):
 	"""Fast passive subdomain enumeration tool."""
 	cmd = 'subfinder -cs'
+	input_types = [HOST]
+	output_types = [Subdomain]
+	tags = ['dns', 'recon', 'passive']
 	file_flag = '-dL'
 	input_flag = '-d'
-	input_type = HOST
 	json_flag = '-json'
 	opt_key_map = {
 		DELAY: OPT_NOT_SUPPORTED,
@@ -32,16 +34,22 @@ class subfinder(Command, ReconMixin):
 			DOMAIN: 'input',
 		}
 	}
-	output_types = [Subdomain]
-	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest'
-	install_github_handle = 'projectdiscovery/subfinder'
+	install_version = 'v2.7.0'
+	install_cmd = 'go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@[install_version]'
+	github_handle = 'projectdiscovery/subfinder'
 	proxychains = False
 	proxy_http = True
 	proxy_socks5 = False
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def validate_item(self, item):
 		if isinstance(item, dict):
 			return item['input'] != 'localhost'
 		return True
+
+	@staticmethod
+	def on_item(self, item):
+		if isinstance(item, Subdomain):
+			item.tags = ['passive']
+		return item

@@ -1,31 +1,7 @@
-import operator
-
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OutputType
-from secator.utils import merge_opts, get_file_timestamp, traceback_as_string
+from secator.output_types import FINDING_TYPES
+from secator.utils import get_file_timestamp, traceback_as_string
 from secator.rich import console
-from secator.runners._helpers import extract_from_results
-
-import concurrent.futures
-from threading import Lock
-
-
-def remove_duplicates(objects):
-	unique_objects = []
-	lock = Lock()
-
-	def add_if_unique(obj):
-		nonlocal unique_objects  # noqa: F824
-		with lock:
-			# Perform linear search to check for duplicates
-			if all(obj != existing_obj for existing_obj in unique_objects):
-				unique_objects.append(obj)
-
-	with concurrent.futures.ThreadPoolExecutor(max_workers=100) as executor:
-		# Execute the function concurrently for each object
-		executor.map(add_if_unique, objects)
-
-	return unique_objects
 
 
 # TODO: initialize from data, not from runner
@@ -37,6 +13,7 @@ class Report:
 		title (str): Report title.
 		exporters (list): List of exporter classes.
 	"""
+
 	def __init__(self, runner, title=None, exporters=[]):
 		self.title = title or f'{runner.config.type}_{runner.config.name}'
 		self.runner = runner
@@ -51,19 +28,20 @@ class Report:
 				report_cls(self).send()
 			except Exception as e:
 				console.print(
-					f'[bold red]Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: '
-					f'{str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',
+					f'[bold red]Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: {str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',  # noqa: E501
 				)
 
-	def build(self, extractors=[], dedupe=False):
-		# Trim options
-		from secator.decorators import DEFAULT_CLI_OPTIONS
-		opts = merge_opts(self.runner.config.options, self.runner.run_opts)
-		opts = {
-			k: v for k, v in opts.items()
-			if k not in DEFAULT_CLI_OPTIONS and k not in self.runner.print_opts
-			and v is not None
-		}
+	def build(self, query=None, dedupe=CONFIG.runners.remove_duplicates):
+		"""Build report data structure using QueryEngine for filtering and dedup.
+
+		Args:
+			query (dict): MongoDB-style filter query (e.g. {'_type': 'vulnerability'}).
+			dedupe (bool): Whether to remove duplicate results.
+		"""
+		if query is None:
+			query = {}
+		from secator.query import QueryEngine
+
 		runner_fields = {
 			'name',
 			'status',
@@ -73,38 +51,39 @@ class Report:
 			'elapsed',
 			'elapsed_human',
 			'run_opts',
-			'results_count'
+			'results_count',
+			'context',
 		}
-
-		# Prepare report structure
-		data = {
-			'info': {k: v for k, v in self.runner.toDict().items() if k in runner_fields},
-			'results': {}
-		}
+		data = {'info': {k: v for k, v in self.runner.toDict().items() if k in runner_fields}, 'results': {}}
 		if 'results' in data['info']:
 			del data['info']['results']
 		data['info']['title'] = self.title
-		data['info']['errors'] = self.runner.errors
+		data['info']['errors'] = getattr(self.runner, 'errors', [])
 
-		# Fill report
-		for output_type in FINDING_TYPES:
+		# Build context for QueryEngine.
+		# Pass runner.results directly (OutputType objects or dicts) to avoid
+		# costly serialization. An absent 'results' key tells JsonBackend to
+		# scan the filesystem instead.
+		context = dict(getattr(self.runner, 'context', {}) or {})
+		if 'results' not in context or not context.get('results'):
+			raw_results = getattr(self.runner, 'results', []) or []
+			if raw_results:
+				context['results'] = raw_results
+			elif 'results' in context:
+				# Remove empty list so JsonBackend falls through to filesystem scan
+				del context['results']
+		if 'workspace_name' not in context:
+			context['workspace_name'] = self.workspace_name
+
+		engine = QueryEngine(self.workspace_name, context=context)
+		results = engine.search(query, dedupe=dedupe)
+
+		# Fill report (findings + targets)
+		from secator.output_types.target import Target
+		for output_type in list(FINDING_TYPES) + [Target]:
 			output_name = output_type.get_name()
-			sort_by, _ = get_table_fields(output_type)
-			items = [
-				item for item in self.runner.results
-				if isinstance(item, OutputType) and item._type == output_name
-			]
-			if items:
-				if sort_by and all(sort_by):
-					items = sorted(items, key=operator.attrgetter(*sort_by))
-				if dedupe and CONFIG.runners.remove_duplicates:
-					items = remove_duplicates(items)
-					# items = [item for item in items if not item._duplicate and item not in dedupe_from]
-				for extractor in extractors:
-					items = extract_from_results(items, extractors=[extractor])
-				data['results'][output_name] = items
+			data['results'][output_name] = [r for r in results if (r.get('_type') if isinstance(r, dict) else getattr(r, '_type', None)) == output_name]  # noqa: E501
 
-		# Save data
 		self.data = data
 
 	def is_empty(self):
