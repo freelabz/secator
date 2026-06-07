@@ -7,7 +7,7 @@ long_description: |
   Identifies potential XSS, LFI, SSRF, RCE, IDOR, and other vulnerability indicators in URL parameters.
   Tests discovered vulnerable patterns with specialized tools like Dalfox for XSS exploitation.
   Optionally runs comprehensive nuclei scans for additional HTTP vulnerability detection.
-tags: [http, vulnerability]
+tags: [http, vuln]
 input_types:
   - url
 

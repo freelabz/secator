@@ -15,6 +15,7 @@ class Tag(OutputType):
 	stored_response_path: str = field(default='', compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
+	tags: list = field(default_factory=list, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='tag', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -33,15 +34,15 @@ class Tag(OutputType):
 	def __str__(self) -> str:
 		return self.match
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		content = self.value
-		s = rf'🏷️  \[[bold yellow]{self.category}[/]] [bold magenta]{self.name}[/]'
+		s = rf'🏷️ \[[bold yellow]{_s(self.category)}[/]] [bold magenta]{_s(self.name)}[/]'
 		small_content = False
 		if len(content) < 100:
 			small_content = True
 		# content_xs = trim_string(content, max_length=50).replace('\n', '/')
 		if small_content:
-			s += f' [bold orange4]{content}[/]'
+			s += f' [bold orange4]{_s(content)}[/]'
 		if self.match != content:
 			s += f' found @ [bold]{_s(self.match)}[/]'
 		ed = ''
@@ -69,4 +70,7 @@ class Tag(OutputType):
 					ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
 		if ed:
 			s += ed
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

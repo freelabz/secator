@@ -13,6 +13,7 @@ class gf(Tagger):
 	tags = ['pattern', 'scan']
 	file_flag = OPT_PIPE_INPUT
 	input_flag = OPT_PIPE_INPUT
+	input_chunk_size = -1  # Disable chunking to process all inputs at once
 	version_flag = OPT_NOT_SUPPORTED
 	opts = {
 		'pattern': {'type': str, 'help': 'Pattern names to match against (comma-delimited)', 'required': True}

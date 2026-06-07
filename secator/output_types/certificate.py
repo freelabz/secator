@@ -1,9 +1,11 @@
 import time
-from datetime import datetime, timedelta
 from dataclasses import dataclass, field
-from secator.output_types import OutputType
-from secator.utils import rich_to_ansi
+from datetime import datetime, timedelta, timezone
+
+from secator.config import CONFIG
 from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
+from secator.output_types import OutputType, Vulnerability
+from secator.utils import rich_to_ansi
 
 
 @dataclass
@@ -37,42 +39,77 @@ class Certificate(OutputType):
 	_table_fields = ['ip', 'host']
 	_sort_by = ('ip',)
 
+	def __post_init__(self):
+		super().__post_init__()
+		self.not_before = self.get_datetime(self.not_before)
+		self.not_after = self.get_datetime(self.not_after)
+
 	def __str__(self) -> str:
 		return self.subject_cn
 
-	def is_expired(self) -> bool:
+	def is_expired(self, months=0) -> bool:
 		if self.not_after:
-			return self.not_after < datetime.now()
+			return self.not_after < datetime.now(timezone.utc) + timedelta(days=months * 30)
 		return True
 
-	def is_expired_soon(self, months: int = 1) -> bool:
-		if self.not_after:
-			return self.not_after < datetime.now() + timedelta(days=months * 30)
-		return True
+	def is_wildcard(self) -> bool:
+		return self.subject_cn and self.subject_cn.startswith('*')
 
 	@staticmethod
 	def format_date(date):
 		if date:
-			return date.strftime("%m/%d/%Y")
+			return date.strftime(CONFIG.cli.date_format)
 		return '?'
 
-	def __repr__(self) -> str:
+	@staticmethod
+	def get_datetime(date):
+		if isinstance(date, datetime):
+			date = date.replace(tzinfo=timezone.utc)
+			return date
+		try:
+			dt = datetime.strptime(date, '%Y-%m-%dT%H:%M:%SZ')
+			dt = dt.replace(tzinfo=timezone.utc)
+			return dt
+		except (ValueError, TypeError):
+			return None
+
+	def get_vulnerabilities(self):
+		if self.is_expired():
+			yield Vulnerability(
+				name='SSL certificate expired',
+				description='The SSL certificate is expired. This can easily lead to domain takeovers',
+				matched_at=self.host,
+				tags=['ssl', 'tls'],
+				severity='high',
+				confidence='high',
+				extra_data={
+					'expiration_date': self.format_date(self.not_after),
+				},
+			)
+
+	def __rich__(self) -> str:
 		s = f'📜 [bold white]{self.host}[/]'
-		s += f' [cyan]{self.status}[/]'
-		s += rf' [white]\[fingerprint={self.fingerprint_sha256[:10]}][/]'
-		if self.subject_cn:
-			s += rf' [white]\[cn={self.subject_cn}][/]'
-		if self.subject_an:
-			s += rf' [white]\[an={", ".join(self.subject_an)}][/]'
-		if self.issuer:
-			s += rf' [white]\[issuer={self.issuer}][/]'
-		elif self.issuer_cn:
-			s += rf' [white]\[issuer_cn={self.issuer_cn}][/]'
+		if self.status != CERTIFICATE_STATUS_UNKNOWN:
+			s += f' [cyan]{self.status}[/]'
+		if self.is_wildcard():
+			s += r' \[[yellow]wildcard[/]]'
 		expiry_date = Certificate.format_date(self.not_after)
 		if self.is_expired():
-			s += f' [red]expired since {expiry_date}[/red]'
-		elif self.is_expired_soon(months=2):
-			s += f' [yellow]expires <2 months[/yellow], [yellow]valid until {expiry_date}[/yellow]'
+			s += rf' \[[red][bold]expired[/] since {expiry_date}[/]]'
+		elif self.is_expired(months=2):
+			s += rf' \[[red][bold]expires soon[/] on {expiry_date}[/]]'
 		else:
-			s += f' [green]not expired[/green], [yellow]valid until {expiry_date}[/yellow]'
-		return rich_to_ansi(s)
+			s += rf' \[[green][bold]valid[/] until {expiry_date}[/]]'
+		if self.subject_cn:
+			s += rf' \[[red][bold]cn[/]={self.subject_cn}[/]]'
+		if self.subject_an:
+			s += rf' \[[orange4][bold]an[/]={", ".join(self.subject_an)}[/]]'
+		if self.issuer:
+			s += rf' \[[magenta][bold]issuer[/]={self.issuer}[/]]'
+		elif self.issuer_cn:
+			s += rf' \[[magenta][bold]issuer_cn[/]={self.issuer_cn}[/]]'
+		s += rf' \[[cyan][bold]fingerprint_sha256[/]={self.fingerprint_sha256[:10]}[/]]'
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from subprocess import call, DEVNULL
-from typing import Dict, List
+from typing import Any, Dict, List
 from typing_extensions import Annotated, Self
 
 import validators
@@ -64,10 +64,10 @@ class Celery(StrictModel):
 	broker_pool_limit: int = 10
 	broker_connection_timeout: float = 4.0
 	broker_visibility_timeout: int = 3600
-	broker_transport_options: str = ""
+	broker_transport_options: str = ''
 	override_default_logging: bool = True
 	result_backend: StrExpandHome = ''
-	result_backend_transport_options: str = ""
+	result_backend_transport_options: str = ''
 	result_expires: int = 86400  # 1 day
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
@@ -88,7 +88,8 @@ class Cli(StrictModel):
 	stdin_timeout: int = 1000
 	show_http_response_headers: bool = False
 	show_command_output: bool = False
-	exclude_http_response_headers: List[str] = ["connection", "content_type", "content_length", "date", "server"]
+	exclude_http_response_headers: List[str] = ['connection', 'content_type', 'content_length', 'date', 'server']
+	date_format: str = '%m/%d/%Y'  # US, use "%d/%m/%Y" for EUROPEAN format
 
 
 class Runners(StrictModel):
@@ -103,12 +104,14 @@ class Runners(StrictModel):
 	remove_duplicates: bool = False
 	threads: int = 50
 	prompt_timeout: int = 20
+	chunk_rate_limit: bool = True
 
 
 class Security(StrictModel):
 	allow_local_file_access: bool = True
 	auto_install_commands: bool = True
 	force_source_install: bool = False
+	prompt_sudo_password: bool = True
 
 
 class HTTP(StrictModel):
@@ -122,15 +125,16 @@ class HTTP(StrictModel):
 
 
 class Tasks(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	overrides: Dict[str, Dict[str, Any]] = {}
 
 
 class Workflows(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
 
 
 class Scans(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt']
+	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
 
 
 class Profiles(StrictModel):
@@ -141,11 +145,15 @@ class Drivers(StrictModel):
 	defaults: List[str] = []
 
 
+class Workspace(StrictModel):
+	default: str = ''
+
+
 class Payloads(StrictModel):
 	templates: Dict[str, str] = {
 		'lse': 'https://github.com/diego-treitos/linux-smart-enumeration/releases/latest/download/lse.sh',
 		'linpeas': 'https://github.com/carlospolop/PEASS-ng/releases/latest/download/linpeas.sh',
-		'sudo_killer': 'https://github.com/TH3xACE/SUDO_KILLER/archive/refs/heads/V3.zip'
+		'sudo_killer': 'https://github.com/TH3xACE/SUDO_KILLER/archive/refs/heads/V3.zip',
 	}
 
 
@@ -182,12 +190,14 @@ class MongodbAddon(StrictModel):
 	update_frequency: int = 60
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
+	max_items: int = -1
 	duplicate_main_copy_fields: List[str] = [
 		'screenshot_path',
 		'stored_response_path',
 		'is_false_positive',
 		'is_acknowledged',
 		'verified',
+		'tags',
 	]
 
 
@@ -196,12 +206,81 @@ class VulnersAddon(StrictModel):
 	api_key: str = ''
 
 
-class Providers(StrictModel):
-	defaults: Dict[str, str] = {
-		'cve': 'circl',
-		'exploit': 'exploitdb',
-		'ghsa': 'ghsa'
+class AiAddon(StrictModel):
+	enabled: bool = False
+	api_key: str = ''
+	api_base: str = ''
+	default_model: str = 'claude-sonnet-4-6'
+	intent_model: str = 'claude-haiku-4-5'
+	temperature: float = 0.7
+	max_tokens: int = 30000
+	max_tokens_total: int = 100000
+	max_results: int = 500
+	user_response_timeout: int = 600
+	encrypt_pii: bool = True
+	permissions: Dict = {
+		"allow": [
+			"target({targets})",
+			"read({workspace}/*,/dev/null,/tmp/*)",
+			"write({workspace}/.outputs/*,/dev/null,/tmp/*)",
+			"shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,"
+			"cd,git,diff,stat,du,df,tree,sort,uniq,cut,tr,echo,realpath,readlink,"
+			"file,strings,xxd,base64,for,while,which,true,timeout,"
+			"tee,cp,mv,mkdir,touch,chmod,sed,awk,xargs,docker,printf,"
+			"redis-cli,nc,ncat,nmap,sqlmap,nikto,gobuster,feroxbuster,ffuf,"
+			"socat,telnet,openssl,ssh,scp,rsync,ping,traceroute,tcpdump,ss,netstat)",
+			"task(*)",
+			"workflow(*)",
+		],
+		"deny": [
+			"target(169.254.169.254)",
+			"target(127.0.0.1)",
+			"target(localhost)",
+			"read(/etc/shadow)",
+			"read(~/.ssh/*)",
+			"read(~/.aws/*)",
+			"write(/etc/*)",
+			"write(/usr/*)",
+			"shell(rm -rf /*,dd,mkfs,env,printenv)",
+		],
+		"ask": [
+			"target(*)",
+			"shell(python,python3,bash,sh,exec,node,ruby,perl,gcc,g++,make,go,php,java,javac)",
+			"read(*)",
+			"write(*)",
+		],
 	}
+
+
+class Providers(StrictModel):
+	defaults: Dict[str, str] = {'cve': 'circl', 'exploit': 'exploitdb', 'ghsa': 'ghsa'}
+
+
+class DiscordAddon(StrictModel):
+	enabled: bool = False
+	webhook_url: str = ''
+	bot_token: str = ''
+	send_runner_updates: bool = True
+	send_findings: bool = True
+	finding_types: List[str] = ['vulnerability']
+	min_severity: str = 'high'
+
+
+class ApiAddon(StrictModel):
+	enabled: bool = False
+	url: str = 'https://app.secator.cloud/api'
+	key: str = ''
+	header_name: str = 'Bearer'
+	force_ssl: bool = True
+	timeout: int = 60
+	runner_create_endpoint: str = 'runners'
+	runner_update_endpoint: str = 'runner/{runner_id}'
+	finding_create_endpoint: str = 'findings'
+	finding_update_endpoint: str = 'finding/{finding_id}'
+	finding_search_endpoint: str = 'findings/_search'
+	workspace_get_endpoint: str = 'workspace/{workspace_id}'
+	workspace_delete_endpoint: str = 'workspace/{workspace_id}'
+	runner_delete_endpoint: str = '{runner_type}/{runner_id}'
 
 
 class Addons(StrictModel):
@@ -210,6 +289,9 @@ class Addons(StrictModel):
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
 	vulners: VulnersAddon = VulnersAddon()
+	discord: DiscordAddon = DiscordAddon()
+	api: ApiAddon = ApiAddon()
+	ai: AiAddon = AiAddon()
 
 
 class SecatorConfig(StrictModel):
@@ -226,6 +308,7 @@ class SecatorConfig(StrictModel):
 	wordlists: Wordlists = Wordlists()
 	profiles: Profiles = Profiles()
 	drivers: Drivers = Drivers()
+	workspace: Workspace = Workspace()
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()
@@ -272,24 +355,41 @@ class Config(DotMap):
 			Config.print_yaml(yaml_str)
 		return value
 
-	def set(self, key, value, set_partial=True):
+	def set(self, key, value, set_partial=True, strategy=None):
 		"""Set a value in the configuration using a dotted path.
 
 		Args:
 			key (str | None): Dotted key path.
 			value (Any): Value.
 			set_partial (bool): Set in partial config.
+			strategy (str | None): Strategy for updating list/dict fields.
+				None or 'replace': replace the value (default).
+				'append': append value to existing list, or add key to existing dict.
+				'remove': remove value from existing list, or remove key from existing dict.
 		"""
-		# Get existing value
-		existing_value = self.get(key, print=False)
-
 		# Convert dotted key path to the corresponding uppercase key used in _keymap
 		map_key = key.upper().replace('.', '_')
 
-		# Check if map key exists
+		# If key not found in keymap, check if parent path points to a dict field
+		# (handles setting/removing keys in a dict, e.g. wordlists.defaults.mykey)
 		if map_key not in self._keymap:
+			parts = key.split('.')
+			if len(parts) > 1:
+				parent_parts = parts[:-1]
+				dict_subkey = parts[-1]
+				try:
+					parent_value = self
+					for part in parent_parts:
+						parent_value = parent_value[part]
+					if isinstance(parent_value, dict):
+						return self._set_dict_key(parent_parts, dict_subkey, value, set_partial=set_partial, strategy=strategy)
+				except (KeyError, TypeError):
+					pass
 			console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
 			return
+
+		# Get existing value
+		existing_value = self.get(key, print=False)
 
 		# Traverse to the second last key to handle the setting correctly
 		target = self
@@ -301,53 +401,139 @@ class Config(DotMap):
 		# Set the value on the final part of the path
 		final_key = self._keymap[map_key][-1]
 
-		# Try to convert value to expected type
-		try:
-			if isinstance(existing_value, list):
-				if isinstance(value, str):
-					if value.startswith('[') and value.endswith(']'):
-						value = value[1:-1]
-					if ',' in value:
-						value = [c.strip() for c in value.split(',')]
-					elif value:
-						value = [value]
-					else:
-						value = []
-			elif isinstance(existing_value, dict):
-				if isinstance(value, str):
-					if value.startswith('{') and value.endswith('}'):
-						import json
-						value = json.loads(value)
-			elif isinstance(existing_value, bool):
-				if isinstance(value, str):
-					value = value.lower() in ("true", "1", "t")
-				elif isinstance(value, (int, float)):
-					value = True if value == 1 else False
-			elif isinstance(existing_value, int):
-				value = int(value)
-			elif isinstance(existing_value, float):
-				value = float(value)
-			elif isinstance(existing_value, Path):
-				value = Path(value)
-		except ValueError:
-			pass
-		finally:
-			if set_partial:
-				if value is None or value == target[final_key]:
-					if final_key in partial:
-						del partial[final_key]
-					return
+		# Apply strategy for list fields
+		if strategy in ('append', 'remove') and isinstance(existing_value, list):
+			item = value
+			current = list(existing_value)
+			if strategy == 'append':
+				if item not in current:
+					current.append(item)
+			elif strategy == 'remove':
+				if item in current:
+					current.remove(item)
 				else:
-					partial[final_key] = value
-			target[final_key] = value
+					console.print(f'[bold orange1]Value "{item}" not found in {key}[/].')
+					return
+			value = current
+		else:
+			# Try to convert value to expected type
+			try:
+				if isinstance(existing_value, list):
+					if isinstance(value, str):
+						if value.startswith('[') and value.endswith(']'):
+							value = value[1:-1]
+						if ',' in value:
+							value = [c.strip() for c in value.split(',')]
+						elif value:
+							value = [value]
+						else:
+							value = []
+				elif isinstance(existing_value, dict):
+					if isinstance(value, str):
+						if value.startswith('{') and value.endswith('}'):
+							import json
 
-	def unset(self, key, set_partial=True):
+							value = json.loads(value)
+				elif isinstance(existing_value, bool):
+					if isinstance(value, str):
+						value = value.lower() in ('true', '1', 't')
+					elif isinstance(value, (int, float)):
+						value = True if value == 1 else False
+				elif isinstance(existing_value, int):
+					value = int(value)
+				elif isinstance(existing_value, float):
+					value = float(value)
+				elif isinstance(existing_value, Path):
+					value = Path(value)
+			except ValueError:
+				pass
+
+		if set_partial:
+			if value is None or value == target[final_key]:
+				if final_key in partial:
+					del partial[final_key]
+				return
+			else:
+				partial[final_key] = value
+		target[final_key] = value
+
+	def _set_dict_key(self, parent_parts, subkey, value, set_partial=True, strategy=None):
+		"""Set or remove a key within a dict config field.
+
+		Args:
+			parent_parts (list[str]): Path components to the dict field (e.g. ['wordlists', 'defaults']).
+			subkey (str | None): Key within the dict to set/remove.
+			value (Any): Value to set.
+			set_partial (bool): Set in partial config.
+			strategy (str | None): 'remove' to delete the subkey.
+		"""
+		# Navigate to the dict
+		existing_dict = self
+		for part in parent_parts:
+			existing_dict = existing_dict[part]
+
+		if not isinstance(existing_dict, dict):
+			console.print(f'[bold red]Path "{".".join(parent_parts)}" is not a dict field[/].')
+			return
+
+		updated = dict(existing_dict)
+		if strategy == 'remove':
+			if subkey and subkey in updated:
+				del updated[subkey]
+			elif subkey:
+				console.print(f'[bold orange1]Key "{subkey}" not found in {".".join(parent_parts)}[/].')
+				return
+		else:
+			if subkey:
+				updated[subkey] = value
+			elif isinstance(value, dict):
+				updated.update(value)
+
+		# Traverse to the parent of the dict to set the updated value
+		target = self
+		partial = self._partial
+		for part in parent_parts[:-1]:
+			target = target[part]
+			partial = partial[part]
+		dict_key = parent_parts[-1]
+
+		if set_partial:
+			partial[dict_key] = updated
+		target[dict_key] = updated
+
+	def unset(self, key, value=None, set_partial=True):
 		"""Unset a value in the configuration using a dotted path.
 
 		Args:
 			key (str): Dotted key path.
+			value (Any | None): If provided and the field is a list, remove this item from the list.
+				If the field is a dict, this is ignored (use the key to specify the dict subkey to remove).
 			set_partial (bool): Set in partial config.
 		"""
+		if value is not None:
+			# Remove item from list
+			self.set(key, value, set_partial=set_partial, strategy='remove')
+			return
+
+		# Check if key points to a dict subkey that should be removed
+		map_key = key.upper().replace('.', '_')
+		if map_key not in self._keymap:
+			parts = key.split('.')
+			if len(parts) > 1:
+				parent_parts = parts[:-1]
+				dict_subkey = parts[-1]
+				try:
+					parent_value = self
+					for part in parent_parts:
+						parent_value = parent_value[part]
+					if isinstance(parent_value, dict):
+						self._set_dict_key(parent_parts, dict_subkey, None, set_partial=set_partial, strategy='remove')
+						return
+				except (KeyError, TypeError):
+					pass
+			console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
+			return
+
 		self.set(key, None, set_partial=set_partial)
 
 	def save(self, target_path: Path = None, partial=True):
@@ -411,10 +597,7 @@ class Config(DotMap):
 
 	def validate(self, print_errors=True):
 		"""Validate config."""
-		return Config.load(
-			SecatorConfig,
-			data=self._partial.toDict(),
-			print_errors=print_errors)
+		return Config.load(SecatorConfig, data=self._partial.toDict(), print_errors=print_errors)
 
 	def set_extras(self, original_data, original_path):
 		"""Set extra useful values in config.
@@ -481,6 +664,7 @@ class Config(DotMap):
 			string (str): YAML string.
 		"""
 		from rich.syntax import Syntax
+
 		data = Syntax(string, 'yaml', theme='ansi-dark', padding=0, background_color='default')
 		console_stdout.print(data)
 
@@ -547,10 +731,10 @@ class Config(DotMap):
 
 	def apply_env_overrides(self, print_errors=True):
 		"""Override config values from environment variables."""
-		prefix = "SECATOR_"
+		prefix = 'SECATOR_'
 		for var in os.environ:
 			if var.startswith(prefix):
-				key = var[len(prefix):]  # remove prefix
+				key = var[len(prefix) :]  # remove prefix
 				if key in self._keymap:
 					path = '.'.join(k.lower() for k in self._keymap[key])
 					value = os.environ[var]
@@ -590,6 +774,7 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 		path (Path): Path to downloaded file / folder.
 	"""
 	from secator.output_types import Info, Error
+
 	if url_or_path.startswith('git+'):
 		# Clone Git repository
 		git_url = url_or_path[4:]  # remove 'git+' prefix
@@ -623,6 +808,7 @@ def download_file(url_or_path, target_folder: Path, offline_mode: bool, type: st
 				console.print(Error(message=f'File {local_path.resolve()} is not in {CONFIG.dirs.data} and security.allow_local_file_access is disabled.'))  # noqa: E501
 				return None
 			from secator.output_types import Info
+
 			console.print(repr(Info(message=f'[bold turquoise4]Copying {type} [bold magenta]{name}[/] to {target_folder} ...[/] ')), highlight=False, end='')  # noqa: E501
 			shutil.copyfile(local_path, target_folder / name)
 			target_path = target_folder / local_path.name
@@ -666,8 +852,7 @@ if not config_path.exists():
 		console.print(f'[bold turquoise4]Creating directory [bold magenta]{data_root}[/] ... [/]', end='')
 		data_root.mkdir(parents=False)
 		console.print('[bold green]ok.[/]')
-	console.print(
-		f'[bold turquoise4]Creating user conf [bold magenta]{config_path}[/]... [/]', end='')
+	console.print(f'[bold turquoise4]Creating user conf [bold magenta]{config_path}[/]... [/]', end='')
 	config_path.touch()
 	console.print('[bold green]ok.[/]')
 CONFIG = Config.parse(path=config_path)
@@ -681,7 +866,7 @@ if not CONFIG:
 for name, dir in CONFIG.dirs.items():
 	if not dir.exists():
 		console.print(f'[bold turquoise4]Creating directory [bold magenta]{dir}[/] ... [/]', end='')
-		dir.mkdir(parents=False)
+		dir.mkdir(parents=True)
 		console.print('[bold green]ok.[/]')
 
 # Download wordlists and payloads

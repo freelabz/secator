@@ -91,6 +91,7 @@ class trufflehog(Command):
         f'mv {CONFIG.dirs.share}/trufflehog_[install_version]/trufflehog {CONFIG.dirs.bin}'
     )
     github_handle = 'trufflesecurity/trufflehog'
+    profile = 'medium'
 
     @staticmethod
     def before_init(self):

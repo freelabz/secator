@@ -25,6 +25,9 @@ class Warning(OutputType):
 		self.message_color = self.message
 		self.message = strip_rich_markup(self.message)
 
-	def __repr__(self):
+	def __rich__(self):
 		s = rf"\[[yellow]WRN[/]] {self.message_color}"
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self):
+		return rich_to_ansi(self.__rich__())

@@ -1,13 +1,18 @@
 import os
 import shlex
-import yaml
-
 from urllib.parse import urlparse, urlunparse
 
+import yaml
+
 from secator.decorators import task
-from secator.definitions import (OUTPUT_PATH, RATE_LIMIT, THREADS, DELAY, TIMEOUT, METHOD, WORDLIST,
-								 HEADER, URL, FOLLOW_REDIRECT, OPT_NOT_SUPPORTED, DATA, USER_AGENT)
-from secator.output_types import Info, Url, Warning, Tag
+
+# fmt: off
+from secator.definitions import (
+	DATA, DELAY, FOLLOW_REDIRECT, HEADER, METHOD, OPT_NOT_SUPPORTED, OUTPUT_PATH, RATE_LIMIT, RETRIES, THREADS, TIMEOUT,
+	URL, USER_AGENT, WORDLIST
+)
+# fmt: on
+from secator.output_types import Info, Tag, Url, Warning
 from secator.tasks._categories import HttpBase
 from secator.utils import process_wordlist
 
@@ -15,6 +20,7 @@ from secator.utils import process_wordlist
 @task()
 class arjun(HttpBase):
 	"""HTTP Parameter Discovery Suite."""
+
 	cmd = 'arjun'
 	input_types = [URL]
 	output_types = [Url, Tag]
@@ -33,6 +39,7 @@ class arjun(HttpBase):
 	opt_key_map = {
 		DATA: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED,
+		RETRIES: OPT_NOT_SUPPORTED,
 		THREADS: 't',
 		DELAY: 'd',
 		TIMEOUT: 'T',
@@ -46,19 +53,11 @@ class arjun(HttpBase):
 		'passive': '--passive',
 		'casing': '--casing',
 	}
-	opt_value_map = {
-		HEADER: lambda headers: "\\n".join(c.strip() for c in headers.split(";;"))
-	}
+	opt_value_map = {HEADER: lambda headers: '\\n'.join(c.strip() for c in headers.split(';;'))}
 	install_version = '2.2.7'
 	install_cmd = 'pipx install arjun==[install_version] --force'
 	install_github_bin = False
 	github_handle = 's0md3v/Arjun'
-
-	@staticmethod
-	def on_line(self, line):
-		if 'Processing chunks' in line:
-			return ''
-		return line
 
 	@staticmethod
 	def on_cmd(self):
@@ -69,8 +68,15 @@ class arjun(HttpBase):
 
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
-			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
+			self.output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
 		self.cmd += f' -oJ {shlex.quote(self.output_path)}'
+
+	@staticmethod
+	def on_line(self, line):
+		if 'Processing chunks' in line:
+			yield ''
+			return
+		yield line
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -85,13 +91,15 @@ class arjun(HttpBase):
 				return
 		for url, values in results.items():
 			parsed_url = urlparse(url)
-			url_without_param = urlunparse(parsed_url._replace(query=''))
+			url_without_param = str(urlunparse(parsed_url._replace(query='')))
 			yield Url(
 				url=url,
 				host=parsed_url.hostname,
 				request_headers=values['headers'],
 				method=values['method'],
-				confidence='high'
+				confidence='high',
+				verified=True,
+				tags=['fuzz'],
 			)
 			for param in values['params']:
 				yield Tag(
@@ -99,4 +107,13 @@ class arjun(HttpBase):
 					name='url_param',
 					value=param,
 					match=url_without_param,
+				)
+				yield Url(
+					url=f'{url_without_param}?{param}=',
+					host=parsed_url.hostname,
+					request_headers=values['headers'],
+					method=values['method'],
+					confidence='high',
+					verified=True,
+					tags=['fuzz'],
 				)

@@ -31,8 +31,11 @@ class Target(OutputType):
 	def __str__(self):
 		return self.name
 
-	def __repr__(self):
+	def __rich__(self):
 		s = f'🎯 {_s(self.name)}'
 		if self.type:
 			s += f' ({self.type})'
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self):
+		return rich_to_ansi(self.__rich__())

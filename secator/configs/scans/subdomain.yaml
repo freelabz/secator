@@ -7,6 +7,7 @@ long_description: |
   crawls web applications, and scans for vulnerabilities. Identifies the full subdomain
   attack surface and potential security issues. Crucial for comprehensive domain security testing.
 profile: default
+tags: [recon, dns, network, http, crawl, ssl, takeovers, vuln, secrets]
 input_types:
   - host
 workflows:

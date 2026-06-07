@@ -31,6 +31,10 @@ def dataclass_decoder(obj):
 	return obj
 
 
+def dump_dataclass(obj, fp, indent=None):
+	json.dump(obj, fp, cls=DataclassEncoder, indent=indent)
+
+
 def dumps_dataclass(obj, indent=None):
 	return json.dumps(obj, cls=DataclassEncoder, indent=indent)
 

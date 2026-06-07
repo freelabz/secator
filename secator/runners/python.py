@@ -37,10 +37,19 @@ class PythonRunner(Runner):
 	tags = []
 	opts = {}
 	default_inputs = None
-	profile = 'io'
-
-	def needs_chunking(self, sync):
-		return False
+	input_chunk_size = CONFIG.runners.input_chunk_size
+	profile = 'small'
+	install_cmd = None
+	install_pre = None
+	install_post = None
+	install_cmd_pre = None
+	github_handle = None
+	install_github_bin = False
+	install_ignore_bin = []
+	install_binary_name = None
+	install_version = None
+	install_github_version_prefix = ''
+	print_cmd_icon = ':zap:'
 
 	def __init__(self, inputs=[], **run_opts):
 		"""Initialize PythonRunner.
@@ -89,6 +98,14 @@ class PythonRunner(Runner):
 			validators=validators,
 			context=context)
 
+	@classmethod
+	def si(cls, *args, results=None, **kwargs):
+		# TODO: Move this to TaskBase
+		from secator.celery import run_command
+
+		profile = cls.profile(kwargs) if callable(cls.profile) else cls.profile
+		return run_command.si(results or [], cls.__name__, *args, opts=kwargs).set(queue=profile)
+
 	@staticmethod
 	def _validate_input_nonempty(self, inputs):
 		"""Input is empty."""
@@ -104,6 +121,41 @@ class PythonRunner(Runner):
 		if len(inputs) > 1:
 			return False
 		return True
+
+	def print_command(self):
+		"""Print command."""
+		print_cmd = self.run_opts.get('print_cmd', False)
+		if print_cmd:
+			icon = self.run_opts.get('print_cmd_icon', self.print_cmd_icon)
+			targets = ','.join(self.inputs)
+			cmd_str = f'{icon} [bold green]{self.__class__.__name__} {targets}[/]'
+			if self.sync and self.chunk and self.chunk_count:
+				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
+			self._print(cmd_str, rich=True)
+
+	def needs_chunking(self, sync):
+		many_targets = len(self.inputs) > 1
+		targets_over_chunk_size = self.input_chunk_size and self.input_chunk_size != -1 and len(self.inputs) > self.input_chunk_size  # noqa: E501
+		is_chunk = self.chunk
+		chunk_it = (sync and many_targets and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501
+		return chunk_it
+
+	def get_opt_value(self, opt_name):
+		"""Get option value with fallback to default from opts definition.
+
+		# TODO: align with Command.get_opt_value to support aliases, pre_process, process, and opt_key_map overrides.
+
+		Args:
+			opt_name (str): Option name.
+
+		Returns:
+			Any: Option value.
+		"""
+		val = self.run_opts.get(opt_name)
+		if val is not None:
+			return val
+		opt_conf = self.opts.get(opt_name, {})
+		return opt_conf.get('default')
 
 	def yielder(self):
 		"""Execute the Python task and yield its results.

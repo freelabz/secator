@@ -49,7 +49,7 @@ class naabu(ReconPort):
 	proxychains = False
 	proxy_socks5 = True
 	proxy_http = False
-	profile = 'io'
+	profile = 'small'
 
 	@staticmethod
 	def before_init(self):
@@ -68,18 +68,21 @@ class naabu(ReconPort):
 	def on_json_loaded(self, item):
 		ip = item['ip']
 		host = item['host'] if 'host' in item else ip
+		scan_type = self.get_opt_value('scan_type')
 		if host == '127.0.0.1':
 			host = 'localhost'
 		if host not in self.hosts:
 			yield Ip(
 				ip=ip,
 				host=host,
-				alive=True
+				alive=True,
+				tags=['ping']
 			)
 			self.hosts.append(host)
 		yield Port(
 			ip=ip,
 			port=item['port'],
 			host=host,
-			state='open'
+			state='open',
+			tags=['syn' if scan_type == 's' else 'connect']
 		)

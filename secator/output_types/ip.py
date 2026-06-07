@@ -21,6 +21,7 @@ class Ip(OutputType):
 	extra_data: dict = field(default_factory=dict, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
+	tags: list = field(default_factory=list, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='ip', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -36,7 +37,7 @@ class Ip(OutputType):
 	def __str__(self) -> str:
 		return self.ip
 
-	def __repr__(self) -> str:
+	def __rich__(self) -> str:
 		s = f'💻 [bold white]{self.ip}[/]'
 		if self.host and self.host != self.ip:
 			s += rf' \[[bold magenta]{self.host}[/]]'
@@ -46,4 +47,7 @@ class Ip(OutputType):
 			s += format_object(self.extra_data, 'yellow')
 		if not self.alive:
 			s = f'[dim]{s}[/]'
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self) -> str:
+		return rich_to_ansi(self.__rich__())

@@ -15,11 +15,6 @@ class Scan(Runner):
 
 	default_exporters = CONFIG.scans.exporters
 
-	@classmethod
-	def delay(cls, *args, **kwargs):
-		from secator.celery import run_scan
-		return run_scan.delay(args=args, kwargs=kwargs)
-
 	def build_celery_workflow(self):
 		"""Build Celery workflow for scan execution.
 
@@ -48,6 +43,7 @@ class Scan(Runner):
 			run_opts['has_parent'] = True
 			run_opts['enable_reports'] = False
 			run_opts['print_profiles'] = False
+			run_opts['reports_folder'] = str(self.reports_folder)
 			opts = merge_opts(scan_opts, workflow_opts, run_opts)
 			name = name.split('/')[0]
 			config = TemplateLoader(name=f'workflow/{name}')

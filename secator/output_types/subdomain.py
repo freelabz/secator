@@ -16,6 +16,7 @@ class Subdomain(OutputType):
 	extra_data: dict = field(default_factory=dict, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
+	tags: list = field(default_factory=list, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='subdomain', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -35,7 +36,7 @@ class Subdomain(OutputType):
 	def __str__(self):
 		return self.host
 
-	def __repr__(self):
+	def __rich__(self):
 		sources_str = ', '.join([f'[magenta]{source}[/]' for source in self.sources])
 		s = f'🏰 [white]{self.host}[/]'
 		if sources_str:
@@ -44,4 +45,7 @@ class Subdomain(OutputType):
 			s += format_object(self.extra_data, 'yellow')
 		if not self.verified:
 			s = f'[dim]{s}[/]'
-		return rich_to_ansi(s)
+		return s
+
+	def __repr__(self):
+		return rich_to_ansi(self.__rich__())

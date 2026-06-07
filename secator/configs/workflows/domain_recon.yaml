@@ -7,6 +7,7 @@ long_description: |
   Collects WHOIS data, probes HTTP services, detects technologies, analyzes SSL/TLS security,
   resolves DNS records, retrieves ASN information, and identifies any Web Application Firewalls (WAF).
   Ideal for understanding a domain's infrastructure and security posture before deeper testing.
+tags: [recon, dns, ssl, http]
 input_types:
 - host
 
@@ -22,6 +23,9 @@ tasks:
     jswhois:
       description: Get WHOIS information
 
+    whois:
+      description: Extract domain information from WHOIS data
+
     httpx:
       description: Run HTTP probe on domain
       tech_detect: True
@@ -30,6 +34,10 @@ tasks:
 
     getasn:
       description: Get ASN from domain name
+
+    xurlfind3r:
+      description: Get passive URLs for domain
+      if: opts.passive
 
     testssl:
       description: Test SSL/TLS security

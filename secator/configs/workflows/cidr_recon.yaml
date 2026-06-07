@@ -6,7 +6,7 @@ long_description: |
   Discovers and analyzes hosts within a CIDR range or local network through ARP / ICMP scanning.
   Maps IP addresses and identifies live hosts.
   Useful for local network security assessments and penetration testing.
-tags: [recon, cidr, network]
+tags: [recon, cidr, network, vuln, internal]
 input_types:
   - cidr_range
   - ip
@@ -37,6 +37,8 @@ tasks:
       - type: tag
         field: value
         condition: item.name == 'user_input'
+      - type: target
+        field: name
 
     fping:
       description: Discover hosts with ICMP requests
@@ -44,18 +46,15 @@ tasks:
       - type: tag
         field: value
         condition: item.name == 'user_input'
+      - type: target
+        field: name
 
     nmap:
-      description: Discover hosts and ports with TCP SYN scan
-      version_detection: true
+      description: Discover live hosts with ping scan
+      ping_scan: True
       targets_:
       - type: tag
         field: value
         condition: item.name == 'user_input'
-
-  search_vulns:
-    description: Search for related exploits
-    targets_:
-    - type: port
-      field: '{host}:{port}~{service_name}'
-      condition: len(item.service_name.split('/')) > 1
+      - type: target
+        field: name

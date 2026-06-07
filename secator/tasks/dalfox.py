@@ -70,7 +70,7 @@ class dalfox(HttpBase):
 	proxychains_flavor = 'proxychains4'
 	proxy_socks5 = True
 	proxy_http = True
-	profile = 'cpu'
+	profile = 'extra_large'
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -80,6 +80,7 @@ class dalfox(HttpBase):
 				url=item['data'],
 				method=item['method'],
 				request_headers=item['request_headers'],
+				verified=True,
 				extra_data={k: v for k, v in item.items() if k not in ['type', 'severity', 'cwe', 'request_headers', 'method', 'data']}  # noqa: E501
 			)
 		yield item
@@ -95,8 +96,10 @@ class dalfox(HttpBase):
 	@staticmethod
 	def format_data(data):
 		try:
-			data = json.loads(data)
-			data = '&'.join([f'{k}={v}' for k, v in data.items()])
-			return data
-		except json.JSONDecodeError:
+			if isinstance(data, str):
+				data = json.loads(data)
+			if isinstance(data, dict):
+				return '&'.join([f'{k}={v}' for k, v in data.items()])
+			return ''
+		except (json.JSONDecodeError, TypeError):
 			return ''

@@ -1,10 +1,11 @@
+import json
 import yaml
 
 from collections import OrderedDict
 from dotmap import DotMap
 from pathlib import Path
 
-from secator.output_types import Error
+from secator.output_types import Error, Warning
 from secator.rich import console
 
 
@@ -53,6 +54,14 @@ class TemplateLoader(DotMap):
 		from rich.syntax import Syntax
 		yaml_highlight = Syntax(yaml_str, 'yaml', line_numbers=True)
 		console.print(yaml_highlight)
+
+	def toDict(self, *args, **kwargs):
+		serialize = kwargs.pop('serialize', False)
+		d = super().toDict(*args, **kwargs)
+		config_type = d.get('type')
+		if serialize and config_type != 'profile':
+			d['opts'] = serialize_config_options(get_config_options(self))
+		return d
 
 
 def get_short_id(id_str, config_name):
@@ -136,7 +145,10 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 				continue
 			node_task = None
 			if check_class_opts:
-				node_task = Task.get_task_class(_.name)
+				try:
+					node_task = Task.get_task_class(_.name)
+				except ValueError:
+					continue
 				if opt_name not in node_task.opts:
 					continue
 				opts_value = node_task.opts[opt_name]
@@ -179,7 +191,11 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 
 		# Process task options
 		# a.k.a task options defined in their respective task classes
-		cls = Task.get_task_class(node.name)
+		try:
+			cls = Task.get_task_class(node.name)
+		except ValueError:
+			console.print(Warning(message=f'Task {node.name!r} not found - skipping it in {config.name!r}. Please update your config.'))  # noqa: E501
+			return
 		task_opts = cls.opts.copy()
 		task_opts_meta = getattr(cls, 'meta_opts', {}).copy()
 		task_opts_all = {**task_opts, **task_opts_meta}
@@ -281,7 +297,8 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		if isinstance(default, bool) and default is True:
 			v['reverse'] = True
 		if type_mapping and 'type' in v:
-			v['type'] = type_mapping.get(v['type'], str)
+			if isinstance(v['type'], str):
+				v['type'] = type_mapping.get(v['type'], str)
 		short = v.get('short')
 		k = k.replace('.', '-').replace('_', '-').replace('/', '-')
 		from_str = default_from.replace('.', '-').replace('_', '-').replace('/', '-') if default_from else None
@@ -292,3 +309,28 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		debug(f'\t[bold]{k}[/] -> [bold green]{v.get("default", "N/A")}[/] [dim red](default from {v.get("default_from", "N/A")})[/]', sub=f'cli.{config.name}')  # noqa: E501
 		normalized_opts[k] = v
 	return normalized_opts
+
+
+def serialize_config_options(options):
+	"""
+	Serialize config options to JSON format.
+
+	Args:
+		options (dict): Config options.
+
+	Returns:
+		str: Serialized config options.
+	"""
+	for opt_name, opt_config in options.items():
+		type = opt_config.get("type")
+		applies_to = list(opt_config.get("applies_to", {}))
+		if applies_to:
+			options[opt_name]["applies_to"] = applies_to
+		is_flag = opt_config.get("is_flag", False)
+		if type and getattr(type, "__name__", None):
+			options[opt_name]["type"] = type.__name__
+		if is_flag:
+			options[opt_name]["type"] = "bool"
+	options = {k.replace("-", "_"): v for k, v in options.items()}
+	options_str = json.dumps(options, default=str, indent=4)
+	return json.loads(options_str)

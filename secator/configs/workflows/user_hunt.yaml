@@ -7,7 +7,7 @@ long_description: |
   Takes usernames, email addresses, or other identifiers and queries multiple sources to find
   associated accounts, password leaks, and online profiles. Useful for OSINT investigations,
   credential stuffing prevention checks, and understanding a user's digital footprint.
-tags: [user_account]
+tags: [user_account, leak]
 input_types:
   - slug
   - string

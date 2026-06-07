@@ -5,7 +5,7 @@ import yaml
 
 from secator.decorators import task
 from secator.runners import Command
-from secator.definitions import (OUTPUT_PATH, HEADER, PROXY, URL, TIMEOUT)
+from secator.definitions import (OUTPUT_PATH, HEADER, PROXY, URL, TIMEOUT, HOST, HOST_PORT, IP)
 from secator.output_types import Tag, Info, Error
 from secator.tasks._categories import OPTS
 
@@ -14,7 +14,7 @@ from secator.tasks._categories import OPTS
 class wafw00f(Command):
 	"""Web Application Firewall Fingerprinting tool."""
 	cmd = 'wafw00f'
-	input_types = [URL]
+	input_types = [URL, HOST, HOST_PORT, IP]
 	output_types = [Tag]
 	tags = ['waf', 'scan']
 	input_flag = None
@@ -53,7 +53,7 @@ class wafw00f(Command):
 	def on_cmd(self):
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
-			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
+			self.output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
 		self.cmd += f' -o {shlex.quote(self.output_path)}'
 
 		self.headers = self.get_opt_value(HEADER)
