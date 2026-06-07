@@ -2164,13 +2164,17 @@ def install_ai():
 @install.group()
 def langs():
 	"[deprecated] Install languages. Use 'secator update langs' instead."
-	console.print(Warning(message='The "secator install langs" command is deprecated. Use "secator update langs" instead.'))
+	console.print(Warning(
+		message='The "secator install langs" command is deprecated. Use "secator update langs" instead.'
+	))
 
 
 @langs.command('go')
 def install_go():
 	"""[deprecated] Install Go. Use 'secator update langs' instead."""
-	console.print(Warning(message='The "secator install langs go" command is deprecated. Use "secator update langs" instead.'))
+	console.print(Warning(
+		message='The "secator install langs go" command is deprecated. Use "secator update langs" instead.'
+	))
 	run_install(
 		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
 		title='Go',
@@ -2181,7 +2185,9 @@ def install_go():
 @langs.command('ruby')
 def install_ruby():
 	"""[deprecated] Install Ruby. Use 'secator update langs' instead."""
-	console.print(Warning(message='The "secator install langs ruby" command is deprecated. Use "secator update langs" instead.'))
+	console.print(Warning(
+		message='The "secator install langs ruby" command is deprecated. Use "secator update langs" instead.'
+	))
 	run_install(
 		packages={
 			'apt': ['ruby-full', 'rubygems'],
@@ -2199,7 +2205,9 @@ def install_ruby():
 @click.option('--fail-fast', is_flag=True, default=False, help='Fail fast if any tool fails to install.')
 def install_tools(tool_names, cleanup, fail_fast):
 	"""[deprecated] Install supported tools. Use 'secator update tools' instead."""
-	console.print(Warning(message='The "secator install tools" command is deprecated. Use "secator update tools" instead.'))
+	console.print(Warning(
+		message='The "secator install tools" command is deprecated. Use "secator update tools" instead.'
+	))
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
