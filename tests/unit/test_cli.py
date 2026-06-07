@@ -362,14 +362,16 @@ class TestCli(unittest.TestCase):
 		assert 'Workspace name' in result.output
 
 	def test_profile_list_command(self):
-		result = self.runner.invoke(cli, ['profile', 'list'])
+		# Wide terminal so rich does not wrap the column headers across lines.
+		result = self.runner.invoke(cli, ['profile', 'list'], env={'COLUMNS': '400'})
 		assert not result.exception
 		assert result.exit_code == 0
-		assert 'Profile name' in result.output
+		for column in ['Profile name', 'Description', 'Enforced', 'Workspace', 'Drivers', 'Exporters', 'Options']:
+			assert column in result.output, f'column {column!r} missing from profile list output'
 
 	def test_profile_list_command_aliases(self):
 		for alias in ['p', 'pf', 'profiles']:
-			result = self.runner.invoke(cli, [alias, 'list'])
+			result = self.runner.invoke(cli, [alias, 'list'], env={'COLUMNS': '400'})
 			assert not result.exception, f'alias {alias!r} raised {result.exception}'
 			assert result.exit_code == 0, f'alias {alias!r} exited {result.exit_code}'
 			assert 'Profile name' in result.output, f'alias {alias!r} output missing table'
