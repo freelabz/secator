@@ -29,6 +29,18 @@ MEDIUM_VULN = {
 	'is_false_positive': False,
 	'_context': {'workspace_id': WORKSPACE, 'workspace_duplicate': False},
 }
+TARGET = {
+	'_type': 'target',
+	'name': 'example.com',
+	'type': 'domain',
+	'_context': {'workspace_id': WORKSPACE, 'workspace_duplicate': False},
+}
+AI = {
+	'_type': 'ai',
+	'content': 'thinking about the target',
+	'ai_type': 'prompt',
+	'_context': {'workspace_id': WORKSPACE, 'workspace_duplicate': False},
+}
 
 # Shared query matrix across all backends.
 # Columns: (query_expr, server_docs, expected_count, expected_names)
@@ -94,6 +106,76 @@ class TestReportShowLocalBackend(unittest.TestCase):
 				vulns = captured.get('results', {}).get('vulnerability', [])
 				self.assertEqual(len(vulns), expected_count)
 				self.assertEqual(sorted(v['name'] for v in vulns), sorted(expected_names))
+
+	def _invoke_with_paths(self, report_query):
+		"""Invoke `r show <report_query>` (positional path filter) and return the result."""
+		from secator.cli import cli
+
+		args = ['r', 'show', '-w', WORKSPACE, '--driver', 'local']
+		if report_query:
+			args.append(report_query)
+
+		with mock.patch('secator.query.json.CONFIG') as mock_cfg, \
+				mock.patch('secator.report.Report.send', lambda report_self: None):
+			mock_cfg.dirs.reports = Path(self.temp_dir)
+			result = self.cli_runner.invoke(cli, args)
+		return result
+
+	def test_info_line_shows_searched_paths(self):
+		"""The summary line echoes the searched runner paths when a report_query is passed."""
+		result = self._invoke_with_paths('tasks/1')
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		self.assertIn('searched: tasks/1', result.output)
+
+	def test_info_line_no_searched_without_query(self):
+		"""Without a report_query, the summary line omits the 'searched' suffix."""
+		result = self._invoke_with_paths(None)
+		self.assertEqual(result.exit_code, 0)
+		self.assertIn('results in workspace', result.output)
+		self.assertNotIn('searched:', result.output)
+
+	def _write_report_with_verbose_types(self):
+		task_dir = Path(self.temp_dir) / WORKSPACE / 'tasks' / '1'
+		with open(task_dir / 'report.json', 'w') as f:
+			json.dump({
+				'info': {'name': 'test'},
+				'results': {
+					'vulnerability': [CRITICAL_VULN.copy()],
+					'target': [TARGET.copy()],
+					'ai': [AI.copy()],
+				},
+			}, f)
+
+	def test_verbose_types_excluded_without_query(self):
+		"""`r show` with no query hides verbose target and ai results."""
+		self._write_report_with_verbose_types()
+		result, captured = self._invoke(None)
+		self.assertEqual(result.exit_code, 0)
+		self.assertEqual(len(captured.get('results', {}).get('vulnerability', [])), 1)
+		self.assertEqual(captured.get('results', {}).get('target', []), [])
+		self.assertEqual(captured.get('results', {}).get('ai', []), [])
+
+	def test_targets_shown_with_explicit_query(self):
+		"""`r show -q target` displays target results (and still hides ai)."""
+		self._write_report_with_verbose_types()
+		result, captured = self._invoke('target')
+		self.assertEqual(result.exit_code, 0)
+		targets = captured.get('results', {}).get('target', [])
+		self.assertEqual(len(targets), 1)
+		self.assertEqual(targets[0]['name'], 'example.com')
+		self.assertEqual(captured.get('results', {}).get('vulnerability', []), [])
+		self.assertEqual(captured.get('results', {}).get('ai', []), [])
+
+	def test_ai_shown_with_explicit_query(self):
+		"""`r show -q ai` displays ai results (and still hides targets)."""
+		self._write_report_with_verbose_types()
+		result, captured = self._invoke('ai')
+		self.assertEqual(result.exit_code, 0)
+		ai_items = captured.get('results', {}).get('ai', [])
+		self.assertEqual(len(ai_items), 1)
+		self.assertEqual(captured.get('results', {}).get('vulnerability', []), [])
+		self.assertEqual(captured.get('results', {}).get('target', []), [])
 
 
 class TestReportShowMongoDBBackend(unittest.TestCase):
@@ -245,3 +327,176 @@ class TestReportShowApiBackend(unittest.TestCase):
 
 		self.assertEqual(result.exit_code, 0)
 		self.assertEqual(captured.get('results', {}).get('vulnerability', []), [])
+
+
+class TestReportListCurrentWorkspace(unittest.TestCase):
+	"""`secator r list` shows the current workspace, honoring the -ws option."""
+
+	def setUp(self):
+		self.temp_dir = tempfile.mkdtemp()
+		# A real report file so paths is non-empty and .stat() works
+		task_dir = Path(self.temp_dir) / 'tasks' / '1'
+		task_dir.mkdir(parents=True)
+		self.report_path = task_dir / 'report.json'
+		self.report_path.write_text('{}')
+
+	def tearDown(self):
+		shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+	def _run_list(self, workspace_opt, default_ws):
+		import click
+		from secator.cli import report_list, console
+
+		info = {'type': 'tasks', 'id': '1', 'workspace': workspace_opt or default_ws}
+		report_info = {'name': 't', 'targets': [], 'run_opts': {}, 'status': 'completed',
+					   'start_time': None, 'end_time': None, 'elapsed_human': ''}
+		vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+
+		ctx = click.Context(report_list)
+		ctx.obj = {'piped_output': False}
+		# `report_list.callback` is the @click.pass_context wrapper: it pulls the context from
+		# click's stack (not from an explicit arg), so we push it via `with ctx:`.
+		with ctx, \
+				mock.patch('secator.cli.list_reports', return_value=[self.report_path]), \
+				mock.patch('secator.cli.get_info_from_report_path', return_value=info), \
+				mock.patch('secator.cli._load_report_data', return_value=(report_info, vuln_counts)), \
+				mock.patch('secator.cli.CONFIG') as cfg, \
+				console.capture() as cap:
+			cfg.workspace.default = default_ws
+			report_list.callback(
+				workspace=workspace_opt, runner_type=None, time_delta=None, show_all=False, interesting=False,
+				status=None,
+			)
+		# Flatten whitespace so console line-wrapping doesn't split asserted phrases
+		return ' '.join(cap.get().split())
+
+	def test_uses_ws_option_when_passed(self):
+		out = self._run_list(workspace_opt='vulnweb', default_ws='defws')
+		self.assertIn('Current workspace', out)
+		self.assertIn('vulnweb', out)
+		self.assertNotIn('defws', out)
+		# Switch hint always shown as a reminder, even when -ws was provided
+		self.assertIn('-ws <workspace_name>', out)
+		self.assertIn('to switch', out)
+
+	def test_all_workspaces_message_without_ws(self):
+		out = self._run_list(workspace_opt=None, default_ws='defws')
+		# Without -ws, all workspaces are listed, so don't claim a single current workspace
+		self.assertNotIn('Current workspace', out)
+		self.assertIn('All workspaces selected', out)
+		self.assertIn('-ws <workspace_name>', out)
+		self.assertIn('to filter on a workspace', out)
+
+
+class TestReportListInteresting(unittest.TestCase):
+	"""`secator r list --interesting/-i` only lists reports that have vulnerabilities."""
+
+	def setUp(self):
+		self.temp_dir = tempfile.mkdtemp()
+		# Report WITH a real-severity vulnerability (shows in the Vulnerabilities column), status SUCCESS
+		self.with_vuln = Path(self.temp_dir) / 'tasks' / '1' / 'report.json'
+		self.with_vuln.parent.mkdir(parents=True)
+		self.with_vuln.write_text(json.dumps({
+			'info': {'status': 'SUCCESS'},
+			'results': {'vulnerability': [{'_type': 'vulnerability', 'name': 'x', 'severity': 'high'}]},
+		}))
+		# Report WITHOUT any vulnerability, status FAILURE
+		self.no_vuln = Path(self.temp_dir) / 'tasks' / '2' / 'report.json'
+		self.no_vuln.parent.mkdir(parents=True)
+		self.no_vuln.write_text(json.dumps({'info': {'status': 'FAILURE'}, 'results': {'url': [{'_type': 'url'}]}}))
+		# Report with ONLY unknown/empty-severity vulns (renders as '-', must be filtered out by -i), status SUCCESS
+		self.unknown_sev = Path(self.temp_dir) / 'tasks' / '3' / 'report.json'
+		self.unknown_sev.parent.mkdir(parents=True)
+		self.unknown_sev.write_text(json.dumps({
+			'info': {'status': 'SUCCESS'},
+			'results': {'vulnerability': [
+				{'_type': 'vulnerability', 'name': 'CVE-X', 'severity': 'unknown'},
+				{'_type': 'vulnerability', 'name': 'CVE-Y', 'severity': ''},
+			]},
+		}))
+
+	def tearDown(self):
+		shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+	def _invoke(self, args):
+		from secator.cli import cli
+		# Under CliRunner there is no TTY, so report_list takes the piped branch and prints paths,
+		# which still respects the filters.
+		with mock.patch('secator.cli.list_reports', return_value=[self.with_vuln, self.no_vuln, self.unknown_sev]):
+			return CliRunner().invoke(cli, ['r', 'list'] + args)
+
+	def test_interesting_filters_to_vuln_reports(self):
+		result = self._invoke(['-i'])
+		self.assertEqual(result.exit_code, 0)
+		self.assertIn(str(self.with_vuln), result.output)
+		self.assertNotIn(str(self.no_vuln), result.output)
+		# Unknown/empty-severity vulns render as '-' and are not interesting
+		self.assertNotIn(str(self.unknown_sev), result.output)
+
+	def test_long_flag_equivalent(self):
+		result = self._invoke(['--interesting'])
+		self.assertIn(str(self.with_vuln), result.output)
+		self.assertNotIn(str(self.no_vuln), result.output)
+		self.assertNotIn(str(self.unknown_sev), result.output)
+
+	def test_without_interesting_shows_all(self):
+		result = self._invoke([])
+		self.assertIn(str(self.with_vuln), result.output)
+		self.assertIn(str(self.no_vuln), result.output)
+		self.assertIn(str(self.unknown_sev), result.output)
+
+	def test_status_filter(self):
+		result = self._invoke(['--status', 'FAILURE'])
+		self.assertEqual(result.exit_code, 0)
+		self.assertIn(str(self.no_vuln), result.output)
+		self.assertNotIn(str(self.with_vuln), result.output)
+		self.assertNotIn(str(self.unknown_sev), result.output)
+
+	def test_status_filter_case_insensitive(self):
+		# lower-case, UPPER-case and Title-case must all behave identically
+		for variant in ('success', 'SUCCESS', 'Success'):
+			result = self._invoke(['--status', variant])
+			self.assertIn(str(self.with_vuln), result.output, variant)
+			self.assertIn(str(self.unknown_sev), result.output, variant)
+			self.assertNotIn(str(self.no_vuln), result.output, variant)
+		# Title-case on a different status value
+		result = self._invoke(['--status', 'Failure'])
+		self.assertIn(str(self.no_vuln), result.output)
+		self.assertNotIn(str(self.with_vuln), result.output)
+
+	def test_status_and_interesting_combined(self):
+		# Only the SUCCESS report that also has real-severity vulns survives both filters
+		result = self._invoke(['-i', '--status', 'SUCCESS'])
+		self.assertIn(str(self.with_vuln), result.output)
+		self.assertNotIn(str(self.unknown_sev), result.output)
+		self.assertNotIn(str(self.no_vuln), result.output)
+
+	def test_status_partial_regex_match(self):
+		# 'FAIL' is a regex search, so it matches FAILURE
+		result = self._invoke(['--status', 'FAIL'])
+		self.assertEqual(result.exit_code, 0)
+		self.assertIn(str(self.no_vuln), result.output)
+		self.assertNotIn(str(self.with_vuln), result.output)
+
+	def test_status_alternation_regex(self):
+		# '(SUCCESS|FAILURE)' matches both statuses
+		result = self._invoke(['--status', '(SUCCESS|FAILURE)'])
+		self.assertIn(str(self.with_vuln), result.output)
+		self.assertIn(str(self.no_vuln), result.output)
+		self.assertIn(str(self.unknown_sev), result.output)
+
+	def test_status_no_match(self):
+		# A valid regex matching no status yields no reports (no crash, no warning)
+		result = self._invoke(['--status', 'BOGUS'])
+		self.assertEqual(result.exit_code, 0)
+		self.assertIn('No reports found', result.output)
+
+	def test_status_invalid_regex_errors(self):
+		# An invalid regex is reported as an error and lists nothing
+		result = self._invoke(['--status', '(unclosed'])
+		self.assertEqual(result.exit_code, 0)
+		self.assertIn('Invalid --status regex', result.output)
+
+
+if __name__ == '__main__':
+	unittest.main()

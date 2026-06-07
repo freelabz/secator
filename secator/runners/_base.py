@@ -440,6 +440,23 @@ class Runner:
 		return list(self.__iter__())
 
 	@classmethod
+	def requires_local_execution(cls, inputs, run_opts):
+		"""Whether this invocation must run locally (sync), bypassing worker dispatch.
+
+		Some invocations are inherently interactive or local-only (e.g. an
+		interactive setup wizard) and must never be dispatched to a Celery worker,
+		even when one is alive. Subclasses override this to opt specific inputs in.
+
+		Args:
+			inputs (str | list): Expanded CLI inputs/targets.
+			run_opts (dict): Run options.
+
+		Returns:
+			bool: True to force local (sync) execution.
+		"""
+		return False
+
+	@classmethod
 	def delay(cls, config, targets, **run_opts):
 		"""Run runner asynchronously via Celery.
 

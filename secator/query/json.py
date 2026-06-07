@@ -15,6 +15,7 @@ OPERATORS = {
 	"$regex": lambda field, pattern: re.search(pattern, str(field)) is not None if field else False,
 	"$contains": lambda field, value: value in str(field) if field else False,
 	"$in": lambda field, values: field in values if field else False,
+	"$nin": lambda field, values: field not in values,
 	"$gt": lambda field, value: field > value if field is not None else False,
 	"$gte": lambda field, value: field >= value if field is not None else False,
 	"$lt": lambda field, value: field < value if field is not None else False,
