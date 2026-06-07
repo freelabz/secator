@@ -1010,6 +1010,47 @@ def list_aliases(silent):
 
 
 # --------#
+# QUERY  #
+# --------#
+
+
+@cli.command(name='query', aliases=['q'])
+@click.argument('arg', required=False)
+@click.option('-o', '--output', type=str, default='console', help='Exporters')
+@click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
+@click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{vulnerability.matched_at}'")  # noqa: E501
+@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
+@click.pass_context
+def query(ctx, arg, output, time_delta, fmt, workspace, driver, dedupe):
+	"""Run a saved query, a raw filter expression, or an AI chat prompt.
+
+	ARG resolves in order:
+
+	\b
+	  1. a saved query name (see `secator config get queries`)
+	  2. a filter expression (e.g. "vulnerability.severity == 'high'")
+	  3. natural language -> AI chat (`secator x ai --mode chat`)
+	"""
+	if not arg:
+		raise click.UsageError('Missing argument ARG (a query name, expression, or prompt).')
+
+	# 1. Saved query name
+	if arg in CONFIG.queries:
+		run_report_show(None, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe)
+		return
+
+	# 2. Raw filter expression
+	if _looks_like_query_expr(arg):
+		run_report_show(None, output, time_delta, arg, fmt, workspace, driver, dedupe)
+		return
+
+	# 3. Natural language -> AI chat
+	run_ai_chat(ctx, arg, workspace)
+
+
+# --------#
 # REPORT #
 # --------#
 
@@ -1268,6 +1309,19 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	if fmt:
 		report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
+
+
+def run_ai_chat(ctx, prompt, workspace):
+	"""Run the `ai` task in chat mode with the given PROMPT.
+
+	Equivalent to: secator x ai --mode chat -ws <workspace> -p "<prompt>"
+	"""
+	task_group = ctx.find_root().command.commands['task']
+	ai_cmd = task_group.commands['ai']
+	invoke_kwargs = {'prompt': prompt, 'mode': 'chat'}
+	if workspace:
+		invoke_kwargs['workspace'] = workspace
+	ctx.invoke(ai_cmd, **invoke_kwargs)
 
 
 @report.command('show')
