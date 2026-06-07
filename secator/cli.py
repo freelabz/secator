@@ -1189,18 +1189,11 @@ def _apply_format(results, fmt):
 	return new_results
 
 
-@report.command('show')
-@click.argument('report_query', required=False)
-@click.option('-o', '--output', type=str, default='console', help='Exporters')
-@click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
-@click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
-@click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
-@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
-@click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
-@click.pass_context
-def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe):
-	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
+def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe):
+	"""Build and send a consolidated report. Shared by `report show` and `query`.
+
+	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
+	"""
 	from secator.query.utils import parse_report_paths, python_expr_to_mongo
 
 	current = get_file_timestamp()
@@ -1275,6 +1268,20 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 	if fmt:
 		report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
+
+
+@report.command('show')
+@click.argument('report_query', required=False)
+@click.option('-o', '--output', type=str, default='console', help='Exporters')
+@click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
+@click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
+@click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
+@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
+def report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe):
+	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
+	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe)
 
 
 def _load_report_data(path):
