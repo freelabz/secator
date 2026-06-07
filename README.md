@@ -244,6 +244,44 @@ secator w url_<TAB>     # completes to url_crawl, url_fuzz, url_dirsearch, etc.
 secator x nmap --profiles ag<TAB>  # completes to aggressive
 ```
 
+### Queries
+
+`secator` lets you save named report queries and run them with the `secator query` command.
+
+Queries are stored in your config under the `queries` namespace (`~/.secator/config.yml`):
+
+```sh
+# Add / update a query (name -> filter expression)
+secator config set queries.critical_vulns "vulnerability.severity_nb < 2"
+
+# List all saved queries
+secator config get queries
+
+# Remove a query
+secator config unset queries.critical_vulns
+```
+
+`secator query <arg>` resolves its argument in three steps:
+
+1. **Saved query name** — if `<arg>` matches a saved query, its expression is used.
+2. **Filter expression** — if `<arg>` looks like a filter (contains `==`, `<`, `~=`, `&&`, …), it is passed straight through.
+3. **Natural language** — otherwise it is sent to AI chat (`secator x ai --mode chat`).
+
+```sh
+# Run a saved query, formatting the output
+secator query critical_vulns -ws secator.cloud -f "vulnerability.matched_at"
+
+# Run a raw filter expression directly
+secator query "vulnerability.severity == 'high' && vulnerability.tags ~= 'exploitable'"
+
+# Ask a natural-language question (runs the AI chat task)
+secator query -ws secator.cloud "Analyze my workspace data"
+```
+
+`secator query` accepts the same options as `secator r show` (`-o/--output`,
+`-d/--time-delta`, `-f/--format`, `-w/-ws/--workspace`, `--driver`, `--dedupe`).
+On the AI-chat path only the workspace and prompt are used.
+
 ## Installing tools
 
 `secator` auto-installs tools when you first use them.
