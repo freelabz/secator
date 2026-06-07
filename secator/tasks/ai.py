@@ -380,7 +380,13 @@ class ai(PythonRunner):
 					yield Error(message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`')
 					save_history(self.history, self.reports_folder, debug_fn=self.debug)
 					return
-				elif isinstance(e, litellm.APIConnectionError):
+				elif isinstance(e, litellm.APIConnectionError) or (
+					isinstance(e, litellm.InternalServerError) and 'connection error' in str(e).lower()
+				):
+					# Genuine connectivity failures (connection refused, DNS failure) surface in
+					# some litellm versions as InternalServerError("Connection error.") rather than
+					# APIConnectionError, so catch both and gate the latter on the connection message
+					# to avoid swallowing unrelated upstream 500 errors.
 					yield Error(message=f"Cannot connect to model '{self.model}': {e}")
 					yield Error(message='Check api_base and connectivity: `secator config set addons.ai.api_base <URL>`')
 					save_history(self.history, self.reports_folder, debug_fn=self.debug)
