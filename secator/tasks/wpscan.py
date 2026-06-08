@@ -11,12 +11,13 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   SEVERITY, TAGS, THREADS, TIMEOUT,
 							   URL, USER_AGENT, HOST, IP)
 from secator.output_types import Tag, Vulnerability, Info, Error
-from secator.tasks._categories import VulnHttp
+from secator.tasks._categories import VulnMixin
+from secator.runners import Command
 from secator.installer import parse_version
 
 
 @task()
-class wpscan(VulnHttp):
+class wpscan(Command, VulnMixin):
 	"""Wordpress security scanner."""
 	cmd = 'wpscan --force --verbose'
 	input_types = [URL, HOST, IP]

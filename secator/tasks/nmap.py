@@ -15,7 +15,8 @@ from secator.definitions import (
 )
 # fmt: on
 from secator.output_types import Error, Exploit, Info, Ip, Port, Technology, Vulnerability, Warning, Progress
-from secator.tasks._categories import ReconPort, VulnMulti
+from secator.tasks._categories import ReconPortMixin, VulnMixin
+from secator.runners import Command
 from secator.utils import debug, traceback_as_string
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ NMAP_PROGRESS_REGEX_2 = re.compile(r'(.*) Timing: About (\d+\.\d+)% done; ETC: \
 
 
 @task()
-class nmap(ReconPort):
+class nmap(Command, ReconPortMixin, VulnMixin):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
 
 	cmd = 'nmap'
@@ -415,7 +416,7 @@ class nmapData(dict):
 		if product and version:
 			vsplit = version.split('-')
 			version_cpe = vsplit[0] if not version_exact else version
-			cpe = VulnMulti.create_cpe_string(product, version_cpe)
+			cpe = VulnMixin.create_cpe_string(product, version_cpe)
 			if cpe not in cpes:
 				cpes.append(cpe)
 				debug(f'Added new CPE from identified product and version: {cpe}', sub='cve.nmap')
@@ -456,7 +457,7 @@ class nmapData(dict):
 			vuln_id, vuln_title = matches.groups()
 			vuln = Vulnerability(id=vuln_id, name=vuln_id, description=vuln_title, provider=provider_name, tags=[provider_name])
 			if provider_name == 'MITRE CVE':
-				vuln_lookup = VulnMulti.lookup_cve(vuln_id, *cpes)
+				vuln_lookup = VulnMixin.lookup_cve(vuln_id, *cpes)
 				if vuln_lookup:
 					vuln.merge_with(vuln_lookup)
 				yield vuln
@@ -491,7 +492,7 @@ class nmapData(dict):
 				# TODO: lookup exploit in ExploitDB to find related CVEs
 				# if edb_id:
 				# 	print(edb_id)
-				# 	exploit_data = VulnMulti.lookup_exploitdb(edb_id)
+				# 	exploit_data = VulnMixin.lookup_exploitdb(edb_id)
 				yield exploit
 				continue
 
@@ -511,7 +512,7 @@ class nmapData(dict):
 					confidence='low',
 				)
 				if vuln_type == 'CVE' or vuln_type == 'PRION:CVE':
-					vuln2 = VulnMulti.lookup_cve(vuln_id, *cpes)
+					vuln2 = VulnMixin.lookup_cve(vuln_id, *cpes)
 					vuln.merge_with(vuln2)
 					yield vuln
 				else:

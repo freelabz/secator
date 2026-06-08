@@ -30,6 +30,48 @@ logger = logging.getLogger(__name__)
 class Command(Runner):
 	"""Base class to execute an external command."""
 
+	def __init_subclass__(cls, **kwargs):
+		"""Honor category MIXINS even though `Command` is the first base.
+
+		Tasks are declared as `class X(Command, SomeMixin)`. With that MRO,
+		`Command`'s own defaults (`meta_opts = {}`, `profile = 'small'`,
+		`enable_duplicate_check = True`) would shadow the values carried by the
+		mixin. This hook re-homes those mixin-provided attributes onto the task
+		class so the mixins design actually drives runtime behavior:
+
+		- `meta_opts` is merged across every `*Mixin` base (base -> derived),
+		  unless the task (or a non-mixin base) already defines its own.
+		- `profile` / `enable_duplicate_check` are copied from the nearest
+		  `*Mixin` that defines them, unless the task class set them explicitly.
+		"""
+		super().__init_subclass__(**kwargs)
+
+		mixin_bases = [b for b in cls.__mro__ if b.__name__.endswith('Mixin')]
+		if not mixin_bases:
+			return
+
+		# Merge meta_opts from mixins (least-derived first) when not set locally.
+		if 'meta_opts' not in cls.__dict__:
+			defines_meta = any(
+				'meta_opts' in b.__dict__ and not b.__name__.endswith('Mixin')
+				for b in cls.__mro__ if b not in (Command, Runner, object)
+			)
+			if not defines_meta:
+				merged = {}
+				for b in reversed(mixin_bases):
+					merged.update(getattr(b, 'meta_opts', {}) or {})
+				if merged:
+					cls.meta_opts = merged
+
+		# Promote mixin profile / enable_duplicate_check when not set locally.
+		for attr in ('profile', 'enable_duplicate_check'):
+			if attr in cls.__dict__:
+				continue
+			for b in mixin_bases:
+				if attr in b.__dict__:
+					setattr(cls, attr, b.__dict__[attr])
+					break
+
 	# Base cmd
 	cmd = None
 

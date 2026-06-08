@@ -1,12 +1,13 @@
 from secator.decorators import task
 from secator.definitions import (URL, STRING, OPT_PIPE_INPUT)
 from secator.output_types import Tag
-from secator.tasks._categories import Tagger
+from secator.tasks._categories import TaggerMixin
+from secator.runners import Command
 from secator.serializers import JSONSerializer
 
 
 @task()
-class ph(Tagger):
+class ph(Command, TaggerMixin):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
 	cmd = 'ph'
 	input_types = [URL, STRING]
