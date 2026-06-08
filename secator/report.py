@@ -31,12 +31,13 @@ class Report:
 					f'[bold red]Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: {str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',  # noqa: E501
 				)
 
-	def build(self, query=None, dedupe=CONFIG.runners.remove_duplicates):
+	def build(self, query=None, dedupe=CONFIG.runners.remove_duplicates, limit=0):
 		"""Build report data structure using QueryEngine for filtering and dedup.
 
 		Args:
 			query (dict): MongoDB-style filter query (e.g. {'_type': 'vulnerability'}).
 			dedupe (bool): Whether to remove duplicate results.
+			limit (int): Maximum number of results to return (0 = no limit).
 		"""
 		if query is None:
 			query = {}
@@ -76,7 +77,7 @@ class Report:
 			context['workspace_name'] = self.workspace_name
 
 		engine = QueryEngine(self.workspace_name, context=context)
-		results = engine.search(query, dedupe=dedupe)
+		results = engine.search(query, limit=limit, dedupe=dedupe)
 
 		# Fill report (findings + targets)
 		from secator.output_types.target import Target

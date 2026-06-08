@@ -1176,8 +1176,9 @@ def _apply_format(results, fmt):
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
+@click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.pass_context
-def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe):
+def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit):
 	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
 	from secator.query.utils import parse_report_paths, python_expr_to_mongo
 
@@ -1249,7 +1250,7 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 	# 6. Build and send report via QueryEngine
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
 	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
-	report.build(query=full_query, dedupe=dedupe_effective)
+	report.build(query=full_query, dedupe=dedupe_effective, limit=limit)
 	if fmt:
 		report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
