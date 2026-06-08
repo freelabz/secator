@@ -26,7 +26,7 @@ from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
-from secator.loader import get_configs_by_type, discover_tasks
+from secator.loader import get_configs_by_type, discover_tasks, load_external_addons
 from secator.utils import (
 	debug,
 	detect_host,
@@ -2110,6 +2110,60 @@ def install_ai():
 			'Run [bold green4]secator x ai -p "your prompt"[/] to run AI-powered pentesting.',
 		],
 	)
+
+
+def _install_external_addon(name, config):
+	"""Install an external addon defined in addons.json."""
+	from secator.installer import ToolInstaller
+
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
+
+	next_steps = config.get('next_steps', [])
+	tool_attrs = {
+		'__name__': name,
+		'install_pre': config.get('install_pre', None),
+		'install_post': config.get('install_post', None),
+		'install_cmd_pre': config.get('install_cmd_pre', None),
+		'install_cmd': config.get('install_cmd', None),
+		'install_github_bin': config.get('install_github_bin', True),
+		'github_handle': config.get('github_handle') or config.get('install_github_handle', None),
+		'install_github_version_prefix': config.get('install_github_version_prefix', ''),
+		'install_ignore_bin': config.get('install_ignore_bin', []),
+		'install_version': config.get('install_version', None),
+		'install_binary_name': config.get('install_binary_name', None),
+		'pypi_dependencies': config.get('pypi_dependencies', None),
+	}
+	tool_cls = type(name, (), tool_attrs)
+	status = ToolInstaller.install(tool_cls)
+
+	return_code = 0 if status.is_ok() else 1
+	if status.is_ok() and next_steps:
+		console.print('[bold gold3]:wrench: Next steps:[/]')
+		for ix, step in enumerate(next_steps):
+			console.print(f'   :keycap_{ix}: {step}')
+	sys.exit(return_code)
+
+
+def _load_external_addon_commands():
+	"""Dynamically register install commands for addons defined in addons.json."""
+	external_addons = load_external_addons()
+	for addon_name, addon_config in external_addons.items():
+		if addon_name in addons.commands:
+			debug(f'Skipping external addon "{addon_name}": name conflicts with a built-in addon command', sub='cli')
+			continue
+
+		def _make_cmd(name, config):
+			@click.command(name, help=f'Install {name} addon.')
+			def _cmd():
+				_install_external_addon(name, config)
+			return _cmd
+
+		addons.add_command(_make_cmd(addon_name, addon_config))
+
+
+_load_external_addon_commands()
 
 
 @install.group()

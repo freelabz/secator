@@ -94,6 +94,7 @@ class Command(Runner):
 	install_ignore_bin = []
 	install_version = None
 	install_binary_name = None
+	pypi_dependencies = None
 
 	# Serializer
 	item_loader = None
