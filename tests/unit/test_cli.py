@@ -413,6 +413,7 @@ class TestCli(unittest.TestCase):
 		mock_get_configs_by_type.return_value = []
 		result = self.runner.invoke(cli, ['install', 'tools'])
 		assert result.exit_code == 1
+		assert 'deprecated' in result.output.lower()
 		assert 'Cannot run this command in offline mode' in result.output
 
 	def test_install_addons_worker_command(self):
@@ -458,20 +459,42 @@ class TestCli(unittest.TestCase):
 	def test_install_langs_go_command(self):
 		result = self.runner.invoke(cli, ['install', 'langs', 'go'])
 		assert result.exit_code == 1
+		assert 'deprecated' in result.output.lower()
 		assert 'Cannot run this command in offline mode' in result.output
 
 	def test_install_langs_ruby_command(self):
 		result = self.runner.invoke(cli, ['install', 'langs', 'ruby'])
 		assert result.exit_code == 1
+		assert 'deprecated' in result.output.lower()
 		assert 'Cannot run this command in offline mode' in result.output
 
-	@mock.patch('secator.cli.get_version_info')
-	def test_update_command(self, mock_get_version_info):
-		mock_get_version_info.return_value = {
-			'status': 'latest',
-			'latest_version': VERSION
-		}
+	def test_update_command(self):
 		result = self.runner.invoke(cli, ['update'])
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
+
+	def test_update_secator_command(self):
+		result = self.runner.invoke(cli, ['update', 'secator'])
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
+
+	def test_update_langs_command(self):
+		result = self.runner.invoke(cli, ['update', 'langs'])
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
+
+	def test_update_tools_command(self):
+		result = self.runner.invoke(cli, ['update', 'tools'])
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
+
+	def test_update_wordlists_command(self):
+		result = self.runner.invoke(cli, ['update', 'wordlists'])
+		assert result.exit_code == 1
+		assert 'Cannot run this command in offline mode' in result.output
+
+	def test_update_templates_command(self):
+		result = self.runner.invoke(cli, ['update', 'templates'])
 		assert result.exit_code == 1
 		assert 'Cannot run this command in offline mode' in result.output
 
