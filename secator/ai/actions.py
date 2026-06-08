@@ -416,9 +416,8 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		)
 		for result in results:
 			if isinstance(result, OutputType):
-				result._context.update(context)
-			else:
-				result["_context"].update(context)
+				result = result.toDict()
+			result["_context"].update(context)
 			yield result
 
 	except Exception as e:
