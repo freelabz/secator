@@ -277,37 +277,39 @@ def register_runner(cli_endpoint, config):
 		inputs = opts.pop('inputs')
 		inputs = expand_input(inputs, ctx)
 
-		# Build hooks from driver name
-		hooks = []
-		drivers = driver.split(',') if driver else []
-		drivers = list(dict.fromkeys(CONFIG.drivers.defaults + drivers))
+		# Build driver instances from driver names
+		driver_instances = []
+		driver_names = driver.split(',') if driver else []
+		driver_names = list(dict.fromkeys((CONFIG.drivers.defaults or []) + driver_names))
 		supported_drivers = get_available_drivers()
 		context['drivers'] = []
-		for driver in drivers:
-			if driver in supported_drivers:
-				if driver in ADDONS_ENABLED and not ADDONS_ENABLED[driver]:
-					console.print(f'[bold red]Missing "{driver}" addon: please run `secator install addons {driver}`[/].')
+		for driver_name in driver_names:
+			if driver_name in supported_drivers:
+				if driver_name in ADDONS_ENABLED and not ADDONS_ENABLED[driver_name]:
+					console.print(f'[bold red]Missing "{driver_name}" addon: please run `secator install addons {driver_name}`[/].')
 					sys.exit(1)
-				from secator.utils import import_dynamic
+				from secator.loader import get_driver_instance
 
-				driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
-				if driver_hooks is None:
-					console.print(f'[bold red]Missing "secator.hooks.{driver}.HOOKS".[/]')
+				driver_instance = get_driver_instance(driver_name)
+				if driver_instance is None:
+					console.print(f'[bold red]Could not instantiate driver "{driver_name}".[/]')
 					sys.exit(1)
-				hooks.append(driver_hooks)
-				context['drivers'].append(driver)
+				driver_instances.append(driver_instance)
+				context['drivers'].append(driver_name)
 			else:
 				supported_drivers_str = ', '.join([f'[bold green]{_}[/]' for _ in supported_drivers])
-				console.print(f'[bold red]Driver "{driver}" is not supported.[/]')
+				console.print(f'[bold red]Driver "{driver_name}" is not supported.[/]')
 				console.print(f'Supported drivers: {supported_drivers_str}')
 				sys.exit(1)
 
 		if 'api' in context['drivers']:
 			try:
-				from secator.hooks.api import get_workspace_name
+				from secator.drivers.api import ApiDriver
 
-				workspace_name = get_workspace_name(context.get('workspace_id'))
-				context['workspace_name'] = workspace_name
+				api_driver = next((d for d in driver_instances if isinstance(d, ApiDriver)), None)
+				if api_driver:
+					workspace_name = api_driver.get_workspace_name(context.get('workspace_id'))
+					context['workspace_name'] = workspace_name
 			except Exception as e:
 				console.print(f'[bold red]Error getting workspace from API: {e}.[/]')
 				sys.exit(1)
@@ -320,10 +322,6 @@ def register_runner(cli_endpoint, config):
 
 			output_file = f'trace_memray_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.bin'
 			contextmanager = memray.Tracker(output_file)
-
-		from secator.utils import deep_merge_dicts
-
-		hooks = deep_merge_dicts(*hooks)
 
 		# Enable sync or not
 		if sync or dry_run:
@@ -373,7 +371,7 @@ def register_runner(cli_endpoint, config):
 				process = psutil.Process()
 				console.print(f'[bold yellow3]Initial RAM Usage: {process.memory_info().rss / 1024**2} MB[/]')
 			item_count = 0
-			runner = runner_cls(config, inputs, run_opts=opts, hooks=hooks, context=context)
+			runner = runner_cls(config, inputs, run_opts=opts, drivers=driver_instances, context=context)
 			for item in runner:
 				del item
 				item_count += 1

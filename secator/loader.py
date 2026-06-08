@@ -19,6 +19,14 @@ def _file_has_hooks(path):
 		return False
 
 
+def _file_has_driver_class(path):
+	"""Check if a Python file contains a Driver subclass."""
+	try:
+		return '(Driver)' in path.read_text()
+	except Exception:
+		return False
+
+
 def _file_has_exporter(path):
 	"""Check if a Python file contains an Exporter subclass."""
 	try:
@@ -117,7 +125,7 @@ def discover_external_tasks():
 	prev_state = sys.dont_write_bytecode
 	sys.dont_write_bytecode = True
 	for path in CONFIG.dirs.templates.glob('**/*.py'):
-		if _file_has_hooks(path) or _file_has_exporter(path):
+		if _file_has_hooks(path) or _file_has_exporter(path) or _file_has_driver_class(path):
 			continue  # Skip driver/exporter files
 		try:
 			task_name = path.stem
@@ -149,14 +157,19 @@ def discover_external_tasks():
 	return output
 
 
+_external_driver_classes = {}  # registry for class-based external drivers
+
+
 @cache
 def discover_external_drivers():
-	"""Find external secator drivers."""
+	"""Find external secator drivers (both HOOKS-based and class-based Driver subclasses)."""
 	output = []
 	prev_state = sys.dont_write_bytecode
 	sys.dont_write_bytecode = True
 	for path in CONFIG.dirs.templates.glob('**/*.py'):
-		if not _file_has_hooks(path):
+		is_hooks_based = _file_has_hooks(path)
+		is_class_based = _file_has_driver_class(path)
+		if not is_hooks_based and not is_class_based:
 			continue
 		try:
 			driver_name = path.stem
@@ -170,9 +183,24 @@ def discover_external_drivers():
 			sys.modules[module_name] = module
 			spec.loader.exec_module(module)
 
-			if not hasattr(module, 'HOOKS'):
-				console.print(f'[bold orange1]Could not load external driver "{driver_name}" from {path.name}: missing HOOKS variable.[/] ({path})')  # noqa: E501
-				continue
+			if is_hooks_based:
+				if not hasattr(module, 'HOOKS'):
+					console.print(f'[bold orange1]Could not load external driver "{driver_name}" from {path.name}: missing HOOKS variable.[/] ({path})')  # noqa: E501
+					continue
+			elif is_class_based:
+				# File defines a Driver subclass without HOOKS= - register for direct instantiation
+				from secator.drivers._base import Driver
+				driver_cls = None
+				for attr_name in dir(module):
+					attr = getattr(module, attr_name)
+					if inspect.isclass(attr) and issubclass(attr, Driver) and attr is not Driver:
+						driver_cls = attr
+						break
+				if driver_cls is None:
+					console.print(f'[bold orange1]Could not load external driver "{driver_name}" from {path.name}: no Driver subclass found.[/] ({path})')  # noqa: E501
+					continue
+				_external_driver_classes[driver_name] = driver_cls
+
 			console.print(f'[bold green]Successfully loaded external driver "{driver_name}"[/] ({path})')
 			output.append(driver_name)
 		except Exception as e:
@@ -229,6 +257,56 @@ def get_available_drivers():
 	"""Get all available drivers (internal + external)."""
 	from secator.definitions import AVAILABLE_DRIVERS
 	return AVAILABLE_DRIVERS + discover_external_drivers()
+
+
+def get_driver_instance(driver_name):
+	"""Instantiate a driver by name.
+
+	Tries to import from secator.drivers first (lazy import to avoid loading
+	optional dependencies like pymongo/google-cloud-storage unless needed), then
+	falls back to loading the HOOKS dict from secator.hooks for backward
+	compatibility with external drivers.
+
+	Args:
+		driver_name (str): Driver name (e.g. 'gcs', 'mongodb', 'api', 'discord').
+
+	Returns:
+		Driver instance or None if not found.
+	"""
+	import importlib
+	from secator.drivers import DRIVER_REGISTRY
+	if driver_name in DRIVER_REGISTRY:
+		module_path, class_name = DRIVER_REGISTRY[driver_name]
+		module = importlib.import_module(module_path)
+		cls = getattr(module, class_name)
+		return cls()
+
+	# Check for externally registered class-based drivers
+	if driver_name in _external_driver_classes:
+		return _external_driver_classes[driver_name]()
+
+	# Fall back to external driver (HOOKS-based): wrap in a compatible shim
+	from secator.utils import import_dynamic
+	hooks = import_dynamic(f'secator.hooks.{driver_name}', 'HOOKS')
+	if hooks is not None:
+		from secator.drivers._base import Driver
+		_name = driver_name
+
+		class _ExternalDriver(Driver):
+			@property
+			def name(self):
+				return _name
+
+			@property
+			def hooks(self):
+				return hooks
+
+			def check(self):
+				return True
+
+		_ExternalDriver.__name__ = f'{driver_name.capitalize()}Driver'
+		return _ExternalDriver()
+	return None
 
 
 @cache
