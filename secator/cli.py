@@ -2175,11 +2175,12 @@ def langs():
 @langs.command('go')
 def install_go():
 	"""Install Go."""
-	run_install(
-		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
-		title='Go',
-		next_steps=['Add ~/go/bin to your $PATH'],
-	)
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
+	from secator.tasks import go
+	from secator.installer import ToolInstaller
+	ToolInstaller.install(go)
 
 
 @langs.command('ruby')

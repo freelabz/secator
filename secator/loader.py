@@ -111,6 +111,31 @@ def discover_internal_tasks():
 
 
 @cache
+def discover_utils():
+	"""Find internal secator utils (Command subclasses flagged with __util__)."""
+	from secator.runners import Runner
+	package_dir = Path(__file__).resolve().parent / 'tasks'
+	util_classes = []
+	for (_, module_name, _) in iter_modules([str(package_dir)]):
+		if module_name.startswith('_'):
+			continue
+		try:
+			module = importlib.import_module(f'secator.tasks.{module_name}')
+		except ImportError as e:
+			console.print(f'[bold red]Could not import secator.tasks.{module_name}:[/]')
+			console.print(f'\t[bold red]{type(e).__name__}[/]: {str(e)}')
+			continue
+		for attribute_name in dir(module):
+			attribute = getattr(module, attribute_name)
+			if inspect.isclass(attribute):
+				bases = inspect.getmro(attribute)
+				if Runner in bases and hasattr(attribute, '__util__'):
+					util_classes.append(attribute)
+	util_classes = sorted(util_classes, key=lambda x: x.__name__)
+	return util_classes
+
+
+@cache
 def discover_external_tasks():
 	"""Find external secator tasks."""
 	output = []
