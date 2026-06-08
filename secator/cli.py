@@ -24,7 +24,7 @@ from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STA
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
 from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
-from secator.rich import console
+from secator.rich import console, console_stdout
 from secator.runners import Command, Runner
 from secator.loader import get_configs_by_type, discover_tasks
 from secator.utils import (
@@ -1312,14 +1312,8 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	if show_all:
 		table.add_column('Path')
 
-	# Print paths if piped
-	if ctx.obj['piped_output']:
-		if not paths:
-			console.print(Error(message='No reports found.'))
-			return
-		for path in paths:
-			print(path)
-		return
+	# When piped, route the table to stdout so grep/watch can consume it
+	table_console = console_stdout if ctx.obj['piped_output'] else console
 
 	# Load each report
 	for path in paths:
@@ -1358,10 +1352,10 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 			console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
 	if len(paths) > 0:
-		console.print(table)
-		console.print(Info(message=f'Found {len(paths)} reports.'))
+		table_console.print(table)
+		table_console.print(Info(message=f'Found {len(paths)} reports.'))
 	else:
-		console.print(Error(message='No reports found.'))
+		table_console.print(Error(message='No reports found.'))
 
 
 @report.command('info')
