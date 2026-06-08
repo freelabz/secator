@@ -23,6 +23,7 @@ def _clear_loader_caches():
         'get_available_exporters',
         'find_templates',
         'get_configs_by_type',
+        'load_external_addons',
     ]:
         fn = getattr(loader, name, None)
         if fn and hasattr(fn, 'cache_clear'):
@@ -301,6 +302,82 @@ class TestGetAvailableExporters(unittest.TestCase):
             get_available_exporters.cache_clear()
             result = get_available_exporters()
         self.assertEqual(sorted(result), sorted(AVAILABLE_EXPORTERS))
+
+
+class TestLoadExternalAddons(unittest.TestCase):
+    """Tests for load_external_addons."""
+
+    def setUp(self):
+        self.template_dir = CONFIG.dirs.templates
+        self.template_dir.mkdir(parents=True, exist_ok=True)
+        self.addons_file = self.template_dir / 'addons.json'
+        _clear_loader_caches()
+
+    def tearDown(self):
+        if self.addons_file.exists():
+            self.addons_file.unlink()
+        _clear_loader_caches()
+
+    def _write_addons(self, data):
+        import json
+        self.addons_file.write_text(json.dumps(data))
+
+    def test_returns_empty_dict_when_file_absent(self):
+        """No addons.json → empty dict returned."""
+        from secator.loader import load_external_addons
+        result = load_external_addons()
+        self.assertEqual(result, {})
+
+    def test_returns_dict_with_pypi_addon(self):
+        """Valid addons.json with pypi_dependencies is loaded correctly."""
+        self._write_addons({
+            'elasticsearch': {
+                'pypi_dependencies': ['elasticsearch<10'],
+                'next_steps': [],
+            }
+        })
+        from secator.loader import load_external_addons
+        result = load_external_addons()
+        self.assertIn('elasticsearch', result)
+        self.assertEqual(result['elasticsearch']['pypi_dependencies'], ['elasticsearch<10'])
+
+    def test_returns_dict_with_tool_addon(self):
+        """Valid addons.json with tool install fields is loaded correctly."""
+        self._write_addons({
+            'my_tool': {
+                'install_cmd': 'curl https://example.com/install.sh | sh',
+                'install_version': '1.0.0',
+            }
+        })
+        from secator.loader import load_external_addons
+        result = load_external_addons()
+        self.assertIn('my_tool', result)
+        self.assertEqual(result['my_tool']['install_version'], '1.0.0')
+
+    def test_returns_empty_dict_on_invalid_json(self):
+        """Malformed addons.json returns empty dict and does not raise."""
+        self.addons_file.write_text('not valid json {{{')
+        from secator.loader import load_external_addons
+        result = load_external_addons()
+        self.assertEqual(result, {})
+
+    def test_returns_empty_dict_when_root_is_not_object(self):
+        """addons.json containing a JSON array (not an object) returns empty dict."""
+        self._write_addons([{'pypi_dependencies': ['pkg']}])
+        from secator.loader import load_external_addons
+        result = load_external_addons()
+        self.assertEqual(result, {})
+
+    def test_result_is_cached(self):
+        """Calling load_external_addons twice returns the same dict object."""
+        self._write_addons({'myaddon': {'pypi_dependencies': ['mypkg']}})
+        from secator.loader import load_external_addons
+        self.assertIs(load_external_addons(), load_external_addons())
+
+    def test_returns_dict_type(self):
+        """load_external_addons always returns a dict."""
+        from secator.loader import load_external_addons
+        self.assertIsInstance(load_external_addons(), dict)
 
 
 class TestDiscoverExternalTasksSkipsDriversAndExporters(unittest.TestCase):
