@@ -9,12 +9,17 @@ import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
 from dotmap import DotMap
-from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
+from pydantic import AfterValidator, BaseModel, Field, model_validator, ValidationError
 
 from secator.requests import requests
 from secator.rich import console, console_stdout
 
 load_dotenv(find_dotenv(usecwd=True), override=False)
+
+
+def SecretField(default='', **kwargs):
+    """Create a Pydantic field marked as secret (masked in output)."""
+    return Field(default=default, json_schema_extra={'secret': True}, **kwargs)
 
 Directory = Annotated[Path, AfterValidator(lambda v: v.expanduser())]
 StrExpandHome = Annotated[str, AfterValidator(lambda v: v.replace('~', str(Path.home())))]
@@ -23,6 +28,11 @@ ROOT_FOLDER = Path(__file__).parent.parent
 LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
 DATA_FOLDER = os.environ.get('SECATOR_DIRS_DATA') or str(Path.home() / '.secator')
+
+# Also load .env from the secator data directory (CWD .env takes precedence since it was loaded first)
+_secator_dotenv = Path(DATA_FOLDER) / '.env'
+if _secator_dotenv.exists():
+    load_dotenv(_secator_dotenv, override=False)
 
 USER_AGENTS = {
 	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
@@ -83,7 +93,7 @@ class Celery(StrictModel):
 
 
 class Cli(StrictModel):
-	github_token: str = os.environ.get('GITHUB_TOKEN', '')
+	github_token: str = SecretField(default=os.environ.get('GITHUB_TOKEN', ''))
 	record: bool = False
 	stdin_timeout: int = 1000
 	show_http_response_headers: bool = False
@@ -186,7 +196,7 @@ class WorkerAddon(StrictModel):
 
 class MongodbAddon(StrictModel):
 	enabled: bool = False
-	url: str = 'mongodb://localhost'
+	url: str = SecretField(default='mongodb://localhost')
 	update_frequency: int = 60
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
@@ -203,12 +213,12 @@ class MongodbAddon(StrictModel):
 
 class VulnersAddon(StrictModel):
 	enabled: bool = False
-	api_key: str = ''
+	api_key: str = SecretField()
 
 
 class AiAddon(StrictModel):
 	enabled: bool = False
-	api_key: str = ''
+	api_key: str = SecretField()
 	api_base: str = ''
 	default_model: str = 'claude-sonnet-4-6'
 	intent_model: str = 'claude-haiku-4-5'
@@ -258,8 +268,8 @@ class Providers(StrictModel):
 
 class DiscordAddon(StrictModel):
 	enabled: bool = False
-	webhook_url: str = ''
-	bot_token: str = ''
+	webhook_url: str = SecretField()
+	bot_token: str = SecretField()
 	send_runner_updates: bool = True
 	send_findings: bool = True
 	finding_types: List[str] = ['vulnerability']
@@ -269,7 +279,7 @@ class DiscordAddon(StrictModel):
 class ApiAddon(StrictModel):
 	enabled: bool = False
 	url: str = 'https://app.secator.cloud/api'
-	key: str = ''
+	key: str = SecretField()
 	header_name: str = 'Bearer'
 	force_ssl: bool = True
 	timeout: int = 60
@@ -315,6 +325,23 @@ class SecatorConfig(StrictModel):
 	offline_mode: bool = False
 
 
+def _get_secret_paths(model_class, prefix=''):
+	"""Recursively extract dotted paths of all fields marked as secret in a Pydantic model."""
+	secret_paths = set()
+	for name, field_info in model_class.model_fields.items():
+		path = f'{prefix}.{name}' if prefix else name
+		extra = field_info.json_schema_extra or {}
+		if isinstance(extra, dict) and extra.get('secret'):
+			secret_paths.add(path)
+		annotation = field_info.annotation
+		if hasattr(annotation, 'model_fields'):
+			secret_paths.update(_get_secret_paths(annotation, path))
+	return secret_paths
+
+
+SECRET_PATHS = _get_secret_paths(SecatorConfig)
+
+
 class Config(DotMap):
 	"""Config class.
 
@@ -349,9 +376,10 @@ class Config(DotMap):
 			return None
 		if print:
 			if key:
-				yaml_str = Config.dump(DotMap({key: value}), partial=False)
+				display_value = '***' if key in SECRET_PATHS and value else value
+				yaml_str = Config.dump(DotMap({key: display_value}), partial=False)
 			else:
-				yaml_str = Config.dump(self, partial=False)
+				yaml_str = Config.dump(self, partial=False, mask_secrets=True)
 			Config.print_yaml(yaml_str)
 		return value
 
@@ -557,7 +585,7 @@ class Config(DotMap):
 		Args:
 			partial (bool): Print partial config only.
 		"""
-		yaml_str = self.dump(self, partial=partial)
+		yaml_str = self.dump(self, partial=partial, mask_secrets=True)
 		yaml_str = f'# {self._path}\n\n{yaml_str}' if self._path and partial else yaml_str
 		Config.print_yaml(yaml_str)
 
@@ -669,10 +697,35 @@ class Config(DotMap):
 		console_stdout.print(data)
 
 	@staticmethod
-	def dump(config, partial=True):
+	def _mask_secrets_in_dict(data, prefix=''):
+		"""Recursively replace secret field values with '***' in a config dict.
+
+		Args:
+			data (dict): Config dict.
+			prefix (str): Current dotted path prefix.
+
+		Returns:
+			dict: Dict with secret values masked.
+		"""
+		result = {}
+		for key, value in data.items():
+			path = f'{prefix}.{key}' if prefix else key
+			if path in SECRET_PATHS and value:
+				result[key] = '***'
+			elif isinstance(value, dict):
+				result[key] = Config._mask_secrets_in_dict(value, path)
+			else:
+				result[key] = value
+		return result
+
+	@staticmethod
+	def dump(config, partial=True, mask_secrets=False):
 		"""Safe dump config as yaml:
 		- `Path`, `PosixPath` and `WindowsPath` objects are translated to strings.
 		- Home directory in paths is replaced with the tilde '~'.
+
+		Args:
+			mask_secrets (bool): Replace secret field values with '***' in output.
 
 		Returns:
 			str: YAML dump.
@@ -714,6 +767,10 @@ class Config(DotMap):
 				del data['_partial']
 
 		data = {k: v for k, v in data.items() if not k.startswith('_')}
+
+		if mask_secrets:
+			data = Config._mask_secrets_in_dict(data)
+
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
 
 	@staticmethod

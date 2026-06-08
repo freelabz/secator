@@ -230,3 +230,89 @@ class TestAIConfig(unittest.TestCase):
 		from secator.config import Config
 		config = Config.parse()
 		self.assertEqual(config.addons.api.finding_search_endpoint, 'findings/_search')
+
+
+@mock.patch('sys.stderr', devnull)
+class TestSecretFields(unittest.TestCase):
+
+	def test_secret_paths_populated(self):
+		from secator.config import SECRET_PATHS
+		expected = {
+			'cli.github_token',
+			'addons.mongodb.url',
+			'addons.vulners.api_key',
+			'addons.ai.api_key',
+			'addons.discord.webhook_url',
+			'addons.discord.bot_token',
+			'addons.api.key',
+		}
+		self.assertTrue(expected.issubset(SECRET_PATHS), f'Missing secret paths: {expected - SECRET_PATHS}')
+
+	def test_dump_masks_secret_values(self):
+		from secator.config import Config
+		config = Config.parse({'addons': {'ai': {'api_key': 'my-secret-token'}}})
+		yaml_str = Config.dump(config, partial=False, mask_secrets=True)
+		self.assertNotIn('my-secret-token', yaml_str)
+		self.assertIn('***', yaml_str)
+
+	def test_dump_does_not_mask_empty_secrets(self):
+		from secator.config import Config
+		config = Config.parse()
+		yaml_str = Config.dump(config, partial=False, mask_secrets=True)
+		# Empty secret values should remain empty (not replaced with ***)
+		self.assertNotIn("api_key: '***'", yaml_str)
+
+	def test_dump_no_mask_by_default(self):
+		from secator.config import Config
+		config = Config.parse({'addons': {'ai': {'api_key': 'my-secret-token'}}})
+		yaml_str = Config.dump(config, partial=False, mask_secrets=False)
+		self.assertIn('my-secret-token', yaml_str)
+
+	def test_get_returns_raw_secret_value(self):
+		from secator.config import Config
+		config = Config.parse({'addons': {'ai': {'api_key': 'my-secret-token'}}})
+		# Programmatic access always returns the raw unmasked value
+		self.assertEqual(config.addons.ai.api_key, 'my-secret-token')
+		value = config.get('addons.ai.api_key', print=False)
+		self.assertEqual(value, 'my-secret-token')
+
+	def test_save_does_not_mask_secrets(self):
+		from secator.config import Config
+		config_path = Path('/tmp/test_secret_save.yml')
+		config = Config.parse({'addons': {'ai': {'api_key': 'my-secret-token'}}})
+		config.save(config_path, partial=False)
+		saved_data = Config.read_yaml(config_path)
+		config_path.unlink(missing_ok=True)
+		self.assertEqual(saved_data['addons']['ai']['api_key'], 'my-secret-token')
+
+
+@mock.patch('sys.stderr', devnull)
+class TestDotenvLoading(unittest.TestCase):
+
+	def setUp(self):
+		from secator.utils_test import clear_modules
+		clear_modules()
+		shutil.rmtree('/tmp/.secator_dotenv_test', ignore_errors=True)
+		Path('/tmp/.secator_dotenv_test').mkdir(parents=False)
+
+	def tearDown(self):
+		shutil.rmtree('/tmp/.secator_dotenv_test', ignore_errors=True)
+
+	@mock.patch.dict(os.environ, {'SECATOR_DIRS_DATA': '/tmp/.secator_dotenv_test'}, clear=False)
+	def test_dotenv_loaded_from_data_dir(self):
+		env_file = Path('/tmp/.secator_dotenv_test/.env')
+		env_file.write_text('SECATOR_ADDONS_AI_API_KEY=loaded-from-dotenv\n')
+		from secator.utils_test import clear_modules
+		clear_modules()
+		from secator.config import CONFIG
+		self.assertEqual(CONFIG.addons.ai.api_key, 'loaded-from-dotenv')
+
+	@mock.patch.dict(os.environ, {'SECATOR_DIRS_DATA': '/tmp/.secator_dotenv_test', 'SECATOR_ADDONS_AI_API_KEY': 'from-env'}, clear=False)
+	def test_env_var_takes_precedence_over_dotenv(self):
+		env_file = Path('/tmp/.secator_dotenv_test/.env')
+		env_file.write_text('SECATOR_ADDONS_AI_API_KEY=from-dotenv\n')
+		from secator.utils_test import clear_modules
+		clear_modules()
+		from secator.config import CONFIG
+		# OS env var should take precedence over .env file value
+		self.assertEqual(CONFIG.addons.ai.api_key, 'from-env')
