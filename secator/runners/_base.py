@@ -145,7 +145,7 @@ class Runner:
 		# Runner print opts
 		self.print_item = self.run_opts.get('print_item', False) and not self.dry_run
 		self.print_line = self.run_opts.get('print_line', False) and not self.quiet
-		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input and not self.piped_output  # noqa: E501
+		self.print_remote_info = self.run_opts.get('print_remote_info', False) and not self.piped_input
 		self.print_start = self.run_opts.get('print_start', False) and not self.dry_run  # noqa: E501
 		self.print_end = self.run_opts.get('print_end', False) and not self.dry_run  # noqa: E501
 		self.print_target = self.run_opts.get('print_target', False) and not self.dry_run and not self.has_parent
@@ -736,8 +736,10 @@ class Runner:
 					# (`console`, stderr). Printing through a different Console instance bypasses
 					# that render hook *and* Rich unwraps the FileProxy on `Console.file` via
 					# `rich_proxied_file`, so writes go straight to the raw terminal and corrupt
-					# the Live panel. Route through `console` whenever a Live is active.
-					if console._live is not None:
+					# the Live panel. Route through `console` when a Live is active AND stdout is
+					# a TTY. When piped (stdout is not a TTY), stdout and stderr are independent
+					# file descriptors so writing to console_stdout cannot corrupt the Live panel.
+					if console._live is not None and not self.piped_output:
 						_console = console
 					else:
 						_console = console_stdout if item_out == sys.stdout else console
