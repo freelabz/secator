@@ -49,6 +49,7 @@ class PythonRunner(Runner):
 	install_binary_name = None
 	install_version = None
 	install_github_version_prefix = ''
+	pypi_dependencies = None
 	print_cmd_icon = ':zap:'
 
 	def __init__(self, inputs=[], **run_opts):

@@ -2114,36 +2114,29 @@ def install_ai():
 
 def _install_external_addon(name, config):
 	"""Install an external addon defined in addons.json."""
-	import shlex
-	from secator.installer import SourceInstaller, ToolInstaller
+	from secator.installer import ToolInstaller
 
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 
-	pypi_deps = config.get('pypi_dependencies', [])
 	next_steps = config.get('next_steps', [])
-
-	if pypi_deps:
-		quoted_deps = ' '.join(shlex.quote(dep) for dep in pypi_deps)
-		cmd = f'{sys.executable} -m pip install {quoted_deps}'
-		status = SourceInstaller.install(cmd)
-	else:
-		tool_attrs = {
-			'__name__': name,
-			'install_pre': config.get('install_pre', None),
-			'install_post': config.get('install_post', None),
-			'install_cmd_pre': config.get('install_cmd_pre', None),
-			'install_cmd': config.get('install_cmd', None),
-			'install_github_bin': config.get('install_github_bin', True),
-			'github_handle': config.get('github_handle') or config.get('install_github_handle', None),
-			'install_github_version_prefix': config.get('install_github_version_prefix', ''),
-			'install_ignore_bin': config.get('install_ignore_bin', []),
-			'install_version': config.get('install_version', None),
-			'install_binary_name': config.get('install_binary_name', None),
-		}
-		tool_cls = type(name, (), tool_attrs)
-		status = ToolInstaller.install(tool_cls)
+	tool_attrs = {
+		'__name__': name,
+		'install_pre': config.get('install_pre', None),
+		'install_post': config.get('install_post', None),
+		'install_cmd_pre': config.get('install_cmd_pre', None),
+		'install_cmd': config.get('install_cmd', None),
+		'install_github_bin': config.get('install_github_bin', True),
+		'github_handle': config.get('github_handle') or config.get('install_github_handle', None),
+		'install_github_version_prefix': config.get('install_github_version_prefix', ''),
+		'install_ignore_bin': config.get('install_ignore_bin', []),
+		'install_version': config.get('install_version', None),
+		'install_binary_name': config.get('install_binary_name', None),
+		'pypi_dependencies': config.get('pypi_dependencies', None),
+	}
+	tool_cls = type(name, (), tool_attrs)
+	status = ToolInstaller.install(tool_cls)
 
 	return_code = 0 if status.is_ok() else 1
 	if status.is_ok() and next_steps:

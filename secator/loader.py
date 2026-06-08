@@ -255,8 +255,13 @@ def load_external_addons():
 		if not isinstance(data, dict):
 			console.print(f'[bold red]addons.json must be a JSON object, got {type(data).__name__}[/]')
 			return {}
-		debug(f'Loaded {len(data)} external addon(s) from {addons_file}', sub='template')
-		return data
+		invalid = {k: v for k, v in data.items() if not isinstance(v, dict)}
+		if invalid:
+			for k, v in invalid.items():
+				console.print(f'[bold red]Skipping addon "{k}": config must be an object, got {type(v).__name__}[/]')
+		filtered = {k: v for k, v in data.items() if isinstance(v, dict)}
+		debug(f'Loaded {len(filtered)} external addon(s) from {addons_file}', sub='template')
+		return filtered
 	except Exception as e:
 		console.print(f'[bold red]Could not load addons.json: {e}[/]')
 		return {}

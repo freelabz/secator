@@ -379,6 +379,17 @@ class TestLoadExternalAddons(unittest.TestCase):
         from secator.loader import load_external_addons
         self.assertIsInstance(load_external_addons(), dict)
 
+    def test_filters_out_non_dict_addon_entries(self):
+        """Addon entries with non-dict values are excluded; valid entries are still returned."""
+        self._write_addons({
+            'bad_addon': 'not-an-object',
+            'good_addon': {'install_cmd': 'echo install'},
+        })
+        from secator.loader import load_external_addons
+        result = load_external_addons()
+        self.assertNotIn('bad_addon', result)
+        self.assertIn('good_addon', result)
+
 
 class TestDiscoverExternalTasksSkipsDriversAndExporters(unittest.TestCase):
     """discover_external_tasks must not attempt to load driver or exporter files."""
