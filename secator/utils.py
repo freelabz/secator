@@ -827,10 +827,10 @@ def process_wordlist(val):
 		val (str): Can be a config value in CONFIG.wordlists.defaults or CONFIG.wordlists.templates, or a local path,
 		or a URL.
 	"""
-	default_wordlist = getattr(CONFIG.wordlists.defaults, val)
+	default_wordlist = CONFIG.wordlists.defaults.get(val)
 	if default_wordlist:
 		val = default_wordlist
-	template_wordlist = getattr(CONFIG.wordlists.templates, val)
+	template_wordlist = CONFIG.wordlists.templates.get(val)
 	if template_wordlist:
 		val = template_wordlist
 

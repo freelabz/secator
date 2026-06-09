@@ -72,7 +72,7 @@ class TestConfig(unittest.TestCase):
 		self.assertEqual(config.get('addons.gdrive.enabled'), True)
 		config = Config.parse(path=self.config_test)
 		self.assertEqual(config.addons.gdrive.enabled, True)
-		self.assertEqual(config._partial.addons.gdrive.enabled, True)
+		self.assertEqual(config._partial['addons']['gdrive']['enabled'], True)
 
 	def test_set_dict_subkey_tasks_overrides(self):
 		"""Test that setting a sub-key within an empty dict field works."""
@@ -199,7 +199,7 @@ class TestConfig(unittest.TestCase):
 			f.write(yaml.dump(self.config_home_dir_reduce))
 		config = Config.parse(path=self.config_test)
 		self.assertIsInstance(config.dirs.data, Path)
-		self.assertIsInstance(config._partial.dirs.data, str)
+		self.assertIsInstance(config._partial['dirs']['data'], str)
 		config.save(self.config_test)
 		data = Config.read_yaml(self.config_test)
 		self.assertNotIn(str(self.home), data['dirs']['data'])
@@ -366,7 +366,7 @@ class TestAIConfig(unittest.TestCase):
 		self.assertIsNotNone(ai)
 		# Test enabled and api_key fields (following addon pattern)
 		self.assertEqual(ai.enabled, False)
-		self.assertEqual(ai.api_key, '')
+		self.assertEqual(ai.api_key.get_secret_value(), '')
 		# Test model configuration
 		self.assertEqual(ai.default_model, 'claude-sonnet-4-6')
 		self.assertEqual(ai.intent_model, 'claude-haiku-4-5')
@@ -381,3 +381,104 @@ class TestAIConfig(unittest.TestCase):
 		from secator.config import Config
 		config = Config.parse()
 		self.assertEqual(config.addons.api.finding_search_endpoint, 'findings/_search')
+
+
+@mock.patch('sys.stderr', devnull)
+class TestSecretFields(unittest.TestCase):
+
+	def test_secret_paths_contains_expected(self):
+		from secator.config import SECRET_PATHS
+		expected = [
+			'cli.github_token',
+			'addons.mongodb.url',
+			'addons.vulners.api_key',
+			'addons.ai.api_key',
+			'addons.discord.webhook_url',
+			'addons.discord.bot_token',
+			'addons.api.key',
+		]
+		for path in expected:
+			self.assertIn(path, SECRET_PATHS)
+
+	def test_secret_fields_are_secret_str(self):
+		from pydantic import SecretStr
+		from secator.config import Config
+		config = Config.parse()
+		self.assertIsInstance(config.addons.mongodb.url, SecretStr)
+		self.assertIsInstance(config.addons.vulners.api_key, SecretStr)
+		self.assertIsInstance(config.addons.ai.api_key, SecretStr)
+		self.assertIsInstance(config.addons.discord.webhook_url, SecretStr)
+		self.assertIsInstance(config.addons.discord.bot_token, SecretStr)
+		self.assertIsInstance(config.addons.api.key, SecretStr)
+		self.assertIsInstance(config.cli.github_token, SecretStr)
+
+	def test_get_secret_value_returns_actual_value(self):
+		from secator.config import Config
+		config = Config.parse({'addons': {'mongodb': {'url': 'mongodb://user:pass@host'}}})
+		self.assertEqual(config.addons.mongodb.url.get_secret_value(), 'mongodb://user:pass@host')
+
+	def test_dump_masks_secrets_when_requested(self):
+		from secator.config import Config
+		config = Config.parse({'addons': {'mongodb': {'url': 'mongodb://user:pass@host'}}})
+		yaml_str = Config.dump(config, partial=True, mask_secrets=True)
+		self.assertIn('***', yaml_str)
+		self.assertNotIn('pass@host', yaml_str)
+
+	def test_dump_no_masking_by_default(self):
+		from secator.config import Config
+		config = Config.parse({'addons': {'mongodb': {'url': 'mongodb://user:pass@host'}}})
+		yaml_str = Config.dump(config, partial=True, mask_secrets=False)
+		self.assertIn('mongodb://user:pass@host', yaml_str)
+
+	def test_get_print_false_returns_secret_str(self):
+		from pydantic import SecretStr
+		from secator.config import Config
+		config = Config.parse({'addons': {'mongodb': {'url': 'mongodb://user:pass@host'}}})
+		value = config.get('addons.mongodb.url', print=False)
+		self.assertIsInstance(value, SecretStr)
+		self.assertEqual(value.get_secret_value(), 'mongodb://user:pass@host')
+
+	def test_save_writes_real_value(self):
+		from pathlib import Path
+		from secator.config import Config
+		tmp = Path('test_secret_save.yml')
+		try:
+			config = Config.parse({'addons': {'mongodb': {'url': 'mongodb://user:pass@host'}}})
+			config.save(tmp)
+			data = Config.read_yaml(tmp)
+			self.assertEqual(data['addons']['mongodb']['url'], 'mongodb://user:pass@host')
+		finally:
+			if tmp.exists():
+				tmp.unlink()
+
+	def test_env_var_override_secret_field(self):
+		from pydantic import SecretStr
+		from secator.utils_test import clear_modules
+		import shutil
+		shutil.rmtree('/tmp/.secator', ignore_errors=True)
+		import os
+		with mock.patch.dict(os.environ, {
+			'SECATOR_DIRS_DATA': '/tmp/.secator',
+			'SECATOR_ADDONS_MONGODB_URL': 'mongodb://env:secret@envhost',
+		}):
+			clear_modules()
+			from secator.config import CONFIG
+			self.assertIsInstance(CONFIG.addons.mongodb.url, SecretStr)
+			self.assertEqual(CONFIG.addons.mongodb.url.get_secret_value(), 'mongodb://env:secret@envhost')
+		shutil.rmtree('/tmp/.secator', ignore_errors=True)
+
+	def test_dotenv_file_loads_secret_field(self):
+		from pydantic import SecretStr
+		from secator.utils_test import clear_modules
+		import shutil
+		from pathlib import Path
+		shutil.rmtree('/tmp/.secator', ignore_errors=True)
+		Path('/tmp/.secator').mkdir(parents=True)
+		env_file = Path('/tmp/.secator/.env')
+		env_file.write_text('SECATOR_ADDONS_VULNERS_API_KEY=my_secret_api_key\n')
+		with mock.patch.dict(os.environ, {'SECATOR_DIRS_DATA': '/tmp/.secator'}, clear=False):
+			clear_modules()
+			from secator.config import CONFIG
+			self.assertIsInstance(CONFIG.addons.vulners.api_key, SecretStr)
+			self.assertEqual(CONFIG.addons.vulners.api_key.get_secret_value(), 'my_secret_api_key')
+		shutil.rmtree('/tmp/.secator', ignore_errors=True)
