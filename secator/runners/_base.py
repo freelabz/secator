@@ -97,6 +97,7 @@ class Runner:
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description or '')
 		self.workspace_name = context.get('workspace_name', CONFIG.workspace.default or 'default')
+		self.workspace_explicit = context.get('workspace_explicit', False)
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
@@ -1412,6 +1413,14 @@ class Runner:
 			self.workspace_name = profile_workspace
 			self.context['workspace_name'] = profile_workspace
 			self.context['workspace_id'] = profile_workspace
+		elif not self.workspace_explicit and self.workspace_name == default_ws:
+			# No profile workspace and no explicit -ws: apply route-based workspace if routes match
+			route_workspace = self._resolve_route_workspace(self.inputs)
+			if route_workspace:
+				self.debug(f'route workspace -> {route_workspace}', sub='init')
+				self.workspace_name = route_workspace
+				self.context['workspace_name'] = route_workspace
+				self.context['workspace_id'] = route_workspace
 
 		# Apply exporters (consumed from run_opts['output'] right after profile resolution)
 		if profile_exporters is not None:
@@ -1423,6 +1432,27 @@ class Runner:
 			self._apply_profile_drivers(profile_drivers)
 
 		return templates
+
+	def _resolve_route_workspace(self, inputs):
+		"""Resolve workspace from configured routes based on inputs.
+
+		Args:
+			inputs (list[str]): List of inputs to match against route patterns.
+
+		Returns:
+			str | None: Matched workspace name, or None if no route matches.
+		"""
+		import fnmatch
+
+		routes = CONFIG.workspace.routes
+		if not routes:
+			return None
+		for workspace, patterns in routes.items():
+			for pattern in patterns:
+				for inp in inputs:
+					if fnmatch.fnmatch(str(inp), pattern):
+						return workspace
+		return None
 
 	def _apply_profile_drivers(self, drivers):
 		"""Load and register driver hooks specified by profiles.

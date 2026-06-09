@@ -148,6 +148,7 @@ class Drivers(StrictModel):
 
 class Workspace(StrictModel):
 	default: str = ''
+	routes: Dict[str, List[str]] = {}
 
 
 class Payloads(StrictModel):
@@ -481,10 +482,28 @@ class Config(DotMap):
 		updated = dict(existing_dict)
 		if strategy == 'remove':
 			if subkey and subkey in updated:
-				del updated[subkey]
+				existing = updated[subkey]
+				if isinstance(existing, list) and value is not None:
+					if value in existing:
+						existing = list(existing)
+						existing.remove(value)
+						updated[subkey] = existing
+					else:
+						console.print(f'[bold orange1]Value "{value}" not found in {".".join(parent_parts)}.{subkey}[/].')
+						return
+				else:
+					del updated[subkey]
 			elif subkey:
 				console.print(f'[bold orange1]Key "{subkey}" not found in {".".join(parent_parts)}[/].')
 				return
+		elif strategy == 'append':
+			if subkey:
+				existing_list = list(updated.get(subkey) or [])
+				if value not in existing_list:
+					existing_list.append(value)
+				updated[subkey] = existing_list
+			elif isinstance(value, dict):
+				updated.update(value)
 		else:
 			if subkey:
 				updated[subkey] = value
