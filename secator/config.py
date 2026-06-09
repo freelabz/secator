@@ -312,7 +312,7 @@ class SecatorConfig(StrictModel):
 	wordlists: Wordlists = Wordlists()
 	profiles: Profiles = Profiles()
 	drivers: Drivers = Drivers()
-	workspace: Workspace = Workspace()
+	workspaces: Workspace = Workspace()
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()
@@ -524,15 +524,15 @@ class Config(DotMap):
 		else:
 			if subkey:
 				new_val = Config._parse_new_value(value)
-				# For workspace.profiles, always coerce single strings to list
-				if parent_path == 'workspace.profiles' and isinstance(new_val, str):
+				# For workspaces.profiles, always coerce single strings to list
+				if parent_path == 'workspaces.profiles' and isinstance(new_val, str):
 					new_val = [new_val]
 				updated[subkey] = new_val
 			elif isinstance(value, dict):
 				updated.update(value)
 
-		# Validate profile names when setting workspace.profiles values
-		if parent_path == 'workspace.profiles' and subkey and subkey in updated and strategy != 'remove':
+		# Validate profile names when setting workspaces.profiles values
+		if parent_path == 'workspaces.profiles' and subkey and subkey in updated and strategy != 'remove':
 			new_val = updated[subkey]
 			if new_val:
 				profile_names = new_val if isinstance(new_val, list) else [new_val]
@@ -627,6 +627,17 @@ class Config(DotMap):
 		# Load YAML file
 		if path:
 			data = Config.read_yaml(path)
+
+		# Backwards compatibility: migrate 'workspace' key to 'workspaces'
+		if 'workspace' in data and 'workspaces' not in data:
+			data['workspaces'] = data.pop('workspace')
+			if path:
+				console.print(f'[bold orange1]Migrating config key "workspace" to "workspaces" in {path}[/]')
+				try:
+					with path.open('w') as f:
+						f.write(yaml.dump({k: v for k, v in data.items() if not k.startswith('_')}, sort_keys=False))
+				except Exception as e:
+					console.print(f'[bold red]Failed to save migrated config: {e}[/]')
 
 		# Load data
 		config = Config.load(SecatorConfig, data, print_errors=print_errors)

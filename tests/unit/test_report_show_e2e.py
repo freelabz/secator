@@ -386,7 +386,7 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 				mock.patch('secator.cli._load_report_data', return_value=(report_info, vuln_counts)), \
 				mock.patch('secator.cli.CONFIG') as cfg, \
 				console.capture() as cap:
-			cfg.workspace.default = default_ws
+			cfg.workspaces.default = default_ws
 			report_list.callback(
 				workspace=workspace_opt, runner_type=None, time_delta=None, show_all=False, interesting=False,
 				status=None,
