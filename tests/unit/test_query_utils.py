@@ -1,11 +1,9 @@
-from unittest.mock import patch
 from secator.query.utils import (
     expand_runner_paths,
     parse_report_paths,
     python_expr_to_mongo,
     validate_query_fields,
     query_has_type_constraint,
-    _warn_unknown_field,
 )
 
 
@@ -302,62 +300,67 @@ class TestValidateQueryFields:
     def test_invalid_field_removed_with_warning(self):
         # When ALL user-specified fields are invalid, the fragment is dropped entirely
         # (returning {} rather than {'_type': 'technology'} which would match everything).
+        from secator.rich import console
+        console.export_text(clear=True)
         q = {'_type': 'technology', 'name': {'$regex': '(HSTS|php)'}}
-        with patch('secator.query.utils._warn_unknown_field') as mock_warn:
-            result = validate_query_fields(q)
+        result = validate_query_fields(q)
         assert result == {}
-        mock_warn.assert_called_once()
-        field_name, type_name, valid_fields = mock_warn.call_args[0]
-        assert field_name == 'name'
-        assert type_name == 'technology'
-        assert 'product' in valid_fields  # one of the available fields
+        recorded = console.export_text()
+        assert "Field 'name' does not exist on type 'technology'" in recorded
+        assert 'product' in recorded  # one of the available fields
 
     def test_or_validates_each_fragment(self):
         # The technology fragment has no valid user fields, so it is dropped from $or.
         # The $or collapses to a single item, which is unwrapped.
+        from secator.rich import console
+        console.export_text(clear=True)
         q = {
             '$or': [
                 {'_type': 'url', 'status_code': {'$ne': 200}},
                 {'_type': 'technology', 'name': {'$regex': '(HSTS|php)'}},
             ]
         }
-        with patch('secator.query.utils._warn_unknown_field') as mock_warn:
-            result = validate_query_fields(q)
+        result = validate_query_fields(q)
         assert result == {'_type': 'url', 'status_code': {'$ne': 200}}
-        mock_warn.assert_called_once()
+        recorded = console.export_text()
+        assert "Field 'name' does not exist on type 'technology'" in recorded
 
     def test_or_with_partial_invalid_fields(self):
         # When one fragment has some valid and some invalid fields, only the invalid
         # field is removed; the fragment itself is kept.
+        from secator.rich import console
+        console.export_text(clear=True)
         q = {
             '$or': [
                 {'_type': 'url', 'status_code': {'$ne': 200}},
                 {'_type': 'technology', 'product': 'nginx', 'name': 'bogus'},
             ]
         }
-        with patch('secator.query.utils._warn_unknown_field') as mock_warn:
-            result = validate_query_fields(q)
+        result = validate_query_fields(q)
         assert result == {
             '$or': [
                 {'_type': 'url', 'status_code': {'$ne': 200}},
                 {'_type': 'technology', 'product': 'nginx'},
             ]
         }
-        mock_warn.assert_called_once()
+        recorded = console.export_text()
+        assert "Field 'name' does not exist on type 'technology'" in recorded
 
     def test_and_validates_each_fragment(self):
         # The technology fragment (all user fields invalid) is dropped from $and.
         # The $and collapses to a single item, which is unwrapped.
+        from secator.rich import console
+        console.export_text(clear=True)
         q = {
             '$and': [
                 {'_context.scan_id': '5'},
                 {'_type': 'technology', 'name': {'$regex': 'php'}},
             ]
         }
-        with patch('secator.query.utils._warn_unknown_field') as mock_warn:
-            result = validate_query_fields(q)
+        result = validate_query_fields(q)
         assert result == {'_context.scan_id': '5'}
-        mock_warn.assert_called_once()
+        recorded = console.export_text()
+        assert "Field 'name' does not exist on type 'technology'" in recorded
 
     def test_unknown_type_passes_through(self):
         q = {'_type': 'unknown_type', 'foo': 'bar'}
@@ -377,11 +380,14 @@ class TestValidateQueryFields:
 
     def test_multiple_invalid_fields_all_warned(self):
         # All user fields invalid → fragment dropped entirely, returning {}
+        from secator.rich import console
+        console.export_text(clear=True)
         q = {'_type': 'technology', 'name': 'php', 'bogus': 'x'}
-        with patch('secator.query.utils._warn_unknown_field') as mock_warn:
-            result = validate_query_fields(q)
+        result = validate_query_fields(q)
         assert result == {}
-        assert mock_warn.call_count == 2
+        recorded = console.export_text()
+        assert "Field 'name' does not exist on type 'technology'" in recorded
+        assert "Field 'bogus' does not exist on type 'technology'" in recorded
 
     def test_valid_url_status_code(self):
         q = {'_type': 'url', 'status_code': {'$ne': 200}}
