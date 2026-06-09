@@ -1266,7 +1266,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
 	"""
-	from secator.query.utils import parse_report_paths, python_expr_to_mongo
+	from secator.query.utils import parse_report_paths, python_expr_to_mongo, query_has_type_constraint
 
 	current = get_file_timestamp()
 	workspace_name = workspace or CONFIG.workspace.default or 'default'
