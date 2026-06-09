@@ -426,3 +426,21 @@ class TestQueryEngineUpdate(unittest.TestCase):
 		engine.backend.update.assert_called_once_with(
 			{'_type': 'ai'}, {'$set': {'status': 'done'}}
 		)
+
+
+class TestSqliteWiring(unittest.TestCase):
+	def test_sqlite_in_available_drivers(self):
+		from secator.loader import get_available_drivers
+		self.assertIn('sqlite', get_available_drivers())
+
+	def test_sqlite_addon_always_enabled(self):
+		from secator.definitions import ADDONS_ENABLED
+		self.assertIn('sqlite', ADDONS_ENABLED)
+		self.assertTrue(ADDONS_ENABLED['sqlite'])
+
+	def test_sqlite_addon_config_exists(self):
+		from secator.config import CONFIG
+		self.assertFalse(CONFIG.addons.sqlite.enabled)
+		self.assertEqual(CONFIG.addons.sqlite.busy_timeout_ms, 5000)
+		self.assertEqual(CONFIG.addons.sqlite.max_items, -1)
+		self.assertIsInstance(CONFIG.addons.sqlite.duplicate_main_copy_fields, list)
