@@ -361,6 +361,87 @@ def python_expr_to_mongo(query):
     return result
 
 
+def _warn_unknown_field(field_name, type_name, valid_fields):
+    """Emit a warning for an unknown field in a query fragment."""
+    from secator.output_types import Warning
+    public_fields = sorted(f for f in valid_fields if not f.startswith('_'))
+    console.print(Warning(
+        message=f"Field '{field_name}' does not exist on type '{type_name}'. "
+                f"Available fields: {', '.join(public_fields)}"
+    ))
+
+
+def _build_type_map():
+    from secator.output_types import OUTPUT_TYPES
+    return {
+        cls.__dataclass_fields__['_type'].default: cls
+        for cls in OUTPUT_TYPES
+        if '_type' in getattr(cls, '__dataclass_fields__', {})
+        and isinstance(cls.__dataclass_fields__['_type'].default, str)
+    }
+
+
+def _validate_fragment(fragment, type_map):
+    """Validate a single query fragment against known output type fields.
+
+    Returns None if all user-specified fields were invalid (signals the caller
+    to drop this fragment from an $or/$and list rather than keeping a bare
+    {'_type': 'x'} that would match every object of that type).
+    """
+    if not isinstance(fragment, dict):
+        return fragment
+    _type = fragment.get('_type')
+    if not _type:
+        return fragment
+    cls = type_map.get(_type)
+    if cls is None:
+        return fragment
+    valid_fields = set(cls.fields())
+    result = {}
+    user_fields_seen = 0
+    user_fields_kept = 0
+    for k, v in fragment.items():
+        if k.startswith('$') or k.startswith('_'):
+            result[k] = v
+            continue
+        user_fields_seen += 1
+        top_field = k.split('.')[0]
+        if top_field in valid_fields:
+            result[k] = v
+            user_fields_kept += 1
+        else:
+            _warn_unknown_field(k, _type, valid_fields)
+    # If the fragment had user-specified fields but ALL were invalid, signal
+    # the caller to drop this fragment entirely rather than keeping a bare
+    # {'_type': _type} that would match every object of that type.
+    if user_fields_seen > 0 and user_fields_kept == 0:
+        return None
+    return result
+
+
+def _validate_query(q, type_map):
+    if not isinstance(q, dict):
+        return q
+    if '$or' in q:
+        parts = [_validate_query(sub, type_map) for sub in q['$or']]
+        parts = [p for p in parts if p]
+        if len(parts) == 0:
+            return {}
+        if len(parts) == 1:
+            return parts[0]
+        return {'$or': parts}
+    if '$and' in q:
+        parts = [_validate_query(sub, type_map) for sub in q['$and']]
+        parts = [p for p in parts if p]
+        if len(parts) == 0:
+            return {}
+        if len(parts) == 1:
+            return parts[0]
+        return {'$and': parts}
+    result = _validate_fragment(q, type_map)
+    return result if result is not None else {}
+
+
 def validate_query_fields(query):
     """Validate field names in a MongoDB-style query against known output types.
 
@@ -372,80 +453,8 @@ def validate_query_fields(query):
     if not query or not isinstance(query, dict):
         return query
 
-    from secator.output_types import OUTPUT_TYPES
-
-    type_map = {
-        cls.__dataclass_fields__['_type'].default: cls
-        for cls in OUTPUT_TYPES
-        if '_type' in getattr(cls, '__dataclass_fields__', {})
-        and isinstance(cls.__dataclass_fields__['_type'].default, str)
-    }
-
-    def _validate_fragment(fragment):
-        """Validate a single query fragment against known output type fields.
-
-        Returns None if all user-specified fields were invalid (signals the caller
-        to drop this fragment from an $or/$and list rather than keeping a bare
-        {'_type': 'x'} that would match every object of that type).
-        """
-        if not isinstance(fragment, dict):
-            return fragment
-        _type = fragment.get('_type')
-        if not _type:
-            return fragment
-        cls = type_map.get(_type)
-        if cls is None:
-            return fragment
-        valid_fields = set(cls.fields())
-        result = {}
-        user_fields_seen = 0
-        user_fields_kept = 0
-        for k, v in fragment.items():
-            if k.startswith('$') or k.startswith('_'):
-                result[k] = v
-                continue
-            user_fields_seen += 1
-            top_field = k.split('.')[0]
-            if top_field in valid_fields:
-                result[k] = v
-                user_fields_kept += 1
-            else:
-                from secator.output_types import Warning
-                public_fields = sorted(f for f in valid_fields if not f.startswith('_'))
-                console.print(Warning(
-                    message=f"Field '{k}' does not exist on type '{_type}'. "
-                            f"Available fields: {', '.join(public_fields)}"
-                ))
-        # If the fragment had user-specified fields but ALL were invalid, signal
-        # the caller to drop this fragment entirely rather than keeping a bare
-        # {'_type': _type} that would match every object of that type.
-        if user_fields_seen > 0 and user_fields_kept == 0:
-            return None
-        return result
-
-    def _validate(q):
-        if not isinstance(q, dict):
-            return q
-        if '$or' in q:
-            parts = [_validate(sub) for sub in q['$or']]
-            parts = [p for p in parts if p]
-            if len(parts) == 0:
-                return {}
-            if len(parts) == 1:
-                return parts[0]
-            return {'$or': parts}
-        if '$and' in q:
-            parts = [_validate(sub) for sub in q['$and']]
-            parts = [p for p in parts if p]
-            if len(parts) == 0:
-                return {}
-            if len(parts) == 1:
-                return parts[0]
-            return {'$and': parts}
-        result = _validate_fragment(q)
-        return result if result is not None else {}
-
-    return _validate(query)
+    type_map = _build_type_map()
+    return _validate_query(query, type_map)
 
 
 def query_has_type_constraint(query):
