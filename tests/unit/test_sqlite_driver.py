@@ -122,3 +122,89 @@ class TestComputeDuplicateUpdates(unittest.TestCase):
 		new_item.host = ''  # empty on new item -> should be filled from previous
 		updates = compute_duplicate_updates([ws_finding], [new_item], copy_fields=['host'])
 		self.assertEqual(updates['u1'].get('host'), 'example.com')
+
+
+class TestSqliteHooks(SqliteTestBase):
+	def _make_finding(self, url):
+		from secator.output_types import Url
+		return Url(url=url, _context={'workspace_id': 'ws1', 'workspace_duplicate': False})
+
+	def test_update_finding_inserts_and_assigns_uuid(self):
+		from secator.hooks import sqlite as mod
+		from secator.query.sqlite import SqliteBackend
+
+		class FakeRunner:
+			def __init__(self):
+				self.config = type('C', (), {'name': 'httpx'})()
+				self.context = {'workspace_id': 'ws1'}
+
+		runner = FakeRunner()
+		item = self._make_finding('http://x/a')
+		self.assertEqual(item._uuid, '')
+		returned = mod.update_finding(runner, item)
+		self.assertTrue(returned._uuid)  # uuid assigned
+
+		results = SqliteBackend(workspace_id='ws1').search({'_type': 'url'})
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]['url'], 'http://x/a')
+
+	def test_update_runner_inserts_and_stores_id(self):
+		from secator.hooks import sqlite as mod
+
+		class FakeRunner:
+			def __init__(self):
+				self.config = type('C', (), {'type': 'task', 'name': 'httpx'})()
+				self.context = {'workspace_id': 'ws1'}
+				self.status = 'RUNNING'
+
+			def toDict(self):
+				return {'name': 'httpx', 'status': self.status, 'chunk': None}
+
+		runner = FakeRunner()
+		mod.update_runner(runner)
+		self.assertIn('task_id', runner.context)
+		task_id = runner.context['task_id']
+
+		conn = mod.get_sqlite_conn()
+		row = conn.execute("SELECT workspace_id FROM tasks WHERE id=?", (task_id,)).fetchone()
+		self.assertIsNotNone(row)
+		self.assertEqual(row[0], 'ws1')
+
+		# Second call updates the same row (no new id)
+		runner.status = 'SUCCESS'
+		mod.update_runner(runner)
+		self.assertEqual(runner.context['task_id'], task_id)
+		count = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+		self.assertEqual(count, 1)
+
+	def test_tag_duplicates(self):
+		from secator.hooks import sqlite as mod
+		from secator.query.sqlite import SqliteBackend
+
+		class FakeRunner:
+			def __init__(self):
+				self.config = type('C', (), {'name': 'httpx'})()
+				self.context = {'workspace_id': 'ws1'}
+
+		runner = FakeRunner()
+		mod.update_finding(runner, self._make_finding('http://x/a'))
+		mod.update_finding(runner, self._make_finding('http://x/a'))  # duplicate
+		mod.update_finding(runner, self._make_finding('http://x/b'))
+
+		mod.tag_duplicates('ws1')
+
+		conn = mod.get_sqlite_conn()
+		dup_count = conn.execute(
+			"SELECT COUNT(*) FROM findings WHERE json_extract(data,'$._context.workspace_duplicate')=1"
+		).fetchone()[0]
+		self.assertEqual(dup_count, 1)
+		tagged = conn.execute("SELECT COUNT(*) FROM findings WHERE _tagged=1").fetchone()[0]
+		self.assertEqual(tagged, 3)
+
+	def test_hooks_structure(self):
+		from secator.hooks import sqlite as mod
+		from secator.runners import Scan, Task, Workflow
+		self.assertIn(Task, mod.HOOKS)
+		self.assertIn(Workflow, mod.HOOKS)
+		self.assertIn(Scan, mod.HOOKS)
+		self.assertIn('on_item', mod.HOOKS[Task])
