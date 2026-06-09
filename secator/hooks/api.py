@@ -25,7 +25,7 @@ from secator.utils import debug
 from secator.rich import console
 
 API_URL = CONFIG.addons.api.url
-API_KEY = CONFIG.addons.api.key
+API_KEY = CONFIG.addons.api.key.get_secret_value()
 API_HEADER_NAME = CONFIG.addons.api.header_name
 API_RUNNER_CREATE_ENDPOINT = CONFIG.addons.api.runner_create_endpoint
 API_RUNNER_UPDATE_ENDPOINT = CONFIG.addons.api.runner_update_endpoint

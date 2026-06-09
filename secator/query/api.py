@@ -19,7 +19,7 @@ class ApiBackend(QueryBackend):
     def __init__(self, workspace_id: str, config: Optional[dict] = None, context: Optional[dict] = None):
         super().__init__(workspace_id, config, context=context)
         self.api_url = CONFIG.addons.api.url
-        self.api_key = CONFIG.addons.api.key
+        self.api_key = CONFIG.addons.api.key.get_secret_value()
         self.header_name = CONFIG.addons.api.header_name
         self.search_endpoint = CONFIG.addons.api.finding_search_endpoint
         self.force_ssl = CONFIG.addons.api.force_ssl

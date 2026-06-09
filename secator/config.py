@@ -9,7 +9,7 @@ import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
 from dotmap import DotMap
-from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
+from pydantic import AfterValidator, BaseModel, SecretStr, model_validator, ValidationError
 
 from secator.requests import requests
 from secator.rich import console, console_stdout
@@ -84,7 +84,7 @@ class Celery(StrictModel):
 
 
 class Cli(StrictModel):
-	github_token: str = os.environ.get('GITHUB_TOKEN', '')
+	github_token: SecretStr = os.environ.get('GITHUB_TOKEN', '')
 	record: bool = False
 	stdin_timeout: int = 1000
 	show_http_response_headers: bool = False
@@ -187,7 +187,7 @@ class WorkerAddon(StrictModel):
 
 class MongodbAddon(StrictModel):
 	enabled: bool = False
-	url: str = 'mongodb://localhost'
+	url: SecretStr = 'mongodb://localhost'
 	update_frequency: int = 60
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
@@ -204,12 +204,12 @@ class MongodbAddon(StrictModel):
 
 class VulnersAddon(StrictModel):
 	enabled: bool = False
-	api_key: str = ''
+	api_key: SecretStr = ''
 
 
 class AiAddon(StrictModel):
 	enabled: bool = False
-	api_key: str = ''
+	api_key: SecretStr = ''
 	api_base: str = ''
 	default_model: str = 'claude-sonnet-4-6'
 	intent_model: str = 'claude-haiku-4-5'
@@ -259,8 +259,8 @@ class Providers(StrictModel):
 
 class DiscordAddon(StrictModel):
 	enabled: bool = False
-	webhook_url: str = ''
-	bot_token: str = ''
+	webhook_url: SecretStr = ''
+	bot_token: SecretStr = ''
 	send_runner_updates: bool = True
 	send_findings: bool = True
 	finding_types: List[str] = ['vulnerability']
@@ -270,7 +270,7 @@ class DiscordAddon(StrictModel):
 class ApiAddon(StrictModel):
 	enabled: bool = False
 	url: str = 'https://app.secator.cloud/api'
-	key: str = ''
+	key: SecretStr = ''
 	header_name: str = 'Bearer'
 	force_ssl: bool = True
 	timeout: int = 60
@@ -317,6 +317,40 @@ class SecatorConfig(StrictModel):
 	offline_mode: bool = False
 
 
+def _get_secret_paths(model_class, prefix=''):
+	"""Get all dotted paths to SecretStr fields in a Pydantic model."""
+	paths = []
+	if not hasattr(model_class, 'model_fields'):
+		return paths
+	for field_name, field_info in model_class.model_fields.items():
+		annotation = field_info.annotation
+		if annotation is None:
+			continue
+		field_path = f'{prefix}.{field_name}' if prefix else field_name
+		if annotation is SecretStr:
+			paths.append(field_path)
+		elif hasattr(annotation, 'model_fields'):
+			paths.extend(_get_secret_paths(annotation, field_path))
+	return paths
+
+
+SECRET_PATHS = _get_secret_paths(SecatorConfig)
+
+
+def _mask_secret_data(data, current_path=''):
+	"""Recursively mask SecretStr values and secret path strings in a dict."""
+	if isinstance(data, SecretStr):
+		return '***' if data else ''
+	if isinstance(data, dict):
+		return {
+			k: _mask_secret_data(v, f'{current_path}.{k}' if current_path else k)
+			for k, v in data.items()
+		}
+	if current_path in SECRET_PATHS and isinstance(data, str) and data:
+		return '***'
+	return data
+
+
 class Config(DotMap):
 	"""Config class.
 
@@ -351,9 +385,9 @@ class Config(DotMap):
 			return None
 		if print:
 			if key:
-				yaml_str = Config.dump(DotMap({key: value}), partial=False)
+				yaml_str = Config.dump(DotMap({key: value}), partial=False, mask_secrets=True)
 			else:
-				yaml_str = Config.dump(self, partial=False)
+				yaml_str = Config.dump(self, partial=False, mask_secrets=True)
 			Config.print_yaml(yaml_str)
 		return value
 
@@ -436,6 +470,9 @@ class Config(DotMap):
 							import json
 
 							value = json.loads(value)
+				elif isinstance(existing_value, SecretStr):
+					if not isinstance(value, SecretStr):
+						value = SecretStr(value) if value is not None else SecretStr('')
 				elif isinstance(existing_value, bool):
 					if isinstance(value, str):
 						value = value.lower() in ('true', '1', 't')
@@ -559,7 +596,7 @@ class Config(DotMap):
 		Args:
 			partial (bool): Print partial config only.
 		"""
-		yaml_str = self.dump(self, partial=partial)
+		yaml_str = self.dump(self, partial=partial, mask_secrets=True)
 		yaml_str = f'# {self._path}\n\n{yaml_str}' if self._path and partial else yaml_str
 		Config.print_yaml(yaml_str)
 
@@ -671,10 +708,14 @@ class Config(DotMap):
 		console_stdout.print(data)
 
 	@staticmethod
-	def dump(config, partial=True):
+	def dump(config, partial=True, mask_secrets=False):
 		"""Safe dump config as yaml:
 		- `Path`, `PosixPath` and `WindowsPath` objects are translated to strings.
 		- Home directory in paths is replaced with the tilde '~'.
+		- `SecretStr` values are serialized as their actual string values (use mask_secrets=True for display).
+
+		Args:
+			mask_secrets (bool): When True, replace non-empty secret values with '***'.
 
 		Returns:
 			str: YAML dump.
@@ -698,10 +739,14 @@ class Config(DotMap):
 				path = path.replace(home, '~')
 			return dumper.represent_scalar('tag:yaml.org,2002:str', path)
 
+		def secret_str_representer(dumper, data):
+			return posix_path_representer(dumper, data.get_secret_value())
+
 		LineBreakDumper.add_representer(str, posix_path_representer)
 		LineBreakDumper.add_representer(Path, posix_path_representer)
 		LineBreakDumper.add_representer(PosixPath, posix_path_representer)
 		LineBreakDumper.add_representer(WindowsPath, posix_path_representer)
+		LineBreakDumper.add_representer(SecretStr, secret_str_representer)
 
 		# Get data dict
 		data = config.toDict()
@@ -716,6 +761,10 @@ class Config(DotMap):
 				del data['_partial']
 
 		data = {k: v for k, v in data.items() if not k.startswith('_')}
+
+		if mask_secrets:
+			data = _mask_secret_data(data)
+
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
 
 	@staticmethod
@@ -848,6 +897,8 @@ default_config = Config.parse(print_errors=False)
 
 # Load user config
 data_root = default_config.dirs.data
+# Load .env from data dir (lower priority than CWD .env and OS env vars)
+load_dotenv(data_root / '.env', override=False)
 config_path = data_root / 'config.yml'
 if not config_path.exists():
 	if not data_root.exists():

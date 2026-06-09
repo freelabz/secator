@@ -12,7 +12,7 @@ class TestAddonMongo(unittest.TestCase):
 	def setUpClass(cls):
 		clear_modules()
 		from secator.config import CONFIG
-		print(CONFIG.addons.mongodb.url)
+		print(CONFIG.addons.mongodb.url.get_secret_value())
 		raise Exception('test')
 
 	@classmethod
@@ -20,4 +20,4 @@ class TestAddonMongo(unittest.TestCase):
 		pass
 
 	def test_ok(self):
-		print(CONFIG.addons.mongodb.url)
+		print(CONFIG.addons.mongodb.url.get_secret_value())

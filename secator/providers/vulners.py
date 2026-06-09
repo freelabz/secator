@@ -19,7 +19,7 @@ class vulners(CVEProvider):
 		Returns:
 			dict: vulnerability data.
 		"""
-		api_key = CONFIG.addons.vulners.api_key
+		api_key = CONFIG.addons.vulners.api_key.get_secret_value()
 		enabled = CONFIG.addons.vulners.enabled
 		if not enabled:
 			return None
@@ -45,7 +45,7 @@ class vulners(CVEProvider):
 		Returns:
 			dict: CPE data.
 		"""
-		api_key = CONFIG.addons.vulners.api_key
+		api_key = CONFIG.addons.vulners.api_key.get_secret_value()
 		enabled = CONFIG.addons.vulners.enabled
 		if not enabled:
 			return None

@@ -23,8 +23,8 @@ from secator.output_types import FINDING_TYPES
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug
 
-WEBHOOK_URL = CONFIG.addons.discord.webhook_url
-BOT_TOKEN = CONFIG.addons.discord.bot_token
+WEBHOOK_URL = CONFIG.addons.discord.webhook_url.get_secret_value()
+BOT_TOKEN = CONFIG.addons.discord.bot_token.get_secret_value()
 SEND_RUNNER_UPDATES = CONFIG.addons.discord.send_runner_updates
 SEND_FINDINGS = CONFIG.addons.discord.send_findings
 FINDING_TYPE_FILTER = CONFIG.addons.discord.finding_types

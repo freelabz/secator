@@ -340,7 +340,7 @@ def setup_ai():
 	# Show current config
 	current_model = CONFIG.addons.ai.default_model
 	current_intent = CONFIG.addons.ai.intent_model
-	current_key = CONFIG.addons.ai.api_key
+	current_key = CONFIG.addons.ai.api_key.get_secret_value()
 	masked_key = f"{current_key[:8]}...{current_key[-4:]}" if current_key and len(current_key) > 12 else current_key or ""
 	console.print()
 	console.print("[bold]  Current config:[/]")
@@ -424,7 +424,7 @@ def setup_ai():
 			console.print(f"[bold yellow]  Model selected: {selected} (config validation failed, not saved)[/]")
 
 		# Verify with a simple LLM call
-		api_key = CONFIG.addons.ai.api_key
+		api_key = CONFIG.addons.ai.api_key.get_secret_value()
 		api_base = CONFIG.addons.ai.api_base
 		console.print()
 		try:

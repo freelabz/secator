@@ -29,7 +29,7 @@ from secator.ai.session import save_history, show_session_picker, replay_session
 from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
 
 
-DEFAULT_API_KEY = CONFIG.addons.ai.api_key
+DEFAULT_API_KEY = CONFIG.addons.ai.api_key.get_secret_value()
 
 
 @task()
