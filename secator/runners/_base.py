@@ -97,6 +97,7 @@ class Runner:
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description or '')
 		self.workspace_name = context.get('workspace_name', CONFIG.workspace.default or 'default')
+		self.workspace_explicit = context.get('workspace_explicit', False)
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
@@ -197,7 +198,7 @@ class Runner:
 		# Determine inputs
 		self.debug(f'resolving inputs with {len(self.dynamic_opts)} dynamic opts', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
-		self.inputs = list(set(self.inputs))
+		self.inputs = list(dict.fromkeys(self.inputs))
 		if self.caller != 'Task':
 			targets = [Target(name=target) for target in self.inputs]
 			for target in targets:
@@ -214,6 +215,16 @@ class Runner:
 		profiles_str = run_opts.get('profiles') or []
 		self.debug('resolving profiles', obj={'profiles': profiles_str}, sub='init')
 		self.profiles = self.resolve_profiles(profiles_str)
+
+		# Apply route-based workspace if no profile/explicit workspace was set
+		default_ws = CONFIG.workspace.default or 'default'
+		if not self.workspace_explicit and self.workspace_name == default_ws:
+			route_workspace = self._resolve_route_workspace(self.inputs)
+			if route_workspace:
+				self.debug(f'route workspace -> {route_workspace}', sub='init')
+				self.workspace_name = route_workspace
+				self.context['workspace_name'] = route_workspace
+				self.context['workspace_id'] = route_workspace
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -317,7 +328,7 @@ class Runner:
 		if source == self.unique_name:
 			return True
 		prefix = self.unique_name + '_'
-		return source.startswith(prefix) and source[len(prefix):].isdigit()
+		return source.startswith(prefix) and source[len(prefix) :].isdigit()
 
 	@property
 	def self_targets(self):
@@ -455,6 +466,7 @@ class Runner:
 		drivers = self.context.get('drivers', [])
 		if drivers:
 			from secator.loader import discover_external_drivers
+
 			discover_external_drivers()
 		hooks_list = []
 		for driver in drivers:
@@ -464,8 +476,26 @@ class Runner:
 		merged_hooks = {}
 		if hooks_list:
 			from secator.utils import deep_merge_dicts
+
 			merged_hooks = deep_merge_dicts(*hooks_list)
 		self.register_hooks(merged_hooks)
+
+	@classmethod
+	def requires_local_execution(cls, inputs, run_opts):
+		"""Whether this invocation must run locally (sync), bypassing worker dispatch.
+
+		Some invocations are inherently interactive or local-only (e.g. an
+		interactive setup wizard) and must never be dispatched to a Celery worker,
+		even when one is alive. Subclasses override this to opt specific inputs in.
+
+		Args:
+			inputs (str | list): Expanded CLI inputs/targets.
+			run_opts (dict): Run options.
+
+		Returns:
+			bool: True to force local (sync) execution.
+		"""
+		return False
 
 	@classmethod
 	def delay(cls, config, targets, **run_opts):
@@ -1307,10 +1337,18 @@ class Runner:
 			elif isinstance(p, TemplateLoader):
 				existing_profile_names.add(p.name)
 
-		default_profiles = CONFIG.profiles.defaults
-		for p in default_profiles:
+		# Add global default profiles
+		for p in list(CONFIG.profiles.defaults):
 			if p not in existing_profile_names:
 				profiles.append(p)
+				existing_profile_names.add(p)
+
+		# Add workspace-specific default profiles
+		workspace_defaults = CONFIG.workspace.profiles.get(self.workspace_name, [])
+		for p in workspace_defaults:
+			if p not in existing_profile_names:
+				profiles.append(p)
+				existing_profile_names.add(p)
 
 		# Abort if no profiles
 		if not profiles:
@@ -1342,26 +1380,148 @@ class Runner:
 		non_enforced_templates = [p for p in templates if not p.enforce]
 		templates = non_enforced_templates + enforced_templates
 		profile_opts = {}
+		profile_workspace = None
+		profile_drivers = []
+		profile_exporters = None
+		default_ws = CONFIG.workspace.default or 'default'
 		for profile in templates:
 			self.debug(f'profile {profile.name} opts (enforced: {profile.enforce}): {profile.opts}', sub='init')
 			enforced = profile.enforce or False
 			description = profile.description or ''
+
+			# Merge opts (enforced overrides user opts; otherwise user opts win)
 			if enforced:
 				profile_opts.update(profile.opts)
 			else:
 				profile_opts.update({k: self.run_opts.get(k) or v for k, v in profile.opts.items()})
+
+			# Merge workspace (scalar): enforced overrides; otherwise apply only if user kept the default
+			ws = profile.workspace or None
+			if ws:
+				if enforced:
+					profile_workspace = ws
+				elif profile_workspace is None and self.workspace_name == default_ws:
+					profile_workspace = ws
+
+			# Merge drivers (list): always additive (hooks cannot be unregistered once loaded)
+			drivers = list(profile.drivers) if profile.drivers else []
+			if drivers:
+				profile_drivers.extend(drivers)
+
+			# Merge exporters (list): enforced replaces; otherwise union with user/config exporters
+			exporters = list(profile.exporters) if profile.exporters else []
+			if exporters:
+				if enforced:
+					profile_exporters = list(exporters)
+				else:
+					current = self.run_opts.get('output')
+					if isinstance(current, str):
+						current = [e for e in current.split(',') if e]
+					base = profile_exporters if profile_exporters is not None else (current or [])
+					profile_exporters = list(dict.fromkeys(base + exporters))
+
+			# Print loaded profile info
 			if self.print_profiles:
 				msg = f'Loaded profile [bold pink3]{profile.name}[/]'
 				if description:
 					msg += f' ([dim]{description}[/])'
 				if enforced:
 					msg += ' [bold red](enforced)[/]'
-				profile_opts_str = ', '.join([f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items()])
+				profile_fields = dict(profile.opts)
+				if ws:
+					profile_fields['workspace'] = ws
+				if drivers:
+					profile_fields['drivers'] = drivers
+				if exporters:
+					profile_fields['exporters'] = exporters
+				profile_opts_str = ', '.join([f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile_fields.items()])  # noqa: E501
 				msg += rf' \[[dim]{profile_opts_str}[/]]'
 				self._print(Info(message=msg), rich=True)
+
+		# Apply opts
 		if profile_opts:
 			self.run_opts.update(profile_opts)
+
+		# Apply workspace (used downstream to build report folders)
+		if profile_workspace:
+			self.debug(f'profile workspace -> {profile_workspace}', sub='init')
+			self.workspace_name = profile_workspace
+			self.context['workspace_name'] = profile_workspace
+			self.context['workspace_id'] = profile_workspace
+
+		# Apply exporters (consumed from run_opts['output'] right after profile resolution)
+		if profile_exporters is not None:
+			self.debug(f'profile exporters -> {profile_exporters}', sub='init')
+			self.run_opts['output'] = ','.join(profile_exporters)
+
+		# Apply drivers (load + register hooks; context['drivers'] is reused by worker __setstate__)
+		if profile_drivers:
+			self._apply_profile_drivers(profile_drivers)
+
 		return templates
+
+	def _resolve_route_workspace(self, inputs):
+		"""Resolve workspace from configured routes based on inputs.
+
+		Args:
+			inputs (list[str]): List of inputs to match against route patterns.
+
+		Returns:
+			str | None: Matched workspace name, or None if no route matches.
+		"""
+		import fnmatch
+
+		routes = CONFIG.workspace.routes
+		if not routes:
+			return None
+		for workspace, patterns in routes.items():
+			for pattern in patterns:
+				for inp in inputs:
+					if fnmatch.fnmatch(str(inp), pattern):
+						return workspace
+		return None
+
+	def _apply_profile_drivers(self, drivers):
+		"""Load and register driver hooks specified by profiles.
+
+		Drivers are added to ``context['drivers']`` (deduped) so their hooks are also
+		re-loaded on Celery workers via :meth:`Runner.__setstate__`. Hooks are only loaded
+		for drivers not already present, since CLI-provided drivers are already registered.
+
+		Args:
+			drivers (list[str]): Driver names specified by profiles.
+		"""
+		from secator.loader import discover_external_drivers, get_available_drivers
+		from secator.utils import deep_merge_dicts
+
+		existing = list(self.context.get('drivers', []))
+		new_drivers = [d for d in dict.fromkeys(drivers) if d not in existing]
+		if not new_drivers:
+			return
+		discover_external_drivers()
+		supported = get_available_drivers()
+		hooks_list = []
+		validated = []
+		for driver in new_drivers:
+			if driver not in supported:
+				self._print(Warning(message=f'Profile driver "{driver}" is not supported - skipping.'), rich=True)
+				continue
+			if driver in ADDONS_ENABLED and not ADDONS_ENABLED[driver]:
+				self._print(Warning(message=f'Profile driver "{driver}" requires the "{driver}" addon: run `secator install addons {driver}` - skipping.'), rich=True)  # noqa: E501
+				continue
+			driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
+			if driver_hooks is None:
+				self._print(Warning(message=f'Missing "secator.hooks.{driver}.HOOKS" - skipping.'), rich=True)
+				continue
+			validated.append(driver)
+			hooks_list.append(driver_hooks)
+		if not validated:
+			return
+		self.debug(f'profile drivers -> {validated}', sub='init')
+		merged_hooks = deep_merge_dicts(*hooks_list)
+		self.register_hooks(merged_hooks)
+		self._hooks = deep_merge_dicts(self._hooks, merged_hooks)
+		self.context['drivers'] = list(dict.fromkeys(existing + validated))
 
 	@classmethod
 	def get_func_path(cls, func):

@@ -1,4 +1,5 @@
 import os
+from collections.abc import MutableMapping
 from pathlib import Path
 from subprocess import call, DEVNULL
 from typing import Any, Dict, List
@@ -45,6 +46,7 @@ class Directories(StrictModel):
 	payloads: Directory = ''
 	performance: Directory = ''
 	revshells: Directory = ''
+	queries: Directory = ''
 	celery: Directory = ''
 	celery_data: Directory = ''
 	celery_results: Directory = ''
@@ -52,7 +54,7 @@ class Directories(StrictModel):
 	@model_validator(mode='after')
 	def set_default_folders(self) -> Self:
 		"""Set folders to be relative to the data folders if they are unspecified in config."""
-		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
+		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'queries', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
 			rel_target = '/'.join(folder.split('_'))
 			val = getattr(self, folder) or self.data / rel_target
 			setattr(self, folder, val)
@@ -147,6 +149,8 @@ class Drivers(StrictModel):
 
 class Workspace(StrictModel):
 	default: str = ''
+	routes: Dict[str, List[str]] = {}
+	profiles: Dict[str, List[str]] = {}
 
 
 class Payloads(StrictModel):
@@ -328,6 +332,7 @@ class SecatorConfig(StrictModel):
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()
+	queries: Dict[str, str] = {}
 	offline_mode: bool = False
 
 
@@ -464,6 +469,12 @@ class Config(DotMap):
 			except ValueError:
 				pass
 
+		# Validate profile names before setting
+		if key in ('profiles.defaults',):
+			profile_names = value if isinstance(value, list) else ([value] if value else [])
+			if profile_names and not Config._validate_profile_names(profile_names):
+				return
+
 		if set_partial:
 			if value is None or value == target[final_key]:
 				if final_key in partial:
@@ -479,9 +490,10 @@ class Config(DotMap):
 		Args:
 			parent_parts (list[str]): Path components to the dict field (e.g. ['wordlists', 'defaults']).
 			subkey (str | None): Key within the dict to set/remove.
-			value (Any): Value to set.
+			value (Any): Value to set, or item to remove when strategy='remove'.
 			set_partial (bool): Set in partial config.
-			strategy (str | None): 'remove' to delete the subkey.
+			strategy (str | None): 'remove' to delete the subkey or remove a list item;
+				'append' to append to an existing list value; None to replace.
 		"""
 		# Navigate to the dict
 		existing_dict = self
@@ -493,17 +505,55 @@ class Config(DotMap):
 			return
 
 		updated = dict(existing_dict)
+		parent_path = '.'.join(parent_parts)
+
 		if strategy == 'remove':
 			if subkey and subkey in updated:
-				del updated[subkey]
+				existing_val = updated[subkey]
+				if isinstance(existing_val, list) and value is not None:
+					# Remove item from list rather than deleting the key
+					if value in existing_val:
+						updated[subkey] = [v for v in existing_val if v != value]
+					else:
+						console.print(f'[bold orange1]Value "{value}" not found in {parent_path}.{subkey}[/].')
+						return
+				else:
+					del updated[subkey]
 			elif subkey:
-				console.print(f'[bold orange1]Key "{subkey}" not found in {".".join(parent_parts)}[/].')
+				console.print(f'[bold orange1]Key "{subkey}" not found in {parent_path}[/].')
 				return
-		else:
+		elif strategy == 'append':
 			if subkey:
-				updated[subkey] = value
+				existing_val = updated.get(subkey, [])
+				parsed = Config._parse_new_value(value)
+				items = parsed if isinstance(parsed, list) else [parsed]
+				if isinstance(existing_val, list):
+					new_list = list(existing_val)
+					for item in items:
+						if item not in new_list:
+							new_list.append(item)
+					updated[subkey] = new_list
+				else:
+					updated[subkey] = Config._parse_new_value(value)
 			elif isinstance(value, dict):
 				updated.update(value)
+		else:
+			if subkey:
+				new_val = Config._parse_new_value(value)
+				# For workspace.profiles, always coerce single strings to list
+				if parent_path == 'workspace.profiles' and isinstance(new_val, str):
+					new_val = [new_val]
+				updated[subkey] = new_val
+			elif isinstance(value, dict):
+				updated.update(value)
+
+		# Validate profile names when setting workspace.profiles values
+		if parent_path == 'workspace.profiles' and subkey and subkey in updated and strategy != 'remove':
+			new_val = updated[subkey]
+			if new_val:
+				profile_names = new_val if isinstance(new_val, list) else [new_val]
+				if not Config._validate_profile_names(profile_names):
+					return
 
 		# Traverse to the parent of the dict to set the updated value
 		target = self
@@ -733,16 +783,58 @@ class Config(DotMap):
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
 
 	@staticmethod
+	def _parse_new_value(value):
+		"""Try to parse a string value into a structured type (int, float, bool, list, or dict)."""
+		if not isinstance(value, str):
+			return value
+		if (value.startswith('{') and value.endswith('}')) or (value.startswith('[') and value.endswith(']')):
+			try:
+				import json
+				return json.loads(value)
+			except Exception:
+				pass
+		if ',' in value:
+			return [v.strip() for v in value.split(',')]
+		try:
+			return int(value)
+		except ValueError:
+			pass
+		try:
+			return float(value)
+		except ValueError:
+			pass
+		if value.lower() in ('true', 'false'):
+			return value.lower() == 'true'
+		return value
+
+	@staticmethod
+	def _validate_profile_names(profile_names):
+		"""Validate that all profile names exist. Returns True if all valid or validation cannot run."""
+		try:
+			from secator.loader import get_configs_by_type
+			available = [p.name for p in get_configs_by_type('profile')]
+			invalid = [p for p in profile_names if p not in available]
+			if invalid:
+				console.print(f'[bold red]Invalid profile names: {", ".join(invalid)}[/]')
+				return False
+		except Exception as e:
+			import logging
+			logging.debug('Profile validation skipped due to exception', exc_info=e)
+		return True
+
+	@staticmethod
 	def build_key_map(config, base_path=[]):
 		key_map = {}
 		for key, value in config.items():
 			if key.startswith('_'):  # ignore
 				continue
 			current_path = base_path + [key]
-			if isinstance(value, dict):
+			map_key = '_'.join(current_path).upper()
+			if isinstance(value, MutableMapping) and not isinstance(value, str):
+				key_map[map_key] = current_path  # include dict itself so sub-keys can be set
 				key_map.update(Config.build_key_map(value, current_path))
 			else:
-				key_map['_'.join(current_path).upper()] = current_path
+				key_map[map_key] = current_path
 		return key_map
 
 	def apply_env_overrides(self, print_errors=True):

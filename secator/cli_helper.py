@@ -215,7 +215,9 @@ def register_runner(cli_endpoint, config):
 		dry_run = opts['dry_run']
 		yaml = opts['yaml']
 		tree = opts['tree']
-		context = {'workspace_name': ws, 'workspace_id': ws}
+		from click.core import ParameterSource
+		ws_explicit = ctx.get_parameter_source('workspace') == ParameterSource.COMMANDLINE
+		context = {'workspace_name': ws, 'workspace_id': ws, 'workspace_explicit': ws_explicit}
 		enable_pyinstrument = opts['enable_pyinstrument']
 		enable_memray = opts['enable_memray']
 		contextmanager = nullcontext()
@@ -326,7 +328,10 @@ def register_runner(cli_endpoint, config):
 		hooks = deep_merge_dicts(*hooks)
 
 		# Enable sync or not
-		if sync or dry_run:
+		# Some task invocations are interactive/local-only (e.g. `ai setup`) and must
+		# never be dispatched to a worker, even when one is alive.
+		force_local = cli_endpoint.name == 'task' and task_cls.requires_local_execution(inputs, opts)
+		if sync or dry_run or force_local:
 			sync = True
 		else:
 			from secator.celery import is_celery_worker_alive

@@ -3,6 +3,8 @@
 import json
 import re
 
+from secator.output_types import Error
+from secator.rich import console
 from secator.utils import debug
 
 
@@ -39,6 +41,81 @@ def parse_report_paths(paths_str):
         result = {'$or': filters}
     debug('parse_report_paths', sub='query', obj={'input': paths_str, 'output': result})
     return result
+
+
+RUNNER_TYPES = {'task', 'tasks', 'workflow', 'workflows', 'scan', 'scans'}
+
+
+def expand_runner_paths(tokens):
+    """Expand runner path tokens into individual runner references.
+
+    Each token may be space-separated (passed as separate list items),
+    comma-separated, and may contain inclusive numeric ranges. Examples:
+        ['tasks/23', 'workflows/21']  → [('tasks', 'task', '23'), ('workflows', 'workflow', '21')]
+        ['tasks/23,tasks/24']         → [('tasks', 'task', '23'), ('tasks', 'task', '24')]
+        ['tasks/136-140']             → tasks 136, 137, 138, 139, 140
+
+    Args:
+        tokens (str | iterable[str]): One or more path tokens.
+
+    Returns:
+        tuple[list, list]: (refs, errors) where refs is an order-preserving,
+        de-duplicated list of (type_plural, type_singular, number) tuples and
+        errors is a list of human-readable error strings for invalid tokens.
+    """
+    if isinstance(tokens, str):
+        tokens = [tokens]
+
+    refs = []
+    errors = []
+    seen = set()
+
+    parts = []
+    for token in tokens:
+        parts.extend(p.strip() for p in token.split(',') if p.strip())
+
+    for part in parts:
+        if '/' not in part:
+            errors.append(f'Invalid runner path: {part!r}. Expected format: <type>/<id> (e.g. tasks/24)')
+            continue
+        runner_type_raw, spec = part.split('/', 1)
+        runner_type_raw = runner_type_raw.strip().lower()
+        spec = spec.strip().rstrip('/')
+
+        if runner_type_raw not in RUNNER_TYPES:
+            errors.append(f'Invalid runner type: {runner_type_raw!r}. Must be one of: task, workflow, scan.')
+            continue
+
+        type_plural = runner_type_raw if runner_type_raw.endswith('s') else runner_type_raw + 's'
+        type_singular = type_plural[:-1]
+
+        # Range (e.g. "136-140") or single number
+        if '-' in spec:
+            start_str, _, end_str = spec.partition('-')
+            start_str, end_str = start_str.strip(), end_str.strip()
+            if not (start_str.isdigit() and end_str.isdigit()):
+                errors.append(f'Invalid range: {spec!r} in {part!r}. Both bounds must be numeric (e.g. 136-140).')
+                continue
+            start, end = int(start_str), int(end_str)
+            if start > end:
+                errors.append(f'Invalid range: {spec!r} in {part!r}. Start must be <= end.')
+                continue
+            numbers = [str(n) for n in range(start, end + 1)]
+        else:
+            if not spec.isdigit():
+                errors.append(f'Invalid runner number: {spec!r} in {part!r}. Must be numeric.')
+                continue
+            numbers = [str(int(spec))]
+
+        for number in numbers:
+            key = (type_plural, number)
+            if key in seen:
+                continue
+            seen.add(key)
+            refs.append((type_plural, type_singular, number))
+
+    debug('expand_runner_paths', sub='query', obj={'input': list(tokens), 'refs': refs, 'errors': errors})
+    return refs, errors
 
 
 def _split_logical_op(query, op):
@@ -97,6 +174,58 @@ _OP_MAP = {
     '~=': '$regex',
 }
 
+# Regex for the 'in' operator: "type.field in [val1, val2]"
+_IN_RE = re.compile(r'^(.+?)\s+in\s+\[(.*)\]\s*$', re.DOTALL)
+
+
+def _has_in_op_outside_quotes(expr):
+    """Return True if ' in [' appears outside of any quoted substring in expr."""
+    in_quote = None
+    i = 0
+    while i < len(expr):
+        ch = expr[i]
+        if in_quote is None and ch in ('"', "'"):
+            in_quote = ch
+            i += 1
+        elif ch == in_quote:
+            in_quote = None
+            i += 1
+        elif in_quote is None and expr[i:i + 4] == ' in ':
+            j = i + 4
+            while j < len(expr) and expr[j] == ' ':
+                j += 1
+            if j < len(expr) and expr[j] == '[':
+                return True
+            i += 1
+        else:
+            i += 1
+    return False
+
+
+def _parse_list(values_str):
+    """Parse a comma-separated list of values, respecting quoted strings."""
+    values = []
+    current = []
+    in_quote = None
+    for ch in values_str:
+        if in_quote is None and ch in ('"', "'"):
+            in_quote = ch
+            current.append(ch)
+        elif ch == in_quote:
+            in_quote = None
+            current.append(ch)
+        elif in_quote is None and ch == ',':
+            val = ''.join(current).strip()
+            if val:
+                values.append(_parse_value(val))
+            current = []
+        else:
+            current.append(ch)
+    val = ''.join(current).strip()
+    if val:
+        values.append(_parse_value(val))
+    return values
+
 
 def _parse_single_expr(expr):
     """Parse one expression like 'vulnerability.severity_score > 7' into a query dict."""
@@ -114,6 +243,23 @@ def _parse_single_expr(expr):
     # Type-only: "domain" or "vulnerability"
     if re.match(r'^[a-z_]+$', expr):
         return {'_type': expr}
+
+    # Check for 'in' operator: "type.field in [val1, val2]"
+    m_in = _IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
+    if m_in:
+        left, values_str = m_in.group(1).strip(), m_in.group(2)
+        parts = left.split('.', 1)
+        _type = parts[0].strip()
+        field = parts[1].strip() if len(parts) > 1 else None
+        values = _parse_list(values_str)
+        if field is None:
+            console.print(Error(
+                message=f"'in' operator requires a field (e.g. 'type.field in [...]'): {expr!r}"
+            ))
+            return {'_type': _type}
+        result = {'_type': _type}
+        result[field] = {'$in': values}
+        return result
 
     # Use regex to find the first operator (longest-first via alternation order).
     # This avoids mis-splitting on operators that appear inside quoted values.
@@ -213,3 +359,23 @@ def python_expr_to_mongo(query):
 
     debug('python_expr_to_mongo', sub='query', obj={'input': query, 'output': result})
     return result
+
+
+def query_has_type_constraint(query):
+    """Check whether a MongoDB-style query contains a '_type' constraint anywhere (recursively).
+
+    Args:
+        query (dict | list): MongoDB-style query (or sub-query list from $and / $or).
+
+    Returns:
+        bool: True if a '_type' key is present at any nesting level.
+    """
+    if isinstance(query, dict):
+        for key, value in query.items():
+            if key == '_type':
+                return True
+            if isinstance(value, (dict, list)) and query_has_type_constraint(value):
+                return True
+    elif isinstance(query, list):
+        return any(query_has_type_constraint(item) for item in query)
+    return False

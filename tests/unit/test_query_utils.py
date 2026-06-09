@@ -1,4 +1,9 @@
-from secator.query.utils import parse_report_paths, python_expr_to_mongo
+from secator.query.utils import (
+    expand_runner_paths,
+    parse_report_paths,
+    python_expr_to_mongo,
+    query_has_type_constraint,
+)
 
 
 class TestParseReportPaths:
@@ -123,4 +128,158 @@ class TestPythonExprToMongo:
     def test_and_with_quoted_value_containing_and(self):
         result = python_expr_to_mongo("tag.name == 'this and that' and tag.match == 'x'")
         assert result == {'_type': 'tag', 'name': 'this and that', 'match': 'x'}
+
+
+class TestQueryHasTypeConstraint:
+
+    def test_empty_query(self):
+        assert query_has_type_constraint({}) is False
+
+    def test_no_type_constraint(self):
+        assert query_has_type_constraint({'_timestamp': {'$gte': 123}}) is False
+
+    def test_top_level_type(self):
+        assert query_has_type_constraint({'_type': 'target'}) is True
+
+    def test_type_with_field(self):
+        assert query_has_type_constraint({'_type': 'port', 'port': {'$lt': 1024}}) is True
+
+    def test_type_inside_or(self):
+        query = {'$or': [{'_type': 'vulnerability'}, {'_type': 'target'}]}
+        assert query_has_type_constraint(query) is True
+
+    def test_type_inside_and(self):
+        query = {'$and': [{'_context.scan_id': '5'}, {'_type': 'target'}]}
+        assert query_has_type_constraint(query) is True
+
+    def test_nested_without_type(self):
+        query = {'$or': [{'_context.scan_id': '5'}, {'_context.task_id': '3'}]}
+        assert query_has_type_constraint(query) is False
+
+
+class TestExpandRunnerPaths:
+
+    def test_single_path(self):
+        refs, errors = expand_runner_paths(['tasks/23'])
+        assert refs == [('tasks', 'task', '23')]
+        assert errors == []
+
+    def test_string_input(self):
+        refs, errors = expand_runner_paths('tasks/23')
+        assert refs == [('tasks', 'task', '23')]
+        assert errors == []
+
+    def test_space_separated_tokens(self):
+        refs, errors = expand_runner_paths(['tasks/23', 'tasks/24', 'workflows/21'])
+        assert refs == [
+            ('tasks', 'task', '23'),
+            ('tasks', 'task', '24'),
+            ('workflows', 'workflow', '21'),
+        ]
+        assert errors == []
+
+    def test_comma_separated_single_token(self):
+        refs, errors = expand_runner_paths(['tasks/23,tasks/24,workflows/21'])
+        assert refs == [
+            ('tasks', 'task', '23'),
+            ('tasks', 'task', '24'),
+            ('workflows', 'workflow', '21'),
+        ]
+        assert errors == []
+
+    def test_range_expansion(self):
+        refs, errors = expand_runner_paths(['tasks/136-140'])
+        assert refs == [('tasks', 'task', str(n)) for n in range(136, 141)]
+        assert errors == []
+
+    def test_mixed_ranges_and_comma(self):
+        refs, errors = expand_runner_paths(['tasks/136-140,workflows/10-12'])
+        assert refs == (
+            [('tasks', 'task', str(n)) for n in range(136, 141)]
+            + [('workflows', 'workflow', str(n)) for n in range(10, 13)]
+        )
+        assert errors == []
+
+    def test_single_element_range(self):
+        refs, errors = expand_runner_paths(['tasks/5-5'])
+        assert refs == [('tasks', 'task', '5')]
+        assert errors == []
+
+    def test_singular_type_normalized(self):
+        refs, errors = expand_runner_paths(['task/7', 'scan/2'])
+        assert refs == [('tasks', 'task', '7'), ('scans', 'scan', '2')]
+        assert errors == []
+
+    def test_dedupe_preserves_order(self):
+        refs, errors = expand_runner_paths(['tasks/23', 'tasks/23', 'tasks/22-24'])
+        assert refs == [
+            ('tasks', 'task', '23'),
+            ('tasks', 'task', '22'),
+            ('tasks', 'task', '24'),
+        ]
+        assert errors == []
+
+    def test_invalid_type(self):
+        refs, errors = expand_runner_paths(['foo/1'])
+        assert refs == []
+        assert len(errors) == 1
+        assert 'Invalid runner type' in errors[0]
+
+    def test_missing_slash(self):
+        refs, errors = expand_runner_paths(['tasks23'])
+        assert refs == []
+        assert 'Expected format' in errors[0]
+
+    def test_non_numeric_id(self):
+        refs, errors = expand_runner_paths(['tasks/abc'])
+        assert refs == []
+        assert 'Must be numeric' in errors[0]
+
+    def test_reversed_range(self):
+        refs, errors = expand_runner_paths(['tasks/140-136'])
+        assert refs == []
+        assert 'Start must be <= end' in errors[0]
+
+    def test_non_numeric_range(self):
+        refs, errors = expand_runner_paths(['tasks/1-x'])
+        assert refs == []
+        assert 'Both bounds must be numeric' in errors[0]
+
+    def test_valid_and_invalid_mixed(self):
+        refs, errors = expand_runner_paths(['tasks/23', 'bad/x', 'workflows/2'])
+        assert refs == [('tasks', 'task', '23'), ('workflows', 'workflow', '2')]
+        assert len(errors) == 1
+    def test_in_operator_integers(self):
+        result = python_expr_to_mongo("url.status_code in [200,304]")
+        assert result == {'_type': 'url', 'status_code': {'$in': [200, 304]}}
+
+    def test_in_operator_strings(self):
+        result = python_expr_to_mongo("vulnerability.severity in ['high', 'critical']")
+        assert result == {'_type': 'vulnerability', 'severity': {'$in': ['high', 'critical']}}
+
+    def test_in_operator_double_quoted_strings(self):
+        result = python_expr_to_mongo('vulnerability.severity in ["high", "critical"]')
+        assert result == {'_type': 'vulnerability', 'severity': {'$in': ['high', 'critical']}}
+
+    def test_in_operator_multiple_values(self):
+        result = python_expr_to_mongo("port.port in [80, 443, 8080]")
+        assert result == {'_type': 'port', 'port': {'$in': [80, 443, 8080]}}
+
+    def test_in_operator_with_and(self):
+        result = python_expr_to_mongo("url.status_code in [200, 304] && url.path == '/api'")
+        assert result == {'_type': 'url', 'status_code': {'$in': [200, 304]}, 'path': '/api'}
+
+    def test_in_operator_with_python_and(self):
+        result = python_expr_to_mongo(
+            "vulnerability.severity in ['high', 'critical'] and vulnerability.severity_score > 7"
+        )
+        assert result == {
+            '_type': 'vulnerability',
+            'severity': {'$in': ['high', 'critical']},
+            'severity_score': {'$gt': 7},
+        }
+
+    def test_in_operator_floats(self):
+        result = python_expr_to_mongo("item.score in [1.5, 2.5, 3.0]")
+        assert result == {'_type': 'item', 'score': {'$in': [1.5, 2.5, 3.0]}}
 

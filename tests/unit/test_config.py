@@ -74,6 +74,76 @@ class TestConfig(unittest.TestCase):
 		self.assertEqual(config.addons.gdrive.enabled, True)
 		self.assertEqual(config._partial.addons.gdrive.enabled, True)
 
+	def test_set_dict_subkey_tasks_overrides(self):
+		"""Test that setting a sub-key within an empty dict field works."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('tasks.overrides.nuclei.input_chunk_size', '100')
+		self.assertEqual(config.tasks.overrides['nuclei']['input_chunk_size'], 100)
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['tasks']['overrides']['nuclei']['input_chunk_size'], 100)
+
+	def test_set_workspace_profiles(self):
+		"""Test setting per-workspace default profiles via comma-separated string."""
+		from secator.config import Config
+		from unittest.mock import patch
+		config = Config.parse(path=self.config_test)
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'aggressive,passive')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive', 'passive'])
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['workspace']['profiles']['my_ws'], ['aggressive', 'passive'])
+
+	def test_set_workspace_profiles_single(self):
+		"""Test that a single profile string is coerced to a list."""
+		from secator.config import Config
+		from unittest.mock import patch
+		config = Config.parse(path=self.config_test)
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'aggressive')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive'])
+
+	def test_set_workspace_profiles_append(self):
+		"""Test appending a profile to workspace profiles list."""
+		from secator.config import Config
+		from unittest.mock import patch
+		config = Config.parse(path=self.config_test)
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'aggressive,passive')
+			config.set('workspace.profiles.my_ws', 'stealth', strategy='append')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive', 'passive', 'stealth'])
+		# Duplicate should not be added
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'passive', strategy='append')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive', 'passive', 'stealth'])
+
+	def test_unset_workspace_profiles_item(self):
+		"""Test removing a single profile from workspace profiles list."""
+		from secator.config import Config
+		from unittest.mock import patch
+		config = Config.parse(path=self.config_test)
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'aggressive,passive,stealth')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive', 'passive', 'stealth'])
+		config.unset('workspace.profiles.my_ws', value='passive')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive', 'stealth'])
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['workspace']['profiles']['my_ws'], ['aggressive', 'stealth'])
+
+	def test_unset_workspace_profiles_key(self):
+		"""Test removing an entire workspace entry from profiles."""
+		from secator.config import Config
+		from unittest.mock import patch
+		config = Config.parse(path=self.config_test)
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'aggressive,passive')
+		self.assertIn('my_ws', config.workspace.profiles)
+		config.unset('workspace.profiles.my_ws')
+		self.assertNotIn('my_ws', config.workspace.profiles)
+
 	def test_set_list_field_replace(self):
 		from secator.config import Config
 		config = Config.parse(path=self.config_test)
@@ -133,6 +203,87 @@ class TestConfig(unittest.TestCase):
 		config.save(self.config_test)
 		data = Config.read_yaml(self.config_test)
 		self.assertNotIn(str(self.home), data['dirs']['data'])
+
+	def test_queries_field_default(self):
+		from secator.config import Config
+		config = Config.parse()
+		self.assertEqual(config.queries, {})
+
+	def test_set_get_unset_query(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('queries.critical_vulns', 'vulnerability.severity_nb < 2')
+		self.assertEqual(config.queries['critical_vulns'], 'vulnerability.severity_nb < 2')
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['queries']['critical_vulns'], 'vulnerability.severity_nb < 2')
+		config.unset('queries.critical_vulns')
+		self.assertNotIn('critical_vulns', config.queries)
+
+	def test_queries_dir_resolves_under_data(self):
+		from secator.config import Config
+		config = Config.parse()
+		self.assertEqual(config.dirs.queries, config.dirs.data / 'queries')
+
+	def test_workspace_routes_append_new_workspace(self):
+		"""Appending a route to a new workspace creates the list entry."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		self.assertIn('my_ws', config.workspace.routes)
+		self.assertEqual(config.workspace.routes['my_ws'], ['*vulnweb.com*'])
+
+	def test_workspace_routes_append_multiple_patterns(self):
+		"""Appending multiple patterns to same workspace accumulates them."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		config.set('workspace.routes.my_ws', '*ocervell*', strategy='append')
+		self.assertEqual(config.workspace.routes['my_ws'], ['*vulnweb.com*', '*ocervell*'])
+
+	def test_workspace_routes_append_no_duplicates(self):
+		"""Appending a duplicate pattern is a no-op."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		self.assertEqual(config.workspace.routes['my_ws'], ['*vulnweb.com*'])
+
+	def test_workspace_routes_save_and_reload(self):
+		"""Workspace routes survive a save/reload cycle."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		config.set('workspace.routes.my_ws', '*ocervell*', strategy='append')
+		config.save()
+		config2 = Config.parse(path=self.config_test)
+		self.assertEqual(config2.workspace.routes['my_ws'], ['*vulnweb.com*', '*ocervell*'])
+
+	def test_workspace_routes_remove_existing_pattern(self):
+		"""Removing an existing pattern leaves the remaining patterns intact."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		config.set('workspace.routes.my_ws', '*ocervell*', strategy='append')
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='remove')
+		self.assertEqual(config.workspace.routes['my_ws'], ['*ocervell*'])
+
+	def test_workspace_routes_remove_missing_pattern(self):
+		"""Removing a non-existent pattern is a no-op (warns but does not raise)."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*ocervell*', strategy='append')
+		config.set('workspace.routes.my_ws', '*doesnotexist*', strategy='remove')
+		self.assertEqual(config.workspace.routes['my_ws'], ['*ocervell*'])
+
+	def test_workspace_routes_remove_workspace_key(self):
+		"""Unsetting a workspace key (no value) deletes it from routes entirely."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*ocervell*', strategy='append')
+		self.assertIn('my_ws', config.workspace.routes)
+		config.unset('workspace.routes.my_ws')
+		self.assertNotIn('my_ws', config.workspace.routes)
 
 
 @mock.patch('sys.stderr', devnull)
