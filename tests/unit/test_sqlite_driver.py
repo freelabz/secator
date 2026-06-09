@@ -179,7 +179,6 @@ class TestSqliteHooks(SqliteTestBase):
 
 	def test_tag_duplicates(self):
 		from secator.hooks import sqlite as mod
-		from secator.query.sqlite import SqliteBackend
 
 		class FakeRunner:
 			def __init__(self):
@@ -191,9 +190,14 @@ class TestSqliteHooks(SqliteTestBase):
 		mod.update_finding(runner, self._make_finding('http://x/a'))  # duplicate
 		mod.update_finding(runner, self._make_finding('http://x/b'))
 
+		# tag_duplicates is a Celery @shared_task: the registry caches the task whose
+		# function globals may bind a *stale* CONFIG object after another test calls
+		# clear_modules() (which drops secator.config from sys.modules). Point that exact
+		# CONFIG at our temp DB so the task reads/writes the same database this test set up.
+		mod.tag_duplicates.run.__globals__['CONFIG'].addons.sqlite.path = self.db_path
 		mod.tag_duplicates('ws1')
 
-		conn = mod.get_sqlite_conn()
+		conn = mod.get_sqlite_conn(self.db_path)
 		dup_count = conn.execute(
 			"SELECT COUNT(*) FROM findings WHERE json_extract(data,'$._context.workspace_duplicate')=1"
 		).fetchone()[0]

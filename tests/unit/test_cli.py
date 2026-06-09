@@ -538,6 +538,7 @@ class TestCli(unittest.TestCase):
 				assert result.exit_code == 0
 				assert 'already installed' in result.output
 
+
 class TestSqliteCliDriver(unittest.TestCase):
 	def test_report_show_accepts_sqlite_driver(self):
 		from click.testing import CliRunner

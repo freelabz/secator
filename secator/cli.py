@@ -1822,6 +1822,7 @@ secator s host [blue]-yaml[/]                        [dim]# show config yaml (wo
 [dim]# Organize your results (workspace, database)[/]
 secator s host [blue]-ws[/] [bright_magenta]prod[/] example.com         [dim]# save results to 'prod' workspace[/]
 secator s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com  [dim]# save results to mongodb database[/]
+secator s host [blue]-driver[/] [bright_magenta]sqlite[/] example.com  [dim]# save results to a local sqlite database[/]
 
 [dim]# Input types are flexible ...[/]
 secator s host [cyan]example.com[/]                  [dim]# single input[/]
