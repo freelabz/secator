@@ -339,3 +339,95 @@ class TestDelayMethods(unittest.TestCase):
 			context={}
 		)
 		self.assertIsNotNone(sig)
+
+
+class TestRunnerPickle(unittest.TestCase):
+	"""Test that Runner objects with dynamic driver hooks can be pickled/unpickled."""
+
+	def test_runner_pickle_survives_missing_module_on_worker(self):
+		"""Reproduces the original bug: unpickling a runner whose hooks reference a
+		dynamically-loaded module that does not exist on the worker side.
+		Without the __getstate__/__setstate__ fix this raises ModuleNotFoundError."""
+		import pickle
+		import types
+		import sys
+		from secator.runners import Workflow
+		from secator.loader import get_configs_by_type
+
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		config = workflows[0]
+
+		# 1) CLI side: load the driver into sys.modules (as the loader does)
+		fake_module = types.ModuleType('secator.hooks.testdriver')
+
+		def on_start(runner, *args):
+			pass
+
+		on_start.__module__ = 'secator.hooks.testdriver'
+		on_start.__qualname__ = 'on_start'
+		fake_module.on_start = on_start
+		sys.modules['secator.hooks.testdriver'] = fake_module
+
+		hooks = {Workflow: {'on_start': [on_start]}}
+		runner = Workflow(config, inputs=['example.com'], run_opts={'dry_run': True}, hooks=hooks, context={})
+
+		# Pickle while the module is available (simulates the CLI/sender side)
+		pickled = pickle.dumps(runner)
+
+		# 2) Worker side: remove the module to simulate it not being installed
+		del sys.modules['secator.hooks.testdriver']
+
+		# Without the fix, unpickling would raise:
+		#   ModuleNotFoundError: No module named 'secator.hooks.testdriver'
+		# With the fix, __getstate__ strips hooks so the bytes contain no reference
+		# to the dynamic module and unpickling succeeds.
+		restored = pickle.loads(pickled)
+		self.assertEqual(restored.name, runner.name)
+		# Hooks were stripped; dynamic hook not re-registered (driver not in context['drivers'])
+		self.assertNotIn(on_start, restored.resolved_hooks.get('on_start', []))
+
+	def test_runner_pickle_restores_hooks_from_context_drivers(self):
+		"""Unpickling a Runner re-registers hooks from context['drivers']."""
+		import pickle
+		import sys
+		import types
+		from unittest.mock import patch
+		from secator.runners import Workflow
+		from secator.loader import get_configs_by_type
+
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		config = workflows[0]
+
+		# Simulate an external driver module
+		fake_module = types.ModuleType('secator.hooks.fakedriver')
+
+		def on_end(runner, *args):
+			pass
+
+		on_end.__module__ = 'secator.hooks.fakedriver'
+		on_end.__qualname__ = 'on_end'
+		fake_module.on_end = on_end
+		fake_module.HOOKS = {Workflow: {'on_end': [on_end]}}
+		sys.modules['secator.hooks.fakedriver'] = fake_module
+
+		try:
+			# Patch discover_external_drivers to avoid filesystem scanning;
+			# the module is already in sys.modules so import_dynamic will find it.
+			with patch('secator.loader.discover_external_drivers', return_value=['fakedriver']):
+				context = {'drivers': ['fakedriver']}
+				hooks = {Workflow: {'on_end': [on_end]}}
+				runner = Workflow(config, inputs=['example.com'], run_opts={'dry_run': True}, hooks=hooks, context=context)
+				pickled = pickle.dumps(runner)
+				restored = pickle.loads(pickled)
+				self.assertEqual(restored.name, runner.name)
+				# __setstate__ re-registers on_end from fakedriver via context['drivers']
+				self.assertIn(on_end, restored.resolved_hooks.get('on_end', []))
+
+		finally:
+			del sys.modules['secator.hooks.fakedriver']

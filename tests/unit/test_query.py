@@ -269,6 +269,38 @@ class TestQueryOperators(unittest.TestCase):
 		self.assertTrue(match_query(item, {'url': {'$regex': r'example\.com'}}))
 		self.assertFalse(match_query(item, {'url': {'$regex': r'other\.com'}}))
 
+		# $regex with pattern starting with * — leading * is stripped, remaining pattern matches
+		self.assertTrue(match_query(item, {'url': {'$regex': '*example'}}))
+
+		# $regex with numeric pattern — should convert to string, not raise TypeError
+		item_with_id = {'id': 'CVE-2026-12345', 'score': 9}
+		self.assertFalse(match_query(item_with_id, {'score': {'$regex': 7}}))
+
+
+class TestQueryUtils(unittest.TestCase):
+	def test_regex_value_stays_string(self):
+		"""~= operator must not coerce the RHS to int/float (re.search needs a string)."""
+		from secator.query.utils import python_expr_to_mongo
+
+		result = python_expr_to_mongo('vulnerability.id ~= 123')
+		self.assertEqual(result, {'_type': 'vulnerability', 'id': {'$regex': '123'}})
+		self.assertIsInstance(result['id']['$regex'], str)
+
+	def test_regex_value_with_glob_start(self):
+		"""~= operator with a leading wildcard should produce the raw string, not raise."""
+		from secator.query.utils import python_expr_to_mongo
+
+		result = python_expr_to_mongo("vulnerability.id ~= '*CVE-2026-28780'")
+		self.assertEqual(result['id'], {'$regex': '*CVE-2026-28780'})
+
+	def test_numeric_comparison_still_converts(self):
+		"""Non-regex operators should still coerce numeric RHS values."""
+		from secator.query.utils import python_expr_to_mongo
+
+		result = python_expr_to_mongo('vulnerability.cvss_score > 7')
+		self.assertEqual(result['cvss_score'], {'$gt': 7})
+		self.assertIsInstance(result['cvss_score']['$gt'], int)
+
 
 class TestMongoDBBackend(unittest.TestCase):
 	def test_mongodb_backend_instantiation(self):
