@@ -3,7 +3,7 @@
 import json
 import re
 
-from secator.output_types import Error, Warning
+from secator.output_types import Error
 from secator.rich import console
 from secator.utils import debug
 
@@ -410,6 +410,7 @@ def validate_query_fields(query):
                 result[k] = v
                 user_fields_kept += 1
             else:
+                from secator.output_types import Warning
                 public_fields = sorted(f for f in valid_fields if not f.startswith('_'))
                 console.print(Warning(
                     message=f"Field '{k}' does not exist on type '{_type}'. "
@@ -427,7 +428,7 @@ def validate_query_fields(query):
             return q
         if '$or' in q:
             parts = [_validate(sub) for sub in q['$or']]
-            parts = [p for p in parts if p is not None]
+            parts = [p for p in parts if p]
             if len(parts) == 0:
                 return {}
             if len(parts) == 1:
@@ -435,7 +436,7 @@ def validate_query_fields(query):
             return {'$or': parts}
         if '$and' in q:
             parts = [_validate(sub) for sub in q['$and']]
-            parts = [p for p in parts if p is not None]
+            parts = [p for p in parts if p]
             if len(parts) == 0:
                 return {}
             if len(parts) == 1:
