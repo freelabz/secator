@@ -467,8 +467,9 @@ class GithubInstaller:
 		else:
 			url = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{version_prefix}{version}"
 		headers = {}
-		if CONFIG.cli.github_token:
-			headers['Authorization'] = f'Bearer {CONFIG.cli.github_token.get_secret_value()}'
+		github_token = CONFIG.cli.github_token.get_secret_value()
+		if github_token:
+			headers['Authorization'] = f'Bearer {github_token}'
 		try:
 			debug(f'Fetching release {version} from {url}', sub='installer')
 			response = requests.get(url, headers=headers, timeout=5)

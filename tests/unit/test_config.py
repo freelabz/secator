@@ -72,7 +72,7 @@ class TestConfig(unittest.TestCase):
 		self.assertEqual(config.get('addons.gdrive.enabled'), True)
 		config = Config.parse(path=self.config_test)
 		self.assertEqual(config.addons.gdrive.enabled, True)
-		self.assertEqual(config._partial.addons.gdrive.enabled, True)
+		self.assertEqual(config._partial['addons']['gdrive']['enabled'], True)
 
 	def test_set_list_field_replace(self):
 		from secator.config import Config
@@ -129,7 +129,7 @@ class TestConfig(unittest.TestCase):
 			f.write(yaml.dump(self.config_home_dir_reduce))
 		config = Config.parse(path=self.config_test)
 		self.assertIsInstance(config.dirs.data, Path)
-		self.assertIsInstance(config._partial.dirs.data, str)
+		self.assertIsInstance(config._partial['dirs']['data'], str)
 		config.save(self.config_test)
 		data = Config.read_yaml(self.config_test)
 		self.assertNotIn(str(self.home), data['dirs']['data'])
@@ -257,7 +257,6 @@ class TestAIConfig(unittest.TestCase):
 class TestSecretFields(unittest.TestCase):
 
 	def test_secret_paths_contains_expected(self):
-		from pydantic import SecretStr
 		from secator.config import SECRET_PATHS
 		expected = [
 			'cli.github_token',
@@ -310,7 +309,6 @@ class TestSecretFields(unittest.TestCase):
 		self.assertEqual(value.get_secret_value(), 'mongodb://user:pass@host')
 
 	def test_save_writes_real_value(self):
-		import yaml
 		from pathlib import Path
 		from secator.config import Config
 		tmp = Path('test_secret_save.yml')

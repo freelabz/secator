@@ -1,15 +1,14 @@
 import os
 from pathlib import Path
 from subprocess import call, DEVNULL
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from typing_extensions import Annotated, Self
 
 import validators
 import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
-from dotmap import DotMap
-from pydantic import AfterValidator, BaseModel, SecretStr, model_validator, ValidationError
+from pydantic import AfterValidator, BaseModel, PrivateAttr, SecretStr, model_validator, ValidationError
 
 from secator.requests import requests
 from secator.rich import console, console_stdout
@@ -31,7 +30,16 @@ USER_AGENTS = {
 
 
 class StrictModel(BaseModel, extra='forbid'):
-	pass
+	def items(self):
+		for field_name in type(self).model_fields:
+			yield field_name, getattr(self, field_name)
+
+	def values(self):
+		for field_name in type(self).model_fields:
+			yield getattr(self, field_name)
+
+	def keys(self):
+		return type(self).model_fields.keys()
 
 
 class Directories(StrictModel):
@@ -351,7 +359,7 @@ def _mask_secret_data(data, current_path=''):
 	return data
 
 
-class Config(DotMap):
+class Config(SecatorConfig):
 	"""Config class.
 
 	Examples:
@@ -364,7 +372,10 @@ class Config(DotMap):
 	>>> config.save()									   # save config back to disk.
 	"""
 
-	_error = False
+	_path: Optional[Path] = PrivateAttr(default=None)
+	_partial: dict = PrivateAttr(default_factory=dict)
+	_keymap: dict = PrivateAttr(default_factory=dict)
+	_error: bool = PrivateAttr(default=False)
 
 	def get(self, key=None, print=True):
 		"""Retrieve a value from the configuration using a dotted path.
@@ -379,13 +390,19 @@ class Config(DotMap):
 		value = self
 		if key:
 			for part in key.split('.'):
-				value = value[part]
+				if isinstance(value, BaseModel):
+					value = getattr(value, part)
+				elif isinstance(value, dict):
+					value = value[part]
+				else:
+					value = None
+					break
 		if value is None:
 			console.print(f'[bold red]Key {key} does not exist.[/]')
 			return None
 		if print:
 			if key:
-				yaml_str = Config.dump(DotMap({key: value}), partial=False, mask_secrets=True)
+				yaml_str = Config.dump({key: value}, partial=False, mask_secrets=True)
 			else:
 				yaml_str = Config.dump(self, partial=False, mask_secrets=True)
 			Config.print_yaml(yaml_str)
@@ -403,11 +420,8 @@ class Config(DotMap):
 				'append': append value to existing list, or add key to existing dict.
 				'remove': remove value from existing list, or remove key from existing dict.
 		"""
-		# Convert dotted key path to the corresponding uppercase key used in _keymap
 		map_key = key.upper().replace('.', '_')
 
-		# If key not found in keymap, check if parent path points to a dict field
-		# (handles setting/removing keys in a dict, e.g. wordlists.defaults.mykey)
 		if map_key not in self._keymap:
 			parts = key.split('.')
 			if len(parts) > 1:
@@ -416,28 +430,30 @@ class Config(DotMap):
 				try:
 					parent_value = self
 					for part in parent_parts:
-						parent_value = parent_value[part]
+						if isinstance(parent_value, BaseModel):
+							parent_value = getattr(parent_value, part)
+						else:
+							parent_value = parent_value[part]
 					if isinstance(parent_value, dict):
 						return self._set_dict_key(parent_parts, dict_subkey, value, set_partial=set_partial, strategy=strategy)
-				except (KeyError, TypeError):
+				except (AttributeError, KeyError, TypeError):
 					pass
 			console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
 			return
 
-		# Get existing value
 		existing_value = self.get(key, print=False)
 
-		# Traverse to the second last key to handle the setting correctly
 		target = self
 		partial = self._partial
 		for part in self._keymap[map_key][:-1]:
-			target = target[part]
-			partial = partial[part]
+			if isinstance(target, BaseModel):
+				target = getattr(target, part)
+			else:
+				target = target[part]
+			partial = partial.setdefault(part, {})
 
-		# Set the value on the final part of the path
 		final_key = self._keymap[map_key][-1]
 
-		# Apply strategy for list fields
 		if strategy in ('append', 'remove') and isinstance(existing_value, list):
 			item = value
 			current = list(existing_value)
@@ -452,7 +468,6 @@ class Config(DotMap):
 					return
 			value = current
 		else:
-			# Try to convert value to expected type
 			try:
 				if isinstance(existing_value, list):
 					if isinstance(value, str):
@@ -488,13 +503,19 @@ class Config(DotMap):
 				pass
 
 		if set_partial:
-			if value is None or value == target[final_key]:
+			current_val = getattr(target, final_key) if isinstance(target, BaseModel) else target.get(final_key)
+			if value is None or value == current_val:
 				if final_key in partial:
 					del partial[final_key]
 				return
 			else:
-				partial[final_key] = value
-		target[final_key] = value
+				partial_value = value.get_secret_value() if isinstance(value, SecretStr) else value
+				partial[final_key] = partial_value
+
+		if isinstance(target, BaseModel):
+			setattr(target, final_key, value)
+		else:
+			target[final_key] = value
 
 	def _set_dict_key(self, parent_parts, subkey, value, set_partial=True, strategy=None):
 		"""Set or remove a key within a dict config field.
@@ -506,10 +527,12 @@ class Config(DotMap):
 			set_partial (bool): Set in partial config.
 			strategy (str | None): 'remove' to delete the subkey.
 		"""
-		# Navigate to the dict
 		existing_dict = self
 		for part in parent_parts:
-			existing_dict = existing_dict[part]
+			if isinstance(existing_dict, BaseModel):
+				existing_dict = getattr(existing_dict, part)
+			else:
+				existing_dict = existing_dict[part]
 
 		if not isinstance(existing_dict, dict):
 			console.print(f'[bold red]Path "{".".join(parent_parts)}" is not a dict field[/].')
@@ -528,17 +551,22 @@ class Config(DotMap):
 			elif isinstance(value, dict):
 				updated.update(value)
 
-		# Traverse to the parent of the dict to set the updated value
 		target = self
 		partial = self._partial
 		for part in parent_parts[:-1]:
-			target = target[part]
-			partial = partial[part]
+			if isinstance(target, BaseModel):
+				target = getattr(target, part)
+			else:
+				target = target[part]
+			partial = partial.setdefault(part, {})
 		dict_key = parent_parts[-1]
 
 		if set_partial:
 			partial[dict_key] = updated
-		target[dict_key] = updated
+		if isinstance(target, BaseModel):
+			setattr(target, dict_key, updated)
+		else:
+			target[dict_key] = updated
 
 	def unset(self, key, value=None, set_partial=True):
 		"""Unset a value in the configuration using a dotted path.
@@ -550,11 +578,9 @@ class Config(DotMap):
 			set_partial (bool): Set in partial config.
 		"""
 		if value is not None:
-			# Remove item from list
 			self.set(key, value, set_partial=set_partial, strategy='remove')
 			return
 
-		# Check if key points to a dict subkey that should be removed
 		map_key = key.upper().replace('.', '_')
 		if map_key not in self._keymap:
 			parts = key.split('.')
@@ -564,11 +590,14 @@ class Config(DotMap):
 				try:
 					parent_value = self
 					for part in parent_parts:
-						parent_value = parent_value[part]
+						if isinstance(parent_value, BaseModel):
+							parent_value = getattr(parent_value, part)
+						else:
+							parent_value = parent_value[part]
 					if isinstance(parent_value, dict):
 						self._set_dict_key(parent_parts, dict_subkey, None, set_partial=set_partial, strategy='remove')
 						return
-				except (KeyError, TypeError):
+				except (AttributeError, KeyError, TypeError):
 					pass
 			console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
 			return
@@ -613,30 +642,22 @@ class Config(DotMap):
 			Config: instance of Config object.
 			None: if the config was not loaded properly or there are validation errors.
 		"""
-		# Load YAML file
 		if path:
 			data = Config.read_yaml(path)
 
-		# Load data
-		config = Config.load(SecatorConfig, data, print_errors=print_errors)
-		valid = config is not None
-		if not valid:
+		config = Config.load(data, print_errors=print_errors)
+		if config is None:
 			return None
 
-		# Set extras
 		config.set_extras(data, path)
-
-		# Override config values with environment variables
 		config.apply_env_overrides(print_errors=print_errors)
-
-		# Validate config
 		config.validate(print_errors=print_errors)
 
 		return config
 
 	def validate(self, print_errors=True):
 		"""Validate config."""
-		return Config.load(SecatorConfig, data=self._partial.toDict(), print_errors=print_errors)
+		return Config.load(data=self._partial, print_errors=print_errors)
 
 	def set_extras(self, original_data, original_path):
 		"""Set extra useful values in config.
@@ -644,10 +665,9 @@ class Config(DotMap):
 		Args:
 			original_data (data): Original dict data.
 			original_path (pathlib.Path): Original YAML path.
-			valid (bool): Boolean indicating if config is valid or not.
 		"""
 		self._path = original_path
-		self._partial = Config(original_data)
+		self._partial = dict(original_data) if original_data else {}
 		self._keymap = Config.build_key_map(self)
 
 		# HACK: set default result_backend if unset
@@ -655,28 +675,19 @@ class Config(DotMap):
 			self.celery.result_backend = f'file://{self.dirs.celery_results}'
 
 	@staticmethod
-	def _model_to_dict(model):
-		"""Convert a Pydantic model to a dict, preserving SecretStr objects.
-
-		Unlike model_dump(), this walks fields via direct attribute access so that
-		SecretStr values are kept as SecretStr instances rather than being serialized
-		to plain strings.
-		"""
-		result = {}
-		for field_name in type(model).model_fields:
-			value = getattr(model, field_name)
-			if isinstance(value, BaseModel):
-				result[field_name] = Config._model_to_dict(value)
-			else:
-				result[field_name] = value
-		return result
+	def _to_plain_dict(obj):
+		"""Recursively convert Pydantic models to plain dicts, preserving SecretStr objects."""
+		if isinstance(obj, BaseModel):
+			return {k: Config._to_plain_dict(getattr(obj, k)) for k in type(obj).model_fields}
+		elif isinstance(obj, dict):
+			return {k: Config._to_plain_dict(v) for k, v in obj.items()}
+		return obj
 
 	@staticmethod
-	def load(schema, data: dict = {}, print_errors=True):
+	def load(data: dict = {}, print_errors=True):
 		"""Validate a config using Pydantic.
 
 		Args:
-			schema (pydantic.Schema): Pydantic schema.
 			data (dict): Input data.
 			print_errors (bool): Print validation errors.
 
@@ -684,7 +695,7 @@ class Config(DotMap):
 			Config|None: instance of Config object or None if invalid.
 		"""
 		try:
-			return Config(Config._model_to_dict(schema(**data)))
+			return Config(**data)
 		except ValidationError as e:
 			if print_errors:
 				error_str = str(e).replace('\n', '\n  ')
@@ -740,10 +751,8 @@ class Config(DotMap):
 		import yaml
 		from pathlib import Path, PosixPath, WindowsPath
 
-		# Get home dir
 		home = str(Path.home())
 
-		# Custom dumper to add line breaks between items and a path representer to translate paths to strings
 		class LineBreakDumper(yaml.SafeDumper):
 			def write_line_break(self, data=None):
 				super().write_line_break(data)
@@ -765,17 +774,18 @@ class Config(DotMap):
 		LineBreakDumper.add_representer(WindowsPath, posix_path_representer)
 		LineBreakDumper.add_representer(SecretStr, secret_str_representer)
 
-		# Get data dict
-		data = config.toDict()
-
-		# HACK: Replace home dir in result_backend
 		if isinstance(config, Config):
-			data['celery']['result_backend'] = data['celery']['result_backend'].replace(home, '~')
-			del data['_path']
 			if partial:
-				data = data['_partial']
+				data = dict(config._partial)
 			else:
-				del data['_partial']
+				data = Config._to_plain_dict(config)
+				rb = data.get('celery', {}).get('result_backend', '')
+				if rb:
+					data['celery']['result_backend'] = rb.replace(home, '~')
+		elif isinstance(config, BaseModel):
+			data = Config._to_plain_dict(config)
+		else:
+			data = Config._to_plain_dict(config) if isinstance(config, dict) else {}
 
 		data = {k: v for k, v in data.items() if not k.startswith('_')}
 
@@ -785,16 +795,25 @@ class Config(DotMap):
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
 
 	@staticmethod
-	def build_key_map(config, base_path=[]):
+	def build_key_map(obj, base_path=[]):
 		key_map = {}
-		for key, value in config.items():
-			if key.startswith('_'):  # ignore
-				continue
-			current_path = base_path + [key]
-			if isinstance(value, dict):
-				key_map.update(Config.build_key_map(value, current_path))
-			else:
-				key_map['_'.join(current_path).upper()] = current_path
+		if isinstance(obj, BaseModel):
+			for key in type(obj).model_fields:
+				value = getattr(obj, key)
+				current_path = base_path + [key]
+				if isinstance(value, BaseModel):
+					key_map.update(Config.build_key_map(value, current_path))
+				else:
+					key_map['_'.join(current_path).upper()] = current_path
+		elif isinstance(obj, dict):
+			for key, value in obj.items():
+				if key.startswith('_'):
+					continue
+				current_path = base_path + [key]
+				if isinstance(value, BaseModel):
+					key_map.update(Config.build_key_map(value, current_path))
+				else:
+					key_map['_'.join(current_path).upper()] = current_path
 		return key_map
 
 	def apply_env_overrides(self, print_errors=True):
@@ -802,7 +821,7 @@ class Config(DotMap):
 		prefix = 'SECATOR_'
 		for var in os.environ:
 			if var.startswith(prefix):
-				key = var[len(prefix) :]  # remove prefix
+				key = var[len(prefix):]  # remove prefix
 				if key in self._keymap:
 					path = '.'.join(k.lower() for k in self._keymap[key])
 					value = os.environ[var]
