@@ -321,19 +321,19 @@ class TestCli(unittest.TestCase):
 		result = self.runner.invoke(cli, ['task'])
 		assert not result.exception
 		assert result.exit_code == 0
-		assert 'Run a task.' in result.output
+		assert 'Run a task' in result.output
 
 	def test_workflow_command(self):
 		result = self.runner.invoke(cli, ['workflow'])
 		assert not result.exception
 		assert result.exit_code == 0
-		assert 'Run a workflow.' in result.output
+		assert 'Run a workflow' in result.output
 
 	def test_scan_command(self):
 		result = self.runner.invoke(cli, ['scan'])
 		assert not result.exception
 		assert result.exit_code == 0
-		assert 'Run a scan.' in result.output
+		assert 'Run a scan' in result.output
 
 	# def test_worker_command(self):
 	# 	result = self.runner.invoke(cli, ['worker', '--check'])
@@ -483,6 +483,37 @@ class TestCli(unittest.TestCase):
 		os.remove(tf.name)
 		assert not result.exception
 		assert result.exit_code == 0
+
+	def test_report_info_command(self):
+		"""report info shows _path at top and errors with source context."""
+		with tempfile.TemporaryDirectory() as tmpdir:
+			with mock.patch('secator.cli.CONFIG') as mock_cfg:
+				mock_cfg.dirs.reports = tmpdir
+				mock_cfg.workspace.default = 'default'
+				report_dir = os.path.join(tmpdir, 'default', 'tasks', '1')
+				os.makedirs(report_dir)
+				with open(os.path.join(report_dir, 'report.json'), 'w') as f:
+					import json as _json
+					_json.dump({
+						'info': {
+							'name': 'test_task',
+							'errors': [
+								{
+									'message': 'something went wrong',
+									'_source': 'nmap',
+									'_context': {'node_id': 'nmap_node_1'},
+									'_type': 'error',
+								}
+							]
+						},
+						'results': {}
+					}, f)
+				result = self.runner.invoke(cli, ['report', 'info', 'task/1'])
+				assert not result.exception, str(result.exception)
+				assert result.exit_code == 0
+				assert '_path' in result.output
+				assert 'something went wrong' in result.output
+				assert 'nmap_node_1' in result.output
 
 	@mock.patch('secator.cli.list_reports')
 	def test_report_list_command(self, mock_list_reports):
