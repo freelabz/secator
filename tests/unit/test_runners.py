@@ -740,46 +740,73 @@ class TestCommandRunner(unittest.TestCase):
 class TestWorkspaceRouting(unittest.TestCase):
 	"""Tests for automatic workspace routing based on input targets."""
 
+	def setUp(self):
+		from secator.utils_test import clear_modules
+		clear_modules()
+		from secator.runners import Command
+		from secator.utils_test import mock_command
+
+		class LocalMyCommand(Command):
+			input_types = ['slug']
+			cmd = 'dummy'
+			input_flag = '-u'
+			file_flag = None
+
+		self.Cmd = LocalMyCommand
+		self.mock_command = mock_command
+
 	def test_route_applied_when_input_matches_pattern(self):
 		"""Workspace route is applied when an input matches a configured pattern."""
+		import unittest.mock
 		routes = {'routed-ws': ['*host1*']}
-		with patch('secator.config.CONFIG.workspace.routes', new=routes), \
-			patch('secator.config.CONFIG.workspace.default', new=''):
-			with mock_command(MyCommand, ['host1'], {}, []) as cmd:
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=self.Cmd), \
+			patch('secator.runners._base.CONFIG.workspace.routes', new=routes), \
+			patch('secator.runners._base.CONFIG.workspace.default', new=''), \
+			patch('secator.runners._base.CONFIG.profiles.defaults', []):
+			with self.mock_command(self.Cmd, ['host1'], {}, []) as cmd:
 				self.assertEqual(cmd.workspace_name, 'routed-ws')
 				self.assertEqual(cmd.context.get('workspace_name'), 'routed-ws')
 				self.assertEqual(cmd.context.get('workspace_id'), 'routed-ws')
 
 	def test_route_not_applied_when_no_input_matches(self):
 		"""Workspace route is NOT applied when no input matches any pattern."""
+		import unittest.mock
 		routes = {'routed-ws': ['*vulnweb.com*']}
-		default = ''
-		with patch('secator.config.CONFIG.workspace.routes', new=routes), \
-			patch('secator.config.CONFIG.workspace.default', new=default):
-			with mock_command(MyCommand, ['secator.cloud'], {}, []) as cmd:
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=self.Cmd), \
+			patch('secator.runners._base.CONFIG.workspace.routes', new=routes), \
+			patch('secator.runners._base.CONFIG.workspace.default', new=''), \
+			patch('secator.runners._base.CONFIG.profiles.defaults', []):
+			with self.mock_command(self.Cmd, ['secator.cloud'], {}, []) as cmd:
 				self.assertEqual(cmd.workspace_name, 'default')
 
 	def test_route_not_applied_when_workspace_explicit(self):
 		"""Routes are NOT applied when user explicitly passes -ws, even when value equals the default."""
+		import unittest.mock
 		routes = {'routed-ws': ['*host1*']}
 		# Set default to 'my-default'; user explicitly passes the same value.
 		# Without workspace_explicit=True, routes would match and override — but with it, they should not.
-		with patch('secator.config.CONFIG.workspace.routes', new=routes), \
-			patch('secator.config.CONFIG.workspace.default', new='my-default'):
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=self.Cmd), \
+			patch('secator.runners._base.CONFIG.workspace.routes', new=routes), \
+			patch('secator.runners._base.CONFIG.workspace.default', new='my-default'), \
+			patch('secator.runners._base.CONFIG.profiles.defaults', []):
 			opts = {'context': {'workspace_name': 'my-default', 'workspace_explicit': True}}
-			with mock_command(MyCommand, ['host1'], opts, []) as cmd:
+			with self.mock_command(self.Cmd, ['host1'], opts, []) as cmd:
 				self.assertEqual(cmd.workspace_name, 'my-default')
 
 	def test_route_overrides_default_workspace(self):
 		"""Workspace route overrides the configured default when no explicit -ws passed."""
+		import unittest.mock
 		routes = {'routed-ws': ['*host1*']}
-		with patch('secator.config.CONFIG.workspace.routes', new=routes), \
-			patch('secator.config.CONFIG.workspace.default', new='my-default'):
-			with mock_command(MyCommand, ['host1'], {}, []) as cmd:
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=self.Cmd), \
+			patch('secator.runners._base.CONFIG.workspace.routes', new=routes), \
+			patch('secator.runners._base.CONFIG.workspace.default', new='my-default'), \
+			patch('secator.runners._base.CONFIG.profiles.defaults', []):
+			with self.mock_command(self.Cmd, ['host1'], {}, []) as cmd:
 				self.assertEqual(cmd.workspace_name, 'routed-ws')
 
 	def test_enforced_profile_overrides_route(self):
 		"""An enforced profile workspace overrides a route-matched workspace."""
+		import unittest.mock
 		from secator.template import TemplateLoader
 		routes = {'routed-ws': ['*host1*']}
 		profile = TemplateLoader(input={
@@ -788,14 +815,17 @@ class TestWorkspaceRouting(unittest.TestCase):
 			'enforce': True,
 			'workspace': 'enforced-ws',
 		})
-		with patch('secator.config.CONFIG.workspace.routes', new=routes), \
-			patch('secator.config.CONFIG.workspace.default', new=''):
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=self.Cmd), \
+			patch('secator.runners._base.CONFIG.workspace.routes', new=routes), \
+			patch('secator.runners._base.CONFIG.workspace.default', new=''), \
+			patch('secator.runners._base.CONFIG.profiles.defaults', []):
 			opts = {'profiles': [profile]}
-			with mock_command(MyCommand, ['host1'], opts, []) as cmd:
+			with self.mock_command(self.Cmd, ['host1'], opts, []) as cmd:
 				self.assertEqual(cmd.workspace_name, 'enforced-ws')
 
 	def test_non_enforced_profile_overrides_route(self):
 		"""A non-enforced profile workspace takes precedence over a route match."""
+		import unittest.mock
 		from secator.template import TemplateLoader
 		routes = {'routed-ws': ['*host1*']}
 		profile = TemplateLoader(input={
@@ -803,26 +833,34 @@ class TestWorkspaceRouting(unittest.TestCase):
 			'type': 'profile',
 			'workspace': 'profile-ws',
 		})
-		with patch('secator.config.CONFIG.workspace.routes', new=routes), \
-			patch('secator.config.CONFIG.workspace.default', new=''):
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=self.Cmd), \
+			patch('secator.runners._base.CONFIG.workspace.routes', new=routes), \
+			patch('secator.runners._base.CONFIG.workspace.default', new=''), \
+			patch('secator.runners._base.CONFIG.profiles.defaults', []):
 			opts = {'profiles': [profile]}
-			with mock_command(MyCommand, ['host1'], opts, []) as cmd:
+			with self.mock_command(self.Cmd, ['host1'], opts, []) as cmd:
 				self.assertEqual(cmd.workspace_name, 'profile-ws')
 
 	def test_wildcard_pattern_matches_subdomain(self):
 		"""A wildcard pattern like *vulnweb.com* matches subdomains."""
+		import unittest.mock
 		routes = {'vulnweb-ws': ['*vulnweb.com*']}
-		with patch('secator.config.CONFIG.workspace.routes', new=routes), \
-			patch('secator.config.CONFIG.workspace.default', new=''):
-			with mock_command(MyCommand, ['testphp.vulnweb.com'], {}, []) as cmd:
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=self.Cmd), \
+			patch('secator.runners._base.CONFIG.workspace.routes', new=routes), \
+			patch('secator.runners._base.CONFIG.workspace.default', new=''), \
+			patch('secator.runners._base.CONFIG.profiles.defaults', []):
+			with self.mock_command(self.Cmd, ['testphp.vulnweb.com'], {}, []) as cmd:
 				self.assertEqual(cmd.workspace_name, 'vulnweb-ws')
 
 	def test_first_matching_workspace_wins(self):
 		"""When multiple workspaces have patterns, the first matching workspace is used."""
+		import unittest.mock
 		routes = {'ws-a': ['*host1*'], 'ws-b': ['*host*']}
-		with patch('secator.config.CONFIG.workspace.routes', new=routes), \
-			patch('secator.config.CONFIG.workspace.default', new=''):
-			with mock_command(MyCommand, ['host1'], {}, []) as cmd:
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=self.Cmd), \
+			patch('secator.runners._base.CONFIG.workspace.routes', new=routes), \
+			patch('secator.runners._base.CONFIG.workspace.default', new=''), \
+			patch('secator.runners._base.CONFIG.profiles.defaults', []):
+			with self.mock_command(self.Cmd, ['host1'], {}, []) as cmd:
 				self.assertEqual(cmd.workspace_name, 'ws-a')
 
 
