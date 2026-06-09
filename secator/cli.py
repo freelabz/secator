@@ -1323,8 +1323,7 @@ def _format_vuln_counts(counts):
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('--show-all', is_flag=True, default=False, help='Show all columns including report path')
-@click.pass_context
-def report_list(ctx, workspace, runner_type, time_delta, show_all):
+def report_list(workspace, runner_type, time_delta, show_all):
 	"""List all secator reports."""
 	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
@@ -1343,15 +1342,6 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	table.add_column("Vulnerabilities")
 	if show_all:
 		table.add_column('Path')
-
-	# Print paths if piped
-	if ctx.obj['piped_output']:
-		if not paths:
-			console.print(Error(message='No reports found.'))
-			return
-		for path in paths:
-			print(path)
-		return
 
 	# Load each report
 	for path in paths:
