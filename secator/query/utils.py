@@ -3,7 +3,7 @@
 import json
 import re
 
-from secator.output_types import Error
+from secator.output_types import Error, Warning
 from secator.rich import console
 from secator.utils import debug
 
@@ -284,3 +284,61 @@ def python_expr_to_mongo(query):
 
     debug('python_expr_to_mongo', sub='query', obj={'input': query, 'output': result})
     return result
+
+
+def validate_query_fields(query):
+    """Validate field names in a MongoDB-style query against known output types.
+
+    For each fragment referencing a known _type, checks that the queried fields
+    exist on that type. Prints a warning (with available fields) for unknown fields
+    and removes them from the query.
+    Returns the (possibly modified) query dict.
+    """
+    if not query or not isinstance(query, dict):
+        return query
+
+    from secator.output_types import OUTPUT_TYPES
+
+    type_map = {
+        cls.__dataclass_fields__['_type'].default: cls
+        for cls in OUTPUT_TYPES
+        if '_type' in getattr(cls, '__dataclass_fields__', {})
+        and isinstance(cls.__dataclass_fields__['_type'].default, str)
+    }
+
+    def _validate_fragment(fragment):
+        if not isinstance(fragment, dict):
+            return fragment
+        _type = fragment.get('_type')
+        if not _type:
+            return fragment
+        cls = type_map.get(_type)
+        if cls is None:
+            return fragment
+        valid_fields = set(cls.fields())
+        result = {}
+        for k, v in fragment.items():
+            if k.startswith('$') or k.startswith('_'):
+                result[k] = v
+                continue
+            top_field = k.split('.')[0]
+            if top_field in valid_fields:
+                result[k] = v
+            else:
+                public_fields = sorted(f for f in valid_fields if not f.startswith('_'))
+                console.print(Warning(
+                    message=f"Field '{k}' does not exist on type '{_type}'. "
+                            f"Available fields: {', '.join(public_fields)}"
+                ))
+        return result
+
+    def _validate(q):
+        if not isinstance(q, dict):
+            return q
+        if '$or' in q:
+            return {'$or': [_validate(sub) for sub in q['$or']]}
+        if '$and' in q:
+            return {'$and': [_validate(sub) for sub in q['$and']]}
+        return _validate_fragment(q)
+
+    return _validate(query)

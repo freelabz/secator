@@ -1,4 +1,6 @@
-from secator.query.utils import parse_report_paths, python_expr_to_mongo
+from unittest.mock import patch
+
+from secator.query.utils import parse_report_paths, python_expr_to_mongo, validate_query_fields
 
 
 class TestParseReportPaths:
@@ -157,4 +159,93 @@ class TestPythonExprToMongo:
     def test_in_operator_floats(self):
         result = python_expr_to_mongo("item.score in [1.5, 2.5, 3.0]")
         assert result == {'_type': 'item', 'score': {'$in': [1.5, 2.5, 3.0]}}
+
+
+class TestValidateQueryFields:
+
+    def test_none_returns_none(self):
+        assert validate_query_fields(None) is None
+
+    def test_empty_dict_returns_empty(self):
+        assert validate_query_fields({}) == {}
+
+    def test_valid_field_passes_through(self):
+        q = {'_type': 'vulnerability', 'severity': {'$regex': 'high'}}
+        assert validate_query_fields(q) == q
+
+    def test_invalid_field_removed_with_warning(self):
+        q = {'_type': 'technology', 'name': {'$regex': '(HSTS|php)'}}
+        with patch('secator.query.utils.console') as mock_console:
+            result = validate_query_fields(q)
+        assert result == {'_type': 'technology'}
+        mock_console.print.assert_called_once()
+        warning_obj = mock_console.print.call_args[0][0]
+        assert 'name' in warning_obj.message
+        assert 'technology' in warning_obj.message
+        assert 'product' in warning_obj.message  # one of the available fields
+
+    def test_or_validates_each_fragment(self):
+        q = {
+            '$or': [
+                {'_type': 'url', 'status_code': {'$ne': 200}},
+                {'_type': 'technology', 'name': {'$regex': '(HSTS|php)'}},
+            ]
+        }
+        with patch('secator.query.utils.console') as mock_console:
+            result = validate_query_fields(q)
+        assert result == {
+            '$or': [
+                {'_type': 'url', 'status_code': {'$ne': 200}},
+                {'_type': 'technology'},
+            ]
+        }
+        mock_console.print.assert_called_once()
+
+    def test_and_validates_each_fragment(self):
+        q = {
+            '$and': [
+                {'_context.scan_id': '5'},
+                {'_type': 'technology', 'name': {'$regex': 'php'}},
+            ]
+        }
+        with patch('secator.query.utils.console') as mock_console:
+            result = validate_query_fields(q)
+        assert result == {
+            '$and': [
+                {'_context.scan_id': '5'},
+                {'_type': 'technology'},
+            ]
+        }
+        mock_console.print.assert_called_once()
+
+    def test_unknown_type_passes_through(self):
+        q = {'_type': 'unknown_type', 'foo': 'bar'}
+        assert validate_query_fields(q) == q
+
+    def test_no_type_passes_through(self):
+        q = {'_context.scan_id': '5'}
+        assert validate_query_fields(q) == q
+
+    def test_internal_fields_pass_through(self):
+        q = {'_type': 'url', '_context': {'scan_id': '5'}, '_timestamp': {'$gte': 0}}
+        assert validate_query_fields(q) == q
+
+    def test_nested_extra_data_field_passes_through(self):
+        q = {'_type': 'url', 'extra_data.custom': 'value'}
+        assert validate_query_fields(q) == q
+
+    def test_multiple_invalid_fields_all_warned(self):
+        q = {'_type': 'technology', 'name': 'php', 'bogus': 'x'}
+        with patch('secator.query.utils.console') as mock_console:
+            result = validate_query_fields(q)
+        assert result == {'_type': 'technology'}
+        assert mock_console.print.call_count == 2
+
+    def test_valid_url_status_code(self):
+        q = {'_type': 'url', 'status_code': {'$ne': 200}}
+        assert validate_query_fields(q) == q
+
+    def test_valid_vulnerability_cvss_score(self):
+        q = {'_type': 'vulnerability', 'cvss_score': {'$gt': 7}}
+        assert validate_query_fields(q) == q
 
