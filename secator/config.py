@@ -1,5 +1,4 @@
 import os
-from collections.abc import MutableMapping
 from pathlib import Path
 from subprocess import call, DEVNULL
 from typing import Any, Dict, List, Optional
@@ -428,19 +427,31 @@ class Config(SecatorConfig):
 		if map_key not in self._keymap:
 			parts = key.split('.')
 			if len(parts) > 1:
-				parent_parts = parts[:-1]
-				dict_subkey = parts[-1]
-				try:
-					parent_value = self
-					for part in parent_parts:
-						if isinstance(parent_value, BaseModel):
-							parent_value = getattr(parent_value, part)
+				current = self
+				model_parts = []
+				for i, part in enumerate(parts):
+					if isinstance(current, BaseModel):
+						try:
+							current = getattr(current, part)
+							model_parts.append(part)
+						except AttributeError:
+							break
+					elif isinstance(current, dict):
+						dict_remaining = parts[i:]
+						subkey = dict_remaining[0]
+						inner_parts = dict_remaining[1:]
+						if not inner_parts:
+							return self._set_dict_key(model_parts, subkey, value, set_partial=set_partial, strategy=strategy)
+						parsed_value = Config._parse_new_value(value) if isinstance(value, str) else value
+						nested_val = parsed_value
+						for k in reversed(inner_parts):
+							nested_val = {k: nested_val}
+						existing_subval = current.get(subkey, {})
+						if isinstance(existing_subval, dict) and isinstance(nested_val, dict):
+							merged = {**existing_subval, **nested_val}
 						else:
-							parent_value = parent_value[part]
-					if isinstance(parent_value, dict):
-						return self._set_dict_key(parent_parts, dict_subkey, value, set_partial=set_partial, strategy=strategy)
-				except (AttributeError, KeyError, TypeError):
-					pass
+							merged = nested_val
+						return self._set_dict_key(model_parts, subkey, merged, set_partial=set_partial, strategy=strategy)
 			console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
 			return
 
@@ -590,6 +601,13 @@ class Config(SecatorConfig):
 				updated[subkey] = new_val
 			elif isinstance(value, dict):
 				updated.update(value)
+
+		if parent_path == 'workspace.profiles' and subkey and subkey in updated and strategy != 'remove':
+			new_val = updated[subkey]
+			if new_val:
+				profile_names = new_val if isinstance(new_val, list) else [new_val]
+				if not Config._validate_profile_names(profile_names):
+					return
 
 		target = self
 		partial = self._partial
@@ -833,6 +851,46 @@ class Config(SecatorConfig):
 			data = _mask_secret_data(data)
 
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
+
+	@staticmethod
+	def _parse_new_value(value):
+		"""Try to parse a string value into a structured type (int, float, bool, list, or dict)."""
+		if not isinstance(value, str):
+			return value
+		if (value.startswith('{') and value.endswith('}')) or (value.startswith('[') and value.endswith(']')):
+			try:
+				import json
+				return json.loads(value)
+			except Exception:
+				pass
+		if ',' in value:
+			return [v.strip() for v in value.split(',')]
+		try:
+			return int(value)
+		except ValueError:
+			pass
+		try:
+			return float(value)
+		except ValueError:
+			pass
+		if value.lower() in ('true', 'false'):
+			return value.lower() == 'true'
+		return value
+
+	@staticmethod
+	def _validate_profile_names(profile_names):
+		"""Validate that all profile names exist. Returns True if all valid or validation cannot run."""
+		try:
+			from secator.loader import get_configs_by_type
+			available = [p.name for p in get_configs_by_type('profile')]
+			invalid = [p for p in profile_names if p not in available]
+			if invalid:
+				console.print(f'[bold red]Invalid profile names: {", ".join(invalid)}[/]')
+				return False
+		except Exception as e:
+			import logging
+			logging.debug('Profile validation skipped due to exception', exc_info=e)
+		return True
 
 	@staticmethod
 	def build_key_map(obj, base_path=[]):
