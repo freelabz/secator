@@ -108,6 +108,12 @@ class ai(PythonRunner):
 		from secator.utils_test import mock_litellm_completion
 		return mock_litellm_completion(fixture)
 
+	@classmethod
+	def requires_local_execution(cls, inputs, run_opts):
+		"""`ai setup` runs an interactive setup wizard and must never be dispatched to a worker."""
+		# inputs may be the raw string 'setup' (single input) or a ['setup'] list
+		return inputs == 'setup' or inputs == ['setup']
+
 	# -------------------------------------------------------------------------
 	# yielder: flat init sequence
 	# -------------------------------------------------------------------------

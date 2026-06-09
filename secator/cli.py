@@ -799,6 +799,8 @@ def workspace_list():
 	for workspace, config in workspaces.items():
 		table.add_row(workspace, str(config['count']), config['path'])
 	console.print(table)
+	current = CONFIG.workspace.default or 'default'
+	console.print(Info(message=f'Current workspace: [bold gold3]{current}[/]. Use [bold green4]secator ws use <workspace>[/] to switch.'))  # noqa: E501
 
 
 @workspace.command(name='use', aliases=['create'])
@@ -818,7 +820,7 @@ def workspace_use(name):
 def workspace_current():
 	"""Show current default workspace"""
 	current = CONFIG.workspace.default or 'default'
-	console.print(f'Current workspace: [bold gold3]{current}[/]')
+	console.print(Info(message=f'Current workspace: [bold gold3]{current}[/]. Use [bold green4]secator ws use <workspace>[/] to switch.'))  # noqa: E501
 
 
 @workspace.command(name='rm', aliases=['remove', 'delete'])
@@ -897,7 +899,7 @@ def profile(ctx):
 
 @profile.command('list')
 def profile_list():
-	table = Table(highlight=True)
+	table = Table(show_lines=True, highlight=True)
 	table.add_column('Profile name', style='bold gold3')
 	table.add_column('Description', overflow='fold')
 	table.add_column('Enforced', justify='center')
@@ -906,7 +908,7 @@ def profile_list():
 	table.add_column('Exporters', overflow='fold')
 	table.add_column('Options', overflow='fold')
 	for profile in PROFILES:
-		opts_str = ', '.join(f'[yellow3]{k}[/]={v}' for k, v in profile.opts.items())
+		opts_str = ', '.join(f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items())
 		enforced_str = '[bold red]✓[/]' if profile.enforce else ''
 		workspace_str = profile.workspace or ''
 		drivers_str = ','.join(profile.drivers) if profile.drivers else ''
@@ -1264,7 +1266,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
 	"""
-	from secator.query.utils import parse_report_paths, python_expr_to_mongo
+	from secator.query.utils import parse_report_paths, python_expr_to_mongo, query_has_type_constraint
 
 	current = get_file_timestamp()
 	workspace_name = workspace or CONFIG.workspace.default or 'default'
@@ -1285,6 +1287,11 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 		full_query = {'$and': [runner_filter, mongo_query]}
 	else:
 		full_query = {**runner_filter, **mongo_query}
+	# Exclude verbose 'target' and 'ai' results unless the query explicitly constrains types
+	# (e.g. `-q target` shows targets, `-q ai` shows ai, `-q url` shows urls;
+	# with no -q type filter, both targets and ai output are hidden)
+	if not query_has_type_constraint(mongo_query):
+		full_query['_type'] = {'$nin': ['target', 'ai']}
 	debug('full query', sub='query', obj=full_query)
 
 	# 4. Add time delta filter if provided
@@ -1338,6 +1345,13 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	if fmt:
 		report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
+	total_results = sum(len(items) for items in report.data['results'].values())
+	info_msg = f'Found {total_results} results in workspace [bold gold3]{workspace_name}[/]'
+	if report_query:
+		searched = ', '.join(p.strip() for p in report_query.split(',') if p.strip())
+		if searched:
+			info_msg += f' (searched: [bold cyan]{searched}[/])'
+	console.print(Info(message=info_msg))
 
 
 def run_ai_chat(ctx, prompt, workspace):
@@ -1384,6 +1398,39 @@ def _load_report_data(path):
 	return info, vuln_counts
 
 
+def _report_passes_filters(report_info, vuln_counts, interesting, status_pattern):
+	"""Apply the --interesting / --status filters to already-loaded report data.
+
+	Operates on data loaded once by the caller so filters never re-read the report JSON.
+
+	Args:
+		report_info (dict): The report's 'info' section.
+		vuln_counts (dict): Bucketed vulnerability counts (critical/high/medium/low).
+		interesting (bool): Keep only reports with known-severity vulnerabilities.
+		status_pattern (re.Pattern | None): Compiled case-insensitive status regex, or None.
+
+	Returns:
+		bool: True if the report passes all active filters.
+	"""
+	# --interesting: mirrors the 'Vulnerabilities' column — reports whose only findings have an
+	# empty/'unknown'/'info' severity render as '-' and are not considered interesting.
+	if interesting and sum(vuln_counts.values()) == 0:
+		return False
+	# --status: case-insensitive regex search, so 'FAIL' matches 'FAILURE' and '(RUNNING|FAILURE)' works.
+	if status_pattern and not status_pattern.search(str(report_info.get('status', ''))):
+		return False
+	return True
+
+
+def _report_matches_filters(path, interesting, status_pattern):
+	"""Load a report once and check it against the active filters (used for piped output)."""
+	try:
+		report_info, vuln_counts = _load_report_data(path)
+	except Exception:
+		return False
+	return _report_passes_filters(report_info, vuln_counts, interesting, status_pattern)
+
+
 def _format_vuln_counts(counts):
 	"""Format vulnerability counts as a colored rich string like '2H|10M|5L'"""
 	severity_labels = [
@@ -1405,32 +1452,47 @@ def _format_vuln_counts(counts):
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('--show-all', is_flag=True, default=False, help='Show all columns including report path')
+@click.option('--interesting', '-i', is_flag=True, default=False, help='Only show reports that have vulnerabilities')
+@click.option('--status', type=str, default=None, help="Filter by runner status (case-insensitive regex, e.g. SUCCESS, FAIL, '(RUNNING|FAILURE)')")  # noqa: E501
 @click.pass_context
-def report_list(ctx, workspace, runner_type, time_delta, show_all):
-	"""List all secator reports"""
+def report_list(ctx, workspace, runner_type, time_delta, show_all, interesting, status):
+	"""List all secator reports."""
 	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
 
-	# Build table
+	# --status is matched as a case-insensitive regex (e.g. 'FAIL' -> FAILURE, '(RUNNING|FAILURE)')
+	status_pattern = None
+	if status:
+		try:
+			status_pattern = re.compile(status, re.IGNORECASE)
+		except re.error as e:
+			console.print(Error(message=f'Invalid --status regex {status!r}: {e}'))
+			return
+
+	# Build table. overflow='fold' wraps long values onto multiple lines instead of
+	# truncating with an ellipsis, so important fields stay readable on small screens.
 	table = Table()
-	table.add_column('Workspace', style='bold gold3')
-	table.add_column('Name')
-	table.add_column('Id')
-	table.add_column('Target')
-	table.add_column('Profiles')
-	table.add_column('Start Date')
-	table.add_column('End Date')
-	table.add_column('Elapsed')
-	table.add_column('Status', style='green')
-	table.add_column('Vulnerabilities')
+	table.add_column("Workspace", style="bold gold3", overflow="fold")
+	table.add_column("Name", overflow="fold")
+	table.add_column("Id", overflow="fold")
+	table.add_column("Target", overflow="fold")
+	table.add_column("Profiles", overflow="fold")
+	table.add_column("Start Date", overflow="fold")
+	table.add_column("End Date", overflow="fold")
+	table.add_column("Elapsed", overflow="fold")
+	table.add_column("Status", style="green", overflow="fold")
+	table.add_column("Vulnerabilities", overflow="fold")
 	if show_all:
-		table.add_column('Path')
+		table.add_column('Path', overflow="fold")
 
 	# Load each report
+	shown = 0
 	for path in paths:
 		try:
 			path_info = get_info_from_report_path(path)
 			report_info, vuln_counts = _load_report_data(path)
+			if not _report_passes_filters(report_info, vuln_counts, interesting, status_pattern):
+				continue
 			runner_id = path_info['type'] + '/' + path_info['id']
 			targets = report_info.get('targets', [])
 			first_target = str(targets[0]) if targets else ''
@@ -1440,8 +1502,8 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 			if isinstance(profiles, str):
 				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
 			profiles_str = ', '.join(profiles) if profiles else ''
-			status = report_info.get('status', '')
-			status_color = STATE_COLORS[status] if status in STATE_COLORS else 'white'
+			runner_status = report_info.get('status', '')
+			status_color = STATE_COLORS[runner_status] if runner_status in STATE_COLORS else 'white'
 
 			# Update table
 			row = [
@@ -1453,18 +1515,23 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 				humanize_date(report_info.get('start_time')),
 				humanize_date(report_info.get('end_time')),
 				report_info.get('elapsed_human', ''),
-				f'[{status_color}]{status}[/]',
+				f"[{status_color}]{runner_status}[/]",
 				_format_vuln_counts(vuln_counts),
 			]
 			if show_all:
 				row.append(str(path))
 			table.add_row(*row)
+			shown += 1
 		except Exception as e:
 			console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
-	if len(paths) > 0:
+	if shown > 0:
 		console.print(table)
-		console.print(Info(message=f'Found {len(paths)} reports.'))
+		console.print(Info(message=f'Found {shown} reports.'))
+		if workspace:
+			console.print(Info(message=f'Current workspace: [bold gold3]{workspace}[/]. Use [bold green4]-ws <workspace_name>[/] to switch.'))  # noqa: E501
+		else:
+			console.print(Info(message='All workspaces selected. Use [bold green4]-ws <workspace_name>[/] to filter on a workspace.'))  # noqa: E501
 	else:
 		console.print(Error(message='No reports found.'))
 
@@ -1546,73 +1613,23 @@ def report_info(runner_id, workspace, show_all):
 		console.print('[dim]No errors.[/]')
 
 
-@report.command(name='delete', aliases=['rm', 'remove'])
-@click.argument('runner_id')
-@click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
-@click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
-def report_delete(runner_id, workspace, driver, yes):
-	"""Delete a report. RUNNER_ID: runner path (e.g. tasks/24)"""
-	workspace_name = workspace or CONFIG.workspace.default or 'default'
-
-	parts = runner_id.split('/')
-	if len(parts) != 2:
-		console.print(Error(message=f'Invalid runner ID: {runner_id!r}. Expected format: <type>/<id> (e.g. tasks/24)'))
-		return
-
-	runner_type_raw, runner_number = parts[0], parts[1]
-	allowed_types = {'task', 'tasks', 'workflow', 'workflows', 'scan', 'scans'}
-	if runner_type_raw not in allowed_types:
-		console.print(Error(message=f'Invalid runner type: {runner_type_raw!r}. Must be one of: task, workflow, scan.'))
-		return
-	if not runner_number.isdigit():
-		console.print(Error(message=f'Invalid runner number: {runner_number!r}. Must be numeric.'))
-		return
-	runner_type_plural = runner_type_raw if runner_type_raw.endswith('s') else runner_type_raw + 's'
-	runner_type_singular = runner_type_plural[:-1]  # tasks -> task, workflows -> workflow, scans -> scan
-
-	report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+def _resolve_runner_db_id(report_folder, runner_type_singular):
+	"""Read a report's context to extract its MongoDB/API runner id (or None)."""
 	report_path = report_folder / 'report.json'
+	if not report_path.exists():
+		return None
+	try:
+		with open(report_path, 'r') as f:
+			content = json.loads(f.read())
+		context = content.get('info', {}).get('context', {})
+		return context.get(f'{runner_type_singular}_id')
+	except (json.JSONDecodeError, KeyError):
+		return None
 
-	# Read report context to get MongoDB/API IDs
-	runner_db_id = None
-	if report_path.exists():
-		try:
-			with open(report_path, 'r') as f:
-				content = json.loads(f.read())
-			context = content.get('info', {}).get('context', {})
-			runner_db_id = context.get(f'{runner_type_singular}_id')
-		except (json.JSONDecodeError, KeyError):
-			pass
 
-	actions = []
-	if report_folder.exists():
-		actions.append(f'Remove report folder: {report_folder}')
-	else:
-		actions.append(f'[dim]Report folder not found (will skip): {report_folder}[/]')
-
-	if driver == 'mongodb':
-		if runner_db_id:
-			actions.append(f'Delete findings in MongoDB for {runner_type_singular}_id="{runner_db_id}"')
-			actions.append(f'Delete {runner_type_singular} document in MongoDB (id="{runner_db_id}")')
-		else:
-			actions.append('[yellow]No MongoDB ID found in report — skipping MongoDB deletion[/]')
-	elif driver == 'api':
-		if runner_db_id:
-			endpoint_preview = CONFIG.addons.api.runner_delete_endpoint.format(
-				runner_type=runner_type_singular,
-				runner_id=runner_db_id,
-			)
-			actions.append(f'Send DELETE to API: {endpoint_preview}')
-		else:
-			actions.append('[yellow]No API ID found in report — skipping API deletion[/]')
-
-	console.print('[bold]The following actions will be performed:[/]')
-	for action in actions:
-		console.print(f'  [dim]-[/] {action}')
-
-	if not yes:
-		click.confirm(f'\nAre you sure you want to delete report "{workspace_name}/{runner_id}"?', abort=True)
+def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular, runner_number, runner_db_id, driver):
+	"""Perform the actual deletion for a single runner reference."""
+	report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
 
 	# 1. Remove report folder
 	if report_folder.exists():
@@ -1650,6 +1667,69 @@ def report_delete(runner_id, workspace, driver, yes):
 			console.print(Info(message=f'Deleted {runner_type_singular} from API'))
 		except Exception as e:
 			console.print(Error(message=f'API deletion failed: {e}'))
+
+
+@report.command(name='delete', aliases=['rm', 'remove'])
+@click.argument('runner_ids', nargs=-1, required=True)
+@click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
+def report_delete(runner_ids, workspace, driver, yes):
+	"""Delete one or more reports.
+
+	RUNNER_IDS: one or more runner paths. Supports space- or comma-separated paths and
+	numeric ranges, e.g. 'tasks/23 tasks/24 workflows/21', 'tasks/23,workflows/21',
+	or 'tasks/136-140,workflows/10-21'.
+	"""
+	from secator.query.utils import expand_runner_paths
+
+	workspace_name = workspace or CONFIG.workspace.default or 'default'
+
+	refs, errors = expand_runner_paths(list(runner_ids))
+	for err in errors:
+		console.print(Error(message=err))
+	if not refs:
+		if not errors:
+			console.print(Error(message='No valid runner paths provided.'))
+		return
+
+	# Resolve DB ids and build the preview of actions
+	resolved = []
+	console.print('[bold]The following actions will be performed:[/]')
+	for runner_type_plural, runner_type_singular, runner_number in refs:
+		report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+		runner_db_id = _resolve_runner_db_id(report_folder, runner_type_singular)
+		resolved.append((runner_type_plural, runner_type_singular, runner_number, runner_db_id))
+
+		if report_folder.exists():
+			console.print(f'  [dim]-[/] Remove report folder: {report_folder}')
+		else:
+			console.print(f'  [dim]-[/] [dim]Report folder not found (will skip): {report_folder}[/]')
+
+		if driver == 'mongodb':
+			if runner_db_id:
+				console.print(f'  [dim]-[/] Delete findings in MongoDB for {runner_type_singular}_id="{runner_db_id}"')
+				console.print(f'  [dim]-[/] Delete {runner_type_singular} document in MongoDB (id="{runner_db_id}")')
+			else:
+				console.print('  [dim]-[/] [yellow]No MongoDB ID found in report — skipping MongoDB deletion[/]')
+		elif driver == 'api':
+			if runner_db_id:
+				endpoint_preview = CONFIG.addons.api.runner_delete_endpoint.format(
+					runner_type=runner_type_singular,
+					runner_id=runner_db_id,
+				)
+				console.print(f'  [dim]-[/] Send DELETE to API: {endpoint_preview}')
+			else:
+				console.print('  [dim]-[/] [yellow]No API ID found in report — skipping API deletion[/]')
+
+	if not yes:
+		paths_str = ', '.join(f'{p}/{n}' for p, _s, n, _id in resolved)
+		click.confirm(f'\nAre you sure you want to delete {len(resolved)} report(s) in "{workspace_name}" ({paths_str})?', abort=True)  # noqa: E501
+
+	for runner_type_plural, runner_type_singular, runner_number, runner_db_id in resolved:
+		_delete_one_report(
+			workspace_name, runner_type_plural, runner_type_singular, runner_number, runner_db_id, driver,
+		)
 
 
 # --------#
