@@ -1,5 +1,6 @@
 import tempfile
 from click.testing import CliRunner
+import io
 import os
 import unittest
 from unittest import mock
@@ -214,6 +215,80 @@ class TestApplyFormat(unittest.TestCase):
 		out = _apply_format(results, '{port.ip} || {url.url}')
 		self.assertEqual(out.get('port'), ['1.2.3.4'])
 		self.assertEqual(out.get('url'), ['https://example.com'])
+
+	def test_newline_escape_in_format_string(self):
+		r"""Literal \n in format string should be converted to actual newlines in output."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		out = _apply_format(results, '{url.url}\\nStatus: {url.status_code}')
+		self.assertEqual(out, {'url': ['https://example.com\nStatus: 200']})
+
+	def test_tab_escape_in_format_string(self):
+		r"""Literal \t in format string should be converted to actual tabs in output."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		out = _apply_format(results, '{url.url}\\t{url.status_code}')
+		self.assertEqual(out, {'url': ['https://example.com\t200']})
+
+	def test_format_from_file(self):
+		"""--format accepts a file path and loads the template from disk."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+			f.write('{url.url}')
+			tmp_path = f.name
+		try:
+			out = _apply_format(results, tmp_path)
+			self.assertEqual(out, {'url': ['https://example.com']})
+		finally:
+			os.remove(tmp_path)
+
+	def test_format_from_file_with_newlines(self):
+		"""Template files may contain real newlines which should be preserved."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+			f.write('{url.url}\nStatus: {url.status_code}')
+			tmp_path = f.name
+		try:
+			out = _apply_format(results, tmp_path)
+			self.assertEqual(out, {'url': ['https://example.com\nStatus: 200']})
+		finally:
+			os.remove(tmp_path)
+
+
+class TestConsoleExporterMarkdown(unittest.TestCase):
+
+	def test_markdown_rendering_triggered_by_heading(self):
+		"""ConsoleExporter renders formatted strings that contain Markdown headings via Rich Markdown."""
+		from secator.exporters.console import ConsoleExporter, _is_markdown
+		from secator.rich import console_stdout
+
+		markdown_text = '# Results\nhttps://example.com'
+		plain_text = 'https://example.com'
+
+		self.assertTrue(_is_markdown(markdown_text))
+		self.assertFalse(_is_markdown(plain_text))
+
+		# Verify ConsoleExporter calls Markdown rendering for heading-containing strings.
+		with mock.patch('secator.exporters.console.console_stdout') as mock_console:
+			report = mock.MagicMock()
+			report.data = {'results': {'url': [markdown_text]}}
+			exporter = ConsoleExporter(report)
+			exporter.send()
+			# Rich Markdown object should have been printed (not a plain string)
+			call_args = mock_console.print.call_args_list
+			self.assertEqual(len(call_args), 1)
+			from rich.markdown import Markdown
+			self.assertIsInstance(call_args[0][0][0], Markdown)
+
+	def test_plain_string_printed_without_markup(self):
+		"""ConsoleExporter prints plain strings with markup=False, highlight=False."""
+		from secator.exporters.console import ConsoleExporter
+
+		plain_text = 'https://example.com 200'
+		with mock.patch('secator.exporters.console.console_stdout') as mock_console:
+			report = mock.MagicMock()
+			report.data = {'results': {'url': [plain_text]}}
+			exporter = ConsoleExporter(report)
+			exporter.send()
+			mock_console.print.assert_called_once_with(plain_text, markup=False, highlight=False)
 
 
 class TestCli(unittest.TestCase):
