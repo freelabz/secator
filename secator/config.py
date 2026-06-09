@@ -637,7 +637,8 @@ class Config(DotMap):
 			migrated = True
 
 		# Backwards compatibility: migrate 'workspaces.default' to 'workspaces.current'
-		if isinstance(data.get('workspaces'), dict) and 'default' in data['workspaces'] and 'current' not in data['workspaces']:
+		ws_data = data.get('workspaces')
+		if isinstance(ws_data, dict) and 'default' in ws_data and 'current' not in ws_data:
 			data['workspaces']['current'] = data['workspaces'].pop('default')
 			if path:
 				console.print(f'[bold orange1]Migrating config key "workspaces.default" to "workspaces.current" in {path}[/]')
