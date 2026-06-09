@@ -8,10 +8,12 @@ Secator is a Python-based security assessment automation framework ("the pentest
 
 ## Prerequisites
 
-Before running any `secator` command (including tests, installs, and task execution), activate the virtualenv:
+Before running any `secator` command (including tests, installs, and task execution), create (if doesn't exist) and activate the virtualenv, and install dev dependencies:
 
 ```bash
-source /home/jahmyst/Workspace/secator/.venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev,worker]"
 ```
 
 ## Common Commands

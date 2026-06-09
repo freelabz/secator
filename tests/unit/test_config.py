@@ -108,17 +108,54 @@ class TestConfig(unittest.TestCase):
 			config.set('workspace.default_profile', 'aggressive,passive')
 		self.assertEqual(config.workspace.default_profile, ['aggressive', 'passive'])
 
-	def test_set_invalid_profile_name_blocked(self):
-		"""Test that setting a non-existent profile name is rejected."""
+	def test_set_list_field_replace(self):
 		from secator.config import Config
-		from unittest.mock import patch, MagicMock
 		config = Config.parse(path=self.config_test)
-		mock_profile = MagicMock()
-		mock_profile.name = 'aggressive'
-		with patch('secator.loader.get_configs_by_type', return_value=[mock_profile]):
-			config.set('workspace.default_profiles.my_ws', 'nonexistent_profile')
-		# Should not have been set
-		self.assertEqual(config.workspace.default_profiles.get('my_ws'), None)
+		config.set('drivers.defaults', 'mongodb')
+		self.assertEqual(config.drivers.defaults, ['mongodb'])
+		config.set('drivers.defaults', 'redis')
+		self.assertEqual(config.drivers.defaults, ['redis'])
+
+	def test_set_list_field_append(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('drivers.defaults', 'mongodb', strategy='append')
+		self.assertEqual(config.drivers.defaults, ['mongodb'])
+		config.set('drivers.defaults', 'redis', strategy='append')
+		self.assertEqual(config.drivers.defaults, ['mongodb', 'redis'])
+		# Duplicate should not be added
+		config.set('drivers.defaults', 'redis', strategy='append')
+		self.assertEqual(config.drivers.defaults, ['mongodb', 'redis'])
+
+	def test_unset_list_field_item(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('drivers.defaults', 'mongodb', strategy='append')
+		config.set('drivers.defaults', 'redis', strategy='append')
+		self.assertEqual(config.drivers.defaults, ['mongodb', 'redis'])
+		config.unset('drivers.defaults', value='mongodb')
+		self.assertEqual(config.drivers.defaults, ['redis'])
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['drivers']['defaults'], ['redis'])
+
+	def test_set_dict_subkey(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		# Set a new key in wordlists.defaults (dict field)
+		config.set('wordlists.defaults.mylist', 'myurl')
+		self.assertEqual(config.wordlists.defaults['mylist'], 'myurl')
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['wordlists']['defaults']['mylist'], 'myurl')
+
+	def test_unset_dict_subkey(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('wordlists.defaults.mylist', 'myurl')
+		self.assertIn('mylist', config.wordlists.defaults)
+		config.unset('wordlists.defaults.mylist')
+		self.assertNotIn('mylist', config.wordlists.defaults)
 
 	def test_parse_home_dir_reduce(self):
 		from secator.config import Config

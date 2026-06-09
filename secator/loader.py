@@ -236,3 +236,32 @@ def get_available_exporters():
 	"""Get all available exporters (internal + external)."""
 	from secator.definitions import AVAILABLE_EXPORTERS
 	return AVAILABLE_EXPORTERS + discover_external_exporters()
+
+
+@cache
+def load_external_addons():
+	"""Load external addons from addons.json in the templates directory.
+
+	Returns:
+		dict: Mapping of addon name to addon config dict. Empty dict if file absent or invalid.
+	"""
+	import json
+	addons_file = CONFIG.dirs.templates / 'addons.json'
+	if not addons_file.exists():
+		return {}
+	try:
+		with addons_file.open() as f:
+			data = json.load(f)
+		if not isinstance(data, dict):
+			console.print(f'[bold red]addons.json must be a JSON object, got {type(data).__name__}[/]')
+			return {}
+		invalid = {k: v for k, v in data.items() if not isinstance(v, dict)}
+		if invalid:
+			for k, v in invalid.items():
+				console.print(f'[bold red]Skipping addon "{k}": config must be an object, got {type(v).__name__}[/]')
+		filtered = {k: v for k, v in data.items() if isinstance(v, dict)}
+		debug(f'Loaded {len(filtered)} external addon(s) from {addons_file}', sub='template')
+		return filtered
+	except Exception as e:
+		console.print(f'[bold red]Could not load addons.json: {e}[/]')
+		return {}

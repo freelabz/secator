@@ -541,39 +541,6 @@ class TestCommandRunner(unittest.TestCase):
 						self.assertEqual(cmd.profiles[0].name, 'test_default')
 						self.assertEqual(cmd.run_opts.get('timeout'), 100)
 
-	def test_workspace_default_profile(self):
-		"""Test that workspace.default_profile is applied to all workspaces."""
-		from secator.utils_test import clear_modules
-		clear_modules()
-
-		from secator.runners import Command
-		from secator.template import TemplateLoader
-		from secator.utils_test import mock_command
-		from unittest.mock import patch
-
-		class LocalMyCommand(Command):
-			input_types = ['slug']
-			cmd = 'dummy'
-			input_flag = '-u'
-			file_flag = None
-
-		global_profile = TemplateLoader(input={
-			'name': 'global_default',
-			'type': 'profile',
-			'opts': {'timeout': 77}
-		})
-
-		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
-			with patch('secator.runners._base.CONFIG.profiles.defaults', []):
-				with patch('secator.runners._base.CONFIG.workspace.default_profile', ['global_default']):
-					with patch('secator.runners._base.CONFIG.workspace.default_profiles', {}):
-						with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
-							mock_get_configs.return_value = [global_profile]
-							with mock_command(LocalMyCommand, TARGETS, {}, []) as cmd:
-								self.assertEqual(len(cmd.profiles), 1)
-								self.assertEqual(cmd.profiles[0].name, 'global_default')
-								self.assertEqual(cmd.run_opts.get('timeout'), 77)
-
 	def test_workspace_specific_default_profiles(self):
 		"""Test that workspace.default_profiles loads profiles for the current workspace."""
 		from secator.utils_test import clear_modules
@@ -637,6 +604,108 @@ class TestCommandRunner(unittest.TestCase):
 							mock_get_configs.return_value = [ws_profile]
 							with mock_command(LocalMyCommand, TARGETS, {'context': {'workspace_name': 'other_ws'}}, []) as cmd:
 								self.assertEqual(len(cmd.profiles), 0)
+
+	def test_profile_workspace_applied_when_default(self):
+		"""A non-enforced profile workspace is applied when the user kept the default workspace."""
+		from secator.template import TemplateLoader
+		profile = TemplateLoader(input={
+			'name': 'ws_default_profile',
+			'type': 'profile',
+			'workspace': 'profile-ws',
+		})
+		with mock_command(MyCommand, TARGETS, {'profiles': [profile]}, []) as cmd:
+			self.assertEqual(cmd.workspace_name, 'profile-ws')
+			self.assertEqual(cmd.context.get('workspace_name'), 'profile-ws')
+			self.assertEqual(cmd.context.get('workspace_id'), 'profile-ws')
+
+	def test_profile_workspace_not_applied_when_user_set(self):
+		"""A non-enforced profile workspace yields to a user-specified workspace."""
+		from secator.template import TemplateLoader
+		profile = TemplateLoader(input={
+			'name': 'ws_user_profile',
+			'type': 'profile',
+			'workspace': 'profile-ws',
+		})
+		opts = {'profiles': [profile], 'context': {'workspace_name': 'user-ws'}}
+		with mock_command(MyCommand, TARGETS, opts, []) as cmd:
+			self.assertEqual(cmd.workspace_name, 'user-ws')
+
+	def test_profile_workspace_enforced_overrides_user(self):
+		"""An enforced profile workspace overrides a user-specified workspace."""
+		from secator.template import TemplateLoader
+		profile = TemplateLoader(input={
+			'name': 'ws_enforced_profile',
+			'type': 'profile',
+			'enforce': True,
+			'workspace': 'enforced-ws',
+		})
+		opts = {'profiles': [profile], 'context': {'workspace_name': 'user-ws'}}
+		with mock_command(MyCommand, TARGETS, opts, []) as cmd:
+			self.assertEqual(cmd.workspace_name, 'enforced-ws')
+
+	def test_profile_exporters_union(self):
+		"""A non-enforced profile unions its exporters with the user-specified ones."""
+		from secator.template import TemplateLoader
+		profile = TemplateLoader(input={
+			'name': 'exp_union_profile',
+			'type': 'profile',
+			'exporters': ['json', 'csv'],
+		})
+		with mock_command(MyCommand, TARGETS, {'profiles': [profile], 'output': 'txt'}, []) as cmd:
+			self.assertEqual(cmd.run_opts.get('output'), 'txt,json,csv')
+
+	def test_profile_exporters_enforced_replaces(self):
+		"""An enforced profile replaces the user-specified exporters."""
+		from secator.template import TemplateLoader
+		profile = TemplateLoader(input={
+			'name': 'exp_enforced_profile',
+			'type': 'profile',
+			'enforce': True,
+			'exporters': ['json'],
+		})
+		with mock_command(MyCommand, TARGETS, {'profiles': [profile], 'output': 'txt'}, []) as cmd:
+			self.assertEqual(cmd.run_opts.get('output'), 'json')
+
+	def test_profile_drivers_load_and_register(self):
+		"""A profile-specified driver is validated, loaded, registered and added to context['drivers']."""
+		import sys
+		import types
+		from secator.template import TemplateLoader
+
+		def driver_on_init(self):
+			pass
+
+		# Register a real fake hooks module so the real import_dynamic resolves it via sys.modules
+		# (robust against module-reloading from sibling tests calling clear_modules()).
+		fake_module = types.ModuleType('secator.hooks.fakedriver')
+		fake_module.HOOKS = {'on_init': [driver_on_init]}
+		sys.modules['secator.hooks.fakedriver'] = fake_module
+		self.addCleanup(sys.modules.pop, 'secator.hooks.fakedriver', None)
+
+		profile = TemplateLoader(input={
+			'name': 'driver_profile',
+			'type': 'profile',
+			'drivers': ['fakedriver'],
+		})
+		with patch('secator.loader.get_available_drivers', return_value=['fakedriver']), \
+			patch('secator.loader.discover_external_drivers', return_value=['fakedriver']):
+			with mock_command(MyCommand, TARGETS, {'profiles': [profile]}, []) as cmd:
+				self.assertIn('fakedriver', cmd.context.get('drivers', []))
+				self.assertIn(driver_on_init, cmd.resolved_hooks.get('on_init', []))
+				self.assertIn(driver_on_init, cmd._hooks.get('on_init', []))
+
+	def test_profile_unsupported_driver_skipped(self):
+		"""An unsupported profile driver is skipped without being added to context['drivers']."""
+		from secator.template import TemplateLoader
+		profile = TemplateLoader(input={
+			'name': 'bad_driver_profile',
+			'type': 'profile',
+			'drivers': ['doesnotexist'],
+		})
+		with patch('secator.loader.get_available_drivers', return_value=['mongodb']), \
+			patch('secator.loader.discover_external_drivers', return_value=[]):
+			with mock_command(MyCommand, TARGETS, {'profiles': [profile]}, []) as cmd:
+				self.assertNotIn('doesnotexist', cmd.context.get('drivers', []))
 
 
 class TestIsOwnSource(unittest.TestCase):

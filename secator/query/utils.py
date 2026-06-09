@@ -3,6 +3,8 @@
 import json
 import re
 
+from secator.output_types import Error
+from secator.rich import console
 from secator.utils import debug
 
 
@@ -97,6 +99,58 @@ _OP_MAP = {
     '~=': '$regex',
 }
 
+# Regex for the 'in' operator: "type.field in [val1, val2]"
+_IN_RE = re.compile(r'^(.+?)\s+in\s+\[(.*)\]\s*$', re.DOTALL)
+
+
+def _has_in_op_outside_quotes(expr):
+    """Return True if ' in [' appears outside of any quoted substring in expr."""
+    in_quote = None
+    i = 0
+    while i < len(expr):
+        ch = expr[i]
+        if in_quote is None and ch in ('"', "'"):
+            in_quote = ch
+            i += 1
+        elif ch == in_quote:
+            in_quote = None
+            i += 1
+        elif in_quote is None and expr[i:i + 4] == ' in ':
+            j = i + 4
+            while j < len(expr) and expr[j] == ' ':
+                j += 1
+            if j < len(expr) and expr[j] == '[':
+                return True
+            i += 1
+        else:
+            i += 1
+    return False
+
+
+def _parse_list(values_str):
+    """Parse a comma-separated list of values, respecting quoted strings."""
+    values = []
+    current = []
+    in_quote = None
+    for ch in values_str:
+        if in_quote is None and ch in ('"', "'"):
+            in_quote = ch
+            current.append(ch)
+        elif ch == in_quote:
+            in_quote = None
+            current.append(ch)
+        elif in_quote is None and ch == ',':
+            val = ''.join(current).strip()
+            if val:
+                values.append(_parse_value(val))
+            current = []
+        else:
+            current.append(ch)
+    val = ''.join(current).strip()
+    if val:
+        values.append(_parse_value(val))
+    return values
+
 
 def _parse_single_expr(expr):
     """Parse one expression like 'vulnerability.severity_score > 7' into a query dict."""
@@ -114,6 +168,23 @@ def _parse_single_expr(expr):
     # Type-only: "domain" or "vulnerability"
     if re.match(r'^[a-z_]+$', expr):
         return {'_type': expr}
+
+    # Check for 'in' operator: "type.field in [val1, val2]"
+    m_in = _IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
+    if m_in:
+        left, values_str = m_in.group(1).strip(), m_in.group(2)
+        parts = left.split('.', 1)
+        _type = parts[0].strip()
+        field = parts[1].strip() if len(parts) > 1 else None
+        values = _parse_list(values_str)
+        if field is None:
+            console.print(Error(
+                message=f"'in' operator requires a field (e.g. 'type.field in [...]'): {expr!r}"
+            ))
+            return {'_type': _type}
+        result = {'_type': _type}
+        result[field] = {'$in': values}
+        return result
 
     # Use regex to find the first operator (longest-first via alternation order).
     # This avoids mis-splitting on operators that appear inside quoted values.

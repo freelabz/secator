@@ -13,7 +13,7 @@ from dotmap import DotMap
 from fp.fp import FreeProxy
 from jinja2 import Template
 from rich.live import Live
-from rich.markdown import Markdown
+from secator.rich import CustomMarkdown as Markdown
 from rich.rule import Rule
 from rich.table import Table
 
@@ -26,7 +26,7 @@ from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
-from secator.loader import get_configs_by_type, discover_tasks
+from secator.loader import get_configs_by_type, discover_tasks, load_external_addons
 from secator.utils import (
 	debug,
 	detect_host,
@@ -665,9 +665,21 @@ def config_get(user, key=None):
 @config.command('set')
 @click.argument('key')
 @click.argument('value')
-def config_set(key, value):
-	"""Set config value."""
-	CONFIG.set(key, value)
+@click.option('--append', 'strategy', flag_value='append', default=False, help='Append value to existing list field.')
+def config_set(key, value, strategy):
+	"""Set config value.
+
+	Use --append to append a value to a list field instead of replacing it.
+
+	Examples:
+
+	\b
+	  secator config set debug ''                     # set a scalar field
+	  secator config set drivers.defaults redis       # replace list field
+	  secator config set drivers.defaults redis --append  # append to list field
+	  secator config set wordlists.defaults.http mylist  # set a dict subkey
+	"""
+	CONFIG.set(key, value, strategy=strategy if strategy else None)
 	config = CONFIG.validate()
 	if config:
 		CONFIG.get(key)
@@ -681,9 +693,22 @@ def config_set(key, value):
 
 @config.command('unset')
 @click.argument('key')
-def config_unset(key):
-	"""Unset a config value."""
-	CONFIG.unset(key)
+@click.argument('value', required=False)
+def config_unset(key, value=None):
+	"""Unset a config value.
+
+	When VALUE is provided and KEY is a list field, removes that item from the list.
+	When VALUE is omitted, removes the entire field (resets to default).
+	Also supports removing dict subkeys: secator config unset wordlists.defaults.http
+
+	Examples:
+
+	\b
+	  secator config unset debug                      # reset scalar to default
+	  secator config unset drivers.defaults redis     # remove item from list
+	  secator config unset wordlists.defaults.http    # remove dict subkey
+	"""
+	CONFIG.unset(key, value=value)
 	config = CONFIG.validate()
 	if config:
 		saved = CONFIG.save()
@@ -863,7 +888,7 @@ def workspace_delete(name, driver, yes):
 # ----------#
 
 
-@cli.group(aliases=['p', 'profiles'])
+@cli.group(aliases=['p', 'pf', 'profiles'])
 @click.pass_context
 def profile(ctx):
 	"""Profiles"""
@@ -872,13 +897,29 @@ def profile(ctx):
 
 @profile.command('list')
 def profile_list():
-	table = Table()
+	table = Table(highlight=True)
 	table.add_column('Profile name', style='bold gold3')
 	table.add_column('Description', overflow='fold')
+	table.add_column('Enforced', justify='center')
+	table.add_column('Workspace', overflow='fold')
+	table.add_column('Drivers', overflow='fold')
+	table.add_column('Exporters', overflow='fold')
 	table.add_column('Options', overflow='fold')
 	for profile in PROFILES:
-		opts_str = ', '.join(f'[yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items())
-		table.add_row(profile.name, profile.description or '', opts_str)
+		opts_str = ', '.join(f'[yellow3]{k}[/]={v}' for k, v in profile.opts.items())
+		enforced_str = '[bold red]✓[/]' if profile.enforce else ''
+		workspace_str = profile.workspace or ''
+		drivers_str = ','.join(profile.drivers) if profile.drivers else ''
+		exporters_str = ','.join(profile.exporters) if profile.exporters else ''
+		table.add_row(
+			profile.name,
+			profile.description or '',
+			enforced_str,
+			workspace_str,
+			drivers_str,
+			exporters_str,
+			opts_str,
+		)
 	console.print(table)
 
 
@@ -1002,10 +1043,25 @@ def _apply_format(results, fmt):
 		results (dict): Report results keyed by type name.
 		fmt (str): Format spec(s), optionally pipe-separated per type.
 			E.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'
+			May also be a file path (< 255 chars, file must exist) to load the template from disk.
 
 	Returns:
 		dict: Results dict with items replaced by formatted strings (only matching types kept).
 	"""
+	fmt = fmt.strip()
+
+	# Auto-detect format file: if fmt looks like a path and the file exists, load it.
+	if len(fmt) < 255:
+		p = Path(fmt)
+		if p.is_file():
+			try:
+				fmt = p.read_text(encoding='utf-8')
+			except (OSError, UnicodeDecodeError) as exc:
+				raise click.UsageError(f'Could not read --format template file "{p}": {exc}') from exc
+
+	# Unescape common escape sequences so CLI users can write \n, \t in their format strings.
+	fmt = fmt.replace('\\n', '\n').replace('\\t', '\t')
+
 	specs = [s.strip() for s in re.split(r'\s*\|\|\s*', fmt) if s.strip()]
 	new_results = {}
 
@@ -1151,8 +1207,9 @@ def _apply_format(results, fmt):
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
+@click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.pass_context
-def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe):
+def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit):
 	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
 	from secator.query.utils import parse_report_paths, python_expr_to_mongo
 
@@ -1224,7 +1281,7 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 	# 6. Build and send report via QueryEngine
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
 	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
-	report.build(query=full_query, dedupe=dedupe_effective)
+	report.build(query=full_query, dedupe=dedupe_effective, limit=limit)
 	if fmt:
 		report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
@@ -1356,7 +1413,7 @@ def report_info(runner_id, workspace, show_all):
 	if not runner_type.endswith('s'):
 		runner_type += 's'
 
-	report_path = Path(CONFIG.dirs.reports) / workspace_name / runner_type / runner_number / 'report.json'
+	report_path = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
 	if not report_path.exists():
 		console.print(Error(message=f'Report not found: {report_path}'))
 		return
@@ -2085,6 +2142,60 @@ def install_ai():
 			'Run [bold green4]secator x ai -p "your prompt"[/] to run AI-powered pentesting.',
 		],
 	)
+
+
+def _install_external_addon(name, config):
+	"""Install an external addon defined in addons.json."""
+	from secator.installer import ToolInstaller
+
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
+
+	next_steps = config.get('next_steps', [])
+	tool_attrs = {
+		'__name__': name,
+		'install_pre': config.get('install_pre', None),
+		'install_post': config.get('install_post', None),
+		'install_cmd_pre': config.get('install_cmd_pre', None),
+		'install_cmd': config.get('install_cmd', None),
+		'install_github_bin': config.get('install_github_bin', True),
+		'github_handle': config.get('github_handle') or config.get('install_github_handle', None),
+		'install_github_version_prefix': config.get('install_github_version_prefix', ''),
+		'install_ignore_bin': config.get('install_ignore_bin', []),
+		'install_version': config.get('install_version', None),
+		'install_binary_name': config.get('install_binary_name', None),
+		'pypi_dependencies': config.get('pypi_dependencies', None),
+	}
+	tool_cls = type(name, (), tool_attrs)
+	status = ToolInstaller.install(tool_cls)
+
+	return_code = 0 if status.is_ok() else 1
+	if status.is_ok() and next_steps:
+		console.print('[bold gold3]:wrench: Next steps:[/]')
+		for ix, step in enumerate(next_steps):
+			console.print(f'   :keycap_{ix}: {step}')
+	sys.exit(return_code)
+
+
+def _load_external_addon_commands():
+	"""Dynamically register install commands for addons defined in addons.json."""
+	external_addons = load_external_addons()
+	for addon_name, addon_config in external_addons.items():
+		if addon_name in addons.commands:
+			debug(f'Skipping external addon "{addon_name}": name conflicts with a built-in addon command', sub='cli')
+			continue
+
+		def _make_cmd(name, config):
+			@click.command(name, help=f'Install {name} addon.')
+			def _cmd():
+				_install_external_addon(name, config)
+			return _cmd
+
+		addons.add_command(_make_cmd(addon_name, addon_config))
+
+
+_load_external_addon_commands()
 
 
 @install.group()

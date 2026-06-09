@@ -358,67 +358,41 @@ class Config(DotMap):
 			Config.print_yaml(yaml_str)
 		return value
 
-	def set(self, key, value, set_partial=True):
+	def set(self, key, value, set_partial=True, strategy=None):
 		"""Set a value in the configuration using a dotted path.
 
 		Args:
 			key (str | None): Dotted key path.
 			value (Any): Value.
 			set_partial (bool): Set in partial config.
+			strategy (str | None): Strategy for updating list/dict fields.
+				None or 'replace': replace the value (default).
+				'append': append value to existing list, or add key to existing dict.
+				'remove': remove value from existing list, or remove key from existing dict.
 		"""
-		# Get existing value
-		existing_value = self.get(key, print=False)
-
 		# Convert dotted key path to the corresponding uppercase key used in _keymap
 		map_key = key.upper().replace('.', '_')
 
-		# Check if map key exists; if not, try to find a dict ancestor for sub-key setting
+		# If key not found in keymap, check if parent path points to a dict field
+		# (handles setting/removing keys in a dict, e.g. wordlists.defaults.mykey)
 		if map_key not in self._keymap:
-			anchor_path, remaining_parts = Config._find_dict_anchor(self._keymap, self, key)
-			if anchor_path is None:
-				console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
-				return
-
-			# Parse value without existing type info
-			value = Config._parse_new_value(value)
-
-			# Validate profile names before setting
-			if key == 'workspace.default_profile' or key.startswith('workspace.default_profiles.'):
-				profile_names = value if isinstance(value, list) else ([value] if value else [])
-				if profile_names and not Config._validate_profile_names(profile_names):
-					return
-
-			# Navigate to dict anchor
-			target = self
-			partial = self._partial
-			for part in anchor_path:
-				target = target[part]
-				partial = partial[part]
-
-			# Navigate through intermediate sub-parts, creating nested dicts as needed
-			for part in remaining_parts[:-1]:
-				if part not in target or not isinstance(target[part], dict):
-					target[part] = {}
-				if set_partial:
-					if part not in partial or not isinstance(partial[part], dict):
-						partial[part] = {}
-				target = target[part]
-				if set_partial:
-					partial = partial[part]
-
-			final_key = remaining_parts[-1]
-			if value is None:
-				if final_key in target:
-					del target[final_key]
-				if set_partial and final_key in partial:
-					del partial[final_key]
-			else:
-				target[final_key] = value
-				if set_partial:
-					partial[final_key] = value
-
-			self._keymap = Config.build_key_map(self)
+			parts = key.split('.')
+			if len(parts) > 1:
+				parent_parts = parts[:-1]
+				dict_subkey = parts[-1]
+				try:
+					parent_value = self
+					for part in parent_parts:
+						parent_value = parent_value[part]
+					if isinstance(parent_value, dict):
+						return self._set_dict_key(parent_parts, dict_subkey, value, set_partial=set_partial, strategy=strategy)
+				except (KeyError, TypeError):
+					pass
+			console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
 			return
+
+		# Get existing value
+		existing_value = self.get(key, print=False)
 
 		# Traverse to the second last key to handle the setting correctly
 		target = self
@@ -430,37 +404,52 @@ class Config(DotMap):
 		# Set the value on the final part of the path
 		final_key = self._keymap[map_key][-1]
 
-		# Try to convert value to expected type
-		try:
-			if isinstance(existing_value, list):
-				if isinstance(value, str):
-					if value.startswith('[') and value.endswith(']'):
-						value = value[1:-1]
-					if ',' in value:
-						value = [c.strip() for c in value.split(',')]
-					elif value:
-						value = [value]
-					else:
-						value = []
-			elif isinstance(existing_value, dict):
-				if isinstance(value, str):
-					if value.startswith('{') and value.endswith('}'):
-						import json
+		# Apply strategy for list fields
+		if strategy in ('append', 'remove') and isinstance(existing_value, list):
+			item = value
+			current = list(existing_value)
+			if strategy == 'append':
+				if item not in current:
+					current.append(item)
+			elif strategy == 'remove':
+				if item in current:
+					current.remove(item)
+				else:
+					console.print(f'[bold orange1]Value "{item}" not found in {key}[/].')
+					return
+			value = current
+		else:
+			# Try to convert value to expected type
+			try:
+				if isinstance(existing_value, list):
+					if isinstance(value, str):
+						if value.startswith('[') and value.endswith(']'):
+							value = value[1:-1]
+						if ',' in value:
+							value = [c.strip() for c in value.split(',')]
+						elif value:
+							value = [value]
+						else:
+							value = []
+				elif isinstance(existing_value, dict):
+					if isinstance(value, str):
+						if value.startswith('{') and value.endswith('}'):
+							import json
 
-						value = json.loads(value)
-			elif isinstance(existing_value, bool):
-				if isinstance(value, str):
-					value = value.lower() in ('true', '1', 't')
-				elif isinstance(value, (int, float)):
-					value = True if value == 1 else False
-			elif isinstance(existing_value, int):
-				value = int(value)
-			elif isinstance(existing_value, float):
-				value = float(value)
-			elif isinstance(existing_value, Path):
-				value = Path(value)
-		except ValueError:
-			pass
+							value = json.loads(value)
+				elif isinstance(existing_value, bool):
+					if isinstance(value, str):
+						value = value.lower() in ('true', '1', 't')
+					elif isinstance(value, (int, float)):
+						value = True if value == 1 else False
+				elif isinstance(existing_value, int):
+					value = int(value)
+				elif isinstance(existing_value, float):
+					value = float(value)
+				elif isinstance(existing_value, Path):
+					value = Path(value)
+			except ValueError:
+				pass
 
 		# Validate profile names before setting
 		if key in ('workspace.default_profile', 'profiles.defaults'):
@@ -477,82 +466,83 @@ class Config(DotMap):
 				partial[final_key] = value
 		target[final_key] = value
 
-	@staticmethod
-	def _find_dict_anchor(keymap, config, key):
-		"""Find the deepest dict ancestor in the keymap for a dotted key path.
+	def _set_dict_key(self, parent_parts, subkey, value, set_partial=True, strategy=None):
+		"""Set or remove a key within a dict config field.
 
-		Returns:
-			tuple: (anchor_path, remaining_parts) or (None, None) if not found.
+		Args:
+			parent_parts (list[str]): Path components to the dict field (e.g. ['wordlists', 'defaults']).
+			subkey (str | None): Key within the dict to set/remove.
+			value (Any): Value to set.
+			set_partial (bool): Set in partial config.
+			strategy (str | None): 'remove' to delete the subkey.
 		"""
-		parts = key.split('.')
-		for i in range(len(parts) - 1, 0, -1):
-			candidate_key = '_'.join(parts[:i]).upper()
-			if candidate_key in keymap:
-				candidate_path = keymap[candidate_key]
-				candidate_value = config
-				for part in candidate_path:
-					candidate_value = candidate_value[part]
-				# Accept both plain dict and DotMap (MutableMapping) to handle both cases
-				if isinstance(candidate_value, MutableMapping) and not isinstance(candidate_value, str):
-					return candidate_path, parts[i:]
-		return None, None
+		# Navigate to the dict
+		existing_dict = self
+		for part in parent_parts:
+			existing_dict = existing_dict[part]
 
-	@staticmethod
-	def _parse_new_value(value):
-		"""Parse a string value when no existing type information is available."""
-		if not isinstance(value, str):
-			return value
-		import json
-		stripped = value.strip()
-		if stripped.startswith('[') and stripped.endswith(']'):
-			try:
-				return json.loads(stripped)
-			except (json.JSONDecodeError, ValueError):
-				pass
-		if stripped.startswith('{') and stripped.endswith('}'):
-			try:
-				return json.loads(stripped)
-			except (json.JSONDecodeError, ValueError):
-				pass
-		if ',' in value:
-			return [c.strip() for c in value.split(',')]
-		if value.lower() in ('true', 'false'):
-			return value.lower() == 'true'
-		try:
-			return int(value)
-		except ValueError:
-			pass
-		try:
-			return float(value)
-		except ValueError:
-			pass
-		return value
+		if not isinstance(existing_dict, dict):
+			console.print(f'[bold red]Path "{".".join(parent_parts)}" is not a dict field[/].')
+			return
 
-	@staticmethod
-	def _validate_profile_names(profile_names):
-		"""Validate that profile names exist. Returns True if all are valid."""
-		if not profile_names:
-			return True
-		try:
-			from secator.loader import get_configs_by_type
-			available_profiles = get_configs_by_type('profile')
-			available_names = {p.name for p in available_profiles}
-			invalid = [n for n in profile_names if n not in available_names]
-			if invalid:
-				for name in invalid:
-					console.print(f'[bold red]Profile "{name}" not found. Run [bold green]secator profiles list[/] to see available profiles.[/]')
-				return False
-		except Exception:
-			pass
-		return True
+		updated = dict(existing_dict)
+		if strategy == 'remove':
+			if subkey and subkey in updated:
+				del updated[subkey]
+			elif subkey:
+				console.print(f'[bold orange1]Key "{subkey}" not found in {".".join(parent_parts)}[/].')
+				return
+		else:
+			if subkey:
+				updated[subkey] = value
+			elif isinstance(value, dict):
+				updated.update(value)
 
-	def unset(self, key, set_partial=True):
+		# Traverse to the parent of the dict to set the updated value
+		target = self
+		partial = self._partial
+		for part in parent_parts[:-1]:
+			target = target[part]
+			partial = partial[part]
+		dict_key = parent_parts[-1]
+
+		if set_partial:
+			partial[dict_key] = updated
+		target[dict_key] = updated
+
+	def unset(self, key, value=None, set_partial=True):
 		"""Unset a value in the configuration using a dotted path.
 
 		Args:
 			key (str): Dotted key path.
+			value (Any | None): If provided and the field is a list, remove this item from the list.
+				If the field is a dict, this is ignored (use the key to specify the dict subkey to remove).
 			set_partial (bool): Set in partial config.
 		"""
+		if value is not None:
+			# Remove item from list
+			self.set(key, value, set_partial=set_partial, strategy='remove')
+			return
+
+		# Check if key points to a dict subkey that should be removed
+		map_key = key.upper().replace('.', '_')
+		if map_key not in self._keymap:
+			parts = key.split('.')
+			if len(parts) > 1:
+				parent_parts = parts[:-1]
+				dict_subkey = parts[-1]
+				try:
+					parent_value = self
+					for part in parent_parts:
+						parent_value = parent_value[part]
+					if isinstance(parent_value, dict):
+						self._set_dict_key(parent_parts, dict_subkey, None, set_partial=set_partial, strategy='remove')
+						return
+				except (KeyError, TypeError):
+					pass
+			console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
+			return
+
 		self.set(key, None, set_partial=set_partial)
 
 	def save(self, target_path: Path = None, partial=True):

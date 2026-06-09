@@ -8,7 +8,7 @@ from io import StringIO
 from rich.panel import Panel
 from rich.text import Text
 from rich.console import Console
-from rich.markdown import Markdown
+from secator.rich import CustomMarkdown as Markdown
 
 from secator.output_types import OutputType
 from secator.utils import rich_to_ansi, rich_escape as _s, format_token_count, format_object
