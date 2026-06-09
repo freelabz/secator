@@ -1316,7 +1316,7 @@ class Runner:
 				existing_profile_names.add(p)
 
 		# Add workspace-specific default profiles
-		workspace_defaults = CONFIG.workspace.default_profiles.get(self.workspace_name, [])
+		workspace_defaults = CONFIG.workspace.profiles.get(self.workspace_name, [])
 		for p in workspace_defaults:
 			if p not in existing_profile_names:
 				profiles.append(p)

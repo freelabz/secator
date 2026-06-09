@@ -678,8 +678,8 @@ def config_set(key, value, strategy):
 	  secator config set drivers.defaults redis                            # replace list field
 	  secator config set drivers.defaults redis --append                   # append to list field
 	  secator config set wordlists.defaults.http mylist                    # set a dict subkey
-	  secator config set workspace.default_profiles.my_ws aggressive,passive  # set workspace profiles
-	  secator config set workspace.default_profiles.my_ws test --append   # append to workspace profiles
+	  secator config set workspace.profiles.my_ws aggressive,passive  # set workspace profiles
+	  secator config set workspace.profiles.my_ws test --append   # append to workspace profiles
 	"""
 	CONFIG.set(key, value, strategy=strategy if strategy else None)
 	config = CONFIG.validate()
@@ -709,8 +709,8 @@ def config_unset(key, value=None):
 	  secator config unset debug                                      # reset scalar to default
 	  secator config unset drivers.defaults redis                     # remove item from list
 	  secator config unset wordlists.defaults.http                    # remove dict subkey
-	  secator config unset workspace.default_profiles.my_ws test     # remove profile from workspace list
-	  secator config unset workspace.default_profiles.my_ws          # remove workspace profile list entirely
+	  secator config unset workspace.profiles.my_ws test     # remove profile from workspace list
+	  secator config unset workspace.profiles.my_ws          # remove workspace profile list entirely
 	"""
 	CONFIG.unset(key, value=value)
 	config = CONFIG.validate()

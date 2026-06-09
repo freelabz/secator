@@ -148,7 +148,7 @@ class Drivers(StrictModel):
 
 class Workspace(StrictModel):
 	default: str = ''
-	default_profiles: Dict[str, List[str]] = {}
+	profiles: Dict[str, List[str]] = {}
 
 
 class Payloads(StrictModel):
@@ -521,15 +521,15 @@ class Config(DotMap):
 		else:
 			if subkey:
 				new_val = Config._parse_new_value(value)
-				# For workspace.default_profiles, always coerce single strings to list
-				if parent_path == 'workspace.default_profiles' and isinstance(new_val, str):
+				# For workspace.profiles, always coerce single strings to list
+				if parent_path == 'workspace.profiles' and isinstance(new_val, str):
 					new_val = [new_val]
 				updated[subkey] = new_val
 			elif isinstance(value, dict):
 				updated.update(value)
 
-		# Validate profile names when setting workspace.default_profiles values
-		if parent_path == 'workspace.default_profiles' and subkey and subkey in updated and strategy != 'remove':
+		# Validate profile names when setting workspace.profiles values
+		if parent_path == 'workspace.profiles' and subkey and subkey in updated and strategy != 'remove':
 			new_val = updated[subkey]
 			if new_val:
 				profile_names = new_val if isinstance(new_val, list) else [new_val]

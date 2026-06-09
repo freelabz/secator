@@ -541,8 +541,8 @@ class TestCommandRunner(unittest.TestCase):
 						self.assertEqual(cmd.profiles[0].name, 'test_default')
 						self.assertEqual(cmd.run_opts.get('timeout'), 100)
 
-	def test_workspace_specific_default_profiles(self):
-		"""Test that workspace.default_profiles loads profiles for the current workspace."""
+	def test_workspace_specific_profiles(self):
+		"""Test that workspace.profiles loads profiles for the current workspace."""
 		from secator.utils_test import clear_modules
 		clear_modules()
 
@@ -565,7 +565,7 @@ class TestCommandRunner(unittest.TestCase):
 
 		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
 			with patch('secator.runners._base.CONFIG.profiles.defaults', []):
-				with patch('secator.runners._base.CONFIG.workspace.default_profiles', {'my_ws': ['ws_specific']}):
+				with patch('secator.runners._base.CONFIG.workspace.profiles', {'my_ws': ['ws_specific']}):
 					with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
 						mock_get_configs.return_value = [ws_profile]
 						with mock_command(LocalMyCommand, TARGETS, {'context': {'workspace_name': 'my_ws'}}, []) as cmd:
@@ -597,14 +597,14 @@ class TestCommandRunner(unittest.TestCase):
 
 		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
 			with patch('secator.runners._base.CONFIG.profiles.defaults', []):
-				with patch('secator.runners._base.CONFIG.workspace.default_profiles', {'my_ws': ['ws_specific']}):
+				with patch('secator.runners._base.CONFIG.workspace.profiles', {'my_ws': ['ws_specific']}):
 					with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
 						mock_get_configs.return_value = [ws_profile]
 						with mock_command(LocalMyCommand, TARGETS, {'context': {'workspace_name': 'other_ws'}}, []) as cmd:
 							self.assertEqual(len(cmd.profiles), 0)
 
 	def test_workspace_profile_deduplication(self):
-		"""Test that a profile in both profiles.defaults and workspace.default_profiles is loaded only once."""
+		"""Test that a profile in both profiles.defaults and workspace.profiles is loaded only once."""
 		from secator.utils_test import clear_modules
 		clear_modules()
 
@@ -627,7 +627,7 @@ class TestCommandRunner(unittest.TestCase):
 
 		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
 			with patch('secator.runners._base.CONFIG.profiles.defaults', ['shared_profile']):
-				with patch('secator.runners._base.CONFIG.workspace.default_profiles', {'my_ws': ['shared_profile']}):
+				with patch('secator.runners._base.CONFIG.workspace.profiles', {'my_ws': ['shared_profile']}):
 					with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
 						mock_get_configs.return_value = [shared_profile]
 						with mock_command(LocalMyCommand, TARGETS, {'context': {'workspace_name': 'my_ws'}}, []) as cmd:
