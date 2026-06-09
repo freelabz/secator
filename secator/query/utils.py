@@ -307,6 +307,12 @@ def validate_query_fields(query):
     }
 
     def _validate_fragment(fragment):
+        """Validate a single query fragment against known output type fields.
+
+        Returns None if all user-specified fields were invalid (signals the caller
+        to drop this fragment from an $or/$and list rather than keeping a bare
+        {'_type': 'x'} that would match every object of that type).
+        """
         if not isinstance(fragment, dict):
             return fragment
         _type = fragment.get('_type')
@@ -317,28 +323,50 @@ def validate_query_fields(query):
             return fragment
         valid_fields = set(cls.fields())
         result = {}
+        user_fields_seen = 0
+        user_fields_kept = 0
         for k, v in fragment.items():
             if k.startswith('$') or k.startswith('_'):
                 result[k] = v
                 continue
+            user_fields_seen += 1
             top_field = k.split('.')[0]
             if top_field in valid_fields:
                 result[k] = v
+                user_fields_kept += 1
             else:
                 public_fields = sorted(f for f in valid_fields if not f.startswith('_'))
                 console.print(Warning(
                     message=f"Field '{k}' does not exist on type '{_type}'. "
                             f"Available fields: {', '.join(public_fields)}"
                 ))
+        # If the fragment had user-specified fields but ALL were invalid, signal
+        # the caller to drop this fragment entirely rather than keeping a bare
+        # {'_type': _type} that would match every object of that type.
+        if user_fields_seen > 0 and user_fields_kept == 0:
+            return None
         return result
 
     def _validate(q):
         if not isinstance(q, dict):
             return q
         if '$or' in q:
-            return {'$or': [_validate(sub) for sub in q['$or']]}
+            parts = [_validate(sub) for sub in q['$or']]
+            parts = [p for p in parts if p is not None]
+            if len(parts) == 0:
+                return {}
+            if len(parts) == 1:
+                return parts[0]
+            return {'$or': parts}
         if '$and' in q:
-            return {'$and': [_validate(sub) for sub in q['$and']]}
-        return _validate_fragment(q)
+            parts = [_validate(sub) for sub in q['$and']]
+            parts = [p for p in parts if p is not None]
+            if len(parts) == 0:
+                return {}
+            if len(parts) == 1:
+                return parts[0]
+            return {'$and': parts}
+        result = _validate_fragment(q)
+        return result if result is not None else {}
 
     return _validate(query)
