@@ -100,7 +100,9 @@ class search_vulns(Vuln):
 			confidence = 'high'
 			tags = search_vulns.extract_tags(vuln_data)
 			exploits = vuln_data.get('exploits', [])
-			cvss_score = float(vuln_data.get('cvss', 0))
+			cvss_score = float(vuln_data.get('severity', {}).get('CVSS', {}).get('score', 0))
+			cvss_vector = vuln_data.get('severity', {}).get('CVSS', {}).get('vector', '')
+			epss_score = float(vuln_data.get('severity', {}).get('EPSS', {}).get('score', 0))
 			extra_data = search_vulns.extract_extra_data(vuln_data)
 			extra_data['service_name'] = self.inputs[0] if self.inputs else ''
 			references = search_vulns.extract_references(vuln_data)
@@ -110,8 +112,8 @@ class search_vulns(Vuln):
 				'description': vuln_data.get('description', ''),
 				'confidence': confidence,
 				'cvss_score': cvss_score,
-				'epss_score': vuln_data.get('epss', ''),
-				'cvss_vec': vuln_data.get('cvss_vec', ''),
+				'epss_score': epss_score,
+				'cvss_vec': cvss_vector,
 				'references': references,
 				'extra_data': extra_data,
 				'provider': 'search_vulns',

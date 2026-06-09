@@ -74,6 +74,55 @@ class TestConfig(unittest.TestCase):
 		self.assertEqual(config.addons.gdrive.enabled, True)
 		self.assertEqual(config._partial.addons.gdrive.enabled, True)
 
+	def test_set_list_field_replace(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('drivers.defaults', 'mongodb')
+		self.assertEqual(config.drivers.defaults, ['mongodb'])
+		config.set('drivers.defaults', 'redis')
+		self.assertEqual(config.drivers.defaults, ['redis'])
+
+	def test_set_list_field_append(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('drivers.defaults', 'mongodb', strategy='append')
+		self.assertEqual(config.drivers.defaults, ['mongodb'])
+		config.set('drivers.defaults', 'redis', strategy='append')
+		self.assertEqual(config.drivers.defaults, ['mongodb', 'redis'])
+		# Duplicate should not be added
+		config.set('drivers.defaults', 'redis', strategy='append')
+		self.assertEqual(config.drivers.defaults, ['mongodb', 'redis'])
+
+	def test_unset_list_field_item(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('drivers.defaults', 'mongodb', strategy='append')
+		config.set('drivers.defaults', 'redis', strategy='append')
+		self.assertEqual(config.drivers.defaults, ['mongodb', 'redis'])
+		config.unset('drivers.defaults', value='mongodb')
+		self.assertEqual(config.drivers.defaults, ['redis'])
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['drivers']['defaults'], ['redis'])
+
+	def test_set_dict_subkey(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		# Set a new key in wordlists.defaults (dict field)
+		config.set('wordlists.defaults.mylist', 'myurl')
+		self.assertEqual(config.wordlists.defaults['mylist'], 'myurl')
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['wordlists']['defaults']['mylist'], 'myurl')
+
+	def test_unset_dict_subkey(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('wordlists.defaults.mylist', 'myurl')
+		self.assertIn('mylist', config.wordlists.defaults)
+		config.unset('wordlists.defaults.mylist')
+		self.assertNotIn('mylist', config.wordlists.defaults)
+
 	def test_parse_home_dir_reduce(self):
 		from secator.config import Config
 		with self.config_test.open('w') as f:

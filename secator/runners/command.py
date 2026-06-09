@@ -58,6 +58,7 @@ class Command(Runner):
 
 	# Current working directory
 	cwd = None
+	cwd_isolated = False
 
 	# Output encoding
 	encoding = 'utf-8'
@@ -93,6 +94,7 @@ class Command(Runner):
 	install_ignore_bin = []
 	install_version = None
 	install_binary_name = None
+	pypi_dependencies = None
 
 	# Serializer
 	item_loader = None
@@ -486,7 +488,7 @@ class Command(Runner):
 					task_part = f'[bold gold3]{self.unique_name}[/]'
 				yield Info(
 					message=f'Started task {task_part} (cmd=[dim white]{cmd_str}[/])',
-					_source=self.unique_name
+					_source=self.unique_name,
 				)
 
 			# Check for sudo requirements and prepare the password if needed
@@ -518,6 +520,11 @@ class Command(Runner):
 			self.return_code = 0
 			self.killed = False
 			self.memory_limit_mb = CONFIG.celery.task_memory_limit_mb
+
+			# Isolated CWD
+			if not self.cwd and self.cwd_isolated:
+				self.cwd = f'{self.reports_folder}/.outputs/{self.fqn}'
+				os.makedirs(self.cwd, exist_ok=True)
 
 			# Run the command using subprocess
 			env = os.environ
@@ -876,9 +883,8 @@ class Command(Runner):
 		# Check if we have a tty
 		if not self.has_tty:
 			error = (
-				"Sudo password required but no TTY available (non-interactive mode). "
-				"Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), "
-				"or configure passwordless sudo."
+				'Sudo password required but no TTY available (non-interactive mode). '
+				'Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), or configure passwordless sudo.'
 			)
 			return -1, error
 
@@ -1229,7 +1235,7 @@ class Command(Runner):
 		# If inputs has multiple elements and the tool has input_flag set to OPT_PIPE_INPUT, use cat-piped_input input.
 		# Otherwise pass the file path to the tool.
 		else:
-			fpath = f'{self.reports_folder}/.inputs/{self.unique_name}.txt'
+			fpath = f'{self.reports_folder}/.inputs/{self.fqn}.txt'
 
 			# Write the input to a file
 			with open(fpath, 'w') as f:
@@ -1238,7 +1244,7 @@ class Command(Runner):
 					f.write('\n')
 
 			if self.file_copy_sudo:
-				sudo_fpath = f'/tmp/{self.unique_name}.txt'
+				sudo_fpath = f'/tmp/{self.fqn}.txt'
 				shutil.copy(fpath, sudo_fpath)
 				fpath = sudo_fpath
 

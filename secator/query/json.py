@@ -11,8 +11,18 @@ from secator.utils import sanitize_folder_name
 from secator.utils import debug
 
 
+def _regex_match(field, pattern):
+	if field is None:
+		return False
+	pattern = str(pattern).lstrip('*')
+	try:
+		return re.search(pattern, str(field)) is not None
+	except re.error:
+		return False
+
+
 OPERATORS = {
-	"$regex": lambda field, pattern: re.search(pattern, str(field)) is not None if field else False,
+	"$regex": _regex_match,
 	"$contains": lambda field, value: value in str(field) if field else False,
 	"$in": lambda field, values: field in values if field else False,
 	"$gt": lambda field, value: field > value if field is not None else False,

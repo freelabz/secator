@@ -68,7 +68,7 @@ class arjun(HttpBase):
 
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
-			self.output_path = f'{self.reports_folder}/.outputs/{self.unique_name}.json'
+			self.output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
 		self.cmd += f' -oJ {shlex.quote(self.output_path)}'
 
 	@staticmethod

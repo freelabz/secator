@@ -1,5 +1,6 @@
 import tempfile
 from click.testing import CliRunner
+import io
 import os
 import unittest
 from unittest import mock
@@ -113,6 +114,98 @@ class TestApplyFormat(unittest.TestCase):
 		out = _apply_format(results, '{vulnerability.matched_at}')
 		self.assertEqual(out, {})
 
+	def test_brace_style_nested_dict_field(self):
+		"""Dotted notation for nested dict fields like {extra_data.published} should work (issue #1086)."""
+		results = {
+			'vulnerability': [
+				{
+					'id': 'CVE-2026-28780',
+					'matched_at': 'https://example.com',
+					'extra_data': {'published': '2026-01-01'},
+				}
+			],
+		}
+		out = _apply_format(results, '{id} {matched_at} {extra_data.published}')
+		self.assertEqual(out, {'vulnerability': ['CVE-2026-28780 https://example.com 2026-01-01']})
+
+	def test_brace_style_nested_dict_field_missing_key(self):
+		"""Items missing the nested key should be skipped gracefully."""
+		results = {
+			'vulnerability': [
+				{
+					'id': 'CVE-2026-28780',
+					'matched_at': 'https://example.com',
+					'extra_data': {'published': '2026-01-01'},
+				},
+				{
+					'id': 'CVE-2026-99999',
+					'matched_at': 'https://example.com',
+					'extra_data': {},
+				},
+			],
+		}
+		out = _apply_format(results, '{id} {extra_data.published}')
+		self.assertEqual(out, {'vulnerability': ['CVE-2026-28780 2026-01-01']})
+
+	def test_dotpath_style_nested_dict_field(self):
+		"""Dotted notation without braces (extra_data.published) should work (issue #1086)."""
+		results = {
+			'vulnerability': [
+				{
+					'id': 'CVE-2026-28780',
+					'matched_at': 'https://example.com',
+					'extra_data': {'published': '2026-01-01'},
+				}
+			],
+		}
+		out = _apply_format(results, 'extra_data.published')
+		self.assertEqual(out, {'vulnerability': ['2026-01-01']})
+
+	def test_dotpath_style_nested_dict_field_missing_key(self):
+		"""Dotted notation without braces skips items missing the nested key."""
+		results = {
+			'vulnerability': [
+				{
+					'id': 'CVE-2026-28780',
+					'matched_at': 'https://example.com',
+					'extra_data': {'published': '2026-01-01'},
+				},
+				{
+					'id': 'CVE-2026-99999',
+					'matched_at': 'https://example.com',
+					'extra_data': {},
+				},
+			],
+		}
+		out = _apply_format(results, 'extra_data.published')
+		self.assertEqual(out, {'vulnerability': ['2026-01-01']})
+
+	def _make_tag(self, name='net_cidr', ttl='300'):
+		return {'name': name, 'match': '10.0.0.0/24', 'extra_data': {'ttl': ttl}}
+
+	def test_dotpath_style_type_prefixed_nested_field(self):
+		"""tag.extra_data.ttl (type-prefixed, no braces) should resolve nested dict field."""
+		results = {'tag': [self._make_tag(ttl='300')]}
+		out = _apply_format(results, 'tag.extra_data.ttl')
+		self.assertEqual(out, {'tag': ['300']})
+
+	def test_dotpath_style_type_prefixed_nested_field_missing_key(self):
+		"""tag.extra_data.ttl skips items where the nested key is absent."""
+		results = {
+			'tag': [
+				self._make_tag(ttl='300'),
+				{'name': 'net_cidr', 'match': '10.0.0.0/24', 'extra_data': {}},
+			]
+		}
+		out = _apply_format(results, 'tag.extra_data.ttl')
+		self.assertEqual(out, {'tag': ['300']})
+
+	def test_dotpath_style_untyped_nested_field_on_tag(self):
+		"""extra_data.ttl (no type prefix) resolves against the single non-empty type (tag)."""
+		results = {'tag': [self._make_tag(ttl='300')], 'port': []}
+		out = _apply_format(results, 'extra_data.ttl')
+		self.assertEqual(out, {'tag': ['300']})
+
 	def test_pipe_separated_specs(self):
 		"""Multiple specs separated by || should each be applied independently."""
 		results = {
@@ -122,6 +215,80 @@ class TestApplyFormat(unittest.TestCase):
 		out = _apply_format(results, '{port.ip} || {url.url}')
 		self.assertEqual(out.get('port'), ['1.2.3.4'])
 		self.assertEqual(out.get('url'), ['https://example.com'])
+
+	def test_newline_escape_in_format_string(self):
+		r"""Literal \n in format string should be converted to actual newlines in output."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		out = _apply_format(results, '{url.url}\\nStatus: {url.status_code}')
+		self.assertEqual(out, {'url': ['https://example.com\nStatus: 200']})
+
+	def test_tab_escape_in_format_string(self):
+		r"""Literal \t in format string should be converted to actual tabs in output."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		out = _apply_format(results, '{url.url}\\t{url.status_code}')
+		self.assertEqual(out, {'url': ['https://example.com\t200']})
+
+	def test_format_from_file(self):
+		"""--format accepts a file path and loads the template from disk."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+			f.write('{url.url}')
+			tmp_path = f.name
+		try:
+			out = _apply_format(results, tmp_path)
+			self.assertEqual(out, {'url': ['https://example.com']})
+		finally:
+			os.remove(tmp_path)
+
+	def test_format_from_file_with_newlines(self):
+		"""Template files may contain real newlines which should be preserved."""
+		results = {'url': [{'url': 'https://example.com', 'status_code': 200}]}
+		with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+			f.write('{url.url}\nStatus: {url.status_code}')
+			tmp_path = f.name
+		try:
+			out = _apply_format(results, tmp_path)
+			self.assertEqual(out, {'url': ['https://example.com\nStatus: 200']})
+		finally:
+			os.remove(tmp_path)
+
+
+class TestConsoleExporterMarkdown(unittest.TestCase):
+
+	def test_markdown_rendering_triggered_by_heading(self):
+		"""ConsoleExporter renders formatted strings that contain Markdown headings via Rich Markdown."""
+		from secator.exporters.console import ConsoleExporter, _is_markdown
+		from secator.rich import console_stdout
+
+		markdown_text = '# Results\nhttps://example.com'
+		plain_text = 'https://example.com'
+
+		self.assertTrue(_is_markdown(markdown_text))
+		self.assertFalse(_is_markdown(plain_text))
+
+		# Verify ConsoleExporter calls Markdown rendering for heading-containing strings.
+		with mock.patch('secator.exporters.console.console_stdout') as mock_console:
+			report = mock.MagicMock()
+			report.data = {'results': {'url': [markdown_text]}}
+			exporter = ConsoleExporter(report)
+			exporter.send()
+			# Rich Markdown object should have been printed (not a plain string)
+			call_args = mock_console.print.call_args_list
+			self.assertEqual(len(call_args), 1)
+			from rich.markdown import Markdown
+			self.assertIsInstance(call_args[0][0][0], Markdown)
+
+	def test_plain_string_printed_without_markup(self):
+		"""ConsoleExporter prints plain strings with markup=False, highlight=False."""
+		from secator.exporters.console import ConsoleExporter
+
+		plain_text = 'https://example.com 200'
+		with mock.patch('secator.exporters.console.console_stdout') as mock_console:
+			report = mock.MagicMock()
+			report.data = {'results': {'url': [plain_text]}}
+			exporter = ConsoleExporter(report)
+			exporter.send()
+			mock_console.print.assert_called_once_with(plain_text, markup=False, highlight=False)
 
 
 class TestCli(unittest.TestCase):
@@ -270,10 +437,19 @@ class TestCli(unittest.TestCase):
 		assert 'Workspace name' in result.output
 
 	def test_profile_list_command(self):
-		result = self.runner.invoke(cli, ['profile', 'list'])
+		# Wide terminal so rich does not wrap the column headers across lines.
+		result = self.runner.invoke(cli, ['profile', 'list'], env={'COLUMNS': '400'})
 		assert not result.exception
 		assert result.exit_code == 0
-		assert 'Profile name' in result.output
+		for column in ['Profile name', 'Description', 'Enforced', 'Workspace', 'Drivers', 'Exporters', 'Options']:
+			assert column in result.output, f'column {column!r} missing from profile list output'
+
+	def test_profile_list_command_aliases(self):
+		for alias in ['p', 'pf', 'profiles']:
+			result = self.runner.invoke(cli, [alias, 'list'], env={'COLUMNS': '400'})
+			assert not result.exception, f'alias {alias!r} raised {result.exception}'
+			assert result.exit_code == 0, f'alias {alias!r} exited {result.exit_code}'
+			assert 'Profile name' in result.output, f'alias {alias!r} output missing table'
 
 	def test_alias_list_command(self):
 		result = self.runner.invoke(cli, ['alias', 'list'])

@@ -8,7 +8,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import yaml
-from rich.console import Console
+from rich.console import Console, ConsoleOptions, RenderResult
+from rich.markdown import Heading, Markdown
 from rich.table import Table
 
 _ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-9;?]*[ -/]*[@-~])')
@@ -99,12 +100,28 @@ console = Console(file=_stderr_tee, record=True)
 console_stdout = Console(file=_stdout_tee, record=True)
 
 
+class LeftJustifiedHeading(Heading):
+	def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+		yield from console.render(self.text, options=options.update(justify='left'))
+
+
+class CustomMarkdown(Markdown):
+	elements = {
+		**Markdown.elements,
+		'heading_open': LeftJustifiedHeading,
+	}
+
+
 def maybe_status(*args, **kwargs):
 	"""Return console.status() normally, or nullcontext() when a live display is already active or in a worker."""
 	from secator.definitions import IN_WORKER
+
 	if IN_WORKER or console._live is not None:
 		return nullcontext()
 	return console.status(*args, **kwargs)
+
+
+# handler = RichHandler(rich_tracebacks=True)  # TODO: add logging handler
 
 
 def criticity_to_color(value):
@@ -147,7 +164,7 @@ FORMATTERS = {
 	'reference': lambda reference: f'[link={reference}]{reference}[/]' if reference else '',
 	'matched_at': lambda matched_at: f'[link={matched_at}]{matched_at}[/]' if matched_at and matched_at.startswith('http') else '',  # noqa: E501
 	'match': lambda match: f'[link={match}]{match}[/]' if match else '',
-	'_source': lambda source: f'[bold gold3]{source}[/]'
+	'_source': lambda source: f'[bold gold3]{source}[/]',
 }
 
 
@@ -165,10 +182,10 @@ class FullScreenPrompt:
 		str: The user's input text, or None if cancelled.
 	"""
 
-	def __init__(self, title="Enter your prompt", placeholder="Type your prompt here..."):
+	def __init__(self, title='Enter your prompt', placeholder='Type your prompt here...'):
 		self.title = title
 		self.placeholder = placeholder
-		self.lines = [""]
+		self.lines = ['']
 		self.cursor_line = 0
 		self.cursor_col = 0
 		self._decoder = codecs.getincrementaldecoder('utf-8')(errors='ignore')
@@ -177,6 +194,7 @@ class FullScreenPrompt:
 		"""Read a single keypress, handling escape sequences."""
 		import os
 		import select
+
 		ch = self._decoder.decode(os.read(fd, 1), final=False)
 		if not ch:
 			return 'ignore'
@@ -213,17 +231,18 @@ class FullScreenPrompt:
 	def _render(self):
 		"""Render the prompt to a string using Rich."""
 		from io import StringIO
+
 		buf = StringIO()
 		w = console.width
 		h = console.height
 		render_console = Console(file=buf, force_terminal=True, width=w)
 
 		# Top border
-		render_console.print(f"[dim]{'─' * w}[/]")
+		render_console.print(f'[dim]{"─" * w}[/]')
 		render_console.print()
 
 		# Title
-		render_console.print(f"  [bold cyan]{self.title}[/]")
+		render_console.print(f'  [bold cyan]{self.title}[/]')
 		render_console.print()
 
 		# Input area
@@ -232,13 +251,13 @@ class FullScreenPrompt:
 			for i, line in enumerate(self.lines):
 				if i == self.cursor_line:
 					# Show cursor
-					before = line[:self.cursor_col]
-					after = line[self.cursor_col:]
-					render_console.print(f"  [bold white]  {before}[/][on white] [/][bold white]{after}[/]")
+					before = line[: self.cursor_col]
+					after = line[self.cursor_col :]
+					render_console.print(f'  [bold white]  {before}[/][on white] [/][bold white]{after}[/]')
 				else:
-					render_console.print(f"  [white]  {line}[/]")
+					render_console.print(f'  [white]  {line}[/]')
 		else:
-			render_console.print(f"  [dim]  {self.placeholder}[/][on white] [/]")
+			render_console.print(f'  [dim]  {self.placeholder}[/][on white] [/]')
 
 		# Fill remaining space
 		used_lines = 5 + max(len(self.lines), 1)
@@ -248,8 +267,8 @@ class FullScreenPrompt:
 
 		# Bottom help
 		render_console.print()
-		render_console.print("[gray42]  Ctrl+D: submit  •  Enter: new line  •  Esc: cancel[/]")
-		render_console.print(f"[dim]{'─' * w}[/]")
+		render_console.print('[gray42]  Ctrl+D: submit  •  Enter: new line  •  Esc: cancel[/]')
+		render_console.print(f'[dim]{"─" * w}[/]')
 
 		return buf.getvalue()
 
@@ -272,7 +291,7 @@ class FullScreenPrompt:
 			tty.setraw(fd)
 
 			# Clear screen and render
-			sys.stderr.write("\033[2J\033[H")
+			sys.stderr.write('\033[2J\033[H')
 			output = self._render().replace('\n', '\r\n')
 			sys.stderr.write(output)
 			sys.stderr.flush()
@@ -282,21 +301,21 @@ class FullScreenPrompt:
 
 				if key == 'ctrl_c' or key == 'escape':
 					# Restore screen
-					sys.stderr.write("\033[2J\033[H")
+					sys.stderr.write('\033[2J\033[H')
 					sys.stderr.flush()
 					return None
 
 				elif key == 'ctrl_d':
 					# Submit
 					text = '\n'.join(self.lines).strip()
-					sys.stderr.write("\033[2J\033[H")
+					sys.stderr.write('\033[2J\033[H')
 					sys.stderr.flush()
 					return text if text else None
 
 				elif key == 'enter':
 					# New line
-					rest = self.lines[self.cursor_line][self.cursor_col:]
-					self.lines[self.cursor_line] = self.lines[self.cursor_line][:self.cursor_col]
+					rest = self.lines[self.cursor_line][self.cursor_col :]
+					self.lines[self.cursor_line] = self.lines[self.cursor_line][: self.cursor_col]
 					self.cursor_line += 1
 					self.lines.insert(self.cursor_line, rest)
 					self.cursor_col = 0
@@ -304,7 +323,7 @@ class FullScreenPrompt:
 				elif key == 'backspace':
 					if self.cursor_col > 0:
 						line = self.lines[self.cursor_line]
-						self.lines[self.cursor_line] = line[:self.cursor_col - 1] + line[self.cursor_col:]
+						self.lines[self.cursor_line] = line[: self.cursor_col - 1] + line[self.cursor_col :]
 						self.cursor_col -= 1
 					elif self.cursor_line > 0:
 						# Merge with previous line
@@ -317,7 +336,7 @@ class FullScreenPrompt:
 				elif key == 'delete':
 					line = self.lines[self.cursor_line]
 					if self.cursor_col < len(line):
-						self.lines[self.cursor_line] = line[:self.cursor_col] + line[self.cursor_col + 1:]
+						self.lines[self.cursor_line] = line[: self.cursor_col] + line[self.cursor_col + 1 :]
 					elif self.cursor_line < len(self.lines) - 1:
 						self.lines[self.cursor_line] += self.lines[self.cursor_line + 1]
 						self.lines.pop(self.cursor_line + 1)
@@ -348,19 +367,11 @@ class FullScreenPrompt:
 
 				elif key == 'tab':
 					# Insert spaces for tab
-					self.lines[self.cursor_line] = (
-						self.lines[self.cursor_line][:self.cursor_col]
-						+ '    '
-						+ self.lines[self.cursor_line][self.cursor_col:]
-					)
+					self.lines[self.cursor_line] = self.lines[self.cursor_line][: self.cursor_col] + '    ' + self.lines[self.cursor_line][self.cursor_col :]  # noqa: E501
 					self.cursor_col += 4
 
 				elif len(key) == 1 and key.isprintable():
-					self.lines[self.cursor_line] = (
-						self.lines[self.cursor_line][:self.cursor_col]
-						+ key
-						+ self.lines[self.cursor_line][self.cursor_col:]
-					)
+					self.lines[self.cursor_line] = self.lines[self.cursor_line][: self.cursor_col] + key + self.lines[self.cursor_line][self.cursor_col :]  # noqa: E501
 					self.cursor_col += 1
 
 				elif key == 'ignore':
@@ -369,13 +380,13 @@ class FullScreenPrompt:
 					continue
 
 				# Re-render
-				sys.stderr.write("\033[2J\033[H")
+				sys.stderr.write('\033[2J\033[H')
 				output = self._render().replace('\n', '\r\n')
 				sys.stderr.write(output)
 				sys.stderr.flush()
 
 		except (KeyboardInterrupt, EOFError):
-			sys.stderr.write("\033[2J\033[H")
+			sys.stderr.write('\033[2J\033[H')
 			sys.stderr.flush()
 			return None
 		finally:
@@ -399,13 +410,13 @@ class InteractiveMenu:
 		None: if user pressed Escape or Ctrl+C.
 	"""
 
-	def __init__(self, title, options, description=""):
+	def __init__(self, title, options, description=''):
 		self.title = title
 		self.description = description
 		self.options = options
 		self.selected = 0
 		self.checked = set()
-		self.typed = ""
+		self.typed = ''
 		self.in_input_mode = False
 		self._decoder = codecs.getincrementaldecoder('utf-8')(errors='ignore')
 
@@ -413,6 +424,7 @@ class InteractiveMenu:
 		"""Read a single keypress, handling escape sequences."""
 		import os
 		import select
+
 		ch = self._decoder.decode(os.read(fd, 1), final=False)
 		if not ch:
 			return 'ignore'
@@ -458,6 +470,7 @@ class InteractiveMenu:
 		"""Render the menu to a string using Rich, with scrolling viewport."""
 		import shutil
 		from io import StringIO
+
 		buf = StringIO()
 		render_console = Console(file=buf, force_terminal=True, width=console.width)
 		w = console.width
@@ -481,53 +494,53 @@ class InteractiveMenu:
 				win_end = total
 				win_start = total - max_visible
 
-		render_console.print(f"[dim]{'─' * w}[/]")
-		render_console.print(f"[bold white]{self.title}[/]")
+		render_console.print(f'[dim]{"─" * w}[/]')
+		render_console.print(f'[bold white]{self.title}[/]')
 		if self.description:
-			render_console.print(f"[dim]{self.description}[/]")
+			render_console.print(f'[dim]{self.description}[/]')
 		render_console.print()
 
 		if win_start > 0:
-			render_console.print(f"  [dim]↑ {win_start} more[/]")
+			render_console.print(f'  [dim]↑ {win_start} more[/]')
 
 		for i in range(win_start, win_end):
 			opt = self.options[i]
 			is_selected = i == self.selected
 			is_checked = i in self.checked
-			prefix = "[bold cyan]❯[/]" if is_selected else " "
-			check = "[bold green]✓[/] " if is_checked else "  " if self.checked else ""
-			num = f"[bold]{i + 1}.[/]"
-			if opt.get("input"):
+			prefix = '[bold cyan]❯[/]' if is_selected else ' '
+			check = '[bold green]✓[/] ' if is_checked else '  ' if self.checked else ''
+			num = f'[bold]{i + 1}.[/]'
+			if opt.get('input'):
 				if is_selected and self.in_input_mode:
 					if self.typed:
-						label = f"{prefix} {num} {check}[bold]{self.typed}[/][dim]▎[/]"
+						label = f'{prefix} {num} {check}[bold]{self.typed}[/][dim]▎[/]'
 					else:
-						label = f"{prefix} {num} {check}[gray42]{opt['label']}[/][dim]▎[/]"
+						label = f'{prefix} {num} {check}[gray42]{opt["label"]}[/][dim]▎[/]'
 				elif is_selected:
-					label = f"{prefix} {num} {check}[bold]{opt['label']}[/]"
+					label = f'{prefix} {num} {check}[bold]{opt["label"]}[/]'
 				else:
-					label = f"{prefix} {num} {check}[dim]{opt['label']}[/]"
+					label = f'{prefix} {num} {check}[dim]{opt["label"]}[/]'
 			else:
 				if is_selected:
-					label = f"{prefix} {num} {check}[bold]{opt['label']}[/]"
+					label = f'{prefix} {num} {check}[bold]{opt["label"]}[/]'
 				else:
-					label = f"{prefix} {num} {check}[dim]{opt['label']}[/]"
+					label = f'{prefix} {num} {check}[dim]{opt["label"]}[/]'
 			render_console.print(label)
 
 		if win_end < total:
-			render_console.print(f"  [dim]↓ {total - win_end} more[/]")
+			render_console.print(f'  [dim]↓ {total - win_end} more[/]')
 
 		if self.in_input_mode:
-			render_console.print("\n[gray42]  Enter: confirm  •  Esc: cancel[/]")
+			render_console.print('\n[gray42]  Enter: confirm  •  Esc: cancel[/]')
 		else:
-			has_selectable = any(opt.get("selectable") for opt in self.options)
-			parts = ["Enter: confirm"]
+			has_selectable = any(opt.get('selectable') for opt in self.options)
+			parts = ['Enter: confirm']
 			if has_selectable:
-				parts.append("Space: toggle")
-			parts.append("Tab: edit prompt")
-			parts.append("Esc: exit")
-			render_console.print(f"\n[gray42]  {'  •  '.join(parts)}[/]")
-		render_console.print(f"[dim]{'─' * w}[/]")
+				parts.append('Space: toggle')
+			parts.append('Tab: edit prompt')
+			parts.append('Esc: exit')
+			render_console.print(f'\n[gray42]  {"  •  ".join(parts)}[/]')
+		render_console.print(f'[dim]{"─" * w}[/]')
 		return buf.getvalue()
 
 	def _line_count(self, text):
@@ -535,8 +548,9 @@ class InteractiveMenu:
 
 	def _clear_and_exit(self, output):
 		import sys
+
 		lines = self._line_count(output)
-		sys.stderr.write(f"\033[{lines}A\033[J")
+		sys.stderr.write(f'\033[{lines}A\033[J')
 		sys.stderr.flush()
 
 	def show(self):
@@ -551,9 +565,9 @@ class InteractiveMenu:
 		fd = sys.stdin.fileno()
 		old_settings = termios.tcgetattr(fd)
 		self.selected = 0
-		self.typed = ""
+		self.typed = ''
 		self.in_input_mode = False
-		output = ""
+		output = ''
 
 		try:
 			tty.setraw(fd)
@@ -572,7 +586,7 @@ class InteractiveMenu:
 				elif key == 'escape':
 					if self.in_input_mode:
 						self.in_input_mode = False
-						self.typed = ""
+						self.typed = ''
 					else:
 						self._clear_and_exit(prev_output)
 						return None
@@ -588,7 +602,7 @@ class InteractiveMenu:
 
 				elif key == 'space' and not self.in_input_mode:
 					opt = self.options[self.selected]
-					if opt.get("selectable"):
+					if opt.get('selectable'):
 						if self.selected in self.checked:
 							self.checked.discard(self.selected)
 						else:
@@ -600,11 +614,11 @@ class InteractiveMenu:
 						self._clear_and_exit(prev_output)
 						return (sorted(self.checked), self.typed.strip() if self.typed.strip() else None)
 					opt = self.options[self.selected]
-					if opt.get("input") and not self.in_input_mode:
+					if opt.get('input') and not self.in_input_mode:
 						# Enter always confirms immediately; use Tab to edit
 						self._clear_and_exit(prev_output)
 						return (self.selected, None)
-					elif opt.get("input") and self.in_input_mode:
+					elif opt.get('input') and self.in_input_mode:
 						self._clear_and_exit(prev_output)
 						if self.typed.strip():
 							return (self.selected, self.typed.strip())
@@ -615,9 +629,9 @@ class InteractiveMenu:
 
 				elif key == 'tab' and not self.in_input_mode:
 					opt = self.options[self.selected]
-					if opt.get("input"):
+					if opt.get('input'):
 						self.in_input_mode = True
-						self.typed = f"{opt['label']}, "
+						self.typed = f'{opt["label"]}, '
 
 				elif key == 'backspace' and self.in_input_mode:
 					self.typed = self.typed[:-1]
@@ -632,7 +646,7 @@ class InteractiveMenu:
 
 				# Re-render
 				lines = self._line_count(prev_output)
-				sys.stderr.write(f"\033[{lines}A\033[J")
+				sys.stderr.write(f'\033[{lines}A\033[J')
 				output = self._render().replace('\n', '\r\n')
 				sys.stderr.write(output)
 				sys.stderr.flush()
@@ -640,7 +654,7 @@ class InteractiveMenu:
 		except (KeyboardInterrupt, EOFError):
 			lines = self._line_count(output) if output else 0
 			if lines:
-				sys.stderr.write(f"\033[{lines}A\033[J")
+				sys.stderr.write(f'\033[{lines}A\033[J')
 				sys.stderr.flush()
 			return None
 		finally:
@@ -697,7 +711,8 @@ def build_table(items, output_fields=[], exclude_fields=[], sort_by=None):
 			'Extracted values',
 			overflow=False,
 			min_width=10,
-			no_wrap=False)
+			no_wrap=False,
+		)
 
 	# Create table rows
 	for item in items:
