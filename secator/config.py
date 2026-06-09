@@ -149,6 +149,7 @@ class Drivers(StrictModel):
 
 class Workspace(StrictModel):
 	default: str = ''
+	routes: Dict[str, List[str]] = {}
 	profiles: Dict[str, List[str]] = {}
 
 

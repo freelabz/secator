@@ -215,7 +215,9 @@ def register_runner(cli_endpoint, config):
 		dry_run = opts['dry_run']
 		yaml = opts['yaml']
 		tree = opts['tree']
-		context = {'workspace_name': ws, 'workspace_id': ws}
+		from click.core import ParameterSource
+		ws_explicit = ctx.get_parameter_source('workspace') == ParameterSource.COMMANDLINE
+		context = {'workspace_name': ws, 'workspace_id': ws, 'workspace_explicit': ws_explicit}
 		enable_pyinstrument = opts['enable_pyinstrument']
 		enable_memray = opts['enable_memray']
 		contextmanager = nullcontext()

@@ -225,6 +225,66 @@ class TestConfig(unittest.TestCase):
 		config = Config.parse()
 		self.assertEqual(config.dirs.queries, config.dirs.data / 'queries')
 
+	def test_workspace_routes_append_new_workspace(self):
+		"""Appending a route to a new workspace creates the list entry."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		self.assertIn('my_ws', config.workspace.routes)
+		self.assertEqual(config.workspace.routes['my_ws'], ['*vulnweb.com*'])
+
+	def test_workspace_routes_append_multiple_patterns(self):
+		"""Appending multiple patterns to same workspace accumulates them."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		config.set('workspace.routes.my_ws', '*ocervell*', strategy='append')
+		self.assertEqual(config.workspace.routes['my_ws'], ['*vulnweb.com*', '*ocervell*'])
+
+	def test_workspace_routes_append_no_duplicates(self):
+		"""Appending a duplicate pattern is a no-op."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		self.assertEqual(config.workspace.routes['my_ws'], ['*vulnweb.com*'])
+
+	def test_workspace_routes_save_and_reload(self):
+		"""Workspace routes survive a save/reload cycle."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		config.set('workspace.routes.my_ws', '*ocervell*', strategy='append')
+		config.save()
+		config2 = Config.parse(path=self.config_test)
+		self.assertEqual(config2.workspace.routes['my_ws'], ['*vulnweb.com*', '*ocervell*'])
+
+	def test_workspace_routes_remove_existing_pattern(self):
+		"""Removing an existing pattern leaves the remaining patterns intact."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='append')
+		config.set('workspace.routes.my_ws', '*ocervell*', strategy='append')
+		config.set('workspace.routes.my_ws', '*vulnweb.com*', strategy='remove')
+		self.assertEqual(config.workspace.routes['my_ws'], ['*ocervell*'])
+
+	def test_workspace_routes_remove_missing_pattern(self):
+		"""Removing a non-existent pattern is a no-op (warns but does not raise)."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*ocervell*', strategy='append')
+		config.set('workspace.routes.my_ws', '*doesnotexist*', strategy='remove')
+		self.assertEqual(config.workspace.routes['my_ws'], ['*ocervell*'])
+
+	def test_workspace_routes_remove_workspace_key(self):
+		"""Unsetting a workspace key (no value) deletes it from routes entirely."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('workspace.routes.my_ws', '*ocervell*', strategy='append')
+		self.assertIn('my_ws', config.workspace.routes)
+		config.unset('workspace.routes.my_ws')
+		self.assertNotIn('my_ws', config.workspace.routes)
+
 
 @mock.patch('sys.stderr', devnull)
 class TestConfigEnv(unittest.TestCase):
