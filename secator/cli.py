@@ -1437,6 +1437,7 @@ def report_info(runner_id, workspace, show_all):
 			return '\n'.join(f'[bold]{k}[/]: {v}' for k, v in pairs) + tail
 		return str(value) if value is not None else ''
 
+	table.add_row('_path', str(report_path))
 	for key, value in info.items():
 		table.add_row(key, _format_value(value))
 
