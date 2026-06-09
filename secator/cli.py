@@ -1382,7 +1382,7 @@ def report_info(runner_id, workspace, show_all):
 	if not runner_type.endswith('s'):
 		runner_type += 's'
 
-	report_path = Path(CONFIG.dirs.reports) / workspace_name / runner_type / runner_number / 'report.json'
+	report_path = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
 	if not report_path.exists():
 		console.print(Error(message=f'Report not found: {report_path}'))
 		return
