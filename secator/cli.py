@@ -1024,7 +1024,7 @@ def list_aliases(silent):
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.pass_context
-def query(ctx, arg, output, time_delta, fmt, workspace, driver, dedupe):
+def query(ctx, arg, output, time_delta, fmt, workspace, driver, dedupe, limit):
 	"""Query"""
 	if not arg:
 		raise click.UsageError('Missing argument ARG (a query name, expression, or prompt).')
