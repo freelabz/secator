@@ -87,26 +87,14 @@ class TestConfig(unittest.TestCase):
 	def test_set_workspace_default_profiles(self):
 		"""Test setting per-workspace default profiles."""
 		from secator.config import Config
-		from unittest.mock import patch, MagicMock
+		from unittest.mock import patch
 		config = Config.parse(path=self.config_test)
-		mock_profile = MagicMock()
-		mock_profile.name = 'aggressive'
-		mock_profile2 = MagicMock()
-		mock_profile2.name = 'passive'
 		with patch('secator.config.Config._validate_profile_names', return_value=True):
 			config.set('workspace.default_profiles.my_ws', 'aggressive,passive')
 		self.assertEqual(config.workspace.default_profiles['my_ws'], ['aggressive', 'passive'])
 		config.save()
 		yaml_data = Config.read_yaml(self.config_test)
 		self.assertEqual(yaml_data['workspace']['default_profiles']['my_ws'], ['aggressive', 'passive'])
-
-	def test_set_workspace_default_profile(self):
-		"""Test setting global default profile for all workspaces."""
-		from secator.config import Config
-		config = Config.parse(path=self.config_test)
-		with unittest.mock.patch('secator.config.Config._validate_profile_names', return_value=True):
-			config.set('workspace.default_profile', 'aggressive,passive')
-		self.assertEqual(config.workspace.default_profile, ['aggressive', 'passive'])
 
 	def test_set_list_field_replace(self):
 		from secator.config import Config

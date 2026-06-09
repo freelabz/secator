@@ -148,7 +148,6 @@ class Drivers(StrictModel):
 
 class Workspace(StrictModel):
 	default: str = ''
-	default_profile: List[str] = []
 	default_profiles: Dict[str, List[str]] = {}
 
 
@@ -452,7 +451,7 @@ class Config(DotMap):
 				pass
 
 		# Validate profile names before setting
-		if key in ('workspace.default_profile', 'profiles.defaults'):
+		if key in ('profiles.defaults',):
 			profile_names = value if isinstance(value, list) else ([value] if value else [])
 			if profile_names and not Config._validate_profile_names(profile_names):
 				return
@@ -494,7 +493,7 @@ class Config(DotMap):
 				return
 		else:
 			if subkey:
-				updated[subkey] = value
+				updated[subkey] = Config._parse_new_value(value)
 			elif isinstance(value, dict):
 				updated.update(value)
 
@@ -724,6 +723,46 @@ class Config(DotMap):
 
 		data = {k: v for k, v in data.items() if not k.startswith('_')}
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
+
+	@staticmethod
+	def _parse_new_value(value):
+		"""Try to parse a string value into a structured type (int, float, bool, list, or dict)."""
+		if not isinstance(value, str):
+			return value
+		if (value.startswith('{') and value.endswith('}')) or (value.startswith('[') and value.endswith(']')):
+			try:
+				import json
+				return json.loads(value)
+			except Exception:
+				pass
+		if ',' in value:
+			return [v.strip() for v in value.split(',')]
+		try:
+			return int(value)
+		except ValueError:
+			pass
+		try:
+			return float(value)
+		except ValueError:
+			pass
+		if value.lower() in ('true', 'false'):
+			return value.lower() == 'true'
+		return value
+
+	@staticmethod
+	def _validate_profile_names(profile_names):
+		"""Validate that all profile names exist. Returns True if all valid or validation cannot run."""
+		try:
+			from secator.loader import get_configs_by_type
+			available = [p.name for p in get_configs_by_type('profile')]
+			invalid = [p for p in profile_names if p not in available]
+			if invalid:
+				console.print(f'[bold red]Invalid profile names: {", ".join(invalid)}[/]')
+				return False
+		except Exception as e:
+			import logging
+			logging.debug('Profile validation skipped due to exception', exc_info=e)
+		return True
 
 	@staticmethod
 	def build_key_map(config, base_path=[]):
