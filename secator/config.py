@@ -655,6 +655,23 @@ class Config(DotMap):
 			self.celery.result_backend = f'file://{self.dirs.celery_results}'
 
 	@staticmethod
+	def _model_to_dict(model):
+		"""Convert a Pydantic model to a dict, preserving SecretStr objects.
+
+		Unlike model_dump(), this walks fields via direct attribute access so that
+		SecretStr values are kept as SecretStr instances rather than being serialized
+		to plain strings.
+		"""
+		result = {}
+		for field_name in type(model).model_fields:
+			value = getattr(model, field_name)
+			if isinstance(value, BaseModel):
+				result[field_name] = Config._model_to_dict(value)
+			else:
+				result[field_name] = value
+		return result
+
+	@staticmethod
 	def load(schema, data: dict = {}, print_errors=True):
 		"""Validate a config using Pydantic.
 
@@ -667,7 +684,7 @@ class Config(DotMap):
 			Config|None: instance of Config object or None if invalid.
 		"""
 		try:
-			return Config(schema(**data).model_dump())
+			return Config(Config._model_to_dict(schema(**data)))
 		except ValidationError as e:
 			if print_errors:
 				error_str = str(e).replace('\n', '\n  ')
