@@ -489,7 +489,7 @@ class TestCli(unittest.TestCase):
 		with tempfile.TemporaryDirectory() as tmpdir:
 			with mock.patch('secator.cli.CONFIG') as mock_cfg:
 				mock_cfg.dirs.reports = tmpdir
-				mock_cfg.workspaces.default = 'default'
+				mock_cfg.workspaces.current = 'default'
 				report_dir = os.path.join(tmpdir, 'default', 'tasks', '1')
 				os.makedirs(report_dir)
 				with open(os.path.join(report_dir, 'report.json'), 'w') as f:

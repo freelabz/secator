@@ -148,7 +148,7 @@ class Drivers(StrictModel):
 
 
 class Workspace(StrictModel):
-	default: str = ''
+	current: str = ''
 	routes: Dict[str, List[str]] = {}
 	profiles: Dict[str, List[str]] = {}
 
@@ -629,15 +629,26 @@ class Config(DotMap):
 			data = Config.read_yaml(path)
 
 		# Backwards compatibility: migrate 'workspace' key to 'workspaces'
+		migrated = False
 		if 'workspace' in data and 'workspaces' not in data:
 			data['workspaces'] = data.pop('workspace')
 			if path:
 				console.print(f'[bold orange1]Migrating config key "workspace" to "workspaces" in {path}[/]')
-				try:
-					with path.open('w') as f:
-						f.write(yaml.dump({k: v for k, v in data.items() if not k.startswith('_')}, sort_keys=False))
-				except Exception as e:
-					console.print(f'[bold red]Failed to save migrated config: {e}[/]')
+			migrated = True
+
+		# Backwards compatibility: migrate 'workspaces.default' to 'workspaces.current'
+		if isinstance(data.get('workspaces'), dict) and 'default' in data['workspaces'] and 'current' not in data['workspaces']:
+			data['workspaces']['current'] = data['workspaces'].pop('default')
+			if path:
+				console.print(f'[bold orange1]Migrating config key "workspaces.default" to "workspaces.current" in {path}[/]')
+			migrated = True
+
+		if migrated and path:
+			try:
+				with path.open('w') as f:
+					f.write(yaml.dump({k: v for k, v in data.items() if not k.startswith('_')}, sort_keys=False))
+			except Exception as e:
+				console.print(f'[bold red]Failed to save migrated config: {e}[/]')
 
 		# Load data
 		config = Config.load(SecatorConfig, data, print_errors=print_errors)

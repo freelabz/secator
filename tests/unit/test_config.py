@@ -381,3 +381,51 @@ class TestAIConfig(unittest.TestCase):
 		from secator.config import Config
 		config = Config.parse()
 		self.assertEqual(config.addons.api.finding_search_endpoint, 'findings/_search')
+
+
+@mock.patch('sys.stderr', devnull)
+class TestConfigMigration(unittest.TestCase):
+
+	def test_migrate_workspace_key_to_workspaces(self):
+		"""Old top-level 'workspace' key is renamed to 'workspaces' on parse."""
+		from secator.config import Config
+		data = {'workspace': {'current': 'my-ws', 'routes': {}, 'profiles': {}}}
+		config = Config.parse(data)
+		self.assertIsNotNone(config)
+		self.assertEqual(config.workspaces.current, 'my-ws')
+
+	def test_migrate_workspaces_default_to_current(self):
+		"""Intermediate 'workspaces.default' key is renamed to 'workspaces.current' on parse."""
+		from secator.config import Config
+		data = {'workspaces': {'default': 'my-ws', 'routes': {}, 'profiles': {}}}
+		config = Config.parse(data)
+		self.assertIsNotNone(config)
+		self.assertEqual(config.workspaces.current, 'my-ws')
+
+	def test_migrate_workspace_default_to_workspaces_current(self):
+		"""Fully old-format 'workspace.default' migrates seamlessly to 'workspaces.current'."""
+		from secator.config import Config
+		data = {'workspace': {'default': 'my-ws', 'routes': {}, 'profiles': {}}}
+		config = Config.parse(data)
+		self.assertIsNotNone(config)
+		self.assertEqual(config.workspaces.current, 'my-ws')
+
+	def test_migrate_writes_updated_config_to_file(self):
+		"""Migration persists renamed keys to the YAML file on disk."""
+		import tempfile
+		from secator.config import Config
+		with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+			import yaml
+			yaml.dump({'workspaces': {'default': 'from-file', 'routes': {}, 'profiles': {}}}, f)
+			tmp_path = Path(f.name)
+		try:
+			config = Config.parse(path=tmp_path)
+			self.assertIsNotNone(config)
+			self.assertEqual(config.workspaces.current, 'from-file')
+			# File on disk should now use the new key
+			with tmp_path.open() as f:
+				saved = yaml.safe_load(f)
+			self.assertNotIn('default', saved.get('workspaces', {}))
+			self.assertEqual(saved['workspaces']['current'], 'from-file')
+		finally:
+			tmp_path.unlink(missing_ok=True)
