@@ -66,7 +66,7 @@ class TestReportShowLocalBackend(unittest.TestCase):
 	def tearDown(self):
 		shutil.rmtree(self.temp_dir)
 
-	def _invoke(self, query_expr):
+	def _invoke(self, query_expr, extra_args=None):
 		from secator.cli import cli
 
 		captured = {}
@@ -77,6 +77,8 @@ class TestReportShowLocalBackend(unittest.TestCase):
 		args = ['r', 'show', '-w', WORKSPACE, '--driver', 'local']
 		if query_expr:
 			args += ['-q', query_expr]
+		if extra_args:
+			args += extra_args
 
 		with mock.patch('secator.query.json.CONFIG') as mock_cfg, \
 				mock.patch('secator.report.Report.send', capture_send):
@@ -94,6 +96,22 @@ class TestReportShowLocalBackend(unittest.TestCase):
 				vulns = captured.get('results', {}).get('vulnerability', [])
 				self.assertEqual(len(vulns), expected_count)
 				self.assertEqual(sorted(v['name'] for v in vulns), sorted(expected_names))
+
+	def test_limit_option(self):
+		"""--limit / -l restricts the number of results returned."""
+		result, captured = self._invoke(None, extra_args=['--limit', '1'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(len(vulns), 1)
+
+	def test_limit_short_form(self):
+		"""Short form -l also restricts the number of results returned."""
+		result, captured = self._invoke(None, extra_args=['-l', '1'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(len(vulns), 1)
 
 
 class TestReportShowMongoDBBackend(unittest.TestCase):

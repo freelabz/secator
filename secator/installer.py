@@ -4,7 +4,9 @@ import getpass
 import os
 import platform
 import re
+import shlex
 import shutil
+import sys
 import tarfile
 import zipfile
 import io
@@ -65,8 +67,8 @@ class ToolInstaller:
 		status = InstallerStatus.UNKNOWN
 		has_cmd = hasattr(tool_cls, 'cmd')
 
-		# For non-Command tasks (e.g. PythonRunner), only proceed if they have an install_cmd
-		if not has_cmd and not getattr(tool_cls, 'install_cmd', None):
+		# For non-Command tasks (e.g. PythonRunner), only proceed if they have an install method
+		if not has_cmd and not getattr(tool_cls, 'install_cmd', None) and not getattr(tool_cls, 'pypi_dependencies', None):
 			return InstallerStatus.INSTALL_SKIPPED_OK
 
 		# Fail if not supported
@@ -74,7 +76,8 @@ class ToolInstaller:
 			tool_cls.install_pre,
 			tool_cls.github_handle,
 			tool_cls.install_cmd,
-			tool_cls.install_post]):
+			tool_cls.install_post,
+			getattr(tool_cls, 'pypi_dependencies', None)]):
 			return InstallerStatus.INSTALL_NOT_SUPPORTED
 
 		# Check PATH (only relevant for Command-based tasks that install binaries)
@@ -87,6 +90,14 @@ class ToolInstaller:
 		# Install pre-required packages
 		if tool_cls.install_pre:
 			status = PackageInstaller.install(tool_cls.install_pre)
+			if not status.is_ok():
+				cls.print_status(status, name)
+				return status
+
+		# Install PyPI packages
+		pypi_dependencies = getattr(tool_cls, 'pypi_dependencies', None)
+		if pypi_dependencies:
+			status = PipInstaller.install(pypi_dependencies)
 			if not status.is_ok():
 				cls.print_status(status, name)
 				return status
@@ -198,6 +209,25 @@ class PackageInstaller:
 			if not status.is_ok():
 				return status
 		return InstallerStatus.SUCCESS
+
+
+class PipInstaller:
+	"""Install Python packages via pip."""
+
+	@classmethod
+	def install(cls, packages):
+		"""Install packages using the current Python's pip.
+
+		Args:
+			packages (list): List of package specifications to install (e.g. ['pandas', 'numpy>=1.0']).
+
+		Returns:
+			InstallerStatus: installer status.
+		"""
+		quoted = ' '.join(shlex.quote(pkg) for pkg in packages)
+		cmd = f'{sys.executable} -m pip install {quoted}'
+		console.print(Info(message=f'Installing PyPI packages: {quoted}'))
+		return SourceInstaller.install(cmd, install_prereqs=False)
 
 
 class SourceInstaller:

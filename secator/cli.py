@@ -26,7 +26,7 @@ from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
-from secator.loader import get_configs_by_type, discover_tasks
+from secator.loader import get_configs_by_type, discover_tasks, load_external_addons
 from secator.utils import (
 	debug,
 	detect_host,
@@ -1022,6 +1022,7 @@ def list_aliases(silent):
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
+@click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.pass_context
 def query(ctx, arg, output, time_delta, fmt, workspace, driver, dedupe):
 	"""Query"""
@@ -1030,12 +1031,12 @@ def query(ctx, arg, output, time_delta, fmt, workspace, driver, dedupe):
 
 	# 1. Saved query name
 	if arg in CONFIG.queries:
-		run_report_show(None, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe)
+		run_report_show(None, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit)
 		return
 
 	# 2. Raw filter expression
 	if _looks_like_query_expr(arg):
-		run_report_show(None, output, time_delta, arg, fmt, workspace, driver, dedupe)
+		run_report_show(None, output, time_delta, arg, fmt, workspace, driver, dedupe, limit)
 		return
 
 	# 3. Natural language -> AI chat
@@ -1227,7 +1228,7 @@ def _apply_format(results, fmt):
 	return new_results
 
 
-def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe):
+def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit):
 	"""Build and send a consolidated report. Shared by `report show` and `query`.
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
@@ -1302,7 +1303,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	# 6. Build and send report via QueryEngine
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
 	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
-	report.build(query=full_query, dedupe=dedupe_effective)
+	report.build(query=full_query, dedupe=dedupe_effective, limit=limit)
 	if fmt:
 		report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
@@ -1330,9 +1331,11 @@ def run_ai_chat(ctx, prompt, workspace):
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
-def report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe):
-	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)"""
-	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe)
+@click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.pass_context
+def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit):
+	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
+	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit)
 
 
 def _load_report_data(path):
@@ -1461,7 +1464,7 @@ def report_info(runner_id, workspace, show_all):
 	if not runner_type.endswith('s'):
 		runner_type += 's'
 
-	report_path = Path(CONFIG.dirs.reports) / workspace_name / runner_type / runner_number / 'report.json'
+	report_path = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
 	if not report_path.exists():
 		console.print(Error(message=f'Report not found: {report_path}'))
 		return
@@ -2190,6 +2193,60 @@ def install_ai():
 			'Run [bold green4]secator x ai -p "your prompt"[/] to run AI-powered pentesting.',
 		],
 	)
+
+
+def _install_external_addon(name, config):
+	"""Install an external addon defined in addons.json."""
+	from secator.installer import ToolInstaller
+
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
+
+	next_steps = config.get('next_steps', [])
+	tool_attrs = {
+		'__name__': name,
+		'install_pre': config.get('install_pre', None),
+		'install_post': config.get('install_post', None),
+		'install_cmd_pre': config.get('install_cmd_pre', None),
+		'install_cmd': config.get('install_cmd', None),
+		'install_github_bin': config.get('install_github_bin', True),
+		'github_handle': config.get('github_handle') or config.get('install_github_handle', None),
+		'install_github_version_prefix': config.get('install_github_version_prefix', ''),
+		'install_ignore_bin': config.get('install_ignore_bin', []),
+		'install_version': config.get('install_version', None),
+		'install_binary_name': config.get('install_binary_name', None),
+		'pypi_dependencies': config.get('pypi_dependencies', None),
+	}
+	tool_cls = type(name, (), tool_attrs)
+	status = ToolInstaller.install(tool_cls)
+
+	return_code = 0 if status.is_ok() else 1
+	if status.is_ok() and next_steps:
+		console.print('[bold gold3]:wrench: Next steps:[/]')
+		for ix, step in enumerate(next_steps):
+			console.print(f'   :keycap_{ix}: {step}')
+	sys.exit(return_code)
+
+
+def _load_external_addon_commands():
+	"""Dynamically register install commands for addons defined in addons.json."""
+	external_addons = load_external_addons()
+	for addon_name, addon_config in external_addons.items():
+		if addon_name in addons.commands:
+			debug(f'Skipping external addon "{addon_name}": name conflicts with a built-in addon command', sub='cli')
+			continue
+
+		def _make_cmd(name, config):
+			@click.command(name, help=f'Install {name} addon.')
+			def _cmd():
+				_install_external_addon(name, config)
+			return _cmd
+
+		addons.add_command(_make_cmd(addon_name, addon_config))
+
+
+_load_external_addon_commands()
 
 
 @install.group()
