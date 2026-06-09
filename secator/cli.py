@@ -823,7 +823,7 @@ def workspace_current():
 
 @workspace.command(name='rm', aliases=['remove', 'delete'])
 @click.argument('name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default='local', help='Query backend driver')  # noqa: E501
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def workspace_delete(name, driver, yes):
 	"""Delete a workspace and all associated reports. NAME: workspace name."""
@@ -840,6 +840,9 @@ def workspace_delete(name, driver, yes):
 		actions.append(f'Delete all runners in MongoDB with workspace_id="{name}"')
 	elif driver == 'api':
 		actions.append(f'Send DELETE to API: {CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=name)}')
+	elif driver == 'sqlite':
+		actions.append(f'Delete all findings in SQLite with workspace_id="{name}"')
+		actions.append(f'Delete all runners in SQLite with workspace_id="{name}"')
 
 	console.print('[bold]The following actions will be performed:[/]')
 	for action in actions:
@@ -881,6 +884,22 @@ def workspace_delete(name, driver, yes):
 			console.print(Info(message=f'Deleted workspace "{name}" from API'))
 		except Exception as e:
 			console.print(Error(message=f'API deletion failed: {e}'))
+
+	# 4. SQLite backend
+	elif driver == 'sqlite':
+		try:
+			from secator.hooks.sqlite import get_sqlite_conn
+
+			conn = get_sqlite_conn()
+			findings_result = conn.execute("DELETE FROM findings WHERE workspace_id=?", (name,))
+			console.print(Info(message=f'Deleted {findings_result.rowcount} findings from SQLite'))
+			for collection in ['tasks', 'workflows', 'scans']:
+				result = conn.execute(f"DELETE FROM {collection} WHERE workspace_id=?", (name,))
+				if result.rowcount:
+					console.print(Info(message=f'Deleted {result.rowcount} {collection} from SQLite'))
+			conn.commit()
+		except Exception as e:
+			console.print(Error(message=f'SQLite deletion failed: {e}'))
 
 
 # ----------#
@@ -1174,7 +1193,7 @@ def _apply_format(results, fmt):
 @click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default='local', help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.pass_context
 def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe):
@@ -1443,7 +1462,7 @@ def report_info(runner_id, workspace, show_all):
 @report.command(name='delete', aliases=['rm', 'remove'])
 @click.argument('runner_id')
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default='local', help='Query backend driver')  # noqa: E501
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def report_delete(runner_id, workspace, driver, yes):
 	"""Delete a report. RUNNER_ID: runner path (e.g. tasks/24)."""
@@ -1500,6 +1519,12 @@ def report_delete(runner_id, workspace, driver, yes):
 			actions.append(f'Send DELETE to API: {endpoint_preview}')
 		else:
 			actions.append('[yellow]No API ID found in report — skipping API deletion[/]')
+	elif driver == 'sqlite':
+		if runner_db_id:
+			actions.append(f'Delete findings in SQLite for {runner_type_singular}_id="{runner_db_id}"')
+			actions.append(f'Delete {runner_type_singular} row in SQLite (id="{runner_db_id}")')
+		else:
+			actions.append('[yellow]No SQLite ID found in report — skipping SQLite deletion[/]')
 
 	console.print('[bold]The following actions will be performed:[/]')
 	for action in actions:
@@ -1544,6 +1569,24 @@ def report_delete(runner_id, workspace, driver, yes):
 			console.print(Info(message=f'Deleted {runner_type_singular} from API'))
 		except Exception as e:
 			console.print(Error(message=f'API deletion failed: {e}'))
+
+	# 4. SQLite backend
+	elif driver == 'sqlite' and runner_db_id:
+		try:
+			from secator.hooks.sqlite import get_sqlite_conn
+
+			conn = get_sqlite_conn()
+			findings_result = conn.execute(
+				f"DELETE FROM findings WHERE json_extract(data,'$._context.{runner_type_singular}_id')=?",
+				(runner_db_id,),
+			)
+			console.print(Info(message=f'Deleted {findings_result.rowcount} findings from SQLite'))
+			runner_result = conn.execute(f"DELETE FROM {runner_type_plural} WHERE id=?", (runner_db_id,))
+			if runner_result.rowcount:
+				console.print(Info(message=f'Deleted {runner_type_singular} row from SQLite'))
+			conn.commit()
+		except Exception as e:
+			console.print(Error(message=f'SQLite deletion failed: {e}'))
 
 
 # --------#
