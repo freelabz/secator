@@ -1,4 +1,10 @@
-from secator.query.utils import parse_report_paths, python_expr_to_mongo
+import json
+import shutil
+import tempfile
+import time
+from pathlib import Path
+
+from secator.query.utils import parse_report_paths, python_expr_to_mongo, resolve_last_report_path
 
 
 class TestParseReportPaths:
@@ -123,4 +129,68 @@ class TestPythonExprToMongo:
     def test_and_with_quoted_value_containing_and(self):
         result = python_expr_to_mongo("tag.name == 'this and that' and tag.match == 'x'")
         assert result == {'_type': 'tag', 'name': 'this and that', 'match': 'x'}
+
+
+class TestResolveLastReportPath:
+
+    def _make_report(self, base, workspace, runner_type, report_id):
+        """Create a minimal report.json at the expected path."""
+        report_dir = Path(base) / workspace / runner_type / str(report_id)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_file = report_dir / 'report.json'
+        report_file.write_text(json.dumps({'info': {}, 'results': {}}))
+        return report_file
+
+    def setup_method(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def teardown_method(self):
+        shutil.rmtree(self.tmp)
+
+    def test_none_returns_none(self):
+        assert resolve_last_report_path(None, 'ws', self.tmp) is None
+
+    def test_no_last_keyword_passthrough(self):
+        assert resolve_last_report_path('scans/5', 'ws', self.tmp) == 'scans/5'
+        assert resolve_last_report_path('tasks/3,workflows/2', 'ws', self.tmp) == 'tasks/3,workflows/2'
+
+    def test_tasks_last_resolves_to_highest_id(self):
+        self._make_report(self.tmp, 'ws', 'tasks', 1)
+        self._make_report(self.tmp, 'ws', 'tasks', 3)
+        self._make_report(self.tmp, 'ws', 'tasks', 2)
+        result = resolve_last_report_path('tasks/last', 'ws', self.tmp)
+        assert result == 'tasks/3'
+
+    def test_workflows_last_resolves_to_highest_id(self):
+        self._make_report(self.tmp, 'ws', 'workflows', 0)
+        self._make_report(self.tmp, 'ws', 'workflows', 4)
+        result = resolve_last_report_path('workflows/last', 'ws', self.tmp)
+        assert result == 'workflows/4'
+
+    def test_scans_last_resolves_to_highest_id(self):
+        self._make_report(self.tmp, 'ws', 'scans', 7)
+        result = resolve_last_report_path('scans/last', 'ws', self.tmp)
+        assert result == 'scans/7'
+
+    def test_last_alone_resolves_to_most_recently_modified(self):
+        self._make_report(self.tmp, 'ws', 'tasks', 1)
+        time.sleep(0.01)
+        self._make_report(self.tmp, 'ws', 'workflows', 2)
+        result = resolve_last_report_path('last', 'ws', self.tmp)
+        assert result == 'workflows/2'
+
+    def test_last_alone_no_reports_returns_none(self):
+        result = resolve_last_report_path('last', 'ws', self.tmp)
+        assert result is None
+
+    def test_last_with_nonexistent_runner_type_returns_none(self):
+        result = resolve_last_report_path('tasks/last', 'ws', self.tmp)
+        assert result is None
+
+    def test_non_numeric_dirs_ignored(self):
+        self._make_report(self.tmp, 'ws', 'tasks', 5)
+        non_numeric = Path(self.tmp) / 'ws' / 'tasks' / 'abc'
+        non_numeric.mkdir(parents=True, exist_ok=True)
+        result = resolve_last_report_path('tasks/last', 'ws', self.tmp)
+        assert result == 'tasks/5'
 
