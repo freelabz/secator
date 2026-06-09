@@ -444,3 +444,84 @@ class TestSqliteWiring(unittest.TestCase):
 		self.assertEqual(CONFIG.addons.sqlite.busy_timeout_ms, 5000)
 		self.assertEqual(CONFIG.addons.sqlite.max_items, -1)
 		self.assertIsInstance(CONFIG.addons.sqlite.duplicate_main_copy_fields, list)
+
+
+class TestSqliteTranslator(unittest.TestCase):
+	def _where(self, query):
+		from secator.query.sqlite import _build_where
+		return _build_where(query)
+
+	def test_equality(self):
+		sql, params = self._where({'_type': 'url'})
+		self.assertEqual(sql, "type = ?")
+		self.assertEqual(params, ['url'])
+
+	def test_plain_field_uses_json_extract(self):
+		sql, params = self._where({'name': 'foo'})
+		self.assertEqual(sql, "json_extract(data, '$.name') = ?")
+		self.assertEqual(params, ['foo'])
+
+	def test_mirrored_workspace_id(self):
+		sql, params = self._where({'_context.workspace_id': 'ws1'})
+		self.assertEqual(sql, "workspace_id = ?")
+		self.assertEqual(params, ['ws1'])
+
+	def test_comparison_ops(self):
+		sql, params = self._where({'cvss_score': {'$gte': 9.0}})
+		self.assertEqual(sql, "json_extract(data, '$.cvss_score') >= ?")
+		self.assertEqual(params, [9.0])
+
+	def test_in_op(self):
+		sql, params = self._where({'severity': {'$in': ['critical', 'high']}})
+		self.assertEqual(sql, "json_extract(data, '$.severity') IN (?, ?)")
+		self.assertEqual(params, ['critical', 'high'])
+
+	def test_contains_op(self):
+		sql, params = self._where({'url': {'$contains': 'login'}})
+		self.assertEqual(sql, "json_extract(data, '$.url') LIKE '%' || ? || '%'")
+		self.assertEqual(params, ['login'])
+
+	def test_regex_op(self):
+		sql, params = self._where({'url': {'$regex': r'example\.com'}})
+		self.assertEqual(sql, "json_extract(data, '$.url') REGEXP ?")
+		self.assertEqual(params, [r'example\.com'])
+
+	def test_and(self):
+		sql, params = self._where({'$and': [{'_type': 'url'}, {'name': 'x'}]})
+		self.assertEqual(sql, "(type = ? AND json_extract(data, '$.name') = ?)")
+		self.assertEqual(params, ['url', 'x'])
+
+	def test_or(self):
+		sql, params = self._where({'$or': [{'_type': 'url'}, {'_type': 'port'}]})
+		self.assertEqual(sql, "(type = ? OR type = ?)")
+		self.assertEqual(params, ['url', 'port'])
+
+	def test_empty(self):
+		sql, params = self._where({})
+		self.assertEqual(sql, "")
+		self.assertEqual(params, [])
+
+	def test_in_empty_list(self):
+		sql, params = self._where({'severity': {'$in': []}})
+		self.assertEqual(sql, "0")
+		self.assertEqual(params, [])
+
+	def test_or_empty_list(self):
+		sql, params = self._where({'$or': []})
+		self.assertEqual(sql, "0")
+		self.assertEqual(params, [])
+
+	def test_and_empty_list(self):
+		sql, params = self._where({'$and': []})
+		self.assertEqual(sql, "1=1")
+		self.assertEqual(params, [])
+
+	def test_dotted_field_allowed(self):
+		sql, params = self._where({'foo.bar': 'baz'})
+		self.assertEqual(sql, "json_extract(data, '$.foo.bar') = ?")
+		self.assertEqual(params, ['baz'])
+
+	def test_invalid_field_name_rejected(self):
+		from secator.query.sqlite import _build_where
+		with self.assertRaises(ValueError):
+			_build_where({"x') UNION SELECT 1 --": 'v'})
