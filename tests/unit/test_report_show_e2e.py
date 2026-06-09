@@ -3,6 +3,7 @@
 """End-to-end CLI tests for `secator r show -q <QUERY>` with all query backends."""
 
 import json
+import re
 import shutil
 import tempfile
 import unittest
@@ -10,6 +11,11 @@ from pathlib import Path
 from unittest import mock
 
 from click.testing import CliRunner
+
+
+def _strip_ansi(text):
+	return re.sub(r'\x1b(?:\[[0-9;]*m|\][^\x1b]*\x1b\\)', '', text)
+
 
 WORKSPACE = 'e2e_ws'
 
@@ -126,7 +132,7 @@ class TestReportShowLocalBackend(unittest.TestCase):
 		result = self._invoke_with_paths('tasks/1')
 		self.assertIsNone(result.exception, str(result.exception))
 		self.assertEqual(result.exit_code, 0)
-		self.assertIn('searched: tasks/1', result.output)
+		self.assertIn('searched: tasks/1', _strip_ansi(result.output))
 
 	def test_info_line_no_searched_without_query(self):
 		"""Without a report_query, the summary line omits the 'searched' suffix."""
@@ -367,8 +373,8 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 				workspace=workspace_opt, runner_type=None, time_delta=None, show_all=False, interesting=False,
 				status=None,
 			)
-		# Flatten whitespace so console line-wrapping doesn't split asserted phrases
-		return ' '.join(cap.get().split())
+		# Strip ANSI codes then flatten whitespace so assertions work on plain text
+		return ' '.join(_strip_ansi(cap.get()).split())
 
 	def test_uses_ws_option_when_passed(self):
 		out = self._run_list(workspace_opt='vulnweb', default_ws='defws')
