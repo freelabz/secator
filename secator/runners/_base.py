@@ -471,6 +471,23 @@ class Runner:
 		self.register_hooks(merged_hooks)
 
 	@classmethod
+	def requires_local_execution(cls, inputs, run_opts):
+		"""Whether this invocation must run locally (sync), bypassing worker dispatch.
+
+		Some invocations are inherently interactive or local-only (e.g. an
+		interactive setup wizard) and must never be dispatched to a Celery worker,
+		even when one is alive. Subclasses override this to opt specific inputs in.
+
+		Args:
+			inputs (str | list): Expanded CLI inputs/targets.
+			run_opts (dict): Run options.
+
+		Returns:
+			bool: True to force local (sync) execution.
+		"""
+		return False
+
+	@classmethod
 	def delay(cls, config, targets, **run_opts):
 		"""Run runner asynchronously via Celery.
 
@@ -1310,10 +1327,18 @@ class Runner:
 			elif isinstance(p, TemplateLoader):
 				existing_profile_names.add(p.name)
 
-		default_profiles = CONFIG.profiles.defaults
-		for p in default_profiles:
+		# Add global default profiles
+		for p in list(CONFIG.profiles.defaults):
 			if p not in existing_profile_names:
 				profiles.append(p)
+				existing_profile_names.add(p)
+
+		# Add workspace-specific default profiles
+		workspace_defaults = CONFIG.workspace.profiles.get(self.workspace_name, [])
+		for p in workspace_defaults:
+			if p not in existing_profile_names:
+				profiles.append(p)
+				existing_profile_names.add(p)
 
 		# Abort if no profiles
 		if not profiles:

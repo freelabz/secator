@@ -328,7 +328,10 @@ def register_runner(cli_endpoint, config):
 		hooks = deep_merge_dicts(*hooks)
 
 		# Enable sync or not
-		if sync or dry_run:
+		# Some task invocations are interactive/local-only (e.g. `ai setup`) and must
+		# never be dispatched to a worker, even when one is alive.
+		force_local = cli_endpoint.name == 'task' and task_cls.requires_local_execution(inputs, opts)
+		if sync or dry_run or force_local:
 			sync = True
 		else:
 			from secator.celery import is_celery_worker_alive

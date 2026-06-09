@@ -43,6 +43,81 @@ def parse_report_paths(paths_str):
     return result
 
 
+RUNNER_TYPES = {'task', 'tasks', 'workflow', 'workflows', 'scan', 'scans'}
+
+
+def expand_runner_paths(tokens):
+    """Expand runner path tokens into individual runner references.
+
+    Each token may be space-separated (passed as separate list items),
+    comma-separated, and may contain inclusive numeric ranges. Examples:
+        ['tasks/23', 'workflows/21']  → [('tasks', 'task', '23'), ('workflows', 'workflow', '21')]
+        ['tasks/23,tasks/24']         → [('tasks', 'task', '23'), ('tasks', 'task', '24')]
+        ['tasks/136-140']             → tasks 136, 137, 138, 139, 140
+
+    Args:
+        tokens (str | iterable[str]): One or more path tokens.
+
+    Returns:
+        tuple[list, list]: (refs, errors) where refs is an order-preserving,
+        de-duplicated list of (type_plural, type_singular, number) tuples and
+        errors is a list of human-readable error strings for invalid tokens.
+    """
+    if isinstance(tokens, str):
+        tokens = [tokens]
+
+    refs = []
+    errors = []
+    seen = set()
+
+    parts = []
+    for token in tokens:
+        parts.extend(p.strip() for p in token.split(',') if p.strip())
+
+    for part in parts:
+        if '/' not in part:
+            errors.append(f'Invalid runner path: {part!r}. Expected format: <type>/<id> (e.g. tasks/24)')
+            continue
+        runner_type_raw, spec = part.split('/', 1)
+        runner_type_raw = runner_type_raw.strip().lower()
+        spec = spec.strip().rstrip('/')
+
+        if runner_type_raw not in RUNNER_TYPES:
+            errors.append(f'Invalid runner type: {runner_type_raw!r}. Must be one of: task, workflow, scan.')
+            continue
+
+        type_plural = runner_type_raw if runner_type_raw.endswith('s') else runner_type_raw + 's'
+        type_singular = type_plural[:-1]
+
+        # Range (e.g. "136-140") or single number
+        if '-' in spec:
+            start_str, _, end_str = spec.partition('-')
+            start_str, end_str = start_str.strip(), end_str.strip()
+            if not (start_str.isdigit() and end_str.isdigit()):
+                errors.append(f'Invalid range: {spec!r} in {part!r}. Both bounds must be numeric (e.g. 136-140).')
+                continue
+            start, end = int(start_str), int(end_str)
+            if start > end:
+                errors.append(f'Invalid range: {spec!r} in {part!r}. Start must be <= end.')
+                continue
+            numbers = [str(n) for n in range(start, end + 1)]
+        else:
+            if not spec.isdigit():
+                errors.append(f'Invalid runner number: {spec!r} in {part!r}. Must be numeric.')
+                continue
+            numbers = [str(int(spec))]
+
+        for number in numbers:
+            key = (type_plural, number)
+            if key in seen:
+                continue
+            seen.add(key)
+            refs.append((type_plural, type_singular, number))
+
+    debug('expand_runner_paths', sub='query', obj={'input': list(tokens), 'refs': refs, 'errors': errors})
+    return refs, errors
+
+
 def _split_logical_op(query, op):
     """Split query string on logical operator, skipping quoted substrings."""
     parts = []
@@ -284,3 +359,23 @@ def python_expr_to_mongo(query):
 
     debug('python_expr_to_mongo', sub='query', obj={'input': query, 'output': result})
     return result
+
+
+def query_has_type_constraint(query):
+    """Check whether a MongoDB-style query contains a '_type' constraint anywhere (recursively).
+
+    Args:
+        query (dict | list): MongoDB-style query (or sub-query list from $and / $or).
+
+    Returns:
+        bool: True if a '_type' key is present at any nesting level.
+    """
+    if isinstance(query, dict):
+        for key, value in query.items():
+            if key == '_type':
+                return True
+            if isinstance(value, (dict, list)) and query_has_type_constraint(value):
+                return True
+    elif isinstance(query, list):
+        return any(query_has_type_constraint(item) for item in query)
+    return False
