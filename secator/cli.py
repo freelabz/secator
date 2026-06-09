@@ -888,7 +888,7 @@ def workspace_delete(name, driver, yes):
 # ----------#
 
 
-@cli.group(aliases=['p', 'profiles'])
+@cli.group(aliases=['p', 'pf', 'profiles'])
 @click.pass_context
 def profile(ctx):
 	"""Profiles"""
@@ -897,13 +897,29 @@ def profile(ctx):
 
 @profile.command('list')
 def profile_list():
-	table = Table()
+	table = Table(highlight=True)
 	table.add_column('Profile name', style='bold gold3')
 	table.add_column('Description', overflow='fold')
+	table.add_column('Enforced', justify='center')
+	table.add_column('Workspace', overflow='fold')
+	table.add_column('Drivers', overflow='fold')
+	table.add_column('Exporters', overflow='fold')
 	table.add_column('Options', overflow='fold')
 	for profile in PROFILES:
-		opts_str = ', '.join(f'[yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items())
-		table.add_row(profile.name, profile.description or '', opts_str)
+		opts_str = ', '.join(f'[yellow3]{k}[/]={v}' for k, v in profile.opts.items())
+		enforced_str = '[bold red]✓[/]' if profile.enforce else ''
+		workspace_str = profile.workspace or ''
+		drivers_str = ','.join(profile.drivers) if profile.drivers else ''
+		exporters_str = ','.join(profile.exporters) if profile.exporters else ''
+		table.add_row(
+			profile.name,
+			profile.description or '',
+			enforced_str,
+			workspace_str,
+			drivers_str,
+			exporters_str,
+			opts_str,
+		)
 	console.print(table)
 
 
@@ -1088,10 +1104,25 @@ def _apply_format(results, fmt):
 		results (dict): Report results keyed by type name.
 		fmt (str): Format spec(s), optionally pipe-separated per type.
 			E.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'
+			May also be a file path (< 255 chars, file must exist) to load the template from disk.
 
 	Returns:
 		dict: Results dict with items replaced by formatted strings (only matching types kept).
 	"""
+	fmt = fmt.strip()
+
+	# Auto-detect format file: if fmt looks like a path and the file exists, load it.
+	if len(fmt) < 255:
+		p = Path(fmt)
+		if p.is_file():
+			try:
+				fmt = p.read_text(encoding='utf-8')
+			except (OSError, UnicodeDecodeError) as exc:
+				raise click.UsageError(f'Could not read --format template file "{p}": {exc}') from exc
+
+	# Unescape common escape sequences so CLI users can write \n, \t in their format strings.
+	fmt = fmt.replace('\\n', '\n').replace('\\t', '\t')
+
 	specs = [s.strip() for s in re.split(r'\s*\|\|\s*', fmt) if s.strip()]
 	new_results = {}
 
@@ -1394,15 +1425,6 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 	table.add_column('Vulnerabilities')
 	if show_all:
 		table.add_column('Path')
-
-	# Print paths if piped
-	if ctx.obj['piped_output']:
-		if not paths:
-			console.print(Error(message='No reports found.'))
-			return
-		for path in paths:
-			print(path)
-		return
 
 	# Load each report
 	for path in paths:

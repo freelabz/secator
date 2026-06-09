@@ -317,7 +317,7 @@ class Runner:
 		if source == self.unique_name:
 			return True
 		prefix = self.unique_name + '_'
-		return source.startswith(prefix) and source[len(prefix):].isdigit()
+		return source.startswith(prefix) and source[len(prefix) :].isdigit()
 
 	@property
 	def self_targets(self):
@@ -455,6 +455,7 @@ class Runner:
 		drivers = self.context.get('drivers', [])
 		if drivers:
 			from secator.loader import discover_external_drivers
+
 			discover_external_drivers()
 		hooks_list = []
 		for driver in drivers:
@@ -464,6 +465,7 @@ class Runner:
 		merged_hooks = {}
 		if hooks_list:
 			from secator.utils import deep_merge_dicts
+
 			merged_hooks = deep_merge_dicts(*hooks_list)
 		self.register_hooks(merged_hooks)
 
@@ -1342,26 +1344,127 @@ class Runner:
 		non_enforced_templates = [p for p in templates if not p.enforce]
 		templates = non_enforced_templates + enforced_templates
 		profile_opts = {}
+		profile_workspace = None
+		profile_drivers = []
+		profile_exporters = None
+		default_ws = CONFIG.workspace.default or 'default'
 		for profile in templates:
 			self.debug(f'profile {profile.name} opts (enforced: {profile.enforce}): {profile.opts}', sub='init')
 			enforced = profile.enforce or False
 			description = profile.description or ''
+
+			# Merge opts (enforced overrides user opts; otherwise user opts win)
 			if enforced:
 				profile_opts.update(profile.opts)
 			else:
 				profile_opts.update({k: self.run_opts.get(k) or v for k, v in profile.opts.items()})
+
+			# Merge workspace (scalar): enforced overrides; otherwise apply only if user kept the default
+			ws = profile.workspace or None
+			if ws:
+				if enforced:
+					profile_workspace = ws
+				elif profile_workspace is None and self.workspace_name == default_ws:
+					profile_workspace = ws
+
+			# Merge drivers (list): always additive (hooks cannot be unregistered once loaded)
+			drivers = list(profile.drivers) if profile.drivers else []
+			if drivers:
+				profile_drivers.extend(drivers)
+
+			# Merge exporters (list): enforced replaces; otherwise union with user/config exporters
+			exporters = list(profile.exporters) if profile.exporters else []
+			if exporters:
+				if enforced:
+					profile_exporters = list(exporters)
+				else:
+					current = self.run_opts.get('output')
+					if isinstance(current, str):
+						current = [e for e in current.split(',') if e]
+					base = profile_exporters if profile_exporters is not None else (current or [])
+					profile_exporters = list(dict.fromkeys(base + exporters))
+
+			# Print loaded profile info
 			if self.print_profiles:
 				msg = f'Loaded profile [bold pink3]{profile.name}[/]'
 				if description:
 					msg += f' ([dim]{description}[/])'
 				if enforced:
 					msg += ' [bold red](enforced)[/]'
-				profile_opts_str = ', '.join([f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items()])
+				profile_fields = dict(profile.opts)
+				if ws:
+					profile_fields['workspace'] = ws
+				if drivers:
+					profile_fields['drivers'] = drivers
+				if exporters:
+					profile_fields['exporters'] = exporters
+				profile_opts_str = ', '.join([f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile_fields.items()])  # noqa: E501
 				msg += rf' \[[dim]{profile_opts_str}[/]]'
 				self._print(Info(message=msg), rich=True)
+
+		# Apply opts
 		if profile_opts:
 			self.run_opts.update(profile_opts)
+
+		# Apply workspace (used downstream to build report folders)
+		if profile_workspace:
+			self.debug(f'profile workspace -> {profile_workspace}', sub='init')
+			self.workspace_name = profile_workspace
+			self.context['workspace_name'] = profile_workspace
+			self.context['workspace_id'] = profile_workspace
+
+		# Apply exporters (consumed from run_opts['output'] right after profile resolution)
+		if profile_exporters is not None:
+			self.debug(f'profile exporters -> {profile_exporters}', sub='init')
+			self.run_opts['output'] = ','.join(profile_exporters)
+
+		# Apply drivers (load + register hooks; context['drivers'] is reused by worker __setstate__)
+		if profile_drivers:
+			self._apply_profile_drivers(profile_drivers)
+
 		return templates
+
+	def _apply_profile_drivers(self, drivers):
+		"""Load and register driver hooks specified by profiles.
+
+		Drivers are added to ``context['drivers']`` (deduped) so their hooks are also
+		re-loaded on Celery workers via :meth:`Runner.__setstate__`. Hooks are only loaded
+		for drivers not already present, since CLI-provided drivers are already registered.
+
+		Args:
+			drivers (list[str]): Driver names specified by profiles.
+		"""
+		from secator.loader import discover_external_drivers, get_available_drivers
+		from secator.utils import deep_merge_dicts
+
+		existing = list(self.context.get('drivers', []))
+		new_drivers = [d for d in dict.fromkeys(drivers) if d not in existing]
+		if not new_drivers:
+			return
+		discover_external_drivers()
+		supported = get_available_drivers()
+		hooks_list = []
+		validated = []
+		for driver in new_drivers:
+			if driver not in supported:
+				self._print(Warning(message=f'Profile driver "{driver}" is not supported - skipping.'), rich=True)
+				continue
+			if driver in ADDONS_ENABLED and not ADDONS_ENABLED[driver]:
+				self._print(Warning(message=f'Profile driver "{driver}" requires the "{driver}" addon: run `secator install addons {driver}` - skipping.'), rich=True)  # noqa: E501
+				continue
+			driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
+			if driver_hooks is None:
+				self._print(Warning(message=f'Missing "secator.hooks.{driver}.HOOKS" - skipping.'), rich=True)
+				continue
+			validated.append(driver)
+			hooks_list.append(driver_hooks)
+		if not validated:
+			return
+		self.debug(f'profile drivers -> {validated}', sub='init')
+		merged_hooks = deep_merge_dicts(*hooks_list)
+		self.register_hooks(merged_hooks)
+		self._hooks = deep_merge_dicts(self._hooks, merged_hooks)
+		self.context['drivers'] = list(dict.fromkeys(existing + validated))
 
 	@classmethod
 	def get_func_path(cls, func):
