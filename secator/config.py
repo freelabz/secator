@@ -471,9 +471,10 @@ class Config(DotMap):
 		Args:
 			parent_parts (list[str]): Path components to the dict field (e.g. ['wordlists', 'defaults']).
 			subkey (str | None): Key within the dict to set/remove.
-			value (Any): Value to set.
+			value (Any): Value to set, or item to remove when strategy='remove'.
 			set_partial (bool): Set in partial config.
-			strategy (str | None): 'remove' to delete the subkey.
+			strategy (str | None): 'remove' to delete the subkey or remove a list item;
+				'append' to append to an existing list value; None to replace.
 		"""
 		# Navigate to the dict
 		existing_dict = self
@@ -485,17 +486,55 @@ class Config(DotMap):
 			return
 
 		updated = dict(existing_dict)
+		parent_path = '.'.join(parent_parts)
+
 		if strategy == 'remove':
 			if subkey and subkey in updated:
-				del updated[subkey]
+				existing_val = updated[subkey]
+				if isinstance(existing_val, list) and value is not None:
+					# Remove item from list rather than deleting the key
+					if value in existing_val:
+						updated[subkey] = [v for v in existing_val if v != value]
+					else:
+						console.print(f'[bold orange1]Value "{value}" not found in {parent_path}.{subkey}[/].')
+						return
+				else:
+					del updated[subkey]
 			elif subkey:
-				console.print(f'[bold orange1]Key "{subkey}" not found in {".".join(parent_parts)}[/].')
+				console.print(f'[bold orange1]Key "{subkey}" not found in {parent_path}[/].')
 				return
-		else:
+		elif strategy == 'append':
 			if subkey:
-				updated[subkey] = Config._parse_new_value(value)
+				existing_val = updated.get(subkey, [])
+				parsed = Config._parse_new_value(value)
+				items = parsed if isinstance(parsed, list) else [parsed]
+				if isinstance(existing_val, list):
+					new_list = list(existing_val)
+					for item in items:
+						if item not in new_list:
+							new_list.append(item)
+					updated[subkey] = new_list
+				else:
+					updated[subkey] = Config._parse_new_value(value)
 			elif isinstance(value, dict):
 				updated.update(value)
+		else:
+			if subkey:
+				new_val = Config._parse_new_value(value)
+				# For workspace.default_profiles, always coerce single strings to list
+				if parent_path == 'workspace.default_profiles' and isinstance(new_val, str):
+					new_val = [new_val]
+				updated[subkey] = new_val
+			elif isinstance(value, dict):
+				updated.update(value)
+
+		# Validate profile names when setting workspace.default_profiles values
+		if parent_path == 'workspace.default_profiles' and subkey and subkey in updated and strategy != 'remove':
+			new_val = updated[subkey]
+			if new_val:
+				profile_names = new_val if isinstance(new_val, list) else [new_val]
+				if not Config._validate_profile_names(profile_names):
+					return
 
 		# Traverse to the parent of the dict to set the updated value
 		target = self
