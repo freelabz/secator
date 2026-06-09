@@ -428,6 +428,103 @@ class TestQueryEngineUpdate(unittest.TestCase):
 		)
 
 
+class TestSqliteBackend(unittest.TestCase):
+	def setUp(self):
+		import tempfile
+		import json
+		from pathlib import Path
+		import secator.hooks.sqlite as sqlite_mod
+		from secator.config import CONFIG
+
+		self.sqlite_mod = sqlite_mod
+		self.temp_dir = tempfile.mkdtemp()
+		self.db_path = str(Path(self.temp_dir) / 'test.db')
+		self._orig_path = CONFIG.addons.sqlite.path
+		CONFIG.addons.sqlite.path = self.db_path
+		sqlite_mod._conns.clear()
+		self.ws = 'ws1'
+		conn = sqlite_mod.get_sqlite_conn()
+		rows = [
+			('u1', 'vulnerability', self.ws, 0, {'_type': 'vulnerability', 'name': 'SQLi',
+				'severity': 'critical', 'matched_at': 'http://x/login', 'is_false_positive': False,
+				'_context': {'workspace_id': self.ws, 'workspace_duplicate': False}}),
+			('u2', 'vulnerability', self.ws, 0, {'_type': 'vulnerability', 'name': 'XSS',
+				'severity': 'medium', 'matched_at': 'http://x/search', 'is_false_positive': False,
+				'_context': {'workspace_id': self.ws, 'workspace_duplicate': False}}),
+			('u3', 'url', self.ws, 0, {'_type': 'url', 'url': 'http://x/login',
+				'is_false_positive': False, '_context': {'workspace_id': self.ws, 'workspace_duplicate': False}}),
+		]
+		for uuid_, type_, ws, fp, data in rows:
+			conn.execute(
+				"INSERT INTO findings (uuid, type, workspace_id, is_false_positive, _tagged, data) "
+				"VALUES (?, ?, ?, ?, 0, ?)",
+				(uuid_, type_, ws, fp, json.dumps(data)))
+		conn.commit()
+
+	def tearDown(self):
+		import shutil
+		from secator.config import CONFIG
+		for conn in self.sqlite_mod._conns.values():
+			conn.close()
+		self.sqlite_mod._conns.clear()
+		CONFIG.addons.sqlite.path = self._orig_path
+		shutil.rmtree(self.temp_dir)
+
+	def _backend(self):
+		from secator.query.sqlite import SqliteBackend
+		return SqliteBackend(workspace_id=self.ws)
+
+	def test_search_by_type(self):
+		results = self._backend().search({'_type': 'vulnerability'})
+		self.assertEqual(len(results), 2)
+		self.assertTrue(all(r['_type'] == 'vulnerability' for r in results))
+
+	def test_search_with_in_operator(self):
+		results = self._backend().search({'_type': 'vulnerability', 'severity': {'$in': ['critical', 'high']}})
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]['name'], 'SQLi')
+
+	def test_search_contains(self):
+		results = self._backend().search({'matched_at': {'$contains': 'login'}})
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]['name'], 'SQLi')
+
+	def test_search_regex(self):
+		results = self._backend().search({'matched_at': {'$regex': r'/search'}})
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]['name'], 'XSS')
+
+	def test_count(self):
+		self.assertEqual(self._backend().count({'_type': 'vulnerability'}), 2)
+
+	def test_base_query_enforces_workspace(self):
+		results = self._backend().search({})
+		self.assertTrue(all(r['_context']['workspace_id'] == self.ws for r in results))
+
+	def test_limit(self):
+		results = self._backend().search({}, limit=1)
+		self.assertEqual(len(results), 1)
+
+	def test_exclude_fields(self):
+		results = self._backend().search({'_type': 'url'}, exclude_fields=['url'])
+		self.assertNotIn('url', results[0])
+
+	def test_update(self):
+		backend = self._backend()
+		n = backend.update({'_type': 'url'}, {'$set': {'status_code': 404}})
+		self.assertEqual(n, 1)
+		results = backend.search({'_type': 'url'})
+		self.assertEqual(results[0]['status_code'], 404)
+
+	def test_update_rejects_malicious_field_name(self):
+		backend = self._backend()
+		with self.assertRaises(ValueError):
+			backend.update({'_type': 'url'}, {'$set': {"x', type = 'pwned' --": 1}})
+		# Confirm no row was corrupted: the url row still has type 'url'.
+		results = backend.search({'_type': 'url'})
+		self.assertEqual(len(results), 1)
+
+
 class TestSqliteWiring(unittest.TestCase):
 	def test_sqlite_in_available_drivers(self):
 		from secator.loader import get_available_drivers
