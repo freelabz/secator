@@ -147,6 +147,10 @@ class Drivers(StrictModel):
 	defaults: List[str] = []
 
 
+class Backends(StrictModel):
+	current: str = 'local'
+
+
 class Workspace(StrictModel):
 	default: str = ''
 	routes: Dict[str, List[str]] = {}
@@ -282,8 +286,10 @@ class ApiAddon(StrictModel):
 	finding_create_endpoint: str = 'findings'
 	finding_update_endpoint: str = 'finding/{finding_id}'
 	finding_search_endpoint: str = 'findings/_search'
+	workspace_list_endpoint: str = 'workspaces'
 	workspace_get_endpoint: str = 'workspace/{workspace_id}'
 	workspace_delete_endpoint: str = 'workspace/{workspace_id}'
+	runners_list_endpoint: str = 'runners'
 	runner_delete_endpoint: str = '{runner_type}/{runner_id}'
 
 
@@ -312,6 +318,7 @@ class SecatorConfig(StrictModel):
 	wordlists: Wordlists = Wordlists()
 	profiles: Profiles = Profiles()
 	drivers: Drivers = Drivers()
+	backends: Backends = Backends()
 	workspace: Workspace = Workspace()
 	addons: Addons = Addons()
 	security: Security = Security()

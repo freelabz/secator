@@ -88,3 +88,51 @@ class ApiBackend(QueryBackend):
         payload = {"query": query, "update": update}
         result = self._make_request("PATCH", "findings/update", data=payload)
         return result.get("modified_count", 0)
+
+    def list_workspaces(self):
+        """List workspaces from API."""
+        try:
+            endpoint = CONFIG.addons.api.workspace_list_endpoint
+            result = self._make_request('GET', endpoint)
+            if isinstance(result, list):
+                return result
+            elif isinstance(result, dict) and 'items' in result:
+                return result['items']
+            elif isinstance(result, dict) and 'results' in result:
+                return result['results']
+            return []
+        except Exception as e:
+            console.print(Warning(message=f'API list_workspaces failed: {e}'))
+            return []
+
+    def get_workspace(self, workspace_id: str):
+        """Get workspace info from API."""
+        try:
+            endpoint = CONFIG.addons.api.workspace_get_endpoint.format(workspace_id=workspace_id)
+            return self._make_request('GET', endpoint)
+        except Exception as e:
+            console.print(Warning(message=f'API get_workspace failed: {e}'))
+            return None
+
+    def list_runners(self, workspace_id: str = None, runner_type: str = None):
+        """List runners from API."""
+        try:
+            endpoint = CONFIG.addons.api.runners_list_endpoint
+            params = []
+            if workspace_id:
+                params.append(f'workspace_id={workspace_id}')
+            if runner_type:
+                params.append(f'type={runner_type}')
+            if params:
+                endpoint += '?' + '&'.join(params)
+            result = self._make_request('GET', endpoint)
+            if isinstance(result, list):
+                return result
+            elif isinstance(result, dict) and 'items' in result:
+                return result['items']
+            elif isinstance(result, dict) and 'results' in result:
+                return result['results']
+            return []
+        except Exception as e:
+            console.print(Warning(message=f'API list_runners failed: {e}'))
+            return []

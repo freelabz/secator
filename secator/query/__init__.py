@@ -26,17 +26,25 @@ class QueryEngine:
         self.backend = self._select_backend()
 
     def _select_backend(self) -> QueryBackend:
-        """Select appropriate backend based on context."""
+        """Select appropriate backend based on context or config default."""
+        from secator.config import CONFIG
         drivers = self.context.get('drivers', [])
         if 'mongodb' in drivers:
             return MongoDBBackend(self.workspace_id, context=self.context)
         elif 'api' in drivers:
             return ApiBackend(self.workspace_id, context=self.context)
         else:
-            # For JSON backend, use workspace_name for directory (reports are saved by name)
-            workspace_name = self.context.get('workspace_name', self.workspace_id)
-            results = self.context.get('results')
-            return JsonBackend(workspace_name, context=self.context, results=results)
+            # Fall back to config default backend
+            current = CONFIG.backends.current
+            if current == 'mongodb':
+                return MongoDBBackend(self.workspace_id, context=self.context)
+            elif current == 'api':
+                return ApiBackend(self.workspace_id, context=self.context)
+            else:
+                # For JSON backend, use workspace_name for directory (reports are saved by name)
+                workspace_name = self.context.get('workspace_name', self.workspace_id)
+                results = self.context.get('results')
+                return JsonBackend(workspace_name, context=self.context, results=results)
 
     def search(self, query: dict, limit: int = 0, dedupe: bool = False,
                exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
@@ -55,3 +63,15 @@ class QueryEngine:
     def update(self, query: dict, update: dict) -> int:
         """Update records matching query."""
         return self.backend.update(query, update)
+
+    def list_workspaces(self) -> List[Dict[str, Any]]:
+        """List all workspaces via the active backend."""
+        return self.backend.list_workspaces()
+
+    def get_workspace(self, workspace_id: str) -> Dict[str, Any]:
+        """Get info for a specific workspace via the active backend."""
+        return self.backend.get_workspace(workspace_id)
+
+    def list_runners(self, workspace_id: str = None, runner_type: str = None) -> List[Dict[str, Any]]:
+        """List runners (tasks/workflows/scans) via the active backend."""
+        return self.backend.list_runners(workspace_id=workspace_id, runner_type=runner_type)

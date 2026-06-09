@@ -194,3 +194,44 @@ class JsonBackend(QueryBackend):
 					self._results[i][k] = v
 				count += 1
 		return count
+
+	def list_workspaces(self):
+		"""List workspaces from local reports directory."""
+		workspaces = []
+		if self.reports_dir.exists():
+			for child in sorted(self.reports_dir.iterdir()):
+				if child.is_dir():
+					workspaces.append({
+						'workspace_id': child.name,
+						'workspace_name': child.name,
+						'path': str(child),
+					})
+		return workspaces
+
+	def get_workspace(self, workspace_id: str):
+		"""Get workspace info from local filesystem."""
+		workspace_path = self.reports_dir / sanitize_folder_name(workspace_id)
+		if workspace_path.exists():
+			return {'workspace_id': workspace_id, 'workspace_name': workspace_id, 'path': str(workspace_path)}
+		return None
+
+	def list_runners(self, workspace_id: str = None, runner_type: str = None):
+		"""List runners from local report JSON files."""
+		import json as _json
+		from secator.utils import list_reports, get_info_from_report_path
+		paths = list_reports(workspace=workspace_id, type=runner_type)
+		runners = []
+		for path in paths:
+			try:
+				path_info = get_info_from_report_path(path)
+				with open(path, 'r') as f:
+					data = _json.load(f)
+				info = data.get('info', {})
+				info['_type'] = path_info.get('type', '')
+				info['_id'] = path_info.get('type', '') + '/' + path_info.get('id', '')
+				info['_workspace'] = path_info.get('workspace', '')
+				info['_path'] = str(path)
+				runners.append(info)
+			except Exception:
+				continue
+		return runners

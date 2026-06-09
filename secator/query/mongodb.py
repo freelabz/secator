@@ -67,3 +67,76 @@ class MongoDBBackend(QueryBackend):
 		client = self._get_client()
 		result = client.main.findings.update_one(query, update)
 		return result.modified_count
+
+	def list_workspaces(self):
+		"""List workspaces by aggregating workspace_id from the findings collection."""
+		try:
+			client = self._get_client()
+			db = client.main
+			pipeline = [
+				{'$group': {
+					'_id': '$_context.workspace_id',
+					'workspace_name': {'$first': '$_context.workspace_name'},
+					'count': {'$sum': 1},
+				}},
+				{'$project': {
+					'_id': 0,
+					'workspace_id': '$_id',
+					'workspace_name': 1,
+					'count': 1,
+				}},
+				{'$sort': {'workspace_id': 1}},
+			]
+			return list(db.findings.aggregate(pipeline))
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB list_workspaces failed: {e}'))
+			return []
+
+	def get_workspace(self, workspace_id: str):
+		"""Get workspace info from MongoDB by aggregating findings for workspace_id."""
+		try:
+			client = self._get_client()
+			db = client.main
+			pipeline = [
+				{'$match': {'_context.workspace_id': workspace_id}},
+				{'$group': {
+					'_id': '$_context.workspace_id',
+					'workspace_name': {'$first': '$_context.workspace_name'},
+					'count': {'$sum': 1},
+				}},
+				{'$project': {
+					'_id': 0,
+					'workspace_id': '$_id',
+					'workspace_name': 1,
+					'count': 1,
+				}},
+			]
+			results = list(db.findings.aggregate(pipeline))
+			return results[0] if results else None
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB get_workspace failed: {e}'))
+			return None
+
+	def list_runners(self, workspace_id: str = None, runner_type: str = None):
+		"""List runners from MongoDB tasks/workflows/scans collections."""
+		try:
+			client = self._get_client()
+			db = client.main
+			runner_types = [runner_type + 's'] if runner_type else ['tasks', 'workflows', 'scans']
+			runners = []
+			for rtype in runner_types:
+				query = {}
+				if workspace_id:
+					query['context.workspace_id'] = workspace_id
+				for doc in db[rtype].find(query):
+					doc.pop('_id', None)
+					doc['_type'] = rtype
+					rtype_singular = rtype.rstrip('s')
+					runner_id = doc.get('context', {}).get(f'{rtype_singular}_id', '')
+					doc['_id_str'] = f'{rtype}/{runner_id}' if runner_id else rtype
+					doc['_workspace'] = doc.get('context', {}).get('workspace_id', '')
+					runners.append(doc)
+			return runners
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB list_runners failed: {e}'))
+			return []

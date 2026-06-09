@@ -21,6 +21,18 @@ class QueryBackend(ABC):
 		self.config = config or {}
 		self.context = context or {}
 
+	def list_workspaces(self) -> List[Dict[str, Any]]:
+		"""List all workspaces accessible via this backend."""
+		return []
+
+	def get_workspace(self, workspace_id: str) -> Optional[Dict[str, Any]]:
+		"""Get info for a specific workspace."""
+		return None
+
+	def list_runners(self, workspace_id: str = None, runner_type: str = None) -> List[Dict[str, Any]]:
+		"""List runners (tasks/workflows/scans) from this backend."""
+		return []
+
 	def get_base_query(self) -> dict:
 		"""Base query - ALWAYS enforced, cannot be overridden."""
 		return {

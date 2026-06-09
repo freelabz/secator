@@ -772,38 +772,52 @@ def workspace():
 
 
 @workspace.command('list')
-def workspace_list():
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
+def workspace_list(driver):
 	"""List workspaces"""
-	workspaces = {}
-	reports_dir = Path(CONFIG.dirs.reports)
-	# Discover all workspace directories (including empty ones)
-	if reports_dir.exists():
-		for child in sorted(reports_dir.iterdir()):
-			if child.is_dir():
-				workspaces[child.name] = {'count': 0, 'path': str(child)}
-	# Count reports per workspace
-	json_reports = []
-	for root, _, files in os.walk(CONFIG.dirs.reports):
-		for file in files:
-			if file.endswith('report.json'):
-				path = Path(root) / file
-				json_reports.append(path)
-	json_reports = sorted(json_reports, key=lambda x: x.stat().st_mtime, reverse=False)
-	for path in json_reports:
-		ws, runner_type, number = str(path).split('/')[-4:-1]
-		if ws not in workspaces:
-			workspaces[ws] = {'count': 0, 'path': '/'.join(str(path).split('/')[:-3])}
-		workspaces[ws]['count'] += 1
+	from secator.query import QueryEngine
 
-	# Build table
+	effective_driver = driver or CONFIG.backends.current
+	context = {'drivers': [effective_driver] if effective_driver and effective_driver != 'local' else []}
+	engine = QueryEngine(workspace_id='', context=context)
+
 	table = Table()
-	table.add_column('Workspace name', style='bold gold3')
-	table.add_column('Run count', overflow='fold')
-	table.add_column('Path')
-	for workspace, config in workspaces.items():
-		table.add_row(workspace, str(config['count']), config['path'])
-	console.print(table)
 	current = CONFIG.workspace.default or 'default'
+
+	if effective_driver in ('mongodb', 'api'):
+		workspaces = engine.list_workspaces()
+		table.add_column('Workspace name', style='bold gold3')
+		table.add_column('Findings count', overflow='fold')
+		for ws in workspaces:
+			ws_name = ws.get('workspace_id') or ws.get('workspace_name', '')
+			count = str(ws.get('count', ''))
+			table.add_row(ws_name, count)
+	else:
+		workspaces_dict = {}
+		reports_dir = Path(CONFIG.dirs.reports)
+		if reports_dir.exists():
+			for child in sorted(reports_dir.iterdir()):
+				if child.is_dir():
+					workspaces_dict[child.name] = {'count': 0, 'path': str(child)}
+		json_reports = []
+		for root, _, files in os.walk(CONFIG.dirs.reports):
+			for file in files:
+				if file.endswith('report.json'):
+					path = Path(root) / file
+					json_reports.append(path)
+		json_reports = sorted(json_reports, key=lambda x: x.stat().st_mtime, reverse=False)
+		for path in json_reports:
+			ws, runner_type, number = str(path).split('/')[-4:-1]
+			if ws not in workspaces_dict:
+				workspaces_dict[ws] = {'count': 0, 'path': '/'.join(str(path).split('/')[:-3])}
+			workspaces_dict[ws]['count'] += 1
+		table.add_column('Workspace name', style='bold gold3')
+		table.add_column('Run count', overflow='fold')
+		table.add_column('Path')
+		for workspace, config in workspaces_dict.items():
+			table.add_row(workspace, str(config['count']), config['path'])
+
+	console.print(table)
 	console.print(Info(message=f'Current workspace: [bold gold3]{current}[/]. Use [bold green4]secator ws use <workspace>[/] to switch.'))  # noqa: E501
 
 
@@ -1455,14 +1469,16 @@ def _format_vuln_counts(counts):
 @click.option('-ws', '-w', '--workspace', type=str)
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
 @click.option('--show-all', is_flag=True, default=False, help='Show all columns including report path')
 @click.option('--interesting', '-i', is_flag=True, default=False, help='Only show reports that have vulnerabilities')
 @click.option('--status', type=str, default=None, help="Filter by runner status (case-insensitive regex, e.g. SUCCESS, FAIL, '(RUNNING|FAILURE)')")  # noqa: E501
 @click.pass_context
-def report_list(ctx, workspace, runner_type, time_delta, show_all, interesting, status):
+def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, interesting, status):
 	"""List all secator reports."""
-	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
-	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
+	from secator.query import QueryEngine
+
+	effective_driver = driver or CONFIG.backends.current
 
 	# --status is matched as a case-insensitive regex (e.g. 'FAIL' -> FAILURE, '(RUNNING|FAILURE)')
 	status_pattern = None
@@ -1489,45 +1505,85 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all, interesting, 
 	if show_all:
 		table.add_column('Path', overflow="fold")
 
-	# Load each report
 	shown = 0
-	for path in paths:
-		try:
-			path_info = get_info_from_report_path(path)
-			report_info, vuln_counts = _load_report_data(path)
-			if not _report_passes_filters(report_info, vuln_counts, interesting, status_pattern):
+
+	if effective_driver in ('mongodb', 'api'):
+		# Use QueryEngine backend to list runners
+		context = {'drivers': [effective_driver]}
+		engine = QueryEngine(workspace_id=workspace or '', context=context)
+		runners = engine.list_runners(workspace_id=workspace, runner_type=runner_type)
+		for runner_info in runners:
+			runner_status = runner_info.get('status', '')
+			status_color = STATE_COLORS.get(runner_status, 'white')
+			if status_pattern and not status_pattern.search(str(runner_status)):
 				continue
-			runner_id = path_info['type'] + '/' + path_info['id']
-			targets = report_info.get('targets', [])
+			targets = runner_info.get('targets', [])
 			first_target = str(targets[0]) if targets else ''
 			if len(targets) > 1:
 				first_target += f' (+{len(targets) - 1})'
-			profiles = report_info.get('run_opts', {}).get('profiles', [])
+			profiles = runner_info.get('run_opts', {}).get('profiles', [])
 			if isinstance(profiles, str):
 				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
 			profiles_str = ', '.join(profiles) if profiles else ''
-			runner_status = report_info.get('status', '')
-			status_color = STATE_COLORS[runner_status] if runner_status in STATE_COLORS else 'white'
-
-			# Update table
+			runner_id = runner_info.get('_id_str', runner_info.get('_type', ''))
+			ws_name = runner_info.get('_workspace', workspace or '')
 			row = [
-				path_info['workspace'],
-				f'[bold blue]{report_info.get("name", "")}[/]',
-				f'[link={Path(path).as_uri()}]{runner_id}[/link]',
+				ws_name,
+				f'[bold blue]{runner_info.get("name", "")}[/]',
+				runner_id,
 				first_target,
 				profiles_str,
-				humanize_date(report_info.get('start_time')),
-				humanize_date(report_info.get('end_time')),
-				report_info.get('elapsed_human', ''),
+				humanize_date(runner_info.get('start_time')),
+				humanize_date(runner_info.get('end_time')),
+				runner_info.get('elapsed_human', ''),
 				f"[{status_color}]{runner_status}[/]",
-				_format_vuln_counts(vuln_counts),
+				'-',
 			]
 			if show_all:
-				row.append(str(path))
+				row.append('')
 			table.add_row(*row)
 			shown += 1
-		except Exception as e:
-			console.print(Error(message=f'Could not load {path}: {str(e)}'))
+	else:
+		# Local filesystem listing
+		paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
+		paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
+
+		for path in paths:
+			try:
+				path_info = get_info_from_report_path(path)
+				report_info, vuln_counts = _load_report_data(path)
+				if not _report_passes_filters(report_info, vuln_counts, interesting, status_pattern):
+					continue
+				runner_id = path_info['type'] + '/' + path_info['id']
+				targets = report_info.get('targets', [])
+				first_target = str(targets[0]) if targets else ''
+				if len(targets) > 1:
+					first_target += f' (+{len(targets) - 1})'
+				profiles = report_info.get('run_opts', {}).get('profiles', [])
+				if isinstance(profiles, str):
+					profiles = [p.strip() for p in profiles.split(',') if p.strip()]
+				profiles_str = ', '.join(profiles) if profiles else ''
+				runner_status = report_info.get('status', '')
+				status_color = STATE_COLORS[runner_status] if runner_status in STATE_COLORS else 'white'
+
+				row = [
+					path_info['workspace'],
+					f'[bold blue]{report_info.get("name", "")}[/]',
+					f'[link={Path(path).as_uri()}]{runner_id}[/link]',
+					first_target,
+					profiles_str,
+					humanize_date(report_info.get('start_time')),
+					humanize_date(report_info.get('end_time')),
+					report_info.get('elapsed_human', ''),
+					f"[{status_color}]{runner_status}[/]",
+					_format_vuln_counts(vuln_counts),
+				]
+				if show_all:
+					row.append(str(path))
+				table.add_row(*row)
+				shown += 1
+			except Exception as e:
+				console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
 	if shown > 0:
 		console.print(table)
