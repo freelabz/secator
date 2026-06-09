@@ -1,3 +1,5 @@
+import re
+
 from secator.query.utils import (
     expand_runner_paths,
     parse_report_paths,
@@ -5,6 +7,10 @@ from secator.query.utils import (
     validate_query_fields,
     query_has_type_constraint,
 )
+
+
+def _strip_ansi(text):
+    return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
 
 class TestParseReportPaths:
@@ -304,8 +310,9 @@ class TestValidateQueryFields:
         result = validate_query_fields(q)
         assert result == {}
         captured = capfd.readouterr()
-        assert "Field 'name' does not exist on type 'technology'" in captured.err
-        assert 'product' in captured.err  # one of the available fields
+        err = _strip_ansi(captured.err)
+        assert "Field 'name' does not exist on type 'technology'" in err
+        assert 'product' in err  # one of the available fields
 
     def test_or_validates_each_fragment(self, capfd):
         # The technology fragment has no valid user fields, so it is dropped from $or.
@@ -319,7 +326,7 @@ class TestValidateQueryFields:
         result = validate_query_fields(q)
         assert result == {'_type': 'url', 'status_code': {'$ne': 200}}
         captured = capfd.readouterr()
-        assert "Field 'name' does not exist on type 'technology'" in captured.err
+        assert "Field 'name' does not exist on type 'technology'" in _strip_ansi(captured.err)
 
     def test_or_with_partial_invalid_fields(self, capfd):
         # When one fragment has some valid and some invalid fields, only the invalid
@@ -338,7 +345,7 @@ class TestValidateQueryFields:
             ]
         }
         captured = capfd.readouterr()
-        assert "Field 'name' does not exist on type 'technology'" in captured.err
+        assert "Field 'name' does not exist on type 'technology'" in _strip_ansi(captured.err)
 
     def test_and_validates_each_fragment(self, capfd):
         # The technology fragment (all user fields invalid) is dropped from $and.
@@ -352,7 +359,7 @@ class TestValidateQueryFields:
         result = validate_query_fields(q)
         assert result == {'_context.scan_id': '5'}
         captured = capfd.readouterr()
-        assert "Field 'name' does not exist on type 'technology'" in captured.err
+        assert "Field 'name' does not exist on type 'technology'" in _strip_ansi(captured.err)
 
     def test_unknown_type_passes_through(self):
         q = {'_type': 'unknown_type', 'foo': 'bar'}
@@ -376,8 +383,9 @@ class TestValidateQueryFields:
         result = validate_query_fields(q)
         assert result == {}
         captured = capfd.readouterr()
-        assert "Field 'name' does not exist on type 'technology'" in captured.err
-        assert "Field 'bogus' does not exist on type 'technology'" in captured.err
+        err = _strip_ansi(captured.err)
+        assert "Field 'name' does not exist on type 'technology'" in err
+        assert "Field 'bogus' does not exist on type 'technology'" in err
 
     def test_valid_url_status_code(self):
         q = {'_type': 'url', 'status_code': {'$ne': 200}}
