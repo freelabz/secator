@@ -201,6 +201,31 @@ class TestSqliteHooks(SqliteTestBase):
 		tagged = conn.execute("SELECT COUNT(*) FROM findings WHERE _tagged=1").fetchone()[0]
 		self.assertEqual(tagged, 3)
 
+	def test_reinsert_keeps_column_and_json_consistent(self):
+		from secator.hooks import sqlite as mod
+
+		class FakeRunner:
+			def __init__(self):
+				self.config = type('C', (), {'name': 'httpx'})()
+				self.context = {'workspace_id': 'ws1'}
+
+		runner = FakeRunner()
+		item = self._make_finding('http://x/a')
+		mod.update_finding(runner, item)
+		# Simulate tagging: mark it tagged + duplicate via the dedup apply path.
+		conn = mod.get_sqlite_conn()
+		mod._apply_finding_update(conn, item._uuid, {
+			'_tagged': True, '_context.workspace_duplicate': True,
+		})
+		conn.commit()
+		# Re-save the SAME finding (same uuid) with a fresh/stale in-memory item.
+		mod.update_finding(runner, item)
+		# Column and JSON must agree (no drift): both reflect the re-saved payload.
+		row = conn.execute(
+			"SELECT _tagged, json_extract(data, '$._tagged') FROM findings WHERE uuid=?",
+			(item._uuid,)).fetchone()
+		self.assertEqual(int(bool(row[0])), int(bool(row[1])))
+
 	def test_hooks_structure(self):
 		from secator.hooks import sqlite as mod
 		from secator.runners import Scan, Task, Workflow

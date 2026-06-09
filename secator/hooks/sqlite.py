@@ -157,11 +157,12 @@ def update_finding(self, item):
 	payload = json.dumps(data, default=str)
 	conn.execute(
 		"INSERT INTO findings (uuid, type, workspace_id, is_false_positive, _tagged, data) "
-		"VALUES (?, ?, ?, ?, 0, ?) "
+		"VALUES (?, ?, ?, ?, ?, ?) "
 		"ON CONFLICT(uuid) DO UPDATE SET "
 		"type=excluded.type, workspace_id=excluded.workspace_id, "
-		"is_false_positive=excluded.is_false_positive, data=excluded.data",
-		(item._uuid, item._type, workspace_id, int(bool(data.get('is_false_positive'))), payload),
+		"is_false_positive=excluded.is_false_positive, _tagged=excluded._tagged, data=excluded.data",
+		(item._uuid, item._type, workspace_id,
+			int(bool(data.get('is_false_positive'))), int(bool(data.get('_tagged'))), payload),
 	)
 	conn.commit()
 	return item
