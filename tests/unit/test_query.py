@@ -516,6 +516,14 @@ class TestSqliteBackend(unittest.TestCase):
 		results = backend.search({'_type': 'url'})
 		self.assertEqual(results[0]['status_code'], 404)
 
+	def test_update_multiple_fields(self):
+		backend = self._backend()
+		n = backend.update({'_type': 'url'}, {'$set': {'status_code': 200, 'title': 'Home'}})
+		self.assertEqual(n, 1)
+		results = backend.search({'_type': 'url'})
+		self.assertEqual(results[0]['status_code'], 200)
+		self.assertEqual(results[0]['title'], 'Home')
+
 	def test_update_rejects_malicious_field_name(self):
 		backend = self._backend()
 		with self.assertRaises(ValueError):

@@ -139,20 +139,23 @@ class SqliteBackend(QueryBackend):
 			return 0
 		conn = self._get_conn()
 		where, where_params = _build_where(query)
-		set_exprs = []
-		set_params = []
+		data_expr = "data"
+		data_params = []
+		extra_exprs = []
+		extra_params = []
 		for field, val in set_fields.items():
 			_col_expr(field)  # validate field name (raises ValueError on SQL metacharacters)
-			set_exprs.append(f"data = json_set(data, '$.{field}', json(?))")
-			set_params.append(json.dumps(val, default=str))
+			data_expr = f"json_set({data_expr}, '$.{field}', json(?))"
+			data_params.append(json.dumps(val, default=str))
 			if field == '_tagged':
-				set_exprs.append("_tagged = ?")
-				set_params.append(int(bool(val)))
+				extra_exprs.append("_tagged = ?")
+				extra_params.append(int(bool(val)))
 			elif field == 'is_false_positive':
-				set_exprs.append("is_false_positive = ?")
-				set_params.append(int(bool(val)))
-		sql = f"UPDATE findings SET {', '.join(set_exprs)} WHERE {where or '1=1'}"
-		cur = conn.execute(sql, set_params + where_params)
+				extra_exprs.append("is_false_positive = ?")
+				extra_params.append(int(bool(val)))
+		set_clause = ', '.join([f"data = {data_expr}"] + extra_exprs)
+		sql = f"UPDATE findings SET {set_clause} WHERE {where or '1=1'}"
+		cur = conn.execute(sql, data_params + extra_params + where_params)
 		# Connection is shared; commit flushes pending writes (best-effort single-host semantics, per design).
 		conn.commit()
 		return cur.rowcount
