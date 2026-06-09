@@ -1,4 +1,5 @@
 import os
+from collections.abc import MutableMapping
 from pathlib import Path
 from subprocess import call, DEVNULL
 from typing import Any, Dict, List, Optional
@@ -156,6 +157,8 @@ class Drivers(StrictModel):
 
 class Workspace(StrictModel):
 	default: str = ''
+	routes: Dict[str, List[str]] = {}
+	profiles: Dict[str, List[str]] = {}
 
 
 class Payloads(StrictModel):
@@ -502,6 +505,12 @@ class Config(SecatorConfig):
 			except ValueError:
 				pass
 
+		# Validate profile names before setting
+		if key in ('profiles.defaults',):
+			profile_names = value if isinstance(value, list) else ([value] if value else [])
+			if profile_names and not Config._validate_profile_names(profile_names):
+				return
+
 		if set_partial:
 			current_val = getattr(target, final_key) if isinstance(target, BaseModel) else target.get(final_key)
 			if value is None or value == current_val:
@@ -523,9 +532,10 @@ class Config(SecatorConfig):
 		Args:
 			parent_parts (list[str]): Path components to the dict field (e.g. ['wordlists', 'defaults']).
 			subkey (str | None): Key within the dict to set/remove.
-			value (Any): Value to set.
+			value (Any): Value to set, or item to remove when strategy='remove'.
 			set_partial (bool): Set in partial config.
-			strategy (str | None): 'remove' to delete the subkey.
+			strategy (str | None): 'remove' to delete the subkey or remove a list item;
+				'append' to append to an existing list value; None to replace.
 		"""
 		existing_dict = self
 		for part in parent_parts:
@@ -539,15 +549,45 @@ class Config(SecatorConfig):
 			return
 
 		updated = dict(existing_dict)
+		parent_path = '.'.join(parent_parts)
+
 		if strategy == 'remove':
 			if subkey and subkey in updated:
-				del updated[subkey]
+				existing_val = updated[subkey]
+				if isinstance(existing_val, list) and value is not None:
+					# Remove item from list rather than deleting the key
+					if value in existing_val:
+						updated[subkey] = [v for v in existing_val if v != value]
+					else:
+						console.print(f'[bold orange1]Value "{value}" not found in {parent_path}.{subkey}[/].')
+						return
+				else:
+					del updated[subkey]
 			elif subkey:
-				console.print(f'[bold orange1]Key "{subkey}" not found in {".".join(parent_parts)}[/].')
+				console.print(f'[bold orange1]Key "{subkey}" not found in {parent_path}[/].')
 				return
+		elif strategy == 'append':
+			if subkey:
+				existing_val = updated.get(subkey, [])
+				parsed = Config._parse_new_value(value)
+				items = parsed if isinstance(parsed, list) else [parsed]
+				if isinstance(existing_val, list):
+					new_list = list(existing_val)
+					for item in items:
+						if item not in new_list:
+							new_list.append(item)
+					updated[subkey] = new_list
+				else:
+					updated[subkey] = Config._parse_new_value(value)
+			elif isinstance(value, dict):
+				updated.update(value)
 		else:
 			if subkey:
-				updated[subkey] = value
+				new_val = Config._parse_new_value(value)
+				# For workspace.profiles, always coerce single strings to list
+				if parent_path == 'workspace.profiles' and isinstance(new_val, str):
+					new_val = [new_val]
+				updated[subkey] = new_val
 			elif isinstance(value, dict):
 				updated.update(value)
 
