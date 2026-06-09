@@ -68,7 +68,7 @@ PROFILES = get_configs_by_type('profile')
 @click.option('--quiet', '-quiet', '-q', is_flag=True, default=False)
 @click.pass_context
 def cli(ctx, version, quiet):
-	"""Secator CLI."""
+	"""Secator CLI"""
 	ctx.obj = {'piped_input': S_ISFIFO(os.fstat(0).st_mode), 'piped_output': not sys.stdout.isatty()}
 	if not ctx.obj['piped_output'] and not quiet:
 		console.print(ASCII, highlight=False)
@@ -87,7 +87,7 @@ def cli(ctx, version, quiet):
 @cli.group(aliases=['x', 't', 'tasks'], invoke_without_command=True)
 @click.pass_context
 def task(ctx):
-	"""Run a task."""
+	"""Run a task"""
 	if ctx.invoked_subcommand is None:
 		ctx.get_help()
 
@@ -103,7 +103,7 @@ for config in TASKS:
 @cli.group(cls=OrderedGroup, aliases=['w', 'workflows'], invoke_without_command=True)
 @click.pass_context
 def workflow(ctx):
-	"""Run a workflow."""
+	"""Run a workflow"""
 	if ctx.invoked_subcommand is None:
 		ctx.get_help()
 
@@ -123,7 +123,7 @@ for config in WORKFLOWS:
 @cli.group(cls=OrderedGroup, aliases=['s', 'scans'], invoke_without_command=True)
 @click.pass_context
 def scan(ctx):
-	"""Run a scan."""
+	"""Run a scan"""
 	if ctx.invoked_subcommand is None:
 		ctx.get_help()
 
@@ -157,7 +157,7 @@ for config in SCANS:
 @click.option('--without-mingle', is_flag=True)
 @click.option('--without-heartbeat', is_flag=True)
 def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show, use_command_runner, without_gossip, without_mingle, without_heartbeat):  # noqa: E501
-	"""Run a worker."""
+	"""Run a worker"""
 
 	# Check Celery addon is installed
 	if not ADDONS_ENABLED['worker']:
@@ -232,7 +232,7 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 
 @cli.group(aliases=['u'])
 def util():
-	"""Run a utility."""
+	"""Run a utility"""
 	pass
 
 
@@ -240,7 +240,7 @@ def util():
 @click.option('--timeout', type=float, default=3, help='Proxy timeout (in seconds)')
 @click.option('--number', '-n', type=int, default=1, help='Number of proxies')
 def proxy(timeout, number):
-	"""Get random proxies from FreeProxy."""
+	"""Get random proxies from FreeProxy"""
 	import requests
 
 	if CONFIG.offline_mode:
@@ -277,7 +277,7 @@ def proxy(timeout, number):
 @click.option('--listen', '-l', is_flag=True, default=False, help='Spawn netcat listener on specified port')
 @click.option('--force', is_flag=True)
 def revshell(name, host, port, interface, listen, force):
-	"""Show reverse shell source codes and run netcat listener (-l)."""
+	"""Show reverse shell source codes and run netcat listener (-l)"""
 	if host is None:  # detect host automatically
 		host = detect_host(interface)
 		if not host:
@@ -344,7 +344,7 @@ def revshell(name, host, port, interface, listen, force):
 @click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
 def serve(directory, host, port, interface):
-	"""Run HTTP server to serve payloads."""
+	"""Run HTTP server to serve payloads"""
 	fnames = list(os.listdir(directory))
 	if not fnames:
 		console.print(Warning(message=f'No payloads found in {directory}.'))
@@ -372,7 +372,7 @@ def serve(directory, host, port, interface):
 @click.option('--shell', type=click.Choice(['bash', 'zsh', 'fish']), default='bash', help='Shell type')
 @click.option('--install', is_flag=True, help='Install completion to shell config file')
 def completion(shell, install):
-	"""Show or install shell completion for secator."""
+	"""Show or install shell completion for secator"""
 	# Get completion script
 	env_var = '_SECATOR_COMPLETE'
 	completion_cmd = f'{env_var}={shell}_source secator'
@@ -523,7 +523,7 @@ def record(file, name, width, height, font_size, line_height, output_dir):
 
 @util.group()
 def gif():
-	"""GIF manipulation commands."""
+	"""GIF manipulation commands"""
 	if not ADDONS_ENABLED['dev']:
 		console.print(Error(message='Missing dev addon: please run "secator install addons dev"'))
 		sys.exit(1)
@@ -594,7 +594,7 @@ def info(input_gif):
 @util.command('build')
 @click.option('--version', type=str, help='Override version specified in pyproject.toml')
 def build(version):
-	"""Build secator PyPI package."""
+	"""Build secator PyPI package"""
 	if not DEV_PACKAGE:
 		console.print(Error(message='You MUST use a development version of secator to make builds'))
 		sys.exit(1)
@@ -622,7 +622,7 @@ def build(version):
 
 @util.command('publish')
 def publish():
-	"""Publish secator PyPI package."""
+	"""Publish secator PyPI package"""
 	if not DEV_PACKAGE:
 		console.print(Error(message='You MUST use a development version of secator to publish builds.'))
 		sys.exit(1)
@@ -646,7 +646,7 @@ def publish():
 
 @cli.group(aliases=['c'])
 def config():
-	"""View or edit config."""
+	"""View or edit config"""
 	pass
 
 
@@ -654,7 +654,7 @@ def config():
 @click.option('--user/--full', is_flag=True, help='Show config (user/full)')
 @click.argument('key', required=False)
 def config_get(user, key=None):
-	"""Get config value."""
+	"""Get config value"""
 	if key is None:
 		partial = user and default_config != CONFIG
 		CONFIG.print(partial=partial)
@@ -722,7 +722,7 @@ def config_unset(key, value=None):
 @config.command('edit')
 @click.option('--resume', is_flag=True)
 def config_edit(resume):
-	"""Edit config."""
+	"""Edit config"""
 	tmp_config = CONFIG.dirs.data / 'config.yml.patch'
 	if not tmp_config.exists() or not resume:
 		shutil.copyfile(config_path, tmp_config)
@@ -739,7 +739,7 @@ def config_edit(resume):
 @config.command('default')
 @click.option('--save', type=str, help='Save default config to file.')
 def config_default(save):
-	"""Get default config."""
+	"""Get default config"""
 	default_config.print(partial=False)
 	if save:
 		default_config.save(target_path=Path(save), partial=False)
@@ -750,7 +750,7 @@ def config_default(save):
 # @_config.command('reset')
 # @click.argument('key')
 # def config_reset(key):
-# 	"""Reset config value to default."""
+# 	"""Reset config value to default"""
 # 	success = CONFIG.set(key, None)
 # 	if success:
 # 		CONFIG.print()
@@ -763,13 +763,13 @@ def config_default(save):
 # -----------#
 @cli.group(aliases=['ws', 'workspaces'])
 def workspace():
-	"""Workspaces."""
+	"""Workspaces"""
 	pass
 
 
 @workspace.command('list')
 def workspace_list():
-	"""List workspaces."""
+	"""List workspaces"""
 	workspaces = {}
 	reports_dir = Path(CONFIG.dirs.reports)
 	# Discover all workspace directories (including empty ones)
@@ -804,7 +804,7 @@ def workspace_list():
 @workspace.command(name='use', aliases=['create'])
 @click.argument('name')
 def workspace_use(name):
-	"""Use a workspace (set as default)."""
+	"""Use a workspace (set as default)"""
 	CONFIG.set('workspace.default', name)
 	config = CONFIG.validate()
 	if config:
@@ -816,7 +816,7 @@ def workspace_use(name):
 
 @workspace.command('current')
 def workspace_current():
-	"""Show current default workspace."""
+	"""Show current default workspace"""
 	current = CONFIG.workspace.default or 'default'
 	console.print(f'Current workspace: [bold gold3]{current}[/]')
 
@@ -826,7 +826,7 @@ def workspace_current():
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def workspace_delete(name, driver, yes):
-	"""Delete a workspace and all associated reports. NAME: workspace name."""
+	"""Delete a workspace and all associated reports. NAME: workspace name"""
 	workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
 
 	actions = []
@@ -930,14 +930,14 @@ def profile_list():
 
 @cli.group(aliases=['a', 'aliases'])
 def alias():
-	"""Aliases."""
+	"""Aliases"""
 	pass
 
 
 @alias.command('enable')
 @click.pass_context
 def enable_aliases(ctx):
-	"""Enable aliases."""
+	"""Enable aliases"""
 	fpath = f'{CONFIG.dirs.data}/.aliases'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = '\n'.join(aliases)
@@ -959,7 +959,7 @@ echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load 
 @alias.command('disable')
 @click.pass_context
 def disable_aliases(ctx):
-	"""Disable aliases."""
+	"""Disable aliases"""
 	fpath = f'{CONFIG.dirs.data}/.unalias'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = ''
@@ -1026,14 +1026,75 @@ def list_aliases(silent):
 
 
 # --------#
+# QUERY  #
+# --------#
+
+
+@cli.command(name='query', aliases=['q'])
+@click.argument('arg', required=False)
+@click.option('-o', '--output', type=str, default='console', help='Exporters')
+@click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
+@click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{vulnerability.matched_at}'")  # noqa: E501
+@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
+@click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.pass_context
+def query(ctx, arg, output, time_delta, fmt, workspace, driver, dedupe, limit):
+	"""Query"""
+	if not arg:
+		raise click.UsageError('Missing argument ARG (a query name, expression, or prompt).')
+
+	# 1. Saved query name
+	if arg in CONFIG.queries:
+		run_report_show(None, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit)
+		return
+
+	# 2. Raw filter expression
+	if _looks_like_query_expr(arg):
+		run_report_show(None, output, time_delta, arg, fmt, workspace, driver, dedupe, limit)
+		return
+
+	# 3. Natural language -> AI chat
+	run_ai_chat(ctx, arg, workspace)
+
+
+# --------#
 # REPORT #
 # --------#
 
 
 @cli.group(aliases=['r', 'reports'])
 def report():
-	"""Reports."""
+	"""Reports"""
 	pass
+
+
+# Operators / tokens that mark a string as a filter expression rather than natural language.
+_QUERY_EXPR_OPERATORS = ('==', '!=', '<=', '>=', '~=', '<', '>', '&&', '||')
+_QUERY_EXPR_WORD_OPERATORS = (' and ', ' or ', ' in ')
+
+
+def _looks_like_query_expr(value):
+	"""Return True if VALUE looks like a report filter expression (vs natural language).
+
+	Heuristics (any match => expression):
+	  - contains a comparison/logical operator (==, !=, <, >, <=, >=, ~=, &&, ||)
+	  - contains a word operator surrounded by spaces ( and / or / in )
+	  - matches a bare dotted field-access path like 'word.word' (e.g. extra_data.published)
+	  - is a bare known output type name (url, vulnerability, domain, etc.)
+	"""
+	if not value:
+		return False
+	if any(op in value for op in _QUERY_EXPR_OPERATORS):
+		return True
+	if any(op in value for op in _QUERY_EXPR_WORD_OPERATORS):
+		return True
+	if re.fullmatch(r'\w+(?:\.\w+)+', value.strip()):
+		return True
+	from secator.output_types import OUTPUT_TYPES
+
+	return value.strip() in {cls.get_name() for cls in OUTPUT_TYPES}
 
 
 def _apply_format(results, fmt):
@@ -1198,19 +1259,11 @@ def _apply_format(results, fmt):
 	return new_results
 
 
-@report.command('show')
-@click.argument('report_query', required=False)
-@click.option('-o', '--output', type=str, default='console', help='Exporters')
-@click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
-@click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
-@click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
-@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
-@click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
-@click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
-@click.pass_context
-def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit):
-	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
+def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit):
+	"""Build and send a consolidated report. Shared by `report show` and `query`.
+
+	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
+	"""
 	from secator.query.utils import parse_report_paths, python_expr_to_mongo
 
 	current = get_file_timestamp()
@@ -1287,8 +1340,37 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 	report.send()
 
 
+def run_ai_chat(ctx, prompt, workspace):
+	"""Run the `ai` task in chat mode with the given PROMPT.
+
+	Equivalent to: secator x ai --mode chat -ws <workspace> -p "<prompt>"
+	"""
+	task_group = ctx.find_root().command.commands['task']
+	ai_cmd = task_group.commands['ai']
+	invoke_kwargs = {'prompt': prompt, 'mode': 'chat'}
+	if workspace:
+		invoke_kwargs['workspace'] = workspace
+	ctx.invoke(ai_cmd, **invoke_kwargs)
+
+
+@report.command('show')
+@click.argument('report_query', required=False)
+@click.option('-o', '--output', type=str, default='console', help='Exporters')
+@click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
+@click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
+@click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
+@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
+@click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.pass_context
+def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit):
+	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
+	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit)
+
+
 def _load_report_data(path):
-	"""Read report JSON to extract info section and count vulnerability severities."""
+	"""Read report JSON to extract info section and count vulnerability severities"""
 	info = {}
 	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
 	with open(path, 'r') as f:
@@ -1303,7 +1385,7 @@ def _load_report_data(path):
 
 
 def _format_vuln_counts(counts):
-	"""Format vulnerability counts as a colored rich string like '2H|10M|5L'."""
+	"""Format vulnerability counts as a colored rich string like '2H|10M|5L'"""
 	severity_labels = [
 		('critical', 'C', 'bold red'),
 		('high', 'H', 'red'),
@@ -1323,23 +1405,24 @@ def _format_vuln_counts(counts):
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('--show-all', is_flag=True, default=False, help='Show all columns including report path')
-def report_list(workspace, runner_type, time_delta, show_all):
-	"""List all secator reports."""
+@click.pass_context
+def report_list(ctx, workspace, runner_type, time_delta, show_all):
+	"""List all secator reports"""
 	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
 
 	# Build table
 	table = Table()
-	table.add_column("Workspace", style="bold gold3")
-	table.add_column("Name")
-	table.add_column("Id")
-	table.add_column("Target")
-	table.add_column("Profiles")
-	table.add_column("Start Date")
-	table.add_column("End Date")
-	table.add_column("Elapsed")
-	table.add_column("Status", style="green")
-	table.add_column("Vulnerabilities")
+	table.add_column('Workspace', style='bold gold3')
+	table.add_column('Name')
+	table.add_column('Id')
+	table.add_column('Target')
+	table.add_column('Profiles')
+	table.add_column('Start Date')
+	table.add_column('End Date')
+	table.add_column('Elapsed')
+	table.add_column('Status', style='green')
+	table.add_column('Vulnerabilities')
 	if show_all:
 		table.add_column('Path')
 
@@ -1363,14 +1446,14 @@ def report_list(workspace, runner_type, time_delta, show_all):
 			# Update table
 			row = [
 				path_info['workspace'],
-				f"[bold blue]{report_info.get('name', '')}[/]",
+				f'[bold blue]{report_info.get("name", "")}[/]',
 				f'[link={Path(path).as_uri()}]{runner_id}[/link]',
 				first_target,
 				profiles_str,
 				humanize_date(report_info.get('start_time')),
 				humanize_date(report_info.get('end_time')),
 				report_info.get('elapsed_human', ''),
-				f"[{status_color}]{status}[/]",
+				f'[{status_color}]{status}[/]',
 				_format_vuln_counts(vuln_counts),
 			]
 			if show_all:
@@ -1391,7 +1474,7 @@ def report_list(workspace, runner_type, time_delta, show_all):
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
 @click.option('--show-all', is_flag=True, default=False, help='Show all entries (do not truncate lists/dicts or errors)')  # noqa: E501
 def report_info(runner_id, workspace, show_all):
-	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)."""
+	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)"""
 	MAX_ENTRIES = 20
 
 	workspace_name = workspace or CONFIG.workspace.default or 'default'
@@ -1468,7 +1551,7 @@ def report_info(runner_id, workspace, show_all):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def report_delete(runner_id, workspace, driver, yes):
-	"""Delete a report. RUNNER_ID: runner path (e.g. tasks/24)."""
+	"""Delete a report. RUNNER_ID: runner path (e.g. tasks/24)"""
 	workspace_name = workspace or CONFIG.workspace.default or 'default'
 
 	parts = runner_id.split('/')
@@ -1575,18 +1658,18 @@ def report_delete(runner_id, workspace, driver, yes):
 # TODO: work on this
 # @cli.group(aliases=['d'])
 # def deploy():
-# 	"""Deploy secator."""
+# 	"""Deploy secator"""
 # 	pass
 
 # @deploy.command()
 # def docker_compose():
-# 	"""Deploy secator on docker-compose."""
+# 	"""Deploy secator on docker-compose"""
 # 	pass
 
 # @deploy.command()
 # @click.option('-t', '--target', type=str, default='minikube', help='Deployment target amongst minikube, gke')
 # def k8s():
-# 	"""Deploy secator on Kubernetes."""
+# 	"""Deploy secator on Kubernetes"""
 # 	pass
 
 
@@ -1601,7 +1684,7 @@ def report_delete(runner_id, workspace, driver, yes):
 @click.option('--strict', '-strict', is_flag=True, default=False, help='Fail if missing tools')
 @click.option('--bleeding', '-bleeding', is_flag=True, default=False, help='Check bleeding edge version of tools')
 def health(json_, debug, strict, bleeding):
-	"""Get health status."""
+	"""Health"""
 	tools = discover_tasks()
 	upgrade_cmd = ''
 	results = []
@@ -1759,7 +1842,7 @@ def health(json_, debug, strict, bleeding):
 
 @cli.command(name='cheatsheet', aliases=['cs'])
 def cheatsheet():
-	"""Display a cheatsheet of secator commands."""
+	"""Cheatsheet"""
 	from rich.panel import Panel
 	from rich import box
 
@@ -1992,7 +2075,7 @@ def run_install(title=None, cmd=None, packages=None, next_steps=None):
 
 @cli.group(aliases=['i'])
 def install():
-	"""Install langs, tools and addons."""
+	"""Install things"""
 	pass
 
 
@@ -2196,7 +2279,7 @@ def langs():
 
 @langs.command('go')
 def install_go():
-	"""Install Go."""
+	"""Install Go"""
 	run_install(
 		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
 		title='Go',
@@ -2206,7 +2289,7 @@ def install_go():
 
 @langs.command('ruby')
 def install_ruby():
-	"""Install Ruby."""
+	"""Install Ruby"""
 	run_install(
 		packages={
 			'apt': ['ruby-full', 'rubygems'],
@@ -2223,7 +2306,7 @@ def install_ruby():
 @click.option('--cleanup', is_flag=True, default=False, help='Clean up tools after installation.')
 @click.option('--fail-fast', is_flag=True, default=False, help='Fail fast if any tool fails to install.')
 def install_tools(cmds, cleanup, fail_fast):
-	"""Install supported tools."""
+	"""Install supported tools"""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
@@ -2283,7 +2366,7 @@ def install_tools(cmds, cleanup, fail_fast):
 @cli.command('update')
 @click.option('--all', '-a', is_flag=True, help='Update all secator dependencies (addons, tools, ...)')
 def update(all):
-	"""Update to latest version."""
+	"""Update to latest version"""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
@@ -2338,7 +2421,7 @@ def update(all):
 
 @cli.group(cls=OrderedGroup)
 def test():
-	"""[dim]Run tests (dev build only)."""
+	"""[dim]Run tests (dev build only)"""
 	if not DEV_PACKAGE:
 		console.print(Error(message='You MUST use a development version of secator to run tests.'))
 		sys.exit(1)
@@ -2385,7 +2468,7 @@ def run_test(cmd, name=None, exit=True, verbose=False, use_command_runner=True):
 @test.command()
 @click.option('--linter', '-l', type=click.Choice(['flake8', 'ruff', 'isort', 'pylint']), default='flake8', help='Linter to use')  # noqa: E501
 def lint(linter):
-	"""Run lint tests."""
+	"""Run lint tests"""
 	opts = ''
 	if linter == 'pylint':
 		opts = '--indent-string "\t" --max-line-length 160 --disable=R,C,W'
@@ -2402,7 +2485,7 @@ def lint(linter):
 @click.option('--test', '-t', type=str, help='Secator test to run')
 @click.option('--no-coverage', is_flag=True, help='Disable coverage')
 def unit(tasks, workflows, scans, test, no_coverage):
-	"""Run unit tests."""
+	"""Run unit tests"""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
@@ -2439,7 +2522,7 @@ def unit(tasks, workflows, scans, test, no_coverage):
 @click.option('--test', '-t', type=str, help='Secator test to run')
 @click.option('--no-cleanup', '-nc', is_flag=True, help='Do not perform cleanup (keep lab running, faster for relaunching tests)')  # noqa: E501
 def integration(tasks, workflows, scans, test, no_cleanup):
-	"""Run integration tests."""
+	"""Run integration tests"""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
@@ -2472,7 +2555,7 @@ def integration(tasks, workflows, scans, test, no_cleanup):
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
 def template(tasks, workflows, scans, test):
-	"""Run integration tests."""
+	"""Run integration tests"""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
@@ -2504,7 +2587,7 @@ def template(tasks, workflows, scans, test):
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
 def performance(tasks, workflows, scans, test):
-	"""Run integration tests."""
+	"""Run integration tests"""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
@@ -2527,7 +2610,7 @@ def performance(tasks, workflows, scans, test):
 @click.option('--check', '-c', is_flag=True, default=False, help='Check task semantics only (no unit + integration tests)')  # noqa: E501
 @click.option('--system-exit', '-e', is_flag=True, default=True, help='Exit with system exit code')
 def task(name, verbose, check, system_exit):
-	"""Test a single task for semantics errors, and run unit + integration tests."""
+	"""Test a single task for semantics errors, and run unit + integration tests"""
 	console.print(f'[bold gold3]:wrench: Testing task {name} ...[/]')
 	task = [task for task in discover_tasks() if task.__name__ == name.strip()]
 	warnings = []
@@ -2665,7 +2748,7 @@ def task(name, verbose, check, system_exit):
 @click.option('--check', '-c', is_flag=True, default=False, help='Check task semantics only (no unit + integration tests)')  # noqa: E501
 @click.option('--verbose', '-v', is_flag=True, default=False, help='Print verbose output')
 def tasks(ctx, check, verbose):
-	"""Test all tasks for semantics errors, and run unit + integration tests."""
+	"""Test all tasks for semantics errors, and run unit + integration tests"""
 	results = []
 	for cls in discover_tasks():
 		success = ctx.invoke(task, name=cls.__name__, verbose=verbose, check=check, system_exit=False)
@@ -2699,7 +2782,7 @@ def check_test(condition, message, fail_message, results=[], warn=False):
 @click.option('--integration-only', '-i', is_flag=True, default=False, help='Only generate coverage for integration tests')  # noqa: E501
 @click.option('--template-only', '-t', is_flag=True, default=False, help='Only generate coverage for template tests')  # noqa: E501
 def coverage(unit_only, integration_only, template_only):
-	"""Run coverage combine + coverage report."""
+	"""Run coverage combine + coverage report"""
 	cmd = f'{sys.executable} -m coverage report -m --omit=*/site-packages/*,*/tests/*,*/templates/*'
 	if unit_only:
 		cmd += ' --data-file=.coverage.unit'

@@ -321,19 +321,19 @@ class TestCli(unittest.TestCase):
 		result = self.runner.invoke(cli, ['task'])
 		assert not result.exception
 		assert result.exit_code == 0
-		assert 'Run a task.' in result.output
+		assert 'Run a task' in result.output
 
 	def test_workflow_command(self):
 		result = self.runner.invoke(cli, ['workflow'])
 		assert not result.exception
 		assert result.exit_code == 0
-		assert 'Run a workflow.' in result.output
+		assert 'Run a workflow' in result.output
 
 	def test_scan_command(self):
 		result = self.runner.invoke(cli, ['scan'])
 		assert not result.exception
 		assert result.exit_code == 0
-		assert 'Run a scan.' in result.output
+		assert 'Run a scan' in result.output
 
 	# def test_worker_command(self):
 	# 	result = self.runner.invoke(cli, ['worker', '--check'])

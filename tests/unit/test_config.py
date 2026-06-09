@@ -134,6 +134,27 @@ class TestConfig(unittest.TestCase):
 		data = Config.read_yaml(self.config_test)
 		self.assertNotIn(str(self.home), data['dirs']['data'])
 
+	def test_queries_field_default(self):
+		from secator.config import Config
+		config = Config.parse()
+		self.assertEqual(config.queries, {})
+
+	def test_set_get_unset_query(self):
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('queries.critical_vulns', 'vulnerability.severity_nb < 2')
+		self.assertEqual(config.queries['critical_vulns'], 'vulnerability.severity_nb < 2')
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['queries']['critical_vulns'], 'vulnerability.severity_nb < 2')
+		config.unset('queries.critical_vulns')
+		self.assertNotIn('critical_vulns', config.queries)
+
+	def test_queries_dir_resolves_under_data(self):
+		from secator.config import Config
+		config = Config.parse()
+		self.assertEqual(config.dirs.queries, config.dirs.data / 'queries')
+
 
 @mock.patch('sys.stderr', devnull)
 class TestConfigEnv(unittest.TestCase):
