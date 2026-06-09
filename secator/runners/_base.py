@@ -198,7 +198,7 @@ class Runner:
 		# Determine inputs
 		self.debug(f'resolving inputs with {len(self.dynamic_opts)} dynamic opts', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
-		self.inputs = list(set(self.inputs))
+		self.inputs = list(dict.fromkeys(self.inputs))
 		if self.caller != 'Task':
 			targets = [Target(name=target) for target in self.inputs]
 			for target in targets:
@@ -215,6 +215,16 @@ class Runner:
 		profiles_str = run_opts.get('profiles') or []
 		self.debug('resolving profiles', obj={'profiles': profiles_str}, sub='init')
 		self.profiles = self.resolve_profiles(profiles_str)
+
+		# Apply route-based workspace if no profile/explicit workspace was set
+		default_ws = CONFIG.workspace.default or 'default'
+		if not self.workspace_explicit and self.workspace_name == default_ws:
+			route_workspace = self._resolve_route_workspace(self.inputs)
+			if route_workspace:
+				self.debug(f'route workspace -> {route_workspace}', sub='init')
+				self.workspace_name = route_workspace
+				self.context['workspace_name'] = route_workspace
+				self.context['workspace_id'] = route_workspace
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -1438,14 +1448,6 @@ class Runner:
 			self.workspace_name = profile_workspace
 			self.context['workspace_name'] = profile_workspace
 			self.context['workspace_id'] = profile_workspace
-		elif not self.workspace_explicit and self.workspace_name == default_ws:
-			# No profile workspace and no explicit -ws: apply route-based workspace if routes match
-			route_workspace = self._resolve_route_workspace(self.inputs)
-			if route_workspace:
-				self.debug(f'route workspace -> {route_workspace}', sub='init')
-				self.workspace_name = route_workspace
-				self.context['workspace_name'] = route_workspace
-				self.context['workspace_id'] = route_workspace
 
 		# Apply exporters (consumed from run_opts['output'] right after profile resolution)
 		if profile_exporters is not None:
