@@ -1486,6 +1486,7 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all, interesting, 
 		table.add_column('Path', overflow="fold")
 
 	# Load each report
+	shown = 0
 	for path in paths:
 		try:
 			path_info = get_info_from_report_path(path)
