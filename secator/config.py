@@ -92,7 +92,7 @@ class Celery(StrictModel):
 
 
 class Cli(StrictModel):
-	github_token: SecretStr = os.environ.get('GITHUB_TOKEN', '')
+	github_token: SecretStr = SecretStr(os.environ.get('GITHUB_TOKEN', ''))
 	record: bool = False
 	stdin_timeout: int = 1000
 	show_http_response_headers: bool = False
@@ -195,7 +195,7 @@ class WorkerAddon(StrictModel):
 
 class MongodbAddon(StrictModel):
 	enabled: bool = False
-	url: SecretStr = 'mongodb://localhost'
+	url: SecretStr = SecretStr('mongodb://localhost')
 	update_frequency: int = 60
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
@@ -212,12 +212,12 @@ class MongodbAddon(StrictModel):
 
 class VulnersAddon(StrictModel):
 	enabled: bool = False
-	api_key: SecretStr = ''
+	api_key: SecretStr = SecretStr('')
 
 
 class AiAddon(StrictModel):
 	enabled: bool = False
-	api_key: SecretStr = ''
+	api_key: SecretStr = SecretStr('')
 	api_base: str = ''
 	default_model: str = 'claude-sonnet-4-6'
 	intent_model: str = 'claude-haiku-4-5'
@@ -267,8 +267,8 @@ class Providers(StrictModel):
 
 class DiscordAddon(StrictModel):
 	enabled: bool = False
-	webhook_url: SecretStr = ''
-	bot_token: SecretStr = ''
+	webhook_url: SecretStr = SecretStr('')
+	bot_token: SecretStr = SecretStr('')
 	send_runner_updates: bool = True
 	send_findings: bool = True
 	finding_types: List[str] = ['vulnerability']
@@ -278,7 +278,7 @@ class DiscordAddon(StrictModel):
 class ApiAddon(StrictModel):
 	enabled: bool = False
 	url: str = 'https://app.secator.cloud/api'
-	key: SecretStr = ''
+	key: SecretStr = SecretStr('')
 	header_name: str = 'Bearer'
 	force_ssl: bool = True
 	timeout: int = 60
