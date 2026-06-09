@@ -888,7 +888,7 @@ def workspace_delete(name, driver, yes):
 # ----------#
 
 
-@cli.group(aliases=['p', 'profiles'])
+@cli.group(aliases=['p', 'pf', 'profiles'])
 @click.pass_context
 def profile(ctx):
 	"""Profiles"""
@@ -897,13 +897,29 @@ def profile(ctx):
 
 @profile.command('list')
 def profile_list():
-	table = Table()
+	table = Table(highlight=True)
 	table.add_column('Profile name', style='bold gold3')
 	table.add_column('Description', overflow='fold')
+	table.add_column('Enforced', justify='center')
+	table.add_column('Workspace', overflow='fold')
+	table.add_column('Drivers', overflow='fold')
+	table.add_column('Exporters', overflow='fold')
 	table.add_column('Options', overflow='fold')
 	for profile in PROFILES:
-		opts_str = ', '.join(f'[yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items())
-		table.add_row(profile.name, profile.description or '', opts_str)
+		opts_str = ', '.join(f'[yellow3]{k}[/]={v}' for k, v in profile.opts.items())
+		enforced_str = '[bold red]✓[/]' if profile.enforce else ''
+		workspace_str = profile.workspace or ''
+		drivers_str = ','.join(profile.drivers) if profile.drivers else ''
+		exporters_str = ','.join(profile.exporters) if profile.exporters else ''
+		table.add_row(
+			profile.name,
+			profile.description or '',
+			enforced_str,
+			workspace_str,
+			drivers_str,
+			exporters_str,
+			opts_str,
+		)
 	console.print(table)
 
 
