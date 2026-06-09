@@ -297,23 +297,19 @@ class TestValidateQueryFields:
         q = {'_type': 'vulnerability', 'severity': {'$regex': 'high'}}
         assert validate_query_fields(q) == q
 
-    def test_invalid_field_removed_with_warning(self):
+    def test_invalid_field_removed_with_warning(self, capfd):
         # When ALL user-specified fields are invalid, the fragment is dropped entirely
         # (returning {} rather than {'_type': 'technology'} which would match everything).
-        from secator.rich import console
-        console.export_text(clear=True)
         q = {'_type': 'technology', 'name': {'$regex': '(HSTS|php)'}}
         result = validate_query_fields(q)
         assert result == {}
-        recorded = console.export_text()
-        assert "Field 'name' does not exist on type 'technology'" in recorded
-        assert 'product' in recorded  # one of the available fields
+        captured = capfd.readouterr()
+        assert "Field 'name' does not exist on type 'technology'" in captured.err
+        assert 'product' in captured.err  # one of the available fields
 
-    def test_or_validates_each_fragment(self):
+    def test_or_validates_each_fragment(self, capfd):
         # The technology fragment has no valid user fields, so it is dropped from $or.
         # The $or collapses to a single item, which is unwrapped.
-        from secator.rich import console
-        console.export_text(clear=True)
         q = {
             '$or': [
                 {'_type': 'url', 'status_code': {'$ne': 200}},
@@ -322,14 +318,12 @@ class TestValidateQueryFields:
         }
         result = validate_query_fields(q)
         assert result == {'_type': 'url', 'status_code': {'$ne': 200}}
-        recorded = console.export_text()
-        assert "Field 'name' does not exist on type 'technology'" in recorded
+        captured = capfd.readouterr()
+        assert "Field 'name' does not exist on type 'technology'" in captured.err
 
-    def test_or_with_partial_invalid_fields(self):
+    def test_or_with_partial_invalid_fields(self, capfd):
         # When one fragment has some valid and some invalid fields, only the invalid
         # field is removed; the fragment itself is kept.
-        from secator.rich import console
-        console.export_text(clear=True)
         q = {
             '$or': [
                 {'_type': 'url', 'status_code': {'$ne': 200}},
@@ -343,14 +337,12 @@ class TestValidateQueryFields:
                 {'_type': 'technology', 'product': 'nginx'},
             ]
         }
-        recorded = console.export_text()
-        assert "Field 'name' does not exist on type 'technology'" in recorded
+        captured = capfd.readouterr()
+        assert "Field 'name' does not exist on type 'technology'" in captured.err
 
-    def test_and_validates_each_fragment(self):
+    def test_and_validates_each_fragment(self, capfd):
         # The technology fragment (all user fields invalid) is dropped from $and.
         # The $and collapses to a single item, which is unwrapped.
-        from secator.rich import console
-        console.export_text(clear=True)
         q = {
             '$and': [
                 {'_context.scan_id': '5'},
@@ -359,8 +351,8 @@ class TestValidateQueryFields:
         }
         result = validate_query_fields(q)
         assert result == {'_context.scan_id': '5'}
-        recorded = console.export_text()
-        assert "Field 'name' does not exist on type 'technology'" in recorded
+        captured = capfd.readouterr()
+        assert "Field 'name' does not exist on type 'technology'" in captured.err
 
     def test_unknown_type_passes_through(self):
         q = {'_type': 'unknown_type', 'foo': 'bar'}
@@ -378,16 +370,14 @@ class TestValidateQueryFields:
         q = {'_type': 'url', 'extra_data.custom': 'value'}
         assert validate_query_fields(q) == q
 
-    def test_multiple_invalid_fields_all_warned(self):
+    def test_multiple_invalid_fields_all_warned(self, capfd):
         # All user fields invalid → fragment dropped entirely, returning {}
-        from secator.rich import console
-        console.export_text(clear=True)
         q = {'_type': 'technology', 'name': 'php', 'bogus': 'x'}
         result = validate_query_fields(q)
         assert result == {}
-        recorded = console.export_text()
-        assert "Field 'name' does not exist on type 'technology'" in recorded
-        assert "Field 'bogus' does not exist on type 'technology'" in recorded
+        captured = capfd.readouterr()
+        assert "Field 'name' does not exist on type 'technology'" in captured.err
+        assert "Field 'bogus' does not exist on type 'technology'" in captured.err
 
     def test_valid_url_status_code(self):
         q = {'_type': 'url', 'status_code': {'$ne': 200}}
