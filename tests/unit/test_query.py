@@ -388,6 +388,20 @@ class TestQueryEngine(unittest.TestCase):
 		results = engine.search({}, dedupe=False)
 		assert len(results) == 2
 
+	def test_query_engine_selects_sqlite(self):
+		from secator.query import QueryEngine
+		from secator.query.sqlite import SqliteBackend
+
+		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['sqlite']})
+		self.assertIsInstance(engine.backend, SqliteBackend)
+
+	def test_query_engine_mongodb_priority_over_sqlite(self):
+		from secator.query import QueryEngine
+		from secator.query.mongodb import MongoDBBackend
+
+		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['sqlite', 'mongodb']})
+		self.assertIsInstance(engine.backend, MongoDBBackend)
+
 
 class TestQueryEngineUpdate(unittest.TestCase):
 	"""Tests for QueryEngine.update method."""
