@@ -1326,10 +1326,18 @@ class Runner:
 			elif isinstance(p, TemplateLoader):
 				existing_profile_names.add(p.name)
 
-		default_profiles = CONFIG.profiles.defaults
-		for p in default_profiles:
+		# Add global default profiles
+		for p in list(CONFIG.profiles.defaults):
 			if p not in existing_profile_names:
 				profiles.append(p)
+				existing_profile_names.add(p)
+
+		# Add workspace-specific default profiles
+		workspace_defaults = CONFIG.workspace.profiles.get(self.workspace_name, [])
+		for p in workspace_defaults:
+			if p not in existing_profile_names:
+				profiles.append(p)
+				existing_profile_names.add(p)
 
 		# Abort if no profiles
 		if not profiles:

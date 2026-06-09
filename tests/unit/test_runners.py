@@ -541,6 +541,99 @@ class TestCommandRunner(unittest.TestCase):
 						self.assertEqual(cmd.profiles[0].name, 'test_default')
 						self.assertEqual(cmd.run_opts.get('timeout'), 100)
 
+	def test_workspace_specific_profiles(self):
+		"""Test that workspace.profiles loads profiles for the current workspace."""
+		from secator.utils_test import clear_modules
+		clear_modules()
+
+		from secator.runners import Command
+		from secator.template import TemplateLoader
+		from secator.utils_test import mock_command
+		from unittest.mock import patch
+
+		class LocalMyCommand(Command):
+			input_types = ['slug']
+			cmd = 'dummy'
+			input_flag = '-u'
+			file_flag = None
+
+		ws_profile = TemplateLoader(input={
+			'name': 'ws_specific',
+			'type': 'profile',
+			'opts': {'retries': 5}
+		})
+
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
+			with patch('secator.runners._base.CONFIG.profiles.defaults', []):
+				with patch('secator.runners._base.CONFIG.workspace.profiles', {'my_ws': ['ws_specific']}):
+					with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
+						mock_get_configs.return_value = [ws_profile]
+						with mock_command(LocalMyCommand, TARGETS, {'context': {'workspace_name': 'my_ws'}}, []) as cmd:
+							self.assertEqual(len(cmd.profiles), 1)
+							self.assertEqual(cmd.profiles[0].name, 'ws_specific')
+							self.assertEqual(cmd.run_opts.get('retries'), 5)
+
+	def test_workspace_specific_profiles_not_loaded_for_other_workspace(self):
+		"""Test that workspace-specific profiles are NOT loaded for a different workspace."""
+		from secator.utils_test import clear_modules
+		clear_modules()
+
+		from secator.runners import Command
+		from secator.template import TemplateLoader
+		from secator.utils_test import mock_command
+		from unittest.mock import patch
+
+		class LocalMyCommand(Command):
+			input_types = ['slug']
+			cmd = 'dummy'
+			input_flag = '-u'
+			file_flag = None
+
+		ws_profile = TemplateLoader(input={
+			'name': 'ws_specific',
+			'type': 'profile',
+			'opts': {'retries': 5}
+		})
+
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
+			with patch('secator.runners._base.CONFIG.profiles.defaults', []):
+				with patch('secator.runners._base.CONFIG.workspace.profiles', {'my_ws': ['ws_specific']}):
+					with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
+						mock_get_configs.return_value = [ws_profile]
+						with mock_command(LocalMyCommand, TARGETS, {'context': {'workspace_name': 'other_ws'}}, []) as cmd:
+							self.assertEqual(len(cmd.profiles), 0)
+
+	def test_workspace_profile_deduplication(self):
+		"""Test that a profile in both profiles.defaults and workspace.profiles is loaded only once."""
+		from secator.utils_test import clear_modules
+		clear_modules()
+
+		from secator.runners import Command
+		from secator.template import TemplateLoader
+		from secator.utils_test import mock_command
+		from unittest.mock import patch
+
+		class LocalMyCommand(Command):
+			input_types = ['slug']
+			cmd = 'dummy'
+			input_flag = '-u'
+			file_flag = None
+
+		shared_profile = TemplateLoader(input={
+			'name': 'shared_profile',
+			'type': 'profile',
+			'opts': {'retries': 3}
+		})
+
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=LocalMyCommand):
+			with patch('secator.runners._base.CONFIG.profiles.defaults', ['shared_profile']):
+				with patch('secator.runners._base.CONFIG.workspace.profiles', {'my_ws': ['shared_profile']}):
+					with patch('secator.runners._base.get_configs_by_type') as mock_get_configs:
+						mock_get_configs.return_value = [shared_profile]
+						with mock_command(LocalMyCommand, TARGETS, {'context': {'workspace_name': 'my_ws'}}, []) as cmd:
+							self.assertEqual(len(cmd.profiles), 1)
+							self.assertEqual(cmd.profiles[0].name, 'shared_profile')
+
 	def test_profile_workspace_applied_when_default(self):
 		"""A non-enforced profile workspace is applied when the user kept the default workspace."""
 		from secator.template import TemplateLoader

@@ -74,6 +74,76 @@ class TestConfig(unittest.TestCase):
 		self.assertEqual(config.addons.gdrive.enabled, True)
 		self.assertEqual(config._partial.addons.gdrive.enabled, True)
 
+	def test_set_dict_subkey_tasks_overrides(self):
+		"""Test that setting a sub-key within an empty dict field works."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		config.set('tasks.overrides.nuclei.input_chunk_size', '100')
+		self.assertEqual(config.tasks.overrides['nuclei']['input_chunk_size'], 100)
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['tasks']['overrides']['nuclei']['input_chunk_size'], 100)
+
+	def test_set_workspace_profiles(self):
+		"""Test setting per-workspace default profiles via comma-separated string."""
+		from secator.config import Config
+		from unittest.mock import patch
+		config = Config.parse(path=self.config_test)
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'aggressive,passive')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive', 'passive'])
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['workspace']['profiles']['my_ws'], ['aggressive', 'passive'])
+
+	def test_set_workspace_profiles_single(self):
+		"""Test that a single profile string is coerced to a list."""
+		from secator.config import Config
+		from unittest.mock import patch
+		config = Config.parse(path=self.config_test)
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'aggressive')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive'])
+
+	def test_set_workspace_profiles_append(self):
+		"""Test appending a profile to workspace profiles list."""
+		from secator.config import Config
+		from unittest.mock import patch
+		config = Config.parse(path=self.config_test)
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'aggressive,passive')
+			config.set('workspace.profiles.my_ws', 'stealth', strategy='append')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive', 'passive', 'stealth'])
+		# Duplicate should not be added
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'passive', strategy='append')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive', 'passive', 'stealth'])
+
+	def test_unset_workspace_profiles_item(self):
+		"""Test removing a single profile from workspace profiles list."""
+		from secator.config import Config
+		from unittest.mock import patch
+		config = Config.parse(path=self.config_test)
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'aggressive,passive,stealth')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive', 'passive', 'stealth'])
+		config.unset('workspace.profiles.my_ws', value='passive')
+		self.assertEqual(config.workspace.profiles['my_ws'], ['aggressive', 'stealth'])
+		config.save()
+		yaml_data = Config.read_yaml(self.config_test)
+		self.assertEqual(yaml_data['workspace']['profiles']['my_ws'], ['aggressive', 'stealth'])
+
+	def test_unset_workspace_profiles_key(self):
+		"""Test removing an entire workspace entry from profiles."""
+		from secator.config import Config
+		from unittest.mock import patch
+		config = Config.parse(path=self.config_test)
+		with patch('secator.config.Config._validate_profile_names', return_value=True):
+			config.set('workspace.profiles.my_ws', 'aggressive,passive')
+		self.assertIn('my_ws', config.workspace.profiles)
+		config.unset('workspace.profiles.my_ws')
+		self.assertNotIn('my_ws', config.workspace.profiles)
+
 	def test_set_list_field_replace(self):
 		from secator.config import Config
 		config = Config.parse(path=self.config_test)
