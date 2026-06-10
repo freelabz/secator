@@ -1331,6 +1331,18 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 
 	# 5. Build runner context for QueryEngine backend selection
 	drivers = [driver] if driver and driver != 'local' else []
+	# Resolve the workspace name to its id for the API backend (findings are filtered
+	# by the real workspace id; the local/mongodb backends key findings by name).
+	workspace_id = workspace_name
+	effective_driver = driver or CONFIG.backends.current
+	if effective_driver == 'api':
+		try:
+			from secator.hooks.api import resolve_workspace
+
+			workspace_id, workspace_name = resolve_workspace(workspace_name)
+		except Exception as e:
+			console.print(Error(message=f'Error resolving workspace from API: {e}'))
+			return
 	runner = DotMap(
 		{
 			'config': DotMap({'name': f'consolidated_report_{current}', 'type': 'consolidated'}),
@@ -1338,7 +1350,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 			'workspace_name': workspace_name,
 			'errors': [],
 			'context': {
-				'workspace_id': workspace_name,
+				'workspace_id': workspace_id,
 				'workspace_name': workspace_name,
 				'drivers': drivers,
 			},
