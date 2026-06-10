@@ -69,25 +69,44 @@ class MongoDBBackend(QueryBackend):
 		return result.modified_count
 
 	def list_workspaces(self):
-		"""List workspaces by aggregating workspace_id from the findings collection."""
+		"""List workspaces for the mongodb backend.
+
+		There are no workspace objects, so workspaces are derived from the unique
+		`context.workspace_name` values across the tasks/workflows/scans collections
+		(with runner counts), plus a best-effort finding count per workspace name.
+		"""
 		try:
 			client = self._get_client()
 			db = client.main
-			pipeline = [
-				{'$group': {
-					'_id': '$_context.workspace_id',
-					'workspace_name': {'$first': '$_context.workspace_name'},
-					'count': {'$sum': 1},
-				}},
-				{'$project': {
-					'_id': 0,
-					'workspace_id': '$_id',
-					'workspace_name': 1,
-					'count': 1,
-				}},
-				{'$sort': {'workspace_id': 1}},
+			runners_count = {}
+			for rtype in ['tasks', 'workflows', 'scans']:
+				pipeline = [{'$group': {'_id': '$context.workspace_name', 'count': {'$sum': 1}}}]
+				for row in db[rtype].aggregate(pipeline):
+					name = row.get('_id')
+					if not name:
+						continue
+					runners_count[name] = runners_count.get(name, 0) + row.get('count', 0)
+
+			findings_count = {}
+			try:
+				pipeline = [{'$group': {'_id': '$_context.workspace_name', 'count': {'$sum': 1}}}]
+				for row in db.findings.aggregate(pipeline):
+					name = row.get('_id')
+					if name:
+						findings_count[name] = row.get('count', 0)
+			except Exception:
+				pass
+
+			return [
+				{
+					'name': name,
+					'_id': '',
+					'description': None,
+					'runners_count': runners_count[name],
+					'findings_count': findings_count.get(name, 0),
+				}
+				for name in sorted(runners_count)
 			]
-			return list(db.findings.aggregate(pipeline))
 		except Exception as e:
 			console.print(Warning(message=f'MongoDB list_workspaces failed: {e}'))
 			return []
