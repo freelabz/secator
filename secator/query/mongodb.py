@@ -150,7 +150,8 @@ class MongoDBBackend(QueryBackend):
 			for rtype in runner_types:
 				query = {}
 				if workspace_id:
-					query['context.workspace_id'] = workspace_id
+					# Runners are keyed by workspace name for the mongodb backend.
+					query['context.workspace_name'] = workspace_id
 				if has_parent is not None:
 					query['has_parent'] = has_parent
 				for doc in db[rtype].find(query):
@@ -159,7 +160,7 @@ class MongoDBBackend(QueryBackend):
 					rtype_singular = rtype.rstrip('s')
 					runner_id = doc.get('context', {}).get(f'{rtype_singular}_id', '')
 					doc['_id_str'] = f'{rtype}/{runner_id}' if runner_id else rtype
-					doc['_workspace'] = doc.get('context', {}).get('workspace_id', '')
+					doc['_workspace'] = doc.get('context', {}).get('workspace_name', '')
 					runners.append(doc)
 			return runners
 		except Exception as e:
