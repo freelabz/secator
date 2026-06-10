@@ -60,8 +60,10 @@ class search_vulns(Vuln):
 			return
 		_in = self.inputs[0]
 		self.matched_at = None
+		self.confidence = 'low'
 		if '~' in _in:
 			split = _in.split('~')
+			self.confidence = 'high'
 			self.matched_at = split[0]
 			self.inputs[0] = split[1]
 		self.inputs[0] = self.inputs[0].replace('/', ' ').rstrip()
@@ -97,7 +99,6 @@ class search_vulns(Vuln):
 		# Yield each vulnerability
 		for cve_id, vuln_data in vulns.items():
 			match_reason = vuln_data.get('match_reason', '')
-			confidence = 'high'
 			tags = search_vulns.extract_tags(vuln_data)
 			exploits = vuln_data.get('exploits', [])
 			cvss_score = float(vuln_data.get('severity', {}).get('CVSS', {}).get('score', 0))
@@ -110,7 +111,7 @@ class search_vulns(Vuln):
 				'id': cve_id,
 				'name': cve_id,
 				'description': vuln_data.get('description', ''),
-				'confidence': confidence,
+				'confidence': self.confidence,
 				'cvss_score': cvss_score,
 				'epss_score': epss_score,
 				'cvss_vec': cvss_vector,
