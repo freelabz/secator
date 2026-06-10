@@ -2,6 +2,7 @@ from secator.query.utils import (
     expand_runner_paths,
     parse_report_paths,
     python_expr_to_mongo,
+    validate_query_fields,
     query_has_type_constraint,
 )
 
@@ -282,4 +283,131 @@ class TestExpandRunnerPaths:
     def test_in_operator_floats(self):
         result = python_expr_to_mongo("item.score in [1.5, 2.5, 3.0]")
         assert result == {'_type': 'item', 'score': {'$in': [1.5, 2.5, 3.0]}}
+
+
+class TestValidateQueryFields:
+
+    def test_none_returns_none(self):
+        result, warnings = validate_query_fields(None)
+        assert result is None
+        assert warnings == []
+
+    def test_empty_dict_returns_empty(self):
+        result, warnings = validate_query_fields({})
+        assert result == {}
+        assert warnings == []
+
+    def test_valid_field_passes_through(self):
+        q = {'_type': 'vulnerability', 'severity': {'$regex': 'high'}}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_invalid_field_removed_with_warning(self):
+        # When ALL user-specified fields are invalid, the fragment is dropped entirely
+        # (returning {} rather than {'_type': 'technology'} which would match everything).
+        q = {'_type': 'technology', 'name': {'$regex': '(HSTS|php)'}}
+        result, warnings = validate_query_fields(q)
+        assert result == {}
+        assert len(warnings) == 1
+        field_name, type_name, valid_fields = warnings[0]
+        assert field_name == 'name'
+        assert type_name == 'technology'
+        assert 'product' in valid_fields  # one of the available fields
+
+    def test_or_validates_each_fragment(self):
+        # The technology fragment has no valid user fields, so it is dropped from $or.
+        # The $or collapses to a single item, which is unwrapped.
+        q = {
+            '$or': [
+                {'_type': 'url', 'status_code': {'$ne': 200}},
+                {'_type': 'technology', 'name': {'$regex': '(HSTS|php)'}},
+            ]
+        }
+        result, warnings = validate_query_fields(q)
+        assert result == {'_type': 'url', 'status_code': {'$ne': 200}}
+        assert len(warnings) == 1
+        assert warnings[0][0] == 'name'
+        assert warnings[0][1] == 'technology'
+
+    def test_or_with_partial_invalid_fields(self):
+        # When one fragment has some valid and some invalid fields, only the invalid
+        # field is removed; the fragment itself is kept.
+        q = {
+            '$or': [
+                {'_type': 'url', 'status_code': {'$ne': 200}},
+                {'_type': 'technology', 'product': 'nginx', 'name': 'bogus'},
+            ]
+        }
+        result, warnings = validate_query_fields(q)
+        assert result == {
+            '$or': [
+                {'_type': 'url', 'status_code': {'$ne': 200}},
+                {'_type': 'technology', 'product': 'nginx'},
+            ]
+        }
+        assert len(warnings) == 1
+        assert warnings[0][0] == 'name'
+        assert warnings[0][1] == 'technology'
+
+    def test_and_validates_each_fragment(self):
+        # The technology fragment (all user fields invalid) is dropped from $and.
+        # The $and collapses to a single item, which is unwrapped.
+        q = {
+            '$and': [
+                {'_context.scan_id': '5'},
+                {'_type': 'technology', 'name': {'$regex': 'php'}},
+            ]
+        }
+        result, warnings = validate_query_fields(q)
+        assert result == {'_context.scan_id': '5'}
+        assert len(warnings) == 1
+        assert warnings[0][0] == 'name'
+        assert warnings[0][1] == 'technology'
+
+    def test_unknown_type_passes_through(self):
+        q = {'_type': 'unknown_type', 'foo': 'bar'}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_no_type_passes_through(self):
+        q = {'_context.scan_id': '5'}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_internal_fields_pass_through(self):
+        q = {'_type': 'url', '_context': {'scan_id': '5'}, '_timestamp': {'$gte': 0}}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_nested_extra_data_field_passes_through(self):
+        q = {'_type': 'url', 'extra_data.custom': 'value'}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_multiple_invalid_fields_all_warned(self):
+        # All user fields invalid → fragment dropped entirely, returning {}
+        q = {'_type': 'technology', 'name': 'php', 'bogus': 'x'}
+        result, warnings = validate_query_fields(q)
+        assert result == {}
+        assert len(warnings) == 2
+        warned_fields = {w[0] for w in warnings}
+        assert 'name' in warned_fields
+        assert 'bogus' in warned_fields
+
+    def test_valid_url_status_code(self):
+        q = {'_type': 'url', 'status_code': {'$ne': 200}}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_valid_vulnerability_cvss_score(self):
+        q = {'_type': 'vulnerability', 'cvss_score': {'$gt': 7}}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
 

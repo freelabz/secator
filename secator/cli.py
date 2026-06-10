@@ -1289,7 +1289,10 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
 	"""
-	from secator.query.utils import parse_report_paths, python_expr_to_mongo, query_has_type_constraint
+	from secator.query.utils import (
+		parse_report_paths, python_expr_to_mongo, validate_query_fields,
+		emit_query_warnings, query_has_type_constraint
+	)
 
 	current = get_file_timestamp()
 	workspace_name = workspace or CONFIG.workspaces.current or 'default'
@@ -1301,6 +1304,10 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	# 2. Translate -q expression to MongoDB style
 	debug('original query expr', sub='query', obj={'raw': query or ''})
 	mongo_query = python_expr_to_mongo(query) if query else {}
+	mongo_query, query_warnings = validate_query_fields(mongo_query)
+	if query and query_warnings and not mongo_query:
+		emit_query_warnings(query_warnings)
+		return
 	debug('converted mongo query', sub='query', obj=mongo_query)
 
 	# 3. Merge filters
@@ -1369,6 +1376,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 		report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
 	total_results = sum(len(items) for items in report.data['results'].values())
+	emit_query_warnings(query_warnings)
 	info_msg = f'Found {total_results} results in workspace [bold gold3]{workspace_name}[/]'
 	if report_query:
 		searched = ', '.join(p.strip() for p in report_query.split(',') if p.strip())
