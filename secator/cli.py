@@ -829,7 +829,7 @@ def workspace_current():
 
 @workspace.command(name='rm', aliases=['remove', 'delete'])
 @click.argument('name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default='local', help='Query backend driver')  # noqa: E501
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def workspace_delete(name, driver, yes):
 	"""Delete a workspace and all associated reports. NAME: workspace name"""
@@ -846,6 +846,9 @@ def workspace_delete(name, driver, yes):
 		actions.append(f'Delete all runners in MongoDB with workspace_id="{name}"')
 	elif driver == 'api':
 		actions.append(f'Send DELETE to API: {CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=name)}')
+	elif driver == 'sqlite':
+		actions.append(f'Delete all findings in SQLite with workspace_id="{name}"')
+		actions.append(f'Delete all runners in SQLite with workspace_id="{name}"')
 
 	console.print('[bold]The following actions will be performed:[/]')
 	for action in actions:
@@ -887,6 +890,22 @@ def workspace_delete(name, driver, yes):
 			console.print(Info(message=f'Deleted workspace "{name}" from API'))
 		except Exception as e:
 			console.print(Error(message=f'API deletion failed: {e}'))
+
+	# 4. SQLite backend
+	elif driver == 'sqlite':
+		try:
+			from secator.hooks.sqlite import get_sqlite_conn
+
+			conn = get_sqlite_conn()
+			findings_result = conn.execute("DELETE FROM findings WHERE workspace_id=?", (name,))
+			console.print(Info(message=f'Deleted {findings_result.rowcount} findings from SQLite'))
+			for collection in ['tasks', 'workflows', 'scans']:
+				result = conn.execute(f"DELETE FROM {collection} WHERE workspace_id=?", (name,))
+				if result.rowcount:
+					console.print(Info(message=f'Deleted {result.rowcount} {collection} from SQLite'))
+			conn.commit()
+		except Exception as e:
+			console.print(Error(message=f'SQLite deletion failed: {e}'))
 
 
 # ----------#
@@ -1042,7 +1061,7 @@ def list_aliases(silent):
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{vulnerability.matched_at}'")  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default='local', help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.pass_context
@@ -1378,7 +1397,7 @@ def run_ai_chat(ctx, prompt, workspace):
 @click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default='local', help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.pass_context
@@ -1672,11 +1691,29 @@ def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular,
 		except Exception as e:
 			console.print(Error(message=f'API deletion failed: {e}'))
 
+	# 4. SQLite backend
+	elif driver == 'sqlite' and runner_db_id:
+		try:
+			from secator.hooks.sqlite import get_sqlite_conn
+
+			conn = get_sqlite_conn()
+			findings_result = conn.execute(
+				f"DELETE FROM findings WHERE json_extract(data,'$._context.{runner_type_singular}_id')=?",
+				(runner_db_id,),
+			)
+			console.print(Info(message=f'Deleted {findings_result.rowcount} findings from SQLite'))
+			runner_result = conn.execute(f"DELETE FROM {runner_type_plural} WHERE id=?", (runner_db_id,))
+			if runner_result.rowcount:
+				console.print(Info(message=f'Deleted {runner_type_singular} row from SQLite'))
+			conn.commit()
+		except Exception as e:
+			console.print(Error(message=f'SQLite deletion failed: {e}'))
+
 
 @report.command(name='delete', aliases=['rm', 'remove'])
 @click.argument('runner_ids', nargs=-1, required=True)
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default='local', help='Query backend driver')  # noqa: E501
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def report_delete(runner_ids, workspace, driver, yes):
 	"""Delete one or more reports.
@@ -1725,6 +1762,12 @@ def report_delete(runner_ids, workspace, driver, yes):
 				console.print(f'  [dim]-[/] Send DELETE to API: {endpoint_preview}')
 			else:
 				console.print('  [dim]-[/] [yellow]No API ID found in report — skipping API deletion[/]')
+		elif driver == 'sqlite':
+			if runner_db_id:
+				console.print(f'  [dim]-[/] Delete findings in SQLite for {runner_type_singular}_id="{runner_db_id}"')
+				console.print(f'  [dim]-[/] Delete {runner_type_singular} row in SQLite (id="{runner_db_id}")')
+			else:
+				console.print('  [dim]-[/] [yellow]No SQLite ID found in report — skipping SQLite deletion[/]')
 
 	if not yes:
 		paths_str = ', '.join(f'{p}/{n}' for p, _s, n, _id in resolved)
@@ -1969,6 +2012,7 @@ secator s host [blue]-yaml[/]                        [dim]# show config yaml (wo
 [dim]# Organize your results (workspace, database)[/]
 secator s host [blue]-ws[/] [bright_magenta]prod[/] example.com         [dim]# save results to 'prod' workspace[/]
 secator s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com  [dim]# save results to mongodb database[/]
+secator s host [blue]-driver[/] [bright_magenta]sqlite[/] example.com  [dim]# save results to a local sqlite database[/]
 
 [dim]# Input types are flexible ...[/]
 secator s host [cyan]example.com[/]                  [dim]# single input[/]

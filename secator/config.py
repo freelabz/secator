@@ -205,6 +205,21 @@ class MongodbAddon(StrictModel):
 	]
 
 
+class SqliteAddon(StrictModel):
+	enabled: bool = False
+	path: str = ''
+	busy_timeout_ms: int = 5000
+	max_items: int = -1
+	duplicate_main_copy_fields: List[str] = [
+		'screenshot_path',
+		'stored_response_path',
+		'is_false_positive',
+		'is_acknowledged',
+		'verified',
+		'tags',
+	]
+
+
 class VulnersAddon(StrictModel):
 	enabled: bool = False
 	api_key: str = ''
@@ -292,6 +307,7 @@ class Addons(StrictModel):
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
+	sqlite: SqliteAddon = SqliteAddon()
 	vulners: VulnersAddon = VulnersAddon()
 	discord: DiscordAddon = DiscordAddon()
 	api: ApiAddon = ApiAddon()

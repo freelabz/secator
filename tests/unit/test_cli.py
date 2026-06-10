@@ -653,5 +653,25 @@ class TestCli(unittest.TestCase):
 				assert result.exit_code == 0
 				assert 'already installed' in result.output
 
+
+class TestSqliteCliDriver(unittest.TestCase):
+	def test_report_show_accepts_sqlite_driver(self):
+		from click.testing import CliRunner
+		from secator.cli import cli
+		runner = CliRunner()
+		# Use a wide terminal so the choice list does not wrap mid-word in the help table
+		result = runner.invoke(cli, ['report', 'show', '--help'], env={'COLUMNS': '200'})
+		self.assertEqual(result.exit_code, 0)
+		self.assertIn('sqlite', result.output)
+
+	def test_workspace_delete_accepts_sqlite_driver(self):
+		from click.testing import CliRunner
+		from secator.cli import cli
+		runner = CliRunner()
+		result = runner.invoke(cli, ['workspace', 'delete', '--help'])
+		self.assertEqual(result.exit_code, 0)
+		self.assertIn('sqlite', result.output)
+
+
 if __name__ == '__main__':
 	unittest.main()
