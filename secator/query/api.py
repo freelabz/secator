@@ -58,13 +58,21 @@ class ApiBackend(QueryBackend):
             result = self._make_request('POST', endpoint, query)
 
             if isinstance(result, list):
-                return result
+                items = result
             elif isinstance(result, dict) and 'items' in result:
-                return result['items']
+                items = result['items']
             elif isinstance(result, dict) and 'results' in result:
-                return result['results']
+                items = result['results']
+            else:
+                items = []
 
-            return []
+            # Drop the backend-only '_id' field so results match the output-type
+            # schema (the CSV exporter rejects unknown fields), matching the
+            # MongoDB backend behaviour.
+            for item in items:
+                if isinstance(item, dict):
+                    item.pop('_id', None)
+            return items
         except Exception as e:
             console.print(Warning(message=f"API search failed: {e}"))
             return []
