@@ -1335,6 +1335,9 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 
 	# 5. Build runner context for QueryEngine backend selection
 	drivers = [driver] if driver and driver != 'local' else []
+	workspace_folder = sanitize_folder_name(workspace_name)
+	reports_folder = Path(CONFIG.dirs.reports) / workspace_folder / 'consolidated' / current
+	reports_folder.mkdir(parents=True, exist_ok=True)
 	runner = DotMap(
 		{
 			'config': DotMap({'name': f'consolidated_report_{current}', 'type': 'consolidated'}),
@@ -1346,7 +1349,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 				'workspace_name': workspace_name,
 				'drivers': drivers,
 			},
-			'reports_folder': Path.cwd(),
+			'reports_folder': reports_folder,
 		}
 	)
 	runner.toDict = lambda: {

@@ -56,7 +56,7 @@ LLM_SPINNER_MESSAGES = [
 
 # Available drivers and exporters
 AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord', 'sqlite']
-AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'markdown', 'table', 'txt']
+AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'jsonl', 'markdown', 'table', 'txt']
 
 # Vocab
 ALIVE = 'alive'
