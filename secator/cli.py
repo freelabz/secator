@@ -681,8 +681,8 @@ def config_set(key, value, strategy):
 	  secator config set drivers.defaults redis                            # replace list field
 	  secator config set drivers.defaults redis --append                   # append to list field
 	  secator config set wordlists.defaults.http mylist                    # set a dict subkey
-	  secator config set workspace.profiles.my_ws aggressive,passive  # set workspace profiles
-	  secator config set workspace.profiles.my_ws test --append   # append to workspace profiles
+	  secator config set workspaces.profiles.my_ws aggressive,passive  # set workspace profiles
+	  secator config set workspaces.profiles.my_ws test --append   # append to workspace profiles
 	"""
 	CONFIG.set(key, value, strategy=strategy if strategy else None)
 	config = CONFIG.validate()
@@ -712,8 +712,8 @@ def config_unset(key, value=None):
 	  secator config unset debug                                      # reset scalar to default
 	  secator config unset drivers.defaults redis                     # remove item from list
 	  secator config unset wordlists.defaults.http                    # remove dict subkey
-	  secator config unset workspace.profiles.my_ws test     # remove profile from workspace list
-	  secator config unset workspace.profiles.my_ws          # remove workspace profile list entirely
+	  secator config unset workspaces.profiles.my_ws test     # remove profile from workspace list
+	  secator config unset workspaces.profiles.my_ws          # remove workspace profile list entirely
 	"""
 	CONFIG.unset(key, value=value)
 	config = CONFIG.validate()
@@ -775,7 +775,7 @@ def workspace():
 
 
 @workspace.command('list')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 def workspace_list(driver):
 	"""List workspaces"""
 	effective_driver = QueryEngine.resolve_backend(driver)
@@ -783,9 +783,9 @@ def workspace_list(driver):
 	engine = QueryEngine(workspace_id='', context=context)
 
 	table = Table()
-	current = CONFIG.workspace.default or 'default'
+	current = CONFIG.workspaces.current or 'default'
 
-	if effective_driver in ('mongodb', 'api'):
+	if effective_driver in ('mongodb', 'api', 'sqlite'):
 		workspaces = engine.list_workspaces()
 		table.add_column('Name', style='bold gold3')
 		table.add_column('Id', style='dim cyan')
@@ -836,7 +836,7 @@ def workspace_list(driver):
 @click.argument('name')
 def workspace_use(name):
 	"""Use a workspace (set as default)"""
-	CONFIG.set('workspace.default', name)
+	CONFIG.set('workspaces.current', name)
 	config = CONFIG.validate()
 	if config:
 		CONFIG.save()
@@ -848,13 +848,13 @@ def workspace_use(name):
 @workspace.command('current')
 def workspace_current():
 	"""Show current default workspace"""
-	current = CONFIG.workspace.default or 'default'
+	current = CONFIG.workspaces.current or 'default'
 	console.print(Info(message=f'Current workspace: [bold gold3]{current}[/]. Use [bold green4]secator ws use <workspace>[/] to switch.'))  # noqa: E501
 
 
 @workspace.command(name='rm', aliases=['remove', 'delete'])
 @click.argument('name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def workspace_delete(name, driver, yes):
 	"""Delete a workspace and all associated reports. NAME: workspace name"""
@@ -883,6 +883,9 @@ def workspace_delete(name, driver, yes):
 		actions.append(f'Delete all runners in MongoDB with workspace_id="{name}"')
 	elif driver == 'api':
 		actions.append(f'Send DELETE to API: {CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=api_workspace_id)}')  # noqa: E501
+	elif driver == 'sqlite':
+		actions.append(f'Delete all findings in SQLite with workspace_id="{name}"')
+		actions.append(f'Delete all runners in SQLite with workspace_id="{name}"')
 
 	console.print('[bold]The following actions will be performed:[/]')
 	for action in actions:
@@ -924,6 +927,22 @@ def workspace_delete(name, driver, yes):
 			console.print(Info(message=f'Deleted workspace "{name}" from API'))
 		except Exception as e:
 			console.print(Error(message=f'API deletion failed: {e}'))
+
+	# 4. SQLite backend
+	elif driver == 'sqlite':
+		try:
+			from secator.hooks.sqlite import get_sqlite_conn
+
+			conn = get_sqlite_conn()
+			findings_result = conn.execute("DELETE FROM findings WHERE workspace_id=?", (name,))
+			console.print(Info(message=f'Deleted {findings_result.rowcount} findings from SQLite'))
+			for collection in ['tasks', 'workflows', 'scans']:
+				result = conn.execute(f"DELETE FROM {collection} WHERE workspace_id=?", (name,))
+				if result.rowcount:
+					console.print(Info(message=f'Deleted {result.rowcount} {collection} from SQLite'))
+			conn.commit()
+		except Exception as e:
+			console.print(Error(message=f'SQLite deletion failed: {e}'))
 
 
 # ----------#
@@ -1079,7 +1098,7 @@ def list_aliases(silent):
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{vulnerability.matched_at}'")  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.pass_context
@@ -1313,10 +1332,13 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
 	"""
-	from secator.query.utils import parse_report_paths, python_expr_to_mongo, query_has_type_constraint
+	from secator.query.utils import (
+		parse_report_paths, python_expr_to_mongo, validate_query_fields,
+		emit_query_warnings, query_has_type_constraint
+	)
 
 	current = get_file_timestamp()
-	workspace_name = workspace or CONFIG.workspace.default or 'default'
+	workspace_name = workspace or CONFIG.workspaces.current or 'default'
 
 	# 1. Parse path-based runner filter
 	runner_filter = parse_report_paths(report_query)
@@ -1325,6 +1347,10 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	# 2. Translate -q expression to MongoDB style
 	debug('original query expr', sub='query', obj={'raw': query or ''})
 	mongo_query = python_expr_to_mongo(query) if query else {}
+	mongo_query, query_warnings = validate_query_fields(mongo_query)
+	if query and query_warnings and not mongo_query:
+		emit_query_warnings(query_warnings)
+		return
 	debug('converted mongo query', sub='query', obj=mongo_query)
 
 	# 3. Merge filters
@@ -1405,6 +1431,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 		report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
 	total_results = sum(len(items) for items in report.data['results'].values())
+	emit_query_warnings(query_warnings)
 	info_msg = f'Found {total_results} results in workspace [bold gold3]{workspace_name}[/]'
 	if report_query:
 		searched = ', '.join(p.strip() for p in report_query.split(',') if p.strip())
@@ -1433,7 +1460,7 @@ def run_ai_chat(ctx, prompt, workspace):
 @click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.pass_context
@@ -1510,7 +1537,7 @@ def _format_vuln_counts(counts):
 @click.option('-ws', '-w', '--workspace', type=str)
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--show-all', is_flag=True, default=False, help='Show all columns including report path')
 @click.option('--interesting', '-i', is_flag=True, default=False, help='Only show reports that have vulnerabilities')
 @click.option('--status', type=str, default=None, help="Filter by runner status (case-insensitive regex, e.g. SUCCESS, FAIL, '(RUNNING|FAILURE)')")  # noqa: E501
@@ -1552,7 +1579,7 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 
 	shown = 0
 
-	if effective_driver in ('mongodb', 'api'):
+	if effective_driver in ('mongodb', 'api', 'sqlite'):
 		# --interesting and --time-delta are only supported by the local driver.
 		unsupported = [opt for opt, val in (('--interesting', interesting), ('--time-delta', time_delta)) if val]
 		if unsupported:
@@ -1659,14 +1686,14 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 @report.command('info')
 @click.argument('runner_id', type=str)
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--show-all', is_flag=True, default=False, help='Show all entries (do not truncate lists/dicts or errors)')  # noqa: E501
 def report_info(runner_id, workspace, driver, show_all):
 	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)"""
 	MAX_ENTRIES = 20
 
 	effective_driver = QueryEngine.resolve_backend(driver)
-	workspace_name = workspace or CONFIG.workspace.default or 'default'
+	workspace_name = workspace or CONFIG.workspaces.current or 'default'
 	parts = runner_id.split('/')
 	if len(parts) != 2:
 		console.print(Error(message=f'Invalid runner ID: {runner_id!r}. Expected format: <type>/<id> (e.g. scans/0)'))
@@ -1676,7 +1703,7 @@ def report_info(runner_id, workspace, driver, show_all):
 		runner_type += 's'
 	runner_type_singular = runner_type.rstrip('s')
 
-	if effective_driver in ('mongodb', 'api'):
+	if effective_driver in ('mongodb', 'api', 'sqlite'):
 		# Fetch the runner from the remote/db backend (e.g. /runner/<id>?type=<type>)
 		context = {'drivers': [effective_driver]}
 		engine = QueryEngine(workspace_id=workspace or '', context=context)
@@ -1834,11 +1861,29 @@ def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular,
 		except Exception as e:
 			console.print(Error(message=f'API deletion failed: {e}'))
 
+	# 4. SQLite backend
+	elif driver == 'sqlite' and runner_db_id:
+		try:
+			from secator.hooks.sqlite import get_sqlite_conn
+
+			conn = get_sqlite_conn()
+			findings_result = conn.execute(
+				f"DELETE FROM findings WHERE json_extract(data,'$._context.{runner_type_singular}_id')=?",
+				(runner_db_id,),
+			)
+			console.print(Info(message=f'Deleted {findings_result.rowcount} findings from SQLite'))
+			runner_result = conn.execute(f"DELETE FROM {runner_type_plural} WHERE id=?", (runner_db_id,))
+			if runner_result.rowcount:
+				console.print(Info(message=f'Deleted {runner_type_singular} row from SQLite'))
+			conn.commit()
+		except Exception as e:
+			console.print(Error(message=f'SQLite deletion failed: {e}'))
+
 
 @report.command(name='delete', aliases=['rm', 'remove'])
 @click.argument('runner_ids', nargs=-1, required=True)
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def report_delete(runner_ids, workspace, driver, yes):
 	"""Delete one or more reports.
@@ -1850,7 +1895,7 @@ def report_delete(runner_ids, workspace, driver, yes):
 	from secator.query.utils import expand_runner_paths
 
 	driver = QueryEngine.resolve_backend(driver)
-	workspace_name = workspace or CONFIG.workspace.default or 'default'
+	workspace_name = workspace or CONFIG.workspaces.current or 'default'
 
 	refs, errors = expand_runner_paths(list(runner_ids))
 	for err in errors:
@@ -1894,6 +1939,12 @@ def report_delete(runner_ids, workspace, driver, yes):
 				console.print(f'  [dim]-[/] Send DELETE to API: {endpoint_preview}')
 			else:
 				console.print('  [dim]-[/] [yellow]No API ID found in report — skipping API deletion[/]')
+		elif driver == 'sqlite':
+			if runner_db_id:
+				console.print(f'  [dim]-[/] Delete findings in SQLite for {runner_type_singular}_id="{runner_db_id}"')
+				console.print(f'  [dim]-[/] Delete {runner_type_singular} row in SQLite (id="{runner_db_id}")')
+			else:
+				console.print('  [dim]-[/] [yellow]No SQLite ID found in report — skipping SQLite deletion[/]')
 
 	if not yes:
 		paths_str = ', '.join(f'{p}/{n}' for p, _s, n, _id in resolved)
@@ -2143,6 +2194,7 @@ secator s host [blue]-yaml[/]                        [dim]# show config yaml (wo
 [dim]# Organize your results (workspace, database)[/]
 secator s host [blue]-ws[/] [bright_magenta]prod[/] example.com         [dim]# save results to 'prod' workspace[/]
 secator s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com  [dim]# save results to mongodb database[/]
+secator s host [blue]-driver[/] [bright_magenta]sqlite[/] example.com  [dim]# save results to a local sqlite database[/]
 
 [dim]# Input types are flexible ...[/]
 secator s host [cyan]example.com[/]                  [dim]# single input[/]

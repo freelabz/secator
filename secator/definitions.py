@@ -55,7 +55,7 @@ LLM_SPINNER_MESSAGES = [
 ]
 
 # Available drivers and exporters
-AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord']
+AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord', 'sqlite']
 AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'markdown', 'table', 'txt']
 
 # Vocab
@@ -190,7 +190,7 @@ for addon, module in [
 	('dev', 'flake8'),
 	('trace', 'memray'),
 	('build', 'hatch'),
-	('ai', 'litellm')
+	('ai', 'litellm'),
 ]:
 	ADDONS_ENABLED[addon] = is_importable(module)
 

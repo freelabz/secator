@@ -10,7 +10,7 @@ import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
 from dotmap import DotMap
-from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
+from pydantic import AfterValidator, BaseModel, Field, model_validator, ValidationError
 
 from secator.requests import requests
 from secator.rich import console, console_stdout
@@ -148,7 +148,7 @@ class Drivers(StrictModel):
 
 
 class Workspace(StrictModel):
-	default: str = ''
+	current: str = ''
 	routes: Dict[str, List[str]] = {}
 	profiles: Dict[str, List[str]] = {}
 
@@ -205,6 +205,21 @@ class MongodbAddon(StrictModel):
 	]
 
 
+class SqliteAddon(StrictModel):
+	enabled: bool = False
+	path: str = ''
+	busy_timeout_ms: int = 5000
+	max_items: int = -1
+	duplicate_main_copy_fields: List[str] = [
+		'screenshot_path',
+		'stored_response_path',
+		'is_false_positive',
+		'is_acknowledged',
+		'verified',
+		'tags',
+	]
+
+
 class VulnersAddon(StrictModel):
 	enabled: bool = False
 	api_key: str = ''
@@ -220,6 +235,7 @@ class AiAddon(StrictModel):
 	max_tokens: int = 30000
 	max_tokens_total: int = 100000
 	max_results: int = 500
+	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
 	permissions: Dict = {
@@ -296,6 +312,7 @@ class Addons(StrictModel):
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
+	sqlite: SqliteAddon = SqliteAddon()
 	vulners: VulnersAddon = VulnersAddon()
 	discord: DiscordAddon = DiscordAddon()
 	api: ApiAddon = ApiAddon()
@@ -316,7 +333,7 @@ class SecatorConfig(StrictModel):
 	wordlists: Wordlists = Wordlists()
 	profiles: Profiles = Profiles()
 	drivers: Drivers = Drivers()
-	workspace: Workspace = Workspace()
+	workspaces: Workspace = Workspace()
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()
@@ -528,15 +545,15 @@ class Config(DotMap):
 		else:
 			if subkey:
 				new_val = Config._parse_new_value(value)
-				# For workspace.profiles, always coerce single strings to list
-				if parent_path == 'workspace.profiles' and isinstance(new_val, str):
+				# For workspaces.profiles, always coerce single strings to list
+				if parent_path == 'workspaces.profiles' and isinstance(new_val, str):
 					new_val = [new_val]
 				updated[subkey] = new_val
 			elif isinstance(value, dict):
 				updated.update(value)
 
-		# Validate profile names when setting workspace.profiles values
-		if parent_path == 'workspace.profiles' and subkey and subkey in updated and strategy != 'remove':
+		# Validate profile names when setting workspaces.profiles values
+		if parent_path == 'workspaces.profiles' and subkey and subkey in updated and strategy != 'remove':
 			new_val = updated[subkey]
 			if new_val:
 				profile_names = new_val if isinstance(new_val, list) else [new_val]
@@ -631,6 +648,29 @@ class Config(DotMap):
 		# Load YAML file
 		if path:
 			data = Config.read_yaml(path)
+
+		# Backwards compatibility: migrate 'workspace' key to 'workspaces'
+		migrated = False
+		if 'workspace' in data and 'workspaces' not in data:
+			data['workspaces'] = data.pop('workspace')
+			if path:
+				console.print(f'[bold orange1]Migrating config key "workspace" to "workspaces" in {path}[/]')
+			migrated = True
+
+		# Backwards compatibility: migrate 'workspaces.default' to 'workspaces.current'
+		ws_data = data.get('workspaces')
+		if isinstance(ws_data, dict) and 'default' in ws_data and 'current' not in ws_data:
+			data['workspaces']['current'] = data['workspaces'].pop('default')
+			if path:
+				console.print(f'[bold orange1]Migrating config key "workspaces.default" to "workspaces.current" in {path}[/]')
+			migrated = True
+
+		if migrated and path:
+			try:
+				with path.open('w') as f:
+					f.write(yaml.dump({k: v for k, v in data.items() if not k.startswith('_')}, sort_keys=False))
+			except Exception as e:
+				console.print(f'[bold red]Failed to save migrated config: {e}[/]')
 
 		# Load data
 		config = Config.load(SecatorConfig, data, print_errors=print_errors)

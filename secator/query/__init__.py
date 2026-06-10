@@ -6,9 +6,10 @@ from secator.query._base import QueryBackend
 from secator.query.api import ApiBackend
 from secator.query.mongodb import MongoDBBackend
 from secator.query.json import JsonBackend
+from secator.query.sqlite import SqliteBackend
 
 
-__all__ = ['QueryEngine', 'QueryBackend', 'ApiBackend', 'MongoDBBackend', 'JsonBackend']
+__all__ = ['QueryEngine', 'QueryBackend', 'ApiBackend', 'MongoDBBackend', 'JsonBackend', 'SqliteBackend']
 
 
 class QueryEngine:
@@ -19,6 +20,7 @@ class QueryEngine:
     BACKENDS = {
         'api': ApiBackend,
         'mongodb': MongoDBBackend,
+        'sqlite': SqliteBackend,
         'local': JsonBackend,
     }
 
