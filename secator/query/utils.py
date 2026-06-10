@@ -381,12 +381,13 @@ def _build_type_map():
     }
 
 
-def _validate_fragment(fragment, type_map):
+def _validate_fragment(fragment, type_map, warnings):
     """Validate a single query fragment against known output type fields.
 
-    Returns None if all user-specified fields were invalid (signals the caller
-    to drop this fragment from an $or/$and list rather than keeping a bare
-    {'_type': 'x'} that would match every object of that type).
+    Appends (field_name, type_name, valid_fields) tuples to *warnings* for each
+    unknown field found.  Returns None if all user-specified fields were invalid
+    (signals the caller to drop this fragment from an $or/$and list rather than
+    keeping a bare {'_type': 'x'} that would match every object of that type).
     """
     if not isinstance(fragment, dict):
         return fragment
@@ -410,7 +411,7 @@ def _validate_fragment(fragment, type_map):
             result[k] = v
             user_fields_kept += 1
         else:
-            _warn_unknown_field(k, _type, valid_fields)
+            warnings.append((k, _type, valid_fields))
     # If the fragment had user-specified fields but ALL were invalid, signal
     # the caller to drop this fragment entirely rather than keeping a bare
     # {'_type': _type} that would match every object of that type.
@@ -419,11 +420,11 @@ def _validate_fragment(fragment, type_map):
     return result
 
 
-def _validate_query(q, type_map):
+def _validate_query(q, type_map, warnings):
     if not isinstance(q, dict):
         return q
     if '$or' in q:
-        parts = [_validate_query(sub, type_map) for sub in q['$or']]
+        parts = [_validate_query(sub, type_map, warnings) for sub in q['$or']]
         parts = [p for p in parts if p]
         if len(parts) == 0:
             return {}
@@ -431,14 +432,14 @@ def _validate_query(q, type_map):
             return parts[0]
         return {'$or': parts}
     if '$and' in q:
-        parts = [_validate_query(sub, type_map) for sub in q['$and']]
+        parts = [_validate_query(sub, type_map, warnings) for sub in q['$and']]
         parts = [p for p in parts if p]
         if len(parts) == 0:
             return {}
         if len(parts) == 1:
             return parts[0]
         return {'$and': parts}
-    result = _validate_fragment(q, type_map)
+    result = _validate_fragment(q, type_map, warnings)
     return result if result is not None else {}
 
 
@@ -447,14 +448,18 @@ def validate_query_fields(query):
 
     For each fragment referencing a known _type, checks that the queried fields
     exist on that type. Prints a warning (with available fields) for unknown fields
-    and removes them from the query.
+    and removes them from the query. Warnings are emitted after validation completes.
     Returns the (possibly modified) query dict.
     """
     if not query or not isinstance(query, dict):
         return query
 
     type_map = _build_type_map()
-    return _validate_query(query, type_map)
+    warnings = []
+    result = _validate_query(query, type_map, warnings)
+    for field_name, type_name, valid_fields in warnings:
+        _warn_unknown_field(field_name, type_name, valid_fields)
+    return result
 
 
 def query_has_type_constraint(query):
