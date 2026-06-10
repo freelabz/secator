@@ -38,39 +38,23 @@ API_TIMEOUT = CONFIG.addons.api.timeout
 
 def get_runner_dbg(runner):
 	"""Runner debug object"""
-	return {
-		runner.unique_name: runner.status,
-		'type': runner.config.type,
-		'class': runner.__class__.__name__,
-		'caller': runner.config.name,
-		**runner.context
-	}
+	return {runner.unique_name: runner.status, 'type': runner.config.type, 'class': runner.__class__.__name__, 'caller': runner.config.name, **runner.context}
 
 
 def _make_request(method, endpoint, data=None):
 	"""Make HTTP request to external API endpoint."""
-	url = f"{API_URL.rstrip('/')}/{endpoint.lstrip('/')}"
-	headers = {
-		"Content-Type": "application/json"
-	}
+	url = f'{API_URL.rstrip("/")}/{endpoint.lstrip("/")}'
+	headers = {'Content-Type': 'application/json'}
 	if API_KEY:
-		headers["Authorization"] = f"{API_HEADER_NAME} {API_KEY}"
+		headers['Authorization'] = f'{API_HEADER_NAME} {API_KEY}'
 	verify = FORCE_SSL
 	timeout = API_TIMEOUT
 	debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
 	debug('API headers', sub='hooks.api', verbose=True, obj=headers)
 	json_data = json.dumps(data, cls=DataclassEncoder) if data else None
 	if json_data:
-		debug('API data', sub='hooks.api', verbose=True, obj=json_data)
-
-	response = requests.request(
-		method=method,
-		url=url,
-		data=json_data,
-		headers=headers,
-		verify=verify,
-		timeout=timeout
-	)
+		debug('API data', sub='hooks.api', verbose=True, obj=json_data, obj_after=True)
+	response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)
 	result = response.json()
 	debug('API response', sub='hooks.api', verbose=True, obj=result)
 	if not response.ok and result.get('detail'):
@@ -89,25 +73,14 @@ def update_runner(self):
 	workspace_name = get_workspace_name(self.context.get('workspace_id'))
 	if workspace_name:
 		self.context['workspace_name'] = workspace_name
-	debug(
-		'to_update',
-		sub='hooks.api',
-		id=_id,
-		obj=get_runner_dbg(self),
-		obj_after=True,
-		obj_breaklines=False,
-		verbose=True
-	)
+	debug('to_update', sub='hooks.api', id=_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False, verbose=True)
 
 	start_time = time.time()
 
 	if _id:
 		# Update existing runner
 		result = _make_request('PUT', f'{API_RUNNER_UPDATE_ENDPOINT.format(runner_id=_id)}', update)
-		_log_runner_api_time(
-			self,
-			start_time, '[dim gold4]updated in ', 's[/]', _id
-		)
+		_log_runner_api_time(self, start_time, '[dim gold4]updated in ', 's[/]', _id)
 		self.last_updated_db = start_time
 	else:
 		# Create new runner
@@ -156,20 +129,8 @@ def update_finding(self, item):
 	end_time = time.time()
 	elapsed = end_time - start_time
 
-	debug_obj = {
-		_type: status,
-		'type': 'finding',
-		'class': self.__class__.__name__,
-		'caller': self.config.name,
-		**self.context
-	}
-	debug(
-		f'in {elapsed:.4f}s',
-		sub='hooks.api',
-		id=str(getattr(item, '_uuid', 'unknown')),
-		obj=debug_obj,
-		obj_after=False
-	)
+	debug_obj = {_type: status, 'type': 'finding', 'class': self.__class__.__name__, 'caller': self.config.name, **self.context}
+	debug(f'in {elapsed:.4f}s', sub='hooks.api', id=str(getattr(item, '_uuid', 'unknown')), obj=debug_obj, obj_after=False)
 
 	return item
 
@@ -180,7 +141,9 @@ def get_workspace_name(workspace_id):
 	if not API_WORKSPACE_GET_ENDPOINT:
 		return None
 	if workspace_id == 'default':
-		raise Exception('Workspace `default` cannot be used for API integration: please use a valid workspace ID using `-ws <workspace_id>` (CLI) or `context.workspace_id = <workspace_id>` (Python API).')  # noqa: E501
+		raise Exception(
+			'Workspace `default` cannot be used for API integration: please use a valid workspace ID using `-ws <workspace_id>` (CLI) or `context.workspace_id = <workspace_id>` (Python API).'
+		)  # noqa: E501
 	if not workspace_id:
 		raise Exception('No workspace ID provided: please use a valid workspace ID using `-ws <workspace_id>` (CLI) or `context.workspace_id = <workspace_id>` (Python API).')  # noqa: E501
 	result = _make_request('GET', f'{API_WORKSPACE_GET_ENDPOINT.format(workspace_id=workspace_id)}')
@@ -208,14 +171,7 @@ HOOKS = {
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],
 	},
-	Task: {
-		'on_init': [update_runner],
-		'on_start': [update_runner],
-		'on_interval': [update_runner],
-		'on_item': [update_finding],
-		'on_duplicate': [update_finding],
-		'on_end': [update_runner]
-	}
+	Task: {'on_init': [update_runner], 'on_start': [update_runner], 'on_interval': [update_runner], 'on_item': [update_finding], 'on_duplicate': [update_finding], 'on_end': [update_runner]},
 }
 
 

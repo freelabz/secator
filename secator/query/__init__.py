@@ -1,6 +1,6 @@
 # secator/query/__init__.py
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from secator.query._base import QueryBackend
 from secator.query.api import ApiBackend
@@ -72,6 +72,21 @@ class QueryEngine:
         """Get info for a specific workspace via the active backend."""
         return self.backend.get_workspace(workspace_id)
 
-    def list_runners(self, workspace_id: str = None, runner_type: str = None) -> List[Dict[str, Any]]:
-        """List runners (tasks/workflows/scans) via the active backend."""
-        return self.backend.list_runners(workspace_id=workspace_id, runner_type=runner_type)
+    def list_runners(
+        self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None
+    ) -> List[Dict[str, Any]]:
+        """List runners (tasks/workflows/scans) via the active backend.
+
+        has_parent: filter on the runner's parent relationship. None lists all runners,
+        False lists only outermost (root) runners, True lists only nested children.
+        """
+        return self.backend.list_runners(
+            workspace_id=workspace_id, runner_type=runner_type, has_parent=has_parent
+        )
+
+    def get_runner(self, runner_id: str, runner_type: str) -> Optional[Dict[str, Any]]:
+        """Get a single runner by ID via the active backend.
+
+        runner_id: the backend runner id. runner_type: singular type (task/workflow/scan).
+        """
+        return self.backend.get_runner(runner_id, runner_type=runner_type)

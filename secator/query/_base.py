@@ -29,9 +29,22 @@ class QueryBackend(ABC):
 		"""Get info for a specific workspace."""
 		return None
 
-	def list_runners(self, workspace_id: str = None, runner_type: str = None) -> List[Dict[str, Any]]:
-		"""List runners (tasks/workflows/scans) from this backend."""
+	def list_runners(
+		self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None
+	) -> List[Dict[str, Any]]:
+		"""List runners (tasks/workflows/scans) from this backend.
+
+		has_parent: None lists all runners, False only outermost (root) runners,
+		True only nested children.
+		"""
 		return []
+
+	def get_runner(self, runner_id: str, runner_type: str) -> Optional[Dict[str, Any]]:
+		"""Get a single runner by ID from this backend.
+
+		runner_id: the backend runner id. runner_type: singular type (task/workflow/scan).
+		"""
+		return None
 
 	def get_base_query(self) -> dict:
 		"""Base query - ALWAYS enforced, cannot be overridden."""

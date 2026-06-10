@@ -307,9 +307,22 @@ def register_runner(cli_endpoint, config):
 		if 'api' in context['drivers']:
 			try:
 				from secator.hooks.api import get_workspace_name
+				from secator.query.api import ApiBackend
 
-				workspace_name = get_workspace_name(context.get('workspace_id'))
-				context['workspace_name'] = workspace_name
+				ws_value = context.get('workspace_id')
+				if ws_value and ws_value != 'default' and not ApiBackend._is_object_id(ws_value):
+					# A workspace name was passed (e.g. -ws test): resolve it to its id
+					# using the backend so runners/findings are tagged with the real id.
+					workspaces = ApiBackend(workspace_id='').list_workspaces()
+					match = next((w for w in workspaces if w.get('name') == ws_value), None)
+					if not match:
+						raise Exception(f'Workspace "{ws_value}" not found in remote API.')
+					workspace_id = str(match.get('_id') or match.get('id'))
+					context['workspace_id'] = workspace_id
+					context['workspace_name'] = ws_value
+					console.print(f'[dim]Resolved workspace "[bold gold3]{ws_value}[/]" from remote API [id: {workspace_id}][/]')  # noqa: E501
+				else:
+					context['workspace_name'] = get_workspace_name(ws_value)
 			except Exception as e:
 				console.print(f'[bold red]Error getting workspace from API: {e}.[/]')
 				sys.exit(1)

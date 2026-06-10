@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import sys
 
+import yaml
+
 from pathlib import Path
 from stat import S_ISFIFO
 
@@ -786,12 +788,18 @@ def workspace_list(driver):
 
 	if effective_driver in ('mongodb', 'api'):
 		workspaces = engine.list_workspaces()
-		table.add_column('Workspace name', style='bold gold3')
+		table.add_column('Name', style='bold gold3')
+		table.add_column('Id', style='dim cyan')
+		table.add_column('Description', style='dim cyan')
+		table.add_column('Run count', overflow='fold')
 		table.add_column('Findings count', overflow='fold')
 		for ws in workspaces:
-			ws_name = ws.get('workspace_id') or ws.get('workspace_name', '')
-			count = str(ws.get('count', ''))
-			table.add_row(ws_name, count)
+			ws_name = ws.get('name', '') or ws.get('_id', '')
+			ws_id = ws.get('_id', '')
+			ws_description = ws.get('description')
+			runners_count = str(ws.get('runners_count', '?'))
+			findings_count = str(ws.get('findings_count', '?'))
+			table.add_row(ws_name, ws_id, ws_description, runners_count, findings_count)
 	else:
 		workspaces_dict = {}
 		reports_dir = Path(CONFIG.dirs.reports)
@@ -811,7 +819,7 @@ def workspace_list(driver):
 			if ws not in workspaces_dict:
 				workspaces_dict[ws] = {'count': 0, 'path': '/'.join(str(path).split('/')[:-3])}
 			workspaces_dict[ws]['count'] += 1
-		table.add_column('Workspace name', style='bold gold3')
+		table.add_column('Name', style='bold gold3')
 		table.add_column('Run count', overflow='fold')
 		table.add_column('Path')
 		for workspace, config in workspaces_dict.items():
@@ -1473,12 +1481,18 @@ def _format_vuln_counts(counts):
 @click.option('--show-all', is_flag=True, default=False, help='Show all columns including report path')
 @click.option('--interesting', '-i', is_flag=True, default=False, help='Only show reports that have vulnerabilities')
 @click.option('--status', type=str, default=None, help="Filter by runner status (case-insensitive regex, e.g. SUCCESS, FAIL, '(RUNNING|FAILURE)')")  # noqa: E501
+@click.option('--show-children', is_flag=True, default=False, help='Include nested sub-tasks / sub-workflows (by default only outermost runners are shown)')  # noqa: E501
 @click.pass_context
-def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, interesting, status):
+def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, interesting, status, show_children):
 	"""List all secator reports."""
 	from secator.query import QueryEngine
 
 	effective_driver = driver or CONFIG.backends.current
+
+	# --show-children only applies to the mongodb/api backends, which persist nested
+	# runners. Local JSON reports don't store sub-tasks/sub-workflows separately.
+	if show_children and effective_driver not in ('mongodb', 'api'):
+		console.print(Warning(message='--show-children has no effect with the local driver: sub-tasks/sub-workflows are not stored in local reports.'))  # noqa: E501
 
 	# --status is matched as a case-insensitive regex (e.g. 'FAIL' -> FAILURE, '(RUNNING|FAILURE)')
 	status_pattern = None
@@ -1492,18 +1506,18 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 	# Build table. overflow='fold' wraps long values onto multiple lines instead of
 	# truncating with an ellipsis, so important fields stay readable on small screens.
 	table = Table()
-	table.add_column("Workspace", style="bold gold3", overflow="fold")
-	table.add_column("Name", overflow="fold")
-	table.add_column("Id", overflow="fold")
-	table.add_column("Target", overflow="fold")
-	table.add_column("Profiles", overflow="fold")
-	table.add_column("Start Date", overflow="fold")
-	table.add_column("End Date", overflow="fold")
-	table.add_column("Elapsed", overflow="fold")
-	table.add_column("Status", style="green", overflow="fold")
-	table.add_column("Vulnerabilities", overflow="fold")
+	table.add_column('Workspace', style='bold gold3', overflow='fold')
+	table.add_column('Name', overflow='fold')
+	table.add_column('Id', overflow='fold')
+	table.add_column('Target', overflow='fold')
+	table.add_column('Profiles', overflow='fold')
+	table.add_column('Start Date', overflow='fold')
+	table.add_column('End Date', overflow='fold')
+	table.add_column('Elapsed', overflow='fold')
+	table.add_column('Status', style='green', overflow='fold')
+	table.add_column('Vulnerabilities', overflow='fold')
 	if show_all:
-		table.add_column('Path', overflow="fold")
+		table.add_column('Path', overflow='fold')
 
 	shown = 0
 
@@ -1511,7 +1525,10 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		# Use QueryEngine backend to list runners
 		context = {'drivers': [effective_driver]}
 		engine = QueryEngine(workspace_id=workspace or '', context=context)
-		runners = engine.list_runners(workspace_id=workspace, runner_type=runner_type)
+		# By default only list outermost runners (has_parent=False). --show-children
+		# drops the filter so nested sub-tasks/sub-workflows are shown too.
+		has_parent = None if show_children else False
+		runners = engine.list_runners(workspace_id=workspace, runner_type=runner_type, has_parent=has_parent)
 		for runner_info in runners:
 			runner_status = runner_info.get('status', '')
 			status_color = STATE_COLORS.get(runner_status, 'white')
@@ -1524,9 +1541,17 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 			profiles = runner_info.get('run_opts', {}).get('profiles', [])
 			if isinstance(profiles, str):
 				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
+			profiles = [p for p in profiles if p]
 			profiles_str = ', '.join(profiles) if profiles else ''
-			runner_id = runner_info.get('_id_str', runner_info.get('_type', ''))
-			ws_name = runner_info.get('_workspace', workspace or '')
+			# Show the id as {runner_type}/{runner_id} so it can be passed to `secator r info`.
+			runner_id = runner_info.get('_id_str')
+			if not runner_id:
+				rtype = runner_info.get('_type') or runner_info.get('config', {}).get('type', '')
+				if rtype and not rtype.endswith('s'):
+					rtype += 's'
+				raw_id = runner_info.get('_id', '')
+				runner_id = f'{rtype}/{raw_id}' if rtype and raw_id else (raw_id or rtype)
+			ws_name = runner_info.get('context', {}).get('workspace_name') or runner_info.get('_workspace', workspace or '')
 			row = [
 				ws_name,
 				f'[bold blue]{runner_info.get("name", "")}[/]',
@@ -1536,7 +1561,7 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 				humanize_date(runner_info.get('start_time')),
 				humanize_date(runner_info.get('end_time')),
 				runner_info.get('elapsed_human', ''),
-				f"[{status_color}]{runner_status}[/]",
+				f'[{status_color}]{runner_status}[/]',
 				'-',
 			]
 			if show_all:
@@ -1575,7 +1600,7 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 					humanize_date(report_info.get('start_time')),
 					humanize_date(report_info.get('end_time')),
 					report_info.get('elapsed_human', ''),
-					f"[{status_color}]{runner_status}[/]",
+					f'[{status_color}]{runner_status}[/]',
 					_format_vuln_counts(vuln_counts),
 				]
 				if show_all:
@@ -1599,11 +1624,13 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 @report.command('info')
 @click.argument('runner_id', type=str)
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
 @click.option('--show-all', is_flag=True, default=False, help='Show all entries (do not truncate lists/dicts or errors)')  # noqa: E501
-def report_info(runner_id, workspace, show_all):
+def report_info(runner_id, workspace, driver, show_all):
 	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)"""
 	MAX_ENTRIES = 20
 
+	effective_driver = driver or CONFIG.backends.current
 	workspace_name = workspace or CONFIG.workspace.default or 'default'
 	parts = runner_id.split('/')
 	if len(parts) != 2:
@@ -1612,21 +1639,49 @@ def report_info(runner_id, workspace, show_all):
 	runner_type, runner_number = parts[0], parts[1]
 	if not runner_type.endswith('s'):
 		runner_type += 's'
+	runner_type_singular = runner_type.rstrip('s')
 
-	report_path = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
-	if not report_path.exists():
-		console.print(Error(message=f'Report not found: {report_path}'))
-		return
+	if effective_driver in ('mongodb', 'api'):
+		# Fetch the runner from the remote/db backend (e.g. /runner/<id>?type=<type>)
+		from secator.query import QueryEngine
 
-	with open(report_path, 'r') as f:
-		content = json.loads(f.read())
+		context = {'drivers': [effective_driver]}
+		engine = QueryEngine(workspace_id=workspace or '', context=context)
+		runner_info = engine.get_runner(runner_number, runner_type=runner_type_singular)
+		if not runner_info:
+			console.print(Error(message=f'Runner not found: {runner_id} (driver: {effective_driver})'))
+			return
+		info = dict(runner_info)
+		info.pop('_id', None)
+		source_label, source_value = '_source', f'{effective_driver}:{runner_type}/{runner_number}'
+	else:
+		report_path = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
+		if not report_path.exists():
+			console.print(Error(message=f'Report not found: {report_path}'))
+			return
 
-	info = dict(content.get('info', {}))
+		with open(report_path, 'r') as f:
+			content = json.loads(f.read())
+
+		info = dict(content.get('info', {}))
+		source_label, source_value = '_path', str(report_path)
+
 	errors_raw = info.pop('errors', [])
+	warnings_raw = info.pop('warnings', [])
+
+	# These fields are verbose and only shown with --show-all.
+	SHOW_ALL_ONLY_KEYS = ('config', 'output')
 
 	table = Table(title=f'Info: {runner_id}', show_header=False, box=None, padding=(0, 1))
 	table.add_column('Key', style='bold gold3', no_wrap=True)
 	table.add_column('Value')
+
+	from rich.syntax import Syntax
+
+	def _render_yaml(data):
+		"""Render a dict as syntax-highlighted YAML for readability."""
+		yaml_str = yaml.dump(data, sort_keys=False, default_flow_style=False).rstrip()
+		return Syntax(yaml_str, 'yaml', theme='ansi-dark', padding=0, background_color='default')
 
 	def _format_value(value):
 		if isinstance(value, list):
@@ -1637,19 +1692,20 @@ def report_info(runner_id, workspace, show_all):
 				items = value
 				tail = ''
 			return '\n'.join(str(v) for v in items) + tail
-		if isinstance(value, dict):
-			if not show_all and len(value) > MAX_ENTRIES:
-				pairs = list(value.items())[:MAX_ENTRIES]
-				tail = f'\n[dim]... and {len(value) - MAX_ENTRIES} more (use --show-all to see all)[/]'
-			else:
-				pairs = list(value.items())
-				tail = ''
-			return '\n'.join(f'[bold]{k}[/]: {v}' for k, v in pairs) + tail
 		return str(value) if value is not None else ''
 
-	table.add_row('_path', str(report_path))
+	table.add_row(source_label, source_value)
 	for key, value in info.items():
-		table.add_row(key, _format_value(value))
+		if key in SHOW_ALL_ONLY_KEYS and not show_all:
+			continue
+		# Render any dict value as syntax-highlighted YAML. For config, drop the
+		# verbose 'opts' key (full option schema) first.
+		if isinstance(value, dict):
+			data = {k: v for k, v in value.items() if k != 'opts'} if key == 'config' else value
+			rendered = _render_yaml(data)
+		else:
+			rendered = _format_value(value)
+		table.add_row(key, rendered)
 
 	console.print(table)
 
@@ -1671,6 +1727,22 @@ def report_info(runner_id, workspace, show_all):
 	else:
 		console.print()
 		console.print('[dim]No errors.[/]')
+
+	# Display warnings as Warning output types
+	if warnings_raw:
+		warnings_to_show = warnings_raw if show_all else warnings_raw[-1:]
+		console.print()
+		extra = ', showing last 1' if not show_all and len(warnings_raw) > 1 else ''
+		console.print(f'[bold]Warnings[/] ({len(warnings_raw)} total{extra}):')
+		for warn_data in warnings_to_show:
+			if isinstance(warn_data, dict):
+				try:
+					warn = Warning.load(warn_data)
+				except (KeyError, TypeError, ValueError):
+					warn = Warning(message=str(warn_data))
+			else:
+				warn = Warning(message=str(warn_data))
+			console.print(warn)
 
 
 def _resolve_runner_db_id(report_folder, runner_type_singular):
@@ -1788,7 +1860,12 @@ def report_delete(runner_ids, workspace, driver, yes):
 
 	for runner_type_plural, runner_type_singular, runner_number, runner_db_id in resolved:
 		_delete_one_report(
-			workspace_name, runner_type_plural, runner_type_singular, runner_number, runner_db_id, driver,
+			workspace_name,
+			runner_type_plural,
+			runner_type_singular,
+			runner_number,
+			runner_db_id,
+			driver,
 		)
 
 
@@ -2404,6 +2481,7 @@ def _load_external_addon_commands():
 			@click.command(name, help=f'Install {name} addon.')
 			def _cmd():
 				_install_external_addon(name, config)
+
 			return _cmd
 
 		addons.add_command(_make_cmd(addon_name, addon_config))

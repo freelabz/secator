@@ -117,8 +117,31 @@ class MongoDBBackend(QueryBackend):
 			console.print(Warning(message=f'MongoDB get_workspace failed: {e}'))
 			return None
 
-	def list_runners(self, workspace_id: str = None, runner_type: str = None):
-		"""List runners from MongoDB tasks/workflows/scans collections."""
+	def get_runner(self, runner_id: str, runner_type: str):
+		"""Get a single runner by ID from MongoDB."""
+		try:
+			from bson.objectid import ObjectId
+
+			client = self._get_client()
+			db = client.main
+			rtype = runner_type + 's'
+			query = {'_id': ObjectId(runner_id)} if ObjectId.is_valid(runner_id) else {'_id': runner_id}
+			doc = db[rtype].find_one(query)
+			if doc:
+				doc['_id'] = str(doc['_id'])
+				doc['_type'] = rtype
+				return doc
+			return None
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB get_runner failed: {e}'))
+			return None
+
+	def list_runners(self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None):
+		"""List runners from MongoDB tasks/workflows/scans collections.
+
+		has_parent: when not None, only return runners matching that parent relationship
+		(False = outermost runners only, True = nested children only).
+		"""
 		try:
 			client = self._get_client()
 			db = client.main
@@ -128,6 +151,8 @@ class MongoDBBackend(QueryBackend):
 				query = {}
 				if workspace_id:
 					query['context.workspace_id'] = workspace_id
+				if has_parent is not None:
+					query['has_parent'] = has_parent
 				for doc in db[rtype].find(query):
 					doc.pop('_id', None)
 					doc['_type'] = rtype
