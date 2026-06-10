@@ -74,7 +74,7 @@ FORMATTERS = {
 	'ip': lambda ip: f'[bold yellow]{ip}[/]',
 	'status_code': status_to_color,
 	'reference': lambda reference: f'[link={reference}]{reference}[/]' if reference else '',
-	'matched_at': lambda matched_at: f'[link={matched_at}]{matched_at}[/]' if matched_at and matched_at.startswith('http') else '',  # noqa: E501
+	'matched_at': lambda matched_at: f'[link={matched_at}]{matched_at}[/]' if matched_at and matched_at.startswith('http') else (matched_at or ''),  # noqa: E501
 	'match': lambda match: f'[link={match}]{match}[/]' if match else '',
 	'_source': lambda source: f'[bold gold3]{source}[/]',
 }

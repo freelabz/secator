@@ -1058,6 +1058,7 @@ def list_aliases(silent):
 @cli.command(name='query', aliases=['q'])
 @click.argument('arg', required=False)
 @click.option('-o', '--output', type=str, default='console', help='Exporters')
+@click.option('-of', '--output-folder', type=str, default=None, help='Output folder for exported files (default: current directory)')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{vulnerability.matched_at}'")  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
@@ -1065,19 +1066,19 @@ def list_aliases(silent):
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.pass_context
-def query(ctx, arg, output, time_delta, fmt, workspace, driver, dedupe, limit):
+def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, driver, dedupe, limit):
 	"""Query"""
 	if not arg:
 		raise click.UsageError('Missing argument ARG (a query name, expression, or prompt).')
 
 	# 1. Saved query name
 	if arg in CONFIG.queries:
-		run_report_show(None, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit)
+		run_report_show(None, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder)
 		return
 
 	# 2. Raw filter expression
 	if _looks_like_query_expr(arg):
-		run_report_show(None, output, time_delta, arg, fmt, workspace, driver, dedupe, limit)
+		run_report_show(None, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder)
 		return
 
 	# 3. Natural language -> AI chat
@@ -1284,7 +1285,7 @@ def _apply_format(results, fmt):
 	return new_results
 
 
-def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit):
+def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None):
 	"""Build and send a consolidated report. Shared by `report show` and `query`.
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
@@ -1335,9 +1336,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 
 	# 5. Build runner context for QueryEngine backend selection
 	drivers = [driver] if driver and driver != 'local' else []
-	workspace_folder = sanitize_folder_name(workspace_name)
-	reports_folder = Path(CONFIG.dirs.reports) / workspace_folder / 'consolidated' / current
-	reports_folder.mkdir(parents=True, exist_ok=True)
+	reports_folder = Path(output_folder) if output_folder else Path.cwd()
 	runner = DotMap(
 		{
 			'config': DotMap({'name': f'consolidated_report_{current}', 'type': 'consolidated'}),
@@ -1404,6 +1403,7 @@ def run_ai_chat(ctx, prompt, workspace):
 @report.command('show')
 @click.argument('report_query', required=False)
 @click.option('-o', '--output', type=str, default='console', help='Exporters')
+@click.option('-of', '--output-folder', type=str, default=None, help='Output folder for exported files (default: current directory)')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
@@ -1412,9 +1412,9 @@ def run_ai_chat(ctx, prompt, workspace):
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.pass_context
-def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit):
+def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt, workspace, driver, dedupe, limit):
 	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
-	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit)
+	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder)
 
 
 def _load_report_data(path):
