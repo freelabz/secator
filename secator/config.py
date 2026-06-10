@@ -31,7 +31,9 @@ USER_AGENTS = {
 }
 
 
-class StrictModel(BaseModel, extra='forbid'):
+class StrictModel(BaseModel):
+	# Note: extra keys are ignored (not forbidden) so removed/renamed config keys
+	# (e.g. a legacy `backends:` block) don't break loading of existing configs.
 	pass
 
 
