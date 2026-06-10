@@ -851,11 +851,23 @@ def workspace_current():
 
 @workspace.command(name='rm', aliases=['remove', 'delete'])
 @click.argument('name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def workspace_delete(name, driver, yes):
 	"""Delete a workspace and all associated reports. NAME: workspace name"""
+	driver = driver or CONFIG.backends.current
 	workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+
+	# The API keys workspaces by id, so resolve the name to its id for the api driver.
+	api_workspace_id = name
+	if driver == 'api':
+		try:
+			from secator.hooks.api import resolve_workspace
+
+			api_workspace_id, _ = resolve_workspace(name)
+		except Exception as e:
+			console.print(Error(message=f'Error resolving workspace from API: {e}'))
+			return
 
 	actions = []
 	if workspace_folder.exists():
@@ -867,7 +879,7 @@ def workspace_delete(name, driver, yes):
 		actions.append(f'Delete all findings in MongoDB with workspace_id="{name}"')
 		actions.append(f'Delete all runners in MongoDB with workspace_id="{name}"')
 	elif driver == 'api':
-		actions.append(f'Send DELETE to API: {CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=name)}')
+		actions.append(f'Send DELETE to API: {CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=api_workspace_id)}')  # noqa: E501
 
 	console.print('[bold]The following actions will be performed:[/]')
 	for action in actions:
@@ -904,7 +916,7 @@ def workspace_delete(name, driver, yes):
 		try:
 			from secator.hooks.api import _make_request
 
-			endpoint = CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=name)
+			endpoint = CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=api_workspace_id)
 			_make_request('DELETE', endpoint)
 			console.print(Info(message=f'Deleted workspace "{name}" from API'))
 		except Exception as e:
@@ -1816,7 +1828,7 @@ def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular,
 @report.command(name='delete', aliases=['rm', 'remove'])
 @click.argument('runner_ids', nargs=-1, required=True)
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def report_delete(runner_ids, workspace, driver, yes):
 	"""Delete one or more reports.
@@ -1827,6 +1839,7 @@ def report_delete(runner_ids, workspace, driver, yes):
 	"""
 	from secator.query.utils import expand_runner_paths
 
+	driver = driver or CONFIG.backends.current
 	workspace_name = workspace or CONFIG.workspace.default or 'default'
 
 	refs, errors = expand_runner_paths(list(runner_ids))
