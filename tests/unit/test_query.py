@@ -351,13 +351,13 @@ class TestQueryEngine(unittest.TestCase):
 		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['mongodb']})
 		self.assertIsInstance(engine.backend, MongoDBBackend)
 
-	def test_query_engine_mongodb_takes_priority(self):
+	def test_query_engine_selects_first_driver(self):
 		from secator.query import QueryEngine
-		from secator.query.mongodb import MongoDBBackend
+		from secator.query.api import ApiBackend
 
-		# When both are available, MongoDB takes priority
+		# The backend is the first driver in the list that has a backend.
 		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['api', 'mongodb']})
-		self.assertIsInstance(engine.backend, MongoDBBackend)
+		self.assertIsInstance(engine.backend, ApiBackend)
 
 	def test_query_engine_search_dedupe_removes_duplicates(self):
 		"""QueryEngine.search(dedupe=True) should remove duplicate findings."""

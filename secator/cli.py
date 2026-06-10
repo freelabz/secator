@@ -778,8 +778,6 @@ def workspace():
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default=None, help='Query backend driver')
 def workspace_list(driver):
 	"""List workspaces"""
-	from secator.query import QueryEngine
-
 	effective_driver = QueryEngine.resolve_backend(driver)
 	context = {'drivers': [effective_driver] if effective_driver and effective_driver != 'local' else []}
 	engine = QueryEngine(workspace_id='', context=context)
@@ -1510,8 +1508,6 @@ def _format_vuln_counts(counts):
 @click.pass_context
 def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, interesting, status, show_children):
 	"""List all secator reports."""
-	from secator.query import QueryEngine
-
 	effective_driver = QueryEngine.resolve_backend(driver)
 
 	# --show-children only applies to the mongodb/api backends, which persist nested
@@ -1668,8 +1664,6 @@ def report_info(runner_id, workspace, driver, show_all):
 
 	if effective_driver in ('mongodb', 'api'):
 		# Fetch the runner from the remote/db backend (e.g. /runner/<id>?type=<type>)
-		from secator.query import QueryEngine
-
 		context = {'drivers': [effective_driver]}
 		engine = QueryEngine(workspace_id=workspace or '', context=context)
 		runner_info = engine.get_runner(runner_number, runner_type=runner_type_singular)
