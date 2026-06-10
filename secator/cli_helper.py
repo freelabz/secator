@@ -105,6 +105,7 @@ def decorate_command_options(opts):
 			conf.pop('pre_process', None)
 			conf.pop('requires_sudo', None)
 			conf.pop('prefix', None)
+			conf.pop('set', None)
 			choices = conf.pop('choices', None)
 			applies_to = conf.pop('applies_to', None)
 			default_from = conf.pop('default_from', None)

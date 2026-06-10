@@ -116,6 +116,25 @@ class TestTree(unittest.TestCase):
 				'test2': {}
 			}
 		}
+		self.scan_config_with_opts = {
+			'type': 'scan',
+			'name': 'test',
+			'options': {
+				'nuclei': {
+					'is_flag': True,
+					'default': False,
+					'help': 'Run nuclei scans on all workflows',
+					'set': {
+						'test1_nuclei': True,
+						'test2_nuclei': True,
+					}
+				}
+			},
+			'workflows': {
+				'test1': {},
+				'test2': {}
+			}
+		}
 		self.template_dir = CONFIG.dirs.templates
 		self.custom_workflow_path_1 = self.template_dir / 'test.yml'
 		self.custom_workflow_path_2 = self.template_dir / 'test2.yml'
@@ -269,3 +288,77 @@ class TestTree(unittest.TestCase):
 		# Should use the default from httpx task (False)
 		self.assertIn('tls-grab', opts_3)
 		self.assertEqual(opts_3['tls-grab']['default'], False)
+
+	def test_get_config_options_scan_with_scan_level_opts(self):
+		"""Scan-level options should be preserved and not overwritten by workflow options."""
+		find_templates.cache_clear()
+		config = TemplateLoader(input=self.scan_config_with_opts)
+		opts = get_config_options(config)
+		# Scan-level 'nuclei' option should exist with scan prefix
+		self.assertIn('nuclei', opts)
+		self.assertEqual(opts['nuclei']['prefix'], 'scan')
+		self.assertEqual(opts['nuclei']['default'], False)
+		# Workflow-level 'nuclei' options should be renamed to avoid overwriting scan-level option
+		self.assertIn('test1-nuclei', opts)
+		self.assertEqual(opts['test1-nuclei']['prefix'], 'Workflow test1')
+		self.assertIn('test2-nuclei', opts)
+		self.assertEqual(opts['test2-nuclei']['prefix'], 'Workflow test2')
+
+	def test_expand_scan_opts(self):
+		"""Scan option 'set' mapping should expand into run_opts for child workflows."""
+		from secator.runners import Scan
+		find_templates.cache_clear()
+		config = TemplateLoader(input=self.scan_config_with_opts)
+		scan = Scan(config, run_opts={'dry_run': True, 'nuclei': True})
+		# Before build_celery_workflow, run_opts should only have 'nuclei'
+		self.assertNotIn('test1_nuclei', scan.run_opts)
+		self.assertNotIn('test2_nuclei', scan.run_opts)
+		scan.run()
+		# After running, the 'set' mapping should have been expanded
+		self.assertIn('test1_nuclei', scan.run_opts)
+		self.assertIn('test2_nuclei', scan.run_opts)
+		self.assertTrue(scan.run_opts['test1_nuclei'])
+		self.assertTrue(scan.run_opts['test2_nuclei'])
+
+	def test_expand_scan_opts_default_false(self):
+		"""Scan option with default=False should not expand set mapping."""
+		from secator.runners import Scan
+		find_templates.cache_clear()
+		config = TemplateLoader(input=self.scan_config_with_opts)
+		# Don't pass nuclei=True, so it stays at default False
+		scan = Scan(config, run_opts={'dry_run': True})
+		scan.run()
+		# 'set' mapping should NOT have been expanded since nuclei=False
+		self.assertNotIn('test1_nuclei', scan.run_opts)
+		self.assertNotIn('test2_nuclei', scan.run_opts)
+
+	def test_expand_scan_opts_does_not_override_explicit_opts(self):
+		"""Scan option 'set' mapping should not override already-set workflow options."""
+		from secator.runners import Scan
+		find_templates.cache_clear()
+		config = TemplateLoader(input=self.scan_config_with_opts)
+		# Explicitly set test1_nuclei to False while nuclei=True at scan level
+		scan = Scan(config, run_opts={'dry_run': True, 'nuclei': True, 'test1_nuclei': False})
+		scan.run()
+		# test1_nuclei should remain False (explicitly set, not overwritten by 'set' expansion)
+		self.assertFalse(scan.run_opts['test1_nuclei'])
+		# test2_nuclei should be True from the 'set' expansion
+		self.assertTrue(scan.run_opts['test2_nuclei'])
+
+	def test_dry_run_with_scan_level_option_sets_workflow_conditions(self):
+		"""Dry run with scan-level option enabled should enable workflow task conditions."""
+		from secator.runners import Scan
+		find_templates.cache_clear()
+		config = TemplateLoader(input=self.scan_config_with_opts)
+		scan = Scan(config, run_opts={'dry_run': True, 'nuclei': True})
+		scan.run()
+		self.assertEqual(scan.status, 'SUCCESS')
+		self.assertEqual(len(scan.errors), 0)
+		messages = [r.message for r in scan.infos]
+		# nuclei tasks should NOT be skipped since nuclei=True was set via scan option
+		self.assertNotIn(
+			'Skipped task [bold gold3]nuclei/first[/] because condition is not met: [bold green]opts.nuclei[/]',
+			messages)
+		self.assertNotIn(
+			'Skipped task [bold gold3]nuclei/second[/] because condition is not met: [bold green]opts.nuclei[/]',
+			messages)
