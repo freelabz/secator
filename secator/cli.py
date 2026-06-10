@@ -1855,7 +1855,12 @@ def report_delete(runner_ids, workspace, driver, yes):
 	console.print('[bold]The following actions will be performed:[/]')
 	for runner_type_plural, runner_type_singular, runner_number in refs:
 		report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
-		runner_db_id = _resolve_runner_db_id(report_folder, runner_type_singular)
+		if runner_number.isdigit():
+			# Local report: resolve the backend id from the report's context.
+			runner_db_id = _resolve_runner_db_id(report_folder, runner_type_singular)
+		else:
+			# Backend id passed directly (e.g. an ObjectId from `r list --driver api`).
+			runner_db_id = runner_number
 		resolved.append((runner_type_plural, runner_type_singular, runner_number, runner_db_id))
 
 		if report_folder.exists():

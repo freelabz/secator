@@ -101,11 +101,14 @@ def expand_runner_paths(tokens):
                 errors.append(f'Invalid range: {spec!r} in {part!r}. Start must be <= end.')
                 continue
             numbers = [str(n) for n in range(start, end + 1)]
-        else:
-            if not spec.isdigit():
-                errors.append(f'Invalid runner number: {spec!r} in {part!r}. Must be numeric.')
-                continue
+        elif spec.isdigit():
             numbers = [str(int(spec))]
+        elif len(spec) == 24 and all(c in '0123456789abcdefABCDEF' for c in spec):
+            # ObjectId (e.g. from `r list --driver api`): used as-is, no range expansion.
+            numbers = [spec]
+        else:
+            errors.append(f'Invalid runner id: {spec!r} in {part!r}. Must be a number or a 24-char hex id.')
+            continue
 
         for number in numbers:
             key = (type_plural, number)
