@@ -1787,12 +1787,13 @@ def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular,
 	"""Perform the actual deletion for a single runner reference."""
 	report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
 
-	# 1. Remove report folder
-	if report_folder.exists():
-		shutil.rmtree(report_folder)
-		console.print(Info(message=f'Removed report folder: {report_folder}'))
-	else:
-		console.print(Warning(message=f'Report folder not found: {report_folder}'))
+	# 1. Remove report folder (local driver only; api/mongodb delete from the backend)
+	if driver == 'local':
+		if report_folder.exists():
+			shutil.rmtree(report_folder)
+			console.print(Info(message=f'Removed report folder: {report_folder}'))
+		else:
+			console.print(Warning(message=f'Report folder not found: {report_folder}'))
 
 	# 2. MongoDB backend
 	if driver == 'mongodb' and runner_db_id:
@@ -1863,10 +1864,11 @@ def report_delete(runner_ids, workspace, driver, yes):
 			runner_db_id = runner_number
 		resolved.append((runner_type_plural, runner_type_singular, runner_number, runner_db_id))
 
-		if report_folder.exists():
-			console.print(f'  [dim]-[/] Remove report folder: {report_folder}')
-		else:
-			console.print(f'  [dim]-[/] [dim]Report folder not found (will skip): {report_folder}[/]')
+		if driver == 'local':
+			if report_folder.exists():
+				console.print(f'  [dim]-[/] Remove report folder: {report_folder}')
+			else:
+				console.print(f'  [dim]-[/] [dim]Report folder not found (will skip): {report_folder}[/]')
 
 		if driver == 'mongodb':
 			if runner_db_id:
