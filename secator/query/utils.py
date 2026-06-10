@@ -447,19 +447,26 @@ def validate_query_fields(query):
     """Validate field names in a MongoDB-style query against known output types.
 
     For each fragment referencing a known _type, checks that the queried fields
-    exist on that type. Prints a warning (with available fields) for unknown fields
-    and removes them from the query. Warnings are emitted after validation completes.
-    Returns the (possibly modified) query dict.
+    exist on that type. Invalid fields are removed from the query.
+
+    Returns:
+        tuple[dict, list]: (filtered_query, warnings) where warnings is a list of
+        (field_name, type_name, valid_fields) tuples for unknown fields found.
+        Callers are responsible for emitting the warnings at the appropriate time.
     """
     if not query or not isinstance(query, dict):
-        return query
+        return query, []
 
     type_map = _build_type_map()
     warnings = []
     result = _validate_query(query, type_map, warnings)
+    return result, warnings
+
+
+def emit_query_warnings(warnings):
+    """Emit warning messages for unknown query fields collected by validate_query_fields."""
     for field_name, type_name, valid_fields in warnings:
         _warn_unknown_field(field_name, type_name, valid_fields)
-    return result
 
 
 def query_has_type_constraint(query):
