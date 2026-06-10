@@ -1333,8 +1333,10 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	drivers = [driver] if driver and driver != 'local' else []
 	# Resolve the workspace name to its id for the API backend (findings are filtered
 	# by the real workspace id; the local/mongodb backends key findings by name).
+	# Mirror QueryEngine._select_backend: an explicit mongodb/api driver wins,
+	# otherwise (None/'local') the configured default backend is used.
 	workspace_id = workspace_name
-	effective_driver = driver or CONFIG.backends.current
+	effective_driver = driver if driver in ('mongodb', 'api') else CONFIG.backends.current
 	if effective_driver == 'api':
 		try:
 			from secator.hooks.api import resolve_workspace
