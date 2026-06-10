@@ -678,8 +678,8 @@ def config_set(key, value, strategy):
 	  secator config set drivers.defaults redis                            # replace list field
 	  secator config set drivers.defaults redis --append                   # append to list field
 	  secator config set wordlists.defaults.http mylist                    # set a dict subkey
-	  secator config set workspace.profiles.my_ws aggressive,passive  # set workspace profiles
-	  secator config set workspace.profiles.my_ws test --append   # append to workspace profiles
+	  secator config set workspaces.profiles.my_ws aggressive,passive  # set workspace profiles
+	  secator config set workspaces.profiles.my_ws test --append   # append to workspace profiles
 	"""
 	CONFIG.set(key, value, strategy=strategy if strategy else None)
 	config = CONFIG.validate()
@@ -709,8 +709,8 @@ def config_unset(key, value=None):
 	  secator config unset debug                                      # reset scalar to default
 	  secator config unset drivers.defaults redis                     # remove item from list
 	  secator config unset wordlists.defaults.http                    # remove dict subkey
-	  secator config unset workspace.profiles.my_ws test     # remove profile from workspace list
-	  secator config unset workspace.profiles.my_ws          # remove workspace profile list entirely
+	  secator config unset workspaces.profiles.my_ws test     # remove profile from workspace list
+	  secator config unset workspaces.profiles.my_ws          # remove workspace profile list entirely
 	"""
 	CONFIG.unset(key, value=value)
 	config = CONFIG.validate()
@@ -803,7 +803,7 @@ def workspace_list():
 	for workspace, config in workspaces.items():
 		table.add_row(workspace, str(config['count']), config['path'])
 	console.print(table)
-	current = CONFIG.workspace.default or 'default'
+	current = CONFIG.workspaces.current or 'default'
 	console.print(Info(message=f'Current workspace: [bold gold3]{current}[/]. Use [bold green4]secator ws use <workspace>[/] to switch.'))  # noqa: E501
 
 
@@ -811,7 +811,7 @@ def workspace_list():
 @click.argument('name')
 def workspace_use(name):
 	"""Use a workspace (set as default)"""
-	CONFIG.set('workspace.default', name)
+	CONFIG.set('workspaces.current', name)
 	config = CONFIG.validate()
 	if config:
 		CONFIG.save()
@@ -823,7 +823,7 @@ def workspace_use(name):
 @workspace.command('current')
 def workspace_current():
 	"""Show current default workspace"""
-	current = CONFIG.workspace.default or 'default'
+	current = CONFIG.workspaces.current or 'default'
 	console.print(Info(message=f'Current workspace: [bold gold3]{current}[/]. Use [bold green4]secator ws use <workspace>[/] to switch.'))  # noqa: E501
 
 
@@ -1292,7 +1292,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	from secator.query.utils import parse_report_paths, python_expr_to_mongo, query_has_type_constraint
 
 	current = get_file_timestamp()
-	workspace_name = workspace or CONFIG.workspace.default or 'default'
+	workspace_name = workspace or CONFIG.workspaces.current or 'default'
 
 	# 1. Parse path-based runner filter
 	runner_filter = parse_report_paths(report_query)
@@ -1567,7 +1567,7 @@ def report_info(runner_id, workspace, show_all):
 	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)"""
 	MAX_ENTRIES = 20
 
-	workspace_name = workspace or CONFIG.workspace.default or 'default'
+	workspace_name = workspace or CONFIG.workspaces.current or 'default'
 	parts = runner_id.split('/')
 	if len(parts) != 2:
 		console.print(Error(message=f'Invalid runner ID: {runner_id!r}. Expected format: <type>/<id> (e.g. scans/0)'))
@@ -1724,7 +1724,7 @@ def report_delete(runner_ids, workspace, driver, yes):
 	"""
 	from secator.query.utils import expand_runner_paths
 
-	workspace_name = workspace or CONFIG.workspace.default or 'default'
+	workspace_name = workspace or CONFIG.workspaces.current or 'default'
 
 	refs, errors = expand_runner_paths(list(runner_ids))
 	for err in errors:
