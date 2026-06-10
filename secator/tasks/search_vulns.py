@@ -124,7 +124,7 @@ class search_vulns(Vuln):
 				vuln = Vuln.lookup_cve(cve_id)
 				if vuln:
 					data.update(vuln.toDict())
-					data['confidence'] = confidence
+					data['confidence'] = self.confidence
 					data['references'].extend(references)
 					data['extra_data'].update(extra_data)
 
