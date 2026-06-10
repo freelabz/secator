@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.35.0](https://github.com/freelabz/secator/compare/v0.34.0...v0.35.0) (2026-06-10)
+
+
+### Features
+
+* **cli:** dynamic install addons ([#1144](https://github.com/freelabz/secator/issues/1144)) ([5f0de13](https://github.com/freelabz/secator/commit/5f0de13d4f1ae8a1ea5c6bd62e42c0b050b91afc))
+* **cli:** improve `r show --format` with \n, Markdown, and file templates ([#1065](https://github.com/freelabz/secator/issues/1065)) ([d80ccd5](https://github.com/freelabz/secator/commit/d80ccd5d48ccb765b81252db7525866e4aa03ff7))
+* **cli:** improve report/workspace/profile commands and ai setup ([#1140](https://github.com/freelabz/secator/issues/1140)) ([eabdd5c](https://github.com/freelabz/secator/commit/eabdd5c92cbb51f767bef34574e7fa7db558d5a1))
+* **cli:** saved queries and `secator query` command ([#1139](https://github.com/freelabz/secator/issues/1139)) ([047aa04](https://github.com/freelabz/secator/commit/047aa041a00c87300da712714b3035d0cbc3f163))
+* **profile:** support workspace, drivers and exporters in profiles ([#1137](https://github.com/freelabz/secator/issues/1137)) ([df04797](https://github.com/freelabz/secator/commit/df047975571f5fe3f4733f1c5664dc9a3dd3354d))
+* **query:** add --limit / -l option to secator r show ([#1151](https://github.com/freelabz/secator/issues/1151)) ([a0da3c6](https://github.com/freelabz/secator/commit/a0da3c624ddd63a8cd526bd4d1904dde1a00b5fd))
+* **sqlite:** add SQLite query driver + backend (mongodb parity) ([#1163](https://github.com/freelabz/secator/issues/1163)) ([fe9680d](https://github.com/freelabz/secator/commit/fe9680df309f7b68111726ca312063eb6d2a43e2))
+* **workspace:** add automatic workspace routing ([#1158](https://github.com/freelabz/secator/issues/1158)) ([307eeb3](https://github.com/freelabz/secator/commit/307eeb3e2c22b1633a5bf5ab2776a562ab21f0dd))
+* **workspace:** default profile per workspace ([#1132](https://github.com/freelabz/secator/issues/1132)) ([b38e52d](https://github.com/freelabz/secator/commit/b38e52d9db42119ff9e72a77398496ef06e1af96))
+
+
+### Bug Fixes
+
+* **ai:** handle OutputType objects from query results ([#1152](https://github.com/freelabz/secator/issues/1152)) ([8a41028](https://github.com/freelabz/secator/commit/8a41028fcc58a14dc6b9a3c907e67d71494b77ac))
+* **ai:** yield Error for connection failures and use config context_window fallback ([#1119](https://github.com/freelabz/secator/issues/1119)) ([5484d22](https://github.com/freelabz/secator/commit/5484d221621f6fb07384c2e16a60640910a90204))
+* **cli:** add 'in' operator to query language ([#1037](https://github.com/freelabz/secator/issues/1037)) ([f3b752c](https://github.com/freelabz/secator/commit/f3b752c80eae0ee5eab4d762d1375f8962b22944))
+* **cli:** remove piped output behavior from 'secator r list' ([#1149](https://github.com/freelabz/secator/issues/1149)) ([5e0dd75](https://github.com/freelabz/secator/commit/5e0dd75338eba692ff75478f8ef042b9c1d46922))
+* **cli:** sanitize workspace name in report info path construction ([#1146](https://github.com/freelabz/secator/issues/1146)) ([866ea4d](https://github.com/freelabz/secator/commit/866ea4d75714b3b1694656b81e67fda53137190d))
+* **cli:** show _path and task source in secator r info errors/warnings ([#1155](https://github.com/freelabz/secator/issues/1155)) ([0b4942d](https://github.com/freelabz/secator/commit/0b4942d982def3d4653ed516bb73f6461419b2ac))
+* **config:** rename `workspace` config key to `workspaces` ([#1162](https://github.com/freelabz/secator/issues/1162)) ([55a650e](https://github.com/freelabz/secator/commit/55a650e15ce75a63810472e52ac3536553c22ae4))
+* **query:** validate output type fields and warn on unknown fields ([#1159](https://github.com/freelabz/secator/issues/1159)) ([56388a2](https://github.com/freelabz/secator/commit/56388a2ac526f2eb140de4bd8581f9a0493a67eb))
+* revert "fix(runner): show task source name even when output is piped" ([#1136](https://github.com/freelabz/secator/issues/1136)) ([63280eb](https://github.com/freelabz/secator/commit/63280ebc27e967214d3e9d303b8454ab615ef6b2))
+* **sqlite:** remove `sqlite` addon as it's in std library ([7f249fe](https://github.com/freelabz/secator/commit/7f249fec5ce0b6579f2d990c3f6105ee601d645a))
+* **test:** remove sqlite addon enabled check ([df93876](https://github.com/freelabz/secator/commit/df93876ab43372beadbd593314ff7cf7f5aebfbe))
+
+
+### Documentation
+
+* update CLAUDE.md ([#1142](https://github.com/freelabz/secator/issues/1142)) ([a368160](https://github.com/freelabz/secator/commit/a3681601ced37814a9cffffcb91e545e323f05b0))
+
 ## [0.34.0](https://github.com/freelabz/secator/compare/v0.33.0...v0.34.0) (2026-06-06)
 
 
