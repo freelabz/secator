@@ -191,7 +191,6 @@ for addon, module in [
 	('trace', 'memray'),
 	('build', 'hatch'),
 	('ai', 'litellm'),
-	('sqlite', 'sqlite3'),
 ]:
 	ADDONS_ENABLED[addon] = is_importable(module)
 
