@@ -54,6 +54,10 @@ class TestLooksLikeQueryExpr(unittest.TestCase):
 			"Analyze my workspace data",
 			"critical_vulns",
 			"show me the most exploitable hosts",
+			# Plain English containing 'in'/'and'/'or' must not be read as a query expression.
+			"What's in my workspace ?",
+			"subdomains and ips",
+			"show me urls or vulnerabilities",
 			"",
 		]
 		for phrase in phrases:

@@ -1115,7 +1115,9 @@ def report():
 
 # Operators / tokens that mark a string as a filter expression rather than natural language.
 _QUERY_EXPR_OPERATORS = ('==', '!=', '<=', '>=', '~=', '<', '>', '&&', '||')
-_QUERY_EXPR_WORD_OPERATORS = (' and ', ' or ', ' in ')
+# 'field in [...]' list-membership operator. Require the bracket so plain English
+# "in" (e.g. "what's in my workspace?") is not mistaken for a query expression.
+_QUERY_EXPR_IN_RE = re.compile(r'\bin\s*\[')
 
 
 def _looks_like_query_expr(value):
@@ -1123,15 +1125,19 @@ def _looks_like_query_expr(value):
 
 	Heuristics (any match => expression):
 	  - contains a comparison/logical operator (==, !=, <, >, <=, >=, ~=, &&, ||)
-	  - contains a word operator surrounded by spaces ( and / or / in )
+	  - contains the 'in [' list-membership operator (e.g. tags in [x, y])
 	  - matches a bare dotted field-access path like 'word.word' (e.g. extra_data.published)
 	  - is a bare known output type name (url, vulnerability, domain, etc.)
+
+	Note: the word operators 'and' / 'or' are intentionally not matched on their own —
+	they always connect comparison clauses, which are already caught above, so matching
+	them standalone would misclassify natural-language prompts (e.g. "subdomains and ips").
 	"""
 	if not value:
 		return False
 	if any(op in value for op in _QUERY_EXPR_OPERATORS):
 		return True
-	if any(op in value for op in _QUERY_EXPR_WORD_OPERATORS):
+	if _QUERY_EXPR_IN_RE.search(value):
 		return True
 	if re.fullmatch(r'\w+(?:\.\w+)+', value.strip()):
 		return True
