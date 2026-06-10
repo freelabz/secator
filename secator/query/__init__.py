@@ -6,9 +6,10 @@ from secator.query._base import QueryBackend
 from secator.query.api import ApiBackend
 from secator.query.mongodb import MongoDBBackend
 from secator.query.json import JsonBackend
+from secator.query.sqlite import SqliteBackend
 
 
-__all__ = ['QueryEngine', 'QueryBackend', 'ApiBackend', 'MongoDBBackend', 'JsonBackend']
+__all__ = ['QueryEngine', 'QueryBackend', 'ApiBackend', 'MongoDBBackend', 'JsonBackend', 'SqliteBackend']
 
 
 class QueryEngine:
@@ -17,6 +18,7 @@ class QueryEngine:
     BACKENDS = {
         'api': ApiBackend,
         'mongodb': MongoDBBackend,
+        'sqlite': SqliteBackend,
         'json': JsonBackend,
     }
 
@@ -32,6 +34,8 @@ class QueryEngine:
             return MongoDBBackend(self.workspace_id, context=self.context)
         elif 'api' in drivers:
             return ApiBackend(self.workspace_id, context=self.context)
+        elif 'sqlite' in drivers:
+            return SqliteBackend(self.workspace_id, context=self.context)
         else:
             # For JSON backend, use workspace_name for directory (reports are saved by name)
             workspace_name = self.context.get('workspace_name', self.workspace_id)

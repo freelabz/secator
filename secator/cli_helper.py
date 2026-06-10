@@ -27,7 +27,7 @@ PROFILES_STR = ','.join([f'[dim yellow3]{_.name}[/]' for _ in get_configs_by_typ
 DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in get_available_drivers()])
 DRIVER_DEFAULTS_STR = ','.join(CONFIG.drivers.defaults) if CONFIG.drivers.defaults else None
 PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.defaults else None
-WORKSPACE_DEFAULT_STR = CONFIG.workspace.default if CONFIG.workspace.default else 'default'
+WORKSPACE_DEFAULT_STR = CONFIG.workspaces.current if CONFIG.workspaces.current else 'default'
 EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in get_available_exporters()])
 
 CLI_OUTPUT_OPTS = {
@@ -215,7 +215,9 @@ def register_runner(cli_endpoint, config):
 		dry_run = opts['dry_run']
 		yaml = opts['yaml']
 		tree = opts['tree']
-		context = {'workspace_name': ws, 'workspace_id': ws}
+		from click.core import ParameterSource
+		ws_explicit = ctx.get_parameter_source('workspace') == ParameterSource.COMMANDLINE
+		context = {'workspace_name': ws, 'workspace_id': ws, 'workspace_explicit': ws_explicit}
 		enable_pyinstrument = opts['enable_pyinstrument']
 		enable_memray = opts['enable_memray']
 		contextmanager = nullcontext()

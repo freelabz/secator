@@ -39,7 +39,7 @@ class TestReportDeleteCli(unittest.TestCase):
 
 		with mock.patch('secator.cli.CONFIG') as mock_cfg:
 			mock_cfg.dirs.reports = self.temp_dir
-			mock_cfg.workspace.default = WORKSPACE
+			mock_cfg.workspaces.current = WORKSPACE
 			mock_cfg.addons.api.runner_delete_endpoint = '/api/{runner_type}/{runner_id}'
 			return self.cli_runner.invoke(cli, ['r', 'rm', '-w', WORKSPACE, '-y'] + args)
 
@@ -104,7 +104,7 @@ class TestReportDeleteCli(unittest.TestCase):
 		self._make_runner('tasks', 23)
 		with mock.patch('secator.cli.CONFIG') as mock_cfg:
 			mock_cfg.dirs.reports = self.temp_dir
-			mock_cfg.workspace.default = WORKSPACE
+			mock_cfg.workspaces.current = WORKSPACE
 			mock_cfg.addons.api.runner_delete_endpoint = '/api/{runner_type}/{runner_id}'
 			# Answer 'n' to the confirmation prompt
 			result = self.cli_runner.invoke(cli, ['r', 'rm', '-w', WORKSPACE, 'tasks/23'], input='n\n')

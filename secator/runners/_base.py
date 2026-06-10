@@ -96,7 +96,8 @@ class Runner:
 		self.config = self._process_config(config)
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description or '')
-		self.workspace_name = context.get('workspace_name', CONFIG.workspace.default or 'default')
+		self.workspace_name = context.get('workspace_name', CONFIG.workspaces.current or 'default')
+		self.workspace_explicit = context.get('workspace_explicit', False)
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
@@ -197,7 +198,7 @@ class Runner:
 		# Determine inputs
 		self.debug(f'resolving inputs with {len(self.dynamic_opts)} dynamic opts', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
-		self.inputs = list(set(self.inputs))
+		self.inputs = list(dict.fromkeys(self.inputs))
 		if self.caller != 'Task':
 			targets = [Target(name=target) for target in self.inputs]
 			for target in targets:
@@ -214,6 +215,16 @@ class Runner:
 		profiles_str = run_opts.get('profiles') or []
 		self.debug('resolving profiles', obj={'profiles': profiles_str}, sub='init')
 		self.profiles = self.resolve_profiles(profiles_str)
+
+		# Apply route-based workspace if no profile/explicit workspace was set
+		default_ws = CONFIG.workspaces.current or 'default'
+		if not self.workspace_explicit and self.workspace_name == default_ws:
+			route_workspace = self._resolve_route_workspace(self.inputs)
+			if route_workspace:
+				self.debug(f'route workspace -> {route_workspace}', sub='init')
+				self.workspace_name = route_workspace
+				self.context['workspace_name'] = route_workspace
+				self.context['workspace_id'] = route_workspace
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -1333,7 +1344,7 @@ class Runner:
 				existing_profile_names.add(p)
 
 		# Add workspace-specific default profiles
-		workspace_defaults = CONFIG.workspace.profiles.get(self.workspace_name, [])
+		workspace_defaults = CONFIG.workspaces.profiles.get(self.workspace_name, [])
 		for p in workspace_defaults:
 			if p not in existing_profile_names:
 				profiles.append(p)
@@ -1372,7 +1383,7 @@ class Runner:
 		profile_workspace = None
 		profile_drivers = []
 		profile_exporters = None
-		default_ws = CONFIG.workspace.default or 'default'
+		default_ws = CONFIG.workspaces.current or 'default'
 		for profile in templates:
 			self.debug(f'profile {profile.name} opts (enforced: {profile.enforce}): {profile.opts}', sub='init')
 			enforced = profile.enforce or False
@@ -1448,6 +1459,27 @@ class Runner:
 			self._apply_profile_drivers(profile_drivers)
 
 		return templates
+
+	def _resolve_route_workspace(self, inputs):
+		"""Resolve workspace from configured routes based on inputs.
+
+		Args:
+			inputs (list[str]): List of inputs to match against route patterns.
+
+		Returns:
+			str | None: Matched workspace name, or None if no route matches.
+		"""
+		import fnmatch
+
+		routes = CONFIG.workspaces.routes
+		if not routes:
+			return None
+		for workspace, patterns in routes.items():
+			for pattern in patterns:
+				for inp in inputs:
+					if fnmatch.fnmatch(str(inp), pattern):
+						return workspace
+		return None
 
 	def _apply_profile_drivers(self, drivers):
 		"""Load and register driver hooks specified by profiles.

@@ -355,7 +355,8 @@ class TestChatHistory(unittest.TestCase):
 
         result = get_context_window("unknown-model")
 
-        self.assertEqual(result, 128000)  # Default fallback
+        from secator.config import CONFIG
+        self.assertEqual(result, CONFIG.addons.ai.context_window)  # Config-driven default fallback
 
     def test_constants_defined(self):
         """Verify constants are defined."""

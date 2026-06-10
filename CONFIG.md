@@ -465,11 +465,11 @@ Workspace settings.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `workspace.default` | `string` | `''` | Default workspace name |
+| `workspaces.current` | `string` | `''` | Current workspace name |
 
 ```yaml
-workspace:
-  default: my-project
+workspaces:
+  current: my-project
 ```
 
 ---
