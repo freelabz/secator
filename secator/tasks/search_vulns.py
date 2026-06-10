@@ -130,7 +130,8 @@ class search_vulns(Vuln):
 
 			# Add 'exploitable' and 'uncertain' tags
 			if match_reason == 'general_product_uncertain':
-				data['confidence'] = 'low'
+				self.confidence = 'low'
+				data['confidence'] = self.confidence
 				data['tags'].append('uncertain')
 			if len(exploits) > 0:
 				data['tags'].append('exploitable')
@@ -168,7 +169,7 @@ class search_vulns(Vuln):
 						provider=provider,
 						id=id,
 						matched_at=matched_at,
-						confidence=confidence,
+						confidence=self.confidence,
 						reference=exploit,
 						cves=[cve_id],
 						tags=tags,
