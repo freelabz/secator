@@ -282,6 +282,10 @@ class TestReportShowApiBackend(unittest.TestCase):
 
 	def _invoke(self, query_expr, api_response):
 		from secator.cli import cli
+		from secator.hooks.api import resolve_workspace
+
+		# Workspace name->id resolution is cached; reset so it re-resolves under the mock.
+		resolve_workspace.cache_clear()
 
 		captured = {}
 		captured_request = {}
@@ -291,6 +295,12 @@ class TestReportShowApiBackend(unittest.TestCase):
 
 		def mock_request(method, url, data=None, **kwargs):
 			import json as _json
+			# The api driver resolves the workspace name to its id first (GET /workspaces).
+			if method == 'GET' and 'workspace' in url:
+				resp = mock.MagicMock()
+				resp.json.return_value = [{'name': WORKSPACE, '_id': WORKSPACE}]
+				resp.raise_for_status = mock.MagicMock()
+				return resp
 			captured_request['method'] = method
 			captured_request['url'] = url
 			captured_request['body'] = _json.loads(data) if data else {}
@@ -388,8 +398,8 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 				console.capture() as cap:
 			cfg.workspace.default = default_ws
 			report_list.callback(
-				workspace=workspace_opt, runner_type=None, time_delta=None, show_all=False, interesting=False,
-				status=None,
+				workspace=workspace_opt, runner_type=None, time_delta=None, driver='local', show_all=False,
+				interesting=False, status=None, show_children=False,
 			)
 		# Strip ANSI codes then flatten whitespace so assertions work on plain text
 		return ' '.join(_strip_ansi(cap.get()).split())
@@ -445,9 +455,10 @@ class TestReportListInteresting(unittest.TestCase):
 	def _invoke(self, args):
 		from secator.cli import cli
 		# Under CliRunner there is no TTY, so report_list takes the piped branch and prints paths,
-		# which still respects the filters.
+		# which still respects the filters. Pin --driver local so the filesystem branch is used
+		# regardless of the ambient drivers.defaults config.
 		with mock.patch('secator.cli.list_reports', return_value=[self.with_vuln, self.no_vuln, self.unknown_sev]):
-			return CliRunner().invoke(cli, ['r', 'list'] + args)
+			return CliRunner().invoke(cli, ['r', 'list', '--driver', 'local'] + args)
 
 	def test_interesting_filters_to_vuln_reports(self):
 		result = self._invoke(['-i'])

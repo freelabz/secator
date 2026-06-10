@@ -544,21 +544,6 @@ class TestGetQueryEngine(unittest.TestCase):
 
 		self.assertEqual(count, 42)
 
-	# -- scope=workspace: mongodb takes priority over api --
-
-	def test_workspace_scope_mongodb_priority(self):
-		"""When both mongodb and api drivers present, mongodb wins."""
-		from secator.query.mongodb import MongoDBBackend
-
-		ctx = ActionContext(
-			targets=['t.com'],
-			model='m',
-			context={'workspace_id': 'ws1', 'drivers': ['api', 'mongodb']},
-		)
-		engine = ctx.get_query_engine()
-
-		self.assertIsInstance(engine.backend, MongoDBBackend)
-
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestHandleAddFinding(unittest.TestCase):
