@@ -135,6 +135,96 @@ for config in SCANS:
 		console.print(Warning(message=f'Skipping scan {config.name!r}: {e}'))
 
 
+# ------#
+# POLL #
+# ------#
+
+def _group_poll_results(results):
+	"""Group polled output items by output type name and collect errors.
+
+	Args:
+		results (list): List of OutputType items collected while polling.
+
+	Returns:
+		tuple[dict, list]: (results keyed by output type name, list of errors).
+	"""
+	finding_names = [output_type.get_name() for output_type in FINDING_TYPES]
+	grouped = {}
+	errors = []
+	for item in results:
+		item_type = getattr(item, '_type', None)
+		if item_type == 'error':
+			errors.append(item)
+		elif item_type in finding_names:
+			grouped.setdefault(item_type, []).append(item)
+	return grouped, errors
+
+
+@cli.command(name='poll')
+@click.argument('report_path', type=str, required=True)
+def poll(report_path):
+	"""Poll a report for results."""
+	with open(report_path, 'r') as f:
+		data = json.load(f)
+	if data['info']['celery_id']:
+		from celery.result import AsyncResult
+		from secator.pollers.celery import CeleryPoller
+		from secator.output_types import State
+		import copy
+		celery_result = AsyncResult(data['info']['celery_id'])
+		state = None
+		results = []
+		results_uuids = []
+		celery_ids_map = copy.deepcopy(data['info']['celery_ids_map'])
+		for item in CeleryPoller.iter_results(
+			celery_result,
+			ids_map=celery_ids_map,
+			print_remote_info=True
+		):
+			if isinstance(item, State) and item.task_id == data['info']['celery_id']:
+				state = item.state
+			if item._uuid not in results_uuids:
+				results_uuids.append(item._uuid)
+				results.append(item)
+				console.print(item)
+		console.print(f'State: {state}')
+		console.print(Info(message=f'Writing results to report {report_path}'))
+		grouped, errors = _group_poll_results(results)
+		data['results'] = grouped
+		data['info']['errors'] = errors
+		from secator.serializers.dataclass import dumps_dataclass
+		with open(report_path, 'w') as f:
+			f.write(dumps_dataclass(data, indent=2))
+		console.print(Info(message=f'Results written to report {report_path}'))
+	elif data['info'].get('mongodb_id'):
+		from secator.pollers.mongodb import MongoDBPoller
+		from secator.output_types import State
+		runner_type = data['info']['mongodb_runner_type']
+		runner_id = data['info']['mongodb_id']
+		state = None
+		results = []
+		results_uuids = []
+		for item in MongoDBPoller.iter_results(runner_type, runner_id):
+			if isinstance(item, State) and item.task_id == runner_id:
+				state = item.state
+			if item._uuid not in results_uuids:
+				results_uuids.append(item._uuid)
+				results.append(item)
+				console.print(item)
+		console.print(f'State: {state}')
+		console.print(Info(message=f'Writing results to report {report_path}'))
+		grouped, errors = _group_poll_results(results)
+		data['results'] = grouped
+		data['info']['errors'] = errors
+		from secator.serializers.dataclass import dumps_dataclass
+		with open(report_path, 'w') as f:
+			f.write(dumps_dataclass(data, indent=2))
+		console.print(Info(message=f'Results written to report {report_path}'))
+	else:
+		console.print(Error(message='No celery or mongodb result found in report.'))
+		sys.exit(1)
+
+
 # --------#
 # WORKER #
 # --------#
