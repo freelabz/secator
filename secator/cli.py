@@ -1305,6 +1305,9 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	debug('original query expr', sub='query', obj={'raw': query or ''})
 	mongo_query = python_expr_to_mongo(query) if query else {}
 	mongo_query, query_warnings = validate_query_fields(mongo_query)
+	if query and query_warnings and not mongo_query:
+		emit_query_warnings(query_warnings)
+		return
 	debug('converted mongo query', sub='query', obj=mongo_query)
 
 	# 3. Merge filters
