@@ -33,10 +33,6 @@ class CsvExporter(Exporter):
 		if not csv_paths:
 			return
 
-		if len(csv_paths) == 1:
-			csv_paths_str = csv_paths[0]
-		else:
-			csv_paths_str = '\n   • ' + '\n   • '.join(csv_paths)
-
 		if getattr(self.report.runner, 'print_reports_message', True):
-			console.print(Info(message=f'Saved CSV reports to {csv_paths_str}'))
+			for csv_path in csv_paths:
+				console.print(Info(message=f'CSV report written to {csv_path}'))

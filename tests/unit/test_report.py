@@ -1,3 +1,4 @@
+import json
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -102,3 +103,68 @@ class TestReportBuild:
         report.build(query={})
         assert 'results' in report.data
         assert 'info' in report.data
+
+
+class TestJsonlExporter:
+    """Tests for the JsonlExporter."""
+
+    def _make_report(self, results):
+        config = SimpleNamespace(name='test_runner', type='task')
+        runner = SimpleNamespace(
+            config=config,
+            workspace_name='test_ws',
+            errors=[],
+            context={'workspace_id': 'test_ws', 'workspace_name': 'test_ws', 'results': results},
+            reports_folder=Path(tempfile.mkdtemp()),
+            results=results,
+        )
+        runner.toDict = lambda: {
+            'name': 'test_runner', 'status': 'completed', 'targets': [],
+            'start_time': None, 'end_time': None, 'elapsed': None,
+            'elapsed_human': None, 'run_opts': {}, 'results_count': 0,
+        }
+        report = Report(runner)
+        report.build(query={})
+        return report
+
+    def test_jsonl_outputs_one_line_per_result(self, capsys):
+        from secator.exporters.jsonl import JsonlExporter
+        vuln = {'_type': 'vulnerability', 'name': 'CVE-1', 'cvss_score': 9.0}
+        domain = {'_type': 'domain', 'name': 'example.com'}
+        report = self._make_report([vuln, domain])
+        JsonlExporter(report).send()
+        captured = capsys.readouterr()
+        lines = [ln for ln in captured.out.strip().splitlines() if ln]
+        assert len(lines) == 2
+        for line in lines:
+            obj = json.loads(line)
+            assert '_type' in obj
+
+    def test_jsonl_each_line_is_valid_json(self, capsys):
+        from secator.exporters.jsonl import JsonlExporter
+        vuln = {'_type': 'vulnerability', 'name': 'test-vuln', 'cvss_score': 7.5}
+        report = self._make_report([vuln])
+        JsonlExporter(report).send()
+        captured = capsys.readouterr()
+        lines = [ln for ln in captured.out.strip().splitlines() if ln]
+        assert len(lines) == 1
+        obj = json.loads(lines[0])
+        assert obj.get('_type') == 'vulnerability'
+        assert obj.get('name') == 'test-vuln'
+
+    def test_jsonl_empty_results_produces_no_output(self, capsys):
+        from secator.exporters.jsonl import JsonlExporter
+        report = self._make_report([])
+        JsonlExporter(report).send()
+        captured = capsys.readouterr()
+        assert captured.out.strip() == ''
+
+    def test_jsonl_writes_to_stdout_not_file(self, capsys):
+        from secator.exporters.jsonl import JsonlExporter
+        vuln = {'_type': 'vulnerability', 'name': 'x', 'cvss_score': 5.0}
+        report = self._make_report([vuln])
+        JsonlExporter(report).send()
+        captured = capsys.readouterr()
+        assert captured.out.strip() != ''
+        # No new files should be created in the output folder
+        assert not list(report.output_folder.glob('*.jsonl'))

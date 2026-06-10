@@ -99,8 +99,12 @@ class TestReportShowLocalBackend(unittest.TestCase):
 			args += extra_args
 
 		with mock.patch('secator.query.json.CONFIG') as mock_cfg, \
+				mock.patch('secator.cli.CONFIG') as mock_cli_cfg, \
 				mock.patch('secator.report.Report.send', capture_send):
 			mock_cfg.dirs.reports = Path(self.temp_dir)
+			mock_cli_cfg.dirs.reports = Path(self.temp_dir)
+			mock_cli_cfg.workspaces.current = None
+			mock_cli_cfg.runners.remove_duplicates = False
 			result = self.cli_runner.invoke(cli, args)
 
 		return result, captured
@@ -124,8 +128,12 @@ class TestReportShowLocalBackend(unittest.TestCase):
 			args.append(report_query)
 
 		with mock.patch('secator.query.json.CONFIG') as mock_cfg, \
+				mock.patch('secator.cli.CONFIG') as mock_cli_cfg, \
 				mock.patch('secator.report.Report.send', lambda report_self: None):
 			mock_cfg.dirs.reports = Path(self.temp_dir)
+			mock_cli_cfg.dirs.reports = Path(self.temp_dir)
+			mock_cli_cfg.workspaces.current = None
+			mock_cli_cfg.runners.remove_duplicates = False
 			result = self.cli_runner.invoke(cli, args)
 		return result
 
@@ -233,7 +241,11 @@ class TestReportShowMongoDBBackend(unittest.TestCase):
 			args += ['-q', query_expr]
 
 		with mock.patch.object(MongoDBBackend, '_get_client', return_value=mock_client), \
+				mock.patch('secator.cli.CONFIG') as mock_cli_cfg, \
 				mock.patch('secator.report.Report.send', capture_send):
+			mock_cli_cfg.dirs.reports = Path(tempfile.mkdtemp())
+			mock_cli_cfg.workspaces.current = None
+			mock_cli_cfg.runners.remove_duplicates = False
 			result = CliRunner().invoke(cli, args)
 
 		return result, captured, mock_collection
@@ -270,7 +282,11 @@ class TestReportShowMongoDBBackend(unittest.TestCase):
 			captured['results'] = report_self.data['results']
 
 		with mock.patch.object(MongoDBBackend, '_get_client', side_effect=Exception('connection refused')), \
+				mock.patch('secator.cli.CONFIG') as mock_cli_cfg, \
 				mock.patch('secator.report.Report.send', capture_send):
+			mock_cli_cfg.dirs.reports = Path(tempfile.mkdtemp())
+			mock_cli_cfg.workspaces.current = None
+			mock_cli_cfg.runners.remove_duplicates = False
 			result = CliRunner().invoke(cli, ['r', 'show', '--driver', 'mongodb', '-w', WORKSPACE])
 
 		self.assertEqual(result.exit_code, 0)
@@ -304,7 +320,11 @@ class TestReportShowApiBackend(unittest.TestCase):
 			args += ['-q', query_expr]
 
 		with mock.patch('requests.request', side_effect=mock_request), \
+				mock.patch('secator.cli.CONFIG') as mock_cli_cfg, \
 				mock.patch('secator.report.Report.send', capture_send):
+			mock_cli_cfg.dirs.reports = Path(tempfile.mkdtemp())
+			mock_cli_cfg.workspaces.current = None
+			mock_cli_cfg.runners.remove_duplicates = False
 			result = CliRunner().invoke(cli, args)
 
 		return result, captured, captured_request
@@ -346,7 +366,11 @@ class TestReportShowApiBackend(unittest.TestCase):
 			captured['results'] = report_self.data['results']
 
 		with mock.patch('requests.request', side_effect=Exception('connection refused')), \
+				mock.patch('secator.cli.CONFIG') as mock_cli_cfg, \
 				mock.patch('secator.report.Report.send', capture_send):
+			mock_cli_cfg.dirs.reports = Path(tempfile.mkdtemp())
+			mock_cli_cfg.workspaces.current = None
+			mock_cli_cfg.runners.remove_duplicates = False
 			result = CliRunner().invoke(cli, ['r', 'show', '--driver', 'api', '-w', WORKSPACE])
 
 		self.assertEqual(result.exit_code, 0)

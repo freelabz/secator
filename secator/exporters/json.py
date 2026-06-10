@@ -13,4 +13,4 @@ class JsonExporter(Exporter):
 			dump_dataclass(self.report.data, f, indent=2)
 
 		if getattr(self.report.runner, 'print_reports_message', True):
-			console.print(Info(f'Saved JSON report to {json_path}'))
+			console.print(Info(message=f'JSON report written to {json_path}'))
