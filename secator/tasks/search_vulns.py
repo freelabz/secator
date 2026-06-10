@@ -60,10 +60,8 @@ class search_vulns(Vuln):
 			return
 		_in = self.inputs[0]
 		self.matched_at = None
-		self.confidence = 'low'
 		if '~' in _in:
 			split = _in.split('~')
-			self.confidence = 'high'
 			self.matched_at = split[0]
 			self.inputs[0] = split[1]
 		self.inputs[0] = self.inputs[0].replace('/', ' ').rstrip()
@@ -99,6 +97,7 @@ class search_vulns(Vuln):
 		# Yield each vulnerability
 		for cve_id, vuln_data in vulns.items():
 			match_reason = vuln_data.get('match_reason', '')
+			confidence = 'high'
 			tags = search_vulns.extract_tags(vuln_data)
 			exploits = vuln_data.get('exploits', [])
 			cvss_score = float(vuln_data.get('severity', {}).get('CVSS', {}).get('score', 0))
@@ -111,7 +110,7 @@ class search_vulns(Vuln):
 				'id': cve_id,
 				'name': cve_id,
 				'description': vuln_data.get('description', ''),
-				'confidence': self.confidence,
+				'confidence': confidence,
 				'cvss_score': cvss_score,
 				'epss_score': epss_score,
 				'cvss_vec': cvss_vector,
@@ -124,14 +123,13 @@ class search_vulns(Vuln):
 				vuln = Vuln.lookup_cve(cve_id)
 				if vuln:
 					data.update(vuln.toDict())
-					data['confidence'] = self.confidence
+					data['confidence'] = confidence
 					data['references'].extend(references)
 					data['extra_data'].update(extra_data)
 
 			# Add 'exploitable' and 'uncertain' tags
 			if match_reason == 'general_product_uncertain':
-				self.confidence = 'low'
-				data['confidence'] = self.confidence
+				data['confidence'] = 'low'
 				data['tags'].append('uncertain')
 			if len(exploits) > 0:
 				data['tags'].append('exploitable')
@@ -169,7 +167,7 @@ class search_vulns(Vuln):
 						provider=provider,
 						id=id,
 						matched_at=matched_at,
-						confidence=self.confidence,
+						confidence=confidence,
 						reference=exploit,
 						cves=[cve_id],
 						tags=tags,
