@@ -6,6 +6,8 @@ from secator.output_types import Warning
 from secator.query._base import QueryBackend
 from secator.rich import console
 
+RUNNER_COLLECTIONS = ('tasks', 'workflows', 'scans')
+
 
 class MongoDBBackend(QueryBackend):
 	"""Query backend for MongoDB."""
@@ -143,7 +145,10 @@ class MongoDBBackend(QueryBackend):
 
 			client = self._get_client()
 			db = client.main
-			rtype = runner_type + 's'
+			# Normalize singular/plural and reject unknown runner types.
+			rtype = runner_type.rstrip('s') + 's'
+			if rtype not in RUNNER_COLLECTIONS:
+				return None
 			query = {'_id': ObjectId(runner_id)} if ObjectId.is_valid(runner_id) else {'_id': runner_id}
 			doc = db[rtype].find_one(query)
 			if doc:
@@ -155,7 +160,8 @@ class MongoDBBackend(QueryBackend):
 			console.print(Warning(message=f'MongoDB get_runner failed: {e}'))
 			return None
 
-	def list_runners(self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None):
+	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
+					 has_parent: Optional[bool] = None):
 		"""List runners from MongoDB tasks/workflows/scans collections.
 
 		has_parent: when not None, only return runners matching that parent relationship
@@ -164,7 +170,11 @@ class MongoDBBackend(QueryBackend):
 		try:
 			client = self._get_client()
 			db = client.main
-			runner_types = [runner_type + 's'] if runner_type else ['tasks', 'workflows', 'scans']
+			if runner_type:
+				rtype = runner_type.rstrip('s') + 's'
+				runner_types = [rtype] if rtype in RUNNER_COLLECTIONS else []
+			else:
+				runner_types = list(RUNNER_COLLECTIONS)
 			runners = []
 			for rtype in runner_types:
 				query = {}

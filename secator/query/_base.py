@@ -30,7 +30,8 @@ class QueryBackend(ABC):
 		return None
 
 	def list_runners(
-		self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None
+		self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
+		has_parent: Optional[bool] = None
 	) -> List[Dict[str, Any]]:
 		"""List runners (tasks/workflows/scans) from this backend.
 

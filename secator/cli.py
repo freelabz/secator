@@ -814,9 +814,13 @@ def workspace_list(driver):
 					json_reports.append(path)
 		json_reports = sorted(json_reports, key=lambda x: x.stat().st_mtime, reverse=False)
 		for path in json_reports:
-			ws, runner_type, number = str(path).split('/')[-4:-1]
+			# Layout: <reports>/<ws>/<runner_type>/<number>/report.json — use the path
+			# helper / Path parts instead of a manual POSIX split.
+			ws = get_info_from_report_path(path).get('workspace')
+			if not ws:
+				continue
 			if ws not in workspaces_dict:
-				workspaces_dict[ws] = {'count': 0, 'path': '/'.join(str(path).split('/')[:-3])}
+				workspaces_dict[ws] = {'count': 0, 'path': str(path.parents[2])}
 			workspaces_dict[ws]['count'] += 1
 		table.add_column('Name', style='bold gold3')
 		table.add_column('Run count', overflow='fold')

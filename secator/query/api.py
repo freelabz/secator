@@ -2,6 +2,7 @@
 
 import json
 from typing import List, Dict, Any, Optional
+from urllib.parse import urlencode
 
 import requests
 
@@ -139,7 +140,8 @@ class ApiBackend(QueryBackend):
         """Return True if value looks like a 24-char hex MongoDB ObjectId."""
         return bool(value) and len(value) == 24 and all(c in '0123456789abcdefABCDEF' for c in value)
 
-    def list_runners(self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None):
+    def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
+                     has_parent: Optional[bool] = None):
         """List runners from API.
 
         The CLI passes a workspace name via -ws. The API accepts either workspace_id
@@ -151,20 +153,22 @@ class ApiBackend(QueryBackend):
         """
         try:
             endpoint = CONFIG.addons.api.runners_list_endpoint
-            params = []
+            # Build params as a dict and url-encode them (workspace names may contain
+            # spaces or other characters that must be escaped).
+            params = {}
             if workspace_id:
                 if self._is_object_id(workspace_id):
-                    params.append(f'workspace_id={workspace_id}')
+                    params['workspace_id'] = workspace_id
                 else:
-                    params.append(f'workspace_name={workspace_id}')
+                    params['workspace_name'] = workspace_id
             if runner_type:
-                params.append(f'type={runner_type}')
+                params['type'] = runner_type
             if CONFIG.addons.api.org_id is not None:
-                params.append(f'org_id={CONFIG.addons.api.org_id}')
+                params['org_id'] = CONFIG.addons.api.org_id
             if has_parent is not None:
-                params.append(f'has_parent={str(has_parent).lower()}')
+                params['has_parent'] = str(has_parent).lower()
             if params:
-                endpoint += '?' + '&'.join(params)
+                endpoint += '?' + urlencode(params)
             result = self._make_request('GET', endpoint)
             if isinstance(result, list):
                 return result

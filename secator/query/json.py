@@ -215,13 +215,13 @@ class JsonBackend(QueryBackend):
 			return {'workspace_id': workspace_id, 'workspace_name': workspace_id, 'path': str(workspace_path)}
 		return None
 
-	def list_runners(self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None):
+	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
+					 has_parent: Optional[bool] = None):
 		"""List runners from local report JSON files.
 
 		has_parent: when not None, only return runners matching that parent relationship
 		(False = outermost runners only, True = nested children only).
 		"""
-		import json as _json
 		from secator.utils import list_reports, get_info_from_report_path
 		paths = list_reports(workspace=workspace_id, type=runner_type)
 		runners = []
@@ -229,7 +229,7 @@ class JsonBackend(QueryBackend):
 			try:
 				path_info = get_info_from_report_path(path)
 				with open(path, 'r') as f:
-					data = _json.load(f)
+					data = json.load(f)
 				info = data.get('info', {})
 				if has_parent is not None and info.get('has_parent', False) != has_parent:
 					continue
@@ -238,6 +238,7 @@ class JsonBackend(QueryBackend):
 				info['_workspace'] = path_info.get('workspace', '')
 				info['_path'] = str(path)
 				runners.append(info)
-			except Exception:
+			except Exception as e:
+				debug(f'failed to load runner report {path}: {e}', sub='query.json')
 				continue
 		return runners
