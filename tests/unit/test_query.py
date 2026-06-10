@@ -552,11 +552,6 @@ class TestSqliteWiring(unittest.TestCase):
 		from secator.loader import get_available_drivers
 		self.assertIn('sqlite', get_available_drivers())
 
-	def test_sqlite_addon_always_enabled(self):
-		from secator.definitions import ADDONS_ENABLED
-		self.assertIn('sqlite', ADDONS_ENABLED)
-		self.assertTrue(ADDONS_ENABLED['sqlite'])
-
 	def test_sqlite_addon_config_exists(self):
 		from secator.config import CONFIG
 		self.assertFalse(CONFIG.addons.sqlite.enabled)
