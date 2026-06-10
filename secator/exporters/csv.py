@@ -26,7 +26,10 @@ class CsvExporter(Exporter):
 			csv_path = f'{self.report.output_folder}/report_{output_type}.csv'
 			csv_paths.append(csv_path)
 			with open(csv_path, 'w', newline='') as output_file:
-				dict_writer = _csv.DictWriter(output_file, keys)
+				# extrasaction='ignore': backends (e.g. API) may attach computed fields
+				# not in the output-type schema (e.g. 'is_exploitable'); only write the
+				# schema columns instead of raising on extras.
+				dict_writer = _csv.DictWriter(output_file, keys, extrasaction='ignore')
 				dict_writer.writeheader()
 				dict_writer.writerows(items)
 
