@@ -292,7 +292,7 @@ class ApiAddon(StrictModel):
 	workspace_get_endpoint: str = 'workspace/{workspace_id}'
 	workspace_delete_endpoint: str = 'workspace/{workspace_id}'
 	runners_list_endpoint: str = 'runners/any'
-	runner_delete_endpoint: str = '{runner_type}/{runner_id}'
+	runner_delete_endpoint: str = 'runner/{runner_id}?type={runner_type}'
 
 
 class Addons(StrictModel):
