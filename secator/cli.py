@@ -25,6 +25,7 @@ from secator.cli_helper import register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
 from secator.output_types import FINDING_TYPES, Info, Warning, Error
+from secator.query import QueryEngine
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
@@ -779,7 +780,7 @@ def workspace_list(driver):
 	"""List workspaces"""
 	from secator.query import QueryEngine
 
-	effective_driver = driver or CONFIG.backends.current
+	effective_driver = QueryEngine.resolve_backend(driver)
 	context = {'drivers': [effective_driver] if effective_driver and effective_driver != 'local' else []}
 	engine = QueryEngine(workspace_id='', context=context)
 
@@ -855,7 +856,7 @@ def workspace_current():
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def workspace_delete(name, driver, yes):
 	"""Delete a workspace and all associated reports. NAME: workspace name"""
-	driver = driver or CONFIG.backends.current
+	driver = QueryEngine.resolve_backend(driver)
 	workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
 
 	# The API keys workspaces by id, so resolve the name to its id for the api driver.
@@ -1346,7 +1347,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	# Resolve the workspace name to its id for the API backend (findings are filtered
 	# by the real workspace id; the local/mongodb backends key findings by name).
 	workspace_id = workspace_name
-	effective_driver = driver or CONFIG.backends.current
+	effective_driver = QueryEngine.resolve_backend(driver)
 	if effective_driver == 'api':
 		try:
 			from secator.hooks.api import resolve_workspace
@@ -1511,7 +1512,7 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 	"""List all secator reports."""
 	from secator.query import QueryEngine
 
-	effective_driver = driver or CONFIG.backends.current
+	effective_driver = QueryEngine.resolve_backend(driver)
 
 	# --show-children only applies to the mongodb/api backends, which persist nested
 	# runners. Local JSON reports don't store sub-tasks/sub-workflows separately.
@@ -1654,7 +1655,7 @@ def report_info(runner_id, workspace, driver, show_all):
 	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)"""
 	MAX_ENTRIES = 20
 
-	effective_driver = driver or CONFIG.backends.current
+	effective_driver = QueryEngine.resolve_backend(driver)
 	workspace_name = workspace or CONFIG.workspace.default or 'default'
 	parts = runner_id.split('/')
 	if len(parts) != 2:
@@ -1840,7 +1841,7 @@ def report_delete(runner_ids, workspace, driver, yes):
 	"""
 	from secator.query.utils import expand_runner_paths
 
-	driver = driver or CONFIG.backends.current
+	driver = QueryEngine.resolve_backend(driver)
 	workspace_name = workspace or CONFIG.workspace.default or 'default'
 
 	refs, errors = expand_runner_paths(list(runner_ids))

@@ -14,10 +14,12 @@ __all__ = ['QueryEngine', 'QueryBackend', 'ApiBackend', 'MongoDBBackend', 'JsonB
 class QueryEngine:
     """Query engine with pluggable backends."""
 
+    # Drivers that have a query backend, keyed by driver name. 'local' is the
+    # filesystem (JSON) backend.
     BACKENDS = {
         'api': ApiBackend,
         'mongodb': MongoDBBackend,
-        'json': JsonBackend,
+        'local': JsonBackend,
     }
 
     def __init__(self, workspace_id: str, context: dict = None):
@@ -25,26 +27,33 @@ class QueryEngine:
         self.context = context or {}
         self.backend = self._select_backend()
 
-    def _select_backend(self) -> QueryBackend:
-        """Select appropriate backend based on context or config default."""
+    @classmethod
+    def resolve_backend(cls, driver: str = None) -> str:
+        """Resolve the effective query backend driver name.
+
+        Uses the passed --driver if it corresponds to an available backend, else the
+        first driver in CONFIG.drivers.defaults that does, else 'local'.
+        """
         from secator.config import CONFIG
+        if driver in cls.BACKENDS:
+            return driver
+        for d in CONFIG.drivers.defaults:
+            if d in cls.BACKENDS:
+                return d
+        return 'local'
+
+    def _select_backend(self) -> QueryBackend:
+        """Select the backend from the context drivers (first that has a backend),
+        defaulting to the local (JSON) backend."""
         drivers = self.context.get('drivers', [])
-        if 'mongodb' in drivers:
-            return MongoDBBackend(self.workspace_id, context=self.context)
-        elif 'api' in drivers:
-            return ApiBackend(self.workspace_id, context=self.context)
-        else:
-            # Fall back to config default backend
-            current = CONFIG.backends.current
-            if current == 'mongodb':
-                return MongoDBBackend(self.workspace_id, context=self.context)
-            elif current == 'api':
-                return ApiBackend(self.workspace_id, context=self.context)
-            else:
-                # For JSON backend, use workspace_name for directory (reports are saved by name)
-                workspace_name = self.context.get('workspace_name', self.workspace_id)
-                results = self.context.get('results')
-                return JsonBackend(workspace_name, context=self.context, results=results)
+        backend_name = next((d for d in drivers if d in self.BACKENDS), 'local')
+        if backend_name == 'local':
+            # The JSON backend reads from the workspace_name directory (reports are
+            # saved by name), not the workspace id.
+            workspace_name = self.context.get('workspace_name', self.workspace_id)
+            results = self.context.get('results')
+            return JsonBackend(workspace_name, context=self.context, results=results)
+        return self.BACKENDS[backend_name](self.workspace_id, context=self.context)
 
     def search(self, query: dict, limit: int = 0, dedupe: bool = False,
                exclude_fields: List[str] = None) -> List[Dict[str, Any]]:

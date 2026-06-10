@@ -147,10 +147,6 @@ class Drivers(StrictModel):
 	defaults: List[str] = []
 
 
-class Backends(StrictModel):
-	current: str = 'local'
-
-
 class Workspace(StrictModel):
 	default: str = ''
 	routes: Dict[str, List[str]] = {}
@@ -320,7 +316,6 @@ class SecatorConfig(StrictModel):
 	wordlists: Wordlists = Wordlists()
 	profiles: Profiles = Profiles()
 	drivers: Drivers = Drivers()
-	backends: Backends = Backends()
 	workspace: Workspace = Workspace()
 	addons: Addons = Addons()
 	security: Security = Security()
