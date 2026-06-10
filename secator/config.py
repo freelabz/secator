@@ -10,7 +10,7 @@ import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
 from dotmap import DotMap
-from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
+from pydantic import AfterValidator, BaseModel, Field, model_validator, ValidationError
 
 from secator.requests import requests
 from secator.rich import console, console_stdout
@@ -235,6 +235,7 @@ class AiAddon(StrictModel):
 	max_tokens: int = 30000
 	max_tokens_total: int = 100000
 	max_results: int = 500
+	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
 	permissions: Dict = {
