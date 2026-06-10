@@ -1349,6 +1349,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 				'drivers': drivers,
 			},
 			'reports_folder': reports_folder,
+			'print_reports_message': True,
 		}
 	)
 	runner.toDict = lambda: {
