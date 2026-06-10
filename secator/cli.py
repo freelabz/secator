@@ -1547,6 +1547,10 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 	shown = 0
 
 	if effective_driver in ('mongodb', 'api'):
+		# --interesting and --time-delta are only supported by the local driver.
+		unsupported = [opt for opt, val in (('--interesting', interesting), ('--time-delta', time_delta)) if val]
+		if unsupported:
+			console.print(Warning(message=f'{", ".join(unsupported)} {"is" if len(unsupported) == 1 else "are"} only supported with the local driver and will be ignored for the {effective_driver} driver.'))  # noqa: E501
 		# Use QueryEngine backend to list runners
 		context = {'drivers': [effective_driver]}
 		engine = QueryEngine(workspace_id=workspace or '', context=context)
