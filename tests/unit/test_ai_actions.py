@@ -238,6 +238,12 @@ class TestHandleQuery(unittest.TestCase):
 		self.assertEqual(ai_results[0].extra_data['results'], 2)
 		mock_engine.search.assert_called_once_with({'port': 80}, limit=10)
 
+		# Query results are marked observation-only so the runner doesn't re-report them.
+		result_dicts = [r for r in results if isinstance(r, dict)]
+		self.assertEqual(len(result_dicts), 2)
+		for r in result_dicts:
+			self.assertTrue(r['_context'].get('ai_query_result'))
+
 	@patch('secator.ai.actions.ActionContext.get_query_engine')
 	def test_query_failure(self, mock_get_engine):
 		mock_engine = MagicMock()
