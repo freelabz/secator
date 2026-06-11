@@ -12,23 +12,23 @@ from rich.console import Console
 
 from secator.config import CONFIG
 from secator.click import CLICK_LIST
-from secator.definitions import ADDONS_ENABLED, AVAILABLE_DRIVERS, AVAILABLE_EXPORTERS
+from secator.definitions import ADDONS_ENABLED
 from secator.runners import Scan, Task, Workflow
 from secator.template import get_config_options
 from secator.tree import build_runner_tree, prune_runner_tree
 from secator.utils import deduplicate, expand_input, get_command_category
-from secator.loader import get_configs_by_type
+from secator.loader import get_configs_by_type, get_available_drivers, get_available_exporters
 from secator.completion import complete_profiles, complete_workspaces, complete_drivers, complete_exporters
 
 
 WORKSPACES = next(os.walk(CONFIG.dirs.reports))[1]
 WORKSPACES_STR = '|'.join([f'[dim yellow3]{_}[/]' for _ in WORKSPACES])
 PROFILES_STR = ','.join([f'[dim yellow3]{_.name}[/]' for _ in get_configs_by_type('profile')])
-DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_DRIVERS])
+DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in ['local'] + get_available_drivers()])
 DRIVER_DEFAULTS_STR = ','.join(CONFIG.drivers.defaults) if CONFIG.drivers.defaults else None
 PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.defaults else None
-WORKSPACE_DEFAULT_STR = CONFIG.workspace.default if CONFIG.workspace.default else 'default'
-EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in AVAILABLE_EXPORTERS])
+WORKSPACE_DEFAULT_STR = CONFIG.workspaces.current if CONFIG.workspaces.current else 'default'
+EXPORTERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in get_available_exporters()])
 
 CLI_OUTPUT_OPTS = {
 	'output': {'type': str, 'default': None, 'help': f'Output options [{EXPORTERS_STR}] [dim orange4](comma-separated)[/]', 'short': 'o', 'shell_complete': complete_exporters},  # noqa: E501
@@ -215,7 +215,9 @@ def register_runner(cli_endpoint, config):
 		dry_run = opts['dry_run']
 		yaml = opts['yaml']
 		tree = opts['tree']
-		context = {'workspace_name': ws, 'workspace_id': ws}
+		from click.core import ParameterSource
+		ws_explicit = ctx.get_parameter_source('workspace') == ParameterSource.COMMANDLINE
+		context = {'workspace_name': ws, 'workspace_id': ws, 'workspace_explicit': ws_explicit}
 		enable_pyinstrument = opts['enable_pyinstrument']
 		enable_memray = opts['enable_memray']
 		contextmanager = nullcontext()
@@ -280,12 +282,16 @@ def register_runner(cli_endpoint, config):
 		# Build hooks from driver name
 		hooks = []
 		drivers = driver.split(',') if driver else []
-		drivers = list(set(CONFIG.drivers.defaults + drivers))
-		supported_drivers = AVAILABLE_DRIVERS
+		drivers = list(dict.fromkeys(CONFIG.drivers.defaults + drivers))
+		# 'local' is a sentinel meaning "no remote drivers": it overrides the configured
+		# defaults so a run can opt out of e.g. the default api driver and stay local.
+		if 'local' in drivers:
+			drivers = []
+		supported_drivers = get_available_drivers()
 		context['drivers'] = []
 		for driver in drivers:
 			if driver in supported_drivers:
-				if not ADDONS_ENABLED[driver]:
+				if driver in ADDONS_ENABLED and not ADDONS_ENABLED[driver]:
 					console.print(f'[bold red]Missing "{driver}" addon: please run `secator install addons {driver}`[/].')
 					sys.exit(1)
 				from secator.utils import import_dynamic
@@ -304,9 +310,13 @@ def register_runner(cli_endpoint, config):
 
 		if 'api' in context['drivers']:
 			try:
-				from secator.hooks.api import get_workspace_name
+				# Resolve the workspace (name or id) to its real id so runners/findings
+				# are tagged with the ObjectId. Note the runner re-resolves this after
+				# profile / route-based workspace assignment (see secator.hooks.api).
+				from secator.hooks.api import resolve_workspace
 
-				workspace_name = get_workspace_name(context.get('workspace_id'))
+				workspace_id, workspace_name = resolve_workspace(context.get('workspace_id'))
+				context['workspace_id'] = workspace_id
 				context['workspace_name'] = workspace_name
 			except Exception as e:
 				console.print(f'[bold red]Error getting workspace from API: {e}.[/]')
@@ -326,7 +336,10 @@ def register_runner(cli_endpoint, config):
 		hooks = deep_merge_dicts(*hooks)
 
 		# Enable sync or not
-		if sync or dry_run:
+		# Some task invocations are interactive/local-only (e.g. `ai setup`) and must
+		# never be dispatched to a worker, even when one is alive.
+		force_local = cli_endpoint.name == 'task' and task_cls.requires_local_execution(inputs, opts)
+		if sync or dry_run or force_local:
 			sync = True
 		else:
 			from secator.celery import is_celery_worker_alive

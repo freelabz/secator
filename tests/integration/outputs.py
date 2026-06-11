@@ -119,7 +119,7 @@ OUTPUTS_TASKS = {
 		Port(port=8080, ip='127.0.0.1', state='open', service_name='nagios nsca', _source='nmap'),
 	],
 	'nuclei': [
-		Vulnerability(matched_at='http://localhost:3000/metrics', name='prometheus-metrics', confidence='high', severity='medium', cvss_score=5.3, _source='nuclei'),
+		Vulnerability(matched_at='http://localhost:3000/metrics', name='Prometheus Metrics - Detect', confidence='high', severity='medium', cvss_score=5.3, _source='nuclei'),
 	],
 	'subfinder': [
 		Subdomain(host='community.github.com', domain='github.com', _source='subfinder'),
@@ -257,7 +257,7 @@ OUTPUTS_WORKFLOWS = {
 	'url_nuclei': [
 		Vulnerability(
 			matched_at='http://localhost:3000/metrics',
-			name='prometheus-metrics',
+			name='Prometheus Metrics - Detect',
 			provider='',
 			id='',
 			confidence='high',

@@ -25,6 +25,7 @@ OPERATORS = {
 	"$regex": _regex_match,
 	"$contains": lambda field, value: value in str(field) if field else False,
 	"$in": lambda field, values: field in values if field else False,
+	"$nin": lambda field, values: field not in values if field else False,
 	"$gt": lambda field, value: field > value if field is not None else False,
 	"$gte": lambda field, value: field >= value if field is not None else False,
 	"$lt": lambda field, value: field < value if field is not None else False,
@@ -193,3 +194,51 @@ class JsonBackend(QueryBackend):
 					self._results[i][k] = v
 				count += 1
 		return count
+
+	def list_workspaces(self):
+		"""List workspaces from local reports directory."""
+		workspaces = []
+		if self.reports_dir.exists():
+			for child in sorted(self.reports_dir.iterdir()):
+				if child.is_dir():
+					workspaces.append({
+						'workspace_id': child.name,
+						'workspace_name': child.name,
+						'path': str(child),
+					})
+		return workspaces
+
+	def get_workspace(self, workspace_id: str):
+		"""Get workspace info from local filesystem."""
+		workspace_path = self.reports_dir / sanitize_folder_name(workspace_id)
+		if workspace_path.exists():
+			return {'workspace_id': workspace_id, 'workspace_name': workspace_id, 'path': str(workspace_path)}
+		return None
+
+	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
+					 has_parent: Optional[bool] = None):
+		"""List runners from local report JSON files.
+
+		has_parent: when not None, only return runners matching that parent relationship
+		(False = outermost runners only, True = nested children only).
+		"""
+		from secator.utils import list_reports, get_info_from_report_path
+		paths = list_reports(workspace=workspace_id, type=runner_type)
+		runners = []
+		for path in paths:
+			try:
+				path_info = get_info_from_report_path(path)
+				with open(path, 'r') as f:
+					data = json.load(f)
+				info = data.get('info', {})
+				if has_parent is not None and info.get('has_parent', False) != has_parent:
+					continue
+				info['_type'] = path_info.get('type', '')
+				info['_id'] = path_info.get('type', '') + '/' + path_info.get('id', '')
+				info['_workspace'] = path_info.get('workspace', '')
+				info['_path'] = str(path)
+				runners.append(info)
+			except Exception as e:
+				debug(f'failed to load runner report {path}: {e}', sub='query.json')
+				continue
+		return runners

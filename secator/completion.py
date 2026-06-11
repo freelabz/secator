@@ -4,8 +4,7 @@ import os
 from click.shell_completion import CompletionItem
 
 from secator.config import CONFIG
-from secator.definitions import AVAILABLE_DRIVERS, AVAILABLE_EXPORTERS
-from secator.loader import get_configs_by_type
+from secator.loader import get_configs_by_type, get_available_drivers, get_available_exporters
 
 
 def complete_profiles(ctx, param, incomplete):
@@ -34,9 +33,11 @@ def complete_workspaces(ctx, param, incomplete):
 
 def complete_drivers(ctx, param, incomplete):
 	"""Complete driver names."""
+	# 'local' is not a hook driver but is a valid value meaning "no remote drivers".
+	names = ['local'] + get_available_drivers()
 	return [
 		CompletionItem(name)
-		for name in AVAILABLE_DRIVERS
+		for name in names
 		if name.startswith(incomplete)
 	]
 
@@ -45,6 +46,6 @@ def complete_exporters(ctx, param, incomplete):
 	"""Complete exporter names."""
 	return [
 		CompletionItem(name)
-		for name in AVAILABLE_EXPORTERS
+		for name in get_available_exporters()
 		if name.startswith(incomplete)
 	]

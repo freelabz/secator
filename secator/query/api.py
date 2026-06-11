@@ -2,6 +2,7 @@
 
 import json
 from typing import List, Dict, Any, Optional
+from urllib.parse import urlencode
 
 import requests
 
@@ -58,13 +59,21 @@ class ApiBackend(QueryBackend):
             result = self._make_request('POST', endpoint, query)
 
             if isinstance(result, list):
-                return result
+                items = result
             elif isinstance(result, dict) and 'items' in result:
-                return result['items']
+                items = result['items']
             elif isinstance(result, dict) and 'results' in result:
-                return result['results']
+                items = result['results']
+            else:
+                items = []
 
-            return []
+            # Drop the backend-only '_id' field so results match the output-type
+            # schema (the CSV exporter rejects unknown fields), matching the
+            # MongoDB backend behaviour.
+            for item in items:
+                if isinstance(item, dict):
+                    item.pop('_id', None)
+            return items
         except Exception as e:
             console.print(Warning(message=f"API search failed: {e}"))
             return []
@@ -88,3 +97,86 @@ class ApiBackend(QueryBackend):
         payload = {"query": query, "update": update}
         result = self._make_request("PATCH", "findings/update", data=payload)
         return result.get("modified_count", 0)
+
+    def list_workspaces(self):
+        """List workspaces from API."""
+        try:
+            endpoint = CONFIG.addons.api.workspace_list_endpoint
+            if CONFIG.addons.api.org_id is not None:
+                endpoint += f'?org_id={CONFIG.addons.api.org_id}'
+            result = self._make_request('GET', endpoint)
+            if isinstance(result, list):
+                return result
+            elif isinstance(result, dict) and 'items' in result:
+                return result['items']
+            elif isinstance(result, dict) and 'results' in result:
+                return result['results']
+            return []
+        except Exception as e:
+            console.print(Warning(message=f'API list_workspaces failed: {e}'))
+            return []
+
+    def get_runner(self, runner_id: str, runner_type: str):
+        """Get a single runner by ID from API (GET /runner/{runner_id}?type=<type>)."""
+        try:
+            endpoint = CONFIG.addons.api.runner_get_endpoint.format(runner_id=runner_id)
+            endpoint += f'?type={runner_type}'
+            return self._make_request('GET', endpoint)
+        except Exception as e:
+            console.print(Warning(message=f'API get_runner failed: {e}'))
+            return None
+
+    def get_workspace(self, workspace_id: str):
+        """Get workspace info from API."""
+        try:
+            endpoint = CONFIG.addons.api.workspace_get_endpoint.format(workspace_id=workspace_id)
+            return self._make_request('GET', endpoint)
+        except Exception as e:
+            console.print(Warning(message=f'API get_workspace failed: {e}'))
+            return None
+
+    @staticmethod
+    def _is_object_id(value: str) -> bool:
+        """Return True if value looks like a 24-char hex MongoDB ObjectId."""
+        return bool(value) and len(value) == 24 and all(c in '0123456789abcdefABCDEF' for c in value)
+
+    def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
+                     has_parent: Optional[bool] = None):
+        """List runners from API.
+
+        The CLI passes a workspace name via -ws. The API accepts either workspace_id
+        (a 24-char hex ObjectId) or workspace_name. Detect which one was passed so that
+        names resolve correctly while raw ObjectIds keep working.
+
+        has_parent: when not None, only return runners matching that parent relationship
+        (False = outermost runners only, True = nested children only).
+        """
+        try:
+            endpoint = CONFIG.addons.api.runners_list_endpoint
+            # Build params as a dict and url-encode them (workspace names may contain
+            # spaces or other characters that must be escaped).
+            params = {}
+            if workspace_id:
+                if self._is_object_id(workspace_id):
+                    params['workspace_id'] = workspace_id
+                else:
+                    params['workspace_name'] = workspace_id
+            if runner_type:
+                params['type'] = runner_type
+            if CONFIG.addons.api.org_id is not None:
+                params['org_id'] = CONFIG.addons.api.org_id
+            if has_parent is not None:
+                params['has_parent'] = str(has_parent).lower()
+            if params:
+                endpoint += '?' + urlencode(params)
+            result = self._make_request('GET', endpoint)
+            if isinstance(result, list):
+                return result
+            elif isinstance(result, dict) and 'items' in result:
+                return result['items']
+            elif isinstance(result, dict) and 'results' in result:
+                return result['results']
+            return []
+        except Exception as e:
+            console.print(Warning(message=f'API list_runners failed: {e}'))
+            return []

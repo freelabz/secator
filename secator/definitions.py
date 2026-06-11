@@ -55,8 +55,8 @@ LLM_SPINNER_MESSAGES = [
 ]
 
 # Available drivers and exporters
-AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord']
-AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'markdown', 'table', 'txt']
+AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord', 'sqlite']
+AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'jsonl', 'markdown', 'table', 'txt']
 
 # Vocab
 ALIVE = 'alive'
@@ -79,6 +79,7 @@ DESCRIPTION = 'description'
 DOCKER_IMAGE = 'docker_image'
 DOMAIN = 'domain'
 DEPTH = 'depth'
+EPSS_SCORE = 'epss_score'
 EXTRA_DATA = 'extra_data'
 EMAIL = 'email'
 FILENAME = 'filename'
@@ -94,6 +95,7 @@ HOST = 'host'
 HOST_PORT = 'host:port'
 IBAN = 'iban'
 ID = 'id'
+IMPACT = 'impact'
 IP = 'ip'
 PROTOCOL = 'protocol'
 LINES = 'lines'
@@ -117,6 +119,7 @@ RATE_LIMIT = 'rate_limit'
 RAW = 'raw'
 REFERENCE = 'reference'
 REFERENCES = 'references'
+REMEDIATION = 'remediation'
 REQUEST = 'request'
 REPLAY_PROXY = 'replay_proxy'
 RETRIES = 'retries'
@@ -187,7 +190,7 @@ for addon, module in [
 	('dev', 'flake8'),
 	('trace', 'memray'),
 	('build', 'hatch'),
-	('ai', 'litellm')
+	('ai', 'litellm'),
 ]:
 	ADDONS_ENABLED[addon] = is_importable(module)
 

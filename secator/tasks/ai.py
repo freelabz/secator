@@ -108,6 +108,12 @@ class ai(PythonRunner):
 		from secator.utils_test import mock_litellm_completion
 		return mock_litellm_completion(fixture)
 
+	@classmethod
+	def requires_local_execution(cls, inputs, run_opts):
+		"""`ai setup` runs an interactive setup wizard and must never be dispatched to a worker."""
+		# inputs may be the raw string 'setup' (single input) or a ['setup'] list
+		return inputs == 'setup' or inputs == ['setup']
+
 	# -------------------------------------------------------------------------
 	# yielder: flat init sequence
 	# -------------------------------------------------------------------------
@@ -134,6 +140,11 @@ class ai(PythonRunner):
 			prompt = get_system_prompt(show_mode, workspace_path=str(self.reports_folder), backend=self.backend)
 			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
 			console.print(prompt, highlight=False, soft_wrap=True)
+			return
+
+		# Verify model is configured and reachable
+		yield from self._verify_model()
+		if not self.model:
 			return
 
 		# Resume session
@@ -375,6 +386,17 @@ class ai(PythonRunner):
 					yield Error(message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`')
 					save_history(self.history, self.reports_folder, debug_fn=self.debug)
 					return
+				elif isinstance(e, litellm.APIConnectionError) or (
+					isinstance(e, litellm.InternalServerError) and 'connection error' in str(e).lower()
+				):
+					# Genuine connectivity failures (connection refused, DNS failure) surface in
+					# some litellm versions as InternalServerError("Connection error.") rather than
+					# APIConnectionError, so catch both and gate the latter on the connection message
+					# to avoid swallowing unrelated upstream 500 errors.
+					yield Error(message=f"Cannot connect to model '{self.model}': {e}")
+					yield Error(message='Check api_base and connectivity: `secator config set addons.ai.api_base <URL>`')
+					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					return
 				yield Error.from_exception(e)
 				save_history(self.history, self.reports_folder, debug_fn=self.debug)
 				return
@@ -445,6 +467,30 @@ class ai(PythonRunner):
 			self.print_info = False
 			self.print_warning = False
 			self.print_error = False
+
+	# -------------------------------------------------------------------------
+	# Model verification
+	# -------------------------------------------------------------------------
+
+	def _verify_model(self):
+		"""Check model is configured and that model info is available; yield Error/Warning if not."""
+		if not self.model:
+			yield Error(message='No AI model configured. Run `secator ai setup` or set `addons.ai.default_model`.')
+			return
+		try:
+			import litellm
+			info = litellm.get_model_info(self.model)
+			if not info:
+				yield Warning(
+					message=f'Model info not found for "{self.model}" in litellm registry. '
+					f'Context window defaults to {CONFIG.addons.ai.context_window} tokens. '
+					'If this is a custom/self-hosted model, set `addons.ai.context_window` accordingly.'
+				)
+		except Exception:
+			yield Warning(
+				message=f'Could not retrieve model info for "{self.model}". '
+				f'Context window defaults to {CONFIG.addons.ai.context_window} tokens.'
+			)
 
 	# -------------------------------------------------------------------------
 	# Mode detection
@@ -675,8 +721,15 @@ class ai(PythonRunner):
 			elif isinstance(result, OutputType):
 				self.add_result(result, print=not is_from_subagent)
 
-			# Yield live to caller
-			yield result
+			# Query results are existing workspace findings surfaced only for the AI's
+			# observation; collect them for the tool result but don't yield them (which
+			# would re-report/duplicate them into the workspace via the runner hooks).
+			result_context = result._context if isinstance(result, OutputType) else (
+				result.get("_context", {}) if isinstance(result, dict) else {})
+			is_query_result = bool(result_context.get("ai_query_result"))
+			if not is_query_result:
+				# Yield live to caller
+				yield result
 
 			result = result.toDict() if isinstance(result, OutputType) else result
 			collected.append(result)
