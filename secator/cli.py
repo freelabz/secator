@@ -2390,8 +2390,8 @@ subfinder vulnweb.com | naabu | httpx | ffuf -mc 200,301 -recursion
 	less_env_var = os.environ.get('LESS', '')
 	pager_color_support = '-r' in less_env_var or '-R' in less_env_var
 	with console.pager(styles=pager_color_support):
-		console.print("\n:point_right: [dim]This is an interactive cheatsheet for [bold green]secator[/] that will teach you most of the concepts available in the CLI.[/]")
-		console.print("   [dim]For simplicity, we omit the [bold green]secator[/] prefix in the cheatsheet, so make sure to prepend it (unless you have aliases enabled).[/]\n")
+		console.print("\n:point_right: [dim]This is an interactive cheatsheet for [bold green]secator[/] that will teach you most of the concepts available in the CLI.[/]")  # noqa: E501
+		console.print("   [dim]For simplicity, we omit the [bold green]secator[/] prefix in the cheatsheet, so make sure to prepend it (unless you have aliases enabled).[/]\n")  # noqa: E501
 		console.print(panel1)
 		console.print(panel2)
 		console.print(panel3)
