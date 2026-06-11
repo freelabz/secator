@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 
 from datetime import datetime
 
@@ -69,6 +70,11 @@ class testssl(Command):
 
 	@staticmethod
 	def on_cmd(self):
+		# Force system OpenSSL to avoid missing libproviders.so with bundled OpenSSL in Docker
+		openssl_path = shutil.which('openssl')
+		if openssl_path:
+			self.extra_env = {'OPENSSL': openssl_path}
+
 		output_path = self.get_opt_value(OUTPUT_PATH)
 		if not output_path:
 			output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
