@@ -1731,43 +1731,60 @@ def cheatsheet():
 
 	panel1 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Secator basic commands to get you started.[/]
+[dim gold3]:left_arrow_curving_right: Secator commands to get you started.[/]
 
-secator [orange3]x[/]      [dim]# list tasks[/]
-secator [orange3]w[/]      [dim]# list workflows[/]
-secator [orange3]s[/]      [dim]# list scans[/]
-secator [orange3]p[/]      [dim]# manage profiles[/]
-secator [orange3]r[/]      [dim]# manage reports[/]
-secator [orange3]c[/]      [dim]# manage configuration[/]
-secator [orange3]ws[/]     [dim]# manage workspaces[/]
-secator [orange3]update[/] [dim]# update secator[/]
+[dim]# Basics[/]
+[orange3]x[/]       [dim]# list tasks[/]
+[orange3]w[/]       [dim]# list workflows[/]
+[orange3]s[/]       [dim]# list scans[/]
+[orange3]q[/]       [dim]# query results[/]
+[orange3]r[/]       [dim]# manage reports[/]
+[orange3]p[/]       [dim]# manage profiles[/]
+[orange3]c[/]       [dim]# manage configuration[/]
+[orange3]ws[/]      [dim]# manage workspaces[/]
+[orange3]update[/]  [dim]# update secator[/]
 
-[dim]# Running tasks, workflows or scans...[/]
-secator \[[orange3]x[/]|[orange3]w[/]|[orange3]s[/]] [NAME] [OPTIONS] [INPUTS]   [dim]# run a task ([bold orange3]x[/]), workflow ([bold orange3]w[/]) or scan ([bold orange3]s[/])[/]
-secator [orange3]x[/] [red]httpx[/] example.com                 [dim]# run an [bold red]httpx[/] task ([bold orange3]x[/] is for e[bold orange3]x[/]ecute)[/]
-secator [orange3]w[/] [red]url_crawl[/] https://example.com     [dim]# run a [bold red]url crawl[/] workflow ([bold orange3]w[/])[/]
-secator [orange3]s[/] [red]host[/] example.com                  [dim]# run a [bold red]host[/] scan ([bold orange3]s[/])[/]
+[dim]# Runners[/]
+[orange3]x[/]|[orange3]w[/]|[orange3]s[/] [NAME] [OPTIONS] [INPUTS]                     [dim]# run a task ([bold orange3]x[/]), workflow ([bold orange3]w[/]) or scan ([bold orange3]s[/])[/]
+[orange3]x[/] [red]httpx[/] example.com                                 [dim]# run an [bold red]httpx[/] task ([bold orange3]x[/] for e[bold orange3]x[/]ecute)[/]
+[orange3]w[/] [red]url_crawl[/] https://example.com                     [dim]# run a [bold red]url crawl[/] workflow ([bold orange3]w[/])[/]
+[orange3]s[/] [red]host[/] example.com                                  [dim]# run a [bold red]host[/] scan ([bold orange3]s[/])[/]
+[orange3]s[/] [red]domain[/] example.com                                [dim]# run a [bold red]domain[/] scan ([bold orange3]s[/])[/]
 
-[dim]# Show information on tasks, workflows or scans ...[/]
-secator s host [blue]-dry[/]                         [dim]# show dry run (show exact commands that will be run)[/]
-secator s host [blue]-tree[/]                        [dim]# show config tree (workflows and scans only)[/]
-secator s host [blue]-yaml[/]                        [dim]# show config yaml (workflows and scans only)[/]
+[dim]# Runner metadata[/]
+s host [blue]-dry[/]                                         [dim]# show dry run (exact commands that will be run)[/]
+s host [blue]-tree[/]                                        [dim]# show config tree (workflows and scans only)[/]
+s host [blue]-yaml[/]                                        [dim]# show config yaml (workflows and scans only)[/]
+
+[dim]# Query results[/]
+q [bright_magenta]"vulnerability.severity == 'high'[/]                 [dim]# show critical vulnerabilities[/]
+q [bright_magenta]"vulnerability.tags ~= 'kev'[/]                      [dim]# show known exploited vulnerabilities (KEV)[/]
+q [bright_magenta]"url.status_code != 403"[/]                          [dim]# show URLs with HTTP status != 403[/]
+q [bright_magenta]"port.state == 'open' && port.port in [22,443]"[/]   [dim]# show opened 22 and 8000 ports[/]
 
 [dim]# Organize your results (workspace, database)[/]
-secator s host [blue]-ws[/] [bright_magenta]prod[/] example.com         [dim]# save results to 'prod' workspace[/]
-secator s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com  [dim]# save results to mongodb database[/]
+ws list                                             [dim]# list workspaces[/]
+ws use prod                                         [dim]# switch to [bright_magenta]prod[/] workspace (auto-create if missing)[/]
+s host [blue]-ws[/] [bright_magenta]prod[/] example.com                         [dim]# run in [bright_magenta]prod[/] workspace explicitely[/]
+c set --append workspaces.routes.prod *example.com* [dim]# run in [bright_magenta]prod[/] workspace implicitely (based on target regex)[/]
+
+[dim]# Use different backends for results[/]
+s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com                  [dim]# save results using driver [bright_magenta]mongodb[/][/]
+s host [blue]-driver[/] [bright_magenta]api[/] example.com                      [dim]# save results using driver [bright_magenta]api[/] (Secator Cloud)[/]
+c set --append [blue]drivers.defaults[/] [bright_magenta]api[/]                 [dim]# use driver [bright_magenta]api[/] driver by default[/]
 
 [dim]# Input types are flexible ...[/]
-secator s host [cyan]example.com[/]                  [dim]# single input[/]
-secator s host [cyan]host1,host2,host3[/]            [dim]# multiple inputs (comma-separated)[/]
-secator s host [cyan]hosts.txt[/]                    [dim]# multiple inputs (txt file)[/]
-[cyan]cat hosts.txt | [/]secator s host              [dim]# piped inputs[/]
+s host [cyan]example.com[/]                                  [dim]# single input[/]
+s host [cyan]host1,host2,host3[/]                            [dim]# multiple inputs (comma-separated)[/]
+s host [cyan]hosts.txt[/]                                    [dim]# multiple inputs (txt file)[/]
+[cyan]cat hosts.txt | [/]s host                              [dim]# piped inputs[/]
 
 [dim]# Options are mutualized ...[/]
-secator s host [blue]-rl[/] [bright_magenta]10[/] [blue]-delay[/] [bright_magenta]1[/] [blue]-proxy[/] [bright_magenta]http://127.0.0.1:9090[/] example.com  [dim]# set rate limit, delay and proxy for all subtasks[/]
-secator s host [blue]-pf[/] [bright_magenta]aggressive[/] example.com  [dim]# ... or use a profile to automatically set options[/]
+s host [blue]-rl[/] [bright_magenta]5[/] [blue]-d[/] [bright_magenta]1[/] [blue]-proxy[/] [bright_magenta]localhost:9090[/] example.com [dim]# set rate limit, delay and proxy for all commands[/]
+s host [blue]-pf[/] [bright_magenta]aggressive[/] example.com                   [dim]# ... or use a profile for grouped option sets[/]
+pf list                                             [dim]# view available profiles
 
-[dim]:point_right: and [bold]YES[/], the above options and inputs work with any scan ([bold orange3]s[/]), workflow ([bold orange3]w[/]), and task ([bold orange3]x[/]), not just the host scan shown here![/]
+[dim gold3]:point_right: and [bold]YES[/], the above options and inputs work with any scan ([bold orange3]s[/]), workflow ([bold orange3]w[/]), and task ([bold orange3]x[/])![/]
 """,  # noqa: E501
 		title=f':shield: [{title_style}]Some basics[/]',
 		**kwargs,
@@ -1775,20 +1792,23 @@ secator s host [blue]-pf[/] [bright_magenta]aggressive[/] example.com  [dim]# ..
 
 	panel2 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Secator aliases are useful to stop typing [bold cyan]secator <something>[/] and focus on what you want to run. Aliases are a must to increase your productivity.[/]
+[dim gold3]:left_arrow_curving_right: Secator aliases are useful to stop typing [bold green]secator <something>[/] and focus on the [bold green]<something>[/].
+  Aliases are a must to increase your productivity.[/]
 
-[bold]To enable aliases:[/]
-
-secator alias enable       [dim]# enable aliases[/]
-source ~/.secator/.aliases [dim]# load aliases in current shell[/]
-
-[dim]# Now you can use aliases...[/]
+[dim]# Enable aliases...[/]
+alias enable
+source ~/.secator/.aliases  [dim]# load[/]
+[dim gold3]:point_right: Now you can use aliases ![/]
 a list                                                   [dim]# list all aliases[/]
 httpx                                                    [dim]# aliased httpx ![/]
 nmap -sV -p 443 --script vulners example.com             [dim]# aliased nmap ![/]
-w subdomain_recon                                        [dim]# aliased subdomain_recon ![/]
+w subdomain_recon                                        [dim]# aliased subdomain_recon workflow ![/]
 s domain                                                 [dim]# aliased domain scan ![/]
 cat hosts.txt | subfinder | naabu | httpx | w url_crawl  [dim]# pipes to chain tasks ![/]
+
+[dim]# Disable aliases...[/]
+disable alias
+source ~/.secator/.unalias  [dim]# unload[/]
 """,  # noqa: E501
 		title=f':shorts: [{title_style}]Aliases[/]',
 		**kwargs,
@@ -1796,14 +1816,17 @@ cat hosts.txt | subfinder | naabu | httpx | w url_crawl  [dim]# pipes to chain t
 
 	panel3 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Secator configuration is stored in a YAML file located at [bold cyan]~/.secator/config.yaml[/]. You can edit it manually or use the following commands to get/set values.[/]
+[dim gold3]:left_arrow_curving_right: Secator user configuration (override) is stored in a YAML file located at [bold cyan]~/.secator/config.yaml[/]. You can edit it manually or use the following commands to get/set values.[/]
 
-c get         [dim]# get config value[/]
-c get --user  [dim]# get user config value[/]
-c edit        [dim]# edit user config in editor[/]
-c set profiles.defaults aggressive                              [dim]# set 'aggressive' profile as default[/]
-c set drivers.defaults mongodb                                  [dim]# set mongodb as default driver[/]
-c set wordlists.defaults.http https://example.com/wordlist.txt  [dim]# set default wordlist for http fuzzing[/]
+c get                                                        [dim]# get full config[/]
+c get addons.ai                                              [dim]# get part of config[/]
+c get --user                                                 [dim]# get user config value[/]
+c edit                                                       [dim]# edit user config in editor[/]
+c set tasks.overrides.nuclei.input_chunk_size                [dim]# override nuclei input chunk size defined in code[/]
+c set --append profiles.defaults aggressive                  [dim]# add 'aggressive' profile to defaults[/]
+c set --append drivers.defaults mongodb                      [dim]# add 'mongodb' driver to defaults[/]
+c set --append wordlists.templates.my_wordlist <REMOTE_URL>  [dim]# add new wordlist to config[/]
+c set wordlists.defaults.http my_wordlist                    [dim]# set new wordlist as default for http fuzzing[/]
 """,  # noqa: E501
 		title=f':gear: [{title_style}]Configuration[/]',
 		**kwargs,
@@ -1811,58 +1834,58 @@ c set wordlists.defaults.http https://example.com/wordlist.txt  [dim]# set defau
 
 	panel4 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: By default, tasks are run sequentially. You can use a worker to run tasks in parallel and massively speed up your scans.[/]
+[dim gold3]:left_arrow_curving_right: By default, tasks are run sequentially. You can use a worker to run tasks in parallel and massively speed up your scans.[/]
 
-wk                         [dim]# or [bold cyan]secator worker[/] if you don't use aliases ...[/]
+worker                     [dim]# or [bold cyan]secator worker[/] if you don't use aliases ...[/]
 httpx testphp.vulnweb.com  [dim]# <-- will run in worker and output results normally[/]
 
 [dim]:question: Want to use a remote worker ?[/]
 [dim]:point_right: Spawn a Celery worker on your remote server, a Redis instance and set the following config values to connect to it, both in the worker and locally:[/]
-c set celery.result_backend redis://<remote_ip>:6379/0          [dim]# set redis backend[/]
-c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis broker[/]
+c set celery.result_backend redis://<user>:<pass>@<remote_ip>:6379/0  [dim]# set redis backend[/]
+c set celery.broker_url redis://<user>:<pass>@<remote_ip>:6379/0      [dim]# set redis broker[/]
 [dim]:point_right: Then, run your tasks, workflows or scans like you would locally ![/]
 """,  # noqa: E501
-		title=f':zap: [{title_style}]Too slow ? Use a worker[/]',
+		title=f':zap:[{title_style}]Too slow ? Use a worker[/]',
 		**kwargs,
 	)
 
 	panel5 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Each attack surface gets its own workspace. Reports are stored per-workspace and can be queried across all saved results.[/]
+[dim gold3]:left_arrow_curving_right: Each attack surface gets its own workspace. Reports are stored per-workspace and can be queried across all saved results.[/]
 
 [dim]# Manage workspaces (one attack surface = one workspace)...[/]
 ws use [bright_magenta]pentest_202602[/]     [dim]# define current workspace to be 'pentest_202602' (get or create it)[/]
-ws list                     [dim]# list available workspaces[/]
+ws list                   [dim]# list available workspaces[/]
 
 [dim]# List and filter reports...[/]
 r list                    [dim]# list all reports[/]
 r list [blue]-ws[/] [bright_magenta]default[/]        [dim]# list reports from the workspace 'default'[/]
 r list [blue]-ws[/] [bright_magenta]pentest_202602[/] [dim]# list reports from the workspace 'pentest_202602'[/]
 r list [blue]-d[/] [bright_magenta]1h[/]              [dim]# list reports from the last hour[/]
-r list [blue]-i[/]									  [dim]# list reports that are 'interesting' (i.e: that contain vulns)[/]
+r list [blue]-i[/]                 [dim]# list reports that are 'interesting' (i.e: that contain vulns)[/]
 
 [dim]# Query workspace results...[/]
-r query "Show me the top 5 vulnerabilities in my workspace"                         [dim]# using AI (run `secator x ai setup` first to set your model provider / token)
-r query [bright_magenta]"port.host == 'localhost' && port.port == 6379"[/]          [dim]# find what's running on a specific port[/]
-r query [bright_magenta]"port.port in [22,2222] || port.service_name ~= 'ssh'"[/]   [dim]# ... or all ports 22 or 2222, or which identified service contains 'ssh'[/]
-r query [bright_magenta]"port.state == 'open' && port.service_confidence == 'high'" [dim]# ... or only high confidence, opened ports[/]
-r query [bright_magenta]"vulnerability"[/] -ws "                                        [dim]# show all vulnerabilities in current workspace[/]
-r query [bright_magenta]"vulnerability.severity in ['high', 'critical']"[/]			[dim]# ... filter on severity[/]
-r query [bright_magenta]"vulnerability.cvss_score >= 7"[/]							[dim]# ... filter on CVSS scores[/]
-r query [bright_magenta]"vulnerability.tags ~= 'exploitable'"[/]					[dim]# ... filter on exploitable vulnerabilities[/]
-r query [bright_magenta]"exploit.cves ~= 'CVE-2022-0543'"[/]						[dim]# show exploits related to a vulnerability[/]
-r query [blue]--help[/]																[dim]# ... and more with the -f, -o, -d options
+r query "Show me the top 5 vulnerabilities in my workspace"          [dim]# using AI (run `secator x ai setup` first to set your model)[/]
+r query [bright_magenta]"port.host == 'localhost' && port.port == 6379"[/]              [dim]# find what's running on a specific port[/]
+r query [bright_magenta]"port.port in [22,2222] || port.service_name ~= 'ssh'"[/]       [dim]# ... or all ports 22 or 2222, or which identified service contains 'ssh'[/]
+r query [bright_magenta]"port.state == 'open' && port.service_confidence == 'high'"[/]  [dim]# ... or only high confidence, opened ports[/]
+r query [bright_magenta]"vulnerability"[/]                                              [dim]# show all vulnerabilities in current workspace[/]
+r query [bright_magenta]"vulnerability.severity in ['high', 'critical']"[/]             [dim]# ... filter on severity[/]
+r query [bright_magenta]"vulnerability.cvss_score >= 7"[/]                              [dim]# ... filter on CVSS scores[/]
+r query [bright_magenta]"vulnerability.tags ~= 'exploitable'"[/]                        [dim]# ... filter on exploitable vulnerabilities[/]
+r query [bright_magenta]"exploit.cves ~= 'CVE-2022-0543'"[/]                            [dim]# show exploits related to a vulnerability[/]
+r query [blue]--help[/]                                                       [dim]# ... and more with the -f, -o, -d options[/]
 
 [dim]# Query specific reports by id (tasks, workflows, scans)
 r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"port.state == 'open'"[/] [blue]-o[/] [bright_magenta]json[/]           [dim]# show open ports from tasks 10 and 11[/]
 """,  # noqa: E501
-		title=f':file_cabinet: [{title_style}]Workspaces & reports[/]',
+		title=f':file_cabinet:  [{title_style}]Workspaces, reports, and queries[/]',
 		**kwargs,
 	)
 
 	panel6 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Commands to manage secator installation.[/]
+[dim gold3]:left_arrow_curving_right: Commands to manage secator installation.[/]
 
 update [dim]# update secator to the latest version[/]
 
@@ -1883,15 +1906,15 @@ i addon mongodb  [dim]# install addon 'mongodb'[/]
 
 	panel7 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Some useful scans and workflows we use day-to-day for recon.[/]
+[dim gold3]:left_arrow_curving_right: Some useful scans and workflows we use day-to-day for recon.[/]
 
 [orange3]:warning: Don't forget to add [bold blue]-dry[/] or [bold blue]-tree[/] before running your scans to see what will be done ![/]
 
 [bold orange3]:trophy: Domain recon + Subdomain recon + Port scanning + URL crawl + URL vulns (XSS, SQLi, RCE, ...)[/]
-s domain <DOMAIN>                [dim]# light[/]
-s domain <DOMAIN> -pf all_ports  [dim]# light + full port scan[/]
-s domain <DOMAIN> -pf full       [dim]# all features (full port scan, nuclei, pattern hunting, headless crawling, screenshots, etc.)[/]
-s domain <DOMAIN> -pf passive    [dim]# passive (0 requests to targets)[/]
+s domain <DOMAIN>                                  [dim]# light[/]
+s domain <DOMAIN> -pf all_ports                    [dim]# light + full port scan[/]
+s domain <DOMAIN> -pf full                         [dim]# all features (full port scan, nuclei, pattern hunting, headless crawling, screenshots, etc.)[/]
+s domain <DOMAIN> -pf passive                      [dim]# passive (0 requests to targets)[/]
 
 [bold orange3]:trophy: Subdomain recon[/]
 w subdomain_recon <DOMAIN>                         [dim]# standard[/]
@@ -1920,13 +1943,18 @@ subfinder vulnweb.com | naabu | httpx | ffuf -mc 200,301 -recursion
 		**kwargs,
 	)
 
-	console.print(panel1)
-	console.print(panel2)
-	console.print(panel3)
-	console.print(panel4)
-	console.print(panel5)
-	console.print(panel6)
-	console.print(panel7)
+	less_env_var = os.environ.get('LESS', '')
+	pager_color_support = '-r' in less_env_var or '-R' in less_env_var
+	with console.pager(styles=pager_color_support):
+		console.print("\n:point_right: [dim]This is an interactive cheatsheet for [bold green]secator[/] that will teach you most of the concepts available in the CLI.[/]")
+		console.print("   [dim]For simplicity, we omit the [bold green]secator[/] prefix in the cheatsheet, so make sure to prepend it (unless you have aliases enabled).[/]\n")
+		console.print(panel1)
+		console.print(panel2)
+		console.print(panel3)
+		console.print(panel4)
+		console.print(panel5)
+		console.print(panel6)
+		console.print(panel7)
 
 
 # ---------#
