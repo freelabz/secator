@@ -140,7 +140,7 @@ def discover_external_tasks():
 				console.print(f'[bold orange1]Could not load external task "{task_name}" from module {path.name}[/] ({path})')
 				continue
 			cls = getattr(module, task_name)
-			console.print(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})')
+			debug(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})', sub='loader')
 			cls.__external__ = True
 			output.append(cls)
 		except Exception as e:
@@ -173,7 +173,7 @@ def discover_external_drivers():
 			if not hasattr(module, 'HOOKS'):
 				console.print(f'[bold orange1]Could not load external driver "{driver_name}" from {path.name}: missing HOOKS variable.[/] ({path})')  # noqa: E501
 				continue
-			console.print(f'[bold green]Successfully loaded external driver "{driver_name}"[/] ({path})')
+			debug(f'[bold green]Successfully loaded external driver "{driver_name}"[/] ({path})', sub='loader')
 			output.append(driver_name)
 		except Exception as e:
 			console.print(f'[bold red]Could not load external driver from {path.name}. Reason: {str(e)}.[/] ({path})')
@@ -212,7 +212,7 @@ def discover_external_exporters():
 					exporter_name = name_lower[:-8] if name_lower.endswith('exporter') else name_lower
 					lookup_name = exporter_name.capitalize() + 'Exporter'
 					setattr(exporters_pkg, lookup_name, attr)
-					console.print(f'[bold green]Successfully loaded external exporter "{exporter_name}"[/] ({path})')
+					debug(f'[bold green]Successfully loaded external exporter "{exporter_name}"[/] ({path})', sub='loader')
 					output.append(exporter_name)
 					found = True
 
