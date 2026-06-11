@@ -238,6 +238,12 @@ class TestHandleQuery(unittest.TestCase):
 		self.assertEqual(ai_results[0].extra_data['results'], 2)
 		mock_engine.search.assert_called_once_with({'port': 80}, limit=10)
 
+		# Query results are marked observation-only so the runner doesn't re-report them.
+		result_dicts = [r for r in results if isinstance(r, dict)]
+		self.assertEqual(len(result_dicts), 2)
+		for r in result_dicts:
+			self.assertTrue(r['_context'].get('ai_query_result'))
+
 	@patch('secator.ai.actions.ActionContext.get_query_engine')
 	def test_query_failure(self, mock_get_engine):
 		mock_engine = MagicMock()
@@ -543,21 +549,6 @@ class TestGetQueryEngine(unittest.TestCase):
 		count = engine.count({'_type': 'vulnerability'})
 
 		self.assertEqual(count, 42)
-
-	# -- scope=workspace: mongodb takes priority over api --
-
-	def test_workspace_scope_mongodb_priority(self):
-		"""When both mongodb and api drivers present, mongodb wins."""
-		from secator.query.mongodb import MongoDBBackend
-
-		ctx = ActionContext(
-			targets=['t.com'],
-			model='m',
-			context={'workspace_id': 'ws1', 'drivers': ['api', 'mongodb']},
-		)
-		engine = ctx.get_query_engine()
-
-		self.assertIsInstance(engine.backend, MongoDBBackend)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

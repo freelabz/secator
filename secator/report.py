@@ -76,7 +76,11 @@ class Report:
 		if 'workspace_name' not in context:
 			context['workspace_name'] = self.workspace_name
 
-		engine = QueryEngine(self.workspace_name, context=context)
+		# Use the resolved workspace id (an ObjectId for the api/mongodb backends) so
+		# findings queries filter on the real id. The json backend reads workspace_name
+		# from the context for its directory, so it is unaffected by this value.
+		workspace_id = context.get('workspace_id')
+		engine = QueryEngine(workspace_id, context=context)
 		results = engine.search(query, limit=limit, dedupe=dedupe)
 
 		# Fill report (findings + targets)

@@ -33,9 +33,11 @@ def complete_workspaces(ctx, param, incomplete):
 
 def complete_drivers(ctx, param, incomplete):
 	"""Complete driver names."""
+	# 'local' is not a hook driver but is a valid value meaning "no remote drivers".
+	names = ['local'] + get_available_drivers()
 	return [
 		CompletionItem(name)
-		for name in get_available_drivers()
+		for name in names
 		if name.startswith(incomplete)
 	]
 

@@ -234,7 +234,13 @@ class TestExpandRunnerPaths:
     def test_non_numeric_id(self):
         refs, errors = expand_runner_paths(['tasks/abc'])
         assert refs == []
-        assert 'Must be numeric' in errors[0]
+        assert 'Must be a number or a 24-char hex id' in errors[0]
+
+    def test_object_id(self):
+        # A 24-char hex id (e.g. from `r list --driver api`) is accepted as-is.
+        refs, errors = expand_runner_paths(['workflows/6a298abc13cfda92d5b7ee63'])
+        assert errors == []
+        assert refs == [('workflows', 'workflow', '6a298abc13cfda92d5b7ee63')]
 
     def test_reversed_range(self):
         refs, errors = expand_runner_paths(['tasks/140-136'])

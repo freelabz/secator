@@ -434,7 +434,7 @@ class TestCli(unittest.TestCase):
 		result = self.runner.invoke(cli, ['workspace', 'list'])
 		assert not result.exception
 		assert result.exit_code == 0
-		assert 'Workspace name' in result.output
+		assert 'Name' in result.output
 
 	def test_profile_list_command(self):
 		# Wide terminal so rich does not wrap the column headers across lines.

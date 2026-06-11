@@ -298,6 +298,10 @@ class TestReportShowApiBackend(unittest.TestCase):
 
 	def _invoke(self, query_expr, api_response):
 		from secator.cli import cli
+		from secator.hooks.api import resolve_workspace
+
+		# Workspace name->id resolution is cached; reset so it re-resolves under the mock.
+		resolve_workspace.cache_clear()
 
 		captured = {}
 		captured_request = {}
@@ -307,6 +311,12 @@ class TestReportShowApiBackend(unittest.TestCase):
 
 		def mock_request(method, url, data=None, **kwargs):
 			import json as _json
+			# The api driver resolves the workspace name to its id first (GET /workspaces).
+			if method == 'GET' and 'workspace' in url:
+				resp = mock.MagicMock()
+				resp.json.return_value = [{'name': WORKSPACE, '_id': WORKSPACE}]
+				resp.raise_for_status = mock.MagicMock()
+				return resp
 			captured_request['method'] = method
 			captured_request['url'] = url
 			captured_request['body'] = _json.loads(data) if data else {}
@@ -412,8 +422,8 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 				console.capture() as cap:
 			cfg.workspaces.current = default_ws
 			report_list.callback(
-				workspace=workspace_opt, runner_type=None, time_delta=None, show_all=False, interesting=False,
-				status=None,
+				workspace=workspace_opt, runner_type=None, time_delta=None, driver='local', show_all=False,
+				interesting=False, status=None, show_children=False,
 			)
 		# Strip ANSI codes then flatten whitespace so assertions work on plain text
 		return ' '.join(_strip_ansi(cap.get()).split())
@@ -468,70 +478,73 @@ class TestReportListInteresting(unittest.TestCase):
 
 	def _invoke(self, args):
 		from secator.cli import cli
-		# Under CliRunner there is no TTY, so report_list takes the piped branch and prints paths,
-		# which still respects the filters.
+		# Pin --driver local so the filesystem branch is used regardless of the ambient
+		# drivers.defaults config. Assertions check the runner id (e.g. 'tasks/1'), which is
+		# plain text in the table — unlike the full path, which only appears via a file://
+		# hyperlink that rich renders only when the console is detected as a terminal.
+		# COLUMNS keeps the table wide so the id isn't wrapped across lines.
 		with mock.patch('secator.cli.list_reports', return_value=[self.with_vuln, self.no_vuln, self.unknown_sev]):
-			return CliRunner().invoke(cli, ['r', 'list'] + args)
+			return CliRunner().invoke(cli, ['r', 'list', '--driver', 'local'] + args, env={'COLUMNS': '400'})
 
 	def test_interesting_filters_to_vuln_reports(self):
 		result = self._invoke(['-i'])
 		self.assertEqual(result.exit_code, 0)
-		self.assertIn(str(self.with_vuln), result.output)
-		self.assertNotIn(str(self.no_vuln), result.output)
+		self.assertIn('tasks/1', result.output)
+		self.assertNotIn('tasks/2', result.output)
 		# Unknown/empty-severity vulns render as '-' and are not interesting
-		self.assertNotIn(str(self.unknown_sev), result.output)
+		self.assertNotIn('tasks/3', result.output)
 
 	def test_long_flag_equivalent(self):
 		result = self._invoke(['--interesting'])
-		self.assertIn(str(self.with_vuln), result.output)
-		self.assertNotIn(str(self.no_vuln), result.output)
-		self.assertNotIn(str(self.unknown_sev), result.output)
+		self.assertIn('tasks/1', result.output)
+		self.assertNotIn('tasks/2', result.output)
+		self.assertNotIn('tasks/3', result.output)
 
 	def test_without_interesting_shows_all(self):
 		result = self._invoke([])
-		self.assertIn(str(self.with_vuln), result.output)
-		self.assertIn(str(self.no_vuln), result.output)
-		self.assertIn(str(self.unknown_sev), result.output)
+		self.assertIn('tasks/1', result.output)
+		self.assertIn('tasks/2', result.output)
+		self.assertIn('tasks/3', result.output)
 
 	def test_status_filter(self):
 		result = self._invoke(['--status', 'FAILURE'])
 		self.assertEqual(result.exit_code, 0)
-		self.assertIn(str(self.no_vuln), result.output)
-		self.assertNotIn(str(self.with_vuln), result.output)
-		self.assertNotIn(str(self.unknown_sev), result.output)
+		self.assertIn('tasks/2', result.output)
+		self.assertNotIn('tasks/1', result.output)
+		self.assertNotIn('tasks/3', result.output)
 
 	def test_status_filter_case_insensitive(self):
 		# lower-case, UPPER-case and Title-case must all behave identically
 		for variant in ('success', 'SUCCESS', 'Success'):
 			result = self._invoke(['--status', variant])
-			self.assertIn(str(self.with_vuln), result.output, variant)
-			self.assertIn(str(self.unknown_sev), result.output, variant)
-			self.assertNotIn(str(self.no_vuln), result.output, variant)
+			self.assertIn('tasks/1', result.output, variant)
+			self.assertIn('tasks/3', result.output, variant)
+			self.assertNotIn('tasks/2', result.output, variant)
 		# Title-case on a different status value
 		result = self._invoke(['--status', 'Failure'])
-		self.assertIn(str(self.no_vuln), result.output)
-		self.assertNotIn(str(self.with_vuln), result.output)
+		self.assertIn('tasks/2', result.output)
+		self.assertNotIn('tasks/1', result.output)
 
 	def test_status_and_interesting_combined(self):
 		# Only the SUCCESS report that also has real-severity vulns survives both filters
 		result = self._invoke(['-i', '--status', 'SUCCESS'])
-		self.assertIn(str(self.with_vuln), result.output)
-		self.assertNotIn(str(self.unknown_sev), result.output)
-		self.assertNotIn(str(self.no_vuln), result.output)
+		self.assertIn('tasks/1', result.output)
+		self.assertNotIn('tasks/3', result.output)
+		self.assertNotIn('tasks/2', result.output)
 
 	def test_status_partial_regex_match(self):
 		# 'FAIL' is a regex search, so it matches FAILURE
 		result = self._invoke(['--status', 'FAIL'])
 		self.assertEqual(result.exit_code, 0)
-		self.assertIn(str(self.no_vuln), result.output)
-		self.assertNotIn(str(self.with_vuln), result.output)
+		self.assertIn('tasks/2', result.output)
+		self.assertNotIn('tasks/1', result.output)
 
 	def test_status_alternation_regex(self):
 		# '(SUCCESS|FAILURE)' matches both statuses
 		result = self._invoke(['--status', '(SUCCESS|FAILURE)'])
-		self.assertIn(str(self.with_vuln), result.output)
-		self.assertIn(str(self.no_vuln), result.output)
-		self.assertIn(str(self.unknown_sev), result.output)
+		self.assertIn('tasks/1', result.output)
+		self.assertIn('tasks/2', result.output)
+		self.assertIn('tasks/3', result.output)
 
 	def test_status_no_match(self):
 		# A valid regex matching no status yields no reports (no crash, no warning)

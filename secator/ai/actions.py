@@ -418,6 +418,10 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			if isinstance(result, OutputType):
 				result = result.toDict()
 			result["_context"].update(context)
+			# Query results are existing workspace findings surfaced for the AI's
+			# observation only — mark them so the runner doesn't re-yield/re-report
+			# them (which would duplicate them back into the workspace).
+			result.setdefault("_context", {})["ai_query_result"] = True
 			yield result
 
 	except Exception as e:

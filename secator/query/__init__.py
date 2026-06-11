@@ -1,6 +1,6 @@
 # secator/query/__init__.py
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from secator.query._base import QueryBackend
 from secator.query.api import ApiBackend
@@ -15,11 +15,13 @@ __all__ = ['QueryEngine', 'QueryBackend', 'ApiBackend', 'MongoDBBackend', 'JsonB
 class QueryEngine:
     """Query engine with pluggable backends."""
 
+    # Drivers that have a query backend, keyed by driver name. 'local' is the
+    # filesystem (JSON) backend.
     BACKENDS = {
         'api': ApiBackend,
         'mongodb': MongoDBBackend,
         'sqlite': SqliteBackend,
-        'json': JsonBackend,
+        'local': JsonBackend,
     }
 
     def __init__(self, workspace_id: str, context: dict = None):
@@ -27,20 +29,33 @@ class QueryEngine:
         self.context = context or {}
         self.backend = self._select_backend()
 
+    @classmethod
+    def resolve_backend(cls, driver: str = None) -> str:
+        """Resolve the effective query backend driver name.
+
+        Uses the passed --driver if it corresponds to an available backend, else the
+        first driver in CONFIG.drivers.defaults that does, else 'local'.
+        """
+        from secator.config import CONFIG
+        if driver in cls.BACKENDS:
+            return driver
+        for d in CONFIG.drivers.defaults:
+            if d in cls.BACKENDS:
+                return d
+        return 'local'
+
     def _select_backend(self) -> QueryBackend:
-        """Select appropriate backend based on context."""
+        """Select the backend from the context drivers (first that has a backend),
+        defaulting to the local (JSON) backend."""
         drivers = self.context.get('drivers', [])
-        if 'mongodb' in drivers:
-            return MongoDBBackend(self.workspace_id, context=self.context)
-        elif 'api' in drivers:
-            return ApiBackend(self.workspace_id, context=self.context)
-        elif 'sqlite' in drivers:
-            return SqliteBackend(self.workspace_id, context=self.context)
-        else:
-            # For JSON backend, use workspace_name for directory (reports are saved by name)
+        backend_name = next((d for d in drivers if d in self.BACKENDS), 'local')
+        if backend_name == 'local':
+            # The JSON backend reads from the workspace_name directory (reports are
+            # saved by name), not the workspace id.
             workspace_name = self.context.get('workspace_name', self.workspace_id)
             results = self.context.get('results')
             return JsonBackend(workspace_name, context=self.context, results=results)
+        return self.BACKENDS[backend_name](self.workspace_id, context=self.context)
 
     def search(self, query: dict, limit: int = 0, dedupe: bool = False,
                exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
@@ -59,3 +74,30 @@ class QueryEngine:
     def update(self, query: dict, update: dict) -> int:
         """Update records matching query."""
         return self.backend.update(query, update)
+
+    def list_workspaces(self) -> List[Dict[str, Any]]:
+        """List all workspaces via the active backend."""
+        return self.backend.list_workspaces()
+
+    def get_workspace(self, workspace_id: str) -> Dict[str, Any]:
+        """Get info for a specific workspace via the active backend."""
+        return self.backend.get_workspace(workspace_id)
+
+    def list_runners(
+        self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None
+    ) -> List[Dict[str, Any]]:
+        """List runners (tasks/workflows/scans) via the active backend.
+
+        has_parent: filter on the runner's parent relationship. None lists all runners,
+        False lists only outermost (root) runners, True lists only nested children.
+        """
+        return self.backend.list_runners(
+            workspace_id=workspace_id, runner_type=runner_type, has_parent=has_parent
+        )
+
+    def get_runner(self, runner_id: str, runner_type: str) -> Optional[Dict[str, Any]]:
+        """Get a single runner by ID via the active backend.
+
+        runner_id: the backend runner id. runner_type: singular type (task/workflow/scan).
+        """
+        return self.backend.get_runner(runner_id, runner_type=runner_type)

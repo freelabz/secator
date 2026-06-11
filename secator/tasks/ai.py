@@ -721,8 +721,15 @@ class ai(PythonRunner):
 			elif isinstance(result, OutputType):
 				self.add_result(result, print=not is_from_subagent)
 
-			# Yield live to caller
-			yield result
+			# Query results are existing workspace findings surfaced only for the AI's
+			# observation; collect them for the tool result but don't yield them (which
+			# would re-report/duplicate them into the workspace via the runner hooks).
+			result_context = result._context if isinstance(result, OutputType) else (
+				result.get("_context", {}) if isinstance(result, dict) else {})
+			is_query_result = bool(result_context.get("ai_query_result"))
+			if not is_query_result:
+				# Yield live to caller
+				yield result
 
 			result = result.toDict() if isinstance(result, OutputType) else result
 			collected.append(result)

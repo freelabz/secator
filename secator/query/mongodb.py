@@ -6,6 +6,8 @@ from secator.output_types import Warning
 from secator.query._base import QueryBackend
 from secator.rich import console
 
+RUNNER_COLLECTIONS = ('tasks', 'workflows', 'scans')
+
 
 class MongoDBBackend(QueryBackend):
 	"""Query backend for MongoDB."""
@@ -67,3 +69,129 @@ class MongoDBBackend(QueryBackend):
 		client = self._get_client()
 		result = client.main.findings.update_one(query, update)
 		return result.modified_count
+
+	def list_workspaces(self):
+		"""List workspaces for the mongodb backend.
+
+		There are no workspace objects, so workspaces are derived from the unique
+		`context.workspace_name` values across the tasks/workflows/scans collections
+		(with runner counts), plus a best-effort finding count per workspace name.
+		"""
+		try:
+			client = self._get_client()
+			db = client.main
+			runners_count = {}
+			for rtype in ['tasks', 'workflows', 'scans']:
+				pipeline = [{'$group': {'_id': '$context.workspace_name', 'count': {'$sum': 1}}}]
+				for row in db[rtype].aggregate(pipeline):
+					name = row.get('_id')
+					if not name:
+						continue
+					runners_count[name] = runners_count.get(name, 0) + row.get('count', 0)
+
+			findings_count = {}
+			try:
+				pipeline = [{'$group': {'_id': '$_context.workspace_name', 'count': {'$sum': 1}}}]
+				for row in db.findings.aggregate(pipeline):
+					name = row.get('_id')
+					if name:
+						findings_count[name] = row.get('count', 0)
+			except Exception:
+				pass
+
+			return [
+				{
+					'name': name,
+					'_id': '',
+					'description': None,
+					'runners_count': runners_count[name],
+					'findings_count': findings_count.get(name, 0),
+				}
+				for name in sorted(runners_count)
+			]
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB list_workspaces failed: {e}'))
+			return []
+
+	def get_workspace(self, workspace_id: str):
+		"""Get workspace info from MongoDB by aggregating findings for workspace_id."""
+		try:
+			client = self._get_client()
+			db = client.main
+			pipeline = [
+				{'$match': {'_context.workspace_id': workspace_id}},
+				{'$group': {
+					'_id': '$_context.workspace_id',
+					'workspace_name': {'$first': '$_context.workspace_name'},
+					'count': {'$sum': 1},
+				}},
+				{'$project': {
+					'_id': 0,
+					'workspace_id': '$_id',
+					'workspace_name': 1,
+					'count': 1,
+				}},
+			]
+			results = list(db.findings.aggregate(pipeline))
+			return results[0] if results else None
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB get_workspace failed: {e}'))
+			return None
+
+	def get_runner(self, runner_id: str, runner_type: str):
+		"""Get a single runner by ID from MongoDB."""
+		try:
+			from bson.objectid import ObjectId
+
+			client = self._get_client()
+			db = client.main
+			# Normalize singular/plural and reject unknown runner types.
+			rtype = runner_type.rstrip('s') + 's'
+			if rtype not in RUNNER_COLLECTIONS:
+				return None
+			query = {'_id': ObjectId(runner_id)} if ObjectId.is_valid(runner_id) else {'_id': runner_id}
+			doc = db[rtype].find_one(query)
+			if doc:
+				doc['_id'] = str(doc['_id'])
+				doc['_type'] = rtype
+				return doc
+			return None
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB get_runner failed: {e}'))
+			return None
+
+	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
+					 has_parent: Optional[bool] = None):
+		"""List runners from MongoDB tasks/workflows/scans collections.
+
+		has_parent: when not None, only return runners matching that parent relationship
+		(False = outermost runners only, True = nested children only).
+		"""
+		try:
+			client = self._get_client()
+			db = client.main
+			if runner_type:
+				rtype = runner_type.rstrip('s') + 's'
+				runner_types = [rtype] if rtype in RUNNER_COLLECTIONS else []
+			else:
+				runner_types = list(RUNNER_COLLECTIONS)
+			runners = []
+			for rtype in runner_types:
+				query = {}
+				if workspace_id:
+					# Runners are keyed by workspace name for the mongodb backend.
+					query['context.workspace_name'] = workspace_id
+				if has_parent is not None:
+					query['has_parent'] = has_parent
+				for doc in db[rtype].find(query):
+					doc.pop('_id', None)
+					doc['_type'] = rtype
+					rtype_singular = rtype.rstrip('s')
+					runner_id = doc.get('context', {}).get(f'{rtype_singular}_id', '')
+					doc['_id_str'] = f'{rtype}/{runner_id}' if runner_id else rtype
+					doc['_workspace'] = doc.get('context', {}).get('workspace_name', '')
+					runners.append(doc)
+			return runners
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB list_runners failed: {e}'))
+			return []

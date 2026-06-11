@@ -24,7 +24,7 @@ from secator.completion import complete_profiles, complete_workspaces, complete_
 WORKSPACES = next(os.walk(CONFIG.dirs.reports))[1]
 WORKSPACES_STR = '|'.join([f'[dim yellow3]{_}[/]' for _ in WORKSPACES])
 PROFILES_STR = ','.join([f'[dim yellow3]{_.name}[/]' for _ in get_configs_by_type('profile')])
-DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in get_available_drivers()])
+DRIVERS_STR = ','.join([f'[dim yellow3]{_}[/]' for _ in ['local'] + get_available_drivers()])
 DRIVER_DEFAULTS_STR = ','.join(CONFIG.drivers.defaults) if CONFIG.drivers.defaults else None
 PROFILE_DEFAULTS_STR = ','.join(CONFIG.profiles.defaults) if CONFIG.profiles.defaults else None
 WORKSPACE_DEFAULT_STR = CONFIG.workspaces.current if CONFIG.workspaces.current else 'default'
@@ -283,6 +283,10 @@ def register_runner(cli_endpoint, config):
 		hooks = []
 		drivers = driver.split(',') if driver else []
 		drivers = list(dict.fromkeys(CONFIG.drivers.defaults + drivers))
+		# 'local' is a sentinel meaning "no remote drivers": it overrides the configured
+		# defaults so a run can opt out of e.g. the default api driver and stay local.
+		if 'local' in drivers:
+			drivers = []
 		supported_drivers = get_available_drivers()
 		context['drivers'] = []
 		for driver in drivers:
@@ -306,9 +310,13 @@ def register_runner(cli_endpoint, config):
 
 		if 'api' in context['drivers']:
 			try:
-				from secator.hooks.api import get_workspace_name
+				# Resolve the workspace (name or id) to its real id so runners/findings
+				# are tagged with the ObjectId. Note the runner re-resolves this after
+				# profile / route-based workspace assignment (see secator.hooks.api).
+				from secator.hooks.api import resolve_workspace
 
-				workspace_name = get_workspace_name(context.get('workspace_id'))
+				workspace_id, workspace_name = resolve_workspace(context.get('workspace_id'))
+				context['workspace_id'] = workspace_id
 				context['workspace_name'] = workspace_name
 			except Exception as e:
 				console.print(f'[bold red]Error getting workspace from API: {e}.[/]')

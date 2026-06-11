@@ -2,7 +2,7 @@ import os
 from collections.abc import MutableMapping
 from pathlib import Path
 from subprocess import call, DEVNULL
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from typing_extensions import Annotated, Self
 
 import validators
@@ -239,35 +239,35 @@ class AiAddon(StrictModel):
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
 	permissions: Dict = {
-		"allow": [
-			"target({targets})",
-			"read({workspace}/*,/dev/null,/tmp/*)",
-			"write({workspace}/.outputs/*,/dev/null,/tmp/*)",
-			"shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,"
-			"cd,git,diff,stat,du,df,tree,sort,uniq,cut,tr,echo,realpath,readlink,"
-			"file,strings,xxd,base64,for,while,which,true,timeout,"
-			"tee,cp,mv,mkdir,touch,chmod,sed,awk,xargs,docker,printf,"
-			"redis-cli,nc,ncat,nmap,sqlmap,nikto,gobuster,feroxbuster,ffuf,"
-			"socat,telnet,openssl,ssh,scp,rsync,ping,traceroute,tcpdump,ss,netstat)",
-			"task(*)",
-			"workflow(*)",
+		'allow': [
+			'target({targets})',
+			'read({workspace}/*,/dev/null,/tmp/*)',
+			'write({workspace}/.outputs/*,/dev/null,/tmp/*)',
+			'shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,'
+			'cd,git,diff,stat,du,df,tree,sort,uniq,cut,tr,echo,realpath,readlink,'
+			'file,strings,xxd,base64,for,while,which,true,timeout,'
+			'tee,cp,mv,mkdir,touch,chmod,sed,awk,xargs,docker,printf,'
+			'redis-cli,nc,ncat,nmap,sqlmap,nikto,gobuster,feroxbuster,ffuf,'
+			'socat,telnet,openssl,ssh,scp,rsync,ping,traceroute,tcpdump,ss,netstat)',
+			'task(*)',
+			'workflow(*)',
 		],
-		"deny": [
-			"target(169.254.169.254)",
-			"target(127.0.0.1)",
-			"target(localhost)",
-			"read(/etc/shadow)",
-			"read(~/.ssh/*)",
-			"read(~/.aws/*)",
-			"write(/etc/*)",
-			"write(/usr/*)",
-			"shell(rm -rf /*,dd,mkfs,env,printenv)",
+		'deny': [
+			'target(169.254.169.254)',
+			'target(127.0.0.1)',
+			'target(localhost)',
+			'read(/etc/shadow)',
+			'read(~/.ssh/*)',
+			'read(~/.aws/*)',
+			'write(/etc/*)',
+			'write(/usr/*)',
+			'shell(rm -rf /*,dd,mkfs,env,printenv)',
 		],
-		"ask": [
-			"target(*)",
-			"shell(python,python3,bash,sh,exec,node,ruby,perl,gcc,g++,make,go,php,java,javac)",
-			"read(*)",
-			"write(*)",
+		'ask': [
+			'target(*)',
+			'shell(python,python3,bash,sh,exec,node,ruby,perl,gcc,g++,make,go,php,java,javac)',
+			'read(*)',
+			'write(*)',
 		],
 	}
 
@@ -293,14 +293,18 @@ class ApiAddon(StrictModel):
 	header_name: str = 'Bearer'
 	force_ssl: bool = True
 	timeout: int = 60
+	org_id: Optional[int] = None  # Override org to query (admins only); defaults to the user's own org
 	runner_create_endpoint: str = 'runners'
+	runner_get_endpoint: str = 'runner/{runner_id}'
 	runner_update_endpoint: str = 'runner/{runner_id}'
 	finding_create_endpoint: str = 'findings'
 	finding_update_endpoint: str = 'finding/{finding_id}'
 	finding_search_endpoint: str = 'findings/_search'
+	workspace_list_endpoint: str = 'workspaces'
 	workspace_get_endpoint: str = 'workspace/{workspace_id}'
 	workspace_delete_endpoint: str = 'workspace/{workspace_id}'
-	runner_delete_endpoint: str = '{runner_type}/{runner_id}'
+	runners_list_endpoint: str = 'runners/any'
+	runner_delete_endpoint: str = 'runner/{runner_id}?type={runner_type}'
 
 
 class Addons(StrictModel):
@@ -814,6 +818,7 @@ class Config(DotMap):
 		if (value.startswith('{') and value.endswith('}')) or (value.startswith('[') and value.endswith(']')):
 			try:
 				import json
+
 				return json.loads(value)
 			except Exception:
 				pass
@@ -836,6 +841,7 @@ class Config(DotMap):
 		"""Validate that all profile names exist. Returns True if all valid or validation cannot run."""
 		try:
 			from secator.loader import get_configs_by_type
+
 			available = [p.name for p in get_configs_by_type('profile')]
 			invalid = [p for p in profile_names if p not in available]
 			if invalid:
@@ -843,6 +849,7 @@ class Config(DotMap):
 				return False
 		except Exception as e:
 			import logging
+
 			logging.debug('Profile validation skipped due to exception', exc_info=e)
 		return True
 
