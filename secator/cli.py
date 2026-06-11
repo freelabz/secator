@@ -1831,22 +1831,29 @@ c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis
 [dim bold]:left_arrow_curving_right: Each attack surface gets its own workspace. Reports are stored per-workspace and can be queried across all saved results.[/]
 
 [dim]# Manage workspaces (one attack surface = one workspace)...[/]
-ws use [bright_magenta]pentest_202602[/]     [dim]# create or use workspace 'pentest_202602'[/]
-ws list                   [dim]# list available workspaces[/]
+ws use [bright_magenta]pentest_202602[/]     [dim]# define current workspace to be 'pentest_202602' (get or create it)[/]
+ws list                     [dim]# list available workspaces[/]
 
 [dim]# List and filter reports...[/]
 r list                    [dim]# list all reports[/]
 r list [blue]-ws[/] [bright_magenta]default[/]        [dim]# list reports from the workspace 'default'[/]
-r list [blue]-ws[/] [bright_magenta]prod[/]           [dim]# list reports from the workspace 'prod'[/]
+r list [blue]-ws[/] [bright_magenta]pentest_202602[/] [dim]# list reports from the workspace 'pentest_202602'[/]
 r list [blue]-d[/] [bright_magenta]1h[/]              [dim]# list reports from the last hour[/]
+r list [blue]-i[/]									  [dim]# list reports that are 'interesting' (i.e: that contain vulns)[/]
 
-[dim]# Show and query results...[/]
-r show [blue]-q[/] [bright_magenta]"port.host == 'localhost' && port.port == 6379"[/] [blue]--dedupe[/]          [dim]# find what's running on a specific port[/]
-r show [blue]-q[/] [bright_magenta]"vulnerability"[/]                                                            [dim]# all vulnerabilities in current workspace[/]
-r show [blue]-q[/] [bright_magenta]"vulnerability.severity in ['high', 'critical']"[/] [blue]--dedupe[/]         [dim]# filter on severity[/]
-r show [blue]-q[/] [bright_magenta]"vulnerability.severity_score >= 7"[/] [blue]-o[/] [bright_magenta]txt[/]     [dim]# high-severity vulns, save to txt file[/]
-r show [blue]-q[/] [bright_magenta]"vulnerability.tags ~= 'exploitable'"[/]                                      [dim]# filter exploitable vulnerabilities[/]
-r show [blue]-q[/] [bright_magenta]"exploit.cves ~= 'CVE-2022-0543'"[/]                                          [dim]# get related exploits / POCs[/]
+[dim]# Query workspace results...[/]
+r query "Show me the top 5 vulnerabilities in my workspace"                         [dim]# using AI (run `secator x ai setup` first to set your model provider / token)
+r query [bright_magenta]"port.host == 'localhost' && port.port == 6379"[/]          [dim]# find what's running on a specific port[/]
+r query [bright_magenta]"port.port in [22,2222] || port.service_name ~= 'ssh'"[/]   [dim]# ... or all ports 22 or 2222, or which identified service contains 'ssh'[/]
+r query [bright_magenta]"port.state == 'open' && port.service_confidence == 'high'" [dim]# ... or only high confidence, opened ports[/]
+r query [bright_magenta]"vulnerability"[/] -ws "                                        [dim]# show all vulnerabilities in current workspace[/]
+r query [bright_magenta]"vulnerability.severity in ['high', 'critical']"[/]			[dim]# ... filter on severity[/]
+r query [bright_magenta]"vulnerability.cvss_score >= 7"[/]							[dim]# ... filter on CVSS scores[/]
+r query [bright_magenta]"vulnerability.tags ~= 'exploitable'"[/]					[dim]# ... filter on exploitable vulnerabilities[/]
+r query [bright_magenta]"exploit.cves ~= 'CVE-2022-0543'"[/]						[dim]# show exploits related to a vulnerability[/]
+r query [blue]--help[/]																[dim]# ... and more with the -f, -o, -d options
+
+[dim]# Query specific reports by id (tasks, workflows, scans)
 r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"port.state == 'open'"[/] [blue]-o[/] [bright_magenta]json[/]           [dim]# show open ports from tasks 10 and 11[/]
 """,  # noqa: E501
 		title=f':file_cabinet: [{title_style}]Workspaces & reports[/]',
