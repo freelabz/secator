@@ -157,7 +157,7 @@ class nuclei(VulnMulti):
 	def id_extractor(item):
 		cve_ids = item['info'].get('classification', {}).get('cve-id') or []
 		if len(cve_ids) > 0:
-			return cve_ids[0]
+			return cve_ids[0].upper()
 		return None
 
 	@staticmethod
