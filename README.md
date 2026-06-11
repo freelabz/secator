@@ -226,7 +226,7 @@ secator health
 secator q "vulnerability.tags ~= 'kev' && vulnerability.confidence == 'high'"                                                     # vulns KEV (Known-Exploited Vulnerabilities) + high confidence
 secator q "vulnerability.severity == 'critical' && vulnerability.tags ~= 'exploitable' && vulnerability.confidence == 'high'"     # vulns critical + exploitable + high confidence
 secator q "vulnerability.severity_nb < 2 && vulnerability.confidence == 'high'"                                                   # vulns severity > high + high confidence
-secator q "exploit.cves ~= CVE-2021-44521'"                                                                                       # exploits found for vuln CVE-2021-44521
+secator q "exploit.cves  ~= 'CVE-2021-44521'"                                                                                       # exploits found for vuln CVE-2021-44521
 secator q "port" -f "{host} {port} {service_name}" | cut -d " " -f2 | sort | uniq -c | sort -nr | head -n 15                      # top 15 ports
 secator q "port" -f "{host} {port} {service_name}" | cut -d " " -f3,4,5,6 | awk 'NF > 0' | sort | uniq -c | sort -nr | head -n 15 # top 15 services
 secator q "technology" -f "{product}/{version}" | sort | uniq -c | sort -nr | head -n 15                                          # top 15 technologies
@@ -234,7 +234,7 @@ secator q "technology" -f "{product}/{version}" | sort | uniq -c | sort -nr | he
 # Save a query and run it
 secator c set queries.critical_vulns "vulnerability.severity_nb < 2"          # save a query
 secator c get queries                                                         # list saved queries
-secator q critical_vulns -f "{vulnerability.matched_at}" -ws secator.cloud    # run a saved query on workspace 'secator.cloud' and extract the targets
+secator q critical_vulns -f "{vulnerability.matched_at}" -ws secator.cloud    # run a aved query on workspace + extract targets
 
 # Ask a natural-language question (runs the AI chat task)
 secator q "Analyze my workspace data"
