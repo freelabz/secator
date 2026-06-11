@@ -784,6 +784,8 @@ def workspace_use(name):
 	config = CONFIG.validate()
 	if config:
 		CONFIG.save()
+		workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+		workspace_folder.mkdir(parents=True, exist_ok=True)
 		console.print(Info(message=f'Now using workspace: [bold]{name}[/]'))
 	else:
 		console.print(Error(message='Invalid config, not saving it.'))
@@ -1826,18 +1828,28 @@ c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis
 
 	panel5 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, and filter reports using the following commands.[/]
+[dim bold]:left_arrow_curving_right: Each attack surface gets its own workspace. Reports are stored per-workspace and can be queried across all saved results.[/]
+
+[dim]# Manage workspaces (one attack surface = one workspace)...[/]
+ws use [bright_magenta]pentest_202602[/]     [dim]# create or use workspace 'pentest_202602'[/]
+ws list                   [dim]# list available workspaces[/]
 
 [dim]# List and filter reports...[/]
 r list                    [dim]# list all reports[/]
+r list [blue]-ws[/] [bright_magenta]default[/]        [dim]# list reports from the workspace 'default'[/]
 r list [blue]-ws[/] [bright_magenta]prod[/]           [dim]# list reports from the workspace 'prod'[/]
 r list [blue]-d[/] [bright_magenta]1h[/]              [dim]# list reports from the last hour[/]
 
-[dim]# Show and filter results...[/]
-r show [blue]-q[/] [bright_magenta]"vulnerability.severity_score >= 7"[/] [blue]-o[/] [bright_magenta]txt[/]                                      [dim]# show high-severity vulnerabilities, save to txt file[/]
+[dim]# Show and query results...[/]
+r show [blue]-q[/] [bright_magenta]"port.host == 'localhost' && port.port == 6379"[/] [blue]--dedupe[/]          [dim]# find what's running on a specific port[/]
+r show [blue]-q[/] [bright_magenta]"vulnerability"[/]                                                            [dim]# all vulnerabilities in current workspace[/]
+r show [blue]-q[/] [bright_magenta]"vulnerability.severity in ['high', 'critical']"[/] [blue]--dedupe[/]         [dim]# filter on severity[/]
+r show [blue]-q[/] [bright_magenta]"vulnerability.severity_score >= 7"[/] [blue]-o[/] [bright_magenta]txt[/]     [dim]# high-severity vulns, save to txt file[/]
+r show [blue]-q[/] [bright_magenta]"vulnerability.tags ~= 'exploitable'"[/]                                      [dim]# filter exploitable vulnerabilities[/]
+r show [blue]-q[/] [bright_magenta]"exploit.cves ~= 'CVE-2022-0543'"[/]                                          [dim]# get related exploits / POCs[/]
 r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"port.state == 'open'"[/] [blue]-o[/] [bright_magenta]json[/]           [dim]# show open ports from tasks 10 and 11[/]
 """,  # noqa: E501
-		title=f':file_cabinet: [{title_style}]Digging into reports[/]',
+		title=f':file_cabinet: [{title_style}]Workspaces & reports[/]',
 		**kwargs,
 	)
 
