@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.36.0](https://github.com/freelabz/secator/compare/v0.35.0...v0.36.0) (2026-06-11)
+
+
+### Features
+
+* **driver:** proper support for all backends in CLI commands (`r list`, `r info`, `query`, ...) ([#1164](https://github.com/freelabz/secator/issues/1164)) ([782361d](https://github.com/freelabz/secator/commit/782361dbde17efc16140dbbedbcd094329d8c062))
+
+
+### Bug Fixes
+
+* **cli:** put loader success messages in debug instead of console.print ([#1169](https://github.com/freelabz/secator/issues/1169)) ([2061a29](https://github.com/freelabz/secator/commit/2061a294a3145e4d58883350f79d1e4c1371c540))
+* **exporters:** add `jsonl` exporter, fix `json` and `csv` exports ([#1166](https://github.com/freelabz/secator/issues/1166)) ([d5e4d6e](https://github.com/freelabz/secator/commit/d5e4d6e8fefbcbd1443d5dc21b3dc17ebdda03f6))
+* **nuclei:** uppercase CVE id ([#1168](https://github.com/freelabz/secator/issues/1168)) ([a04e152](https://github.com/freelabz/secator/commit/a04e152c4d8fec75410bdf803ddf39c07dfcdc4c))
+
+
+### Documentation
+
+* add workspaces to cheatsheet ([#1171](https://github.com/freelabz/secator/issues/1171)) ([183f671](https://github.com/freelabz/secator/commit/183f6718a0e986952d0777d07b1f4b238ac3f130))
+* better README for queries ([#1170](https://github.com/freelabz/secator/issues/1170)) ([a72f3be](https://github.com/freelabz/secator/commit/a72f3bee912a7ee8ed9d711e7cbb247137923d9f))
+
 ## [0.35.0](https://github.com/freelabz/secator/compare/v0.34.0...v0.35.0) (2026-06-10)
 
 
