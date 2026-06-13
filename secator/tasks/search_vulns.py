@@ -43,7 +43,7 @@ class search_vulns(Vuln):
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED,
 	}
-	install_version = '1.0.9'
+	install_version = '1.1.0'
 	install_cmd = 'pipx install --force search_vulns==[install_version]'
 	install_post = {'*': 'search_vulns -u'}
 	github_handle = 'ra1nb0rn/search_vulns'
