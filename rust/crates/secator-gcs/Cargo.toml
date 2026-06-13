@@ -1,0 +1,15 @@
+[package]
+name = "secator-gcs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secator-config = { path = "../secator-config" }
+secator-debug = { path = "../secator-debug" }
+secator-driver = { path = "../secator-driver" }
+secator-model = { path = "../secator-model" }
+secator-report = { path = "../secator-report" }
+async-trait = "0.1"
+serde_json = "1.0"
+tokio = { version = "1.52", features = ["process", "sync", "fs", "io-util", "time"] }

@@ -1,0 +1,10 @@
+[package]
+name = "secator-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secator-model = { path = "../secator-model" }
+serde_json = "1.0.150"
+# Planned: comfy-table, indicatif, crossterm (ADR-0007).

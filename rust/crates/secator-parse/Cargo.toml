@@ -1,0 +1,11 @@
+[package]
+name = "secator-parse"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+regex = "1.12.3"
+secator-model = { path = "../secator-model" }
+serde_json = "1.0.150"
+# Planned: serde_json (JSON serializer), regex (Regex serializer), quick-xml (nmap XML).

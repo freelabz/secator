@@ -1,0 +1,13 @@
+[package]
+name = "secator-driver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secator-model = { path = "../secator-model" }
+secator-report = { path = "../secator-report" }
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.52", features = ["macros", "rt"] }

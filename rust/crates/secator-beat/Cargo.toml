@@ -1,0 +1,17 @@
+[package]
+name = "secator-beat"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secator-config = { path = "../secator-config" }
+secator-debug = { path = "../secator-debug" }
+secator-redis = { path = "../secator-redis" }
+secator-exec = { path = "../secator-exec" }
+cron = "0.12"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+tokio = { version = "1.52", features = ["rt", "time", "macros", "sync"] }
+uuid = { version = "1.10", features = ["v4"] }

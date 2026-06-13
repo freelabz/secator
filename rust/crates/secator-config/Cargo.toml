@@ -1,0 +1,13 @@
+[package]
+name = "secator-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dirs = "6.0.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml = "0.9.34"
+
+[dev-dependencies]
+tempfile = "3.27.0"

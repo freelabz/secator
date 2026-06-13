@@ -1,0 +1,10 @@
+[package]
+name = "secator-expr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+regex = "1.12.3"
+serde_json = "1.0.150"
+# Planned: regex (for the `~=` operator). Hand-rolled parser otherwise (ADR-0005).

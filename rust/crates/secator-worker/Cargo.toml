@@ -1,0 +1,18 @@
+[package]
+name = "secator-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secator-exec = { path = "../secator-exec" }
+secator-metrics = { path = "../secator-metrics" }
+secator-model = { path = "../secator-model" }
+secator-runner = { path = "../secator-runner" }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "sync", "macros", "time", "process", "signal"] }
+serde_json = "1.0.150"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+secator-options = { path = "../secator-options" }
+secator-parse = { path = "../secator-parse" }

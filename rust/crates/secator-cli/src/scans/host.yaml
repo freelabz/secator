@@ -1,0 +1,16 @@
+type: scan
+name: host
+description: Host scan
+long_description: |
+  In-depth security assessment of a specific host or IP address.
+  Combines host reconnaissance with URL crawling and vulnerability scanning to identify
+  open ports, running services, web applications, and potential security weaknesses.
+  MVP: wraps host_recon only; url_crawl / url_vuln will be added once those workflows
+  are ported.
+tags: [recon, dns, network, http]
+input_types:
+  - host
+  - ip
+
+workflows:
+  host_recon:

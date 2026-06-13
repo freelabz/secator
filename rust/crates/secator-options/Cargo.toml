@@ -1,0 +1,9 @@
+[package]
+name = "secator-options"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+shell-words = "1.1.1"
+# Planned: shell-words (shlex quoting), serde (schema).

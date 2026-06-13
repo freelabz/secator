@@ -1,0 +1,13 @@
+[package]
+name = "secator-dag"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secator-model = { path = "../secator-model" }
+secator-runner = { path = "../secator-runner" }
+secator-expr = { path = "../secator-expr" }
+secator-templates = { version = "0.1.0", path = "../secator-templates" }
+serde_yaml = "0.9.34"
+serde_json = "1.0.150"

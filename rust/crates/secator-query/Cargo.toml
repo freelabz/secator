@@ -1,0 +1,12 @@
+[package]
+name = "secator-query"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secator-config = { path = "../secator-config" }
+secator-debug = { path = "../secator-debug" }
+secator-model = { path = "../secator-model" }
+serde_json = "1.0"
+regex = "1.12"

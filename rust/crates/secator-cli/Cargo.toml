@@ -1,0 +1,54 @@
+[package]
+name = "secator-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "secator"
+path = "src/main.rs"
+
+[dependencies]
+secator-config = { version = "0.1.0", path = "../secator-config" }
+secator-templates = { version = "0.1.0", path = "../secator-templates" }
+secator-tasks = { path = "../secator-tasks" }
+secator-dag = { version = "0.1.0", path = "../secator-dag" }
+secator-exec = { version = "0.1.0", path = "../secator-exec" }
+secator-report = { version = "0.1.0", path = "../secator-report" }
+secator-exporters = { version = "0.1.0", path = "../secator-exporters" }
+secator-ui = { version = "0.1.0", path = "../secator-ui" }
+secator-runner = { path = "../secator-runner" }
+secator-install = { path = "../secator-install" }
+secator-driver = { path = "../secator-driver" }
+secator-mongo = { path = "../secator-mongo" }
+secator-api = { path = "../secator-api" }
+secator-query = { path = "../secator-query" }
+secator-redis = { path = "../secator-redis" }
+secator-metrics = { path = "../secator-metrics" }
+secator-debug = { path = "../secator-debug" }
+secator-providers = { path = "../secator-providers" }
+secator-notify = { path = "../secator-notify" }
+secator-gcs = { path = "../secator-gcs" }
+secator-beat = { path = "../secator-beat" }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+secator-model = { path = "../secator-model" }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync"] }
+serde_json = "1.0.150"
+clap = "4.6.1"
+clap_complete = "4.6"
+secator-options = { version = "0.1.0", path = "../secator-options" }
+secator-worker = { version = "0.1.0", path = "../secator-worker" }
+uuid = { version = "1.23.2", features = ["v4"] }
+secator-expr = { version = "0.1.0", path = "../secator-expr" }
+secator-plugin-api = { path = "../secator-plugin-api" }
+serde_yaml = "0.9.34"
+libloading = "0.8"
+
+if-addrs = "0.13"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3.10"
+# Planned: clap (dynamic command generation), tokio (runtime), anyhow.

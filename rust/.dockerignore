@@ -1,0 +1,16 @@
+# Don't ship build artifacts or local-only metadata into the Docker build
+# context — that's hundreds of MB of debug binaries on a fresh `cargo build`.
+target/
+**/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Editor / OS noise.
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Local dev artefacts (test broker dirs, traces).
+.tmp/
+*.log

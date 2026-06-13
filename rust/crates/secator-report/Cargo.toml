@@ -1,0 +1,10 @@
+[package]
+name = "secator-report"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secator-config = { path = "../secator-config" }
+secator-model = { path = "../secator-model" }
+serde_json = "1.0.150"

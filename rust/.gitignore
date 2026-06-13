@@ -1,0 +1,7 @@
+/target
+Cargo.lock
+
+# Runtime artefacts produced during local dev (httpx response store, etc).
+# These get written when the operator runs `secator x|w|s` from this dir.
+/output
+/.secator

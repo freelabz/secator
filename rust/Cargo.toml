@@ -1,0 +1,19 @@
+# secator-rs workspace.
+# Scaffold stage: crates are std-only so `cargo check` builds offline.
+# Real dependencies (tokio, serde, clap, redis, sysinfo, reqwest, regex, ...) are added
+# per-crate as implementation begins — see PLAN.md §Dependencies.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "BSL-1.1"
+repository = "https://github.com/freelabz/secator"
+
+# Place for shared dependency versions once we start adding them, e.g.:
+# [workspace.dependencies]
+# tokio = { version = "1", features = ["rt-multi-thread", "process", "sync", "time", "macros"] }
+# serde = { version = "1", features = ["derive"] }
+# serde_json = "1"

@@ -1,0 +1,35 @@
+[package]
+name = "secator-tasks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+if-addrs = "0.13"
+# Pinned at the freelabz/litellm-rust feat/tool-calls branch until the upstream
+# PR (avivsinai/litellm-rust#19) lands — needed for tool_calls on ChatResponse.
+litellm-rust = { git = "https://github.com/freelabz/litellm-rust", branch = "feat/tool-calls" }
+quick-xml = { version = "0.40.1", features = ["serialize"] }
+regex = "1.12.3"
+secator-config = { version = "0.1.0", path = "../secator-config" }
+secator-debug = { path = "../secator-debug" }
+secator-model = { path = "../secator-model" }
+secator-options = { path = "../secator-options" }
+secator-dag = { path = "../secator-dag" }
+secator-exec = { path = "../secator-exec" }
+secator-expr = { path = "../secator-expr" }
+secator-parse = { path = "../secator-parse" }
+secator-query = { path = "../secator-query" }
+secator-runner = { path = "../secator-runner" }
+secator-templates = { path = "../secator-templates" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+serde_yaml = "0.9.34"
+sha2 = "0.10"
+shell-words = "1.1.1"
+tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread"] }
+url = "2.5.8"
+
+[dev-dependencies]
+tempfile = "3.27.0"

@@ -1,0 +1,20 @@
+[package]
+name = "secator-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secator-config = { path = "../secator-config" }
+secator-debug = { path = "../secator-debug" }
+secator-model = { path = "../secator-model" }
+secator-options = { path = "../secator-options" }
+secator-parse = { path = "../secator-parse" }
+encoding_rs = "0.8"
+rpassword = "7.3"
+serde_yaml = "0.9.34"
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "process", "io-util", "sync", "macros", "time"] }

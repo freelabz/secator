@@ -1,0 +1,13 @@
+[package]
+name = "secator-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+# `preserve_order` enables IndexMap-backed `serde_json::Map`, so fields land in
+# insertion order rather than alphabetical — Python-parity for JSON report shape.
+# Feature unifies workspace-wide so all crates that share this serde_json get it.
+serde_json = { version = "1.0.150", features = ["preserve_order"] }
+# Planned: serde, serde_json (Map = serde_json::Value), once (de)serialization lands.

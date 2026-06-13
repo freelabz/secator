@@ -1,0 +1,10 @@
+[package]
+name = "secator-plugin-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secator-driver = { path = "../secator-driver" }
+secator-exporters = { path = "../secator-exporters" }
+secator-runner = { path = "../secator-runner" }

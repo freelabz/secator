@@ -1,0 +1,13 @@
+[package]
+name = "secator-templates"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secator-options = { path = "../secator-options" }
+secator-expr = { path = "../secator-expr" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml = "0.9.34"
+serde_json = "1.0.150"
+# secator-dag depends on us (RunnerTree), not the other way round.

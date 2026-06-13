@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1
+#
+# secator-rs — dev image.
+#
+# Bind-mount the worktree at /code, run `cargo run -p secator-cli` inside.
+# Builder layer is the same Rust toolchain as the production image so
+# incremental rebuilds reuse the cargo cache. Tools are NOT pre-installed —
+# point this image at a host-mounted `~/.secator/` (or `secator install`
+# them inside) so we keep iteration tight.
+#
+# Build:
+#   docker build -t secator-rs:dev -f rust/Dockerfile.dev rust/
+# Run interactively:
+#   docker run --rm -it -v "$PWD/rust":/code -v "$HOME/.secator":/home/secator/.secator \
+#     secator-rs:dev bash
+# Inside the container:
+#   cargo run --release -p secator-cli -- health
+#   cargo test --workspace
+#   cargo run --release -p secator-cli -- scan domain example.com --pf passive
+
+ARG RUST_VERSION=1.83
+FROM rust:${RUST_VERSION}-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config \
+        libssl-dev \
+        cmake \
+        git \
+        ca-certificates \
+        sudo \
+        curl \
+        wget \
+        unzip \
+        flock \
+        nmap \
+        arp-scan \
+        net-tools \
+        iputils-ping \
+        whois \
+        dnsutils \
+        golang-go \
+        python3-pip \
+        pipx \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --shell /bin/bash secator && \
+    echo "secator ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
+    chmod 0440 /etc/sudoers
+USER secator
+WORKDIR /code
+ENV PATH="/home/secator/.local/bin:/home/secator/.local/go/bin:/home/secator/go/bin:/home/secator/.cargo/bin:${PATH}" \
+    GOBIN="/home/secator/.local/bin" \
+    GOPATH="/home/secator/go" \
+    CARGO_HOME="/home/secator/.cargo" \
+    CARGO_TARGET_DIR="/home/secator/.cargo-target" \
+    TERM="xterm-256color" \
+    SECATOR_SECURITY_PROMPT_SUDO_PASSWORD="0"
+
+# Default command: drop into a shell. The source tree is bind-mounted by the
+# caller; cargo handles caching against the shared target dir.
+CMD ["bash"]

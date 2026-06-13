@@ -1,0 +1,4 @@
+<tool_result_analysis>
+Analyze the tool results, make a brief summary (one or two sentences max), then think about next steps and summarize them, then STOP or CONTINUE based on whether the initial user request has been fulfilled. There is no need to mention that you stopped or continued or why you did it (user will see it).
+Do NOT re-run tools that you already ran with similar options if they succeeded, as this will just duplicate the findings and waste time.
+</tool_result_analysis>

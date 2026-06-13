@@ -1,0 +1,15 @@
+[package]
+name = "secator-exporters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+csv = "1.4.0"
+secator-config = { path = "../secator-config" }
+secator-model = { path = "../secator-model" }
+secator-report = { path = "../secator-report" }
+serde_json = "1.0.150"
+
+[dev-dependencies]
+tempfile = "3.10"
