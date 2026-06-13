@@ -72,7 +72,7 @@ class wpscan(VulnHttp):
 			PROVIDER: 'wpscan',
 		},
 	}
-	install_version = 'v3.8.28'
+	install_version = 'v4.0.0'
 	install_pre_cmd = {
 		'apt': ['make', 'kali:libcurl4t64', 'libffi-dev'],
 		'pacman': ['make', 'ruby-erb'],
