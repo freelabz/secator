@@ -52,6 +52,8 @@ CLI_EXEC_OPTS = {
 	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
 	'enable_pyinstrument': {'is_flag': True, 'short': 'pyinstrument', 'default': False, 'help': 'Enable pyinstrument profiling'},  # noqa: E501
 	'enable_memray': {'is_flag': True, 'short': 'memray', 'default': False, 'help': 'Enable memray profiling'},
+	'from': {'type': str, 'default': None, 'short': 'f', 'help': 'Resume from a previous run by loading its results (e.g. workflows/6, scans/abc-uuid)'},  # noqa: E501
+	'skip': {'type': str, 'default': None, 'short': 'sk', 'help': 'Comma-separated task node names to skip (e.g. nmap/light,nmap for workflows; host_recon.nmap for scans)'},  # noqa: E501
 }
 
 CLI_TYPE_MAPPING = {
@@ -67,6 +69,52 @@ CLI_TYPE_MAPPING = {
 }
 
 DEFAULT_CLI_OPTIONS = list(CLI_OUTPUT_OPTS.keys()) + list(CLI_EXEC_OPTS.keys())
+
+
+def _convert_dicts_to_output_types(dicts):
+	"""Convert dict objects from QueryEngine to OutputType objects.
+
+	Uses the same pattern as MongoDB's load_finding function.
+
+	Args:
+		dicts (list[dict]): List of dict objects from QueryEngine.search()
+
+	Returns:
+		list[OutputType]: List of OutputType objects
+	"""
+	from secator.output_types import OUTPUT_TYPES
+
+	results = []
+	for obj in dicts:
+		if not isinstance(obj, dict):
+			# Already an OutputType object, keep it
+			results.append(obj)
+			continue
+
+		finding_type = obj.get('_type')
+		if not finding_type:
+			continue
+
+		# Find the matching OutputType class
+		klass = None
+		for otype in OUTPUT_TYPES:
+			if finding_type == otype.get_name():
+				klass = otype
+				break
+
+		if klass:
+			try:
+				item = klass.load(obj)
+				# Preserve the original _uuid if it exists, otherwise it will be generated
+				if '_uuid' in obj:
+					item._uuid = obj['_uuid']
+				results.append(item)
+			except Exception as e:
+				# If conversion fails, skip this item but log the error
+				from secator.utils import debug
+				debug(f'Failed to convert dict to {klass.__name__}: {e}', sub='cli_helper')
+
+	return results
 
 
 def decorate_command_options(opts):
@@ -335,6 +383,20 @@ def register_runner(cli_endpoint, config):
 
 		hooks = deep_merge_dicts(*hooks)
 
+		# Resolve --from (load prior results) and --skip (task names to skip)
+		from_ref = opts.pop('from', None)
+		skip_raw = opts.pop('skip', None)
+		opts['skip'] = [s.strip() for s in skip_raw.split(',') if s.strip()] if skip_raw else []
+
+		prior_results = []
+		if from_ref:
+			from secator.query import QueryEngine
+			from secator.query.utils import parse_report_paths
+			query = parse_report_paths(from_ref)
+			prior_results_dicts = QueryEngine(ws, context=context).search(query) or [] if query else []
+			# Convert dict results to OutputType objects (same pattern as MongoDB backend)
+			prior_results = _convert_dicts_to_output_types(prior_results_dicts)
+
 		# Enable sync or not
 		# Some task invocations are interactive/local-only (e.g. `ai setup`) and must
 		# never be dispatched to a worker, even when one is alive.
@@ -386,7 +448,9 @@ def register_runner(cli_endpoint, config):
 				process = psutil.Process()
 				console.print(f'[bold yellow3]Initial RAM Usage: {process.memory_info().rss / 1024**2} MB[/]')
 			item_count = 0
-			runner = runner_cls(config, inputs, run_opts=opts, hooks=hooks, context=context)
+			runner = runner_cls(
+				config, inputs, results=prior_results, run_opts=opts, hooks=hooks, context=context
+			)
 			for item in runner:
 				del item
 				item_count += 1
