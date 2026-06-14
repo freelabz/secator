@@ -7,8 +7,8 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-	DELAY, FOLLOW_REDIRECT, HEADER, OPT_NOT_SUPPORTED, PATH, PROXY, RATE_LIMIT, RETRIES, STRING, THREADS, TIMEOUT,
-	USER_AGENT
+	DELAY, FOLLOW_REDIRECT, HEADER, OPT_NOT_SUPPORTED, PATH, PROXY, RATE_LIMIT, RETRIES, SKIP_SSL_VERIFY, STRING,
+	THREADS, TIMEOUT, USER_AGENT
 )
 # fmt: on
 from secator.output_types import Vulnerability
@@ -59,6 +59,7 @@ class grype(VulnCode):
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED,
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 	}
 	install_version = 'v0.91.2'
 	install_cmd_pre = {'*': ['curl']}

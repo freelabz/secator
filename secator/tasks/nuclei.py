@@ -8,7 +8,7 @@ from secator.decorators import task
 from secator.definitions import (
 	CONFIDENCE, CVSS_SCORE, CVSS_VECTOR, DELAY, DESCRIPTION, EPSS_SCORE, EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST,
 	HOST_PORT, ID, IMPACT, IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT, PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
-	REMEDIATION, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT
+	REMEDIATION, RETRIES, SEVERITY, SKIP_SSL_VERIFY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT
 )
 # fmt: on
 from secator.output_types import Progress, Tag, Technology, Vulnerability
@@ -76,6 +76,7 @@ class nuclei(VulnMulti):
 		THREADS: 'c',
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		# nuclei opts
 		'display_templates': 'vv',
 		'exclude_tags': 'exclude-tags',

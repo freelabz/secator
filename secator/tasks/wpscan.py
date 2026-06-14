@@ -8,7 +8,7 @@ from secator.definitions import (CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION,
 							   EXTRA_DATA, FOLLOW_REDIRECT, HEADER, ID,
 							   MATCHED_AT, NAME, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROVIDER,
 							   PROXY, RATE_LIMIT, REFERENCES, RETRIES,
-							   SEVERITY, TAGS, THREADS, TIMEOUT,
+							   SEVERITY, SKIP_SSL_VERIFY, TAGS, THREADS, TIMEOUT,
 							   URL, USER_AGENT, HOST, IP)
 from secator.output_types import Tag, Vulnerability, Info, Error
 from secator.tasks._categories import VulnHttp
@@ -45,6 +45,7 @@ class wpscan(VulnHttp):
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
+		SKIP_SSL_VERIFY: 'disable-tls-checks',
 		TIMEOUT: 'request-timeout',
 		THREADS: 'max-threads',
 		USER_AGENT: 'user-agent',
