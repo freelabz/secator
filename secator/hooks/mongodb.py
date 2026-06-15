@@ -9,7 +9,7 @@ from secator.config import CONFIG
 from secator.hooks._dedup import compute_duplicate_updates
 from secator.output_types import OUTPUT_TYPES
 from secator.runners import Scan, Task, Workflow
-from secator.utils import debug, escape_mongodb_url
+from secator.utils import debug, escape_mongodb_url, should_update
 
 # import gevent.monkey
 # gevent.monkey.patch_all()
@@ -18,6 +18,10 @@ MONGODB_URL = CONFIG.addons.mongodb.url
 MONGODB_UPDATE_FREQUENCY = CONFIG.addons.mongodb.update_frequency
 MONGODB_CONNECT_TIMEOUT = CONFIG.addons.mongodb.server_selection_timeout_ms
 MONGODB_MAX_POOL_SIZE = CONFIG.addons.mongodb.max_pool_size
+
+# Max buffered finding upserts before a forced bulk flush (bounds worker memory).
+# Time-based flushing is throttled by CONFIG.runners.backend_update_frequency.
+MONGODB_FLUSH_SIZE = 1000
 
 logger = logging.getLogger(__name__)
 
@@ -103,32 +107,58 @@ def update_runner(self):
 
 
 def update_finding(self, item):
+	"""Buffer a finding upsert; the write is batched (see flush_findings).
+
+	Findings used to be written one-by-one (one update_one/insert_one per item),
+	which is millions of round-trips on a large crawl. We now mint the Mongo _id
+	client-side (ObjectId() needs no round-trip) so the item has a stable id
+	immediately, buffer an upsert, and flush in bulk on a size cap, on_interval
+	(throttled by backend_update_frequency) and on_end.
+	"""
 	if type(item) not in OUTPUT_TYPES:
 		return item
+	if not ObjectId.is_valid(str(item._uuid)):
+		item._uuid = str(ObjectId())
+	buffer = getattr(self, '_mongodb_findings_buffer', None)
+	if buffer is None:
+		buffer = self._mongodb_findings_buffer = []
+	buffer.append(
+		pymongo.UpdateOne({'_id': ObjectId(item._uuid)}, {'$set': item.toDict()}, upsert=True)
+	)
+	if len(buffer) >= MONGODB_FLUSH_SIZE:
+		flush_findings_buffer(self)
+	return item
+
+
+def flush_findings_buffer(self):
+	"""Write all buffered finding upserts to MongoDB in a single bulk_write."""
+	buffer = getattr(self, '_mongodb_findings_buffer', None)
+	if not buffer:
+		return
 	start_time = time.time()
 	client = get_mongodb_client()
 	db = client.main
-	update = item.toDict()
-	_type = item._type
-	_id = ObjectId(item._uuid) if ObjectId.is_valid(item._uuid) else None
-	if _id:
-		finding = db['findings'].update_one({'_id': _id}, {'$set': update})
-		status = 'UPDATED'
-	else:
-		finding = db['findings'].insert_one(update)
-		item._uuid = str(finding.inserted_id)
-		status = 'CREATED'
-	end_time = time.time()
-	elapsed = end_time - start_time
-	debug_obj = {
-		_type: status,
-		'type': 'finding',
-		'class': self.__class__.__name__,
-		'caller': self.config.name,
-		**self.context
-	}
-	debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=str(item._uuid), obj=debug_obj, obj_after=False)  # noqa: E501
-	return item
+	count = len(buffer)
+	db.findings.bulk_write(buffer, ordered=False)
+	self._mongodb_findings_buffer = []
+	self._last_findings_flush = start_time
+	debug(f'flushed {count} findings in {time.time() - start_time:.4f}s', sub='hooks.mongodb', obj_after=False)
+
+
+def flush_findings(self):
+	"""on_interval hook: flush buffered findings, throttled by backend_update_frequency."""
+	if should_update(CONFIG.runners.backend_update_frequency, getattr(self, '_last_findings_flush', None)):
+		flush_findings_buffer(self)
+
+
+def flush_findings_final(self):
+	"""on_end hook: always flush remaining findings.
+
+	This is required for correctness, not just throughput: the next runner in a
+	scan re-hydrates these findings from the DB (get_results), so they must be
+	persisted before this runner finishes.
+	"""
+	flush_findings_buffer(self)
 
 
 def find_duplicates(self):
@@ -220,23 +250,23 @@ HOOKS = {
 	Scan: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
-		'on_interval': [update_runner],
+		'on_interval': [update_runner, flush_findings],
 		'on_duplicate': [update_finding],
-		'on_end': [update_runner],
+		'on_end': [update_runner, flush_findings_final],
 	},
 	Workflow: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
-		'on_interval': [update_runner],
+		'on_interval': [update_runner, flush_findings],
 		'on_duplicate': [update_finding],
-		'on_end': [update_runner],
+		'on_end': [update_runner, flush_findings_final],
 	},
 	Task: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_duplicate': [update_finding],
-		'on_interval': [update_runner],
-		'on_end': [update_runner]
+		'on_interval': [update_runner, flush_findings],
+		'on_end': [update_runner, flush_findings_final]
 	}
 }
