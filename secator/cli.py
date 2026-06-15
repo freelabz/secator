@@ -834,8 +834,26 @@ def workspace_list(driver):
 
 @workspace.command(name='use', aliases=['create'])
 @click.argument('name')
-def workspace_use(name):
-	"""Use a workspace (set as default)"""
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+def workspace_use(name, driver):
+	"""Use a workspace (set as default). With the api driver, also creates it remotely."""
+	# When the api driver is active (via --driver or drivers.defaults), make sure the
+	# workspace exists remotely so subsequent api-backed runs/queries resolve it — the
+	# API keys workspaces by id, so a name has to map to a real remote workspace.
+	effective_driver = QueryEngine.resolve_backend(driver)
+	if effective_driver == 'api':
+		try:
+			from secator.hooks.api import create_workspace
+
+			created, ws_id = create_workspace(name)
+			if created:
+				console.print(Info(message=f'Created workspace "{name}" via API [id: {ws_id}]'))
+			else:
+				console.print(Info(message=f'Workspace "{name}" already exists in API [id: {ws_id}]'))
+		except Exception as e:
+			console.print(Error(message=f'Error creating workspace via API: {e}'))
+			return
+
 	CONFIG.set('workspaces.current', name)
 	config = CONFIG.validate()
 	if config:
@@ -1380,11 +1398,15 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 			full_query['_timestamp'] = {'$gte': cutoff.timestamp()}
 
 	# 5. Build runner context for QueryEngine backend selection
-	drivers = [driver] if driver and driver != 'local' else []
+	# Resolve the backend from --driver or drivers.defaults, then build the context
+	# drivers list from the *resolved* backend (not the raw --driver) — otherwise a
+	# drivers.defaults=api setup resolves the workspace via the API but still queries
+	# the local JSON backend (drivers stays empty).
+	effective_driver = QueryEngine.resolve_backend(driver)
+	drivers = [effective_driver] if effective_driver != 'local' else []
 	# Resolve the workspace name to its id for the API backend (findings are filtered
 	# by the real workspace id; the local/mongodb backends key findings by name).
 	workspace_id = workspace_name
-	effective_driver = QueryEngine.resolve_backend(driver)
 	if effective_driver == 'api':
 		try:
 			from secator.hooks.api import resolve_workspace
@@ -1590,13 +1612,25 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		unsupported = [opt for opt, val in (('--interesting', interesting), ('--time-delta', time_delta)) if val]
 		if unsupported:
 			console.print(Warning(message=f'{", ".join(unsupported)} {"is" if len(unsupported) == 1 else "are"} only supported with the local driver and will be ignored for the {effective_driver} driver.'))  # noqa: E501
+		# Resolve the workspace name to its id for the API backend. The API only
+		# reliably filters runners by workspace_id (ObjectId); passing the raw name
+		# returns nothing (e.g. `r list -ws T2S` finds 0 while `r list` finds all).
+		list_workspace = workspace
+		if effective_driver == 'api' and workspace:
+			try:
+				from secator.hooks.api import resolve_workspace
+
+				list_workspace, _ = resolve_workspace(workspace)
+			except Exception as e:
+				console.print(Error(message=f'Error resolving workspace from API: {e}'))
+				return
 		# Use QueryEngine backend to list runners
 		context = {'drivers': [effective_driver]}
-		engine = QueryEngine(workspace_id=workspace or '', context=context)
+		engine = QueryEngine(workspace_id=list_workspace or '', context=context)
 		# By default only list outermost runners (has_parent=False). --show-children
 		# drops the filter so nested sub-tasks/sub-workflows are shown too.
 		has_parent = None if show_children else False
-		runners = engine.list_runners(workspace_id=workspace, runner_type=runner_type, has_parent=has_parent)
+		runners = engine.list_runners(workspace_id=list_workspace, runner_type=runner_type, has_parent=has_parent)
 		for runner_info in runners:
 			runner_status = runner_info.get('status', '')
 			status_color = STATE_COLORS.get(runner_status, 'white')
