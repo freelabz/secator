@@ -70,6 +70,15 @@ def match_query(item: dict, query: dict) -> bool:
 
 		if isinstance(condition, dict):
 			for op, op_value in condition.items():
+				if op == '$not':
+					# Negated operator dict, e.g. {'$not': {'$regex': p}} from '!~='.
+					# Fails the match if every inner operator matches.
+					if isinstance(op_value, dict) and all(
+						OPERATORS[iop](value, ival)
+						for iop, ival in op_value.items() if iop in OPERATORS
+					):
+						return False
+					continue
 				if op not in OPERATORS:
 					continue
 				if not OPERATORS[op](value, op_value):

@@ -165,7 +165,9 @@ def _parse_value(raw):
 
 # Regex that finds the first comparison operator outside of quotes.
 # Alternatives are ordered longest-first so >= matches before > and ~= is included.
-_OP_RE = re.compile(r'^(.*?)\s*(>=|<=|!=|~=|>|<|==)\s*(.+)$', re.DOTALL)
+# '!~=' (negated regex) must come before '!=' and '~=' so the longest operator
+# wins at the same position.
+_OP_RE = re.compile(r'^(.*?)\s*(>=|<=|!~=|!=|~=|>|<|==)\s*(.+)$', re.DOTALL)
 
 _OP_MAP = {
     '>=': '$gte',
@@ -175,10 +177,13 @@ _OP_MAP = {
     '!=': '$ne',
     '==': None,
     '~=': '$regex',
+    '!~=': '$not_regex',  # sentinel -> {'$not': {'$regex': ...}} (not matching regex)
 }
 
-# Regex for the 'in' operator: "type.field in [val1, val2]"
+# Regex for the 'in'/'not in' operators: "type.field in [val1, val2]". 'not in'
+# is matched first (it also contains ' in ').
 _IN_RE = re.compile(r'^(.+?)\s+in\s+\[(.*)\]\s*$', re.DOTALL)
+_NOT_IN_RE = re.compile(r'^(.+?)\s+not\s+in\s+\[(.*)\]\s*$', re.DOTALL)
 
 
 def _has_in_op_outside_quotes(expr):
@@ -247,6 +252,24 @@ def _parse_single_expr(expr):
     if re.match(r'^[a-z_]+$', expr):
         return {'_type': expr}
 
+    # Check for 'not in' operator first: "type.field not in [val1, val2]" -> $nin.
+    # It also contains ' in ', so it must be matched before the plain 'in' branch.
+    m_not_in = _NOT_IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
+    if m_not_in:
+        left, values_str = m_not_in.group(1).strip(), m_not_in.group(2)
+        parts = left.split('.', 1)
+        _type = parts[0].strip()
+        field = parts[1].strip() if len(parts) > 1 else None
+        values = _parse_list(values_str)
+        if field is None:
+            console.print(Error(
+                message=f"'not in' operator requires a field (e.g. 'type.field not in [...]'): {expr!r}"
+            ))
+            return {'_type': _type}
+        result = {'_type': _type}
+        result[field] = {'$nin': values}
+        return result
+
     # Check for 'in' operator: "type.field in [val1, val2]"
     m_in = _IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
     if m_in:
@@ -274,13 +297,18 @@ def _parse_single_expr(expr):
         _type = parts[0].strip()
         field = parts[1].strip() if len(parts) > 1 else None
         # Regex patterns must stay as strings — converting to int/float breaks re.search.
-        if mongo_op == '$regex':
+        if mongo_op in ('$regex', '$not_regex'):
             value = right.strip().strip("'\"")
         else:
             value = _parse_value(right)
         result = {'_type': _type}
         if field:
-            result[field] = value if mongo_op is None else {mongo_op: value}
+            if mongo_op == '$not_regex':
+                result[field] = {'$not': {'$regex': value}}
+            elif mongo_op is None:
+                result[field] = value
+            else:
+                result[field] = {mongo_op: value}
         return result
 
     # Fallback: treat as type name
@@ -354,9 +382,27 @@ def python_expr_to_mongo(query):
     if len(or_parts) > 1:
         result = {'$or': [_parse_single_expr(p) for p in or_parts]}
     elif len(and_parts) > 1:
+        # Merge AND parts. A naive dict.update() drops earlier conditions when two
+        # clauses constrain the SAME field (e.g. `host !~= a && host != b` would
+        # keep only `host != b`). Combine same-field operator dicts instead, and
+        # fall back to an explicit $and when they can't be merged.
         result = {}
+        extra_and = []
         for part in and_parts:
-            result.update(_parse_single_expr(part))
+            for key, val in _parse_single_expr(part).items():
+                if key not in result or result[key] == val:
+                    result[key] = val
+                elif (
+                    isinstance(result[key], dict) and isinstance(val, dict)
+                    and not (set(result[key]) & set(val))
+                ):
+                    # Distinct operators on the same field -> Mongo ANDs them.
+                    result[key] = {**result[key], **val}
+                else:
+                    # Same operator twice, or a scalar equality clash -> AND it on.
+                    extra_and.append({key: val})
+        if extra_and:
+            result.setdefault('$and', []).extend(extra_and)
     else:
         result = _parse_single_expr(query)
 
