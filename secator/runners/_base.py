@@ -482,7 +482,18 @@ class Runner:
 			from secator.utils import deep_merge_dicts
 
 			merged_hooks = deep_merge_dicts(*hooks_list)
-		self.register_hooks(merged_hooks)
+		# Driver HOOKS dicts are keyed by base runner class (Scan/Workflow/Task). A task
+		# runner's class is its command subclass (e.g. ``whois``), never the base ``Task``,
+		# so register_hooks()' exact ``hooks.get(self.__class__)`` lookup would miss the
+		# ``Task`` entry and the task's on_end hook would never re-register on unpickle.
+		# That left chunk-parent tasks — the only tasks pickled into a chord callback —
+		# stuck in RUNNING because mark_runner_completed() ran zero on_end hooks. Flatten
+		# to the base runner type's hooks first (same convention as Workflow handing
+		# ``self._hooks.get(Task)`` to its task signatures) so they restore in the worker.
+		from secator.runners import Scan, Task, Workflow
+
+		base_cls = {'scan': Scan, 'workflow': Workflow, 'task': Task}.get(self.config.type)
+		self.register_hooks(merged_hooks.get(base_cls, {}) if base_cls else merged_hooks)
 
 	@classmethod
 	def requires_local_execution(cls, inputs, run_opts):
