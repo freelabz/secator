@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.2](https://github.com/freelabz/secator/compare/v0.36.1...v0.36.2) (2026-06-15)
+
+
+### Bug Fixes
+
+* **chain:** keep non-persisted outputs (Target/Info) through the Celery chain so subdomains feed host_recon with MongoDB ([#1174](https://github.com/freelabz/secator/issues/1174)) ([b6f0380](https://github.com/freelabz/secator/commit/b6f0380b2c8694255e07e82cd566d3b654a84c9f))
+
 ## [0.36.1](https://github.com/freelabz/secator/compare/v0.36.0...v0.36.1) (2026-06-15)
 
 
