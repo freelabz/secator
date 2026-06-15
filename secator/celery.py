@@ -108,6 +108,36 @@ if IN_WORKER:
 	setup_handlers()
 
 
+def chain_results(results):
+	"""Reduce results for passing through the Celery chain with MongoDB enabled.
+
+	Persisted findings are reduced to their Mongo ObjectId string (re-hydrated
+	downstream by secator.hooks.mongodb.get_results). Non-persisted outputs
+	(EXECUTION_TYPES like Target/Info, which carry uuid4 ids that are never
+	stored in db.findings) are kept as objects so they survive the round-trip
+	instead of being silently dropped by get_results' ObjectId.is_valid() filter.
+
+	Without this, scope-tagged Target inputs (e.g. the subdomains feeding
+	host_recon in a domain scan) are lost and the workflow falls back to its
+	original input.
+	"""
+	from bson.objectid import ObjectId
+	out, seen = [], set()
+	for r in results:
+		if isinstance(r, str):
+			if r not in seen:
+				seen.add(r)
+				out.append(r)
+		elif getattr(r, '_uuid', None) and ObjectId.is_valid(str(r._uuid)):
+			uid = str(r._uuid)
+			if uid not in seen:
+				seen.add(uid)
+				out.append(uid)
+		else:
+			out.append(r)
+	return out
+
+
 @retry(Exception, tries=3, delay=2)
 def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
@@ -228,7 +258,7 @@ def run_command(self, results, name, targets, opts={}):
 	update_state(self, task, force=True)
 
 	if CONFIG.addons.mongodb.enabled:
-		return [r._uuid for r in task.results]
+		return chain_results(task.results)
 	return task.results
 
 
@@ -255,9 +285,9 @@ def forward_results(results):
 	results = flatten(results)
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
 		console.print(Info(message=f'Extracting uuids from {len(results)} results'))
-		uuids = [r._uuid for r in results if hasattr(r, '_uuid')]
-		uuids.extend([r for r in results if isinstance(r, str)])
-		results = list(set(uuids))
+		# Keep non-persisted outputs (Target/Info etc.) as objects so they survive
+		# the chain; only persisted findings are reduced to their ObjectId uuid.
+		results = chain_results(results)
 	else:
 		results = deduplicate(results, attr='_uuid')
 
@@ -340,7 +370,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 
 	# Return only uuids when mongodb is enabled
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		return [r._uuid for r in runner.results]
+		return chain_results(runner.results)
 
 	return runner.results
 
@@ -389,7 +419,7 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 
 	# Return only uuids when mongodb is enabled
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		return [r._uuid for r in runner.results]
+		return chain_results(runner.results)
 
 	return runner.results
 
