@@ -3,6 +3,7 @@ import json
 import logging
 import sys
 import textwrap
+import threading
 import uuid
 
 from datetime import datetime, timezone
@@ -107,6 +108,10 @@ class Runner:
 		self.results = []
 		self.results_count = 0
 		self.threads = []
+		# Interval-hook thread (lazily started in __iter__ so the runner stays
+		# picklable for Celery, like the monitor thread). None until started.
+		self._interval_thread = None
+		self._interval_stop_event = None
 		self.output = ''
 		self.started = False
 		self.done = False
@@ -458,6 +463,9 @@ class Runner:
 		state = self.__dict__.copy()
 		state['_hooks'] = {}
 		state['resolved_hooks'] = {name: [] for name in state['resolved_hooks']}
+		# Threads/Events aren't picklable; they're recreated lazily on run.
+		state['_interval_thread'] = None
+		state['_interval_stop_event'] = None
 		return state
 
 	def __setstate__(self, state):
@@ -545,6 +553,9 @@ class Runner:
 			else:
 				self.log_start()
 
+			# Fire on_interval hooks on a timer (covers quiet periods); stopped in _finalize
+			self._start_interval_thread()
+
 			# Yield results buffer
 			yield from self.results_buffer
 			self.results_buffer = []
@@ -577,6 +588,9 @@ class Runner:
 
 	def _finalize(self):
 		"""Finalize the runner."""
+		# Stop interval thread first so it can't flush concurrently with the
+		# final on_end flush (mark_completed below).
+		self._stop_interval_thread()
 		self.join_threads()
 		gc.collect()
 		if self.sync:
@@ -594,6 +608,38 @@ class Runner:
 				self.debug(f'error checking celery result state in _finalize: {e}', sub='end')
 		if self.enable_reports:
 			self.export_reports()
+
+	def _start_interval_thread(self):
+		"""Start a daemon thread firing on_interval hooks on a time interval.
+
+		Created here (not in __init__) so the runner stays picklable for Celery,
+		mirroring the monitor thread. Without this, on_interval only fires when the
+		runner produces an item, so it stalls during quiet periods. on_interval is
+		still throttled by backend_update_frequency in run_hooks; a value <= 0
+		disables time-based backend updates, so we don't start the thread at all.
+		"""
+		frequency = CONFIG.runners.backend_update_frequency
+		if frequency <= 0 or self._interval_thread is not None:
+			return
+		self._interval_stop_event = threading.Event()
+		self._interval_thread = threading.Thread(target=self._interval_loop, args=(frequency,), daemon=True)
+		self._interval_thread.start()
+
+	def _interval_loop(self, frequency):
+		"""Fire on_interval hooks every `frequency` seconds until stopped."""
+		while not self._interval_stop_event.wait(frequency):
+			try:
+				self.run_hooks('on_interval', sub='interval')
+			except Exception as e:
+				self.debug(f'interval thread hook error: {e}', sub='interval')
+
+	def _stop_interval_thread(self):
+		"""Stop the interval thread (called before the final on_end flush)."""
+		if self._interval_thread and self._interval_stop_event:
+			self._interval_stop_event.set()
+			self._interval_thread.join(timeout=2.0)
+		self._interval_thread = None
+		self._interval_stop_event = None
 
 	def join_threads(self):
 		"""Wait for all running threads to complete."""
@@ -938,9 +984,11 @@ class Runner:
 				'output': self.output,
 				'progress': self.progress,
 				'last_updated_db': self.last_updated_db,
-				'context': {**self.context, 'celery_ids': list(self.celery_ids_map.keys())},
-				'errors': [e.toDict() for e in self.errors],
-				'warnings': [w.toDict() for w in self.warnings],
+				# Snapshot mutable collections (copy before iterating): toDict can be
+				# called from the interval thread while the main thread appends.
+				'context': {**self.context, 'celery_ids': list(self.celery_ids_map.copy())},
+				'errors': [e.toDict() for e in list(self.errors)],
+				'warnings': [w.toDict() for w in list(self.warnings)],
 			}
 		)
 		return data
