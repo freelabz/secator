@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.36.3](https://github.com/freelabz/secator/compare/v0.36.2...v0.36.3) (2026-06-15)
+
+
+### Bug Fixes
+
+* restore on_end hooks for chunk-parent tasks on unpickle ([#1180](https://github.com/freelabz/secator/issues/1180)) ([5c92833](https://github.com/freelabz/secator/commit/5c928331a79a6014e572132bf6c1206bb28813e5))
+* **wpscan:** add --no-update and --update flags ([#1177](https://github.com/freelabz/secator/issues/1177)) ([36a1966](https://github.com/freelabz/secator/commit/36a196671bafea8a711ee63b80f9ed2bb4f9b8ef))
+
 ## [0.36.2](https://github.com/freelabz/secator/compare/v0.36.1...v0.36.2) (2026-06-15)
 
 
