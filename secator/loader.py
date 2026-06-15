@@ -231,6 +231,38 @@ def get_available_drivers():
 	return AVAILABLE_DRIVERS + discover_external_drivers()
 
 
+def order_drivers(drivers):
+	"""Order driver names by canonical priority and dedupe.
+
+	Backend selection and hook execution both follow the order of the runner's
+	``context['drivers']`` list. Authoritative persistence drivers must take
+	precedence over relay drivers so that, when several are attached, the driver
+	that actually owns the runner's status (e.g. ``mongodb``, which writes
+	straight to the DB) runs before one that merely relays it (e.g. ``api``,
+	which does an HTTP round-trip that can fail or preempt). Without this a
+	runner can execute fine yet stay stuck in PENDING because ``api`` shadowed
+	``mongodb``'s ``update_runner`` hook.
+
+	Priority follows ``AVAILABLE_DRIVERS``; unknown/external drivers keep their
+	relative order at the end.
+
+	Args:
+		drivers (list[str]): Driver names, in arbitrary order.
+
+	Returns:
+		list[str]: Deduped driver names ordered by canonical priority.
+	"""
+	from secator.definitions import AVAILABLE_DRIVERS
+
+	def sort_key(driver):
+		try:
+			return (0, AVAILABLE_DRIVERS.index(driver))
+		except ValueError:
+			return (1, 0)
+
+	return sorted(dict.fromkeys(drivers), key=sort_key)
+
+
 @cache
 def get_available_exporters():
 	"""Get all available exporters (internal + external)."""

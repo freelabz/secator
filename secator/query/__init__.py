@@ -44,11 +44,19 @@ class QueryEngine:
                 return d
         return 'local'
 
+    @classmethod
+    def resolve_backend_from_drivers(cls, drivers) -> str:
+        """Resolve the backend name from a drivers list, honouring canonical
+        driver priority (e.g. mongodb over api), defaulting to 'local'."""
+        from secator.loader import order_drivers
+        ordered = order_drivers(drivers or [])
+        return next((d for d in ordered if d in cls.BACKENDS), 'local')
+
     def _select_backend(self) -> QueryBackend:
-        """Select the backend from the context drivers (first that has a backend),
+        """Select the backend from the context drivers (highest-priority backend),
         defaulting to the local (JSON) backend."""
         drivers = self.context.get('drivers', [])
-        backend_name = next((d for d in drivers if d in self.BACKENDS), 'local')
+        backend_name = self.resolve_backend_from_drivers(drivers)
         if backend_name == 'local':
             # The JSON backend reads from the workspace_name directory (reports are
             # saved by name), not the workspace id.
