@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.1](https://github.com/freelabz/secator/compare/v0.36.0...v0.36.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **driver:** order drivers by priority so mongodb prevails over api ([#1172](https://github.com/freelabz/secator/issues/1172)) ([edb0dcf](https://github.com/freelabz/secator/commit/edb0dcf346ebf14322243120b59742c66da0b7de))
+
 ## [0.36.0](https://github.com/freelabz/secator/compare/v0.35.0...v0.36.0) (2026-06-11)
 
 
