@@ -301,6 +301,14 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	for item in results:
 		runner.add_result(item, print=False)
 
+	# [chain-debug] temporary instrumentation: composition of re-hydrated results
+	# feeding the scan-level targets_ extractor (diagnosing cross-workflow chaining).
+	_by_type = {}
+	for r in runner.results:
+		_t = getattr(r, '_type', type(r).__name__)
+		_by_type[_t] = _by_type.get(_t, 0) + 1
+	debug(f'{runner.unique_name} mark_started: results by_type={_by_type} parent_scope={runner.context.get("parent_scope")}', sub='chain')  # noqa: E501
+
 	# Emit scope-tagged Targets for workflows with a scan-level targets_ extractor.
 	# This resolves the extractor at execution time (when Port/result data is available)
 	# so all tasks in the chain can find the correct inputs via parent_scope filtering.
@@ -311,6 +319,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		}
 		ctx = {'ancestor_id': runner.ancestor_id, 'node_chain_start': True}
 		scoped_inputs, _, _ = run_extractors(runner.results, target_extractor_opts, runner.inputs, ctx=ctx)
+		debug(f'{runner.unique_name} scope-extractor -> {len(scoped_inputs)} inputs: {scoped_inputs}', sub='chain')
 		for name in scoped_inputs:
 			t = TargetOutput(name=name)
 			t._context['scope'] = scope

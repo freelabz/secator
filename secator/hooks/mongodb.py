@@ -61,14 +61,23 @@ def get_results(uuids):
 	client = get_mongodb_client()
 	db = client.main
 	del_uuids = []
+	n_in = len(uuids) if hasattr(uuids, '__len__') else -1
 	for r in uuids:
 		if isinstance(r, tuple(OUTPUT_TYPES)):
 			yield r
 			del_uuids.append(r)
 	uuids = [ObjectId(u) for u in uuids if u not in del_uuids and ObjectId.is_valid(u)]
+	# [chain-debug] temporary instrumentation: which uuids resolve to findings on re-hydration
+	debug(f'get_results: in={n_in} prehydrated={len(del_uuids)} valid_objectids={len(uuids)}', sub='chain')
+	n_out = 0
+	by_type = {}
 	for r in db.findings.find({'_id': {'$in': uuids}}):
 		finding = load_finding(r)
+		if finding is not None:
+			n_out += 1
+			by_type[finding._type] = by_type.get(finding._type, 0) + 1
 		yield finding
+	debug(f'get_results: rehydrated={n_out} by_type={by_type}', sub='chain')
 
 
 def update_runner(self):
