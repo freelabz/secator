@@ -399,6 +399,15 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	for item in results:
 		runner.add_result(item, print=False)
 
+	# [chunk-debug] callback runner state (hooks re-attached via __setstate__ from context['drivers'])
+	debug(
+		f'mark_completed {runner.unique_name}: drivers={runner.context.get("drivers")} '
+		f'on_end_hooks={len(runner.resolved_hooks.get("on_end", []))} '
+		f'enable_hooks={runner.enable_hooks} done={runner.done} '
+		f'task_id={runner.context.get("task_id")} chunk={runner.chunk} has_children={runner.has_children}',
+		sub='chunk'
+	)
+
 	# Run mark_completed (duplicate checks, db updates if enable_hooks is True)
 	runner.mark_completed()
 
@@ -564,6 +573,14 @@ def break_task(task, task_opts, results=[]):
 	if IN_WORKER:
 		console.print(Info(message=f'Task {task.unique_name} is now async, building chord with {len(sigs)} chunks'))
 	# console.print(Info(message=f'Results: {results}'))
+
+	# [chunk-debug] live parent state right before it's pickled into the chord callback
+	debug(
+		f'break_task {task.unique_name}: drivers={task.context.get("drivers")} '
+		f'on_end_hooks={len(task.resolved_hooks.get("on_end", []))} '
+		f'task_id={task.context.get("task_id")} chunk={task.chunk} has_children={task.has_children}',
+		sub='chunk'
+	)
 
 	# Build Celery workflow
 	workflow = chord(
