@@ -351,13 +351,14 @@ class TestQueryEngine(unittest.TestCase):
 		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['mongodb']})
 		self.assertIsInstance(engine.backend, MongoDBBackend)
 
-	def test_query_engine_selects_first_driver(self):
+	def test_query_engine_prefers_mongodb_over_api(self):
 		from secator.query import QueryEngine
-		from secator.query.api import ApiBackend
+		from secator.query.mongodb import MongoDBBackend
 
-		# The backend is the first driver in the list that has a backend.
+		# Backend follows driver priority (DRIVER_PRIORITY): the authoritative DB
+		# (mongodb) prevails over the relay (api) regardless of list order.
 		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['api', 'mongodb']})
-		self.assertIsInstance(engine.backend, ApiBackend)
+		self.assertIsInstance(engine.backend, MongoDBBackend)
 
 	def test_query_engine_search_dedupe_removes_duplicates(self):
 		"""QueryEngine.search(dedupe=True) should remove duplicate findings."""
@@ -395,13 +396,14 @@ class TestQueryEngine(unittest.TestCase):
 		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['sqlite']})
 		self.assertIsInstance(engine.backend, SqliteBackend)
 
-	def test_query_engine_selects_first_driver_sqlite_then_mongodb(self):
+	def test_query_engine_prefers_mongodb_over_sqlite(self):
 		from secator.query import QueryEngine
-		from secator.query.sqlite import SqliteBackend
+		from secator.query.mongodb import MongoDBBackend
 
-		# Backend is the first driver in the list that has a backend (no priority order).
+		# Driver priority (DRIVER_PRIORITY) ranks mongodb before sqlite, so mongodb
+		# is selected regardless of list order.
 		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['sqlite', 'mongodb']})
-		self.assertIsInstance(engine.backend, SqliteBackend)
+		self.assertIsInstance(engine.backend, MongoDBBackend)
 
 
 class TestQueryEngineUpdate(unittest.TestCase):

@@ -235,16 +235,18 @@ def order_drivers(drivers):
 	"""Order driver names by canonical priority and dedupe.
 
 	Backend selection and hook execution both follow the order of the runner's
-	``context['drivers']`` list. Authoritative persistence drivers must take
-	precedence over relay drivers so that, when several are attached, the driver
-	that actually owns the runner's status (e.g. ``mongodb``, which writes
-	straight to the DB) runs before one that merely relays it (e.g. ``api``,
-	which does an HTTP round-trip that can fail or preempt). Without this a
-	runner can execute fine yet stay stuck in PENDING because ``api`` shadowed
-	``mongodb``'s ``update_runner`` hook.
+	``context['drivers']`` list (hook lists are concatenated in driver order).
+	The ranking (``DRIVER_PRIORITY``) ensures:
 
-	Priority follows ``AVAILABLE_DRIVERS``; unknown/external drivers keep their
-	relative order at the end.
+	- enrichment drivers (``gcs``) run before backends, so finding mutations
+	  (e.g. ``screenshot_path``) are present when a backend persists them;
+	- among backend-type drivers (databases then the relay API), the
+	  authoritative DB (``mongodb``) prevails over the relay (``api``) — without
+	  this a runner can execute fine yet stay stuck in PENDING because ``api``
+	  shadowed ``mongodb``'s ``update_runner`` hook.
+
+	Drivers not in ``DRIVER_PRIORITY`` (e.g. ``discord`` notifications, external
+	drivers) are left unranked, keeping their relative order after ranked ones.
 
 	Args:
 		drivers (list[str]): Driver names, in arbitrary order.
@@ -252,11 +254,11 @@ def order_drivers(drivers):
 	Returns:
 		list[str]: Deduped driver names ordered by canonical priority.
 	"""
-	from secator.definitions import AVAILABLE_DRIVERS
+	from secator.definitions import DRIVER_PRIORITY
 
 	def sort_key(driver):
 		try:
-			return (0, AVAILABLE_DRIVERS.index(driver))
+			return (0, DRIVER_PRIORITY.index(driver))
 		except ValueError:
 			return (1, 0)
 

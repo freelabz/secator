@@ -20,11 +20,19 @@ class TestDriverOrdering(unittest.TestCase):
 		self.assertEqual(order_drivers(['api', 'mongodb']), ['mongodb', 'api'])
 		self.assertEqual(order_drivers(['mongodb', 'api']), ['mongodb', 'api'])
 
+	def test_enrichment_gcs_runs_before_backends(self):
+		# gcs enriches findings (e.g. screenshot_path) and must run before any
+		# backend persists them.
+		self.assertEqual(order_drivers(['mongodb', 'gcs']), ['gcs', 'mongodb'])
+		self.assertEqual(order_drivers(['api', 'gcs']), ['gcs', 'api'])
+		self.assertEqual(order_drivers(['sqlite', 'gcs']), ['gcs', 'sqlite'])
+
 	def test_full_canonical_order(self):
-		# Canonical order follows AVAILABLE_DRIVERS = mongodb, gcs, api, discord, sqlite.
+		# Priority (DRIVER_PRIORITY): gcs (enrichment), then backends mongodb >
+		# sqlite > api; unranked drivers (discord) keep their order at the end.
 		self.assertEqual(
 			order_drivers(['sqlite', 'api', 'discord', 'gcs', 'mongodb']),
-			['mongodb', 'gcs', 'api', 'discord', 'sqlite'],
+			['gcs', 'mongodb', 'sqlite', 'api', 'discord'],
 		)
 
 	def test_unknown_drivers_kept_at_end_in_order(self):

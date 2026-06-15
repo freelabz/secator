@@ -58,6 +58,17 @@ LLM_SPINNER_MESSAGES = [
 AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord', 'sqlite']
 AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'jsonl', 'markdown', 'table', 'txt']
 
+# Canonical execution priority for drivers whose hooks share a lifecycle event.
+# Hook lists are concatenated in driver order, so this decides run order:
+#   1. Enrichment drivers (gcs) mutate findings (e.g. set screenshot_path) and
+#      must run BEFORE any backend persists them.
+#   2. Backend-type drivers (databases then the relay API) — the authoritative
+#      DB (mongodb) prevails over the relay (api) so status/findings are written
+#      directly to the store the API reads.
+# Drivers not listed here (e.g. discord notifications, external drivers) are not
+# ranked and keep their relative order after the ranked ones.
+DRIVER_PRIORITY = ['gcs', 'mongodb', 'sqlite', 'api']
+
 # Vocab
 ALIVE = 'alive'
 AUTO_CALIBRATION = 'auto_calibration'
