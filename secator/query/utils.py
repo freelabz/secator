@@ -382,27 +382,31 @@ def python_expr_to_mongo(query):
     if len(or_parts) > 1:
         result = {'$or': [_parse_single_expr(p) for p in or_parts]}
     elif len(and_parts) > 1:
-        # Merge AND parts. A naive dict.update() drops earlier conditions when two
-        # clauses constrain the SAME field (e.g. `host !~= a && host != b` would
-        # keep only `host != b`). Combine same-field operator dicts instead, and
-        # fall back to an explicit $and when they can't be merged.
-        result = {}
-        extra_and = []
-        for part in and_parts:
-            for key, val in _parse_single_expr(part).items():
-                if key not in result or result[key] == val:
-                    result[key] = val
+        # Merge AND parts into one flat dict when possible: distinct fields, or the
+        # SAME field with disjoint operator dicts (Mongo ANDs operators within a
+        # field, e.g. `host !~= a && host != b` -> {host: {$not:.., $ne:..}}).
+        # If any clause can't merge (two `$not` on the same field, or an equality
+        # clash), emit a top-level $and of the FULL parts. Mongo has no field-level
+        # $and, and a *mixed* {field:.., $and:[..]} dict silently loses the inline
+        # keys in downstream query validation — so the $and must be the sole key.
+        parsed = [_parse_single_expr(p) for p in and_parts]
+        merged = {}
+        mergeable = True
+        for part in parsed:
+            for key, val in part.items():
+                if key not in merged or merged[key] == val:
+                    merged[key] = val
                 elif (
-                    isinstance(result[key], dict) and isinstance(val, dict)
-                    and not (set(result[key]) & set(val))
+                    isinstance(merged[key], dict) and isinstance(val, dict)
+                    and not (set(merged[key]) & set(val))
                 ):
-                    # Distinct operators on the same field -> Mongo ANDs them.
-                    result[key] = {**result[key], **val}
+                    merged[key] = {**merged[key], **val}
                 else:
-                    # Same operator twice, or a scalar equality clash -> AND it on.
-                    extra_and.append({key: val})
-        if extra_and:
-            result.setdefault('$and', []).extend(extra_and)
+                    mergeable = False
+                    break
+            if not mergeable:
+                break
+        result = merged if mergeable else {'$and': parsed}
     else:
         result = _parse_single_expr(query)
 
