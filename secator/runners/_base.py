@@ -465,9 +465,13 @@ class Runner:
 		self.__dict__.update(state)
 		drivers = self.context.get('drivers', [])
 		if drivers:
-			from secator.loader import discover_external_drivers
+			from secator.loader import discover_external_drivers, order_drivers
 
 			discover_external_drivers()
+			# Order by canonical priority so authoritative backends (e.g. mongodb)
+			# register their hooks before relay drivers (e.g. api). Hook lists are
+			# concatenated in driver order, so this decides hook execution order.
+			drivers = order_drivers(drivers)
 		hooks_list = []
 		for driver in drivers:
 			driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
