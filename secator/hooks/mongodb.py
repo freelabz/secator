@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 
 import pymongo
@@ -9,7 +10,7 @@ from secator.config import CONFIG
 from secator.hooks._dedup import compute_duplicate_updates
 from secator.output_types import OUTPUT_TYPES
 from secator.runners import Scan, Task, Workflow
-from secator.utils import debug, escape_mongodb_url, should_update
+from secator.utils import debug, escape_mongodb_url
 
 # import gevent.monkey
 # gevent.monkey.patch_all()
@@ -22,6 +23,10 @@ MONGODB_MAX_POOL_SIZE = CONFIG.addons.mongodb.max_pool_size
 # Max buffered finding upserts before a forced bulk flush (bounds worker memory).
 # Time-based flushing is throttled by CONFIG.runners.backend_update_frequency.
 MONGODB_FLUSH_SIZE = 1000
+
+# Guards the per-runner findings buffer: appends happen on the main thread
+# (on_item) while flushes can run from the runner's interval thread (on_interval).
+_findings_buffer_lock = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -117,38 +122,50 @@ def update_finding(self, item):
 	"""
 	if type(item) not in OUTPUT_TYPES:
 		return item
+	# Add all in-memory context HERE (synchronously, before the item is yielded):
+	# the batched DB write below must never mutate the item, since the flush can
+	# run later / on another thread, after the item has already been yielded.
 	if not ObjectId.is_valid(str(item._uuid)):
 		item._uuid = str(ObjectId())
-	buffer = getattr(self, '_mongodb_findings_buffer', None)
-	if buffer is None:
-		buffer = self._mongodb_findings_buffer = []
-	buffer.append(
-		pymongo.UpdateOne({'_id': ObjectId(item._uuid)}, {'$set': item.toDict()}, upsert=True)
-	)
-	if len(buffer) >= MONGODB_FLUSH_SIZE:
+	op = pymongo.UpdateOne({'_id': ObjectId(item._uuid)}, {'$set': item.toDict()}, upsert=True)
+	with _findings_buffer_lock:
+		buffer = getattr(self, '_mongodb_findings_buffer', None)
+		if buffer is None:
+			buffer = self._mongodb_findings_buffer = []
+		buffer.append(op)
+		over_cap = len(buffer) >= MONGODB_FLUSH_SIZE
+	if over_cap:
 		flush_findings_buffer(self)
 	return item
 
 
 def flush_findings_buffer(self):
-	"""Write all buffered finding upserts to MongoDB in a single bulk_write."""
-	buffer = getattr(self, '_mongodb_findings_buffer', None)
-	if not buffer:
-		return
+	"""Write all buffered finding upserts to MongoDB in a single bulk_write.
+
+	The buffer is swapped out under a lock (so concurrent on_item appends aren't
+	lost), then written outside the lock to avoid holding it during DB I/O.
+	"""
+	with _findings_buffer_lock:
+		buffer = getattr(self, '_mongodb_findings_buffer', None)
+		if not buffer:
+			return
+		self._mongodb_findings_buffer = []
 	start_time = time.time()
 	client = get_mongodb_client()
 	db = client.main
 	count = len(buffer)
 	db.findings.bulk_write(buffer, ordered=False)
-	self._mongodb_findings_buffer = []
 	self._last_findings_flush = start_time
 	debug(f'flushed {count} findings in {time.time() - start_time:.4f}s', sub='hooks.mongodb', obj_after=False)
 
 
 def flush_findings(self):
-	"""on_interval hook: flush buffered findings, throttled by backend_update_frequency."""
-	if should_update(CONFIG.runners.backend_update_frequency, getattr(self, '_last_findings_flush', None)):
-		flush_findings_buffer(self)
+	"""on_interval hook: flush buffered findings.
+
+	Cadence is handled by run_hooks' on_interval throttle (backend_update_frequency)
+	and the runner's interval thread; this just drains the buffer when called.
+	"""
+	flush_findings_buffer(self)
 
 
 def flush_findings_final(self):
