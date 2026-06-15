@@ -431,3 +431,46 @@ class TestRunnerPickle(unittest.TestCase):
 
 		finally:
 			del sys.modules['secator.hooks.fakedriver']
+
+	def test_task_pickle_restores_hooks_from_base_task_key(self):
+		"""Regression for chunk-parent tasks stuck in RUNNING.
+
+		A driver's HOOKS dict is keyed by the *base* runner classes (Scan/Workflow/Task),
+		but a task runner's class is its command subclass (e.g. ``httpx``), never the base
+		``Task``. So __setstate__ must flatten driver HOOKS to the runner's base type before
+		register_hooks() — otherwise its exact ``hooks.get(self.__class__)`` lookup misses
+		the ``Task`` entry and the task's on_end hook is never re-registered on unpickle.
+		Only chunk-parent tasks get pickled into a chord callback, so they were the ones
+		left stuck in RUNNING because mark_runner_completed() ran zero on_end hooks."""
+		import pickle
+		import sys
+		import types
+		from unittest.mock import patch
+		from secator.runners import Task
+		from secator.tasks import httpx
+
+		# Simulate an external driver module keyed by the BASE Task class, exactly like the
+		# real mongodb/api driver HOOKS dicts.
+		fake_module = types.ModuleType('secator.hooks.faketaskdriver')
+
+		def on_end(runner, *args):
+			pass
+
+		on_end.__module__ = 'secator.hooks.faketaskdriver'
+		on_end.__qualname__ = 'on_end'
+		fake_module.on_end = on_end
+		fake_module.HOOKS = {Task: {'on_end': [on_end]}}
+		sys.modules['secator.hooks.faketaskdriver'] = fake_module
+
+		try:
+			with patch('secator.loader.discover_external_drivers', return_value=['faketaskdriver']):
+				context = {'drivers': ['faketaskdriver']}
+				# Instance class is `httpx` (a Command subclass), not the base Task.
+				task = httpx(['example.com'], hooks={Task: {'on_end': [on_end]}}, context=context, dry_run=True)
+				self.assertIsNot(type(task), Task)  # sanity: command subclass, not base Task
+				restored = pickle.loads(pickle.dumps(task))
+				# With the fix, on_end is re-registered from the base `Task` key in HOOKS.
+				self.assertIn(on_end, restored.resolved_hooks.get('on_end', []))
+
+		finally:
+			del sys.modules['secator.hooks.faketaskdriver']
