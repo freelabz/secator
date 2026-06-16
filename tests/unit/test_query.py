@@ -46,7 +46,7 @@ class TestQueryBackendBase(unittest.TestCase):
 		# Protected field should be enforced
 		self.assertEqual(merged['_context.workspace_id'], 'ws123')
 		self.assertEqual(merged['_type'], 'vulnerability')
-		self.assertEqual(merged['is_false_positive'], False)
+		self.assertEqual(merged['is_false_positive'], {'$ne': True})
 
 	def test_merge_query_preserves_user_fields(self):
 		backend = self._create_test_backend(workspace_id='ws123')
@@ -76,7 +76,7 @@ class TestQueryBackendBase(unittest.TestCase):
 		self.assertIsNotNone(backend.last_count_query)
 		self.assertEqual(backend.last_count_query['_context.workspace_id'], 'ws123')
 		# self.assertEqual(backend.last_count_query['_context.workspace_duplicate'], False)
-		self.assertEqual(backend.last_count_query['is_false_positive'], False)
+		self.assertEqual(backend.last_count_query['is_false_positive'], {'$ne': True})
 		# User field should still be preserved
 		self.assertEqual(backend.last_count_query['_type'], 'vulnerability')
 
