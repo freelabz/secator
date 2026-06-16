@@ -195,13 +195,17 @@ def create_workspace(name, description=None):
 	try:
 		existing_id, _ = resolve_workspace(name)
 		return False, existing_id
-	except Exception:
-		pass
+	except Exception as e:
+		if 'not found in remote API' not in str(e):
+			raise
 	data = {'name': name}
 	if description:
 		data['description'] = description
 	result = _make_request('POST', API_WORKSPACE_CREATE_ENDPOINT, data)
-	return True, (result or {}).get('_id')
+	workspace_id = (result or {}).get('_id') or (result or {}).get('id')
+	if not workspace_id:
+		raise Exception('API workspace creation returned no workspace id.')
+	return True, workspace_id
 
 
 HOOKS = {
