@@ -346,11 +346,27 @@ class Runner:
 			return [r for r in self.results if isinstance(r, Warning) and self._is_own_source(r._source)]
 		return [r for r in self.results if isinstance(r, Warning)]
 
+	def _owns_error(self, r):
+		"""Whether Error *r* was produced within this runner's own subtree.
+
+		- task: only errors from its own source (incl. its chunks).
+		- workflow: only its own subtree's errors. In a scan, results forward from one
+		  workflow to the next, so without this a later workflow would inherit an
+		  earlier sibling's Error and wrongly report FAILURE even when all its own
+		  tasks succeeded. A workflow's tasks are tagged
+		  ``_context['ancestor_id'] == <workflow config name>`` (see Workflow.run), and
+		  a workflow-level error carries the workflow's own ``_source``.
+		- scan / other composite: aggregate every descendant error (no siblings above).
+		"""
+		if self.config.type == 'task':
+			return self._is_own_source(r._source)
+		if self.config.type == 'workflow':
+			return r._context.get('ancestor_id') == self.config.name or self._is_own_source(r._source)
+		return True
+
 	@property
 	def errors(self):
-		if self.config.type == 'task':
-			return [r for r in self.results if isinstance(r, Error) and self._is_own_source(r._source)]
-		return [r for r in self.results if isinstance(r, Error)]
+		return [r for r in self.results if isinstance(r, Error) and self._owns_error(r)]
 
 	@property
 	def self_results(self):
@@ -370,9 +386,7 @@ class Runner:
 
 	@property
 	def self_errors(self):
-		if self.config.type == 'task':
-			return [r for r in self.results if isinstance(r, Error) and self._is_own_source(r._source)]
-		return [r for r in self.results if isinstance(r, Error)]
+		return [r for r in self.results if isinstance(r, Error) and self._owns_error(r)]
 
 	@property
 	def self_findings_count(self):
