@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.36.4](https://github.com/freelabz/secator/compare/v0.36.3...v0.36.4) (2026-06-16)
+
+
+### Bug Fixes
+
+* **mongodb:** warn instead of crashing on DocumentTooLarge ([#1186](https://github.com/freelabz/secator/issues/1186)) ([cb6a899](https://github.com/freelabz/secator/commit/cb6a899793f7db49631898f8e9743871b8bc9fb2))
+* **query:** bare `type.field` resolves to a boolean match (field == True) ([#1185](https://github.com/freelabz/secator/issues/1185)) ([b9106fb](https://github.com/freelabz/secator/commit/b9106fb9bb4f72c4aa3ac410125e2435876586ac))
+* stop a workflow inheriting a sibling workflow's errors ([#1182](https://github.com/freelabz/secator/issues/1182)) ([5fd5a89](https://github.com/freelabz/secator/commit/5fd5a891d19bc822b3356ee2f55a46bd966ddc13))
+
 ## [0.36.3](https://github.com/freelabz/secator/compare/v0.36.2...v0.36.3) (2026-06-15)
 
 
