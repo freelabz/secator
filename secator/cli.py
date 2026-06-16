@@ -1119,23 +1119,24 @@ def list_aliases(silent):
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{vulnerability.matched_at}'")  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
+@click.option('-rf', '--report-filter', 'report_filter', type=str, default=None, help='Scope the query to runner paths (e.g. scans/5,tasks/3), like the REPORT_QUERY of `report show`')  # noqa: E501
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.pass_context
-def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, driver, dedupe, limit):
+def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit):
 	"""Query"""
 	if not arg:
 		raise click.UsageError('Missing argument ARG (a query name, expression, or prompt).')
 
 	# 1. Saved query name
 	if arg in CONFIG.queries:
-		run_report_show(None, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder)
+		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder)
 		return
 
 	# 2. Raw filter expression
 	if _looks_like_query_expr(arg):
-		run_report_show(None, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder)
+		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder)
 		return
 
 	# 3. Natural language -> AI chat
@@ -2343,19 +2344,19 @@ r list [blue]-d[/] [bright_magenta]1h[/]              [grey42]# list reports fro
 r list [blue]-i[/]                 [grey42]# list reports that are 'interesting' (i.e: that contain vulns)[/]
 
 [grey42]# Query workspace results...[/]
-r query "Show me the top 5 vulnerabilities in my workspace"          [grey42]# using AI (run `secator x ai setup` first to set your model)[/]
-r query [bright_magenta]"port.host == 'localhost' && port.port == 6379"[/]              [grey42]# find what's running on a specific port[/]
-r query [bright_magenta]"port.port in [22,2222] || port.service_name ~= 'ssh'"[/]       [grey42]# ... or all ports 22 or 2222, or which identified service contains 'ssh'[/]
-r query [bright_magenta]"port.state == 'open' && port.service_confidence == 'high'"[/]  [grey42]# ... or only high confidence, opened ports[/]
-r query [bright_magenta]"vulnerability"[/]                                              [grey42]# show all vulnerabilities in current workspace[/]
-r query [bright_magenta]"vulnerability.severity in ['high', 'critical']"[/]             [grey42]# ... filter on severity[/]
-r query [bright_magenta]"vulnerability.cvss_score >= 7"[/]                              [grey42]# ... filter on CVSS scores[/]
-r query [bright_magenta]"vulnerability.tags ~= 'exploitable'"[/]                        [grey42]# ... filter on exploitable vulnerabilities[/]
-r query [bright_magenta]"exploit.cves ~= 'CVE-2022-0543'"[/]                            [grey42]# show exploits related to a vulnerability[/]
-r query [blue]--help[/]                                                       [grey42]# ... and more with the -f, -o, -d options[/]
+q "Show me the top 5 vulnerabilities in my workspace"          [grey42]# using AI (run `secator x ai setup` first to set your model)[/]
+q [bright_magenta]"port.host == 'localhost' && port.port == 6379"[/]              [grey42]# find what's running on a specific port[/]
+q [bright_magenta]"port.port in [22,2222] || port.service_name ~= 'ssh'"[/]       [grey42]# ... or all ports 22 or 2222, or which identified service contains 'ssh'[/]
+q [bright_magenta]"port.state == 'open' && port.service_confidence == 'high'"[/]  [grey42]# ... or only high confidence, opened ports[/]
+q [bright_magenta]"vulnerability"[/]                                              [grey42]# show all vulnerabilities in current workspace[/]
+q [bright_magenta]"vulnerability.severity in ['high', 'critical']"[/]             [grey42]# ... filter on severity[/]
+q [bright_magenta]"vulnerability.cvss_score >= 7"[/]                              [grey42]# ... filter on CVSS scores[/]
+q [bright_magenta]"vulnerability.tags ~= 'exploitable'"[/]                        [grey42]# ... filter on exploitable vulnerabilities[/]
+q [bright_magenta]"exploit.cves ~= 'CVE-2022-0543'"[/]                            [grey42]# show exploits related to a vulnerability[/]
+q [blue]--help[/]                                                       [grey42]# ... and more with the -f, -o, -d options[/]
 
 [grey42]# Query specific reports by id (tasks, workflows, scans)[/]
-r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"port.state == 'open'"[/] [blue]-o[/] [bright_magenta]json[/]           [grey42]# show open ports from tasks 10 and 11[/]
+q [bright_magenta]"port.state == 'open'"[/] [blue]-rf[/] [bright_magenta]tasks/10,tasks/11[/] [blue]-o[/] [bright_magenta]json[/]         [grey42]# show open ports from tasks 10 and 11[/]
 """,  # noqa: E501
 		title=f':file_cabinet:  [{title_style}]Workspaces, reports, and queries[/]',
 		**kwargs,

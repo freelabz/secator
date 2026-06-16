@@ -230,19 +230,22 @@ secator q "exploit.cves  ~= 'CVE-2021-44521'"                                   
 secator q "port" -f "{host} {port} {service_name}" | cut -d " " -f2 | sort | uniq -c | sort -nr | head -n 15                      # top 15 ports
 secator q "port" -f "{host} {port} {service_name}" | cut -d " " -f3,4,5,6 | awk 'NF > 0' | sort | uniq -c | sort -nr | head -n 15 # top 15 services
 secator q "technology" -f "{product}/{version}" | sort | uniq -c | sort -nr | head -n 15                                          # top 15 technologies
+secator q "port.state == 'open'" -rf scans/23,tasks/10                                                                            # only results from scan 23 and task 10
 
 # Save a query and run it
 secator c set queries.critical_vulns "vulnerability.severity_nb < 2"          # save a query
 secator c get queries                                                         # list saved queries
-secator q critical_vulns -f "{vulnerability.matched_at}" -ws secator.cloud    # run a aved query on workspace + extract targets
+secator q critical_vulns -f "{vulnerability.matched_at}" -ws secator.cloud    # run a saved query on workspace + extract targets
 
 # Ask a natural-language question (runs the AI chat task)
 secator q "Analyze my workspace data"
 ```
 
 `secator q` accepts the same options as `secator r show` (`-o/--output`,
-`-d/--time-delta`, `-f/--format`, `-w/-ws/--workspace`, `--driver`, `--dedupe`).
-On the AI-chat path only the workspace and prompt are used.
+`-d/--time-delta`, `-f/--format`, `-w/-ws/--workspace`, `--driver`, `--dedupe`),
+plus `-rf/--report-filter` to scope the query to specific runner paths (the
+equivalent of `r show`'s `REPORT_QUERY` argument). On the AI-chat path only the
+workspace and prompt are used.
 
 
 ### Shell completion
