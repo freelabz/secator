@@ -82,12 +82,23 @@ def _build_where(query: dict):
 					placeholders = ', '.join('?' for _ in val)
 					clauses.append(f'{expr} IN ({placeholders})')
 					params.extend(val)
+				elif op == '$nin':
+					# NOT IN [] matches everything -> emit no constraint.
+					if not val:
+						continue
+					placeholders = ', '.join('?' for _ in val)
+					clauses.append(f'{expr} NOT IN ({placeholders})')
+					params.extend(val)
 				elif op == '$contains':
 					clauses.append(f"{expr} LIKE '%' || ? || '%'")
 					params.append(val)
 				elif op == '$regex':
 					clauses.append(f'{expr} REGEXP ?')
 					params.append(str(val))
+				elif op == '$not' and isinstance(val, dict) and '$regex' in val:
+					# Negated regex from '!~='.
+					clauses.append(f'{expr} NOT REGEXP ?')
+					params.append(str(val['$regex']))
 				# unknown operators are ignored, matching the json backend
 		else:
 			clauses.append(f'{expr} = ?')

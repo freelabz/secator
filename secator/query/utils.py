@@ -173,7 +173,9 @@ def _parse_value(raw):
 
 # Regex that finds the first comparison operator outside of quotes.
 # Alternatives are ordered longest-first so >= matches before > and ~= is included.
-_OP_RE = re.compile(r'^(.*?)\s*(>=|<=|!=|~=|>|<|==)\s*(.+)$', re.DOTALL)
+# '!~=' (negated regex) must come before '!=' and '~=' so the longest operator
+# wins at the same position.
+_OP_RE = re.compile(r'^(.*?)\s*(>=|<=|!~=|!=|~=|>|<|==)\s*(.+)$', re.DOTALL)
 
 _OP_MAP = {
     '>=': '$gte',
@@ -183,10 +185,13 @@ _OP_MAP = {
     '!=': '$ne',
     '==': None,
     '~=': '$regex',
+    '!~=': '$not_regex',  # sentinel -> {'$not': {'$regex': ...}} (not matching regex)
 }
 
-# Regex for the 'in' operator: "type.field in [val1, val2]"
+# Regex for the 'in'/'not in' operators: "type.field in [val1, val2]". 'not in'
+# is matched first (it also contains ' in ').
 _IN_RE = re.compile(r'^(.+?)\s+in\s+\[(.*)\]\s*$', re.DOTALL)
+_NOT_IN_RE = re.compile(r'^(.+?)\s+not\s+in\s+\[(.*)\]\s*$', re.DOTALL)
 
 
 def _has_in_op_outside_quotes(expr):
@@ -255,6 +260,24 @@ def _parse_single_expr(expr):
     if re.match(r'^[a-z_]+$', expr):
         return {'_type': expr}
 
+    # Check for 'not in' operator first: "type.field not in [val1, val2]" -> $nin.
+    # It also contains ' in ', so it must be matched before the plain 'in' branch.
+    m_not_in = _NOT_IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
+    if m_not_in:
+        left, values_str = m_not_in.group(1).strip(), m_not_in.group(2)
+        parts = left.split('.', 1)
+        _type = parts[0].strip()
+        field = parts[1].strip() if len(parts) > 1 else None
+        values = _parse_list(values_str)
+        if field is None:
+            console.print(Error(
+                message=f"'not in' operator requires a field (e.g. 'type.field not in [...]'): {expr!r}"
+            ))
+            return {'_type': _type}
+        result = {'_type': _type}
+        result[field] = {'$nin': values}
+        return result
+
     # Check for 'in' operator: "type.field in [val1, val2]"
     m_in = _IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
     if m_in:
@@ -282,13 +305,18 @@ def _parse_single_expr(expr):
         _type = parts[0].strip()
         field = parts[1].strip() if len(parts) > 1 else None
         # Regex patterns must stay as strings — converting to int/float breaks re.search.
-        if mongo_op == '$regex':
+        if mongo_op in ('$regex', '$not_regex'):
             value = right.strip().strip("'\"")
         else:
             value = _parse_value(right)
         result = {'_type': _type}
         if field:
-            result[field] = value if mongo_op is None else {mongo_op: value}
+            if mongo_op == '$not_regex':
+                result[field] = {'$not': {'$regex': value}}
+            elif mongo_op is None:
+                result[field] = value
+            else:
+                result[field] = {mongo_op: value}
         return result
 
     # Fallback: a bare "type.field" with no operator is a boolean truthiness check,
@@ -369,9 +397,31 @@ def python_expr_to_mongo(query):
     if len(or_parts) > 1:
         result = {'$or': [_parse_single_expr(p) for p in or_parts]}
     elif len(and_parts) > 1:
-        result = {}
-        for part in and_parts:
-            result.update(_parse_single_expr(part))
+        # Merge AND parts into one flat dict when possible: distinct fields, or the
+        # SAME field with disjoint operator dicts (Mongo ANDs operators within a
+        # field, e.g. `host !~= a && host != b` -> {host: {$not:.., $ne:..}}).
+        # If any clause can't merge (two `$not` on the same field, or an equality
+        # clash), emit a top-level $and of the FULL parts. Mongo has no field-level
+        # $and, and a *mixed* {field:.., $and:[..]} dict silently loses the inline
+        # keys in downstream query validation — so the $and must be the sole key.
+        parsed = [_parse_single_expr(p) for p in and_parts]
+        merged = {}
+        mergeable = True
+        for part in parsed:
+            for key, val in part.items():
+                if key not in merged or merged[key] == val:
+                    merged[key] = val
+                elif (
+                    isinstance(merged[key], dict) and isinstance(val, dict)
+                    and not (set(merged[key]) & set(val))
+                ):
+                    merged[key] = {**merged[key], **val}
+                else:
+                    mergeable = False
+                    break
+            if not mergeable:
+                break
+        result = merged if mergeable else {'$and': parsed}
     else:
         result = _parse_single_expr(query)
 

@@ -41,7 +41,11 @@ class TestReportDeleteCli(unittest.TestCase):
 			mock_cfg.dirs.reports = self.temp_dir
 			mock_cfg.workspaces.current = WORKSPACE
 			mock_cfg.addons.api.runner_delete_endpoint = '/api/{runner_type}/{runner_id}'
-			return self.cli_runner.invoke(cli, ['r', 'rm', '-w', WORKSPACE, '-y'] + args)
+			# Force the local driver explicitly: resolve_backend() reads the real
+			# secator.config.CONFIG.drivers.defaults (not the mocked cli.CONFIG), so a
+			# developer with `drivers.defaults: api` would otherwise route these
+			# local-driver deletes to the API backend and fail.
+			return self.cli_runner.invoke(cli, ['r', 'rm', '-w', WORKSPACE, '-y', '--driver', 'local'] + args)
 
 	def test_space_separated_paths(self):
 		self._make_runner('tasks', 23)

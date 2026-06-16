@@ -33,6 +33,7 @@ API_FINDING_CREATE_ENDPOINT = CONFIG.addons.api.finding_create_endpoint
 API_FINDING_UPDATE_ENDPOINT = CONFIG.addons.api.finding_update_endpoint
 API_WORKSPACE_GET_ENDPOINT = CONFIG.addons.api.workspace_get_endpoint
 API_WORKSPACE_LIST_ENDPOINT = CONFIG.addons.api.workspace_list_endpoint
+API_WORKSPACE_CREATE_ENDPOINT = CONFIG.addons.api.workspace_create_endpoint
 API_ORG_ID = CONFIG.addons.api.org_id
 FORCE_SSL = CONFIG.addons.api.force_ssl
 API_TIMEOUT = CONFIG.addons.api.timeout
@@ -180,6 +181,31 @@ def resolve_workspace(value):
 	workspace_id = str(match.get('_id') or match.get('id'))
 	console.print(Info(message=f'Resolved workspace "{value}" from remote API [id: {workspace_id}]'))
 	return workspace_id, value
+
+
+def create_workspace(name, description=None):
+	"""Create a workspace via the API (scoped to the configured org), idempotently.
+
+	Returns (created, workspace_id): if a workspace with this name already exists in
+	the org it is reused (created=False) instead of erroring, so `secator ws use`
+	is safe to re-run. Otherwise it is created (created=True).
+	"""
+	# Reuse an existing workspace of the same name rather than hitting the API's
+	# per-org name-uniqueness check. resolve_workspace raises if not found.
+	try:
+		existing_id, _ = resolve_workspace(name)
+		return False, existing_id
+	except Exception as e:
+		if 'not found in remote API' not in str(e):
+			raise
+	data = {'name': name}
+	if description:
+		data['description'] = description
+	result = _make_request('POST', API_WORKSPACE_CREATE_ENDPOINT, data)
+	workspace_id = (result or {}).get('_id') or (result or {}).get('id')
+	if not workspace_id:
+		raise Exception('API workspace creation returned no workspace id.')
+	return True, workspace_id
 
 
 HOOKS = {

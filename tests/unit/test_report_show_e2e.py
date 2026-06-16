@@ -269,7 +269,7 @@ class TestReportShowMongoDBBackend(unittest.TestCase):
 		self.assertEqual(query_sent.get('_type'), 'vulnerability')
 		self.assertEqual(query_sent.get('severity'), 'critical')
 		self.assertEqual(query_sent.get('_context.workspace_id'), WORKSPACE)
-		self.assertEqual(query_sent.get('is_false_positive'), False)
+		self.assertEqual(query_sent.get('is_false_positive'), {'$ne': True})
 
 	def test_mongodb_unavailable_exits_cleanly(self):
 		"""If MongoDB is unavailable the command exits cleanly with empty results."""
@@ -357,7 +357,7 @@ class TestReportShowApiBackend(unittest.TestCase):
 		self.assertEqual(body.get('_type'), 'vulnerability')
 		self.assertEqual(body.get('severity'), 'critical')
 		self.assertEqual(body.get('_context.workspace_id'), WORKSPACE)
-		self.assertEqual(body.get('is_false_positive'), False)
+		self.assertEqual(body.get('is_false_positive'), {'$ne': True})
 		self.assertEqual(body.get('_tagged'), True)
 
 	def test_api_handles_items_format(self):

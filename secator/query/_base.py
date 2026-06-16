@@ -52,7 +52,12 @@ class QueryBackend(ABC):
 		return {
 			'_context.workspace_id': self.workspace_id,
 			# "_context.workspace_duplicate": False,
-			'is_false_positive': False,
+			# A finding is a false positive only when explicitly marked. Most
+			# findings never set the field at all, so an exact `False` match drops
+			# them (Mongo `is_false_positive: false` does not match missing fields)
+			# — that returned 0 results for fully-populated workspaces. `$ne: True`
+			# keeps false/null/absent and excludes only explicit false positives.
+			'is_false_positive': {'$ne': True},
 		}
 
 	def _merge_query(self, query: dict) -> dict:
