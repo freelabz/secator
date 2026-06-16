@@ -7,7 +7,7 @@ from celery import shared_task
 
 from secator.config import CONFIG
 from secator.hooks._dedup import compute_duplicate_updates
-from secator.output_types import OUTPUT_TYPES
+from secator.output_types import OUTPUT_TYPES, Warning
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
 
@@ -81,25 +81,32 @@ def update_runner(self):
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
 	debug('to_update', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False, verbose=True)  # noqa: E501
 	start_time = time.time()
-	if _id:
-		db = client.main
-		start_time = time.time()
-		db[collection].update_one({'_id': ObjectId(_id)}, {'$set': update})
-		end_time = time.time()
-		elapsed = end_time - start_time
-		debug(
-			f'[dim gold4]updated in {elapsed:.4f}s[/]', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)  # noqa: E501
-		self.last_updated_db = start_time
-	else:  # sync update and save result to runner object
-		runner = db[collection].insert_one(update)
-		_id = str(runner.inserted_id)
-		if chunk:
-			self.context[f'{type}_chunk_id'] = _id
-		else:
-			self.context[f'{type}_id'] = _id
-		end_time = time.time()
-		elapsed = end_time - start_time
-		debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
+	try:
+		if _id:
+			db = client.main
+			start_time = time.time()
+			db[collection].update_one({'_id': ObjectId(_id)}, {'$set': update})
+			end_time = time.time()
+			elapsed = end_time - start_time
+			debug(
+				f'[dim gold4]updated in {elapsed:.4f}s[/]', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)  # noqa: E501
+			self.last_updated_db = start_time
+		else:  # sync update and save result to runner object
+			runner = db[collection].insert_one(update)
+			_id = str(runner.inserted_id)
+			if chunk:
+				self.context[f'{type}_chunk_id'] = _id
+			else:
+				self.context[f'{type}_id'] = _id
+			end_time = time.time()
+			elapsed = end_time - start_time
+			debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
+	except pymongo.errors.DocumentTooLarge:
+		# The runner state exceeds MongoDB's 16MB BSON limit (usually huge outputs).
+		# Don't crash the runner over a persistence limit — warn and carry on.
+		msg = f'{self.unique_name} state exceeds MongoDB\'s 16MB document limit; skipping this DB update.'
+		self.add_result(Warning(message=msg), hooks=False)
+		debug(msg, sub='hooks.mongodb', id=_id)
 
 
 def update_finding(self, item):
@@ -111,13 +118,22 @@ def update_finding(self, item):
 	update = item.toDict()
 	_type = item._type
 	_id = ObjectId(item._uuid) if ObjectId.is_valid(item._uuid) else None
-	if _id:
-		finding = db['findings'].update_one({'_id': _id}, {'$set': update})
-		status = 'UPDATED'
-	else:
-		finding = db['findings'].insert_one(update)
-		item._uuid = str(finding.inserted_id)
-		status = 'CREATED'
+	try:
+		if _id:
+			finding = db['findings'].update_one({'_id': _id}, {'$set': update})
+			status = 'UPDATED'
+		else:
+			finding = db['findings'].insert_one(update)
+			item._uuid = str(finding.inserted_id)
+			status = 'CREATED'
+	except pymongo.errors.DocumentTooLarge:
+		# A single finding exceeds MongoDB's 16MB BSON limit (e.g. a huge inline
+		# response body). Warn instead of crashing the runner; return the item so
+		# the chain continues.
+		msg = f'{item._type} finding exceeds MongoDB\'s 16MB document limit; skipping persist.'
+		self.add_result(Warning(message=msg), hooks=False)
+		debug(msg, sub='hooks.mongodb', id=str(item._uuid))
+		return item
 	end_time = time.time()
 	elapsed = end_time - start_time
 	debug_obj = {
