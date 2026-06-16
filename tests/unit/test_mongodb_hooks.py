@@ -7,10 +7,15 @@ the runner. The hooks must instead catch it, emit a Warning, and carry on.
 import unittest
 from unittest.mock import MagicMock, patch
 
-import pymongo
+import pytest
 
-from secator.hooks import mongodb
-from secator.output_types import Info, Warning
+# The mongodb addon (pymongo) is an optional extra and is NOT installed in the base
+# unit-test environment (CI). Skip this whole module cleanly when it's absent —
+# importing secator.hooks.mongodb also pulls pymongo, so guard before that import.
+pymongo = pytest.importorskip("pymongo")
+
+from secator.hooks import mongodb  # noqa: E402
+from secator.output_types import Info, Warning  # noqa: E402
 
 
 class _Cfg:
