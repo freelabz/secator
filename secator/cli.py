@@ -1131,7 +1131,7 @@ def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_fi
 
 	# 1. Saved query name
 	if arg in CONFIG.queries:
-		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder)
+		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder)  # noqa: E501
 		return
 
 	# 2. Raw filter expression
