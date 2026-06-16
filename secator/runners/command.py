@@ -195,7 +195,10 @@ class Command(Runner):
 		self.print_cmd = self.run_opts.get('print_cmd', False)
 
 		# TTY availability (can be explicitly disabled for non-interactive contexts)
-		self.has_tty = self.run_opts.get('tty', sys.stdin.isatty())
+		try:
+			self.has_tty = self.run_opts.get('tty', sys.stdin.isatty())
+		except (ValueError, AttributeError, OSError):
+			self.has_tty = self.run_opts.get('tty', False)
 
 		# Stat update
 		self.last_updated_stat = None
