@@ -150,8 +150,16 @@ def _split_logical_op(query, op):
 
 
 def _parse_value(raw):
-    """Convert a string token to int, float, or stripped string."""
+    """Convert a string token to bool, int, float, or stripped string."""
     raw = raw.strip().strip("'\"")
+    # Boolean literals ("True"/"true", "False"/"false") become real booleans so a
+    # comparison like `ip.alive == True` resolves to a boolean match (not the string
+    # "True") across all backends.
+    low = raw.lower()
+    if low == 'true':
+        return True
+    if low == 'false':
+        return False
     try:
         return int(raw)
     except ValueError:
@@ -283,9 +291,16 @@ def _parse_single_expr(expr):
             result[field] = value if mongo_op is None else {mongo_op: value}
         return result
 
-    # Fallback: treat as type name
+    # Fallback: a bare "type.field" with no operator is a boolean truthiness check,
+    # i.e. "ip.alive" means "ip.alive == True" (resolves identically across backends).
+    # A bare "type" with no field is just the type.
     parts = expr.split('.', 1)
-    return {'_type': parts[0].strip()}
+    _type = parts[0].strip()
+    field = parts[1].strip() if len(parts) > 1 else None
+    result = {'_type': _type}
+    if field:
+        result[field] = True
+    return result
 
 
 def _normalize_logical_ops(query):
