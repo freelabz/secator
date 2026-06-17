@@ -4,7 +4,7 @@ build-backend = 'hatchling.build'
 
 [project]
 name = 'secator'
-version = "0.36.4"
+version = "0.37.0"
 authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
 readme = 'README.md'
 description = "The pentester's swiss knife."
