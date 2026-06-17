@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.37.0](https://github.com/freelabz/secator/compare/v0.36.4...v0.37.0) (2026-06-17)
+
+
+### Features
+
+* make the api driver work end-to-end in the CLI (queries, workspaces, operators) ([#1181](https://github.com/freelabz/secator/issues/1181)) ([d075115](https://github.com/freelabz/secator/commit/d075115583454b114f9ada824ff15a84c199d8dc))
+
+
+### Bug Fixes
+
+* **tty:** rare issue with tty ([#1184](https://github.com/freelabz/secator/issues/1184)) ([4dd45e6](https://github.com/freelabz/secator/commit/4dd45e6472d8e7f9c478a0c3d7d467364fbcb87e))
+
 ## [0.36.4](https://github.com/freelabz/secator/compare/v0.36.3...v0.36.4) (2026-06-16)
 
 
