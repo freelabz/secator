@@ -14,6 +14,39 @@ success() { echo -e "${GREEN}✓${NC} $1" >&2; }
 warn() { echo -e "${YELLOW}⚠${NC} $1" >&2; }
 error() { echo -e "${RED}✗${NC} $1" >&2; exit 1; }
 
+# Script-level variable for version (empty = latest)
+SECATOR_VERSION=""
+
+# Parse command-line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --version)
+                if [[ -z "${2:-}" ]]; then
+                    error "--version requires a value (e.g. --version 0.36.0)"
+                fi
+                SECATOR_VERSION="$2"
+                shift 2
+                ;;
+            -h|--help)
+                echo "Usage: $0 [OPTIONS]" >&2
+                echo "" >&2
+                echo "Options:" >&2
+                echo "  --version <version>   Install a specific version of secator (e.g. 0.36.0)" >&2
+                echo "  -h, --help            Show this help message and exit" >&2
+                echo "" >&2
+                echo "Examples:" >&2
+                echo "  $0                    Install the latest version" >&2
+                echo "  $0 --version 0.36.0   Install version 0.36.0" >&2
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1. Use --help for usage information."
+                ;;
+        esac
+    done
+}
+
 # Detect OS and distribution
 detect_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
@@ -176,30 +209,35 @@ install_python() {
 # Install secator in a virtual environment
 install_secator() {
     VENV_DIR="$HOME/.secator"
-    
+
     # Check if venv module is available
     if ! python3 -m venv --help >/dev/null 2>&1; then
         error "Python venv module is not available. Please install python3-venv package."
     fi
-    
+
     info "Creating virtual environment at $VENV_DIR..."
     python3 -m venv "$VENV_DIR" || error "Failed to create virtual environment"
-    
+
     info "Activating virtual environment..."
     source "$VENV_DIR/bin/activate" || error "Failed to activate virtual environment"
-    
+
     info "Upgrading pip..."
     pip install --upgrade pip --quiet || warn "Failed to upgrade pip, continuing..."
-    
-    info "Installing secator..."
-    pip install secator --quiet || error "Failed to install secator"
-    
+
+    if [[ -n "$SECATOR_VERSION" ]]; then
+        info "Installing secator==$SECATOR_VERSION..."
+        pip install "secator==$SECATOR_VERSION" --quiet || error "Failed to install secator==$SECATOR_VERSION"
+    else
+        info "Installing secator (latest)..."
+        pip install secator --quiet || error "Failed to install secator"
+    fi
+
     # Find the secator binary
     SECATOR_BIN="$VENV_DIR/bin/secator"
     if [[ ! -f "$SECATOR_BIN" ]]; then
         error "secator binary not found at $SECATOR_BIN"
     fi
-    
+
     success "secator installed successfully"
     echo "$SECATOR_BIN"
 }
@@ -259,8 +297,14 @@ create_symlink() {
 
 # Main installation function
 main() {
+    parse_args "$@"
+
     echo ""
-    info "Starting secator installation..."
+    if [[ -n "$SECATOR_VERSION" ]]; then
+        info "Starting secator installation (version $SECATOR_VERSION)..."
+    else
+        info "Starting secator installation (latest)..."
+    fi
     echo ""
     
     detect_os
