@@ -14,6 +14,39 @@ success() { echo -e "${GREEN}✓${NC} $1" >&2; }
 warn() { echo -e "${YELLOW}⚠${NC} $1" >&2; }
 error() { echo -e "${RED}✗${NC} $1" >&2; exit 1; }
 
+usage() {
+    echo "Usage: $0 [OPTIONS]" >&2
+    echo "" >&2
+    echo "Options:" >&2
+    echo "  --version <version>   Install a specific version of secator (e.g. 0.36.0)" >&2
+    echo "  --help                Show this help message" >&2
+    echo "" >&2
+    echo "Examples:" >&2
+    echo "  $0                    Install the latest version of secator" >&2
+    echo "  $0 --version 0.36.0   Install secator v0.36.0" >&2
+    exit 0
+}
+
+# Parse arguments
+SECATOR_VERSION=""
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --version)
+                [[ -z "${2:-}" ]] && error "--version requires a version argument"
+                SECATOR_VERSION="$2"
+                shift 2
+                ;;
+            --help|-h)
+                usage
+                ;;
+            *)
+                error "Unknown option: $1. Use --help for usage information."
+                ;;
+        esac
+    done
+}
+
 # Detect OS and distribution
 detect_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
@@ -191,8 +224,13 @@ install_secator() {
     info "Upgrading pip..."
     pip install --upgrade pip --quiet || warn "Failed to upgrade pip, continuing..."
     
-    info "Installing secator..."
-    pip install secator --quiet || error "Failed to install secator"
+    if [[ -n "$SECATOR_VERSION" ]]; then
+        info "Installing secator==$SECATOR_VERSION..."
+        pip install "secator==$SECATOR_VERSION" --quiet || error "Failed to install secator==$SECATOR_VERSION"
+    else
+        info "Installing secator (latest)..."
+        pip install secator --quiet || error "Failed to install secator"
+    fi
     
     # Find the secator binary
     SECATOR_BIN="$VENV_DIR/bin/secator"
@@ -259,10 +297,16 @@ create_symlink() {
 
 # Main installation function
 main() {
+    parse_args "$@"
+
     echo ""
-    info "Starting secator installation..."
+    if [[ -n "$SECATOR_VERSION" ]]; then
+        info "Starting secator installation (version: $SECATOR_VERSION)..."
+    else
+        info "Starting secator installation (latest)..."
+    fi
     echo ""
-    
+
     detect_os
     info "Detected OS: $OS, Distribution: $DISTRO"
     
