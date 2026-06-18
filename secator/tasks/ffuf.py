@@ -72,6 +72,7 @@ class ffuf(HttpFuzzer):
 		},
 	}
 	encoding = 'ansi'
+	has_fuzz_keyword = False
 	install_version = 'v2.1.0'
 	install_cmd = 'go install -v github.com/ffuf/ffuf/v2@[install_version]'
 	github_handle = 'ffuf/ffuf'
@@ -103,7 +104,7 @@ class ffuf(HttpFuzzer):
 	@staticmethod
 	def on_cmd_opts(self, opts):
 		# Fuzz host header
-		if self.get_opt_value('subs') and not self.has_fuzz_keyword and len(self.inputs) > 0:
+		if self.get_opt_value('subs') and len(self.inputs) > 0 and not self.has_fuzz_keyword:
 			host = self.inputs[0].split('://')[1].split('/')[0]
 			opts['header']['value']['Host'] = f'FUZZ.{host}'
 			if self.get_opt_value('wordlist') == 'http':
