@@ -14,8 +14,11 @@ success() { echo -e "${GREEN}✓${NC} $1" >&2; }
 warn() { echo -e "${YELLOW}⚠${NC} $1" >&2; }
 error() { echo -e "${RED}✗${NC} $1" >&2; exit 1; }
 
-# Script-level variable for version (empty = latest)
+# Script-level variables (empty = use default)
 SECATOR_VERSION=""
+SECATOR_TEMPLATES=""
+SECATOR_ADDONS=""
+SECATOR_TOOLS=""
 
 # Parse command-line arguments
 parse_args() {
@@ -25,19 +28,58 @@ parse_args() {
                 if [[ -z "${2:-}" ]]; then
                     error "--version requires a value (e.g. --version 0.36.0)"
                 fi
+                if [[ "${2}" == -* ]]; then
+                    error "--version requires a version value, got option-like token: ${2}"
+                fi
                 SECATOR_VERSION="$2"
                 shift 2
+                ;;
+            --templates)
+                if [[ -z "${2:-}" ]]; then
+                    error "--templates requires a path (e.g. --templates /path/to/mytpl)"
+                fi
+                if [[ "${2}" == -* ]]; then
+                    error "--templates requires a path, got option-like token: ${2}"
+                fi
+                SECATOR_TEMPLATES="$2"
+                shift 2
+                ;;
+            --addons)
+                if [[ -z "${2:-}" ]]; then
+                    error "--addons requires at least one addon name (e.g. --addons worker,gcs)"
+                fi
+                if [[ "${2}" == -* ]]; then
+                    error "--addons requires addon names, got option-like token: ${2}"
+                fi
+                SECATOR_ADDONS="$2"
+                shift 2
+                ;;
+            --tools)
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" == -* ]]; then
+                    SECATOR_TOOLS="all"
+                    shift
+                else
+                    SECATOR_TOOLS="$2"
+                    shift 2
+                fi
                 ;;
             -h|--help)
                 echo "Usage: $0 [OPTIONS]" >&2
                 echo "" >&2
                 echo "Options:" >&2
-                echo "  --version <version>   Install a specific version of secator (e.g. 0.36.0)" >&2
-                echo "  -h, --help            Show this help message and exit" >&2
+                echo "  --version <version>    Install a specific version of secator (e.g. 0.36.0)" >&2
+                echo "  --templates <path>     Symlink a custom templates folder into secator's templates dir" >&2
+                echo "  --addons <list>        Install addons, comma-separated (e.g. worker,gcs)" >&2
+                echo "  --tools [<list>]       Install tools; omit list to install all, or pass comma-separated names" >&2
+                echo "  -h, --help             Show this help message and exit" >&2
                 echo "" >&2
                 echo "Examples:" >&2
-                echo "  $0                    Install the latest version" >&2
-                echo "  $0 --version 0.36.0   Install version 0.36.0" >&2
+                echo "  $0                              Install the latest version" >&2
+                echo "  $0 --version 0.36.0             Install version 0.36.0" >&2
+                echo "  $0 --templates /path/to/mytpl   Symlink custom templates" >&2
+                echo "  $0 --addons worker,gcs          Install worker and gcs addons" >&2
+                echo "  $0 --tools                      Install all tools" >&2
+                echo "  $0 --tools httpx,katana         Install specific tools" >&2
                 exit 0
                 ;;
             *)
@@ -295,6 +337,70 @@ create_symlink() {
     echo "$symlink_path"
 }
 
+# Symlink a custom templates folder into secator's templates directory
+setup_templates() {
+    local secator_bin="$1"
+    if [[ -z "$SECATOR_TEMPLATES" ]]; then
+        return 0
+    fi
+
+    local templates_path
+    templates_path=$(realpath "$SECATOR_TEMPLATES" 2>/dev/null) || error "Templates path not found: $SECATOR_TEMPLATES"
+    [[ -d "$templates_path" ]] || error "Templates path is not a directory: $templates_path"
+
+    local folder_name
+    folder_name=$(basename "$templates_path")
+
+    local secator_templates_dir
+    secator_templates_dir=$("$secator_bin" config get dirs.templates 2>/dev/null) || error "Failed to get secator templates directory"
+
+    mkdir -p "$secator_templates_dir" || error "Failed to create templates directory: $secator_templates_dir"
+
+    local symlink_target="$secator_templates_dir/$folder_name"
+
+    if [[ -L "$symlink_target" ]] || [[ -e "$symlink_target" ]]; then
+        info "Removing existing entry at $symlink_target..."
+        rm -f "$symlink_target" || error "Failed to remove existing entry"
+    fi
+
+    ln -s "$templates_path" "$symlink_target" || error "Failed to create templates symlink"
+    success "Templates symlinked: $symlink_target -> $templates_path"
+}
+
+# Install secator addons
+install_addons() {
+    local secator_bin="$1"
+    if [[ -z "$SECATOR_ADDONS" ]]; then
+        return 0
+    fi
+
+    local addons_str="${SECATOR_ADDONS//,/ }"
+    for addon in $addons_str; do
+        info "Installing addon: $addon..."
+        "$secator_bin" -q install addons "$addon" || error "Failed to install addon: $addon"
+        success "Addon '$addon' installed"
+    done
+}
+
+# Install secator tools
+install_tools() {
+    local secator_bin="$1"
+    if [[ -z "$SECATOR_TOOLS" ]]; then
+        return 0
+    fi
+
+    if [[ "$SECATOR_TOOLS" == "all" ]]; then
+        info "Installing all tools..."
+        "$secator_bin" install tools || error "Failed to install tools"
+    else
+        local tools_list="${SECATOR_TOOLS// /,}"
+        info "Installing tools: $tools_list..."
+        "$secator_bin" -q install tools "$tools_list" || error "Failed to install tools: $tools_list"
+    fi
+
+    success "Tools installed successfully"
+}
+
 # Main installation function
 main() {
     parse_args "$@"
@@ -324,7 +430,12 @@ main() {
     local symlink_path
     symlink_path=$(create_symlink "$secator_bin")
     echo ""
-    
+
+    setup_templates "$secator_bin"
+    install_addons "$secator_bin"
+    install_tools "$secator_bin"
+    echo ""
+
     success "Installation complete!"
     echo ""
     info "You can now run secator with:"

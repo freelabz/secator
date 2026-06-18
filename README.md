@@ -109,6 +109,8 @@ check that the tool complies with our selection criterias before doing so. If it
 ```sh
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_universal.sh)"
 ```
+***Note:** Supports optional flags `--version`, `--templates`, `--addons`, and `--tools` — run the script with `--help` for details.*
+
 </details>
 
 <details>
