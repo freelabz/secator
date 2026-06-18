@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.1](https://github.com/freelabz/secator/compare/v0.37.0...v0.37.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **ffuf:** guard against missing has_fuzz_keyword attribute ([#1193](https://github.com/freelabz/secator/issues/1193)) ([10809f8](https://github.com/freelabz/secator/commit/10809f806599da833b51dee166a28991d73987a1))
+
 ## [0.37.0](https://github.com/freelabz/secator/compare/v0.36.4...v0.37.0) (2026-06-17)
 
 
