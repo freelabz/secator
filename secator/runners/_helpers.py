@@ -2,8 +2,37 @@ import os
 import re
 
 from dotmap import DotMap
+from secator.config import CONFIG
 from secator.output_types import Error
 from secator.utils import deduplicate, debug
+
+
+def resolve_task_queue(task_cls, opts):
+	"""Resolve the Celery queue (== task profile) for a task at dispatch time.
+
+	A dynamic (callable) profile encodes the task author's per-run resource routing (e.g. katana
+	headless -> extra_large) and always wins. A static profile is overridable via
+	``tasks.overrides.<task>.profile`` so an operator can route a task to a dedicated queue (e.g.
+	nmap -> a long-running pool via SECATOR_TASKS_OVERRIDES_NMAP_PROFILE) without code changes —
+	while never being able to silently flatten a dynamic profile onto a single queue and send a
+	heavy variant to a small pool.
+
+	Args:
+		task_cls (type): The task class (a Command subclass).
+		opts (dict): Run options, passed to a dynamic profile callable.
+
+	Returns:
+		str: The queue name.
+	"""
+	if callable(task_cls.profile):
+		return task_cls.profile(opts)
+	# CONFIG.tasks.overrides is a DotMap-like Config that auto-vivifies missing keys to a truthy
+	# empty object (not None), so normalize to a plain dict before lookups.
+	task_overrides = CONFIG.tasks.overrides.get(task_cls.__name__, {})
+	if hasattr(task_overrides, 'toDict'):
+		task_overrides = task_overrides.toDict()
+	override = task_overrides.get('profile')
+	return override if override else task_cls.profile
 
 
 def _format_nested(template, data):

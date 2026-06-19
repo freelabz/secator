@@ -1,5 +1,6 @@
 from secator.config import CONFIG
 from secator.runners import Runner
+from secator.runners._helpers import resolve_task_queue
 from secator.loader import discover_tasks
 from celery import chain
 
@@ -58,8 +59,14 @@ class Task(Runner):
 		opts['skip_if_no_inputs'] = False
 		opts['caller'] = 'Task'
 
-		# Create task signature
-		profile = task_cls.profile(opts) if callable(task_cls.profile) else task_cls.profile
+		# Create task signature. The queue is the task's profile. A dynamic (callable) profile
+		# encodes the task author's per-run resource routing (e.g. katana headless -> extra_large)
+		# and always wins. Only a STATIC profile is overridable via `tasks.overrides.<task>.profile`
+		# (e.g. route nmap to a long-running pool with SECATOR_TASKS_OVERRIDES_NMAP_PROFILE) — so an
+		# env override can never silently flatten a dynamic profile and send a heavy variant to a
+		# small pool. (The instance-level override in Command.__init__ runs on the worker, too late
+		# to affect routing.)
+		profile = resolve_task_queue(task_cls, opts)
 		sig = run_command.si(self.results, self.config.name, self.inputs, opts).set(queue=profile)
 		task_id = sig.freeze().task_id
 		self.add_subtask(task_id, self.config.name, self.description)
