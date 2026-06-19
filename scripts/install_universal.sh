@@ -337,7 +337,7 @@ create_symlink() {
     echo "$symlink_path"
 }
 
-# Symlink a custom templates folder into secator's templates directory
+# Symlink a custom templates folder to secator's templates directory
 setup_templates() {
     local secator_bin="$1"
     if [[ -z "$SECATOR_TEMPLATES" ]]; then
@@ -348,9 +348,6 @@ setup_templates() {
     templates_path=$(realpath "$SECATOR_TEMPLATES" 2>/dev/null) || error "Templates path not found: $SECATOR_TEMPLATES"
     [[ -d "$templates_path" ]] || error "Templates path is not a directory: $templates_path"
 
-    local folder_name
-    folder_name=$(basename "$templates_path")
-
     # Use Python from the venv to get the plain path — `secator config get` outputs YAML with
     # rich markup, which is unusable in a bash variable.
     local python_bin
@@ -360,17 +357,16 @@ setup_templates() {
         || error "Failed to get secator templates directory"
     [[ -n "$secator_templates_dir" ]] || error "Secator templates directory resolved to an empty string"
 
-    mkdir -p "$secator_templates_dir" || error "Failed to create templates directory: $secator_templates_dir"
+    # Ensure the parent directory exists
+    mkdir -p "$(dirname "$secator_templates_dir")" || error "Failed to create parent of templates directory"
 
-    local symlink_target="$secator_templates_dir/$folder_name"
-
-    if [[ -L "$symlink_target" ]] || [[ -e "$symlink_target" ]]; then
-        info "Removing existing entry at $symlink_target..."
-        rm -rf "$symlink_target" || error "Failed to remove existing entry"
+    if [[ -L "$secator_templates_dir" ]] || [[ -e "$secator_templates_dir" ]]; then
+        info "Removing existing templates directory at $secator_templates_dir..."
+        rm -rf "$secator_templates_dir" || error "Failed to remove existing templates directory"
     fi
 
-    ln -s "$templates_path" "$symlink_target" || error "Failed to create templates symlink"
-    success "Templates symlinked: $symlink_target -> $templates_path"
+    ln -s "$templates_path" "$secator_templates_dir" || error "Failed to create templates symlink"
+    success "Templates symlinked: $secator_templates_dir -> $templates_path"
 }
 
 # Install secator addons
