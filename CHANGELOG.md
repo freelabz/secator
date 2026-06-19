@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.38.0](https://github.com/freelabz/secator/compare/v0.37.1...v0.38.0) (2026-06-19)
+
+
+### Features
+
+* **routing:** allow tasks.overrides.&lt;task&gt;.profile to re-route static-profile tasks ([#1200](https://github.com/freelabz/secator/issues/1200)) ([1d41063](https://github.com/freelabz/secator/commit/1d4106360b2b299514c5016d3af8e992af81b61b))
+
+
+### Bug Fixes
+
+* **jswhois:** add --force option, always ([#1195](https://github.com/freelabz/secator/issues/1195)) ([4e495a6](https://github.com/freelabz/secator/commit/4e495a69780b9b7a2ee06b194ec8f7b3df24aef5))
+* **katana:** use extra_large profile for headless crawls ([#1198](https://github.com/freelabz/secator/issues/1198)) ([d92e80c](https://github.com/freelabz/secator/commit/d92e80cfc300902e0398971624a57987f4e37e0e))
+* **nmap:** repair truncated XML on timeout + per-task max timeout ([#1196](https://github.com/freelabz/secator/issues/1196)) ([36b8719](https://github.com/freelabz/secator/commit/36b87195f526480afe87a376ab040546596a1e39))
+* test pollution bug ([29ee62f](https://github.com/freelabz/secator/commit/29ee62fc7c990f3b930c0d7d4ec6d0846b81d5a2))
+
 ## [0.37.1](https://github.com/freelabz/secator/compare/v0.37.0...v0.37.1) (2026-06-18)
 
 
