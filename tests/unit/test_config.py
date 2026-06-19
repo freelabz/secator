@@ -84,6 +84,50 @@ class TestConfig(unittest.TestCase):
 		yaml_data = Config.read_yaml(self.config_test)
 		self.assertEqual(yaml_data['tasks']['overrides']['nuclei']['input_chunk_size'], 100)
 
+	def _parse_with_env(self, **env):
+		"""Parse a fresh config with the given SECATOR_* env vars set, then clean them up."""
+		from secator.config import Config
+		added = []
+		try:
+			for k, v in env.items():
+				os.environ[k] = v
+				added.append(k)
+			return Config.parse(path=self.config_test)
+		finally:
+			for k in added:
+				os.environ.pop(k, None)
+
+	def test_env_override_task_overrides_simple_name(self):
+		"""SECATOR_TASKS_OVERRIDES_NMAP_MAX_TIMEOUT maps to tasks.overrides.nmap.max_timeout (int)."""
+		config = self._parse_with_env(SECATOR_TASKS_OVERRIDES_NMAP_MAX_TIMEOUT='500')
+		self.assertEqual(config.tasks.overrides['nmap']['max_timeout'], 500)
+		self.assertIsInstance(config.tasks.overrides['nmap']['max_timeout'], int)
+
+	def test_env_override_task_overrides_underscore_name(self):
+		"""Task names containing underscores (search_vulns) disambiguate correctly from the attr."""
+		config = self._parse_with_env(SECATOR_TASKS_OVERRIDES_SEARCH_VULNS_INPUT_CHUNK_SIZE='7')
+		self.assertEqual(config.tasks.overrides['search_vulns']['input_chunk_size'], 7)
+
+	def test_env_override_unknown_task_is_ignored(self):
+		"""An env override targeting an unknown task name is ignored (no crash, no key)."""
+		config = self._parse_with_env(SECATOR_TASKS_OVERRIDES_NOTATASK_FOO='1')
+		self.assertNotIn('notatask', config.tasks.overrides)
+
+	def test_env_override_dynamic_dict_existing_key(self):
+		"""SECATOR_PAYLOADS_TEMPLATES_LSE overrides an existing payloads.templates entry."""
+		config = self._parse_with_env(SECATOR_PAYLOADS_TEMPLATES_LSE='https://mycustomtemplates.sh')
+		self.assertEqual(config.payloads.templates['lse'], 'https://mycustomtemplates.sh')
+
+	def test_env_override_dynamic_dict_new_key(self):
+		"""SECATOR_PAYLOADS_TEMPLATES_MYCUSTOM adds a new payloads.templates entry."""
+		config = self._parse_with_env(SECATOR_PAYLOADS_TEMPLATES_MYCUSTOM='https://new.sh')
+		self.assertEqual(config.payloads.templates['mycustom'], 'https://new.sh')
+
+	def test_env_override_direct_key_still_works(self):
+		"""A non-dynamic env override (SECATOR_CELERY_TASK_MAX_TIMEOUT) still applies."""
+		config = self._parse_with_env(SECATOR_CELERY_TASK_MAX_TIMEOUT='999')
+		self.assertEqual(config.celery.task_max_timeout, 999)
+
 	def test_set_workspace_profiles(self):
 		"""Test setting per-workspace default profiles via comma-separated string."""
 		from secator.config import Config
