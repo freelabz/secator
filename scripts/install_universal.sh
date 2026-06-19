@@ -14,6 +14,81 @@ success() { echo -e "${GREEN}✓${NC} $1" >&2; }
 warn() { echo -e "${YELLOW}⚠${NC} $1" >&2; }
 error() { echo -e "${RED}✗${NC} $1" >&2; exit 1; }
 
+# Script-level variables (empty = use default)
+SECATOR_VERSION=""
+SECATOR_TEMPLATES=""
+SECATOR_ADDONS=""
+SECATOR_TOOLS=""
+
+# Parse command-line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --version)
+                if [[ -z "${2:-}" ]]; then
+                    error "--version requires a value (e.g. --version 0.36.0)"
+                fi
+                if [[ "${2}" == -* ]]; then
+                    error "--version requires a version value, got option-like token: ${2}"
+                fi
+                SECATOR_VERSION="$2"
+                shift 2
+                ;;
+            --templates)
+                if [[ -z "${2:-}" ]]; then
+                    error "--templates requires a path (e.g. --templates /path/to/mytpl)"
+                fi
+                if [[ "${2}" == -* ]]; then
+                    error "--templates requires a path, got option-like token: ${2}"
+                fi
+                SECATOR_TEMPLATES="$2"
+                shift 2
+                ;;
+            --addons)
+                if [[ -z "${2:-}" ]]; then
+                    error "--addons requires at least one addon name (e.g. --addons worker,gcs)"
+                fi
+                if [[ "${2}" == -* ]]; then
+                    error "--addons requires addon names, got option-like token: ${2}"
+                fi
+                SECATOR_ADDONS="$2"
+                shift 2
+                ;;
+            --tools)
+                if [[ -z "${2:-}" ]] || [[ "${2:-}" == -* ]]; then
+                    SECATOR_TOOLS="all"
+                    shift
+                else
+                    SECATOR_TOOLS="$2"
+                    shift 2
+                fi
+                ;;
+            -h|--help)
+                echo "Usage: $0 [OPTIONS]" >&2
+                echo "" >&2
+                echo "Options:" >&2
+                echo "  --version <version>    Install a specific version of secator (e.g. 0.36.0)" >&2
+                echo "  --templates <path>     Symlink a custom templates folder into secator's templates dir" >&2
+                echo "  --addons <list>        Install addons, comma-separated (e.g. worker,gcs)" >&2
+                echo "  --tools [<list>]       Install tools; omit list to install all, or pass comma-separated names" >&2
+                echo "  -h, --help             Show this help message and exit" >&2
+                echo "" >&2
+                echo "Examples:" >&2
+                echo "  $0                              Install the latest version" >&2
+                echo "  $0 --version 0.36.0             Install version 0.36.0" >&2
+                echo "  $0 --templates /path/to/mytpl   Symlink custom templates" >&2
+                echo "  $0 --addons worker,gcs          Install worker and gcs addons" >&2
+                echo "  $0 --tools                      Install all tools" >&2
+                echo "  $0 --tools httpx,katana         Install specific tools" >&2
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1. Use --help for usage information."
+                ;;
+        esac
+    done
+}
+
 # Detect OS and distribution
 detect_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
@@ -176,30 +251,35 @@ install_python() {
 # Install secator in a virtual environment
 install_secator() {
     VENV_DIR="$HOME/.secator"
-    
+
     # Check if venv module is available
     if ! python3 -m venv --help >/dev/null 2>&1; then
         error "Python venv module is not available. Please install python3-venv package."
     fi
-    
+
     info "Creating virtual environment at $VENV_DIR..."
     python3 -m venv "$VENV_DIR" || error "Failed to create virtual environment"
-    
+
     info "Activating virtual environment..."
     source "$VENV_DIR/bin/activate" || error "Failed to activate virtual environment"
-    
+
     info "Upgrading pip..."
     pip install --upgrade pip --quiet || warn "Failed to upgrade pip, continuing..."
-    
-    info "Installing secator..."
-    pip install secator --quiet || error "Failed to install secator"
-    
+
+    if [[ -n "$SECATOR_VERSION" ]]; then
+        info "Installing secator==$SECATOR_VERSION..."
+        pip install "secator==$SECATOR_VERSION" --quiet || error "Failed to install secator==$SECATOR_VERSION"
+    else
+        info "Installing secator (latest)..."
+        pip install secator --quiet || error "Failed to install secator"
+    fi
+
     # Find the secator binary
     SECATOR_BIN="$VENV_DIR/bin/secator"
     if [[ ! -f "$SECATOR_BIN" ]]; then
         error "secator binary not found at $SECATOR_BIN"
     fi
-    
+
     success "secator installed successfully"
     echo "$SECATOR_BIN"
 }
@@ -257,10 +337,82 @@ create_symlink() {
     echo "$symlink_path"
 }
 
+# Symlink a custom templates folder to secator's templates directory
+setup_templates() {
+    local secator_bin="$1"
+    if [[ -z "$SECATOR_TEMPLATES" ]]; then
+        return 0
+    fi
+
+    local templates_path
+    templates_path=$(realpath "$SECATOR_TEMPLATES" 2>/dev/null) || error "Templates path not found: $SECATOR_TEMPLATES"
+    [[ -d "$templates_path" ]] || error "Templates path is not a directory: $templates_path"
+
+    # Use Python from the venv to get the plain path — `secator config get` outputs YAML with
+    # rich markup, which is unusable in a bash variable.
+    local python_bin
+    python_bin="$(dirname "$secator_bin")/python3"
+    local secator_templates_dir
+    secator_templates_dir=$("$python_bin" -c "from secator.config import CONFIG; print(CONFIG.dirs.templates)" 2>/dev/null) \
+        || error "Failed to get secator templates directory"
+    [[ -n "$secator_templates_dir" ]] || error "Secator templates directory resolved to an empty string"
+
+    # Ensure the parent directory exists
+    mkdir -p "$(dirname "$secator_templates_dir")" || error "Failed to create parent of templates directory"
+
+    if [[ -L "$secator_templates_dir" ]] || [[ -e "$secator_templates_dir" ]]; then
+        info "Removing existing templates directory at $secator_templates_dir..."
+        rm -rf "$secator_templates_dir" || error "Failed to remove existing templates directory"
+    fi
+
+    ln -s "$templates_path" "$secator_templates_dir" || error "Failed to create templates symlink"
+    success "Templates symlinked: $secator_templates_dir -> $templates_path"
+}
+
+# Install secator addons
+install_addons() {
+    local secator_bin="$1"
+    if [[ -z "$SECATOR_ADDONS" ]]; then
+        return 0
+    fi
+
+    local addons_str="${SECATOR_ADDONS//,/ }"
+    for addon in $addons_str; do
+        info "Installing addon: $addon..."
+        "$secator_bin" -q install addons "$addon" || error "Failed to install addon: $addon"
+        success "Addon '$addon' installed"
+    done
+}
+
+# Install secator tools
+install_tools() {
+    local secator_bin="$1"
+    if [[ -z "$SECATOR_TOOLS" ]]; then
+        return 0
+    fi
+
+    if [[ "$SECATOR_TOOLS" == "all" ]]; then
+        info "Installing all tools..."
+        "$secator_bin" install tools || error "Failed to install tools"
+    else
+        local tools_list="${SECATOR_TOOLS// /,}"
+        info "Installing tools: $tools_list..."
+        "$secator_bin" -q install tools "$tools_list" || error "Failed to install tools: $tools_list"
+    fi
+
+    success "Tools installed successfully"
+}
+
 # Main installation function
 main() {
+    parse_args "$@"
+
     echo ""
-    info "Starting secator installation..."
+    if [[ -n "$SECATOR_VERSION" ]]; then
+        info "Starting secator installation (version $SECATOR_VERSION)..."
+    else
+        info "Starting secator installation (latest)..."
+    fi
     echo ""
     
     detect_os
@@ -280,7 +432,12 @@ main() {
     local symlink_path
     symlink_path=$(create_symlink "$secator_bin")
     echo ""
-    
+
+    setup_templates "$secator_bin"
+    install_addons "$secator_bin"
+    install_tools "$secator_bin"
+    echo ""
+
     success "Installation complete!"
     echo ""
     info "You can now run secator with:"
