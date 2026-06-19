@@ -82,7 +82,11 @@ class katana(HttpCrawler):
 			opts_conf=dict(katana.opts, **katana.meta_opts),
 			opt_aliases=opts.get('aliases', []),
 		)
-		return 'large' if headless is True else 'medium'
+		# Headless crawls render pages in a browser and can hold large result
+		# sets in memory (deduplicating/forwarding tens of thousands of URLs),
+		# which has caused workers to exceed the `large` memory budget and get
+		# evicted under node memory pressure. Use `extra_large` for headroom.
+		return 'extra_large' if headless is True else 'medium'
 
 	@staticmethod
 	def on_init(self):
