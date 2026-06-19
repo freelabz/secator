@@ -26,7 +26,10 @@ class TestTaskQueueRouting(unittest.TestCase):
 
 	def tearDown(self):
 		from secator.config import CONFIG
-		CONFIG.tasks.overrides = self._saved
+		# Mutate in place rather than reassigning, so the DotMap-backed Config field keeps its type
+		# (a plain dict would break CONFIG.set()'s auto-vivification of nested keys for later tests).
+		CONFIG.tasks.overrides.clear()
+		CONFIG.tasks.overrides.update(self._saved)
 
 	def test_static_profile_default(self):
 		from secator.runners._helpers import resolve_task_queue
