@@ -137,6 +137,10 @@ class Command(Runner):
 	# Profile
 	profile = 'small'
 
+	# Max execution timeout (seconds). If None, defaults to CONFIG.celery.task_max_timeout.
+	# Overridable via `secator config set tasks.overrides.<task>.max_timeout <seconds>`.
+	max_timeout = None
+
 	def __init__(self, inputs=[], **run_opts):
 
 		# Build runnerconfig on-the-fly
@@ -695,6 +699,17 @@ class Command(Runner):
 			self.monitor_stop_event.set()
 			self.monitor_thread.join(timeout=2.0)
 
+	def get_max_timeout(self):
+		"""Resolve the effective max execution timeout (seconds).
+
+		Uses the per-task ``max_timeout`` (set on the class or via
+		``tasks.overrides.<task>.max_timeout``) when defined, otherwise falls back to the global
+		``CONFIG.celery.task_max_timeout``. A value of -1 means no timeout.
+		"""
+		if self.max_timeout is not None:
+			return self.max_timeout
+		return CONFIG.celery.task_max_timeout
+
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
 		last_stats_time = 0
@@ -726,10 +741,11 @@ class Command(Runner):
 							break
 
 				# Check execution time
-				if self.process_start_time and CONFIG.celery.task_max_timeout != -1:
+				max_timeout = self.get_max_timeout()
+				if self.process_start_time and max_timeout != -1:
 					elapsed_time = current_time - self.process_start_time
-					if elapsed_time > CONFIG.celery.task_max_timeout:
-						warning = Warning(message=f'Task timeout {CONFIG.celery.task_max_timeout}s exceeded')
+					if elapsed_time > max_timeout:
+						warning = Warning(message=f'Task timeout {max_timeout}s exceeded: incomplete results saved')
 						if self.monitor_queue is not None:
 							self.monitor_queue.put(warning)
 						self.stop_process(exit_ok=True, sig=signal.SIGTERM)
