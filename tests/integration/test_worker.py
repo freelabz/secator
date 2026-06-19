@@ -45,7 +45,7 @@ class TestWorker(unittest.TestCase):
 		# vulns = [v for v in cmd.results if v._type == 'vulnerability']
 		port = Port(port=443, ip='34.149.194.179', state='open', _source='nmap')
 		url = Url('https://secator.cloud', status_code=200, _source='httpx')
-		tag = Tag(name='nginx-version', match='https://secator.cloud', category='info', value='nginx/1.30.2', _source='nuclei_url')
+		tag = Tag(name='nginx-version', match='https://secator.cloud', category='info', value='nginx/1.30.3', _source='nuclei_url')
 		self.assertIn(port, cmd.findings)
 		self.assertIn(url, cmd.findings)
 		self.assertIn(tag, cmd.findings)
