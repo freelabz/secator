@@ -74,6 +74,7 @@ class Celery(StrictModel):
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
+	task_max_retries: int = -1  # max worker-loss redeliveries before abandoning a task (-1 = unlimited / disabled)
 	task_max_timeout: int = -1
 	task_memory_limit_mb: int = -1
 	worker_max_tasks_per_child: int = 20
