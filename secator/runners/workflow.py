@@ -3,6 +3,7 @@ from dotmap import DotMap
 from secator.config import CONFIG
 from secator.output_types import Info
 from secator.runners._base import Runner
+from secator.runners._helpers import resolve_task_queue
 from secator.runners.task import Task
 from secator.tree import build_runner_tree, walk_runner_tree
 from secator.utils import merge_opts
@@ -105,7 +106,7 @@ class Workflow(Runner):
 				task_opts['aliases'] = [node.id, node.name]
 				if task.__name__ != node.name:
 					task_opts['aliases'].append(task.__name__)
-				profile = task.profile(task_opts) if callable(task.profile) else task.profile
+				profile = resolve_task_queue(task, task_opts)
 				sig = task.s(self.inputs, **task_opts).set(queue=profile)
 				task_id = sig.freeze().task_id
 				debug(f'{node.id} sig built ix: {ix}, parent_ix: {parent_ix}', sub=self.config.name)

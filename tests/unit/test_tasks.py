@@ -17,6 +17,40 @@ level = logging.DEBUG if DEBUG == ["1"] else logging.ERROR
 setup_logging(level)
 
 
+class TestTaskQueueRouting(unittest.TestCase):
+	"""resolve_task_queue: static profiles are overridable, dynamic profiles always win."""
+
+	def setUp(self):
+		from secator.config import CONFIG
+		self._saved = dict(CONFIG.tasks.overrides) if CONFIG.tasks.overrides else {}
+
+	def tearDown(self):
+		from secator.config import CONFIG
+		CONFIG.tasks.overrides = self._saved
+
+	def test_static_profile_default(self):
+		from secator.runners._helpers import resolve_task_queue
+		from secator.tasks import nmap
+		self.assertEqual(resolve_task_queue(nmap, {}), 'small')
+
+	def test_static_profile_override_applies(self):
+		from secator.config import CONFIG
+		from secator.runners._helpers import resolve_task_queue
+		from secator.tasks import nmap
+		CONFIG.tasks.overrides['nmap'] = {'profile': 'small_long'}
+		self.assertEqual(resolve_task_queue(nmap, {}), 'small_long')
+
+	def test_dynamic_profile_ignores_override(self):
+		"""A callable profile (katana) must not be flattened by an env override."""
+		from secator.config import CONFIG
+		from secator.runners._helpers import resolve_task_queue
+		from secator.tasks import katana
+		CONFIG.tasks.overrides['katana'] = {'profile': 'small_long'}
+		# headless vs non-headless still resolve via dynamic_profile, never to the override.
+		self.assertNotEqual(resolve_task_queue(katana, {'headless': True}), 'small_long')
+		self.assertEqual(resolve_task_queue(katana, {}), 'medium')
+
+
 class TestTasks(unittest.TestCase, CommandOutputTester):
 
 	def setUp(self):
