@@ -870,19 +870,96 @@ class Config(DotMap):
 		return key_map
 
 	def apply_env_overrides(self, print_errors=True):
-		"""Override config values from environment variables."""
+		"""Override config values from environment variables.
+
+		A variable ``SECATOR_<UPPERCASED_DOTTED_KEY>`` overrides the matching config key (dots replaced
+		by underscores), e.g. ``SECATOR_CELERY_BROKER_URL``. Dynamic dict keys are also supported, e.g.
+		``SECATOR_TASKS_OVERRIDES_NMAP_MAX_TIMEOUT=500`` maps to ``tasks.overrides.nmap.max_timeout``.
+		"""
 		prefix = 'SECATOR_'
 		for var in os.environ:
-			if var.startswith(prefix):
-				key = var[len(prefix) :]  # remove prefix
-				if key in self._keymap:
-					path = '.'.join(k.lower() for k in self._keymap[key])
-					value = os.environ[var]
-					self.set(path, value, set_partial=False)
-					if not self.validate(print_errors=False) and print_errors:
-						console.print(f'[bold red]{var} (override failed)[/]')
-				# elif print_errors:
-				# 	console.print(f'[bold red]{var} (override failed: key not found)[/]')
+			if not var.startswith(prefix):
+				continue
+			key = var[len(prefix):]  # remove prefix
+			path = self._resolve_env_key(key)
+			if path is None:
+				continue
+			self.set(path, os.environ[var], set_partial=False)
+			if not self.validate(print_errors=False) and print_errors:
+				console.print(f'[bold red]{var} (override failed)[/]')
+
+	def _resolve_env_key(self, key):
+		"""Resolve an env var key (``SECATOR_`` prefix already stripped) to a dotted config path.
+
+		Returns the dotted path for a direct keymap hit, or for a dynamic key nested inside a dict
+		field (e.g. ``TASKS_OVERRIDES_NMAP_MAX_TIMEOUT`` -> ``tasks.overrides.nmap.max_timeout``).
+		Returns None when the key does not map to a known config field.
+
+		Args:
+			key (str): Env var name with the ``SECATOR_`` prefix removed.
+
+		Returns:
+			str | None: Dotted config path, or None.
+		"""
+		# Direct keymap hit (also covers dynamic keys already present in the loaded config)
+		if key in self._keymap:
+			return '.'.join(k.lower() for k in self._keymap[key])
+
+		# Otherwise, find the longest keymap prefix that resolves to a dict field, then resolve the
+		# remaining dynamic segments under it.
+		best = None
+		for map_key, path_parts in self._keymap.items():
+			if not key.startswith(map_key + '_'):
+				continue
+			target = self
+			try:
+				for part in path_parts:
+					target = target[part]
+			except (KeyError, TypeError):
+				continue
+			if isinstance(target, MutableMapping) and not isinstance(target, str):
+				if best is None or len(map_key) > len(best[0]):
+					best = (map_key, path_parts)
+		if best is None:
+			return None
+
+		map_key, path_parts = best
+		remainder = key[len(map_key) + 1:].lower()  # e.g. 'nmap_max_timeout'
+		dotted_prefix = '.'.join(p.lower() for p in path_parts)
+
+		# tasks.overrides maps a task name -> {attr: value}. The task name may itself contain
+		# underscores (e.g. search_vulns), so disambiguate it against the known task list.
+		if [p.lower() for p in path_parts] == ['tasks', 'overrides']:
+			task_name = Config._match_task_name(remainder)
+			if not task_name or remainder == task_name:
+				return None
+			attr = remainder[len(task_name) + 1:]
+			return f'{dotted_prefix}.{task_name}.{attr}'
+
+		# Generic single-level dynamic dict (e.g. wordlists.defaults): the remainder is the leaf key.
+		return f'{dotted_prefix}.{remainder}'
+
+	@staticmethod
+	def _match_task_name(remainder):
+		"""Return the longest task name that prefixes an underscored remainder, else None.
+
+		Task names are read from the ``secator/tasks`` package directory (filenames match task class
+		names by convention), avoiding any task imports at config-load time.
+
+		Args:
+			remainder (str): Lowercased underscored remainder, e.g. 'search_vulns_input_chunk_size'.
+
+		Returns:
+			str | None: Matching task name, e.g. 'search_vulns'.
+		"""
+		tasks_dir = Path(__file__).parent / 'tasks'
+		if not tasks_dir.is_dir():
+			return None
+		candidates = [
+			f.stem for f in tasks_dir.glob('*.py')
+			if not f.stem.startswith('_') and (remainder == f.stem or remainder.startswith(f.stem + '_'))
+		]
+		return max(candidates, key=len) if candidates else None
 
 
 def download_files(data: dict, target_folder: Path, offline_mode: bool, type: str):

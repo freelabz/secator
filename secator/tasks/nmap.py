@@ -194,6 +194,10 @@ class nmap(ReconPort):
 		results = []
 		with open(self.output_path, 'r') as f:
 			content = f.read()
+			# nmap may produce truncated XML when killed (e.g. task timeout exceeded), missing the closing
+			# </nmaprun> tag. Repair it so the partial results can still be parsed.
+			if '<nmaprun' in content and '</nmaprun>' not in content:
+				content = content.rstrip() + '\n</nmaprun>\n'
 			try:
 				results = xmltodict.parse(content)  # parse XML to dict
 			except Exception as exc:
