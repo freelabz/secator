@@ -351,8 +351,14 @@ setup_templates() {
     local folder_name
     folder_name=$(basename "$templates_path")
 
+    # Use Python from the venv to get the plain path — `secator config get` outputs YAML with
+    # rich markup, which is unusable in a bash variable.
+    local python_bin
+    python_bin="$(dirname "$secator_bin")/python3"
     local secator_templates_dir
-    secator_templates_dir=$("$secator_bin" config get dirs.templates 2>/dev/null) || error "Failed to get secator templates directory"
+    secator_templates_dir=$("$python_bin" -c "from secator.config import CONFIG; print(CONFIG.dirs.templates)" 2>/dev/null) \
+        || error "Failed to get secator templates directory"
+    [[ -n "$secator_templates_dir" ]] || error "Secator templates directory resolved to an empty string"
 
     mkdir -p "$secator_templates_dir" || error "Failed to create templates directory: $secator_templates_dir"
 
@@ -360,7 +366,7 @@ setup_templates() {
 
     if [[ -L "$symlink_target" ]] || [[ -e "$symlink_target" ]]; then
         info "Removing existing entry at $symlink_target..."
-        rm -f "$symlink_target" || error "Failed to remove existing entry"
+        rm -rf "$symlink_target" || error "Failed to remove existing entry"
     fi
 
     ln -s "$templates_path" "$symlink_target" || error "Failed to create templates symlink"
