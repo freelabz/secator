@@ -212,3 +212,76 @@ class TestOnBuildChunkWiring(unittest.TestCase):
             f'Some chunk signatures are missing task_chunk_id: {chunk_ids}'
         assert len(set(chunk_ids)) == len(chunk_ids), \
             f'Chunk ids are not all distinct: {chunk_ids}'
+
+
+class TestOnBuildSqlite:
+    def test_sqlite_on_build_stamps_task_id(self, tmp_path, monkeypatch):
+        import secator.hooks.sqlite as sql
+
+        # Point the sqlite store at a temp DB by monkeypatching get_sqlite_conn
+        # to use a fresh in-memory connection, and capture executed SQL.
+        import sqlite3
+        import json
+
+        tmp_db = str(tmp_path / 'test.db')
+        conn = sqlite3.connect(tmp_db)
+        conn.execute("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS workflows (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)")
+        conn.commit()
+
+        monkeypatch.setattr(sql, 'get_sqlite_conn', lambda: conn)
+
+        spec = {'name': 'httpx', 'context': {'workspace_id': 'ws1'}}
+        sql.on_build(_FakeParent('workflow'), spec)
+
+        # id was stamped into the spec context
+        task_id = spec['context'].get('task_id')
+        assert task_id, f'Expected task_id to be stamped in context, got: {spec["context"]}'
+
+        # row was actually inserted into the tasks table
+        rows = conn.execute("SELECT id, data FROM tasks WHERE id=?", (task_id,)).fetchall()
+        assert len(rows) == 1, f'Expected 1 row in tasks for id {task_id}, got {len(rows)}'
+        doc = json.loads(rows[0][1])
+        assert doc['status'] == 'PENDING'
+
+    def test_sqlite_on_build_scan_parent_stamps_workflow_id(self, tmp_path, monkeypatch):
+        import secator.hooks.sqlite as sql
+        import sqlite3
+        import json
+
+        tmp_db = str(tmp_path / 'test.db')
+        conn = sqlite3.connect(tmp_db)
+        conn.execute("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS workflows (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)")
+        conn.commit()
+
+        monkeypatch.setattr(sql, 'get_sqlite_conn', lambda: conn)
+
+        spec = {'name': 'url_fuzz', 'context': {'workspace_id': 'ws1'}}
+        sql.on_build(_FakeParent('scan'), spec)
+
+        workflow_id = spec['context'].get('workflow_id')
+        assert workflow_id, f'Expected workflow_id stamped in context, got: {spec["context"]}'
+        rows = conn.execute("SELECT id FROM workflows WHERE id=?", (workflow_id,)).fetchall()
+        assert len(rows) == 1
+
+    def test_sqlite_on_build_chunk_stamps_chunk_id(self, tmp_path, monkeypatch):
+        import secator.hooks.sqlite as sql
+        import sqlite3
+
+        tmp_db = str(tmp_path / 'test.db')
+        conn = sqlite3.connect(tmp_db)
+        conn.execute("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS workflows (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)")
+        conn.commit()
+
+        monkeypatch.setattr(sql, 'get_sqlite_conn', lambda: conn)
+
+        spec = {'name': 'ffuf', 'chunk': 2, 'chunk_count': 5, 'context': {'workspace_id': 'ws1'}}
+        sql.on_build(_FakeParent('task'), spec)
+
+        chunk_id = spec['context'].get('task_chunk_id')
+        assert chunk_id, f'Expected task_chunk_id stamped in context, got: {spec["context"]}'
