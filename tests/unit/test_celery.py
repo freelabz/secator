@@ -394,6 +394,28 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 		self.assertEqual(len(errors), 1)
 		self.assertIn('abandoned after', errors[0].message)
 
+	def test_retries_exhausted_does_not_count_initial_delivery(self):
+		"""delivery_count includes the initial run; task_max_retries=N allows N redeliveries."""
+		from secator.celery import worker_loss_retries_exhausted
+		# task_max_retries=3 -> initial (1) + 3 redeliveries (2,3,4) allowed, abandon on the 5th delivery.
+		self.assertFalse(worker_loss_retries_exhausted(1, 3))  # initial run
+		self.assertFalse(worker_loss_retries_exhausted(2, 3))  # redelivery 1
+		self.assertFalse(worker_loss_retries_exhausted(3, 3))  # redelivery 2
+		self.assertFalse(worker_loss_retries_exhausted(4, 3))  # redelivery 3 (last allowed)
+		self.assertTrue(worker_loss_retries_exhausted(5, 3))   # redelivery 4 -> abandon
+		# task_max_retries=0 -> no redeliveries; abandon on the first redelivery, not the initial run.
+		self.assertFalse(worker_loss_retries_exhausted(1, 0))
+		self.assertTrue(worker_loss_retries_exhausted(2, 0))
+
+	def test_worker_cancel_flag_wired_to_app_conf(self):
+		"""The worker_cancel_long_running_tasks_on_connection_loss config flag reaches app.conf."""
+		from secator.celery import app
+		from secator.config import CONFIG
+		self.assertEqual(
+			app.conf.worker_cancel_long_running_tasks_on_connection_loss,
+			CONFIG.celery.worker_cancel_long_running_tasks_on_connection_loss,
+		)
+
 
 class TestRunnerPickle(unittest.TestCase):
 	"""Test that Runner objects with dynamic driver hooks can be pickled/unpickled."""

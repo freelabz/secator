@@ -98,6 +98,8 @@ app.conf.update(
 		'worker_pool_restarts': True,
 		'worker_prefetch_multiplier': CONFIG.celery.worker_prefetch_multiplier,
 		'worker_send_task_events': CONFIG.celery.worker_send_task_events,
+		'worker_cancel_long_running_tasks_on_connection_loss':
+			CONFIG.celery.worker_cancel_long_running_tasks_on_connection_loss,
 	}
 )
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
@@ -200,6 +202,18 @@ def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, valid
 	runner.run()
 
 
+def _expire_worker_loss_key(backend, key):
+	"""Best-effort TTL on a worker-loss counter key so they don't accumulate forever.
+
+	Tied to ``result_expires`` (the lifetime of the task's own result). Not all result
+	backends implement ``expire``; ignore if unsupported.
+	"""
+	try:
+		backend.expire(key, CONFIG.celery.result_expires)
+	except Exception:
+		pass
+
+
 def bump_worker_loss_count(task_id):
 	"""Increment and return the worker-loss delivery count for a Celery task id.
 
@@ -220,7 +234,9 @@ def bump_worker_loss_count(task_id):
 
 	# Preferred: atomic incr (Redis, Memcached) — race-free.
 	try:
-		return backend.incr(key)
+		count = backend.incr(key)
+		_expire_worker_loss_key(backend, key)
+		return count
 	except NotImplementedError:
 		pass  # Backend has no atomic counter; fall back to get/set below.
 	except Exception as e:
@@ -234,6 +250,7 @@ def bump_worker_loss_count(task_id):
 		raw = backend.get(key)
 		count = (int(raw) if raw else 0) + 1
 		backend.set(key, str(count))
+		_expire_worker_loss_key(backend, key)
 		return count
 	except Exception as e:
 		debug(f'worker-loss get/set failed for {task_id}: {e}', sub='celery.state')
@@ -275,6 +292,18 @@ def abandon_task(name, targets, opts, results):
 	return task.results
 
 
+def worker_loss_retries_exhausted(delivery_count, max_retries):
+	"""Whether a task has exhausted its allowed worker-loss redeliveries.
+
+	``delivery_count`` includes the INITIAL delivery (it is 1 on first run), so the
+	number of *redeliveries* is ``delivery_count - 1``. We abandon once redeliveries
+	exceed ``max_retries`` — i.e. ``task_max_retries=3`` allows the initial run plus 3
+	redeliveries (4 attempts total) before abandoning. (The initial delivery must not
+	count as a retry — that was the off-by-one in the original cap.)
+	"""
+	return (delivery_count - 1) > max_retries
+
+
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
 	# Set Celery request id in context
@@ -306,7 +335,7 @@ def run_command(self, results, name, targets, opts={}):
 		# block the surrounding chord/workflow.
 		if CONFIG.celery.task_max_retries != -1 and CONFIG.celery.task_acks_late:
 			delivery_count = bump_worker_loss_count(self.request.id)
-			if delivery_count > CONFIG.celery.task_max_retries:
+			if worker_loss_retries_exhausted(delivery_count, CONFIG.celery.task_max_retries):
 				return abandon_task(name, targets, opts, results)
 
 	# Flatten + dedupe + filter results
