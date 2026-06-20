@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 HOOKS = [
 	'before_init',
+	'on_build',
 	'on_init',
 	'on_start',
 	'on_end',
