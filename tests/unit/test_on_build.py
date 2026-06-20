@@ -110,3 +110,49 @@ class TestOnBuildWorkflowWiring(unittest.TestCase):
             f'Expected tasks inserts but got: {[coll for coll, _ in sink]}'
         # ...and every tasks insert has status PENDING.
         assert all(doc['status'] == 'PENDING' for coll, doc in sink if coll == 'tasks')
+
+
+class TestOnBuildChunkWiring(unittest.TestCase):
+    def test_each_chunk_signature_carries_a_distinct_task_chunk_id(self):
+        from secator.celery import break_task
+        from secator.tasks import httpx
+        from secator.runners.task import Task
+        from secator.utils_test import mock_command, FIXTURES_TASKS
+
+        targets = ['https://a.com', 'https://b.com', 'https://c.com']
+
+        # Use flattened task hooks (same as Workflow does via self._hooks.get(Task, {}))
+        # MONGO_HOOKS is keyed by runner class (Scan/Workflow/Task); register_hooks
+        # looks up hooks.get(self.__class__) which won't match Task for an httpx
+        # subclass, so we flatten to the Task-level hook dict.
+        task_hooks = MONGO_HOOKS.get(Task, {})
+
+        # Subclass with input_chunk_size=1 so each target becomes its own chunk.
+        class ChunkedHttpx(httpx):
+            input_chunk_size = 1
+
+        sink = []
+        import secator.hooks.mongodb as m
+        orig = m.get_mongodb_client
+        m.get_mongodb_client = lambda: _FakeClient(sink)
+        try:
+            with mock_command(ChunkedHttpx, fixture=[FIXTURES_TASKS[httpx]] * len(targets)):
+                task = ChunkedHttpx(targets, sync=False, hooks=task_hooks,
+                                    context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
+                task.has_children = True
+                workflow = break_task(task, {'name': 'httpx', 'sync': False}, results=[])
+        finally:
+            m.get_mongodb_client = orig
+
+        # Read chunk ids from the chunk signatures (more robust than reading the sink)
+        chunk_ids = [
+            sig.kwargs.get('opts', {}).get('context', {}).get('task_chunk_id')
+            for sig in workflow.tasks
+        ]
+        # one id per chunk, all present, all distinct
+        assert len(chunk_ids) == len(targets), \
+            f'Expected {len(targets)} chunk signatures, got {len(chunk_ids)}'
+        assert all(chunk_ids), \
+            f'Some chunk signatures are missing task_chunk_id: {chunk_ids}'
+        assert len(set(chunk_ids)) == len(chunk_ids), \
+            f'Chunk ids are not all distinct: {chunk_ids}'
