@@ -84,7 +84,67 @@ class TestOnBuildMongo:
         assert spec['context']['task_chunk_id'] == 'oid-tasks-0'
 
 
+def _fresh_mongo_hooks():
+    """Return a freshly-imported MONGO_HOOKS dict.
+
+    test_config.py's TestConfigEnv calls clear_modules(), which purges all
+    secator.* module objects from sys.modules and reimports them with a temp
+    SECATOR_DIRS_DATA.  After that reimport, the runner classes (Workflow,
+    Task, Scan) are *new* Python objects.  The module-level MONGO_HOOKS dict
+    captured at test-file import time still holds the *old* class objects as
+    keys.  Passing that stale dict as hooks= to the new Workflow/Task instances
+    means register_hooks() finds no matching key and registers nothing —
+    so on_build never fires.
+
+    We fix this by re-importing HOOKS from the live secator.hooks.mongodb
+    module (which always reflects the currently-loaded classes) and returning
+    it so setUp can store it as self.MONGO_HOOKS for use in each test body.
+    """
+    from secator.hooks.mongodb import HOOKS
+    return HOOKS
+
+
+def _restore_config_dirs():
+    """Restore CONFIG.dirs to the real data directory.
+
+    test_config.py's TestConfigEnv calls clear_modules() and reimports
+    secator.config with SECATOR_DIRS_DATA=/tmp/.secator/new, then deletes
+    /tmp/.secator in tearDown.  This leaves the global CONFIG singleton
+    pointing at a non-existent celery_results path, causing the Celery
+    filesystem backend to raise ImproperlyConfigured in any subsequent test
+    that builds a canvas.
+
+    We repair CONFIG by reconstructing Directories from the real data root
+    (read from the live SECATOR_DIRS_DATA env var, which test_config.py
+    restores in its own tearDown, or falling back to ~/.secator).
+    Directories is a Pydantic StrictModel; we use model_dump() to iterate it.
+    CONFIG.dirs is a DotMap (Config subclass) that accepts plain setattr.
+    """
+    import os
+    import secator.config as _cfg
+    from pathlib import Path
+
+    real_data = Path(os.environ.get('SECATOR_DIRS_DATA') or Path.home() / '.secator')
+    real_dirs = _cfg.Directories(data=real_data)
+    cfg = _cfg.CONFIG
+    for k, v in real_dirs.model_dump().items():
+        setattr(cfg.dirs, k, v)
+    cfg.celery.result_backend = f'file://{real_dirs.celery_results}'
+
+
 class TestOnBuildWorkflowWiring(unittest.TestCase):
+    """Wiring tests for on_build in a full Workflow canvas build.
+
+    These tests are hermetic against CONFIG pollution from test_config.py.
+    See _restore_config_dirs() and _fresh_mongo_hooks() for details.
+    """
+
+    def setUp(self):
+        _restore_config_dirs()
+        # Re-import HOOKS so keys match the currently-loaded runner classes
+        # (stale keys from the pre-clear_modules import won't match).
+        self.MONGO_HOOKS = _fresh_mongo_hooks()
+
     def test_task_signatures_carry_task_id_from_on_build(self):
         from secator.runners.workflow import Workflow
         from secator.template import TemplateLoader
@@ -98,7 +158,7 @@ class TestOnBuildWorkflowWiring(unittest.TestCase):
             wf = Workflow(
                 config,
                 inputs=['example.com'],
-                hooks=MONGO_HOOKS,
+                hooks=self.MONGO_HOOKS,
                 context={'workspace_id': 'ws1', 'drivers': ['mongodb']},
             )
             wf.build_celery_workflow()
@@ -169,6 +229,18 @@ class TestUpdateRunnerReusesPrebuiltDoc:
 
 
 class TestOnBuildChunkWiring(unittest.TestCase):
+    """Wiring tests for on_build during chunk-task canvas assembly.
+
+    These tests are hermetic against CONFIG pollution from test_config.py.
+    See _restore_config_dirs() and _fresh_mongo_hooks() for details.
+    """
+
+    def setUp(self):
+        _restore_config_dirs()
+        # Re-import HOOKS so keys match the currently-loaded runner classes
+        # (stale keys from the pre-clear_modules import won't match).
+        self.MONGO_HOOKS = _fresh_mongo_hooks()
+
     def test_each_chunk_signature_carries_a_distinct_task_chunk_id(self):
         from secator.celery import break_task
         from secator.tasks import httpx
@@ -178,10 +250,9 @@ class TestOnBuildChunkWiring(unittest.TestCase):
         targets = ['https://a.com', 'https://b.com', 'https://c.com']
 
         # Use flattened task hooks (same as Workflow does via self._hooks.get(Task, {}))
-        # MONGO_HOOKS is keyed by runner class (Scan/Workflow/Task); register_hooks
-        # looks up hooks.get(self.__class__) which won't match Task for an httpx
-        # subclass, so we flatten to the Task-level hook dict.
-        task_hooks = MONGO_HOOKS.get(Task, {})
+        # self.MONGO_HOOKS is keyed by the currently-loaded runner classes; re-importing
+        # Task here gives us the same object that MONGO_HOOKS uses as its Task key.
+        task_hooks = self.MONGO_HOOKS.get(Task, {})
 
         # Subclass with input_chunk_size=1 so each target becomes its own chunk.
         class ChunkedHttpx(httpx):
