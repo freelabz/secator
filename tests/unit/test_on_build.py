@@ -112,6 +112,62 @@ class TestOnBuildWorkflowWiring(unittest.TestCase):
         assert all(doc['status'] == 'PENDING' for coll, doc in sink if coll == 'tasks')
 
 
+class _RecordingCollection:
+    def __init__(self, name, calls):
+        self.name = name
+        self.calls = calls
+
+    def insert_one(self, doc):
+        self.calls.append(('insert', self.name))
+        return _FakeInsertResult(f'{"a" * 24}')
+
+    def update_one(self, flt, update):
+        self.calls.append(('update', self.name, flt))
+
+
+class _RecordingDB:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def __getitem__(self, name):
+        return _RecordingCollection(name, self.calls)
+
+
+class _RecordingClient:
+    def __init__(self, calls):
+        self.main = _RecordingDB(calls)
+
+
+class TestUpdateRunnerReusesPrebuiltDoc:
+    def test_prebuilt_id_takes_update_one_branch(self, monkeypatch):
+        import secator.hooks.mongodb as m
+        calls = []
+        monkeypatch.setattr(m, 'get_mongodb_client', lambda: _RecordingClient(calls))
+
+        # A valid 24-hex-char ObjectId string (as on_build stamps into context).
+        valid_oid = 'a' * 24
+
+        # Stand-in runner whose context already has a task_id (as if on_build ran).
+        # Needs unique_name, status, config.name for get_runner_dbg(); last_updated_db
+        # is set by update_runner after a successful update_one.
+        runner = types.SimpleNamespace(
+            config=types.SimpleNamespace(type='task', name='httpx'),
+            context={'task_id': valid_oid},
+            unique_name='httpx-1',
+            status='RUNNING',
+            last_updated_db=None,
+            toDict=lambda: {'status': 'RUNNING', 'chunk': None,
+                            'context': {'task_id': valid_oid}},
+        )
+        m.update_runner(runner)
+
+        # Load-bearing assertions: an update happened on tasks, no insert happened.
+        assert any(c[0] == 'update' and c[1] == 'tasks' for c in calls), \
+            f'Expected an update_one on tasks but got: {calls}'
+        assert not any(c[0] == 'insert' for c in calls), \
+            f'Expected no insert_one but got: {calls}'
+
+
 class TestOnBuildChunkWiring(unittest.TestCase):
     def test_each_chunk_signature_carries_a_distinct_task_chunk_id(self):
         from secator.celery import break_task
