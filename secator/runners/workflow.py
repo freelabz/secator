@@ -106,6 +106,11 @@ class Workflow(Runner):
 				task_opts['aliases'] = [node.id, node.name]
 				if task.__name__ != node.name:
 					task_opts['aliases'].append(task.__name__)
+				# Mint the child task's runner doc + id at build time so a
+				# redelivered task reuses the same doc (see L2 / on_build).
+				self.enable_hooks = True
+				self.run_hooks('on_build', task_opts, sub='build')
+				self.enable_hooks = False
 				profile = resolve_task_queue(task, task_opts)
 				sig = task.s(self.inputs, **task_opts).set(queue=profile)
 				task_id = sig.freeze().task_id

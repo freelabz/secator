@@ -1,5 +1,6 @@
 import types
 import unittest
+from secator.hooks.mongodb import HOOKS as MONGO_HOOKS
 
 
 class TestOnBuildHookRegistration(unittest.TestCase):
@@ -22,6 +23,9 @@ class _FakeCollection:
         _id = f'oid-{self.name}-{len(self.sink)}'
         self.sink.append((self.name, doc))
         return _FakeInsertResult(_id)
+
+    def update_one(self, query, update):
+        pass
 
 
 class _FakeDB:
@@ -78,3 +82,31 @@ class TestOnBuildMongo:
         assert doc['has_parent'] is True
         assert doc['chunk'] == 2 and doc['chunk_count'] == 5
         assert spec['context']['task_chunk_id'] == 'oid-tasks-0'
+
+
+class TestOnBuildWorkflowWiring(unittest.TestCase):
+    def test_task_signatures_carry_task_id_from_on_build(self):
+        from secator.runners.workflow import Workflow
+        from secator.template import TemplateLoader
+        sink = []
+
+        import secator.hooks.mongodb as m
+        orig = m.get_mongodb_client
+        m.get_mongodb_client = lambda: _FakeClient(sink)
+        try:
+            config = TemplateLoader(name='workflow/host_recon')
+            wf = Workflow(
+                config,
+                inputs=['example.com'],
+                hooks=MONGO_HOOKS,
+                context={'workspace_id': 'ws1', 'drivers': ['mongodb']},
+            )
+            wf.build_celery_workflow()
+        finally:
+            m.get_mongodb_client = orig
+
+        # At least one task doc was inserted at build time...
+        assert any(coll == 'tasks' for coll, _ in sink), \
+            f'Expected tasks inserts but got: {[coll for coll, _ in sink]}'
+        # ...and every tasks insert has status PENDING.
+        assert all(doc['status'] == 'PENDING' for coll, doc in sink if coll == 'tasks')
