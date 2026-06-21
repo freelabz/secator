@@ -60,9 +60,14 @@ class TestEvictionSelfFinalize(unittest.TestCase):
 		with unittest.mock.patch('secator.runners.command.MONITOR_POLL_SECONDS', 1):
 			start = time.monotonic()
 			t.start()
-			time.sleep(2)                    # let the subprocess + monitor thread start
-			worker_shutting_down_handler()   # simulate the eviction SIGTERM, mid-run
-			t.join(timeout=20)
+			# Keep raising the flag until the task stops. The monitor clears any pre-existing flag
+			# once at startup, so a single set could be wiped if it raced ahead of a slow monitor
+			# start; re-raising guarantees the monitor's poll sees it once it is running.
+			deadline = time.monotonic() + 20
+			while t.is_alive() and time.monotonic() < deadline:
+				worker_shutting_down_handler()   # simulate the eviction SIGTERM, mid-run
+				time.sleep(0.5)
+			t.join(timeout=5)
 			elapsed = time.monotonic() - start
 
 		self.assertFalse(t.is_alive(), 'command did not stop after the shutdown flag was raised')
