@@ -36,9 +36,10 @@ def clear_shutdown_flag():
 def worker_shutting_down_handler(**kwargs):
 	"""Raise the eviction flag so the in-flight task's monitor stops it early and returns."""
 	try:
+		SHUTDOWN_FLAG.parent.mkdir(parents=True, exist_ok=True)
 		SHUTDOWN_FLAG.write_text("1")
-	except Exception:
-		pass
+	except OSError as e:
+		console.print(Info(message=f'Failed to raise worker shutdown flag: {e}'))
 
 
 def get_lock_file_path():

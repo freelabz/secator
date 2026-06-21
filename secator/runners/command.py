@@ -717,7 +717,12 @@ class Command(Runner):
 
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
-		from secator.celery_signals import is_worker_shutting_down
+		from secator.celery_signals import clear_shutdown_flag, is_worker_shutting_down
+		# Only honour a shutdown raised *during* this run: clear any stale flag left by a previous
+		# worker/task sharing this machine's state dir. In prod each task gets a fresh pod (and /tmp),
+		# but tests and a long-lived `secator worker` reuse it, so a leftover flag would otherwise
+		# wrongly stop every later task.
+		clear_shutdown_flag()
 		last_stats_time = 0
 
 		while not self.monitor_stop_event.is_set():
