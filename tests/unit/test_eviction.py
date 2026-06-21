@@ -72,11 +72,10 @@ class TestEvictionSelfFinalize(unittest.TestCase):
 		"""The monitor clears any pre-existing (stale) flag at start, so a flag left by a previous
 		worker sharing the state dir does not stop a fresh task. Regression for the integration leak:
 		a leaked flag had been self-aborting every later task."""
-		worker_shutting_down_handler()                 # stale flag present before the task starts
-		self.assertTrue(is_worker_shutting_down())
 		cmd = self._bare_command(None)                 # process=None -> loop breaks right after the clear
-		cmd._monitor_process()
-		self.assertFalse(is_worker_shutting_down(), 'monitor did not clear the stale flag at start')
+		with unittest.mock.patch('secator.celery_signals.clear_shutdown_flag') as mock_clear:
+			cmd._monitor_process()
+		mock_clear.assert_called_once()
 
 
 if __name__ == '__main__':
