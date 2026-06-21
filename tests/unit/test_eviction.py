@@ -1,10 +1,11 @@
-import shutil
-import tempfile
+import queue
 import threading
-import time
+import types
 import unittest
 import unittest.mock
 from pathlib import Path
+import shutil
+import tempfile
 
 import secator.celery_signals as cs
 from secator.celery_signals import (
@@ -12,7 +13,7 @@ from secator.celery_signals import (
 	is_worker_shutting_down,
 	worker_shutting_down_handler,
 )
-from secator.runners import Command
+from secator.runners import command as command_mod
 
 
 class TestEvictionSelfFinalize(unittest.TestCase):
@@ -33,11 +34,14 @@ class TestEvictionSelfFinalize(unittest.TestCase):
 		self._patcher.stop()
 		shutil.rmtree(self._tmpdir, ignore_errors=True)
 
-	def _eviction_signals(self, cmd):
-		return [
-			item for item in (cmd.warnings + cmd.results)
-			if 'shutting down' in str(getattr(item, 'message', '')).lower()
-		]
+	def _bare_command(self, process):
+		"""A Command shell with only the attributes _monitor_process touches (no real subprocess)."""
+		cmd = command_mod.Command.__new__(command_mod.Command)
+		cmd.process = process
+		cmd.monitor_stop_event = threading.Event()
+		cmd.monitor_queue = queue.Queue()
+		cmd.debug = lambda *a, **k: None
+		return cmd
 
 	def test_shutdown_flag_lifecycle(self):
 		"""worker_shutting_down_handler raises the flag; clear_shutdown_flag drops it."""
@@ -47,41 +51,32 @@ class TestEvictionSelfFinalize(unittest.TestCase):
 		clear_shutdown_flag()
 		self.assertFalse(is_worker_shutting_down())
 
-	def test_monitor_stops_running_command_on_shutdown(self):
-		"""A long-running command stops early once the flag is raised *during* the run (instead of
-		running to completion), and emits the eviction Warning — proving the monitor self-stop."""
-		holder = {}
+	def test_monitor_stops_process_when_flag_set(self):
+		"""When a shutdown is raised during the run, the monitor stops the process (exit_ok=True, so
+		the task returns partial results) and emits the eviction Warning — letting the chord proceed."""
+		cmd = self._bare_command(types.SimpleNamespace(pid=999999))
+		stopped = {}
+		cmd.stop_process = lambda **kw: (stopped.update(kw), cmd.monitor_stop_event.set())
+		with unittest.mock.patch('secator.celery_signals.is_worker_shutting_down', return_value=True):
+			cmd._monitor_process()
+		self.assertTrue(stopped.get('exit_ok'), 'monitor did not stop the process on the shutdown flag')
+		queued = []
+		while not cmd.monitor_queue.empty():
+			queued.append(cmd.monitor_queue.get())
+		self.assertTrue(
+			any('shutting down' in str(getattr(i, 'message', '')).lower() for i in queued),
+			'monitor did not emit the eviction warning',
+		)
 
-		def run():
-			holder['cmd'] = Command.execute('sleep 30', name='evict_sleep', process=True, quiet=True)
-
-		t = threading.Thread(target=run, daemon=True)
-		# Poll fast so the test doesn't wait the full stat-update cadence.
-		with unittest.mock.patch('secator.runners.command.MONITOR_POLL_SECONDS', 1):
-			start = time.monotonic()
-			t.start()
-			# Keep raising the flag until the task stops. The monitor clears any pre-existing flag
-			# once at startup, so a single set could be wiped if it raced ahead of a slow monitor
-			# start; re-raising guarantees the monitor's poll sees it once it is running.
-			deadline = time.monotonic() + 20
-			while t.is_alive() and time.monotonic() < deadline:
-				worker_shutting_down_handler()   # simulate the eviction SIGTERM, mid-run
-				time.sleep(0.5)
-			t.join(timeout=5)
-			elapsed = time.monotonic() - start
-
-		self.assertFalse(t.is_alive(), 'command did not stop after the shutdown flag was raised')
-		self.assertLess(elapsed, 25, 'command did not stop early (ran toward the full 30s sleep)')
-		self.assertTrue(self._eviction_signals(holder['cmd']), 'no eviction warning emitted on shutdown')
-
-	def test_stale_flag_does_not_stop_fresh_task(self):
-		"""A flag already set *before* a task starts (stale, e.g. left by a previous worker sharing
-		the state dir) must NOT stop it: the monitor clears it at start and only honours a shutdown
-		raised during the run. This is the regression for the integration-suite leak."""
-		worker_shutting_down_handler()  # pre-existing / stale flag
+	def test_monitor_clears_stale_flag_at_start(self):
+		"""The monitor clears any pre-existing (stale) flag at start, so a flag left by a previous
+		worker sharing the state dir does not stop a fresh task. Regression for the integration leak:
+		a leaked flag had been self-aborting every later task."""
+		worker_shutting_down_handler()                 # stale flag present before the task starts
 		self.assertTrue(is_worker_shutting_down())
-		cmd = Command.execute('sleep 3', name='stale_flag', process=True, quiet=True)
-		self.assertFalse(self._eviction_signals(cmd), 'a stale flag wrongly stopped a fresh task')
+		cmd = self._bare_command(None)                 # process=None -> loop breaks right after the clear
+		cmd._monitor_process()
+		self.assertFalse(is_worker_shutting_down(), 'monitor did not clear the stale flag at start')
 
 
 if __name__ == '__main__':
