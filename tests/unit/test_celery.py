@@ -389,10 +389,13 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 		if httpx not in TEST_TASKS:
 			return
 
-		results = abandon_task('httpx', ['example.com'], {'context': {}}, [])
+		results = abandon_task('httpx', ['example.com'], {'context': {}}, [], delivery_count=2)
 		errors = [r for r in results if r._type == 'error']
 		self.assertEqual(len(errors), 1)
-		self.assertIn('abandoned after', errors[0].message)
+		# Message separates delivery attempts (broker redeliveries) from the retry cap, so it
+		# reads sensibly even when the cap is 0 (a redelivery still occurs; the work isn't re-run).
+		self.assertIn('abandoned after 2 delivery attempts', errors[0].message)
+		self.assertIn('retry cap:', errors[0].message)
 
 	def test_retries_exhausted_does_not_count_initial_delivery(self):
 		"""delivery_count includes the initial run; task_max_retries=N allows N redeliveries."""

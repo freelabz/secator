@@ -257,7 +257,7 @@ def bump_worker_loss_count(task_id):
 		return 0
 
 
-def abandon_task(name, targets, opts, results):
+def abandon_task(name, targets, opts, results, delivery_count=None):
 	"""Abandon a task that has exhausted its worker-loss retries.
 
 	Returns a normal (forwarded) result list with an Error appended, so the surrounding
@@ -269,6 +269,9 @@ def abandon_task(name, targets, opts, results):
 		targets (list): Task targets.
 		opts (dict): Task options (already carries context).
 		results (list): Incoming results from upstream tasks.
+		delivery_count (int | None): How many times this task was delivered (a redelivery
+			is the broker's doing under ``task_acks_late``; it is NOT a re-run of the work).
+			Reported separately from the retry cap so the message is unambiguous.
 
 	Returns:
 		list: Forwarded results including a FAILURE Error for this task.
@@ -279,10 +282,12 @@ def abandon_task(name, targets, opts, results):
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
 	task.mark_started()
+	attempts = f'{delivery_count} delivery attempts' if delivery_count is not None else 'repeated delivery attempts'
 	task.add_result(Error(
 		message=(
-			f'Task {name} abandoned after {CONFIG.celery.task_max_retries} retries '
-			'(worker repeatedly lost — likely OOM kill or node eviction).'
+			f'Task {name} abandoned after {attempts} '
+			f'(retry cap: {CONFIG.celery.task_max_retries}; worker repeatedly lost — '
+			'likely OOM kill or node eviction).'
 		),
 		_source=task.unique_name,
 	))
@@ -336,7 +341,7 @@ def run_command(self, results, name, targets, opts={}):
 		if CONFIG.celery.task_max_retries != -1 and CONFIG.celery.task_acks_late:
 			delivery_count = bump_worker_loss_count(self.request.id)
 			if worker_loss_retries_exhausted(delivery_count, CONFIG.celery.task_max_retries):
-				return abandon_task(name, targets, opts, results)
+				return abandon_task(name, targets, opts, results, delivery_count)
 
 	# Flatten + dedupe + filter results
 	results = forward_results(results)
