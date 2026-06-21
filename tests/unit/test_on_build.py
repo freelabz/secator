@@ -1,6 +1,16 @@
 import types
 import unittest
-from secator.hooks.mongodb import HOOKS as MONGO_HOOKS
+
+import pytest
+
+from secator.definitions import ADDONS_ENABLED
+
+# secator.hooks.mongodb imports pymongo, an optional addon NOT installed in the base
+# unit-test environment (CI). Guard the import so the module collects cleanly, and skip
+# the mongodb-dependent test classes below when the addon is absent. (The registration
+# and sqlite tests don't need pymongo and still run.)
+if ADDONS_ENABLED['mongodb']:
+    from secator.hooks.mongodb import HOOKS as MONGO_HOOKS
 
 
 class TestOnBuildHookRegistration(unittest.TestCase):
@@ -54,6 +64,7 @@ class _FakeParent:
         self.config = types.SimpleNamespace(type=parent_type)
 
 
+@pytest.mark.skipif(not ADDONS_ENABLED['mongodb'], reason='mongodb addon (pymongo) not installed')
 class TestOnBuildMongo:
     def test_workflow_parent_inserts_task_doc_and_stamps_task_id(self, monkeypatch):
         from secator.hooks.mongodb import on_build
@@ -132,6 +143,7 @@ def _restore_config_dirs():
     cfg.celery.result_backend = f'file://{real_dirs.celery_results}'
 
 
+@pytest.mark.skipif(not ADDONS_ENABLED['mongodb'], reason='mongodb addon (pymongo) not installed')
 class TestOnBuildWorkflowWiring(unittest.TestCase):
     """Wiring tests for on_build in a full Workflow canvas build.
 
@@ -198,6 +210,7 @@ class _RecordingClient:
         self.main = _RecordingDB(calls)
 
 
+@pytest.mark.skipif(not ADDONS_ENABLED['mongodb'], reason='mongodb addon (pymongo) not installed')
 class TestUpdateRunnerReusesPrebuiltDoc:
     def test_prebuilt_id_takes_update_one_branch(self, monkeypatch):
         import secator.hooks.mongodb as m
@@ -228,6 +241,7 @@ class TestUpdateRunnerReusesPrebuiltDoc:
             f'Expected no insert_one but got: {calls}'
 
 
+@pytest.mark.skipif(not ADDONS_ENABLED['mongodb'], reason='mongodb addon (pymongo) not installed')
 class TestOnBuildChunkWiring(unittest.TestCase):
     """Wiring tests for on_build during chunk-task canvas assembly.
 
