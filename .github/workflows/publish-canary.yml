@@ -1,0 +1,54 @@
+name: publish-canary
+
+# Build + push freelabz/secator:canary on every push to the `canary` integration
+# branch, so the canary env (worker image) redeploys the latest merged worker
+# improvements before they're released. Mirrors publish.yml's publish-docker job
+# but tags :canary (Docker Hub) and skips PyPI / -lite / latest.
+#
+# `canary` is throwaway preproduction — never promote :canary to prod (prod pulls
+# released v*.*.* tags via publish.yml).
+
+on:
+  push:
+    branches:
+      - canary
+
+permissions:
+  contents: read
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  publish-canary-docker:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install secator
+        uses: ./.github/actions/install
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker image (canary)
+        run: docker build -t freelabz/secator:canary .
+
+      - name: Push Docker image (canary)
+        run: docker push freelabz/secator:canary
