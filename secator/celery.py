@@ -663,6 +663,12 @@ def break_task(task, task_opts, results=[]):
 		opts['results'] = results
 		if 'targets_' in opts:
 			del opts['targets_']
+		# Mint each chunk's runner doc + id at build time so a redelivered
+		# chunk reuses the same doc (see L2 / on_build).
+		prev_enable_hooks = task.enable_hooks
+		task.enable_hooks = True
+		task.run_hooks('on_build', opts, sub='build')
+		task.enable_hooks = prev_enable_hooks
 		sig = type(task).si(chunk, **opts)
 		task_id = sig.freeze().task_id
 		full_name = f'{task.name}_{ix + 1}'

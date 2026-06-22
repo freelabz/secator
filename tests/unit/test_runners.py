@@ -135,6 +135,12 @@ class TestCommandRunner(unittest.TestCase):
 		# Run the command using mock_command
 		with mock_command(MyCommand, TARGETS, {}, fixture, 'run'):
 			for hook, mock in mock_hooks.items():
+				# 'on_build' is a build-time hook fired by a PARENT runner during
+				# Celery canvas assembly, not during the runner's own execution.
+				# It will never be called in a standalone Command/Task run.
+				if hook == 'on_build':
+					self.assertFalse(mock.called, f"Hook '{hook}' should NOT be called during runner execution")
+					continue
 				self.assertTrue(mock.called, f"Hook '{hook}' was not called")
 			self.assertEqual(mock_hooks['on_json_loaded'].call_count, 3)
 			self.assertGreaterEqual(mock_hooks['on_duplicate'].call_count, 1)
