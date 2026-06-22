@@ -128,6 +128,31 @@ class TestConfig(unittest.TestCase):
 		config = self._parse_with_env(SECATOR_CELERY_TASK_MAX_TIMEOUT='999')
 		self.assertEqual(config.celery.task_max_timeout, 999)
 
+	def test_env_override_unknown_addon_key_does_not_break_config(self):
+		"""An invalid SECATOR_ADDONS_* key is ignored and leaves the typed addons model intact (#1204).
+
+		Previously this clobbered the typed `addons` model with a plain dict, so attribute access like
+		CONFIG.addons.ai.api_key raised AttributeError at import time and bricked the whole CLI.
+		"""
+		from secator.config import Config
+		config = self._parse_with_env(SECATOR_ADDONS_NONEXISTENT_URL='test')
+		self.assertIsNotNone(config)
+		self.assertIsInstance(config, Config)
+		# Typed addon models stay attribute-accessible (not replaced by a plain dict).
+		self.assertIsInstance(config.addons, Config)
+		self.assertEqual(config.addons.ai.api_key, config.addons.ai.api_key)  # no AttributeError
+		self.assertIsInstance(config.addons.mongodb.url, str)
+		# The bogus key was not written anywhere.
+		self.assertNotIn('nonexistent', config.addons.toDict())
+
+	def test_env_override_valid_addon_key_still_works(self):
+		"""A valid SECATOR_ADDONS_* override applies and keeps the typed addons model intact."""
+		from secator.config import Config
+		config = self._parse_with_env(SECATOR_ADDONS_MONGODB_URL='mongodb://example:27017')
+		self.assertEqual(config.addons.mongodb.url, 'mongodb://example:27017')
+		self.assertIsInstance(config.addons, Config)
+		self.assertEqual(config.addons.ai.api_key, config.addons.ai.api_key)  # no AttributeError
+
 	def test_set_workspace_profiles(self):
 		"""Test setting per-workspace default profiles via comma-separated string."""
 		from secator.config import Config
