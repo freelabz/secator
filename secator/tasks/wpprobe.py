@@ -1,7 +1,7 @@
+import json
 import os
 import re
 import click
-import yaml
 import shlex
 
 from secator.decorators import task
@@ -62,7 +62,7 @@ class wpprobe(Command):
 
 		yield Info(message=f'JSON results saved to {self.output_path}')
 		with open(self.output_path, 'r') as f:
-			results = yaml.safe_load(f.read())
+			results = json.load(f)
 			if not results or 'url' not in results:
 				yield Warning(message='No results found !')
 				return
