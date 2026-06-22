@@ -74,6 +74,7 @@ class Celery(StrictModel):
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
+	task_max_retries: int = -1  # max worker-loss redeliveries before abandoning a task (-1 = unlimited / disabled)
 	task_max_timeout: int = -1
 	task_memory_limit_mb: int = -1
 	worker_max_tasks_per_child: int = 20
@@ -82,6 +83,10 @@ class Celery(StrictModel):
 	worker_kill_after_task: bool = False
 	worker_kill_after_idle_seconds: int = -1
 	worker_command_verbose: bool = False
+	# Cancel (and redeliver, with acks_late) a worker's in-flight tasks when it loses the broker
+	# connection, instead of letting them run detached as zombies. Part of the OOM/eviction
+	# robustness layer; enable in deployment alongside task_acks_late + task_reject_on_worker_lost.
+	worker_cancel_long_running_tasks_on_connection_loss: bool = False
 
 
 class Cli(StrictModel):

@@ -15,7 +15,7 @@ from retry import retry
 from secator.celery_signals import setup_handlers
 from secator.definitions import IN_WORKER
 from secator.config import CONFIG
-from secator.output_types import Info, Target as TargetOutput
+from secator.output_types import Error, Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import run_extractors
@@ -98,6 +98,8 @@ app.conf.update(
 		'worker_pool_restarts': True,
 		'worker_prefetch_multiplier': CONFIG.celery.worker_prefetch_multiplier,
 		'worker_send_task_events': CONFIG.celery.worker_send_task_events,
+		'worker_cancel_long_running_tasks_on_connection_loss':
+			CONFIG.celery.worker_cancel_long_running_tasks_on_connection_loss,
 	}
 )
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
@@ -200,6 +202,113 @@ def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, valid
 	runner.run()
 
 
+def _expire_worker_loss_key(backend, key):
+	"""Best-effort TTL on a worker-loss counter key so they don't accumulate forever.
+
+	Tied to ``result_expires`` (the lifetime of the task's own result). Not all result
+	backends implement ``expire``; ignore if unsupported.
+	"""
+	try:
+		backend.expire(key, CONFIG.celery.result_expires)
+	except Exception:
+		pass
+
+
+def bump_worker_loss_count(task_id):
+	"""Increment and return the worker-loss delivery count for a Celery task id.
+
+	Stored on the Celery result backend (via its generic key/value interface) so it survives a
+	worker being killed and works with whatever backend is configured — Redis, filesystem, cache,
+	S3/GCS, etc. — not just Redis. Returns 1 on the first delivery, 2 on the first redelivery, and
+	so on. Returns 0 (cap disabled) if the backend supports neither atomic ``incr`` nor
+	``get``/``set`` (e.g. the database/RPC backends), so the cap simply no-ops there.
+
+	Args:
+		task_id (str): Celery request id (stable across worker-loss redeliveries).
+
+	Returns:
+		int: Number of times this task has been delivered, or 0 if unsupported.
+	"""
+	backend = app.backend
+	key = backend.get_key_for_task(f'worker-loss-{task_id}')
+
+	# Preferred: atomic incr (Redis, Memcached) — race-free.
+	try:
+		count = backend.incr(key)
+		_expire_worker_loss_key(backend, key)
+		return count
+	except NotImplementedError:
+		pass  # Backend has no atomic counter; fall back to get/set below.
+	except Exception as e:
+		debug(f'worker-loss incr failed for {task_id}: {e}', sub='celery.state')
+		return 0
+
+	# Fallback: get/set, implemented by every key/value result backend (filesystem, S3, GCS, ...).
+	# Worker-loss redeliveries of the same task id are sequential (only one attempt runs at a
+	# time), so a non-atomic read-modify-write is safe here.
+	try:
+		raw = backend.get(key)
+		count = (int(raw) if raw else 0) + 1
+		backend.set(key, str(count))
+		_expire_worker_loss_key(backend, key)
+		return count
+	except Exception as e:
+		debug(f'worker-loss get/set failed for {task_id}: {e}', sub='celery.state')
+		return 0
+
+
+def abandon_task(name, targets, opts, results, delivery_count=None):
+	"""Abandon a task that has exhausted its worker-loss retries.
+
+	Returns a normal (forwarded) result list with an Error appended, so the surrounding
+	chord/chain proceeds and the workflow finishes instead of hanging forever on a task whose
+	worker keeps getting killed (OOM / eviction).
+
+	Args:
+		name (str): Task name.
+		targets (list): Task targets.
+		opts (dict): Task options (already carries context).
+		results (list): Incoming results from upstream tasks.
+		delivery_count (int | None): How many times this task was delivered (a redelivery
+			is the broker's doing under ``task_acks_late``; it is NOT a re-run of the work).
+			Reported separately from the retry cap so the message is unambiguous.
+
+	Returns:
+		list: Forwarded results including a FAILURE Error for this task.
+	"""
+	results = forward_results(results)
+	opts['results'] = results
+	opts['sync'] = True
+	task_cls = Task.get_task_class(name)
+	task = task_cls(targets, **opts)
+	task.mark_started()
+	attempts = f'{delivery_count} delivery attempts' if delivery_count is not None else 'repeated delivery attempts'
+	task.add_result(Error(
+		message=(
+			f'Task {name} abandoned after {attempts} '
+			f'(retry cap: {CONFIG.celery.task_max_retries}; worker repeatedly lost — '
+			'likely OOM kill or node eviction).'
+		),
+		_source=task.unique_name,
+	))
+	task.mark_completed()
+	if CONFIG.addons.mongodb.enabled:
+		return chain_results(task.results)
+	return task.results
+
+
+def worker_loss_retries_exhausted(delivery_count, max_retries):
+	"""Whether a task has exhausted its allowed worker-loss redeliveries.
+
+	``delivery_count`` includes the INITIAL delivery (it is 1 on first run), so the
+	number of *redeliveries* is ``delivery_count - 1``. We abandon once redeliveries
+	exceed ``max_retries`` — i.e. ``task_max_retries=3`` allows the initial run plus 3
+	redeliveries (4 attempts total) before abandoning. (The initial delivery must not
+	count as a retry — that was the off-by-one in the original cap.)
+	"""
+	return (delivery_count - 1) > max_retries
+
+
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
 	# Set Celery request id in context
@@ -223,6 +332,16 @@ def run_command(self, results, name, targets, opts={}):
 		routing_key = self.request.delivery_info['routing_key']
 		context['routing_key'] = routing_key
 		debug(f'Task "{name}" running with routing key "{routing_key}"', sub='celery.state')
+
+		# Worker-loss redelivery cap. With task_acks_late + task_reject_on_worker_lost, a task
+		# whose worker is killed (cgroup OOMKill of the child, or a node-pressure eviction) is
+		# redelivered with the SAME Celery id. Count redeliveries on the result backend and
+		# abandon after task_max_retries, so a task that OOMs every run can't loop forever and
+		# block the surrounding chord/workflow.
+		if CONFIG.celery.task_max_retries != -1 and CONFIG.celery.task_acks_late:
+			delivery_count = bump_worker_loss_count(self.request.id)
+			if worker_loss_retries_exhausted(delivery_count, CONFIG.celery.task_max_retries):
+				return abandon_task(name, targets, opts, results, delivery_count)
 
 	# Flatten + dedupe + filter results
 	results = forward_results(results)
