@@ -4,11 +4,12 @@ from secator.decorators import task
 from secator.definitions import (URL, PROXY, DATA, WORDLIST, RETRIES, OPT_NOT_SUPPORTED, USER_AGENT, THREADS, DELAY, TIMEOUT, RATE_LIMIT, METHOD, HEADER, FOLLOW_REDIRECT, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, DEPTH)  # noqa: E501
 from secator.output_types import Url, Tag
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpParamsFuzzer
+from secator.tasks._categories import HttpParamsFuzzerMixin
+from secator.runners import Command
 
 
 @task()
-class x8(HttpParamsFuzzer):
+class x8(Command, HttpParamsFuzzerMixin):
 	"""Hidden parameters discovery suite written in Rust."""
 	cmd = 'x8'
 	input_types = [URL]

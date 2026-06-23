@@ -266,7 +266,7 @@ def import_dynamic(path, name=None):
 
 
 def get_command_category(command):
-	"""Get the category of a command.
+	"""Get the category of a command based on its Mixin base class.
 
 	Args:
 		command (class): Command class.
@@ -274,9 +274,16 @@ def get_command_category(command):
 	Returns:
 		str: Command category.
 	"""
-	if not command.tags:
-		return 'misc'
-	return '/'.join(command.tags)
+	category_name = 'misc'  # Default category
+	for base in command.__mro__:
+		base_name = base.__name__
+		if base_name.endswith('Mixin'):
+			category_name = base_name[:-5]  # Remove 'Mixin' suffix
+			break  # Found the first category mixin in the MRO
+
+	# Convert CamelCase to snake_case/path_case and lowercase
+	category = re.sub(r'(?<!^)(?=[A-Z])', '/', category_name).lower()
+	return category
 
 
 def merge_opts(*options):
@@ -827,6 +834,7 @@ def process_wordlist(val):
 		val (str): Can be a config value in CONFIG.wordlists.defaults or CONFIG.wordlists.templates, or a local path,
 		or a URL.
 	"""
+	print(val)
 	default_wordlist = getattr(CONFIG.wordlists.defaults, val)
 	if default_wordlist:
 		val = default_wordlist
