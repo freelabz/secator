@@ -59,7 +59,15 @@ tasks:
       targets_:
         - type: tag
           field: match
-          condition: item._source.startswith("gf")
+          condition: item._source.startswith("gf") and item.name == 'xss' and item.category == 'url_pattern'
+      if: not opts.passive
+
+    sqlmap:
+      description: Attack SQLI vulnerabilities
+      targets_:
+        - type: tag
+          field: match
+          condition: item._source.startswith("gf") and item.category == 'url_pattern'
       if: not opts.passive
 
     nuclei:
