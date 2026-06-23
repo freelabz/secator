@@ -30,6 +30,7 @@ class Workflow(Runner):
 		opts.pop('output', None)
 		opts.pop('no_poll', False)
 		opts.pop('print_profiles', False)
+		skip = opts.pop('skip', [])
 
 		# Set hooks and reports
 		self.enable_hooks = False   # Celery will handle hooks
@@ -76,6 +77,11 @@ class Workflow(Runner):
 
 			if node.type == 'task':
 				if node.parent.type == 'group' and not force:
+					return
+
+				# Skip task if in skip list
+				if node.name in skip:
+					self.add_result(Info(message=f'Skipped task [bold gold3]{node.name}[/] because it is in the skip list.'))
 					return
 
 				# Skip task if condition is not met
