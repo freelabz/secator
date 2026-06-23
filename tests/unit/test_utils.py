@@ -52,6 +52,16 @@ class TestExtractRootDomain(unittest.TestCase):
 			("example.com", HOST),
 			("example.co.uk", HOST),
 			("example.tata", HOST),
+			# Internal/non-standard TLD hostnames
+			("server.internal", HOST),
+			("db.corp", HOST),
+			("web.local", HOST),
+			("app.lan", HOST),
+			("host01.office.corp", HOST),
+			# Single-label hostnames with hyphen
+			("db-server", HOST),
+			("web-01", HOST),
+			("my-host", HOST),
 			("localhost", IP),
 			("127.0.0.1", IP),
 			("192.168.1.1", IP),
@@ -60,6 +70,10 @@ class TestExtractRootDomain(unittest.TestCase):
 			("example.com:8080", HOST_PORT),
 			("example.co.uk:80", HOST_PORT),
 			("example.tata:443", HOST_PORT),
+			# Internal host:port
+			("server.internal:8080", HOST_PORT),
+			("db.corp:5432", HOST_PORT),
+			("db-server:22", HOST_PORT),
 			("http://localhost", URL),
 			("https://localhost", URL),
 			("http://localhost:8080", URL),
