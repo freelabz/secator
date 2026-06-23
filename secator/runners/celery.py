@@ -1,4 +1,4 @@
-from secator.celery_utils import CeleryData
+from secator.pollers import CeleryPoller
 from secator.runners import Runner
 
 
@@ -8,7 +8,7 @@ class Celery(Runner):
 			result = self.build_celery_workflow()
 		if self.sync:
 			yield from result.apply().get()
-		yield from CeleryData.iter_results(
+		yield from CeleryPoller.iter_results(
 			self.celery_result,
 			ids_map=self.celery_ids_map,
 			print_remote_info=False

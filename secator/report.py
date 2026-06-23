@@ -61,6 +61,20 @@ class Report:
 		data['info']['title'] = self.title
 		data['info']['errors'] = getattr(self.runner, 'errors', [])
 
+		# Celery / MongoDB poller metadata (used by `secator poll`).
+		data['info']['celery_id'] = self.runner.celery_result.id if self.runner.celery_result else None
+		data['info']['celery_ids'] = list(self.runner.celery_ids_map.keys())
+		ids_map = self.runner.celery_ids_map.copy()
+		for _, val in ids_map.items():
+			if 'results' in val:
+				del val['results']
+			if 'ready' in val:
+				del val['ready']
+		data['info']['celery_ids_map'] = ids_map
+		runner_type = self.runner.config.type
+		data['info']['mongodb_runner_type'] = runner_type
+		data['info']['mongodb_id'] = self.runner.context.get(f'{runner_type}_id')
+
 		# Build context for QueryEngine.
 		# Pass runner.results directly (OutputType objects or dicts) to avoid
 		# costly serialization. An absent 'results' key tells JsonBackend to
