@@ -25,7 +25,7 @@ from secator.ai.prompts import (
 	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, TOOL_SCHEMAS
-from secator.ai.session import save_history, show_session_picker, replay_session
+from secator.ai.session import save_history, show_session_picker, replay_session, restore_history_from_db
 from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
 
 
@@ -147,6 +147,13 @@ class ai(PythonRunner):
 		if not self.model:
 			return
 
+		# Remote (web) resume: a respawned chat task restores its history from the
+		# workspace Mongo `_type:"ai"` docs (headless — no local files, no TUI).
+		if self.interactive == "remote":
+			restored = yield from self._maybe_resume_remote()
+			if restored:
+				return
+
 		# Resume session
 		if self.resume and not self.is_subagent:
 			session = show_session_picker()
@@ -161,7 +168,7 @@ class ai(PythonRunner):
 			self._reports_folder = session['folder']
 			result = self._prompt_and_redetect([])
 			if result is None:
-				save_history(self.history, self.reports_folder, debug_fn=self.debug)
+				self._save_history()
 				return
 			self.context["session_name"] = self.session_name
 			yield from result
@@ -208,6 +215,91 @@ class ai(PythonRunner):
 
 		# Run loop
 		yield from self._run_loop()
+
+	# -------------------------------------------------------------------------
+	# Remote (web) session restore
+	# -------------------------------------------------------------------------
+
+	def _get_query_engine(self):
+		"""Build a workspace-scoped QueryEngine from the runner context.
+
+		The backend (mongodb/api/local) is resolved from ``context['drivers']``
+		via ``QueryEngine._select_backend``. For the remote channel the API
+		appends the ``mongodb`` driver on dispatch, so this resolves to the
+		workspace Mongo backend.
+		"""
+		from secator.query import QueryEngine
+		return QueryEngine(self.context.get("workspace_id", ""), context=dict(self.context))
+
+	def _maybe_resume_remote(self):
+		"""Restore chat history from Mongo when a remote session has prior docs.
+
+		Returns True (via generator return) if this turn was fully handled as a
+		respawn (history restored, loop run), False to fall through to a fresh
+		conversation. Yields any items produced along the way.
+		"""
+		query_engine = self._get_query_engine()
+
+		# Guard: remote interactivity requires a Mongo-backed query engine, else
+		# the RemoteBackend poll can never see the web answer (and restore can't
+		# read the channel docs). Warn loudly but don't hard-fail a fresh run.
+		backend_name = getattr(query_engine.backend, "name", "")
+		if backend_name not in ("mongodb", "api"):
+			yield Warning(
+				message=f'interactive="remote" but query engine resolved to "{backend_name}" backend '
+				'(expected mongodb/api). The web answer channel will not work — check that the '
+				'`mongodb` driver is in the runner context.'
+			)
+
+		# Look for prior `_type:"ai"` docs for this session
+		try:
+			prior = query_engine.search({"_type": "ai", "session_id": self.session_id}, limit=1)
+		except Exception as e:  # noqa: BLE001 - backend errors must not crash the worker
+			self.debug(f'remote resume: failed to query prior docs: {e}', sub='llm')
+			prior = None
+
+		if not prior:
+			# Fresh conversation: nothing to restore, fall through to normal start.
+			return False
+
+		# Resolve the user's new prompt (the message that triggered this respawn)
+		self.prompt = self.run_opts.get("prompt", "")
+		if self.prompt and Path(self.prompt).is_file():
+			self.prompt = Path(self.prompt).read_text().strip()
+
+		# Session metadata
+		if not self.session_name:
+			self.session_name = (self.prompt[:80] + '...') if self.prompt and len(self.prompt) > 80 else self.prompt
+		self.context["session_name"] = self.session_name
+
+		# Detect mode (defaults to chat) and build the system prompt + tools
+		self._detect_mode()
+		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+
+		# Rebuild history from the channel docs (text-only; see restore_history_from_db)
+		self.history = restore_history_from_db(
+			self.session_id, query_engine, model=self.model,
+			encryptor=self.encryptor, system_prompt=self.system_prompt)
+		self.history.model = self.model
+
+		# Append the new user message that respawned the conversation
+		if self.prompt:
+			self.history.add_user(maybe_encrypt(self.prompt, self.encryptor))
+			yield Ai(content=self.prompt, ai_type="prompt", session_id=self.session_id)
+
+		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
+		yield from self._run_loop()
+		return True
+
+	def _save_history(self):
+		"""Persist chat history to the local reports folder, unless on the remote path.
+
+		For the remote (web) channel the workspace Mongo `_type:"ai"` docs are the
+		source of truth, so the local `history.json` write is skipped.
+		"""
+		if self.interactive == "remote":
+			return
+		save_history(self.history, self.reports_folder, debug_fn=self.debug)
 
 	# -------------------------------------------------------------------------
 	# _run_loop: main LLM interaction loop
@@ -286,7 +378,7 @@ class ai(PythonRunner):
 					yield Warning(message="LLM returned empty response")
 					if empty_streak >= 3:
 						yield Error(message="3 consecutive empty responses - the model may not support tool calling. Stopping.")
-						save_history(self.history, self.reports_folder, debug_fn=self.debug)
+						self._save_history()
 						return
 					continue
 
@@ -343,7 +435,7 @@ class ai(PythonRunner):
 
 				# Stop tool → save and exit
 				if stop_reason is not None:
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 
 				# Follow-up / content-only / max_iter → prompt user
@@ -356,7 +448,7 @@ class ai(PythonRunner):
 
 					result = self._prompt_and_redetect(follow_up_choices or [])
 					if result is None:
-						save_history(self.history, self.reports_folder, debug_fn=self.debug)
+						self._save_history()
 						return
 					yield from result
 					continue
@@ -370,7 +462,7 @@ class ai(PythonRunner):
 				yield Warning(message="Interrupted by user.")
 				result = self._prompt_and_redetect([])
 				if result is None:
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 				yield from result
 				continue
@@ -384,7 +476,7 @@ class ai(PythonRunner):
 				elif isinstance(e, litellm.AuthenticationError):
 					yield Error(message=str(e))
 					yield Error(message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`')
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 				elif isinstance(e, litellm.APIConnectionError) or (
 					isinstance(e, litellm.InternalServerError) and 'connection error' in str(e).lower()
@@ -395,13 +487,13 @@ class ai(PythonRunner):
 					# to avoid swallowing unrelated upstream 500 errors.
 					yield Error(message=f"Cannot connect to model '{self.model}': {e}")
 					yield Error(message='Check api_base and connectivity: `secator config set addons.ai.api_base <URL>`')
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 				yield Error.from_exception(e)
-				save_history(self.history, self.reports_folder, debug_fn=self.debug)
+				self._save_history()
 				return
 
-		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+		self._save_history()
 		yield Info(message=f"Reached max iterations ({iteration}/{self.max_iterations})")
 
 	# -------------------------------------------------------------------------
@@ -455,8 +547,11 @@ class ai(PythonRunner):
 			workspace=self.reports_folder or ""
 		)
 
-		# Create interactivity backend
-		self.session_id = self.session_name or str(self.id)
+		# Create interactivity backend.
+		# For the remote (web) channel, the UI generates a stable session_id and
+		# reuses it verbatim on respawn (passed in run_opts.context.session_id);
+		# prefer it so a respawned task can find its prior `_type:"ai"` docs.
+		self.session_id = self.passed_context.get("session_id") or self.session_name or str(self.id)
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
 		# Auto-approve workspace targets
