@@ -126,3 +126,24 @@ class TestQueryDispatch(unittest.TestCase):
 		self.assertEqual(result.exit_code, 0)
 		vulns = captured.get('results', {}).get('vulnerability', [])
 		self.assertEqual(sorted(v['name'] for v in vulns), ['XSS'])
+
+	def test_empty_arg_with_report_filter(self):
+		"""secator q -rf tasks/1 should return all results without requiring an ARG."""
+		result, captured = self._invoke(['query', '-rf', 'tasks/1', '-ws', WS, '--driver', 'local'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi', 'XSS'])
+
+	def test_empty_arg_with_workspace(self):
+		"""secator q -ws myws should return all results for the workspace without requiring an ARG."""
+		result, captured = self._invoke(['query', '-ws', WS, '--driver', 'local'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi', 'XSS'])
+
+	def test_empty_arg_no_filter_shows_error(self):
+		"""secator q with no args and no filters should still show an error."""
+		result, _ = self._invoke(['query'])
+		self.assertNotEqual(result.exit_code, 0)

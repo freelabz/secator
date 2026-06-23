@@ -1127,6 +1127,9 @@ def list_aliases(silent):
 def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit):
 	"""Query"""
 	if not arg:
+		if report_filter or workspace or time_delta:
+			run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder)
+			return
 		raise click.UsageError('Missing argument ARG (a query name, expression, or prompt).')
 
 	# 1. Saved query name
