@@ -143,7 +143,10 @@ class TestQueryDispatch(unittest.TestCase):
 		vulns = captured.get('results', {}).get('vulnerability', [])
 		self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi', 'XSS'])
 
-	def test_empty_arg_no_filter_shows_error(self):
-		"""secator q with no args and no filters should still show an error."""
-		result, _ = self._invoke(['query'])
-		self.assertNotEqual(result.exit_code, 0)
+	def test_empty_arg_no_filter_shows_all(self):
+		"""bare secator q (no args, no filters) should succeed and return all results."""
+		result, captured = self._invoke(['query', '--driver', 'local'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi', 'XSS'])
