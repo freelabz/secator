@@ -8,7 +8,7 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   HEADER, HOST, HOST_PORT, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, URL, USER_AGENT)
+							   SKIP_SSL_VERIFY, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.output_types import Tag, Url
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
@@ -63,6 +63,7 @@ class cariddi(HttpCrawler):
 		FILTER_SIZE: OPT_NOT_SUPPORTED,
 		FILTER_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		MATCH_CODES: OPT_NOT_SUPPORTED,
 		MATCH_REGEX: OPT_NOT_SUPPORTED,
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
