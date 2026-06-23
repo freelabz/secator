@@ -10,6 +10,19 @@ profile: default
 tags: [recon, dns, network, http, crawl, ssl, takeovers, vuln, secrets]
 input_types:
   - host
+
+options:
+  passive:
+    is_flag: True
+    default: False
+    help: "Passive scan (no active requests to targets)"
+    short: ps
+    set:
+      subdomain_recon_passive: True
+      host_recon_passive: True
+      url_crawl_passive: True
+      url_vuln_passive: True
+
 workflows:
   subdomain_recon:
   host_recon:
