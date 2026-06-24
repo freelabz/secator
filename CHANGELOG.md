@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.1](https://github.com/freelabz/secator/compare/v0.38.0...v0.38.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **config:** SECATOR_ADDONS_* invalid key override breaks Secator totally ([#1205](https://github.com/freelabz/secator/issues/1205)) ([2164993](https://github.com/freelabz/secator/commit/2164993b37797f5b2bacd83e89a002e46e59883b))
+
 ## [0.38.0](https://github.com/freelabz/secator/compare/v0.37.1...v0.38.0) (2026-06-19)
 
 
