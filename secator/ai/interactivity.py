@@ -119,7 +119,7 @@ class RemoteBackend(InteractivityBackend):
 		)
 
 	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
-		answer = self._poll_for_answer(session_id, prompt_type)
+		answer = self._poll_for_answer(session_id, prompt_type, prompt_uuid=context.get("prompt_uuid"))
 		if answer is None:
 			return None
 
@@ -135,26 +135,42 @@ class RemoteBackend(InteractivityBackend):
 		# follow_up: return the answer text
 		return {"answer": answer}
 
-	def _poll_for_answer(self, session_id, prompt_type):
-		"""Poll DB for user answer until timeout."""
+	def _poll_for_answer(self, session_id, prompt_type, prompt_uuid=None):
+		"""Poll DB for the answer to the SPECIFIC pending prompt until timeout.
+
+		The query MUST be scoped to the exact prompt the worker is currently
+		blocked on — identified by ``prompt_uuid`` (stamped into the pending doc's
+		``extra_data.prompt_uuid`` before it was persisted). Matching only on
+		``{session_id, status:"answered"}`` is a bug: a multi-turn conversation
+		accumulates *previously* answered follow-up docs, so an unscoped query
+		returns a STALE answer immediately, the worker re-injects that old answer
+		as a brand-new prompt, re-runs the whole turn, asks again, re-matches the
+		same stale doc — an infinite respawn loop that re-runs scans and burns
+		tokens. Scoping on ``prompt_uuid`` makes the poll resolve only THIS
+		prompt's own answer (and time out only THIS prompt's doc).
+		"""
+		base = {
+			"_type": "ai",
+			"ai_type": prompt_type,
+			# Correlate by the runner context's session_id: it's auto-stamped on
+			# every persisted item (item._context = self.context), so it's always
+			# present — unlike the top-level session_id field.
+			"_context.session_id": session_id,
+		}
+		if prompt_uuid:
+			base["extra_data.prompt_uuid"] = prompt_uuid
+
 		elapsed = 0
 		while elapsed < self.timeout:
-			results = self.query_engine.search({
-				"_type": "ai",
-				"ai_type": prompt_type,
-				# Correlate by the runner context's session_id: it's auto-stamped on
-				# every persisted item (item._context = self.context), so it's always
-				# present — unlike the top-level session_id field.
-				"_context.session_id": session_id,
-				"status": "answered"
-			}, limit=1)
+			results = self.query_engine.search({**base, "status": "answered"}, limit=1)
 			if results:
 				return results[0].get("answer")
 			sleep(self.poll_interval)
 			elapsed += self.poll_interval
-		# Timeout: update finding status
+		# Timeout: flip ONLY this prompt's still-pending doc to timed_out, so a
+		# concurrent/older pending doc for the same session isn't disturbed.
 		self.query_engine.update(
-			{"_type": "ai", "ai_type": prompt_type, "_context.session_id": session_id, "status": "pending"},
+			{**base, "status": "pending"},
 			{"$set": {"status": "timed_out"}}
 		)
 		return None

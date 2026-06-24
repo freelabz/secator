@@ -10,7 +10,7 @@ if ADDONS_ENABLED['ai']:
 	from secator.ai.actions import (
 		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
 		_handle_query, _handle_add_finding, _run_runner, _decrypt_dict,
-		_build_hooks_from_context
+		_build_hooks_from_context, _coerce_finding_fields
 	)
 	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
 
@@ -354,6 +354,60 @@ class TestRunRunner(unittest.TestCase):
 		self.assertEqual(len(ai_items), 1)
 		self.assertEqual(ai_items[0].extra_data.get('runner_id'), 'runner123')
 		self.assertEqual(ai_items[0].extra_data.get('runner_type'), 'task')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_propagates_session_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""The dispatched sub-runner's context must carry the ai task's session_id
+		(the conversation id) so its persisted runner doc is queryable by the
+		conversation. session_id may be derived (not already in ctx.context), so
+		it must be stamped from ctx.session_id."""
+		mock_build_hooks.return_value = {}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		# session_id lives on the ActionContext but NOT in context (it is derived)
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'drivers': ['mongodb']},
+			session_id='conv-abc-123',
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		sub_context = kwargs.get('context', {})
+		self.assertEqual(sub_context.get('session_id'), 'conv-abc-123')
+		self.assertEqual(sub_context.get('workspace_id'), 'ws1')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_preserves_existing_session_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""A session_id already present in ctx.context must not be overwritten."""
+		mock_build_hooks.return_value = {}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'session_id': 'from-context'},
+			session_id='from-ctx-field',
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		self.assertEqual(kwargs.get('context', {}).get('session_id'), 'from-context')
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -722,6 +776,77 @@ class TestHandleAddFinding(unittest.TestCase):
 		self.assertEqual(len(results), 2)
 		self.assertIsInstance(results[1], Vulnerability)
 		self.assertEqual(results[1].matched_at, 'http://t.com/search')
+
+	def test_coerce_finding_fields_scalar_types(self):
+		# LLMs send wrong-typed scalars (bool as "true", float/int as strings).
+		# The coercion helper fixes them to the declared field types.
+		data = _coerce_finding_fields(
+			Vulnerability,
+			{
+				'name': 'SQL Injection',
+				'verified': 'true',
+				'cvss_score': '7.5',
+				'severity_nb': '3',
+			},
+		)
+		self.assertIs(data['verified'], True)
+		self.assertIsInstance(data['verified'], bool)
+		self.assertEqual(data['cvss_score'], 7.5)
+		self.assertIsInstance(data['cvss_score'], float)
+		self.assertEqual(data['severity_nb'], 3)
+		self.assertIsInstance(data['severity_nb'], int)
+		# str fields are left untouched.
+		self.assertEqual(data['name'], 'SQL Injection')
+		# Coerced data validates clean.
+		self.assertEqual(Vulnerability.validate_fields(data), [])
+
+	def test_add_finding_coerces_scalar_types(self):
+		# End-to-end: wrong-typed scalars flow through the handler and validate
+		# clean, producing a Vulnerability with the coerced bool/float values.
+		ctx = ActionContext(targets=['t.com'], model='m')
+		results = list(
+			_handle_add_finding(
+				{
+					'action': 'add_finding',
+					'_type': 'vulnerability',
+					'name': 'SQL Injection',
+					'matched_at': 'http://t.com/login',
+					'verified': 'true',
+					'cvss_score': '7.5',
+					'severity_nb': '3',
+				},
+				ctx,
+			)
+		)
+
+		# No validation Error: the sloppy types were coerced before validation.
+		self.assertEqual(len(results), 2)
+		vuln = results[1]
+		self.assertIsInstance(vuln, Vulnerability)
+		self.assertIs(vuln.verified, True)
+		self.assertIsInstance(vuln.verified, bool)
+		self.assertEqual(vuln.cvss_score, 7.5)
+		self.assertIsInstance(vuln.cvss_score, float)
+
+	def test_add_finding_unparseable_bool_surfaces_error(self):
+		# An unparseable value must NOT be silently dropped; validation reports it.
+		ctx = ActionContext(targets=['t.com'], model='m')
+		results = list(
+			_handle_add_finding(
+				{
+					'action': 'add_finding',
+					'_type': 'vulnerability',
+					'name': 'SQL Injection',
+					'matched_at': 'http://t.com/login',
+					'verified': 'maybe',
+				},
+				ctx,
+			)
+		)
+
+		self.assertEqual(len(results), 1)
+		self.assertIsInstance(results[0], Error)
+		self.assertIn('verified', results[0].message)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
