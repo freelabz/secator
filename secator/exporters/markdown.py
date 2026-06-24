@@ -10,7 +10,14 @@ class MarkdownExporter(Exporter):
 		if not ai_items:
 			return
 
-		sections = [item.content for item in ai_items if item.content]
+		# report.data['results']['ai'] holds serialized dicts, not Ai objects, so
+		# read `content` defensively (handle both dict and OutputType forms).
+		def _content(item):
+			if isinstance(item, dict):
+				return item.get('content')
+			return getattr(item, 'content', None)
+
+		sections = [c for item in ai_items if (c := _content(item))]
 		if not sections:
 			return
 
