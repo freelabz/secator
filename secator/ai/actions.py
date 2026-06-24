@@ -378,7 +378,11 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	# Emit even when silent (batch mode): silent only suppresses live console
 	# chatter, but the action doc must still be yielded so it is persisted and
 	# the UI can render a RunnerCard for it.
-	runner_id = runner.id or context.get(f"{runner_type}_id", "")
+	# Prefer the context id (`{type}_id`) the on_init hook stamped — that IS the
+	# persisted runner doc's `_id`, which is what the UI's getRunner queries.
+	# `runner.id` is secator's internal id and does NOT match the persisted doc,
+	# so the RunnerCard showed "Runner not found".
+	runner_id = context.get(f"{runner_type}_id", "") or runner.id
 	yield Ai(
 		content=name,
 		ai_type=runner_type,
