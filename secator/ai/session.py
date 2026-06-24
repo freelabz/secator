@@ -222,7 +222,7 @@ def restore_history_from_db(session_id, query_engine, model=None, encryptor=None
 		history.set_system(maybe_encrypt(system_prompt, encryptor))
 
 	try:
-		docs = query_engine.search({'_type': 'ai', 'session_id': session_id})
+		docs = query_engine.search({'_type': 'ai', '_context.session_id': session_id})
 	except Exception as e:  # noqa: BLE001 - backend errors must not crash the worker
 		console.print(Warning(message=f'Failed to restore session from DB: {e}'))
 		return history

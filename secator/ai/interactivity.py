@@ -142,7 +142,10 @@ class RemoteBackend(InteractivityBackend):
 			results = self.query_engine.search({
 				"_type": "ai",
 				"ai_type": prompt_type,
-				"session_id": session_id,
+				# Correlate by the runner context's session_id: it's auto-stamped on
+				# every persisted item (item._context = self.context), so it's always
+				# present — unlike the top-level session_id field.
+				"_context.session_id": session_id,
 				"status": "answered"
 			}, limit=1)
 			if results:
@@ -151,7 +154,7 @@ class RemoteBackend(InteractivityBackend):
 			elapsed += self.poll_interval
 		# Timeout: update finding status
 		self.query_engine.update(
-			{"_type": "ai", "ai_type": prompt_type, "session_id": session_id, "status": "pending"},
+			{"_type": "ai", "ai_type": prompt_type, "_context.session_id": session_id, "status": "pending"},
 			{"$set": {"status": "timed_out"}}
 		)
 		return None

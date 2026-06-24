@@ -119,17 +119,6 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 
 	def yielder(self) -> Generator:
-		"""Stamp every Ai item with the session_id so the remote-channel transcript
-		is queryable by session_id. The web UI correlates the whole conversation
-		(across respawns) by session_id, so a message item without it is invisible.
-		_init_options() sets self.session_id before the first yield, so the stamp
-		is always valid here."""
-		for _item in self._yielder():
-			if isinstance(_item, Ai) and not getattr(_item, "session_id", ""):
-				_item.session_id = self.session_id
-			yield _item
-
-	def _yielder(self) -> Generator:
 		"""Execute AI task."""
 		# Addon / setup check
 		if self.inputs == ['setup']:
@@ -264,7 +253,7 @@ class ai(PythonRunner):
 
 		# Look for prior `_type:"ai"` docs for this session
 		try:
-			prior = query_engine.search({"_type": "ai", "session_id": self.session_id}, limit=1)
+			prior = query_engine.search({"_type": "ai", "_context.session_id": self.session_id}, limit=1)
 		except Exception as e:  # noqa: BLE001 - backend errors must not crash the worker
 			self.debug(f'remote resume: failed to query prior docs: {e}', sub='llm')
 			prior = None
