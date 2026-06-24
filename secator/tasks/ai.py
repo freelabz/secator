@@ -1,6 +1,7 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task."""
 import json
+import uuid
 from itertools import groupby
 from pathlib import Path
 from time import sleep
@@ -408,6 +409,7 @@ class ai(PythonRunner):
 				follow_up_choices = None
 				stop_reason = None
 				follow_up_ai = None
+				follow_up_prompt_uuid = None
 
 				if tool_calls:
 					actions = yield from self._process_tool_calls(tool_calls, ctx)
@@ -424,6 +426,7 @@ class ai(PythonRunner):
 					follow_up_choices = dispatch_result.get("follow_up_choices")
 					stop_reason = dispatch_result.get("stop_reason")
 					follow_up_ai = dispatch_result.get("follow_up_ai")
+					follow_up_prompt_uuid = dispatch_result.get("follow_up_prompt_uuid")
 
 					if len(actions) > 1:
 						yield Info(message=f"Executed {len(actions)} actions.")
@@ -446,7 +449,7 @@ class ai(PythonRunner):
 					# only happen once). Nothing to re-yield here — the frontend reads the
 					# persisted doc.
 
-					result = self._prompt_and_redetect(follow_up_choices or [])
+					result = self._prompt_and_redetect(follow_up_choices or [], prompt_uuid=follow_up_prompt_uuid)
 					if result is None:
 						self._save_history()
 						return
@@ -798,6 +801,7 @@ class ai(PythonRunner):
 		follow_up_choices = None
 		stop_reason = None
 		follow_up_ai = None
+		follow_up_prompt_uuid = None
 
 		is_batch = len(actions) > 1
 		action_iter = _run_batch(actions, ctx) if is_batch else dispatch_action(actions[0], ctx)
@@ -825,6 +829,14 @@ class ai(PythonRunner):
 						follow_up_ai.session_id = self.session_id
 						if not follow_up_ai.choices and follow_up_choices:
 							follow_up_ai.choices = list(follow_up_choices)
+						# Stamp a unique correlation id so the poll resolves ONLY this
+						# prompt's own answer (not a stale answered follow_up from a
+						# prior turn, which would loop). Generated here (not reusing
+						# _uuid, which mongo may reassign to its _id on insert) and
+						# persisted in extra_data so it round-trips on read.
+						follow_up_prompt_uuid = str(uuid.uuid4())
+						follow_up_ai.extra_data = {
+							**(follow_up_ai.extra_data or {}), "prompt_uuid": follow_up_prompt_uuid}
 					self.add_result(result, print=not is_from_subagent)
 					continue
 				self.add_result(result, print=not is_from_subagent)
@@ -869,7 +881,12 @@ class ai(PythonRunner):
 			tool_result_str = maybe_encrypt(tool_result_str, self.encryptor)
 			self.history.add_tool_result(tc_name, tc_id, tool_result_str)
 
-		return {"follow_up_choices": follow_up_choices, "stop_reason": stop_reason, "follow_up_ai": follow_up_ai}
+		return {
+			"follow_up_choices": follow_up_choices,
+			"stop_reason": stop_reason,
+			"follow_up_ai": follow_up_ai,
+			"follow_up_prompt_uuid": follow_up_prompt_uuid,
+		}
 
 	# -------------------------------------------------------------------------
 	# History helpers
@@ -897,11 +914,15 @@ class ai(PythonRunner):
 	# Follow-up / prompt
 	# -------------------------------------------------------------------------
 
-	def _prompt_and_redetect(self, choices):
+	def _prompt_and_redetect(self, choices, prompt_uuid=None):
 		"""Prompt user via backend and re-detect intent.
 
 		Works for all backends: CLIBackend shows rich menus, RemoteBackend
 		polls DB, AutoBackend returns None (exits).
+
+		``prompt_uuid`` correlates the (remote) poll to the SPECIFIC pending
+		follow_up doc this call raised, so a stale answered follow_up from a prior
+		turn can't resolve it (which would re-inject the old prompt and loop).
 
 		Returns list of items to yield, or None to exit.
 		"""
@@ -915,6 +936,7 @@ class ai(PythonRunner):
 			max_iterations=self.max_iterations,
 			mode=self.mode,
 			model=self.model,
+			prompt_uuid=prompt_uuid,
 		)
 		if response is None:
 			return None
