@@ -593,6 +593,9 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Ai(
 			content=f'{str(finding)}',
 			ai_type="add_finding",
+			# Carry the created finding so the web UI can render its FindingCard
+			# (VulnerabilityCard/SubdomainCard/…) — it routes on `_type`.
+			extra_data={"finding": finding.toDict()},
 			_context=context
 		)
 		yield finding
