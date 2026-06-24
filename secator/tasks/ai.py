@@ -560,9 +560,17 @@ class ai(PythonRunner):
 
 		# Create interactivity backend.
 		# For the remote (web) channel, the UI generates a stable session_id and
-		# reuses it verbatim on respawn (passed in run_opts.context.session_id);
-		# prefer it so a respawned task can find its prior `_type:"ai"` docs.
-		self.session_id = self.passed_context.get("session_id") or self.session_name or str(self.id)
+		# reuses it verbatim on respawn so a respawned task finds its prior
+		# `_type:"ai"` docs. It arrives on the runner context (self.context) —
+		# the dispatcher sends self.context to the worker (task.py build_celery)
+		# and pops run_opts['context'], so self.context is authoritative here;
+		# run_opts['context'] only carries it for local/sync runs.
+		self.session_id = (
+			self.passed_context.get("session_id")
+			or (self.context or {}).get("session_id")
+			or self.session_name
+			or str(self.id)
+		)
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
 		# Auto-approve workspace targets
