@@ -440,11 +440,11 @@ class ai(PythonRunner):
 
 				# Follow-up / content-only / max_iter → prompt user
 				if follow_up_choices is not None or not tool_calls or iteration == self.max_iterations:
-					# For remote follow-up, yield the pending Ai so frontend can show it
-					if follow_up_ai and isinstance(self.backend, RemoteBackend):
-						follow_up_ai.status = "pending"
-						follow_up_ai.session_id = self.session_id
-						yield follow_up_ai
+					# Remote follow-up: the pending Ai (status="pending" + top-level choices +
+					# session_id) was already stamped and persisted as a single doc in
+					# _dispatch_and_collect (add_result dedupes by _uuid, so persistence can
+					# only happen once). Nothing to re-yield here — the frontend reads the
+					# persisted doc.
 
 					result = self._prompt_and_redetect(follow_up_choices or [])
 					if result is None:
@@ -811,12 +811,24 @@ class ai(PythonRunner):
 			is_from_subagent = isinstance(result, OutputType) and bool(result._context.get('subagent'))
 
 			if isinstance(result, Ai):
-				self.add_result(result, print=not is_from_subagent)
 				if result.ai_type == "follow_up":
 					follow_up_ai = result
 					follow_up_choices = result.choices or (result.extra_data or {}).get("choices", [])
+					# Persist the follow-up doc in its FINAL renderable state. add_result()
+					# dedupes by _uuid, so once persisted here it can never be re-persisted
+					# (the later `yield follow_up_ai` in the main loop is dropped). For a
+					# remote run, stamp status="pending" + top-level choices + session_id
+					# BEFORE the single add_result, so the one persisted doc is what the web
+					# UI needs: status=="pending" (clears "thinking") and non-empty choices.
+					if isinstance(self.backend, RemoteBackend):
+						follow_up_ai.status = "pending"
+						follow_up_ai.session_id = self.session_id
+						if not follow_up_ai.choices and follow_up_choices:
+							follow_up_ai.choices = list(follow_up_choices)
+					self.add_result(result, print=not is_from_subagent)
 					continue
-				elif result.ai_type == "stopped":
+				self.add_result(result, print=not is_from_subagent)
+				if result.ai_type == "stopped":
 					stop_reason = result.content
 					continue
 				if result.ai_type not in ("shell_output", "response"):

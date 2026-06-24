@@ -444,7 +444,10 @@ def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
 	choices = action.get("choices", [])
-	yield Ai(content=reason, ai_type="follow_up", extra_data={"choices": choices}, _context=context)
+	# Store choices on the top-level `choices` field (what the web UI reads) AND in
+	# extra_data (back-compat). Without the top-level field, the persisted follow-up
+	# doc has `choices: []` and the UI renders no choice buttons.
+	yield Ai(content=reason, ai_type="follow_up", choices=choices, extra_data={"choices": choices}, _context=context)
 
 
 def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:

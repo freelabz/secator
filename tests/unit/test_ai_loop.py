@@ -308,6 +308,82 @@ class TestFollowUpDispatch(unittest.TestCase):
 
 
 # =============================================================================
+# UNIT TESTS: Remote follow-up persistence (status + top-level choices)
+# =============================================================================
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestRemoteFollowUpPersistence(unittest.TestCase):
+	"""In remote mode, the single persisted follow-up doc must be renderable:
+	status=="pending" + non-empty top-level `choices` (what the web UI reads)."""
+
+	def _run_dispatch(self, backend):
+		"""Drive the real ai._dispatch_and_collect with a minimal fake self.
+
+		Returns (yielded_items, persisted_items) where persisted_items are what
+		add_result() received (i.e. what the mongodb on_item hook would persist).
+		"""
+		from secator.tasks.ai import ai as AiTask
+
+		choices = ["Fuzz parameters", "Run nuclei", "Deep crawl"]
+		follow_up = Ai(
+			content="Presenting actionable next steps",
+			ai_type="follow_up",
+			extra_data={"choices": choices},
+			_context={"tool_call_id": "tc_fu", "tool_call_name": "follow_up"},
+		)
+
+		persisted = []
+
+		class _FakeHistory:
+			def get_action_budget(self, model):
+				return 10000
+
+			def add_tool_result(self, *a, **k):
+				pass
+
+		fake_self = MagicMock()
+		fake_self.backend = backend
+		fake_self.session_id = "sess-123"
+		fake_self.model = "test-model"
+		fake_self.reports_folder = None
+		fake_self.history = _FakeHistory()
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+
+		ctx = MagicMock()
+		ctx.results = []
+
+		def _fake_dispatch_action(action, c):
+			yield follow_up
+
+		with patch("secator.tasks.ai.dispatch_action", _fake_dispatch_action):
+			gen = AiTask._dispatch_and_collect(fake_self, [{"tool_call_id": "tc_fu"}], ctx)
+			yielded = list(gen)
+		return yielded, persisted, follow_up
+
+	def test_remote_follow_up_persisted_pending_with_choices(self):
+		backend = RemoteBackend(timeout=60, query_engine=MagicMock())
+		yielded, persisted, follow_up = self._run_dispatch(backend)
+
+		# Exactly one follow_up Ai is persisted (no duplicate display + pending docs).
+		fu_docs = [p for p in persisted if isinstance(p, Ai) and p.ai_type == "follow_up"]
+		self.assertEqual(len(fu_docs), 1)
+		doc = fu_docs[0]
+		self.assertEqual(doc.status, "pending")
+		self.assertEqual(doc.choices, ["Fuzz parameters", "Run nuclei", "Deep crawl"])
+		self.assertEqual(doc.session_id, "sess-123")
+		# Same object → single doc by _uuid.
+		self.assertIs(doc, follow_up)
+
+	def test_local_follow_up_not_stamped_pending(self):
+		"""CLI/local mode must NOT stamp status=pending (drives the TUI menu directly)."""
+		backend = CLIBackend()
+		yielded, persisted, follow_up = self._run_dispatch(backend)
+		fu_docs = [p for p in persisted if isinstance(p, Ai) and p.ai_type == "follow_up"]
+		self.assertEqual(len(fu_docs), 1)
+		self.assertNotEqual(fu_docs[0].status, "pending")
+
+
+# =============================================================================
 # UNIT TESTS: Backend and tool schema behavior
 # =============================================================================
 
