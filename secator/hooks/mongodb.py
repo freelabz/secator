@@ -109,6 +109,46 @@ def update_runner(self):
 		debug(msg, sub='hooks.mongodb', id=_id)
 
 
+def build_pending_doc(parent, task_spec, child_type):
+	"""Minimal PENDING placeholder doc for a not-yet-run child runner.
+
+	The runtime update_runner does {'$set': self.toDict()} and fully overwrites
+	this once the child executes, so only the fields the UI tree / watchdog need
+	before that have to be correct here.
+	"""
+	return {
+		'name': task_spec.get('name'),
+		'status': 'PENDING',
+		'done': False,
+		'config': {'type': child_type, 'name': task_spec.get('name')},
+		'context': dict(task_spec.get('context', {})),
+		'has_parent': True,
+		'chunk': task_spec.get('chunk'),
+		'chunk_count': task_spec.get('chunk_count'),
+	}
+
+
+def on_build(self, task_spec):
+	"""Build-time hook: mint the child runner's Mongo doc + id before dispatch.
+
+	Fired by the PARENT runner (self) while assembling the Celery canvas, once
+	per child task/workflow/chunk. Inserts a PENDING placeholder and writes its
+	id into the child signature's serialized context so a redelivered task
+	reuses the same doc (update_one) instead of inserting a new one.
+	"""
+	client = get_mongodb_client()
+	db = client.main
+	parent_type = self.config.type                       # 'scan' | 'workflow' | 'task'
+	child_type = 'workflow' if parent_type == 'scan' else 'task'
+	collection = f'{child_type}s'
+	is_chunk = bool(task_spec.get('chunk'))
+	doc = build_pending_doc(self, task_spec, child_type)
+	_id = str(db[collection].insert_one(doc).inserted_id)
+	key = f'{child_type}_chunk_id' if is_chunk else f'{child_type}_id'
+	task_spec.setdefault('context', {})[key] = _id
+	return task_spec
+
+
 def update_finding(self, item):
 	if type(item) not in OUTPUT_TYPES:
 		return item
@@ -234,6 +274,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 
 HOOKS = {
 	Scan: {
+		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_interval': [update_runner],
@@ -241,6 +282,7 @@ HOOKS = {
 		'on_end': [update_runner],
 	},
 	Workflow: {
+		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_interval': [update_runner],
@@ -248,11 +290,12 @@ HOOKS = {
 		'on_end': [update_runner],
 	},
 	Task: {
+		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_duplicate': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner]
+		'on_end': [update_runner],
 	}
 }
