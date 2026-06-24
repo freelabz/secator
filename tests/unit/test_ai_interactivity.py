@@ -100,6 +100,46 @@ class TestRemoteBackend(unittest.TestCase):
 		# Should have called update to set timed_out
 		mock_engine.update.assert_called_once()
 
+	def test_poll_scopes_query_to_prompt_uuid(self):
+		"""The poll must correlate on the specific prompt's uuid.
+
+		Regression test for the infinite-respawn loop: without scoping on
+		prompt_uuid, a stale answered follow_up from a prior turn resolves the
+		current wait immediately, the worker re-injects that old answer as a new
+		prompt and re-runs the turn forever. The query MUST include
+		extra_data.prompt_uuid so only THIS prompt's own answer resolves it.
+		"""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": "the right answer"}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		result = backend.ask_user("What next?", [], "session1", prompt_uuid="abc-123")
+
+		self.assertEqual(result["answer"], "the right answer")
+		# The search query must be scoped to this prompt's uuid (else a stale
+		# answered follow_up from a prior turn would match -> loop).
+		search_query = mock_engine.search.call_args[0][0]
+		self.assertEqual(search_query.get("extra_data.prompt_uuid"), "abc-123")
+		self.assertEqual(search_query.get("status"), "answered")
+
+	@patch('secator.ai.interactivity.sleep')
+	def test_timeout_update_scoped_to_prompt_uuid(self, mock_sleep):
+		"""On timeout, only THIS prompt's pending doc is flipped to timed_out."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = []  # never answered
+		mock_engine.update = MagicMock()
+		backend = RemoteBackend(timeout=5, query_engine=mock_engine, poll_interval=5)
+
+		result = backend.ask_user("What next?", [], "session1", prompt_uuid="abc-123")
+
+		self.assertIsNone(result)
+		mock_engine.update.assert_called_once()
+		update_query = mock_engine.update.call_args[0][0]
+		self.assertEqual(update_query.get("extra_data.prompt_uuid"), "abc-123")
+		self.assertEqual(update_query.get("status"), "pending")
+
 	@patch('secator.ai.interactivity.sleep')
 	def test_ask_user_returns_on_second_poll(self, mock_sleep):
 		from secator.ai.interactivity import RemoteBackend
