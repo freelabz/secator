@@ -29,8 +29,6 @@ from secator.ai.session import save_history, show_session_picker, replay_session
 from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
 
 
-DEFAULT_API_KEY = CONFIG.addons.ai.api_key
-
 
 @task()
 class ai(PythonRunner):
@@ -44,8 +42,15 @@ class ai(PythonRunner):
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": "Mode: attack or chat"},
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
-		"api_key": {"type": str, "default": DEFAULT_API_KEY, "sensitive": True, "help": "API key for LLM provider"},
-		"api_base": {"type": str, "default": CONFIG.addons.ai.api_base, "help": "API base URL"},
+		# Never set a secret/CONFIG value as a task-option `default`: secator-api
+		# serves task opts (including defaults) to the UI, so a CONFIG default
+		# would leak the platform's LLM API key into the runner form. Default to
+		# empty; the task falls back to CONFIG.addons.ai.* at runtime in
+		# _init_options (api_key = passed or CONFIG.addons.ai.api_key). The
+		# user-supplied value is still `sensitive` so it's redacted from serialized
+		# runner state (run_opts/cmd) even though it's never a default.
+		"api_key": {"type": str, "default": "", "sensitive": True, "help": "API key for LLM provider (defaults to configured key)"},  # noqa: E501
+		"api_base": {"type": str, "default": "", "help": "API base URL (defaults to configured base)"},
 		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
 		"max_iterations": {"type": int, "default": 10, "help": "Max iterations"},
 		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
@@ -414,8 +419,8 @@ class ai(PythonRunner):
 		self.is_subagent = self.get_opt_value("subagent")
 		self.model = self.get_opt_value("model")
 		self.intent_model = self.get_opt_value("intent_model")
-		self.api_base = self.get_opt_value("api_base")
-		self.api_key = self.get_opt_value("api_key")
+		self.api_base = self.get_opt_value("api_base") or CONFIG.addons.ai.api_base
+		self.api_key = self.get_opt_value("api_key") or CONFIG.addons.ai.api_key
 		self.sensitive = self.get_opt_value("sensitive")
 		self.mode = self.get_opt_value("mode")
 		self.max_tokens_total = self.get_opt_value("max_tokens_total")
