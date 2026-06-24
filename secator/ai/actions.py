@@ -404,15 +404,26 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 
 
 def _get_result_context(action, ctx):
-	"""Get result context from action"""
-	ctx = ctx.context.copy()
+	"""Get result context from action.
+
+	Always stamps the ai task's ``session_id`` (the conversation id) onto the
+	derived context. The ai task's ``self.session_id`` may be derived (from
+	``session_name`` / the runner id) and is therefore not guaranteed to already
+	live in ``ctx.context``. Stamping it here means every sub-runner (task /
+	workflow / scan) dispatched by the ai task persists a runner doc whose
+	``context.session_id`` matches the conversation — so the runners spawned by a
+	conversation are queryable by that conversation's session_id.
+	"""
+	new_ctx = ctx.context.copy()
+	if ctx.session_id and not new_ctx.get("session_id"):
+		new_ctx["session_id"] = ctx.session_id
 	action_context = {}
 	tool_call_id = action.get("tool_call_id")
 	tool_call_name = action.get("tool_call_name")
 	if tool_call_id:
 		action_context["tool_call_id"] = tool_call_id
 		action_context["tool_call_name"] = tool_call_name
-	return {**ctx, **action_context}
+	return {**new_ctx, **action_context}
 
 
 def _handle_task(action: Dict, ctx: ActionContext) -> Generator:

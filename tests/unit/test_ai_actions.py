@@ -355,6 +355,60 @@ class TestRunRunner(unittest.TestCase):
 		self.assertEqual(ai_items[0].extra_data.get('runner_id'), 'runner123')
 		self.assertEqual(ai_items[0].extra_data.get('runner_type'), 'task')
 
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_propagates_session_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""The dispatched sub-runner's context must carry the ai task's session_id
+		(the conversation id) so its persisted runner doc is queryable by the
+		conversation. session_id may be derived (not already in ctx.context), so
+		it must be stamped from ctx.session_id."""
+		mock_build_hooks.return_value = {}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		# session_id lives on the ActionContext but NOT in context (it is derived)
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'drivers': ['mongodb']},
+			session_id='conv-abc-123',
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		sub_context = kwargs.get('context', {})
+		self.assertEqual(sub_context.get('session_id'), 'conv-abc-123')
+		self.assertEqual(sub_context.get('workspace_id'), 'ws1')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_preserves_existing_session_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""A session_id already present in ctx.context must not be overwritten."""
+		mock_build_hooks.return_value = {}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'session_id': 'from-context'},
+			session_id='from-ctx-field',
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		self.assertEqual(kwargs.get('context', {}).get('session_id'), 'from-context')
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestBuildHooksFromContext(unittest.TestCase):
