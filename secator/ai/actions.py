@@ -70,6 +70,53 @@ def _sanitized_env() -> dict:
 			and "KEY" not in k and "SECRET" not in k and "TOKEN" not in k and "PASSWORD" not in k}
 
 
+def _build_hooks_from_context(context: Dict) -> Dict:
+	"""Build the runner hooks dict from ``context['drivers']``.
+
+	Sub-runners dispatched by the ai task are constructed in-process and run
+	synchronously, so the framework's pickle path (``__setstate__``, which
+	re-registers driver hooks from ``context['drivers']``) never runs for them.
+	Without this, a sub-runner inherits the ai task's ``workspace_id`` /
+	``drivers`` in its context but registers *no* driver hooks — so its
+	``mongodb``/``api`` ``update_runner``/``update_finding`` hooks never fire and
+	its runner doc + findings are never persisted to the workspace. The result:
+	sub-runs are absent from the workspace History.
+
+	This mirrors the normal CLI entrypoint (``cli_helper._run``): import each
+	driver's ``secator.hooks.<driver>.HOOKS`` and ``deep_merge_dicts`` them into a
+	single class-keyed dict (keyed by ``Scan``/``Workflow``/``Task``). The dict is
+	returned raw (not flattened) because ``Task``/``Workflow`` forward
+	``self._hooks.get(Task, {})`` down to their command/task signatures.
+
+	Args:
+		context: Runner context dict (expects ``drivers`` list).
+
+	Returns:
+		dict: Merged hooks dict suitable for ``runner_cls(..., hooks=hooks)``.
+	"""
+	from secator.loader import discover_external_drivers, get_available_drivers, order_drivers
+	from secator.utils import import_dynamic, deep_merge_dicts
+
+	drivers = list(context.get('drivers', []))
+	if not drivers:
+		return {}
+	discover_external_drivers()
+	# Order by canonical priority so authoritative backends (e.g. mongodb) register
+	# their hooks before relay drivers (e.g. api) — same ordering as __setstate__.
+	drivers = order_drivers(drivers)
+	supported = set(get_available_drivers())
+	hooks_list = []
+	for driver in drivers:
+		if driver not in supported:
+			continue
+		driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
+		if driver_hooks:
+			hooks_list.append(driver_hooks)
+	if not hooks_list:
+		return {}
+	return deep_merge_dicts(*hooks_list)
+
+
 def _build_action_display(action: Dict) -> str:
 	"""Build a display string for the action being checked.
 
@@ -292,9 +339,6 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		yield Info(message=f"[DRY RUN] Would run {runner_type}: {name} on {targets}", _context=context)
 		return
 
-	if not ctx.silent:
-		yield Ai(content=name, ai_type=runner_type, extra_data={"targets": targets, "opts": opts}, _context=context)
-
 	run_opts = {
 		"print_item": not ctx.silent,
 		"print_line": ctx.verbose and not ctx.silent,
@@ -315,11 +359,38 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	context["task_chunk_id"] = str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
+
+	# Propagate the ai task's driver hooks (mongodb/api) into the sub-runner.
+	# The context already carries workspace_id/workspace_name/drivers (see
+	# _get_result_context), but a sync sub-runner never goes through the pickle
+	# path that re-registers driver hooks — so without this its results would
+	# persist with no workspace scope and never appear in the workspace History.
+	hooks = _build_hooks_from_context(context)
 	try:
-		runner = runner_cls(tpl, targets, run_opts=run_opts, context=context)
+		runner = runner_cls(tpl, targets, run_opts=run_opts, hooks=hooks, context=context)
 	except TaskNotFoundError as e:
 		yield Error(message=str(e), _context=context)
 		return
+
+	# Emit the action Ai item now that the runner exists: its on_init hook has
+	# stamped the runner id into context, so we can surface it on the item
+	# (extra_data.runner_id/runner_type) for the UI to link to a RunnerCard.
+	# Emit even when silent (batch mode): silent only suppresses live console
+	# chatter, but the action doc must still be yielded so it is persisted and
+	# the UI can render a RunnerCard for it.
+	runner_id = runner.id or context.get(f"{runner_type}_id", "")
+	yield Ai(
+		content=name,
+		ai_type=runner_type,
+		extra_data={
+			"targets": targets,
+			"opts": opts,
+			"runner_id": runner_id,
+			"runner_type": runner_type,
+		},
+		_context=context,
+	)
+
 	yield from runner
 
 	# Auto-allow reading from the spawned runner's reports folder

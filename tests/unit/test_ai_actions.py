@@ -9,7 +9,8 @@ from secator.definitions import ADDONS_ENABLED
 if ADDONS_ENABLED['ai']:
 	from secator.ai.actions import (
 		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
-		_handle_query, _handle_add_finding, _run_runner, _decrypt_dict
+		_handle_query, _handle_add_finding, _run_runner, _decrypt_dict,
+		_build_hooks_from_context
 	)
 	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
 
@@ -318,6 +319,78 @@ class TestRunRunner(unittest.TestCase):
 		results = list(_run_runner(action, ctx, 'task'))
 
 		self.assertIn('default.com', results[0].message)
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_propagates_hooks_and_emits_runner_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""Sub-runner must receive driver hooks (so its results persist) and the
+		emitted action Ai must carry the created runner's id + type for the UI."""
+		sentinel_hooks = {'fake': ['hook']}
+		mock_build_hooks.return_value = sentinel_hooks
+
+		# Fake runner: an iterable whose id is populated (mimics on_init stamping it)
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'drivers': ['mongodb']},
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+
+		results = list(_run_runner(action, ctx, 'task'))
+
+		# Runner constructed with hooks= from the context drivers
+		_, kwargs = mock_task_cls.call_args
+		self.assertEqual(kwargs.get('hooks'), sentinel_hooks)
+		self.assertEqual(kwargs.get('context', {}).get('workspace_id'), 'ws1')
+
+		# Action Ai item carries runner_id + runner_type
+		ai_items = [r for r in results if isinstance(r, Ai) and r.ai_type == 'task']
+		self.assertEqual(len(ai_items), 1)
+		self.assertEqual(ai_items[0].extra_data.get('runner_id'), 'runner123')
+		self.assertEqual(ai_items[0].extra_data.get('runner_type'), 'task')
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestBuildHooksFromContext(unittest.TestCase):
+	"""Tests for _build_hooks_from_context (driver name -> hooks dict)."""
+
+	def test_no_drivers_returns_empty(self):
+		self.assertEqual(_build_hooks_from_context({}), {})
+		self.assertEqual(_build_hooks_from_context({'drivers': []}), {})
+
+	@patch('secator.loader.get_available_drivers')
+	@patch('secator.loader.order_drivers')
+	@patch('secator.loader.discover_external_drivers')
+	@patch('secator.utils.import_dynamic')
+	def test_builds_hooks_from_driver_names(self, mock_import, _disc, mock_order, mock_avail):
+		from secator.runners import Task
+		mock_order.side_effect = lambda d: d
+		mock_avail.return_value = ['mongodb', 'api']
+		mongo_hooks = {Task: {'on_init': ['update_runner']}}
+		mock_import.return_value = mongo_hooks
+
+		hooks = _build_hooks_from_context({'drivers': ['mongodb']})
+
+		mock_import.assert_called_once_with('secator.hooks.mongodb', 'HOOKS')
+		self.assertIn(Task, hooks)
+		self.assertIn('on_init', hooks[Task])
+
+	@patch('secator.loader.get_available_drivers')
+	@patch('secator.loader.order_drivers')
+	@patch('secator.loader.discover_external_drivers')
+	@patch('secator.utils.import_dynamic')
+	def test_skips_unsupported_driver(self, mock_import, _disc, mock_order, mock_avail):
+		mock_order.side_effect = lambda d: d
+		mock_avail.return_value = ['mongodb']
+		hooks = _build_hooks_from_context({'drivers': ['bogus']})
+		self.assertEqual(hooks, {})
+		mock_import.assert_not_called()
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
