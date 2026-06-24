@@ -44,8 +44,11 @@ class ai(PythonRunner):
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": "Mode: attack or chat"},
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
-		"api_key": {"type": str, "default": DEFAULT_API_KEY, "help": "API key for LLM provider"},
-		"api_base": {"type": str, "default": CONFIG.addons.ai.api_base, "help": "API base URL"},
+		# internal: never surface the LLM key/endpoint as a UI/CLI option — the
+		# task reads them from CONFIG.addons.ai at runtime. Exposing them served
+		# the platform's API key (the default) to every user in the runner form.
+		"api_key": {"type": str, "default": DEFAULT_API_KEY, "internal": True, "help": "API key for LLM provider"},
+		"api_base": {"type": str, "default": CONFIG.addons.ai.api_base, "internal": True, "help": "API base URL"},
 		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
 		"max_iterations": {"type": int, "default": 10, "help": "Max iterations"},
 		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
