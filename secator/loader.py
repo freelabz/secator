@@ -8,13 +8,14 @@ from pathlib import Path
 import glob
 import importlib
 import inspect
+import re
 import sys
 
 
 def _file_has_hooks(path):
 	"""Check if a Python file contains a HOOKS variable (driver indicator)."""
 	try:
-		return 'HOOKS =' in path.read_text()
+		return bool(re.search(r'\bHOOKS\s*=', path.read_text()))
 	except Exception:
 		return False
 
@@ -76,7 +77,9 @@ def get_configs_by_type(type):
 @cache
 def discover_tasks():
 	"""Find all secator tasks (internal + external)."""
-	return discover_internal_tasks() + discover_external_tasks()
+	external = discover_external_tasks()
+	internal = discover_internal_tasks()
+	return external + internal
 
 
 @cache
@@ -140,6 +143,14 @@ def discover_external_tasks():
 				console.print(f'[bold orange1]Could not load external task "{task_name}" from module {path.name}[/] ({path})')
 				continue
 			cls = getattr(module, task_name)
+			if not inspect.isclass(cls):
+				# cls is a module reference, not a class — likely caused by a circular
+				# import (e.g. the file does `from secator.tasks import <task_name>`
+				# while secator.tasks is still initialising).  Clean up sys.modules so
+				# the entry doesn't shadow the real task later.
+				sys.modules.pop(module_name, None)
+				console.print(f'[bold orange1]Could not load external task "{task_name}" from {path.name}: not a class[/] ({path})')
+				continue
 			debug(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})', sub='loader')
 			cls.__external__ = True
 			output.append(cls)
