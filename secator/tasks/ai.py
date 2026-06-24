@@ -63,6 +63,12 @@ class ai(PythonRunner):
 			"internal": True,
 			"help": "Context to pass to AI (findings, scope, objective)"
 		},
+		"allowed_targets": {
+			"type": list,
+			"default": None,
+			"internal": True,
+			"help": "Platform-set allow-list of target strings/regexes the AI must stay within (e.g. validated mandates)"  # noqa: E501
+		},
 		"subagent": {
 			"is_flag": True,
 			"default": False,
@@ -429,6 +435,7 @@ class ai(PythonRunner):
 		self.passed_context = self.run_opts.get("context") or {}
 		self.async_tasks = self.get_opt_value("async_tasks")
 		self.dangerous = self.get_opt_value("dangerous")
+		self.allowed_targets = self.get_opt_value("allowed_targets") or []
 
 		# Interactive mode: "local" / "remote" / "auto"
 		interactive = self.get_opt_value("interactive")
@@ -452,7 +459,8 @@ class ai(PythonRunner):
 		self.permission_engine = PermissionEngine(
 			CONFIG.addons.ai.permissions,
 			targets=self.inputs,
-			workspace=self.reports_folder or ""
+			workspace=self.reports_folder or "",
+			allowed_targets=self.allowed_targets,
 		)
 
 		# Create interactivity backend

@@ -342,6 +342,59 @@ class TestPermissionEngine(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestAllowedTargets(unittest.TestCase):
+	"""Platform-supplied allowed_targets (e.g. validated mandates) constrain target scope."""
+
+	def _make_engine(self, allow=None, deny=None, ask=None, targets=None, allowed_targets=None, workspace="/tmp/workspace"):  # noqa: E501
+		config = {"allow": allow or [], "deny": deny or [], "ask": ask or []}
+		return PermissionEngine(
+			config, targets=targets or [], workspace=workspace, allowed_targets=allowed_targets or [])
+
+	def test_allowed_target_literal_match(self):
+		engine = self._make_engine(allow=["shell(nmap)"], allowed_targets=["example.com"])
+		result = engine.check_action({"action": "shell", "command": "nmap example.com"})
+		self.assertEqual(result.decision, "allow")
+
+	def test_allowed_target_regex_match(self):
+		engine = self._make_engine(allow=["shell(nmap)"], allowed_targets=[r".*\.example\.com"])
+		result = engine.check_action({"action": "shell", "command": "nmap api.example.com"})
+		self.assertEqual(result.decision, "allow")
+
+	def test_target_outside_allowed_targets_is_constrained(self):
+		"""A target not matching any allowed_targets regex must NOT be silently allowed."""
+		engine = self._make_engine(allow=["shell(nmap)"], allowed_targets=[r".*\.example\.com"])
+		result = engine.check_action({"action": "shell", "command": "nmap evil.attacker.com"})
+		self.assertNotEqual(result.decision, "allow")
+
+	def test_allowed_targets_presence_forces_target_check(self):
+		"""Even with no config target rules, allowed_targets makes the target step run."""
+		engine = self._make_engine(allow=["task(*)"], allowed_targets=["10.0.0.1"])
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["8.8.8.8"]})
+		self.assertNotEqual(result.decision, "allow")
+
+	def test_allowed_target_task_in_scope(self):
+		engine = self._make_engine(allow=["task(*)"], allowed_targets=[r"10\.0\.0\.\d+"])
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.5"]})
+		self.assertEqual(result.decision, "allow")
+
+	def test_deny_still_wins_over_allowed_targets(self):
+		engine = self._make_engine(
+			allow=["shell(nmap)"], deny=["target(169.254.169.254)"], allowed_targets=[r".*"])
+		result = engine.check_action({"action": "shell", "command": "nmap 169.254.169.254"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_invalid_regex_falls_back_to_literal(self):
+		# '[' is invalid regex → treated as a literal string
+		engine = self._make_engine(allow=["shell(nmap)"], allowed_targets=["host[1"])
+		self.assertEqual(len(engine.allowed_targets), 1)
+
+	def test_allowed_target_url_host_component(self):
+		engine = self._make_engine(allow=["shell(curl)"], allowed_targets=["example.com"])
+		result = engine.check_action({"action": "shell", "command": "curl https://example.com/path"})
+		self.assertEqual(result.decision, "allow")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestTargetPrompt(unittest.TestCase):
 
 	def test_build_target_choices_ip(self):
