@@ -528,6 +528,106 @@ def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
 	yield Ai(content=reason, ai_type="stopped", _context=context)
 
 
+def _resolve_field_type(f) -> Optional[type]:
+	"""Resolve a dataclass field's declared type to a concrete builtin type.
+
+	Mirrors ``OutputType.validate_fields``: ``f.type`` may be an actual type
+	(``bool``) or — under ``from __future__ import annotations`` — a string
+	annotation (``'bool'``). Returns the concrete type (``bool``/``int``/
+	``float``/``list``/``dict``/``str``) or ``None`` if it can't be resolved.
+	"""
+	t = f.type
+	# Actual type, e.g. bool / int / float / str
+	if isinstance(t, type):
+		return t
+	# Typing generic, e.g. List[str] -> list
+	origin = getattr(t, '__origin__', None)
+	if origin is not None:
+		return origin
+	# String annotation, e.g. 'bool', 'int', "List[str]"
+	if isinstance(t, str):
+		name = t.split('[', 1)[0].strip().lower()
+		return {
+			'bool': bool, 'int': int, 'float': float,
+			'str': str, 'list': list, 'dict': dict,
+		}.get(name)
+	return None
+
+
+def _coerce_finding_fields(cls, data: Dict) -> Dict:
+	"""Coerce AI-provided scalar values to a finding class's declared field types.
+
+	LLMs frequently emit wrong-typed scalars (a ``bool`` field as the string
+	``"true"``, an ``int`` as ``"3"``). This fixes *obvious* type mismatches
+	before validation so the finding isn't rejected for model type sloppiness.
+
+	Only coerces when safe; unknown keys, already-correct values, and
+	unparseable values are left untouched (validation will still surface a real
+	error rather than silently dropping data).
+	"""
+	field_types = {f.name: _resolve_field_type(f) for f in fields(cls)}
+	for key, value in list(data.items()):
+		if key.startswith('_'):
+			continue
+		expected = field_types.get(key)
+		if expected is None or value is None:
+			continue
+		# Already the right type (note: bool is a subclass of int, so guard it).
+		if isinstance(value, expected) and not (expected is int and isinstance(value, bool)):
+			continue
+
+		if expected is bool:
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, int):
+				data[key] = bool(value)
+			elif isinstance(value, str):
+				s = value.strip().lower()
+				if s in ('true', '1', 'yes', 'on'):
+					data[key] = True
+				elif s in ('false', '0', 'no', 'off', ''):
+					data[key] = False
+		elif expected is int:
+			# Avoid coercing real bools into ints.
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, float):
+				if value.is_integer():
+					data[key] = int(value)
+			elif isinstance(value, str):
+				try:
+					data[key] = int(value)
+				except ValueError:
+					try:
+						f_val = float(value)
+						if f_val.is_integer():
+							data[key] = int(f_val)
+					except ValueError:
+						pass
+		elif expected is float:
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, int):
+				data[key] = float(value)
+			elif isinstance(value, str):
+				try:
+					data[key] = float(value)
+				except ValueError:
+					pass
+		elif expected is list:
+			if isinstance(value, str):
+				s = value.strip()
+				if s.startswith('['):
+					try:
+						parsed = json.loads(s)
+						if isinstance(parsed, list):
+							data[key] = parsed
+					except (json.JSONDecodeError, TypeError):
+						pass
+		# str fields: leave as-is (don't stringify); unknown types: leave untouched.
+	return data
+
+
 def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 	"""Create a secator finding from LLM-provided data.
 
@@ -580,6 +680,10 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 				extra = {}
 		extra.update(unknown)
 		finding_data['extra_data'] = extra
+
+	# Coerce AI-provided scalars to declared field types (LLMs send wrong-typed
+	# scalars, e.g. a bool field as the string "true") before validating.
+	finding_data = _coerce_finding_fields(cls, finding_data)
 
 	# Validate field types before instantiation
 	errors = cls.validate_fields(finding_data)
