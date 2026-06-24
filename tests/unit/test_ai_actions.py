@@ -119,6 +119,9 @@ class TestHandleFollowUp(unittest.TestCase):
 		self.assertEqual(results[0].ai_type, 'follow_up')
 		self.assertEqual(results[0].content, 'What next?')
 		self.assertEqual(results[0].extra_data['choices'], ['Scan deeper', 'Try SQL injection'])
+		# Choices must also land on the top-level `choices` field (what the web UI reads),
+		# not only in extra_data — otherwise the persisted follow-up doc renders no buttons.
+		self.assertEqual(results[0].choices, ['Scan deeper', 'Try SQL injection'])
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
