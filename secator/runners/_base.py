@@ -138,7 +138,17 @@ class Runner:
 		self.raise_on_error = self.run_opts.get('raise_on_error', False)
 
 		# Runner toggles
+		# Duplicate check should run ONCE, on the outermost runner only. A nested runner
+		# (has_parent=True) — e.g. a task inside a workflow, or a workflow inside a scan —
+		# would otherwise re-run the dedup at every nesting level, which on scans with
+		# 10,000s of findings is a real runtime toll for no benefit: results aggregate up to
+		# the outermost runner (descendant findings flow into its self.results via the
+		# yielder), so its single mark_duplicates() pass already covers every descendant's
+		# findings. We therefore disable the check for nested runners by default, while still
+		# respecting an explicit `enable_duplicate_check` override if the caller set one.
 		self.enable_duplicate_check = self.run_opts.get('enable_duplicate_check', self.enable_duplicate_check)
+		if self.has_parent and 'enable_duplicate_check' not in self.run_opts:
+			self.enable_duplicate_check = False
 		self.enable_profiles = self.run_opts.get('enable_profiles', True)
 		self.enable_reports = self.run_opts.get('enable_reports', not self.sync) and not self.dry_run and not self.no_process and not self.no_poll  # noqa: E501
 		self.enable_hooks = self.run_opts.get('enable_hooks', True) and not self.dry_run and not self.no_process  # noqa: E501
