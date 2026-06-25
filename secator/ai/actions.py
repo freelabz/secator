@@ -360,6 +360,31 @@ def safe_dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		)
 
 
+_HEAVY_PROFILES = {'large', 'extra_large'}
+
+
+def _is_heavy_runner(runner_type: str, name: str, opts: dict = None) -> bool:
+	"""Whether a sub-runner is too heavy to run sync in-process inside the ai worker.
+
+	Workflows/scans fan out across multiple pools, so they should always be
+	dispatched rather than run in-process. A task is heavy if its (possibly
+	opts-dependent) profile maps to a large worker pool (``large``/``extra_large``).
+	"""
+	if runner_type != 'task':
+		return True
+	try:
+		cls = Task.get_task_class(name)
+	except Exception:
+		return False
+	profile = getattr(cls, 'profile', 'small')
+	if callable(profile):
+		try:
+			profile = profile(opts or {})  # resolve dynamic profile (mirrors Command.s/si)
+		except Exception:
+			return True  # can't resolve — be conservative and dispatch
+	return profile in _HEAVY_PROFILES
+
+
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
 	"""Execute a secator task or workflow.
 
@@ -409,6 +434,17 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	if runner_type == "workflow":
 		run_opts["print_start"] = not ctx.silent and not ctx.subagent
 		run_opts["print_end"] = not ctx.silent and not ctx.subagent
+
+	# A heavy sub-task must NOT run sync in-process inside the ai task's own worker:
+	# the ai pool is small (e.g. the warm small-fast pool, ~1Gi) and a tool like
+	# nuclei (profile 'extra_large') OOM-kills it. When running inside a worker,
+	# dispatch heavy sub-runners async to their own profile's queue — the ai still
+	# waits by iterating the results. Local (non-worker) runs keep sync in-process.
+	if run_opts.get("sync") and _is_heavy_runner(runner_type, name, opts):
+		from secator.celery import IN_WORKER
+		if IN_WORKER:
+			run_opts["sync"] = False
+			run_opts["tty"] = False
 
 	context["task_chunk_id"] = str(uuid.uuid4())
 	if ctx.subagent:
