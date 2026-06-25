@@ -445,10 +445,15 @@ def mark_runner_started(results, runner, enable_hooks=True):
 
 		results = get_results(results)
 
-	# Add results to runner so it can compute status
-	# and extract dynamic targets
+	# Add results to runner so it can compute status and extract dynamic targets.
+	# hooks=False: these are forwarded/inherited results already on_item-processed
+	# (enrichment + persistence) by their producing runner. Re-firing on_item here
+	# re-runs every per-item driver hook — e.g. a vuln-enrich DB query *per item* —
+	# which is what turned mark_started into a multi-minute, O(n)-queries operation.
+	# The duplicate pass (mark_duplicates, gated on enable_duplicate_check) runs
+	# separately at completion and is unaffected; add_result still appends to results.
 	for item in results:
-		runner.add_result(item, print=False)
+		runner.add_result(item, print=False, hooks=False)
 
 	# Emit scope-tagged Targets for workflows with a scan-level targets_ extractor.
 	# This resolves the extractor at execution time (when Port/result data is available)
@@ -513,10 +518,13 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 
 		results = get_results(results)
 
-	# Add results to runner so it can compute status
-	# and run duplicate checks
+	# Add results to runner so it can compute status and run duplicate checks.
+	# hooks=False for the same reason as mark_runner_started: these forwarded results
+	# were already on_item-processed upstream, so re-firing item hooks here is
+	# redundant. add_result still appends to self.results (the gate only skips hooks),
+	# so the mark_completed() duplicate check below still sees every item.
 	for item in results:
-		runner.add_result(item, print=False)
+		runner.add_result(item, print=False, hooks=False)
 
 	# Run mark_completed (duplicate checks, db updates if enable_hooks is True)
 	runner.mark_completed()
