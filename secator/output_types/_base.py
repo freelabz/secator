@@ -133,9 +133,12 @@ class OutputType:
 	@classmethod
 	@lru_cache(maxsize=None)
 	def keys(cls):
-		# Field names are constant per class; cache to avoid recomputing fields()
-		# on every call (hot path in deduplicate / serialization). Returns a tuple
-		# so the cached object can't be mutated by callers.
+		"""Return the field names of this OutputType as a cached tuple.
+
+		Field names are constant per class, so cache to avoid recomputing fields()
+		on every call (a hot path in deduplicate / serialization). A tuple is
+		returned so the cached object can't be mutated by callers.
+		"""
 		return tuple(f.name for f in fields(cls))
 
 	def toDict(self, exclude=[]):
