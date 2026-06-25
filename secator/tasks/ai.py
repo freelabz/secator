@@ -255,6 +255,9 @@ class ai(PythonRunner):
 				# Prompt user when context is filling up (local only)
 				yield from self._summarize_user()
 
+				# Roll any billed summarization usage into context.ai_tokens
+				self._drain_history_usage()
+
 				# Subagent token usage (for batch progress tracking)
 				if self.is_subagent:
 					by_role = self.history.count_tokens_by_role(self.model)
@@ -277,6 +280,11 @@ class ai(PythonRunner):
 				content = result["content"]
 				tool_calls = result.get("tool_calls", [])
 				usage = result.get("usage", {})
+
+				# Accumulate billed tokens for this run (read by the billing chore
+				# as context.ai_tokens). Done here, before any empty-response
+				# `continue`, so every billed call is counted exactly once.
+				self._account_usage(usage)
 
 				self.debug(f'content: {content[:200] if content else "(empty)"}', sub='llm')
 
@@ -455,6 +463,13 @@ class ai(PythonRunner):
 			workspace=self.reports_folder or ""
 		)
 
+		# Per-run billed-token accounting. The platform billing chore reads
+		# `context.ai_tokens` (cumulative billed tokens) — the AI analog of
+		# `context.scan_hours`. Initialize on the runner context so it is
+		# persisted onto the task doc even if the run makes zero LLM calls.
+		self.context.setdefault("ai_tokens", 0)
+		self.context.setdefault("ai_cost", 0.0)
+
 		# Create interactivity backend
 		self.session_id = self.session_name or str(self.id)
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
@@ -514,6 +529,7 @@ class ai(PythonRunner):
 			messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
 			with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
 				result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)
+			self._account_usage(result.get("usage"))
 			mode = result["content"].strip().lower()
 			if mode in ("attack", "chat"):
 				console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
@@ -759,6 +775,43 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# History helpers
 	# -------------------------------------------------------------------------
+
+	def _account_usage(self, usage):
+		"""Accumulate billed token/cost usage from a single LLM call onto the runner context.
+
+		`usage` is the dict returned by `call_llm` (`{"tokens", "cost"}`) or None.
+		Missing/None usage counts as 0 so accounting never crashes the run. The
+		running total lives on `self.context["ai_tokens"]` (int, cumulative) which
+		is persisted onto the task doc and read by the platform billing chore.
+		"""
+		if not usage:
+			return
+		try:
+			tokens = usage.get("tokens") or 0
+			self.context["ai_tokens"] = int(self.context.get("ai_tokens", 0) or 0) + int(tokens)
+		except (TypeError, ValueError):
+			pass
+		try:
+			cost = usage.get("cost") or 0
+			self.context["ai_cost"] = float(self.context.get("ai_cost", 0.0) or 0.0) + float(cost)
+		except (TypeError, ValueError):
+			pass
+
+	def _drain_history_usage(self):
+		"""Roll billed usage accrued by history summarization into context.ai_tokens.
+
+		`ChatHistory.compact` makes its own LLM calls and stashes their billed
+		usage on the history object; drain it here so it is counted exactly once.
+		"""
+		history = getattr(self, "history", None)
+		if history is None:
+			return
+		tokens = getattr(history, "billed_tokens", 0) or 0
+		cost = getattr(history, "billed_cost", 0.0) or 0.0
+		if tokens:
+			self._account_usage({"tokens": tokens, "cost": cost})
+			history.billed_tokens = 0
+			history.billed_cost = 0.0
 
 	def _add_assistant_to_history(self, content, tool_calls):
 		"""Add assistant message (with optional tool calls) to chat history."""
