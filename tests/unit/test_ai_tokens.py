@@ -10,6 +10,7 @@ These tests verify:
 - History summarization usage is rolled in exactly once.
 """
 import contextlib
+import types
 import unittest
 from unittest.mock import patch
 
@@ -20,6 +21,14 @@ HAS_AI = ADDONS_ENABLED.get('ai', False)
 if HAS_AI:
 	from secator.tasks.ai import ai
 	from secator.ai.history import ChatHistory
+
+
+def _fake_tool_call(name="noop", call_id="t1"):
+	"""A minimal litellm-shaped tool_call object (has .id and .function.*)."""
+	return types.SimpleNamespace(
+		id=call_id,
+		function=types.SimpleNamespace(name=name, arguments="{}"),
+	)
 
 
 def _make_task():
@@ -33,6 +42,8 @@ def _make_task():
 	task.history = ChatHistory()
 	# Mirror what _init_options seeds.
 	task.context.setdefault("ai_tokens", 0)
+	task.context.setdefault("ai_prompt_tokens", 0)
+	task.context.setdefault("ai_completion_tokens", 0)
 	task.context.setdefault("ai_cost", 0.0)
 	return task
 
@@ -76,6 +87,23 @@ class TestAiTokenAccounting(unittest.TestCase):
 		self.assertIn("ai_tokens", task.context)
 		self.assertEqual(task.context["ai_tokens"], 123)
 		self.assertIsInstance(task.context["ai_tokens"], int)
+
+	def test_prompt_completion_split_accumulated(self):
+		"""prompt_tokens/completion_tokens accumulate into their own context keys."""
+		task = _make_task()
+		task._account_usage({"tokens": 300, "prompt_tokens": 200, "completion_tokens": 100, "cost": 0.0})
+		task._account_usage({"tokens": 60, "prompt_tokens": 40, "completion_tokens": 20, "cost": 0.0})
+		self.assertEqual(task.context["ai_tokens"], 360)
+		self.assertEqual(task.context["ai_prompt_tokens"], 240)
+		self.assertEqual(task.context["ai_completion_tokens"], 120)
+
+	def test_prompt_completion_split_missing_is_zero(self):
+		"""Usage with only total tokens leaves the split at 0 (no crash)."""
+		task = _make_task()
+		task._account_usage({"tokens": 100, "cost": 0.0})
+		self.assertEqual(task.context["ai_tokens"], 100)
+		self.assertEqual(task.context["ai_prompt_tokens"], 0)
+		self.assertEqual(task.context["ai_completion_tokens"], 0)
 
 	def test_history_summarization_usage_drained_once(self):
 		"""Billed tokens accrued by history compaction roll in exactly once."""
@@ -219,6 +247,57 @@ class TestAiTokenAccountingEndToEnd(unittest.TestCase):
 				list(task._run_loop())
 
 		self.assertEqual(task.context["ai_tokens"], 0)
+
+	def test_tool_only_turn_is_counted(self):
+		"""A main-loop turn that only calls tools (no display content) is billed.
+
+		The old `Σ ai_type=="response"` approach missed these turns entirely
+		(the `response` Ai is gated on `if content:`). The accumulator must count
+		the call's tokens regardless of whether it produced content.
+		"""
+		task = self._make_loop_task()
+		# Turn 1: tool-only (no content). Turn 2: content -> exits.
+		responses = [
+			{"content": "", "tool_calls": [_fake_tool_call()], "usage": {"tokens": 100, "cost": 0.001}},
+			{"content": "done", "tool_calls": [], "usage": {"tokens": 50, "cost": 0.0005}},
+		]
+		with _loop_patches(task, responses):
+			# Tool call is consumed, returns no follow-up actions -> loop continues.
+			with patch.object(ai, '_process_tool_calls', return_value=iter(())):
+				with patch.object(ai, '_prompt_and_redetect', return_value=None):
+					list(task._run_loop())
+
+		# Both turns counted, including the content-less tool-only turn.
+		self.assertEqual(task.context["ai_tokens"], 150)
+		self.assertAlmostEqual(task.context["ai_cost"], 0.0015)
+
+	def test_combined_main_intent_compaction_sum(self):
+		"""Main-loop + intent-detection + compaction usages all sum onto context.
+
+		Proves the three distinct billed call sites the audit flagged
+		(tool-only main turn, _detect_mode intent call, history compaction)
+		are aggregated into a single context.ai_tokens total.
+		"""
+		task = self._make_loop_task()
+		# (b) intent-detection call (as _detect_mode does it).
+		task._account_usage({"tokens": 30, "cost": 0.0003})
+		# (c) compaction call (as ChatHistory.compact stashes, then drained).
+		task.history.billed_tokens = 70
+		task.history.billed_cost = 0.0007
+		task._drain_history_usage()
+		# (a) tool-only main-loop turn driven through the real loop.
+		responses = [
+			{"content": "", "tool_calls": [_fake_tool_call()], "usage": {"tokens": 100, "cost": 0.001}},
+			{"content": "done", "tool_calls": [], "usage": {"tokens": 50, "cost": 0.0005}},
+		]
+		with _loop_patches(task, responses):
+			with patch.object(ai, '_process_tool_calls', return_value=iter(())):
+				with patch.object(ai, '_prompt_and_redetect', return_value=None):
+					list(task._run_loop())
+
+		# 30 (intent) + 70 (compaction) + 100 (tool-only) + 50 (content) = 250
+		self.assertEqual(task.context["ai_tokens"], 250)
+		self.assertAlmostEqual(task.context["ai_cost"], 0.0025)
 
 
 if __name__ == '__main__':

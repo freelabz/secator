@@ -468,6 +468,8 @@ class ai(PythonRunner):
 		# `context.scan_hours`. Initialize on the runner context so it is
 		# persisted onto the task doc even if the run makes zero LLM calls.
 		self.context.setdefault("ai_tokens", 0)
+		self.context.setdefault("ai_prompt_tokens", 0)
+		self.context.setdefault("ai_completion_tokens", 0)
 		self.context.setdefault("ai_cost", 0.0)
 
 		# Create interactivity backend
@@ -779,16 +781,30 @@ class ai(PythonRunner):
 	def _account_usage(self, usage):
 		"""Accumulate billed token/cost usage from a single LLM call onto the runner context.
 
-		`usage` is the dict returned by `call_llm` (`{"tokens", "cost"}`) or None.
+		`usage` is the dict returned by `call_llm`
+		(`{"tokens", "prompt_tokens", "completion_tokens", "cost"}`) or None.
 		Missing/None usage counts as 0 so accounting never crashes the run. The
 		running total lives on `self.context["ai_tokens"]` (int, cumulative) which
 		is persisted onto the task doc and read by the platform billing chore.
+		`context["ai_prompt_tokens"]`/`["ai_completion_tokens"]` carry the split.
 		"""
 		if not usage:
 			return
 		try:
 			tokens = usage.get("tokens") or 0
 			self.context["ai_tokens"] = int(self.context.get("ai_tokens", 0) or 0) + int(tokens)
+		except (TypeError, ValueError):
+			pass
+		try:
+			prompt_tokens = usage.get("prompt_tokens") or 0
+			self.context["ai_prompt_tokens"] = \
+				int(self.context.get("ai_prompt_tokens", 0) or 0) + int(prompt_tokens)
+		except (TypeError, ValueError):
+			pass
+		try:
+			completion_tokens = usage.get("completion_tokens") or 0
+			self.context["ai_completion_tokens"] = \
+				int(self.context.get("ai_completion_tokens", 0) or 0) + int(completion_tokens)
 		except (TypeError, ValueError):
 			pass
 		try:
@@ -807,10 +823,19 @@ class ai(PythonRunner):
 		if history is None:
 			return
 		tokens = getattr(history, "billed_tokens", 0) or 0
+		prompt_tokens = getattr(history, "billed_prompt_tokens", 0) or 0
+		completion_tokens = getattr(history, "billed_completion_tokens", 0) or 0
 		cost = getattr(history, "billed_cost", 0.0) or 0.0
 		if tokens:
-			self._account_usage({"tokens": tokens, "cost": cost})
+			self._account_usage({
+				"tokens": tokens,
+				"prompt_tokens": prompt_tokens,
+				"completion_tokens": completion_tokens,
+				"cost": cost,
+			})
 			history.billed_tokens = 0
+			history.billed_prompt_tokens = 0
+			history.billed_completion_tokens = 0
 			history.billed_cost = 0.0
 
 	def _add_assistant_to_history(self, content, tool_calls):

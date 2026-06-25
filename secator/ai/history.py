@@ -128,6 +128,8 @@ class ChatHistory:
     # (history summarization/compaction). The owning `ai` task drains these into
     # context.ai_tokens so summarization is billed alongside the main loop.
     billed_tokens: int = 0
+    billed_prompt_tokens: int = 0
+    billed_completion_tokens: int = 0
     billed_cost: float = 0.0
 
     def add_system(self, content: str) -> None:
@@ -400,6 +402,14 @@ class ChatHistory:
         usage = result.get("usage") or {}
         try:
             self.billed_tokens += int(usage.get("tokens") or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            self.billed_prompt_tokens += int(usage.get("prompt_tokens") or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            self.billed_completion_tokens += int(usage.get("completion_tokens") or 0)
         except (TypeError, ValueError):
             pass
         try:

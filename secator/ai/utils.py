@@ -275,6 +275,8 @@ def call_llm(
 
 		usage = {
 			"tokens": response.usage.total_tokens,
+			"prompt_tokens": getattr(response.usage, "prompt_tokens", None),
+			"completion_tokens": getattr(response.usage, "completion_tokens", None),
 			"cost": cost,
 		}
 
