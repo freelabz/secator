@@ -16,7 +16,7 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.ai.actions import (
-	ActionContext, check_guardrails, dispatch_action, _run_batch, _decrypt_dict, _build_action_display
+	ActionContext, check_guardrails, safe_dispatch_action, _run_batch, _decrypt_dict, _build_action_display
 )
 from secator.ai.guardrails import PermissionEngine
 from secator.ai.interactivity import create_backend, RemoteBackend
@@ -411,7 +411,6 @@ class ai(PythonRunner):
 				# Process tool calls → validated actions
 				follow_up_choices = None
 				stop_reason = None
-				follow_up_ai = None
 				follow_up_prompt_uuid = None
 
 				if tool_calls:
@@ -428,7 +427,6 @@ class ai(PythonRunner):
 					dispatch_result = yield from self._dispatch_and_collect(actions, ctx)
 					follow_up_choices = dispatch_result.get("follow_up_choices")
 					stop_reason = dispatch_result.get("stop_reason")
-					follow_up_ai = dispatch_result.get("follow_up_ai")
 					follow_up_prompt_uuid = dispatch_result.get("follow_up_prompt_uuid")
 
 					if len(actions) > 1:
@@ -807,7 +805,12 @@ class ai(PythonRunner):
 		follow_up_prompt_uuid = None
 
 		is_batch = len(actions) > 1
-		action_iter = _run_batch(actions, ctx) if is_batch else dispatch_action(actions[0], ctx)
+		# safe_dispatch_action wraps each action's dispatch so a Python error during
+		# a handler (e.g. a malformed LLM action/opts raising TypeError) becomes an
+		# Error item fed back to the LLM as that tool call's result, instead of
+		# propagating out and killing the main loop. _run_batch already wraps each
+		# of its actions the same way internally.
+		action_iter = _run_batch(actions, ctx) if is_batch else safe_dispatch_action(actions[0], ctx)
 
 		collected = []
 		for result in action_iter:
