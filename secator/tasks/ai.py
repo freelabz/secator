@@ -69,6 +69,12 @@ class ai(PythonRunner):
 			"internal": True,
 			"help": "Platform-set allow-list of target strings/regexes the AI must stay within (e.g. validated mandates)"  # noqa: E501
 		},
+		"denied_targets": {
+			"type": list,
+			"default": None,
+			"internal": True,
+			"help": "Platform-set deny-list of target strings/regexes the AI must never touch (deny wins over allowed_targets)"  # noqa: E501
+		},
 		"subagent": {
 			"is_flag": True,
 			"default": False,
@@ -436,6 +442,7 @@ class ai(PythonRunner):
 		self.async_tasks = self.get_opt_value("async_tasks")
 		self.dangerous = self.get_opt_value("dangerous")
 		self.allowed_targets = self.get_opt_value("allowed_targets") or []
+		self.denied_targets = self.get_opt_value("denied_targets") or []
 
 		# Interactive mode: "local" / "remote" / "auto"
 		interactive = self.get_opt_value("interactive")
@@ -461,6 +468,7 @@ class ai(PythonRunner):
 			targets=self.inputs,
 			workspace=self.reports_folder or "",
 			allowed_targets=self.allowed_targets,
+			denied_targets=self.denied_targets,
 		)
 
 		# Create interactivity backend
