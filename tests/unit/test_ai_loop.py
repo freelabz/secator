@@ -1170,11 +1170,9 @@ class TestDrainSteers(unittest.TestCase):
 		self.assertEqual(len(user_msgs), 1)
 		self.assertEqual(user_msgs[-1]["content"], "[User interjected]: actually focus on the API")
 
-		# Echoed as a steer Ai item carrying the session_id (so it persists).
-		steer_items = [r for r in yielded if isinstance(r, Ai) and r.ai_type == "steer"]
-		self.assertEqual(len(steer_items), 1)
-		self.assertEqual(steer_items[0].content, "actually focus on the API")
-		self.assertEqual(steer_items[0].session_id, "steer-sess")
+		# No echo doc is yielded: the API's pending steer doc is itself the
+		# persisted transcript entry, so a second steer Ai would double-render.
+		self.assertEqual(yielded, [])
 
 		# Marked consumed so it injects exactly once.
 		update_set = mock_engine.update.call_args[0][1]
