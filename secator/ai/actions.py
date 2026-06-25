@@ -70,6 +70,53 @@ def _sanitized_env() -> dict:
 			and "KEY" not in k and "SECRET" not in k and "TOKEN" not in k and "PASSWORD" not in k}
 
 
+def _build_hooks_from_context(context: Dict) -> Dict:
+	"""Build the runner hooks dict from ``context['drivers']``.
+
+	Sub-runners dispatched by the ai task are constructed in-process and run
+	synchronously, so the framework's pickle path (``__setstate__``, which
+	re-registers driver hooks from ``context['drivers']``) never runs for them.
+	Without this, a sub-runner inherits the ai task's ``workspace_id`` /
+	``drivers`` in its context but registers *no* driver hooks — so its
+	``mongodb``/``api`` ``update_runner``/``update_finding`` hooks never fire and
+	its runner doc + findings are never persisted to the workspace. The result:
+	sub-runs are absent from the workspace History.
+
+	This mirrors the normal CLI entrypoint (``cli_helper._run``): import each
+	driver's ``secator.hooks.<driver>.HOOKS`` and ``deep_merge_dicts`` them into a
+	single class-keyed dict (keyed by ``Scan``/``Workflow``/``Task``). The dict is
+	returned raw (not flattened) because ``Task``/``Workflow`` forward
+	``self._hooks.get(Task, {})`` down to their command/task signatures.
+
+	Args:
+		context: Runner context dict (expects ``drivers`` list).
+
+	Returns:
+		dict: Merged hooks dict suitable for ``runner_cls(..., hooks=hooks)``.
+	"""
+	from secator.loader import discover_external_drivers, get_available_drivers, order_drivers
+	from secator.utils import import_dynamic, deep_merge_dicts
+
+	drivers = list(context.get('drivers', []))
+	if not drivers:
+		return {}
+	discover_external_drivers()
+	# Order by canonical priority so authoritative backends (e.g. mongodb) register
+	# their hooks before relay drivers (e.g. api) — same ordering as __setstate__.
+	drivers = order_drivers(drivers)
+	supported = set(get_available_drivers())
+	hooks_list = []
+	for driver in drivers:
+		if driver not in supported:
+			continue
+		driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
+		if driver_hooks:
+			hooks_list.append(driver_hooks)
+	if not hooks_list:
+		return {}
+	return deep_merge_dicts(*hooks_list)
+
+
 def _build_action_display(action: Dict) -> str:
 	"""Build a display string for the action being checked.
 
@@ -259,6 +306,60 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		yield Warning(message=f"Unknown action: {action_type}", _context=context)
 
 
+def _format_action_error(e: Exception, max_chars: int = 400) -> str:
+	"""Build a concise, LLM-facing error string for a failed action dispatch.
+
+	Combines the exception type + message with the last few traceback frames so
+	the model can see *where* it failed, then truncates to a sane length so a
+	deep traceback can't blow up the next prompt's token budget.
+	"""
+	import traceback
+
+	errtype = type(e).__name__
+	msg = str(e)
+	head = f"{errtype}: {msg}" if msg else errtype
+
+	# Keep only the tail of the traceback (last ~3 frames) — that's where the
+	# actual failure is, and it keeps the feedback compact.
+	tb_lines = traceback.format_exc().strip().splitlines()
+	tb_tail = "\n".join(tb_lines[-6:]) if tb_lines else ""
+
+	detail = f"{head}\n{tb_tail}" if tb_tail else head
+	if len(detail) > max_chars:
+		detail = detail[:max_chars] + "…(truncated)"
+	return (
+		f"Action failed with error: {detail}\n"
+		"Fix the issue and try again."
+	)
+
+
+def safe_dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
+	"""Dispatch a single action, converting any raised ``Exception`` into an
+	``Error`` output item instead of letting it abort the AI loop.
+
+	A Python error during a handler (e.g. ``TypeError: 'str' object is not a
+	mapping`` from a malformed LLM action/opts) must NOT kill the main loop. We
+	wrap the per-action generator so the failure becomes an ``Error`` carrying
+	the action's ``tool_call_id``/``tool_call_name`` in ``_context`` — that lets
+	the caller group it into a tool result and feed the error back to the LLM so
+	it can correct itself on the next turn.
+
+	Only ``Exception`` is caught: ``KeyboardInterrupt`` / ``SystemExit`` /
+	``GeneratorExit`` (all ``BaseException`` subclasses) propagate so legitimate
+	control-flow and generator close are never swallowed.
+	"""
+	import traceback as _traceback
+	try:
+		yield from dispatch_action(action, ctx)
+	except Exception as e:  # noqa: BLE001 - per-action resilience: feed error back to LLM, never abort the loop
+		context = _get_result_context(action, ctx)
+		yield Error(
+			message=_format_action_error(e),
+			traceback=_traceback.format_exc(),
+			_context=context,
+		)
+
+
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
 	"""Execute a secator task or workflow.
 
@@ -292,9 +393,6 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		yield Info(message=f"[DRY RUN] Would run {runner_type}: {name} on {targets}", _context=context)
 		return
 
-	if not ctx.silent:
-		yield Ai(content=name, ai_type=runner_type, extra_data={"targets": targets, "opts": opts}, _context=context)
-
 	run_opts = {
 		"print_item": not ctx.silent,
 		"print_line": ctx.verbose and not ctx.silent,
@@ -315,11 +413,42 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	context["task_chunk_id"] = str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
+
+	# Propagate the ai task's driver hooks (mongodb/api) into the sub-runner.
+	# The context already carries workspace_id/workspace_name/drivers (see
+	# _get_result_context), but a sync sub-runner never goes through the pickle
+	# path that re-registers driver hooks — so without this its results would
+	# persist with no workspace scope and never appear in the workspace History.
+	hooks = _build_hooks_from_context(context)
 	try:
-		runner = runner_cls(tpl, targets, run_opts=run_opts, context=context)
+		runner = runner_cls(tpl, targets, run_opts=run_opts, hooks=hooks, context=context)
 	except TaskNotFoundError as e:
 		yield Error(message=str(e), _context=context)
 		return
+
+	# Emit the action Ai item now that the runner exists: its on_init hook has
+	# stamped the runner id into context, so we can surface it on the item
+	# (extra_data.runner_id/runner_type) for the UI to link to a RunnerCard.
+	# Emit even when silent (batch mode): silent only suppresses live console
+	# chatter, but the action doc must still be yielded so it is persisted and
+	# the UI can render a RunnerCard for it.
+	# Prefer the context id (`{type}_id`) the on_init hook stamped — that IS the
+	# persisted runner doc's `_id`, which is what the UI's getRunner queries.
+	# `runner.id` is secator's internal id and does NOT match the persisted doc,
+	# so the RunnerCard showed "Runner not found".
+	runner_id = context.get(f"{runner_type}_id", "") or runner.id
+	yield Ai(
+		content=name,
+		ai_type=runner_type,
+		extra_data={
+			"targets": targets,
+			"opts": opts,
+			"runner_id": runner_id,
+			"runner_type": runner_type,
+		},
+		_context=context,
+	)
+
 	yield from runner
 
 	# Auto-allow reading from the spawned runner's reports folder
@@ -329,15 +458,26 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 
 
 def _get_result_context(action, ctx):
-	"""Get result context from action"""
-	ctx = ctx.context.copy()
+	"""Get result context from action.
+
+	Always stamps the ai task's ``session_id`` (the conversation id) onto the
+	derived context. The ai task's ``self.session_id`` may be derived (from
+	``session_name`` / the runner id) and is therefore not guaranteed to already
+	live in ``ctx.context``. Stamping it here means every sub-runner (task /
+	workflow / scan) dispatched by the ai task persists a runner doc whose
+	``context.session_id`` matches the conversation — so the runners spawned by a
+	conversation are queryable by that conversation's session_id.
+	"""
+	new_ctx = ctx.context.copy()
+	if ctx.session_id and not new_ctx.get("session_id"):
+		new_ctx["session_id"] = ctx.session_id
 	action_context = {}
 	tool_call_id = action.get("tool_call_id")
 	tool_call_name = action.get("tool_call_name")
 	if tool_call_id:
 		action_context["tool_call_id"] = tool_call_id
 		action_context["tool_call_name"] = tool_call_name
-	return {**ctx, **action_context}
+	return {**new_ctx, **action_context}
 
 
 def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
@@ -444,7 +584,10 @@ def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
 	choices = action.get("choices", [])
-	yield Ai(content=reason, ai_type="follow_up", extra_data={"choices": choices}, _context=context)
+	# Store choices on the top-level `choices` field (what the web UI reads) AND in
+	# extra_data (back-compat). Without the top-level field, the persisted follow-up
+	# doc has `choices: []` and the UI renders no choice buttons.
+	yield Ai(content=reason, ai_type="follow_up", choices=choices, extra_data={"choices": choices}, _context=context)
 
 
 def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
@@ -452,6 +595,106 @@ def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
 	yield Ai(content=reason, ai_type="stopped", _context=context)
+
+
+def _resolve_field_type(f) -> Optional[type]:
+	"""Resolve a dataclass field's declared type to a concrete builtin type.
+
+	Mirrors ``OutputType.validate_fields``: ``f.type`` may be an actual type
+	(``bool``) or — under ``from __future__ import annotations`` — a string
+	annotation (``'bool'``). Returns the concrete type (``bool``/``int``/
+	``float``/``list``/``dict``/``str``) or ``None`` if it can't be resolved.
+	"""
+	t = f.type
+	# Actual type, e.g. bool / int / float / str
+	if isinstance(t, type):
+		return t
+	# Typing generic, e.g. List[str] -> list
+	origin = getattr(t, '__origin__', None)
+	if origin is not None:
+		return origin
+	# String annotation, e.g. 'bool', 'int', "List[str]"
+	if isinstance(t, str):
+		name = t.split('[', 1)[0].strip().lower()
+		return {
+			'bool': bool, 'int': int, 'float': float,
+			'str': str, 'list': list, 'dict': dict,
+		}.get(name)
+	return None
+
+
+def _coerce_finding_fields(cls, data: Dict) -> Dict:
+	"""Coerce AI-provided scalar values to a finding class's declared field types.
+
+	LLMs frequently emit wrong-typed scalars (a ``bool`` field as the string
+	``"true"``, an ``int`` as ``"3"``). This fixes *obvious* type mismatches
+	before validation so the finding isn't rejected for model type sloppiness.
+
+	Only coerces when safe; unknown keys, already-correct values, and
+	unparseable values are left untouched (validation will still surface a real
+	error rather than silently dropping data).
+	"""
+	field_types = {f.name: _resolve_field_type(f) for f in fields(cls)}
+	for key, value in list(data.items()):
+		if key.startswith('_'):
+			continue
+		expected = field_types.get(key)
+		if expected is None or value is None:
+			continue
+		# Already the right type (note: bool is a subclass of int, so guard it).
+		if isinstance(value, expected) and not (expected is int and isinstance(value, bool)):
+			continue
+
+		if expected is bool:
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, int):
+				data[key] = bool(value)
+			elif isinstance(value, str):
+				s = value.strip().lower()
+				if s in ('true', '1', 'yes', 'on'):
+					data[key] = True
+				elif s in ('false', '0', 'no', 'off', ''):
+					data[key] = False
+		elif expected is int:
+			# Avoid coercing real bools into ints.
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, float):
+				if value.is_integer():
+					data[key] = int(value)
+			elif isinstance(value, str):
+				try:
+					data[key] = int(value)
+				except ValueError:
+					try:
+						f_val = float(value)
+						if f_val.is_integer():
+							data[key] = int(f_val)
+					except ValueError:
+						pass
+		elif expected is float:
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, int):
+				data[key] = float(value)
+			elif isinstance(value, str):
+				try:
+					data[key] = float(value)
+				except ValueError:
+					pass
+		elif expected is list:
+			if isinstance(value, str):
+				s = value.strip()
+				if s.startswith('['):
+					try:
+						parsed = json.loads(s)
+						if isinstance(parsed, list):
+							data[key] = parsed
+					except (json.JSONDecodeError, TypeError):
+						pass
+		# str fields: leave as-is (don't stringify); unknown types: leave untouched.
+	return data
 
 
 def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
@@ -507,6 +750,10 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		extra.update(unknown)
 		finding_data['extra_data'] = extra
 
+	# Coerce AI-provided scalars to declared field types (LLMs send wrong-typed
+	# scalars, e.g. a bool field as the string "true") before validating.
+	finding_data = _coerce_finding_fields(cls, finding_data)
+
 	# Validate field types before instantiation
 	errors = cls.validate_fields(finding_data)
 	if errors:
@@ -519,6 +766,9 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Ai(
 			content=f'{str(finding)}',
 			ai_type="add_finding",
+			# Carry the created finding so the web UI can render its FindingCard
+			# (VulnerabilityCard/SubdomainCard/…) — it routes on `_type`.
+			extra_data={"finding": finding.toDict()},
 			_context=context
 		)
 		yield finding
@@ -593,8 +843,12 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 	progress_ids = {}
 
 	def run_single(act: Dict, idx: int) -> Dict:
+		# Use safe_dispatch_action so one action raising doesn't abort the whole
+		# batch (the executor future.result() would otherwise re-raise into the
+		# main loop). The error is captured as an Error item attributed to that
+		# action's tool_call_id and fed back to the LLM like any other result.
 		results = []
-		for item in dispatch_action(act, batch_ctx):
+		for item in safe_dispatch_action(act, batch_ctx):
 			if isinstance(item, Ai) and item.ai_type == "token_usage":
 				if progress:
 					extra = item.extra_data or {}

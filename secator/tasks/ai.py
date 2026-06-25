@@ -1,6 +1,7 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task."""
 import json
+import uuid
 from itertools import groupby
 from pathlib import Path
 from time import sleep
@@ -15,7 +16,7 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.ai.actions import (
-	ActionContext, check_guardrails, dispatch_action, _run_batch, _decrypt_dict, _build_action_display
+	ActionContext, check_guardrails, safe_dispatch_action, _run_batch, _decrypt_dict, _build_action_display
 )
 from secator.ai.guardrails import PermissionEngine
 from secator.ai.interactivity import create_backend, RemoteBackend
@@ -25,7 +26,7 @@ from secator.ai.prompts import (
 	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, TOOL_SCHEMAS
-from secator.ai.session import save_history, show_session_picker, replay_session
+from secator.ai.session import save_history, show_session_picker, replay_session, restore_history_from_db
 from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
 
 
@@ -147,6 +148,13 @@ class ai(PythonRunner):
 		if not self.model:
 			return
 
+		# Remote (web) resume: a respawned chat task restores its history from the
+		# workspace Mongo `_type:"ai"` docs (headless — no local files, no TUI).
+		if self.interactive == "remote":
+			restored = yield from self._maybe_resume_remote()
+			if restored:
+				return
+
 		# Resume session
 		if self.resume and not self.is_subagent:
 			session = show_session_picker()
@@ -161,7 +169,7 @@ class ai(PythonRunner):
 			self._reports_folder = session['folder']
 			result = self._prompt_and_redetect([])
 			if result is None:
-				save_history(self.history, self.reports_folder, debug_fn=self.debug)
+				self._save_history()
 				return
 			self.context["session_name"] = self.session_name
 			yield from result
@@ -210,6 +218,91 @@ class ai(PythonRunner):
 		yield from self._run_loop()
 
 	# -------------------------------------------------------------------------
+	# Remote (web) session restore
+	# -------------------------------------------------------------------------
+
+	def _get_query_engine(self):
+		"""Build a workspace-scoped QueryEngine from the runner context.
+
+		The backend (mongodb/api/local) is resolved from ``context['drivers']``
+		via ``QueryEngine._select_backend``. For the remote channel the API
+		appends the ``mongodb`` driver on dispatch, so this resolves to the
+		workspace Mongo backend.
+		"""
+		from secator.query import QueryEngine
+		return QueryEngine(self.context.get("workspace_id", ""), context=dict(self.context))
+
+	def _maybe_resume_remote(self):
+		"""Restore chat history from Mongo when a remote session has prior docs.
+
+		Returns True (via generator return) if this turn was fully handled as a
+		respawn (history restored, loop run), False to fall through to a fresh
+		conversation. Yields any items produced along the way.
+		"""
+		query_engine = self._get_query_engine()
+
+		# Guard: remote interactivity requires a Mongo-backed query engine, else
+		# the RemoteBackend poll can never see the web answer (and restore can't
+		# read the channel docs). Warn loudly but don't hard-fail a fresh run.
+		backend_name = getattr(query_engine.backend, "name", "")
+		if backend_name not in ("mongodb", "api"):
+			yield Warning(
+				message=f'interactive="remote" but query engine resolved to "{backend_name}" backend '
+				'(expected mongodb/api). The web answer channel will not work — check that the '
+				'`mongodb` driver is in the runner context.'
+			)
+
+		# Look for prior `_type:"ai"` docs for this session
+		try:
+			prior = query_engine.search({"_type": "ai", "_context.session_id": self.session_id}, limit=1)
+		except Exception as e:  # noqa: BLE001 - backend errors must not crash the worker
+			self.debug(f'remote resume: failed to query prior docs: {e}', sub='llm')
+			prior = None
+
+		if not prior:
+			# Fresh conversation: nothing to restore, fall through to normal start.
+			return False
+
+		# Resolve the user's new prompt (the message that triggered this respawn)
+		self.prompt = self.run_opts.get("prompt", "")
+		if self.prompt and Path(self.prompt).is_file():
+			self.prompt = Path(self.prompt).read_text().strip()
+
+		# Session metadata
+		if not self.session_name:
+			self.session_name = (self.prompt[:80] + '...') if self.prompt and len(self.prompt) > 80 else self.prompt
+		self.context["session_name"] = self.session_name
+
+		# Detect mode (defaults to chat) and build the system prompt + tools
+		self._detect_mode()
+		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+
+		# Rebuild history from the channel docs (text-only; see restore_history_from_db)
+		self.history = restore_history_from_db(
+			self.session_id, query_engine, model=self.model,
+			encryptor=self.encryptor, system_prompt=self.system_prompt)
+		self.history.model = self.model
+
+		# Append the new user message that respawned the conversation
+		if self.prompt:
+			self.history.add_user(maybe_encrypt(self.prompt, self.encryptor))
+			yield Ai(content=self.prompt, ai_type="prompt", session_id=self.session_id)
+
+		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
+		yield from self._run_loop()
+		return True
+
+	def _save_history(self):
+		"""Persist chat history to the local reports folder, unless on the remote path.
+
+		For the remote (web) channel the workspace Mongo `_type:"ai"` docs are the
+		source of truth, so the local `history.json` write is skipped.
+		"""
+		if self.interactive == "remote":
+			return
+		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+
+	# -------------------------------------------------------------------------
 	# _run_loop: main LLM interaction loop
 	# -------------------------------------------------------------------------
 
@@ -249,6 +342,11 @@ class ai(PythonRunner):
 			iteration += 1
 
 			try:
+				# Mid-flight steering: drain any user messages sent WHILE the agent
+				# was running and inject them into history so the next turn redirects.
+				# Cheap query per iteration; robust (never crashes the loop).
+				yield from self._drain_steers()
+
 				# Auto-summarize when context > 85% threshold
 				yield from self._summarize_auto()
 
@@ -286,7 +384,7 @@ class ai(PythonRunner):
 					yield Warning(message="LLM returned empty response")
 					if empty_streak >= 3:
 						yield Error(message="3 consecutive empty responses - the model may not support tool calling. Stopping.")
-						save_history(self.history, self.reports_folder, debug_fn=self.debug)
+						self._save_history()
 						return
 					continue
 
@@ -315,7 +413,7 @@ class ai(PythonRunner):
 				# Process tool calls → validated actions
 				follow_up_choices = None
 				stop_reason = None
-				follow_up_ai = None
+				follow_up_prompt_uuid = None
 
 				if tool_calls:
 					actions = yield from self._process_tool_calls(tool_calls, ctx)
@@ -331,7 +429,7 @@ class ai(PythonRunner):
 					dispatch_result = yield from self._dispatch_and_collect(actions, ctx)
 					follow_up_choices = dispatch_result.get("follow_up_choices")
 					stop_reason = dispatch_result.get("stop_reason")
-					follow_up_ai = dispatch_result.get("follow_up_ai")
+					follow_up_prompt_uuid = dispatch_result.get("follow_up_prompt_uuid")
 
 					if len(actions) > 1:
 						yield Info(message=f"Executed {len(actions)} actions.")
@@ -343,20 +441,20 @@ class ai(PythonRunner):
 
 				# Stop tool → save and exit
 				if stop_reason is not None:
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 
 				# Follow-up / content-only / max_iter → prompt user
 				if follow_up_choices is not None or not tool_calls or iteration == self.max_iterations:
-					# For remote follow-up, yield the pending Ai so frontend can show it
-					if follow_up_ai and isinstance(self.backend, RemoteBackend):
-						follow_up_ai.status = "pending"
-						follow_up_ai.session_id = self.session_id
-						yield follow_up_ai
+					# Remote follow-up: the pending Ai (status="pending" + top-level choices +
+					# session_id) was already stamped and persisted as a single doc in
+					# _dispatch_and_collect (add_result dedupes by _uuid, so persistence can
+					# only happen once). Nothing to re-yield here — the frontend reads the
+					# persisted doc.
 
-					result = self._prompt_and_redetect(follow_up_choices or [])
+					result = self._prompt_and_redetect(follow_up_choices or [], prompt_uuid=follow_up_prompt_uuid)
 					if result is None:
-						save_history(self.history, self.reports_folder, debug_fn=self.debug)
+						self._save_history()
 						return
 					yield from result
 					continue
@@ -370,7 +468,7 @@ class ai(PythonRunner):
 				yield Warning(message="Interrupted by user.")
 				result = self._prompt_and_redetect([])
 				if result is None:
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 				yield from result
 				continue
@@ -384,7 +482,7 @@ class ai(PythonRunner):
 				elif isinstance(e, litellm.AuthenticationError):
 					yield Error(message=str(e))
 					yield Error(message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`')
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 				elif isinstance(e, litellm.APIConnectionError) or (
 					isinstance(e, litellm.InternalServerError) and 'connection error' in str(e).lower()
@@ -395,13 +493,13 @@ class ai(PythonRunner):
 					# to avoid swallowing unrelated upstream 500 errors.
 					yield Error(message=f"Cannot connect to model '{self.model}': {e}")
 					yield Error(message='Check api_base and connectivity: `secator config set addons.ai.api_base <URL>`')
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 				yield Error.from_exception(e)
-				save_history(self.history, self.reports_folder, debug_fn=self.debug)
+				self._save_history()
 				return
 
-		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+		self._save_history()
 		yield Info(message=f"Reached max iterations ({iteration}/{self.max_iterations})")
 
 	# -------------------------------------------------------------------------
@@ -455,8 +553,19 @@ class ai(PythonRunner):
 			workspace=self.reports_folder or ""
 		)
 
-		# Create interactivity backend
-		self.session_id = self.session_name or str(self.id)
+		# Create interactivity backend.
+		# For the remote (web) channel, the UI generates a stable session_id and
+		# reuses it verbatim on respawn so a respawned task finds its prior
+		# `_type:"ai"` docs. It arrives on the runner context (self.context) —
+		# the dispatcher sends self.context to the worker (task.py build_celery)
+		# and pops run_opts['context'], so self.context is authoritative here;
+		# run_opts['context'] only carries it for local/sync runs.
+		self.session_id = (
+			self.passed_context.get("session_id")
+			or (self.context or {}).get("session_id")
+			or self.session_name
+			or str(self.id)
+		)
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
 		# Auto-approve workspace targets
@@ -553,6 +662,48 @@ class ai(PythonRunner):
 				self.permission_engine.add_runtime_allow([rule])
 		except Exception as e:
 			self.debug(f'[workspace] failed to query targets: {e}', sub='guardrail')
+
+	# -------------------------------------------------------------------------
+	# Mid-flight steering
+	# -------------------------------------------------------------------------
+
+	def _drain_steers(self):
+		"""Drain pending mid-flight steers and inject them into the LLM history.
+
+		A "steer" is a user message sent WHILE the agent is running (over the
+		remote/web channel: a pending ``_type:"ai", ai_type:"steer"`` doc written by
+		``POST /ai/conversations/{id}/steer``). At the top of each loop iteration we
+		drain any pending steers for this session and append each to the history as
+		a ``[User interjected]: …`` user message so the model sees them on the next
+		turn. Cooperative — not a hard cancel (Stop already does that).
+
+		The steer doc the API wrote is itself the persisted transcript entry (it
+		carries ``_context.session_id``, so the UI's transcript poll surfaces it as
+		an "interjected" user bubble). We deliberately do NOT yield a second
+		``Ai(ai_type="steer")`` echo here — that would persist a duplicate doc with
+		the same content and double-render in the UI. ``poll_steers`` flips the
+		drained doc to ``status:"consumed"`` so it injects exactly once.
+
+		Only the RemoteBackend has a channel to poll; for every other backend this
+		is a no-op. Robust: a steer must never crash the run, so all backend access
+		is best-effort and swallowed.
+
+		Generator (``yield from``-compatible with the loop) — currently yields no
+		items, but kept a generator so future transcript echoes can be added without
+		changing the call site.
+		"""
+		if not isinstance(self.backend, RemoteBackend):
+			return
+		try:
+			steers = self.backend.poll_steers(self.session_id)
+		except Exception as e:  # noqa: BLE001 - a steer must never crash the run
+			self.debug(f'steer: failed to poll steers: {e}', sub='llm')
+			return
+		for content in steers:
+			self.debug(f'steer: injecting user interjection: {content[:120]}', sub='llm')
+			self.history.add_user(maybe_encrypt(f"[User interjected]: {content}", self.encryptor))
+		return
+		yield  # noqa: unreachable - keeps this a generator for `yield from`
 
 	# -------------------------------------------------------------------------
 	# Summarization / compaction
@@ -695,9 +846,15 @@ class ai(PythonRunner):
 		follow_up_choices = None
 		stop_reason = None
 		follow_up_ai = None
+		follow_up_prompt_uuid = None
 
 		is_batch = len(actions) > 1
-		action_iter = _run_batch(actions, ctx) if is_batch else dispatch_action(actions[0], ctx)
+		# safe_dispatch_action wraps each action's dispatch so a Python error during
+		# a handler (e.g. a malformed LLM action/opts raising TypeError) becomes an
+		# Error item fed back to the LLM as that tool call's result, instead of
+		# propagating out and killing the main loop. _run_batch already wraps each
+		# of its actions the same way internally.
+		action_iter = _run_batch(actions, ctx) if is_batch else safe_dispatch_action(actions[0], ctx)
 
 		collected = []
 		for result in action_iter:
@@ -708,12 +865,32 @@ class ai(PythonRunner):
 			is_from_subagent = isinstance(result, OutputType) and bool(result._context.get('subagent'))
 
 			if isinstance(result, Ai):
-				self.add_result(result, print=not is_from_subagent)
 				if result.ai_type == "follow_up":
 					follow_up_ai = result
 					follow_up_choices = result.choices or (result.extra_data or {}).get("choices", [])
+					# Persist the follow-up doc in its FINAL renderable state. add_result()
+					# dedupes by _uuid, so once persisted here it can never be re-persisted
+					# (the later `yield follow_up_ai` in the main loop is dropped). For a
+					# remote run, stamp status="pending" + top-level choices + session_id
+					# BEFORE the single add_result, so the one persisted doc is what the web
+					# UI needs: status=="pending" (clears "thinking") and non-empty choices.
+					if isinstance(self.backend, RemoteBackend):
+						follow_up_ai.status = "pending"
+						follow_up_ai.session_id = self.session_id
+						if not follow_up_ai.choices and follow_up_choices:
+							follow_up_ai.choices = list(follow_up_choices)
+						# Stamp a unique correlation id so the poll resolves ONLY this
+						# prompt's own answer (not a stale answered follow_up from a
+						# prior turn, which would loop). Generated here (not reusing
+						# _uuid, which mongo may reassign to its _id on insert) and
+						# persisted in extra_data so it round-trips on read.
+						follow_up_prompt_uuid = str(uuid.uuid4())
+						follow_up_ai.extra_data = {
+							**(follow_up_ai.extra_data or {}), "prompt_uuid": follow_up_prompt_uuid}
+					self.add_result(result, print=not is_from_subagent)
 					continue
-				elif result.ai_type == "stopped":
+				self.add_result(result, print=not is_from_subagent)
+				if result.ai_type == "stopped":
 					stop_reason = result.content
 					continue
 				if result.ai_type not in ("shell_output", "response"):
@@ -754,7 +931,12 @@ class ai(PythonRunner):
 			tool_result_str = maybe_encrypt(tool_result_str, self.encryptor)
 			self.history.add_tool_result(tc_name, tc_id, tool_result_str)
 
-		return {"follow_up_choices": follow_up_choices, "stop_reason": stop_reason, "follow_up_ai": follow_up_ai}
+		return {
+			"follow_up_choices": follow_up_choices,
+			"stop_reason": stop_reason,
+			"follow_up_ai": follow_up_ai,
+			"follow_up_prompt_uuid": follow_up_prompt_uuid,
+		}
 
 	# -------------------------------------------------------------------------
 	# History helpers
@@ -782,11 +964,15 @@ class ai(PythonRunner):
 	# Follow-up / prompt
 	# -------------------------------------------------------------------------
 
-	def _prompt_and_redetect(self, choices):
+	def _prompt_and_redetect(self, choices, prompt_uuid=None):
 		"""Prompt user via backend and re-detect intent.
 
 		Works for all backends: CLIBackend shows rich menus, RemoteBackend
 		polls DB, AutoBackend returns None (exits).
+
+		``prompt_uuid`` correlates the (remote) poll to the SPECIFIC pending
+		follow_up doc this call raised, so a stale answered follow_up from a prior
+		turn can't resolve it (which would re-inject the old prompt and loop).
 
 		Returns list of items to yield, or None to exit.
 		"""
@@ -800,6 +986,7 @@ class ai(PythonRunner):
 			max_iterations=self.max_iterations,
 			mode=self.mode,
 			model=self.model,
+			prompt_uuid=prompt_uuid,
 		)
 		if response is None:
 			return None
