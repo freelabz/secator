@@ -156,6 +156,67 @@ class TestAiTokenAccounting(unittest.TestCase):
 		self.assertEqual(history.billed_tokens, 0)
 
 
+@unittest.skipUnless(HAS_AI, 'ai addon required')
+class TestAiModelRecording(unittest.TestCase):
+	"""The resolved run model is recorded on context.ai_model for the metering chore."""
+
+	def _run_init_options(self, model):
+		"""Drive _init_options with the heavy collaborators stubbed out.
+
+		Only the bits _init_options touches are stubbed; we assert the
+		context.ai_model recording, which sits next to the ai_tokens seeding.
+		"""
+		task = ai.__new__(ai)
+		task.context = {}
+		task.run_opts = {}
+		task.results = []
+		task.inputs = []
+		task._reports_folder = None
+		task.sync = True
+
+		opt_values = {
+			"resume": False,
+			"subagent": False,
+			"model": model,
+			"intent_model": "intent-model",
+			"api_base": None,
+			"api_key": "key",
+			"sensitive": False,
+			"mode": "chat",
+			"max_tokens_total": 100000,
+			"max_workers": 1,
+			"max_iterations": 10,
+			"temperature": 0.7,
+			"context_warnings": True,
+			"async_tasks": False,
+			"dangerous": False,
+			"interactive": "auto",
+		}
+		task.get_opt_value = lambda key: opt_values.get(key)
+
+		with contextlib.ExitStack() as stack:
+			stack.enter_context(patch('secator.tasks.ai.PermissionEngine'))
+			stack.enter_context(patch('secator.tasks.ai.create_backend'))
+			stack.enter_context(patch('secator.tasks.ai.SensitiveDataEncryptor'))
+			stack.enter_context(patch.object(ai, '_auto_approve_workspace_targets'))
+			stack.enter_context(patch.object(type(task), 'reports_folder', property(lambda self: None)))
+			stack.enter_context(patch.object(type(task), 'id', 'task-id', create=True))
+			task._init_options()
+		return task
+
+	def test_ai_model_recorded_on_context(self):
+		"""context.ai_model == the resolved run model (the chore prices against it)."""
+		task = self._run_init_options("openrouter/anthropic/claude-sonnet-4.6")
+		self.assertEqual(task.context["ai_model"], "openrouter/anthropic/claude-sonnet-4.6")
+
+	def test_ai_model_recorded_alongside_token_seeds(self):
+		"""ai_model is seeded next to the ai_tokens accounting keys."""
+		task = self._run_init_options("openrouter/google/gemma-4-26b-a4b-it:free")
+		self.assertEqual(task.context["ai_model"], "openrouter/google/gemma-4-26b-a4b-it:free")
+		self.assertEqual(task.context["ai_tokens"], 0)
+		self.assertIn("ai_prompt_tokens", task.context)
+
+
 @contextlib.contextmanager
 def _loop_patches(task, responses):
 	"""Patch the heavy collaborators _run_loop touches so we can drive it bare.

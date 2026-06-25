@@ -472,6 +472,14 @@ class ai(PythonRunner):
 		self.context.setdefault("ai_completion_tokens", 0)
 		self.context.setdefault("ai_cost", 0.0)
 
+		# Record the resolved model id used for this run so the platform metering
+		# chore can price the consumed tokens against the model registry (free
+		# vs paid, per-million in/out/cached rates). This is the *configured*
+		# model for the run; if the user switches model mid-session that change
+		# is out of scope (the configured model is recorded). Set unconditionally
+		# (not setdefault) so it reflects the option resolved in this _init.
+		self.context["ai_model"] = self.model
+
 		# Create interactivity backend
 		self.session_id = self.session_name or str(self.id)
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
