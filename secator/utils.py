@@ -229,7 +229,9 @@ def deduplicate(array, attr=None):
 		memo = set()
 		res = []
 		for sub in array:
-			if attr in sub.keys() and getattr(sub, attr) not in memo:
+			# hasattr is O(1) vs the previous `attr in sub.keys()` which recomputed
+			# the field-name list for every item (a quadratic hot path under fan-out).
+			if hasattr(sub, attr) and getattr(sub, attr) not in memo:
 				res.append(sub)
 				memo.add(getattr(sub, attr))
 		return sorted(res, key=operator.attrgetter(attr))

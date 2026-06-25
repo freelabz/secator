@@ -1,5 +1,6 @@
 import logging
 import re
+from functools import lru_cache
 from dataclasses import _MISSING_TYPE, dataclass, fields
 from secator.definitions import DEBUG
 from secator.rich import console
@@ -130,8 +131,12 @@ class OutputType:
 		return re.sub(r'(?<!^)(?=[A-Z])', '_', cls.__name__).lower()
 
 	@classmethod
+	@lru_cache(maxsize=None)
 	def keys(cls):
-		return [f.name for f in fields(cls)]
+		# Field names are constant per class; cache to avoid recomputing fields()
+		# on every call (hot path in deduplicate / serialization). Returns a tuple
+		# so the cached object can't be mutated by callers.
+		return tuple(f.name for f in fields(cls))
 
 	def toDict(self, exclude=[]):
 		data = self.__dict__.copy()
