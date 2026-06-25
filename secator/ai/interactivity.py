@@ -135,6 +135,53 @@ class RemoteBackend(InteractivityBackend):
 		# follow_up: return the answer text
 		return {"answer": answer}
 
+	def poll_steers(self, session_id):
+		"""Drain pending steer docs for ``session_id`` and mark them consumed.
+
+		A "steer" is a mid-flight user message: it's written into the channel
+		(``_type:"ai"``, ``ai_type:"steer"``, ``status:"pending"``) WHILE the agent
+		is running, and the worker picks it up at the next loop checkpoint to
+		redirect the next turn. This is distinct from a follow-up ``answer`` (which
+		the worker is *blocked* waiting on) and from a hard Stop (which revokes the
+		Celery task).
+
+		Returns a list of steer content strings (oldest-first). Each returned doc is
+		flipped to ``status:"consumed"`` so it's injected exactly once. Robust by
+		design: any backend error returns ``[]`` so a steer can never crash the run.
+		"""
+		if self.query_engine is None:
+			return []
+		base = {
+			"_type": "ai",
+			"ai_type": "steer",
+			# Correlate by the runner context's session_id, auto-stamped on every
+			# persisted item (item._context = self.context) — see _poll_for_answer.
+			"_context.session_id": session_id,
+			"status": "pending",
+		}
+		try:
+			results = self.query_engine.search(base, limit=50)
+		except Exception:  # noqa: BLE001 - a steer must never crash the run
+			return []
+		if not results:
+			return []
+		# Oldest-first so multiple queued steers are injected in send order.
+		results = sorted(results, key=lambda r: r.get("_timestamp", 0))
+		contents = []
+		for doc in results:
+			content = doc.get("content") or doc.get("answer") or ""
+			if content:
+				contents.append(content)
+		# Mark this session's pending steers consumed so they inject exactly once.
+		try:
+			self.query_engine.update(
+				{**base},
+				{"$set": {"status": "consumed"}},
+			)
+		except Exception:  # noqa: BLE001 - consume failure must not crash the run
+			pass
+		return contents
+
 	def _poll_for_answer(self, session_id, prompt_type, prompt_uuid=None):
 		"""Poll DB for the answer to the SPECIFIC pending prompt until timeout.
 
@@ -148,6 +195,12 @@ class RemoteBackend(InteractivityBackend):
 		same stale doc — an infinite respawn loop that re-runs scans and burns
 		tokens. Scoping on ``prompt_uuid`` makes the poll resolve only THIS
 		prompt's own answer (and time out only THIS prompt's doc).
+
+		A steer (mid-flight user message) breaks the wait: if a pending steer
+		arrives for this session while we're blocked on a follow-up, we return its
+		content as the "answer" so the loop redirects immediately instead of
+		stalling until the follow-up is explicitly answered (or times out). This
+		keeps follow-up semantics intact for the no-steer case.
 		"""
 		base = {
 			"_type": "ai",
@@ -165,6 +218,11 @@ class RemoteBackend(InteractivityBackend):
 			results = self.query_engine.search({**base, "status": "answered"}, limit=1)
 			if results:
 				return results[0].get("answer")
+			# A steer breaks the wait: treat the steer as the user's answer so the
+			# blocked follow-up resolves and the next turn redirects.
+			steers = self.poll_steers(session_id)
+			if steers:
+				return "\n".join(steers)
 			sleep(self.poll_interval)
 			elapsed += self.poll_interval
 		# Timeout: flip ONLY this prompt's still-pending doc to timed_out, so a

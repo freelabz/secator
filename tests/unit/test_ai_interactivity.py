@@ -144,10 +144,18 @@ class TestRemoteBackend(unittest.TestCase):
 	def test_ask_user_returns_on_second_poll(self, mock_sleep):
 		from secator.ai.interactivity import RemoteBackend
 		mock_engine = MagicMock()
-		mock_engine.search.side_effect = [
-			[],  # first poll: not answered
-			[{"answer": "option B"}],  # second poll: answered
-		]
+		# Query-aware: the follow-up answer poll (ai_type=="follow_up") returns the
+		# answer on the second call; the interleaved steer poll (ai_type=="steer")
+		# always returns nothing — so the steer-break never fires here.
+		answer_calls = {"n": 0}
+
+		def search(query, limit=1):
+			if query.get("ai_type") == "steer":
+				return []
+			answer_calls["n"] += 1
+			return [] if answer_calls["n"] == 1 else [{"answer": "option B"}]
+
+		mock_engine.search.side_effect = search
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=5)
 
 		result = backend.ask_user("What next?", [], "session1")
@@ -155,6 +163,76 @@ class TestRemoteBackend(unittest.TestCase):
 		self.assertIsNotNone(result)
 		self.assertEqual(result["answer"], "option B")
 		self.assertEqual(mock_sleep.call_count, 1)
+
+
+class TestRemoteBackendSteer(unittest.TestCase):
+	"""Verify mid-flight steer draining + the blocked-wait break."""
+
+	def test_poll_steers_returns_and_consumes(self):
+		"""poll_steers returns pending steer content and marks them consumed."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"content": "actually focus on the API", "_timestamp": 2},
+			{"content": "and skip port 80", "_timestamp": 1},
+		]
+		mock_engine.update = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		steers = backend.poll_steers("session1")
+
+		# Oldest-first by _timestamp
+		self.assertEqual(steers, ["and skip port 80", "actually focus on the API"])
+		# Query scoped to pending steer docs for this session
+		search_query = mock_engine.search.call_args[0][0]
+		self.assertEqual(search_query.get("ai_type"), "steer")
+		self.assertEqual(search_query.get("status"), "pending")
+		self.assertEqual(search_query.get("_context.session_id"), "session1")
+		# Pending steers flipped to consumed (inject exactly once)
+		mock_engine.update.assert_called_once()
+		update_set = mock_engine.update.call_args[0][1]
+		self.assertEqual(update_set["$set"]["status"], "consumed")
+
+	def test_poll_steers_no_pending_returns_empty(self):
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = []
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		self.assertEqual(backend.poll_steers("session1"), [])
+		# Nothing to consume when nothing is pending
+		mock_engine.update.assert_not_called()
+
+	def test_poll_steers_robust_on_backend_error(self):
+		"""A steer must never crash the run: backend errors return []."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = RuntimeError("mongo down")
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		self.assertEqual(backend.poll_steers("session1"), [])
+
+	def test_poll_steers_no_query_engine(self):
+		from secator.ai.interactivity import RemoteBackend
+		backend = RemoteBackend(timeout=60, query_engine=None, poll_interval=0.01)
+		self.assertEqual(backend.poll_steers("session1"), [])
+
+	def test_steer_breaks_blocked_follow_up_wait(self):
+		"""A steer arriving during a follow-up wait returns as the answer."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		# No follow-up answer ever; a steer arrives on the first poll.
+		mock_engine.search.side_effect = [
+			[],  # answered? no
+			[{"content": "change course now", "_timestamp": 1}],  # poll_steers -> steer
+		]
+		mock_engine.update = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		result = backend.ask_user("What next?", [], "session1", prompt_uuid="uuid-1")
+
+		# The steer content resolves the blocked wait (returned as the answer).
+		self.assertEqual(result["answer"], "change course now")
 
 
 class TestCreateBackend(unittest.TestCase):

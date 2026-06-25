@@ -1128,5 +1128,90 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 		self.assertIn("'str' object is not a mapping", content)
 
 
+# =============================================================================
+# Mid-flight steering: _drain_steers injects pending steers into history
+# =============================================================================
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestDrainSteers(unittest.TestCase):
+	"""The loop's `_drain_steers` drains pending steers and injects them.
+
+	A pending `ai_type:"steer"` doc (user message sent WHILE the agent runs) must
+	be drained at the loop checkpoint, appended to the LLM history as a
+	`[User interjected]: …` user message, echoed as a steer Ai item, and marked
+	consumed — without breaking the loop or the existing follow-up flow.
+	"""
+
+	def _make_task(self, backend, history=None):
+		"""Build a minimal `ai` task with only what _drain_steers reads."""
+		from secator.tasks.ai import ai
+		task = object.__new__(ai)
+		task.backend = backend
+		task.session_id = "steer-sess"
+		task.encryptor = None
+		task.history = history or ChatHistory()
+		task.debug = lambda *a, **k: None
+		return task
+
+	def test_steer_drained_injected_and_consumed(self):
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"content": "actually focus on the API", "_timestamp": 1},
+		]
+		mock_engine.update = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		task = self._make_task(backend)
+
+		yielded = list(task._drain_steers())
+
+		# Injected into history as a user "interjected" message.
+		user_msgs = [m for m in task.history.to_messages() if m["role"] == "user"]
+		self.assertEqual(len(user_msgs), 1)
+		self.assertEqual(user_msgs[-1]["content"], "[User interjected]: actually focus on the API")
+
+		# Echoed as a steer Ai item carrying the session_id (so it persists).
+		steer_items = [r for r in yielded if isinstance(r, Ai) and r.ai_type == "steer"]
+		self.assertEqual(len(steer_items), 1)
+		self.assertEqual(steer_items[0].content, "actually focus on the API")
+		self.assertEqual(steer_items[0].session_id, "steer-sess")
+
+		# Marked consumed so it injects exactly once.
+		update_set = mock_engine.update.call_args[0][1]
+		self.assertEqual(update_set["$set"]["status"], "consumed")
+
+	def test_no_steer_is_noop_and_preserves_loop(self):
+		"""No pending steer -> nothing injected, history untouched (loop intact)."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = []
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		history = ChatHistory()
+		history.add_user("original prompt")
+		task = self._make_task(backend, history=history)
+
+		yielded = list(task._drain_steers())
+
+		self.assertEqual(yielded, [])
+		user_msgs = [m for m in task.history.to_messages() if m["role"] == "user"]
+		self.assertEqual([m["content"] for m in user_msgs], ["original prompt"])
+
+	def test_non_remote_backend_is_noop(self):
+		"""Local/auto backends have no channel -> drain is a no-op (no crash)."""
+		task = self._make_task(create_backend("auto"))
+		self.assertEqual(list(task._drain_steers()), [])
+
+	def test_steer_poll_error_never_crashes_loop(self):
+		"""A backend error during drain is swallowed (run must not crash)."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = RuntimeError("mongo down")
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		task = self._make_task(backend)
+		# Should not raise, yields nothing, history untouched.
+		self.assertEqual(list(task._drain_steers()), [])
+		self.assertEqual(task.history.to_messages(), [])
+
+
 if __name__ == "__main__":
 	unittest.main()
