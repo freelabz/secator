@@ -80,7 +80,7 @@ class nuclei(VulnMulti):
 		# Excludes
 		'exclude_severity': {'type': str, 'short': 'es', 'help': f'Exclude templates based on severities. Possible values: {NUCLEI_SEVERITIES_STR}'},  # noqa: E501
 		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude templates based on tags'},
-		'exclude_templates': {'type': str, 'short': 'et', 'help': 'Exclude templates based on file / directory (comma-separated)'},
+		'exclude_templates': {'type': str, 'short': 'et', 'help': 'Exclude templates based on file / directory (comma-separated)'},  # noqa: E501
 		'exclude_id': {'type': str, 'short': 'eid', 'help': 'Exclude template ids'},
 		'exclude_protocol': {'type': str, 'short': 'ept', 'help': f'Exclude templates based on protocols. Possible values: {NUCLEI_PROTOCOLS_STR}'},  # noqa: E501
 
