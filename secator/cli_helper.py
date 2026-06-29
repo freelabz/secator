@@ -113,6 +113,7 @@ def decorate_command_options(opts):
 			# Keep shell_complete in conf - it's a valid click.option parameter
 			long = f'--{opt_name}'
 			short = f'-{short_opt}' if short_opt else f'-{opt_name}'
+			conf['help'] = conf.get('help', '')
 			if reverse:
 				if opposite:
 					long += f'/--{opposite}'
