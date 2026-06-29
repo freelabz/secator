@@ -39,6 +39,10 @@ HOOKS = [
 
 VALIDATORS = ['validate_input', 'validate_item']
 
+# Placeholder substituted for option values flagged ``sensitive: True`` in any
+# serialized/printed runner state (see Runner.sensitive_opt_names).
+REDACTED_OPT_VALUE = '[REDACTED]'
+
 
 def format_runner_name(runner):
 	"""Format runner name."""
@@ -285,8 +289,53 @@ class Runner:
 		return config
 
 	@property
+	def sensitive_opt_names(self):
+		"""Names of options flagged ``sensitive: True`` in their definition.
+
+		Sensitive option values are redacted from any serialized/printed runner state
+		(``toDict()``, debug echoes, the built command string) so a user-supplied secret
+		(e.g. a BYO addon API key) never lands in the Mongo runner doc, the API response,
+		``--driver api`` egress, or logs. The value still travels in-flight to the worker.
+
+		Resolved once and memoized. Sources, unioned defensively:
+		- a direct task instance's own ``opts``/``meta_opts`` (Command / PythonRunner),
+		- the task classes referenced by this runner's config tree (Task / Workflow / Scan,
+		  which carry no ``opts`` of their own).
+		"""
+		cached = getattr(self, '_sensitive_opt_names_cache', None)
+		if cached is not None:
+			return cached
+		names = set()
+
+		def collect(holder):
+			for attr in ('opts', 'meta_opts'):
+				confs = getattr(holder, attr, None)
+				if isinstance(confs, dict):
+					names.update(k for k, v in confs.items() if isinstance(v, dict) and v.get('sensitive'))
+
+		collect(self)
+		try:
+			from secator.runners.task import Task
+			from secator.tree import build_runner_tree, get_flat_node_list
+			for node in get_flat_node_list(build_runner_tree(self.config)):
+				if node.type != 'task':
+					continue
+				try:
+					collect(Task.get_task_class(node.name))
+				except Exception:
+					continue
+		except Exception:
+			pass
+		self._sensitive_opt_names_cache = names
+		return names
+
+	@property
 	def resolved_opts(self):
-		return {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+		opts = {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+		sensitive = self.sensitive_opt_names
+		if sensitive:
+			opts = {k: (REDACTED_OPT_VALUE if (k in sensitive and v) else v) for k, v in opts.items()}
+		return opts
 
 	@property
 	def resolved_print_opts(self):

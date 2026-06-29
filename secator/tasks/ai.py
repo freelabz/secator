@@ -44,7 +44,7 @@ class ai(PythonRunner):
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": "Mode: attack or chat"},
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
-		"api_key": {"type": str, "default": DEFAULT_API_KEY, "help": "API key for LLM provider"},
+		"api_key": {"type": str, "default": DEFAULT_API_KEY, "sensitive": True, "help": "API key for LLM provider"},
 		"api_base": {"type": str, "default": CONFIG.addons.ai.api_base, "help": "API base URL"},
 		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
 		"max_iterations": {"type": int, "default": 10, "help": "Max iterations"},
