@@ -157,6 +157,9 @@ OUTPUTS_TASKS = {
 	'searchsploit': [
 		Exploit(name='cgi-bin Remote Code Execution', provider='EDB', id='29290', matched_at='apache 2.4.5', confidence='low'),
 	],
+	'shodan': [
+		Ip(ip='8.8.8.8', alive=True, _source='shodan'),
+	],
 	'search_vulns': [
 		Exploit(name='Apache exploit', provider='apache', id='CVE-2019-10081-exploit', matched_at='apache 2.4.39', confidence='high'),
 	],
