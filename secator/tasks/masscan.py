@@ -30,12 +30,12 @@ class masscan(ReconPort):
 	requires_sudo = True
 	opts = {
 		'banners': {'is_flag': True, 'short': 'bn', 'default': False, 'help': 'Grab banners from services'},
-		'connection_timeout': {'type': int, 'short': 'ct', 'default': None, 'help': 'TCP connection timeout in seconds for banner grabbing'},
+		'connection_timeout': {'type': int, 'short': 'ct', 'default': None, 'help': 'TCP connection timeout in seconds for banner grabbing'},  # noqa: E501
 		'source_port': {'type': int, 'short': 'sp', 'default': None, 'help': 'Spoof source port number'},
 		'source_ip': {'type': str, 'short': 'si', 'default': None, 'help': 'Spoof source IP address'},
 		'interface': {'type': str, 'short': 'iface', 'default': None, 'help': 'Network interface to use'},
-		'output_path': {'type': str, 'short': 'oJ', 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},
-		'exclude_ports': {'type': str, 'short': 'ep', 'default': None, 'help': 'Exclude ports from scan', 'internal': True, 'display': True},
+		'output_path': {'type': str, 'short': 'oJ', 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},  # noqa: E501
+		'exclude_ports': {'type': str, 'short': 'ep', 'default': None, 'help': 'Exclude ports from scan', 'internal': True, 'display': True},  # noqa: E501
 		'resume_conf': {'type': str, 'default': None, 'help': 'Path to resume file', 'internal': False, 'display': True},
 		'ttl': {'type': int, 'short': 'ttl', 'default': None, 'help': 'Set TTL', 'requires_sudo': True},
 	}
