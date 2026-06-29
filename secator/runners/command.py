@@ -638,7 +638,7 @@ class Command(Runner):
 	def print_description(self):
 		"""Print description"""
 		if self.sync and not self.has_children and self.caller and self.description and self.print_cmd:
-			self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
+			self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.node_id})[/][/] ...', rich=True)
 
 	def print_command(self):
 		"""Print command."""
