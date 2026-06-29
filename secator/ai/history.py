@@ -124,6 +124,13 @@ class ChatHistory:
 
     messages: List[Dict[str, str]] = field(default_factory=list)
     model: Optional[str] = None
+    # Billed token/cost usage accrued by LLM calls this object makes internally
+    # (history summarization/compaction). The owning `ai` task drains these into
+    # context.ai_tokens so summarization is billed alongside the main loop.
+    billed_tokens: int = 0
+    billed_prompt_tokens: int = 0
+    billed_completion_tokens: int = 0
+    billed_cost: float = 0.0
 
     def add_system(self, content: str) -> None:
         self.messages.append({"role": "system", "content": content})
@@ -389,6 +396,26 @@ class ChatHistory:
         token_str = format_token_count(self.count_tokens(model), icon='arrow_up')
         with console.status(f"[bold orange3]Compacting chat history...[/] [gray42] • {token_str}[/]", spinner="dots"):
             result = call_llm([{"role": "user", "content": prompt}], model, 0.3, api_base, api_key)
+
+        # Record billed usage of the summarization call so the owning task can
+        # roll it into context.ai_tokens. Missing usage counts as 0.
+        usage = result.get("usage") or {}
+        try:
+            self.billed_tokens += int(usage.get("tokens") or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            self.billed_prompt_tokens += int(usage.get("prompt_tokens") or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            self.billed_completion_tokens += int(usage.get("completion_tokens") or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            self.billed_cost += float(usage.get("cost") or 0)
+        except (TypeError, ValueError):
+            pass
 
         self.messages = []
         if initial_system:
