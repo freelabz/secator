@@ -1,3 +1,4 @@
+import copy
 import gc
 import json
 import logging
@@ -322,12 +323,38 @@ class Runner:
 					continue
 				try:
 					collect(Task.get_task_class(node.name))
-				except Exception:
+				except ValueError:
+					# Unknown task name in this node: skip it, but keep scanning the rest.
 					continue
-		except Exception:
-			pass
+		except Exception as e:
+			# Discovery failed for the whole tree: we can't enumerate sensitive opts, so
+			# redaction may be incomplete. Surface it loudly rather than failing silently
+			# (a silent miss here would let a secret through into serialized/printed state).
+			logger.warning('Could not resolve sensitive option names for %s (redaction may be incomplete): %s', getattr(self, 'unique_name', self), e)  # noqa: E501
 		self._sensitive_opt_names_cache = names
 		return names
+
+	@staticmethod
+	def _redact_sensitive(obj, sensitive):
+		"""Recursively mask sensitive option values in a serialized structure (in place).
+
+		Masks the ``default``/``value`` fields of any option-conf dict keyed by a sensitive
+		opt name, and any scalar held directly under a sensitive opt name. Callers must pass
+		a COPY — never the live config — since this mutates ``obj``.
+		"""
+		if isinstance(obj, dict):
+			for k, v in obj.items():
+				if k in sensitive:
+					if isinstance(v, dict):
+						for field in ('default', 'value'):
+							if v.get(field):
+								v[field] = REDACTED_OPT_VALUE
+					elif v and not isinstance(v, (list, dict)):
+						obj[k] = REDACTED_OPT_VALUE
+				Runner._redact_sensitive(v, sensitive)
+		elif isinstance(obj, list):
+			for v in obj:
+				Runner._redact_sensitive(v, sensitive)
 
 	@property
 	def resolved_opts(self):
@@ -1017,6 +1044,17 @@ class Runner:
 				'warnings': [w.toDict() for w in self.warnings],
 			}
 		)
+		# Redact sensitive opt values that also surface as serialized config/opts metadata
+		# (notably an option's `default`, e.g. ai.api_key defaults to CONFIG.addons.ai.api_key
+		# -> the *platform* key would otherwise land in every runner doc). run_opts is already
+		# redacted via resolved_opts. Operate on copies so the live config is never mutated.
+		sensitive = self.sensitive_opt_names
+		if sensitive:
+			data['config'] = copy.deepcopy(data['config'])
+			Runner._redact_sensitive(data['config'], sensitive)
+			if data.get('opts'):
+				data['opts'] = copy.deepcopy(data['opts'])
+				Runner._redact_sensitive(data['opts'], sensitive)
 		return data
 
 	def run_hooks(self, hook_type, *args, sub='hooks'):

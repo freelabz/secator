@@ -1,14 +1,10 @@
-import logging
 import unittest
+import unittest.mock
 
 from secator.runners import Command
 from secator.runners._base import REDACTED_OPT_VALUE
 from secator.runners.task import Task
 from secator.template import TemplateLoader
-from secator.utils import setup_logging
-
-level = logging.ERROR
-setup_logging(level)
 
 
 class SensitiveCmd(Command):
@@ -74,6 +70,34 @@ class TestSensitiveCommandOpts(unittest.TestCase):
 		t = self._build(SensitiveCmd, token='', level=5)
 		self.assertEqual(t.toDict()['run_opts'].get('token'), '')
 
+	def test_print_command_masks_secret(self):
+		"""print_command() (the user-visible logging path) must not emit the real secret."""
+		t = SensitiveCmd('example.com', token='SECRET123', level=5, sync=True, print_cmd=True, run=False)
+		with unittest.mock.patch.object(t, '_print') as mock_print:
+			t.print_command()
+		printed = ' '.join(str(c.args[0]) for c in mock_print.call_args_list)
+		self.assertNotIn('SECRET123', printed)
+		self.assertIn('REDACTED', printed)  # substring: rich-escaping may render it as \[REDACTED\]
+
+	def test_dry_run_info_masks_secret(self):
+		"""The dry-run emission path (yields Info(message=cmd)) must use the redacted command."""
+		t = SensitiveCmd('example.com', token='SECRET123', level=5, sync=True, dry_run=True, print_cmd=False)
+		messages = ' '.join(str(getattr(item, 'message', '')) for item in t)
+		self.assertNotIn('SECRET123', messages)
+		self.assertIn(REDACTED_OPT_VALUE, messages)
+
+	def test_redact_cmd_options_masks_nested_default(self):
+		"""Debug echo of cmd_options must mask both the value and a secret-bearing `default`."""
+		cmd_options = {
+			'token': {'name': '-token', 'value': 'SECRET123',
+					  'conf': {'sensitive': True, 'default': 'PLATFORM_DEFAULT'}},
+			'level': {'name': '-level', 'value': 5, 'conf': {}},
+		}
+		out = Command._redact_cmd_options(cmd_options)
+		self.assertEqual(out['token']['value'], REDACTED_OPT_VALUE)
+		self.assertEqual(out['token']['conf']['default'], REDACTED_OPT_VALUE)
+		self.assertEqual(out['level'], cmd_options['level'])  # untouched
+
 
 class TestSensitiveRunnerOpts(unittest.TestCase):
 	"""The redaction must also apply at the composite-runner level (Task/Workflow/Scan),
@@ -86,6 +110,19 @@ class TestSensitiveRunnerOpts(unittest.TestCase):
 		d = r.toDict()
 		self.assertEqual(d['run_opts'].get('api_key'), REDACTED_OPT_VALUE)
 		self.assertEqual(d['run_opts'].get('model'), 'x')
+
+	def test_serialized_config_does_not_leak_sensitive_default(self):
+		"""An option's `default` can be a platform secret (ai.api_key defaults to the
+		configured key). It must not survive into toDict()['config'] / ['opts']."""
+		import json
+		from secator.tasks.ai import ai
+		with unittest.mock.patch.dict(ai.opts['api_key'], {'default': 'PLATFORM_SECRET_XYZ'}):
+			cfg = TemplateLoader(input={'name': 'ai', 'type': 'task'})
+			r = Task(cfg, inputs=['hi'], run_opts={'api_key': 'USER_SECRET_ABC'})
+			d = r.toDict()
+		blob = json.dumps(d, default=str)
+		self.assertNotIn('PLATFORM_SECRET_XYZ', blob)
+		self.assertNotIn('USER_SECRET_ABC', blob)
 
 
 if __name__ == '__main__':

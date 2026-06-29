@@ -39,6 +39,15 @@ class Command(Runner):
 	cmd_redacted = None
 	_has_sensitive_cmd_opts = False
 
+	@property
+	def cmd_for_display(self):
+		"""The command to show/serialize: redacted when it carries a sensitive opt, else the real cmd.
+
+		Use this anywhere the command is emitted (printed, streamed, persisted, dry-run Info).
+		Never use it to execute — the subprocess must run `self.cmd` with the real value.
+		"""
+		return self.cmd_redacted if self._has_sensitive_cmd_opts else self.cmd
+
 	# Tags
 	tags = []
 	# Meta options
@@ -265,7 +274,7 @@ class Command(Runner):
 		res = super().toDict()
 		res.update(
 			{
-				'cmd': self.cmd_redacted if self._has_sensitive_cmd_opts else self.cmd,
+				'cmd': self.cmd_for_display,
 				'cwd': self.cwd,
 				'return_code': self.return_code,
 			}
@@ -473,7 +482,7 @@ class Command(Runner):
 			if self.dry_run:
 				self.print_description()
 				self.print_command()
-				yield Info(message=self.cmd)
+				yield Info(message=self.cmd_for_display)
 				return
 
 			# Abort if no inputs
@@ -494,7 +503,7 @@ class Command(Runner):
 
 			# In remote worker mode, stream description and cmd back to the client
 			if IN_WORKER and self.print_cmd:
-				cmd_str = _s(self.cmd)
+				cmd_str = _s(self.cmd_for_display)
 				if self.chunk and self.chunk_count:
 					cmd_str += f' ({self.chunk}/{self.chunk_count})'
 				if self.description:
@@ -650,7 +659,7 @@ class Command(Runner):
 
 	def print_command(self):
 		"""Print command."""
-		cmd_display = self.cmd_redacted if self._has_sensitive_cmd_opts else self.cmd
+		cmd_display = self.cmd_for_display
 		if self.print_cmd:
 			icon = self.run_opts.get('print_cmd_icon', self.print_cmd_icon)
 			cmd_str = f'{icon} [bold green]{_s(cmd_display)}[/]'
@@ -659,12 +668,30 @@ class Command(Runner):
 			self._print(cmd_str, rich=True)
 		opts_display = self.cmd_options
 		if self._has_sensitive_cmd_opts:
-			opts_display = {
-				name: ({**oc, 'value': REDACTED_OPT_VALUE} if oc.get('conf', {}).get('sensitive') else oc)
-				for name, oc in self.cmd_options.items()
-			}
+			opts_display = self._redact_cmd_options(self.cmd_options)
 		self.debug('command', obj={'cmd': cmd_display}, sub='start')
 		self.debug('options', obj=opts_display, sub='start')
+
+	@staticmethod
+	def _redact_cmd_options(cmd_options):
+		"""Mask both the resolved value and the (possibly secret) `default` of sensitive opts.
+
+		The option's `default` can itself be a secret — e.g. ai.api_key defaults to the
+		platform key — so masking only the top-level `value` would still leak it via the
+		`conf.default` field in debug output.
+		"""
+		redacted = {}
+		for name, oc in cmd_options.items():
+			conf = oc.get('conf', {})
+			if conf.get('sensitive'):
+				new_conf = {**conf}
+				for field in ('default', 'value'):
+					if new_conf.get(field):
+						new_conf[field] = REDACTED_OPT_VALUE
+				redacted[name] = {**oc, 'value': REDACTED_OPT_VALUE, 'conf': new_conf}
+			else:
+				redacted[name] = oc
+		return redacted
 
 	def handle_file_not_found(self, exc):
 		"""Handle case where binary is not found.
@@ -1159,7 +1186,12 @@ class Command(Runner):
 				value = preprocessor(value)
 			if process and processor:
 				value = processor(value)
-		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
+		if isinstance(opt_conf, dict) and opt_conf.get('sensitive'):
+			log_value = REDACTED_OPT_VALUE if value else value
+			log_values = [REDACTED_OPT_VALUE if v else v for v in opt_values]
+		else:
+			log_value, log_values = value, opt_values
+		debug('got opt value', obj={'name': opt_name, 'value': log_value, 'aliases': opt_names, 'values': log_values}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 		return value
 
 	def _build_cmd(self):
