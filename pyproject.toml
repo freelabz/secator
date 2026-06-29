@@ -95,7 +95,7 @@ ai = [
 	'safecmd'
 ]
 shodan = [
-	'shodan'
+	'shodan < 2'
 ]
 
 [project.scripts]

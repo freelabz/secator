@@ -95,10 +95,12 @@ class shodan(PythonRunner):
 								provider='shodan', confidence='low', tags=['shodan'])
 		for b in (h.get('data') or []):
 			port = b.get('port')
-			if port is None:
+			try:
+				port = int(port)
+			except (TypeError, ValueError):
 				continue
 			yield Port(
-				port=int(port), ip=ip_str, host=host, state='open',
+				port=port, ip=ip_str, host=host, state='open',
 				protocol=b.get('transport', 'tcp'),
 				service_name=b.get('product', '') or '',
 				cpes=b.get('cpe', []) or [],

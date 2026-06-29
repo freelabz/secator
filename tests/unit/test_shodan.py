@@ -1,6 +1,7 @@
 import json
 import os
 import unittest
+import unittest.mock
 
 
 class TestShodanConfig(unittest.TestCase):
@@ -68,3 +69,58 @@ class TestShodanMapping(unittest.TestCase):
         from secator.output_types import Tag
         tags = {t.name for t in self._run() if isinstance(t, Tag)}
         self.assertEqual(tags, {'shodan_org', 'shodan_isp', 'shodan_asn', 'shodan_os'})
+
+
+class TestShodanErrorPaths(unittest.TestCase):
+    """Test yielder() error branches: missing key, no-data warning, generic API error."""
+
+    def _make_task(self, **run_opts):
+        from secator.tasks.shodan import shodan
+        task = shodan.__new__(shodan)
+        task.run_opts = run_opts
+        task.inputs = ['10.0.0.1']
+        return task
+
+    def test_missing_api_key_yields_single_error(self):
+        """No api_key opt, no config key, no env var → exactly one Error, no findings."""
+        from secator.output_types import Error
+        task = self._make_task(api_key='')
+        mock_cfg = unittest.mock.MagicMock()
+        mock_cfg.addons.shodan.api_key = ''
+        env_without_key = {k: v for k, v in os.environ.items() if k != 'SHODAN_API_KEY'}
+        with unittest.mock.patch('secator.tasks.shodan.CONFIG', mock_cfg), \
+             unittest.mock.patch.dict(os.environ, env_without_key, clear=True):
+            results = list(task.yielder())
+        errors = [r for r in results if isinstance(r, Error)]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(errors), 1)
+        self.assertIn('API key', errors[0].message)
+
+    def test_no_information_available_yields_warning_not_error(self):
+        """shodan.APIError('No information available...') → one Warning, zero Errors."""
+        import shodan as shodan_sdk
+        from secator.output_types import Error, Warning
+        task = self._make_task(api_key='testkey')
+        mock_api = unittest.mock.MagicMock()
+        mock_api.host.side_effect = shodan_sdk.APIError('No information available for that IP.')
+        with unittest.mock.patch('shodan.Shodan', return_value=mock_api):
+            results = list(task.yielder())
+        warnings = [r for r in results if isinstance(r, Warning)]
+        errors = [r for r in results if isinstance(r, Error)]
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(len(errors), 0)
+
+    def test_generic_api_error_yields_error(self):
+        """Non-'No information' shodan.APIError → one Error containing the message."""
+        import shodan as shodan_sdk
+        from secator.output_types import Error, Warning
+        task = self._make_task(api_key='testkey')
+        mock_api = unittest.mock.MagicMock()
+        mock_api.host.side_effect = shodan_sdk.APIError('Invalid API key')
+        with unittest.mock.patch('shodan.Shodan', return_value=mock_api):
+            results = list(task.yielder())
+        errors = [r for r in results if isinstance(r, Error)]
+        warnings = [r for r in results if isinstance(r, Warning)]
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(len(warnings), 0)
+        self.assertIn('Invalid API key', errors[0].message)
