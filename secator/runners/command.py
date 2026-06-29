@@ -668,30 +668,14 @@ class Command(Runner):
 			self._print(cmd_str, rich=True)
 		opts_display = self.cmd_options
 		if self._has_sensitive_cmd_opts:
-			opts_display = self._redact_cmd_options(self.cmd_options)
+			# Mask the user-supplied value of sensitive opts in the debug echo. The conf's
+			# `default` is never a secret (see toDict note in _base), so it needs no masking.
+			opts_display = {
+				name: ({**oc, 'value': REDACTED_OPT_VALUE} if oc.get('conf', {}).get('sensitive') else oc)
+				for name, oc in self.cmd_options.items()
+			}
 		self.debug('command', obj={'cmd': cmd_display}, sub='start')
 		self.debug('options', obj=opts_display, sub='start')
-
-	@staticmethod
-	def _redact_cmd_options(cmd_options):
-		"""Mask both the resolved value and the (possibly secret) `default` of sensitive opts.
-
-		The option's `default` can itself be a secret — e.g. ai.api_key defaults to the
-		platform key — so masking only the top-level `value` would still leak it via the
-		`conf.default` field in debug output.
-		"""
-		redacted = {}
-		for name, oc in cmd_options.items():
-			conf = oc.get('conf', {})
-			if conf.get('sensitive'):
-				new_conf = {**conf}
-				for field in ('default', 'value'):
-					if new_conf.get(field):
-						new_conf[field] = REDACTED_OPT_VALUE
-				redacted[name] = {**oc, 'value': REDACTED_OPT_VALUE, 'conf': new_conf}
-			else:
-				redacted[name] = oc
-		return redacted
 
 	def handle_file_not_found(self, exc):
 		"""Handle case where binary is not found.

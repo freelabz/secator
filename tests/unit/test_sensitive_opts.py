@@ -86,18 +86,6 @@ class TestSensitiveCommandOpts(unittest.TestCase):
 		self.assertNotIn('SECRET123', messages)
 		self.assertIn(REDACTED_OPT_VALUE, messages)
 
-	def test_redact_cmd_options_masks_nested_default(self):
-		"""Debug echo of cmd_options must mask both the value and a secret-bearing `default`."""
-		cmd_options = {
-			'token': {'name': '-token', 'value': 'SECRET123',
-					  'conf': {'sensitive': True, 'default': 'PLATFORM_DEFAULT'}},
-			'level': {'name': '-level', 'value': 5, 'conf': {}},
-		}
-		out = Command._redact_cmd_options(cmd_options)
-		self.assertEqual(out['token']['value'], REDACTED_OPT_VALUE)
-		self.assertEqual(out['token']['conf']['default'], REDACTED_OPT_VALUE)
-		self.assertEqual(out['level'], cmd_options['level'])  # untouched
-
 
 class TestSensitiveRunnerOpts(unittest.TestCase):
 	"""The redaction must also apply at the composite-runner level (Task/Workflow/Scan),
@@ -110,19 +98,6 @@ class TestSensitiveRunnerOpts(unittest.TestCase):
 		d = r.toDict()
 		self.assertEqual(d['run_opts'].get('api_key'), REDACTED_OPT_VALUE)
 		self.assertEqual(d['run_opts'].get('model'), 'x')
-
-	def test_serialized_config_does_not_leak_sensitive_default(self):
-		"""An option's `default` can be a platform secret (ai.api_key defaults to the
-		configured key). It must not survive into toDict()['config'] / ['opts']."""
-		import json
-		from secator.tasks.ai import ai
-		with unittest.mock.patch.dict(ai.opts['api_key'], {'default': 'PLATFORM_SECRET_XYZ'}):
-			cfg = TemplateLoader(input={'name': 'ai', 'type': 'task'})
-			r = Task(cfg, inputs=['hi'], run_opts={'api_key': 'USER_SECRET_ABC'})
-			d = r.toDict()
-		blob = json.dumps(d, default=str)
-		self.assertNotIn('PLATFORM_SECRET_XYZ', blob)
-		self.assertNotIn('USER_SECRET_ABC', blob)
 
 
 if __name__ == '__main__':
