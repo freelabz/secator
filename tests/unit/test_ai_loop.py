@@ -308,6 +308,82 @@ class TestFollowUpDispatch(unittest.TestCase):
 
 
 # =============================================================================
+# UNIT TESTS: Remote follow-up persistence (status + top-level choices)
+# =============================================================================
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestRemoteFollowUpPersistence(unittest.TestCase):
+	"""In remote mode, the single persisted follow-up doc must be renderable:
+	status=="pending" + non-empty top-level `choices` (what the web UI reads)."""
+
+	def _run_dispatch(self, backend):
+		"""Drive the real ai._dispatch_and_collect with a minimal fake self.
+
+		Returns (yielded_items, persisted_items) where persisted_items are what
+		add_result() received (i.e. what the mongodb on_item hook would persist).
+		"""
+		from secator.tasks.ai import ai as AiTask
+
+		choices = ["Fuzz parameters", "Run nuclei", "Deep crawl"]
+		follow_up = Ai(
+			content="Presenting actionable next steps",
+			ai_type="follow_up",
+			extra_data={"choices": choices},
+			_context={"tool_call_id": "tc_fu", "tool_call_name": "follow_up"},
+		)
+
+		persisted = []
+
+		class _FakeHistory:
+			def get_action_budget(self, model):
+				return 10000
+
+			def add_tool_result(self, *a, **k):
+				pass
+
+		fake_self = MagicMock()
+		fake_self.backend = backend
+		fake_self.session_id = "sess-123"
+		fake_self.model = "test-model"
+		fake_self.reports_folder = None
+		fake_self.history = _FakeHistory()
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+
+		ctx = MagicMock()
+		ctx.results = []
+
+		def _fake_dispatch_action(action, c):
+			yield follow_up
+
+		with patch("secator.tasks.ai.safe_dispatch_action", _fake_dispatch_action):
+			gen = AiTask._dispatch_and_collect(fake_self, [{"tool_call_id": "tc_fu"}], ctx)
+			yielded = list(gen)
+		return yielded, persisted, follow_up
+
+	def test_remote_follow_up_persisted_pending_with_choices(self):
+		backend = RemoteBackend(timeout=60, query_engine=MagicMock())
+		yielded, persisted, follow_up = self._run_dispatch(backend)
+
+		# Exactly one follow_up Ai is persisted (no duplicate display + pending docs).
+		fu_docs = [p for p in persisted if isinstance(p, Ai) and p.ai_type == "follow_up"]
+		self.assertEqual(len(fu_docs), 1)
+		doc = fu_docs[0]
+		self.assertEqual(doc.status, "pending")
+		self.assertEqual(doc.choices, ["Fuzz parameters", "Run nuclei", "Deep crawl"])
+		self.assertEqual(doc.session_id, "sess-123")
+		# Same object → single doc by _uuid.
+		self.assertIs(doc, follow_up)
+
+	def test_local_follow_up_not_stamped_pending(self):
+		"""CLI/local mode must NOT stamp status=pending (drives the TUI menu directly)."""
+		backend = CLIBackend()
+		yielded, persisted, follow_up = self._run_dispatch(backend)
+		fu_docs = [p for p in persisted if isinstance(p, Ai) and p.ai_type == "follow_up"]
+		self.assertEqual(len(fu_docs), 1)
+		self.assertNotEqual(fu_docs[0].status, "pending")
+
+
+# =============================================================================
 # UNIT TESTS: Backend and tool schema behavior
 # =============================================================================
 
@@ -937,6 +1013,202 @@ class TestMainLoopAutoE2E(unittest.TestCase):
 		# In the main loop, stop_reason would be set and loop exits
 		stop_reason = stopped[0].content
 		self.assertIsNotNone(stop_reason)
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestLoopResilientToActionErrors(unittest.TestCase):
+	"""A Python error during an action dispatch must NOT kill the main loop.
+
+	It must be caught, turned into an Error item fed back to the LLM as that
+	tool call's result, and the loop must continue.
+	"""
+
+	def test_safe_dispatch_catches_exception_and_feeds_back(self):
+		"""safe_dispatch_action converts a raised Exception into an Error item
+		carrying the action's tool_call_id, instead of propagating."""
+		from secator.ai.actions import safe_dispatch_action
+		from secator.output_types import Error
+
+		ctx = _make_ctx(interactive="auto")
+		action = {
+			"action": "shell",
+			"command": "curl http://10.0.0.1",
+			"tool_call_id": "tc_err",
+			"tool_call_name": "run_shell",
+		}
+
+		# Make the shell handler raise the exact failure from the spec.
+		def _boom(*a, **k):
+			raise TypeError("'str' object is not a mapping")
+
+		with patch("secator.ai.actions._handle_shell", _boom):
+			# Must NOT raise.
+			results = list(safe_dispatch_action(action, ctx))
+
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1, "expected exactly one Error item")
+		err = errors[0]
+		# LLM-facing feedback phrasing + the exception type/message.
+		self.assertIn("Action failed with error", err.message)
+		self.assertIn("TypeError", err.message)
+		self.assertIn("'str' object is not a mapping", err.message)
+		self.assertIn("try again", err.message.lower())
+		# Attributed to the failing tool call so it groups into that tool result.
+		self.assertEqual(err._context.get("tool_call_id"), "tc_err")
+		self.assertEqual(err._context.get("tool_call_name"), "run_shell")
+
+	def test_does_not_catch_keyboardinterrupt(self):
+		"""Control-flow exceptions (BaseException) must propagate, not be swallowed."""
+		from secator.ai.actions import safe_dispatch_action
+
+		ctx = _make_ctx(interactive="auto")
+		action = {"action": "shell", "command": "x", "tool_call_id": "tc", "tool_call_name": "run_shell"}
+
+		def _interrupt(*a, **k):
+			raise KeyboardInterrupt()
+			yield  # pragma: no cover - make it a generator
+
+		with patch("secator.ai.actions._handle_shell", _interrupt):
+			with self.assertRaises(KeyboardInterrupt):
+				list(safe_dispatch_action(action, ctx))
+
+	def test_dispatch_and_collect_continues_and_feeds_history(self):
+		"""Drive the real _dispatch_and_collect: a raising action yields an Error,
+		appends an error result to history (LLM-visible), and does NOT raise."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.output_types import Error
+
+		tool_results = []  # (name, tc_id, content) tuples appended to history
+
+		class _FakeHistory:
+			def get_action_budget(self, model):
+				return 10000
+
+			def add_tool_result(self, name, tc_id, content):
+				tool_results.append((name, tc_id, content))
+
+		persisted = []
+		fake_self = MagicMock()
+		fake_self.backend = CLIBackend()
+		fake_self.session_id = "sess-err"
+		fake_self.model = "test-model"
+		fake_self.reports_folder = None
+		fake_self.encryptor = None
+		fake_self.history = _FakeHistory()
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+
+		ctx = MagicMock()
+		ctx.results = []
+
+		action = {
+			"action": "shell",
+			"command": "curl http://10.0.0.1",
+			"tool_call_id": "tc_err",
+			"tool_call_name": "run_shell",
+		}
+
+		def _boom(*a, **k):
+			raise TypeError("'str' object is not a mapping")
+			yield  # pragma: no cover
+
+		with patch("secator.ai.actions._handle_shell", _boom):
+			# Single action → safe_dispatch_action path. Must not raise.
+			gen = AiTask._dispatch_and_collect(fake_self, [action], ctx)
+			yielded = list(gen)
+
+		# An Error item was yielded to the caller (visible in console / persisted).
+		errors = [r for r in yielded if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1)
+
+		# The error reached the LLM-visible history as this tool call's result.
+		self.assertEqual(len(tool_results), 1)
+		name, tc_id, content = tool_results[0]
+		self.assertEqual(tc_id, "tc_err")
+		self.assertIn("error", content.lower())
+		self.assertIn("'str' object is not a mapping", content)
+
+
+# =============================================================================
+# Mid-flight steering: _drain_steers injects pending steers into history
+# =============================================================================
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestDrainSteers(unittest.TestCase):
+	"""The loop's `_drain_steers` drains pending steers and injects them.
+
+	A pending `ai_type:"steer"` doc (user message sent WHILE the agent runs) must
+	be drained at the loop checkpoint, appended to the LLM history as a
+	`[User interjected]: …` user message, echoed as a steer Ai item, and marked
+	consumed — without breaking the loop or the existing follow-up flow.
+	"""
+
+	def _make_task(self, backend, history=None):
+		"""Build a minimal `ai` task with only what _drain_steers reads."""
+		from secator.tasks.ai import ai
+		task = object.__new__(ai)
+		task.backend = backend
+		task.session_id = "steer-sess"
+		task.encryptor = None
+		task.history = history or ChatHistory()
+		task.debug = lambda *a, **k: None
+		return task
+
+	def test_steer_drained_injected_and_consumed(self):
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"content": "actually focus on the API", "_timestamp": 1},
+		]
+		mock_engine.update = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		task = self._make_task(backend)
+
+		yielded = list(task._drain_steers())
+
+		# Injected into history as a user "interjected" message.
+		user_msgs = [m for m in task.history.to_messages() if m["role"] == "user"]
+		self.assertEqual(len(user_msgs), 1)
+		self.assertEqual(user_msgs[-1]["content"], "[User interjected]: actually focus on the API")
+
+		# No echo doc is yielded: the API's pending steer doc is itself the
+		# persisted transcript entry, so a second steer Ai would double-render.
+		self.assertEqual(yielded, [])
+
+		# Marked consumed so it injects exactly once.
+		update_set = mock_engine.update.call_args[0][1]
+		self.assertEqual(update_set["$set"]["status"], "consumed")
+
+	def test_no_steer_is_noop_and_preserves_loop(self):
+		"""No pending steer -> nothing injected, history untouched (loop intact)."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = []
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		history = ChatHistory()
+		history.add_user("original prompt")
+		task = self._make_task(backend, history=history)
+
+		yielded = list(task._drain_steers())
+
+		self.assertEqual(yielded, [])
+		user_msgs = [m for m in task.history.to_messages() if m["role"] == "user"]
+		self.assertEqual([m["content"] for m in user_msgs], ["original prompt"])
+
+	def test_non_remote_backend_is_noop(self):
+		"""Local/auto backends have no channel -> drain is a no-op (no crash)."""
+		task = self._make_task(create_backend("auto"))
+		self.assertEqual(list(task._drain_steers()), [])
+
+	def test_steer_poll_error_never_crashes_loop(self):
+		"""A backend error during drain is swallowed (run must not crash)."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = RuntimeError("mongo down")
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		task = self._make_task(backend)
+		# Should not raise, yields nothing, history untouched.
+		self.assertEqual(list(task._drain_steers()), [])
+		self.assertEqual(task.history.to_messages(), [])
 
 
 if __name__ == "__main__":
