@@ -34,10 +34,10 @@ class masscan(ReconPort):
 		'source_port': {'type': int, 'short': 'sp', 'default': None, 'help': 'Spoof source port number'},
 		'source_ip': {'type': str, 'short': 'si', 'default': None, 'help': 'Spoof source IP address'},
 		'interface': {'type': str, 'short': 'iface', 'default': None, 'help': 'Network interface to use'},
-		'output_path': {'type': str, 'short': 'oJ', 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},  # noqa: E501
 		'exclude_ports': {'type': str, 'short': 'ep', 'default': None, 'help': 'Exclude ports from scan', 'internal': True, 'display': True},  # noqa: E501
 		'resume_conf': {'type': str, 'default': None, 'help': 'Path to resume file', 'internal': False, 'display': True},
 		'ttl': {'type': int, 'short': 'ttl', 'default': None, 'help': 'Set TTL', 'requires_sudo': True},
+		OUTPUT_PATH: {'type': str, 'short': 'oJ', 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},  # noqa: E501
 	}
 	opt_key_map = {
 		DELAY: OPT_NOT_SUPPORTED,
@@ -90,7 +90,7 @@ class masscan(ReconPort):
 
 	@staticmethod
 	def on_cmd(self):
-		self.output_path = self.get_opt_value('output_path') or self.output_path
+		self.output_path = self.get_opt_value(OUTPUT_PATH) or self.output_path
 		self.resume_conf = self.get_opt_value('resume_conf')
 		if self.resume_conf:
 			self.cmd += ' --append-output'
