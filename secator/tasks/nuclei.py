@@ -16,6 +16,12 @@ from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
 
 
+NUCLEI_PROTOCOLS = ['dns', 'file', 'http', 'headless', 'tcp', 'workflow', 'ssl', 'websocket', 'whois', 'code', 'javascript']  # noqa: E501
+NUCLEI_PROTOCOLS_STR = ', '.join(NUCLEI_PROTOCOLS)
+NUCLEI_SEVERITIES = ['info', 'low', 'medium', 'high', 'critical', 'unknown']
+NUCLEI_SEVERITIES_STR = ', '.join(NUCLEI_SEVERITIES)
+
+
 def output_discriminator(self, item):
 	"""Discriminate between Tag and Vulnerability based on severity."""
 	if 'percent' in item:
@@ -39,32 +45,47 @@ class nuclei(VulnMulti):
 	json_flag = '-jsonl'
 	input_chunk_size = 20
 	opts = {
-		'automatic_scan': {'is_flag': True, 'short': 'as', 'help': 'Automatic web scan using wappalyzer technology detection to tags mapping'},  # noqa: E501
-		'bulk_size': {'type': int, 'short': 'bs', 'help': 'Maximum number of hosts to be analyzed in parallel per template'},  # noqa: E501
+		# Debug / stats / format
 		'debug': {'type': str, 'help': 'Debug mode'},
 		'display_templates': {'is_flag': True, 'default': False, 'short': 'dt', 'help': 'Display loaded template names.'},
-		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
-		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude tags'},
 		'hang_monitor': {'is_flag': True, 'short': 'hm', 'default': True, 'help': 'Enable nuclei hang monitoring'},
-		'headless_bulk_size': {'type': int, 'short': 'hbs', 'help': 'Maximum number of headless hosts to be analzyed in parallel per template'},  # noqa: E501
-		'input_mode': {'type': str, 'short': 'im', 'help': 'Mode of input file (list, burp, jsonl, yaml, openapi, swagger)'},
-		'interactsh_server': {'type': str, 'default': None, 'short': 'iserver', 'help': 'InteractSH server url for self-hosted instance (default: oast.pro,oast.live,oast.site,oast.online,oast.fun,oast.me)'},  # noqa: E501
-		'interactsh_token': {'type': str, 'default': None, 'short': 'itoken', 'help': 'InteractSH auth token for self-hosted instance'},  # noqa: E501
-		'no_interactsh': {'is_flag': True, 'default': False, 'short': 'ni', 'help': 'Disable InteractSH server for OAST testing, exclude OAST based templates'},  # noqa: E501
 		'logs': {'is_flag': True, 'internal': True, 'display': True, 'help': 'Log errors (-elog) and traces (-tlog) to output dir'},  # noqa: E501
-		'new_templates': {'type': str, 'short': 'nt', 'help': 'Run only new templates added in latest nuclei-templates release'},  # noqa: E501
-		'no_httpx': {'is_flag': True, 'short': 'nh', 'help': 'Disable httpx probing for non-url inputs'},
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit requests/response pairs in the JSON, JSONL, and Markdown outputs (for findings only)'},  # noqa: E501
-		'response_size_read': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},  # noqa: E501
-		'severity': {'type': str, 'short': 's', 'help': 'Templates to run based on severity. Possible values: info, low, medium, high, critical, unknown'},  # noqa: E501
 		'stats': {'is_flag': True, 'short': 'stats', 'default': True, 'help': 'Display statistics about the running scan'},
 		'stats_json': {'is_flag': True, 'short': 'sj', 'default': True, 'help': 'Display statistics in JSONL(ines) format'},
+
+		# Execution
+		'automatic_scan': {'is_flag': True, 'short': 'as', 'help': 'Automatic web scan using wappalyzer technology detection to tags mapping'},  # noqa: E501
+		'bulk_size': {'type': int, 'short': 'bs', 'help': 'Maximum number of hosts to be analyzed in parallel per template'},  # noqa: E501
+		'headless_bulk_size': {'type': int, 'short': 'hbs', 'help': 'Maximum number of headless hosts to be analzyed in parallel per template'},  # noqa: E501
+		'input_mode': {'type': str, 'short': 'im', 'help': 'Mode of input file (list, burp, jsonl, yaml, openapi, swagger)'},
+		'new_templates': {'type': str, 'short': 'nt', 'help': 'Run only new templates added in latest nuclei-templates release'},  # noqa: E501
+		'response_size_read': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},  # noqa: E501
 		'stats_interval': {'type': str, 'short': 'si', 'help': 'Number of seconds to wait between showing a statistics update'},  # noqa: E501
 		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store reponses'},
-		'tags': {'type': str, 'help': 'Tags'},
-		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
-		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
-		'template_condition': {'type': str, 'short': 'tc', 'help': 'Templates to run based on expression condition (ex: "contains(id, "ssh")")'},  # noqa: E501
+
+		# External
+		'no_httpx': {'is_flag': True, 'short': 'nh', 'help': 'Disable httpx probing for non-url inputs'},
+		'no_interactsh': {'is_flag': True, 'default': False, 'short': 'ni', 'help': 'Disable InteractSH server for OAST testing, exclude OAST based templates'},  # noqa: E501
+		'interactsh_server': {'type': str, 'default': None, 'short': 'iserver', 'help': 'InteractSH server url for self-hosted instance (default: oast.pro,oast.live,oast.site,oast.online,oast.fun,oast.me)'},  # noqa: E501
+		'interactsh_token': {'type': str, 'default': None, 'short': 'itoken', 'help': 'InteractSH auth token for self-hosted instance'},  # noqa: E501
+
+		# Includes
+		'severity': {'type': str, 'short': 's', 'help': f'Include templates based on severity. Possible values: {NUCLEI_SEVERITIES_STR}'},  # noqa: E501
+		'tags': {'type': str, 'help': 'Include templates based on tags'},
+		'templates': {'type': str, 'short': 'it', 'help': 'Include templates based on file / directory (comma-separated)'},
+		'id': {'type': str, 'short': 'id', 'help': 'Include templates based on ids (comma-separated)'},
+		'protocol': {'type': str, 'short': 'pt', 'help': 'Include templates based on protocol types. Possible values: dns, file, http, headless, tcp, workflow, ssl, websocket, whois, code, javascript'},  # noqa: E501
+
+		# Excludes
+		'exclude_severity': {'type': str, 'short': 'es', 'help': f'Exclude templates based on severities. Possible values: {NUCLEI_SEVERITIES_STR}'},  # noqa: E501
+		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude templates based on tags'},
+		'exclude_templates': {'type': str, 'short': 'et', 'help': 'Exclude templates based on file / directory (comma-separated)'},
+		'exclude_id': {'type': str, 'short': 'eid', 'help': 'Exclude template ids'},
+		'exclude_protocol': {'type': str, 'short': 'ept', 'help': f'Exclude templates based on protocols. Possible values: {NUCLEI_PROTOCOLS_STR}'},  # noqa: E501
+
+		# Filter expr
+		'template_condition': {'type': str, 'short': 'tc', 'help': 'Include templates based on expression condition (ex: "contains(id, "ssh")")'},  # noqa: E501
 	}
 	opt_key_map = {
 		HEADER: 'header',
@@ -78,9 +99,15 @@ class nuclei(VulnMulti):
 		USER_AGENT: OPT_NOT_SUPPORTED,
 		# nuclei opts
 		'display_templates': 'vv',
-		'exclude_tags': 'exclude-tags',
-		'exclude_severity': 'exclude-severity',
-		'templates': 't',
+		'severity': 's',
+		'templates': 'it',
+		'id': 'id',
+		'protocol': 'pt',
+		'exclude_severity': 'es',
+		'exclude_tags': 'etags',
+		'exclude_templates': 'et',
+		'exclude_id': 'eid',
+		'exclude_protocol': 'ept',
 		'response_size_read': 'rsr',
 		'store_responses': 'sr',
 		'template_condition': 'tc',
@@ -118,12 +145,14 @@ class nuclei(VulnMulti):
 			'match': 'matched-at',
 			'value': lambda x: nuclei.value_extractor(x),
 			'category': lambda x: 'info',
-			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x, with_tags=True),
+			'tags': lambda x: x['info']['tags'],
+			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
 		},
 		Technology: {
 			'match': 'matched-at',
 			'product': lambda x: nuclei.product_extractor(x),
 			'version': lambda x: nuclei.version_extractor(x),
+			'tags': lambda x: x['info']['tags'],
 			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
 		},
 		Progress: {
@@ -161,7 +190,7 @@ class nuclei(VulnMulti):
 		return None
 
 	@staticmethod
-	def extra_data_extractor(item, with_tags=False):
+	def extra_data_extractor(item):
 		data = {}
 		data['data'] = item.get('extracted-results', [])
 		data['type'] = item.get('type', '')
@@ -172,8 +201,6 @@ class nuclei(VulnMulti):
 		for k, v in item.get('meta', {}).items():
 			data['data'].append(f'{k}: {v}')
 		data['metadata'] = item.get('metadata', {})
-		if with_tags:
-			data['tags'] = item.get('info', {}).get('tags', [])
 		return data
 
 	@staticmethod
