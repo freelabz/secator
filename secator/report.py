@@ -60,6 +60,7 @@ class Report:
 			del data['info']['results']
 		data['info']['title'] = self.title
 		data['info']['errors'] = getattr(self.runner, 'errors', [])
+		data['info']['warnings'] = getattr(self.runner, 'warnings', [])
 
 		# Build context for QueryEngine.
 		# Pass runner.results directly (OutputType objects or dicts) to avoid
