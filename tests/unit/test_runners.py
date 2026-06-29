@@ -918,3 +918,36 @@ class TestIsOwnSource(unittest.TestCase):
 			cmd.unique_name = 'nmap'
 			cmd.results.append(chunk_error)
 			self.assertEqual(cmd.self_errors, [chunk_error])
+
+
+class TestDuplicateCheckGating(unittest.TestCase):
+	"""Duplicate check must run only on the outermost runner.
+
+	A nested runner (has_parent=True) — a task inside a workflow, or a workflow inside
+	a scan — must NOT run its own dedup pass; the outermost runner does it once over its
+	fully-aggregated results. See Runner.__init__ in secator/runners/_base.py.
+	"""
+
+	def test_outermost_runner_dedups(self):
+		"""An outermost runner (has_parent defaults to False) keeps the duplicate check on."""
+		cmd = MyCommand(TARGETS)
+		self.assertFalse(cmd.has_parent)
+		self.assertTrue(cmd.enable_duplicate_check)
+
+	def test_nested_runner_does_not_dedup(self):
+		"""A nested runner (has_parent=True) has its duplicate check disabled by default."""
+		cmd = MyCommand(TARGETS, has_parent=True)
+		self.assertTrue(cmd.has_parent)
+		self.assertFalse(cmd.enable_duplicate_check)
+
+	def test_nested_runner_respects_explicit_enable_override(self):
+		"""An explicit enable_duplicate_check=True override wins even when nested."""
+		cmd = MyCommand(TARGETS, has_parent=True, enable_duplicate_check=True)
+		self.assertTrue(cmd.has_parent)
+		self.assertTrue(cmd.enable_duplicate_check)
+
+	def test_outermost_runner_respects_explicit_disable_override(self):
+		"""An explicit enable_duplicate_check=False override wins on an outermost runner."""
+		cmd = MyCommand(TARGETS, enable_duplicate_check=False)
+		self.assertFalse(cmd.has_parent)
+		self.assertFalse(cmd.enable_duplicate_check)
