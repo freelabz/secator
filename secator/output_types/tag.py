@@ -36,7 +36,12 @@ class Tag(OutputType):
 
 	def __rich__(self) -> str:
 		content = self.value
-		s = rf'🏷️ \[[bold yellow]{_s(self.category)}[/]] [bold magenta]{_s(self.name)}[/]'
+		category_color = {
+			'error': 'bold dark_orange3',
+			'secret': 'bold red3',
+		}
+		color = category_color.get(self.category, 'bold yellow')
+		s = rf'🏷️  \[[{color}]{_s(self.category)}[/]] [bold magenta]{_s(self.name)}[/]'
 		small_content = False
 		if len(content) < 100:
 			small_content = True
@@ -45,6 +50,9 @@ class Tag(OutputType):
 			s += f' [bold orange4]{_s(content)}[/]'
 		if self.match != content:
 			s += f' found @ [bold]{_s(self.match)}[/]'
+		if self.tags:
+			tags_str = ','.join(self.tags)
+			s += rf' \[[cyan]{_s(tags_str)}[/]]'
 		ed = ''
 		if self.stored_response_path:
 			s += rf' [link=file://{self.stored_response_path}]:incoming_envelope:[/]'
@@ -67,7 +75,7 @@ class Tag(OutputType):
 				if k == 'content' and not small_content:
 					ed += f'\n    [bold red]{_s(k)}[/]:{sep}[yellow]{_s(v)}[/]'
 				else:
-					ed += f'\n    [dim red]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
+					ed += f'\n    [bold dim magenta]{_s(k)}[/]:{sep}[dim yellow]{_s(v)}[/]'
 		if ed:
 			s += ed
 		return s
