@@ -94,6 +94,9 @@ ai = [
 	'litellm < 2',
 	'safecmd'
 ]
+shodan = [
+	'shodan'
+]
 
 [project.scripts]
 secator = 'secator.cli:cli'
