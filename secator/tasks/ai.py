@@ -4,7 +4,6 @@ import json
 import uuid
 from itertools import groupby
 from pathlib import Path
-from time import sleep
 from typing import Generator
 
 from secator.config import CONFIG
@@ -339,6 +338,7 @@ class ai(PythonRunner):
 		iteration = 0
 		query_extensions = 0
 		empty_streak = 0
+		rate_limit_streak = 0
 		self._context_warnings_shown = set()
 
 		while iteration < self.max_iterations:
@@ -372,6 +372,9 @@ class ai(PythonRunner):
 				msg = format_llm_status(token_count, ctx_window, by_role)
 				with maybe_status(msg, spinner="dots"):
 					result = call_llm(messages, self.model, self.temp, self.api_base, self.api_key, tools=self.tool_schemas)
+
+				# reset rate-limit guard on success
+				rate_limit_streak = 0
 
 				content = result["content"]
 				tool_calls = result.get("tool_calls", [])
@@ -481,9 +484,14 @@ class ai(PythonRunner):
 
 			except Exception as e:
 				if isinstance(e, litellm.RateLimitError):
-					yield Warning(message="Rate limit exceeded - waiting 5s and retry in the next iteration")
-					iteration -= 1
-					sleep(5)
+					# call_llm already backed off (~2/4/8s); don't re-sleep. Bound consecutive
+					# 429s so a persistent rate limit can't spin forever; let iteration advance.
+					rate_limit_streak += 1
+					if rate_limit_streak >= 4:
+						yield Error(message="Rate limit exceeded on 4 consecutive attempts - aborting. Check your provider quota/billing.")
+						self._save_history()
+						return
+					yield Warning(message=f"Rate limit exceeded (attempt {rate_limit_streak}/4) - retrying in the next iteration")
 					continue
 				elif isinstance(e, litellm.AuthenticationError):
 					yield Error(message=str(e))

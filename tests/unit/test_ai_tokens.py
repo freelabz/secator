@@ -361,5 +361,62 @@ class TestAiTokenAccountingEndToEnd(unittest.TestCase):
 		self.assertAlmostEqual(task.context["ai_cost"], 0.0025)
 
 
+@unittest.skipUnless(HAS_AI, 'ai addon required')
+class TestAiRateLimitTermination(unittest.TestCase):
+	"""A persistent 429 must terminate the loop after a bounded number of failures (H1)."""
+
+	def _make_loop_task(self, max_iterations):
+		task = _make_task()
+		task.inputs = []
+		task.model = "test-model"
+		task.intent_model = "test-model"
+		task.temp = 0.7
+		task.api_base = None
+		task.api_key = "key"
+		task.max_iterations = max_iterations
+		task.max_tokens_total = 100000
+		task.max_workers = 1
+		task.is_subagent = True
+		task.verbose = False
+		task.dry_run = False
+		task.mode = "chat"
+		task.scope = "workspace"
+		task.results = []
+		task.encryptor = None
+		task.tool_schemas = []
+		task.permission_engine = None
+		task.dangerous = True
+		task.interactive = "auto"
+		task._sync = True
+		task.session_id = "s"
+		task._reports_folder = None
+		task.debug = lambda *a, **k: None
+		task.add_result = lambda *a, **k: None
+		from secator.ai.interactivity import create_backend
+		task.backend = create_backend("auto")
+		return task
+
+	def test_persistent_rate_limit_aborts_bounded(self):
+		"""A 429 on every call_llm aborts after 4 attempts, regardless of max_iterations."""
+		import litellm
+		from secator.output_types import Error
+
+		task = self._make_loop_task(max_iterations=50)
+		calls = {"n": 0}
+
+		def always_rate_limited(*args, **kwargs):
+			calls["n"] += 1
+			raise litellm.RateLimitError("rate limited", "openai", "test-model")
+
+		with _loop_patches(task, always_rate_limited):
+			results = list(task._run_loop())
+
+		# bounded by the 4-consecutive-429 cap, not the 50-iteration budget
+		self.assertEqual(calls["n"], 4)
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertTrue(errors, "expected an Error to be yielded on abort")
+		self.assertIn("Rate limit", errors[-1].message)
+
+
 if __name__ == '__main__':
 	unittest.main()
