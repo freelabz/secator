@@ -986,5 +986,22 @@ class TestRunBatch(unittest.TestCase):
         self.assertIsInstance(results[0], Warning)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestCheckGuardrailsFailClosed(unittest.TestCase):
+	"""H10: prompts exhausted with the decision still 'ask' must fail CLOSED (deny)."""
+
+	def test_unresolved_after_max_rounds_denies(self):
+		from secator.ai.actions import check_guardrails_sync
+		# permission engine that never resolves: always 'ask', no shell/target/path layer
+		res = MagicMock(decision="ask", shell_command="", targets=[], paths=[], reason="needs approval")
+		engine = MagicMock()
+		engine.check_action.return_value = res
+		ctx = ActionContext(targets=['t.com'], model='m')
+		ctx.permission_engine = engine
+		denial, _items = check_guardrails_sync({"action": "shell", "command": "x"}, ctx)
+		self.assertIsNotNone(denial, "exhausted-but-unresolved guardrail must deny, not return None")
+		self.assertIn("unresolved", denial)
+
+
 if __name__ == '__main__':
 	unittest.main()
