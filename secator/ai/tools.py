@@ -37,7 +37,7 @@ TOOL_SCHEMAS = {
 					},
 					"opts": {
 						"type": "object",
-						"description": "Optional task-specific options (e.g. ports, rate_limit, timeout)."
+						"description": "Optional task-specific options (e.g. ports, rate_limit). Control/security flags are ignored."
 					}
 				},
 				"required": ["name", "targets"]
@@ -63,7 +63,7 @@ TOOL_SCHEMAS = {
 					},
 					"opts": {
 						"type": "object",
-						"description": "Optional workflow options (e.g. profiles)."
+						"description": "Optional workflow options (e.g. profiles). Control/security flags are ignored."
 					}
 				},
 				"required": ["name", "targets"]
