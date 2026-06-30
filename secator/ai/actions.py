@@ -385,6 +385,46 @@ def _is_heavy_runner(runner_type: str, name: str, opts: dict = None) -> bool:
 	return profile in _HEAVY_PROFILES
 
 
+# Framework control/security keys the LLM must never set on a spawned sub-runner
+# (esp. `dangerous`, which skips the permission engine). Task/workflow scan opts
+# (nmap ports, httpx rate_limit, ...) are not control keys and pass through.
+_FORBIDDEN_CHILD_OPT_KEYS = frozenset({
+	"dangerous",
+	"interactive",
+	"hooks",
+	"sync",
+	"subagent",
+	"tty",
+	"dry_run",
+	"exporters",
+	"enable_reports",
+})
+
+# Cap a spawned subagent's iteration budget so it can't be told to loop unbounded.
+_MAX_CHILD_ITERATIONS = 25
+
+
+def _sanitize_child_opts(opts: Any) -> Dict:
+	"""Drop LLM-settable control/security keys from sub-runner opts; clamp max_iterations."""
+	if not isinstance(opts, dict):
+		return {}
+	clean = {}
+	for key, value in opts.items():
+		k = str(key)
+		if k in _FORBIDDEN_CHILD_OPT_KEYS or k.startswith("print_"):
+			continue
+		clean[key] = value
+	# Clamp the AI-subagent iteration budget (bool is an int subclass — drop it).
+	mi = clean.get("max_iterations")
+	if isinstance(mi, bool):
+		clean.pop("max_iterations", None)
+	elif isinstance(mi, (int, float)):
+		clean["max_iterations"] = max(1, min(int(mi), _MAX_CHILD_ITERATIONS))
+	elif mi is not None:
+		clean.pop("max_iterations", None)
+	return clean
+
+
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
 	"""Execute a secator task or workflow.
 
@@ -395,13 +435,17 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	"""
 	name = action.get("name", "")
 	targets = action.get("targets", ctx.targets)
-	opts = action.get("opts", {})
+	# drop LLM-set control keys (notably `dangerous`) before they reach the child
+	opts = _sanitize_child_opts(action.get("opts", {}))
 	context = _get_result_context(action, ctx)
 
 	# Force subagent flags when spawning an AI task from a parent AI task
 	if runner_type == "task" and name.lower() == "ai":
 		opts["subagent"] = True
 		opts["interactive"] = False
+
+	# defense in depth: a spawned runner is never dangerous (CLI --dangerous unaffected)
+	opts["dangerous"] = False
 
 	if runner_type == "task":
 		tpl = TemplateLoader(input={'type': 'task', 'name': name})

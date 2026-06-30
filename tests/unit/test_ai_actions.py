@@ -10,7 +10,8 @@ if ADDONS_ENABLED['ai']:
 	from secator.ai.actions import (
 		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
 		_handle_query, _handle_add_finding, _run_runner, _decrypt_dict,
-		_build_hooks_from_context, _coerce_finding_fields
+		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
+		_MAX_CHILD_ITERATIONS
 	)
 	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
 
@@ -408,6 +409,97 @@ class TestRunRunner(unittest.TestCase):
 
 		_, kwargs = mock_task_cls.call_args
 		self.assertEqual(kwargs.get('context', {}).get('session_id'), 'from-context')
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSanitizeChildOpts(unittest.TestCase):
+	"""Tests for _sanitize_child_opts (C1: LLM-supplied subagent opts allow-list)."""
+
+	def test_strips_dangerous_and_control_keys(self):
+		opts = {
+			'dangerous': True, 'interactive': 'local', 'hooks': {'x': 1},
+			'sync': False, 'subagent': True, 'tty': True, 'dry_run': True,
+			'exporters': ['csv'], 'enable_reports': False,
+		}
+		clean = _sanitize_child_opts(opts)
+		self.assertEqual(clean, {})
+
+	def test_strips_print_star_keys(self):
+		clean = _sanitize_child_opts({'print_cmd': True, 'print_item': False, 'print_anything': 1})
+		self.assertEqual(clean, {})
+
+	def test_keeps_benign_task_opts(self):
+		clean = _sanitize_child_opts({'ports': '80,443', 'rate_limit': 100, 'mode': 'attack'})
+		self.assertEqual(clean, {'ports': '80,443', 'rate_limit': 100, 'mode': 'attack'})
+
+	def test_clamps_max_iterations(self):
+		clean = _sanitize_child_opts({'max_iterations': 9999})
+		self.assertEqual(clean['max_iterations'], _MAX_CHILD_ITERATIONS)
+		clean = _sanitize_child_opts({'max_iterations': 5})
+		self.assertEqual(clean['max_iterations'], 5)
+		# bool / non-numeric max_iterations is dropped (bool is an int subclass)
+		self.assertNotIn('max_iterations', _sanitize_child_opts({'max_iterations': True}))
+		self.assertNotIn('max_iterations', _sanitize_child_opts({'max_iterations': 'lots'}))
+
+	def test_non_dict_returns_empty(self):
+		self.assertEqual(_sanitize_child_opts(None), {})
+		self.assertEqual(_sanitize_child_opts('dangerous'), {})
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_neutralizes_dangerous_and_interactive(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""C1: an LLM emitting opts={'dangerous': True, 'interactive': 'local'} must NOT
+		propagate either into the spawned child's run_opts — dangerous is forced False
+		and interactive (a control key) is stripped."""
+		mock_build_hooks.return_value = {}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		action = {
+			'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1'],
+			'opts': {'dangerous': True, 'interactive': 'local', 'ports': '80'},
+		}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		run_opts = kwargs.get('run_opts', {})
+		self.assertEqual(run_opts.get('dangerous'), False)
+		self.assertNotEqual(run_opts.get('interactive'), 'local')
+		# benign task opt still passes through
+		self.assertEqual(run_opts.get('ports'), '80')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_ai_subagent_forced_flags_over_llm_opts(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""Spawning an `ai` subagent with hostile opts: subagent forced True,
+		interactive forced False, dangerous forced False regardless of LLM input."""
+		mock_build_hooks.return_value = {}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		action = {
+			'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'],
+			'opts': {'dangerous': True, 'interactive': 'local', 'subagent': False},
+		}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		run_opts = kwargs.get('run_opts', {})
+		self.assertEqual(run_opts.get('dangerous'), False)
+		self.assertEqual(run_opts.get('interactive'), False)
+		self.assertEqual(run_opts.get('subagent'), True)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
