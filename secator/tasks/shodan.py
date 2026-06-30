@@ -30,6 +30,7 @@ class shodan(PythonRunner):
 		'resolver': {'type': str, 'default': 'local', 'help': 'host mode: hostname resolver — local | shodan'},
 		'record_types': {'type': list, 'default': ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT', 'SOA'],
 						 'help': 'dns mode: DNS record types to emit'},
+		'limit': {'type': int, 'default': 100, 'help': 'search mode: max results (one page = 100)'},
 	}
 
 	def yielder(self):
@@ -142,7 +143,35 @@ class shodan(PythonRunner):
 		return None
 
 	def _run_search(self, api, shodan_sdk):
-		yield Error(message='search mode not implemented yet')
+		query = ' '.join(self.inputs).strip()
+		if not query:
+			yield Error(message='Shodan search requires a query (pass it as the input).')
+			return
+		limit = self.get_opt_value('limit') or 100
+		try:
+			result = api.search(query, limit=limit)
+		except shodan_sdk.APIError as e:
+			yield Error(message=f'Shodan search error: {e}')
+			return
+		yield Tag(name='shodan_search_total', value=str(result.get('total', 0)),
+				  match=query, category='info', tags=['shodan'])
+		for match in (result.get('matches') or []):
+			ip_str = match.get('ip_str')
+			if not ip_str:
+				continue
+			host = (match.get('hostnames') or [''])[0]
+			yield Ip(
+				ip=ip_str, host=host, alive=True,
+				extra_data=self._compact({'os': match.get('os'), 'org': match.get('org'),
+										  'isp': match.get('isp'), 'asn': match.get('asn')}),
+				tags=['shodan'],
+			)
+			seen = set()
+			for name in (match.get('hostnames') or []):
+				if name and name not in seen:
+					seen.add(name)
+					yield Subdomain(host=name, domain=self._registered_domain(name), sources=['shodan'])
+			yield from self._map_banner(match, ip_str, host)
 
 	def _map_host(self, h, ip, host):
 		ip_str = h.get('ip_str', ip)
@@ -245,3 +274,9 @@ class shodan(PythonRunner):
 			with patch_shodan, patch_dns:
 				yield
 		return _ctx()
+
+	@staticmethod
+	def validate_input(self, inputs):
+		# In search mode the input is a free-text Shodan query (e.g. "apache country:US"),
+		# not a HOST/IP — accept it. host/dns inputs are still typed via input_types.
+		return True

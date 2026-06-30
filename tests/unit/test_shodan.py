@@ -163,3 +163,47 @@ class TestShodanDns(unittest.TestCase):
         from secator.output_types import Record
         recs = [r for r in self._run(record_types=['MX']) if isinstance(r, Record)]
         self.assertEqual({r.type for r in recs}, {'MX'})
+
+
+def _load_search_fixture():
+    path = os.path.join(os.path.dirname(__file__), '..', 'fixtures', 'shodan_search_output.json')
+    with open(path) as f:
+        return json.load(f)
+
+
+class TestShodanSearch(unittest.TestCase):
+    def _run(self):
+        import unittest.mock as m
+        from secator.tasks.shodan import shodan
+        task = shodan.__new__(shodan)
+        task.inputs = ['apache country:US']
+        task.run_opts = {'limit': 100}
+        mock_api = m.MagicMock()
+        mock_api.search.return_value = _load_search_fixture()
+        import shodan as sdk
+        with m.patch('shodan.Shodan', return_value=mock_api):
+            return list(task._run_search(mock_api, sdk))
+
+    def test_emits_total_tag(self):
+        from secator.output_types import Tag
+        tags = [t for t in self._run() if isinstance(t, Tag) and t.name == 'shodan_search_total']
+        self.assertEqual(len(tags), 1)
+        self.assertEqual(tags[0].value, '2')
+
+    def test_emits_ip_per_match(self):
+        from secator.output_types import Ip
+        ips = sorted(i.ip for i in self._run() if isinstance(i, Ip))
+        self.assertEqual(ips, ['10.0.0.1', '10.0.0.2'])
+
+    def test_emits_ports_low_confidence(self):
+        from secator.output_types import Port
+        ports = [p for p in self._run() if isinstance(p, Port)]
+        self.assertEqual(sorted(p.port for p in ports), [22, 80])
+        for p in ports:
+            self.assertEqual(p.confidence, 'low')
+
+    def test_emits_banner_vuln_low_confidence(self):
+        from secator.output_types import Vulnerability
+        vulns = [v for v in self._run() if isinstance(v, Vulnerability)]
+        self.assertTrue(any(v.name == 'CVE-2021-23017' and v.confidence == 'low'
+                            and v.cvss_score == 9.8 for v in vulns))
