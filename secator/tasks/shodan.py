@@ -27,6 +27,9 @@ class shodan(PythonRunner):
 		'api_key': {'type': str, 'default': '', 'help': 'Shodan API key (defaults to configured key)'},
 		'history': {'is_flag': True, 'default': False, 'help': 'Include historical (non-current) banners'},
 		'minify': {'is_flag': True, 'default': False, 'help': 'Only ports + general host info (no banners)'},
+		'resolver': {'type': str, 'default': 'local', 'help': 'host mode: hostname resolver — local | shodan'},
+		'record_types': {'type': list, 'default': ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT', 'SOA'],
+						 'help': 'dns mode: DNS record types to emit'},
 	}
 
 	def yielder(self):
@@ -64,11 +67,21 @@ class shodan(PythonRunner):
 			ip, hostname = target, ''
 			if not self._is_ip(target):
 				hostname = target
-				try:
-					ip = socket.gethostbyname(target)
-				except (socket.gaierror, OSError) as e:
-					yield Error(message=f'Could not resolve {target}: {e}')
-					continue
+				if (self.get_opt_value('resolver') or 'local') == 'shodan':
+					try:
+						ip = self._shodan_resolve(api, target)
+					except shodan_sdk.APIError as e:
+						yield Error(message=f'Shodan DNS resolve failed for {target}: {e}')
+						continue
+					if not ip:
+						yield Error(message=f'Shodan DNS has no A record for {target}')
+						continue
+				else:
+					try:
+						ip = socket.gethostbyname(target)
+					except (socket.gaierror, OSError) as e:
+						yield Error(message=f'Could not resolve {target}: {e}')
+						continue
 			try:
 				data = api.host(ip, history=history, minify=minify)
 			except shodan_sdk.APIError as e:
@@ -82,7 +95,51 @@ class shodan(PythonRunner):
 			yield from self._map_host(data, ip, host)
 
 	def _run_dns(self, api, shodan_sdk):
-		yield Error(message='dns mode not implemented yet')
+		record_types = [str(t).upper() for t in (self.get_opt_value('record_types') or [])]
+		for domain in self.inputs:
+			try:
+				info = api.dns.domain_info(domain)
+			except shodan_sdk.APIError as e:
+				msg = str(e)
+				if 'No information' in msg or 'Invalid' in msg:
+					yield Warning(message=f'No Shodan DNS data for {domain}')
+				else:
+					yield Error(message=f'Shodan DNS error for {domain}: {msg}')
+				continue
+			yield from self._map_dns(domain, info, record_types)
+
+	def _map_dns(self, domain, info, record_types):
+		for r in (info.get('data') or []):
+			rtype = str(r.get('type') or '').upper()
+			if record_types and rtype not in record_types:
+				continue
+			sub = r.get('subdomain') or ''
+			fqdn = f'{sub}.{domain}' if sub else domain
+			value = r.get('value')
+			yield Record(
+				name=fqdn, type=rtype, host=domain,
+				extra_data=self._compact({'value': value, 'last_seen': r.get('last_seen'), 'ports': r.get('ports')}),
+				tags=['shodan'],
+			)
+			if rtype in ('A', 'AAAA') and value and self._is_public_ip(value):
+				yield Ip(ip=value, host=fqdn, alive=True, tags=['shodan'])
+		seen = set()
+		for sub in (info.get('subdomains') or []):
+			host = f'{sub}.{domain}'
+			if host not in seen:
+				seen.add(host)
+				yield Subdomain(host=host, domain=domain, sources=['shodan'])
+
+	def _shodan_resolve(self, api, host):
+		"""Resolve a hostname to an IP via Shodan DNS (no local resolver). Returns the
+		first matching A-record value, or None."""
+		domain = self._registered_domain(host)
+		sub = host[:-len(domain)].rstrip('.') if host != domain else ''
+		info = api.dns.domain_info(domain)
+		for r in (info.get('data') or []):
+			if str(r.get('type')) == 'A' and (r.get('subdomain') or '') == sub:
+				return r.get('value')
+		return None
 
 	def _run_search(self, api, shodan_sdk):
 		yield Error(message='search mode not implemented yet')
@@ -153,6 +210,13 @@ class shodan(PythonRunner):
 		try:
 			ipaddress.ip_address(value)
 			return True
+		except ValueError:
+			return False
+
+	@staticmethod
+	def _is_public_ip(value):
+		try:
+			return ipaddress.ip_address(value).is_global
 		except ValueError:
 			return False
 

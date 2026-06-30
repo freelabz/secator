@@ -4,6 +4,12 @@ import unittest
 import unittest.mock
 
 
+def _load_dns_fixture():
+    path = os.path.join(os.path.dirname(__file__), '..', 'fixtures', 'shodan_dns_output.json')
+    with open(path) as f:
+        return json.load(f)
+
+
 class TestShodanConfig(unittest.TestCase):
     def test_addon_defaults(self):
         from secator.config import CONFIG
@@ -124,3 +130,36 @@ class TestShodanErrorPaths(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertEqual(len(warnings), 0)
         self.assertIn('Invalid API key', errors[0].message)
+
+
+class TestShodanDns(unittest.TestCase):
+    def _run(self, record_types=None):
+        from secator.tasks.shodan import shodan
+        task = shodan.__new__(shodan)
+        types = record_types or ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT', 'SOA']
+        return list(task._map_dns('example.com', _load_dns_fixture(), types))
+
+    def test_emits_record_per_type(self):
+        from secator.output_types import Record
+        recs = [r for r in self._run() if isinstance(r, Record)]
+        types = sorted({r.type for r in recs})
+        self.assertEqual(types, ['A', 'AAAA', 'MX', 'TXT'])
+        a = next(r for r in recs if r.type == 'A' and r.name == 'www.example.com')
+        self.assertEqual(a.host, 'example.com')
+        self.assertEqual(a.extra_data.get('value'), '93.184.216.34')
+
+    def test_ip_only_for_public_a_aaaa(self):
+        from secator.output_types import Ip
+        ips = sorted({i.ip for i in self._run() if isinstance(i, Ip)})
+        # public A + AAAA only; the 10.0.0.5 private A is excluded
+        self.assertEqual(ips, ['2606:2800:220:1:248:1893:25c8:1946', '93.184.216.34'])
+
+    def test_emits_subdomains_from_list(self):
+        from secator.output_types import Subdomain
+        subs = sorted({s.host for s in self._run() if isinstance(s, Subdomain)})
+        self.assertEqual(subs, ['mail.example.com', 'www.example.com'])
+
+    def test_record_types_filter(self):
+        from secator.output_types import Record
+        recs = [r for r in self._run(record_types=['MX']) if isinstance(r, Record)]
+        self.assertEqual({r.type for r in recs}, {'MX'})
