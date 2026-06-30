@@ -610,6 +610,55 @@ class TestDefaultPermissions(unittest.TestCase):
 		self.assertEqual(result.decision, "ask")
 		self.assertIn("rm", result.shell_command)
 
+	# === Exec-wrapper laundering (C2) + destructive deny (H6) ===
+
+	def test_timeout_wrapper_does_not_launder_destructive_rm(self):
+		"""`timeout 60 rm -rf /` must NOT auto-allow via the timeout wrapper (C2 + H6)."""
+		engine = self._engine()
+		result = engine.check_action({"action": "shell", "command": "timeout 60 rm -rf /"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_xargs_wrapper_does_not_launder_inner_command(self):
+		"""`xargs ... rm ...` must not auto-allow via the xargs wrapper (C2)."""
+		engine = self._engine()
+		result = engine.check_action({"action": "shell", "command": "xargs -I{} rm -rf {}"})
+		# Inner rm is unknown (not root-destructive) -> prompt, never silent allow.
+		self.assertEqual(result.decision, "ask")
+
+	def test_timeout_wrapper_restores_interpreter_ask_gate(self):
+		"""Wrapping an interpreter (`timeout 60 bash -c ...`) must keep the ask gate (C2)."""
+		engine = self._engine()
+		result = engine.check_action({"action": "shell", "command": "timeout 60 bash -c 'rm -rf /'"})
+		self.assertEqual(result.decision, "ask")
+
+	def test_sudo_wrapper_does_not_launder_destructive_rm(self):
+		"""`sudo rm -rf /` must be denied, not laundered through sudo (C2 + H6)."""
+		engine = self._engine()
+		result = engine.check_action({"action": "shell", "command": "sudo rm -rf /"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_destructive_root_rm_denied(self):
+		"""Bare `rm -rf /` (and one level under /) must be denied (H6)."""
+		engine = self._engine()
+		self.assertEqual(
+			engine.check_action({"action": "shell", "command": "rm -rf /"}).decision, "deny")
+		self.assertEqual(
+			engine.check_action({"action": "shell", "command": "rm -rf /etc"}).decision, "deny")
+
+	def test_scoped_rm_still_prompts_not_denied(self):
+		"""Scoped `rm -rf /tmp/x` is not catastrophic -> prompt (not silent allow/deny) (H6)."""
+		engine = self._engine()
+		result = engine.check_action({"action": "shell", "command": "rm -rf /tmp/data/x"})
+		self.assertEqual(result.decision, "ask")
+
+	def test_wrapper_preserves_allowed_inner_command(self):
+		"""`timeout 60 curl ...` must not regress: curl stays allowed at the action level."""
+		engine = self._engine(targets=["10.0.0.1"])
+		# Inner curl is allow-listed; the unknown URL target is what triggers the ask,
+		# proving the wrapper was peeled and curl recognised (not denied).
+		result = engine.check_action({"action": "shell", "command": "timeout 60 curl http://10.0.0.1/x"})
+		self.assertEqual(result.decision, "allow")
+
 	# === Should NOT trigger approval (allow) ===
 
 	def test_read_file_in_workspace(self):
