@@ -201,7 +201,6 @@ class MongodbAddon(StrictModel):
 		'is_false_positive',
 		'is_acknowledged',
 		'verified',
-		'status',
 		'tags',
 	]
 
@@ -217,7 +216,6 @@ class SqliteAddon(StrictModel):
 		'is_false_positive',
 		'is_acknowledged',
 		'verified',
-		'status',
 		'tags',
 	]
 
