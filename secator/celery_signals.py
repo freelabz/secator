@@ -15,6 +15,32 @@ IDLE_TIMEOUT = CONFIG.celery.worker_kill_after_idle_seconds
 STATE_DIR = Path("/tmp/celery_state")
 STATE_DIR.mkdir(exist_ok=True, parents=True)
 
+# Eviction flag. On worker shutdown (e.g. a K8s pod SIGTERM eviction) we raise this flag; the
+# running task's monitor thread (in the prefork child, a separate process) polls it via a file
+# and stops early, returning partial results so the surrounding chord proceeds — instead of the
+# task hanging until the broker visibility timeout redelivers it (hours, on the long pool).
+SHUTDOWN_FLAG = STATE_DIR / "worker_shutdown"
+
+
+def is_worker_shutting_down():
+	"""True once the worker has begun shutting down (set by worker_shutting_down_handler)."""
+	return SHUTDOWN_FLAG.exists()
+
+
+def clear_shutdown_flag():
+	"""Remove the eviction flag (called on worker boot to drop any stale flag)."""
+	if SHUTDOWN_FLAG.exists():
+		SHUTDOWN_FLAG.unlink()
+
+
+def worker_shutting_down_handler(**kwargs):
+	"""Raise the eviction flag so the in-flight task's monitor stops it early and returns."""
+	try:
+		SHUTDOWN_FLAG.parent.mkdir(parents=True, exist_ok=True)
+		SHUTDOWN_FLAG.write_text("1")
+	except OSError as e:
+		console.print(Info(message=f'Failed to raise worker shutdown flag: {e}'))
+
 
 def get_lock_file_path():
 	worker_name = os.environ.get("WORKER_NAME", f"unknown_{os.getpid()}")
@@ -125,6 +151,11 @@ def worker_shutdown_handler(**kwargs):
 def setup_handlers():
 	if CONFIG.celery.override_default_logging:
 		signals.setup_logging.connect(setup_logging)
+
+	# Eviction handling (always on): clear any stale flag from a previous worker in this pod,
+	# and raise it on shutdown so the in-flight task stops early and lets its chord proceed.
+	clear_shutdown_flag()
+	signals.worker_shutting_down.connect(worker_shutting_down_handler)
 
 	# Register common handlers when either task‐ or idle‐based termination is enabled
 	if CONFIG.celery.worker_kill_after_task or CONFIG.celery.worker_kill_after_idle_seconds != -1:
