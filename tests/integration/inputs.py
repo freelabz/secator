@@ -23,7 +23,6 @@ INPUTS_TASKS = {
 	'jswhois': 'wikipedia.org',
 	'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
-	'shodan': '8.8.8.8',
 	'subfinder': 'github.com',
 	'search_vulns': 'apache 2.4.39',
 	'testssl': 'free.fr',
