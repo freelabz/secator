@@ -140,6 +140,69 @@ class TestRemoteBackend(unittest.TestCase):
 		self.assertEqual(update_query.get("extra_data.prompt_uuid"), "abc-123")
 		self.assertEqual(update_query.get("status"), "pending")
 
+	def test_build_pending_prompt_stamps_permission_prompt_uuid(self):
+		"""A permission pending doc carries its prompt_uuid in extra_data."""
+		from secator.ai.interactivity import RemoteBackend
+		backend = RemoteBackend(timeout=60, query_engine=MagicMock())
+		item = backend.build_pending_prompt(
+			"Shell `nmap` requires approval", ["allow", "deny"], "session1",
+			prompt_type="permission", permission_type="shell", value="nmap",
+			prompt_uuid="uuid-shell",
+		)
+		self.assertEqual(item.extra_data.get("prompt_uuid"), "uuid-shell")
+		self.assertEqual(item.extra_data.get("permission_type"), "shell")
+		self.assertEqual(item.ai_type, "permission")
+		self.assertEqual(item.status, "pending")
+
+	@patch('secator.ai.interactivity.sleep')
+	def test_later_permission_layer_does_not_resolve_from_earlier_allow(self, mock_sleep):
+		"""H7: a later guardrail layer must not auto-resolve from an earlier 'allow'."""
+		from secator.ai.interactivity import RemoteBackend
+
+		# Fake "DB": one answered doc from the FIRST (shell) layer only.
+		answered_db = [{
+			"_type": "ai", "ai_type": "permission", "status": "answered",
+			"_context": {"session_id": "session1"},
+			"extra_data": {"prompt_uuid": "uuid-shell"},
+			"answer": "allow", "_timestamp": 100.0,
+		}]
+
+		def fake_search(query, *args, **kwargs):
+			# Honor prompt_uuid scoping like a real backend would.
+			want_uuid = query.get("extra_data.prompt_uuid")
+			out = []
+			for d in answered_db:
+				if d.get("status") != query.get("status"):
+					continue
+				if want_uuid is not None and d["extra_data"].get("prompt_uuid") != want_uuid:
+					continue
+				out.append(d)
+			return out
+
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = fake_search
+		backend = RemoteBackend(timeout=5, query_engine=mock_engine, poll_interval=5)
+
+		# First (shell) layer resolves to its own answered "allow".
+		first = backend._poll_for_answer("session1", "permission", prompt_uuid="uuid-shell")
+		self.assertEqual(first, "allow")
+
+		# Second (target) layer must NOT pick up the shell layer's "allow".
+		second = backend._poll_for_answer("session1", "permission", prompt_uuid="uuid-target")
+		self.assertIsNone(second)
+
+	def test_poll_returns_newest_answered_doc(self):
+		"""Defense in depth: resolve against the NEWEST answered doc by _timestamp."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"answer": "stale", "_timestamp": 100.0},
+			{"answer": "fresh", "_timestamp": 200.0},
+		]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		result = backend._poll_for_answer("session1", "permission", prompt_uuid="abc-123")
+		self.assertEqual(result, "fresh")
+
 	@patch('secator.ai.interactivity.sleep')
 	def test_ask_user_returns_on_second_poll(self, mock_sleep):
 		from secator.ai.interactivity import RemoteBackend

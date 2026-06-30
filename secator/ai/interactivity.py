@@ -103,18 +103,25 @@ class RemoteBackend(InteractivityBackend):
 
 		The caller must yield this item so it gets stored in the workspace
 		(via runner hooks) before calling ask_user(), which will poll for the answer.
+
+		``prompt_uuid`` (from context) is stamped into ``extra_data`` so the poll
+		can match THIS exact prompt, not a stale earlier answer (H7).
 		"""
 		from secator.output_types import Ai
+		extra_data = {
+			"permission_type": context.get("permission_type", ""),
+			"value": context.get("value", ""),
+		}
+		prompt_uuid = context.get("prompt_uuid")
+		if prompt_uuid:
+			extra_data["prompt_uuid"] = prompt_uuid
 		return Ai(
 			content=question,
 			ai_type=prompt_type,
 			status="pending",
 			choices=choices,
 			session_id=session_id,
-			extra_data={
-				"permission_type": context.get("permission_type", ""),
-				"value": context.get("value", ""),
-			},
+			extra_data=extra_data,
 			_timestamp=time.time(),
 		)
 
@@ -136,25 +143,15 @@ class RemoteBackend(InteractivityBackend):
 		return {"answer": answer}
 
 	def _poll_for_answer(self, session_id, prompt_type, prompt_uuid=None):
-		"""Poll DB for the answer to the SPECIFIC pending prompt until timeout.
+		"""Poll the DB for the answer to THIS specific prompt until timeout.
 
-		The query MUST be scoped to the exact prompt the worker is currently
-		blocked on — identified by ``prompt_uuid`` (stamped into the pending doc's
-		``extra_data.prompt_uuid`` before it was persisted). Matching only on
-		``{session_id, status:"answered"}`` is a bug: a multi-turn conversation
-		accumulates *previously* answered follow-up docs, so an unscoped query
-		returns a STALE answer immediately, the worker re-injects that old answer
-		as a brand-new prompt, re-runs the whole turn, asks again, re-matches the
-		same stale doc — an infinite respawn loop that re-runs scans and burns
-		tokens. Scoping on ``prompt_uuid`` makes the poll resolve only THIS
-		prompt's own answer (and time out only THIS prompt's doc).
+		Scoped by ``prompt_uuid``; without it an unscoped query returns a stale
+		earlier answer and respawns the turn in a loop (H7).
 		"""
 		base = {
 			"_type": "ai",
 			"ai_type": prompt_type,
-			# Correlate by the runner context's session_id: it's auto-stamped on
-			# every persisted item (item._context = self.context), so it's always
-			# present — unlike the top-level session_id field.
+			# session_id is auto-stamped on every persisted item (item._context)
 			"_context.session_id": session_id,
 		}
 		if prompt_uuid:
@@ -162,9 +159,11 @@ class RemoteBackend(InteractivityBackend):
 
 		elapsed = 0
 		while elapsed < self.timeout:
-			results = self.query_engine.search({**base, "status": "answered"}, limit=1)
+			results = self.query_engine.search({**base, "status": "answered"})
 			if results:
-				return results[0].get("answer")
+				# resolve against the newest answered doc as a backstop against stale answers
+				newest = max(results, key=lambda r: r.get("_timestamp", 0))
+				return newest.get("answer")
 			sleep(self.poll_interval)
 			elapsed += self.poll_interval
 		# Timeout: flip ONLY this prompt's still-pending doc to timed_out, so a
