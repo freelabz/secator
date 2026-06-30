@@ -208,11 +208,17 @@ class ChatHistory:
             Trimmed list of messages.
         """
         from litellm.utils import trim_messages
+        from secator.ai.utils import _strip_leading_orphan_tools
         from secator.rich import console
         from secator.output_types import Warning
 
         original_count = len(self.messages)
         trimmed = trim_messages(self.messages, max_tokens=max_tokens)
+
+        # litellm drops the OLDEST messages with no tool-pairing awareness, so the
+        # kept window can START with an orphan tool_result whose assistant(tool_calls)
+        # parent was dropped — Anthropic/OpenAI reject that. Drop leading orphans.
+        _strip_leading_orphan_tools(trimmed)
         dropped = original_count - len(trimmed)
 
         if dropped:
@@ -381,9 +387,14 @@ class ChatHistory:
             to_summarize = rest
             to_keep = []
 
-        from secator.ai.utils import call_llm
+        from secator.ai.utils import call_llm, _strip_leading_orphan_tools
         from secator.rich import console
         from secator.utils import format_token_count
+
+        # The blind keep_last tail cut can leave to_keep STARTING with a tool_result
+        # whose assistant(tool_calls) parent fell into to_summarize — strip those so
+        # the rebuilt window never begins on an orphan tool_result.
+        _strip_leading_orphan_tools(to_keep)
 
         # Calculate target summary size based on available context
         context_window = get_context_window(model)
