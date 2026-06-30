@@ -216,6 +216,8 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 				value=result.shell_command,
 				reason=result.reason,
 				engine=ctx.permission_engine,
+				# unique id per prompt so its remote poll matches only its own answer (H7)
+				prompt_uuid=str(uuid.uuid4()),
 			)
 			if is_remote:
 				yield ctx.backend.build_pending_prompt(**ask_kwargs)
@@ -239,6 +241,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 				value=target,
 				command=cmd_display,
 				engine=ctx.permission_engine,
+				prompt_uuid=str(uuid.uuid4()),
 			)
 			if is_remote:
 				yield ctx.backend.build_pending_prompt(**ask_kwargs)
@@ -261,6 +264,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 					value=path,
 					command=cmd_display,
 					engine=ctx.permission_engine,
+					prompt_uuid=str(uuid.uuid4()),
 				)
 				if is_remote:
 					yield ctx.backend.build_pending_prompt(**ask_kwargs)
