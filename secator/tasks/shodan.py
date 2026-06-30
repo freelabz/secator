@@ -8,7 +8,7 @@ from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import HOST, IP
 from secator.output_types import (
-	Error, Ip, Port, Subdomain, Tag, Technology, Vulnerability, Warning
+	Error, Ip, Port, Record, Subdomain, Tag, Technology, Vulnerability, Warning
 )
 from secator.runners import PythonRunner
 
@@ -17,10 +17,11 @@ from secator.runners import PythonRunner
 class shodan(PythonRunner):
 	"""Passive host recon via the Shodan API (ports, services, CVEs, hostnames)."""
 	input_types = [HOST, IP]
-	output_types = [Ip, Subdomain, Port, Technology, Vulnerability, Tag]
+	output_types = [Ip, Subdomain, Port, Technology, Vulnerability, Tag, Record]
 	tags = ['shodan', 'recon', 'osint', 'passive']
 	install_cmd = 'pip install shodan'
 	opts = {
+		'operation': {'type': str, 'default': 'host', 'short': 'op', 'help': 'Operation: host | dns | search'},
 		# Empty default + runtime fallback (never a CONFIG default — it would leak
 		# the configured key into the secator-api UI form, like the `ai` task).
 		'api_key': {'type': str, 'default': '', 'help': 'Shodan API key (defaults to configured key)'},
@@ -46,9 +47,19 @@ class shodan(PythonRunner):
 			return
 
 		api = shodan_sdk.Shodan(api_key)
+		operation = self.get_opt_value('operation') or 'host'
+		if operation == 'host':
+			yield from self._run_host(api, shodan_sdk)
+		elif operation == 'dns':
+			yield from self._run_dns(api, shodan_sdk)
+		elif operation == 'search':
+			yield from self._run_search(api, shodan_sdk)
+		else:
+			yield Error(message=f"Unknown Shodan operation '{operation}' (expected host | dns | search).")
+
+	def _run_host(self, api, shodan_sdk):
 		history = self.get_opt_value('history')
 		minify = self.get_opt_value('minify')
-
 		for target in self.inputs:
 			ip, hostname = target, ''
 			if not self._is_ip(target):
@@ -69,6 +80,12 @@ class shodan(PythonRunner):
 				continue
 			host = hostname or (data.get('hostnames') or [''])[0]
 			yield from self._map_host(data, ip, host)
+
+	def _run_dns(self, api, shodan_sdk):
+		yield Error(message='dns mode not implemented yet')
+
+	def _run_search(self, api, shodan_sdk):
+		yield Error(message='search mode not implemented yet')
 
 	def _map_host(self, h, ip, host):
 		ip_str = h.get('ip_str', ip)
@@ -94,39 +111,42 @@ class shodan(PythonRunner):
 			yield Vulnerability(name=cve, id=cve, matched_at=ip_str, ip=ip_str,
 								provider='shodan', confidence='low', tags=['shodan'])
 		for b in (h.get('data') or []):
-			port = b.get('port')
-			try:
-				port = int(port)
-			except (TypeError, ValueError):
-				continue
-			yield Port(
-				port=port, ip=ip_str, host=host, state='open',
-				protocol=b.get('transport', 'tcp'),
-				service_name=b.get('product', '') or '',
-				cpes=b.get('cpe', []) or [],
-				confidence='low', service_confidence='low',
-				extra_data=self._compact({'version': b.get('version'), 'banner': self._excerpt(b.get('data'))}),
+			yield from self._map_banner(b, ip_str, host)
+
+	def _map_banner(self, b, ip_str, host):
+		port = b.get('port')
+		try:
+			port = int(port)
+		except (TypeError, ValueError):
+			return
+		yield Port(
+			port=port, ip=ip_str, host=host, state='open',
+			protocol=b.get('transport', 'tcp'),
+			service_name=b.get('product', '') or '',
+			cpes=b.get('cpe', []) or [],
+			confidence='low', service_confidence='low',
+			extra_data=self._compact({'version': b.get('version'), 'banner': self._excerpt(b.get('data'))}),
+			tags=['shodan'],
+		)
+		product = b.get('product')
+		if product:
+			yield Technology(
+				product=product, match=f'{ip_str}:{port}', version=b.get('version'),
+				extra_data=self._compact({'cpe': b.get('cpe')}), tags=['shodan'],
+			)
+		for cve, meta in (b.get('vulns') or {}).items():
+			cvss = 0.0
+			if isinstance(meta, dict) and meta.get('cvss') is not None:
+				try:
+					cvss = float(meta.get('cvss'))
+				except (TypeError, ValueError):
+					cvss = 0.0
+			yield Vulnerability(
+				name=cve, id=cve, matched_at=f'{ip_str}:{port}', ip=ip_str,
+				provider='shodan', confidence='low', cvss_score=cvss,
+				description=(meta.get('summary', '') if isinstance(meta, dict) else ''),
 				tags=['shodan'],
 			)
-			product = b.get('product')
-			if product:
-				yield Technology(
-					product=product, match=f'{ip_str}:{port}', version=b.get('version'),
-					extra_data=self._compact({'cpe': b.get('cpe')}), tags=['shodan'],
-				)
-			for cve, meta in (b.get('vulns') or {}).items():
-				cvss = 0.0
-				if isinstance(meta, dict) and meta.get('cvss') is not None:
-					try:
-						cvss = float(meta.get('cvss'))
-					except (TypeError, ValueError):
-						cvss = 0.0
-				yield Vulnerability(
-					name=cve, id=cve, matched_at=f'{ip_str}:{port}', ip=ip_str,
-					provider='shodan', confidence='low', cvss_score=cvss,
-					description=(meta.get('summary', '') if isinstance(meta, dict) else ''),
-					tags=['shodan'],
-				)
 
 	@staticmethod
 	def _is_ip(value):
