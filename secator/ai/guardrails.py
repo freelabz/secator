@@ -951,10 +951,7 @@ class PermissionEngine:
 			return "deny"
 
 		idx, _ = result
-		if idx == 0:  # Allow this specific command (one-time, no rule added)
-			# Add a runtime allow for each cmd name in this command
-			if cmd_names:
-				self.add_runtime_allow([f"shell({','.join(cmd_names)})"])
+		if idx == 0:  # Allow ONLY this invocation — no rule added, next call re-prompts (H9)
 			return "allow"
 		elif idx == 1:  # Allow all commands with this name
 			self.add_runtime_allow([f"shell({prompt_cmd})"])
