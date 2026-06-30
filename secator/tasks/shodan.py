@@ -6,7 +6,7 @@ import unittest.mock
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import HOST, IP
+from secator.definitions import HOST, IP, STRING
 from secator.output_types import (
 	Error, Ip, Port, Record, Subdomain, Tag, Technology, Vulnerability, Warning
 )
@@ -16,7 +16,7 @@ from secator.runners import PythonRunner
 @task()
 class shodan(PythonRunner):
 	"""Passive host recon via the Shodan API (ports, services, CVEs, hostnames)."""
-	input_types = [HOST, IP]
+	input_types = [HOST, IP, STRING]
 	output_types = [Ip, Subdomain, Port, Technology, Vulnerability, Tag, Record]
 	tags = ['shodan', 'recon', 'osint', 'passive']
 	install_cmd = 'pip install shodan'
@@ -40,6 +40,12 @@ class shodan(PythonRunner):
 			yield Error(message="The 'shodan' package is not installed. Run: pip install shodan")
 			return
 
+		# Validate operation first so unknown ops get a clean error regardless of key.
+		operation = self.get_opt_value('operation') or 'host'
+		if operation not in ('host', 'dns', 'search'):
+			yield Error(message=f"Unknown Shodan operation '{operation}' (expected host | dns | search).")
+			return
+
 		api_key = (
 			self.get_opt_value('api_key')
 			or CONFIG.addons.shodan.api_key
@@ -51,15 +57,12 @@ class shodan(PythonRunner):
 			return
 
 		api = shodan_sdk.Shodan(api_key)
-		operation = self.get_opt_value('operation') or 'host'
 		if operation == 'host':
 			yield from self._run_host(api, shodan_sdk)
 		elif operation == 'dns':
 			yield from self._run_dns(api, shodan_sdk)
 		elif operation == 'search':
 			yield from self._run_search(api, shodan_sdk)
-		else:
-			yield Error(message=f"Unknown Shodan operation '{operation}' (expected host | dns | search).")
 
 	def _run_host(self, api, shodan_sdk):
 		history = self.get_opt_value('history')
