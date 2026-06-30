@@ -39,6 +39,10 @@ HOOKS = [
 
 VALIDATORS = ['validate_input', 'validate_item']
 
+# Placeholder substituted for option values flagged ``sensitive: True`` in any
+# serialized/printed runner state (see Runner.sensitive_opt_names).
+REDACTED_OPT_VALUE = '[REDACTED]'
+
 
 def format_runner_name(runner):
 	"""Format runner name."""
@@ -285,8 +289,57 @@ class Runner:
 		return config
 
 	@property
+	def sensitive_opt_names(self):
+		"""Names of options flagged ``sensitive: True`` in their definition.
+
+		Sensitive option values are redacted from any serialized/printed runner state
+		(``toDict()``, debug echoes, the built command string) so a user-supplied secret
+		(e.g. a BYO addon API key) never lands in the Mongo runner doc, the API response,
+		``--driver api`` egress, or logs. The value still travels in-flight to the worker.
+
+		Resolved once and memoized. Sources, unioned defensively:
+		- a direct task instance's own ``opts``/``meta_opts`` (Command / PythonRunner),
+		- the task classes referenced by this runner's config tree (Task / Workflow / Scan,
+		  which carry no ``opts`` of their own).
+		"""
+		cached = getattr(self, '_sensitive_opt_names_cache', None)
+		if cached is not None:
+			return cached
+		names = set()
+
+		def collect(holder):
+			for attr in ('opts', 'meta_opts'):
+				confs = getattr(holder, attr, None)
+				if isinstance(confs, dict):
+					names.update(k for k, v in confs.items() if isinstance(v, dict) and v.get('sensitive'))
+
+		collect(self)
+		try:
+			from secator.runners.task import Task
+			from secator.tree import build_runner_tree, get_flat_node_list
+			for node in get_flat_node_list(build_runner_tree(self.config)):
+				if node.type != 'task':
+					continue
+				try:
+					collect(Task.get_task_class(node.name))
+				except ValueError:
+					# Unknown task name in this node: skip it, but keep scanning the rest.
+					continue
+		except Exception as e:
+			# Discovery failed for the whole tree: we can't enumerate sensitive opts, so
+			# redaction may be incomplete. Surface it loudly rather than failing silently
+			# (a silent miss here would let a secret through into serialized/printed state).
+			logger.warning('Could not resolve sensitive option names for %s (redaction may be incomplete): %s', getattr(self, 'unique_name', self), e)  # noqa: E501
+		self._sensitive_opt_names_cache = names
+		return names
+
+	@property
 	def resolved_opts(self):
-		return {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+		opts = {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+		sensitive = self.sensitive_opt_names
+		if sensitive:
+			opts = {k: (REDACTED_OPT_VALUE if (k in sensitive and v) else v) for k, v in opts.items()}
+		return opts
 
 	@property
 	def resolved_print_opts(self):
@@ -968,6 +1021,10 @@ class Runner:
 				'warnings': [w.toDict() for w in self.warnings],
 			}
 		)
+		# Note: serialized config/opts intentionally not scrubbed. An option's `default` must
+		# never be a secret by convention (tasks use `passed or CONFIG.addons.*` at runtime,
+		# not a config-sourced default), so config/opts carry no secret. The user-supplied
+		# value is redacted where it actually lands: run_opts (resolved_opts) and the cmd.
 		return data
 
 	def run_hooks(self, hook_type, *args, sub='hooks'):
