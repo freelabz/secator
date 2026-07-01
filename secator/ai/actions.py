@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, fields
@@ -34,6 +35,7 @@ class ActionContext:
 	scope: str = "workspace"
 	results: Optional[List[Dict]] = None
 	max_workers: int = 3
+	in_batch: bool = False  # H4: set on the per-batch ctx so the per-turn fan-out cap applies
 	subagent: bool = False
 	silent: bool = False
 	sync: bool = True
@@ -411,6 +413,42 @@ _FORBIDDEN_CHILD_OPT_KEYS = frozenset({
 # Cap a spawned subagent's iteration budget so it can't be told to loop unbounded.
 _MAX_CHILD_ITERATIONS = 25
 
+# H4: bound recursive AI-subagent fan-out so injected output can't drive an
+# exponential subagent/token blow-up. Depth caps recursion (child inherits +1 via
+# context); breadth caps how many subagents one parent turn may spawn.
+_MAX_SUBAGENT_DEPTH = 3
+_MAX_SUBAGENTS_PER_TURN = 5
+_SUBAGENT_TURN_LOCK = threading.Lock()
+
+
+def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["Warning"]:
+	"""H4: cap AI-subagent recursion depth + per-turn fan-out.
+
+	Returns a denial ``Warning`` if a cap is hit (caller yields it and skips the
+	spawn); otherwise stamps the child's depth (+1) into ``context`` and bumps the
+	per-turn counter. Breadth is only counted within a batch (one LLM turn); a
+	lone spawn is inherently breadth-1.
+	"""
+	depth = int(ctx.context.get("ai_subagent_depth", 0) or 0)
+	if depth >= _MAX_SUBAGENT_DEPTH:
+		return Warning(
+			message=f"Subagent spawn denied: recursion depth cap ({_MAX_SUBAGENT_DEPTH}) reached",
+			_context=context,
+		)
+	if ctx.in_batch:  # per-turn breadth only bites within a batch
+		with _SUBAGENT_TURN_LOCK:
+			turn = int(ctx.context.get("ai_subagent_turn_count", 0) or 0)
+			over_breadth = turn >= _MAX_SUBAGENTS_PER_TURN
+			if not over_breadth:
+				ctx.context["ai_subagent_turn_count"] = turn + 1
+		if over_breadth:
+			return Warning(
+				message=f"Subagent spawn denied: per-turn fan-out cap ({_MAX_SUBAGENTS_PER_TURN}) reached",
+				_context=context,
+			)
+	context["ai_subagent_depth"] = depth + 1  # child inherits depth+1
+	return None
+
 
 def _sanitize_child_opts(opts: Any) -> Dict:
 	"""Drop LLM-settable control/security keys from sub-runner opts; clamp max_iterations."""
@@ -449,6 +487,11 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 
 	# Force subagent flags when spawning an AI task from a parent AI task
 	if runner_type == "task" and name.lower() == "ai":
+		# H4: bound recursive fan-out before constructing/running the child
+		denial = _guard_subagent_fanout(ctx, context)
+		if denial is not None:
+			yield denial
+			return
 		opts["subagent"] = True
 		opts["interactive"] = False
 
@@ -907,8 +950,11 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 
 	max_workers = ctx.max_workers or 3
 
+	# H4: fresh per-turn subagent fan-out budget for this batch (one LLM turn)
+	ctx.context["ai_subagent_turn_count"] = 0
+
 	# Silence console output for parallel tasks to avoid interleaved printing
-	batch_ctx = replace(ctx, silent=True)
+	batch_ctx = replace(ctx, silent=True, in_batch=True)
 
 	# Skip Rich progress panel when we are a subagent, or when the batch
 	# contains an AI subagent task (its output conflicts with the Live display)
