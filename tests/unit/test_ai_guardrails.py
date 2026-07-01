@@ -259,6 +259,23 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "follow_up", "reason": "test"})
 		self.assertEqual(result.decision, "allow")
 
+	# --- M7: add_finding privileged-type gating ---
+
+	def test_add_finding_benign_allowed(self):
+		engine = self._make_engine()
+		result = engine.check_action({"action": "add_finding", "_type": "vulnerability", "name": "XSS"})
+		self.assertEqual(result.decision, "allow")
+
+	def test_add_finding_target_type_not_allowed(self):
+		engine = self._make_engine()
+		result = engine.check_action({"action": "add_finding", "_type": "target", "name": "evil.com"})
+		self.assertEqual(result.decision, "ask")
+
+	def test_add_finding_target_type_case_insensitive(self):
+		engine = self._make_engine()
+		result = engine.check_action({"action": "add_finding", "_type": " Target ", "name": "evil.com"})
+		self.assertEqual(result.decision, "ask")
+
 	# --- Target checks ---
 
 	def test_target_allowed_via_targets_variable(self):
