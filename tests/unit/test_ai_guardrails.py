@@ -10,7 +10,7 @@ if ADDONS_ENABLED['ai']:
 	from secator.ai.guardrails import (
 		parse_rule, match_rule, extract_command_targets, detect_paths, detect_paths_with_access,
 		detect_sensitive_env_vars, classify_command, build_target_choices, PermissionEngine,
-		_is_file_path
+		_is_file_path, _normalize_ip
 	)
 	from secator.output_types import Warning, Error
 
@@ -86,6 +86,53 @@ class TestRuleParser(unittest.TestCase):
 		self.assertTrue(match_rule("/home/user/cert.pem", ["*.pem"]))
 		# Non-path values should not get basename matching
 		self.assertFalse(match_rule("example.com", [".com"]))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestEncodedIPDeny(unittest.TestCase):
+	"""M8: alternate IP encodings must not evade an IP/CIDR deny rule."""
+
+	META = "169.254.169.254"
+
+	def test_normalize_ip_encodings(self):
+		import ipaddress
+		expected = ipaddress.ip_address(self.META)
+		for enc in ("2852039166", "0xA9FEA9FE", "0xa9fea9fe",
+					"::ffff:169.254.169.254", "[::ffff:169.254.169.254]",
+					"0xA9.0xFE.0xA9.0xFE", "169.254.169.254"):
+			self.assertEqual(_normalize_ip(enc), expected, enc)
+
+	def test_normalize_ip_non_ip(self):
+		# Hostnames and port-suffixed values are not IPs (no DNS resolution here)
+		self.assertIsNone(_normalize_ip("example.com"))
+		self.assertIsNone(_normalize_ip("10.0.0.1:8080"))
+
+	def test_encoded_forms_denied(self):
+		deny = ["169.254.169.254"]
+		for enc in ("2852039166", "0xA9FEA9FE", "::ffff:169.254.169.254", "169.254.169.254"):
+			self.assertTrue(match_rule(enc, deny), enc)
+
+	def test_public_ip_still_allowed(self):
+		# A normal public IP must not match the metadata deny rule
+		self.assertFalse(match_rule("8.8.8.8", ["169.254.169.254"]))
+		self.assertFalse(match_rule("93.184.216.34", ["169.254.169.254"]))
+
+	def test_cidr_deny_membership(self):
+		# Encoded link-local addresses fall inside a CIDR deny rule
+		self.assertTrue(match_rule("2852039166", ["169.254.0.0/16"]))
+		self.assertFalse(match_rule("8.8.8.8", ["169.254.0.0/16"]))
+
+	def test_check_value_denies_encoded_targets(self):
+		engine = PermissionEngine(config=dict(deny=["target(169.254.169.254)"], allow=["target(*)"]))
+		for enc in ("2852039166", "0xA9FEA9FE", "::ffff:169.254.169.254"):
+			self.assertEqual(engine._check_value("target", enc).decision, "deny", enc)
+		self.assertEqual(engine._check_value("target", "8.8.8.8").decision, "allow")
+
+	def test_encoded_url_target_denied(self):
+		# curl http://<decimal>/ resolves to the metadata IP → deny (via URL host extraction)
+		engine = PermissionEngine(config=dict(deny=["target(169.254.169.254)"], allow=["task(*)", "target(*)"]))
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["http://2852039166/latest/meta-data/"]})
+		self.assertEqual(result.decision, "deny")
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

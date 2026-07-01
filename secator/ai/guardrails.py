@@ -1,10 +1,11 @@
 """Permission engine for AI guardrails."""
 import fnmatch
+import ipaddress
 import re
 import socket
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from secator.ai.encryption import PII_PATTERNS
 
@@ -51,6 +52,59 @@ def parse_rule(rule: str) -> Tuple[str, List[str]]:
 	return rule_type, values
 
 
+_IP_INT_RE = re.compile(r'0[xX][0-9a-fA-F]+|0[oO][0-7]+|\d+')
+_DOTTED_ODD_RE = re.compile(r'(?:0[xX][0-9a-fA-F]+|0[0-7]+|\d+)(?:\.(?:0[xX][0-9a-fA-F]+|0[0-7]+|\d+)){3}')
+IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+
+
+def _normalize_ip(candidate: str) -> Optional[IPAddress]:
+	"""M8: normalize encoded IPs (decimal/hex/octal int, dotted-hex/octal, IPv6-mapped) to an ip_address.
+
+	Returns None if the candidate is not an IP (e.g. a hostname) so callers fall back to literal matching.
+	Hostnames are NOT resolved here (DNS rebinding is a documented residual).
+	"""
+	s = candidate.strip()
+	if not s:
+		return None
+	if s.startswith('[') and s.endswith(']'):  # [::1] / [::ffff:1.2.3.4]
+		s = s[1:-1]
+	ip = None
+	# Plain dotted-quad / standard IPv6 first (leaves normal targets untouched)
+	try:
+		ip = ipaddress.ip_address(s)
+	except ValueError:
+		# Integer form: decimal (2852039166), hex (0xA9FEA9FE), octal (0o...)
+		if _IP_INT_RE.fullmatch(s):
+			try:
+				ip = ipaddress.ip_address(int(s, 0) if s[:2].lower() in ('0x', '0o') else int(s))
+			except (ValueError, ipaddress.AddressValueError):
+				return None
+		# Dotted octets with hex/octal parts (0xA9.0xFE.0xA9.0xFE, 0251.0376.0251.0376)
+		elif _DOTTED_ODD_RE.fullmatch(s):
+			try:
+				octets = [int(p, 0) if p[:2].lower() == '0x' else int(p, 8) if p.startswith('0') and len(p) > 1 else int(p)
+						  for p in s.split('.')]
+				if all(0 <= o <= 255 for o in octets):
+					ip = ipaddress.ip_address('.'.join(str(o) for o in octets))
+			except (ValueError, ipaddress.AddressValueError):
+				return None
+	if ip is None:
+		return None
+	# Collapse IPv6-mapped/compatible IPv4 (::ffff:169.254.169.254) down to the v4 address
+	if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+		ip = ip.ipv4_mapped
+	return ip
+
+
+def _ip_in_pattern(ip: IPAddress, pattern: str) -> Optional[bool]:
+	"""M8: True/False if `pattern` is an IP/CIDR literal, else None (pattern isn't an address rule)."""
+	try:
+		net = ipaddress.ip_network(pattern, strict=False)
+	except ValueError:
+		return None
+	return ip.version == net.version and ip in net
+
+
 def match_rule(value: str, patterns: List[str]) -> bool:
 	"""Check if a value matches any of the given patterns.
 
@@ -60,6 +114,7 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 	- Glob patterns (fnmatch)
 	- {port} variable (matches :\\d+)
 	- Basename matching for path-like values (e.g. '.env' matches '/home/user/.env')
+	- M8: IP/CIDR patterns are matched by normalized address (encoded IPs are canonicalized first)
 
 	Args:
 		value: The value to check
@@ -68,9 +123,21 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 	Returns:
 		True if value matches any pattern
 	"""
+	# M8: normalize encoded IPs before deny/allow match so alternate encodings can't evade IP rules
+	norm_ip = _normalize_ip(value)
+	canon = str(norm_ip) if norm_ip is not None else None
 	for pattern in patterns:
 		if pattern == "*":
 			return True
+		if norm_ip is not None:
+			in_pat = _ip_in_pattern(norm_ip, pattern)
+			if in_pat is not None:
+				if in_pat:
+					return True
+				continue  # IP/CIDR pattern that doesn't contain this address — no string fallback
+			# Non-address pattern (glob/{port}): also test the canonical dotted form
+			if canon != value and fnmatch.fnmatch(canon, pattern):
+				return True
 		if "{port}" in pattern:
 			regex_pattern = re.escape(pattern).replace(r"\{port\}", r"\d+")
 			if re.fullmatch(regex_pattern, value):
