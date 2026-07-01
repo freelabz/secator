@@ -224,6 +224,41 @@ def init_llm(api_key: Optional[str] = None):
 	_llm_initialized = True
 
 
+def _estimate_usage(model: str, messages: List[Dict], content: str, tool_calls) -> Dict:
+	"""M5: estimate tokens when the provider omits `usage`, so calls are never unmetered.
+
+	Uses litellm's own token counter for the model in use — prompt tokens from the
+	request messages, completion tokens from the response text (+ any tool-call
+	name/arguments). Returns the same shape as the real-usage dict (cost unknown).
+	"""
+	import litellm
+
+	def _count(**kw):
+		try:
+			return litellm.token_counter(model=model, **kw) or 0
+		except Exception:
+			return 0
+
+	prompt_tokens = _count(messages=messages)
+	completion_text = content or ""
+	for tc in tool_calls or []:
+		fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
+		if isinstance(fn, dict):
+			name, args = fn.get("name", ""), fn.get("arguments", "")
+		elif fn is not None:
+			name, args = getattr(fn, "name", ""), getattr(fn, "arguments", "")
+		else:
+			name, args = "", ""
+		completion_text += f" {name} {args}"
+	completion_tokens = _count(text=completion_text)
+	return {
+		"tokens": prompt_tokens + completion_tokens,
+		"prompt_tokens": prompt_tokens,
+		"completion_tokens": completion_tokens,
+		"cost": None,
+	}
+
+
 def call_llm(
 	messages: List[Dict],
 	model: str,
@@ -311,6 +346,12 @@ def call_llm(
 			"completion_tokens": getattr(response.usage, "completion_tokens", None),
 			"cost": cost,
 		}
+	else:
+		# M5: usage missing/empty (streaming, some models) — estimate so the call
+		# is still metered instead of silently counting 0 tokens.
+		usage = _estimate_usage(model, kwargs["messages"], content, getattr(message, 'tool_calls', None))
+		console.print(Warning(
+			message=f"LLM response missing usage; estimated ~{usage['tokens']} tokens for metering."))
 
 	# Get tool calls
 	tool_calls = getattr(message, 'tool_calls', None) or []

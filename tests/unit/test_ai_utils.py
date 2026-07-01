@@ -82,15 +82,18 @@ class TestCallLLM(unittest.TestCase):
         self.assertEqual(result["tool_calls"], [])
         mock_completion.assert_called_once()
 
+    @patch('litellm.token_counter')
     @patch('litellm.completion')
-    def test_call_llm_no_usage(self, mock_completion):
-        """Response without usage data."""
+    def test_call_llm_no_usage_estimates_tokens(self, mock_completion, mock_token_counter):
+        """M5: response without usage still yields a non-zero estimated token count."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Response"
         mock_response.choices[0].message.tool_calls = None
         mock_response.usage = None
         mock_completion.return_value = mock_response
+        # prompt (messages=...) then completion (text=...)
+        mock_token_counter.side_effect = [42, 8]
 
         from secator.ai.utils import call_llm
         result = call_llm(
@@ -99,7 +102,11 @@ class TestCallLLM(unittest.TestCase):
         )
 
         self.assertEqual(result["content"], "Response")
-        self.assertIsNone(result["usage"])
+        self.assertIsNotNone(result["usage"])
+        self.assertEqual(result["usage"]["tokens"], 50)
+        self.assertEqual(result["usage"]["prompt_tokens"], 42)
+        self.assertEqual(result["usage"]["completion_tokens"], 8)
+        self.assertIsNone(result["usage"]["cost"])
         self.assertEqual(result["tool_calls"], [])
 
     @patch('litellm.completion')
