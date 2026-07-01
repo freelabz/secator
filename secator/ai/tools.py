@@ -13,9 +13,6 @@ TOOL_ACTION_MAP = {
 	"stop": "stop",
 }
 
-# Reverse mapping: action type -> tool name
-ACTION_TOOL_MAP = {v: k for k, v in TOOL_ACTION_MAP.items()}
-
 # OpenAI-format tool schemas keyed by tool name
 TOOL_SCHEMAS = {
 	"run_task": {
