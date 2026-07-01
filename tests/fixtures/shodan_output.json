@@ -1,0 +1,33 @@
+{
+  "ip_str": "10.0.0.1",
+  "os": "Linux 3.x",
+  "org": "Example Org",
+  "isp": "Example ISP",
+  "asn": "AS65000",
+  "country_name": "Wonderland",
+  "hostnames": ["host1.example.com", "www.example.com"],
+  "domains": ["example.com"],
+  "vulns": ["CVE-2021-40438"],
+  "ports": [80, 443],
+  "data": [
+    {
+      "port": 80,
+      "transport": "tcp",
+      "product": "Apache httpd",
+      "version": "2.4.49",
+      "cpe": ["cpe:/a:apache:http_server:2.4.49"],
+      "data": "HTTP/1.1 200 OK\r\nServer: Apache/2.4.49\r\n",
+      "vulns": {
+        "CVE-2021-41773": {"cvss": "7.5", "summary": "Path traversal in Apache 2.4.49"}
+      }
+    },
+    {
+      "port": 443,
+      "transport": "tcp",
+      "product": "Apache httpd",
+      "version": "2.4.49",
+      "cpe": ["cpe:/a:apache:http_server:2.4.49"],
+      "data": "HTTP/1.1 200 OK\r\n"
+    }
+  ]
+}
