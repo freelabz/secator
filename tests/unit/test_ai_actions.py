@@ -11,7 +11,7 @@ if ADDONS_ENABLED['ai']:
 		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
 		_handle_query, _handle_add_finding, _run_runner, _decrypt_dict,
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
-		_MAX_CHILD_ITERATIONS
+		_MAX_CHILD_ITERATIONS, _MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
 	)
 	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
 
@@ -1001,6 +1001,74 @@ class TestCheckGuardrailsFailClosed(unittest.TestCase):
 		denial, _items = check_guardrails_sync({"action": "shell", "command": "x"}, ctx)
 		self.assertIsNotNone(denial, "exhausted-but-unresolved guardrail must deny, not return None")
 		self.assertIn("unresolved", denial)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSubagentFanoutCap(unittest.TestCase):
+	"""H4: recursion depth + per-turn fan-out caps on AI-subagent spawns."""
+
+	def _mock_task(self, mock_task_cls):
+		runner = MagicMock()
+		runner.id = 'runner123'
+		runner.reports_folder = None
+		runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = runner
+		return runner
+
+	def test_depth_cap_refuses_spawn(self):
+		"""Spawning an AI subagent at/over _MAX_SUBAGENT_DEPTH is denied."""
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'ai_subagent_depth': _MAX_SUBAGENT_DEPTH},
+		)
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+
+		with patch('secator.ai.actions.Task') as mock_task_cls:
+			results = list(_run_runner(action, ctx, 'task'))
+
+		mock_task_cls.assert_not_called()  # denied before constructing the child
+		self.assertEqual(len(results), 1)
+		self.assertIsInstance(results[0], Warning)
+		self.assertIn('depth cap', results[0].message)
+		# no Ai task item emitted (spawn refused)
+		self.assertFalse([r for r in results if isinstance(r, Ai) and r.ai_type == 'task'])
+
+	def test_per_turn_breadth_cap_refuses_spawn(self):
+		"""In a batch, spawning past _MAX_SUBAGENTS_PER_TURN is denied."""
+		ctx = ActionContext(
+			targets=['t.com'], model='m', in_batch=True,
+			context={'ai_subagent_turn_count': _MAX_SUBAGENTS_PER_TURN},
+		)
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+
+		with patch('secator.ai.actions.Task') as mock_task_cls:
+			results = list(_run_runner(action, ctx, 'task'))
+
+		mock_task_cls.assert_not_called()
+		self.assertEqual(len(results), 1)
+		self.assertIsInstance(results[0], Warning)
+		self.assertIn('fan-out cap', results[0].message)
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_normal_depth1_spawn_succeeds(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""A first-level AI subagent (depth 0 -> 1) still spawns; child inherits depth+1."""
+		mock_build_hooks.return_value = {}
+		self._mock_task(mock_task_cls)
+
+		ctx = ActionContext(targets=['t.com'], model='m', context={})  # depth 0, not in a batch
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+
+		results = list(_run_runner(action, ctx, 'task'))
+
+		mock_task_cls.assert_called_once()
+		ai_items = [r for r in results if isinstance(r, Ai) and r.ai_type == 'task']
+		self.assertEqual(len(ai_items), 1)
+		self.assertFalse([r for r in results if isinstance(r, Warning)])
+		# child context carries incremented depth
+		_, kwargs = mock_task_cls.call_args
+		self.assertEqual(kwargs.get('context', {}).get('ai_subagent_depth'), 1)
 
 
 if __name__ == '__main__':
