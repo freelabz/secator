@@ -287,6 +287,77 @@ class TestRemoteBackend(unittest.TestCase):
 		backend = RemoteBackend(timeout=60, query_engine=None)
 		backend._expire_stale_pending("session1")  # must not raise
 
+	def _permission_backend(self, answer):
+		"""RemoteBackend whose poll resolves to `answer` for a shell prompt."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": answer, "_timestamp": 1.0}]
+		return RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+	@staticmethod
+	def _shell_name_allowed(engine, cmd_name):
+		"""True if the engine auto-allows this shell command NAME (no re-prompt).
+
+		Asserted at the command-name layer (``_check_value``) rather than via
+		check_action() so the test does not depend on the safecmd/shfmt parser,
+		which is not present in every env. This is the exact layer a persisted
+		``shell(<cmd>)`` session rule matches on.
+		"""
+		return engine._check_value("shell", cmd_name).decision == "allow"
+
+	def test_allow_all_persists_session_rule_second_action_auto_allowed(self):
+		"""M12: allow_all adds a session-scoped rule; a 2nd matching action needs no prompt."""
+		from secator.ai.guardrails import PermissionEngine
+		engine = PermissionEngine(config={})  # no static rules: unknown cmd -> no auto-allow
+		backend = self._permission_backend("allow_all")
+
+		# Pre-condition: with no rule, the command name is not pre-allowed.
+		self.assertFalse(self._shell_name_allowed(engine, "nmap"))
+
+		result = backend.ask_user(
+			"Shell `nmap -sV` requires approval", ["deny", "allow", "allow_all"],
+			"session1", prompt_type="permission", engine=engine,
+			permission_type="shell", value="nmap -sV", prompt_uuid="u1",
+		)
+		self.assertEqual(result["answer"], "allow")
+		# A session-scoped shell(nmap) pattern rule must now be present.
+		self.assertTrue(
+			any(rt == "shell" and "nmap" in patterns for rt, patterns in engine.runtime_allow),
+			"allow_all must persist a session-scoped shell(nmap) rule",
+		)
+		# A SECOND, DIFFERENT nmap invocation is auto-allowed without a new prompt.
+		self.assertTrue(self._shell_name_allowed(engine, "nmap"))
+
+	def test_single_allow_does_not_persist_rule_second_action_reprompts(self):
+		"""M12/H9: single allow is one-shot — no rule added, a 2nd match re-prompts."""
+		from secator.ai.guardrails import PermissionEngine
+		engine = PermissionEngine(config={})
+		backend = self._permission_backend("allow")
+
+		result = backend.ask_user(
+			"Shell `nmap -sV` requires approval", ["deny", "allow", "allow_all"],
+			"session1", prompt_type="permission", engine=engine,
+			permission_type="shell", value="nmap -sV", prompt_uuid="u1",
+		)
+		self.assertEqual(result["answer"], "allow")
+		# No session rule was persisted -> a second matching action is not pre-allowed.
+		self.assertEqual(engine.runtime_allow, [])
+		self.assertFalse(self._shell_name_allowed(engine, "nmap"))
+
+	def test_deny_unchanged_no_rule(self):
+		"""deny returns deny and never touches runtime_allow."""
+		from secator.ai.guardrails import PermissionEngine
+		engine = PermissionEngine(config={})
+		backend = self._permission_backend("deny")
+
+		result = backend.ask_user(
+			"Shell `nmap` requires approval", ["deny", "allow", "allow_all"],
+			"session1", prompt_type="permission", engine=engine,
+			permission_type="shell", value="nmap", prompt_uuid="u1",
+		)
+		self.assertEqual(result["answer"], "deny")
+		self.assertEqual(engine.runtime_allow, [])
+
 
 class TestCreateBackend(unittest.TestCase):
 	"""Verify create_backend factory."""

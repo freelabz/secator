@@ -136,10 +136,13 @@ class RemoteBackend(InteractivityBackend):
 
 		if prompt_type == "permission":
 			engine = context.get("engine")
-			if answer in ("allow", "allow_all") and engine:
-				ptype = context.get("permission_type")
-				value = context.get("value", "")
-				self._add_permission_rules(engine, ptype, value)
+			if answer in ("allow", "allow_all"):
+				# M12: allow_all persists a session-scoped allow rule; single allow is
+				# a true one-shot that adds NO rule (H9) — next match re-prompts.
+				if answer == "allow_all" and engine:
+					ptype = context.get("permission_type")
+					value = context.get("value", "")
+					self._add_permission_rules(engine, ptype, value)
 				return {"answer": "allow"}
 			return {"answer": "deny"}
 
