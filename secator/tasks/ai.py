@@ -29,6 +29,37 @@ from secator.ai.session import save_history, show_session_picker, replay_session
 from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
 
 
+# D4: high-precision cues for the deterministic mode fast-path. Only unambiguous
+# prompts (cues for exactly one of attack/chat, and no exploit-ish cue) are
+# resolved here; everything else defers to the LLM classifier.
+_ATTACK_CUES = (
+	"scan", "pentest", "pen test", "enumerate", "enumeration", "recon",
+	"brute", "bruteforce", "fuzz", "attack", "nmap", "nuclei", "subdomain", "hack",
+)
+_CHAT_CUES = (
+	"summarize", "summary", "explain", "what is", "what are", "what's",
+	"how do", "how does", "tell me", "describe", "list the", "show me", "?",
+)
+_EXPLOIT_CUES = ("exploit", "poc", "proof of concept", "cve-", "vulnerabilit")
+
+
+def fast_detect_mode(prompt):
+	"""D4: cheap deterministic pre-classifier. Returns 'attack'/'chat' for
+	unambiguous prompts, else None to defer to the LLM. Exploit-ish prompts
+	return None so the LLM keeps deciding those (no behavior change there)."""
+	text = (prompt or "").strip().lower()
+	if not text:
+		return "chat"
+	if any(cue in text for cue in _EXPLOIT_CUES):
+		return None
+	has_attack = any(cue in text for cue in _ATTACK_CUES)
+	has_chat = any(cue in text for cue in _CHAT_CUES)
+	if has_attack and not has_chat:
+		return "attack"
+	if has_chat and not has_attack:
+		return "chat"
+	return None
+
 
 @task()
 class ai(PythonRunner):
@@ -717,21 +748,27 @@ class ai(PythonRunner):
 		if not self.prompt:
 			self.mode = "chat"
 			return
-		try:
-			selection_prompt = load_prompt("modes/_selection.txt")
-			messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
-			with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
-				result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)
-			self._account_usage(result.get("usage"))
-			mode = result["content"].strip().lower()
-			if mode in ("attack", "chat"):
-				console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
-				self.mode = mode
-			else:
-				self.mode = old_mode or "chat"
-		except Exception:
-			console.print(Warning(message='Could not detect mode using LLM. Falling back to "chat" mode.'))
-			self.mode = "chat"
+		# D4: resolve unambiguous prompts deterministically; skip the intent LLM round-trip.
+		fast_mode = fast_detect_mode(self.prompt)
+		if fast_mode:
+			console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{fast_mode}[/] (fast-path)")
+			self.mode = fast_mode
+		else:
+			try:
+				selection_prompt = load_prompt("modes/_selection.txt")
+				messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
+				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
+					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
+				self._account_usage(result.get("usage"))
+				mode = result["content"].strip().lower()
+				if mode in ("attack", "chat"):
+					console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
+					self.mode = mode
+				else:
+					self.mode = old_mode or "chat"
+			except Exception:
+				console.print(Warning(message='Could not detect mode using LLM. Falling back to "chat" mode.'))
+				self.mode = "chat"
 		if not self.mode:
 			self.mode = "chat"
 		mode_max = get_mode_config(self.mode).get("max_iterations", self.max_iterations)
