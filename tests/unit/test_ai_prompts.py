@@ -281,6 +281,33 @@ class TestPrompts(unittest.TestCase):
 		self.assertNotIn("NEVER INVENT", COMMON_RULES)
 		self.assertNotIn("ALWAYS provide", COMMON_RULES)
 
+	# === Template-drift regression tests (D1) ===
+
+	def test_rendered_prompts_have_no_unsubstituted_template_vars(self):
+		"""Rendered prompts must not leak $query_types / $output_types_reference (D1)."""
+		for mode in ("attack", "chat", "exploit"):
+			prompt = get_system_prompt(mode)
+			self.assertNotIn("$query_types", prompt, f"$query_types leaked in {mode!r} prompt")
+			self.assertNotIn("$output_types_reference", prompt, f"$output_types_reference leaked in {mode!r} prompt")
+
+	def test_rendered_prompts_substitute_query_types_from_registry(self):
+		"""$query_types renders to the real FINDING_TYPES names, not a placeholder."""
+		from secator.ai.prompts import build_query_types
+		expected = build_query_types()
+		self.assertIn("vulnerability", expected)
+		for mode in ("attack", "chat", "exploit"):
+			self.assertIn(expected, get_system_prompt(mode))
+
+	def test_rendered_prompts_have_no_phantom_run_query_tool(self):
+		"""Examples must call the real query_workspace tool, never a phantom run_query (D1)."""
+		from secator.ai.tools import TOOL_ACTION_MAP
+		self.assertEqual(TOOL_ACTION_MAP["query_workspace"], "query")
+		self.assertNotIn("run_query", TOOL_ACTION_MAP)
+		for mode in ("attack", "chat", "exploit"):
+			prompt = get_system_prompt(mode)
+			self.assertNotIn("run_query", prompt, f"phantom run_query in {mode!r} prompt")
+			self.assertIn("query_workspace", prompt)
+
 
 if __name__ == '__main__':
 	unittest.main()

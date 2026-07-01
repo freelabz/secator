@@ -12,7 +12,7 @@ run_task(name="httpx", targets=["target3.com"], opts={"rate_limit": 30, "proxy":
 run_workflow(name="domain_recon", targets=["example.com"])
 run_shell(command="curl -sk https://10.0.0.1/ | head -50")
 run_task(name="ai", targets=["example.com"], opts={"prompt": "Enumerate subdomains", "mode": "attack", "session_name": "Subdomain enumeration on example.com", "max_iterations": 5})
-run_query(query={'vulnerability': {'severity': {'$in': ['high', 'critical']})
+query_workspace(query={"_type": "vulnerability", "severity": {"$in": ["high", "critical"]}})
 add_finding(name="XSS vuln", matched_at=["http://testphp.vulnweb.com/hpp/?pp=1"], )
 </correct>
 
