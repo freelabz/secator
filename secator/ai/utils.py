@@ -297,25 +297,30 @@ def call_llm(
 	# a matching tool_result). Safety net in case the caller bypassed ChatHistory.
 	_repair_orphan_tool_uses(kwargs["messages"])
 
+	# M4: 400s are non-transient (malformed request, context_length_exceeded, ...) —
+	# handled separately below and NOT in this transient-retry tuple.
 	retryable = (
 		litellm.InternalServerError, litellm.RateLimitError,
-		litellm.ServiceUnavailableError, litellm.APIConnectionError, litellm.BadRequestError,
+		litellm.ServiceUnavailableError, litellm.APIConnectionError,
 		litellm.APIError
 	)
 	for attempt in range(1, max_retries + 1):
 		try:
 			response = litellm.completion(**kwargs)
 			break
-		except retryable as e:
-			# Detect the specific "orphan tool_use" error and repair before retry.
+		except litellm.BadRequestError as e:
+			# M4: 400s fail fast, except the orphan tool_use case which we repair
+			# and retry (not counted as an attempt — the repair is the real fix).
 			err_str = str(e)
 			if 'tool_use' in err_str and 'tool_result' in err_str:
 				repaired = _repair_orphan_tool_uses(kwargs["messages"])
 				if repaired:
 					console.print(Warning(
 						message=f"Repaired {repaired} orphan tool_use block(s); retrying LLM call."))
-					# Don't count this as a retry attempt — the repair is the real fix.
 					continue
+			console.print(Error(message=f"LLM call failed with non-retryable 400: {e}"))
+			raise
+		except retryable as e:
 			if attempt < max_retries:
 				wait = 2 ** attempt
 				console.print(Warning(
