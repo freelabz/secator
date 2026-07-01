@@ -1,6 +1,6 @@
 # tests/unit/test_ai_guardrails.py
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from secator.definitions import ADDONS_ENABLED
 
@@ -409,6 +409,54 @@ class TestPromptTarget(unittest.TestCase):
 		with patch.object(engine, '_show_target_menu', return_value=[4]):
 			result = engine.prompt_target("10.5.2.3", interactive=True)
 		self.assertEqual(result, "deny")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestPromptShell(unittest.TestCase):
+
+	def _make_engine(self, allow=None, deny=None, ask=None):
+		config = {"allow": allow or [], "deny": deny or [], "ask": ask or []}
+		return PermissionEngine(config)
+
+	def _menu_returning(self, idx):
+		"""Patch the rich menu so .show() yields (idx, label)."""
+		menu = MagicMock()
+		menu.return_value.show.return_value = (idx, "")
+		return menu
+
+	def test_prompt_shell_non_interactive_returns_deny(self):
+		engine = self._make_engine(ask=["shell(*)"])
+		self.assertEqual(engine.prompt_shell("curl https://x", interactive=False), "deny")
+
+	def test_allow_this_command_is_one_shot(self):
+		"""Option 0 approves ONLY this invocation — no session rule; the next call re-prompts (H9)."""
+		engine = self._make_engine(ask=["shell(*)"])
+		with patch('secator.rich.InteractiveMenu', self._menu_returning(0)), \
+		     patch('secator.ai.guardrails._extract_cmd_names', return_value=["curl"]):
+			result = engine.prompt_shell("curl https://good.example")
+		self.assertEqual(result, "allow")
+		# No runtime rule was added, so a second, different-arg curl is NOT auto-allowed
+		self.assertEqual(engine.runtime_allow, [])
+		self.assertEqual(engine._check_value("shell", "curl").decision, "ask")
+
+	def test_allow_all_commands_adds_session_rule(self):
+		"""Option 1 persists a session-wide allow for the command name (unchanged)."""
+		engine = self._make_engine(ask=["shell(*)"])
+		with patch('secator.rich.InteractiveMenu', self._menu_returning(1)), \
+		     patch('secator.ai.guardrails._extract_cmd_names', return_value=["curl"]):
+			result = engine.prompt_shell("curl https://good.example")
+		self.assertEqual(result, "allow")
+		self.assertEqual(engine.runtime_allow, [("shell", ["curl"])])
+		# Now any curl is auto-allowed for the session
+		self.assertEqual(engine._check_value("shell", "curl").decision, "allow")
+
+	def test_deny_choice_blocks(self):
+		engine = self._make_engine(ask=["shell(*)"])
+		with patch('secator.rich.InteractiveMenu', self._menu_returning(2)), \
+		     patch('secator.ai.guardrails._extract_cmd_names', return_value=["curl"]):
+			result = engine.prompt_shell("curl https://good.example")
+		self.assertEqual(result, "deny")
+		self.assertEqual(engine.runtime_allow, [])
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
