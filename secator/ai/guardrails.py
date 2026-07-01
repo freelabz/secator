@@ -37,10 +37,51 @@ OUTPUT_FLAG_COMMANDS = {
 
 # Exec-wrappers run a *different* command passed as args (`timeout 60 rm -rf /`),
 # so we peel the wrapper and check the INNER command, not the allow-listed name (C2).
+# M11: any wrapper NOT peeled reopens the C2 laundering class (`proxychains curl evil`,
+# `firejail rm -rf /`, `flock /tmp/x curl ...`), so the set is broadened + config-extensible.
 EXEC_WRAPPERS = frozenset({
 	"timeout", "xargs", "env", "nice", "ionice", "nohup", "stdbuf",
 	"setsid", "sudo", "doas", "watch", "time", "chroot", "unbuffer",
+	# M11: added laundering-vector wrappers
+	"flock", "runuser", "su", "script", "proxychains", "proxychains4",
+	"firejail", "torsocks", "torify", "unshare", "catchsegv", "chrt", "taskset",
 })
+
+# M11: per-wrapper arg grammar so the REAL command is located, not a lockfile/config/user.
+# (opts_taking_a_value, positional_args_before_cmd, cmd_string_opts) — cmd_string_opts values
+# (e.g. `-c 'curl evil'`) are re-parsed and peeled so the payload is checked, not skipped.
+_EMPTY = frozenset()
+_WRAPPER_ARG_GRAMMAR = {
+	"flock":        (frozenset({"-w", "--timeout", "-E", "--conflict-exit-code"}), 1, frozenset({"-c", "--command"})),
+	"runuser":      (frozenset({"-u", "--user", "-g", "--group", "-G", "--supp-group", "-s", "--shell"}), 0, frozenset({"-c", "--command"})),  # noqa: E501
+	"su":           (frozenset({"-s", "--shell", "-g", "--group", "-G", "--supp-group"}), 1, frozenset({"-c", "--command"})),
+	"script":       (_EMPTY, 0, frozenset({"-c", "--command"})),
+	"proxychains":  (frozenset({"-f"}), 0, _EMPTY),
+	"proxychains4": (frozenset({"-f"}), 0, _EMPTY),
+	"sudo":         (frozenset({"-u", "--user", "-g", "--group", "-U", "-C", "-p", "-r", "-t", "-T"}), 0, _EMPTY),
+}
+
+
+def _exec_wrappers() -> frozenset:
+	"""M11: built-in wrappers plus any ops-configured extras. Config EXTENDS the security baseline."""
+	try:
+		from secator.config import CONFIG
+		extra = getattr(CONFIG.addons.ai, "exec_wrappers", None) or []
+		extra = {str(w).strip() for w in extra if str(w).strip()}
+		if extra:
+			return EXEC_WRAPPERS | extra
+	except Exception:
+		pass
+	return EXEC_WRAPPERS
+
+
+def _split_cmd_string(s: str) -> List[str]:
+	"""Best-effort tokenize a `-c '<cmd>'` payload so the nested command can be re-checked."""
+	import shlex
+	try:
+		return shlex.split(s)
+	except ValueError:
+		return s.split()
 
 
 def parse_rule(rule: str) -> Tuple[str, List[str]]:
@@ -356,18 +397,36 @@ def _peel_wrapper(args: List[str]) -> List[str]:
 
 	Bare `env`/`sudo` (no inner command) is returned as-is so it's still checked by name.
 	"""
+	wrappers = _exec_wrappers()
 	tokens = args
 	for _ in range(len(args)):  # bounded peels (guards against pathological nesting)
 		if not tokens:
 			return tokens
 		name = tokens[0].rsplit('/', 1)[-1]
-		if name not in EXEC_WRAPPERS:
+		if name not in wrappers:
 			return tokens
 		rest = tokens[1:]
+		# M11: peel proxychains/firejail/flock/runuser/... past their OWN args (value-opts,
+		# positional lockfile/config, `-c '<cmd>'`) so the leaf payload is what gets classified.
+		opts_with_val, n_pos, cmd_opts = _WRAPPER_ARG_GRAMMAR.get(name, (_EMPTY, 0, _EMPTY))
 		i = 0
+		pos_seen = 0
 		while i < len(rest):
 			tok = rest[i]
+			if tok == '--':  # end-of-options: the inner command starts next
+				i += 1
+				break
+			if tok in cmd_opts and i + 1 < len(rest):  # `-c '<cmd>'` — re-parse & peel the nested payload
+				nested = _split_cmd_string(rest[i + 1])
+				return _peel_wrapper(nested) if nested else tokens
+			if tok in opts_with_val and i + 1 < len(rest):  # option that consumes its value
+				i += 2
+				continue
 			if tok.startswith('-') or _is_wrapper_operand(tok):
+				i += 1
+				continue
+			if pos_seen < n_pos:  # wrapper's own positional (flock lockfile / su user)
+				pos_seen += 1
 				i += 1
 				continue
 			break

@@ -10,7 +10,7 @@ if ADDONS_ENABLED['ai']:
 	from secator.ai.guardrails import (
 		parse_rule, match_rule, extract_command_targets, detect_paths, detect_paths_with_access,
 		detect_sensitive_env_vars, classify_command, build_target_choices, PermissionEngine,
-		_is_file_path, _normalize_ip
+		_is_file_path, _normalize_ip, _peel_wrapper, _exec_wrappers, EXEC_WRAPPERS
 	)
 	from secator.output_types import Warning, Error
 
@@ -1192,6 +1192,95 @@ class TestOutputFlagWrites(unittest.TestCase):
 		"""Redirect classification is preserved alongside the new flag handling."""
 		paths = self._paths(["echo", "x"], redirects=[("", "/etc/y")])
 		self.assertIn(("/etc/y", "write"), paths)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestWrapperPeelingM11(unittest.TestCase):
+	"""M11: broadened + arg-grammar-aware exec-wrapper peeling closes the C2 laundering class.
+
+	The `_peel_wrapper` assertions are PROVEN (they take a token list — no shfmt needed).
+	The `check_action` integration assertions stub `extract_commands` (real shfmt is absent
+	in CI-less envs, which no-ops every parser-dependent test), same pattern as
+	TestOutputFlagWrites."""
+
+	# --- PROVEN: peel locates the leaf command past each wrapper's own arg grammar ---
+
+	def test_proxychains_peels_to_inner(self):
+		self.assertEqual(_peel_wrapper(["proxychains", "curl", "http://evil"]), ["curl", "http://evil"])
+
+	def test_proxychains_config_flag_consumed(self):
+		self.assertEqual(_peel_wrapper(["proxychains", "-f", "/etc/pc.conf", "dd"]), ["dd"])
+
+	def test_firejail_peels_past_long_opts(self):
+		self.assertEqual(_peel_wrapper(["firejail", "--net=none", "rm", "-rf", "/tmp/x"]), ["rm", "-rf", "/tmp/x"])
+
+	def test_flock_lockfile_positional_consumed(self):
+		self.assertEqual(_peel_wrapper(["flock", "/tmp/l", "curl", "http://evil"]), ["curl", "http://evil"])
+
+	def test_flock_value_opt_then_lockfile(self):
+		self.assertEqual(_peel_wrapper(["flock", "-w", "5", "/tmp/l", "dd"]), ["dd"])
+
+	def test_runuser_cmd_string_reparsed(self):
+		self.assertEqual(_peel_wrapper(["runuser", "-c", "curl http://evil"]), ["curl", "http://evil"])
+
+	def test_runuser_user_then_dashdash(self):
+		self.assertEqual(_peel_wrapper(["runuser", "-u", "bob", "--", "curl", "http://evil"]), ["curl", "http://evil"])
+
+	def test_su_user_positional_and_cmd_string(self):
+		self.assertEqual(_peel_wrapper(["su", "root", "-c", "dd if=/dev/zero"]), ["dd", "if=/dev/zero"])
+
+	def test_script_cmd_string_reparsed(self):
+		self.assertEqual(_peel_wrapper(["script", "-c", "curl http://evil", "/tmp/log"]), ["curl", "http://evil"])
+
+	def test_torsocks_peels_to_inner(self):
+		self.assertEqual(_peel_wrapper(["torsocks", "curl", "http://evil"]), ["curl", "http://evil"])
+
+	def test_sudo_user_value_opt_consumed(self):
+		# pre-existing C2 gap: `sudo -u bob` mis-read `bob` as the command; grammar now consumes it
+		self.assertEqual(_peel_wrapper(["sudo", "-u", "bob", "rm", "-rf", "/"]), ["rm", "-rf", "/"])
+
+	# --- PROVEN: C2-covered wrappers + normal commands unchanged ---
+
+	def test_c2_timeout_still_peels(self):
+		self.assertEqual(_peel_wrapper(["timeout", "60", "rm", "-rf", "/"]), ["rm", "-rf", "/"])
+
+	def test_c2_interpreter_gate_preserved(self):
+		# bash is NOT a wrapper — it stays the leaf so its ask-gate still fires
+		self.assertEqual(_peel_wrapper(["timeout", "60", "bash", "-c", "rm -rf /"]), ["bash", "-c", "rm -rf /"])
+
+	def test_normal_command_untouched(self):
+		self.assertEqual(_peel_wrapper(["curl", "http://ok"]), ["curl", "http://ok"])
+
+	def test_bare_wrapper_checked_by_name(self):
+		self.assertEqual(_peel_wrapper(["sudo"]), ["sudo"])
+
+	# --- PROVEN: config EXTENDS the built-in baseline (never shrinks below it) ---
+
+	def test_config_added_wrapper_honored(self):
+		try:
+			CONFIG.addons.ai.exec_wrappers = ["myrunner"]
+			self.assertIn("myrunner", _exec_wrappers())
+			self.assertTrue(EXEC_WRAPPERS <= _exec_wrappers())  # baseline is the floor
+			self.assertEqual(_peel_wrapper(["myrunner", "dd", "if=/dev/zero"]), ["dd", "if=/dev/zero"])
+		finally:
+			CONFIG.addons.ai.exec_wrappers = []
+
+	# --- PROVEN-via-stub: end-to-end deny/ask fires on the peeled leaf, not the wrapper name ---
+
+	def _decide(self, argv):
+		engine = PermissionEngine(dict(CONFIG.addons.ai.permissions), targets=["10.0.0.1"],
+								  workspace="/home/user/.secator/reports/test/tasks/ai_1")
+		with patch('safecmd.bashxtract.extract_commands', return_value=([argv], [], [])):
+			return engine.check_action({"action": "shell", "command": " ".join(argv)}).decision
+
+	def test_proxychains_denied_inner_command(self):
+		self.assertEqual(self._decide(["proxychains", "dd", "if=/dev/zero"]), "deny")  # dd is deny-listed
+
+	def test_flock_launders_denied_command(self):
+		self.assertEqual(self._decide(["flock", "/tmp/l", "dd"]), "deny")
+
+	def test_firejail_scoped_rm_asks(self):
+		self.assertEqual(self._decide(["firejail", "rm", "-rf", "/tmp/x"]), "ask")  # not silent-allowed as firejail
 
 
 if __name__ == '__main__':
