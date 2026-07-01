@@ -664,6 +664,17 @@ class PermissionResult:
 	shell_command: str = ""  # full command when prompting for shell approval
 
 
+# M7: finding types downstream auto-trusts. tasks/ai.py _auto_approve_workspace_targets()
+# searches _type:"target" findings and auto-approves them as in-scope, so an injected
+# add_finding of one of these silently widens scope.
+_PRIVILEGED_FINDING_TYPES = frozenset({"target"})
+
+
+def _is_privileged_finding_type(action: Dict) -> bool:
+	"""True if an add_finding action would mint a downstream-trusted (scope-widening) finding."""
+	return str(action.get("_type", "")).strip().lower() in _PRIVILEGED_FINDING_TYPES
+
+
 class PermissionEngine:
 	"""Evaluate AI actions against allow/deny/ask permission rules.
 
@@ -824,6 +835,13 @@ class PermissionEngine:
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
 		elif action_type in ("query", "follow_up", "add_finding"):
+			# M7: don't let injected add_finding mint a trusted target that auto-approve later trusts
+			if action_type == "add_finding" and _is_privileged_finding_type(action):
+				ftype = str(action.get("_type", "")).strip().lower()
+				return PermissionResult(
+					decision="ask",
+					reason=f"add_finding of privileged type '{ftype}' requires approval",
+				)
 			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
 		return PermissionResult(decision="deny", reason=f"Unknown action type: {action_type}")
 
