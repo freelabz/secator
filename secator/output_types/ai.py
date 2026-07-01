@@ -162,11 +162,10 @@ class Ai(OutputType):
 			action_label_str = action_label.capitalize().replace('_', ' ')
 			line = f'{s}[bold blue]{action_label_str}[/]'
 			content = _s(self.content)
-			if self.ai_type in ['task', 'workflow', 'scan']:
+			if self.ai_type in ['task', 'workflow']:
 				colors = {
 					'task': 'bold gold3',
 					'workflow': 'bold dark_orange3',
-					'scan': 'bold red',
 				}
 				color = colors[self.ai_type]
 				content = f'[{color}]{content}[/]'

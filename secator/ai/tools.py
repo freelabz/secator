@@ -13,9 +13,6 @@ TOOL_ACTION_MAP = {
 	"stop": "stop",
 }
 
-# Reverse mapping: action type -> tool name
-ACTION_TOOL_MAP = {v: k for k, v in TOOL_ACTION_MAP.items()}
-
 # OpenAI-format tool schemas keyed by tool name
 TOOL_SCHEMAS = {
 	"run_task": {
@@ -37,7 +34,7 @@ TOOL_SCHEMAS = {
 					},
 					"opts": {
 						"type": "object",
-						"description": "Optional task-specific options (e.g. ports, rate_limit, timeout)."
+						"description": "Optional task-specific options (e.g. ports, rate_limit). Control/security flags are ignored."
 					}
 				},
 				"required": ["name", "targets"]
@@ -63,7 +60,7 @@ TOOL_SCHEMAS = {
 					},
 					"opts": {
 						"type": "object",
-						"description": "Optional workflow options (e.g. profiles)."
+						"description": "Optional workflow options (e.g. profiles). Control/security flags are ignored."
 					}
 				},
 				"required": ["name", "targets"]

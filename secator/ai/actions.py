@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, fields
@@ -34,6 +35,7 @@ class ActionContext:
 	scope: str = "workspace"
 	results: Optional[List[Dict]] = None
 	max_workers: int = 3
+	in_batch: bool = False  # H4: set on the per-batch ctx so the per-turn fan-out cap applies
 	subagent: bool = False
 	silent: bool = False
 	sync: bool = True
@@ -115,6 +117,37 @@ def _build_hooks_from_context(context: Dict) -> Dict:
 	if not hooks_list:
 		return {}
 	return deep_merge_dicts(*hooks_list)
+
+
+def _build_child_hooks_or_denial(context: Dict) -> Tuple[Dict, Optional["Warning"]]:
+	"""M2: rebuild the child's persistence hooks, refusing a persistence-less child.
+
+	``context`` carries the parent's ``drivers`` (copied via ``_get_result_context``),
+	so an empty/failed rebuild while the parent HAS drivers means the child would run
+	to completion and silently persist nothing (lost findings/docs). In that case
+	return a denial ``Warning`` (same shape H4/C1 use) so the caller yields it and
+	skips the spawn. When the parent itself has no drivers (pure local/no-persistence
+	run) an empty-hooks child is expected and allowed.
+
+	Returns ``(hooks, denial)``; if ``denial`` is non-None the caller must not spawn.
+	"""
+	parent_has_drivers = bool(context.get('drivers'))
+	try:
+		hooks = _build_hooks_from_context(context)
+	except Exception as e:  # narrow to the rebuild — surface, don't degrade to hooks={}
+		if parent_has_drivers:
+			return {}, Warning(
+				message=f"Subagent spawn denied: persistence hook rebuild failed — {type(e).__name__}: {e}",
+				_context=context,
+			)
+		return {}, None
+	if parent_has_drivers and not hooks:
+		return {}, Warning(
+			message="Subagent spawn denied: parent has persistence drivers but child hook rebuild "
+					"was empty (would silently drop findings/docs)",
+			_context=context,
+		)
+	return hooks, None
 
 
 def _build_action_display(action: Dict) -> str:
@@ -216,6 +249,8 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 				value=result.shell_command,
 				reason=result.reason,
 				engine=ctx.permission_engine,
+				# unique id per prompt so its remote poll matches only its own answer (H7)
+				prompt_uuid=str(uuid.uuid4()),
 			)
 			if is_remote:
 				yield ctx.backend.build_pending_prompt(**ask_kwargs)
@@ -239,6 +274,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 				value=target,
 				command=cmd_display,
 				engine=ctx.permission_engine,
+				prompt_uuid=str(uuid.uuid4()),
 			)
 			if is_remote:
 				yield ctx.backend.build_pending_prompt(**ask_kwargs)
@@ -261,6 +297,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 					value=path,
 					command=cmd_display,
 					engine=ctx.permission_engine,
+					prompt_uuid=str(uuid.uuid4()),
 				)
 				if is_remote:
 					yield ctx.backend.build_pending_prompt(**ask_kwargs)
@@ -272,6 +309,10 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 		result = ctx.permission_engine.check_action(action)
 		if result.decision == "deny":
 			return f"Action denied after prompt: {result.reason}"
+
+	# fail closed: prompts exhausted with the decision still unresolved -> block (H10)
+	if result.decision == "ask":
+		return f"Action denied: guardrail check unresolved after {max_rounds} prompts"
 
 	return None
 
@@ -306,6 +347,17 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		yield Warning(message=f"Unknown action: {action_type}", _context=context)
 
 
+def _truncate(text: str, max_chars: int) -> str:
+	"""Cap ``text`` to ~``max_chars``, keeping head + tail so both the start and the
+	final lines survive, with a clear marker for the dropped middle. Short text is
+	returned unchanged (no marker)."""
+	if len(text) <= max_chars:
+		return text
+	dropped = len(text) - max_chars
+	half = max_chars // 2
+	return f"{text[:half]}\n…(truncated {dropped} chars)…\n{text[-(max_chars - half):]}"
+
+
 def _format_action_error(e: Exception, max_chars: int = 400) -> str:
 	"""Build a concise, LLM-facing error string for a failed action dispatch.
 
@@ -325,8 +377,7 @@ def _format_action_error(e: Exception, max_chars: int = 400) -> str:
 	tb_tail = "\n".join(tb_lines[-6:]) if tb_lines else ""
 
 	detail = f"{head}\n{tb_tail}" if tb_tail else head
-	if len(detail) > max_chars:
-		detail = detail[:max_chars] + "…(truncated)"
+	detail = _truncate(detail, max_chars)
 	return (
 		f"Action failed with error: {detail}\n"
 		"Fix the issue and try again."
@@ -385,6 +436,88 @@ def _is_heavy_runner(runner_type: str, name: str, opts: dict = None) -> bool:
 	return profile in _HEAVY_PROFILES
 
 
+# Framework control/security keys the LLM must never set on a spawned sub-runner
+# (esp. `dangerous`, which skips the permission engine). Task/workflow scan opts
+# (nmap ports, httpx rate_limit, ...) are not control keys and pass through.
+_FORBIDDEN_CHILD_OPT_KEYS = frozenset({
+	"dangerous",
+	"interactive",
+	"hooks",
+	"sync",
+	"subagent",
+	"tty",
+	"dry_run",
+	"exporters",
+	"enable_reports",
+})
+
+# Cap a spawned subagent's iteration budget so it can't be told to loop unbounded.
+_MAX_CHILD_ITERATIONS = 25
+
+# H4: bound recursive AI-subagent fan-out so injected output can't drive an
+# exponential subagent/token blow-up. Depth caps recursion (child inherits +1 via
+# context); breadth caps how many subagents one parent turn may spawn.
+_MAX_SUBAGENT_DEPTH = 3
+_MAX_SUBAGENTS_PER_TURN = 5
+_SUBAGENT_TURN_LOCK = threading.Lock()
+
+# M1: cap shell stdout/stderr before it enters AI history so a command emitting
+# megabytes can't blow up the next prompt's token budget / memory. Larger than the
+# 400-char error cap because successful output carries more useful signal; head+tail
+# so the model still sees the start AND the final lines (often the result/error).
+_MAX_SHELL_OUTPUT_CHARS = 4000
+
+
+def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["Warning"]:
+	"""H4: cap AI-subagent recursion depth + per-turn fan-out.
+
+	Returns a denial ``Warning`` if a cap is hit (caller yields it and skips the
+	spawn); otherwise stamps the child's depth (+1) into ``context`` and bumps the
+	per-turn counter. Breadth is only counted within a batch (one LLM turn); a
+	lone spawn is inherently breadth-1.
+	"""
+	depth = int(ctx.context.get("ai_subagent_depth", 0) or 0)
+	if depth >= _MAX_SUBAGENT_DEPTH:
+		return Warning(
+			message=f"Subagent spawn denied: recursion depth cap ({_MAX_SUBAGENT_DEPTH}) reached",
+			_context=context,
+		)
+	if ctx.in_batch:  # per-turn breadth only bites within a batch
+		with _SUBAGENT_TURN_LOCK:
+			turn = int(ctx.context.get("ai_subagent_turn_count", 0) or 0)
+			over_breadth = turn >= _MAX_SUBAGENTS_PER_TURN
+			if not over_breadth:
+				ctx.context["ai_subagent_turn_count"] = turn + 1
+		if over_breadth:
+			return Warning(
+				message=f"Subagent spawn denied: per-turn fan-out cap ({_MAX_SUBAGENTS_PER_TURN}) reached",
+				_context=context,
+			)
+	context["ai_subagent_depth"] = depth + 1  # child inherits depth+1
+	return None
+
+
+def _sanitize_child_opts(opts: Any) -> Dict:
+	"""Drop LLM-settable control/security keys from sub-runner opts; clamp max_iterations."""
+	if not isinstance(opts, dict):
+		return {}
+	clean = {}
+	for key, value in opts.items():
+		k = str(key)
+		if k in _FORBIDDEN_CHILD_OPT_KEYS or k.startswith("print_"):
+			continue
+		clean[key] = value
+	# Clamp the AI-subagent iteration budget (bool is an int subclass — drop it).
+	mi = clean.get("max_iterations")
+	if isinstance(mi, bool):
+		clean.pop("max_iterations", None)
+	elif isinstance(mi, (int, float)):
+		clean["max_iterations"] = max(1, min(int(mi), _MAX_CHILD_ITERATIONS))
+	elif mi is not None:
+		clean.pop("max_iterations", None)
+	return clean
+
+
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
 	"""Execute a secator task or workflow.
 
@@ -395,13 +528,22 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	"""
 	name = action.get("name", "")
 	targets = action.get("targets", ctx.targets)
-	opts = action.get("opts", {})
+	# drop LLM-set control keys (notably `dangerous`) before they reach the child
+	opts = _sanitize_child_opts(action.get("opts", {}))
 	context = _get_result_context(action, ctx)
 
 	# Force subagent flags when spawning an AI task from a parent AI task
 	if runner_type == "task" and name.lower() == "ai":
+		# H4: bound recursive fan-out before constructing/running the child
+		denial = _guard_subagent_fanout(ctx, context)
+		if denial is not None:
+			yield denial
+			return
 		opts["subagent"] = True
 		opts["interactive"] = False
+
+	# defense in depth: a spawned runner is never dangerous (CLI --dangerous unaffected)
+	opts["dangerous"] = False
 
 	if runner_type == "task":
 		tpl = TemplateLoader(input={'type': 'task', 'name': name})
@@ -455,7 +597,11 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	# _get_result_context), but a sync sub-runner never goes through the pickle
 	# path that re-registers driver hooks — so without this its results would
 	# persist with no workspace scope and never appear in the workspace History.
-	hooks = _build_hooks_from_context(context)
+	# M2: don't silently spawn a persistence-less child when the parent has drivers
+	hooks, denial = _build_child_hooks_or_denial(context)
+	if denial is not None:
+		yield denial
+		return
 	try:
 		runner = runner_cls(tpl, targets, run_opts=run_opts, hooks=hooks, context=context)
 	except TaskNotFoundError as e:
@@ -555,6 +701,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			env=_sanitized_env()
 		)
 		output = result.stdout or result.stderr or "(no output)"
+		output = _truncate(output, _MAX_SHELL_OUTPUT_CHARS)  # M1: cap so it can't blow up history
 		yield Ai(content=output, ai_type="shell_output", _context=context)
 
 	except Exception as e:
@@ -855,8 +1002,11 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 
 	max_workers = ctx.max_workers or 3
 
+	# H4: fresh per-turn subagent fan-out budget for this batch (one LLM turn)
+	ctx.context["ai_subagent_turn_count"] = 0
+
 	# Silence console output for parallel tasks to avoid interleaved printing
-	batch_ctx = replace(ctx, silent=True)
+	batch_ctx = replace(ctx, silent=True, in_batch=True)
 
 	# Skip Rich progress panel when we are a subagent, or when the batch
 	# contains an AI subagent task (its output conflicts with the Live display)

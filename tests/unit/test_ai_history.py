@@ -218,6 +218,76 @@ class TestChatHistory(unittest.TestCase):
         messages = history.to_messages(max_tokens_total=500)
         self.assertEqual(len(messages), 2)
 
+    @patch('secator.ai.history.get_context_window')
+    def test_to_messages_caps_budget_to_small_window(self, mock_get_ctx):
+        """M3: a flat max_tokens_total is capped to a small model's window."""
+        mock_get_ctx.return_value = 8000  # small-window model
+
+        history = ChatHistory()
+        history.model = "small-model"
+        history.add_system("s" * 40)
+        for i in range(40):
+            history.add_user("x" * 4000)  # long history, well over 8k tokens
+
+        original_count = len(history.messages)
+        # Flat 100k cap would NOT trim on a real 8k model without this fix.
+        messages = history.to_messages(max_tokens_total=100000)
+
+        self.assertLess(len(messages), original_count)  # trimmed to fit the window
+        self.assertEqual(messages[0]["role"], "system")
+
+    @patch('secator.ai.history.get_context_window')
+    def test_to_messages_no_explicit_cap_uses_window(self, mock_get_ctx):
+        """M3: with max_tokens_total=0 and a model, trim to the window-derived budget."""
+        mock_get_ctx.return_value = 8000
+
+        history = ChatHistory()
+        history.model = "small-model"
+        history.add_system("s" * 40)
+        for i in range(40):
+            history.add_user("x" * 4000)
+
+        original_count = len(history.messages)
+        messages = history.to_messages()  # no explicit cap
+
+        self.assertLess(len(messages), original_count)
+
+    @patch('secator.ai.history.get_context_window')
+    def test_to_messages_large_window_matches_flat_budget(self, mock_get_ctx):
+        """M3: on a large-window model the flat cap is honored (no over-trim)."""
+        mock_get_ctx.return_value = 200000  # window - reserve (191808) > 100k cap
+
+        history = ChatHistory()
+        history.model = "big-model"
+        history.add_system("short")
+        history.add_user("small message")
+
+        with patch.object(history, 'trim', wraps=history.trim) as spy:
+            history.to_messages(max_tokens_total=100000)
+            # Budget = min(100000, 200000 - 8192) = 100000, unchanged by the window.
+            spy.assert_called_once_with(100000)
+
+    @patch('secator.ai.history.get_context_window')
+    def test_to_messages_window_cap_preserves_tool_pairs(self, mock_get_ctx):
+        """M3 + H2: window-capped trim never leaves a leading orphan tool_result."""
+        mock_get_ctx.return_value = 8000
+
+        history = ChatHistory()
+        history.model = "small-model"
+        history.add_system("s" * 40)
+        for i in range(30):
+            tool_calls = [{"id": f"call_{i}", "type": "function",
+                           "function": {"name": "nmap", "arguments": "{}"}}]
+            history.add_assistant_with_tool_calls("x" * 2000, tool_calls)
+            history.add_tool_result("nmap", f"call_{i}", "y" * 2000)
+
+        messages = history.to_messages(max_tokens_total=100000)
+
+        # First non-system message must not be an orphan tool result.
+        non_system = [m for m in messages if m["role"] != "system"]
+        if non_system:
+            self.assertNotEqual(non_system[0]["role"], "tool")
+
     def test_to_messages_no_truncation_when_zero(self):
         """to_messages without max_tokens_total does not truncate."""
         history = ChatHistory()

@@ -361,5 +361,130 @@ class TestAiTokenAccountingEndToEnd(unittest.TestCase):
 		self.assertAlmostEqual(task.context["ai_cost"], 0.0025)
 
 
+@unittest.skipUnless(HAS_AI, 'ai addon required')
+class TestAiRateLimitTermination(unittest.TestCase):
+	"""A persistent 429 must terminate the loop after a bounded number of failures (H1)."""
+
+	def _make_loop_task(self, max_iterations):
+		task = _make_task()
+		task.inputs = []
+		task.model = "test-model"
+		task.intent_model = "test-model"
+		task.temp = 0.7
+		task.api_base = None
+		task.api_key = "key"
+		task.max_iterations = max_iterations
+		task.max_tokens_total = 100000
+		task.max_workers = 1
+		task.is_subagent = True
+		task.verbose = False
+		task.dry_run = False
+		task.mode = "chat"
+		task.scope = "workspace"
+		task.results = []
+		task.encryptor = None
+		task.tool_schemas = []
+		task.permission_engine = None
+		task.dangerous = True
+		task.interactive = "auto"
+		task._sync = True
+		task.session_id = "s"
+		task._reports_folder = None
+		task.debug = lambda *a, **k: None
+		task.add_result = lambda *a, **k: None
+		from secator.ai.interactivity import create_backend
+		task.backend = create_backend("auto")
+		return task
+
+	def test_persistent_rate_limit_aborts_bounded(self):
+		"""A 429 on every call_llm aborts after 4 attempts, regardless of max_iterations."""
+		import litellm
+		from secator.output_types import Error
+
+		task = self._make_loop_task(max_iterations=50)
+		calls = {"n": 0}
+
+		def always_rate_limited(*args, **kwargs):
+			calls["n"] += 1
+			raise litellm.RateLimitError("rate limited", "openai", "test-model")
+
+		with _loop_patches(task, always_rate_limited):
+			results = list(task._run_loop())
+
+		# bounded by the 4-consecutive-429 cap, not the 50-iteration budget
+		self.assertEqual(calls["n"], 4)
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertTrue(errors, "expected an Error to be yielded on abort")
+		self.assertIn("Rate limit", errors[-1].message)
+
+
+@unittest.skipUnless(HAS_AI, 'ai addon required')
+class TestAiToolPairTrim(unittest.TestCase):
+	"""Trim/compaction must not leave a leading orphan tool_result (H2).
+
+	litellm trim_messages and the blind keep_last tail cut drop the OLDEST
+	messages with no tool-pairing awareness, so the kept window can START with a
+	tool_result whose assistant(tool_calls) parent was dropped — which
+	Anthropic/OpenAI reject. The fix strips those leading orphans.
+	"""
+
+	def test_strip_leading_orphan_tools_keeps_system(self):
+		from secator.ai.utils import _strip_leading_orphan_tools
+		msgs = [
+			{"role": "system", "content": "s"},
+			{"role": "tool", "tool_call_id": "t1", "content": "{}"},
+			{"role": "tool", "tool_call_id": "t2", "content": "{}"},
+			{"role": "user", "content": "u"},
+		]
+		removed = _strip_leading_orphan_tools(msgs)
+		self.assertEqual(removed, 2)
+		self.assertEqual([m["role"] for m in msgs], ["system", "user"])
+
+	def test_repair_handles_leading_orphan_tool(self):
+		from secator.ai.utils import _repair_orphan_tool_uses
+		msgs = [
+			{"role": "tool", "tool_call_id": "t1", "content": "{}"},
+			{"role": "user", "content": "u"},
+		]
+		n = _repair_orphan_tool_uses(msgs)
+		self.assertEqual(n, 1)
+		self.assertEqual(msgs[0]["role"], "user")
+
+	def test_trim_strips_leading_orphan_tool(self):
+		"""After litellm drops the assistant parent, trim() removes the orphan tool."""
+		history = ChatHistory(model="test-model")
+		history.add_system("sys")
+		history.add_assistant_with_tool_calls(None, [{"id": "t1", "function": {"name": "noop", "arguments": "{}"}}])
+		history.add_tool_result("noop", "t1", "{}")
+		history.add_user("u1")
+		history.add_assistant("a1")
+		# Simulate litellm dropping the oldest (assistant parent) but keeping its tool_result.
+		simulated = [history.messages[0], history.messages[2], history.messages[3], history.messages[4]]
+		with patch('litellm.utils.trim_messages', return_value=simulated):
+			out = history.trim(100)
+		nonsys = [m for m in out if m["role"] != "system"]
+		self.assertEqual(nonsys[0]["role"], "user")
+		self.assertFalse(any(m["role"] == "tool" for m in out))
+
+	def test_compact_strips_leading_orphan_tool_in_kept_tail(self):
+		"""keep_last tail cut that starts on a tool_result is repaired."""
+		history = ChatHistory(model="test-model")
+		history.add_system("sys")
+		history.add_user("u1")
+		history.add_assistant_with_tool_calls(None, [{"id": "t1", "function": {"name": "noop", "arguments": "{}"}}])
+		history.add_tool_result("noop", "t1", "{}")
+		history.add_assistant("a2")
+		history.add_user("u2")
+
+		fake = {"content": "summary", "usage": None}
+		with patch('secator.ai.utils.call_llm', return_value=fake):
+			with patch('secator.ai.history.get_context_window', return_value=8000):
+				history.compact("test-model", keep_last=3)
+
+		nonsys = [m for m in history.messages if m["role"] != "system"]
+		self.assertIn(nonsys[0]["role"], ("user", "assistant"))
+		self.assertFalse(any(m["role"] == "tool" for m in history.messages))
+
+
 if __name__ == '__main__':
 	unittest.main()

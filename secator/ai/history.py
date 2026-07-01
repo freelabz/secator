@@ -183,17 +183,34 @@ class ChatHistory:
         self.messages.append({"role": "tool", "content": content})
 
     def to_messages(self, max_tokens_total: int = 0) -> List[Dict[str, str]]:
-        """Return a copy of the messages list, trimming if over max_tokens_total.
+        """Return a copy of the messages list, trimming if over the effective budget.
 
         Uses litellm's trim_messages which preserves system messages and recent
         context while removing oldest messages first.
 
         Args:
-            max_tokens_total: Hard token limit. If > 0, trim messages to fit.
+            max_tokens_total: Requested hard token limit (0 = no explicit cap).
         """
-        if max_tokens_total > 0:
-            return self.trim(max_tokens_total)
+        budget = self._trim_budget(max_tokens_total)
+        if budget > 0:
+            return self.trim(budget)
         return self.messages.copy()
+
+    def _trim_budget(self, max_tokens_total: int = 0) -> int:
+        """Effective trim budget, capped to the model's real context window.
+
+        M3: a flat max_tokens_total (e.g. 100k) ignores the model window and
+        fails with context_length_exceeded on smaller-window models. Cap it to
+        get_context_window(model) - OUTPUT_TOKEN_RESERVATION (headroom for the
+        response), and use that window-derived budget even when no explicit cap
+        is set. With no model known, keep the legacy caller-driven behavior.
+        """
+        if not self.model:
+            return max_tokens_total
+        window_budget = max(get_context_window(self.model) - OUTPUT_TOKEN_RESERVATION, 1)
+        if max_tokens_total > 0:
+            return min(max_tokens_total, window_budget)
+        return window_budget
 
     def trim(self, max_tokens: int) -> List[Dict[str, str]]:
         """Trim messages to fit under max_tokens using litellm's trim_messages.
@@ -208,11 +225,17 @@ class ChatHistory:
             Trimmed list of messages.
         """
         from litellm.utils import trim_messages
+        from secator.ai.utils import _strip_leading_orphan_tools
         from secator.rich import console
         from secator.output_types import Warning
 
         original_count = len(self.messages)
         trimmed = trim_messages(self.messages, max_tokens=max_tokens)
+
+        # litellm drops the OLDEST messages with no tool-pairing awareness, so the
+        # kept window can START with an orphan tool_result whose assistant(tool_calls)
+        # parent was dropped — Anthropic/OpenAI reject that. Drop leading orphans.
+        _strip_leading_orphan_tools(trimmed)
         dropped = original_count - len(trimmed)
 
         if dropped:
@@ -381,9 +404,14 @@ class ChatHistory:
             to_summarize = rest
             to_keep = []
 
-        from secator.ai.utils import call_llm
+        from secator.ai.utils import call_llm, _strip_leading_orphan_tools
         from secator.rich import console
         from secator.utils import format_token_count
+
+        # The blind keep_last tail cut can leave to_keep STARTING with a tool_result
+        # whose assistant(tool_calls) parent fell into to_summarize — strip those so
+        # the rebuilt window never begins on an orphan tool_result.
+        _strip_leading_orphan_tools(to_keep)
 
         # Calculate target summary size based on available context
         context_window = get_context_window(model)

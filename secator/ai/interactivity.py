@@ -103,18 +103,29 @@ class RemoteBackend(InteractivityBackend):
 
 		The caller must yield this item so it gets stored in the workspace
 		(via runner hooks) before calling ask_user(), which will poll for the answer.
+
+		``prompt_uuid`` (from context) is stamped into ``extra_data`` so the poll
+		can match THIS exact prompt, not a stale earlier answer (H7).
 		"""
 		from secator.output_types import Ai
+		extra_data = {
+			"permission_type": context.get("permission_type", ""),
+			"value": context.get("value", ""),
+		}
+		prompt_uuid = context.get("prompt_uuid")
+		if prompt_uuid:
+			extra_data["prompt_uuid"] = prompt_uuid
+		# A new prompt for this session supersedes any older still-pending one
+		# (e.g. a worker that died mid-poll). Expire them BEFORE this doc is
+		# persisted so only the current prompt stays live (M10).
+		self._expire_stale_pending(session_id)
 		return Ai(
 			content=question,
 			ai_type=prompt_type,
 			status="pending",
 			choices=choices,
 			session_id=session_id,
-			extra_data={
-				"permission_type": context.get("permission_type", ""),
-				"value": context.get("value", ""),
-			},
+			extra_data=extra_data,
 			_timestamp=time.time(),
 		)
 
@@ -125,10 +136,13 @@ class RemoteBackend(InteractivityBackend):
 
 		if prompt_type == "permission":
 			engine = context.get("engine")
-			if answer in ("allow", "allow_all") and engine:
-				ptype = context.get("permission_type")
-				value = context.get("value", "")
-				self._add_permission_rules(engine, ptype, value)
+			if answer in ("allow", "allow_all"):
+				# M12: allow_all persists a session-scoped allow rule; single allow is
+				# a true one-shot that adds NO rule (H9) — next match re-prompts.
+				if answer == "allow_all" and engine:
+					ptype = context.get("permission_type")
+					value = context.get("value", "")
+					self._add_permission_rules(engine, ptype, value)
 				return {"answer": "allow"}
 			return {"answer": "deny"}
 
@@ -136,44 +150,79 @@ class RemoteBackend(InteractivityBackend):
 		return {"answer": answer}
 
 	def _poll_for_answer(self, session_id, prompt_type, prompt_uuid=None):
-		"""Poll DB for the answer to the SPECIFIC pending prompt until timeout.
+		"""Poll the DB for the answer to THIS specific prompt until timeout.
 
-		The query MUST be scoped to the exact prompt the worker is currently
-		blocked on — identified by ``prompt_uuid`` (stamped into the pending doc's
-		``extra_data.prompt_uuid`` before it was persisted). Matching only on
-		``{session_id, status:"answered"}`` is a bug: a multi-turn conversation
-		accumulates *previously* answered follow-up docs, so an unscoped query
-		returns a STALE answer immediately, the worker re-injects that old answer
-		as a brand-new prompt, re-runs the whole turn, asks again, re-matches the
-		same stale doc — an infinite respawn loop that re-runs scans and burns
-		tokens. Scoping on ``prompt_uuid`` makes the poll resolve only THIS
-		prompt's own answer (and time out only THIS prompt's doc).
+		Scoped by ``prompt_uuid``; without it an unscoped query returns a stale
+		earlier answer and respawns the turn in a loop (H7).
 		"""
 		base = {
 			"_type": "ai",
 			"ai_type": prompt_type,
-			# Correlate by the runner context's session_id: it's auto-stamped on
-			# every persisted item (item._context = self.context), so it's always
-			# present — unlike the top-level session_id field.
+			# session_id is auto-stamped on every persisted item (item._context)
 			"_context.session_id": session_id,
 		}
 		if prompt_uuid:
 			base["extra_data.prompt_uuid"] = prompt_uuid
 
+		answered_query = {**base, "status": "answered"}
 		elapsed = 0
 		while elapsed < self.timeout:
-			results = self.query_engine.search({**base, "status": "answered"}, limit=1)
-			if results:
-				return results[0].get("answer")
+			answer = self._resolve_answer(answered_query)
+			if answer is not None:
+				return answer
 			sleep(self.poll_interval)
 			elapsed += self.poll_interval
-		# Timeout: flip ONLY this prompt's still-pending doc to timed_out, so a
+		# One final search before giving up: the user may have answered during
+		# the last sleep (or between the last search and now). Without this the
+		# answer is silently stranded (M10).
+		answer = self._resolve_answer(answered_query)
+		if answer is not None:
+			return answer
+		# Timeout: atomically flip ONLY a doc that is STILL pending, so a
 		# concurrent/older pending doc for the same session isn't disturbed.
-		self.query_engine.update(
+		# If the answer landed in the race window the doc is already 'answered'
+		# and this no-ops (modified == 0) — re-read rather than abandon it (M10).
+		modified = self.query_engine.update(
 			{**base, "status": "pending"},
 			{"$set": {"status": "timed_out"}}
 		)
+		if not modified:
+			answer = self._resolve_answer(answered_query)
+			if answer is not None:
+				return answer
 		return None
+
+	def _resolve_answer(self, answered_query):
+		"""Return the newest answered doc's answer, or None if none answered.
+
+		Resolving against the newest by ``_timestamp`` is a backstop against
+		stale answers.
+		"""
+		results = self.query_engine.search(answered_query)
+		if not results:
+			return None
+		newest = max(results, key=lambda r: r.get("_timestamp", 0))
+		return newest.get("answer")
+
+	def _expire_stale_pending(self, session_id):
+		"""Mark any older still-pending prompt for this session as timed_out.
+
+		Called when a NEW prompt starts (before it is persisted), so it only
+		affects prior prompts. Stops stale 'pending' docs from accumulating —
+		a worker that dies mid-poll otherwise leaves the UI 'thinking' forever
+		and lets crud.answer_ai_prompt's "latest pending" collide (M10).
+		FLAG: a DB-layer TTL index on pending Ai docs is the durable follow-up.
+		"""
+		if not self.query_engine:
+			return
+		self.query_engine.update(
+			{
+				"_type": "ai",
+				"_context.session_id": session_id,
+				"status": "pending",
+			},
+			{"$set": {"status": "timed_out"}},
+		)
 
 	@staticmethod
 	def _add_permission_rules(engine, ptype, value):

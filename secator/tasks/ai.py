@@ -4,7 +4,6 @@ import json
 import uuid
 from itertools import groupby
 from pathlib import Path
-from time import sleep
 from typing import Generator
 
 from secator.config import CONFIG
@@ -29,6 +28,37 @@ from secator.ai.tools import build_tool_schemas, tool_call_to_action, TOOL_SCHEM
 from secator.ai.session import save_history, show_session_picker, replay_session, restore_history_from_db
 from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
 
+
+# D4: high-precision cues for the deterministic mode fast-path. Only unambiguous
+# prompts (cues for exactly one of attack/chat, and no exploit-ish cue) are
+# resolved here; everything else defers to the LLM classifier.
+_ATTACK_CUES = (
+	"scan", "pentest", "pen test", "enumerate", "enumeration", "recon",
+	"brute", "bruteforce", "fuzz", "attack", "nmap", "nuclei", "subdomain", "hack",
+)
+_CHAT_CUES = (
+	"summarize", "summary", "explain", "what is", "what are", "what's",
+	"how do", "how does", "tell me", "describe", "list the", "show me", "?",
+)
+_EXPLOIT_CUES = ("exploit", "poc", "proof of concept", "cve-", "vulnerabilit")
+
+
+def fast_detect_mode(prompt):
+	"""D4: cheap deterministic pre-classifier. Returns 'attack'/'chat' for
+	unambiguous prompts, else None to defer to the LLM. Exploit-ish prompts
+	return None so the LLM keeps deciding those (no behavior change there)."""
+	text = (prompt or "").strip().lower()
+	if not text:
+		return "chat"
+	if any(cue in text for cue in _EXPLOIT_CUES):
+		return None
+	has_attack = any(cue in text for cue in _ATTACK_CUES)
+	has_chat = any(cue in text for cue in _CHAT_CUES)
+	if has_attack and not has_chat:
+		return "attack"
+	if has_chat and not has_attack:
+		return "chat"
+	return None
 
 
 @task()
@@ -219,6 +249,7 @@ class ai(PythonRunner):
 
 		# Run loop
 		yield from self._run_loop()
+		self._mark_turn_completed()  # C3: record this turn as done so a redelivery won't replay it
 
 	# -------------------------------------------------------------------------
 	# Remote (web) session restore
@@ -254,6 +285,16 @@ class ai(PythonRunner):
 				'(expected mongodb/api). The web answer channel will not work — check that the '
 				'`mongodb` driver is in the runner context.'
 			)
+
+		# C3: skip replay of an already-completed turn. acks_late can redeliver
+		# this exact message (same celery_id) after a worker crash; without an
+		# idempotency marker the resume path would re-run every tool action and
+		# re-bill tokens. If this turn already completed, short-circuit instead of
+		# replaying _run_loop.
+		turn_uuid = self._turn_uuid()
+		if turn_uuid and self._turn_completed_marker(turn_uuid, query_engine):
+			self.debug(f'C3 idempotency: turn {turn_uuid} already completed; skipping replay', sub='llm')
+			return True
 
 		# Look for prior `_type:"ai"` docs for this session
 		try:
@@ -293,6 +334,7 @@ class ai(PythonRunner):
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		yield from self._run_loop()
+		self._mark_turn_completed()  # C3: record this turn as done so a redelivery won't replay it
 		return True
 
 	def _save_history(self):
@@ -304,6 +346,54 @@ class ai(PythonRunner):
 		if self.interactive == "remote":
 			return
 		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+
+	# -------------------------------------------------------------------------
+	# C3: turn-level idempotency (remote/Celery redelivery)
+	# -------------------------------------------------------------------------
+
+	def _turn_uuid(self):
+		"""Stable id naming THIS delivery's turn for idempotency.
+
+		``celery_id`` (the Celery request id) is stamped on the runner context by
+		the worker entrypoint (``run_command``) and is the SAME across an acks_late
+		worker-loss redelivery, so it uniquely and idempotently names one turn.
+		"""
+		return (self.context or {}).get("celery_id")
+
+	def _turn_completed_marker(self, turn_uuid, query_engine):
+		"""Return the persisted completion marker for ``turn_uuid``, or None."""
+		try:
+			docs = query_engine.search({
+				"_type": "ai",
+				"ai_type": "turn_completed",
+				"_context.session_id": self.session_id,
+				"extra_data.turn_uuid": turn_uuid,
+			}, limit=1)
+		except Exception as e:  # noqa: BLE001 - a marker query must not crash the worker
+			self.debug(f'C3 idempotency: marker query failed: {e}', sub='llm')
+			return None
+		return docs[0] if docs else None
+
+	def _mark_turn_completed(self):
+		"""C3: persist a turn-completion marker once the turn is durably done.
+
+		Remote channel only. Reuses the workspace `_type:"ai"` docs (no new
+		collection); restore_history_from_db skips this ai_type so it never enters
+		the transcript. Called by the caller AFTER `_run_loop` returns, so a crash
+		mid-turn leaves no marker and the partial turn still resumes.
+		"""
+		if self.interactive != "remote":
+			return
+		turn_uuid = self._turn_uuid()
+		if not turn_uuid:
+			return
+		self.add_result(Ai(
+			content="",
+			ai_type="turn_completed",
+			status="completed",
+			session_id=self.session_id,
+			extra_data={"turn_uuid": turn_uuid},
+		), print=False)
 
 	# -------------------------------------------------------------------------
 	# _run_loop: main LLM interaction loop
@@ -339,6 +429,7 @@ class ai(PythonRunner):
 		iteration = 0
 		query_extensions = 0
 		empty_streak = 0
+		rate_limit_streak = 0
 		self._context_warnings_shown = set()
 
 		while iteration < self.max_iterations:
@@ -372,6 +463,9 @@ class ai(PythonRunner):
 				msg = format_llm_status(token_count, ctx_window, by_role)
 				with maybe_status(msg, spinner="dots"):
 					result = call_llm(messages, self.model, self.temp, self.api_base, self.api_key, tools=self.tool_schemas)
+
+				# reset rate-limit guard on success
+				rate_limit_streak = 0
 
 				content = result["content"]
 				tool_calls = result.get("tool_calls", [])
@@ -458,6 +552,14 @@ class ai(PythonRunner):
 					# only happen once). Nothing to re-yield here — the frontend reads the
 					# persisted doc.
 
+					# H5: remote max-iter after tool work is a terminal turn (no further
+					# user input expected) — don't block-poll on prompt_uuid=None with no
+					# answerable pending doc; end cleanly via the loop tail (save + Info).
+					if (isinstance(self.backend, RemoteBackend)
+							and iteration == self.max_iterations
+							and follow_up_choices is None and tool_calls):
+						break
+
 					result = self._prompt_and_redetect(follow_up_choices or [], prompt_uuid=follow_up_prompt_uuid)
 					if result is None:
 						self._save_history()
@@ -481,9 +583,14 @@ class ai(PythonRunner):
 
 			except Exception as e:
 				if isinstance(e, litellm.RateLimitError):
-					yield Warning(message="Rate limit exceeded - waiting 5s and retry in the next iteration")
-					iteration -= 1
-					sleep(5)
+					# call_llm already backed off (~2/4/8s); don't re-sleep. Bound consecutive
+					# 429s so a persistent rate limit can't spin forever; let iteration advance.
+					rate_limit_streak += 1
+					if rate_limit_streak >= 4:
+						yield Error(message="Rate limit exceeded on 4 consecutive attempts - aborting. Check your provider quota/billing.")
+						self._save_history()
+						return
+					yield Warning(message=f"Rate limit exceeded (attempt {rate_limit_streak}/4) - retrying in the next iteration")
 					continue
 				elif isinstance(e, litellm.AuthenticationError):
 					yield Error(message=str(e))
@@ -641,21 +748,27 @@ class ai(PythonRunner):
 		if not self.prompt:
 			self.mode = "chat"
 			return
-		try:
-			selection_prompt = load_prompt("modes/_selection.txt")
-			messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
-			with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
-				result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)
-			self._account_usage(result.get("usage"))
-			mode = result["content"].strip().lower()
-			if mode in ("attack", "chat"):
-				console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
-				self.mode = mode
-			else:
-				self.mode = old_mode or "chat"
-		except Exception:
-			console.print(Warning(message='Could not detect mode using LLM. Falling back to "chat" mode.'))
-			self.mode = "chat"
+		# D4: resolve unambiguous prompts deterministically; skip the intent LLM round-trip.
+		fast_mode = fast_detect_mode(self.prompt)
+		if fast_mode:
+			console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{fast_mode}[/] (fast-path)")
+			self.mode = fast_mode
+		else:
+			try:
+				selection_prompt = load_prompt("modes/_selection.txt")
+				messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
+				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
+					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
+				self._account_usage(result.get("usage"))
+				mode = result["content"].strip().lower()
+				if mode in ("attack", "chat"):
+					console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
+					self.mode = mode
+				else:
+					self.mode = old_mode or "chat"
+			except Exception:
+				console.print(Warning(message='Could not detect mode using LLM. Falling back to "chat" mode.'))
+				self.mode = "chat"
 		if not self.mode:
 			self.mode = "chat"
 		mode_max = get_mode_config(self.mode).get("max_iterations", self.max_iterations)
@@ -1018,6 +1131,19 @@ class ai(PythonRunner):
 
 		Returns list of items to yield, or None to exit.
 		"""
+		# H5: plain-chat remote turns reach here with no pre-persisted pending doc
+		# (unlike the guardrail/follow-up path). Persist one now with a real
+		# prompt_uuid so the frontend can render/answer it and the poll matches only
+		# this prompt — never poll on prompt_uuid=None.
+		if isinstance(self.backend, RemoteBackend) and not prompt_uuid:
+			prompt_uuid = str(uuid.uuid4())
+			self.add_result(self.backend.build_pending_prompt(
+				question="What's next?",
+				choices=choices,
+				session_id=self.session_id,
+				prompt_type="follow_up",
+				prompt_uuid=prompt_uuid,
+			))
 		response = self.backend.ask_user(
 			question="What's next?",
 			choices=choices,
