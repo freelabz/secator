@@ -846,6 +846,23 @@ class TestEdgeCases(unittest.TestCase):
 		self.assertEqual(access_map["/etc/hosts"], "read")
 		self.assertEqual(access_map["/tmp/copy.txt"], "write")
 
+	# --- M9: output-flag destinations are writes (shfmt-gated: need real shell parser) ---
+
+	def test_curl_output_flag_classified_as_write(self):
+		"""curl -o dest is a write, so `deny write(/etc/*)` fires (not a read)."""
+		paths = detect_paths_with_access("curl -o /etc/passwd http://x")
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_wget_output_flag_classified_as_write(self):
+		"""wget -O dest is a write."""
+		paths = detect_paths_with_access("wget -O /etc/passwd http://x")
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_curl_without_output_flag_stays_read(self):
+		"""curl with no -o only reads (URL is not a file path); no write leaks in."""
+		paths = detect_paths_with_access("curl http://x")
+		self.assertNotIn("write", [a for _, a in paths])
+
 	def test_fd_redirect_2_to_1_not_detected_as_path(self):
 		"""2>&1 is a fd redirect, not a file path."""
 		paths = detect_paths('curl -sk "http://example.com" 2>&1 | head -100')
@@ -1114,6 +1131,50 @@ class TestEdgeCases(unittest.TestCase):
 		self.assertEqual(result.decision, "allow")
 		result = engine.check_action({"action": "shell", "command": "cat /home/user/project/src/deep/file.txt"})
 		self.assertEqual(result.decision, "allow")
+
+
+class TestOutputFlagWrites(unittest.TestCase):
+	"""M9: output-flag write classification, proven locally by stubbing the shell
+	parser (real shfmt is absent in CI-less envs, which makes the tests above no-ops)."""
+
+	def _paths(self, argv, redirects=None):
+		"""Run detect_paths_with_access with a stubbed extract_commands (no shfmt)."""
+		with patch('safecmd.bashxtract.extract_commands',
+				   return_value=([argv], [], redirects or [])):
+			return detect_paths_with_access(" ".join(argv))
+
+	def test_curl_o_space_form_is_write(self):
+		paths = self._paths(["curl", "-o", "/etc/passwd", "http://x"])
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_curl_long_output_equals_form_is_write(self):
+		paths = self._paths(["curl", "--output=/etc/passwd", "http://x"])
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_curl_o_attached_short_form_is_write(self):
+		paths = self._paths(["curl", "-o/etc/passwd", "http://x"])
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_wget_O_form_is_write(self):
+		paths = self._paths(["wget", "-O", "/etc/passwd", "http://x"])
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_wget_output_document_equals_form_is_write(self):
+		paths = self._paths(["wget", "--output-document=/etc/passwd", "http://x"])
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_curl_no_output_flag_has_no_write(self):
+		paths = self._paths(["curl", "http://x"])
+		self.assertNotIn("write", [a for _, a in paths])
+
+	def test_curl_o_stdout_dash_not_treated_as_file(self):
+		paths = self._paths(["curl", "-o", "-", "http://x"])
+		self.assertEqual(paths, [])
+
+	def test_redirect_still_write_with_output_flag_cmd(self):
+		"""Redirect classification is preserved alongside the new flag handling."""
+		paths = self._paths(["echo", "x"], redirects=[("", "/etc/y")])
+		self.assertIn(("/etc/y", "write"), paths)
 
 
 if __name__ == '__main__':

@@ -27,6 +27,14 @@ WRITE_COMMANDS = frozenset({"tee", "cp", "mv", "sed", "awk", "dd", "install", "m
 # Execute-type commands
 EXECUTE_COMMANDS = frozenset({"python", "python3", "bash", "sh", "node", "ruby", "perl", "gcc", "g++", "make", "go"})
 
+# M9: download tools that write to a file via an OUTPUT FLAG — the flag's destination
+# is a WRITE, not a read (else `deny write(/etc/*)` never fires). Focused set; residual
+# write-vs-read gaps (dd of=, tar -f, cp/install dest, >() ) are tracked separately.
+OUTPUT_FLAG_COMMANDS = {
+	"curl": frozenset({"-o", "--output"}),
+	"wget": frozenset({"-O", "--output-document"}),
+}
+
 # Exec-wrappers run a *different* command passed as args (`timeout 60 rm -rf /`),
 # so we peel the wrapper and check the INNER command, not the allow-listed name (C2).
 EXEC_WRAPPERS = frozenset({
@@ -477,11 +485,31 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 		cmd_class = classify_command(cmd_name)
 		base_access = "write" if cmd_class == "write" else "read"
 
-		for arg in args[1:]:
-			if arg.startswith('-'):
-				continue
-			if _is_file_path(arg):
+		# M9: output-flag destinations are writes (curl -o/wget -O), not reads.
+		write_flags = OUTPUT_FLAG_COMMANDS.get(cmd_name.rsplit('/', 1)[-1], frozenset())
+
+		sub_args = args[1:]
+		i = 0
+		while i < len(sub_args):
+			arg = sub_args[i]
+			if write_flags:
+				dest = None
+				if arg in write_flags and i + 1 < len(sub_args):  # -o FILE / --output FILE
+					dest, i = sub_args[i + 1], i + 1
+				elif '=' in arg and arg.split('=', 1)[0] in write_flags:  # --output=FILE
+					dest = arg.split('=', 1)[1]
+				else:  # -oFILE (short attached form)
+					for f in write_flags:
+						if len(f) == 2 and arg.startswith(f) and len(arg) > 2:
+							dest = arg[2:]
+							break
+				if dest and dest != '-':  # '-' is stdout, not a file
+					_add_path(dest, "write")
+					i += 1
+					continue
+			if not arg.startswith('-') and _is_file_path(arg):
 				_add_path(arg, base_access)
+			i += 1
 
 	return paths
 
