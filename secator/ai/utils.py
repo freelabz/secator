@@ -14,18 +14,50 @@ from secator.utils import format_token_count
 _llm_initialized = False
 
 
-def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
-	"""Insert synthetic tool_result messages for orphan assistant tool_use blocks.
+def _strip_leading_orphan_tools(messages: List[Dict]) -> int:
+	"""Drop leading 'tool' (tool_result) messages with no preceding tool_use.
 
-	Anthropic rejects requests where an assistant tool_use block is not
-	immediately followed by a matching tool_result. Mutates `messages` in place.
+	Truncation/compaction drops the OLDEST messages with no tool-pairing
+	awareness, so the kept window can START with a tool_result whose
+	assistant(tool_calls) parent was dropped. Anthropic/OpenAI reject such a
+	leading orphan tool_result ("tool_result without matching tool_use").
+	System messages are preserved; we scan past them and drop the run of
+	leading 'tool' messages that follows. Mutates `messages` in place.
 
 	Args:
 		messages: List of message dicts in litellm/OpenAI format.
 
 	Returns:
-		Number of synthetic tool_results inserted.
+		Number of leading orphan tool messages removed.
 	"""
+	i = 0
+	while i < len(messages) and messages[i].get("role") == "system":
+		i += 1
+	removed = 0
+	while i < len(messages) and messages[i].get("role") == "tool":
+		messages.pop(i)
+		removed += 1
+	return removed
+
+
+def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
+	"""Repair orphan tool_use/tool_result pairing for Anthropic/OpenAI.
+
+	Two defects are fixed (both mutate `messages` in place):
+	- LEADING orphan tool_results: a kept window starting with a tool_result
+	  whose assistant(tool_calls) parent was trimmed away (see
+	  `_strip_leading_orphan_tools`).
+	- FORWARD orphan tool_uses: an assistant tool_use block not immediately
+	  followed by a matching tool_result (synthesize an acknowledged result).
+
+	Args:
+		messages: List of message dicts in litellm/OpenAI format.
+
+	Returns:
+		Number of messages removed or synthetic tool_results inserted.
+	"""
+	# Leading orphan tool_results have no parent in this window — drop them.
+	repaired = _strip_leading_orphan_tools(messages)
 	inserted = 0
 	i = 0
 	while i < len(messages):
@@ -69,7 +101,7 @@ def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
 			j += len(to_insert)
 
 		i = j
-	return inserted
+	return repaired + inserted
 
 
 def init_llm(api_key: Optional[str] = None):
