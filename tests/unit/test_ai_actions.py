@@ -11,6 +11,7 @@ if ADDONS_ENABLED['ai']:
 		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
 		_handle_query, _handle_add_finding, _run_runner, _decrypt_dict,
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
+		_build_child_hooks_or_denial,
 		_MAX_CHILD_ITERATIONS, _MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
 	)
 	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
@@ -364,7 +365,8 @@ class TestRunRunner(unittest.TestCase):
 		(the conversation id) so its persisted runner doc is queryable by the
 		conversation. session_id may be derived (not already in ctx.context), so
 		it must be stamped from ctx.session_id."""
-		mock_build_hooks.return_value = {}
+		# non-empty: context has drivers, so empty hooks would trip the M2 guard
+		mock_build_hooks.return_value = {'fake': ['hook']}
 		mock_runner = MagicMock()
 		mock_runner.id = 'runner123'
 		mock_runner.reports_folder = None
@@ -537,6 +539,89 @@ class TestBuildHooksFromContext(unittest.TestCase):
 		hooks = _build_hooks_from_context({'drivers': ['bogus']})
 		self.assertEqual(hooks, {})
 		mock_import.assert_not_called()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestChildHooksOrDenial(unittest.TestCase):
+	"""M2: refuse to spawn a persistence-less child when the parent has drivers."""
+
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_parent_no_drivers_empty_hooks_allowed(self, mock_build):
+		# pure local/no-persistence run: empty hooks child is expected, no denial
+		mock_build.return_value = {}
+		hooks, denial = _build_child_hooks_or_denial({'workspace_id': 'ws1'})
+		self.assertEqual(hooks, {})
+		self.assertIsNone(denial)
+
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_parent_drivers_present_hooks_pass_through(self, mock_build):
+		# normal spawn: drivers present + non-empty hooks -> pass through unchanged
+		sentinel = {'fake': ['hook']}
+		mock_build.return_value = sentinel
+		hooks, denial = _build_child_hooks_or_denial({'drivers': ['mongodb']})
+		self.assertEqual(hooks, sentinel)
+		self.assertIsNone(denial)
+
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_parent_drivers_but_empty_hooks_denied(self, mock_build):
+		# parent HAS drivers but rebuild produced no hooks -> refuse, surface Warning
+		mock_build.return_value = {}
+		hooks, denial = _build_child_hooks_or_denial({'drivers': ['mongodb']})
+		self.assertEqual(hooks, {})
+		self.assertIsInstance(denial, Warning)
+		self.assertIn('drop findings', denial.message)
+
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_rebuild_raise_with_drivers_denied_not_swallowed(self, mock_build):
+		# a raising rebuild must not degrade to hooks={} silently -> Warning
+		mock_build.side_effect = RuntimeError('boom')
+		hooks, denial = _build_child_hooks_or_denial({'drivers': ['mongodb']})
+		self.assertEqual(hooks, {})
+		self.assertIsInstance(denial, Warning)
+		self.assertIn('rebuild failed', denial.message)
+
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_rebuild_raise_no_drivers_allowed(self, mock_build):
+		# no parent drivers: a rebuild error still yields an allowed empty-hooks child
+		mock_build.side_effect = RuntimeError('boom')
+		hooks, denial = _build_child_hooks_or_denial({'workspace_id': 'ws1'})
+		self.assertEqual(hooks, {})
+		self.assertIsNone(denial)
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_refuses_spawn_on_lost_persistence(self, mock_build, mock_task_cls, _tpl):
+		# end-to-end: parent has drivers, rebuild empty -> _run_runner yields a
+		# Warning and never constructs the child runner
+		mock_build.return_value = {}
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'drivers': ['mongodb']},
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+		results = list(_run_runner(action, ctx, 'task'))
+		mock_task_cls.assert_not_called()
+		warnings = [r for r in results if isinstance(r, Warning)]
+		self.assertEqual(len(warnings), 1)
+		self.assertIn('denied', warnings[0].message)
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_no_drivers_spawns_normally(self, mock_build, mock_task_cls, _tpl):
+		# parent has NO drivers: empty-hooks child still spawns (no false alarm)
+		mock_build.return_value = {}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+		results = list(_run_runner(action, ctx, 'task'))
+		mock_task_cls.assert_called_once()
+		self.assertFalse([r for r in results if isinstance(r, Warning)])
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
