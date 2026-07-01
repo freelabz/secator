@@ -119,6 +119,37 @@ def _build_hooks_from_context(context: Dict) -> Dict:
 	return deep_merge_dicts(*hooks_list)
 
 
+def _build_child_hooks_or_denial(context: Dict) -> Tuple[Dict, Optional["Warning"]]:
+	"""M2: rebuild the child's persistence hooks, refusing a persistence-less child.
+
+	``context`` carries the parent's ``drivers`` (copied via ``_get_result_context``),
+	so an empty/failed rebuild while the parent HAS drivers means the child would run
+	to completion and silently persist nothing (lost findings/docs). In that case
+	return a denial ``Warning`` (same shape H4/C1 use) so the caller yields it and
+	skips the spawn. When the parent itself has no drivers (pure local/no-persistence
+	run) an empty-hooks child is expected and allowed.
+
+	Returns ``(hooks, denial)``; if ``denial`` is non-None the caller must not spawn.
+	"""
+	parent_has_drivers = bool(context.get('drivers'))
+	try:
+		hooks = _build_hooks_from_context(context)
+	except Exception as e:  # narrow to the rebuild — surface, don't degrade to hooks={}
+		if parent_has_drivers:
+			return {}, Warning(
+				message=f"Subagent spawn denied: persistence hook rebuild failed — {type(e).__name__}: {e}",
+				_context=context,
+			)
+		return {}, None
+	if parent_has_drivers and not hooks:
+		return {}, Warning(
+			message="Subagent spawn denied: parent has persistence drivers but child hook rebuild "
+					"was empty (would silently drop findings/docs)",
+			_context=context,
+		)
+	return hooks, None
+
+
 def _build_action_display(action: Dict) -> str:
 	"""Build a display string for the action being checked.
 
@@ -550,7 +581,11 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	# _get_result_context), but a sync sub-runner never goes through the pickle
 	# path that re-registers driver hooks — so without this its results would
 	# persist with no workspace scope and never appear in the workspace History.
-	hooks = _build_hooks_from_context(context)
+	# M2: don't silently spawn a persistence-less child when the parent has drivers
+	hooks, denial = _build_child_hooks_or_denial(context)
+	if denial is not None:
+		yield denial
+		return
 	try:
 		runner = runner_cls(tpl, targets, run_opts=run_opts, hooks=hooks, context=context)
 	except TaskNotFoundError as e:
