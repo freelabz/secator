@@ -22,7 +22,7 @@ from secator.ai.interactivity import create_backend, RemoteBackend
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window
 from secator.ai.prompts import (
-	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue
+	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, TOOL_SCHEMAS
 from secator.ai.session import save_history, show_session_picker, replay_session, restore_history_from_db
@@ -71,7 +71,7 @@ class ai(PythonRunner):
 	opts = {
 		"name": {"type": str, "default": "", "short": "n", "internal_name": "session_name", "help": "Name for the AI session or subagent"},  # noqa: E501
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
-		"mode": {"type": str, "default": "", "help": "Mode: attack or chat"},
+		"mode": {"type": str, "default": "", "help": f"Mode: {', '.join(MODES)}"},  # D2: derive from MODES, don't drift
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
 		# Never set a secret/CONFIG value as a task-option `default`: secator-api
 		# serves task opts (including defaults) to the UI, so a CONFIG default
@@ -761,7 +761,7 @@ class ai(PythonRunner):
 					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
 				self._account_usage(result.get("usage"))
 				mode = result["content"].strip().lower()
-				if mode in ("attack", "chat"):
+				if mode in MODES:  # D2: honor any real mode (incl. exploit), don't discard it
 					console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
 					self.mode = mode
 				else:
