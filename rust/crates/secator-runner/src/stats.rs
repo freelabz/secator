@@ -13,27 +13,17 @@ use tokio::time::interval;
 
 use secator_model::{OutputItem, Stat};
 
-/// Start the sampler. Returns `None` when sampling is disabled (`freq_secs <= 0`).
-/// The returned `JoinHandle` should be aborted when the child exits to stop the
-/// background poll cleanly.
-#[allow(dead_code)]
-pub fn spawn_sampler(
-    root_pid: u32,
-    freq_secs: u64,
-    tx: Sender<OutputItem>,
-) -> Option<JoinHandle<()>> {
-    spawn_sampler_with_limit(root_pid, freq_secs, None, tx)
-}
-
-/// Same as [`spawn_sampler`] plus an enforced RSS ceiling. When the process
-/// tree's total memory crosses `mem_limit_mb`, the sampler emits an
-/// `OutputItem::Error` describing the breach and calls `Process::kill()` on
-/// the root pid. The subprocess dies → its stdout closes → the runner's read
-/// loop returns naturally → `process_unit` reports `status=FAILURE`.
+/// Start the sampler. Returns `None` when sampling is fully disabled
+/// (`freq_secs == 0` **and** no `mem_limit_mb`).
 ///
-/// At least ONE periodic tick is needed for the kill check to fire, so we
-/// force-enable a 1-second poll when only the memory limit is set (without
-/// stat reporting).
+/// When `mem_limit_mb` is set and the process-tree RSS crosses it, the sampler
+/// emits an `OutputItem::Error` describing the breach and calls
+/// `Process::kill()` on the root pid. The subprocess dies → its stdout closes
+/// → the runner's read loop returns → `process_unit` reports `status=FAILURE`.
+///
+/// At least one periodic tick is needed for the kill check to fire, so a
+/// 1-second poll is forced when only the memory limit is set (no stat
+/// emission).
 pub fn spawn_sampler_with_limit(
     root_pid: u32,
     freq_secs: u64,
@@ -165,7 +155,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(async {
             let (tx, _rx) = tokio::sync::mpsc::channel(1);
-            assert!(spawn_sampler(1, 0, tx).is_none());
+            assert!(spawn_sampler_with_limit(1, 0, None, tx).is_none());
         });
     }
 

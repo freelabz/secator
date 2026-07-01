@@ -139,17 +139,7 @@ impl Exporter for CsvExporter {
                 continue;
             }
             let path = report.output_folder.join(format!("report_{ty}.csv"));
-            // Discover columns. Skip the `_uuid`/`_context`/`_related` etc. internal
-            // fields to keep CSVs human-readable.
-            let mut columns: BTreeSet<String> = BTreeSet::new();
-            for item in items {
-                for k in item.to_map().keys() {
-                    if !k.starts_with('_') {
-                        columns.insert(k.clone());
-                    }
-                }
-            }
-            let cols: Vec<String> = columns.into_iter().collect();
+            let cols = discover_columns(items);
             let mut w = csv::Writer::from_path(&path).map_err(|e| ExportError::Other(e.to_string()))?;
             w.write_record(&cols).map_err(|e| ExportError::Other(e.to_string()))?;
             for item in items {
@@ -243,15 +233,7 @@ impl Exporter for MarkdownExporter {
                 continue;
             }
             buf.push_str(&format!("## {}s ({})\n\n", capitalize(ty), items.len()));
-            let mut columns: BTreeSet<String> = BTreeSet::new();
-            for item in items {
-                for k in item.to_map().keys() {
-                    if !k.starts_with('_') {
-                        columns.insert(k.clone());
-                    }
-                }
-            }
-            let cols: Vec<String> = columns.into_iter().collect();
+            let cols = discover_columns(items);
             buf.push('|');
             for c in &cols { buf.push_str(&format!(" {c} |")); }
             buf.push('\n');
@@ -294,6 +276,22 @@ fn value_to_string(v: &serde_json::Value) -> String {
     }
 }
 
+/// Union of non-internal field names across all items — the column set every
+/// per-type exporter (CSV / Markdown / Table) needs. Fields prefixed with `_`
+/// (`_uuid`, `_source`, `_context`, `_related`, …) are skipped so CSVs stay
+/// human-readable. Returns columns sorted alphabetically (`BTreeSet`-backed).
+fn discover_columns(items: &[OutputItem]) -> Vec<String> {
+    let mut columns: BTreeSet<String> = BTreeSet::new();
+    for item in items {
+        for k in item.to_map().keys() {
+            if !k.starts_with('_') {
+                columns.insert(k.clone());
+            }
+        }
+    }
+    columns.into_iter().collect()
+}
+
 /// Minimal Markdown escape: collapse newlines to ` / ` (table cells can't wrap)
 /// and escape pipes so we don't break the column count.
 fn md_escape(s: &str) -> String {
@@ -314,15 +312,7 @@ impl Exporter for TableExporter {
                 continue;
             }
             let path = report.output_folder.join(format!("report_{ty}.table.txt"));
-            let mut columns: BTreeSet<String> = BTreeSet::new();
-            for item in items {
-                for k in item.to_map().keys() {
-                    if !k.starts_with('_') {
-                        columns.insert(k.clone());
-                    }
-                }
-            }
-            let cols: Vec<String> = columns.into_iter().collect();
+            let cols = discover_columns(items);
             // Precompute column widths.
             let mut widths: Vec<usize> = cols.iter().map(|c| c.len()).collect();
             let rows: Vec<Vec<String>> = items
@@ -733,23 +723,29 @@ pub fn resolve(names: &[&str]) -> Vec<Box<dyn Exporter>> {
         .collect()
 }
 
-/// The default exporter set for tasks. Reads `CONFIG.tasks.exporters` so users
-/// can opt into Markdown/Table by editing `~/.secator/config.yml` (or via
-/// `secator config set tasks.exporters json,markdown`). Falls back to a
-/// sensible JSON/CSV/TXT triple when the config field is empty.
-pub fn default_task_exporters() -> Vec<Box<dyn Exporter>> {
-    exporters_for(&secator_config::get().tasks.exporters)
+/// Which runner tier a caller wants exporters for. Each variant maps to a
+/// different config section (`tasks.exporters` / `workflows.exporters` /
+/// `scans.exporters`) — users can edit these via `secator config set …` to
+/// opt into Markdown/Table beyond the JSON/CSV/TXT default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunnerKind {
+    Task,
+    Workflow,
+    Scan,
 }
 
-/// Same as [`default_task_exporters`] for the workflow exporter set.
-pub fn default_workflow_exporters() -> Vec<Box<dyn Exporter>> {
-    exporters_for(&secator_config::get().workflows.exporters)
+/// Resolve the operator-configured exporter set for a runner tier. Falls back
+/// to a JSON/CSV/TXT triple when the corresponding config field is empty.
+pub fn default_exporters(kind: RunnerKind) -> Vec<Box<dyn Exporter>> {
+    let cfg = secator_config::get();
+    let names = match kind {
+        RunnerKind::Task => &cfg.tasks.exporters,
+        RunnerKind::Workflow => &cfg.workflows.exporters,
+        RunnerKind::Scan => &cfg.scans.exporters,
+    };
+    exporters_for(names)
 }
 
-/// Same as [`default_task_exporters`] for the scan exporter set.
-pub fn default_scan_exporters() -> Vec<Box<dyn Exporter>> {
-    exporters_for(&secator_config::get().scans.exporters)
-}
 
 fn exporters_for(names: &[String]) -> Vec<Box<dyn Exporter>> {
     let fallback = ["json".to_string(), "csv".into(), "txt".into()];
@@ -765,7 +761,11 @@ mod tests {
     use secator_model::{Subdomain, Url};
     use secator_report::{Report, ReportInfo};
 
-    fn sample_report(folder: PathBuf) -> Report {
+    /// Test fixture: a fresh `TempDir` (auto-cleaned on drop) plus a two-item
+    /// sample report rooted in it. Every exporter test uses this — keeps the
+    /// per-test bodies focused on the assertion, not the plumbing.
+    fn temp_report() -> (tempfile::TempDir, Report) {
+        let tmp = tempfile::tempdir().expect("tempdir");
         let items = vec![
             OutputItem::Url(Url {
                 url: "https://example.com".into(),
@@ -779,7 +779,7 @@ mod tests {
                 ..Default::default()
             }),
         ];
-        Report::build(
+        let report = Report::build(
             ReportInfo {
                 name: "httpx".into(),
                 task_name: "httpx".into(),
@@ -787,15 +787,14 @@ mod tests {
                 ..Default::default()
             },
             &items,
-            folder,
-        )
+            tmp.path().to_path_buf(),
+        );
+        (tmp, report)
     }
 
     #[test]
     fn json_exporter_writes_report_json() {
-        let dir = std::env::temp_dir().join(format!("sec-exp-json-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let report = sample_report(dir.clone());
+        let (_tmp, report) = temp_report();
         let written = JsonExporter.send(&report).unwrap();
         assert_eq!(written.len(), 1);
         assert!(written[0].ends_with("report.json"));
@@ -803,38 +802,31 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(parsed["info"]["task_name"], "httpx");
         assert_eq!(parsed["results"]["url"][0]["url"], "https://example.com");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn csv_exporter_writes_one_file_per_type() {
-        let dir = std::env::temp_dir().join(format!("sec-exp-csv-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let report = sample_report(dir.clone());
+        let (tmp, report) = temp_report();
         let written = CsvExporter.send(&report).unwrap();
         assert_eq!(written.len(), 2); // url + subdomain
         let names: Vec<String> = written.iter().filter_map(|p| p.file_name().map(|f| f.to_string_lossy().into_owned())).collect();
         assert!(names.contains(&"report_url.csv".to_string()));
         assert!(names.contains(&"report_subdomain.csv".to_string()));
         // Sanity: csv contains the url.
-        let url_csv = std::fs::read_to_string(dir.join("report_url.csv")).unwrap();
+        let url_csv = std::fs::read_to_string(tmp.path().join("report_url.csv")).unwrap();
         assert!(url_csv.contains("https://example.com"));
         // Internal `_uuid` etc. fields are NOT columns.
         assert!(!url_csv.contains("_uuid"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn txt_exporter_writes_primary_field_per_line() {
-        let dir = std::env::temp_dir().join(format!("sec-exp-txt-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let report = sample_report(dir.clone());
+        let (tmp, report) = temp_report();
         let _ = TxtExporter.send(&report).unwrap();
-        let url_txt = std::fs::read_to_string(dir.join("report_url.txt")).unwrap();
+        let url_txt = std::fs::read_to_string(tmp.path().join("report_url.txt")).unwrap();
         assert_eq!(url_txt.trim(), "https://example.com");
-        let sub_txt = std::fs::read_to_string(dir.join("report_subdomain.txt")).unwrap();
+        let sub_txt = std::fs::read_to_string(tmp.path().join("report_subdomain.txt")).unwrap();
         assert_eq!(sub_txt.trim(), "a.example.com");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -846,9 +838,7 @@ mod tests {
 
     #[test]
     fn markdown_exporter_writes_grouped_tables() {
-        let dir = std::env::temp_dir().join(format!("sec-exp-md-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let report = sample_report(dir.clone());
+        let (_tmp, report) = temp_report();
         let written = MarkdownExporter.send(&report).unwrap();
         assert_eq!(written.len(), 1);
         assert!(written[0].ends_with("report.md"));
@@ -857,21 +847,17 @@ mod tests {
         assert!(body.contains("## Urls (1)"));
         assert!(body.contains("https://example.com"));
         assert!(body.contains("## Subdomains (1)"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn table_exporter_writes_per_type_table_files() {
-        let dir = std::env::temp_dir().join(format!("sec-exp-tbl-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let report = sample_report(dir.clone());
+        let (tmp, report) = temp_report();
         let written = TableExporter.send(&report).unwrap();
         assert_eq!(written.len(), 2);
-        let url_tbl = std::fs::read_to_string(dir.join("report_url.table.txt")).unwrap();
+        let url_tbl = std::fs::read_to_string(tmp.path().join("report_url.table.txt")).unwrap();
         assert!(url_tbl.contains("https://example.com"));
         // Header followed by separator row of dashes.
         assert!(url_tbl.lines().nth(1).unwrap().contains("---"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -883,9 +869,7 @@ mod tests {
     /// finding-type declaration order. `jq -c` over the file should round-trip.
     #[test]
     fn jsonl_exporter_writes_one_object_per_line() {
-        let dir = std::env::temp_dir().join(format!("sec-exp-jsonl-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let report = sample_report(dir.clone());
+        let (_tmp, report) = temp_report();
         let written = JsonlExporter.send(&report).unwrap();
         assert_eq!(written.len(), 1);
         assert!(written[0].ends_with("report.jsonl"));
@@ -896,7 +880,6 @@ mod tests {
             let v: serde_json::Value = serde_json::from_str(line).expect("each line is JSON");
             assert!(v.is_object());
         }
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// #176 T7: Console exporter returns no paths (it streams to stdout) and
@@ -905,12 +888,9 @@ mod tests {
     /// that to skip the "Saved … to" log line.
     #[test]
     fn console_exporter_returns_empty_paths() {
-        let dir = std::env::temp_dir().join(format!("sec-exp-cons-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let report = sample_report(dir.clone());
+        let (_tmp, report) = temp_report();
         let written = ConsoleExporter.send(&report).unwrap();
         assert!(written.is_empty(), "console exporter must not write files");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// #176 T7: `-o jsonl,console` resolves both as proper trait objects.
@@ -949,8 +929,7 @@ mod tests {
     #[test]
     fn gdrive_exporter_rejects_unconfigured_run() {
         // No config = disabled. Should refuse cleanly without panicking.
-        let tmp = tempfile::tempdir().unwrap();
-        let report = sample_report(tmp.path().to_path_buf());
+        let (_tmp, report) = temp_report();
         let err = GdriveExporter.send(&report).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("not enabled") || msg.contains("missing"), "got: {msg}");

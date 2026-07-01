@@ -635,80 +635,32 @@ fn build_workflow_cmd(name: &'static str, yaml: &'static str) -> Command {
         .unwrap_or_else(|| vec!["target".into()]);
     let metavar: &'static str = Box::leak(input_types.join("|").into_boxed_str());
 
-    let mut cmd = Command::new(name)
-        .about(Box::leak(description.to_string().into_boxed_str()) as &str)
-        .arg(
-            // Optional at the clap layer: stdin / piped input is read by
-            // `expand_inputs` when no positionals are passed. Empties are
-            // rejected there with a clear error message.
-            Arg::new("inputs")
-                .help("Target(s) — positional, comma-separated list, file path, or stdin")
-                .value_name(metavar)
-                .num_args(0..),
-        )
-        .arg(global_flag("json", "Print items as JSON lines on stdout"))
-        .arg(global_flag("raw", "Print only the primary field of each item on stdout"))
-        .arg(
-            // Default: hide subprocess stderr so the operator only sees Secator's
-            // own lines (`⚡`, `[INF] Task ...`, parsed items). `--verbose` flips
-            // it back on for debugging.
-            Arg::new("verbose")
-                .long("verbose")
-                .short('v')
-                .help("Show the underlying tool's stderr output (banners, logs)")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(global_flag("no_color", "Disable ANSI colors"))
-        // Inspection flags — print + exit, no tasks executed (Python parity).
-        .arg(
-            Arg::new("tree")
-                .long("tree")
-                .help("Print the pruned runner tree and exit (no tasks run)")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("yaml")
-                .long("yaml")
-                .help("Print the resolved workflow YAML and exit")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("dry_run")
-                .long("dry-run")
-                .help("Print the tree and the cmds that would run; do not spawn subprocesses")
-                .action(ArgAction::SetTrue),
-        )
-        // Worker / sync routing flags — same semantics as for the `x` subcommand.
-        .arg(
-            Arg::new("worker")
-                .long("worker")
-                .help("Force remote execution via the file broker (every task)")
-                .action(ArgAction::SetTrue)
-                .conflicts_with("sync"),
-        )
-        .arg(
-            Arg::new("sync")
-                .long("sync")
-                .help("Force local (in-process) execution for every task")
-                .action(ArgAction::SetTrue),
-        )
-        // Profile + workspace flags (Python parity: --pf/--ws long aliases —
-        // Click's single-dash multi-char `-pf` / `-ws` shorts can't be modeled
-        // in clap without colliding with task short flags like naabu's `-p`).
-        .arg(
-            Arg::new("profiles")
-                .long("profiles")
-                .visible_alias("pf")
-                .value_name("LIST")
-                .help("Comma-separated profile names to apply (see `secator p list`)"),
-        )
-        .arg(
-            Arg::new("workspace")
-                .long("workspace")
-                .visible_alias("ws")
-                .value_name("NAME")
-                .help("Override the workspace name for this run's reports folder"),
-        );
+    let mut cmd = add_common_flags(
+        Command::new(name)
+            .about(Box::leak(description.to_string().into_boxed_str()) as &str)
+            .arg(
+                // Optional at the clap layer: stdin / piped input is read by
+                // `expand_inputs` when no positionals are passed. Empties are
+                // rejected there with a clear error message.
+                Arg::new("inputs")
+                    .help("Target(s) — positional, comma-separated list, file path, or stdin")
+                    .value_name(metavar)
+                    .num_args(0..),
+            ),
+    )
+    // Workflow-only inspection flags — print + exit, no tasks executed (Python parity).
+    .arg(
+        Arg::new("tree")
+            .long("tree")
+            .help("Print the pruned runner tree and exit (no tasks run)")
+            .action(ArgAction::SetTrue),
+    )
+    .arg(
+        Arg::new("yaml")
+            .long("yaml")
+            .help("Print the resolved workflow YAML and exit")
+            .action(ArgAction::SetTrue),
+    );
 
     // Workflow-level "common opts" that propagate to every task (Python parity:
     // threads/rate_limit/header/timeout/proxy/delay propagate down). Skip names that
@@ -1964,63 +1916,16 @@ fn build_task_cmd(spec: &'static secator_runner::TaskSpec) -> Command {
     } else {
         Box::leak(spec.input_types.join("|").into_boxed_str())
     };
-    let mut cmd = Command::new(spec.name)
-        .about(spec.description)
-        .arg(
+    let cmd = add_common_flags(
+        Command::new(spec.name).about(spec.description).arg(
             // Optional at the clap layer: `expand_inputs` reads stdin when no
             // positionals are passed, and emits a clear error if it ends up empty.
             Arg::new("inputs")
                 .help("Target(s) — positional, comma-separated list, file path, or stdin")
                 .value_name(metavar)
                 .num_args(0..),
-        )
-        // CLI-global flags (separate namespace from per-task opts).
-        .arg(global_flag("json", "Print items as JSON lines on stdout"))
-        .arg(global_flag("raw", "Print only the primary field of each item on stdout (for piping)"))
-        .arg(
-            Arg::new("verbose")
-                .long("verbose")
-                .short('v')
-                .help("Show the underlying tool's stderr output (banners, logs)")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(global_flag("no_color", "Disable ANSI colors"))
-        .arg(
-            Arg::new("dry_run")
-                .long("dry-run")
-                .help("Print the cmd that would run; do not spawn a subprocess")
-                .action(ArgAction::SetTrue),
-        )
-        // Worker / sync routing flags. By default the CLI auto-detects: if a worker is
-        // heartbeating on the broker dir, route the task there; otherwise run locally.
-        .arg(
-            Arg::new("worker")
-                .long("worker")
-                .help("Force remote execution via the file broker (fails if no worker alive)")
-                .action(ArgAction::SetTrue)
-                .conflicts_with("sync"),
-        )
-        .arg(
-            Arg::new("sync")
-                .long("sync")
-                .help("Force local (in-process) execution, even if a worker is available")
-                .action(ArgAction::SetTrue),
-        )
-        // Profile + workspace flags — same shape as the workflow/scan path.
-        .arg(
-            Arg::new("profiles")
-                .long("profiles")
-                .visible_alias("pf")
-                .value_name("LIST")
-                .help("Comma-separated profile names to apply (see `secator p list`)"),
-        )
-        .arg(
-            Arg::new("workspace")
-                .long("workspace")
-                .visible_alias("ws")
-                .value_name("NAME")
-                .help("Override the workspace name for this run's reports folder"),
-        );
+        ),
+    );
 
     // Per-task options from the schema. Meta-opts (shared HTTP/recon set) come first
     // for stable help ordering, then task-specific opts (mirrors Python's grouping).
@@ -2029,43 +1934,7 @@ fn build_task_cmd(spec: &'static secator_runner::TaskSpec) -> Command {
     // `runner.opts` directly (Python's "internal pattern": `gf`'s positional `pattern`,
     // `dirsearch`'s `output_path`, `msfconsole`'s `execute_command`, …).
     let schema = (spec.schema)();
-    // Dedup: a task opt with the same name as a meta opt overrides the meta opt
-    // entirely (ffuf's `data` with short `-d` wins over the canonical `data`
-    // meta). Also track shorts so meta opts that collide with task-claimed
-    // letters silently drop their short.
-    let task_opt_names: std::collections::BTreeSet<&str> =
-        schema.opts.iter().map(|o| o.name).collect();
-    let mut taken_shorts: std::collections::BTreeSet<char> =
-        ["v", "h"].iter().filter_map(|s| s.chars().next()).collect();
-    for opt in schema.opts.iter() {
-        if let Some(s) = opt.short {
-            if s.chars().count() == 1 {
-                if let Some(c) = s.chars().next() {
-                    taken_shorts.insert(c);
-                }
-            }
-        }
-    }
-    for opt in schema.meta_opts.iter() {
-        if matches!(schema.key_map.get(opt.name), Some(KeyMap::NotSupported)) {
-            continue;
-        }
-        if opt.internal {
-            continue;
-        }
-        if task_opt_names.contains(opt.name) {
-            // Task's own opt will register it — skip the meta version.
-            continue;
-        }
-        cmd = cmd.arg(build_arg_from_spec_taken(opt, &mut taken_shorts));
-    }
-    for opt in schema.opts.iter() {
-        if opt.internal {
-            continue;
-        }
-        cmd = cmd.arg(build_arg_from_spec_taken(opt, &mut taken_shorts));
-    }
-    cmd
+    add_schema_opts(cmd, &schema)
 }
 
 /// Like `build_task_cmd` but for in-process native tasks. The CLI surface is
@@ -2079,94 +1948,18 @@ fn build_native_task_cmd(spec: &'static secator_runner::NativeSpec) -> Command {
     } else {
         Box::leak(spec.input_types.join("|").into_boxed_str())
     };
-    let mut cmd = Command::new(spec.name)
-        .about(spec.description)
-        .arg(
+    // Native tasks accept the same common flags as command tasks; `--worker`
+    // is effectively a no-op here since the run path always executes locally.
+    let cmd = add_common_flags(
+        Command::new(spec.name).about(spec.description).arg(
             Arg::new("inputs")
                 .help("Target(s) — positional, comma-separated list, file path, or stdin")
                 .value_name(metavar)
                 .num_args(0..),
-        )
-        .arg(global_flag("json", "Print items as JSON lines on stdout"))
-        .arg(global_flag("raw", "Print only the primary field of each item on stdout (for piping)"))
-        .arg(
-            Arg::new("verbose")
-                .long("verbose")
-                .short('v')
-                .help("Show extra detail in stderr output")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(global_flag("no_color", "Disable ANSI colors"))
-        .arg(
-            Arg::new("dry_run")
-                .long("dry-run")
-                .help("Print the resolved inputs/opts; do not run the native task")
-                .action(ArgAction::SetTrue),
-        )
-        // `--worker` / `--sync` are meaningless for native (in-process) tasks
-        // but the flags are accepted so operators can pass them uniformly
-        // across native + command tasks — the run path always executes locally
-        // regardless of what's set here.
-        .arg(
-            Arg::new("worker")
-                .long("worker")
-                .help("Force remote execution via the file broker (ignored for native tasks — always local)")
-                .action(ArgAction::SetTrue)
-                .conflicts_with("sync"),
-        )
-        .arg(
-            Arg::new("sync")
-                .long("sync")
-                .help("Force local (in-process) execution (default for native tasks)")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("profiles")
-                .long("profiles")
-                .visible_alias("pf")
-                .value_name("LIST")
-                .help("Comma-separated profile names to apply (see `secator p list`)"),
-        )
-        .arg(
-            Arg::new("workspace")
-                .long("workspace")
-                .visible_alias("ws")
-                .value_name("NAME")
-                .help("Override the workspace name for this run's reports folder"),
-        );
+        ),
+    );
     let schema = (spec.schema)();
-    let task_opt_names: std::collections::BTreeSet<&str> =
-        schema.opts.iter().map(|o| o.name).collect();
-    let mut taken_shorts: std::collections::BTreeSet<char> =
-        ["v", "h"].iter().filter_map(|s| s.chars().next()).collect();
-    for opt in schema.opts.iter() {
-        if let Some(s) = opt.short {
-            if s.chars().count() == 1 {
-                if let Some(c) = s.chars().next() {
-                    taken_shorts.insert(c);
-                }
-            }
-        }
-    }
-    for opt in schema.meta_opts.iter() {
-        if matches!(schema.key_map.get(opt.name), Some(KeyMap::NotSupported)) {
-            continue;
-        }
-        if opt.internal {
-            continue;
-        }
-        if task_opt_names.contains(opt.name) {
-            continue;
-        }
-        cmd = cmd.arg(build_arg_from_spec_taken(opt, &mut taken_shorts));
-    }
-    for opt in schema.opts.iter() {
-        if opt.internal {
-            continue;
-        }
-        cmd = cmd.arg(build_arg_from_spec_taken(opt, &mut taken_shorts));
-    }
-    cmd
+    add_schema_opts(cmd, &schema)
 }
 
 /// Expand raw CLI-provided targets into the runner's input list. Mirrors Python
@@ -2441,6 +2234,98 @@ fn global_flag(name: &'static str, help: &'static str) -> Arg {
         .action(ArgAction::SetTrue)
 }
 
+/// Attach a task's own opts + non-suppressed meta opts as clap args, resolving
+/// name-and-short collisions in a single place. Task opts win over meta opts of
+/// the same name (Python parity: e.g. ffuf's `data` with short `-d` overrides
+/// the canonical `data` meta). Meta opts whose short letter is already taken
+/// by a task opt silently drop their short. Used by every runner subcommand
+/// builder (task / native / workflow / scan).
+fn add_schema_opts(mut cmd: Command, schema: &OptSchema) -> Command {
+    let task_opt_names: std::collections::BTreeSet<&str> =
+        schema.opts.iter().map(|o| o.name).collect();
+    // Seed with the flags clap reserves globally (`-v` verbose, `-h` help).
+    let mut taken_shorts: std::collections::BTreeSet<char> = ['v', 'h'].into_iter().collect();
+    for opt in schema.opts.iter() {
+        if let Some(s) = opt.short {
+            if let Some(c) = s.chars().next().filter(|_| s.chars().count() == 1) {
+                taken_shorts.insert(c);
+            }
+        }
+    }
+    for opt in schema.meta_opts.iter() {
+        if matches!(schema.key_map.get(opt.name), Some(KeyMap::NotSupported)) {
+            continue;
+        }
+        if opt.internal || task_opt_names.contains(opt.name) {
+            continue;
+        }
+        cmd = cmd.arg(build_arg_from_spec_taken(opt, &mut taken_shorts));
+    }
+    for opt in schema.opts.iter() {
+        if opt.internal {
+            continue;
+        }
+        cmd = cmd.arg(build_arg_from_spec_taken(opt, &mut taken_shorts));
+    }
+    cmd
+}
+
+/// Attach the flags every runner subcommand accepts — `--json`, `--raw`,
+/// `--verbose`, `--no-color`, `--dry-run`, `--worker`/`--sync`, `--profiles`,
+/// `--workspace`. Kept here so the task / native / workflow / scan builders
+/// stay symmetric (one source of truth for flag semantics + help text).
+fn add_common_flags(cmd: Command) -> Command {
+    cmd.arg(global_flag("json", "Print items as JSON lines on stdout"))
+        .arg(global_flag(
+            "raw",
+            "Print only the primary field of each item on stdout (for piping)",
+        ))
+        .arg(
+            Arg::new("verbose")
+                .long("verbose")
+                .short('v')
+                .help("Show the underlying tool's stderr output (banners, logs)")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(global_flag("no_color", "Disable ANSI colors"))
+        .arg(
+            Arg::new("dry_run")
+                .long("dry-run")
+                .help("Print the cmd(s) that would run; do not spawn subprocesses")
+                .action(ArgAction::SetTrue),
+        )
+        // Worker / sync routing. Auto by default; native tasks always run
+        // locally regardless, but the flags are still accepted so operators
+        // can pass them uniformly.
+        .arg(
+            Arg::new("worker")
+                .long("worker")
+                .help("Force remote execution via the file broker (fails if no worker alive)")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("sync"),
+        )
+        .arg(
+            Arg::new("sync")
+                .long("sync")
+                .help("Force local (in-process) execution, even if a worker is available")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("profiles")
+                .long("profiles")
+                .visible_alias("pf")
+                .value_name("LIST")
+                .help("Comma-separated profile names to apply (see `secator p list`)"),
+        )
+        .arg(
+            Arg::new("workspace")
+                .long("workspace")
+                .visible_alias("ws")
+                .value_name("NAME")
+                .help("Override the workspace name for this run's reports folder"),
+        )
+}
+
 /// Same as [`build_arg_from_spec`] but drops the short flag when it'd collide
 /// with an already-claimed letter. Used by the per-task builders so meta opts
 /// can't shadow a task's own short flag (e.g. ffuf's `-d` for `data`).
@@ -2635,6 +2520,23 @@ async fn run_task_subcommand(matches: &ArgMatches) -> ExitCode {
         Cmd(&'static secator_runner::TaskSpec),
         Native(&'static secator_runner::NativeSpec),
     }
+    impl SpecRef {
+        fn name(&self) -> &'static str {
+            match self { SpecRef::Cmd(s) => s.name, SpecRef::Native(s) => s.name }
+        }
+        fn description(&self) -> &'static str {
+            match self { SpecRef::Cmd(s) => s.description, SpecRef::Native(s) => s.description }
+        }
+        fn input_types(&self) -> &'static [&'static str] {
+            match self { SpecRef::Cmd(s) => s.input_types, SpecRef::Native(s) => s.input_types }
+        }
+        fn default_inputs(&self) -> Option<&'static str> {
+            match self { SpecRef::Cmd(s) => s.default_inputs, SpecRef::Native(s) => s.default_inputs }
+        }
+        fn is_native(&self) -> bool {
+            matches!(self, SpecRef::Native(_))
+        }
+    }
     let spec_ref = if let Some(s) = secator_tasks::get(task_name) {
         SpecRef::Cmd(s)
     } else if let Some(s) = secator_tasks::get_native(task_name) {
@@ -2643,11 +2545,10 @@ async fn run_task_subcommand(matches: &ArgMatches) -> ExitCode {
         eprintln!("unknown task: {task_name}");
         return ExitCode::from(2);
     };
-    let (spec_name, spec_desc, spec_input_types, spec_default_inputs):
-        (&str, &str, &[&str], Option<&str>) = match &spec_ref {
-        SpecRef::Cmd(s) => (s.name, s.description, s.input_types, s.default_inputs),
-        SpecRef::Native(s) => (s.name, s.description, s.input_types, s.default_inputs),
-    };
+    let spec_name = spec_ref.name();
+    let spec_desc = spec_ref.description();
+    let spec_input_types = spec_ref.input_types();
+    let spec_default_inputs = spec_ref.default_inputs();
 
     // Expand inputs: file → lines, `a,b,c` → split, stdin auto-read if piped.
     // Python semantics (`_validate_input_nonempty`): a task with
@@ -2697,7 +2598,7 @@ async fn run_task_subcommand(matches: &ArgMatches) -> ExitCode {
 
     // Worker / sync routing: native tasks always run locally (no subprocess to
     // ship to a worker), command tasks honor `--worker`/`--sync` + auto.
-    let is_native = matches!(&spec_ref, SpecRef::Native(_));
+    let is_native = spec_ref.is_native();
     let want_worker = !is_native && args.get_flag("worker");
     let want_sync = is_native || args.get_flag("sync");
     let broker_root = config.dirs.celery_data.clone();
@@ -3394,11 +3295,11 @@ fn finalize_run_with_timing(
         {
             // Honour `CONFIG.exporters.{tasks,workflows,scans}` so users can
             // opt into Markdown/Table without touching code.
-            let exporters = match kind {
-                "workflow" => secator_exporters::default_workflow_exporters(),
-                "scan" => secator_exporters::default_scan_exporters(),
-                _ => secator_exporters::default_task_exporters(),
-            };
+            let exporters = secator_exporters::default_exporters(match kind {
+                "workflow" => secator_exporters::RunnerKind::Workflow,
+                "scan" => secator_exporters::RunnerKind::Scan,
+                _ => secator_exporters::RunnerKind::Task,
+            });
             eprintln!(
                 "{}",
                 info(
@@ -3464,7 +3365,7 @@ fn write_reports(
     errors: u32,
     style: Style,
 ) {
-    use secator_exporters::default_task_exporters;
+    use secator_exporters::{default_exporters, RunnerKind};
     use secator_report::{Report, ReportInfo};
 
     let report = Report::build(
@@ -3485,7 +3386,7 @@ fn write_reports(
     if report.is_empty() {
         return;
     }
-    let exporters = default_task_exporters();
+    let exporters = default_exporters(RunnerKind::Task);
     eprintln!(
         "{}",
         info(
