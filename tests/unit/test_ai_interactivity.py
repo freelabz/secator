@@ -219,6 +219,71 @@ class TestRemoteBackend(unittest.TestCase):
 		self.assertEqual(result["answer"], "option B")
 		self.assertEqual(mock_sleep.call_count, 1)
 
+	@patch('secator.ai.interactivity.sleep')
+	def test_answer_in_final_window_is_not_lost_to_timeout(self, mock_sleep):
+		"""M10: an answer landing in the last sleep window is returned, not lost.
+
+		The poll loop sees only 'pending' until the loop exits, then the answer
+		appears. The final post-loop search must pick it up rather than abandon
+		the turn.
+		"""
+		from secator.ai.interactivity import RemoteBackend
+		answered_doc = [{"answer": "landed late", "_timestamp": 100.0}]
+
+		def fake_search(query, *args, **kwargs):
+			# Answer only becomes visible AFTER the single poll iteration.
+			return list(answered_doc) if mock_sleep.call_count >= 1 else []
+
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = fake_search
+		mock_engine.update.return_value = 0
+		backend = RemoteBackend(timeout=5, query_engine=mock_engine, poll_interval=5)
+
+		result = backend.ask_user("What next?", [], "session1", prompt_uuid="abc-123")
+
+		self.assertIsNotNone(result)
+		self.assertEqual(result["answer"], "landed late")
+
+	@patch('secator.ai.interactivity.sleep')
+	def test_timeout_noop_flip_rereads_answer(self, mock_sleep):
+		"""M10: if the timeout flip modifies 0 rows, re-read the answer."""
+		from secator.ai.interactivity import RemoteBackend
+		# Empty during the loop AND at the first final search, then the answer
+		# appears right as we attempt the (no-op) flip.
+		searches = [[], [], [{"answer": "raced in", "_timestamp": 1.0}]]
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = lambda *a, **k: searches.pop(0) if searches else []
+		mock_engine.update.return_value = 0  # nothing pending -> already answered
+		backend = RemoteBackend(timeout=5, query_engine=mock_engine, poll_interval=5)
+
+		result = backend._poll_for_answer("session1", "permission", prompt_uuid="abc-123")
+		self.assertEqual(result, "raced in")
+
+	def test_build_pending_prompt_expires_prior_pending(self):
+		"""M10: starting a new prompt marks prior still-pending docs stale."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+
+		backend.build_pending_prompt(
+			"Target x requires approval", ["allow", "deny"], "session1",
+			prompt_type="permission", permission_type="target", value="x",
+			prompt_uuid="uuid-new",
+		)
+
+		# An update flipping this session's pending docs to timed_out must fire.
+		mock_engine.update.assert_called_once()
+		flip_query, flip_update = mock_engine.update.call_args[0]
+		self.assertEqual(flip_query.get("_context.session_id"), "session1")
+		self.assertEqual(flip_query.get("status"), "pending")
+		self.assertEqual(flip_update, {"$set": {"status": "timed_out"}})
+
+	def test_expire_stale_pending_noop_without_engine(self):
+		"""No query engine -> no crash, no update."""
+		from secator.ai.interactivity import RemoteBackend
+		backend = RemoteBackend(timeout=60, query_engine=None)
+		backend._expire_stale_pending("session1")  # must not raise
+
 
 class TestCreateBackend(unittest.TestCase):
 	"""Verify create_backend factory."""
