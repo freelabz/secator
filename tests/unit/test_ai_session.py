@@ -184,5 +184,113 @@ class TestRemoteResumeBranch(unittest.TestCase):
 		self.assertTrue(any("remote" in w.message for w in warnings))
 
 
+class TestTurnIdempotency(unittest.TestCase):
+	"""C3: an acks_late redelivery of an already-completed turn must NOT replay
+	_run_loop (no re-run tool actions, no re-billed tokens); a genuinely
+	incomplete turn must still resume and run."""
+
+	def _make_task(self, marker_docs, prior_docs, celery_id="turn-abc"):
+		from secator.tasks.ai import ai
+
+		task = ai.__new__(ai)
+		task.interactive = "remote"
+		task.session_id = "sess-123"
+		task.session_name = ""
+		task.mode = "chat"
+		task.model = "gpt-4o"
+		task.encryptor = None
+		task.context = {"workspace_id": "ws1", "drivers": ["mongodb"], "celery_id": celery_id}
+		task.context["ai_tokens"] = 0
+		task.run_opts = {"prompt": "continue"}
+		task._reports_folder = tempfile.mkdtemp(prefix="secator-test-")
+		task.backend = MagicMock()
+		task.debug = MagicMock()
+		task.history = MagicMock()
+
+		engine = MagicMock()
+		engine.backend = MagicMock()
+		engine.backend.name = "mongodb"
+
+		def _search(query, limit=0):
+			# The idempotency marker query is the only one keyed by turn_completed.
+			if query.get("ai_type") == "turn_completed":
+				return marker_docs
+			if query.get("_type") == "ai":
+				return prior_docs
+			return []
+		engine.search.side_effect = _search
+		task._get_query_engine = MagicMock(return_value=engine)
+		return task, engine
+
+	def _drive(self, task):
+		gen = task._maybe_resume_remote()
+		restored = None
+		try:
+			while True:
+				next(gen)
+		except StopIteration as e:
+			restored = e.value
+		return restored
+
+	def test_completed_turn_short_circuits_without_replay(self):
+		"""A redelivery whose turn already has a completion marker short-circuits:
+		_run_loop is not called and no tokens are billed."""
+		task, engine = self._make_task(
+			marker_docs=[{"ai_type": "turn_completed", "extra_data": {"turn_uuid": "turn-abc"}}],
+			prior_docs=[{"ai_type": "prompt", "content": "hi"}],
+		)
+		task._run_loop = MagicMock(return_value=iter([]))
+
+		with patch("secator.tasks.ai.restore_history_from_db") as mock_restore:
+			restored = self._drive(task)
+
+		self.assertTrue(restored)                       # turn handled (as a no-op)
+		task._run_loop.assert_not_called()              # no tool actions replayed
+		mock_restore.assert_not_called()                # didn't even rebuild/append
+		self.assertEqual(task.context["ai_tokens"], 0)  # nothing re-billed
+
+	@patch("secator.tasks.ai.restore_history_from_db")
+	@patch("secator.tasks.ai.get_system_prompt", return_value="SYS")
+	def test_incomplete_turn_still_resumes(self, mock_sys, mock_restore):
+		"""No marker (a real mid-turn crash) → the turn resumes and runs _run_loop."""
+		mock_restore.return_value = MagicMock(messages=[{"role": "system", "content": "SYS"}])
+		task, engine = self._make_task(
+			marker_docs=[],
+			prior_docs=[{"ai_type": "prompt", "content": "hi"}],
+		)
+		task._detect_mode = MagicMock()
+		task._run_loop = MagicMock(return_value=iter([]))
+		task._mark_turn_completed = MagicMock()
+
+		restored = self._drive(task)
+
+		self.assertTrue(restored)
+		mock_restore.assert_called_once()
+		task._run_loop.assert_called_once()
+
+	def test_mark_turn_completed_persists_marker(self):
+		"""_mark_turn_completed persists exactly one turn_completed Ai stamped with
+		the celery_id turn_uuid; it is a no-op off the remote channel."""
+		from secator.output_types import Ai
+
+		task, engine = self._make_task(marker_docs=[], prior_docs=[])
+		persisted = []
+		task.add_result = lambda item, **kw: persisted.append(item)
+
+		task._mark_turn_completed()
+		self.assertEqual(len(persisted), 1)
+		marker = persisted[0]
+		self.assertIsInstance(marker, Ai)
+		self.assertEqual(marker.ai_type, "turn_completed")
+		self.assertEqual(marker.extra_data.get("turn_uuid"), "turn-abc")
+		self.assertEqual(marker.session_id, "sess-123")
+
+		# Local channel: no marker persisted (idempotency is a remote concern).
+		persisted.clear()
+		task.interactive = "local"
+		task._mark_turn_completed()
+		self.assertEqual(persisted, [])
+
+
 if __name__ == "__main__":
 	unittest.main()

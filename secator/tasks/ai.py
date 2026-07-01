@@ -218,6 +218,7 @@ class ai(PythonRunner):
 
 		# Run loop
 		yield from self._run_loop()
+		self._mark_turn_completed()  # C3: record this turn as done so a redelivery won't replay it
 
 	# -------------------------------------------------------------------------
 	# Remote (web) session restore
@@ -253,6 +254,16 @@ class ai(PythonRunner):
 				'(expected mongodb/api). The web answer channel will not work — check that the '
 				'`mongodb` driver is in the runner context.'
 			)
+
+		# C3: skip replay of an already-completed turn. acks_late can redeliver
+		# this exact message (same celery_id) after a worker crash; without an
+		# idempotency marker the resume path would re-run every tool action and
+		# re-bill tokens. If this turn already completed, short-circuit instead of
+		# replaying _run_loop.
+		turn_uuid = self._turn_uuid()
+		if turn_uuid and self._turn_completed_marker(turn_uuid, query_engine):
+			self.debug(f'C3 idempotency: turn {turn_uuid} already completed; skipping replay', sub='llm')
+			return True
 
 		# Look for prior `_type:"ai"` docs for this session
 		try:
@@ -292,6 +303,7 @@ class ai(PythonRunner):
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		yield from self._run_loop()
+		self._mark_turn_completed()  # C3: record this turn as done so a redelivery won't replay it
 		return True
 
 	def _save_history(self):
@@ -303,6 +315,54 @@ class ai(PythonRunner):
 		if self.interactive == "remote":
 			return
 		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+
+	# -------------------------------------------------------------------------
+	# C3: turn-level idempotency (remote/Celery redelivery)
+	# -------------------------------------------------------------------------
+
+	def _turn_uuid(self):
+		"""Stable id naming THIS delivery's turn for idempotency.
+
+		``celery_id`` (the Celery request id) is stamped on the runner context by
+		the worker entrypoint (``run_command``) and is the SAME across an acks_late
+		worker-loss redelivery, so it uniquely and idempotently names one turn.
+		"""
+		return (self.context or {}).get("celery_id")
+
+	def _turn_completed_marker(self, turn_uuid, query_engine):
+		"""Return the persisted completion marker for ``turn_uuid``, or None."""
+		try:
+			docs = query_engine.search({
+				"_type": "ai",
+				"ai_type": "turn_completed",
+				"_context.session_id": self.session_id,
+				"extra_data.turn_uuid": turn_uuid,
+			}, limit=1)
+		except Exception as e:  # noqa: BLE001 - a marker query must not crash the worker
+			self.debug(f'C3 idempotency: marker query failed: {e}', sub='llm')
+			return None
+		return docs[0] if docs else None
+
+	def _mark_turn_completed(self):
+		"""C3: persist a turn-completion marker once the turn is durably done.
+
+		Remote channel only. Reuses the workspace `_type:"ai"` docs (no new
+		collection); restore_history_from_db skips this ai_type so it never enters
+		the transcript. Called by the caller AFTER `_run_loop` returns, so a crash
+		mid-turn leaves no marker and the partial turn still resumes.
+		"""
+		if self.interactive != "remote":
+			return
+		turn_uuid = self._turn_uuid()
+		if not turn_uuid:
+			return
+		self.add_result(Ai(
+			content="",
+			ai_type="turn_completed",
+			status="completed",
+			session_id=self.session_id,
+			extra_data={"turn_uuid": turn_uuid},
+		), print=False)
 
 	# -------------------------------------------------------------------------
 	# _run_loop: main LLM interaction loop
