@@ -277,6 +277,10 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 		if result.decision == "deny":
 			return f"Action denied after prompt: {result.reason}"
 
+	# fail closed: prompts exhausted with the decision still unresolved -> block (H10)
+	if result.decision == "ask":
+		return f"Action denied: guardrail check unresolved after {max_rounds} prompts"
+
 	return None
 
 
