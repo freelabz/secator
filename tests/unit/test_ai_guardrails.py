@@ -239,6 +239,13 @@ class TestPermissionEngine(unittest.TestCase):
 		self.assertEqual(result.decision, "ask")
 		self.assertIn("10.5.2.3", result.targets)
 
+	def test_target_no_catchall_asks_not_allows(self):
+		"""M6: with no target rule/catch-all configured, an unknown target must ask (fail-safe), not silently allow."""
+		engine = self._make_engine(allow=["task(*)"])  # no target(...) rule in any category
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.5.2.3"]})
+		self.assertEqual(result.decision, "ask")
+		self.assertIn("10.5.2.3", result.targets)
+
 	def test_task_target_validation(self):
 		engine = self._make_engine(
 			allow=["task(*)", "target({targets})"],
