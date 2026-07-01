@@ -461,6 +461,14 @@ class ai(PythonRunner):
 					# only happen once). Nothing to re-yield here — the frontend reads the
 					# persisted doc.
 
+					# H5: remote max-iter after tool work is a terminal turn (no further
+					# user input expected) — don't block-poll on prompt_uuid=None with no
+					# answerable pending doc; end cleanly via the loop tail (save + Info).
+					if (isinstance(self.backend, RemoteBackend)
+							and iteration == self.max_iterations
+							and follow_up_choices is None and tool_calls):
+						break
+
 					result = self._prompt_and_redetect(follow_up_choices or [], prompt_uuid=follow_up_prompt_uuid)
 					if result is None:
 						self._save_history()
@@ -1026,6 +1034,19 @@ class ai(PythonRunner):
 
 		Returns list of items to yield, or None to exit.
 		"""
+		# H5: plain-chat remote turns reach here with no pre-persisted pending doc
+		# (unlike the guardrail/follow-up path). Persist one now with a real
+		# prompt_uuid so the frontend can render/answer it and the poll matches only
+		# this prompt — never poll on prompt_uuid=None.
+		if isinstance(self.backend, RemoteBackend) and not prompt_uuid:
+			prompt_uuid = str(uuid.uuid4())
+			self.add_result(self.backend.build_pending_prompt(
+				question="What's next?",
+				choices=choices,
+				session_id=self.session_id,
+				prompt_type="follow_up",
+				prompt_uuid=prompt_uuid,
+			))
 		response = self.backend.ask_user(
 			question="What's next?",
 			choices=choices,

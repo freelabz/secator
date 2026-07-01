@@ -2,6 +2,9 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from secator.definitions import ADDONS_ENABLED
+HAS_AI = ADDONS_ENABLED.get('ai', False)
+
 
 class TestInteractivityBackendBase(unittest.TestCase):
 	"""Verify base class interface."""
@@ -307,6 +310,169 @@ class TestCreateBackend(unittest.TestCase):
 		from secator.ai.interactivity import create_backend, AutoBackend
 		backend = create_backend("unknown")
 		self.assertIsInstance(backend, AutoBackend)
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestRemoteTurnPendingDocCoverage(unittest.TestCase):
+	"""H5: common remote turns (plain-chat reply, max-iter exit) must not poll on
+	prompt_uuid=None. Plain-chat must persist a proper pending doc and poll on its
+	real uuid; the max-iter terminal path must not strand a dangling pending doc."""
+
+	class _FakeHistory:
+		def add_user(self, *a, **k):
+			pass
+
+		def count_tokens_by_role(self, model=None):
+			return {"total": 0}
+
+		def to_messages(self, *a, **k):
+			return []
+
+	def test_plain_chat_remote_persists_pending_doc_and_polls_on_uuid(self):
+		"""A plain-chat remote turn persists a pending follow_up doc with a
+		non-None prompt_uuid and polls scoped to THAT uuid (never None)."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.ai.interactivity import RemoteBackend
+		from secator.output_types import Ai
+
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": "keep going", "_timestamp": 1.0}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		persisted = []
+		fake_self = MagicMock()
+		fake_self.backend = backend
+		fake_self.session_id = "sess-chat"
+		fake_self.model = "gpt-4o"
+		fake_self.mode = "chat"
+		fake_self.encryptor = None
+		fake_self.max_iterations = 10
+		fake_self.history = self._FakeHistory()
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+
+		# plain-chat turn: no prompt_uuid passed in (this is the H5 path)
+		items = AiTask._prompt_and_redetect(fake_self, [])
+
+		pend = [p for p in persisted if isinstance(p, Ai) and p.status == "pending"]
+		self.assertEqual(len(pend), 1, "exactly one pending doc must be persisted")
+		uuid_stamped = (pend[0].extra_data or {}).get("prompt_uuid")
+		self.assertTrue(uuid_stamped, "pending doc must carry a real (non-None) prompt_uuid")
+		self.assertEqual(pend[0].ai_type, "follow_up")
+
+		# the poll must be scoped to THAT prompt's uuid — never None
+		search_query = mock_engine.search.call_args[0][0]
+		self.assertEqual(search_query.get("extra_data.prompt_uuid"), uuid_stamped)
+		# the answer resolved, so the loop continues (non-None items) rather than exiting
+		self.assertIsNotNone(items)
+
+	def test_local_plain_chat_does_not_persist_pending_doc(self):
+		"""Local (CLI) plain-chat must NOT create a pending doc — that is a
+		remote-channel concern only."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.ai.interactivity import CLIBackend
+		from secator.output_types import Ai
+
+		backend = MagicMock(spec=CLIBackend)
+		backend.ask_user.return_value = {"answer": "do x"}
+
+		persisted = []
+		fake_self = MagicMock()
+		fake_self.backend = backend
+		fake_self.session_id = "sess-local"
+		fake_self.model = "gpt-4o"
+		fake_self.mode = "chat"
+		fake_self.encryptor = None
+		fake_self.max_iterations = 10
+		fake_self.history = self._FakeHistory()
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+
+		AiTask._prompt_and_redetect(fake_self, [])
+
+		pend = [p for p in persisted if isinstance(p, Ai) and p.status == "pending"]
+		self.assertEqual(pend, [], "local backend must not persist a pending doc")
+
+	@patch("secator.query.QueryEngine")
+	@patch("secator.tasks.ai.init_llm")
+	@patch("secator.tasks.ai.call_llm")
+	def test_remote_max_iter_does_not_strand_pending_doc(self, mock_call_llm, mock_init, mock_qe_cls):
+		"""At remote max-iter after tool work, the loop ends cleanly: it does not
+		enter the follow-up poll and does not persist a dangling pending doc."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.ai.interactivity import RemoteBackend
+		from secator.output_types import Ai, Info
+
+		mock_call_llm.return_value = {
+			"content": "working", "tool_calls": [object()], "usage": {"tokens": 100, "cost": 0.001},
+		}
+
+		persisted = []
+		prompt_calls = []
+		backend = RemoteBackend(timeout=60, query_engine=MagicMock(), poll_interval=0.01)
+
+		fake_self = MagicMock()
+		fake_self.backend = backend
+		fake_self.session_id = "sess-max"
+		fake_self.model = "gpt-4o"
+		fake_self.mode = "chat"
+		fake_self.max_iterations = 1
+		fake_self.interactive = "remote"
+		fake_self.is_subagent = False
+		fake_self.inputs = []
+		fake_self.context = {}
+		fake_self.scope = "workspace"
+		fake_self.results = []
+		fake_self.max_workers = 3
+		fake_self.encryptor = None
+		fake_self.dry_run = False
+		fake_self.verbose = False
+		fake_self._sync = False
+		fake_self.temp = 0.7
+		fake_self.api_base = ""
+		fake_self.api_key = ""
+		fake_self.tool_schemas = []
+		fake_self.max_tokens_total = 100000
+		fake_self.permission_engine = MagicMock()
+		fake_self.history = self._FakeHistory()
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+
+		def _empty_gen(*a, **k):
+			return
+			yield  # pragma: no cover - make it a generator
+
+		fake_self._summarize_auto = _empty_gen
+		fake_self._summarize_user = _empty_gen
+		fake_self._drain_history_usage = lambda: None
+		fake_self._account_usage = lambda u: None
+		fake_self._add_assistant_to_history = lambda c, t: None
+		fake_self._save_history = lambda: None
+
+		def _fake_process(tool_calls, ctx):
+			return [{"action": "shell", "tool_call_id": "t", "tool_call_name": "run_shell"}]
+			yield  # pragma: no cover
+
+		fake_self._process_tool_calls = _fake_process
+
+		def _fake_dispatch(actions, ctx):
+			return {"follow_up_choices": None, "stop_reason": None, "follow_up_prompt_uuid": None}
+			yield  # pragma: no cover
+
+		fake_self._dispatch_and_collect = _fake_dispatch
+
+		def _track_prompt(choices, prompt_uuid=None):
+			prompt_calls.append((choices, prompt_uuid))
+			return []
+
+		fake_self._prompt_and_redetect = _track_prompt
+
+		items = list(AiTask._run_loop(fake_self))
+
+		self.assertEqual(prompt_calls, [], "remote max-iter must not enter the follow-up poll")
+		pend = [p for p in persisted if isinstance(p, Ai) and getattr(p, "status", None) == "pending"]
+		self.assertEqual(pend, [], "remote max-iter must not persist a dangling pending doc")
+		self.assertTrue(
+			any(isinstance(it, Info) and "max iterations" in it.message.lower() for it in items),
+			"loop must end via the terminal 'reached max iterations' tail",
+		)
 
 
 if __name__ == "__main__":
