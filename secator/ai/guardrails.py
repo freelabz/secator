@@ -611,9 +611,10 @@ class PermissionEngine:
 		if result.decision in ("deny", "ask"):
 			return result
 
-		# Step 2: Check targets (only if target rules are configured)
+		# Step 2: Check targets. M6: always enforce when targets exist — a missing
+		# catch-all must fall to ask (via _check_values "No rule"), never default-allow.
 		targets_to_check = self._extract_targets(action)
-		if targets_to_check and self._has_rules_for("target"):
+		if targets_to_check:
 			target_result = self._check_values("target", targets_to_check)
 			if target_result.decision == "deny":
 				return target_result
@@ -628,7 +629,7 @@ class PermissionEngine:
 		if action_type == "shell":
 			command = action.get("command", "")
 			paths_with_access = detect_paths_with_access(command)
-			if paths_with_access and (self._has_rules_for("read") or self._has_rules_for("write")):
+			if paths_with_access:  # M6: always enforce — no read/write rule must ask, not allow
 				# Check each path with its correct access type
 				ask_paths = []
 				for path, access in paths_with_access:
@@ -669,14 +670,6 @@ class PermissionEngine:
 			return result
 
 		return PermissionResult(decision="deny", reason=f"No matching rule for {action_type}")
-
-	def _has_rules_for(self, rule_type: str) -> bool:
-		"""Check if any rules exist for the given rule type."""
-		for category in ("allow", "deny", "ask"):
-			for rt, _ in self.rules[category]:
-				if rt == rule_type:
-					return True
-		return any(rt == rule_type for rt, _ in self.runtime_allow)
 
 	def _check_action_type(self, action_type: str, action: Dict) -> PermissionResult:
 		"""Check if the action type is allowed/denied/ask.
