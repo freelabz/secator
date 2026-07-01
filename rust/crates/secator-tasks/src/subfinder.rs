@@ -40,6 +40,7 @@ pub static SPEC: TaskSpec = TaskSpec {
     encoding: "utf-8",
     ignore_return_code: false,
     requires_sudo: false,
+    default_inputs: None,
 };
 
 /// Mirrors Python `tasks/subfinder.py`:

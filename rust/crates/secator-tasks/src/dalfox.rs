@@ -49,6 +49,7 @@ pub static SPEC: TaskSpec = TaskSpec {
     encoding: "ansi",
     ignore_return_code: true,
     requires_sudo: false,
+    default_inputs: None,
 };
 
 /// Per-record translation: emit Vulnerability + (when verified) Url.

@@ -537,6 +537,7 @@ mod tests {
         encoding: "utf-8",
         ignore_return_code: false,
         requires_sudo: false,
+            default_inputs: None,
     };
     /// Task that sleeps 200ms before emitting one subdomain — used by the
     /// Group-parallelism regression test to prove `_group` branches actually
@@ -560,6 +561,7 @@ mod tests {
         encoding: "utf-8",
         ignore_return_code: false,
         requires_sudo: false,
+            default_inputs: None,
     };
     static FAKE_HTTPX: TaskSpec = TaskSpec {
         name: "fake-httpx",
@@ -582,6 +584,7 @@ mod tests {
         encoding: "utf-8",
         ignore_return_code: false,
         requires_sudo: false,
+            default_inputs: None,
     };
 
     fn lookup() -> Arc<dyn TaskLookup> {

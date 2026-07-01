@@ -11,6 +11,8 @@ secator-model = { path = "../secator-model" }
 secator-options = { path = "../secator-options" }
 secator-parse = { path = "../secator-parse" }
 encoding_rs = "0.8"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 rpassword = "7.3"
 serde_yaml = "0.9.34"
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }

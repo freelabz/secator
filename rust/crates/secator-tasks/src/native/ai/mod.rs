@@ -30,7 +30,7 @@ pub fn sessions_root() -> std::path::PathBuf {
 
 use std::path::PathBuf;
 
-use litellm_rust::{LiteLLM, ProviderConfig, ProviderKind};
+use litellm_rust::{ChatMessage, ChatMessageContent, ChatRequest, LiteLLM, ProviderConfig, ProviderKind};
 use secator_model::{Ai, Error, Info, OutputItem, Warning};
 use secator_options::{OptSchema, OptSpec, OptType, RunOpts};
 use secator_runner::{HookRegistry, NativeSpec, ValidatorRegistry};
@@ -55,6 +55,7 @@ pub static SPEC: NativeSpec = NativeSpec {
     encoding: "utf-8",
     ignore_return_code: false,
     requires_sudo: false,
+    default_inputs: Some(""),
 };
 
 fn run(inputs: &[String], opts: &RunOpts) -> Vec<OutputItem> {
@@ -75,7 +76,28 @@ fn run(inputs: &[String], opts: &RunOpts) -> Vec<OutputItem> {
         .or_else(|| (!ai_cfg.api_base.is_empty()).then(|| ai_cfg.api_base.clone()));
     let dry_run = opt_bool(opts, "dry_run");
     let dangerous = opt_bool(opts, "dangerous");
-    let mode = prompts::normalize_mode(&opt_string(opts, "mode").unwrap_or_default());
+    // Intent-detection (#173 T4 / Python parity, `addons.ai.intent_model`):
+    // when --mode is unset, use a cheaper model to classify the user's prompt
+    // into chat/attack/exploit. CLI opt wins; falls back to the addon config;
+    // empty string disables.
+    let intent_model = opt_string(opts, "intent_model")
+        .or_else(|| (!ai_cfg.intent_model.is_empty()).then(|| ai_cfg.intent_model.clone()))
+        .unwrap_or_default();
+    let explicit_mode = opt_string(opts, "mode").unwrap_or_default();
+    let mode: String = if !explicit_mode.is_empty() {
+        prompts::normalize_mode(&explicit_mode).to_string()
+    } else if dry_run || intent_model.is_empty() {
+        // No mode AND no intent model — Python parity: "chat".
+        "chat".to_string()
+    } else {
+        classify_intent(
+            &intent_model,
+            api_key.as_deref(),
+            api_base.as_deref(),
+            &opt_string(opts, "prompt").unwrap_or_default(),
+        )
+        .unwrap_or_else(|| "chat".to_string())
+    };
     let max_iterations = opts
         .get("max_iterations")
         .and_then(|s| s.parse::<u32>().ok())
@@ -170,7 +192,7 @@ fn run(inputs: &[String], opts: &RunOpts) -> Vec<OutputItem> {
             let mut h = ChatHistory::new();
             // System prompt is template-only — no PII to mask, push raw.
             let library = build_library_reference();
-            h.set_system(prompts::get_system_prompt(mode, &workspace_path, Some(&library)));
+            h.set_system(prompts::get_system_prompt(&mode, &workspace_path, Some(&library)));
             // User prompt may reference customer hosts / emails / IPs. Mask
             // before persisting to history so the LLM never sees the raw value.
             let masked_user = match encryptor.as_mut() {
@@ -199,7 +221,7 @@ fn run(inputs: &[String], opts: &RunOpts) -> Vec<OutputItem> {
         content: prompt_for_display.clone(),
         ai_type: "prompt".into(),
         model: model.clone(),
-        mode: mode.into(),
+        mode: mode.clone(),
         ..Default::default()
     }));
 
@@ -290,6 +312,7 @@ fn run(inputs: &[String], opts: &RunOpts) -> Vec<OutputItem> {
         });
     let agent_cfg = AgentConfig {
         model: model.clone(),
+        mode: mode.clone(),
         temperature,
         max_iterations,
         is_subagent,
@@ -590,6 +613,55 @@ fn build_client(
         .map(|client| client.with_provider(provider, cfg))
 }
 
+/// One-shot intent classification call (Python parity: `_detect_mode`).
+/// Builds a tiny LiteLLM client against `model`, sends a single user turn
+/// containing the selection prompt + the operator's prompt, parses the
+/// response into one of `chat` / `attack` / `exploit`. Returns `None` when
+/// anything fails — caller falls back to `"chat"`.
+fn classify_intent(
+    model: &str,
+    api_key: Option<&str>,
+    api_base: Option<&str>,
+    user_prompt: &str,
+) -> Option<String> {
+    if user_prompt.trim().is_empty() {
+        return None;
+    }
+    let client = build_client(model, api_key, api_base).ok()?;
+    let mut req = ChatRequest::new(model).temperature(0.3);
+    req.messages = vec![ChatMessage {
+        role: "user".into(),
+        content: ChatMessageContent::Text(format!(
+            "{}\n{}",
+            prompts::selection_prompt(),
+            user_prompt
+        )),
+        name: None,
+        tool_call_id: None,
+        tool_calls: None,
+        function_call: None,
+        provider_specific_fields: None,
+    }];
+
+    // Tiny dedicated runtime — we're already off the main async loop (the
+    // CLI is in `run_in_thread` for the full agent later), but classification
+    // happens before `run_in_thread` so we need our own scratch runtime here.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    let resp = rt.block_on(client.completion(req)).ok()?;
+    let raw = resp.content.trim().to_lowercase();
+    // Strip code fences / trailing punctuation the model sometimes adds.
+    let token = raw
+        .trim_matches(|c: char| !c.is_ascii_alphabetic())
+        .to_string();
+    match token.as_str() {
+        "attack" | "chat" | "exploit" => Some(token),
+        _ => None,
+    }
+}
+
 fn build_schema() -> OptSchema {
     let mut s = OptSchema { opt_prefix: "--", ..OptSchema::default() };
     s.opts = vec![
@@ -600,7 +672,18 @@ fn build_schema() -> OptSchema {
             Some("openai/gpt-4o-mini"),
             "Provider/model identifier (e.g. openai/gpt-4o, anthropic/claude-3-5-sonnet)",
         ),
-        str_opt("mode", None, Some("attack"), "Agent mode: attack or chat"),
+        str_opt(
+            "mode",
+            None,
+            None,
+            "Agent mode: chat / attack / exploit. Empty → auto-detect via `addons.ai.intent_model` (Python parity); falls back to `chat`.",
+        ),
+        str_opt(
+            "intent_model",
+            None,
+            None,
+            "Cheaper model used for intent classification when --mode is unset (defaults to `addons.ai.intent_model`).",
+        ),
         OptSpec {
             name: "temperature",
             ty: OptType::Float,
@@ -972,6 +1055,37 @@ mod tests {
             msg.contains("would call ") && !msg.contains("would call  "),
             "dry-run must name a model; got: {msg}"
         );
+    }
+
+    /// #173 T4: empty prompt → classifier short-circuits to `None`. The caller
+    /// in `run()` then falls back to `"chat"` without ever building a client.
+    #[test]
+    fn classify_intent_returns_none_for_blank_prompt() {
+        assert!(classify_intent("claude-haiku-4-5", Some("dummy"), None, "").is_none());
+        assert!(classify_intent("claude-haiku-4-5", Some("dummy"), None, "   ").is_none());
+    }
+
+    /// #173 T4: in dry-run, classification is bypassed regardless of
+    /// `intent_model` — Python parity (no live LLM call in dry-run).
+    #[test]
+    fn intent_model_does_not_call_llm_in_dry_run() {
+        let mut cfg = secator_config::Config::default();
+        cfg.addons.ai.intent_model = "claude-haiku-4-5".into();
+        let _ = secator_config::set(cfg);
+        // Dry-run + intent_model set + no explicit --mode → "chat" fallback,
+        // no LLM call (we don't have credentials in tests).
+        let items = run(
+            &[],
+            &opts(&[("prompt", "scan example.com"), ("dry_run", "true")]),
+        );
+        let prompt_ai = items
+            .iter()
+            .find_map(|i| match i {
+                OutputItem::Ai(a) if a.ai_type == "prompt" => Some(a),
+                _ => None,
+            })
+            .expect("prompt Ai");
+        assert_eq!(prompt_ai.mode, "chat");
     }
 
     #[test]

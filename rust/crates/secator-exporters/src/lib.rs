@@ -367,6 +367,70 @@ impl Exporter for TableExporter {
     }
 }
 
+// ----------------------------------------------------------------------- JSONL
+
+/// Newline-delimited JSON — one object per item, written to
+/// `report.jsonl` in the output folder. Python parity with
+/// `exporters/jsonl.py` (which prints to stdout for `jq` piping); we write to
+/// disk so the file lands next to `report.json` and the operator can `cat` /
+/// pipe at their convenience. The order matches Python: iterate every finding
+/// type in declaration order, then any items that fall into the catch-all
+/// `target` bucket.
+pub struct JsonlExporter;
+impl Exporter for JsonlExporter {
+    fn name(&self) -> &'static str { "JSONL" }
+    fn send(&self, report: &Report) -> Result<Vec<PathBuf>, ExportError> {
+        let path = report.output_folder.join("report.jsonl");
+        let mut f = File::create(&path)?;
+        for ty in secator_model::FINDING_TYPE_NAMES
+            .iter()
+            .copied()
+            .chain(std::iter::once("target"))
+        {
+            let Some(items) = report.results.get(ty) else { continue };
+            for item in items {
+                let map = item.to_map();
+                let line = serde_json::to_string(&serde_json::Value::Object(map))
+                    .map_err(|e| ExportError::Other(e.to_string()))?;
+                writeln!(f, "{line}")?;
+            }
+        }
+        Ok(vec![path])
+    }
+}
+
+// ---------------------------------------------------------------- Console
+
+/// Stream every finding to stdout, one line per item, formatted via
+/// [`primary_field`] (same rendering as `TxtExporter` but on stdout for live
+/// piping). Python parity with `exporters/console.py`.
+///
+/// Returns an empty path list — nothing is written to disk, so the CLI's
+/// `[INF] Saved <NAME> reports to ...` line is skipped for this exporter.
+pub struct ConsoleExporter;
+impl Exporter for ConsoleExporter {
+    fn name(&self) -> &'static str { "Console" }
+    fn send(&self, report: &Report) -> Result<Vec<PathBuf>, ExportError> {
+        use std::io::Write as _;
+        let stdout = std::io::stdout();
+        let mut handle = stdout.lock();
+        for ty in secator_model::FINDING_TYPE_NAMES
+            .iter()
+            .copied()
+            .chain(std::iter::once("target"))
+        {
+            let Some(items) = report.results.get(ty) else { continue };
+            for item in items {
+                if let Some(line) = primary_field(item) {
+                    let _ = writeln!(handle, "{line}");
+                }
+            }
+        }
+        let _ = handle.flush();
+        Ok(Vec::new())
+    }
+}
+
 // ----------------------------------------------------------- Google Drive
 
 /// Upload the rendered `report.json` (and any sibling `report_*.csv` files
@@ -657,10 +721,12 @@ pub fn resolve(names: &[&str]) -> Vec<Box<dyn Exporter>> {
         .iter()
         .filter_map(|n| match *n {
             "json" => Some(Box::new(JsonExporter) as Box<dyn Exporter>),
+            "jsonl" => Some(Box::new(JsonlExporter)),
             "csv" => Some(Box::new(CsvExporter)),
             "txt" => Some(Box::new(TxtExporter)),
             "markdown" | "md" => Some(Box::new(MarkdownExporter)),
             "table" => Some(Box::new(TableExporter)),
+            "console" => Some(Box::new(ConsoleExporter)),
             "gdrive" => Some(Box::new(GdriveExporter)),
             _ => None,
         })
@@ -811,6 +877,50 @@ mod tests {
     #[test]
     fn md_escape_pipes_and_newlines() {
         assert_eq!(md_escape("a|b\nc"), r"a\|b / c");
+    }
+
+    /// #176 T7: JSONL exporter writes one JSON object per line in
+    /// finding-type declaration order. `jq -c` over the file should round-trip.
+    #[test]
+    fn jsonl_exporter_writes_one_object_per_line() {
+        let dir = std::env::temp_dir().join(format!("sec-exp-jsonl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let report = sample_report(dir.clone());
+        let written = JsonlExporter.send(&report).unwrap();
+        assert_eq!(written.len(), 1);
+        assert!(written[0].ends_with("report.jsonl"));
+        let body = std::fs::read_to_string(&written[0]).unwrap();
+        let lines: Vec<&str> = body.lines().collect();
+        assert_eq!(lines.len(), 2, "expected 2 items, one per line");
+        for line in &lines {
+            let v: serde_json::Value = serde_json::from_str(line).expect("each line is JSON");
+            assert!(v.is_object());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #176 T7: Console exporter returns no paths (it streams to stdout) and
+    /// doesn't panic. Validating the stdout content from a unit test is
+    /// brittle — what we check is the no-paths contract since the CLI uses
+    /// that to skip the "Saved … to" log line.
+    #[test]
+    fn console_exporter_returns_empty_paths() {
+        let dir = std::env::temp_dir().join(format!("sec-exp-cons-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let report = sample_report(dir.clone());
+        let written = ConsoleExporter.send(&report).unwrap();
+        assert!(written.is_empty(), "console exporter must not write files");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #176 T7: `-o jsonl,console` resolves both as proper trait objects.
+    #[test]
+    fn resolve_picks_jsonl_and_console() {
+        let xs = resolve(&["jsonl", "console"]);
+        assert_eq!(xs.len(), 2);
+        let names: Vec<&str> = xs.iter().map(|e| e.name()).collect();
+        assert!(names.contains(&"JSONL"));
+        assert!(names.contains(&"Console"));
     }
 
     #[test]

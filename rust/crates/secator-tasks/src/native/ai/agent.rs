@@ -23,6 +23,9 @@ use super::tools::{build_tool_schemas, tool_call_to_action};
 /// shape without going through the option engine.
 pub struct AgentConfig {
     pub model: String,
+    /// Resolved mode (`chat` / `attack` / `exploit`) — drives which tool
+    /// schemas the LLM sees this turn. Python parity: `build_tool_schemas(mode)`.
+    pub mode: String,
     pub temperature: f32,
     pub max_iterations: u32,
     pub is_subagent: bool,
@@ -60,7 +63,7 @@ pub fn run_agent(
     mut cfg: AgentConfig,
 ) -> Vec<OutputItem> {
     let mut out: Vec<OutputItem> = Vec::new();
-    let tools = build_tool_schemas(cfg.is_subagent);
+    let tools = build_tool_schemas(&cfg.mode, cfg.is_subagent);
     let mut empty_streak = 0u32;
     let mut total_tokens: u64 = 0;
 

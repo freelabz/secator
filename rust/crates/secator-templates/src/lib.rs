@@ -229,7 +229,13 @@ pub enum NodeKind {
 /// from YAML insertion order.
 #[derive(Debug, Clone)]
 pub struct TaskNode {
+    /// Task class name (e.g. `"nmap"` — the part before `/` in `nmap/light`).
+    /// Used for spec lookup; the alias suffix is stripped at build time.
     pub name: String,
+    /// Original key from the YAML (e.g. `"nmap/light"`, `"dnsx/probe"`).
+    /// Used by the tree renderer so the visible output matches Python.
+    /// Falls back to `name` for nodes without an alias.
+    pub display_name: String,
     /// Path-like unique id: `host_recon`, `host_recon.naabu`, `host_recon._group/vuln.searchsploit`.
     pub id: String,
     pub kind: NodeKind,
@@ -288,6 +294,7 @@ fn build_workflow_node(wf: &WorkflowDef, ancestor_id: Option<&str>) -> Result<Ta
     }
     let mut node = TaskNode {
         name: wf.name.clone(),
+        display_name: wf.name.clone(),
         id: id.clone(),
         kind: NodeKind::Workflow,
         condition: None,
@@ -313,6 +320,7 @@ where
     let id = s.name.clone();
     let mut node = TaskNode {
         name: s.name.clone(),
+        display_name: s.name.clone(),
         id: id.clone(),
         kind: NodeKind::Scan,
         condition: None,
@@ -361,6 +369,7 @@ fn build_task_or_group(name: &str, val: &Yaml, id: &str) -> Result<TaskNode, Tem
         }
         Ok(TaskNode {
             name: name.to_string(),
+            display_name: name.to_string(),
             id: id.to_string(),
             kind: NodeKind::Group,
             condition: None,
@@ -394,9 +403,11 @@ fn build_task_node(name: &str, val: &Yaml, id: &str) -> Result<TaskNode, Templat
         }
     }
     // Task class name is the part before any `/` (e.g. `nmap/light` → class `nmap`).
+    // `display_name` keeps the original key so the tree renderer matches Python.
     let class = name.split('/').next().unwrap_or(name).to_string();
     Ok(TaskNode {
         name: class,
+        display_name: name.to_string(),
         id: id.to_string(),
         kind: NodeKind::Task,
         condition,
@@ -536,7 +547,7 @@ fn render_node(node: &TaskNode, prefix: &str, is_root: bool, _is_last: bool, out
         NodeKind::Group => "▦",
         NodeKind::Task => "🔧",
     };
-    out.push_str(&format!("{prefix}{icon} {}", node.name));
+    out.push_str(&format!("{prefix}{icon} {}", node.display_name));
     if let Some(d) = &node.description {
         out.push_str(&format!(" — {d}"));
     }

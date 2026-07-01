@@ -53,6 +53,9 @@ pub struct WorkerConfig {
     /// Subprocess RSS ceiling — over this and the runner kills the child
     /// (Python `transport.task_memory_limit_mb`). `None` ⇒ unlimited.
     pub task_memory_limit_mb: Option<u64>,
+    /// Kill the worker after each task (Python `transport.worker_kill_after_task`).
+    /// Useful for tools with leaky state (nuclei template caches, etc.).
+    pub worker_kill_after_task: bool,
 }
 impl Default for WorkerConfig {
     fn default() -> Self {
@@ -65,6 +68,7 @@ impl Default for WorkerConfig {
             worker_max_tasks_per_child: None,
             worker_kill_after_idle: None,
             task_memory_limit_mb: None,
+            worker_kill_after_task: false,
         }
     }
 }
@@ -252,6 +256,19 @@ fn spawn_poll_loop(worker: Arc<Worker>, slot: usize) -> JoinHandle<()> {
                         worker
                             .last_active
                             .store(now_secs(), std::sync::atomic::Ordering::Relaxed);
+                        // `worker_kill_after_task` (Python parity): recycle the
+                        // worker after every unit. Useful for leaky-state tools
+                        // (nuclei template caches, etc.). #172.
+                        if worker.config.worker_kill_after_task {
+                            eprintln!(
+                                "[INF] {} self-shutdown: worker_kill_after_task is set",
+                                worker.config.id,
+                            );
+                            worker
+                                .self_shutdown
+                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                            return;
+                        }
                         break; // back to outer poll loop after each unit
                     }
                     Ok(None) => continue, // race lost; try next file
@@ -467,6 +484,7 @@ mod tests {
         encoding: "utf-8",
         ignore_return_code: false,
         requires_sudo: false,
+            default_inputs: None,
     };
 
     struct OneTaskLookup;
@@ -555,6 +573,7 @@ mod tests {
         encoding: "utf-8",
         ignore_return_code: false,
         requires_sudo: false,
+            default_inputs: None,
     };
     struct SleepLookup;
     impl TaskLookup for SleepLookup {
@@ -646,5 +665,50 @@ mod tests {
         let result = tokio::time::timeout(Duration::from_secs(5), worker_handle).await;
         let _ = std::fs::remove_dir_all(&base);
         assert!(result.is_ok(), "worker run() must return after hitting max-tasks");
+    }
+
+    /// #172 T3: `worker_kill_after_task = true` recycles the worker after the
+    /// FIRST unit, with no max-tasks counter involved. Stronger contract than
+    /// `worker_max_tasks_per_child: Some(1)` because Python's flag is
+    /// orthogonal — a memory-leaky tool can flip it without touching
+    /// concurrency or recycle counts.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn worker_kill_after_task_recycles_after_one_unit() {
+        let base = std::env::temp_dir().join(format!(
+            "secator-kat-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let broker = FileBroker::new(&base).unwrap();
+
+        let cfg = WorkerConfig {
+            id: "kat-worker".into(),
+            concurrency: 1,
+            heartbeat_interval: Duration::from_secs(60),
+            poll_interval: Duration::from_millis(5),
+            worker_kill_after_task: true,
+            ..Default::default()
+        };
+        let worker = Worker::new(broker, Arc::new(OneTaskLookup) as Arc<dyn TaskLookup>, cfg);
+        let worker_handle = tokio::spawn(async move {
+            let _ = worker
+                .run(async { std::future::pending::<()>().await })
+                .await;
+        });
+
+        // Submit ONE job — worker should process it and self-exit.
+        let ft = FileTransport::open(base.clone()).unwrap();
+        let (tx, _rx) = mpsc::channel::<OutputItem>(8);
+        ft.execute_task("echo-task", vec!["example.com".into()], BTreeMap::new(), None, tx)
+            .await
+            .expect("execute_task");
+
+        let result = tokio::time::timeout(Duration::from_secs(5), worker_handle).await;
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(
+            result.is_ok(),
+            "worker run() must return on its own after the first task"
+        );
     }
 }

@@ -75,6 +75,7 @@ pub static SPEC: TaskSpec = TaskSpec {
     encoding: "utf-8",
     ignore_return_code: false,
     requires_sudo: false,
+    default_inputs: None,
 };
 
 /// Python `BBOT_MAP_TYPES`. Returns the canonical Rust `output_types` name.

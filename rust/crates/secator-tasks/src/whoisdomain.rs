@@ -44,6 +44,7 @@ pub static SPEC: TaskSpec = TaskSpec {
     encoding: "utf-8",
     ignore_return_code: false,
     requires_sudo: false,
+    default_inputs: None,
 };
 
 /// Python `on_json_loaded` — straight map to `Domain` with emails in `extra_data`.

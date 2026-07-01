@@ -26,6 +26,17 @@ const MODE_ATTACK: &str = include_str!("prompts/modes/attack.txt");
 const MODE_CHAT: &str = include_str!("prompts/modes/chat.txt");
 const MODE_EXPLOIT: &str = include_str!("prompts/modes/exploit.txt");
 
+/// One-shot intent-classification prompt (Python `prompts/modes/_selection.txt`).
+/// Fed to the cheap `addons.ai.intent_model` when `--mode` is unset; we expect
+/// the LLM to reply with exactly one of `chat` / `attack` / `exploit`.
+const MODE_SELECTION: &str = include_str!("prompts/modes/_selection.txt");
+
+/// Public accessor for the selection prompt (kept here so the prompt body
+/// stays bundled with the other mode templates).
+pub fn selection_prompt() -> &'static str {
+    MODE_SELECTION
+}
+
 // --------------------------------------------------------------- Constraints
 
 const CONSTRAINT_ARSENAL: &str = include_str!("prompts/constraints/arsenal.txt");
@@ -71,21 +82,19 @@ fn constraint_body(name: &str) -> Option<&'static str> {
 //
 // The mode tables and `get_mode_config` helper are read by the test suite to
 // pin the Python `MODES` parity, but the agent loop in `agent.rs` doesn't
-// gate tool calls on `allowed_actions` yet — Python parity gap. Gated to
-// `cfg(test)` so the dead-code lint stays quiet; un-gate the moment the
-// agent enforces per-mode tool restrictions.
+// gate tool calls on `allowed_actions`.
 
 /// Per-mode policy: which actions the LLM may call, default iteration cap.
 /// Mirrors Python `MODES` in `prompts.py`.
-#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct ModeConfig {
+    #[allow(dead_code)]
     pub name: &'static str,
     pub allowed_actions: &'static [&'static str],
+    #[allow(dead_code)]
     pub max_iterations: u32,
 }
 
-#[cfg(test)]
 const ALLOWED_ATTACK: &[&str] = &[
     "task",
     "workflow",
@@ -95,12 +104,10 @@ const ALLOWED_ATTACK: &[&str] = &[
     "add_finding",
     "stop",
 ];
-#[cfg(test)]
 const ALLOWED_CHAT: &[&str] = &["query", "follow_up", "add_finding", "shell", "stop"];
-#[cfg(test)]
 const ALLOWED_EXPLOIT: &[&str] = &["task", "workflow", "shell", "add_finding", "stop"];
 
-#[cfg(test)]
+/// Python parity (`get_mode_config`): unknown modes resolve to `chat`.
 pub fn get_mode_config(mode: &str) -> ModeConfig {
     match normalize_mode(mode) {
         "attack" => ModeConfig {

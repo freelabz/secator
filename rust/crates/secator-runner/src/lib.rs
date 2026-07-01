@@ -11,6 +11,7 @@
 //! `on_interval` ticks live in this loop; the DAG engine drives the workflow-
 //! level lifecycle (`on_start`/`on_end` for the whole run) separately.
 
+mod freeproxy;
 mod stats;
 
 use std::collections::BTreeMap;
@@ -314,6 +315,17 @@ pub struct TaskSpec {
     /// prepends `sudo -S` and feeds the operator's password (or skips when
     /// already root / `SECATOR_SUDO_NOPROMPT` is set).
     pub requires_sudo: bool,
+    /// Python `default_inputs`. `Some("")` (or any non-`None` value) signals
+    /// "OK to run with zero inputs" — the CLI skips the "no targets" bail
+    /// and the task synthesises its own state (`arp` reads the local ARP
+    /// cache, `netdetect` scans local interfaces, `ai`/`prompt` read from
+    /// their own opts). `None` (default) means the runner requires at least
+    /// one input — Python's `_validate_input_nonempty` semantics.
+    ///
+    /// This is orthogonal to `input_types`: an empty `input_types` slice
+    /// means "accept any autodetected type" (Python parity — the falsy
+    /// check in `_validate_inputs`), NOT "no input required".
+    pub default_inputs: Option<&'static str>,
 }
 
 /// Default schema constructor: no opts, `-` prefix.
@@ -409,7 +421,31 @@ pub fn configure_proxy(runner: &mut CommandRunner) {
     let want_pc = matches!(raw.as_str(), "auto" | "proxychains");
     let want_socks5 = matches!(raw.as_str(), "auto" | "socks5");
     let want_http = matches!(raw.as_str(), "auto" | "http");
+    let want_random = raw.as_str() == "random";
     let is_literal_url = raw.starts_with("http://") || raw.starts_with("https://") || raw.starts_with("socks5://");
+
+    // 0. `--proxy random` — fetch a live anonymous HTTP proxy from a public
+    //    list (Python `FreeProxy(rand=True, anonym=True).get()`). Only applies
+    //    when the task accepts HTTP proxies; falls back to dropping the opt if
+    //    no live proxy is found within `cfg.http.freeproxy_timeout` seconds.
+    if want_random && caps.proxy_http {
+        match freeproxy::random_proxy(cfg.http.freeproxy_timeout) {
+            Some(url) => {
+                secator_debug::debug!("proxy", "{} random → {url}", runner.spec.name);
+                runner.opts.insert("proxy".into(), url);
+            }
+            None => {
+                secator_debug::debug!(
+                    "proxy",
+                    "{} random: no live free proxy found within {}s, dropping opt",
+                    runner.spec.name,
+                    cfg.http.freeproxy_timeout,
+                );
+                runner.opts.remove("proxy");
+            }
+        }
+        return;
+    }
 
     // 1. Proxychains takes priority (Python: `proxy in ['auto', 'proxychains']`).
     if want_pc && caps.proxychains && !cfg.http.proxychains_command.is_empty() {
@@ -529,6 +565,10 @@ pub struct NativeSpec {
     pub encoding: &'static str,
     pub ignore_return_code: bool,
     pub requires_sudo: bool,
+    /// Python `default_inputs`. See [`TaskSpec::default_inputs`] — same
+    /// semantics: `Some("")` skips the "no targets" bail, `None` requires
+    /// at least one input.
+    pub default_inputs: Option<&'static str>,
 }
 
 pub struct NativeRunner {
@@ -934,12 +974,18 @@ async fn execute_with_hooks(
     // Start the background stat sampler — Python parity with `Command._collect_stats`.
     // Skipped when `config.runners.stat_update_frequency <= 0` or pid is unknown.
     let stat_freq = secator_config::get().runners.stat_update_frequency.max(0) as u64;
+    // `transport.task_memory_limit_mb`: when > 0, the sampler also enforces an
+    // RSS ceiling and SIGKILL's the subprocess tree on breach (#171).
+    let mem_limit_mb: Option<u64> = {
+        let lim = secator_config::get().transport.task_memory_limit_mb;
+        if lim > 0 { Some(lim as u64) } else { None }
+    };
     // Wrap the optional sampler in an abort-on-drop guard. If `runner.run` is
     // dropped mid-execution (e.g. the worker's `task_max_timeout` deadline
     // fires), the guard's Drop aborts the spawned task — which releases its
     // `tx.clone()` and unblocks the worker's streamer drain.
     let stat_guard = AbortOnDrop(if child_pid != 0 {
-        stats::spawn_sampler(child_pid, stat_freq, tx.clone())
+        stats::spawn_sampler_with_limit(child_pid, stat_freq, mem_limit_mb, tx.clone())
     } else {
         None
     });
@@ -1106,6 +1152,7 @@ mod tests {
         encoding: "utf-8",
         ignore_return_code: false,
         requires_sudo: false,
+            default_inputs: None,
     };
 
     #[tokio::test]
@@ -1151,6 +1198,7 @@ mod tests {
         encoding: "utf-8",
         ignore_return_code: false,
         requires_sudo: false,
+            default_inputs: None,
     };
 
     #[tokio::test]
@@ -1195,6 +1243,7 @@ mod tests {
         encoding: "utf-8",
         ignore_return_code: false,
         requires_sudo: false,
+            default_inputs: None,
     };
 
     #[tokio::test]
@@ -1232,6 +1281,7 @@ mod tests {
         encoding: "utf-8",
         ignore_return_code: false,
         requires_sudo: false,
+            default_inputs: None,
     };
 
     #[tokio::test]
@@ -1263,6 +1313,7 @@ mod tests {
         encoding: "utf-8",
         ignore_return_code: false,
         requires_sudo: false,
+            default_inputs: None,
     };
 
     #[tokio::test]

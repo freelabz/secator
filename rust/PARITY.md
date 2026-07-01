@@ -22,6 +22,17 @@ Per-cell status (Python / Rust columns):
 
 Newest first. Each entry: date · sprint slug · cells flipped · task IDs.
 
+### 2026-06-17 · T1–T8 follow-up sprint — every queued parity gap closed
+- **#170 T1 Workflow merge-priority sweep** → ✅ Confirmed the `ancestor_defaults` priority fix from #167 carries through every workflow; new regression test `ancestor_defaults_lose_to_parent_runtime_opts` pins the order.
+- **#171 T2 transport.task_memory_limit_mb enforcement** → ✅ `spawn_sampler_with_limit` walks the process tree via sysinfo, emits `OutputItem::Error("task killed: subprocess tree RSS …")`, and kills the root pid on breach. 1-second poll cadence when only the limit is set. Test: `memory_limit_breach_emits_error`.
+- **#172 T3 transport.worker_kill_after_task** → ✅ Worker poll loop signals `self_shutdown` after each `process_unit` when the config flag is set, allowing supervisors to recycle on every task. Test: `worker_kill_after_task_recycles_after_one_unit`.
+- **#173 T4 addons.ai.intent_model** → ✅ New `classify_intent` helper calls the cheap intent model with the bundled `modes/_selection.txt` prompt, normalizes the response to chat/attack/exploit, falls back to "chat" on any failure. Schema gains `intent_model` opt with addon fallback. Tests: `classify_intent_returns_none_for_blank_prompt`, `intent_model_does_not_call_llm_in_dry_run`.
+- **#174 T5 AI per-mode allowed_actions** → ✅ `build_tool_schemas(mode, is_subagent)` filters tool schemas via `get_mode_config(mode).allowed_actions` — chat no longer sees `run_task`/`run_workflow`, exploit no longer sees `query_workspace`/`follow_up`. Tests: `chat_mode_strips_run_task_and_run_workflow`, `exploit_mode_drops_query_and_follow_up`.
+- **#175 T6 --proxy random** → ✅ New `freeproxy::random_proxy` queries proxyscrape's plain-text list, shuffles, probes up to 8 candidates against `generate_204`, returns the first live `http://ip:port`. `configure_proxy` honors `--proxy random` for tasks with `proxy_http` caps; drops the opt cleanly when no proxy is alive within `cfg.http.freeproxy_timeout`.
+- **#176 T7 Console + jsonl exporters** → ✅ Added `JsonlExporter` (writes `report.jsonl`) and `ConsoleExporter` (streams to stdout, returns empty paths so the CLI skips the "Saved" log line). Both register via `-o jsonl` / `-o console`. Tests: `jsonl_exporter_writes_one_object_per_line`, `console_exporter_returns_empty_paths`, `resolve_picks_jsonl_and_console`.
+- **#177 T8 Release polish** → ✅ Added `secator template scaffold <name>` that drops a starter cdylib plugin crate under `~/.secator/templates/<name>/` and registers it in a top-level workspace `Cargo.toml`; added the `docker-rust.yml` GitHub Actions workflow that publishes `ghcr.io/freelabz/secator-rs` on `rust-dev` pushes + `rust-v*` tags. Tests: `scaffold_writes_full_skeleton_and_workspace_member`, `scaffold_rejects_bad_names`.
+- **Full workspace suite**: 569 passed (1 ignored). No regressions.
+
 ### 2026-06-13 · Report-parity follow-ups — all 6 bugs fixed
 - **#167 B-WF-PASSIVE** (HIGH) → ✅ Fixed by splitting `TaskPlan` into `ancestor_defaults` (lowest priority) and `opts` (highest priority). Exec merge is now `ancestor_defaults < parent_runtime_opts < own_opts` — workflow `options.passive.default: false` no longer clobbers `--pf passive`. Regression test `ancestor_defaults_lose_to_parent_runtime_opts` pins the priority. Live verified: `workflow url_crawl https://example.com --pf passive` now runs xurlfind3r.
 - **#164 B-TASK-META** → ✅ Added `stamp_task_meta` helper called on every item in the single-task receive loop; fills `_source`, `_timestamp`, `_uuid`, `_context.workspace_{name,id}`.
@@ -259,8 +270,8 @@ worker start, see `secator health`).
 | markdown | ✅ | ✅ | Complete | |
 | table | ✅ | ✅ | Complete | |
 | gdrive | ✅ | ✅ | Complete | uses `gcloud` shell-out |
-| console | ✅ | 🟡 | Partial | Rust uses inline stderr renderer + `--json/--raw` flags; no swappable "console exporter" object |
-| jsonl | ✅ | 🟡 | Partial | Rust has `--json` (JSONL on stdout) but no `jsonl` exporter file |
+| console | ✅ | ✅ | Complete | `ConsoleExporter` (`-o console`) streams primary fields to stdout — #176 T7 |
+| jsonl | ✅ | ✅ | Complete | `JsonlExporter` (`-o jsonl`) writes `report.jsonl` next to `report.json` — #176 T7 |
 
 ---
 
@@ -320,8 +331,8 @@ worker start, see `secator health`).
 | `transport.task_max_timeout` enforcement | ✅ Celery | ✅ | Complete | wraps `runner.run` in `tokio::time::timeout`; `kill_on_drop(true)` ensures SIGKILL — #157 |
 | `transport.worker_max_tasks_per_child` | ✅ | ✅ | Complete | shared atomic + `self_shutdown` flag — #157 |
 | `transport.worker_kill_after_idle_seconds` | ✅ | ✅ | Complete | watchdog task — #157 |
-| `transport.worker_kill_after_task` | ✅ | ❌ | Not implemented | Python only — kill worker after EVERY task |
-| `transport.task_memory_limit_mb` | ✅ | 🟡 | Partial | field plumbed through `WorkerConfig`; sampler kill-path deferred — #159 |
+| `transport.worker_kill_after_task` | ✅ | ✅ | Complete | Poll loop signals `self_shutdown` after each `process_unit` when set — #172 T3 |
+| `transport.task_memory_limit_mb` | ✅ | ✅ | Complete | `spawn_sampler_with_limit` kills the process tree + emits an `Error` on RSS breach — #171 T2 |
 | `transport.worker_prefetch_multiplier` | ✅ | ➖ | Complete | Celery prefork concept; Rust worker uses dedicated poll loops |
 | `transport.broker_pool_limit` | ✅ | ➖ | Complete | Celery only |
 | `transport.broker_visibility_timeout` | ✅ | ➖ | Complete | Celery / Redis-only knob |
@@ -349,7 +360,7 @@ worker start, see `secator health`).
 | Tool: `add_finding` | ✅ | ✅ | Complete | stamps `_source=ai` |
 | Tool: `follow_up` (interactive) | ✅ | ✅ | Complete | TTY → prompt; non-TTY → stop with operator info |
 | Tool: `stop` | ✅ | ✅ | Complete | |
-| Modes (`chat`/`attack`/`exploit`) | ✅ | 🟡 | Partial | tables exist + tested; agent loop doesn't yet enforce per-mode `allowed_actions` |
+| Modes (`chat`/`attack`/`exploit`) | ✅ | ✅ | Complete | `build_tool_schemas(mode, …)` filters allowed_actions before tools reach the LLM — #174 T5 |
 | Sub-agent dispatch (`run_task ai`) | ✅ | ✅ | Complete | depth cap = `MAX_SUBAGENT_DEPTH` |
 | Session save / resume | ✅ | ✅ | Complete | `~/.secator/<sessions>/` JSON records, interactive picker |
 | History pruning to token budget | ✅ | ✅ | Complete | drops oldest non-system messages, truncates huge tool results |
@@ -360,7 +371,7 @@ worker start, see `secator health`).
 | `addons.ai.*` config fallback (default_model, temperature, api_key, …) | ✅ | ✅ | Complete | #158 |
 | Cost / pricing tracking | ✅ | ✅ | Complete | |
 | Tool: `run_workflow` parallel `_group` | ✅ | ✅ | Complete | now uses DAG dispatch instead of flattened serial |
-| `addons.ai.intent_model` | ✅ | ❌ | Not implemented | Python uses a smaller model for intent extraction; Rust unwired |
+| `addons.ai.intent_model` | ✅ | ✅ | Complete | When `--mode` is unset, `classify_intent` calls the cheap model with the bundled `modes/_selection.txt` prompt; defaults to `claude-haiku-4-5` — #173 T4 |
 
 ---
 
@@ -467,17 +478,17 @@ worker start, see `secator health`).
 | `--reload` (watchmedo auto-restart) | ✅ | ❌ | Not implemented | Rust workers don't reload on source change (compiled binary) |
 | `--check` worker | ✅ | ❌ | Not implemented | |
 | `--dev` worker (verbose Celery) | ✅ | ➖ | Complete | Celery-specific |
-| `worker_kill_after_task` (kill after each task) | ✅ | ❌ | Not implemented | useful for memory-leaky deps; deferred |
+| `worker_kill_after_task` (kill after each task) | ✅ | ✅ | Complete | Poll loop signals `self_shutdown` after each task — #172 T3 |
 | `worker_kill_after_idle_seconds` | ✅ | ✅ | Complete | watchdog — #157 |
 | `worker_max_tasks_per_child` | ✅ | ✅ | Complete | #157 |
 | Sudo password prompt + cache | ✅ | ✅ | Complete | `rpassword` interactive |
 | Proxychains prefix on commands | ✅ | ✅ | Complete | configurable command name |
-| `--proxy random` (FreeProxy library) | ✅ | ❌ | Not implemented | `freeproxy_timeout` config unused |
+| `--proxy random` (FreeProxy library) | ✅ | ✅ | Complete | `freeproxy::random_proxy` fetches from proxyscrape, probes up to 8, returns first live `http://ip:port`; honors `http.freeproxy_timeout` — #175 T6 |
 | `--proxy auto / socks5 / http / proxychains` | ✅ | ✅ | Complete | |
 | Output-encoding switch (utf-8 / ansi) | ✅ | ✅ | Complete | |
 | `ignore_return_code` per task | ✅ | ✅ | Complete | declared on spec; Rust runner doesn't gate on exit either way |
 | Stat tree walking (cpu/mem per descendant) | ✅ | ✅ | Complete | sysinfo tree walk |
-| Per-process memory limit kill | ✅ | 🟡 | Partial | field plumbed; enforcement deferred — #159 |
+| Per-process memory limit kill | ✅ | ✅ | Complete | sampler enforces `transport.task_memory_limit_mb` via process-tree RSS check; emits `Error` + kills root — #171 T2 |
 | SIGKILL on task timeout | ✅ | ✅ | Complete | `kill_on_drop(true)` on `TokioCommand` — #157 |
 | AbortOnDrop guards (sampler / hooks) | ➖ | ✅ | Complete | needed because cancel-on-drop can leak otherwise |
 | Run-folder allocation (`<reports>/<ws>/<kind>s/<id>/`) | ✅ | ✅ | Complete | next-id picker; `.inputs/` + `.outputs/` |
@@ -521,9 +532,9 @@ worker start, see `secator health`).
 
 **State rollup** (across all tables above, excluding the per-tool / per-template tables which are uniformly Complete):
 
-- **Complete** — the overwhelming majority of cells.
-- **Partial** — `transport.task_memory_limit_mb`, `transport.worker_command_verbose`, console exporter, jsonl exporter, AI modes (per-mode `allowed_actions` enforcement), `http.*` (freeproxy_timeout unused), tab-completion install, run-id resolution, integration test surface.
-- **Not implemented** — `transport.worker_kill_after_task`, third-party `addons.json` discovery, AI `intent_model`, worker `--reload` / `--check`, `--proxy random`, asciinema recording, tab completion install, Cloud Build pipelines.
+- **Complete** — the overwhelming majority of cells; after the T1–T8 sprint this now covers all per-mode `allowed_actions` enforcement, `addons.ai.intent_model`, `--proxy random` (FreeProxy-equivalent), `console`/`jsonl` exporters, `transport.task_memory_limit_mb` kill-path, `transport.worker_kill_after_task`, and `secator template scaffold`.
+- **Partial** — `transport.worker_command_verbose`, tab-completion install, run-id resolution, integration test surface.
+- **Not implemented** — third-party `addons.json` discovery, worker `--reload` / `--check`, asciinema recording, tab completion install, Cloud Build pipelines.
 - **Deferred by user** — SQLite driver (§6), SQLite query backend (§8), Airflow 3.0+ DAG generation (§15).
 
 **Rust-only extensions** (Python doesn't have these):

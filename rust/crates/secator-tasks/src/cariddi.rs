@@ -51,6 +51,7 @@ pub static SPEC: TaskSpec = TaskSpec {
     encoding: "ansi",
     ignore_return_code: false,
     requires_sudo: false,
+    default_inputs: None,
 };
 
 const CARIDDI_IGNORE_LIST: &[&str] = &["BTC address"];

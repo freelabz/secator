@@ -8,12 +8,18 @@
 
 use serde_json::{json, Value};
 
-/// The full set of tool schemas, returned as a JSON `Value` ready to assign to
-/// `ChatRequest.tools`. Subagent mode strips `follow_up` (Python parity).
-pub fn build_tool_schemas(is_subagent: bool) -> Value {
+/// The full set of tool schemas, filtered by the mode's `allowed_actions`
+/// (Python parity with `build_tool_schemas`). Subagent runs additionally strip
+/// `follow_up` since they can't prompt the operator.
+pub fn build_tool_schemas(mode: &str, is_subagent: bool) -> Value {
+    let cfg = super::prompts::get_mode_config(mode);
     let mut out: Vec<Value> = Vec::new();
     for (name, schema) in all_schemas() {
         if is_subagent && name == "follow_up" {
+            continue;
+        }
+        let action = action_type_for(name);
+        if !cfg.allowed_actions.contains(&action) {
             continue;
         }
         out.push(schema);
@@ -208,15 +214,19 @@ fn stop_schema() -> Value {
 mod tests {
     use super::*;
 
-    #[test]
-    fn build_includes_all_tools_by_default() {
-        let v = build_tool_schemas(false);
-        let arr = v.as_array().unwrap();
-        assert_eq!(arr.len(), TOOL_NAMES.len(), "expected one entry per TOOL_NAME");
-        let names: Vec<&str> = arr
+    fn schema_names(v: &Value) -> Vec<&str> {
+        v.as_array()
+            .unwrap()
             .iter()
             .map(|s| s["function"]["name"].as_str().unwrap())
-            .collect();
+            .collect()
+    }
+
+    #[test]
+    fn attack_mode_includes_all_tools() {
+        let v = build_tool_schemas("attack", false);
+        let names = schema_names(&v);
+        assert_eq!(names.len(), TOOL_NAMES.len(), "attack should include every tool");
         for t in TOOL_NAMES {
             assert!(names.contains(t), "missing tool {t}");
         }
@@ -224,15 +234,38 @@ mod tests {
 
     #[test]
     fn subagent_strips_follow_up() {
-        let v = build_tool_schemas(true);
-        let names: Vec<&str> = v
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|s| s["function"]["name"].as_str().unwrap())
-            .collect();
+        let v = build_tool_schemas("attack", true);
+        let names = schema_names(&v);
         assert!(!names.contains(&"follow_up"));
         assert!(names.contains(&"run_task"));
+    }
+
+    /// #174 T5: chat mode strips `run_task`, `run_workflow`, and the LLM
+    /// literally never sees their schemas. Python parity.
+    #[test]
+    fn chat_mode_strips_run_task_and_run_workflow() {
+        let v = build_tool_schemas("chat", false);
+        let names = schema_names(&v);
+        assert!(!names.contains(&"run_task"), "chat must not expose run_task");
+        assert!(!names.contains(&"run_workflow"), "chat must not expose run_workflow");
+        // Still has the read-only / interactive bits.
+        assert!(names.contains(&"query_workspace"));
+        assert!(names.contains(&"follow_up"));
+        assert!(names.contains(&"add_finding"));
+        assert!(names.contains(&"stop"));
+        assert!(names.contains(&"run_shell"));
+    }
+
+    /// #174 T5: exploit mode drops `query_workspace` + `follow_up` — Python parity.
+    #[test]
+    fn exploit_mode_drops_query_and_follow_up() {
+        let v = build_tool_schemas("exploit", false);
+        let names = schema_names(&v);
+        assert!(!names.contains(&"query_workspace"));
+        assert!(!names.contains(&"follow_up"));
+        assert!(names.contains(&"run_task"));
+        assert!(names.contains(&"run_workflow"));
+        assert!(names.contains(&"add_finding"));
     }
 
     #[test]

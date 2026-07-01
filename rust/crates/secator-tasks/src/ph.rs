@@ -45,6 +45,7 @@ pub static SPEC: TaskSpec = TaskSpec {
     encoding: "utf-8",
     ignore_return_code: true,
     requires_sudo: false,
+    default_inputs: None,
 };
 
 /// Python `on_json_loaded`: pull `match.{context,value,...}` and `config.{name,path}`,

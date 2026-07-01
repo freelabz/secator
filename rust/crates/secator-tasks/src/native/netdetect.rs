@@ -30,6 +30,7 @@ pub static SPEC: NativeSpec = NativeSpec {
     encoding: "utf-8",
     ignore_return_code: false,
     requires_sudo: false,
+    default_inputs: Some(""),
 };
 
 fn run(_inputs: &[String], _opts: &RunOpts) -> Vec<OutputItem> {

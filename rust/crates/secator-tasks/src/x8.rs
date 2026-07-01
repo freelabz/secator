@@ -48,6 +48,7 @@ pub static SPEC: TaskSpec = TaskSpec {
     encoding: "utf-8",
     ignore_return_code: false,
     requires_sudo: false,
+    default_inputs: None,
 };
 
 fn on_json_loaded(ctx: &mut HookCtx, item: Map) -> Vec<OutputItem> {

@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use secator_expr::Value as ExprValue;
-use secator_model::{OutputItem, OutputType};
+use secator_model::OutputItem;
 use secator_options::{KeyMap, OptSchema, OptSpec, OptType};
 use secator_runner::CommandRunner;
 use secator_ui::{err, info, raw, render, target_line, Style};
@@ -150,6 +150,26 @@ fn positive_u64(n: i64) -> Option<u64> {
 fn run_template_subcommand(args: &ArgMatches) -> ExitCode {
     let templates_dir = secator_config::get().dirs.templates.clone();
     match args.subcommand() {
+        Some(("scaffold", sub)) => {
+            let name = sub
+                .get_one::<String>("name")
+                .expect("required arg")
+                .clone();
+            match plugins::scaffold_plugin(&templates_dir, &name) {
+                Ok(path) => {
+                    eprintln!(
+                        "[INF] Scaffolded plugin crate at {}",
+                        path.display()
+                    );
+                    eprintln!("      Edit src/lib.rs, then run `secator template build`.");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("template scaffold failed: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
         Some(("build", _)) => match plugins::build_user_templates(&templates_dir) {
             Ok(paths) if paths.is_empty() => {
                 eprintln!("Built — but no cdylib artifacts produced. Make sure your plugin crate sets `crate-type = [\"cdylib\"]` in Cargo.toml.");
@@ -203,6 +223,15 @@ fn build_template_subcommand() -> Command {
         .about("Manage .rs plugin crates dropped under ~/.secator/templates/")
         .subcommand_required(true)
         .arg_required_else_help(true)
+        .subcommand(
+            Command::new("scaffold")
+                .about("Generate a starter plugin crate under ~/.secator/templates/<name>/")
+                .arg(
+                    Arg::new("name")
+                        .help("Plugin crate name (kebab-case recommended)")
+                        .required(true),
+                ),
+        )
         .subcommand(
             Command::new("build")
                 .about("Compile plugin crates via `cargo build --release` against ~/.secator/templates/"),
@@ -1670,6 +1699,7 @@ async fn run_worker_subcommand(args: &ArgMatches) -> ExitCode {
         worker_max_tasks_per_child: positive_u64(config.transport.worker_max_tasks_per_child),
         worker_kill_after_idle: positive_duration(config.transport.worker_kill_after_idle_seconds),
         task_memory_limit_mb: positive_u64(config.transport.task_memory_limit_mb),
+        worker_kill_after_task: config.transport.worker_kill_after_task,
         ..Default::default()
     };
     let worker = secator_worker::Worker::new(broker, lookup, cfg);
@@ -2071,6 +2101,23 @@ fn build_native_task_cmd(spec: &'static secator_runner::NativeSpec) -> Command {
             Arg::new("dry_run")
                 .long("dry-run")
                 .help("Print the resolved inputs/opts; do not run the native task")
+                .action(ArgAction::SetTrue),
+        )
+        // `--worker` / `--sync` are meaningless for native (in-process) tasks
+        // but the flags are accepted so operators can pass them uniformly
+        // across native + command tasks — the run path always executes locally
+        // regardless of what's set here.
+        .arg(
+            Arg::new("worker")
+                .long("worker")
+                .help("Force remote execution via the file broker (ignored for native tasks — always local)")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("sync"),
+        )
+        .arg(
+            Arg::new("sync")
+                .long("sync")
+                .help("Force local (in-process) execution (default for native tasks)")
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -2596,16 +2643,21 @@ async fn run_task_subcommand(matches: &ArgMatches) -> ExitCode {
         eprintln!("unknown task: {task_name}");
         return ExitCode::from(2);
     };
-    let (spec_name, spec_desc, spec_input_types): (&str, &str, &[&str]) = match &spec_ref {
-        SpecRef::Cmd(s) => (s.name, s.description, s.input_types),
-        SpecRef::Native(s) => (s.name, s.description, s.input_types),
+    let (spec_name, spec_desc, spec_input_types, spec_default_inputs):
+        (&str, &str, &[&str], Option<&str>) = match &spec_ref {
+        SpecRef::Cmd(s) => (s.name, s.description, s.input_types, s.default_inputs),
+        SpecRef::Native(s) => (s.name, s.description, s.input_types, s.default_inputs),
     };
 
     // Expand inputs: file → lines, `a,b,c` → split, stdin auto-read if piped.
-    // For native tasks that take no inputs (netdetect, prompt with --yes), we
-    // tolerate an empty list — they synthesise their own state.
+    // Python semantics (`_validate_input_nonempty`): a task with
+    // `default_inputs` set (to any value, including `""`) tolerates an
+    // empty input list — it synthesises its own state (arp reads local
+    // ARP cache, netdetect scans interfaces, ai/prompt read from opts).
+    // `input_types: &[]` is orthogonal: it means "accept any type", NOT
+    // "no input required" (Python `input_types = None` semantics).
     let inputs = expand_inputs(raw_inputs, spec_input_types);
-    let allow_empty_inputs = matches!(&spec_ref, SpecRef::Native(s) if s.input_types.is_empty());
+    let allow_empty_inputs = spec_default_inputs.is_some();
     if inputs.is_empty() && !allow_empty_inputs {
         eprintln!("no targets — pass positional args, a comma list, a file, or pipe via stdin");
         return ExitCode::from(2);
@@ -3239,30 +3291,11 @@ fn enabled_drivers(
     out
 }
 
-/// Runner-level finalizer — Python `Runner.mark_completed` equivalent. Called once at
-/// the end of every task/workflow/scan run regardless of which task/workflow/scan
-/// produced the items. Flags duplicate findings on the accumulated results (does NOT
-/// drop them — matches Python: reports persist all items with `_duplicate: true` on
-/// the losers). Then prints the summary line and writes the configured exporters.
-fn finalize_run(
-    name: &str,
-    description: &str,
-    kind: &'static str,
-    inputs: Vec<String>,
-    workspace: String,
-    reports_folder: Option<std::path::PathBuf>,
-    collected: Vec<OutputItem>,
-    findings: u32,
-    errors: u32,
-    style: Style,
-) -> ExitCode {
-    finalize_run_with_timing(
-        name, description, kind, inputs, workspace, reports_folder,
-        collected, findings, errors, style,
-        0.0, 0.0, std::collections::BTreeMap::new(),
-    )
-}
-
+/// Runner-level finalizer — Python `Runner.mark_completed` equivalent. Called
+/// once at the end of every task/workflow/scan run. Flags duplicate findings
+/// on the accumulated results (does NOT drop them — Python parity: reports
+/// persist all items with `_duplicate: true` on the losers), then prints the
+/// summary line and writes the configured exporters.
 #[allow(clippy::too_many_arguments)]
 fn finalize_run_with_timing(
     name: &str,
@@ -3545,5 +3578,71 @@ mod tests {
             &["host"],
         );
         assert_eq!(out, vec!["a.com", "b.com", "c.com"]);
+    }
+
+    /// Native task subcommands must accept the global `--sync` / `--worker`
+    /// flags at clap parse time. Regression for the task-matrix run where
+    /// `urlparser --sync` and `netdetect --sync` bailed with
+    /// `error: unexpected argument '--sync' found`.
+    #[test]
+    fn native_task_cmd_accepts_sync_and_worker_flags() {
+        let spec = secator_tasks::get_native("urlparser").expect("urlparser native spec");
+        let cmd = build_native_task_cmd(spec);
+        // clap surfaces unknown args as errors — a successful parse proves
+        // the flags are registered on the subcommand.
+        assert!(
+            cmd.clone()
+                .try_get_matches_from(vec!["urlparser", "https://x?a=1", "--sync"])
+                .is_ok(),
+            "--sync should be accepted"
+        );
+        assert!(
+            cmd.clone()
+                .try_get_matches_from(vec!["urlparser", "https://x?a=1", "--worker"])
+                .is_ok(),
+            "--worker should be accepted"
+        );
+        // Mutual exclusion is preserved (Python parity + subprocess-task parity).
+        assert!(
+            cmd.try_get_matches_from(vec!["urlparser", "x", "--sync", "--worker"])
+                .is_err(),
+            "--sync + --worker together must conflict"
+        );
+    }
+
+    /// `default_inputs = Some("")` (Python parity: `default_inputs = ''`)
+    /// is what tells the CLI to skip the "no targets" bail — NOT
+    /// `input_types.is_empty()` (which is Python's "accept any type" flag).
+    /// Regression: `arp`, `netdetect`, `ai`, `prompt` must run empty.
+    #[test]
+    fn tasks_with_default_inputs_tolerate_empty_input() {
+        for name in ["arp"] {
+            let spec = secator_tasks::get(name).expect(name);
+            assert!(
+                spec.default_inputs.is_some(),
+                "{name} must declare default_inputs = Some(\"\") to run empty"
+            );
+        }
+        for name in ["netdetect", "ai", "prompt"] {
+            let spec = secator_tasks::get_native(name).expect(name);
+            assert!(
+                spec.default_inputs.is_some(),
+                "native {name} must declare default_inputs = Some(\"\") to run empty"
+            );
+        }
+    }
+
+    /// `gf` has `input_types: &[]` (accept any type — Python `input_types =
+    /// None`) but no `default_inputs`, so it still requires ≥1 input.
+    /// Python parity. Guards against the earlier over-relaxed fix that
+    /// treated empty input_types as "no input required".
+    #[test]
+    fn gf_requires_at_least_one_input_despite_empty_input_types() {
+        let spec = secator_tasks::get("gf").expect("gf");
+        assert!(spec.input_types.is_empty(), "gf accepts any type");
+        assert!(
+            spec.default_inputs.is_none(),
+            "gf must require at least one input (Python parity)"
+        );
     }
 }

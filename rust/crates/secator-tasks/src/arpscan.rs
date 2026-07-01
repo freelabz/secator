@@ -46,6 +46,7 @@ pub static SPEC: TaskSpec = TaskSpec {
     encoding: "utf-8",
     ignore_return_code: false,
     requires_sudo: true,
+    default_inputs: None,
 };
 
 static HOOKS: HookRegistry = HookRegistry {
