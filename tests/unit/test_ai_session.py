@@ -292,5 +292,82 @@ class TestTurnIdempotency(unittest.TestCase):
 		self.assertEqual(persisted, [])
 
 
+class TestFastDetectMode(unittest.TestCase):
+	"""D4: the deterministic mode fast-path skips the intent LLM round-trip for
+	unambiguous prompts, while ambiguous ones still fall back to the LLM."""
+
+	def test_fast_detect_mode_pure(self):
+		from secator.tasks.ai import fast_detect_mode
+		self.assertEqual(fast_detect_mode("scan the target"), "attack")
+		self.assertEqual(fast_detect_mode("summarize the findings"), "chat")
+		self.assertEqual(fast_detect_mode(""), "chat")
+		# exploit-ish → defer to LLM (no behavior change for those)
+		self.assertIsNone(fast_detect_mode("write an exploit for this CVE-2024-1234"))
+		# conflicting cues → ambiguous → defer to LLM
+		self.assertIsNone(fast_detect_mode("scan and explain the results"))
+		# no cues → ambiguous → defer to LLM
+		self.assertIsNone(fast_detect_mode("please handle the situation"))
+
+	def _make_task(self, prompt, mode=""):
+		from secator.tasks.ai import ai
+		task = ai.__new__(ai)
+		task.mode = mode
+		task.prompt = prompt
+		task.intent_model = "intent-model"
+		task.model = "main-model"
+		task.api_base = None
+		task.api_key = None
+		task.max_iterations = 10
+		task.is_subagent = False
+		task.backend = MagicMock()
+		task._reports_folder = tempfile.mkdtemp(prefix="secator-test-")
+		task._account_usage = MagicMock()
+		return task
+
+	def _patches(self):
+		return (
+			patch("secator.tasks.ai.get_system_prompt", return_value="SYS"),
+			patch("secator.tasks.ai.build_tool_schemas", return_value=[]),
+			patch("secator.tasks.ai.get_mode_config", return_value={"max_iterations": 5}),
+		)
+
+	def test_fast_path_resolves_without_llm(self):
+		"""Unambiguous prompt → mode set deterministically, call_llm untouched."""
+		task = self._make_task("scan the target")
+		p_sys, p_tools, p_cfg = self._patches()
+		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm:
+			task._detect_mode()
+		mock_llm.assert_not_called()
+		self.assertEqual(task.mode, "attack")
+
+	def test_ambiguous_falls_back_to_llm(self):
+		"""Conflicting cues → the LLM classifier still runs and decides."""
+		task = self._make_task("scan and explain the results")
+		p_sys, p_tools, p_cfg = self._patches()
+		with p_sys, p_tools, p_cfg, \
+				patch("secator.tasks.ai.load_prompt", return_value="SELECT"), \
+				patch("secator.tasks.ai.call_llm", return_value={"content": "chat", "usage": {}}) as mock_llm:
+			task._detect_mode()
+		mock_llm.assert_called_once()
+		self.assertEqual(mock_llm.call_args[0][1], "intent-model")  # uses intent_model
+		self.assertEqual(task.mode, "chat")
+
+	def test_force_redetects_over_explicit_mode(self):
+		"""force=True re-detects even when mode was explicitly set (fast-path applies)."""
+		task = self._make_task("scan the target", mode="chat")
+		p_sys, p_tools, p_cfg = self._patches()
+		# Without force, explicit mode short-circuits (no detection, no LLM).
+		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm:
+			task._detect_mode()
+			self.assertEqual(task.mode, "chat")
+			mock_llm.assert_not_called()
+		# With force, detection runs again → fast-path flips to attack.
+		p_sys, p_tools, p_cfg = self._patches()
+		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm:
+			task._detect_mode(force=True)
+			self.assertEqual(task.mode, "attack")
+			mock_llm.assert_not_called()
+
+
 if __name__ == "__main__":
 	unittest.main()
