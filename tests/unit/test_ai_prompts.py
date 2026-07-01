@@ -101,6 +101,26 @@ class TestPrompts(unittest.TestCase):
 		self.assertIn("exploitation verification specialist", prompt)
 		self.assertIn("proof-of-concept", prompt)
 
+	def test_get_system_prompt_exploit_no_leftover_placeholders(self):
+		"""D2: exploit renders fully — no unresolved ${include} or template $vars.
+
+		(Literal Mongo operators like $in/$regex and example secrets like $API_KEY
+		are content, not Template vars, so we check the template names explicitly.)
+		"""
+		import re
+		prompt = get_system_prompt("exploit")
+		# All ${include} directives resolved (load_prompt) and $var substitutions done.
+		self.assertEqual(re.findall(r'\$\{\w+\}', prompt), [], "unresolved ${include} in exploit prompt")
+		template_vars = [
+			"library_reference", "discovery", "common", "queries", "findings",
+			"arsenal", "guardrails", "isolation", "exploitation_report",
+			"workspace_path", "query_types", "output_types_reference",
+		]
+		leftover = [v for v in template_vars if f"${v}" in prompt]
+		self.assertEqual(leftover, [], f"unresolved template vars in exploit prompt: {leftover}")
+		# uses the exploit template, not attack/chat
+		self.assertIn("exploitation verification specialist", prompt)
+
 	def test_get_system_prompt_attack_has_library_reference(self):
 		prompt = get_system_prompt("attack")
 		self.assertIn('<tasks>', prompt)
