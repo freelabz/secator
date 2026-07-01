@@ -13,6 +13,7 @@ if ADDONS_ENABLED['ai']:
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
 		_build_child_hooks_or_denial,
 		_MAX_CHILD_ITERATIONS, _MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
+		_MAX_SHELL_OUTPUT_CHARS, _truncate,
 	)
 	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
 
@@ -186,6 +187,46 @@ class TestHandleShell(unittest.TestCase):
 		self.assertEqual(len(results), 2)
 		self.assertIsInstance(results[1], Error)
 		self.assertIn('failed', results[1].message)
+
+	@patch('secator.ai.actions.subprocess.run')
+	def test_shell_output_capped_when_over_limit(self, mock_run):
+		# M1: huge stdout must be truncated to <= cap + marker and carry the marker.
+		big = "HEAD_LINE\n" + ("x" * (_MAX_SHELL_OUTPUT_CHARS * 3)) + "\nTAIL_LINE"
+		mock_run.return_value = MagicMock(stdout=big, stderr='')
+		ctx = ActionContext(targets=['t.com'], model='m')
+
+		results = list(_handle_shell({'action': 'shell', 'command': 'dump'}, ctx))
+
+		content = results[1].content
+		self.assertLess(len(content), len(big))
+		# body is bounded by the cap (plus the short marker line)
+		self.assertLessEqual(len(content), _MAX_SHELL_OUTPUT_CHARS + 40)
+		self.assertIn('truncated', content)
+		# head + tail preserved so the model sees the start AND the final lines
+		self.assertIn('HEAD_LINE', content)
+		self.assertIn('TAIL_LINE', content)
+
+	@patch('secator.ai.actions.subprocess.run')
+	def test_shell_output_short_passes_through_unchanged(self, mock_run):
+		# M1: short output must pass through untouched (no marker).
+		mock_run.return_value = MagicMock(stdout='root\n', stderr='')
+		ctx = ActionContext(targets=['t.com'], model='m')
+
+		results = list(_handle_shell({'action': 'shell', 'command': 'whoami'}, ctx))
+
+		self.assertEqual(results[1].content, 'root\n')
+		self.assertNotIn('truncated', results[1].content)
+
+	def test_truncate_short_text_unchanged(self):
+		self.assertEqual(_truncate('short', 100), 'short')
+
+	def test_truncate_keeps_head_and_tail(self):
+		text = 'START' + ('m' * 500) + 'END'
+		out = _truncate(text, 100)
+		self.assertLessEqual(len(out), 100 + 40)
+		self.assertTrue(out.startswith('START'))
+		self.assertTrue(out.endswith('END'))
+		self.assertIn('truncated', out)
 
 	def test_shell_decrypts_command(self):
 		encryptor = MagicMock()

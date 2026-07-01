@@ -347,6 +347,17 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		yield Warning(message=f"Unknown action: {action_type}", _context=context)
 
 
+def _truncate(text: str, max_chars: int) -> str:
+	"""Cap ``text`` to ~``max_chars``, keeping head + tail so both the start and the
+	final lines survive, with a clear marker for the dropped middle. Short text is
+	returned unchanged (no marker)."""
+	if len(text) <= max_chars:
+		return text
+	dropped = len(text) - max_chars
+	half = max_chars // 2
+	return f"{text[:half]}\n…(truncated {dropped} chars)…\n{text[-(max_chars - half):]}"
+
+
 def _format_action_error(e: Exception, max_chars: int = 400) -> str:
 	"""Build a concise, LLM-facing error string for a failed action dispatch.
 
@@ -366,8 +377,7 @@ def _format_action_error(e: Exception, max_chars: int = 400) -> str:
 	tb_tail = "\n".join(tb_lines[-6:]) if tb_lines else ""
 
 	detail = f"{head}\n{tb_tail}" if tb_tail else head
-	if len(detail) > max_chars:
-		detail = detail[:max_chars] + "…(truncated)"
+	detail = _truncate(detail, max_chars)
 	return (
 		f"Action failed with error: {detail}\n"
 		"Fix the issue and try again."
@@ -450,6 +460,12 @@ _MAX_CHILD_ITERATIONS = 25
 _MAX_SUBAGENT_DEPTH = 3
 _MAX_SUBAGENTS_PER_TURN = 5
 _SUBAGENT_TURN_LOCK = threading.Lock()
+
+# M1: cap shell stdout/stderr before it enters AI history so a command emitting
+# megabytes can't blow up the next prompt's token budget / memory. Larger than the
+# 400-char error cap because successful output carries more useful signal; head+tail
+# so the model still sees the start AND the final lines (often the result/error).
+_MAX_SHELL_OUTPUT_CHARS = 4000
 
 
 def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["Warning"]:
@@ -685,6 +701,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			env=_sanitized_env()
 		)
 		output = result.stdout or result.stderr or "(no output)"
+		output = _truncate(output, _MAX_SHELL_OUTPUT_CHARS)  # M1: cap so it can't blow up history
 		yield Ai(content=output, ai_type="shell_output", _context=context)
 
 	except Exception as e:
