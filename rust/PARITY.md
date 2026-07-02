@@ -425,7 +425,7 @@ worker start, see `secator health`).
 | `transport.*` (broker_url, result_backend, …) | ✅ (`celery.*`) | ✅ (`transport.*` + `celery:` alias) | Complete | rename with deprecation warning |
 | `cli.*` (github_token, record, stdin_timeout, show_http_response_headers, show_command_output, exclude_http_response_headers, date_format) | ✅ | ✅ | Complete | |
 | `runners.*` (input_chunk_size, progress/stat/backend_update_frequency, poll_frequency, skip_cve_search, skip_exploit_search, skip_cve_low_confidence, remove_duplicates, threads, prompt_timeout, chunk_rate_limit) | ✅ | ✅ | Complete | `poll_frequency` *parsed*, not honored — Rust polls at 50 ms regardless |
-| `http.*` (socks5_proxy, http_proxy, store_responses, response_max_size_bytes, proxychains_command, freeproxy_timeout, default_header) | ✅ | 🟡 | Partial | `freeproxy_timeout` unused — Rust has no `--proxy random` (FreeProxy library) |
+| `http.*` (socks5_proxy, http_proxy, store_responses, response_max_size_bytes, proxychains_command, freeproxy_timeout, default_header) | ✅ | ✅ | Complete | every knob wired — `--proxy random` uses `freeproxy::random_proxy` (#175 T6) |
 | `tasks.exporters`, `tasks.overrides.<task>.<opt>` | ✅ | ✅ | Complete | overrides applied at runtime (CLI/YAML wins) |
 | `workflows.exporters`, `scans.exporters` | ✅ | ✅ | Complete | |
 | `payloads.templates` | ✅ | ✅ | Complete | |
@@ -462,7 +462,7 @@ worker start, see `secator health`).
 | User-supplied task modules (`.rs` crates in `~/.secator/templates/`) | ✅ (`.py`) | ✅ (`.rs` cdylib) | Complete | `secator template build` compiles via `cargo build --release`; loader dlopens via `libloading` and calls `secator_plugin_v1_register` — #162 |
 | External drivers from filesystem | ✅ (`hooks.py`) | ✅ (`.rs` cdylib) | Complete | same plugin entry-point registers via `PluginRegistry::register_driver` — #162 |
 | External exporters from filesystem | ✅ | ✅ (`.rs` cdylib) | Complete | same plugin path; `register_exporter` — #162 |
-| `~/.secator/templates/addons.json` (third-party addon registry) | ✅ | ❌ | Not implemented | |
+| `~/.secator/templates/addons.json` (third-party addon registry) | ➖ | ✅ | Complete — Rust-only | Python has no equivalent (its `ADDONS_ENABLED` is a hard-coded PyPI-extras probe). Rust manifest gates cdylib loading; missing entries default to enabled. Managed via `secator template addons {list,enable,disable}` |
 | Tool overrides via `tasks.overrides.<task>.<opt>` (config-only, no plugin) | ✅ | ✅ | Complete | works for any registered task — #155 |
 
 **Impact note (historical)**: through the sprint of 2026-06-13, the Rust binary now honors `~/.secator/templates/` — YAML workflows / scans / profiles are picked up at startup and `.rs` plugin crates compiled by `secator template build` register their tasks/drivers/exporters via the `secator-plugin-api` ABI (entry point: `secator_plugin_v1_register`, ABI version probe: `secator_plugin_v1_abi_version`). Plugins MUST be built with the same `rustc` + `secator-plugin-api` revision as the host — the loader emits a clear error on ABI-version mismatch and silently skips dylibs with the wrong symbol set.

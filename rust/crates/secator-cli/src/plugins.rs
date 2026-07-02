@@ -23,10 +23,135 @@
 //!   functions inside the dylib; closing the library would crash the next
 //!   call.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use serde::{Deserialize, Serialize};
+
 use secator_plugin_api::{PluginRegistry, ABI_VERSION, ENTRY_SYMBOL};
+
+// -------------------------------------------------------------------- addons.json
+
+/// Declarative registry of plugins the operator wants loaded (or explicitly
+/// disabled). Persisted at `<templates>/addons.json`. Optional — if absent, the
+/// loader falls back to loading every cdylib it finds under
+/// `<templates>/target/release/`.
+///
+/// The key is the dylib file stem WITH the `lib` prefix stripped on unix (e.g.
+/// `libmy_scanner.so` → `"my_scanner"`, `my_scanner.dll` → `"my_scanner"`).
+/// Match `AddonEntry::enabled == false` skips the corresponding dylib at load
+/// time; entries not listed in the manifest are treated as `enabled: true`
+/// (operators opt OUT, not in — matches the "drop a crate, it works" ergonomics).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AddonsManifest {
+    /// Schema version. Bumped when the on-disk shape changes in a
+    /// backwards-incompatible way; older files still parse but log a warning.
+    pub version: u32,
+    /// Addon name → entry. Preserved order via BTreeMap so
+    /// `secator template addons list` is stable across runs.
+    pub addons: BTreeMap<String, AddonEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AddonEntry {
+    /// `false` → skip this dylib at plugin-load time (log a WRN). Defaults to
+    /// `true` so a fresh entry with just a description is enabled.
+    pub enabled: bool,
+    /// Operator-facing description; unused by the loader, shown in
+    /// `secator template addons list`.
+    pub description: String,
+}
+
+impl Default for AddonsManifest {
+    fn default() -> Self {
+        Self { version: 1, addons: BTreeMap::new() }
+    }
+}
+impl Default for AddonEntry {
+    fn default() -> Self {
+        Self { enabled: true, description: String::new() }
+    }
+}
+
+impl AddonsManifest {
+    /// Manifest file path — `<templates_dir>/addons.json`.
+    pub fn path(templates_dir: &Path) -> PathBuf {
+        templates_dir.join("addons.json")
+    }
+
+    /// Load from `<templates>/addons.json`. Returns `None` when the file is
+    /// missing (all plugins load); returns `Some(Default)` on a malformed file
+    /// (log-and-continue rather than crash the CLI).
+    pub fn load(templates_dir: &Path) -> Option<Self> {
+        let path = Self::path(templates_dir);
+        if !path.is_file() {
+            return None;
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(body) => match serde_json::from_str::<Self>(&body) {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    eprintln!(
+                        "[WRN] Failed to parse {} — ignoring manifest: {e}",
+                        path.display()
+                    );
+                    None
+                }
+            },
+            Err(e) => {
+                eprintln!("[WRN] Failed to read {}: {e}", path.display());
+                None
+            }
+        }
+    }
+
+    /// Serialize + write to disk. Creates the file (and parent dir) if needed.
+    /// Pretty-printed so operators can hand-edit.
+    pub fn save(&self, templates_dir: &Path) -> Result<PathBuf, String> {
+        let path = Self::path(templates_dir);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create {}: {e}", parent.display()))?;
+        }
+        let body = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("serialize manifest: {e}"))?;
+        std::fs::write(&path, body).map_err(|e| format!("write manifest: {e}"))?;
+        Ok(path)
+    }
+
+    /// Look up an entry; return `true` when the addon should load (missing
+    /// entries default to enabled — Python parity with "drop it in, it works").
+    pub fn is_enabled(&self, name: &str) -> bool {
+        self.addons.get(name).map(|e| e.enabled).unwrap_or(true)
+    }
+
+    /// Flip an entry to `enabled = true`. Creates it with an empty
+    /// description if the entry is new.
+    pub fn enable(&mut self, name: &str) {
+        self.addons.entry(name.to_string()).or_default().enabled = true;
+    }
+
+    /// Flip an entry to `enabled = false`. Creates the entry if new so a
+    /// subsequent `secator template addons list` reflects the intent.
+    pub fn disable(&mut self, name: &str) {
+        self.addons.entry(name.to_string()).or_default().enabled = false;
+    }
+}
+
+/// Derive the addon key from a dylib filename — strip the platform-specific
+/// `lib` prefix on unix and the extension everywhere. Mirrors the pattern
+/// operators would type into `secator template addons enable <name>`.
+pub fn addon_key_for(path: &Path) -> Option<String> {
+    let stem = path.file_stem()?.to_str()?;
+    #[cfg(unix)]
+    let cleaned = stem.strip_prefix("lib").unwrap_or(stem);
+    #[cfg(not(unix))]
+    let cleaned = stem;
+    Some(cleaned.to_string())
+}
 
 /// Outcome of loading every plugin under `<templates>/target/release/`.
 /// Returned by [`load_user_plugins`] so the CLI can fold the contributions
@@ -52,10 +177,24 @@ pub fn load_user_plugins(templates_dir: &Path) -> LoadedPlugins {
         Ok(it) => it,
         Err(_) => return out,
     };
+    // Optional manifest — missing = load everything; present = skip
+    // entries flagged `enabled: false`.
+    let manifest = AddonsManifest::load(templates_dir);
     for entry in entries.flatten() {
         let path = entry.path();
         if !is_dylib(&path) {
             continue;
+        }
+        // Manifest gate: named entries can opt an addon out. Un-named entries
+        // load by default so an operator can drop a cdylib in without touching
+        // the manifest.
+        if let (Some(m), Some(key)) = (manifest.as_ref(), addon_key_for(&path)) {
+            if !m.is_enabled(&key) {
+                eprintln!(
+                    "[INF] Plugin {key}: disabled via addons.json — skipped"
+                );
+                continue;
+            }
         }
         match load_one_plugin(&path) {
             Ok(reg) => {
@@ -76,6 +215,59 @@ pub fn load_user_plugins(templates_dir: &Path) -> LoadedPlugins {
                 eprintln!("[WRN] Plugin {}: skipped — {e}", path.display());
             }
         }
+    }
+    out
+}
+
+/// Row shape returned by [`list_addons`] — one entry per cdylib actually on
+/// disk, cross-referenced against the manifest so the CLI can render the
+/// combined view (`present but not manifested`, `manifested but no dylib`,
+/// etc.).
+#[derive(Debug, Clone)]
+pub struct AddonInfo {
+    pub name: String,
+    pub enabled: bool,
+    pub description: String,
+    /// `true` when a matching cdylib exists under `target/release/`; `false`
+    /// when the manifest names an addon whose dylib hasn't been built yet.
+    pub built: bool,
+}
+
+/// Render the union of `<templates>/addons.json` entries + on-disk cdylibs.
+/// Ordering: manifested entries in alphabetical order first, then any
+/// on-disk-only dylibs (built but not tracked) alphabetized after.
+pub fn list_addons(templates_dir: &Path) -> Vec<AddonInfo> {
+    let manifest = AddonsManifest::load(templates_dir).unwrap_or_default();
+    let release_dir = templates_dir.join("target").join("release");
+    let built_keys: std::collections::BTreeSet<String> = std::fs::read_dir(&release_dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| is_dylib(p))
+        .filter_map(|p| addon_key_for(&p))
+        .collect();
+
+    let mut out: Vec<AddonInfo> = Vec::new();
+    for (name, entry) in manifest.addons.iter() {
+        out.push(AddonInfo {
+            name: name.clone(),
+            enabled: entry.enabled,
+            description: entry.description.clone(),
+            built: built_keys.contains(name),
+        });
+    }
+    // Add on-disk-only dylibs that the manifest doesn't mention (implicit-enabled).
+    for key in &built_keys {
+        if manifest.addons.contains_key(key) {
+            continue;
+        }
+        out.push(AddonInfo {
+            name: key.clone(),
+            enabled: true,
+            description: String::from("(untracked — dropped in without a manifest entry)"),
+            built: true,
+        });
     }
     out
 }
@@ -341,6 +533,74 @@ mod tests {
         assert!(is_dylib(Path::new("foo.dll")));
         assert!(!is_dylib(Path::new("foo.txt")));
         assert!(!is_dylib(Path::new("Cargo.toml")));
+    }
+
+    #[test]
+    fn addon_key_strips_lib_prefix_on_unix() {
+        // Unix: `libfoo.so` → `foo`.
+        assert_eq!(addon_key_for(Path::new("libfoo.so")).unwrap(), "foo");
+        // Multi-word crate names: `libmy_scanner.so` → `my_scanner`.
+        assert_eq!(
+            addon_key_for(Path::new("libmy_scanner.so")).unwrap(),
+            "my_scanner"
+        );
+        // No `lib` prefix (Windows-style .dll) → stem unchanged.
+        assert_eq!(addon_key_for(Path::new("foo.dll")).unwrap(), "foo");
+    }
+
+    /// addons.json semantics: missing entries default to ENABLED (so an
+    /// operator can drop a cdylib in without touching the manifest).
+    #[test]
+    fn manifest_missing_entry_defaults_enabled() {
+        let m = AddonsManifest::default();
+        assert!(m.is_enabled("anything"));
+    }
+
+    /// addons.json semantics: `enabled: false` short-circuits the load.
+    #[test]
+    fn manifest_disable_flips_and_survives_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut m = AddonsManifest::default();
+        m.disable("noisy-plugin");
+        m.enable("keeper");
+        let path = m.save(tmp.path()).expect("save");
+        assert!(path.ends_with("addons.json"));
+
+        let loaded = AddonsManifest::load(tmp.path()).expect("manifest present");
+        assert!(!loaded.is_enabled("noisy-plugin"));
+        assert!(loaded.is_enabled("keeper"));
+        assert!(loaded.is_enabled("anything-else-implicit"));
+    }
+
+    /// A malformed addons.json must not crash the CLI — the loader logs a
+    /// warning and returns `None` so the fallback "load everything" path
+    /// takes over.
+    #[test]
+    fn malformed_manifest_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("addons.json"), "{not json").unwrap();
+        assert!(AddonsManifest::load(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn list_addons_includes_untracked_dylibs() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Fake a built cdylib the manifest doesn't mention.
+        let release = tmp.path().join("target").join("release");
+        std::fs::create_dir_all(&release).unwrap();
+        std::fs::write(release.join("libuntracked.so"), b"fake").unwrap();
+        // Explicit-disabled entry with no dylib.
+        let mut m = AddonsManifest::default();
+        m.disable("disabled_entry");
+        m.save(tmp.path()).unwrap();
+
+        let rows = list_addons(tmp.path());
+        let by_name: std::collections::HashMap<&str, &AddonInfo> =
+            rows.iter().map(|r| (r.name.as_str(), r)).collect();
+        assert_eq!(by_name.get("disabled_entry").unwrap().enabled, false);
+        assert_eq!(by_name.get("disabled_entry").unwrap().built, false);
+        assert_eq!(by_name.get("untracked").unwrap().enabled, true);
+        assert_eq!(by_name.get("untracked").unwrap().built, true);
     }
 
     #[test]

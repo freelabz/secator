@@ -150,6 +150,7 @@ fn positive_u64(n: i64) -> Option<u64> {
 fn run_template_subcommand(args: &ArgMatches) -> ExitCode {
     let templates_dir = secator_config::get().dirs.templates.clone();
     match args.subcommand() {
+        Some(("addons", sub)) => run_template_addons_subcommand(&templates_dir, sub),
         Some(("scaffold", sub)) => {
             let name = sub
                 .get_one::<String>("name")
@@ -217,12 +218,98 @@ fn run_template_subcommand(args: &ArgMatches) -> ExitCode {
     }
 }
 
+/// `secator template addons list|enable|disable` — manage
+/// `~/.secator/templates/addons.json`, the on-disk manifest that gates which
+/// cdylib plugins get loaded at startup. When the file is absent every dylib
+/// found under `target/release/` is loaded (Python's "drop it in" ergonomics);
+/// once present, entries with `enabled: false` are skipped and untracked
+/// dylibs default to loaded.
+fn run_template_addons_subcommand(templates_dir: &std::path::Path, args: &ArgMatches) -> ExitCode {
+    match args.subcommand() {
+        Some(("list", _)) => {
+            let rows = plugins::list_addons(templates_dir);
+            if rows.is_empty() {
+                eprintln!(
+                    "No plugin addons found — nothing under {} yet. \
+                     Try `secator template scaffold <name>` + `secator template build`.",
+                    templates_dir.display()
+                );
+                return ExitCode::SUCCESS;
+            }
+            println!(
+                "{:<24} {:<9} {:<8} {}",
+                "NAME", "ENABLED", "BUILT", "DESCRIPTION"
+            );
+            for row in rows {
+                let en = if row.enabled { "yes" } else { "no" };
+                let built = if row.built { "yes" } else { "no" };
+                println!("{:<24} {:<9} {:<8} {}", row.name, en, built, row.description);
+            }
+            ExitCode::SUCCESS
+        }
+        Some(("enable", sub)) => {
+            let name = sub.get_one::<String>("name").expect("required").clone();
+            let mut m = plugins::AddonsManifest::load(templates_dir).unwrap_or_default();
+            m.enable(&name);
+            match m.save(templates_dir) {
+                Ok(p) => {
+                    eprintln!("[INF] Enabled `{name}` in {}", p.display());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("failed to save addons.json: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        Some(("disable", sub)) => {
+            let name = sub.get_one::<String>("name").expect("required").clone();
+            let mut m = plugins::AddonsManifest::load(templates_dir).unwrap_or_default();
+            m.disable(&name);
+            match m.save(templates_dir) {
+                Ok(p) => {
+                    eprintln!("[INF] Disabled `{name}` in {}", p.display());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("failed to save addons.json: {e}");
+                    ExitCode::from(1)
+                }
+            }
+        }
+        _ => {
+            eprintln!("see --help");
+            ExitCode::from(2)
+        }
+    }
+}
+
 fn build_template_subcommand() -> Command {
     Command::new("template")
         .visible_alias("templates")
         .about("Manage .rs plugin crates dropped under ~/.secator/templates/")
         .subcommand_required(true)
         .arg_required_else_help(true)
+        .subcommand(
+            Command::new("addons")
+                .about("Manage ~/.secator/templates/addons.json — enable/disable third-party plugins")
+                .subcommand_required(true)
+                .arg_required_else_help(true)
+                .subcommand(
+                    Command::new("list")
+                        .about("Print each plugin addon's enable / built state"),
+                )
+                .subcommand(
+                    Command::new("enable")
+                        .about("Mark an addon as enabled in addons.json (creates the file if absent)")
+                        .arg(Arg::new("name").required(true).help("Addon name (dylib stem)")),
+                )
+                .subcommand(
+                    Command::new("disable")
+                        .about("Mark an addon as disabled — skipped at plugin-load time")
+                        .arg(Arg::new("name").required(true).help("Addon name (dylib stem)")),
+                ),
+        )
         .subcommand(
             Command::new("scaffold")
                 .about("Generate a starter plugin crate under ~/.secator/templates/<name>/")
@@ -678,6 +765,10 @@ fn build_workflow_cmd(name: &'static str, yaml: &'static str) -> Command {
         ("delay", "float", "Delay between requests in seconds (propagated)"),
         ("header", "str", "Custom HTTP header propagated to HTTP tasks"),
         ("proxy", "str", "HTTP(s)/SOCKS5 proxy URL (propagated)"),
+        // Extended parity with Python `s domain --help` (2026-07 diff).
+        ("retries", "int", "Number of retries on failed requests (propagated)"),
+        ("user_agent", "str", "Custom User-Agent string (propagated to HTTP tasks)"),
+        ("follow_redirect", "bool", "Follow HTTP redirects (propagated)"),
     ] {
         if already_declared(opt_name) {
             continue;
@@ -687,6 +778,9 @@ fn build_workflow_cmd(name: &'static str, yaml: &'static str) -> Command {
         match ty {
             "int" => arg = arg.value_parser(clap::value_parser!(i64)),
             "float" => arg = arg.value_parser(clap::value_parser!(f64)),
+            "bool" => {
+                arg = arg.action(ArgAction::SetTrue);
+            }
             _ => {}
         }
         cmd = cmd.arg(arg);
