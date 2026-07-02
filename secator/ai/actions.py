@@ -171,6 +171,13 @@ def _build_action_display(action: Dict) -> str:
 	return ""
 
 
+def _is_approved(response) -> bool:
+	# Explicit allow-list: only a normalized "allow" answer approves. None, "deny",
+	# or any unexpected token denies (fail closed) — so a new backend or a refactored
+	# answer vocabulary can't silently approve via a "not deny" gap.
+	return bool(response) and response.get("answer") == "allow"
+
+
 def check_guardrails_sync(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], List]:
 	"""Non-generator wrapper for check_guardrails.
 
@@ -255,7 +262,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 			if is_remote:
 				yield ctx.backend.build_pending_prompt(**ask_kwargs)
 			response = ctx.backend.ask_user(**ask_kwargs) if ctx.backend else None
-			if response is None or response.get("answer") == "deny":
+			if not _is_approved(response):
 				return "Action denied: shell command not approved"
 			if parse_failed:
 				return None
@@ -279,7 +286,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 			if is_remote:
 				yield ctx.backend.build_pending_prompt(**ask_kwargs)
 			response = ctx.backend.ask_user(**ask_kwargs) if ctx.backend else None
-			if response is None or response.get("answer") == "deny":
+			if not _is_approved(response):
 				return f"Action denied: target {target} not approved"
 
 		# Handle path prompts
@@ -302,7 +309,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 				if is_remote:
 					yield ctx.backend.build_pending_prompt(**ask_kwargs)
 				response = ctx.backend.ask_user(**ask_kwargs) if ctx.backend else None
-				if response is None or response.get("answer") == "deny":
+				if not _is_approved(response):
 					return f"Action denied: {access_type} access to {path} not approved"
 
 		# Re-check to see if more layers need prompting

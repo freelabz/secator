@@ -1129,6 +1129,38 @@ class TestCheckGuardrailsFailClosed(unittest.TestCase):
 		self.assertIn("unresolved", denial)
 
 
+class TestApprovalAllowList(unittest.TestCase):
+	"""Ask-loop approval must be an explicit allow-list: only "allow" proceeds."""
+
+	def _run(self, answer):
+		from secator.ai.actions import check_guardrails_sync
+		ask = MagicMock(decision="ask", shell_command="somecmd", targets=[], paths=[], reason="needs approval")
+		allow = MagicMock(decision="allow", shell_command="", targets=[], paths=[], reason="")
+		engine = MagicMock()
+		engine.check_action.side_effect = [ask, allow]
+		backend = MagicMock()
+		backend.ask_user.return_value = None if answer is None else {"answer": answer}
+		ctx = ActionContext(targets=['t.com'], model='m')
+		ctx.permission_engine = engine
+		ctx.backend = backend
+		denial, _items = check_guardrails_sync({"action": "shell", "command": "somecmd"}, ctx)
+		return denial
+
+	def test_allow_proceeds(self):
+		self.assertIsNone(self._run("allow"))
+
+	def test_deny_denies(self):
+		self.assertIsNotNone(self._run("deny"))
+
+	def test_unexpected_answer_denies(self):
+		# an out-of-vocabulary token must NOT be treated as approval (fail closed)
+		self.assertIsNotNone(self._run("sure"))
+		self.assertIsNotNone(self._run("allow_all_typo"))
+
+	def test_none_response_denies(self):
+		self.assertIsNotNone(self._run(None))
+
+
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestSubagentFanoutCap(unittest.TestCase):
 	"""H4: recursion depth + per-turn fan-out caps on AI-subagent spawns."""
