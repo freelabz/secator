@@ -12,7 +12,7 @@
 
 use std::fs;
 
-use secator_model::{Error, Info, Map, OutputItem, Tag, Vulnerability};
+use secator_model::{Error, Info, Map, OutputItem, Tag, Vulnerability, Warning};
 use secator_options::{
     FileMode, InputWiring, KeyMap, OptSchema, OptSpec, OptType, SingleMode, ValueMap,
 };
@@ -94,7 +94,10 @@ fn on_cmd_done_parse(ctx: &mut HookCtx) -> Vec<OutputItem> {
     let body = match fs::read_to_string(&path) {
         Ok(b) => b,
         Err(_) => {
-            return vec![OutputItem::Error(Error {
+            // wpscan skips its JSON output when the target isn't a WordPress
+            // site (or when scanning is refused). Treat as a Warning so the
+            // run status stays SUCCESS.
+            return vec![OutputItem::Warning(Warning {
                 message: format!("Could not find JSON results in {path}"),
                 ..Default::default()
             })]
@@ -374,6 +377,25 @@ mod tests {
         let mut ctx = HookCtx::default();
         ctx.state.insert("wpscan:output_path".into(), path.to_string_lossy().into_owned());
         on_cmd_done_parse(&mut ctx)
+    }
+
+    /// wpscan against a non-WordPress target skips its JSON output — we
+    /// must emit a Warning (not an Error) so the run stays SUCCESS.
+    #[test]
+    fn missing_json_file_emits_warning_not_error() {
+        let mut ctx = HookCtx::default();
+        ctx.state.insert(
+            "wpscan:output_path".into(),
+            "/nonexistent/path/wpscan.json".into(),
+        );
+        let out = on_cmd_done_parse(&mut ctx);
+        assert_eq!(out.len(), 1);
+        assert!(
+            matches!(&out[0], OutputItem::Warning(w) if w.message.contains("Could not find JSON results")),
+            "expected a Warning for missing JSON, got {:?}",
+            out[0]
+        );
+        assert!(!out.iter().any(|i| matches!(i, OutputItem::Error(_))));
     }
 
     #[test]

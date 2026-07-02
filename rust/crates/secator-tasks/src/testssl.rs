@@ -14,7 +14,7 @@
 
 use std::fs;
 
-use secator_model::{Certificate, Error, Info, Ip, Map, OutputItem, Tag, Vulnerability, Warning};
+use secator_model::{Certificate, Info, Ip, Map, OutputItem, Tag, Vulnerability, Warning};
 use secator_options::{FileMode, InputWiring, KeyMap, OptSchema, OptSpec, OptType, SingleMode};
 use secator_runner::{empty_output_maps, HookCtx, HookRegistry, ValidatorRegistry};
 use serde_json::Value;
@@ -105,7 +105,10 @@ fn on_cmd_done_parse(ctx: &mut HookCtx) -> Vec<OutputItem> {
     let body = match fs::read_to_string(&path) {
         Ok(s) => s,
         Err(_) => {
-            return vec![OutputItem::Error(Error {
+            // testssl exits cleanly against hosts without TLS / with hardened
+            // configs — the JSON file just never gets written. Treat as a
+            // Warning (not an Error) so the run status stays SUCCESS.
+            return vec![OutputItem::Warning(Warning {
                 message: format!("Could not find JSON results in {path}"),
                 ..Default::default()
             })];
@@ -440,5 +443,26 @@ mod tests {
             .iter()
             .any(|i| matches!(i, OutputItem::Vulnerability(v) if v.name.contains("deprecated")));
         assert!(has_vuln_tls && has_cert && has_warning && has_ip && has_bad_cypher_vuln);
+    }
+
+    /// When testssl exits without writing its JSON file (target has no TLS,
+    /// hardened target, etc.) we must emit a Warning, not an Error — the run
+    /// status should stay SUCCESS.
+    #[test]
+    fn missing_json_file_emits_warning_not_error() {
+        let mut ctx = HookCtx::default();
+        ctx.state.insert(
+            "testssl:output_path".into(),
+            "/nonexistent/path/testssl.json".into(),
+        );
+        let out = on_cmd_done_parse(&mut ctx);
+        assert_eq!(out.len(), 1);
+        assert!(
+            matches!(&out[0], OutputItem::Warning(w) if w.message.contains("Could not find JSON results")),
+            "expected a Warning for missing JSON, got {:?}",
+            out[0]
+        );
+        // Explicitly assert *no* Error variant.
+        assert!(!out.iter().any(|i| matches!(i, OutputItem::Error(_))));
     }
 }
