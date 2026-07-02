@@ -72,7 +72,7 @@ class Celery(StrictModel):
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
-	task_max_timeout: int = -1
+	task_max_timeout: int = 7200  # 2 hours
 	task_memory_limit_mb: int = -1
 	worker_max_tasks_per_child: int = 20
 	worker_prefetch_multiplier: int = 1

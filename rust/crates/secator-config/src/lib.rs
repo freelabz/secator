@@ -228,7 +228,7 @@ impl Default for Transport {
             task_acks_late: false,
             task_send_sent_event: false,
             task_reject_on_worker_lost: false,
-            task_max_timeout: -1,
+            task_max_timeout: 7200,
             task_memory_limit_mb: -1,
             worker_max_tasks_per_child: 20,
             worker_prefetch_multiplier: 1,
