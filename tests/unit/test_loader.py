@@ -54,6 +54,11 @@ class TestFileDetectionHelpers(unittest.TestCase):
         f = self._tmp_file('hooks_yes.py', 'HOOKS = {}\n')
         self.assertTrue(_file_has_hooks(f))
 
+    def test_file_has_hooks_no_space_true(self):
+        from secator.loader import _file_has_hooks
+        f = self._tmp_file('hooks_nospace.py', 'HOOKS={}\n')
+        self.assertTrue(_file_has_hooks(f))
+
     def test_file_has_hooks_false(self):
         from secator.loader import _file_has_hooks
         f = self._tmp_file('hooks_no.py', 'class Foo:\n    pass\n')
@@ -417,6 +422,15 @@ class TestDiscoverExternalTasksSkipsDriversAndExporters(unittest.TestCase):
         result_names = [cls.__name__ for cls in result]
         self.assertNotIn('skiptest_driver', result_names)
 
+    def test_driver_files_hooks_no_space_not_loaded_as_tasks(self):
+        """Files containing 'HOOKS=' (no space) are excluded from task discovery."""
+        path = self.template_dir / 'skiptest_nospace.py'
+        path.write_text('HOOKS={}\n')
+        from secator.loader import discover_external_tasks
+        result = discover_external_tasks()
+        result_names = [cls.__name__ for cls in result]
+        self.assertNotIn('skiptest_nospace', result_names)
+
     def test_exporter_files_not_loaded_as_tasks(self):
         """Files containing '(Exporter)' are excluded from task discovery."""
         path = self.template_dir / 'skiptest_exporter.py'
@@ -425,6 +439,17 @@ class TestDiscoverExternalTasksSkipsDriversAndExporters(unittest.TestCase):
         result = discover_external_tasks()
         result_names = [cls.__name__ for cls in result]
         self.assertNotIn('SkipTestExporter', result_names)
+
+    def test_non_class_task_attribute_not_loaded(self):
+        """Files where the task attribute is not a class are excluded from task discovery."""
+        path = self.template_dir / 'skiptest_nonclass.py'
+        # The file has an attribute with the module's own name but it's not a class
+        path.write_text('skiptest_nonclass = "not a class"\n')
+        from secator.loader import discover_external_tasks
+        result = discover_external_tasks()
+        result_names = [cls.__name__ for cls in result]
+        self.assertNotIn('skiptest_nonclass', result_names)
+        self.assertNotIn('secator.tasks.skiptest_nonclass', sys.modules)
 
 
 if __name__ == '__main__':
