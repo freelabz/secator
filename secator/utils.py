@@ -229,9 +229,15 @@ def deduplicate(array, attr=None):
 		memo = set()
 		res = []
 		for sub in array:
-			if attr in sub.keys() and getattr(sub, attr) not in memo:
-				res.append(sub)
-				memo.add(getattr(sub, attr))
+			# keys() is now cached (a constant tuple per class), so the field-only
+			# membership check is cheap again — no per-item fields() recompute. Keep
+			# the declared-field contract (vs hasattr, which would also match
+			# inherited attrs / invoke property getters) and read the value once.
+			if attr in sub.keys():
+				value = getattr(sub, attr)
+				if value not in memo:
+					res.append(sub)
+					memo.add(value)
 		return sorted(res, key=operator.attrgetter(attr))
 	return sorted(list(dict.fromkeys(array)))
 
