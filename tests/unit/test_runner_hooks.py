@@ -1,8 +1,6 @@
 import pickle
 import sys
-import tempfile
 import unittest
-from pathlib import Path
 
 from secator.config import CONFIG
 from secator.loader import discover_external_drivers
@@ -37,22 +35,25 @@ class TestRunnerHooks(unittest.TestCase):
 
 	@classmethod
 	def setUpClass(cls):
-		cls._tmpdir = tempfile.TemporaryDirectory()
-		tmp = Path(cls._tmpdir.name)
-		(tmp / 'mydriver.py').write_text(CUSTOM_DRIVER)
-		cls._orig_templates = CONFIG.dirs.templates
-		CONFIG.dirs.templates = tmp
-		# discover_external_drivers is @cache'd; clear it so it re-scans our tmp dir
-		# (an earlier test/import may have populated the cache with the real dir)
+		# Drop the driver into the REAL templates dir (not a system tempdir): its
+		# path contains '/templates/', so the coverage report's --omit=*/templates/*
+		# excludes it. A tempdir path is not omitted, so coverage would later fail
+		# with "No source for code" once the tempdir is gone (breaks `coverage report`).
+		cls.template_dir = CONFIG.dirs.templates
+		cls.template_dir.mkdir(parents=True, exist_ok=True)
+		cls.driver_path = cls.template_dir / 'custom_hook_driver.py'
+		cls.driver_path.write_text(CUSTOM_DRIVER)
+		# discover_external_drivers is @cache'd; clear it so it re-scans and picks
+		# up our driver (an earlier test/import may have populated the cache).
 		discover_external_drivers.cache_clear()
 		discover_external_drivers()
 
 	@classmethod
 	def tearDownClass(cls):
-		CONFIG.dirs.templates = cls._orig_templates
-		cls._tmpdir.cleanup()
-		sys.modules.pop('secator.hooks.mydriver', None)
-		# reset the cache so later tests re-discover against the restored dir
+		if cls.driver_path.exists():
+			cls.driver_path.unlink()
+		sys.modules.pop('secator.hooks.custom_hook_driver', None)
+		# reset the cache so later tests re-discover against the cleaned-up dir
 		discover_external_drivers.cache_clear()
 
 	def _build_task(self, **kwargs):
@@ -84,12 +85,12 @@ class TestRunnerHooks(unittest.TestCase):
 
 	def test_driver_hooks_loaded_at_init(self):
 		# context['drivers'] hooks must be present right after construction (no pickle)
-		task = self._build_task(context={'drivers': ['mydriver']})
+		task = self._build_task(context={'drivers': ['custom_hook_driver']})
 		self.assertIn('cd_on_item', self._hook_names(task, 'on_item'))
 		self.assertIn('cd_on_end', self._hook_names(task, 'on_end'))
 
 	def test_custom_driver_hook_survives_pickle_without_reregistration(self):
-		task = self._build_task(context={'drivers': ['mydriver']})
+		task = self._build_task(context={'drivers': ['custom_hook_driver']})
 		# unpickling must NOT call register_hooks (this is what flooded the logs)
 		reg = self._count_register_hooks(lambda: pickle.loads(pickle.dumps(task)))
 		self.assertEqual(reg, 0, 'unpickle must not re-register hooks')
@@ -99,7 +100,7 @@ class TestRunnerHooks(unittest.TestCase):
 		self.assertTrue(callable(back.resolved_hooks['on_item'][0]))
 
 	def test_registration_is_idempotent(self):
-		task = self._build_task(context={'drivers': ['mydriver']})
+		task = self._build_task(context={'drivers': ['custom_hook_driver']})
 		before = len(task.resolved_hooks['on_item'])
 		# re-apply the same context drivers -> no duplicate registration
 		task._apply_context_drivers()
