@@ -107,6 +107,7 @@ META_OPTS = {
 	# Individual tasks options
 	'bup.mode': 'http_methods',
 	'gf.pattern': 'xss',
+	'masscan.output_path': load_fixture('masscan_output', FIXTURES_DIR, only_path=True),
 	'nmap.output_path': load_fixture('nmap_output', FIXTURES_DIR, only_path=True, ext='.xml'),  # nmap XML fixture
 	'nmap.tcp_connect': True,
 	'nmap.version_detection': True,
