@@ -176,6 +176,9 @@ OUTPUTS_TASKS = {
 }
 
 OUTPUTS_WORKFLOWS = {
+	'api_discover': [
+		Url(url='http://localhost:3000', method='GET', _type='url'),
+	],
 	'cidr_recon': [Ip(ip='127.0.0.1', host='', alive=True, _source='fping', _type='ip', _uuid='ea92f674-4cfe-4556-91f5-8669644513a0')],
 	'code_scan': [
 		Vulnerability(
@@ -584,4 +587,5 @@ OUTPUTS_SCANS = {
 	],
 	'network': [],
 	'url': [],
+	'api': [],
 }

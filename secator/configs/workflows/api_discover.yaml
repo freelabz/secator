@@ -1,0 +1,58 @@
+type: workflow
+name: api_discover
+alias: apid
+description: API endpoint discovery
+long_description: |
+  Discovers API endpoints on a target web application.
+  Combines active crawling (katana, which parses JavaScript to surface referenced endpoints) with optional
+  brute-forcing of API routes (ffuf, using Assetnote's HTTP Archive apiroutes wordlist — the same real-world
+  route dataset kiterunner relied on). Discovered endpoints are probed with httpx to verify they are live and
+  fingerprint their technologies. The apiroutes wordlist also covers exposed API specification paths
+  (openapi/swagger), so they surface when fuzzing is enabled. Endpoint discovery only — parameter fuzzing,
+  vulnerability scanning and secrets hunting are handled by the url_params_fuzz and url_vuln workflows (see
+  the `api` scan).
+tags: [http, api, crawl, fuzz]
+input_types:
+  - url
+
+default_options:
+  follow_redirect: true
+
+options:
+  waf:
+    is_flag: True
+    help: Fingerprint WAF (wafw00f)
+    default: False
+
+  fuzz:
+    is_flag: True
+    help: Brute-force API routes with the apiroutes wordlist (ffuf)
+    default: False
+    short: fuzz
+
+tasks:
+  katana:
+    description: Crawl for API endpoints
+
+  ffuf:
+    description: Brute-force API routes
+    wordlist: apiroutes
+    auto_calibration: true
+    if: opts.fuzz
+    targets_:
+      - type: target
+        field: '{name}/FUZZ'
+
+  wafw00f:
+    description: Fingerprint WAF
+    if: opts.waf
+
+  httpx:
+    description: Probe discovered API endpoints
+    tech_detect: True
+    filter_duplicates: True
+    targets_:
+      - target.name
+      - type: url
+        field: url
+        condition: not url.verified

@@ -168,6 +168,8 @@ class Wordlists(StrictModel):
 		'combined_subdomains': 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/combined_subdomains.txt',  # noqa: E501
 		'directory_list_small': 'https://gist.githubusercontent.com/sl4v/c087e36164e74233514b/raw/c51a811c70bbdd87f4725521420cc30e7232b36d/directory-list-2.3-small.txt',  # noqa: E501
 		'burp-parameter-names': 'https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/burp-parameter-names.txt',  # noqa: E501
+		# Assetnote's HTTP Archive API routes dataset (same data kiterunner's -A apiroutes uses), regenerated monthly
+		'apiroutes': 'https://wordlists-cdn.assetnote.io/data/automated/httparchive_apiroutes_2026_06_27.txt',  # noqa: E501
 	}
 	lists: Dict[str, List[str]] = {}
 
