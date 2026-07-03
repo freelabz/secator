@@ -102,6 +102,10 @@ OUTPUTS_TASKS = {
 	'katana': [
 		Url(url='http://localhost:3000/scripts.js', host='localhost:3000', status_code=200, method='GET', _source='katana'),
 	],
+	'kiterunner': [
+		Url(url='http://localhost:3000/api/Products', status_code=200, content_length=1234, method='GET', _source='kiterunner'),
+		Url(url='http://localhost:3000/rest/products/search', status_code=200, content_length=567, method='GET', _source='kiterunner'),
+	],
 	'maigret': [
 		UserAccount(site_name='GitHubGist', username='ocervell', url='https://gist.github.com/ocervell', _source='maigret'),
 	],

@@ -1,0 +1,30 @@
+[
+  {
+    "level": "info",
+    "method": "GET",
+    "target": "http://localhost:3000",
+    "path": "/api/Products",
+    "responses": [
+      {
+        "uri": "http://localhost:3000/api/Products",
+        "sc": 200,
+        "len": 1234
+      }
+    ],
+    "message": ""
+  },
+  {
+    "level": "info",
+    "method": "GET",
+    "target": "http://localhost:3000",
+    "path": "/rest/products/search",
+    "responses": [
+      {
+        "uri": "http://localhost:3000/rest/products/search",
+        "sc": 200,
+        "len": 567
+      }
+    ],
+    "message": ""
+  }
+]
