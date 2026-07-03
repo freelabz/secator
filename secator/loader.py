@@ -140,6 +140,7 @@ def discover_external_tasks():
 
 			# console.print(f'Checking that {module} contains task {task_name}')
 			if not hasattr(module, task_name):
+				sys.modules.pop(module_name, None)
 				console.print(f'[bold orange1]Could not load external task "{task_name}" from module {path.name}[/] ({path})')
 				continue
 			cls = getattr(module, task_name)
@@ -155,6 +156,7 @@ def discover_external_tasks():
 			cls.__external__ = True
 			output.append(cls)
 		except Exception as e:
+			sys.modules.pop(module_name, None)
 			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')
 	sys.dont_write_bytecode = prev_state
 	return output

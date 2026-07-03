@@ -449,6 +449,7 @@ class TestDiscoverExternalTasksSkipsDriversAndExporters(unittest.TestCase):
         result = discover_external_tasks()
         result_names = [cls.__name__ for cls in result]
         self.assertNotIn('skiptest_nonclass', result_names)
+        self.assertNotIn('secator.tasks.skiptest_nonclass', sys.modules)
 
 
 if __name__ == '__main__':
