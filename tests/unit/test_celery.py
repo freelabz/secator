@@ -344,14 +344,18 @@ class TestDelayMethods(unittest.TestCase):
 class TestRunnerPickle(unittest.TestCase):
 	"""Test that Runner objects with dynamic driver hooks can be pickled/unpickled."""
 
-	def test_runner_pickle_survives_missing_module_on_worker(self):
-		"""Reproduces the original bug: unpickling a runner whose hooks reference a
-		dynamically-loaded module that does not exist on the worker side.
-		Without the __getstate__/__setstate__ fix this raises ModuleNotFoundError."""
+	def test_runner_pickle_survives_with_discovered_module(self):
+		"""Runners pickle/unpickle natively (no __getstate__/__setstate__).
+
+		Driver hook functions reference dynamically-loaded modules. The worker
+		discovers external drivers at startup (celery.py IN_WORKER), so those
+		modules are in sys.modules and hook functions resolve on unpickle. The
+		hook survives the round-trip and unpickling does NOT re-register hooks
+		(which, under replace()/chord synchronization, previously flooded logs)."""
 		import pickle
 		import types
 		import sys
-		from secator.runners import Workflow
+		from secator.runners import Runner, Workflow
 		from secator.loader import get_configs_by_type
 
 		workflows = get_configs_by_type('workflow')
@@ -360,7 +364,7 @@ class TestRunnerPickle(unittest.TestCase):
 
 		config = workflows[0]
 
-		# 1) CLI side: load the driver into sys.modules (as the loader does)
+		# Driver module present in sys.modules, as on a worker post-discovery
 		fake_module = types.ModuleType('secator.hooks.testdriver')
 
 		def on_start(runner, *args):
@@ -371,23 +375,31 @@ class TestRunnerPickle(unittest.TestCase):
 		fake_module.on_start = on_start
 		sys.modules['secator.hooks.testdriver'] = fake_module
 
-		hooks = {Workflow: {'on_start': [on_start]}}
-		runner = Workflow(config, inputs=['example.com'], run_opts={'dry_run': True}, hooks=hooks, context={})
+		try:
+			hooks = {Workflow: {'on_start': [on_start]}}
+			runner = Workflow(config, inputs=['example.com'], run_opts={'dry_run': True}, hooks=hooks, context={})
+			self.assertIn(on_start, runner.resolved_hooks.get('on_start', []))
 
-		# Pickle while the module is available (simulates the CLI/sender side)
-		pickled = pickle.dumps(runner)
+			# Unpickling must NOT call register_hooks (native pickling restores state)
+			calls = {'n': 0}
+			orig = Runner.register_hooks
 
-		# 2) Worker side: remove the module to simulate it not being installed
-		del sys.modules['secator.hooks.testdriver']
+			def counting(self, h):
+				calls['n'] += 1
+				return orig(self, h)
 
-		# Without the fix, unpickling would raise:
-		#   ModuleNotFoundError: No module named 'secator.hooks.testdriver'
-		# With the fix, __getstate__ strips hooks so the bytes contain no reference
-		# to the dynamic module and unpickling succeeds.
-		restored = pickle.loads(pickled)
-		self.assertEqual(restored.name, runner.name)
-		# Hooks were stripped; dynamic hook not re-registered (driver not in context['drivers'])
-		self.assertNotIn(on_start, restored.resolved_hooks.get('on_start', []))
+			Runner.register_hooks = counting
+			try:
+				restored = pickle.loads(pickle.dumps(runner))
+			finally:
+				Runner.register_hooks = orig
+
+			self.assertEqual(calls['n'], 0, 'unpickle must not re-register hooks')
+			self.assertEqual(restored.name, runner.name)
+			# The dynamically-referenced hook survives natively
+			self.assertIn(on_start, restored.resolved_hooks.get('on_start', []))
+		finally:
+			del sys.modules['secator.hooks.testdriver']
 
 	def test_runner_pickle_restores_hooks_from_context_drivers(self):
 		"""Unpickling a Runner re-registers hooks from context['drivers']."""
@@ -426,7 +438,7 @@ class TestRunnerPickle(unittest.TestCase):
 				pickled = pickle.dumps(runner)
 				restored = pickle.loads(pickled)
 				self.assertEqual(restored.name, runner.name)
-				# __setstate__ re-registers on_end from fakedriver via context['drivers']
+				# on_end is loaded at init from context['drivers'] and survives pickling natively
 				self.assertIn(on_end, restored.resolved_hooks.get('on_end', []))
 
 		finally:

@@ -178,6 +178,7 @@ class Runner:
 		self.resolved_hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		self.debug('registering hooks', obj=list(self.resolved_hooks.keys()), sub='init')
 		self.register_hooks(hooks)
+		self._apply_context_drivers()
 
 		# Validators
 		self.resolved_validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
@@ -464,46 +465,50 @@ class Runner:
 		"""
 		return list(self.__iter__())
 
-	def __getstate__(self):
-		"""Custom pickle: strip hook functions so dynamically-loaded modules
-		(e.g. secator.hooks.cockpit) don't cause ModuleNotFoundError on workers.
-		Driver names in context['drivers'] are used to re-load hooks in __setstate__.
+	def _apply_context_drivers(self):
+		"""Register hooks for drivers named in ``context['drivers']``.
+
+		``context['drivers']`` is the cross-process source of truth for driver
+		hooks. Loading them at construction (rather than on unpickle) means every
+		runner gets its driver hooks exactly once, wherever it is built: the
+		initial dispatch, a chunk task rebuilt by ``run_command`` via
+		``task_cls(targets, **opts)``, and a chord callback runner. Because
+		``register_hooks()`` is idempotent, drivers also supplied explicitly via
+		``self._hooks`` (CLI-resolved hooks or library callers passing
+		``hooks=HOOKS``) are not registered twice.
+
+		This replaces the former ``__getstate__``/``__setstate__`` pair: with the
+		driver modules discovered at worker startup (``celery.py`` ``IN_WORKER``),
+		hook functions now pickle/unpickle natively by qualified name, so runners
+		no longer need to strip hooks on pickle and rebuild them on every unpickle
+		(which, under ``replace``/chord synchronization, re-registered hooks
+		O(chunks) times and flooded ``SECATOR_DEBUG=runner`` logs).
 		"""
-		state = self.__dict__.copy()
-		state['_hooks'] = {}
-		state['resolved_hooks'] = {name: [] for name in state['resolved_hooks']}
-		return state
-
-	def __setstate__(self, state):
-		"""Custom unpickle: restore runner state then re-register hooks."""
-		self.__dict__.update(state)
 		drivers = self.context.get('drivers', [])
-		if drivers:
-			from secator.loader import discover_external_drivers, order_drivers
+		if not drivers:
+			return
+		from secator.loader import discover_external_drivers, order_drivers
 
-			discover_external_drivers()
-			# Order by canonical priority so authoritative backends (e.g. mongodb)
-			# register their hooks before relay drivers (e.g. api). Hook lists are
-			# concatenated in driver order, so this decides hook execution order.
-			drivers = order_drivers(drivers)
+		discover_external_drivers()
+		# Order by canonical priority so authoritative backends (e.g. mongodb)
+		# register their hooks before relay drivers (e.g. api). Hook lists are
+		# concatenated in driver order, so this decides hook execution order.
+		drivers = order_drivers(drivers)
 		hooks_list = []
 		for driver in drivers:
 			driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
 			if driver_hooks:
 				hooks_list.append(driver_hooks)
-		merged_hooks = {}
-		if hooks_list:
-			from secator.utils import deep_merge_dicts
+		if not hooks_list:
+			return
+		from secator.utils import deep_merge_dicts
 
-			merged_hooks = deep_merge_dicts(*hooks_list)
+		merged_hooks = deep_merge_dicts(*hooks_list)
 		# Driver HOOKS dicts are keyed by base runner class (Scan/Workflow/Task). A task
 		# runner's class is its command subclass (e.g. ``whois``), never the base ``Task``,
 		# so register_hooks()' exact ``hooks.get(self.__class__)`` lookup would miss the
-		# ``Task`` entry and the task's on_end hook would never re-register on unpickle.
-		# That left chunk-parent tasks — the only tasks pickled into a chord callback —
-		# stuck in RUNNING because mark_runner_completed() ran zero on_end hooks. Flatten
-		# to the base runner type's hooks first (same convention as Workflow handing
-		# ``self._hooks.get(Task)`` to its task signatures) so they restore in the worker.
+		# ``Task`` entry. Flatten to the base runner type's hooks first (same convention as
+		# Workflow handing ``self._hooks.get(Task)`` to its task signatures).
 		from secator.runners import Scan, Task, Workflow
 
 		base_cls = {'scan': Scan, 'workflow': Workflow, 'task': Task}.get(self.config.type)
@@ -1046,24 +1051,33 @@ class Runner:
 	def register_hooks(self, hooks):
 		"""Register hooks.
 
+		Idempotent: a hook already present in ``resolved_hooks[key]`` is skipped
+		(and not re-logged). This lets the same driver be supplied via both
+		``self._hooks`` (e.g. library callers passing ``hooks=HOOKS``) and
+		``context['drivers']`` without registering — or logging — it twice.
+
 		Args:
 			hooks (dict[str, List[Callable]]): List of hooks to register.
 		"""
 		for key in self.resolved_hooks:
+			registered = self.resolved_hooks[key]
+
 			# Register class + derived class hooks
 			class_hook = getattr(self, key, None)
-			if class_hook:
+			if class_hook and class_hook not in registered:
 				fun = self.get_func_path(class_hook)
 				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
-				self.resolved_hooks[key].append(class_hook)
+				registered.append(class_hook)
 
-			# Register user hooks
-			user_hooks = hooks.get(self.__class__, {}).get(key, [])
+			# Register user hooks (copy so we never mutate a caller's/shared list)
+			user_hooks = list(hooks.get(self.__class__, {}).get(key, []))
 			user_hooks.extend(hooks.get(key, []))
 			for hook in user_hooks:
+				if hook in registered:
+					continue
 				fun = self.get_func_path(hook)
 				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
-			self.resolved_hooks[key].extend(user_hooks)
+				registered.append(hook)
 
 	def register_validators(self, validators):
 		"""Register validators.
