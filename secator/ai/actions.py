@@ -995,7 +995,9 @@ def _get_action_label(action: Dict) -> str:
 	if act_type in ("task", "workflow"):
 		name = action.get("name", "?")
 		opts = action.get("opts", {})
-		session_name = opts.get("session_name", "")
+		# Defensive: a model may stringify `opts` (coerced at the tool-call boundary,
+		# but a malformed value can survive as a str) — never crash a display label.
+		session_name = opts.get("session_name", "") if isinstance(opts, dict) else ""
 		if session_name:
 			return session_name
 		targets = action.get("targets", [])

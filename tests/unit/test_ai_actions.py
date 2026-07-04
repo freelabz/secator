@@ -1154,6 +1154,14 @@ class TestRunBatch(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertIsInstance(results[0], Warning)
 
+    def test_get_action_label_tolerates_stringified_opts(self):
+        """Regression: a str `opts` (model stringified it) must not crash the
+        batch label with AttributeError('str' object has no attribute 'get')."""
+        from secator.ai.actions import _get_action_label
+        label = _get_action_label(
+            {"action": "task", "name": "nmap", "targets": ["10.0.0.1"], "opts": '{"session_name": "x"}'})
+        self.assertEqual(label, "nmap on 10.0.0.1")  # falls back to name-on-target, no crash
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestCheckGuardrailsFailClosed(unittest.TestCase):
