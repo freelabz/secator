@@ -726,6 +726,29 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	query_filter = action.get("query", {})
 	limit = action.get("limit", 100)
 
+	# The query_workspace tool schema declares `query` as an object, but some
+	# models/providers serialize it as a JSON *string* (a known tool-calling
+	# quirk). Coerce a stringified query back to a dict so the tool works
+	# regardless of the provider, mirroring the add_finding scalar coercion.
+	# On a genuinely malformed query, return a clear error the LLM can act on
+	# instead of crashing _decrypt_dict/search on a non-dict.
+	if isinstance(query_filter, str):
+		try:
+			query_filter = json.loads(query_filter)
+		except (json.JSONDecodeError, TypeError):
+			yield Error(
+				message='query must be a JSON object (e.g. {"_type": "vulnerability"}); '
+				f'got an unparseable string: {query_filter[:120]!r}',
+				_context=context,
+			)
+			return
+	if not isinstance(query_filter, dict):
+		yield Error(
+			message=f'query must be a JSON object; got {type(query_filter).__name__}.',
+			_context=context,
+		)
+		return
+
 	# Decrypt query values
 	if ctx.encryptor:
 		query_filter = _decrypt_dict(query_filter, ctx.encryptor)
@@ -1126,6 +1149,11 @@ def _decrypt_dict(d: Dict, encryptor: Any) -> Dict:
 	Returns:
 		Decrypted dictionary
 	"""
+	# Backstop: callers should pass a dict, but a non-dict (e.g. an LLM that
+	# stringified an object arg) must not raise `.items()` here — return it
+	# unchanged rather than crash the whole action.
+	if not isinstance(d, dict):
+		return d
 	result = {}
 	for k, v in d.items():
 		if isinstance(v, str):
