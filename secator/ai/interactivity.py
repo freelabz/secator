@@ -119,12 +119,14 @@ class RemoteBackend(InteractivityBackend):
 		# (e.g. a worker that died mid-poll). Expire them BEFORE this doc is
 		# persisted so only the current prompt stays live (M10).
 		self._expire_stale_pending(session_id)
+		# The conversation id rides on `_context.session_id` (auto-stamped from the
+		# runner context on persist) — the poll + restore + secator-api all key on
+		# that, so this pending doc needs no top-level session_id field.
 		return Ai(
 			content=question,
 			ai_type=prompt_type,
 			status="pending",
 			choices=choices,
-			session_id=session_id,
 			extra_data=extra_data,
 			_timestamp=time.time(),
 		)

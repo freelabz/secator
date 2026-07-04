@@ -1,4 +1,5 @@
 """Tests for secator.ai.session restore_history_from_db + remote resume branch."""
+import contextlib
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -26,8 +27,10 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		history = restore_history_from_db(
 			"session1", engine, model="gpt-4o", system_prompt="SYSTEM PROMPT")
 
-		# Query was scoped to the session
-		engine.search.assert_called_once_with({"_type": "ai", "session_id": "session1"})
+		# Query was scoped to the session by the auto-stamped `_context.session_id`
+		# (the same key the remote poll + resume branch use — NOT the top-level field,
+		# which prompt/response docs don't carry).
+		engine.search.assert_called_once_with({"_type": "ai", "_context.session_id": "session1"})
 
 		# System prompt set, conversation turns in timestamp order, non-turn docs skipped
 		self.assertEqual(history.messages, [
@@ -115,7 +118,8 @@ class TestRemoteResumeBranch(unittest.TestCase):
 		engine.backend.name = backend_name
 
 		def _search(query, limit=0):
-			if query.get("_type") == "ai" and "session_id" in query:
+			# The resume branch scopes by `_context.session_id` (not the top-level field).
+			if query.get("_type") == "ai" and any("session_id" in k for k in query):
 				return prior_docs
 			return []
 		engine.search.side_effect = _search
@@ -283,7 +287,9 @@ class TestTurnIdempotency(unittest.TestCase):
 		self.assertIsInstance(marker, Ai)
 		self.assertEqual(marker.ai_type, "turn_completed")
 		self.assertEqual(marker.extra_data.get("turn_uuid"), "turn-abc")
-		self.assertEqual(marker.session_id, "sess-123")
+		# The marker carries no top-level session_id; its conversation id is stamped
+		# onto `_context.session_id` by the runner persist pipeline (from self.context),
+		# which _turn_completed_marker queries by. That stamping is out of scope here.
 
 		# Local channel: no marker persisted (idempotency is a remote concern).
 		persisted.clear()
@@ -367,6 +373,63 @@ class TestFastDetectMode(unittest.TestCase):
 			task._detect_mode(force=True)
 			self.assertEqual(task.mode, "attack")
 			mock_llm.assert_not_called()
+
+
+class TestSessionIdStampedOnContext(unittest.TestCase):
+	"""_init_options writes the resolved session_id back onto self.context.
+
+	Every persisted item copies self.context into its `_context` (Runner._process_item),
+	so this is what makes `prompt`/`response` docs queryable by `_context.session_id`
+	(restore_history_from_db + the remote poll both key on it). Without the stamp a
+	locally-resolved session_id (str(self.id)/session_name) leaves the transcript turns
+	unqueryable and a remote resume restores an empty history.
+	"""
+
+	def _drive_init(self, context, run_opts=None):
+		from secator.tasks.ai import ai
+		task = ai.__new__(ai)
+		task.context = context
+		task.run_opts = run_opts or {}
+		task.results = []
+		task.inputs = []
+		task._reports_folder = None
+		task.sync = True
+		opt_values = {
+			"resume": False, "subagent": False, "model": "m", "intent_model": "im",
+			"api_base": None, "api_key": "k", "sensitive": False, "mode": "chat",
+			"max_tokens_total": 100000, "max_workers": 1, "max_iterations": 10,
+			"temperature": 0.7, "context_warnings": True, "async_tasks": False,
+			"dangerous": False, "interactive": "remote",
+		}
+		task.get_opt_value = lambda key: opt_values.get(key)
+		with contextlib.ExitStack() as stack:
+			stack.enter_context(patch('secator.tasks.ai.PermissionEngine'))
+			stack.enter_context(patch('secator.tasks.ai.create_backend'))
+			stack.enter_context(patch('secator.tasks.ai.SensitiveDataEncryptor'))
+			stack.enter_context(patch.object(ai, '_auto_approve_workspace_targets'))
+			stack.enter_context(patch.object(type(task), 'reports_folder', property(lambda self: None)))
+			stack.enter_context(patch.object(type(task), 'id', 'runner-id-42', create=True))
+			task._init_options()
+		return task
+
+	def test_stamped_when_locally_derived(self):
+		"""No session_id anywhere -> falls back to str(self.id) AND is written to context."""
+		task = self._drive_init(context={"workspace_id": "ws1"})
+		self.assertEqual(task.session_id, "runner-id-42")
+		self.assertEqual(task.context["session_id"], "runner-id-42")
+
+	def test_platform_supplied_session_id_preserved(self):
+		"""A dispatcher-supplied context session_id is kept and remains the stamped value."""
+		task = self._drive_init(context={"workspace_id": "ws1", "session_id": "ui-sess-abc"})
+		self.assertEqual(task.session_id, "ui-sess-abc")
+		self.assertEqual(task.context["session_id"], "ui-sess-abc")
+
+	def test_stamp_matches_restore_query_key(self):
+		"""The stamped context key is exactly what restore/poll query (`_context.session_id`)."""
+		task = self._drive_init(context={})
+		# Simulate the generic per-item context copy (Runner._process_item does self.context.copy()).
+		item_context = dict(task.context)
+		self.assertEqual(item_context.get("session_id"), task.session_id)
 
 
 if __name__ == "__main__":
