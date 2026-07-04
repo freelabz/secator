@@ -536,6 +536,8 @@ worker start, see `secator health`).
 - **Partial** — `transport.worker_command_verbose`, tab-completion install, run-id resolution, integration test surface.
 - **Not implemented** — worker `--reload` / `--check`, asciinema recording, tab completion install, Cloud Build pipelines.
 - **Deferred by user** — SQLite driver (§6), SQLite query backend (§8), Airflow 3.0+ DAG generation (§15).
+- **Intentionally not ported** (Python-shaped problems that don't exist in Rust; see §18):
+  - `ADDONS_ENABLED` PyPI-extras probe / `secator utils enable-addon` — Python runtime-gates optional deps (gevent, pymongo, litellm, …); Rust cdylibs are already gated at compile time. Replaced by `custom_templates:` for the third-party-plugin distribution use case.
 
 **Rust-only extensions** (Python doesn't have these):
 - Prometheus metrics endpoint (`--metrics-addr`)
@@ -545,3 +547,57 @@ worker start, see `secator health`).
 - `custom_templates:` — git-cloned third-party template packs (tasks/workflows/scans); `secator template {sync,add,remove,ls}` manages the list, skip-if-unchanged on rebuild
 - `kill_on_drop` on subprocess (parity with Celery's `task_max_timeout` enforcement)
 - True parallel `_group` execution via `futures::future::join_all` (Python's Celery does this via `group(...)`; Rust matched it).
+
+---
+
+## 18. Intentionally not ported
+
+This section lists Python features the Rust port deliberately does **not**
+implement, along with the reasoning. Future parity audits should treat these as
+**Complete-by-omission**, not as gaps.
+
+### 18.1 `ADDONS_ENABLED` PyPI-extras probe
+
+**Python behaviour.** `secator/__init__.py` inspects `sys.modules` / imports at
+startup to detect which extras (`worker`, `google`, `mongo`, `ai`, `redis`,
+`api`, `slack`, `discord`, `dev`, `trace`, `build`) are installed. `secator
+utils enable-addon <name>` flips a config flag AND runs `pip install
+'secator[<name>]'` to bring optional dependencies in. `disable-addon` mutates
+the same flag; the extra stays installed. The pattern exists because Python
+extras are runtime-detected — an operator can install `secator` bare, then add
+`secator[ai]` later without rebuilding anything, and the CLI must gracefully
+degrade when the underlying import isn't available.
+
+**Rust equivalent (why it's a non-problem).** Rust has no runtime dependency
+resolution. A cdylib either compiled with its deps or it didn't. There's
+nothing to "enable at runtime" — the compile step is the gate. Concretely:
+
+| Python addon | Rust equivalent | State |
+|---|---|---|
+| `secator[worker]` (gevent, celery) | Built into `secator-worker` unconditionally (tokio-based, not celery) | Complete |
+| `secator[google]` (Google Drive API) | Built into `secator-gcs` unconditionally | Complete |
+| `secator[mongo]` (pymongo) | Built into `secator-mongo` unconditionally | Complete |
+| `secator[ai]` (litellm) | Built into the AI runner unconditionally (via FreeLabz `litellm-rust`) | Complete |
+| `secator[redis]` | Built into `secator-redis` unconditionally | Complete |
+| `secator[api]` (fastapi client) | Built into `secator-api` unconditionally | Complete |
+| `secator[slack]` / `secator[discord]` | Built into `secator-notify` unconditionally | Complete |
+| `secator[trace]` (memray) | Not applicable (Rust has different profilers) | N/A |
+| `secator[dev]` / `secator[build]` | `cargo` handles this via `--features` at build time | N/A |
+
+Runtime enable/disable is still available for the per-addon toggles: `addons.<name>.enabled`
+in `~/.secator/config.yml` (Mongo, GCS, AI, API, Slack, Discord, Vulners). Those flags gate
+whether the driver is *wired in*, not whether the *code is present*. Managed via
+`secator addons {enable,disable,list}`.
+
+**Third-party distribution.** The one legitimate use case Python's `ADDONS_ENABLED`
+covered that Rust needs a replacement for — "how does someone else distribute
+a plugin so operators can install it after the fact" — is answered by
+[`custom_templates:`](#13-external-configs--drop-ins), a git-URL list managed
+via `secator template {sync,add,remove,ls}`. It's a superset: a pack can ship
+Rust task crates AND workflow/scan YAMLs in the same repo.
+
+**Auditor's rule of thumb.** If you're reviewing this codebase and see a
+Python code path with `ADDONS_ENABLED`, `enable_addon`, `disable_addon`, or
+per-extra `try: import x except ImportError`, do NOT add a parity row for it
+— the Rust equivalent is compile-time, not runtime, and there is nothing to
+port.
