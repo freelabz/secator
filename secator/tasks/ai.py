@@ -24,7 +24,7 @@ from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_wind
 from secator.ai.prompts import (
 	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES
 )
-from secator.ai.tools import build_tool_schemas, tool_call_to_action, TOOL_SCHEMAS
+from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
 from secator.ai.session import save_history, show_session_picker, replay_session, restore_history_from_db
 from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
 
@@ -881,6 +881,10 @@ class ai(PythonRunner):
 					}, separators=(',', ':'))
 					self.history.add_tool_result(name, tc_id, maybe_encrypt(error_msg, self.encryptor))
 					continue
+
+			# Coerce object/array args the model stringified (provider quirk) BEFORE
+			# decrypt/convert, so handlers get the declared type not a JSON string.
+			args = coerce_stringified_args(name, args)
 
 			# Decrypt args
 			if self.encryptor:

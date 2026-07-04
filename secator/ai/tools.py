@@ -1,5 +1,7 @@
 """Tool schema definitions for native LLM tool calling."""
 
+import json
+
 from secator.ai.prompts import get_mode_config
 
 # Map tool names to action types used by existing action handlers
@@ -195,6 +197,33 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> li
 	if backend is not None:
 		schemas.extend(backend.get_extra_tools())
 	return schemas
+
+
+def coerce_stringified_args(tool_name: str, arguments: dict) -> dict:
+	"""Coerce args the model serialized as JSON strings back to their declared type.
+
+	Some providers stringify nested object/array parameters even when the tool
+	schema says ``type: object`` / ``array`` (e.g. ``opts`` or ``query`` arriving
+	as a JSON string). Downstream handlers then call ``.get()`` / ``**opts`` /
+	``.items()`` on a ``str`` and raise ``AttributeError`` — or silently drop the
+	value (``_sanitize_child_opts`` returns ``{}`` for a non-dict). Parse any such
+	arg once, here at the tool-call boundary, so every consumer gets the declared
+	type. Best-effort: an unparseable value is left as-is so the handler can return
+	a clean error rather than crash.
+
+	Must run BEFORE arg decryption — ``_decrypt_dict`` would otherwise treat a
+	stringified object as a single encrypted value.
+	"""
+	if not isinstance(arguments, dict):
+		return arguments
+	props = TOOL_SCHEMAS.get(tool_name, {}).get("function", {}).get("parameters", {}).get("properties", {})
+	for key, spec in props.items():
+		if spec.get("type") in ("object", "array") and isinstance(arguments.get(key), str):
+			try:
+				arguments[key] = json.loads(arguments[key])
+			except (json.JSONDecodeError, TypeError, ValueError):
+				pass
+	return arguments
 
 
 def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
