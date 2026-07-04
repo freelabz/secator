@@ -198,6 +198,13 @@ class TestToolCallToAction(unittest.TestCase):
 		result = tool_call_to_action("nonexistent_tool", {"foo": "bar"})
 		self.assertIsNone(result)
 
+	def test_non_dict_arguments_rejected(self):
+		"""Non-object arguments (a bare JSON int/array/string) reject cleanly to None
+		instead of raising AttributeError on .items() and aborting the loop."""
+		from secator.ai.tools import tool_call_to_action
+		for bad in (12345, ["nmap", "10.0.0.1"], "just a string"):
+			self.assertIsNone(tool_call_to_action("run_task", bad))
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestCoerceStringifiedArgs(unittest.TestCase):

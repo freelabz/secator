@@ -241,6 +241,12 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 		return None
 	if not arguments:
 		return None
+	# A model may emit non-object arguments (a bare JSON int/array/string, e.g.
+	# `12345` or `["nmap"]`). `.items()` below would raise AttributeError and abort
+	# the whole loop — reject cleanly instead so the caller feeds an error back and
+	# the conversation continues.
+	if not isinstance(arguments, dict):
+		return None
 	safe_arguments = {k: v for k, v in arguments.items() if k not in {"action", "description"}}
 	descr = safe_arguments.get("name", "") or safe_arguments.get("query") or safe_arguments.get("command", "unknown")
 	return {"action": action_type, "description": descr, **safe_arguments}
