@@ -41,6 +41,7 @@ class nuclei(VulnMulti):
 	opts = {
 		'automatic_scan': {'is_flag': True, 'short': 'as', 'help': 'Automatic web scan using wappalyzer technology detection to tags mapping'},  # noqa: E501
 		'bulk_size': {'type': int, 'short': 'bs', 'help': 'Maximum number of hosts to be analyzed in parallel per template'},  # noqa: E501
+		'dast': {'is_flag': True, 'default': False, 'help': 'Enable DAST fuzzing templates (required to fuzz OpenAPI/Swagger endpoints)'},  # noqa: E501
 		'debug': {'type': str, 'help': 'Debug mode'},
 		'display_templates': {'is_flag': True, 'default': False, 'short': 'dt', 'help': 'Display loaded template names.'},
 		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
