@@ -24,6 +24,7 @@ use serde_yaml::{Mapping, Value as Yaml};
 use tokio::sync::mpsc;
 
 mod cli_groups;
+mod custom_templates;
 mod plugins;
 mod profiles;
 mod scans;
@@ -56,11 +57,21 @@ async fn main() -> ExitCode {
     secator_debug::init(&secator_config::get().debug);
     // Discover user-supplied workflow / scan / profile templates from
     // `<dirs.templates>/*.yaml`. Python parity with `loader.find_templates()`.
-    secator_templates::registry::init_user_templates(&secator_config::get().dirs.templates);
-    // Discover compiled `.rs` plugin crates (tasks / drivers / exporters)
-    // under `<dirs.templates>/target/release/`. `secator template build`
-    // produces these; the loader silently no-ops when the dir doesn't exist.
-    let user_plugins = plugins::load_user_plugins(&secator_config::get().dirs.templates);
+    // Also scan each enabled `custom_templates:` repo for workflow/scan YAMLs.
+    let cfg_ref = secator_config::get();
+    secator_templates::registry::init_user_templates(&cfg_ref.dirs.templates);
+    for repo in custom_templates::discovery_dirs(cfg_ref) {
+        secator_templates::registry::init_user_templates(&repo);
+    }
+    // Discover compiled `.rs` plugin crates (tasks / drivers / exporters):
+    // 1. Scaffolded local crates under `<dirs.templates>/target/release/`.
+    // 2. Git-cloned custom_templates repos under `~/.secator/custom/<slug>/target/release/`.
+    // Both use the same cdylib + ABI-version convention; the loader silently
+    // no-ops on dirs that don't exist yet (pre-sync / pre-build).
+    let mut user_plugins = plugins::load_user_plugins(&cfg_ref.dirs.templates);
+    for repo in custom_templates::discovery_dirs(cfg_ref) {
+        user_plugins.extend(plugins::load_user_plugins(&repo));
+    }
     secator_tasks::register_plugin_tasks(user_plugins.tasks);
 
     let cli = build_cli();
@@ -143,14 +154,17 @@ fn positive_u64(n: i64) -> Option<u64> {
     (n > 0).then_some(n as u64)
 }
 
-/// `secator template build|list|path` — manages plugin crates dropped under
-/// `<dirs.templates>/`. `build` shells out to `cargo build --release` against
-/// that dir; `list` shows the compiled dylibs the loader would pick up at
-/// startup; `path` prints the templates dir so operators can `cd` to it.
+/// `secator template scaffold|build|list|path|sync|add|remove|ls` — manages
+/// both the local scaffold flow (drop a plugin crate under
+/// `<dirs.templates>/`) and the `custom_templates:` list (git-cloned repos
+/// providing tasks/workflows/scans).
 fn run_template_subcommand(args: &ArgMatches) -> ExitCode {
     let templates_dir = secator_config::get().dirs.templates.clone();
     match args.subcommand() {
-        Some(("addons", sub)) => run_template_addons_subcommand(&templates_dir, sub),
+        Some(("sync", _)) => run_template_sync_subcommand(),
+        Some(("add", sub)) => run_template_add_subcommand(sub),
+        Some(("remove", sub)) => run_template_remove_subcommand(sub),
+        Some(("ls", _)) => run_template_ls_subcommand(),
         Some(("scaffold", sub)) => {
             let name = sub
                 .get_one::<String>("name")
@@ -218,70 +232,132 @@ fn run_template_subcommand(args: &ArgMatches) -> ExitCode {
     }
 }
 
-/// `secator template addons list|enable|disable` — manage
-/// `~/.secator/templates/addons.json`, the on-disk manifest that gates which
-/// cdylib plugins get loaded at startup. When the file is absent every dylib
-/// found under `target/release/` is loaded (Python's "drop it in" ergonomics);
-/// once present, entries with `enabled: false` are skipped and untracked
-/// dylibs default to loaded.
-fn run_template_addons_subcommand(templates_dir: &std::path::Path, args: &ArgMatches) -> ExitCode {
-    match args.subcommand() {
-        Some(("list", _)) => {
-            let rows = plugins::list_addons(templates_dir);
-            if rows.is_empty() {
+/// `secator template sync` — clone or update every enabled entry in
+/// `custom_templates:`, rebuild task crates whose git ref has moved. Prints a
+/// one-line status per repo.
+fn run_template_sync_subcommand() -> ExitCode {
+    let cfg = secator_config::get();
+    if cfg.custom_templates.is_empty() {
+        eprintln!(
+            "No custom_templates in ~/.secator/config.yml — add one with \
+             `secator template add <git-url>`."
+        );
+        return ExitCode::SUCCESS;
+    }
+    let results = custom_templates::sync_all(cfg);
+    let mut any_failed = false;
+    for r in &results {
+        match &r.status {
+            custom_templates::SyncStatus::Cloned { rev } => {
                 eprintln!(
-                    "No plugin addons found — nothing under {} yet. \
-                     Try `secator template scaffold <name>` + `secator template build`.",
-                    templates_dir.display()
+                    "[OK ] {url} cloned @ {}",
+                    &rev[..rev.len().min(7)],
+                    url = r.url
                 );
-                return ExitCode::SUCCESS;
             }
-            println!(
-                "{:<24} {:<9} {:<8} {}",
-                "NAME", "ENABLED", "BUILT", "DESCRIPTION"
-            );
-            for row in rows {
-                let en = if row.enabled { "yes" } else { "no" };
-                let built = if row.built { "yes" } else { "no" };
-                println!("{:<24} {:<9} {:<8} {}", row.name, en, built, row.description);
+            custom_templates::SyncStatus::Updated { from, to } => {
+                eprintln!(
+                    "[OK ] {url} {}→{}",
+                    &from[..from.len().min(7)],
+                    &to[..to.len().min(7)],
+                    url = r.url
+                );
             }
-            ExitCode::SUCCESS
-        }
-        Some(("enable", sub)) => {
-            let name = sub.get_one::<String>("name").expect("required").clone();
-            let mut m = plugins::AddonsManifest::load(templates_dir).unwrap_or_default();
-            m.enable(&name);
-            match m.save(templates_dir) {
-                Ok(p) => {
-                    eprintln!("[INF] Enabled `{name}` in {}", p.display());
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("failed to save addons.json: {e}");
-                    ExitCode::from(1)
-                }
+            custom_templates::SyncStatus::UnchangedSkippedBuild => {
+                eprintln!("[OK ] {url} (unchanged)", url = r.url);
+            }
+            custom_templates::SyncStatus::Disabled => {
+                eprintln!("[SKIP] {url} (disabled)", url = r.url);
+            }
+            custom_templates::SyncStatus::Failed(e) => {
+                any_failed = true;
+                eprintln!("[ERR] {url} — {e}", url = r.url);
             }
         }
-        Some(("disable", sub)) => {
-            let name = sub.get_one::<String>("name").expect("required").clone();
-            let mut m = plugins::AddonsManifest::load(templates_dir).unwrap_or_default();
-            m.disable(&name);
-            match m.save(templates_dir) {
-                Ok(p) => {
-                    eprintln!("[INF] Disabled `{name}` in {}", p.display());
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("failed to save addons.json: {e}");
-                    ExitCode::from(1)
-                }
-            }
+        if !r.built_dylibs.is_empty() {
+            eprintln!("       built {} plugin dylib(s)", r.built_dylibs.len());
         }
-        _ => {
-            eprintln!("see --help");
-            ExitCode::from(2)
+        let n_wf = r.workflows_registered.len();
+        let n_sc = r.scans_registered.len();
+        if n_wf + n_sc > 0 {
+            eprintln!("       {n_wf} workflow(s), {n_sc} scan(s) exposed");
         }
     }
+    if any_failed {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// `secator template add <url> [--branch B]` — append a git URL to
+/// `custom_templates:` and immediately sync it.
+fn run_template_add_subcommand(args: &ArgMatches) -> ExitCode {
+    let url = args.get_one::<String>("url").expect("required").clone();
+    let branch = args.get_one::<String>("branch").cloned();
+    match custom_templates::add_to_config(&url, branch.as_deref()) {
+        Ok(entry) => {
+            eprintln!(
+                "[INF] Added `{url}` (branch={}) to ~/.secator/config.yml",
+                entry.effective_branch()
+            );
+            let r = custom_templates::sync_one(&entry);
+            match &r.status {
+                custom_templates::SyncStatus::Failed(e) => {
+                    eprintln!("[ERR] sync failed: {e}");
+                    ExitCode::from(1)
+                }
+                _ => {
+                    eprintln!("[INF] Synced. Run `secator health` to see the new plugins.");
+                    ExitCode::SUCCESS
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("template add failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// `secator template remove <url> [--purge]` — drop from config; with `--purge`
+/// also `rm -rf` the local clone under `~/.secator/custom/<slug>/`.
+fn run_template_remove_subcommand(args: &ArgMatches) -> ExitCode {
+    let url = args.get_one::<String>("url").expect("required").clone();
+    let purge = args.get_flag("purge");
+    match custom_templates::remove_from_config(&url, purge) {
+        Ok(()) => {
+            eprintln!("[INF] Removed `{url}` from ~/.secator/config.yml");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("template remove failed: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// `secator template ls` — one row per `custom_templates:` entry with its
+/// url, branch, enabled flag, and whether the local clone exists.
+fn run_template_ls_subcommand() -> ExitCode {
+    let cfg = secator_config::get();
+    if cfg.custom_templates.is_empty() {
+        eprintln!("No custom_templates configured.");
+        return ExitCode::SUCCESS;
+    }
+    println!("{:<50} {:<12} {:<9} {}", "URL", "BRANCH", "ENABLED", "CLONED");
+    let base = secator_config::custom_templates_dir();
+    for t in &cfg.custom_templates {
+        let cloned = base.join(t.slug()).join(".git").is_dir();
+        println!(
+            "{:<50} {:<12} {:<9} {}",
+            t.url,
+            t.effective_branch(),
+            if t.enabled { "yes" } else { "no" },
+            if cloned { "yes" } else { "no" }
+        );
+    }
+    ExitCode::SUCCESS
 }
 
 fn build_template_subcommand() -> Command {
@@ -291,24 +367,34 @@ fn build_template_subcommand() -> Command {
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(
-            Command::new("addons")
-                .about("Manage ~/.secator/templates/addons.json — enable/disable third-party plugins")
-                .subcommand_required(true)
-                .arg_required_else_help(true)
-                .subcommand(
-                    Command::new("list")
-                        .about("Print each plugin addon's enable / built state"),
-                )
-                .subcommand(
-                    Command::new("enable")
-                        .about("Mark an addon as enabled in addons.json (creates the file if absent)")
-                        .arg(Arg::new("name").required(true).help("Addon name (dylib stem)")),
-                )
-                .subcommand(
-                    Command::new("disable")
-                        .about("Mark an addon as disabled — skipped at plugin-load time")
-                        .arg(Arg::new("name").required(true).help("Addon name (dylib stem)")),
+            Command::new("sync")
+                .about("Clone/pull every enabled custom_templates repo and rebuild task crates whose git ref moved"),
+        )
+        .subcommand(
+            Command::new("add")
+                .about("Register a new git URL under custom_templates: in ~/.secator/config.yml and sync it")
+                .arg(Arg::new("url").required(true).help("Git URL of the template repo"))
+                .arg(
+                    Arg::new("branch")
+                        .long("branch")
+                        .short('b')
+                        .help("Branch / tag / commit to check out (defaults to `main`)"),
                 ),
+        )
+        .subcommand(
+            Command::new("remove")
+                .about("Drop a URL from custom_templates: in ~/.secator/config.yml")
+                .arg(Arg::new("url").required(true).help("Git URL of the template repo"))
+                .arg(
+                    Arg::new("purge")
+                        .long("purge")
+                        .action(ArgAction::SetTrue)
+                        .help("Also delete the on-disk clone at ~/.secator/custom/<slug>/"),
+                ),
+        )
+        .subcommand(
+            Command::new("ls")
+                .about("List each custom_templates entry — url / branch / enabled / cloned"),
         )
         .subcommand(
             Command::new("scaffold")

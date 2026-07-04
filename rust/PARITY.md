@@ -462,7 +462,7 @@ worker start, see `secator health`).
 | User-supplied task modules (`.rs` crates in `~/.secator/templates/`) | ✅ (`.py`) | ✅ (`.rs` cdylib) | Complete | `secator template build` compiles via `cargo build --release`; loader dlopens via `libloading` and calls `secator_plugin_v1_register` — #162 |
 | External drivers from filesystem | ✅ (`hooks.py`) | ✅ (`.rs` cdylib) | Complete | same plugin entry-point registers via `PluginRegistry::register_driver` — #162 |
 | External exporters from filesystem | ✅ | ✅ (`.rs` cdylib) | Complete | same plugin path; `register_exporter` — #162 |
-| `~/.secator/templates/addons.json` (third-party addon registry) | ➖ | ✅ | Complete — Rust-only | Python has no equivalent (its `ADDONS_ENABLED` is a hard-coded PyPI-extras probe). Rust manifest gates cdylib loading; missing entries default to enabled. Managed via `secator template addons {list,enable,disable}` |
+| `custom_templates:` in `~/.secator/config.yml` (git-cloned template packs) | ➖ | ✅ | Complete — Rust-only | Python has no equivalent. A repo listed under `custom_templates:` can ship any mix of Rust task crates, workflow YAMLs, and scan YAMLs; managed via `secator template {sync,add,remove,ls}`. Rebuild is skipped when the git ref is unchanged. Optional `secator.yml` at the repo root declares what the pack exposes; without it, `Cargo.toml` / `workflows/*.yml` / `scans/*.yml` are auto-detected. |
 | Tool overrides via `tasks.overrides.<task>.<opt>` (config-only, no plugin) | ✅ | ✅ | Complete | works for any registered task — #155 |
 
 **Impact note (historical)**: through the sprint of 2026-06-13, the Rust binary now honors `~/.secator/templates/` — YAML workflows / scans / profiles are picked up at startup and `.rs` plugin crates compiled by `secator template build` register their tasks/drivers/exporters via the `secator-plugin-api` ABI (entry point: `secator_plugin_v1_register`, ABI version probe: `secator_plugin_v1_abi_version`). Plugins MUST be built with the same `rustc` + `secator-plugin-api` revision as the host — the loader emits a clear error on ABI-version mismatch and silently skips dylibs with the wrong symbol set.
@@ -534,7 +534,7 @@ worker start, see `secator health`).
 
 - **Complete** — the overwhelming majority of cells; after the T1–T8 sprint this now covers all per-mode `allowed_actions` enforcement, `addons.ai.intent_model`, `--proxy random` (FreeProxy-equivalent), `console`/`jsonl` exporters, `transport.task_memory_limit_mb` kill-path, `transport.worker_kill_after_task`, and `secator template scaffold`.
 - **Partial** — `transport.worker_command_verbose`, tab-completion install, run-id resolution, integration test surface.
-- **Not implemented** — third-party `addons.json` discovery, worker `--reload` / `--check`, asciinema recording, tab completion install, Cloud Build pipelines.
+- **Not implemented** — worker `--reload` / `--check`, asciinema recording, tab completion install, Cloud Build pipelines.
 - **Deferred by user** — SQLite driver (§6), SQLite query backend (§8), Airflow 3.0+ DAG generation (§15).
 
 **Rust-only extensions** (Python doesn't have these):
@@ -542,5 +542,6 @@ worker start, see `secator health`).
 - Slack notifier addon (mirror of Discord)
 - Worker self-shutdown watchdog (`worker_kill_after_idle_seconds` actually fires; Python relies on Celery beat)
 - `AbortOnDrop` cancellation guards (needed in async Rust; N/A in Python)
+- `custom_templates:` — git-cloned third-party template packs (tasks/workflows/scans); `secator template {sync,add,remove,ls}` manages the list, skip-if-unchanged on rebuild
 - `kill_on_drop` on subprocess (parity with Celery's `task_max_timeout` enforcement)
 - True parallel `_group` execution via `futures::future::join_all` (Python's Celery does this via `group(...)`; Rust matched it).

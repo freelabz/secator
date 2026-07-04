@@ -147,6 +147,12 @@ pub fn user_config_path() -> PathBuf {
     default_data_dir().join("config.yml")
 }
 
+/// Where `secator template sync` clones each `custom_templates:` entry — one
+/// subdirectory per repo, slug'd via [`CustomTemplate::slug`].
+pub fn custom_templates_dir() -> PathBuf {
+    default_data_dir().join("custom")
+}
+
 // =========================================================================== Cli
 
 /// Python `Cli` — knobs the operator-facing CLI consults at startup.
@@ -737,6 +743,76 @@ impl Default for SlackAddon {
     }
 }
 
+// =============================================================== CustomTemplate
+
+/// One entry in `custom_templates:` — a remote git URL that provides some mix
+/// of task plugins (Rust crates), workflows, and scans. `secator template sync`
+/// clones/pulls each entry, builds task crates whose git-ref has moved, and
+/// exposes any `workflows/*.yml` / `scans/*.yml` at runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CustomTemplate {
+    /// Git URL (https or ssh). Required in practice — an empty string is
+    /// treated as a no-op so `Default` remains derivable.
+    pub url: String,
+    /// Branch / tag / commit to check out. Defaults to `main` when empty.
+    pub branch: String,
+    /// `false` → skip this repo at sync + skip its built plugins at load.
+    /// Missing entries default to `true`.
+    pub enabled: bool,
+    /// Optional operator-facing note.
+    pub description: String,
+}
+impl Default for CustomTemplate {
+    fn default() -> Self {
+        CustomTemplate {
+            url: String::new(),
+            branch: String::new(),
+            enabled: true,
+            description: String::new(),
+        }
+    }
+}
+
+impl CustomTemplate {
+    /// Effective branch: `main` when unset, honoring the operator's override.
+    pub fn effective_branch(&self) -> &str {
+        if self.branch.is_empty() {
+            "main"
+        } else {
+            &self.branch
+        }
+    }
+
+    /// Directory slug used under `~/.secator/custom/`. Deterministic per URL
+    /// so `sync` finds the same clone on every invocation.
+    ///
+    /// Example: `https://github.com/user/repo.git` → `github.com-user-repo`.
+    pub fn slug(&self) -> String {
+        let s = self.url.trim();
+        let s = s.strip_suffix('/').unwrap_or(s);
+        let s = s.strip_suffix(".git").unwrap_or(s);
+        let s = s
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .trim_start_matches("ssh://")
+            .trim_start_matches("git@");
+        let s = s.replacen(':', "-", 1);
+        let mut out = String::with_capacity(s.len());
+        for ch in s.chars() {
+            match ch {
+                '/' | '\\' | ' ' => out.push('-'),
+                c if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' => out.push(c),
+                _ => out.push('-'),
+            }
+        }
+        while out.starts_with('-') {
+            out.remove(0);
+        }
+        out
+    }
+}
+
 // =============================================================== Top-level Config
 
 /// Top-level config — matches Python `SecatorConfig` 1:1 (same field names,
@@ -767,6 +843,9 @@ pub struct Config {
     pub addons: Addons,
     pub security: Security,
     pub providers: Providers,
+    /// Third-party template packs (git-cloned repos providing tasks / workflows
+    /// / scans). Managed via `secator template sync/add/remove`.
+    pub custom_templates: Vec<CustomTemplate>,
     pub offline_mode: bool,
     /// Captures unknown keys for forward-compat. Currently only used to swallow
     /// fields a newer Python adds that Rust hasn't ported yet.
@@ -1170,6 +1249,47 @@ offline_mode: true
         let cfg: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(cfg.transport.broker_url, "redis://from-celery");
         assert_eq!(cfg.transport.task_max_timeout, 999);
+    }
+
+    #[test]
+    fn custom_template_slug_deterministic_per_url() {
+        let mk = |url: &str| CustomTemplate { url: url.into(), ..Default::default() };
+        assert_eq!(mk("https://github.com/user/repo").slug(), "github.com-user-repo");
+        assert_eq!(mk("https://github.com/user/repo.git").slug(), "github.com-user-repo");
+        assert_eq!(mk("https://github.com/user/repo/").slug(), "github.com-user-repo");
+        assert_eq!(mk("git@github.com:user/repo.git").slug(), "github.com-user-repo");
+        assert_eq!(mk("ssh://git@gitlab.example.com/team/pack").slug(), "gitlab.example.com-team-pack");
+    }
+
+    #[test]
+    fn custom_template_effective_branch_defaults_to_main() {
+        let t = CustomTemplate { url: "x".into(), ..Default::default() };
+        assert_eq!(t.effective_branch(), "main");
+        let t = CustomTemplate { url: "x".into(), branch: "dev".into(), ..Default::default() };
+        assert_eq!(t.effective_branch(), "dev");
+    }
+
+    #[test]
+    fn custom_templates_round_trip_yaml() {
+        let yaml = r#"
+custom_templates:
+  - url: https://github.com/user/pack-a
+    branch: main
+    enabled: true
+    description: recon workflows
+  - url: git@github.com:user/pack-b.git
+    branch: v0.2.0
+    enabled: false
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.custom_templates.len(), 2);
+        assert_eq!(cfg.custom_templates[0].url, "https://github.com/user/pack-a");
+        assert_eq!(cfg.custom_templates[0].effective_branch(), "main");
+        assert!(cfg.custom_templates[0].enabled);
+        assert_eq!(cfg.custom_templates[0].description, "recon workflows");
+        assert_eq!(cfg.custom_templates[1].url, "git@github.com:user/pack-b.git");
+        assert!(!cfg.custom_templates[1].enabled);
+        assert_eq!(cfg.custom_templates[1].slug(), "github.com-user-pack-b");
     }
 
     #[test]
