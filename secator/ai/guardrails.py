@@ -349,6 +349,34 @@ def extract_command_targets(command: str) -> List[str]:
 	return targets
 
 
+_SHELL_PARSER_WARNED = False
+
+
+def _warn_shell_parser_unavailable(reason: str) -> None:
+	"""Warn ONCE that the shfmt-based shell parser is unavailable, then let the
+	caller fall back to the non-shfmt path (whole-command approval).
+
+	This is deliberately a Warning, not an Error, and it does NOT claim the ai
+	addon is missing: ``litellm`` (the ai addon) can be installed while the shell
+	parser — ``safecmd`` + the ``shfmt`` binary it shells out to — is not. Without
+	it the guardrail can't split a command into sub-commands, so
+	``_check_action_type`` falls back to asking the user to approve the whole
+	command (safe, just coarser). Warn once so a long agent run isn't spammed on
+	every shell command.
+	"""
+	global _SHELL_PARSER_WARNED
+	if _SHELL_PARSER_WARNED:
+		return
+	_SHELL_PARSER_WARNED = True
+	from secator.rich import console
+	from secator.output_types import Warning
+	console.print(Warning(
+		message=f'{reason}: shell commands cannot be sub-parsed for guardrails — '
+		'falling back to whole-command approval. Run "secator install addons ai" '
+		'to enable precise per-subcommand parsing.'
+	))
+
+
 def _parse_subcommands(command: str) -> List[List[str]]:
 	"""Parse a shell command into sub-command token lists via safecmd's parser.
 
@@ -365,8 +393,8 @@ def _parse_subcommands(command: str) -> List[List[str]]:
 	try:
 		from safecmd.bashxtract import extract_commands
 	except ImportError:
-		from secator.rich import console
-		console.print('[bold red][ERR][/] Missing ai addon: please run "secator install addons ai".')
+		# NOT a missing *ai* addon (litellm can be present without the shell parser).
+		_warn_shell_parser_unavailable('Missing safecmd shell parser')
 		return []
 	try:
 		# Normalize LLM-generated multiline commands: join lines where a pipe/operator
@@ -374,6 +402,10 @@ def _parse_subcommands(command: str) -> List[List[str]]:
 		command = re.sub(r'\s*\n\s*(\||\&\&|\|\|)', r' \1', command)
 		cmds, ops, redirects = extract_commands(command)
 		return [c for c in cmds if c]
+	except FileNotFoundError:
+		# safecmd is installed but the `shfmt` binary it shells out to isn't on PATH.
+		_warn_shell_parser_unavailable('Missing shfmt binary')
+		return []
 	except Exception:
 		return []
 
