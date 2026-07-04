@@ -10,7 +10,8 @@ if ADDONS_ENABLED['ai']:
 	from secator.ai.guardrails import (
 		parse_rule, match_rule, extract_command_targets, detect_paths, detect_paths_with_access,
 		detect_sensitive_env_vars, classify_command, build_target_choices, PermissionEngine,
-		_is_file_path, _normalize_ip, _peel_wrapper, _exec_wrappers, EXEC_WRAPPERS
+		_is_file_path, _normalize_ip, _peel_wrapper, _exec_wrappers, EXEC_WRAPPERS,
+		_parse_subcommands,
 	)
 	from secator.output_types import Warning, Error
 
@@ -1281,6 +1282,52 @@ class TestWrapperPeelingM11(unittest.TestCase):
 
 	def test_firejail_scoped_rm_asks(self):
 		self.assertEqual(self._decide(["firejail", "rm", "-rf", "/tmp/x"]), "ask")  # not silent-allowed as firejail
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestShellParserFallback(unittest.TestCase):
+	"""When the shfmt-based shell parser (safecmd/shfmt) is unavailable, the
+	guardrail must Warn (NOT claim 'Missing ai addon') and fall back to
+	whole-command approval — an empty sub-command list makes the caller `ask`."""
+
+	def setUp(self):
+		import secator.ai.guardrails as g
+		g._SHELL_PARSER_WARNED = False  # reset warn-once flag per test
+
+	def _run_and_capture(self):
+		printed = []
+		with patch('secator.rich.console.print', side_effect=lambda x, *a, **k: printed.append(x)):
+			result = _parse_subcommands('curl -s https://x.com | head -5')
+		return result, printed
+
+	def test_missing_safecmd_warns_not_ai_addon(self):
+		# Simulate safecmd not installed -> ImportError on the in-function import.
+		with patch.dict('sys.modules', {'safecmd.bashxtract': None}):
+			result, printed = self._run_and_capture()
+		self.assertEqual(result, [])  # unparseable -> caller falls back to ask
+		self.assertEqual(len(printed), 1)
+		item = printed[0]
+		self.assertIsInstance(item, Warning)  # a Warning, not an Error
+		self.assertIn('safecmd', item.message)
+		self.assertNotIn('ai addon', item.message.lower())
+
+	def test_missing_shfmt_binary_warns(self):
+		# safecmd imports, but the shfmt binary it shells out to is not on PATH.
+		with patch('safecmd.bashxtract.extract_commands', side_effect=FileNotFoundError('shfmt')):
+			result, printed = self._run_and_capture()
+		self.assertEqual(result, [])
+		self.assertEqual(len(printed), 1)
+		self.assertIsInstance(printed[0], Warning)
+		self.assertIn('shfmt', printed[0].message)
+		self.assertNotIn('ai addon', printed[0].message.lower())
+
+	def test_warns_only_once_across_commands(self):
+		printed = []
+		with patch('safecmd.bashxtract.extract_commands', side_effect=FileNotFoundError):
+			with patch('secator.rich.console.print', side_effect=lambda x, *a, **k: printed.append(x)):
+				_parse_subcommands('a | b')
+				_parse_subcommands('c | d')
+		self.assertEqual(len(printed), 1)  # warn-once, no per-command spam
 
 
 if __name__ == '__main__':
