@@ -287,7 +287,9 @@ class TestTurnIdempotency(unittest.TestCase):
 		self.assertIsInstance(marker, Ai)
 		self.assertEqual(marker.ai_type, "turn_completed")
 		self.assertEqual(marker.extra_data.get("turn_uuid"), "turn-abc")
-		self.assertEqual(marker.session_id, "sess-123")
+		# The marker carries no top-level session_id; its conversation id is stamped
+		# onto `_context.session_id` by the runner persist pipeline (from self.context),
+		# which _turn_completed_marker queries by. That stamping is out of scope here.
 
 		# Local channel: no marker persisted (idempotency is a remote concern).
 		persisted.clear()

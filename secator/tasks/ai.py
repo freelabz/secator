@@ -330,7 +330,7 @@ class ai(PythonRunner):
 		# Append the new user message that respawned the conversation
 		if self.prompt:
 			self.history.add_user(maybe_encrypt(self.prompt, self.encryptor))
-			yield Ai(content=self.prompt, ai_type="prompt", session_id=self.session_id)
+			yield Ai(content=self.prompt, ai_type="prompt")
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		yield from self._run_loop()
@@ -391,7 +391,6 @@ class ai(PythonRunner):
 			content="",
 			ai_type="turn_completed",
 			status="completed",
-			session_id=self.session_id,
 			extra_data={"turn_uuid": turn_uuid},
 		), print=False)
 
