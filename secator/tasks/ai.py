@@ -696,6 +696,19 @@ class ai(PythonRunner):
 			or self.session_name
 			or str(self.id)
 		)
+		# Write the resolved session_id back onto the runner context so it is the
+		# single source of truth for the conversation id. Every persisted item
+		# copies `self.context` into its `_context` (Runner._process_item), so this
+		# stamps `_context.session_id` on ALL `_type:"ai"` docs — including the
+		# `prompt`/`response` turns yielded directly here, which otherwise carry no
+		# session_id (they don't go through `_get_result_context` like tool docs do).
+		# restore_history_from_db + the remote poll both key on `_context.session_id`,
+		# so without this a locally-resolved session_id (str(self.id)/session_name)
+		# leaves the transcript turns unqueryable and a resume restores nothing.
+		# On the platform the dispatcher already supplies session_id in the context,
+		# so self.session_id equals it and this is an idempotent write.
+		if self.context is not None:
+			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
 		# Auto-approve workspace targets
