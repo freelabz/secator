@@ -39,6 +39,14 @@ class TestDecryptDict(unittest.TestCase):
 
 		self.assertEqual(result['outer']['inner'], 'VALUE')
 
+	def test_decrypt_non_dict_returned_unchanged(self):
+		"""Backstop: a non-dict (e.g. a stringified query arg) must not raise
+		`.items()` — it is returned unchanged instead of crashing the action."""
+		encryptor = MagicMock()
+		self.assertEqual(_decrypt_dict('{"_type": "url"}', encryptor), '{"_type": "url"}')
+		self.assertEqual(_decrypt_dict(['a', 'b'], encryptor), ['a', 'b'])
+		encryptor.decrypt.assert_not_called()
+
 	def test_decrypt_list_values(self):
 		encryptor = MagicMock()
 		encryptor.decrypt.side_effect = lambda x: x.upper()
@@ -290,6 +298,41 @@ class TestHandleQuery(unittest.TestCase):
 		self.assertEqual(len(result_dicts), 2)
 		for r in result_dicts:
 			self.assertTrue(r['_context'].get('ai_query_result'))
+
+	@patch('secator.ai.actions.ActionContext.get_query_engine')
+	def test_query_stringified_json_is_coerced(self, mock_get_engine):
+		"""A model that passes `query` as a JSON *string* (schema says object) must
+		still work — coerced to a dict, then searched. Regression for the
+		AttributeError('str' object has no attribute 'items') in _decrypt_dict."""
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{'_type': 'url', '_context': {}}]
+		mock_get_engine.return_value = mock_engine
+		# Encryptor active is the exact condition that made the original crash fire.
+		encryptor = MagicMock()
+		encryptor.decrypt.side_effect = lambda s: s
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'}, encryptor=encryptor)
+
+		results = list(_handle_query(
+			{'action': 'query', 'query': '{"_type": "url", "verified": true}'}, ctx))
+
+		self.assertFalse([r for r in results if isinstance(r, Error)], 'stringified query must not error')
+		mock_engine.search.assert_called_once_with({'_type': 'url', 'verified': True}, limit=100)
+
+	def test_query_unparseable_string_returns_clean_error(self):
+		"""A non-JSON string yields an Error the LLM can act on — not a crash."""
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		results = list(_handle_query({'action': 'query', 'query': 'not json at all'}, ctx))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1)
+		self.assertIn('JSON object', errors[0].message)
+
+	def test_query_non_dict_returns_clean_error(self):
+		"""A non-dict, non-str query (e.g. a list) yields a clean Error, not a crash."""
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		results = list(_handle_query({'action': 'query', 'query': ['_type', 'url']}, ctx))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1)
+		self.assertIn('JSON object', errors[0].message)
 
 	@patch('secator.ai.actions.ActionContext.get_query_engine')
 	def test_query_failure(self, mock_get_engine):
