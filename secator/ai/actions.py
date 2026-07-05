@@ -525,6 +525,24 @@ def _sanitize_child_opts(opts: Any) -> Dict:
 	return clean
 
 
+def build_subagent_prompt(objective: str, targets: list, evidence: str) -> str:
+	"""Wrap the LLM-supplied subagent objective in a structured prompt.
+
+	The `objective` is used verbatim (the parent LLM's intent). `targets` scopes
+	the work; `evidence` (auto-gathered, may be empty) is prior findings the
+	subagent should NOT re-discover.
+	"""
+	targets_str = ", ".join(str(t) for t in targets) if targets else "(inherit parent scope)"
+	evidence_block = evidence.strip() if evidence.strip() else "(none — no prior findings for this scope)"
+	return (
+		f"## Objective\n{objective.strip() or '(no explicit objective given)'}\n\n"
+		f"## Scope\nWork ONLY within these target(s): {targets_str}\n\n"
+		f"## Already known (do not re-run tools that would re-discover these)\n{evidence_block}\n\n"
+		f"## Expected output\nInvestigate the objective, then report your findings concisely. "
+		f"Persist any new findings; do not repeat work already listed under 'Already known'."
+	)
+
+
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
 	"""Execute a secator task or workflow.
 

@@ -1372,5 +1372,25 @@ class TestChildContextParenting(unittest.TestCase):
 		self.assertNotIn('scan_id', child)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestBuildSubagentPrompt(unittest.TestCase):
+	def test_structure_sections_and_objective(self):
+		from secator.ai.actions import build_subagent_prompt
+		p = build_subagent_prompt("Test auth on the API", ["10.0.0.1", "app.x.com"], "- Port 443 open")
+		self.assertIn("## Objective", p)
+		self.assertIn("Test auth on the API", p)          # objective verbatim
+		self.assertIn("## Scope", p)
+		self.assertIn("10.0.0.1", p)
+		self.assertIn("app.x.com", p)
+		self.assertIn("## Already known", p)
+		self.assertIn("- Port 443 open", p)               # evidence injected
+		self.assertIn("## Expected output", p)
+
+	def test_empty_evidence_renders_none(self):
+		from secator.ai.actions import build_subagent_prompt
+		p = build_subagent_prompt("Do X", ["t.com"], "")
+		self.assertIn("(none", p.lower())                 # explicit "none" marker
+
+
 if __name__ == '__main__':
 	unittest.main()
