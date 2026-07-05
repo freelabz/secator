@@ -104,6 +104,23 @@ class TestCommandTask(unittest.TestCase):
 		self.assertNotIn('sk-leakme', runner.output)
 		self.assertIn('[]', runner.output)
 
+	def test_env_run_opt_is_not_persisted(self):
+		"""The `env` run_opt must be runtime-only, NOT persisted into the runner doc.
+
+		`resolved_opts` -> `toDict()['run_opts']` is written to Mongo by the mongodb driver
+		and exposed via the runner-list API. Persisting `env` would write the whole (denylist-
+		sanitized) process environment — DB URLs, internal hostnames, etc. that the denylist
+		misses — into every AI-shell runner's history, a broader disclosure than the command's
+		own output. `resolved_opts` excludes `env` so the subprocess still reads it from
+		`run_opts` (command.py) but it never reaches the persisted doc.
+		"""
+		custom_env = {'FOO': 'bar', 'DATABASE_URL': 'postgres://u:pw@host', 'PATH': os.environ.get('PATH', '')}
+		runner = command(['echo hi'], sync=True, print_line=False, print_item=False, env=custom_env)
+		persisted_opts = runner.toDict()['run_opts']
+		self.assertNotIn('env', persisted_opts)
+		# sanity: the runner still holds env at runtime for the subprocess to use
+		self.assertEqual(runner.run_opts.get('env'), custom_env)
+
 
 class TestCommandFromResult(unittest.TestCase):
 	"""`command.from_result` imports an already-run command's result into a runner doc,
