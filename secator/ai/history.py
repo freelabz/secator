@@ -230,7 +230,19 @@ class ChatHistory:
         from secator.output_types import Warning
 
         original_count = len(self.messages)
-        trimmed = trim_messages(self.messages, max_tokens=max_tokens)
+        # litellm's trim_messages shortens an over-budget message via len(msg["content"]),
+        # which raises TypeError when an assistant turn carries only tool_calls (content=None
+        # or the key absent). Coerce such content to "" for trimming — equivalent for the LLM,
+        # safe for len(). Wrap the call so any trimmer bug degrades to untrimmed history
+        # (handled downstream by the context_length_exceeded 400-repair) instead of crashing.
+        sanitized = [dict(m, content="") if m.get("content") is None else m for m in self.messages]
+        try:
+            trimmed = trim_messages(sanitized, max_tokens=max_tokens)
+        except Exception as e:  # noqa: BLE001 - a token-trimming crash must never kill the AI loop
+            console.print(Warning(
+                message=f'Chat history trim failed ({type(e).__name__}: {e}); using untrimmed history.'
+            ))
+            trimmed = sanitized
 
         # litellm drops the OLDEST messages with no tool-pairing awareness, so the
         # kept window can START with an orphan tool_result whose assistant(tool_calls)

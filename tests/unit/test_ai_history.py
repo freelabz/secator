@@ -190,6 +190,48 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(history.messages[0]["role"], "system")
         self.assertEqual(history.messages[0]["content"], "s" * 40)
 
+    def test_trim_sanitizes_none_content_before_trimmer(self):
+        """Messages with content=None (assistant tool-call turns) must never reach
+        trim_messages as None — litellm's shorten path does len(content) and crashes
+        with 'object of type NoneType has no len()'. trim() coerces them to "".
+        """
+        history = ChatHistory()
+        history.add_system("s")
+        history.add_user("u")
+        # assistant turn carrying only tool_calls -> content is None
+        history.add_assistant_with_tool_calls(None, [
+            {"id": "1", "type": "function", "function": {"name": "q", "arguments": "{}"}}
+        ])
+        history.add_tool_result("q", "1", "result")
+
+        captured = {}
+
+        def fake_trim(messages, max_tokens):
+            captured["messages"] = messages
+            # replicate litellm's crashing operation to prove it no longer crashes
+            for m in messages:
+                if m.get("role") != "system":
+                    _ = len(m["content"])  # would raise TypeError on None
+            return messages
+
+        with patch("litellm.utils.trim_messages", side_effect=fake_trim):
+            history.trim(max_tokens=1000)  # must not raise
+
+        self.assertTrue(all(m.get("content") is not None for m in captured["messages"]))
+
+    def test_trim_survives_trimmer_exception(self):
+        """A crash inside trim_messages must not propagate and kill the AI loop —
+        trim() degrades to the (sanitized) untrimmed history instead.
+        """
+        history = ChatHistory()
+        history.add_system("s")
+        history.add_user("u")
+
+        with patch("litellm.utils.trim_messages", side_effect=RuntimeError("boom")):
+            out = history.trim(max_tokens=1000)  # must not raise
+
+        self.assertEqual(len(out), 2)
+
     def test_to_messages_with_max_tokens_total(self):
         """to_messages with max_tokens_total trims messages."""
         history = ChatHistory()
