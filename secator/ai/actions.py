@@ -28,6 +28,8 @@ class ActionContext:
 	"""
 	targets: List[str]
 	model: str
+	api_key: str = ""
+	api_base: str = ""
 	encryptor: Any = None
 	dry_run: bool = False
 	verbose: bool = False
@@ -525,6 +527,50 @@ def _sanitize_child_opts(opts: Any) -> Dict:
 	return clean
 
 
+def build_subagent_prompt(objective: str, targets: list, evidence: str) -> str:
+	"""Wrap the LLM-supplied subagent objective in a structured prompt.
+
+	The `objective` is used verbatim (the parent LLM's intent). `targets` scopes
+	the work; `evidence` (auto-gathered, may be empty) is prior findings the
+	subagent should NOT re-discover.
+	"""
+	targets_str = ", ".join(str(t) for t in targets) if targets else "(inherit parent scope)"
+	evidence_block = evidence.strip() if evidence.strip() else "(none — no prior findings for this scope)"
+	return (
+		f"## Objective\n{objective.strip() or '(no explicit objective given)'}\n\n"
+		f"## Scope\nWork ONLY within these target(s): {targets_str}\n\n"
+		f"## Already known (do not re-run tools that would re-discover these)\n{evidence_block}\n\n"
+		f"## Expected output\nInvestigate the objective, then report your findings concisely. "
+		f"Persist any new findings; do not repeat work already listed under 'Already known'."
+	)
+
+
+def _gather_subagent_evidence(ctx: "ActionContext", targets: list, limit: int = 40) -> str:
+	"""Auto-assemble prior findings for the subagent's targets so it doesn't redo work.
+
+	Queries the workspace (the single source of truth — incl. this run's live findings)
+	for findings whose host/ip/url match any target, capped at `limit`. Best-effort:
+	any failure returns "" (evidence is a nicety, never a blocker).
+	"""
+	targets = [t for t in (targets or []) if t]
+	if not targets:
+		return ""
+	query = {"$or": [{"host": {"$in": targets}}, {"ip": {"$in": targets}}, {"url": {"$in": targets}}]}
+	try:
+		results = ctx.get_query_engine().search(query, limit=limit) or []
+	except Exception:  # noqa: BLE001 - evidence is best-effort; never break the spawn
+		return ""
+	lines = []
+	for r in results[:limit]:
+		d = r.toDict() if hasattr(r, "toDict") else r
+		t = d.get("_type", "finding")
+		key = d.get("url") or d.get("matched_at") or f"{d.get('ip','') or d.get('host','')}"
+		extra = f":{d.get('port')}" if d.get("port") else ""
+		name = f" {d.get('name')}" if d.get("name") else ""
+		lines.append(f"- {t} {key}{extra}{name}".rstrip())
+	return "\n".join(lines)
+
+
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
 	"""Execute a secator task or workflow.
 
@@ -548,6 +594,20 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			return
 		opts["subagent"] = True
 		opts["interactive"] = False
+		# Inherit the parent's resolved LLM config so the subagent can actually run.
+		# Without this it falls back to CONFIG.addons.ai.default_model, which may be a
+		# different provider than the parent (e.g. anthropic-direct vs openrouter) with
+		# no key set -> AuthenticationError before the subagent does anything. setdefault
+		# so an explicit LLM-supplied model/key still wins.
+		opts.setdefault("model", ctx.model)
+		if ctx.api_key:
+			opts.setdefault("api_key", ctx.api_key)
+		if ctx.api_base:
+			opts.setdefault("api_base", ctx.api_base)
+		# 1.b/1.c: structure the subagent's prompt and inject prior findings for its
+		# scope so it doesn't re-run work already done.
+		_objective = opts.get("prompt", "")
+		opts["prompt"] = build_subagent_prompt(_objective, targets, _gather_subagent_evidence(ctx, targets))
 
 	# defense in depth: a spawned runner is never dangerous (CLI --dangerous unaffected)
 	opts["dangerous"] = False

@@ -405,6 +405,8 @@ class ai(PythonRunner):
 		ctx = ActionContext(
 			targets=self.inputs,
 			model=self.model,
+			api_key=self.api_key,
+			api_base=self.api_base,
 			encryptor=self.encryptor,
 			dry_run=self.dry_run,
 			verbose=self.verbose,

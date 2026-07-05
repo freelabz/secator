@@ -557,6 +557,62 @@ class TestRunRunner(unittest.TestCase):
 		_, kwargs = mock_task_cls.call_args
 		self.assertEqual(kwargs.get('context', {}).get('session_id'), 'from-context')
 
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_structures_subagent_prompt(self, mock_build_hooks, mock_task_cls, _tpl):
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['10.0.0.1'], model='m',
+							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value="- port 10.0.0.1:443"):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'],
+					'opts': {'prompt': 'Test auth on the API'}}
+			list(_run_runner(action, ctx, 'task'))
+		_, kwargs = mock_task_cls.call_args
+		prompt = kwargs.get('run_opts', {}).get('prompt', '')
+		self.assertIn('## Objective', prompt)
+		self.assertIn('Test auth on the API', prompt)
+		self.assertIn('- port 10.0.0.1:443', prompt)   # evidence injected
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_subagent_inherits_parent_llm_config(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""A spawned subagent inherits the parent's resolved model/api_key/api_base so it
+		can actually run (else it falls back to CONFIG.default_model with no key)."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['10.0.0.1'], model='openrouter/anthropic/x',
+							api_key='PARENTKEY', api_base='https://base',
+							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'], 'opts': {'prompt': 'do x'}}
+			list(_run_runner(action, ctx, 'task'))
+		ro = mock_task_cls.call_args[1].get('run_opts', {})
+		self.assertEqual(ro.get('model'), 'openrouter/anthropic/x')
+		self.assertEqual(ro.get('api_key'), 'PARENTKEY')
+		self.assertEqual(ro.get('api_base'), 'https://base')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_subagent_explicit_model_wins(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""An explicit LLM-supplied model on the subagent opts is preserved (setdefault)."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t'], model='parent/model',
+							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'],
+					  'opts': {'prompt': 'x', 'model': 'explicit/model'}}
+			list(_run_runner(action, ctx, 'task'))
+		ro = mock_task_cls.call_args[1].get('run_opts', {})
+		self.assertEqual(ro.get('model'), 'explicit/model')
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestSanitizeChildOpts(unittest.TestCase):
@@ -1370,6 +1426,60 @@ class TestChildContextParenting(unittest.TestCase):
 		self.assertNotIn('task_id', child)
 		self.assertNotIn('workflow_id', child)
 		self.assertNotIn('scan_id', child)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestBuildSubagentPrompt(unittest.TestCase):
+	def test_structure_sections_and_objective(self):
+		from secator.ai.actions import build_subagent_prompt
+		p = build_subagent_prompt("Test auth on the API", ["10.0.0.1", "app.x.com"], "- Port 443 open")
+		self.assertIn("## Objective", p)
+		self.assertIn("Test auth on the API", p)          # objective verbatim
+		self.assertIn("## Scope", p)
+		self.assertIn("10.0.0.1", p)
+		self.assertIn("app.x.com", p)
+		self.assertIn("## Already known", p)
+		self.assertIn("- Port 443 open", p)               # evidence injected
+		self.assertIn("## Expected output", p)
+
+	def test_empty_evidence_renders_none(self):
+		from secator.ai.actions import build_subagent_prompt
+		p = build_subagent_prompt("Do X", ["t.com"], "")
+		self.assertIn("(none", p.lower())                 # explicit "none" marker
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestGatherSubagentEvidence(unittest.TestCase):
+	def test_queries_targets_and_formats(self):
+		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"_type": "port", "ip": "10.0.0.1", "port": 443},
+			{"_type": "url", "url": "http://app.x.com/login"},
+		]
+		ctx = ActionContext(targets=[], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			out = _gather_subagent_evidence(ctx, ["10.0.0.1", "app.x.com"], limit=40)
+		# queried by an $or over the targets
+		q = mock_engine.search.call_args[0][0]
+		self.assertIn("$or", q)
+		# formatted a compact summary
+		self.assertIn("port", out)
+		self.assertIn("10.0.0.1", out)
+		self.assertIn("url", out)
+
+	def test_no_targets_returns_empty(self):
+		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		ctx = ActionContext(targets=[], model='m', context={})
+		self.assertEqual(_gather_subagent_evidence(ctx, [], limit=40), "")
+
+	def test_search_error_returns_empty(self):
+		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = Exception("boom")
+		ctx = ActionContext(targets=[], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			self.assertEqual(_gather_subagent_evidence(ctx, ["t"], limit=40), "")
 
 
 if __name__ == '__main__':
