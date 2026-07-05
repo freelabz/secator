@@ -4,7 +4,7 @@ from secator.hooks._dedup import compute_duplicate_updates
 from secator.output_types import Vulnerability
 
 
-def _vuln(uuid, status='NEW', verified=False, **kwargs):
+def _vuln(uuid, status='', verified=False, **kwargs):
 	return Vulnerability(
 		name='CVE-2025-53020',
 		id='CVE-2025-53020',
@@ -19,23 +19,23 @@ def _vuln(uuid, status='NEW', verified=False, **kwargs):
 class TestComputeDuplicateUpdates(unittest.TestCase):
 
 	def test_status_carried_forward_onto_new_main(self):
-		"""A prior ACKNOWLEDGED main carries onto a re-found main whose status is NEW."""
+		"""A prior ACKNOWLEDGED main carries onto a re-found main with no status yet."""
 		prev = _vuln('prev', status='ACKNOWLEDGED')
-		new = _vuln('new', status='NEW')
+		new = _vuln('new')  # untouched -> status '' (empty, like any other field)
 		updates = compute_duplicate_updates([prev], [new], copy_fields=['status'])
 		assert updates['new']['status'] == 'ACKNOWLEDGED'
 
 	def test_status_fixed_not_overwritten(self):
-		"""A new main that is already FIXED keeps its value (FIXED is not 'unset')."""
+		"""A new main that already has a status keeps its value (not empty)."""
 		prev = _vuln('prev', status='ACKNOWLEDGED')
 		new = _vuln('new', status='FIXED')
 		updates = compute_duplicate_updates([prev], [new], copy_fields=['status'])
 		assert 'status' not in updates['new']
 
-	def test_prior_new_status_not_carried(self):
-		"""A prior status of NEW is treated as unset and is not carried forward."""
-		prev = _vuln('prev', status='NEW')
-		new = _vuln('new', status='NEW')
+	def test_prior_empty_status_not_carried(self):
+		"""A prior empty status has nothing to carry forward."""
+		prev = _vuln('prev')  # status '' (empty)
+		new = _vuln('new')
 		updates = compute_duplicate_updates([prev], [new], copy_fields=['status'])
 		assert 'status' not in updates['new']
 

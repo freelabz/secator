@@ -44,21 +44,16 @@ class TestOutputTypes(unittest.TestCase):
 
 class TestVulnerabilityStatus(unittest.TestCase):
 
-	def test_status_defaults_to_new(self):
+	def test_status_defaults_to_empty(self):
+		# status is a plain field: untouched vulns default to '' (rendered/treated
+		# as NEW downstream), which lets dedup carry a prior status forward generically.
 		vuln = Vulnerability(name='CVE-2025-53020')
-		assert vuln.status == 'NEW'
+		assert vuln.status == ''
 
-	def test_status_empty_coerces_to_new(self):
-		assert Vulnerability(name='CVE-2025-53020', status='').status == 'NEW'
-		assert Vulnerability(name='CVE-2025-53020', status=None).status == 'NEW'
-
-	def test_status_unknown_coerces_to_new(self):
-		assert Vulnerability(name='CVE-2025-53020', status='bogus').status == 'NEW'
-
-	def test_status_valid_values_preserved_and_uppercased(self):
+	def test_status_value_preserved_as_is(self):
+		# No coercion / uppercasing — treated like any other field.
 		assert Vulnerability(name='CVE-2025-53020', status='ACKNOWLEDGED').status == 'ACKNOWLEDGED'
-		assert Vulnerability(name='CVE-2025-53020', status='fixed').status == 'FIXED'
-		assert Vulnerability(name='CVE-2025-53020', status='  new  ').status == 'NEW'
+		assert Vulnerability(name='CVE-2025-53020', status='FIXED').status == 'FIXED'
 
 	def test_status_does_not_affect_equality(self):
 		# Same identity (name/id/matched_at) but different status must still be equal (dedup-safe).
