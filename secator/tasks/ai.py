@@ -29,7 +29,6 @@ from secator.ai.session import save_history, show_session_picker, replay_session
 from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
 
 
-
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (attack or chat mode)."""
