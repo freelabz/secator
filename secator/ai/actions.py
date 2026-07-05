@@ -543,6 +543,32 @@ def build_subagent_prompt(objective: str, targets: list, evidence: str) -> str:
 	)
 
 
+def _gather_subagent_evidence(ctx: "ActionContext", targets: list, limit: int = 40) -> str:
+	"""Auto-assemble prior findings for the subagent's targets so it doesn't redo work.
+
+	Queries the workspace (the single source of truth — incl. this run's live findings)
+	for findings whose host/ip/url match any target, capped at `limit`. Best-effort:
+	any failure returns "" (evidence is a nicety, never a blocker).
+	"""
+	targets = [t for t in (targets or []) if t]
+	if not targets:
+		return ""
+	query = {"$or": [{"host": {"$in": targets}}, {"ip": {"$in": targets}}, {"url": {"$in": targets}}]}
+	try:
+		results = ctx.get_query_engine().search(query, limit=limit) or []
+	except Exception:  # noqa: BLE001 - evidence is best-effort; never break the spawn
+		return ""
+	lines = []
+	for r in results[:limit]:
+		d = r.toDict() if hasattr(r, "toDict") else r
+		t = d.get("_type", "finding")
+		key = d.get("url") or d.get("matched_at") or f"{d.get('ip','') or d.get('host','')}"
+		extra = f":{d.get('port')}" if d.get("port") else ""
+		name = f" {d.get('name')}" if d.get("name") else ""
+		lines.append(f"- {t} {key}{extra}{name}".rstrip())
+	return "\n".join(lines)
+
+
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
 	"""Execute a secator task or workflow.
 

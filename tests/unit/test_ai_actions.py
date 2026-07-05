@@ -1392,5 +1392,39 @@ class TestBuildSubagentPrompt(unittest.TestCase):
 		self.assertIn("(none", p.lower())                 # explicit "none" marker
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestGatherSubagentEvidence(unittest.TestCase):
+	def test_queries_targets_and_formats(self):
+		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"_type": "port", "ip": "10.0.0.1", "port": 443},
+			{"_type": "url", "url": "http://app.x.com/login"},
+		]
+		ctx = ActionContext(targets=[], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			out = _gather_subagent_evidence(ctx, ["10.0.0.1", "app.x.com"], limit=40)
+		# queried by an $or over the targets
+		q = mock_engine.search.call_args[0][0]
+		self.assertIn("$or", q)
+		# formatted a compact summary
+		self.assertIn("port", out)
+		self.assertIn("10.0.0.1", out)
+		self.assertIn("url", out)
+
+	def test_no_targets_returns_empty(self):
+		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		ctx = ActionContext(targets=[], model='m', context={})
+		self.assertEqual(_gather_subagent_evidence(ctx, [], limit=40), "")
+
+	def test_search_error_returns_empty(self):
+		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = Exception("boom")
+		ctx = ActionContext(targets=[], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			self.assertEqual(_gather_subagent_evidence(ctx, ["t"], limit=40), "")
+
+
 if __name__ == '__main__':
 	unittest.main()
