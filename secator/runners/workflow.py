@@ -153,8 +153,14 @@ class Workflow(Runner):
 
 		walk_runner_tree(tree, process_task)
 
-		# Build workflow chain with lifecycle management
-		start_sig = mark_runner_started.si([], self, enable_hooks=True).set(queue='results')
+		# Build workflow chain with lifecycle management.
+		# A parentless / first workflow's start carries no prior results (empty
+		# `[]`), so route it to `small` (fast, warm capacity) rather than the
+		# memory-heavy `results` pool (served by the large worker pool) — this
+		# avoids a scale-from-zero node provision just to mark the workflow started.
+		# When it chains previous results (a workflow inside a scan), its start
+		# receives forwarded results and keeps `results` for the memory headroom.
+		start_sig = mark_runner_started.si([], self, enable_hooks=True).set(queue='small')
 		if chain_previous_results:
 			start_sig = mark_runner_started.s(self, enable_hooks=True).set(queue='results')
 		sig = chain(
