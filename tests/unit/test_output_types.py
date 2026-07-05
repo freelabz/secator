@@ -42,6 +42,27 @@ class TestOutputTypes(unittest.TestCase):
 		assert vuln1.name == 'CVE-2025-53020'
 
 
+class TestVulnerabilityStatus(unittest.TestCase):
+
+	def test_status_defaults_to_empty(self):
+		# status is a plain field: untouched vulns default to '' (rendered/treated
+		# as NEW downstream), which lets dedup carry a prior status forward generically.
+		vuln = Vulnerability(name='CVE-2025-53020')
+		assert vuln.status == ''
+
+	def test_status_value_preserved_as_is(self):
+		# No coercion / uppercasing — treated like any other field.
+		assert Vulnerability(name='CVE-2025-53020', status='ACKNOWLEDGED').status == 'ACKNOWLEDGED'
+		assert Vulnerability(name='CVE-2025-53020', status='FIXED').status == 'FIXED'
+
+	def test_status_does_not_affect_equality(self):
+		# Same identity (name/id/matched_at) but different status must still be equal (dedup-safe).
+		vuln1 = Vulnerability(name='CVE-2025-53020', id='CVE-2025-53020', matched_at='host:80', status='NEW')
+		vuln2 = Vulnerability(name='CVE-2025-53020', id='CVE-2025-53020', matched_at='host:80', status='FIXED')
+		assert vuln1 == vuln2
+		assert vuln1._compare_key() == vuln2._compare_key()
+
+
 class TestErrorRich(unittest.TestCase):
 
 	def test_error_rich_with_node_id(self):
