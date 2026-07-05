@@ -576,6 +576,43 @@ class TestRunRunner(unittest.TestCase):
 		self.assertIn('Test auth on the API', prompt)
 		self.assertIn('- port 10.0.0.1:443', prompt)   # evidence injected
 
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_subagent_inherits_parent_llm_config(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""A spawned subagent inherits the parent's resolved model/api_key/api_base so it
+		can actually run (else it falls back to CONFIG.default_model with no key)."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['10.0.0.1'], model='openrouter/anthropic/x',
+							api_key='PARENTKEY', api_base='https://base',
+							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'], 'opts': {'prompt': 'do x'}}
+			list(_run_runner(action, ctx, 'task'))
+		ro = mock_task_cls.call_args[1].get('run_opts', {})
+		self.assertEqual(ro.get('model'), 'openrouter/anthropic/x')
+		self.assertEqual(ro.get('api_key'), 'PARENTKEY')
+		self.assertEqual(ro.get('api_base'), 'https://base')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_subagent_explicit_model_wins(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""An explicit LLM-supplied model on the subagent opts is preserved (setdefault)."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t'], model='parent/model',
+							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'],
+					  'opts': {'prompt': 'x', 'model': 'explicit/model'}}
+			list(_run_runner(action, ctx, 'task'))
+		ro = mock_task_cls.call_args[1].get('run_opts', {})
+		self.assertEqual(ro.get('model'), 'explicit/model')
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestSanitizeChildOpts(unittest.TestCase):

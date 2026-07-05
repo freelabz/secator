@@ -28,6 +28,8 @@ class ActionContext:
 	"""
 	targets: List[str]
 	model: str
+	api_key: str = ""
+	api_base: str = ""
 	encryptor: Any = None
 	dry_run: bool = False
 	verbose: bool = False
@@ -592,6 +594,16 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			return
 		opts["subagent"] = True
 		opts["interactive"] = False
+		# Inherit the parent's resolved LLM config so the subagent can actually run.
+		# Without this it falls back to CONFIG.addons.ai.default_model, which may be a
+		# different provider than the parent (e.g. anthropic-direct vs openrouter) with
+		# no key set -> AuthenticationError before the subagent does anything. setdefault
+		# so an explicit LLM-supplied model/key still wins.
+		opts.setdefault("model", ctx.model)
+		if ctx.api_key:
+			opts.setdefault("api_key", ctx.api_key)
+		if ctx.api_base:
+			opts.setdefault("api_base", ctx.api_base)
 		# 1.b/1.c: structure the subagent's prompt and inject prior findings for its
 		# scope so it doesn't re-run work already done.
 		_objective = opts.get("prompt", "")
