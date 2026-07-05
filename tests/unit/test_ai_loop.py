@@ -1048,11 +1048,9 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 		errors = [r for r in results if isinstance(r, Error)]
 		self.assertEqual(len(errors), 1, "expected exactly one Error item")
 		err = errors[0]
-		# LLM-facing feedback phrasing + the exception type/message.
-		self.assertIn("Action failed with error", err.message)
+		# LLM-facing feedback carries the exception type/message (Error.from_exception).
 		self.assertIn("TypeError", err.message)
 		self.assertIn("'str' object is not a mapping", err.message)
-		self.assertIn("try again", err.message.lower())
 		# Attributed to the failing tool call so it groups into that tool result.
 		self.assertEqual(err._context.get("tool_call_id"), "tc_err")
 		self.assertEqual(err._context.get("tool_call_name"), "run_shell")

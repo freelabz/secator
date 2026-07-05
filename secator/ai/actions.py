@@ -259,33 +259,6 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		yield Warning(message=f"Unknown action: {action_type}", _context=context)
 
 
-def _format_action_error(e: Exception, max_chars: int = 400) -> str:
-	"""Build a concise, LLM-facing error string for a failed action dispatch.
-
-	Combines the exception type + message with the last few traceback frames so
-	the model can see *where* it failed, then truncates to a sane length so a
-	deep traceback can't blow up the next prompt's token budget.
-	"""
-	import traceback
-
-	errtype = type(e).__name__
-	msg = str(e)
-	head = f"{errtype}: {msg}" if msg else errtype
-
-	# Keep only the tail of the traceback (last ~3 frames) — that's where the
-	# actual failure is, and it keeps the feedback compact.
-	tb_lines = traceback.format_exc().strip().splitlines()
-	tb_tail = "\n".join(tb_lines[-6:]) if tb_lines else ""
-
-	detail = f"{head}\n{tb_tail}" if tb_tail else head
-	if len(detail) > max_chars:
-		detail = detail[:max_chars] + "…(truncated)"
-	return (
-		f"Action failed with error: {detail}\n"
-		"Fix the issue and try again."
-	)
-
-
 def safe_dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	"""Dispatch a single action, converting any raised ``Exception`` into an
 	``Error`` output item instead of letting it abort the AI loop.
@@ -301,16 +274,11 @@ def safe_dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	``GeneratorExit`` (all ``BaseException`` subclasses) propagate so legitimate
 	control-flow and generator close are never swallowed.
 	"""
-	import traceback as _traceback
 	try:
 		yield from dispatch_action(action, ctx)
 	except Exception as e:  # noqa: BLE001 - per-action resilience: feed error back to LLM, never abort the loop
 		context = _get_result_context(action, ctx)
-		yield Error(
-			message=_format_action_error(e),
-			traceback=_traceback.format_exc(),
-			_context=context,
-		)
+		yield Error.from_exception(e, _context=context)
 
 
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
