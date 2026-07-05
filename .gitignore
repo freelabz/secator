@@ -1,6 +1,12 @@
 # Build logs
 .docker/logs
 
+# Claude Code local state (per-session worktrees, hooks, transcripts).
+# Never commit these — worktrees look like submodules to cargo/git and break
+# downstream consumers (see rust-dev fix commit that removed the accidental
+# .claude/worktrees/pause-resume-2 gitlink).
+.claude/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
