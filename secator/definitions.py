@@ -143,7 +143,6 @@ SOURCES = 'sources'
 STORED_RESPONSE_PATH = 'stored_response_path'
 STATE = 'state'
 STATUS = 'status'
-STATUSES = ('NEW', 'ACKNOWLEDGED', 'FIXED')
 STATUS_CODE = 'status_code'
 STRING = 'str'
 TAGS = 'tags'
