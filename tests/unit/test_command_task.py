@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest import mock
 
@@ -56,6 +57,52 @@ class TestCommandTask(unittest.TestCase):
 	def test_is_a_command_subclass(self):
 		"""Sanity check on the inheritance the rest of the PR relies on."""
 		self.assertTrue(issubclass(command, Command))
+
+	def test_env_run_opt_is_honored(self):
+		"""A custom `env` run_opt overrides the process env for the subprocess.
+
+		The AI shell handler relies on this to pass a SANITIZED env (LLM key / cloud
+		creds stripped) so an AI-run `env`/`printenv` can't leak them. PATH is included
+		so /bin/sh can still resolve the shell builtin. Opts are spread as kwargs
+		(command takes **run_opts) so `env` actually reaches self.run_opts.
+		"""
+		custom_env = {'FOO': 'bar', 'PATH': os.environ.get('PATH', '')}
+		runner = command(
+			['echo $FOO'],
+			sync=True, print_line=False, print_item=False, env=custom_env,
+		)
+		runner.run()
+		self.assertEqual(runner.status, 'SUCCESS')
+		self.assertIn('bar', runner.output)
+
+	def test_no_env_run_opt_uses_process_env(self):
+		"""Control: with no `env` run_opt, the subprocess inherits the process env
+		(default behavior unchanged)."""
+		with mock.patch.dict(os.environ, {'SECATOR_ENV_PROBE': 'present'}):
+			runner = command(
+				['echo $SECATOR_ENV_PROBE'],
+				sync=True, print_line=False, print_item=False,
+			)
+			runner.run()
+		self.assertEqual(runner.status, 'SUCCESS')
+		self.assertIn('present', runner.output)
+
+	def test_empty_env_run_opt_is_honored(self):
+		"""An explicit empty `env={}` must be honored (deliberate empty environment),
+		NOT silently fall back to the full process env — otherwise a caller asking for a
+		locked-down env would leak every process var. Guards the `.get('env', os.environ)`
+		(vs truthiness `or os.environ`) semantics.
+		"""
+		with mock.patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'sk-leakme'}):
+			runner = command(
+				['echo "[$ANTHROPIC_API_KEY]"'],
+				sync=True, print_line=False, print_item=False, env={},
+			)
+			runner.run()
+		self.assertEqual(runner.status, 'SUCCESS')
+		# With an empty env the var is unset, so the shell expands it to nothing.
+		self.assertNotIn('sk-leakme', runner.output)
+		self.assertIn('[]', runner.output)
 
 
 class TestCommandFromResult(unittest.TestCase):
