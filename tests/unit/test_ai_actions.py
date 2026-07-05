@@ -1280,5 +1280,36 @@ class TestSubagentFanoutCap(unittest.TestCase):
 		self.assertEqual(kwargs.get('context', {}).get('ai_subagent_depth'), 1)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestChildContextParenting(unittest.TestCase):
+	"""A spawned sub-runner must get a CLEAN identity: it inherits the conversation
+	session_id + drivers but NOT the parent's runner-doc id, so it mints its own doc
+	(linked to the conversation by session_id), instead of clobbering the parent."""
+
+	def test_child_context_strips_parent_identity_keeps_session(self):
+		from secator.ai.actions import _get_result_context, ActionContext
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={
+				'workspace_id': 'ws1', 'workspace_name': 'w', 'drivers': ['mongodb'],
+				'task_id': 'PARENT_AI_ID',          # the parent ai task's own doc id
+				'session_id': 'conv-1',
+			},
+			session_id='conv-1',
+		)
+		action = {'action': 'task', 'name': 'nmap', 'tool_call_id': 'tc1', 'tool_call_name': 'run_task'}
+		child = _get_result_context(action, ctx)
+		# keeps the conversation link + drivers/workspace
+		self.assertEqual(child['session_id'], 'conv-1')
+		self.assertEqual(child['drivers'], ['mongodb'])
+		self.assertEqual(child['workspace_id'], 'ws1')
+		# marks it a child
+		self.assertTrue(child.get('has_parent'))
+		# does NOT inherit the parent's runner-doc identity (would clobber / suppress its own doc)
+		self.assertNotIn('task_id', child)
+		self.assertNotIn('workflow_id', child)
+		self.assertNotIn('scan_id', child)
+
+
 if __name__ == '__main__':
 	unittest.main()
