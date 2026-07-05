@@ -41,6 +41,14 @@ class TestMarkStartedQueue(unittest.TestCase):
         canvas = wf.build_celery_workflow(chain_previous_results=True)
         self.assertEqual(_first_task_queue(canvas), 'results')
 
+    def test_workflow_light_start_routes_to_small(self):
+        # A scan's first workflow keeps `.s(self)` (chain_previous_results=True) —
+        # so it still receives the scan-start's forwarded results — but its start is
+        # light (that set is empty), so `light_start` routes just the queue to small.
+        wf = self._workflow()
+        canvas = wf.build_celery_workflow(chain_previous_results=True, light_start=True)
+        self.assertEqual(_first_task_queue(canvas), 'small')
+
     def test_scan_start_routes_to_small(self):
         scans = get_configs_by_type('scan')
         if not scans:

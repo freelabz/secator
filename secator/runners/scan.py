@@ -67,7 +67,15 @@ class Scan(Runner):
 				hooks=self._hooks,
 				context=self.context.copy()
 			)
-			celery_workflow = workflow.build_celery_workflow(chain_previous_results=True)
+			# The scan's first (non-skipped) workflow only ever receives the
+			# scan-start's empty results, so its start marker is light too — route
+			# it to `small` like the scan start. Later workflows accumulate results
+			# and keep `results`/large. `light_start` changes only the queue, not the
+			# `.s(self)` result forwarding.
+			first_workflow = len(sigs) == 0
+			celery_workflow = workflow.build_celery_workflow(
+				chain_previous_results=True, light_start=first_workflow
+			)
 			for task_id, task_info in workflow.celery_ids_map.items():
 				self.add_subtask(task_id, task_info['name'], task_info['descr'])
 			sigs.append(celery_workflow)
