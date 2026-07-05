@@ -73,6 +73,7 @@ async fn main() -> ExitCode {
         user_plugins.extend(plugins::load_user_plugins(&repo));
     }
     secator_tasks::register_plugin_tasks(user_plugins.tasks);
+    secator_tasks::register_plugin_native_tasks(user_plugins.native_tasks);
 
     let cli = build_cli();
     let matches = cli.get_matches();

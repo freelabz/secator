@@ -34,6 +34,7 @@ use secator_plugin_api::{PluginRegistry, ABI_VERSION, ENTRY_SYMBOL};
 #[derive(Default)]
 pub struct LoadedPlugins {
     pub tasks: Vec<&'static secator_runner::TaskSpec>,
+    pub native_tasks: Vec<&'static secator_runner::NativeSpec>,
     pub drivers: Vec<(String, std::sync::Arc<dyn secator_driver::Driver>)>,
     pub exporters: Vec<(String, Box<dyn secator_exporters::Exporter>)>,
 }
@@ -44,6 +45,7 @@ impl LoadedPlugins {
     pub fn extend(&mut self, other: LoadedPlugins) {
         let mut o = other;
         self.tasks.append(&mut o.tasks);
+        self.native_tasks.append(&mut o.native_tasks);
         self.drivers.append(&mut o.drivers);
         self.exporters.append(&mut o.exporters);
     }
@@ -74,8 +76,8 @@ pub fn load_user_plugins(dir: &Path) -> LoadedPlugins {
         }
         match load_one_plugin(&path) {
             Ok(reg) => {
-                let (mut tasks, mut drivers, mut exporters, source) = reg.drain();
-                let task_n = tasks.len();
+                let (mut tasks, mut native_tasks, mut drivers, mut exporters, source) = reg.drain();
+                let task_n = tasks.len() + native_tasks.len();
                 let drv_n = drivers.len();
                 let exp_n = exporters.len();
                 if task_n + drv_n + exp_n > 0 {
@@ -84,6 +86,7 @@ pub fn load_user_plugins(dir: &Path) -> LoadedPlugins {
                     );
                 }
                 out.tasks.append(&mut tasks);
+                out.native_tasks.append(&mut native_tasks);
                 out.drivers.append(&mut drivers);
                 out.exporters.append(&mut exporters);
             }
@@ -216,8 +219,8 @@ use secator_plugin_api::{export_plugin, PluginRegistry};
 use secator_plugin_api::runner::{
     HookRegistry, InstallSpec, NativeSpec, ProxyCaps, ValidatorRegistry,
 };
-use secator_plugin_api::runner::secator_model::{Info, OutputItem};
-use secator_plugin_api::runner::secator_options::{OptSchema, RunOpts};
+use secator_plugin_api::model::{Info, OutputItem};
+use secator_plugin_api::options::{OptSchema, RunOpts};
 
 static SPEC: NativeSpec = NativeSpec {
     name: "hello",
@@ -250,7 +253,7 @@ fn build_schema() -> OptSchema {
 }
 
 fn register(reg: &mut PluginRegistry) {
-    reg.register_task(&SPEC);
+    reg.register_native_task(&SPEC);
 }
 
 export_plugin!(register);

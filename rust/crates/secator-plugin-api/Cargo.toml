@@ -7,4 +7,7 @@ license.workspace = true
 [dependencies]
 secator-driver = { path = "../secator-driver" }
 secator-exporters = { path = "../secator-exporters" }
+secator-model = { path = "../secator-model" }
+secator-options = { path = "../secator-options" }
+secator-report = { path = "../secator-report" }
 secator-runner = { path = "../secator-runner" }

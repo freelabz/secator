@@ -36,11 +36,14 @@ use std::sync::Arc;
 
 pub use secator_driver as driver;
 pub use secator_exporters as exporters;
+pub use secator_model as model;
+pub use secator_options as options;
+pub use secator_report as report;
 pub use secator_runner as runner;
 
 use secator_driver::Driver;
 use secator_exporters::Exporter;
-use secator_runner::TaskSpec;
+use secator_runner::{NativeSpec, TaskSpec};
 
 /// Symbol the host looks up via `libloading::Library::get`. Plugins must
 /// export `extern "C" fn secator_plugin_v1_register(&mut PluginRegistry)`;
@@ -57,6 +60,7 @@ pub const ABI_VERSION: u32 = 1;
 /// mutably by the host loader and passed to the plugin's entry point.
 pub struct PluginRegistry {
     pub(crate) tasks: Vec<&'static TaskSpec>,
+    pub(crate) native_tasks: Vec<&'static NativeSpec>,
     pub(crate) drivers: Vec<(String, Arc<dyn Driver>)>,
     pub(crate) exporters: Vec<(String, Box<dyn Exporter>)>,
     pub(crate) source: String,
@@ -68,18 +72,28 @@ impl PluginRegistry {
     pub fn new(source: impl Into<String>) -> Self {
         Self {
             tasks: Vec::new(),
+            native_tasks: Vec::new(),
             drivers: Vec::new(),
             exporters: Vec::new(),
             source: source.into(),
         }
     }
 
-    /// Add a `&'static TaskSpec` to the global task registry. The spec must
-    /// outlive the process; plugins typically declare a `static` at module
-    /// scope. After the host pulls these out it appends them to its
-    /// `StaticLookup` so `secator x <name>` resolves the plugin task.
+    /// Add a `&'static TaskSpec` (subprocess-wrapping task) to the global
+    /// task registry. The spec must outlive the process; plugins typically
+    /// declare a `static` at module scope. After the host pulls these out it
+    /// appends them to its `StaticLookup` so `secator x <name>` resolves the
+    /// plugin task.
     pub fn register_task(&mut self, spec: &'static TaskSpec) {
         self.tasks.push(spec);
+    }
+
+    /// Add a `&'static NativeSpec` — a pure-Rust in-process task (no
+    /// subprocess). Same lifetime requirement as [`register_task`]. Use this
+    /// when your plugin's logic runs entirely in Rust (`arp`, `ai`, custom
+    /// business logic) — no need to spin up an external CLI just to shim it.
+    pub fn register_native_task(&mut self, spec: &'static NativeSpec) {
+        self.native_tasks.push(spec);
     }
 
     /// Add a driver under a stable name (used by `addons.<name>.enabled`).
@@ -97,16 +111,18 @@ impl PluginRegistry {
 
     /// Move the collected contributions out of the registry. Called by the
     /// host once the plugin's entry point has returned; the empty registry
-    /// is then dropped.
+    /// is then dropped. Order of tuple elements is stable across releases —
+    /// pattern-match by position at the call site.
     pub fn drain(
         self,
     ) -> (
         Vec<&'static TaskSpec>,
+        Vec<&'static NativeSpec>,
         Vec<(String, Arc<dyn Driver>)>,
         Vec<(String, Box<dyn Exporter>)>,
         String,
     ) {
-        (self.tasks, self.drivers, self.exporters, self.source)
+        (self.tasks, self.native_tasks, self.drivers, self.exporters, self.source)
     }
 }
 
@@ -141,8 +157,9 @@ mod tests {
     #[test]
     fn registry_starts_empty() {
         let reg = PluginRegistry::new("test");
-        let (tasks, drivers, exporters, source) = reg.drain();
+        let (tasks, native_tasks, drivers, exporters, source) = reg.drain();
         assert!(tasks.is_empty());
+        assert!(native_tasks.is_empty());
         assert!(drivers.is_empty());
         assert!(exporters.is_empty());
         assert_eq!(source, "test");

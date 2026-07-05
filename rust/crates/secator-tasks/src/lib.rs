@@ -63,10 +63,22 @@ pub mod xurlfind3r;
 /// every clap subcommand without touching the built-in slice.
 static PLUGIN_TASKS: std::sync::OnceLock<Vec<&'static TaskSpec>> = std::sync::OnceLock::new();
 
+/// Same shape as `PLUGIN_TASKS` but for plugin-supplied `NativeSpec`s
+/// (pure-Rust in-process tasks). Populated by
+/// `secator-cli::plugins::load_user_plugins`.
+static PLUGIN_NATIVE_TASKS: std::sync::OnceLock<Vec<&'static NativeSpec>> =
+    std::sync::OnceLock::new();
+
 /// One-shot installer for plugin TaskSpecs. Called by the CLI's plugin
 /// loader at startup; idempotent thanks to OnceLock.
 pub fn register_plugin_tasks(specs: Vec<&'static TaskSpec>) {
     let _ = PLUGIN_TASKS.set(specs);
+}
+
+/// One-shot installer for plugin NativeSpecs. Called by the CLI's plugin
+/// loader at startup; idempotent thanks to OnceLock.
+pub fn register_plugin_native_tasks(specs: Vec<&'static NativeSpec>) {
+    let _ = PLUGIN_NATIVE_TASKS.set(specs);
 }
 
 /// All built-in task SPECs (plus any plugin-registered specs) in one slice —
@@ -140,14 +152,23 @@ pub fn get(name: &str) -> Option<&'static TaskSpec> {
     all().into_iter().find(|s| s.name == name)
 }
 
-/// All built-in native (in-process) specs.
+/// All native (in-process) specs — built-ins + any plugin-registered ones.
 pub fn native_all() -> Vec<&'static NativeSpec> {
-    native::all()
+    let mut v = native::all();
+    if let Some(extra) = PLUGIN_NATIVE_TASKS.get() {
+        for s in extra {
+            v.push(*s);
+        }
+    }
+    v
 }
 
-/// Look a native spec up by name.
+/// Look a native spec up by name (checks built-ins first, then plugins).
 pub fn get_native(name: &str) -> Option<&'static NativeSpec> {
-    native::get(name)
+    if let Some(s) = native::get(name) {
+        return Some(s);
+    }
+    PLUGIN_NATIVE_TASKS.get().and_then(|v| v.iter().copied().find(|s| s.name == name))
 }
 
 /// Union of every built-in task class name (command + native). Used by the CLI

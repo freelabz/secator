@@ -14,26 +14,39 @@
 //! `name:`; the loader prints a startup info line when a built-in is shadowed.
 
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::RwLock;
 
-/// Slot for user-supplied YAML, populated once per process by
-/// [`init_user_templates`]. Entries: `(kind, name, body)` where `kind` is
-/// `"workflow"`, `"scan"`, or `"profile"`. `&'static str` bodies are obtained
-/// by `Box::leak`ing the file contents — one-shot leak, bounded by file count.
-static USER: OnceLock<Vec<(&'static str, &'static str, &'static str)>> = OnceLock::new();
+/// Slot for user-supplied YAML, populated by [`init_user_templates`] (once per
+/// directory — multi-source support for `custom_templates:` repos). Entries:
+/// `(kind, name, body)` where `kind` is `"workflow"`, `"scan"`, or `"profile"`.
+/// `&'static str` bodies are obtained by `Box::leak`ing the file contents —
+/// one-shot leak, bounded by file count.
+///
+/// Access is via `RwLock` (not `OnceLock`) so the CLI can walk each
+/// custom_templates repo directory and append to the overlay incrementally.
+/// Reads dominate (looked at once per CLI invocation for command routing);
+/// writes are limited to a handful of init calls at startup.
+static USER: RwLock<Vec<(&'static str, &'static str, &'static str)>> = RwLock::new(Vec::new());
 
 /// Walk `dir` for `*.yaml` files, classify each by its top-level `type:`
-/// field, and stash the (kind, name, body) triple into the process-wide
-/// overlay. Idempotent — repeat calls after the first are no-ops because of
-/// the OnceLock. Returns the number of templates loaded (0 when the dir
-/// doesn't exist, which is the common case for fresh installs).
+/// field, and append the (kind, name, body) triples to the process-wide
+/// overlay. Call once per source directory (typically `<dirs.templates>` plus
+/// one call per enabled `custom_templates:` clone). Returns the number of
+/// templates newly appended (0 when the dir doesn't exist, which is the
+/// common case for fresh installs). Duplicates within one source are kept;
+/// across sources, the FIRST registration wins (later calls skip names that
+/// already exist for that same kind).
 pub fn init_user_templates(dir: &Path) -> usize {
     let entries = match collect_yaml_files(dir) {
         Ok(v) => v,
         Err(_) => Vec::new(),
     };
-    let mut out: Vec<(&'static str, &'static str, &'static str)> = Vec::new();
+    let mut appended = 0usize;
     let mut shadowed: Vec<(String, &'static str)> = Vec::new();
+    let mut store = match USER.write() {
+        Ok(w) => w,
+        Err(_) => return 0,
+    };
     for (path, body) in entries {
         let (kind, name) = match classify_template(&body) {
             Some(pair) => pair,
@@ -45,6 +58,11 @@ pub fn init_user_templates(dir: &Path) -> usize {
                 continue;
             }
         };
+        // Skip if the same (kind, name) already registered from a prior source
+        // — first-source-wins keeps behavior deterministic.
+        if store.iter().any(|(k, n, _)| *k == kind && *n == name) {
+            continue;
+        }
         // Track shadowing against built-ins so operators get a heads-up.
         let built_in_hit = match kind {
             "workflow" => workflows::BUILT_IN.iter().any(|(n, _)| *n == name),
@@ -56,21 +74,20 @@ pub fn init_user_templates(dir: &Path) -> usize {
         if built_in_hit {
             shadowed.push((name_static.to_string(), kind));
         }
-        out.push((kind, name_static, body_static));
+        store.push((kind, name_static, body_static));
+        appended += 1;
     }
-    let count = out.len();
-    let _ = USER.set(out);
-    if count > 0 {
+    if appended > 0 {
         eprintln!(
-            "[INF] Loaded {count} user template{} from {}",
-            if count == 1 { "" } else { "s" },
+            "[INF] Loaded {appended} user template{} from {}",
+            if appended == 1 { "" } else { "s" },
             dir.display(),
         );
     }
     for (name, kind) in shadowed {
         eprintln!("[WRN] user {kind} `{name}` shadows the built-in of the same name");
     }
-    count
+    appended
 }
 
 fn collect_yaml_files(dir: &Path) -> std::io::Result<Vec<(std::path::PathBuf, String)>> {
@@ -106,6 +123,17 @@ fn collect_yaml_files_rec(
         if !is_yaml {
             continue;
         }
+        // Skip well-known non-template YAML files that operators drop next to
+        // real templates (repo manifests, editor scratch files). The template
+        // classifier would reject them anyway with a noisy WRN — cheaper to
+        // pre-filter.
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.eq_ignore_ascii_case("secator.yml")
+                || name.eq_ignore_ascii_case("secator.yaml")
+            {
+                continue;
+            }
+        }
         match std::fs::read_to_string(&path) {
             Ok(body) => out.push((path, body)),
             Err(e) => eprintln!(
@@ -133,25 +161,28 @@ fn classify_template(body: &str) -> Option<(&'static str, String)> {
     Some((kind, name))
 }
 
-/// Iterate every `(kind, name, body)` user template that was loaded by
-/// [`init_user_templates`]. Empty when the loader was never invoked or
-/// `dirs.templates` was missing.
-fn user_iter() -> std::slice::Iter<'static, (&'static str, &'static str, &'static str)> {
-    static EMPTY: [(&'static str, &'static str, &'static str); 0] = [];
-    USER.get().map(|v| v.iter()).unwrap_or_else(|| EMPTY.iter())
+/// Snapshot every `(kind, name, body)` user template that was loaded by
+/// [`init_user_templates`]. The three-tuple copies trivially (all `&'static
+/// str`) so we return a `Vec` and drop the RwLock read guard immediately,
+/// avoiding lifetime-vs-guard entanglement at call sites.
+fn user_snapshot() -> Vec<(&'static str, &'static str, &'static str)> {
+    match USER.read() {
+        Ok(guard) => guard.clone(),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// Lookup helper shared by `workflows::get` / `scans::get`. User overlay wins
 /// over the built-in catalog.
 fn user_get(kind: &str, name: &str) -> Option<&'static str> {
-    user_iter()
+    user_snapshot().iter()
         .find(|(k, n, _)| *k == kind && *n == name)
         .map(|(_, _, body)| *body)
 }
 
 /// Names-list helper that merges user + built-in (user first, deduped).
 fn merged_names(kind: &str, built_in: &'static [(&'static str, &'static str)]) -> Vec<&'static str> {
-    let mut out: Vec<&'static str> = user_iter()
+    let mut out: Vec<&'static str> = user_snapshot().iter()
         .filter(|(k, _, _)| *k == kind)
         .map(|(_, n, _)| *n)
         .collect();
@@ -275,7 +306,7 @@ pub mod profiles {
         super::user_get("profile", name)
     }
     pub fn names() -> Vec<&'static str> {
-        super::user_iter()
+        super::user_snapshot().iter()
             .filter(|(k, _, _)| *k == "profile")
             .map(|(_, n, _)| *n)
             .collect()
