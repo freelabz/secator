@@ -424,6 +424,27 @@ class TestHandleQuery(unittest.TestCase):
 		uuids = {r.get('_uuid') for r in results if isinstance(r, dict)}
 		self.assertIn('live1', uuids)
 
+	def test_query_stringified_limit_coerced_to_int(self):
+		"""A model-supplied string limit ('10') is coerced to int before the backend
+		(a str limit raises TypeError: '>=' not supported between int and str)."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "mongodb"
+		mock_engine.search.return_value = []
+		ctx = ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			list(_handle_query({'action': 'query', 'query': {'_type': 'ip'}, 'limit': '10'}, ctx))
+		self.assertEqual(mock_engine.search.call_args.kwargs.get('limit'), 10)
+
+	def test_query_bad_limit_falls_back_to_default(self):
+		"""A non-numeric limit falls back to the default (100), not a crash."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "mongodb"
+		mock_engine.search.return_value = []
+		ctx = ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			list(_handle_query({'action': 'query', 'query': {}, 'limit': 'notanumber'}, ctx))
+		self.assertEqual(mock_engine.search.call_args.kwargs.get('limit'), 100)
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestRunRunner(unittest.TestCase):
