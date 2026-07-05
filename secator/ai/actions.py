@@ -811,7 +811,14 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	"""
 	context = _get_result_context(action, ctx)
 	query_filter = action.get("query", {})
+	# The schema declares `limit` an integer, but some models send it as a string
+	# ("10"); a str limit reaches the backend and raises `'>=' not supported between
+	# int and str`. Coerce to int (bad/None values fall back to the default).
 	limit = action.get("limit", 100)
+	try:
+		limit = int(limit)
+	except (TypeError, ValueError):
+		limit = 100
 
 	# The query_workspace tool schema declares `query` as an object, but some
 	# models/providers serialize it as a JSON *string* (a known tool-calling
