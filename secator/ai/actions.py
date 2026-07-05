@@ -717,6 +717,31 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error(message=f"Shell command failed: {e}", _context=context)
 
 
+def _union_live_results(persisted: List[Dict], live_results: List[Dict], query_filter: Dict, limit: int) -> List[Dict]:
+	"""Union backend results with this run's in-memory findings (local driver only).
+
+	The live findings are filtered by the SAME query via an in-memory json backend,
+	then merged into the backend (disk) results and deduped by ``_uuid`` (backend wins),
+	respecting ``limit``. Makes query_workspace the single source of truth under the
+	local driver, whose JSON exporter only writes to disk at end-of-run.
+	"""
+	if not live_results:
+		return persisted
+	from secator.query import QueryEngine
+	# workspace_id "" + a `results` context => an in-memory json backend that filters
+	# the provided results by the query (no disk access).
+	live = QueryEngine("", context={"results": live_results}).search(query_filter, limit=limit or 0)
+	seen = {r.get("_uuid") for r in persisted if r.get("_uuid")}
+	for r in live:
+		u = r.get("_uuid")
+		if u and u in seen:
+			continue
+		persisted.append(r)
+		if u:
+			seen.add(u)
+	return persisted[:limit] if limit else persisted
+
+
 def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	"""Query workspace or current results for findings.
 
@@ -755,14 +780,25 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	if ctx.encryptor:
 		query_filter = _decrypt_dict(query_filter, ctx.encryptor)
 
-	if ctx.scope != "current" and not ctx.context.get("workspace_id"):
+	engine = ctx.get_query_engine()
+	is_local = getattr(engine.backend, "name", "") == "json"
+
+	# A non-local backend (mongodb/api) needs a workspace to query. The local (json)
+	# driver can always answer from this run's in-memory findings (unioned below), so
+	# it is exempt from the workspace_id requirement.
+	if not is_local and ctx.scope != "current" and not ctx.context.get("workspace_id"):
 		yield Warning(message="No workspace available for query", _context=context)
 		return
 
 	try:
 		query_str = json.dumps(query_filter, separators=(',', ':'))
-		engine = ctx.get_query_engine()
 		results = engine.search(query_filter, limit=limit)
+		# Local driver: the JSON exporter writes findings to disk only at end-of-run,
+		# so the backend can't see THIS run's live findings mid-run. Union the in-memory
+		# run results so query_workspace is the single source of truth. Other backends
+		# (mongodb/api) persist live via hooks, so they are queried normally (no union).
+		if is_local and ctx.scope != "current":
+			results = _union_live_results(results, ctx.results or [], query_filter, limit)
 		yield Ai(
 			content=query_str,
 			ai_type="query",

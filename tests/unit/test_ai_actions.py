@@ -252,8 +252,14 @@ class TestHandleQuery(unittest.TestCase):
 	"""Tests for the _handle_query action handler."""
 
 	def test_query_no_workspace(self):
+		"""A NON-local backend (mongodb/api) without a workspace_id yields the
+		'No workspace' guard. The local driver is exempt (it answers from in-memory
+		results — see test_query_local_driver_exempt_from_workspace_guard)."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "mongodb"
 		ctx = ActionContext(targets=['t.com'], model='m', context={})
-		results = list(_handle_query({'action': 'query', 'query': {}}, ctx))
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_query({'action': 'query', 'query': {}}, ctx))
 
 		self.assertEqual(len(results), 1)
 		self.assertIsInstance(results[0], Warning)
@@ -362,6 +368,61 @@ class TestHandleQuery(unittest.TestCase):
 		mock_engine.search.assert_called_once()
 		call_args = mock_engine.search.call_args[0][0]
 		self.assertEqual(call_args['host'], 'example.com')
+
+	def test_union_live_results_dedup_and_filter(self):
+		"""_union_live_results filters live by the query, merges into backend results,
+		and dedupes by _uuid (backend wins)."""
+		from secator.ai.actions import _union_live_results
+		persisted = [{"_uuid": "a", "_type": "port"}]
+		live = [{"_uuid": "a", "_type": "port"},   # dup -> deduped
+				{"_uuid": "b", "_type": "port"},   # new -> included
+				{"_uuid": "c", "_type": "url"}]    # wrong type -> filtered out by the query
+		out = _union_live_results(list(persisted), live, {"_type": "port"}, 100)
+		self.assertEqual(sorted(r["_uuid"] for r in out), ["a", "b"])
+		# no live results -> persisted returned unchanged
+		self.assertEqual(_union_live_results([{"_uuid": "z"}], [], {}, 0), [{"_uuid": "z"}])
+
+	def test_query_local_driver_unions_live_results(self):
+		"""Local (json) driver: query_workspace unions this run's in-memory findings
+		with the backend (JSON exporter only writes to disk at end-of-run)."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "json"
+		mock_engine.search.return_value = [{"_uuid": "disk1", "_type": "port", "_context": {}}]
+		ctx = ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'},
+							 results=[{"_uuid": "live1", "_type": "port", "_context": {}}])
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_query({'action': 'query', 'query': {'_type': 'port'}}, ctx))
+		uuids = {r.get('_uuid') for r in results if isinstance(r, dict)}
+		self.assertIn('disk1', uuids)   # backend result
+		self.assertIn('live1', uuids)   # unioned live in-memory result
+
+	def test_query_mongodb_driver_does_not_union(self):
+		"""Non-local backend (mongodb) is queried normally — live self.results are NOT unioned."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "mongodb"
+		mock_engine.search.return_value = [{"_uuid": "db1", "_type": "port", "_context": {}}]
+		ctx = ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'},
+							 results=[{"_uuid": "live1", "_type": "port", "_context": {}}])
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_query({'action': 'query', 'query': {'_type': 'port'}}, ctx))
+		uuids = {r.get('_uuid') for r in results if isinstance(r, dict)}
+		self.assertIn('db1', uuids)
+		self.assertNotIn('live1', uuids)   # not unioned for non-local backends
+
+	def test_query_local_driver_exempt_from_workspace_guard(self):
+		"""Local driver with NO workspace_id is not blocked by the 'No workspace' guard —
+		it answers from in-memory results."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "json"
+		mock_engine.search.return_value = []
+		ctx = ActionContext(targets=['t'], model='m', context={},   # no workspace_id
+							 results=[{"_uuid": "live1", "_type": "port", "_context": {}}])
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_query({'action': 'query', 'query': {'_type': 'port'}}, ctx))
+		warnings = [r for r in results if isinstance(r, Warning)]
+		self.assertFalse(any('No workspace' in getattr(w, 'message', '') for w in warnings))
+		uuids = {r.get('_uuid') for r in results if isinstance(r, dict)}
+		self.assertIn('live1', uuids)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
