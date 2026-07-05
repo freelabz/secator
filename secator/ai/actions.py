@@ -342,16 +342,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		yield Error(message=str(e), _context=context)
 		return
 
-	# Emit the action Ai item now that the runner exists: its on_init hook has
-	# stamped the runner id into context, so we can surface it on the item
-	# (extra_data.runner_id/runner_type) for the UI to link to a RunnerCard.
-	# Emit even when silent (batch mode): silent only suppresses live console
-	# chatter, but the action doc must still be yielded so it is persisted and
-	# the UI can render a RunnerCard for it.
-	# Prefer the context id (`{type}_id`) the on_init hook stamped — that IS the
-	# persisted runner doc's `_id`, which is what the UI's getRunner queries.
-	# `runner.id` is secator's internal id and does NOT match the persisted doc,
-	# so the RunnerCard showed "Runner not found".
+	# Prefer the persisted doc id ({type}_id from on_init) over runner.id.
 	runner_id = context.get(f"{runner_type}_id", "") or runner.id
 	yield Ai(
 		content=name,
@@ -374,16 +365,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 
 
 def _get_result_context(action, ctx):
-	"""Get result context from action.
-
-	Always stamps the ai task's ``session_id`` (the conversation id) onto the
-	derived context. The ai task's ``self.session_id`` may be derived (from
-	``session_name`` / the runner id) and is therefore not guaranteed to already
-	live in ``ctx.context``. Stamping it here means every sub-runner (task /
-	workflow / scan) dispatched by the ai task persists a runner doc whose
-	``context.session_id`` matches the conversation — so the runners spawned by a
-	conversation are queryable by that conversation's session_id.
-	"""
+	"""Derive a sub-runner result context, stamping the conversation session_id."""
 	new_ctx = ctx.context.copy()
 	if ctx.session_id and not new_ctx.get("session_id"):
 		new_ctx["session_id"] = ctx.session_id
@@ -500,9 +482,6 @@ def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
 	choices = action.get("choices", [])
-	# Store choices on the top-level `choices` field (what the web UI reads) AND in
-	# extra_data (back-compat). Without the top-level field, the persisted follow-up
-	# doc has `choices: []` and the UI renders no choice buttons.
 	yield Ai(content=reason, ai_type="follow_up", choices=choices, extra_data={"choices": choices}, _context=context)
 
 
@@ -640,8 +619,6 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		extra.update(unknown)
 		finding_data['extra_data'] = extra
 
-	# Coerce AI-provided scalars to declared field types (LLMs send wrong-typed
-	# scalars, e.g. a bool field as the string "true") before validating.
 	finding_data = _coerce_finding_fields(cls, finding_data)
 
 	# Validate field types before instantiation
@@ -656,8 +633,6 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Ai(
 			content=f'{str(finding)}',
 			ai_type="add_finding",
-			# Carry the created finding so the web UI can render its FindingCard
-			# (VulnerabilityCard/SubdomainCard/…) — it routes on `_type`.
 			extra_data={"finding": finding.toDict()},
 			_context=context
 		)
@@ -733,10 +708,6 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 	progress_ids = {}
 
 	def run_single(act: Dict, idx: int) -> Dict:
-		# Use safe_dispatch_action so one action raising doesn't abort the whole
-		# batch (the executor future.result() would otherwise re-raise into the
-		# main loop). The error is captured as an Error item attributed to that
-		# action's tool_call_id and fed back to the LLM like any other result.
 		results = []
 		for item in safe_dispatch_action(act, batch_ctx):
 			if isinstance(item, Ai) and item.ai_type == "token_usage":

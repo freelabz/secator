@@ -342,9 +342,7 @@ class ai(PythonRunner):
 			iteration += 1
 
 			try:
-				# Mid-flight steering: drain any user messages sent WHILE the agent
-				# was running and inject them into history so the next turn redirects.
-				# Cheap query per iteration; robust (never crashes the loop).
+				# Drain mid-flight steer messages and inject them so the next turn redirects.
 				yield from self._drain_steers()
 
 				# Auto-summarize when context > 85% threshold
@@ -553,13 +551,7 @@ class ai(PythonRunner):
 			workspace=self.reports_folder or ""
 		)
 
-		# Create interactivity backend.
-		# For the remote (web) channel, the UI generates a stable session_id and
-		# reuses it verbatim on respawn so a respawned task finds its prior
-		# `_type:"ai"` docs. It arrives on the runner context (self.context) —
-		# the dispatcher sends self.context to the worker (task.py build_celery)
-		# and pops run_opts['context'], so self.context is authoritative here;
-		# run_opts['context'] only carries it for local/sync runs.
+		# Remote channel: UI sends a stable session_id on self.context; local uses self.id.
 		self.session_id = (
 			self.passed_context.get("session_id")
 			or (self.context or {}).get("session_id")
@@ -849,11 +841,6 @@ class ai(PythonRunner):
 		follow_up_prompt_uuid = None
 
 		is_batch = len(actions) > 1
-		# safe_dispatch_action wraps each action's dispatch so a Python error during
-		# a handler (e.g. a malformed LLM action/opts raising TypeError) becomes an
-		# Error item fed back to the LLM as that tool call's result, instead of
-		# propagating out and killing the main loop. _run_batch already wraps each
-		# of its actions the same way internally.
 		action_iter = _run_batch(actions, ctx) if is_batch else safe_dispatch_action(actions[0], ctx)
 
 		collected = []
@@ -868,12 +855,7 @@ class ai(PythonRunner):
 				if result.ai_type == "follow_up":
 					follow_up_ai = result
 					follow_up_choices = result.choices or (result.extra_data or {}).get("choices", [])
-					# Persist the follow-up doc in its FINAL renderable state. add_result()
-					# dedupes by _uuid, so once persisted here it can never be re-persisted
-					# (the later `yield follow_up_ai` in the main loop is dropped). For a
-					# remote run, stamp status="pending" + top-level choices + session_id
-					# BEFORE the single add_result, so the one persisted doc is what the web
-					# UI needs: status=="pending" (clears "thinking") and non-empty choices.
+					# Persist the follow-up doc once, in its final renderable state (add_result dedupes by _uuid).
 					if isinstance(self.backend, RemoteBackend):
 						follow_up_ai.status = "pending"
 						follow_up_ai.session_id = self.session_id

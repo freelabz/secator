@@ -136,26 +136,14 @@ class RemoteBackend(InteractivityBackend):
 		return {"answer": answer}
 
 	def poll_steers(self, session_id):
-		"""Drain pending steer docs for ``session_id`` and mark them consumed.
-
-		A "steer" is a mid-flight user message: it's written into the channel
-		(``_type:"ai"``, ``ai_type:"steer"``, ``status:"pending"``) WHILE the agent
-		is running, and the worker picks it up at the next loop checkpoint to
-		redirect the next turn. This is distinct from a follow-up ``answer`` (which
-		the worker is *blocked* waiting on) and from a hard Stop (which revokes the
-		Celery task).
-
-		Returns a list of steer content strings (oldest-first). Each returned doc is
-		flipped to ``status:"consumed"`` so it's injected exactly once. Robust by
-		design: any backend error returns ``[]`` so a steer can never crash the run.
+		"""Drain pending steer docs for ``session_id`` and mark them consumed
+		(oldest-first). Any backend error returns ``[]`` — a steer must never crash the run.
 		"""
 		if self.query_engine is None:
 			return []
 		base = {
 			"_type": "ai",
 			"ai_type": "steer",
-			# Correlate by the runner context's session_id, auto-stamped on every
-			# persisted item (item._context = self.context) — see _poll_for_answer.
 			"_context.session_id": session_id,
 			"status": "pending",
 		}
@@ -185,29 +173,13 @@ class RemoteBackend(InteractivityBackend):
 	def _poll_for_answer(self, session_id, prompt_type, prompt_uuid=None):
 		"""Poll DB for the answer to the SPECIFIC pending prompt until timeout.
 
-		The query MUST be scoped to the exact prompt the worker is currently
-		blocked on — identified by ``prompt_uuid`` (stamped into the pending doc's
-		``extra_data.prompt_uuid`` before it was persisted). Matching only on
-		``{session_id, status:"answered"}`` is a bug: a multi-turn conversation
-		accumulates *previously* answered follow-up docs, so an unscoped query
-		returns a STALE answer immediately, the worker re-injects that old answer
-		as a brand-new prompt, re-runs the whole turn, asks again, re-matches the
-		same stale doc — an infinite respawn loop that re-runs scans and burns
-		tokens. Scoping on ``prompt_uuid`` makes the poll resolve only THIS
-		prompt's own answer (and time out only THIS prompt's doc).
-
-		A steer (mid-flight user message) breaks the wait: if a pending steer
-		arrives for this session while we're blocked on a follow-up, we return its
-		content as the "answer" so the loop redirects immediately instead of
-		stalling until the follow-up is explicitly answered (or times out). This
-		keeps follow-up semantics intact for the no-steer case.
+		Scoped by ``prompt_uuid`` (not just session_id + status:"answered"), else a
+		multi-turn conversation matches a stale answered doc and respawn-loops. A
+		pending steer also breaks the wait early and is returned as the answer.
 		"""
 		base = {
 			"_type": "ai",
 			"ai_type": prompt_type,
-			# Correlate by the runner context's session_id: it's auto-stamped on
-			# every persisted item (item._context = self.context), so it's always
-			# present — unlike the top-level session_id field.
 			"_context.session_id": session_id,
 		}
 		if prompt_uuid:
