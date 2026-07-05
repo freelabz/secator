@@ -647,19 +647,21 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 
 
 def _get_result_context(action, ctx):
-	"""Get result context from action.
+	"""Build the CHILD runner's context.
 
-	Always stamps the ai task's ``session_id`` (the conversation id) onto the
-	derived context. The ai task's ``self.session_id`` may be derived (from
-	``session_name`` / the runner id) and is therefore not guaranteed to already
-	live in ``ctx.context``. Stamping it here means every sub-runner (task /
-	workflow / scan) dispatched by the ai task persists a runner doc whose
-	``context.session_id`` matches the conversation — so the runners spawned by a
-	conversation are queryable by that conversation's session_id.
+	Stamps the conversation ``session_id`` (parenting link — see the runner-parenting
+	design) and marks the child ``has_parent``. Critically, it STRIPS the parent's
+	runner-identity keys (`task_id`/`workflow_id`/`scan_id`): a child that inherited
+	them would make `update_runner`/`runner_id` target the PARENT's doc instead of
+	minting its own. The child keeps drivers/workspace so it persists into the same
+	workspace, linked to the conversation by ``session_id``.
 	"""
 	new_ctx = ctx.context.copy()
+	for identity_key in ("task_id", "workflow_id", "scan_id", "task_chunk_id"):
+		new_ctx.pop(identity_key, None)
 	if ctx.session_id and not new_ctx.get("session_id"):
 		new_ctx["session_id"] = ctx.session_id
+	new_ctx["has_parent"] = True
 	action_context = {}
 	tool_call_id = action.get("tool_call_id")
 	tool_call_name = action.get("tool_call_name")
