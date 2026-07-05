@@ -513,32 +513,6 @@ def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
 	yield Ai(content=reason, ai_type="stopped", _context=context)
 
 
-def _resolve_field_type(f) -> Optional[type]:
-	"""Resolve a dataclass field's declared type to a concrete builtin type.
-
-	Mirrors ``OutputType.validate_fields``: ``f.type`` may be an actual type
-	(``bool``) or — under ``from __future__ import annotations`` — a string
-	annotation (``'bool'``). Returns the concrete type (``bool``/``int``/
-	``float``/``list``/``dict``/``str``) or ``None`` if it can't be resolved.
-	"""
-	t = f.type
-	# Actual type, e.g. bool / int / float / str
-	if isinstance(t, type):
-		return t
-	# Typing generic, e.g. List[str] -> list
-	origin = getattr(t, '__origin__', None)
-	if origin is not None:
-		return origin
-	# String annotation, e.g. 'bool', 'int', "List[str]"
-	if isinstance(t, str):
-		name = t.split('[', 1)[0].strip().lower()
-		return {
-			'bool': bool, 'int': int, 'float': float,
-			'str': str, 'list': list, 'dict': dict,
-		}.get(name)
-	return None
-
-
 def _coerce_finding_fields(cls, data: Dict) -> Dict:
 	"""Coerce AI-provided scalar values to a finding class's declared field types.
 
@@ -550,7 +524,7 @@ def _coerce_finding_fields(cls, data: Dict) -> Dict:
 	unparseable values are left untouched (validation will still surface a real
 	error rather than silently dropping data).
 	"""
-	field_types = {f.name: _resolve_field_type(f) for f in fields(cls)}
+	field_types = cls.field_types()
 	for key, value in list(data.items()):
 		if key.startswith('_'):
 			continue
