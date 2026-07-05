@@ -297,14 +297,13 @@ class Runner:
 		(e.g. a BYO addon API key) never lands in the Mongo runner doc, the API response,
 		``--driver api`` egress, or logs. The value still travels in-flight to the worker.
 
-		Resolved once and memoized. Sources, unioned defensively:
+		Sources, unioned:
 		- a direct task instance's own ``opts``/``meta_opts`` (Command / PythonRunner),
 		- the task classes referenced by this runner's config tree (Task / Workflow / Scan,
 		  which carry no ``opts`` of their own).
 		"""
-		cached = getattr(self, '_sensitive_opt_names_cache', None)
-		if cached is not None:
-			return cached
+		from secator.loader import discover_tasks
+		from secator.tree import build_runner_tree, get_flat_node_list
 		names = set()
 
 		def collect(holder):
@@ -313,24 +312,12 @@ class Runner:
 				if isinstance(confs, dict):
 					names.update(k for k, v in confs.items() if isinstance(v, dict) and v.get('sensitive'))
 
-		collect(self)
-		try:
-			from secator.runners.task import Task
-			from secator.tree import build_runner_tree, get_flat_node_list
-			for node in get_flat_node_list(build_runner_tree(self.config)):
-				if node.type != 'task':
-					continue
-				try:
-					collect(Task.get_task_class(node.name))
-				except ValueError:
-					# Unknown task name in this node: skip it, but keep scanning the rest.
-					continue
-		except Exception as e:
-			# Discovery failed for the whole tree: we can't enumerate sensitive opts, so
-			# redaction may be incomplete. Surface it loudly rather than failing silently
-			# (a silent miss here would let a secret through into serialized/printed state).
-			logger.warning('Could not resolve sensitive option names for %s (redaction may be incomplete): %s', getattr(self, 'unique_name', self), e)  # noqa: E501
-		self._sensitive_opt_names_cache = names
+		collect(self)  # a direct Command / PythonRunner instance carries its own opts
+		task_classes = {cls.__name__: cls for cls in discover_tasks()}
+		for node in get_flat_node_list(build_runner_tree(self.config)):
+			cls = task_classes.get(node.name.split('/')[0]) if node.type == 'task' else None
+			if cls:
+				collect(cls)
 		return names
 
 	@property
