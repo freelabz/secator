@@ -557,6 +557,25 @@ class TestRunRunner(unittest.TestCase):
 		_, kwargs = mock_task_cls.call_args
 		self.assertEqual(kwargs.get('context', {}).get('session_id'), 'from-context')
 
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_structures_subagent_prompt(self, mock_build_hooks, mock_task_cls, _tpl):
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['10.0.0.1'], model='m',
+							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value="- port 10.0.0.1:443"):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'],
+					'opts': {'prompt': 'Test auth on the API'}}
+			list(_run_runner(action, ctx, 'task'))
+		_, kwargs = mock_task_cls.call_args
+		prompt = kwargs.get('run_opts', {}).get('prompt', '')
+		self.assertIn('## Objective', prompt)
+		self.assertIn('Test auth on the API', prompt)
+		self.assertIn('- port 10.0.0.1:443', prompt)   # evidence injected
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestSanitizeChildOpts(unittest.TestCase):

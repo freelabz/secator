@@ -592,6 +592,10 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			return
 		opts["subagent"] = True
 		opts["interactive"] = False
+		# 1.b/1.c: structure the subagent's prompt and inject prior findings for its
+		# scope so it doesn't re-run work already done.
+		_objective = opts.get("prompt", "")
+		opts["prompt"] = build_subagent_prompt(_objective, targets, _gather_subagent_evidence(ctx, targets))
 
 	# defense in depth: a spawned runner is never dangerous (CLI --dangerous unaffected)
 	opts["dangerous"] = False
