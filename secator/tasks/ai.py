@@ -2,7 +2,6 @@
 """AI-powered penetration testing task."""
 import json
 import uuid
-from itertools import groupby
 from pathlib import Path
 from typing import Generator
 
@@ -1023,11 +1022,18 @@ class ai(PythonRunner):
 			collected.append(result)
 			ctx.results.append(result)
 
-		# Group results by tool_call_id and add to history
+		# Group results by tool_call_id and add to history. Use an order-preserving
+		# dict, NOT itertools.groupby: batch results (_run_batch) interleave by id, and
+		# groupby only groups *consecutive* keys — so an interleaved id yielded several
+		# groups and thus several tool_result messages for one tool_use, which the
+		# provider rejects ("multiple tool_result blocks with id X"). A dict groups all
+		# of an id's results together regardless of arrival order → exactly one result.
 		budget = self.history.get_action_budget(self.model)
 		fallback_path = Path(self.reports_folder) / "report.json" if self.reports_folder else None
-		for tc_id, group in groupby(collected, key=lambda r: r["_context"]['tool_call_id']):
-			group_results = list(group)
+		grouped = {}
+		for r in collected:
+			grouped.setdefault(r["_context"]['tool_call_id'], []).append(r)
+		for tc_id, group_results in grouped.items():
 			tc_name = group_results[0]["_context"]['tool_call_name']
 			has_errors = any(r["_type"] == "error" for r in group_results)
 			serialized = [

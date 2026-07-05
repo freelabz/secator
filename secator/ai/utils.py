@@ -40,6 +40,39 @@ def _strip_leading_orphan_tools(messages: List[Dict]) -> int:
 	return removed
 
 
+def _dedupe_tool_results(messages: List[Dict]) -> int:
+	"""Drop duplicate tool_result messages sharing a tool_call_id.
+
+	Anthropic (and OpenRouter's providers) fold consecutive 'tool' messages into a
+	single user turn and reject more than one tool_result per tool_use id
+	("each tool_use must have a single result. Found multiple tool_result blocks
+	with id X") — a NON-retryable 400. Duplicates arise when batch results are
+	grouped out of order (itertools.groupby only groups *consecutive* keys), or
+	when history trim/compaction restructures the window. Within each run of
+	consecutive 'tool' messages, keep the first result for each id and drop the
+	rest (in place). Returns the number removed.
+	"""
+	removed = 0
+	i = 0
+	while i < len(messages):
+		if messages[i].get("role") != "tool":
+			i += 1
+			continue
+		seen = set()
+		j = i
+		while j < len(messages) and messages[j].get("role") == "tool":
+			tc_id = messages[j].get("tool_call_id")
+			if tc_id is not None and tc_id in seen:
+				del messages[j]
+				removed += 1
+				continue  # a message shifted into j; re-check without advancing
+			if tc_id is not None:
+				seen.add(tc_id)
+			j += 1
+		i = j
+	return removed
+
+
 def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
 	"""Repair orphan tool_use/tool_result pairing for Anthropic/OpenAI.
 
@@ -58,6 +91,9 @@ def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
 	"""
 	# Leading orphan tool_results have no parent in this window — drop them.
 	repaired = _strip_leading_orphan_tools(messages)
+	# Duplicate tool_results for one id are rejected as a non-retryable 400 — drop
+	# extras so the request is valid (and, when hit as a 400, so the retry repairs it).
+	repaired += _dedupe_tool_results(messages)
 	inserted = 0
 	i = 0
 	while i < len(messages):
