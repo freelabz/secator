@@ -85,6 +85,7 @@ tasks:
     nuclei/network:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
+      severity: [critical, high, medium]
       targets_:
         - type: port
           field: '{host}:{port}'
@@ -104,7 +105,6 @@ tasks:
       description: Search for vulnerabilities on alive HTTP services
       automatic_scan: true
       severity: [critical, high, medium]
-      exclude_tags: [network, ssl, file, dns, osint, token-spray, headers, dos, fuzzing]
       targets_:
         - type: url
           field: url
@@ -114,7 +114,7 @@ tasks:
     nuclei/kev:
       description: Check for CISA Known Exploited Vulnerabilities
       tags: [kev]
-      severity: [critical, high]
+      severity: [critical, high, medium]
       targets_:
         - type: url
           field: url
