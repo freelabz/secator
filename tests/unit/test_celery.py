@@ -341,6 +341,84 @@ class TestDelayMethods(unittest.TestCase):
 		self.assertIsNotNone(sig)
 
 
+class TestWorkerLossRetryCap(unittest.TestCase):
+	"""Worker-loss redelivery cap (task_acks_late + task_reject_on_worker_lost)."""
+
+	def test_bump_worker_loss_count_get_set_fallback(self):
+		"""Counter increments via the generic get/set fallback (any KV backend, e.g. filesystem)."""
+		from secator.celery import bump_worker_loss_count
+
+		# Use a unique id so reruns don't collide, and clean up the backend key afterwards.
+		task_id = f'wl-test-{id(self)}'
+		key = app.backend.get_key_for_task(f'worker-loss-{task_id}')
+		try:
+			self.assertEqual(bump_worker_loss_count(task_id), 1)
+			self.assertEqual(bump_worker_loss_count(task_id), 2)
+			self.assertEqual(bump_worker_loss_count(task_id), 3)
+			# A different task id is counted independently.
+			self.assertEqual(bump_worker_loss_count(f'{task_id}-other'), 1)
+		finally:
+			try:
+				app.backend.delete(key)
+				app.backend.delete(app.backend.get_key_for_task(f'worker-loss-{task_id}-other'))
+			except Exception:
+				pass
+
+	def test_bump_worker_loss_count_prefers_atomic_incr(self):
+		"""When the backend implements atomic incr (Redis/Memcached), it is used directly."""
+		from unittest.mock import patch
+		from secator.celery import bump_worker_loss_count
+
+		with patch.object(app.backend, 'incr', return_value=42, create=True) as mock_incr:
+			self.assertEqual(bump_worker_loss_count('task-abc'), 42)
+			mock_incr.assert_called_once()
+
+	def test_bump_worker_loss_count_disabled_without_kv(self):
+		"""Returns 0 (cap disabled) on backends with neither incr nor get/set (db/RPC)."""
+		from unittest.mock import patch
+		from secator.celery import bump_worker_loss_count
+
+		with patch.object(app.backend, 'incr', side_effect=NotImplementedError, create=True):
+			with patch.object(app.backend, 'get', side_effect=NotImplementedError, create=True):
+				self.assertEqual(bump_worker_loss_count('task-abc'), 0)
+
+	def test_abandon_task_returns_failure_error(self):
+		"""Abandoning returns results with a self-owned FAILURE Error so the chord proceeds."""
+		from secator.tasks import httpx
+		from secator.celery import abandon_task
+		if httpx not in TEST_TASKS:
+			self.skipTest('httpx not available')
+
+		results = abandon_task('httpx', ['example.com'], {'context': {}}, [], delivery_count=2)
+		errors = [r for r in results if r._type == 'error']
+		self.assertEqual(len(errors), 1)
+		# Message separates delivery attempts (broker redeliveries) from the retry cap, so it
+		# reads sensibly even when the cap is 0 (a redelivery still occurs; the work isn't re-run).
+		self.assertIn('abandoned after 2 delivery attempts', errors[0].message)
+		self.assertIn('retry cap:', errors[0].message)
+
+	def test_retries_exhausted_does_not_count_initial_delivery(self):
+		"""delivery_count includes the initial run; task_max_retries=N allows N redeliveries."""
+		from secator.celery import worker_loss_retries_exhausted
+		# task_max_retries=3 -> initial (1) + 3 redeliveries (2,3,4) allowed, abandon on the 5th delivery.
+		self.assertFalse(worker_loss_retries_exhausted(1, 3))  # initial run
+		self.assertFalse(worker_loss_retries_exhausted(2, 3))  # redelivery 1
+		self.assertFalse(worker_loss_retries_exhausted(3, 3))  # redelivery 2
+		self.assertFalse(worker_loss_retries_exhausted(4, 3))  # redelivery 3 (last allowed)
+		self.assertTrue(worker_loss_retries_exhausted(5, 3))   # redelivery 4 -> abandon
+		# task_max_retries=0 -> no redeliveries; abandon on the first redelivery, not the initial run.
+		self.assertFalse(worker_loss_retries_exhausted(1, 0))
+		self.assertTrue(worker_loss_retries_exhausted(2, 0))
+
+	def test_worker_cancel_flag_wired_to_app_conf(self):
+		"""The worker_cancel_long_running_tasks_on_connection_loss config flag reaches app.conf."""
+		from secator.config import CONFIG
+		self.assertEqual(
+			app.conf.worker_cancel_long_running_tasks_on_connection_loss,
+			CONFIG.celery.worker_cancel_long_running_tasks_on_connection_loss,
+		)
+
+
 class TestRunnerPickle(unittest.TestCase):
 	"""Test that Runner objects with dynamic driver hooks can be pickled/unpickled."""
 
