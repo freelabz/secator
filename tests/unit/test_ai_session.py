@@ -183,6 +183,190 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		self.assertEqual(encryptor.decrypt(history.messages[0]["content"]), plaintext)
 
 
+class TestRestoreScopingIsolation(unittest.TestCase):
+	"""Task 6 Step 1: restore_history_from_db must be scoped to a single
+	conversation even when the underlying store holds docs from several. The
+	scoping key is `_context.session_id` (see restore_history_from_db's query),
+	so this uses a fake engine that ACTUALLY applies that filter to a MIXED doc
+	list of two conversations -- not a MagicMock stub that always returns a
+	fixed set regardless of the query -- to prove zero cross-bleed end to end."""
+
+	class _FilteringEngine:
+		"""Fake engine standing in for a real backend: applies the caller's
+		`_context.session_id` filter (and `_type` filter) to `docs`, exactly the
+		way JsonBackend/MongoDBBackend would."""
+
+		def __init__(self, docs):
+			self.docs = docs
+			self.calls = []
+
+		def search(self, query, **kwargs):
+			self.calls.append(query)
+			wanted_session = query.get('_context.session_id')
+			wanted_type = query.get('_type')
+			return [
+				d for d in self.docs
+				if (wanted_type is None or d.get('_type') == wanted_type)
+				and (wanted_session is None or (d.get('_context') or {}).get('session_id') == wanted_session)
+			]
+
+	def _mixed_docs(self):
+		"""Two interleaved conversations, A and B, in one combined doc list."""
+		return [
+			{"_type": "ai", "ai_type": "prompt", "_timestamp": 1,
+			 "message": {"role": "user", "content": "A: scan host1"},
+			 "_context": {"session_id": "A"}},
+			{"_type": "ai", "ai_type": "prompt", "_timestamp": 1,
+			 "message": {"role": "user", "content": "B: scan host2"},
+			 "_context": {"session_id": "B"}},
+			{"_type": "ai", "ai_type": "response", "_timestamp": 2,
+			 "message": {"role": "assistant", "content": "A: host1 has port 80 open"},
+			 "_context": {"session_id": "A"}},
+			{"_type": "ai", "ai_type": "response", "_timestamp": 2,
+			 "message": {"role": "assistant", "content": "B: host2 has port 443 open"},
+			 "_context": {"session_id": "B"}},
+			{"_type": "ai", "ai_type": "prompt", "_timestamp": 3,
+			 "message": {"role": "user", "content": "A: anything else?"},
+			 "_context": {"session_id": "A"}},
+		]
+
+	def test_restore_isolates_session_a_from_mixed_docs(self):
+		from secator.ai.session import restore_history_from_db
+		engine = self._FilteringEngine(self._mixed_docs())
+
+		history = restore_history_from_db("A", engine, model="gpt-4o")
+
+		self.assertEqual(history.messages, [
+			{"role": "user", "content": "A: scan host1"},
+			{"role": "assistant", "content": "A: host1 has port 80 open"},
+			{"role": "user", "content": "A: anything else?"},
+		])
+		# No content from B leaked into A's transcript.
+		for msg in history.messages:
+			self.assertNotIn("B:", msg["content"])
+		# The engine was actually called with the session-scoping filter.
+		self.assertEqual(engine.calls, [{"_type": "ai", "_context.session_id": "A"}])
+
+	def test_restore_isolates_session_b_from_mixed_docs(self):
+		from secator.ai.session import restore_history_from_db
+		engine = self._FilteringEngine(self._mixed_docs())
+
+		history = restore_history_from_db("B", engine, model="gpt-4o")
+
+		self.assertEqual(history.messages, [
+			{"role": "user", "content": "B: scan host2"},
+			{"role": "assistant", "content": "B: host2 has port 443 open"},
+		])
+		for msg in history.messages:
+			self.assertNotIn("A:", msg["content"])
+		self.assertEqual(engine.calls, [{"_type": "ai", "_context.session_id": "B"}])
+
+
+class TestRestoreCrossBackend(unittest.TestCase):
+	"""Task 6 Step 2: restore_history_from_db must round-trip identically
+	whether the docs come from a mocked engine or a REAL local backend
+	(JsonBackend via QueryEngine reading an on-disk report.json). Proves the
+	restore logic itself -- not just the mock plumbing -- is backend-agnostic."""
+
+	def test_restore_from_real_json_backend_matches_fake_engine_path(self):
+		import json as _json
+		import tempfile as _tempfile
+		from pathlib import Path
+		from secator.query import QueryEngine
+		from secator.query.json import JsonBackend
+		from secator.ai.session import restore_history_from_db
+
+		tmp = _tempfile.mkdtemp(prefix="secator-test-reports-")
+		# No hyphens/spaces: sanitize_folder_name would otherwise rewrite the
+		# workspace directory name and the test would look in the wrong place.
+		workspace_name = "wscrossbackend"
+		task_dir = Path(tmp) / workspace_name / "tasks" / "task1"
+		task_dir.mkdir(parents=True)
+
+		session_id = "CROSS-SESSION-1"
+		ai_items = [
+			{"_type": "ai", "ai_type": "prompt", "_timestamp": 1,
+			 "message": {"role": "user", "content": "scan example.com"},
+			 "_context": {"session_id": session_id}},
+			{"_type": "ai", "ai_type": "response", "_timestamp": 2,
+			 "message": {"role": "assistant", "content": "port 80 is open"},
+			 "_context": {"session_id": session_id}},
+		]
+		report = {"results": {"ai": ai_items}}
+		(task_dir / "report.json").write_text(_json.dumps(report))
+
+		# Resolve a real QueryEngine down to the real JsonBackend, then apply the
+		# backend's documented reports_dir override (JsonBackend.__init__ accepts
+		# config={'reports_dir': ...}; QueryEngine doesn't forward a `config` kwarg
+		# of its own, so the override is applied directly on the resolved backend
+		# instance -- same effect, same attribute the constructor would have set).
+		engine = QueryEngine(
+			workspace_id=workspace_name,
+			context={"drivers": ["local"], "workspace_name": workspace_name},
+		)
+		self.assertIsInstance(engine.backend, JsonBackend)
+		engine.backend.reports_dir = Path(tmp)
+
+		history = restore_history_from_db(session_id, engine, model="gpt-4o")
+
+		expected = [
+			{"role": "user", "content": "scan example.com"},
+			{"role": "assistant", "content": "port 80 is open"},
+		]
+		self.assertEqual(history.messages, expected)
+
+		# Same round-trip via a fake engine over the identical doc list -> proves
+		# parity between the real local backend and the mock/fake path.
+		class FakeEngine:
+			def search(self, query, **kwargs):
+				return ai_items
+
+		fake_history = restore_history_from_db(session_id, FakeEngine(), model="gpt-4o")
+		self.assertEqual(history.messages, fake_history.messages)
+
+
+class TestSizeBackstopEndToEnd(unittest.TestCase):
+	"""Task 6 Step 3: an oversized assistant `content` is capped by cap_message
+	before persist (mirrors ai.py:526's `message=cap_message(assistant_msg)`),
+	and the capped message still restores into a valid transcript -- proving
+	the persist-time backstop and the restore path compose correctly."""
+
+	def test_oversized_assistant_content_capped_and_restores_cleanly(self):
+		from secator.ai.history import cap_message, MAX_PERSISTED_MESSAGE_CHARS
+		from secator.ai.session import restore_history_from_db
+
+		oversized = "y" * (MAX_PERSISTED_MESSAGE_CHARS * 3)
+		assistant_msg = {"role": "assistant", "content": oversized}
+		capped = cap_message(assistant_msg)
+
+		# Backstop applied at persist time: capped, marker present, well under budget.
+		slack = 20  # room for the '…[capped]' marker itself
+		self.assertLessEqual(len(capped["content"]), MAX_PERSISTED_MESSAGE_CHARS + slack)
+		self.assertIn("[capped]", capped["content"])
+		self.assertLess(len(capped["content"]), len(oversized))
+
+		docs = [
+			{"_type": "ai", "ai_type": "prompt", "_timestamp": 1,
+			 "message": {"role": "user", "content": "scan and summarize everything"},
+			 "_context": {"session_id": "SZ"}},
+			{"_type": "ai", "ai_type": "response", "_timestamp": 2,
+			 "message": capped,
+			 "_context": {"session_id": "SZ"}},
+		]
+
+		class FakeEngine:
+			def search(self, query, **kwargs):
+				return docs
+
+		history = restore_history_from_db("SZ", FakeEngine(), model="gpt-4o")
+
+		# Valid transcript: correct roles/order, restored verbatim (including cap).
+		self.assertEqual([m["role"] for m in history.messages], ["user", "assistant"])
+		self.assertEqual(history.messages[-1]["content"], capped["content"])
+		self.assertLessEqual(len(history.messages[-1]["content"]), MAX_PERSISTED_MESSAGE_CHARS + slack)
+		self.assertIn("[capped]", history.messages[-1]["content"])
+
+
 class TestRemoteResumeBranch(unittest.TestCase):
 	"""Verify the yielder remote-resume branch picks Mongo restore vs fresh start."""
 

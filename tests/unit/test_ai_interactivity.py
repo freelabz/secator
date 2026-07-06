@@ -514,7 +514,12 @@ class TestRemoteTurnPendingDocCoverage(unittest.TestCase):
 		fake_self._summarize_user = _empty_gen
 		fake_self._drain_history_usage = lambda: None
 		fake_self._account_usage = lambda u: None
-		fake_self._add_assistant_to_history = lambda c, t: None
+		# _add_assistant_to_history now returns the litellm message dict (the
+		# caller feeds it to cap_message(...) for persistence); the stub must
+		# match that contract instead of returning None -- a bare None broke
+		# cap_message's dict(msg) call and masked this test's real assertions
+		# behind a swallowed exception.
+		fake_self._add_assistant_to_history = lambda c, t: {"role": "assistant", "content": c}
 		fake_self._save_history = lambda: None
 
 		def _fake_process(tool_calls, ctx):
