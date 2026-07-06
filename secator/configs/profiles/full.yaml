@@ -14,14 +14,15 @@ opts:
 
     # Workflow options overrides
     ports: "-"
-    nuclei: true
+    nuclei: true            # url_vuln / wordpress / subdomain_recon (bool flag)
+    nuclei_mode: full       # host_recon (kev by default -> full)
     brute_dns: true
     brute_http: true
     hunt_secrets: true
     test_ssl: true
 
     # Scan options overrides
-    host_recon_nuclei: true
+    host_recon_nuclei_mode: full
     host_recon_nmap_ports: "-"
     domain_recon_testssl_server_defaults: null
     subdomain_recon_hunt_secrets: true

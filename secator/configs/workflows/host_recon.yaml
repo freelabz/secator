@@ -15,10 +15,11 @@ input_types:
   - cidr_range
 
 options:
-  nuclei:
-    is_flag: True
-    default: False
-    help: Run nuclei scans (slow)
+  nuclei_mode:
+    type: str
+    default: kev
+    choices: ["off", kev, full]
+    help: "Nuclei scan level: off | kev (CISA Known Exploited Vulns, on by default) | full (tech-aware url + network/ssl + default-login, slow)"
 
   scanners:
     type: list
@@ -91,7 +92,7 @@ tasks:
         - type: port
           field: '{host}:{port}'
           condition: item.state == 'open'
-      if: opts.nuclei and not opts.passive
+      if: opts.nuclei_mode == 'full' and not opts.passive
 
     nuclei/default-login:
       description: Check for default credentials on open services
@@ -100,7 +101,7 @@ tasks:
         - type: port
           field: '{host}:{port}'
           condition: item.state == 'open'
-      if: opts.nuclei and not opts.passive
+      if: opts.nuclei_mode == 'full' and not opts.passive
 
     nuclei/url:
       description: Search for vulnerabilities on alive HTTP services
@@ -114,7 +115,7 @@ tasks:
         - type: url
           field: url
           condition: item.status_code != 0
-      if: opts.nuclei and not opts.passive
+      if: opts.nuclei_mode == 'full' and not opts.passive
 
     nuclei/kev:
       description: Check for CISA Known Exploited Vulnerabilities
@@ -130,7 +131,8 @@ tasks:
         - type: port
           field: '{host}:{port}'
           condition: item.state == 'open'
-      if: opts.nuclei and not opts.passive
+      # kev runs in both 'kev' (default) and 'full' modes; only 'off' disables it
+      if: opts.nuclei_mode != 'off' and not opts.passive
 
   _group/vuln:
     searchsploit:
