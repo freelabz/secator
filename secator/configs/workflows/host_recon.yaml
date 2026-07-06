@@ -106,6 +106,10 @@ tasks:
       description: Search for vulnerabilities on alive HTTP services
       automatic_scan: true
       severity: [critical, high, medium]
+      # kev and default-login templates carry product tags that automatic_scan
+      # matches on detected tech, so they'd be re-run here — leave those to the
+      # dedicated nuclei/kev and nuclei/default-login tasks.
+      exclude_tags: [kev, default-login]
       targets_:
         - type: url
           field: url
@@ -116,10 +120,16 @@ tasks:
       description: Check for CISA Known Exploited Vulnerabilities
       tags: [kev]
       severity: [critical, high, medium]
+      # URLs catch web KEV templates; open ports catch the network-protocol KEV
+      # templates (Redis, WebLogic T3, SMB, Tomcat AJP, ESXi, ...) that carry a
+      # network/tcp tag and are unreachable via an HTTP URL.
       targets_:
         - type: url
           field: url
           condition: item.status_code != 0
+        - type: port
+          field: '{host}:{port}'
+          condition: item.state == 'open'
       if: opts.nuclei and not opts.passive
 
   _group/vuln:
