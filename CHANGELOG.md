@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.40.0](https://github.com/freelabz/secator/compare/v0.39.0...v0.40.0) (2026-07-06)
+
+
+### Features
+
+* **celery:** cap worker-loss redeliveries to abandon repeatedly-killed tasks ([#1284](https://github.com/freelabz/secator/issues/1284)) ([9de0592](https://github.com/freelabz/secator/commit/9de05925a274e1981600725d30a65fe9663fd0b5))
+* **hooks:** on_build — stable runner identity across redeliveries (L2) ([#1202](https://github.com/freelabz/secator/issues/1202)) ([e0b16b4](https://github.com/freelabz/secator/commit/e0b16b475c51580734bd62c1809e2ce8452d711e))
+* **runners:** redact sensitive task options from serialized/printed state ([#1232](https://github.com/freelabz/secator/issues/1232)) ([0203f02](https://github.com/freelabz/secator/commit/0203f028935e053c58380060eb22217bea33ba69))
+* **vulnerability:** add status field + carry-over across re-scans ([#1240](https://github.com/freelabz/secator/issues/1240)) ([60154dd](https://github.com/freelabz/secator/commit/60154ddc5f400ce7d33e5d3d0c6ecaa4b68bf4c0))
+
+
+### Performance Improvements
+
+* **runners:** route empty-results mark_started to the small pool ([#1281](https://github.com/freelabz/secator/issues/1281)) ([56866d6](https://github.com/freelabz/secator/commit/56866d693119620a8c795f21f710ca24a52b1b74))
+
 ## [0.39.0](https://github.com/freelabz/secator/compare/v0.38.0...v0.39.0) (2026-07-03)
 
 
