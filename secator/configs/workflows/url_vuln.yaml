@@ -65,7 +65,6 @@ tasks:
 
     nuclei:
       description: Search for HTTP vulns
-      # kev is handled by the dedicated nuclei/kev task below
       exclude_tags: [network, ssl, file, dns, osint, token-spray, headers, kev]
       targets_:
         - type: target
@@ -82,7 +81,6 @@ tasks:
       targets_:
         - type: target
           field: name
-      # kev runs in both 'kev' (default) and 'full' modes; only 'off' disables it
       if: opts.nuclei_mode != 'off' and not opts.passive
   # TODO: Add support for SQLMap
   # sqlmap:

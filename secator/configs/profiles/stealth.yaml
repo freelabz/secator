@@ -6,8 +6,6 @@ opts:
   tcp_syn_stealth: true
   nmap_light_tcp_syn_stealth: true
   scan_type: s
-  # KEV nuclei is active probing (on by default) — disable it for stealth.
-  # Quoted so YAML keeps the string "off" (bare off parses as boolean false).
   nuclei_mode: "off"
   host_recon_nuclei_mode: "off"
   url_vuln_nuclei_mode: "off"

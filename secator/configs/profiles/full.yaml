@@ -14,7 +14,7 @@ opts:
 
     # Workflow options overrides
     ports: "-"
-    nuclei_mode: full       # host_recon + url_vuln (kev by default -> full)
+    nuclei_mode: full
     brute_dns: true
     brute_http: true
     hunt_secrets: true
