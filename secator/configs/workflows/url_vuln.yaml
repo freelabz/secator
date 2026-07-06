@@ -18,10 +18,11 @@ options:
     default: False
     short: ps
 
-  nuclei:
-    is_flag: True
-    default: False
-    help: Run nuclei on tagged URLs (slow)
+  nuclei_mode:
+    type: str
+    default: kev
+    choices: ["off", kev, full]
+    help: "Nuclei scan level: off | kev (CISA Known Exploited Vulns, on by default) | full (broad HTTP vuln scan on target + tagged URLs, slow)"
 
 tasks:
   _group/pattern_analysis:
@@ -64,14 +65,25 @@ tasks:
 
     nuclei:
       description: Search for HTTP vulns
-      exclude_tags: [network, ssl, file, dns, osint, token-spray, headers]
+      # kev is handled by the dedicated nuclei/kev task below
+      exclude_tags: [network, ssl, file, dns, osint, token-spray, headers, kev]
       targets_:
         - type: target
           field: name
         - type: tag
           field: match
           condition: item._source.startswith("gf")
-      if: opts.nuclei and not opts.passive
+      if: opts.nuclei_mode == 'full' and not opts.passive
+
+    nuclei/kev:
+      description: Check for CISA Known Exploited Vulnerabilities
+      tags: [kev]
+      severity: [critical, high, medium]
+      targets_:
+        - type: target
+          field: name
+      # kev runs in both 'kev' (default) and 'full' modes; only 'off' disables it
+      if: opts.nuclei_mode != 'off' and not opts.passive
   # TODO: Add support for SQLMap
   # sqlmap:
   #   description: Attack SQLI vulnerabilities

@@ -10,3 +10,4 @@ opts:
   # Quoted so YAML keeps the string "off" (bare off parses as boolean false).
   nuclei_mode: "off"
   host_recon_nuclei_mode: "off"
+  url_vuln_nuclei_mode: "off"
