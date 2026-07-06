@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 import time
 from secator.output_types import OutputType
-from secator.utils import strip_rich_markup, rich_to_ansi
+from secator.utils import strip_rich_markup, rich_to_ansi, rich_escape as _s
 
 
 @dataclass
@@ -26,7 +26,9 @@ class Warning(OutputType):
 		self.message = strip_rich_markup(self.message)
 
 	def __rich__(self):
-		s = rf"\[[yellow]WRN[/]] {self.message_color}"
+		source = (self._context or {}).get('node_id') or self._source
+		prefix = f'[dim]{_s(source)}[/] ' if source else ''
+		s = rf"\[[yellow]WRN[/]] {prefix}{self.message_color}"
 		return s
 
 	def __repr__(self):

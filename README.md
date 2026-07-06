@@ -109,6 +109,8 @@ check that the tool complies with our selection criterias before doing so. If it
 ```sh
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_universal.sh)"
 ```
+***Note:** Supports optional flags `--version`, `--templates`, `--addons`, and `--tools` — run the script with `--help` for details.*
+
 </details>
 
 <details>
@@ -210,6 +212,44 @@ To figure out which languages or tools are installed on your system (along with 
 secator health
 ```
 
+
+### Queries
+
+`secator` lets you query all previous reports with the `secator query` (or `secator q`) command, and re-use queries.
+
+`secator q <arg>` resolves its argument in three steps:
+
+1. **Saved query name** — if `<arg>` matches a saved query, its expression is used.
+2. **Filter expression** — if `<arg>` looks like a filter (contains `==`, `<`, `~=`, `&&`, …), it is passed straight through.
+3. **Natural language** — otherwise it is sent to AI chat (`secator x ai --mode chat`).
+
+```sh
+# Run raw expressions directly
+secator q "vulnerability.tags ~= 'kev' && vulnerability.confidence == 'high'"                                                     # vulns KEV (Known-Exploited Vulnerabilities) + high confidence
+secator q "vulnerability.severity == 'critical' && vulnerability.tags ~= 'exploitable' && vulnerability.confidence == 'high'"     # vulns critical + exploitable + high confidence
+secator q "vulnerability.severity_nb < 2 && vulnerability.confidence == 'high'"                                                   # vulns severity > high + high confidence
+secator q "exploit.cves  ~= 'CVE-2021-44521'"                                                                                       # exploits found for vuln CVE-2021-44521
+secator q "port" -f "{host} {port} {service_name}" | cut -d " " -f2 | sort | uniq -c | sort -nr | head -n 15                      # top 15 ports
+secator q "port" -f "{host} {port} {service_name}" | cut -d " " -f3,4,5,6 | awk 'NF > 0' | sort | uniq -c | sort -nr | head -n 15 # top 15 services
+secator q "technology" -f "{product}/{version}" | sort | uniq -c | sort -nr | head -n 15                                          # top 15 technologies
+secator q "port.state == 'open'" -rf scans/23,tasks/10                                                                            # only results from scan 23 and task 10
+
+# Save a query and run it
+secator c set queries.critical_vulns "vulnerability.severity_nb < 2"          # save a query
+secator c get queries                                                         # list saved queries
+secator q critical_vulns -f "{vulnerability.matched_at}" -ws secator.cloud    # run a saved query on workspace + extract targets
+
+# Ask a natural-language question (runs the AI chat task)
+secator q "Analyze my workspace data"
+```
+
+`secator q` accepts the same options as `secator r show` (`-o/--output`,
+`-d/--time-delta`, `-f/--format`, `-w/-ws/--workspace`, `--driver`, `--dedupe`),
+plus `-rf/--report-filter` to scope the query to specific runner paths (the
+equivalent of `r show`'s `REPORT_QUERY` argument). On the AI-chat path only the
+workspace and prompt are used.
+
+
 ### Shell completion
 
 `secator` supports shell completion for bash, zsh, and fish. This provides auto-completion for:
@@ -239,7 +279,7 @@ secator util completion --shell fish --install
 
 After installation, you can use tab completion:
 ```sh
-secator task n<TAB>     # completes to nmap, naabu, nuclei, etc.
+secator x n<TAB>     # completes to nmap, naabu, nuclei, etc.
 secator w url_<TAB>     # completes to url_crawl, url_fuzz, url_dirsearch, etc.
 secator x nmap --profiles ag<TAB>  # completes to aggressive
 ```

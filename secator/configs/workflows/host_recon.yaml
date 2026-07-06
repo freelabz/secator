@@ -86,6 +86,7 @@ tasks:
       description: Scan network and SSL vulnerabilities
       tags: [network, ssl]
       severity: [critical, high, medium]
+      no_httpx: true
       targets_:
         - type: port
           field: '{host}:{port}'

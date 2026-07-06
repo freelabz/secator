@@ -8,7 +8,7 @@ from secator.serializers import JSONSerializer
 @task()
 class jswhois(Command):
 	"""WHOIS in JSON format"""
-	cmd = 'jswhois'
+	cmd = 'jswhois -f'
 	input_types = [HOST]
 	output_types = [Tag]
 	item_loaders = [JSONSerializer(list=True)]

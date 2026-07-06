@@ -21,12 +21,43 @@ class QueryBackend(ABC):
 		self.config = config or {}
 		self.context = context or {}
 
+	def list_workspaces(self) -> List[Dict[str, Any]]:
+		"""List all workspaces accessible via this backend."""
+		return []
+
+	def get_workspace(self, workspace_id: str) -> Optional[Dict[str, Any]]:
+		"""Get info for a specific workspace."""
+		return None
+
+	def list_runners(
+		self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
+		has_parent: Optional[bool] = None
+	) -> List[Dict[str, Any]]:
+		"""List runners (tasks/workflows/scans) from this backend.
+
+		has_parent: None lists all runners, False only outermost (root) runners,
+		True only nested children.
+		"""
+		return []
+
+	def get_runner(self, runner_id: str, runner_type: str) -> Optional[Dict[str, Any]]:
+		"""Get a single runner by ID from this backend.
+
+		runner_id: the backend runner id. runner_type: singular type (task/workflow/scan).
+		"""
+		return None
+
 	def get_base_query(self) -> dict:
 		"""Base query - ALWAYS enforced, cannot be overridden."""
 		return {
 			'_context.workspace_id': self.workspace_id,
 			# "_context.workspace_duplicate": False,
-			'is_false_positive': False,
+			# A finding is a false positive only when explicitly marked. Most
+			# findings never set the field at all, so an exact `False` match drops
+			# them (Mongo `is_false_positive: false` does not match missing fields)
+			# — that returned 0 results for fully-populated workspaces. `$ne: True`
+			# keeps false/null/absent and excludes only explicit false positives.
+			'is_false_positive': {'$ne': True},
 		}
 
 	def _merge_query(self, query: dict) -> dict:

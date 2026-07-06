@@ -1,4 +1,3 @@
-import fnmatch
 import importlib
 import ipaddress
 import itertools
@@ -15,9 +14,9 @@ import traceback
 import validators
 import warnings
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import reduce
-from pathlib import Path, PurePath
+from pathlib import Path
 from time import time
 from urllib.parse import urlparse, quote
 
@@ -230,9 +229,15 @@ def deduplicate(array, attr=None):
 		memo = set()
 		res = []
 		for sub in array:
-			if attr in sub.keys() and getattr(sub, attr) not in memo:
-				res.append(sub)
-				memo.add(getattr(sub, attr))
+			# keys() is now cached (a constant tuple per class), so the field-only
+			# membership check is cheap again — no per-item fields() recompute. Keep
+			# the declared-field contract (vs hasattr, which would also match
+			# inherited attrs / invoke property getters) and read the value once.
+			if attr in sub.keys():
+				value = getattr(sub, attr)
+				if value not in memo:
+					res.append(sub)
+					memo.add(value)
 		return sorted(res, key=operator.attrgetter(attr))
 	return sorted(list(dict.fromkeys(array)))
 
@@ -619,51 +624,6 @@ def extract_subdomains_from_fqdn(fqdn, domain, suffix):
 	return subdomains
 
 
-def match_file_by_pattern(paths, pattern, type='both'):
-	"""Match pattern on a set of paths.
-
-	Args:
-		paths (iterable): An iterable of Path objects to be searched.
-		pattern (str): The pattern to search for in file names or directory names, supports Unix shell-style wildcards.
-		type (str): Specifies the type to search for; 'file', 'directory', or 'both'.
-
-	Returns:
-		list of Path: A list of Path objects that match the given pattern.
-	"""
-	matches = []
-	for path in paths:
-		full_path = str(path.resolve())
-		if path.is_dir() and type in ['directory', 'both'] and fnmatch.fnmatch(full_path, f'*{pattern}*'):
-			matches.append(path)
-		elif path.is_file() and type in ['file', 'both'] and fnmatch.fnmatch(full_path, f'*{pattern}*'):
-			matches.append(path)
-
-	return matches
-
-
-def get_file_date(file_path):
-	"""Retrieves the last modification date of the file and returns it in a human-readable format.
-
-	Args:
-		file_path (Path): Path object pointing to the file.
-
-	Returns:
-		str: Human-readable time format.
-	"""
-	# Get the last modified time of the file
-	mod_timestamp = file_path.stat().st_mtime
-	mod_date = datetime.fromtimestamp(mod_timestamp)
-
-	# Determine how to display the date based on how long ago it was modified
-	now = datetime.now()
-	if (now - mod_date).days < 7:
-		# If the modification was less than a week ago, use natural time
-		return humanize.naturaltime(now - mod_date) + mod_date.strftime(' @ %H:%m')
-	else:
-		# Otherwise, return the date in "on %B %d" format
-		return f'{mod_date.strftime("%B %d @ %H:%m")}'
-
-
 def humanize_date(dt):
 	"""Returns a human-readable format for a datetime object or ISO format string.
 
@@ -680,12 +640,15 @@ def humanize_date(dt):
 			dt = datetime.fromisoformat(dt)
 		except (ValueError, TypeError):
 			return str(dt)
-	dt_utc = dt.replace(tzinfo=None) if dt.tzinfo else dt
-	now = datetime.utcnow()
-	if (now - dt_utc).days < 7:
-		return humanize.naturaltime(now - dt_utc) + dt_utc.strftime(' @ %H:%M')
+	if dt.tzinfo is None:
+		dt = dt.replace(tzinfo=timezone.utc)
+	dt_local = dt.astimezone(tz=None)
+	now = datetime.now(timezone.utc)
+	diff = now - dt
+	if diff.days < 1:
+		return humanize.naturaltime(diff) + dt_local.strftime(' @ %H:%M')
 	else:
-		return f'{dt_utc.strftime("%B %d @ %H:%M")}'
+		return f'{dt_local.strftime("%B %d @ %H:%M")}'
 
 
 def trim_string(s, max_length=30, mode='middle'):
@@ -717,19 +680,6 @@ def trim_string(s, max_length=30, mode='middle'):
 		start_length = (available + 1) // 2
 		end_length = available - start_length
 		return rf'{s[:start_length]} {ellipsis} {s[-end_length:]}' if end_length > 0 else s[: max_length - elen] + ellipsis
-
-
-def sort_files_by_date(file_list):
-	"""Sorts a list of file paths by their modification date.
-
-	Args:
-		file_list (list): A list of file paths (strings or Path objects).
-
-	Returns:
-		list: The list of file paths sorted by modification date.
-	"""
-	file_list.sort(key=lambda x: x.stat().st_mtime)
-	return file_list
 
 
 def traceback_as_string(exc):
@@ -1105,22 +1055,6 @@ def signal_to_name(signum):
 		if name.startswith('SIG') and not name.startswith('SIG_') and value == signum:
 			return name
 	return str(signum)
-
-
-def is_valid_path(path):
-	"""Check if a path is valid.
-
-	Args:
-		path (str): Path to check.
-
-	Returns:
-		bool: True if the path is valid, False otherwise.
-	"""
-	try:
-		PurePath(path)
-		return True
-	except (TypeError, ValueError):
-		return False
 
 
 def trim_gif(input_path, output_path, max_pause_ms=3000):

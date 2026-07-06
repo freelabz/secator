@@ -31,12 +31,13 @@ class Report:
 					f'[bold red]Could not create exporter {report_cls.__name__} for {self.__class__.__name__}: {str(e)}[/]\n[dim]{traceback_as_string(e)}[/]',  # noqa: E501
 				)
 
-	def build(self, query=None, dedupe=CONFIG.runners.remove_duplicates):
+	def build(self, query=None, dedupe=CONFIG.runners.remove_duplicates, limit=0):
 		"""Build report data structure using QueryEngine for filtering and dedup.
 
 		Args:
 			query (dict): MongoDB-style filter query (e.g. {'_type': 'vulnerability'}).
 			dedupe (bool): Whether to remove duplicate results.
+			limit (int): Maximum number of results to return (0 = no limit).
 		"""
 		if query is None:
 			query = {}
@@ -59,6 +60,7 @@ class Report:
 			del data['info']['results']
 		data['info']['title'] = self.title
 		data['info']['errors'] = getattr(self.runner, 'errors', [])
+		data['info']['warnings'] = getattr(self.runner, 'warnings', [])
 
 		# Build context for QueryEngine.
 		# Pass runner.results directly (OutputType objects or dicts) to avoid
@@ -75,8 +77,12 @@ class Report:
 		if 'workspace_name' not in context:
 			context['workspace_name'] = self.workspace_name
 
-		engine = QueryEngine(self.workspace_name, context=context)
-		results = engine.search(query, dedupe=dedupe)
+		# Use the resolved workspace id (an ObjectId for the api/mongodb backends) so
+		# findings queries filter on the real id. The json backend reads workspace_name
+		# from the context for its directory, so it is unaffected by this value.
+		workspace_id = context.get('workspace_id')
+		engine = QueryEngine(workspace_id, context=context)
+		results = engine.search(query, limit=limit, dedupe=dedupe)
 
 		# Fill report (findings + targets)
 		from secator.output_types.target import Target

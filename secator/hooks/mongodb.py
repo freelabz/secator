@@ -6,7 +6,8 @@ from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.output_types import OUTPUT_TYPES
+from secator.hooks._dedup import compute_duplicate_updates
+from secator.output_types import OUTPUT_TYPES, Warning
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
 
@@ -80,25 +81,72 @@ def update_runner(self):
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
 	debug('to_update', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False, verbose=True)  # noqa: E501
 	start_time = time.time()
-	if _id:
-		db = client.main
-		start_time = time.time()
-		db[collection].update_one({'_id': ObjectId(_id)}, {'$set': update})
-		end_time = time.time()
-		elapsed = end_time - start_time
-		debug(
-			f'[dim gold4]updated in {elapsed:.4f}s[/]', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)  # noqa: E501
-		self.last_updated_db = start_time
-	else:  # sync update and save result to runner object
-		runner = db[collection].insert_one(update)
-		_id = str(runner.inserted_id)
-		if chunk:
-			self.context[f'{type}_chunk_id'] = _id
-		else:
-			self.context[f'{type}_id'] = _id
-		end_time = time.time()
-		elapsed = end_time - start_time
-		debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
+	try:
+		if _id:
+			db = client.main
+			start_time = time.time()
+			db[collection].update_one({'_id': ObjectId(_id)}, {'$set': update})
+			end_time = time.time()
+			elapsed = end_time - start_time
+			debug(
+				f'[dim gold4]updated in {elapsed:.4f}s[/]', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)  # noqa: E501
+			self.last_updated_db = start_time
+		else:  # sync update and save result to runner object
+			runner = db[collection].insert_one(update)
+			_id = str(runner.inserted_id)
+			if chunk:
+				self.context[f'{type}_chunk_id'] = _id
+			else:
+				self.context[f'{type}_id'] = _id
+			end_time = time.time()
+			elapsed = end_time - start_time
+			debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
+	except pymongo.errors.DocumentTooLarge:
+		# The runner state exceeds MongoDB's 16MB BSON limit (usually huge outputs).
+		# Don't crash the runner over a persistence limit — warn and carry on.
+		msg = f'{self.unique_name} state exceeds MongoDB\'s 16MB document limit; skipping this DB update.'
+		self.add_result(Warning(message=msg), hooks=False)
+		debug(msg, sub='hooks.mongodb', id=_id)
+
+
+def build_pending_doc(parent, task_spec, child_type):
+	"""Minimal PENDING placeholder doc for a not-yet-run child runner.
+
+	The runtime update_runner does {'$set': self.toDict()} and fully overwrites
+	this once the child executes, so only the fields the UI tree / watchdog need
+	before that have to be correct here.
+	"""
+	return {
+		'name': task_spec.get('name'),
+		'status': 'PENDING',
+		'done': False,
+		'config': {'type': child_type, 'name': task_spec.get('name')},
+		'context': dict(task_spec.get('context', {})),
+		'has_parent': True,
+		'chunk': task_spec.get('chunk'),
+		'chunk_count': task_spec.get('chunk_count'),
+	}
+
+
+def on_build(self, task_spec):
+	"""Build-time hook: mint the child runner's Mongo doc + id before dispatch.
+
+	Fired by the PARENT runner (self) while assembling the Celery canvas, once
+	per child task/workflow/chunk. Inserts a PENDING placeholder and writes its
+	id into the child signature's serialized context so a redelivered task
+	reuses the same doc (update_one) instead of inserting a new one.
+	"""
+	client = get_mongodb_client()
+	db = client.main
+	parent_type = self.config.type                       # 'scan' | 'workflow' | 'task'
+	child_type = 'workflow' if parent_type == 'scan' else 'task'
+	collection = f'{child_type}s'
+	is_chunk = bool(task_spec.get('chunk'))
+	doc = build_pending_doc(self, task_spec, child_type)
+	_id = str(db[collection].insert_one(doc).inserted_id)
+	key = f'{child_type}_chunk_id' if is_chunk else f'{child_type}_id'
+	task_spec.setdefault('context', {})[key] = _id
+	return task_spec
 
 
 def update_finding(self, item):
@@ -110,13 +158,22 @@ def update_finding(self, item):
 	update = item.toDict()
 	_type = item._type
 	_id = ObjectId(item._uuid) if ObjectId.is_valid(item._uuid) else None
-	if _id:
-		finding = db['findings'].update_one({'_id': _id}, {'$set': update})
-		status = 'UPDATED'
-	else:
-		finding = db['findings'].insert_one(update)
-		item._uuid = str(finding.inserted_id)
-		status = 'CREATED'
+	try:
+		if _id:
+			finding = db['findings'].update_one({'_id': _id}, {'$set': update})
+			status = 'UPDATED'
+		else:
+			finding = db['findings'].insert_one(update)
+			item._uuid = str(finding.inserted_id)
+			status = 'CREATED'
+	except pymongo.errors.DocumentTooLarge:
+		# A single finding exceeds MongoDB's 16MB BSON limit (e.g. a huge inline
+		# response body). Warn instead of crashing the runner; return the item so
+		# the chain continues.
+		msg = f'{item._type} finding exceeds MongoDB\'s 16MB document limit; skipping persist.'
+		self.add_result(Warning(message=msg), hooks=False)
+		debug(msg, sub='hooks.mongodb', id=str(item._uuid))
+		return item
 	end_time = time.time()
 	elapsed = end_time - start_time
 	debug_obj = {
@@ -192,87 +249,11 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 		log_hook=log_hook
 	)
 	start_time = time.time()
-	seen = []
-	db_updates = {}
-
-	for item in untagged_findings:
-		if item._uuid in seen:
-			continue
-
-		debug(
-			f'Processing: {repr(item)} ({item._timestamp}) [{item._uuid}]',
-			sub='hooks.mongodb',
-			verbose=True,
-			log_hook=log_hook
-		)
-
-		duplicate_ids = [
-			_._uuid
-			for _ in untagged_findings
-			if _ == item and _._uuid != item._uuid
-		]
-		seen.extend(duplicate_ids)
-
-		debug(
-			f'Found {len(duplicate_ids)} duplicates for item',
-			sub='hooks.mongodb',
-			verbose=True,
-			log_hook=log_hook
-		)
-
-		duplicate_ws = [
-			_ for _ in workspace_findings
-			if _ == item and _._uuid != item._uuid
-		]
-		debug(f' --> Found {len(duplicate_ws)} workspace duplicates for item', sub='hooks.mongodb', verbose=True, log_hook=log_hook)  # noqa: E501
-
-		# Copy selected fields from the previous "main" finding (first workspace duplicate)
-		# into the new main finding, if configured.
-		copied_fields = {}
-		for previous_item in duplicate_ws:
-			copy_fields = CONFIG.addons.mongodb.duplicate_main_copy_fields
-			if copy_fields:
-				for field in copy_fields:
-					# Only copy if the attribute exists on the previous finding
-					if not hasattr(previous_item, field):
-						debug(f'{field} not found on {previous_item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
-						continue
-					value_prev = getattr(previous_item, field)
-					debug(f'{field} is {value_prev} on {previous_item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
-					# Skip empty values to avoid overwriting with "less useful" data
-					if not value_prev:
-						debug(f'{field} is empty on {previous_item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
-						continue
-					# Only overwrite if current item field isn't set
-					value_curr = getattr(item, field)
-					debug(f'{field} is {value_curr} on {item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
-					if not value_curr:
-						if field in copied_fields:
-							debug(f'{field} is already copied from previous item', sub='hooks.mongodb', verbose=True, log_hook=log_hook)
-							continue
-						debug(f'Using {field}={value_prev} from {previous_item._uuid} for {item._uuid}', sub='hooks.mongodb', verbose=True, log_hook=log_hook)  # noqa: E501
-						copied_fields[field] = value_prev
-
-		related_ids = []
-		if duplicate_ws:
-			duplicate_ws_ids = [_._uuid for _ in duplicate_ws]
-			duplicate_ids.extend(duplicate_ws_ids)
-			for related in duplicate_ws:
-				related_ids.extend(related._related)
-
-		debug(f' --> Found {len(duplicate_ids)} total duplicates for item', sub='hooks.mongodb', verbose=True, log_hook=log_hook)  # noqa: E501
-
-		db_updates[item._uuid] = {
-			**copied_fields,
-			'_related': duplicate_ids + related_ids,
-			'_context.workspace_duplicate': False,
-			'_tagged': True
-		}
-		for uuid in duplicate_ids:
-			db_updates[uuid] = {
-				'_context.workspace_duplicate': True,
-				'_tagged': True
-			}
+	db_updates = compute_duplicate_updates(
+		workspace_findings,
+		untagged_findings,
+		CONFIG.addons.mongodb.duplicate_main_copy_fields,
+	)
 	debug(f'Finished processing untagged findings in {time.time() - start_time}s', sub='hooks.mongodb', log_hook=log_hook)
 	start_time = time.time()
 
@@ -293,6 +274,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 
 HOOKS = {
 	Scan: {
+		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_interval': [update_runner],
@@ -300,6 +282,7 @@ HOOKS = {
 		'on_end': [update_runner],
 	},
 	Workflow: {
+		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_interval': [update_runner],
@@ -307,11 +290,12 @@ HOOKS = {
 		'on_end': [update_runner],
 	},
 	Task: {
+		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_duplicate': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner]
+		'on_end': [update_runner],
 	}
 }

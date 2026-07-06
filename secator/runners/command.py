@@ -20,6 +20,7 @@ from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OP
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
+from secator.runners._base import REDACTED_OPT_VALUE
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s, signal_to_name
 
@@ -32,6 +33,20 @@ class Command(Runner):
 
 	# Base cmd
 	cmd = None
+
+	# Redacted copy of `cmd` for serialization/printing (sensitive opt values masked).
+	# Only diverges from `cmd` when the command carries a `sensitive: True` option.
+	cmd_redacted = None
+	_has_sensitive_cmd_opts = False
+
+	@property
+	def cmd_for_display(self):
+		"""The command to show/serialize: redacted when it carries a sensitive opt, else the real cmd.
+
+		Use this anywhere the command is emitted (printed, streamed, persisted, dry-run Info).
+		Never use it to execute — the subprocess must run `self.cmd` with the real value.
+		"""
+		return self.cmd_redacted if self._has_sensitive_cmd_opts else self.cmd
 
 	# Tags
 	tags = []
@@ -94,6 +109,7 @@ class Command(Runner):
 	install_ignore_bin = []
 	install_version = None
 	install_binary_name = None
+	pypi_dependencies = None
 
 	# Serializer
 	item_loader = None
@@ -135,6 +151,10 @@ class Command(Runner):
 
 	# Profile
 	profile = 'small'
+
+	# Max execution timeout (seconds). If None, defaults to CONFIG.celery.task_max_timeout.
+	# Overridable via `secator config set tasks.overrides.<task>.max_timeout <seconds>`.
+	max_timeout = None
 
 	def __init__(self, inputs=[], **run_opts):
 
@@ -194,7 +214,10 @@ class Command(Runner):
 		self.print_cmd = self.run_opts.get('print_cmd', False)
 
 		# TTY availability (can be explicitly disabled for non-interactive contexts)
-		self.has_tty = self.run_opts.get('tty', sys.stdin.isatty())
+		try:
+			self.has_tty = self.run_opts.get('tty', sys.stdin.isatty())
+		except (ValueError, AttributeError, OSError):
+			self.has_tty = self.run_opts.get('tty', False)
 
 		# Stat update
 		self.last_updated_stat = None
@@ -230,6 +253,8 @@ class Command(Runner):
 		# Add sudo to command if it is required
 		if self.requires_sudo:
 			self.cmd = f'sudo {self.cmd}'
+			if self._has_sensitive_cmd_opts:
+				self.cmd_redacted = f'sudo {self.cmd_redacted}'
 
 		# Build item loaders
 		instance_func = getattr(self, 'item_loader', None)
@@ -249,7 +274,7 @@ class Command(Runner):
 		res = super().toDict()
 		res.update(
 			{
-				'cmd': self.cmd,
+				'cmd': self.cmd_for_display,
 				'cwd': self.cwd,
 				'return_code': self.return_code,
 			}
@@ -457,7 +482,7 @@ class Command(Runner):
 			if self.dry_run:
 				self.print_description()
 				self.print_command()
-				yield Info(message=self.cmd)
+				yield Info(message=self.cmd_for_display)
 				return
 
 			# Abort if no inputs
@@ -478,7 +503,7 @@ class Command(Runner):
 
 			# In remote worker mode, stream description and cmd back to the client
 			if IN_WORKER and self.print_cmd:
-				cmd_str = _s(self.cmd)
+				cmd_str = _s(self.cmd_for_display)
 				if self.chunk and self.chunk_count:
 					cmd_str += f' ({self.chunk}/{self.chunk_count})'
 				if self.description:
@@ -630,18 +655,27 @@ class Command(Runner):
 	def print_description(self):
 		"""Print description"""
 		if self.sync and not self.has_children and self.caller and self.description and self.print_cmd:
-			self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.name})[/][/] ...', rich=True)
+			self._print(f'\n[bold gold3]:wrench: {self.description} [dim cyan]({self.config.node_id})[/][/] ...', rich=True)
 
 	def print_command(self):
 		"""Print command."""
+		cmd_display = self.cmd_for_display
 		if self.print_cmd:
 			icon = self.run_opts.get('print_cmd_icon', self.print_cmd_icon)
-			cmd_str = f'{icon} [bold green]{_s(self.cmd)}[/]'
+			cmd_str = f'{icon} [bold green]{_s(cmd_display)}[/]'
 			if self.sync and self.chunk and self.chunk_count:
 				cmd_str += f' [dim gray11]({self.chunk}/{self.chunk_count})[/]'
 			self._print(cmd_str, rich=True)
-		self.debug('command', obj={'cmd': self.cmd}, sub='start')
-		self.debug('options', obj=self.cmd_options, sub='start')
+		opts_display = self.cmd_options
+		if self._has_sensitive_cmd_opts:
+			# Mask the user-supplied value of sensitive opts in the debug echo. The conf's
+			# `default` is never a secret (see toDict note in _base), so it needs no masking.
+			opts_display = {
+				name: ({**oc, 'value': REDACTED_OPT_VALUE} if oc.get('conf', {}).get('sensitive') else oc)
+				for name, oc in self.cmd_options.items()
+			}
+		self.debug('command', obj={'cmd': cmd_display}, sub='start')
+		self.debug('options', obj=opts_display, sub='start')
 
 	def handle_file_not_found(self, exc):
 		"""Handle case where binary is not found.
@@ -691,6 +725,17 @@ class Command(Runner):
 			self.monitor_stop_event.set()
 			self.monitor_thread.join(timeout=2.0)
 
+	def get_max_timeout(self):
+		"""Resolve the effective max execution timeout (seconds).
+
+		Uses the per-task ``max_timeout`` (set on the class or via
+		``tasks.overrides.<task>.max_timeout``) when defined, otherwise falls back to the global
+		``CONFIG.celery.task_max_timeout``. A value of -1 means no timeout.
+		"""
+		if self.max_timeout is not None:
+			return self.max_timeout
+		return CONFIG.celery.task_max_timeout
+
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
 		last_stats_time = 0
@@ -722,10 +767,11 @@ class Command(Runner):
 							break
 
 				# Check execution time
-				if self.process_start_time and CONFIG.celery.task_max_timeout != -1:
+				max_timeout = self.get_max_timeout()
+				if self.process_start_time and max_timeout != -1:
 					elapsed_time = current_time - self.process_start_time
-					if elapsed_time > CONFIG.celery.task_max_timeout:
-						warning = Warning(message=f'Task timeout {CONFIG.celery.task_max_timeout}s exceeded')
+					if elapsed_time > max_timeout:
+						warning = Warning(message=f'Task timeout {max_timeout}s exceeded: incomplete results saved')
 						if self.monitor_queue is not None:
 							self.monitor_queue.put(warning)
 						self.stop_process(exit_ok=True, sig=signal.SIGTERM)
@@ -1124,7 +1170,12 @@ class Command(Runner):
 				value = preprocessor(value)
 			if process and processor:
 				value = processor(value)
-		debug('got opt value', obj={'name': opt_name, 'value': value, 'aliases': opt_names, 'values': opt_values}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
+		if isinstance(opt_conf, dict) and opt_conf.get('sensitive'):
+			log_value = REDACTED_OPT_VALUE if value else value
+			log_values = [REDACTED_OPT_VALUE if v else v for v in opt_values]
+		else:
+			log_value, log_values = value, opt_values
+		debug('got opt value', obj={'name': opt_name, 'value': log_value, 'aliases': opt_names, 'values': log_values}, obj_after=False, sub='init.options', verbose=True)  # noqa: E501
 		return value
 
 	def _build_cmd(self):
@@ -1171,6 +1222,7 @@ class Command(Runner):
 
 		opts = self.run_hooks('on_cmd_opts', opts, sub='init')
 
+		opts_str_redacted = ''
 		if opts:
 			for opt_conf in opts.values():
 				conf = opt_conf['conf']
@@ -1182,15 +1234,24 @@ class Command(Runner):
 					continue
 				if conf.get('requires_sudo', False):
 					self.requires_sudo = True
-				opts_str += ' ' + Command._build_opt_str(opt_conf)
+				opt_str = ' ' + Command._build_opt_str(opt_conf)
+				opts_str += opt_str
+				if conf.get('sensitive', False):
+					self._has_sensitive_cmd_opts = True
+					opts_str_redacted += ' ' + Command._build_opt_str(opt_conf, redact=True)
+				else:
+					opts_str_redacted += opt_str
 				if '{target}' in opts_str:
 					opts_str = opts_str.replace('{target}', self.inputs[0])
+					opts_str_redacted = opts_str_redacted.replace('{target}', self.inputs[0])
 		self.cmd_options = opts
-		self.cmd += opts_str
+		cmd_base = self.cmd
+		self.cmd = cmd_base + opts_str
+		self.cmd_redacted = (cmd_base + opts_str_redacted) if self._has_sensitive_cmd_opts else self.cmd
 
 	@staticmethod
-	def _build_opt_str(opt):
-		"""Build option string."""
+	def _build_opt_str(opt, redact=False):
+		"""Build option string. When ``redact`` is set, mask the value (used for sensitive opts)."""
 		conf = opt['conf']
 		shlex_quote = conf.get('shlex', True)
 		value = opt['value']
@@ -1202,6 +1263,8 @@ class Command(Runner):
 				opts_str += f'{opt_name}'
 			elif val is None:
 				continue
+			elif redact:
+				opts_str += f'{opt_name} {REDACTED_OPT_VALUE} '
 			else:
 				if shlex_quote:
 					val = shlex.quote(str(val))

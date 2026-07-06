@@ -55,8 +55,19 @@ LLM_SPINNER_MESSAGES = [
 ]
 
 # Available drivers and exporters
-AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord']
-AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'markdown', 'table', 'txt']
+AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord', 'sqlite']
+AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'jsonl', 'markdown', 'table', 'txt']
+
+# Canonical execution priority for drivers whose hooks share a lifecycle event.
+# Hook lists are concatenated in driver order, so this decides run order:
+#   1. Enrichment drivers (gcs) mutate findings (e.g. set screenshot_path) and
+#      must run BEFORE any backend persists them.
+#   2. Backend-type drivers (databases then the relay API) — the authoritative
+#      DB (mongodb) prevails over the relay (api) so status/findings are written
+#      directly to the store the API reads.
+# Drivers not listed here (e.g. discord notifications, external drivers) are not
+# ranked and keep their relative order after the ranked ones.
+DRIVER_PRIORITY = ['gcs', 'mongodb', 'sqlite', 'api']
 
 # Vocab
 ALIVE = 'alive'
@@ -72,12 +83,14 @@ CONFIDENCE = 'confidence'
 CPES = 'cpes'
 CVES = 'cves'
 CVSS_SCORE = 'cvss_score'
+CVSS_VECTOR = 'cvss_vec'
 DATA = 'data'
 DELAY = 'delay'
 DESCRIPTION = 'description'
 DOCKER_IMAGE = 'docker_image'
 DOMAIN = 'domain'
 DEPTH = 'depth'
+EPSS_SCORE = 'epss_score'
 EXTRA_DATA = 'extra_data'
 EMAIL = 'email'
 FILENAME = 'filename'
@@ -93,6 +106,7 @@ HOST = 'host'
 HOST_PORT = 'host:port'
 IBAN = 'iban'
 ID = 'id'
+IMPACT = 'impact'
 IP = 'ip'
 PROTOCOL = 'protocol'
 LINES = 'lines'
@@ -116,6 +130,7 @@ RATE_LIMIT = 'rate_limit'
 RAW = 'raw'
 REFERENCE = 'reference'
 REFERENCES = 'references'
+REMEDIATION = 'remediation'
 REQUEST = 'request'
 REPLAY_PROXY = 'replay_proxy'
 RETRIES = 'retries'
@@ -127,6 +142,7 @@ SLUG = 'slug'
 SOURCES = 'sources'
 STORED_RESPONSE_PATH = 'stored_response_path'
 STATE = 'state'
+STATUS = 'status'
 STATUS_CODE = 'status_code'
 STRING = 'str'
 TAGS = 'tags'
@@ -186,7 +202,7 @@ for addon, module in [
 	('dev', 'flake8'),
 	('trace', 'memray'),
 	('build', 'hatch'),
-	('ai', 'litellm')
+	('ai', 'litellm'),
 ]:
 	ADDONS_ENABLED[addon] = is_importable(module)
 

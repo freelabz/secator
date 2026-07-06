@@ -34,7 +34,9 @@ class Error(OutputType):
 		return self.message
 
 	def __rich__(self):
-		s = rf"\[[bold red]ERR[/]] {self.message}"
+		source = (self._context or {}).get('node_id') or self._source
+		prefix = f'[dim]{_s(source)}[/] ' if source else ''
+		s = rf"\[[bold red]ERR[/]] {prefix}{self.message}"
 		if self.traceback:
 			traceback_pretty = '   ' + _s(self.traceback).replace('\n', '\n   ')
 			if self.traceback_title:

@@ -1,7 +1,8 @@
 import os
+from collections.abc import MutableMapping
 from pathlib import Path
 from subprocess import call, DEVNULL
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from typing_extensions import Annotated, Self
 
 import validators
@@ -9,7 +10,7 @@ import shutil
 import yaml
 from dotenv import find_dotenv, load_dotenv
 from dotmap import DotMap
-from pydantic import AfterValidator, BaseModel, model_validator, ValidationError
+from pydantic import AfterValidator, BaseModel, Field, model_validator, ValidationError
 
 from secator.requests import requests
 from secator.rich import console, console_stdout
@@ -45,6 +46,7 @@ class Directories(StrictModel):
 	payloads: Directory = ''
 	performance: Directory = ''
 	revshells: Directory = ''
+	queries: Directory = ''
 	celery: Directory = ''
 	celery_data: Directory = ''
 	celery_results: Directory = ''
@@ -52,7 +54,7 @@ class Directories(StrictModel):
 	@model_validator(mode='after')
 	def set_default_folders(self) -> Self:
 		"""Set folders to be relative to the data folders if they are unspecified in config."""
-		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
+		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'queries', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
 			rel_target = '/'.join(folder.split('_'))
 			val = getattr(self, folder) or self.data / rel_target
 			setattr(self, folder, val)
@@ -146,7 +148,9 @@ class Drivers(StrictModel):
 
 
 class Workspace(StrictModel):
-	default: str = ''
+	current: str = ''
+	routes: Dict[str, List[str]] = {}
+	profiles: Dict[str, List[str]] = {}
 
 
 class Payloads(StrictModel):
@@ -197,6 +201,23 @@ class MongodbAddon(StrictModel):
 		'is_false_positive',
 		'is_acknowledged',
 		'verified',
+		'status',
+		'tags',
+	]
+
+
+class SqliteAddon(StrictModel):
+	enabled: bool = False
+	path: str = ''
+	busy_timeout_ms: int = 5000
+	max_items: int = -1
+	duplicate_main_copy_fields: List[str] = [
+		'screenshot_path',
+		'stored_response_path',
+		'is_false_positive',
+		'is_acknowledged',
+		'verified',
+		'status',
 		'tags',
 	]
 
@@ -216,38 +237,39 @@ class AiAddon(StrictModel):
 	max_tokens: int = 30000
 	max_tokens_total: int = 100000
 	max_results: int = 500
+	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
 	permissions: Dict = {
-		"allow": [
-			"target({targets})",
-			"read({workspace}/*,/dev/null,/tmp/*)",
-			"write({workspace}/.outputs/*,/dev/null,/tmp/*)",
-			"shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,"
-			"cd,git,diff,stat,du,df,tree,sort,uniq,cut,tr,echo,realpath,readlink,"
-			"file,strings,xxd,base64,for,while,which,true,timeout,"
-			"tee,cp,mv,mkdir,touch,chmod,sed,awk,xargs,docker,printf,"
-			"redis-cli,nc,ncat,nmap,sqlmap,nikto,gobuster,feroxbuster,ffuf,"
-			"socat,telnet,openssl,ssh,scp,rsync,ping,traceroute,tcpdump,ss,netstat)",
-			"task(*)",
-			"workflow(*)",
+		'allow': [
+			'target({targets})',
+			'read({workspace}/*,/dev/null,/tmp/*)',
+			'write({workspace}/.outputs/*,/dev/null,/tmp/*)',
+			'shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,'
+			'cd,git,diff,stat,du,df,tree,sort,uniq,cut,tr,echo,realpath,readlink,'
+			'file,strings,xxd,base64,for,while,which,true,timeout,'
+			'tee,cp,mv,mkdir,touch,chmod,sed,awk,xargs,docker,printf,'
+			'redis-cli,nc,ncat,nmap,sqlmap,nikto,gobuster,feroxbuster,ffuf,'
+			'socat,telnet,openssl,ssh,scp,rsync,ping,traceroute,tcpdump,ss,netstat)',
+			'task(*)',
+			'workflow(*)',
 		],
-		"deny": [
-			"target(169.254.169.254)",
-			"target(127.0.0.1)",
-			"target(localhost)",
-			"read(/etc/shadow)",
-			"read(~/.ssh/*)",
-			"read(~/.aws/*)",
-			"write(/etc/*)",
-			"write(/usr/*)",
-			"shell(rm -rf /*,dd,mkfs,env,printenv)",
+		'deny': [
+			'target(169.254.169.254)',
+			'target(127.0.0.1)',
+			'target(localhost)',
+			'read(/etc/shadow)',
+			'read(~/.ssh/*)',
+			'read(~/.aws/*)',
+			'write(/etc/*)',
+			'write(/usr/*)',
+			'shell(rm -rf /*,dd,mkfs,env,printenv)',
 		],
-		"ask": [
-			"target(*)",
-			"shell(python,python3,bash,sh,exec,node,ruby,perl,gcc,g++,make,go,php,java,javac)",
-			"read(*)",
-			"write(*)",
+		'ask': [
+			'target(*)',
+			'shell(python,python3,bash,sh,exec,node,ruby,perl,gcc,g++,make,go,php,java,javac)',
+			'read(*)',
+			'write(*)',
 		],
 	}
 
@@ -273,14 +295,19 @@ class ApiAddon(StrictModel):
 	header_name: str = 'Bearer'
 	force_ssl: bool = True
 	timeout: int = 60
+	org_id: Optional[int] = None  # Override org to query (admins only); defaults to the user's own org
 	runner_create_endpoint: str = 'runners'
+	runner_get_endpoint: str = 'runner/{runner_id}'
 	runner_update_endpoint: str = 'runner/{runner_id}'
 	finding_create_endpoint: str = 'findings'
 	finding_update_endpoint: str = 'finding/{finding_id}'
 	finding_search_endpoint: str = 'findings/_search'
+	workspace_list_endpoint: str = 'workspaces'
+	workspace_create_endpoint: str = 'workspaces'
 	workspace_get_endpoint: str = 'workspace/{workspace_id}'
 	workspace_delete_endpoint: str = 'workspace/{workspace_id}'
-	runner_delete_endpoint: str = '{runner_type}/{runner_id}'
+	runners_list_endpoint: str = 'runners/any'
+	runner_delete_endpoint: str = 'runner/{runner_id}?type={runner_type}'
 
 
 class Addons(StrictModel):
@@ -288,6 +315,7 @@ class Addons(StrictModel):
 	gcs: GoogleCloudStorageAddon = GoogleCloudStorageAddon()
 	worker: WorkerAddon = WorkerAddon()
 	mongodb: MongodbAddon = MongodbAddon()
+	sqlite: SqliteAddon = SqliteAddon()
 	vulners: VulnersAddon = VulnersAddon()
 	discord: DiscordAddon = DiscordAddon()
 	api: ApiAddon = ApiAddon()
@@ -308,10 +336,11 @@ class SecatorConfig(StrictModel):
 	wordlists: Wordlists = Wordlists()
 	profiles: Profiles = Profiles()
 	drivers: Drivers = Drivers()
-	workspace: Workspace = Workspace()
+	workspaces: Workspace = Workspace()
 	addons: Addons = Addons()
 	security: Security = Security()
 	providers: Providers = Providers()
+	queries: Dict[str, str] = {}
 	offline_mode: bool = False
 
 
@@ -355,24 +384,41 @@ class Config(DotMap):
 			Config.print_yaml(yaml_str)
 		return value
 
-	def set(self, key, value, set_partial=True):
+	def set(self, key, value, set_partial=True, strategy=None):
 		"""Set a value in the configuration using a dotted path.
 
 		Args:
 			key (str | None): Dotted key path.
 			value (Any): Value.
 			set_partial (bool): Set in partial config.
+			strategy (str | None): Strategy for updating list/dict fields.
+				None or 'replace': replace the value (default).
+				'append': append value to existing list, or add key to existing dict.
+				'remove': remove value from existing list, or remove key from existing dict.
 		"""
-		# Get existing value
-		existing_value = self.get(key, print=False)
-
 		# Convert dotted key path to the corresponding uppercase key used in _keymap
 		map_key = key.upper().replace('.', '_')
 
-		# Check if map key exists
+		# If key not found in keymap, check if parent path points to a dict field
+		# (handles setting/removing keys in a dict, e.g. wordlists.defaults.mykey)
 		if map_key not in self._keymap:
+			parts = key.split('.')
+			if len(parts) > 1:
+				parent_parts = parts[:-1]
+				dict_subkey = parts[-1]
+				try:
+					parent_value = self
+					for part in parent_parts:
+						parent_value = parent_value[part]
+					if isinstance(parent_value, dict):
+						return self._set_dict_key(parent_parts, dict_subkey, value, set_partial=set_partial, strategy=strategy)
+				except (KeyError, TypeError):
+					pass
 			console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
 			return
+
+		# Get existing value
+		existing_value = self.get(key, print=False)
 
 		# Traverse to the second last key to handle the setting correctly
 		target = self
@@ -384,37 +430,58 @@ class Config(DotMap):
 		# Set the value on the final part of the path
 		final_key = self._keymap[map_key][-1]
 
-		# Try to convert value to expected type
-		try:
-			if isinstance(existing_value, list):
-				if isinstance(value, str):
-					if value.startswith('[') and value.endswith(']'):
-						value = value[1:-1]
-					if ',' in value:
-						value = [c.strip() for c in value.split(',')]
-					elif value:
-						value = [value]
-					else:
-						value = []
-			elif isinstance(existing_value, dict):
-				if isinstance(value, str):
-					if value.startswith('{') and value.endswith('}'):
-						import json
+		# Apply strategy for list fields
+		if strategy in ('append', 'remove') and isinstance(existing_value, list):
+			item = value
+			current = list(existing_value)
+			if strategy == 'append':
+				if item not in current:
+					current.append(item)
+			elif strategy == 'remove':
+				if item in current:
+					current.remove(item)
+				else:
+					console.print(f'[bold orange1]Value "{item}" not found in {key}[/].')
+					return
+			value = current
+		else:
+			# Try to convert value to expected type
+			try:
+				if isinstance(existing_value, list):
+					if isinstance(value, str):
+						if value.startswith('[') and value.endswith(']'):
+							value = value[1:-1]
+						if ',' in value:
+							value = [c.strip() for c in value.split(',')]
+						elif value:
+							value = [value]
+						else:
+							value = []
+				elif isinstance(existing_value, dict):
+					if isinstance(value, str):
+						if value.startswith('{') and value.endswith('}'):
+							import json
 
-						value = json.loads(value)
-			elif isinstance(existing_value, bool):
-				if isinstance(value, str):
-					value = value.lower() in ('true', '1', 't')
-				elif isinstance(value, (int, float)):
-					value = True if value == 1 else False
-			elif isinstance(existing_value, int):
-				value = int(value)
-			elif isinstance(existing_value, float):
-				value = float(value)
-			elif isinstance(existing_value, Path):
-				value = Path(value)
-		except ValueError:
-			pass
+							value = json.loads(value)
+				elif isinstance(existing_value, bool):
+					if isinstance(value, str):
+						value = value.lower() in ('true', '1', 't')
+					elif isinstance(value, (int, float)):
+						value = True if value == 1 else False
+				elif isinstance(existing_value, int):
+					value = int(value)
+				elif isinstance(existing_value, float):
+					value = float(value)
+				elif isinstance(existing_value, Path):
+					value = Path(value)
+			except ValueError:
+				pass
+
+		# Validate profile names before setting
+		if key in ('profiles.defaults',):
+			profile_names = value if isinstance(value, list) else ([value] if value else [])
+			if profile_names and not Config._validate_profile_names(profile_names):
+				return
 
 		if set_partial:
 			if value is None or value == target[final_key]:
@@ -425,13 +492,122 @@ class Config(DotMap):
 				partial[final_key] = value
 		target[final_key] = value
 
-	def unset(self, key, set_partial=True):
+	def _set_dict_key(self, parent_parts, subkey, value, set_partial=True, strategy=None):
+		"""Set or remove a key within a dict config field.
+
+		Args:
+			parent_parts (list[str]): Path components to the dict field (e.g. ['wordlists', 'defaults']).
+			subkey (str | None): Key within the dict to set/remove.
+			value (Any): Value to set, or item to remove when strategy='remove'.
+			set_partial (bool): Set in partial config.
+			strategy (str | None): 'remove' to delete the subkey or remove a list item;
+				'append' to append to an existing list value; None to replace.
+		"""
+		# Navigate to the dict
+		existing_dict = self
+		for part in parent_parts:
+			existing_dict = existing_dict[part]
+
+		if not isinstance(existing_dict, dict):
+			console.print(f'[bold red]Path "{".".join(parent_parts)}" is not a dict field[/].')
+			return
+
+		updated = dict(existing_dict)
+		parent_path = '.'.join(parent_parts)
+
+		if strategy == 'remove':
+			if subkey and subkey in updated:
+				existing_val = updated[subkey]
+				if isinstance(existing_val, list) and value is not None:
+					# Remove item from list rather than deleting the key
+					if value in existing_val:
+						updated[subkey] = [v for v in existing_val if v != value]
+					else:
+						console.print(f'[bold orange1]Value "{value}" not found in {parent_path}.{subkey}[/].')
+						return
+				else:
+					del updated[subkey]
+			elif subkey:
+				console.print(f'[bold orange1]Key "{subkey}" not found in {parent_path}[/].')
+				return
+		elif strategy == 'append':
+			if subkey:
+				existing_val = updated.get(subkey, [])
+				parsed = Config._parse_new_value(value)
+				items = parsed if isinstance(parsed, list) else [parsed]
+				if isinstance(existing_val, list):
+					new_list = list(existing_val)
+					for item in items:
+						if item not in new_list:
+							new_list.append(item)
+					updated[subkey] = new_list
+				else:
+					updated[subkey] = Config._parse_new_value(value)
+			elif isinstance(value, dict):
+				updated.update(value)
+		else:
+			if subkey:
+				new_val = Config._parse_new_value(value)
+				# For workspaces.profiles, always coerce single strings to list
+				if parent_path == 'workspaces.profiles' and isinstance(new_val, str):
+					new_val = [new_val]
+				updated[subkey] = new_val
+			elif isinstance(value, dict):
+				updated.update(value)
+
+		# Validate profile names when setting workspaces.profiles values
+		if parent_path == 'workspaces.profiles' and subkey and subkey in updated and strategy != 'remove':
+			new_val = updated[subkey]
+			if new_val:
+				profile_names = new_val if isinstance(new_val, list) else [new_val]
+				if not Config._validate_profile_names(profile_names):
+					return
+
+		# Traverse to the parent of the dict to set the updated value
+		target = self
+		partial = self._partial
+		for part in parent_parts[:-1]:
+			target = target[part]
+			partial = partial[part]
+		dict_key = parent_parts[-1]
+
+		if set_partial:
+			partial[dict_key] = updated
+		target[dict_key] = updated
+
+	def unset(self, key, value=None, set_partial=True):
 		"""Unset a value in the configuration using a dotted path.
 
 		Args:
 			key (str): Dotted key path.
+			value (Any | None): If provided and the field is a list, remove this item from the list.
+				If the field is a dict, this is ignored (use the key to specify the dict subkey to remove).
 			set_partial (bool): Set in partial config.
 		"""
+		if value is not None:
+			# Remove item from list
+			self.set(key, value, set_partial=set_partial, strategy='remove')
+			return
+
+		# Check if key points to a dict subkey that should be removed
+		map_key = key.upper().replace('.', '_')
+		if map_key not in self._keymap:
+			parts = key.split('.')
+			if len(parts) > 1:
+				parent_parts = parts[:-1]
+				dict_subkey = parts[-1]
+				try:
+					parent_value = self
+					for part in parent_parts:
+						parent_value = parent_value[part]
+					if isinstance(parent_value, dict):
+						self._set_dict_key(parent_parts, dict_subkey, None, set_partial=set_partial, strategy='remove')
+						return
+				except (KeyError, TypeError):
+					pass
+			console.print(f'[bold red]Key "{key}" not found in config keymap[/].')
+			return
+
 		self.set(key, None, set_partial=set_partial)
 
 	def save(self, target_path: Path = None, partial=True):
@@ -475,6 +651,29 @@ class Config(DotMap):
 		# Load YAML file
 		if path:
 			data = Config.read_yaml(path)
+
+		# Backwards compatibility: migrate 'workspace' key to 'workspaces'
+		migrated = False
+		if 'workspace' in data and 'workspaces' not in data:
+			data['workspaces'] = data.pop('workspace')
+			if path:
+				console.print(f'[bold orange1]Migrating config key "workspace" to "workspaces" in {path}[/]')
+			migrated = True
+
+		# Backwards compatibility: migrate 'workspaces.default' to 'workspaces.current'
+		ws_data = data.get('workspaces')
+		if isinstance(ws_data, dict) and 'default' in ws_data and 'current' not in ws_data:
+			data['workspaces']['current'] = data['workspaces'].pop('default')
+			if path:
+				console.print(f'[bold orange1]Migrating config key "workspaces.default" to "workspaces.current" in {path}[/]')
+			migrated = True
+
+		if migrated and path:
+			try:
+				with path.open('w') as f:
+					f.write(yaml.dump({k: v for k, v in data.items() if not k.startswith('_')}, sort_keys=False))
+			except Exception as e:
+				console.print(f'[bold red]Failed to save migrated config: {e}[/]')
 
 		# Load data
 		config = Config.load(SecatorConfig, data, print_errors=print_errors)
@@ -615,32 +814,184 @@ class Config(DotMap):
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
 
 	@staticmethod
+	def _parse_new_value(value):
+		"""Try to parse a string value into a structured type (int, float, bool, list, or dict)."""
+		if not isinstance(value, str):
+			return value
+		if (value.startswith('{') and value.endswith('}')) or (value.startswith('[') and value.endswith(']')):
+			try:
+				import json
+
+				return json.loads(value)
+			except Exception:
+				pass
+		if ',' in value:
+			return [v.strip() for v in value.split(',')]
+		try:
+			return int(value)
+		except ValueError:
+			pass
+		try:
+			return float(value)
+		except ValueError:
+			pass
+		if value.lower() in ('true', 'false'):
+			return value.lower() == 'true'
+		return value
+
+	@staticmethod
+	def _validate_profile_names(profile_names):
+		"""Validate that all profile names exist. Returns True if all valid or validation cannot run."""
+		try:
+			from secator.loader import get_configs_by_type
+
+			available = [p.name for p in get_configs_by_type('profile')]
+			invalid = [p for p in profile_names if p not in available]
+			if invalid:
+				console.print(f'[bold red]Invalid profile names: {", ".join(invalid)}[/]')
+				return False
+		except Exception as e:
+			import logging
+
+			logging.debug('Profile validation skipped due to exception', exc_info=e)
+		return True
+
+	@staticmethod
 	def build_key_map(config, base_path=[]):
 		key_map = {}
 		for key, value in config.items():
 			if key.startswith('_'):  # ignore
 				continue
 			current_path = base_path + [key]
-			if isinstance(value, dict):
+			map_key = '_'.join(current_path).upper()
+			if isinstance(value, MutableMapping) and not isinstance(value, str):
+				key_map[map_key] = current_path  # include dict itself so sub-keys can be set
 				key_map.update(Config.build_key_map(value, current_path))
 			else:
-				key_map['_'.join(current_path).upper()] = current_path
+				key_map[map_key] = current_path
 		return key_map
 
 	def apply_env_overrides(self, print_errors=True):
-		"""Override config values from environment variables."""
+		"""Override config values from environment variables.
+
+		A variable ``SECATOR_<UPPERCASED_DOTTED_KEY>`` overrides the matching config key (dots replaced
+		by underscores), e.g. ``SECATOR_CELERY_BROKER_URL``. Dynamic dict keys are also supported, e.g.
+		``SECATOR_TASKS_OVERRIDES_NMAP_MAX_TIMEOUT=500`` maps to ``tasks.overrides.nmap.max_timeout``.
+		"""
 		prefix = 'SECATOR_'
 		for var in os.environ:
-			if var.startswith(prefix):
-				key = var[len(prefix) :]  # remove prefix
-				if key in self._keymap:
-					path = '.'.join(k.lower() for k in self._keymap[key])
-					value = os.environ[var]
-					self.set(path, value, set_partial=False)
-					if not self.validate(print_errors=False) and print_errors:
-						console.print(f'[bold red]{var} (override failed)[/]')
-				# elif print_errors:
-				# 	console.print(f'[bold red]{var} (override failed: key not found)[/]')
+			if not var.startswith(prefix):
+				continue
+			key = var[len(prefix):]  # remove prefix
+			path = self._resolve_env_key(key)
+			if path is None:
+				# Unknown / invalid override key: skip it (don't let one bad env var break the config).
+				if print_errors:
+					console.print(f'[bold orange1]{var} (unknown config key, ignored)[/]')
+				continue
+			self.set(path, os.environ[var], set_partial=False)
+			if not self.validate(print_errors=False) and print_errors:
+				console.print(f'[bold red]{var} (override failed)[/]')
+
+	def _resolve_env_key(self, key):
+		"""Resolve an env var key (``SECATOR_`` prefix already stripped) to a dotted config path.
+
+		Returns the dotted path for a direct keymap hit, or for a dynamic key nested inside a dict
+		field (e.g. ``TASKS_OVERRIDES_NMAP_MAX_TIMEOUT`` -> ``tasks.overrides.nmap.max_timeout``).
+		Returns None when the key does not map to a known config field.
+
+		Args:
+			key (str): Env var name with the ``SECATOR_`` prefix removed.
+
+		Returns:
+			str | None: Dotted config path, or None.
+		"""
+		# Direct keymap hit (also covers dynamic keys already present in the loaded config)
+		if key in self._keymap:
+			return '.'.join(k.lower() for k in self._keymap[key])
+
+		# Otherwise, find the longest keymap prefix that resolves to a *dynamic* dict field (one typed
+		# as a Dict in the schema, e.g. tasks.overrides / wordlists.defaults), then resolve the
+		# remaining dynamic segments under it. Typed sub-models (e.g. addons, celery) are dicts at
+		# runtime too, but have a fixed schema (extra='forbid'): an unknown sub-key there is invalid
+		# and must be skipped, not written (else it would clobber the typed model with a plain dict).
+		best = None
+		for map_key, path_parts in self._keymap.items():
+			if not key.startswith(map_key + '_'):
+				continue
+			if not Config._is_dynamic_dict_path(path_parts):
+				continue
+			if best is None or len(map_key) > len(best[0]):
+				best = (map_key, path_parts)
+		if best is None:
+			return None
+
+		map_key, path_parts = best
+		remainder = key[len(map_key) + 1:].lower()  # e.g. 'nmap_max_timeout'
+		dotted_prefix = '.'.join(p.lower() for p in path_parts)
+
+		# tasks.overrides maps a task name -> {attr: value}. The task name may itself contain
+		# underscores (e.g. search_vulns), so disambiguate it against the known task list.
+		if [p.lower() for p in path_parts] == ['tasks', 'overrides']:
+			task_name = Config._match_task_name(remainder)
+			if not task_name or remainder == task_name:
+				return None
+			attr = remainder[len(task_name) + 1:]
+			return f'{dotted_prefix}.{task_name}.{attr}'
+
+		# Generic single-level dynamic dict (e.g. wordlists.defaults): the remainder is the leaf key.
+		return f'{dotted_prefix}.{remainder}'
+
+	@staticmethod
+	def _is_dynamic_dict_path(path_parts):
+		"""Return True if a config path points to a dynamic ``Dict`` field in the schema.
+
+		Walks the ``SecatorConfig`` field annotations along ``path_parts``. A path resolves to a
+		dynamic dict (arbitrary keys allowed, e.g. ``tasks.overrides`` / ``wordlists.defaults``) when
+		its annotation is a typing ``Dict``; it resolves to a typed sub-model (fixed schema, e.g.
+		``addons``) when its annotation is a ``BaseModel`` subclass. Unknown keys are not dynamic.
+
+		Args:
+			path_parts (list[str]): Dotted config path components (e.g. ['tasks', 'overrides']).
+
+		Returns:
+			bool: True if the path is a dynamic ``Dict`` field.
+		"""
+		import typing
+		model = SecatorConfig
+		annotation = None
+		for part in path_parts:
+			fields = getattr(model, 'model_fields', None)
+			if not fields or part not in fields:
+				return False
+			annotation = fields[part].annotation
+			if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+				model = annotation
+			else:
+				model = None  # leaf or container; no further sub-models to walk
+		return typing.get_origin(annotation) is dict
+
+	@staticmethod
+	def _match_task_name(remainder):
+		"""Return the longest task name that prefixes an underscored remainder, else None.
+
+		Task names are read from the ``secator/tasks`` package directory (filenames match task class
+		names by convention), avoiding any task imports at config-load time.
+
+		Args:
+			remainder (str): Lowercased underscored remainder, e.g. 'search_vulns_input_chunk_size'.
+
+		Returns:
+			str | None: Matching task name, e.g. 'search_vulns'.
+		"""
+		tasks_dir = Path(__file__).parent / 'tasks'
+		if not tasks_dir.is_dir():
+			return None
+		candidates = [
+			f.stem for f in tasks_dir.glob('*.py')
+			if not f.stem.startswith('_') and (remainder == f.stem or remainder.startswith(f.stem + '_'))
+		]
+		return max(candidates, key=len) if candidates else None
 
 
 def download_files(data: dict, target_folder: Path, offline_mode: bool, type: str):

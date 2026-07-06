@@ -6,9 +6,9 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-	CONFIDENCE, CVSS_SCORE, DELAY, DESCRIPTION, EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT, ID, IP,
-	MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT, PROVIDER, PROXY, RATE_LIMIT, REFERENCES, RETRIES, SEVERITY, TAGS,
-	THREADS, TIMEOUT, URL, USER_AGENT
+	CONFIDENCE, CVSS_SCORE, CVSS_VECTOR, DELAY, DESCRIPTION, EPSS_SCORE, EXTRA_DATA, FOLLOW_REDIRECT, HEADER, HOST,
+	HOST_PORT, ID, IMPACT, IP, MATCHED_AT, NAME, OPT_NOT_SUPPORTED, PERCENT, PROVIDER, PROXY, RATE_LIMIT, REFERENCES,
+	REMEDIATION, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT
 )
 # fmt: on
 from secator.output_types import Progress, Tag, Technology, Vulnerability
@@ -42,13 +42,18 @@ class nuclei(VulnMulti):
 		'automatic_scan': {'is_flag': True, 'short': 'as', 'help': 'Automatic web scan using wappalyzer technology detection to tags mapping'},  # noqa: E501
 		'bulk_size': {'type': int, 'short': 'bs', 'help': 'Maximum number of hosts to be analyzed in parallel per template'},  # noqa: E501
 		'debug': {'type': str, 'help': 'Debug mode'},
+		'display_templates': {'is_flag': True, 'default': False, 'short': 'dt', 'help': 'Display loaded template names.'},
 		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
 		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude tags'},
 		'hang_monitor': {'is_flag': True, 'short': 'hm', 'default': True, 'help': 'Enable nuclei hang monitoring'},
 		'headless_bulk_size': {'type': int, 'short': 'hbs', 'help': 'Maximum number of headless hosts to be analzyed in parallel per template'},  # noqa: E501
 		'input_mode': {'type': str, 'short': 'im', 'help': 'Mode of input file (list, burp, jsonl, yaml, openapi, swagger)'},
+		'interactsh_server': {'type': str, 'default': None, 'short': 'iserver', 'help': 'InteractSH server url for self-hosted instance (default: oast.pro,oast.live,oast.site,oast.online,oast.fun,oast.me)'},  # noqa: E501
+		'interactsh_token': {'type': str, 'default': None, 'short': 'itoken', 'help': 'InteractSH auth token for self-hosted instance'},  # noqa: E501
+		'no_interactsh': {'is_flag': True, 'default': False, 'short': 'ni', 'help': 'Disable InteractSH server for OAST testing, exclude OAST based templates'},  # noqa: E501
 		'logs': {'is_flag': True, 'internal': True, 'display': True, 'help': 'Log errors (-elog) and traces (-tlog) to output dir'},  # noqa: E501
 		'new_templates': {'type': str, 'short': 'nt', 'help': 'Run only new templates added in latest nuclei-templates release'},  # noqa: E501
+		'no_httpx': {'is_flag': True, 'short': 'nh', 'help': 'Disable httpx probing for non-url inputs'},
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit requests/response pairs in the JSON, JSONL, and Markdown outputs (for findings only)'},  # noqa: E501
 		'response_size_read': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},  # noqa: E501
 		'severity': {'type': str, 'short': 's', 'help': 'Templates to run based on severity. Possible values: info, low, medium, high, critical, unknown'},  # noqa: E501
@@ -72,6 +77,7 @@ class nuclei(VulnMulti):
 		TIMEOUT: 'timeout',
 		USER_AGENT: OPT_NOT_SUPPORTED,
 		# nuclei opts
+		'display_templates': 'vv',
 		'exclude_tags': 'exclude-tags',
 		'exclude_severity': 'exclude-severity',
 		'templates': 't',
@@ -90,15 +96,19 @@ class nuclei(VulnMulti):
 	output_map = {
 		Vulnerability: {
 			ID: lambda x: nuclei.id_extractor(x),
-			NAME: lambda x: nuclei.name_extractor(x),
+			NAME: lambda x: x['info']['name'],
 			DESCRIPTION: lambda x: x['info'].get('description'),
 			SEVERITY: lambda x: x['info'][SEVERITY],
 			CONFIDENCE: lambda x: 'high',
-			CVSS_SCORE: lambda x: x['info'].get('classification', {}).get('cvss-score') or 0,
+			CVSS_SCORE: lambda x: float(x['info'].get('classification', {}).get('cvss-score') or 0),
+			CVSS_VECTOR: lambda x: x['info'].get('classification', {}).get('cvss-metrics') or '',
+			EPSS_SCORE: lambda x: float(x['info'].get('classification', {}).get('epss-score') or 0),
+			IMPACT: lambda x: x['info'].get('impact') or '',
+			REMEDIATION: lambda x: x['info'].get('remediation') or '',
 			MATCHED_AT: 'matched-at',
 			IP: 'ip',
 			TAGS: lambda x: x['info']['tags'],
-			REFERENCES: lambda x: x['info'].get('reference', []),
+			REFERENCES: lambda x: [nuclei.get_github_template_url(x)] + x['info'].get('reference', []),
 			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
 			PROVIDER: 'nuclei',
 		},
@@ -146,7 +156,7 @@ class nuclei(VulnMulti):
 	def id_extractor(item):
 		cve_ids = item['info'].get('classification', {}).get('cve-id') or []
 		if len(cve_ids) > 0:
-			return cve_ids[0]
+			return cve_ids[0].upper()
 		return None
 
 	@staticmethod
@@ -156,17 +166,22 @@ class nuclei(VulnMulti):
 		data['type'] = item.get('type', '')
 		data['matcher_name'] = item.get('matcher-name', '')
 		data['template_id'] = item['template-id']
-		template = item.get('template')
-		template_url = item.get('template-url', '')
-		if template_url.startswith('https://cloud.projectdiscovery.io') and template:
-			template_url = 'https://github.com/projectdiscovery/nuclei-templates/blob/main/' + template
-		data['template_url'] = template_url
+		data['curl_command'] = item.get('curl-command', '')
+		data['template_url'] = nuclei.get_github_template_url(item)
 		for k, v in item.get('meta', {}).items():
 			data['data'].append(f'{k}: {v}')
 		data['metadata'] = item.get('metadata', {})
 		if with_tags:
 			data['tags'] = item.get('info', {}).get('tags', [])
 		return data
+
+	@staticmethod
+	def get_github_template_url(item):
+		template = item.get('template')
+		template_url = item.get('template-url', '')
+		if template_url.startswith('https://cloud.projectdiscovery.io') and template:
+			template_url = 'https://github.com/projectdiscovery/nuclei-templates/blob/main/' + template
+		return template_url
 
 	@staticmethod
 	def value_extractor(item):

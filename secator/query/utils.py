@@ -3,6 +3,8 @@
 import json
 import re
 
+from secator.output_types import Error
+from secator.rich import console
 from secator.utils import debug
 
 
@@ -41,6 +43,84 @@ def parse_report_paths(paths_str):
     return result
 
 
+RUNNER_TYPES = {'task', 'tasks', 'workflow', 'workflows', 'scan', 'scans'}
+
+
+def expand_runner_paths(tokens):
+    """Expand runner path tokens into individual runner references.
+
+    Each token may be space-separated (passed as separate list items),
+    comma-separated, and may contain inclusive numeric ranges. Examples:
+        ['tasks/23', 'workflows/21']  → [('tasks', 'task', '23'), ('workflows', 'workflow', '21')]
+        ['tasks/23,tasks/24']         → [('tasks', 'task', '23'), ('tasks', 'task', '24')]
+        ['tasks/136-140']             → tasks 136, 137, 138, 139, 140
+
+    Args:
+        tokens (str | iterable[str]): One or more path tokens.
+
+    Returns:
+        tuple[list, list]: (refs, errors) where refs is an order-preserving,
+        de-duplicated list of (type_plural, type_singular, number) tuples and
+        errors is a list of human-readable error strings for invalid tokens.
+    """
+    if isinstance(tokens, str):
+        tokens = [tokens]
+
+    refs = []
+    errors = []
+    seen = set()
+
+    parts = []
+    for token in tokens:
+        parts.extend(p.strip() for p in token.split(',') if p.strip())
+
+    for part in parts:
+        if '/' not in part:
+            errors.append(f'Invalid runner path: {part!r}. Expected format: <type>/<id> (e.g. tasks/24)')
+            continue
+        runner_type_raw, spec = part.split('/', 1)
+        runner_type_raw = runner_type_raw.strip().lower()
+        spec = spec.strip().rstrip('/')
+
+        if runner_type_raw not in RUNNER_TYPES:
+            errors.append(f'Invalid runner type: {runner_type_raw!r}. Must be one of: task, workflow, scan.')
+            continue
+
+        type_plural = runner_type_raw if runner_type_raw.endswith('s') else runner_type_raw + 's'
+        type_singular = type_plural[:-1]
+
+        # Range (e.g. "136-140") or single number
+        if '-' in spec:
+            start_str, _, end_str = spec.partition('-')
+            start_str, end_str = start_str.strip(), end_str.strip()
+            if not (start_str.isdigit() and end_str.isdigit()):
+                errors.append(f'Invalid range: {spec!r} in {part!r}. Both bounds must be numeric (e.g. 136-140).')
+                continue
+            start, end = int(start_str), int(end_str)
+            if start > end:
+                errors.append(f'Invalid range: {spec!r} in {part!r}. Start must be <= end.')
+                continue
+            numbers = [str(n) for n in range(start, end + 1)]
+        elif spec.isdigit():
+            numbers = [str(int(spec))]
+        elif len(spec) == 24 and all(c in '0123456789abcdefABCDEF' for c in spec):
+            # ObjectId (e.g. from `r list --driver api`): used as-is, no range expansion.
+            numbers = [spec]
+        else:
+            errors.append(f'Invalid runner id: {spec!r} in {part!r}. Must be a number or a 24-char hex id.')
+            continue
+
+        for number in numbers:
+            key = (type_plural, number)
+            if key in seen:
+                continue
+            seen.add(key)
+            refs.append((type_plural, type_singular, number))
+
+    debug('expand_runner_paths', sub='query', obj={'input': list(tokens), 'refs': refs, 'errors': errors})
+    return refs, errors
+
+
 def _split_logical_op(query, op):
     """Split query string on logical operator, skipping quoted substrings."""
     parts = []
@@ -70,8 +150,16 @@ def _split_logical_op(query, op):
 
 
 def _parse_value(raw):
-    """Convert a string token to int, float, or stripped string."""
+    """Convert a string token to bool, int, float, or stripped string."""
     raw = raw.strip().strip("'\"")
+    # Boolean literals ("True"/"true", "False"/"false") become real booleans so a
+    # comparison like `ip.alive == True` resolves to a boolean match (not the string
+    # "True") across all backends.
+    low = raw.lower()
+    if low == 'true':
+        return True
+    if low == 'false':
+        return False
     try:
         return int(raw)
     except ValueError:
@@ -85,7 +173,9 @@ def _parse_value(raw):
 
 # Regex that finds the first comparison operator outside of quotes.
 # Alternatives are ordered longest-first so >= matches before > and ~= is included.
-_OP_RE = re.compile(r'^(.*?)\s*(>=|<=|!=|~=|>|<|==)\s*(.+)$', re.DOTALL)
+# '!~=' (negated regex) must come before '!=' and '~=' so the longest operator
+# wins at the same position.
+_OP_RE = re.compile(r'^(.*?)\s*(>=|<=|!~=|!=|~=|>|<|==)\s*(.+)$', re.DOTALL)
 
 _OP_MAP = {
     '>=': '$gte',
@@ -95,7 +185,62 @@ _OP_MAP = {
     '!=': '$ne',
     '==': None,
     '~=': '$regex',
+    '!~=': '$not_regex',  # sentinel -> {'$not': {'$regex': ...}} (not matching regex)
 }
+
+# Regex for the 'in'/'not in' operators: "type.field in [val1, val2]". 'not in'
+# is matched first (it also contains ' in ').
+_IN_RE = re.compile(r'^(.+?)\s+in\s+\[(.*)\]\s*$', re.DOTALL)
+_NOT_IN_RE = re.compile(r'^(.+?)\s+not\s+in\s+\[(.*)\]\s*$', re.DOTALL)
+
+
+def _has_in_op_outside_quotes(expr):
+    """Return True if ' in [' appears outside of any quoted substring in expr."""
+    in_quote = None
+    i = 0
+    while i < len(expr):
+        ch = expr[i]
+        if in_quote is None and ch in ('"', "'"):
+            in_quote = ch
+            i += 1
+        elif ch == in_quote:
+            in_quote = None
+            i += 1
+        elif in_quote is None and expr[i:i + 4] == ' in ':
+            j = i + 4
+            while j < len(expr) and expr[j] == ' ':
+                j += 1
+            if j < len(expr) and expr[j] == '[':
+                return True
+            i += 1
+        else:
+            i += 1
+    return False
+
+
+def _parse_list(values_str):
+    """Parse a comma-separated list of values, respecting quoted strings."""
+    values = []
+    current = []
+    in_quote = None
+    for ch in values_str:
+        if in_quote is None and ch in ('"', "'"):
+            in_quote = ch
+            current.append(ch)
+        elif ch == in_quote:
+            in_quote = None
+            current.append(ch)
+        elif in_quote is None and ch == ',':
+            val = ''.join(current).strip()
+            if val:
+                values.append(_parse_value(val))
+            current = []
+        else:
+            current.append(ch)
+    val = ''.join(current).strip()
+    if val:
+        values.append(_parse_value(val))
+    return values
 
 
 def _parse_single_expr(expr):
@@ -115,6 +260,41 @@ def _parse_single_expr(expr):
     if re.match(r'^[a-z_]+$', expr):
         return {'_type': expr}
 
+    # Check for 'not in' operator first: "type.field not in [val1, val2]" -> $nin.
+    # It also contains ' in ', so it must be matched before the plain 'in' branch.
+    m_not_in = _NOT_IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
+    if m_not_in:
+        left, values_str = m_not_in.group(1).strip(), m_not_in.group(2)
+        parts = left.split('.', 1)
+        _type = parts[0].strip()
+        field = parts[1].strip() if len(parts) > 1 else None
+        values = _parse_list(values_str)
+        if field is None:
+            console.print(Error(
+                message=f"'not in' operator requires a field (e.g. 'type.field not in [...]'): {expr!r}"
+            ))
+            return {'_type': _type}
+        result = {'_type': _type}
+        result[field] = {'$nin': values}
+        return result
+
+    # Check for 'in' operator: "type.field in [val1, val2]"
+    m_in = _IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
+    if m_in:
+        left, values_str = m_in.group(1).strip(), m_in.group(2)
+        parts = left.split('.', 1)
+        _type = parts[0].strip()
+        field = parts[1].strip() if len(parts) > 1 else None
+        values = _parse_list(values_str)
+        if field is None:
+            console.print(Error(
+                message=f"'in' operator requires a field (e.g. 'type.field in [...]'): {expr!r}"
+            ))
+            return {'_type': _type}
+        result = {'_type': _type}
+        result[field] = {'$in': values}
+        return result
+
     # Use regex to find the first operator (longest-first via alternation order).
     # This avoids mis-splitting on operators that appear inside quoted values.
     m = _OP_RE.match(expr)
@@ -124,15 +304,31 @@ def _parse_single_expr(expr):
         parts = left.split('.', 1)
         _type = parts[0].strip()
         field = parts[1].strip() if len(parts) > 1 else None
-        value = _parse_value(right)
+        # Regex patterns must stay as strings — converting to int/float breaks re.search.
+        if mongo_op in ('$regex', '$not_regex'):
+            value = right.strip().strip("'\"")
+        else:
+            value = _parse_value(right)
         result = {'_type': _type}
         if field:
-            result[field] = value if mongo_op is None else {mongo_op: value}
+            if mongo_op == '$not_regex':
+                result[field] = {'$not': {'$regex': value}}
+            elif mongo_op is None:
+                result[field] = value
+            else:
+                result[field] = {mongo_op: value}
         return result
 
-    # Fallback: treat as type name
+    # Fallback: a bare "type.field" with no operator is a boolean truthiness check,
+    # i.e. "ip.alive" means "ip.alive == True" (resolves identically across backends).
+    # A bare "type" with no field is just the type.
     parts = expr.split('.', 1)
-    return {'_type': parts[0].strip()}
+    _type = parts[0].strip()
+    field = parts[1].strip() if len(parts) > 1 else None
+    result = {'_type': _type}
+    if field:
+        result[field] = True
+    return result
 
 
 def _normalize_logical_ops(query):
@@ -201,11 +397,161 @@ def python_expr_to_mongo(query):
     if len(or_parts) > 1:
         result = {'$or': [_parse_single_expr(p) for p in or_parts]}
     elif len(and_parts) > 1:
-        result = {}
-        for part in and_parts:
-            result.update(_parse_single_expr(part))
+        # Merge AND parts into one flat dict when possible: distinct fields, or the
+        # SAME field with disjoint operator dicts (Mongo ANDs operators within a
+        # field, e.g. `host !~= a && host != b` -> {host: {$not:.., $ne:..}}).
+        # If any clause can't merge (two `$not` on the same field, or an equality
+        # clash), emit a top-level $and of the FULL parts. Mongo has no field-level
+        # $and, and a *mixed* {field:.., $and:[..]} dict silently loses the inline
+        # keys in downstream query validation — so the $and must be the sole key.
+        parsed = [_parse_single_expr(p) for p in and_parts]
+        merged = {}
+        mergeable = True
+        for part in parsed:
+            for key, val in part.items():
+                if key not in merged or merged[key] == val:
+                    merged[key] = val
+                elif (
+                    isinstance(merged[key], dict) and isinstance(val, dict)
+                    and not (set(merged[key]) & set(val))
+                ):
+                    merged[key] = {**merged[key], **val}
+                else:
+                    mergeable = False
+                    break
+            if not mergeable:
+                break
+        result = merged if mergeable else {'$and': parsed}
     else:
         result = _parse_single_expr(query)
 
     debug('python_expr_to_mongo', sub='query', obj={'input': query, 'output': result})
     return result
+
+
+def _warn_unknown_field(field_name, type_name, valid_fields):
+    """Emit a warning for an unknown field in a query fragment."""
+    from secator.output_types import Warning
+    public_fields = sorted(f for f in valid_fields if not f.startswith('_'))
+    console.print(Warning(
+        message=f"Field '{field_name}' does not exist on type '{type_name}'. "
+                f"Available fields: {', '.join(public_fields)}"
+    ))
+
+
+def _build_type_map():
+    from secator.output_types import OUTPUT_TYPES
+    return {
+        cls.__dataclass_fields__['_type'].default: cls
+        for cls in OUTPUT_TYPES
+        if '_type' in getattr(cls, '__dataclass_fields__', {})
+        and isinstance(cls.__dataclass_fields__['_type'].default, str)
+    }
+
+
+def _validate_fragment(fragment, type_map, warnings):
+    """Validate a single query fragment against known output type fields.
+
+    Appends (field_name, type_name, valid_fields) tuples to *warnings* for each
+    unknown field found.  Returns None if all user-specified fields were invalid
+    (signals the caller to drop this fragment from an $or/$and list rather than
+    keeping a bare {'_type': 'x'} that would match every object of that type).
+    """
+    if not isinstance(fragment, dict):
+        return fragment
+    _type = fragment.get('_type')
+    if not _type:
+        return fragment
+    cls = type_map.get(_type)
+    if cls is None:
+        return fragment
+    valid_fields = set(cls.fields())
+    result = {}
+    user_fields_seen = 0
+    user_fields_kept = 0
+    for k, v in fragment.items():
+        if k.startswith('$') or k.startswith('_'):
+            result[k] = v
+            continue
+        user_fields_seen += 1
+        top_field = k.split('.')[0]
+        if top_field in valid_fields:
+            result[k] = v
+            user_fields_kept += 1
+        else:
+            warnings.append((k, _type, valid_fields))
+    # If the fragment had user-specified fields but ALL were invalid, signal
+    # the caller to drop this fragment entirely rather than keeping a bare
+    # {'_type': _type} that would match every object of that type.
+    if user_fields_seen > 0 and user_fields_kept == 0:
+        return None
+    return result
+
+
+def _validate_query(q, type_map, warnings):
+    if not isinstance(q, dict):
+        return q
+    if '$or' in q:
+        parts = [_validate_query(sub, type_map, warnings) for sub in q['$or']]
+        parts = [p for p in parts if p]
+        if len(parts) == 0:
+            return {}
+        if len(parts) == 1:
+            return parts[0]
+        return {'$or': parts}
+    if '$and' in q:
+        parts = [_validate_query(sub, type_map, warnings) for sub in q['$and']]
+        parts = [p for p in parts if p]
+        if len(parts) == 0:
+            return {}
+        if len(parts) == 1:
+            return parts[0]
+        return {'$and': parts}
+    result = _validate_fragment(q, type_map, warnings)
+    return result if result is not None else {}
+
+
+def validate_query_fields(query):
+    """Validate field names in a MongoDB-style query against known output types.
+
+    For each fragment referencing a known _type, checks that the queried fields
+    exist on that type. Invalid fields are removed from the query.
+
+    Returns:
+        tuple[dict, list]: (filtered_query, warnings) where warnings is a list of
+        (field_name, type_name, valid_fields) tuples for unknown fields found.
+        Callers are responsible for emitting the warnings at the appropriate time.
+    """
+    if not query or not isinstance(query, dict):
+        return query, []
+
+    type_map = _build_type_map()
+    warnings = []
+    result = _validate_query(query, type_map, warnings)
+    return result, warnings
+
+
+def emit_query_warnings(warnings):
+    """Emit warning messages for unknown query fields collected by validate_query_fields."""
+    for field_name, type_name, valid_fields in warnings:
+        _warn_unknown_field(field_name, type_name, valid_fields)
+
+
+def query_has_type_constraint(query):
+    """Check whether a MongoDB-style query contains a '_type' constraint anywhere (recursively).
+
+    Args:
+        query (dict | list): MongoDB-style query (or sub-query list from $and / $or).
+
+    Returns:
+        bool: True if a '_type' key is present at any nesting level.
+    """
+    if isinstance(query, dict):
+        for key, value in query.items():
+            if key == '_type':
+                return True
+            if isinstance(value, (dict, list)) and query_has_type_constraint(value):
+                return True
+    elif isinstance(query, list):
+        return any(query_has_type_constraint(item) for item in query)
+    return False

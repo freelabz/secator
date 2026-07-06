@@ -36,7 +36,9 @@ class wpscan(VulnHttp):
 		'login_uri': {'type': str, 'short': 'lu', 'help': 'URI of the login page if different from /wp-login.php'},
 		'detection_mode': {'type': str, 'short': 'dm', 'help': 'Detection mode between mixed, passive, and aggressive'},
 		'random_user_agent': {'is_flag': True, 'short': 'rua', 'help': 'Random user agent'},
-		'disable_tls_checks': {'is_flag': True, 'short': 'dtc', 'help': 'Disable TLS checks'}
+		'disable_tls_checks': {'is_flag': True, 'short': 'dtc', 'help': 'Disable TLS checks'},
+		'no_update': {'is_flag': True, 'default': None, 'help': 'Do not update wordpress DB'},
+		'update': {'is_flag': True, 'default': None, 'help': 'Update Wordpress DB'}
 	}
 	opt_key_map = {
 		HEADER: OPT_NOT_SUPPORTED,

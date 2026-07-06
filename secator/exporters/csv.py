@@ -26,17 +26,16 @@ class CsvExporter(Exporter):
 			csv_path = f'{self.report.output_folder}/report_{output_type}.csv'
 			csv_paths.append(csv_path)
 			with open(csv_path, 'w', newline='') as output_file:
-				dict_writer = _csv.DictWriter(output_file, keys)
+				# extrasaction='ignore': backends (e.g. API) may attach computed fields
+				# not in the output-type schema (e.g. 'is_exploitable'); only write the
+				# schema columns instead of raising on extras.
+				dict_writer = _csv.DictWriter(output_file, keys, extrasaction='ignore')
 				dict_writer.writeheader()
 				dict_writer.writerows(items)
 
 		if not csv_paths:
 			return
 
-		if len(csv_paths) == 1:
-			csv_paths_str = csv_paths[0]
-		else:
-			csv_paths_str = '\n   • ' + '\n   • '.join(csv_paths)
-
 		if getattr(self.report.runner, 'print_reports_message', True):
-			console.print(Info(message=f'Saved CSV reports to {csv_paths_str}'))
+			for csv_path in csv_paths:
+				console.print(Info(message=f'CSV report written to {csv_path}'))

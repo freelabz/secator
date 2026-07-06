@@ -1,5 +1,188 @@
 # Changelog
 
+## [0.39.0](https://github.com/freelabz/secator/compare/v0.38.0...v0.39.0) (2026-07-03)
+
+
+### Features
+
+* **vulnerability:** add status field + carry-over across re-scans ([#1209](https://github.com/freelabz/secator/issues/1209)) ([0d7bf7d](https://github.com/freelabz/secator/commit/0d7bf7d6fe2c418f244049f87bb98cb537230c04))
+
+
+### Bug Fixes
+
+* **cli:** missing "help" field in option raises ValueError ([#1230](https://github.com/freelabz/secator/issues/1230)) ([74a6b39](https://github.com/freelabz/secator/commit/74a6b39078e85530064489eb290e960492b92a18))
+* **config:** SECATOR_ADDONS_* invalid key override breaks Secator totally ([#1205](https://github.com/freelabz/secator/issues/1205)) ([2164993](https://github.com/freelabz/secator/commit/2164993b37797f5b2bacd83e89a002e46e59883b))
+* dynamic task import order causing SyntaxError with external tasks ([#1213](https://github.com/freelabz/secator/issues/1213)) ([0e2fcd6](https://github.com/freelabz/secator/commit/0e2fcd6408cb801452169971e31f04f843073895))
+* **exporters:** add runner warnings to report ([#1228](https://github.com/freelabz/secator/issues/1228)) ([1734f6b](https://github.com/freelabz/secator/commit/1734f6b4d7a0dad4cb2950b9cc9952907dc23266))
+* **output:** display full node id instead of task name ([#1227](https://github.com/freelabz/secator/issues/1227)) ([e26f394](https://github.com/freelabz/secator/commit/e26f3944197aa38c9077dfdffabbb0df5be4dfca))
+* **output:** Vulnerability colors display by severity, show tags for Tag ([#1229](https://github.com/freelabz/secator/issues/1229)) ([6ad35e3](https://github.com/freelabz/secator/commit/6ad35e3d11ab8aafcda58596216dca7ea3cfc6c9))
+* **runner:** remove __getstate__/__setstate__, load driver hooks at init ([#1267](https://github.com/freelabz/secator/issues/1267)) ([2c6d2e8](https://github.com/freelabz/secator/commit/2c6d2e8eba638d6cdf275e7bdb101dadfa21b7da))
+* **tests:** coverage report NoSource failure on main ([#1270](https://github.com/freelabz/secator/issues/1270)) ([8b3a2a3](https://github.com/freelabz/secator/commit/8b3a2a3dc639291a68dbe1edaf0535480d5b01bf))
+
+
+### Performance Improvements
+
+* **output-types:** cache keys() + O(1) deduplicate membership check ([#1220](https://github.com/freelabz/secator/issues/1220)) ([7a956e9](https://github.com/freelabz/secator/commit/7a956e9215ffdfe69d3b8c628b46d3665f835587))
+
+## [0.38.0](https://github.com/freelabz/secator/compare/v0.37.1...v0.38.0) (2026-06-19)
+
+
+### Features
+
+* **routing:** allow tasks.overrides.&lt;task&gt;.profile to re-route static-profile tasks ([#1200](https://github.com/freelabz/secator/issues/1200)) ([1d41063](https://github.com/freelabz/secator/commit/1d4106360b2b299514c5016d3af8e992af81b61b))
+
+
+### Bug Fixes
+
+* **jswhois:** add --force option, always ([#1195](https://github.com/freelabz/secator/issues/1195)) ([4e495a6](https://github.com/freelabz/secator/commit/4e495a69780b9b7a2ee06b194ec8f7b3df24aef5))
+* **katana:** use extra_large profile for headless crawls ([#1198](https://github.com/freelabz/secator/issues/1198)) ([d92e80c](https://github.com/freelabz/secator/commit/d92e80cfc300902e0398971624a57987f4e37e0e))
+* **nmap:** repair truncated XML on timeout + per-task max timeout ([#1196](https://github.com/freelabz/secator/issues/1196)) ([36b8719](https://github.com/freelabz/secator/commit/36b87195f526480afe87a376ab040546596a1e39))
+* test pollution bug ([29ee62f](https://github.com/freelabz/secator/commit/29ee62fc7c990f3b930c0d7d4ec6d0846b81d5a2))
+
+## [0.37.1](https://github.com/freelabz/secator/compare/v0.37.0...v0.37.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **ffuf:** guard against missing has_fuzz_keyword attribute ([#1193](https://github.com/freelabz/secator/issues/1193)) ([10809f8](https://github.com/freelabz/secator/commit/10809f806599da833b51dee166a28991d73987a1))
+
+## [0.37.0](https://github.com/freelabz/secator/compare/v0.36.4...v0.37.0) (2026-06-17)
+
+
+### Features
+
+* make the api driver work end-to-end in the CLI (queries, workspaces, operators) ([#1181](https://github.com/freelabz/secator/issues/1181)) ([d075115](https://github.com/freelabz/secator/commit/d075115583454b114f9ada824ff15a84c199d8dc))
+
+
+### Bug Fixes
+
+* **tty:** rare issue with tty ([#1184](https://github.com/freelabz/secator/issues/1184)) ([4dd45e6](https://github.com/freelabz/secator/commit/4dd45e6472d8e7f9c478a0c3d7d467364fbcb87e))
+
+## [0.36.4](https://github.com/freelabz/secator/compare/v0.36.3...v0.36.4) (2026-06-16)
+
+
+### Bug Fixes
+
+* **mongodb:** warn instead of crashing on DocumentTooLarge ([#1186](https://github.com/freelabz/secator/issues/1186)) ([cb6a899](https://github.com/freelabz/secator/commit/cb6a899793f7db49631898f8e9743871b8bc9fb2))
+* **query:** bare `type.field` resolves to a boolean match (field == True) ([#1185](https://github.com/freelabz/secator/issues/1185)) ([b9106fb](https://github.com/freelabz/secator/commit/b9106fb9bb4f72c4aa3ac410125e2435876586ac))
+* stop a workflow inheriting a sibling workflow's errors ([#1182](https://github.com/freelabz/secator/issues/1182)) ([5fd5a89](https://github.com/freelabz/secator/commit/5fd5a891d19bc822b3356ee2f55a46bd966ddc13))
+
+## [0.36.3](https://github.com/freelabz/secator/compare/v0.36.2...v0.36.3) (2026-06-15)
+
+
+### Bug Fixes
+
+* restore on_end hooks for chunk-parent tasks on unpickle ([#1180](https://github.com/freelabz/secator/issues/1180)) ([5c92833](https://github.com/freelabz/secator/commit/5c928331a79a6014e572132bf6c1206bb28813e5))
+* **wpscan:** add --no-update and --update flags ([#1177](https://github.com/freelabz/secator/issues/1177)) ([36a1966](https://github.com/freelabz/secator/commit/36a196671bafea8a711ee63b80f9ed2bb4f9b8ef))
+
+## [0.36.2](https://github.com/freelabz/secator/compare/v0.36.1...v0.36.2) (2026-06-15)
+
+
+### Bug Fixes
+
+* **chain:** keep non-persisted outputs (Target/Info) through the Celery chain so subdomains feed host_recon with MongoDB ([#1174](https://github.com/freelabz/secator/issues/1174)) ([b6f0380](https://github.com/freelabz/secator/commit/b6f0380b2c8694255e07e82cd566d3b654a84c9f))
+
+## [0.36.1](https://github.com/freelabz/secator/compare/v0.36.0...v0.36.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* **driver:** order drivers by priority so mongodb prevails over api ([#1172](https://github.com/freelabz/secator/issues/1172)) ([edb0dcf](https://github.com/freelabz/secator/commit/edb0dcf346ebf14322243120b59742c66da0b7de))
+
+## [0.36.0](https://github.com/freelabz/secator/compare/v0.35.0...v0.36.0) (2026-06-11)
+
+
+### Features
+
+* **driver:** proper support for all backends in CLI commands (`r list`, `r info`, `query`, ...) ([#1164](https://github.com/freelabz/secator/issues/1164)) ([782361d](https://github.com/freelabz/secator/commit/782361dbde17efc16140dbbedbcd094329d8c062))
+
+
+### Bug Fixes
+
+* **cli:** put loader success messages in debug instead of console.print ([#1169](https://github.com/freelabz/secator/issues/1169)) ([2061a29](https://github.com/freelabz/secator/commit/2061a294a3145e4d58883350f79d1e4c1371c540))
+* **exporters:** add `jsonl` exporter, fix `json` and `csv` exports ([#1166](https://github.com/freelabz/secator/issues/1166)) ([d5e4d6e](https://github.com/freelabz/secator/commit/d5e4d6e8fefbcbd1443d5dc21b3dc17ebdda03f6))
+* **nuclei:** uppercase CVE id ([#1168](https://github.com/freelabz/secator/issues/1168)) ([a04e152](https://github.com/freelabz/secator/commit/a04e152c4d8fec75410bdf803ddf39c07dfcdc4c))
+
+
+### Documentation
+
+* add workspaces to cheatsheet ([#1171](https://github.com/freelabz/secator/issues/1171)) ([183f671](https://github.com/freelabz/secator/commit/183f6718a0e986952d0777d07b1f4b238ac3f130))
+* better README for queries ([#1170](https://github.com/freelabz/secator/issues/1170)) ([a72f3be](https://github.com/freelabz/secator/commit/a72f3bee912a7ee8ed9d711e7cbb247137923d9f))
+
+## [0.35.0](https://github.com/freelabz/secator/compare/v0.34.0...v0.35.0) (2026-06-10)
+
+
+### Features
+
+* **cli:** dynamic install addons ([#1144](https://github.com/freelabz/secator/issues/1144)) ([5f0de13](https://github.com/freelabz/secator/commit/5f0de13d4f1ae8a1ea5c6bd62e42c0b050b91afc))
+* **cli:** improve `r show --format` with \n, Markdown, and file templates ([#1065](https://github.com/freelabz/secator/issues/1065)) ([d80ccd5](https://github.com/freelabz/secator/commit/d80ccd5d48ccb765b81252db7525866e4aa03ff7))
+* **cli:** improve report/workspace/profile commands and ai setup ([#1140](https://github.com/freelabz/secator/issues/1140)) ([eabdd5c](https://github.com/freelabz/secator/commit/eabdd5c92cbb51f767bef34574e7fa7db558d5a1))
+* **cli:** saved queries and `secator query` command ([#1139](https://github.com/freelabz/secator/issues/1139)) ([047aa04](https://github.com/freelabz/secator/commit/047aa041a00c87300da712714b3035d0cbc3f163))
+* **profile:** support workspace, drivers and exporters in profiles ([#1137](https://github.com/freelabz/secator/issues/1137)) ([df04797](https://github.com/freelabz/secator/commit/df047975571f5fe3f4733f1c5664dc9a3dd3354d))
+* **query:** add --limit / -l option to secator r show ([#1151](https://github.com/freelabz/secator/issues/1151)) ([a0da3c6](https://github.com/freelabz/secator/commit/a0da3c624ddd63a8cd526bd4d1904dde1a00b5fd))
+* **sqlite:** add SQLite query driver + backend (mongodb parity) ([#1163](https://github.com/freelabz/secator/issues/1163)) ([fe9680d](https://github.com/freelabz/secator/commit/fe9680df309f7b68111726ca312063eb6d2a43e2))
+* **workspace:** add automatic workspace routing ([#1158](https://github.com/freelabz/secator/issues/1158)) ([307eeb3](https://github.com/freelabz/secator/commit/307eeb3e2c22b1633a5bf5ab2776a562ab21f0dd))
+* **workspace:** default profile per workspace ([#1132](https://github.com/freelabz/secator/issues/1132)) ([b38e52d](https://github.com/freelabz/secator/commit/b38e52d9db42119ff9e72a77398496ef06e1af96))
+
+
+### Bug Fixes
+
+* **ai:** handle OutputType objects from query results ([#1152](https://github.com/freelabz/secator/issues/1152)) ([8a41028](https://github.com/freelabz/secator/commit/8a41028fcc58a14dc6b9a3c907e67d71494b77ac))
+* **ai:** yield Error for connection failures and use config context_window fallback ([#1119](https://github.com/freelabz/secator/issues/1119)) ([5484d22](https://github.com/freelabz/secator/commit/5484d221621f6fb07384c2e16a60640910a90204))
+* **cli:** add 'in' operator to query language ([#1037](https://github.com/freelabz/secator/issues/1037)) ([f3b752c](https://github.com/freelabz/secator/commit/f3b752c80eae0ee5eab4d762d1375f8962b22944))
+* **cli:** remove piped output behavior from 'secator r list' ([#1149](https://github.com/freelabz/secator/issues/1149)) ([5e0dd75](https://github.com/freelabz/secator/commit/5e0dd75338eba692ff75478f8ef042b9c1d46922))
+* **cli:** sanitize workspace name in report info path construction ([#1146](https://github.com/freelabz/secator/issues/1146)) ([866ea4d](https://github.com/freelabz/secator/commit/866ea4d75714b3b1694656b81e67fda53137190d))
+* **cli:** show _path and task source in secator r info errors/warnings ([#1155](https://github.com/freelabz/secator/issues/1155)) ([0b4942d](https://github.com/freelabz/secator/commit/0b4942d982def3d4653ed516bb73f6461419b2ac))
+* **config:** rename `workspace` config key to `workspaces` ([#1162](https://github.com/freelabz/secator/issues/1162)) ([55a650e](https://github.com/freelabz/secator/commit/55a650e15ce75a63810472e52ac3536553c22ae4))
+* **query:** validate output type fields and warn on unknown fields ([#1159](https://github.com/freelabz/secator/issues/1159)) ([56388a2](https://github.com/freelabz/secator/commit/56388a2ac526f2eb140de4bd8581f9a0493a67eb))
+* revert "fix(runner): show task source name even when output is piped" ([#1136](https://github.com/freelabz/secator/issues/1136)) ([63280eb](https://github.com/freelabz/secator/commit/63280ebc27e967214d3e9d303b8454ab615ef6b2))
+* **sqlite:** remove `sqlite` addon as it's in std library ([7f249fe](https://github.com/freelabz/secator/commit/7f249fec5ce0b6579f2d990c3f6105ee601d645a))
+* **test:** remove sqlite addon enabled check ([df93876](https://github.com/freelabz/secator/commit/df93876ab43372beadbd593314ff7cf7f5aebfbe))
+
+
+### Documentation
+
+* update CLAUDE.md ([#1142](https://github.com/freelabz/secator/issues/1142)) ([a368160](https://github.com/freelabz/secator/commit/a3681601ced37814a9cffffcb91e545e323f05b0))
+
+## [0.34.0](https://github.com/freelabz/secator/compare/v0.33.0...v0.34.0) (2026-06-06)
+
+
+### Features
+
+* **config:** add strategy flag to Config.set for list/dict append and remove ([#1129](https://github.com/freelabz/secator/issues/1129)) ([366df28](https://github.com/freelabz/secator/commit/366df286b04d6f5730106c403d53694d29729827))
+* dynamic driver and exporter loading ([#1116](https://github.com/freelabz/secator/issues/1116)) ([44ac519](https://github.com/freelabz/secator/commit/44ac519b3c59f6856e817675fbbc3b3b7ea92e87))
+* **output_types:** add epss_score, impact, remediation to Vulnerability type ([#1115](https://github.com/freelabz/secator/issues/1115)) ([4237cdc](https://github.com/freelabz/secator/commit/4237cdcac69a4671762a883efe3c29df10187bb3))
+* **runner:** support chunking for python runner ([#1113](https://github.com/freelabz/secator/issues/1113)) ([037df3e](https://github.com/freelabz/secator/commit/037df3ec7a95b0640a9e0893266abed349793ebb))
+
+
+### Bug Fixes
+
+* **cli:** driver order not respected in cli ([#1123](https://github.com/freelabz/secator/issues/1123)) ([f712990](https://github.com/freelabz/secator/commit/f712990df8bc3bdc5a86bf432dc3321e00c41322))
+* dynamic driver hooks not working in worker mode ([#1126](https://github.com/freelabz/secator/issues/1126)) ([f1f0ca2](https://github.com/freelabz/secator/commit/f1f0ca2d66460d933a3af1de4133aff1075dd16a))
+* **markdown:** left-aligned markdown headers ([#1068](https://github.com/freelabz/secator/issues/1068)) ([798de6e](https://github.com/freelabz/secator/commit/798de6e1d3c5604b0292044f124f4efaf5b1b965))
+* **runner:** show task source name even when output is piped ([#1121](https://github.com/freelabz/secator/issues/1121)) ([876819a](https://github.com/freelabz/secator/commit/876819ad5ec4cd223a0913f458bf05ba65f4849a))
+
+## [0.33.0](https://github.com/freelabz/secator/compare/v0.32.0...v0.33.0) (2026-06-02)
+
+
+### Features
+
+* **tasks:** add cvss_vec to vulnerabilities from search_vulns / nuclei ([#1103](https://github.com/freelabz/secator/issues/1103)) ([eceb563](https://github.com/freelabz/secator/commit/eceb56395e6576590592b7df9ff6328e6244d0ff))
+
+
+### Bug Fixes
+
+* **ai:** list all models in setup ([#1102](https://github.com/freelabz/secator/issues/1102)) ([b06d3c2](https://github.com/freelabz/secator/commit/b06d3c252c54518b047debb520ac33ecf75fa1a0))
+* **cli:** add locale to report dates ([#1097](https://github.com/freelabz/secator/issues/1097)) ([e7952aa](https://github.com/freelabz/secator/commit/e7952aa76c6822ccd8caa25bb894274fdee647c7))
+* **httpx:** bump httpx to v1.9.0 ([#1104](https://github.com/freelabz/secator/issues/1104)) ([2f1ccc8](https://github.com/freelabz/secator/commit/2f1ccc8942dc8d50e47611db0ccb151cca12ac78))
+* **nuclei:** add -nh / -no-httpx option ([#1109](https://github.com/freelabz/secator/issues/1109)) ([c16aceb](https://github.com/freelabz/secator/commit/c16acebef8aa9f098a4635e864ac6ee025f6e860))
+* **nuclei:** add missing options ([#1095](https://github.com/freelabz/secator/issues/1095)) ([c00d53f](https://github.com/freelabz/secator/commit/c00d53fb7b0274e0d54d276a2b5a7094821af045))
+* **output_types:** update vuln to not compare cvss score + vector + epss ([#1107](https://github.com/freelabz/secator/issues/1107)) ([0fb0a4a](https://github.com/freelabz/secator/commit/0fb0a4ad419a43110833329a5cd8785372de211c))
+* **query:** handle nested dict dotted notation in --format ([#1086](https://github.com/freelabz/secator/issues/1086)) ([#1101](https://github.com/freelabz/secator/issues/1101)) ([013692d](https://github.com/freelabz/secator/commit/013692d652ff8af27dbaf4a31e53885cad2b6e98))
+* **query:** prevent exception when regex starts with '*' or is a number ([#1105](https://github.com/freelabz/secator/issues/1105)) ([7a576d3](https://github.com/freelabz/secator/commit/7a576d357583d644c9553e5c27257684e7e8ba37))
+* **runner:** prevent scan stuck in PENDING state after async completion ([#1106](https://github.com/freelabz/secator/issues/1106)) ([07195c4](https://github.com/freelabz/secator/commit/07195c46869311dec91ba9315620e188a3d60031))
+* **testssl:** turn errors into warnings to stop scans from failing ([#1098](https://github.com/freelabz/secator/issues/1098)) ([734d2fe](https://github.com/freelabz/secator/commit/734d2fe4cf300d343d36b4ae7013345e1956b83b))
+
 ## [0.32.0](https://github.com/freelabz/secator/compare/v0.31.2...v0.32.0) (2026-05-12)
 
 

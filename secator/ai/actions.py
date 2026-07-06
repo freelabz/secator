@@ -415,7 +415,13 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			_context=context
 		)
 		for result in results:
+			if isinstance(result, OutputType):
+				result = result.toDict()
 			result["_context"].update(context)
+			# Query results are existing workspace findings surfaced for the AI's
+			# observation only — mark them so the runner doesn't re-yield/re-report
+			# them (which would duplicate them back into the workspace).
+			result.setdefault("_context", {})["ai_query_result"] = True
 			yield result
 
 	except Exception as e:
@@ -425,7 +431,7 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			extra_data={"results": "failed", "limit": limit},
 			_context=context
 		)
-		yield Error.from_exception(e)
+		yield Error.from_exception(e, _context=context)
 
 
 def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:

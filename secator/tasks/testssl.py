@@ -8,15 +8,17 @@ from datetime import datetime
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.output_types import Vulnerability, Certificate, Error, Info, Ip, Tag, Warning
-from secator.definitions import (PROXY, HOST, USER_AGENT, HEADER, OUTPUT_PATH,
-								CERTIFICATE_STATUS_UNKNOWN, CERTIFICATE_STATUS_TRUSTED, CERTIFICATE_STATUS_REVOKED,
-								TIMEOUT, HOST_PORT, URL, IP)
+from secator.definitions import (
+	PROXY, HOST, USER_AGENT, HEADER, OUTPUT_PATH, CERTIFICATE_STATUS_UNKNOWN,
+	CERTIFICATE_STATUS_TRUSTED, CERTIFICATE_STATUS_REVOKED, TIMEOUT, HOST_PORT, URL, IP
+)  # fmt: off
 from secator.tasks._categories import Command, OPTS
 
 
 @task()
 class testssl(Command):
 	"""SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws."""
+
 	cmd = 'testssl.sh'
 	input_types = [HOST, HOST_PORT, URL, IP]
 	output_types = [Certificate, Vulnerability, Ip, Tag]
@@ -55,7 +57,7 @@ class testssl(Command):
 	install_cmd_pre = {
 		'apk': ['hexdump', 'coreutils', 'procps', 'bash'],
 		'pacman': ['util-linux', 'bash'],
-		'*': ['bsdmainutils', 'bash']
+		'*': ['bsdmainutils', 'bash'],
 	}
 	install_version = 'v3.2.0'
 	install_cmd = (
@@ -77,7 +79,7 @@ class testssl(Command):
 		if len(self.inputs) == 1:
 			target = self.inputs[0]
 			target_quoted = shlex.quote(target)
-			self.cmd = re.sub(re.escape(f' {target_quoted}'), "", self.cmd)
+			self.cmd = re.sub(re.escape(f' {target_quoted}'), '', self.cmd)
 			self.cmd += f' {target_quoted}'
 
 	@staticmethod
@@ -92,7 +94,7 @@ class testssl(Command):
 			data = json.load(f)
 			bad_cyphers = {}
 			retrieved_certificates = {}
-			ignored_item_ids = ["scanTime", "overall_grade", "DNS_CAArecord"]
+			ignored_item_ids = ['scanTime', 'overall_grade', 'DNS_CAArecord']
 			ip_addresses = []
 			host_to_ips = {}
 
@@ -118,23 +120,20 @@ class testssl(Command):
 					yield Ip(
 						host=host,
 						ip=ip,
-						alive=True
+						alive=True,
 					)
 
 				# Process errors
-				if id.startswith("scanProblem"):
-					if "Can't connect to" in finding:
-						yield Warning(message=finding)
-					else:
-						yield Error(message=finding)
+				if id.startswith('scanProblem'):
+					yield Warning(message=finding)
 
 				# Process warnings
-				elif id.startswith("engine_problem"):
+				elif id.startswith('engine_problem'):
 					yield Warning(message=finding)
 
 				# Process bad ciphers
 				elif id.startswith('cipher-'):
-					splited_item = item["finding"].split(" ")
+					splited_item = item['finding'].split(' ')
 					concerned_protocol = splited_item[0]
 					bad_cypher = splited_item[-1]
 					bad_cyphers.setdefault(ip, {}).setdefault(concerned_protocol, []).append(bad_cypher)  # noqa: E501
@@ -159,7 +158,7 @@ class testssl(Command):
 						value=finding,
 						extra_data={
 							'subtype': id,
-						}
+						},
 					)
 
 				# Create vulnerability
@@ -177,8 +176,8 @@ class testssl(Command):
 						confidence='high',
 						extra_data={
 							'id': id,
-							'finding': finding
-						}
+							'finding': finding,
+						},
 					)
 
 			# Creating vulnerability for the deprecated ciphers
@@ -190,9 +189,7 @@ class testssl(Command):
 						ip=ip,
 						confidence='high',
 						severity='low',
-						extra_data={
-							'cyphers': cyphers
-						}
+						extra_data={'cyphers': cyphers},
 					)
 
 			# Creating certificates for each founded target
@@ -236,13 +233,13 @@ class testssl(Command):
 						cert_data['subject_cn'] = finding
 
 					if id.startswith('cert_subjectAltName'):
-						cert_data['subject_an'] = finding.split(" ")
+						cert_data['subject_an'] = finding.split(' ')
 
 					if id.startswith('cert_notBefore'):
-						cert_data['not_before'] = datetime.strptime(finding, "%Y-%m-%d %H:%M")
+						cert_data['not_before'] = datetime.strptime(finding, '%Y-%m-%d %H:%M')
 
 					if id.startswith('cert_notAfter'):
-						cert_data['not_after'] = datetime.strptime(finding, "%Y-%m-%d %H:%M")
+						cert_data['not_after'] = datetime.strptime(finding, '%Y-%m-%d %H:%M')
 
 					if id.startswith('cert_caIssuers'):
 						cert_data['issuer_cn'] = finding
@@ -254,7 +251,7 @@ class testssl(Command):
 						cert_data['trusted'] = finding.startswith('passed')
 
 					if id.startswith('cert_keySize'):
-						cert_data['keysize'] = int(finding.split(" ")[1])
+						cert_data['keysize'] = int(finding.split(' ')[1])
 
 					if id.startswith('cert_serialNumber'):
 						cert_data['serial_number'] = finding

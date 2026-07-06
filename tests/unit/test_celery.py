@@ -339,3 +339,150 @@ class TestDelayMethods(unittest.TestCase):
 			context={}
 		)
 		self.assertIsNotNone(sig)
+
+
+class TestRunnerPickle(unittest.TestCase):
+	"""Test that Runner objects with dynamic driver hooks can be pickled/unpickled."""
+
+	def test_runner_pickle_survives_with_discovered_module(self):
+		"""Runners pickle/unpickle natively (no __getstate__/__setstate__).
+
+		Driver hook functions reference dynamically-loaded modules. The worker
+		discovers external drivers at startup (celery.py IN_WORKER), so those
+		modules are in sys.modules and hook functions resolve on unpickle. The
+		hook survives the round-trip and unpickling does NOT re-register hooks
+		(which, under replace()/chord synchronization, previously flooded logs)."""
+		import pickle
+		import types
+		import sys
+		from secator.runners import Runner, Workflow
+		from secator.loader import get_configs_by_type
+
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		config = workflows[0]
+
+		# Driver module present in sys.modules, as on a worker post-discovery
+		fake_module = types.ModuleType('secator.hooks.testdriver')
+
+		def on_start(runner, *args):
+			pass
+
+		on_start.__module__ = 'secator.hooks.testdriver'
+		on_start.__qualname__ = 'on_start'
+		fake_module.on_start = on_start
+		sys.modules['secator.hooks.testdriver'] = fake_module
+
+		try:
+			hooks = {Workflow: {'on_start': [on_start]}}
+			runner = Workflow(config, inputs=['example.com'], run_opts={'dry_run': True}, hooks=hooks, context={})
+			self.assertIn(on_start, runner.resolved_hooks.get('on_start', []))
+
+			# Unpickling must NOT call register_hooks (native pickling restores state)
+			calls = {'n': 0}
+			orig = Runner.register_hooks
+
+			def counting(self, h):
+				calls['n'] += 1
+				return orig(self, h)
+
+			Runner.register_hooks = counting
+			try:
+				restored = pickle.loads(pickle.dumps(runner))
+			finally:
+				Runner.register_hooks = orig
+
+			self.assertEqual(calls['n'], 0, 'unpickle must not re-register hooks')
+			self.assertEqual(restored.name, runner.name)
+			# The dynamically-referenced hook survives natively
+			self.assertIn(on_start, restored.resolved_hooks.get('on_start', []))
+		finally:
+			del sys.modules['secator.hooks.testdriver']
+
+	def test_runner_pickle_restores_hooks_from_context_drivers(self):
+		"""Unpickling a Runner re-registers hooks from context['drivers']."""
+		import pickle
+		import sys
+		import types
+		from unittest.mock import patch
+		from secator.runners import Workflow
+		from secator.loader import get_configs_by_type
+
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		config = workflows[0]
+
+		# Simulate an external driver module
+		fake_module = types.ModuleType('secator.hooks.fakedriver')
+
+		def on_end(runner, *args):
+			pass
+
+		on_end.__module__ = 'secator.hooks.fakedriver'
+		on_end.__qualname__ = 'on_end'
+		fake_module.on_end = on_end
+		fake_module.HOOKS = {Workflow: {'on_end': [on_end]}}
+		sys.modules['secator.hooks.fakedriver'] = fake_module
+
+		try:
+			# Patch discover_external_drivers to avoid filesystem scanning;
+			# the module is already in sys.modules so import_dynamic will find it.
+			with patch('secator.loader.discover_external_drivers', return_value=['fakedriver']):
+				context = {'drivers': ['fakedriver']}
+				hooks = {Workflow: {'on_end': [on_end]}}
+				runner = Workflow(config, inputs=['example.com'], run_opts={'dry_run': True}, hooks=hooks, context=context)
+				pickled = pickle.dumps(runner)
+				restored = pickle.loads(pickled)
+				self.assertEqual(restored.name, runner.name)
+				# on_end is loaded at init from context['drivers'] and survives pickling natively
+				self.assertIn(on_end, restored.resolved_hooks.get('on_end', []))
+
+		finally:
+			del sys.modules['secator.hooks.fakedriver']
+
+	def test_task_pickle_restores_hooks_from_base_task_key(self):
+		"""Regression for chunk-parent tasks stuck in RUNNING.
+
+		A driver's HOOKS dict is keyed by the *base* runner classes (Scan/Workflow/Task),
+		but a task runner's class is its command subclass (e.g. ``httpx``), never the base
+		``Task``. So __setstate__ must flatten driver HOOKS to the runner's base type before
+		register_hooks() — otherwise its exact ``hooks.get(self.__class__)`` lookup misses
+		the ``Task`` entry and the task's on_end hook is never re-registered on unpickle.
+		Only chunk-parent tasks get pickled into a chord callback, so they were the ones
+		left stuck in RUNNING because mark_runner_completed() ran zero on_end hooks."""
+		import pickle
+		import sys
+		import types
+		from unittest.mock import patch
+		from secator.runners import Task
+		from secator.tasks import httpx
+
+		# Simulate an external driver module keyed by the BASE Task class, exactly like the
+		# real mongodb/api driver HOOKS dicts.
+		fake_module = types.ModuleType('secator.hooks.faketaskdriver')
+
+		def on_end(runner, *args):
+			pass
+
+		on_end.__module__ = 'secator.hooks.faketaskdriver'
+		on_end.__qualname__ = 'on_end'
+		fake_module.on_end = on_end
+		fake_module.HOOKS = {Task: {'on_end': [on_end]}}
+		sys.modules['secator.hooks.faketaskdriver'] = fake_module
+
+		try:
+			with patch('secator.loader.discover_external_drivers', return_value=['faketaskdriver']):
+				context = {'drivers': ['faketaskdriver']}
+				# Instance class is `httpx` (a Command subclass), not the base Task.
+				task = httpx(['example.com'], hooks={Task: {'on_end': [on_end]}}, context=context, dry_run=True)
+				self.assertIsNot(type(task), Task)  # sanity: command subclass, not base Task
+				restored = pickle.loads(pickle.dumps(task))
+				# With the fix, on_end is re-registered from the base `Task` key in HOOKS.
+				self.assertIn(on_end, restored.resolved_hooks.get('on_end', []))
+
+		finally:
+			del sys.modules['secator.hooks.faketaskdriver']

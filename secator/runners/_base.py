@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 HOOKS = [
 	'before_init',
+	'on_build',
 	'on_init',
 	'on_start',
 	'on_end',
@@ -38,6 +39,10 @@ HOOKS = [
 ]
 
 VALIDATORS = ['validate_input', 'validate_item']
+
+# Placeholder substituted for option values flagged ``sensitive: True`` in any
+# serialized/printed runner state (see Runner.sensitive_opt_names).
+REDACTED_OPT_VALUE = '[REDACTED]'
 
 
 def format_runner_name(runner):
@@ -96,7 +101,8 @@ class Runner:
 		self.config = self._process_config(config)
 		self.name = run_opts.get('name', config.name)
 		self.description = run_opts.get('description', config.description or '')
-		self.workspace_name = context.get('workspace_name', CONFIG.workspace.default or 'default')
+		self.workspace_name = context.get('workspace_name', CONFIG.workspaces.current or 'default')
+		self.workspace_explicit = context.get('workspace_explicit', False)
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
@@ -177,6 +183,7 @@ class Runner:
 		self.resolved_hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		self.debug('registering hooks', obj=list(self.resolved_hooks.keys()), sub='init')
 		self.register_hooks(hooks)
+		self._apply_context_drivers()
 
 		# Validators
 		self.resolved_validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
@@ -197,7 +204,7 @@ class Runner:
 		# Determine inputs
 		self.debug(f'resolving inputs with {len(self.dynamic_opts)} dynamic opts', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
-		self.inputs = list(set(self.inputs))
+		self.inputs = list(dict.fromkeys(self.inputs))
 		if self.caller != 'Task':
 			targets = [Target(name=target) for target in self.inputs]
 			for target in targets:
@@ -214,6 +221,16 @@ class Runner:
 		profiles_str = run_opts.get('profiles') or []
 		self.debug('resolving profiles', obj={'profiles': profiles_str}, sub='init')
 		self.profiles = self.resolve_profiles(profiles_str)
+
+		# Apply route-based workspace if no profile/explicit workspace was set
+		default_ws = CONFIG.workspaces.current or 'default'
+		if not self.workspace_explicit and self.workspace_name == default_ws:
+			route_workspace = self._resolve_route_workspace(self.inputs)
+			if route_workspace:
+				self.debug(f'route workspace -> {route_workspace}', sub='init')
+				self.workspace_name = route_workspace
+				self.context['workspace_name'] = route_workspace
+				self.context['workspace_id'] = route_workspace
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -274,8 +291,44 @@ class Runner:
 		return config
 
 	@property
+	def sensitive_opt_names(self):
+		"""Names of options flagged ``sensitive: True`` in their definition.
+
+		Sensitive option values are redacted from any serialized/printed runner state
+		(``toDict()``, debug echoes, the built command string) so a user-supplied secret
+		(e.g. a BYO addon API key) never lands in the Mongo runner doc, the API response,
+		``--driver api`` egress, or logs. The value still travels in-flight to the worker.
+
+		Sources, unioned:
+		- a direct task instance's own ``opts``/``meta_opts`` (Command / PythonRunner),
+		- the task classes referenced by this runner's config tree (Task / Workflow / Scan,
+		  which carry no ``opts`` of their own).
+		"""
+		from secator.loader import discover_tasks
+		from secator.tree import build_runner_tree, get_flat_node_list
+		names = set()
+
+		def collect(holder):
+			for attr in ('opts', 'meta_opts'):
+				confs = getattr(holder, attr, None)
+				if isinstance(confs, dict):
+					names.update(k for k, v in confs.items() if isinstance(v, dict) and v.get('sensitive'))
+
+		collect(self)  # a direct Command / PythonRunner instance carries its own opts
+		task_classes = {cls.__name__: cls for cls in discover_tasks()}
+		for node in get_flat_node_list(build_runner_tree(self.config)):
+			cls = task_classes.get(node.name.split('/')[0]) if node.type == 'task' else None
+			if cls:
+				collect(cls)
+		return names
+
+	@property
 	def resolved_opts(self):
-		return {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+		opts = {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+		sensitive = self.sensitive_opt_names
+		if sensitive:
+			opts = {k: (REDACTED_OPT_VALUE if (k in sensitive and v) else v) for k, v in opts.items()}
+		return opts
 
 	@property
 	def resolved_print_opts(self):
@@ -317,7 +370,7 @@ class Runner:
 		if source == self.unique_name:
 			return True
 		prefix = self.unique_name + '_'
-		return source.startswith(prefix) and source[len(prefix):].isdigit()
+		return source.startswith(prefix) and source[len(prefix) :].isdigit()
 
 	@property
 	def self_targets(self):
@@ -335,11 +388,27 @@ class Runner:
 			return [r for r in self.results if isinstance(r, Warning) and self._is_own_source(r._source)]
 		return [r for r in self.results if isinstance(r, Warning)]
 
+	def _owns_error(self, r):
+		"""Whether Error *r* was produced within this runner's own subtree.
+
+		- task: only errors from its own source (incl. its chunks).
+		- workflow: only its own subtree's errors. In a scan, results forward from one
+		  workflow to the next, so without this a later workflow would inherit an
+		  earlier sibling's Error and wrongly report FAILURE even when all its own
+		  tasks succeeded. A workflow's tasks are tagged
+		  ``_context['ancestor_id'] == <workflow config name>`` (see Workflow.run), and
+		  a workflow-level error carries the workflow's own ``_source``.
+		- scan / other composite: aggregate every descendant error (no siblings above).
+		"""
+		if self.config.type == 'task':
+			return self._is_own_source(r._source)
+		if self.config.type == 'workflow':
+			return r._context.get('ancestor_id') == self.config.name or self._is_own_source(r._source)
+		return True
+
 	@property
 	def errors(self):
-		if self.config.type == 'task':
-			return [r for r in self.results if isinstance(r, Error) and self._is_own_source(r._source)]
-		return [r for r in self.results if isinstance(r, Error)]
+		return [r for r in self.results if isinstance(r, Error) and self._owns_error(r)]
 
 	@property
 	def self_results(self):
@@ -359,9 +428,7 @@ class Runner:
 
 	@property
 	def self_errors(self):
-		if self.config.type == 'task':
-			return [r for r in self.results if isinstance(r, Error) and self._is_own_source(r._source)]
-		return [r for r in self.results if isinstance(r, Error)]
+		return [r for r in self.results if isinstance(r, Error) and self._owns_error(r)]
 
 	@property
 	def self_findings_count(self):
@@ -438,6 +505,72 @@ class Runner:
 			List[OutputType]: List of runner results.
 		"""
 		return list(self.__iter__())
+
+	def _apply_context_drivers(self):
+		"""Register hooks for drivers named in ``context['drivers']``.
+
+		``context['drivers']`` is the cross-process source of truth for driver
+		hooks. Loading them at construction (rather than on unpickle) means every
+		runner gets its driver hooks exactly once, wherever it is built: the
+		initial dispatch, a chunk task rebuilt by ``run_command`` via
+		``task_cls(targets, **opts)``, and a chord callback runner. Because
+		``register_hooks()`` is idempotent, drivers also supplied explicitly via
+		``self._hooks`` (CLI-resolved hooks or library callers passing
+		``hooks=HOOKS``) are not registered twice.
+
+		This replaces the former ``__getstate__``/``__setstate__`` pair: with the
+		driver modules discovered at worker startup (``celery.py`` ``IN_WORKER``),
+		hook functions now pickle/unpickle natively by qualified name, so runners
+		no longer need to strip hooks on pickle and rebuild them on every unpickle
+		(which, under ``replace``/chord synchronization, re-registered hooks
+		O(chunks) times and flooded ``SECATOR_DEBUG=runner`` logs).
+		"""
+		drivers = self.context.get('drivers', [])
+		if not drivers:
+			return
+		from secator.loader import discover_external_drivers, order_drivers
+
+		discover_external_drivers()
+		# Order by canonical priority so authoritative backends (e.g. mongodb)
+		# register their hooks before relay drivers (e.g. api). Hook lists are
+		# concatenated in driver order, so this decides hook execution order.
+		drivers = order_drivers(drivers)
+		hooks_list = []
+		for driver in drivers:
+			driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
+			if driver_hooks:
+				hooks_list.append(driver_hooks)
+		if not hooks_list:
+			return
+		from secator.utils import deep_merge_dicts
+
+		merged_hooks = deep_merge_dicts(*hooks_list)
+		# Driver HOOKS dicts are keyed by base runner class (Scan/Workflow/Task). A task
+		# runner's class is its command subclass (e.g. ``whois``), never the base ``Task``,
+		# so register_hooks()' exact ``hooks.get(self.__class__)`` lookup would miss the
+		# ``Task`` entry. Flatten to the base runner type's hooks first (same convention as
+		# Workflow handing ``self._hooks.get(Task)`` to its task signatures).
+		from secator.runners import Scan, Task, Workflow
+
+		base_cls = {'scan': Scan, 'workflow': Workflow, 'task': Task}.get(self.config.type)
+		self.register_hooks(merged_hooks.get(base_cls, {}) if base_cls else merged_hooks)
+
+	@classmethod
+	def requires_local_execution(cls, inputs, run_opts):
+		"""Whether this invocation must run locally (sync), bypassing worker dispatch.
+
+		Some invocations are inherently interactive or local-only (e.g. an
+		interactive setup wizard) and must never be dispatched to a Celery worker,
+		even when one is alive. Subclasses override this to opt specific inputs in.
+
+		Args:
+			inputs (str | list): Expanded CLI inputs/targets.
+			run_opts (dict): Run options.
+
+		Returns:
+			bool: True to force local (sync) execution.
+		"""
+		return False
 
 	@classmethod
 	def delay(cls, config, targets, **run_opts):
@@ -519,6 +652,17 @@ class Runner:
 		gc.collect()
 		if self.sync:
 			self.mark_completed()
+		elif self.celery_result and not self.done:
+			# TODO: cleaner fix than this
+			# Race condition: the last Celery poll can read 'PENDING' from the result
+			# backend while result.ready() simultaneously returns True (two separate
+			# backend reads per poll iteration). When this happens, the runner's
+			# started/done flags are never set. Sync from the backend here as a safety net.
+			try:
+				if self.celery_result.ready():
+					self.mark_completed()
+			except Exception as e:
+				self.debug(f'error checking celery result state in _finalize: {e}', sub='end')
 		if self.enable_reports:
 			self.export_reports()
 
@@ -870,6 +1014,10 @@ class Runner:
 				'warnings': [w.toDict() for w in self.warnings],
 			}
 		)
+		# Note: serialized config/opts intentionally not scrubbed. An option's `default` must
+		# never be a secret by convention (tasks use `passed or CONFIG.addons.*` at runtime,
+		# not a config-sourced default), so config/opts carry no secret. The user-supplied
+		# value is redacted where it actually lands: run_opts (resolved_opts) and the cmd.
 		return data
 
 	def run_hooks(self, hook_type, *args, sub='hooks'):
@@ -948,24 +1096,33 @@ class Runner:
 	def register_hooks(self, hooks):
 		"""Register hooks.
 
+		Idempotent: a hook already present in ``resolved_hooks[key]`` is skipped
+		(and not re-logged). This lets the same driver be supplied via both
+		``self._hooks`` (e.g. library callers passing ``hooks=HOOKS``) and
+		``context['drivers']`` without registering — or logging — it twice.
+
 		Args:
 			hooks (dict[str, List[Callable]]): List of hooks to register.
 		"""
 		for key in self.resolved_hooks:
+			registered = self.resolved_hooks[key]
+
 			# Register class + derived class hooks
 			class_hook = getattr(self, key, None)
-			if class_hook:
+			if class_hook and class_hook not in registered:
 				fun = self.get_func_path(class_hook)
 				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
-				self.resolved_hooks[key].append(class_hook)
+				registered.append(class_hook)
 
-			# Register user hooks
-			user_hooks = hooks.get(self.__class__, {}).get(key, [])
+			# Register user hooks (copy so we never mutate a caller's/shared list)
+			user_hooks = list(hooks.get(self.__class__, {}).get(key, []))
 			user_hooks.extend(hooks.get(key, []))
 			for hook in user_hooks:
+				if hook in registered:
+					continue
 				fun = self.get_func_path(hook)
 				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
-			self.resolved_hooks[key].extend(user_hooks)
+				registered.append(hook)
 
 	def register_validators(self, validators):
 		"""Register validators.
@@ -1268,10 +1425,18 @@ class Runner:
 			elif isinstance(p, TemplateLoader):
 				existing_profile_names.add(p.name)
 
-		default_profiles = CONFIG.profiles.defaults
-		for p in default_profiles:
+		# Add global default profiles
+		for p in list(CONFIG.profiles.defaults):
 			if p not in existing_profile_names:
 				profiles.append(p)
+				existing_profile_names.add(p)
+
+		# Add workspace-specific default profiles
+		workspace_defaults = CONFIG.workspaces.profiles.get(self.workspace_name, [])
+		for p in workspace_defaults:
+			if p not in existing_profile_names:
+				profiles.append(p)
+				existing_profile_names.add(p)
 
 		# Abort if no profiles
 		if not profiles:
@@ -1303,26 +1468,148 @@ class Runner:
 		non_enforced_templates = [p for p in templates if not p.enforce]
 		templates = non_enforced_templates + enforced_templates
 		profile_opts = {}
+		profile_workspace = None
+		profile_drivers = []
+		profile_exporters = None
+		default_ws = CONFIG.workspaces.current or 'default'
 		for profile in templates:
 			self.debug(f'profile {profile.name} opts (enforced: {profile.enforce}): {profile.opts}', sub='init')
 			enforced = profile.enforce or False
 			description = profile.description or ''
+
+			# Merge opts (enforced overrides user opts; otherwise user opts win)
 			if enforced:
 				profile_opts.update(profile.opts)
 			else:
 				profile_opts.update({k: self.run_opts.get(k) or v for k, v in profile.opts.items()})
+
+			# Merge workspace (scalar): enforced overrides; otherwise apply only if user kept the default
+			ws = profile.workspace or None
+			if ws:
+				if enforced:
+					profile_workspace = ws
+				elif profile_workspace is None and self.workspace_name == default_ws:
+					profile_workspace = ws
+
+			# Merge drivers (list): always additive (hooks cannot be unregistered once loaded)
+			drivers = list(profile.drivers) if profile.drivers else []
+			if drivers:
+				profile_drivers.extend(drivers)
+
+			# Merge exporters (list): enforced replaces; otherwise union with user/config exporters
+			exporters = list(profile.exporters) if profile.exporters else []
+			if exporters:
+				if enforced:
+					profile_exporters = list(exporters)
+				else:
+					current = self.run_opts.get('output')
+					if isinstance(current, str):
+						current = [e for e in current.split(',') if e]
+					base = profile_exporters if profile_exporters is not None else (current or [])
+					profile_exporters = list(dict.fromkeys(base + exporters))
+
+			# Print loaded profile info
 			if self.print_profiles:
 				msg = f'Loaded profile [bold pink3]{profile.name}[/]'
 				if description:
 					msg += f' ([dim]{description}[/])'
 				if enforced:
 					msg += ' [bold red](enforced)[/]'
-				profile_opts_str = ', '.join([f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items()])
+				profile_fields = dict(profile.opts)
+				if ws:
+					profile_fields['workspace'] = ws
+				if drivers:
+					profile_fields['drivers'] = drivers
+				if exporters:
+					profile_fields['exporters'] = exporters
+				profile_opts_str = ', '.join([f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile_fields.items()])  # noqa: E501
 				msg += rf' \[[dim]{profile_opts_str}[/]]'
 				self._print(Info(message=msg), rich=True)
+
+		# Apply opts
 		if profile_opts:
 			self.run_opts.update(profile_opts)
+
+		# Apply workspace (used downstream to build report folders)
+		if profile_workspace:
+			self.debug(f'profile workspace -> {profile_workspace}', sub='init')
+			self.workspace_name = profile_workspace
+			self.context['workspace_name'] = profile_workspace
+			self.context['workspace_id'] = profile_workspace
+
+		# Apply exporters (consumed from run_opts['output'] right after profile resolution)
+		if profile_exporters is not None:
+			self.debug(f'profile exporters -> {profile_exporters}', sub='init')
+			self.run_opts['output'] = ','.join(profile_exporters)
+
+		# Apply drivers (load + register hooks; context['drivers'] is reused by worker __setstate__)
+		if profile_drivers:
+			self._apply_profile_drivers(profile_drivers)
+
 		return templates
+
+	def _resolve_route_workspace(self, inputs):
+		"""Resolve workspace from configured routes based on inputs.
+
+		Args:
+			inputs (list[str]): List of inputs to match against route patterns.
+
+		Returns:
+			str | None: Matched workspace name, or None if no route matches.
+		"""
+		import fnmatch
+
+		routes = CONFIG.workspaces.routes
+		if not routes:
+			return None
+		for workspace, patterns in routes.items():
+			for pattern in patterns:
+				for inp in inputs:
+					if fnmatch.fnmatch(str(inp), pattern):
+						return workspace
+		return None
+
+	def _apply_profile_drivers(self, drivers):
+		"""Load and register driver hooks specified by profiles.
+
+		Drivers are added to ``context['drivers']`` (deduped) so their hooks are also
+		re-loaded on Celery workers via :meth:`Runner.__setstate__`. Hooks are only loaded
+		for drivers not already present, since CLI-provided drivers are already registered.
+
+		Args:
+			drivers (list[str]): Driver names specified by profiles.
+		"""
+		from secator.loader import discover_external_drivers, get_available_drivers
+		from secator.utils import deep_merge_dicts
+
+		existing = list(self.context.get('drivers', []))
+		new_drivers = [d for d in dict.fromkeys(drivers) if d not in existing]
+		if not new_drivers:
+			return
+		discover_external_drivers()
+		supported = get_available_drivers()
+		hooks_list = []
+		validated = []
+		for driver in new_drivers:
+			if driver not in supported:
+				self._print(Warning(message=f'Profile driver "{driver}" is not supported - skipping.'), rich=True)
+				continue
+			if driver in ADDONS_ENABLED and not ADDONS_ENABLED[driver]:
+				self._print(Warning(message=f'Profile driver "{driver}" requires the "{driver}" addon: run `secator install addons {driver}` - skipping.'), rich=True)  # noqa: E501
+				continue
+			driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
+			if driver_hooks is None:
+				self._print(Warning(message=f'Missing "secator.hooks.{driver}.HOOKS" - skipping.'), rich=True)
+				continue
+			validated.append(driver)
+			hooks_list.append(driver_hooks)
+		if not validated:
+			return
+		self.debug(f'profile drivers -> {validated}', sub='init')
+		merged_hooks = deep_merge_dicts(*hooks_list)
+		self.register_hooks(merged_hooks)
+		self._hooks = deep_merge_dicts(self._hooks, merged_hooks)
+		self.context['drivers'] = list(dict.fromkeys(existing + validated))
 
 	@classmethod
 	def get_func_path(cls, func):

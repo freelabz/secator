@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import sys
 
+import yaml
+
 from pathlib import Path
 from stat import S_ISFIFO
 
@@ -13,7 +15,7 @@ from dotmap import DotMap
 from fp.fp import FreeProxy
 from jinja2 import Template
 from rich.live import Live
-from rich.markdown import Markdown
+from secator.rich import CustomMarkdown as Markdown
 from rich.rule import Rule
 from rich.table import Table
 
@@ -23,10 +25,11 @@ from secator.cli_helper import register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STATE_COLORS
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
 from secator.output_types import FINDING_TYPES, Info, Warning, Error
+from secator.query import QueryEngine
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
-from secator.loader import get_configs_by_type, discover_tasks
+from secator.loader import get_configs_by_type, discover_tasks, load_external_addons
 from secator.utils import (
 	debug,
 	detect_host,
@@ -68,7 +71,7 @@ PROFILES = get_configs_by_type('profile')
 @click.option('--quiet', '-quiet', '-q', is_flag=True, default=False)
 @click.pass_context
 def cli(ctx, version, quiet):
-	"""Secator CLI."""
+	"""Secator CLI"""
 	ctx.obj = {'piped_input': S_ISFIFO(os.fstat(0).st_mode), 'piped_output': not sys.stdout.isatty()}
 	if not ctx.obj['piped_output'] and not quiet:
 		console.print(ASCII, highlight=False)
@@ -87,7 +90,7 @@ def cli(ctx, version, quiet):
 @cli.group(aliases=['x', 't', 'tasks'], invoke_without_command=True)
 @click.pass_context
 def task(ctx):
-	"""Run a task."""
+	"""Run a task"""
 	if ctx.invoked_subcommand is None:
 		ctx.get_help()
 
@@ -103,7 +106,7 @@ for config in TASKS:
 @cli.group(cls=OrderedGroup, aliases=['w', 'workflows'], invoke_without_command=True)
 @click.pass_context
 def workflow(ctx):
-	"""Run a workflow."""
+	"""Run a workflow"""
 	if ctx.invoked_subcommand is None:
 		ctx.get_help()
 
@@ -123,7 +126,7 @@ for config in WORKFLOWS:
 @cli.group(cls=OrderedGroup, aliases=['s', 'scans'], invoke_without_command=True)
 @click.pass_context
 def scan(ctx):
-	"""Run a scan."""
+	"""Run a scan"""
 	if ctx.invoked_subcommand is None:
 		ctx.get_help()
 
@@ -157,7 +160,7 @@ for config in SCANS:
 @click.option('--without-mingle', is_flag=True)
 @click.option('--without-heartbeat', is_flag=True)
 def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show, use_command_runner, without_gossip, without_mingle, without_heartbeat):  # noqa: E501
-	"""Run a worker."""
+	"""Run a worker"""
 
 	# Check Celery addon is installed
 	if not ADDONS_ENABLED['worker']:
@@ -232,7 +235,7 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 
 @cli.group(aliases=['u'])
 def util():
-	"""Run a utility."""
+	"""Run a utility"""
 	pass
 
 
@@ -240,7 +243,7 @@ def util():
 @click.option('--timeout', type=float, default=3, help='Proxy timeout (in seconds)')
 @click.option('--number', '-n', type=int, default=1, help='Number of proxies')
 def proxy(timeout, number):
-	"""Get random proxies from FreeProxy."""
+	"""Get random proxies from FreeProxy"""
 	import requests
 
 	if CONFIG.offline_mode:
@@ -277,7 +280,7 @@ def proxy(timeout, number):
 @click.option('--listen', '-l', is_flag=True, default=False, help='Spawn netcat listener on specified port')
 @click.option('--force', is_flag=True)
 def revshell(name, host, port, interface, listen, force):
-	"""Show reverse shell source codes and run netcat listener (-l)."""
+	"""Show reverse shell source codes and run netcat listener (-l)"""
 	if host is None:  # detect host automatically
 		host = detect_host(interface)
 		if not host:
@@ -344,7 +347,7 @@ def revshell(name, host, port, interface, listen, force):
 @click.option('--port', '-p', type=int, default=9001, help='HTTP server port')
 @click.option('--interface', '-i', type=str, default=None, help='Interface to use to auto-detect host IP')
 def serve(directory, host, port, interface):
-	"""Run HTTP server to serve payloads."""
+	"""Run HTTP server to serve payloads"""
 	fnames = list(os.listdir(directory))
 	if not fnames:
 		console.print(Warning(message=f'No payloads found in {directory}.'))
@@ -372,7 +375,7 @@ def serve(directory, host, port, interface):
 @click.option('--shell', type=click.Choice(['bash', 'zsh', 'fish']), default='bash', help='Shell type')
 @click.option('--install', is_flag=True, help='Install completion to shell config file')
 def completion(shell, install):
-	"""Show or install shell completion for secator."""
+	"""Show or install shell completion for secator"""
 	# Get completion script
 	env_var = '_SECATOR_COMPLETE'
 	completion_cmd = f'{env_var}={shell}_source secator'
@@ -523,7 +526,7 @@ def record(file, name, width, height, font_size, line_height, output_dir):
 
 @util.group()
 def gif():
-	"""GIF manipulation commands."""
+	"""GIF manipulation commands"""
 	if not ADDONS_ENABLED['dev']:
 		console.print(Error(message='Missing dev addon: please run "secator install addons dev"'))
 		sys.exit(1)
@@ -594,7 +597,7 @@ def info(input_gif):
 @util.command('build')
 @click.option('--version', type=str, help='Override version specified in pyproject.toml')
 def build(version):
-	"""Build secator PyPI package."""
+	"""Build secator PyPI package"""
 	if not DEV_PACKAGE:
 		console.print(Error(message='You MUST use a development version of secator to make builds'))
 		sys.exit(1)
@@ -622,7 +625,7 @@ def build(version):
 
 @util.command('publish')
 def publish():
-	"""Publish secator PyPI package."""
+	"""Publish secator PyPI package"""
 	if not DEV_PACKAGE:
 		console.print(Error(message='You MUST use a development version of secator to publish builds.'))
 		sys.exit(1)
@@ -646,7 +649,7 @@ def publish():
 
 @cli.group(aliases=['c'])
 def config():
-	"""View or edit config."""
+	"""View or edit config"""
 	pass
 
 
@@ -654,7 +657,7 @@ def config():
 @click.option('--user/--full', is_flag=True, help='Show config (user/full)')
 @click.argument('key', required=False)
 def config_get(user, key=None):
-	"""Get config value."""
+	"""Get config value"""
 	if key is None:
 		partial = user and default_config != CONFIG
 		CONFIG.print(partial=partial)
@@ -665,9 +668,23 @@ def config_get(user, key=None):
 @config.command('set')
 @click.argument('key')
 @click.argument('value')
-def config_set(key, value):
-	"""Set config value."""
-	CONFIG.set(key, value)
+@click.option('--append', 'strategy', flag_value='append', default=False, help='Append value to existing list field.')
+def config_set(key, value, strategy):
+	"""Set config value.
+
+	Use --append to append a value to a list field instead of replacing it.
+
+	Examples:
+
+	\b
+	  secator config set debug ''                                           # set a scalar field
+	  secator config set drivers.defaults redis                            # replace list field
+	  secator config set drivers.defaults redis --append                   # append to list field
+	  secator config set wordlists.defaults.http mylist                    # set a dict subkey
+	  secator config set workspaces.profiles.my_ws aggressive,passive  # set workspace profiles
+	  secator config set workspaces.profiles.my_ws test --append   # append to workspace profiles
+	"""
+	CONFIG.set(key, value, strategy=strategy if strategy else None)
 	config = CONFIG.validate()
 	if config:
 		CONFIG.get(key)
@@ -681,9 +698,24 @@ def config_set(key, value):
 
 @config.command('unset')
 @click.argument('key')
-def config_unset(key):
-	"""Unset a config value."""
-	CONFIG.unset(key)
+@click.argument('value', required=False)
+def config_unset(key, value=None):
+	"""Unset a config value.
+
+	When VALUE is provided and KEY is a list field, removes that item from the list.
+	When VALUE is omitted, removes the entire field (resets to default).
+	Also supports removing dict subkeys: secator config unset wordlists.defaults.http
+
+	Examples:
+
+	\b
+	  secator config unset debug                                      # reset scalar to default
+	  secator config unset drivers.defaults redis                     # remove item from list
+	  secator config unset wordlists.defaults.http                    # remove dict subkey
+	  secator config unset workspaces.profiles.my_ws test     # remove profile from workspace list
+	  secator config unset workspaces.profiles.my_ws          # remove workspace profile list entirely
+	"""
+	CONFIG.unset(key, value=value)
 	config = CONFIG.validate()
 	if config:
 		saved = CONFIG.save()
@@ -697,7 +729,7 @@ def config_unset(key):
 @config.command('edit')
 @click.option('--resume', is_flag=True)
 def config_edit(resume):
-	"""Edit config."""
+	"""Edit config"""
 	tmp_config = CONFIG.dirs.data / 'config.yml.patch'
 	if not tmp_config.exists() or not resume:
 		shutil.copyfile(config_path, tmp_config)
@@ -714,7 +746,7 @@ def config_edit(resume):
 @config.command('default')
 @click.option('--save', type=str, help='Save default config to file.')
 def config_default(save):
-	"""Get default config."""
+	"""Get default config"""
 	default_config.print(partial=False)
 	if save:
 		default_config.save(target_path=Path(save), partial=False)
@@ -725,7 +757,7 @@ def config_default(save):
 # @_config.command('reset')
 # @click.argument('key')
 # def config_reset(key):
-# 	"""Reset config value to default."""
+# 	"""Reset config value to default"""
 # 	success = CONFIG.set(key, None)
 # 	if success:
 # 		CONFIG.print()
@@ -738,52 +770,96 @@ def config_default(save):
 # -----------#
 @cli.group(aliases=['ws', 'workspaces'])
 def workspace():
-	"""Workspaces."""
+	"""Workspaces"""
 	pass
 
 
 @workspace.command('list')
-def workspace_list():
-	"""List workspaces."""
-	workspaces = {}
-	reports_dir = Path(CONFIG.dirs.reports)
-	# Discover all workspace directories (including empty ones)
-	if reports_dir.exists():
-		for child in sorted(reports_dir.iterdir()):
-			if child.is_dir():
-				workspaces[child.name] = {'count': 0, 'path': str(child)}
-	# Count reports per workspace
-	json_reports = []
-	for root, _, files in os.walk(CONFIG.dirs.reports):
-		for file in files:
-			if file.endswith('report.json'):
-				path = Path(root) / file
-				json_reports.append(path)
-	json_reports = sorted(json_reports, key=lambda x: x.stat().st_mtime, reverse=False)
-	for path in json_reports:
-		ws, runner_type, number = str(path).split('/')[-4:-1]
-		if ws not in workspaces:
-			workspaces[ws] = {'count': 0, 'path': '/'.join(str(path).split('/')[:-3])}
-		workspaces[ws]['count'] += 1
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+def workspace_list(driver):
+	"""List workspaces"""
+	effective_driver = QueryEngine.resolve_backend(driver)
+	context = {'drivers': [effective_driver] if effective_driver and effective_driver != 'local' else []}
+	engine = QueryEngine(workspace_id='', context=context)
 
-	# Build table
 	table = Table()
-	table.add_column('Workspace name', style='bold gold3')
-	table.add_column('Run count', overflow='fold')
-	table.add_column('Path')
-	for workspace, config in workspaces.items():
-		table.add_row(workspace, str(config['count']), config['path'])
+	current = CONFIG.workspaces.current or 'default'
+
+	if effective_driver in ('mongodb', 'api', 'sqlite'):
+		workspaces = engine.list_workspaces()
+		table.add_column('Name', style='bold gold3')
+		table.add_column('Id', style='dim cyan')
+		table.add_column('Description', style='dim cyan')
+		table.add_column('Run count', overflow='fold')
+		table.add_column('Findings count', overflow='fold')
+		for ws in workspaces:
+			ws_name = ws.get('name', '') or ws.get('_id', '')
+			ws_id = ws.get('_id', '')
+			ws_description = ws.get('description')
+			runners_count = str(ws.get('runners_count', '?'))
+			findings_count = str(ws.get('findings_count', '?'))
+			table.add_row(ws_name, ws_id, ws_description, runners_count, findings_count)
+	else:
+		workspaces_dict = {}
+		reports_dir = Path(CONFIG.dirs.reports)
+		if reports_dir.exists():
+			for child in sorted(reports_dir.iterdir()):
+				if child.is_dir():
+					workspaces_dict[child.name] = {'count': 0, 'path': str(child)}
+		json_reports = []
+		for root, _, files in os.walk(CONFIG.dirs.reports):
+			for file in files:
+				if file.endswith('report.json'):
+					path = Path(root) / file
+					json_reports.append(path)
+		json_reports = sorted(json_reports, key=lambda x: x.stat().st_mtime, reverse=False)
+		for path in json_reports:
+			# Layout: <reports>/<ws>/<runner_type>/<number>/report.json — use the path
+			# helper / Path parts instead of a manual POSIX split.
+			ws = get_info_from_report_path(path).get('workspace')
+			if not ws:
+				continue
+			if ws not in workspaces_dict:
+				workspaces_dict[ws] = {'count': 0, 'path': str(path.parents[2])}
+			workspaces_dict[ws]['count'] += 1
+		table.add_column('Name', style='bold gold3')
+		table.add_column('Run count', overflow='fold')
+		table.add_column('Path')
+		for workspace, config in workspaces_dict.items():
+			table.add_row(workspace, str(config['count']), config['path'])
+
 	console.print(table)
+	console.print(Info(message=f'Current workspace: [bold gold3]{current}[/]. Use [bold green4]secator ws use <workspace>[/] to switch.'))  # noqa: E501
 
 
 @workspace.command(name='use', aliases=['create'])
 @click.argument('name')
-def workspace_use(name):
-	"""Use a workspace (set as default)."""
-	CONFIG.set('workspace.default', name)
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+def workspace_use(name, driver):
+	"""Use a workspace (set as default). With the api driver, also creates it remotely."""
+	# When the api driver is active (via --driver or drivers.defaults), make sure the
+	# workspace exists remotely so subsequent api-backed runs/queries resolve it — the
+	# API keys workspaces by id, so a name has to map to a real remote workspace.
+	effective_driver = QueryEngine.resolve_backend(driver)
+	if effective_driver == 'api':
+		try:
+			from secator.hooks.api import create_workspace
+
+			created, ws_id = create_workspace(name)
+			if created:
+				console.print(Info(message=f'Created workspace "{name}" via API [id: {ws_id}]'))
+			else:
+				console.print(Info(message=f'Workspace "{name}" already exists in API [id: {ws_id}]'))
+		except Exception as e:
+			console.print(Error(message=f'Error creating workspace via API: {e}'))
+			return
+
+	CONFIG.set('workspaces.current', name)
 	config = CONFIG.validate()
 	if config:
 		CONFIG.save()
+		workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+		workspace_folder.mkdir(parents=True, exist_ok=True)
 		console.print(Info(message=f'Now using workspace: [bold]{name}[/]'))
 	else:
 		console.print(Error(message='Invalid config, not saving it.'))
@@ -791,18 +867,30 @@ def workspace_use(name):
 
 @workspace.command('current')
 def workspace_current():
-	"""Show current default workspace."""
-	current = CONFIG.workspace.default or 'default'
-	console.print(f'Current workspace: [bold gold3]{current}[/]')
+	"""Show current default workspace"""
+	current = CONFIG.workspaces.current or 'default'
+	console.print(Info(message=f'Current workspace: [bold gold3]{current}[/]. Use [bold green4]secator ws use <workspace>[/] to switch.'))  # noqa: E501
 
 
 @workspace.command(name='rm', aliases=['remove', 'delete'])
 @click.argument('name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def workspace_delete(name, driver, yes):
-	"""Delete a workspace and all associated reports. NAME: workspace name."""
+	"""Delete a workspace and all associated reports. NAME: workspace name"""
+	driver = QueryEngine.resolve_backend(driver)
 	workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+
+	# The API keys workspaces by id, so resolve the name to its id for the api driver.
+	api_workspace_id = name
+	if driver == 'api':
+		try:
+			from secator.hooks.api import resolve_workspace
+
+			api_workspace_id, _ = resolve_workspace(name)
+		except Exception as e:
+			console.print(Error(message=f'Error resolving workspace from API: {e}'))
+			return
 
 	actions = []
 	if workspace_folder.exists():
@@ -814,7 +902,10 @@ def workspace_delete(name, driver, yes):
 		actions.append(f'Delete all findings in MongoDB with workspace_id="{name}"')
 		actions.append(f'Delete all runners in MongoDB with workspace_id="{name}"')
 	elif driver == 'api':
-		actions.append(f'Send DELETE to API: {CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=name)}')
+		actions.append(f'Send DELETE to API: {CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=api_workspace_id)}')  # noqa: E501
+	elif driver == 'sqlite':
+		actions.append(f'Delete all findings in SQLite with workspace_id="{name}"')
+		actions.append(f'Delete all runners in SQLite with workspace_id="{name}"')
 
 	console.print('[bold]The following actions will be performed:[/]')
 	for action in actions:
@@ -851,11 +942,27 @@ def workspace_delete(name, driver, yes):
 		try:
 			from secator.hooks.api import _make_request
 
-			endpoint = CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=name)
+			endpoint = CONFIG.addons.api.workspace_delete_endpoint.format(workspace_id=api_workspace_id)
 			_make_request('DELETE', endpoint)
 			console.print(Info(message=f'Deleted workspace "{name}" from API'))
 		except Exception as e:
 			console.print(Error(message=f'API deletion failed: {e}'))
+
+	# 4. SQLite backend
+	elif driver == 'sqlite':
+		try:
+			from secator.hooks.sqlite import get_sqlite_conn
+
+			conn = get_sqlite_conn()
+			findings_result = conn.execute("DELETE FROM findings WHERE workspace_id=?", (name,))
+			console.print(Info(message=f'Deleted {findings_result.rowcount} findings from SQLite'))
+			for collection in ['tasks', 'workflows', 'scans']:
+				result = conn.execute(f"DELETE FROM {collection} WHERE workspace_id=?", (name,))
+				if result.rowcount:
+					console.print(Info(message=f'Deleted {result.rowcount} {collection} from SQLite'))
+			conn.commit()
+		except Exception as e:
+			console.print(Error(message=f'SQLite deletion failed: {e}'))
 
 
 # ----------#
@@ -863,7 +970,7 @@ def workspace_delete(name, driver, yes):
 # ----------#
 
 
-@cli.group(aliases=['p', 'profiles'])
+@cli.group(aliases=['p', 'pf', 'profiles'])
 @click.pass_context
 def profile(ctx):
 	"""Profiles"""
@@ -872,13 +979,29 @@ def profile(ctx):
 
 @profile.command('list')
 def profile_list():
-	table = Table()
+	table = Table(show_lines=True, highlight=True)
 	table.add_column('Profile name', style='bold gold3')
 	table.add_column('Description', overflow='fold')
+	table.add_column('Enforced', justify='center')
+	table.add_column('Workspace', overflow='fold')
+	table.add_column('Drivers', overflow='fold')
+	table.add_column('Exporters', overflow='fold')
 	table.add_column('Options', overflow='fold')
 	for profile in PROFILES:
-		opts_str = ', '.join(f'[yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items())
-		table.add_row(profile.name, profile.description or '', opts_str)
+		opts_str = ', '.join(f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items())
+		enforced_str = '[bold red]✓[/]' if profile.enforce else ''
+		workspace_str = profile.workspace or ''
+		drivers_str = ','.join(profile.drivers) if profile.drivers else ''
+		exporters_str = ','.join(profile.exporters) if profile.exporters else ''
+		table.add_row(
+			profile.name,
+			profile.description or '',
+			enforced_str,
+			workspace_str,
+			drivers_str,
+			exporters_str,
+			opts_str,
+		)
 	console.print(table)
 
 
@@ -889,14 +1012,14 @@ def profile_list():
 
 @cli.group(aliases=['a', 'aliases'])
 def alias():
-	"""Aliases."""
+	"""Aliases"""
 	pass
 
 
 @alias.command('enable')
 @click.pass_context
 def enable_aliases(ctx):
-	"""Enable aliases."""
+	"""Enable aliases"""
 	fpath = f'{CONFIG.dirs.data}/.aliases'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = '\n'.join(aliases)
@@ -918,7 +1041,7 @@ echo "source {fpath} >> ~/.bashrc" # or add this line to your ~/.bashrc to load 
 @alias.command('disable')
 @click.pass_context
 def disable_aliases(ctx):
-	"""Disable aliases."""
+	"""Disable aliases"""
 	fpath = f'{CONFIG.dirs.data}/.unalias'
 	aliases = ctx.invoke(list_aliases, silent=True)
 	aliases_str = ''
@@ -985,14 +1108,83 @@ def list_aliases(silent):
 
 
 # --------#
+# QUERY  #
+# --------#
+
+
+@cli.command(name='query', aliases=['q'])
+@click.argument('arg', required=False)
+@click.option('-o', '--output', type=str, default='console', help='Exporters')
+@click.option('-of', '--output-folder', type=str, default=None, help='Output folder for exported files (default: current directory)')  # noqa: E501
+@click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
+@click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{vulnerability.matched_at}'")  # noqa: E501
+@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
+@click.option('-rf', '--report-filter', 'report_filter', type=str, default=None, help='Scope the query to runner paths (e.g. scans/5,tasks/3), like the REPORT_QUERY of `report show`')  # noqa: E501
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
+@click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.pass_context
+def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit):
+	"""Query"""
+	if not arg:
+		raise click.UsageError('Missing argument ARG (a query name, expression, or prompt).')
+
+	# 1. Saved query name
+	if arg in CONFIG.queries:
+		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder)  # noqa: E501
+		return
+
+	# 2. Raw filter expression
+	if _looks_like_query_expr(arg):
+		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder)
+		return
+
+	# 3. Natural language -> AI chat
+	run_ai_chat(ctx, arg, workspace)
+
+
+# --------#
 # REPORT #
 # --------#
 
 
 @cli.group(aliases=['r', 'reports'])
 def report():
-	"""Reports."""
+	"""Reports"""
 	pass
+
+
+# Operators / tokens that mark a string as a filter expression rather than natural language.
+_QUERY_EXPR_OPERATORS = ('==', '!=', '<=', '>=', '~=', '<', '>', '&&', '||')
+# 'field in [...]' list-membership operator. Require the bracket so plain English
+# "in" (e.g. "what's in my workspace?") is not mistaken for a query expression.
+_QUERY_EXPR_IN_RE = re.compile(r'\bin\s*\[')
+
+
+def _looks_like_query_expr(value):
+	"""Return True if VALUE looks like a report filter expression (vs natural language).
+
+	Heuristics (any match => expression):
+	  - contains a comparison/logical operator (==, !=, <, >, <=, >=, ~=, &&, ||)
+	  - contains the 'in [' list-membership operator (e.g. tags in [x, y])
+	  - matches a bare dotted field-access path like 'word.word' (e.g. extra_data.published)
+	  - is a bare known output type name (url, vulnerability, domain, etc.)
+
+	Note: the word operators 'and' / 'or' are intentionally not matched on their own —
+	they always connect comparison clauses, which are already caught above, so matching
+	them standalone would misclassify natural-language prompts (e.g. "subdomains and ips").
+	"""
+	if not value:
+		return False
+	if any(op in value for op in _QUERY_EXPR_OPERATORS):
+		return True
+	if _QUERY_EXPR_IN_RE.search(value):
+		return True
+	if re.fullmatch(r'\w+(?:\.\w+)+', value.strip()):
+		return True
+	from secator.output_types import OUTPUT_TYPES
+
+	return value.strip() in {cls.get_name() for cls in OUTPUT_TYPES}
 
 
 def _apply_format(results, fmt):
@@ -1002,26 +1194,42 @@ def _apply_format(results, fmt):
 		results (dict): Report results keyed by type name.
 		fmt (str): Format spec(s), optionally pipe-separated per type.
 			E.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'
+			May also be a file path (< 255 chars, file must exist) to load the template from disk.
 
 	Returns:
 		dict: Results dict with items replaced by formatted strings (only matching types kept).
 	"""
+	fmt = fmt.strip()
+
+	# Auto-detect format file: if fmt looks like a path and the file exists, load it.
+	if len(fmt) < 255:
+		p = Path(fmt)
+		if p.is_file():
+			try:
+				fmt = p.read_text(encoding='utf-8')
+			except (OSError, UnicodeDecodeError) as exc:
+				raise click.UsageError(f'Could not read --format template file "{p}": {exc}') from exc
+
+	# Unescape common escape sequences so CLI users can write \n, \t in their format strings.
+	fmt = fmt.replace('\\n', '\n').replace('\\t', '\t')
+
 	specs = [s.strip() for s in re.split(r'\s*\|\|\s*', fmt) if s.strip()]
 	new_results = {}
 
 	for spec in specs:
 		_field_only = False
 		if '{' in spec and '}' in spec:
-			if re.search(r'\{\w+\.\w+', spec):
+			m = re.search(r'\{(\w+)\.', spec)
+			if m and m.group(1) in results:
 				# Brace-style with type.field dot notation: {url.host} {port.port}
-				m = re.search(r'\{(\w+)\.', spec)
-				if not m:
-					continue
 				_type = m.group(1)
 				_template = spec
+			elif m and m.group(1) in FINDING_TYPES_LOWER:
+				# Known output type referenced but not present in results — skip this spec.
+				continue
 			else:
-				# Brace-style with direct field names: {url} {host} {status_code}
-				# Only works when exactly one type is present in results.
+				# Brace-style with direct field names or nested field access:
+				# {url} {host} {status_code} or {extra_data.published}
 				_field_only = True
 				_type = None
 				_template = spec
@@ -1044,8 +1252,12 @@ def _apply_format(results, fmt):
 			formatted = []
 			for item in items:
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+				# Wrap nested dicts with DotMap to support dotted access (e.g. {extra_data.published})
+				d_dotmaps = {k: DotMap(v) if isinstance(v, dict) else v for k, v in d.items()}
 				try:
-					value = _template.format(**d)
+					value = _template.format(**d_dotmaps)
+					if 'DotMap()' in str(value):
+						continue
 					formatted.append(value)
 				except (KeyError, AttributeError):
 					pass
@@ -1069,7 +1281,27 @@ def _apply_format(results, fmt):
 					new_results[_actual_type] = formatted
 				else:
 					console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
-			# When _template is set the user gave an explicit type prefix — skip silently.
+			elif _type not in FINDING_TYPES_LOWER:
+				# Dotted field path (e.g. extra_data.published) where the first part is not a
+				# known output type. Treat the whole spec as a nested field path on the single
+				# non-empty result type, using DotMap for traversal.
+				nonempty_types = [k for k, v in results.items() if v]
+				if len(nonempty_types) == 1:
+					_actual_type = nonempty_types[0]
+					items = results[_actual_type]
+					formatted = []
+					path_parts = spec.split('.')
+					for item in items:
+						d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+						val = DotMap(d)
+						for part in path_parts:
+							val = getattr(val, part, None)
+							if val is None or (isinstance(val, DotMap) and not val):
+								val = None
+								break
+						if val is not None:
+							formatted.append(str(val))
+					new_results[_actual_type] = formatted
 			continue
 
 		items = results[_type]
@@ -1083,9 +1315,13 @@ def _apply_format(results, fmt):
 			for item in items:
 				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
 				try:
-					# Brace-style ({type.field}) needs DotMap for attribute access.
-					# Dot-path style (type.field) uses direct field values to avoid clobbering.
-					kwargs = {**d, _type: DotMap(d)} if is_brace_style else d
+					# Brace-style ({type.field}): expose the item as a DotMap under the type key.
+					# Dot-path style (type.field): wrap nested dict values as DotMap so that
+					# templates like {extra_data.ttl} can resolve via attribute access.
+					if is_brace_style:
+						kwargs = {**d, _type: DotMap(d)}
+					else:
+						kwargs = {k: DotMap(v) if isinstance(v, dict) else v for k, v in d.items()}
 					value = _template.format(**kwargs)
 					# DotMap returns an empty DotMap() for missing nested paths; skip such items.
 					if 'DotMap()' in str(value):
@@ -1113,22 +1349,18 @@ def _apply_format(results, fmt):
 	return new_results
 
 
-@report.command('show')
-@click.argument('report_query', required=False)
-@click.option('-o', '--output', type=str, default='console', help='Exporters')
-@click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
-@click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
-@click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
-@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
-@click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
-@click.pass_context
-def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, driver, dedupe):
-	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
-	from secator.query.utils import parse_report_paths, python_expr_to_mongo
+def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None):
+	"""Build and send a consolidated report. Shared by `report show` and `query`.
+
+	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
+	"""
+	from secator.query.utils import (
+		parse_report_paths, python_expr_to_mongo, validate_query_fields,
+		emit_query_warnings, query_has_type_constraint
+	)
 
 	current = get_file_timestamp()
-	workspace_name = workspace or CONFIG.workspace.default or 'default'
+	workspace_name = workspace or CONFIG.workspaces.current or 'default'
 
 	# 1. Parse path-based runner filter
 	runner_filter = parse_report_paths(report_query)
@@ -1137,6 +1369,10 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 	# 2. Translate -q expression to MongoDB style
 	debug('original query expr', sub='query', obj={'raw': query or ''})
 	mongo_query = python_expr_to_mongo(query) if query else {}
+	mongo_query, query_warnings = validate_query_fields(mongo_query)
+	if query and query_warnings and not mongo_query:
+		emit_query_warnings(query_warnings)
+		return
 	debug('converted mongo query', sub='query', obj=mongo_query)
 
 	# 3. Merge filters
@@ -1146,6 +1382,11 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 		full_query = {'$and': [runner_filter, mongo_query]}
 	else:
 		full_query = {**runner_filter, **mongo_query}
+	# Exclude verbose 'target' and 'ai' results unless the query explicitly constrains types
+	# (e.g. `-q target` shows targets, `-q ai` shows ai, `-q url` shows urls;
+	# with no -q type filter, both targets and ai output are hidden)
+	if not query_has_type_constraint(mongo_query):
+		full_query['_type'] = {'$nin': ['target', 'ai']}
 	debug('full query', sub='query', obj=full_query)
 
 	# 4. Add time delta filter if provided
@@ -1158,7 +1399,24 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 			full_query['_timestamp'] = {'$gte': cutoff.timestamp()}
 
 	# 5. Build runner context for QueryEngine backend selection
-	drivers = [driver] if driver and driver != 'local' else []
+	# Resolve the backend from --driver or drivers.defaults, then build the context
+	# drivers list from the *resolved* backend (not the raw --driver) — otherwise a
+	# drivers.defaults=api setup resolves the workspace via the API but still queries
+	# the local JSON backend (drivers stays empty).
+	effective_driver = QueryEngine.resolve_backend(driver)
+	drivers = [effective_driver] if effective_driver != 'local' else []
+	# Resolve the workspace name to its id for the API backend (findings are filtered
+	# by the real workspace id; the local/mongodb backends key findings by name).
+	workspace_id = workspace_name
+	if effective_driver == 'api':
+		try:
+			from secator.hooks.api import resolve_workspace
+
+			workspace_id, workspace_name = resolve_workspace(workspace_name)
+		except Exception as e:
+			console.print(Error(message=f'Error resolving workspace from API: {e}'))
+			return
+	reports_folder = Path(output_folder) if output_folder else Path.cwd()
 	runner = DotMap(
 		{
 			'config': DotMap({'name': f'consolidated_report_{current}', 'type': 'consolidated'}),
@@ -1166,11 +1424,12 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 			'workspace_name': workspace_name,
 			'errors': [],
 			'context': {
-				'workspace_id': workspace_name,
+				'workspace_id': workspace_id,
 				'workspace_name': workspace_name,
 				'drivers': drivers,
 			},
-			'reports_folder': Path.cwd(),
+			'reports_folder': reports_folder,
+			'print_reports_message': True,
 		}
 	)
 	runner.toDict = lambda: {
@@ -1195,14 +1454,52 @@ def report_show(ctx, report_query, output, time_delta, query, fmt, workspace, dr
 	# 6. Build and send report via QueryEngine
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
 	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
-	report.build(query=full_query, dedupe=dedupe_effective)
+	report.build(query=full_query, dedupe=dedupe_effective, limit=limit)
 	if fmt:
 		report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
+	total_results = sum(len(items) for items in report.data['results'].values())
+	emit_query_warnings(query_warnings)
+	info_msg = f'Found {total_results} results in workspace [bold gold3]{workspace_name}[/]'
+	if report_query:
+		searched = ', '.join(p.strip() for p in report_query.split(',') if p.strip())
+		if searched:
+			info_msg += f' (searched: [bold cyan]{searched}[/])'
+	console.print(Info(message=info_msg))
+
+
+def run_ai_chat(ctx, prompt, workspace):
+	"""Run the `ai` task in chat mode with the given PROMPT.
+
+	Equivalent to: secator x ai --mode chat -ws <workspace> -p "<prompt>"
+	"""
+	task_group = ctx.find_root().command.commands['task']
+	ai_cmd = task_group.commands['ai']
+	invoke_kwargs = {'prompt': prompt, 'mode': 'chat'}
+	if workspace:
+		invoke_kwargs['workspace'] = workspace
+	ctx.invoke(ai_cmd, **invoke_kwargs)
+
+
+@report.command('show')
+@click.argument('report_query', required=False)
+@click.option('-o', '--output', type=str, default='console', help='Exporters')
+@click.option('-of', '--output-folder', type=str, default=None, help='Output folder for exported files (default: current directory)')  # noqa: E501
+@click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
+@click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
+@click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
+@click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
+@click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.pass_context
+def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt, workspace, driver, dedupe, limit):
+	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
+	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder)
 
 
 def _load_report_data(path):
-	"""Read report JSON to extract info section and count vulnerability severities."""
+	"""Read report JSON to extract info section and count vulnerability severities"""
 	info = {}
 	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
 	with open(path, 'r') as f:
@@ -1216,8 +1513,41 @@ def _load_report_data(path):
 	return info, vuln_counts
 
 
+def _report_passes_filters(report_info, vuln_counts, interesting, status_pattern):
+	"""Apply the --interesting / --status filters to already-loaded report data.
+
+	Operates on data loaded once by the caller so filters never re-read the report JSON.
+
+	Args:
+		report_info (dict): The report's 'info' section.
+		vuln_counts (dict): Bucketed vulnerability counts (critical/high/medium/low).
+		interesting (bool): Keep only reports with known-severity vulnerabilities.
+		status_pattern (re.Pattern | None): Compiled case-insensitive status regex, or None.
+
+	Returns:
+		bool: True if the report passes all active filters.
+	"""
+	# --interesting: mirrors the 'Vulnerabilities' column — reports whose only findings have an
+	# empty/'unknown'/'info' severity render as '-' and are not considered interesting.
+	if interesting and sum(vuln_counts.values()) == 0:
+		return False
+	# --status: case-insensitive regex search, so 'FAIL' matches 'FAILURE' and '(RUNNING|FAILURE)' works.
+	if status_pattern and not status_pattern.search(str(report_info.get('status', ''))):
+		return False
+	return True
+
+
+def _report_matches_filters(path, interesting, status_pattern):
+	"""Load a report once and check it against the active filters (used for piped output)."""
+	try:
+		report_info, vuln_counts = _load_report_data(path)
+	except Exception:
+		return False
+	return _report_passes_filters(report_info, vuln_counts, interesting, status_pattern)
+
+
 def _format_vuln_counts(counts):
-	"""Format vulnerability counts as a colored rich string like '2H|10M|5L'."""
+	"""Format vulnerability counts as a colored rich string like '2H|10M|5L'"""
 	severity_labels = [
 		('critical', 'C', 'bold red'),
 		('high', 'H', 'red'),
@@ -1236,76 +1566,160 @@ def _format_vuln_counts(counts):
 @click.option('-ws', '-w', '--workspace', type=str)
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--show-all', is_flag=True, default=False, help='Show all columns including report path')
+@click.option('--interesting', '-i', is_flag=True, default=False, help='Only show reports that have vulnerabilities')
+@click.option('--status', type=str, default=None, help="Filter by runner status (case-insensitive regex, e.g. SUCCESS, FAIL, '(RUNNING|FAILURE)')")  # noqa: E501
+@click.option('--show-children', is_flag=True, default=False, help='Include nested sub-tasks / sub-workflows (by default only outermost runners are shown)')  # noqa: E501
 @click.pass_context
-def report_list(ctx, workspace, runner_type, time_delta, show_all):
+def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, interesting, status, show_children):
 	"""List all secator reports."""
-	paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
-	paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
+	effective_driver = QueryEngine.resolve_backend(driver)
 
-	# Build table
-	table = Table()
-	table.add_column("Workspace", style="bold gold3")
-	table.add_column("Name")
-	table.add_column("Id")
-	table.add_column("Target")
-	table.add_column("Profiles")
-	table.add_column("Start Date")
-	table.add_column("End Date")
-	table.add_column("Elapsed")
-	table.add_column("Status", style="green")
-	table.add_column("Vulnerabilities")
-	if show_all:
-		table.add_column('Path')
+	# --show-children only applies to the mongodb/api backends, which persist nested
+	# runners. Local JSON reports don't store sub-tasks/sub-workflows separately.
+	if show_children and effective_driver not in ('mongodb', 'api'):
+		console.print(Warning(message='--show-children has no effect with the local driver: sub-tasks/sub-workflows are not stored in local reports.'))  # noqa: E501
 
-	# Print paths if piped
-	if ctx.obj['piped_output']:
-		if not paths:
-			console.print(Error(message='No reports found.'))
-			return
-		for path in paths:
-			print(path)
-		return
-
-	# Load each report
-	for path in paths:
+	# --status is matched as a case-insensitive regex (e.g. 'FAIL' -> FAILURE, '(RUNNING|FAILURE)')
+	status_pattern = None
+	if status:
 		try:
-			path_info = get_info_from_report_path(path)
-			report_info, vuln_counts = _load_report_data(path)
-			runner_id = path_info['type'] + '/' + path_info['id']
-			targets = report_info.get('targets', [])
+			status_pattern = re.compile(status, re.IGNORECASE)
+		except re.error as e:
+			console.print(Error(message=f'Invalid --status regex {status!r}: {e}'))
+			return
+
+	# Build table. overflow='fold' wraps long values onto multiple lines instead of
+	# truncating with an ellipsis, so important fields stay readable on small screens.
+	table = Table()
+	table.add_column('Workspace', style='bold gold3', overflow='fold')
+	table.add_column('Name', overflow='fold')
+	table.add_column('Id', overflow='fold')
+	table.add_column('Target', overflow='fold')
+	table.add_column('Profiles', overflow='fold')
+	table.add_column('Start Date', overflow='fold')
+	table.add_column('End Date', overflow='fold')
+	table.add_column('Elapsed', overflow='fold')
+	table.add_column('Status', style='green', overflow='fold')
+	table.add_column('Vulnerabilities', overflow='fold')
+	if show_all:
+		table.add_column('Path', overflow='fold')
+
+	shown = 0
+
+	if effective_driver in ('mongodb', 'api', 'sqlite'):
+		# --interesting and --time-delta are only supported by the local driver.
+		unsupported = [opt for opt, val in (('--interesting', interesting), ('--time-delta', time_delta)) if val]
+		if unsupported:
+			console.print(Warning(message=f'{", ".join(unsupported)} {"is" if len(unsupported) == 1 else "are"} only supported with the local driver and will be ignored for the {effective_driver} driver.'))  # noqa: E501
+		# Resolve the workspace name to its id for the API backend. The API only
+		# reliably filters runners by workspace_id (ObjectId); passing the raw name
+		# returns nothing (e.g. `r list -ws T2S` finds 0 while `r list` finds all).
+		list_workspace = workspace
+		if effective_driver == 'api' and workspace:
+			try:
+				from secator.hooks.api import resolve_workspace
+
+				list_workspace, _ = resolve_workspace(workspace)
+			except Exception as e:
+				console.print(Error(message=f'Error resolving workspace from API: {e}'))
+				return
+		# Use QueryEngine backend to list runners
+		context = {'drivers': [effective_driver]}
+		engine = QueryEngine(workspace_id=list_workspace or '', context=context)
+		# By default only list outermost runners (has_parent=False). --show-children
+		# drops the filter so nested sub-tasks/sub-workflows are shown too.
+		has_parent = None if show_children else False
+		runners = engine.list_runners(workspace_id=list_workspace, runner_type=runner_type, has_parent=has_parent)
+		for runner_info in runners:
+			runner_status = runner_info.get('status', '')
+			status_color = STATE_COLORS.get(runner_status, 'white')
+			if status_pattern and not status_pattern.search(str(runner_status)):
+				continue
+			targets = runner_info.get('targets', [])
 			first_target = str(targets[0]) if targets else ''
 			if len(targets) > 1:
 				first_target += f' (+{len(targets) - 1})'
-			profiles = report_info.get('run_opts', {}).get('profiles', [])
+			profiles = runner_info.get('run_opts', {}).get('profiles', [])
 			if isinstance(profiles, str):
 				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
+			profiles = [p for p in profiles if p]
 			profiles_str = ', '.join(profiles) if profiles else ''
-			status = report_info.get('status', '')
-			status_color = STATE_COLORS[status] if status in STATE_COLORS else 'white'
-
-			# Update table
+			# Show the id as {runner_type}/{runner_id} so it can be passed to `secator r info`.
+			runner_id = runner_info.get('_id_str')
+			if not runner_id:
+				rtype = runner_info.get('_type') or runner_info.get('config', {}).get('type', '')
+				if rtype and not rtype.endswith('s'):
+					rtype += 's'
+				raw_id = runner_info.get('_id', '')
+				runner_id = f'{rtype}/{raw_id}' if rtype and raw_id else (raw_id or rtype)
+			ws_name = runner_info.get('context', {}).get('workspace_name') or runner_info.get('_workspace', workspace or '')
 			row = [
-				path_info['workspace'],
-				f"[bold blue]{report_info.get('name', '')}[/]",
-				f'[link={Path(path).as_uri()}]{runner_id}[/link]',
+				ws_name,
+				f'[bold blue]{runner_info.get("name", "")}[/]',
+				runner_id,
 				first_target,
 				profiles_str,
-				humanize_date(report_info.get('start_time')),
-				humanize_date(report_info.get('end_time')),
-				report_info.get('elapsed_human', ''),
-				f"[{status_color}]{status}[/]",
-				_format_vuln_counts(vuln_counts),
+				humanize_date(runner_info.get('start_time')),
+				humanize_date(runner_info.get('end_time')),
+				runner_info.get('elapsed_human', ''),
+				f'[{status_color}]{runner_status}[/]',
+				'-',
 			]
 			if show_all:
-				row.append(str(path))
+				row.append('')
 			table.add_row(*row)
-		except Exception as e:
-			console.print(Error(message=f'Could not load {path}: {str(e)}'))
+			shown += 1
+	else:
+		# Local filesystem listing
+		paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
+		paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
 
-	if len(paths) > 0:
+		for path in paths:
+			try:
+				path_info = get_info_from_report_path(path)
+				report_info, vuln_counts = _load_report_data(path)
+				if not _report_passes_filters(report_info, vuln_counts, interesting, status_pattern):
+					continue
+				runner_id = path_info['type'] + '/' + path_info['id']
+				targets = report_info.get('targets', [])
+				first_target = str(targets[0]) if targets else ''
+				if len(targets) > 1:
+					first_target += f' (+{len(targets) - 1})'
+				profiles = report_info.get('run_opts', {}).get('profiles', [])
+				if isinstance(profiles, str):
+					profiles = [p.strip() for p in profiles.split(',') if p.strip()]
+				profiles_str = ', '.join(profiles) if profiles else ''
+				runner_status = report_info.get('status', '')
+				status_color = STATE_COLORS[runner_status] if runner_status in STATE_COLORS else 'white'
+
+				row = [
+					path_info['workspace'],
+					f'[bold blue]{report_info.get("name", "")}[/]',
+					f'[link={Path(path).as_uri()}]{runner_id}[/link]',
+					first_target,
+					profiles_str,
+					humanize_date(report_info.get('start_time')),
+					humanize_date(report_info.get('end_time')),
+					report_info.get('elapsed_human', ''),
+					f'[{status_color}]{runner_status}[/]',
+					_format_vuln_counts(vuln_counts),
+				]
+				if show_all:
+					row.append(str(path))
+				table.add_row(*row)
+				shown += 1
+			except Exception as e:
+				console.print(Error(message=f'Could not load {path}: {str(e)}'))
+
+	if shown > 0:
 		console.print(table)
-		console.print(Info(message=f'Found {len(paths)} reports.'))
+		console.print(Info(message=f'Found {shown} reports.'))
+		if workspace:
+			console.print(Info(message=f'Current workspace: [bold gold3]{workspace}[/]. Use [bold green4]-ws <workspace_name>[/] to switch.'))  # noqa: E501
+		else:
+			console.print(Info(message='All workspaces selected. Use [bold green4]-ws <workspace_name>[/] to filter on a workspace.'))  # noqa: E501
 	else:
 		console.print(Error(message='No reports found.'))
 
@@ -1313,12 +1727,14 @@ def report_list(ctx, workspace, runner_type, time_delta, show_all):
 @report.command('info')
 @click.argument('runner_id', type=str)
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--show-all', is_flag=True, default=False, help='Show all entries (do not truncate lists/dicts or errors)')  # noqa: E501
-def report_info(runner_id, workspace, show_all):
-	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)."""
+def report_info(runner_id, workspace, driver, show_all):
+	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)"""
 	MAX_ENTRIES = 20
 
-	workspace_name = workspace or CONFIG.workspace.default or 'default'
+	effective_driver = QueryEngine.resolve_backend(driver)
+	workspace_name = workspace or CONFIG.workspaces.current or 'default'
 	parts = runner_id.split('/')
 	if len(parts) != 2:
 		console.print(Error(message=f'Invalid runner ID: {runner_id!r}. Expected format: <type>/<id> (e.g. scans/0)'))
@@ -1326,21 +1742,47 @@ def report_info(runner_id, workspace, show_all):
 	runner_type, runner_number = parts[0], parts[1]
 	if not runner_type.endswith('s'):
 		runner_type += 's'
+	runner_type_singular = runner_type.rstrip('s')
 
-	report_path = Path(CONFIG.dirs.reports) / workspace_name / runner_type / runner_number / 'report.json'
-	if not report_path.exists():
-		console.print(Error(message=f'Report not found: {report_path}'))
-		return
+	if effective_driver in ('mongodb', 'api', 'sqlite'):
+		# Fetch the runner from the remote/db backend (e.g. /runner/<id>?type=<type>)
+		context = {'drivers': [effective_driver]}
+		engine = QueryEngine(workspace_id=workspace or '', context=context)
+		runner_info = engine.get_runner(runner_number, runner_type=runner_type_singular)
+		if not runner_info:
+			console.print(Error(message=f'Runner not found: {runner_id} (driver: {effective_driver})'))
+			return
+		info = dict(runner_info)
+		info.pop('_id', None)
+		source_label, source_value = '_source', f'{effective_driver}:{runner_type}/{runner_number}'
+	else:
+		report_path = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
+		if not report_path.exists():
+			console.print(Error(message=f'Report not found: {report_path}'))
+			return
 
-	with open(report_path, 'r') as f:
-		content = json.loads(f.read())
+		with open(report_path, 'r') as f:
+			content = json.loads(f.read())
 
-	info = dict(content.get('info', {}))
+		info = dict(content.get('info', {}))
+		source_label, source_value = '_path', str(report_path)
+
 	errors_raw = info.pop('errors', [])
+	warnings_raw = info.pop('warnings', [])
+
+	# These fields are verbose and only shown with --show-all.
+	SHOW_ALL_ONLY_KEYS = ('config', 'output')
 
 	table = Table(title=f'Info: {runner_id}', show_header=False, box=None, padding=(0, 1))
 	table.add_column('Key', style='bold gold3', no_wrap=True)
 	table.add_column('Value')
+
+	from rich.syntax import Syntax
+
+	def _render_yaml(data):
+		"""Render a dict as syntax-highlighted YAML for readability."""
+		yaml_str = yaml.dump(data, sort_keys=False, default_flow_style=False).rstrip()
+		return Syntax(yaml_str, 'yaml', theme='ansi-dark', padding=0, background_color='default')
 
 	def _format_value(value):
 		if isinstance(value, list):
@@ -1351,18 +1793,20 @@ def report_info(runner_id, workspace, show_all):
 				items = value
 				tail = ''
 			return '\n'.join(str(v) for v in items) + tail
-		if isinstance(value, dict):
-			if not show_all and len(value) > MAX_ENTRIES:
-				pairs = list(value.items())[:MAX_ENTRIES]
-				tail = f'\n[dim]... and {len(value) - MAX_ENTRIES} more (use --show-all to see all)[/]'
-			else:
-				pairs = list(value.items())
-				tail = ''
-			return '\n'.join(f'[bold]{k}[/]: {v}' for k, v in pairs) + tail
 		return str(value) if value is not None else ''
 
+	table.add_row(source_label, source_value)
 	for key, value in info.items():
-		table.add_row(key, _format_value(value))
+		if key in SHOW_ALL_ONLY_KEYS and not show_all:
+			continue
+		# Render any dict value as syntax-highlighted YAML. For config, drop the
+		# verbose 'opts' key (full option schema) first.
+		if isinstance(value, dict):
+			data = {k: v for k, v in value.items() if k != 'opts'} if key == 'config' else value
+			rendered = _render_yaml(data)
+		else:
+			rendered = _format_value(value)
+		table.add_row(key, rendered)
 
 	console.print(table)
 
@@ -1385,81 +1829,48 @@ def report_info(runner_id, workspace, show_all):
 		console.print()
 		console.print('[dim]No errors.[/]')
 
+	# Display warnings as Warning output types
+	if warnings_raw:
+		warnings_to_show = warnings_raw if show_all else warnings_raw[-1:]
+		console.print()
+		extra = ', showing last 1' if not show_all and len(warnings_raw) > 1 else ''
+		console.print(f'[bold]Warnings[/] ({len(warnings_raw)} total{extra}):')
+		for warn_data in warnings_to_show:
+			if isinstance(warn_data, dict):
+				try:
+					warn = Warning.load(warn_data)
+				except (KeyError, TypeError, ValueError):
+					warn = Warning(message=str(warn_data))
+			else:
+				warn = Warning(message=str(warn_data))
+			console.print(warn)
 
-@report.command(name='delete', aliases=['rm', 'remove'])
-@click.argument('runner_id')
-@click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api']), default='local', help='Query backend driver')
-@click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
-def report_delete(runner_id, workspace, driver, yes):
-	"""Delete a report. RUNNER_ID: runner path (e.g. tasks/24)."""
-	workspace_name = workspace or CONFIG.workspace.default or 'default'
 
-	parts = runner_id.split('/')
-	if len(parts) != 2:
-		console.print(Error(message=f'Invalid runner ID: {runner_id!r}. Expected format: <type>/<id> (e.g. tasks/24)'))
-		return
-
-	runner_type_raw, runner_number = parts[0], parts[1]
-	allowed_types = {'task', 'tasks', 'workflow', 'workflows', 'scan', 'scans'}
-	if runner_type_raw not in allowed_types:
-		console.print(Error(message=f'Invalid runner type: {runner_type_raw!r}. Must be one of: task, workflow, scan.'))
-		return
-	if not runner_number.isdigit():
-		console.print(Error(message=f'Invalid runner number: {runner_number!r}. Must be numeric.'))
-		return
-	runner_type_plural = runner_type_raw if runner_type_raw.endswith('s') else runner_type_raw + 's'
-	runner_type_singular = runner_type_plural[:-1]  # tasks -> task, workflows -> workflow, scans -> scan
-
-	report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+def _resolve_runner_db_id(report_folder, runner_type_singular):
+	"""Read a report's context to extract its MongoDB/API runner id (or None)."""
 	report_path = report_folder / 'report.json'
+	if not report_path.exists():
+		return None
+	try:
+		with open(report_path, 'r') as f:
+			content = json.loads(f.read())
+		context = content.get('info', {}).get('context', {})
+		return context.get(f'{runner_type_singular}_id')
+	except (json.JSONDecodeError, KeyError):
+		return None
 
-	# Read report context to get MongoDB/API IDs
-	runner_db_id = None
-	if report_path.exists():
-		try:
-			with open(report_path, 'r') as f:
-				content = json.loads(f.read())
-			context = content.get('info', {}).get('context', {})
-			runner_db_id = context.get(f'{runner_type_singular}_id')
-		except (json.JSONDecodeError, KeyError):
-			pass
 
-	actions = []
-	if report_folder.exists():
-		actions.append(f'Remove report folder: {report_folder}')
-	else:
-		actions.append(f'[dim]Report folder not found (will skip): {report_folder}[/]')
+def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular, runner_number, runner_db_id, driver):
+	"""Perform the actual deletion for a single runner reference."""
+	report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
 
-	if driver == 'mongodb':
-		if runner_db_id:
-			actions.append(f'Delete findings in MongoDB for {runner_type_singular}_id="{runner_db_id}"')
-			actions.append(f'Delete {runner_type_singular} document in MongoDB (id="{runner_db_id}")')
+	# 1. Remove report folder (local driver only; api/mongodb delete from the backend)
+	if driver == 'local':
+		if report_folder.exists():
+			shutil.rmtree(report_folder)
+			console.print(Info(message=f'Removed report folder: {report_folder}'))
 		else:
-			actions.append('[yellow]No MongoDB ID found in report — skipping MongoDB deletion[/]')
-	elif driver == 'api':
-		if runner_db_id:
-			endpoint_preview = CONFIG.addons.api.runner_delete_endpoint.format(
-				runner_type=runner_type_singular,
-				runner_id=runner_db_id,
-			)
-			actions.append(f'Send DELETE to API: {endpoint_preview}')
-		else:
-			actions.append('[yellow]No API ID found in report — skipping API deletion[/]')
-
-	console.print('[bold]The following actions will be performed:[/]')
-	for action in actions:
-		console.print(f'  [dim]-[/] {action}')
-
-	if not yes:
-		click.confirm(f'\nAre you sure you want to delete report "{workspace_name}/{runner_id}"?', abort=True)
-
-	# 1. Remove report folder
-	if report_folder.exists():
-		shutil.rmtree(report_folder)
-		console.print(Info(message=f'Removed report folder: {report_folder}'))
-	else:
-		console.print(Warning(message=f'Report folder not found: {report_folder}'))
+			console.print(Warning(message=f'Report folder not found: {report_folder}'))
 
 	# 2. MongoDB backend
 	if driver == 'mongodb' and runner_db_id:
@@ -1491,6 +1902,105 @@ def report_delete(runner_id, workspace, driver, yes):
 		except Exception as e:
 			console.print(Error(message=f'API deletion failed: {e}'))
 
+	# 4. SQLite backend
+	elif driver == 'sqlite' and runner_db_id:
+		try:
+			from secator.hooks.sqlite import get_sqlite_conn
+
+			conn = get_sqlite_conn()
+			findings_result = conn.execute(
+				f"DELETE FROM findings WHERE json_extract(data,'$._context.{runner_type_singular}_id')=?",
+				(runner_db_id,),
+			)
+			console.print(Info(message=f'Deleted {findings_result.rowcount} findings from SQLite'))
+			runner_result = conn.execute(f"DELETE FROM {runner_type_plural} WHERE id=?", (runner_db_id,))
+			if runner_result.rowcount:
+				console.print(Info(message=f'Deleted {runner_type_singular} row from SQLite'))
+			conn.commit()
+		except Exception as e:
+			console.print(Error(message=f'SQLite deletion failed: {e}'))
+
+
+@report.command(name='delete', aliases=['rm', 'remove'])
+@click.argument('runner_ids', nargs=-1, required=True)
+@click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
+def report_delete(runner_ids, workspace, driver, yes):
+	"""Delete one or more reports.
+
+	RUNNER_IDS: one or more runner paths. Supports space- or comma-separated paths and
+	numeric ranges, e.g. 'tasks/23 tasks/24 workflows/21', 'tasks/23,workflows/21',
+	or 'tasks/136-140,workflows/10-21'.
+	"""
+	from secator.query.utils import expand_runner_paths
+
+	driver = QueryEngine.resolve_backend(driver)
+	workspace_name = workspace or CONFIG.workspaces.current or 'default'
+
+	refs, errors = expand_runner_paths(list(runner_ids))
+	for err in errors:
+		console.print(Error(message=err))
+	if not refs:
+		if not errors:
+			console.print(Error(message='No valid runner paths provided.'))
+		return
+
+	# Resolve DB ids and build the preview of actions
+	resolved = []
+	console.print('[bold]The following actions will be performed:[/]')
+	for runner_type_plural, runner_type_singular, runner_number in refs:
+		report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+		if runner_number.isdigit():
+			# Local report: resolve the backend id from the report's context.
+			runner_db_id = _resolve_runner_db_id(report_folder, runner_type_singular)
+		else:
+			# Backend id passed directly (e.g. an ObjectId from `r list --driver api`).
+			runner_db_id = runner_number
+		resolved.append((runner_type_plural, runner_type_singular, runner_number, runner_db_id))
+
+		if driver == 'local':
+			if report_folder.exists():
+				console.print(f'  [dim]-[/] Remove report folder: {report_folder}')
+			else:
+				console.print(f'  [dim]-[/] [dim]Report folder not found (will skip): {report_folder}[/]')
+
+		if driver == 'mongodb':
+			if runner_db_id:
+				console.print(f'  [dim]-[/] Delete findings in MongoDB for {runner_type_singular}_id="{runner_db_id}"')
+				console.print(f'  [dim]-[/] Delete {runner_type_singular} document in MongoDB (id="{runner_db_id}")')
+			else:
+				console.print('  [dim]-[/] [yellow]No MongoDB ID found in report — skipping MongoDB deletion[/]')
+		elif driver == 'api':
+			if runner_db_id:
+				endpoint_preview = CONFIG.addons.api.runner_delete_endpoint.format(
+					runner_type=runner_type_singular,
+					runner_id=runner_db_id,
+				)
+				console.print(f'  [dim]-[/] Send DELETE to API: {endpoint_preview}')
+			else:
+				console.print('  [dim]-[/] [yellow]No API ID found in report — skipping API deletion[/]')
+		elif driver == 'sqlite':
+			if runner_db_id:
+				console.print(f'  [dim]-[/] Delete findings in SQLite for {runner_type_singular}_id="{runner_db_id}"')
+				console.print(f'  [dim]-[/] Delete {runner_type_singular} row in SQLite (id="{runner_db_id}")')
+			else:
+				console.print('  [dim]-[/] [yellow]No SQLite ID found in report — skipping SQLite deletion[/]')
+
+	if not yes:
+		paths_str = ', '.join(f'{p}/{n}' for p, _s, n, _id in resolved)
+		click.confirm(f'\nAre you sure you want to delete {len(resolved)} report(s) in "{workspace_name}" ({paths_str})?', abort=True)  # noqa: E501
+
+	for runner_type_plural, runner_type_singular, runner_number, runner_db_id in resolved:
+		_delete_one_report(
+			workspace_name,
+			runner_type_plural,
+			runner_type_singular,
+			runner_number,
+			runner_db_id,
+			driver,
+		)
+
 
 # --------#
 # DEPLOY #
@@ -1499,18 +2009,18 @@ def report_delete(runner_id, workspace, driver, yes):
 # TODO: work on this
 # @cli.group(aliases=['d'])
 # def deploy():
-# 	"""Deploy secator."""
+# 	"""Deploy secator"""
 # 	pass
 
 # @deploy.command()
 # def docker_compose():
-# 	"""Deploy secator on docker-compose."""
+# 	"""Deploy secator on docker-compose"""
 # 	pass
 
 # @deploy.command()
 # @click.option('-t', '--target', type=str, default='minikube', help='Deployment target amongst minikube, gke')
 # def k8s():
-# 	"""Deploy secator on Kubernetes."""
+# 	"""Deploy secator on Kubernetes"""
 # 	pass
 
 
@@ -1525,7 +2035,7 @@ def report_delete(runner_id, workspace, driver, yes):
 @click.option('--strict', '-strict', is_flag=True, default=False, help='Fail if missing tools')
 @click.option('--bleeding', '-bleeding', is_flag=True, default=False, help='Check bleeding edge version of tools')
 def health(json_, debug, strict, bleeding):
-	"""Get health status."""
+	"""Health"""
 	tools = discover_tasks()
 	upgrade_cmd = ''
 	results = []
@@ -1683,7 +2193,7 @@ def health(json_, debug, strict, bleeding):
 
 @cli.command(name='cheatsheet', aliases=['cs'])
 def cheatsheet():
-	"""Display a cheatsheet of secator commands."""
+	"""Cheatsheet"""
 	from rich.panel import Panel
 	from rich import box
 
@@ -1700,43 +2210,60 @@ def cheatsheet():
 
 	panel1 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Secator basic commands to get you started.[/]
+[dim gold3]:left_arrow_curving_right: Secator commands to get you started.[/]
 
-secator [orange3]x[/]      [dim]# list tasks[/]
-secator [orange3]w[/]      [dim]# list workflows[/]
-secator [orange3]s[/]      [dim]# list scans[/]
-secator [orange3]p[/]      [dim]# manage profiles[/]
-secator [orange3]r[/]      [dim]# manage reports[/]
-secator [orange3]c[/]      [dim]# manage configuration[/]
-secator [orange3]ws[/]     [dim]# manage workspaces[/]
-secator [orange3]update[/] [dim]# update secator[/]
+[grey42]# Basics[/]
+[orange3]x[/]       [grey42]# list tasks[/]
+[orange3]w[/]       [grey42]# list workflows[/]
+[orange3]s[/]       [grey42]# list scans[/]
+[orange3]q[/]       [grey42]# query results[/]
+[orange3]r[/]       [grey42]# manage reports[/]
+[orange3]p[/]       [grey42]# manage profiles[/]
+[orange3]c[/]       [grey42]# manage configuration[/]
+[orange3]ws[/]      [grey42]# manage workspaces[/]
+[orange3]update[/]  [grey42]# update secator[/]
 
-[dim]# Running tasks, workflows or scans...[/]
-secator \[[orange3]x[/]|[orange3]w[/]|[orange3]s[/]] [NAME] [OPTIONS] [INPUTS]   [dim]# run a task ([bold orange3]x[/]), workflow ([bold orange3]w[/]) or scan ([bold orange3]s[/])[/]
-secator [orange3]x[/] [red]httpx[/] example.com                 [dim]# run an [bold red]httpx[/] task ([bold orange3]x[/] is for e[bold orange3]x[/]ecute)[/]
-secator [orange3]w[/] [red]url_crawl[/] https://example.com     [dim]# run a [bold red]url crawl[/] workflow ([bold orange3]w[/])[/]
-secator [orange3]s[/] [red]host[/] example.com                  [dim]# run a [bold red]host[/] scan ([bold orange3]s[/])[/]
+[grey42]# Runners[/]
+[orange3]x[/]|[orange3]w[/]|[orange3]s[/] [NAME] [OPTIONS] [INPUTS]                     [grey42]# run a task (x), workflow (w) or scan (s)[/]
+[orange3]x[/] [red]httpx[/] example.com                                 [grey42]# run an httpx task (x for execute)[/]
+[orange3]w[/] [red]url_crawl[/] https://example.com                     [grey42]# run a url crawl workflow (w)[/]
+[orange3]s[/] [red]host[/] example.com                                  [grey42]# run a host scan (s)[/]
+[orange3]s[/] [red]domain[/] example.com                                [grey42]# run a domain scan (s)[/]
 
-[dim]# Show information on tasks, workflows or scans ...[/]
-secator s host [blue]-dry[/]                         [dim]# show dry run (show exact commands that will be run)[/]
-secator s host [blue]-tree[/]                        [dim]# show config tree (workflows and scans only)[/]
-secator s host [blue]-yaml[/]                        [dim]# show config yaml (workflows and scans only)[/]
+[grey42]# Runner metadata[/]
+s host [blue]-dry[/]                                         [grey42]# show dry run (exact commands that will be run)[/]
+s host [blue]-tree[/]                                        [grey42]# show config tree (workflows and scans only)[/]
+s host [blue]-yaml[/]                                        [grey42]# show config yaml (workflows and scans only)[/]
 
-[dim]# Organize your results (workspace, database)[/]
-secator s host [blue]-ws[/] [bright_magenta]prod[/] example.com         [dim]# save results to 'prod' workspace[/]
-secator s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com  [dim]# save results to mongodb database[/]
+[grey42]# Query results[/]
+q [bright_magenta]"vulnerability.severity == 'high'[/]                 [grey42]# show critical vulnerabilities[/]
+q [bright_magenta]"vulnerability.tags ~= 'kev'[/]                      [grey42]# show known exploited vulnerabilities (KEV)[/]
+q [bright_magenta]"url.status_code != 403"[/]                          [grey42]# show URLs with HTTP status != 403[/]
+q [bright_magenta]"port.state == 'open' && port.port in [22,443]"[/]   [grey42]# show opened 22 and 8000 ports[/]
 
-[dim]# Input types are flexible ...[/]
-secator s host [cyan]example.com[/]                  [dim]# single input[/]
-secator s host [cyan]host1,host2,host3[/]            [dim]# multiple inputs (comma-separated)[/]
-secator s host [cyan]hosts.txt[/]                    [dim]# multiple inputs (txt file)[/]
-[cyan]cat hosts.txt | [/]secator s host              [dim]# piped inputs[/]
+[grey42]# Organize your results (workspace, database)[/]
+ws list                                             [grey42]# list workspaces[/]
+ws use prod                                         [grey42]# switch to prod workspace (auto-create if missing)[/]
+s host [blue]-ws[/] [bright_magenta]prod[/] example.com                         [grey42]# run in prod workspace explicitely[/]
+c set --append workspaces.routes.prod *example.com* [grey42]# run in prod workspace implicitely (based on target regex)[/]
 
-[dim]# Options are mutualized ...[/]
-secator s host [blue]-rl[/] [bright_magenta]10[/] [blue]-delay[/] [bright_magenta]1[/] [blue]-proxy[/] [bright_magenta]http://127.0.0.1:9090[/] example.com  [dim]# set rate limit, delay and proxy for all subtasks[/]
-secator s host [blue]-pf[/] [bright_magenta]aggressive[/] example.com  [dim]# ... or use a profile to automatically set options[/]
+[grey42]# Use different backends for results[/]
+s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com                  [grey42]# save results using driver mongodb[/]
+s host [blue]-driver[/] [bright_magenta]api[/] example.com                      [grey42]# save results using driver api (Secator Cloud)[/]
+c set --append [blue]drivers.defaults[/] [bright_magenta]api[/]                 [grey42]# use driver api driver by default[/]
 
-[dim]:point_right: and [bold]YES[/], the above options and inputs work with any scan ([bold orange3]s[/]), workflow ([bold orange3]w[/]), and task ([bold orange3]x[/]), not just the host scan shown here![/]
+[grey42]# Input types are flexible ...[/]
+s host [cyan]example.com[/]                                  [grey42]# single input[/]
+s host [cyan]host1,host2,host3[/]                            [grey42]# multiple inputs (comma-separated)[/]
+s host [cyan]hosts.txt[/]                                    [grey42]# multiple inputs (txt file)[/]
+[cyan]cat hosts.txt | [/]s host                              [grey42]# piped inputs[/]
+
+[grey42]# Options are mutualized ...[/]
+s host [blue]-rl[/] [bright_magenta]5[/] [blue]-d[/] [bright_magenta]1[/] [blue]-proxy[/] [bright_magenta]localhost:9090[/] example.com [grey42]# set rate limit, delay and proxy for all commands[/]
+s host [blue]-pf[/] [bright_magenta]aggressive[/] example.com                   [grey42]# ... or use a profile for grouped option sets[/]
+pf list                                             [grey42]# view available profiles[/]
+
+[dim gold3]:point_right: and [bold]YES[/], the above options and inputs work with any scan ([bold orange3]s[/]), workflow ([bold orange3]w[/]), and task ([bold orange3]x[/])![/]
 """,  # noqa: E501
 		title=f':shield: [{title_style}]Some basics[/]',
 		**kwargs,
@@ -1744,20 +2271,23 @@ secator s host [blue]-pf[/] [bright_magenta]aggressive[/] example.com  [dim]# ..
 
 	panel2 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Secator aliases are useful to stop typing [bold cyan]secator <something>[/] and focus on what you want to run. Aliases are a must to increase your productivity.[/]
+[dim gold3]:left_arrow_curving_right: Secator aliases are useful to stop typing [bold green]secator <something>[/] and focus on the [bold green]<something>[/].
+  Aliases are a must to increase your productivity.[/]
 
-[bold]To enable aliases:[/]
+[grey42]# Enable aliases...[/]
+alias enable
+source ~/.secator/.aliases  [grey42]# load[/]
+[dim gold3]:point_right: Now you can use aliases ![/]
+a list                                                   [grey42]# list all aliases[/]
+httpx                                                    [grey42]# aliased httpx ![/]
+nmap -sV -p 443 --script vulners example.com             [grey42]# aliased nmap ![/]
+w subdomain_recon                                        [grey42]# aliased subdomain_recon workflow ![/]
+s domain                                                 [grey42]# aliased domain scan ![/]
+cat hosts.txt | subfinder | naabu | httpx | w url_crawl  [grey42]# pipes to chain tasks ![/]
 
-secator alias enable       [dim]# enable aliases[/]
-source ~/.secator/.aliases [dim]# load aliases in current shell[/]
-
-[dim]# Now you can use aliases...[/]
-a list                                                   [dim]# list all aliases[/]
-httpx                                                    [dim]# aliased httpx ![/]
-nmap -sV -p 443 --script vulners example.com             [dim]# aliased nmap ![/]
-w subdomain_recon                                        [dim]# aliased subdomain_recon ![/]
-s domain                                                 [dim]# aliased domain scan ![/]
-cat hosts.txt | subfinder | naabu | httpx | w url_crawl  [dim]# pipes to chain tasks ![/]
+[grey42]# Disable aliases...[/]
+disable alias
+source ~/.secator/.unalias  [grey42]# unload[/]
 """,  # noqa: E501
 		title=f':shorts: [{title_style}]Aliases[/]',
 		**kwargs,
@@ -1765,14 +2295,17 @@ cat hosts.txt | subfinder | naabu | httpx | w url_crawl  [dim]# pipes to chain t
 
 	panel3 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Secator configuration is stored in a YAML file located at [bold cyan]~/.secator/config.yaml[/]. You can edit it manually or use the following commands to get/set values.[/]
+[dim gold3]:left_arrow_curving_right: Secator user configuration (override) is stored in a YAML file located at [bold cyan]~/.secator/config.yaml[/]. You can edit it manually or use the following commands to get/set values.[/]
 
-c get         [dim]# get config value[/]
-c get --user  [dim]# get user config value[/]
-c edit        [dim]# edit user config in editor[/]
-c set profiles.defaults aggressive                              [dim]# set 'aggressive' profile as default[/]
-c set drivers.defaults mongodb                                  [dim]# set mongodb as default driver[/]
-c set wordlists.defaults.http https://example.com/wordlist.txt  [dim]# set default wordlist for http fuzzing[/]
+c get                                                        [grey42]# get full config[/]
+c get addons.ai                                              [grey42]# get part of config[/]
+c get --user                                                 [grey42]# get user config value[/]
+c edit                                                       [grey42]# edit user config in editor[/]
+c set tasks.overrides.nuclei.input_chunk_size                [grey42]# override nuclei input chunk size defined in code[/]
+c set --append profiles.defaults aggressive                  [grey42]# add 'aggressive' profile to defaults[/]
+c set --append drivers.defaults mongodb                      [grey42]# add 'mongodb' driver to defaults[/]
+c set --append wordlists.templates.my_wordlist <REMOTE_URL>  [grey42]# add new wordlist to config[/]
+c set wordlists.defaults.http my_wordlist                    [grey42]# set new wordlist as default for http fuzzing[/]
 """,  # noqa: E501
 		title=f':gear: [{title_style}]Configuration[/]',
 		**kwargs,
@@ -1780,54 +2313,71 @@ c set wordlists.defaults.http https://example.com/wordlist.txt  [dim]# set defau
 
 	panel4 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: By default, tasks are run sequentially. You can use a worker to run tasks in parallel and massively speed up your scans.[/]
+[dim gold3]:left_arrow_curving_right: By default, tasks are run sequentially. You can use a worker to run tasks in parallel and massively speed up your scans.[/]
 
-wk                         [dim]# or [bold cyan]secator worker[/] if you don't use aliases ...[/]
-httpx testphp.vulnweb.com  [dim]# <-- will run in worker and output results normally[/]
+worker                     [grey42]# or secator worker if you don't use aliases ...[/]
+httpx testphp.vulnweb.com  [grey42]# <-- will run in worker and output results normally[/]
 
 [dim]:question: Want to use a remote worker ?[/]
 [dim]:point_right: Spawn a Celery worker on your remote server, a Redis instance and set the following config values to connect to it, both in the worker and locally:[/]
-c set celery.result_backend redis://<remote_ip>:6379/0          [dim]# set redis backend[/]
-c set celery.broker_url redis://<remote_ip>:6379/0              [dim]# set redis broker[/]
+c set celery.result_backend redis://<user>:<pass>@<remote_ip>:6379/0  [grey42]# set redis backend[/]
+c set celery.broker_url redis://<user>:<pass>@<remote_ip>:6379/0      [grey42]# set redis broker[/]
 [dim]:point_right: Then, run your tasks, workflows or scans like you would locally ![/]
 """,  # noqa: E501
-		title=f':zap: [{title_style}]Too slow ? Use a worker[/]',
+		title=f':zap:[{title_style}]Too slow ? Use a worker[/]',
 		**kwargs,
 	)
 
 	panel5 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Reports are stored in the [bold cyan]~/.secator/reports[/] directory. You can list, show, and filter reports using the following commands.[/]
+[dim gold3]:left_arrow_curving_right: Each attack surface gets its own workspace. Reports are stored per-workspace and can be queried across all saved results.[/]
 
-[dim]# List and filter reports...[/]
-r list                    [dim]# list all reports[/]
-r list [blue]-ws[/] [bright_magenta]prod[/]           [dim]# list reports from the workspace 'prod'[/]
-r list [blue]-d[/] [bright_magenta]1h[/]              [dim]# list reports from the last hour[/]
+[grey42]# Manage workspaces (one attack surface = one workspace)...[/]
+ws use [bright_magenta]pentest_202602[/]     [grey42]# define current workspace to be 'pentest_202602' (get or create it)[/]
+ws list                   [grey42]# list available workspaces[/]
 
-[dim]# Show and filter results...[/]
-r show [blue]-q[/] [bright_magenta]"vulnerability.severity_score >= 7"[/] [blue]-o[/] [bright_magenta]txt[/]                                      [dim]# show high-severity vulnerabilities, save to txt file[/]
-r show tasks/10,tasks/11 [blue]-q[/] [bright_magenta]"port.state == 'open'"[/] [blue]-o[/] [bright_magenta]json[/]           [dim]# show open ports from tasks 10 and 11[/]
+[grey42]# List and filter reports...[/]
+r list                    [grey42]# list all reports[/]
+r list [blue]-ws[/] [bright_magenta]default[/]        [grey42]# list reports from the workspace 'default'[/]
+r list [blue]-ws[/] [bright_magenta]pentest_202602[/] [grey42]# list reports from the workspace 'pentest_202602'[/]
+r list [blue]-d[/] [bright_magenta]1h[/]              [grey42]# list reports from the last hour[/]
+r list [blue]-i[/]                 [grey42]# list reports that are 'interesting' (i.e: that contain vulns)[/]
+
+[grey42]# Query workspace results...[/]
+q "Show me the top 5 vulnerabilities in my workspace"          [grey42]# using AI (run `secator x ai setup` first to set your model)[/]
+q [bright_magenta]"port.host == 'localhost' && port.port == 6379"[/]              [grey42]# find what's running on a specific port[/]
+q [bright_magenta]"port.port in [22,2222] || port.service_name ~= 'ssh'"[/]       [grey42]# ... or all ports 22 or 2222, or which identified service contains 'ssh'[/]
+q [bright_magenta]"port.state == 'open' && port.service_confidence == 'high'"[/]  [grey42]# ... or only high confidence, opened ports[/]
+q [bright_magenta]"vulnerability"[/]                                              [grey42]# show all vulnerabilities in current workspace[/]
+q [bright_magenta]"vulnerability.severity in ['high', 'critical']"[/]             [grey42]# ... filter on severity[/]
+q [bright_magenta]"vulnerability.cvss_score >= 7"[/]                              [grey42]# ... filter on CVSS scores[/]
+q [bright_magenta]"vulnerability.tags ~= 'exploitable'"[/]                        [grey42]# ... filter on exploitable vulnerabilities[/]
+q [bright_magenta]"exploit.cves ~= 'CVE-2022-0543'"[/]                            [grey42]# show exploits related to a vulnerability[/]
+q [blue]--help[/]                                                       [grey42]# ... and more with the -f, -o, -d options[/]
+
+[grey42]# Query specific reports by id (tasks, workflows, scans)[/]
+q [bright_magenta]"port.state == 'open'"[/] [blue]-rf[/] [bright_magenta]tasks/10,tasks/11[/] [blue]-o[/] [bright_magenta]json[/]         [grey42]# show open ports from tasks 10 and 11[/]
 """,  # noqa: E501
-		title=f':file_cabinet: [{title_style}]Digging into reports[/]',
+		title=f':file_cabinet:  [{title_style}]Workspaces, reports, and queries[/]',
 		**kwargs,
 	)
 
 	panel6 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Commands to manage secator installation.[/]
+[dim gold3]:left_arrow_curving_right: Commands to manage secator installation.[/]
 
-update [dim]# update secator to the latest version[/]
+update [grey42]# update secator to the latest version[/]
 
 [dim]:point_right: Tools are automatically installed when first running a task, workflow or scan, but you can still install them manually.[/]
-i tools httpx    [dim]# install tool 'httpx'[/]
-i tools          [dim]# install all tools[/]
+i tools httpx    [grey42]# install tool 'httpx'[/]
+i tools          [grey42]# install all tools[/]
 
 [dim]:point_right: Addons are optional dependencies required to enable certain features.[/]
-i addon redis    [dim]# install addon 'redis'[/]
-i addon gcs      [dim]# install addon 'gcs'[/]
-i addon worker   [dim]# install addon 'worker'[/]
-i addon gdrive   [dim]# install addon 'gdrive'[/]
-i addon mongodb  [dim]# install addon 'mongodb'[/]
+i addon redis    [grey42]# install addon 'redis'[/]
+i addon gcs      [grey42]# install addon 'gcs'[/]
+i addon worker   [grey42]# install addon 'worker'[/]
+i addon gdrive   [grey42]# install addon 'gdrive'[/]
+i addon mongodb  [grey42]# install addon 'mongodb'[/]
 """,  # noqa: E501
 		title=f':wrench: [{title_style}]Updates[/]',
 		**kwargs,
@@ -1835,35 +2385,35 @@ i addon mongodb  [dim]# install addon 'mongodb'[/]
 
 	panel7 = Panel(
 		r"""
-[dim bold]:left_arrow_curving_right: Some useful scans and workflows we use day-to-day for recon.[/]
+[dim gold3]:left_arrow_curving_right: Some useful scans and workflows we use day-to-day for recon.[/]
 
 [orange3]:warning: Don't forget to add [bold blue]-dry[/] or [bold blue]-tree[/] before running your scans to see what will be done ![/]
 
 [bold orange3]:trophy: Domain recon + Subdomain recon + Port scanning + URL crawl + URL vulns (XSS, SQLi, RCE, ...)[/]
-s domain <DOMAIN>                [dim]# light[/]
-s domain <DOMAIN> -pf all_ports  [dim]# light + full port scan[/]
-s domain <DOMAIN> -pf full       [dim]# all features (full port scan, nuclei, pattern hunting, headless crawling, screenshots, etc.)[/]
-s domain <DOMAIN> -pf passive    [dim]# passive (0 requests to targets)[/]
+s domain <DOMAIN>                                  [grey42]# light[/]
+s domain <DOMAIN> -pf all_ports                    [grey42]# light + full port scan[/]
+s domain <DOMAIN> -pf full                         [grey42]# all features (full port scan, nuclei, pattern hunting, headless crawling, screenshots, etc.)[/]
+s domain <DOMAIN> -pf passive                      [grey42]# passive (0 requests to targets)[/]
 
 [bold orange3]:trophy: Subdomain recon[/]
-w subdomain_recon <DOMAIN>                         [dim]# standard[/]
-w subdomain_recon <DOMAIN> -brute-dns -brute-http  [dim]# bruteforce subdomains (DNS queries + HTTP Host header fuzzing)[/]
-w subdomain_recon <DOMAIN> -pf passive             [dim]# passive (0 requests to targets)[/]
+w subdomain_recon <DOMAIN>                         [grey42]# standard[/]
+w subdomain_recon <DOMAIN> -brute-dns -brute-http  [grey42]# bruteforce subdomains (DNS queries + HTTP Host header fuzzing)[/]
+w subdomain_recon <DOMAIN> -pf passive             [grey42]# passive (0 requests to targets)[/]
 
 [bold orange3]:trophy: URL fuzzing[/]
-w url_fuzz <URL>                                   [dim]# standard fuzzing (ffuf)[/]
-w url_fuzz <URL> -hs                               [dim]# hunt secrets in HTTP responses (trufflehog)[/]
-w url_fuzz <URL> -mc 200,301 -fs 204               [dim]# match 200, 301, and filter size equal to 204 bytes[/]
-w url_fuzz -fuzzers ffuf,dirsearch <URL> -w <URL>  [dim]# choose fuzzers, use remote wordlist[/]
+w url_fuzz <URL>                                   [grey42]# standard fuzzing (ffuf)[/]
+w url_fuzz <URL> -hs                               [grey42]# hunt secrets in HTTP responses (trufflehog)[/]
+w url_fuzz <URL> -mc 200,301 -fs 204               [grey42]# match 200, 301, and filter size equal to 204 bytes[/]
+w url_fuzz -fuzzers ffuf,dirsearch <URL> -w <URL>  [grey42]# choose fuzzers, use remote wordlist[/]
 
 [bold orange3]:trophy: Vuln and secret scan:[/]
-w code_scan <PATH>                                 [dim]# on a local path or git repo[/]
-w code_scan https://github.com/freelabz/secator    [dim]# on a github repo[/]
-w code_scan https://github.com/freelabz            [dim]# on a github org (all repos)[/]
+w code_scan <PATH>                                 [grey42]# on a local path or git repo[/]
+w code_scan https://github.com/freelabz/secator    [grey42]# on a github repo[/]
+w code_scan https://github.com/freelabz            [grey42]# on a github org (all repos)[/]
 
 [bold orange3]:trophy: Hunt user accounts[/]
-w user_hunt elonmusk                               [dim]# by username[/]
-w user_hunt elonmusk@tesla.com                     [dim]# by email[/]
+w user_hunt elonmusk                               [grey42]# by username[/]
+w user_hunt elonmusk@tesla.com                     [grey42]# by email[/]
 
 [bold orange3]:trophy: Custom pipeline to find HTTP servers and fuzz alive ones[/]
 subfinder vulnweb.com | naabu | httpx | ffuf -mc 200,301 -recursion
@@ -1872,13 +2422,18 @@ subfinder vulnweb.com | naabu | httpx | ffuf -mc 200,301 -recursion
 		**kwargs,
 	)
 
-	console.print(panel1)
-	console.print(panel2)
-	console.print(panel3)
-	console.print(panel4)
-	console.print(panel5)
-	console.print(panel6)
-	console.print(panel7)
+	less_env_var = os.environ.get('LESS', '')
+	pager_color_support = '-r' in less_env_var or '-R' in less_env_var
+	with console.pager(styles=pager_color_support):
+		console.print("\n:point_right: [dim]This is an interactive cheatsheet for [bold green]secator[/] that will teach you most of the concepts available in the CLI.[/]")  # noqa: E501
+		console.print("   [dim]For simplicity, we omit the [bold green]secator[/] prefix in the cheatsheet, so make sure to prepend it (unless you have aliases enabled).[/]\n")  # noqa: E501
+		console.print(panel1)
+		console.print(panel2)
+		console.print(panel3)
+		console.print(panel4)
+		console.print(panel5)
+		console.print(panel6)
+		console.print(panel7)
 
 
 # ---------#
@@ -1916,7 +2471,7 @@ def run_install(title=None, cmd=None, packages=None, next_steps=None):
 
 @cli.group(aliases=['i'])
 def install():
-	"""Install langs, tools and addons."""
+	"""Install things"""
 	pass
 
 
@@ -2058,6 +2613,61 @@ def install_ai():
 	)
 
 
+def _install_external_addon(name, config):
+	"""Install an external addon defined in addons.json."""
+	from secator.installer import ToolInstaller
+
+	if CONFIG.offline_mode:
+		console.print(Error(message='Cannot run this command in offline mode.'))
+		sys.exit(1)
+
+	next_steps = config.get('next_steps', [])
+	tool_attrs = {
+		'__name__': name,
+		'install_pre': config.get('install_pre', None),
+		'install_post': config.get('install_post', None),
+		'install_cmd_pre': config.get('install_cmd_pre', None),
+		'install_cmd': config.get('install_cmd', None),
+		'install_github_bin': config.get('install_github_bin', True),
+		'github_handle': config.get('github_handle') or config.get('install_github_handle', None),
+		'install_github_version_prefix': config.get('install_github_version_prefix', ''),
+		'install_ignore_bin': config.get('install_ignore_bin', []),
+		'install_version': config.get('install_version', None),
+		'install_binary_name': config.get('install_binary_name', None),
+		'pypi_dependencies': config.get('pypi_dependencies', None),
+	}
+	tool_cls = type(name, (), tool_attrs)
+	status = ToolInstaller.install(tool_cls)
+
+	return_code = 0 if status.is_ok() else 1
+	if status.is_ok() and next_steps:
+		console.print('[bold gold3]:wrench: Next steps:[/]')
+		for ix, step in enumerate(next_steps):
+			console.print(f'   :keycap_{ix}: {step}')
+	sys.exit(return_code)
+
+
+def _load_external_addon_commands():
+	"""Dynamically register install commands for addons defined in addons.json."""
+	external_addons = load_external_addons()
+	for addon_name, addon_config in external_addons.items():
+		if addon_name in addons.commands:
+			debug(f'Skipping external addon "{addon_name}": name conflicts with a built-in addon command', sub='cli')
+			continue
+
+		def _make_cmd(name, config):
+			@click.command(name, help=f'Install {name} addon.')
+			def _cmd():
+				_install_external_addon(name, config)
+
+			return _cmd
+
+		addons.add_command(_make_cmd(addon_name, addon_config))
+
+
+_load_external_addon_commands()
+
+
 @install.group()
 def langs():
 	"Install languages."
@@ -2066,7 +2676,7 @@ def langs():
 
 @langs.command('go')
 def install_go():
-	"""Install Go."""
+	"""Install Go"""
 	run_install(
 		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_go.sh | sudo sh',
 		title='Go',
@@ -2076,7 +2686,7 @@ def install_go():
 
 @langs.command('ruby')
 def install_ruby():
-	"""Install Ruby."""
+	"""Install Ruby"""
 	run_install(
 		packages={
 			'apt': ['ruby-full', 'rubygems'],
@@ -2093,7 +2703,7 @@ def install_ruby():
 @click.option('--cleanup', is_flag=True, default=False, help='Clean up tools after installation.')
 @click.option('--fail-fast', is_flag=True, default=False, help='Fail fast if any tool fails to install.')
 def install_tools(cmds, cleanup, fail_fast):
-	"""Install supported tools."""
+	"""Install supported tools"""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
@@ -2153,7 +2763,7 @@ def install_tools(cmds, cleanup, fail_fast):
 @cli.command('update')
 @click.option('--all', '-a', is_flag=True, help='Update all secator dependencies (addons, tools, ...)')
 def update(all):
-	"""Update to latest version."""
+	"""Update to latest version"""
 	if CONFIG.offline_mode:
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
@@ -2208,7 +2818,7 @@ def update(all):
 
 @cli.group(cls=OrderedGroup)
 def test():
-	"""[dim]Run tests (dev build only)."""
+	"""[dim]Run tests (dev build only)"""
 	if not DEV_PACKAGE:
 		console.print(Error(message='You MUST use a development version of secator to run tests.'))
 		sys.exit(1)
@@ -2255,7 +2865,7 @@ def run_test(cmd, name=None, exit=True, verbose=False, use_command_runner=True):
 @test.command()
 @click.option('--linter', '-l', type=click.Choice(['flake8', 'ruff', 'isort', 'pylint']), default='flake8', help='Linter to use')  # noqa: E501
 def lint(linter):
-	"""Run lint tests."""
+	"""Run lint tests"""
 	opts = ''
 	if linter == 'pylint':
 		opts = '--indent-string "\t" --max-line-length 160 --disable=R,C,W'
@@ -2272,7 +2882,7 @@ def lint(linter):
 @click.option('--test', '-t', type=str, help='Secator test to run')
 @click.option('--no-coverage', is_flag=True, help='Disable coverage')
 def unit(tasks, workflows, scans, test, no_coverage):
-	"""Run unit tests."""
+	"""Run unit tests"""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
@@ -2309,7 +2919,7 @@ def unit(tasks, workflows, scans, test, no_coverage):
 @click.option('--test', '-t', type=str, help='Secator test to run')
 @click.option('--no-cleanup', '-nc', is_flag=True, help='Do not perform cleanup (keep lab running, faster for relaunching tests)')  # noqa: E501
 def integration(tasks, workflows, scans, test, no_cleanup):
-	"""Run integration tests."""
+	"""Run integration tests"""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
@@ -2342,7 +2952,7 @@ def integration(tasks, workflows, scans, test, no_cleanup):
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
 def template(tasks, workflows, scans, test):
-	"""Run integration tests."""
+	"""Run integration tests"""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
@@ -2374,7 +2984,7 @@ def template(tasks, workflows, scans, test):
 @click.option('--scans', type=str, default='', help='Secator scans to test (comma-separated)')
 @click.option('--test', '-t', type=str, help='Secator test to run')
 def performance(tasks, workflows, scans, test):
-	"""Run integration tests."""
+	"""Run integration tests"""
 	os.environ['TEST_TASKS'] = tasks or ''
 	os.environ['TEST_WORKFLOWS'] = workflows or ''
 	os.environ['TEST_SCANS'] = scans or ''
@@ -2397,7 +3007,7 @@ def performance(tasks, workflows, scans, test):
 @click.option('--check', '-c', is_flag=True, default=False, help='Check task semantics only (no unit + integration tests)')  # noqa: E501
 @click.option('--system-exit', '-e', is_flag=True, default=True, help='Exit with system exit code')
 def task(name, verbose, check, system_exit):
-	"""Test a single task for semantics errors, and run unit + integration tests."""
+	"""Test a single task for semantics errors, and run unit + integration tests"""
 	console.print(f'[bold gold3]:wrench: Testing task {name} ...[/]')
 	task = [task for task in discover_tasks() if task.__name__ == name.strip()]
 	warnings = []
@@ -2535,7 +3145,7 @@ def task(name, verbose, check, system_exit):
 @click.option('--check', '-c', is_flag=True, default=False, help='Check task semantics only (no unit + integration tests)')  # noqa: E501
 @click.option('--verbose', '-v', is_flag=True, default=False, help='Print verbose output')
 def tasks(ctx, check, verbose):
-	"""Test all tasks for semantics errors, and run unit + integration tests."""
+	"""Test all tasks for semantics errors, and run unit + integration tests"""
 	results = []
 	for cls in discover_tasks():
 		success = ctx.invoke(task, name=cls.__name__, verbose=verbose, check=check, system_exit=False)
@@ -2569,7 +3179,7 @@ def check_test(condition, message, fail_message, results=[], warn=False):
 @click.option('--integration-only', '-i', is_flag=True, default=False, help='Only generate coverage for integration tests')  # noqa: E501
 @click.option('--template-only', '-t', is_flag=True, default=False, help='Only generate coverage for template tests')  # noqa: E501
 def coverage(unit_only, integration_only, template_only):
-	"""Run coverage combine + coverage report."""
+	"""Run coverage combine + coverage report"""
 	cmd = f'{sys.executable} -m coverage report -m --omit=*/site-packages/*,*/tests/*,*/templates/*'
 	if unit_only:
 		cmd += ' --data-file=.coverage.unit'

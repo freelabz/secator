@@ -3,6 +3,7 @@ from dotmap import DotMap
 from secator.config import CONFIG
 from secator.output_types import Info
 from secator.runners._base import Runner
+from secator.runners._helpers import resolve_task_queue
 from secator.runners.task import Task
 from secator.tree import build_runner_tree, walk_runner_tree
 from secator.utils import merge_opts
@@ -12,7 +13,7 @@ class Workflow(Runner):
 
 	default_exporters = CONFIG.workflows.exporters
 
-	def build_celery_workflow(self, chain_previous_results=False):
+	def build_celery_workflow(self, chain_previous_results=False, light_start=False):
 		"""Build Celery workflow for workflow execution.
 
 		Args:
@@ -105,7 +106,13 @@ class Workflow(Runner):
 				task_opts['aliases'] = [node.id, node.name]
 				if task.__name__ != node.name:
 					task_opts['aliases'].append(task.__name__)
-				profile = task.profile(task_opts) if callable(task.profile) else task.profile
+				# Mint the child task's runner doc + id at build time so a
+				# redelivered task reuses the same doc (see L2 / on_build).
+				prev_enable_hooks = self.enable_hooks
+				self.enable_hooks = True
+				self.run_hooks('on_build', task_opts, sub='build')
+				self.enable_hooks = prev_enable_hooks
+				profile = resolve_task_queue(task, task_opts)
 				sig = task.s(self.inputs, **task_opts).set(queue=profile)
 				task_id = sig.freeze().task_id
 				debug(f'{node.id} sig built ix: {ix}, parent_ix: {parent_ix}', sub=self.config.name)
@@ -146,10 +153,20 @@ class Workflow(Runner):
 
 		walk_runner_tree(tree, process_task)
 
-		# Build workflow chain with lifecycle management
-		start_sig = mark_runner_started.si([], self, enable_hooks=True).set(queue='results')
+		# Build workflow chain with lifecycle management.
+		# The start marker's pool: a start with no forwarded results — a parentless
+		# workflow (`.si([], ...)`), or a scan's first workflow whose only upstream
+		# is the scan-start's (empty) marker (`light_start`) — is light, so route it
+		# to `small` (fast, warm capacity) instead of the memory-heavy `results`
+		# pool (served by the large worker pool). This avoids a scale-from-zero node
+		# provision just to mark the runner started. A workflow that chains
+		# accumulated results keeps `results` for the memory headroom. `light_start`
+		# only changes the queue — the `.s(self)` form still receives its forwarded
+		# results, so nothing is dropped.
+		start_queue = 'small' if (light_start or not chain_previous_results) else 'results'
+		start_sig = mark_runner_started.si([], self, enable_hooks=True).set(queue=start_queue)
 		if chain_previous_results:
-			start_sig = mark_runner_started.s(self, enable_hooks=True).set(queue='results')
+			start_sig = mark_runner_started.s(self, enable_hooks=True).set(queue=start_queue)
 		sig = chain(
 			start_sig,
 			*sigs,

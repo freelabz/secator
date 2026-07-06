@@ -1,4 +1,10 @@
-from secator.query.utils import parse_report_paths, python_expr_to_mongo
+from secator.query.utils import (
+    expand_runner_paths,
+    parse_report_paths,
+    python_expr_to_mongo,
+    validate_query_fields,
+    query_has_type_constraint,
+)
 
 
 class TestParseReportPaths:
@@ -52,6 +58,21 @@ class TestPythonExprToMongo:
     def test_type_only_no_field(self):
         result = python_expr_to_mongo('domain')
         assert result == {'_type': 'domain'}
+
+    def test_bare_field_is_boolean_true(self):
+        # "ip.alive" (no operator) is a truthiness shorthand: it must resolve to a
+        # boolean match (alive == True), not drop the field. Regression for the
+        # resolved query missing the boolean comparison.
+        assert python_expr_to_mongo('ip.alive') == {'_type': 'ip', 'alive': True}
+
+    def test_bare_field_matches_explicit_eq_true(self):
+        # The bare form must resolve identically to "== True".
+        assert python_expr_to_mongo('ip.alive') == python_expr_to_mongo('ip.alive == True')
+
+    def test_boolean_literals_parse_as_bool(self):
+        assert python_expr_to_mongo('ip.alive == True') == {'_type': 'ip', 'alive': True}
+        assert python_expr_to_mongo('ip.alive == False') == {'_type': 'ip', 'alive': False}
+        assert python_expr_to_mongo('ip.alive == true') == {'_type': 'ip', 'alive': True}
 
     def test_greater_than(self):
         result = python_expr_to_mongo('vulnerability.severity_score > 7')
@@ -123,4 +144,291 @@ class TestPythonExprToMongo:
     def test_and_with_quoted_value_containing_and(self):
         result = python_expr_to_mongo("tag.name == 'this and that' and tag.match == 'x'")
         assert result == {'_type': 'tag', 'name': 'this and that', 'match': 'x'}
+
+
+class TestQueryHasTypeConstraint:
+
+    def test_empty_query(self):
+        assert query_has_type_constraint({}) is False
+
+    def test_no_type_constraint(self):
+        assert query_has_type_constraint({'_timestamp': {'$gte': 123}}) is False
+
+    def test_top_level_type(self):
+        assert query_has_type_constraint({'_type': 'target'}) is True
+
+    def test_type_with_field(self):
+        assert query_has_type_constraint({'_type': 'port', 'port': {'$lt': 1024}}) is True
+
+    def test_type_inside_or(self):
+        query = {'$or': [{'_type': 'vulnerability'}, {'_type': 'target'}]}
+        assert query_has_type_constraint(query) is True
+
+    def test_type_inside_and(self):
+        query = {'$and': [{'_context.scan_id': '5'}, {'_type': 'target'}]}
+        assert query_has_type_constraint(query) is True
+
+    def test_nested_without_type(self):
+        query = {'$or': [{'_context.scan_id': '5'}, {'_context.task_id': '3'}]}
+        assert query_has_type_constraint(query) is False
+
+
+class TestExpandRunnerPaths:
+
+    def test_single_path(self):
+        refs, errors = expand_runner_paths(['tasks/23'])
+        assert refs == [('tasks', 'task', '23')]
+        assert errors == []
+
+    def test_string_input(self):
+        refs, errors = expand_runner_paths('tasks/23')
+        assert refs == [('tasks', 'task', '23')]
+        assert errors == []
+
+    def test_space_separated_tokens(self):
+        refs, errors = expand_runner_paths(['tasks/23', 'tasks/24', 'workflows/21'])
+        assert refs == [
+            ('tasks', 'task', '23'),
+            ('tasks', 'task', '24'),
+            ('workflows', 'workflow', '21'),
+        ]
+        assert errors == []
+
+    def test_comma_separated_single_token(self):
+        refs, errors = expand_runner_paths(['tasks/23,tasks/24,workflows/21'])
+        assert refs == [
+            ('tasks', 'task', '23'),
+            ('tasks', 'task', '24'),
+            ('workflows', 'workflow', '21'),
+        ]
+        assert errors == []
+
+    def test_range_expansion(self):
+        refs, errors = expand_runner_paths(['tasks/136-140'])
+        assert refs == [('tasks', 'task', str(n)) for n in range(136, 141)]
+        assert errors == []
+
+    def test_mixed_ranges_and_comma(self):
+        refs, errors = expand_runner_paths(['tasks/136-140,workflows/10-12'])
+        assert refs == (
+            [('tasks', 'task', str(n)) for n in range(136, 141)]
+            + [('workflows', 'workflow', str(n)) for n in range(10, 13)]
+        )
+        assert errors == []
+
+    def test_single_element_range(self):
+        refs, errors = expand_runner_paths(['tasks/5-5'])
+        assert refs == [('tasks', 'task', '5')]
+        assert errors == []
+
+    def test_singular_type_normalized(self):
+        refs, errors = expand_runner_paths(['task/7', 'scan/2'])
+        assert refs == [('tasks', 'task', '7'), ('scans', 'scan', '2')]
+        assert errors == []
+
+    def test_dedupe_preserves_order(self):
+        refs, errors = expand_runner_paths(['tasks/23', 'tasks/23', 'tasks/22-24'])
+        assert refs == [
+            ('tasks', 'task', '23'),
+            ('tasks', 'task', '22'),
+            ('tasks', 'task', '24'),
+        ]
+        assert errors == []
+
+    def test_invalid_type(self):
+        refs, errors = expand_runner_paths(['foo/1'])
+        assert refs == []
+        assert len(errors) == 1
+        assert 'Invalid runner type' in errors[0]
+
+    def test_missing_slash(self):
+        refs, errors = expand_runner_paths(['tasks23'])
+        assert refs == []
+        assert 'Expected format' in errors[0]
+
+    def test_non_numeric_id(self):
+        refs, errors = expand_runner_paths(['tasks/abc'])
+        assert refs == []
+        assert 'Must be a number or a 24-char hex id' in errors[0]
+
+    def test_object_id(self):
+        # A 24-char hex id (e.g. from `r list --driver api`) is accepted as-is.
+        refs, errors = expand_runner_paths(['workflows/6a298abc13cfda92d5b7ee63'])
+        assert errors == []
+        assert refs == [('workflows', 'workflow', '6a298abc13cfda92d5b7ee63')]
+
+    def test_reversed_range(self):
+        refs, errors = expand_runner_paths(['tasks/140-136'])
+        assert refs == []
+        assert 'Start must be <= end' in errors[0]
+
+    def test_non_numeric_range(self):
+        refs, errors = expand_runner_paths(['tasks/1-x'])
+        assert refs == []
+        assert 'Both bounds must be numeric' in errors[0]
+
+    def test_valid_and_invalid_mixed(self):
+        refs, errors = expand_runner_paths(['tasks/23', 'bad/x', 'workflows/2'])
+        assert refs == [('tasks', 'task', '23'), ('workflows', 'workflow', '2')]
+        assert len(errors) == 1
+    def test_in_operator_integers(self):
+        result = python_expr_to_mongo("url.status_code in [200,304]")
+        assert result == {'_type': 'url', 'status_code': {'$in': [200, 304]}}
+
+    def test_in_operator_strings(self):
+        result = python_expr_to_mongo("vulnerability.severity in ['high', 'critical']")
+        assert result == {'_type': 'vulnerability', 'severity': {'$in': ['high', 'critical']}}
+
+    def test_in_operator_double_quoted_strings(self):
+        result = python_expr_to_mongo('vulnerability.severity in ["high", "critical"]')
+        assert result == {'_type': 'vulnerability', 'severity': {'$in': ['high', 'critical']}}
+
+    def test_in_operator_multiple_values(self):
+        result = python_expr_to_mongo("port.port in [80, 443, 8080]")
+        assert result == {'_type': 'port', 'port': {'$in': [80, 443, 8080]}}
+
+    def test_in_operator_with_and(self):
+        result = python_expr_to_mongo("url.status_code in [200, 304] && url.path == '/api'")
+        assert result == {'_type': 'url', 'status_code': {'$in': [200, 304]}, 'path': '/api'}
+
+    def test_in_operator_with_python_and(self):
+        result = python_expr_to_mongo(
+            "vulnerability.severity in ['high', 'critical'] and vulnerability.severity_score > 7"
+        )
+        assert result == {
+            '_type': 'vulnerability',
+            'severity': {'$in': ['high', 'critical']},
+            'severity_score': {'$gt': 7},
+        }
+
+    def test_in_operator_floats(self):
+        result = python_expr_to_mongo("item.score in [1.5, 2.5, 3.0]")
+        assert result == {'_type': 'item', 'score': {'$in': [1.5, 2.5, 3.0]}}
+
+
+class TestValidateQueryFields:
+
+    def test_none_returns_none(self):
+        result, warnings = validate_query_fields(None)
+        assert result is None
+        assert warnings == []
+
+    def test_empty_dict_returns_empty(self):
+        result, warnings = validate_query_fields({})
+        assert result == {}
+        assert warnings == []
+
+    def test_valid_field_passes_through(self):
+        q = {'_type': 'vulnerability', 'severity': {'$regex': 'high'}}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_invalid_field_removed_with_warning(self):
+        # When ALL user-specified fields are invalid, the fragment is dropped entirely
+        # (returning {} rather than {'_type': 'technology'} which would match everything).
+        q = {'_type': 'technology', 'name': {'$regex': '(HSTS|php)'}}
+        result, warnings = validate_query_fields(q)
+        assert result == {}
+        assert len(warnings) == 1
+        field_name, type_name, valid_fields = warnings[0]
+        assert field_name == 'name'
+        assert type_name == 'technology'
+        assert 'product' in valid_fields  # one of the available fields
+
+    def test_or_validates_each_fragment(self):
+        # The technology fragment has no valid user fields, so it is dropped from $or.
+        # The $or collapses to a single item, which is unwrapped.
+        q = {
+            '$or': [
+                {'_type': 'url', 'status_code': {'$ne': 200}},
+                {'_type': 'technology', 'name': {'$regex': '(HSTS|php)'}},
+            ]
+        }
+        result, warnings = validate_query_fields(q)
+        assert result == {'_type': 'url', 'status_code': {'$ne': 200}}
+        assert len(warnings) == 1
+        assert warnings[0][0] == 'name'
+        assert warnings[0][1] == 'technology'
+
+    def test_or_with_partial_invalid_fields(self):
+        # When one fragment has some valid and some invalid fields, only the invalid
+        # field is removed; the fragment itself is kept.
+        q = {
+            '$or': [
+                {'_type': 'url', 'status_code': {'$ne': 200}},
+                {'_type': 'technology', 'product': 'nginx', 'name': 'bogus'},
+            ]
+        }
+        result, warnings = validate_query_fields(q)
+        assert result == {
+            '$or': [
+                {'_type': 'url', 'status_code': {'$ne': 200}},
+                {'_type': 'technology', 'product': 'nginx'},
+            ]
+        }
+        assert len(warnings) == 1
+        assert warnings[0][0] == 'name'
+        assert warnings[0][1] == 'technology'
+
+    def test_and_validates_each_fragment(self):
+        # The technology fragment (all user fields invalid) is dropped from $and.
+        # The $and collapses to a single item, which is unwrapped.
+        q = {
+            '$and': [
+                {'_context.scan_id': '5'},
+                {'_type': 'technology', 'name': {'$regex': 'php'}},
+            ]
+        }
+        result, warnings = validate_query_fields(q)
+        assert result == {'_context.scan_id': '5'}
+        assert len(warnings) == 1
+        assert warnings[0][0] == 'name'
+        assert warnings[0][1] == 'technology'
+
+    def test_unknown_type_passes_through(self):
+        q = {'_type': 'unknown_type', 'foo': 'bar'}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_no_type_passes_through(self):
+        q = {'_context.scan_id': '5'}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_internal_fields_pass_through(self):
+        q = {'_type': 'url', '_context': {'scan_id': '5'}, '_timestamp': {'$gte': 0}}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_nested_extra_data_field_passes_through(self):
+        q = {'_type': 'url', 'extra_data.custom': 'value'}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_multiple_invalid_fields_all_warned(self):
+        # All user fields invalid → fragment dropped entirely, returning {}
+        q = {'_type': 'technology', 'name': 'php', 'bogus': 'x'}
+        result, warnings = validate_query_fields(q)
+        assert result == {}
+        assert len(warnings) == 2
+        warned_fields = {w[0] for w in warnings}
+        assert 'name' in warned_fields
+        assert 'bogus' in warned_fields
+
+    def test_valid_url_status_code(self):
+        q = {'_type': 'url', 'status_code': {'$ne': 200}}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
+
+    def test_valid_vulnerability_cvss_score(self):
+        q = {'_type': 'vulnerability', 'cvss_score': {'$gt': 7}}
+        result, warnings = validate_query_fields(q)
+        assert result == q
+        assert warnings == []
 

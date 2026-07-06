@@ -46,7 +46,7 @@ class TestQueryBackendBase(unittest.TestCase):
 		# Protected field should be enforced
 		self.assertEqual(merged['_context.workspace_id'], 'ws123')
 		self.assertEqual(merged['_type'], 'vulnerability')
-		self.assertEqual(merged['is_false_positive'], False)
+		self.assertEqual(merged['is_false_positive'], {'$ne': True})
 
 	def test_merge_query_preserves_user_fields(self):
 		backend = self._create_test_backend(workspace_id='ws123')
@@ -76,7 +76,7 @@ class TestQueryBackendBase(unittest.TestCase):
 		self.assertIsNotNone(backend.last_count_query)
 		self.assertEqual(backend.last_count_query['_context.workspace_id'], 'ws123')
 		# self.assertEqual(backend.last_count_query['_context.workspace_duplicate'], False)
-		self.assertEqual(backend.last_count_query['is_false_positive'], False)
+		self.assertEqual(backend.last_count_query['is_false_positive'], {'$ne': True})
 		# User field should still be preserved
 		self.assertEqual(backend.last_count_query['_type'], 'vulnerability')
 
@@ -269,6 +269,38 @@ class TestQueryOperators(unittest.TestCase):
 		self.assertTrue(match_query(item, {'url': {'$regex': r'example\.com'}}))
 		self.assertFalse(match_query(item, {'url': {'$regex': r'other\.com'}}))
 
+		# $regex with pattern starting with * — leading * is stripped, remaining pattern matches
+		self.assertTrue(match_query(item, {'url': {'$regex': '*example'}}))
+
+		# $regex with numeric pattern — should convert to string, not raise TypeError
+		item_with_id = {'id': 'CVE-2026-12345', 'score': 9}
+		self.assertFalse(match_query(item_with_id, {'score': {'$regex': 7}}))
+
+
+class TestQueryUtils(unittest.TestCase):
+	def test_regex_value_stays_string(self):
+		"""~= operator must not coerce the RHS to int/float (re.search needs a string)."""
+		from secator.query.utils import python_expr_to_mongo
+
+		result = python_expr_to_mongo('vulnerability.id ~= 123')
+		self.assertEqual(result, {'_type': 'vulnerability', 'id': {'$regex': '123'}})
+		self.assertIsInstance(result['id']['$regex'], str)
+
+	def test_regex_value_with_glob_start(self):
+		"""~= operator with a leading wildcard should produce the raw string, not raise."""
+		from secator.query.utils import python_expr_to_mongo
+
+		result = python_expr_to_mongo("vulnerability.id ~= '*CVE-2026-28780'")
+		self.assertEqual(result['id'], {'$regex': '*CVE-2026-28780'})
+
+	def test_numeric_comparison_still_converts(self):
+		"""Non-regex operators should still coerce numeric RHS values."""
+		from secator.query.utils import python_expr_to_mongo
+
+		result = python_expr_to_mongo('vulnerability.cvss_score > 7')
+		self.assertEqual(result['cvss_score'], {'$gt': 7})
+		self.assertIsInstance(result['cvss_score']['$gt'], int)
+
 
 class TestMongoDBBackend(unittest.TestCase):
 	def test_mongodb_backend_instantiation(self):
@@ -319,11 +351,12 @@ class TestQueryEngine(unittest.TestCase):
 		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['mongodb']})
 		self.assertIsInstance(engine.backend, MongoDBBackend)
 
-	def test_query_engine_mongodb_takes_priority(self):
+	def test_query_engine_prefers_mongodb_over_api(self):
 		from secator.query import QueryEngine
 		from secator.query.mongodb import MongoDBBackend
 
-		# When both are available, MongoDB takes priority
+		# Backend follows driver priority (DRIVER_PRIORITY): the authoritative DB
+		# (mongodb) prevails over the relay (api) regardless of list order.
 		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['api', 'mongodb']})
 		self.assertIsInstance(engine.backend, MongoDBBackend)
 
@@ -355,6 +388,22 @@ class TestQueryEngine(unittest.TestCase):
 		engine = QueryEngine('test_ws', context={'results': [duplicate_finding, duplicate_finding.copy()]})
 		results = engine.search({}, dedupe=False)
 		assert len(results) == 2
+
+	def test_query_engine_selects_sqlite(self):
+		from secator.query import QueryEngine
+		from secator.query.sqlite import SqliteBackend
+
+		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['sqlite']})
+		self.assertIsInstance(engine.backend, SqliteBackend)
+
+	def test_query_engine_prefers_mongodb_over_sqlite(self):
+		from secator.query import QueryEngine
+		from secator.query.mongodb import MongoDBBackend
+
+		# Driver priority (DRIVER_PRIORITY) ranks mongodb before sqlite, so mongodb
+		# is selected regardless of list order.
+		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['sqlite', 'mongodb']})
+		self.assertIsInstance(engine.backend, MongoDBBackend)
 
 
 class TestQueryEngineUpdate(unittest.TestCase):
@@ -394,3 +443,202 @@ class TestQueryEngineUpdate(unittest.TestCase):
 		engine.backend.update.assert_called_once_with(
 			{'_type': 'ai'}, {'$set': {'status': 'done'}}
 		)
+
+
+class TestSqliteBackend(unittest.TestCase):
+	def setUp(self):
+		import tempfile
+		import json
+		from pathlib import Path
+		import secator.hooks.sqlite as sqlite_mod
+		from secator.config import CONFIG
+
+		self.sqlite_mod = sqlite_mod
+		self.temp_dir = tempfile.mkdtemp()
+		self.db_path = str(Path(self.temp_dir) / 'test.db')
+		self._orig_path = CONFIG.addons.sqlite.path
+		CONFIG.addons.sqlite.path = self.db_path
+		sqlite_mod._conns.clear()
+		self.ws = 'ws1'
+		conn = sqlite_mod.get_sqlite_conn()
+		rows = [
+			('u1', 'vulnerability', self.ws, 0, {'_type': 'vulnerability', 'name': 'SQLi',
+				'severity': 'critical', 'matched_at': 'http://x/login', 'is_false_positive': False,
+				'_context': {'workspace_id': self.ws, 'workspace_duplicate': False}}),
+			('u2', 'vulnerability', self.ws, 0, {'_type': 'vulnerability', 'name': 'XSS',
+				'severity': 'medium', 'matched_at': 'http://x/search', 'is_false_positive': False,
+				'_context': {'workspace_id': self.ws, 'workspace_duplicate': False}}),
+			('u3', 'url', self.ws, 0, {'_type': 'url', 'url': 'http://x/login',
+				'is_false_positive': False, '_context': {'workspace_id': self.ws, 'workspace_duplicate': False}}),
+		]
+		for uuid_, type_, ws, fp, data in rows:
+			conn.execute(
+				"INSERT INTO findings (uuid, type, workspace_id, is_false_positive, _tagged, data) "
+				"VALUES (?, ?, ?, ?, 0, ?)",
+				(uuid_, type_, ws, fp, json.dumps(data)))
+		conn.commit()
+
+	def tearDown(self):
+		import shutil
+		from secator.config import CONFIG
+		for conn in self.sqlite_mod._conns.values():
+			conn.close()
+		self.sqlite_mod._conns.clear()
+		CONFIG.addons.sqlite.path = self._orig_path
+		shutil.rmtree(self.temp_dir)
+
+	def _backend(self):
+		from secator.query.sqlite import SqliteBackend
+		return SqliteBackend(workspace_id=self.ws)
+
+	def test_search_by_type(self):
+		results = self._backend().search({'_type': 'vulnerability'})
+		self.assertEqual(len(results), 2)
+		self.assertTrue(all(r['_type'] == 'vulnerability' for r in results))
+
+	def test_search_with_in_operator(self):
+		results = self._backend().search({'_type': 'vulnerability', 'severity': {'$in': ['critical', 'high']}})
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]['name'], 'SQLi')
+
+	def test_search_contains(self):
+		results = self._backend().search({'matched_at': {'$contains': 'login'}})
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]['name'], 'SQLi')
+
+	def test_search_regex(self):
+		results = self._backend().search({'matched_at': {'$regex': r'/search'}})
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]['name'], 'XSS')
+
+	def test_count(self):
+		self.assertEqual(self._backend().count({'_type': 'vulnerability'}), 2)
+
+	def test_base_query_enforces_workspace(self):
+		results = self._backend().search({})
+		self.assertTrue(all(r['_context']['workspace_id'] == self.ws for r in results))
+
+	def test_limit(self):
+		results = self._backend().search({}, limit=1)
+		self.assertEqual(len(results), 1)
+
+	def test_exclude_fields(self):
+		results = self._backend().search({'_type': 'url'}, exclude_fields=['url'])
+		self.assertNotIn('url', results[0])
+
+	def test_update(self):
+		backend = self._backend()
+		n = backend.update({'_type': 'url'}, {'$set': {'status_code': 404}})
+		self.assertEqual(n, 1)
+		results = backend.search({'_type': 'url'})
+		self.assertEqual(results[0]['status_code'], 404)
+
+	def test_update_multiple_fields(self):
+		backend = self._backend()
+		n = backend.update({'_type': 'url'}, {'$set': {'status_code': 200, 'title': 'Home'}})
+		self.assertEqual(n, 1)
+		results = backend.search({'_type': 'url'})
+		self.assertEqual(results[0]['status_code'], 200)
+		self.assertEqual(results[0]['title'], 'Home')
+
+	def test_update_rejects_malicious_field_name(self):
+		backend = self._backend()
+		with self.assertRaises(ValueError):
+			backend.update({'_type': 'url'}, {'$set': {"x', type = 'pwned' --": 1}})
+		# Confirm no row was corrupted: the url row still has type 'url'.
+		results = backend.search({'_type': 'url'})
+		self.assertEqual(len(results), 1)
+
+
+class TestSqliteWiring(unittest.TestCase):
+	def test_sqlite_in_available_drivers(self):
+		from secator.loader import get_available_drivers
+		self.assertIn('sqlite', get_available_drivers())
+
+	def test_sqlite_addon_config_exists(self):
+		from secator.config import CONFIG
+		self.assertFalse(CONFIG.addons.sqlite.enabled)
+		self.assertEqual(CONFIG.addons.sqlite.busy_timeout_ms, 5000)
+		self.assertEqual(CONFIG.addons.sqlite.max_items, -1)
+		self.assertIsInstance(CONFIG.addons.sqlite.duplicate_main_copy_fields, list)
+
+
+class TestSqliteTranslator(unittest.TestCase):
+	def _where(self, query):
+		from secator.query.sqlite import _build_where
+		return _build_where(query)
+
+	def test_equality(self):
+		sql, params = self._where({'_type': 'url'})
+		self.assertEqual(sql, "type = ?")
+		self.assertEqual(params, ['url'])
+
+	def test_plain_field_uses_json_extract(self):
+		sql, params = self._where({'name': 'foo'})
+		self.assertEqual(sql, "json_extract(data, '$.name') = ?")
+		self.assertEqual(params, ['foo'])
+
+	def test_mirrored_workspace_id(self):
+		sql, params = self._where({'_context.workspace_id': 'ws1'})
+		self.assertEqual(sql, "workspace_id = ?")
+		self.assertEqual(params, ['ws1'])
+
+	def test_comparison_ops(self):
+		sql, params = self._where({'cvss_score': {'$gte': 9.0}})
+		self.assertEqual(sql, "json_extract(data, '$.cvss_score') >= ?")
+		self.assertEqual(params, [9.0])
+
+	def test_in_op(self):
+		sql, params = self._where({'severity': {'$in': ['critical', 'high']}})
+		self.assertEqual(sql, "json_extract(data, '$.severity') IN (?, ?)")
+		self.assertEqual(params, ['critical', 'high'])
+
+	def test_contains_op(self):
+		sql, params = self._where({'url': {'$contains': 'login'}})
+		self.assertEqual(sql, "json_extract(data, '$.url') LIKE '%' || ? || '%'")
+		self.assertEqual(params, ['login'])
+
+	def test_regex_op(self):
+		sql, params = self._where({'url': {'$regex': r'example\.com'}})
+		self.assertEqual(sql, "json_extract(data, '$.url') REGEXP ?")
+		self.assertEqual(params, [r'example\.com'])
+
+	def test_and(self):
+		sql, params = self._where({'$and': [{'_type': 'url'}, {'name': 'x'}]})
+		self.assertEqual(sql, "(type = ? AND json_extract(data, '$.name') = ?)")
+		self.assertEqual(params, ['url', 'x'])
+
+	def test_or(self):
+		sql, params = self._where({'$or': [{'_type': 'url'}, {'_type': 'port'}]})
+		self.assertEqual(sql, "(type = ? OR type = ?)")
+		self.assertEqual(params, ['url', 'port'])
+
+	def test_empty(self):
+		sql, params = self._where({})
+		self.assertEqual(sql, "")
+		self.assertEqual(params, [])
+
+	def test_in_empty_list(self):
+		sql, params = self._where({'severity': {'$in': []}})
+		self.assertEqual(sql, "0")
+		self.assertEqual(params, [])
+
+	def test_or_empty_list(self):
+		sql, params = self._where({'$or': []})
+		self.assertEqual(sql, "0")
+		self.assertEqual(params, [])
+
+	def test_and_empty_list(self):
+		sql, params = self._where({'$and': []})
+		self.assertEqual(sql, "1=1")
+		self.assertEqual(params, [])
+
+	def test_dotted_field_allowed(self):
+		sql, params = self._where({'foo.bar': 'baz'})
+		self.assertEqual(sql, "json_extract(data, '$.foo.bar') = ?")
+		self.assertEqual(params, ['baz'])
+
+	def test_invalid_field_name_rejected(self):
+		from secator.query.sqlite import _build_where
+		with self.assertRaises(ValueError):
+			_build_where({"x') UNION SELECT 1 --": 'v'})
