@@ -61,6 +61,16 @@ def list_sessions(max_sessions=20):
 					first_prompt = item.get('content', '')
 					session_name = (item.get('_context') or {}).get('session_name', '') or (item.get('_context') or {}).get('name', '')
 					break
+			# session_id: first non-empty `_context.session_id` across ALL ai docs
+			# (not just prompt docs) -- every persisted item stamps it (see
+			# ai.py:_init_options), so any doc suffices. Needed so a resumed run
+			# can adopt this session's id instead of minting a fresh one.
+			session_id = ''
+			for item in ai_items:
+				sid = (item.get('_context') or {}).get('session_id', '')
+				if sid:
+					session_id = sid
+					break
 			info = data.get('info', {})
 			sessions.append({
 				'folder': str(history_path.parent),
@@ -68,6 +78,7 @@ def list_sessions(max_sessions=20):
 				'report_path': str(report_path),
 				'name': session_name,
 				'prompt': first_prompt,
+				'session_id': session_id,
 				'targets': info.get('targets', []),
 				'timestamp': info.get('end_time') or info.get('start_time') or 0,
 				'mtime': history_path.stat().st_mtime,

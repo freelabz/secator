@@ -525,6 +525,153 @@ class TestSessionIdStampedOnContext(unittest.TestCase):
 		self.assertEqual(item_context.get("session_id"), task.session_id)
 
 
+class TestLocalResumeAdoptsSessionId(unittest.TestCase):
+	"""Task 5: a resumed LOCAL run (yielder's `self.resume` branch) adopts the
+	picked session's session_id and rebuilds history via the unified
+	restore_history_from_db over the local query engine -- not the bespoke
+	replay_session, which mints a fresh str(self.id) and can't correlate a
+	re-resumed conversation's appended docs with the prior ones."""
+
+	def _make_task(self, model="gpt-4o"):
+		from secator.tasks.ai import ai
+
+		task = ai.__new__(ai)
+		task.inputs = []
+		task.results = []
+		task.run_opts = {"resume": True}
+		task.sync = True
+		task._reports_folder = tempfile.mkdtemp(prefix="secator-test-")
+		task.context = {"workspace_id": "ws1"}
+		task.debug = MagicMock()
+
+		opt_values = {
+			"resume": True, "subagent": False, "model": model, "intent_model": "im",
+			"api_base": None, "api_key": "k", "sensitive": False, "mode": "",
+			"max_tokens_total": 100000, "max_workers": 1, "max_iterations": 10,
+			"temperature": 0.7, "context_warnings": True, "async_tasks": False,
+			"dangerous": False, "interactive": "local",
+		}
+		task.get_opt_value = lambda key: opt_values.get(key)
+
+		# Stub the local (JSON) query engine _get_query_engine() would build.
+		engine = MagicMock()
+		task._get_query_engine = MagicMock(return_value=engine)
+
+		# Short-circuit right after the resume block adopts session_id + restores
+		# history: declining the interactive "what's next?" prompt (as if the user
+		# cancelled) ends the run cleanly, so the full _run_loop is out of scope.
+		task._prompt_and_redetect = MagicMock(return_value=None)
+		task._save_history = MagicMock()
+
+		return task, engine
+
+	def _patches(self):
+		from secator.tasks.ai import ai
+		return (
+			patch('secator.tasks.ai.PermissionEngine'),
+			patch('secator.tasks.ai.create_backend'),
+			patch('secator.tasks.ai.SensitiveDataEncryptor'),
+			patch.object(ai, '_auto_approve_workspace_targets'),
+			patch('secator.tasks.ai.get_system_prompt', return_value='SYS'),
+			patch('secator.tasks.ai.build_tool_schemas', return_value=[]),
+		)
+
+	@patch('secator.tasks.ai.show_session_picker')
+	@patch('secator.tasks.ai.restore_history_from_db')
+	def test_resume_adopts_prior_session_id_and_uses_unified_restore(self, mock_restore, mock_picker):
+		prior_folder = tempfile.mkdtemp(prefix="secator-test-prior-")
+		mock_picker.return_value = {"name": "prior chat", "folder": prior_folder, "session_id": "PRIOR-SESSION"}
+		mock_history = MagicMock()
+		mock_restore.return_value = mock_history
+
+		task, engine = self._make_task()
+
+		with contextlib.ExitStack() as stack:
+			for p in self._patches():
+				stack.enter_context(p)
+			list(task.yielder())
+
+		# Adopted the picked session's id (not a freshly-minted str(self.id)),
+		# and stamped it back onto the context (every persisted item copies
+		# self.context into its `_context`, so this is what makes appended docs
+		# queryable by `_context.session_id` under the SAME id going forward).
+		self.assertEqual(task.session_id, "PRIOR-SESSION")
+		self.assertEqual(task.context["session_id"], "PRIOR-SESSION")
+
+		# Restored via the unified restore over the LOCAL query engine, keyed by
+		# the adopted session_id -- not replay_session's bespoke rebuild.
+		mock_restore.assert_called_once()
+		args, kwargs = mock_restore.call_args
+		self.assertEqual(args[0], "PRIOR-SESSION")
+		self.assertIs(args[1], engine)
+		self.assertEqual(kwargs.get("model"), "gpt-4o")
+		self.assertIs(task.history, mock_history)
+
+
+class TestListSessionsSurfacesSessionId(unittest.TestCase):
+	"""list_sessions() must surface each session's session_id (read from its
+	report.json ai docs' `_context.session_id`, first non-empty) so the local
+	resume branch has something to adopt (Task 5)."""
+
+	def _write_session(self, tmp_root, ai_items, info=None):
+		import json as _json
+		from pathlib import Path
+
+		task_dir = Path(tmp_root) / 'ws1' / 'tasks' / 'task1'
+		task_dir.mkdir(parents=True)
+		(task_dir / 'history.json').write_text('[]')
+		report = {"info": info or {}, "results": {"ai": ai_items}}
+		(task_dir / 'report.json').write_text(_json.dumps(report))
+		return str(task_dir / 'history.json')
+
+	@patch('secator.ai.session.glob.glob')
+	def test_list_sessions_includes_session_id(self, mock_glob):
+		from secator.ai.session import list_sessions
+
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history_path = self._write_session(tmp_root, [
+			{"ai_type": "prompt", "content": "hello", "_context": {"session_name": "hi", "session_id": "SESSION-XYZ"}},
+			{"ai_type": "response", "content": "hi there", "_context": {"session_id": "SESSION-XYZ"}},
+		])
+		mock_glob.return_value = [history_path]
+
+		sessions = list_sessions()
+
+		self.assertEqual(len(sessions), 1)
+		self.assertEqual(sessions[0]["session_id"], "SESSION-XYZ")
+
+	@patch('secator.ai.session.glob.glob')
+	def test_list_sessions_session_id_falls_back_to_first_non_empty(self, mock_glob):
+		"""The prompt doc itself may carry no session_id (pre-stamp docs); scan
+		ALL ai docs and take the first non-empty one, not just the prompt doc."""
+		from secator.ai.session import list_sessions
+
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history_path = self._write_session(tmp_root, [
+			{"ai_type": "prompt", "content": "hello", "_context": {}},
+			{"ai_type": "response", "content": "hi there", "_context": {"session_id": "SESSION-ABC"}},
+		])
+		mock_glob.return_value = [history_path]
+
+		sessions = list_sessions()
+
+		self.assertEqual(sessions[0]["session_id"], "SESSION-ABC")
+
+	@patch('secator.ai.session.glob.glob')
+	def test_list_sessions_session_id_empty_when_absent(self, mock_glob):
+		from secator.ai.session import list_sessions
+
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history_path = self._write_session(tmp_root, [
+			{"ai_type": "prompt", "content": "hello", "_context": {}},
+		])
+		mock_glob.return_value = [history_path]
+
+		sessions = list_sessions()
+
+		self.assertEqual(sessions[0]["session_id"], '')
+
+
 class TestAddAssistantToHistory(unittest.TestCase):
 	"""_add_assistant_to_history must build + append the litellm message to chat
 	history AND return that exact dict, so the caller (the response emission in
