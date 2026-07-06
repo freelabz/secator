@@ -894,7 +894,12 @@ class ai(PythonRunner):
 						"expected_schema": {k: v.get("type", "any") for k, v in properties.items()},
 						"hint": "Retry with properly formatted JSON arguments.",
 					}, separators=(',', ':'))
-					self.history.add_tool_result(name, tc_id, maybe_encrypt(error_msg, self.encryptor))
+					_error_content = maybe_encrypt(error_msg, self.encryptor)
+					self.history.add_tool_result(name, tc_id, _error_content)
+					yield Ai(content=f"[{name}] malformed arguments",
+					         ai_type="tool_result",
+					         message=cap_message({"role": "tool", "tool_call_id": tc_id, "name": name, "content": _error_content}),
+					         _context=dict(self.context))
 					continue
 
 			# Coerce object/array args the model stringified (provider quirk) BEFORE
@@ -919,7 +924,12 @@ class ai(PythonRunner):
 					"schema": {k: v.get("type", "any") for k, v in params.get("properties", {}).items()},
 					"hint": "Provide all required fields. Retry with a complete arguments object.",
 				}, separators=(',', ':'))
-				self.history.add_tool_result(name, tc_id, maybe_encrypt(error_msg, self.encryptor))
+				_error_content = maybe_encrypt(error_msg, self.encryptor)
+				self.history.add_tool_result(name, tc_id, _error_content)
+				yield Ai(content=f"[{name}] rejected: {reason}",
+				         ai_type="tool_result",
+				         message=cap_message({"role": "tool", "tool_call_id": tc_id, "name": name, "content": _error_content}),
+				         _context=dict(self.context))
 				continue
 
 			action["tool_call_id"] = tc_id
@@ -939,7 +949,12 @@ class ai(PythonRunner):
 				denial_display = f"{denial}\n[gray42]{cmd_display}[/gray42]" if cmd_display else denial
 				yield Warning(message=denial_display)
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
-				self.history.add_tool_result(name, tc_id, maybe_encrypt(error_msg, self.encryptor))
+				_error_content = maybe_encrypt(error_msg, self.encryptor)
+				self.history.add_tool_result(name, tc_id, _error_content)
+				yield Ai(content=f"[{name}] denied",
+				         ai_type="tool_result",
+				         message=cap_message({"role": "tool", "tool_call_id": tc_id, "name": name, "content": _error_content}),
+				         _context=dict(self.context))
 				continue
 
 			actions.append(action)
@@ -1051,6 +1066,16 @@ class ai(PythonRunner):
 				tool_result_str, budget, self.model, fallback_path=fallback_path)
 			tool_result_str = maybe_encrypt(tool_result_str, self.encryptor)
 			self.history.add_tool_result(tc_name, tc_id, tool_result_str)
+			_tool_msg = {"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": tool_result_str}
+			_runner_id = next((r.get("_context", {}).get("task_id")
+			                   or r.get("_context", {}).get("workflow_id")
+			                   or r.get("_context", {}).get("scan_id")
+			                   for r in group_results if isinstance(r, dict)), "")
+			yield Ai(content=f"[{tc_name}] {len(serialized)} result(s)",
+			         ai_type="tool_result",
+			         message=cap_message(_tool_msg),
+			         extra_data={"runner_id": _runner_id},
+			         _context=dict(self.context))
 
 		return {
 			"follow_up_choices": follow_up_choices,

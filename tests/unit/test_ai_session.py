@@ -483,5 +483,157 @@ class TestAddAssistantToHistory(unittest.TestCase):
 		self.assertTrue(capped["content"].endswith('…[capped]'))
 
 
+class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
+	"""Task 3: _dispatch_and_collect must emit a tool_result Ai (in addition to
+	appending to self.history) at every add_tool_result site, so the tool turn
+	round-trips through session restore. Drives the real _dispatch_and_collect
+	with a minimal fake self, patching the shell handler to control the single
+	collected result (mirrors the existing _dispatch_and_collect harness in
+	test_ai_loop.py's TestLoopResilientToActionErrors)."""
+
+	def _make_fake_self(self, context=None):
+		from secator.ai.interactivity import CLIBackend
+
+		class _FakeHistory:
+			def __init__(self):
+				self.tool_results = []
+
+			def get_action_budget(self, model):
+				return 10000
+
+			def add_tool_result(self, name, tc_id, content):
+				self.tool_results.append((name, tc_id, content))
+
+		fake_self = MagicMock()
+		fake_self.backend = CLIBackend()
+		fake_self.session_id = "sess-tool-result"
+		fake_self.model = "test-model"
+		fake_self.reports_folder = None
+		fake_self.encryptor = None
+		fake_self.context = context if context is not None else {}
+		fake_self.history = _FakeHistory()
+		persisted = []
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+		return fake_self, persisted
+
+	def _drive(self, fake_self, ctx, action):
+		from secator.tasks.ai import ai as AiTask
+		from secator.output_types import Ai as _Ai
+
+		def _shell_ok(*a, **k):
+			# ai_type="shell_output" is required for the result to reach `collected`
+			# (see _dispatch_and_collect: Info/Stat/Progress/State are skipped
+			# entirely, and Ai results only collect for ai_type in
+			# ("shell_output", "response")).
+			yield _Ai(content="ok", ai_type="shell_output", _context={
+				"tool_call_id": action["tool_call_id"],
+				"tool_call_name": action["tool_call_name"],
+			})
+
+		with patch("secator.ai.actions._handle_shell", _shell_ok):
+			gen = AiTask._dispatch_and_collect(fake_self, [action], ctx)
+			yielded = list(gen)
+		return yielded
+
+	def test_tool_result_ai_emitted_matching_tool_call_id_and_content(self):
+		from secator.output_types import Ai
+
+		ctx = MagicMock()
+		ctx.results = []
+		action = {
+			"action": "shell",
+			"command": "echo hi",
+			"tool_call_id": "tc_ok",
+			"tool_call_name": "run_shell",
+		}
+		fake_self, _persisted = self._make_fake_self()
+		yielded = self._drive(fake_self, ctx, action)
+
+		# The tool result was appended to LLM-visible history exactly once.
+		self.assertEqual(len(fake_self.history.tool_results), 1)
+		name, tc_id, tool_result_str = fake_self.history.tool_results[0]
+		self.assertEqual(tc_id, "tc_ok")
+
+		# A matching tool_result Ai was yielded alongside the history append.
+		tool_result_ais = [r for r in yielded if isinstance(r, Ai) and r.ai_type == "tool_result"]
+		self.assertEqual(len(tool_result_ais), 1)
+		doc = tool_result_ais[0]
+		self.assertEqual(doc.message["role"], "tool")
+		self.assertEqual(doc.message["tool_call_id"], tc_id)
+		self.assertEqual(doc.message["name"], name)
+		# Byte-exact: same (truncated+encrypted) string that went to history, no re-processing.
+		self.assertEqual(doc.message["content"], tool_result_str)
+
+	def test_tool_result_runner_id_from_group_result_context(self):
+		"""runner_id is pulled from the collected result's own _context
+		(task_id/workflow_id/scan_id), stamped by the persistence hooks -
+		NOT from self.context."""
+		from secator.output_types import Ai
+
+		ctx = MagicMock()
+		ctx.results = []
+		action = {
+			"action": "shell",
+			"command": "echo hi",
+			"tool_call_id": "tc_runner",
+			"tool_call_name": "run_shell",
+		}
+		fake_self, _persisted = self._make_fake_self()
+
+		def _shell_with_task_id(*a, **k):
+			yield Ai(content="ok", ai_type="shell_output", _context={
+				"tool_call_id": action["tool_call_id"],
+				"tool_call_name": action["tool_call_name"],
+				"task_id": "task-xyz",
+			})
+
+		with patch("secator.ai.actions._handle_shell", _shell_with_task_id):
+			from secator.tasks.ai import ai as AiTask
+			yielded = list(AiTask._dispatch_and_collect(fake_self, [action], ctx))
+
+		tool_result_ais = [r for r in yielded if isinstance(r, Ai) and r.ai_type == "tool_result"]
+		self.assertEqual(len(tool_result_ais), 1)
+		self.assertEqual(tool_result_ais[0].extra_data.get("runner_id"), "task-xyz")
+
+	def test_tool_result_ai_emitted_on_error_paths(self):
+		"""Malformed-JSON / unknown-tool / guardrail-denial error paths (in
+		_process_tool_calls) also emit a tool_result Ai, not just the success
+		path in _dispatch_and_collect."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.output_types import Ai
+
+		class _FakeHistory:
+			def __init__(self):
+				self.tool_results = []
+
+			def add_tool_result(self, name, tc_id, content):
+				self.tool_results.append((name, tc_id, content))
+
+		fake_self = MagicMock()
+		fake_self.encryptor = None
+		fake_self.context = {}
+		fake_self.history = _FakeHistory()
+		fake_self.debug = MagicMock()
+		fake_self.dangerous = True  # skip guardrails entirely; force the malformed-JSON path
+
+		tc = MagicMock()
+		tc.id = "tc_bad_json"
+		tc.function.name = "run_shell"
+		tc.function.arguments = "{not json"
+
+		ctx = MagicMock()
+		items = list(AiTask._process_tool_calls(fake_self, [tc], ctx))
+
+		self.assertEqual(len(fake_self.history.tool_results), 1)
+		_, tc_id, error_content = fake_self.history.tool_results[0]
+
+		tool_result_ais = [i for i in items if isinstance(i, Ai) and i.ai_type == "tool_result"]
+		self.assertEqual(len(tool_result_ais), 1)
+		doc = tool_result_ais[0]
+		self.assertEqual(doc.message["role"], "tool")
+		self.assertEqual(doc.message["tool_call_id"], tc_id)
+		self.assertEqual(doc.message["content"], error_content)
+
+
 if __name__ == "__main__":
 	unittest.main()
