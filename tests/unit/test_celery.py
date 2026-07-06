@@ -346,7 +346,7 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 
 	def test_bump_worker_loss_count_get_set_fallback(self):
 		"""Counter increments via the generic get/set fallback (any KV backend, e.g. filesystem)."""
-		from secator.celery import app, bump_worker_loss_count
+		from secator.celery import bump_worker_loss_count
 
 		# Use a unique id so reruns don't collide, and clean up the backend key afterwards.
 		task_id = f'wl-test-{id(self)}'
@@ -367,7 +367,7 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 	def test_bump_worker_loss_count_prefers_atomic_incr(self):
 		"""When the backend implements atomic incr (Redis/Memcached), it is used directly."""
 		from unittest.mock import patch
-		from secator.celery import app, bump_worker_loss_count
+		from secator.celery import bump_worker_loss_count
 
 		with patch.object(app.backend, 'incr', return_value=42, create=True) as mock_incr:
 			self.assertEqual(bump_worker_loss_count('task-abc'), 42)
@@ -376,18 +376,18 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 	def test_bump_worker_loss_count_disabled_without_kv(self):
 		"""Returns 0 (cap disabled) on backends with neither incr nor get/set (db/RPC)."""
 		from unittest.mock import patch
-		from secator.celery import app, bump_worker_loss_count
+		from secator.celery import bump_worker_loss_count
 
-		with patch.object(app.backend, 'incr', side_effect=NotImplementedError, create=True), \
-				patch.object(app.backend, 'get', side_effect=NotImplementedError, create=True):
-			self.assertEqual(bump_worker_loss_count('task-abc'), 0)
+		with patch.object(app.backend, 'incr', side_effect=NotImplementedError, create=True):
+			with patch.object(app.backend, 'get', side_effect=NotImplementedError, create=True):
+				self.assertEqual(bump_worker_loss_count('task-abc'), 0)
 
 	def test_abandon_task_returns_failure_error(self):
 		"""Abandoning returns results with a self-owned FAILURE Error so the chord proceeds."""
 		from secator.tasks import httpx
 		from secator.celery import abandon_task
 		if httpx not in TEST_TASKS:
-			return
+			self.skipTest('httpx not available')
 
 		results = abandon_task('httpx', ['example.com'], {'context': {}}, [], delivery_count=2)
 		errors = [r for r in results if r._type == 'error']
@@ -412,7 +412,6 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 
 	def test_worker_cancel_flag_wired_to_app_conf(self):
 		"""The worker_cancel_long_running_tasks_on_connection_loss config flag reaches app.conf."""
-		from secator.celery import app
 		from secator.config import CONFIG
 		self.assertEqual(
 			app.conf.worker_cancel_long_running_tasks_on_connection_loss,
