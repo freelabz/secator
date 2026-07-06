@@ -432,5 +432,56 @@ class TestSessionIdStampedOnContext(unittest.TestCase):
 		self.assertEqual(item_context.get("session_id"), task.session_id)
 
 
+class TestAddAssistantToHistory(unittest.TestCase):
+	"""_add_assistant_to_history must build + append the litellm message to chat
+	history AND return that exact dict, so the caller (the response emission in
+	_run_loop) can persist it verbatim via Ai.message — including tool-call-only
+	turns that carry no text content (today's `if content:` gate silently drops
+	those turns; Task 2 fixes that by always emitting on this returned message).
+	"""
+
+	def _make_task(self, encryptor=None):
+		from secator.tasks.ai import ai
+		from secator.ai.history import ChatHistory
+
+		task = ai.__new__(ai)
+		task.encryptor = encryptor
+		task.history = ChatHistory()
+		return task
+
+	def test_add_assistant_returns_message_with_tool_calls(self):
+		task = self._make_task()
+
+		class TC:
+			id = "call_1"
+
+			class function:
+				name = "run_task"
+				arguments = '{"name":"nmap"}'
+
+		msg = task._add_assistant_to_history(None, [TC])
+		self.assertEqual(msg["role"], "assistant")
+		self.assertEqual(msg["tool_calls"][0]["id"], "call_1")
+		self.assertEqual(msg["tool_calls"][0]["function"]["name"], "run_task")
+		self.assertTrue("content" not in msg or msg["content"] is None)
+		# The returned dict is the exact one appended to history (same content).
+		self.assertEqual(task.history.messages[-1], msg)
+
+	def test_add_assistant_returns_message_text_only(self):
+		task = self._make_task()
+		msg = task._add_assistant_to_history("hello", [])
+		self.assertEqual(msg, {"role": "assistant", "content": "hello"})
+		self.assertEqual(task.history.messages[-1], msg)
+
+	def test_cap_message_applies_to_returned_message(self):
+		from secator.ai.history import cap_message, MAX_PERSISTED_MESSAGE_CHARS
+		task = self._make_task()
+		long_content = "x" * (MAX_PERSISTED_MESSAGE_CHARS + 500)
+		msg = task._add_assistant_to_history(long_content, [])
+		capped = cap_message(msg)
+		self.assertLess(len(capped["content"]), len(long_content))
+		self.assertTrue(capped["content"].endswith('…[capped]'))
+
+
 if __name__ == "__main__":
 	unittest.main()

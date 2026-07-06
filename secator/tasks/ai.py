@@ -19,7 +19,7 @@ from secator.ai.actions import (
 from secator.ai.guardrails import PermissionEngine
 from secator.ai.interactivity import create_backend, RemoteBackend
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
-from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window
+from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
 	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES
 )
@@ -243,7 +243,8 @@ class ai(PythonRunner):
 		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
 		self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 		self.history.add_user(maybe_encrypt(self.prompt, self.encryptor))
-		yield Ai(content=self.prompt, ai_type="prompt")
+		yield Ai(content=self.prompt, ai_type="prompt",
+		         message={"role": "user", "content": maybe_encrypt(self.prompt, self.encryptor)})
 		yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
 
 		# Run loop
@@ -329,7 +330,8 @@ class ai(PythonRunner):
 		# Append the new user message that respawned the conversation
 		if self.prompt:
 			self.history.add_user(maybe_encrypt(self.prompt, self.encryptor))
-			yield Ai(content=self.prompt, ai_type="prompt")
+			yield Ai(content=self.prompt, ai_type="prompt",
+			         message={"role": "user", "content": maybe_encrypt(self.prompt, self.encryptor)})
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		yield from self._run_loop()
@@ -490,25 +492,25 @@ class ai(PythonRunner):
 
 				empty_streak = 0
 
-				# Add assistant message to history
-				self._add_assistant_to_history(content, tool_calls)
+				# Add assistant message to history and capture it for persistence
+				assistant_msg = self._add_assistant_to_history(content, tool_calls)
 
-				# Yield response content
-				if content:
-					display_content = self.encryptor.decrypt(content) if self.encryptor else content
-					yield Ai(
-						content=display_content,
-						ai_type="response",
-						mode=self.mode,
-						model=self.intent_model,
-						summary=not tool_calls,
-						extra_data={
-							"iteration": iteration,
-							"max_iterations": self.max_iterations,
-							"tokens": usage.get("tokens") if usage else None,
-							"cost": usage.get("cost") if usage else None,
-						},
-					)
+				# Persist the assistant turn (even tool-call-only turns carry tool_calls)
+				display_content = (self.encryptor.decrypt(content) if (self.encryptor and content) else (content or ''))
+				yield Ai(
+					content=display_content,
+					ai_type="response",
+					mode=self.mode,
+					model=self.intent_model,
+					summary=not tool_calls,
+					message=cap_message(assistant_msg),
+					extra_data={
+						"iteration": iteration,
+						"max_iterations": self.max_iterations,
+						"tokens": usage.get("tokens") if usage else None,
+						"cost": usage.get("cost") if usage else None,
+					},
+				)
 
 				# Process tool calls → validated actions
 				follow_up_choices = None
@@ -1122,7 +1124,7 @@ class ai(PythonRunner):
 			history.billed_cost = 0.0
 
 	def _add_assistant_to_history(self, content, tool_calls):
-		"""Add assistant message (with optional tool calls) to chat history."""
+		"""Add assistant message (with optional tool calls) to chat history; return the message."""
 		if tool_calls:
 			litellm_tool_calls = [{
 				"id": tc.id,
@@ -1133,11 +1135,16 @@ class ai(PythonRunner):
 					else json.dumps(tc.function.arguments)),
 				},
 			} for tc in tool_calls]
-			self.history.add_assistant_with_tool_calls(
-				maybe_encrypt(content, self.encryptor) if content else None,
-				litellm_tool_calls)
-		else:
-			self.history.add_assistant(maybe_encrypt(content, self.encryptor))
+			enc = maybe_encrypt(content, self.encryptor) if content else None
+			msg = {"role": "assistant", "tool_calls": litellm_tool_calls}
+			if enc is not None:
+				msg["content"] = enc
+			self.history.messages.append(msg)
+			return msg
+		enc = maybe_encrypt(content, self.encryptor)
+		msg = {"role": "assistant", "content": enc}
+		self.history.messages.append(msg)
+		return msg
 
 	# -------------------------------------------------------------------------
 	# Follow-up / prompt
@@ -1211,5 +1218,6 @@ class ai(PythonRunner):
 		# Token breakdown for prompt display
 		by_role = self.history.count_tokens_by_role(self.model)
 		extra_data = {"tokens": by_role["total"], "context_window": get_context_window(self.model), "by_role": by_role}
-		items.append(Ai(content=answer, ai_type="prompt", extra_data=extra_data))
+		items.append(Ai(content=answer, ai_type="prompt", extra_data=extra_data,
+		                 message={"role": "user", "content": maybe_encrypt(answer, self.encryptor)}))
 		return items
