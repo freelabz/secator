@@ -10,6 +10,17 @@ profile: default
 tags: [http, crawl, fuzz, vuln, secrets]
 input_types:
   - url
+
+options:
+  passive:
+    is_flag: True
+    default: False
+    help: "Passive scan (no active requests to targets)"
+    short: ps
+    set:
+      url_crawl_passive: True
+      url_vuln_passive: True
+
 workflows:
   url_crawl:
   url_fuzz:

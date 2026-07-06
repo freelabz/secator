@@ -15,6 +15,39 @@ class Scan(Runner):
 
 	default_exporters = CONFIG.scans.exporters
 
+	def _expand_scan_opts(self):
+		"""Expand scan options with 'set' mappings into run_opts.
+
+		Scan options can define a 'set' key that maps option values to workflow-specific
+		options. When a scan option is truthy, the 'set' mappings are expanded into
+		run_opts so child workflows can resolve them via their opt_aliases.
+
+		Example YAML:
+		    options:
+		      passive:
+		        is_flag: True
+		        default: False
+		        help: "Passive scan"
+		        set:
+		          domain_recon_passive: True
+		          host_recon_passive: True
+		"""
+		scan_options = self.config.options.toDict() if self.config.options else {}
+		for opt_name, opt_conf in scan_options.items():
+			if not isinstance(opt_conf, dict):
+				continue
+			set_mapping = opt_conf.get('set')
+			if not set_mapping:
+				continue
+			opt_value = self.run_opts.get(opt_name)
+			if opt_value is None:
+				opt_value = opt_conf.get('default', False)
+			if opt_value:
+				set_items = set_mapping.toDict() if hasattr(set_mapping, 'toDict') else set_mapping
+				for k, v in set_items.items():
+					if k not in self.run_opts:
+						self.run_opts[k] = v
+
 	def build_celery_workflow(self):
 		"""Build Celery workflow for scan execution.
 
@@ -25,7 +58,21 @@ class Scan(Runner):
 		from secator.celery import mark_runner_started, mark_runner_completed
 		from secator.template import TemplateLoader
 
-		scan_opts = self.config.options
+		self._expand_scan_opts()
+
+		# Build scan_opts from scan config options. The options key may contain either:
+		# - literal values (old format): {threads: 5} → passed through as-is
+		# - option definitions (new format): {passive: {is_flag: True, default: False}} →
+		#   extract the default value to avoid passing definition dicts to child workflows
+		scan_options_raw = self.config.options.toDict() if self.config.options else {}
+		scan_opts = {}
+		for k, v in scan_options_raw.items():
+			if isinstance(v, dict):
+				default = v.get('default')
+				if default is not None:
+					scan_opts[k] = default
+			else:
+				scan_opts[k] = v
 
 		# Set hooks and reports
 		self.enable_hooks = False   # Celery will handle hooks
