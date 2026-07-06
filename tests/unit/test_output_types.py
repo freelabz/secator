@@ -113,3 +113,20 @@ class TestWarningRich(unittest.TestCase):
 		warn = Warning(message='watch out')
 		rich_str = warn.__rich__()
 		assert 'watch out' in rich_str
+
+
+class TestAiMessageField(unittest.TestCase):
+
+	def test_ai_message_roundtrips_through_todict(self):
+		from secator.output_types.ai import Ai
+		msg = {'role': 'user', 'content': 'x'}
+		ai = Ai(content='x', message=msg)
+		assert ai.message == msg
+		d = ai.toDict()
+		assert d['message'] == msg
+
+	def test_ai_message_defaults_empty(self):
+		from secator.output_types.ai import Ai
+		ai = Ai(content='x')
+		assert ai.message == {}
+		assert ai.toDict()['message'] == {}

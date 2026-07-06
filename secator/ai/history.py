@@ -13,6 +13,34 @@ OUTPUT_TOKEN_RESERVATION = 8192  # Reserve for LLM response
 COMPACTION_THRESHOLD_PCT = 85    # Trigger compaction at 85% of usable context
 MAX_ACTION_TOKENS = 10_000       # Hard cap per action result
 
+# Hard cap on a persisted transcript message's content / tool-call arguments.
+# A `_type:"ai"` doc must stay far below Mongo's 16MB BSON limit; tool-result
+# content is already token-bounded upstream (truncate_to_tokens), so this is a
+# backstop for a pathological envelope, not primary truncation.
+MAX_PERSISTED_MESSAGE_CHARS = 12000
+
+
+def _cap(text, max_chars):
+    if isinstance(text, str) and len(text) > max_chars:
+        return text[:max_chars] + '…[capped]'
+    return text
+
+
+def cap_message(msg: dict, max_chars: int = MAX_PERSISTED_MESSAGE_CHARS) -> dict:
+    """Return a copy of a litellm message with content + tool-call arguments
+    capped to max_chars (BSON-safety backstop). Non-string/short fields untouched."""
+    out = dict(msg)
+    if 'content' in out:
+        out['content'] = _cap(out['content'], max_chars)
+    if out.get('tool_calls'):
+        out['tool_calls'] = [
+            {**tc, 'function': {**tc.get('function', {}),
+                                'arguments': _cap(tc.get('function', {}).get('arguments'), max_chars)}}
+            if tc.get('function') else tc
+            for tc in out['tool_calls']
+        ]
+    return out
+
 
 def get_context_window(model: str) -> int:
     """Get model's context window size from litellm.
