@@ -136,6 +136,42 @@ def show_session_picker():
 	return sessions[idx]
 
 
+def print_session_results(session):
+	"""Print a prior session's persisted results (findings + ai turns) to the
+	console in ``_timestamp`` order — the visible "here's where you left off"
+	replay shown on resume. Reads the session's ``report.json``; best-effort
+	(never raises), so a resume is never blocked by a display error.
+
+	Args:
+		session: Session dict from show_session_picker (uses ``report_path``).
+	"""
+	from secator.output_types import OUTPUT_TYPES
+
+	report_path = session.get('report_path')
+	if not report_path:
+		return
+	type_map = {cls.__name__.lower(): cls for cls in OUTPUT_TYPES}
+	try:
+		with open(report_path) as f:
+			data = json.load(f)
+	except (json.JSONDecodeError, OSError):
+		return
+	# Flatten all items with their type class, then print in timestamp order
+	all_items = []
+	for type_name, items in data.get('results', {}).items():
+		cls = type_map.get(type_name)
+		if not cls:
+			continue
+		for item_data in items:
+			all_items.append((item_data, cls))
+	all_items.sort(key=lambda x: x[0].get('_timestamp', 0))
+	for item_data, cls in all_items:
+		try:
+			console.print(cls.load(item_data), highlight=False)
+		except Exception:
+			continue
+
+
 def replay_session(session):
 	"""Replay all results from a previous session and restore history.
 
@@ -146,36 +182,9 @@ def replay_session(session):
 		ChatHistory: Restored history, or None on error.
 	"""
 	from secator.ai.history import ChatHistory
-	from secator.output_types import OUTPUT_TYPES
 
-	# Build type map for loading items
-	type_map = {cls.__name__.lower(): cls for cls in OUTPUT_TYPES}
-
-	# Load and replay all results from report.json, sorted by timestamp
-	report_path = session.get('report_path')
-	if report_path:
-		try:
-			with open(report_path) as f:
-				data = json.load(f)
-			results = data.get('results', {})
-			# Flatten all items with their type class
-			all_items = []
-			for type_name, items in results.items():
-				cls = type_map.get(type_name)
-				if not cls:
-					continue
-				for item_data in items:
-					all_items.append((item_data, cls))
-			# Sort by _timestamp
-			all_items.sort(key=lambda x: x[0].get('_timestamp', 0))
-			for item_data, cls in all_items:
-				try:
-					item = cls.load(item_data)
-					console.print(item, highlight=False)
-				except Exception:
-					continue
-		except (json.JSONDecodeError, OSError):
-			pass
+	# Show the prior conversation + findings on the console
+	print_session_results(session)
 
 	# Load history
 	history_path = session['history_path']

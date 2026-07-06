@@ -791,6 +791,26 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		self.assertEqual(kwargs.get("model"), "gpt-4o")
 		self.assertIs(task.history, mock_history)
 
+	@patch('secator.tasks.ai.print_session_results')
+	@patch('secator.tasks.ai.show_session_picker')
+	@patch('secator.tasks.ai.restore_history_from_db')
+	def test_new_format_resume_prints_prior_conversation(self, mock_restore, mock_picker, mock_print):
+		"""New-format resume rebuilds history in-memory via the unified restore, which
+		(unlike the legacy replay_session) does NOT print anything — so the branch must
+		call print_session_results(session) to keep the prior conversation visible on
+		the console."""
+		prior_folder = tempfile.mkdtemp(prefix="secator-test-print-")
+		mock_picker.return_value = {"name": "prior chat", "folder": prior_folder, "session_id": "PRIOR"}
+		mock_restore.return_value = MagicMock()
+
+		task, engine = self._make_task()
+		with contextlib.ExitStack() as stack:
+			for p in self._patches():
+				stack.enter_context(p)
+			list(task.yielder())
+
+		mock_print.assert_called_once_with(mock_picker.return_value)
+
 	@patch('secator.tasks.ai.show_session_picker')
 	@patch('secator.tasks.ai.replay_session')
 	@patch('secator.tasks.ai.restore_history_from_db')
