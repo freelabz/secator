@@ -24,7 +24,7 @@ from secator.ai.prompts import (
 	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
-from secator.ai.session import save_history, show_session_picker, restore_history_from_db
+from secator.ai.session import save_history, show_session_picker, replay_session, restore_history_from_db
 from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
 
 
@@ -193,28 +193,36 @@ class ai(PythonRunner):
 			if session is None:
 				return
 			self.session_name = session["name"]
-			# Adopt the prior conversation's session_id (instead of minting a fresh
-			# str(self.id)) so appended docs continue under it and a later resume
-			# can still find this run's turns via `_context.session_id`.
+			self._reports_folder = session['folder']
 			if session.get("session_id"):
+				# New-format session (has a stamped session_id): adopt the prior
+				# conversation's id (instead of minting a fresh str(self.id)) so
+				# appended docs continue under it and a later resume can still find
+				# this run's turns via `_context.session_id`, and rebuild via the
+				# unified restore over the local query engine.
 				self.session_id = session["session_id"]
 				self.context["session_id"] = self.session_id
-			self._reports_folder = session['folder']
-			# restore_history_from_db seeds the system message from `system_prompt`
-			# (unlike the old replay_session, which loaded history.json verbatim,
-			# system prompt included). No new prompt exists yet at this point (it's
-			# asked interactively below), so seed the same "chat" default
-			# `_detect_mode()` falls back to when there's nothing to classify; the
-			# user's next answer re-detects the real mode via `_prompt_and_redetect`
-			# -> `_detect_mode(force=True)`, which overwrites the system message in
-			# history regardless (mirrors `_maybe_resume_remote`'s ordering: mode /
-			# system_prompt resolved before the restore call).
-			self.mode = self.mode or "chat"
-			self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
-			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
-			self.history = restore_history_from_db(
-				self.session_id, self._get_query_engine(),
-				model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
+				# restore_history_from_db seeds the system message from `system_prompt`.
+				# No new prompt exists yet at this point (it's asked interactively
+				# below), so seed the same "chat" default `_detect_mode()` falls back
+				# to when there's nothing to classify; the user's next answer
+				# re-detects the real mode via `_prompt_and_redetect` ->
+				# `_detect_mode(force=True)`, which overwrites the system message in
+				# history regardless (mirrors `_maybe_resume_remote`'s ordering:
+				# mode / system_prompt resolved before the restore call).
+				self.mode = self.mode or "chat"
+				self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+				self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+				self.history = restore_history_from_db(
+					self.session_id, self._get_query_engine(),
+					model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
+			else:
+				# Legacy session (pre session_id-stamping): its `_type:"ai"` docs
+				# carry no `_context.session_id`, so the unified restore's nested
+				# session_id filter would exclude them and rebuild an empty history.
+				# Fall back to the local `history.json` replay, which reads the file
+				# directly and works for legacy sessions.
+				self.history = replay_session(session)
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
 				return

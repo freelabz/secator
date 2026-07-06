@@ -198,13 +198,18 @@ def restore_history_from_db(session_id, query_engine, model=None, encryptor=None
 	the conversation is rebuilt from the channel docs themselves (queried by
 	``session_id``, ordered by ``_timestamp``).
 
-	This is a **byte-exact** restore for docs carrying a raw litellm ``message``
-	dict (persisted by Tasks 2-3 for every prompt/assistant/tool_result turn,
-	including tool_calls and tool_call_id pairing): the message is appended
-	verbatim, in ``_timestamp`` order, reproducing the exact transcript a live
-	run would have built. Persisted ``message.content`` is already encrypted
-	(the encryption happens at persist time, not at read time), so it is NOT
-	re-encrypted here — doing so would double-encrypt it.
+	This is a **faithful, valid litellm transcript continuation** for docs
+	carrying a raw litellm ``message`` dict (persisted by Tasks 2-3 for every
+	prompt/assistant/tool_result turn, including tool_calls and tool_call_id
+	pairing): each persisted message is appended verbatim, in ``_timestamp``
+	order. Internal loop nudges (the synthetic "continue"/"retry" ``user``
+	prompts the run appends to live history but never persists as docs) are not
+	restored and so are omitted here — the result is therefore NOT literally
+	byte-identical to the live in-memory history, but it stays a valid transcript
+	(a clean tool→assistant continuation the model can resume from). Persisted
+	``message.content`` is already encrypted (the encryption happens at persist
+	time, not at read time), so it is NOT re-encrypted here — doing so would
+	double-encrypt it.
 
 	Docs from before this feature shipped don't carry a ``message`` field at
 	all (only the human-readable ``content`` used for the channel/report

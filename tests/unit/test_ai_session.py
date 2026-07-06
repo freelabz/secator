@@ -791,6 +791,55 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		self.assertEqual(kwargs.get("model"), "gpt-4o")
 		self.assertIs(task.history, mock_history)
 
+	@patch('secator.tasks.ai.show_session_picker')
+	@patch('secator.tasks.ai.replay_session')
+	@patch('secator.tasks.ai.restore_history_from_db')
+	def test_legacy_session_without_session_id_falls_back_to_replay(self, mock_restore, mock_replay, mock_picker):
+		"""A picked LEGACY session (pre session_id-stamping: session_id absent/'')
+		must resume via replay_session (reads history.json directly), NOT the
+		unified restore -- whose nested `_context.session_id` filter would exclude
+		the legacy docs (they carry no session_id) and rebuild an EMPTY history."""
+		prior_folder = tempfile.mkdtemp(prefix="secator-test-legacy-")
+		# session_id absent entirely (older list_sessions) — same as '' in behavior.
+		mock_picker.return_value = {"name": "legacy chat", "folder": prior_folder}
+		mock_history = MagicMock()
+		mock_replay.return_value = mock_history
+
+		task, engine = self._make_task()
+
+		with contextlib.ExitStack() as stack:
+			for p in self._patches():
+				stack.enter_context(p)
+			list(task.yielder())
+
+		# Legacy path: replay_session used to rebuild history, unified restore NOT
+		# called (its session_id filter would exclude the legacy docs → empty).
+		mock_replay.assert_called_once_with(mock_picker.return_value)
+		mock_restore.assert_not_called()
+		self.assertIs(task.history, mock_history)
+		# No picked session_id, so context was NOT stamped with an adopted id — it
+		# keeps whatever _init_options locally resolved.
+		self.assertEqual(task.context.get("session_id"), task.session_id)
+
+	@patch('secator.tasks.ai.show_session_picker')
+	@patch('secator.tasks.ai.replay_session')
+	@patch('secator.tasks.ai.restore_history_from_db')
+	def test_empty_string_session_id_also_falls_back_to_replay(self, mock_restore, mock_replay, mock_picker):
+		"""An explicit empty-string session_id (what list_sessions returns for a
+		legacy session) is falsy too → same replay fallback."""
+		prior_folder = tempfile.mkdtemp(prefix="secator-test-legacy2-")
+		mock_picker.return_value = {"name": "legacy chat", "folder": prior_folder, "session_id": ""}
+		mock_replay.return_value = MagicMock()
+
+		task, engine = self._make_task()
+		with contextlib.ExitStack() as stack:
+			for p in self._patches():
+				stack.enter_context(p)
+			list(task.yielder())
+
+		mock_replay.assert_called_once()
+		mock_restore.assert_not_called()
+
 
 class TestListSessionsSurfacesSessionId(unittest.TestCase):
 	"""list_sessions() must surface each session's session_id (read from its
