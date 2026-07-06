@@ -89,6 +89,99 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		history = restore_history_from_db("s6", engine, encryptor=encryptor)
 		self.assertEqual(history.messages, [{"role": "user", "content": "ENC(scan 10.0.0.1)"}])
 
+	def test_restore_rebuilds_full_transcript_from_message(self):
+		"""A persisted user->assistant(tool_calls)->tool->assistant round-trip
+		restores byte-identically, with tool_call_id pairing intact."""
+		from secator.ai.session import restore_history_from_db
+		docs = [
+			{"_type": "ai", "ai_type": "prompt", "_timestamp": 1,
+			 "message": {"role": "user", "content": "scan example.com"},
+			 "_context": {"session_id": "S"}},
+			{"_type": "ai", "ai_type": "response", "_timestamp": 2,
+			 "message": {"role": "assistant", "tool_calls": [
+				 {"id": "c1", "type": "function", "function": {"name": "run_task", "arguments": "{}"}}]},
+			 "_context": {"session_id": "S"}},
+			{"_type": "ai", "ai_type": "tool_result", "_timestamp": 3,
+			 "message": {"role": "tool", "tool_call_id": "c1", "name": "run_task", "content": "80/open"},
+			 "_context": {"session_id": "S"}},
+			{"_type": "ai", "ai_type": "response", "_timestamp": 4,
+			 "message": {"role": "assistant", "content": "port 80 is open"},
+			 "_context": {"session_id": "S"}},
+		]
+
+		class FakeEngine:
+			def search(self, q, **k):
+				return docs
+
+		h = restore_history_from_db("S", FakeEngine(), model="gpt-4o")
+		roles = [m["role"] for m in h.messages if m["role"] != "system"]
+		self.assertEqual(roles, ["user", "assistant", "tool", "assistant"])
+		self.assertEqual(h.messages[-3]["tool_calls"][0]["id"], "c1")
+		self.assertEqual(h.messages[-2]["tool_call_id"], "c1")  # pairs correctly
+		# Byte-exact: every field of every persisted message survives verbatim.
+		self.assertEqual(h.messages, [
+			{"role": "user", "content": "scan example.com"},
+			{"role": "assistant", "tool_calls": [
+				{"id": "c1", "type": "function", "function": {"name": "run_task", "arguments": "{}"}}]},
+			{"role": "tool", "tool_call_id": "c1", "name": "run_task", "content": "80/open"},
+			{"role": "assistant", "content": "port 80 is open"},
+		])
+		self.assertEqual(h.model, "gpt-4o")
+
+	def test_restore_appends_copies_not_shared_doc_references(self):
+		"""Mutating the restored history must not mutate the source doc's message dict."""
+		from secator.ai.session import restore_history_from_db
+		doc_message = {"role": "user", "content": "scan example.com"}
+		engine = MagicMock()
+		engine.search.return_value = [
+			{"_type": "ai", "ai_type": "prompt", "_timestamp": 1, "message": doc_message},
+		]
+		history = restore_history_from_db("s7", engine)
+		history.messages[0]["content"] = "mutated"
+		self.assertEqual(doc_message["content"], "scan example.com")
+
+	def test_legacy_docs_without_message_field_fall_back_to_text_only(self):
+		"""Pre-upgrade docs (no `message` field) still restore via the old
+		text-only prompt/response reconstruction."""
+		from secator.ai.session import restore_history_from_db
+		engine = MagicMock()
+		engine.search.return_value = [
+			{"ai_type": "prompt", "content": "legacy scan request", "_timestamp": 1},
+			{"ai_type": "response", "content": "legacy scan result", "_timestamp": 2},
+		]
+		history = restore_history_from_db("s8", engine)
+		self.assertEqual(history.messages, [
+			{"role": "user", "content": "legacy scan request"},
+			{"role": "assistant", "content": "legacy scan result"},
+		])
+
+	def test_message_docs_are_not_reencrypted_on_restore(self):
+		"""Persisted `message.content` is already encrypted at persist time — restore
+		must append it verbatim and NOT pass it through the encryptor again, whereas
+		the legacy text-only fallback still encrypts (its content was never encrypted
+		at persist time)."""
+		from secator.ai.session import restore_history_from_db
+		from secator.ai.encryption import SensitiveDataEncryptor
+
+		encryptor = SensitiveDataEncryptor()
+		plaintext = "scan admin@example.com now"
+		already_encrypted = encryptor.encrypt(plaintext)
+		self.assertNotEqual(already_encrypted, plaintext)  # sanity: encryption actually changed it
+
+		engine = MagicMock()
+		engine.search.return_value = [
+			{"_type": "ai", "ai_type": "prompt", "_timestamp": 1,
+			 "message": {"role": "user", "content": already_encrypted}},
+		]
+		history = restore_history_from_db("s9", engine, encryptor=encryptor)
+
+		# Verbatim: restored content matches the already-encrypted string exactly
+		# (re-encrypting placeholders would change/garble it further).
+		self.assertEqual(history.messages[0]["content"], already_encrypted)
+		# And it decrypts back to the original plaintext downstream, proving the
+		# round-trip survived restore intact.
+		self.assertEqual(encryptor.decrypt(history.messages[0]["content"]), plaintext)
+
 
 class TestRemoteResumeBranch(unittest.TestCase):
 	"""Verify the yielder remote-resume branch picks Mongo restore vs fresh start."""
