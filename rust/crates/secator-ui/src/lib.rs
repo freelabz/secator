@@ -10,8 +10,8 @@
 use std::io::IsTerminal;
 
 use secator_model::{
-    Domain, Error, Exploit, Info, Ip, OutputItem, Port, Record, Subdomain, Tag, Technology, Url,
-    Vulnerability, Warning,
+    Ai, Certificate, Domain, Error, Exploit, Info, Ip, OutputItem, Port, Record, State, Subdomain,
+    Tag, Technology, Url, UserAccount, Vulnerability, Warning,
 };
 
 // ----------------------------------------------------------------------- Colors
@@ -25,7 +25,21 @@ const YELLOW: &str = "\x1b[33m";
 const BLUE: &str = "\x1b[34m";
 const MAGENTA: &str = "\x1b[35m";
 const CYAN: &str = "\x1b[36m";
+const WHITE: &str = "\x1b[37m";
+#[allow(dead_code)]
 const GREY: &str = "\x1b[90m";
+// Rich extended (256-color) palette — codes match `rich.color.ANSI_COLOR_NAMES`
+// so the Rust CLI paints the same hue Python does for the same concept.
+const TURQUOISE4: &str = "\x1b[38;5;30m";
+const SPRING_GREEN3: &str = "\x1b[38;5;41m";
+const GOLD3: &str = "\x1b[38;5;178m";
+const YELLOW3: &str = "\x1b[38;5;184m";
+const ORANGE3: &str = "\x1b[38;5;172m";
+const ORANGE4: &str = "\x1b[38;5;94m";
+const DARK_ORANGE3: &str = "\x1b[38;5;166m";
+const RED3: &str = "\x1b[38;5;160m";
+const PURPLE: &str = "\x1b[38;5;129m";
+const BRIGHT_BLUE: &str = "\x1b[94m";
 
 /// Per-context color toggle. `stderr_tty` controls UI coloring; `stdout_tty` decides
 /// whether raw-piped output stays plain.
@@ -59,6 +73,18 @@ fn yellow(s: &str, style: Style) -> String { paint(s, YELLOW, style) }
 fn blue(s: &str, style: Style) -> String { paint(s, BLUE, style) }
 fn magenta(s: &str, style: Style) -> String { paint(s, MAGENTA, style) }
 fn cyan(s: &str, style: Style) -> String { paint(s, CYAN, style) }
+fn white(s: &str, style: Style) -> String { paint(s, WHITE, style) }
+fn turquoise4(s: &str, style: Style) -> String { paint(s, TURQUOISE4, style) }
+fn spring_green3(s: &str, style: Style) -> String { paint(s, SPRING_GREEN3, style) }
+#[allow(dead_code)] // Kept for palette completeness; may be used by future render fns / plugins.
+fn gold3(s: &str, style: Style) -> String { paint(s, GOLD3, style) }
+fn yellow3(s: &str, style: Style) -> String { paint(s, YELLOW3, style) }
+fn orange3(s: &str, style: Style) -> String { paint(s, ORANGE3, style) }
+fn orange4(s: &str, style: Style) -> String { paint(s, ORANGE4, style) }
+fn dark_orange3(s: &str, style: Style) -> String { paint(s, DARK_ORANGE3, style) }
+fn red3(s: &str, style: Style) -> String { paint(s, RED3, style) }
+fn purple(s: &str, style: Style) -> String { paint(s, PURPLE, style) }
+fn bright_blue(s: &str, style: Style) -> String { paint(s, BRIGHT_BLUE, style) }
 
 // ----------------------------------------------------------------- Lifecycle
 
@@ -99,20 +125,27 @@ pub fn render(item: &OutputItem, style: Style) -> Option<String> {
         OutputItem::Exploit(e) => render_exploit(e, style),
         OutputItem::Domain(d) => render_domain(d, style),
         OutputItem::Record(r) => render_record(r, style),
+        OutputItem::UserAccount(u) => render_user_account(u, style),
+        OutputItem::Certificate(c) => render_certificate(c, style),
+        OutputItem::State(s) => render_state(s, style),
+        OutputItem::Ai(a) => match render_ai(a, style) {
+            Some(l) => l,
+            None => return None,
+        },
         OutputItem::Target(t) => target_line(&t.name, &t.type_, style),
         OutputItem::Info(i) => render_info(i, style),
         OutputItem::Warning(w) => render_warning(w, style),
         OutputItem::Error(e) => render_error(e, style),
-        // For other types, fall back to a generic line.
+        // For other types (Progress, Stat), fall back to a generic line.
         _ => format!("• {} ({})", item.type_name(), dim(&item.meta().source, style)),
     })
 }
 
 fn render_url(u: &Url, style: Style) -> String {
     let mut parts: Vec<String> = Vec::new();
-    parts.push(format!("🔗 {}", u.url));
+    parts.push(format!("🔗 {}", white(&u.url, style)));
     if !u.method.is_empty() && u.method != "GET" {
-        parts.push(format!("[{}]", cyan(&u.method, style)));
+        parts.push(format!("[{}]", turquoise4(&u.method, style)));
     }
     if u.status_code != 0 {
         let code_str = u.status_code.to_string();
@@ -124,7 +157,7 @@ fn render_url(u: &Url, style: Style) -> String {
         parts.push(format!("[{colored}]"));
     }
     if !u.title.is_empty() {
-        parts.push(format!("[{}]", green(&trim(&u.title, 60), style)));
+        parts.push(format!("[{}]", spring_green3(&trim(&u.title, 60), style)));
     }
     if !u.webserver.is_empty() {
         parts.push(format!("[{}]", bold(&magenta(&u.webserver, style), style)));
@@ -152,12 +185,25 @@ fn render_url(u: &Url, style: Style) -> String {
 }
 
 fn render_subdomain(s: &Subdomain, style: Style) -> String {
-    let mut line = format!("🌐 {}", s.host);
+    let mut line = format!("🏰 {}", white(&s.host, style));
     if !s.sources.is_empty() {
-        line.push_str(&format!(" {}", dim(&format!("({})", s.sources.join(", ")), style)));
+        let srcs = s
+            .sources
+            .iter()
+            .map(|src| magenta(src, style))
+            .collect::<Vec<_>>()
+            .join(", ");
+        line.push_str(&format!(" [{srcs}]"));
     }
     if !s.tags.is_empty() {
         line.push_str(&format!(" {}", dim(&format!("[{}]", s.tags.join(", ")), style)));
+    }
+    let ed = format_extra_data(&s.extra_data, style);
+    if !ed.is_empty() {
+        line.push_str(&format!(" {ed}"));
+    }
+    if !s.verified {
+        line = dim(&line, style);
     }
     line
 }
@@ -166,9 +212,14 @@ fn render_subdomain(s: &Subdomain, style: Style) -> String {
 /// Long values are truncated; the multi-line `extra_data` block is intentionally
 /// omitted from this single-line renderer.
 fn render_tag(t: &Tag, style: Style) -> String {
-    let mut line = format!("🏷️  [{}] {}", yellow(&t.category, style), magenta(&t.name, style));
+    let category = match t.category.as_str() {
+        "error" => bold(&dark_orange3(&t.category, style), style),
+        "secret" => bold(&red3(&t.category, style), style),
+        _ => bold(&yellow(&t.category, style), style),
+    };
+    let mut line = format!("🏷️  [{}] {}", category, bold(&magenta(&t.name, style), style));
     if !t.value.is_empty() && t.value.len() < 100 {
-        line.push_str(&format!(" {}", bold(&t.value, style)));
+        line.push_str(&format!(" {}", bold(&orange4(&t.value, style), style)));
     }
     if !t.match_.is_empty() && t.match_ != t.value {
         line.push_str(&format!(" found @ {}", bold(&t.match_, style)));
@@ -178,7 +229,11 @@ fn render_tag(t: &Tag, style: Style) -> String {
 
 /// Mirrors Python `Record.__rich__`: `🎤 <name> [<type>] [<host>] [<extra>]`.
 fn render_record(r: &Record, style: Style) -> String {
-    let mut line = format!("🎤 {} [{}]", bold(&r.name, style), green(&r.type_, style));
+    let mut line = format!(
+        "🎤 {} [{}]",
+        bold(&white(&r.name, style), style),
+        green(&r.type_, style),
+    );
     if !r.host.is_empty() {
         line.push_str(&format!(" [{}]", magenta(&r.host, style)));
     }
@@ -191,7 +246,7 @@ fn render_record(r: &Record, style: Style) -> String {
 
 /// Mirrors Python `Domain.__rich__`: `🪪  <domain> [<registrant>] [<registrar>] ...`.
 fn render_domain(d: &Domain, style: Style) -> String {
-    let mut line = format!("🪪  {}", bold(&d.domain, style));
+    let mut line = format!("🪪  {}", bold(&white(&d.domain, style), style));
     if d.alive {
         line.push_str(&format!(" [{}]", bold(&green("alive", style), style)));
     }
@@ -213,7 +268,7 @@ fn render_domain(d: &Domain, style: Style) -> String {
 
 /// Mirrors Python `Ip.__rich__`: `💻 <ip> [<host>] [alive]`, dimmed if `!alive`.
 fn render_ip(i: &Ip, style: Style) -> String {
-    let mut line = format!("💻 {}", bold(&i.ip, style));
+    let mut line = format!("💻 {}", bold(&white(&i.ip, style), style));
     if !i.host.is_empty() && i.host != i.ip {
         line.push_str(&format!(" [{}]", bold(&magenta(&i.host, style), style)));
     }
@@ -226,46 +281,77 @@ fn render_ip(i: &Ip, style: Style) -> String {
 }
 
 fn render_port(p: &Port, style: Style) -> String {
-    let mut line = format!("🔌 {}:{}", bold(&p.host, style), bold(&p.port.to_string(), style));
-    if !p.service_name.is_empty() {
-        line.push_str(&format!(" [{}]", cyan(&p.service_name, style)));
+    let ip = if p.ip.is_empty() { p.host.as_str() } else { p.ip.as_str() };
+    // Python uses `:<4` — pad port to width 4 so the state column lines up.
+    let port_padded = format!("{:<4}", p.port);
+    let mut line = format!("🔓 {}:{}", ip, bold(&red(&port_padded, style), style));
+    if !p.state.is_empty() {
+        let mut state_str = bold(&yellow(&p.state.to_uppercase(), style), style);
+        if p.confidence == "low" {
+            state_str.push_str(&bold(&orange3("?", style), style));
+        }
+        line.push_str(&format!(" {state_str}"));
     }
-    if !p.state.is_empty() && p.state != "UNKNOWN" {
-        line.push_str(&format!(" [{}]", green(&p.state, style)));
+    let proto_upper = p.protocol.to_uppercase();
+    if !proto_upper.is_empty() && proto_upper != "TCP" {
+        line.push_str(&format!(" [{}]", yellow3(&proto_upper, style)));
+    }
+    if !p.service_name.is_empty() {
+        let mut svc = bold(&purple(&p.service_name, style), style);
+        if p.service_confidence == "low" {
+            svc.push_str(&bold(&orange3("?", style), style));
+        }
+        line.push_str(&format!(" [{svc}]"));
+    }
+    if !p.host.is_empty() && p.host != p.ip {
+        line.push_str(&format!(" [{}]", cyan(&p.host, style)));
+    }
+    if !p.tags.is_empty() {
+        line.push_str(&format!(" [{}]", cyan(&p.tags.join(","), style)));
+    }
+    let ed = format_extra_data(&p.extra_data, style);
+    if !ed.is_empty() {
+        line.push_str(&format!(" {ed}"));
+    }
+    if p.confidence == "low" {
+        line = dim(&line, style);
     }
     line
 }
 
 fn render_technology(t: &Technology, style: Style) -> String {
-    let product = match &t.version {
-        Some(v) if !v.is_empty() => format!("{} {}", t.product, v),
-        _ => t.product.clone(),
+    // Python: `📦 [bold orange3]{product}[/]/[red]{version}[/] found @ {match}`.
+    let product_str = bold(&orange3(&t.product, style), style);
+    let versioned = match &t.version {
+        Some(v) if !v.is_empty() => format!("{}/{}", product_str, red(v, style)),
+        _ => product_str,
     };
-    format!(
-        "📦 {} found @ {}",
-        bold(&magenta(&product, style), style),
-        dim(&t.match_, style),
-    )
+    format!("📦 {} found @ {}", versioned, t.match_)
 }
 
 /// Mirrors Python `Vulnerability.__rich__`:
 /// `🚨 [<id>: <name>] [<severity>] <matched_at> [<tags>] [<extra_data>] (<provider>)`.
 /// Low-confidence vulns are dimmed.
 fn render_vulnerability(v: &Vulnerability, style: Style) -> String {
-    let sev_color = match v.severity.as_str() {
-        "critical" | "high" => RED,
-        "medium" => YELLOW,
-        "low" => GREEN,
-        "info" => MAGENTA,
-        _ => GREY,
+    // Python severity colors: critical=bold red, high=red, medium=yellow, low=green,
+    // info=magenta, else=dim magenta.
+    let paint_sev = |s: &str| -> String {
+        match v.severity.as_str() {
+            "critical" => bold(&red(s, style), style),
+            "high" => bold(&red(s, style), style),
+            "medium" => bold(&yellow(s, style), style),
+            "low" => bold(&green(s, style), style),
+            "info" => bold(&magenta(s, style), style),
+            _ => bold(&dim(&magenta(s, style), style), style),
+        }
     };
     let name = if !v.id.is_empty() && v.id.to_lowercase() != v.name.to_lowercase() {
         format!("{}: {}", v.id, v.name)
     } else {
         v.name.clone()
     };
-    let mut line = format!("🚨 [{}]", green(&name, style));
-    line.push_str(&format!(" [{}]", paint(&v.severity, sev_color, style)));
+    let mut line = format!("🚨 [{}]", paint_sev(&name));
+    line.push_str(&format!(" [{}]", paint_sev(&v.severity)));
     if !v.matched_at.is_empty() {
         line.push_str(&format!(" {}", v.matched_at));
     }
@@ -277,7 +363,7 @@ fn render_vulnerability(v: &Vulnerability, style: Style) -> String {
         line.push_str(&format!(" {ed}"));
     }
     if !v.provider.is_empty() {
-        line.push_str(&format!(" ({})", dim(&v.provider, style)));
+        line.push_str(&format!(" ({})", dim(&orange4(&v.provider, style), style)));
     }
     if v.confidence == "low" {
         line = dim(&line, style);
@@ -306,6 +392,88 @@ fn render_exploit(e: &Exploit, style: Style) -> String {
         line = dim(&line, style);
     }
     line
+}
+
+/// Mirrors Python `UserAccount.__rich__`: `👤 <username> [<email>] [<site>] [<url>] [<extra>]`.
+fn render_user_account(u: &UserAccount, style: Style) -> String {
+    let mut line = format!("👤 {}", green(&u.username, style));
+    if !u.email.is_empty() {
+        line.push_str(&format!(" [{}]", bold(&yellow(&u.email, style), style)));
+    }
+    if !u.site_name.is_empty() {
+        line.push_str(&format!(" [{}]", bold(&blue(&u.site_name, style), style)));
+    }
+    if !u.url.is_empty() {
+        line.push_str(&format!(" [{}]", white(&u.url, style)));
+    }
+    let ed = format_extra_data(&u.extra_data, style);
+    if !ed.is_empty() {
+        line.push_str(&format!(" {ed}"));
+    }
+    line
+}
+
+/// Mirrors Python `Certificate.__rich__`: `📜 <host> [<status>] [expired/valid] [cn=...] [an=...] [issuer=...] [fp_sha256=...]`.
+fn render_certificate(c: &Certificate, style: Style) -> String {
+    let mut line = format!("📜 {}", bold(&white(&c.host, style), style));
+    if !c.status.is_empty() && c.status != "Unknown" {
+        line.push_str(&format!(" [{}]", cyan(&c.status, style)));
+    }
+    let is_wildcard = c.subject_cn.starts_with("*.")
+        || c.subject_an.iter().any(|a| a.starts_with("*."));
+    if is_wildcard {
+        line.push_str(&format!(" [{}]", yellow("wildcard", style)));
+    }
+    if let Some(exp) = c.not_after.as_deref().filter(|s| !s.is_empty()) {
+        line.push_str(&format!(" [{} {}]", bold(&green("valid until", style), style), exp));
+    }
+    if !c.subject_cn.is_empty() {
+        line.push_str(&format!(" [{}={}]", bold(&red("cn", style), style), c.subject_cn));
+    }
+    if !c.subject_an.is_empty() {
+        line.push_str(&format!(
+            " [{}={}]",
+            bold(&orange4("an", style), style),
+            c.subject_an.join(", "),
+        ));
+    }
+    let issuer = if !c.issuer.is_empty() { &c.issuer } else { &c.issuer_cn };
+    if !issuer.is_empty() {
+        let label = if !c.issuer.is_empty() { "issuer" } else { "issuer_cn" };
+        line.push_str(&format!(" [{}={}]", bold(&magenta(label, style), style), issuer));
+    }
+    if !c.fingerprint_sha256.is_empty() {
+        let short: String = c.fingerprint_sha256.chars().take(10).collect();
+        line.push_str(&format!(" [{}={}]", bold(&cyan("fingerprint_sha256", style), style), short));
+    }
+    line
+}
+
+/// Mirrors Python `State.__rich__`: `📊 <state> <task_id>` in bold bright_blue.
+fn render_state(s: &State, style: Style) -> String {
+    format!("📊 {} {}", bold(&bright_blue(&s.state, style), style), s.task_id)
+}
+
+/// Mirrors Python `Ai.__rich__`: label + colored content, varying by `ai_type`.
+/// Colors match Python's `AI_TYPES` table. Returns `None` for internal-only types
+/// (e.g. `token_usage`).
+fn render_ai(a: &Ai, style: Style) -> Option<String> {
+    if a.ai_type == "token_usage" {
+        return None;
+    }
+    let (label, color): (&str, &str) = match a.ai_type.as_str() {
+        "prompt" => ("❯", RED),
+        "response" => ("🧠", WHITE),
+        "chat_compacted" => ("📦", ORANGE3),
+        "task" | "workflow" | "shell" | "add_finding" | "query" => ("🟢", MAGENTA),
+        "shell_output" => ("◀", DIM),
+        "stopped" => ("🛑", ORANGE3),
+        "follow_up" => ("[FOLLOW UP]", ORANGE3),
+        _ => ("•", ""),
+    };
+    let label_str = if color.is_empty() { label.to_string() } else { bold(&paint(label, color, style), style) };
+    let colored = if color.is_empty() { a.content.clone() } else { paint(&a.content, color, style) };
+    Some(format!("{label_str} {colored}"))
 }
 
 /// Mirrors Python `format_object`: render an `extra_data` map as
@@ -485,12 +653,113 @@ mod tests {
         let s = Subdomain {
             host: "a.example.com".into(),
             domain: "example.com".into(),
+            verified: true,
             sources: vec!["alienvault".into(), "crtsh".into()],
             ..Default::default()
         };
         let line = render_subdomain(&s, plain());
-        assert!(line.contains("a.example.com"));
-        assert!(line.contains("(alienvault, crtsh)"));
+        assert!(line.starts_with("🏰 a.example.com"), "got: {line}");
+        assert!(line.contains("[alienvault, crtsh]"), "got: {line}");
+    }
+
+    #[test]
+    fn port_renders_matches_python_layout() {
+        let p = Port {
+            ip: "10.0.0.1".into(),
+            port: 443,
+            state: "open".into(),
+            service_name: "https".into(),
+            protocol: "tcp".into(),
+            confidence: "high".into(),
+            service_confidence: "high".into(),
+            ..Default::default()
+        };
+        let line = render_port(&p, plain());
+        assert!(line.starts_with("🔓 10.0.0.1:443"), "got: {line}");
+        assert!(line.contains("OPEN"), "got: {line}");
+        assert!(line.contains("[https]"), "got: {line}");
+        // TCP is elided; UDP would show as [UDP].
+        assert!(!line.contains("[TCP]"), "got: {line}");
+    }
+
+    #[test]
+    fn user_account_renders_username_and_extras() {
+        let u = UserAccount {
+            username: "alice".into(),
+            email: "a@example.com".into(),
+            site_name: "github".into(),
+            url: "https://github.com/alice".into(),
+            ..Default::default()
+        };
+        let line = render_user_account(&u, plain());
+        assert!(line.starts_with("👤 alice"), "got: {line}");
+        assert!(line.contains("[a@example.com]"), "got: {line}");
+        assert!(line.contains("[github]"), "got: {line}");
+    }
+
+    #[test]
+    fn certificate_renders_host_and_issuer() {
+        let c = Certificate {
+            host: "example.com".into(),
+            subject_cn: "*.example.com".into(),
+            issuer_cn: "Let's Encrypt".into(),
+            not_after: Some("2027-01-01".into()),
+            fingerprint_sha256: "abcdef1234567890".into(),
+            status: "valid".into(),
+            ..Default::default()
+        };
+        let line = render_certificate(&c, plain());
+        assert!(line.starts_with("📜 example.com"), "got: {line}");
+        assert!(line.contains("wildcard"), "got: {line}");
+        assert!(line.contains("cn=*.example.com"), "got: {line}");
+        assert!(line.contains("issuer_cn=Let's Encrypt"), "got: {line}");
+        assert!(line.contains("fingerprint_sha256=abcdef1234"), "got: {line}");
+    }
+
+    #[test]
+    fn state_renders_task_and_state() {
+        let s = State {
+            task_id: "job-42".into(),
+            state: "SUCCESS".into(),
+            ..Default::default()
+        };
+        let line = render_state(&s, plain());
+        assert_eq!(line, "📊 SUCCESS job-42");
+    }
+
+    #[test]
+    fn ai_renders_per_action_type() {
+        let prompt = Ai { content: "hello?".into(), ai_type: "prompt".into(), ..Default::default() };
+        assert_eq!(render_ai(&prompt, plain()).as_deref(), Some("❯ hello?"));
+
+        let response = Ai { content: "hi".into(), ai_type: "response".into(), ..Default::default() };
+        assert_eq!(render_ai(&response, plain()).as_deref(), Some("🧠 hi"));
+
+        let task = Ai { content: "nmap".into(), ai_type: "task".into(), ..Default::default() };
+        assert_eq!(render_ai(&task, plain()).as_deref(), Some("🟢 nmap"));
+
+        let stopped = Ai { content: "".into(), ai_type: "stopped".into(), ..Default::default() };
+        assert_eq!(render_ai(&stopped, plain()).as_deref(), Some("🛑 "));
+
+        let tok = Ai { content: "".into(), ai_type: "token_usage".into(), ..Default::default() };
+        assert_eq!(render_ai(&tok, plain()), None);
+    }
+
+    #[test]
+    fn colors_match_python_rich_palette() {
+        // Sanity-check that we emit the exact SGR sequences the Rich extended-color
+        // names decode to — matches `rich.color.ANSI_COLOR_NAMES`.
+        let color = Style { color: true };
+        assert!(turquoise4("x", color).contains("\x1b[38;5;30m"));
+        assert!(spring_green3("x", color).contains("\x1b[38;5;41m"));
+        assert!(gold3("x", color).contains("\x1b[38;5;178m"));
+        assert!(yellow3("x", color).contains("\x1b[38;5;184m"));
+        assert!(orange3("x", color).contains("\x1b[38;5;172m"));
+        assert!(orange4("x", color).contains("\x1b[38;5;94m"));
+        assert!(dark_orange3("x", color).contains("\x1b[38;5;166m"));
+        assert!(red3("x", color).contains("\x1b[38;5;160m"));
+        assert!(purple("x", color).contains("\x1b[38;5;129m"));
+        assert!(bright_blue("x", color).contains("\x1b[94m"));
     }
 
     #[test]
