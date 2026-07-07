@@ -473,6 +473,11 @@ class ai(PythonRunner):
 			iteration += 1
 
 			try:
+				# Mid-flight steering: drain any user messages sent WHILE the agent
+				# was running and inject them into history so the next turn redirects.
+				# Cheap query per iteration; robust (never crashes the loop).
+				yield from self._drain_steers()
+
 				# Auto-summarize when context > 85% threshold
 				yield from self._summarize_auto()
 
@@ -849,6 +854,48 @@ class ai(PythonRunner):
 				self.permission_engine.add_runtime_allow([rule])
 		except Exception as e:
 			self.debug(f'[workspace] failed to query targets: {e}', sub='guardrail')
+
+	# -------------------------------------------------------------------------
+	# Mid-flight steering
+	# -------------------------------------------------------------------------
+
+	def _drain_steers(self):
+		"""Drain pending mid-flight steers and inject them into the LLM history.
+
+		A "steer" is a user message sent WHILE the agent is running (over the
+		remote/web channel: a pending ``_type:"ai", ai_type:"steer"`` doc written by
+		``POST /ai/conversations/{id}/steer``). At the top of each loop iteration we
+		drain any pending steers for this session and append each to the history as
+		a ``[User interjected]: …`` user message so the model sees them on the next
+		turn. Cooperative — not a hard cancel (Stop already does that).
+
+		The steer doc the API wrote is itself the persisted transcript entry (it
+		carries ``_context.session_id``, so the UI's transcript poll surfaces it as
+		an "interjected" user bubble). We deliberately do NOT yield a second
+		``Ai(ai_type="steer")`` echo here — that would persist a duplicate doc with
+		the same content and double-render in the UI. ``poll_steers`` flips the
+		drained doc to ``status:"consumed"`` so it injects exactly once.
+
+		Only the RemoteBackend has a channel to poll; for every other backend this
+		is a no-op. Robust: a steer must never crash the run, so all backend access
+		is best-effort and swallowed.
+
+		Generator (``yield from``-compatible with the loop) — currently yields no
+		items, but kept a generator so future transcript echoes can be added without
+		changing the call site.
+		"""
+		if not isinstance(self.backend, RemoteBackend):
+			return
+		try:
+			steers = self.backend.poll_steers(self.session_id)
+		except Exception as e:  # noqa: BLE001 - a steer must never crash the run
+			self.debug(f'steer: failed to poll steers: {e}', sub='llm')
+			return
+		for content in steers:
+			self.debug(f'steer: injecting user interjection: {content[:120]}', sub='llm')
+			self.history.add_user(maybe_encrypt(f"[User interjected]: {content}", self.encryptor))
+		return
+		yield  # noqa: unreachable - keeps this a generator for `yield from`
 
 	# -------------------------------------------------------------------------
 	# Summarization / compaction

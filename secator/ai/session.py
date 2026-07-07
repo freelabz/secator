@@ -283,6 +283,11 @@ def restore_history_from_db(session_id, query_engine, model=None, encryptor=None
 			history.add_user(maybe_encrypt(content, encryptor))
 		elif ai_type == 'response':
 			history.add_assistant(maybe_encrypt(content, encryptor))
+		elif ai_type == 'steer':
+			# A mid-flight steer is a real user turn (an interjection that
+			# redirected the run): preserve it as a user message on respawn so the
+			# redirect survives a history restore. Mirror the live-loop framing.
+			history.add_user(maybe_encrypt(f'[User interjected]: {content}', encryptor))
 		# All other ai_types (action displays, follow_up/permission prompts,
 		# shell_output, summaries) are channel/UX artifacts, not conversation
 		# turns — intentionally skipped for a valid litellm transcript.
