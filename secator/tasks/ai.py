@@ -14,7 +14,7 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.ai.actions import (
-	ActionContext, check_guardrails, safe_dispatch_action, _run_batch, _decrypt_dict, _build_action_display
+	ActionContext, check_guardrails, safe_dispatch_action, _run_batch
 )
 from secator.ai.guardrails import PermissionEngine
 from secator.ai.interactivity import create_backend, RemoteBackend
@@ -26,7 +26,7 @@ from secator.ai.prompts import (
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
 from secator.ai.session import (
 	save_history, show_session_picker, replay_session, restore_history_from_db, print_session_results)
-from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
+from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status, _decrypt_dict, _build_action_display
 
 
 # D4: high-precision cues for the deterministic mode fast-path. Only unambiguous

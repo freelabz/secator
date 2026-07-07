@@ -1,6 +1,5 @@
 """Action handlers for AI task."""
 import json
-import os
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,6 +11,29 @@ from secator.runners.task import TaskNotFoundError
 from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_TYPES
 from secator.template import TemplateLoader
 from secator.utils import format_token_count
+from secator.ai.utils import (
+	_sanitized_env, _build_action_display, _is_approved, _truncate, _format_action_error,
+	_is_heavy_runner, _sanitize_child_opts, build_subagent_prompt, _union_live_results,
+	_coerce_finding_fields, _get_action_label, _decrypt_dict,
+)
+from secator.ai.utils import _MAX_CHILD_ITERATIONS  # noqa: F401 - re-exported for tests importing it from actions
+
+
+# H4: bound recursive AI-subagent fan-out so injected output can't drive an
+# exponential subagent/token blow-up. Depth caps recursion (child inherits +1 via
+# context); breadth caps how many subagents one parent turn may spawn.
+_MAX_SUBAGENT_DEPTH = 3
+_MAX_SUBAGENTS_PER_TURN = 5
+_SUBAGENT_TURN_LOCK = threading.Lock()
+
+# M1: cap shell stdout before it enters AI history so a huge command can't blow up
+# the next prompt's token budget; head+tail keeps both the start and the result.
+_MAX_SHELL_OUTPUT_CHARS = 4000
+
+# Cap on ad-hoc AI shell commands (dispatched as the `command` task). Applied as an
+# instance attribute post-construction (see _handle_shell) since max_timeout is not a
+# run_opts-settable field.
+_SHELL_TIMEOUT = 60
 
 
 @dataclass
@@ -56,26 +78,6 @@ class ActionContext:
 				query_context = dict(self.context)
 			self._query_engine = QueryEngine(self.context.get("workspace_id", ""), context=query_context)
 		return self._query_engine
-
-
-SENSITIVE_ENV_PREFIXES = (
-	"SECATOR_",
-	"ANTHROPIC_", "OPENAI_", "GOOGLE_", "AZURE_", "AWS_", "GCP_",
-	"GITHUB_TOKEN", "GITLAB_TOKEN", "SLACK_TOKEN", "DISCORD_TOKEN",
-	"SECRET_", "TOKEN_", "API_KEY", "PRIVATE_KEY",
-)
-
-
-def _sanitized_env() -> dict:
-	"""Return a copy of os.environ with sensitive variables removed.
-
-	Passed as the `env` run_opt to the AI shell `command` runner so an AI-run
-	`env`/`printenv` can't dump the LLM key + cloud creds into output that flows
-	back to the LLM and is persisted to Mongo.
-	"""
-	return {k: v for k, v in os.environ.items()
-			if not any(k.startswith(p) for p in SENSITIVE_ENV_PREFIXES)
-			and "KEY" not in k and "SECRET" not in k and "TOKEN" not in k and "PASSWORD" not in k}
 
 
 def _build_hooks_from_context(context: Dict) -> Dict:
@@ -156,34 +158,6 @@ def _build_child_hooks_or_denial(context: Dict) -> Tuple[Dict, Optional["Warning
 	return hooks, None
 
 
-def _build_action_display(action: Dict) -> str:
-	"""Build a display string for the action being checked.
-
-	Returns a concise description of the command/task/workflow for prompt context.
-	"""
-	action_type = action.get("action", "")
-	if action_type == "shell":
-		return action.get("command", "")
-	elif action_type in ("task", "workflow"):
-		name = action.get("name", "")
-		targets = action.get("targets", [])
-		opts = action.get("opts", {})
-		parts = [f"{action_type}: {name}"]
-		if targets:
-			parts.append(f"targets={targets}")
-		if opts:
-			parts.append(f"opts={opts}")
-		return " ".join(parts)
-	return ""
-
-
-def _is_approved(response) -> bool:
-	# Explicit allow-list: only a normalized "allow" answer approves. None, "deny",
-	# or any unexpected token denies (fail closed) — so a new backend or a refactored
-	# answer vocabulary can't silently approve via a "not deny" gap.
-	return bool(response) and response.get("answer") == "allow"
-
-
 def check_guardrails_sync(action: Dict, ctx: ActionContext) -> Tuple[Optional[str], List]:
 	"""Non-generator wrapper for check_guardrails.
 
@@ -239,11 +213,8 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 
 	is_remote = isinstance(ctx.backend, RemoteBackend)
 
-	# Prompt loop: each check_action returns the first "ask" it encounters
-	# (shell, then targets, then paths). We prompt for that layer, then re-check
-	# to surface the next layer, until everything is resolved.
-	# All prompting goes through ctx.backend.ask_user() — the backend handles
-	# the UX differences (CLI menu, DB polling, or auto-deny).
+	# Prompt loop: check_action returns the first unresolved "ask" layer (shell, then
+	# targets, then paths); prompt via ctx.backend.ask_user() and re-check until resolved.
 	max_rounds = 5
 	rounds = 0
 	while result.decision == "ask" and rounds < max_rounds:
@@ -360,43 +331,6 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		yield Warning(message=f"Unknown action: {action_type}", _context=context)
 
 
-def _truncate(text: str, max_chars: int) -> str:
-	"""Cap ``text`` to ~``max_chars``, keeping head + tail so both the start and the
-	final lines survive, with a clear marker for the dropped middle. Short text is
-	returned unchanged (no marker)."""
-	if len(text) <= max_chars:
-		return text
-	dropped = len(text) - max_chars
-	half = max_chars // 2
-	return f"{text[:half]}\n…(truncated {dropped} chars)…\n{text[-(max_chars - half):]}"
-
-
-def _format_action_error(e: Exception, max_chars: int = 400) -> str:
-	"""Build a concise, LLM-facing error string for a failed action dispatch.
-
-	Combines the exception type + message with the last few traceback frames so
-	the model can see *where* it failed, then truncates to a sane length so a
-	deep traceback can't blow up the next prompt's token budget.
-	"""
-	import traceback
-
-	errtype = type(e).__name__
-	msg = str(e)
-	head = f"{errtype}: {msg}" if msg else errtype
-
-	# Keep only the tail of the traceback (last ~3 frames) — that's where the
-	# actual failure is, and it keeps the feedback compact.
-	tb_lines = traceback.format_exc().strip().splitlines()
-	tb_tail = "\n".join(tb_lines[-6:]) if tb_lines else ""
-
-	detail = f"{head}\n{tb_tail}" if tb_tail else head
-	detail = _truncate(detail, max_chars)
-	return (
-		f"Action failed with error: {detail}\n"
-		"Fix the issue and try again."
-	)
-
-
 def safe_dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	"""Dispatch a single action, converting any raised ``Exception`` into an
 	``Error`` output item instead of letting it abort the AI loop.
@@ -422,68 +356,6 @@ def safe_dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 			traceback=_traceback.format_exc(),
 			_context=context,
 		)
-
-
-_HEAVY_PROFILES = {'large', 'extra_large'}
-
-
-def _is_heavy_runner(runner_type: str, name: str, opts: dict = None) -> bool:
-	"""Whether a sub-runner is too heavy to run sync in-process inside the ai worker.
-
-	Workflows/scans fan out across multiple pools, so they should always be
-	dispatched rather than run in-process. A task is heavy if its (possibly
-	opts-dependent) profile maps to a large worker pool (``large``/``extra_large``).
-	"""
-	if runner_type != 'task':
-		return True
-	try:
-		cls = Task.get_task_class(name)
-	except Exception:
-		return False
-	profile = getattr(cls, 'profile', 'small')
-	if callable(profile):
-		try:
-			profile = profile(opts or {})  # resolve dynamic profile (mirrors Command.s/si)
-		except Exception:
-			return True  # can't resolve — be conservative and dispatch
-	return profile in _HEAVY_PROFILES
-
-
-# Framework control/security keys the LLM must never set on a spawned sub-runner
-# (esp. `dangerous`, which skips the permission engine). Task/workflow scan opts
-# (nmap ports, httpx rate_limit, ...) are not control keys and pass through.
-_FORBIDDEN_CHILD_OPT_KEYS = frozenset({
-	"dangerous",
-	"interactive",
-	"hooks",
-	"sync",
-	"subagent",
-	"tty",
-	"dry_run",
-	"exporters",
-	"enable_reports",
-})
-
-# Cap a spawned subagent's iteration budget so it can't be told to loop unbounded.
-_MAX_CHILD_ITERATIONS = 25
-
-# H4: bound recursive AI-subagent fan-out so injected output can't drive an
-# exponential subagent/token blow-up. Depth caps recursion (child inherits +1 via
-# context); breadth caps how many subagents one parent turn may spawn.
-_MAX_SUBAGENT_DEPTH = 3
-_MAX_SUBAGENTS_PER_TURN = 5
-_SUBAGENT_TURN_LOCK = threading.Lock()
-
-# M1: cap shell stdout/stderr before it enters AI history so a command emitting
-# megabytes can't blow up the next prompt's token budget / memory. Larger than the
-# 400-char error cap because successful output carries more useful signal; head+tail
-# so the model still sees the start AND the final lines (often the result/error).
-_MAX_SHELL_OUTPUT_CHARS = 4000
-
-# Cap on ad-hoc AI shell commands (dispatched as the `command` task). Applied as an
-# instance attribute post-construction (see _handle_shell) since max_timeout is not a
-# run_opts-settable field.
-_SHELL_TIMEOUT = 60
 
 
 def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["Warning"]:
@@ -513,45 +385,6 @@ def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["War
 			)
 	context["ai_subagent_depth"] = depth + 1  # child inherits depth+1
 	return None
-
-
-def _sanitize_child_opts(opts: Any) -> Dict:
-	"""Drop LLM-settable control/security keys from sub-runner opts; clamp max_iterations."""
-	if not isinstance(opts, dict):
-		return {}
-	clean = {}
-	for key, value in opts.items():
-		k = str(key)
-		if k in _FORBIDDEN_CHILD_OPT_KEYS or k.startswith("print_"):
-			continue
-		clean[key] = value
-	# Clamp the AI-subagent iteration budget (bool is an int subclass — drop it).
-	mi = clean.get("max_iterations")
-	if isinstance(mi, bool):
-		clean.pop("max_iterations", None)
-	elif isinstance(mi, (int, float)):
-		clean["max_iterations"] = max(1, min(int(mi), _MAX_CHILD_ITERATIONS))
-	elif mi is not None:
-		clean.pop("max_iterations", None)
-	return clean
-
-
-def build_subagent_prompt(objective: str, targets: list, evidence: str) -> str:
-	"""Wrap the LLM-supplied subagent objective in a structured prompt.
-
-	The `objective` is used verbatim (the parent LLM's intent). `targets` scopes
-	the work; `evidence` (auto-gathered, may be empty) is prior findings the
-	subagent should NOT re-discover.
-	"""
-	targets_str = ", ".join(str(t) for t in targets) if targets else "(inherit parent scope)"
-	evidence_block = evidence.strip() if evidence.strip() else "(none — no prior findings for this scope)"
-	return (
-		f"## Objective\n{objective.strip() or '(no explicit objective given)'}\n\n"
-		f"## Scope\nWork ONLY within these target(s): {targets_str}\n\n"
-		f"## Already known (do not re-run tools that would re-discover these)\n{evidence_block}\n\n"
-		f"## Expected output\nInvestigate the objective, then report your findings concisely. "
-		f"Persist any new findings; do not repeat work already listed under 'Already known'."
-	)
 
 
 def _gather_subagent_evidence(ctx: "ActionContext", targets: list, limit: int = 40) -> str:
@@ -603,11 +436,9 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			return
 		opts["subagent"] = True
 		opts["interactive"] = False
-		# Inherit the parent's resolved LLM config so the subagent can actually run.
-		# Without this it falls back to CONFIG.addons.ai.default_model, which may be a
-		# different provider than the parent (e.g. anthropic-direct vs openrouter) with
-		# no key set -> AuthenticationError before the subagent does anything. setdefault
-		# so an explicit LLM-supplied model/key still wins.
+		# Inherit the parent's resolved LLM config (else it falls back to the default
+		# model/provider with no key set -> AuthenticationError). setdefault so an
+		# explicit LLM-supplied model/key still wins.
 		opts.setdefault("model", ctx.model)
 		if ctx.api_key:
 			opts.setdefault("api_key", ctx.api_key)
@@ -653,11 +484,8 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		run_opts["print_start"] = not ctx.silent and not ctx.subagent
 		run_opts["print_end"] = not ctx.silent and not ctx.subagent
 
-	# A heavy sub-task must NOT run sync in-process inside the ai task's own worker:
-	# the ai pool is small (e.g. the warm small-fast pool, ~1Gi) and a tool like
-	# nuclei (profile 'extra_large') OOM-kills it. When running inside a worker,
-	# dispatch heavy sub-runners async to their own profile's queue — the ai still
-	# waits by iterating the results. Local (non-worker) runs keep sync in-process.
+	# A heavy sub-task (e.g. nuclei) must not run sync in the ai task's small worker
+	# pool (OOM risk) — dispatch it async to its own profile's queue when in a worker.
 	if run_opts.get("sync") and _is_heavy_runner(runner_type, name, opts):
 		from secator.celery import IN_WORKER
 		if IN_WORKER:
@@ -668,11 +496,8 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
 
-	# Propagate the ai task's driver hooks (mongodb/api) into the sub-runner.
-	# The context already carries workspace_id/workspace_name/drivers (see
-	# _get_result_context), but a sync sub-runner never goes through the pickle
-	# path that re-registers driver hooks — so without this its results would
-	# persist with no workspace scope and never appear in the workspace History.
+	# Propagate driver hooks (mongodb/api): a sync sub-runner skips the pickle path
+	# that normally re-registers them, so without this its results never persist.
 	# M2: don't silently spawn a persistence-less child when the parent has drivers
 	hooks, denial = _build_child_hooks_or_denial(context)
 	if denial is not None:
@@ -684,16 +509,9 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		yield Error(message=str(e), _context=context)
 		return
 
-	# Emit the action Ai item now that the runner exists: its on_init hook has
-	# stamped the runner id into context, so we can surface it on the item
-	# (extra_data.runner_id/runner_type) for the UI to link to a RunnerCard.
-	# Emit even when silent (batch mode): silent only suppresses live console
-	# chatter, but the action doc must still be yielded so it is persisted and
-	# the UI can render a RunnerCard for it.
-	# Prefer the context id (`{type}_id`) the on_init hook stamped — that IS the
-	# persisted runner doc's `_id`, which is what the UI's getRunner queries.
-	# `runner.id` is secator's internal id and does NOT match the persisted doc,
-	# so the RunnerCard showed "Runner not found".
+	# Emit the action Ai item now the runner exists (on_init stamped the runner id) so
+	# the UI can render a RunnerCard; always emitted, even when silent. Prefer context
+	# `{type}_id` (the persisted doc's `_id`) over `runner.id` (internal, doesn't match).
 	runner_id = context.get(f"{runner_type}_id", "") or runner.id
 	yield Ai(
 		content=name,
@@ -786,22 +604,13 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			yield denial
 			return
 
-		# _build_child_hooks_or_denial returns a CLASS-keyed dict ({Scan:{}, Workflow:{},
-		# Task:{on_init:[...], on_end:[...], ...}}). The generic Task wrapper forwards
-		# self._hooks.get(Task, {}) down to its command signature, but we bypass the
-		# wrapper with direct `command(...)` instantiation, so we must extract the
-		# Task-level (name-keyed) sub-dict ourselves. Without this, register_hooks
-		# resolves hooks via hooks.get(command)/hooks.get('on_init') — neither key exists
-		# in a class-keyed dict — so the mongodb update_runner/on_build hooks never fire
-		# and the runner doc is silently never persisted (command runs SUCCESS, no doc).
+		# hooks is CLASS-keyed ({Task: {...}}); we bypass the Task wrapper with a direct
+		# `command(...)` instantiation, so extract hooks[Task] ourselves — else register_hooks
+		# finds no match and the runner doc is silently never persisted (no error, no doc).
 		hooks = hooks.get(Task, {})
 
-		# Run opts mirroring _run_runner's wiring: quiet unless the caller wants
-		# console chatter, reports enabled (findings flow through the normal
-		# pipeline), never dangerous (defense in depth). `env` is the sanitized
-		# process env so an AI-run `env`/`printenv` can't leak the LLM key / cloud
-		# creds into output that reaches the LLM + Mongo (honored via the `env`
-		# run_opt added to Command.yielder).
+		# Mirrors _run_runner's wiring: quiet, reports enabled, never dangerous (defense
+		# in depth). `env` is the sanitized process env so `env`/`printenv` can't leak secrets.
 		run_opts = {
 			"print_item": not ctx.silent,
 			"print_line": ctx.verbose and not ctx.silent,
@@ -815,24 +624,9 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			"env": _sanitized_env(),
 		}
 
-		# Instantiate the concrete `command` task directly (NOT the generic Task
-		# wrapper). The wrapper's sync path runs a throwaway inner instance inside
-		# secator.celery.run_command and returns only the structured results, so the
-		# outer wrapper's `.output` stays empty. A direct instance runs the command
-		# in-process and keeps its captured stdout on `.output`, while still firing
-		# the on_init/on_start/on_end driver hooks so the runner doc persists (with
-		# output/status/session_id) parented under the conversation.
-		#
-		# NOTE: `command` (a Command subclass) takes **run_opts, not a `run_opts=`
-		# kwarg — passing `run_opts=` would nest it and silently drop `env` (and every
-		# other opt). Spread it, keeping hooks/context as their own kwargs (both are
-		# popped by Command.__init__).
-		#
-		# Imported locally (not at module top): a top-level `from secator.tasks...`
-		# forces secator.tasks/__init__ to run discover_tasks() while secator.ai.actions
-		# is still being imported, which drops the `ai` task from discovery (circular
-		# import). The function-level import defers it to call time, after all modules
-		# are loaded.
+		# Instantiate `command` directly (bypasses the Task wrapper, which discards `.output`)
+		# so stdout survives while persist hooks still fire. Spread **run_opts, not `run_opts=`
+		# (would nest and drop `env`); import locally to avoid a circular import.
 		from secator.tasks.command import command as CommandTask
 		runner = CommandTask([command], hooks=hooks, context=context, **run_opts)
 
@@ -854,10 +648,9 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			_context=context,
 		)
 
-		# Run to completion in-process — this fires the persist hooks (on_start/
-		# on_end) exactly like a dispatched task/workflow. Do NOT `yield from
-		# runner`: the command's raw stdout lines are not surfaced as separate
-		# transcript items — the single shell_output below is the contract.
+		# Run to completion in-process (fires persist hooks like a normal task/workflow).
+		# Do NOT `yield from runner` — raw stdout lines aren't separate transcript items;
+		# the single shell_output below is the contract.
 		runner.run()
 
 		output = _truncate(runner.output or "(no output)", _MAX_SHELL_OUTPUT_CHARS)  # M1: cap so it can't blow up history
@@ -865,31 +658,6 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 
 	except Exception as e:
 		yield Error(message=f"Shell command failed: {e}", _context=context)
-
-
-def _union_live_results(persisted: List[Dict], live_results: List[Dict], query_filter: Dict, limit: int) -> List[Dict]:
-	"""Union backend results with this run's in-memory findings (local driver only).
-
-	The live findings are filtered by the SAME query via an in-memory json backend,
-	then merged into the backend (disk) results and deduped by ``_uuid`` (backend wins),
-	respecting ``limit``. Makes query_workspace the single source of truth under the
-	local driver, whose JSON exporter only writes to disk at end-of-run.
-	"""
-	if not live_results:
-		return persisted
-	from secator.query import QueryEngine
-	# workspace_id "" + a `results` context => an in-memory json backend that filters
-	# the provided results by the query (no disk access).
-	live = QueryEngine("", context={"results": live_results}).search(query_filter, limit=limit or 0)
-	seen = {r.get("_uuid") for r in persisted if r.get("_uuid")}
-	for r in live:
-		u = r.get("_uuid")
-		if u and u in seen:
-			continue
-		persisted.append(r)
-		if u:
-			seen.add(u)
-	return persisted[:limit] if limit else persisted
 
 
 def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
@@ -910,12 +678,8 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	except (TypeError, ValueError):
 		limit = 100
 
-	# The query_workspace tool schema declares `query` as an object, but some
-	# models/providers serialize it as a JSON *string* (a known tool-calling
-	# quirk). Coerce a stringified query back to a dict so the tool works
-	# regardless of the provider, mirroring the add_finding scalar coercion.
-	# On a genuinely malformed query, return a clear error the LLM can act on
-	# instead of crashing _decrypt_dict/search on a non-dict.
+	# Some providers serialize `query` as a JSON string despite the object schema
+	# (known tool-calling quirk); coerce it back, else fail with a clear LLM error.
 	if isinstance(query_filter, str):
 		try:
 			query_filter = json.loads(query_filter)
@@ -950,10 +714,8 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	try:
 		query_str = json.dumps(query_filter, separators=(',', ':'))
 		results = engine.search(query_filter, limit=limit)
-		# Local driver: the JSON exporter writes findings to disk only at end-of-run,
-		# so the backend can't see THIS run's live findings mid-run. Union the in-memory
-		# run results so query_workspace is the single source of truth. Other backends
-		# (mongodb/api) persist live via hooks, so they are queried normally (no union).
+		# Local driver only writes to disk at end-of-run, so union in-memory live results
+		# to make query_workspace the source of truth (mongodb/api persist live already).
 		if is_local and ctx.scope != "current":
 			results = _union_live_results(results, ctx.results or [], query_filter, limit)
 		yield Ai(
@@ -1003,106 +765,6 @@ def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
 	yield Ai(content=reason, ai_type="stopped", _context=context)
-
-
-def _resolve_field_type(f) -> Optional[type]:
-	"""Resolve a dataclass field's declared type to a concrete builtin type.
-
-	Mirrors ``OutputType.validate_fields``: ``f.type`` may be an actual type
-	(``bool``) or — under ``from __future__ import annotations`` — a string
-	annotation (``'bool'``). Returns the concrete type (``bool``/``int``/
-	``float``/``list``/``dict``/``str``) or ``None`` if it can't be resolved.
-	"""
-	t = f.type
-	# Actual type, e.g. bool / int / float / str
-	if isinstance(t, type):
-		return t
-	# Typing generic, e.g. List[str] -> list
-	origin = getattr(t, '__origin__', None)
-	if origin is not None:
-		return origin
-	# String annotation, e.g. 'bool', 'int', "List[str]"
-	if isinstance(t, str):
-		name = t.split('[', 1)[0].strip().lower()
-		return {
-			'bool': bool, 'int': int, 'float': float,
-			'str': str, 'list': list, 'dict': dict,
-		}.get(name)
-	return None
-
-
-def _coerce_finding_fields(cls, data: Dict) -> Dict:
-	"""Coerce AI-provided scalar values to a finding class's declared field types.
-
-	LLMs frequently emit wrong-typed scalars (a ``bool`` field as the string
-	``"true"``, an ``int`` as ``"3"``). This fixes *obvious* type mismatches
-	before validation so the finding isn't rejected for model type sloppiness.
-
-	Only coerces when safe; unknown keys, already-correct values, and
-	unparseable values are left untouched (validation will still surface a real
-	error rather than silently dropping data).
-	"""
-	field_types = {f.name: _resolve_field_type(f) for f in fields(cls)}
-	for key, value in list(data.items()):
-		if key.startswith('_'):
-			continue
-		expected = field_types.get(key)
-		if expected is None or value is None:
-			continue
-		# Already the right type (note: bool is a subclass of int, so guard it).
-		if isinstance(value, expected) and not (expected is int and isinstance(value, bool)):
-			continue
-
-		if expected is bool:
-			if isinstance(value, bool):
-				continue
-			if isinstance(value, int):
-				data[key] = bool(value)
-			elif isinstance(value, str):
-				s = value.strip().lower()
-				if s in ('true', '1', 'yes', 'on'):
-					data[key] = True
-				elif s in ('false', '0', 'no', 'off', ''):
-					data[key] = False
-		elif expected is int:
-			# Avoid coercing real bools into ints.
-			if isinstance(value, bool):
-				continue
-			if isinstance(value, float):
-				if value.is_integer():
-					data[key] = int(value)
-			elif isinstance(value, str):
-				try:
-					data[key] = int(value)
-				except ValueError:
-					try:
-						f_val = float(value)
-						if f_val.is_integer():
-							data[key] = int(f_val)
-					except ValueError:
-						pass
-		elif expected is float:
-			if isinstance(value, bool):
-				continue
-			if isinstance(value, int):
-				data[key] = float(value)
-			elif isinstance(value, str):
-				try:
-					data[key] = float(value)
-				except ValueError:
-					pass
-		elif expected is list:
-			if isinstance(value, str):
-				s = value.strip()
-				if s.startswith('['):
-					try:
-						parsed = json.loads(s)
-						if isinstance(parsed, list):
-							data[key] = parsed
-					except (json.JSONDecodeError, TypeError):
-						pass
-		# str fields: leave as-is (don't stringify); unknown types: leave untouched.
-	return data
 
 
 def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
@@ -1184,26 +846,6 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error(message=f"Failed to create {finding_type}: {e}\nExpected schema:\n{cls.schema()}", _context=context)
 
 
-def _get_action_label(action: Dict) -> str:
-	"""Get a display label for an action."""
-	act_type = action.get("action", "unknown")
-	if act_type in ("task", "workflow"):
-		name = action.get("name", "?")
-		opts = action.get("opts", {})
-		# Defensive: a model may stringify `opts` (coerced at the tool-call boundary,
-		# but a malformed value can survive as a str) — never crash a display label.
-		session_name = opts.get("session_name", "") if isinstance(opts, dict) else ""
-		if session_name:
-			return session_name
-		targets = action.get("targets", [])
-		target_str = targets[0] if len(targets) == 1 else f"{len(targets)} targets"
-		return f"{name} on {target_str}"
-	elif act_type == "shell":
-		cmd = action.get("command", "")[:40]
-		return f"shell: {cmd}"
-	return act_type
-
-
 def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 	"""Execute multiple actions in parallel with Rich progress display.
 
@@ -1256,10 +898,8 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 	progress_ids = {}
 
 	def run_single(act: Dict, idx: int) -> Dict:
-		# Use safe_dispatch_action so one action raising doesn't abort the whole
-		# batch (the executor future.result() would otherwise re-raise into the
-		# main loop). The error is captured as an Error item attributed to that
-		# action's tool_call_id and fed back to the LLM like any other result.
+		# safe_dispatch_action so one action raising doesn't abort the batch — the
+		# error becomes an Error item (tagged with tool_call_id) fed back to the LLM.
 		results = []
 		for item in safe_dispatch_action(act, batch_ctx):
 			if isinstance(item, Ai) and item.ai_type == "token_usage":
@@ -1334,36 +974,3 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 	for idx, result in sorted(all_results, key=lambda x: x[0]):
 		for item in result["results"]:
 			yield item
-
-
-def _decrypt_dict(d: Dict, encryptor: Any) -> Dict:
-	"""Recursively decrypt all string values in a dict.
-
-	Args:
-		d: Dictionary to decrypt
-		encryptor: SensitiveDataEncryptor instance
-
-	Returns:
-		Decrypted dictionary
-	"""
-	# Backstop: callers should pass a dict, but a non-dict (e.g. an LLM that
-	# stringified an object arg) must not raise `.items()` here — return it
-	# unchanged rather than crash the whole action.
-	if not isinstance(d, dict):
-		return d
-	result = {}
-	for k, v in d.items():
-		if isinstance(v, str):
-			result[k] = encryptor.decrypt(v)
-		elif isinstance(v, dict):
-			result[k] = _decrypt_dict(v, encryptor)
-		elif isinstance(v, list):
-			result[k] = [
-				encryptor.decrypt(i) if isinstance(i, str)
-				else _decrypt_dict(i, encryptor) if isinstance(i, dict)
-				else i
-				for i in v
-			]
-		else:
-			result[k] = v
-	return result
