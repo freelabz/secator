@@ -562,9 +562,8 @@ def init_llm(api_key: Optional[str] = None):
 					tool_name = msg.get("name", msg.get("tool_call_id", ""))
 					title_extra = f" [dim]{tool_name}[/]"
 					try:
-						import json as _json
 						from rich.pretty import Pretty
-						data = _json.loads(content)
+						data = json.loads(content)
 						renderable = Pretty(data)
 					except (ValueError, TypeError):
 						pass
@@ -756,8 +755,9 @@ MODEL_COLORS = [
 ]
 
 
-def format_llm_status(token_count, ctx_window, by_role):
-	"""Format a rich status message for LLM calls with token counts and a spinner message."""
+def _format_token_breakdown(token_count, ctx_window, by_role):
+	"""Format the token/context-window/per-role strings shared by the LLM status
+	spinner and the prompt_user title recap."""
 	token_str = format_token_count(token_count, icon='arrow_up', compact=True)
 	ctx_str = format_token_count(ctx_window, compact=True)
 	role_parts = []
@@ -765,6 +765,12 @@ def format_llm_status(token_count, ctx_window, by_role):
 		if role in by_role:
 			role_parts.append(f'[orange4]{role}[/]:{format_token_count(by_role[role], compact=True)}')
 	role_str = ' | '.join(role_parts)
+	return token_str, ctx_str, role_str
+
+
+def format_llm_status(token_count, ctx_window, by_role):
+	"""Format a rich status message for LLM calls with token counts and a spinner message."""
+	token_str, ctx_str, role_str = _format_token_breakdown(token_count, ctx_window, by_role)
 	return (
 		f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/]"
 		f" [gray42] • {token_str}/[dim red]{ctx_str}[/] ({role_str})[/]"
@@ -777,7 +783,6 @@ def setup_ai():
 	from rich.prompt import Prompt
 
 	# Load all models, sort, build color map
-	# all_models = sorted(litellm.model_list) # TODO: revise this, check why it doesn't list all models
 	all_models = []
 	all_parts = set()
 	for provider, model_names in litellm.models_by_provider.items():
@@ -929,7 +934,6 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 		return None
 	from secator.rich import InteractiveMenu
 	from secator.ai.prompts import format_continue
-	from secator.utils import format_token_count
 
 	# Build title with token recap
 	title = "What's next?"
@@ -938,13 +942,7 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 			from secator.ai.history import get_context_window
 			by_role = history.count_tokens_by_role(model)
 			ctx_window = get_context_window(model)
-			token_str = format_token_count(by_role['total'], icon='arrow_up', compact=True)
-			ctx_str = format_token_count(ctx_window, compact=True)
-			role_parts = []
-			for role in ('system', 'user', 'assistant', 'tool'):
-				if role in by_role:
-					role_parts.append(f'[orange4]{role}[/]:{format_token_count(by_role[role], compact=True)}')
-			role_str = ' | '.join(role_parts)
+			token_str, ctx_str, role_str = _format_token_breakdown(by_role['total'], ctx_window, by_role)
 			title += f" [gray42]• {token_str}/[dim red]{ctx_str}[/] ({role_str})[/]"
 		except Exception:
 			pass

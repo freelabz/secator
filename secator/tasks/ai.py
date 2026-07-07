@@ -61,6 +61,18 @@ def fast_detect_mode(prompt):
 	return None
 
 
+def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason):
+	"""Shared body for rejecting a tool call: encrypt the error, record it as the
+	tool result in history, and return the ``tool_result`` Ai event to yield."""
+	_error_content = maybe_encrypt(error_msg, runner.encryptor)
+	runner.history.add_tool_result(tool_name, tool_call_id, _error_content)
+	return Ai(content=f"[{tool_name}] {reason}",
+	          ai_type="tool_result",
+	          message=cap_message(
+	              {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": _error_content}),
+	          _context=dict(runner.context))
+
+
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (attack or chat mode)."""
@@ -214,8 +226,7 @@ class ai(PythonRunner):
 				# interactively below), so seed the same "chat" default `_detect_mode()`
 				# uses — the user's next answer re-detects the real mode and overwrites it.
 				self.mode = self.mode or "chat"
-				self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
-				self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+				self._rebuild_prompt_and_tools()
 				self.history = restore_history_from_db(
 					self.session_id, self._get_query_engine(),
 					model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
@@ -287,6 +298,14 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# Remote (web) session restore
 	# -------------------------------------------------------------------------
+
+	def _rebuild_prompt_and_tools(self):
+		"""Rebuild system_prompt + tool_schemas for the current mode and store them.
+
+		Returns the ``(system_prompt, tool_schemas)`` pair for callers that want it."""
+		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+		return self.system_prompt, self.tool_schemas
 
 	def _get_query_engine(self):
 		"""Build a workspace-scoped QueryEngine from the runner context.
@@ -683,7 +702,7 @@ class ai(PythonRunner):
 		self.history = ChatHistory()
 		self.encryptor = SensitiveDataEncryptor() if self.sensitive else None
 		self.has_previous_results = len(self.results) > 0
-		self.scope = "current" if self.has_previous_results > 0 else "workspace"
+		self.scope = "current" if self.has_previous_results else "workspace"
 		self.permission_engine = PermissionEngine(
 			CONFIG.addons.ai.permissions,
 			targets=self.inputs,
@@ -766,8 +785,7 @@ class ai(PythonRunner):
 		old_mode = self.mode
 		if old_mode and not force:
 			if not hasattr(self, 'tool_schemas'):
-				self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
-				self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+				self._rebuild_prompt_and_tools()
 			return
 		if not self.prompt:
 			self.mode = "chat"
@@ -811,8 +829,7 @@ class ai(PythonRunner):
 		if not workspace_id:
 			return
 		try:
-			from secator.query import QueryEngine
-			engine = QueryEngine(workspace_id, context=dict(self.context))
+			engine = self._get_query_engine()
 			results = engine.search({"_type": "target"}, limit=1000)
 			target_names = {r.get("name") or r.get("_name", "") for r in results if r}
 			target_names.discard("")
@@ -925,12 +942,7 @@ class ai(PythonRunner):
 						"expected_schema": {k: v.get("type", "any") for k, v in properties.items()},
 						"hint": "Retry with properly formatted JSON arguments.",
 					}, separators=(',', ':'))
-					_error_content = maybe_encrypt(error_msg, self.encryptor)
-					self.history.add_tool_result(name, tc_id, _error_content)
-					yield Ai(content=f"[{name}] malformed arguments",
-					         ai_type="tool_result",
-					         message=cap_message({"role": "tool", "tool_call_id": tc_id, "name": name, "content": _error_content}),
-					         _context=dict(self.context))
+					yield _reject_tool_call(self, name, tc_id, error_msg, "malformed arguments")
 					continue
 
 			# Coerce object/array args the model stringified (provider quirk) BEFORE
@@ -955,12 +967,7 @@ class ai(PythonRunner):
 					"schema": {k: v.get("type", "any") for k, v in params.get("properties", {}).items()},
 					"hint": "Provide all required fields. Retry with a complete arguments object.",
 				}, separators=(',', ':'))
-				_error_content = maybe_encrypt(error_msg, self.encryptor)
-				self.history.add_tool_result(name, tc_id, _error_content)
-				yield Ai(content=f"[{name}] rejected: {reason}",
-				         ai_type="tool_result",
-				         message=cap_message({"role": "tool", "tool_call_id": tc_id, "name": name, "content": _error_content}),
-				         _context=dict(self.context))
+				yield _reject_tool_call(self, name, tc_id, error_msg, f"rejected: {reason}")
 				continue
 
 			action["tool_call_id"] = tc_id
@@ -980,12 +987,7 @@ class ai(PythonRunner):
 				denial_display = f"{denial}\n[gray42]{cmd_display}[/gray42]" if cmd_display else denial
 				yield Warning(message=denial_display)
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
-				_error_content = maybe_encrypt(error_msg, self.encryptor)
-				self.history.add_tool_result(name, tc_id, _error_content)
-				yield Ai(content=f"[{name}] denied",
-				         ai_type="tool_result",
-				         message=cap_message({"role": "tool", "tool_call_id": tc_id, "name": name, "content": _error_content}),
-				         _context=dict(self.context))
+				yield _reject_tool_call(self, name, tc_id, error_msg, "denied")
 				continue
 
 			actions.append(action)
@@ -1115,28 +1117,16 @@ class ai(PythonRunner):
 		`self.context["ai_tokens"]` etc., read by the platform billing chore."""
 		if not usage:
 			return
-		try:
-			tokens = usage.get("tokens") or 0
-			self.context["ai_tokens"] = int(self.context.get("ai_tokens", 0) or 0) + int(tokens)
-		except (TypeError, ValueError):
-			pass
-		try:
-			prompt_tokens = usage.get("prompt_tokens") or 0
-			self.context["ai_prompt_tokens"] = \
-				int(self.context.get("ai_prompt_tokens", 0) or 0) + int(prompt_tokens)
-		except (TypeError, ValueError):
-			pass
-		try:
-			completion_tokens = usage.get("completion_tokens") or 0
-			self.context["ai_completion_tokens"] = \
-				int(self.context.get("ai_completion_tokens", 0) or 0) + int(completion_tokens)
-		except (TypeError, ValueError):
-			pass
-		try:
-			cost = usage.get("cost") or 0
-			self.context["ai_cost"] = float(self.context.get("ai_cost", 0.0) or 0.0) + float(cost)
-		except (TypeError, ValueError):
-			pass
+		for usage_key, ctx_key, cast in (
+			("tokens", "ai_tokens", int),
+			("prompt_tokens", "ai_prompt_tokens", int),
+			("completion_tokens", "ai_completion_tokens", int),
+			("cost", "ai_cost", float),
+		):
+			try:
+				self.context[ctx_key] = cast(self.context.get(ctx_key, 0) or 0) + cast(usage.get(usage_key) or 0)
+			except (TypeError, ValueError):
+				pass
 
 	def _drain_history_usage(self):
 		"""Roll billed usage accrued by history summarization into context.ai_tokens.
@@ -1232,8 +1222,7 @@ class ai(PythonRunner):
 		# Handle explicit mode switch (e.g. summarize → chat)
 		if response.get("switch_mode"):
 			self.mode = response["switch_mode"]
-			self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
-			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+			self._rebuild_prompt_and_tools()
 			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 			self.max_iterations += extra_iters
 			items.append(Info(message=f"Switched to {self.mode} mode"))
