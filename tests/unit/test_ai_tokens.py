@@ -283,7 +283,7 @@ class TestAiTokenAccountingEndToEnd(unittest.TestCase):
 		# add a user turn for the first two, then exit.
 		prompt_calls = {"n": 0}
 
-		def fake_prompt(choices):
+		def fake_prompt(choices, **kwargs):  # loop passes prompt_uuid= on the content-only path
 			prompt_calls["n"] += 1
 			if prompt_calls["n"] >= 3:
 				return None  # exit
