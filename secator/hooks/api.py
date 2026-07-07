@@ -16,6 +16,8 @@ import time
 import requests
 
 from functools import cache
+from ipaddress import ip_address
+from urllib.parse import urlsplit
 
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, Error, Info
@@ -44,9 +46,43 @@ def get_runner_dbg(runner):
 	return {runner.unique_name: runner.status, 'type': runner.config.type, 'class': runner.__class__.__name__, 'caller': runner.config.name, **runner.context}  # noqa: E501
 
 
+def _is_loopback_host(host):
+	"""Return True if host is localhost or a loopback IP address."""
+	if not host:
+		return False
+	host = host.strip('[]').lower()
+	if host == 'localhost':
+		return True
+	try:
+		return ip_address(host).is_loopback
+	except ValueError:
+		return False
+
+
+def _check_transport_security(url):
+	"""Refuse cleartext transport to a non-loopback host.
+
+	`force_ssl` only controls TLS certificate *verification*; it must never be a
+	way to ship targets/output/the Bearer key over plaintext HTTP to a remote
+	host. Allow http:// only for loopback (localhost / 127.0.0.1 / ::1) dev use.
+	"""
+	parts = urlsplit(url)
+	if parts.scheme == 'https':
+		return
+	if parts.scheme == 'http' and _is_loopback_host(parts.hostname):
+		return
+	raise Exception(
+		f'Refusing to send API data over cleartext transport to "{url}": the api driver '
+		f'transmits targets, command output and the Bearer API key. Use an https:// API_URL '
+		f'(addons.api.url) for remote hosts; plaintext http:// is only allowed for loopback. '
+		f'Note: `force_ssl:false` controls TLS cert verification only and does not enable this.'
+	)
+
+
 def _make_request(method, endpoint, data=None):
 	"""Make HTTP request to external API endpoint."""
 	url = f'{API_URL.rstrip("/")}/{endpoint.lstrip("/")}'
+	_check_transport_security(url)
 	headers = {'Content-Type': 'application/json'}
 	if API_KEY:
 		headers['Authorization'] = f'{API_HEADER_NAME} {API_KEY}'

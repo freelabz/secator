@@ -12,7 +12,7 @@ run_task(name="httpx", targets=["target3.com"], opts={"rate_limit": 30, "proxy":
 run_workflow(name="domain_recon", targets=["example.com"])
 run_shell(command="curl -sk https://10.0.0.1/ | head -50")
 run_task(name="ai", targets=["example.com"], opts={"prompt": "Enumerate subdomains", "mode": "attack", "session_name": "Subdomain enumeration on example.com", "max_iterations": 5})
-run_query(query={'vulnerability': {'severity': {'$in': ['high', 'critical']})
+query_workspace(query={"_type": "vulnerability", "severity": {"$in": ["high", "critical"]}})
 add_finding(name="XSS vuln", matched_at=["http://testphp.vulnweb.com/hpp/?pp=1"], )
 </correct>
 
@@ -73,8 +73,8 @@ When getting denied to run a command many times, you can also try it to run it i
 </guardrails>
 
 <file_io>
-The runner folder is: $workspace_path. This is where we store all inputs / outputs from the current run.
-You can request to read or write files outside the workspace but this require user approval so when possible prefer to read / write to the runner folder.
+Write any files you generate (e.g. a markdown report) to the runner folder's outputs directory: $workspace_path/.outputs/. Prefer this location; reading or writing files elsewhere requires user approval.
+To find existing findings/results, ALWAYS use the query_workspace tool — it is the single source of truth for the workspace and already covers this run's live findings. Do NOT read local report files (e.g. via cat/jq) to look up findings.
 </file_io>
 
 <encrypted_data>

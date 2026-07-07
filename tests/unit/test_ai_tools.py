@@ -198,6 +198,51 @@ class TestToolCallToAction(unittest.TestCase):
 		result = tool_call_to_action("nonexistent_tool", {"foo": "bar"})
 		self.assertIsNone(result)
 
+	def test_non_dict_arguments_rejected(self):
+		"""Non-object arguments (a bare JSON int/array/string) reject cleanly to None
+		instead of raising AttributeError on .items() and aborting the loop."""
+		from secator.ai.tools import tool_call_to_action
+		for bad in (12345, ["nmap", "10.0.0.1"], "just a string"):
+			self.assertIsNone(tool_call_to_action("run_task", bad))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestCoerceStringifiedArgs(unittest.TestCase):
+	"""Models sometimes serialize object/array params as JSON strings even though
+	the schema says object/array — coerce them back at the tool-call boundary."""
+
+	def test_stringified_opts_and_targets_coerced(self):
+		from secator.ai.tools import coerce_stringified_args
+		args = coerce_stringified_args("run_task", {
+			"name": "nmap",
+			"targets": '["10.0.0.1", "10.0.0.2"]',       # array sent as string
+			"opts": '{"session_name": "scan-x", "top_ports": 100}',  # object sent as string
+		})
+		self.assertEqual(args["targets"], ["10.0.0.1", "10.0.0.2"])
+		self.assertEqual(args["opts"], {"session_name": "scan-x", "top_ports": 100})
+
+	def test_stringified_query_coerced(self):
+		from secator.ai.tools import coerce_stringified_args
+		args = coerce_stringified_args("query_workspace", {"query": '{"_type": "url"}'})
+		self.assertEqual(args["query"], {"_type": "url"})
+
+	def test_already_typed_args_untouched(self):
+		from secator.ai.tools import coerce_stringified_args
+		args = coerce_stringified_args("run_task", {"name": "nmap", "targets": ["a"], "opts": {"x": 1}})
+		self.assertEqual(args["targets"], ["a"])
+		self.assertEqual(args["opts"], {"x": 1})
+
+	def test_malformed_json_left_as_is(self):
+		from secator.ai.tools import coerce_stringified_args
+		args = coerce_stringified_args("run_task", {"name": "nmap", "opts": "not json"})
+		self.assertEqual(args["opts"], "not json")  # left for the handler to reject cleanly
+
+	def test_scalar_string_params_not_coerced(self):
+		"""A string-typed param (e.g. run_shell.command) must stay a string."""
+		from secator.ai.tools import coerce_stringified_args
+		args = coerce_stringified_args("run_shell", {"command": '{"looks": "like json"}'})
+		self.assertEqual(args["command"], '{"looks": "like json"}')
+
 
 if __name__ == "__main__":
 	unittest.main()

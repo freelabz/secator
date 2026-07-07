@@ -14,18 +14,86 @@ from secator.utils import format_token_count
 _llm_initialized = False
 
 
-def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
-	"""Insert synthetic tool_result messages for orphan assistant tool_use blocks.
+def _strip_leading_orphan_tools(messages: List[Dict]) -> int:
+	"""Drop leading 'tool' (tool_result) messages with no preceding tool_use.
 
-	Anthropic rejects requests where an assistant tool_use block is not
-	immediately followed by a matching tool_result. Mutates `messages` in place.
+	Truncation/compaction drops the OLDEST messages with no tool-pairing
+	awareness, so the kept window can START with a tool_result whose
+	assistant(tool_calls) parent was dropped. Anthropic/OpenAI reject such a
+	leading orphan tool_result ("tool_result without matching tool_use").
+	System messages are preserved; we scan past them and drop the run of
+	leading 'tool' messages that follows. Mutates `messages` in place.
 
 	Args:
 		messages: List of message dicts in litellm/OpenAI format.
 
 	Returns:
-		Number of synthetic tool_results inserted.
+		Number of leading orphan tool messages removed.
 	"""
+	i = 0
+	while i < len(messages) and messages[i].get("role") == "system":
+		i += 1
+	removed = 0
+	while i < len(messages) and messages[i].get("role") == "tool":
+		messages.pop(i)
+		removed += 1
+	return removed
+
+
+def _dedupe_tool_results(messages: List[Dict]) -> int:
+	"""Drop duplicate tool_result messages sharing a tool_call_id.
+
+	Anthropic (and OpenRouter's providers) fold consecutive 'tool' messages into a
+	single user turn and reject more than one tool_result per tool_use id
+	("each tool_use must have a single result. Found multiple tool_result blocks
+	with id X") — a NON-retryable 400. Duplicates arise when batch results are
+	grouped out of order (itertools.groupby only groups *consecutive* keys), or
+	when history trim/compaction restructures the window. Within each run of
+	consecutive 'tool' messages, keep the first result for each id and drop the
+	rest (in place). Returns the number removed.
+	"""
+	removed = 0
+	i = 0
+	while i < len(messages):
+		if messages[i].get("role") != "tool":
+			i += 1
+			continue
+		seen = set()
+		j = i
+		while j < len(messages) and messages[j].get("role") == "tool":
+			tc_id = messages[j].get("tool_call_id")
+			if tc_id is not None and tc_id in seen:
+				del messages[j]
+				removed += 1
+				continue  # a message shifted into j; re-check without advancing
+			if tc_id is not None:
+				seen.add(tc_id)
+			j += 1
+		i = j
+	return removed
+
+
+def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
+	"""Repair orphan tool_use/tool_result pairing for Anthropic/OpenAI.
+
+	Two defects are fixed (both mutate `messages` in place):
+	- LEADING orphan tool_results: a kept window starting with a tool_result
+	  whose assistant(tool_calls) parent was trimmed away (see
+	  `_strip_leading_orphan_tools`).
+	- FORWARD orphan tool_uses: an assistant tool_use block not immediately
+	  followed by a matching tool_result (synthesize an acknowledged result).
+
+	Args:
+		messages: List of message dicts in litellm/OpenAI format.
+
+	Returns:
+		Number of messages removed or synthetic tool_results inserted.
+	"""
+	# Leading orphan tool_results have no parent in this window — drop them.
+	repaired = _strip_leading_orphan_tools(messages)
+	# Duplicate tool_results for one id are rejected as a non-retryable 400 — drop
+	# extras so the request is valid (and, when hit as a 400, so the retry repairs it).
+	repaired += _dedupe_tool_results(messages)
 	inserted = 0
 	i = 0
 	while i < len(messages):
@@ -69,7 +137,7 @@ def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
 			j += len(to_insert)
 
 		i = j
-	return inserted
+	return repaired + inserted
 
 
 def init_llm(api_key: Optional[str] = None):
@@ -192,6 +260,41 @@ def init_llm(api_key: Optional[str] = None):
 	_llm_initialized = True
 
 
+def _estimate_usage(model: str, messages: List[Dict], content: str, tool_calls) -> Dict:
+	"""M5: estimate tokens when the provider omits `usage`, so calls are never unmetered.
+
+	Uses litellm's own token counter for the model in use — prompt tokens from the
+	request messages, completion tokens from the response text (+ any tool-call
+	name/arguments). Returns the same shape as the real-usage dict (cost unknown).
+	"""
+	import litellm
+
+	def _count(**kw):
+		try:
+			return litellm.token_counter(model=model, **kw) or 0
+		except Exception:
+			return 0
+
+	prompt_tokens = _count(messages=messages)
+	completion_text = content or ""
+	for tc in tool_calls or []:
+		fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
+		if isinstance(fn, dict):
+			name, args = fn.get("name", ""), fn.get("arguments", "")
+		elif fn is not None:
+			name, args = getattr(fn, "name", ""), getattr(fn, "arguments", "")
+		else:
+			name, args = "", ""
+		completion_text += f" {name} {args}"
+	completion_tokens = _count(text=completion_text)
+	return {
+		"tokens": prompt_tokens + completion_tokens,
+		"prompt_tokens": prompt_tokens,
+		"completion_tokens": completion_tokens,
+		"cost": None,
+	}
+
+
 def call_llm(
 	messages: List[Dict],
 	model: str,
@@ -230,25 +333,30 @@ def call_llm(
 	# a matching tool_result). Safety net in case the caller bypassed ChatHistory.
 	_repair_orphan_tool_uses(kwargs["messages"])
 
+	# M4: 400s are non-transient (malformed request, context_length_exceeded, ...) —
+	# handled separately below and NOT in this transient-retry tuple.
 	retryable = (
 		litellm.InternalServerError, litellm.RateLimitError,
-		litellm.ServiceUnavailableError, litellm.APIConnectionError, litellm.BadRequestError,
+		litellm.ServiceUnavailableError, litellm.APIConnectionError,
 		litellm.APIError
 	)
 	for attempt in range(1, max_retries + 1):
 		try:
 			response = litellm.completion(**kwargs)
 			break
-		except retryable as e:
-			# Detect the specific "orphan tool_use" error and repair before retry.
+		except litellm.BadRequestError as e:
+			# M4: 400s fail fast, except the orphan tool_use case which we repair
+			# and retry (not counted as an attempt — the repair is the real fix).
 			err_str = str(e)
 			if 'tool_use' in err_str and 'tool_result' in err_str:
 				repaired = _repair_orphan_tool_uses(kwargs["messages"])
 				if repaired:
 					console.print(Warning(
 						message=f"Repaired {repaired} orphan tool_use block(s); retrying LLM call."))
-					# Don't count this as a retry attempt — the repair is the real fix.
 					continue
+			console.print(Error(message=f"LLM call failed with non-retryable 400: {e}"))
+			raise
+		except retryable as e:
 			if attempt < max_retries:
 				wait = 2 ** attempt
 				console.print(Warning(
@@ -275,8 +383,16 @@ def call_llm(
 
 		usage = {
 			"tokens": response.usage.total_tokens,
+			"prompt_tokens": getattr(response.usage, "prompt_tokens", None),
+			"completion_tokens": getattr(response.usage, "completion_tokens", None),
 			"cost": cost,
 		}
+	else:
+		# M5: usage missing/empty (streaming, some models) — estimate so the call
+		# is still metered instead of silently counting 0 tokens.
+		usage = _estimate_usage(model, kwargs["messages"], content, getattr(message, 'tool_calls', None))
+		console.print(Warning(
+			message=f"LLM response missing usage; estimated ~{usage['tokens']} tokens for metering."))
 
 	# Get tool calls
 	tool_calls = getattr(message, 'tool_calls', None) or []
@@ -581,8 +697,3 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 		return None
 	except (KeyboardInterrupt, EOFError):
 		return None
-
-
-def _maybe_encrypt(text, encryptor):
-	"""Encrypt text if encryptor is available, otherwise return as-is."""
-	return encryptor.encrypt(text) if encryptor else text
