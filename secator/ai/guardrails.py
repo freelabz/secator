@@ -773,17 +773,62 @@ class PermissionEngine:
 	Two-step validation: (1) action type check, (2) target/path check.
 	"""
 
-	def __init__(self, config: Dict, targets: List[str] = None, workspace: str = ""):
+	def __init__(
+		self, config: Dict, targets: List[str] = None, workspace: str = "",
+		allowed_targets: List[str] = None, denied_targets: List[str] = None
+	):
 		self.targets = targets or []
 		self.workspace = str(workspace)
 		self.rules = {"allow": [], "deny": [], "ask": []}
 		self.runtime_allow: List[Tuple[str, List[str]]] = []
+
+		# Platform-supplied allow-list of target regexes (e.g. validated workspace
+		# mandates). When set, a `target(...)` action is allowed only if it matches
+		# one of these regexes — this constrains the AI to the authorized scope.
+		# Each entry is matched as a regex (full-match), falling back to a literal
+		# match if the pattern is not valid regex.
+		self.allowed_targets: List = []
+		for pat in (allowed_targets or []):
+			if not pat:
+				continue
+			try:
+				self.allowed_targets.append(re.compile(pat))
+			except re.error:
+				self.allowed_targets.append(re.compile(re.escape(pat)))
+
+		# Platform-supplied deny-list of target regexes (e.g. the `deny` scope of
+		# validated workspace mandates). Symmetric to allowed_targets but DENY WINS:
+		# a `target(...)` matching one of these is denied even if it also matches an
+		# allowed_targets entry — mirroring the mandate scope matcher's deny-wins.
+		# Same regex-or-literal compilation as allowed_targets.
+		self.denied_targets: List = []
+		for pat in (denied_targets or []):
+			if not pat:
+				continue
+			try:
+				self.denied_targets.append(re.compile(pat))
+			except re.error:
+				self.denied_targets.append(re.compile(re.escape(pat)))
 
 		for category in ("allow", "deny", "ask"):
 			for rule_str in config.get(category, []):
 				resolved = self._resolve_variables(rule_str)
 				rule_type, patterns = parse_rule(resolved)
 				self.rules[category].append((rule_type, patterns))
+
+	def _matches_allowed_targets(self, value: str) -> bool:
+		"""Check if a target value matches any platform-supplied allowed_targets regex."""
+		for rx in self.allowed_targets:
+			if rx.fullmatch(value) or rx.match(value):
+				return True
+		return False
+
+	def _matches_denied_targets(self, value: str) -> bool:
+		"""Check if a target value matches any platform-supplied denied_targets regex."""
+		for rx in self.denied_targets:
+			if rx.fullmatch(value) or rx.match(value):
+				return True
+		return False
 
 	def _resolve_variables(self, rule: str) -> str:
 		"""Replace {workspace} and {targets} variables in a rule string."""
@@ -868,6 +913,18 @@ class PermissionEngine:
 
 		return PermissionResult(decision="deny", reason=f"No matching rule for {action_type}")
 
+	def _has_rules_for(self, rule_type: str) -> bool:
+		"""Check if any rules exist for the given rule type."""
+		# Platform-supplied allowed_targets / denied_targets act as a target
+		# allow/deny-list: their presence forces the target-check step to run so
+		# out-of-scope targets get constrained and denied targets get blocked.
+		if rule_type == "target" and (self.allowed_targets or self.denied_targets):
+			return True
+		for category in ("allow", "deny", "ask"):
+			for rt, _ in self.rules[category]:
+				if rt == rule_type:
+					return True
+		return any(rt == rule_type for rt, _ in self.runtime_allow)
 	def _check_action_type(self, action_type: str, action: Dict) -> PermissionResult:
 		"""Check if the action type is allowed/denied/ask.
 
@@ -970,6 +1027,21 @@ class PermissionEngine:
 				for v in values_to_check:
 					if match_rule(v, patterns):
 						return PermissionResult(decision="deny", reason=f"Denied by rule: {rule_type}({v})")
+
+		# Platform-supplied denied_targets (regex) deny-list — checked before the
+		# allowed_targets allow-list so DENY WINS: a target matching both an allow
+		# and a deny mandate scope is denied (mirrors the mandate scope matcher).
+		if rule_type == "target" and self.denied_targets:
+			for v in values_to_check:
+				if self._matches_denied_targets(v):
+					return PermissionResult(decision="deny", reason=f"Denied by mandate: target({v})")
+
+		# Platform-supplied allowed_targets (regex) allow-list — checked after deny
+		# (deny still wins) but before config/runtime allow rules.
+		if rule_type == "target" and self.allowed_targets:
+			for v in values_to_check:
+				if self._matches_allowed_targets(v):
+					return PermissionResult(decision="allow", reason=f"Allowed by mandate: target({v})")
 
 		for rt, patterns in self.rules["allow"]:
 			if rt == rule_type:
