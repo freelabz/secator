@@ -20,17 +20,8 @@ ports|1-1000,8080,8443|Comma-separated ports or ranges"""
 
 
 def load_prompt(path: str) -> str:
-	"""Load a prompt file and resolve ${includes} from common/.
-
-	Include syntax: ${common_name} resolves to common/<common_name>.txt content.
-	Standard $variable substitution is handled later by string.Template.
-
-	Args:
-		path: Relative path within the prompts directory (e.g. 'modes/attack.txt')
-
-	Returns:
-		Prompt string with includes resolved.
-	"""
+	"""Load a prompt file and resolve ${includes} from constraints/*.txt (standard
+	$variable substitution happens later via string.Template)."""
 	filepath = PROMPTS_DIR / path
 	content = filepath.read_text()
 
@@ -76,14 +67,8 @@ MODES = {
 
 
 def get_mode_config(mode: str) -> dict:
-	"""Get full config for a mode.
-
-	Args:
-		mode: The mode name (attack, chat, exploit)
-
-	Returns:
-		Mode configuration dict with system_prompt, allowed_actions, max_iterations
-	"""
+	"""Get full config (system_prompt, allowed_actions, max_iterations) for a
+	mode; unknown modes fall back to chat's config."""
 	return MODES.get(mode, MODES["chat"])
 
 
@@ -96,17 +81,8 @@ def _format_opt_type(opt_config: dict) -> str:
 
 
 def _build_runner_reference(config_type: str) -> str:
-	"""Build compact runner reference: name|description|opts|meta:meta_opt_names.
-
-	Meta options (shared across tools) are listed by name only since their
-	definitions appear in the META_OPTIONS section.
-
-	Args:
-		config_type: 'task' or 'workflow'
-
-	Returns:
-		Formatted reference string.
-	"""
+	"""Build compact runner reference: name|description|opts|meta:meta_opt_names
+	(meta options listed by name only; defined in the META_OPTIONS section)."""
 	from secator.loader import get_configs_by_type
 	from secator.template import get_config_options
 
@@ -221,16 +197,9 @@ def build_query_types() -> str:
 
 
 def get_system_prompt(mode: str, workspace_path: str = "", backend=None) -> str:
-	"""Get system prompt for mode with library reference filled in.
-
-	Args:
-		mode: One of "attack", "chat", or "exploit"
-		workspace_path: Path to the workspace/reports directory
-		backend: Optional interactivity backend to determine interaction rules
-
-	Returns:
-		Formatted system prompt string
-	"""
+	"""Get the system prompt for a mode with the library reference filled in;
+	backend (if given) determines the interaction rules appended for
+	non-interactive modes."""
 	if mode not in MODES:
 		from secator.rich import console
 		from secator.output_types import Warning
@@ -283,18 +252,8 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None) -> str:
 
 
 def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = 100) -> str:
-	"""Format tool result as compact JSON, truncating results if too many.
-
-	Args:
-		name: Tool/task name
-		status: Execution status (success/error)
-		count: Number of results
-		results: Full results from the action
-		max_items: Maximum number of result items to include (default 100)
-
-	Returns:
-		Compact JSON string
-	"""
+	"""Format a tool result as compact JSON, truncating results (and flagging
+	truncated/total_count) past max_items."""
 	truncated = False
 	if isinstance(results, list) and len(results) > max_items:
 		results = results[:max_items]
@@ -318,15 +277,7 @@ def format_tool_result(name: str, status: str, count: int, results: Any, max_ite
 
 
 def format_continue(iteration: int, max_iterations: int, instruction="continue") -> str:
-	"""Format continue message as compact JSON.
-
-	Args:
-		iteration: Current iteration number
-		max_iterations: Maximum iterations allowed
-
-	Returns:
-		Compact JSON string
-	"""
+	"""Format a "continue" loop message as compact JSON."""
 	return json.dumps({
 		"iteration": iteration,
 		"max": max_iterations,

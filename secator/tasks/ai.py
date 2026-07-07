@@ -73,13 +73,9 @@ class ai(PythonRunner):
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": f"Mode: {', '.join(MODES)}"},  # D2: derive from MODES, don't drift
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
-		# Never set a secret/CONFIG value as a task-option `default`: secator-api
-		# serves task opts (including defaults) to the UI, so a CONFIG default
-		# would leak the platform's LLM API key into the runner form. Default to
-		# empty; the task falls back to CONFIG.addons.ai.* at runtime in
-		# _init_options (api_key = passed or CONFIG.addons.ai.api_key). The
-		# user-supplied value is still `sensitive` so it's redacted from serialized
-		# runner state (run_opts/cmd) even though it's never a default.
+		# Never default this to CONFIG.addons.ai.api_key: secator-api serves task opts
+		# (incl. defaults) to the UI, which would leak the key into the runner form.
+		# Falls back to CONFIG at runtime instead; still `sensitive` so it's redacted.
 		"api_key": {"type": str, "default": "", "sensitive": True, "help": "API key for LLM provider (defaults to configured key)"},  # noqa: E501
 		"api_base": {"type": str, "default": "", "help": "API base URL (defaults to configured base)"},
 		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
@@ -210,21 +206,13 @@ class ai(PythonRunner):
 			self.session_name = session["name"]
 			self._reports_folder = session['folder']
 			if session.get("session_id"):
-				# New-format session (has a stamped session_id): adopt the prior
-				# conversation's id (instead of minting a fresh str(self.id)) so
-				# appended docs continue under it and a later resume can still find
-				# this run's turns via `_context.session_id`, and rebuild via the
-				# unified restore over the local query engine.
+				# New-format session: adopt the prior session_id (instead of a fresh
+				# str(self.id)) so appended docs continue the same `_context.session_id`.
 				self.session_id = session["session_id"]
 				self.context["session_id"] = self.session_id
-				# restore_history_from_db seeds the system message from `system_prompt`.
-				# No new prompt exists yet at this point (it's asked interactively
-				# below), so seed the same "chat" default `_detect_mode()` falls back
-				# to when there's nothing to classify; the user's next answer
-				# re-detects the real mode via `_prompt_and_redetect` ->
-				# `_detect_mode(force=True)`, which overwrites the system message in
-				# history regardless (mirrors `_maybe_resume_remote`'s ordering:
-				# mode / system_prompt resolved before the restore call).
+				# restore_history_from_db seeds system_prompt; no prompt exists yet (asked
+				# interactively below), so seed the same "chat" default `_detect_mode()`
+				# uses — the user's next answer re-detects the real mode and overwrites it.
 				self.mode = self.mode or "chat"
 				self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
 				self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
@@ -236,11 +224,9 @@ class ai(PythonRunner):
 				# the legacy path, so print it here to keep resume UX consistent).
 				print_session_results(session)
 			else:
-				# Legacy session (pre session_id-stamping): its `_type:"ai"` docs
-				# carry no `_context.session_id`, so the unified restore's nested
-				# session_id filter would exclude them and rebuild an empty history.
-				# Fall back to the local `history.json` replay, which reads the file
-				# directly and works for legacy sessions.
+				# Legacy session: its docs carry no `_context.session_id`, so the unified
+				# restore would rebuild empty history. Fall back to the local
+				# history.json replay instead.
 				self.history = replay_session(session)
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
@@ -305,21 +291,16 @@ class ai(PythonRunner):
 	def _get_query_engine(self):
 		"""Build a workspace-scoped QueryEngine from the runner context.
 
-		The backend (mongodb/api/local) is resolved from ``context['drivers']``
-		via ``QueryEngine._select_backend``. For the remote channel the API
-		appends the ``mongodb`` driver on dispatch, so this resolves to the
-		workspace Mongo backend.
-		"""
+		Backend (mongodb/api/local) resolves from ``context['drivers']``; the
+		remote channel appends ``mongodb`` on dispatch."""
 		from secator.query import QueryEngine
 		return QueryEngine(self.context.get("workspace_id", ""), context=dict(self.context))
 
 	def _maybe_resume_remote(self):
 		"""Restore chat history from Mongo when a remote session has prior docs.
 
-		Returns True (via generator return) if this turn was fully handled as a
-		respawn (history restored, loop run), False to fall through to a fresh
-		conversation. Yields any items produced along the way.
-		"""
+		Returns True if the turn was fully handled as a respawn, False to fall
+		through to a fresh conversation."""
 		query_engine = self._get_query_engine()
 
 		# Guard: remote interactivity requires a Mongo-backed query engine, else
@@ -333,11 +314,9 @@ class ai(PythonRunner):
 				'`mongodb` driver is in the runner context.'
 			)
 
-		# C3: skip replay of an already-completed turn. acks_late can redeliver
-		# this exact message (same celery_id) after a worker crash; without an
-		# idempotency marker the resume path would re-run every tool action and
-		# re-bill tokens. If this turn already completed, short-circuit instead of
-		# replaying _run_loop.
+		# C3: skip replay of an already-completed turn — acks_late can redeliver the
+		# same celery_id after a worker crash; without this marker we'd re-run every
+		# tool action and re-bill tokens.
 		turn_uuid = self._turn_uuid()
 		if turn_uuid and self._turn_completed_marker(turn_uuid, query_engine):
 			self.debug(f'C3 idempotency: turn {turn_uuid} already completed; skipping replay', sub='llm')
@@ -386,11 +365,8 @@ class ai(PythonRunner):
 		return True
 
 	def _save_history(self):
-		"""Persist chat history to the local reports folder, unless on the remote path.
-
-		For the remote (web) channel the workspace Mongo `_type:"ai"` docs are the
-		source of truth, so the local `history.json` write is skipped.
-		"""
+		"""Persist chat history locally, unless on the remote path (where the
+		workspace Mongo `_type:"ai"` docs are the source of truth instead)."""
 		if self.interactive == "remote":
 			return
 		save_history(self.history, self.reports_folder, debug_fn=self.debug)
@@ -402,10 +378,8 @@ class ai(PythonRunner):
 	def _turn_uuid(self):
 		"""Stable id naming THIS delivery's turn for idempotency.
 
-		``celery_id`` (the Celery request id) is stamped on the runner context by
-		the worker entrypoint (``run_command``) and is the SAME across an acks_late
-		worker-loss redelivery, so it uniquely and idempotently names one turn.
-		"""
+		``celery_id`` is stamped on the context by the worker entrypoint and stays
+		the same across an acks_late redelivery."""
 		return (self.context or {}).get("celery_id")
 
 	def _turn_completed_marker(self, turn_uuid, query_engine):
@@ -425,11 +399,9 @@ class ai(PythonRunner):
 	def _mark_turn_completed(self):
 		"""C3: persist a turn-completion marker once the turn is durably done.
 
-		Remote channel only. Reuses the workspace `_type:"ai"` docs (no new
-		collection); restore_history_from_db skips this ai_type so it never enters
-		the transcript. Called by the caller AFTER `_run_loop` returns, so a crash
-		mid-turn leaves no marker and the partial turn still resumes.
-		"""
+		Remote only; reuses the workspace `_type:"ai"` docs (restore skips this
+		ai_type). Called after `_run_loop` returns, so a mid-turn crash leaves no
+		marker and the turn still resumes."""
 		if self.interactive != "remote":
 			return
 		turn_uuid = self._turn_uuid()
@@ -600,11 +572,8 @@ class ai(PythonRunner):
 
 				# Follow-up / content-only / max_iter → prompt user
 				if follow_up_choices is not None or not tool_calls or iteration == self.max_iterations:
-					# Remote follow-up: the pending Ai (status="pending" + top-level choices +
-					# session_id) was already stamped and persisted as a single doc in
-					# _dispatch_and_collect (add_result dedupes by _uuid, so persistence can
-					# only happen once). Nothing to re-yield here — the frontend reads the
-					# persisted doc.
+					# Remote follow-up: the pending Ai doc was already stamped + persisted
+					# in _dispatch_and_collect (dedup by _uuid) — nothing to re-yield here.
 
 					# H5: remote max-iter after tool work is a terminal turn (no further
 					# user input expected) — don't block-poll on prompt_uuid=None with no
@@ -654,10 +623,9 @@ class ai(PythonRunner):
 				elif isinstance(e, litellm.APIConnectionError) or (
 					isinstance(e, litellm.InternalServerError) and 'connection error' in str(e).lower()
 				):
-					# Genuine connectivity failures (connection refused, DNS failure) surface in
-					# some litellm versions as InternalServerError("Connection error.") rather than
-					# APIConnectionError, so catch both and gate the latter on the connection message
-					# to avoid swallowing unrelated upstream 500 errors.
+					# Some litellm versions surface connectivity failures as InternalServerError
+					# instead of APIConnectionError, so catch both, gated by message to avoid
+					# swallowing unrelated upstream 500s.
 					yield Error(message=f"Cannot connect to model '{self.model}': {e}")
 					yield Error(message='Check api_base and connectivity: `secator config set addons.ai.api_base <URL>`')
 					self._save_history()
@@ -724,47 +692,32 @@ class ai(PythonRunner):
 			denied_targets=self.denied_targets,
 		)
 
-		# Per-run billed-token accounting. The platform billing chore reads
-		# `context.ai_tokens` (cumulative billed tokens) — the AI analog of
-		# `context.scan_hours`. Initialize on the runner context so it is
-		# persisted onto the task doc even if the run makes zero LLM calls.
+		# Per-run billed-token accounting (AI analog of context.scan_hours), read
+		# by the platform billing chore. Init so it persists even with zero LLM calls.
 		self.context.setdefault("ai_tokens", 0)
 		self.context.setdefault("ai_prompt_tokens", 0)
 		self.context.setdefault("ai_completion_tokens", 0)
 		self.context.setdefault("ai_cost", 0.0)
 
-		# Record the resolved model id used for this run so the platform metering
-		# chore can price the consumed tokens against the model registry (free
-		# vs paid, per-million in/out/cached rates). This is the *configured*
-		# model for the run; if the user switches model mid-session that change
-		# is out of scope (the configured model is recorded). Set unconditionally
-		# (not setdefault) so it reflects the option resolved in this _init.
+		# Record the resolved model id so the metering chore can price tokens against
+		# the model registry. Set unconditionally (not setdefault) — records the
+		# configured model even if the user switches mid-session.
 		self.context["ai_model"] = self.model
 
-		# Create interactivity backend.
-		# For the remote (web) channel, the UI generates a stable session_id and
-		# reuses it verbatim on respawn so a respawned task finds its prior
-		# `_type:"ai"` docs. It arrives on the runner context (self.context) —
-		# the dispatcher sends self.context to the worker (task.py build_celery)
-		# and pops run_opts['context'], so self.context is authoritative here;
-		# run_opts['context'] only carries it for local/sync runs.
+		# Create interactivity backend. For remote (web), the UI reuses a stable
+		# session_id on respawn so a respawned task finds its prior docs; it arrives
+		# via self.context (authoritative — the dispatcher pops run_opts['context']).
 		self.session_id = (
 			self.passed_context.get("session_id")
 			or (self.context or {}).get("session_id")
 			or self.session_name
 			or str(self.id)
 		)
-		# Write the resolved session_id back onto the runner context so it is the
-		# single source of truth for the conversation id. Every persisted item
-		# copies `self.context` into its `_context` (Runner._process_item), so this
-		# stamps `_context.session_id` on ALL `_type:"ai"` docs — including the
-		# `prompt`/`response` turns yielded directly here, which otherwise carry no
-		# session_id (they don't go through `_get_result_context` like tool docs do).
-		# restore_history_from_db + the remote poll both key on `_context.session_id`,
-		# so without this a locally-resolved session_id (str(self.id)/session_name)
-		# leaves the transcript turns unqueryable and a resume restores nothing.
-		# On the platform the dispatcher already supplies session_id in the context,
-		# so self.session_id equals it and this is an idempotent write.
+		# Write session_id back onto the context: every persisted item copies
+		# self.context into `_context`, so this stamps `_context.session_id` on all
+		# `_type:"ai"` docs (incl. prompt/response turns yielded directly here).
+		# restore_history_from_db + the remote poll key on it, so skipping this
+		# would leave the transcript unqueryable and resume would restore nothing.
 		if self.context is not None:
 			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
@@ -876,30 +829,12 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 
 	def _drain_steers(self):
-		"""Drain pending mid-flight steers and inject them into the LLM history.
+		"""Drain pending mid-flight steers and inject them into LLM history.
 
-		A "steer" is a user message sent WHILE the agent is running (over the
-		remote/web channel: a pending ``_type:"ai", ai_type:"steer"`` doc written by
-		``POST /ai/conversations/{id}/steer``). At the top of each loop iteration we
-		drain any pending steers for this session and append each to the history as
-		a ``[User interjected]: …`` user message so the model sees them on the next
-		turn. Cooperative — not a hard cancel (Stop already does that).
-
-		The steer doc the API wrote is itself the persisted transcript entry (it
-		carries ``_context.session_id``, so the UI's transcript poll surfaces it as
-		an "interjected" user bubble). We deliberately do NOT yield a second
-		``Ai(ai_type="steer")`` echo here — that would persist a duplicate doc with
-		the same content and double-render in the UI. ``poll_steers`` flips the
-		drained doc to ``status:"consumed"`` so it injects exactly once.
-
-		Only the RemoteBackend has a channel to poll; for every other backend this
-		is a no-op. Robust: a steer must never crash the run, so all backend access
-		is best-effort and swallowed.
-
-		Generator (``yield from``-compatible with the loop) — currently yields no
-		items, but kept a generator so future transcript echoes can be added without
-		changing the call site.
-		"""
+		A steer is a user message sent while the agent runs (over the remote/web
+		channel); each is appended as a "[User interjected]" user message. No Ai
+		echo is yielded — the steer doc itself is the persisted transcript entry.
+		RemoteBackend-only; a no-op (generator) for every other backend."""
 		if not isinstance(self.backend, RemoteBackend):
 			return
 		try:
@@ -967,10 +902,8 @@ class ai(PythonRunner):
 	def _process_tool_calls(self, tool_calls, ctx):
 		"""Parse, validate, and guardrails-check tool calls from LLM response.
 
-		Generator: yields Warning items and pending Ai prompts (for remote).
-		Returns list of validated action dicts via generator return.
-		Use: actions = yield from self._process_tool_calls(tool_calls, ctx)
-		"""
+		Generator: yields Warnings/pending Ai prompts; returns validated actions.
+		Use: actions = yield from self._process_tool_calls(tool_calls, ctx)"""
 		actions = []
 
 		for tc in tool_calls:
@@ -1067,20 +1000,16 @@ class ai(PythonRunner):
 	def _dispatch_and_collect(self, actions, ctx):
 		"""Dispatch actions, yield results, add to history.
 
-		Yields OutputType items. Returns dict with follow_up_choices, stop_reason, follow_up_ai.
-		Use: result = yield from self._dispatch_and_collect(actions, ctx)
-		"""
+		Yields OutputType items; returns dict with follow_up_choices/stop_reason/follow_up_ai."""
 		follow_up_choices = None
 		stop_reason = None
 		follow_up_ai = None
 		follow_up_prompt_uuid = None
 
 		is_batch = len(actions) > 1
-		# safe_dispatch_action wraps each action's dispatch so a Python error during
-		# a handler (e.g. a malformed LLM action/opts raising TypeError) becomes an
-		# Error item fed back to the LLM as that tool call's result, instead of
-		# propagating out and killing the main loop. _run_batch already wraps each
-		# of its actions the same way internally.
+		# safe_dispatch_action wraps dispatch so a handler error becomes an Error item
+		# fed back to the LLM, instead of killing the main loop (_run_batch does the
+		# same internally for each of its actions).
 		action_iter = _run_batch(actions, ctx) if is_batch else safe_dispatch_action(actions[0], ctx)
 
 		collected = []
@@ -1095,22 +1024,17 @@ class ai(PythonRunner):
 				if result.ai_type == "follow_up":
 					follow_up_ai = result
 					follow_up_choices = result.choices or (result.extra_data or {}).get("choices", [])
-					# Persist the follow-up doc in its FINAL renderable state. add_result()
-					# dedupes by _uuid, so once persisted here it can never be re-persisted
-					# (the later `yield follow_up_ai` in the main loop is dropped). For a
-					# remote run, stamp status="pending" + top-level choices + session_id
-					# BEFORE the single add_result, so the one persisted doc is what the web
-					# UI needs: status=="pending" (clears "thinking") and non-empty choices.
+					# Persist the follow-up doc in its FINAL renderable state (add_result
+					# dedupes by _uuid, so the later `yield follow_up_ai` is dropped). For a
+					# remote run, stamp status="pending" + choices + session_id first.
 					if isinstance(self.backend, RemoteBackend):
 						follow_up_ai.status = "pending"
 						follow_up_ai.session_id = self.session_id
 						if not follow_up_ai.choices and follow_up_choices:
 							follow_up_ai.choices = list(follow_up_choices)
-						# Stamp a unique correlation id so the poll resolves ONLY this
-						# prompt's own answer (not a stale answered follow_up from a
-						# prior turn, which would loop). Generated here (not reusing
-						# _uuid, which mongo may reassign to its _id on insert) and
-						# persisted in extra_data so it round-trips on read.
+						# Stamp a unique correlation id so the poll resolves only this prompt's
+						# answer, not a stale one from a prior turn (not reusing _uuid, which
+						# mongo may reassign on insert).
 						follow_up_prompt_uuid = str(uuid.uuid4())
 						follow_up_ai.extra_data = {
 							**(follow_up_ai.extra_data or {}), "prompt_uuid": follow_up_prompt_uuid}
@@ -1139,12 +1063,10 @@ class ai(PythonRunner):
 			collected.append(result)
 			ctx.results.append(result)
 
-		# Group results by tool_call_id and add to history. Use an order-preserving
-		# dict, NOT itertools.groupby: batch results (_run_batch) interleave by id, and
-		# groupby only groups *consecutive* keys — so an interleaved id yielded several
-		# groups and thus several tool_result messages for one tool_use, which the
-		# provider rejects ("multiple tool_result blocks with id X"). A dict groups all
-		# of an id's results together regardless of arrival order → exactly one result.
+		# Group by tool_call_id with an order-preserving dict, NOT itertools.groupby:
+		# batch results interleave by id, and groupby only groups consecutive keys,
+		# which would emit multiple tool_result messages for one tool_use (rejected
+		# by providers).
 		budget = self.history.get_action_budget(self.model)
 		fallback_path = Path(self.reports_folder) / "report.json" if self.reports_folder else None
 		grouped = {}
@@ -1189,13 +1111,8 @@ class ai(PythonRunner):
 	def _account_usage(self, usage):
 		"""Accumulate billed token/cost usage from a single LLM call onto the runner context.
 
-		`usage` is the dict returned by `call_llm`
-		(`{"tokens", "prompt_tokens", "completion_tokens", "cost"}`) or None.
-		Missing/None usage counts as 0 so accounting never crashes the run. The
-		running total lives on `self.context["ai_tokens"]` (int, cumulative) which
-		is persisted onto the task doc and read by the platform billing chore.
-		`context["ai_prompt_tokens"]`/`["ai_completion_tokens"]` carry the split.
-		"""
+		`usage` is `call_llm`'s dict (or None, counted as 0). Running totals live on
+		`self.context["ai_tokens"]` etc., read by the platform billing chore."""
 		if not usage:
 			return
 		try:
@@ -1224,9 +1141,8 @@ class ai(PythonRunner):
 	def _drain_history_usage(self):
 		"""Roll billed usage accrued by history summarization into context.ai_tokens.
 
-		`ChatHistory.compact` makes its own LLM calls and stashes their billed
-		usage on the history object; drain it here so it is counted exactly once.
-		"""
+		`ChatHistory.compact` stashes its own billed usage on the history object;
+		drain it here so it's counted exactly once."""
 		history = getattr(self, "history", None)
 		if history is None:
 			return
@@ -1276,19 +1192,11 @@ class ai(PythonRunner):
 	def _prompt_and_redetect(self, choices, prompt_uuid=None):
 		"""Prompt user via backend and re-detect intent.
 
-		Works for all backends: CLIBackend shows rich menus, RemoteBackend
-		polls DB, AutoBackend returns None (exits).
-
-		``prompt_uuid`` correlates the (remote) poll to the SPECIFIC pending
-		follow_up doc this call raised, so a stale answered follow_up from a prior
-		turn can't resolve it (which would re-inject the old prompt and loop).
-
-		Returns list of items to yield, or None to exit.
-		"""
-		# H5: plain-chat remote turns reach here with no pre-persisted pending doc
-		# (unlike the guardrail/follow-up path). Persist one now with a real
-		# prompt_uuid so the frontend can render/answer it and the poll matches only
-		# this prompt — never poll on prompt_uuid=None.
+		Works for all backends (CLI menus / remote DB poll / Auto returns None).
+		``prompt_uuid`` scopes the remote poll to THIS pending doc, avoiding a stale
+		answer from a prior turn. Returns items to yield, or None to exit."""
+		# H5: plain-chat remote turns reach here with no pre-persisted pending doc,
+		# so persist one now with a real prompt_uuid (never poll on prompt_uuid=None).
 		if isinstance(self.backend, RemoteBackend) and not prompt_uuid:
 			prompt_uuid = str(uuid.uuid4())
 			self.add_result(self.backend.build_pending_prompt(

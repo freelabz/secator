@@ -172,16 +172,8 @@ STOP_TOOL_SCHEMA = {
 
 
 def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> list:
-	"""Return list of tool schemas filtered by mode's allowed_actions.
-
-	Args:
-		mode: The AI mode (attack, chat, exploit). Unknown modes fall back to chat.
-		is_subagent: If True, exclude follow_up tool (legacy compat).
-		backend: Optional interactivity backend for exclusion/extra tools.
-
-	Returns:
-		List of OpenAI-format tool schema dicts.
-	"""
+	"""Return tool schemas filtered by mode's allowed_actions (unknown modes fall
+	back to chat), minus is_subagent/backend exclusions plus any backend extra tools."""
 	config = get_mode_config(mode)
 	allowed_actions = config["allowed_actions"]
 	excluded = set()
@@ -202,16 +194,10 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> li
 def coerce_stringified_args(tool_name: str, arguments: dict) -> dict:
 	"""Coerce args the model serialized as JSON strings back to their declared type.
 
-	Some providers stringify nested object/array parameters even when the tool
-	schema says ``type: object`` / ``array`` (e.g. ``opts`` or ``query`` arriving
-	as a JSON string). Downstream handlers then call ``.get()`` / ``**opts`` /
-	``.items()`` on a ``str`` and raise ``AttributeError`` — or silently drop the
-	value (``_sanitize_child_opts`` returns ``{}`` for a non-dict). Parse any such
-	arg once, here at the tool-call boundary, so every consumer gets the declared
-	type. Best-effort: an unparseable value is left as-is so the handler can return
-	a clean error rather than crash.
-
-	Must run BEFORE arg decryption — ``_decrypt_dict`` would otherwise treat a
+	Some providers stringify object/array params (e.g. ``opts``/``query``) even
+	though the schema declares them as such; downstream handlers then crash or
+	silently drop them. Parse once here, best-effort (left as-is if unparseable).
+	Must run BEFORE arg decryption, or ``_decrypt_dict`` would treat the
 	stringified object as a single encrypted value.
 	"""
 	if not isinstance(arguments, dict):
@@ -227,24 +213,15 @@ def coerce_stringified_args(tool_name: str, arguments: dict) -> dict:
 
 
 def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
-	"""Convert a tool call to an action dict compatible with existing action handlers.
-
-	Args:
-		tool_name: The tool function name from the LLM response.
-		arguments: The parsed arguments dict from the LLM response.
-
-	Returns:
-		Action dict with "action" key added, or None for unknown tools.
-	"""
+	"""Convert a tool call to an action dict compatible with existing action
+	handlers; returns None for unknown tools."""
 	action_type = TOOL_ACTION_MAP.get(tool_name)
 	if action_type is None:
 		return None
 	if not arguments:
 		return None
-	# A model may emit non-object arguments (a bare JSON int/array/string, e.g.
-	# `12345` or `["nmap"]`). `.items()` below would raise AttributeError and abort
-	# the whole loop — reject cleanly instead so the caller feeds an error back and
-	# the conversation continues.
+	# A model may emit non-object arguments (bare JSON int/array/string) -- `.items()`
+	# below would raise and abort the loop, so reject cleanly and let the caller retry.
 	if not isinstance(arguments, dict):
 		return None
 	safe_arguments = {k: v for k, v in arguments.items() if k not in {"action", "description"}}
