@@ -54,7 +54,7 @@ _EMPTY = frozenset()
 _WRAPPER_ARG_GRAMMAR = {
 	"flock":        (frozenset({"-w", "--timeout", "-E", "--conflict-exit-code"}), 1, frozenset({"-c", "--command"})),
 	"runuser":      (frozenset({"-u", "--user", "-g", "--group", "-G", "--supp-group", "-s", "--shell"}), 0, frozenset({"-c", "--command"})),  # noqa: E501
-	"su":           (frozenset({"-s", "--shell", "-g", "--group", "-G", "--supp-group"}), 1, frozenset({"-c", "--command"})),
+	"su":           (frozenset({"-s", "--shell", "-g", "--group", "-G", "--supp-group"}), 1, frozenset({"-c", "--command"})),  # noqa: E501
 	"script":       (_EMPTY, 0, frozenset({"-c", "--command"})),
 	"proxychains":  (frozenset({"-f"}), 0, _EMPTY),
 	"proxychains4": (frozenset({"-f"}), 0, _EMPTY),
@@ -925,6 +925,7 @@ class PermissionEngine:
 				if rt == rule_type:
 					return True
 		return any(rt == rule_type for rt, _ in self.runtime_allow)
+
 	def _check_action_type(self, action_type: str, action: Dict) -> PermissionResult:
 		"""Check if the action type is allowed/denied/ask.
 

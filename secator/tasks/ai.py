@@ -641,7 +641,7 @@ class ai(PythonRunner):
 					# 429s so a persistent rate limit can't spin forever; let iteration advance.
 					rate_limit_streak += 1
 					if rate_limit_streak >= 4:
-						yield Error(message="Rate limit exceeded on 4 consecutive attempts - aborting. Check your provider quota/billing.")
+						yield Error(message="Rate limit exceeded on 4 consecutive attempts - aborting. Check your provider quota/billing.")  # noqa: E501
 						self._save_history()
 						return
 					yield Warning(message=f"Rate limit exceeded (attempt {rate_limit_streak}/4) - retrying in the next iteration")
@@ -1341,6 +1341,8 @@ class ai(PythonRunner):
 		# Token breakdown for prompt display
 		by_role = self.history.count_tokens_by_role(self.model)
 		extra_data = {"tokens": by_role["total"], "context_window": get_context_window(self.model), "by_role": by_role}
-		items.append(Ai(content=answer, ai_type="prompt", extra_data=extra_data,
-		                 message={"role": "user", "content": maybe_encrypt(answer, self.encryptor)}))
+		items.append(Ai(
+			content=answer, ai_type="prompt", extra_data=extra_data,
+			message={"role": "user", "content": maybe_encrypt(answer, self.encryptor)},
+		))
 		return items

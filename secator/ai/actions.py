@@ -150,7 +150,7 @@ def _build_child_hooks_or_denial(context: Dict) -> Tuple[Dict, Optional["Warning
 	if parent_has_drivers and not hooks:
 		return {}, Warning(
 			message="Subagent spawn denied: parent has persistence drivers but child hook rebuild "
-					"was empty (would silently drop findings/docs)",
+				"was empty (would silently drop findings/docs)",  # noqa: E131
 			_context=context,
 		)
 	return hooks, None
@@ -573,7 +573,7 @@ def _gather_subagent_evidence(ctx: "ActionContext", targets: list, limit: int = 
 	for r in results[:limit]:
 		d = r.toDict() if hasattr(r, "toDict") else r
 		t = d.get("_type", "finding")
-		key = d.get("url") or d.get("matched_at") or f"{d.get('ip','') or d.get('host','')}"
+		key = d.get("url") or d.get("matched_at") or f"{d.get('ip', '') or d.get('host', '')}"
 		extra = f":{d.get('port')}" if d.get("port") else ""
 		name = f" {d.get('name')}" if d.get("name") else ""
 		lines.append(f"- {t} {key}{extra}{name}".rstrip())
