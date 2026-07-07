@@ -24,6 +24,21 @@ if HAS_AI:
 	from secator.output_types import Ai
 
 
+def _fake_command_runner(output):
+	"""Build a fake `command` runner instance for patching secator.tasks.command.command.
+
+	The AI shell path now runs commands as the `command` task (not subprocess.run), so
+	these E2E flows patch the class at its source and hand back an instance exposing the
+	fields _handle_shell reads: `.output` (captured stdout), `.id`, `.status`, a callable
+	`.run()`, and a settable `.max_timeout`. Mirrors the fake used in TestHandleShell.
+	"""
+	fake = MagicMock()
+	fake.output = output
+	fake.id = "task_fake"
+	fake.status = "SUCCESS"
+	return fake
+
+
 def _make_tool_call(name, args, tc_id=None):
 	"""Create a mock litellm tool call object."""
 	tc = MagicMock()
@@ -517,8 +532,8 @@ class TestLocalModeFlow(unittest.TestCase):
 		mock_shell_prompt.assert_called_once()
 
 		# Dispatch the approved action
-		with patch('secator.ai.actions.subprocess.run') as mock_run:
-			mock_run.return_value = MagicMock(stdout="exploit output\n", stderr="")
+		with patch('secator.tasks.command.command') as mock_cmd:
+			mock_cmd.return_value = _fake_command_runner("exploit output")
 			results1 = list(dispatch_action(shell_action, ctx))
 
 		# Verify shell output was produced
@@ -598,8 +613,8 @@ class TestRemoteModeFlow(unittest.TestCase):
 		self.assertIsNone(denial, f"Expected approval but got: {denial}")
 
 		# Dispatch the approved action
-		with patch('secator.ai.actions.subprocess.run') as mock_run:
-			mock_run.return_value = MagicMock(stdout="exploit output\n", stderr="")
+		with patch('secator.tasks.command.command') as mock_cmd:
+			mock_cmd.return_value = _fake_command_runner("exploit output")
 			results1 = list(dispatch_action(shell_action, ctx))
 
 		ai_results = [r for r in results1 if isinstance(r, Ai)]
@@ -705,8 +720,8 @@ class TestAutoModeFlow(unittest.TestCase):
 		denial, warnings = check_guardrails(action, ctx)
 		self.assertIsNone(denial)
 
-		with patch('secator.ai.actions.subprocess.run') as mock_run:
-			mock_run.return_value = MagicMock(stdout="response data", stderr="")
+		with patch('secator.tasks.command.command') as mock_cmd:
+			mock_cmd.return_value = _fake_command_runner("response data")
 			results = list(dispatch_action(action, ctx))
 
 		ai_results = [r for r in results if isinstance(r, Ai)]
@@ -839,8 +854,8 @@ class TestMainLoopLocalE2E(unittest.TestCase):
 		self.assertIsNone(denial)
 
 		# Dispatch
-		with patch('secator.ai.actions.subprocess.run') as mock_subprocess:
-			mock_subprocess.return_value = MagicMock(stdout="scan results\n", stderr="")
+		with patch('secator.tasks.command.command') as mock_cmd:
+			mock_cmd.return_value = _fake_command_runner("scan results")
 			results1 = list(dispatch_action(action, ctx))
 		self.assertTrue(any(isinstance(r, Ai) and r.ai_type == "shell_output" for r in results1))
 
@@ -923,8 +938,8 @@ class TestMainLoopRemoteE2E(unittest.TestCase):
 		self.assertIsNone(denial, f"Expected remote approval but got: {denial}")
 
 		# Dispatch (mock subprocess only around dispatch_action)
-		with patch('secator.ai.actions.subprocess.run') as mock_subprocess:
-			mock_subprocess.return_value = MagicMock(stdout="scan results\n", stderr="")
+		with patch('secator.tasks.command.command') as mock_cmd:
+			mock_cmd.return_value = _fake_command_runner("scan results")
 			results1 = list(dispatch_action(action, ctx))
 		self.assertTrue(any(isinstance(r, Ai) and r.ai_type == "shell_output" for r in results1))
 
@@ -994,8 +1009,8 @@ class TestMainLoopAutoE2E(unittest.TestCase):
 		denial2, _ = check_guardrails(action2, ctx)
 		self.assertIsNone(denial2, "Allowed command should pass in auto mode")
 
-		with patch('secator.ai.actions.subprocess.run') as mock_subprocess:
-			mock_subprocess.return_value = MagicMock(stdout="output\n", stderr="")
+		with patch('secator.tasks.command.command') as mock_cmd:
+			mock_cmd.return_value = _fake_command_runner("output")
 			results = list(dispatch_action(action2, ctx))
 		self.assertTrue(any(isinstance(r, Ai) and r.ai_type == "shell_output" for r in results))
 
