@@ -83,7 +83,14 @@ def _split_cmd_string(s: str) -> List[str]:
 
 
 def parse_rule(rule: str) -> Tuple[str, List[str]]:
-	"""Parse a rule string like 'target(10.0.0.1,example.com)' into (type, patterns)."""
+	"""Parse a rule string like 'target(10.0.0.1,example.com)' into (type, patterns).
+
+	Args:
+		rule: Rule string in format 'type(value1,value2,...)'
+
+	Returns:
+		Tuple of (rule_type, list_of_patterns)
+	"""
 	match = re.match(r'^(\w+)\((.+)\)$', rule)
 	if not match:
 		return ("unknown", [rule])
@@ -98,9 +105,11 @@ IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 
 
 def _normalize_ip(candidate: str) -> Optional[IPAddress]:
-	"""M8: normalize encoded IPs (decimal/hex/octal int, dotted-hex/octal, IPv6-mapped) so
-	alternate encodings can't evade IP rules. None for non-IPs (hostnames aren't resolved here;
-	DNS rebinding is a documented residual)."""
+	"""M8: normalize encoded IPs (decimal/hex/octal int, dotted-hex/octal, IPv6-mapped) to an ip_address.
+
+	Returns None if the candidate is not an IP (e.g. a hostname) so callers fall back to literal matching.
+	Hostnames are NOT resolved here (DNS rebinding is a documented residual).
+	"""
 	s = candidate.strip()
 	if not s:
 		return None
@@ -144,9 +153,23 @@ def _ip_in_pattern(ip: IPAddress, pattern: str) -> Optional[bool]:
 
 
 def match_rule(value: str, patterns: List[str]) -> bool:
-	"""Check if a value matches any pattern: exact, '*', fnmatch glob, '{port}' (:\\d+),
-	path basename (e.g. '.env' matches '/home/user/.env'), or M8 normalized IP/CIDR
-	(encoded IPs canonicalized first so alternate encodings can't evade IP rules)."""
+	"""Check if a value matches any of the given patterns.
+
+	Supports:
+	- Exact match
+	- Wildcard '*' (matches everything)
+	- Glob patterns (fnmatch)
+	- {port} variable (matches :\\d+)
+	- Basename matching for path-like values (e.g. '.env' matches '/home/user/.env')
+	- M8: IP/CIDR patterns are matched by normalized address (encoded IPs are canonicalized first)
+
+	Args:
+		value: The value to check
+		patterns: List of patterns to match against
+
+	Returns:
+		True if value matches any pattern
+	"""
 	# M8: normalize encoded IPs before deny/allow match so alternate encodings can't evade IP rules
 	norm_ip = _normalize_ip(value)
 	canon = str(norm_ip) if norm_ip is not None else None
@@ -184,8 +207,10 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 
 
 def _is_file_path(value: str) -> bool:
-	"""Check if a value looks like a file path (vs a network target), via explicit
-	path prefixes or filesystem existence checks."""
+	"""Check if a value looks like a file path rather than a network target.
+
+	Uses explicit path prefixes and filesystem existence checks.
+	"""
 	# URLs are not file paths
 	if value.startswith(('http://', 'https://', 'ftp://')):
 		return False
@@ -238,8 +263,16 @@ def _resolves(hostname: str) -> bool:
 def extract_command_targets(command: str) -> List[str]:
 	"""Extract target-like values (IPs, hosts, URLs) from a shell command string.
 
-	Uses safecmd's parsed sub-command args (naturally excludes heredocs/quoted code
-	strings); falls back to regex on the raw string if parsing fails."""
+	Uses safecmd's parsed sub-command arguments and checks each individually,
+	which naturally excludes heredoc content, quoted code strings, etc.
+	Falls back to regex on raw string if parsing fails.
+
+	Args:
+		command: Shell command string
+
+	Returns:
+		List of detected target strings
+	"""
 	targets = []
 	seen = set()
 
@@ -316,9 +349,17 @@ _SHELL_PARSER_WARNED = False
 
 
 def _warn_shell_parser_unavailable(reason: str) -> None:
-	"""Warn ONCE that the shfmt-based shell parser is unavailable, so callers fall back
-	to whole-command approval. A Warning not an Error: ``litellm`` (the ai addon) can be
-	installed while ``safecmd``/``shfmt`` is not — that just makes guardrails coarser."""
+	"""Warn ONCE that the shfmt-based shell parser is unavailable, then let the
+	caller fall back to the non-shfmt path (whole-command approval).
+
+	This is deliberately a Warning, not an Error, and it does NOT claim the ai
+	addon is missing: ``litellm`` (the ai addon) can be installed while the shell
+	parser — ``safecmd`` + the ``shfmt`` binary it shells out to — is not. Without
+	it the guardrail can't split a command into sub-commands, so
+	``_check_action_type`` falls back to asking the user to approve the whole
+	command (safe, just coarser). Warn once so a long agent run isn't spammed on
+	every shell command.
+	"""
 	global _SHELL_PARSER_WARNED
 	if _SHELL_PARSER_WARNED:
 		return
@@ -333,9 +374,18 @@ def _warn_shell_parser_unavailable(reason: str) -> None:
 
 
 def _parse_subcommands(command: str) -> List[List[str]]:
-	"""Parse a shell command into sub-command token lists via safecmd/shfmt (handles
-	pipes, &&, ||, ;, subshells, substitutions). Returns [] on parse failure (caller
-	should prompt the user to approve the whole command)."""
+	"""Parse a shell command into sub-command token lists via safecmd's parser.
+
+	Uses shfmt (via safecmd) to properly parse pipes, &&, ||, ;, subshells,
+	and command substitutions. Returns an empty list if parsing fails (caller
+	should prompt the user to approve the whole command).
+
+	Args:
+		command: Full shell command string
+
+	Returns:
+		List of token lists, one per sub-command, or [] if parsing fails.
+	"""
 	try:
 		from safecmd.bashxtract import extract_commands
 	except ImportError:
@@ -372,7 +422,9 @@ def _is_wrapper_operand(token: str) -> bool:
 
 def _peel_wrapper(args: List[str]) -> List[str]:
 	"""Strip leading exec-wrapper binaries to reach the inner command's tokens.
-	Bare `env`/`sudo` (no inner command) is returned as-is, still checked by name."""
+
+	Bare `env`/`sudo` (no inner command) is returned as-is so it's still checked by name.
+	"""
 	wrappers = _exec_wrappers()
 	tokens = args
 	for _ in range(len(args)):  # bounded peels (guards against pathological nesting)
@@ -419,8 +471,13 @@ def _match_command_glob(command: str, pattern: str) -> bool:
 
 
 def _resolve_path(path: str, cwd: str = "") -> str:
-	"""Resolve a path to absolute for consistent rule matching. `cwd` is the effective
-	working directory tracked from `cd` in the shell chain; empty uses the real CWD."""
+	"""Resolve a path to absolute for consistent rule matching.
+
+	Args:
+		path: The path to resolve
+		cwd: Effective working directory (from cd commands in the shell chain).
+			 If empty, uses the real CWD.
+	"""
 	from pathlib import Path
 	try:
 		p = Path(path).expanduser()
@@ -432,9 +489,18 @@ def _resolve_path(path: str, cwd: str = "") -> str:
 
 
 def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
-	"""Extract (resolved_path, access_type) tuples from a shell command via safecmd's
-	bash parser. Redirects (>, >>, 2>) are always 'write'; other paths take the
-	access type of their sub-command's classification."""
+	"""Extract file paths with access type from a shell command string.
+
+	Uses safecmd's bash parser (shfmt) for proper argument splitting.
+	Redirects (>, >>, 2>) are always classified as 'write'.
+	Other paths are classified based on the sub-command's classification.
+
+	Args:
+		command: Shell command string
+
+	Returns:
+		List of (resolved_path, access_type) tuples where access_type is 'read' or 'write'
+	"""
 	seen = set()
 	paths = []
 	effective_cwd = ""  # tracks cd commands in the shell chain
@@ -536,8 +602,16 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 
 
 def detect_paths(command: str) -> List[str]:
-	"""Extract file paths from a shell command string, splitting compound commands
-	(&&, ||, ;, |) first."""
+	"""Extract file paths from a shell command string.
+
+	Handles compound commands (&&, ||, ;, |) by splitting first.
+
+	Args:
+		command: Shell command string
+
+	Returns:
+		List of detected file paths
+	"""
 	return [path for path, _ in detect_paths_with_access(command)]
 
 
@@ -548,13 +622,26 @@ SENSITIVE_ENV_PATTERNS = re.compile(
 
 
 def detect_sensitive_env_vars(command: str) -> List[str]:
-	"""Detect $VAR / ${VAR} references whose name contains KEY, SECRET, TOKEN, PASSWORD,
-	PASSWD, CREDENTIAL, or AUTH; returns the matched variable names."""
+	"""Detect references to sensitive environment variables in a command.
+
+	Matches $VAR and ${VAR} patterns where the variable name contains
+	KEY, SECRET, TOKEN, PASSWORD, PASSWD, CREDENTIAL, or AUTH.
+
+	Returns:
+		List of matched variable names (e.g. ['ANTHROPIC_API_KEY'])
+	"""
 	return list(set(SENSITIVE_ENV_PATTERNS.findall(command)))
 
 
 def classify_command(cmd_name: str) -> str:
-	"""Classify a command name as one of: 'read', 'write', 'execute', 'other'."""
+	"""Classify a command as read, write, execute, or other.
+
+	Args:
+		cmd_name: The command name (first token)
+
+	Returns:
+		One of: 'read', 'write', 'execute', 'other'
+	"""
 	base = cmd_name.rsplit('/', 1)[-1]
 	if base in READ_COMMANDS:
 		return "read"
@@ -566,8 +653,14 @@ def classify_command(cmd_name: str) -> str:
 
 
 def build_target_choices(target: str) -> List[Dict]:
-	"""Build multi-select choices (label/rules/selected dicts) for an unknown target
-	(IP, host, domain, or URL)."""
+	"""Build multi-select choices for an unknown target.
+
+	Args:
+		target: The target string (IP, host, domain, or URL)
+
+	Returns:
+		List of choice dicts with label, rules, selected keys
+	"""
 	from urllib.parse import urlparse
 
 	# Detect if target is a URL and extract components
@@ -822,9 +915,13 @@ class PermissionEngine:
 		return any(rt == rule_type for rt, _ in self.runtime_allow)
 
 	def _check_action_type(self, action_type: str, action: Dict) -> PermissionResult:
-		"""Check if the action type is allowed/denied/ask. For shell, splits sub-commands via
-		safecmd/shfmt and returns the most restrictive result (deny > ask > allow); a parse
-		failure (e.g. unbalanced quotes) prompts for the whole command."""
+		"""Check if the action type is allowed/denied/ask.
+
+		For shell commands, uses safecmd's bash parser (shfmt) to extract
+		sub-commands from pipes, &&, ||, ;, and subshells. When parsing fails
+		(e.g. unbalanced quotes from LLM), prompts the user for the whole command.
+		Returns the most restrictive result (deny > ask > allow).
+		"""
 		if action_type == "shell":
 			command = action.get("command", "")
 			if not command.strip():
@@ -899,8 +996,11 @@ class PermissionEngine:
 		return ""
 
 	def _check_value(self, rule_type: str, value: str) -> PermissionResult:
-		"""Check a single value. Order: deny > allow > ask > deny. For target rules, URL
-		values are also checked by host and host:port so 'example.com:8080' covers all its URLs."""
+		"""Check a single value. Order: deny > allow > ask > deny.
+
+		For target rules, URL values are also checked by their host and host:port
+		components so that approving 'example.com:8080' covers all URLs under it.
+		"""
 		# Build list of values to check (original + URL components for targets)
 		values_to_check = [value]
 		if rule_type == "target" and value.startswith(('http://', 'https://')):
@@ -992,8 +1092,16 @@ class PermissionEngine:
 			self.runtime_allow.append((rule_type, patterns))
 
 	def prompt_target(self, target: str, interactive: bool = True, command: str = "") -> str:
-		"""Show interactive prompt for an unknown target; returns 'allow' or 'deny'.
-		`interactive=False` auto-denies without prompting."""
+		"""Show interactive prompt for an unknown target.
+
+		Args:
+			target: The target string that needs approval
+			interactive: If False, auto-deny without prompting
+			command: The shell command triggering this prompt (for display)
+
+		Returns:
+			'allow' or 'deny'
+		"""
 		if not interactive:
 			return "deny"
 
@@ -1019,8 +1127,17 @@ class PermissionEngine:
 		return "allow"
 
 	def prompt_path(self, path: str, access_type: str = "read", interactive: bool = True, command: str = "") -> str:
-		"""Show interactive prompt for a path access request (read/write); returns 'allow'
-		or 'deny'. `interactive=False` auto-denies without prompting."""
+		"""Show interactive prompt for a path access request.
+
+		Args:
+			path: The file path that needs approval
+			access_type: 'read' or 'write'
+			interactive: If False, auto-deny without prompting
+			command: The shell command triggering this prompt (for display)
+
+		Returns:
+			'allow' or 'deny'
+		"""
 		if not interactive:
 			return "deny"
 
@@ -1052,8 +1169,16 @@ class PermissionEngine:
 		return "allow"
 
 	def prompt_shell(self, command: str, reason: str = "", interactive: bool = True) -> str:
-		"""Show interactive prompt for a shell command that needs approval; returns 'allow'
-		or 'deny'. `interactive=False` auto-denies without prompting."""
+		"""Show interactive prompt for a shell command that needs approval.
+
+		Args:
+			command: The full shell command to approve
+			reason: Why approval is needed
+			interactive: If False, auto-deny without prompting
+
+		Returns:
+			'allow' or 'deny'
+		"""
 		if not interactive:
 			return "deny"
 
@@ -1092,8 +1217,16 @@ class PermissionEngine:
 		return "deny"
 
 	def _show_target_menu(self, target: str, choices: List[Dict], command: str = "") -> List[int]:
-		"""Show interactive menu (separated for testability); returns selected indices,
-		or None if cancelled."""
+		"""Show interactive menu. Separated for testability.
+
+		Args:
+			target: The target being prompted about
+			choices: List of choice dicts from build_target_choices
+			command: The shell command triggering this prompt (for display)
+
+		Returns:
+			List of selected indices, or None if cancelled
+		"""
 		from secator.rich import InteractiveMenu
 
 		options = [{"label": choice["label"]} for choice in choices]

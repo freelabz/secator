@@ -41,8 +41,14 @@ def cap_message(msg: dict, max_chars: int = MAX_PERSISTED_MESSAGE_CHARS) -> dict
 
 
 def get_context_window(model: str) -> int:
-    """Get model's context window size from litellm; falls back to
-    CONFIG.addons.ai.context_window on error or empty info."""
+    """Get model's context window size from litellm.
+
+    Args:
+        model: LLM model name
+
+    Returns:
+        Context window size in tokens (falls back to CONFIG.addons.ai.context_window on error or empty info)
+    """
     from secator.config import CONFIG
     import litellm
     try:
@@ -70,8 +76,19 @@ def truncate_to_tokens(
     output_dir: Path = None,
     result_name: str = "result"
 ) -> str:
-    """Truncate content to fit within max_tokens; if over budget, save/reference
-    the full output to a file and append a [TRUNCATED] marker + hint."""
+    """Truncate content to fit within token budget, with file fallback.
+
+    Args:
+        content: Content to truncate
+        max_tokens: Maximum tokens allowed
+        model: LLM model name for token counting
+        fallback_path: Existing file to reference (task/workflow report.json)
+        output_dir: Directory to save shell output (creates file)
+        result_name: Prefix for saved filename
+
+    Returns:
+        Original content if under budget, or truncated with [TRUNCATED] marker
+    """
     import litellm
     current = litellm.token_counter(model=model, text=content)
     if current <= max_tokens:
@@ -122,8 +139,14 @@ Keep the summary under {max_words} words. Use markdown formatting.
 
 @dataclass
 class ChatHistory:
-    """Manages chat history in litellm message format -- a thin wrapper around
-    a list of message dicts passable directly to litellm.completion()."""
+    """Manages chat history in litellm message format.
+
+    This is a thin wrapper around a list of message dicts that can be
+    passed directly to litellm.completion().
+
+    Attributes:
+        messages: List of message dicts with 'role' and 'content' keys
+    """
 
     messages: List[Dict[str, str]] = field(default_factory=list)
     model: Optional[str] = None
@@ -139,8 +162,10 @@ class ChatHistory:
         self.messages.append({"role": "system", "content": content})
 
     def set_system(self, content: str) -> None:
-        """Replace the first system message (or insert one at the start);
-        invalidates its cached token count."""
+        """Replace the first system message, or insert one at the start.
+
+        Invalidates any cached token count for the system message.
+        """
         for msg in self.messages:
             if msg["role"] == "system":
                 msg["content"] = content
@@ -156,15 +181,25 @@ class ChatHistory:
         self.messages.append({"role": "assistant", "content": content})
 
     def add_assistant_with_tool_calls(self, content: Optional[str], tool_calls: list) -> None:
-        """Add an assistant message with tool calls; content is None when the
-        LLM returns only tool calls."""
+        """Add an assistant message that includes tool calls.
+
+        Args:
+            content: Optional text content (None when LLM returns only tool calls)
+            tool_calls: List of tool call dicts from the LLM response
+        """
         msg = {"role": "assistant", "tool_calls": tool_calls}
         if content is not None:
             msg["content"] = content
         self.messages.append(msg)
 
     def add_tool_result(self, name: str, tool_call_id: str, content: str) -> None:
-        """Add a tool result message keyed by tool_call_id (the call this responds to)."""
+        """Add a tool result message.
+
+        Args:
+            name: Function name
+            tool_call_id: ID of the tool call this result responds to
+            content: The tool's output content
+        """
         msg = {"role": "tool", "tool_call_id": tool_call_id, "name": name, "content": content}
         if name:
             msg["name"] = name
@@ -174,9 +209,14 @@ class ChatHistory:
         self.messages.append({"role": "tool", "content": content})
 
     def to_messages(self, max_tokens_total: int = 0) -> List[Dict[str, str]]:
-        """Return a copy of messages, trimmed to the effective budget if needed
-        (oldest dropped first, system/recent context preserved); max_tokens_total=0
-        means no explicit cap."""
+        """Return a copy of the messages list, trimming if over the effective budget.
+
+        Uses litellm's trim_messages which preserves system messages and recent
+        context while removing oldest messages first.
+
+        Args:
+            max_tokens_total: Requested hard token limit (0 = no explicit cap).
+        """
         budget = self._trim_budget(max_tokens_total)
         if budget > 0:
             return self.trim(budget)
@@ -185,11 +225,11 @@ class ChatHistory:
     def _trim_budget(self, max_tokens_total: int = 0) -> int:
         """Effective trim budget, capped to the model's real context window.
 
-        M3: a flat max_tokens_total ignores the model window and can fail with
-        context_length_exceeded on smaller models, so cap to
-        get_context_window(model) - OUTPUT_TOKEN_RESERVATION and use it even
-        with no explicit cap. Falls back to legacy caller-driven behavior if no
-        model is known.
+        M3: a flat max_tokens_total (e.g. 100k) ignores the model window and
+        fails with context_length_exceeded on smaller-window models. Cap it to
+        get_context_window(model) - OUTPUT_TOKEN_RESERVATION (headroom for the
+        response), and use that window-derived budget even when no explicit cap
+        is set. With no model known, keep the legacy caller-driven behavior.
         """
         if not self.model:
             return max_tokens_total
@@ -199,9 +239,17 @@ class ChatHistory:
         return window_budget
 
     def trim(self, max_tokens: int) -> List[Dict[str, str]]:
-        """Trim messages to max_tokens via litellm's trim_messages: preserves
-        system/recent context, drops oldest first, shortens individual messages
-        before dropping them."""
+        """Trim messages to fit under max_tokens using litellm's trim_messages.
+
+        Preserves system messages and recent context, removing oldest messages first.
+        Also attempts to shorten individual messages before dropping them entirely.
+
+        Args:
+            max_tokens: Maximum token limit for the messages.
+
+        Returns:
+            Trimmed list of messages.
+        """
         from litellm.utils import trim_messages
         from secator.ai.utils import _strip_leading_orphan_tools
         from secator.rich import console
@@ -239,8 +287,17 @@ class ChatHistory:
         self.messages = []
 
     def count_tokens(self, model: str = None) -> int:
-        """Count tokens using litellm with per-message caching; raises ValueError
-        if no model is set/passed."""
+        """Count tokens using litellm, with per-message caching.
+
+        Args:
+            model: LLM model name (required if self.model not set)
+
+        Returns:
+            Total token count across all messages
+
+        Raises:
+            ValueError: If no model provided and self.model not set
+        """
         import litellm
         model = model or self.model
         if not model:
@@ -265,8 +322,17 @@ class ChatHistory:
         return total
 
     def count_tokens_by_role(self, model: str = None) -> Dict[str, int]:
-        """Count tokens per message role (via count_tokens()'s cache); returns a
-        dict by role plus a 'total' key."""
+        """Count tokens per message role, reusing per-message cache.
+
+        Calls count_tokens() first to ensure cache is populated,
+        then aggregates by role.
+
+        Args:
+            model: LLM model name (required if self.model not set)
+
+        Returns:
+            Dict mapping role to token count, plus 'total' key
+        """
         self.count_tokens(model)
         by_role: Dict[str, int] = {}
         for msg in self.messages:
@@ -276,7 +342,14 @@ class ChatHistory:
         return by_role
 
     def get_available_tokens(self, model: str) -> int:
-        """Return tokens available for new content: context window - reservation - used."""
+        """Return tokens available for new content.
+
+        Args:
+            model: LLM model name
+
+        Returns:
+            Available tokens (context - reservation - used)
+        """
         context_window = get_context_window(model)
         usable = context_window - OUTPUT_TOKEN_RESERVATION
         used = self.count_tokens(model)
@@ -288,8 +361,15 @@ class ChatHistory:
         return available
 
     def should_compact(self, model: str, threshold_pct: int = COMPACTION_THRESHOLD_PCT) -> bool:
-        """Return True if compaction is needed: used tokens exceed threshold_pct
-        of usable context (default 85%)."""
+        """Check if compaction needed based on % of context used.
+
+        Args:
+            model: LLM model name
+            threshold_pct: Percentage threshold (default 85)
+
+        Returns:
+            True if compaction needed
+        """
         context_window = get_context_window(model)
         usable = context_window - OUTPUT_TOKEN_RESERVATION
         used = self.count_tokens(model)
@@ -304,8 +384,19 @@ class ChatHistory:
 
     def maybe_summarize(self, model: str, api_base: Optional[str] = None,
                         api_key: Optional[str] = None) -> Tuple[bool, int, int]:
-        """Summarize history if should_compact() says usage exceeds threshold;
-        returns (compacted, old_tokens, new_tokens)."""
+        """Summarize history if token usage exceeds percentage threshold.
+
+        Uses should_compact() to determine if compaction is needed based on
+        percentage of usable context (default 85%).
+
+        Args:
+            model: LLM model name
+            api_base: Optional API base URL
+            api_key: Optional API key
+
+        Returns:
+            tuple: (compacted, old_tokens, new_tokens)
+        """
         old_tokens = self.count_tokens(model)
         if not self.should_compact(model):
             debug('skipping compaction: not needed', sub='runner.ai.context')
@@ -319,8 +410,15 @@ class ChatHistory:
 
     def compact(self, model: str, api_base: Optional[str] = None,
                 api_key: Optional[str] = None, keep_last: int = 4) -> None:
-        """Summarize non-system messages via an LLM, keeping the system prompt and
-        the last keep_last messages intact for recent context."""
+        """Summarize non-system messages using an LLM, keeping the initial system prompt
+        and the last few messages intact so the LLM retains recent context.
+
+        Args:
+            model: LLM model name
+            api_base: Optional API base URL
+            api_key: Optional API key
+            keep_last: Number of recent non-system messages to preserve (default 4)
+        """
         if len(self.messages) <= 2:
             return
 
@@ -392,8 +490,18 @@ class ChatHistory:
         self.messages.extend(to_keep)
 
     def get_action_budget(self, model: str) -> int:
-        """Get max tokens for a single action's output: the smaller of
-        MAX_ACTION_TOKENS and 50% of available context."""
+        """Get max tokens allowed for a single action's combined output.
+
+        Returns the smaller of:
+        - MAX_ACTION_TOKENS (10k hard cap)
+        - 50% of available context
+
+        Args:
+            model: LLM model name
+
+        Returns:
+            Token budget for action result
+        """
         available = self.get_available_tokens(model)
         budget = min(MAX_ACTION_TOKENS, available // 2)
         debug(

@@ -11,7 +11,13 @@ from secator.rich import console
 
 
 def save_history(history, reports_folder, debug_fn=None):
-	"""Save chat history to reports/history.json; best-effort, warns via debug_fn or console on failure."""
+	"""Save chat history to reports folder.
+
+	Args:
+		history: ChatHistory instance.
+		reports_folder: Path to reports folder.
+		debug_fn: Optional debug function for logging.
+	"""
 	try:
 		history_path = Path(reports_folder) / 'history.json'
 		with open(history_path, 'w', encoding='utf-8') as f:
@@ -26,8 +32,14 @@ def save_history(history, reports_folder, debug_fn=None):
 
 
 def list_sessions(max_sessions=20):
-	"""Scan reports folders for AI sessions with history.json; return dicts
-	sorted by mtime (most recent first), capped at max_sessions."""
+	"""Scan reports folders for AI sessions with history.json.
+
+	Args:
+		max_sessions: Maximum number of sessions to return.
+
+	Returns:
+		list: Session dicts sorted by mtime (most recent first), capped at max_sessions.
+	"""
 	sessions = []
 	pattern = str(Path(CONFIG.dirs.reports) / '*/tasks/*/history.json')
 	for history_path_str in glob.glob(pattern):
@@ -77,7 +89,11 @@ def list_sessions(max_sessions=20):
 
 
 def show_session_picker():
-	"""Show interactive menu to pick a session to resume; returns the selected session dict, or None if cancelled."""
+	"""Show interactive menu to pick a session to resume.
+
+	Returns:
+		dict: Selected session dict, or None if cancelled.
+	"""
 	from secator.rich import InteractiveMenu
 
 	sessions = list_sessions()
@@ -119,9 +135,14 @@ def show_session_picker():
 
 
 def print_session_results(session):
-	"""Print a prior session's persisted results in ``_timestamp`` order -- the
-	"here's where you left off" replay shown on resume. Reads ``report.json``;
-	best-effort (never raises) so a display error can't block a resume."""
+	"""Print a prior session's persisted results (findings + ai turns) to the
+	console in ``_timestamp`` order — the visible "here's where you left off"
+	replay shown on resume. Reads the session's ``report.json``; best-effort
+	(never raises), so a resume is never blocked by a display error.
+
+	Args:
+		session: Session dict from show_session_picker (uses ``report_path``).
+	"""
 	from secator.output_types import OUTPUT_TYPES
 
 	report_path = session.get('report_path')
@@ -150,7 +171,14 @@ def print_session_results(session):
 
 
 def replay_session(session):
-	"""Replay all results from a previous session and restore history; returns None on error."""
+	"""Replay all results from a previous session and restore history.
+
+	Args:
+		session: Session dict from show_session_picker.
+
+	Returns:
+		ChatHistory: Restored history, or None on error.
+	"""
 	from secator.ai.history import ChatHistory
 
 	# Show the prior conversation + findings on the console
@@ -172,20 +200,51 @@ def replay_session(session):
 def restore_history_from_db(session_id, query_engine, model=None, encryptor=None, system_prompt=None):
 	"""Rebuild an in-memory ChatHistory from the workspace's `_type:"ai"` Mongo docs.
 
-	Headless equivalent of ``replay_session`` for the remote path: a respawned
-	``ai`` task has no local report files, so history is rebuilt from the
-	channel docs (queried by ``session_id``, ordered by ``_timestamp``).
+	Headless equivalent of ``replay_session`` for the remote (web) path: a
+	respawned ``ai`` task on a different worker pod has no local report files, so
+	the conversation is rebuilt from the channel docs themselves (queried by
+	``session_id``, ordered by ``_timestamp``).
 
-	Post-upgrade docs carry a raw litellm ``message`` and are appended verbatim
-	(already encrypted at persist time -- do NOT re-encrypt, or it double-encrypts).
-	Legacy docs (no ``message`` field) fall back to text-only prompt/response/steer
-	reconstruction, re-encrypted here since their plaintext was never encrypted at
-	persist time; other legacy ai_types are UX artifacts and are skipped. A session
-	is never a mix of the two, so restoring each group in its own timestamp order
-	never reorders an actual transcript.
+	This is a **faithful, valid litellm transcript continuation** for docs
+	carrying a raw litellm ``message`` dict (persisted by Tasks 2-3 for every
+	prompt/assistant/tool_result turn, including tool_calls and tool_call_id
+	pairing): each persisted message is appended verbatim, in ``_timestamp``
+	order. Internal loop nudges (the synthetic "continue"/"retry" ``user``
+	prompts the run appends to live history but never persists as docs) are not
+	restored and so are omitted here — the result is therefore NOT literally
+	byte-identical to the live in-memory history, but it stays a valid transcript
+	(a clean tool→assistant continuation the model can resume from). Persisted
+	``message.content`` is already encrypted (the encryption happens at persist
+	time, not at read time), so it is NOT re-encrypted here — doing so would
+	double-encrypt it.
+
+	Docs from before this feature shipped don't carry a ``message`` field at
+	all (only the human-readable ``content`` used for the channel/report
+	display). Those fall back to the legacy **text-only** reconstruction: only
+	``ai_type="prompt"``/``"response"`` docs become ``user``/``assistant``
+	messages (re-encrypted here, since their plaintext ``content`` was never
+	encrypted at persist time), and intermediate tool-call/tool-result activity
+	is collapsed away (it was never captured verbatim pre-upgrade).
+
+	Ordering assumption: a single session is either entirely message-carrying
+	(post-upgrade) or entirely legacy (pre-upgrade) — sessions aren't upgraded
+	mid-conversation. So it is safe to restore all message-docs first (in
+	their own timestamp order) and then append any legacy docs (in their own
+	timestamp order); within a real session only one of the two groups will be
+	non-empty, so this two-pass split never reorders an actual transcript.
+
+	Args:
+		session_id: The conversation's session id (UUID generated by the UI).
+		query_engine: A ``QueryEngine`` (must resolve to the workspace Mongo
+			backend for the docs to be visible).
+		model: Optional LLM model name to set on the returned history.
+		encryptor: Optional ``SensitiveDataEncryptor``, used only for the legacy
+			text-only fallback (message-docs are already encrypted verbatim).
+		system_prompt: Optional system prompt to set as the first message.
 
 	Returns:
-		ChatHistory: rebuilt history (system-prompt-only if no prior docs exist).
+		ChatHistory: The rebuilt history (possibly with only a system prompt if
+		no prior docs exist).
 	"""
 	from secator.ai.history import ChatHistory
 	from secator.ai.encryption import maybe_encrypt

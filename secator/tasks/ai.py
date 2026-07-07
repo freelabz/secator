@@ -310,16 +310,21 @@ class ai(PythonRunner):
 	def _get_query_engine(self):
 		"""Build a workspace-scoped QueryEngine from the runner context.
 
-		Backend (mongodb/api/local) resolves from ``context['drivers']``; the
-		remote channel appends ``mongodb`` on dispatch."""
+		The backend (mongodb/api/local) is resolved from ``context['drivers']``
+		via ``QueryEngine._select_backend``. For the remote channel the API
+		appends the ``mongodb`` driver on dispatch, so this resolves to the
+		workspace Mongo backend.
+		"""
 		from secator.query import QueryEngine
 		return QueryEngine(self.context.get("workspace_id", ""), context=dict(self.context))
 
 	def _maybe_resume_remote(self):
 		"""Restore chat history from Mongo when a remote session has prior docs.
 
-		Returns True if the turn was fully handled as a respawn, False to fall
-		through to a fresh conversation."""
+		Returns True (via generator return) if this turn was fully handled as a
+		respawn (history restored, loop run), False to fall through to a fresh
+		conversation. Yields any items produced along the way.
+		"""
 		query_engine = self._get_query_engine()
 
 		# Guard: remote interactivity requires a Mongo-backed query engine, else
@@ -384,8 +389,11 @@ class ai(PythonRunner):
 		return True
 
 	def _save_history(self):
-		"""Persist chat history locally, unless on the remote path (where the
-		workspace Mongo `_type:"ai"` docs are the source of truth instead)."""
+		"""Persist chat history to the local reports folder, unless on the remote path.
+
+		For the remote (web) channel the workspace Mongo `_type:"ai"` docs are the
+		source of truth, so the local `history.json` write is skipped.
+		"""
 		if self.interactive == "remote":
 			return
 		save_history(self.history, self.reports_folder, debug_fn=self.debug)
@@ -397,8 +405,10 @@ class ai(PythonRunner):
 	def _turn_uuid(self):
 		"""Stable id naming THIS delivery's turn for idempotency.
 
-		``celery_id`` is stamped on the context by the worker entrypoint and stays
-		the same across an acks_late redelivery."""
+		``celery_id`` (the Celery request id) is stamped on the runner context by
+		the worker entrypoint (``run_command``) and is the SAME across an acks_late
+		worker-loss redelivery, so it uniquely and idempotently names one turn.
+		"""
 		return (self.context or {}).get("celery_id")
 
 	def _turn_completed_marker(self, turn_uuid, query_engine):
@@ -418,9 +428,11 @@ class ai(PythonRunner):
 	def _mark_turn_completed(self):
 		"""C3: persist a turn-completion marker once the turn is durably done.
 
-		Remote only; reuses the workspace `_type:"ai"` docs (restore skips this
-		ai_type). Called after `_run_loop` returns, so a mid-turn crash leaves no
-		marker and the turn still resumes."""
+		Remote channel only. Reuses the workspace `_type:"ai"` docs (no new
+		collection); restore_history_from_db skips this ai_type so it never enters
+		the transcript. Called by the caller AFTER `_run_loop` returns, so a crash
+		mid-turn leaves no marker and the partial turn still resumes.
+		"""
 		if self.interactive != "remote":
 			return
 		turn_uuid = self._turn_uuid()
@@ -846,12 +858,30 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 
 	def _drain_steers(self):
-		"""Drain pending mid-flight steers and inject them into LLM history.
+		"""Drain pending mid-flight steers and inject them into the LLM history.
 
-		A steer is a user message sent while the agent runs (over the remote/web
-		channel); each is appended as a "[User interjected]" user message. No Ai
-		echo is yielded — the steer doc itself is the persisted transcript entry.
-		RemoteBackend-only; a no-op (generator) for every other backend."""
+		A "steer" is a user message sent WHILE the agent is running (over the
+		remote/web channel: a pending ``_type:"ai", ai_type:"steer"`` doc written by
+		``POST /ai/conversations/{id}/steer``). At the top of each loop iteration we
+		drain any pending steers for this session and append each to the history as
+		a ``[User interjected]: …`` user message so the model sees them on the next
+		turn. Cooperative — not a hard cancel (Stop already does that).
+
+		The steer doc the API wrote is itself the persisted transcript entry (it
+		carries ``_context.session_id``, so the UI's transcript poll surfaces it as
+		an "interjected" user bubble). We deliberately do NOT yield a second
+		``Ai(ai_type="steer")`` echo here — that would persist a duplicate doc with
+		the same content and double-render in the UI. ``poll_steers`` flips the
+		drained doc to ``status:"consumed"`` so it injects exactly once.
+
+		Only the RemoteBackend has a channel to poll; for every other backend this
+		is a no-op. Robust: a steer must never crash the run, so all backend access
+		is best-effort and swallowed.
+
+		Generator (``yield from``-compatible with the loop) — currently yields no
+		items, but kept a generator so future transcript echoes can be added without
+		changing the call site.
+		"""
 		if not isinstance(self.backend, RemoteBackend):
 			return
 		try:
@@ -919,8 +949,10 @@ class ai(PythonRunner):
 	def _process_tool_calls(self, tool_calls, ctx):
 		"""Parse, validate, and guardrails-check tool calls from LLM response.
 
-		Generator: yields Warnings/pending Ai prompts; returns validated actions.
-		Use: actions = yield from self._process_tool_calls(tool_calls, ctx)"""
+		Generator: yields Warning items and pending Ai prompts (for remote).
+		Returns list of validated action dicts via generator return.
+		Use: actions = yield from self._process_tool_calls(tool_calls, ctx)
+		"""
 		actions = []
 
 		for tc in tool_calls:
@@ -1002,7 +1034,9 @@ class ai(PythonRunner):
 	def _dispatch_and_collect(self, actions, ctx):
 		"""Dispatch actions, yield results, add to history.
 
-		Yields OutputType items; returns dict with follow_up_choices/stop_reason/follow_up_ai."""
+		Yields OutputType items. Returns dict with follow_up_choices, stop_reason, follow_up_ai.
+		Use: result = yield from self._dispatch_and_collect(actions, ctx)
+		"""
 		follow_up_choices = None
 		stop_reason = None
 		follow_up_ai = None
@@ -1113,8 +1147,13 @@ class ai(PythonRunner):
 	def _account_usage(self, usage):
 		"""Accumulate billed token/cost usage from a single LLM call onto the runner context.
 
-		`usage` is `call_llm`'s dict (or None, counted as 0). Running totals live on
-		`self.context["ai_tokens"]` etc., read by the platform billing chore."""
+		`usage` is the dict returned by `call_llm`
+		(`{"tokens", "prompt_tokens", "completion_tokens", "cost"}`) or None.
+		Missing/None usage counts as 0 so accounting never crashes the run. The
+		running total lives on `self.context["ai_tokens"]` (int, cumulative) which
+		is persisted onto the task doc and read by the platform billing chore.
+		`context["ai_prompt_tokens"]`/`["ai_completion_tokens"]` carry the split.
+		"""
 		if not usage:
 			return
 		for usage_key, ctx_key, cast in (
@@ -1131,8 +1170,9 @@ class ai(PythonRunner):
 	def _drain_history_usage(self):
 		"""Roll billed usage accrued by history summarization into context.ai_tokens.
 
-		`ChatHistory.compact` stashes its own billed usage on the history object;
-		drain it here so it's counted exactly once."""
+		`ChatHistory.compact` makes its own LLM calls and stashes their billed
+		usage on the history object; drain it here so it is counted exactly once.
+		"""
 		history = getattr(self, "history", None)
 		if history is None:
 			return
@@ -1182,9 +1222,15 @@ class ai(PythonRunner):
 	def _prompt_and_redetect(self, choices, prompt_uuid=None):
 		"""Prompt user via backend and re-detect intent.
 
-		Works for all backends (CLI menus / remote DB poll / Auto returns None).
-		``prompt_uuid`` scopes the remote poll to THIS pending doc, avoiding a stale
-		answer from a prior turn. Returns items to yield, or None to exit."""
+		Works for all backends: CLIBackend shows rich menus, RemoteBackend
+		polls DB, AutoBackend returns None (exits).
+
+		``prompt_uuid`` correlates the (remote) poll to the SPECIFIC pending
+		follow_up doc this call raised, so a stale answered follow_up from a prior
+		turn can't resolve it (which would re-inject the old prompt and loop).
+
+		Returns list of items to yield, or None to exit.
+		"""
 		# H5: plain-chat remote turns reach here with no pre-persisted pending doc,
 		# so persist one now with a real prompt_uuid (never poll on prompt_uuid=None).
 		if isinstance(self.backend, RemoteBackend) and not prompt_uuid:

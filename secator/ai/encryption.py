@@ -27,8 +27,12 @@ _FAKE_HOST_EXTENSIONS = frozenset({
 
 
 def _is_hash_filename(hostname: str) -> bool:
-	"""Return True if hostname looks like a hash filename (e.g. sha1.txt,
-	md5.json) rather than a real host, to avoid false-positive PII encryption."""
+	"""Return True if the matched hostname looks like a hash filename rather than a real host.
+
+	Prevents false-positive encryption of paths like:
+	  fefdc75b8092569ffdaaf5c91522f10d063a93d2.txt   (SHA-1 hash from httpx)
+	  d41d8cd98f00b204e9800998ecf8427e.json          (MD5 hash)
+	"""
 	dot_idx = hostname.rfind('.')
 	if dot_idx < 0:
 		return False
@@ -47,16 +51,31 @@ def maybe_encrypt(text, encryptor):
 
 
 class SensitiveDataEncryptor:
-	"""Reversibly "encrypt" PII in text via salted SHA-256-hashed placeholders,
-	restorable with decrypt()."""
+	"""Encrypt sensitive data using SHA-256 hashing with salt.
+
+	This class provides reversible encryption of sensitive data (PII) in text
+	by replacing matches with hashed placeholders. The original values can be
+	restored using the decrypt method.
+
+	Attributes:
+		salt: Salt string used for hashing to ensure unique placeholders.
+		pii_map: Mapping of placeholders to original values.
+		hash_map: Mapping of bare hashes to original values.
+		custom_patterns: List of compiled regex patterns for custom PII types.
+	"""
 
 	def __init__(
 		self,
 		salt: str = "secator_pii_salt",
 		custom_patterns: Optional[List[str]] = None
 	) -> None:
-		"""Initialize with optional salt and custom_patterns (regex or literal
-		strings; '#'-prefixed entries are ignored)."""
+		"""Initialize the encryptor with optional salt and custom patterns.
+
+		Args:
+			salt: Salt string used for hashing. Defaults to "secator_pii_salt".
+			custom_patterns: Optional list of regex patterns or literal strings
+				to match as custom PII types. Lines starting with '#' are ignored.
+		"""
 		self.salt = salt
 		self.pii_map: Dict[str, str] = {}  # placeholder -> original
 		self.hash_map: Dict[str, str] = {}  # bare hash -> original

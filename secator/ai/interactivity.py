@@ -1,5 +1,9 @@
-"""Interactivity backends for AI task user interaction: all prompting flows
-through backend.ask_user() so callers never branch on interactive mode."""
+"""Interactivity backends for AI task user interaction.
+
+All user prompting (permission requests and follow-up questions) flows through
+backend.ask_user().  Callers never branch on interactive mode — the backend
+handles the UX differences.
+"""
 import time
 
 from time import sleep
@@ -13,8 +17,19 @@ class InteractivityBackend:
 
 	def ask_user(self, question: str, choices: List[str], session_id: str,
 				 prompt_type: str = "follow_up", **context) -> Optional[Dict]:
-		"""Ask the user a question; returns {"answer": str} (+ optional "extra_iters"/
-		"switch_mode" for follow_up), or None on exit/timeout/deny."""
+		"""Ask the user a question.
+
+		Args:
+			question: The question to ask.
+			choices: List of choice strings.
+			session_id: Session ID for correlating request/response.
+			prompt_type: "follow_up" or "permission".
+			**context: Backend-specific context (engine, history, etc.).
+
+		Returns:
+			dict with at least {"answer": str}, or None (exit/timeout/deny).
+			For follow_up: may also include "extra_iters" and "switch_mode".
+		"""
 		raise NotImplementedError
 
 	def get_excluded_tools(self) -> set:
@@ -84,9 +99,14 @@ class RemoteBackend(InteractivityBackend):
 		return {"stop"}
 
 	def build_pending_prompt(self, question, choices, session_id, prompt_type="follow_up", **context):
-		"""Build a pending Ai finding for the caller to yield (persists it before
-		ask_user() polls for the answer). ``prompt_uuid`` is stamped into
-		``extra_data`` so the poll matches THIS prompt, not a stale one (H7)."""
+		"""Build a pending Ai finding for the remote user to see and answer.
+
+		The caller must yield this item so it gets stored in the workspace
+		(via runner hooks) before calling ask_user(), which will poll for the answer.
+
+		``prompt_uuid`` (from context) is stamped into ``extra_data`` so the poll
+		can match THIS exact prompt, not a stale earlier answer (H7).
+		"""
 		from secator.output_types import Ai
 		extra_data = {
 			"permission_type": context.get("permission_type", ""),
@@ -134,12 +154,16 @@ class RemoteBackend(InteractivityBackend):
 	def poll_steers(self, session_id):
 		"""Drain pending steer docs for ``session_id`` and mark them consumed.
 
-		A "steer" is a mid-flight user message written to the channel while the
-		agent runs; the worker picks it up at the next checkpoint to redirect --
-		distinct from a blocking follow-up ``answer`` or a hard Stop. Returns
-		content strings oldest-first, flipping each doc to ``consumed`` so it's
-		injected exactly once; any backend error returns ``[]`` (a steer must
-		never crash the run).
+		A "steer" is a mid-flight user message: it's written into the channel
+		(``_type:"ai"``, ``ai_type:"steer"``, ``status:"pending"``) WHILE the agent
+		is running, and the worker picks it up at the next loop checkpoint to
+		redirect the next turn. This is distinct from a follow-up ``answer`` (which
+		the worker is *blocked* waiting on) and from a hard Stop (which revokes the
+		Celery task).
+
+		Returns a list of steer content strings (oldest-first). Each returned doc is
+		flipped to ``status:"consumed"`` so it's injected exactly once. Robust by
+		design: any backend error returns ``[]`` so a steer can never crash the run.
 		"""
 		if self.query_engine is None:
 			return []
@@ -177,11 +201,22 @@ class RemoteBackend(InteractivityBackend):
 	def _poll_for_answer(self, session_id, prompt_type, prompt_uuid=None):
 		"""Poll the DB for the answer to THIS specific prompt until timeout.
 
-		Scoped by ``prompt_uuid`` (not just session_id+status:"answered"): an
-		unscoped query would match a stale previously-answered doc from an earlier
-		turn, causing an infinite re-injection/respawn loop that re-runs scans and
-		burns tokens. A pending steer for this session breaks the wait early and is
-		returned as the answer, so the loop redirects immediately instead of stalling.
+		The query MUST be scoped to the exact prompt the worker is currently
+		blocked on — identified by ``prompt_uuid`` (stamped into the pending doc's
+		``extra_data.prompt_uuid`` before it was persisted). Matching only on
+		``{session_id, status:"answered"}`` is a bug: a multi-turn conversation
+		accumulates *previously* answered follow-up docs, so an unscoped query
+		returns a STALE answer immediately, the worker re-injects that old answer
+		as a brand-new prompt, re-runs the whole turn, asks again, re-matches the
+		same stale doc — an infinite respawn loop that re-runs scans and burns
+		tokens. Scoping on ``prompt_uuid`` makes the poll resolve only THIS
+		prompt's own answer (and time out only THIS prompt's doc).
+
+		A steer (mid-flight user message) breaks the wait: if a pending steer
+		arrives for this session while we're blocked on a follow-up, we return its
+		content as the "answer" so the loop redirects immediately instead of
+		stalling until the follow-up is explicitly answered (or times out). This
+		keeps follow-up semantics intact for the no-steer case.
 		"""
 		base = {
 			"_type": "ai",
@@ -225,8 +260,11 @@ class RemoteBackend(InteractivityBackend):
 		return None
 
 	def _resolve_answer(self, answered_query):
-		"""Return the newest answered doc's answer (by ``_timestamp``, a backstop
-		against stale answers), or None if none answered."""
+		"""Return the newest answered doc's answer, or None if none answered.
+
+		Resolving against the newest by ``_timestamp`` is a backstop against
+		stale answers.
+		"""
 		results = self.query_engine.search(answered_query)
 		if not results:
 			return None
@@ -236,10 +274,11 @@ class RemoteBackend(InteractivityBackend):
 	def _expire_stale_pending(self, session_id):
 		"""Mark any older still-pending prompt for this session as timed_out.
 
-		Called before a new prompt persists, so stale 'pending' docs (e.g. from a
-		worker that died mid-poll) don't strand the UI or collide with
-		crud.answer_ai_prompt's "latest pending" (M10). FLAG: a DB-layer TTL index
-		on pending Ai docs is the durable follow-up.
+		Called when a NEW prompt starts (before it is persisted), so it only
+		affects prior prompts. Stops stale 'pending' docs from accumulating —
+		a worker that dies mid-poll otherwise leaves the UI 'thinking' forever
+		and lets crud.answer_ai_prompt's "latest pending" collide (M10).
+		FLAG: a DB-layer TTL index on pending Ai docs is the durable follow-up.
 		"""
 		if not self.query_engine:
 			return
