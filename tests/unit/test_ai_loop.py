@@ -477,14 +477,19 @@ class TestRemoteBackendPermissions(unittest.TestCase):
 		self.assertEqual(check.decision, "allow")
 
 	def test_full_remote_permission_flow(self):
-		"""Full flow: RemoteBackend polls, gets 'allow', adds rules."""
+		"""Full flow: RemoteBackend polls, gets 'allow_all', persists a session rule.
+
+		Per M12/H9 a single 'allow' is a one-shot that adds NO rule (next match
+		re-prompts); only 'allow_all' persists a session-scoped runtime allow. The
+		backend still maps both to {"answer": "allow"} for the caller.
+		"""
 		mock_engine = MagicMock()
-		mock_engine.search.return_value = [{"answer": "allow"}]
+		mock_engine.search.return_value = [{"answer": "allow_all"}]
 		engine = PermissionEngine(_make_permission_config(), targets=["10.0.0.1"], workspace="/tmp/ws")
 
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
 		result = backend.ask_user(
-			"Allow shell: python3?", ["allow", "deny"], "sess1",
+			"Allow shell: python3?", ["allow", "allow_all", "deny"], "sess1",
 			prompt_type="permission", permission_type="shell",
 			value="python3 exploit.py", engine=engine
 		)
