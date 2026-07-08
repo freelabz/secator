@@ -777,5 +777,27 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         self.assertNotIn("system", result)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestCapMessage(unittest.TestCase):
+
+    def test_cap_message_truncates_content_and_arguments(self):
+        from secator.ai.history import cap_message, MAX_PERSISTED_MESSAGE_CHARS
+        big = "x" * (MAX_PERSISTED_MESSAGE_CHARS + 500)
+        msg = {"role": "assistant", "content": big,
+               "tool_calls": [{"id": "1", "type": "function",
+                               "function": {"name": "q", "arguments": big}}]}
+        out = cap_message(msg)
+        assert len(out["content"]) <= MAX_PERSISTED_MESSAGE_CHARS + 20  # marker slack
+        assert "[capped]" in out["content"]
+        assert len(out["tool_calls"][0]["function"]["arguments"]) <= MAX_PERSISTED_MESSAGE_CHARS + 20
+        # original not mutated
+        assert len(msg["content"]) == MAX_PERSISTED_MESSAGE_CHARS + 500
+
+    def test_cap_message_leaves_small_messages_untouched(self):
+        from secator.ai.history import cap_message
+        msg = {"role": "tool", "tool_call_id": "1", "content": "small"}
+        assert cap_message(msg) == msg
+
+
 if __name__ == '__main__':
     unittest.main()
