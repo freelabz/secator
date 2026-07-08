@@ -40,14 +40,26 @@ tasks:
   katana:
     description: Crawl for API endpoints
 
+  urlparser:
+    description: Extract origin URL
+    include: [url_root]
+    targets_:
+      - type: target
+        field: name
+    if: opts.fuzz
+
   ffuf:
     description: Brute-force API routes
     wordlist: apiroutes
     auto_calibration: true
     if: opts.fuzz
     targets_:
-      - type: target
-        field: '{name}/FUZZ'
+      # Fuzz from the origin (url_root strips path + trailing slash) with /FUZZ so ffuf's auto-calibration
+      # probes hit the right host with a clean path. apiroutes entries are absolute (/api/x), so real routes
+      # come out as host//api — ffuf collapses the redundant slash in its output URLs.
+      - type: tag
+        field: '{value}/FUZZ'
+        condition: item.name == 'url_root'
 
   wafw00f:
     description: Fingerprint WAF
