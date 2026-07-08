@@ -501,20 +501,6 @@ class Command(Runner):
 			self.print_description()
 			self.print_command()
 
-			# In remote worker mode, stream description and cmd back to the client
-			if IN_WORKER and self.print_cmd:
-				cmd_str = _s(self.cmd_for_display)
-				if self.chunk and self.chunk_count:
-					cmd_str += f' ({self.chunk}/{self.chunk_count})'
-				if self.description:
-					task_part = f'{self.description} ([bold gold3]{self.unique_name}[/])'
-				else:
-					task_part = f'[bold gold3]{self.unique_name}[/]'
-				yield Info(
-					message=f'Started task {task_part} (cmd=[dim white]{cmd_str}[/])',
-					_source=self.unique_name,
-				)
-
 			# Check for sudo requirements and prepare the password if needed
 			sudo_required = re.search(r'\bsudo\b', self.cmd)
 			sudo_password = None
