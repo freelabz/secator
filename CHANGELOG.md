@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.40.1](https://github.com/freelabz/secator/compare/v0.40.0...v0.40.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **core:** remove command info messages to not pollute self.output ([#1290](https://github.com/freelabz/secator/issues/1290)) ([ff3a1ef](https://github.com/freelabz/secator/commit/ff3a1ef55da294681e7c002cdafbded8d7fdfa60))
+* **gitleaks:** set input_chunk_size to 1 ([#1291](https://github.com/freelabz/secator/issues/1291)) ([a7ea3d7](https://github.com/freelabz/secator/commit/a7ea3d7be480214ffb76e42e303059eec7b64c61))
+* **output_types:** strip short content for tags ([#1292](https://github.com/freelabz/secator/issues/1292)) ([383894f](https://github.com/freelabz/secator/commit/383894f014ba311ca48c5a122b616bd8372ae45f))
+
 ## [0.40.0](https://github.com/freelabz/secator/compare/v0.39.0...v0.40.0) (2026-07-06)
 
 
