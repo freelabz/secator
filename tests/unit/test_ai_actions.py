@@ -15,6 +15,7 @@ if ADDONS_ENABLED['ai']:
 		_MAX_CHILD_ITERATIONS, _MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
 		_MAX_SHELL_OUTPUT_CHARS, _truncate,
 	)
+	from secator.runners import Task
 	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
 
 
@@ -149,58 +150,130 @@ class TestHandleShell(unittest.TestCase):
 		self.assertIn('DRY RUN', results[0].message)
 		self.assertIn('whoami', results[0].message)
 
-	@patch('secator.ai.actions.subprocess.run')
-	def test_shell_execution(self, mock_run):
-		mock_run.return_value = MagicMock(stdout='root\n', stderr='')
+	def test_shell_execution(self):
+		"""Real integration test: `_handle_shell` dispatches the actual `command` task
+		(no driver -> no persistence, but it still runs) and surfaces its stdout."""
 		ctx = ActionContext(targets=['t.com'], model='m')
 
-		results = list(_handle_shell({'action': 'shell', 'command': 'whoami'}, ctx))
+		results = list(_handle_shell({'action': 'shell', 'command': 'echo hello'}, ctx))
 
 		self.assertEqual(len(results), 2)
 		# First: the command being run
 		self.assertIsInstance(results[0], Ai)
 		self.assertEqual(results[0].ai_type, 'shell')
-		self.assertEqual(results[0].content, 'whoami')
+		self.assertEqual(results[0].content, 'echo hello')
 		# Second: the output
 		self.assertIsInstance(results[1], Ai)
 		self.assertEqual(results[1].ai_type, 'shell_output')
-		self.assertIn('root', results[1].content)
+		self.assertIn('hello', results[1].content)
 
-	@patch('secator.ai.actions.subprocess.run')
-	def test_shell_stderr(self, mock_run):
-		mock_run.return_value = MagicMock(stdout='', stderr='error msg')
+	@patch('secator.tasks.command.command')
+	def test_shell_dispatches_command_task_with_parent_context(self, mock_task_cls):
+		"""The shell command must run as a `command` task carrying the parent's context
+		(notably `session_id`), so it persists nested under the conversation."""
+		fake_runner = MagicMock()
+		fake_runner.id = 'task_abc'
+		fake_runner.output = 'hello'
+		mock_task_cls.return_value = fake_runner
+
+		ctx = ActionContext(targets=['t.com'], model='m', session_id='sess-123')
+		results = list(_handle_shell({'action': 'shell', 'command': 'echo hello'}, ctx))
+
+		# CommandTask constructed with the raw command line as its sole input (first
+		# positional arg, since we instantiate the concrete class directly).
+		call_args = mock_task_cls.call_args
+		self.assertEqual(call_args[0][0], ['echo hello'])
+		captured_context = call_args[1]['context']
+		self.assertEqual(captured_context.get('session_id'), 'sess-123')
+
+		fake_runner.run.assert_called_once()
+		self.assertEqual(fake_runner.max_timeout, 60)
+
+		self.assertEqual(results[0].ai_type, 'shell')
+		# The shell Ai must carry the UI-linking extra_data (runner_type + runner_id)
+		# so a future regression in that wiring is caught.
+		self.assertEqual(results[0].extra_data.get('runner_type'), 'task')
+		self.assertTrue(results[0].extra_data.get('runner_id'))
+		self.assertEqual(results[-1].ai_type, 'shell_output')
+		self.assertIn('hello', results[-1].content)
+
+	@patch('secator.tasks.command.command')
+	def test_shell_passes_sanitized_env(self, mock_task_cls):
+		"""SECURITY: the sanitized process env is passed via the `env` run_opt so an
+		AI-run `env`/`printenv` can't dump the LLM key / cloud creds into output that
+		reaches the LLM + Mongo."""
+		import os as _os
+		fake_runner = MagicMock()
+		fake_runner.id = 'task_abc'
+		fake_runner.output = ''
+		mock_task_cls.return_value = fake_runner
+
+		with patch.dict(_os.environ, {'ANTHROPIC_API_KEY': 'sk-secret', 'HOME': '/home/x'}):
+			ctx = ActionContext(targets=['t.com'], model='m')
+			list(_handle_shell({'action': 'shell', 'command': 'env'}, ctx))
+
+		# run_opts are spread as kwargs (command takes **run_opts), so `env` is a
+		# top-level kwarg, not nested under a `run_opts` kwarg.
+		passed_env = mock_task_cls.call_args[1]['env']
+		self.assertNotIn('ANTHROPIC_API_KEY', passed_env)
+		# a benign var still passes through so the command can actually run
+		self.assertEqual(passed_env.get('HOME'), '/home/x')
+
+	@patch('secator.ai.actions._build_child_hooks_or_denial')
+	def test_shell_extracts_task_hooks_and_they_fire(self, mock_hooks):
+		"""REGRESSION GUARD (live-Mongo bug): _build_child_hooks_or_denial returns a
+		CLASS-keyed dict ({Task: {on_end: [...]}, ...}). Direct `command` instantiation
+		bypasses the Task wrapper that would extract the Task sub-dict, so _handle_shell
+		must extract `hooks.get(Task, {})` itself — otherwise register_hooks resolves
+		nothing and the mongodb persistence hooks never fire (command runs SUCCESS but
+		no doc is persisted). This asserts the extraction happened AND the hook actually
+		fired during the real run — a flat-dict mock cannot catch the extraction bug.
+		"""
+		fired = []
+
+		def sentinel(runner):
+			fired.append(runner)
+			return runner  # on_end convention: return the runner
+
+		mock_hooks.return_value = ({Task: {'on_end': [sentinel]}}, None)
+
 		ctx = ActionContext(targets=['t.com'], model='m')
+		results = list(_handle_shell({'action': 'shell', 'command': 'echo hi'}, ctx))
 
-		results = list(_handle_shell({'action': 'shell', 'command': 'bad'}, ctx))
+		# The class-keyed dict was extracted to the Task sub-dict, so the on_end hook
+		# resolved and fired against the real command runner.
+		self.assertTrue(fired, "on_end hook did not fire — Task sub-dict was not extracted")
+		self.assertEqual(results[-1].ai_type, 'shell_output')
+		self.assertIn('hi', results[-1].content)
 
-		self.assertEqual(results[1].content, 'error msg')
-
-	@patch('secator.ai.actions.subprocess.run')
-	def test_shell_no_output(self, mock_run):
-		mock_run.return_value = MagicMock(stdout='', stderr='')
+	def test_shell_no_output(self):
 		ctx = ActionContext(targets=['t.com'], model='m')
 
 		results = list(_handle_shell({'action': 'shell', 'command': 'true'}, ctx))
 
 		self.assertEqual(results[1].content, '(no output)')
 
-	@patch('secator.ai.actions.subprocess.run')
-	def test_shell_exception(self, mock_run):
-		mock_run.side_effect = Exception('Command timed out')
+	@patch('secator.tasks.command.command')
+	def test_shell_exception(self, mock_task_cls):
+		mock_task_cls.side_effect = Exception('Command timed out')
 		ctx = ActionContext(targets=['t.com'], model='m')
 
 		results = list(_handle_shell({'action': 'shell', 'command': 'slow'}, ctx))
 
-		# shell Ai + Error
-		self.assertEqual(len(results), 2)
-		self.assertIsInstance(results[1], Error)
-		self.assertIn('failed', results[1].message)
+		# Only the Error (the shell Ai is emitted AFTER construction, which never
+		# succeeds here).
+		self.assertEqual(len(results), 1)
+		self.assertIsInstance(results[0], Error)
+		self.assertIn('failed', results[0].message)
 
-	@patch('secator.ai.actions.subprocess.run')
-	def test_shell_output_capped_when_over_limit(self, mock_run):
+	@patch('secator.tasks.command.command')
+	def test_shell_output_capped_when_over_limit(self, mock_task_cls):
 		# M1: huge stdout must be truncated to <= cap + marker and carry the marker.
 		big = "HEAD_LINE\n" + ("x" * (_MAX_SHELL_OUTPUT_CHARS * 3)) + "\nTAIL_LINE"
-		mock_run.return_value = MagicMock(stdout=big, stderr='')
+		fake_runner = MagicMock()
+		fake_runner.id = 'task_abc'
+		fake_runner.output = big
+		mock_task_cls.return_value = fake_runner
 		ctx = ActionContext(targets=['t.com'], model='m')
 
 		results = list(_handle_shell({'action': 'shell', 'command': 'dump'}, ctx))
@@ -214,15 +287,14 @@ class TestHandleShell(unittest.TestCase):
 		self.assertIn('HEAD_LINE', content)
 		self.assertIn('TAIL_LINE', content)
 
-	@patch('secator.ai.actions.subprocess.run')
-	def test_shell_output_short_passes_through_unchanged(self, mock_run):
-		# M1: short output must pass through untouched (no marker).
-		mock_run.return_value = MagicMock(stdout='root\n', stderr='')
+	def test_shell_output_short_passes_through_unchanged(self):
+		# M1: short output must pass through untouched (no marker). The `command`
+		# runner rstrips its captured output, so a trailing newline is not expected.
 		ctx = ActionContext(targets=['t.com'], model='m')
 
-		results = list(_handle_shell({'action': 'shell', 'command': 'whoami'}, ctx))
+		results = list(_handle_shell({'action': 'shell', 'command': 'echo root'}, ctx))
 
-		self.assertEqual(results[1].content, 'root\n')
+		self.assertEqual(results[1].content, 'root')
 		self.assertNotIn('truncated', results[1].content)
 
 	def test_truncate_short_text_unchanged(self):

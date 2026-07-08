@@ -1,7 +1,6 @@
 """Action handlers for AI task."""
 import json
 import os
-import subprocess
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -68,7 +67,12 @@ SENSITIVE_ENV_PREFIXES = (
 
 
 def _sanitized_env() -> dict:
-	"""Return a copy of os.environ with sensitive variables removed."""
+	"""Return a copy of os.environ with sensitive variables removed.
+
+	Passed as the `env` run_opt to the AI shell `command` runner so an AI-run
+	`env`/`printenv` can't dump the LLM key + cloud creds into output that flows
+	back to the LLM and is persisted to Mongo.
+	"""
 	return {k: v for k, v in os.environ.items()
 			if not any(k.startswith(p) for p in SENSITIVE_ENV_PREFIXES)
 			and "KEY" not in k and "SECRET" not in k and "TOKEN" not in k and "PASSWORD" not in k}
@@ -476,6 +480,11 @@ _SUBAGENT_TURN_LOCK = threading.Lock()
 # so the model still sees the start AND the final lines (often the result/error).
 _MAX_SHELL_OUTPUT_CHARS = 4000
 
+# Cap on ad-hoc AI shell commands (dispatched as the `command` task). Applied as an
+# instance attribute post-construction (see _handle_shell) since max_timeout is not a
+# run_opts-settable field.
+_SHELL_TIMEOUT = 60
+
 
 def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["Warning"]:
 	"""H4: cap AI-subagent recursion depth + per-turn fan-out.
@@ -742,7 +751,14 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
 
 
 def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
-	"""Execute a shell command.
+	"""Execute a shell command as a `command` task runner.
+
+	Dispatches the built-in `command` task (a Command subclass that runs an arbitrary
+	shell command line verbatim) through the normal runner lifecycle, instead of a raw
+	`subprocess.run`. This makes the shell invocation persist as a runner doc (via the
+	driver hooks rebuilt from `context['drivers']`) and appear in history, parented
+	under the conversation via `context['session_id']` — exactly like `_run_runner`
+	does for AI-spawned tasks/workflows.
 
 	Args:
 		action: Action dict with command
@@ -758,19 +774,93 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		yield Info(message=f"[DRY RUN] Would run: {command}", _context=context)
 		return
 
-	yield Ai(content=command, ai_type="shell", _context=context)
-
 	try:
-		result = subprocess.run(
-			command,
-			shell=True,
-			capture_output=True,
-			text=True,
-			timeout=60,
-			env=_sanitized_env()
+		context["task_chunk_id"] = str(uuid.uuid4())
+		if ctx.subagent:
+			context["subagent"] = ctx.context.get("subagent", True)
+
+		# M2: don't silently run a persistence-less child when the parent has drivers
+		# (same guard _run_runner uses for spawned tasks/workflows).
+		hooks, denial = _build_child_hooks_or_denial(context)
+		if denial is not None:
+			yield denial
+			return
+
+		# _build_child_hooks_or_denial returns a CLASS-keyed dict ({Scan:{}, Workflow:{},
+		# Task:{on_init:[...], on_end:[...], ...}}). The generic Task wrapper forwards
+		# self._hooks.get(Task, {}) down to its command signature, but we bypass the
+		# wrapper with direct `command(...)` instantiation, so we must extract the
+		# Task-level (name-keyed) sub-dict ourselves. Without this, register_hooks
+		# resolves hooks via hooks.get(command)/hooks.get('on_init') — neither key exists
+		# in a class-keyed dict — so the mongodb update_runner/on_build hooks never fire
+		# and the runner doc is silently never persisted (command runs SUCCESS, no doc).
+		hooks = hooks.get(Task, {})
+
+		# Run opts mirroring _run_runner's wiring: quiet unless the caller wants
+		# console chatter, reports enabled (findings flow through the normal
+		# pipeline), never dangerous (defense in depth). `env` is the sanitized
+		# process env so an AI-run `env`/`printenv` can't leak the LLM key / cloud
+		# creds into output that reaches the LLM + Mongo (honored via the `env`
+		# run_opt added to Command.yielder).
+		run_opts = {
+			"print_item": not ctx.silent,
+			"print_line": ctx.verbose and not ctx.silent,
+			"print_cmd": False,
+			"print_progress": False,
+			"print_reports_message": False,
+			"enable_reports": True,
+			"exporters": [],
+			"sync": ctx.sync,
+			"dangerous": False,
+			"env": _sanitized_env(),
+		}
+
+		# Instantiate the concrete `command` task directly (NOT the generic Task
+		# wrapper). The wrapper's sync path runs a throwaway inner instance inside
+		# secator.celery.run_command and returns only the structured results, so the
+		# outer wrapper's `.output` stays empty. A direct instance runs the command
+		# in-process and keeps its captured stdout on `.output`, while still firing
+		# the on_init/on_start/on_end driver hooks so the runner doc persists (with
+		# output/status/session_id) parented under the conversation.
+		#
+		# NOTE: `command` (a Command subclass) takes **run_opts, not a `run_opts=`
+		# kwarg — passing `run_opts=` would nest it and silently drop `env` (and every
+		# other opt). Spread it, keeping hooks/context as their own kwargs (both are
+		# popped by Command.__init__).
+		#
+		# Imported locally (not at module top): a top-level `from secator.tasks...`
+		# forces secator.tasks/__init__ to run discover_tasks() while secator.ai.actions
+		# is still being imported, which drops the `ai` task from discovery (circular
+		# import). The function-level import defers it to call time, after all modules
+		# are loaded.
+		from secator.tasks.command import command as CommandTask
+		runner = CommandTask([command], hooks=hooks, context=context, **run_opts)
+
+		# 60s cap on ad-hoc AI shell commands. max_timeout is NOT run_opts-settable
+		# (Command.__init__ resolves it from CONFIG.tasks.overrides); setting the
+		# instance attribute here is honored by get_max_timeout().
+		runner.max_timeout = _SHELL_TIMEOUT
+
+		# Emit the command Ai now that the runner exists: its on_init hook has
+		# stamped the runner id into context, so the UI can link this item to the
+		# persisted runner doc (mirrors _run_runner:688-699).
+		yield Ai(
+			content=command,
+			ai_type="shell",
+			extra_data={
+				"runner_id": context.get("task_id", "") or runner.id,
+				"runner_type": "task",
+			},
+			_context=context,
 		)
-		output = result.stdout or result.stderr or "(no output)"
-		output = _truncate(output, _MAX_SHELL_OUTPUT_CHARS)  # M1: cap so it can't blow up history
+
+		# Run to completion in-process — this fires the persist hooks (on_start/
+		# on_end) exactly like a dispatched task/workflow. Do NOT `yield from
+		# runner`: the command's raw stdout lines are not surfaced as separate
+		# transcript items — the single shell_output below is the contract.
+		runner.run()
+
+		output = _truncate(runner.output or "(no output)", _MAX_SHELL_OUTPUT_CHARS)  # M1: cap so it can't blow up history
 		yield Ai(content=output, ai_type="shell_output", _context=context)
 
 	except Exception as e:
