@@ -18,7 +18,7 @@ from secator.config import CONFIG
 from secator.output_types import Error, Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.runners._helpers import run_extractors
+from secator.runners._helpers import resolve_task_queue, run_extractors
 from secator.utils import debug, deduplicate, flatten, should_update
 
 
@@ -679,7 +679,7 @@ def break_task(task, task_opts, results=[]):
 		task.enable_hooks = True
 		task.run_hooks('on_build', opts, sub='build')
 		task.enable_hooks = prev_enable_hooks
-		sig = type(task).si(chunk, **opts)
+		sig = type(task).si(chunk, **opts).set(queue=resolve_task_queue(type(task), opts))
 		task_id = sig.freeze().task_id
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, full_name)
