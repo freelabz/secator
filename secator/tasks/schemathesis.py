@@ -11,6 +11,10 @@ from secator.output_types import Error, Info, Vulnerability
 from secator.runners import Command
 from secator.tasks._categories import OPTS
 
+# High-signal checks by default; drop pure spec-conformance noise (status_code/content_type/headers/unsupported
+# method) and positive_data_acceptance (mostly authentication noise). Pass `--checks all` to run everything.
+DEFAULT_CHECKS = 'not_a_server_error,negative_data_rejection,response_schema_conformance,use_after_free,ignored_auth'
+
 
 @task()
 class schemathesis(Command):
@@ -42,7 +46,8 @@ class schemathesis(Command):
 		'base_url': {'type': str, 'short': 'burl', 'help': 'Base URL of the API under test (default: schema URL origin)'},  # noqa: E501
 		'max_examples': {'type': int, 'short': 'n', 'help': 'Max generated test cases per API operation'},
 		'mode': {'type': str, 'short': 'm', 'default': 'all', 'help': 'Data generation mode (positive, negative, all)'},
-		'checks': {'type': str, 'short': 'c', 'default': 'all', 'help': 'Checks to run (comma-separated, or "all")'},
+		'checks': {'type': str, 'short': 'c', 'default': DEFAULT_CHECKS, 'help': 'Checks to run (comma-separated, or "all")'},  # noqa: E501
+		'auth': {'type': str, 'short': 'a', 'help': 'Basic auth credentials as "user:password" (use -H for bearer tokens)'},  # noqa: E501
 		'output_path': {'type': str, 'default': None, 'internal': True, 'display': False, 'help': 'JUnit XML output path'},  # noqa: E501
 	}
 	opt_key_map = {
@@ -53,6 +58,7 @@ class schemathesis(Command):
 		'max_examples': 'max-examples',
 		'mode': 'mode',
 		'checks': 'checks',
+		'auth': 'auth',
 	}
 	install_cmd = 'pipx install schemathesis'
 	install_github_bin = False
@@ -109,14 +115,45 @@ class schemathesis(Command):
 				method, _, path = name.partition(' ')
 				matched_at = f'{base_url}{path}' if path.startswith('/') else (base_url or name)
 				for failure in failures:
-					message = failure.get('@message', '') if isinstance(failure, dict) else str(failure)
+					if isinstance(failure, dict):
+						text = failure.get('#text') or failure.get('@message') or ''
+					else:
+						text = str(failure)
+					check = schemathesis._extract_check(text)
+					severity = schemathesis._severity_for_check(check)
+					title = f'{check}: {name}' if check else (f'API schema violation: {name}' if name else 'API schema violation')  # noqa: E501
 					yield Vulnerability(
-						name=f'API schema fuzzing failure: {name}' if name else 'API schema fuzzing failure',
+						name=title,
 						provider='schemathesis',
 						matched_at=matched_at,
 						confidence='high',
-						severity='medium',
-						description=(message or '').strip()[:2000],
-						extra_data={'operation': name, 'method': method},
+						severity=severity,
+						description=text.strip()[:2000],
+						extra_data={'operation': name, 'method': method, 'check': check},
 						tags=['api', 'fuzz'],
 					)
+
+	@staticmethod
+	def _extract_check(text):
+		"""Extract the failing check title from a schemathesis JUnit failure body (the first '- <check>' line)."""
+		for line in text.splitlines():
+			line = line.strip()
+			if line.startswith('- '):
+				return line[2:].strip()
+		return ''
+
+	@staticmethod
+	def _severity_for_check(check):
+		"""Map a schemathesis check to a severity that reflects its real security value."""
+		c = check.lower()
+		if 'server error' in c:
+			return 'high'  # 5xx / crash
+		if 'accepted schema-violating' in c:
+			return 'high'  # the API accepted invalid data -> missing input validation
+		if 'violates schema' in c or 'malformed' in c:
+			return 'medium'  # response does not match its own schema
+		if 'rejected schema-compliant' in c:
+			return 'low'  # frequently just authentication or stricter-than-documented validation
+		if c.startswith('undocumented') or 'unsupported method' in c or 'content-type' in c or 'content type' in c or 'header' in c:  # noqa: E501
+			return 'info'  # pure spec-conformance noise
+		return 'low'
