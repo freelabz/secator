@@ -538,8 +538,13 @@ class Command(Runner):
 				self.cwd = f'{self.reports_folder}/.outputs/{self.fqn}'
 				os.makedirs(self.cwd, exist_ok=True)
 
-			# Run the command using subprocess
-			env = os.environ
+			# Run the command using subprocess. A caller may pass a sanitized/custom env
+			# via the `env` run_opt (e.g. the AI shell handler strips LLM/cloud secrets so
+			# an AI-run `env`/`printenv` can't dump them). Defaults to the process env when
+			# the opt is absent (existing behavior unchanged). Uses `.get(key, default)`
+			# (not `or`) so an explicit empty `env={}` — a deliberate empty environment —
+			# is honored rather than silently falling back to the full process env.
+			env = self.run_opts.get('env', os.environ)
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,

@@ -287,7 +287,7 @@ class Runner:
 
 	@property
 	def resolved_opts(self):
-		return {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+		return {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_') and k != 'env'}  # noqa: E501
 
 	@property
 	def resolved_print_opts(self):

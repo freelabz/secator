@@ -84,7 +84,16 @@ class Ai(OutputType):
 	status: str = field(default='', compare=False)
 	answer: str = field(default='', compare=False)
 	choices: list = field(default_factory=list, compare=False)
-	session_id: str = field(default='', compare=False)
+	# Raw litellm message for this transcript turn (role/content/tool_calls or
+	# role:tool/tool_call_id). Persisted so restore_history_from_db rebuilds the
+	# full conversation verbatim. Empty for non-transcript ai_types (action
+	# displays, follow_up, shell_output, etc.). compare=False: not an identity field.
+	message: dict = field(default_factory=dict, compare=False)
+	# NOTE: no top-level `session_id` field — the conversation id is carried by
+	# `_context.session_id`, auto-stamped on every persisted item from the runner
+	# context (see ai._init_options). restore_history_from_db, the remote answer
+	# poll, and secator-api all correlate on `_context.session_id`. Don't re-add a
+	# redundant top-level field.
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='ai', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -162,11 +171,10 @@ class Ai(OutputType):
 			action_label_str = action_label.capitalize().replace('_', ' ')
 			line = f'{s}[bold blue]{action_label_str}[/]'
 			content = _s(self.content)
-			if self.ai_type in ['task', 'workflow', 'scan']:
+			if self.ai_type in ['task', 'workflow']:
 				colors = {
 					'task': 'bold gold3',
 					'workflow': 'bold dark_orange3',
-					'scan': 'bold red',
 				}
 				color = colors[self.ai_type]
 				content = f'[{color}]{content}[/]'

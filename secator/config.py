@@ -245,6 +245,7 @@ class AiAddon(StrictModel):
 	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
+	exec_wrappers: List[str] = []  # M11: extra exec-wrappers to peel (extends the built-in security baseline)
 	permissions: Dict = {
 		'allow': [
 			'target({targets})',
