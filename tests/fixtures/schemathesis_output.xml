@@ -1,0 +1,12 @@
+<?xml version="1.0" ?>
+<testsuites>
+  <testsuite name="schemathesis" errors="0" failures="2" skipped="0" tests="3" time="4.213">
+    <testcase name="GET /api/Products" time="1.102"/>
+    <testcase name="POST /api/Feedbacks" time="1.501">
+      <failure type="failure" message="1. Server error&#10;&#10;[500] Internal Server Error">Falsifying example: case body={'rating': -2147483648}</failure>
+    </testcase>
+    <testcase name="GET /rest/products/{id}/reviews" time="1.610">
+      <failure type="failure" message="1. Response violates schema&#10;&#10;'id' is a required property">Falsifying example: case path_parameters={'id': 0}</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
