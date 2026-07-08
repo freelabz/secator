@@ -8,9 +8,10 @@ long_description: |
   brute-forcing of API routes (ffuf, using Assetnote's HTTP Archive apiroutes wordlist — the same real-world
   route dataset kiterunner relied on). Discovered endpoints are probed with httpx to verify they are live and
   fingerprint their technologies. The apiroutes wordlist also covers exposed API specification paths
-  (openapi/swagger); when one is found, the --spec option hands it off to nuclei, which parses the spec
-  (input-mode openapi) and DAST-fuzzes every documented endpoint with the correct method and parameters —
-  recovering the contextual testing kiterunner used to provide, using a maintained tool already in secator.
+  (openapi/swagger); when one is found, the --spec option hands it off to two spec-driven tools: nuclei
+  (input-mode openapi) DAST-fuzzes every documented endpoint for known vulnerabilities with the correct method
+  and parameters, and schemathesis property-fuzzes the same operations for server errors (5xx) and schema
+  conformance violations — the negative fuzzing nuclei's templates do not cover.
 tags: [http, api, crawl, fuzz]
 input_types:
   - url
@@ -76,9 +77,17 @@ tasks:
         condition: not url.verified
 
   nuclei:
-    description: Fuzz endpoints from discovered API specs
+    description: Scan spec endpoints for known vulns (openapi templates)
     input_mode: openapi
     dast: True
+    targets_:
+      - type: url
+        field: url
+        condition: "'openapi' in url.url or 'swagger' in url.url or 'api-docs' in url.url"
+    if: opts.spec
+
+  schemathesis:
+    description: Fuzz spec endpoints (negative + schema conformance)
     targets_:
       - type: url
         field: url

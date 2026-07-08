@@ -126,6 +126,7 @@ META_OPTS = {
 	'wafw00f.output_path': load_fixture('wafw00f_output', FIXTURES_DIR, only_path=True),
 	'testssl.output_path': load_fixture('testssl_output', FIXTURES_DIR, only_path=True),
 	'ssh_audit.output_path': load_fixture('ssh_audit_output', FIXTURES_DIR, only_path=True),
+	'schemathesis.output_path': load_fixture('schemathesis_output', FIXTURES_DIR, only_path=True, ext='.xml'),
 	'x8.wordlist': 'http_params',
 }
 
