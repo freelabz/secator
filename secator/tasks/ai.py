@@ -29,7 +29,7 @@ from secator.ai.session import (
 from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status, _decrypt_dict, _build_action_display
 
 
-# D4: high-precision cues for the deterministic mode fast-path. Only unambiguous
+# High-precision cues for the deterministic mode fast-path. Only unambiguous
 # prompts (cues for exactly one of attack/chat, and no exploit-ish cue) are
 # resolved here; everything else defers to the LLM classifier.
 _ATTACK_CUES = (
@@ -44,7 +44,7 @@ _EXPLOIT_CUES = ("exploit", "poc", "proof of concept", "cve-", "vulnerabilit")
 
 
 def fast_detect_mode(prompt):
-	"""D4: cheap deterministic pre-classifier. Returns 'attack'/'chat' for
+	"""Cheap deterministic pre-classifier. Returns 'attack'/'chat' for
 	unambiguous prompts, else None to defer to the LLM. Exploit-ish prompts
 	return None so the LLM keeps deciding those (no behavior change there)."""
 	text = (prompt or "").strip().lower()
@@ -83,7 +83,7 @@ class ai(PythonRunner):
 	opts = {
 		"name": {"type": str, "default": "", "short": "n", "internal_name": "session_name", "help": "Name for the AI session or subagent"},  # noqa: E501
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
-		"mode": {"type": str, "default": "", "help": f"Mode: {', '.join(MODES)}"},  # D2: derive from MODES, don't drift
+		"mode": {"type": str, "default": "", "help": f"Mode: {', '.join(MODES)}"},  # derive from MODES, don't drift
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
 		# Never default this to CONFIG.addons.ai.api_key: secator-api serves task opts
 		# (incl. defaults) to the UI, which would leak the key into the runner form.
@@ -293,7 +293,7 @@ class ai(PythonRunner):
 
 		# Run loop
 		yield from self._run_loop()
-		self._mark_turn_completed()  # C3: record this turn as done so a redelivery won't replay it
+		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 
 	# -------------------------------------------------------------------------
 	# Remote (web) session restore
@@ -338,12 +338,12 @@ class ai(PythonRunner):
 				'`mongodb` driver is in the runner context.'
 			)
 
-		# C3: skip replay of an already-completed turn — acks_late can redeliver the
+		# Skip replay of an already-completed turn — acks_late can redeliver the
 		# same celery_id after a worker crash; without this marker we'd re-run every
 		# tool action and re-bill tokens.
 		turn_uuid = self._turn_uuid()
 		if turn_uuid and self._turn_completed_marker(turn_uuid, query_engine):
-			self.debug(f'C3 idempotency: turn {turn_uuid} already completed; skipping replay', sub='llm')
+			self.debug(f'idempotency: turn {turn_uuid} already completed; skipping replay', sub='llm')
 			return True
 
 		# Look for prior `_type:"ai"` docs for this session
@@ -385,7 +385,7 @@ class ai(PythonRunner):
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		yield from self._run_loop()
-		self._mark_turn_completed()  # C3: record this turn as done so a redelivery won't replay it
+		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 		return True
 
 	def _save_history(self):
@@ -399,7 +399,7 @@ class ai(PythonRunner):
 		save_history(self.history, self.reports_folder, debug_fn=self.debug)
 
 	# -------------------------------------------------------------------------
-	# C3: turn-level idempotency (remote/Celery redelivery)
+	# Turn-level idempotency (remote/Celery redelivery)
 	# -------------------------------------------------------------------------
 
 	def _turn_uuid(self):
@@ -421,12 +421,12 @@ class ai(PythonRunner):
 				"extra_data.turn_uuid": turn_uuid,
 			}, limit=1)
 		except Exception as e:  # noqa: BLE001 - a marker query must not crash the worker
-			self.debug(f'C3 idempotency: marker query failed: {e}', sub='llm')
+			self.debug(f'idempotency: marker query failed: {e}', sub='llm')
 			return None
 		return docs[0] if docs else None
 
 	def _mark_turn_completed(self):
-		"""C3: persist a turn-completion marker once the turn is durably done.
+		"""Persist a turn-completion marker once the turn is durably done.
 
 		Remote channel only. Reuses the workspace `_type:"ai"` docs (no new
 		collection); restore_history_from_db skips this ai_type so it never enters
@@ -606,7 +606,7 @@ class ai(PythonRunner):
 					# Remote follow-up: the pending Ai doc was already stamped + persisted
 					# in _dispatch_and_collect (dedup by _uuid) — nothing to re-yield here.
 
-					# H5: remote max-iter after tool work is a terminal turn (no further
+					# Remote max-iter after tool work is a terminal turn (no further
 					# user input expected) — don't block-poll on prompt_uuid=None with no
 					# answerable pending doc; end cleanly via the loop tail (save + Info).
 					if (isinstance(self.backend, RemoteBackend)
@@ -802,7 +802,7 @@ class ai(PythonRunner):
 		if not self.prompt:
 			self.mode = "chat"
 			return
-		# D4: resolve unambiguous prompts deterministically; skip the intent LLM round-trip.
+		# Resolve unambiguous prompts deterministically; skip the intent LLM round-trip.
 		fast_mode = fast_detect_mode(self.prompt)
 		if fast_mode:
 			console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{fast_mode}[/] (fast-path)")
@@ -815,7 +815,7 @@ class ai(PythonRunner):
 					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
 				self._account_usage(result.get("usage"))
 				mode = result["content"].strip().lower()
-				if mode in MODES:  # D2: honor any real mode (incl. exploit), don't discard it
+				if mode in MODES:  # honor any real mode (incl. exploit), don't discard it
 					console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
 					self.mode = mode
 				else:
@@ -1231,7 +1231,7 @@ class ai(PythonRunner):
 
 		Returns list of items to yield, or None to exit.
 		"""
-		# H5: plain-chat remote turns reach here with no pre-persisted pending doc,
+		# Plain-chat remote turns reach here with no pre-persisted pending doc,
 		# so persist one now with a real prompt_uuid (never poll on prompt_uuid=None).
 		if isinstance(self.backend, RemoteBackend) and not prompt_uuid:
 			prompt_uuid = str(uuid.uuid4())

@@ -105,7 +105,7 @@ class RemoteBackend(InteractivityBackend):
 		(via runner hooks) before calling ask_user(), which will poll for the answer.
 
 		``prompt_uuid`` (from context) is stamped into ``extra_data`` so the poll
-		can match THIS exact prompt, not a stale earlier answer (H7).
+		can match THIS exact prompt, not a stale earlier answer.
 		"""
 		from secator.output_types import Ai
 		extra_data = {
@@ -117,7 +117,7 @@ class RemoteBackend(InteractivityBackend):
 			extra_data["prompt_uuid"] = prompt_uuid
 		# A new prompt for this session supersedes any older still-pending one
 		# (e.g. a worker that died mid-poll). Expire them BEFORE this doc is
-		# persisted so only the current prompt stays live (M10).
+		# persisted so only the current prompt stays live.
 		self._expire_stale_pending(session_id)
 		# The conversation id rides on `_context.session_id` (auto-stamped from the
 		# runner context on persist) — the poll + restore + secator-api all key on
@@ -139,8 +139,8 @@ class RemoteBackend(InteractivityBackend):
 		if prompt_type == "permission":
 			engine = context.get("engine")
 			if answer in ("allow", "allow_all"):
-				# M12: allow_all persists a session-scoped allow rule; single allow is
-				# a true one-shot that adds NO rule (H9) — next match re-prompts.
+				# allow_all persists a session-scoped allow rule; single allow is
+				# a true one-shot that adds NO rule — next match re-prompts.
 				if answer == "allow_all" and engine:
 					ptype = context.get("permission_type")
 					value = context.get("value", "")
@@ -242,13 +242,13 @@ class RemoteBackend(InteractivityBackend):
 			elapsed += self.poll_interval
 		# One final search before giving up: the user may have answered during
 		# the last sleep (or between the last search and now). Without this the
-		# answer is silently stranded (M10).
+		# answer is silently stranded.
 		answer = self._resolve_answer(answered_query)
 		if answer is not None:
 			return answer
 		# Timeout: atomically flip ONLY a doc that is STILL pending, so a concurrent
 		# older pending doc isn't disturbed. If the answer landed in the race window
-		# the doc is already 'answered' and this no-ops -- re-read rather than abandon it (M10).
+		# the doc is already 'answered' and this no-ops -- re-read rather than abandon it.
 		modified = self.query_engine.update(
 			{**base, "status": "pending"},
 			{"$set": {"status": "timed_out"}}
@@ -277,7 +277,7 @@ class RemoteBackend(InteractivityBackend):
 		Called when a NEW prompt starts (before it is persisted), so it only
 		affects prior prompts. Stops stale 'pending' docs from accumulating —
 		a worker that dies mid-poll otherwise leaves the UI 'thinking' forever
-		and lets crud.answer_ai_prompt's "latest pending" collide (M10).
+		and lets crud.answer_ai_prompt's "latest pending" collide.
 		FLAG: a DB-layer TTL index on pending Ai docs is the durable follow-up.
 		"""
 		if not self.query_engine:

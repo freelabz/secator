@@ -19,14 +19,14 @@ from secator.ai.utils import (
 from secator.ai.utils import _MAX_CHILD_ITERATIONS  # noqa: F401 - re-exported for tests importing it from actions
 
 
-# H4: bound recursive AI-subagent fan-out so injected output can't drive an
+# Bound recursive AI-subagent fan-out so injected output can't drive an
 # exponential subagent/token blow-up. Depth caps recursion (child inherits +1 via
 # context); breadth caps how many subagents one parent turn may spawn.
 _MAX_SUBAGENT_DEPTH = 3
 _MAX_SUBAGENTS_PER_TURN = 5
 _SUBAGENT_TURN_LOCK = threading.Lock()
 
-# M1: cap shell stdout before it enters AI history so a huge command can't blow up
+# Cap shell stdout before it enters AI history so a huge command can't blow up
 # the next prompt's token budget; head+tail keeps both the start and the result.
 _MAX_SHELL_OUTPUT_CHARS = 4000
 
@@ -58,7 +58,7 @@ class ActionContext:
 	scope: str = "workspace"
 	results: Optional[List[Dict]] = None
 	max_workers: int = 3
-	in_batch: bool = False  # H4: set on the per-batch ctx so the per-turn fan-out cap applies
+	in_batch: bool = False  # set on the per-batch ctx so the per-turn fan-out cap applies
 	subagent: bool = False
 	silent: bool = False
 	sync: bool = True
@@ -128,13 +128,13 @@ def _build_hooks_from_context(context: Dict) -> Dict:
 
 
 def _build_child_hooks_or_denial(context: Dict) -> Tuple[Dict, Optional["Warning"]]:
-	"""M2: rebuild the child's persistence hooks, refusing a persistence-less child.
+	"""Rebuild the child's persistence hooks, refusing a persistence-less child.
 
 	``context`` carries the parent's ``drivers`` (copied via ``_get_result_context``),
 	so an empty/failed rebuild while the parent HAS drivers means the child would run
 	to completion and silently persist nothing (lost findings/docs). In that case
-	return a denial ``Warning`` (same shape H4/C1 use) so the caller yields it and
-	skips the spawn. When the parent itself has no drivers (pure local/no-persistence
+	return a denial ``Warning`` (same shape other denials use) so the caller yields it
+	and skips the spawn. When the parent itself has no drivers (pure local/no-persistence
 	run) an empty-hooks child is expected and allowed.
 
 	Returns ``(hooks, denial)``; if ``denial`` is non-None the caller must not spawn.
@@ -233,7 +233,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 				value=result.shell_command,
 				reason=result.reason,
 				engine=ctx.permission_engine,
-				# unique id per prompt so its remote poll matches only its own answer (H7)
+				# unique id per prompt so its remote poll matches only its own answer
 				prompt_uuid=str(uuid.uuid4()),
 			)
 			if is_remote:
@@ -294,7 +294,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 		if result.decision == "deny":
 			return f"Action denied after prompt: {result.reason}"
 
-	# fail closed: prompts exhausted with the decision still unresolved -> block (H10)
+	# fail closed: prompts exhausted with the decision still unresolved -> block
 	if result.decision == "ask":
 		return f"Action denied: guardrail check unresolved after {max_rounds} prompts"
 
@@ -359,7 +359,7 @@ def safe_dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 
 
 def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["Warning"]:
-	"""H4: cap AI-subagent recursion depth + per-turn fan-out.
+	"""Cap AI-subagent recursion depth + per-turn fan-out.
 
 	Returns a denial ``Warning`` if a cap is hit (caller yields it and skips the
 	spawn); otherwise stamps the child's depth (+1) into ``context`` and bumps the
@@ -429,7 +429,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 
 	# Force subagent flags when spawning an AI task from a parent AI task
 	if runner_type == "task" and name.lower() == "ai":
-		# H4: bound recursive fan-out before constructing/running the child
+		# Bound recursive fan-out before constructing/running the child
 		denial = _guard_subagent_fanout(ctx, context)
 		if denial is not None:
 			yield denial
@@ -498,7 +498,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 
 	# Propagate driver hooks (mongodb/api): a sync sub-runner skips the pickle path
 	# that normally re-registers them, so without this its results never persist.
-	# M2: don't silently spawn a persistence-less child when the parent has drivers
+	# Don't silently spawn a persistence-less child when the parent has drivers
 	hooks, denial = _build_child_hooks_or_denial(context)
 	if denial is not None:
 		yield denial
@@ -597,7 +597,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		if ctx.subagent:
 			context["subagent"] = ctx.context.get("subagent", True)
 
-		# M2: don't silently run a persistence-less child when the parent has drivers
+		# Don't silently run a persistence-less child when the parent has drivers
 		# (same guard _run_runner uses for spawned tasks/workflows).
 		hooks, denial = _build_child_hooks_or_denial(context)
 		if denial is not None:
@@ -653,7 +653,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		# the single shell_output below is the contract.
 		runner.run()
 
-		output = _truncate(runner.output or "(no output)", _MAX_SHELL_OUTPUT_CHARS)  # M1: cap so it can't blow up history
+		output = _truncate(runner.output or "(no output)", _MAX_SHELL_OUTPUT_CHARS)  # cap so it can't blow up history
 		yield Ai(content=output, ai_type="shell_output", _context=context)
 
 	except Exception as e:
@@ -871,7 +871,7 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 
 	max_workers = ctx.max_workers or 3
 
-	# H4: fresh per-turn subagent fan-out budget for this batch (one LLM turn)
+	# Fresh per-turn subagent fan-out budget for this batch (one LLM turn)
 	ctx.context["ai_subagent_turn_count"] = 0
 
 	# Silence console output for parallel tasks to avoid interleaved printing

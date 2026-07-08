@@ -27,7 +27,7 @@ WRITE_COMMANDS = frozenset({"tee", "cp", "mv", "sed", "awk", "dd", "install", "m
 # Execute-type commands
 EXECUTE_COMMANDS = frozenset({"python", "python3", "bash", "sh", "node", "ruby", "perl", "gcc", "g++", "make", "go"})
 
-# M9: download tools that write to a file via an OUTPUT FLAG — the flag's destination
+# Download tools that write to a file via an OUTPUT FLAG — the flag's destination
 # is a WRITE, not a read (else `deny write(/etc/*)` never fires). Focused set; residual
 # write-vs-read gaps (dd of=, tar -f, cp/install dest, >() ) are tracked separately.
 OUTPUT_FLAG_COMMANDS = {
@@ -36,16 +36,16 @@ OUTPUT_FLAG_COMMANDS = {
 }
 
 # Exec-wrappers run a different inner command (`timeout 60 rm -rf /`) — peel the
-# wrapper and check the INNER command, not the allow-listed wrapper name (C2/M11).
+# wrapper and check the INNER command, not the allow-listed wrapper name.
 EXEC_WRAPPERS = frozenset({
 	"timeout", "xargs", "env", "nice", "ionice", "nohup", "stdbuf",
 	"setsid", "sudo", "doas", "watch", "time", "chroot", "unbuffer",
-	# M11: added laundering-vector wrappers
+	# Laundering-vector wrappers
 	"flock", "runuser", "su", "script", "proxychains", "proxychains4",
 	"firejail", "torsocks", "torify", "unshare", "catchsegv", "chrt", "taskset",
 })
 
-# M11: per-wrapper arg grammar so the REAL command is located, not a lockfile/config/user.
+# Per-wrapper arg grammar so the REAL command is located, not a lockfile/config/user.
 # (opts_taking_a_value, positional_args_before_cmd, cmd_string_opts) — cmd_string_opts values
 # (e.g. `-c 'curl evil'`) are re-parsed and peeled so the payload is checked, not skipped.
 _EMPTY = frozenset()
@@ -61,7 +61,7 @@ _WRAPPER_ARG_GRAMMAR = {
 
 
 def _exec_wrappers() -> frozenset:
-	"""M11: built-in wrappers plus any ops-configured extras. Config EXTENDS the security baseline."""
+	"""Built-in wrappers plus any ops-configured extras. Config EXTENDS the security baseline."""
 	try:
 		from secator.config import CONFIG
 		extra = getattr(CONFIG.addons.ai, "exec_wrappers", None) or []
@@ -105,7 +105,7 @@ IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 
 
 def _normalize_ip(candidate: str) -> Optional[IPAddress]:
-	"""M8: normalize encoded IPs (decimal/hex/octal int, dotted-hex/octal, IPv6-mapped) to an ip_address.
+	"""Normalize encoded IPs (decimal/hex/octal int, dotted-hex/octal, IPv6-mapped) to an ip_address.
 
 	Returns None if the candidate is not an IP (e.g. a hostname) so callers fall back to literal matching.
 	Hostnames are NOT resolved here (DNS rebinding is a documented residual).
@@ -144,7 +144,7 @@ def _normalize_ip(candidate: str) -> Optional[IPAddress]:
 
 
 def _ip_in_pattern(ip: IPAddress, pattern: str) -> Optional[bool]:
-	"""M8: True/False if `pattern` is an IP/CIDR literal, else None (pattern isn't an address rule)."""
+	"""True/False if `pattern` is an IP/CIDR literal, else None (pattern isn't an address rule)."""
 	try:
 		net = ipaddress.ip_network(pattern, strict=False)
 	except ValueError:
@@ -161,7 +161,7 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 	- Glob patterns (fnmatch)
 	- {port} variable (matches :\\d+)
 	- Basename matching for path-like values (e.g. '.env' matches '/home/user/.env')
-	- M8: IP/CIDR patterns are matched by normalized address (encoded IPs are canonicalized first)
+	- IP/CIDR patterns are matched by normalized address (encoded IPs are canonicalized first)
 
 	Args:
 		value: The value to check
@@ -170,7 +170,7 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 	Returns:
 		True if value matches any pattern
 	"""
-	# M8: normalize encoded IPs before deny/allow match so alternate encodings can't evade IP rules
+	# Normalize encoded IPs before deny/allow match so alternate encodings can't evade IP rules
 	norm_ip = _normalize_ip(value)
 	canon = str(norm_ip) if norm_ip is not None else None
 	for pattern in patterns:
@@ -434,7 +434,7 @@ def _peel_wrapper(args: List[str]) -> List[str]:
 		if name not in wrappers:
 			return tokens
 		rest = tokens[1:]
-		# M11: peel proxychains/firejail/flock/runuser/... past their OWN args (value-opts,
+		# Peel proxychains/firejail/flock/runuser/... past their OWN args (value-opts,
 		# positional lockfile/config, `-c '<cmd>'`) so the leaf payload is what gets classified.
 		opts_with_val, n_pos, cmd_opts = _WRAPPER_ARG_GRAMMAR.get(name, (_EMPTY, 0, _EMPTY))
 		i = 0
@@ -572,7 +572,7 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 		cmd_class = classify_command(cmd_name)
 		base_access = "write" if cmd_class == "write" else "read"
 
-		# M9: output-flag destinations are writes (curl -o/wget -O), not reads.
+		# Output-flag destinations are writes (curl -o/wget -O), not reads.
 		write_flags = OUTPUT_FLAG_COMMANDS.get(cmd_name.rsplit('/', 1)[-1], frozenset())
 
 		sub_args = args[1:]
@@ -751,7 +751,7 @@ class PermissionResult:
 	shell_command: str = ""  # full command when prompting for shell approval
 
 
-# M7: finding types downstream auto-trusts. tasks/ai.py _auto_approve_workspace_targets()
+# Finding types downstream auto-trusts. tasks/ai.py _auto_approve_workspace_targets()
 # searches _type:"target" findings and auto-approves them as in-scope, so an injected
 # add_finding of one of these silently widens scope.
 _PRIVILEGED_FINDING_TYPES = frozenset({"target"})
@@ -843,7 +843,7 @@ class PermissionEngine:
 		if result.decision in ("deny", "ask"):
 			return result
 
-		# Step 2: Check targets. M6: always enforce when targets exist — a missing
+		# Step 2: Check targets. Always enforce when targets exist — a missing
 		# catch-all must fall to ask (via _check_values "No rule"), never default-allow.
 		targets_to_check = self._extract_targets(action)
 		if targets_to_check:
@@ -861,7 +861,7 @@ class PermissionEngine:
 		if action_type == "shell":
 			command = action.get("command", "")
 			paths_with_access = detect_paths_with_access(command)
-			if paths_with_access:  # M6: always enforce — no read/write rule must ask, not allow
+			if paths_with_access:  # Always enforce — no read/write rule must ask, not allow
 				# Check each path with its correct access type
 				ask_paths = []
 				for path, access in paths_with_access:
@@ -937,12 +937,12 @@ class PermissionEngine:
 			most_restrictive = None
 			unmatched = []
 			for args in subcommands:
-				# peel exec-wrappers so the INNER command is checked, not the wrapper name (C2)
+				# peel exec-wrappers so the INNER command is checked, not the wrapper name
 				inner = _peel_wrapper(args)
 				if not inner:
 					continue
 				cmd_name = inner[0]
-				# multi-word denies (e.g. "rm -rf /*") match the full peeled command; names via _check_value (H6)
+				# multi-word denies (e.g. "rm -rf /*") match the full peeled command; names via _check_value
 				denied = self._match_shell_command_deny(inner)
 				if denied:
 					return PermissionResult(decision="deny", reason=f"Denied by rule: shell({denied})")
@@ -972,7 +972,7 @@ class PermissionEngine:
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
 		elif action_type in ("query", "follow_up", "add_finding"):
-			# M7: don't let injected add_finding mint a trusted target that auto-approve later trusts
+			# Don't let injected add_finding mint a trusted target that auto-approve later trusts
 			if action_type == "add_finding" and _is_privileged_finding_type(action):
 				ftype = str(action.get("_type", "")).strip().lower()
 				return PermissionResult(
@@ -983,7 +983,7 @@ class PermissionEngine:
 		return PermissionResult(decision="deny", reason=f"Unknown action type: {action_type}")
 
 	def _match_shell_command_deny(self, tokens: List[str]) -> str:
-		"""Return a multi-word shell deny pattern (e.g. "rm -rf /*") hit by these tokens, else "" (H6)."""
+		"""Return a multi-word shell deny pattern (e.g. "rm -rf /*") hit by these tokens, else ""."""
 		cmd_str = ' '.join(tokens)
 		for rt, patterns in self.rules["deny"]:
 			if rt != "shell":
@@ -1209,7 +1209,7 @@ class PermissionEngine:
 			return "deny"
 
 		idx, _ = result
-		if idx == 0:  # Allow ONLY this invocation — no rule added, next call re-prompts (H9)
+		if idx == 0:  # Allow ONLY this invocation — no rule added, next call re-prompts
 			return "allow"
 		elif idx == 1:  # Allow all commands with this name
 			self.add_runtime_allow([f"shell({prompt_cmd})"])

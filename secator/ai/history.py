@@ -225,7 +225,7 @@ class ChatHistory:
     def _trim_budget(self, max_tokens_total: int = 0) -> int:
         """Effective trim budget, capped to the model's real context window.
 
-        M3: a flat max_tokens_total (e.g. 100k) ignores the model window and
+        A flat max_tokens_total (e.g. 100k) ignores the model window and
         fails with context_length_exceeded on smaller-window models. Cap it to
         get_context_window(model) - OUTPUT_TOKEN_RESERVATION (headroom for the
         response), and use that window-derived budget even when no explicit cap

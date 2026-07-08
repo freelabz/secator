@@ -608,7 +608,7 @@ def init_llm(api_key: Optional[str] = None):
 
 
 def _estimate_usage(model: str, messages: List[Dict], content: str, tool_calls) -> Dict:
-	"""M5: estimate tokens when the provider omits `usage`, so calls are never unmetered.
+	"""Estimate tokens when the provider omits `usage`, so calls are never unmetered.
 
 	Uses litellm's own token counter for the model in use — prompt tokens from the
 	request messages, completion tokens from the response text (+ any tool-call
@@ -680,7 +680,7 @@ def call_llm(
 	# a matching tool_result). Safety net in case the caller bypassed ChatHistory.
 	_repair_orphan_tool_uses(kwargs["messages"])
 
-	# M4: 400s are non-transient (malformed request, context_length_exceeded, ...) —
+	# 400s are non-transient (malformed request, context_length_exceeded, ...) —
 	# handled separately below and NOT in this transient-retry tuple.
 	retryable = (
 		litellm.InternalServerError, litellm.RateLimitError,
@@ -692,7 +692,7 @@ def call_llm(
 			response = litellm.completion(**kwargs)
 			break
 		except litellm.BadRequestError as e:
-			# M4: 400s fail fast, except the orphan tool_use case which we repair
+			# 400s fail fast, except the orphan tool_use case which we repair
 			# and retry (not counted as an attempt — the repair is the real fix).
 			err_str = str(e)
 			if 'tool_use' in err_str and 'tool_result' in err_str:
@@ -735,7 +735,7 @@ def call_llm(
 			"cost": cost,
 		}
 	else:
-		# M5: usage missing/empty (streaming, some models) — estimate so the call
+		# usage missing/empty (streaming, some models) — estimate so the call
 		# is still metered instead of silently counting 0 tokens.
 		usage = _estimate_usage(model, kwargs["messages"], content, getattr(message, 'tool_calls', None))
 		console.print(Warning(
