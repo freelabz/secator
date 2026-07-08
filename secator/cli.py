@@ -2748,10 +2748,12 @@ def install_tools(cmds, cleanup, fail_fast):
 			'gem cleanup --user-install',
 			'gem clean --user-install',
 		]
+		requires_sudo = False
 		if distro.pm_finalizer:
 			cleanup_cmds.append(f'sudo {distro.pm_finalizer}')
+			requires_sudo = True
 		cmd = ' && '.join(cleanup_cmds)
-		Command.execute(cmd, cls_attributes={'shell': True}, quiet=False)
+		Command.execute(cmd, cls_attributes={'shell': True, 'requires_sudo': requires_sudo}, quiet=False)
 	sys.exit(return_code)
 
 

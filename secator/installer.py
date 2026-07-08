@@ -401,7 +401,8 @@ class SourceInstaller:
 			install_cmd = install_cmd.replace('[install_version_strip]', version.lstrip('v'))
 
 		# Run command
-		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
+		requires_sudo = bool(re.search(r'\bsudo\b', install_cmd))
+		ret = Command.execute(install_cmd, cls_attributes={'shell': True, 'requires_sudo': requires_sudo}, quiet=False)
 		if ret.return_code != 0:
 			return InstallerStatus.INSTALL_FAILED
 
