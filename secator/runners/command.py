@@ -543,7 +543,7 @@ class Command(Runner):
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
-				preexec_fn=os.setsid if not (sudo_required or self.disable_preexec) else None,
+				preexec_fn=os.setsid if not (self.sudo_required or self.disable_preexec) else None,
 				shell=self.shell,
 				errors='replace',
 				env=env,
