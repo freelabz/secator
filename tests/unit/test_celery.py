@@ -196,16 +196,6 @@ class TestCelery(unittest.TestCase):
 					self.assertEqual(actual_rate_limit, 1)  # Should be 1 since 2//6 = 0, but max(1, 0) = 1
 
 	def test_chunk_sigs_routed_via_resolve_task_queue(self):
-		"""Chunk sigs must be routed through resolve_task_queue, same as the parent.
-
-		Regression: break_task built chunk sigs without .set(queue=...), so chunks ignored
-		operator profile overrides and fell back to the task's baked class-profile queue.
-		In prod this misrouted chunked nmap (profile 'small' but
-		SECATOR_TASKS_OVERRIDES_NMAP_PROFILE=small_long) from `small_long` down to `small`,
-		where the chunks also missed nmap's longer TASK_MAX_TIMEOUT and were soft-killed at
-		the global 7200s. Here we stub resolve_task_queue to a sentinel and assert every
-		chunk sig carries that resolved queue.
-		"""
 		import secator.celery as celery_mod
 		from secator.celery import break_task
 		from secator.tasks import httpx

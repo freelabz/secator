@@ -679,13 +679,6 @@ def break_task(task, task_opts, results=[]):
 		task.enable_hooks = True
 		task.run_hooks('on_build', opts, sub='build')
 		task.enable_hooks = prev_enable_hooks
-		# Route each chunk to the task's RESOLVED queue (profile + operator overrides),
-		# exactly like the parent is routed in Workflow.build_celery_workflow. Without this
-		# the chunk sigs carry no queue and fall back to the task class's default `profile`,
-		# so a chunked task with a non-default profile/override (e.g. nmap ->
-		# SECATOR_TASKS_OVERRIDES_NMAP_PROFILE=small_long) has its chunks misrouted to the
-		# small pool — where they also miss that pool's per-task overrides (e.g. nmap's
-		# longer TASK_MAX_TIMEOUT), so they get soft-killed early.
 		sig = type(task).si(chunk, **opts).set(queue=resolve_task_queue(type(task), opts))
 		task_id = sig.freeze().task_id
 		full_name = f'{task.name}_{ix + 1}'
