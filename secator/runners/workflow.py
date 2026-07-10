@@ -5,6 +5,7 @@ from secator.output_types import Info
 from secator.runners._base import Runner
 from secator.runners._helpers import resolve_task_queue
 from secator.runners.task import Task
+from secator.safe_eval import safe_eval_condition
 from secator.tree import build_runner_tree, walk_runner_tree
 from secator.utils import merge_opts
 
@@ -83,8 +84,7 @@ class Workflow(Runner):
 				local_ns = {'opts': DotMap(opts), 'targets': self.inputs}
 				if condition:
 					# debug(f'{node.id} evaluating {condition} with opts {opts}', sub=self.config.name)
-					safe_globals = {'__builtins__': {'len': len}}
-					result = eval(condition, safe_globals, local_ns)
+					result = safe_eval_condition(condition, local_ns, {'len': len})
 					if not result:
 						debug(f'{node.id} skipped task because condition is not met: {condition}', sub=self.config.name)
 						# Persisted to the store via the runner's on_item hook.

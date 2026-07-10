@@ -1,4 +1,5 @@
 from typing import List, Optional, Union
+from secator.safe_eval import safe_eval_condition
 from secator.template import TemplateLoader
 from dotmap import DotMap
 
@@ -161,7 +162,7 @@ def prune_runner_tree(tree: RunnerTree, opts: dict, inputs: list = None) -> Runn
 	scan-level options like domain_recon_passive are visible as opts.passive
 	inside that workflow's tasks (mirroring build_celery_workflow behaviour).
 	"""
-	safe_globals = {'__builtins__': {'len': len}}
+	funcs = {'len': len}
 
 	def strip_prefix(parent_opts, workflow_name):
 		prefix = workflow_name.split('/')[0] + '_'
@@ -181,7 +182,7 @@ def prune_runner_tree(tree: RunnerTree, opts: dict, inputs: list = None) -> Runn
 		if node.condition:
 			local_ns = {'opts': DotMap(current_opts), 'targets': inputs or []}
 			try:
-				if not eval(node.condition, safe_globals, local_ns):
+				if not safe_eval_condition(node.condition, local_ns, funcs):
 					node.remove()
 			except Exception:
 				pass
@@ -191,7 +192,7 @@ def prune_runner_tree(tree: RunnerTree, opts: dict, inputs: list = None) -> Runn
 		if root.condition:
 			local_ns = {'opts': DotMap(opts), 'targets': inputs or []}
 			try:
-				if not eval(root.condition, safe_globals, local_ns):
+				if not safe_eval_condition(root.condition, local_ns, funcs):
 					tree.root_nodes.remove(root)
 			except Exception:
 				pass
