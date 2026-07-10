@@ -452,5 +452,52 @@ class TestDiscoverExternalTasksSkipsDriversAndExporters(unittest.TestCase):
         self.assertNotIn('secator.tasks.skiptest_nonclass', sys.modules)
 
 
+class TestDiscoverExternalTasksIdempotent(unittest.TestCase):
+    """An external task class must stay pickle-stable across repeated discovery (regression for #1286).
+
+    When discovery runs more than once in a process — e.g. an external task imports a
+    ``secator.tasks.*`` submodule, which re-enters ``discover_tasks()`` while the ``@cache``'d
+    ``discover_external_tasks()`` is still executing (``functools.cache`` is not re-entrancy safe)
+    — re-executing the file used to mint a SECOND class object and overwrite ``sys.modules``. A
+    task instance built from the first object could then no longer be pickled ("not the same
+    object as ..."), which crashed ``--sync`` chunked runs where the eager chord result is
+    pickled in-process (``task_store_eager_result``).
+    """
+
+    def setUp(self):
+        self.template_dir = CONFIG.dirs.templates
+        self.template_dir.mkdir(parents=True, exist_ok=True)
+        self.task_path = self.template_dir / 'idemtest_task.py'
+        self.task_path.write_text('class idemtest_task:\n    __external__ = False\n')
+        clear_modules()
+        _clear_loader_caches()
+
+    def tearDown(self):
+        if self.task_path.exists():
+            self.task_path.unlink()
+        for key in list(sys.modules.keys()):
+            if 'idemtest_task' in key:
+                del sys.modules[key]
+        _clear_loader_caches()
+
+    def _discover_one(self):
+        from secator.loader import discover_external_tasks
+        return next(c for c in discover_external_tasks() if c.__name__ == 'idemtest_task')
+
+    def test_repeated_discovery_keeps_class_pickle_stable(self):
+        import pickle
+        from secator.loader import discover_external_tasks
+        cls1 = self._discover_one()
+        # Simulate discovery running a second time (re-entrant import / cache miss).
+        discover_external_tasks.cache_clear()
+        cls2 = self._discover_one()
+        # Idempotent: the second run must not mint a duplicate class object...
+        self.assertIs(cls1, cls2)
+        # ...and sys.modules must still resolve the name to that same object...
+        self.assertIs(getattr(sys.modules[cls1.__module__], 'idemtest_task'), cls1)
+        # ...so the first object stays pickleable (the #1286 --sync chunk failure).
+        pickle.dumps(cls1)
+
+
 if __name__ == '__main__':
     unittest.main()
