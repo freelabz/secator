@@ -537,6 +537,81 @@ def emit_query_warnings(warnings):
         _warn_unknown_field(field_name, type_name, valid_fields)
 
 
+def _finding_value(item, key):
+    """Read a field from a finding, which may be a dict or an OutputType object."""
+    return item.get(key) if isinstance(item, dict) else getattr(item, key, None)
+
+
+def _finding_ts(item):
+    return _finding_value(item, '_timestamp') or 0
+
+
+def _truncate_aggregate(values, max_display=5):
+    """Join aggregated values, truncating with '.. and X more' past max_display."""
+    values = [str(v) for v in values]
+    if len(values) <= max_display:
+        return ', '.join(values)
+    shown = ', '.join(values[:max_display])
+    return f'{shown} .. and {len(values) - max_display} more'
+
+
+def group_findings(items, group_by, aggregate_field=None, max_display=5):
+    """Group findings by one or more fields, collapsing each group to a single
+    representative (the newest finding) that carries the aggregated field values
+    and a `_group_count` attribute for display.
+
+    Args:
+        items (list): Findings (dicts or OutputType objects) of a single type.
+        group_by (list[str]): Field names to group by.
+        aggregate_field (str): Field whose distinct values are collected onto the
+            representative (truncated for display). None disables aggregation.
+        max_display (int): Max aggregated values shown before '.. and X more'.
+
+    Returns:
+        list: One representative finding per group (OutputType objects when the
+            input could be loaded, else the raw items), in first-seen order.
+    """
+    from secator.output_types import OUTPUT_TYPES
+    type_map = {cls.get_name(): cls for cls in OUTPUT_TYPES}
+
+    groups = {}
+    order = []
+    for item in items:
+        key = tuple(str(_finding_value(item, f)) for f in group_by)
+        if key not in groups:
+            groups[key] = {'rep': item, 'agg': [], 'count': 0}
+            order.append(key)
+        group = groups[key]
+        group['count'] += 1
+        if _finding_ts(item) >= _finding_ts(group['rep']):
+            group['rep'] = item
+        if aggregate_field:
+            value = _finding_value(item, aggregate_field)
+            if value and value not in group['agg']:
+                group['agg'].append(value)
+
+    out = []
+    for key in order:
+        group = groups[key]
+        rep = group['rep']
+        if isinstance(rep, dict):
+            cls = type_map.get(rep.get('_type'))
+            if cls:
+                try:
+                    rep = cls.load(rep)
+                except Exception:
+                    pass
+        if aggregate_field and not isinstance(rep, dict):
+            # When grouping, other fields (extra_data, etc.) keep the newest
+            # finding's values; only the aggregate field is replaced by the
+            # truncated collected values.
+            setattr(rep, aggregate_field, _truncate_aggregate(group['agg'], max_display))
+        if not isinstance(rep, dict):
+            rep._group_count = group['count']
+        out.append(rep)
+    return out
+
+
 def query_has_type_constraint(query):
     """Check whether a MongoDB-style query contains a '_type' constraint anywhere (recursively).
 

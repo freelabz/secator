@@ -1,10 +1,41 @@
 from secator.query.utils import (
     expand_runner_paths,
+    group_findings,
     parse_report_paths,
     python_expr_to_mongo,
     validate_query_fields,
     query_has_type_constraint,
 )
+
+
+class TestGroupFindings:
+
+    def _vuln(self, name, matched_at, ts):
+        return {'_type': 'vulnerability', 'name': name, 'matched_at': matched_at, '_timestamp': ts}
+
+    def test_groups_by_name_with_count_and_aggregate(self):
+        findings = [
+            self._vuln('CVE-1', 'http://a.com', ts=1),
+            self._vuln('CVE-1', 'http://b.com', ts=2),
+            self._vuln('CVE-2', 'http://c.com', ts=3),
+        ]
+        grouped = group_findings(findings, group_by=['name'], aggregate_field='matched_at')
+
+        assert len(grouped) == 2
+        by_name = {g.name: g for g in grouped}
+        assert by_name['CVE-1']._group_count == 2
+        # Both matched_at values collected into the representative
+        assert 'http://a.com' in by_name['CVE-1'].matched_at
+        assert 'http://b.com' in by_name['CVE-1'].matched_at
+        assert by_name['CVE-2']._group_count == 1
+
+    def test_aggregate_truncates_past_max_display(self):
+        findings = [self._vuln('CVE-1', f'http://h{i}.com', ts=i) for i in range(8)]
+        grouped = group_findings(findings, group_by=['name'], aggregate_field='matched_at', max_display=5)
+
+        assert len(grouped) == 1
+        assert grouped[0]._group_count == 8
+        assert '.. and 3 more' in grouped[0].matched_at
 
 
 class TestParseReportPaths:
