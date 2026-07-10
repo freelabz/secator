@@ -199,6 +199,7 @@ _IDENT_RE = re.compile(r'^[\w.]+$')
 # Method-call / negation forms used by extractor conditions.
 _STARTSWITH_RE = re.compile(r"""^\s*([\w.]+)\.startswith\(\s*['"](.*?)['"]\s*\)\s*$""", re.DOTALL)
 _IN_LOWER_RE = re.compile(r"""^\s*['"](.*?)['"]\s+in\s+([\w.]+)\.lower\(\)\s*$""", re.DOTALL)
+_IN_FIELD_RE = re.compile(r"""^\s*['"](.*?)['"]\s+in\s+([\w.]+)\s*$""", re.DOTALL)
 _LOWER_EQ_RE = re.compile(r"""^\s*([\w.]+)\.lower\(\)\s*==\s*['"](.*?)['"]\s*$""", re.DOTALL)
 _NOT_FIELD_RE = re.compile(r'^\s*not\s+([\w.]+)\s*$')
 
@@ -303,6 +304,12 @@ def _parse_single_expr(expr):
     m = _IN_LOWER_RE.match(expr)
     if m:
         return _regex_result(m.group(2), '(?i)' + re.escape(m.group(1)))
+
+    # `'x' in field` -> case-sensitive substring (matches Python `'x' in str_field`).
+    # Checked after the `.lower()` form (whose trailing `()` keeps it from matching here).
+    m = _IN_FIELD_RE.match(expr)
+    if m:
+        return _regex_result(m.group(2), re.escape(m.group(1)))
 
     # `field.lower() == 'x'` -> anchored case-insensitive regex.
     m = _LOWER_EQ_RE.match(expr)

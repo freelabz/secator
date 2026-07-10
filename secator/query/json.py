@@ -83,6 +83,16 @@ def match_query(item: dict, query: dict) -> bool:
 					continue
 				if not OPERATORS[op](value, op_value):
 					return False
+		elif condition is True:
+			# Bare truthy field (e.g. `url.verified`, `vulnerability.id`): match on Python
+			# truthiness, not identity to `True`, so non-empty strings match too (mirrors the
+			# old per-item `if item.field` eval). Booleans behave identically to `== True`.
+			if not value:
+				return False
+		elif condition is False:
+			# `not field` -> keep only falsy values (False/None/''/0), mirroring `not item.field`.
+			if value:
+				return False
 		else:
 			if value != condition:
 				return False

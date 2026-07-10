@@ -30,6 +30,12 @@ class TestLowerContains:
 			'service_name': {'$regex': '(?i)ssh'}
 		}
 
+	def test_in_field_case_sensitive_substring(self):
+		# `'x' in field` (no .lower()) is case-sensitive substring containment.
+		assert python_expr_to_mongo("'445' in target.name") == {
+			'_type': 'target', 'name': {'$regex': '445'}
+		}
+
 
 class TestLowerEquality:
 	def test_lower_equality_case_insensitive(self):

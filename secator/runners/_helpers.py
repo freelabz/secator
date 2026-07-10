@@ -3,7 +3,6 @@ import operator
 import os
 import re
 
-from dotmap import DotMap
 from secator.config import CONFIG
 from secator.output_types import Error
 from secator.utils import deduplicate, debug
@@ -233,10 +232,9 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')
 		inputs = computed_inputs
 	elif parent_scope and not opts.get('chunk'):
-		scoped_targets = [
-			item.name for item in results
-			if item._type == 'target' and item._context.get('scope') == parent_scope
-		]
+		# Scoped target fallback: query scope-tagged Targets via the same engine (backend
+		# does the filtering) instead of scanning the full in-memory fan-in.
+		scoped_targets = process_extractor(results, {'type': 'target', 'field': 'name'}, ctx=ctx)
 		combined = deduplicate(scoped_targets)
 		if combined:
 			debug('using scope-tagged targets as inputs', obj=combined, sub='extractors')
@@ -374,10 +372,7 @@ def process_extractor(results, extractor, ctx=None):
 	"""
 	if ctx is None:
 		ctx = {}
-	# debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
 	ancestor_id = ctx.get('ancestor_id')
-	node_chain_start = ctx.get('node_chain_start', False)
-	parent_scope = ctx.get('parent_scope')
 	key = ctx.get('key')
 
 	# Parse extractor, it can be a dict or a string (shortcut)
@@ -386,39 +381,25 @@ def process_extractor(results, extractor, ctx=None):
 		return results
 	_type, _field, _condition, _group_by = parsed_extractor
 
-	# Evaluate condition for each result
-	if _condition:
-		tmp_results = []
-		if _type == 'target' and parent_scope:
-			_condition = _condition + f' and item._context.get("scope") == "{parent_scope}"'
-		elif ancestor_id and not node_chain_start:
-			_condition = _condition + f' and item._context.get("ancestor_id") == "{str(ancestor_id)}"'
-		for item in results:
-			if item._type != _type:
-				continue
-			ctx['item'] = DotMap(item.toDict())
-			ctx[f'{_type}'] = DotMap(item.toDict())
-			safe_globals = {
-				'__builtins__': {'len': len},
-				're_match': lambda pattern, value: bool(re.search(pattern, str(value))) if value is not None else False,
-			}
-			_eval_condition = re.sub(r'([\w.]+)\s*~=\s*(.+?)(?=\s+(?:and|or)\s+|$)', r're_match(\2, \1)', _condition)
-			eval_result = eval(_eval_condition, safe_globals, ctx)
-			if eval_result:
-				tmp_results.append(item)
-			del ctx['item']
-			del ctx[f'{_type}']
-		# debug(f'kept {len(tmp_results)} / {len(results)} items after condition [bold]{_condition}[/bold]', sub='extractor')  # noqa: E501
-		results = tmp_results
-	else:
-		results = [item for item in results if item._type == _type]
-		if _type == 'target' and parent_scope:
-			results = [item for item in results if item._context.get('scope') == parent_scope]
-		elif ancestor_id and not node_chain_start:
-			results = [item for item in results if item._context.get('ancestor_id') == ancestor_id]
+	# Translate the extractor into a query and let the backend do the filtering. Under a
+	# DB backend (mongodb/api/sqlite) this queries the store directly — the full fan-in is
+	# never materialized on the heap (RC#6 OOM fix). Under the local backend it filters the
+	# in-memory ctx['results'] (falling back to the passed-in results), mirroring the old
+	# per-item eval byte-for-byte.
+	query = build_extractor_query(extractor, ctx)
+	if query is None:
+		return []
+	from secator.query import QueryEngine
+	engine = QueryEngine(ctx.get('workspace_id'), context={
+		'drivers': ctx.get('drivers', []),
+		'results': ctx.get('results', results),
+		'workspace_name': ctx.get('workspace_name'),
+	})
+	results = engine.search(query)
 
-	results_str = "\n".join([f'{repr(item)} [{str(item._context.get("ancestor_id", ""))}]' for item in results])
-	debug(f'extracted results ([bold]ancestor_id[/]: {ancestor_id}, [bold]key[/]: {key}):\n{results_str}', sub='extractor')
+	debug(
+		f'extracted {len(results)} results ([bold]ancestor_id[/]: {ancestor_id}, [bold]key[/]: {key}) '
+		f'via query {query}', sub='extractor')
 
 	# Format field if needed
 	if _field:
@@ -430,7 +411,7 @@ def process_extractor(results, extractor, ctx=None):
 			_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
 			groups = {}
 			for item in results:
-				item_dict = item.toDict()
+				item_dict = _item_dict(item)
 				group_key = _format_nested(_group_by, item_dict)
 				value = _format_nested(_field, item_dict)
 				if not group_key or not value:
@@ -443,9 +424,14 @@ def process_extractor(results, extractor, ctx=None):
 					bucket.append(prefix)
 			results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
 		else:
-			results = [v for v in (_format_nested(_field, item.toDict()) for item in results) if v]
-	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
+			results = [v for v in (_format_nested(_field, _item_dict(item)) for item in results) if v]
 	return results
+
+
+def _item_dict(item):
+	"""Return an item as a dict, whether it's a raw finding dict (DB backend) or an
+	OutputType object (local backend)."""
+	return item if isinstance(item, dict) else item.toDict()
 
 
 def get_task_folder_id(path):

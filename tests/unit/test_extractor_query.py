@@ -146,6 +146,45 @@ class TestBuildExtractorQuery:
 		]
 
 
+def _local_ctx(results, **kw):
+	base = {
+		'opts': {}, 'targets': [], 'parent_scope': None, 'ancestor_id': None, 'node_chain_start': False,
+		'workspace_id': None, 'workspace_name': None, 'drivers': [], 'results': results,
+	}
+	base.update(kw)
+	return base
+
+
+class TestLocalBackendExtraction:
+	def test_filters_verified_urls(self):
+		from secator.output_types import Url
+		from secator.runners._helpers import run_extractors
+		results = [Url(url='http://a', host='a', verified=True), Url(url='http://b', host='b', verified=False)]
+		opts = {'targets_': [{'type': 'url', 'field': 'url', 'condition': 'url.verified'}]}
+		inputs, _, errors = run_extractors(results, opts, [], ctx=_local_ctx(results))
+		assert set(inputs) == {'http://a'}
+		assert not errors
+
+	def test_negation_and_case_insensitive_lower(self):
+		from secator.output_types import Url, Port
+		from secator.runners._helpers import run_extractors
+		results = [
+			Url(url='http://a', host='a', verified=True),
+			Url(url='http://b', host='b', verified=False),
+			Port(port=22, ip='1.1.1.1', host='a', service_name='OpenSSH'),
+			Port(port=80, ip='1.1.1.2', host='b', service_name='http'),
+		]
+		# not url.verified -> only the unverified url
+		opts = {'targets_': [{'type': 'url', 'field': 'url', 'condition': 'not url.verified'}]}
+		inputs, _, errors = run_extractors(results, opts, [], ctx=_local_ctx(results))
+		assert set(inputs) == {'http://b'} and not errors
+		# 'ssh' in service_name.lower() -> matches OpenSSH case-insensitively
+		opts2 = {'targets_': [{'type': 'port', 'field': 'host',
+							   'condition': "port.port == 22 or 'ssh' in port.service_name.lower()"}]}
+		inputs2, _, errors2 = run_extractors(results, opts2, [], ctx=_local_ctx(results))
+		assert set(inputs2) == {'a'} and not errors2
+
+
 class TestCorpusTranslation:
 	def test_every_config_condition_translates_or_raises_explicitly(self):
 		ctx = _ctx(opts=_AllTruthyOpts(), targets=['1.2.3.4'], ancestor_id='anc')

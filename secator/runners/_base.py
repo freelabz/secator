@@ -679,7 +679,15 @@ class Runner:
 	def _run_extractors(self):
 		"""Run extractors on results and targets."""
 		self.debug('running extractors', sub='init')
-		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs, 'ancestor_id': self.ancestor_id}
+		ctx = {
+			'opts': DotMap(self.run_opts),
+			'targets': self.inputs,
+			'ancestor_id': self.ancestor_id,
+			'workspace_id': self.context.get('workspace_id'),
+			'workspace_name': self.workspace_name,
+			'drivers': self.context.get('drivers', []),
+			'results': self.results,
+		}
 		inputs, run_opts, errors = run_extractors(self.results, self.run_opts, self.inputs, ctx=ctx, dry_run=self.dry_run)
 		for error in errors:
 			self.add_result(error)
