@@ -357,6 +357,76 @@ class TestRunnerErrorStatus:
 		assert any(e.message == 'boom' for e in r.self_errors)
 
 
+class TestBackendParity:
+	def _lower_query(self):
+		return build_extractor_query(
+			{'type': 'port', 'field': 'host', 'condition': "'ssh' in port.service_name.lower()"}, _ctx())
+
+	def test_lower_case_insensitivity_uses_inline_flag(self):
+		# The JSON backend's _regex_match ignores $options, so case-insensitivity MUST ride on an
+		# inline (?i) flag in the pattern (honored by both re.search and Mongo $regex). Guards the
+		# risk the spec flagged: a query that is case-insensitive on Mongo but sensitive on JSON.
+		q = self._lower_query()
+		assert q['service_name'] == {'$regex': '(?i)ssh'}
+		assert '$options' not in q['service_name']
+
+	def test_json_backend_lower_is_case_insensitive(self):
+		from secator.query.json import match_query
+		q = self._lower_query()
+		assert match_query({'_type': 'port', 'service_name': 'OpenSSH'}, q)      # upper matches
+		assert match_query({'_type': 'port', 'service_name': 'ssh'}, q)          # lower matches
+		assert not match_query({'_type': 'port', 'service_name': 'http'}, q)
+
+	def test_json_and_mongo_backends_extract_same(self):
+		import pytest
+		pytest.importorskip('mongomock')
+		import mongomock
+		from secator.query.json import JsonBackend
+		from secator.query.mongodb import MongoDBBackend
+		findings = [
+			{'_type': 'port', 'service_name': 'OpenSSH', 'host': 'a',
+			 '_context': {'workspace_id': 'ws'}, 'is_false_positive': False},
+			{'_type': 'port', 'service_name': 'http', 'host': 'b',
+			 '_context': {'workspace_id': 'ws'}, 'is_false_positive': False},
+		]
+		query = self._lower_query()
+		json_backend = JsonBackend('ws', results=[dict(f) for f in findings])
+		json_hosts = sorted(r['host'] for r in json_backend.search(query))
+
+		client = mongomock.MongoClient()
+		client.main.findings.insert_many([dict(f) for f in findings])
+		mongo_backend = MongoDBBackend('ws')
+		mongo_backend._client = client
+		mongo_hosts = sorted(r['host'] for r in mongo_backend.search(query))
+		assert json_hosts == mongo_hosts == ['a']
+
+
+class TestMemoryBound:
+	def test_large_fanin_not_materialized(self, monkeypatch):
+		import tracemalloc
+		from secator import celery as celery_mod
+		runner = _dummy_runner()
+		runner.started = True
+		runner.done = True
+		# 300k persisted findings arrive as uuid strings (as chain_results reduces them).
+		ids = [f'{i:024x}' for i in range(300_000)]
+		monkeypatch.setattr('secator.query.QueryEngine.search', lambda self, *a, **k: [])
+		before = len(runner.results)
+		tracemalloc.start()
+		# Mirror the mark_runner_* hook body: partition uuids, add only objects, hydrate errors.
+		forwarded_uuids = [item for item in ids if isinstance(item, str)]
+		for item in ids:
+			if isinstance(item, str):
+				continue
+			runner.add_result(item, print=False)
+		celery_mod._hydrate_runner_errors(runner)
+		_, peak = tracemalloc.get_traced_memory()
+		tracemalloc.stop()
+		assert len(forwarded_uuids) == 300_000
+		assert len(runner.results) == before     # the fan-in was never rehydrated into objects
+		assert peak < 40 * 1024 * 1024
+
+
 class TestCorpusTranslation:
 	def test_every_config_condition_translates_or_raises_explicitly(self):
 		ctx = _ctx(opts=_AllTruthyOpts(), targets=['1.2.3.4'], ancestor_id='anc')
