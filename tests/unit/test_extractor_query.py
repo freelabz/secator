@@ -320,6 +320,43 @@ class TestDifferentialGolden:
 		assert sorted(inputs) == old_out
 
 
+def _dummy_runner():
+	from secator.definitions import HOST
+	from secator.runners import PythonRunner
+
+	class dummytask(PythonRunner):
+		input_types = [HOST]
+
+		def yielder(self):
+			return []
+
+	return dummytask(inputs=['x'], skip_if_no_inputs=True)
+
+
+class TestRunnerErrorStatus:
+	def test_status_failure_with_owned_error(self):
+		from secator.output_types import Error
+		r = _dummy_runner()
+		r.started = True
+		r.done = True
+		assert r.status == 'SUCCESS'
+		r.add_result(Error(message='boom'), print=False, hooks=False)
+		assert r.status == 'FAILURE'
+
+	def test_hydrate_runner_errors_from_store(self, monkeypatch):
+		from secator import celery as celery_mod
+		r = _dummy_runner()
+		r.started = True
+		r.done = True
+		assert r.status == 'SUCCESS'
+		err_doc = {'_type': 'error', 'message': 'boom', '_source': r.unique_name}
+		# Stub the store: only errors come back, never the (huge) findings set.
+		monkeypatch.setattr('secator.query.QueryEngine.search', lambda self, *a, **k: [err_doc])
+		celery_mod._hydrate_runner_errors(r)
+		assert r.status == 'FAILURE'
+		assert any(e.message == 'boom' for e in r.self_errors)
+
+
 class TestCorpusTranslation:
 	def test_every_config_condition_translates_or_raises_explicitly(self):
 		ctx = _ctx(opts=_AllTruthyOpts(), targets=['1.2.3.4'], ancestor_id='anc')

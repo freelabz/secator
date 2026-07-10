@@ -449,15 +449,15 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		results = forward_results(results)
 	runner.enable_hooks = enable_hooks
 
-	# Query results from db when mongodb is enabled
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		from secator.hooks.mongodb import get_results
-
-		results = get_results(results)
-
-	# Add results to runner so it can compute status
-	# and extract dynamic targets
+	# Do NOT rehydrate the fan-in (RC#6 OOM): the incoming results are a mix of uuid
+	# strings (persisted findings, reduced by chain_results) and non-persisted objects.
+	# Add only the objects to the runner (needed for scope-tagged extraction / status);
+	# carry the uuid strings straight through the chain. Extractors query the store
+	# independently instead of scanning a materialized fan-in.
+	forwarded_uuids = [item for item in results if isinstance(item, str)]
 	for item in results:
+		if isinstance(item, str):
+			continue
 		runner.add_result(item, print=False)
 
 	# Emit scope-tagged Targets for workflows with a scan-level targets_ extractor.
@@ -495,9 +495,9 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_started in {total_time:.2f}s'))
 
-	# Return only uuids when mongodb is enabled
+	# Return only uuids when mongodb is enabled (carry the un-hydrated fan-in uuids through)
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		return chain_results(runner.results)
+		return chain_results(list(runner.results) + forwarded_uuids)
 
 	return runner.results
 
@@ -524,16 +524,19 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
 
-	# Query results from db when mongodb is enabled
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		from secator.hooks.mongodb import get_results
-
-		results = get_results(results)
-
-	# Add results to runner so it can compute status
-	# and run duplicate checks
+	# Do NOT rehydrate the fan-in (RC#6 OOM). Add only the non-persisted objects; carry the
+	# uuid strings through the chain.
+	forwarded_uuids = [item for item in results if isinstance(item, str)]
 	for item in results:
+		if isinstance(item, str):
+			continue
 		runner.add_result(item, print=False)
+
+	# Status derives from this runner's own Error findings. Under mongodb those were reduced
+	# to uuids in the fan-in, so fetch ONLY the errors from the store (a small, bounded set —
+	# never the full findings set) and let self_errors / _owns_error narrow to this subtree.
+	if IN_WORKER and CONFIG.addons.mongodb.enabled:
+		_hydrate_runner_errors(runner)
 
 	# Run mark_completed (duplicate checks, db updates if enable_hooks is True)
 	runner.mark_completed()
@@ -544,11 +547,33 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_completed in {total_time:.2f}s'))
 
-	# Return only uuids when mongodb is enabled
+	# Return only uuids when mongodb is enabled (carry the un-hydrated fan-in uuids through)
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		return chain_results(runner.results)
+		return chain_results(list(runner.results) + forwarded_uuids)
 
 	return runner.results
+
+
+def _hydrate_runner_errors(runner):
+	"""Fetch this runner's workspace Errors from the query store and add them as objects so
+	status/self_errors compute without rehydrating the entire fan-in (RC#6 OOM fix).
+
+	Only ``_type: 'error'`` documents are materialized (bounded and small); the runner's
+	``_owns_error`` narrows them to its own subtree. Best-effort: a query failure must not
+	break completion.
+	"""
+	try:
+		from secator.query import QueryEngine
+		from secator.output_types import Error
+		engine = QueryEngine(runner.context.get('workspace_id'), context={
+			'drivers': runner.context.get('drivers', []),
+			'workspace_name': runner.workspace_name,
+		})
+		for doc in engine.search({'_type': 'error'}):
+			err = doc if isinstance(doc, Error) else Error.load(doc)
+			runner.add_result(err, print=False, hooks=False, queue=False)
+	except Exception as e:  # noqa: BLE001
+		debug(f'Runner {runner.unique_name}: failed to hydrate errors for status: {e}', sub='celery')
 
 
 # --------------#
