@@ -642,3 +642,135 @@ class TestSqliteTranslator(unittest.TestCase):
 		from secator.query.sqlite import _build_where
 		with self.assertRaises(ValueError):
 			_build_where({"x') UNION SELECT 1 --": 'v'})
+
+
+class TestIdFanInQuery(unittest.TestCase):
+	"""Prove the `{'_id': {'$in': <ids>}, **filters}` fan-in query shape works
+	across backends. Findings are fanned in by their `_id` string (see
+	celery.chain_results); the extractor path must be able to query them by id +
+	filter instead of materializing the whole result set (RC#6/#9)."""
+
+	def test_merge_query_preserves_id_filter(self):
+		"""The enforced base query must AND in workspace/false-positive filters
+		without stripping a client `_id` filter (it is not a PROTECTED_FIELD)."""
+		from secator.query._base import QueryBackend
+
+		class _B(QueryBackend):
+			name = 'test'
+
+			def _execute_search(self, q, limit, exclude_fields=None):
+				return []
+
+			def _execute_count(self, q):
+				return 0
+
+			def _execute_update(self, q, u):
+				return 0
+
+		backend = _B(workspace_id='ws123')
+		ids = ['6a4d40157218971a7a32305d', '6a4d40157218971a7a32305e']
+		merged = backend._merge_query({'_id': {'$in': ids}, '_type': 'port'})
+		self.assertEqual(merged['_id'], {'$in': ids})
+		self.assertEqual(merged['_type'], 'port')
+		self.assertEqual(merged['_context.workspace_id'], 'ws123')
+		self.assertEqual(merged['is_false_positive'], {'$ne': True})
+
+	def test_json_backend_id_in_with_filter(self):
+		"""Local/JSON `match_query` supports `{'_id': {'$in': ids}, **filters}` when
+		findings carry an id field — i.e. the query *mechanism* is backend-agnostic.
+
+		NOTE: local report.json findings key on `_uuid`, not `_id`; local runs never
+		fan-in by id (mongodb addon off), so this proves the operator, using `_uuid`
+		as the id field the local backend actually populates."""
+		from secator.query.json import match_query
+
+		items = [
+			{'_uuid': 'a1', '_type': 'port', 'port': 80},
+			{'_uuid': 'a2', '_type': 'port', 'port': 443},
+			{'_uuid': 'a3', '_type': 'url', 'url': 'http://x'},
+		]
+		q = {'_uuid': {'$in': ['a1', 'a3']}, '_type': 'port'}
+		matched = [i for i in items if match_query(i, q)]
+		self.assertEqual([i['_uuid'] for i in matched], ['a1'])
+
+
+class TestMongoDBIdConversion(unittest.TestCase):
+	"""MongoDB query backend must convert `_id` `$in`/`$nin` **string** lists to
+	ObjectId — findings are fanned in by their id *string*, but Mongo stores `_id`
+	as an ObjectId so a raw-string `$in` matches nothing. Mirrors the rehydration
+	in hooks.mongodb.get_results and the server-side api.db.utils.convert_query."""
+
+	def setUp(self):
+		import pytest
+		pytest.importorskip('bson')
+
+	def test_convert_id_query_converts_in_and_nin(self):
+		from bson.objectid import ObjectId
+		from secator.query.mongodb import _convert_id_query
+
+		ids = ['6a4d40157218971a7a32305d', '6a4d40157218971a7a32305e']
+		out = _convert_id_query({'_id': {'$in': list(ids)}, '_type': 'port'})
+		self.assertTrue(all(isinstance(v, ObjectId) for v in out['_id']['$in']))
+		self.assertEqual([str(v) for v in out['_id']['$in']], ids)
+		self.assertEqual(out['_type'], 'port')
+
+		out2 = _convert_id_query({'_id': {'$nin': list(ids)}})
+		self.assertTrue(all(isinstance(v, ObjectId) for v in out2['_id']['$nin']))
+
+	def test_convert_id_query_leaves_invalid_and_plain(self):
+		from bson.objectid import ObjectId
+		from secator.query.mongodb import _convert_id_query
+
+		# Non-ObjectId strings are left untouched (they simply won't match).
+		out = _convert_id_query({'_id': {'$in': ['not-an-oid']}})
+		self.assertEqual(out['_id']['$in'], ['not-an-oid'])
+		# A query with no `_id` is a no-op.
+		self.assertEqual(_convert_id_query({'_type': 'url'}), {'_type': 'url'})
+		# Already-ObjectId values survive.
+		oid = ObjectId()
+		out2 = _convert_id_query({'_id': {'$in': [oid]}})
+		self.assertEqual(out2['_id']['$in'], [oid])
+
+	def test_execute_search_converts_ids_before_query(self):
+		"""Regression: `_execute_search` must convert ids to ObjectId before hitting
+		the driver, else a fan-in by id string returns zero findings."""
+		from unittest.mock import MagicMock, patch
+		from bson.objectid import ObjectId
+		from secator.query.mongodb import MongoDBBackend
+
+		captured = {}
+
+		def _find(query, projection=None):
+			captured['query'] = query
+			cursor = MagicMock()
+			cursor.limit.return_value = iter([])
+			return cursor
+
+		client = MagicMock()
+		client.main.findings.find.side_effect = _find
+
+		ids = ['6a4d40157218971a7a32305d', '6a4d40157218971a7a32305e']
+		backend = MongoDBBackend(workspace_id='ws123')
+		with patch.object(backend, '_get_client', return_value=client):
+			backend.search({'_id': {'$in': list(ids)}, '_type': 'port'})
+
+		sent = captured['query']
+		self.assertTrue(all(isinstance(v, ObjectId) for v in sent['_id']['$in']))
+		self.assertEqual([str(v) for v in sent['_id']['$in']], ids)
+		# base query still enforced alongside the id filter
+		self.assertEqual(sent['_context.workspace_id'], 'ws123')
+		self.assertEqual(sent['is_false_positive'], {'$ne': True})
+
+	def test_execute_count_converts_ids(self):
+		from unittest.mock import MagicMock, patch
+		from bson.objectid import ObjectId
+		from secator.query.mongodb import MongoDBBackend
+
+		captured = {}
+		client = MagicMock()
+		client.main.findings.count_documents.side_effect = lambda q: captured.setdefault('q', q) or 0
+
+		backend = MongoDBBackend(workspace_id='ws123')
+		with patch.object(backend, '_get_client', return_value=client):
+			backend.count({'_id': {'$in': ['6a4d40157218971a7a32305d']}})
+		self.assertTrue(all(isinstance(v, ObjectId) for v in captured['q']['_id']['$in']))

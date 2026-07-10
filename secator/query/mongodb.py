@@ -9,6 +9,28 @@ from secator.rich import console
 RUNNER_COLLECTIONS = ('tasks', 'workflows', 'scans')
 
 
+def _convert_id_query(query: dict) -> dict:
+	"""Convert `_id` `$in` / `$nin` string lists to ObjectId in-place.
+
+	Findings are fanned in by their `_id` **string** (see celery.chain_results),
+	but Mongo stores `_id` as an ObjectId — a raw string `$in` matches nothing.
+	Mirror the rehydration in hooks.mongodb.get_results and the server-side
+	api.db.utils.convert_query so `{'_id': {'$in': ids}, **filters}` works.
+
+	Only valid 24-char hex ids are converted; anything else is left untouched
+	(it simply won't match a real ObjectId, which is the correct outcome).
+	"""
+	from bson.objectid import ObjectId
+	cond = query.get('_id')
+	if not isinstance(cond, dict):
+		return query
+	for op in ('$in', '$nin'):
+		values = cond.get(op)
+		if isinstance(values, (list, tuple)):
+			cond[op] = [ObjectId(v) if ObjectId.is_valid(v) else v for v in values]
+	return query
+
+
 class MongoDBBackend(QueryBackend):
 	"""Query backend for MongoDB."""
 
@@ -37,6 +59,8 @@ class MongoDBBackend(QueryBackend):
 			client = self._get_client()
 			db = client.main
 
+			query = _convert_id_query(query)
+
 			# Build projection to exclude fields
 			projection = None
 			if exclude_fields:
@@ -59,7 +83,7 @@ class MongoDBBackend(QueryBackend):
 		try:
 			client = self._get_client()
 			db = client.main
-			return db.findings.count_documents(query)
+			return db.findings.count_documents(_convert_id_query(query))
 		except Exception as e:
 			console.print(Warning(message=f'MongoDB count failed: {e}'))
 			return 0
@@ -67,7 +91,7 @@ class MongoDBBackend(QueryBackend):
 	def _execute_update(self, query: dict, update: dict) -> int:
 		"""Update documents matching query in MongoDB."""
 		client = self._get_client()
-		result = client.main.findings.update_one(query, update)
+		result = client.main.findings.update_one(_convert_id_query(query), update)
 		return result.modified_count
 
 	def list_workspaces(self):
