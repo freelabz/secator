@@ -126,6 +126,23 @@ def discover_external_tasks():
 			task_name = path.stem
 			module_name = f'secator.tasks.{task_name}'
 
+			# Idempotent import: reuse an already-registered module instead of re-executing
+			# the file. Re-exec mints a SECOND class object and overwrites sys.modules, so a
+			# task instance built from the first object can no longer be pickled ("not the same
+			# object as ...") — the #1286 sync-mode chunk crash (task_store_eager_result pickles
+			# the eager chord result in-process). This runs twice when an external task imports a
+			# secator.tasks.* submodule: that triggers secator/tasks/__init__.py -> discover_tasks()
+			# re-entrantly while this @cache'd discovery is still executing (functools.cache is not
+			# re-entrancy safe). If the module is mid-initialisation the class isn't defined yet, so
+			# skip it here — the in-progress exec that registered it appends it when it completes.
+			existing = sys.modules.get(module_name)
+			if existing is not None:
+				cls = getattr(existing, task_name, None)
+				if inspect.isclass(cls):
+					cls.__external__ = True
+					output.append(cls)
+				continue
+
 			# console.print(f'Importing module {module_name} from {path}')
 			spec = importlib.util.spec_from_file_location(module_name, path)
 			if not spec:
