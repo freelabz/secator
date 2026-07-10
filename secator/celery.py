@@ -216,8 +216,32 @@ def _expire_worker_loss_key(backend, key):
 		debug(f'worker-loss expire failed for {key}: {e}', sub='celery.state')
 
 
+def worker_loss_key(context, celery_id):
+	"""Stable identity for worker-loss counting across broker redeliveries.
+
+	Prefer the Mongo task id — minted at ``on_build`` (secator.hooks.mongodb) and baked into the
+	child signature's serialized ``context`` — so the counter accumulates on the *logical* task
+	even when the Celery request id rotates between deliveries. The observed OOM zombies redelivered
+	with ``redelivered=true, retries=0`` (pure broker redelivery) each presenting a fresh Celery id,
+	so keying on ``self.request.id`` reset the count to 1 every cycle and the abandon cap never
+	tripped. The Mongo id rides inside the message body, so it is identical on every redelivery.
+
+	Falls back to the Celery id for tasks with no persisted doc (e.g. a bare top-level task that
+	never went through ``on_build``); those keep a stable Celery id under ``reject_on_worker_lost``,
+	so the fallback preserves the original behaviour.
+
+	Args:
+		context (dict): Task context (may carry ``task_chunk_id`` / ``task_id``).
+		celery_id (str): Celery request id, used as a fallback.
+
+	Returns:
+		str: The key to count worker-loss redeliveries against.
+	"""
+	return context.get('task_chunk_id') or context.get('task_id') or celery_id
+
+
 def bump_worker_loss_count(task_id):
-	"""Increment and return the worker-loss delivery count for a Celery task id.
+	"""Increment and return the worker-loss delivery count for a logical task id.
 
 	Stored on the Celery result backend (via its generic key/value interface) so it survives a
 	worker being killed and works with whatever backend is configured — Redis, filesystem, cache,
@@ -226,7 +250,8 @@ def bump_worker_loss_count(task_id):
 	``get``/``set`` (e.g. the database/RPC backends), so the cap simply no-ops there.
 
 	Args:
-		task_id (str): Celery request id (stable across worker-loss redeliveries).
+		task_id (str): Stable logical task id (see ``worker_loss_key``) — the Mongo task id when
+			available, else the Celery request id.
 
 	Returns:
 		int: Number of times this task has been delivered, or 0 if unsupported.
@@ -337,16 +362,19 @@ def run_command(self, results, name, targets, opts={}):
 
 		# Worker-loss redelivery cap. With task_acks_late + task_reject_on_worker_lost, a task
 		# whose worker is killed (cgroup OOMKill of the child, or a node-pressure eviction) is
-		# redelivered with the SAME Celery id. Count redeliveries on the result backend and
-		# abandon after task_max_retries, so a task that OOMs every run can't loop forever and
-		# block the surrounding chord/workflow. reject_on_worker_lost is what actually
-		# re-queues the task on abrupt worker death, so gate on it too (not just late acks).
+		# redelivered and re-run. Count redeliveries on the result backend and abandon after
+		# task_max_retries, so a task that OOMs every run can't loop forever and block the
+		# surrounding chord/workflow. reject_on_worker_lost is what actually re-queues the task on
+		# abrupt worker death, so gate on it too (not just late acks). Key the counter on the stable
+		# Mongo task id (worker_loss_key), not self.request.id: broker redeliveries of a fan-in can
+		# present a fresh Celery id each cycle (redelivered=true, retries=0), which would reset a
+		# per-request-id count to 1 forever and never trip the cap.
 		if (
 			CONFIG.celery.task_max_retries != -1
 			and CONFIG.celery.task_acks_late
 			and CONFIG.celery.task_reject_on_worker_lost
 		):
-			delivery_count = bump_worker_loss_count(self.request.id)
+			delivery_count = bump_worker_loss_count(worker_loss_key(context, self.request.id))
 			if worker_loss_retries_exhausted(delivery_count, CONFIG.celery.task_max_retries):
 				# Attach the request context so the abandoned task doc still carries
 				# celery_id / worker_name / routing_key even when opts had none coming in.
