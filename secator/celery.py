@@ -140,6 +140,18 @@ def chain_results(results):
 	return out
 
 
+def chain_output(runner):
+	"""Chain-forward a runner's results plus any lazily-held fan-in ids (RC#6).
+
+	When the fan-in was kept by id (not rehydrated), ``runner.results`` holds only
+	this runner's own + carried objects; the prior fan-in ids are re-emitted here so
+	the accumulated set keeps flowing downstream unchanged, without ever
+	materializing it. ``chain_results`` dedupes and reduces objects to ids.
+	"""
+	prior = runner.prior_result_ids or []
+	return chain_results(list(prior) + runner.results)
+
+
 @retry(Exception, tries=3, delay=2)
 def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
@@ -295,7 +307,7 @@ def abandon_task(name, targets, opts, results, delivery_count=None):
 	))
 	task.mark_completed()
 	if CONFIG.addons.mongodb.enabled:
-		return chain_results(task.results)
+		return chain_output(task)
 	return task.results
 
 
@@ -387,7 +399,7 @@ def run_command(self, results, name, targets, opts={}):
 	update_state(self, task, force=True)
 
 	if CONFIG.addons.mongodb.enabled:
-		return chain_results(task.results)
+		return chain_output(task)
 	return task.results
 
 
@@ -449,11 +461,10 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		results = forward_results(results)
 	runner.enable_hooks = enable_hooks
 
-	# Query results from db when mongodb is enabled
+	# Load prior results from db when mongodb is enabled. For a child runner this keeps
+	# the fan-in by id (RC#6) instead of rehydrating the whole set onto the heap.
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		from secator.hooks.mongodb import get_results
-
-		results = get_results(results)
+		runner.prior_result_ids, results = runner._split_fanin(results)
 
 	# Add results to runner so it can compute status
 	# and extract dynamic targets
@@ -469,6 +480,8 @@ def mark_runner_started(results, runner, enable_hooks=True):
 			k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'
 		}
 		ctx = {'ancestor_id': runner.ancestor_id, 'node_chain_start': True}
+		if runner.prior_result_ids is not None:
+			ctx['fetch_by_type'] = runner._make_fanin_fetch(runner.prior_result_ids)
 		scoped_inputs, _, _ = run_extractors(runner.results, target_extractor_opts, runner.inputs, ctx=ctx)
 		for name in scoped_inputs:
 			t = TargetOutput(name=name)
@@ -490,7 +503,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 
 	# Return only uuids when mongodb is enabled
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		return chain_results(runner.results)
+		return chain_output(runner)
 
 	return runner.results
 
@@ -517,11 +530,10 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
 
-	# Query results from db when mongodb is enabled
+	# Load prior results from db when mongodb is enabled (fan-in kept by id for a child
+	# runner, RC#6 — mark_completed only needs own-source results + db state).
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		from secator.hooks.mongodb import get_results
-
-		results = get_results(results)
+		runner.prior_result_ids, results = runner._split_fanin(results)
 
 	# Add results to runner so it can compute status
 	# and run duplicate checks
@@ -539,7 +551,7 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 
 	# Return only uuids when mongodb is enabled
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		return chain_results(runner.results)
+		return chain_output(runner)
 
 	return runner.results
 

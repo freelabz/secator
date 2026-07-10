@@ -187,6 +187,40 @@ def extract_from_results(results, extractors, ctx=None):
 	return all_results, errors
 
 
+# Tokens that appear in extractor conditions but are never finding fields, so
+# they must not pollute the DB projection.
+_FIELD_STOPWORDS = {
+	'and', 'or', 'not', 'in', 'is', 'if', 'else', 'None', 'True', 'False',
+	'len', 're_match', 'item',
+}
+
+
+def _extractor_fields(parsed_extractor):
+	"""Bounded Mongo include-projection for an extractor.
+
+	Collects every identifier its field / group_by templates and condition could
+	reference, plus mandatory identity/context fields. Deliberately over-inclusive
+	(unknown projected fields are ignored by Mongo, and any real referenced field
+	is kept so condition/format semantics are identical) — it only ever *omits*
+	fields the extractor never mentions, which is what bounds per-object memory for
+	huge same-type fan-ins. Returns None (→ no projection, full objects) if the
+	extractor can't be parsed.
+	"""
+	if not parsed_extractor:
+		return None
+	_type, _field, _condition, _group_by = parsed_extractor
+	fields = {'_type', '_context', '_source', '_uuid', 'name'}
+	for tmpl in (_field, _group_by, _condition):
+		if not tmpl:
+			continue
+		# Strip string literals so quoted values aren't treated as field names.
+		text = re.sub(r"'[^']*'|\"[^\"]*\"", ' ', str(tmpl))
+		for tok in re.findall(r'[A-Za-z_]\w*', text):
+			if tok not in _FIELD_STOPWORDS:
+				fields.add(tok)
+	return sorted(fields)
+
+
 def parse_extractor(extractor):
 	"""Parse extractor.
 
@@ -237,6 +271,15 @@ def process_extractor(results, extractor, ctx=None):
 	if not parsed_extractor:
 		return results
 	_type, _field, _condition, _group_by = parsed_extractor
+
+	# RC#6: when a fan-in fetch is provided (mongodb id fan-in), source this
+	# extractor's candidates from the DB (id + _type filter + field projection)
+	# instead of the fully-materialized fan-in — the whole set is never
+	# rehydrated onto the worker heap. The condition eval + formatting below are
+	# unchanged; they just run on the (much smaller, projected) queried subset.
+	fetch = ctx.get('fetch_by_type')
+	if fetch is not None:
+		results = fetch(_type, _extractor_fields(parsed_extractor))
 
 	# Evaluate condition for each result
 	if _condition:

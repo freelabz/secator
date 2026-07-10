@@ -49,11 +49,16 @@ def get_runner_dbg(runner):
 	}
 
 
-def get_results(uuids):
+def get_results(uuids, types=None, fields=None):
 	"""Get results from MongoDB based on a list of uuids.
 
 	Args:
 		uuids (list[str | Output]): List of uuids, but can also be a mix of uuids and output types.
+		types (list[str], optional): If set, only fetch findings whose ``_type`` is in this
+			list (pushed into the Mongo query). Lets an extractor rehydrate just the subset
+			it needs instead of the whole fan-in (RC#6 heap OOM).
+		fields (list[str], optional): If set, a Mongo include-projection so only these fields
+			(plus ``_id``) come back — bounds per-object memory for huge same-type fan-ins.
 
 	Returns:
 		Generator of findings.
@@ -63,12 +68,18 @@ def get_results(uuids):
 	del_uuids = []
 	for r in uuids:
 		if isinstance(r, tuple(OUTPUT_TYPES)):
-			yield r
+			if types is None or getattr(r, '_type', None) in types:
+				yield r
 			del_uuids.append(r)
 	uuids = [ObjectId(u) for u in uuids if u not in del_uuids and ObjectId.is_valid(u)]
-	for r in db.findings.find({'_id': {'$in': uuids}}):
+	query = {'_id': {'$in': uuids}}
+	if types is not None:
+		query['_type'] = {'$in': list(types)}
+	projection = {f: 1 for f in fields} if fields else None
+	for r in db.findings.find(query, projection):
 		finding = load_finding(r)
-		yield finding
+		if finding is not None:
+			yield finding
 
 
 def update_runner(self):

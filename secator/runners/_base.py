@@ -110,6 +110,10 @@ class Runner:
 		# Runner state
 		self.uuids = set()
 		self.results = []
+		# RC#6: when a mongodb fan-in is passed by id, we keep the raw id strings here
+		# (cheap) instead of rehydrating every finding onto the heap. None means the
+		# eager/local path (prior results materialized into self.results as before).
+		self.prior_result_ids = None
 		self.results_count = 0
 		self.threads = []
 		self.output = ''
@@ -193,11 +197,7 @@ class Runner:
 
 		# Add prior results to runner results
 		self.debug(f'adding {len(results)} prior results to runner', sub='init')
-		if CONFIG.addons.mongodb.enabled:
-			self.debug(f'loading {len(results)} results from MongoDB', sub='init')
-			from secator.hooks.mongodb import get_results
-
-			results = get_results(results)
+		self.prior_result_ids, results = self._split_fanin(results)
 		for result in results:
 			self.add_result(result, print=False, output=False, hooks=False, queue=not self.has_parent)
 
@@ -676,10 +676,54 @@ class Runner:
 			if error:
 				self.add_result(error)
 
+	def _query_fanin_enabled(self):
+		"""Whether to use the lazy query fan-in path (RC#6).
+
+		Active only for a child runner under the mongodb addon: those are the ones
+		that receive a large accumulated fan-in by id. Root/sync/local runners keep
+		the eager in-memory path unchanged.
+		"""
+		return bool(CONFIG.addons.mongodb.enabled and self.has_parent)
+
+	def _split_fanin(self, results):
+		"""Split incoming prior results for the lazy query path.
+
+		Returns ``(prior_ids, results)``:
+		- lazy path on: keep persisted-finding **id strings** as ``prior_ids`` (cheap,
+		  for re-forwarding + lazy per-extractor querying) and materialize only the
+		  carried non-id objects (Target/Info etc.).
+		- otherwise: ``(None, ...)`` with results rehydrated in full as before.
+		"""
+		if not CONFIG.addons.mongodb.enabled:
+			return None, results
+		if self._query_fanin_enabled():
+			prior_ids = [r for r in results if isinstance(r, str)]
+			objects = [r for r in results if not isinstance(r, str)]
+			self.debug(
+				f'lazy fan-in: kept {len(prior_ids)} ids, materialized {len(objects)} carried objects', sub='init')
+			return prior_ids, objects
+		from secator.hooks.mongodb import get_results
+		return None, list(get_results(results))
+
+	def _make_fanin_fetch(self, ids):
+		"""Build a ``fetch_by_type(type, fields)`` callable that rehydrates only the
+		findings of the requested type from the fan-in ids (+ carried in-memory
+		objects of that type, e.g. scope-tagged Targets)."""
+		from secator.hooks.mongodb import get_results
+		carried = self.results
+
+		def fetch(_type, fields=None):
+			out = list(get_results(ids, types=[_type], fields=fields))
+			out += [r for r in carried if getattr(r, '_type', None) == _type]
+			return out
+		return fetch
+
 	def _run_extractors(self):
 		"""Run extractors on results and targets."""
 		self.debug('running extractors', sub='init')
 		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs, 'ancestor_id': self.ancestor_id}
+		if self.prior_result_ids is not None:
+			ctx['fetch_by_type'] = self._make_fanin_fetch(self.prior_result_ids)
 		inputs, run_opts, errors = run_extractors(self.results, self.run_opts, self.inputs, ctx=ctx, dry_run=self.dry_run)
 		for error in errors:
 			self.add_result(error)
