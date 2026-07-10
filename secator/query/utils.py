@@ -193,6 +193,37 @@ _OP_MAP = {
 _IN_RE = re.compile(r'^(.+?)\s+in\s+\[(.*)\]\s*$', re.DOTALL)
 _NOT_IN_RE = re.compile(r'^(.+?)\s+not\s+in\s+\[(.*)\]\s*$', re.DOTALL)
 
+# A clean dotted identifier (word chars + dots), e.g. `url.verified`, `_source`.
+_IDENT_RE = re.compile(r'^[\w.]+$')
+
+# Method-call / negation forms used by extractor conditions.
+_STARTSWITH_RE = re.compile(r"""^\s*([\w.]+)\.startswith\(\s*['"](.*?)['"]\s*\)\s*$""", re.DOTALL)
+_IN_LOWER_RE = re.compile(r"""^\s*['"](.*?)['"]\s+in\s+([\w.]+)\.lower\(\)\s*$""", re.DOTALL)
+_LOWER_EQ_RE = re.compile(r"""^\s*([\w.]+)\.lower\(\)\s*==\s*['"](.*?)['"]\s*$""", re.DOTALL)
+_NOT_FIELD_RE = re.compile(r'^\s*not\s+([\w.]+)\s*$')
+
+
+def _split_type_field(dotted):
+    """Split a `type.field` operand into (_type, field), or (None, field) when bare.
+
+    Mirrors the existing `left.split('.', 1)` convention used across the translator so a
+    type prefix (`port.service_name`) yields a `_type` while a bare field (`_source`) does not.
+    """
+    parts = dotted.split('.', 1)
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip()
+    return None, parts[0].strip()
+
+
+def _regex_result(dotted, pattern):
+    """Build a {[_type], field: {$regex: pattern}} dict from a dotted operand."""
+    _type, field = _split_type_field(dotted)
+    result = {}
+    if _type:
+        result['_type'] = _type
+    result[field] = {'$regex': pattern}
+    return result
+
 
 def _has_in_op_outside_quotes(expr):
     """Return True if ' in [' appears outside of any quoted substring in expr."""
@@ -260,6 +291,35 @@ def _parse_single_expr(expr):
     if re.match(r'^[a-z_]+$', expr):
         return {'_type': expr}
 
+    # Method-call / negation forms used by extractor conditions. Checked before the
+    # generic operator parse because `field.lower() == 'x'` contains '==' and
+    # `'x' in field.lower()` contains ' in ' but must NOT be parsed as those ops.
+    m = _STARTSWITH_RE.match(expr)
+    if m:
+        return _regex_result(m.group(1), '^' + re.escape(m.group(2)))
+
+    # `'x' in field.lower()` -> case-insensitive contains (inline (?i) so it works on
+    # the JSON backend's re.search too, which ignores $options).
+    m = _IN_LOWER_RE.match(expr)
+    if m:
+        return _regex_result(m.group(2), '(?i)' + re.escape(m.group(1)))
+
+    # `field.lower() == 'x'` -> anchored case-insensitive regex.
+    m = _LOWER_EQ_RE.match(expr)
+    if m:
+        return _regex_result(m.group(1), '(?i)^' + re.escape(m.group(2)) + '$')
+
+    # `not type.field` -> falsy truthiness match (the backend treats {field: False} as
+    # "field is falsy", mirroring the old per-item `not item.field` eval).
+    m = _NOT_FIELD_RE.match(expr)
+    if m:
+        _type, field = _split_type_field(m.group(1))
+        result = {}
+        if _type:
+            result['_type'] = _type
+        result[field] = False
+        return result
+
     # Check for 'not in' operator first: "type.field not in [val1, val2]" -> $nin.
     # It also contains ' in ', so it must be matched before the plain 'in' branch.
     m_not_in = _NOT_IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
@@ -300,6 +360,11 @@ def _parse_single_expr(expr):
     m = _OP_RE.match(expr)
     if m:
         left, op_str, right = m.group(1).strip(), m.group(2), m.group(3).strip()
+        # The left operand must be a clean dotted identifier; anything else (a function
+        # call, an arithmetic expression) is untranslatable and must raise rather than
+        # be silently coerced into a bogus _type that matches everything/nothing.
+        if not _IDENT_RE.match(left):
+            raise ValueError(f'Cannot translate expression to query: {expr!r}')
         mongo_op = _OP_MAP.get(op_str)
         parts = left.split('.', 1)
         _type = parts[0].strip()
@@ -322,6 +387,8 @@ def _parse_single_expr(expr):
     # Fallback: a bare "type.field" with no operator is a boolean truthiness check,
     # i.e. "ip.alive" means "ip.alive == True" (resolves identically across backends).
     # A bare "type" with no field is just the type.
+    if not _IDENT_RE.match(expr):
+        raise ValueError(f'Cannot translate expression to query: {expr!r}')
     parts = expr.split('.', 1)
     _type = parts[0].strip()
     field = parts[1].strip() if len(parts) > 1 else None
