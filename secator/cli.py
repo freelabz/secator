@@ -1123,11 +1123,22 @@ def list_aliases(silent):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.option('--save', 'save', type=str, default=None, help='Save the query expression ARG under this name for later reuse (e.g. --save vuln_high)')  # noqa: E501
 @click.pass_context
-def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit):
+def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, save):
 	"""Query"""
 	if not arg:
 		raise click.UsageError('Missing argument ARG (a query name, expression, or prompt).')
+
+	# 0. Save the expression under a name, then exit (reuse later with `secator q <name>`).
+	if save:
+		CONFIG.set(f'queries.{save}', arg)
+		if CONFIG.validate():
+			CONFIG.save()
+			console.print(f'[bold green]:tada: Saved query "{save}". Run it with[/] [bold]secator q {save}[/].')
+		else:
+			console.print(Error(message='Invalid config, not saving it.'))
+		return
 
 	# 1. Saved query name
 	if arg in CONFIG.queries:
