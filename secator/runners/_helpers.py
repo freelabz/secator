@@ -330,6 +330,38 @@ def parse_extractor(extractor):
 	return _type, _field, _condition, _group_by
 
 
+def build_extractor_query(extractor, ctx):
+	"""Translate an extractor (type + condition) into a Mongo-style query dict.
+
+	Folds opts/targets ctx-constants, rewrites the per-item Python condition to a query,
+	and appends the same scope/ancestor filters the old per-item eval applied. Returns
+	None when the extractor must yield nothing (a constant gate is falsy).
+	"""
+	from secator.query.utils import python_expr_to_mongo
+	parsed = parse_extractor(extractor)
+	if not parsed:
+		return None
+	_type, _field, _condition, _group_by = parsed
+	query = {'_type': _type}
+	residual = substitute_ctx_constants(_condition, ctx)
+	if residual is None:
+		return None
+	if residual:
+		# The condition references the item under `item.` or the type name; normalize the
+		# `item.` alias to the type prefix so the translator emits the matching _type.
+		expr = re.sub(r'\bitem\.', f'{_type}.', residual)
+		query.update(python_expr_to_mongo(expr))
+	# Mirror process_extractor's scope/ancestor scoping.
+	parent_scope = ctx.get('parent_scope')
+	ancestor_id = ctx.get('ancestor_id')
+	node_chain_start = ctx.get('node_chain_start', False)
+	if _type == 'target' and parent_scope:
+		query['_context.scope'] = parent_scope
+	elif ancestor_id and not node_chain_start:
+		query['_context.ancestor_id'] = str(ancestor_id)
+	return query
+
+
 def process_extractor(results, extractor, ctx=None):
 	"""Process extractor.
 
