@@ -16,7 +16,7 @@ from time import time
 import psutil
 from fp.fp import FreeProxy
 
-from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
+from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
@@ -230,6 +230,7 @@ class Command(Runner):
 		self.monitor_stop_event = None
 		self.monitor_queue = None
 		self.process_start_time = None
+		self._prev_sigterm_handler = None
 		# self.retry_count = 0  # TODO: remove this
 
 		# Proxy config (global)
@@ -536,15 +537,21 @@ class Command(Runner):
 				self.cwd = f'{self.reports_folder}/.outputs/{self.fqn}'
 				os.makedirs(self.cwd, exist_ok=True)
 
-			# Run the command using subprocess
+			# Run the command using subprocess.
+			# Spawn the tool in its own session (setsid) so stop_process can kill the whole
+			# process tree in one shot via killpg — this is what lets us reach a `sudo <tool>`
+			# child (RC#7). We keep setsid OFF only for an *interactive* sudo prompt, since
+			# detaching the controlling tty breaks the password prompt (see #722). In a worker
+			# (no tty) or passwordless sudo, setsid is safe and the group kill works.
 			env = os.environ
+			new_session = not self.disable_preexec and not (sudo_required and self.has_tty and sudo_password is not None)  # noqa: E501
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
-				preexec_fn=os.setsid if not (sudo_required or self.disable_preexec) else None,
+				start_new_session=new_session,
 				shell=self.shell,
 				errors='replace',
 				env=env,
@@ -557,6 +564,11 @@ class Command(Runner):
 			self.monitor_stop_event.clear()
 			self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
 			self.monitor_thread.start()
+
+			# In a worker, catch the SIGTERM from `revoke(terminate=True)` so we kill the tool
+			# subprocess tree instead of dying and orphaning it (RC#7). SIGKILL is uncatchable —
+			# for that path the backstop is deploy-side (see PR notes).
+			self._install_worker_term_handler()
 
 			# If sudo password is provided, send it to stdin
 			if sudo_password:
@@ -585,6 +597,7 @@ class Command(Runner):
 			yield Error.from_exception(e)
 
 		finally:
+			self._restore_worker_term_handler()
 			yield from self._wait_for_end()
 
 	def is_installed(self):
@@ -684,26 +697,85 @@ class Command(Runner):
 		yield error
 
 	def stop_process(self, exit_ok=False, sig=signal.SIGINT):
-		"""Sends signal to running process, if any.
+		"""Send `sig` to the running process tree, if any.
 
-		Uses killpg only when the subprocess has its own process group (preexec_fn=os.setsid).
-		Otherwise (disable_preexec=True or sudo), the subprocess shares the worker's pgid and
-		killpg would also kill the worker.
+		The tool is spawned in its own session (start_new_session) whenever possible, so we can
+		signal the *whole* process group with killpg — that reaches a `sudo <tool>` child too,
+		instead of just the immediate child. When the group is root-owned (the tool runs via
+		sudo), a non-root worker's killpg/kill raises PermissionError; we then escalate the kill
+		through `sudo -n kill` so the root tool actually dies instead of being orphaned and
+		outliving its timeout monitor (RC#7). The sudo escalation is best-effort and requires
+		passwordless `sudo kill` in the worker's sudoers — see the deploy notes in the PR.
 		"""
-		if not self.process:
+		if not self.process or not self.process.pid:
+			if exit_ok:
+				self.exit_ok = True
 			return
-		self.debug(f'Sending signal {signal_to_name(sig)} to process {self.process.pid}.', sub='error')
-		if self.process and self.process.pid:
-			try:
-				pgid = os.getpgid(self.process.pid)
-				if pgid == self.process.pid:
-					os.killpg(pgid, sig)
-				else:
-					os.kill(self.process.pid, sig)
-			except (ProcessLookupError, PermissionError):
-				pass
+		pid = self.process.pid
+		self.debug(f'Sending signal {signal_to_name(sig)} to process {pid}.', sub='error')
+		try:
+			pgid = os.getpgid(pid)
+		except ProcessLookupError:
+			pgid = None
+		use_group = pgid is not None and pgid == pid  # own session => safe to kill the group
+		try:
+			if use_group:
+				os.killpg(pgid, sig)
+			else:
+				os.kill(pid, sig)
+		except ProcessLookupError:
+			pass
+		except PermissionError:
+			# Root-owned target (sudo tool). A non-root worker can't signal it directly, so
+			# escalate through sudo. Kill the whole group when we have one so the tool child dies.
+			self._sudo_kill(pgid if use_group else pid, sig, group=use_group)
 		if exit_ok:
 			self.exit_ok = True
+
+	def _sudo_kill(self, target, sig, group=False):
+		"""Best-effort `sudo -n kill` of a root-owned process (or process group when `group`).
+
+		Needs a passwordless `sudo kill` sudoers entry in the worker container; if that's absent
+		the call fails harmlessly (non-zero exit) and we just log it — the orphan is then a
+		deploy-side problem (activeDeadlineSeconds / drop sudo for capabilities), not a code one.
+		"""
+		spec = f'-{int(target)}' if group else str(int(target))
+		try:
+			ret = subprocess.run(
+				['sudo', '-n', 'kill', f'-{int(sig)}', spec],
+				stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
+			).returncode
+			self.debug(f'sudo kill {spec} (sig={int(sig)}) returned {ret}', sub='error')
+		except Exception as e:
+			self.debug(f'sudo kill {spec} failed: {e}', sub='error')
+
+	def _install_worker_term_handler(self):
+		"""Install a SIGTERM handler (worker only) that kills the tool tree on task terminate.
+
+		`app.control.revoke(id, terminate=True)` sends SIGTERM to the pool child running the task.
+		Without a handler the child just dies and the tool subprocess (esp. a root `sudo` one) is
+		orphaned. Signal handlers can only be set from the main thread, so guard for that.
+		"""
+		if not IN_WORKER:
+			return
+		try:
+			if threading.current_thread() is threading.main_thread():
+				self._prev_sigterm_handler = signal.signal(signal.SIGTERM, self._on_worker_term)
+		except (ValueError, OSError):
+			self._prev_sigterm_handler = None
+
+	def _on_worker_term(self, signum, frame):
+		self.debug('Received SIGTERM (task terminate) — killing tool subprocess tree', sub='error')
+		self.killed = True
+		self.stop_process(exit_ok=True, sig=signal.SIGKILL)
+
+	def _restore_worker_term_handler(self):
+		if self._prev_sigterm_handler is not None:
+			try:
+				signal.signal(signal.SIGTERM, self._prev_sigterm_handler)
+			except (ValueError, OSError):
+				pass
+			self._prev_sigterm_handler = None
 
 	def _stop_monitor_thread(self):
 		"""Stop monitor thread."""

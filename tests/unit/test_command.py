@@ -360,3 +360,71 @@ class TestCommandConfigOverrides(unittest.TestCase):
 				self.assertEqual(cmd_b.input_chunk_size, 100)
 		finally:
 			CONFIG.tasks.overrides = original_overrides
+
+
+class TestStopProcessKillsTree(unittest.TestCase):
+	"""RC#7: stop_process must kill the whole subprocess tree (own session), incl. a sudo/root child."""
+
+	class SleepCmd(Command):
+		input_types = ['slug']
+		cmd = 'sleep'
+		input_flag = None
+		file_flag = None
+
+	def _run_bg(self, cmd):
+		import threading
+		import time
+		t = threading.Thread(target=lambda: list(cmd), daemon=True)
+		t.start()
+		for _ in range(200):  # up to ~10s for the subprocess to spawn
+			if cmd.process and cmd.process.pid and cmd.process.poll() is None:
+				return t
+			time.sleep(0.05)
+		self.fail('subprocess did not start')
+
+	def _assert_group_gone(self, pgid):
+		import os
+		import time
+		for _ in range(200):  # up to ~10s to reap
+			try:
+				os.killpg(pgid, 0)
+			except ProcessLookupError:
+				return  # gone
+			except PermissionError:
+				pass  # still alive, root-owned
+			time.sleep(0.05)
+		self.fail(f'process group {pgid} still alive after kill')
+
+	def test_setsid_group_kill_non_sudo(self):
+		import os
+		import signal
+		cmd = self.SleepCmd(['300'])
+		t = self._run_bg(cmd)
+		pid = cmd.process.pid
+		pgid = os.getpgid(pid)
+		# Core of the fix: the tool is spawned in its own session, so we can killpg the whole tree.
+		self.assertEqual(pgid, pid, 'tool should be its own process-group leader (start_new_session)')
+		cmd.stop_process(sig=signal.SIGKILL)
+		t.join(timeout=15)
+		self.assertFalse(t.is_alive(), 'runner thread should finish after kill')
+		self._assert_group_gone(pgid)
+
+	def test_sudo_group_kill(self):
+		import os
+		import signal
+		import subprocess
+		if subprocess.run(
+			['sudo', '-n', 'true'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+		).returncode != 0:
+			self.skipTest('passwordless sudo not available in this environment')
+
+		class SudoSleep(TestStopProcessKillsTree.SleepCmd):
+			requires_sudo = True
+
+		cmd = SudoSleep(['300'])
+		t = self._run_bg(cmd)
+		pgid = os.getpgid(cmd.process.pid)
+		# sudo makes the group root-owned; killpg raises EPERM and stop_process escalates via sudo kill.
+		cmd.stop_process(sig=signal.SIGKILL)
+		t.join(timeout=15)
+		self._assert_group_gone(pgid)
