@@ -145,6 +145,25 @@ class TestBuildExtractorQuery:
 			{'_type': 'port', 'service_name': {'$regex': '(?i)ssh'}},
 		]
 
+	def test_run_bound_uses_topmost_ancestry_id(self):
+		# In a scan, the fan-in is scan-wide -> bound by scan_id (not the leaf workflow/task id).
+		q = build_extractor_query({'type': 'url', 'condition': 'url.verified'},
+								  _ctx(scan_id='S1', workflow_id='W2', task_id='T3'))
+		assert q['_context.scan_id'] == 'S1'
+		assert '_context.workflow_id' not in q and '_context.task_id' not in q
+
+	def test_run_bound_falls_back_to_workflow_then_task(self):
+		q = build_extractor_query({'type': 'url', 'condition': 'url.verified'},
+								  _ctx(workflow_id='W2', task_id='T3'))
+		assert q['_context.workflow_id'] == 'W2' and '_context.task_id' not in q
+		q2 = build_extractor_query({'type': 'url', 'condition': 'url.verified'}, _ctx(task_id='T3'))
+		assert q2['_context.task_id'] == 'T3'
+
+	def test_run_bound_absent_when_no_ids(self):
+		# Local/sync path (no run ids): no run bound — the in-memory results are already bounded.
+		q = build_extractor_query({'type': 'url', 'condition': 'url.verified'}, _ctx())
+		assert not any(k.startswith('_context.') and k.endswith('_id') for k in q)
+
 
 def _local_ctx(results, **kw):
 	base = {
@@ -399,6 +418,52 @@ class TestBackendParity:
 		mongo_backend._client = client
 		mongo_hosts = sorted(r['host'] for r in mongo_backend.search(query))
 		assert json_hosts == mongo_hosts == ['a']
+
+
+class TestCrossRunIsolation:
+	"""Store backends must not leak findings across runs. This is the exact scenario the
+	local-backend golden test cannot express (it filters the same in-memory self.results)."""
+
+	def _seed(self, findings):
+		import pytest
+		pytest.importorskip('mongomock')
+		import mongomock
+		from secator.query.mongodb import MongoDBBackend
+		client = mongomock.MongoClient()
+		client.main.findings.insert_many([dict(f) for f in findings])
+		backend = MongoDBBackend('ws')
+		backend._client = client
+		return backend
+
+	def _url(self, url, scan_id=None, workflow_id=None):
+		ctx = {'workspace_id': 'ws'}
+		if scan_id:
+			ctx['scan_id'] = scan_id
+		if workflow_id:
+			ctx['workflow_id'] = workflow_id
+		return {'_type': 'url', 'url': url, 'verified': True, '_context': ctx, 'is_false_positive': False}
+
+	def test_scan_extractor_sees_only_its_own_run(self):
+		# Two scans in the same workspace, each emitting a verified url. ancestor_id is None
+		# (scan-level, top-level runner) — the OLD query would be workspace-wide and see both.
+		backend = self._seed([self._url('http://a1', scan_id='A'), self._url('http://b1', scan_id='B')])
+		q = build_extractor_query({'type': 'url', 'field': 'url', 'condition': 'url.verified'}, _ctx(scan_id='A'))
+		assert q['_context.scan_id'] == 'A'
+		assert sorted(r['url'] for r in backend.search(q)) == ['http://a1']
+
+	def test_workflow_extractor_isolated_across_runs(self):
+		# Two standalone workflow runs (distinct workflow_id) emitting the same type.
+		backend = self._seed([self._url('http://a1', workflow_id='W1'), self._url('http://b1', workflow_id='W2')])
+		q = build_extractor_query({'type': 'url', 'field': 'url', 'condition': 'url.verified'}, _ctx(workflow_id='W1'))
+		assert q['_context.workflow_id'] == 'W1'
+		assert sorted(r['url'] for r in backend.search(q)) == ['http://a1']
+
+	def test_unbounded_query_would_leak(self):
+		# Guard: without the run bound the query IS workspace-wide (both runs) — proving the
+		# bound is what fixes the leak, not some other filter.
+		backend = self._seed([self._url('http://a1', scan_id='A'), self._url('http://b1', scan_id='B')])
+		q = build_extractor_query({'type': 'url', 'field': 'url', 'condition': 'url.verified'}, _ctx())
+		assert sorted(r['url'] for r in backend.search(q)) == ['http://a1', 'http://b1']
 
 
 class TestMemoryBound:

@@ -687,6 +687,9 @@ class Runner:
 			'workspace_name': self.workspace_name,
 			'drivers': self.context.get('drivers', []),
 			'results': self.results,
+			'scan_id': self.context.get('scan_id'),
+			'workflow_id': self.context.get('workflow_id'),
+			'task_id': self.context.get('task_id'),
 		}
 		inputs, run_opts, errors = run_extractors(self.results, self.run_opts, self.inputs, ctx=ctx, dry_run=self.dry_run)
 		for error in errors:

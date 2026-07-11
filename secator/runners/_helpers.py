@@ -349,7 +349,19 @@ def build_extractor_query(extractor, ctx):
 		# `item.` alias to the type prefix so the translator emits the matching _type.
 		expr = re.sub(r'\bitem\.', f'{_type}.', residual)
 		query.update(python_expr_to_mongo(expr))
-	# Mirror process_extractor's scope/ancestor scoping.
+	# Bound the query to the CURRENT run so store backends (mongodb/api/sqlite) don't leak
+	# findings across runs / the whole workspace. `self.results` (the in-memory fan-in the old
+	# eval scanned) is the accumulation at the top of the current run's chain, so every fan-in
+	# finding carries the top-most ancestry run id: `scan_id` inside a scan (results forward
+	# across its workflows), else `workflow_id` inside a standalone workflow. `ancestor_id`
+	# below is only the config NAME (not run-unique), so it cannot provide this bound.
+	for level in ('scan', 'workflow', 'task'):
+		run_id = ctx.get(f'{level}_id')
+		if run_id:
+			query[f'_context.{level}_id'] = str(run_id)
+			break
+
+	# Mirror process_extractor's scope/ancestor scoping (additional narrowing within the run).
 	parent_scope = ctx.get('parent_scope')
 	ancestor_id = ctx.get('ancestor_id')
 	node_chain_start = ctx.get('node_chain_start', False)
