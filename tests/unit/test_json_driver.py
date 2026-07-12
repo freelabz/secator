@@ -140,6 +140,30 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		urls = sorted(r['url'] for r in results)
 		self.assertEqual(urls, ['http://x/a', 'http://x/b'])
 
+	def test_live_files_win_over_in_memory_results(self):
+		"""#1299 shadow fix: live report.json files must be read even when the backend
+		was handed an in-memory `results` payload (which is topology-only once the chain
+		payload is dropped, and would otherwise shadow the files)."""
+		from secator.hooks import json as mod
+		from secator.query.json import JsonBackend
+		folder = Path(self.temp_dir) / 'ws1' / 'tasks' / 'abc123'
+		runner = self._runner(folder=str(folder))
+		mod.update_finding(runner, self._url('http://live/a'))
+
+		# A stale/topology-only payload handed in as `results` must NOT shadow the files.
+		stale = [{'_type': 'url', 'url': 'http://stale/z', '_context': {'workspace_id': 'ws1'}}]
+		backend = JsonBackend(workspace_id='ws1', config={'reports_dir': self.temp_dir}, results=stale)
+		urls = sorted(r['url'] for r in backend.search({'_type': 'url'}))
+		self.assertEqual(urls, ['http://live/a'])
+
+	def test_in_memory_results_fallback_when_no_files(self):
+		"""With no report.json files on disk, the backend falls back to in-memory results."""
+		from secator.query.json import JsonBackend
+		payload = [{'_type': 'url', 'url': 'http://mem/a', '_context': {'workspace_id': 'ws1'}}]
+		backend = JsonBackend(workspace_id='ws1', config={'reports_dir': self.temp_dir}, results=payload)
+		urls = [r['url'] for r in backend.search({'_type': 'url'})]
+		self.assertEqual(urls, ['http://mem/a'])
+
 
 class TestJsonDriverConcurrency(JsonDriverTestBase):
 	N_WORKERS = 4

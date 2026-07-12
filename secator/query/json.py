@@ -115,11 +115,24 @@ class JsonBackend(QueryBackend):
 		return self.reports_dir / workspace_folder
 
 	def _load_all_findings(self) -> List[Dict[str, Any]]:
-		"""Load all findings from workspace JSON files, or return pre-loaded/cached results."""
-		if self._results is not None:
-			return self._results
+		"""Load all findings from the LIVE workspace report.json files, falling back to
+		pre-loaded in-memory results only when the filesystem yields nothing.
+
+		The json driver (#1299) writes each runner's report.json as results are produced,
+		so the files are the authoritative store mid-run. Reading self._results first would
+		shadow those live files (the payload is topology-only once the chain payload is
+		dropped), so we invert: files first, self._results only as a fallback.
+		"""
 		if self._findings_cache is not None:
 			return self._findings_cache
+		findings = self._load_from_files()
+		if not findings and self._results is not None:
+			findings = self._results
+		self._findings_cache = findings
+		return findings
+
+	def _load_from_files(self) -> List[Dict[str, Any]]:
+		"""Load all findings by scanning the workspace's report.json files."""
 		findings = []
 		workspace_path = self._get_workspace_path()
 		debug(f'Looking for reports in: {workspace_path}', sub='query.json')
@@ -165,7 +178,6 @@ class JsonBackend(QueryBackend):
 						continue
 
 		debug(f'Loaded {len(findings)} findings from workspace', sub='query.json')
-		self._findings_cache = findings
 		return findings
 
 	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
