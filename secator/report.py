@@ -63,9 +63,12 @@ class Report:
 		data['info']['warnings'] = getattr(self.runner, 'warnings', [])
 
 		# Build context for QueryEngine.
-		# Pass runner.results directly (OutputType objects or dicts) to avoid
-		# costly serialization. An absent 'results' key tells JsonBackend to
-		# scan the filesystem instead.
+		# Query the store for this run's findings. With the inter-task result payload
+		# dropped, a live run's findings live only in the store (the live report.json files
+		# locally, or the DB), which the backend reads directly. runner.results is still
+		# passed as an in-memory FALLBACK for callers that have no live files (report_show,
+		# library Report(runner)); JsonBackend prefers the live files when present (#1299),
+		# so for a real run this fallback never shadows the store.
 		context = dict(getattr(self.runner, 'context', {}) or {})
 		if 'results' not in context or not context.get('results'):
 			raw_results = getattr(self.runner, 'results', []) or []
@@ -76,6 +79,14 @@ class Report:
 				del context['results']
 		if 'workspace_name' not in context:
 			context['workspace_name'] = self.workspace_name
+
+		# Bound the query to THIS run so a shared workspace's other runs don't leak in.
+		# On DB backends the run-scope ids are set (update_runner); locally the json
+		# backend has no ids and is already scoped to the workspace directory.
+		from secator.runners._helpers import run_scope_query
+		scope = run_scope_query(context)
+		if scope:
+			query = {'$and': [query, scope]} if (query and set(query) & set(scope)) else {**query, **scope}
 
 		# Use the resolved workspace id (an ObjectId for the api/mongodb backends) so
 		# findings queries filter on the real id. The json backend reads workspace_name

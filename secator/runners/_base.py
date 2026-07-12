@@ -984,6 +984,35 @@ class Runner:
 		# Yield results
 		yield from results
 
+		# Backfill this run's results from the store. With the inter-task result payload
+		# dropped, tasks return topology-only, so the run's findings (and the persisted
+		# Warning/Info and extractor fan-in Targets) live only in the store — not in the
+		# returned/streamed payload. Query them run-scoped and yield; add_result dedups by
+		# uuid. Top runner only, and only when the payload delivered no findings itself
+		# (topology-only return) — so this is dormant while the payload still carries them.
+		if not self.has_parent and not self.no_process and not self.findings:
+			yield from self._iter_store_results()
+
+	def _iter_store_results(self):
+		"""Yield this run's results from the store (run-scoped), rehydrated to OutputType.
+
+		Best-effort: a query failure must not break the run — the report exporter queries
+		the store independently, so this only backfills self.results for the console summary
+		and library callers reading runner.results.
+		"""
+		from secator.query import QueryEngine
+		from secator.runners._helpers import load_output_types, run_scope_query
+		context = {**self.context, 'workspace_name': self.workspace_name}
+		context.pop('results', None)
+		try:
+			engine = QueryEngine(self.context.get('workspace_id'), context=context)
+			docs = engine.search(run_scope_query(self.context))
+		except Exception as e:  # noqa: BLE001
+			self.debug(f'store backfill query failed: {e}', sub='end')
+			return
+		for item in load_output_types(docs):
+			yield item
+
 	def build_celery_workflow(self):
 		"""Build Celery workflow.
 

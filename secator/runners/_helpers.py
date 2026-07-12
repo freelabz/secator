@@ -369,6 +369,38 @@ def persist_execution_items(runner, items):
 			hook(runner, item)
 
 
+def load_output_types(docs):
+	"""Rehydrate store query results (dicts) into OutputType objects.
+
+	Items already OutputType instances pass through; dicts are mapped by their ``_type``
+	to the matching class and loaded. Docs with an unknown/missing type are skipped.
+	The uuid is taken from ``_uuid`` (json/sqlite) or ``_id`` (mongodb).
+
+	Args:
+		docs (list): Store query results (dicts and/or OutputType objects).
+
+	Returns:
+		list[OutputType]: Rehydrated output types.
+	"""
+	from secator.output_types import OUTPUT_TYPES
+	by_name = {o.get_name(): o for o in OUTPUT_TYPES}
+	out = []
+	for doc in docs:
+		if isinstance(doc, dict):
+			klass = by_name.get(doc.get('_type'))
+			if not klass:
+				continue
+			item = klass.load(doc)
+			if not item._uuid:
+				item._uuid = str(doc.get('_uuid') or doc.get('_id') or '')
+			out.append(item)
+		elif hasattr(doc, '_type') and hasattr(doc, 'toDict'):
+			# Already an OutputType. Structural check (not isinstance) so a mid-suite
+			# module reload — which changes the OutputType class identity — can't drop it.
+			out.append(doc)
+	return out
+
+
 def run_scope_query(ctx):
 	"""Bound a query to the current run via the top-most ancestry run id (scan > workflow > task);
 	the in-memory fan-in all carries it. Without this, store backends leak across runs/workspace."""

@@ -105,6 +105,55 @@ class TestReportBuild:
         assert 'info' in report.data
 
 
+class TestReportBuildFromStore:
+	"""Step 4: with the inter-task payload dropped, tasks return topology-only, so the
+	final report must assemble from the STORE (the live report.json files), not from the
+	runner's in-memory results. Same query path for sync and async."""
+
+	def _write_store(self, reports_dir, ws, findings):
+		# JsonBackend reads <reports_dir>/<ws>/tasks/<id>/report.json
+		task_dir = Path(reports_dir) / ws / 'tasks' / 'task_abc'
+		task_dir.mkdir(parents=True, exist_ok=True)
+		results = {}
+		for f in findings:
+			f.setdefault('_context', {'workspace_id': ws})
+			results.setdefault(f['_type'], []).append(f)
+		(task_dir / 'report.json').write_text(json.dumps({'info': {}, 'results': results}))
+
+	def _runner(self, reports_dir, ws, in_memory_results):
+		config = SimpleNamespace(name='test_runner', type='workflow')
+		return _FakeRunner(
+			config=config, workspace_name=ws, errors=[],
+			context={'workspace_id': ws, 'workspace_name': ws, 'drivers': ['json']},
+			reports_folder=Path(reports_dir) / ws, results=in_memory_results,
+			_to_dict={'name': 'test_runner', 'status': 'completed', 'targets': [],
+					  'start_time': None, 'end_time': None, 'elapsed': None,
+					  'elapsed_human': None, 'run_opts': {}, 'results_count': 0},
+		)
+
+	def test_report_assembles_findings_from_store_with_topology_only_results(self, monkeypatch):
+		from secator.config import CONFIG
+		reports_dir = tempfile.mkdtemp()
+		monkeypatch.setattr(CONFIG.dirs, 'reports', Path(reports_dir))
+		ws = 'store_ws'
+		self._write_store(reports_dir, ws, [
+			{'_type': 'url', 'url': 'http://x/a'},
+			{'_type': 'url', 'url': 'http://x/b'},
+			{'_type': 'vulnerability', 'name': 'CVE-1', 'cvss_score': 9.0},
+		])
+		# The runner carries a TOPOLOGY-ONLY payload (a Target + Info, no findings).
+		topo = [
+			{'_type': 'target', 'name': 'http://x'},
+			{'_type': 'info', 'message': 'Task created'},
+		]
+		runner = self._runner(reports_dir, ws, topo)
+		report = Report(runner)
+		report.build(query={})
+		urls = sorted(u.get('url') if isinstance(u, dict) else u.url for u in report.data['results']['url'])
+		assert urls == ['http://x/a', 'http://x/b']
+		assert len(report.data['results']['vulnerability']) == 1
+
+
 class TestJsonlExporter:
     """Tests for the JsonlExporter."""
 
