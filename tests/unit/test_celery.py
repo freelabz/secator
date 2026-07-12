@@ -244,6 +244,28 @@ class TestCelery(unittest.TestCase):
 			self.assertEqual(len(workflow.tasks), len(inputs))
 
 
+class TestNoPayloadIngestion(unittest.TestCase):
+	"""#1310 regression: the mongodb --sync `deduplicate` crash ('str' has no attribute ...)
+	came from chain_results reducing findings to uuid strings, which mark_runner_completed
+	ingested into runner.results, where mark_duplicates then called ._compare_key() on a str.
+	With the payload dropped, mark_runner_completed ignores its upstream arg entirely, so uuid
+	strings can never enter runner.results — the crash is impossible by construction."""
+
+	def test_mark_completed_ignores_uuid_string_payload(self):
+		from secator.loader import get_configs_by_type
+		from secator.runners import Workflow
+		from secator.celery import mark_runner_completed
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+		wf = Workflow(workflows[0], inputs=['example.com'], run_opts={'dry_run': True}, context={})
+		# Feed the exact shape chain_results used to emit (ObjectId-like uuid strings).
+		ret = mark_runner_completed(['deadbeefdeadbeefdeadbeef', 'cafebabecafebabecafebabe'], wf, enable_hooks=False)
+		self.assertEqual(ret, [])                                       # topology-only return
+		self.assertFalse(any(isinstance(r, str) for r in wf.results))   # no str in results
+		self.assertEqual(wf.status, 'SUCCESS')                          # mark_duplicates did not crash
+
+
 class TestDelayMethods(unittest.TestCase):
 	"""Test the delay methods for different runner types."""
 
