@@ -131,17 +131,21 @@ class HTTP(StrictModel):
 	default_header: str = 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']
 
 
+# The json driver writes each runner's report.json live (findings + execution types), so the
+# end-of-run JSON exporter is redundant — and worse, it overwrites the driver's richer live file
+# with a findings-only snapshot. Drop json from the default exporters (still available via
+# `-o json`); report.json now comes from the json driver.
 class Tasks(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	exporters: List[str] = ['csv', 'txt', 'markdown']
 	overrides: Dict[str, Dict[str, Any]] = {}
 
 
 class Workflows(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	exporters: List[str] = ['csv', 'txt', 'markdown']
 
 
 class Scans(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	exporters: List[str] = ['csv', 'txt', 'markdown']
 
 
 class Profiles(StrictModel):

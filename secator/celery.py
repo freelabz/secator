@@ -466,6 +466,11 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	# the store (run-scoped) so the runner's status/self_errors compute correctly.
 	_hydrate_runner_errors(runner)
 
+	# Backfill the top runner's findings from the store before it completes, so its summary
+	# ("found N findings"), duplicate check and persisted doc reflect the run (the payload no
+	# longer carries them). No-op for nested runners and single-task runs.
+	runner.backfill_results_from_store()
+
 	# Run mark_completed (duplicate checks, db updates if enable_hooks is True)
 	runner.mark_completed()
 

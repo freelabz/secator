@@ -993,12 +993,12 @@ class Runner:
 		if not self.has_parent and not self.no_process and not self.findings:
 			yield from self._iter_store_results()
 
-	def _iter_store_results(self):
-		"""Yield this run's results from the store (run-scoped), rehydrated to OutputType.
+	def _query_store_results(self):
+		"""Query this run's results from the store (run-scoped), rehydrated to OutputType.
 
-		Best-effort: a query failure must not break the run — the report exporter queries
-		the store independently, so this only backfills self.results for the console summary
-		and library callers reading runner.results.
+		Best-effort: a query failure must not break the run — the report exporter queries the
+		store independently, so this only backfills self.results for the console summary and
+		library callers reading runner.results.
 		"""
 		from secator.query import QueryEngine
 		from secator.runners._helpers import load_output_types, run_scope_query
@@ -1009,9 +1009,22 @@ class Runner:
 			docs = engine.search(run_scope_query(self.context))
 		except Exception as e:  # noqa: BLE001
 			self.debug(f'store backfill query failed: {e}', sub='end')
+			return []
+		return load_output_types(docs)
+
+	def _iter_store_results(self):
+		"""Yield this run's store results (for the live-display path in yielder)."""
+		yield from self._query_store_results()
+
+	def backfill_results_from_store(self):
+		"""Populate self.results from the store (run-scoped) when the run produced no in-memory
+		findings itself — i.e. a topology-only multi-runner run whose findings live only in the
+		store. add_result dedups by uuid, so this is a no-op when the results are already present
+		(single-task runs, or a re-entrant call). Top runner only."""
+		if self.has_parent or self.no_process or self.findings:
 			return
-		for item in load_output_types(docs):
-			yield item
+		for item in self._query_store_results():
+			self.add_result(item, print=False)
 
 	def build_celery_workflow(self):
 		"""Build Celery workflow.
