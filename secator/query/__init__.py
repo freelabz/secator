@@ -75,6 +75,10 @@ class QueryEngine:
             results = remove_duplicates(results)
         return results
 
+    def iterate(self, query: dict, batch_size: int = 1000):
+        """Stream findings matching query in batches (never materializes all N)."""
+        yield from self.backend.iterate(query, batch_size)
+
     def count(self, query: dict) -> int:
         """Count findings matching query."""
         return self.backend.count(query)

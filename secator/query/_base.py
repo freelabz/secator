@@ -92,6 +92,18 @@ class QueryBackend(ABC):
 		"""Backend-specific search implementation."""
 		pass
 
+	def iterate(self, query: dict, batch_size: int = 1000):
+		"""Stream matching findings in batches (never materializes all N). Yields lists of dicts."""
+		safe_query = self._merge_query(query)
+		yield from self._execute_iterate(safe_query, batch_size)
+
+	def _execute_iterate(self, query: dict, batch_size: int = 1000):
+		"""Default: no native cursor — chunk the full result. Backends that load everything anyway
+		(json/api) use this; sqlite/mongodb override with a true streaming cursor."""
+		results = self._execute_search(query, limit=0)
+		for i in range(0, len(results), batch_size):
+			yield results[i:i + batch_size]
+
 	def count(self, query: dict) -> int:
 		"""Count matching findings with enforced base query."""
 		safe_query = self._merge_query(query)

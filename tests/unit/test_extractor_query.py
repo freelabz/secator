@@ -572,30 +572,67 @@ class TestScopeTargetPersistence:
 		assert sorted(got) == sorted(names)
 
 
-class TestMemoryBound:
-	def test_large_fanin_not_materialized(self, monkeypatch):
+class TestReadModelMemoryBound:
+	"""The read-model RAM gate: with ~300k findings in the store under one run_id, the runner's
+	findings VIEW streams flat (peak ~ one batch), and len() is an indexed count — never the O(N)
+	materialization the old completion backfill re-introduced."""
+
+	def _seed(self, tmp_path, monkeypatch, n):
+		import json as _json
+		from secator.config import CONFIG
+		from secator.hooks import sqlite as sqlite_hook
+		monkeypatch.setattr(CONFIG.addons.sqlite, 'path', str(tmp_path / 'ram.db'))
+		sqlite_hook._conns.clear()
+		conn = sqlite_hook.get_sqlite_conn()
+		rows = (
+			(f'{i:024x}', 'url', 'ws',
+			 _json.dumps({'_type': 'url', 'url': f'http://h/{i}', '_uuid': f'{i:024x}',
+						  '_context': {'workspace_id': 'ws', 'run_id': 'R'}}))
+			for i in range(n)
+		)
+		conn.executemany(
+			"INSERT INTO findings (uuid, type, workspace_id, data) VALUES (?, ?, ?, ?)", rows)
+		conn.commit()
+
+	def test_findings_view_streams_flat(self, tmp_path, monkeypatch):
 		import tracemalloc
-		from secator import celery as celery_mod
+		from secator.query.sqlite import SqliteBackend
+		N = 300_000
+		self._seed(tmp_path, monkeypatch, N)
 		runner = _dummy_runner()
-		runner.started = True
-		runner.done = True
-		# 300k persisted findings arrive as uuid strings (as chain_results reduces them).
-		ids = [f'{i:024x}' for i in range(300_000)]
-		monkeypatch.setattr('secator.query.QueryEngine.search', lambda self, *a, **k: [])
-		before = len(runner.results)
+		runner.context.update({'drivers': ['sqlite'], 'run_id': 'R', 'workspace_id': 'ws', 'workspace_name': 'ws'})
+
+		# len() is an indexed count — no rows materialized.
+		assert len(runner.findings) == N
+
+		# Streaming iteration: peak stays flat (one batch of objects at a time, GC'd).
 		tracemalloc.start()
-		# Mirror the mark_runner_* hook body: partition uuids, add only objects, hydrate errors.
-		forwarded_uuids = [item for item in ids if isinstance(item, str)]
-		for item in ids:
-			if isinstance(item, str):
-				continue
-			runner.add_result(item, print=False)
-		celery_mod._hydrate_runner_errors(runner)
-		_, peak = tracemalloc.get_traced_memory()
+		count = sum(1 for _ in runner.findings)
+		_, peak_stream = tracemalloc.get_traced_memory()
 		tracemalloc.stop()
-		assert len(forwarded_uuids) == 300_000
-		assert len(runner.results) == before     # the fan-in was never rehydrated into objects
-		assert peak < 40 * 1024 * 1024
+		assert count == N
+
+		# Baseline: materializing all N (the old backfill) — peak is O(N), far larger.
+		tracemalloc.start()
+		allrows = list(SqliteBackend(workspace_id='ws').search({'_type': 'url'}))
+		_, peak_mat = tracemalloc.get_traced_memory()
+		tracemalloc.stop()
+		assert len(allrows) == N
+
+		# The streaming peak must be a small fraction of the materialized peak (flat, not O(N)).
+		assert peak_stream < peak_mat / 10, f'stream peak {peak_stream} not << materialized {peak_mat}'
+
+	def test_findings_view_survives_pickle(self, tmp_path, monkeypatch):
+		# The view is rebuilt from self.context on access — no state stored on the instance — so a
+		# deserialized runner's findings still stream (no __getstate__/__setstate__ involved).
+		import pickle
+		from secator.tasks import httpx
+		self._seed(tmp_path, monkeypatch, 5)
+		runner = httpx(['x'], context={'drivers': ['sqlite'], 'run_id': 'R',
+									   'workspace_id': 'ws', 'workspace_name': 'ws'}, dry_run=True)
+		restored = pickle.loads(pickle.dumps(runner))
+		assert len(restored.findings) == 5                                  # view rebuilt from context
+		assert sorted(f.url for f in restored.findings)[0] == 'http://h/0'  # and it streams
 
 
 class TestCorpusTranslation:

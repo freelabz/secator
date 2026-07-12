@@ -134,6 +134,20 @@ class SqliteBackend(QueryBackend):
 			console.print(Warning(message=f'SQLite search failed: {e}'))
 			return []
 
+	def _execute_iterate(self, query: dict, batch_size: int = 1000):
+		"""Stream rows with a cursor + fetchmany — never loads all N into memory."""
+		try:
+			conn = self._get_conn()
+			where, params = _build_where(query)
+			cur = conn.execute(f"SELECT data FROM findings WHERE {where or '1=1'}", params)
+			while True:
+				rows = cur.fetchmany(batch_size)
+				if not rows:
+					break
+				yield [json.loads(d) for (d,) in rows]
+		except Exception as e:
+			console.print(Warning(message=f'SQLite iterate failed: {e}'))
+
 	def _execute_count(self, query: dict) -> int:
 		try:
 			conn = self._get_conn()

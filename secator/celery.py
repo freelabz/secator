@@ -456,15 +456,12 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	runner.enable_hooks = enable_hooks
 
 	# The payload no longer carries this run's errors, so fetch just this run's errors from
-	# the store (run-scoped) so the runner's status/self_errors compute correctly.
+	# the store (run-scoped) so the runner's status/self_errors compute correctly. Errors are
+	# few (bounded), so materializing them is fine.
 	_hydrate_runner_errors(runner)
 
-	# Backfill the top runner's findings from the store before it completes, so its summary
-	# ("found N findings"), duplicate check and persisted doc reflect the run (the payload no
-	# longer carries them). No-op for nested runners and single-task runs.
-	runner.backfill_results_from_store()
-
-	# Run mark_completed (duplicate checks, db updates if enable_hooks is True)
+	# Run mark_completed (duplicate checks, db updates if enable_hooks is True). The findings
+	# stay in the store — the summary counts them run-scoped, never re-materialized here.
 	runner.mark_completed()
 
 	# Log total time

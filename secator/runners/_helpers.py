@@ -337,6 +337,47 @@ class _AliasItem(ast.NodeTransformer):
 		return ast.Name(id=self._type, ctx=node.ctx) if node.id == 'item' else node
 
 
+class StreamView:
+	"""Lazy, streaming view over a run-scoped store query — the read-model for a run's findings.
+
+	Iterating streams the backend cursor in batches (never materializes all N); ``len()`` is an
+	indexed count; ``bool()`` is a cheap count. Dicts are rehydrated to OutputType on the fly.
+
+	ponytail: ``__contains__`` is an O(N) stream + ``==`` scan — fine for the small membership
+	checks in the integration tests; the RAM-critical paths use ``__iter__``/``__len__`` which
+	stay flat. Upgrade __contains__ to a keyed exists-query if a hot path ever needs it.
+	"""
+	def __init__(self, engine, query, batch_size=1000):
+		self._engine = engine
+		self._query = query
+		self._batch_size = batch_size
+
+	def __iter__(self):
+		for batch in self._engine.iterate(self._query, self._batch_size):
+			for item in load_output_types(batch):
+				yield item
+
+	def __len__(self):
+		return self._engine.count(self._query)
+
+	def __bool__(self):
+		return self._engine.count(self._query) > 0
+
+	def __contains__(self, item):
+		return any(x == item for x in self)
+
+
+def run_findings_view(runner):
+	"""Streaming view of THIS run's findings from the store (run-scoped). Nothing is materialized
+	until iterated; len() counts. Used by the read-model `Runner.findings` when a store is active."""
+	from secator.query import QueryEngine
+	from secator.output_types import FINDING_TYPES
+	engine = QueryEngine(runner.context.get('workspace_id'),
+						 context={**runner.context, 'workspace_name': runner.workspace_name})
+	query = {'_type': {'$in': [t.get_name() for t in FINDING_TYPES]}, **run_scope_query(runner.context)}
+	return StreamView(engine, query)
+
+
 def load_output_types(docs):
 	"""Rehydrate store query results (dicts) into OutputType objects.
 

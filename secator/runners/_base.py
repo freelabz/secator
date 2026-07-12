@@ -422,11 +422,37 @@ class Runner:
 
 	@property
 	def findings(self):
+		# Read-model: when a store is active, findings are the RUN's findings, streamed from the
+		# store (run-scoped) — never re-materialized into a list. Without a store (no-driver
+		# library run), fall back to this runner's own in-memory findings.
+		if self.context.get('drivers'):
+			from secator.runners._helpers import run_findings_view
+			return run_findings_view(self)
 		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES))]
 
 	@property
 	def findings_count(self):
 		return len(self.findings)
+
+	def run_findings_count(self):
+		"""Count THIS run's findings from the store (run-scoped), without materializing them.
+
+		self.results holds only this runner's own bounded emissions (never the fan-in), so the
+		aggregate count comes from the store via indexed count queries — keeping peak memory flat.
+		Falls back to the in-memory own-count when there is no run scope (no store / bare call).
+		"""
+		from secator.query import QueryEngine
+		from secator.runners._helpers import run_scope_query
+		scope = run_scope_query(self.context)
+		if not scope:
+			return self.findings_count
+		try:
+			engine = QueryEngine(self.context.get('workspace_id'),
+								 context={**self.context, 'workspace_name': self.workspace_name})
+			return sum(engine.count({'_type': t.get_name(), **scope}) for t in FINDING_TYPES)
+		except Exception as e:  # noqa: BLE001
+			self.debug(f'run_findings_count query failed: {e}', sub='end')
+			return self.findings_count
 
 	@property
 	def self_findings(self):
@@ -987,48 +1013,9 @@ class Runner:
 
 		# Yield results
 		yield from results
-
-		# Backfill this run's results from the store. With the inter-task result payload
-		# dropped, tasks return topology-only, so the run's findings (and the persisted
-		# Warning/Info and extractor fan-in Targets) live only in the store — not in the
-		# returned/streamed payload. Query them run-scoped and yield; add_result dedups by
-		# uuid. Top runner only, and only when the payload delivered no findings itself
-		# (topology-only return) — so this is dormant while the payload still carries them.
-		if not self.has_parent and not self.no_process and not self.findings:
-			yield from self._iter_store_results()
-
-	def _query_store_results(self):
-		"""Query this run's results from the store (run-scoped), rehydrated to OutputType.
-
-		Best-effort: a query failure must not break the run — the report exporter queries the
-		store independently, so this only backfills self.results for the console summary and
-		library callers reading runner.results.
-		"""
-		from secator.query import QueryEngine
-		from secator.runners._helpers import load_output_types, run_scope_query
-		context = {**self.context, 'workspace_name': self.workspace_name}
-		context.pop('results', None)
-		try:
-			engine = QueryEngine(self.context.get('workspace_id'), context=context)
-			docs = engine.search(run_scope_query(self.context))
-		except Exception as e:  # noqa: BLE001
-			self.debug(f'store backfill query failed: {e}', sub='end')
-			return []
-		return load_output_types(docs)
-
-	def _iter_store_results(self):
-		"""Yield this run's store results (for the live-display path in yielder)."""
-		yield from self._query_store_results()
-
-	def backfill_results_from_store(self):
-		"""Populate self.results from the store (run-scoped) when the run produced no in-memory
-		findings itself — i.e. a topology-only multi-runner run whose findings live only in the
-		store. add_result dedups by uuid, so this is a no-op when the results are already present
-		(single-task runs, or a re-entrant call). Top runner only."""
-		if self.has_parent or self.no_process or self.findings:
-			return
-		for item in self._query_store_results():
-			self.add_result(item, print=False)
+		# No store backfill: findings live in the store (write-model), never re-materialized into
+		# a list here. The report and the summary count read them from the store (streaming/count),
+		# keeping peak memory flat through completion.
 
 	def build_celery_workflow(self):
 		"""Build Celery workflow.
@@ -1255,7 +1242,7 @@ class Runner:
 		info = Info(
 			message=(
 				f'{self.config.type.capitalize()} {format_runner_name(self)} finished with status '
-				f'[bold {STATE_COLORS[self.status]}]{self.status}[/] and found [bold]{len(self.findings)}[/] findings'
+				f'[bold {STATE_COLORS[self.status]}]{self.status}[/] and found [bold]{self.run_findings_count()}[/] findings'
 			)
 		)
 		# fmt: on
