@@ -63,7 +63,7 @@ class Scan(Runner):
 			workflow = Workflow(
 				config,
 				self.inputs,
-				results=self.results,
+				results=[],  # children read this run's findings from the store (run_id-scoped)
 				run_opts=opts,
 				hooks=self._hooks,
 				context=self.context.copy()
