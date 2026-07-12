@@ -23,7 +23,7 @@ class Workflow(Runner):
 			celery.Signature: Celery task signature.
 		"""
 		from celery import chain
-		from secator.celery import mark_runner_started, mark_runner_completed, forward_results
+		from secator.celery import mark_runner_started, mark_runner_completed, join_results
 
 		# Prepare run options
 		opts = self.run_opts.copy()
@@ -136,8 +136,8 @@ class Workflow(Runner):
 					sig = group(*tasks)
 					last_sig = sigs[-1] if sigs else None
 					if sig and isinstance(last_sig, group):  # cannot chain 2 groups without bridge task
-						debug(f'{node.id} previous is group, adding bridge task forward_results', sub=self.config.name)
-						sigs.append(forward_results.s())
+						debug(f'{node.id} previous is group, adding bridge task join_results', sub=self.config.name)
+						sigs.append(join_results.s())
 				else:
 					debug(f'{node.id} group built with 0 tasks', sub=self.config.name)
 				ix += 1

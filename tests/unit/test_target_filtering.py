@@ -426,13 +426,43 @@ class TestMarkRunnerStartedScopeEmission(unittest.TestCase):
         # Ensure clean secator module state (guard against clear_modules() from test_runners.py)
         from secator.utils_test import clear_modules
         clear_modules()
+        # The scope-target extractor now queries the store (not the results payload), so the
+        # upstream Ports must be persisted. Use a temp sqlite store.
+        import tempfile
+        from pathlib import Path
+        import secator.hooks.sqlite as sqlite_mod
+        from secator.config import CONFIG
+        self.sqlite_mod = sqlite_mod
+        self.temp_dir = tempfile.mkdtemp()
+        self._orig_sqlite_path = CONFIG.addons.sqlite.path
+        CONFIG.addons.sqlite.path = str(Path(self.temp_dir) / 'test.db')
+        sqlite_mod._conns.clear()
+
+    def tearDown(self):
+        import shutil
+        from secator.config import CONFIG
+        for conn in self.sqlite_mod._conns.values():
+            conn.close()
+        self.sqlite_mod._conns.clear()
+        CONFIG.addons.sqlite.path = self._orig_sqlite_path
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def _make_port(self, ip, port):
         import uuid as _uuid
         from secator.output_types import Port as _Port  # fresh import after any clear_modules
-        p = _Port(ip=ip, host=ip, port=port, protocol='tcp')
+        # Carry the run scope (scan_id) the downstream workflow queries by, exactly as a real
+        # upstream task's Ports inherit the scan's id.
+        p = _Port(ip=ip, host=ip, port=port, protocol='tcp', _context={'workspace_id': 'ws', 'scan_id': 'S'})
         p._uuid = str(_uuid.uuid4())
         return p
+
+    def _persist_ports(self, ports):
+        """Persist Ports to the sqlite store so the scope-target extractor can query them."""
+        class _R:
+            config = type('C', (), {'name': 'w1_1'})()
+            context = {'workspace_id': 'ws'}
+        for p in ports:
+            self.sqlite_mod.update_finding(_R(), p)
 
     def _build_workflow2_runner(self, prior_results):
         """Build a workflow2 runner as if it was set up by the scan."""
@@ -445,7 +475,9 @@ class TestMarkRunnerStartedScopeEmission(unittest.TestCase):
             'caller': 'Scan',
         }
         with patch('secator.runners.task.discover_tasks', side_effect=patched_discover_tasks):
-            wf = Workflow(config, inputs=[], results=prior_results, run_opts=run_opts)
+            wf = Workflow(config, inputs=[], results=prior_results, run_opts=run_opts,
+                          context={'drivers': ['sqlite'], 'workspace_id': 'ws',
+                                   'workspace_name': 'ws', 'scan_id': 'S'})
         wf.context['parent_scope'] = 'workflow2'
         return wf
 
@@ -457,12 +489,15 @@ class TestMarkRunnerStartedScopeEmission(unittest.TestCase):
             self._make_port('example.com', 443),
             self._make_port('example.com', 445),
         ]
+        self._persist_ports(prior_ports)
         wf = self._build_workflow2_runner(prior_results=[])
 
-        result = mark_runner_started(prior_ports, wf, enable_hooks=False)
+        # mark_runner_started returns topology-only now; the emitted scope Targets land in
+        # the runner's results (and the store), resolved by querying the persisted Ports.
+        mark_runner_started([], wf, enable_hooks=False)
 
         scoped_targets = [
-            r for r in result
+            r for r in wf.results
             if r._type == 'target' and r._context.get('scope') == 'workflow2'
         ]
         scoped_names = [t.name for t in scoped_targets]
@@ -480,10 +515,11 @@ class TestMarkRunnerStartedScopeEmission(unittest.TestCase):
             wf = Workflow(config, inputs=['example.com'], run_opts=run_opts)
 
         prior_ports = [self._make_port('example.com', 80)]
-        result = mark_runner_started(prior_ports, wf, enable_hooks=False)
+        self._persist_ports(prior_ports)
+        mark_runner_started([], wf, enable_hooks=False)
 
         scoped_targets = [
-            r for r in result
+            r for r in wf.results
             if r._type == 'target' and r._context.get('scope') is not None
         ]
         self.assertEqual(len(scoped_targets), 0)
@@ -502,6 +538,27 @@ class TestEndToEndTargetFilteringChain(unittest.TestCase):
         from secator.utils_test import clear_modules
         clear_modules()
         self._rebuild_mock_tasks()
+        # The chain no longer carries a result payload: the scope-target fan-in queries the
+        # store, so the scan must run with an active store driver (sqlite, temp DB) for the
+        # downstream workflow's inputs to resolve.
+        import tempfile
+        from pathlib import Path
+        import secator.hooks.sqlite as sqlite_mod
+        from secator.config import CONFIG
+        self.sqlite_mod = sqlite_mod
+        self.temp_dir = tempfile.mkdtemp()
+        self._orig_sqlite_path = CONFIG.addons.sqlite.path
+        CONFIG.addons.sqlite.path = str(Path(self.temp_dir) / 'test.db')
+        sqlite_mod._conns.clear()
+
+    def tearDown(self):
+        import shutil
+        from secator.config import CONFIG
+        for conn in self.sqlite_mod._conns.values():
+            conn.close()
+        self.sqlite_mod._conns.clear()
+        CONFIG.addons.sqlite.path = self._orig_sqlite_path
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def _rebuild_mock_tasks(self):
         """Recreate mock task classes using fresh secator imports.
@@ -619,7 +676,8 @@ class TestEndToEndTargetFilteringChain(unittest.TestCase):
 
         with patch('secator.loader.find_templates', side_effect=mock_find_templates), \
              patch('secator.runners.task.discover_tasks', side_effect=patched_discover_tasks):
-            scan = Scan(scan_config, inputs=scan_inputs, run_opts={})
+            scan = Scan(scan_config, inputs=scan_inputs, run_opts={},
+                        context={'drivers': ['sqlite'], 'workspace_id': 'ws', 'workspace_name': 'ws'})
             sig = scan.build_celery_workflow()
             result = sig.apply()
             return result.get()

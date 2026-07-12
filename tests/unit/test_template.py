@@ -51,14 +51,30 @@ class TestTemplate(unittest.TestCase):
 		get_configs_by_type.cache_clear()
 		discover_tasks.cache_clear()
 		from secator.runners import Workflow
-		ls_workflow = [w for w in get_configs_by_type('workflow') if w.name == 'ls'][0]
-		self.assertIsNotNone(ls_workflow)
-		workflow = Workflow(ls_workflow, inputs=[str(self.template_dir)])
-		workflow.run()
-		findings = workflow.findings
-		self.assertEqual(len(findings), 1)
-		vuln = [r for r in findings if r._type == 'vulnerability'][0]
-		self.assertTrue(self.expected_vuln == Vulnerability.load(vuln.toDict()))
+		# The chain no longer carries a result payload, so a workflow's findings come from the
+		# store. Run with a temp sqlite store (a bare CLI run gets the json driver by default;
+		# a direct library run must supply one).
+		import tempfile
+		from pathlib import Path
+		import secator.hooks.sqlite as sqlite_mod
+		sqlite_mod._conns.clear()
+		orig_path = CONFIG.addons.sqlite.path
+		CONFIG.addons.sqlite.path = str(Path(tempfile.mkdtemp()) / 'test.db')
+		try:
+			ls_workflow = [w for w in get_configs_by_type('workflow') if w.name == 'ls'][0]
+			self.assertIsNotNone(ls_workflow)
+			workflow = Workflow(ls_workflow, inputs=[str(self.template_dir)],
+								 context={'drivers': ['sqlite'], 'workspace_id': 'ws', 'workspace_name': 'ws'})
+			workflow.run()
+			findings = workflow.findings
+			self.assertEqual(len(findings), 1)
+			vuln = [r for r in findings if r._type == 'vulnerability'][0]
+			self.assertTrue(self.expected_vuln == Vulnerability.load(vuln.toDict()))
+		finally:
+			for conn in sqlite_mod._conns.values():
+				conn.close()
+			sqlite_mod._conns.clear()
+			CONFIG.addons.sqlite.path = orig_path
 
 
 class TestTree(unittest.TestCase):
@@ -209,7 +225,11 @@ class TestTree(unittest.TestCase):
 		scan = Scan(config, run_opts={'dry_run': True, 'test1_nuclei': True})
 		scan.run()
 		self.assertEqual(scan.status, 'SUCCESS')
-		self.assertEqual(len(scan.infos), 11)
+		# dry_run has no store and no result payload (dropped), and is no_process so the
+		# store backfill is skipped — the top runner aggregates only the build-time "Skipped"
+		# infos (test2's 3 nuclei-gated tasks). Nested dry-run command previews still print
+		# live; they are simply no longer collected into scan.infos.
+		self.assertEqual(len(scan.infos), 3)
 		self.assertEqual(len(scan.errors), 0)
 		messages = [r.message for r in scan.infos]
 		self.assertNotIn('Skipped task nuclei/first because condition is not met: opts.nuclei', messages)

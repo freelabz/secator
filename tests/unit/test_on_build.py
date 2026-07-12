@@ -281,7 +281,7 @@ class TestOnBuildChunkWiring(unittest.TestCase):
                 task = ChunkedHttpx(targets, sync=False, hooks=task_hooks,
                                     context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
                 task.has_children = True
-                workflow = break_task(task, {'name': 'httpx', 'sync': False}, results=[])
+                workflow = break_task(task, {'name': 'httpx', 'sync': False})
         finally:
             m.get_mongodb_client = orig
 
