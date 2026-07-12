@@ -278,6 +278,35 @@ def order_drivers(drivers):
 	return sorted(dict.fromkeys(drivers), key=sort_key)
 
 
+# Backend drivers that provide their own queryable store. If one of these (or the
+# mongodb addon) is active, we must NOT force the local json driver on top of it.
+STORE_DRIVERS = {'mongodb', 'sqlite', 'api'}
+
+
+def apply_default_drivers(drivers, mongodb_enabled):
+	"""Default local runs to the ``json`` driver so there is ALWAYS a queryable store.
+
+	Once the inter-task result payload is dropped, every consumer reads findings from
+	the store instead of the returned results. Locally that store is the per-runner
+	``report.json`` written live by the json driver — so a bare run needs the json
+	driver active. Applied ONLY when no store backend is otherwise active: no
+	mongodb/sqlite/api driver in ``drivers`` and the mongodb addon disabled. In prod
+	(mongodb addon enabled) mongodb still wins and json is not forced.
+
+	Args:
+		drivers (list[str]): Resolved driver names (config defaults + CLI --driver).
+		mongodb_enabled (bool): Whether the mongodb addon is enabled.
+
+	Returns:
+		list[str]: Drivers, with ``json`` appended when no store backend is active.
+	"""
+	if mongodb_enabled or (STORE_DRIVERS & set(drivers)):
+		return drivers
+	if 'json' not in drivers:
+		drivers = drivers + ['json']
+	return drivers
+
+
 @cache
 def get_available_exporters():
 	"""Get all available exporters (internal + external)."""
