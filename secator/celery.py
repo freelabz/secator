@@ -408,9 +408,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 			'workspace_name': runner.workspace_name,
 			'drivers': runner.context.get('drivers', []),
 			'results': runner.results,
-			'scan_id': runner.context.get('scan_id'),
-			'workflow_id': runner.context.get('workflow_id'),
-			'task_id': runner.context.get('task_id'),
+			'run_id': runner.context.get('run_id'),
 		}
 		scoped_inputs, _, _ = run_extractors(runner.results, target_extractor_opts, runner.inputs, ctx=ctx)
 		emitted = []
