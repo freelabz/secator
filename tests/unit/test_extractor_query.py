@@ -520,6 +520,43 @@ class TestCrossRunIsolation:
 		assert sorted(r['url'] for r in backend.search(q)) == ['http://a1', 'http://b1']
 
 
+class TestScopeTargetPersistence:
+	"""Domain-scan shape: workflow-emitted scope-tagged host Targets must be persisted so the
+	scoped-target fallback's QueryEngine serves them on DB backends (not just local in-memory)."""
+
+	def test_sqlite_fallback_serves_persisted_scope_targets(self, tmp_path, monkeypatch):
+		from secator import celery as celery_mod
+		from secator.config import CONFIG
+		from secator.hooks import sqlite as sqlite_hook
+		from secator.output_types import Target
+		from secator.runners._helpers import run_extractors
+
+		monkeypatch.setattr(CONFIG.addons.sqlite, 'path', str(tmp_path / 'test.db'))
+		sqlite_hook._conns.clear()
+
+		runner = _dummy_runner()
+		runner.context.update({'drivers': ['sqlite'], 'scan_id': 'S', 'workspace_id': 'ws', 'workspace_name': 'ws'})
+		names = [f'sub{i}.example.com' for i in range(20)]
+		targets = []
+		for n in names:
+			t = Target(name=n)
+			t._context['scope'] = 'host_recon'
+			runner.add_result(t, print=False, hooks=False)
+			targets.append(t)
+
+		# host_recon's port scanners have no targets_ -> they use the scoped-target fallback.
+		ctx = {'parent_scope': 'host_recon', 'drivers': ['sqlite'], 'scan_id': 'S',
+			   'workspace_id': 'ws', 'workspace_name': 'ws', 'results': []}
+
+		# Negative: not persisted -> the DB-backed fallback returns nothing (reproduces the bug).
+		assert run_extractors([], {'parent_scope': 'host_recon'}, [], ctx=dict(ctx))[0] == []
+
+		# Fix: persist via the active driver's finding hook, then the query serves ALL host targets.
+		celery_mod._persist_scope_targets(runner, targets)
+		got = run_extractors([], {'parent_scope': 'host_recon'}, [], ctx=dict(ctx))[0]
+		assert sorted(got) == sorted(names)
+
+
 class TestMemoryBound:
 	def test_large_fanin_not_materialized(self, monkeypatch):
 		import tracemalloc
