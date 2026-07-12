@@ -328,13 +328,28 @@ def parse_extractor(extractor):
 	return _type, _field, _condition, _group_by
 
 
-def build_extractor_query(extractor, ctx):
-	"""Translate an extractor (type + condition) into a Mongo-style query dict.
+class _AliasItem(ast.NodeTransformer):
+	"""Rewrite the `item` alias to the extractor's type name, leaving string literals intact."""
+	def __init__(self, type_name):
+		self._type = type_name
 
-	Folds opts/targets ctx-constants, rewrites the per-item Python condition to a query,
-	and appends the same scope/ancestor filters the old per-item eval applied. Returns
-	None when the extractor must yield nothing (a constant gate is falsy).
-	"""
+	def visit_Name(self, node):
+		return ast.Name(id=self._type, ctx=node.ctx) if node.id == 'item' else node
+
+
+def run_scope_query(ctx):
+	"""Bound a query to the current run via the top-most ancestry run id (scan > workflow > task);
+	the in-memory fan-in all carries it. Without this, store backends leak across runs/workspace."""
+	for level in ('scan', 'workflow', 'task'):
+		rid = ctx.get(f'{level}_id')
+		if rid:
+			return {f'_context.{level}_id': str(rid)}
+	return {}
+
+
+def build_extractor_query(extractor, ctx):
+	"""Translate an extractor (type + condition) into a Mongo-style query dict, or None when a
+	constant gate makes it yield nothing."""
 	from secator.query.utils import python_expr_to_mongo
 	parsed = parse_extractor(extractor)
 	if not parsed:
@@ -345,29 +360,15 @@ def build_extractor_query(extractor, ctx):
 	if residual is None:
 		return None
 	if residual:
-		# The condition references the item under `item.` or the type name; normalize the
-		# `item.` alias to the type prefix so the translator emits the matching _type.
-		expr = re.sub(r'\bitem\.', f'{_type}.', residual)
-		query.update(python_expr_to_mongo(expr))
-	# Bound the query to the CURRENT run so store backends (mongodb/api/sqlite) don't leak
-	# findings across runs / the whole workspace. `self.results` (the in-memory fan-in the old
-	# eval scanned) is the accumulation at the top of the current run's chain, so every fan-in
-	# finding carries the top-most ancestry run id: `scan_id` inside a scan (results forward
-	# across its workflows), else `workflow_id` inside a standalone workflow. `ancestor_id`
-	# below is only the config NAME (not run-unique), so it cannot provide this bound.
-	for level in ('scan', 'workflow', 'task'):
-		run_id = ctx.get(f'{level}_id')
-		if run_id:
-			query[f'_context.{level}_id'] = str(run_id)
-			break
-
-	# Mirror process_extractor's scope/ancestor scoping (additional narrowing within the run).
+		tree = _AliasItem(_type).visit(ast.parse(residual, mode='eval'))
+		query.update(python_expr_to_mongo(ast.unparse(tree)))
+	query.update(run_scope_query(ctx))
+	# Additional narrowing the old per-item eval applied within the run.
 	parent_scope = ctx.get('parent_scope')
 	ancestor_id = ctx.get('ancestor_id')
-	node_chain_start = ctx.get('node_chain_start', False)
 	if _type == 'target' and parent_scope:
 		query['_context.scope'] = parent_scope
-	elif ancestor_id and not node_chain_start:
+	elif ancestor_id and not ctx.get('node_chain_start', False):
 		query['_context.ancestor_id'] = str(ancestor_id)
 	return query
 
@@ -384,20 +385,14 @@ def process_extractor(results, extractor, ctx=None):
 	"""
 	if ctx is None:
 		ctx = {}
-	ancestor_id = ctx.get('ancestor_id')
 	key = ctx.get('key')
-
-	# Parse extractor, it can be a dict or a string (shortcut)
 	parsed_extractor = parse_extractor(extractor)
 	if not parsed_extractor:
 		return results
 	_type, _field, _condition, _group_by = parsed_extractor
 
-	# Translate the extractor into a query and let the backend do the filtering. Under a
-	# DB backend (mongodb/api/sqlite) this queries the store directly — the full fan-in is
-	# never materialized on the heap (RC#6 OOM fix). Under the local backend it filters the
-	# in-memory ctx['results'] (falling back to the passed-in results), mirroring the old
-	# per-item eval byte-for-byte.
+	# Let the backend filter: a DB backend queries the store (fan-in never materialized —
+	# RC#6 OOM fix); the local backend filters the in-memory ctx['results'].
 	query = build_extractor_query(extractor, ctx)
 	if query is None:
 		return []
@@ -408,12 +403,8 @@ def process_extractor(results, extractor, ctx=None):
 		'workspace_name': ctx.get('workspace_name'),
 	})
 	results = engine.search(query)
+	debug(f'extracted {len(results)} results (key: {key}) via query {query}', sub='extractor')
 
-	debug(
-		f'extracted {len(results)} results ([bold]ancestor_id[/]: {ancestor_id}, [bold]key[/]: {key}) '
-		f'via query {query}', sub='extractor')
-
-	# Format field if needed
 	if _field:
 		already_formatted = '{' in _field and '}' in _field
 		_field = '{' + _field + '}' if not already_formatted else _field

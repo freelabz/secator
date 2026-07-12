@@ -148,16 +148,13 @@ class TestExtractorFunctions(unittest.TestCase):
         self.assertEqual(result, ['test2', 'test3'])
 
         # Combined AND condition over finding fields.
-        # (Note: `len(item.field1) > 3` — an arbitrary len() on a field — is no longer
-        # supported now that filtering runs through the query engine; only the shipped
-        # ctx-constant form `len(targets)` is folded. No shipped config uses len() on a field.)
-        extractor = {
-            'type': 'mock',
-            'field': 'field1',
-            'condition': "item.field1 == 'test1' and item.field2 == 1"
-        }
-        result = process_extractor(self.results, extractor, {})
-        self.assertEqual(result, ['test1'])
+        extractor = {'type': 'mock', 'field': 'field1', 'condition': "item.field1 == 'test1' and item.field2 == 1"}
+        self.assertEqual(process_extractor(self.results, extractor, {}), ['test1'])
+
+        # `len(<field>)` is no longer supported (Mongo can't express it without $expr; no shipped
+        # config uses it). It must RAISE explicitly, never silently match-all/none.
+        with self.assertRaises(ValueError):
+            process_extractor(self.results, {'type': 'mock', 'field': 'field1', 'condition': 'len(item.field1) > 3'}, {})
 
     def test_process_extractor_with_nested_condition(self):
         """Test process_extractor with nested dict field access in conditions (dot notation)."""

@@ -94,7 +94,7 @@ class TestSubstituteCtxConstants:
 class TestBuildExtractorQuery:
 	def test_type_and_truthy_condition(self):
 		q = build_extractor_query({'type': 'url', 'field': 'url', 'condition': 'url.verified'}, _ctx())
-		assert q == {'_type': 'url', 'verified': True}
+		assert q == {'_type': 'url', 'verified': {'$nin': [None, '', False, 0]}}
 
 	def test_scope_filter_for_target(self):
 		q = build_extractor_query(
@@ -129,7 +129,12 @@ class TestBuildExtractorQuery:
 
 	def test_not_condition(self):
 		q = build_extractor_query({'type': 'subdomain', 'condition': 'not item.verified'}, _ctx())
-		assert q == {'_type': 'subdomain', 'verified': False}
+		assert q == {'_type': 'subdomain', 'verified': {'$ne': True}}
+
+	def test_item_alias_leaves_string_literal_untouched(self):
+		# `item.` inside a quoted literal must NOT be rewritten to the type prefix.
+		q = build_extractor_query({'type': 'tag', 'condition': "item.name == 'item.foo'"}, _ctx())
+		assert q == {'_type': 'tag', 'name': 'item.foo'}
 
 	def test_no_condition_matches_type(self):
 		q = build_extractor_query({'type': 'target', 'field': 'name'}, _ctx())
@@ -202,6 +207,18 @@ class TestLocalBackendExtraction:
 							   'condition': "port.port == 22 or 'ssh' in port.service_name.lower()"}]}
 		inputs2, _, errors2 = run_extractors(results, opts2, [], ctx=_local_ctx(results))
 		assert set(inputs2) == {'a'} and not errors2
+
+	def test_targets_and_opts_gate_need_threaded_ctx(self):
+		from secator.output_types import Port
+		from secator.runners._helpers import run_extractors
+		results = [Port(port=22, ip='1', host='a', service_name='ssh'),
+				   Port(port=80, ip='2', host='b', service_name='http')]
+		opts = {'targets_': [{'type': 'port', 'field': 'host',
+							  'condition': 'port.host in targets and opts.scanners'}]}
+		inputs, _, errors = run_extractors(results, opts, [], ctx=_local_ctx(results, opts={'scanners': True}, targets=['a']))
+		assert set(inputs) == {'a'} and not errors
+		# Without opts/targets in ctx the gate folds against {}/[] -> yields nothing (the scope-tagged bug).
+		assert run_extractors(results, opts, [], ctx=_local_ctx(results))[0] == []
 
 
 import re as _re
@@ -344,7 +361,7 @@ def _dummy_runner():
 	from secator.runners import PythonRunner
 
 	class dummytask(PythonRunner):
-		input_types = [HOST]
+		input_types = (HOST,)
 
 		def yielder(self):
 			return []
@@ -374,6 +391,18 @@ class TestRunnerErrorStatus:
 		celery_mod._hydrate_runner_errors(r)
 		assert r.status == 'FAILURE'
 		assert any(e.message == 'boom' for e in r.self_errors)
+
+	def test_hydrate_error_query_is_run_scoped(self, monkeypatch):
+		# The error query must be bound to this run, not workspace-wide (no cross-run leak).
+		from secator import celery as celery_mod
+		r = _dummy_runner()
+		r.context['scan_id'] = 'S1'
+		captured = {}
+		monkeypatch.setattr('secator.query.QueryEngine.search',
+							lambda self, query, *a, **k: captured.update(query) or [])
+		celery_mod._hydrate_runner_errors(r)
+		assert captured.get('_type') == 'error'
+		assert captured.get('_context.scan_id') == 'S1'
 
 
 class TestBackendParity:
@@ -418,6 +447,31 @@ class TestBackendParity:
 		mongo_backend._client = client
 		mongo_hosts = sorted(r['host'] for r in mongo_backend.search(query))
 		assert json_hosts == mongo_hosts == ['a']
+
+	def test_bare_truthy_string_parity_json_vs_mongo(self):
+		# `item.version` -> $nin truthy. Non-empty kept; '' and None excluded on BOTH backends.
+		import pytest
+		pytest.importorskip('mongomock')
+		import mongomock
+		from secator.query.json import JsonBackend
+		from secator.query.mongodb import MongoDBBackend
+		findings = [
+			{'_type': 'technology', 'version': '1.0', 'product': 'a',
+			 '_context': {'workspace_id': 'ws'}, 'is_false_positive': False},
+			{'_type': 'technology', 'version': '', 'product': 'b',
+			 '_context': {'workspace_id': 'ws'}, 'is_false_positive': False},
+			{'_type': 'technology', 'version': None, 'product': 'c',
+			 '_context': {'workspace_id': 'ws'}, 'is_false_positive': False},
+		]
+		query = build_extractor_query({'type': 'technology', 'field': 'product', 'condition': 'item.version'}, _ctx())
+		json_b = JsonBackend('ws', results=[dict(f) for f in findings])
+		json_prod = sorted(r['product'] for r in json_b.search(query))
+		client = mongomock.MongoClient()
+		client.main.findings.insert_many([dict(f) for f in findings])
+		mongo_b = MongoDBBackend('ws')
+		mongo_b._client = client
+		mongo_prod = sorted(r['product'] for r in mongo_b.search(query))
+		assert json_prod == mongo_prod == ['a']
 
 
 class TestCrossRunIsolation:

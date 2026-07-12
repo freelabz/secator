@@ -1,5 +1,6 @@
 """Utilities for converting CLI query syntax to MongoDB-style queries."""
 
+import ast
 import json
 import re
 
@@ -193,15 +194,23 @@ _OP_MAP = {
 _IN_RE = re.compile(r'^(.+?)\s+in\s+\[(.*)\]\s*$', re.DOTALL)
 _NOT_IN_RE = re.compile(r'^(.+?)\s+not\s+in\s+\[(.*)\]\s*$', re.DOTALL)
 
-# A clean dotted identifier (word chars + dots), e.g. `url.verified`, `_source`.
-_IDENT_RE = re.compile(r'^[\w.]+$')
+# Strict dotted identifier: non-empty word segments separated by single dots (rejects
+# `.field`, `type.`, `type..field`). `_STR` matches a complete, escape-aware quoted literal.
+_SEG = r'[A-Za-z_]\w*'
+_DOTTED = rf'{_SEG}(?:\.{_SEG})*'
+_STR = r"""(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")"""
+_IDENT_RE = re.compile(rf'^{_DOTTED}$')
 
 # Method-call / negation forms used by extractor conditions.
-_STARTSWITH_RE = re.compile(r"""^\s*([\w.]+)\.startswith\(\s*['"](.*?)['"]\s*\)\s*$""", re.DOTALL)
-_IN_LOWER_RE = re.compile(r"""^\s*['"](.*?)['"]\s+in\s+([\w.]+)\.lower\(\)\s*$""", re.DOTALL)
-_IN_FIELD_RE = re.compile(r"""^\s*['"](.*?)['"]\s+in\s+([\w.]+)\s*$""", re.DOTALL)
-_LOWER_EQ_RE = re.compile(r"""^\s*([\w.]+)\.lower\(\)\s*==\s*['"](.*?)['"]\s*$""", re.DOTALL)
-_NOT_FIELD_RE = re.compile(r'^\s*not\s+([\w.]+)\s*$')
+_STARTSWITH_RE = re.compile(rf'^\s*({_DOTTED})\.startswith\(\s*({_STR})\s*\)\s*$', re.DOTALL)
+_IN_LOWER_RE = re.compile(rf'^\s*({_STR})\s+in\s+({_DOTTED})\.lower\(\)\s*$', re.DOTALL)
+_IN_FIELD_RE = re.compile(rf'^\s*({_STR})\s+in\s+({_DOTTED})\s*$', re.DOTALL)
+_LOWER_EQ_RE = re.compile(rf'^\s*({_DOTTED})\.lower\(\)\s*==\s*({_STR})\s*$', re.DOTALL)
+_NOT_FIELD_RE = re.compile(rf'^\s*not\s+({_DOTTED})\s*$')
+
+# Truthy match that agrees on both backends: json's $nin returns False for falsy fields,
+# Mongo's $nin (with null in the list) excludes falsy/absent — so both keep only truthy.
+_TRUTHY = {'$nin': [None, '', False, 0]}
 
 
 def _split_type_field(dotted):
@@ -292,39 +301,33 @@ def _parse_single_expr(expr):
     if re.match(r'^[a-z_]+$', expr):
         return {'_type': expr}
 
-    # Method-call / negation forms used by extractor conditions. Checked before the
-    # generic operator parse because `field.lower() == 'x'` contains '==' and
-    # `'x' in field.lower()` contains ' in ' but must NOT be parsed as those ops.
+    # Method-call / negation forms. Checked before the generic operator parse because
+    # `field.lower() == 'x'` contains '==' and `'x' in field.lower()` contains ' in '.
+    # String literals are ast.literal_eval'd (decode escapes) before re.escape.
     m = _STARTSWITH_RE.match(expr)
     if m:
-        return _regex_result(m.group(1), '^' + re.escape(m.group(2)))
+        return _regex_result(m.group(1), '^' + re.escape(ast.literal_eval(m.group(2))))
 
-    # `'x' in field.lower()` -> case-insensitive contains (inline (?i) so it works on
-    # the JSON backend's re.search too, which ignores $options).
+    # inline (?i) so case-insensitivity works on the JSON backend's re.search (ignores $options).
     m = _IN_LOWER_RE.match(expr)
     if m:
-        return _regex_result(m.group(2), '(?i)' + re.escape(m.group(1)))
+        return _regex_result(m.group(2), '(?i)' + re.escape(ast.literal_eval(m.group(1))))
 
-    # `'x' in field` -> case-sensitive substring (matches Python `'x' in str_field`).
-    # Checked after the `.lower()` form (whose trailing `()` keeps it from matching here).
     m = _IN_FIELD_RE.match(expr)
     if m:
-        return _regex_result(m.group(2), re.escape(m.group(1)))
+        return _regex_result(m.group(2), re.escape(ast.literal_eval(m.group(1))))
 
-    # `field.lower() == 'x'` -> anchored case-insensitive regex.
     m = _LOWER_EQ_RE.match(expr)
     if m:
-        return _regex_result(m.group(1), '(?i)^' + re.escape(m.group(2)) + '$')
+        return _regex_result(m.group(1), '(?i)^' + re.escape(ast.literal_eval(m.group(2))) + '$')
 
-    # `not type.field` -> falsy truthiness match (the backend treats {field: False} as
-    # "field is falsy", mirroring the old per-item `not item.field` eval).
+    # `not type.field` -> {field: {$ne: True}}: keeps false/null/absent on both backends,
+    # mirroring the old `not item.field` eval (corpus `not` targets are booleans).
     m = _NOT_FIELD_RE.match(expr)
     if m:
         _type, field = _split_type_field(m.group(1))
-        result = {}
-        if _type:
-            result['_type'] = _type
-        result[field] = False
+        result = {'_type': _type} if _type else {}
+        result[field] = {'$ne': True}
         return result
 
     # Check for 'not in' operator first: "type.field not in [val1, val2]" -> $nin.
@@ -391,17 +394,14 @@ def _parse_single_expr(expr):
                 result[field] = {mongo_op: value}
         return result
 
-    # Fallback: a bare "type.field" with no operator is a boolean truthiness check,
-    # i.e. "ip.alive" means "ip.alive == True" (resolves identically across backends).
-    # A bare "type" with no field is just the type.
+    # Fallback: bare "type.field" is a truthiness check (`ip.alive`, `vuln.id`); bare "type"
+    # is just the type. $nin keeps only truthy values on both backends (bool and string).
     if not _IDENT_RE.match(expr):
         raise ValueError(f'Cannot translate expression to query: {expr!r}')
     parts = expr.split('.', 1)
-    _type = parts[0].strip()
-    field = parts[1].strip() if len(parts) > 1 else None
-    result = {'_type': _type}
-    if field:
-        result[field] = True
+    result = {'_type': parts[0].strip()}
+    if len(parts) > 1:
+        result[parts[1].strip()] = dict(_TRUTHY)
     return result
 
 

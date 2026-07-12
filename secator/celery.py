@@ -18,7 +18,7 @@ from secator.config import CONFIG
 from secator.output_types import Error, Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.runners._helpers import resolve_task_queue, run_extractors
+from secator.runners._helpers import resolve_task_queue, run_extractors, run_scope_query
 from secator.utils import debug, deduplicate, flatten, should_update
 
 
@@ -449,11 +449,8 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		results = forward_results(results)
 	runner.enable_hooks = enable_hooks
 
-	# Do NOT rehydrate the fan-in (RC#6 OOM): the incoming results are a mix of uuid
-	# strings (persisted findings, reduced by chain_results) and non-persisted objects.
-	# Add only the objects to the runner (needed for scope-tagged extraction / status);
-	# carry the uuid strings straight through the chain. Extractors query the store
-	# independently instead of scanning a materialized fan-in.
+	# Don't rehydrate the fan-in (RC#6 OOM): add only the non-persisted objects; carry the
+	# persisted-finding uuid strings straight through the chain. Extractors query the store.
 	forwarded_uuids = [item for item in results if isinstance(item, str)]
 	for item in results:
 		if isinstance(item, str):
@@ -469,6 +466,8 @@ def mark_runner_started(results, runner, enable_hooks=True):
 			k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'
 		}
 		ctx = {
+			'opts': runner.run_opts,
+			'targets': runner.inputs,
 			'ancestor_id': runner.ancestor_id,
 			'node_chain_start': True,
 			'workspace_id': runner.context.get('workspace_id'),
@@ -498,7 +497,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_started in {total_time:.2f}s'))
 
-	# Return only uuids when mongodb is enabled (carry the un-hydrated fan-in uuids through)
+	# Carry the un-hydrated fan-in uuids through the chain.
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
 		return chain_results(list(runner.results) + forwarded_uuids)
 
@@ -527,17 +526,14 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
 
-	# Do NOT rehydrate the fan-in (RC#6 OOM). Add only the non-persisted objects; carry the
-	# uuid strings through the chain.
+	# Don't rehydrate the fan-in (RC#6 OOM). Add only the non-persisted objects; carry uuids through.
 	forwarded_uuids = [item for item in results if isinstance(item, str)]
 	for item in results:
 		if isinstance(item, str):
 			continue
 		runner.add_result(item, print=False)
 
-	# Status derives from this runner's own Error findings. Under mongodb those were reduced
-	# to uuids in the fan-in, so fetch ONLY the errors from the store (a small, bounded set —
-	# never the full findings set) and let self_errors / _owns_error narrow to this subtree.
+	# Errors were reduced to uuids in the fan-in; fetch just this run's errors so status computes.
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
 		_hydrate_runner_errors(runner)
 
@@ -550,7 +546,7 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_completed in {total_time:.2f}s'))
 
-	# Return only uuids when mongodb is enabled (carry the un-hydrated fan-in uuids through)
+	# Carry the un-hydrated fan-in uuids through the chain.
 	if IN_WORKER and CONFIG.addons.mongodb.enabled:
 		return chain_results(list(runner.results) + forwarded_uuids)
 
@@ -558,12 +554,9 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 
 
 def _hydrate_runner_errors(runner):
-	"""Fetch this runner's workspace Errors from the query store and add them as objects so
-	status/self_errors compute without rehydrating the entire fan-in (RC#6 OOM fix).
-
-	Only ``_type: 'error'`` documents are materialized (bounded and small); the runner's
-	``_owns_error`` narrows them to its own subtree. Best-effort: a query failure must not
-	break completion.
+	"""Fetch only this run's Errors from the store so status/self_errors compute without
+	rehydrating the fan-in (RC#6 OOM). Run-scoped (not workspace-wide); _owns_error narrows
+	to the runner's own subtree. Best-effort — a query failure must not break completion.
 	"""
 	try:
 		from secator.query import QueryEngine
@@ -572,7 +565,7 @@ def _hydrate_runner_errors(runner):
 			'drivers': runner.context.get('drivers', []),
 			'workspace_name': runner.workspace_name,
 		})
-		for doc in engine.search({'_type': 'error'}):
+		for doc in engine.search({'_type': 'error', **run_scope_query(runner.context)}):
 			err = doc if isinstance(doc, Error) else Error.load(doc)
 			runner.add_result(err, print=False, hooks=False, queue=False)
 	except Exception as e:  # noqa: BLE001

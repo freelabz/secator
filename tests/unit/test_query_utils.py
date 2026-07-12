@@ -59,15 +59,14 @@ class TestPythonExprToMongo:
         result = python_expr_to_mongo('domain')
         assert result == {'_type': 'domain'}
 
-    def test_bare_field_is_boolean_true(self):
-        # "ip.alive" (no operator) is a truthiness shorthand: it must resolve to a
-        # boolean match (alive == True), not drop the field. Regression for the
-        # resolved query missing the boolean comparison.
-        assert python_expr_to_mongo('ip.alive') == {'_type': 'ip', 'alive': True}
+    def test_bare_field_is_truthy_match(self):
+        # "ip.alive" (no operator) is a truthiness shorthand -> $nin of the falsy values,
+        # which keeps truthy booleans AND non-empty strings identically on both backends.
+        assert python_expr_to_mongo('ip.alive') == {'_type': 'ip', 'alive': {'$nin': [None, '', False, 0]}}
 
-    def test_bare_field_matches_explicit_eq_true(self):
-        # The bare form must resolve identically to "== True".
-        assert python_expr_to_mongo('ip.alive') == python_expr_to_mongo('ip.alive == True')
+    def test_explicit_eq_true_stays_strict(self):
+        # Explicit "== True" is strict equality, distinct from the bare truthiness form.
+        assert python_expr_to_mongo('ip.alive == True') == {'_type': 'ip', 'alive': True}
 
     def test_boolean_literals_parse_as_bool(self):
         assert python_expr_to_mongo('ip.alive == True') == {'_type': 'ip', 'alive': True}

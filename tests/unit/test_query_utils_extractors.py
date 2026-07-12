@@ -45,12 +45,16 @@ class TestLowerEquality:
 
 
 class TestNot:
-	def test_not_bare_field_is_falsy_match(self):
-		assert python_expr_to_mongo('subdomain.verified') == {'_type': 'subdomain', 'verified': True}
-		assert python_expr_to_mongo('not subdomain.verified') == {'_type': 'subdomain', 'verified': False}
+	def test_bare_truthy_uses_nin(self):
+		assert python_expr_to_mongo('subdomain.verified') == {
+			'_type': 'subdomain', 'verified': {'$nin': [None, '', False, 0]}
+		}
+
+	def test_not_bare_field_is_ne_true(self):
+		assert python_expr_to_mongo('not subdomain.verified') == {'_type': 'subdomain', 'verified': {'$ne': True}}
 
 	def test_not_bare_field_no_type(self):
-		assert python_expr_to_mongo('not verified') == {'verified': False}
+		assert python_expr_to_mongo('not verified') == {'verified': {'$ne': True}}
 
 
 class TestUntranslatableRaises:
@@ -61,3 +65,22 @@ class TestUntranslatableRaises:
 	def test_bare_garbage_raises(self):
 		with pytest.raises(ValueError):
 			python_expr_to_mongo("foo(bar)")
+
+	@pytest.mark.parametrize('expr', ['type..field == 1', '.field == 1', 'type. == 1', 'not type..field'])
+	def test_malformed_dotted_raises(self, expr):
+		with pytest.raises(ValueError):
+			python_expr_to_mongo(expr)
+
+
+class TestLiteralDecode:
+	def test_startswith_decodes_escapes(self):
+		# The literal is ast.literal_eval'd before re.escape, so `\t` matches a real tab
+		# (not a literal backslash-t) — matching the old Python-eval semantics.
+		from secator.query.json import match_query
+		q = python_expr_to_mongo(r"url._source.startswith('a\tb')")
+		assert match_query({'_type': 'url', '_source': 'a\tb-x'}, q)
+		assert not match_query({'_type': 'url', '_source': 'atb'}, q)
+
+	def test_mismatched_quote_raises(self):
+		with pytest.raises(ValueError):
+			python_expr_to_mongo("url._source.startswith('abc)")
