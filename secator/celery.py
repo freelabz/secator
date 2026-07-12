@@ -18,7 +18,7 @@ from secator.config import CONFIG
 from secator.output_types import Error, Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.runners._helpers import persist_execution_items, resolve_task_queue, run_extractors, run_scope_query
+from secator.runners._helpers import resolve_task_queue, run_extractors, run_scope_query
 from secator.utils import debug, should_update
 
 
@@ -411,15 +411,10 @@ def mark_runner_started(results, runner, enable_hooks=True):
 			'run_id': runner.context.get('run_id'),
 		}
 		scoped_inputs, _, _ = run_extractors(runner.results, target_extractor_opts, runner.inputs, ctx=ctx)
-		emitted = []
 		for name in scoped_inputs:
 			t = TargetOutput(name=name)
 			t._context['scope'] = scope
-			runner.add_result(t, print=False)
-			emitted.append(t)
-		# Persist these Targets to the active store so the downstream scoped-target fallback's
-		# QueryEngine finds them on DB backends (Workflow has no on_item persist hook, unlike Task).
-		persist_execution_items(runner, emitted)
+			runner.add_result(t, print=False)  # persisted to the store via the runner's on_item hook
 		debug(
 			f'Runner {runner.unique_name}: emitted {len(scoped_inputs)} scope-tagged targets (scope={scope})',
 			sub='celery'

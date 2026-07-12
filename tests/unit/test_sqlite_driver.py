@@ -239,45 +239,27 @@ class TestSqliteHooks(SqliteTestBase):
 		self.assertIn('on_item', mod.HOOKS[Task])
 
 
-class TestPersistExecutionItems(SqliteTestBase):
-	"""Orphan execution outputs (Warning/Info emitted off the Task.on_item path) must be
-	persisted to the store so they survive the removal of the inter-task result payload."""
+class TestWriteModelOnItem(SqliteTestBase):
+	"""Write-model: the store driver's on_item persists for EVERY runner type (Task/Workflow/Scan),
+	so execution outputs (Info/Warning/Target) emitted by a Workflow/Scan land in the store through
+	the one add_result path — no persist_execution_items shim."""
 
-	def _runner(self):
-		class FakeRunner:
-			def __init__(self):
-				self.config = type('C', (), {'type': 'workflow', 'name': 'host_recon'})()
-				self.context = {'workspace_id': 'ws1', 'drivers': ['sqlite']}
-		return FakeRunner()
+	def test_on_item_registered_for_all_runner_types(self):
+		from secator.hooks import sqlite as mod
+		from secator.runners import Scan, Task, Workflow
+		for cls in (Task, Workflow, Scan):
+			self.assertIn('on_item', mod.HOOKS[cls])
+			self.assertIn(mod.update_finding, mod.HOOKS[cls]['on_item'])
 
-	def test_warning_is_queryable_from_store(self):
-		from secator.runners._helpers import persist_execution_items
+	def test_workflow_execution_item_persisted_via_on_item(self):
+		from secator.hooks import sqlite as mod
 		from secator.output_types import Warning
 		from secator.query.sqlite import SqliteBackend
-		runner = self._runner()
-		warning = Warning(message='state exceeds 16MB', _context={'workspace_id': 'ws1'})
-		persist_execution_items(runner, [warning])
+
+		class FakeWorkflow:
+			config = type('C', (), {'type': 'workflow', 'name': 'host_recon'})()
+			context = {'workspace_id': 'ws1'}
+		mod.update_finding(FakeWorkflow(), Warning(message='state exceeds 16MB', _context={'workspace_id': 'ws1'}))
 		results = SqliteBackend(workspace_id='ws1').search({'_type': 'warning'})
 		self.assertEqual(len(results), 1)
 		self.assertEqual(results[0]['message'], 'state exceeds 16MB')
-
-	def test_info_is_queryable_from_store(self):
-		from secator.runners._helpers import persist_execution_items
-		from secator.output_types import Info
-		from secator.query.sqlite import SqliteBackend
-		runner = self._runner()
-		info = Info(message='Skipped workflow host_recon', _context={'workspace_id': 'ws1'})
-		persist_execution_items(runner, [info])
-		results = SqliteBackend(workspace_id='ws1').search({'_type': 'info'})
-		self.assertEqual(len(results), 1)
-		self.assertEqual(results[0]['message'], 'Skipped workflow host_recon')
-
-	def test_no_drivers_is_noop(self):
-		from secator.runners._helpers import persist_execution_items
-		from secator.output_types import Warning
-
-		class NoDriverRunner:
-			config = type('C', (), {'type': 'task', 'name': 'httpx'})()
-			context = {'workspace_id': 'ws1', 'drivers': []}
-		# Must not raise when no drivers are active (bare local run without the sqlite driver).
-		persist_execution_items(NoDriverRunner(), [Warning(message='x', _context={'workspace_id': 'ws1'})])

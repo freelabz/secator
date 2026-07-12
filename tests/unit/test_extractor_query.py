@@ -552,24 +552,22 @@ class TestScopeTargetPersistence:
 
 		runner = _dummy_runner()
 		runner.context.update({'drivers': ['sqlite'], 'run_id': 'S', 'workspace_id': 'ws', 'workspace_name': 'ws'})
+		runner._apply_context_drivers()  # register sqlite hooks (real runs have drivers at construction)
 		names = [f'sub{i}.example.com' for i in range(20)]
-		targets = []
-		for n in names:
-			t = Target(name=n)
-			t._context['scope'] = 'host_recon'
-			runner.add_result(t, print=False, hooks=False)
-			targets.append(t)
 
 		# host_recon's port scanners have no targets_ -> they use the scoped-target fallback.
 		ctx = {'parent_scope': 'host_recon', 'drivers': ['sqlite'], 'run_id': 'S',
 			   'workspace_id': 'ws', 'workspace_name': 'ws', 'results': []}
 
-		# Negative: not persisted -> the DB-backed fallback returns nothing (reproduces the bug).
+		# Negative: nothing persisted yet -> the DB-backed fallback returns nothing.
 		assert run_extractors([], {'parent_scope': 'host_recon'}, [], ctx=dict(ctx))[0] == []
 
-		# Fix: persist via the active driver's finding hook, then the query serves ALL host targets.
-		from secator.runners._helpers import persist_execution_items
-		persist_execution_items(runner, targets)
+		# Write-model: add_result persists via the runner's on_item hook (every runner type),
+		# so the scoped-target query then serves ALL host targets.
+		for n in names:
+			t = Target(name=n)
+			t._context['scope'] = 'host_recon'
+			runner.add_result(t, print=False)
 		got = run_extractors([], {'parent_scope': 'host_recon'}, [], ctx=dict(ctx))[0]
 		assert sorted(got) == sorted(names)
 

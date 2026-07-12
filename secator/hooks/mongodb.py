@@ -9,7 +9,6 @@ from secator.config import CONFIG
 from secator.hooks._dedup import compute_duplicate_updates
 from secator.output_types import OUTPUT_TYPES, Warning
 from secator.runners import Scan, Task, Workflow
-from secator.runners._helpers import persist_execution_items
 from secator.utils import debug, escape_mongodb_url
 
 # import gevent.monkey
@@ -106,9 +105,8 @@ def update_runner(self):
 		# The runner state exceeds MongoDB's 16MB BSON limit (usually huge outputs).
 		# Don't crash the runner over a persistence limit — warn and carry on.
 		msg = f'{self.unique_name} state exceeds MongoDB\'s 16MB document limit; skipping this DB update.'
-		warning = Warning(message=msg)
-		self.add_result(warning, hooks=False)
-		persist_execution_items(self, [warning])
+		# Persisted to the store via the runner's on_item hook (warning is tiny; no recursion).
+		self.add_result(Warning(message=msg))
 		debug(msg, sub='hooks.mongodb', id=_id)
 
 
@@ -174,9 +172,8 @@ def update_finding(self, item):
 		# response body). Warn instead of crashing the runner; return the item so
 		# the chain continues.
 		msg = f'{item._type} finding exceeds MongoDB\'s 16MB document limit; skipping persist.'
-		warning = Warning(message=msg)
-		self.add_result(warning, hooks=False)
-		persist_execution_items(self, [warning])
+		# Persisted to the store via the runner's on_item hook (warning is tiny; no recursion).
+		self.add_result(Warning(message=msg))
 		debug(msg, sub='hooks.mongodb', id=str(item._uuid))
 		return item
 	end_time = time.time()
@@ -282,6 +279,7 @@ HOOKS = {
 		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
+		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],
@@ -290,6 +288,7 @@ HOOKS = {
 		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
+		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],

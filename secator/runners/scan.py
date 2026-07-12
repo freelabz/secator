@@ -4,7 +4,6 @@ from dotmap import DotMap
 from secator.config import CONFIG
 from secator.output_types.info import Info
 from secator.runners._base import Runner
-from secator.runners._helpers import persist_execution_items
 from secator.runners.workflow import Workflow
 from secator.utils import merge_opts
 
@@ -56,10 +55,8 @@ class Scan(Runner):
 			local_ns = {'opts': DotMap(opts)}
 			safe_globals = {'__builtins__': {'len': len}}
 			if condition and not eval(condition, safe_globals, local_ns):
-				info = Info(message=f'Skipped workflow {name} because condition is not met: {condition}')
-				self.add_result(info)
-				# Scan-level HOOKS have no on_item, so persist explicitly to survive the payload drop.
-				persist_execution_items(self, [info])
+				# Persisted to the store via the runner's on_item hook.
+				self.add_result(Info(message=f'Skipped workflow {name} because condition is not met: {condition}'))
 				continue
 
 			# Build workflow

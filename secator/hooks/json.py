@@ -172,6 +172,7 @@ HOOKS = {
 	Scan: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
+		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],
@@ -179,6 +180,7 @@ HOOKS = {
 	Workflow: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
+		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],
