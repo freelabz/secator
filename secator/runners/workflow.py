@@ -3,7 +3,7 @@ from dotmap import DotMap
 from secator.config import CONFIG
 from secator.output_types import Info
 from secator.runners._base import Runner
-from secator.runners._helpers import resolve_task_queue
+from secator.runners._helpers import persist_execution_items, resolve_task_queue
 from secator.runners.task import Task
 from secator.tree import build_runner_tree, walk_runner_tree
 from secator.utils import merge_opts
@@ -87,7 +87,10 @@ class Workflow(Runner):
 					result = eval(condition, safe_globals, local_ns)
 					if not result:
 						debug(f'{node.id} skipped task because condition is not met: {condition}', sub=self.config.name)
-						self.add_result(Info(message=f'Skipped task [bold gold3]{node.name}[/] because condition is not met: [bold green]{condition}[/]'))  # noqa: E501
+						info = Info(message=f'Skipped task [bold gold3]{node.name}[/] because condition is not met: [bold green]{condition}[/]')  # noqa: E501
+						self.add_result(info)
+						# Workflow-level HOOKS have no on_item, so persist explicitly to survive the payload drop.
+						persist_execution_items(self, [info])
 						return
 
 				# Get task class

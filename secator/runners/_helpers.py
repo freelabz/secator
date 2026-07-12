@@ -337,6 +337,38 @@ class _AliasItem(ast.NodeTransformer):
 		return ast.Name(id=self._type, ctx=node.ctx) if node.id == 'item' else node
 
 
+def persist_execution_items(runner, items):
+	"""Persist execution objects (Info/Warning/Target/...) emitted OFF the Task.on_item path.
+
+	Some execution outputs never reach a Task's ``on_item`` hook and so are never persisted by
+	any driver: the DocumentTooLarge Warnings raised inside the mongodb driver (added with
+	``hooks=False``), and the "Skipped ..." Info a Workflow/Scan emits at build time (Workflow/Scan
+	driver HOOKS have no ``on_item``). Without the inter-task result payload to carry them, they
+	would vanish from the final report. Route each item through the active drivers' Task-level
+	``on_item`` hook (the same finding-persistence the local backend gets for free from the
+	in-memory results), so it lands in the store and is queryable. No-op on runs with no drivers.
+
+	Args:
+		runner (Runner): The emitting runner (carries ``context['drivers']`` and its context).
+		items (list): Execution OutputType objects to persist.
+	"""
+	drivers = runner.context.get('drivers', [])
+	if not drivers or not items:
+		return
+	from secator.runners import Task
+	from secator.loader import discover_external_drivers, order_drivers
+	from secator.utils import import_dynamic
+	discover_external_drivers()
+	persist = []
+	for driver in order_drivers(drivers):
+		driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
+		if driver_hooks:
+			persist += driver_hooks.get(Task, {}).get('on_item', [])
+	for item in items:
+		for hook in persist:
+			hook(runner, item)
+
+
 def run_scope_query(ctx):
 	"""Bound a query to the current run via the top-most ancestry run id (scan > workflow > task);
 	the in-memory fan-in all carries it. Without this, store backends leak across runs/workspace."""

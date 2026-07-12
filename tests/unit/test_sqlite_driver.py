@@ -237,3 +237,47 @@ class TestSqliteHooks(SqliteTestBase):
 		self.assertIn(Workflow, mod.HOOKS)
 		self.assertIn(Scan, mod.HOOKS)
 		self.assertIn('on_item', mod.HOOKS[Task])
+
+
+class TestPersistExecutionItems(SqliteTestBase):
+	"""Orphan execution outputs (Warning/Info emitted off the Task.on_item path) must be
+	persisted to the store so they survive the removal of the inter-task result payload."""
+
+	def _runner(self):
+		class FakeRunner:
+			def __init__(self):
+				self.config = type('C', (), {'type': 'workflow', 'name': 'host_recon'})()
+				self.context = {'workspace_id': 'ws1', 'drivers': ['sqlite']}
+		return FakeRunner()
+
+	def test_warning_is_queryable_from_store(self):
+		from secator.runners._helpers import persist_execution_items
+		from secator.output_types import Warning
+		from secator.query.sqlite import SqliteBackend
+		runner = self._runner()
+		warning = Warning(message='state exceeds 16MB', _context={'workspace_id': 'ws1'})
+		persist_execution_items(runner, [warning])
+		results = SqliteBackend(workspace_id='ws1').search({'_type': 'warning'})
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]['message'], 'state exceeds 16MB')
+
+	def test_info_is_queryable_from_store(self):
+		from secator.runners._helpers import persist_execution_items
+		from secator.output_types import Info
+		from secator.query.sqlite import SqliteBackend
+		runner = self._runner()
+		info = Info(message='Skipped workflow host_recon', _context={'workspace_id': 'ws1'})
+		persist_execution_items(runner, [info])
+		results = SqliteBackend(workspace_id='ws1').search({'_type': 'info'})
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]['message'], 'Skipped workflow host_recon')
+
+	def test_no_drivers_is_noop(self):
+		from secator.runners._helpers import persist_execution_items
+		from secator.output_types import Warning
+
+		class NoDriverRunner:
+			config = type('C', (), {'type': 'task', 'name': 'httpx'})()
+			context = {'workspace_id': 'ws1', 'drivers': []}
+		# Must not raise when no drivers are active (bare local run without the sqlite driver).
+		persist_execution_items(NoDriverRunner(), [Warning(message='x', _context={'workspace_id': 'ws1'})])

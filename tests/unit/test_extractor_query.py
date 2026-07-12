@@ -525,7 +525,6 @@ class TestScopeTargetPersistence:
 	scoped-target fallback's QueryEngine serves them on DB backends (not just local in-memory)."""
 
 	def test_sqlite_fallback_serves_persisted_scope_targets(self, tmp_path, monkeypatch):
-		from secator import celery as celery_mod
 		from secator.config import CONFIG
 		from secator.hooks import sqlite as sqlite_hook
 		from secator.output_types import Target
@@ -552,7 +551,8 @@ class TestScopeTargetPersistence:
 		assert run_extractors([], {'parent_scope': 'host_recon'}, [], ctx=dict(ctx))[0] == []
 
 		# Fix: persist via the active driver's finding hook, then the query serves ALL host targets.
-		celery_mod._persist_scope_targets(runner, targets)
+		from secator.runners._helpers import persist_execution_items
+		persist_execution_items(runner, targets)
 		got = run_extractors([], {'parent_scope': 'host_recon'}, [], ctx=dict(ctx))[0]
 		assert sorted(got) == sorted(names)
 

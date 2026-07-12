@@ -18,8 +18,8 @@ from secator.config import CONFIG
 from secator.output_types import Error, Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.runners._helpers import resolve_task_queue, run_extractors, run_scope_query
-from secator.utils import debug, deduplicate, flatten, import_dynamic, should_update
+from secator.runners._helpers import persist_execution_items, resolve_task_queue, run_extractors, run_scope_query
+from secator.utils import debug, deduplicate, flatten, should_update
 
 
 # ---------#
@@ -487,7 +487,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 			emitted.append(t)
 		# Persist these Targets to the active store so the downstream scoped-target fallback's
 		# QueryEngine finds them on DB backends (Workflow has no on_item persist hook, unlike Task).
-		_persist_scope_targets(runner, emitted)
+		persist_execution_items(runner, emitted)
 		debug(
 			f'Runner {runner.unique_name}: emitted {len(scoped_inputs)} scope-tagged targets (scope={scope})',
 			sub='celery'
@@ -556,27 +556,6 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 		return chain_results(list(runner.results) + forwarded_uuids)
 
 	return runner.results
-
-
-def _persist_scope_targets(runner, targets):
-	"""Persist workflow-emitted scope-tagged Targets via the active drivers' finding-persistence
-	(the Task-level on_item hook), so the scoped-target fallback's QueryEngine serves them on DB
-	backends exactly as the local backend serves the in-memory results. No-op on local (no driver
-	HOOKS). Each Target already carries _context.scope + the run-scope ids from add_result.
-	"""
-	drivers = runner.context.get('drivers', [])
-	if not drivers or not targets:
-		return
-	from secator.loader import discover_external_drivers, order_drivers
-	discover_external_drivers()
-	persist = []
-	for driver in order_drivers(drivers):
-		driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
-		if driver_hooks:
-			persist += driver_hooks.get(Task, {}).get('on_item', [])
-	for target in targets:
-		for hook in persist:
-			hook(runner, target)
 
 
 def _hydrate_runner_errors(runner):
