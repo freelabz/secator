@@ -1049,8 +1049,6 @@ class Runner:
 				'progress': self.progress,
 				'last_updated_db': self.last_updated_db,
 				'context': {**self.context, 'celery_ids': list(self.celery_ids_map.keys())},
-				'errors': [e.toDict() for e in self.errors],
-				'warnings': [w.toDict() for w in self.warnings],
 			}
 		)
 		# Note: serialized config/opts intentionally not scrubbed. An option's `default` must
