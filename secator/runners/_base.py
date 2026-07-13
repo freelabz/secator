@@ -106,12 +106,9 @@ class Runner:
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
-		# One run_id per run, assigned at the OUTERMOST runner and inherited by every
-		# child (which gets context=parent.context.copy()). It is the uniform run-scope key
-		# stamped onto every finding via add_result, so run scoping (run_scope_query) is the
-		# same for all drivers instead of depending on the DB layer minting scan/workflow/task ids.
-		if not self.context.get('run_id'):
-			self.context['run_id'] = str(uuid.uuid4())
+		# The run-scope id ({type}_id) is minted by the active store driver at on_init (in
+		# update_runner), in its native format (mongodb ObjectId, json/sqlite uuid4), then stamped
+		# into context so descendants inherit it and findings carry it. The runner core stays dumb.
 
 		# Runner state
 		self.uuids = set()
@@ -719,7 +716,9 @@ class Runner:
 			'workspace_name': self.workspace_name,
 			'drivers': self.context.get('drivers', []),
 			'results': self.results,
-			'run_id': self.context.get('run_id'),
+			'scan_id': self.context.get('scan_id'),
+			'workflow_id': self.context.get('workflow_id'),
+			'task_id': self.context.get('task_id'),
 		}
 		inputs, run_opts, errors = run_extractors(self.results, self.run_opts, self.inputs, ctx=ctx, dry_run=self.dry_run)
 		for error in errors:

@@ -135,7 +135,15 @@ def _report_path(runner):
 
 
 def update_runner(self):
-	"""Persist the runner's own info block into its report.json (live)."""
+	"""Persist the runner's own info block into its report.json (live).
+
+	Mints the runner's {type}_id (uuid4) if absent — at on_init, before any finding is emitted —
+	and stamps it into context so descendants inherit it and findings carry it (the run-scope key).
+	"""
+	_type = self.config.type
+	key = f'{_type}_chunk_id' if self.toDict().get('chunk') else f'{_type}_id'
+	if not self.context.get(key):
+		self.context[key] = str(uuid.uuid4())
 	info = self.toDict()
 
 	def mutate(data):

@@ -450,9 +450,9 @@ class TestMarkRunnerStartedScopeEmission(unittest.TestCase):
     def _make_port(self, ip, port):
         import uuid as _uuid
         from secator.output_types import Port as _Port  # fresh import after any clear_modules
-        # Carry the run scope (run_id) the downstream workflow queries by, exactly as a real
-        # upstream task's Ports inherit the outermost runner's run_id.
-        p = _Port(ip=ip, host=ip, port=port, protocol='tcp', _context={'workspace_id': 'ws', 'run_id': 'S'})
+        # Carry the run scope (scan_id) the downstream workflow queries by, exactly as a real
+        # upstream task's Ports inherit the outermost runner's scan_id.
+        p = _Port(ip=ip, host=ip, port=port, protocol='tcp', _context={'workspace_id': 'ws', 'scan_id': 'S'})
         p._uuid = str(_uuid.uuid4())
         return p
 
@@ -477,7 +477,7 @@ class TestMarkRunnerStartedScopeEmission(unittest.TestCase):
         with patch('secator.runners.task.discover_tasks', side_effect=patched_discover_tasks):
             wf = Workflow(config, inputs=[], results=prior_results, run_opts=run_opts,
                           context={'drivers': ['sqlite'], 'workspace_id': 'ws',
-                                   'workspace_name': 'ws', 'run_id': 'S'})
+                                   'workspace_name': 'ws', 'scan_id': 'S'})
         wf.context['parent_scope'] = 'workflow2'
         return wf
 

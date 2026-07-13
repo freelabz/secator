@@ -150,17 +150,19 @@ class TestBuildExtractorQuery:
 			{'_type': 'port', 'service_name': {'$regex': '(?i)ssh'}},
 		]
 
-	def test_run_bound_uses_run_id(self):
-		# The whole run shares ONE run_id (outermost runner mints it, descendants inherit) ->
-		# the fan-in is bound by run_id uniformly, for every driver. scan/workflow/task ids
-		# are no longer used for scoping.
+	def test_run_bound_uses_topmost_type_id(self):
+		# Bound by the top-most present {type}_id (scan > workflow > task) — the driver-minted
+		# id a run's findings all carry via inheritance.
 		q = build_extractor_query({'type': 'url', 'condition': 'url.verified'},
-								  _ctx(run_id='R1', scan_id='S1', workflow_id='W2', task_id='T3'))
-		assert q['_context.run_id'] == 'R1'
-		assert not any(k in q for k in ('_context.scan_id', '_context.workflow_id', '_context.task_id'))
+								  _ctx(scan_id='S1', workflow_id='W2', task_id='T3'))
+		assert q['_context.scan_id'] == 'S1'
+		assert '_context.workflow_id' not in q and '_context.task_id' not in q
+		# Falls back to workflow_id, then task_id, when no higher id is present.
+		q2 = build_extractor_query({'type': 'url', 'condition': 'url.verified'}, _ctx(workflow_id='W2', task_id='T3'))
+		assert q2['_context.workflow_id'] == 'W2' and '_context.task_id' not in q2
 
-	def test_run_bound_absent_when_no_run_id(self):
-		# No run_id in ctx (e.g. a bare build_extractor_query call): no run bound.
+	def test_run_bound_absent_when_no_type_id(self):
+		# No {type}_id in ctx (e.g. a bare build_extractor_query call): no run bound.
 		q = build_extractor_query({'type': 'url', 'condition': 'url.verified'}, _ctx())
 		assert not any(k.startswith('_context.') and k.endswith('_id') for k in q)
 
@@ -391,13 +393,13 @@ class TestRunnerErrorStatus:
 		# The error query must be bound to this run, not workspace-wide (no cross-run leak).
 		from secator import celery as celery_mod
 		r = _dummy_runner()
-		r.context['run_id'] = 'R1'
+		r.context['scan_id'] = 'R1'
 		captured = {}
 		monkeypatch.setattr('secator.query.QueryEngine.search',
 							lambda self, query, *a, **k: captured.update(query) or [])
 		celery_mod._hydrate_runner_errors(r)
 		assert captured.get('_type') == 'error'
-		assert captured.get('_context.run_id') == 'R1'
+		assert captured.get('_context.scan_id') == 'R1'
 
 
 class TestBackendParity:
@@ -484,57 +486,91 @@ class TestCrossRunIsolation:
 		backend._client = client
 		return backend
 
-	def _url(self, url, run_id=None):
+	def _url(self, url, scan_id=None):
 		ctx = {'workspace_id': 'ws'}
-		if run_id:
-			ctx['run_id'] = run_id
+		if scan_id:
+			ctx['scan_id'] = scan_id
 		return {'_type': 'url', 'url': url, 'verified': True, '_context': ctx, 'is_false_positive': False}
 
 	def test_extractor_sees_only_its_own_run(self):
-		# Two runs in the same workspace, each emitting a verified url, isolated by run_id —
+		# Two runs in the same workspace, each emitting a verified url, isolated by scan_id —
 		# the OLD query would be workspace-wide and see both.
-		backend = self._seed([self._url('http://a1', run_id='A'), self._url('http://b1', run_id='B')])
-		q = build_extractor_query({'type': 'url', 'field': 'url', 'condition': 'url.verified'}, _ctx(run_id='A'))
-		assert q['_context.run_id'] == 'A'
+		backend = self._seed([self._url('http://a1', scan_id='A'), self._url('http://b1', scan_id='B')])
+		q = build_extractor_query({'type': 'url', 'field': 'url', 'condition': 'url.verified'}, _ctx(scan_id='A'))
+		assert q['_context.scan_id'] == 'A'
 		assert sorted(r['url'] for r in backend.search(q)) == ['http://a1']
 
 	def test_unbounded_query_would_leak(self):
 		# Guard: without the run bound the query IS workspace-wide (both runs) — proving the
 		# bound is what fixes the leak, not some other filter.
-		backend = self._seed([self._url('http://a1', run_id='A'), self._url('http://b1', run_id='B')])
+		backend = self._seed([self._url('http://a1', scan_id='A'), self._url('http://b1', scan_id='B')])
 		q = build_extractor_query({'type': 'url', 'field': 'url', 'condition': 'url.verified'}, _ctx())
 		assert sorted(r['url'] for r in backend.search(q)) == ['http://a1', 'http://b1']
 
 
-class TestRunIdScoping:
-	"""run_id: one uuid minted at the outermost runner, inherited by every descendant, stamped
-	onto every finding — the uniform run-scope key across all drivers."""
+class TestTypeIdMinting:
+	"""The active store driver mints the runner's {type}_id at on_init (in update_runner), in its
+	native format (mongodb ObjectId, json/sqlite uuid4), and stamps it into context — before any
+	finding is emitted — so descendants inherit it and findings carry it (the run-scope key)."""
 
-	def test_outermost_mints_and_descendant_inherits(self):
-		from secator.definitions import HOST
-		from secator.runners import PythonRunner
+	def test_json_update_runner_mints_and_stamps(self, tmp_path):
+		from secator.hooks import json as mod
 
-		parent = _dummy_runner()
-		rid = parent.context.get('run_id')
-		assert rid  # outermost minted a run_id
+		class R:
+			config = type('C', (), {'type': 'task', 'name': 'httpx'})()
+			context = {'workspace_id': 'ws'}
+			reports_folder = str(tmp_path)
+			status = 'RUNNING'
 
-		class child(PythonRunner):
-			input_types = (HOST,)
+			def toDict(self):
+				return {'name': 'httpx', 'status': 'RUNNING', 'chunk': None, 'context': self.context}
 
-			def yielder(self):
-				return []
+		r = R()
+		assert not r.context.get('task_id')
+		mod.update_runner(r)
+		assert r.context.get('task_id')        # minted + stamped (uuid4), before any finding
 
-		# A child built from the parent's copied context (how Workflow/Scan build children) keeps it.
-		c = child(inputs=['x'], skip_if_no_inputs=True, context=parent.context.copy())
-		assert c.context['run_id'] == rid
-		# A separate outermost run gets its OWN run_id.
-		assert _dummy_runner().context.get('run_id') != rid
+	def test_json_reuses_existing_id_no_remint(self, tmp_path):
+		# Multi-driver: the higher-priority driver (mongodb) mints its ObjectId first; json must
+		# REUSE it, never re-mint — so a run's findings never mix ObjectId and uuid4 formats.
+		from secator.hooks import json as mod
+		from bson.objectid import ObjectId
+		oid = str(ObjectId())
 
-	def test_finding_carries_run_id(self):
+		class R:
+			config = type('C', (), {'type': 'task', 'name': 'httpx'})()
+			context = {'workspace_id': 'ws', 'task_id': oid}
+			reports_folder = str(tmp_path)
+			status = 'RUNNING'
+
+			def toDict(self):
+				return {'name': 'httpx', 'status': 'RUNNING', 'chunk': None, 'context': self.context}
+
+		r = R()
+		mod.update_runner(r)
+		assert r.context['task_id'] == oid                 # reused, not re-minted
+
+	def test_finding_carries_type_id_and_is_scoped(self, tmp_path, monkeypatch):
+		# A runner whose driver minted its task_id: a finding add_result'd carries that id (via
+		# context.copy() in add_result) and is served by the run-scoped query.
+		from secator.config import CONFIG
+		from secator.hooks import sqlite as sqlite_hook
 		from secator.output_types import Url
-		r = _dummy_runner()
-		r.add_result(Url(url='http://x', _context={'workspace_id': 'ws'}), print=False, hooks=False)
-		assert r.results[-1]._context['run_id'] == r.context['run_id']
+		from secator.query.sqlite import SqliteBackend
+		from secator.runners._helpers import run_scope_query
+		monkeypatch.setattr(CONFIG.addons.sqlite, 'path', str(tmp_path / 't.db'))
+		sqlite_hook._conns.clear()
+
+		runner = _dummy_runner()
+		runner.context.update({'drivers': ['sqlite'], 'workspace_id': 'ws', 'workspace_name': 'ws'})
+		runner._apply_context_drivers()
+		from secator.hooks import sqlite as mod
+		mod.update_runner(runner)                          # on_init: mint + stamp task_id
+		tid = runner.context.get('task_id')
+		assert tid
+		runner.add_result(Url(url='http://x', _context={'workspace_id': 'ws'}), print=False)
+		rows = SqliteBackend(workspace_id='ws').search({'_type': 'url', **run_scope_query(runner.context)})
+		assert len(rows) == 1 and rows[0]['_context'].get('task_id') == tid
 
 
 class TestScopeTargetPersistence:
@@ -551,12 +587,12 @@ class TestScopeTargetPersistence:
 		sqlite_hook._conns.clear()
 
 		runner = _dummy_runner()
-		runner.context.update({'drivers': ['sqlite'], 'run_id': 'S', 'workspace_id': 'ws', 'workspace_name': 'ws'})
+		runner.context.update({'drivers': ['sqlite'], 'scan_id': 'S', 'workspace_id': 'ws', 'workspace_name': 'ws'})
 		runner._apply_context_drivers()  # register sqlite hooks (real runs have drivers at construction)
 		names = [f'sub{i}.example.com' for i in range(20)]
 
 		# host_recon's port scanners have no targets_ -> they use the scoped-target fallback.
-		ctx = {'parent_scope': 'host_recon', 'drivers': ['sqlite'], 'run_id': 'S',
+		ctx = {'parent_scope': 'host_recon', 'drivers': ['sqlite'], 'scan_id': 'S',
 			   'workspace_id': 'ws', 'workspace_name': 'ws', 'results': []}
 
 		# Negative: nothing persisted yet -> the DB-backed fallback returns nothing.
@@ -573,7 +609,7 @@ class TestScopeTargetPersistence:
 
 
 class TestReadModelMemoryBound:
-	"""The read-model RAM gate: with ~300k findings in the store under one run_id, the runner's
+	"""The read-model RAM gate: with ~300k findings in the store under one scan_id, the runner's
 	findings VIEW streams flat (peak ~ one batch), and len() is an indexed count — never the O(N)
 	materialization the old completion backfill re-introduced."""
 
@@ -587,7 +623,7 @@ class TestReadModelMemoryBound:
 		rows = (
 			(f'{i:024x}', 'url', 'ws',
 			 _json.dumps({'_type': 'url', 'url': f'http://h/{i}', '_uuid': f'{i:024x}',
-						  '_context': {'workspace_id': 'ws', 'run_id': 'R'}}))
+						  '_context': {'workspace_id': 'ws', 'scan_id': 'R'}}))
 			for i in range(n)
 		)
 		conn.executemany(
@@ -600,7 +636,7 @@ class TestReadModelMemoryBound:
 		N = 300_000
 		self._seed(tmp_path, monkeypatch, N)
 		runner = _dummy_runner()
-		runner.context.update({'drivers': ['sqlite'], 'run_id': 'R', 'workspace_id': 'ws', 'workspace_name': 'ws'})
+		runner.context.update({'drivers': ['sqlite'], 'scan_id': 'R', 'workspace_id': 'ws', 'workspace_name': 'ws'})
 
 		# len() is an indexed count — no rows materialized.
 		assert len(runner.findings) == N
@@ -628,7 +664,7 @@ class TestReadModelMemoryBound:
 		import pickle
 		from secator.tasks import httpx
 		self._seed(tmp_path, monkeypatch, 5)
-		runner = httpx(['x'], context={'drivers': ['sqlite'], 'run_id': 'R',
+		runner = httpx(['x'], context={'drivers': ['sqlite'], 'scan_id': 'R',
 									   'workspace_id': 'ws', 'workspace_name': 'ws'}, dry_run=True)
 		restored = pickle.loads(pickle.dumps(runner))
 		assert len(restored.findings) == 5                                  # view rebuilt from context

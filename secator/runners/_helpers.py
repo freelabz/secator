@@ -411,13 +411,14 @@ def load_output_types(docs):
 
 
 def run_scope_query(ctx):
-	"""Bound a query to the current run via its run_id — one uuid assigned at the outermost
-	runner and inherited by every descendant, stamped onto every finding's _context. Uniform
-	across all drivers (local-json included), so scoping no longer depends on the DB layer
-	minting scan/workflow/task ids. Without it, store backends leak across runs in a workspace."""
-	run_id = ctx.get('run_id')
-	if run_id:
-		return {'_context.run_id': str(run_id)}
+	"""Bound a query to the current run via the top-most present ancestry id (scan > workflow >
+	task). Each store driver mints its {type}_id at on_init (native format) and stamps it into
+	context, so descendants inherit it and findings carry it — uniform across all drivers, local
+	json included. Without it, store backends leak across runs in a shared workspace."""
+	for level in ('scan', 'workflow', 'task'):
+		rid = ctx.get(f'{level}_id')
+		if rid:
+			return {f'_context.{level}_id': str(rid)}
 	return {}
 
 

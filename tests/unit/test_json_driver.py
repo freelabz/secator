@@ -164,28 +164,28 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		urls = [r['url'] for r in backend.search({'_type': 'url'})]
 		self.assertEqual(urls, ['http://mem/a'])
 
-	def test_cross_run_isolation_by_run_id(self):
+	def test_cross_run_isolation_by_scan_id(self):
 		"""Two runs into the SAME local workspace (same -ws, --driver json): a run-scoped query
 		returns ONLY that run's findings, not the other run's. This is the local-json cross-run
-		leak the workspace-dir-only scoping used to allow, fixed by the uniform run_id key."""
+		leak the workspace-dir-only scoping used to allow, fixed by the uniform scan_id key."""
 		from secator.hooks import json as mod
 		from secator.query.json import JsonBackend
 		from secator.runners._helpers import run_scope_query
 		root = Path(self.temp_dir)
 		# Run A and run B each write a finding into their own runner dir under the SAME workspace.
-		for run_id, url in [('A', 'http://a/1'), ('B', 'http://b/1')]:
-			runner = self._runner(folder=str(root / 'ws1' / 'tasks' / f'task_{run_id}'))
+		for scan_id, url in [('A', 'http://a/1'), ('B', 'http://b/1')]:
+			runner = self._runner(folder=str(root / 'ws1' / 'tasks' / f'task_{scan_id}'))
 			item = self._url(url)
-			item._context['run_id'] = run_id     # stamped by add_result in the real flow
+			item._context['scan_id'] = scan_id     # stamped by add_result in the real flow
 			mod.update_finding(runner, item)
 
 		# Unbounded query sees BOTH runs (the leak the fix prevents).
 		unbounded = JsonBackend(workspace_id='ws1', config={'reports_dir': self.temp_dir})
 		self.assertEqual(len(unbounded.search({'_type': 'url'})), 2)
 
-		# Run-scoped (by run_id) returns only run B.
+		# Run-scoped (by scan_id) returns only run B.
 		scoped = JsonBackend(workspace_id='ws1', config={'reports_dir': self.temp_dir})
-		q = {'_type': 'url', **run_scope_query({'run_id': 'B'})}
+		q = {'_type': 'url', **run_scope_query({'scan_id': 'B'})}
 		self.assertEqual([r['url'] for r in scoped.search(q)], ['http://b/1'])
 
 
