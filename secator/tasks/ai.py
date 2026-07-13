@@ -61,6 +61,11 @@ def fast_detect_mode(prompt):
 	return None
 
 
+def _truncate_label(text, fallback):
+	"""Truncate ``text`` to 80 chars with an ellipsis; empty text falls back to ``fallback``."""
+	return (text[:80] + '...') if text and len(text) > 80 else (text or fallback)
+
+
 def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason):
 	"""Shared body for rejecting a tool call: encrypt the error, record it as the
 	tool result in history, and return the ``tool_result`` Ai event to yield."""
@@ -71,6 +76,56 @@ def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason):
 	          message=cap_message(
 	              {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": _error_content}),
 	          _context=dict(runner.context))
+
+
+def _reject_malformed_tool_call(runner, name, tc_id, error, extra_fields, reason):
+	"""Build the rejected-tool-call error JSON (schema-derived hint fields) and
+	reject it via ``_reject_tool_call``. Shared by the two ``_process_tool_calls``
+	rejection paths (malformed JSON args, unknown tool/missing args), which only
+	differ in the extra schema-derived fields included in the error payload."""
+	error_msg = json.dumps({"error": error, **extra_fields}, separators=(',', ':'))
+	return _reject_tool_call(runner, name, tc_id, error_msg, reason)
+
+
+def _yield_tool_results(runner, collected):
+	"""Group ``collected`` results by tool_call_id, add each group's tool result to
+	history, and yield a summary ``Ai(ai_type="tool_result")`` per group. Split out
+	of ``_dispatch_and_collect``; kept a plain function (not a method, like
+	``_reject_tool_call`` above) so mocked-``self`` unit tests for that method still
+	hit this real code instead of an auto-mocked attribute. Order-preserving dict,
+	NOT itertools.groupby: batch results interleave by id and groupby only groups
+	consecutive keys, which would emit multiple tool_result messages per tool_use
+	(rejected by providers).
+	"""
+	budget = runner.history.get_action_budget(runner.model)
+	fallback_path = Path(runner.reports_folder) / "report.json" if runner.reports_folder else None
+	grouped = {}
+	for r in collected:
+		grouped.setdefault(r["_context"]['tool_call_id'], []).append(r)
+	for tc_id, group_results in grouped.items():
+		tc_name = group_results[0]["_context"]['tool_call_name']
+		has_errors = any(r["_type"] == "error" for r in group_results)
+		serialized = [
+			{k: v for k, v in r.items() if k not in INTERNAL_FIELDS}
+			for r in group_results
+		]
+		tool_result_str = format_tool_result(
+			tc_name, "error" if has_errors else "success",
+			len(serialized), serialized)
+		tool_result_str = truncate_to_tokens(
+			tool_result_str, budget, runner.model, fallback_path=fallback_path)
+		tool_result_str = maybe_encrypt(tool_result_str, runner.encryptor)
+		runner.history.add_tool_result(tc_name, tc_id, tool_result_str)
+		_tool_msg = {"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": tool_result_str}
+		_runner_id = next((r.get("_context", {}).get("task_id")
+		                   or r.get("_context", {}).get("workflow_id")
+		                   or r.get("_context", {}).get("scan_id")
+		                   for r in group_results if isinstance(r, dict)), "")
+		yield Ai(content=f"[{tc_name}] {len(serialized)} result(s)",
+		         ai_type="tool_result",
+		         message=cap_message(_tool_msg),
+		         extra_data={"runner_id": _runner_id},
+		         _context=dict(runner.context))
 
 
 @task()
@@ -254,9 +309,7 @@ class ai(PythonRunner):
 			return
 
 		# Get user prompt
-		self.prompt = self.run_opts.get("prompt", "")
-		if self.prompt and Path(self.prompt).is_file():
-			self.prompt = Path(self.prompt).read_text().strip()
+		self.prompt = self._resolve_prompt()
 		if not self.prompt and not self.is_subagent:
 			from secator.definitions import IN_WORKER
 			if not IN_WORKER:
@@ -271,9 +324,8 @@ class ai(PythonRunner):
 					return
 
 		# Setup session metadata
-		prompt_label = (self.prompt[:80] + '...') if self.prompt and len(self.prompt) > 80 else (self.prompt or self.mode)
 		if not self.session_name:
-			self.session_name = prompt_label
+			self.session_name = _truncate_label(self.prompt, self.mode)
 		if self.encryptor:
 			self.session_name = self.encryptor.decrypt(self.session_name)
 		self.context["session_name"] = self.session_name
@@ -284,11 +336,9 @@ class ai(PythonRunner):
 		self._detect_mode()
 
 		# Build system prompt + start history
-		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+		self.system_prompt = self._system_prompt_for(self.mode)
 		self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
-		self.history.add_user(maybe_encrypt(self.prompt, self.encryptor))
-		yield Ai(content=self.prompt, ai_type="prompt",
-		         message={"role": "user", "content": maybe_encrypt(self.prompt, self.encryptor)})
+		yield self._emit_user_prompt(self.prompt)
 		yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
 
 		# Run loop
@@ -299,13 +349,30 @@ class ai(PythonRunner):
 	# Remote (web) session restore
 	# -------------------------------------------------------------------------
 
+	def _system_prompt_for(self, mode):
+		"""Compute the system prompt for ``mode`` using this runner's workspace + backend."""
+		return get_system_prompt(mode, workspace_path=str(self.reports_folder), backend=self.backend)
+
 	def _rebuild_prompt_and_tools(self):
 		"""Rebuild system_prompt + tool_schemas for the current mode and store them.
 
 		Returns the ``(system_prompt, tool_schemas)`` pair for callers that want it."""
-		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+		self.system_prompt = self._system_prompt_for(self.mode)
 		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
 		return self.system_prompt, self.tool_schemas
+
+	def _resolve_prompt(self):
+		"""Resolve the ``prompt`` run option, reading it from a file if it names one."""
+		prompt = self.run_opts.get("prompt", "")
+		if prompt and Path(prompt).is_file():
+			prompt = Path(prompt).read_text().strip()
+		return prompt
+
+	def _emit_user_prompt(self, prompt):
+		"""Add ``prompt`` to history (encrypted once) and return the user-prompt Ai event to yield."""
+		encrypted = maybe_encrypt(prompt, self.encryptor)
+		self.history.add_user(encrypted)
+		return Ai(content=prompt, ai_type="prompt", message={"role": "user", "content": encrypted})
 
 	def _get_query_engine(self):
 		"""Build a workspace-scoped QueryEngine from the runner context.
@@ -358,18 +425,16 @@ class ai(PythonRunner):
 			return False
 
 		# Resolve the user's new prompt (the message that triggered this respawn)
-		self.prompt = self.run_opts.get("prompt", "")
-		if self.prompt and Path(self.prompt).is_file():
-			self.prompt = Path(self.prompt).read_text().strip()
+		self.prompt = self._resolve_prompt()
 
 		# Session metadata
 		if not self.session_name:
-			self.session_name = (self.prompt[:80] + '...') if self.prompt and len(self.prompt) > 80 else self.prompt
+			self.session_name = _truncate_label(self.prompt, self.prompt)
 		self.context["session_name"] = self.session_name
 
 		# Detect mode (defaults to chat) and build the system prompt + tools
 		self._detect_mode()
-		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+		self.system_prompt = self._system_prompt_for(self.mode)
 
 		# Rebuild history from the channel docs (text-only; see restore_history_from_db)
 		self.history = restore_history_from_db(
@@ -379,9 +444,7 @@ class ai(PythonRunner):
 
 		# Append the new user message that respawned the conversation
 		if self.prompt:
-			self.history.add_user(maybe_encrypt(self.prompt, self.encryptor))
-			yield Ai(content=self.prompt, ai_type="prompt",
-			         message={"role": "user", "content": maybe_encrypt(self.prompt, self.encryptor)})
+			yield self._emit_user_prompt(self.prompt)
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		yield from self._run_loop()
@@ -827,7 +890,7 @@ class ai(PythonRunner):
 			self.mode = "chat"
 		mode_max = get_mode_config(self.mode).get("max_iterations", self.max_iterations)
 		self.max_iterations = max(self.max_iterations, mode_max)
-		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+		self.system_prompt = self._system_prompt_for(self.mode)
 		if not hasattr(self, 'tool_schemas') or not old_mode or old_mode != self.mode:
 			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
 
@@ -968,13 +1031,13 @@ class ai(PythonRunner):
 					self.debug(f'[tool_call] {name}: failed to parse: {tc.function.arguments[:200]}', sub='llm')
 					schema = TOOL_SCHEMAS.get(name, {}).get("function", {})
 					properties = schema.get("parameters", {}).get("properties", {})
-					error_msg = json.dumps({
-						"error": f"Tool call '{tc_id}' rejected: malformed JSON arguments ({e})",
-						"raw_arguments": tc.function.arguments[:200],
-						"expected_schema": {k: v.get("type", "any") for k, v in properties.items()},
-						"hint": "Retry with properly formatted JSON arguments.",
-					}, separators=(',', ':'))
-					yield _reject_tool_call(self, name, tc_id, error_msg, "malformed arguments")
+					yield _reject_malformed_tool_call(
+						self, name, tc_id, f"Tool call '{tc_id}' rejected: malformed JSON arguments ({e})",
+						{
+							"raw_arguments": tc.function.arguments[:200],
+							"expected_schema": {k: v.get("type", "any") for k, v in properties.items()},
+							"hint": "Retry with properly formatted JSON arguments.",
+						}, "malformed arguments")
 					continue
 
 			# Coerce object/array args the model stringified (provider quirk) BEFORE
@@ -993,13 +1056,13 @@ class ai(PythonRunner):
 				self.debug(f'[tool_call] skipping {name}: {reason}', sub='llm')
 				schema = TOOL_SCHEMAS.get(name, {}).get("function", {})
 				params = schema.get("parameters", {})
-				error_msg = json.dumps({
-					"error": f"Tool call '{tc_id}' rejected: {reason}",
-					"required_fields": params.get("required", []),
-					"schema": {k: v.get("type", "any") for k, v in params.get("properties", {}).items()},
-					"hint": "Provide all required fields. Retry with a complete arguments object.",
-				}, separators=(',', ':'))
-				yield _reject_tool_call(self, name, tc_id, error_msg, f"rejected: {reason}")
+				yield _reject_malformed_tool_call(
+					self, name, tc_id, f"Tool call '{tc_id}' rejected: {reason}",
+					{
+						"required_fields": params.get("required", []),
+						"schema": {k: v.get("type", "any") for k, v in params.get("properties", {}).items()},
+						"hint": "Provide all required fields. Retry with a complete arguments object.",
+					}, f"rejected: {reason}")
 				continue
 
 			action["tool_call_id"] = tc_id
@@ -1099,39 +1162,7 @@ class ai(PythonRunner):
 			collected.append(result)
 			ctx.results.append(result)
 
-		# Group by tool_call_id with an order-preserving dict, NOT itertools.groupby:
-		# batch results interleave by id, and groupby only groups consecutive keys,
-		# which would emit multiple tool_result messages for one tool_use (rejected
-		# by providers).
-		budget = self.history.get_action_budget(self.model)
-		fallback_path = Path(self.reports_folder) / "report.json" if self.reports_folder else None
-		grouped = {}
-		for r in collected:
-			grouped.setdefault(r["_context"]['tool_call_id'], []).append(r)
-		for tc_id, group_results in grouped.items():
-			tc_name = group_results[0]["_context"]['tool_call_name']
-			has_errors = any(r["_type"] == "error" for r in group_results)
-			serialized = [
-				{k: v for k, v in r.items() if k not in INTERNAL_FIELDS}
-				for r in group_results
-			]
-			tool_result_str = format_tool_result(
-				tc_name, "error" if has_errors else "success",
-				len(serialized), serialized)
-			tool_result_str = truncate_to_tokens(
-				tool_result_str, budget, self.model, fallback_path=fallback_path)
-			tool_result_str = maybe_encrypt(tool_result_str, self.encryptor)
-			self.history.add_tool_result(tc_name, tc_id, tool_result_str)
-			_tool_msg = {"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": tool_result_str}
-			_runner_id = next((r.get("_context", {}).get("task_id")
-			                   or r.get("_context", {}).get("workflow_id")
-			                   or r.get("_context", {}).get("scan_id")
-			                   for r in group_results if isinstance(r, dict)), "")
-			yield Ai(content=f"[{tc_name}] {len(serialized)} result(s)",
-			         ai_type="tool_result",
-			         message=cap_message(_tool_msg),
-			         extra_data={"runner_id": _runner_id},
-			         _context=dict(self.context))
+		yield from _yield_tool_results(self, collected)
 
 		return {
 			"follow_up_choices": follow_up_choices,
@@ -1266,17 +1297,16 @@ class ai(PythonRunner):
 		self.history.add_user(maybe_encrypt(answer, self.encryptor))
 
 		# Handle explicit mode switch (e.g. summarize → chat)
+		self.max_iterations += extra_iters
 		if response.get("switch_mode"):
 			self.mode = response["switch_mode"]
 			self._rebuild_prompt_and_tools()
 			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
-			self.max_iterations += extra_iters
 			items.append(Info(message=f"Switched to {self.mode} mode"))
 		else:
 			# Re-detect mode (user may switch from chat to attack, etc.)
 			previous_mode = self.mode
 			self._detect_mode(force=True)
-			self.max_iterations += extra_iters
 			if self.mode != previous_mode:
 				self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 				items.append(Info(message=f"Switched to {self.mode} mode"))
