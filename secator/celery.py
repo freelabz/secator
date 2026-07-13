@@ -121,15 +121,18 @@ def update_state(celery_task, task, force=False):
 	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
 		return
 	task.last_updated_celery = time()
+	# Build the state ONCE (one batched store read) and reuse it for the debug line — the old code
+	# re-read the store for task.status + task.self_findings_count on top of task.celery_state.
+	state = task.celery_state
 	debug(
 		'',
 		sub='celery.state',
 		id=celery_task.request.id,
-		obj={task.unique_name: task.status, 'count': task.self_findings_count},
+		obj={task.unique_name: state['state'], 'count': state['count']},
 		obj_after=False,
 		verbose=True,
 	)
-	return celery_task.update_state(state='RUNNING', meta=task.celery_state)
+	return celery_task.update_state(state='RUNNING', meta=state)
 
 
 def revoke_task(task_id, task_name=None):

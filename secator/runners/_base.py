@@ -269,15 +269,16 @@ class Runner:
 		# Check if input is valid
 		self.inputs_valid = self.run_validators('validate_input', self.inputs, sub='init')
 
-		# Print targets
+		# Print targets — from the in-memory inputs, NOT a store query (self.inputs is the
+		# authoritative target list at init; querying self_targets here re-parsed report.json).
 		if self.print_target:
-			pluralize = 'targets' if len(self.self_targets) > 1 else 'target'
-			self._print(Info(message=f'Loaded {len(self.self_targets)} {pluralize} for {format_runner_name(self)}'), rich=True)
-			truncated_targets = self.self_targets[:10] if len(self.self_targets) > 10 else self.self_targets
-			for target in truncated_targets:
+			targets = [Target(name=t) for t in self.inputs]
+			pluralize = 'targets' if len(targets) > 1 else 'target'
+			self._print(Info(message=f'Loaded {len(targets)} {pluralize} for {format_runner_name(self)}'), rich=True)
+			for target in targets[:10]:
 				self._print(f'      {repr(target)}', rich=True)
-			if len(self.self_targets) > 10:
-				self._print(f'      and {len(self.self_targets) - 10} more...', rich=True)
+			if len(targets) > 10:
+				self._print(f'      and {len(targets) - 10} more...', rich=True)
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
@@ -475,7 +476,16 @@ class Runner:
 		return len(self.self_findings)
 
 	@property
-	def status(self):
+	def errors_count(self):
+		"""Number of this runner's OWN errors — ONE store read of just the error records (few),
+		then the `_owns_error` filter. A pure {type}_id-scoped COUNT would over-report: a sibling's
+		FORWARDED error shares this run's scope but carries a foreign `ancestor_id`, so ownership
+		must be inspected per-record (can't be a bare count). `status` only needs the >0 check."""
+		return len(self.self_errors)
+
+	def _status(self, errors_count=None):
+		"""Runner status. Pass a pre-computed `errors_count` (e.g. from a batched read) to avoid
+		a second store round-trip; otherwise a count query runs only when the run is done."""
 		if not self.started:
 			return 'PENDING'
 		if self.revoked:
@@ -484,21 +494,39 @@ class Runner:
 			return 'SKIPPED'
 		if not self.done:
 			return 'RUNNING'
-		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
+		if errors_count is None:
+			errors_count = self.errors_count
+		return 'FAILURE' if errors_count > 0 else 'SUCCESS'
+
+	@property
+	def status(self):
+		return self._status()
 
 	@property
 	def celery_state(self):
+		# ONE store read for the whole subtree, then derive state/results/count in memory (was 3
+		# independent _view reads re-parsing the same report.json). Rebuilt fresh on every polling
+		# tick, so it stays live — this de-dups within a single snapshot, it does not cache across.
+		view = list(self._view())
+		own_results = [r for r in view if self._is_own_source(r._source)]
+		# Ownership must be inspected (not a bare scope count) — see errors_count.
+		errors_count = sum(1 for r in view if getattr(r, '_type', None) == 'error' and self._owns_error(r))
+		finding_names = {t.get_name() for t in FINDING_TYPES}
+		if self.config.type == 'task':
+			count = sum(1 for r in view if getattr(r, '_type', None) in finding_names)
+		else:
+			count = sum(1 for r in view if getattr(r, '_type', None) in finding_names and self._is_own_source(r._source))  # noqa: E501
 		return {
 			'name': self.config.name,
 			'full_name': self.unique_name,
-			'state': self.status,
+			'state': self._status(errors_count),
 			'progress': self.progress,
-			'results': self.self_results,
+			'results': own_results,
 			'chunk': self.chunk,
 			'chunk_count': self.chunk_count,
 			'chunk_info': f'{self.chunk}/{self.chunk_count}' if self.chunk and self.chunk_count else '',
 			'celery_id': self.context['celery_id'],
-			'count': self.self_findings_count,
+			'count': count,
 			'descr': self.description,
 		}
 
@@ -664,8 +692,8 @@ class Runner:
 			yield from self.results_buffer
 			self.results_buffer = []
 
-			# If any errors happened during validation, exit
-			if self.self_errors:
+			# If any errors happened during validation, exit (count query — no materialization)
+			if self.errors_count:
 				self._finalize()
 				return
 
@@ -1207,7 +1235,9 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time(), timezone.utc)
-		self.debug(f'completed (status: {self.status}, sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})', sub='end')  # noqa: E501
+		# Lazy: `self.status` (a store count query) is computed ONLY when the 'end' debug sub is
+		# active — the lazy callback runs after debug()'s enable-gate, so it's free when debug is off.
+		self.debug('completed', sub='end', lazy=lambda m: f'{m} (status: {self.status}, sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})')  # noqa: E501
 		self.run_hooks('on_end', sub='end')
 		self.export_profiler()
 		self.log_results()
@@ -1238,10 +1268,11 @@ class Runner:
 		if self.has_parent:
 			return
 		# fmt: off
+		status = self.status  # one store count query, reused for both the color and the label
 		info = Info(
 			message=(
 				f'{self.config.type.capitalize()} {format_runner_name(self)} finished with status '
-				f'[bold {STATE_COLORS[self.status]}]{self.status}[/] and found [bold]{len(self.findings)}[/] findings'
+				f'[bold {STATE_COLORS[status]}]{status}[/] and found [bold]{len(self.findings)}[/] findings'
 			)
 		)
 		# fmt: on
