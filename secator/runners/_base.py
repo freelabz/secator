@@ -1323,7 +1323,7 @@ class Runner:
 				exporters_str = ', '.join([f'[bold cyan]{e.__name__.replace("Exporter", "").lower()}[/]' for e in self.exporters])
 				self._print(Info(message=f'Exporting results with exporters: {exporters_str}'), rich=True)
 			report = Report(self, exporters=self.exporters)
-			report.build()
+			report.build(stream=True)   # live-run exporters stream per-type; peak stays flat
 			report.send()
 			self.report = report
 

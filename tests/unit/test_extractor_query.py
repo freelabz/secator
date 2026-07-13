@@ -658,6 +658,38 @@ class TestReadModelMemoryBound:
 		# The streaming peak must be a small fraction of the materialized peak (flat, not O(N)).
 		assert peak_stream < peak_mat / 10, f'stream peak {peak_stream} not << materialized {peak_mat}'
 
+	def test_report_generation_streams_flat(self, tmp_path, monkeypatch):
+		# The report-RAM arm: Report.build(stream=True) + a csv export over 300k stays O(batch),
+		# not O(N) — the exporter iterates the per-type store cursor, never materializing report.data.
+		import tracemalloc
+		from secator.report import Report
+		from secator.exporters.csv import CsvExporter
+		N = 300_000
+		self._seed(tmp_path, monkeypatch, N)
+		runner = _dummy_runner()
+		runner.context.update({'drivers': ['sqlite'], 'task_id': 'R', 'workspace_id': 'ws', 'workspace_name': 'ws'})
+
+		# Streaming report + export: peak flat.
+		report = Report(runner)
+		report.output_folder = str(tmp_path)
+		tracemalloc.start()
+		report.build(stream=True, dedupe=False)
+		assert len(report.data['results']['url']) == N     # indexed count, nothing materialized
+		CsvExporter(report).send()                          # streams rows to report_url.csv
+		_, peak_stream = tracemalloc.get_traced_memory()
+		tracemalloc.stop()
+		with open(f'{tmp_path}/report_url.csv') as f:
+			assert sum(1 for _ in f) == N + 1               # header + N rows actually written
+
+		# Baseline: the materialized (display) build pulls all N into report.data — peak O(N).
+		report2 = Report(runner)
+		tracemalloc.start()
+		report2.build(stream=False, dedupe=False)
+		_, peak_mat = tracemalloc.get_traced_memory()
+		tracemalloc.stop()
+		assert len(report2.data['results']['url']) == N
+		assert peak_stream < peak_mat / 10, f'report stream peak {peak_stream} not << materialized {peak_mat}'
+
 	def test_findings_view_survives_pickle(self, tmp_path, monkeypatch):
 		# The view is rebuilt from self.context on access — no state stored on the instance — so a
 		# deserialized runner's findings still stream (no __getstate__/__setstate__ involved).

@@ -347,18 +347,24 @@ class StreamView:
 	checks in the integration tests; the RAM-critical paths use ``__iter__``/``__len__`` which
 	stay flat. Upgrade __contains__ to a keyed exists-query if a hot path ever needs it.
 	"""
-	def __init__(self, engine, query, batch_size=1000):
+	def __init__(self, engine, query, batch_size=1000, limit=0):
 		self._engine = engine
 		self._query = query
 		self._batch_size = batch_size
+		self._limit = limit
 
 	def __iter__(self):
+		n = 0
 		for batch in self._engine.iterate(self._query, self._batch_size):
 			for item in load_output_types(batch):
 				yield item
+				n += 1
+				if self._limit and n >= self._limit:
+					return
 
 	def __len__(self):
-		return self._engine.count(self._query)
+		n = self._engine.count(self._query)
+		return min(n, self._limit) if self._limit else n
 
 	def __bool__(self):
 		return self._engine.count(self._query) > 0
