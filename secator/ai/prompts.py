@@ -261,27 +261,6 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None) -> str:
 	return result.replace("$workspace_path", ws)
 
 
-# def format_user_initial(targets: List[str], instructions: str, previous_results: List[Dict] = None) -> str:
-# 	"""Format initial user message as compact JSON.
-
-# 	Args:
-# 		targets: List of target hosts/URLs
-# 		instructions: User instructions for the task
-# 		previous_results: Optional list of result dicts from upstream tasks
-
-# 	Returns:
-# 		Compact JSON string (no whitespace)
-# 	"""
-# 	results_str = json.dumps(previous_results, default=str)
-# 	instructions_str = json.dumps(instructions or "Analyze the previous results first")
-# 	return f"""
-# <previous_results>
-# {instructions_str}
-# {results_str}
-# </previous_results>
-# 	"""
-
-
 def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = 100) -> str:
 	"""Format tool result as compact JSON, truncating results if too many.
 

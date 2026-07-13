@@ -119,6 +119,11 @@ def truncate_to_tokens(
     return content[:truncate_at] + f"\n\n[TRUNCATED]{file_hint}"
 
 
+def _usable_tokens(model: str) -> int:
+    """Model's context window minus the reserved output allowance."""
+    return get_context_window(model) - OUTPUT_TOKEN_RESERVATION
+
+
 SUMMARIZATION_PROMPT = """Summarize the following attack session history into a compact context.
 Keep ONLY the essential information:
 - Key findings (vulnerabilities, open ports, services, credentials)
@@ -233,7 +238,7 @@ class ChatHistory:
         """
         if not self.model:
             return max_tokens_total
-        window_budget = max(get_context_window(self.model) - OUTPUT_TOKEN_RESERVATION, 1)
+        window_budget = max(_usable_tokens(self.model), 1)
         if max_tokens_total > 0:
             return min(max_tokens_total, window_budget)
         return window_budget
@@ -351,7 +356,7 @@ class ChatHistory:
             Available tokens (context - reservation - used)
         """
         context_window = get_context_window(model)
-        usable = context_window - OUTPUT_TOKEN_RESERVATION
+        usable = _usable_tokens(model)
         used = self.count_tokens(model)
         available = usable - used
         debug(
@@ -370,8 +375,7 @@ class ChatHistory:
         Returns:
             True if compaction needed
         """
-        context_window = get_context_window(model)
-        usable = context_window - OUTPUT_TOKEN_RESERVATION
+        usable = _usable_tokens(model)
         used = self.count_tokens(model)
         threshold = usable * threshold_pct / 100
         should = used > threshold
@@ -450,8 +454,7 @@ class ChatHistory:
         _strip_leading_orphan_tools(to_keep)
 
         # Calculate target summary size based on available context
-        context_window = get_context_window(model)
-        usable = context_window - OUTPUT_TOKEN_RESERVATION
+        usable = _usable_tokens(model)
         target_tokens = int(usable * 0.3)  # Target 30% of usable context
         max_words = target_tokens // 2  # Rough tokens-to-words ratio
 
@@ -464,22 +467,16 @@ class ChatHistory:
         # Record billed usage of the summarization call so the owning task can
         # roll it into context.ai_tokens. Missing usage counts as 0.
         usage = result.get("usage") or {}
-        try:
-            self.billed_tokens += int(usage.get("tokens") or 0)
-        except (TypeError, ValueError):
-            pass
-        try:
-            self.billed_prompt_tokens += int(usage.get("prompt_tokens") or 0)
-        except (TypeError, ValueError):
-            pass
-        try:
-            self.billed_completion_tokens += int(usage.get("completion_tokens") or 0)
-        except (TypeError, ValueError):
-            pass
-        try:
-            self.billed_cost += float(usage.get("cost") or 0)
-        except (TypeError, ValueError):
-            pass
+        for attr, key, cast in (
+            ("billed_tokens", "tokens", int),
+            ("billed_prompt_tokens", "prompt_tokens", int),
+            ("billed_completion_tokens", "completion_tokens", int),
+            ("billed_cost", "cost", float),
+        ):
+            try:
+                setattr(self, attr, getattr(self, attr) + cast(usage.get(key) or 0))
+            except (TypeError, ValueError):
+                pass
 
         self.messages = []
         if initial_system:

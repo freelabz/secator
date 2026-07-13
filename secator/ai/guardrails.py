@@ -396,7 +396,7 @@ def _parse_subcommands(command: str) -> List[List[str]]:
 		# Normalize LLM-generated multiline commands: join lines where a pipe/operator
 		# starts the next line (e.g. "cmd1\n| cmd2" -> "cmd1 | cmd2")
 		command = re.sub(r'\s*\n\s*(\||\&\&|\|\|)', r' \1', command)
-		cmds, ops, redirects = extract_commands(command)
+		cmds, _, _ = extract_commands(command)
 		return [c for c in cmds if c]
 	except FileNotFoundError:
 		# safecmd is installed but the `shfmt` binary it shells out to isn't on PATH.
@@ -751,6 +751,11 @@ class PermissionResult:
 	shell_command: str = ""  # full command when prompting for shell approval
 
 
+def _is_default_deny(result: "PermissionResult") -> bool:
+	"""True if `result` is the catch-all "no rule matched" deny, not an explicit deny rule."""
+	return "No rule for" in result.reason
+
+
 # Finding types downstream auto-trusts. tasks/ai.py _auto_approve_workspace_targets()
 # searches _type:"target" findings and auto-approves them as in-scope, so an injected
 # add_finding of one of these silently widens scope.
@@ -780,25 +785,11 @@ class PermissionEngine:
 
 		# Platform-supplied allow-list of target regexes (e.g. validated workspace mandates):
 		# constrains the AI to this scope. Regex full-match, falls back to literal match.
-		self.allowed_targets: List = []
-		for pat in (allowed_targets or []):
-			if not pat:
-				continue
-			try:
-				self.allowed_targets.append(re.compile(pat))
-			except re.error:
-				self.allowed_targets.append(re.compile(re.escape(pat)))
+		self.allowed_targets: List = self._compile_patterns(allowed_targets)
 
 		# Platform-supplied deny-list of target regexes (mandate `deny` scope). Symmetric
 		# to allowed_targets but DENY WINS, mirroring the mandate scope matcher.
-		self.denied_targets: List = []
-		for pat in (denied_targets or []):
-			if not pat:
-				continue
-			try:
-				self.denied_targets.append(re.compile(pat))
-			except re.error:
-				self.denied_targets.append(re.compile(re.escape(pat)))
+		self.denied_targets: List = self._compile_patterns(denied_targets)
 
 		for category in ("allow", "deny", "ask"):
 			for rule_str in config.get(category, []):
@@ -806,19 +797,34 @@ class PermissionEngine:
 				rule_type, patterns = parse_rule(resolved)
 				self.rules[category].append((rule_type, patterns))
 
-	def _matches_allowed_targets(self, value: str) -> bool:
-		"""Check if a target value matches any platform-supplied allowed_targets regex."""
-		for rx in self.allowed_targets:
+	@staticmethod
+	def _compile_patterns(patterns: List[str]) -> List:
+		"""Compile a list of regex patterns, falling back to a literal-escaped match on error."""
+		compiled: List = []
+		for pat in (patterns or []):
+			if not pat:
+				continue
+			try:
+				compiled.append(re.compile(pat))
+			except re.error:
+				compiled.append(re.compile(re.escape(pat)))
+		return compiled
+
+	@staticmethod
+	def _matches_any(patterns: List, value: str) -> bool:
+		"""Check if a value matches any of the given compiled regexes (full or partial match)."""
+		for rx in patterns:
 			if rx.fullmatch(value) or rx.match(value):
 				return True
 		return False
 
+	def _matches_allowed_targets(self, value: str) -> bool:
+		"""Check if a target value matches any platform-supplied allowed_targets regex."""
+		return self._matches_any(self.allowed_targets, value)
+
 	def _matches_denied_targets(self, value: str) -> bool:
 		"""Check if a target value matches any platform-supplied denied_targets regex."""
-		for rx in self.denied_targets:
-			if rx.fullmatch(value) or rx.match(value):
-				return True
-		return False
+		return self._matches_any(self.denied_targets, value)
 
 	def _resolve_variables(self, rule: str) -> str:
 		"""Replace {workspace} and {targets} variables in a rule string."""
@@ -869,7 +875,7 @@ class PermissionEngine:
 					if path_result.decision == "deny":
 						# Explicit deny rule: block immediately
 						# "No rule" default deny: prompt user instead
-						if "No rule for" in path_result.reason:
+						if _is_default_deny(path_result):
 							ask_paths.append((path, access))
 						else:
 							return PermissionResult(
@@ -949,7 +955,7 @@ class PermissionEngine:
 				result = self._check_value("shell", cmd_name)
 				if result.decision == "deny":
 					# Distinguish explicit deny rules from "no matching rule" default
-					if "No rule for" in result.reason:
+					if _is_default_deny(result):
 						unmatched.append(cmd_name)
 					else:
 						return result  # Explicit deny rule hit
@@ -1058,7 +1064,7 @@ class PermissionEngine:
 			result = self._check_value(rule_type, value)
 			if result.decision == "deny":
 				# "No rule for" default deny → ask user instead of blocking
-				if "No rule for" in result.reason:
+				if _is_default_deny(result):
 					ask_targets.append(value)
 				else:
 					return result  # Explicit deny rule: block
@@ -1102,11 +1108,8 @@ class PermissionEngine:
 		Returns:
 			'allow' or 'deny'
 		"""
-		if not interactive:
-			return "deny"
-
 		choices = build_target_choices(target)
-		selected_indices = self._show_target_menu(target, choices, command=command)
+		selected_indices = self._show_target_menu(target, choices, command=command, interactive=interactive)
 
 		if selected_indices is None:
 			return "deny"
@@ -1138,11 +1141,6 @@ class PermissionEngine:
 		Returns:
 			'allow' or 'deny'
 		"""
-		if not interactive:
-			return "deny"
-
-		from secator.rich import InteractiveMenu
-
 		action_label = "Read from" if access_type == "read" else "Write to"
 		parent = '/'.join(path.split('/')[:-1]) if '/' in path else path
 		options = [
@@ -1150,16 +1148,16 @@ class PermissionEngine:
 			{"label": f"Allow {access_type}({parent}/*)"},
 			{"label": "Deny (block this action)"},
 		]
-		result = InteractiveMenu(
+		idx = self._show_menu(
 			f"{action_label} {path} requires approval.",
 			options,
 			description=command,
-		).show()
+			interactive=interactive,
+		)
 
-		if result is None:
+		if idx is None:
 			return "deny"
 
-		idx, _ = result
 		if idx == 2:  # Deny
 			return "deny"
 		elif idx == 0:  # Exact path
@@ -1179,11 +1177,6 @@ class PermissionEngine:
 		Returns:
 			'allow' or 'deny'
 		"""
-		if not interactive:
-			return "deny"
-
-		from secator.rich import InteractiveMenu
-
 		# Extract command names; use the unmatched one(s) from reason for option 2
 		cmd_names = _extract_cmd_names(command)
 		# Parse unmatched commands from reason like "No rule for command(s): ./terrapin-scanner, foo"
@@ -1199,16 +1192,16 @@ class PermissionEngine:
 			{"label": "Deny (block this action)"},
 		]
 		title = reason or "Shell command requires approval"
-		result = InteractiveMenu(
+		idx = self._show_menu(
 			title,
 			options,
 			description=f"[gray42]{command}[/gray42]",
-		).show()
+			interactive=interactive,
+		)
 
-		if result is None:
+		if idx is None:
 			return "deny"
 
-		idx, _ = result
 		if idx == 0:  # Allow ONLY this invocation — no rule added, next call re-prompts
 			return "allow"
 		elif idx == 1:  # Allow all commands with this name
@@ -1216,28 +1209,54 @@ class PermissionEngine:
 			return "allow"
 		return "deny"
 
-	def _show_target_menu(self, target: str, choices: List[Dict], command: str = "") -> List[int]:
+	def _show_target_menu(
+		self, target: str, choices: List[Dict], command: str = "", interactive: bool = True
+	) -> Optional[List[int]]:
 		"""Show interactive menu. Separated for testability.
 
 		Args:
 			target: The target being prompted about
 			choices: List of choice dicts from build_target_choices
 			command: The shell command triggering this prompt (for display)
+			interactive: If False, auto-deny without prompting
 
 		Returns:
 			List of selected indices, or None if cancelled
 		"""
-		from secator.rich import InteractiveMenu
-
 		options = [{"label": choice["label"]} for choice in choices]
-		result = InteractiveMenu(
+		idx = self._show_menu(
 			f"Target {target} is not in allowed targets. Add it?",
 			options,
 			description=command,
-		).show()
+			interactive=interactive,
+		)
 
+		if idx is None:
+			return None
+		return [idx]
+
+	def _show_menu(
+		self, title: str, options: List[Dict], description: str = "", interactive: bool = True
+	) -> Optional[int]:
+		"""Shared interactive-menu scaffold used by prompt_path/prompt_shell/_show_target_menu.
+
+		Args:
+			title: Menu title/prompt text
+			options: List of {"label": ...} option dicts
+			description: Extra context shown below the title (e.g. the shell command)
+			interactive: If False, auto-deny (return None) without prompting
+
+		Returns:
+			The selected index, or None if not interactive or the user cancelled.
+		"""
+		if not interactive:
+			return None
+
+		from secator.rich import InteractiveMenu
+
+		result = InteractiveMenu(title, options, description=description).show()
 		if result is None:
 			return None
 
 		idx, _ = result
-		return [idx]
+		return idx

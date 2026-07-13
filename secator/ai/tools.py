@@ -15,6 +15,13 @@ TOOL_ACTION_MAP = {
 	"stop": "stop",
 }
 
+# Shared "targets" parameter schema (identical across run_task/run_workflow)
+_TARGETS_SCHEMA = {
+	"type": "array",
+	"items": {"type": "string"},
+	"description": "List of targets (hosts, URLs, IPs)."
+}
+
 # OpenAI-format tool schemas keyed by tool name
 TOOL_SCHEMAS = {
 	"run_task": {
@@ -29,11 +36,7 @@ TOOL_SCHEMAS = {
 						"type": "string",
 						"description": "The task name (e.g. nmap, httpx, nuclei, ffuf)."
 					},
-					"targets": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "List of targets (hosts, URLs, IPs)."
-					},
+					"targets": _TARGETS_SCHEMA,
 					"opts": {
 						"type": "object",
 						"description": "Optional task-specific options (e.g. ports, rate_limit). Control/security flags are ignored."
@@ -55,11 +58,7 @@ TOOL_SCHEMAS = {
 						"type": "string",
 						"description": "The workflow name."
 					},
-					"targets": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "List of targets (hosts, URLs, IPs)."
-					},
+					"targets": _TARGETS_SCHEMA,
 					"opts": {
 						"type": "object",
 						"description": "Optional workflow options (e.g. profiles). Control/security flags are ignored."

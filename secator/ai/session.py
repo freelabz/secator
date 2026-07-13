@@ -53,21 +53,26 @@ def list_sessions(max_sessions=20):
 			ai_items = data.get('results', {}).get('ai', [])
 			if not ai_items:
 				continue
-			# Find first user prompt content and session name
+			# Find first user prompt content + session name, and the first non-empty
+			# `_context.session_id` across ALL ai docs (every persisted item stamps it,
+			# letting a resumed run adopt this session's id) -- single pass, stopping
+			# once both have been found.
 			first_prompt = ''
 			session_name = ''
+			session_id = ''
+			found_prompt = False
+			found_session_id = False
 			for item in ai_items:
-				if item.get('ai_type') == 'prompt':
+				if not found_prompt and item.get('ai_type') == 'prompt':
 					first_prompt = item.get('content', '')
 					session_name = (item.get('_context') or {}).get('session_name', '') or (item.get('_context') or {}).get('name', '')
-					break
-			# session_id: first non-empty `_context.session_id` across ALL ai docs (every
-			# persisted item stamps it) -- lets a resumed run adopt this session's id.
-			session_id = ''
-			for item in ai_items:
-				sid = (item.get('_context') or {}).get('session_id', '')
-				if sid:
-					session_id = sid
+					found_prompt = True
+				if not found_session_id:
+					sid = (item.get('_context') or {}).get('session_id', '')
+					if sid:
+						session_id = sid
+						found_session_id = True
+				if found_prompt and found_session_id:
 					break
 			info = data.get('info', {})
 			sessions.append({
