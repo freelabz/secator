@@ -1369,7 +1369,8 @@ class Runner:
 	def _validate_inputs(self, inputs):
 		"""Input type is not supported by runner"""
 		# supported_types = ', '.join(self.config.input_types) if self.config.input_types else 'any'
-		for _input in inputs:
+		# iterate over a copy: we mutate self.inputs (same list) via .remove() below
+		for _input in list(inputs):
 			input_type = autodetect_type(_input)
 			if self.config.input_types and input_type not in self.config.input_types:
 				runner_name = format_runner_name(self)
