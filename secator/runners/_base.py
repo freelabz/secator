@@ -379,8 +379,17 @@ class Runner:
 		names = None if _type is None else (_type if isinstance(_type, list) else [_type])
 		from secator.query import QueryEngine
 		from secator.runners._helpers import StreamView
-		engine = QueryEngine(self.context.get('workspace_id'),
-							 context={**self.context, 'workspace_name': self.workspace_name})
+		context = {**self.context, 'workspace_name': self.workspace_name}
+		# Local-json hot path: a runner's OWN report.json already holds its complete result set —
+		# fan-in re-persists every descendant finding up into each ancestor's report.json, re-tagged
+		# with that ancestor's {type}_id (a workflow report carries all its tasks' findings under its
+		# workflow_id; a scan report all of theirs under scan_id). So scope the read to this runner's
+		# own file instead of re-scanning (and re-parsing) every historical report in the workspace on
+		# every property access — the whole-workspace scan flooded the gevent hub with blocking disk
+		# I/O (unyielded), which serialized concurrent chunks and made runs ~100x slower. `report show`
+		# / cross-run aggregation keeps the full scan (no report_dir hint).
+		context['report_dir'] = str(self.reports_folder)
+		engine = QueryEngine(self.context.get('workspace_id'), context=context)
 		query = {f'_context.{self.config.type}_id': self.context.get(f'{self.config.type}_id')}
 		if names is not None:
 			query['_type'] = {'$in': names} if isinstance(_type, list) else _type

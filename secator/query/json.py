@@ -174,51 +174,63 @@ class JsonBackend(QueryBackend):
 		self._findings_cache = findings
 		return findings
 
+	def _read_report_dir(self, report_dir: Path, runner_type_singular: str, findings: list):
+		"""Append the findings in ONE report.json (report_dir/report.json) to `findings`."""
+		report_file = report_dir / 'report.json'
+		if not report_file.exists():
+			return
+		try:
+			with open(report_file, 'r') as f:
+				data = json.load(f)
+		except (json.JSONDecodeError, IOError) as e:
+			debug(f'Error loading {report_file}: {e}', sub='query.json')
+			return
+		runner_id = report_dir.name
+		for items in data.get('results', {}).values():
+			if isinstance(items, list):
+				for item in items:
+					# Inject the {type}_id from the directory path when the finding lacks it.
+					if f'{runner_type_singular}_id' not in item.get('_context', {}):
+						item.setdefault('_context', {})[f'{runner_type_singular}_id'] = runner_id
+				findings.extend(items)
+
 	def _load_from_files(self) -> List[Dict[str, Any]]:
-		"""Load all findings by scanning the workspace's report.json files."""
+		"""Load findings from report.json files.
+
+		A run-scoped read (``context['report_dir']``) reads ONLY that one runner's report.json — the
+		hot path during a run. Fan-in re-persists every descendant finding up into each ancestor's
+		report.json (re-tagged with the ancestor's {type}_id), so a runner's own file already holds its
+		complete result set: no need to scan (and re-parse) every historical report in the workspace on
+		every query. Without the hint we fall back to the full workspace scan (report show, cross-run
+		aggregation).
+		"""
 		findings = []
+		report_dir = self.context.get('report_dir')
+		if report_dir:
+			report_dir = Path(report_dir)
+			# tasks/<n> -> singular 'task' (parent dir name minus trailing 's'); default 'task'.
+			singular = report_dir.parent.name.rstrip('s') or 'task'
+			self._read_report_dir(report_dir, singular, findings)
+			debug(f'Loaded {len(findings)} findings from run-scoped {report_dir}', sub='query.json')
+			return findings
+
 		workspace_path = self._get_workspace_path()
 		debug(f'Looking for reports in: {workspace_path}', sub='query.json')
 		debug(f'Workspace ID/name: {self.workspace_id}', sub='query.json')
-
 		if not workspace_path.exists():
 			debug(f'Workspace path does not exist: {workspace_path}', sub='query.json')
-			# Show what workspaces are available
 			if self.reports_dir.exists():
 				available = [d.name for d in self.reports_dir.iterdir() if d.is_dir()]
 				debug(f'Available workspaces in {self.reports_dir}: {available}', sub='query.json')
 			return findings
 
-		# Search for report.json files in tasks/, workflows/, scans/
 		for runner_type in ['tasks', 'workflows', 'scans']:
 			runner_path = workspace_path / runner_type
 			if not runner_path.exists():
 				continue
-
 			for report_dir in runner_path.iterdir():
-				if not report_dir.is_dir():
-					continue
-
-				report_file = report_dir / 'report.json'
-				if report_file.exists():
-					try:
-						with open(report_file, 'r') as f:
-							data = json.load(f)
-
-						results = data.get('results', {})
-						runner_type_singular = runner_type.rstrip('s')  # "tasks" -> "task", "scans" -> "scan"
-						runner_id = report_dir.name
-
-						for type_name, items in results.items():
-							if isinstance(items, list):
-								for item in items:
-									# Inject runner context from directory path if not already present
-									if f'{runner_type_singular}_id' not in item['_context']:
-										item['_context'][f'{runner_type_singular}_id'] = runner_id
-								findings.extend(items)
-					except (json.JSONDecodeError, IOError) as e:
-						debug(f'Error loading {report_file}: {e}', sub='query.json')
-						continue
+				if report_dir.is_dir():
+					self._read_report_dir(report_dir, runner_type.rstrip('s'), findings)
 
 		debug(f'Loaded {len(findings)} findings from workspace', sub='query.json')
 		return findings
