@@ -952,74 +952,6 @@ class Runner:
 			kwargs['id'] = self.id
 		debug(*args, **kwargs)
 
-	def mark_duplicates(self):
-		"""Tag duplicate findings.
-
-		Prefer STORE-SIDE dedup: the driver's find_duplicates -> tag_duplicates groups and tags
-		server-side (sqlite/mongodb) without materializing the run, so we never pull the fan-in
-		into memory. Workspace-wide, so run it once at the top runner. json has no store-side dedup
-		(pre-existing local limitation), so it groups this runner's own in-memory buffer instead.
-		"""
-		if not self.enable_duplicate_check:
-			return
-		find_dup = self._store_find_duplicates_fn()
-		if find_dup is not None:
-			if not self.has_parent:
-				find_dup(self)
-			return
-		self._mark_duplicates_in_memory()
-
-	def _store_find_duplicates_fn(self):
-		"""The active store driver's find_duplicates (store-side dedup), or None (e.g. json)."""
-		drivers = self.context.get('drivers', [])
-		if not drivers:
-			return None
-		import importlib
-		from secator.loader import order_drivers, discover_external_drivers
-		discover_external_drivers()
-		for driver in order_drivers(drivers):
-			try:
-				mod = importlib.import_module(f'secator.hooks.{driver}')
-			except Exception:  # noqa: BLE001
-				continue
-			fn = getattr(mod, 'find_duplicates', None)  # json has none — pre-existing local limit
-			if fn:
-				return fn
-		return None
-
-	def _mark_duplicates_in_memory(self):
-		"""Hash-group this runner's own in-memory buffer (O(n) over bounded own emissions)."""
-		start_time = time()
-		self.debug('running duplicate check', sub='end')
-
-		# Group items by their compare key (O(n))
-		from collections import defaultdict
-
-		groups = defaultdict(list)
-		for item in self._results:
-			groups[item._compare_key()].append(item)
-
-		# Process only groups with duplicates
-		for key, items in groups.items():
-			if len(items) < 2:
-				continue
-			# Pick the main item (newest by timestamp)
-			main = max(items)
-			for dupe in items:
-				if dupe._uuid == main._uuid:
-					continue
-				self.debug('found duplicate', obj=dupe.toDict(), obj_breaklines=True, sub='item.duplicate', verbose=True)
-				dupe._duplicate = True
-				dupe = self.run_hooks('on_item', dupe, sub='item.duplicate')
-				dupe = self.run_hooks('on_duplicate', dupe, sub='item.duplicate')
-				if dupe._uuid not in main._related:
-					main._related.append(dupe._uuid)
-			main._duplicate = False
-			main = self.run_hooks('on_duplicate', main, sub='item.duplicate')
-
-		total_time = time() - start_time
-		self.debug(f'duplicate check completed in {total_time:.2f} seconds', sub='end')
-
 	def yielder(self):
 		"""Base yielder implementation.
 
@@ -1276,7 +1208,6 @@ class Runner:
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time(), timezone.utc)
 		self.debug(f'completed (status: {self.status}, sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})', sub='end')  # noqa: E501
-		self.mark_duplicates()
 		self.run_hooks('on_end', sub='end')
 		self.export_profiler()
 		self.log_results()
