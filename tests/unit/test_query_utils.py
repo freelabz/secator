@@ -115,8 +115,9 @@ class TestPythonExprToMongo:
         }
 
     def test_regex_match_operator(self):
+        # ~= is case-insensitive by default (inline (?i)).
         result = python_expr_to_mongo("technology.product ~= 'xrdp'")
-        assert result == {'_type': 'technology', 'product': {'$regex': 'xrdp'}}
+        assert result == {'_type': 'technology', 'product': {'$regex': '(?i)xrdp'}}
 
     def test_passthrough_mongo_dict(self):
         query = {'_type': 'vulnerability', 'severity_score': {'$gte': 7}}
@@ -301,8 +302,9 @@ class TestExpandRunnerPaths:
         }
 
     def test_in_operator_floats(self):
+        # `item` is a neutral placeholder -> bare field, no _type.
         result = python_expr_to_mongo("item.score in [1.5, 2.5, 3.0]")
-        assert result == {'_type': 'item', 'score': {'$in': [1.5, 2.5, 3.0]}}
+        assert result == {'score': {'$in': [1.5, 2.5, 3.0]}}
 
 
 class TestValidateQueryFields:

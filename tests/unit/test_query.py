@@ -283,7 +283,7 @@ class TestQueryUtils(unittest.TestCase):
 		from secator.query.utils import python_expr_to_mongo
 
 		result = python_expr_to_mongo('vulnerability.id ~= 123')
-		self.assertEqual(result, {'_type': 'vulnerability', 'id': {'$regex': '123'}})
+		self.assertEqual(result, {'_type': 'vulnerability', 'id': {'$regex': '(?i)123'}})
 		self.assertIsInstance(result['id']['$regex'], str)
 
 	def test_regex_value_with_glob_start(self):
@@ -291,7 +291,7 @@ class TestQueryUtils(unittest.TestCase):
 		from secator.query.utils import python_expr_to_mongo
 
 		result = python_expr_to_mongo("vulnerability.id ~= '*CVE-2026-28780'")
-		self.assertEqual(result['id'], {'$regex': '*CVE-2026-28780'})
+		self.assertEqual(result['id'], {'$regex': '(?i)*CVE-2026-28780'})
 
 	def test_numeric_comparison_still_converts(self):
 		"""Non-regex operators should still coerce numeric RHS values."""
