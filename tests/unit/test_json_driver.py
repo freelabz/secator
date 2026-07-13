@@ -38,6 +38,74 @@ def _gevent_child(path, n_greenlets, count):
 	gevent.joinall(greenlets, raise_error=True)
 
 
+def _parallelism_probe(base_dir, result_path, n, dt):
+	"""Isolated gevent process: measure that two chatty --driver-json tasks run in PARALLEL.
+
+	Emulates the gevent Celery worker. Two 'tasks' each emit `n` findings through the
+	REAL json driver, with a gevent.sleep(dt) between findings (a monkey-patched,
+	yielding stand-in for tool output arriving over a socket).
+
+	- parallel_wall: two BATCHED tasks concurrently -> should be ~= n*dt (their sleeps
+	  overlap: max(t1,t2)), NOT ~= 2*n*dt (the sum, i.e. serial).
+	- serial_burst vs batched_burst: same work WITHOUT the sleeps, so the only
+	  difference is I/O. The serial (pre-fix) path does a blocking atomic_json write +
+	  fsync per finding — under gevent that can't yield, so it stalls the hub; the
+	  batched path buffers and writes once. batched_burst must be << serial_burst.
+	"""
+	import gevent.monkey
+	gevent.monkey.patch_all()
+	import gevent
+	import json as _json
+	from time import time as _now
+	from secator.hooks import json as drv
+	from secator.output_types import Url
+	from secator.utils import atomic_json
+
+	def _runner(folder):
+		import os
+		os.makedirs(folder, exist_ok=True)
+		r = type('R', (), {})()
+		r.reports_folder = folder
+		r.last_updated_db = None
+		r.toDict = lambda: {'status': 'RUNNING', 'name': 'ffuf'}
+		return r
+
+	def _url(i):
+		return Url(url=f'http://x/{i}', _context={'workspace_id': 'ws', 'workspace_duplicate': False})
+
+	def batched_task(folder, sleep):
+		runner = _runner(folder)
+		for i in range(n):
+			drv.update_finding(runner, _url(i))      # buffer only (O(1), no syscall)
+			if sleep:
+				gevent.sleep(dt)
+		drv.flush_report(runner)                     # single write at the end
+
+	def serial_task(folder, sleep):
+		# Pre-fix behavior: one blocking atomic_json write + fsync PER finding.
+		path = f'{folder}/report.json'
+		for i in range(n):
+			with atomic_json(path, default=drv._empty_report) as data:
+				data['results'].setdefault('url', []).append({'_uuid': f'{i}'})
+			if sleep:
+				gevent.sleep(dt)
+
+	def wall(fn, sleep):
+		t0 = _now()
+		gs = [gevent.spawn(fn, f'{base_dir}/{fn.__name__}-{w}-{sleep}', sleep) for w in range(2)]
+		gevent.joinall(gs, raise_error=True)
+		return _now() - t0
+
+	parallel_wall = wall(batched_task, True)      # with inter-finding yields -> proves parallel
+	serial_burst = wall(serial_task, False)       # no yields -> pure I/O cost, pre-fix
+	batched_burst = wall(batched_task, False)     # no yields -> pure I/O cost, batched
+
+	Path(result_path).write_text(_json.dumps({
+		'parallel_wall': parallel_wall, 'ideal': n * dt,
+		'serial_burst': serial_burst, 'batched_burst': batched_burst,
+	}))
+
+
 class JsonDriverTestBase(unittest.TestCase):
 	def setUp(self):
 		self.temp_dir = tempfile.mkdtemp()
@@ -74,11 +142,24 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		self.assertEqual(item._uuid, '')
 		returned = mod.update_finding(runner, item)
 		self.assertTrue(returned._uuid)  # uuid assigned
+		mod.flush_report(runner)  # findings are batched — persist before asserting
 
 		data = json.loads((Path(self.temp_dir) / 'report.json').read_text())
 		self.assertEqual(len(data['results']['url']), 1)
 		self.assertEqual(data['results']['url'][0]['url'], 'http://x/a')
 		self.assertEqual(data['results']['url'][0]['_uuid'], returned._uuid)
+
+	def test_on_item_buffers_no_write_until_flush(self):
+		"""on_item must NOT touch disk (that per-finding fsync is what stalled the gevent hub)."""
+		from secator.hooks import json as mod
+		runner = self._runner()
+		report = Path(self.temp_dir) / 'report.json'
+		for i in range(10):
+			mod.update_finding(runner, self._url(f'http://x/{i}'))
+		self.assertFalse(report.exists())  # zero file writes across 10 findings
+		mod.flush_report(runner)            # single write persists them all
+		data = json.loads(report.read_text())
+		self.assertEqual(len(data['results']['url']), 10)
 
 	def test_update_finding_upserts_by_uuid(self):
 		from secator.hooks import json as mod
@@ -87,7 +168,22 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		mod.update_finding(runner, item)          # insert
 		item.status_code = 200
 		mod.update_finding(runner, item)          # update same uuid, must not duplicate
+		mod.flush_report(runner)
 
+		data = json.loads((Path(self.temp_dir) / 'report.json').read_text())
+		self.assertEqual(len(data['results']['url']), 1)
+		self.assertEqual(data['results']['url'][0]['status_code'], 200)
+
+	def test_upsert_across_flush_boundary(self):
+		"""A finding updated in a LATER flush window upserts the earlier persisted copy."""
+		from secator.hooks import json as mod
+		runner = self._runner()
+		item = self._url('http://x/a')
+		mod.update_finding(runner, item)
+		mod.flush_report(runner)                  # persisted (window 1)
+		item.status_code = 200
+		mod.update_finding(runner, item)
+		mod.flush_report(runner)                  # window 2 must upsert, not duplicate
 		data = json.loads((Path(self.temp_dir) / 'report.json').read_text())
 		self.assertEqual(len(data['results']['url']), 1)
 		self.assertEqual(data['results']['url'][0]['status_code'], 200)
@@ -96,7 +192,9 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		from secator.hooks import json as mod
 		runner = self._runner()
 		self.assertEqual(mod.update_finding(runner, {'not': 'an output type'}), {'not': 'an output type'})
-		self.assertFalse((Path(self.temp_dir) / 'report.json').exists())
+		mod.flush_report(runner)
+		data = json.loads((Path(self.temp_dir) / 'report.json').read_text())
+		self.assertEqual(data['results'], {})  # nothing buffered/written for a non-output-type
 
 	def test_update_runner_writes_info(self):
 		from secator.hooks import json as mod
@@ -106,10 +204,10 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		self.assertEqual(data['info']['status'], 'RUNNING')
 		self.assertEqual(data['info']['name'], 'httpx')
 
-		# Runner info update must preserve already-written findings (findings + info share the file).
+		# flush_report writes info + buffered findings together (findings + info share the file).
 		mod.update_finding(runner, self._url('http://x/a'))
 		runner.status = 'SUCCESS'
-		mod.update_runner(runner)
+		mod.flush_report(runner)
 		data = json.loads((Path(self.temp_dir) / 'report.json').read_text())
 		self.assertEqual(data['info']['status'], 'SUCCESS')
 		self.assertEqual(len(data['results']['url']), 1)
@@ -132,6 +230,7 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		runner = self._runner(folder=str(folder))
 		mod.update_finding(runner, self._url('http://x/a'))
 		mod.update_finding(runner, self._url('http://x/b'))
+		mod.flush_report(runner)
 
 		backend = JsonBackend(workspace_id='ws1', config={'reports_dir': self.temp_dir})
 		results = backend.search({'_type': 'url'})
@@ -147,6 +246,7 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		folder = Path(self.temp_dir) / 'ws1' / 'tasks' / 'abc123'
 		runner = self._runner(folder=str(folder))
 		mod.update_finding(runner, self._url('http://live/a'))
+		mod.flush_report(runner)  # findings are batched — persist before querying the store
 
 		# A stale/topology-only payload handed in as `results` must NOT shadow the files.
 		stale = [{'_type': 'url', 'url': 'http://stale/z', '_context': {'workspace_id': 'ws1'}}]
@@ -176,6 +276,7 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 			item = self._url(url)
 			item._context['scan_id'] = scan_id     # stamped by add_result in the real flow
 			mod.update_finding(runner, item)
+			mod.flush_report(runner)               # findings are batched — persist before querying
 
 		# Unbounded query sees BOTH runs (the leak the fix prevents).
 		unbounded = JsonBackend(workspace_id='ws1', config={'reports_dir': self.temp_dir})
@@ -247,6 +348,43 @@ class TestJsonDriverConcurrency(JsonDriverTestBase):
 		self._join(procs + [gproc])
 		# N_WORKERS process-appends + N_WORKERS greenlet-appends, each PER_WORKER items.
 		self._assert_no_loss(path, 2 * self.N_WORKERS * self.PER_WORKER)
+
+
+class TestJsonDriverParallelism(JsonDriverTestBase):
+	"""Acceptance gate: two chatty --driver-json tasks must run in PARALLEL on a gevent worker."""
+
+	N = 150
+	DT = 0.004  # 4ms between findings; ideal single-task wall = N*DT = 600ms
+
+	def _join(self, procs, timeout=120):
+		for p in procs:
+			p.join(timeout)
+			if p.is_alive():
+				p.terminate()
+				p.join(5)
+			self.assertEqual(p.exitcode, 0, f'probe did not exit cleanly (exitcode={p.exitcode})')
+
+	def test_two_chatty_tasks_run_in_parallel(self):
+		pytest.importorskip('gevent')
+		result = str(Path(self.temp_dir) / 'result.json')
+		ctx = mp.get_context('spawn')  # isolate monkey-patch, like the other gevent tests
+		p = ctx.Process(target=_parallelism_probe, args=(self.temp_dir, result, self.N, self.DT))
+		p.start()
+		self._join([p])
+		m = json.loads(Path(result).read_text())
+
+		# 1) PARALLEL: two concurrent batched tasks finish in ~= one task's time (max), not the
+		#    sum. Serial would be ~= 2*ideal; allow generous scheduling slack.
+		self.assertLess(
+			m['parallel_wall'], 1.6 * m['ideal'],
+			f"two tasks did not overlap: wall={m['parallel_wall']:.3f}s ideal(max)={m['ideal']:.3f}s "
+			f"serial-would-be~={2 * m['ideal']:.3f}s")
+
+		# 2) The fix's cause: per-finding blocking fsync (pre-fix) stalls the gevent hub; batching
+		#    writes once. Burst (no yields) isolates pure I/O cost — batched must be far cheaper.
+		self.assertLess(
+			m['batched_burst'], 0.5 * m['serial_burst'],
+			f"batched I/O not cheaper: batched={m['batched_burst']:.3f}s serial={m['serial_burst']:.3f}s")
 
 
 if __name__ == '__main__':

@@ -416,7 +416,10 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		for name in scoped_inputs:
 			t = TargetOutput(name=name)
 			t._context['scope'] = scope
-			runner.add_result(t, print=False)  # persisted to the store via the runner's on_item hook
+			# Persisted synchronously to the store via on_item: Target is an EXECUTION type, which the
+			# json driver writes through immediately (NOT batched) — so a downstream task's extractor can
+			# QUERY these scope Targets right away. See secator/hooks/json.py for the finding/execution split.
+			runner.add_result(t, print=False)
 		debug(
 			f'Runner {runner.unique_name}: emitted {len(scoped_inputs)} scope-tagged targets (scope={scope})',
 			sub='celery'
