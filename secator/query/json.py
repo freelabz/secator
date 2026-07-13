@@ -52,7 +52,12 @@ def resolve_local_report_paths(report_query, workspace_name):
 def _regex_match(field, pattern):
 	if field is None:
 		return False
-	pattern = str(pattern).lstrip('*')
+	pattern = str(pattern)
+	# Strip the leading-glob convention, honoring an inline (?i) case-insensitivity flag.
+	if pattern.startswith('(?i)'):
+		pattern = '(?i)' + pattern[4:].lstrip('*')
+	else:
+		pattern = pattern.lstrip('*')
 	try:
 		return re.search(pattern, str(field)) is not None
 	except re.error:

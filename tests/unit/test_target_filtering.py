@@ -113,7 +113,7 @@ def make_workflow2_config():
         'tasks': {
             'w2_1': {
                 'targets_': [
-                    {'type': 'target', 'field': 'name', 'condition': "'445' in target.name"}
+                    {'type': 'target', 'field': 'name', 'condition': 'target.name ~= 445'}
                 ]
             },
             'w2_2': {},
@@ -193,7 +193,7 @@ class TestProcessExtractorScopeFiltering(unittest.TestCase):
         t_80 = self._make_scope_target('example.com:80', 'workflow2')
         results = [t_445, t_80]
 
-        extractor = {'type': 'target', 'field': 'name', 'condition': "'445' in target.name"}
+        extractor = {'type': 'target', 'field': 'name', 'condition': 'target.name ~= 445'}
         ctx = {'key': 'targets', 'parent_scope': 'workflow2', 'ancestor_id': 'workflow2', 'node_chain_start': False}
         extracted = process_extractor(results, extractor, ctx=ctx)
 

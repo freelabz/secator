@@ -143,7 +143,7 @@ class TestBuildExtractorQuery:
 	def test_or_condition(self):
 		q = build_extractor_query(
 			{'type': 'port', 'field': 'host',
-			 'condition': "port.port == 22 or 'ssh' in port.service_name.lower()"}, _ctx())
+			 'condition': 'port.port == 22 or port.service_name ~= ssh'}, _ctx())
 		assert q['_type'] == 'port'
 		assert q['$or'] == [
 			{'_type': 'port', 'port': 22},
@@ -199,9 +199,9 @@ class TestLocalBackendExtraction:
 		opts = {'targets_': [{'type': 'url', 'field': 'url', 'condition': 'not url.verified'}]}
 		inputs, _, errors = run_extractors(results, opts, [], ctx=_local_ctx(results))
 		assert set(inputs) == {'http://b'} and not errors
-		# 'ssh' in service_name.lower() -> matches OpenSSH case-insensitively
+		# case-insensitive regex (default) -> matches OpenSSH
 		opts2 = {'targets_': [{'type': 'port', 'field': 'host',
-							   'condition': "port.port == 22 or 'ssh' in port.service_name.lower()"}]}
+							   'condition': 'port.port == 22 or port.service_name ~= ssh'}]}
 		inputs2, _, errors2 = run_extractors(results, opts2, [], ctx=_local_ctx(results))
 		assert set(inputs2) == {'a'} and not errors2
 
@@ -272,8 +272,9 @@ def _golden_findings():
 	]
 
 
-# Every distinct condition shape in secator/configs/** (plus the '445' substring form and the
-# `name in [...]` form). field is irrelevant to filtering but kept realistic.
+# Every distinct condition shape in secator/configs/**. `condition` is the current (unified)
+# form fed to build_extractor_query; `old` (when present) is the pre-refactor form evaluated by
+# the reference to prove the YAML rewrites preserve extraction semantics.
 GOLDEN_MATRIX = [
 	{'type': 'url', 'field': 'url', 'condition': 'url.verified'},                       # truthy bool
 	{'type': 'url', 'field': 'url', 'condition': 'url.is_root'},                         # truthy bool
@@ -289,13 +290,16 @@ GOLDEN_MATRIX = [
 	{'type': 'url', 'field': 'url', 'condition': "item.stored_response_path != ''"},     # inequality str
 	{'type': 'url', 'field': 'url', 'condition': 'item.status_code != 0'},               # inequality int
 	{'type': 'tag', 'field': 'name', 'condition': "item.name in ['sqli']"},              # in [...]
-	{'type': 'url', 'field': 'url', 'condition': "item._source.startswith('httpx')"},    # startswith
+	# regex forms (unified ~=, case-insensitive by default) that replaced startswith/.lower()/in:
+	{'type': 'url', 'field': 'url', 'condition': 'item._source ~= ^httpx',
+	 'old': "item._source.startswith('httpx')"},
 	{'type': 'url', 'field': 'url',
-	 'condition': "item._source.startswith('urlparser') or item._source.startswith('arjun') "
-				  "or item._source.startswith('x8')"},                                    # OR of startswith
-	{'type': 'port', 'field': 'host',
-	 'condition': "port.port == 22 or 'ssh' in port.service_name.lower()"},              # OR + .lower() in
-	{'type': 'target', 'field': 'name', 'condition': "'445' in target.name"},            # substring in field
+	 'condition': 'item._source ~= ^urlparser or item._source ~= ^arjun or item._source ~= ^x8',
+	 'old': "item._source.startswith('urlparser') or item._source.startswith('arjun') "
+			"or item._source.startswith('x8')"},
+	{'type': 'port', 'field': 'host', 'condition': 'port.port == 22 or port.service_name ~= ssh',
+	 'old': "port.port == 22 or 'ssh' in port.service_name.lower()"},
+	{'type': 'target', 'field': 'name', 'condition': 'target.name ~= 445', 'old': "'445' in target.name"},
 	{'type': 'target', 'field': 'name', 'condition': 'opts.scanners'},                   # opts gate
 	{'type': 'target', 'field': 'name', 'condition': 'not opts.probe'},                  # negated opts gate
 	{'type': 'port', 'field': 'port', 'condition': 'port.host in targets and opts.scanners'},   # targets + gate
@@ -315,9 +319,10 @@ class TestDifferentialGolden:
 		findings = _golden_findings()
 		for extractor in GOLDEN_MATRIX:
 			_type, _field, cond, _group_by = parse_extractor(extractor)
+			old_cond = extractor.get('old', cond)
 			for opts, targets in GOLDEN_CTX_VARIANTS:
 				ctx = _ctx(opts=opts, targets=list(targets))
-				old = {id(i) for i in findings if _old_eval_pass(i, _type, cond, opts, list(targets))}
+				old = {id(i) for i in findings if _old_eval_pass(i, _type, old_cond, opts, list(targets))}
 				query = build_extractor_query(extractor, ctx)
 				new = set()
 				if query is not None:
@@ -376,21 +381,23 @@ class TestRunnerErrorStatus:
 		r.add_result(Error(message='boom'), print=False)
 		assert r.status == 'FAILURE'
 
-	def _lower_query(self):
-		return build_extractor_query(
-			{'type': 'port', 'field': 'host', 'condition': "'ssh' in port.service_name.lower()"}, _ctx())
 
-	def test_lower_case_insensitivity_uses_inline_flag(self):
+class TestBackendParity:
+	def _regex_query(self):
+		# ~= is case-insensitive by default now (replaces the old 'ssh' in service_name.lower()).
+		return build_extractor_query(
+			{'type': 'port', 'field': 'host', 'condition': 'port.service_name ~= ssh'}, _ctx())
+
+	def test_regex_case_insensitivity_uses_inline_flag(self):
 		# The JSON backend's _regex_match ignores $options, so case-insensitivity MUST ride on an
-		# inline (?i) flag in the pattern (honored by both re.search and Mongo $regex). Guards the
-		# risk the spec flagged: a query that is case-insensitive on Mongo but sensitive on JSON.
-		q = self._lower_query()
+		# inline (?i) flag in the pattern (honored by both re.search and Mongo $regex).
+		q = self._regex_query()
 		assert q['service_name'] == {'$regex': '(?i)ssh'}
 		assert '$options' not in q['service_name']
 
-	def test_json_backend_lower_is_case_insensitive(self):
+	def test_json_backend_regex_is_case_insensitive(self):
 		from secator.query.json import match_query
-		q = self._lower_query()
+		q = self._regex_query()
 		assert match_query({'_type': 'port', 'service_name': 'OpenSSH'}, q)      # upper matches
 		assert match_query({'_type': 'port', 'service_name': 'ssh'}, q)          # lower matches
 		assert not match_query({'_type': 'port', 'service_name': 'http'}, q)
@@ -407,7 +414,7 @@ class TestRunnerErrorStatus:
 			{'_type': 'port', 'service_name': 'http', 'host': 'b',
 			 '_context': {'workspace_id': 'ws'}, 'is_false_positive': False},
 		]
-		query = self._lower_query()
+		query = self._regex_query()
 		json_backend = JsonBackend('ws', results=[dict(f) for f in findings])
 		json_hosts = sorted(r['host'] for r in json_backend.search(query))
 

@@ -69,7 +69,7 @@ tasks:
     targets_:
     - type: port
       field: host
-      condition: "port.port == 22 or 'ssh' in port.service_name.lower()"
+      condition: "port.port == 22 or port.service_name ~= ssh"
     if: not opts.passive
 
   httpx:
