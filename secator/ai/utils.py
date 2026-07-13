@@ -5,7 +5,7 @@ import logging
 import os
 import random
 from dataclasses import fields
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from secator.definitions import LLM_SPINNER_MESSAGES
 from secator.config import CONFIG
@@ -362,6 +362,17 @@ def _decrypt_dict(d: Dict, encryptor: Any) -> Dict:
 	return result
 
 
+def _tool_call_fields(tc) -> Tuple[str, str]:
+	"""Extract (name, arguments) from a tool_call, handling both the dict shape
+	(litellm/OpenAI JSON) and the SDK object shape (attribute access)."""
+	fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
+	if isinstance(fn, dict):
+		return fn.get("name", ""), fn.get("arguments", "")
+	if fn is not None:
+		return getattr(fn, "name", ""), getattr(fn, "arguments", "")
+	return "", ""
+
+
 def _strip_leading_orphan_tools(messages: List[Dict]) -> int:
 	"""Drop leading 'tool' (tool_result) messages with no preceding tool_use.
 
@@ -467,11 +478,7 @@ def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
 			tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
 			if not tc_id or tc_id in satisfied:
 				continue
-			fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
-			if isinstance(fn, dict):
-				name = fn.get("name", "")
-			else:
-				name = getattr(fn, "name", "") if fn else ""
+			name, _ = _tool_call_fields(tc)
 			to_insert.append({
 				"role": "tool",
 				"tool_call_id": tc_id,
@@ -625,13 +632,7 @@ def _estimate_usage(model: str, messages: List[Dict], content: str, tool_calls) 
 	prompt_tokens = _count(messages=messages)
 	completion_text = content or ""
 	for tc in tool_calls or []:
-		fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
-		if isinstance(fn, dict):
-			name, args = fn.get("name", ""), fn.get("arguments", "")
-		elif fn is not None:
-			name, args = getattr(fn, "name", ""), getattr(fn, "arguments", "")
-		else:
-			name, args = "", ""
+		name, args = _tool_call_fields(tc)
 		completion_text += f" {name} {args}"
 	completion_tokens = _count(text=completion_text)
 	return {
@@ -806,6 +807,12 @@ def setup_ai():
 		prefix = f"[dim]{idx:>4}[/] " if idx is not None else "  "
 		return prefix + colored
 
+	def _show_models(displayed, suffix, leading_newline=False):
+		prefix = "\n" if leading_newline else ""
+		console.print(f"{prefix}[bold]  Found {len(displayed)} models{suffix}:[/]")
+		for i, m in enumerate(displayed, 1):
+			console.print(_format_model(m, idx=i), highlight=False)
+
 	# Show current config
 	current_model = CONFIG.addons.ai.default_model
 	current_intent = CONFIG.addons.ai.intent_model
@@ -821,9 +828,7 @@ def setup_ai():
 	# Display all models numbered
 	displayed = all_models
 	suffix = ''
-	console.print(f"[bold]  Found {len(displayed)} models{suffix}:[/]")
-	for i, m in enumerate(displayed, 1):
-		console.print(_format_model(m, idx=i), highlight=False)
+	_show_models(displayed, suffix)
 
 	# Enter prompt loop
 	while True:
@@ -832,9 +837,7 @@ def setup_ai():
 
 		if not choice:
 			# Empty input: re-show current list
-			console.print(f"\n[bold]  Found {len(displayed)} models{suffix}:[/]")
-			for i, m in enumerate(displayed, 1):
-				console.print(_format_model(m, idx=i), highlight=False)
+			_show_models(displayed, suffix, leading_newline=True)
 			continue
 
 		if choice.lower() in ('q', 'quit', 'exit'):
@@ -865,9 +868,7 @@ def setup_ai():
 				else:
 					displayed = filtered
 					suffix = f' matching "{choice}"'
-					console.print(f"\n[bold]  Found {len(displayed)} models{suffix}:[/]")
-					for i, m in enumerate(displayed, 1):
-						console.print(_format_model(m, idx=i), highlight=False)
+					_show_models(displayed, suffix, leading_newline=True)
 					continue
 
 		# Model selected - save config
@@ -910,7 +911,7 @@ def setup_ai():
 		return selected
 
 
-def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
+def prompt_user(history, max_iterations=10, choices=None,
 				mode="chat", model=None):
 	"""Prompt user for follow-up input via interactive menu.
 
@@ -920,7 +921,6 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 
 	Args:
 		history: ChatHistory instance (read-only, used for token counts and compaction).
-		encryptor: Optional SensitiveDataEncryptor (unused, kept for compat).
 		max_iterations: Current max iterations (used for continue message).
 		choices: Optional list of choice strings from LLM follow_up action.
 		model: Optional LLM model name for token count display.
@@ -1037,7 +1037,7 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 			history.compact(model)
 			new_tokens = history.count_tokens(model)
 			console.print(f"[bold green]Compacted context: {old_tokens} -> {new_tokens} tokens[/]")
-			return prompt_user(history, encryptor, max_iterations, choices, mode, model)
+			return prompt_user(history, max_iterations, choices, mode, model)
 
 		# exit
 		return None

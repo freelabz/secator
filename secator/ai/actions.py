@@ -16,7 +16,6 @@ from secator.ai.utils import (
 	_is_heavy_runner, _sanitize_child_opts, build_subagent_prompt, _union_live_results,
 	_coerce_finding_fields, _get_action_label, _decrypt_dict,
 )
-from secator.ai.utils import _MAX_CHILD_ITERATIONS  # noqa: F401 - re-exported for tests importing it from actions
 
 
 # Bound recursive AI-subagent fan-out so injected output can't drive an
@@ -173,6 +172,39 @@ def check_guardrails_sync(action: Dict, ctx: ActionContext) -> Tuple[Optional[st
 		return e.value, items
 
 
+def _ask_and_check(ctx: ActionContext, is_remote: bool, question: str, permission_type: str,
+					value: str, deny_message: str, command: Optional[str] = None,
+					reason: Optional[str] = None):
+	"""Ask the user/backend to approve one "ask" guardrail layer (shell/target/path).
+
+	Builds the common ask_kwargs, emits the remote pending-prompt (if any), then
+	calls ``ctx.backend.ask_user()`` and checks approval. This is a generator so a
+	remote backend's pending prompt can be yielded up through the caller's
+	``yield from``. Returns ``None`` if approved, else ``deny_message``.
+	"""
+	ask_kwargs = dict(
+		question=question,
+		choices=["allow", "allow_all", "deny"],
+		session_id=ctx.session_id,
+		prompt_type="permission",
+		permission_type=permission_type,
+		value=value,
+		engine=ctx.permission_engine,
+		# unique id per prompt so its remote poll matches only its own answer
+		prompt_uuid=str(uuid.uuid4()),
+	)
+	if command is not None:
+		ask_kwargs["command"] = command
+	if reason is not None:
+		ask_kwargs["reason"] = reason
+	if is_remote:
+		yield ctx.backend.build_pending_prompt(**ask_kwargs)
+	response = ctx.backend.ask_user(**ask_kwargs) if ctx.backend else None
+	if not _is_approved(response):
+		return deny_message
+	return None
+
+
 def check_guardrails(action: Dict, ctx: ActionContext):
 	"""Check action against guardrails before dispatching.
 
@@ -224,23 +256,16 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 		# Handle shell command prompts (unknown commands or parse failures)
 		if result.shell_command:
 			parse_failed = "Could not parse" in (result.reason or "")
-			ask_kwargs = dict(
+			denial = yield from _ask_and_check(
+				ctx, is_remote,
 				question=result.reason or "Shell command requires approval",
-				choices=["allow", "allow_all", "deny"],
-				session_id=ctx.session_id,
-				prompt_type="permission",
 				permission_type="shell",
 				value=result.shell_command,
+				deny_message="Action denied: shell command not approved",
 				reason=result.reason,
-				engine=ctx.permission_engine,
-				# unique id per prompt so its remote poll matches only its own answer
-				prompt_uuid=str(uuid.uuid4()),
 			)
-			if is_remote:
-				yield ctx.backend.build_pending_prompt(**ask_kwargs)
-			response = ctx.backend.ask_user(**ask_kwargs) if ctx.backend else None
-			if not _is_approved(response):
-				return "Action denied: shell command not approved"
+			if denial:
+				return denial
 			if parse_failed:
 				return None
 
@@ -249,22 +274,16 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 			recheck = ctx.permission_engine._check_value("target", target)
 			if recheck.decision == "allow":
 				continue
-			ask_kwargs = dict(
+			denial = yield from _ask_and_check(
+				ctx, is_remote,
 				question=f"Target {target} requires approval",
-				choices=["allow", "allow_all", "deny"],
-				session_id=ctx.session_id,
-				prompt_type="permission",
 				permission_type="target",
 				value=target,
+				deny_message=f"Action denied: target {target} not approved",
 				command=cmd_display,
-				engine=ctx.permission_engine,
-				prompt_uuid=str(uuid.uuid4()),
 			)
-			if is_remote:
-				yield ctx.backend.build_pending_prompt(**ask_kwargs)
-			response = ctx.backend.ask_user(**ask_kwargs) if ctx.backend else None
-			if not _is_approved(response):
-				return f"Action denied: target {target} not approved"
+			if denial:
+				return denial
 
 		# Handle path prompts
 		if result.paths:
@@ -272,22 +291,16 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 			path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
 			for path in result.paths:
 				access_type = path_access_map.get(path, "read")
-				ask_kwargs = dict(
+				denial = yield from _ask_and_check(
+					ctx, is_remote,
 					question=f"{access_type.capitalize()} access to {path} requires approval",
-					choices=["allow", "allow_all", "deny"],
-					session_id=ctx.session_id,
-					prompt_type="permission",
 					permission_type=access_type,
 					value=path,
+					deny_message=f"Action denied: {access_type} access to {path} not approved",
 					command=cmd_display,
-					engine=ctx.permission_engine,
-					prompt_uuid=str(uuid.uuid4()),
 				)
-				if is_remote:
-					yield ctx.backend.build_pending_prompt(**ask_kwargs)
-				response = ctx.backend.ask_user(**ask_kwargs) if ctx.backend else None
-				if not _is_approved(response):
-					return f"Action denied: {access_type} access to {path} not approved"
+				if denial:
+					return denial
 
 		# Re-check to see if more layers need prompting
 		result = ctx.permission_engine.check_action(action)
@@ -413,6 +426,36 @@ def _gather_subagent_evidence(ctx: "ActionContext", targets: list, limit: int = 
 	return "\n".join(lines)
 
 
+def _child_run_opts(ctx: ActionContext) -> Dict:
+	"""Common run_opts shared by every child runner (task/workflow/shell command)."""
+	return {
+		"print_item": not ctx.silent,
+		"print_line": ctx.verbose and not ctx.silent,
+		"print_progress": False,
+		"print_reports_message": False,
+		"enable_reports": True,
+		"exporters": [],
+		"sync": ctx.sync,
+	}
+
+
+def _child_preamble(ctx: ActionContext, context: Dict) -> Tuple[Dict, Optional["Warning"]]:
+	"""Shared child-runner prelude: stamp task_chunk_id + subagent flag, then rebuild
+	persistence hooks (or return a denial).
+
+	Propagates driver hooks (mongodb/api): a sync sub-runner skips the pickle path
+	that normally re-registers them, so without this its results never persist.
+	Don't silently spawn a persistence-less child when the parent has drivers.
+
+	Returns ``(hooks, denial)``; if ``denial`` is non-None the caller must yield it
+	and skip the spawn.
+	"""
+	context["task_chunk_id"] = str(uuid.uuid4())
+	if ctx.subagent:
+		context["subagent"] = ctx.context.get("subagent", True)
+	return _build_child_hooks_or_denial(context)
+
+
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
 	"""Execute a secator task or workflow.
 
@@ -468,15 +511,9 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		return
 
 	run_opts = {
-		"print_item": not ctx.silent,
-		"print_line": ctx.verbose and not ctx.silent,
+		**_child_run_opts(ctx),
 		"print_cmd": not ctx.silent and not ctx.subagent,
 		"print_cmd_icon": "└",
-		"print_progress": False,
-		"print_reports_message": False,
-		"enable_reports": True,
-		"exporters": [],
-		"sync": ctx.sync,
 		"tty": not ctx.subagent and ctx.sync,
 		**opts,
 	}
@@ -492,14 +529,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			run_opts["sync"] = False
 			run_opts["tty"] = False
 
-	context["task_chunk_id"] = str(uuid.uuid4())
-	if ctx.subagent:
-		context["subagent"] = ctx.context.get("subagent", True)
-
-	# Propagate driver hooks (mongodb/api): a sync sub-runner skips the pickle path
-	# that normally re-registers them, so without this its results never persist.
-	# Don't silently spawn a persistence-less child when the parent has drivers
-	hooks, denial = _build_child_hooks_or_denial(context)
+	hooks, denial = _child_preamble(ctx, context)
 	if denial is not None:
 		yield denial
 		return
@@ -593,13 +623,9 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		return
 
 	try:
-		context["task_chunk_id"] = str(uuid.uuid4())
-		if ctx.subagent:
-			context["subagent"] = ctx.context.get("subagent", True)
-
 		# Don't silently run a persistence-less child when the parent has drivers
 		# (same guard _run_runner uses for spawned tasks/workflows).
-		hooks, denial = _build_child_hooks_or_denial(context)
+		hooks, denial = _child_preamble(ctx, context)
 		if denial is not None:
 			yield denial
 			return
@@ -612,14 +638,8 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		# Mirrors _run_runner's wiring: quiet, reports enabled, never dangerous (defense
 		# in depth). `env` is the sanitized process env so `env`/`printenv` can't leak secrets.
 		run_opts = {
-			"print_item": not ctx.silent,
-			"print_line": ctx.verbose and not ctx.silent,
+			**_child_run_opts(ctx),
 			"print_cmd": False,
-			"print_progress": False,
-			"print_reports_message": False,
-			"enable_reports": True,
-			"exporters": [],
-			"sync": ctx.sync,
 			"dangerous": False,
 			"env": _sanitized_env(),
 		}

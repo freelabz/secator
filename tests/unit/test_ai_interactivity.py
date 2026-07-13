@@ -18,7 +18,7 @@ class TestInteractivityBackendBase(unittest.TestCase):
 	def test_base_get_excluded_tools(self):
 		from secator.ai.interactivity import InteractivityBackend
 		backend = InteractivityBackend()
-		self.assertEqual(backend.get_excluded_tools(), set())
+		self.assertEqual(backend.get_excluded_tools(), {"stop"})
 
 	def test_base_get_extra_tools(self):
 		from secator.ai.interactivity import InteractivityBackend

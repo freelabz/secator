@@ -33,8 +33,12 @@ class InteractivityBackend:
 		raise NotImplementedError
 
 	def get_excluded_tools(self) -> set:
-		"""Return tool names to exclude from the LLM's available tools."""
-		return set()
+		"""Return tool names to exclude from the LLM's available tools.
+
+		Excludes "stop" by default: only AutoBackend (no user to hand control back
+		to) needs the LLM to have an explicit stop tool.
+		"""
+		return {"stop"}
 
 	def get_extra_tools(self) -> list:
 		"""Return additional tool schemas (not in TOOL_SCHEMAS) to inject."""
@@ -43,9 +47,6 @@ class InteractivityBackend:
 
 class CLIBackend(InteractivityBackend):
 	"""Local terminal interactive backend."""
-
-	def get_excluded_tools(self) -> set:
-		return {"stop"}
 
 	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
 		if prompt_type == "permission":
@@ -79,7 +80,6 @@ class CLIBackend(InteractivityBackend):
 			return None
 		return prompt_user(
 			history,
-			encryptor=context.get("encryptor"),
 			max_iterations=context.get("max_iterations", 10),
 			choices=choices,
 			mode=context.get("mode", "chat"),
@@ -94,9 +94,6 @@ class RemoteBackend(InteractivityBackend):
 		self.timeout = timeout
 		self.query_engine = query_engine
 		self.poll_interval = poll_interval
-
-	def get_excluded_tools(self) -> set:
-		return {"stop"}
 
 	def build_pending_prompt(self, question, choices, session_id, prompt_type="follow_up", **context):
 		"""Build a pending Ai finding for the remote user to see and answer.

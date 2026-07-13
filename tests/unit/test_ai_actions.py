@@ -12,9 +12,10 @@ if ADDONS_ENABLED['ai']:
 		_handle_query, _handle_add_finding, _run_runner, _decrypt_dict,
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
 		_build_child_hooks_or_denial,
-		_MAX_CHILD_ITERATIONS, _MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
+		_MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
 		_MAX_SHELL_OUTPUT_CHARS, _truncate,
 	)
+	from secator.ai.utils import _MAX_CHILD_ITERATIONS
 	from secator.runners import Task
 	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
 
