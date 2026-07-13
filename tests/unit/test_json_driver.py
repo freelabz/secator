@@ -7,18 +7,18 @@ import shutil
 import unittest
 from pathlib import Path
 
+import pytest
+
 
 # --- module-level workers (must be importable/picklable for multiprocessing) ---
 
 def _proc_worker(path, worker_id, count):
 	"""Append `count` uniquely-uuid'd findings to the SAME report.json (one process)."""
-	from secator.hooks.json import atomic_json_update
+	from secator.utils import atomic_json
 	for i in range(count):
 		uid = f'{worker_id}-{i}'
-		atomic_json_update(
-			path,
-			lambda data, uid=uid: data['results'].setdefault('url', []).append({'_uuid': uid}),
-		)
+		with atomic_json(path, default=lambda: {'info': {}, 'results': {}}) as data:
+			data['results'].setdefault('url', []).append({'_uuid': uid})
 
 
 def _gevent_child(path, n_greenlets, count):
@@ -26,15 +26,13 @@ def _gevent_child(path, n_greenlets, count):
 	import gevent.monkey
 	gevent.monkey.patch_all()
 	import gevent
-	from secator.hooks.json import atomic_json_update
+	from secator.utils import atomic_json
 
 	def work(worker_id):
 		for i in range(count):
 			uid = f'g{worker_id}-{i}'
-			atomic_json_update(
-				path,
-				lambda data, uid=uid: data['results'].setdefault('url', []).append({'_uuid': uid}),
-			)
+			with atomic_json(path, default=lambda: {'info': {}, 'results': {}}) as data:
+				data['results'].setdefault('url', []).append({'_uuid': uid})
 
 	greenlets = [gevent.spawn(work, w) for w in range(n_greenlets)]
 	gevent.joinall(greenlets, raise_error=True)
@@ -199,6 +197,15 @@ class TestJsonDriverConcurrency(JsonDriverTestBase):
 		self.assertEqual(len(uuids), expected_prefix_count)  # no lost updates
 		self.assertEqual(len(set(uuids)), expected_prefix_count)  # no corruption/dupes
 
+	def _join(self, procs, timeout=60):
+		"""Join workers; terminate any that time out so a regression can't hang the suite."""
+		for p in procs:
+			p.join(timeout)
+			if p.is_alive():
+				p.terminate()
+				p.join(5)
+			self.assertEqual(p.exitcode, 0, f'worker {p.pid} did not exit cleanly (exitcode={p.exitcode})')
+
 	def test_concurrent_prefork_processes(self):
 		"""prefork pool analogue: N separate OS processes append to one report.json."""
 		path = str(Path(self.temp_dir) / 'report.json')
@@ -209,24 +216,23 @@ class TestJsonDriverConcurrency(JsonDriverTestBase):
 		]
 		for p in procs:
 			p.start()
-		for p in procs:
-			p.join(60)
-			self.assertEqual(p.exitcode, 0)
+		self._join(procs)
 		self._assert_no_loss(path, self.N_WORKERS * self.PER_WORKER)
 
 	def test_concurrent_gevent_greenlets(self):
 		"""gevent pool analogue: N greenlets in one (monkey-patched) process append to one file."""
+		pytest.importorskip('gevent')
 		path = str(Path(self.temp_dir) / 'report.json')
 		# Run monkey-patched gevent in a child process so patch_all() doesn't leak into the suite.
 		ctx = mp.get_context('spawn')
 		p = ctx.Process(target=_gevent_child, args=(path, self.N_WORKERS, self.PER_WORKER))
 		p.start()
-		p.join(60)
-		self.assertEqual(p.exitcode, 0)
+		self._join([p])
 		self._assert_no_loss(path, self.N_WORKERS * self.PER_WORKER)
 
 	def test_concurrent_mixed_processes_and_greenlets(self):
 		"""Both at once: prefork processes AND a gevent-greenlet process share one file."""
+		pytest.importorskip('gevent')
 		path = str(Path(self.temp_dir) / 'report.json')
 		fork = mp.get_context('fork')
 		spawn = mp.get_context('spawn')
@@ -238,9 +244,7 @@ class TestJsonDriverConcurrency(JsonDriverTestBase):
 		for p in procs:
 			p.start()
 		gproc.start()
-		for p in procs + [gproc]:
-			p.join(60)
-			self.assertEqual(p.exitcode, 0)
+		self._join(procs + [gproc])
 		# N_WORKERS process-appends + N_WORKERS greenlet-appends, each PER_WORKER items.
 		self._assert_no_loss(path, 2 * self.N_WORKERS * self.PER_WORKER)
 
