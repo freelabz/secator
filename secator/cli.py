@@ -1488,8 +1488,9 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 			aggregate_field = getattr(cls, '_group_aggregate', None)
 			report.data['results'][type_name] = group_findings(items, group_by, aggregate_field)
 			grouped_types.append((type_name, ', '.join(group_by)))
-		if group and not grouped_types:
-			console.print(Warning(message=f'--group "{group}": no groupable finding types in results'))
+		if not grouped_types:
+			group_desc = f' "{group}"' if group else ''
+			console.print(Warning(message=f'--group{group_desc}: no groupable finding types in results'))
 	elif group is not None and fmt:
 		console.print(Warning(message='--group is ignored when --format is used'))
 

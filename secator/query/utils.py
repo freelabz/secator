@@ -599,8 +599,8 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5):
             if cls:
                 try:
                     rep = cls.load(rep)
-                except Exception:
-                    pass
+                except Exception as e:
+                    debug(f'group_findings: failed to load {rep.get("_type")} representative: {e}', sub='query')
         if aggregate_field and not isinstance(rep, dict):
             # When grouping, other fields (extra_data, etc.) keep the newest
             # finding's values; only the aggregate field is replaced by the
