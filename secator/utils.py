@@ -1,3 +1,4 @@
+import fcntl
 import importlib
 import ipaddress
 import itertools
@@ -9,11 +10,14 @@ import re
 import select
 import signal
 import sys
+import tempfile
+import threading
 import tldextract
 import traceback
 import validators
 import warnings
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import reduce
 from pathlib import Path
@@ -1429,3 +1433,117 @@ def remove_duplicates(items):
 		if key not in seen:
 			seen[key] = item
 	return list(seen.values())
+
+
+# --- Atomic JSON: concurrency-safe read-modify-write of a JSON file ----------
+#
+# A layered lock makes a JSON file safe to update from many writers at once,
+# correct under both Celery pools (prefork processes + gevent greenlets):
+#   1. per-path in-process lock (``threading.Lock``) — gevent monkey-patches
+#      threading, so this is greenlet-cooperative under the gevent pool and a
+#      real mutex under prefork threads. It serializes same-process writers
+#      BEFORE they touch the OS lock, so the blocking flock is only ever
+#      contended across processes (rare), never stalling the gevent hub.
+#   2. ``fcntl.flock(LOCK_EX)`` on a stable sidecar ``.lock`` file — mutual
+#      exclusion across prefork processes. It is a *separate* file (never
+#      replaced/unlinked), so os.replace() can't pull the locked inode out from
+#      under a holder.
+#   3. tempfile + ``os.replace`` — atomic on POSIX, so a concurrent reader
+#      always sees a whole old-or-new file, never a torn write. That is why
+#      read_json() below can snapshot lock-free.
+
+# One lock object per path, so same-process writers (greenlets under gevent,
+# threads under prefork) serialize before the cross-process flock.
+_path_locks = {}
+_path_locks_guard = threading.Lock()
+
+
+def _get_path_lock(path):
+	key = str(path)
+	lock = _path_locks.get(key)
+	if lock is None:
+		with _path_locks_guard:
+			lock = _path_locks.get(key)
+			if lock is None:
+				lock = threading.Lock()
+				_path_locks[key] = lock
+	return lock
+
+
+def _read_json(path, default):
+	"""Read a JSON file, tolerating absence / partial writes.
+
+	os.replace makes torn reads impossible in the normal path; the JSONDecodeError
+	guard is belt-and-suspenders for an externally-truncated file. ``default`` is a
+	callable factory (e.g. ``dict``) returning the fallback on absence/corruption.
+	"""
+	try:
+		with open(path, 'r') as f:
+			return json.load(f)
+	except (FileNotFoundError, json.JSONDecodeError):
+		return default()
+
+
+def _atomic_write(path, data):
+	"""Write JSON to a temp file in the same dir, then os.replace() over the target."""
+	path = Path(path)
+	fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix='.report-', suffix='.json.tmp')
+	try:
+		with os.fdopen(fd, 'w') as f:
+			json.dump(data, f, indent=2, default=str)
+			f.flush()
+			os.fsync(f.fileno())
+		os.replace(tmp, path)
+	except BaseException:
+		try:
+			os.unlink(tmp)
+		except OSError:
+			pass
+		raise
+
+
+@contextmanager
+def atomic_json(path, default=dict):
+	"""Locked read-modify-write of a JSON file, as a context manager.
+
+	Yields the parsed data (default() if the file is absent/corrupt); the caller
+	mutates it in place. On clean block exit the data is written back atomically
+	(tempfile + fsync + os.replace). On exception, nothing is written — the file
+	is left unchanged. The layered lock is always released in ``finally``.
+
+	Wholesale replace is just ``data.clear(); data.update(new)`` inside the block.
+
+	Args:
+		path (str | Path): JSON file path (parent dirs are created).
+		default (callable): factory for the fallback value when the file is
+			absent/corrupt, e.g. ``dict``, ``list``, ``lambda: {'info': {}, 'results': {}}``.
+
+	Notes:
+		- The block runs while the lock is HELD — keep it to the read-modify-write,
+		  no slow I/O / subprocess inside, or you serialize every other writer.
+		- The ``.lock`` sidecar file persists (never unlinked — unlinking races
+		  holders); this is harmless.
+		- Safe under both Celery pools (prefork processes + gevent greenlets).
+	"""
+	path = Path(path)
+	path.parent.mkdir(parents=True, exist_ok=True)
+	lock_path = str(path) + '.lock'
+	with _get_path_lock(path):                        # (1) in-process (greenlet/thread)
+		with open(lock_path, 'w') as lock_fd:
+			fcntl.flock(lock_fd, fcntl.LOCK_EX)       # (2) cross-process (prefork)
+			try:
+				data = _read_json(path, default)
+				yield data
+				_atomic_write(path, data)             # (3) atomic swap (clean exit only)
+			finally:
+				fcntl.flock(lock_fd, fcntl.LOCK_UN)
+
+
+def read_json(path, default=dict):
+	"""Lock-free snapshot read of a JSON file written by ``atomic_json``.
+
+	Safe without a lock because writers use os.replace(), so a reader always sees a
+	complete old-or-new file, never a torn write. Returns ``default()`` (a callable
+	factory) if the file is absent or corrupt.
+	"""
+	return _read_json(path, default)

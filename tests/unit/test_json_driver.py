@@ -12,13 +12,11 @@ from pathlib import Path
 
 def _proc_worker(path, worker_id, count):
 	"""Append `count` uniquely-uuid'd findings to the SAME report.json (one process)."""
-	from secator.hooks.json import atomic_json_update
+	from secator.utils import atomic_json
 	for i in range(count):
 		uid = f'{worker_id}-{i}'
-		atomic_json_update(
-			path,
-			lambda data, uid=uid: data['results'].setdefault('url', []).append({'_uuid': uid}),
-		)
+		with atomic_json(path, default=lambda: {'info': {}, 'results': {}}) as data:
+			data['results'].setdefault('url', []).append({'_uuid': uid})
 
 
 def _gevent_child(path, n_greenlets, count):
@@ -26,15 +24,13 @@ def _gevent_child(path, n_greenlets, count):
 	import gevent.monkey
 	gevent.monkey.patch_all()
 	import gevent
-	from secator.hooks.json import atomic_json_update
+	from secator.utils import atomic_json
 
 	def work(worker_id):
 		for i in range(count):
 			uid = f'g{worker_id}-{i}'
-			atomic_json_update(
-				path,
-				lambda data, uid=uid: data['results'].setdefault('url', []).append({'_uuid': uid}),
-			)
+			with atomic_json(path, default=lambda: {'info': {}, 'results': {}}) as data:
+				data['results'].setdefault('url', []).append({'_uuid': uid})
 
 	greenlets = [gevent.spawn(work, w) for w in range(n_greenlets)]
 	gevent.joinall(greenlets, raise_error=True)
