@@ -1771,8 +1771,24 @@ def report_info(runner_id, workspace, driver, show_all):
 		info = dict(content.get('info', {}))
 		source_label, source_value = '_path', str(report_path)
 
-	errors_raw = info.pop('errors', [])
-	warnings_raw = info.pop('warnings', [])
+	# Errors and warnings are first-class findings (_type=error/warning) in the store, so source them
+	# from a run-scoped findings query rather than the denormalized info.errors/info.warnings block
+	# (which toDict is being moved off of). Fall back to the legacy info block for old reports/docs
+	# that still embed it and predate error/warning findings being persisted.
+	legacy_errors = info.pop('errors', [])
+	legacy_warnings = info.pop('warnings', [])
+	run_ctx = info.get('context', {}) or {}
+	run_id = run_ctx.get(f'{runner_type_singular}_id')
+	errors_raw, warnings_raw = [], []
+	if run_id:
+		drivers = [effective_driver] if effective_driver != 'local' else []
+		q_engine = QueryEngine(workspace_id=run_ctx.get('workspace_id') or workspace_name,
+							   context={'drivers': drivers, 'workspace_name': workspace_name})
+		scope = {f'_context.{runner_type_singular}_id': run_id}
+		errors_raw = list(q_engine.search({**scope, '_type': 'error'}))
+		warnings_raw = list(q_engine.search({**scope, '_type': 'warning'}))
+	if not errors_raw and not warnings_raw:
+		errors_raw, warnings_raw = legacy_errors, legacy_warnings
 
 	# These fields are verbose and only shown with --show-all.
 	SHOW_ALL_ONLY_KEYS = ('config', 'output')
