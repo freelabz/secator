@@ -11,6 +11,44 @@ from secator.utils import sanitize_folder_name
 from secator.utils import debug
 
 
+def resolve_local_report_paths(report_query, workspace_name):
+	"""Rewrite a `report show`/`query` runner path so a human-friendly on-disk folder number resolves
+	to the runner's real {type}_id (the UUID stamped into findings' _context).
+
+	Local runs keep two ids: the sequential report FOLDER number (``tasks/0``, user-facing) and the
+	run-scope ``_context.{type}_id`` UUID that findings actually carry. A path like ``task/0`` names the
+	folder, so translate ``0`` -> that folder's ``info.context.{type}_id`` before it becomes a query
+	filter. Values that are not a local folder number (already a UUID, or a missing folder) pass through
+	unchanged. Only meaningful for the local json backend; DB backends already store the real id.
+
+	Args:
+		report_query (str): Comma-separated runner paths, e.g. ``tasks/0,scans/5``.
+		workspace_name (str): Workspace whose report tree to resolve against.
+
+	Returns:
+		str: The runner path with folder numbers replaced by their real {type}_id.
+	"""
+	if not report_query:
+		return report_query
+	ws_path = Path(CONFIG.dirs.reports).expanduser() / sanitize_folder_name(workspace_name)
+	out = []
+	for part in report_query.split(','):
+		token = part.strip()
+		if '/' not in token:
+			out.append(part)
+			continue
+		runner_type, runner_id = token.split('/', 1)
+		singular = runner_type.strip().lower().rstrip('s')
+		report_file = ws_path / f'{singular}s' / runner_id.strip() / 'report.json'
+		try:
+			with open(report_file) as f:
+				real_id = json.load(f).get('info', {}).get('context', {}).get(f'{singular}_id')
+			out.append(f'{runner_type}/{real_id}' if real_id else part)
+		except (FileNotFoundError, json.JSONDecodeError):
+			out.append(part)
+	return ','.join(out)
+
+
 def _regex_match(field, pattern):
 	if field is None:
 		return False

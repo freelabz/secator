@@ -106,16 +106,23 @@ class Runner:
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
-		# The run-scope id ({type}_id) is minted by the active store driver at on_init (in
-		# update_runner), in its native format (mongodb ObjectId, json/sqlite uuid4), then stamped
-		# into context so descendants inherit it and findings carry it. The runner core stays dumb.
+		# Mint the run-scope {type}_id (uuid) HERE — before any add_result in __init__ (validation
+		# errors, input Targets) — so every finding carries it (the view's scope key). Every store
+		# driver uses this as its runner-doc id; descendants inherit it via context.copy().
+		key = f'{self.config.type}_id'
+		if not self.context.get(key):
+			self.context[key] = str(uuid.uuid4())
+		# workspace_id defaults to workspace_name so the local json store's on-disk folder (named by
+		# workspace_name) and the run-scope query (JsonBackend keys its directory off workspace_id;
+		# DB backends query the _context.workspace_id field) agree. Route/profile resolution below
+		# overrides both together; prod (mongodb) always passes an explicit workspace_id.
+		if not self.context.get('workspace_id'):
+			self.context['workspace_id'] = self.workspace_name
 
-		# Runner state. `results` is the instance-less StreamView over the store (json is the core
-		# default, so a store is always active). `uuids` is the own-emitted dedup guard.
-		# `_results` is populated ONLY when hooks are off (dry_run / no_process) — nothing is
-		# persisted then, so it holds the runner's bounded own emissions for those paths.
+		# Runner state. `results` is the instance-less StreamView over the store — the ONLY results
+		# path (json is the core default, so a store is always active). `uuids` is the own-emitted
+		# dedup guard.
 		self.uuids = set()
-		self._results = []
 		self.results_count = 0
 		self.threads = []
 		self.output = ''
@@ -364,23 +371,17 @@ class Runner:
 		return humanize.naturaldelta(self.elapsed)
 
 	def _view(self, _type=None):
-		"""THE view accessor: a StreamView of this runner's OWN subtree, scoped by its {type}_id
-		(Task→task_id, Workflow→workflow_id, Scan→scan_id), optionally filtered to one or more
-		output types. Instance-less (rebuilt from context → pickle-safe); the backend client is a
-		process singleton, so per-access construction is cheap. Every result property is a one-liner
-		over this — the single scoping/query point (json is the default store, so it always applies).
-
-		When no store is active — no driver / no minted id, or dry_run / no_process (nothing is
-		persisted) — serve the bounded in-memory own-emissions buffer instead."""
+		"""THE (only) results path: a StreamView of this runner's OWN subtree, scoped by its
+		{type}_id (Task→task_id, Workflow→workflow_id, Scan→scan_id), optionally filtered to one or
+		more output types. Instance-less (rebuilt from context → pickle-safe); the backend client is
+		a process singleton, so per-access construction is cheap. Every result property is a one-liner
+		over this — the single scoping/query point (json is the core default store, always active)."""
 		names = None if _type is None else (_type if isinstance(_type, list) else [_type])
-		own_id = self.context.get(f'{self.config.type}_id')
-		if self.dry_run or self.no_process or not (self.context.get('drivers') and own_id):
-			return [r for r in self._results if names is None or r._type in names]
 		from secator.query import QueryEngine
 		from secator.runners._helpers import StreamView
 		engine = QueryEngine(self.context.get('workspace_id'),
 							 context={**self.context, 'workspace_name': self.workspace_name})
-		query = {f'_context.{self.config.type}_id': own_id}
+		query = {f'_context.{self.config.type}_id': self.context.get(f'{self.config.type}_id')}
 		if names is not None:
 			query['_type'] = {'$in': names} if isinstance(_type, list) else _type
 		return StreamView(engine, query)
@@ -555,10 +556,14 @@ class Runner:
 		(which, under ``replace``/chord synchronization, re-registered hooks
 		O(chunks) times and flooded ``SECATOR_DEBUG=runner`` logs).
 		"""
-		drivers = self.context.get('drivers', [])
+		from secator.loader import apply_default_drivers, discover_external_drivers, order_drivers
+		# json is the CORE default store: EVERY run — CLI and library (Workflow(...).run(), tests) —
+		# is store-backed, so `results` (the StreamView) always has a store to read. mongodb still
+		# wins when active (priority). Stamped into context so descendants inherit it.
+		drivers = apply_default_drivers(self.context.get('drivers', []), CONFIG.addons.mongodb.enabled)
+		self.context['drivers'] = drivers
 		if not drivers:
 			return
-		from secator.loader import discover_external_drivers, order_drivers
 
 		discover_external_drivers()
 		# Order by canonical priority so authoritative backends (e.g. mongodb)
@@ -734,6 +739,22 @@ class Runner:
 			if k not in self.run_opts and v['default']:
 				self.run_opts[k] = v['default']
 
+	def _persist_to_store(self, item):
+		"""Persist an item to the store when on_item didn't run (dry_run, or a Skipped Info emitted
+		while a runner temporarily disables hooks during build_celery_workflow).
+
+		Runs the resolved on_item hooks (update_finding) directly, bypassing the enable_hooks gate that
+		run_hooks enforces, so the `results` view still serves these items. No in-memory buffer. No-op
+		when no store driver is registered.
+		"""
+		if not isinstance(item, tuple(OUTPUT_TYPES)):
+			return
+		for hook in self.resolved_hooks.get('on_item', []):
+			try:
+				hook(self, item)
+			except Exception as e:
+				self.debug(f'persist-to-store hook failed: {e}', sub='item')
+
 	def add_result(self, item, print=True, output=True, hooks=True, queue=True):
 		"""Add item to runner results.
 
@@ -796,11 +817,12 @@ class Runner:
 			if not item:
 				return
 
-		# Fan out to the store via on_item (run above); the `results` view reads it back. Also keep
-		# the item in the bounded own-emissions buffer — the fallback `_view` serves when no store is
-		# active (no-driver library run, dry_run, no_process). Never the fan-in, so it stays flat.
+		# Fan out to the store via on_item (run above); the `results` view reads it back. When hooks
+		# are off (dry_run, or the build-time Skipped Info emitted while a runner temporarily disables
+		# hooks) on_item didn't fire, so persist to the store directly — no in-memory buffer.
 		self.uuids.add(item._uuid)
-		self._results.append(item)
+		if not self.enable_hooks:
+			self._persist_to_store(item)
 		self.results_count += 1
 		if output and isinstance(item, (Info, Warning, Error)):
 			self.output += repr(item) + '\n'

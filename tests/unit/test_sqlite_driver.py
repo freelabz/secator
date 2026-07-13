@@ -149,12 +149,14 @@ class TestSqliteHooks(SqliteTestBase):
 		self.assertEqual(results[0]['url'], 'http://x/a')
 
 	def test_update_runner_inserts_and_stores_id(self):
+		import uuid
 		from secator.hooks import sqlite as mod
 
 		class FakeRunner:
 			def __init__(self):
 				self.config = type('C', (), {'type': 'task', 'name': 'httpx'})()
-				self.context = {'workspace_id': 'ws1'}
+				# {type}_id is minted by the runner core (Runner.__init__); the driver only persists.
+				self.context = {'workspace_id': 'ws1', 'task_id': str(uuid.uuid4())}
 				self.status = 'RUNNING'
 
 			def toDict(self):

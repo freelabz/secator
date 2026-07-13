@@ -51,3 +51,17 @@ FINDING_TYPES = [
 ]  # fmt: off
 OUTPUT_TYPES = FINDING_TYPES + EXECUTION_TYPES + STAT_TYPES
 INTERNAL_FIELDS = ('_context', '_uuid', '_related', '_duplicate')
+
+_OUTPUT_TYPE_NAMES = {t.get_name() for t in OUTPUT_TYPES}
+
+
+def is_output_type(item):
+	"""True if ``item`` is an OutputType instance.
+
+	Compares by ``_type`` name rather than ``type(item) in OUTPUT_TYPES``: class identity is not stable
+	across a module reload (the test harness' ``clear_modules()`` and ``secator worker -r`` autoreload
+	both produce two live generations of the output-type classes), which would make an identity check
+	silently reject a valid finding. The ``_type`` name is a stable string.
+	"""
+	name = getattr(item, '_type', None)
+	return name is not None and name in _OUTPUT_TYPE_NAMES

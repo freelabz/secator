@@ -482,49 +482,32 @@ class TestCrossRunIsolation:
 
 
 class TestTypeIdMinting:
-	"""The active store driver mints the runner's {type}_id at on_init (in update_runner), in its
-	native format (mongodb ObjectId, json/sqlite uuid4), and stamps it into context — before any
-	finding is emitted — so descendants inherit it and findings carry it (the run-scope key)."""
+	"""The runner CORE mints {type}_id (a uniform uuid4) in __init__ — before any finding is emitted —
+	so descendants inherit it and findings carry it (the run-scope key). Store drivers reuse it as the
+	runner-doc _id and never mint one themselves."""
 
-	def test_json_update_runner_mints_and_stamps(self, tmp_path):
-		from secator.hooks import json as mod
+	def test_core_mints_type_id_at_init(self):
+		import uuid as _uuid
+		runner = _dummy_runner()
+		tid = runner.context.get('task_id')
+		assert tid and _uuid.UUID(tid)                     # minted uuid4 at __init__, before any finding
 
-		class R:
-			config = type('C', (), {'type': 'task', 'name': 'httpx'})()
-			context = {'workspace_id': 'ws'}
-			reports_folder = str(tmp_path)
-			status = 'RUNNING'
+	def test_core_reuses_provided_type_id(self):
+		# A pre-supplied {type}_id (e.g. a parent-minted child id) is reused, never re-minted.
+		from secator.definitions import HOST
+		from secator.runners import PythonRunner
 
-			def toDict(self):
-				return {'name': 'httpx', 'status': 'RUNNING', 'chunk': None, 'context': self.context}
+		class dummytask(PythonRunner):
+			input_types = (HOST,)
 
-		r = R()
-		assert not r.context.get('task_id')
-		mod.update_runner(r)
-		assert r.context.get('task_id')        # minted + stamped (uuid4), before any finding
+			def yielder(self):
+				return []
 
-	def test_json_reuses_existing_id_no_remint(self, tmp_path):
-		# Multi-driver: the higher-priority driver (mongodb) mints its ObjectId first; json must
-		# REUSE it, never re-mint — so a run's findings never mix ObjectId and uuid4 formats.
-		from secator.hooks import json as mod
-		from bson.objectid import ObjectId
-		oid = str(ObjectId())
-
-		class R:
-			config = type('C', (), {'type': 'task', 'name': 'httpx'})()
-			context = {'workspace_id': 'ws', 'task_id': oid}
-			reports_folder = str(tmp_path)
-			status = 'RUNNING'
-
-			def toDict(self):
-				return {'name': 'httpx', 'status': 'RUNNING', 'chunk': None, 'context': self.context}
-
-		r = R()
-		mod.update_runner(r)
-		assert r.context['task_id'] == oid                 # reused, not re-minted
+		runner = dummytask(inputs=['x'], skip_if_no_inputs=True, context={'task_id': 'PRESET'})
+		assert runner.context['task_id'] == 'PRESET'
 
 	def test_finding_carries_type_id_and_is_scoped(self, tmp_path, monkeypatch):
-		# A runner whose driver minted its task_id: a finding add_result'd carries that id (via
+		# A runner's core-minted task_id: a finding add_result'd carries that id (via
 		# context.copy() in add_result) and is served by the run-scoped query.
 		from secator.config import CONFIG
 		from secator.hooks import sqlite as sqlite_hook
@@ -538,9 +521,9 @@ class TestTypeIdMinting:
 		runner.context.update({'drivers': ['sqlite'], 'workspace_id': 'ws', 'workspace_name': 'ws'})
 		runner._apply_context_drivers()
 		from secator.hooks import sqlite as mod
-		mod.update_runner(runner)                          # on_init: mint + stamp task_id
-		tid = runner.context.get('task_id')
+		tid = runner.context.get('task_id')                # already minted by the runner core __init__
 		assert tid
+		mod.update_runner(runner)                          # on_init: persist the runner doc keyed by tid
 		runner.add_result(Url(url='http://x', _context={'workspace_id': 'ws'}), print=False)
 		rows = SqliteBackend(workspace_id='ws').search({'_type': 'url', **run_scope_query(runner.context)})
 		assert len(rows) == 1 and rows[0]['_context'].get('task_id') == tid

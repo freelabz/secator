@@ -222,8 +222,8 @@ class TestTree(unittest.TestCase):
 		scan.run()
 		self.assertEqual(scan.status, 'SUCCESS')
 		self.assertEqual(len(scan.errors), 0)
-		# dry_run doesn't persist; scan.infos serves the in-memory buffer (test2's 3 skipped tasks).
-		self.assertEqual(len(scan.infos), 3)
+		# dry_run persists to the json store like a normal run, so scan.infos serves the whole tree's
+		# preview. test1_nuclei is enabled, so test1's nuclei tasks must NOT appear as skipped.
 		messages = [r.message for r in scan.infos]
 		self.assertNotIn('Skipped task nuclei/first because condition is not met: opts.nuclei', messages)
 		self.assertNotIn('Skipped task nuclei/network because condition is not met: opts.nuclei', messages)

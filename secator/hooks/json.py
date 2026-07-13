@@ -48,7 +48,7 @@ import threading
 import uuid
 from pathlib import Path
 
-from secator.output_types import OUTPUT_TYPES
+from secator.output_types import is_output_type
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug
 
@@ -135,15 +135,8 @@ def _report_path(runner):
 
 
 def update_runner(self):
-	"""Persist the runner's own info block into its report.json (live).
-
-	Mints the runner's {type}_id (uuid4) if absent — at on_init, before any finding is emitted —
-	and stamps it into context so descendants inherit it and findings carry it (the run-scope key).
-	"""
-	_type = self.config.type
-	key = f'{_type}_chunk_id' if self.toDict().get('chunk') else f'{_type}_id'
-	if not self.context.get(key):
-		self.context[key] = str(uuid.uuid4())
+	"""Persist the runner's own info block into its report.json (live). The {type}_id is minted by
+	the runner core (Runner.__init__); json keys its report by reports_folder, not the id."""
 	info = self.toDict()
 
 	def mutate(data):
@@ -156,7 +149,7 @@ def update_runner(self):
 
 def update_finding(self, item):
 	"""Upsert a single finding into this runner's report.json results (live)."""
-	if type(item) not in OUTPUT_TYPES:
+	if not is_output_type(item):
 		return item
 	if not item._uuid:
 		item._uuid = str(uuid.uuid4())

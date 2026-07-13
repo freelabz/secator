@@ -7,6 +7,32 @@ from secator.query.utils import (
 )
 
 
+class TestResolveLocalReportPaths:
+    """Local runs keep a sequential folder number (tasks/0) AND a UUID {type}_id (what findings carry).
+    `report show tasks/0` must resolve the folder number to that UUID before it becomes a query filter."""
+
+    def _write_report(self, reports, ws, singular, folder, type_id):
+        import json
+        from pathlib import Path
+        p = Path(reports) / ws / f'{singular}s' / str(folder)
+        p.mkdir(parents=True, exist_ok=True)
+        (p / 'report.json').write_text(json.dumps({'info': {'context': {f'{singular}_id': type_id}}}))
+
+    def test_folder_number_resolves_to_uuid(self, tmp_path, monkeypatch):
+        from secator.config import CONFIG
+        from secator.query.json import resolve_local_report_paths
+        monkeypatch.setattr(CONFIG.dirs, 'reports', str(tmp_path))
+        self._write_report(tmp_path, 'default', 'task', 0, 'the-uuid')
+        assert resolve_local_report_paths('task/0', 'default') == 'task/the-uuid'
+
+    def test_missing_folder_and_non_path_pass_through(self, tmp_path, monkeypatch):
+        from secator.config import CONFIG
+        from secator.query.json import resolve_local_report_paths
+        monkeypatch.setattr(CONFIG.dirs, 'reports', str(tmp_path))
+        assert resolve_local_report_paths('task/99', 'default') == 'task/99'  # no such folder -> unchanged
+        assert resolve_local_report_paths('', 'default') == ''
+
+
 class TestParseReportPaths:
 
     def test_empty_returns_empty_dict(self):

@@ -80,12 +80,8 @@ class Scan(Runner):
 			for task_id, task_info in workflow.celery_ids_map.items():
 				self.add_subtask(task_id, task_info['name'], task_info['descr'])
 			sigs.append(celery_workflow)
-			# Real runs: the scan's results view (scoped by scan_id) already sees every descendant
-			# (the whole subtree inherits scan_id). Only a no-persist run (dry_run) needs the child's
-			# own-emissions buffer copied into the scan buffer for aggregation.
-			if self.dry_run or self.no_process:
-				for result in workflow._results:
-					self.add_result(result, print=False, hooks=False)
+			# No child-aggregation: the scan's results view (scoped by scan_id) sees every descendant
+			# — the whole subtree inherits scan_id, and dry_run persists too (hooks stay on).
 
 		if sigs:
 			# A scan's start marker carries no prior results (empty `[]`), so it

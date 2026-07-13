@@ -815,7 +815,8 @@ def deep_merge_dicts(*dicts):
 				if isinstance(result[key], dict) and isinstance(value, dict):
 					result[key] = merge_two_dicts(result[key], value)
 				elif isinstance(result[key], list) and isinstance(value, list):
-					result[key] += value  # Concatenating lists
+					# New list, not `+=`: result is a shallow copy of dict1, so `+=` mutates dict1's list.
+					result[key] = result[key] + value
 				else:
 					result[key] = value  # Overwrite if not both lists or both dicts
 			else:
