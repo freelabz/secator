@@ -126,3 +126,12 @@ class TestQueryDispatch(unittest.TestCase):
 		self.assertEqual(result.exit_code, 0)
 		vulns = captured.get('results', {}).get('vulnerability', [])
 		self.assertEqual(sorted(v['name'] for v in vulns), ['XSS'])
+
+	def test_empty_query_returns_all(self):
+		# `secator q -rf tasks/1` (no query expression) must return all findings
+		# scoped by the report filter, not raise "Missing argument ARG".
+		result, captured = self._invoke(['query', '-rf', 'tasks/1', '-ws', WS, '--driver', 'local'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi', 'XSS'])
