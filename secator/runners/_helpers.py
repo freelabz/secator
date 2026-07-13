@@ -373,17 +373,6 @@ class StreamView:
 		return any(x == item for x in self)
 
 
-def run_findings_view(runner):
-	"""Streaming view of THIS run's findings from the store (run-scoped). Nothing is materialized
-	until iterated; len() counts. Used by the read-model `Runner.findings` when a store is active."""
-	from secator.query import QueryEngine
-	from secator.output_types import FINDING_TYPES
-	engine = QueryEngine(runner.context.get('workspace_id'),
-						 context={**runner.context, 'workspace_name': runner.workspace_name})
-	query = {'_type': {'$in': [t.get_name() for t in FINDING_TYPES]}, **run_scope_query(runner.context)}
-	return StreamView(engine, query)
-
-
 def load_output_types(docs):
 	"""Rehydrate store query results (dicts) into OutputType objects.
 

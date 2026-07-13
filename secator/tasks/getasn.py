@@ -56,5 +56,10 @@ class getasn(Command):
 			match=self.inputs[0],
 			value=line.strip(),
 		)
-		if tag not in self.self_results:
+		# Local dedup of own emitted tags (cheap) instead of membership over the streaming view.
+		seen = getattr(self, '_asn_seen', None)
+		if seen is None:
+			seen = self._asn_seen = set()
+		if tag._compare_key() not in seen:
+			seen.add(tag._compare_key())
 			yield tag

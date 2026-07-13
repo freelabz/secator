@@ -44,7 +44,7 @@ class TestTemplate(unittest.TestCase):
 		task.run()
 		findings = task.findings
 		self.assertEqual(len(findings), 1)
-		self.assertTrue(self.expected_vuln == Vulnerability.load(findings[0].toDict()))
+		self.assertTrue(self.expected_vuln == Vulnerability.load(list(findings)[0].toDict()))
 
 	def test_external_workflow(self):
 		find_templates.cache_clear()
@@ -199,10 +199,6 @@ class TestTree(unittest.TestCase):
 		scan.run()
 		self.assertEqual(scan.status, 'SUCCESS')
 		self.assertEqual(len(scan.errors), 0)
-		# from secator.rich import console
-		# tree = build_runner_tree(config)
-		# console.print(tree.render_tree())
-		# console.print('')
 		messages = [r.message for r in scan.infos]
 		self.assertIn(
 			'Skipped task [bold gold3]nuclei/first[/] because condition is not met: [bold green]opts.nuclei[/]',
@@ -225,12 +221,9 @@ class TestTree(unittest.TestCase):
 		scan = Scan(config, run_opts={'dry_run': True, 'test1_nuclei': True})
 		scan.run()
 		self.assertEqual(scan.status, 'SUCCESS')
-		# dry_run has no store and no result payload (dropped), and is no_process so the
-		# store backfill is skipped — the top runner aggregates only the build-time "Skipped"
-		# infos (test2's 3 nuclei-gated tasks). Nested dry-run command previews still print
-		# live; they are simply no longer collected into scan.infos.
-		self.assertEqual(len(scan.infos), 3)
 		self.assertEqual(len(scan.errors), 0)
+		# dry_run doesn't persist; scan.infos serves the in-memory buffer (test2's 3 skipped tasks).
+		self.assertEqual(len(scan.infos), 3)
 		messages = [r.message for r in scan.infos]
 		self.assertNotIn('Skipped task nuclei/first because condition is not met: opts.nuclei', messages)
 		self.assertNotIn('Skipped task nuclei/network because condition is not met: opts.nuclei', messages)

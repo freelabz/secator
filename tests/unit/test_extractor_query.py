@@ -373,36 +373,9 @@ class TestRunnerErrorStatus:
 		r.started = True
 		r.done = True
 		assert r.status == 'SUCCESS'
-		r.add_result(Error(message='boom'), print=False, hooks=False)
+		r.add_result(Error(message='boom'), print=False)
 		assert r.status == 'FAILURE'
 
-	def test_hydrate_runner_errors_from_store(self, monkeypatch):
-		from secator import celery as celery_mod
-		r = _dummy_runner()
-		r.started = True
-		r.done = True
-		assert r.status == 'SUCCESS'
-		err_doc = {'_type': 'error', 'message': 'boom', '_source': r.unique_name}
-		# Stub the store: only errors come back, never the (huge) findings set.
-		monkeypatch.setattr('secator.query.QueryEngine.search', lambda self, *a, **k: [err_doc])
-		celery_mod._hydrate_runner_errors(r)
-		assert r.status == 'FAILURE'
-		assert any(e.message == 'boom' for e in r.self_errors)
-
-	def test_hydrate_error_query_is_run_scoped(self, monkeypatch):
-		# The error query must be bound to this run, not workspace-wide (no cross-run leak).
-		from secator import celery as celery_mod
-		r = _dummy_runner()
-		r.context['scan_id'] = 'R1'
-		captured = {}
-		monkeypatch.setattr('secator.query.QueryEngine.search',
-							lambda self, query, *a, **k: captured.update(query) or [])
-		celery_mod._hydrate_runner_errors(r)
-		assert captured.get('_type') == 'error'
-		assert captured.get('_context.scan_id') == 'R1'
-
-
-class TestBackendParity:
 	def _lower_query(self):
 		return build_extractor_query(
 			{'type': 'port', 'field': 'host', 'condition': "'ssh' in port.service_name.lower()"}, _ctx())
@@ -696,8 +669,9 @@ class TestReadModelMemoryBound:
 		import pickle
 		from secator.tasks import httpx
 		self._seed(tmp_path, monkeypatch, 5)
+		# no dry_run: dry_run serves the (empty) in-memory buffer; we want the seeded store view.
 		runner = httpx(['x'], context={'drivers': ['sqlite'], 'task_id': 'R',
-									   'workspace_id': 'ws', 'workspace_name': 'ws'}, dry_run=True)
+									   'workspace_id': 'ws', 'workspace_name': 'ws'})
 		restored = pickle.loads(pickle.dumps(runner))
 		assert len(restored.findings) == 5                                  # view rebuilt from context
 		assert sorted(f.url for f in restored.findings)[0] == 'http://h/0'  # and it streams

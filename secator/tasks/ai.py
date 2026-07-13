@@ -230,7 +230,7 @@ class ai(PythonRunner):
 			verbose=self.verbose,
 			context=self.context or {},
 			scope=self.scope,
-			results=self._results,  # AI reasons over its own/prior results buffer
+			results=list(self.results),  # AI reasons over its own subtree (store view)
 			max_workers=self.max_workers,
 			subagent=self.is_subagent,
 			sync=self._sync,
@@ -451,7 +451,7 @@ class ai(PythonRunner):
 		self._sync = False if self.async_tasks else self.sync
 		self.history = ChatHistory()
 		self.encryptor = SensitiveDataEncryptor() if self.sensitive else None
-		self.has_previous_results = len(self._results) > 0
+		self.has_previous_results = len(self.results) > 0
 		self.scope = "current" if self.has_previous_results > 0 else "workspace"
 		self.permission_engine = PermissionEngine(
 			CONFIG.addons.ai.permissions,

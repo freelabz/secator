@@ -903,7 +903,7 @@ class TestIsOwnSource(unittest.TestCase):
 		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
 			cmd.name = 'nmap'
 			cmd.unique_name = 'nmap'
-			cmd.results.append(prior_error)
+			cmd.add_result(prior_error, print=False)
 			self.assertEqual(cmd.self_errors, [])
 
 	def test_self_errors_includes_own_errors(self):
@@ -912,7 +912,7 @@ class TestIsOwnSource(unittest.TestCase):
 		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
 			cmd.name = 'nmap'
 			cmd.unique_name = 'nmap'
-			cmd.results.append(own_error)
+			cmd.add_result(own_error, print=False)
 			self.assertEqual(cmd.self_errors, [own_error])
 
 	def test_self_errors_includes_chunk_errors(self):
@@ -921,5 +921,5 @@ class TestIsOwnSource(unittest.TestCase):
 		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
 			cmd.name = 'nmap'
 			cmd.unique_name = 'nmap'
-			cmd.results.append(chunk_error)
+			cmd.add_result(chunk_error, print=False)
 			self.assertEqual(cmd.self_errors, [chunk_error])

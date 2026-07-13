@@ -18,7 +18,7 @@ from secator.config import CONFIG
 from secator.output_types import Error, Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.runners._helpers import resolve_task_queue, run_extractors, run_scope_query
+from secator.runners._helpers import resolve_task_queue, run_extractors
 from secator.utils import debug, should_update
 
 
@@ -407,12 +407,12 @@ def mark_runner_started(results, runner, enable_hooks=True):
 			'workspace_id': runner.context.get('workspace_id'),
 			'workspace_name': runner.workspace_name,
 			'drivers': runner.context.get('drivers', []),
-			'results': runner._results,
+			'results': [],  # extractors query the store
 			'scan_id': runner.context.get('scan_id'),
 			'workflow_id': runner.context.get('workflow_id'),
 			'task_id': runner.context.get('task_id'),
 		}
-		scoped_inputs, _, _ = run_extractors(runner._results, target_extractor_opts, runner.inputs, ctx=ctx)
+		scoped_inputs, _, _ = run_extractors([], target_extractor_opts, runner.inputs, ctx=ctx)
 		for name in scoped_inputs:
 			t = TargetOutput(name=name)
 			t._context['scope'] = scope
@@ -457,11 +457,6 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	# rehydrated into the runner; every consumer queries the store instead.
 	runner.enable_hooks = enable_hooks
 
-	# The payload no longer carries this run's errors, so fetch just this run's errors from
-	# the store (run-scoped) so the runner's status/self_errors compute correctly. Errors are
-	# few (bounded), so materializing them is fine.
-	_hydrate_runner_errors(runner)
-
 	# Run mark_completed (duplicate checks, db updates if enable_hooks is True). The findings
 	# stay in the store — the summary counts them run-scoped, never re-materialized here.
 	runner.mark_completed()
@@ -474,25 +469,6 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 
 	# Topology-only return: the run's results live in the store, not the payload.
 	return []
-
-
-def _hydrate_runner_errors(runner):
-	"""Fetch only this run's Errors from the store so status/self_errors compute without
-	rehydrating the fan-in (RC#6 OOM). Run-scoped (not workspace-wide); _owns_error narrows
-	to the runner's own subtree. Best-effort — a query failure must not break completion.
-	"""
-	try:
-		from secator.query import QueryEngine
-		from secator.output_types import Error
-		engine = QueryEngine(runner.context.get('workspace_id'), context={
-			'drivers': runner.context.get('drivers', []),
-			'workspace_name': runner.workspace_name,
-		})
-		for doc in engine.search({'_type': 'error', **run_scope_query(runner.context)}):
-			err = doc if isinstance(doc, Error) else Error.load(doc)
-			runner.add_result(err, print=False, hooks=False, queue=False)
-	except Exception as e:  # noqa: BLE001
-		debug(f'Runner {runner.unique_name}: failed to hydrate errors for status: {e}', sub='celery')
 
 
 # --------------#
@@ -641,7 +617,6 @@ def break_task(task, task_opts):
 	# Mark main task as async since it's being chunked. Reset the own-emissions buffer + dedup
 	# guard, then re-add chunk Info items so they survive into celery_state['results'] for polling.
 	task.sync = False
-	task._results = []
 	task.uuids = set()
 	for info in chunk_infos:
 		task.add_result(info)
