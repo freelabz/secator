@@ -61,8 +61,7 @@ class QueryEngine:
             # The JSON backend reads from the workspace_name directory (reports are
             # saved by name), not the workspace id.
             workspace_name = self.context.get('workspace_name', self.workspace_id)
-            results = self.context.get('results')
-            return JsonBackend(workspace_name, context=self.context, results=results)
+            return JsonBackend(workspace_name, context=self.context)
         return self.BACKENDS[backend_name](self.workspace_id, context=self.context)
 
     def search(self, query: dict, limit: int = 0, dedupe: bool = False,

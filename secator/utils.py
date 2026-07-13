@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import reduce
 from pathlib import Path
-from time import time
+from time import monotonic, time
 from urllib.parse import urlparse, quote
 
 import humanize
@@ -1533,15 +1533,27 @@ def atomic_json(path, default=dict):
 	path = Path(path)
 	path.parent.mkdir(parents=True, exist_ok=True)
 	lock_path = str(path) + '.lock'
-	with _get_path_lock(path):                        # (1) in-process (greenlet/thread)
+	# Perf instrumentation (SECATOR_DEBUG=perf): one line per call with the lock-acquire wait and
+	# write time, to diagnose gevent-hub stalls / lock contention on the json write path in prod.
+	_t0 = monotonic()
+	lock_wait_ms = write_ms = 0.0
+	with _get_path_lock(path):                        # (1) in-process (greenlet/thread cooperative)
 		with open(lock_path, 'w') as lock_fd:
-			fcntl.flock(lock_fd, fcntl.LOCK_EX)       # (2) cross-process (prefork)
+			fcntl.flock(lock_fd, fcntl.LOCK_EX)       # (2) cross-process (prefork); blocking under gevent
+			lock_wait_ms = (monotonic() - _t0) * 1000
 			try:
 				data = _read_json(path, default)
 				yield data
+				_tw = monotonic()
 				_atomic_write(path, data)             # (3) atomic swap (clean exit only)
+				write_ms = (monotonic() - _tw) * 1000
 			finally:
 				fcntl.flock(lock_fd, fcntl.LOCK_UN)
+	debug(
+		f'atomic_json g={threading.get_ident() % 100000} {path.name} '
+		f'lock_wait={lock_wait_ms:.1f}ms write={write_ms:.1f}ms',
+		sub='perf',
+	)
 
 
 def read_json(path, default=dict):

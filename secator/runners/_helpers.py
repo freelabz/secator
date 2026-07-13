@@ -339,18 +339,26 @@ def process_extractor(results, extractor, ctx=None):
 		return results
 	_type, _field, _condition, _group_by = parsed_extractor
 
-	# Let the backend filter: a DB backend queries the store (fan-in never materialized —
-	# RC#6 OOM fix); the local backend filters the in-memory ctx['results'].
 	query = build_extractor_query(extractor, ctx)
 	if query is None:
 		return []
-	from secator.query import QueryEngine
-	engine = QueryEngine(ctx.get('workspace_id'), context={
-		'drivers': ctx.get('drivers', []),
-		'results': ctx.get('results', results),
-		'workspace_name': ctx.get('workspace_name'),
-	})
-	results = engine.search(query)
+	in_memory = ctx.get('results') or results
+	if in_memory:
+		# Caller handed us a materialized finding list (unit tests / sync library callers):
+		# filter it directly with the same match_query the local backend uses — no store
+		# round-trip. This is an explicit argument, NOT the runner's in-memory results.
+		from secator.query.json import match_query
+		results = [r for r in in_memory if match_query(r, query)]
+	else:
+		# Live run: findings live only in the store. Query it — the DB backend pushes the
+		# filter down (fan-in never materialized, RC#6 OOM fix); the local backend reads the
+		# run's report.json files.
+		from secator.query import QueryEngine
+		results = QueryEngine(ctx.get('workspace_id'), context={
+			'drivers': ctx.get('drivers', []),
+			'workspace_name': ctx.get('workspace_name'),
+			'report_dir': ctx.get('report_dir'),
+		}).search(query)
 	debug(f'extracted {len(results)} results (key: {key}) via query {query}', sub='extractor')
 
 	if _field:

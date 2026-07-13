@@ -2,6 +2,7 @@ import gc
 import json
 import logging
 import os
+import threading
 
 from time import time
 
@@ -278,6 +279,9 @@ def worker_loss_retries_exhausted(delivery_count, max_retries):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
+	# Perf instrumentation (SECATOR_DEBUG=perf): task entry point + greenlet id, to diagnose
+	# worker concurrency / serialization (which chunks run on which greenlet, and when).
+	debug(f'run_command ENTER g={threading.get_ident() % 100000} {name} targets={targets}', sub='perf')
 	# Set Celery request id in context
 	context = opts.get('context', {})
 	context['celery_id'] = self.request.id

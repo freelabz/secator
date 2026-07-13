@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES
 from secator.utils import get_file_timestamp, traceback_as_string
@@ -73,15 +75,20 @@ class Report:
 		# library Report(runner)); JsonBackend prefers the live files when present (#1299),
 		# so for a real run this fallback never shadows the store.
 		context = dict(getattr(self.runner, 'context', {}) or {})
-		if 'results' not in context or not context.get('results'):
-			raw_results = getattr(self.runner, 'results', []) or []
-			if raw_results:
-				context['results'] = raw_results
-			elif 'results' in context:
-				# Remove empty list so JsonBackend falls through to filesystem scan
-				del context['results']
+		# The store (run-scoped report.json / DB) is the SOLE source of results — no in-memory
+		# results are ever passed to the backend.
+		context.pop('results', None)
 		if 'workspace_name' not in context:
 			context['workspace_name'] = self.workspace_name
+
+		# Scope the JsonBackend read to THIS run's own report.json (like Runner._view) instead of
+		# scanning every report in the workspace — O(run) not O(workspace). The run's own file
+		# already holds its complete result set (fan-in re-persists descendants up). Gate on the
+		# file actually existing: `report show`/consolidated aggregation has no single run dir
+		# (reports_folder is cwd/an output folder), so it keeps the full workspace scan.
+		reports_folder = getattr(self.runner, 'reports_folder', None)
+		if reports_folder and 'report_dir' not in context and (Path(reports_folder) / 'report.json').exists():
+			context['report_dir'] = str(reports_folder)
 
 		# Bound the query to THIS run so a shared workspace's other runs don't leak in.
 		from secator.runners._helpers import run_scope_query, StreamView

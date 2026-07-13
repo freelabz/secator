@@ -138,9 +138,8 @@ class JsonBackend(QueryBackend):
 	name = "json"
 
 	def __init__(self, workspace_id: str, config: Optional[dict] = None,
-				 context: Optional[dict] = None, results: Optional[list] = None):
+				 context: Optional[dict] = None):
 		super().__init__(workspace_id, config, context=context)
-		self._results = results
 		self._findings_cache = None
 		reports_dir = config.get('reports_dir', CONFIG.dirs.reports) if config else CONFIG.dirs.reports
 		self.reports_dir = Path(reports_dir).expanduser()
@@ -158,19 +157,15 @@ class JsonBackend(QueryBackend):
 		return self.reports_dir / workspace_folder
 
 	def _load_all_findings(self) -> List[Dict[str, Any]]:
-		"""Load all findings from the LIVE workspace report.json files, falling back to
-		pre-loaded in-memory results only when the filesystem yields nothing.
+		"""Load findings from the LIVE report.json store — the SOLE source (no in-memory results).
 
-		The json driver (#1299) writes each runner's report.json as results are produced,
-		so the files are the authoritative store mid-run. Reading self._results first would
-		shadow those live files (the payload is topology-only once the chain payload is
-		dropped), so we invert: files first, self._results only as a fallback.
+		The json driver (#1299) writes each runner's report.json as results are produced, so the
+		files are the authoritative store. A run-scoped read (``context['report_dir']``) reads only
+		this run's report.json; without the hint it falls back to a full workspace scan.
 		"""
 		if self._findings_cache is not None:
 			return self._findings_cache
 		findings = self._load_from_files()
-		if not findings and self._results is not None:
-			findings = self._results
 		self._findings_cache = findings
 		return findings
 
@@ -256,19 +251,53 @@ class JsonBackend(QueryBackend):
 		findings = self._load_all_findings()
 		return sum(1 for f in findings if match_query(f, query))
 
+	def _report_files(self):
+		"""Yield the report.json paths this backend reads — the run-scoped file when
+		``context['report_dir']`` is set, else every report in the workspace."""
+		report_dir = self.context.get('report_dir')
+		if report_dir:
+			p = Path(report_dir) / 'report.json'
+			if p.exists():
+				yield p
+			return
+		workspace_path = self._get_workspace_path()
+		if not workspace_path.exists():
+			return
+		for runner_type in ['tasks', 'workflows', 'scans']:
+			runner_path = workspace_path / runner_type
+			if not runner_path.exists():
+				continue
+			for d in runner_path.iterdir():
+				if d.is_dir() and (d / 'report.json').exists():
+					yield d / 'report.json'
+
 	def _execute_update(self, query: dict, update: dict) -> int:
-		"""Update in-memory records matching query."""
-		if self._results is None:
-			return 0
+		"""Apply a ``$set`` update to matching findings directly in the report.json store.
+
+		The store is the source of truth (no in-memory results). Each matching file is
+		rewritten atomically; a read-first dirty check skips files with no match so an
+		update never rewrites the whole workspace.
+		"""
 		set_fields = update.get("$set", {})
 		if not set_fields:
 			return 0
+		from secator.utils import atomic_json, read_json
 		count = 0
-		for i, record in enumerate(self._results):
-			if match_query(record, query):
-				for k, v in set_fields.items():
-					self._results[i][k] = v
-				count += 1
+		for path in self._report_files():
+			data = read_json(path, default=None)
+			if not data:
+				continue
+			buckets = data.get('results', {})
+			if not any(match_query(it, query) for b in buckets.values() if isinstance(b, list) for it in b):
+				continue
+			with atomic_json(path, default={'info': {}, 'results': {}}) as d:
+				for bucket in d.get('results', {}).values():
+					if isinstance(bucket, list):
+						for item in bucket:
+							if match_query(item, query):
+								item.update(set_fields)
+								count += 1
+		self._findings_cache = None
 		return count
 
 	def list_workspaces(self):

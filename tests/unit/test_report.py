@@ -19,6 +19,13 @@ class TestReportBuild:
 
     def _make_runner(self, results, workspace='test_ws', drivers=None):
         config = SimpleNamespace(name='test_runner', type='task')
+        # Store-only model: findings live in the run's report.json, not in memory.
+        reports_folder = Path(tempfile.mkdtemp())
+        grouped = {}
+        for r in results:
+            grouped.setdefault(r['_type'], []).append(r)
+        with open(reports_folder / 'report.json', 'w') as f:
+            json.dump({'info': {'name': 'test_runner'}, 'results': grouped}, f)
         runner = _FakeRunner(
             config=config,
             workspace_name=workspace,
@@ -27,9 +34,8 @@ class TestReportBuild:
                 'workspace_id': workspace,
                 'workspace_name': workspace,
                 'drivers': drivers or [],
-                'results': results,
             },
-            reports_folder=Path(tempfile.mkdtemp()),
+            reports_folder=reports_folder,
             results=results,
             _to_dict={
                 'name': 'test_runner',
@@ -159,13 +165,19 @@ class TestJsonlExporter:
 
     def _make_report(self, results):
         config = SimpleNamespace(name='test_runner', type='task')
+        # Store-only model: findings live in the run's report.json, not in memory.
+        reports_folder = Path(tempfile.mkdtemp())
+        grouped = {}
+        for r in results:
+            grouped.setdefault(r['_type'], []).append(r)
+        with open(reports_folder / 'report.json', 'w') as f:
+            json.dump({'info': {'name': 'test_runner'}, 'results': grouped}, f)
         runner = SimpleNamespace(
             config=config,
             workspace_name='test_ws',
             errors=[],
-            context={'workspace_id': 'test_ws', 'workspace_name': 'test_ws', 'results': results},
-            reports_folder=Path(tempfile.mkdtemp()),
-            results=results,
+            context={'workspace_id': 'test_ws', 'workspace_name': 'test_ws'},
+            reports_folder=reports_folder,
         )
         runner.toDict = lambda: {
             'name': 'test_runner', 'status': 'completed', 'targets': [],
