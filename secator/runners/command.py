@@ -502,9 +502,8 @@ class Command(Runner):
 			self.print_command()
 
 			# Check for sudo requirements and prepare the password if needed
-			sudo_required = re.search(r'\bsudo\b', self.cmd)
 			sudo_password = None
-			if CONFIG.security.prompt_sudo_password and sudo_required:
+			if CONFIG.security.prompt_sudo_password and self.requires_sudo:
 				self.debug('prompting for sudo password', sub='start')
 				sudo_password, error = self._prompt_sudo(self.cmd)
 				if error:
@@ -544,7 +543,7 @@ class Command(Runner):
 				stdout=subprocess.PIPE,
 				stderr=subprocess.STDOUT,
 				universal_newlines=True,
-				preexec_fn=os.setsid if not (sudo_required or self.disable_preexec) else None,
+				preexec_fn=os.setsid if not (self.requires_sudo or self.disable_preexec) else None,
 				shell=self.shell,
 				errors='replace',
 				env=env,
