@@ -723,6 +723,12 @@ class Runner:
 	def _run_extractors(self):
 		"""Run extractors on results and targets."""
 		self.debug('running extractors', sub='init')
+		# Scope the extractor's store query to THIS run's report.json instead of scanning every report
+		# in the workspace (the fan-in re-persists descendants up, so the run's own file holds the
+		# complete set — same scoping Runner._view/report.py use). Gate on the file existing so a run
+		# without a live file falls back to the full scan. Only meaningful for the local json backend.
+		rf = self.reports_folder
+		report_dir = str(rf) if rf and (Path(rf) / 'report.json').exists() else None
 		ctx = {
 			'opts': DotMap(self.run_opts),
 			'targets': self.inputs,
@@ -731,6 +737,7 @@ class Runner:
 			'workspace_name': self.workspace_name,
 			'drivers': self.context.get('drivers', []),
 			'results': [],  # extractors query the store; no in-memory results at init
+			'report_dir': report_dir,
 			'scan_id': self.context.get('scan_id'),
 			'workflow_id': self.context.get('workflow_id'),
 			'task_id': self.context.get('task_id'),

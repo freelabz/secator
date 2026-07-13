@@ -571,6 +571,35 @@ class TestScopeTargetPersistence:
 		assert sorted(got) == sorted(names)
 
 
+class TestExtractorReportDirScoping:
+	"""The extractor's store query reads only THIS run's report.json (context['report_dir']) instead of
+	scanning every report in the workspace — the domain-scan cascade (host_recon) used to full-scan."""
+
+	def test_extractor_scopes_to_run_report_dir(self, tmp_path, monkeypatch):
+		import json as _json
+		from secator.config import CONFIG
+		from secator.runners._helpers import run_extractors
+		monkeypatch.setattr(CONFIG.dirs, 'reports', str(tmp_path))
+
+		def _seed(scan_no, sid, hosts):
+			d = tmp_path / 'default' / 'scans' / str(scan_no)
+			d.mkdir(parents=True)
+			ports = [{'_type': 'port', 'host': h, 'port': 22, 'service_name': 'ssh', '_uuid': f'{sid}-{h}',
+					  '_context': {'scan_id': sid, 'workspace_id': 'default', 'ancestor_id': 'host_recon'}}
+					 for h in hosts]
+			_json.dump({'info': {'context': {'scan_id': sid}}, 'results': {'port': ports}},
+					   open(d / 'report.json', 'w'))
+
+		_seed(1, 'S1', ['a.com', 'b.com'])   # this run
+		_seed(2, 'S2', ['z.com'])            # a sibling run — must NOT leak into the scoped read
+
+		ctx = {'workspace_id': 'default', 'workspace_name': 'default', 'drivers': ['json'], 'results': [],
+			   'report_dir': str(tmp_path / 'default' / 'scans' / '1'), 'scan_id': 'S1', 'ancestor_id': 'host_recon'}
+		extractor = {'targets_': [{'type': 'port', 'field': 'host', 'condition': 'port.port == 22'}]}
+		inputs = run_extractors([], extractor, [], ctx=ctx)[0]
+		assert sorted(inputs) == ['a.com', 'b.com']  # scoped to run 1; S2's z.com excluded
+
+
 class TestReadModelMemoryBound:
 	"""The read-model RAM gate: with ~300k findings in the store under one scan_id, the runner's
 	findings VIEW streams flat (peak ~ one batch), and len() is an indexed count — never the O(N)
