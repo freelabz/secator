@@ -1471,16 +1471,18 @@ def _get_path_lock(path):
 
 
 def _read_json(path, default):
-	"""Read a JSON file, tolerating absence / partial writes.
+	"""Read a JSON file. Absent -> default(); corrupt -> raise.
 
-	os.replace makes torn reads impossible in the normal path; the JSONDecodeError
-	guard is belt-and-suspenders for an externally-truncated file. ``default`` is a
-	callable factory (e.g. ``dict``) returning the fallback on absence/corruption.
+	Absence is normal (first write), so it returns ``default()`` (a callable
+	factory, e.g. ``dict``). Corruption is NOT normal — os.replace makes torn
+	writes impossible, so a JSONDecodeError means a real anomaly. We let it
+	propagate rather than reset to empty, so a read-modify-write never clobbers a
+	corrupt-but-present file (and its accumulated data) with a blank one.
 	"""
 	try:
 		with open(path, 'r') as f:
 			return json.load(f)
-	except (FileNotFoundError, json.JSONDecodeError):
+	except FileNotFoundError:
 		return default()
 
 
@@ -1506,8 +1508,10 @@ def _atomic_write(path, data):
 def atomic_json(path, default=dict):
 	"""Locked read-modify-write of a JSON file, as a context manager.
 
-	Yields the parsed data (default() if the file is absent/corrupt); the caller
-	mutates it in place. On clean block exit the data is written back atomically
+	Yields the parsed data (default() if the file is absent; a present-but-corrupt
+	file raises rather than being reset to empty, so a read-modify-write never
+	clobbers accumulated data); the caller mutates it in place. On clean block exit
+	the data is written back atomically
 	(tempfile + fsync + os.replace). On exception, nothing is written — the file
 	is left unchanged. The layered lock is always released in ``finally``.
 
@@ -1516,7 +1520,7 @@ def atomic_json(path, default=dict):
 	Args:
 		path (str | Path): JSON file path (parent dirs are created).
 		default (callable): factory for the fallback value when the file is
-			absent/corrupt, e.g. ``dict``, ``list``, ``lambda: {'info': {}, 'results': {}}``.
+			absent, e.g. ``dict``, ``list``, ``lambda: {'info': {}, 'results': {}}``.
 
 	Notes:
 		- The block runs while the lock is HELD — keep it to the read-modify-write,
@@ -1544,6 +1548,7 @@ def read_json(path, default=dict):
 
 	Safe without a lock because writers use os.replace(), so a reader always sees a
 	complete old-or-new file, never a torn write. Returns ``default()`` (a callable
-	factory) if the file is absent or corrupt.
+	factory) if the file is absent; a present-but-corrupt file raises
+	JSONDecodeError (a real anomaly, not silently masked).
 	"""
 	return _read_json(path, default)

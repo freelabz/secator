@@ -10,6 +10,8 @@ import shutil
 import unittest
 from pathlib import Path
 
+import pytest
+
 
 # --- module-level workers (must be importable/picklable for multiprocessing) ---
 
@@ -48,6 +50,15 @@ class AtomicJsonTestBase(unittest.TestCase):
 	def _items(self):
 		data = json.loads(Path(self.path).read_text())  # must be valid JSON (no torn write)
 		return data['items']
+
+	def _join(self, procs, timeout=60):
+		"""Join workers; terminate any that time out so a regression can't hang the suite."""
+		for p in procs:
+			p.join(timeout)
+			if p.is_alive():
+				p.terminate()
+				p.join(5)
+			self.assertEqual(p.exitcode, 0, f'worker {p.pid} did not exit cleanly (exitcode={p.exitcode})')
 
 
 class TestAtomicJson(AtomicJsonTestBase):
@@ -91,26 +102,25 @@ class TestAtomicJson(AtomicJsonTestBase):
 		]
 		for p in procs:
 			p.start()
-		for p in procs:
-			p.join(60)
-			self.assertEqual(p.exitcode, 0)
+		self._join(procs)
 		items = self._items()
 		self.assertEqual(len(items), self.N_WORKERS * self.PER_WORKER)
 		self.assertEqual(len(set(items)), self.N_WORKERS * self.PER_WORKER)
 
 	def test_concurrent_gevent_greenlets(self):
 		"""N greenlets in one (isolated, monkey-patched) process append to one file."""
+		pytest.importorskip('gevent')
 		ctx = mp.get_context('spawn')
 		p = ctx.Process(target=_gevent_child, args=(self.path, self.N_WORKERS, self.PER_WORKER))
 		p.start()
-		p.join(60)
-		self.assertEqual(p.exitcode, 0)
+		self._join([p])
 		items = self._items()
 		self.assertEqual(len(items), self.N_WORKERS * self.PER_WORKER)
 		self.assertEqual(len(set(items)), self.N_WORKERS * self.PER_WORKER)
 
 	def test_concurrent_mixed_processes_and_greenlets(self):
 		"""prefork processes AND a gevent-greenlet process share one file."""
+		pytest.importorskip('gevent')
 		fork = mp.get_context('fork')
 		spawn = mp.get_context('spawn')
 		procs = [
@@ -121,9 +131,7 @@ class TestAtomicJson(AtomicJsonTestBase):
 		for p in procs:
 			p.start()
 		gproc.start()
-		for p in procs + [gproc]:
-			p.join(60)
-			self.assertEqual(p.exitcode, 0)
+		self._join(procs + [gproc])
 		items = self._items()
 		self.assertEqual(len(items), 2 * self.N_WORKERS * self.PER_WORKER)
 		self.assertEqual(len(set(items)), 2 * self.N_WORKERS * self.PER_WORKER)
@@ -135,10 +143,18 @@ class TestReadJson(AtomicJsonTestBase):
 		self.assertEqual(read_json(self.path, default=dict), {})
 		self.assertEqual(read_json(self.path, default=lambda: {'items': []}), {'items': []})
 
-	def test_corrupt_returns_default(self):
-		from secator.utils import read_json
+	def test_corrupt_raises_not_masked(self):
+		# A present-but-corrupt file is a real anomaly, not a normal partial write:
+		# read_json (and atomic_json) must raise, never silently reset to default and
+		# clobber accumulated data.
+		from secator.utils import atomic_json, read_json
 		Path(self.path).write_text('{ not valid json')
-		self.assertEqual(read_json(self.path, default=lambda: {'items': []}), {'items': []})
+		with self.assertRaises(json.JSONDecodeError):
+			read_json(self.path, default=lambda: {'items': []})
+		with self.assertRaises(json.JSONDecodeError):
+			with atomic_json(self.path, default=lambda: {'items': []}):
+				pass
+		self.assertEqual(Path(self.path).read_text(), '{ not valid json')  # unchanged
 
 	def test_present_returns_data(self):
 		from secator.utils import atomic_json, read_json
@@ -157,9 +173,7 @@ class TestReadJson(AtomicJsonTestBase):
 		for _ in range(200):
 			snap = read_json(self.path, default=lambda: {'items': []})
 			self.assertIsInstance(snap['items'], list)
-		for p in procs:
-			p.join(60)
-			self.assertEqual(p.exitcode, 0)
+		self._join(procs)
 
 
 if __name__ == '__main__':
