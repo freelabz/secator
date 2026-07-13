@@ -255,7 +255,7 @@ class TestCallLLM(unittest.TestCase):
         mock_completion.side_effect = err
 
         with self.assertRaises(litellm.BadRequestError):
-            call_llm([{"role": "user", "content": "hi"}], "test-model", max_retries=3)
+            call_llm([{"role": "user", "content": "hi"}], "test-model")
 
         self.assertEqual(mock_completion.call_count, 1)  # no 3x spin
         mock_sleep.assert_not_called()
@@ -290,7 +290,7 @@ class TestCallLLM(unittest.TestCase):
             return ok_response
 
         mock_completion.side_effect = side_effect
-        result = call_llm([{"role": "user", "content": "hi"}], "claude", max_retries=3)
+        result = call_llm([{"role": "user", "content": "hi"}], "claude")
 
         self.assertEqual(result["content"], "ok")
         self.assertEqual(mock_completion.call_count, 2)  # repaired then succeeded
@@ -329,7 +329,7 @@ class TestCallLLM(unittest.TestCase):
             return ok_response
 
         mock_completion.side_effect = side_effect
-        result = call_llm([{"role": "user", "content": "hi"}], "claude", max_retries=3)
+        result = call_llm([{"role": "user", "content": "hi"}], "claude")
 
         self.assertEqual(result["content"], "ok")
         self.assertEqual(mock_completion.call_count, 2)  # deduped then succeeded
@@ -355,7 +355,7 @@ class TestCallLLM(unittest.TestCase):
         )
         mock_completion.side_effect = [err, ok_response]
 
-        result = call_llm([{"role": "user", "content": "hi"}], "test-model", max_retries=3)
+        result = call_llm([{"role": "user", "content": "hi"}], "test-model")
 
         self.assertEqual(result["content"], "ok")
         self.assertEqual(mock_completion.call_count, 2)  # transient retry honored
@@ -378,7 +378,7 @@ class TestPromptUserAllChoices(unittest.TestCase):
         mock_menu_class.return_value = mock_menu
 
         history = ChatHistory()
-        history.add_system("system")
+        history.set_system("system")
 
         prompt_user(history, choices=["Single choice"])
 
@@ -401,7 +401,7 @@ class TestPromptUserAllChoices(unittest.TestCase):
         mock_menu_class.return_value = mock_menu
 
         history = ChatHistory()
-        history.add_system("system")
+        history.set_system("system")
 
         prompt_user(history, choices=["Choice A", "Choice B"])
 
@@ -423,7 +423,7 @@ class TestPromptUserAllChoices(unittest.TestCase):
         mock_menu_class.return_value = mock_menu
 
         history = ChatHistory()
-        history.add_system("system")
+        history.set_system("system")
 
         prompt_user(history, choices=["Choice A", "Choice B", "Choice C"])
 
@@ -450,7 +450,7 @@ class TestPromptUserAllChoices(unittest.TestCase):
         mock_menu_class.return_value = mock_menu
 
         history = ChatHistory()
-        history.add_system("system")
+        history.set_system("system")
 
         result = prompt_user(history, choices=choices, max_iterations=10)
 
@@ -471,7 +471,7 @@ class TestPromptUserAllChoices(unittest.TestCase):
         mock_menu_class.return_value = mock_menu
 
         history = ChatHistory()
-        history.add_system("system")
+        history.set_system("system")
 
         result = prompt_user(history, choices=choices)
 
@@ -593,7 +593,7 @@ class TestRepairOrphanToolUses(unittest.TestCase):
 
         with patch('litellm.completion', side_effect=completion_side_effect), \
                 patch('time.sleep') as mock_sleep:
-            result = call_llm(messages, "claude", max_retries=3)
+            result = call_llm(messages, "claude")
 
         self.assertEqual(result["content"], "ok")
         mock_sleep.assert_not_called()  # repair branch should skip the backoff sleep

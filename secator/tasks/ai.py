@@ -149,7 +149,6 @@ class ai(PythonRunner):
 		"max_iterations": {"type": int, "default": 10, "help": "Max iterations"},
 		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
-		"yes": {"is_flag": True, "default": False, "short": "y", "help": "Auto-accept"},
 		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
 		"max_tokens_total": {
 			"type": int, "default": CONFIG.addons.ai.max_tokens_total,

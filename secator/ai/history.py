@@ -2,7 +2,6 @@
 """Chat history management for AI task - litellm format."""
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -73,8 +72,6 @@ def truncate_to_tokens(
     max_tokens: int,
     model: str,
     fallback_path: Path = None,
-    output_dir: Path = None,
-    result_name: str = "result"
 ) -> str:
     """Truncate content to fit within token budget, with file fallback.
 
@@ -83,8 +80,6 @@ def truncate_to_tokens(
         max_tokens: Maximum tokens allowed
         model: LLM model name for token counting
         fallback_path: Existing file to reference (task/workflow report.json)
-        output_dir: Directory to save shell output (creates file)
-        result_name: Prefix for saved filename
 
     Returns:
         Original content if under budget, or truncated with [TRUNCATED] marker
@@ -101,13 +96,6 @@ def truncate_to_tokens(
     if fallback_path and fallback_path.exists():
         file_hint = f"\nFull output: {fallback_path}"
         debug(f'using existing fallback: {fallback_path}', sub='runner.ai.context')
-    elif output_dir:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        fallback_path = output_dir / f"{result_name}_{timestamp}.txt"
-        fallback_path.write_text(content)
-        file_hint = f"\nFull output saved to: {fallback_path}"
-        debug(f'saved output to: {fallback_path}', sub='runner.ai.context')
     else:
         file_hint = ""
 
@@ -163,9 +151,6 @@ class ChatHistory:
     billed_completion_tokens: int = 0
     billed_cost: float = 0.0
 
-    def add_system(self, content: str) -> None:
-        self.messages.append({"role": "system", "content": content})
-
     def set_system(self, content: str) -> None:
         """Replace the first system message, or insert one at the start.
 
@@ -209,9 +194,6 @@ class ChatHistory:
         if name:
             msg["name"] = name
         self.messages.append(msg)
-
-    def add_tool(self, content: str) -> None:
-        self.messages.append({"role": "tool", "content": content})
 
     def to_messages(self, max_tokens_total: int = 0) -> List[Dict[str, str]]:
         """Return a copy of the messages list, trimming if over the effective budget.
@@ -365,19 +347,18 @@ class ChatHistory:
         )
         return available
 
-    def should_compact(self, model: str, threshold_pct: int = COMPACTION_THRESHOLD_PCT) -> bool:
+    def should_compact(self, model: str) -> bool:
         """Check if compaction needed based on % of context used.
 
         Args:
             model: LLM model name
-            threshold_pct: Percentage threshold (default 85)
 
         Returns:
             True if compaction needed
         """
         usable = _usable_tokens(model)
         used = self.count_tokens(model)
-        threshold = usable * threshold_pct / 100
+        threshold = usable * COMPACTION_THRESHOLD_PCT / 100
         should = used > threshold
         pct_used = (used / usable * 100) if usable > 0 else 0
         debug(
@@ -413,7 +394,7 @@ class ChatHistory:
         return True, old_tokens, new_tokens
 
     def compact(self, model: str, api_base: Optional[str] = None,
-                api_key: Optional[str] = None, keep_last: int = 4) -> None:
+                api_key: Optional[str] = None) -> None:
         """Summarize non-system messages using an LLM, keeping the initial system prompt
         and the last few messages intact so the LLM retains recent context.
 
@@ -421,8 +402,8 @@ class ChatHistory:
             model: LLM model name
             api_base: Optional API base URL
             api_key: Optional API key
-            keep_last: Number of recent non-system messages to preserve (default 4)
         """
+        keep_last = 4
         if len(self.messages) <= 2:
             return
 

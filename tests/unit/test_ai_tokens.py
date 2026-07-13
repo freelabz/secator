@@ -121,7 +121,7 @@ class TestAiTokenAccounting(unittest.TestCase):
 	def test_history_compact_records_billed_usage(self):
 		"""ChatHistory.compact accrues the summarization call's billed tokens."""
 		history = ChatHistory(model="test-model")
-		history.add_system("system")
+		history.set_system("system")
 		history.add_user("u1")
 		history.add_assistant("a1")
 		history.add_user("u2")
@@ -132,7 +132,7 @@ class TestAiTokenAccounting(unittest.TestCase):
 		fake = {"content": "summary", "usage": {"tokens": 321, "cost": 0.003}}
 		with patch('secator.ai.utils.call_llm', return_value=fake):
 			with patch('secator.ai.history.get_context_window', return_value=8000):
-				history.compact("test-model", keep_last=2)
+				history.compact("test-model")
 
 		self.assertEqual(history.billed_tokens, 321)
 		self.assertAlmostEqual(history.billed_cost, 0.003)
@@ -140,7 +140,7 @@ class TestAiTokenAccounting(unittest.TestCase):
 	def test_history_compact_missing_usage_is_zero(self):
 		"""compact() with no usage on the response adds 0 billed tokens."""
 		history = ChatHistory(model="test-model")
-		history.add_system("system")
+		history.set_system("system")
 		history.add_user("u1")
 		history.add_assistant("a1")
 		history.add_user("u2")
@@ -151,7 +151,7 @@ class TestAiTokenAccounting(unittest.TestCase):
 		fake = {"content": "summary", "usage": None}
 		with patch('secator.ai.utils.call_llm', return_value=fake):
 			with patch('secator.ai.history.get_context_window', return_value=8000):
-				history.compact("test-model", keep_last=2)
+				history.compact("test-model")
 
 		self.assertEqual(history.billed_tokens, 0)
 
@@ -453,7 +453,7 @@ class TestAiToolPairTrim(unittest.TestCase):
 	def test_trim_strips_leading_orphan_tool(self):
 		"""After litellm drops the assistant parent, trim() removes the orphan tool."""
 		history = ChatHistory(model="test-model")
-		history.add_system("sys")
+		history.set_system("sys")
 		history.add_assistant_with_tool_calls(None, [{"id": "t1", "function": {"name": "noop", "arguments": "{}"}}])
 		history.add_tool_result("noop", "t1", "{}")
 		history.add_user("u1")
@@ -467,19 +467,20 @@ class TestAiToolPairTrim(unittest.TestCase):
 		self.assertFalse(any(m["role"] == "tool" for m in out))
 
 	def test_compact_strips_leading_orphan_tool_in_kept_tail(self):
-		"""keep_last tail cut that starts on a tool_result is repaired."""
+		"""keep_last (fixed at 4) tail cut that starts on a tool_result is repaired."""
 		history = ChatHistory(model="test-model")
-		history.add_system("sys")
+		history.set_system("sys")
 		history.add_user("u1")
 		history.add_assistant_with_tool_calls(None, [{"id": "t1", "function": {"name": "noop", "arguments": "{}"}}])
 		history.add_tool_result("noop", "t1", "{}")
+		history.add_user("u_filler")
 		history.add_assistant("a2")
 		history.add_user("u2")
 
 		fake = {"content": "summary", "usage": None}
 		with patch('secator.ai.utils.call_llm', return_value=fake):
 			with patch('secator.ai.history.get_context_window', return_value=8000):
-				history.compact("test-model", keep_last=3)
+				history.compact("test-model")
 
 		nonsys = [m for m in history.messages if m["role"] != "system"]
 		self.assertIn(nonsys[0]["role"], ("user", "assistant"))

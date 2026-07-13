@@ -839,7 +839,7 @@ class TestMainLoopLocalE2E(unittest.TestCase):
 		engine = PermissionEngine(_make_permission_config(), targets=["10.0.0.1"], workspace="/tmp/ws")
 		ctx = _make_ctx(interactive="local", engine=engine)
 		history = ChatHistory()
-		history.add_system("You are a pentester.")
+		history.set_system("You are a pentester.")
 		history.add_user("Scan 10.0.0.1")
 
 		# --- Turn 1: LLM returns shell tool call ---
@@ -928,7 +928,7 @@ class TestMainLoopRemoteE2E(unittest.TestCase):
 
 		ctx = _make_ctx(interactive="remote", backend=mock_backend, engine=engine, session_id="remote-e2e")
 		history = ChatHistory()
-		history.add_system("You are a pentester.")
+		history.set_system("You are a pentester.")
 		history.add_user("Scan 10.0.0.1")
 
 		# --- Turn 1: Shell command needing remote permission ---
@@ -987,7 +987,7 @@ class TestMainLoopAutoE2E(unittest.TestCase):
 		"""
 		ctx = _make_ctx(interactive="auto")
 		history = ChatHistory()
-		history.add_system("You are a pentester.")
+		history.set_system("You are a pentester.")
 		history.add_user("Scan 10.0.0.1")
 
 		# --- Turn 1: Unknown command → blocked ---

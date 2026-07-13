@@ -649,12 +649,13 @@ def call_llm(
 	temperature: float = 0.7,
 	api_base: Optional[str] = None,
 	api_key: Optional[str] = None,
-	max_retries: int = 3,
 	tools: Optional[List[Dict]] = None,
 ) -> Dict:
 	"""Call litellm completion and return response with usage."""
 	import time
 	import litellm
+
+	max_retries = 3
 
 	# Initialize litellm once (avoids callback accumulation)
 	init_llm(api_key=api_key)
@@ -797,15 +798,14 @@ def setup_ai():
 				all_parts.add(p)
 	part_colors = {p: MODEL_COLORS[i % len(MODEL_COLORS)] for i, p in enumerate(sorted(all_parts))}
 
-	def _format_model(m, idx=None):
+	def _format_model(m, idx):
 		parts = m.split('/')
 		if len(parts) > 1:
 			segments = [f"[bold {part_colors[p]}]{p}[/]" for p in parts[:-1]]
 			colored = '/'.join(segments) + f"/[bold white]{parts[-1]}[/]"
 		else:
 			colored = f"[bold white]{m}[/]"
-		prefix = f"[dim]{idx:>4}[/] " if idx is not None else "  "
-		return prefix + colored
+		return f"[dim]{idx:>4}[/] " + colored
 
 	def _show_models(displayed, suffix, leading_newline=False):
 		prefix = "\n" if leading_newline else ""

@@ -680,27 +680,22 @@ def build_target_choices(target: str) -> List[Dict]:
 			{
 				"label": f"Allow this URL only ({base_path})",
 				"rules": [f"target({base_path}*)"],
-				"selected": False,
 			},
 			{
 				"label": f"Allow all URLs from {host_port}",
 				"rules": host_rules,
-				"selected": False,
 			},
 			{
 				"label": f"Allow all URLs from {host} (any port)",
 				"rules": host_rules,
-				"selected": False,
 			},
 			{
 				"label": "All of the above",
 				"rules": host_rules,
-				"selected": False,
 			},
 			{
 				"label": "Deny (block this action)",
 				"rules": [],
-				"selected": False,
 			},
 		]
 		# Deduplicate options 2 and 3 when there's no port
@@ -715,27 +710,22 @@ def build_target_choices(target: str) -> List[Dict]:
 			{
 				"label": f"Allow {target} only",
 				"rules": [host_rule],
-				"selected": False,
 			},
 			{
 				"label": f"Allow {target} (any port)",
 				"rules": [host_rule, port_rule],
-				"selected": False,
 			},
 			{
 				"label": f"Allow all URLs from {target} (any port)",
 				"rules": [host_rule, port_rule, url_rule, f"target((http|https)://{target}/*)"],
-				"selected": False,
 			},
 			{
 				"label": "All of the above",
 				"rules": [host_rule, port_rule, url_rule, f"target((http|https)://{target}/*)"],
-				"selected": False,
 			},
 			{
 				"label": "Deny (block this action)",
 				"rules": [],
-				"selected": False,
 			},
 		]
 	return choices
