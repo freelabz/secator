@@ -494,7 +494,7 @@ class TestMarkRunnerStartedScopeEmission(unittest.TestCase):
 
         # mark_runner_started returns topology-only now; the emitted scope Targets land in
         # the runner's results (and the store), resolved by querying the persisted Ports.
-        mark_runner_started([], wf, enable_hooks=False)
+        mark_runner_started([], wf, enable_hooks=True)  # real runs enable hooks (persist via on_item)
 
         scoped_targets = [
             r for r in wf.results
@@ -516,7 +516,7 @@ class TestMarkRunnerStartedScopeEmission(unittest.TestCase):
 
         prior_ports = [self._make_port('example.com', 80)]
         self._persist_ports(prior_ports)
-        mark_runner_started([], wf, enable_hooks=False)
+        mark_runner_started([], wf, enable_hooks=True)  # real runs enable hooks (persist via on_item)
 
         scoped_targets = [
             r for r in wf.results

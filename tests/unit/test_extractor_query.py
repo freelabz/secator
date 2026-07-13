@@ -623,7 +623,7 @@ class TestReadModelMemoryBound:
 		rows = (
 			(f'{i:024x}', 'url', 'ws',
 			 _json.dumps({'_type': 'url', 'url': f'http://h/{i}', '_uuid': f'{i:024x}',
-						  '_context': {'workspace_id': 'ws', 'scan_id': 'R'}}))
+						  '_context': {'workspace_id': 'ws', 'task_id': 'R'}}))
 			for i in range(n)
 		)
 		conn.executemany(
@@ -636,7 +636,7 @@ class TestReadModelMemoryBound:
 		N = 300_000
 		self._seed(tmp_path, monkeypatch, N)
 		runner = _dummy_runner()
-		runner.context.update({'drivers': ['sqlite'], 'scan_id': 'R', 'workspace_id': 'ws', 'workspace_name': 'ws'})
+		runner.context.update({'drivers': ['sqlite'], 'task_id': 'R', 'workspace_id': 'ws', 'workspace_name': 'ws'})
 
 		# len() is an indexed count — no rows materialized.
 		assert len(runner.findings) == N
@@ -664,7 +664,7 @@ class TestReadModelMemoryBound:
 		import pickle
 		from secator.tasks import httpx
 		self._seed(tmp_path, monkeypatch, 5)
-		runner = httpx(['x'], context={'drivers': ['sqlite'], 'scan_id': 'R',
+		runner = httpx(['x'], context={'drivers': ['sqlite'], 'task_id': 'R',
 									   'workspace_id': 'ws', 'workspace_name': 'ws'}, dry_run=True)
 		restored = pickle.loads(pickle.dumps(runner))
 		assert len(restored.findings) == 5                                  # view rebuilt from context

@@ -407,12 +407,12 @@ def mark_runner_started(results, runner, enable_hooks=True):
 			'workspace_id': runner.context.get('workspace_id'),
 			'workspace_name': runner.workspace_name,
 			'drivers': runner.context.get('drivers', []),
-			'results': runner.results,
+			'results': runner._results,
 			'scan_id': runner.context.get('scan_id'),
 			'workflow_id': runner.context.get('workflow_id'),
 			'task_id': runner.context.get('task_id'),
 		}
-		scoped_inputs, _, _ = run_extractors(runner.results, target_extractor_opts, runner.inputs, ctx=ctx)
+		scoped_inputs, _, _ = run_extractors(runner._results, target_extractor_opts, runner.inputs, ctx=ctx)
 		for name in scoped_inputs:
 			t = TargetOutput(name=name)
 			t._context['scope'] = scope
@@ -638,11 +638,10 @@ def break_task(task, task_opts):
 			chunk_infos.append(info)
 		sigs.append(sig)
 
-	# Mark main task as async since it's being chunked
-	# Clear prior results (so they're not re-yielded), then re-add chunk Info items
-	# so they survive into celery_state['results'] for client-side polling.
+	# Mark main task as async since it's being chunked. Reset the own-emissions buffer + dedup
+	# guard, then re-add chunk Info items so they survive into celery_state['results'] for polling.
 	task.sync = False
-	task.results = []
+	task._results = []
 	task.uuids = set()
 	for info in chunk_infos:
 		task.add_result(info)

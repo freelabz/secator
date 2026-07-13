@@ -81,8 +81,13 @@ class Scan(Runner):
 				self.add_subtask(task_id, task_info['name'], task_info['descr'])
 			sigs.append(celery_workflow)
 
-			for result in workflow.results:
-				self.add_result(result, print=False, hooks=False)
+			# With a store, the scan's results view (scoped by scan_id) already sees every
+			# descendant — the whole subtree inherits scan_id. Only a NO-store run needs the
+			# child's own-emissions (e.g. dry-run "Skipped" Info) copied into the scan buffer;
+			# read the bounded buffer, never the view, so this stays O(own), not O(N).
+			if not self.context.get('drivers'):
+				for result in workflow._results:
+					self.add_result(result, print=False, hooks=False)
 
 		if sigs:
 			# A scan's start marker carries no prior results (empty `[]`), so it
