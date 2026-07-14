@@ -74,8 +74,11 @@ class TestOnBuildMongo:
         on_build(_FakeParent('workflow'), spec)
         assert sink[0][0] == 'tasks'                       # inserted into tasks collection
         assert sink[0][1]['status'] == 'PENDING'
-        # on_build mints a uuid _id and stamps the SAME id back into spec context (uniform format).
-        assert uuid.UUID(spec['context']['task_id']) and spec['context']['task_id'] == sink[0][1]['_id']
+        # on_build stamps a uuid run-scope task_id into spec context; the pending doc carries the
+        # same id under context.task_id. Mongo mints the native ObjectId _id (we don't force it).
+        assert uuid.UUID(spec['context']['task_id'])
+        assert sink[0][1]['context']['task_id'] == spec['context']['task_id']
+        assert '_id' not in sink[0][1]
 
     def test_scan_parent_inserts_workflow_doc_and_stamps_workflow_id(self, monkeypatch):
         from secator.hooks.mongodb import on_build
@@ -83,7 +86,9 @@ class TestOnBuildMongo:
         spec = {'name': 'url_fuzz', 'context': {'workspace_id': 'ws1'}}
         on_build(_FakeParent('scan'), spec)
         assert sink[0][0] == 'workflows'
-        assert uuid.UUID(spec['context']['workflow_id']) and spec['context']['workflow_id'] == sink[0][1]['_id']
+        assert uuid.UUID(spec['context']['workflow_id'])
+        assert sink[0][1]['context']['workflow_id'] == spec['context']['workflow_id']
+        assert '_id' not in sink[0][1]
 
     def test_chunk_spec_stamps_task_chunk_id_and_chunk_flags(self, monkeypatch):
         from secator.hooks.mongodb import on_build
@@ -94,7 +99,9 @@ class TestOnBuildMongo:
         doc = sink[0][1]
         assert doc['has_parent'] is True
         assert doc['chunk'] == 2 and doc['chunk_count'] == 5
-        assert uuid.UUID(spec['context']['task_chunk_id']) and spec['context']['task_chunk_id'] == doc['_id']
+        assert uuid.UUID(spec['context']['task_chunk_id'])
+        assert doc['context']['task_chunk_id'] == spec['context']['task_chunk_id']
+        assert '_id' not in doc
 
 
 def _fresh_mongo_hooks():
