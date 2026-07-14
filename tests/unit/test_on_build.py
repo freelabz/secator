@@ -1,6 +1,5 @@
 import types
 import unittest
-import uuid
 
 import pytest
 
@@ -72,23 +71,25 @@ class TestOnBuildMongo:
         sink = _patch_mongo(monkeypatch)
         spec = {'name': 'httpx', 'context': {'workspace_id': 'ws1'}}
         on_build(_FakeParent('workflow'), spec)
+        from bson.objectid import ObjectId
         assert sink[0][0] == 'tasks'                       # inserted into tasks collection
         assert sink[0][1]['status'] == 'PENDING'
-        # on_build stamps a uuid run-scope task_id into spec context; the pending doc carries the
-        # same id under context.task_id. Mongo mints the native ObjectId _id (we don't force it).
-        assert uuid.UUID(spec['context']['task_id'])
+        # on_build mints an ObjectId task_id into spec context and stores the pending doc as
+        # _id=ObjectId(task_id) — so _id == context.task_id.
+        assert ObjectId.is_valid(spec['context']['task_id'])
         assert sink[0][1]['context']['task_id'] == spec['context']['task_id']
-        assert '_id' not in sink[0][1]
+        assert sink[0][1]['_id'] == ObjectId(spec['context']['task_id'])
 
     def test_scan_parent_inserts_workflow_doc_and_stamps_workflow_id(self, monkeypatch):
         from secator.hooks.mongodb import on_build
         sink = _patch_mongo(monkeypatch)
         spec = {'name': 'url_fuzz', 'context': {'workspace_id': 'ws1'}}
         on_build(_FakeParent('scan'), spec)
+        from bson.objectid import ObjectId
         assert sink[0][0] == 'workflows'
-        assert uuid.UUID(spec['context']['workflow_id'])
+        assert ObjectId.is_valid(spec['context']['workflow_id'])
         assert sink[0][1]['context']['workflow_id'] == spec['context']['workflow_id']
-        assert '_id' not in sink[0][1]
+        assert sink[0][1]['_id'] == ObjectId(spec['context']['workflow_id'])
 
     def test_chunk_spec_stamps_task_chunk_id_and_chunk_flags(self, monkeypatch):
         from secator.hooks.mongodb import on_build
@@ -97,11 +98,12 @@ class TestOnBuildMongo:
         on_build(_FakeParent('task'), spec)
         assert sink[0][0] == 'tasks'
         doc = sink[0][1]
+        from bson.objectid import ObjectId
         assert doc['has_parent'] is True
         assert doc['chunk'] == 2 and doc['chunk_count'] == 5
-        assert uuid.UUID(spec['context']['task_chunk_id'])
+        assert ObjectId.is_valid(spec['context']['task_chunk_id'])
         assert doc['context']['task_chunk_id'] == spec['context']['task_chunk_id']
-        assert '_id' not in doc
+        assert doc['_id'] == ObjectId(spec['context']['task_chunk_id'])
 
 
 def _fresh_mongo_hooks():

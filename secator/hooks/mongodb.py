@@ -1,6 +1,5 @@
 import logging
 import time
-import uuid
 
 import pymongo
 from bson.objectid import ObjectId
@@ -72,23 +71,33 @@ def get_results(uuids):
 		yield finding
 
 
+def ensure_mongo_run_id(context):
+	"""Override the runner-core's uuid {type}_id with a Mongo ObjectId, in-place, on the FIRST DB
+	write — so the runner doc _id (ObjectId({type}_id)) equals context.{type}_id and every finding
+	scopes to that same id. Idempotent: a valid ObjectId is kept, so all later writes hit one doc.
+	The json store keeps its uuid; only the mongodb path (which has bson) is coerced."""
+	for key in ('task_id', 'workflow_id', 'scan_id', 'task_chunk_id', 'workflow_chunk_id'):
+		val = context.get(key)
+		if val and not ObjectId.is_valid(val):
+			context[key] = str(ObjectId())
+
+
 def update_runner(self):
 	client = get_mongodb_client()
 	db = client.main
 	type = self.config.type
 	collection = f'{type}s'
+	chunk = self.context.get(f'{type}_chunk_id') is not None
+	# The runner-doc _id IS context.{type}_id — coerce the core's uuid to a Mongo ObjectId before
+	# writing (idempotent) so _id == context.{type}_id (a real ObjectId the API/UI can ObjectId()).
+	ensure_mongo_run_id(self.context)
 	update = self.toDict()
-	chunk = update.get('chunk')
-	# Mongo mints its OWN native ObjectId doc _id — we do NOT reuse the json store's UUID {type}_id
-	# as the _id. Correlate the runner doc by the run-scope id kept in context.{type}_id (the same
-	# field findings scope by), upserting on the first write. Requires a context.{type}_id index
-	# (tasks already have context_task_id) so the upsert match stays O(1).
 	key = f'{type}_chunk_id' if chunk else f'{type}_id'
-	_id = self.context.get(key)
-	debug('to_update', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False, verbose=True)  # noqa: E501
+	_id = ObjectId(self.context.get(key))
+	debug('to_update', sub='hooks.mongodb', id=str(_id), obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False, verbose=True)  # noqa: E501
 	start_time = time.time()
 	try:
-		db[collection].update_one({f'context.{key}': _id}, {'$set': update}, upsert=True)
+		db[collection].update_one({'_id': _id}, {'$set': update}, upsert=True)
 		elapsed = time.time() - start_time
 		debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
 		self.last_updated_db = start_time
@@ -134,20 +143,28 @@ def on_build(self, task_spec):
 	child_type = 'workflow' if parent_type == 'scan' else 'task'
 	collection = f'{child_type}s'
 	is_chunk = bool(task_spec.get('chunk'))
-	# Mint the child's run-scope {type}_id as a UUID (findings scope by it; the child inherits it via
-	# its serialized context). Mongo mints the native ObjectId doc _id on insert — we do NOT force
-	# _id = the UUID. The child's update_runner re-finds this doc by context.{type}_id (upsert match).
+	# Mint the child's {type}_id as a Mongo ObjectId and store the pending doc as _id=ObjectId(that),
+	# so _id == context.{type}_id. The child inherits it via its serialized context, and its
+	# update_runner (idempotent — keeps a valid ObjectId) upserts THIS same doc instead of a new one.
 	key = f'{child_type}_chunk_id' if is_chunk else f'{child_type}_id'
-	child_id = str(uuid.uuid4())
+	child_id = str(ObjectId())
 	task_spec.setdefault('context', {})[key] = child_id
 	doc = build_pending_doc(self, task_spec, child_type)  # doc.context now carries child_id
-	db[collection].insert_one(doc)
+	db[collection].insert_one({**doc, '_id': ObjectId(child_id)})
 	return task_spec
 
 
 def update_finding(self, item):
 	if not is_output_type(item):
 		return item
+	# on_item is the first DB write (findings/targets are emitted in __init__, before on_init):
+	# coerce the runner's uuid {type}_id to a Mongo ObjectId, then re-stamp it onto THIS finding
+	# (which copied the pre-override uuid at emission) so it scopes to the same id as the runner doc.
+	ensure_mongo_run_id(self.context)
+	for key in (f'{self.config.type}_id', f'{self.config.type}_chunk_id'):
+		cur = item._context.get(key)
+		if cur and not ObjectId.is_valid(cur):
+			item._context[key] = self.context.get(key)
 	start_time = time.time()
 	client = get_mongodb_client()
 	db = client.main
