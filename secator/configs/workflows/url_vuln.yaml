@@ -59,7 +59,7 @@ tasks:
       targets_:
         - type: tag
           field: match
-          condition: item._source.startswith("gf")
+          condition: item._source ~= ^gf
       if: not opts.passive
 
     nuclei:
@@ -70,7 +70,7 @@ tasks:
           field: name
         - type: tag
           field: match
-          condition: item._source.startswith("gf")
+          condition: item._source ~= ^gf
       if: opts.nuclei and not opts.passive
   # TODO: Add support for SQLMap
   # sqlmap:

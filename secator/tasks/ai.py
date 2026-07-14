@@ -230,7 +230,7 @@ class ai(PythonRunner):
 			verbose=self.verbose,
 			context=self.context or {},
 			scope=self.scope,
-			results=self.results,
+			results=list(self.results),  # AI reasons over its own subtree (store view)
 			max_workers=self.max_workers,
 			subagent=self.is_subagent,
 			sync=self._sync,

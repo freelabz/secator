@@ -1376,7 +1376,11 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	current = get_file_timestamp()
 	workspace_name = workspace or CONFIG.workspaces.current or 'default'
 
-	# 1. Parse path-based runner filter
+	# 1. Parse path-based runner filter. For the local json backend, a path's number is a report FOLDER
+	# id (tasks/0); findings are scoped by the runner's {type}_id UUID, so translate folder -> UUID first.
+	if QueryEngine.resolve_backend(driver) == 'local':
+		from secator.query.json import resolve_local_report_paths
+		report_query = resolve_local_report_paths(report_query, workspace_name)
 	runner_filter = parse_report_paths(report_query)
 	debug('runner paths filter', sub='query', obj=runner_filter)
 
@@ -1781,8 +1785,24 @@ def report_info(runner_id, workspace, driver, show_all):
 		info = dict(content.get('info', {}))
 		source_label, source_value = '_path', str(report_path)
 
-	errors_raw = info.pop('errors', [])
-	warnings_raw = info.pop('warnings', [])
+	# Errors and warnings are first-class findings (_type=error/warning) in the store, so source them
+	# from a run-scoped findings query rather than the denormalized info.errors/info.warnings block
+	# (which toDict is being moved off of). Fall back to the legacy info block for old reports/docs
+	# that still embed it and predate error/warning findings being persisted.
+	legacy_errors = info.pop('errors', [])
+	legacy_warnings = info.pop('warnings', [])
+	run_ctx = info.get('context', {}) or {}
+	run_id = run_ctx.get(f'{runner_type_singular}_id')
+	errors_raw, warnings_raw = [], []
+	if run_id:
+		drivers = [effective_driver] if effective_driver != 'local' else []
+		q_engine = QueryEngine(workspace_id=run_ctx.get('workspace_id') or workspace_name,
+							   context={'drivers': drivers, 'workspace_name': workspace_name})
+		scope = {f'_context.{runner_type_singular}_id': run_id}
+		errors_raw = list(q_engine.search({**scope, '_type': 'error'}))
+		warnings_raw = list(q_engine.search({**scope, '_type': 'warning'}))
+	if not errors_raw and not warnings_raw:
+		errors_raw, warnings_raw = legacy_errors, legacy_warnings
 
 	# These fields are verbose and only shown with --show-all.
 	SHOW_ALL_ONLY_KEYS = ('config', 'output')
@@ -1889,19 +1909,16 @@ def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular,
 	# 2. MongoDB backend
 	if driver == 'mongodb' and runner_db_id:
 		try:
-			from bson.objectid import ObjectId
 			from secator.hooks.mongodb import get_mongodb_client
 
 			client = get_mongodb_client()
 			db = client.main
 			findings_result = db.findings.delete_many({f'_context.{runner_type_singular}_id': runner_db_id})
 			console.print(Info(message=f'Deleted {findings_result.deleted_count} findings from MongoDB'))
-			if ObjectId.is_valid(runner_db_id):
-				runner_result = db[runner_type_plural].delete_one({'_id': ObjectId(runner_db_id)})
-				if runner_result.deleted_count:
-					console.print(Info(message=f'Deleted {runner_type_singular} document from MongoDB'))
-			else:
-				console.print(Warning(message=f'{runner_type_singular}_id "{runner_db_id}" is not a valid ObjectId — runner document was not deleted from MongoDB'))  # noqa: E501
+			# The runner-doc _id is the runner core's {type}_id (a UUID string), not an ObjectId.
+			runner_result = db[runner_type_plural].delete_one({'_id': runner_db_id})
+			if runner_result.deleted_count:
+				console.print(Info(message=f'Deleted {runner_type_singular} document from MongoDB'))
 		except Exception as e:
 			console.print(Error(message=f'MongoDB deletion failed: {e}'))
 

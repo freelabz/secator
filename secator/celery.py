@@ -2,6 +2,7 @@ import gc
 import json
 import logging
 import os
+import threading
 
 from time import time
 
@@ -19,7 +20,7 @@ from secator.output_types import Error, Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import resolve_task_queue, run_extractors
-from secator.utils import debug, deduplicate, flatten, should_update
+from secator.utils import debug, should_update
 
 
 # ---------#
@@ -81,7 +82,7 @@ app.conf.update(
 			'secator.celery.run_workflow': {'queue': 'celery'},
 			'secator.celery.run_scan': {'queue': 'celery'},
 			'secator.celery.run_task': {'queue': 'celery'},
-			'secator.celery.forward_results': {'queue': 'results'},
+			'secator.celery.join_results': {'queue': 'results'},
 			'secator.hooks.mongodb.*': {'queue': 'mongodb'},
 		},
 		'task_store_eager_result': True,
@@ -110,36 +111,6 @@ if IN_WORKER:
 	setup_handlers()
 
 
-def chain_results(results):
-	"""Reduce results for passing through the Celery chain with MongoDB enabled.
-
-	Persisted findings are reduced to their Mongo ObjectId string (re-hydrated
-	downstream by secator.hooks.mongodb.get_results). Non-persisted outputs
-	(EXECUTION_TYPES like Target/Info, which carry uuid4 ids that are never
-	stored in db.findings) are kept as objects so they survive the round-trip
-	instead of being silently dropped by get_results' ObjectId.is_valid() filter.
-
-	Without this, scope-tagged Target inputs (e.g. the subdomains feeding
-	host_recon in a domain scan) are lost and the workflow falls back to its
-	original input.
-	"""
-	from bson.objectid import ObjectId
-	out, seen = [], set()
-	for r in results:
-		if isinstance(r, str):
-			if r not in seen:
-				seen.add(r)
-				out.append(r)
-		elif getattr(r, '_uuid', None) and ObjectId.is_valid(str(r._uuid)):
-			uid = str(r._uuid)
-			if uid not in seen:
-				seen.add(uid)
-				out.append(uid)
-		else:
-			out.append(r)
-	return out
-
-
 @retry(Exception, tries=3, delay=2)
 def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
@@ -150,15 +121,18 @@ def update_state(celery_task, task, force=False):
 	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
 		return
 	task.last_updated_celery = time()
+	# Build the state ONCE (one batched store read) and reuse it for the debug line — the old code
+	# re-read the store for task.status + task.self_findings_count on top of task.celery_state.
+	state = task.celery_state
 	debug(
 		'',
 		sub='celery.state',
 		id=celery_task.request.id,
-		obj={task.unique_name: task.status, 'count': task.self_findings_count},
+		obj={task.unique_name: state['state'], 'count': state['count']},
 		obj_after=False,
 		verbose=True,
 	)
-	return celery_task.update_state(state='RUNNING', meta=task.celery_state)
+	return celery_task.update_state(state='RUNNING', meta=state)
 
 
 def revoke_task(task_id, task_name=None):
@@ -259,27 +233,24 @@ def bump_worker_loss_count(task_id):
 		return 0
 
 
-def abandon_task(name, targets, opts, results, delivery_count=None):
+def abandon_task(name, targets, opts, delivery_count=None):
 	"""Abandon a task that has exhausted its worker-loss retries.
 
-	Returns a normal (forwarded) result list with an Error appended, so the surrounding
-	chord/chain proceeds and the workflow finishes instead of hanging forever on a task whose
-	worker keeps getting killed (OOM / eviction).
+	The abandoned task persists a FAILURE Error to the store (via its on_item hooks) and
+	returns topology-only, so the surrounding chord/chain proceeds and the workflow finishes
+	instead of hanging forever on a task whose worker keeps getting killed (OOM / eviction).
 
 	Args:
 		name (str): Task name.
 		targets (list): Task targets.
 		opts (dict): Task options (already carries context).
-		results (list): Incoming results from upstream tasks.
 		delivery_count (int | None): How many times this task was delivered (a redelivery
 			is the broker's doing under ``task_acks_late``; it is NOT a re-run of the work).
 			Reported separately from the retry cap so the message is unambiguous.
 
 	Returns:
-		list: Forwarded results including a FAILURE Error for this task.
+		list: Topology-only (empty) — the Error lives in the store, not the payload.
 	"""
-	results = forward_results(results)
-	opts['results'] = results
 	opts['sync'] = True
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
@@ -294,9 +265,7 @@ def abandon_task(name, targets, opts, results, delivery_count=None):
 		_source=task.unique_name,
 	))
 	task.mark_completed()
-	if CONFIG.addons.mongodb.enabled:
-		return chain_results(task.results)
-	return task.results
+	return []
 
 
 def worker_loss_retries_exhausted(delivery_count, max_retries):
@@ -313,6 +282,9 @@ def worker_loss_retries_exhausted(delivery_count, max_retries):
 
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
+	# Perf instrumentation (SECATOR_DEBUG=perf): task entry point + greenlet id, to diagnose
+	# worker concurrency / serialization (which chunks run on which greenlet, and when).
+	debug(f'run_command ENTER g={threading.get_ident() % 100000} {name} targets={targets}', sub='perf')
 	# Set Celery request id in context
 	context = opts.get('context', {})
 	context['celery_id'] = self.request.id
@@ -351,14 +323,11 @@ def run_command(self, results, name, targets, opts={}):
 				# Attach the request context so the abandoned task doc still carries
 				# celery_id / worker_name / routing_key even when opts had none coming in.
 				opts['context'] = context
-				return abandon_task(name, targets, opts, results, delivery_count)
+				return abandon_task(name, targets, opts, delivery_count)
 
-	# Flatten + dedupe + filter results
-	results = forward_results(results)
-
-	# Set task opts
+	# Set task opts. The chain no longer carries a result payload (tasks pass topology
+	# only); every consumer queries the store, so `results` is ignored here.
 	opts['context'] = context
-	opts['results'] = results
 	opts['sync'] = True
 
 	# Initialize task
@@ -374,7 +343,7 @@ def run_command(self, results, name, targets, opts={}):
 	if chunk_it:
 		if IN_WORKER:
 			console.print(Info(message=f'Task {name} requires chunking'))
-		workflow = break_task(task, opts, results=results)
+		workflow = break_task(task, opts)
 		if IN_WORKER:
 			console.print(Info(message=f'Task {name} successfully broken into {len(workflow)} chunks'))
 		update_state(self, task, force=True)
@@ -386,44 +355,25 @@ def run_command(self, results, name, targets, opts={}):
 		update_state(self, task)
 	update_state(self, task, force=True)
 
-	if CONFIG.addons.mongodb.enabled:
-		return chain_results(task.results)
-	return task.results
+	# Topology-only return: findings live in the store, not the payload.
+	return []
 
 
 @app.task
-def forward_results(results):
-	"""Forward results to the next task (bridge task).
+def join_results(results=None):
+	"""No-op bridge task joining two adjacent groups in a chain.
+
+	Celery cannot chain two groups directly — a task must sit between them. This task
+	carries no payload (tasks pass topology only; every consumer queries the store), so it
+	simply lets the chain proceed past the group boundary.
 
 	Args:
-		results (list): Results to forward.
+		results: The upstream group's return (a list of topology-only returns). Ignored.
 
 	Returns:
-		list: List of uuids.
+		list: Topology-only (empty).
 	"""
-	if isinstance(results, list):
-		for ix, item in enumerate(results):
-			if isinstance(item, dict) and 'results' in item:
-				results[ix] = item['results']
-	elif 'results' in results:
-		results = results['results']
-
-	if IN_WORKER:
-		console.print(Info(message=f'Deduplicating {len(results)} results'))
-
-	results = flatten(results)
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		console.print(Info(message=f'Extracting uuids from {len(results)} results'))
-		# Keep non-persisted outputs (Target/Info etc.) as objects so they survive
-		# the chain; only persisted findings are reduced to their ObjectId uuid.
-		results = chain_results(results)
-	else:
-		results = deduplicate(results, attr='_uuid')
-
-	if IN_WORKER:
-		console.print(Info(message=f'Forwarded {len(results)} flattened and deduplicated results'))
-
-	return results
+	return []
 
 
 @app.task
@@ -444,21 +394,9 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		console.print(Info(message=f'Runner {runner.unique_name} has started, running mark_started'))
 	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
 
-	# Forward previous results
-	if results:
-		results = forward_results(results)
+	# `results` (the upstream return) is topology-only and ignored — the fan-in is never
+	# rehydrated into the runner; every consumer queries the store instead.
 	runner.enable_hooks = enable_hooks
-
-	# Query results from db when mongodb is enabled
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		from secator.hooks.mongodb import get_results
-
-		results = get_results(results)
-
-	# Add results to runner so it can compute status
-	# and extract dynamic targets
-	for item in results:
-		runner.add_result(item, print=False)
 
 	# Emit scope-tagged Targets for workflows with a scan-level targets_ extractor.
 	# This resolves the extractor at execution time (when Port/result data is available)
@@ -468,11 +406,26 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		target_extractor_opts = {
 			k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'
 		}
-		ctx = {'ancestor_id': runner.ancestor_id, 'node_chain_start': True}
-		scoped_inputs, _, _ = run_extractors(runner.results, target_extractor_opts, runner.inputs, ctx=ctx)
+		ctx = {
+			'opts': runner.run_opts,
+			'targets': runner.inputs,
+			'ancestor_id': runner.ancestor_id,
+			'node_chain_start': True,
+			'workspace_id': runner.context.get('workspace_id'),
+			'workspace_name': runner.workspace_name,
+			'drivers': runner.context.get('drivers', []),
+			'results': [],  # extractors query the store
+			'scan_id': runner.context.get('scan_id'),
+			'workflow_id': runner.context.get('workflow_id'),
+			'task_id': runner.context.get('task_id'),
+		}
+		scoped_inputs, _, _ = run_extractors([], target_extractor_opts, runner.inputs, ctx=ctx)
 		for name in scoped_inputs:
 			t = TargetOutput(name=name)
 			t._context['scope'] = scope
+			# Persisted synchronously to the store via on_item: Target is an EXECUTION type, which the
+			# json driver writes through immediately (NOT batched) — so a downstream task's extractor can
+			# QUERY these scope Targets right away. See secator/hooks/json.py for the finding/execution split.
 			runner.add_result(t, print=False)
 		debug(
 			f'Runner {runner.unique_name}: emitted {len(scoped_inputs)} scope-tagged targets (scope={scope})',
@@ -488,11 +441,8 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_started in {total_time:.2f}s'))
 
-	# Return only uuids when mongodb is enabled
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		return chain_results(runner.results)
-
-	return runner.results
+	# Topology-only return: the emitted scope Targets are already persisted to the store.
+	return []
 
 
 @app.task
@@ -513,22 +463,12 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name} has finished, running mark_completed'))
 
-	# Forward previous results
-	results = forward_results(results)
+	# `results` (the upstream return) is topology-only and ignored — the fan-in is never
+	# rehydrated into the runner; every consumer queries the store instead.
 	runner.enable_hooks = enable_hooks
 
-	# Query results from db when mongodb is enabled
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		from secator.hooks.mongodb import get_results
-
-		results = get_results(results)
-
-	# Add results to runner so it can compute status
-	# and run duplicate checks
-	for item in results:
-		runner.add_result(item, print=False)
-
-	# Run mark_completed (duplicate checks, db updates if enable_hooks is True)
+	# Run mark_completed (duplicate checks, db updates if enable_hooks is True). The findings
+	# stay in the store — the summary counts them run-scoped, never re-materialized here.
 	runner.mark_completed()
 
 	# Log total time
@@ -537,11 +477,8 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_completed in {total_time:.2f}s'))
 
-	# Return only uuids when mongodb is enabled
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		return chain_results(runner.results)
-
-	return runner.results
+	# Topology-only return: the run's results live in the store, not the payload.
+	return []
 
 
 # --------------#
@@ -606,7 +543,7 @@ def replace(task_instance, sig):
 	return task_instance.on_replace(sig)
 
 
-def break_task(task, task_opts, results=[]):
+def break_task(task, task_opts):
 	"""Break a task into multiple of the same type."""
 	chunks = task.inputs
 	if task.input_chunk_size > 1 and task.input_chunk_size != -1:
@@ -670,7 +607,6 @@ def break_task(task, task_opts, results=[]):
 		# Construct chunked signature
 		opts['has_parent'] = True
 		opts['enable_duplicate_check'] = False
-		opts['results'] = results
 		if 'targets_' in opts:
 			del opts['targets_']
 		# Mint each chunk's runner doc + id at build time so a redelivered
@@ -688,11 +624,9 @@ def break_task(task, task_opts, results=[]):
 			chunk_infos.append(info)
 		sigs.append(sig)
 
-	# Mark main task as async since it's being chunked
-	# Clear prior results (so they're not re-yielded), then re-add chunk Info items
-	# so they survive into celery_state['results'] for client-side polling.
+	# Mark main task as async since it's being chunked. Reset the own-emissions buffer + dedup
+	# guard, then re-add chunk Info items so they survive into celery_state['results'] for polling.
 	task.sync = False
-	task.results = []
 	task.uuids = set()
 	for info in chunk_infos:
 		task.add_result(info)

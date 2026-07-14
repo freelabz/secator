@@ -54,6 +54,23 @@ class MongoDBBackend(QueryBackend):
 			console.print(Warning(message=f'MongoDB search failed: {e}'))
 			return []
 
+	def _execute_iterate(self, query: dict, batch_size: int = 1000):
+		"""Stream a MongoDB cursor in batches — the driver never buffers all N."""
+		try:
+			client = self._get_client()
+			db = client.main
+			batch = []
+			for doc in db.findings.find(query).batch_size(batch_size):
+				doc.pop('_id', None)
+				batch.append(doc)
+				if len(batch) >= batch_size:
+					yield batch
+					batch = []
+			if batch:
+				yield batch
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB iterate failed: {e}'))
+
 	def _execute_count(self, query: dict) -> int:
 		"""Count findings matching query."""
 		try:

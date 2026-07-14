@@ -11,10 +11,53 @@ from secator.utils import sanitize_folder_name
 from secator.utils import debug
 
 
+def resolve_local_report_paths(report_query, workspace_name):
+	"""Rewrite a `report show`/`query` runner path so a human-friendly on-disk folder number resolves
+	to the runner's real {type}_id (the UUID stamped into findings' _context).
+
+	Local runs keep two ids: the sequential report FOLDER number (``tasks/0``, user-facing) and the
+	run-scope ``_context.{type}_id`` UUID that findings actually carry. A path like ``task/0`` names the
+	folder, so translate ``0`` -> that folder's ``info.context.{type}_id`` before it becomes a query
+	filter. Values that are not a local folder number (already a UUID, or a missing folder) pass through
+	unchanged. Only meaningful for the local json backend; DB backends already store the real id.
+
+	Args:
+		report_query (str): Comma-separated runner paths, e.g. ``tasks/0,scans/5``.
+		workspace_name (str): Workspace whose report tree to resolve against.
+
+	Returns:
+		str: The runner path with folder numbers replaced by their real {type}_id.
+	"""
+	if not report_query:
+		return report_query
+	ws_path = Path(CONFIG.dirs.reports).expanduser() / sanitize_folder_name(workspace_name)
+	out = []
+	for part in report_query.split(','):
+		token = part.strip()
+		if '/' not in token:
+			out.append(part)
+			continue
+		runner_type, runner_id = token.split('/', 1)
+		singular = runner_type.strip().lower().rstrip('s')
+		report_file = ws_path / f'{singular}s' / runner_id.strip() / 'report.json'
+		try:
+			with open(report_file) as f:
+				real_id = json.load(f).get('info', {}).get('context', {}).get(f'{singular}_id')
+			out.append(f'{runner_type}/{real_id}' if real_id else part)
+		except (FileNotFoundError, json.JSONDecodeError):
+			out.append(part)
+	return ','.join(out)
+
+
 def _regex_match(field, pattern):
 	if field is None:
 		return False
-	pattern = str(pattern).lstrip('*')
+	pattern = str(pattern)
+	# Strip the leading-glob convention, honoring an inline (?i) case-insensitivity flag.
+	if pattern.startswith('(?i)'):
+		pattern = '(?i)' + pattern[4:].lstrip('*')
+	else:
+		pattern = pattern.lstrip('*')
 	try:
 		return re.search(pattern, str(field)) is not None
 	except re.error:
@@ -95,9 +138,8 @@ class JsonBackend(QueryBackend):
 	name = "json"
 
 	def __init__(self, workspace_id: str, config: Optional[dict] = None,
-				 context: Optional[dict] = None, results: Optional[list] = None):
+				 context: Optional[dict] = None):
 		super().__init__(workspace_id, config, context=context)
-		self._results = results
 		self._findings_cache = None
 		reports_dir = config.get('reports_dir', CONFIG.dirs.reports) if config else CONFIG.dirs.reports
 		self.reports_dir = Path(reports_dir).expanduser()
@@ -115,57 +157,77 @@ class JsonBackend(QueryBackend):
 		return self.reports_dir / workspace_folder
 
 	def _load_all_findings(self) -> List[Dict[str, Any]]:
-		"""Load all findings from workspace JSON files, or return pre-loaded/cached results."""
-		if self._results is not None:
-			return self._results
+		"""Load findings from the LIVE report.json store — the SOLE source (no in-memory results).
+
+		The json driver (#1299) writes each runner's report.json as results are produced, so the
+		files are the authoritative store. A run-scoped read (``context['report_dir']``) reads only
+		this run's report.json; without the hint it falls back to a full workspace scan.
+		"""
 		if self._findings_cache is not None:
 			return self._findings_cache
+		findings = self._load_from_files()
+		self._findings_cache = findings
+		return findings
+
+	def _read_report_dir(self, report_dir: Path, runner_type_singular: str, findings: list):
+		"""Append the findings in ONE report.json (report_dir/report.json) to `findings`."""
+		report_file = report_dir / 'report.json'
+		if not report_file.exists():
+			return
+		try:
+			with open(report_file, 'r') as f:
+				data = json.load(f)
+		except (json.JSONDecodeError, IOError) as e:
+			debug(f'Error loading {report_file}: {e}', sub='query.json')
+			return
+		runner_id = report_dir.name
+		for items in data.get('results', {}).values():
+			if isinstance(items, list):
+				for item in items:
+					# Inject the {type}_id from the directory path when the finding lacks it.
+					if f'{runner_type_singular}_id' not in item.get('_context', {}):
+						item.setdefault('_context', {})[f'{runner_type_singular}_id'] = runner_id
+				findings.extend(items)
+
+	def _load_from_files(self) -> List[Dict[str, Any]]:
+		"""Load findings from report.json files.
+
+		A run-scoped read (``context['report_dir']``) reads ONLY that one runner's report.json — the
+		hot path during a run. Fan-in re-persists every descendant finding up into each ancestor's
+		report.json (re-tagged with the ancestor's {type}_id), so a runner's own file already holds its
+		complete result set: no need to scan (and re-parse) every historical report in the workspace on
+		every query. Without the hint we fall back to the full workspace scan (report show, cross-run
+		aggregation).
+		"""
 		findings = []
+		report_dir = self.context.get('report_dir')
+		if report_dir:
+			report_dir = Path(report_dir)
+			# tasks/<n> -> singular 'task' (parent dir name minus trailing 's'); default 'task'.
+			singular = report_dir.parent.name.rstrip('s') or 'task'
+			self._read_report_dir(report_dir, singular, findings)
+			debug(f'Loaded {len(findings)} findings from run-scoped {report_dir}', sub='query.json')
+			return findings
+
 		workspace_path = self._get_workspace_path()
 		debug(f'Looking for reports in: {workspace_path}', sub='query.json')
 		debug(f'Workspace ID/name: {self.workspace_id}', sub='query.json')
-
 		if not workspace_path.exists():
 			debug(f'Workspace path does not exist: {workspace_path}', sub='query.json')
-			# Show what workspaces are available
 			if self.reports_dir.exists():
 				available = [d.name for d in self.reports_dir.iterdir() if d.is_dir()]
 				debug(f'Available workspaces in {self.reports_dir}: {available}', sub='query.json')
 			return findings
 
-		# Search for report.json files in tasks/, workflows/, scans/
 		for runner_type in ['tasks', 'workflows', 'scans']:
 			runner_path = workspace_path / runner_type
 			if not runner_path.exists():
 				continue
-
 			for report_dir in runner_path.iterdir():
-				if not report_dir.is_dir():
-					continue
-
-				report_file = report_dir / 'report.json'
-				if report_file.exists():
-					try:
-						with open(report_file, 'r') as f:
-							data = json.load(f)
-
-						results = data.get('results', {})
-						runner_type_singular = runner_type.rstrip('s')  # "tasks" -> "task", "scans" -> "scan"
-						runner_id = report_dir.name
-
-						for type_name, items in results.items():
-							if isinstance(items, list):
-								for item in items:
-									# Inject runner context from directory path if not already present
-									if f'{runner_type_singular}_id' not in item['_context']:
-										item['_context'][f'{runner_type_singular}_id'] = runner_id
-								findings.extend(items)
-					except (json.JSONDecodeError, IOError) as e:
-						debug(f'Error loading {report_file}: {e}', sub='query.json')
-						continue
+				if report_dir.is_dir():
+					self._read_report_dir(report_dir, runner_type.rstrip('s'), findings)
 
 		debug(f'Loaded {len(findings)} findings from workspace', sub='query.json')
-		self._findings_cache = findings
 		return findings
 
 	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
@@ -189,19 +251,53 @@ class JsonBackend(QueryBackend):
 		findings = self._load_all_findings()
 		return sum(1 for f in findings if match_query(f, query))
 
+	def _report_files(self):
+		"""Yield the report.json paths this backend reads — the run-scoped file when
+		``context['report_dir']`` is set, else every report in the workspace."""
+		report_dir = self.context.get('report_dir')
+		if report_dir:
+			p = Path(report_dir) / 'report.json'
+			if p.exists():
+				yield p
+			return
+		workspace_path = self._get_workspace_path()
+		if not workspace_path.exists():
+			return
+		for runner_type in ['tasks', 'workflows', 'scans']:
+			runner_path = workspace_path / runner_type
+			if not runner_path.exists():
+				continue
+			for d in runner_path.iterdir():
+				if d.is_dir() and (d / 'report.json').exists():
+					yield d / 'report.json'
+
 	def _execute_update(self, query: dict, update: dict) -> int:
-		"""Update in-memory records matching query."""
-		if self._results is None:
-			return 0
+		"""Apply a ``$set`` update to matching findings directly in the report.json store.
+
+		The store is the source of truth (no in-memory results). Each matching file is
+		rewritten atomically; a read-first dirty check skips files with no match so an
+		update never rewrites the whole workspace.
+		"""
 		set_fields = update.get("$set", {})
 		if not set_fields:
 			return 0
+		from secator.utils import atomic_json, read_json
 		count = 0
-		for i, record in enumerate(self._results):
-			if match_query(record, query):
-				for k, v in set_fields.items():
-					self._results[i][k] = v
-				count += 1
+		for path in self._report_files():
+			data = read_json(path, default=None)
+			if not data:
+				continue
+			buckets = data.get('results', {})
+			if not any(match_query(it, query) for b in buckets.values() if isinstance(b, list) for it in b):
+				continue
+			with atomic_json(path, default={'info': {}, 'results': {}}) as d:
+				for bucket in d.get('results', {}).values():
+					if isinstance(bucket, list):
+						for item in bucket:
+							if match_query(item, query):
+								item.update(set_fields)
+								count += 1
+		self._findings_cache = None
 		return count
 
 	def list_workspaces(self):

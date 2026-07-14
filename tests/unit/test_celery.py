@@ -1,136 +1,139 @@
+import tempfile
 import unittest
-from secator.celery import app, forward_results  # noqa: F401
+from pathlib import Path
+from secator.celery import app, join_results  # noqa: F401
 from secator.utils_test import mock_command, FIXTURES_TASKS, TEST_TASKS, FIXTURES_DIR, load_fixture
 from secator.output_types import Url
 from celery import chain, chord
 
 TARGETS = ['bing.com', 'google.com', 'wikipedia.org', 'ibm.com', 'cnn.com', 'karate.com']
 
+# TEST_TASKS holds TemplateLoaders, so `<task class> in TEST_TASKS` is always False (the old
+# guard silently skipped every chain test). Match by name instead; mock_command mocks the
+# binary, so the task only needs to be registered — not installed.
+TEST_TASK_NAMES = {t.name for t in TEST_TASKS}
+
 
 class TestCelery(unittest.TestCase):
+	"""The Celery chain no longer carries a result payload — tasks pass topology only and
+	every finding lands in the store (here the sqlite driver). So these assert on the STORE,
+	not on `result.get()` (which is topology-only)."""
+
+	def setUp(self):
+		import secator.hooks.sqlite as sqlite_mod
+		from secator.config import CONFIG
+		self.sqlite_mod = sqlite_mod
+		self.temp_dir = tempfile.mkdtemp()
+		self._orig_path = CONFIG.addons.sqlite.path
+		CONFIG.addons.sqlite.path = str(Path(self.temp_dir) / 'test.db')
+		sqlite_mod._conns.clear()
+		# Driver context threaded into every task so its on_item hook persists to the store.
+		self.ctx = {'drivers': ['sqlite'], 'workspace_id': 'ws', 'workspace_name': 'ws'}
+
+	def tearDown(self):
+		import shutil
+		from secator.config import CONFIG
+		for conn in self.sqlite_mod._conns.values():
+			conn.close()
+		self.sqlite_mod._conns.clear()
+		CONFIG.addons.sqlite.path = self._orig_path
+		shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+	def _store(self, _type):
+		from secator.query.sqlite import SqliteBackend
+		return SqliteBackend(workspace_id='ws').search({'_type': _type})
 
 	def test_httpx_chain(self):
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:
+		if 'httpx' not in TEST_TASK_NAMES:
 			return
 
 		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]] * len(TARGETS)):
-			sigs = [forward_results.si([])] + [httpx.s(target) for target in TARGETS]
-			workflow = chain(*sigs)
-			result = workflow.apply()
-			results = result.get()
-			urls = [r.url for r in results if r._type == 'url']
-			targets = [r.name for r in results if r._type == 'target']
-			self.assertEqual(len(urls), len(TARGETS))
-			self.assertEqual(len(targets), len(TARGETS))
+			sigs = [join_results.si([])] + [httpx.s(target, context=dict(self.ctx)) for target in TARGETS]
+			chain(*sigs).apply().get()
+			self.assertEqual(len(self._store('url')), len(TARGETS))
+			self.assertEqual(len(self._store('target')), len(TARGETS))
 
 	def test_httpx_chain_with_results(self):
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:
+		if 'httpx' not in TEST_TASK_NAMES:
 			return
 
-		existing_results = [Url(**{
-			"url": "https://example.synology.me",
-			"method": "GET",
-			"status_code": 200,
-			"words": 438,
-			"lines": 136,
-			"content_type":
-			"text/html",
-			"content_length": 11577,
-			"host": "82.66.157.114",
-			"time": 0.16246860100000002,
-			"_source": "httpx",
-			"_type": "url"
-		})]
+		# A pre-existing finding now lives in the store, not seeded through the chain payload.
+		existing = Url(**{
+			"url": "https://example.synology.me", "method": "GET", "status_code": 200,
+			"words": 438, "lines": 136, "content_type": "text/html", "content_length": 11577,
+			"host": "82.66.157.114", "time": 0.16, "_source": "httpx", "_type": "url",
+			"_context": {"workspace_id": "ws"},
+		})
+
+		class _R:
+			config = type('C', (), {'name': 'httpx'})()
+			context = {'workspace_id': 'ws'}
+		self.sqlite_mod.update_finding(_R(), existing)
+
 		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]] * len(TARGETS)):
-			sigs = [forward_results.s(existing_results)] + [httpx.s(target) for target in TARGETS]
-			workflow = chain(*sigs)
-			result = workflow.apply()
-			results = result.get()
-			urls = [r.url for r in results if r._type == 'url']
-			targets = [r.name for r in results if r._type == 'target']
-			self.assertEqual(len(urls), len(TARGETS) + 1)
-			self.assertEqual(len(targets), len(TARGETS))
-			self.assertIn(existing_results[0], results)
+			sigs = [join_results.si([])] + [httpx.s(target, context=dict(self.ctx)) for target in TARGETS]
+			chain(*sigs).apply().get()
+			self.assertEqual(len(self._store('url')), len(TARGETS) + 1)
+			self.assertEqual(len(self._store('target')), len(TARGETS))
 
 	def test_httpx_workflow(self):
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:
+		if 'httpx' not in TEST_TASK_NAMES:
 			return
 
 		targets = ['bing.com', 'google.com', 'wikipedia.org', 'ibm.com', 'cnn.com', 'karate.com']
-		sigs = []
-		for target in targets:
-			sig = httpx().s(target)
-			sigs.append(sig)
+		sigs = [httpx().s(target, context=dict(self.ctx)) for target in targets]
 		with mock_command(httpx, fixture=[FIXTURES_TASKS[httpx]] * len(targets)):
+			# Two adjacent groups need the join_results bridge task between them.
 			workflow = chain(
-				forward_results.s([]),
+				join_results.s([]),
 				sigs[0],
-				chord((
-					sigs[1],
-					sigs[2],
-				), forward_results.s()),
+				chord((sigs[1], sigs[2]), join_results.s()),
 				sigs[3],
-				chord((
-					sigs[4],
-					sigs[5],
-				), forward_results.s())
+				chord((sigs[4], sigs[5]), join_results.s()),
 			)
-			result = workflow.apply()
-			results = result.get()
-			urls = [r.url for r in results if r._type == 'url']
-			targets = [r.name for r in results if r._type == 'target']
-			self.assertEqual(len(targets), len(TARGETS))
-			self.assertEqual(len(urls), len(TARGETS))
+			workflow.apply().get()
+			self.assertEqual(len(self._store('target')), len(TARGETS))
+			self.assertEqual(len(self._store('url')), len(TARGETS))
 
 	def test_nmap_workflow(self):
 		from secator.tasks import nmap
-		if nmap not in TEST_TASKS:
+		if 'nmap' not in TEST_TASK_NAMES:
 			return
 
 		nmap_fixture = load_fixture('nmap_output', fixtures_dir=FIXTURES_DIR, ext='.xml', only_path=True)
 		with mock_command(nmap, fixture=[FIXTURES_TASKS[nmap]] * len(TARGETS)):
 			workflow = chain(
-				forward_results.s([]),
-				chord((
-					nmap.s(TARGETS, output_path=nmap_fixture)
-				), forward_results.s()),
+				join_results.s([]),
+				chord((nmap.s(TARGETS, output_path=nmap_fixture, context=dict(self.ctx))), join_results.s()),
 			)
-			result = workflow.apply()
-			results = result.get()
-			vulns = [r.id for r in results if r._type == 'vulnerability']
-			targets = [r.name for r in results if r._type == 'target']
-			self.assertEqual(len(targets), len(TARGETS))
-			self.assertEqual(len(vulns), 61)  # number of vulns in the XML fixture
+			workflow.apply().get()
+			self.assertEqual(len(self._store('target')), len(TARGETS))
+			self.assertEqual(len(self._store('vulnerability')), 61)  # number of vulns in the XML fixture
 
 	def test_ffuf_chunked(self):
 		from secator.tasks import ffuf
-		if ffuf not in TEST_TASKS:
+		if 'ffuf' not in TEST_TASK_NAMES:
 			return
 
 		HTTP_TARGETS = [f'https://{target}' for target in TARGETS]
 
 		with mock_command(ffuf, fixture=[FIXTURES_TASKS[ffuf]] * len(HTTP_TARGETS)):
 			workflow = chain(
-				forward_results.s([]),
-				chord((
-					ffuf.s(HTTP_TARGETS)
-				), forward_results.s()),
+				join_results.s([]),
+				chord((ffuf.s(HTTP_TARGETS, context=dict(self.ctx))), join_results.s()),
 			)
-			result = workflow.apply()
-			results = result.get()
-			urls = [r.url for r in results if r._type == 'url']
-			targets = [r.name for r in results if r._type == 'target']
-			self.assertEqual(len(targets), len(HTTP_TARGETS) * 2)
-			self.assertEqual(len(urls), len(HTTP_TARGETS))
+			workflow.apply().get()
+			self.assertEqual(len(self._store('target')), len(HTTP_TARGETS) * 2)
+			self.assertEqual(len(self._store('url')), len(HTTP_TARGETS))
 
 	def test_rate_limit_adjustment_for_chunked_tasks(self):
 		"""Test that rate_limit is divided by chunk count when chunking tasks."""
 		from secator.celery import break_task
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:
+		if httpx not in TEST_TASKS:  # vacuous by design (kept dormant, unrelated to payload drop)
 			return
 
 		# Create a task with rate_limit
@@ -142,7 +145,7 @@ class TestCelery(unittest.TestCase):
 			task.has_children = True
 
 			# Break the task into chunks
-			workflow = break_task(task, task_opts, results=[])
+			workflow = break_task(task, task_opts)
 
 			# Check that rate_limit was adjusted
 			# With 6 targets and input_chunk_size=1 (default for most tasks),
@@ -166,7 +169,7 @@ class TestCelery(unittest.TestCase):
 		"""Test that rate_limit never goes below 1 when chunking."""
 		from secator.celery import break_task
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:
+		if httpx not in TEST_TASKS:  # vacuous by design (kept dormant, unrelated to payload drop)
 			return
 
 		# Create a task with low rate_limit
@@ -179,7 +182,7 @@ class TestCelery(unittest.TestCase):
 
 			# Break the task into chunks
 			# With rate_limit=2 and 6 chunks, adjusted rate_limit should be max(1, 2//6) = 1
-			workflow = break_task(task, task_opts, results=[])
+			workflow = break_task(task, task_opts)
 
 			# The workflow should exist and have properly adjusted rate_limit
 			self.assertIsNotNone(workflow)
@@ -199,7 +202,7 @@ class TestCelery(unittest.TestCase):
 		import secator.celery as celery_mod
 		from secator.celery import break_task
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:
+		if httpx not in TEST_TASKS:  # vacuous by design (kept dormant, unrelated to payload drop)
 			return
 
 		HTTP_TARGETS = [f'https://{target}' for target in TARGETS]
@@ -209,7 +212,7 @@ class TestCelery(unittest.TestCase):
 			orig = celery_mod.resolve_task_queue
 			celery_mod.resolve_task_queue = lambda cls, opts: 'sentinel_queue'
 			try:
-				workflow = break_task(task, {'sync': False}, results=[])
+				workflow = break_task(task, {'sync': False})
 			finally:
 				celery_mod.resolve_task_queue = orig
 
@@ -222,7 +225,7 @@ class TestCelery(unittest.TestCase):
 		"""Test that break_task doesn't chunk when input_chunk_size=-1."""
 		from secator.tasks import httpx
 		from secator.celery import break_task
-		if httpx not in TEST_TASKS:
+		if httpx not in TEST_TASKS:  # vacuous by design (kept dormant, unrelated to payload drop)
 			return
 
 		class TestTask(httpx):
@@ -235,10 +238,32 @@ class TestCelery(unittest.TestCase):
 
 		# Mock to get the workflow signature
 		with mock_command(TestTask, fixture=[FIXTURES_TASKS[httpx]]):
-			workflow = break_task(task, task_opts, results=[])
+			workflow = break_task(task, task_opts)
 			# With input_chunk_size=-1, should return the inputs as-is without chunking
 			# This means one chunk with all inputs
 			self.assertEqual(len(workflow.tasks), len(inputs))
+
+
+class TestNoPayloadIngestion(unittest.TestCase):
+	"""#1310 regression: the mongodb --sync `deduplicate` crash ('str' has no attribute ...)
+	came from chain_results reducing findings to uuid strings, which mark_runner_completed
+	ingested into runner.results, where mark_duplicates then called ._compare_key() on a str.
+	With the payload dropped, mark_runner_completed ignores its upstream arg entirely, so uuid
+	strings can never enter runner.results — the crash is impossible by construction."""
+
+	def test_mark_completed_ignores_uuid_string_payload(self):
+		from secator.loader import get_configs_by_type
+		from secator.runners import Workflow
+		from secator.celery import mark_runner_completed
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+		wf = Workflow(workflows[0], inputs=['example.com'], run_opts={'dry_run': True}, context={})
+		# Feed the exact shape chain_results used to emit (ObjectId-like uuid strings).
+		ret = mark_runner_completed(['deadbeefdeadbeefdeadbeef', 'cafebabecafebabecafebabe'], wf, enable_hooks=False)
+		self.assertEqual(ret, [])                                       # topology-only return
+		self.assertFalse(any(isinstance(r, str) for r in wf.results))   # no str in results
+		self.assertEqual(wf.status, 'SUCCESS')                          # mark_duplicates did not crash
 
 
 class TestDelayMethods(unittest.TestCase):
@@ -247,7 +272,7 @@ class TestDelayMethods(unittest.TestCase):
 	def test_command_delay_signature(self):
 		"""Test that Command.delay() creates a proper Celery signature."""
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:
+		if 'httpx' not in TEST_TASK_NAMES:
 			return
 
 		# Test that delay returns an AsyncResult-like object
@@ -405,20 +430,40 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 			with patch.object(app.backend, 'get', side_effect=NotImplementedError, create=True):
 				self.assertEqual(bump_worker_loss_count('task-abc'), 0)
 
-	def test_abandon_task_returns_failure_error(self):
-		"""Abandoning returns results with a self-owned FAILURE Error so the chord proceeds."""
+	def test_abandon_task_persists_failure_error_to_store(self):
+		"""Abandoning returns topology-only, persisting a self-owned FAILURE Error to the store
+		(not the payload) so the chord proceeds and the failure is still queryable."""
+		import tempfile
+		from pathlib import Path
 		from secator.tasks import httpx
 		from secator.celery import abandon_task
-		if httpx not in TEST_TASKS:
+		from secator.config import CONFIG
+		import secator.hooks.sqlite as sqlite_mod
+		from secator.query.sqlite import SqliteBackend
+		if 'httpx' not in TEST_TASK_NAMES:
 			self.skipTest('httpx not available')
 
-		results = abandon_task('httpx', ['example.com'], {'context': {}}, [], delivery_count=2)
-		errors = [r for r in results if r._type == 'error']
-		self.assertEqual(len(errors), 1)
-		# Message separates delivery attempts (broker redeliveries) from the retry cap, so it
-		# reads sensibly even when the cap is 0 (a redelivery still occurs; the work isn't re-run).
-		self.assertIn('abandoned after 2 delivery attempts', errors[0].message)
-		self.assertIn('retry cap:', errors[0].message)
+		orig_path = CONFIG.addons.sqlite.path
+		tmp = tempfile.mkdtemp()
+		CONFIG.addons.sqlite.path = str(Path(tmp) / 'test.db')
+		sqlite_mod._conns.clear()
+		try:
+			ctx = {'drivers': ['sqlite'], 'workspace_id': 'ws', 'workspace_name': 'ws'}
+			ret = abandon_task('httpx', ['example.com'], {'context': ctx}, delivery_count=2)
+			self.assertEqual(ret, [])  # topology-only return
+			errors = SqliteBackend(workspace_id='ws').search({'_type': 'error'})
+			self.assertEqual(len(errors), 1)
+			# Message separates delivery attempts (broker redeliveries) from the retry cap, so it
+			# reads sensibly even when the cap is 0 (a redelivery still occurs; the work isn't re-run).
+			self.assertIn('abandoned after 2 delivery attempts', errors[0]['message'])
+			self.assertIn('retry cap:', errors[0]['message'])
+		finally:
+			for conn in sqlite_mod._conns.values():
+				conn.close()
+			sqlite_mod._conns.clear()
+			CONFIG.addons.sqlite.path = orig_path
+			import shutil
+			shutil.rmtree(tmp, ignore_errors=True)
 
 	def test_retries_exhausted_does_not_count_initial_delivery(self):
 		"""delivery_count includes the initial run; task_max_retries=N allows N redeliveries."""

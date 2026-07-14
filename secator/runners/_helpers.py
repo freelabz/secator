@@ -1,9 +1,9 @@
 import os
 import re
 
-from dotmap import DotMap
 from secator.config import CONFIG
 from secator.output_types import Error
+from secator.query.ast import substitute_ctx_constants
 from secator.utils import deduplicate, debug
 
 
@@ -117,10 +117,9 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')
 		inputs = computed_inputs
 	elif parent_scope and not opts.get('chunk'):
-		scoped_targets = [
-			item.name for item in results
-			if item._type == 'target' and item._context.get('scope') == parent_scope
-		]
+		# Scoped target fallback: query scope-tagged Targets via the same engine (backend
+		# does the filtering) instead of scanning the full in-memory fan-in.
+		scoped_targets = process_extractor(results, {'type': 'target', 'field': 'name'}, ctx=ctx)
 		combined = deduplicate(scoped_targets)
 		if combined:
 			debug('using scope-tagged targets as inputs', obj=combined, sub='extractors')
@@ -214,6 +213,114 @@ def parse_extractor(extractor):
 	return _type, _field, _condition, _group_by
 
 
+class StreamView:
+	"""Lazy, streaming view over a run-scoped store query — the read-model for a run's findings.
+
+	Iterating streams the backend cursor in batches (never materializes all N); ``len()`` is an
+	indexed count; ``bool()`` is a cheap count. Dicts are rehydrated to OutputType on the fly.
+
+	ponytail: ``__contains__`` is an O(N) stream + ``==`` scan — fine for the small membership
+	checks in the integration tests; the RAM-critical paths use ``__iter__``/``__len__`` which
+	stay flat. Upgrade __contains__ to a keyed exists-query if a hot path ever needs it.
+	"""
+	def __init__(self, engine, query, batch_size=1000, limit=0):
+		self._engine = engine
+		self._query = query
+		self._batch_size = batch_size
+		self._limit = limit
+
+	def __iter__(self):
+		n = 0
+		for batch in self._engine.iterate(self._query, self._batch_size):
+			for item in load_output_types(batch):
+				yield item
+				n += 1
+				if self._limit and n >= self._limit:
+					return
+
+	def __len__(self):
+		n = self._engine.count(self._query)
+		return min(n, self._limit) if self._limit else n
+
+	def __bool__(self):
+		return self._engine.count(self._query) > 0
+
+	def __contains__(self, item):
+		return any(x == item for x in self)
+
+
+def load_output_types(docs):
+	"""Rehydrate store query results (dicts) into OutputType objects.
+
+	Items already OutputType instances pass through; dicts are mapped by their ``_type``
+	to the matching class and loaded. Docs with an unknown/missing type are skipped.
+	The uuid is taken from ``_uuid`` (json/sqlite) or ``_id`` (mongodb).
+
+	Args:
+		docs (list): Store query results (dicts and/or OutputType objects).
+
+	Returns:
+		list[OutputType]: Rehydrated output types.
+	"""
+	from secator.output_types import OUTPUT_TYPES
+	by_name = {o.get_name(): o for o in OUTPUT_TYPES}
+	out = []
+	for doc in docs:
+		if isinstance(doc, dict):
+			klass = by_name.get(doc.get('_type'))
+			if not klass:
+				continue
+			item = klass.load(doc)
+			if not item._uuid:
+				item._uuid = str(doc.get('_uuid') or doc.get('_id') or '')
+			out.append(item)
+		elif hasattr(doc, '_type') and hasattr(doc, 'toDict'):
+			# Already an OutputType. Structural check (not isinstance) so a mid-suite
+			# module reload — which changes the OutputType class identity — can't drop it.
+			out.append(doc)
+	return out
+
+
+def run_scope_query(ctx):
+	"""Bound a query to the current run via the top-most present ancestry id (scan > workflow >
+	task). Each store driver mints its {type}_id at on_init (native format) and stamps it into
+	context, so descendants inherit it and findings carry it — uniform across all drivers, local
+	json included. Without it, store backends leak across runs in a shared workspace."""
+	for level in ('scan', 'workflow', 'task'):
+		rid = ctx.get(f'{level}_id')
+		if rid:
+			return {f'_context.{level}_id': str(rid)}
+	return {}
+
+
+def build_extractor_query(extractor, ctx):
+	"""Translate an extractor (type + condition) into a Mongo-style query dict, or None when a
+	constant gate makes it yield nothing."""
+	from secator.query.utils import python_expr_to_mongo
+	parsed = parse_extractor(extractor)
+	if not parsed:
+		return None
+	_type, _field, _condition, _group_by = parsed
+	query = {'_type': _type}
+	residual = substitute_ctx_constants(_condition, ctx)
+	if residual is None:
+		return None
+	if residual:
+		# python_expr_to_mongo treats `item.` as neutral (no _type), so force the extractor's
+		# declared type afterwards — it is authoritative over any prefix in the condition.
+		query.update(python_expr_to_mongo(residual))
+		query['_type'] = _type
+	query.update(run_scope_query(ctx))
+	# Additional narrowing the old per-item eval applied within the run.
+	parent_scope = ctx.get('parent_scope')
+	ancestor_id = ctx.get('ancestor_id')
+	if _type == 'target' and parent_scope:
+		query['_context.scope'] = parent_scope
+	elif ancestor_id and not ctx.get('node_chain_start', False):
+		query['_context.ancestor_id'] = str(ancestor_id)
+	return query
+
+
 def process_extractor(results, extractor, ctx=None):
 	"""Process extractor.
 
@@ -226,53 +333,34 @@ def process_extractor(results, extractor, ctx=None):
 	"""
 	if ctx is None:
 		ctx = {}
-	# debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
-	ancestor_id = ctx.get('ancestor_id')
-	node_chain_start = ctx.get('node_chain_start', False)
-	parent_scope = ctx.get('parent_scope')
 	key = ctx.get('key')
-
-	# Parse extractor, it can be a dict or a string (shortcut)
 	parsed_extractor = parse_extractor(extractor)
 	if not parsed_extractor:
 		return results
 	_type, _field, _condition, _group_by = parsed_extractor
 
-	# Evaluate condition for each result
-	if _condition:
-		tmp_results = []
-		if _type == 'target' and parent_scope:
-			_condition = _condition + f' and item._context.get("scope") == "{parent_scope}"'
-		elif ancestor_id and not node_chain_start:
-			_condition = _condition + f' and item._context.get("ancestor_id") == "{str(ancestor_id)}"'
-		for item in results:
-			if item._type != _type:
-				continue
-			ctx['item'] = DotMap(item.toDict())
-			ctx[f'{_type}'] = DotMap(item.toDict())
-			safe_globals = {
-				'__builtins__': {'len': len},
-				're_match': lambda pattern, value: bool(re.search(pattern, str(value))) if value is not None else False,
-			}
-			_eval_condition = re.sub(r'([\w.]+)\s*~=\s*(.+?)(?=\s+(?:and|or)\s+|$)', r're_match(\2, \1)', _condition)
-			eval_result = eval(_eval_condition, safe_globals, ctx)
-			if eval_result:
-				tmp_results.append(item)
-			del ctx['item']
-			del ctx[f'{_type}']
-		# debug(f'kept {len(tmp_results)} / {len(results)} items after condition [bold]{_condition}[/bold]', sub='extractor')  # noqa: E501
-		results = tmp_results
+	query = build_extractor_query(extractor, ctx)
+	if query is None:
+		return []
+	in_memory = ctx.get('results') or results
+	if in_memory:
+		# Caller handed us a materialized finding list (unit tests / sync library callers):
+		# filter it directly with the same match_query the local backend uses — no store
+		# round-trip. This is an explicit argument, NOT the runner's in-memory results.
+		from secator.query.json import match_query
+		results = [r for r in in_memory if match_query(r, query)]
 	else:
-		results = [item for item in results if item._type == _type]
-		if _type == 'target' and parent_scope:
-			results = [item for item in results if item._context.get('scope') == parent_scope]
-		elif ancestor_id and not node_chain_start:
-			results = [item for item in results if item._context.get('ancestor_id') == ancestor_id]
+		# Live run: findings live only in the store. Query it — the DB backend pushes the
+		# filter down (fan-in never materialized, RC#6 OOM fix); the local backend reads the
+		# run's report.json files.
+		from secator.query import QueryEngine
+		results = QueryEngine(ctx.get('workspace_id'), context={
+			'drivers': ctx.get('drivers', []),
+			'workspace_name': ctx.get('workspace_name'),
+			'report_dir': ctx.get('report_dir'),
+		}).search(query)
+	debug(f'extracted {len(results)} results (key: {key}) via query {query}', sub='extractor')
 
-	results_str = "\n".join([f'{repr(item)} [{str(item._context.get("ancestor_id", ""))}]' for item in results])
-	debug(f'extracted results ([bold]ancestor_id[/]: {ancestor_id}, [bold]key[/]: {key}):\n{results_str}', sub='extractor')
-
-	# Format field if needed
 	if _field:
 		already_formatted = '{' in _field and '}' in _field
 		_field = '{' + _field + '}' if not already_formatted else _field
@@ -282,7 +370,7 @@ def process_extractor(results, extractor, ctx=None):
 			_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
 			groups = {}
 			for item in results:
-				item_dict = item.toDict()
+				item_dict = _item_dict(item)
 				group_key = _format_nested(_group_by, item_dict)
 				value = _format_nested(_field, item_dict)
 				if not group_key or not value:
@@ -295,9 +383,14 @@ def process_extractor(results, extractor, ctx=None):
 					bucket.append(prefix)
 			results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
 		else:
-			results = [v for v in (_format_nested(_field, item.toDict()) for item in results) if v]
-	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
+			results = [v for v in (_format_nested(_field, _item_dict(item)) for item in results) if v]
 	return results
+
+
+def _item_dict(item):
+	"""Return an item as a dict, whether it's a raw finding dict (DB backend) or an
+	OutputType object (local backend)."""
+	return item if isinstance(item, dict) else item.toDict()
 
 
 def get_task_folder_id(path):

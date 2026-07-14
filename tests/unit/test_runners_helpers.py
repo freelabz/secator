@@ -147,14 +147,14 @@ class TestExtractorFunctions(unittest.TestCase):
         self.assertEqual(len(result), 2)  # mock2 and mock3 meet condition
         self.assertEqual(result, ['test2', 'test3'])
 
-        # Test with len function in condition
-        extractor = {
-            'type': 'mock',
-            'field': 'field1',
-            'condition': 'len(item.field1) > 3 and item.field2 == 1'
-        }
-        result = process_extractor(self.results, extractor, {})
-        self.assertEqual(result, ['test1'])
+        # Combined AND condition over finding fields.
+        extractor = {'type': 'mock', 'field': 'field1', 'condition': "item.field1 == 'test1' and item.field2 == 1"}
+        self.assertEqual(process_extractor(self.results, extractor, {}), ['test1'])
+
+        # `len(<field>)` is no longer supported (Mongo can't express it without $expr; no shipped
+        # config uses it). It must RAISE explicitly, never silently match-all/none.
+        with self.assertRaises(ValueError):
+            process_extractor(self.results, {'type': 'mock', 'field': 'field1', 'condition': 'len(item.field1) > 3'}, {})
 
     def test_process_extractor_with_nested_condition(self):
         """Test process_extractor with nested dict field access in conditions (dot notation)."""
@@ -381,6 +381,29 @@ class TestExtractorFunctions(unittest.TestCase):
         ]
         result = get_task_folder_id('/dummy/path')
         self.assertEqual(result, 4)  # Max numeric dir (3) + 1
+
+
+class TestLoadOutputTypes(unittest.TestCase):
+    """Rehydration of store query docs (dicts) into OutputType objects for the run-scope
+    backfill that assembles self.results from the store (Step 4)."""
+
+    def test_loads_dicts_by_type_and_keeps_uuid(self):
+        from secator.runners._helpers import load_output_types
+        docs = [
+            {'_type': 'url', 'url': 'http://x/a', '_uuid': 'u1'},
+            {'_type': 'vulnerability', 'name': 'CVE-1', '_id': 'm2'},  # mongodb-style id
+        ]
+        out = load_output_types(docs)
+        self.assertEqual([type(o).__name__ for o in out], ['Url', 'Vulnerability'])
+        self.assertEqual(out[0].url, 'http://x/a')
+        self.assertEqual(out[0]._uuid, 'u1')
+        self.assertEqual(out[1]._uuid, 'm2')  # falls back to _id
+
+    def test_passes_through_output_type_and_skips_unknown(self):
+        from secator.runners._helpers import load_output_types
+        existing = Url(url='http://y/b', _context={'workspace_id': 'ws'})
+        out = load_output_types([existing, {'_type': 'nope'}, 'garbage', 42])
+        self.assertEqual(out, [existing])
 
 
 if __name__ == '__main__':

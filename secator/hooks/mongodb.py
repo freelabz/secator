@@ -1,5 +1,6 @@
 import logging
 import time
+import uuid
 
 import pymongo
 from bson.objectid import ObjectId
@@ -7,7 +8,7 @@ from celery import shared_task
 
 from secator.config import CONFIG
 from secator.hooks._dedup import compute_duplicate_updates
-from secator.output_types import OUTPUT_TYPES, Warning
+from secator.output_types import OUTPUT_TYPES, Warning, is_output_type
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
 
@@ -78,34 +79,22 @@ def update_runner(self):
 	collection = f'{type}s'
 	update = self.toDict()
 	chunk = update.get('chunk')
+	# The runner-doc _id is the runner core's {type}_id (a UUID string), NOT an ObjectId. Upsert by
+	# it so the runner core owns id-minting uniformly. (Findings keep their own ObjectId _id.)
 	_id = self.context.get(f'{type}_chunk_id') if chunk else self.context.get(f'{type}_id')
 	debug('to_update', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=True, obj_breaklines=False, verbose=True)  # noqa: E501
 	start_time = time.time()
 	try:
-		if _id:
-			db = client.main
-			start_time = time.time()
-			db[collection].update_one({'_id': ObjectId(_id)}, {'$set': update})
-			end_time = time.time()
-			elapsed = end_time - start_time
-			debug(
-				f'[dim gold4]updated in {elapsed:.4f}s[/]', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)  # noqa: E501
-			self.last_updated_db = start_time
-		else:  # sync update and save result to runner object
-			runner = db[collection].insert_one(update)
-			_id = str(runner.inserted_id)
-			if chunk:
-				self.context[f'{type}_chunk_id'] = _id
-			else:
-				self.context[f'{type}_id'] = _id
-			end_time = time.time()
-			elapsed = end_time - start_time
-			debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
+		db[collection].update_one({'_id': _id}, {'$set': update}, upsert=True)
+		elapsed = time.time() - start_time
+		debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=_id, obj=get_runner_dbg(self), obj_after=False)
+		self.last_updated_db = start_time
 	except pymongo.errors.DocumentTooLarge:
 		# The runner state exceeds MongoDB's 16MB BSON limit (usually huge outputs).
 		# Don't crash the runner over a persistence limit — warn and carry on.
 		msg = f'{self.unique_name} state exceeds MongoDB\'s 16MB document limit; skipping this DB update.'
-		self.add_result(Warning(message=msg), hooks=False)
+		# Persisted to the store via the runner's on_item hook (warning is tiny; no recursion).
+		self.add_result(Warning(message=msg))
 		debug(msg, sub='hooks.mongodb', id=_id)
 
 
@@ -143,14 +132,17 @@ def on_build(self, task_spec):
 	collection = f'{child_type}s'
 	is_chunk = bool(task_spec.get('chunk'))
 	doc = build_pending_doc(self, task_spec, child_type)
-	_id = str(db[collection].insert_one(doc).inserted_id)
+	# Mint the child's runner-doc id as a UUID string (matches the runner core's format), so the
+	# child reuses it and update_runner upserts the same doc.
+	_id = str(uuid.uuid4())
+	db[collection].insert_one({**doc, '_id': _id})
 	key = f'{child_type}_chunk_id' if is_chunk else f'{child_type}_id'
 	task_spec.setdefault('context', {})[key] = _id
 	return task_spec
 
 
 def update_finding(self, item):
-	if type(item) not in OUTPUT_TYPES:
+	if not is_output_type(item):
 		return item
 	start_time = time.time()
 	client = get_mongodb_client()
@@ -171,7 +163,8 @@ def update_finding(self, item):
 		# response body). Warn instead of crashing the runner; return the item so
 		# the chain continues.
 		msg = f'{item._type} finding exceeds MongoDB\'s 16MB document limit; skipping persist.'
-		self.add_result(Warning(message=msg), hooks=False)
+		# Persisted to the store via the runner's on_item hook (warning is tiny; no recursion).
+		self.add_result(Warning(message=msg))
 		debug(msg, sub='hooks.mongodb', id=str(item._uuid))
 		return item
 	end_time = time.time()
@@ -277,6 +270,7 @@ HOOKS = {
 		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
+		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],
@@ -285,6 +279,7 @@ HOOKS = {
 		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
+		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],

@@ -55,6 +55,7 @@ class Scan(Runner):
 			local_ns = {'opts': DotMap(opts)}
 			safe_globals = {'__builtins__': {'len': len}}
 			if condition and not eval(condition, safe_globals, local_ns):
+				# Persisted to the store via the runner's on_item hook.
 				self.add_result(Info(message=f'Skipped workflow {name} because condition is not met: {condition}'))
 				continue
 
@@ -62,7 +63,7 @@ class Scan(Runner):
 			workflow = Workflow(
 				config,
 				self.inputs,
-				results=self.results,
+				results=[],  # children read this run's findings from the store (run-scoped)
 				run_opts=opts,
 				hooks=self._hooks,
 				context=self.context.copy()
@@ -79,9 +80,8 @@ class Scan(Runner):
 			for task_id, task_info in workflow.celery_ids_map.items():
 				self.add_subtask(task_id, task_info['name'], task_info['descr'])
 			sigs.append(celery_workflow)
-
-			for result in workflow.results:
-				self.add_result(result, print=False, hooks=False)
+			# No child-aggregation: the scan's results view (scoped by scan_id) sees every descendant
+			# — the whole subtree inherits scan_id, and dry_run persists too (hooks stay on).
 
 		if sigs:
 			# A scan's start marker carries no prior results (empty `[]`), so it
