@@ -6,3 +6,6 @@ opts:
   tcp_syn_stealth: true
   nmap_light_tcp_syn_stealth: true
   scan_type: s
+  nuclei_mode: "off"
+  host_recon_nuclei_mode: "off"
+  url_vuln_nuclei_mode: "off"
