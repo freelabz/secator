@@ -1126,7 +1126,7 @@ def list_aliases(silent):
 @click.option('--group', is_flag=False, flag_value='', default=None, help='Group findings by field(s) (comma-separated) with auto-aggregation. Bare --group uses per-type defaults.')  # noqa: E501
 @click.option('--save', 'save', type=str, default=None, help='Save the query expression ARG under this name for later reuse (e.g. --save vuln_high)')  # noqa: E501
 @click.pass_context
-def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, group, save):
+def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, group, save):  # noqa: E501
 	"""Query"""
 	# Empty query: return all results (subject to the enforced base query),
 	# optionally scoped by --report-filter / --workspace.
