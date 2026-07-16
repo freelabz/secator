@@ -1556,6 +1556,28 @@ def atomic_json(path, default=dict):
 	)
 
 
+def append_ndjson(path, line):
+	"""Append one line (a single JSON record, no trailing newline) to an NDJSON file.
+
+	O(1): opens in append mode and writes one line — never reads or parses the existing
+	content. Uses the SAME layered lock as ``atomic_json`` (in-process path lock +
+	cross-process ``flock`` on the ``.lock`` sidecar) so concurrent appenders — prefork
+	processes and gevent greenlets — never interleave a partial write. A record can exceed
+	``PIPE_BUF`` (4 KB), so a bare ``write`` is not atomic on its own; the lock is required.
+	"""
+	path = Path(path)
+	path.parent.mkdir(parents=True, exist_ok=True)
+	lock_path = str(path) + '.lock'
+	with _get_path_lock(path):
+		with open(lock_path, 'w') as lock_fd:
+			fcntl.flock(lock_fd, fcntl.LOCK_EX)
+			try:
+				with open(path, 'a') as f:
+					f.write(line + '\n')
+			finally:
+				fcntl.flock(lock_fd, fcntl.LOCK_UN)
+
+
 def read_json(path, default=dict):
 	"""Lock-free snapshot read of a JSON file written by ``atomic_json``.
 
