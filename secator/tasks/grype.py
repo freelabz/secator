@@ -60,7 +60,7 @@ class grype(VulnCode):
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED,
 	}
-	install_version = 'v0.91.2'
+	install_version = 'v0.115.0'
 	install_cmd_pre = {'*': ['curl']}
 	install_cmd = f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {CONFIG.dirs.bin}'  # noqa: E501
 	github_handle = 'anchore/grype'
@@ -69,22 +69,38 @@ class grype(VulnCode):
 	def item_loader(self, line):
 		"""Load vulnerabilty dicts from grype line output."""
 		split = [i for i in line.split('  ') if i]
-		if len(split) not in [5, 6] or split[0] == 'NAME':
+		kev = split and split[-1].strip() == '(kev)'  # grype flags KEV vulns with a trailing marker in the RISK column
+		if kev:
+			split = split[:-1]
+		if len(split) not in [7, 8] or split[0] == 'NAME':
 			return
 		versions_fixed = None
-		if len(split) == 5:  # no version fixed
-			product, version, product_type, vuln_id, severity = tuple(split)
-		elif len(split) == 6:
-			product, version, versions_fixed, product_type, vuln_id, severity = tuple(split)
+		if len(split) == 7:  # no version fixed
+			product, version, product_type, vuln_id, severity, epss, risk = tuple(split)
+		elif len(split) == 8:
+			product, version, versions_fixed, product_type, vuln_id, severity, epss, risk = tuple(split)
 		extra_data = {
 			'lang': product_type.strip(),
 			'product': product.strip(),
 			'version': version.strip(),
+			'risk': risk.strip(),
 		}
-		if versions_fixed:
+		epss_score = 0.0
+		if '%' in epss:  # e.g. '47.6% (98th)' -> 0.476
+			try:
+				epss_score = float(epss.split('%')[0].strip()) / 100
+			except ValueError:
+				pass
+		wont_fix = versions_fixed is not None and versions_fixed.strip() == "(won't fix)"
+		if wont_fix:
+			extra_data['versions_fixed'] = []
+		elif versions_fixed:
 			extra_data['versions_fixed'] = [c.strip() for c in versions_fixed.split(', ')]
+		tags = (['kev'] if kev else []) + (['wont_fix'] if wont_fix else [])
 		vuln_id = vuln_id.strip()
 		severity = severity.lower().strip()
+		if severity == 'negligible':
+			severity = 'low'
 		matched_at = self.inputs[0]
 		if Path(matched_at).exists():
 			matched_at = str(Path(matched_at).resolve())
@@ -96,7 +112,8 @@ class grype(VulnCode):
 			'severity': severity,
 			'provider': 'grype',
 			'cvss_score': -1,
-			'tags': [],
+			'epss_score': epss_score,
+			'tags': list(tags),
 		}
 		if vuln_id.startswith('GHSA'):
 			data['provider'] = 'github.com'
@@ -104,12 +121,16 @@ class grype(VulnCode):
 			vuln = VulnCode.lookup_cve_from_ghsa(vuln_id)
 			if vuln:
 				data.update(vuln)
-				data['severity'] = data['severity'] or severity
+				data['severity'] = data['severity'] if data['severity'] not in ('', 'unknown') else severity
 				extra_data['ghsa_id'] = vuln_id
 		elif vuln_id.startswith('CVE'):
 			vuln = VulnCode.lookup_cve(vuln_id)
 			if vuln:
 				data.update(vuln.toDict())
-				data['severity'] = data['severity'] or severity
+				data['severity'] = data['severity'] if data['severity'] not in ('', 'unknown') else severity
+		# grype's EPSS and tags are authoritative; re-assert them after the CVE/GHSA lookup which clobbers them
+		data['epss_score'] = epss_score
+		if tags:
+			data['tags'] = list(dict.fromkeys(data.get('tags', []) + tags))
 		data['extra_data'] = extra_data
 		yield data
