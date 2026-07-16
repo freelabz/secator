@@ -90,7 +90,7 @@ OUTPUTS_TASKS = {
 		Url(url='https://danielmiessler.com/predictions/', status_code=200, content_length=23, _source='gospider'),
 	],
 	'grype': [
-		Vulnerability(name='CVE-2024-24790', provider='grype', id='CVE-2024-24790', matched_at='redis:7.4.1', ip='', confidence='medium', severity='critical', cvss_score=-1, _source='grype'),
+		Vulnerability(name='CVE-2024-46981', provider='grype', id='CVE-2024-46981', matched_at='redis:7.4.1', ip='', confidence='medium', severity='critical', cvss_score=-1, _source='grype'),
 	],
 	'h8mail': [UserAccount(username='test', email='test@test.com', _source='h8mail')],
 	'httpx': [
