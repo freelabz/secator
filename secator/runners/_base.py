@@ -128,6 +128,8 @@ class Runner:
 		self.output = ''
 		self.started = False
 		self.done = False
+		self._final_status = None  # memoized terminal status — a done runner's errors don't change
+		self._final_errors = None  # memoized terminal errors (root of status/errors_count)
 		self.start_time = datetime.fromtimestamp(time(), timezone.utc)
 		self.end_time = None
 		self.last_updated_db = None
@@ -449,7 +451,15 @@ class Runner:
 
 	@property
 	def errors(self):
-		return [r for r in self._view('error') if self._owns_error(r)]
+		# All error accessors (self_errors, errors_count, status) root here. Once the runner is done
+		# its errors are fixed, so memoize — otherwise each status/log/toDict/export access at
+		# completion re-reads _view('error') (a full json-store parse). Live (not-done) reads stay fresh.
+		if self._final_errors is not None:
+			return self._final_errors
+		errs = [r for r in self._view('error') if self._owns_error(r)]
+		if self.done:
+			self._final_errors = errs
+		return errs
 
 	@property
 	def self_results(self):
@@ -500,7 +510,15 @@ class Runner:
 
 	@property
 	def status(self):
-		return self._status()
+		# A done runner is terminal: its errors (and thus SUCCESS/FAILURE) can't change, so memoize
+		# to avoid re-reading errors_count from the store on every access (status is read many times
+		# at completion — logging, toDict, export). Cheap on mongodb, a full re-parse on the json store.
+		if self._final_status is not None:
+			return self._final_status
+		st = self._status()
+		if self.done:
+			self._final_status = st
+		return st
 
 	@property
 	def celery_state(self):
