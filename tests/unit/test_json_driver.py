@@ -67,7 +67,7 @@ class JsonDriverTestBase(unittest.TestCase):
 
 
 class TestJsonDriverHooks(JsonDriverTestBase):
-	def test_update_finding_inserts_and_assigns_uuid(self):
+	def test_update_finding_appends_to_ndjson(self):
 		from secator.hooks import json as mod
 		runner = self._runner()
 		item = self._url('http://x/a')
@@ -75,30 +75,34 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		returned = mod.update_finding(runner, item)
 		self.assertTrue(returned._uuid)  # uuid assigned
 
-		data = json.loads((Path(self.temp_dir) / 'report.json').read_text())
-		self.assertEqual(len(data['results']['url']), 1)
-		self.assertEqual(data['results']['url'][0]['url'], 'http://x/a')
-		self.assertEqual(data['results']['url'][0]['_uuid'], returned._uuid)
+		lines = (Path(self.temp_dir) / 'results.ndjson').read_text().splitlines()
+		self.assertEqual(len(lines), 1)
+		rec = json.loads(lines[0])
+		self.assertEqual(rec['url'], 'http://x/a')
+		self.assertEqual(rec['_uuid'], returned._uuid)
+		# report.json (if written at all here) must NOT carry results
+		rp = Path(self.temp_dir) / 'report.json'
+		if rp.exists():
+			self.assertEqual(json.loads(rp.read_text()).get('results', {}), {})
 
-	def test_update_finding_upserts_by_uuid(self):
+	def test_update_finding_reemit_appends_second_line(self):
 		from secator.hooks import json as mod
 		runner = self._runner()
 		item = self._url('http://x/a')
-		mod.update_finding(runner, item)          # insert
+		mod.update_finding(runner, item)          # append 1
 		item.status_code = 200
-		mod.update_finding(runner, item)          # update same uuid, must not duplicate
-
-		data = json.loads((Path(self.temp_dir) / 'report.json').read_text())
-		self.assertEqual(len(data['results']['url']), 1)
-		self.assertEqual(data['results']['url'][0]['status_code'], 200)
+		mod.update_finding(runner, item)          # append 2 (same _uuid)
+		lines = (Path(self.temp_dir) / 'results.ndjson').read_text().splitlines()
+		self.assertEqual(len(lines), 2)           # append-only: two lines
+		self.assertEqual(json.loads(lines[1])['status_code'], 200)  # later line wins on read
 
 	def test_update_finding_ignores_non_output_type(self):
 		from secator.hooks import json as mod
 		runner = self._runner()
 		self.assertEqual(mod.update_finding(runner, {'not': 'an output type'}), {'not': 'an output type'})
-		self.assertFalse((Path(self.temp_dir) / 'report.json').exists())
+		self.assertFalse((Path(self.temp_dir) / 'results.ndjson').exists())
 
-	def test_update_runner_writes_info(self):
+	def test_update_runner_writes_info_only(self):
 		from secator.hooks import json as mod
 		runner = self._runner()
 		mod.update_runner(runner)
@@ -106,13 +110,14 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		self.assertEqual(data['info']['status'], 'RUNNING')
 		self.assertEqual(data['info']['name'], 'httpx')
 
-		# Runner info update must preserve already-written findings (findings + info share the file).
+		# A finding goes to the ndjson; a later info update must not disturb it.
 		mod.update_finding(runner, self._url('http://x/a'))
 		runner.status = 'SUCCESS'
 		mod.update_runner(runner)
 		data = json.loads((Path(self.temp_dir) / 'report.json').read_text())
 		self.assertEqual(data['info']['status'], 'SUCCESS')
-		self.assertEqual(len(data['results']['url']), 1)
+		lines = (Path(self.temp_dir) / 'results.ndjson').read_text().splitlines()
+		self.assertEqual(len(lines), 1)
 
 	def test_hooks_structure(self):
 		from secator.hooks import json as mod
