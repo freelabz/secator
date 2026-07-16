@@ -62,7 +62,7 @@ class grype(VulnCode):
 	}
 	install_version = 'v0.115.0'
 	install_cmd_pre = {'*': ['curl']}
-	install_cmd = f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {CONFIG.dirs.bin} {install_version}'  # noqa: E501
+	install_cmd = f'curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b {CONFIG.dirs.bin} [install_version]'  # noqa: E501
 	github_handle = 'anchore/grype'
 
 	@staticmethod
