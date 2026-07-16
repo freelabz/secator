@@ -1503,14 +1503,33 @@ def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt
 
 
 def _load_report_data(path):
-	"""Read report JSON to extract info section and count vulnerability severities"""
+	"""Read report info + count vulnerability severities.
+
+	Info comes from report.json; vulnerabilities come from the sibling results.ndjson
+	(json driver's live/new store) when present, else from the legacy report.json['results'].
+	"""
 	info = {}
 	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
 	with open(path, 'r') as f:
 		data = json.load(f)
 	info = data.get('info', {})
-	results = data.get('results', {})
-	for vuln in results.get('vulnerability', []):
+	ndjson = Path(path).parent / 'results.ndjson'
+	vulns = []
+	if ndjson.exists():
+		with open(ndjson, 'r') as f:
+			for line in f:
+				line = line.strip()
+				if not line:
+					continue
+				try:
+					rec = json.loads(line)
+				except json.JSONDecodeError:
+					continue
+				if rec.get('_type') == 'vulnerability':
+					vulns.append(rec)
+	else:
+		vulns = data.get('results', {}).get('vulnerability', [])
+	for vuln in vulns:
 		severity = str(vuln.get('severity', '')).lower()
 		if severity in vuln_counts:
 			vuln_counts[severity] += 1
