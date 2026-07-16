@@ -128,6 +128,35 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		self.assertIn('on_item', mod.HOOKS[Task])
 		self.assertIn('on_end', mod.HOOKS[Task])
 
+	def test_reader_last_wins_and_torn_line(self):
+		from secator.query.json import JsonBackend
+		folder = Path(self.temp_dir) / 'ws1' / 'tasks' / 'abc123'
+		folder.mkdir(parents=True)
+		nd = folder / 'results.ndjson'
+		# two records for uuid u1 (last wins) + one torn (partial) final line
+		nd.write_text(
+			json.dumps({'_type': 'url', '_uuid': 'u1', 'url': 'http://x/a', 'status_code': 0}) + '\n' +
+			json.dumps({'_type': 'url', '_uuid': 'u1', 'url': 'http://x/a', 'status_code': 200}) + '\n' +
+			'{"_type": "url", "_uuid": "u2", "url": "http://x/b'  # torn, no closing
+		)
+		backend = JsonBackend(workspace_id='ws1', config={'reports_dir': self.temp_dir},
+							  context={'report_dir': str(folder)})
+		res = backend.search({'_type': 'url'})
+		self.assertEqual(len(res), 1)                       # u2 torn line skipped; u1 deduped
+		self.assertEqual(res[0]['status_code'], 200)        # later u1 line wins
+
+	def test_reader_falls_back_to_old_report_json(self):
+		from secator.query.json import JsonBackend
+		folder = Path(self.temp_dir) / 'ws1' / 'tasks' / 'old1'
+		folder.mkdir(parents=True)
+		# legacy report.json with nested results, NO ndjson
+		(folder / 'report.json').write_text(json.dumps(
+			{'info': {}, 'results': {'url': [{'_type': 'url', '_uuid': 'o1', 'url': 'http://old/a'}]}}))
+		backend = JsonBackend(workspace_id='ws1', config={'reports_dir': self.temp_dir},
+							  context={'report_dir': str(folder)})
+		res = backend.search({'_type': 'url'})
+		self.assertEqual([r['url'] for r in res], ['http://old/a'])
+
 	def test_query_backend_reads_live_file(self):
 		"""The live-written report.json is readable by the local (json) query backend mid-run."""
 		from secator.hooks import json as mod

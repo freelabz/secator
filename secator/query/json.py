@@ -170,24 +170,43 @@ class JsonBackend(QueryBackend):
 		return findings
 
 	def _read_report_dir(self, report_dir: Path, runner_type_singular: str, findings: list):
-		"""Append the findings in ONE report.json (report_dir/report.json) to `findings`."""
-		report_file = report_dir / 'report.json'
-		if not report_file.exists():
-			return
-		try:
-			with open(report_file, 'r') as f:
-				data = json.load(f)
-		except (json.JSONDecodeError, IOError) as e:
-			debug(f'Error loading {report_file}: {e}', sub='query.json')
-			return
+		"""Append one runner's findings to `findings`, reading results.ndjson (live/new format)
+		or falling back to report.json['results'] (legacy/completed pre-ndjson reports)."""
+		ndjson = report_dir / 'results.ndjson'
+		if ndjson.exists():
+			by_uuid = {}
+			try:
+				with open(ndjson, 'r') as f:
+					for line in f:
+						line = line.strip()
+						if not line:
+							continue
+						try:
+							rec = json.loads(line)
+						except json.JSONDecodeError:
+							continue  # torn final line after a crash -> skip
+						by_uuid[rec.get('_uuid') or id(rec)] = rec  # last-wins
+			except IOError as e:
+				debug(f'Error reading {ndjson}: {e}', sub='query.json')
+				return
+			items = list(by_uuid.values())
+		else:
+			report_file = report_dir / 'report.json'
+			if not report_file.exists():
+				return
+			try:
+				with open(report_file, 'r') as f:
+					data = json.load(f)
+			except (json.JSONDecodeError, IOError) as e:
+				debug(f'Error loading {report_file}: {e}', sub='query.json')
+				return
+			items = [it for lst in data.get('results', {}).values()
+					 if isinstance(lst, list) for it in lst]
 		runner_id = report_dir.name
-		for items in data.get('results', {}).values():
-			if isinstance(items, list):
-				for item in items:
-					# Inject the {type}_id from the directory path when the finding lacks it.
-					if f'{runner_type_singular}_id' not in item.get('_context', {}):
-						item.setdefault('_context', {})[f'{runner_type_singular}_id'] = runner_id
-				findings.extend(items)
+		for item in items:
+			if f'{runner_type_singular}_id' not in item.get('_context', {}):
+				item.setdefault('_context', {})[f'{runner_type_singular}_id'] = runner_id
+		findings.extend(items)
 
 	def _load_from_files(self) -> List[Dict[str, Any]]:
 		"""Load findings from report.json files.
