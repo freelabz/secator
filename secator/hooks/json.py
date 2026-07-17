@@ -27,7 +27,6 @@
 # by walking report dirs, so a child simply appears once it starts. Add on_build
 # if a live "pending children" view is needed.
 
-import json
 import orjson
 import uuid
 from pathlib import Path
