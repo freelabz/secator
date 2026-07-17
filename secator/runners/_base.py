@@ -1151,9 +1151,11 @@ class Runner:
 		for hook in self.resolved_hooks[hook_type]:
 			fun = self.get_func_path(hook)
 			try:
-				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
-					self.debug('hook skipped (backend update frequency)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
-					return
+				if hook_type == 'on_interval':
+					if not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
+						self.debug('hook skipped (backend update frequency)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
+						return
+					self.last_updated_db = time()  # stamp so the throttle actually engages (was never set -> fired per-item)
 				if not self.enable_hooks or self.no_process:
 					self.debug('hook skipped (disabled hooks or no_process)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
 					continue

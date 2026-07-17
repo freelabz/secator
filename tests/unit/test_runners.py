@@ -148,6 +148,23 @@ class TestCommandRunner(unittest.TestCase):
 					self.assertEqual(len(call[0]), 2)  # self and item arguments
 					self.assertIsInstance(call[0][1], (str, dict, OutputType))  # result
 
+	def test_on_interval_throttled_by_backend_frequency(self):
+		"""Regression: on_interval must honor backend_update_frequency, not fire once per item.
+
+		last_updated_db was initialized to None and never stamped, so should_update() was
+		always true and the backend runner row was rewritten on every finding (1M redundant
+		writes at 1M findings — the cause of the sqlite driver's super-linear DNF at scale).
+		"""
+		mock_hooks = self.mock_hooks(output_types=[Url], item_loaders=[JSONSerializer()])
+		with mock_command(MyCommand, TARGETS, {}, ['{"url": "http://example.com"}']) as command:
+			command.last_updated_db = None
+			before = mock_hooks['on_interval'].call_count
+			command.run_hooks('on_interval')   # first call: throttle open -> fires + stamps
+			command.run_hooks('on_interval')   # immediate second call: must be throttled
+			fired = mock_hooks['on_interval'].call_count - before
+			self.assertEqual(fired, 1, "on_interval fired twice — the backend-frequency throttle is not engaging")
+			self.assertIsNotNone(command.last_updated_db, "last_updated_db must be stamped so the throttle engages")
+
 	def test_hooks_failing(self):
 		"""Ensure that failing hooks are correctly handled for all hooks in the command lifecycle."""
 		fixture = [
