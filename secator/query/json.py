@@ -249,21 +249,84 @@ class JsonBackend(QueryBackend):
 		debug(f'Loaded {len(findings)} findings from workspace', sub='query.json')
 		return findings
 
+	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str):
+		"""Yield one runner's records one at a time — the ndjson streamed line-by-line (or a legacy
+		report.json), with the {type}_id injection. No dedup or list here: this is the O(1)-memory
+		read used for filter-while-streaming; last-wins dedup, when needed, is done by the caller over
+		its (small) kept subset, not over the whole file."""
+		runner_id = report_dir.name
+
+		def _tag(rec):
+			if isinstance(rec, dict) and f'{runner_type_singular}_id' not in rec.get('_context', {}):
+				rec.setdefault('_context', {})[f'{runner_type_singular}_id'] = runner_id
+			return rec
+
+		ndjson = report_dir / 'results.ndjson'
+		if ndjson.exists():
+			try:
+				with open(ndjson, 'r') as f:
+					for line in f:
+						line = line.strip()
+						if not line:
+							continue
+						try:
+							rec = json.loads(line)
+						except json.JSONDecodeError:
+							continue  # torn final line after a crash -> skip
+						yield _tag(rec)
+			except IOError as e:
+				debug(f'Error reading {ndjson}: {e}', sub='query.json')
+			return
+		report_file = report_dir / 'report.json'
+		if not report_file.exists():
+			return
+		try:
+			with open(report_file, 'r') as f:
+				data = json.load(f)  # legacy/completed report — nested JSON, can't stream without json_stream
+		except (json.JSONDecodeError, IOError) as e:
+			debug(f'Error loading {report_file}: {e}', sub='query.json')
+			return
+		for lst in data.get('results', {}).values():
+			if isinstance(lst, list):
+				for rec in lst:
+					yield _tag(rec)
+
+	def _iter_records(self):
+		"""Stream store records one at a time — never materializes the full result set. Mirrors
+		_load_from_files' scoping (run-scoped report_dir hot path, else workspace scan)."""
+		report_dir = self.context.get('report_dir')
+		if report_dir:
+			report_dir = Path(report_dir)
+			singular = report_dir.parent.name.rstrip('s') or 'task'
+			yield from self._iter_report_dir(report_dir, singular)
+			return
+		workspace_path = self._get_workspace_path()
+		if not workspace_path.exists():
+			return
+		for runner_type in ['tasks', 'workflows', 'scans']:
+			runner_path = workspace_path / runner_type
+			if not runner_path.exists():
+				continue
+			for report_dir in runner_path.iterdir():
+				if report_dir.is_dir():
+					yield from self._iter_report_dir(report_dir, runner_type.rstrip('s'))
+
 	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
-		"""Search findings matching query."""
-		findings = self._load_all_findings()
-
-		matched = []
-		for finding in findings:
-			if match_query(finding, query):
-				# Remove excluded fields
-				if exclude_fields and isinstance(finding, dict):
-					finding = {k: v for k, v in finding.items() if k not in exclude_fields}
-				matched.append(finding)
-				if limit and len(matched) >= limit:
-					break
-
-		return matched
+		"""Search findings matching query by FILTERING WHILE STREAMING — peak memory is O(matches),
+		not O(total findings). The fan-in extractor's one store query used to materialize the whole
+		result set (_load_all_findings) before filtering to a handful of matches, which was the O(N)
+		peak that defeated streaming. We iterate records one at a time, match, and keep only matches,
+		deduped last-wins by _uuid over the (small) matched subset."""
+		by_uuid = {}
+		for finding in self._iter_records():
+			if not match_query(finding, query):
+				continue
+			if exclude_fields and isinstance(finding, dict):
+				finding = {k: v for k, v in finding.items() if k not in exclude_fields}
+			by_uuid[(finding.get('_uuid') if isinstance(finding, dict) else None) or id(finding)] = finding
+			if limit and len(by_uuid) >= limit:
+				break
+		return list(by_uuid.values())
 
 	def _execute_count(self, query: dict) -> int:
 		"""Count findings matching query."""
