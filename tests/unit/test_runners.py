@@ -165,6 +165,19 @@ class TestCommandRunner(unittest.TestCase):
 			self.assertEqual(fired, 1, "on_interval fired twice — the backend-frequency throttle is not engaging")
 			self.assertIsNotNone(command.last_updated_db, "last_updated_db must be stamped so the throttle engages")
 
+	def test_on_interval_flushes_on_status_transition(self):
+		"""A status change must flush to the store immediately, even inside the throttle window —
+		so PENDING->RUNNING->done stay live; only unchanged-status heartbeats are throttled (#1315)."""
+		mock_hooks = self.mock_hooks(output_types=[Url], item_loaders=[JSONSerializer()])
+		with mock_command(MyCommand, TARGETS, {}, ['{"url": "http://example.com"}']) as command:
+			command.last_updated_db = 10 ** 18       # throttle window firmly CLOSED
+			command._last_status_flushed = 'STALE'   # ...but status differs from last flushed
+			before = mock_hooks['on_interval'].call_count
+			command.run_hooks('on_interval')         # transition -> must fire despite the throttle
+			self.assertEqual(mock_hooks['on_interval'].call_count - before, 1,
+				"on_interval must flush a status transition even within the throttle window")
+			self.assertEqual(command._last_status_flushed, command.status)
+
 	def test_hooks_failing(self):
 		"""Ensure that failing hooks are correctly handled for all hooks in the command lifecycle."""
 		fixture = [

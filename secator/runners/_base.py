@@ -134,6 +134,7 @@ class Runner:
 		self.start_time = datetime.fromtimestamp(time(), timezone.utc)
 		self.end_time = None
 		self.last_updated_db = None
+		self._last_status_flushed = None
 		self.last_updated_celery = None
 		self.last_updated_progress = None
 		self.progress = 0
@@ -1152,10 +1153,16 @@ class Runner:
 			fun = self.get_func_path(hook)
 			try:
 				if hook_type == 'on_interval':
-					if not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
+					# Always flush a status TRANSITION immediately (PENDING->RUNNING->done stay live in
+					# the store); the time-throttle only applies while status is unchanged (progress
+					# heartbeats), which is what stops the per-item write storm. See #1315.
+					status = self.status
+					unchanged = status == self._last_status_flushed
+					if unchanged and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
 						self.debug('hook skipped (backend update frequency)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
 						return
-					self.last_updated_db = time()  # stamp so the throttle actually engages (was never set -> fired per-item)
+					self.last_updated_db = time()
+					self._last_status_flushed = status
 				if not self.enable_hooks or self.no_process:
 					self.debug('hook skipped (disabled hooks or no_process)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
 					continue
