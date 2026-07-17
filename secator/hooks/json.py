@@ -32,7 +32,8 @@ import orjson
 import uuid
 from pathlib import Path
 
-from secator.output_types import is_output_type
+from secator.output_types import is_output_type, Info
+from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.utils import append_ndjson, atomic_json, debug
 
@@ -47,6 +48,16 @@ def _report_path(runner):
 
 def _ndjson_path(runner):
 	return Path(runner.reports_folder) / 'results.ndjson'
+
+
+def announce_report(self):
+	"""At run end, announce where the live JSON report was written — mirrors the former JSON
+	exporter's message. Only the top-level runner prints (not every child task), gated by
+	``print_reports_message`` like the exporters."""
+	if getattr(self, 'has_parent', False):
+		return
+	if getattr(self, 'print_reports_message', True):
+		console.print(Info(message=f'JSON report written to {_report_path(self)}'))
 
 
 def update_runner(self):
@@ -83,7 +94,7 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
-		'on_end': [update_runner],
+		'on_end': [update_runner, announce_report],
 	},
 	Workflow: {
 		'on_init': [update_runner],
@@ -91,7 +102,7 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
-		'on_end': [update_runner],
+		'on_end': [update_runner, announce_report],
 	},
 	Task: {
 		'on_init': [update_runner],
@@ -99,6 +110,6 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_duplicate': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner],
+		'on_end': [update_runner, announce_report],
 	},
 }
