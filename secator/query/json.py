@@ -329,10 +329,44 @@ class JsonBackend(QueryBackend):
 				break
 		return list(by_uuid.values())
 
+	def _execute_iterate(self, query: dict, batch_size: int = 1000):
+		"""Stream matching records in batches — O(batch) + O(distinct uuids), never materializing the
+		full record set (the base impl does _execute_search(limit=0), which collects everything). Used
+		by the exporters (via StreamView.__iter__) so a report over N findings stays flat. Deduped
+		keep-first by _uuid with a seen-set, so the append-only ndjson's re-emitted lines don't yield
+		duplicate rows. (Keep-first, not last-wins: true last-wins can't stream; fine for a report.)"""
+		seen = set()
+		batch = []
+		for rec in self._iter_records():
+			if not match_query(rec, query):
+				continue
+			uid = rec.get('_uuid') if isinstance(rec, dict) else None
+			if uid is not None:
+				if uid in seen:
+					continue
+				seen.add(uid)
+			batch.append(rec)
+			if len(batch) >= batch_size:
+				yield batch
+				batch = []
+		if batch:
+			yield batch
+
 	def _execute_count(self, query: dict) -> int:
-		"""Count findings matching query."""
-		findings = self._load_all_findings()
-		return sum(1 for f in findings if match_query(f, query))
+		"""Count DISTINCT matching findings by streaming (seen-set of _uuids), not by materializing
+		every record via _load_all_findings — same O(distinct) memory as iterate, not O(all)."""
+		seen = set()
+		n = 0
+		for rec in self._iter_records():
+			if not match_query(rec, query):
+				continue
+			uid = rec.get('_uuid') if isinstance(rec, dict) else None
+			if uid is None:
+				n += 1
+			elif uid not in seen:
+				seen.add(uid)
+				n += 1
+		return n
 
 	def _report_files(self):
 		"""Yield the report.json paths this backend reads — the run-scoped file when
