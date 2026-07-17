@@ -28,6 +28,7 @@
 # if a live "pending children" view is needed.
 
 import json
+import orjson
 import uuid
 from pathlib import Path
 
@@ -71,7 +72,7 @@ def update_finding(self, item):
 		item._uuid = str(uuid.uuid4())
 	record = item.toDict()
 	record['_uuid'] = item._uuid
-	append_ndjson(_ndjson_path(self), json.dumps(record, default=str))
+	append_ndjson(_ndjson_path(self), orjson.dumps(record, default=str).decode())
 	return item
 
 

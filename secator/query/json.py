@@ -1,6 +1,7 @@
 # secator/query/json.py
 
 import json
+import orjson
 import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -182,7 +183,7 @@ class JsonBackend(QueryBackend):
 						if not line:
 							continue
 						try:
-							rec = json.loads(line)
+							rec = orjson.loads(line)
 						except json.JSONDecodeError:
 							continue  # torn final line after a crash -> skip
 						by_uuid[rec.get('_uuid') or id(rec)] = rec  # last-wins
@@ -270,7 +271,7 @@ class JsonBackend(QueryBackend):
 						if not line:
 							continue
 						try:
-							rec = json.loads(line)
+							rec = orjson.loads(line)
 						except json.JSONDecodeError:
 							continue  # torn final line after a crash -> skip
 						yield _tag(rec)

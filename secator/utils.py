@@ -3,6 +3,7 @@ import importlib
 import ipaddress
 import itertools
 import json
+import orjson
 import logging
 import operator
 import os
@@ -1481,8 +1482,8 @@ def _read_json(path, default):
 	corrupt-but-present file (and its accumulated data) with a blank one.
 	"""
 	try:
-		with open(path, 'r') as f:
-			return json.load(f)
+		with open(path, 'rb') as f:
+			return orjson.loads(f.read())
 	except FileNotFoundError:
 		return default()
 
@@ -1492,8 +1493,8 @@ def _atomic_write(path, data):
 	path = Path(path)
 	fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix='.report-', suffix='.json.tmp')
 	try:
-		with os.fdopen(fd, 'w') as f:
-			json.dump(data, f, indent=2, default=str)
+		with os.fdopen(fd, 'wb') as f:
+			f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2, default=str))
 			f.flush()
 			os.fsync(f.fileno())
 		os.replace(tmp, path)
