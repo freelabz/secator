@@ -27,12 +27,14 @@
 # by walking report dirs, so a child simply appears once it starts. Add on_build
 # if a live "pending children" view is needed.
 
+import orjson
 import uuid
 from pathlib import Path
 
-from secator.output_types import is_output_type
+from secator.output_types import is_output_type, Info
+from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.utils import atomic_json, debug
+from secator.utils import append_ndjson, atomic_json, debug
 
 
 def _empty_report():
@@ -41,6 +43,20 @@ def _empty_report():
 
 def _report_path(runner):
 	return Path(runner.reports_folder) / 'report.json'
+
+
+def _ndjson_path(runner):
+	return Path(runner.reports_folder) / 'results.ndjson'
+
+
+def announce_report(self):
+	"""At run end, announce where the live JSON report was written — mirrors the former JSON
+	exporter's message. Only the top-level runner prints (not every child task), gated by
+	``print_reports_message`` like the exporters."""
+	if getattr(self, 'has_parent', False):
+		return
+	if getattr(self, 'print_reports_message', True):
+		console.print(Info(message=f'JSON report written to {_report_path(self)}'))
 
 
 def update_runner(self):
@@ -54,23 +70,19 @@ def update_runner(self):
 
 
 def update_finding(self, item):
-	"""Upsert a single finding into this runner's report.json results (live)."""
+	"""Append a single finding to this runner's results.ndjson (live, O(1)).
+
+	Append-only: a re-emitted finding (on_duplicate / enrichment) appends a second line
+	with the same _uuid; the query backend resolves last-wins on read. Own-emit dedup is
+	the runner's in-memory self.uuids, so no in-file scan is needed here.
+	"""
 	if not is_output_type(item):
 		return item
 	if not item._uuid:
 		item._uuid = str(uuid.uuid4())
 	record = item.toDict()
 	record['_uuid'] = item._uuid
-	_type = item._type
-
-	with atomic_json(_report_path(self), default=_empty_report) as data:
-		bucket = data.setdefault('results', {}).setdefault(_type, [])
-		for i, existing in enumerate(bucket):
-			if existing.get('_uuid') == item._uuid:
-				bucket[i] = record
-				break
-		else:
-			bucket.append(record)
+	append_ndjson(_ndjson_path(self), orjson.dumps(record, default=str).decode())
 	return item
 
 
@@ -81,7 +93,7 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
-		'on_end': [update_runner],
+		'on_end': [update_runner, announce_report],
 	},
 	Workflow: {
 		'on_init': [update_runner],
@@ -89,7 +101,7 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
-		'on_end': [update_runner],
+		'on_end': [update_runner, announce_report],
 	},
 	Task: {
 		'on_init': [update_runner],
@@ -97,6 +109,6 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_duplicate': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner],
+		'on_end': [update_runner, announce_report],
 	},
 }
