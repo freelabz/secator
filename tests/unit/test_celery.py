@@ -405,6 +405,49 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 			with patch.object(app.backend, 'get', side_effect=NotImplementedError, create=True):
 				self.assertEqual(bump_worker_loss_count('task-abc'), 0)
 
+	def test_worker_loss_key_prefers_mongo_id_over_rotating_celery_id(self):
+		"""The counter key is the stable Mongo task id, not the (rotating) Celery request id."""
+		from secator.celery import worker_loss_key
+		# Chunk id wins, then task id, then falls back to the Celery id.
+		self.assertEqual(worker_loss_key({'task_chunk_id': 'chunk1', 'task_id': 't1'}, 'cel-x'), 'chunk1')
+		self.assertEqual(worker_loss_key({'task_id': 't1'}, 'cel-x'), 't1')
+		self.assertEqual(worker_loss_key({}, 'cel-x'), 'cel-x')
+
+	def test_redeliveries_with_rotating_celery_ids_abandon_after_cap(self):
+		"""Same logical task redelivered with DIFFERENT celery ids each time must still abandon.
+
+		Reproduces the OOM zombie: broker redelivery presents a fresh celery id every cycle. Keyed
+		on the stable Mongo task id the count accumulates and trips the cap; keyed on the celery id
+		it would reset to 1 forever and loop.
+		"""
+		from secator.celery import bump_worker_loss_count, worker_loss_key, worker_loss_retries_exhausted
+		max_retries = 3  # initial + 3 redeliveries allowed -> abandon on the 5th delivery
+		context = {'task_id': f'mongo-{id(self)}'}
+		keys_to_clean = set()
+		try:
+			abandoned_on = None
+			celery_keyed_max = 0
+			for delivery in range(1, 8):
+				celery_id = f'celery-{delivery}'  # rotates every delivery
+				# Stable-id path (the fix)
+				key = worker_loss_key(context, celery_id)
+				keys_to_clean.add(key)
+				count = bump_worker_loss_count(key)
+				if worker_loss_retries_exhausted(count, max_retries) and abandoned_on is None:
+					abandoned_on = delivery
+				# Celery-id path (the old bug) — each rotating id counts to 1, never exhausts
+				ck = worker_loss_key({}, celery_id)
+				keys_to_clean.add(ck)
+				celery_keyed_max = max(celery_keyed_max, bump_worker_loss_count(ck))
+			self.assertEqual(abandoned_on, 5, 'must abandon on the 5th delivery with a rotating celery id')
+			self.assertEqual(celery_keyed_max, 1, 'per-celery-id keying never accumulates (the bug)')
+		finally:
+			for k in keys_to_clean:
+				try:
+					app.backend.delete(k)
+				except Exception:
+					pass
+
 	def test_abandon_task_returns_failure_error(self):
 		"""Abandoning returns results with a self-owned FAILURE Error so the chord proceeds."""
 		from secator.tasks import httpx
