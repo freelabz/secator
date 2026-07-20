@@ -718,6 +718,16 @@ class Runner:
 				yield from self._process_item(item)
 				self.run_hooks('on_interval', sub='item')
 
+			# Backfill store findings the live celery poll never surfaced. Tasks return topology-only
+			# now, so a fast task can finish before a throttled RUNNING update ever publishes its
+			# findings — and the `-json`/UI output that consumes this stream would otherwise be empty.
+			# Stream via the StreamView (peak memory stays flat) and skip anything already yielded
+			# during polling (self.uuids). Applies to both Command and Workflow (their yielders differ).
+			if not self.sync and not self.no_process:
+				for item in self.results:
+					if getattr(item, '_uuid', None) not in self.uuids:
+						yield from self._process_item(item)
+
 		except BaseException as e:
 			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
 			error = Error.from_exception(e)
@@ -1067,15 +1077,6 @@ class Runner:
 
 		# Yield results
 		yield from results
-		# Backfill store findings the live poll never surfaced. Tasks return topology-only now, so a
-		# fast task can finish before a throttled RUNNING update ever publishes its findings — and the
-		# `-json`/UI output that consumes this stream would otherwise be empty. Stream via the
-		# StreamView (peak memory stays flat) and skip anything already yielded during polling
-		# (tracked in self.uuids), so nothing is materialized or double-emitted.
-		if not self.sync and not self.no_process:
-			for item in self.results:
-				if getattr(item, '_uuid', None) not in self.uuids:
-					yield item
 
 	def build_celery_workflow(self):
 		"""Build Celery workflow.
