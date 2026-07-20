@@ -389,6 +389,31 @@ def detect_host(interface=None):
 	return None
 
 
+def render_yaml(data, dump_kwargs=None, **syntax_kwargs):
+	"""Render a dict — or a pre-dumped YAML string — as a syntax-highlighted rich ``Syntax``.
+
+	Defaults to the CLI/config style (ansi-dark theme, no padding, terminal background). Pass
+	``dump_kwargs`` for ``yaml.dump`` options and any ``Syntax`` kwargs (theme, line_numbers, …)
+	to override per call site.
+
+	Args:
+		data (dict | str): a dict to dump, or an already-dumped YAML string (used verbatim).
+		dump_kwargs (dict): extra kwargs for ``yaml.dump`` (defaults: sort_keys=False,
+			default_flow_style=False).
+
+	Returns:
+		rich.syntax.Syntax: the highlighted YAML.
+	"""
+	from rich.syntax import Syntax
+	if isinstance(data, str):
+		yaml_str = data
+	else:
+		dump = {'sort_keys': False, 'default_flow_style': False, **(dump_kwargs or {})}
+		yaml_str = yaml.dump(data, **dump).rstrip()
+	opts = {'theme': 'ansi-dark', 'padding': 0, 'background_color': 'default', **syntax_kwargs}
+	return Syntax(yaml_str, 'yaml', **opts)
+
+
 def rich_to_ansi(text):
 	"""Convert text formatted with rich markup to standard string.
 

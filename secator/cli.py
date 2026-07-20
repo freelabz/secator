@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import sys
 
-import yaml
 
 from pathlib import Path
 from stat import S_ISFIFO
@@ -44,6 +43,7 @@ from secator.utils import (
 	reduce_gif_frames,
 	get_gif_info,
 	humanize_date,
+	render_yaml,
 )
 from contextlib import nullcontext
 
@@ -1835,13 +1835,6 @@ def report_info(runner_id, workspace, driver, show_all):
 	table.add_column('Key', style='bold gold3', no_wrap=True)
 	table.add_column('Value')
 
-	from rich.syntax import Syntax
-
-	def _render_yaml(data):
-		"""Render a dict as syntax-highlighted YAML for readability."""
-		yaml_str = yaml.dump(data, sort_keys=False, default_flow_style=False).rstrip()
-		return Syntax(yaml_str, 'yaml', theme='ansi-dark', padding=0, background_color='default')
-
 	def _format_value(value):
 		if isinstance(value, list):
 			if not show_all and len(value) > MAX_ENTRIES:
@@ -1861,7 +1854,7 @@ def report_info(runner_id, workspace, driver, show_all):
 		# verbose 'opts' key (full option schema) first.
 		if isinstance(value, dict):
 			data = {k: v for k, v in value.items() if k != 'opts'} if key == 'config' else value
-			rendered = _render_yaml(data)
+			rendered = render_yaml(data)
 		else:
 			rendered = _format_value(value)
 		table.add_row(key, rendered)

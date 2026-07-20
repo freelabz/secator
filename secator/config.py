@@ -769,10 +769,8 @@ class Config(DotMap):
 		Args:
 			string (str): YAML string.
 		"""
-		from rich.syntax import Syntax
-
-		data = Syntax(string, 'yaml', theme='ansi-dark', padding=0, background_color='default')
-		console_stdout.print(data)
+		from secator.utils import render_yaml
+		console_stdout.print(render_yaml(string))
 
 	@staticmethod
 	def dump(config, partial=True):
