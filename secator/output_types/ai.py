@@ -67,6 +67,7 @@ AI_TYPES = {
 	'query': {'label': '🟢', 'color': 'magenta'},
 	'stopped': {'label': '🛑', 'color': 'orange3'},
 	'follow_up': {'label': '[FOLLOW UP]', 'color': 'orange3'},
+	'steer': {'label': '[STEER]', 'color': 'cyan'},
 }
 
 ACTION_TYPES = ('task', 'workflow', 'shell', 'add_finding', 'query', 'stopped')
