@@ -34,7 +34,7 @@ class TestItemPlaceholderNeutral:
 class TestTruthyAndNot:
 	def test_bare_truthy_uses_nin(self):
 		assert python_expr_to_mongo('subdomain.verified') == {
-			'_type': 'subdomain', 'verified': {'$nin': [None, '', False, 0]}
+			'_type': 'subdomain', 'verified': {'$nin': [None, '', False, 0], '$exists': True}
 		}
 
 	def test_not_field_is_ne_true(self):

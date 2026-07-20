@@ -30,6 +30,7 @@ class TestReportBuild:
             config=config,
             workspace_name=workspace,
             errors=[],
+            warnings=[],
             context={
                 'workspace_id': workspace,
                 'workspace_name': workspace,
@@ -129,7 +130,7 @@ class TestReportBuildFromStore:
     def _runner(self, reports_dir, ws, in_memory_results):
         config = SimpleNamespace(name='test_runner', type='workflow')
         return _FakeRunner(
-            config=config, workspace_name=ws, errors=[],
+            config=config, workspace_name=ws, errors=[], warnings=[],
             context={'workspace_id': ws, 'workspace_name': ws, 'drivers': ['json']},
             reports_folder=Path(reports_dir) / ws, results=in_memory_results,
             _to_dict={'name': 'test_runner', 'status': 'completed', 'targets': [],
@@ -176,6 +177,7 @@ class TestJsonlExporter:
             config=config,
             workspace_name='test_ws',
             errors=[],
+            warnings=[],
             context={'workspace_id': 'test_ws', 'workspace_name': 'test_ws'},
             reports_folder=reports_folder,
         )
