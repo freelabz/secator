@@ -102,7 +102,13 @@ class TestCelery(unittest.TestCase):
 			return
 
 		targets = [t + '/FUZZ' for t in URL_TARGETS]
-		results = ffuf(targets, **ASYNC_OPTS, **{k.replace('ffuf.', ''): v for k, v in OPTS.items()}).run()
+		results = list(ffuf(targets, **ASYNC_OPTS, **{k.replace('ffuf.', ''): v for k, v in OPTS.items()}).run())
+		from secator.rich import console  # TEMP DEBUG
+		from collections import Counter as _C  # TEMP DEBUG
+		console.print(f'[DBGFF] targets={targets} result types={dict(_C(r._type for r in results))}')
+		for _r in results:
+			if _r._type in ('error', 'warning'):
+				console.print(f'[DBGFF-{_r._type.upper()}] {_r.toDict()}')
 		targets_out = [r.name for r in results if r._type == 'target']
 		urls = [r.url for r in results if r._type == 'url']
 		# Store-based collection dedups the per-target echoes the old chain payload accumulated
