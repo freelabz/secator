@@ -723,20 +723,8 @@ class Runner:
 			# findings — and the `-json`/UI output that consumes this stream would otherwise be empty.
 			# Stream via the StreamView (peak memory stays flat) and skip anything already yielded
 			# during polling (self.uuids). Applies to both Command and Workflow (their yielders differ).
-			import sys as _dbgsys  # TEMP DEBUG
-			_dbgsys.stderr.write(
-				f'[DBGBF] {self.unique_name} type={self.config.type} sync={self.sync} no_process={self.no_process} '
-				f'ws={self.context.get("workspace_id")} rdir={self.context.get("report_dir")} '
-				f'{self.config.type}_id={self.context.get(self.config.type + "_id")} '
-				f'drivers={self.context.get("drivers")}\n')
-			_dbgsys.stderr.flush()
 			if not self.sync and not self.no_process:
-				_dbg_all = list(self.results)  # TEMP DEBUG: materialize to inspect
-				_dbgsys.stderr.write(
-					f'[DBGBF] {self.unique_name} store self.results={len(_dbg_all)} '
-					f'types={[getattr(i, "_type", "?") for i in _dbg_all]} uuids_seen={len(self.uuids)}\n')
-				_dbgsys.stderr.flush()
-				for item in _dbg_all:
+				for item in self.results:
 					if getattr(item, '_uuid', None) not in self.uuids:
 						yield from self._process_item(item)
 
@@ -855,6 +843,12 @@ class Runner:
 		item._context = self.context.copy()
 		item._context.update(ctx)
 		item._context['ancestor_id'] = ctx.get('ancestor_id') or self.ancestor_id
+		# The runner OWNS every item it adds, so its own scope id must win over any id the item
+		# arrived pre-tagged with — otherwise a Command that parses a foreign `secator -json` stream
+		# (its findings carry the producing task's id) can't find its own results via the store query.
+		own_id = self.context.get(f'{self.config.type}_id')
+		if own_id:
+			item._context[f'{self.config.type}_id'] = own_id
 
 		# Set uuid
 		if not item._uuid:

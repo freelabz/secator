@@ -25,12 +25,6 @@ class TestWorker(unittest.TestCase):
 		cmd = Command.execute(
 			'secator x httpx secator.cloud -json', name='secator_x_httpx', process=True, quiet=True, cls_attributes={'output_types': [Target, Url, Info], 'item_loaders': [JSONSerializer()]}
 		)
-		import sys as _dbg  # TEMP DEBUG
-		_dbg.stderr.write(f'\n[DBGHX] status={cmd.status} rc={cmd.return_code} errors={cmd.errors}\n')
-		_dbg.stderr.write(f'[DBGHX] cmd.output ({len(cmd.output or "")} chars):\n{(cmd.output or "")[:4000]}\n')
-		_dbg.stderr.write(f'[DBGHX] findings types={[f._type for f in cmd.findings]}\n')
-		_dbg.stderr.write(f'[DBGHX] cmd.results types={[getattr(r, "_type", "?") for r in cmd.results]}\n')
-		_dbg.stderr.flush()
 		# self.assertEqual(cmd.return_code, 0)  # TODO: figure out why return code is -9 when running from unittest
 		self.assertEqual(cmd.errors, [])
 		self.assertEqual(cmd.status, 'SUCCESS')

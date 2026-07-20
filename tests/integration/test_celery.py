@@ -103,14 +103,8 @@ class TestCelery(unittest.TestCase):
 
 		targets = [t + '/FUZZ' for t in URL_TARGETS]
 		results = ffuf(targets, **ASYNC_OPTS, **{k.replace('ffuf.', ''): v for k, v in OPTS.items()}).run()
-		results = list(results)  # TEMP DEBUG: materialize
-		import sys as _dbg  # TEMP DEBUG
-		from collections import Counter as _C
-		_dbg.stderr.write(f'\n[DBGFF] result types={dict(_C(r._type for r in results))}\n')
 		targets_out = [r.name for r in results if r._type == 'target']
 		urls = [r.url for r in results if r._type == 'url']
-		_dbg.stderr.write(f'[DBGFF] targets_out({len(targets_out)})={targets_out} urls({len(urls)})={urls}\n')
-		_dbg.stderr.flush()
 		self.assertEqual(len(targets_out), len(URL_TARGETS) * 2)
 		self.assertEqual(len(urls), sum(URL_RESULTS_COUNT))
 
