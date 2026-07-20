@@ -80,7 +80,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		TASKS = [t for t in tasks if t.__name__ in test_tasks_names]
 
 		for cls in TASKS:
-			if cls.__name__ == 'msfconsole':  # skip msfconsole test as it's stuck
+			if cls.__name__ in ('msfconsole', 'shodan'):  # msfconsole is stuck; shodan needs a live SHODAN_API_KEY not available in CI
 				continue
 			with self.subTest(name=cls.__name__):
 				input = INPUTS_TASKS.get(cls.__name__)
