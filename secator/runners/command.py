@@ -250,8 +250,8 @@ class Command(Runner):
 		# Run on_cmd hook
 		self.run_hooks('on_cmd', sub='init')
 
-		# Add sudo to command if it is required
-		if self.requires_sudo:
+		# Add sudo to command if it is required (skip when relying on file capabilities instead)
+		if self.requires_sudo and CONFIG.security.privileged_mode != 'caps':
 			self.cmd = f'sudo {self.cmd}'
 			if self._has_sensitive_cmd_opts:
 				self.cmd_redacted = f'sudo {self.cmd_redacted}'

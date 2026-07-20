@@ -119,6 +119,7 @@ class Security(StrictModel):
 	auto_install_commands: bool = True
 	force_source_install: bool = False
 	prompt_sudo_password: bool = True
+	privileged_mode: str = 'sudo'  # 'sudo' (prepend sudo) or 'caps' (rely on file capabilities)
 
 
 class HTTP(StrictModel):

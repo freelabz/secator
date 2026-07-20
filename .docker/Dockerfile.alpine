@@ -41,10 +41,18 @@ RUN apk add --no-cache \
 
 RUN adduser -D secator
 
-# Allow runing 'nmap' with sudo; for priviledged scans
-RUN echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /usr/bin/arp-scan *" >> /etc/sudoers && \
-    echo "secator ALL=(ALL) NOPASSWD: /sbin/arp *" >> /etc/sudoers
+# Raw-socket tools (nmap/arp-scan/arp) need CAP_NET_RAW/CAP_NET_ADMIN.
+# full flavor: no baked-in sudoers grant here -- tools are installed below, then
+# switched to file capabilities (see the setcap block after tool install). A
+# `NOPASSWD: /usr/bin/nmap *` sudoers entry is a GTFObins root shell (a shell
+# injection in a worker can `sudo nmap --script=/tmp/x.nse ...` -> root).
+# lite flavor: tools are installed at runtime, so there are no baked binaries to
+# setcap yet -- keep the old sudo grants here. Prefer the full image in prod.
+RUN if [ "$flavor" = "lite" ]; then \
+	echo "secator ALL=(ALL) NOPASSWD: /usr/bin/nmap *" >> /etc/sudoers && \
+	echo "secator ALL=(ALL) NOPASSWD: /usr/bin/arp-scan *" >> /etc/sudoers && \
+	echo "secator ALL=(ALL) NOPASSWD: /sbin/arp *" >> /etc/sudoers; \
+	fi
 
 # Allow user to install commands
 RUN echo "secator ALL=(ALL) NOPASSWD: /sbin/apk add *" >> /etc/sudoers && \
@@ -74,6 +82,19 @@ RUN if [ "$flavor" != "lite" ]; then \
 	sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock apk add \*/d' /etc/sudoers && \
 	sed -i '/secator ALL=(ALL) NOPASSWD: \/usr\/bin\/flock \/tmp\/install.lock ln -sf \/usr\/lib\/libpcap.so/d' /etc/sudoers; \
 	fi
+
+# full flavor: grant CAP_NET_RAW/CAP_NET_ADMIN directly on the raw-socket tool
+# binaries instead of sudo (no baked sudoers entry to abuse via GTFObins).
+RUN if [ "$flavor" != "lite" ]; then \
+	apk add --no-cache libcap && \
+	setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap && \
+	setcap cap_net_raw,cap_net_admin+eip /usr/bin/arp-scan && \
+	setcap cap_net_raw,cap_net_admin+eip /sbin/arp && \
+	setcap cap_net_raw,cap_net_admin+eip /home/secator/.local/bin/naabu; \
+	fi
 USER secator
+
+# full flavor: switch secator to caps mode so requires_sudo commands run unprivileged.
+RUN if [ "$flavor" != "lite" ]; then secator config set security.privileged_mode caps; fi
 
 ENTRYPOINT ["secator"]
