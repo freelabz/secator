@@ -381,6 +381,21 @@ class TestRunnerErrorStatus:
 		r.add_result(Error(message='boom'), print=False)
 		assert r.status == 'FAILURE'
 
+	def test_leaf_metadata_served_from_memory(self):
+		# A leaf runner mirrors its own findings/errors/targets in memory — status/counts don't query
+		# the store (the hybrid model). self_targets come from self.inputs, not a Target store read.
+		from secator.output_types import Url, Error
+		r = _dummy_runner()
+		r.started = True
+		assert r.findings_count == 0
+		r.add_result(Url(url='http://x/a'), print=False)
+		r.add_result(Url(url='http://x/b'), print=False)
+		assert r.findings_count == 2          # in-memory own-findings count
+		r.add_result(Error(message='boom'), print=False)
+		assert r.errors_count == 1            # in-memory own-errors mirror
+		r.inputs = ['a', 'b']
+		assert [t.name for t in r.self_targets] == ['a', 'b']  # from self.inputs, no store query
+
 
 class TestBackendParity:
 	def _regex_query(self):

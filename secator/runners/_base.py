@@ -128,6 +128,9 @@ class Runner:
 		self.output = ''
 		self.started = False
 		self.done = False
+		self._final_errors = None  # memoized aggregator errors (composite/chunked-parent store read)
+		self._own_errors = []          # in-memory mirror of this leaf runner's own emitted errors
+		self._own_findings_count = 0   # in-memory count of this leaf runner's own emitted findings
 		self.start_time = datetime.fromtimestamp(time(), timezone.utc)
 		self.end_time = None
 		self.last_updated_db = None
@@ -418,6 +421,10 @@ class Runner:
 
 	@property
 	def findings_count(self):
+		# Leaf emitter: own findings count is mirrored in memory (no store read). Aggregators
+		# (workflow / scan / chunked-parent) count their subtree from the store view.
+		if self._is_leaf_emitter:
+			return self._own_findings_count
 		return len(self.findings)
 
 	def _is_own_source(self, source):
@@ -448,8 +455,26 @@ class Runner:
 		return True
 
 	@property
+	def _is_leaf_emitter(self):
+		"""True when this runner emits its OWN findings by running a tool — a task or a chunk. Such a
+		runner's metadata is mirrored in memory. Aggregators (workflow/scan, or a chunked-parent task
+		whose findings come from its chunks) have `has_children`/composite type and read the store."""
+		return self.config.type == 'task' and not self.has_children
+
+	@property
 	def errors(self):
-		return [r for r in self._view('error') if self._owns_error(r)]
+		# All error accessors (self_errors, errors_count, status) root here.
+		# Leaf emitter: serve own errors from the in-memory mirror — zero store reads. Aggregators
+		# (workflow/scan/chunked-parent) read their subtree's errors from the store, memoized once
+		# done (errors can't change).
+		if self._is_leaf_emitter:
+			return list(self._own_errors)
+		if self._final_errors is not None:
+			return self._final_errors
+		errs = [r for r in self._view('error') if self._owns_error(r)]
+		if self.done:
+			self._final_errors = errs
+		return errs
 
 	@property
 	def self_results(self):
@@ -457,7 +482,9 @@ class Runner:
 
 	@property
 	def self_targets(self):
-		return [r for r in self.targets if self._is_own_source(r._source)]
+		# Own targets are the runner's authoritative in-memory inputs (whether from the CLI or fed by
+		# a fan-in) — no store query. The fan-in-produced `targets` for the NEXT task stays a store read.
+		return [Target(name=t, _source=self.unique_name) for t in self.inputs]
 
 	@property
 	def self_findings(self):
@@ -469,10 +496,10 @@ class Runner:
 
 	@property
 	def self_findings_count(self):
-		# Live per-task count (celery update_state): a task's subtree IS its own source, so its
-		# findings view already equals self_findings — count it (no materialization).
+		# A task's subtree IS its own source, so its own count == findings_count (leaf: in-memory
+		# mirror; chunked-parent: store). A composite filters its subtree view by own source.
 		if self.config.type == 'task':
-			return len(self.findings)
+			return self.findings_count
 		return len(self.self_findings)
 
 	@property
@@ -500,6 +527,9 @@ class Runner:
 
 	@property
 	def status(self):
+		# Recomputed each access — cheap now that a leaf's errors_count is an in-memory mirror and an
+		# aggregator's is a memoized store read (self._final_errors). Not memoized itself, so a late
+		# add_result(Error) is reflected immediately.
 		return self._status()
 
 	@property
@@ -868,6 +898,14 @@ class Runner:
 		if not self.enable_hooks:
 			self._persist_to_store(item)
 		self.results_count += 1
+		# Mirror own errors + findings count in memory: a leaf runner's status/errors_count/findings_count
+		# then never re-read the store. Composites/chunked-parents (has_children) aggregate via the store.
+		if self._is_own_source(item._source):
+			if isinstance(item, Error):
+				self._own_errors.append(item)
+				self._final_errors = None  # invalidate the aggregator memo — status must reflect a new error
+			elif isinstance(item, tuple(FINDING_TYPES)):
+				self._own_findings_count += 1
 		if output and isinstance(item, (Info, Warning, Error)):
 			self.output += repr(item) + '\n'
 		if print:
@@ -1272,7 +1310,7 @@ class Runner:
 		info = Info(
 			message=(
 				f'{self.config.type.capitalize()} {format_runner_name(self)} finished with status '
-				f'[bold {STATE_COLORS[status]}]{status}[/] and found [bold]{len(self.findings)}[/] findings'
+				f'[bold {STATE_COLORS[status]}]{status}[/] and found [bold]{self.findings_count}[/] findings'
 			)
 		)
 		# fmt: on

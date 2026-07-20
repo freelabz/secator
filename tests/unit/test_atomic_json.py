@@ -176,5 +176,37 @@ class TestReadJson(AtomicJsonTestBase):
 		self._join(procs)
 
 
+# --- append_ndjson (O(1) locked append) ---
+
+def _ndjson_proc_worker(path, worker_id, count):
+	from secator.utils import append_ndjson
+	for i in range(count):
+		append_ndjson(path, json.dumps({'_uuid': f'{worker_id}-{i}'}))
+
+
+def test_append_ndjson_appends_lines(tmp_path):
+	from secator.utils import append_ndjson
+	p = tmp_path / 'results.ndjson'
+	append_ndjson(p, '{"_uuid": "a"}')
+	append_ndjson(p, '{"_uuid": "b"}')
+	lines = p.read_text().splitlines()
+	assert lines == ['{"_uuid": "a"}', '{"_uuid": "b"}']
+
+
+def test_append_ndjson_concurrent_no_torn_lines(tmp_path):
+	path = str(tmp_path / 'results.ndjson')
+	ctx = mp.get_context('fork')
+	procs = [ctx.Process(target=_ndjson_proc_worker, args=(path, w, 50)) for w in range(4)]
+	for p in procs:
+		p.start()
+	for p in procs:
+		p.join(60)
+		assert p.exitcode == 0
+	lines = [l for l in open(path).read().splitlines() if l]
+	uuids = [json.loads(l)['_uuid'] for l in lines]      # every line valid JSON (no interleave)
+	assert len(uuids) == 4 * 50
+	assert len(set(uuids)) == 4 * 50                      # no loss, no dupes
+
+
 if __name__ == '__main__':
 	unittest.main()

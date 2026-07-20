@@ -243,7 +243,11 @@ class StreamView:
 		return min(n, self._limit) if self._limit else n
 
 	def __bool__(self):
-		return self._engine.count(self._query) > 0
+		# Exists-check by streaming — return on the first match instead of counting the whole set
+		# (a bare count materializes on the json backend). Used by exporters' `if not items:` guard.
+		for _ in self:
+			return True
+		return False
 
 	def __contains__(self, item):
 		return any(x == item for x in self)
