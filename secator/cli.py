@@ -1123,9 +1123,10 @@ def list_aliases(silent):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.option('--group', is_flag=False, flag_value='', default=None, help='Group findings by field(s) (comma-separated) with auto-aggregation. Bare --group uses per-type defaults.')  # noqa: E501
 @click.option('--save', 'save', type=str, default=None, help='Save the query expression ARG under this name for later reuse (e.g. --save vuln_high)')  # noqa: E501
 @click.pass_context
-def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, save):
+def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, group, save):  # noqa: E501
 	"""Query"""
 	# Empty query: return all results (subject to the enforced base query),
 	# optionally scoped by --report-filter / --workspace.
@@ -1145,12 +1146,12 @@ def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_fi
 
 	# 1. Saved query name
 	if arg in CONFIG.queries:
-		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder, group)  # noqa: E501
 		return
 
 	# 2. Raw filter expression
 	if _looks_like_query_expr(arg):
-		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder)
+		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder, group)  # noqa: E501
 		return
 
 	# 3. Natural language -> AI chat
@@ -1363,7 +1364,7 @@ def _apply_format(results, fmt):
 	return new_results
 
 
-def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None):
+def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, group=None):  # noqa: E501
 	"""Build and send a consolidated report. Shared by `report show` and `query`.
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
@@ -1469,6 +1470,30 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
 	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
 	report.build(query=full_query, dedupe=dedupe_effective, limit=limit)
+
+	# Group findings by field(s) with auto-aggregation (processing-side, post-query).
+	# `group is None` => disabled; `group == ''` => per-type defaults; else explicit field(s).
+	grouped_types = []
+	if group is not None and not fmt:
+		from secator.query.utils import group_findings
+		user_group_by = [f.strip() for f in group.split(',') if f.strip()]
+		type_map = {cls.get_name(): cls for cls in FINDING_TYPES}
+		for type_name, items in report.data['results'].items():
+			cls = type_map.get(type_name)
+			if not items or cls is None:
+				continue
+			group_by = user_group_by or list(getattr(cls, '_group_by', ()) or ())
+			if not group_by:
+				continue
+			aggregate_field = getattr(cls, '_group_aggregate', None)
+			report.data['results'][type_name] = group_findings(items, group_by, aggregate_field)
+			grouped_types.append((type_name, ', '.join(group_by)))
+		if not grouped_types:
+			group_desc = f' "{group}"' if group else ''
+			console.print(Warning(message=f'--group{group_desc}: no groupable finding types in results'))
+	elif group is not None and fmt:
+		console.print(Warning(message='--group is ignored when --format is used'))
+
 	if fmt:
 		report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
@@ -1480,6 +1505,8 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 		if searched:
 			info_msg += f' (searched: [bold cyan]{searched}[/])'
 	console.print(Info(message=info_msg))
+	for type_name, field_str in grouped_types:
+		console.print(Info(message=f'{type_name} grouped by {field_str}. To show complete results, remove the --group option.'))  # noqa: E501
 
 
 def run_ai_chat(ctx, prompt, workspace):
@@ -1506,10 +1533,11 @@ def run_ai_chat(ctx, prompt, workspace):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.option('--group', is_flag=False, flag_value='', default=None, help='Group findings by field(s) (comma-separated) with auto-aggregation. Bare --group uses per-type defaults.')  # noqa: E501
 @click.pass_context
-def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt, workspace, driver, dedupe, limit):
+def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt, workspace, driver, dedupe, limit, group):  # noqa: E501
 	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
-	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder)
+	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder, group)
 
 
 def _load_report_data(path):

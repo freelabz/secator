@@ -31,4 +31,9 @@ class ConsoleExporter(Exporter):
 								item = cls.load(item)
 							except (TypeError, Exception):
 								pass
-					console_stdout.print(item, highlight=False)
+					# Grouped findings carry a _group_count; show it next to the line.
+					count = getattr(item, '_group_count', 0)
+					if count:
+						console_stdout.print(item, f'[dim](count: {count})[/]', highlight=False)
+					else:
+						console_stdout.print(item, highlight=False)
