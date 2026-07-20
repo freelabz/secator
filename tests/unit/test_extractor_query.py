@@ -94,7 +94,7 @@ class TestSubstituteCtxConstants:
 class TestBuildExtractorQuery:
 	def test_type_and_truthy_condition(self):
 		q = build_extractor_query({'type': 'url', 'field': 'url', 'condition': 'url.verified'}, _ctx())
-		assert q == {'_type': 'url', 'verified': {'$nin': [None, '', False, 0]}}
+		assert q == {'_type': 'url', 'verified': {'$nin': [None, '', False, 0], '$exists': True}}
 
 	def test_scope_filter_for_target(self):
 		q = build_extractor_query(

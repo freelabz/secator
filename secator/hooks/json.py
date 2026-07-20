@@ -28,6 +28,7 @@
 # if a live "pending children" view is needed.
 
 import orjson
+import uuid
 from pathlib import Path
 
 from secator.output_types import is_output_type, Info
@@ -78,7 +79,13 @@ def update_finding(self, item):
 	"""
 	if not is_output_type(item):
 		return item
-	record = item.toDict()  # _uuid already minted by Runner.add_result before on_item fires
+	# add_result mints _uuid on the normal path, but update_finding can also be called on
+	# items that never routed through it (the on_item hook invoked directly, re-emits) — mint
+	# defensively so every appended record carries a stable _uuid for last-wins dedup on read.
+	if not item._uuid:
+		item._uuid = str(uuid.uuid4())
+	record = item.toDict()
+	record['_uuid'] = item._uuid
 	append_ndjson(_ndjson_path(self), orjson.dumps(record, default=str).decode())
 	return item
 

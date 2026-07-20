@@ -88,7 +88,8 @@ class TestPythonExprToMongo:
     def test_bare_field_is_truthy_match(self):
         # "ip.alive" (no operator) is a truthiness shorthand -> $nin of the falsy values,
         # which keeps truthy booleans AND non-empty strings identically on both backends.
-        assert python_expr_to_mongo('ip.alive') == {'_type': 'ip', 'alive': {'$nin': [None, '', False, 0]}}
+        assert python_expr_to_mongo('ip.alive') == {
+            '_type': 'ip', 'alive': {'$nin': [None, '', False, 0], '$exists': True}}
 
     def test_explicit_eq_true_stays_strict(self):
         # Explicit "== True" is strict equality, distinct from the bare truthiness form.

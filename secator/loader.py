@@ -316,15 +316,14 @@ def apply_default_drivers(drivers, mongodb_enabled):
 
 	Returns:
 		list[str]: Drivers unchanged if a store backend is already active; otherwise
-			``mongodb`` appended when the addon is enabled, else ``json``.
+			``json`` appended so there is always a queryable store.
 	"""
 	if STORE_DRIVERS & set(drivers):
 		return drivers
-	# Addon enabled but no explicit store driver: activate mongodb so its persistence
-	# hooks register — otherwise (with the celery result payload dropped) nothing writes
-	# the store and the StreamView reads an empty local JSON backend.
-	if mongodb_enabled:
-		return drivers + ['mongodb']
+	# No explicit store driver (even with the mongodb addon on but mongodb absent from
+	# drivers.defaults): default to json so SOMETHING writes the store. With the celery
+	# result payload dropped, an empty drivers list registers no persistence hooks and
+	# the StreamView would read an empty backend (data integrity).
 	if 'json' not in drivers:
 		drivers = drivers + ['json']
 	return drivers

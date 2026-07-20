@@ -76,11 +76,12 @@ class TestDefaultDrivers(unittest.TestCase):
 		self.assertNotIn('json', drivers)
 		self.assertEqual(QueryEngine.resolve_backend_from_drivers(drivers), 'mongodb')
 
-	def test_mongodb_addon_without_explicit_driver_not_overridden(self):
-		# Prod enables the addon but may not list mongodb in drivers.defaults; json
-		# must still not be forced on top.
+	def test_mongodb_addon_without_explicit_driver_defaults_to_json(self):
+		# Addon enabled but no explicit store driver in drivers.defaults: with the result
+		# payload dropped, something must still write the store, so json is the default
+		# (data integrity) — same as a bare local run.
 		from secator.loader import apply_default_drivers
-		self.assertEqual(apply_default_drivers([], mongodb_enabled=True), [])
+		self.assertEqual(apply_default_drivers([], mongodb_enabled=True), ['json'])
 
 	def test_sqlite_driver_not_overridden(self):
 		from secator.loader import apply_default_drivers
