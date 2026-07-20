@@ -1073,7 +1073,7 @@ class Runner:
 		# StreamView (peak memory stays flat) and skip anything already yielded during polling
 		# (tracked in self.uuids), so nothing is materialized or double-emitted.
 		if not self.sync and not self.no_process:
-			for item in self.findings:
+			for item in self.results:
 				if getattr(item, '_uuid', None) not in self.uuids:
 					yield item
 
