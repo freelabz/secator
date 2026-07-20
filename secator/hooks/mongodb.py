@@ -163,6 +163,9 @@ def update_finding(self, item):
 			finding = db['findings'].update_one({'_id': _id}, {'$set': update})
 			status = 'UPDATED'
 		else:
+			# Stamp an explicit untagged default so tag_duplicates can index-seek untagged
+			# findings (`_tagged: False`) instead of a `$ne: True` whole-workspace scan (#1315).
+			update.setdefault('_tagged', False)
 			finding = db['findings'].insert_one(update)
 			item._uuid = str(finding.inserted_id)
 			status = 'CREATED'
@@ -232,7 +235,10 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 	db = client.main
 	start_time = time.time()
 	workspace_query = {'_context.workspace_id': str(ws_id), '_context.workspace_duplicate': False, '_tagged': True}
-	untagged_query = {'_context.workspace_id': str(ws_id), '_tagged': {'$ne': True}}
+	# `$in: [False, None]` (index-seekable) instead of `$ne: True` (whole-workspace scan). Matches
+	# findings stamped `_tagged: False` on insert AND legacy docs where the field is absent (indexed
+	# as null), so no backfill is required. See #1315.
+	untagged_query = {'_context.workspace_id': str(ws_id), '_tagged': {'$in': [False, None]}}
 	if full_scan:
 		del untagged_query['_tagged']
 	workspace_findings = load_findings(list(db.findings.find(workspace_query).sort('_timestamp', -1)), exclude_types)
