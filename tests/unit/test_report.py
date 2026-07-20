@@ -97,8 +97,8 @@ class TestReportBuild:
     def test_build_no_preloaded_results_does_not_short_circuit_backend(self):
         """When runner has no pre-loaded results, Report.build() must not pass empty list to context.
 
-        An empty list in context['results'] causes JsonBackend._load_all_findings() to return []
-        immediately (since [] is not None), bypassing the filesystem scan entirely.
+        With the store-only streaming model, build() must query the backend (which reads the
+        report.json store) rather than short-circuit on an empty in-memory results list.
         """
         runner = self._make_runner([])  # empty results list
         # Remove 'results' from context to simulate a runner with no pre-loaded results

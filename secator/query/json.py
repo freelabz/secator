@@ -141,7 +141,6 @@ class JsonBackend(QueryBackend):
 	def __init__(self, workspace_id: str, config: Optional[dict] = None,
 				 context: Optional[dict] = None):
 		super().__init__(workspace_id, config, context=context)
-		self._findings_cache = None
 		reports_dir = config.get('reports_dir', CONFIG.dirs.reports) if config else CONFIG.dirs.reports
 		self.reports_dir = Path(reports_dir).expanduser()
 
@@ -156,99 +155,6 @@ class JsonBackend(QueryBackend):
 		# Sanitize workspace name the same way as the runner does
 		workspace_folder = sanitize_folder_name(self.workspace_id)
 		return self.reports_dir / workspace_folder
-
-	def _load_all_findings(self) -> List[Dict[str, Any]]:
-		"""Load findings from the LIVE report.json store — the SOLE source (no in-memory results).
-
-		The json driver (#1299) writes each runner's report.json as results are produced, so the
-		files are the authoritative store. A run-scoped read (``context['report_dir']``) reads only
-		this run's report.json; without the hint it falls back to a full workspace scan.
-		"""
-		if self._findings_cache is not None:
-			return self._findings_cache
-		findings = self._load_from_files()
-		self._findings_cache = findings
-		return findings
-
-	def _read_report_dir(self, report_dir: Path, runner_type_singular: str, findings: list):
-		"""Append one runner's findings to `findings`, reading results.ndjson (live/new format)
-		or falling back to report.json['results'] (legacy/completed pre-ndjson reports)."""
-		ndjson = report_dir / 'results.ndjson'
-		if ndjson.exists():
-			by_uuid = {}
-			try:
-				with open(ndjson, 'r') as f:
-					for line in f:
-						line = line.strip()
-						if not line:
-							continue
-						try:
-							rec = orjson.loads(line)
-						except json.JSONDecodeError:
-							continue  # torn final line after a crash -> skip
-						by_uuid[rec.get('_uuid') or id(rec)] = rec  # last-wins
-			except IOError as e:
-				debug(f'Error reading {ndjson}: {e}', sub='query.json')
-				return
-			items = list(by_uuid.values())
-		else:
-			report_file = report_dir / 'report.json'
-			if not report_file.exists():
-				return
-			try:
-				with open(report_file, 'r') as f:
-					data = json.load(f)
-			except (json.JSONDecodeError, IOError) as e:
-				debug(f'Error loading {report_file}: {e}', sub='query.json')
-				return
-			items = [it for lst in data.get('results', {}).values()
-					 if isinstance(lst, list) for it in lst]
-		runner_id = report_dir.name
-		for item in items:
-			if f'{runner_type_singular}_id' not in item.get('_context', {}):
-				item.setdefault('_context', {})[f'{runner_type_singular}_id'] = runner_id
-		findings.extend(items)
-
-	def _load_from_files(self) -> List[Dict[str, Any]]:
-		"""Load findings from report.json files.
-
-		A run-scoped read (``context['report_dir']``) reads ONLY that one runner's report.json — the
-		hot path during a run. Fan-in re-persists every descendant finding up into each ancestor's
-		report.json (re-tagged with the ancestor's {type}_id), so a runner's own file already holds its
-		complete result set: no need to scan (and re-parse) every historical report in the workspace on
-		every query. Without the hint we fall back to the full workspace scan (report show, cross-run
-		aggregation).
-		"""
-		findings = []
-		report_dir = self.context.get('report_dir')
-		if report_dir:
-			report_dir = Path(report_dir)
-			# tasks/<n> -> singular 'task' (parent dir name minus trailing 's'); default 'task'.
-			singular = report_dir.parent.name.rstrip('s') or 'task'
-			self._read_report_dir(report_dir, singular, findings)
-			debug(f'Loaded {len(findings)} findings from run-scoped {report_dir}', sub='query.json')
-			return findings
-
-		workspace_path = self._get_workspace_path()
-		debug(f'Looking for reports in: {workspace_path}', sub='query.json')
-		debug(f'Workspace ID/name: {self.workspace_id}', sub='query.json')
-		if not workspace_path.exists():
-			debug(f'Workspace path does not exist: {workspace_path}', sub='query.json')
-			if self.reports_dir.exists():
-				available = [d.name for d in self.reports_dir.iterdir() if d.is_dir()]
-				debug(f'Available workspaces in {self.reports_dir}: {available}', sub='query.json')
-			return findings
-
-		for runner_type in ['tasks', 'workflows', 'scans']:
-			runner_path = workspace_path / runner_type
-			if not runner_path.exists():
-				continue
-			for report_dir in runner_path.iterdir():
-				if report_dir.is_dir():
-					self._read_report_dir(report_dir, runner_type.rstrip('s'), findings)
-
-		debug(f'Loaded {len(findings)} findings from workspace', sub='query.json')
-		return findings
 
 	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str):
 		"""Yield one runner's records one at a time — the ndjson streamed line-by-line (or a legacy
@@ -293,8 +199,8 @@ class JsonBackend(QueryBackend):
 					yield _tag(rec)
 
 	def _iter_records(self):
-		"""Stream store records one at a time — never materializes the full result set. Mirrors
-		_load_from_files' scoping (run-scoped report_dir hot path, else workspace scan)."""
+		"""Stream store records one at a time — never materializes the full result set. Run-scoped
+		report_dir hot path when hinted, else a full workspace scan."""
 		report_dir = self.context.get('report_dir')
 		if report_dir:
 			report_dir = Path(report_dir)
@@ -315,7 +221,7 @@ class JsonBackend(QueryBackend):
 	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
 		"""Search findings matching query by FILTERING WHILE STREAMING — peak memory is O(matches),
 		not O(total findings). The fan-in extractor's one store query used to materialize the whole
-		result set (_load_all_findings) before filtering to a handful of matches, which was the O(N)
+		result set before filtering to a handful of matches, which was the O(N)
 		peak that defeated streaming. We iterate records one at a time, match, and keep only matches,
 		deduped last-wins by _uuid over the (small) matched subset."""
 		by_uuid = {}
@@ -354,7 +260,7 @@ class JsonBackend(QueryBackend):
 
 	def _execute_count(self, query: dict) -> int:
 		"""Count DISTINCT matching findings by streaming (seen-set of _uuids), not by materializing
-		every record via _load_all_findings — same O(distinct) memory as iterate, not O(all)."""
+		every record — same O(distinct) memory as iterate, not O(all)."""
 		seen = set()
 		n = 0
 		for rec in self._iter_records():
@@ -414,7 +320,6 @@ class JsonBackend(QueryBackend):
 							if match_query(item, query):
 								item.update(set_fields)
 								count += 1
-		self._findings_cache = None
 		return count
 
 	def list_workspaces(self):

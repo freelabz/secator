@@ -96,7 +96,6 @@ HOOKS = {
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
-		'on_duplicate': [update_finding],
 		'on_end': [update_runner, announce_report],
 	},
 	Workflow: {
@@ -104,14 +103,12 @@ HOOKS = {
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
-		'on_duplicate': [update_finding],
 		'on_end': [update_runner, announce_report],
 	},
 	Task: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],
-		'on_duplicate': [update_finding],
 		'on_interval': [update_runner],
 		'on_end': [update_runner, announce_report],
 	},

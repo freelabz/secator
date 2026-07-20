@@ -15,7 +15,9 @@ import humanize
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
+from secator.output_types import (
+	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
+)
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import get_task_folder_id, run_extractors, StreamView
@@ -804,7 +806,7 @@ class Runner:
 		run_hooks enforces, so the `results` view still serves these items. No in-memory buffer. No-op
 		when no store driver is registered.
 		"""
-		if not isinstance(item, tuple(OUTPUT_TYPES)):
+		if not is_output_type(item):
 			return
 		for hook in self.resolved_hooks.get('on_item', []):
 			try:
@@ -869,7 +871,7 @@ class Runner:
 			self.debug(f'update runner celery_ids_map from remote: {item.task_id}', sub='item')
 
 		# If output type, run on_item hooks
-		elif isinstance(item, tuple(OUTPUT_TYPES)) and hooks:
+		elif is_output_type(item) and hooks:
 			item = self.run_hooks('on_item', item, sub='item')
 			if not item:
 				return
