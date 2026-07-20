@@ -126,3 +126,36 @@ class TestQueryDispatch(unittest.TestCase):
 		self.assertEqual(result.exit_code, 0)
 		vulns = captured.get('results', {}).get('vulnerability', [])
 		self.assertEqual(sorted(v['name'] for v in vulns), ['XSS'])
+
+	def test_save_query_round_trips(self):
+		# `secator q "<expr>" --save <name>` persists the expression under <name>,
+		# and it becomes loadable/runnable as a named query.
+		from secator.cli import cli
+		from secator.config import CONFIG, Config
+		expr = "vulnerability.severity == 'critical'"
+		name = 'saved_crit'
+		CONFIG.queries.pop(name, None)
+		try:
+			# Patch Config.save (class level) so persistence doesn't clobber the real config file.
+			with mock.patch.object(Config, 'save', return_value=True) as mock_save:
+				result = self.cli_runner.invoke(cli, ['query', expr, '--save', name])
+			self.assertIsNone(result.exception, str(result.exception))
+			self.assertEqual(result.exit_code, 0)
+			mock_save.assert_called_once()
+			# Persisted under the name and resolvable by the named-query lookup path.
+			self.assertEqual(CONFIG.queries.get(name), expr)
+			result, captured = self._invoke(['query', name, '-ws', WS, '--driver', 'local'])
+			self.assertIsNone(result.exception, str(result.exception))
+			vulns = captured.get('results', {}).get('vulnerability', [])
+			self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi'])
+		finally:
+			CONFIG.queries.pop(name, None)
+
+	def test_empty_query_returns_all(self):
+		# `secator q -rf tasks/1` (no query expression) must return all findings
+		# scoped by the report filter, not raise "Missing argument ARG".
+		result, captured = self._invoke(['query', '-rf', 'tasks/1', '-ws', WS, '--driver', 'local'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi', 'XSS'])

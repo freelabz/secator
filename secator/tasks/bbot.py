@@ -203,6 +203,17 @@ class bbot(Command):
 	opt_value_map = {
 		'presets': lambda x: ' '.join(x.split(','))
 	}
+
+	@staticmethod
+	def on_cmd(self):
+		# `presets` is `shlex: False` and comma->space expanded into argv above, so an
+		# unknown token could inject an extra bbot flag. Restrict to known presets.
+		presets = self.get_opt_value('presets')
+		if presets:
+			for token in re.split(r'[,\s]+', str(presets).strip()):
+				if token and token not in BBOT_PRESETS:
+					raise ValueError(f'Invalid bbot preset: {token}')
+
 	item_loaders = [JSONSerializer()]
 	output_discriminator = output_discriminator
 	output_map = {

@@ -60,6 +60,11 @@ app.conf.update(
 			'data_folder_out': CONFIG.dirs.celery_data,
 			'control_folder': CONFIG.dirs.celery_data,
 			'visibility_timeout': CONFIG.celery.broker_visibility_timeout,
+			# Keep the broker connection alive (redis transport) so a long task's idle
+			# consumer connection isn't silently reaped — same reasoning as the result
+			# backend below. Ignored by the filesystem broker.
+			'socket_keepalive': True,
+			'health_check_interval': 30,
 		},
 		'broker_connection_retry_on_startup': True,
 		'broker_pool_limit': CONFIG.celery.broker_pool_limit,
@@ -72,6 +77,19 @@ app.conf.update(
 		'result_backend_thread_safe': True,
 		'result_serializer': 'pickle',
 		'result_accept_content': ['application/x-python-serialize'],
+		# Redis connection resilience. A long task leaves its result-backend connection
+		# idle for its whole runtime; the network can silently reap it, and by default
+		# Celery does NOT retry result-backend ops (result_backend_always_retry=False) and
+		# the redis client has no keepalive/health-check. The next store_result then hits
+		# `ConnectionError: Connection reset by peer` and the task is marked FAILURE even
+		# though its work succeeded — which poisons any chord it belongs to and hangs the
+		# workflow. Keep the connection alive (keepalive + health-check) AND retry the
+		# store on a transient error so a reset can't fail the task.
+		'redis_socket_keepalive': True,
+		'redis_backend_health_check_interval': 30,
+		'redis_retry_on_timeout': True,
+		'result_backend_always_retry': True,
+		'result_backend_max_retries': 20,
 		# Task config
 		'task_acks_late': CONFIG.celery.task_acks_late,
 		'task_compression': 'gzip',
