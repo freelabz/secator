@@ -148,6 +148,37 @@ class OutputType:
 		return data
 
 	@classmethod
+	def field_types(cls) -> dict:
+		"""Resolve each non-underscore field's declared type to a concrete builtin type.
+
+		``f.type`` may be an actual type (``bool``), a typing generic (``List[str]``,
+		resolved via ``__origin__``), or — under ``from __future__ import annotations``
+		— a string annotation (``'bool'``, ``'List[str]'``). Returns
+		``{field_name: concrete_type}``, omitting fields that can't be resolved.
+		"""
+		type_map = {
+			'bool': bool, 'int': int, 'float': float,
+			'str': str, 'list': list, 'dict': dict,
+		}
+		resolved = {}
+		for f in fields(cls):
+			if f.name.startswith('_'):
+				continue
+			t = f.type
+			if isinstance(t, type):
+				resolved[f.name] = t
+				continue
+			origin = getattr(t, '__origin__', None)
+			if origin is not None:
+				resolved[f.name] = origin
+				continue
+			if isinstance(t, str):
+				name = t.split('[', 1)[0].strip().lower()
+				if name in type_map:
+					resolved[f.name] = type_map[name]
+		return resolved
+
+	@classmethod
 	def validate_fields(cls, data: dict) -> list:
 		"""Validate data types against dataclass field definitions.
 
@@ -155,17 +186,14 @@ class OutputType:
 		"""
 		errors = []
 		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+		expected_types = cls.field_types()
 		for f in fields(cls):
 			if f.name.startswith('_') or f.name not in data:
 				continue
 			value = data[f.name]
 			if value is None:
 				continue
-			expected_type = f.type if isinstance(f.type, type) else None
-			if expected_type is None:
-				origin = getattr(f.type, '__origin__', None)
-				if origin is not None:
-					expected_type = origin
+			expected_type = expected_types.get(f.name)
 			if expected_type and not isinstance(value, expected_type):
 				expected_name = type_names.get(expected_type, getattr(expected_type, '__name__', str(expected_type)))
 				actual_name = type_names.get(type(value), type(value).__name__)

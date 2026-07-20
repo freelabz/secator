@@ -1,5 +1,7 @@
 """Tool schema definitions for native LLM tool calling."""
 
+import json
+
 from secator.ai.prompts import get_mode_config
 
 # Map tool names to action types used by existing action handlers
@@ -13,8 +15,12 @@ TOOL_ACTION_MAP = {
 	"stop": "stop",
 }
 
-# Reverse mapping: action type -> tool name
-ACTION_TOOL_MAP = {v: k for k, v in TOOL_ACTION_MAP.items()}
+# Shared "targets" parameter schema (identical across run_task/run_workflow)
+_TARGETS_SCHEMA = {
+	"type": "array",
+	"items": {"type": "string"},
+	"description": "List of targets (hosts, URLs, IPs)."
+}
 
 # OpenAI-format tool schemas keyed by tool name
 TOOL_SCHEMAS = {
@@ -30,14 +36,10 @@ TOOL_SCHEMAS = {
 						"type": "string",
 						"description": "The task name (e.g. nmap, httpx, nuclei, ffuf)."
 					},
-					"targets": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "List of targets (hosts, URLs, IPs)."
-					},
+					"targets": _TARGETS_SCHEMA,
 					"opts": {
 						"type": "object",
-						"description": "Optional task-specific options (e.g. ports, rate_limit, timeout)."
+						"description": "Optional task-specific options (e.g. ports, rate_limit). Control/security flags are ignored."
 					}
 				},
 				"required": ["name", "targets"]
@@ -56,14 +58,10 @@ TOOL_SCHEMAS = {
 						"type": "string",
 						"description": "The workflow name."
 					},
-					"targets": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "List of targets (hosts, URLs, IPs)."
-					},
+					"targets": _TARGETS_SCHEMA,
 					"opts": {
 						"type": "object",
-						"description": "Optional workflow options (e.g. profiles)."
+						"description": "Optional workflow options (e.g. profiles). Control/security flags are ignored."
 					}
 				},
 				"required": ["name", "targets"]
@@ -200,6 +198,33 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> li
 	return schemas
 
 
+def coerce_stringified_args(tool_name: str, arguments: dict) -> dict:
+	"""Coerce args the model serialized as JSON strings back to their declared type.
+
+	Some providers stringify nested object/array parameters even when the tool
+	schema says ``type: object`` / ``array`` (e.g. ``opts`` or ``query`` arriving
+	as a JSON string). Downstream handlers then call ``.get()`` / ``**opts`` /
+	``.items()`` on a ``str`` and raise ``AttributeError`` — or silently drop the
+	value (``_sanitize_child_opts`` returns ``{}`` for a non-dict). Parse any such
+	arg once, here at the tool-call boundary, so every consumer gets the declared
+	type. Best-effort: an unparseable value is left as-is so the handler can return
+	a clean error rather than crash.
+
+	Must run BEFORE arg decryption — ``_decrypt_dict`` would otherwise treat a
+	stringified object as a single encrypted value.
+	"""
+	if not isinstance(arguments, dict):
+		return arguments
+	props = TOOL_SCHEMAS.get(tool_name, {}).get("function", {}).get("parameters", {}).get("properties", {})
+	for key, spec in props.items():
+		if spec.get("type") in ("object", "array") and isinstance(arguments.get(key), str):
+			try:
+				arguments[key] = json.loads(arguments[key])
+			except (json.JSONDecodeError, TypeError, ValueError):
+				pass
+	return arguments
+
+
 def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 	"""Convert a tool call to an action dict compatible with existing action handlers.
 
@@ -214,6 +239,10 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 	if action_type is None:
 		return None
 	if not arguments:
+		return None
+	# A model may emit non-object arguments (bare JSON int/array/string) -- `.items()`
+	# below would raise and abort the loop, so reject cleanly and let the caller retry.
+	if not isinstance(arguments, dict):
 		return None
 	safe_arguments = {k: v for k, v in arguments.items() if k not in {"action", "description"}}
 	descr = safe_arguments.get("name", "") or safe_arguments.get("query") or safe_arguments.get("command", "unknown")

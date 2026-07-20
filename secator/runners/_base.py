@@ -324,7 +324,7 @@ class Runner:
 
 	@property
 	def resolved_opts(self):
-		opts = {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+		opts = {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_') and k != 'env'}  # noqa: E501
 		sensitive = self.sensitive_opt_names
 		if sensitive:
 			opts = {k: (REDACTED_OPT_VALUE if (k in sensitive and v) else v) for k, v in opts.items()}

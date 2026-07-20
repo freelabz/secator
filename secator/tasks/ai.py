@@ -1,9 +1,8 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task."""
 import json
-from itertools import groupby
+import uuid
 from pathlib import Path
-from time import sleep
 from typing import Generator
 
 from secator.config import CONFIG
@@ -15,18 +14,118 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.ai.actions import (
-	ActionContext, check_guardrails, dispatch_action, _run_batch, _decrypt_dict, _build_action_display
+	ActionContext, check_guardrails, safe_dispatch_action, _run_batch
 )
 from secator.ai.guardrails import PermissionEngine
 from secator.ai.interactivity import create_backend, RemoteBackend
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
-from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window
+from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
-	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue
+	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES
 )
-from secator.ai.tools import build_tool_schemas, tool_call_to_action, TOOL_SCHEMAS
-from secator.ai.session import save_history, show_session_picker, replay_session
-from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status
+from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
+from secator.ai.session import (
+	save_history, show_session_picker, replay_session, restore_history_from_db, print_session_results)
+from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status, _decrypt_dict, _build_action_display
+
+
+# High-precision cues for the deterministic mode fast-path. Only unambiguous
+# prompts (cues for exactly one of attack/chat, and no exploit-ish cue) are
+# resolved here; everything else defers to the LLM classifier.
+_ATTACK_CUES = (
+	"scan", "pentest", "pen test", "enumerate", "enumeration", "recon",
+	"brute", "bruteforce", "fuzz", "attack", "nmap", "nuclei", "subdomain", "hack",
+)
+_CHAT_CUES = (
+	"summarize", "summary", "explain", "what is", "what are", "what's",
+	"how do", "how does", "tell me", "describe", "list the", "show me", "?",
+)
+_EXPLOIT_CUES = ("exploit", "poc", "proof of concept", "cve-", "vulnerabilit")
+
+
+def fast_detect_mode(prompt):
+	"""Cheap deterministic pre-classifier. Returns 'attack'/'chat' for
+	unambiguous prompts, else None to defer to the LLM. Exploit-ish prompts
+	return None so the LLM keeps deciding those (no behavior change there)."""
+	text = (prompt or "").strip().lower()
+	if not text:
+		return "chat"
+	if any(cue in text for cue in _EXPLOIT_CUES):
+		return None
+	has_attack = any(cue in text for cue in _ATTACK_CUES)
+	has_chat = any(cue in text for cue in _CHAT_CUES)
+	if has_attack and not has_chat:
+		return "attack"
+	if has_chat and not has_attack:
+		return "chat"
+	return None
+
+
+def _truncate_label(text, fallback):
+	"""Truncate ``text`` to 80 chars with an ellipsis; empty text falls back to ``fallback``."""
+	return (text[:80] + '...') if text and len(text) > 80 else (text or fallback)
+
+
+def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason):
+	"""Shared body for rejecting a tool call: encrypt the error, record it as the
+	tool result in history, and return the ``tool_result`` Ai event to yield."""
+	_error_content = maybe_encrypt(error_msg, runner.encryptor)
+	runner.history.add_tool_result(tool_name, tool_call_id, _error_content)
+	return Ai(content=f"[{tool_name}] {reason}",
+	          ai_type="tool_result",
+	          message=cap_message(
+	              {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": _error_content}),
+	          _context=dict(runner.context))
+
+
+def _reject_malformed_tool_call(runner, name, tc_id, error, extra_fields, reason):
+	"""Build the rejected-tool-call error JSON (schema-derived hint fields) and
+	reject it via ``_reject_tool_call``. Shared by the two ``_process_tool_calls``
+	rejection paths (malformed JSON args, unknown tool/missing args), which only
+	differ in the extra schema-derived fields included in the error payload."""
+	error_msg = json.dumps({"error": error, **extra_fields}, separators=(',', ':'))
+	return _reject_tool_call(runner, name, tc_id, error_msg, reason)
+
+
+def _yield_tool_results(runner, collected):
+	"""Group ``collected`` results by tool_call_id, add each group's tool result to
+	history, and yield a summary ``Ai(ai_type="tool_result")`` per group. Split out
+	of ``_dispatch_and_collect``; kept a plain function (not a method, like
+	``_reject_tool_call`` above) so mocked-``self`` unit tests for that method still
+	hit this real code instead of an auto-mocked attribute. Order-preserving dict,
+	NOT itertools.groupby: batch results interleave by id and groupby only groups
+	consecutive keys, which would emit multiple tool_result messages per tool_use
+	(rejected by providers).
+	"""
+	budget = runner.history.get_action_budget(runner.model)
+	fallback_path = Path(runner.reports_folder) / "report.json" if runner.reports_folder else None
+	grouped = {}
+	for r in collected:
+		grouped.setdefault(r["_context"]['tool_call_id'], []).append(r)
+	for tc_id, group_results in grouped.items():
+		tc_name = group_results[0]["_context"]['tool_call_name']
+		has_errors = any(r["_type"] == "error" for r in group_results)
+		serialized = [
+			{k: v for k, v in r.items() if k not in INTERNAL_FIELDS}
+			for r in group_results
+		]
+		tool_result_str = format_tool_result(
+			tc_name, "error" if has_errors else "success",
+			len(serialized), serialized)
+		tool_result_str = truncate_to_tokens(
+			tool_result_str, budget, runner.model, fallback_path=fallback_path)
+		tool_result_str = maybe_encrypt(tool_result_str, runner.encryptor)
+		runner.history.add_tool_result(tc_name, tc_id, tool_result_str)
+		_tool_msg = {"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": tool_result_str}
+		_runner_id = next((r.get("_context", {}).get("task_id")
+		                   or r.get("_context", {}).get("workflow_id")
+		                   or r.get("_context", {}).get("scan_id")
+		                   for r in group_results if isinstance(r, dict)), "")
+		yield Ai(content=f"[{tc_name}] {len(serialized)} result(s)",
+		         ai_type="tool_result",
+		         message=cap_message(_tool_msg),
+		         extra_data={"runner_id": _runner_id},
+		         _context=dict(runner.context))
 
 
 @task()
@@ -39,22 +138,17 @@ class ai(PythonRunner):
 	opts = {
 		"name": {"type": str, "default": "", "short": "n", "internal_name": "session_name", "help": "Name for the AI session or subagent"},  # noqa: E501
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
-		"mode": {"type": str, "default": "", "help": "Mode: attack or chat"},
+		"mode": {"type": str, "default": "", "help": f"Mode: {', '.join(MODES)}"},  # derive from MODES, don't drift
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
-		# Never set a secret/CONFIG value as a task-option `default`: secator-api
-		# serves task opts (including defaults) to the UI, so a CONFIG default
-		# would leak the platform's LLM API key into the runner form. Default to
-		# empty; the task falls back to CONFIG.addons.ai.* at runtime in
-		# _init_options (api_key = passed or CONFIG.addons.ai.api_key). The
-		# user-supplied value is still `sensitive` so it's redacted from serialized
-		# runner state (run_opts/cmd) even though it's never a default.
+		# Never default this to CONFIG.addons.ai.api_key: secator-api serves task opts
+		# (incl. defaults) to the UI, which would leak the key into the runner form.
+		# Falls back to CONFIG at runtime instead; still `sensitive` so it's redacted.
 		"api_key": {"type": str, "default": "", "sensitive": True, "help": "API key for LLM provider (defaults to configured key)"},  # noqa: E501
 		"api_base": {"type": str, "default": "", "help": "API base URL (defaults to configured base)"},
 		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
 		"max_iterations": {"type": int, "default": 10, "help": "Max iterations"},
 		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
-		"yes": {"is_flag": True, "default": False, "short": "y", "help": "Auto-accept"},
 		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
 		"max_tokens_total": {
 			"type": int, "default": CONFIG.addons.ai.max_tokens_total,
@@ -66,6 +160,18 @@ class ai(PythonRunner):
 			"default": None,
 			"internal": True,
 			"help": "Context to pass to AI (findings, scope, objective)"
+		},
+		"allowed_targets": {
+			"type": list,
+			"default": None,
+			"internal": True,
+			"help": "Platform-set allow-list of target strings/regexes the AI must stay within (e.g. validated mandates)"  # noqa: E501
+		},
+		"denied_targets": {
+			"type": list,
+			"default": None,
+			"internal": True,
+			"help": "Platform-set deny-list of target strings/regexes the AI must never touch (deny wins over allowed_targets)"  # noqa: E501
 		},
 		"subagent": {
 			"is_flag": True,
@@ -151,21 +257,49 @@ class ai(PythonRunner):
 		if not self.model:
 			return
 
+		# Remote (web) resume: a respawned chat task restores its history from the
+		# workspace Mongo `_type:"ai"` docs (headless — no local files, no TUI).
+		if self.interactive == "remote":
+			restored = yield from self._maybe_resume_remote()
+			if restored:
+				return
+
 		# Resume session
 		if self.resume and not self.is_subagent:
 			session = show_session_picker()
 			if session is None:
 				return
 			self.session_name = session["name"]
-			self.history = replay_session(session)
+			self._reports_folder = session['folder']
+			if session.get("session_id"):
+				# New-format session: adopt the prior session_id (instead of a fresh
+				# str(self.id)) so appended docs continue the same `_context.session_id`.
+				self.session_id = session["session_id"]
+				self.context["session_id"] = self.session_id
+				# restore_history_from_db seeds system_prompt; no prompt exists yet (asked
+				# interactively below), so seed the same "chat" default `_detect_mode()`
+				# uses — the user's next answer re-detects the real mode and overwrites it.
+				self.mode = self.mode or "chat"
+				self._rebuild_prompt_and_tools()
+				self.history = restore_history_from_db(
+					self.session_id, self._get_query_engine(),
+					model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
+				# Show the prior conversation + findings on the console (the unified
+				# restore only rebuilds in-memory history; replay_session did this for
+				# the legacy path, so print it here to keep resume UX consistent).
+				print_session_results(session)
+			else:
+				# Legacy session: its docs carry no `_context.session_id`, so the unified
+				# restore would rebuild empty history. Fall back to the local
+				# history.json replay instead.
+				self.history = replay_session(session)
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
 				return
 			self.history.model = self.model
-			self._reports_folder = session['folder']
 			result = self._prompt_and_redetect([])
 			if result is None:
-				save_history(self.history, self.reports_folder, debug_fn=self.debug)
+				self._save_history()
 				return
 			self.context["session_name"] = self.session_name
 			yield from result
@@ -174,9 +308,7 @@ class ai(PythonRunner):
 			return
 
 		# Get user prompt
-		self.prompt = self.run_opts.get("prompt", "")
-		if self.prompt and Path(self.prompt).is_file():
-			self.prompt = Path(self.prompt).read_text().strip()
+		self.prompt = self._resolve_prompt()
 		if not self.prompt and not self.is_subagent:
 			from secator.definitions import IN_WORKER
 			if not IN_WORKER:
@@ -191,9 +323,8 @@ class ai(PythonRunner):
 					return
 
 		# Setup session metadata
-		prompt_label = (self.prompt[:80] + '...') if self.prompt and len(self.prompt) > 80 else (self.prompt or self.mode)
 		if not self.session_name:
-			self.session_name = prompt_label
+			self.session_name = _truncate_label(self.prompt, self.mode)
 		if self.encryptor:
 			self.session_name = self.encryptor.decrypt(self.session_name)
 		self.context["session_name"] = self.session_name
@@ -204,14 +335,177 @@ class ai(PythonRunner):
 		self._detect_mode()
 
 		# Build system prompt + start history
-		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+		self.system_prompt = self._system_prompt_for(self.mode)
 		self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
-		self.history.add_user(maybe_encrypt(self.prompt, self.encryptor))
-		yield Ai(content=self.prompt, ai_type="prompt")
+		yield self._emit_user_prompt(self.prompt)
 		yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
 
 		# Run loop
 		yield from self._run_loop()
+		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
+
+	# -------------------------------------------------------------------------
+	# Remote (web) session restore
+	# -------------------------------------------------------------------------
+
+	def _system_prompt_for(self, mode):
+		"""Compute the system prompt for ``mode`` using this runner's workspace + backend."""
+		return get_system_prompt(mode, workspace_path=str(self.reports_folder), backend=self.backend)
+
+	def _rebuild_prompt_and_tools(self):
+		"""Rebuild system_prompt + tool_schemas for the current mode and store them.
+
+		Returns the ``(system_prompt, tool_schemas)`` pair for callers that want it."""
+		self.system_prompt = self._system_prompt_for(self.mode)
+		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+		return self.system_prompt, self.tool_schemas
+
+	def _resolve_prompt(self):
+		"""Resolve the ``prompt`` run option, reading it from a file if it names one."""
+		prompt = self.run_opts.get("prompt", "")
+		if prompt and Path(prompt).is_file():
+			prompt = Path(prompt).read_text().strip()
+		return prompt
+
+	def _emit_user_prompt(self, prompt):
+		"""Add ``prompt`` to history (encrypted once) and return the user-prompt Ai event to yield."""
+		encrypted = maybe_encrypt(prompt, self.encryptor)
+		self.history.add_user(encrypted)
+		return Ai(content=prompt, ai_type="prompt", message={"role": "user", "content": encrypted})
+
+	def _get_query_engine(self):
+		"""Build a workspace-scoped QueryEngine from the runner context.
+
+		The backend (mongodb/api/local) is resolved from ``context['drivers']``
+		via ``QueryEngine._select_backend``. For the remote channel the API
+		appends the ``mongodb`` driver on dispatch, so this resolves to the
+		workspace Mongo backend.
+		"""
+		from secator.query import QueryEngine
+		return QueryEngine(self.context.get("workspace_id", ""), context=dict(self.context))
+
+	def _maybe_resume_remote(self):
+		"""Restore chat history from Mongo when a remote session has prior docs.
+
+		Returns True (via generator return) if this turn was fully handled as a
+		respawn (history restored, loop run), False to fall through to a fresh
+		conversation. Yields any items produced along the way.
+		"""
+		query_engine = self._get_query_engine()
+
+		# Guard: remote interactivity requires a Mongo-backed query engine, else
+		# the RemoteBackend poll can never see the web answer (and restore can't
+		# read the channel docs). Warn loudly but don't hard-fail a fresh run.
+		backend_name = getattr(query_engine.backend, "name", "")
+		if backend_name not in ("mongodb", "api"):
+			yield Warning(
+				message=f'interactive="remote" but query engine resolved to "{backend_name}" backend '
+				'(expected mongodb/api). The web answer channel will not work — check that the '
+				'`mongodb` driver is in the runner context.'
+			)
+
+		# Skip replay of an already-completed turn — acks_late can redeliver the
+		# same celery_id after a worker crash; without this marker we'd re-run every
+		# tool action and re-bill tokens.
+		turn_uuid = self._turn_uuid()
+		if turn_uuid and self._turn_completed_marker(turn_uuid, query_engine):
+			self.debug(f'idempotency: turn {turn_uuid} already completed; skipping replay', sub='llm')
+			return True
+
+		# Look for prior `_type:"ai"` docs for this session
+		try:
+			prior = query_engine.search({"_type": "ai", "_context.session_id": self.session_id}, limit=1)
+		except Exception as e:  # noqa: BLE001 - backend errors must not crash the worker
+			self.debug(f'remote resume: failed to query prior docs: {e}', sub='llm')
+			prior = None
+
+		if not prior:
+			# Fresh conversation: nothing to restore, fall through to normal start.
+			return False
+
+		# Resolve the user's new prompt (the message that triggered this respawn)
+		self.prompt = self._resolve_prompt()
+
+		# Session metadata
+		if not self.session_name:
+			self.session_name = _truncate_label(self.prompt, self.prompt)
+		self.context["session_name"] = self.session_name
+
+		# Detect mode (defaults to chat) and build the system prompt + tools
+		self._detect_mode()
+		self.system_prompt = self._system_prompt_for(self.mode)
+
+		# Rebuild history from the channel docs (text-only; see restore_history_from_db)
+		self.history = restore_history_from_db(
+			self.session_id, query_engine, model=self.model,
+			encryptor=self.encryptor, system_prompt=self.system_prompt)
+		self.history.model = self.model
+
+		# Append the new user message that respawned the conversation
+		if self.prompt:
+			yield self._emit_user_prompt(self.prompt)
+
+		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
+		yield from self._run_loop()
+		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
+		return True
+
+	def _save_history(self):
+		"""Persist chat history to the local reports folder, unless on the remote path.
+
+		For the remote (web) channel the workspace Mongo `_type:"ai"` docs are the
+		source of truth, so the local `history.json` write is skipped.
+		"""
+		if self.interactive == "remote":
+			return
+		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+
+	# -------------------------------------------------------------------------
+	# Turn-level idempotency (remote/Celery redelivery)
+	# -------------------------------------------------------------------------
+
+	def _turn_uuid(self):
+		"""Stable id naming THIS delivery's turn for idempotency.
+
+		``celery_id`` (the Celery request id) is stamped on the runner context by
+		the worker entrypoint (``run_command``) and is the SAME across an acks_late
+		worker-loss redelivery, so it uniquely and idempotently names one turn.
+		"""
+		return (self.context or {}).get("celery_id")
+
+	def _turn_completed_marker(self, turn_uuid, query_engine):
+		"""Return the persisted completion marker for ``turn_uuid``, or None."""
+		try:
+			docs = query_engine.search({
+				"_type": "ai",
+				"ai_type": "turn_completed",
+				"_context.session_id": self.session_id,
+				"extra_data.turn_uuid": turn_uuid,
+			}, limit=1)
+		except Exception as e:  # noqa: BLE001 - a marker query must not crash the worker
+			self.debug(f'idempotency: marker query failed: {e}', sub='llm')
+			return None
+		return docs[0] if docs else None
+
+	def _mark_turn_completed(self):
+		"""Persist a turn-completion marker once the turn is durably done.
+
+		Remote channel only. Reuses the workspace `_type:"ai"` docs (no new
+		collection); restore_history_from_db skips this ai_type so it never enters
+		the transcript. Called by the caller AFTER `_run_loop` returns, so a crash
+		mid-turn leaves no marker and the partial turn still resumes.
+		"""
+		if self.interactive != "remote":
+			return
+		turn_uuid = self._turn_uuid()
+		if not turn_uuid:
+			return
+		self.add_result(Ai(
+			content="",
+			ai_type="turn_completed",
+			status="completed",
+			extra_data={"turn_uuid": turn_uuid},
+		), print=False)
 
 	# -------------------------------------------------------------------------
 	# _run_loop: main LLM interaction loop
@@ -225,6 +519,8 @@ class ai(PythonRunner):
 		ctx = ActionContext(
 			targets=self.inputs,
 			model=self.model,
+			api_key=self.api_key,
+			api_base=self.api_base,
 			encryptor=self.encryptor,
 			dry_run=self.dry_run,
 			verbose=self.verbose,
@@ -247,17 +543,26 @@ class ai(PythonRunner):
 		iteration = 0
 		query_extensions = 0
 		empty_streak = 0
+		rate_limit_streak = 0
 		self._context_warnings_shown = set()
 
 		while iteration < self.max_iterations:
 			iteration += 1
 
 			try:
+				# Mid-flight steering: drain any user messages sent WHILE the agent
+				# was running and inject them into history so the next turn redirects.
+				# Cheap query per iteration; robust (never crashes the loop).
+				yield from self._drain_steers()
+
 				# Auto-summarize when context > 85% threshold
 				yield from self._summarize_auto()
 
 				# Prompt user when context is filling up (local only)
 				yield from self._summarize_user()
+
+				# Roll any billed summarization usage into context.ai_tokens
+				self._drain_history_usage()
 
 				# Subagent token usage (for batch progress tracking)
 				if self.is_subagent:
@@ -278,9 +583,17 @@ class ai(PythonRunner):
 				with maybe_status(msg, spinner="dots"):
 					result = call_llm(messages, self.model, self.temp, self.api_base, self.api_key, tools=self.tool_schemas)
 
+				# reset rate-limit guard on success
+				rate_limit_streak = 0
+
 				content = result["content"]
 				tool_calls = result.get("tool_calls", [])
 				usage = result.get("usage", {})
+
+				# Accumulate billed tokens for this run (read by the billing chore
+				# as context.ai_tokens). Done here, before any empty-response
+				# `continue`, so every billed call is counted exactly once.
+				self._account_usage(usage)
 
 				self.debug(f'content: {content[:200] if content else "(empty)"}', sub='llm')
 
@@ -290,36 +603,36 @@ class ai(PythonRunner):
 					yield Warning(message="LLM returned empty response")
 					if empty_streak >= 3:
 						yield Error(message="3 consecutive empty responses - the model may not support tool calling. Stopping.")
-						save_history(self.history, self.reports_folder, debug_fn=self.debug)
+						self._save_history()
 						return
 					continue
 
 				empty_streak = 0
 
-				# Add assistant message to history
-				self._add_assistant_to_history(content, tool_calls)
+				# Add assistant message to history and capture it for persistence
+				assistant_msg = self._add_assistant_to_history(content, tool_calls)
 
-				# Yield response content
-				if content:
-					display_content = self.encryptor.decrypt(content) if self.encryptor else content
-					yield Ai(
-						content=display_content,
-						ai_type="response",
-						mode=self.mode,
-						model=self.intent_model,
-						summary=not tool_calls,
-						extra_data={
-							"iteration": iteration,
-							"max_iterations": self.max_iterations,
-							"tokens": usage.get("tokens") if usage else None,
-							"cost": usage.get("cost") if usage else None,
-						},
-					)
+				# Persist the assistant turn (even tool-call-only turns carry tool_calls)
+				display_content = (self.encryptor.decrypt(content) if (self.encryptor and content) else (content or ''))
+				yield Ai(
+					content=display_content,
+					ai_type="response",
+					mode=self.mode,
+					model=self.intent_model,
+					summary=not tool_calls,
+					message=cap_message(assistant_msg),
+					extra_data={
+						"iteration": iteration,
+						"max_iterations": self.max_iterations,
+						"tokens": usage.get("tokens") if usage else None,
+						"cost": usage.get("cost") if usage else None,
+					},
+				)
 
 				# Process tool calls → validated actions
 				follow_up_choices = None
 				stop_reason = None
-				follow_up_ai = None
+				follow_up_prompt_uuid = None
 
 				if tool_calls:
 					actions = yield from self._process_tool_calls(tool_calls, ctx)
@@ -335,7 +648,7 @@ class ai(PythonRunner):
 					dispatch_result = yield from self._dispatch_and_collect(actions, ctx)
 					follow_up_choices = dispatch_result.get("follow_up_choices")
 					stop_reason = dispatch_result.get("stop_reason")
-					follow_up_ai = dispatch_result.get("follow_up_ai")
+					follow_up_prompt_uuid = dispatch_result.get("follow_up_prompt_uuid")
 
 					if len(actions) > 1:
 						yield Info(message=f"Executed {len(actions)} actions.")
@@ -347,20 +660,25 @@ class ai(PythonRunner):
 
 				# Stop tool → save and exit
 				if stop_reason is not None:
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 
 				# Follow-up / content-only / max_iter → prompt user
 				if follow_up_choices is not None or not tool_calls or iteration == self.max_iterations:
-					# For remote follow-up, yield the pending Ai so frontend can show it
-					if follow_up_ai and isinstance(self.backend, RemoteBackend):
-						follow_up_ai.status = "pending"
-						follow_up_ai.session_id = self.session_id
-						yield follow_up_ai
+					# Remote follow-up: the pending Ai doc was already stamped + persisted
+					# in _dispatch_and_collect (dedup by _uuid) — nothing to re-yield here.
 
-					result = self._prompt_and_redetect(follow_up_choices or [])
+					# Remote max-iter after tool work is a terminal turn (no further
+					# user input expected) — don't block-poll on prompt_uuid=None with no
+					# answerable pending doc; end cleanly via the loop tail (save + Info).
+					if (isinstance(self.backend, RemoteBackend)
+							and iteration == self.max_iterations
+							and follow_up_choices is None and tool_calls):
+						break
+
+					result = self._prompt_and_redetect(follow_up_choices or [], prompt_uuid=follow_up_prompt_uuid)
 					if result is None:
-						save_history(self.history, self.reports_folder, debug_fn=self.debug)
+						self._save_history()
 						return
 					yield from result
 					continue
@@ -374,38 +692,42 @@ class ai(PythonRunner):
 				yield Warning(message="Interrupted by user.")
 				result = self._prompt_and_redetect([])
 				if result is None:
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 				yield from result
 				continue
 
 			except Exception as e:
 				if isinstance(e, litellm.RateLimitError):
-					yield Warning(message="Rate limit exceeded - waiting 5s and retry in the next iteration")
-					iteration -= 1
-					sleep(5)
+					# call_llm already backed off (~2/4/8s); don't re-sleep. Bound consecutive
+					# 429s so a persistent rate limit can't spin forever; let iteration advance.
+					rate_limit_streak += 1
+					if rate_limit_streak >= 4:
+						yield Error(message="Rate limit exceeded on 4 consecutive attempts - aborting. Check your provider quota/billing.")  # noqa: E501
+						self._save_history()
+						return
+					yield Warning(message=f"Rate limit exceeded (attempt {rate_limit_streak}/4) - retrying in the next iteration")
 					continue
 				elif isinstance(e, litellm.AuthenticationError):
 					yield Error(message=str(e))
 					yield Error(message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`')
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 				elif isinstance(e, litellm.APIConnectionError) or (
 					isinstance(e, litellm.InternalServerError) and 'connection error' in str(e).lower()
 				):
-					# Genuine connectivity failures (connection refused, DNS failure) surface in
-					# some litellm versions as InternalServerError("Connection error.") rather than
-					# APIConnectionError, so catch both and gate the latter on the connection message
-					# to avoid swallowing unrelated upstream 500 errors.
+					# Some litellm versions surface connectivity failures as InternalServerError
+					# instead of APIConnectionError, so catch both, gated by message to avoid
+					# swallowing unrelated upstream 500s.
 					yield Error(message=f"Cannot connect to model '{self.model}': {e}")
 					yield Error(message='Check api_base and connectivity: `secator config set addons.ai.api_base <URL>`')
-					save_history(self.history, self.reports_folder, debug_fn=self.debug)
+					self._save_history()
 					return
 				yield Error.from_exception(e)
-				save_history(self.history, self.reports_folder, debug_fn=self.debug)
+				self._save_history()
 				return
 
-		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+		self._save_history()
 		yield Info(message=f"Reached max iterations ({iteration}/{self.max_iterations})")
 
 	# -------------------------------------------------------------------------
@@ -433,6 +755,8 @@ class ai(PythonRunner):
 		self.passed_context = self.run_opts.get("context") or {}
 		self.async_tasks = self.get_opt_value("async_tasks")
 		self.dangerous = self.get_opt_value("dangerous")
+		self.allowed_targets = self.get_opt_value("allowed_targets") or []
+		self.denied_targets = self.get_opt_value("denied_targets") or []
 
 		# Interactive mode: "local" / "remote" / "auto"
 		interactive = self.get_opt_value("interactive")
@@ -452,15 +776,43 @@ class ai(PythonRunner):
 		self.history = ChatHistory()
 		self.encryptor = SensitiveDataEncryptor() if self.sensitive else None
 		self.has_previous_results = len(self.results) > 0
-		self.scope = "current" if self.has_previous_results > 0 else "workspace"
+		self.scope = "current" if self.has_previous_results else "workspace"
 		self.permission_engine = PermissionEngine(
 			CONFIG.addons.ai.permissions,
 			targets=self.inputs,
-			workspace=self.reports_folder or ""
+			workspace=self.reports_folder or "",
+			allowed_targets=self.allowed_targets,
+			denied_targets=self.denied_targets,
 		)
 
-		# Create interactivity backend
-		self.session_id = self.session_name or str(self.id)
+		# Per-run billed-token accounting (AI analog of context.scan_hours), read
+		# by the platform billing chore. Init so it persists even with zero LLM calls.
+		self.context.setdefault("ai_tokens", 0)
+		self.context.setdefault("ai_prompt_tokens", 0)
+		self.context.setdefault("ai_completion_tokens", 0)
+		self.context.setdefault("ai_cost", 0.0)
+
+		# Record the resolved model id so the metering chore can price tokens against
+		# the model registry. Set unconditionally (not setdefault) — records the
+		# configured model even if the user switches mid-session.
+		self.context["ai_model"] = self.model
+
+		# Create interactivity backend. For remote (web), the UI reuses a stable
+		# session_id on respawn so a respawned task finds its prior docs; it arrives
+		# via self.context (authoritative — the dispatcher pops run_opts['context']).
+		self.session_id = (
+			self.passed_context.get("session_id")
+			or (self.context or {}).get("session_id")
+			or self.session_name
+			or str(self.id)
+		)
+		# Write session_id back onto the context: every persisted item copies
+		# self.context into `_context`, so this stamps `_context.session_id` on all
+		# `_type:"ai"` docs (incl. prompt/response turns yielded directly here).
+		# restore_history_from_db + the remote poll key on it, so skipping this
+		# would leave the transcript unqueryable and resume would restore nothing.
+		if self.context is not None:
+			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
 		# Auto-approve workspace targets
@@ -507,31 +859,37 @@ class ai(PythonRunner):
 		old_mode = self.mode
 		if old_mode and not force:
 			if not hasattr(self, 'tool_schemas'):
-				self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
-				self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+				self._rebuild_prompt_and_tools()
 			return
 		if not self.prompt:
 			self.mode = "chat"
 			return
-		try:
-			selection_prompt = load_prompt("modes/_selection.txt")
-			messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
-			with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
-				result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)
-			mode = result["content"].strip().lower()
-			if mode in ("attack", "chat"):
-				console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
-				self.mode = mode
-			else:
-				self.mode = old_mode or "chat"
-		except Exception:
-			console.print(Warning(message='Could not detect mode using LLM. Falling back to "chat" mode.'))
-			self.mode = "chat"
+		# Resolve unambiguous prompts deterministically; skip the intent LLM round-trip.
+		fast_mode = fast_detect_mode(self.prompt)
+		if fast_mode:
+			console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{fast_mode}[/] (fast-path)")
+			self.mode = fast_mode
+		else:
+			try:
+				selection_prompt = load_prompt("modes/_selection.txt")
+				messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
+				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
+					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
+				self._account_usage(result.get("usage"))
+				mode = result["content"].strip().lower()
+				if mode in MODES:  # honor any real mode (incl. exploit), don't discard it
+					console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
+					self.mode = mode
+				else:
+					self.mode = old_mode or "chat"
+			except Exception:
+				console.print(Warning(message='Could not detect mode using LLM. Falling back to "chat" mode.'))
+				self.mode = "chat"
 		if not self.mode:
 			self.mode = "chat"
 		mode_max = get_mode_config(self.mode).get("max_iterations", self.max_iterations)
 		self.max_iterations = max(self.max_iterations, mode_max)
-		self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
+		self.system_prompt = self._system_prompt_for(self.mode)
 		if not hasattr(self, 'tool_schemas') or not old_mode or old_mode != self.mode:
 			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
 
@@ -545,8 +903,7 @@ class ai(PythonRunner):
 		if not workspace_id:
 			return
 		try:
-			from secator.query import QueryEngine
-			engine = QueryEngine(workspace_id, context=dict(self.context))
+			engine = self._get_query_engine()
 			results = engine.search({"_type": "target"}, limit=1000)
 			target_names = {r.get("name") or r.get("_name", "") for r in results if r}
 			target_names.discard("")
@@ -557,6 +914,48 @@ class ai(PythonRunner):
 				self.permission_engine.add_runtime_allow([rule])
 		except Exception as e:
 			self.debug(f'[workspace] failed to query targets: {e}', sub='guardrail')
+
+	# -------------------------------------------------------------------------
+	# Mid-flight steering
+	# -------------------------------------------------------------------------
+
+	def _drain_steers(self):
+		"""Drain pending mid-flight steers and inject them into the LLM history.
+
+		A "steer" is a user message sent WHILE the agent is running (over the
+		remote/web channel: a pending ``_type:"ai", ai_type:"steer"`` doc written by
+		``POST /ai/conversations/{id}/steer``). At the top of each loop iteration we
+		drain any pending steers for this session and append each to the history as
+		a ``[User interjected]: …`` user message so the model sees them on the next
+		turn. Cooperative — not a hard cancel (Stop already does that).
+
+		The steer doc the API wrote is itself the persisted transcript entry (it
+		carries ``_context.session_id``, so the UI's transcript poll surfaces it as
+		an "interjected" user bubble). We deliberately do NOT yield a second
+		``Ai(ai_type="steer")`` echo here — that would persist a duplicate doc with
+		the same content and double-render in the UI. ``poll_steers`` flips the
+		drained doc to ``status:"consumed"`` so it injects exactly once.
+
+		Only the RemoteBackend has a channel to poll; for every other backend this
+		is a no-op. Robust: a steer must never crash the run, so all backend access
+		is best-effort and swallowed.
+
+		Generator (``yield from``-compatible with the loop) — currently yields no
+		items, but kept a generator so future transcript echoes can be added without
+		changing the call site.
+		"""
+		if not isinstance(self.backend, RemoteBackend):
+			return
+		try:
+			steers = self.backend.poll_steers(self.session_id)
+		except Exception as e:  # noqa: BLE001 - a steer must never crash the run
+			self.debug(f'steer: failed to poll steers: {e}', sub='llm')
+			return
+		for content in steers:
+			self.debug(f'steer: injecting user interjection: {content[:120]}', sub='llm')
+			self.history.add_user(maybe_encrypt(f"[User interjected]: {content}", self.encryptor))
+		return
+		yield  # noqa: unreachable - keeps this a generator for `yield from`
 
 	# -------------------------------------------------------------------------
 	# Summarization / compaction
@@ -631,14 +1030,18 @@ class ai(PythonRunner):
 					self.debug(f'[tool_call] {name}: failed to parse: {tc.function.arguments[:200]}', sub='llm')
 					schema = TOOL_SCHEMAS.get(name, {}).get("function", {})
 					properties = schema.get("parameters", {}).get("properties", {})
-					error_msg = json.dumps({
-						"error": f"Tool call '{tc_id}' rejected: malformed JSON arguments ({e})",
-						"raw_arguments": tc.function.arguments[:200],
-						"expected_schema": {k: v.get("type", "any") for k, v in properties.items()},
-						"hint": "Retry with properly formatted JSON arguments.",
-					}, separators=(',', ':'))
-					self.history.add_tool_result(name, tc_id, maybe_encrypt(error_msg, self.encryptor))
+					yield _reject_malformed_tool_call(
+						self, name, tc_id, f"Tool call '{tc_id}' rejected: malformed JSON arguments ({e})",
+						{
+							"raw_arguments": tc.function.arguments[:200],
+							"expected_schema": {k: v.get("type", "any") for k, v in properties.items()},
+							"hint": "Retry with properly formatted JSON arguments.",
+						}, "malformed arguments")
 					continue
+
+			# Coerce object/array args the model stringified (provider quirk) BEFORE
+			# decrypt/convert, so handlers get the declared type not a JSON string.
+			args = coerce_stringified_args(name, args)
 
 			# Decrypt args
 			if self.encryptor:
@@ -652,13 +1055,13 @@ class ai(PythonRunner):
 				self.debug(f'[tool_call] skipping {name}: {reason}', sub='llm')
 				schema = TOOL_SCHEMAS.get(name, {}).get("function", {})
 				params = schema.get("parameters", {})
-				error_msg = json.dumps({
-					"error": f"Tool call '{tc_id}' rejected: {reason}",
-					"required_fields": params.get("required", []),
-					"schema": {k: v.get("type", "any") for k, v in params.get("properties", {}).items()},
-					"hint": "Provide all required fields. Retry with a complete arguments object.",
-				}, separators=(',', ':'))
-				self.history.add_tool_result(name, tc_id, maybe_encrypt(error_msg, self.encryptor))
+				yield _reject_malformed_tool_call(
+					self, name, tc_id, f"Tool call '{tc_id}' rejected: {reason}",
+					{
+						"required_fields": params.get("required", []),
+						"schema": {k: v.get("type", "any") for k, v in params.get("properties", {}).items()},
+						"hint": "Provide all required fields. Retry with a complete arguments object.",
+					}, f"rejected: {reason}")
 				continue
 
 			action["tool_call_id"] = tc_id
@@ -678,7 +1081,7 @@ class ai(PythonRunner):
 				denial_display = f"{denial}\n[gray42]{cmd_display}[/gray42]" if cmd_display else denial
 				yield Warning(message=denial_display)
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
-				self.history.add_tool_result(name, tc_id, maybe_encrypt(error_msg, self.encryptor))
+				yield _reject_tool_call(self, name, tc_id, error_msg, "denied")
 				continue
 
 			actions.append(action)
@@ -699,9 +1102,13 @@ class ai(PythonRunner):
 		follow_up_choices = None
 		stop_reason = None
 		follow_up_ai = None
+		follow_up_prompt_uuid = None
 
 		is_batch = len(actions) > 1
-		action_iter = _run_batch(actions, ctx) if is_batch else dispatch_action(actions[0], ctx)
+		# safe_dispatch_action wraps dispatch so a handler error becomes an Error item
+		# fed back to the LLM, instead of killing the main loop (_run_batch does the
+		# same internally for each of its actions).
+		action_iter = _run_batch(actions, ctx) if is_batch else safe_dispatch_action(actions[0], ctx)
 
 		collected = []
 		for result in action_iter:
@@ -712,12 +1119,27 @@ class ai(PythonRunner):
 			is_from_subagent = isinstance(result, OutputType) and bool(result._context.get('subagent'))
 
 			if isinstance(result, Ai):
-				self.add_result(result, print=not is_from_subagent)
 				if result.ai_type == "follow_up":
 					follow_up_ai = result
 					follow_up_choices = result.choices or (result.extra_data or {}).get("choices", [])
+					# Persist the follow-up doc in its FINAL renderable state (add_result
+					# dedupes by _uuid, so the later `yield follow_up_ai` is dropped). For a
+					# remote run, stamp status="pending" + choices + session_id first.
+					if isinstance(self.backend, RemoteBackend):
+						follow_up_ai.status = "pending"
+						follow_up_ai.session_id = self.session_id
+						if not follow_up_ai.choices and follow_up_choices:
+							follow_up_ai.choices = list(follow_up_choices)
+						# Stamp a unique correlation id so the poll resolves only this prompt's
+						# answer, not a stale one from a prior turn (not reusing _uuid, which
+						# mongo may reassign on insert).
+						follow_up_prompt_uuid = str(uuid.uuid4())
+						follow_up_ai.extra_data = {
+							**(follow_up_ai.extra_data or {}), "prompt_uuid": follow_up_prompt_uuid}
+					self.add_result(result, print=not is_from_subagent)
 					continue
-				elif result.ai_type == "stopped":
+				self.add_result(result, print=not is_from_subagent)
+				if result.ai_type == "stopped":
 					stop_reason = result.content
 					continue
 				if result.ai_type not in ("shell_output", "response"):
@@ -739,33 +1161,69 @@ class ai(PythonRunner):
 			collected.append(result)
 			ctx.results.append(result)
 
-		# Group results by tool_call_id and add to history
-		budget = self.history.get_action_budget(self.model)
-		fallback_path = Path(self.reports_folder) / "report.json" if self.reports_folder else None
-		for tc_id, group in groupby(collected, key=lambda r: r["_context"]['tool_call_id']):
-			group_results = list(group)
-			tc_name = group_results[0]["_context"]['tool_call_name']
-			has_errors = any(r["_type"] == "error" for r in group_results)
-			serialized = [
-				{k: v for k, v in r.items() if k not in INTERNAL_FIELDS}
-				for r in group_results
-			]
-			tool_result_str = format_tool_result(
-				tc_name, "error" if has_errors else "success",
-				len(serialized), serialized)
-			tool_result_str = truncate_to_tokens(
-				tool_result_str, budget, self.model, fallback_path=fallback_path)
-			tool_result_str = maybe_encrypt(tool_result_str, self.encryptor)
-			self.history.add_tool_result(tc_name, tc_id, tool_result_str)
+		yield from _yield_tool_results(self, collected)
 
-		return {"follow_up_choices": follow_up_choices, "stop_reason": stop_reason, "follow_up_ai": follow_up_ai}
+		return {
+			"follow_up_choices": follow_up_choices,
+			"stop_reason": stop_reason,
+			"follow_up_ai": follow_up_ai,
+			"follow_up_prompt_uuid": follow_up_prompt_uuid,
+		}
 
 	# -------------------------------------------------------------------------
 	# History helpers
 	# -------------------------------------------------------------------------
 
+	def _account_usage(self, usage):
+		"""Accumulate billed token/cost usage from a single LLM call onto the runner context.
+
+		`usage` is the dict returned by `call_llm`
+		(`{"tokens", "prompt_tokens", "completion_tokens", "cost"}`) or None.
+		Missing/None usage counts as 0 so accounting never crashes the run. The
+		running total lives on `self.context["ai_tokens"]` (int, cumulative) which
+		is persisted onto the task doc and read by the platform billing chore.
+		`context["ai_prompt_tokens"]`/`["ai_completion_tokens"]` carry the split.
+		"""
+		if not usage:
+			return
+		for usage_key, ctx_key, cast in (
+			("tokens", "ai_tokens", int),
+			("prompt_tokens", "ai_prompt_tokens", int),
+			("completion_tokens", "ai_completion_tokens", int),
+			("cost", "ai_cost", float),
+		):
+			try:
+				self.context[ctx_key] = cast(self.context.get(ctx_key, 0) or 0) + cast(usage.get(usage_key) or 0)
+			except (TypeError, ValueError):
+				pass
+
+	def _drain_history_usage(self):
+		"""Roll billed usage accrued by history summarization into context.ai_tokens.
+
+		`ChatHistory.compact` makes its own LLM calls and stashes their billed
+		usage on the history object; drain it here so it is counted exactly once.
+		"""
+		history = getattr(self, "history", None)
+		if history is None:
+			return
+		tokens = getattr(history, "billed_tokens", 0) or 0
+		prompt_tokens = getattr(history, "billed_prompt_tokens", 0) or 0
+		completion_tokens = getattr(history, "billed_completion_tokens", 0) or 0
+		cost = getattr(history, "billed_cost", 0.0) or 0.0
+		if tokens:
+			self._account_usage({
+				"tokens": tokens,
+				"prompt_tokens": prompt_tokens,
+				"completion_tokens": completion_tokens,
+				"cost": cost,
+			})
+			history.billed_tokens = 0
+			history.billed_prompt_tokens = 0
+			history.billed_completion_tokens = 0
+			history.billed_cost = 0.0
+
 	def _add_assistant_to_history(self, content, tool_calls):
-		"""Add assistant message (with optional tool calls) to chat history."""
+		"""Add assistant message (with optional tool calls) to chat history; return the message."""
 		if tool_calls:
 			litellm_tool_calls = [{
 				"id": tc.id,
@@ -776,24 +1234,44 @@ class ai(PythonRunner):
 					else json.dumps(tc.function.arguments)),
 				},
 			} for tc in tool_calls]
-			self.history.add_assistant_with_tool_calls(
-				maybe_encrypt(content, self.encryptor) if content else None,
-				litellm_tool_calls)
-		else:
-			self.history.add_assistant(maybe_encrypt(content, self.encryptor))
+			enc = maybe_encrypt(content, self.encryptor) if content else None
+			msg = {"role": "assistant", "tool_calls": litellm_tool_calls}
+			if enc is not None:
+				msg["content"] = enc
+			self.history.messages.append(msg)
+			return msg
+		enc = maybe_encrypt(content, self.encryptor)
+		msg = {"role": "assistant", "content": enc}
+		self.history.messages.append(msg)
+		return msg
 
 	# -------------------------------------------------------------------------
 	# Follow-up / prompt
 	# -------------------------------------------------------------------------
 
-	def _prompt_and_redetect(self, choices):
+	def _prompt_and_redetect(self, choices, prompt_uuid=None):
 		"""Prompt user via backend and re-detect intent.
 
 		Works for all backends: CLIBackend shows rich menus, RemoteBackend
 		polls DB, AutoBackend returns None (exits).
 
+		``prompt_uuid`` correlates the (remote) poll to the SPECIFIC pending
+		follow_up doc this call raised, so a stale answered follow_up from a prior
+		turn can't resolve it (which would re-inject the old prompt and loop).
+
 		Returns list of items to yield, or None to exit.
 		"""
+		# Plain-chat remote turns reach here with no pre-persisted pending doc,
+		# so persist one now with a real prompt_uuid (never poll on prompt_uuid=None).
+		if isinstance(self.backend, RemoteBackend) and not prompt_uuid:
+			prompt_uuid = str(uuid.uuid4())
+			self.add_result(self.backend.build_pending_prompt(
+				question="What's next?",
+				choices=choices,
+				session_id=self.session_id,
+				prompt_type="follow_up",
+				prompt_uuid=prompt_uuid,
+			))
 		response = self.backend.ask_user(
 			question="What's next?",
 			choices=choices,
@@ -804,6 +1282,7 @@ class ai(PythonRunner):
 			max_iterations=self.max_iterations,
 			mode=self.mode,
 			model=self.model,
+			prompt_uuid=prompt_uuid,
 		)
 		if response is None:
 			return None
@@ -817,18 +1296,16 @@ class ai(PythonRunner):
 		self.history.add_user(maybe_encrypt(answer, self.encryptor))
 
 		# Handle explicit mode switch (e.g. summarize → chat)
+		self.max_iterations += extra_iters
 		if response.get("switch_mode"):
 			self.mode = response["switch_mode"]
-			self.system_prompt = get_system_prompt(self.mode, workspace_path=str(self.reports_folder), backend=self.backend)
-			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+			self._rebuild_prompt_and_tools()
 			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
-			self.max_iterations += extra_iters
 			items.append(Info(message=f"Switched to {self.mode} mode"))
 		else:
 			# Re-detect mode (user may switch from chat to attack, etc.)
 			previous_mode = self.mode
 			self._detect_mode(force=True)
-			self.max_iterations += extra_iters
 			if self.mode != previous_mode:
 				self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 				items.append(Info(message=f"Switched to {self.mode} mode"))
@@ -836,5 +1313,8 @@ class ai(PythonRunner):
 		# Token breakdown for prompt display
 		by_role = self.history.count_tokens_by_role(self.model)
 		extra_data = {"tokens": by_role["total"], "context_window": get_context_window(self.model), "by_role": by_role}
-		items.append(Ai(content=answer, ai_type="prompt", extra_data=extra_data))
+		items.append(Ai(
+			content=answer, ai_type="prompt", extra_data=extra_data,
+			message={"role": "user", "content": maybe_encrypt(answer, self.encryptor)},
+		))
 		return items

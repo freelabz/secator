@@ -1,6 +1,20 @@
 # secator/hooks/_dedup.py
 
 
+def _is_unset(field, value):
+	"""Return True if `value` should be treated as "empty" for copy-forward purposes.
+
+	For most fields, emptiness is the generic falsy check (`not value`). The `status`
+	field (Vulnerability) is special: its default value `'NEW'` is truthy but means
+	"untouched", so we treat `''` / `None` / `'NEW'` as unset. This lets a prior
+	`ACKNOWLEDGED` / `FIXED` status carry forward onto a re-found main whose status is
+	still the default `'NEW'`, while a never-touched vuln stays `'NEW'`.
+	"""
+	if field == 'status':
+		return not value or str(value).strip().upper() == 'NEW'
+	return not value
+
+
 def compute_duplicate_updates(workspace_findings, untagged_findings, copy_fields=None):
 	"""Compute duplicate-tagging updates for a set of findings (backend-agnostic).
 
@@ -35,10 +49,12 @@ def compute_duplicate_updates(workspace_findings, untagged_findings, copy_fields
 				if not hasattr(previous_item, field):
 					continue
 				value_prev = getattr(previous_item, field)
-				if not value_prev:
+				# Nothing meaningful to carry forward (handles `status='NEW'` as unset too).
+				if _is_unset(field, value_prev):
 					continue
 				value_curr = getattr(item, field, None)
-				if not value_curr and field not in copied_fields:
+				# Copy only onto an "empty" current value; for `status`, `'NEW'` counts as empty.
+				if _is_unset(field, value_curr) and field not in copied_fields:
 					copied_fields[field] = value_prev
 
 		related_ids = []

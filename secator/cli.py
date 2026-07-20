@@ -3049,8 +3049,8 @@ def task(name, verbose, check, system_exit):
 		else:
 			return False
 
-	# Run install
-	if hasattr(task, 'get_version_info'):
+	# Run install (skip for generic tasks with no static cmd — no external tool to install/version)
+	if hasattr(task, 'get_version_info') and getattr(task, 'cmd', None):
 		cmd = f'secator install tools {task_name}'
 		ret_code = Command.execute(cmd, name='install', quiet=not verbose, cwd=ROOT_FOLDER)
 		version_info = task.get_version_info()

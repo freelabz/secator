@@ -150,7 +150,7 @@ class TestAITask(unittest.TestCase):
         from secator.tasks.ai import ai
 
         required_opts = ['prompt', 'mode', 'model', 'api_base', 'sensitive',
-                         'max_iterations', 'temperature', 'dry_run', 'yes']
+                         'max_iterations', 'temperature', 'dry_run']
         for opt in required_opts:
             self.assertIn(opt, ai.opts, f"Missing opt: {opt}")
 

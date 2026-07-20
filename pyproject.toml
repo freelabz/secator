@@ -92,7 +92,11 @@ gcs = [
 ]
 ai = [
 	'litellm < 2',
-	'safecmd'
+	'safecmd',
+	# safecmd shells out to the `shfmt` binary (via shutil.which); pin shfmt-py
+	# explicitly so `secator install addons ai` always ships the binary, not just
+	# the safecmd Python package. Without it the guardrail shell parser degrades.
+	'shfmt-py'
 ]
 
 [project.scripts]
