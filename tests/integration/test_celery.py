@@ -105,7 +105,9 @@ class TestCelery(unittest.TestCase):
 		results = ffuf(targets, **ASYNC_OPTS, **{k.replace('ffuf.', ''): v for k, v in OPTS.items()}).run()
 		targets_out = [r.name for r in results if r._type == 'target']
 		urls = [r.url for r in results if r._type == 'url']
-		self.assertEqual(len(targets_out), len(URL_TARGETS) * 2)
+		# Store-based collection dedups the per-target echoes the old chain payload accumulated
+		# across chunks (see test_url_vuln_workflow), so each input target appears once, not doubled.
+		self.assertEqual(len(targets_out), len(URL_TARGETS))
 		self.assertEqual(len(urls), sum(URL_RESULTS_COUNT))
 
 	def test_url_vuln_workflow(self):
