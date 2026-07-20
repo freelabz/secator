@@ -1067,9 +1067,15 @@ class Runner:
 
 		# Yield results
 		yield from results
-		# No store backfill: findings live in the store (write-model), never re-materialized into
-		# a list here. The report and the summary count read them from the store (streaming/count),
-		# keeping peak memory flat through completion.
+		# Backfill store findings the live poll never surfaced. Tasks return topology-only now, so a
+		# fast task can finish before a throttled RUNNING update ever publishes its findings — and the
+		# `-json`/UI output that consumes this stream would otherwise be empty. Stream via the
+		# StreamView (peak memory stays flat) and skip anything already yielded during polling
+		# (tracked in self.uuids), so nothing is materialized or double-emitted.
+		if not self.sync and not self.no_process:
+			for item in self.findings:
+				if getattr(item, '_uuid', None) not in self.uuids:
+					yield item
 
 	def build_celery_workflow(self):
 		"""Build Celery workflow.
