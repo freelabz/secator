@@ -64,6 +64,7 @@ class JsonDriverTestBase(unittest.TestCase):
 				inner.context = {'workspace_id': ws}
 				inner.reports_folder = folder
 				inner.status = 'RUNNING'
+				inner.has_parent = False
 
 			def toDict(inner):
 				return {'name': name, 'status': inner.status, 'chunk': None, 'context': inner.context}

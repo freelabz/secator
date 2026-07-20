@@ -42,6 +42,12 @@ def _empty_report():
 
 
 def _report_path(runner):
+	# Children share the parent's reports_folder, so a workflow/scan and its tasks would otherwise
+	# all write the same report.json and clobber each other's info block. Children write a per-child
+	# report_<fqn>.json instead. (Reading those back for per-task detail — MongoDB parity — is a
+	# parked follow-up; findings still stream to the shared results.ndjson.)
+	if runner.has_parent:
+		return Path(runner.reports_folder) / f'report_{runner.fqn}.json'
 	return Path(runner.reports_folder) / 'report.json'
 
 
