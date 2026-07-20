@@ -37,7 +37,7 @@ class nuclei(VulnMulti):
 	file_flag = '-l'
 	input_flag = '-u'
 	json_flag = '-jsonl'
-	input_chunk_size = 20
+	input_chunk_size = -1
 	opts = {
 		'automatic_scan': {'is_flag': True, 'short': 'as', 'help': 'Automatic web scan using wappalyzer technology detection to tags mapping'},  # noqa: E501
 		'bulk_size': {'type': int, 'short': 'bs', 'help': 'Maximum number of hosts to be analyzed in parallel per template'},  # noqa: E501
@@ -152,6 +152,13 @@ class nuclei(VulnMulti):
 			self.cmd += ' -ts'
 			self.cmd += f' -elog {output_folder}/{self.fqn}_error.json'
 			self.cmd += f' -tlog {output_folder}/{self.fqn}_trace.json'
+
+		# Auto-set bulk_size to input count when not explicitly provided.
+		# nuclei's default bulk_size is 25, which limits parallelism on large host lists
+		# and prevents saturating the configured rate limit.
+		bulk_size = self.get_opt_value('bulk_size')
+		if not bulk_size and self.inputs:
+			self.run_opts['bulk_size'] = len(self.inputs)
 
 	@staticmethod
 	def id_extractor(item):
