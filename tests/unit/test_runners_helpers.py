@@ -388,21 +388,21 @@ class TestLoadOutputTypes(unittest.TestCase):
     backfill that assembles self.results from the store (Step 4)."""
 
     def test_loads_dicts_by_type_and_keeps_uuid(self):
-        from secator.runners._helpers import load_output_types
+        from secator.output_types._base import load_output_types
         docs = [
             {'_type': 'url', 'url': 'http://x/a', '_uuid': 'u1'},
             {'_type': 'vulnerability', 'name': 'CVE-1', '_id': 'm2'},  # mongodb-style id
         ]
-        out = load_output_types(docs)
+        out = list(load_output_types(docs))
         self.assertEqual([type(o).__name__ for o in out], ['Url', 'Vulnerability'])
         self.assertEqual(out[0].url, 'http://x/a')
         self.assertEqual(out[0]._uuid, 'u1')
         self.assertEqual(out[1]._uuid, 'm2')  # falls back to _id
 
     def test_passes_through_output_type_and_skips_unknown(self):
-        from secator.runners._helpers import load_output_types
+        from secator.output_types._base import load_output_types
         existing = Url(url='http://y/b', _context={'workspace_id': 'ws'})
-        out = load_output_types([existing, {'_type': 'nope'}, 'garbage', 42])
+        out = list(load_output_types([existing, {'_type': 'nope'}, 'garbage', 42]))
         self.assertEqual(out, [existing])
 
 

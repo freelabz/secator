@@ -20,8 +20,9 @@ from secator.output_types import (
 )
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import get_task_folder_id, run_extractors, StreamView
+from secator.runners._helpers import get_task_folder_id, run_extractors
 from secator.query import QueryEngine
+from secator.query._stream import StreamView
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
 from secator.tree import build_runner_tree, prune_runner_tree
 from secator.loader import get_configs_by_type

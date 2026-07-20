@@ -93,7 +93,8 @@ class Report:
 			context['report_dir'] = str(reports_folder)
 
 		# Bound the query to THIS run so a shared workspace's other runs don't leak in.
-		from secator.runners._helpers import run_scope_query, StreamView
+		from secator.runners._helpers import run_scope_query
+		from secator.query._stream import StreamView
 		scope = run_scope_query(context)
 		if scope:
 			query = {'$and': [query, scope]} if (query and set(query) & set(scope)) else {**query, **scope}
