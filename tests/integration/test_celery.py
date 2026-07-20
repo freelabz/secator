@@ -12,6 +12,8 @@ from secator.utils_test import TEST_TASKS, load_fixture
 from secator.runners import Command
 from tests.integration.inputs import INPUTS_SCANS
 
+TEST_TASK_NAMES = {t.name for t in TEST_TASKS}
+
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
 OPTS = {
@@ -65,7 +67,7 @@ class TestCelery(unittest.TestCase):
 	def test_httpx_async(self):
 		"""A single task dispatched to the worker: results come from the store, not the payload."""
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:
+		if 'httpx' not in TEST_TASK_NAMES:
 			return
 		results = httpx(URL_TARGETS, **ASYNC_OPTS).run()
 		urls = [r.url for r in results if r._type == 'url']
@@ -77,7 +79,7 @@ class TestCelery(unittest.TestCase):
 		"""Enough targets to force chunking → a chord of chunks; every chunk's findings
 		are collected from the store."""
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:
+		if 'httpx' not in TEST_TASK_NAMES:
 			return
 
 		size = CONFIG.runners.input_chunk_size + 1
@@ -88,7 +90,7 @@ class TestCelery(unittest.TestCase):
 
 	def test_nmap_async(self):
 		from secator.tasks import nmap
-		if nmap not in TEST_TASKS:
+		if 'nmap' not in TEST_TASK_NAMES:
 			return
 		results = nmap(URL_TARGETS, **ASYNC_OPTS).run()
 		targets = [r.name for r in results if r._type == 'target']
@@ -96,7 +98,7 @@ class TestCelery(unittest.TestCase):
 
 	def test_ffuf_chunked(self):
 		from secator.tasks import ffuf
-		if ffuf not in TEST_TASKS:
+		if 'ffuf' not in TEST_TASK_NAMES:
 			return
 
 		targets = [t + '/FUZZ' for t in URL_TARGETS]
