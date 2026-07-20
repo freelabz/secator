@@ -168,9 +168,22 @@ class TestBuildExtractorQuery:
 
 
 def _local_ctx(results, **kw):
+	# Persist findings to a run-scoped json store and query it — the in-memory extractor path was
+	# removed, so process_extractor reads only the store.
+	import json
+	import tempfile
+	from pathlib import Path
+	d = Path(tempfile.mkdtemp())
+	with open(d / 'results.ndjson', 'w') as fh:
+		for i, item in enumerate(results):
+			rec = item.toDict() if hasattr(item, 'toDict') else dict(item)
+			rec.setdefault('_type', getattr(item, '_type', None))
+			if not rec.get('_uuid'):
+				rec['_uuid'] = f'test-uuid-{i}'
+			fh.write(json.dumps(rec, default=str) + '\n')
 	base = {
 		'opts': {}, 'targets': [], 'parent_scope': None, 'ancestor_id': None, 'node_chain_start': False,
-		'workspace_id': None, 'workspace_name': None, 'drivers': [], 'results': results,
+		'workspace_id': 'ws', 'workspace_name': 'ws', 'drivers': ['json'], 'report_dir': str(d),
 	}
 	base.update(kw)
 	return base

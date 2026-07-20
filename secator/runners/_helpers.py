@@ -254,14 +254,20 @@ def build_extractor_query(extractor, ctx):
 
 
 def process_extractor(results, extractor, ctx=None):
-	"""Process extractor.
+	"""Process an extractor against the run's store.
+
+	Streams the matched findings from the store — the fan-in is never materialized (peak memory is
+	O(extracted), not O(N findings)) — and returns either the raw findings or, when the extractor
+	declares a ``field``, the formatted (and optionally grouped) field values.
 
 	Args:
-		results (list): List of results.
+		results (list): legacy positional kept for call-site compatibility; findings live in the
+			store now, so it is only returned verbatim when the extractor can't be parsed.
 		extractor (dict / str): extractor definition.
+		ctx (dict): run context (drivers, workspace, report_dir, run-scope ids).
 
 	Returns:
-		list: List of extracted results.
+		list: extracted results (findings, or formatted field values).
 	"""
 	if ctx is None:
 		ctx = {}
@@ -274,55 +280,48 @@ def process_extractor(results, extractor, ctx=None):
 	query = build_extractor_query(extractor, ctx)
 	if query is None:
 		return []
-	in_memory = ctx.get('results') or results
-	if in_memory:
-		# Caller handed us a materialized finding list (unit tests / sync library callers):
-		# filter it directly with the same match_query the local backend uses — no store
-		# round-trip. This is an explicit argument, NOT the runner's in-memory results.
-		from secator.query.json import match_query
-		results = [r for r in in_memory if match_query(r, query)]
+
+	from secator.query import QueryEngine
+	engine = QueryEngine(ctx.get('workspace_id'), context={
+		'drivers': ctx.get('drivers', []),
+		'workspace_name': ctx.get('workspace_name'),
+		'report_dir': ctx.get('report_dir'),
+	})
+
+	def _matched():
+		# Stream the store cursor one finding at a time — DB backends push the filter down, the local
+		# backend reads the run's report.json/ndjson; findings come back as raw dicts.
+		for batch in engine.iterate(query):
+			for item in batch:
+				yield item
+
+	if not _field:
+		results = list(_matched())
+		debug(f'extracted {len(results)} results (key: {key}) via query {query}', sub='extractor')
+		return results
+
+	already_formatted = '{' in _field and '}' in _field
+	_field = '{' + _field + '}' if not already_formatted else _field
+	if _group_by:
+		already_formatted_gb = '{' in _group_by and '}' in _group_by
+		_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
+		groups = {}
+		for item in _matched():
+			group_key = _format_nested(_group_by, item)
+			value = _format_nested(_field, item)
+			if not group_key or not value:
+				continue
+			prefix = value.split('~')[0] if '~' in value else value
+			if not prefix:
+				continue
+			bucket = groups.setdefault(group_key, [])
+			if prefix not in bucket:
+				bucket.append(prefix)
+		results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
 	else:
-		# Live run: findings live only in the store. Query it — the DB backend pushes the
-		# filter down (fan-in never materialized, RC#6 OOM fix); the local backend reads the
-		# run's report.json files.
-		from secator.query import QueryEngine
-		results = QueryEngine(ctx.get('workspace_id'), context={
-			'drivers': ctx.get('drivers', []),
-			'workspace_name': ctx.get('workspace_name'),
-			'report_dir': ctx.get('report_dir'),
-		}).search(query)
+		results = [v for v in (_format_nested(_field, item) for item in _matched()) if v]
 	debug(f'extracted {len(results)} results (key: {key}) via query {query}', sub='extractor')
-
-	if _field:
-		already_formatted = '{' in _field and '}' in _field
-		_field = '{' + _field + '}' if not already_formatted else _field
-
-		if _group_by:
-			already_formatted_gb = '{' in _group_by and '}' in _group_by
-			_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
-			groups = {}
-			for item in results:
-				item_dict = _item_dict(item)
-				group_key = _format_nested(_group_by, item_dict)
-				value = _format_nested(_field, item_dict)
-				if not group_key or not value:
-					continue
-				prefix = value.split('~')[0] if '~' in value else value
-				if not prefix:
-					continue
-				bucket = groups.setdefault(group_key, [])
-				if prefix not in bucket:
-					bucket.append(prefix)
-			results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
-		else:
-			results = [v for v in (_format_nested(_field, _item_dict(item)) for item in results) if v]
 	return results
-
-
-def _item_dict(item):
-	"""Return an item as a dict, whether it's a raw finding dict (DB backend) or an
-	OutputType object (local backend)."""
-	return item if isinstance(item, dict) else item.toDict()
 
 
 def get_task_folder_id(path):

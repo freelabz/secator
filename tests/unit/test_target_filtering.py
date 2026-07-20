@@ -167,6 +167,23 @@ def get_all_task_opts(sig):
 class TestProcessExtractorScopeFiltering(unittest.TestCase):
     """process_extractor must use scope-based filtering for type='target' when parent_scope is set."""
 
+    def _store_ctx(self, findings, **extra):
+        """Persist findings to a run-scoped json store and return a ctx that queries it."""
+        import json
+        import tempfile
+        from pathlib import Path
+        d = Path(tempfile.mkdtemp())
+        with open(d / 'results.ndjson', 'w') as fh:
+            for i, item in enumerate(findings):
+                rec = item.toDict() if hasattr(item, 'toDict') else dict(item)
+                rec.setdefault('_type', getattr(item, '_type', None))
+                if not rec.get('_uuid'):
+                    rec['_uuid'] = f'test-uuid-{i}'
+                fh.write(json.dumps(rec, default=str) + '\n')
+        ctx = {'drivers': ['json'], 'workspace_id': 'ws', 'workspace_name': 'ws', 'report_dir': str(d)}
+        ctx.update(extra)
+        return ctx
+
     def _make_scope_target(self, name, scope):
         t = Target(name=name)
         t._context['scope'] = scope
@@ -181,7 +198,7 @@ class TestProcessExtractorScopeFiltering(unittest.TestCase):
 
         extractor = {'type': 'target', 'field': 'name'}
         ctx = {'key': 'targets', 'parent_scope': 'workflow2', 'ancestor_id': 'workflow2', 'node_chain_start': False}
-        extracted = process_extractor(results, extractor, ctx=ctx)
+        extracted = process_extractor([], extractor, ctx=self._store_ctx(results, **ctx))
 
         self.assertIn('example.com:445', extracted)
         self.assertNotIn('other.com:80', extracted)
@@ -195,7 +212,7 @@ class TestProcessExtractorScopeFiltering(unittest.TestCase):
 
         extractor = {'type': 'target', 'field': 'name', 'condition': 'target.name ~= 445'}
         ctx = {'key': 'targets', 'parent_scope': 'workflow2', 'ancestor_id': 'workflow2', 'node_chain_start': False}
-        extracted = process_extractor(results, extractor, ctx=ctx)
+        extracted = process_extractor([], extractor, ctx=self._store_ctx(results, **ctx))
 
         self.assertEqual(extracted, ['example.com:445'])
 
@@ -209,7 +226,7 @@ class TestProcessExtractorScopeFiltering(unittest.TestCase):
 
         extractor = {'type': 'target', 'field': 'name'}
         ctx = {'key': 'targets', 'ancestor_id': 'wf-abc', 'node_chain_start': False}
-        extracted = process_extractor(results, extractor, ctx=ctx)
+        extracted = process_extractor([], extractor, ctx=self._store_ctx(results, **ctx))
 
         self.assertIn('example.com', extracted)
         self.assertNotIn('other.com', extracted)
@@ -224,7 +241,7 @@ class TestProcessExtractorScopeFiltering(unittest.TestCase):
 
         extractor = {'type': 'url', 'field': 'url'}
         ctx = {'key': 'targets', 'ancestor_id': 'wf-abc', 'node_chain_start': True}
-        extracted = process_extractor(results, extractor, ctx=ctx)
+        extracted = process_extractor([], extractor, ctx=self._store_ctx(results, **ctx))
 
         self.assertIn('http://example.com', extracted)
         self.assertIn('http://other.com', extracted)
@@ -232,6 +249,23 @@ class TestProcessExtractorScopeFiltering(unittest.TestCase):
 
 class TestRunExtractorsScopeFallback(unittest.TestCase):
     """run_extractors must fall back to scope-tagged Targets when no targets_ extractor + parent_scope set."""
+
+    def _store_ctx(self, findings, **extra):
+        """Persist findings to a run-scoped json store and return a ctx that queries it."""
+        import json
+        import tempfile
+        from pathlib import Path
+        d = Path(tempfile.mkdtemp())
+        with open(d / 'results.ndjson', 'w') as fh:
+            for i, item in enumerate(findings):
+                rec = item.toDict() if hasattr(item, 'toDict') else dict(item)
+                rec.setdefault('_type', getattr(item, '_type', None))
+                if not rec.get('_uuid'):
+                    rec['_uuid'] = f'test-uuid-{i}'
+                fh.write(json.dumps(rec, default=str) + '\n')
+        ctx = {'drivers': ['json'], 'workspace_id': 'ws', 'workspace_name': 'ws', 'report_dir': str(d)}
+        ctx.update(extra)
+        return ctx
 
     def _make_scope_target(self, name, scope):
         t = Target(name=name)
@@ -248,7 +282,7 @@ class TestRunExtractorsScopeFallback(unittest.TestCase):
         inputs, _, errors = run_extractors(
             results, {},
             inputs=['original.com'],
-            ctx={'parent_scope': 'workflow2'}
+            ctx=self._store_ctx(results, parent_scope='workflow2')
         )
         self.assertEqual(errors, [])
         self.assertIn('example.com:80', inputs)
@@ -264,7 +298,7 @@ class TestRunExtractorsScopeFallback(unittest.TestCase):
         inputs, _, errors = run_extractors(
             results, {},
             inputs=['original.com'],
-            ctx={'parent_scope': 'workflow2'}
+            ctx=self._store_ctx(results, parent_scope='workflow2')
         )
         self.assertEqual(errors, [])
         self.assertEqual(inputs, ['original.com'])
@@ -279,7 +313,7 @@ class TestRunExtractorsScopeFallback(unittest.TestCase):
         inputs, _, errors = run_extractors(
             results, {},
             inputs=['original.com'],
-            ctx={}
+            ctx=self._store_ctx(results)
         )
         self.assertEqual(errors, [])
         self.assertEqual(inputs, ['original.com'])
@@ -295,7 +329,7 @@ class TestRunExtractorsScopeFallback(unittest.TestCase):
             results,
             {'targets_': [{'type': 'url', 'field': 'url'}]},
             inputs=['original.com'],
-            ctx={'parent_scope': 'workflow2'}
+            ctx=self._store_ctx(results, parent_scope='workflow2')
         )
         self.assertEqual(errors, [])
         self.assertIn('http://extracted.com', inputs)
@@ -317,7 +351,7 @@ class TestRunExtractorsScopeFallback(unittest.TestCase):
             results,
             {'parent_scope': 'workflow2', 'chunk': 1},
             inputs=[chunk_query],
-            ctx={'parent_scope': 'workflow2'}
+            ctx=self._store_ctx(results, parent_scope='workflow2')
         )
         self.assertEqual(errors, [])
         self.assertEqual(inputs, [chunk_query],
