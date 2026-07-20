@@ -76,7 +76,7 @@ def ensure_mongo_run_id(context):
 	write — so the runner doc _id (ObjectId({type}_id)) equals context.{type}_id and every finding
 	scopes to that same id. Idempotent: a valid ObjectId is kept, so all later writes hit one doc.
 	The json store keeps its uuid; only the mongodb path (which has bson) is coerced."""
-	for key in ('task_id', 'workflow_id', 'scan_id', 'task_chunk_id', 'workflow_chunk_id'):
+	for key in ('task_id', 'workflow_id', 'scan_id', 'task_chunk_id'):
 		val = context.get(key)
 		if val and not ObjectId.is_valid(val):
 			context[key] = str(ObjectId())
@@ -88,8 +88,6 @@ def update_runner(self):
 	type = self.config.type
 	collection = f'{type}s'
 	chunk = self.context.get(f'{type}_chunk_id') is not None
-	# The runner-doc _id IS context.{type}_id — coerce the core's uuid to a Mongo ObjectId before
-	# writing (idempotent) so _id == context.{type}_id (a real ObjectId the API/UI can ObjectId()).
 	ensure_mongo_run_id(self.context)
 	update = self.toDict()
 	key = f'{type}_chunk_id' if chunk else f'{type}_id'
@@ -139,13 +137,10 @@ def on_build(self, task_spec):
 	"""
 	client = get_mongodb_client()
 	db = client.main
-	parent_type = self.config.type                       # 'scan' | 'workflow' | 'task'
+	parent_type = self.config.type
 	child_type = 'workflow' if parent_type == 'scan' else 'task'
 	collection = f'{child_type}s'
 	is_chunk = bool(task_spec.get('chunk'))
-	# Mint the child's {type}_id as a Mongo ObjectId and store the pending doc as _id=ObjectId(that),
-	# so _id == context.{type}_id. The child inherits it via its serialized context, and its
-	# update_runner (idempotent — keeps a valid ObjectId) upserts THIS same doc instead of a new one.
 	key = f'{child_type}_chunk_id' if is_chunk else f'{child_type}_id'
 	child_id = str(ObjectId())
 	task_spec.setdefault('context', {})[key] = child_id
@@ -157,9 +152,6 @@ def on_build(self, task_spec):
 def update_finding(self, item):
 	if not is_output_type(item):
 		return item
-	# on_item is the first DB write (findings/targets are emitted in __init__, before on_init):
-	# coerce the runner's uuid {type}_id to a Mongo ObjectId, then re-stamp it onto THIS finding
-	# (which copied the pre-override uuid at emission) so it scopes to the same id as the runner doc.
 	ensure_mongo_run_id(self.context)
 	for key in (f'{self.config.type}_id', f'{self.config.type}_chunk_id'):
 		cur = item._context.get(key)
@@ -180,9 +172,8 @@ def update_finding(self, item):
 			item._uuid = str(finding.inserted_id)
 			status = 'CREATED'
 	except pymongo.errors.DocumentTooLarge:
-		# A single finding exceeds MongoDB's 16MB BSON limit (e.g. a huge inline
-		# response body). Warn instead of crashing the runner; return the item so
-		# the chain continues.
+		# The finding exceeds MongoDB's 16MB BSON limit (usually huge outputs).
+		# Don't crash the runner over a persistence limit — warn and carry on.
 		msg = f'{item._type} finding exceeds MongoDB\'s 16MB document limit; skipping persist.'
 		# Persisted to the store via the runner's on_item hook (warning is tiny; no recursion).
 		self.add_result(Warning(message=msg))

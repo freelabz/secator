@@ -95,8 +95,9 @@ class QueryBackend(ABC):
 		yield from self._execute_iterate(safe_query, batch_size)
 
 	def _execute_iterate(self, query: dict, batch_size: int = 1000):
-		"""Default: no native cursor — chunk the full result. Backends that load everything anyway
-		(json/api) use this; sqlite/mongodb override with a true streaming cursor."""
+		"""Default: no native cursor — chunk the full result, so this path DOES materialize all N.
+		Only the api backend still uses it (a single limit=0 fetch); json/sqlite/mongodb override
+		with a true streaming cursor. TODO: paginate the api backend via its skip/limit endpoint."""
 		results = self._execute_search(query, limit=0)
 		for i in range(0, len(results), batch_size):
 			yield results[i:i + batch_size]

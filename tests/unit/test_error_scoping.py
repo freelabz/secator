@@ -22,7 +22,7 @@ class TestErrorScoping(unittest.TestCase):
 		workflows = get_configs_by_type('workflow')
 		if not workflows:
 			self.skipTest('No workflows configured')
-		wf = Workflow(workflows[0], inputs=['example.com'], run_opts={}, context={})
+		wf = Workflow(workflows[0], inputs=['example.com'], run_opts={'dry_run': True}, context={})
 		wf.started = True
 		wf.done = True
 		return wf

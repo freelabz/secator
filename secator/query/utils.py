@@ -199,9 +199,10 @@ _DOTTED = rf'{_SEG}(?:\.{_SEG})*'
 _IDENT_RE = re.compile(rf'^{_DOTTED}$')
 _NOT_FIELD_RE = re.compile(rf'^\s*not\s+({_DOTTED})\s*$')
 
-# Truthy match that agrees on both backends: json's $nin returns False for falsy fields,
-# Mongo's $nin (with null in the list) excludes falsy/absent — so both keep only truthy.
-_TRUTHY = {'$nin': [None, '', False, 0]}
+# Truthy match on all backends: json's $nin returns False for falsy/absent and sqlite's NOT IN
+# drops NULL, but Mongo's $nin ALONE keeps absent fields — so $exists pins presence (unknown op,
+# hence a no-op on json/sqlite).
+_TRUTHY = {'$nin': [None, '', False, 0], '$exists': True}
 
 
 def _split_type_field(dotted):
@@ -298,13 +299,19 @@ def _parse_single_expr(expr):
     # 'not in' operator first ("type.field not in [...]" -> $nin); it also contains ' in '.
     m_not_in = _NOT_IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
     if m_not_in:
-        _type, field = _split_type_field(m_not_in.group(1).strip())
+        left = m_not_in.group(1).strip()
+        if not _IDENT_RE.match(left):
+            raise ValueError(f'Cannot translate expression to query: {expr!r}')
+        _type, field = _split_type_field(left)
         return _fragment(_type, field, {'$nin': _parse_list(m_not_in.group(2))})
 
     # 'in' operator ("type.field in [...]" -> $in)
     m_in = _IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
     if m_in:
-        _type, field = _split_type_field(m_in.group(1).strip())
+        left = m_in.group(1).strip()
+        if not _IDENT_RE.match(left):
+            raise ValueError(f'Cannot translate expression to query: {expr!r}')
+        _type, field = _split_type_field(left)
         return _fragment(_type, field, {'$in': _parse_list(m_in.group(2))})
 
     # First comparison operator outside quotes (longest-first via alternation order).

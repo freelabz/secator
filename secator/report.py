@@ -65,7 +65,7 @@ class Report:
 			del data['info']['results']
 		data['info']['title'] = self.title
 		data['info']['errors'] = getattr(self.runner, 'errors', [])
-		data['info']['warnings'] = getattr(self.runner, 'warnings', [])
+		data['info']['warnings'] = self.runner.warnings
 
 		# Build context for QueryEngine.
 		# Query the store for this run's findings. With the inter-task result payload
@@ -74,7 +74,7 @@ class Report:
 		# passed as an in-memory FALLBACK for callers that have no live files (report_show,
 		# library Report(runner)); JsonBackend prefers the live files when present (#1299),
 		# so for a real run this fallback never shadows the store.
-		context = dict(getattr(self.runner, 'context', {}) or {})
+		context = dict(self.runner.context)
 		# The store (run-scoped report.json / DB) is the SOLE source of results — no in-memory
 		# results are ever passed to the backend.
 		context.pop('results', None)
@@ -84,10 +84,12 @@ class Report:
 		# Scope the JsonBackend read to THIS run's own report.json (like Runner._view) instead of
 		# scanning every report in the workspace — O(run) not O(workspace). The run's own file
 		# already holds its complete result set (fan-in re-persists descendants up). Gate on the
-		# file actually existing: `report show`/consolidated aggregation has no single run dir
-		# (reports_folder is cwd/an output folder), so it keeps the full workspace scan.
-		reports_folder = getattr(self.runner, 'reports_folder', None)
-		if reports_folder and 'report_dir' not in context and (Path(reports_folder) / 'report.json').exists():
+		# runner being an actual task/workflow/scan run: `report show`/consolidated aggregation uses a
+		# synthetic runner (config.type='consolidated') whose reports_folder is cwd/an output dir that
+		# may coincidentally hold a report.json — those must keep the full workspace scan.
+		reports_folder = self.runner.reports_folder
+		is_run = self.runner.config.type in ('task', 'workflow', 'scan')
+		if is_run and reports_folder and 'report_dir' not in context and (Path(reports_folder) / 'report.json').exists():
 			context['report_dir'] = str(reports_folder)
 
 		# Bound the query to THIS run so a shared workspace's other runs don't leak in.
@@ -118,7 +120,7 @@ class Report:
 		results = engine.search(query, limit=limit, dedupe=dedupe)
 		for output_type in list(FINDING_TYPES) + [Target]:
 			output_name = output_type.get_name()
-			data['results'][output_name] = [r for r in results if (r.get('_type') if isinstance(r, dict) else getattr(r, '_type', None)) == output_name]  # noqa: E501
+			data['results'][output_name] = [r for r in results if r.get('_type') == output_name]
 
 		self.data = data
 

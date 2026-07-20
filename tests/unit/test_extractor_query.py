@@ -295,8 +295,7 @@ GOLDEN_MATRIX = [
 	 'old': "item._source.startswith('httpx')"},
 	{'type': 'url', 'field': 'url',
 	 'condition': 'item._source ~= ^urlparser or item._source ~= ^arjun or item._source ~= ^x8',
-	 'old': "item._source.startswith('urlparser') or item._source.startswith('arjun') "
-			"or item._source.startswith('x8')"},
+	 'old': "item._source.startswith('urlparser') or item._source.startswith('arjun') or item._source.startswith('x8')"},
 	{'type': 'port', 'field': 'host', 'condition': 'port.port == 22 or port.service_name ~= ssh',
 	 'old': "port.port == 22 or 'ssh' in port.service_name.lower()"},
 	{'type': 'target', 'field': 'name', 'condition': 'target.name ~= 445', 'old': "'445' in target.name"},

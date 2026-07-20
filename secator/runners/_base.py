@@ -18,7 +18,8 @@ from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
 from secator.report import Report
 from secator.rich import console, console_stdout
-from secator.runners._helpers import get_task_folder_id, run_extractors
+from secator.runners._helpers import get_task_folder_id, run_extractors, StreamView
+from secator.query import QueryEngine
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
 from secator.tree import build_runner_tree, prune_runner_tree
 from secator.loader import get_configs_by_type
@@ -106,22 +107,15 @@ class Runner:
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
-		# Mint the run-scope {type}_id (uuid) HERE — before any add_result in __init__ (validation
-		# errors, input Targets) — so every finding carries it (the view's scope key). Every store
-		# driver uses this as its runner-doc id; descendants inherit it via context.copy().
+		# Mint the run-scope {type}_id before any add_result so every finding carries the scope key.
 		key = f'{self.config.type}_id'
 		if not self.context.get(key):
 			self.context[key] = str(uuid.uuid4())
-		# workspace_id defaults to workspace_name so the local json store's on-disk folder (named by
-		# workspace_name) and the run-scope query (JsonBackend keys its directory off workspace_id;
-		# DB backends query the _context.workspace_id field) agree. Route/profile resolution below
-		# overrides both together; prod (mongodb) always passes an explicit workspace_id.
+		# workspace_id defaults to workspace_name (store folder / query scope); overridden by route/profile below
 		if not self.context.get('workspace_id'):
 			self.context['workspace_id'] = self.workspace_name
 
-		# Runner state. `results` is the instance-less StreamView over the store — the ONLY results
-		# path (json is the core default, so a store is always active). `uuids` is the own-emitted
-		# dedup guard.
+		# Runner state
 		self.uuids = set()
 		self.results_count = 0
 		self.threads = []
@@ -272,8 +266,7 @@ class Runner:
 		# Check if input is valid
 		self.inputs_valid = self.run_validators('validate_input', self.inputs, sub='init')
 
-		# Print targets — from the in-memory inputs, NOT a store query (self.inputs is the
-		# authoritative target list at init; querying self_targets here re-parsed report.json).
+		# Print targets
 		if self.print_target:
 			targets = [Target(name=t) for t in self.inputs]
 			pluralize = 'targets' if len(targets) > 1 else 'target'
@@ -375,23 +368,13 @@ class Runner:
 		return humanize.naturaldelta(self.elapsed)
 
 	def _view(self, _type=None):
-		"""THE (only) results path: a StreamView of this runner's OWN subtree, scoped by its
-		{type}_id (Task→task_id, Workflow→workflow_id, Scan→scan_id), optionally filtered to one or
-		more output types. Instance-less (rebuilt from context → pickle-safe); the backend client is
-		a process singleton, so per-access construction is cheap. Every result property is a one-liner
-		over this — the single scoping/query point (json is the core default store, always active)."""
+		"""Return a StreamView of this runner's own results, scoped by its {type}_id and optionally
+		filtered to one or more output types. Backs every result property (results, findings, etc.)."""
 		names = None if _type is None else (_type if isinstance(_type, list) else [_type])
-		from secator.query import QueryEngine
-		from secator.runners._helpers import StreamView
 		context = {**self.context, 'workspace_name': self.workspace_name}
-		# Local-json hot path: a runner's OWN report.json already holds its complete result set —
-		# fan-in re-persists every descendant finding up into each ancestor's report.json, re-tagged
-		# with that ancestor's {type}_id (a workflow report carries all its tasks' findings under its
-		# workflow_id; a scan report all of theirs under scan_id). So scope the read to this runner's
-		# own file instead of re-scanning (and re-parsing) every historical report in the workspace on
-		# every property access — the whole-workspace scan flooded the gevent hub with blocking disk
-		# I/O (unyielded), which serialized concurrent chunks and made runs ~100x slower. `report show`
-		# / cross-run aggregation keeps the full scan (no report_dir hint).
+		# Hot path: scope to this runner's own report.json (fan-in already re-tags every descendant finding
+		# under its {type}_id); scanning the whole workspace per-access blocked the gevent hub (~100x slower).
+		# `report show` / cross-run aggregation keeps the full scan (no report_dir hint).
 		context['report_dir'] = str(self.reports_folder)
 		engine = QueryEngine(self.context.get('workspace_id'), context=context)
 		query = {f'_context.{self.config.type}_id': self.context.get(f'{self.config.type}_id')}

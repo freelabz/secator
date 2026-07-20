@@ -283,7 +283,7 @@ class JsonBackend(QueryBackend):
 			return
 		try:
 			with open(report_file, 'r') as f:
-				data = json.load(f)  # legacy/completed report — nested JSON, can't stream without json_stream
+				data = orjson.loads(f.read())  # legacy/completed report — nested JSON, can't stream without json_stream
 		except (json.JSONDecodeError, IOError) as e:
 			debug(f'Error loading {report_file}: {e}', sub='query.json')
 			return
@@ -401,13 +401,13 @@ class JsonBackend(QueryBackend):
 		from secator.utils import atomic_json, read_json
 		count = 0
 		for path in self._report_files():
-			data = read_json(path, default=None)
+			data = read_json(path)
 			if not data:
 				continue
 			buckets = data.get('results', {})
 			if not any(match_query(it, query) for b in buckets.values() if isinstance(b, list) for it in b):
 				continue
-			with atomic_json(path, default={'info': {}, 'results': {}}) as d:
+			with atomic_json(path, default=lambda: {'info': {}, 'results': {}}) as d:
 				for bucket in d.get('results', {}).values():
 					if isinstance(bucket, list):
 						for item in bucket:

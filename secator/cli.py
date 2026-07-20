@@ -1376,9 +1376,13 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	current = get_file_timestamp()
 	workspace_name = workspace or CONFIG.workspaces.current or 'default'
 
+	# Resolve the backend from --driver or drivers.defaults once, up-front — reused below to
+	# translate local report paths and to build the runner context drivers list.
+	effective_driver = QueryEngine.resolve_backend(driver)
+
 	# 1. Parse path-based runner filter. For the local json backend, a path's number is a report FOLDER
 	# id (tasks/0); findings are scoped by the runner's {type}_id UUID, so translate folder -> UUID first.
-	if QueryEngine.resolve_backend(driver) == 'local':
+	if effective_driver == 'local':
 		from secator.query.json import resolve_local_report_paths
 		report_query = resolve_local_report_paths(report_query, workspace_name)
 	runner_filter = parse_report_paths(report_query)
@@ -1417,11 +1421,9 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 			full_query['_timestamp'] = {'$gte': cutoff.timestamp()}
 
 	# 5. Build runner context for QueryEngine backend selection
-	# Resolve the backend from --driver or drivers.defaults, then build the context
-	# drivers list from the *resolved* backend (not the raw --driver) — otherwise a
+	# Build the context drivers list from the *resolved* backend (not the raw --driver) — otherwise a
 	# drivers.defaults=api setup resolves the workspace via the API but still queries
 	# the local JSON backend (drivers stays empty).
-	effective_driver = QueryEngine.resolve_backend(driver)
 	drivers = [effective_driver] if effective_driver != 'local' else []
 	# Resolve the workspace name to its id for the API backend (findings are filtered
 	# by the real workspace id; the local/mongodb backends key findings by name).
@@ -1445,6 +1447,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 				'workspace_id': workspace_id,
 				'workspace_name': workspace_name,
 				'drivers': drivers,
+				'report_dir': None,
 			},
 			'reports_folder': reports_folder,
 			'print_reports_message': True,
@@ -1528,22 +1531,24 @@ def _load_report_data(path):
 		data = json.load(f)
 	info = data.get('info', {})
 	ndjson = Path(path).parent / 'results.ndjson'
-	vulns = []
-	if ndjson.exists():
-		with open(ndjson, 'r') as f:
-			for line in f:
-				line = line.strip()
-				if not line:
-					continue
-				try:
-					rec = json.loads(line)
-				except json.JSONDecodeError:
-					continue
-				if rec.get('_type') == 'vulnerability':
-					vulns.append(rec)
-	else:
-		vulns = data.get('results', {}).get('vulnerability', [])
-	for vuln in vulns:
+
+	def _iter_vulns():
+		if ndjson.exists():
+			with open(ndjson, 'r') as f:
+				for line in f:
+					line = line.strip()
+					if not line:
+						continue
+					try:
+						rec = json.loads(line)
+					except json.JSONDecodeError:
+						continue
+					if rec.get('_type') == 'vulnerability':
+						yield rec
+		else:
+			yield from data.get('results', {}).get('vulnerability', [])
+
+	for vuln in _iter_vulns():
 		severity = str(vuln.get('severity', '')).lower()
 		if severity in vuln_counts:
 			vuln_counts[severity] += 1
@@ -1934,8 +1939,11 @@ def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular,
 			db = client.main
 			findings_result = db.findings.delete_many({f'_context.{runner_type_singular}_id': runner_db_id})
 			console.print(Info(message=f'Deleted {findings_result.deleted_count} findings from MongoDB'))
-			# The runner-doc _id is the runner core's {type}_id (a UUID string), not an ObjectId.
-			runner_result = db[runner_type_plural].delete_one({'_id': runner_db_id})
+			# The runner-doc _id is a Mongo ObjectId (hooks.mongodb.ensure_mongo_run_id coerces
+			# context.{type}_id to str(ObjectId())), so cast back to match; findings scope on the string.
+			from bson.objectid import ObjectId
+			_id = ObjectId(runner_db_id) if ObjectId.is_valid(runner_db_id) else runner_db_id
+			runner_result = db[runner_type_plural].delete_one({'_id': _id})
 			if runner_result.deleted_count:
 				console.print(Info(message=f'Deleted {runner_type_singular} document from MongoDB'))
 		except Exception as e:

@@ -133,7 +133,7 @@ class TestCelery(unittest.TestCase):
 		"""Test that rate_limit is divided by chunk count when chunking tasks."""
 		from secator.celery import break_task
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:  # vacuous by design (kept dormant, unrelated to payload drop)
+		if httpx not in TEST_TASKS:
 			return
 
 		# Create a task with rate_limit
@@ -169,7 +169,7 @@ class TestCelery(unittest.TestCase):
 		"""Test that rate_limit never goes below 1 when chunking."""
 		from secator.celery import break_task
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:  # vacuous by design (kept dormant, unrelated to payload drop)
+		if httpx not in TEST_TASKS:
 			return
 
 		# Create a task with low rate_limit
@@ -202,7 +202,7 @@ class TestCelery(unittest.TestCase):
 		import secator.celery as celery_mod
 		from secator.celery import break_task
 		from secator.tasks import httpx
-		if httpx not in TEST_TASKS:  # vacuous by design (kept dormant, unrelated to payload drop)
+		if httpx not in TEST_TASKS:
 			return
 
 		HTTP_TARGETS = [f'https://{target}' for target in TARGETS]
@@ -225,7 +225,7 @@ class TestCelery(unittest.TestCase):
 		"""Test that break_task doesn't chunk when input_chunk_size=-1."""
 		from secator.tasks import httpx
 		from secator.celery import break_task
-		if httpx not in TEST_TASKS:  # vacuous by design (kept dormant, unrelated to payload drop)
+		if httpx not in TEST_TASKS:
 			return
 
 		class TestTask(httpx):

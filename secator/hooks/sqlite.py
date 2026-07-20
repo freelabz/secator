@@ -132,7 +132,7 @@ def update_runner(self):
 	update = self.toDict()
 	chunk = update.get('chunk')
 	key = f'{_type}_chunk_id' if chunk else f'{_type}_id'
-	_id = self.context.get(key)  # minted by the runner core (Runner.__init__)
+	_id = self.context.get(key)
 	workspace_id = self.context.get('workspace_id')
 	payload = json.dumps(update, default=str)
 	conn.execute(

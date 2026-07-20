@@ -65,8 +65,6 @@ class dnsx(ReconDns):
 	def before_init(self):
 		self.wordlist = self.get_opt_value('wordlist')
 		self.subdomains = []
-		# Local dedup of this run's own emitted Ip/Record (compare keys) — cheap and bounded.
-		# Replaces membership over runner.results, which is now a streaming store view (O(N^2)).
 		self._dns_seen = set()
 		if self.wordlist:
 			self.file_flag = '-d'

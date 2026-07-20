@@ -147,6 +147,7 @@ class SqliteBackend(QueryBackend):
 				yield [json.loads(d) for (d,) in rows]
 		except Exception as e:
 			console.print(Warning(message=f'SQLite iterate failed: {e}'))
+			raise
 
 	def _execute_count(self, query: dict) -> int:
 		try:

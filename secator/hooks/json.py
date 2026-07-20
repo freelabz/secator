@@ -28,7 +28,6 @@
 # if a live "pending children" view is needed.
 
 import orjson
-import uuid
 from pathlib import Path
 
 from secator.output_types import is_output_type, Info
@@ -53,9 +52,9 @@ def announce_report(self):
 	"""At run end, announce where the live JSON report was written — mirrors the former JSON
 	exporter's message. Only the top-level runner prints (not every child task), gated by
 	``print_reports_message`` like the exporters."""
-	if getattr(self, 'has_parent', False):
+	if self.has_parent:
 		return
-	if getattr(self, 'print_reports_message', True):
+	if self.print_reports_message:
 		console.print(Info(message=f'JSON report written to {_report_path(self)}'))
 
 
@@ -72,16 +71,14 @@ def update_runner(self):
 def update_finding(self, item):
 	"""Append a single finding to this runner's results.ndjson (live, O(1)).
 
-	Append-only: a re-emitted finding (on_duplicate / enrichment) appends a second line
-	with the same _uuid; the query backend resolves last-wins on read. Own-emit dedup is
-	the runner's in-memory self.uuids, so no in-file scan is needed here.
+	Append-only. Own-emit dedup is the runner core's in-memory self.uuids (add_result skips an
+	already-seen _uuid before on_item fires), so the common path appends each finding once and no
+	in-file scan is needed here. A redelivered/racing writer that does append a second line with the
+	same _uuid is resolved last-wins by the query backend on read.
 	"""
 	if not is_output_type(item):
 		return item
-	if not item._uuid:
-		item._uuid = str(uuid.uuid4())
-	record = item.toDict()
-	record['_uuid'] = item._uuid
+	record = item.toDict()  # _uuid already minted by Runner.add_result before on_item fires
 	append_ndjson(_ndjson_path(self), orjson.dumps(record, default=str).decode())
 	return item
 

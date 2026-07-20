@@ -412,15 +412,13 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		console.print(Info(message=f'Runner {runner.unique_name} has started, running mark_started'))
 	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
 
-	# `results` (the upstream return) is topology-only and ignored — the fan-in is never
-	# rehydrated into the runner; every consumer queries the store instead.
 	runner.enable_hooks = enable_hooks
 
 	# Emit scope-tagged Targets for workflows with a scan-level targets_ extractor.
 	# This resolves the extractor at execution time (when Port/result data is available)
 	# so all tasks in the chain can find the correct inputs via parent_scope filtering.
 	scope = runner.context.get('parent_scope')
-	if scope and runner.has_parent and getattr(runner.config, 'type', None) == 'workflow':
+	if scope and runner.has_parent and runner.config.type == 'workflow':
 		target_extractor_opts = {
 			k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'
 		}
@@ -642,8 +640,6 @@ def break_task(task, task_opts):
 			chunk_infos.append(info)
 		sigs.append(sig)
 
-	# Mark main task as async since it's being chunked. Reset the own-emissions buffer + dedup
-	# guard, then re-add chunk Info items so they survive into celery_state['results'] for polling.
 	task.sync = False
 	task.uuids = set()
 	for info in chunk_infos:

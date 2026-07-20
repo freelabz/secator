@@ -820,7 +820,6 @@ def deep_merge_dicts(*dicts):
 				if isinstance(result[key], dict) and isinstance(value, dict):
 					result[key] = merge_two_dicts(result[key], value)
 				elif isinstance(result[key], list) and isinstance(value, list):
-					# New list, not `+=`: result is a shallow copy of dict1, so `+=` mutates dict1's list.
 					result[key] = result[key] + value
 				else:
 					result[key] = value  # Overwrite if not both lists or both dicts
@@ -1498,6 +1497,8 @@ def _atomic_write(path, data):
 			f.flush()
 			os.fsync(f.fileno())
 		os.replace(tmp, path)
+	# Clean up the orphaned temp file on ANY failure (incl. KeyboardInterrupt /
+	# SystemExit before os.replace lands), then re-raise — nothing is swallowed.
 	except BaseException:
 		try:
 			os.unlink(tmp)

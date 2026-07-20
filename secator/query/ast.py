@@ -59,6 +59,17 @@ def _fold(node, opts, targets):
 	if isinstance(node, ast.Constant):
 		return True, node.value
 
+	# Fold constant container literals (opts.mode in ('attack', 'chat')) so a runtime-only `in`
+	# gate collapses instead of leaking a fieldless expr to python_expr_to_mongo.
+	# ponytail: dict literals + partially-const containers don't ship; add if one does.
+	if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+		folded = [_fold(e, opts, targets) for e in node.elts]
+		if all(c[0] for c in folded):
+			vals = [c[1] for c in folded]
+			ctor = tuple if isinstance(node, ast.Tuple) else set if isinstance(node, ast.Set) else list
+			return True, ctor(vals)
+		return False, node
+
 	# `len(targets)` (or len of any constant) folds to an int.
 	if isinstance(node, ast.Call):
 		if isinstance(node.func, ast.Name) and node.func.id == 'len' and len(node.args) == 1:
