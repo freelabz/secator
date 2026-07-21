@@ -352,8 +352,6 @@ def run_command(self, results, name, targets, opts={}):
 	sync = not IN_WORKER
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
-	from secator.output_types import Warning as _DbgW  # TEMP DEBUG
-	task.add_result(_DbgW(message=f'DBGRC name={name} targets={targets!r} inputs={task.inputs!r} chunk={opts.get("chunk")} wordlist={opts.get("wordlist")!r} optkeys={sorted(opts.keys())}'))  # TEMP DEBUG  # noqa: E501
 	chunk_it = task.needs_chunking(sync)
 	task.has_children = chunk_it
 	task.mark_started()
