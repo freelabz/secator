@@ -64,8 +64,11 @@ class Report:
 		if 'results' in data['info']:
 			del data['info']['results']
 		data['info']['title'] = self.title
-		data['info']['errors'] = getattr(self.runner, 'errors', [])
-		data['info']['warnings'] = self.runner.warnings
+		# runner.errors/warnings are lazy store-backed StreamViews — materialize them so
+		# info holds concrete, serializable lists (a StreamView is one-shot and not
+		# JSON-serializable).
+		data['info']['errors'] = list(getattr(self.runner, 'errors', None) or [])
+		data['info']['warnings'] = list(self.runner.warnings)
 
 		# Build context for QueryEngine.
 		# Query the store for this run's findings. With the inter-task result payload
