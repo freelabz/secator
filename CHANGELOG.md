@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.41.0](https://github.com/freelabz/secator/compare/v0.40.1...v0.41.0) (2026-07-24)
+
+
+### Features
+
+* **query:** add --save option to secator q ([#1303](https://github.com/freelabz/secator/issues/1303)) ([37c156d](https://github.com/freelabz/secator/commit/37c156deb8c134cbb899d5fea88eff0c3583bca8))
+* **runners:** store-backed results, JSON driver, streaming fan-in ([#1312](https://github.com/freelabz/secator/issues/1312)) ([93638a1](https://github.com/freelabz/secator/commit/93638a15883bebfd4686ec19e689c89bdcbc2405))
+
+
+### Bug Fixes
+
+* **grype:** update parsing for v0.115.0 output ([#1313](https://github.com/freelabz/secator/issues/1313)) ([6f6c64f](https://github.com/freelabz/secator/commit/6f6c64f1a94c83cac5376fc1894ef6aec5e2f427))
+* harden Redis connection resilience (broker + result backend) ([#1317](https://github.com/freelabz/secator/issues/1317)) ([158427d](https://github.com/freelabz/secator/commit/158427dbac4f96b9f0dbfd8108258e40ed93da66))
+* **query:** allow empty query in secator q ([#1302](https://github.com/freelabz/secator/issues/1302)) ([bf2fd8f](https://github.com/freelabz/secator/commit/bf2fd8f51a7d07ab8326aa9c11c387de7ba16f63))
+* **target validation:** ignore all invalid targets, not just one ([#1301](https://github.com/freelabz/secator/issues/1301)) ([eae2ced](https://github.com/freelabz/secator/commit/eae2cede400f6dc522304709b2139092ddbf2183))
+* **tasks:** validate bbot presets and wpprobe mode on the construction path ([#1309](https://github.com/freelabz/secator/issues/1309)) ([532c88b](https://github.com/freelabz/secator/commit/532c88b93f7ea7a2cc206a87417b283d6ff4163e))
+
+
+### Performance Improvements
+
+* **mongodb:** index-seek untagged findings in tag_duplicates (was 12s O(workspace) scan) ([#1316](https://github.com/freelabz/secator/issues/1316)) ([2504e2b](https://github.com/freelabz/secator/commit/2504e2b6ee00fdf496c0f46b8b4d901c2c4a45c5))
+
 ## [0.40.1](https://github.com/freelabz/secator/compare/v0.40.0...v0.40.1) (2026-07-08)
 
 
