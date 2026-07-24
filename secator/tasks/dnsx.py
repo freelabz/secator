@@ -65,6 +65,7 @@ class dnsx(ReconDns):
 	def before_init(self):
 		self.wordlist = self.get_opt_value('wordlist')
 		self.subdomains = []
+		self._dns_seen = set()
 		if self.wordlist:
 			self.file_flag = '-d'
 			self.input_flag = '-d'
@@ -118,7 +119,8 @@ class dnsx(ReconDns):
 						alive=False,
 						tags=['dns', 'a'],
 					)
-					if ip not in self.results:
+					if ip._compare_key() not in self._dns_seen:
+						self._dns_seen.add(ip._compare_key())
 						yield ip
 				elif _type == 'aaaa':
 					ip = Ip(
@@ -128,7 +130,8 @@ class dnsx(ReconDns):
 						alive=False,
 						tags=['dns', 'aaaa'],
 					)
-					if ip not in self.results:
+					if ip._compare_key() not in self._dns_seen:
+						self._dns_seen.add(ip._compare_key())
 						yield ip
 				elif _type == 'ptr':
 					ip = Ip(
@@ -138,7 +141,8 @@ class dnsx(ReconDns):
 						alive=False,
 						tags=['dns', 'ptr'],
 					)
-					if ip not in self.results:
+					if ip._compare_key() not in self._dns_seen:
+						self._dns_seen.add(ip._compare_key())
 						yield ip
 				record = Record(
 					host=host,
@@ -149,7 +153,8 @@ class dnsx(ReconDns):
 					tags=['dns'],
 				)
 
-				if record not in self.results:
+				if record._compare_key() not in self._dns_seen:
+					self._dns_seen.add(record._compare_key())
 					yield record
 
 

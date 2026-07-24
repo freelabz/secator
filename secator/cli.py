@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import sys
 
-import yaml
 
 from pathlib import Path
 from stat import S_ISFIFO
@@ -44,6 +43,7 @@ from secator.utils import (
 	reduce_gif_frames,
 	get_gif_info,
 	humanize_date,
+	render_yaml,
 )
 from contextlib import nullcontext
 
@@ -1376,7 +1376,15 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	current = get_file_timestamp()
 	workspace_name = workspace or CONFIG.workspaces.current or 'default'
 
-	# 1. Parse path-based runner filter
+	# Resolve the backend from --driver or drivers.defaults once, up-front — reused below to
+	# translate local report paths and to build the runner context drivers list.
+	effective_driver = QueryEngine.resolve_backend(driver)
+
+	# 1. Parse path-based runner filter. For the local json backend, a path's number is a report FOLDER
+	# id (tasks/0); findings are scoped by the runner's {type}_id UUID, so translate folder -> UUID first.
+	if effective_driver == 'local':
+		from secator.query.json import resolve_local_report_paths
+		report_query = resolve_local_report_paths(report_query, workspace_name)
 	runner_filter = parse_report_paths(report_query)
 	debug('runner paths filter', sub='query', obj=runner_filter)
 
@@ -1413,11 +1421,9 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 			full_query['_timestamp'] = {'$gte': cutoff.timestamp()}
 
 	# 5. Build runner context for QueryEngine backend selection
-	# Resolve the backend from --driver or drivers.defaults, then build the context
-	# drivers list from the *resolved* backend (not the raw --driver) — otherwise a
+	# Build the context drivers list from the *resolved* backend (not the raw --driver) — otherwise a
 	# drivers.defaults=api setup resolves the workspace via the API but still queries
 	# the local JSON backend (drivers stays empty).
-	effective_driver = QueryEngine.resolve_backend(driver)
 	drivers = [effective_driver] if effective_driver != 'local' else []
 	# Resolve the workspace name to its id for the API backend (findings are filtered
 	# by the real workspace id; the local/mongodb backends key findings by name).
@@ -1441,6 +1447,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 				'workspace_id': workspace_id,
 				'workspace_name': workspace_name,
 				'drivers': drivers,
+				'report_dir': None,
 			},
 			'reports_folder': reports_folder,
 			'print_reports_message': True,
@@ -1513,14 +1520,35 @@ def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt
 
 
 def _load_report_data(path):
-	"""Read report JSON to extract info section and count vulnerability severities"""
+	"""Read report info + count vulnerability severities.
+
+	Info comes from report.json; vulnerabilities come from the sibling results.ndjson
+	(json driver's live/new store) when present, else from the legacy report.json['results'].
+	"""
 	info = {}
 	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
 	with open(path, 'r') as f:
 		data = json.load(f)
 	info = data.get('info', {})
-	results = data.get('results', {})
-	for vuln in results.get('vulnerability', []):
+	ndjson = Path(path).parent / 'results.ndjson'
+
+	def _iter_vulns():
+		if ndjson.exists():
+			with open(ndjson, 'r') as f:
+				for line in f:
+					line = line.strip()
+					if not line:
+						continue
+					try:
+						rec = json.loads(line)
+					except json.JSONDecodeError:
+						continue
+					if rec.get('_type') == 'vulnerability':
+						yield rec
+		else:
+			yield from data.get('results', {}).get('vulnerability', [])
+
+	for vuln in _iter_vulns():
 		severity = str(vuln.get('severity', '')).lower()
 		if severity in vuln_counts:
 			vuln_counts[severity] += 1
@@ -1781,8 +1809,24 @@ def report_info(runner_id, workspace, driver, show_all):
 		info = dict(content.get('info', {}))
 		source_label, source_value = '_path', str(report_path)
 
-	errors_raw = info.pop('errors', [])
-	warnings_raw = info.pop('warnings', [])
+	# Errors and warnings are first-class findings (_type=error/warning) in the store, so source them
+	# from a run-scoped findings query rather than the denormalized info.errors/info.warnings block
+	# (which toDict is being moved off of). Fall back to the legacy info block for old reports/docs
+	# that still embed it and predate error/warning findings being persisted.
+	legacy_errors = info.pop('errors', [])
+	legacy_warnings = info.pop('warnings', [])
+	run_ctx = info.get('context', {}) or {}
+	run_id = run_ctx.get(f'{runner_type_singular}_id')
+	errors_raw, warnings_raw = [], []
+	if run_id:
+		drivers = [effective_driver] if effective_driver != 'local' else []
+		q_engine = QueryEngine(workspace_id=run_ctx.get('workspace_id') or workspace_name,
+							   context={'drivers': drivers, 'workspace_name': workspace_name})
+		scope = {f'_context.{runner_type_singular}_id': run_id}
+		errors_raw = list(q_engine.search({**scope, '_type': 'error'}))
+		warnings_raw = list(q_engine.search({**scope, '_type': 'warning'}))
+	if not errors_raw and not warnings_raw:
+		errors_raw, warnings_raw = legacy_errors, legacy_warnings
 
 	# These fields are verbose and only shown with --show-all.
 	SHOW_ALL_ONLY_KEYS = ('config', 'output')
@@ -1790,13 +1834,6 @@ def report_info(runner_id, workspace, driver, show_all):
 	table = Table(title=f'Info: {runner_id}', show_header=False, box=None, padding=(0, 1))
 	table.add_column('Key', style='bold gold3', no_wrap=True)
 	table.add_column('Value')
-
-	from rich.syntax import Syntax
-
-	def _render_yaml(data):
-		"""Render a dict as syntax-highlighted YAML for readability."""
-		yaml_str = yaml.dump(data, sort_keys=False, default_flow_style=False).rstrip()
-		return Syntax(yaml_str, 'yaml', theme='ansi-dark', padding=0, background_color='default')
 
 	def _format_value(value):
 		if isinstance(value, list):
@@ -1817,7 +1854,7 @@ def report_info(runner_id, workspace, driver, show_all):
 		# verbose 'opts' key (full option schema) first.
 		if isinstance(value, dict):
 			data = {k: v for k, v in value.items() if k != 'opts'} if key == 'config' else value
-			rendered = _render_yaml(data)
+			rendered = render_yaml(data)
 		else:
 			rendered = _format_value(value)
 		table.add_row(key, rendered)
@@ -1889,19 +1926,19 @@ def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular,
 	# 2. MongoDB backend
 	if driver == 'mongodb' and runner_db_id:
 		try:
-			from bson.objectid import ObjectId
 			from secator.hooks.mongodb import get_mongodb_client
 
 			client = get_mongodb_client()
 			db = client.main
 			findings_result = db.findings.delete_many({f'_context.{runner_type_singular}_id': runner_db_id})
 			console.print(Info(message=f'Deleted {findings_result.deleted_count} findings from MongoDB'))
-			if ObjectId.is_valid(runner_db_id):
-				runner_result = db[runner_type_plural].delete_one({'_id': ObjectId(runner_db_id)})
-				if runner_result.deleted_count:
-					console.print(Info(message=f'Deleted {runner_type_singular} document from MongoDB'))
-			else:
-				console.print(Warning(message=f'{runner_type_singular}_id "{runner_db_id}" is not a valid ObjectId — runner document was not deleted from MongoDB'))  # noqa: E501
+			# The runner-doc _id is a Mongo ObjectId (hooks.mongodb.ensure_mongo_run_id coerces
+			# context.{type}_id to str(ObjectId())), so cast back to match; findings scope on the string.
+			from bson.objectid import ObjectId
+			_id = ObjectId(runner_db_id) if ObjectId.is_valid(runner_db_id) else runner_db_id
+			runner_result = db[runner_type_plural].delete_one({'_id': _id})
+			if runner_result.deleted_count:
+				console.print(Info(message=f'Deleted {runner_type_singular} document from MongoDB'))
 		except Exception as e:
 			console.print(Error(message=f'MongoDB deletion failed: {e}'))
 

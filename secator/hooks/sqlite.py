@@ -10,7 +10,7 @@ from pathlib import Path
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.output_types import OUTPUT_TYPES
+from secator.output_types import OUTPUT_TYPES, is_output_type
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug
 from secator.hooks._dedup import compute_duplicate_updates
@@ -135,17 +135,15 @@ def update_runner(self):
 	_id = self.context.get(key)
 	workspace_id = self.context.get('workspace_id')
 	payload = json.dumps(update, default=str)
-	if _id:
-		conn.execute(f"UPDATE {table} SET workspace_id=?, data=? WHERE id=?", (workspace_id, payload, _id))
-	else:
-		_id = str(uuid.uuid4())
-		conn.execute(f"INSERT INTO {table} (id, workspace_id, data) VALUES (?, ?, ?)", (_id, workspace_id, payload))
-		self.context[key] = _id
+	conn.execute(
+		f"INSERT INTO {table} (id, workspace_id, data) VALUES (?, ?, ?) "
+		f"ON CONFLICT(id) DO UPDATE SET workspace_id=excluded.workspace_id, data=excluded.data",
+		(_id, workspace_id, payload))
 	conn.commit()
 
 
 def update_finding(self, item):
-	if type(item) not in OUTPUT_TYPES:
+	if not is_output_type(item):
 		return item
 	conn = get_sqlite_conn()
 	if not item._uuid:
@@ -263,6 +261,7 @@ HOOKS = {
 		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
+		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],
@@ -271,6 +270,7 @@ HOOKS = {
 		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
+		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],

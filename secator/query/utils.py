@@ -3,7 +3,6 @@
 import json
 import re
 
-from secator.output_types import Error
 from secator.rich import console
 from secator.utils import debug
 
@@ -193,6 +192,36 @@ _OP_MAP = {
 _IN_RE = re.compile(r'^(.+?)\s+in\s+\[(.*)\]\s*$', re.DOTALL)
 _NOT_IN_RE = re.compile(r'^(.+?)\s+not\s+in\s+\[(.*)\]\s*$', re.DOTALL)
 
+# Strict dotted identifier: non-empty word segments separated by single dots (rejects
+# `.field`, `type.`, `type..field`).
+_SEG = r'[A-Za-z_]\w*'
+_DOTTED = rf'{_SEG}(?:\.{_SEG})*'
+_IDENT_RE = re.compile(rf'^{_DOTTED}$')
+_NOT_FIELD_RE = re.compile(rf'^\s*not\s+({_DOTTED})\s*$')
+
+# Truthy match on all backends: json's $nin returns False for falsy/absent and sqlite's NOT IN
+# drops NULL, but Mongo's $nin ALONE keeps absent fields — so $exists pins presence (unknown op,
+# hence a no-op on json/sqlite).
+_TRUTHY = {'$nin': [None, '', False, 0], '$exists': True}
+
+
+def _split_type_field(dotted):
+    """Split a `type.field` operand into (_type, field). `item` is a neutral placeholder
+    (the extractor's declared `type:` is authoritative), so `item.field` -> (None, field);
+    a bare field -> (None, field) too. A real type prefix -> (type, field)."""
+    parts = dotted.split('.', 1)
+    if len(parts) == 2 and parts[0].strip() != 'item':
+        return parts[0].strip(), parts[1].strip()
+    return None, parts[-1].strip()
+
+
+def _fragment(_type, field, value):
+    """Assemble a {[_type], field: value} fragment, omitting _type when neutral."""
+    result = {'_type': _type} if _type else {}
+    if field:
+        result[field] = value
+    return result
+
 
 def _has_in_op_outside_quotes(expr):
     """Return True if ' in [' appears outside of any quoted substring in expr."""
@@ -260,75 +289,61 @@ def _parse_single_expr(expr):
     if re.match(r'^[a-z_]+$', expr):
         return {'_type': expr}
 
-    # Check for 'not in' operator first: "type.field not in [val1, val2]" -> $nin.
-    # It also contains ' in ', so it must be matched before the plain 'in' branch.
+    # `not type.field` -> {field: {$ne: True}}: bare truthy-negation (keeps false/null/absent
+    # on both backends), DISTINCT from `field not in [...]` (handled below via $nin).
+    m = _NOT_FIELD_RE.match(expr)
+    if m:
+        _type, field = _split_type_field(m.group(1))
+        return _fragment(_type, field, {'$ne': True})
+
+    # 'not in' operator first ("type.field not in [...]" -> $nin); it also contains ' in '.
     m_not_in = _NOT_IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
     if m_not_in:
-        left, values_str = m_not_in.group(1).strip(), m_not_in.group(2)
-        parts = left.split('.', 1)
-        _type = parts[0].strip()
-        field = parts[1].strip() if len(parts) > 1 else None
-        values = _parse_list(values_str)
-        if field is None:
-            console.print(Error(
-                message=f"'not in' operator requires a field (e.g. 'type.field not in [...]'): {expr!r}"
-            ))
-            return {'_type': _type}
-        result = {'_type': _type}
-        result[field] = {'$nin': values}
-        return result
+        left = m_not_in.group(1).strip()
+        if not _IDENT_RE.match(left):
+            raise ValueError(f'Cannot translate expression to query: {expr!r}')
+        _type, field = _split_type_field(left)
+        return _fragment(_type, field, {'$nin': _parse_list(m_not_in.group(2))})
 
-    # Check for 'in' operator: "type.field in [val1, val2]"
+    # 'in' operator ("type.field in [...]" -> $in)
     m_in = _IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
     if m_in:
-        left, values_str = m_in.group(1).strip(), m_in.group(2)
-        parts = left.split('.', 1)
-        _type = parts[0].strip()
-        field = parts[1].strip() if len(parts) > 1 else None
-        values = _parse_list(values_str)
-        if field is None:
-            console.print(Error(
-                message=f"'in' operator requires a field (e.g. 'type.field in [...]'): {expr!r}"
-            ))
-            return {'_type': _type}
-        result = {'_type': _type}
-        result[field] = {'$in': values}
-        return result
+        left = m_in.group(1).strip()
+        if not _IDENT_RE.match(left):
+            raise ValueError(f'Cannot translate expression to query: {expr!r}')
+        _type, field = _split_type_field(left)
+        return _fragment(_type, field, {'$in': _parse_list(m_in.group(2))})
 
-    # Use regex to find the first operator (longest-first via alternation order).
-    # This avoids mis-splitting on operators that appear inside quoted values.
+    # First comparison operator outside quotes (longest-first via alternation order).
     m = _OP_RE.match(expr)
     if m:
         left, op_str, right = m.group(1).strip(), m.group(2), m.group(3).strip()
+        # The left operand must be a clean dotted identifier; anything else (a function call,
+        # an arithmetic expression) is untranslatable and must raise, not match all/none.
+        if not _IDENT_RE.match(left):
+            raise ValueError(f'Cannot translate expression to query: {expr!r}')
         mongo_op = _OP_MAP.get(op_str)
-        parts = left.split('.', 1)
-        _type = parts[0].strip()
-        field = parts[1].strip() if len(parts) > 1 else None
-        # Regex patterns must stay as strings — converting to int/float breaks re.search.
+        _type, field = _split_type_field(left)
+        # Regex patterns stay strings (int/float coercion breaks re.search); (?i) makes all
+        # regexes case-insensitive by default (works on json re.search and Mongo $regex).
         if mongo_op in ('$regex', '$not_regex'):
-            value = right.strip().strip("'\"")
+            value = '(?i)' + right.strip().strip("'\"")
         else:
             value = _parse_value(right)
-        result = {'_type': _type}
-        if field:
-            if mongo_op == '$not_regex':
-                result[field] = {'$not': {'$regex': value}}
-            elif mongo_op is None:
-                result[field] = value
-            else:
-                result[field] = {mongo_op: value}
-        return result
+        if not field:
+            return _fragment(_type, field, None)
+        if mongo_op == '$not_regex':
+            return _fragment(_type, field, {'$not': {'$regex': value}})
+        if mongo_op is None:
+            return _fragment(_type, field, value)
+        return _fragment(_type, field, {mongo_op: value})
 
-    # Fallback: a bare "type.field" with no operator is a boolean truthiness check,
-    # i.e. "ip.alive" means "ip.alive == True" (resolves identically across backends).
-    # A bare "type" with no field is just the type.
-    parts = expr.split('.', 1)
-    _type = parts[0].strip()
-    field = parts[1].strip() if len(parts) > 1 else None
-    result = {'_type': _type}
-    if field:
-        result[field] = True
-    return result
+    # Fallback: bare "type.field"/"item.field" is a truthiness check (`ip.alive`, `vuln.id`).
+    # $nin keeps only truthy values on both backends (bool and string).
+    if not _IDENT_RE.match(expr):
+        raise ValueError(f'Cannot translate expression to query: {expr!r}')
+    _type, field = _split_type_field(expr)
+    return _fragment(_type, field, dict(_TRUTHY) if field else None)
 
 
 def _normalize_logical_ops(query):

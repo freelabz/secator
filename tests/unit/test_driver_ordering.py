@@ -57,5 +57,40 @@ class TestQueryBackendOrdering(unittest.TestCase):
 		self.assertEqual(name, 'mongodb')
 
 
+class TestDefaultDrivers(unittest.TestCase):
+	"""json = implicit local default so there is always a queryable store, without
+	overriding a store backend (mongodb/sqlite/api) or the mongodb addon (prod)."""
+
+	def test_no_driver_local_run_defaults_to_json(self):
+		from secator.loader import apply_default_drivers
+		from secator.query import QueryEngine
+		drivers = apply_default_drivers([], mongodb_enabled=False)
+		self.assertEqual(drivers, ['json'])
+		# The json driver reads via the local (filesystem) query backend.
+		self.assertEqual(QueryEngine.resolve_backend_from_drivers(drivers), 'local')
+
+	def test_mongodb_addon_run_stays_mongodb(self):
+		from secator.loader import apply_default_drivers
+		from secator.query import QueryEngine
+		drivers = apply_default_drivers(['mongodb'], mongodb_enabled=True)
+		self.assertNotIn('json', drivers)
+		self.assertEqual(QueryEngine.resolve_backend_from_drivers(drivers), 'mongodb')
+
+	def test_mongodb_addon_without_explicit_driver_defaults_to_json(self):
+		# Addon enabled but no explicit store driver in drivers.defaults: with the result
+		# payload dropped, something must still write the store, so json is the default
+		# (data integrity) — same as a bare local run.
+		from secator.loader import apply_default_drivers
+		self.assertEqual(apply_default_drivers([], mongodb_enabled=True), ['json'])
+
+	def test_sqlite_driver_not_overridden(self):
+		from secator.loader import apply_default_drivers
+		self.assertEqual(apply_default_drivers(['sqlite'], mongodb_enabled=False), ['sqlite'])
+
+	def test_json_not_duplicated(self):
+		from secator.loader import apply_default_drivers
+		self.assertEqual(apply_default_drivers(['json'], mongodb_enabled=False), ['json'])
+
+
 if __name__ == '__main__':
 	unittest.main()

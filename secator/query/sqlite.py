@@ -86,9 +86,20 @@ def _build_where(query: dict):
 					# NOT IN [] matches everything -> emit no constraint.
 					if not val:
 						continue
-					placeholders = ', '.join('?' for _ in val)
-					clauses.append(f'{expr} NOT IN ({placeholders})')
-					params.extend(val)
+					# SQL three-valued logic: `x NOT IN (..., NULL, ...)` is NULL (never TRUE)
+					# for any x, so a None in the list would drop every row. Pull NULLs out
+					# into an explicit `IS NOT NULL` guard and NOT IN only the non-null values
+					# (this is what makes bare truthiness checks like `ip.alive` work on sqlite).
+					non_null = [v for v in val if v is not None]
+					sub = []
+					if len(non_null) != len(val):
+						sub.append(f'{expr} IS NOT NULL')
+					if non_null:
+						placeholders = ', '.join('?' for _ in non_null)
+						sub.append(f'{expr} NOT IN ({placeholders})')
+						params.extend(non_null)
+					if sub:
+						clauses.append('(' + ' AND '.join(sub) + ')')
 				elif op == '$contains':
 					clauses.append(f"{expr} LIKE '%' || ? || '%'")
 					params.append(val)
@@ -133,6 +144,21 @@ class SqliteBackend(QueryBackend):
 		except Exception as e:
 			console.print(Warning(message=f'SQLite search failed: {e}'))
 			return []
+
+	def _execute_iterate(self, query: dict, batch_size: int = 1000):
+		"""Stream rows with a cursor + fetchmany — never loads all N into memory."""
+		try:
+			conn = self._get_conn()
+			where, params = _build_where(query)
+			cur = conn.execute(f"SELECT data FROM findings WHERE {where or '1=1'}", params)
+			while True:
+				rows = cur.fetchmany(batch_size)
+				if not rows:
+					break
+				yield [json.loads(d) for (d,) in rows]
+		except Exception as e:
+			console.print(Warning(message=f'SQLite iterate failed: {e}'))
+			raise
 
 	def _execute_count(self, query: dict) -> int:
 		try:

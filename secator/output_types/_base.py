@@ -189,3 +189,34 @@ class OutputType:
 				lines.append(f"  {f.name}: {type_name},  # required")
 		lines.append(")")
 		return "\n".join(lines)
+
+
+def load_output_types(docs):
+	"""Rehydrate store query results (dicts) into OutputType objects, streaming.
+
+	Items already OutputType instances pass through; dicts are mapped by their ``_type`` to the
+	matching class and loaded. Docs with an unknown/missing type are skipped. The uuid is taken
+	from ``_uuid`` (json/sqlite) or ``_id`` (mongodb).
+
+	Args:
+		docs (iterable): store query results (dicts and/or OutputType objects).
+
+	Yields:
+		OutputType: rehydrated output types, one at a time (never materializes the full list).
+	"""
+	from secator.output_types import OUTPUT_TYPES
+	by_name = {o.get_name(): o for o in OUTPUT_TYPES}
+	for doc in docs:
+		if isinstance(doc, dict):
+			klass = by_name.get(doc.get('_type'))
+			if not klass:
+				logger.debug(f'load_output_types: skipping doc with unknown _type {doc.get("_type")!r}')
+				continue
+			item = klass.load(doc)
+			if not item._uuid:
+				item._uuid = str(doc.get('_uuid') or doc.get('_id') or '')
+			yield item
+		elif hasattr(doc, '_type') and hasattr(doc, 'toDict'):
+			# Already an OutputType. Structural check (not isinstance) so a mid-suite module
+			# reload — which changes the OutputType class identity — can't drop it.
+			yield doc

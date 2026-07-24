@@ -230,7 +230,8 @@ class ai(PythonRunner):
 			verbose=self.verbose,
 			context=self.context or {},
 			scope=self.scope,
-			results=self.results,
+			# AI accumulates its own action results here; queries the store on demand (avoids OOM on the full subtree)
+			results=[],
 			max_workers=self.max_workers,
 			subagent=self.is_subagent,
 			sync=self._sync,

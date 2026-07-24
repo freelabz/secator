@@ -7,6 +7,32 @@ from secator.query.utils import (
 )
 
 
+class TestResolveLocalReportPaths:
+    """Local runs keep a sequential folder number (tasks/0) AND a UUID {type}_id (what findings carry).
+    `report show tasks/0` must resolve the folder number to that UUID before it becomes a query filter."""
+
+    def _write_report(self, reports, ws, singular, folder, type_id):
+        import json
+        from pathlib import Path
+        p = Path(reports) / ws / f'{singular}s' / str(folder)
+        p.mkdir(parents=True, exist_ok=True)
+        (p / 'report.json').write_text(json.dumps({'info': {'context': {f'{singular}_id': type_id}}}))
+
+    def test_folder_number_resolves_to_uuid(self, tmp_path, monkeypatch):
+        from secator.config import CONFIG
+        from secator.query.json import resolve_local_report_paths
+        monkeypatch.setattr(CONFIG.dirs, 'reports', str(tmp_path))
+        self._write_report(tmp_path, 'default', 'task', 0, 'the-uuid')
+        assert resolve_local_report_paths('task/0', 'default') == 'task/the-uuid'
+
+    def test_missing_folder_and_non_path_pass_through(self, tmp_path, monkeypatch):
+        from secator.config import CONFIG
+        from secator.query.json import resolve_local_report_paths
+        monkeypatch.setattr(CONFIG.dirs, 'reports', str(tmp_path))
+        assert resolve_local_report_paths('task/99', 'default') == 'task/99'  # no such folder -> unchanged
+        assert resolve_local_report_paths('', 'default') == ''
+
+
 class TestParseReportPaths:
 
     def test_empty_returns_empty_dict(self):
@@ -59,15 +85,15 @@ class TestPythonExprToMongo:
         result = python_expr_to_mongo('domain')
         assert result == {'_type': 'domain'}
 
-    def test_bare_field_is_boolean_true(self):
-        # "ip.alive" (no operator) is a truthiness shorthand: it must resolve to a
-        # boolean match (alive == True), not drop the field. Regression for the
-        # resolved query missing the boolean comparison.
-        assert python_expr_to_mongo('ip.alive') == {'_type': 'ip', 'alive': True}
+    def test_bare_field_is_truthy_match(self):
+        # "ip.alive" (no operator) is a truthiness shorthand -> $nin of the falsy values,
+        # which keeps truthy booleans AND non-empty strings identically on both backends.
+        assert python_expr_to_mongo('ip.alive') == {
+            '_type': 'ip', 'alive': {'$nin': [None, '', False, 0], '$exists': True}}
 
-    def test_bare_field_matches_explicit_eq_true(self):
-        # The bare form must resolve identically to "== True".
-        assert python_expr_to_mongo('ip.alive') == python_expr_to_mongo('ip.alive == True')
+    def test_explicit_eq_true_stays_strict(self):
+        # Explicit "== True" is strict equality, distinct from the bare truthiness form.
+        assert python_expr_to_mongo('ip.alive == True') == {'_type': 'ip', 'alive': True}
 
     def test_boolean_literals_parse_as_bool(self):
         assert python_expr_to_mongo('ip.alive == True') == {'_type': 'ip', 'alive': True}
@@ -116,8 +142,9 @@ class TestPythonExprToMongo:
         }
 
     def test_regex_match_operator(self):
+        # ~= is case-insensitive by default (inline (?i)).
         result = python_expr_to_mongo("technology.product ~= 'xrdp'")
-        assert result == {'_type': 'technology', 'product': {'$regex': 'xrdp'}}
+        assert result == {'_type': 'technology', 'product': {'$regex': '(?i)xrdp'}}
 
     def test_passthrough_mongo_dict(self):
         query = {'_type': 'vulnerability', 'severity_score': {'$gte': 7}}
@@ -302,8 +329,9 @@ class TestExpandRunnerPaths:
         }
 
     def test_in_operator_floats(self):
+        # `item` is a neutral placeholder -> bare field, no _type.
         result = python_expr_to_mongo("item.score in [1.5, 2.5, 3.0]")
-        assert result == {'_type': 'item', 'score': {'$in': [1.5, 2.5, 3.0]}}
+        assert result == {'score': {'$in': [1.5, 2.5, 3.0]}}
 
 
 class TestValidateQueryFields:
