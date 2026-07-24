@@ -86,9 +86,20 @@ def _build_where(query: dict):
 					# NOT IN [] matches everything -> emit no constraint.
 					if not val:
 						continue
-					placeholders = ', '.join('?' for _ in val)
-					clauses.append(f'{expr} NOT IN ({placeholders})')
-					params.extend(val)
+					# SQL three-valued logic: `x NOT IN (..., NULL, ...)` is NULL (never TRUE)
+					# for any x, so a None in the list would drop every row. Pull NULLs out
+					# into an explicit `IS NOT NULL` guard and NOT IN only the non-null values
+					# (this is what makes bare truthiness checks like `ip.alive` work on sqlite).
+					non_null = [v for v in val if v is not None]
+					sub = []
+					if len(non_null) != len(val):
+						sub.append(f'{expr} IS NOT NULL')
+					if non_null:
+						placeholders = ', '.join('?' for _ in non_null)
+						sub.append(f'{expr} NOT IN ({placeholders})')
+						params.extend(non_null)
+					if sub:
+						clauses.append('(' + ' AND '.join(sub) + ')')
 				elif op == '$contains':
 					clauses.append(f"{expr} LIKE '%' || ? || '%'")
 					params.append(val)

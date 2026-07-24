@@ -70,6 +70,7 @@ class MongoDBBackend(QueryBackend):
 				yield batch
 		except Exception as e:
 			console.print(Warning(message=f'MongoDB iterate failed: {e}'))
+			raise
 
 	def _execute_count(self, query: dict) -> int:
 		"""Count findings matching query."""

@@ -42,4 +42,6 @@ class StreamView:
 			return any(x == item for x in self)
 		q = {'_type': getattr(item, '_type', None)}
 		q.update({f.name: getattr(item, f.name) for f in fields(item) if f.compare})
-		return self._engine.count(q) > 0
+		# Scope to this run like the other dunders do (self._query, e.g. `_context.{type}_id`);
+		# item fields win on key overlap (item's scalar `_type` over the run's `$in`).
+		return self._engine.count({**self._query, **q}) > 0

@@ -210,6 +210,7 @@ def load_output_types(docs):
 		if isinstance(doc, dict):
 			klass = by_name.get(doc.get('_type'))
 			if not klass:
+				logger.debug(f'load_output_types: skipping doc with unknown _type {doc.get("_type")!r}')
 				continue
 			item = klass.load(doc)
 			if not item._uuid:

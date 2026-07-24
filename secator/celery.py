@@ -422,19 +422,18 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		target_extractor_opts = {
 			k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'
 		}
-		ctx = {
+		# Start from the runner's full store-resolution context (preserves run-scoping keys like
+		# parent_scope, workspace_id, drivers, {type}_id) so the local/json driver scopes correctly,
+		# then overlay only the extractor-specific values.
+		ctx = dict(runner.context)
+		ctx.update({
 			'opts': runner.run_opts,
 			'targets': runner.inputs,
 			'ancestor_id': runner.ancestor_id,
 			'node_chain_start': True,
-			'workspace_id': runner.context.get('workspace_id'),
 			'workspace_name': runner.workspace_name,
-			'drivers': runner.context.get('drivers', []),
 			'results': [],  # extractors query the store
-			'scan_id': runner.context.get('scan_id'),
-			'workflow_id': runner.context.get('workflow_id'),
-			'task_id': runner.context.get('task_id'),
-		}
+		})
 		scoped_inputs, _, _ = run_extractors([], target_extractor_opts, runner.inputs, ctx=ctx)
 		for name in scoped_inputs:
 			t = TargetOutput(name=name)

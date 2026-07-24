@@ -265,3 +265,33 @@ class TestWriteModelOnItem(SqliteTestBase):
 		results = SqliteBackend(workspace_id='ws1').search({'_type': 'warning'})
 		self.assertEqual(len(results), 1)
 		self.assertEqual(results[0]['message'], 'state exceeds 16MB')
+
+
+class TestSqliteBuildWhere(unittest.TestCase):
+	"""Query-dict -> SQL WHERE translation (pure, no DB)."""
+
+	def test_nin_with_none_guards_null(self):
+		# Regression: `x NOT IN (..., NULL, ...)` is NULL (never TRUE) in SQL 3-valued
+		# logic, so a None in the $nin list would drop every row — breaking bare
+		# truthiness checks (_TRUTHY uses $nin: [None, '', False, 0]). The None must be
+		# pulled out into an explicit `IS NOT NULL` guard, NOT IN only the non-null values.
+		from secator.query.sqlite import _build_where
+		sql, params = _build_where({'verified': {'$nin': [None, '', False, 0]}})
+		self.assertIn('IS NOT NULL', sql)
+		self.assertIn('NOT IN (?, ?, ?)', sql)  # only the 3 non-null values
+		self.assertNotIn(None, params)
+		self.assertEqual(params, ['', False, 0])
+
+	def test_nin_without_none_unchanged(self):
+		from secator.query.sqlite import _build_where
+		sql, params = _build_where({'status': {'$nin': ['a', 'b']}})
+		self.assertIn('NOT IN (?, ?)', sql)
+		self.assertNotIn('IS NOT NULL', sql)
+		self.assertEqual(params, ['a', 'b'])
+
+	def test_nin_only_none_is_null_guard_only(self):
+		from secator.query.sqlite import _build_where
+		sql, params = _build_where({'verified': {'$nin': [None]}})
+		self.assertIn('IS NOT NULL', sql)
+		self.assertNotIn('NOT IN', sql)
+		self.assertEqual(params, [])
