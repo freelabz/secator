@@ -33,7 +33,7 @@ class wpprobe(Command):
 	opt_key_map = {
 		THREADS: 't'
 	}
-	install_version = 'v0.11.1'
+	install_version = 'v0.12.5'
 	install_cmd = 'go install github.com/Chocapikk/wpprobe@[install_version]'
 	github_handle = 'Chocapikk/wpprobe'
 	install_post = {
