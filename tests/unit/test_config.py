@@ -84,6 +84,19 @@ class TestConfig(unittest.TestCase):
 		yaml_data = Config.read_yaml(self.config_test)
 		self.assertEqual(yaml_data['tasks']['overrides']['nuclei']['input_chunk_size'], 100)
 
+	def test_unset_numeric_key(self):
+		"""Unsetting an int field must drop it from the partial config, not raise TypeError."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		default = config.runners.progress_update_frequency
+		config.set('runners.progress_update_frequency', '30')
+		config.save()
+		self.assertEqual(Config.read_yaml(self.config_test)['runners']['progress_update_frequency'], 30)
+		config.unset('runners.progress_update_frequency')
+		config.save()
+		self.assertNotIn('progress_update_frequency', Config.read_yaml(self.config_test).get('runners', {}))
+		self.assertEqual(Config.parse(path=self.config_test).runners.progress_update_frequency, default)
+
 	def _parse_with_env(self, **env):
 		"""Parse a fresh config with the given SECATOR_* env vars set, then clean them up."""
 		from secator.config import Config
