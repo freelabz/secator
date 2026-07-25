@@ -76,6 +76,7 @@ INPUTS_TASKS = {
 	'maigret': 'Linus__Torvalds',
 	'searchsploit': 'apache',
 	'search_vulns': 'apache 2.4.39',
+	'shodan': '10.0.0.1',
 }
 
 #---------------------#
@@ -136,6 +137,9 @@ PYTHON_RUNNER_OPTS = {
 		'interactive': False,
 		'sensitive': False,
 		'prompt': 'Run a full reconnaissance on this target',
+	},
+	'shodan': {
+		'api_key': 'test-key',  # bypassed by get_mock_context; just satisfies the key check
 	},
 }
 
