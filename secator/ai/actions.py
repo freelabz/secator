@@ -259,6 +259,28 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		yield Warning(message=f"Unknown action: {action_type}", _context=context)
 
 
+def safe_dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
+	"""Dispatch a single action, converting any raised ``Exception`` into an
+	``Error`` output item instead of letting it abort the AI loop.
+
+	A Python error during a handler (e.g. ``TypeError: 'str' object is not a
+	mapping`` from a malformed LLM action/opts) must NOT kill the main loop. We
+	wrap the per-action generator so the failure becomes an ``Error`` carrying
+	the action's ``tool_call_id``/``tool_call_name`` in ``_context`` — that lets
+	the caller group it into a tool result and feed the error back to the LLM so
+	it can correct itself on the next turn.
+
+	Only ``Exception`` is caught: ``KeyboardInterrupt`` / ``SystemExit`` /
+	``GeneratorExit`` (all ``BaseException`` subclasses) propagate so legitimate
+	control-flow and generator close are never swallowed.
+	"""
+	try:
+		yield from dispatch_action(action, ctx)
+	except Exception as e:  # noqa: BLE001 - per-action resilience: feed error back to LLM, never abort the loop
+		context = _get_result_context(action, ctx)
+		yield Error.from_exception(e, _context=context)
+
+
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
 	"""Execute a secator task or workflow.
 
@@ -292,9 +314,6 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		yield Info(message=f"[DRY RUN] Would run {runner_type}: {name} on {targets}", _context=context)
 		return
 
-	if not ctx.silent:
-		yield Ai(content=name, ai_type=runner_type, extra_data={"targets": targets, "opts": opts}, _context=context)
-
 	run_opts = {
 		"print_item": not ctx.silent,
 		"print_line": ctx.verbose and not ctx.silent,
@@ -315,11 +334,28 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	context["task_chunk_id"] = str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
+
+	# Driver hooks (mongodb/api) auto-register from context['drivers'] in Runner.__init__.
 	try:
 		runner = runner_cls(tpl, targets, run_opts=run_opts, context=context)
 	except TaskNotFoundError as e:
 		yield Error(message=str(e), _context=context)
 		return
+
+	# Prefer the persisted doc id ({type}_id from on_init) over runner.id.
+	runner_id = context.get(f"{runner_type}_id", "") or runner.id
+	yield Ai(
+		content=name,
+		ai_type=runner_type,
+		extra_data={
+			"targets": targets,
+			"opts": opts,
+			"runner_id": runner_id,
+			"runner_type": runner_type,
+		},
+		_context=context,
+	)
+
 	yield from runner
 
 	# Auto-allow reading from the spawned runner's reports folder
@@ -329,15 +365,17 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 
 
 def _get_result_context(action, ctx):
-	"""Get result context from action"""
-	ctx = ctx.context.copy()
+	"""Derive a sub-runner result context, stamping the conversation session_id."""
+	new_ctx = ctx.context.copy()
+	if ctx.session_id and not new_ctx.get("session_id"):
+		new_ctx["session_id"] = ctx.session_id
 	action_context = {}
 	tool_call_id = action.get("tool_call_id")
 	tool_call_name = action.get("tool_call_name")
 	if tool_call_id:
 		action_context["tool_call_id"] = tool_call_id
 		action_context["tool_call_name"] = tool_call_name
-	return {**ctx, **action_context}
+	return {**new_ctx, **action_context}
 
 
 def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
@@ -444,7 +482,7 @@ def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
 	choices = action.get("choices", [])
-	yield Ai(content=reason, ai_type="follow_up", extra_data={"choices": choices}, _context=context)
+	yield Ai(content=reason, ai_type="follow_up", choices=choices, extra_data={"choices": choices}, _context=context)
 
 
 def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
@@ -452,6 +490,80 @@ def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
 	yield Ai(content=reason, ai_type="stopped", _context=context)
+
+
+def _coerce_finding_fields(cls, data: Dict) -> Dict:
+	"""Coerce AI-provided scalar values to a finding class's declared field types.
+
+	LLMs frequently emit wrong-typed scalars (a ``bool`` field as the string
+	``"true"``, an ``int`` as ``"3"``). This fixes *obvious* type mismatches
+	before validation so the finding isn't rejected for model type sloppiness.
+
+	Only coerces when safe; unknown keys, already-correct values, and
+	unparseable values are left untouched (validation will still surface a real
+	error rather than silently dropping data).
+	"""
+	field_types = cls.field_types()
+	for key, value in list(data.items()):
+		if key.startswith('_'):
+			continue
+		expected = field_types.get(key)
+		if expected is None or value is None:
+			continue
+		# Already the right type (note: bool is a subclass of int, so guard it).
+		if isinstance(value, expected) and not (expected is int and isinstance(value, bool)):
+			continue
+
+		if expected is bool:
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, int):
+				data[key] = bool(value)
+			elif isinstance(value, str):
+				s = value.strip().lower()
+				if s in ('true', '1', 'yes', 'on'):
+					data[key] = True
+				elif s in ('false', '0', 'no', 'off', ''):
+					data[key] = False
+		elif expected is int:
+			# Avoid coercing real bools into ints.
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, float):
+				if value.is_integer():
+					data[key] = int(value)
+			elif isinstance(value, str):
+				try:
+					data[key] = int(value)
+				except ValueError:
+					try:
+						f_val = float(value)
+						if f_val.is_integer():
+							data[key] = int(f_val)
+					except ValueError:
+						pass
+		elif expected is float:
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, int):
+				data[key] = float(value)
+			elif isinstance(value, str):
+				try:
+					data[key] = float(value)
+				except ValueError:
+					pass
+		elif expected is list:
+			if isinstance(value, str):
+				s = value.strip()
+				if s.startswith('['):
+					try:
+						parsed = json.loads(s)
+						if isinstance(parsed, list):
+							data[key] = parsed
+					except (json.JSONDecodeError, TypeError):
+						pass
+		# str fields: leave as-is (don't stringify); unknown types: leave untouched.
+	return data
 
 
 def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
@@ -507,6 +619,8 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		extra.update(unknown)
 		finding_data['extra_data'] = extra
 
+	finding_data = _coerce_finding_fields(cls, finding_data)
+
 	# Validate field types before instantiation
 	errors = cls.validate_fields(finding_data)
 	if errors:
@@ -519,6 +633,7 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Ai(
 			content=f'{str(finding)}',
 			ai_type="add_finding",
+			extra_data={"finding": finding.toDict()},
 			_context=context
 		)
 		yield finding
@@ -594,7 +709,7 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 
 	def run_single(act: Dict, idx: int) -> Dict:
 		results = []
-		for item in dispatch_action(act, batch_ctx):
+		for item in safe_dispatch_action(act, batch_ctx):
 			if isinstance(item, Ai) and item.ai_type == "token_usage":
 				if progress:
 					extra = item.extra_data or {}

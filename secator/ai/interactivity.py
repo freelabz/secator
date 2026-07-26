@@ -119,7 +119,7 @@ class RemoteBackend(InteractivityBackend):
 		)
 
 	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
-		answer = self._poll_for_answer(session_id, prompt_type)
+		answer = self._poll_for_answer(session_id, prompt_type, prompt_uuid=context.get("prompt_uuid"))
 		if answer is None:
 			return None
 
@@ -135,23 +135,72 @@ class RemoteBackend(InteractivityBackend):
 		# follow_up: return the answer text
 		return {"answer": answer}
 
-	def _poll_for_answer(self, session_id, prompt_type):
-		"""Poll DB for user answer until timeout."""
+	def poll_steers(self, session_id):
+		"""Drain pending steer docs for ``session_id`` and mark them consumed
+		(oldest-first). Any backend error returns ``[]`` — a steer must never crash the run.
+		"""
+		if self.query_engine is None:
+			return []
+		base = {
+			"_type": "ai",
+			"ai_type": "steer",
+			"_context.session_id": session_id,
+			"status": "pending",
+		}
+		try:
+			results = self.query_engine.search(base, limit=50)
+		except Exception:  # noqa: BLE001 - a steer must never crash the run
+			return []
+		if not results:
+			return []
+		# Oldest-first so multiple queued steers are injected in send order.
+		results = sorted(results, key=lambda r: r.get("_timestamp", 0))
+		contents = []
+		for doc in results:
+			content = doc.get("content") or doc.get("answer") or ""
+			if content:
+				contents.append(content)
+		# Mark this session's pending steers consumed so they inject exactly once.
+		try:
+			self.query_engine.update(
+				{**base},
+				{"$set": {"status": "consumed"}},
+			)
+		except Exception:  # noqa: BLE001 - consume failure must not crash the run
+			pass
+		return contents
+
+	def _poll_for_answer(self, session_id, prompt_type, prompt_uuid=None):
+		"""Poll DB for the answer to the SPECIFIC pending prompt until timeout.
+
+		Scoped by ``prompt_uuid`` (not just session_id + status:"answered"), else a
+		multi-turn conversation matches a stale answered doc and respawn-loops. A
+		pending steer also breaks the wait early and is returned as the answer.
+		"""
+		base = {
+			"_type": "ai",
+			"ai_type": prompt_type,
+			"_context.session_id": session_id,
+		}
+		if prompt_uuid:
+			base["extra_data.prompt_uuid"] = prompt_uuid
+
 		elapsed = 0
 		while elapsed < self.timeout:
-			results = self.query_engine.search({
-				"_type": "ai",
-				"ai_type": prompt_type,
-				"session_id": session_id,
-				"status": "answered"
-			}, limit=1)
+			results = self.query_engine.search({**base, "status": "answered"}, limit=1)
 			if results:
 				return results[0].get("answer")
+			# A steer breaks the wait: treat the steer as the user's answer so the
+			# blocked follow-up resolves and the next turn redirects.
+			steers = self.poll_steers(session_id)
+			if steers:
+				return "\n".join(steers)
 			sleep(self.poll_interval)
 			elapsed += self.poll_interval
-		# Timeout: update finding status
+		# Timeout: flip ONLY this prompt's still-pending doc to timed_out, so a
+		# concurrent/older pending doc for the same session isn't disturbed.
 		self.query_engine.update(
-			{"_type": "ai", "ai_type": prompt_type, "session_id": session_id, "status": "pending"},
+			{**base, "status": "pending"},
 			{"$set": {"status": "timed_out"}}
 		)
 		return None
