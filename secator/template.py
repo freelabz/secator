@@ -183,7 +183,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 				conf = dict(v).copy()
 				opt_name = k
 				conf['prefix'] = f'{node.type.capitalize()} {node.name}'
-				if len(same_opts) > 0:  # opt name conflict, change opt name
+				if len(same_opts) > 0 or k in config_opts:  # opt name conflict, change opt name
 					opt_name = f'{node.name}.{k}'
 					debug(f'[bold]{config.name}[/] -> [bold blue]{node.id}[/] -> [bold green]{k}[/] renamed to [bold green]{opt_name}[/] [dim red](duplicated)[/]', sub=f'cli.{config.name}')  # noqa: E501
 				all_opts[opt_name] = conf
