@@ -1,5 +1,6 @@
 import os
 import shlex
+from pathlib import Path
 import yaml
 
 # from secator.decorators import task
@@ -75,6 +76,12 @@ class dirsearch(HttpFuzzer):
 
 	@staticmethod
 	def on_cmd_done(self):
+		output_path = Path(self.output_path).resolve()
+		reports_folder = Path(self.reports_folder).resolve()
+		if not str(output_path).startswith(str(reports_folder)):
+			yield Error(message=f'Output path {output_path} is not within reports folder {reports_folder}')
+			return
+
 		if not os.path.exists(self.output_path):
 			yield Error(message=f'Could not find JSON results in {self.output_path}')
 			return
