@@ -65,7 +65,7 @@ class ToolInstaller:
 		name = tool_cls.__name__
 		console.print(Info(message=f'[bold yellow]:wrench: Installing {name} ...[/]'))
 		status = InstallerStatus.UNKNOWN
-		has_cmd = hasattr(tool_cls, 'cmd')
+		has_cmd = bool(getattr(tool_cls, 'cmd', None))  # a generic task (cmd='') has no tool to install
 
 		# For non-Command tasks (e.g. PythonRunner), only proceed if they have an install method
 		if not has_cmd and not getattr(tool_cls, 'install_cmd', None) and not getattr(tool_cls, 'pypi_dependencies', None):

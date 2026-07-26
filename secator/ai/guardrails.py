@@ -1,10 +1,11 @@
 """Permission engine for AI guardrails."""
 import fnmatch
+import ipaddress
 import re
 import socket
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from secator.ai.encryption import PII_PATTERNS
 
@@ -26,6 +27,60 @@ WRITE_COMMANDS = frozenset({"tee", "cp", "mv", "sed", "awk", "dd", "install", "m
 # Execute-type commands
 EXECUTE_COMMANDS = frozenset({"python", "python3", "bash", "sh", "node", "ruby", "perl", "gcc", "g++", "make", "go"})
 
+# Download tools that write to a file via an OUTPUT FLAG — the flag's destination
+# is a WRITE, not a read (else `deny write(/etc/*)` never fires). Focused set; residual
+# write-vs-read gaps (dd of=, tar -f, cp/install dest, >() ) are tracked separately.
+OUTPUT_FLAG_COMMANDS = {
+	"curl": frozenset({"-o", "--output"}),
+	"wget": frozenset({"-O", "--output-document"}),
+}
+
+# Exec-wrappers run a different inner command (`timeout 60 rm -rf /`) — peel the
+# wrapper and check the INNER command, not the allow-listed wrapper name.
+EXEC_WRAPPERS = frozenset({
+	"timeout", "xargs", "env", "nice", "ionice", "nohup", "stdbuf",
+	"setsid", "sudo", "doas", "watch", "time", "chroot", "unbuffer",
+	# Laundering-vector wrappers
+	"flock", "runuser", "su", "script", "proxychains", "proxychains4",
+	"firejail", "torsocks", "torify", "unshare", "catchsegv", "chrt", "taskset",
+})
+
+# Per-wrapper arg grammar so the REAL command is located, not a lockfile/config/user.
+# (opts_taking_a_value, positional_args_before_cmd, cmd_string_opts) — cmd_string_opts values
+# (e.g. `-c 'curl evil'`) are re-parsed and peeled so the payload is checked, not skipped.
+_EMPTY = frozenset()
+_WRAPPER_ARG_GRAMMAR = {
+	"flock":        (frozenset({"-w", "--timeout", "-E", "--conflict-exit-code"}), 1, frozenset({"-c", "--command"})),
+	"runuser":      (frozenset({"-u", "--user", "-g", "--group", "-G", "--supp-group", "-s", "--shell"}), 0, frozenset({"-c", "--command"})),  # noqa: E501
+	"su":           (frozenset({"-s", "--shell", "-g", "--group", "-G", "--supp-group"}), 1, frozenset({"-c", "--command"})),  # noqa: E501
+	"script":       (_EMPTY, 0, frozenset({"-c", "--command"})),
+	"proxychains":  (frozenset({"-f"}), 0, _EMPTY),
+	"proxychains4": (frozenset({"-f"}), 0, _EMPTY),
+	"sudo":         (frozenset({"-u", "--user", "-g", "--group", "-U", "-C", "-p", "-r", "-t", "-T"}), 0, _EMPTY),
+}
+
+
+def _exec_wrappers() -> frozenset:
+	"""Built-in wrappers plus any ops-configured extras. Config EXTENDS the security baseline."""
+	try:
+		from secator.config import CONFIG
+		extra = getattr(CONFIG.addons.ai, "exec_wrappers", None) or []
+		extra = {str(w).strip() for w in extra if str(w).strip()}
+		if extra:
+			return EXEC_WRAPPERS | extra
+	except Exception:
+		pass
+	return EXEC_WRAPPERS
+
+
+def _split_cmd_string(s: str) -> List[str]:
+	"""Best-effort tokenize a `-c '<cmd>'` payload so the nested command can be re-checked."""
+	import shlex
+	try:
+		return shlex.split(s)
+	except ValueError:
+		return s.split()
+
 
 def parse_rule(rule: str) -> Tuple[str, List[str]]:
 	"""Parse a rule string like 'target(10.0.0.1,example.com)' into (type, patterns).
@@ -44,6 +99,59 @@ def parse_rule(rule: str) -> Tuple[str, List[str]]:
 	return rule_type, values
 
 
+_IP_INT_RE = re.compile(r'0[xX][0-9a-fA-F]+|0[oO][0-7]+|\d+')
+_DOTTED_ODD_RE = re.compile(r'(?:0[xX][0-9a-fA-F]+|0[0-7]+|\d+)(?:\.(?:0[xX][0-9a-fA-F]+|0[0-7]+|\d+)){3}')
+IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+
+
+def _normalize_ip(candidate: str) -> Optional[IPAddress]:
+	"""Normalize encoded IPs (decimal/hex/octal int, dotted-hex/octal, IPv6-mapped) to an ip_address.
+
+	Returns None if the candidate is not an IP (e.g. a hostname) so callers fall back to literal matching.
+	Hostnames are NOT resolved here (DNS rebinding is a documented residual).
+	"""
+	s = candidate.strip()
+	if not s:
+		return None
+	if s.startswith('[') and s.endswith(']'):  # [::1] / [::ffff:1.2.3.4]
+		s = s[1:-1]
+	ip = None
+	# Plain dotted-quad / standard IPv6 first (leaves normal targets untouched)
+	try:
+		ip = ipaddress.ip_address(s)
+	except ValueError:
+		# Integer form: decimal (2852039166), hex (0xA9FEA9FE), octal (0o...)
+		if _IP_INT_RE.fullmatch(s):
+			try:
+				ip = ipaddress.ip_address(int(s, 0) if s[:2].lower() in ('0x', '0o') else int(s))
+			except (ValueError, ipaddress.AddressValueError):
+				return None
+		# Dotted octets with hex/octal parts (0xA9.0xFE.0xA9.0xFE, 0251.0376.0251.0376)
+		elif _DOTTED_ODD_RE.fullmatch(s):
+			try:
+				octets = [int(p, 0) if p[:2].lower() == '0x' else int(p, 8) if p.startswith('0') and len(p) > 1 else int(p)
+						  for p in s.split('.')]
+				if all(0 <= o <= 255 for o in octets):
+					ip = ipaddress.ip_address('.'.join(str(o) for o in octets))
+			except (ValueError, ipaddress.AddressValueError):
+				return None
+	if ip is None:
+		return None
+	# Collapse IPv6-mapped/compatible IPv4 (::ffff:169.254.169.254) down to the v4 address
+	if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+		ip = ip.ipv4_mapped
+	return ip
+
+
+def _ip_in_pattern(ip: IPAddress, pattern: str) -> Optional[bool]:
+	"""True/False if `pattern` is an IP/CIDR literal, else None (pattern isn't an address rule)."""
+	try:
+		net = ipaddress.ip_network(pattern, strict=False)
+	except ValueError:
+		return None
+	return ip.version == net.version and ip in net
+
+
 def match_rule(value: str, patterns: List[str]) -> bool:
 	"""Check if a value matches any of the given patterns.
 
@@ -53,6 +161,7 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 	- Glob patterns (fnmatch)
 	- {port} variable (matches :\\d+)
 	- Basename matching for path-like values (e.g. '.env' matches '/home/user/.env')
+	- IP/CIDR patterns are matched by normalized address (encoded IPs are canonicalized first)
 
 	Args:
 		value: The value to check
@@ -61,9 +170,21 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 	Returns:
 		True if value matches any pattern
 	"""
+	# Normalize encoded IPs before deny/allow match so alternate encodings can't evade IP rules
+	norm_ip = _normalize_ip(value)
+	canon = str(norm_ip) if norm_ip is not None else None
 	for pattern in patterns:
 		if pattern == "*":
 			return True
+		if norm_ip is not None:
+			in_pat = _ip_in_pattern(norm_ip, pattern)
+			if in_pat is not None:
+				if in_pat:
+					return True
+				continue  # IP/CIDR pattern that doesn't contain this address — no string fallback
+			# Non-address pattern (glob/{port}): also test the canonical dotted form
+			if canon != value and fnmatch.fnmatch(canon, pattern):
+				return True
 		if "{port}" in pattern:
 			regex_pattern = re.escape(pattern).replace(r"\{port\}", r"\d+")
 			if re.fullmatch(regex_pattern, value):
@@ -108,10 +229,8 @@ def _is_file_path(value: str) -> bool:
 
 
 def _is_network_target(value: str) -> bool:
-	"""Check if a value looks like a valid network target (IP, hostname, URL, CIDR).
-
-	Filters out descriptive strings that aren't actual targets.
-	"""
+	"""Check if a value looks like a valid network target (IP, hostname, URL, CIDR),
+	filtering out descriptive strings that aren't actual targets."""
 	if ' ' in value.strip():
 		return False
 	if value.startswith(('http://', 'https://')):
@@ -226,35 +345,129 @@ def extract_command_targets(command: str) -> List[str]:
 	return targets
 
 
-def _extract_cmd_names(command: str) -> List[str]:
-	"""Extract command names from a shell command using safecmd's bash parser.
+_SHELL_PARSER_WARNED = False
+
+
+def _warn_shell_parser_unavailable(reason: str) -> None:
+	"""Warn ONCE that the shfmt-based shell parser is unavailable, then let the
+	caller fall back to the non-shfmt path (whole-command approval).
+
+	This is deliberately a Warning, not an Error, and it does NOT claim the ai
+	addon is missing: ``litellm`` (the ai addon) can be installed while the shell
+	parser — ``safecmd`` + the ``shfmt`` binary it shells out to — is not. Without
+	it the guardrail can't split a command into sub-commands, so
+	``_check_action_type`` falls back to asking the user to approve the whole
+	command (safe, just coarser). Warn once so a long agent run isn't spammed on
+	every shell command.
+	"""
+	global _SHELL_PARSER_WARNED
+	if _SHELL_PARSER_WARNED:
+		return
+	_SHELL_PARSER_WARNED = True
+	from secator.rich import console
+	from secator.output_types import Warning
+	console.print(Warning(
+		message=f'{reason}: shell commands cannot be sub-parsed for guardrails — '
+		'falling back to whole-command approval. Run "secator install addons ai" '
+		'to enable precise per-subcommand parsing.'
+	))
+
+
+def _parse_subcommands(command: str) -> List[List[str]]:
+	"""Parse a shell command into sub-command token lists via safecmd's parser.
 
 	Uses shfmt (via safecmd) to properly parse pipes, &&, ||, ;, subshells,
-	and command substitutions. Returns empty list if parsing fails (caller
+	and command substitutions. Returns an empty list if parsing fails (caller
 	should prompt the user to approve the whole command).
 
 	Args:
 		command: Full shell command string
 
 	Returns:
-		List of command name strings (first token of each sub-command),
-		or empty list if parsing fails.
+		List of token lists, one per sub-command, or [] if parsing fails.
 	"""
-	import re
 	try:
 		from safecmd.bashxtract import extract_commands
 	except ImportError:
-		from secator.rich import console
-		console.print('[bold red][ERR][/] Missing ai addon: please run "secator install addons ai".')
+		# NOT a missing *ai* addon (litellm can be present without the shell parser).
+		_warn_shell_parser_unavailable('Missing safecmd shell parser')
 		return []
 	try:
 		# Normalize LLM-generated multiline commands: join lines where a pipe/operator
 		# starts the next line (e.g. "cmd1\n| cmd2" -> "cmd1 | cmd2")
 		command = re.sub(r'\s*\n\s*(\||\&\&|\|\|)', r' \1', command)
-		cmds, ops, redirects = extract_commands(command)
-		return [c[0] for c in cmds if c]
+		cmds, _, _ = extract_commands(command)
+		return [c for c in cmds if c]
+	except FileNotFoundError:
+		# safecmd is installed but the `shfmt` binary it shells out to isn't on PATH.
+		_warn_shell_parser_unavailable('Missing shfmt binary')
+		return []
 	except Exception:
 		return []
+
+
+def _extract_cmd_names(command: str) -> List[str]:
+	"""Extract command names (first token of each sub-command); [] on parse failure."""
+	return [c[0] for c in _parse_subcommands(command)]
+
+
+def _is_wrapper_operand(token: str) -> bool:
+	"""Heuristic: is this token a wrapper operand (numeric duration / KEY=VALUE), not the inner cmd?"""
+	if re.fullmatch(r'\d+(?:\.\d+)?[smhd]?', token):
+		return True
+	if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*=.*', token):
+		return True
+	return False
+
+
+def _peel_wrapper(args: List[str]) -> List[str]:
+	"""Strip leading exec-wrapper binaries to reach the inner command's tokens.
+
+	Bare `env`/`sudo` (no inner command) is returned as-is so it's still checked by name.
+	"""
+	wrappers = _exec_wrappers()
+	tokens = args
+	for _ in range(len(args)):  # bounded peels (guards against pathological nesting)
+		if not tokens:
+			return tokens
+		name = tokens[0].rsplit('/', 1)[-1]
+		if name not in wrappers:
+			return tokens
+		rest = tokens[1:]
+		# Peel proxychains/firejail/flock/runuser/... past their OWN args (value-opts,
+		# positional lockfile/config, `-c '<cmd>'`) so the leaf payload is what gets classified.
+		opts_with_val, n_pos, cmd_opts = _WRAPPER_ARG_GRAMMAR.get(name, (_EMPTY, 0, _EMPTY))
+		i = 0
+		pos_seen = 0
+		while i < len(rest):
+			tok = rest[i]
+			if tok == '--':  # end-of-options: the inner command starts next
+				i += 1
+				break
+			if tok in cmd_opts and i + 1 < len(rest):  # `-c '<cmd>'` — re-parse & peel the nested payload
+				nested = _split_cmd_string(rest[i + 1])
+				return _peel_wrapper(nested) if nested else tokens
+			if tok in opts_with_val and i + 1 < len(rest):  # option that consumes its value
+				i += 2
+				continue
+			if tok.startswith('-') or _is_wrapper_operand(tok):
+				i += 1
+				continue
+			if pos_seen < n_pos:  # wrapper's own positional (flock lockfile / su user)
+				pos_seen += 1
+				i += 1
+				continue
+			break
+		if i >= len(rest):
+			return tokens  # wrapper with no inner command — check it by name
+		tokens = rest[i:]
+	return tokens
+
+
+def _match_command_glob(command: str, pattern: str) -> bool:
+	"""Anchored glob match where '*' does NOT cross '/' (so `rm -rf /*` spares `rm -rf /tmp/x`)."""
+	regex = ''.join('[^/]*' if ch == '*' else re.escape(ch) for ch in pattern)
+	return re.fullmatch(regex, command) is not None
 
 
 def _resolve_path(path: str, cwd: str = "") -> str:
@@ -359,11 +572,31 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 		cmd_class = classify_command(cmd_name)
 		base_access = "write" if cmd_class == "write" else "read"
 
-		for arg in args[1:]:
-			if arg.startswith('-'):
-				continue
-			if _is_file_path(arg):
+		# Output-flag destinations are writes (curl -o/wget -O), not reads.
+		write_flags = OUTPUT_FLAG_COMMANDS.get(cmd_name.rsplit('/', 1)[-1], frozenset())
+
+		sub_args = args[1:]
+		i = 0
+		while i < len(sub_args):
+			arg = sub_args[i]
+			if write_flags:
+				dest = None
+				if arg in write_flags and i + 1 < len(sub_args):  # -o FILE / --output FILE
+					dest, i = sub_args[i + 1], i + 1
+				elif '=' in arg and arg.split('=', 1)[0] in write_flags:  # --output=FILE
+					dest = arg.split('=', 1)[1]
+				else:  # -oFILE (short attached form)
+					for f in write_flags:
+						if len(f) == 2 and arg.startswith(f) and len(arg) > 2:
+							dest = arg[2:]
+							break
+				if dest and dest != '-':  # '-' is stdout, not a file
+					_add_path(dest, "write")
+					i += 1
+					continue
+			if not arg.startswith('-') and _is_file_path(arg):
 				_add_path(arg, base_access)
+			i += 1
 
 	return paths
 
@@ -447,27 +680,22 @@ def build_target_choices(target: str) -> List[Dict]:
 			{
 				"label": f"Allow this URL only ({base_path})",
 				"rules": [f"target({base_path}*)"],
-				"selected": False,
 			},
 			{
 				"label": f"Allow all URLs from {host_port}",
 				"rules": host_rules,
-				"selected": False,
 			},
 			{
 				"label": f"Allow all URLs from {host} (any port)",
 				"rules": host_rules,
-				"selected": False,
 			},
 			{
 				"label": "All of the above",
 				"rules": host_rules,
-				"selected": False,
 			},
 			{
 				"label": "Deny (block this action)",
 				"rules": [],
-				"selected": False,
 			},
 		]
 		# Deduplicate options 2 and 3 when there's no port
@@ -482,27 +710,22 @@ def build_target_choices(target: str) -> List[Dict]:
 			{
 				"label": f"Allow {target} only",
 				"rules": [host_rule],
-				"selected": False,
 			},
 			{
 				"label": f"Allow {target} (any port)",
 				"rules": [host_rule, port_rule],
-				"selected": False,
 			},
 			{
 				"label": f"Allow all URLs from {target} (any port)",
 				"rules": [host_rule, port_rule, url_rule, f"target((http|https)://{target}/*)"],
-				"selected": False,
 			},
 			{
 				"label": "All of the above",
 				"rules": [host_rule, port_rule, url_rule, f"target((http|https)://{target}/*)"],
-				"selected": False,
 			},
 			{
 				"label": "Deny (block this action)",
 				"rules": [],
-				"selected": False,
 			},
 		]
 	return choices
@@ -518,6 +741,22 @@ class PermissionResult:
 	shell_command: str = ""  # full command when prompting for shell approval
 
 
+def _is_default_deny(result: "PermissionResult") -> bool:
+	"""True if `result` is the catch-all "no rule matched" deny, not an explicit deny rule."""
+	return "No rule for" in result.reason
+
+
+# Finding types downstream auto-trusts. tasks/ai.py _auto_approve_workspace_targets()
+# searches _type:"target" findings and auto-approves them as in-scope, so an injected
+# add_finding of one of these silently widens scope.
+_PRIVILEGED_FINDING_TYPES = frozenset({"target"})
+
+
+def _is_privileged_finding_type(action: Dict) -> bool:
+	"""True if an add_finding action would mint a downstream-trusted (scope-widening) finding."""
+	return str(action.get("_type", "")).strip().lower() in _PRIVILEGED_FINDING_TYPES
+
+
 class PermissionEngine:
 	"""Evaluate AI actions against allow/deny/ask permission rules.
 
@@ -525,17 +764,57 @@ class PermissionEngine:
 	Two-step validation: (1) action type check, (2) target/path check.
 	"""
 
-	def __init__(self, config: Dict, targets: List[str] = None, workspace: str = ""):
+	def __init__(
+		self, config: Dict, targets: List[str] = None, workspace: str = "",
+		allowed_targets: List[str] = None, denied_targets: List[str] = None
+	):
 		self.targets = targets or []
 		self.workspace = str(workspace)
 		self.rules = {"allow": [], "deny": [], "ask": []}
 		self.runtime_allow: List[Tuple[str, List[str]]] = []
+
+		# Platform-supplied allow-list of target regexes (e.g. validated workspace mandates):
+		# constrains the AI to this scope. Regex full-match, falls back to literal match.
+		self.allowed_targets: List = self._compile_patterns(allowed_targets)
+
+		# Platform-supplied deny-list of target regexes (mandate `deny` scope). Symmetric
+		# to allowed_targets but DENY WINS, mirroring the mandate scope matcher.
+		self.denied_targets: List = self._compile_patterns(denied_targets)
 
 		for category in ("allow", "deny", "ask"):
 			for rule_str in config.get(category, []):
 				resolved = self._resolve_variables(rule_str)
 				rule_type, patterns = parse_rule(resolved)
 				self.rules[category].append((rule_type, patterns))
+
+	@staticmethod
+	def _compile_patterns(patterns: List[str]) -> List:
+		"""Compile a list of regex patterns, falling back to a literal-escaped match on error."""
+		compiled: List = []
+		for pat in (patterns or []):
+			if not pat:
+				continue
+			try:
+				compiled.append(re.compile(pat))
+			except re.error:
+				compiled.append(re.compile(re.escape(pat)))
+		return compiled
+
+	@staticmethod
+	def _matches_any(patterns: List, value: str) -> bool:
+		"""Check if a value matches any of the given compiled regexes (full or partial match)."""
+		for rx in patterns:
+			if rx.fullmatch(value) or rx.match(value):
+				return True
+		return False
+
+	def _matches_allowed_targets(self, value: str) -> bool:
+		"""Check if a target value matches any platform-supplied allowed_targets regex."""
+		return self._matches_any(self.allowed_targets, value)
+
+	def _matches_denied_targets(self, value: str) -> bool:
+		"""Check if a target value matches any platform-supplied denied_targets regex."""
+		return self._matches_any(self.denied_targets, value)
 
 	def _resolve_variables(self, rule: str) -> str:
 		"""Replace {workspace} and {targets} variables in a rule string."""
@@ -560,9 +839,10 @@ class PermissionEngine:
 		if result.decision in ("deny", "ask"):
 			return result
 
-		# Step 2: Check targets (only if target rules are configured)
+		# Step 2: Check targets. Always enforce when targets exist — a missing
+		# catch-all must fall to ask (via _check_values "No rule"), never default-allow.
 		targets_to_check = self._extract_targets(action)
-		if targets_to_check and self._has_rules_for("target"):
+		if targets_to_check:
 			target_result = self._check_values("target", targets_to_check)
 			if target_result.decision == "deny":
 				return target_result
@@ -577,7 +857,7 @@ class PermissionEngine:
 		if action_type == "shell":
 			command = action.get("command", "")
 			paths_with_access = detect_paths_with_access(command)
-			if paths_with_access and (self._has_rules_for("read") or self._has_rules_for("write")):
+			if paths_with_access:  # Always enforce — no read/write rule must ask, not allow
 				# Check each path with its correct access type
 				ask_paths = []
 				for path, access in paths_with_access:
@@ -585,7 +865,7 @@ class PermissionEngine:
 					if path_result.decision == "deny":
 						# Explicit deny rule: block immediately
 						# "No rule" default deny: prompt user instead
-						if "No rule for" in path_result.reason:
+						if _is_default_deny(path_result):
 							ask_paths.append((path, access))
 						else:
 							return PermissionResult(
@@ -621,6 +901,9 @@ class PermissionEngine:
 
 	def _has_rules_for(self, rule_type: str) -> bool:
 		"""Check if any rules exist for the given rule type."""
+		# allowed_targets/denied_targets force the target-check step so out-of-scope/denied targets are caught.
+		if rule_type == "target" and (self.allowed_targets or self.denied_targets):
+			return True
 		for category in ("allow", "deny", "ask"):
 			for rt, _ in self.rules[category]:
 				if rt == rule_type:
@@ -639,8 +922,8 @@ class PermissionEngine:
 			command = action.get("command", "")
 			if not command.strip():
 				return PermissionResult(decision="deny", reason="Empty command")
-			cmd_names = _extract_cmd_names(command)
-			if not cmd_names:
+			subcommands = _parse_subcommands(command)
+			if not subcommands:
 				# Parse failure — prompt user for the whole command
 				return PermissionResult(
 					decision="ask",
@@ -649,11 +932,20 @@ class PermissionEngine:
 				)
 			most_restrictive = None
 			unmatched = []
-			for cmd_name in cmd_names:
+			for args in subcommands:
+				# peel exec-wrappers so the INNER command is checked, not the wrapper name
+				inner = _peel_wrapper(args)
+				if not inner:
+					continue
+				cmd_name = inner[0]
+				# multi-word denies (e.g. "rm -rf /*") match the full peeled command; names via _check_value
+				denied = self._match_shell_command_deny(inner)
+				if denied:
+					return PermissionResult(decision="deny", reason=f"Denied by rule: shell({denied})")
 				result = self._check_value("shell", cmd_name)
 				if result.decision == "deny":
 					# Distinguish explicit deny rules from "no matching rule" default
-					if "No rule for" in result.reason:
+					if _is_default_deny(result):
 						unmatched.append(cmd_name)
 					else:
 						return result  # Explicit deny rule hit
@@ -676,8 +968,28 @@ class PermissionEngine:
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
 		elif action_type in ("query", "follow_up", "add_finding"):
+			# Don't let injected add_finding mint a trusted target that auto-approve later trusts
+			if action_type == "add_finding" and _is_privileged_finding_type(action):
+				ftype = str(action.get("_type", "")).strip().lower()
+				return PermissionResult(
+					decision="ask",
+					reason=f"add_finding of privileged type '{ftype}' requires approval",
+				)
 			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
 		return PermissionResult(decision="deny", reason=f"Unknown action type: {action_type}")
+
+	def _match_shell_command_deny(self, tokens: List[str]) -> str:
+		"""Return a multi-word shell deny pattern (e.g. "rm -rf /*") hit by these tokens, else ""."""
+		cmd_str = ' '.join(tokens)
+		for rt, patterns in self.rules["deny"]:
+			if rt != "shell":
+				continue
+			for pattern in patterns:
+				if ' ' not in pattern:
+					continue  # single-token denies are handled by name in _check_value
+				if _match_command_glob(cmd_str, pattern):
+					return pattern
+		return ""
 
 	def _check_value(self, rule_type: str, value: str) -> PermissionResult:
 		"""Check a single value. Order: deny > allow > ask > deny.
@@ -700,6 +1012,21 @@ class PermissionEngine:
 				for v in values_to_check:
 					if match_rule(v, patterns):
 						return PermissionResult(decision="deny", reason=f"Denied by rule: {rule_type}({v})")
+
+		# Platform-supplied denied_targets (regex) deny-list — checked before the
+		# allowed_targets allow-list so DENY WINS: a target matching both an allow
+		# and a deny mandate scope is denied (mirrors the mandate scope matcher).
+		if rule_type == "target" and self.denied_targets:
+			for v in values_to_check:
+				if self._matches_denied_targets(v):
+					return PermissionResult(decision="deny", reason=f"Denied by mandate: target({v})")
+
+		# Platform-supplied allowed_targets (regex) allow-list — checked after deny
+		# (deny still wins) but before config/runtime allow rules.
+		if rule_type == "target" and self.allowed_targets:
+			for v in values_to_check:
+				if self._matches_allowed_targets(v):
+					return PermissionResult(decision="allow", reason=f"Allowed by mandate: target({v})")
 
 		for rt, patterns in self.rules["allow"]:
 			if rt == rule_type:
@@ -727,7 +1054,7 @@ class PermissionEngine:
 			result = self._check_value(rule_type, value)
 			if result.decision == "deny":
 				# "No rule for" default deny → ask user instead of blocking
-				if "No rule for" in result.reason:
+				if _is_default_deny(result):
 					ask_targets.append(value)
 				else:
 					return result  # Explicit deny rule: block
@@ -771,11 +1098,8 @@ class PermissionEngine:
 		Returns:
 			'allow' or 'deny'
 		"""
-		if not interactive:
-			return "deny"
-
 		choices = build_target_choices(target)
-		selected_indices = self._show_target_menu(target, choices, command=command)
+		selected_indices = self._show_target_menu(target, choices, command=command, interactive=interactive)
 
 		if selected_indices is None:
 			return "deny"
@@ -807,11 +1131,6 @@ class PermissionEngine:
 		Returns:
 			'allow' or 'deny'
 		"""
-		if not interactive:
-			return "deny"
-
-		from secator.rich import InteractiveMenu
-
 		action_label = "Read from" if access_type == "read" else "Write to"
 		parent = '/'.join(path.split('/')[:-1]) if '/' in path else path
 		options = [
@@ -819,16 +1138,16 @@ class PermissionEngine:
 			{"label": f"Allow {access_type}({parent}/*)"},
 			{"label": "Deny (block this action)"},
 		]
-		result = InteractiveMenu(
+		idx = self._show_menu(
 			f"{action_label} {path} requires approval.",
 			options,
 			description=command,
-		).show()
+			interactive=interactive,
+		)
 
-		if result is None:
+		if idx is None:
 			return "deny"
 
-		idx, _ = result
 		if idx == 2:  # Deny
 			return "deny"
 		elif idx == 0:  # Exact path
@@ -848,11 +1167,6 @@ class PermissionEngine:
 		Returns:
 			'allow' or 'deny'
 		"""
-		if not interactive:
-			return "deny"
-
-		from secator.rich import InteractiveMenu
-
 		# Extract command names; use the unmatched one(s) from reason for option 2
 		cmd_names = _extract_cmd_names(command)
 		# Parse unmatched commands from reason like "No rule for command(s): ./terrapin-scanner, foo"
@@ -868,48 +1182,71 @@ class PermissionEngine:
 			{"label": "Deny (block this action)"},
 		]
 		title = reason or "Shell command requires approval"
-		result = InteractiveMenu(
+		idx = self._show_menu(
 			title,
 			options,
 			description=f"[gray42]{command}[/gray42]",
-		).show()
+			interactive=interactive,
+		)
 
-		if result is None:
+		if idx is None:
 			return "deny"
 
-		idx, _ = result
-		if idx == 0:  # Allow this specific command (one-time, no rule added)
-			# Add a runtime allow for each cmd name in this command
-			if cmd_names:
-				self.add_runtime_allow([f"shell({','.join(cmd_names)})"])
+		if idx == 0:  # Allow ONLY this invocation — no rule added, next call re-prompts
 			return "allow"
 		elif idx == 1:  # Allow all commands with this name
 			self.add_runtime_allow([f"shell({prompt_cmd})"])
 			return "allow"
 		return "deny"
 
-	def _show_target_menu(self, target: str, choices: List[Dict], command: str = "") -> List[int]:
+	def _show_target_menu(
+		self, target: str, choices: List[Dict], command: str = "", interactive: bool = True
+	) -> Optional[List[int]]:
 		"""Show interactive menu. Separated for testability.
 
 		Args:
 			target: The target being prompted about
 			choices: List of choice dicts from build_target_choices
 			command: The shell command triggering this prompt (for display)
+			interactive: If False, auto-deny without prompting
 
 		Returns:
 			List of selected indices, or None if cancelled
 		"""
-		from secator.rich import InteractiveMenu
-
 		options = [{"label": choice["label"]} for choice in choices]
-		result = InteractiveMenu(
+		idx = self._show_menu(
 			f"Target {target} is not in allowed targets. Add it?",
 			options,
 			description=command,
-		).show()
+			interactive=interactive,
+		)
 
+		if idx is None:
+			return None
+		return [idx]
+
+	def _show_menu(
+		self, title: str, options: List[Dict], description: str = "", interactive: bool = True
+	) -> Optional[int]:
+		"""Shared interactive-menu scaffold used by prompt_path/prompt_shell/_show_target_menu.
+
+		Args:
+			title: Menu title/prompt text
+			options: List of {"label": ...} option dicts
+			description: Extra context shown below the title (e.g. the shell command)
+			interactive: If False, auto-deny (return None) without prompting
+
+		Returns:
+			The selected index, or None if not interactive or the user cancelled.
+		"""
+		if not interactive:
+			return None
+
+		from secator.rich import InteractiveMenu
+
+		result = InteractiveMenu(title, options, description=description).show()
 		if result is None:
 			return None
 
 		idx, _ = result
-		return [idx]
+		return idx

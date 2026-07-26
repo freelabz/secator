@@ -13,18 +13,9 @@ if ADDONS_ENABLED['ai']:
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestChatHistory(unittest.TestCase):
 
-    def test_add_system(self):
-        history = ChatHistory()
-        history.add_system("You are an assistant.")
-
-        messages = history.to_messages()
-        self.assertEqual(len(messages), 1)
-        self.assertEqual(messages[0]["role"], "system")
-        self.assertEqual(messages[0]["content"], "You are an assistant.")
-
     def test_set_system_replaces_existing(self):
         history = ChatHistory()
-        history.add_system("old prompt")
+        history.set_system("old prompt")
         history.add_user("user msg")
         history.set_system("new prompt")
 
@@ -62,7 +53,7 @@ class TestChatHistory(unittest.TestCase):
 
     def test_to_messages_returns_list(self):
         history = ChatHistory()
-        history.add_system("sys")
+        history.set_system("sys")
         history.add_user("user")
         history.add_assistant("assistant")
 
@@ -88,16 +79,6 @@ class TestChatHistory(unittest.TestCase):
         # Original should be unchanged
         self.assertEqual(len(history.to_messages()), 1)
 
-
-    def test_add_tool(self):
-        history = ChatHistory()
-        history.add_tool("tool output here")
-
-        messages = history.to_messages()
-        self.assertEqual(len(messages), 1)
-        self.assertEqual(messages[0]["role"], "tool")
-        self.assertEqual(messages[0]["content"], "tool output here")
-
     @patch('secator.ai.history.get_context_window')
     @patch('litellm.token_counter')
     def test_maybe_summarize_below_threshold(self, mock_token_counter, mock_get_ctx):
@@ -106,7 +87,7 @@ class TestChatHistory(unittest.TestCase):
         mock_token_counter.return_value = 1000  # Well under 85%
 
         history = ChatHistory()
-        history.add_system("system prompt")
+        history.set_system("system prompt")
         history.add_user("short message")
 
         summarized, old_tokens, new_tokens = history.maybe_summarize("test-model")
@@ -130,7 +111,7 @@ class TestChatHistory(unittest.TestCase):
         mock_call_llm.return_value = {"content": "Summary of session.", "usage": None}
 
         history = ChatHistory()
-        history.add_system("system prompt")
+        history.set_system("system prompt")
         # Add enough content to exceed threshold
         for i in range(20):
             history.add_user("x" * 200)
@@ -154,7 +135,7 @@ class TestChatHistory(unittest.TestCase):
         mock_call_llm.return_value = {"content": "Compact summary.", "usage": None}
 
         history = ChatHistory()
-        history.add_system("You are an AI pentester.")
+        history.set_system("You are an AI pentester.")
         for i in range(10):
             history.add_user("x" * 200)
             history.add_assistant("y" * 200)
@@ -175,7 +156,7 @@ class TestChatHistory(unittest.TestCase):
     def test_trim_drops_oldest_messages(self):
         """Trim drops messages to fit under token limit."""
         history = ChatHistory()
-        history.add_system("s" * 40)
+        history.set_system("s" * 40)
         history.add_user("u" * 40)
         for i in range(10):
             history.add_user(f"msg{i} " + "x" * 200)
@@ -190,10 +171,52 @@ class TestChatHistory(unittest.TestCase):
         self.assertEqual(history.messages[0]["role"], "system")
         self.assertEqual(history.messages[0]["content"], "s" * 40)
 
+    def test_trim_sanitizes_none_content_before_trimmer(self):
+        """Messages with content=None (assistant tool-call turns) must never reach
+        trim_messages as None — litellm's shorten path does len(content) and crashes
+        with 'object of type NoneType has no len()'. trim() coerces them to "".
+        """
+        history = ChatHistory()
+        history.set_system("s")
+        history.add_user("u")
+        # assistant turn carrying only tool_calls -> content is None
+        history.add_assistant_with_tool_calls(None, [
+            {"id": "1", "type": "function", "function": {"name": "q", "arguments": "{}"}}
+        ])
+        history.add_tool_result("q", "1", "result")
+
+        captured = {}
+
+        def fake_trim(messages, max_tokens):
+            captured["messages"] = messages
+            # replicate litellm's crashing operation to prove it no longer crashes
+            for m in messages:
+                if m.get("role") != "system":
+                    _ = len(m["content"])  # would raise TypeError on None
+            return messages
+
+        with patch("litellm.utils.trim_messages", side_effect=fake_trim):
+            history.trim(max_tokens=1000)  # must not raise
+
+        self.assertTrue(all(m.get("content") is not None for m in captured["messages"]))
+
+    def test_trim_survives_trimmer_exception(self):
+        """A crash inside trim_messages must not propagate and kill the AI loop —
+        trim() degrades to the (sanitized) untrimmed history instead.
+        """
+        history = ChatHistory()
+        history.set_system("s")
+        history.add_user("u")
+
+        with patch("litellm.utils.trim_messages", side_effect=RuntimeError("boom")):
+            out = history.trim(max_tokens=1000)  # must not raise
+
+        self.assertEqual(len(out), 2)
+
     def test_to_messages_with_max_tokens_total(self):
         """to_messages with max_tokens_total trims messages."""
         history = ChatHistory()
-        history.add_system("s" * 40)
+        history.set_system("s" * 40)
         history.add_user("u" * 40)
         for i in range(20):
             history.add_user("x" * 400)
@@ -212,16 +235,86 @@ class TestChatHistory(unittest.TestCase):
     def test_to_messages_no_truncation_when_under_limit(self):
         """to_messages with max_tokens_total does nothing when under limit."""
         history = ChatHistory()
-        history.add_system("short")
+        history.set_system("short")
         history.add_user("msg")
 
         messages = history.to_messages(max_tokens_total=500)
         self.assertEqual(len(messages), 2)
 
+    @patch('secator.ai.history.get_context_window')
+    def test_to_messages_caps_budget_to_small_window(self, mock_get_ctx):
+        """M3: a flat max_tokens_total is capped to a small model's window."""
+        mock_get_ctx.return_value = 8000  # small-window model
+
+        history = ChatHistory()
+        history.model = "small-model"
+        history.set_system("s" * 40)
+        for i in range(40):
+            history.add_user("x" * 4000)  # long history, well over 8k tokens
+
+        original_count = len(history.messages)
+        # Flat 100k cap would NOT trim on a real 8k model without this fix.
+        messages = history.to_messages(max_tokens_total=100000)
+
+        self.assertLess(len(messages), original_count)  # trimmed to fit the window
+        self.assertEqual(messages[0]["role"], "system")
+
+    @patch('secator.ai.history.get_context_window')
+    def test_to_messages_no_explicit_cap_uses_window(self, mock_get_ctx):
+        """M3: with max_tokens_total=0 and a model, trim to the window-derived budget."""
+        mock_get_ctx.return_value = 8000
+
+        history = ChatHistory()
+        history.model = "small-model"
+        history.set_system("s" * 40)
+        for i in range(40):
+            history.add_user("x" * 4000)
+
+        original_count = len(history.messages)
+        messages = history.to_messages()  # no explicit cap
+
+        self.assertLess(len(messages), original_count)
+
+    @patch('secator.ai.history.get_context_window')
+    def test_to_messages_large_window_matches_flat_budget(self, mock_get_ctx):
+        """M3: on a large-window model the flat cap is honored (no over-trim)."""
+        mock_get_ctx.return_value = 200000  # window - reserve (191808) > 100k cap
+
+        history = ChatHistory()
+        history.model = "big-model"
+        history.set_system("short")
+        history.add_user("small message")
+
+        with patch.object(history, 'trim', wraps=history.trim) as spy:
+            history.to_messages(max_tokens_total=100000)
+            # Budget = min(100000, 200000 - 8192) = 100000, unchanged by the window.
+            spy.assert_called_once_with(100000)
+
+    @patch('secator.ai.history.get_context_window')
+    def test_to_messages_window_cap_preserves_tool_pairs(self, mock_get_ctx):
+        """M3 + H2: window-capped trim never leaves a leading orphan tool_result."""
+        mock_get_ctx.return_value = 8000
+
+        history = ChatHistory()
+        history.model = "small-model"
+        history.set_system("s" * 40)
+        for i in range(30):
+            tool_calls = [{"id": f"call_{i}", "type": "function",
+                           "function": {"name": "nmap", "arguments": "{}"}}]
+            history.add_assistant_with_tool_calls("x" * 2000, tool_calls)
+            history.add_tool_result("nmap", f"call_{i}", "y" * 2000)
+
+        messages = history.to_messages(max_tokens_total=100000)
+
+        # First non-system message must not be an orphan tool result.
+        non_system = [m for m in messages if m["role"] != "system"]
+        if non_system:
+            self.assertNotEqual(non_system[0]["role"], "tool")
+
     def test_to_messages_no_truncation_when_zero(self):
         """to_messages without max_tokens_total does not truncate."""
         history = ChatHistory()
-        history.add_system("s" * 40)
+        history.set_system("s" * 40)
         history.add_user("u" * 40)
         for i in range(20):
             history.add_user("x" * 400)
@@ -235,7 +328,7 @@ class TestChatHistory(unittest.TestCase):
     def test_maybe_summarize_skips_when_not_needed(self, mock_token_counter, mock_get_model_info):
 
         history = ChatHistory()
-        history.add_system("system")
+        history.set_system("system")
         history.add_user("user")
 
         original_messages = history.to_messages()
@@ -321,7 +414,7 @@ class TestChatHistory(unittest.TestCase):
         mock_token_counter.return_value = 50
 
         history = ChatHistory()
-        history.add_system("old prompt")
+        history.set_system("old prompt")
 
         # Count tokens - this caches the count
         history.count_tokens("gpt-4")
@@ -485,32 +578,6 @@ class TestChatHistory(unittest.TestCase):
         finally:
             fallback_path.unlink()
 
-    @patch('litellm.token_counter')
-    def test_truncate_to_tokens_saves_shell_output(self, mock_token_counter):
-        """truncate_to_tokens saves shell output to .outputs directory."""
-        from secator.ai.history import truncate_to_tokens
-
-        mock_token_counter.return_value = 1000
-        content = "shell output " * 500
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_dir = Path(tmpdir)
-
-            result = truncate_to_tokens(
-                content, 100, "gpt-4",
-                output_dir=output_dir,
-                result_name="shell"
-            )
-
-            self.assertIn("[TRUNCATED]", result)
-            self.assertIn("saved to:", result)
-
-            # Verify file was created
-            saved_files = list(output_dir.glob("shell_*.txt"))
-            self.assertEqual(len(saved_files), 1)
-            self.assertEqual(saved_files[0].read_text(), content)
-
-
     @patch('secator.ai.history.get_context_window')
     @patch('secator.ai.utils.call_llm')
     @patch('litellm.token_counter')
@@ -523,7 +590,7 @@ class TestChatHistory(unittest.TestCase):
         mock_call_llm.return_value = {"content": "Summary.", "usage": None}
 
         history = ChatHistory()
-        history.add_system("system")
+        history.set_system("system")
         history.add_user("user1")
         history.add_assistant("response1")
 
@@ -540,7 +607,7 @@ class TestChatHistory(unittest.TestCase):
         mock_token_counter.return_value = 1000
 
         history = ChatHistory()
-        history.add_system("system")
+        history.set_system("system")
 
         # Should work without threshold param
         summarized, _, _ = history.maybe_summarize("gpt-4")
@@ -609,7 +676,7 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         mock_call_llm.return_value = {"content": "Summary with tool results.", "usage": None}
 
         history = ChatHistory()
-        history.add_system("system prompt")
+        history.set_system("system prompt")
         history.add_user("scan target.com")
 
         # Add several rounds with tool calling messages
@@ -635,7 +702,7 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         mock_token_counter.return_value = 100
 
         history = ChatHistory()
-        history.add_system("system prompt")
+        history.set_system("system prompt")
         history.add_user("user message")
         history.add_assistant("assistant reply")
         history.add_tool_result("tool_func", "call_1", "tool result")
@@ -663,6 +730,28 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         self.assertEqual(result["user"], 150)
         self.assertEqual(result["total"], 150)
         self.assertNotIn("system", result)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestCapMessage(unittest.TestCase):
+
+    def test_cap_message_truncates_content_and_arguments(self):
+        from secator.ai.history import cap_message, MAX_PERSISTED_MESSAGE_CHARS
+        big = "x" * (MAX_PERSISTED_MESSAGE_CHARS + 500)
+        msg = {"role": "assistant", "content": big,
+               "tool_calls": [{"id": "1", "type": "function",
+                               "function": {"name": "q", "arguments": big}}]}
+        out = cap_message(msg)
+        assert len(out["content"]) <= MAX_PERSISTED_MESSAGE_CHARS + 20  # marker slack
+        assert "[capped]" in out["content"]
+        assert len(out["tool_calls"][0]["function"]["arguments"]) <= MAX_PERSISTED_MESSAGE_CHARS + 20
+        # original not mutated
+        assert len(msg["content"]) == MAX_PERSISTED_MESSAGE_CHARS + 500
+
+    def test_cap_message_leaves_small_messages_untouched(self):
+        from secator.ai.history import cap_message
+        msg = {"role": "tool", "tool_call_id": "1", "content": "small"}
+        assert cap_message(msg) == msg
 
 
 if __name__ == '__main__':

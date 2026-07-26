@@ -33,8 +33,12 @@ class InteractivityBackend:
 		raise NotImplementedError
 
 	def get_excluded_tools(self) -> set:
-		"""Return tool names to exclude from the LLM's available tools."""
-		return set()
+		"""Return tool names to exclude from the LLM's available tools.
+
+		Excludes "stop" by default: only AutoBackend (no user to hand control back
+		to) needs the LLM to have an explicit stop tool.
+		"""
+		return {"stop"}
 
 	def get_extra_tools(self) -> list:
 		"""Return additional tool schemas (not in TOOL_SCHEMAS) to inject."""
@@ -43,9 +47,6 @@ class InteractivityBackend:
 
 class CLIBackend(InteractivityBackend):
 	"""Local terminal interactive backend."""
-
-	def get_excluded_tools(self) -> set:
-		return {"stop"}
 
 	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
 		if prompt_type == "permission":
@@ -79,7 +80,6 @@ class CLIBackend(InteractivityBackend):
 			return None
 		return prompt_user(
 			history,
-			encryptor=context.get("encryptor"),
 			max_iterations=context.get("max_iterations", 10),
 			choices=choices,
 			mode=context.get("mode", "chat"),
@@ -95,66 +95,198 @@ class RemoteBackend(InteractivityBackend):
 		self.query_engine = query_engine
 		self.poll_interval = poll_interval
 
-	def get_excluded_tools(self) -> set:
-		return {"stop"}
-
 	def build_pending_prompt(self, question, choices, session_id, prompt_type="follow_up", **context):
 		"""Build a pending Ai finding for the remote user to see and answer.
 
 		The caller must yield this item so it gets stored in the workspace
 		(via runner hooks) before calling ask_user(), which will poll for the answer.
+
+		``prompt_uuid`` (from context) is stamped into ``extra_data`` so the poll
+		can match THIS exact prompt, not a stale earlier answer.
 		"""
 		from secator.output_types import Ai
+		extra_data = {
+			"permission_type": context.get("permission_type", ""),
+			"value": context.get("value", ""),
+		}
+		prompt_uuid = context.get("prompt_uuid")
+		if prompt_uuid:
+			extra_data["prompt_uuid"] = prompt_uuid
+		# A new prompt for this session supersedes any older still-pending one
+		# (e.g. a worker that died mid-poll). Expire them BEFORE this doc is
+		# persisted so only the current prompt stays live.
+		self._expire_stale_pending(session_id)
+		# The conversation id rides on `_context.session_id` (auto-stamped from the
+		# runner context on persist) — the poll + restore + secator-api all key on
+		# that, so this pending doc needs no top-level session_id field.
 		return Ai(
 			content=question,
 			ai_type=prompt_type,
 			status="pending",
 			choices=choices,
-			session_id=session_id,
-			extra_data={
-				"permission_type": context.get("permission_type", ""),
-				"value": context.get("value", ""),
-			},
+			extra_data=extra_data,
 			_timestamp=time.time(),
 		)
 
 	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
-		answer = self._poll_for_answer(session_id, prompt_type)
+		answer = self._poll_for_answer(session_id, prompt_type, prompt_uuid=context.get("prompt_uuid"))
 		if answer is None:
 			return None
 
 		if prompt_type == "permission":
 			engine = context.get("engine")
-			if answer in ("allow", "allow_all") and engine:
-				ptype = context.get("permission_type")
-				value = context.get("value", "")
-				self._add_permission_rules(engine, ptype, value)
+			if answer in ("allow", "allow_all"):
+				# allow_all persists a session-scoped allow rule; single allow is
+				# a true one-shot that adds NO rule — next match re-prompts.
+				if answer == "allow_all" and engine:
+					ptype = context.get("permission_type")
+					value = context.get("value", "")
+					self._add_permission_rules(engine, ptype, value)
 				return {"answer": "allow"}
 			return {"answer": "deny"}
 
 		# follow_up: return the answer text
 		return {"answer": answer}
 
-	def _poll_for_answer(self, session_id, prompt_type):
-		"""Poll DB for user answer until timeout."""
+	def poll_steers(self, session_id):
+		"""Drain pending steer docs for ``session_id`` and mark them consumed.
+
+		A "steer" is a mid-flight user message: it's written into the channel
+		(``_type:"ai"``, ``ai_type:"steer"``, ``status:"pending"``) WHILE the agent
+		is running, and the worker picks it up at the next loop checkpoint to
+		redirect the next turn. This is distinct from a follow-up ``answer`` (which
+		the worker is *blocked* waiting on) and from a hard Stop (which revokes the
+		Celery task).
+
+		Returns a list of steer content strings (oldest-first). Each returned doc is
+		flipped to ``status:"consumed"`` so it's injected exactly once. Robust by
+		design: any backend error returns ``[]`` so a steer can never crash the run.
+		"""
+		if self.query_engine is None:
+			return []
+		base = {
+			"_type": "ai",
+			"ai_type": "steer",
+			# Correlate by the runner context's session_id, auto-stamped on every
+			# persisted item (item._context = self.context) — see _poll_for_answer.
+			"_context.session_id": session_id,
+			"status": "pending",
+		}
+		try:
+			results = self.query_engine.search(base, limit=50)
+		except Exception:  # noqa: BLE001 - a steer must never crash the run
+			return []
+		if not results:
+			return []
+		# Oldest-first so multiple queued steers are injected in send order.
+		results = sorted(results, key=lambda r: r.get("_timestamp", 0))
+		contents = []
+		for doc in results:
+			content = doc.get("content") or doc.get("answer") or ""
+			if content:
+				contents.append(content)
+		# Mark this session's pending steers consumed so they inject exactly once.
+		try:
+			self.query_engine.update(
+				{**base},
+				{"$set": {"status": "consumed"}},
+			)
+		except Exception:  # noqa: BLE001 - consume failure must not crash the run
+			pass
+		return contents
+
+	def _poll_for_answer(self, session_id, prompt_type, prompt_uuid=None):
+		"""Poll the DB for the answer to THIS specific prompt until timeout.
+
+		The query MUST be scoped to the exact prompt the worker is currently
+		blocked on — identified by ``prompt_uuid`` (stamped into the pending doc's
+		``extra_data.prompt_uuid`` before it was persisted). Matching only on
+		``{session_id, status:"answered"}`` is a bug: a multi-turn conversation
+		accumulates *previously* answered follow-up docs, so an unscoped query
+		returns a STALE answer immediately, the worker re-injects that old answer
+		as a brand-new prompt, re-runs the whole turn, asks again, re-matches the
+		same stale doc — an infinite respawn loop that re-runs scans and burns
+		tokens. Scoping on ``prompt_uuid`` makes the poll resolve only THIS
+		prompt's own answer (and time out only THIS prompt's doc).
+
+		A steer (mid-flight user message) breaks the wait: if a pending steer
+		arrives for this session while we're blocked on a follow-up, we return its
+		content as the "answer" so the loop redirects immediately instead of
+		stalling until the follow-up is explicitly answered (or times out). This
+		keeps follow-up semantics intact for the no-steer case.
+		"""
+		base = {
+			"_type": "ai",
+			"ai_type": prompt_type,
+			# session_id is auto-stamped on every persisted item (item._context)
+			"_context.session_id": session_id,
+		}
+		if prompt_uuid:
+			base["extra_data.prompt_uuid"] = prompt_uuid
+
+		answered_query = {**base, "status": "answered"}
 		elapsed = 0
 		while elapsed < self.timeout:
-			results = self.query_engine.search({
-				"_type": "ai",
-				"ai_type": prompt_type,
-				"session_id": session_id,
-				"status": "answered"
-			}, limit=1)
-			if results:
-				return results[0].get("answer")
+			answer = self._resolve_answer(answered_query)
+			if answer is not None:
+				return answer
+			# A steer breaks the wait: treat the steer as the user's answer so the
+			# blocked follow-up resolves and the next turn redirects.
+			steers = self.poll_steers(session_id)
+			if steers:
+				return "\n".join(steers)
 			sleep(self.poll_interval)
 			elapsed += self.poll_interval
-		# Timeout: update finding status
-		self.query_engine.update(
-			{"_type": "ai", "ai_type": prompt_type, "session_id": session_id, "status": "pending"},
+		# One final search before giving up: the user may have answered during
+		# the last sleep (or between the last search and now). Without this the
+		# answer is silently stranded.
+		answer = self._resolve_answer(answered_query)
+		if answer is not None:
+			return answer
+		# Timeout: atomically flip ONLY a doc that is STILL pending, so a concurrent
+		# older pending doc isn't disturbed. If the answer landed in the race window
+		# the doc is already 'answered' and this no-ops -- re-read rather than abandon it.
+		modified = self.query_engine.update(
+			{**base, "status": "pending"},
 			{"$set": {"status": "timed_out"}}
 		)
+		if not modified:
+			answer = self._resolve_answer(answered_query)
+			if answer is not None:
+				return answer
 		return None
+
+	def _resolve_answer(self, answered_query):
+		"""Return the newest answered doc's answer, or None if none answered.
+
+		Resolving against the newest by ``_timestamp`` is a backstop against
+		stale answers.
+		"""
+		results = self.query_engine.search(answered_query)
+		if not results:
+			return None
+		newest = max(results, key=lambda r: r.get("_timestamp", 0))
+		return newest.get("answer")
+
+	def _expire_stale_pending(self, session_id):
+		"""Mark any older still-pending prompt for this session as timed_out.
+
+		Called when a NEW prompt starts (before it is persisted), so it only
+		affects prior prompts. Stops stale 'pending' docs from accumulating —
+		a worker that dies mid-poll otherwise leaves the UI 'thinking' forever
+		and lets crud.answer_ai_prompt's "latest pending" collide.
+		FLAG: a DB-layer TTL index on pending Ai docs is the durable follow-up.
+		"""
+		if not self.query_engine:
+			return
+		self.query_engine.update(
+			{
+				"_type": "ai",
+				"_context.session_id": session_id,
+				"status": "pending",
+			},
+			{"$set": {"status": "timed_out"}},
+		)
 
 	@staticmethod
 	def _add_permission_rules(engine, ptype, value):

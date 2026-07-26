@@ -27,6 +27,11 @@ from secator.utils import debug, rich_escape as _s, signal_to_name
 
 logger = logging.getLogger(__name__)
 
+# Upper bound on the monitor thread's poll interval (seconds). Keeps the shutdown/timeout checks
+# responsive even when stat_update_frequency is large, so an evicted task stops well within the
+# pod's termination grace period.
+MONITOR_POLL_SECONDS = 5
+
 
 class Command(Runner):
 	"""Base class to execute an external command."""
@@ -536,8 +541,13 @@ class Command(Runner):
 				self.cwd = f'{self.reports_folder}/.outputs/{self.fqn}'
 				os.makedirs(self.cwd, exist_ok=True)
 
-			# Run the command using subprocess
-			env = os.environ
+			# Run the command using subprocess. A caller may pass a sanitized/custom env
+			# via the `env` run_opt (e.g. the AI shell handler strips LLM/cloud secrets so
+			# an AI-run `env`/`printenv` can't dump them). Defaults to the process env when
+			# the opt is absent (existing behavior unchanged). Uses `.get(key, default)`
+			# (not `or`) so an explicit empty `env={}` — a deliberate empty environment —
+			# is honored rather than silently falling back to the full process env.
+			env = self.run_opts.get('env', os.environ)
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
@@ -724,6 +734,12 @@ class Command(Runner):
 
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
+		from secator.celery_signals import clear_shutdown_flag, is_worker_shutting_down
+		# Only honour a shutdown raised *during* this run: clear any stale flag left by a previous
+		# worker/task sharing this machine's state dir. In prod each task gets a fresh pod (and /tmp),
+		# but tests and a long-lived `secator worker` reuse it, so a leftover flag would otherwise
+		# wrongly stop every later task.
+		clear_shutdown_flag()
 		last_stats_time = 0
 
 		while not self.monitor_stop_event.is_set():
@@ -733,6 +749,16 @@ class Command(Runner):
 			try:
 				current_time = time()
 				self.debug('Collecting monitor items', sub='monitor')
+
+				# Worker is shutting down (e.g. K8s pod eviction): stop early and save partial
+				# results so the surrounding chord proceeds, rather than hang until the broker
+				# visibility timeout redelivers this task.
+				if is_worker_shutting_down():
+					warning = Warning(message='Worker shutting down (eviction): stopping task early, saving incomplete results')
+					if self.monitor_queue is not None:
+						self.monitor_queue.put(warning)
+					self.stop_process(exit_ok=True, sig=signal.SIGTERM)
+					break
 
 				# Collect and queue stats at regular intervals
 				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
@@ -782,8 +808,10 @@ class Command(Runner):
 					self.monitor_queue.put(warning)
 				break
 
-			# Sleep for a short interval before next check (stat update frequency)
-			self.monitor_stop_event.wait(CONFIG.runners.stat_update_frequency)
+			# Wake at least every MONITOR_POLL_SECONDS so the shutdown/timeout checks stay
+			# responsive (stats themselves are still gated to stat_update_frequency above), so
+			# an eviction is caught well within the pod's termination grace period.
+			self.monitor_stop_event.wait(min(CONFIG.runners.stat_update_frequency, MONITOR_POLL_SECONDS))
 
 	def _collect_stats(self):
 		"""Collect stats about the current running process, if any."""
