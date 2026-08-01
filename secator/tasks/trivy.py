@@ -10,7 +10,8 @@ from secator.decorators import task
 from secator.definitions import (THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT,
 								PATH, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT, STRING)
 from secator.output_types import Vulnerability, Tag, Info, Error
-from secator.tasks._categories import Vuln
+from secator.tasks._categories import VulnMixin
+from secator.runners import Command
 from secator.utils import caml_to_snake
 from secator.rich import console
 
@@ -23,7 +24,7 @@ def convert_mode(mode):
 
 
 @task()
-class trivy(Vuln):
+class trivy(Command, VulnMixin):
 	"""Comprehensive and versatile security scanner."""
 	cmd = 'trivy'
 	input_types = [PATH, STRING]
@@ -113,7 +114,7 @@ class trivy(Vuln):
 					'extra_data': extra_data
 				}
 				if vuln_id.startswith('CVE'):
-					remote_data = Vuln.lookup_cve(vuln_id)
+					remote_data = VulnMixin.lookup_cve(vuln_id)
 					if remote_data:
 						data.update(remote_data.toDict() if hasattr(remote_data, 'toDict') else remote_data)
 				yield Vulnerability(**data)
