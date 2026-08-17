@@ -360,3 +360,41 @@ class TestCommandConfigOverrides(unittest.TestCase):
 				self.assertEqual(cmd_b.input_chunk_size, 100)
 		finally:
 			CONFIG.tasks.overrides = original_overrides
+
+
+class TestCommandPrivilegedMode(unittest.TestCase):
+	"""Gate test for security.privileged_mode: 'caps' must not prepend sudo, 'sudo' (default) must."""
+
+	def test_sudo_mode_prepends_sudo(self):
+		from secator.config import CONFIG
+
+		class SudoTestCmd(Command):
+			cmd = 'test'
+			requires_sudo = True
+			file_flag = None
+
+		original_mode = CONFIG.security.privileged_mode
+		CONFIG.security.privileged_mode = 'sudo'
+		try:
+			with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=SudoTestCmd):
+				cmd = SudoTestCmd(['target1'])
+				self.assertTrue(cmd.cmd.startswith('sudo '))
+		finally:
+			CONFIG.security.privileged_mode = original_mode
+
+	def test_caps_mode_does_not_prepend_sudo(self):
+		from secator.config import CONFIG
+
+		class CapsTestCmd(Command):
+			cmd = 'test'
+			requires_sudo = True
+			file_flag = None
+
+		original_mode = CONFIG.security.privileged_mode
+		CONFIG.security.privileged_mode = 'caps'
+		try:
+			with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=CapsTestCmd):
+				cmd = CapsTestCmd(['target1'])
+				self.assertFalse(cmd.cmd.startswith('sudo '))
+		finally:
+			CONFIG.security.privileged_mode = original_mode
