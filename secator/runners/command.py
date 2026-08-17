@@ -220,7 +220,8 @@ class Command(Runner):
 		try:
 			self.has_tty = self.run_opts.get('tty', sys.stdin.isatty())
 		except (ValueError, AttributeError, OSError):
-			self.has_tty = self.run_opts.get('tty', False)
+			is_not_dumb = os.environ.get('TERM', '').lower() != 'dumb'
+			self.has_tty = self.run_opts.get('tty', is_not_dumb)
 
 		# Stat update
 		self.last_updated_stat = None
