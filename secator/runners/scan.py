@@ -5,6 +5,7 @@ from secator.config import CONFIG
 from secator.output_types.info import Info
 from secator.runners._base import Runner
 from secator.runners.workflow import Workflow
+from secator.safe_eval import safe_eval_condition
 from secator.utils import merge_opts
 
 
@@ -53,8 +54,7 @@ class Scan(Runner):
 			# Skip workflow if condition is not met
 			condition = workflow_opts.pop('if', None) if workflow_opts else None
 			local_ns = {'opts': DotMap(opts)}
-			safe_globals = {'__builtins__': {'len': len}}
-			if condition and not eval(condition, safe_globals, local_ns):
+			if condition and not safe_eval_condition(condition, local_ns, {'len': len}):
 				self.add_result(Info(message=f'Skipped workflow {name} because condition is not met: {condition}'))
 				continue
 
@@ -62,23 +62,27 @@ class Scan(Runner):
 			workflow = Workflow(
 				config,
 				self.inputs,
-				results=self.results,
 				run_opts=opts,
 				hooks=self._hooks,
 				context=self.context.copy()
 			)
-			celery_workflow = workflow.build_celery_workflow(chain_previous_results=True)
+			# The scan's first (non-skipped) workflow only ever receives the
+			# scan-start's empty results, so its start marker is light too — route
+			# it to `small` like the scan start. Later workflows accumulate results
+			# and keep `results`/large. `light_start` changes only the queue, not the
+			# `.s(self)` result forwarding.
+			first_workflow = len(sigs) == 0
+			celery_workflow = workflow.build_celery_workflow(
+				chain_previous_results=True, light_start=first_workflow
+			)
 			for task_id, task_info in workflow.celery_ids_map.items():
 				self.add_subtask(task_id, task_info['name'], task_info['descr'])
 			sigs.append(celery_workflow)
 
-			for result in workflow.results:
-				self.add_result(result, print=False, hooks=False)
-
 		if sigs:
 			sig = chain(
-				mark_runner_started.si([], self).set(queue='results'),
+				mark_runner_started.si([], self).set(queue='small'),
 				*sigs,
-				mark_runner_completed.s(self).set(queue='results'),
+				mark_runner_completed.si([], self).set(queue='results'),
 			)
 		return sig

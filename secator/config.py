@@ -74,6 +74,7 @@ class Celery(StrictModel):
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
+	task_max_retries: int = Field(default=-1, ge=-1)  # max worker-loss redeliveries before abandon (-1 = disabled)
 	task_max_timeout: int = -1
 	task_memory_limit_mb: int = -1
 	worker_max_tasks_per_child: int = 20
@@ -82,6 +83,10 @@ class Celery(StrictModel):
 	worker_kill_after_task: bool = False
 	worker_kill_after_idle_seconds: int = -1
 	worker_command_verbose: bool = False
+	# Cancel (and redeliver, with acks_late) a worker's in-flight tasks when it loses the broker
+	# connection, instead of letting them run detached as zombies. Part of the OOM/eviction
+	# robustness layer; enable in deployment alongside task_acks_late + task_reject_on_worker_lost.
+	worker_cancel_long_running_tasks_on_connection_loss: bool = False
 
 
 class Cli(StrictModel):
@@ -126,17 +131,21 @@ class HTTP(StrictModel):
 	default_header: str = 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']
 
 
+# The json driver writes each runner's report.json live (findings + execution types), so the
+# end-of-run JSON exporter is redundant — and worse, it overwrites the driver's richer live file
+# with a findings-only snapshot. Drop json from the default exporters (still available via
+# `-o json`); report.json now comes from the json driver.
 class Tasks(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	exporters: List[str] = ['csv', 'txt', 'markdown']
 	overrides: Dict[str, Dict[str, Any]] = {}
 
 
 class Workflows(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	exporters: List[str] = ['csv', 'txt', 'markdown']
 
 
 class Scans(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	exporters: List[str] = ['csv', 'txt', 'markdown']
 
 
 class Profiles(StrictModel):
@@ -201,6 +210,7 @@ class MongodbAddon(StrictModel):
 		'is_false_positive',
 		'is_acknowledged',
 		'verified',
+		'status',
 		'tags',
 	]
 
@@ -216,6 +226,7 @@ class SqliteAddon(StrictModel):
 		'is_false_positive',
 		'is_acknowledged',
 		'verified',
+		'status',
 		'tags',
 	]
 
@@ -442,7 +453,7 @@ class Config(DotMap):
 					console.print(f'[bold orange1]Value "{item}" not found in {key}[/].')
 					return
 			value = current
-		else:
+		elif value is not None:
 			# Try to convert value to expected type
 			try:
 				if isinstance(existing_value, list):
@@ -758,10 +769,8 @@ class Config(DotMap):
 		Args:
 			string (str): YAML string.
 		"""
-		from rich.syntax import Syntax
-
-		data = Syntax(string, 'yaml', theme='ansi-dark', padding=0, background_color='default')
-		console_stdout.print(data)
+		from secator.utils import render_yaml
+		console_stdout.print(render_yaml(string))
 
 	@staticmethod
 	def dump(config, partial=True):

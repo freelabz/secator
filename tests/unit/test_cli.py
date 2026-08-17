@@ -673,5 +673,17 @@ class TestSqliteCliDriver(unittest.TestCase):
 		self.assertIn('sqlite', result.output)
 
 
+def test_load_report_data_counts_vulns_from_ndjson(tmp_path):
+	import json
+	from secator.cli import _load_report_data
+	(tmp_path / 'report.json').write_text(json.dumps({'info': {'name': 'nuclei'}}))
+	(tmp_path / 'results.ndjson').write_text(
+		json.dumps({'_type': 'vulnerability', '_uuid': 'v1', 'severity': 'high'}) + '\n' +
+		json.dumps({'_type': 'vulnerability', '_uuid': 'v2', 'severity': 'critical'}) + '\n')
+	info, counts = _load_report_data(str(tmp_path / 'report.json'))
+	assert info['name'] == 'nuclei'
+	assert counts['high'] == 1 and counts['critical'] == 1
+
+
 if __name__ == '__main__':
 	unittest.main()

@@ -19,10 +19,9 @@ class CsvExporter(Exporter):
 			output_cls = next((o for o in [*FINDING_TYPES, Target] if o._type == output_type), None)
 			if output_cls is None:
 				continue
-			keys = [o.name for o in fields(output_cls)]
-			items = [i.toDict() if hasattr(i, 'toDict') else i for i in items]
-			if not items:
+			if not items:  # count query on the streaming view — no materialization
 				continue
+			keys = [o.name for o in fields(output_cls)]
 			csv_path = f'{self.report.output_folder}/report_{output_type}.csv'
 			csv_paths.append(csv_path)
 			with open(csv_path, 'w', newline='') as output_file:
@@ -31,7 +30,8 @@ class CsvExporter(Exporter):
 				# schema columns instead of raising on extras.
 				dict_writer = _csv.DictWriter(output_file, keys, extrasaction='ignore')
 				dict_writer.writeheader()
-				dict_writer.writerows(items)
+				for item in items:  # stream rows from the store cursor
+					dict_writer.writerow(item.toDict() if hasattr(item, 'toDict') else item)
 
 		if not csv_paths:
 			return

@@ -10,7 +10,7 @@ from pathlib import Path
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.output_types import OUTPUT_TYPES
+from secator.output_types import OUTPUT_TYPES, is_output_type
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug
 from secator.hooks._dedup import compute_duplicate_updates
@@ -135,17 +135,15 @@ def update_runner(self):
 	_id = self.context.get(key)
 	workspace_id = self.context.get('workspace_id')
 	payload = json.dumps(update, default=str)
-	if _id:
-		conn.execute(f"UPDATE {table} SET workspace_id=?, data=? WHERE id=?", (workspace_id, payload, _id))
-	else:
-		_id = str(uuid.uuid4())
-		conn.execute(f"INSERT INTO {table} (id, workspace_id, data) VALUES (?, ?, ?)", (_id, workspace_id, payload))
-		self.context[key] = _id
+	conn.execute(
+		f"INSERT INTO {table} (id, workspace_id, data) VALUES (?, ?, ?) "
+		f"ON CONFLICT(id) DO UPDATE SET workspace_id=excluded.workspace_id, data=excluded.data",
+		(_id, workspace_id, payload))
 	conn.commit()
 
 
 def update_finding(self, item):
-	if type(item) not in OUTPUT_TYPES:
+	if not is_output_type(item):
 		return item
 	conn = get_sqlite_conn()
 	if not item._uuid:
@@ -166,6 +164,44 @@ def update_finding(self, item):
 	)
 	conn.commit()
 	return item
+
+
+def build_pending_doc(parent, task_spec, child_type):
+	"""Minimal PENDING placeholder doc for a not-yet-run child runner."""
+	return {
+		'name': task_spec.get('name'),
+		'status': 'PENDING',
+		'done': False,
+		'config': {'type': child_type, 'name': task_spec.get('name')},
+		'context': dict(task_spec.get('context', {})),
+		'has_parent': True,
+		'chunk': task_spec.get('chunk'),
+		'chunk_count': task_spec.get('chunk_count'),
+	}
+
+
+def on_build(self, task_spec):
+	"""Build-time hook: mint the child runner's sqlite row + id before dispatch.
+
+	Fired by the PARENT runner (self) while assembling the Celery canvas, once
+	per child task/workflow/chunk. Inserts a PENDING placeholder and writes its
+	id into the child signature's serialized context so a redelivered task
+	reuses the same row (UPDATE) instead of inserting a new one.
+	"""
+	conn = get_sqlite_conn()
+	parent_type = self.config.type                       # 'scan' | 'workflow' | 'task'
+	child_type = 'workflow' if parent_type == 'scan' else 'task'
+	table = f'{child_type}s'
+	is_chunk = bool(task_spec.get('chunk'))
+	doc = build_pending_doc(self, task_spec, child_type)
+	_id = str(uuid.uuid4())
+	workspace_id = task_spec.get('context', {}).get('workspace_id')
+	payload = json.dumps(doc, default=str)
+	conn.execute(f"INSERT INTO {table} (id, workspace_id, data) VALUES (?, ?, ?)", (_id, workspace_id, payload))
+	conn.commit()
+	key = f'{child_type}_chunk_id' if is_chunk else f'{child_type}_id'
+	task_spec.setdefault('context', {})[key] = _id
+	return task_spec
 
 
 def find_duplicates(self):
@@ -222,20 +258,25 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 
 HOOKS = {
 	Scan: {
+		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
+		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],
 	},
 	Workflow: {
+		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
+		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_duplicate': [update_finding],
 		'on_end': [update_runner],
 	},
 	Task: {
+		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],

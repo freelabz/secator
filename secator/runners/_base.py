@@ -15,10 +15,14 @@ import humanize
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, OutputType, Progress, Info, Warning, Error, Target, State
+from secator.output_types import (
+	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
+)
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import get_task_folder_id, run_extractors
+from secator.query import QueryEngine
+from secator.query._stream import StreamView
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
 from secator.tree import build_runner_tree, prune_runner_tree
 from secator.loader import get_configs_by_type
@@ -28,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 HOOKS = [
 	'before_init',
+	'on_build',
 	'on_init',
 	'on_start',
 	'on_end',
@@ -38,6 +43,10 @@ HOOKS = [
 ]
 
 VALIDATORS = ['validate_input', 'validate_item']
+
+# Placeholder substituted for option values flagged ``sensitive: True`` in any
+# serialized/printed runner state (see Runner.sensitive_opt_names).
+REDACTED_OPT_VALUE = '[REDACTED]'
 
 
 def format_runner_name(runner):
@@ -101,15 +110,24 @@ class Runner:
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
+		# Mint the run-scope {type}_id before any add_result so every finding carries the scope key.
+		key = f'{self.config.type}_id'
+		if not self.context.get(key):
+			self.context[key] = str(uuid.uuid4())
+		# workspace_id defaults to workspace_name (store folder / query scope); overridden by route/profile below
+		if not self.context.get('workspace_id'):
+			self.context['workspace_id'] = self.workspace_name
 
 		# Runner state
 		self.uuids = set()
-		self.results = []
 		self.results_count = 0
 		self.threads = []
 		self.output = ''
 		self.started = False
 		self.done = False
+		self._final_errors = None  # memoized aggregator errors (composite/chunked-parent store read)
+		self._own_errors = []          # in-memory mirror of this leaf runner's own emitted errors
+		self._own_findings_count = 0   # in-memory count of this leaf runner's own emitted findings
 		self.start_time = datetime.fromtimestamp(time(), timezone.utc)
 		self.end_time = None
 		self.last_updated_db = None
@@ -178,6 +196,7 @@ class Runner:
 		self.resolved_hooks = {name: [] for name in HOOKS + getattr(self, 'hooks', [])}
 		self.debug('registering hooks', obj=list(self.resolved_hooks.keys()), sub='init')
 		self.register_hooks(hooks)
+		self._apply_context_drivers()
 
 		# Validators
 		self.resolved_validators = {name: [] for name in VALIDATORS + getattr(self, 'validators', [])}
@@ -252,13 +271,13 @@ class Runner:
 
 		# Print targets
 		if self.print_target:
-			pluralize = 'targets' if len(self.self_targets) > 1 else 'target'
-			self._print(Info(message=f'Loaded {len(self.self_targets)} {pluralize} for {format_runner_name(self)}'), rich=True)
-			truncated_targets = self.self_targets[:10] if len(self.self_targets) > 10 else self.self_targets
-			for target in truncated_targets:
+			targets = [Target(name=t) for t in self.inputs]
+			pluralize = 'targets' if len(targets) > 1 else 'target'
+			self._print(Info(message=f'Loaded {len(targets)} {pluralize} for {format_runner_name(self)}'), rich=True)
+			for target in targets[:10]:
 				self._print(f'      {repr(target)}', rich=True)
-			if len(self.self_targets) > 10:
-				self._print(f'      and {len(self.self_targets) - 10} more...', rich=True)
+			if len(targets) > 10:
+				self._print(f'      and {len(targets) - 10} more...', rich=True)
 
 		# Run hooks
 		self.run_hooks('on_init', sub='init')
@@ -285,8 +304,44 @@ class Runner:
 		return config
 
 	@property
+	def sensitive_opt_names(self):
+		"""Names of options flagged ``sensitive: True`` in their definition.
+
+		Sensitive option values are redacted from any serialized/printed runner state
+		(``toDict()``, debug echoes, the built command string) so a user-supplied secret
+		(e.g. a BYO addon API key) never lands in the Mongo runner doc, the API response,
+		``--driver api`` egress, or logs. The value still travels in-flight to the worker.
+
+		Sources, unioned:
+		- a direct task instance's own ``opts``/``meta_opts`` (Command / PythonRunner),
+		- the task classes referenced by this runner's config tree (Task / Workflow / Scan,
+		  which carry no ``opts`` of their own).
+		"""
+		from secator.loader import discover_tasks
+		from secator.tree import build_runner_tree, get_flat_node_list
+		names = set()
+
+		def collect(holder):
+			for attr in ('opts', 'meta_opts'):
+				confs = getattr(holder, attr, None)
+				if isinstance(confs, dict):
+					names.update(k for k, v in confs.items() if isinstance(v, dict) and v.get('sensitive'))
+
+		collect(self)  # a direct Command / PythonRunner instance carries its own opts
+		task_classes = {cls.__name__: cls for cls in discover_tasks()}
+		for node in get_flat_node_list(build_runner_tree(self.config)):
+			cls = task_classes.get(node.name.split('/')[0]) if node.type == 'task' else None
+			if cls:
+				collect(cls)
+		return names
+
+	@property
 	def resolved_opts(self):
-		return {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+		opts = {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+		sensitive = self.sensitive_opt_names
+		if sensitive:
+			opts = {k: (REDACTED_OPT_VALUE if (k in sensitive and v) else v) for k, v in opts.items()}
+		return opts
 
 	@property
 	def resolved_print_opts(self):
@@ -315,9 +370,48 @@ class Runner:
 	def elapsed_human(self):
 		return humanize.naturaldelta(self.elapsed)
 
+	def _view(self, _type=None):
+		"""Return a StreamView of this runner's own results, scoped by its {type}_id and optionally
+		filtered to one or more output types. Backs every result property (results, findings, etc.)."""
+		names = None if _type is None else (_type if isinstance(_type, list) else [_type])
+		context = {**self.context, 'workspace_name': self.workspace_name}
+		# Hot path: scope to this runner's own report.json (fan-in already re-tags every descendant finding
+		# under its {type}_id); scanning the whole workspace per-access blocked the gevent hub (~100x slower).
+		# `report show` / cross-run aggregation keeps the full scan (no report_dir hint).
+		context['report_dir'] = str(self.reports_folder)
+		engine = QueryEngine(self.context.get('workspace_id'), context=context)
+		query = {f'_context.{self.config.type}_id': self.context.get(f'{self.config.type}_id')}
+		if names is not None:
+			query['_type'] = {'$in': names} if isinstance(_type, list) else _type
+		return StreamView(engine, query)
+
+	@property
+	def results(self):
+		return self._view()
+
 	@property
 	def targets(self):
-		return [r for r in self.results if isinstance(r, Target)]
+		return self._view('target')
+
+	@property
+	def infos(self):
+		return self._view('info')
+
+	@property
+	def warnings(self):
+		return self._view('warning')
+
+	@property
+	def findings(self):
+		return self._view([t.get_name() for t in FINDING_TYPES])
+
+	@property
+	def findings_count(self):
+		# Leaf emitter: own findings count is mirrored in memory (no store read). Aggregators
+		# (workflow / scan / chunked-parent) count their subtree from the store view.
+		if self._is_leaf_emitter:
+			return self._own_findings_count
+		return len(self.findings)
 
 	def _is_own_source(self, source):
 		"""Return True when *source* was generated by this runner or one of its chunks.
@@ -330,32 +424,14 @@ class Runner:
 		prefix = self.unique_name + '_'
 		return source.startswith(prefix) and source[len(prefix) :].isdigit()
 
-	@property
-	def self_targets(self):
-		return [r for r in self.results if isinstance(r, Target) and self._is_own_source(r._source)]
-
-	@property
-	def infos(self):
-		if self.config.type == 'task':
-			return [r for r in self.results if isinstance(r, Info) and self._is_own_source(r._source)]
-		return [r for r in self.results if isinstance(r, Info)]
-
-	@property
-	def warnings(self):
-		if self.config.type == 'task':
-			return [r for r in self.results if isinstance(r, Warning) and self._is_own_source(r._source)]
-		return [r for r in self.results if isinstance(r, Warning)]
-
 	def _owns_error(self, r):
 		"""Whether Error *r* was produced within this runner's own subtree.
 
 		- task: only errors from its own source (incl. its chunks).
-		- workflow: only its own subtree's errors. In a scan, results forward from one
-		  workflow to the next, so without this a later workflow would inherit an
-		  earlier sibling's Error and wrongly report FAILURE even when all its own
-		  tasks succeeded. A workflow's tasks are tagged
-		  ``_context['ancestor_id'] == <workflow config name>`` (see Workflow.run), and
-		  a workflow-level error carries the workflow's own ``_source``.
+		- workflow: only its own subtree's errors (its tasks carry
+		  ``_context['ancestor_id'] == <workflow config name>``; a workflow-level error carries
+		  the workflow's own ``_source``) — so a later workflow in a scan doesn't inherit an
+		  earlier sibling's Error and wrongly report FAILURE.
 		- scan / other composite: aggregate every descendant error (no siblings above).
 		"""
 		if self.config.type == 'task':
@@ -365,35 +441,64 @@ class Runner:
 		return True
 
 	@property
+	def _is_leaf_emitter(self):
+		"""True when this runner emits its OWN findings by running a tool — a task or a chunk. Such a
+		runner's metadata is mirrored in memory. Aggregators (workflow/scan, or a chunked-parent task
+		whose findings come from its chunks) have `has_children`/composite type and read the store."""
+		return self.config.type == 'task' and not self.has_children
+
+	@property
 	def errors(self):
-		return [r for r in self.results if isinstance(r, Error) and self._owns_error(r)]
+		# All error accessors (self_errors, errors_count, status) root here.
+		# Leaf emitter: serve own errors from the in-memory mirror — zero store reads. Aggregators
+		# (workflow/scan/chunked-parent) read their subtree's errors from the store, memoized once
+		# done (errors can't change).
+		if self._is_leaf_emitter:
+			return list(self._own_errors)
+		if self._final_errors is not None:
+			return self._final_errors
+		errs = [r for r in self._view('error') if self._owns_error(r)]
+		if self.done:
+			self._final_errors = errs
+		return errs
 
 	@property
 	def self_results(self):
 		return [r for r in self.results if self._is_own_source(r._source)]
 
 	@property
-	def findings(self):
-		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES))]
-
-	@property
-	def findings_count(self):
-		return len(self.findings)
+	def self_targets(self):
+		# Own targets are the runner's authoritative in-memory inputs (whether from the CLI or fed by
+		# a fan-in) — no store query. The fan-in-produced `targets` for the NEXT task stays a store read.
+		return [Target(name=t, _source=self.unique_name) for t in self.inputs]
 
 	@property
 	def self_findings(self):
-		return [r for r in self.results if isinstance(r, tuple(FINDING_TYPES)) if self._is_own_source(r._source)]
+		return [r for r in self.findings if self._is_own_source(r._source)]
 
 	@property
 	def self_errors(self):
-		return [r for r in self.results if isinstance(r, Error) and self._owns_error(r)]
+		return self.errors
 
 	@property
 	def self_findings_count(self):
+		# A task's subtree IS its own source, so its own count == findings_count (leaf: in-memory
+		# mirror; chunked-parent: store). A composite filters its subtree view by own source.
+		if self.config.type == 'task':
+			return self.findings_count
 		return len(self.self_findings)
 
 	@property
-	def status(self):
+	def errors_count(self):
+		"""Number of this runner's OWN errors — ONE store read of just the error records (few),
+		then the `_owns_error` filter. A pure {type}_id-scoped COUNT would over-report: a sibling's
+		FORWARDED error shares this run's scope but carries a foreign `ancestor_id`, so ownership
+		must be inspected per-record (can't be a bare count). `status` only needs the >0 check."""
+		return len(self.self_errors)
+
+	def _status(self, errors_count=None):
+		"""Runner status. Pass a pre-computed `errors_count` (e.g. from a batched read) to avoid
+		a second store round-trip; otherwise a count query runs only when the run is done."""
 		if not self.started:
 			return 'PENDING'
 		if self.revoked:
@@ -402,21 +507,42 @@ class Runner:
 			return 'SKIPPED'
 		if not self.done:
 			return 'RUNNING'
-		return 'FAILURE' if len(self.self_errors) > 0 else 'SUCCESS'
+		if errors_count is None:
+			errors_count = self.errors_count
+		return 'FAILURE' if errors_count > 0 else 'SUCCESS'
+
+	@property
+	def status(self):
+		# Recomputed each access — cheap now that a leaf's errors_count is an in-memory mirror and an
+		# aggregator's is a memoized store read (self._final_errors). Not memoized itself, so a late
+		# add_result(Error) is reflected immediately.
+		return self._status()
 
 	@property
 	def celery_state(self):
+		# ONE store read for the whole subtree, then derive state/results/count in memory (was 3
+		# independent _view reads re-parsing the same report.json). Rebuilt fresh on every polling
+		# tick, so it stays live — this de-dups within a single snapshot, it does not cache across.
+		view = list(self._view())
+		own_results = [r for r in view if self._is_own_source(r._source)]
+		# Ownership must be inspected (not a bare scope count) — see errors_count.
+		errors_count = sum(1 for r in view if getattr(r, '_type', None) == 'error' and self._owns_error(r))
+		finding_names = {t.get_name() for t in FINDING_TYPES}
+		if self.config.type == 'task':
+			count = sum(1 for r in view if getattr(r, '_type', None) in finding_names)
+		else:
+			count = sum(1 for r in view if getattr(r, '_type', None) in finding_names and self._is_own_source(r._source))  # noqa: E501
 		return {
 			'name': self.config.name,
 			'full_name': self.unique_name,
-			'state': self.status,
+			'state': self._status(errors_count),
 			'progress': self.progress,
-			'results': self.self_results,
+			'results': own_results,
 			'chunk': self.chunk,
 			'chunk_count': self.chunk_count,
 			'chunk_info': f'{self.chunk}/{self.chunk_count}' if self.chunk and self.chunk_count else '',
 			'celery_id': self.context['celery_id'],
-			'count': self.self_findings_count,
+			'count': count,
 			'descr': self.description,
 		}
 
@@ -464,46 +590,54 @@ class Runner:
 		"""
 		return list(self.__iter__())
 
-	def __getstate__(self):
-		"""Custom pickle: strip hook functions so dynamically-loaded modules
-		(e.g. secator.hooks.cockpit) don't cause ModuleNotFoundError on workers.
-		Driver names in context['drivers'] are used to re-load hooks in __setstate__.
+	def _apply_context_drivers(self):
+		"""Register hooks for drivers named in ``context['drivers']``.
+
+		``context['drivers']`` is the cross-process source of truth for driver
+		hooks. Loading them at construction (rather than on unpickle) means every
+		runner gets its driver hooks exactly once, wherever it is built: the
+		initial dispatch, a chunk task rebuilt by ``run_command`` via
+		``task_cls(targets, **opts)``, and a chord callback runner. Because
+		``register_hooks()`` is idempotent, drivers also supplied explicitly via
+		``self._hooks`` (CLI-resolved hooks or library callers passing
+		``hooks=HOOKS``) are not registered twice.
+
+		This replaces the former ``__getstate__``/``__setstate__`` pair: with the
+		driver modules discovered at worker startup (``celery.py`` ``IN_WORKER``),
+		hook functions now pickle/unpickle natively by qualified name, so runners
+		no longer need to strip hooks on pickle and rebuild them on every unpickle
+		(which, under ``replace``/chord synchronization, re-registered hooks
+		O(chunks) times and flooded ``SECATOR_DEBUG=runner`` logs).
 		"""
-		state = self.__dict__.copy()
-		state['_hooks'] = {}
-		state['resolved_hooks'] = {name: [] for name in state['resolved_hooks']}
-		return state
+		from secator.loader import apply_default_drivers, discover_external_drivers, order_drivers
+		# json is the CORE default store: EVERY run — CLI and library (Workflow(...).run(), tests) —
+		# is store-backed, so `results` (the StreamView) always has a store to read. mongodb still
+		# wins when active (priority). Stamped into context so descendants inherit it.
+		drivers = apply_default_drivers(self.context.get('drivers', []), CONFIG.addons.mongodb.enabled)
+		self.context['drivers'] = drivers
+		if not drivers:
+			return
 
-	def __setstate__(self, state):
-		"""Custom unpickle: restore runner state then re-register hooks."""
-		self.__dict__.update(state)
-		drivers = self.context.get('drivers', [])
-		if drivers:
-			from secator.loader import discover_external_drivers, order_drivers
-
-			discover_external_drivers()
-			# Order by canonical priority so authoritative backends (e.g. mongodb)
-			# register their hooks before relay drivers (e.g. api). Hook lists are
-			# concatenated in driver order, so this decides hook execution order.
-			drivers = order_drivers(drivers)
+		discover_external_drivers()
+		# Order by canonical priority so authoritative backends (e.g. mongodb)
+		# register their hooks before relay drivers (e.g. api). Hook lists are
+		# concatenated in driver order, so this decides hook execution order.
+		drivers = order_drivers(drivers)
 		hooks_list = []
 		for driver in drivers:
 			driver_hooks = import_dynamic(f'secator.hooks.{driver}', 'HOOKS')
 			if driver_hooks:
 				hooks_list.append(driver_hooks)
-		merged_hooks = {}
-		if hooks_list:
-			from secator.utils import deep_merge_dicts
+		if not hooks_list:
+			return
+		from secator.utils import deep_merge_dicts
 
-			merged_hooks = deep_merge_dicts(*hooks_list)
+		merged_hooks = deep_merge_dicts(*hooks_list)
 		# Driver HOOKS dicts are keyed by base runner class (Scan/Workflow/Task). A task
 		# runner's class is its command subclass (e.g. ``whois``), never the base ``Task``,
 		# so register_hooks()' exact ``hooks.get(self.__class__)`` lookup would miss the
-		# ``Task`` entry and the task's on_end hook would never re-register on unpickle.
-		# That left chunk-parent tasks — the only tasks pickled into a chord callback —
-		# stuck in RUNNING because mark_runner_completed() ran zero on_end hooks. Flatten
-		# to the base runner type's hooks first (same convention as Workflow handing
-		# ``self._hooks.get(Task)`` to its task signatures) so they restore in the worker.
+		# ``Task`` entry. Flatten to the base runner type's hooks first (same convention as
+		# Workflow handing ``self._hooks.get(Task)`` to its task signatures).
 		from secator.runners import Scan, Task, Workflow
 
 		base_cls = {'scan': Scan, 'workflow': Workflow, 'task': Task}.get(self.config.type)
@@ -574,8 +708,8 @@ class Runner:
 			yield from self.results_buffer
 			self.results_buffer = []
 
-			# If any errors happened during validation, exit
-			if self.self_errors:
+			# If any errors happened during validation, exit (count query — no materialization)
+			if self.errors_count:
 				self._finalize()
 				return
 
@@ -583,6 +717,16 @@ class Runner:
 			for item in self.yielder():
 				yield from self._process_item(item)
 				self.run_hooks('on_interval', sub='item')
+
+			# Backfill store findings the live celery poll never surfaced. Tasks return topology-only
+			# now, so a fast task can finish before a throttled RUNNING update ever publishes its
+			# findings — and the `-json`/UI output that consumes this stream would otherwise be empty.
+			# Stream via the StreamView (peak memory stays flat) and skip anything already yielded
+			# during polling (self.uuids). Applies to both Command and Workflow (their yielders differ).
+			if not self.sync and not self.no_process:
+				for item in self.results:
+					if getattr(item, '_uuid', None) not in self.uuids:
+						yield from self._process_item(item)
 
 		except BaseException as e:
 			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
@@ -633,8 +777,26 @@ class Runner:
 	def _run_extractors(self):
 		"""Run extractors on results and targets."""
 		self.debug('running extractors', sub='init')
-		ctx = {'opts': DotMap(self.run_opts), 'targets': self.inputs, 'ancestor_id': self.ancestor_id}
-		inputs, run_opts, errors = run_extractors(self.results, self.run_opts, self.inputs, ctx=ctx, dry_run=self.dry_run)
+		# Scope the extractor's store query to THIS run's report.json instead of scanning every report
+		# in the workspace (the fan-in re-persists descendants up, so the run's own file holds the
+		# complete set — same scoping Runner._view/report.py use). Gate on the file existing so a run
+		# without a live file falls back to the full scan. Only meaningful for the local json backend.
+		rf = self.reports_folder
+		report_dir = str(rf) if rf and (Path(rf) / 'report.json').exists() else None
+		ctx = {
+			'opts': DotMap(self.run_opts),
+			'targets': self.inputs,
+			'ancestor_id': self.ancestor_id,
+			'workspace_id': self.context.get('workspace_id'),
+			'workspace_name': self.workspace_name,
+			'drivers': self.context.get('drivers', []),
+			'results': [],  # extractors query the store; no in-memory results at init
+			'report_dir': report_dir,
+			'scan_id': self.context.get('scan_id'),
+			'workflow_id': self.context.get('workflow_id'),
+			'task_id': self.context.get('task_id'),
+		}
+		inputs, run_opts, errors = run_extractors([], self.run_opts, self.inputs, ctx=ctx, dry_run=self.dry_run)
 		for error in errors:
 			self.add_result(error)
 		self.inputs = sorted(list(set(inputs)))
@@ -646,6 +808,22 @@ class Runner:
 		for k, v in self.config.opts.items():
 			if k not in self.run_opts and v['default']:
 				self.run_opts[k] = v['default']
+
+	def _persist_to_store(self, item):
+		"""Persist an item to the store when on_item didn't run (dry_run, or a Skipped Info emitted
+		while a runner temporarily disables hooks during build_celery_workflow).
+
+		Runs the resolved on_item hooks (update_finding) directly, bypassing the enable_hooks gate that
+		run_hooks enforces, so the `results` view still serves these items. No in-memory buffer. No-op
+		when no store driver is registered.
+		"""
+		if not is_output_type(item):
+			return
+		for hook in self.resolved_hooks.get('on_item', []):
+			try:
+				hook(self, item)
+			except Exception as e:
+				self.debug(f'persist-to-store hook failed: {e}', sub='item')
 
 	def add_result(self, item, print=True, output=True, hooks=True, queue=True):
 		"""Add item to runner results.
@@ -665,6 +843,12 @@ class Runner:
 		item._context = self.context.copy()
 		item._context.update(ctx)
 		item._context['ancestor_id'] = ctx.get('ancestor_id') or self.ancestor_id
+		# The runner OWNS every item it adds, so its own scope id must win over any id the item
+		# arrived pre-tagged with — otherwise a Command that parses a foreign `secator -json` stream
+		# (its findings carry the producing task's id) can't find its own results via the store query.
+		own_id = self.context.get(f'{self.config.type}_id')
+		if own_id:
+			item._context[f'{self.config.type}_id'] = own_id
 
 		# Set uuid
 		if not item._uuid:
@@ -704,15 +888,26 @@ class Runner:
 			self.debug(f'update runner celery_ids_map from remote: {item.task_id}', sub='item')
 
 		# If output type, run on_item hooks
-		elif isinstance(item, tuple(OUTPUT_TYPES)) and hooks:
+		elif is_output_type(item) and hooks:
 			item = self.run_hooks('on_item', item, sub='item')
 			if not item:
 				return
 
-		# Add item to results
+		# Fan out to the store via on_item (run above); the `results` view reads it back. When hooks
+		# are off (dry_run, or the build-time Skipped Info emitted while a runner temporarily disables
+		# hooks) on_item didn't fire, so persist to the store directly — no in-memory buffer.
 		self.uuids.add(item._uuid)
-		self.results.append(item)
+		if not self.enable_hooks:
+			self._persist_to_store(item)
 		self.results_count += 1
+		# Mirror own errors + findings count in memory: a leaf runner's status/errors_count/findings_count
+		# then never re-read the store. Composites/chunked-parents (has_children) aggregate via the store.
+		if self._is_own_source(item._source):
+			if isinstance(item, Error):
+				self._own_errors.append(item)
+				self._final_errors = None  # invalidate the aggregator memo — status must reflect a new error
+			elif isinstance(item, tuple(FINDING_TYPES)):
+				self._own_findings_count += 1
 		if output and isinstance(item, (Info, Warning, Error)):
 			self.output += repr(item) + '\n'
 		if print:
@@ -827,44 +1022,6 @@ class Runner:
 			kwargs['id'] = self.id
 		debug(*args, **kwargs)
 
-	def mark_duplicates(self):
-		"""Check for duplicates and mark items as duplicates.
-
-		Uses hash-based grouping (O(n)) instead of pairwise comparison (O(n²)).
-		"""
-		if not self.enable_duplicate_check:
-			return
-		start_time = time()
-		self.debug('running duplicate check', sub='end')
-
-		# Group items by their compare key (O(n))
-		from collections import defaultdict
-
-		groups = defaultdict(list)
-		for item in self.results:
-			groups[item._compare_key()].append(item)
-
-		# Process only groups with duplicates
-		for key, items in groups.items():
-			if len(items) < 2:
-				continue
-			# Pick the main item (newest by timestamp)
-			main = max(items)
-			for dupe in items:
-				if dupe._uuid == main._uuid:
-					continue
-				self.debug('found duplicate', obj=dupe.toDict(), obj_breaklines=True, sub='item.duplicate', verbose=True)
-				dupe._duplicate = True
-				dupe = self.run_hooks('on_item', dupe, sub='item.duplicate')
-				dupe = self.run_hooks('on_duplicate', dupe, sub='item.duplicate')
-				if dupe._uuid not in main._related:
-					main._related.append(dupe._uuid)
-			main._duplicate = False
-			main = self.run_hooks('on_duplicate', main, sub='item.duplicate')
-
-		total_time = time() - start_time
-		self.debug(f'duplicate check completed in {total_time:.2f} seconds', sub='end')
-
 	def yielder(self):
 		"""Base yielder implementation.
 
@@ -964,10 +1121,12 @@ class Runner:
 				'progress': self.progress,
 				'last_updated_db': self.last_updated_db,
 				'context': {**self.context, 'celery_ids': list(self.celery_ids_map.keys())},
-				'errors': [e.toDict() for e in self.errors],
-				'warnings': [w.toDict() for w in self.warnings],
 			}
 		)
+		# Note: serialized config/opts intentionally not scrubbed. An option's `default` must
+		# never be a secret by convention (tasks use `passed or CONFIG.addons.*` at runtime,
+		# not a config-sourced default), so config/opts carry no secret. The user-supplied
+		# value is redacted where it actually lands: run_opts (resolved_opts) and the cmd.
 		return data
 
 	def run_hooks(self, hook_type, *args, sub='hooks'):
@@ -1046,24 +1205,33 @@ class Runner:
 	def register_hooks(self, hooks):
 		"""Register hooks.
 
+		Idempotent: a hook already present in ``resolved_hooks[key]`` is skipped
+		(and not re-logged). This lets the same driver be supplied via both
+		``self._hooks`` (e.g. library callers passing ``hooks=HOOKS``) and
+		``context['drivers']`` without registering — or logging — it twice.
+
 		Args:
 			hooks (dict[str, List[Callable]]): List of hooks to register.
 		"""
 		for key in self.resolved_hooks:
+			registered = self.resolved_hooks[key]
+
 			# Register class + derived class hooks
 			class_hook = getattr(self, key, None)
-			if class_hook:
+			if class_hook and class_hook not in registered:
 				fun = self.get_func_path(class_hook)
 				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
-				self.resolved_hooks[key].append(class_hook)
+				registered.append(class_hook)
 
-			# Register user hooks
-			user_hooks = hooks.get(self.__class__, {}).get(key, [])
+			# Register user hooks (copy so we never mutate a caller's/shared list)
+			user_hooks = list(hooks.get(self.__class__, {}).get(key, []))
 			user_hooks.extend(hooks.get(key, []))
 			for hook in user_hooks:
+				if hook in registered:
+					continue
 				fun = self.get_func_path(hook)
 				self.debug('hook registered', obj={'name': key, 'fun': fun}, sub='init')
-			self.resolved_hooks[key].extend(user_hooks)
+				registered.append(hook)
 
 	def register_validators(self, validators):
 		"""Register validators.
@@ -1104,8 +1272,9 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = datetime.fromtimestamp(time(), timezone.utc)
-		self.debug(f'completed (status: {self.status}, sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})', sub='end')  # noqa: E501
-		self.mark_duplicates()
+		# Lazy: `self.status` (a store count query) is computed ONLY when the 'end' debug sub is
+		# active — the lazy callback runs after debug()'s enable-gate, so it's free when debug is off.
+		self.debug('completed', sub='end', lazy=lambda m: f'{m} (status: {self.status}, sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})')  # noqa: E501
 		self.run_hooks('on_end', sub='end')
 		self.export_profiler()
 		self.log_results()
@@ -1136,10 +1305,11 @@ class Runner:
 		if self.has_parent:
 			return
 		# fmt: off
+		status = self.status  # one store count query, reused for both the color and the label
 		info = Info(
 			message=(
 				f'{self.config.type.capitalize()} {format_runner_name(self)} finished with status '
-				f'[bold {STATE_COLORS[self.status]}]{self.status}[/] and found [bold]{len(self.findings)}[/] findings'
+				f'[bold {STATE_COLORS[status]}]{status}[/] and found [bold]{self.findings_count}[/] findings'
 			)
 		)
 		# fmt: on
@@ -1152,7 +1322,7 @@ class Runner:
 				exporters_str = ', '.join([f'[bold cyan]{e.__name__.replace("Exporter", "").lower()}[/]' for e in self.exporters])
 				self._print(Info(message=f'Exporting results with exporters: {exporters_str}'), rich=True)
 			report = Report(self, exporters=self.exporters)
-			report.build()
+			report.build(stream=True)   # live-run exporters stream per-type; peak stays flat
 			report.send()
 			self.report = report
 
@@ -1263,7 +1433,7 @@ class Runner:
 		count_map = {}
 		for output_type in FINDING_TYPES:
 			name = output_type.get_name()
-			count = len([r for r in self.results if isinstance(r, output_type)])
+			count = len(self._view(name))
 			if count > 0:
 				count_map[name] = count
 		return count_map
@@ -1310,7 +1480,8 @@ class Runner:
 	def _validate_inputs(self, inputs):
 		"""Input type is not supported by runner"""
 		# supported_types = ', '.join(self.config.input_types) if self.config.input_types else 'any'
-		for _input in inputs:
+		# iterate over a copy: we mutate self.inputs (same list) via .remove() below
+		for _input in list(inputs):
 			input_type = autodetect_type(_input)
 			if self.config.input_types and input_type not in self.config.input_types:
 				runner_name = format_runner_name(self)

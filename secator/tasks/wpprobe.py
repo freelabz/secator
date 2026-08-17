@@ -10,6 +10,8 @@ from secator.definitions import OUTPUT_PATH, THREADS, URL
 from secator.output_types import Vulnerability, Tag, Info, Warning, Error
 from secator.tasks._categories import OPTS
 
+WPPROBE_MODES = ['scan', 'update', 'update-db']
+
 
 @task()
 class wpprobe(Command):
@@ -22,7 +24,7 @@ class wpprobe(Command):
 	input_flag = '-u'
 	opt_prefix = '-'
 	opts = {
-		'mode': {'type': click.Choice(['scan', 'update', 'update-db']), 'default': 'scan', 'help': 'WPProbe mode', 'required': True, 'internal': True},  # noqa: E501
+		'mode': {'type': click.Choice(WPPROBE_MODES), 'default': 'scan', 'help': 'WPProbe mode', 'required': True, 'internal': True},  # noqa: E501
 		'output_path': {'type': str, 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},  # noqa: E501
 	}
 	meta_opts = {
@@ -41,6 +43,11 @@ class wpprobe(Command):
 	@staticmethod
 	def on_cmd(self):
 		mode = self.get_opt_value('mode')
+		# `mode` is `internal` (not shlex-quoted) and interpolated into the command
+		# below; click.Choice is only enforced by the CLI parser, so re-validate it
+		# here for the API/Celery construction path.
+		if mode not in WPPROBE_MODES:
+			raise ValueError(f'Invalid mode: {mode}')
 		if mode == 'update' or mode == 'update-db':
 			self.cmd = f'{wpprobe.cmd} {mode}'
 			return

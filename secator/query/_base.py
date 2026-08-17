@@ -78,10 +78,7 @@ class QueryBackend(ABC):
 		if exclude_fields is None:
 			exclude_fields = []
 		safe_query = self._merge_query(query)
-		debug_ctx = {k: v for k, v in self.context.items() if k != 'results'}
-		debug('context', sub=f'query.{self.name}', obj=debug_ctx)
-		if hasattr(self, '_results') and self._results is not None:
-			debug(f'{len(self._results)} pre-loaded results', sub=f'query.{self.name}')
+		debug('context', sub=f'query.{self.name}', obj=self.context)
 		debug('search', sub=f'query.{self.name}', obj=safe_query)
 		results = self._execute_search(safe_query, limit, exclude_fields)
 		debug(f'{len(results)} results', sub=f'query.{self.name}')
@@ -91,6 +88,19 @@ class QueryBackend(ABC):
 	def _execute_search(self, query: dict, limit: int, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
 		"""Backend-specific search implementation."""
 		pass
+
+	def iterate(self, query: dict, batch_size: int = 1000):
+		"""Stream matching findings in batches (never materializes all N). Yields lists of dicts."""
+		safe_query = self._merge_query(query)
+		yield from self._execute_iterate(safe_query, batch_size)
+
+	def _execute_iterate(self, query: dict, batch_size: int = 1000):
+		"""Default: no native cursor — chunk the full result, so this path DOES materialize all N.
+		Only the api backend still uses it (a single limit=0 fetch); json/sqlite/mongodb override
+		with a true streaming cursor. TODO: paginate the api backend via its skip/limit endpoint."""
+		results = self._execute_search(query, limit=0)
+		for i in range(0, len(results), batch_size):
+			yield results[i:i + batch_size]
 
 	def count(self, query: dict) -> int:
 		"""Count matching findings with enforced base query."""

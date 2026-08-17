@@ -8,13 +8,14 @@ from pathlib import Path
 import glob
 import importlib
 import inspect
+import re
 import sys
 
 
 def _file_has_hooks(path):
 	"""Check if a Python file contains a HOOKS variable (driver indicator)."""
 	try:
-		return 'HOOKS =' in path.read_text()
+		return bool(re.search(r'\bHOOKS\s*=', path.read_text()))
 	except Exception:
 		return False
 
@@ -76,7 +77,9 @@ def get_configs_by_type(type):
 @cache
 def discover_tasks():
 	"""Find all secator tasks (internal + external)."""
-	return discover_internal_tasks() + discover_external_tasks()
+	external = discover_external_tasks()
+	internal = discover_internal_tasks()
+	return external + internal
 
 
 @cache
@@ -123,6 +126,23 @@ def discover_external_tasks():
 			task_name = path.stem
 			module_name = f'secator.tasks.{task_name}'
 
+			# Idempotent import: reuse an already-registered module instead of re-executing
+			# the file. Re-exec mints a SECOND class object and overwrites sys.modules, so a
+			# task instance built from the first object can no longer be pickled ("not the same
+			# object as ...") — the #1286 sync-mode chunk crash (task_store_eager_result pickles
+			# the eager chord result in-process). This runs twice when an external task imports a
+			# secator.tasks.* submodule: that triggers secator/tasks/__init__.py -> discover_tasks()
+			# re-entrantly while this @cache'd discovery is still executing (functools.cache is not
+			# re-entrancy safe). If the module is mid-initialisation the class isn't defined yet, so
+			# skip it here — the in-progress exec that registered it appends it when it completes.
+			existing = sys.modules.get(module_name)
+			if existing is not None:
+				cls = getattr(existing, task_name, None)
+				if inspect.isclass(cls):
+					cls.__external__ = True
+					output.append(cls)
+				continue
+
 			# console.print(f'Importing module {module_name} from {path}')
 			spec = importlib.util.spec_from_file_location(module_name, path)
 			if not spec:
@@ -137,13 +157,23 @@ def discover_external_tasks():
 
 			# console.print(f'Checking that {module} contains task {task_name}')
 			if not hasattr(module, task_name):
+				sys.modules.pop(module_name, None)
 				console.print(f'[bold orange1]Could not load external task "{task_name}" from module {path.name}[/] ({path})')
 				continue
 			cls = getattr(module, task_name)
+			if not inspect.isclass(cls):
+				# cls is a module reference, not a class — likely caused by a circular
+				# import (e.g. the file does `from secator.tasks import <task_name>`
+				# while secator.tasks is still initialising).  Clean up sys.modules so
+				# the entry doesn't shadow the real task later.
+				sys.modules.pop(module_name, None)
+				console.print(f'[bold orange1]Could not load external task "{task_name}" from {path.name}: not a class[/] ({path})')
+				continue
 			debug(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})', sub='loader')
 			cls.__external__ = True
 			output.append(cls)
 		except Exception as e:
+			sys.modules.pop(module_name, None)
 			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')
 	sys.dont_write_bytecode = prev_state
 	return output
@@ -263,6 +293,40 @@ def order_drivers(drivers):
 			return (1, 0)
 
 	return sorted(dict.fromkeys(drivers), key=sort_key)
+
+
+# Backend drivers that provide their own queryable store. If one of these (or the
+# mongodb addon) is active, we must NOT force the local json driver on top of it.
+STORE_DRIVERS = {'mongodb', 'sqlite', 'api'}
+
+
+def apply_default_drivers(drivers, mongodb_enabled):
+	"""Default local runs to the ``json`` driver so there is ALWAYS a queryable store.
+
+	Once the inter-task result payload is dropped, every consumer reads findings from
+	the store instead of the returned results. Locally that store is the per-runner
+	``report.json`` written live by the json driver — so a bare run needs the json
+	driver active. Applied ONLY when no store backend is otherwise active: no
+	mongodb/sqlite/api driver in ``drivers`` and the mongodb addon disabled. In prod
+	(mongodb addon enabled) mongodb still wins and json is not forced.
+
+	Args:
+		drivers (list[str]): Resolved driver names (config defaults + CLI --driver).
+		mongodb_enabled (bool): Whether the mongodb addon is enabled.
+
+	Returns:
+		list[str]: Drivers unchanged if a store backend is already active; otherwise
+			``json`` appended so there is always a queryable store.
+	"""
+	if STORE_DRIVERS & set(drivers):
+		return drivers
+	# No explicit store driver (even with the mongodb addon on but mongodb absent from
+	# drivers.defaults): default to json so SOMETHING writes the store. With the celery
+	# result payload dropped, an empty drivers list registers no persistence hooks and
+	# the StreamView would read an empty backend (data integrity).
+	if 'json' not in drivers:
+		drivers = drivers + ['json']
+	return drivers
 
 
 @cache

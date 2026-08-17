@@ -17,7 +17,7 @@ from secator.runners import Scan, Task, Workflow
 from secator.template import get_config_options
 from secator.tree import build_runner_tree, prune_runner_tree
 from secator.utils import deduplicate, expand_input, get_command_category
-from secator.loader import get_configs_by_type, get_available_drivers, get_available_exporters
+from secator.loader import get_configs_by_type, get_available_drivers, get_available_exporters, apply_default_drivers
 from secator.completion import complete_profiles, complete_workspaces, complete_drivers, complete_exporters
 
 
@@ -104,6 +104,7 @@ def decorate_command_options(opts):
 			conf.pop('process', None)
 			conf.pop('pre_process', None)
 			conf.pop('requires_sudo', None)
+			conf.pop('sensitive', None)
 			conf.pop('prefix', None)
 			choices = conf.pop('choices', None)
 			applies_to = conf.pop('applies_to', None)
@@ -113,6 +114,7 @@ def decorate_command_options(opts):
 			# Keep shell_complete in conf - it's a valid click.option parameter
 			long = f'--{opt_name}'
 			short = f'-{short_opt}' if short_opt else f'-{opt_name}'
+			conf['help'] = conf.get('help', '')
 			if reverse:
 				if opposite:
 					long += f'/--{opposite}'
@@ -287,6 +289,9 @@ def register_runner(cli_endpoint, config):
 		# defaults so a run can opt out of e.g. the default api driver and stay local.
 		if 'local' in drivers:
 			drivers = []
+		# json = implicit local default: guarantee a queryable store when no store
+		# backend (mongodb/sqlite/api driver, or the mongodb addon) is otherwise active.
+		drivers = apply_default_drivers(drivers, CONFIG.addons.mongodb.enabled)
 		supported_drivers = get_available_drivers()
 		context['drivers'] = []
 		for driver in drivers:
