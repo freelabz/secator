@@ -54,6 +54,11 @@ class TestFileDetectionHelpers(unittest.TestCase):
         f = self._tmp_file('hooks_yes.py', 'HOOKS = {}\n')
         self.assertTrue(_file_has_hooks(f))
 
+    def test_file_has_hooks_no_space_true(self):
+        from secator.loader import _file_has_hooks
+        f = self._tmp_file('hooks_nospace.py', 'HOOKS={}\n')
+        self.assertTrue(_file_has_hooks(f))
+
     def test_file_has_hooks_false(self):
         from secator.loader import _file_has_hooks
         f = self._tmp_file('hooks_no.py', 'class Foo:\n    pass\n')
@@ -417,6 +422,15 @@ class TestDiscoverExternalTasksSkipsDriversAndExporters(unittest.TestCase):
         result_names = [cls.__name__ for cls in result]
         self.assertNotIn('skiptest_driver', result_names)
 
+    def test_driver_files_hooks_no_space_not_loaded_as_tasks(self):
+        """Files containing 'HOOKS=' (no space) are excluded from task discovery."""
+        path = self.template_dir / 'skiptest_nospace.py'
+        path.write_text('HOOKS={}\n')
+        from secator.loader import discover_external_tasks
+        result = discover_external_tasks()
+        result_names = [cls.__name__ for cls in result]
+        self.assertNotIn('skiptest_nospace', result_names)
+
     def test_exporter_files_not_loaded_as_tasks(self):
         """Files containing '(Exporter)' are excluded from task discovery."""
         path = self.template_dir / 'skiptest_exporter.py'
@@ -425,6 +439,64 @@ class TestDiscoverExternalTasksSkipsDriversAndExporters(unittest.TestCase):
         result = discover_external_tasks()
         result_names = [cls.__name__ for cls in result]
         self.assertNotIn('SkipTestExporter', result_names)
+
+    def test_non_class_task_attribute_not_loaded(self):
+        """Files where the task attribute is not a class are excluded from task discovery."""
+        path = self.template_dir / 'skiptest_nonclass.py'
+        # The file has an attribute with the module's own name but it's not a class
+        path.write_text('skiptest_nonclass = "not a class"\n')
+        from secator.loader import discover_external_tasks
+        result = discover_external_tasks()
+        result_names = [cls.__name__ for cls in result]
+        self.assertNotIn('skiptest_nonclass', result_names)
+        self.assertNotIn('secator.tasks.skiptest_nonclass', sys.modules)
+
+
+class TestDiscoverExternalTasksIdempotent(unittest.TestCase):
+    """An external task class must stay pickle-stable across repeated discovery (regression for #1286).
+
+    When discovery runs more than once in a process — e.g. an external task imports a
+    ``secator.tasks.*`` submodule, which re-enters ``discover_tasks()`` while the ``@cache``'d
+    ``discover_external_tasks()`` is still executing (``functools.cache`` is not re-entrancy safe)
+    — re-executing the file used to mint a SECOND class object and overwrite ``sys.modules``. A
+    task instance built from the first object could then no longer be pickled ("not the same
+    object as ..."), which crashed ``--sync`` chunked runs where the eager chord result is
+    pickled in-process (``task_store_eager_result``).
+    """
+
+    def setUp(self):
+        self.template_dir = CONFIG.dirs.templates
+        self.template_dir.mkdir(parents=True, exist_ok=True)
+        self.task_path = self.template_dir / 'idemtest_task.py'
+        self.task_path.write_text('class idemtest_task:\n    __external__ = False\n')
+        clear_modules()
+        _clear_loader_caches()
+
+    def tearDown(self):
+        if self.task_path.exists():
+            self.task_path.unlink()
+        for key in list(sys.modules.keys()):
+            if 'idemtest_task' in key:
+                del sys.modules[key]
+        _clear_loader_caches()
+
+    def _discover_one(self):
+        from secator.loader import discover_external_tasks
+        return next(c for c in discover_external_tasks() if c.__name__ == 'idemtest_task')
+
+    def test_repeated_discovery_keeps_class_pickle_stable(self):
+        import pickle
+        from secator.loader import discover_external_tasks
+        cls1 = self._discover_one()
+        # Simulate discovery running a second time (re-entrant import / cache miss).
+        discover_external_tasks.cache_clear()
+        cls2 = self._discover_one()
+        # Idempotent: the second run must not mint a duplicate class object...
+        self.assertIs(cls1, cls2)
+        # ...and sys.modules must still resolve the name to that same object...
+        self.assertIs(getattr(sys.modules[cls1.__module__], 'idemtest_task'), cls1)
+        # ...so the first object stays pickleable (the #1286 --sync chunk failure).
+        pickle.dumps(cls1)
 
 
 if __name__ == '__main__':

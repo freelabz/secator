@@ -69,5 +69,21 @@ class TestMongoDocumentTooLarge(unittest.TestCase):
         self.assertIn("16MB", warnings[0].message)
 
 
+class TestMongoTaggedDefault(unittest.TestCase):
+    """#1315: new findings must be stamped `_tagged: False` on insert so tag_duplicates
+    can index-seek untagged findings instead of a `$ne: True` whole-workspace scan."""
+
+    def test_new_finding_stamped_untagged_on_insert(self):
+        from bson.objectid import ObjectId
+        client = MagicMock()
+        coll = client.main.__getitem__.return_value
+        coll.insert_one.return_value = MagicMock(inserted_id=ObjectId())
+        with patch.object(mongodb, "get_mongodb_client", return_value=client):
+            mongodb.update_finding(_FakeRunner(), Info(message="x"))
+        doc = coll.insert_one.call_args[0][0]
+        self.assertIn("_tagged", doc)
+        self.assertFalse(doc["_tagged"])
+
+
 if __name__ == "__main__":
     unittest.main()

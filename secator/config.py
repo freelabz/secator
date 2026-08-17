@@ -74,6 +74,7 @@ class Celery(StrictModel):
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
+	task_max_retries: int = Field(default=-1, ge=-1)  # max worker-loss redeliveries before abandon (-1 = disabled)
 	task_max_timeout: int = -1
 	task_memory_limit_mb: int = -1
 	worker_max_tasks_per_child: int = 20
@@ -82,6 +83,10 @@ class Celery(StrictModel):
 	worker_kill_after_task: bool = False
 	worker_kill_after_idle_seconds: int = -1
 	worker_command_verbose: bool = False
+	# Cancel (and redeliver, with acks_late) a worker's in-flight tasks when it loses the broker
+	# connection, instead of letting them run detached as zombies. Part of the OOM/eviction
+	# robustness layer; enable in deployment alongside task_acks_late + task_reject_on_worker_lost.
+	worker_cancel_long_running_tasks_on_connection_loss: bool = False
 
 
 class Cli(StrictModel):
@@ -126,17 +131,21 @@ class HTTP(StrictModel):
 	default_header: str = 'User-Agent: ' + USER_AGENTS['chrome_134.0_win10']
 
 
+# The json driver writes each runner's report.json live (findings + execution types), so the
+# end-of-run JSON exporter is redundant — and worse, it overwrites the driver's richer live file
+# with a findings-only snapshot. Drop json from the default exporters (still available via
+# `-o json`); report.json now comes from the json driver.
 class Tasks(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	exporters: List[str] = ['csv', 'txt', 'markdown']
 	overrides: Dict[str, Dict[str, Any]] = {}
 
 
 class Workflows(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	exporters: List[str] = ['csv', 'txt', 'markdown']
 
 
 class Scans(StrictModel):
-	exporters: List[str] = ['json', 'csv', 'txt', 'markdown']
+	exporters: List[str] = ['csv', 'txt', 'markdown']
 
 
 class Profiles(StrictModel):
@@ -201,6 +210,7 @@ class MongodbAddon(StrictModel):
 		'is_false_positive',
 		'is_acknowledged',
 		'verified',
+		'status',
 		'tags',
 	]
 
@@ -216,6 +226,7 @@ class SqliteAddon(StrictModel):
 		'is_false_positive',
 		'is_acknowledged',
 		'verified',
+		'status',
 		'tags',
 	]
 
@@ -758,10 +769,8 @@ class Config(DotMap):
 		Args:
 			string (str): YAML string.
 		"""
-		from rich.syntax import Syntax
-
-		data = Syntax(string, 'yaml', theme='ansi-dark', padding=0, background_color='default')
-		console_stdout.print(data)
+		from secator.utils import render_yaml
+		console_stdout.print(render_yaml(string))
 
 	@staticmethod
 	def dump(config, partial=True):
@@ -883,6 +892,9 @@ class Config(DotMap):
 			key = var[len(prefix):]  # remove prefix
 			path = self._resolve_env_key(key)
 			if path is None:
+				# Unknown / invalid override key: skip it (don't let one bad env var break the config).
+				if print_errors:
+					console.print(f'[bold orange1]{var} (unknown config key, ignored)[/]')
 				continue
 			self.set(path, os.environ[var], set_partial=False)
 			if not self.validate(print_errors=False) and print_errors:
@@ -905,21 +917,19 @@ class Config(DotMap):
 		if key in self._keymap:
 			return '.'.join(k.lower() for k in self._keymap[key])
 
-		# Otherwise, find the longest keymap prefix that resolves to a dict field, then resolve the
-		# remaining dynamic segments under it.
+		# Otherwise, find the longest keymap prefix that resolves to a *dynamic* dict field (one typed
+		# as a Dict in the schema, e.g. tasks.overrides / wordlists.defaults), then resolve the
+		# remaining dynamic segments under it. Typed sub-models (e.g. addons, celery) are dicts at
+		# runtime too, but have a fixed schema (extra='forbid'): an unknown sub-key there is invalid
+		# and must be skipped, not written (else it would clobber the typed model with a plain dict).
 		best = None
 		for map_key, path_parts in self._keymap.items():
 			if not key.startswith(map_key + '_'):
 				continue
-			target = self
-			try:
-				for part in path_parts:
-					target = target[part]
-			except (KeyError, TypeError):
+			if not Config._is_dynamic_dict_path(path_parts):
 				continue
-			if isinstance(target, MutableMapping) and not isinstance(target, str):
-				if best is None or len(map_key) > len(best[0]):
-					best = (map_key, path_parts)
+			if best is None or len(map_key) > len(best[0]):
+				best = (map_key, path_parts)
 		if best is None:
 			return None
 
@@ -938,6 +948,35 @@ class Config(DotMap):
 
 		# Generic single-level dynamic dict (e.g. wordlists.defaults): the remainder is the leaf key.
 		return f'{dotted_prefix}.{remainder}'
+
+	@staticmethod
+	def _is_dynamic_dict_path(path_parts):
+		"""Return True if a config path points to a dynamic ``Dict`` field in the schema.
+
+		Walks the ``SecatorConfig`` field annotations along ``path_parts``. A path resolves to a
+		dynamic dict (arbitrary keys allowed, e.g. ``tasks.overrides`` / ``wordlists.defaults``) when
+		its annotation is a typing ``Dict``; it resolves to a typed sub-model (fixed schema, e.g.
+		``addons``) when its annotation is a ``BaseModel`` subclass. Unknown keys are not dynamic.
+
+		Args:
+			path_parts (list[str]): Dotted config path components (e.g. ['tasks', 'overrides']).
+
+		Returns:
+			bool: True if the path is a dynamic ``Dict`` field.
+		"""
+		import typing
+		model = SecatorConfig
+		annotation = None
+		for part in path_parts:
+			fields = getattr(model, 'model_fields', None)
+			if not fields or part not in fields:
+				return False
+			annotation = fields[part].annotation
+			if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+				model = annotation
+			else:
+				model = None  # leaf or container; no further sub-models to walk
+		return typing.get_origin(annotation) is dict
 
 	@staticmethod
 	def _match_task_name(remainder):

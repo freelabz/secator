@@ -2,6 +2,7 @@ import gc
 import json
 import logging
 import os
+import threading
 
 from time import time
 
@@ -15,11 +16,11 @@ from retry import retry
 from secator.celery_signals import setup_handlers
 from secator.definitions import IN_WORKER
 from secator.config import CONFIG
-from secator.output_types import Info, Target as TargetOutput
+from secator.output_types import Error, Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.runners._helpers import run_extractors
-from secator.utils import debug, deduplicate, flatten, should_update
+from secator.runners._helpers import resolve_task_queue, run_extractors
+from secator.utils import debug, should_update
 
 
 # ---------#
@@ -59,6 +60,11 @@ app.conf.update(
 			'data_folder_out': CONFIG.dirs.celery_data,
 			'control_folder': CONFIG.dirs.celery_data,
 			'visibility_timeout': CONFIG.celery.broker_visibility_timeout,
+			# Keep the broker connection alive (redis transport) so a long task's idle
+			# consumer connection isn't silently reaped — same reasoning as the result
+			# backend below. Ignored by the filesystem broker.
+			'socket_keepalive': True,
+			'health_check_interval': 30,
 		},
 		'broker_connection_retry_on_startup': True,
 		'broker_pool_limit': CONFIG.celery.broker_pool_limit,
@@ -71,6 +77,19 @@ app.conf.update(
 		'result_backend_thread_safe': True,
 		'result_serializer': 'pickle',
 		'result_accept_content': ['application/x-python-serialize'],
+		# Redis connection resilience. A long task leaves its result-backend connection
+		# idle for its whole runtime; the network can silently reap it, and by default
+		# Celery does NOT retry result-backend ops (result_backend_always_retry=False) and
+		# the redis client has no keepalive/health-check. The next store_result then hits
+		# `ConnectionError: Connection reset by peer` and the task is marked FAILURE even
+		# though its work succeeded — which poisons any chord it belongs to and hangs the
+		# workflow. Keep the connection alive (keepalive + health-check) AND retry the
+		# store on a transient error so a reset can't fail the task.
+		'redis_socket_keepalive': True,
+		'redis_backend_health_check_interval': 30,
+		'redis_retry_on_timeout': True,
+		'result_backend_always_retry': True,
+		'result_backend_max_retries': 20,
 		# Task config
 		'task_acks_late': CONFIG.celery.task_acks_late,
 		'task_compression': 'gzip',
@@ -81,7 +100,7 @@ app.conf.update(
 			'secator.celery.run_workflow': {'queue': 'celery'},
 			'secator.celery.run_scan': {'queue': 'celery'},
 			'secator.celery.run_task': {'queue': 'celery'},
-			'secator.celery.forward_results': {'queue': 'results'},
+			'secator.celery.join_results': {'queue': 'results'},
 			'secator.hooks.mongodb.*': {'queue': 'mongodb'},
 		},
 		'task_store_eager_result': True,
@@ -98,6 +117,8 @@ app.conf.update(
 		'worker_pool_restarts': True,
 		'worker_prefetch_multiplier': CONFIG.celery.worker_prefetch_multiplier,
 		'worker_send_task_events': CONFIG.celery.worker_send_task_events,
+		'worker_cancel_long_running_tasks_on_connection_loss':
+			CONFIG.celery.worker_cancel_long_running_tasks_on_connection_loss,
 	}
 )
 app.autodiscover_tasks(['secator.hooks.mongodb'], related_name=None)
@@ -106,36 +127,6 @@ if IN_WORKER:
 	discover_external_drivers()
 	discover_external_exporters()
 	setup_handlers()
-
-
-def chain_results(results):
-	"""Reduce results for passing through the Celery chain with MongoDB enabled.
-
-	Persisted findings are reduced to their Mongo ObjectId string (re-hydrated
-	downstream by secator.hooks.mongodb.get_results). Non-persisted outputs
-	(EXECUTION_TYPES like Target/Info, which carry uuid4 ids that are never
-	stored in db.findings) are kept as objects so they survive the round-trip
-	instead of being silently dropped by get_results' ObjectId.is_valid() filter.
-
-	Without this, scope-tagged Target inputs (e.g. the subdomains feeding
-	host_recon in a domain scan) are lost and the workflow falls back to its
-	original input.
-	"""
-	from bson.objectid import ObjectId
-	out, seen = [], set()
-	for r in results:
-		if isinstance(r, str):
-			if r not in seen:
-				seen.add(r)
-				out.append(r)
-		elif getattr(r, '_uuid', None) and ObjectId.is_valid(str(r._uuid)):
-			uid = str(r._uuid)
-			if uid not in seen:
-				seen.add(uid)
-				out.append(uid)
-		else:
-			out.append(r)
-	return out
 
 
 @retry(Exception, tries=3, delay=2)
@@ -148,15 +139,18 @@ def update_state(celery_task, task, force=False):
 	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
 		return
 	task.last_updated_celery = time()
+	# Build the state ONCE (one batched store read) and reuse it for the debug line — the old code
+	# re-read the store for task.status + task.self_findings_count on top of task.celery_state.
+	state = task.celery_state
 	debug(
 		'',
 		sub='celery.state',
 		id=celery_task.request.id,
-		obj={task.unique_name: task.status, 'count': task.self_findings_count},
+		obj={task.unique_name: state['state'], 'count': state['count']},
 		obj_after=False,
 		verbose=True,
 	)
-	return celery_task.update_state(state='RUNNING', meta=task.celery_state)
+	return celery_task.update_state(state='RUNNING', meta=state)
 
 
 def revoke_task(task_id, task_name=None):
@@ -200,8 +194,115 @@ def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, valid
 	runner.run()
 
 
+def _expire_worker_loss_key(backend, key):
+	"""Best-effort TTL on a worker-loss counter key so they don't accumulate forever.
+
+	Tied to ``result_expires`` (the lifetime of the task's own result). Not all result
+	backends implement ``expire``; ignore if unsupported.
+	"""
+	try:
+		backend.expire(key, CONFIG.celery.result_expires)
+	except (AttributeError, NotImplementedError):
+		pass  # backend doesn't support TTL — best-effort, ignore
+	except Exception as e:  # noqa: BLE001
+		debug(f'worker-loss expire failed for {key}: {e}', sub='celery.state')
+
+
+def bump_worker_loss_count(task_id):
+	"""Increment and return the worker-loss delivery count for a Celery task id.
+
+	Stored on the Celery result backend (via its generic key/value interface) so it survives a
+	worker being killed and works with whatever backend is configured — Redis, filesystem, cache,
+	S3/GCS, etc. — not just Redis. Returns 1 on the first delivery, 2 on the first redelivery, and
+	so on. Returns 0 (cap disabled) if the backend supports neither atomic ``incr`` nor
+	``get``/``set`` (e.g. the database/RPC backends), so the cap simply no-ops there.
+
+	Args:
+		task_id (str): Celery request id (stable across worker-loss redeliveries).
+
+	Returns:
+		int: Number of times this task has been delivered, or 0 if unsupported.
+	"""
+	backend = app.backend
+	key = backend.get_key_for_task(f'worker-loss-{task_id}')
+
+	# Preferred: atomic incr (Redis, Memcached) — race-free.
+	try:
+		count = backend.incr(key)
+		_expire_worker_loss_key(backend, key)
+		return count
+	except NotImplementedError:
+		pass  # Backend has no atomic counter; fall back to get/set below.
+	except Exception as e:
+		debug(f'worker-loss incr failed for {task_id}: {e}', sub='celery.state')
+		return 0
+
+	# Fallback: get/set, implemented by every key/value result backend (filesystem, S3, GCS, ...).
+	# Worker-loss redeliveries of the same task id are sequential (only one attempt runs at a
+	# time), so a non-atomic read-modify-write is safe here.
+	try:
+		raw = backend.get(key)
+		count = (int(raw) if raw else 0) + 1
+		backend.set(key, str(count))
+		_expire_worker_loss_key(backend, key)
+		return count
+	except Exception as e:
+		debug(f'worker-loss get/set failed for {task_id}: {e}', sub='celery.state')
+		return 0
+
+
+def abandon_task(name, targets, opts, delivery_count=None):
+	"""Abandon a task that has exhausted its worker-loss retries.
+
+	The abandoned task persists a FAILURE Error to the store (via its on_item hooks) and
+	returns topology-only, so the surrounding chord/chain proceeds and the workflow finishes
+	instead of hanging forever on a task whose worker keeps getting killed (OOM / eviction).
+
+	Args:
+		name (str): Task name.
+		targets (list): Task targets.
+		opts (dict): Task options (already carries context).
+		delivery_count (int | None): How many times this task was delivered (a redelivery
+			is the broker's doing under ``task_acks_late``; it is NOT a re-run of the work).
+			Reported separately from the retry cap so the message is unambiguous.
+
+	Returns:
+		list: Topology-only (empty) — the Error lives in the store, not the payload.
+	"""
+	opts['sync'] = True
+	task_cls = Task.get_task_class(name)
+	task = task_cls(targets, **opts)
+	task.mark_started()
+	attempts = f'{delivery_count} delivery attempts' if delivery_count is not None else 'repeated delivery attempts'
+	task.add_result(Error(
+		message=(
+			f'Task {name} abandoned after {attempts} '
+			f'(retry cap: {CONFIG.celery.task_max_retries}; worker repeatedly lost — '
+			'likely OOM kill or node eviction).'
+		),
+		_source=task.unique_name,
+	))
+	task.mark_completed()
+	return []
+
+
+def worker_loss_retries_exhausted(delivery_count, max_retries):
+	"""Whether a task has exhausted its allowed worker-loss redeliveries.
+
+	``delivery_count`` includes the INITIAL delivery (it is 1 on first run), so the
+	number of *redeliveries* is ``delivery_count - 1``. We abandon once redeliveries
+	exceed ``max_retries`` — i.e. ``task_max_retries=3`` allows the initial run plus 3
+	redeliveries (4 attempts total) before abandoning. (The initial delivery must not
+	count as a retry — that was the off-by-one in the original cap.)
+	"""
+	return (delivery_count - 1) > max_retries
+
+
 @app.task(bind=True)
 def run_command(self, results, name, targets, opts={}):
+	# Perf instrumentation (SECATOR_DEBUG=perf): task entry point + greenlet id, to diagnose
+	# worker concurrency / serialization (which chunks run on which greenlet, and when).
+	debug(f'run_command ENTER g={threading.get_ident() % 100000} {name} targets={targets}', sub='perf')
 	# Set Celery request id in context
 	context = opts.get('context', {})
 	context['celery_id'] = self.request.id
@@ -224,12 +325,27 @@ def run_command(self, results, name, targets, opts={}):
 		context['routing_key'] = routing_key
 		debug(f'Task "{name}" running with routing key "{routing_key}"', sub='celery.state')
 
-	# Flatten + dedupe + filter results
-	results = forward_results(results)
+		# Worker-loss redelivery cap. With task_acks_late + task_reject_on_worker_lost, a task
+		# whose worker is killed (cgroup OOMKill of the child, or a node-pressure eviction) is
+		# redelivered with the SAME Celery id. Count redeliveries on the result backend and
+		# abandon after task_max_retries, so a task that OOMs every run can't loop forever and
+		# block the surrounding chord/workflow. reject_on_worker_lost is what actually
+		# re-queues the task on abrupt worker death, so gate on it too (not just late acks).
+		if (
+			CONFIG.celery.task_max_retries != -1
+			and CONFIG.celery.task_acks_late
+			and CONFIG.celery.task_reject_on_worker_lost
+		):
+			delivery_count = bump_worker_loss_count(self.request.id)
+			if worker_loss_retries_exhausted(delivery_count, CONFIG.celery.task_max_retries):
+				# Attach the request context so the abandoned task doc still carries
+				# celery_id / worker_name / routing_key even when opts had none coming in.
+				opts['context'] = context
+				return abandon_task(name, targets, opts, delivery_count)
 
-	# Set task opts
+	# Set task opts. The chain no longer carries a result payload (tasks pass topology
+	# only); every consumer queries the store, so `results` is ignored here.
 	opts['context'] = context
-	opts['results'] = results
 	opts['sync'] = True
 
 	# Initialize task
@@ -245,7 +361,7 @@ def run_command(self, results, name, targets, opts={}):
 	if chunk_it:
 		if IN_WORKER:
 			console.print(Info(message=f'Task {name} requires chunking'))
-		workflow = break_task(task, opts, results=results)
+		workflow = break_task(task, opts)
 		if IN_WORKER:
 			console.print(Info(message=f'Task {name} successfully broken into {len(workflow)} chunks'))
 		update_state(self, task, force=True)
@@ -257,44 +373,25 @@ def run_command(self, results, name, targets, opts={}):
 		update_state(self, task)
 	update_state(self, task, force=True)
 
-	if CONFIG.addons.mongodb.enabled:
-		return chain_results(task.results)
-	return task.results
+	# Topology-only return: findings live in the store, not the payload.
+	return []
 
 
 @app.task
-def forward_results(results):
-	"""Forward results to the next task (bridge task).
+def join_results(results=None):
+	"""No-op bridge task joining two adjacent groups in a chain.
+
+	Celery cannot chain two groups directly — a task must sit between them. This task
+	carries no payload (tasks pass topology only; every consumer queries the store), so it
+	simply lets the chain proceed past the group boundary.
 
 	Args:
-		results (list): Results to forward.
+		results: The upstream group's return (a list of topology-only returns). Ignored.
 
 	Returns:
-		list: List of uuids.
+		list: Topology-only (empty).
 	"""
-	if isinstance(results, list):
-		for ix, item in enumerate(results):
-			if isinstance(item, dict) and 'results' in item:
-				results[ix] = item['results']
-	elif 'results' in results:
-		results = results['results']
-
-	if IN_WORKER:
-		console.print(Info(message=f'Deduplicating {len(results)} results'))
-
-	results = flatten(results)
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		console.print(Info(message=f'Extracting uuids from {len(results)} results'))
-		# Keep non-persisted outputs (Target/Info etc.) as objects so they survive
-		# the chain; only persisted findings are reduced to their ObjectId uuid.
-		results = chain_results(results)
-	else:
-		results = deduplicate(results, attr='_uuid')
-
-	if IN_WORKER:
-		console.print(Info(message=f'Forwarded {len(results)} flattened and deduplicated results'))
-
-	return results
+	return []
 
 
 @app.task
@@ -315,35 +412,35 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		console.print(Info(message=f'Runner {runner.unique_name} has started, running mark_started'))
 	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
 
-	# Forward previous results
-	if results:
-		results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-
-	# Query results from db when mongodb is enabled
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		from secator.hooks.mongodb import get_results
-
-		results = get_results(results)
-
-	# Add results to runner so it can compute status
-	# and extract dynamic targets
-	for item in results:
-		runner.add_result(item, print=False)
 
 	# Emit scope-tagged Targets for workflows with a scan-level targets_ extractor.
 	# This resolves the extractor at execution time (when Port/result data is available)
 	# so all tasks in the chain can find the correct inputs via parent_scope filtering.
 	scope = runner.context.get('parent_scope')
-	if scope and runner.has_parent and getattr(runner.config, 'type', None) == 'workflow':
+	if scope and runner.has_parent and runner.config.type == 'workflow':
 		target_extractor_opts = {
 			k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'
 		}
-		ctx = {'ancestor_id': runner.ancestor_id, 'node_chain_start': True}
-		scoped_inputs, _, _ = run_extractors(runner.results, target_extractor_opts, runner.inputs, ctx=ctx)
+		# Start from the runner's full store-resolution context (preserves run-scoping keys like
+		# parent_scope, workspace_id, drivers, {type}_id) so the local/json driver scopes correctly,
+		# then overlay only the extractor-specific values.
+		ctx = dict(runner.context)
+		ctx.update({
+			'opts': runner.run_opts,
+			'targets': runner.inputs,
+			'ancestor_id': runner.ancestor_id,
+			'node_chain_start': True,
+			'workspace_name': runner.workspace_name,
+			'results': [],  # extractors query the store
+		})
+		scoped_inputs, _, _ = run_extractors([], target_extractor_opts, runner.inputs, ctx=ctx)
 		for name in scoped_inputs:
 			t = TargetOutput(name=name)
 			t._context['scope'] = scope
+			# Persisted synchronously to the store via on_item: Target is an EXECUTION type, which the
+			# json driver writes through immediately (NOT batched) — so a downstream task's extractor can
+			# QUERY these scope Targets right away. See secator/hooks/json.py for the finding/execution split.
 			runner.add_result(t, print=False)
 		debug(
 			f'Runner {runner.unique_name}: emitted {len(scoped_inputs)} scope-tagged targets (scope={scope})',
@@ -359,11 +456,8 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_started in {total_time:.2f}s'))
 
-	# Return only uuids when mongodb is enabled
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		return chain_results(runner.results)
-
-	return runner.results
+	# Topology-only return: the emitted scope Targets are already persisted to the store.
+	return []
 
 
 @app.task
@@ -384,22 +478,12 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name} has finished, running mark_completed'))
 
-	# Forward previous results
-	results = forward_results(results)
+	# `results` (the upstream return) is topology-only and ignored — the fan-in is never
+	# rehydrated into the runner; every consumer queries the store instead.
 	runner.enable_hooks = enable_hooks
 
-	# Query results from db when mongodb is enabled
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		from secator.hooks.mongodb import get_results
-
-		results = get_results(results)
-
-	# Add results to runner so it can compute status
-	# and run duplicate checks
-	for item in results:
-		runner.add_result(item, print=False)
-
-	# Run mark_completed (duplicate checks, db updates if enable_hooks is True)
+	# Run mark_completed (duplicate checks, db updates if enable_hooks is True). The findings
+	# stay in the store — the summary counts them run-scoped, never re-materialized here.
 	runner.mark_completed()
 
 	# Log total time
@@ -408,11 +492,8 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	if IN_WORKER:
 		console.print(Info(message=f'Runner {runner.unique_name}: finished mark_completed in {total_time:.2f}s'))
 
-	# Return only uuids when mongodb is enabled
-	if IN_WORKER and CONFIG.addons.mongodb.enabled:
-		return chain_results(runner.results)
-
-	return runner.results
+	# Topology-only return: the run's results live in the store, not the payload.
+	return []
 
 
 # --------------#
@@ -477,7 +558,7 @@ def replace(task_instance, sig):
 	return task_instance.on_replace(sig)
 
 
-def break_task(task, task_opts, results=[]):
+def break_task(task, task_opts):
 	"""Break a task into multiple of the same type."""
 	chunks = task.inputs
 	if task.input_chunk_size > 1 and task.input_chunk_size != -1:
@@ -541,10 +622,15 @@ def break_task(task, task_opts, results=[]):
 		# Construct chunked signature
 		opts['has_parent'] = True
 		opts['enable_duplicate_check'] = False
-		opts['results'] = results
 		if 'targets_' in opts:
 			del opts['targets_']
-		sig = type(task).si(chunk, **opts)
+		# Mint each chunk's runner doc + id at build time so a redelivered
+		# chunk reuses the same doc (see L2 / on_build).
+		prev_enable_hooks = task.enable_hooks
+		task.enable_hooks = True
+		task.run_hooks('on_build', opts, sub='build')
+		task.enable_hooks = prev_enable_hooks
+		sig = type(task).si(chunk, **opts).set(queue=resolve_task_queue(type(task), opts))
 		task_id = sig.freeze().task_id
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, full_name)
@@ -553,11 +639,7 @@ def break_task(task, task_opts, results=[]):
 			chunk_infos.append(info)
 		sigs.append(sig)
 
-	# Mark main task as async since it's being chunked
-	# Clear prior results (so they're not re-yielded), then re-add chunk Info items
-	# so they survive into celery_state['results'] for client-side polling.
 	task.sync = False
-	task.results = []
 	task.uuids = set()
 	for info in chunk_infos:
 		task.add_result(info)

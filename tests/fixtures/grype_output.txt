@@ -1,5 +1,7 @@
-NAME        INSTALLED  FIXED-IN  TYPE    VULNERABILITY        SEVERITY
-pip         23.0.1     25.3      python  GHSA-4xh5-x5gv-qwph  Medium
-pip         23.0.1     23.3      python  GHSA-mq26-g339-26xf  Medium
-setuptools  66.1.1     78.1.1    python  GHSA-5rjg-fvgr-3xxf  High
-setuptools  66.1.1     70.0.0    python  GHSA-cx63-2mw6-8hw5  High
+NAME        INSTALLED  FIXED IN  TYPE    VULNERABILITY        SEVERITY  EPSS         RISK
+pip         23.0.1     25.3      python  GHSA-4xh5-x5gv-qwph  Medium    0.4% (35th)  0.2
+pip         23.0.1     23.3      python  GHSA-mq26-g339-26xf  Medium    0.5% (37th)  0.3
+setuptools  66.1.1     78.1.1    python  GHSA-5rjg-fvgr-3xxf  High      0.4% (30th)  0.2
+setuptools  66.1.1     70.0.0    python  GHSA-cx63-2mw6-8hw5  High      0.3% (25th)  0.2
+pip         23.0.1     23.3      python  CVE-2023-44487       High      100.0% (99th)  78.8   (kev)
+ncurses     6.1        (won't fix)  deb   CVE-2023-45918       Negligible  N/A          N/A
