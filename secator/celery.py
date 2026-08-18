@@ -431,6 +431,10 @@ def mark_runner_started(results, runner, enable_hooks=True):
 			'targets': runner.inputs,
 			'ancestor_id': runner.ancestor_id,
 			'node_chain_start': True,
+			# This resolution PRODUCES the scope-tagged Targets, so it must query the upstream
+			# targets, not the (not-yet-existing) scope it is about to assign — see
+			# build_extractor_query / freelabz/secator#1328.
+			'scope_producer': True,
 			'workspace_name': runner.workspace_name,
 			'results': [],  # extractors query the store
 		})
