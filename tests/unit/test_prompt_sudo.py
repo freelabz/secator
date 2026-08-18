@@ -2,11 +2,19 @@ import types
 import unittest
 from unittest.mock import patch
 
+import secator.runners.command as command
+from secator.config import CONFIG
 from secator.runners.command import Command
 
 
 class TestPromptSudo(unittest.TestCase):
 	"""_prompt_sudo must never crash the task on a missing/broken TTY (issue #1332)."""
+
+	def setUp(self):
+		command._SUDO_PASSWORD_CACHE = None  # avoid the in-process cache leaking across tests
+
+	def tearDown(self):
+		command._SUDO_PASSWORD_CACHE = None
 
 	def _stub(self, has_tty=True):
 		# _prompt_sudo only touches these attributes — avoid a full Command __init__.
@@ -31,6 +39,47 @@ class TestPromptSudo(unittest.TestCase):
 	def test_no_sudo_is_noop(self):
 		stub = self._stub()
 		self.assertEqual(Command._prompt_sudo(stub, 'nmap -sT target'), (None, []))
+
+	@patch('getpass.getpass', side_effect=AssertionError('must not prompt when password configured'))
+	def test_configured_password_used_without_tty(self, _):
+		stub = self._stub(has_tty=False)  # headless worker: no prompt possible
+		# sudo -n true => needs password (rc 1); sudo -S with the configured password => ok (rc 0)
+		runs = [types.SimpleNamespace(returncode=1), types.SimpleNamespace(returncode=0)]
+		with patch.object(CONFIG.security, 'sudo_password', 'hunter2'):
+			with patch('subprocess.run', side_effect=runs):
+				password, error = Command._prompt_sudo(stub, 'sudo masscan')
+		self.assertEqual(password, 'hunter2')
+		self.assertIsNone(error)
+
+	def test_configured_password_wrong(self):
+		stub = self._stub(has_tty=False)
+		runs = [types.SimpleNamespace(returncode=1), types.SimpleNamespace(returncode=1)]
+		with patch.object(CONFIG.security, 'sudo_password', 'wrong'):
+			with patch('subprocess.run', side_effect=runs):
+				password, error = Command._prompt_sudo(stub, 'sudo masscan')
+		self.assertEqual(password, -1)
+		self.assertTrue(error)
+
+	@patch('getpass.getuser', return_value='test')
+	@patch('getpass.getpass', return_value='typed-pw')
+	def test_successful_prompt_caches_password(self, *_):
+		stub = self._stub(has_tty=True)
+		# sudo -n true => needs password (rc 1); sudo -S with the typed password => ok (rc 0)
+		runs = [types.SimpleNamespace(returncode=1), types.SimpleNamespace(returncode=0)]
+		with patch('subprocess.run', side_effect=runs):
+			password, error = Command._prompt_sudo(stub, 'sudo masscan')
+		self.assertEqual(password, 'typed-pw')
+		self.assertIsNone(error)
+		self.assertEqual(command._SUDO_PASSWORD_CACHE, 'typed-pw')  # cached for later tasks
+
+	@patch('getpass.getpass', side_effect=AssertionError('must not re-prompt when cached'))
+	def test_cached_password_reused_without_prompt(self, _):
+		command._SUDO_PASSWORD_CACHE = 'cached-pw'
+		stub = self._stub(has_tty=True)
+		with patch('subprocess.run', return_value=types.SimpleNamespace(returncode=1)):  # sudo -n: needs pw
+			password, error = Command._prompt_sudo(stub, 'sudo masscan')
+		self.assertEqual(password, 'cached-pw')  # reused, getpass never called
+		self.assertIsNone(error)
 
 
 if __name__ == '__main__':
