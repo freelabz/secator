@@ -95,13 +95,22 @@ class QueryEngine:
         return self.backend.get_workspace(workspace_id)
 
     def list_runners(
-        self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None
+        self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None,
+        report_dir: str = None
     ) -> List[Dict[str, Any]]:
         """List runners (tasks/workflows/scans) via the active backend.
 
         has_parent: filter on the runner's parent relationship. None lists all runners,
         False lists only outermost (root) runners, True lists only nested children.
+        report_dir: local (json) hint to read one run's own report tree (report.json + per-child
+        report_<fqn>.json shards); ignored by DB backends. Used by the store-driven live poll.
         """
+        # Only the json backend uses report_dir; keep the DB backends' signature stable.
+        if report_dir is not None and self.backend.name == 'json':
+            return self.backend.list_runners(
+                workspace_id=workspace_id, runner_type=runner_type, has_parent=has_parent,
+                report_dir=report_dir,
+            )
         return self.backend.list_runners(
             workspace_id=workspace_id, runner_type=runner_type, has_parent=has_parent
         )
