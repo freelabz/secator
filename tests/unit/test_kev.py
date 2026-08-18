@@ -1,4 +1,7 @@
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import secator.kev as kev
@@ -39,7 +42,7 @@ class TestKevTagging(unittest.TestCase):
 		self.assertNotIn('kev', vuln.tags)
 
 	def test_no_id_is_noop(self):
-		# No CVE id => no network / catalog access at all.
+		# No CVE id => no catalog access at all.
 		with patch('secator.kev._load_kev_cve_ids') as mock_load:
 			vuln = Vulnerability(name='Generic finding')
 			self.assertNotIn('kev', vuln.tags)
@@ -47,55 +50,69 @@ class TestKevTagging(unittest.TestCase):
 
 
 class TestKevLoading(unittest.TestCase):
-	"""_load_kev_cve_ids / bundled-mirror fallback / refresh — all offline (no network)."""
+	"""Cache seeding, cache-first reads, and refresh — all offline (no network)."""
 
 	def setUp(self):
 		kev._KEV_CVE_IDS = None
+		# Isolate from the committed files: copy the real bundle into a throwaway dir and
+		# point both the bundle and cache paths there, so refresh() can't touch the mirror.
+		self._tmp = Path(tempfile.mkdtemp())
+		self._bundle = self._tmp / 'bundle.json'
+		shutil.copyfile(kev.BUNDLED_KEV_PATH, self._bundle)
+		self._cache = self._tmp / 'cves' / kev.KEV_FILENAME
+		self._patches = [
+			patch.object(kev, 'BUNDLED_KEV_PATH', self._bundle),
+			patch.object(kev, '_cache_path', lambda: self._cache),
+		]
+		for p in self._patches:
+			p.start()
 
 	def tearDown(self):
 		kev._KEV_CVE_IDS = None
+		for p in self._patches:
+			p.stop()
+		shutil.rmtree(self._tmp, ignore_errors=True)
 
 	def test_parse_uppercases_and_skips_missing_cveid(self):
 		data = {'vulnerabilities': [
 			{'cveID': 'cve-2021-44228'},
 			{'cveID': 'CVE-2000-0001'},
-			{'notes': 'no cveId'},
+			{'notes': 'no cveID here'},
 		]}
 		self.assertEqual(kev._parse_kev_cve_ids(data), {'CVE-2021-44228', 'CVE-2000-0001'})
 		self.assertEqual(kev._parse_kev_cve_ids(None), set())
 
-	def test_bundled_mirror_used_when_live_feed_unavailable(self):
-		# download_file returns None (offline / cisa.gov unreachable) => bundled mirror.
-		with patch('secator.kev.download_file', return_value=None):
-			ids = kev._load_kev_cve_ids()
-		self.assertGreater(len(ids), 0)
+	def test_ensure_seeds_cache_from_bundle(self):
+		self.assertFalse(self._cache.exists())
+		kev.ensure_kev_cache()
+		self.assertTrue(self._cache.exists())  # copied from the bundled mirror
+
+	def test_load_reads_from_cache_no_network(self):
+		ids = kev._load_kev_cve_ids()
+		self.assertTrue(self._cache.exists())  # seeded on first use
 		self.assertTrue(all(i.startswith('CVE-') and i.isupper() for i in ids))
-		# Log4Shell has been in the CISA KEV catalog since 2021.
-		self.assertIn('CVE-2021-44228', ids)
+		self.assertIn('CVE-2021-44228', ids)  # Log4Shell, in KEV since 2021
 
-	def test_live_feed_preferred_over_bundled(self):
-		import json
-		import os
-		import tempfile
-		with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as tf:
-			json.dump({'vulnerabilities': [{'cveID': 'CVE-1999-9999'}]}, tf)
-			tmp = tf.name
-		try:
-			with patch('secator.kev.download_file', return_value=tmp):
-				ids = kev._load_kev_cve_ids()
-			self.assertEqual(ids, {'CVE-1999-9999'})  # live feed, not the bundled mirror
-		finally:
-			os.unlink(tmp)
+	def test_refresh_downloads_and_writes_bundle_and_cache(self):
+		feed = {'vulnerabilities': [{'cveID': 'CVE-1999-9999'}]}
 
-	def test_refresh_kev_busts_memo_and_reloads(self):
-		kev._KEV_CVE_IDS = {'STALE'}
-		# offline_mode True skips the cache unlink (no filesystem side effect); the
-		# feed is unavailable so it reloads from the bundled mirror.
+		class FakeResp:
+			def raise_for_status(self):
+				pass
+
+			def json(self):
+				return feed
+
+		with patch('requests.get', return_value=FakeResp()):
+			ids = kev.refresh_kev()
+		self.assertEqual(ids, {'CVE-1999-9999'})  # memo busted, reloaded from fresh feed
+		self.assertIn('CVE-1999-9999', self._cache.read_text())    # cache updated
+		self.assertIn('CVE-1999-9999', self._bundle.read_text())   # bundled mirror updated
+
+	def test_refresh_offline_is_noop(self):
 		with patch.object(kev.CONFIG, 'offline_mode', True):
-			with patch('secator.kev.download_file', return_value=None):
-				ids = kev.refresh_kev()
-		self.assertNotIn('STALE', ids)
-		self.assertGreater(len(ids), 0)
+			ids = kev.refresh_kev()  # no download, falls back to the seeded cache
+		self.assertIn('CVE-2021-44228', ids)
 
 
 if __name__ == '__main__':
