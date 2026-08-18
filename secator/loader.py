@@ -28,6 +28,32 @@ def _file_has_exporter(path):
 		return False
 
 
+def _warn_duplicate_names(entries, _seen=set()):
+	"""Warn when a config name is defined more than once.
+
+	A second scan/workflow/task with the same ``name`` silently shadows the first (name
+	resolution keeps the first match), which is a confusing footgun — e.g. two workflow files
+	with the same ``name:`` key, or an external task shadowing a built-in one.
+
+	Args:
+		entries: iterable of ``(label, source)`` where ``label`` uniquely identifies a config
+			(e.g. ``workflow "host_recon"``) and ``source`` is the file/module it came from.
+		_seen: persistent set (module lifetime) so each duplicate is reported only once.
+	"""
+	from collections import defaultdict
+	groups = defaultdict(list)
+	for label, source in entries:
+		groups[label].append(source)
+	for label, sources in groups.items():
+		# Dedupe sources so the same file counted twice (re-entrant discovery) isn't a false positive.
+		distinct = list(dict.fromkeys(sources))
+		if len(distinct) > 1 and label not in _seen:
+			_seen.add(label)
+			console.print(f'[bold orange1]⚠  Duplicate {label} defined in {len(distinct)} places — only the first is used:[/]')  # noqa: E501
+			for source in distinct:
+				console.print(f'   [dim]{source}[/]')
+
+
 @cache
 def find_templates():
 	discover_tasks()  # always load tasks first
@@ -49,6 +75,10 @@ def find_templates():
 		config = TemplateLoader(input=path)
 		debug(f'Loaded template from {path}', sub='template')
 		results.append(config)
+	_warn_duplicate_names(
+		(f'{c.get("type")} "{c.get("name")}"', c.get('_path') or '<unknown>')
+		for c in results if c.get('type') and c.get('name')
+	)
 	return results
 
 
@@ -79,7 +109,12 @@ def discover_tasks():
 	"""Find all secator tasks (internal + external)."""
 	external = discover_external_tasks()
 	internal = discover_internal_tasks()
-	return external + internal
+	tasks = external + internal
+	_warn_duplicate_names(
+		(f'task "{cls.__name__}"', getattr(sys.modules.get(cls.__module__), '__file__', None) or cls.__module__)
+		for cls in tasks
+	)
+	return tasks
 
 
 @cache
