@@ -915,6 +915,21 @@ class Command(Runner):
 		except ValueError:
 			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
 
+		# Non-interactive password source: a configured password (e.g. SECATOR_SECURITY_SUDO_PASSWORD)
+		# lets headless workers — Celery, systemd, docker — sudo without a TTY. It stays in the worker's
+		# env/config and never travels through the broker.
+		configured = CONFIG.security.sudo_password
+		if configured:
+			result = subprocess.run(
+				['sudo', '-S', '-p', '', 'true'],
+				input=configured + '\n',
+				text=True,
+				capture_output=True,
+			)
+			if result.returncode == 0:
+				return configured, None
+			return -1, 'Configured sudo password (security.sudo_password) is incorrect.'
+
 		# Check if we have a tty
 		if not self.has_tty:
 			error = (

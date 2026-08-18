@@ -2,6 +2,7 @@ import types
 import unittest
 from unittest.mock import patch
 
+from secator.config import CONFIG
 from secator.runners.command import Command
 
 
@@ -31,6 +32,26 @@ class TestPromptSudo(unittest.TestCase):
 	def test_no_sudo_is_noop(self):
 		stub = self._stub()
 		self.assertEqual(Command._prompt_sudo(stub, 'nmap -sT target'), (None, []))
+
+	@patch('getpass.getpass', side_effect=AssertionError('must not prompt when password configured'))
+	def test_configured_password_used_without_tty(self, _):
+		stub = self._stub(has_tty=False)  # headless worker: no prompt possible
+		# sudo -n true => needs password (rc 1); sudo -S with the configured password => ok (rc 0)
+		runs = [types.SimpleNamespace(returncode=1), types.SimpleNamespace(returncode=0)]
+		with patch.object(CONFIG.security, 'sudo_password', 'hunter2'):
+			with patch('subprocess.run', side_effect=runs):
+				password, error = Command._prompt_sudo(stub, 'sudo masscan')
+		self.assertEqual(password, 'hunter2')
+		self.assertIsNone(error)
+
+	def test_configured_password_wrong(self):
+		stub = self._stub(has_tty=False)
+		runs = [types.SimpleNamespace(returncode=1), types.SimpleNamespace(returncode=1)]
+		with patch.object(CONFIG.security, 'sudo_password', 'wrong'):
+			with patch('subprocess.run', side_effect=runs):
+				password, error = Command._prompt_sudo(stub, 'sudo masscan')
+		self.assertEqual(password, -1)
+		self.assertTrue(error)
 
 
 if __name__ == '__main__':
