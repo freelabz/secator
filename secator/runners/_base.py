@@ -1,4 +1,5 @@
 import gc
+import os
 import json
 import logging
 import sys
@@ -1022,6 +1023,34 @@ class Runner:
 			kwargs['id'] = self.id
 		debug(*args, **kwargs)
 
+	def _get_store_poller(self):
+		"""Build a StorePoller for this run, or None if there's no store scope to poll.
+
+		Mirrors process_extractor's QueryEngine construction (drivers/workspace/report_dir from
+		context) and scopes to this runner's own {type}_id."""
+		rtype = self.config.type
+		root_id = self.context.get(f'{rtype}_id')
+		if not root_id:
+			return None
+		from secator.query import QueryEngine
+		from secator.store_utils import StorePoller
+		rf = self.reports_folder
+		report_dir = str(rf) if rf and (Path(rf) / 'report.json').exists() else None
+		engine = QueryEngine(self.context.get('workspace_id'), context={
+			'drivers': self.context.get('drivers', []),
+			'workspace_name': self.workspace_name,
+			'report_dir': report_dir,
+		})
+		return StorePoller(
+			engine,
+			findings_query={f'_context.{rtype}_id': str(root_id)},
+			root_id=root_id,
+			root_type=rtype,
+			report_dir=report_dir,
+			print_remote_info=self.print_remote_info,
+			print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
+		)
+
 	def yielder(self):
 		"""Base yielder implementation.
 
@@ -1033,6 +1062,13 @@ class Runner:
 		"""
 		# If existing celery result, yield from it
 		if self.celery_result:
+			# Experimental: poll the store instead of the Celery result backend (SECATOR_STORE_POLL=1).
+			# Default OFF -> unchanged Celery poll (zero regression). See store_utils.StorePoller.
+			if os.environ.get('SECATOR_STORE_POLL', '').lower() in ('1', 'true', 'yes'):
+				poller = self._get_store_poller()
+				if poller is not None:
+					yield from poller.iter_results()
+					return
 			yield from CeleryData.iter_results(
 				self.celery_result,
 				ids_map=self.celery_ids_map,

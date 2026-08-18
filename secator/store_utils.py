@@ -29,7 +29,7 @@ class StorePoller:
 				 report_dir=None, refresh_interval=None,
 				 inactivity_seconds=DEFAULT_INACTIVITY_SECONDS,
 				 print_remote_info=True, print_remote_title='Results',
-				 sleep_func=None, time_func=None):
+				 rehydrate=None, sleep_func=None, time_func=None):
 		"""
 		Args:
 			engine: a ``QueryEngine`` (or any object exposing ``list_runners`` + ``iterate``).
@@ -52,6 +52,12 @@ class StorePoller:
 		self.print_remote_title = print_remote_title
 		self._sleep = sleep_func or _time.sleep
 		self._time = time_func or _time.monotonic
+		# Rehydrate store dicts -> OutputType objects, exactly like the results StreamView, so the
+		# runner's _process_item receives the same objects it does on the Celery path.
+		if rehydrate is None:
+			from secator.output_types._base import load_output_types
+			rehydrate = load_output_types
+		self._rehydrate = rehydrate
 		self._seen = set()          # yielded finding uuids (dedup contract, like CeleryData)
 		self._last_status = None
 
@@ -79,7 +85,7 @@ class StorePoller:
 	def _iter_new_findings(self):
 		"""Yield findings not yielded before (dedup by _uuid), streamed one batch at a time."""
 		for batch in self.engine.iterate(self.findings_query):
-			for item in batch:
+			for item in self._rehydrate(batch):
 				uuid = item.get('_uuid') if isinstance(item, dict) else getattr(item, '_uuid', None)
 				if uuid and uuid in self._seen:
 					continue

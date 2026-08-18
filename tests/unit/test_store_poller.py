@@ -36,7 +36,9 @@ class TestStorePoller(unittest.TestCase):
 		engine = FakeEngine(runner_frames, finding_frames)
 		return StorePoller(
 			engine, findings_query={'_context.scan_id': 'S'}, root_id='S', root_type='scan',
-			refresh_interval=0, print_remote_info=False, sleep_func=lambda *_: None, **kw,
+			refresh_interval=0, print_remote_info=False, sleep_func=lambda *_: None,
+			rehydrate=lambda batch: batch,  # keep raw dicts in tests
+			**kw,
 		)
 
 	def test_incremental_findings_and_terminal_exit(self):
