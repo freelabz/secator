@@ -3,6 +3,7 @@
 A second config with the same `name` silently shadows the first (name resolution keeps the first
 match), so discovery warns about it — see secator.loader._warn_duplicate_names.
 """
+import contextlib
 import unittest
 from unittest.mock import patch
 
@@ -53,6 +54,32 @@ class TestDuplicateNameWarning(unittest.TestCase):
 			second = mock.call_count
 		self.assertGreater(first, 0)
 		self.assertEqual(first, second, 'duplicate should be reported only once per process')
+
+	def test_discover_tasks_warns_on_same_stem_external_shadowing(self):
+		# Two external files with the same stem in different dirs: discover_external_tasks reuses
+		# the first module for the second, so both classes are identical and cls.__module__ points
+		# both at the first file — hiding the duplicate. The per-file sources side channel keeps
+		# both real paths so the shadowing is still reported.
+		nmap = type('nmap', (), {})
+		patches = [
+			patch.object(loader, 'discover_external_tasks', return_value=[nmap, nmap]),
+			patch.object(loader, 'discover_internal_tasks', return_value=[]),
+			patch.object(loader, '_external_task_sources', [('nmap', '/a/nmap.py'), ('nmap', '/b/nmap.py')]),
+			patch.object(loader, '_warned_duplicate_names', set()),
+		]
+		with contextlib.ExitStack() as stack:
+			mock = stack.enter_context(patch.object(loader.console, 'print'))
+			for p in patches:
+				stack.enter_context(p)
+			loader.discover_tasks.cache_clear()
+			try:
+				loader.discover_tasks()
+			finally:
+				loader.discover_tasks.cache_clear()
+		out = _printed(mock)
+		self.assertIn('Duplicate task "nmap"', out)
+		self.assertIn('/a/nmap.py', out)
+		self.assertIn('/b/nmap.py', out)
 
 
 if __name__ == '__main__':

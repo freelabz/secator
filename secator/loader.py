@@ -28,7 +28,10 @@ def _file_has_exporter(path):
 		return False
 
 
-def _warn_duplicate_names(entries, _seen=set()):
+_warned_duplicate_names = set()
+
+
+def _warn_duplicate_names(entries, _seen=None):
 	"""Warn when a config name is defined more than once.
 
 	A second scan/workflow/task with the same ``name`` silently shadows the first (name
@@ -38,9 +41,12 @@ def _warn_duplicate_names(entries, _seen=set()):
 	Args:
 		entries: iterable of ``(label, source)`` where ``label`` uniquely identifies a config
 			(e.g. ``workflow "host_recon"``) and ``source`` is the file/module it came from.
-		_seen: persistent set (module lifetime) so each duplicate is reported only once.
+		_seen: set of already-reported labels so each duplicate is reported only once. Defaults
+			to a module-level set that persists for the process lifetime.
 	"""
 	from collections import defaultdict
+	if _seen is None:
+		_seen = _warned_duplicate_names
 	groups = defaultdict(list)
 	for label, source in entries:
 		groups[label].append(source)
@@ -110,10 +116,15 @@ def discover_tasks():
 	external = discover_external_tasks()
 	internal = discover_internal_tasks()
 	tasks = external + internal
-	_warn_duplicate_names(
+	# External tasks: use the real per-file paths (a reused same-stem module would otherwise make
+	# every duplicate resolve to the first file and hide the shadowing). Internal tasks are properly
+	# imported, so their module __file__ is reliable.
+	entries = [(f'task "{name}"', source) for name, source in _external_task_sources]
+	entries += [
 		(f'task "{cls.__name__}"', getattr(sys.modules.get(cls.__module__), '__file__', None) or cls.__module__)
-		for cls in tasks
-	)
+		for cls in internal
+	]
+	_warn_duplicate_names(entries)
 	return tasks
 
 
@@ -148,10 +159,19 @@ def discover_internal_tasks():
 	return task_classes
 
 
+# Candidate ``(task_name, file path)`` pairs seen by the last discover_external_tasks() run — one
+# entry per source FILE, even when its module is reused (same stem in two dirs). Duplicate detection
+# reads this instead of cls.__module__: a reused module points every same-stem file at the first
+# file's path, which would hide exactly the shadowing we want to warn about.
+_external_task_sources = []
+
+
 @cache
 def discover_external_tasks():
 	"""Find external secator tasks."""
+	global _external_task_sources
 	output = []
+	sources = []
 	prev_state = sys.dont_write_bytecode
 	sys.dont_write_bytecode = True
 	for path in CONFIG.dirs.templates.glob('**/*.py'):
@@ -176,6 +196,7 @@ def discover_external_tasks():
 				if inspect.isclass(cls):
 					cls.__external__ = True
 					output.append(cls)
+					sources.append((task_name, str(path)))  # record THIS file, not the reused module's
 				continue
 
 			# console.print(f'Importing module {module_name} from {path}')
@@ -207,10 +228,12 @@ def discover_external_tasks():
 			debug(f'[bold green]Successfully loaded external task "{task_name}"[/] ({path})', sub='loader')
 			cls.__external__ = True
 			output.append(cls)
+			sources.append((task_name, str(path)))
 		except Exception as e:
 			sys.modules.pop(module_name, None)
 			console.print(f'[bold red]Could not load external module {path.name}. Reason: {str(e)}.[/] ({path})')
 	sys.dont_write_bytecode = prev_state
+	_external_task_sources = sources
 	return output
 
 
