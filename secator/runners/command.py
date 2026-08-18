@@ -27,6 +27,14 @@ from secator.utils import debug, rich_escape as _s, signal_to_name
 
 logger = logging.getLogger(__name__)
 
+# Serialize interactive sudo prompts and cache the verified password for the process lifetime.
+# Under the gevent worker (default -c 100) many tasks call getpass on the same tty at once and
+# corrupt its termios state (issue #1332); the lock prompts one at a time and the cache lets the
+# rest reuse the password instead of re-prompting. threading.Lock is gevent-cooperative once
+# monkey-patched, and a plain lock otherwise.
+_SUDO_PROMPT_LOCK = threading.Lock()
+_SUDO_PASSWORD_CACHE = None
+
 
 class Command(Runner):
 	"""Base class to execute an external command."""
@@ -902,6 +910,7 @@ class Command(Runner):
 		Returns:
 			tuple: (sudo password, error).
 		"""
+		global _SUDO_PASSWORD_CACHE
 		sudo_password = None
 
 		# Check if sudo is required by the command
@@ -930,6 +939,10 @@ class Command(Runner):
 				return configured, None
 			return -1, 'Configured sudo password (security.sudo_password) is incorrect.'
 
+		# Reuse a password already entered this process (by a prior task) — no re-prompt, no tty.
+		if _SUDO_PASSWORD_CACHE is not None:
+			return _SUDO_PASSWORD_CACHE, None
+
 		# Check if we have a tty
 		if not self.has_tty:
 			error = (
@@ -938,34 +951,39 @@ class Command(Runner):
 			)
 			return -1, error
 
-		# If not, prompt the user for a password
-		self._print('[bold red]Please enter sudo password to continue.[/]', rich=True)
-		for _ in range(3):
-			user = getpass.getuser()
-			self._print(rf'\[sudo] password for {user}: ▌', rich=True)
-			try:
-				sudo_password = getpass.getpass()
-			except (EOFError, ValueError, OSError):
-				# has_tty can disagree with the real stdin (closed / redirected under Celery or
-				# gevent, dumb terminals): getpass then blows up on termios / a closed stream.
-				# Degrade to the same graceful error as the no-TTY case instead of crashing.
-				error = (
-					'Sudo password required but no usable TTY (non-interactive mode). '
-					'Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), '
-					'or configure passwordless sudo.'
+		# Prompt one task at a time (lock) so concurrent greenlets don't race on the tty, and cache
+		# the verified password so tasks queued behind the lock reuse it instead of re-prompting.
+		with _SUDO_PROMPT_LOCK:
+			if _SUDO_PASSWORD_CACHE is not None:  # another task prompted while we waited
+				return _SUDO_PASSWORD_CACHE, None
+			self._print('[bold red]Please enter sudo password to continue.[/]', rich=True)
+			for _ in range(3):
+				user = getpass.getuser()
+				self._print(rf'\[sudo] password for {user}: ▌', rich=True)
+				try:
+					sudo_password = getpass.getpass()
+				except (EOFError, ValueError, OSError):
+					# has_tty can disagree with the real stdin (closed / redirected under Celery or
+					# gevent, dumb terminals): getpass then blows up on termios / a closed stream.
+					# Degrade to the same graceful error as the no-TTY case instead of crashing.
+					error = (
+						'Sudo password required but no usable TTY (non-interactive mode). '
+						'Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), '
+						'or configure passwordless sudo.'
+					)
+					return -1, error
+				result = subprocess.run(
+					['sudo', '-S', '-p', '', 'true'],
+					input=sudo_password + '\n',
+					text=True,
+					capture_output=True,
 				)
-				return -1, error
-			result = subprocess.run(
-				['sudo', '-S', '-p', '', 'true'],
-				input=sudo_password + '\n',
-				text=True,
-				capture_output=True,
-			)
-			if result.returncode == 0:
-				return sudo_password, None  # Password is correct
-			self._print('Sorry, try again.')
-		error = 'Sudo password verification failed after 3 attempts.'
-		return -1, error
+				if result.returncode == 0:
+					_SUDO_PASSWORD_CACHE = sudo_password
+					return sudo_password, None  # Password is correct
+				self._print('Sorry, try again.')
+			error = 'Sudo password verification failed after 3 attempts.'
+			return -1, error
 
 	def _wait_for_end(self):
 		"""Wait for process to finish and process output and return code."""
