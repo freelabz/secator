@@ -26,7 +26,7 @@ RUN pipx install --pip-args="--no-cache-dir" . && \
     secator install addons dev
 
 
-FROM python:3.12-alpine3.22
+FROM python:3.12-alpine3.23
 ARG flavor=full
 ARG build_from_source=false
 ENV PYENV_ROOT="/opt/pyenv"
