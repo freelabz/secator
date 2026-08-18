@@ -144,8 +144,12 @@ class TestQueryDispatch(unittest.TestCase):
 		self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi', 'XSS'])
 
 	def test_empty_arg_no_filter_shows_all(self):
-		"""bare secator q (no args, no filters) should succeed and return all results."""
-		result, captured = self._invoke(['query', '--driver', 'local'])
+		"""bare secator q (no args) should succeed and return the current workspace's results."""
+		from secator.config import CONFIG
+		# bare `secator q` (no -ws) reads the CURRENT workspace; point current at the
+		# seeded workspace so the test doesn't depend on the dev/CI-configured one.
+		with mock.patch.object(CONFIG.workspaces, 'current', WS):
+			result, captured = self._invoke(['query', '--driver', 'local'])
 		self.assertIsNone(result.exception, str(result.exception))
 		self.assertEqual(result.exit_code, 0)
 		vulns = captured.get('results', {}).get('vulnerability', [])

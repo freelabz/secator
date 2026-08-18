@@ -1137,8 +1137,8 @@ def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_fi
 		else:
 			console.print(Error(message='Invalid config, not saving it.'))
 		return
-	
-  # Empty query: return all results (subject to the enforced base query),
+
+	# Empty query: return all results (subject to the enforced base query),
 	# optionally scoped by --report-filter / --workspace.
 	if not arg:
 		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder)
