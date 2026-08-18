@@ -66,9 +66,14 @@ class TestKevLoading(unittest.TestCase):
 		]
 		for p in self._patches:
 			p.start()
+		# Snapshot offline_mode and restore it by hand — patch.object on the pydantic CONFIG
+		# restores to the field default (False) instead of the live value, leaking into later
+		# tests (e.g. test_offline). `secator test unit` runs with offline_mode=True.
+		self._orig_offline = kev.CONFIG.offline_mode
 
 	def tearDown(self):
 		kev._KEV_CVE_IDS = None
+		kev.CONFIG.offline_mode = self._orig_offline
 		for p in self._patches:
 			p.stop()
 		shutil.rmtree(self._tmp, ignore_errors=True)
@@ -94,6 +99,7 @@ class TestKevLoading(unittest.TestCase):
 		self.assertIn('CVE-2021-44228', ids)  # Log4Shell, in KEV since 2021
 
 	def test_refresh_downloads_and_writes_bundle_and_cache(self):
+		kev.CONFIG.offline_mode = False  # force the download path (CI runs offline by default)
 		feed = {'vulnerabilities': [{'cveID': 'CVE-1999-9999'}]}
 
 		class FakeResp:
@@ -110,8 +116,8 @@ class TestKevLoading(unittest.TestCase):
 		self.assertIn('CVE-1999-9999', self._bundle.read_text())   # bundled mirror updated
 
 	def test_refresh_offline_is_noop(self):
-		with patch.object(kev.CONFIG, 'offline_mode', True):
-			ids = kev.refresh_kev()  # no download, falls back to the seeded cache
+		kev.CONFIG.offline_mode = True
+		ids = kev.refresh_kev()  # no download, falls back to the seeded cache
 		self.assertIn('CVE-2021-44228', ids)
 
 
