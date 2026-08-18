@@ -246,7 +246,12 @@ def build_extractor_query(extractor, ctx):
 	# Additional narrowing the old per-item eval applied within the run.
 	parent_scope = ctx.get('parent_scope')
 	ancestor_id = ctx.get('ancestor_id')
-	if _type == 'target' and parent_scope:
+	# `scope_producer` marks the mark_runner_started pass that RESOLVES a workflow's own
+	# targets_ in order to emit the scope-tagged Targets (see secator/celery.py). That pass must
+	# query the UPSTREAM targets — filtering by `parent_scope` here would look for the very scope
+	# it is about to create, always yield nothing, and leave every task in the workflow with no
+	# inputs (freelabz/secator#1328). Consumers (task extractors) still filter by the scope.
+	if _type == 'target' and parent_scope and not ctx.get('scope_producer', False):
 		query['_context.scope'] = parent_scope
 	elif ancestor_id and not ctx.get('node_chain_start', False):
 		query['_context.ancestor_id'] = str(ancestor_id)
