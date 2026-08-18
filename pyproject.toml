@@ -2,6 +2,13 @@
 requires = ['hatchling']
 build-backend = 'hatchling.build'
 
+[tool.hatch.build]
+# Ship the bundled CISA KEV mirror even though *.json is git-ignored (hatchling excludes
+# VCS-ignored files by default) — it's the offline fallback for `kev` vulnerability tagging.
+artifacts = [
+  'secator/data/known_exploited_vulnerabilities.json',
+]
+
 [project]
 name = 'secator'
 version = "0.41.0"
