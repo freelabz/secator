@@ -928,7 +928,18 @@ class Command(Runner):
 		for _ in range(3):
 			user = getpass.getuser()
 			self._print(rf'\[sudo] password for {user}: ▌', rich=True)
-			sudo_password = getpass.getpass()
+			try:
+				sudo_password = getpass.getpass()
+			except (EOFError, ValueError, OSError):
+				# has_tty can disagree with the real stdin (closed / redirected under Celery or
+				# gevent, dumb terminals): getpass then blows up on termios / a closed stream.
+				# Degrade to the same graceful error as the no-TTY case instead of crashing.
+				error = (
+					'Sudo password required but no usable TTY (non-interactive mode). '
+					'Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), '
+					'or configure passwordless sudo.'
+				)
+				return -1, error
 			result = subprocess.run(
 				['sudo', '-S', '-p', '', 'true'],
 				input=sudo_password + '\n',
