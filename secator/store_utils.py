@@ -153,9 +153,6 @@ class StorePoller:
 				self._sleep(self.refresh_interval)
 
 	# --- rendering (only when print_remote_info) -------------------------------------------------
-	# NOTE: replicates a minimal panel rather than reaching into CeleryData's inline PanelProgress,
-	# to avoid touching the hot Celery path. ponytail: dedupe the two panels once StorePoller is the
-	# default and the Celery poll is removed.
 	def _make_panel(self):
 		from rich.progress import Progress as RichProgress, SpinnerColumn, TextColumn, TimeElapsedColumn
 		from rich.panel import Panel
@@ -179,7 +176,7 @@ class StorePoller:
 		)
 
 	def _render(self, progress, runners):
-		from secator.celery_utils import STATE_COLORS
+		from secator.definitions import STATE_COLORS
 		for r in runners:
 			rid = r.get('_id') or r.get('name')
 			state = r.get('status', 'PENDING')

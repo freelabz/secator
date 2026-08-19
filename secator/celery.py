@@ -11,7 +11,6 @@ from celery.canvas import signature
 from celery.app import trace
 
 from rich.logging import RichHandler
-from retry import retry
 
 from secator.celery_signals import setup_handlers
 from secator.definitions import IN_WORKER
@@ -20,7 +19,7 @@ from secator.output_types import Error, Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import resolve_task_queue, run_extractors
-from secator.utils import debug, should_update
+from secator.utils import debug
 
 
 # ---------#
@@ -127,30 +126,6 @@ if IN_WORKER:
 	discover_external_drivers()
 	discover_external_exporters()
 	setup_handlers()
-
-
-@retry(Exception, tries=3, delay=2)
-def update_state(celery_task, task, force=False):
-	"""Update task state to add metadata information."""
-	if not IN_WORKER:
-		return
-	if task.no_live_updates:
-		return
-	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
-		return
-	task.last_updated_celery = time()
-	# Build the state ONCE (one batched store read) and reuse it for the debug line — the old code
-	# re-read the store for task.status + task.self_findings_count on top of task.celery_state.
-	state = task.celery_state
-	debug(
-		'',
-		sub='celery.state',
-		id=celery_task.request.id,
-		obj={task.unique_name: state['state'], 'count': state['count']},
-		obj_after=False,
-		verbose=True,
-	)
-	return celery_task.update_state(state='RUNNING', meta=state)
 
 
 def revoke_task(task_id, task_name=None):
@@ -355,7 +330,6 @@ def run_command(self, results, name, targets, opts={}):
 	chunk_it = task.needs_chunking(sync)
 	task.has_children = chunk_it
 	task.mark_started()
-	update_state(self, task, force=True)
 
 	# Chunk task if needed
 	if chunk_it:
@@ -364,14 +338,14 @@ def run_command(self, results, name, targets, opts={}):
 		workflow = break_task(task, opts)
 		if IN_WORKER:
 			console.print(Info(message=f'Task {name} successfully broken into {len(workflow)} chunks'))
-		update_state(self, task, force=True)
-		console.print(Info(message=f'Task {name} updated state, replacing task with Celery chord workflow'))
+		console.print(Info(message=f'Task {name} replacing task with Celery chord workflow'))
 		return replace(self, workflow)
 
-	# Update state live
+	# Drive task execution. Findings/status/progress persist to the store live via the on_item /
+	# on_interval hooks as they are produced — consumers live-poll the store, not the Celery
+	# result backend, so there is no per-task state to publish here anymore.
 	for _ in task:
-		update_state(self, task)
-	update_state(self, task, force=True)
+		pass
 
 	# Topology-only return: findings live in the store, not the payload.
 	return []

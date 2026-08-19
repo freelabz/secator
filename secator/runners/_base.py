@@ -1,5 +1,4 @@
 import gc
-import os
 import json
 import logging
 import sys
@@ -14,7 +13,6 @@ from dotmap import DotMap
 import humanize
 
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
-from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import (
 	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
@@ -1023,6 +1021,17 @@ class Runner:
 			kwargs['id'] = self.id
 		debug(*args, **kwargs)
 
+	def _record_chunk_task_id(self, item):
+		"""Register a dynamically-created chunk task id (from its 'Celery chunked task created' Info)
+		into celery_ids_map, so stop_celery_tasks can revoke it. Format: '... created (i / n): <id>'."""
+		if isinstance(item, Info) and str(getattr(item, 'message', '')).startswith('Celery chunked task created'):
+			task_id = item.message.split(' ')[-1]
+			if task_id and task_id not in self.celery_ids_map:
+				self.celery_ids_map[task_id] = {
+					'id': task_id, 'name': item._source, 'full_name': item._source,
+					'descr': '', 'state': 'PENDING', 'count': 0, 'progress': 0, 'chunk': True,
+				}
+
 	def _get_store_poller(self):
 		"""Build a StorePoller for this run, or None if there's no store scope to poll.
 
@@ -1051,6 +1060,14 @@ class Runner:
 			print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
 		)
 
+	def _poll_results(self):
+		"""Live-poll this run's findings + progress from the store (StorePoller)."""
+		poller = self._get_store_poller()
+		if poller is None:
+			self.debug('no store scope to poll', sub='start')
+			return iter(())
+		return poller.iter_results()
+
 	def yielder(self):
 		"""Base yielder implementation.
 
@@ -1060,23 +1077,9 @@ class Runner:
 		Yields:
 			secator.output_types.OutputType: Secator output type.
 		"""
-		# If existing celery result, yield from it
+		# If existing celery result, live-poll the store for it
 		if self.celery_result:
-			# Experimental: poll the store instead of the Celery result backend (SECATOR_STORE_POLL=1).
-			# Default OFF -> unchanged Celery poll (zero regression). See store_utils.StorePoller.
-			if os.environ.get('SECATOR_STORE_POLL', '').lower() in ('1', 'true', 'yes'):
-				poller = self._get_store_poller()
-				if poller is not None:
-					yield from poller.iter_results()
-					return
-			yield from CeleryData.iter_results(
-				self.celery_result,
-				ids_map=self.celery_ids_map,
-				description=True,
-				revoked=self.revoked,
-				print_remote_info=self.print_remote_info,
-				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
-			)
+			yield from self._poll_results()
 			return
 
 		# Build Celery workflow
@@ -1109,19 +1112,7 @@ class Runner:
 				self.enable_reports = False
 				self.no_process = True
 				return
-			# Experimental store poll (SECATOR_STORE_POLL=1); default -> Celery poll (zero regression).
-			store_poller = self._get_store_poller() \
-				if os.environ.get('SECATOR_STORE_POLL', '').lower() in ('1', 'true', 'yes') else None
-			if store_poller is not None:
-				results = store_poller.iter_results()
-			else:
-				results = CeleryData.iter_results(
-					self.celery_result,
-					ids_map=self.celery_ids_map,
-					description=True,
-					print_remote_info=self.print_remote_info,
-					print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
-				)
+			results = self._poll_results()
 
 		# Yield results
 		yield from results
@@ -1496,6 +1487,11 @@ class Runner:
 			self.output += item + '\n' if output else ''
 			self._print_item(item) if item and print else ''
 			return
+
+		# Record dynamically-created chunk task ids for revoke. The Celery poll used to harvest these
+		# from the "Celery chunked task created" Info; the store poll surfaces the same Info, so
+		# capture it here instead so stop_celery_tasks can still revoke chunk children.
+		self._record_chunk_task_id(item)
 
 		# Abort further processing if no_process is set
 		if self.no_process:

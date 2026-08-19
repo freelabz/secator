@@ -1,7 +1,5 @@
-"""The runner's yielder uses StorePoller only under SECATOR_STORE_POLL=1 (default: Celery poll)."""
-import os
+"""The runner's yielder live-polls the store (StorePoller) — now the only poll path."""
 import unittest
-from unittest.mock import patch
 
 from secator.runners._base import Runner
 
@@ -17,34 +15,26 @@ class FakePoller:
 
 def _runner(poller):
 	r = Runner.__new__(Runner)          # bypass heavy __init__; set only what yielder touches
-	r.celery_result = object()          # truthy -> takes the remote-poll branch
+	r.celery_result = object()          # truthy -> remote poll branch
 	r._get_store_poller = lambda: poller
-	r.celery_ids_map = {}
-	r.revoked = False
-	r.print_remote_info = False
-	r.name = 'x'
+	r.debug = lambda *a, **k: None
 	return r
 
 
-class TestRunnerStorePollWire(unittest.TestCase):
+class TestRunnerStorePoll(unittest.TestCase):
 
-	def test_flag_on_uses_store_poller(self):
+	def test_yielder_polls_the_store(self):
 		poller = FakePoller()
-		with patch.dict(os.environ, {'SECATOR_STORE_POLL': '1'}):
-			out = list(Runner.yielder(_runner(poller)))
+		out = list(Runner.yielder(_runner(poller)))
 		self.assertTrue(poller.called)
 		self.assertEqual(out, [{'_uuid': 'store'}])
 
-	def test_flag_off_uses_celery_poll(self):
-		poller = FakePoller()
-		env = {k: v for k, v in os.environ.items() if k != 'SECATOR_STORE_POLL'}
-		with patch.dict(os.environ, env, clear=True), \
-			 patch('secator.runners._base.CeleryData') as CD:
-			CD.iter_results.return_value = iter([{'_uuid': 'celery'}])
-			out = list(Runner.yielder(_runner(poller)))
-		self.assertFalse(poller.called)
-		CD.iter_results.assert_called_once()
-		self.assertEqual(out, [{'_uuid': 'celery'}])
+	def test_poll_results_empty_without_scope(self):
+		# No store scope (e.g. missing {type}_id) -> yields nothing rather than crashing.
+		r = Runner.__new__(Runner)
+		r._get_store_poller = lambda: None
+		r.debug = lambda *a, **k: None
+		self.assertEqual(list(r._poll_results()), [])
 
 
 if __name__ == '__main__':
