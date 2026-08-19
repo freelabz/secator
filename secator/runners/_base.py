@@ -1056,6 +1056,9 @@ class Runner:
 			root_id=root_id,
 			root_type=rtype,
 			report_dir=report_dir,
+			ids_map=self.celery_ids_map,
+			main_id=str(self.celery_result.id) if self.celery_result else None,
+			revoked=self.revoked,
 			print_remote_info=self.print_remote_info,
 			print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
 		)

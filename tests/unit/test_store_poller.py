@@ -80,6 +80,15 @@ class TestStorePoller(unittest.TestCase):
 		self.assertEqual(engine.iterate_queries[1].get('_timestamp'), {'$gte': 2})
 		self.assertEqual(poller._scanned, 4)                            # 2 + 2, not 2 + 3
 
+	def test_revoked_flushes_once_and_exits(self):
+		# On Ctrl+C the runner re-yields with revoked=True; the poll must flush remaining findings
+		# and exit immediately, NOT wait for a terminal status (that was the revoke hardstop).
+		runner_frames = [[_root('RUNNING')]]     # never terminal
+		finding_frames = [[_f('a')]]
+		poller = self._poller(runner_frames, finding_frames, inactivity_seconds=None, revoked=True)
+		yielded = [item['_uuid'] for item in poller.iter_results()]
+		self.assertEqual(yielded, ['a'])
+
 	def test_inactivity_timeout_terminates_without_terminal_status(self):
 		# Root never finalizes and nothing new arrives -> the poll must STOP (not hang).
 		runner_frames = [[_root('RUNNING')]]        # clamped: always RUNNING
