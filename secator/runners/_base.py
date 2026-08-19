@@ -1109,13 +1109,19 @@ class Runner:
 				self.enable_reports = False
 				self.no_process = True
 				return
-			results = CeleryData.iter_results(
-				self.celery_result,
-				ids_map=self.celery_ids_map,
-				description=True,
-				print_remote_info=self.print_remote_info,
-				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
-			)
+			# Experimental store poll (SECATOR_STORE_POLL=1); default -> Celery poll (zero regression).
+			store_poller = self._get_store_poller() \
+				if os.environ.get('SECATOR_STORE_POLL', '').lower() in ('1', 'true', 'yes') else None
+			if store_poller is not None:
+				results = store_poller.iter_results()
+			else:
+				results = CeleryData.iter_results(
+					self.celery_result,
+					ids_map=self.celery_ids_map,
+					description=True,
+					print_remote_info=self.print_remote_info,
+					print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
+				)
 
 		# Yield results
 		yield from results

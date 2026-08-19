@@ -59,6 +59,8 @@ class StorePoller:
 			rehydrate = load_output_types
 		self._rehydrate = rehydrate
 		self._seen = set()          # yielded finding uuids (dedup contract, like CeleryData)
+		self._scanned = 0           # total findings read from the store (efficiency counter)
+		self._watermark = 0         # max _timestamp fetched so far — incremental fetch floor
 		self._last_status = None
 
 	def _runners_in_scope(self):
@@ -83,15 +85,29 @@ class StorePoller:
 		return runners[0].get('status') if runners else None
 
 	def _iter_new_findings(self):
-		"""Yield findings not yielded before (dedup by _uuid), streamed one batch at a time."""
-		for batch in self.engine.iterate(self.findings_query):
+		"""Yield findings not yielded before (dedup by _uuid), streamed one batch at a time.
+
+		Incremental: only fetch findings at/after the highest ``_timestamp`` seen so far, so each
+		cycle costs O(new findings) rather than re-scanning the whole set (indexed on DB backends;
+		on json the file is still read but only new items are rehydrated/deduped). ``$gte`` (not
+		``$gt``) re-reads the boundary second; the ``_uuid`` dedup drops those re-reads."""
+		query = dict(self.findings_query)
+		if self._watermark:
+			query['_timestamp'] = {'$gte': self._watermark}
+		high = self._watermark
+		for batch in self.engine.iterate(query):
+			self._scanned += len(batch)
 			for item in self._rehydrate(batch):
 				uuid = item.get('_uuid') if isinstance(item, dict) else getattr(item, '_uuid', None)
+				ts = item.get('_timestamp') if isinstance(item, dict) else getattr(item, '_timestamp', None)
+				if ts and ts > high:
+					high = ts
 				if uuid and uuid in self._seen:
 					continue
 				if uuid:
 					self._seen.add(uuid)
 				yield item
+		self._watermark = high
 
 	def iter_results(self):
 		"""Generator: yield findings as they land; render the live panel from runner docs; stop when
@@ -106,15 +122,20 @@ class StorePoller:
 					# Transient store error: log and retry next cycle (never aborts the run).
 					debug(f'store poll list_runners failed: {e}', sub='store.poll')
 					runners = []
+				status = self._root_status(runners)
 				advanced = False
+				scanned = self._scanned
+				yielded_before = len(self._seen)
 				try:
 					for item in self._iter_new_findings():
 						advanced = True
 						yield item
 				except Exception as e:
 					debug(f'store poll iterate failed: {e}', sub='store.poll')
-
-				status = self._root_status(runners)
+				debug(
+					f'cycle: {len(runners)} runners, scanned {self._scanned - scanned} findings, '
+					f'yielded {len(self._seen) - yielded_before} new (status={status})',
+					sub='store.poll')
 				if status != self._last_status:
 					advanced = True
 					self._last_status = status
