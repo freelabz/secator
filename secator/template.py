@@ -42,7 +42,10 @@ class TemplateLoader(DotMap):
 			return self._load(f.read())
 
 	def _load(self, input):
-		return yaml.load(input, Loader=yaml.Loader)
+		# Templates are declarative config (mappings/lists/scalars); the plain
+		# SafeLoader covers everything they use, so there's no need for the full
+		# loader's arbitrary Python-object construction.
+		return yaml.safe_load(input)
 
 	def print(self):
 		"""Print config as highlighted yaml."""
