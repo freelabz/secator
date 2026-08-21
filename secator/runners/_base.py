@@ -1064,12 +1064,33 @@ class Runner:
 		)
 
 	def _poll_results(self):
-		"""Live-poll this run's findings + progress from the store (StorePoller)."""
+		"""Live-poll this run's findings + progress.
+
+		Pick the poller once, at start. Use the store poll (StorePoller) when the resolved
+		store backend is a reachable *shared* store (mongodb/api) — worker and client both read
+		it — or when there is no Celery result to poll (in-process/sync run, where the local
+		store is trivially on the same machine). Otherwise (a filesystem store on a dispatched
+		run, or an unreachable network store) fall back to the Celery result-backend poll, which
+		works whenever a shared broker/result_backend exists — the requirement for any
+		distributed run."""
 		poller = self._get_store_poller()
-		if poller is None:
-			self.debug('no store scope to poll', sub='start')
-			return iter(())
-		return poller.iter_results()
+		use_store = poller is not None and (
+			not self.celery_result or poller.engine.pollable_shared_store()
+		)
+		if use_store:
+			return poller.iter_results()
+		if self.celery_result:
+			from secator.celery_utils import CeleryData
+			self.debug('store not a reachable shared store; polling celery result backend', sub='start')
+			return CeleryData.iter_results(
+				self.celery_result,
+				ids_map=self.celery_ids_map,
+				revoked=self.revoked,
+				print_remote_info=self.print_remote_info,
+				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
+			)
+		self.debug('no store scope and no celery result to poll', sub='start')
+		return iter(())
 
 	def yielder(self):
 		"""Base yielder implementation.

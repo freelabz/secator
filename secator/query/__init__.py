@@ -11,6 +11,11 @@ from secator.query.sqlite import SqliteBackend
 
 __all__ = ['QueryEngine', 'QueryBackend', 'ApiBackend', 'MongoDBBackend', 'JsonBackend', 'SqliteBackend']
 
+# Store backends that are network-shared between worker and client, so the client can
+# live-poll them directly. Filesystem backends (local/sqlite) are per-machine — a
+# dispatched run on those polls the Celery result backend instead (see _base._poll_results).
+SHARED_POLL_BACKENDS = frozenset({'mongodb', 'api'})
+
 
 class QueryEngine:
     """Query engine with pluggable backends."""
@@ -63,6 +68,15 @@ class QueryEngine:
             workspace_name = self.context.get('workspace_name', self.workspace_id)
             return JsonBackend(workspace_name, context=self.context)
         return self.BACKENDS[backend_name](self.workspace_id, context=self.context)
+
+    def pollable_shared_store(self) -> bool:
+        """True if the resolved store backend is a network store shared with the worker AND
+        reachable right now. Filesystem stores (local/sqlite) are per-machine, so a dispatched
+        run on those cannot see a remote worker's writes and polls the Celery result backend
+        instead. Used once, at poll start, to pick StorePoller vs the Celery poll."""
+        if self.backend.name not in SHARED_POLL_BACKENDS:
+            return False
+        return self.backend.is_reachable()
 
     def search(self, query: dict, limit: int = 0, dedupe: bool = False,
                exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
