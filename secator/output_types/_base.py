@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 class OutputType:
 	_table_fields = []
 	_sort_by = ()
+	# Fields to group by (tuple) and the field whose values to aggregate/collect
+	# when the CLI `--group` option is used without an explicit field.
+	_group_by = ()
+	_group_aggregate = None
 
 	@classmethod
 	def fields(cls):
