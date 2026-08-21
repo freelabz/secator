@@ -54,6 +54,26 @@ class TestExtractorFunctions(unittest.TestCase):
             self.target1,
             self.vuln1
         ]
+        self.ctx = self._store_ctx(self.results)
+        self.tech_ctx = self._store_ctx(self.tech_results)
+
+    def _store_ctx(self, findings, **extra):
+        """Persist findings to a run-scoped json store and return a ctx that queries it (the
+        in-memory extractor path was removed; process_extractor reads only the store)."""
+        import json
+        import tempfile
+        from pathlib import Path
+        d = Path(tempfile.mkdtemp())
+        with open(d / 'results.ndjson', 'w') as fh:
+            for i, item in enumerate(findings):
+                rec = item.toDict() if hasattr(item, 'toDict') else dict(item)
+                rec.setdefault('_type', getattr(item, '_type', None))  # test mocks set _type as a class var
+                if not rec.get('_uuid'):
+                    rec['_uuid'] = f'test-uuid-{i}'  # unique: the read path dedups by _uuid
+                fh.write(json.dumps(rec, default=str) + '\n')
+        ctx = {'drivers': ['json'], 'workspace_id': 'ws', 'workspace_name': 'ws', 'report_dir': str(d)}
+        ctx.update(extra)
+        return ctx
 
     def test_parse_extractor_string(self):
         """Test parsing extractor from string format."""
@@ -126,12 +146,12 @@ class TestExtractorFunctions(unittest.TestCase):
     def test_process_extractor_type_filter(self):
         """Test process_extractor filtering by type."""
         # Extract only mock types
-        result = process_extractor(self.results, 'mock.field1')
+        result = process_extractor([], 'mock.field1', ctx=self.ctx)
         self.assertEqual(len(result), 3)
         self.assertEqual(result, ['test1', 'test2', 'test3'])
 
         # Extract only url types
-        result = process_extractor(self.results, 'url.url')
+        result = process_extractor([], 'url.url', ctx=self.ctx)
         self.assertEqual(len(result), 2)
         self.assertEqual(result, ['http://example.com', 'http://example.org'])
 
@@ -143,18 +163,18 @@ class TestExtractorFunctions(unittest.TestCase):
             'field': 'field1',
             'condition': 'item.field2 > 1'
         }
-        result = process_extractor(self.results, extractor)
+        result = process_extractor([], extractor, ctx=self.ctx)
         self.assertEqual(len(result), 2)  # mock2 and mock3 meet condition
         self.assertEqual(result, ['test2', 'test3'])
 
-        # Test with len function in condition
-        extractor = {
-            'type': 'mock',
-            'field': 'field1',
-            'condition': 'len(item.field1) > 3 and item.field2 == 1'
-        }
-        result = process_extractor(self.results, extractor, {})
-        self.assertEqual(result, ['test1'])
+        # Combined AND condition over finding fields.
+        extractor = {'type': 'mock', 'field': 'field1', 'condition': "item.field1 == 'test1' and item.field2 == 1"}
+        self.assertEqual(process_extractor([], extractor, ctx=self.ctx), ['test1'])
+
+        # `len(<field>)` is no longer supported (Mongo can't express it without $expr; no shipped
+        # config uses it). It must RAISE explicitly, never silently match-all/none.
+        with self.assertRaises(ValueError):
+            process_extractor([], {'type': 'mock', 'field': 'field1', 'condition': 'len(item.field1) > 3'}, ctx=self.ctx)
 
     def test_process_extractor_with_nested_condition(self):
         """Test process_extractor with nested dict field access in conditions (dot notation)."""
@@ -164,7 +184,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'field': 'field1',
             'condition': "mock.nested.subfield == 'nested_value'"
         }
-        result = process_extractor(self.results, extractor)
+        result = process_extractor([], extractor, ctx=self.ctx)
         self.assertEqual(len(result), 3)
         self.assertEqual(result, ['test1', 'test2', 'test3'])
 
@@ -174,7 +194,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'field': 'field1',
             'condition': "mock.nested.subfield == 'nested_value' and mock.field2 == 1"
         }
-        result = process_extractor(self.results, extractor)
+        result = process_extractor([], extractor, ctx=self.ctx)
         self.assertEqual(len(result), 1)
         self.assertEqual(result, ['test1'])
 
@@ -184,7 +204,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'field': 'field1',
             'condition': "mock.nested.subfield == 'no_such_value'"
         }
-        result = process_extractor(self.results, extractor)
+        result = process_extractor([], extractor, ctx=self.ctx)
         self.assertEqual(result, [])
 
     def test_process_extractor_with_formatted_field(self):
@@ -194,7 +214,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'type': 'mock',
             'field': '{field1}_{field2}'
         }
-        result = process_extractor(self.results, extractor)
+        result = process_extractor([], extractor, ctx=self.ctx)
         self.assertEqual(result, ['test1_1', 'test2_2', 'test3_3'])
 
         # Test field that needs formatting
@@ -202,7 +222,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'type': 'mock',
             'field': 'field1'
         }
-        result = process_extractor(self.results, extractor)
+        result = process_extractor([], extractor, ctx=self.ctx)
         self.assertEqual(result, ['test1', 'test2', 'test3'])
 
         # Test nested field access with dot notation
@@ -210,7 +230,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'type': 'mock',
             'field': '{nested.subfield}'
         }
-        result = process_extractor(self.results, extractor)
+        result = process_extractor([], extractor, ctx=self.ctx)
         self.assertEqual(result, ['nested_value', 'nested_value', 'nested_value'])
 
         # Test nested field without braces
@@ -218,7 +238,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'type': 'mock',
             'field': 'nested.subfield'
         }
-        result = process_extractor(self.results, extractor)
+        result = process_extractor([], extractor, ctx=self.ctx)
         self.assertEqual(result, ['nested_value', 'nested_value', 'nested_value'])
 
         # Test that missing nested key yields empty string, which is filtered from results
@@ -226,7 +246,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'type': 'mock',
             'field': '{nested.nonexistent}'
         }
-        result = process_extractor(self.results, extractor)
+        result = process_extractor([], extractor, ctx=self.ctx)
         self.assertEqual(result, [])
 
     def test_process_extractor_group_by_combines_hosts(self):
@@ -237,7 +257,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'condition': 'item.version',
             'group_by': '{product} {version}',
         }
-        result = process_extractor(self.tech_results, extractor)
+        result = process_extractor([], extractor, ctx=self.tech_ctx)
         self.assertEqual(len(result), 2)
         self.assertIn('10.0.0.1:80,10.0.0.2:80~apache httpd 2.4.50', result)
         self.assertIn('10.0.0.3:80~nginx 1.21.0', result)
@@ -250,7 +270,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'condition': 'item.version',
             'group_by': '{product} {version}',
         }
-        result = process_extractor([self.tech3], extractor)
+        result = process_extractor([], extractor, ctx=self._store_ctx([self.tech3]))
         self.assertEqual(result, ['10.0.0.3:80~nginx 1.21.0'])
 
     def test_process_extractor_without_group_by_unchanged(self):
@@ -260,7 +280,7 @@ class TestExtractorFunctions(unittest.TestCase):
             'field': '{match}~{product} {version}',
             'condition': 'item.version',
         }
-        result = process_extractor(self.tech_results, extractor)
+        result = process_extractor([], extractor, ctx=self.tech_ctx)
         self.assertEqual(len(result), 3)
         self.assertIn('10.0.0.1:80~apache httpd 2.4.50', result)
         self.assertIn('10.0.0.2:80~apache httpd 2.4.50', result)
@@ -280,19 +300,19 @@ class TestExtractorFunctions(unittest.TestCase):
     def test_extract_from_results(self):
         """Test extract_from_results function."""
         # Test single extractor
-        results, errors = extract_from_results(self.results, 'mock.field1')
+        results, errors = extract_from_results([], 'mock.field1', ctx=self.ctx)
         self.assertEqual(results, ['test1', 'test2', 'test3'])
         self.assertEqual(errors, [])
 
         # Test multiple extractors
         extractors = ['mock.field1', 'url.url']
-        results, errors = extract_from_results(self.results, extractors)
+        results, errors = extract_from_results([], extractors, ctx=self.ctx)
         self.assertEqual(len(results), 5)  # 3 mock + 2 url
         self.assertEqual(errors, [])
 
         # Test with failing extractor
         # with patch('secator.runners._helpers.process_extractor', side_effect=Exception('Test error')):
-        #     results, errors = extract_from_results(self.results, 'mock.field1')
+        #     results, errors = extract_from_results([], 'mock.field1', ctx=self.ctx)
         #     self.assertEqual(results, [])
         #     self.assertEqual(len(errors), 1)
         #     self.assertIsInstance(errors[0], Error)
@@ -308,7 +328,7 @@ class TestExtractorFunctions(unittest.TestCase):
         }
 
         # Test normal extraction
-        inputs, updated_opts, errors = run_extractors(self.results, opts)
+        inputs, updated_opts, errors = run_extractors([], opts, ctx=self.ctx)
         self.assertEqual(inputs, ['test1', 'test2', 'test3'])
         self.assertEqual(updated_opts['other'], ['http://example.com', 'http://example.org'])
         self.assertEqual(errors, [])
@@ -337,7 +357,7 @@ class TestExtractorFunctions(unittest.TestCase):
             ]
         }
 
-        inputs, _updated_opts, errors = run_extractors(results, opts)
+        inputs, _updated_opts, errors = run_extractors([], opts, ctx=self._store_ctx(results))
         self.assertEqual(errors, [])
         self.assertEqual(len(inputs), 2)  # 2 unique services
         apache_input = next(i for i in inputs if 'apache' in i)
@@ -381,6 +401,29 @@ class TestExtractorFunctions(unittest.TestCase):
         ]
         result = get_task_folder_id('/dummy/path')
         self.assertEqual(result, 4)  # Max numeric dir (3) + 1
+
+
+class TestLoadOutputTypes(unittest.TestCase):
+    """Rehydration of store query docs (dicts) into OutputType objects for the run-scope
+    backfill that assembles self.results from the store (Step 4)."""
+
+    def test_loads_dicts_by_type_and_keeps_uuid(self):
+        from secator.output_types._base import load_output_types
+        docs = [
+            {'_type': 'url', 'url': 'http://x/a', '_uuid': 'u1'},
+            {'_type': 'vulnerability', 'name': 'CVE-1', '_id': 'm2'},  # mongodb-style id
+        ]
+        out = list(load_output_types(docs))
+        self.assertEqual([type(o).__name__ for o in out], ['Url', 'Vulnerability'])
+        self.assertEqual(out[0].url, 'http://x/a')
+        self.assertEqual(out[0]._uuid, 'u1')
+        self.assertEqual(out[1]._uuid, 'm2')  # falls back to _id
+
+    def test_passes_through_output_type_and_skips_unknown(self):
+        from secator.output_types._base import load_output_types
+        existing = Url(url='http://y/b', _context={'workspace_id': 'ws'})
+        out = list(load_output_types([existing, {'_type': 'nope'}, 'garbage', 42]))
+        self.assertEqual(out, [existing])
 
 
 if __name__ == '__main__':

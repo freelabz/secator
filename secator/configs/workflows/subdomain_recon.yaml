@@ -95,7 +95,7 @@ tasks:
       targets_:
       - type: url
         field: url
-        condition: item._source.startswith('httpx')
+        condition: item._source ~= ^httpx
       if: opts.brute_http and not opts.passive
 
   _group/probe:

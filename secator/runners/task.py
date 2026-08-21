@@ -67,7 +67,7 @@ class Task(Runner):
 		# small pool. (The instance-level override in Command.__init__ runs on the worker, too late
 		# to affect routing.)
 		profile = resolve_task_queue(task_cls, opts)
-		sig = run_command.si(self.results, self.config.name, self.inputs, opts).set(queue=profile)
+		sig = run_command.si([], self.config.name, self.inputs, opts).set(queue=profile)
 		task_id = sig.freeze().task_id
 		self.add_subtask(task_id, self.config.name, self.description)
 		return chain(sig)

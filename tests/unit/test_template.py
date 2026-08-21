@@ -44,21 +44,37 @@ class TestTemplate(unittest.TestCase):
 		task.run()
 		findings = task.findings
 		self.assertEqual(len(findings), 1)
-		self.assertTrue(self.expected_vuln == Vulnerability.load(findings[0].toDict()))
+		self.assertTrue(self.expected_vuln == Vulnerability.load(list(findings)[0].toDict()))
 
 	def test_external_workflow(self):
 		find_templates.cache_clear()
 		get_configs_by_type.cache_clear()
 		discover_tasks.cache_clear()
 		from secator.runners import Workflow
-		ls_workflow = [w for w in get_configs_by_type('workflow') if w.name == 'ls'][0]
-		self.assertIsNotNone(ls_workflow)
-		workflow = Workflow(ls_workflow, inputs=[str(self.template_dir)])
-		workflow.run()
-		findings = workflow.findings
-		self.assertEqual(len(findings), 1)
-		vuln = [r for r in findings if r._type == 'vulnerability'][0]
-		self.assertTrue(self.expected_vuln == Vulnerability.load(vuln.toDict()))
+		# The chain no longer carries a result payload, so a workflow's findings come from the
+		# store. Run with a temp sqlite store (a bare CLI run gets the json driver by default;
+		# a direct library run must supply one).
+		import tempfile
+		from pathlib import Path
+		import secator.hooks.sqlite as sqlite_mod
+		sqlite_mod._conns.clear()
+		orig_path = CONFIG.addons.sqlite.path
+		CONFIG.addons.sqlite.path = str(Path(tempfile.mkdtemp()) / 'test.db')
+		try:
+			ls_workflow = [w for w in get_configs_by_type('workflow') if w.name == 'ls'][0]
+			self.assertIsNotNone(ls_workflow)
+			workflow = Workflow(ls_workflow, inputs=[str(self.template_dir)],
+								 context={'drivers': ['sqlite'], 'workspace_id': 'ws', 'workspace_name': 'ws'})
+			workflow.run()
+			findings = workflow.findings
+			self.assertEqual(len(findings), 1)
+			vuln = [r for r in findings if r._type == 'vulnerability'][0]
+			self.assertTrue(self.expected_vuln == Vulnerability.load(vuln.toDict()))
+		finally:
+			for conn in sqlite_mod._conns.values():
+				conn.close()
+			sqlite_mod._conns.clear()
+			CONFIG.addons.sqlite.path = orig_path
 
 
 class TestTree(unittest.TestCase):
@@ -183,10 +199,6 @@ class TestTree(unittest.TestCase):
 		scan.run()
 		self.assertEqual(scan.status, 'SUCCESS')
 		self.assertEqual(len(scan.errors), 0)
-		# from secator.rich import console
-		# tree = build_runner_tree(config)
-		# console.print(tree.render_tree())
-		# console.print('')
 		messages = [r.message for r in scan.infos]
 		self.assertIn(
 			'Skipped task [bold gold3]nuclei/first[/] because condition is not met: [bold green]opts.nuclei[/]',
@@ -209,8 +221,9 @@ class TestTree(unittest.TestCase):
 		scan = Scan(config, run_opts={'dry_run': True, 'test1_nuclei': True})
 		scan.run()
 		self.assertEqual(scan.status, 'SUCCESS')
-		self.assertEqual(len(scan.infos), 11)
 		self.assertEqual(len(scan.errors), 0)
+		# dry_run persists to the json store like a normal run, so scan.infos serves the whole tree's
+		# preview. test1_nuclei is enabled, so test1's nuclei tasks must NOT appear as skipped.
 		messages = [r.message for r in scan.infos]
 		self.assertNotIn('Skipped task nuclei/first because condition is not met: opts.nuclei', messages)
 		self.assertNotIn('Skipped task nuclei/network because condition is not met: opts.nuclei', messages)

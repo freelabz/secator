@@ -1,6 +1,7 @@
 # secator/query/json.py
 
 import json
+import orjson
 import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -11,10 +12,53 @@ from secator.utils import sanitize_folder_name
 from secator.utils import debug
 
 
+def resolve_local_report_paths(report_query, workspace_name):
+	"""Rewrite a `report show`/`query` runner path so a human-friendly on-disk folder number resolves
+	to the runner's real {type}_id (the UUID stamped into findings' _context).
+
+	Local runs keep two ids: the sequential report FOLDER number (``tasks/0``, user-facing) and the
+	run-scope ``_context.{type}_id`` UUID that findings actually carry. A path like ``task/0`` names the
+	folder, so translate ``0`` -> that folder's ``info.context.{type}_id`` before it becomes a query
+	filter. Values that are not a local folder number (already a UUID, or a missing folder) pass through
+	unchanged. Only meaningful for the local json backend; DB backends already store the real id.
+
+	Args:
+		report_query (str): Comma-separated runner paths, e.g. ``tasks/0,scans/5``.
+		workspace_name (str): Workspace whose report tree to resolve against.
+
+	Returns:
+		str: The runner path with folder numbers replaced by their real {type}_id.
+	"""
+	if not report_query:
+		return report_query
+	ws_path = Path(CONFIG.dirs.reports).expanduser() / sanitize_folder_name(workspace_name)
+	out = []
+	for part in report_query.split(','):
+		token = part.strip()
+		if '/' not in token:
+			out.append(part)
+			continue
+		runner_type, runner_id = token.split('/', 1)
+		singular = runner_type.strip().lower().rstrip('s')
+		report_file = ws_path / f'{singular}s' / runner_id.strip() / 'report.json'
+		try:
+			with open(report_file) as f:
+				real_id = json.load(f).get('info', {}).get('context', {}).get(f'{singular}_id')
+			out.append(f'{runner_type}/{real_id}' if real_id else part)
+		except (FileNotFoundError, json.JSONDecodeError):
+			out.append(part)
+	return ','.join(out)
+
+
 def _regex_match(field, pattern):
 	if field is None:
 		return False
-	pattern = str(pattern).lstrip('*')
+	pattern = str(pattern)
+	# Strip the leading-glob convention, honoring an inline (?i) case-insensitivity flag.
+	if pattern.startswith('(?i)'):
+		pattern = '(?i)' + pattern[4:].lstrip('*')
+	else:
+		pattern = pattern.lstrip('*')
 	try:
 		return re.search(pattern, str(field)) is not None
 	except re.error:
@@ -95,10 +139,8 @@ class JsonBackend(QueryBackend):
 	name = "json"
 
 	def __init__(self, workspace_id: str, config: Optional[dict] = None,
-				 context: Optional[dict] = None, results: Optional[list] = None):
+				 context: Optional[dict] = None):
 		super().__init__(workspace_id, config, context=context)
-		self._results = results
-		self._findings_cache = None
 		reports_dir = config.get('reports_dir', CONFIG.dirs.reports) if config else CONFIG.dirs.reports
 		self.reports_dir = Path(reports_dir).expanduser()
 
@@ -114,94 +156,170 @@ class JsonBackend(QueryBackend):
 		workspace_folder = sanitize_folder_name(self.workspace_id)
 		return self.reports_dir / workspace_folder
 
-	def _load_all_findings(self) -> List[Dict[str, Any]]:
-		"""Load all findings from workspace JSON files, or return pre-loaded/cached results."""
-		if self._results is not None:
-			return self._results
-		if self._findings_cache is not None:
-			return self._findings_cache
-		findings = []
+	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str):
+		"""Yield one runner's records one at a time — the ndjson streamed line-by-line (or a legacy
+		report.json), with the {type}_id injection. No dedup or list here: this is the O(1)-memory
+		read used for filter-while-streaming; last-wins dedup, when needed, is done by the caller over
+		its (small) kept subset, not over the whole file."""
+		runner_id = report_dir.name
+
+		def _tag(rec):
+			if isinstance(rec, dict) and f'{runner_type_singular}_id' not in rec.get('_context', {}):
+				rec.setdefault('_context', {})[f'{runner_type_singular}_id'] = runner_id
+			return rec
+
+		ndjson = report_dir / 'results.ndjson'
+		if ndjson.exists():
+			try:
+				with open(ndjson, 'r') as f:
+					for line in f:
+						line = line.strip()
+						if not line:
+							continue
+						try:
+							rec = orjson.loads(line)
+						except json.JSONDecodeError:
+							continue  # torn final line after a crash -> skip
+						yield _tag(rec)
+			except IOError as e:
+				debug(f'Error reading {ndjson}: {e}', sub='query.json')
+			return
+		report_file = report_dir / 'report.json'
+		if not report_file.exists():
+			return
+		try:
+			with open(report_file, 'r') as f:
+				data = orjson.loads(f.read())  # legacy/completed report — nested JSON, can't stream without json_stream
+		except (json.JSONDecodeError, IOError) as e:
+			debug(f'Error loading {report_file}: {e}', sub='query.json')
+			return
+		for lst in data.get('results', {}).values():
+			if isinstance(lst, list):
+				for rec in lst:
+					yield _tag(rec)
+
+	def _iter_records(self):
+		"""Stream store records one at a time — never materializes the full result set. Run-scoped
+		report_dir hot path when hinted, else a full workspace scan."""
+		report_dir = self.context.get('report_dir')
+		if report_dir:
+			report_dir = Path(report_dir)
+			singular = report_dir.parent.name.rstrip('s') or 'task'
+			yield from self._iter_report_dir(report_dir, singular)
+			return
 		workspace_path = self._get_workspace_path()
-		debug(f'Looking for reports in: {workspace_path}', sub='query.json')
-		debug(f'Workspace ID/name: {self.workspace_id}', sub='query.json')
-
 		if not workspace_path.exists():
-			debug(f'Workspace path does not exist: {workspace_path}', sub='query.json')
-			# Show what workspaces are available
-			if self.reports_dir.exists():
-				available = [d.name for d in self.reports_dir.iterdir() if d.is_dir()]
-				debug(f'Available workspaces in {self.reports_dir}: {available}', sub='query.json')
-			return findings
-
-		# Search for report.json files in tasks/, workflows/, scans/
+			return
 		for runner_type in ['tasks', 'workflows', 'scans']:
 			runner_path = workspace_path / runner_type
 			if not runner_path.exists():
 				continue
-
 			for report_dir in runner_path.iterdir():
-				if not report_dir.is_dir():
-					continue
-
-				report_file = report_dir / 'report.json'
-				if report_file.exists():
-					try:
-						with open(report_file, 'r') as f:
-							data = json.load(f)
-
-						results = data.get('results', {})
-						runner_type_singular = runner_type.rstrip('s')  # "tasks" -> "task", "scans" -> "scan"
-						runner_id = report_dir.name
-
-						for type_name, items in results.items():
-							if isinstance(items, list):
-								for item in items:
-									# Inject runner context from directory path if not already present
-									if f'{runner_type_singular}_id' not in item['_context']:
-										item['_context'][f'{runner_type_singular}_id'] = runner_id
-								findings.extend(items)
-					except (json.JSONDecodeError, IOError) as e:
-						debug(f'Error loading {report_file}: {e}', sub='query.json')
-						continue
-
-		debug(f'Loaded {len(findings)} findings from workspace', sub='query.json')
-		self._findings_cache = findings
-		return findings
+				if report_dir.is_dir():
+					yield from self._iter_report_dir(report_dir, runner_type.rstrip('s'))
 
 	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
-		"""Search findings matching query."""
-		findings = self._load_all_findings()
+		"""Search findings matching query by FILTERING WHILE STREAMING — peak memory is O(matches),
+		not O(total findings). The fan-in extractor's one store query used to materialize the whole
+		result set before filtering to a handful of matches, which was the O(N)
+		peak that defeated streaming. We iterate records one at a time, match, and keep only matches,
+		deduped last-wins by _uuid over the (small) matched subset."""
+		by_uuid = {}
+		for finding in self._iter_records():
+			if not match_query(finding, query):
+				continue
+			if exclude_fields and isinstance(finding, dict):
+				finding = {k: v for k, v in finding.items() if k not in exclude_fields}
+			by_uuid[(finding.get('_uuid') if isinstance(finding, dict) else None) or id(finding)] = finding
+			if limit and len(by_uuid) >= limit:
+				break
+		return list(by_uuid.values())
 
-		matched = []
-		for finding in findings:
-			if match_query(finding, query):
-				# Remove excluded fields
-				if exclude_fields and isinstance(finding, dict):
-					finding = {k: v for k, v in finding.items() if k not in exclude_fields}
-				matched.append(finding)
-				if limit and len(matched) >= limit:
-					break
-
-		return matched
+	def _execute_iterate(self, query: dict, batch_size: int = 1000):
+		"""Stream matching records in batches — O(batch) + O(distinct uuids), never materializing the
+		full record set (the base impl does _execute_search(limit=0), which collects everything). Used
+		by the exporters (via StreamView.__iter__) so a report over N findings stays flat. Deduped
+		keep-first by _uuid with a seen-set, so the append-only ndjson's re-emitted lines don't yield
+		duplicate rows. (Keep-first, not last-wins: true last-wins can't stream; fine for a report.)"""
+		seen = set()
+		batch = []
+		for rec in self._iter_records():
+			if not match_query(rec, query):
+				continue
+			uid = rec.get('_uuid') if isinstance(rec, dict) else None
+			if uid is not None:
+				if uid in seen:
+					continue
+				seen.add(uid)
+			batch.append(rec)
+			if len(batch) >= batch_size:
+				yield batch
+				batch = []
+		if batch:
+			yield batch
 
 	def _execute_count(self, query: dict) -> int:
-		"""Count findings matching query."""
-		findings = self._load_all_findings()
-		return sum(1 for f in findings if match_query(f, query))
+		"""Count DISTINCT matching findings by streaming (seen-set of _uuids), not by materializing
+		every record — same O(distinct) memory as iterate, not O(all)."""
+		seen = set()
+		n = 0
+		for rec in self._iter_records():
+			if not match_query(rec, query):
+				continue
+			uid = rec.get('_uuid') if isinstance(rec, dict) else None
+			if uid is None:
+				n += 1
+			elif uid not in seen:
+				seen.add(uid)
+				n += 1
+		return n
+
+	def _report_files(self):
+		"""Yield the report.json paths this backend reads — the run-scoped file when
+		``context['report_dir']`` is set, else every report in the workspace."""
+		report_dir = self.context.get('report_dir')
+		if report_dir:
+			p = Path(report_dir) / 'report.json'
+			if p.exists():
+				yield p
+			return
+		workspace_path = self._get_workspace_path()
+		if not workspace_path.exists():
+			return
+		for runner_type in ['tasks', 'workflows', 'scans']:
+			runner_path = workspace_path / runner_type
+			if not runner_path.exists():
+				continue
+			for d in runner_path.iterdir():
+				if d.is_dir() and (d / 'report.json').exists():
+					yield d / 'report.json'
 
 	def _execute_update(self, query: dict, update: dict) -> int:
-		"""Update in-memory records matching query."""
-		if self._results is None:
-			return 0
+		"""Apply a ``$set`` update to matching findings directly in the report.json store.
+
+		The store is the source of truth (no in-memory results). Each matching file is
+		rewritten atomically; a read-first dirty check skips files with no match so an
+		update never rewrites the whole workspace.
+		"""
 		set_fields = update.get("$set", {})
 		if not set_fields:
 			return 0
+		from secator.utils import atomic_json, read_json
 		count = 0
-		for i, record in enumerate(self._results):
-			if match_query(record, query):
-				for k, v in set_fields.items():
-					self._results[i][k] = v
-				count += 1
+		for path in self._report_files():
+			data = read_json(path)
+			if not data:
+				continue
+			buckets = data.get('results', {})
+			if not any(match_query(it, query) for b in buckets.values() if isinstance(b, list) for it in b):
+				continue
+			with atomic_json(path, default=lambda: {'info': {}, 'results': {}}) as d:
+				for bucket in d.get('results', {}).values():
+					if isinstance(bucket, list):
+						for item in bucket:
+							if match_query(item, query):
+								item.update(set_fields)
+								count += 1
 		return count
 
 	def list_workspaces(self):

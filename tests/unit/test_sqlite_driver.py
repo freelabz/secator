@@ -149,12 +149,14 @@ class TestSqliteHooks(SqliteTestBase):
 		self.assertEqual(results[0]['url'], 'http://x/a')
 
 	def test_update_runner_inserts_and_stores_id(self):
+		import uuid
 		from secator.hooks import sqlite as mod
 
 		class FakeRunner:
 			def __init__(self):
 				self.config = type('C', (), {'type': 'task', 'name': 'httpx'})()
-				self.context = {'workspace_id': 'ws1'}
+				# {type}_id is minted by the runner core (Runner.__init__); the driver only persists.
+				self.context = {'workspace_id': 'ws1', 'task_id': str(uuid.uuid4())}
 				self.status = 'RUNNING'
 
 			def toDict(self):
@@ -237,3 +239,59 @@ class TestSqliteHooks(SqliteTestBase):
 		self.assertIn(Workflow, mod.HOOKS)
 		self.assertIn(Scan, mod.HOOKS)
 		self.assertIn('on_item', mod.HOOKS[Task])
+
+
+class TestWriteModelOnItem(SqliteTestBase):
+	"""Write-model: the store driver's on_item persists for EVERY runner type (Task/Workflow/Scan),
+	so execution outputs (Info/Warning/Target) emitted by a Workflow/Scan land in the store through
+	the one add_result path — no persist_execution_items shim."""
+
+	def test_on_item_registered_for_all_runner_types(self):
+		from secator.hooks import sqlite as mod
+		from secator.runners import Scan, Task, Workflow
+		for cls in (Task, Workflow, Scan):
+			self.assertIn('on_item', mod.HOOKS[cls])
+			self.assertIn(mod.update_finding, mod.HOOKS[cls]['on_item'])
+
+	def test_workflow_execution_item_persisted_via_on_item(self):
+		from secator.hooks import sqlite as mod
+		from secator.output_types import Warning
+		from secator.query.sqlite import SqliteBackend
+
+		class FakeWorkflow:
+			config = type('C', (), {'type': 'workflow', 'name': 'host_recon'})()
+			context = {'workspace_id': 'ws1'}
+		mod.update_finding(FakeWorkflow(), Warning(message='state exceeds 16MB', _context={'workspace_id': 'ws1'}))
+		results = SqliteBackend(workspace_id='ws1').search({'_type': 'warning'})
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0]['message'], 'state exceeds 16MB')
+
+
+class TestSqliteBuildWhere(unittest.TestCase):
+	"""Query-dict -> SQL WHERE translation (pure, no DB)."""
+
+	def test_nin_with_none_guards_null(self):
+		# Regression: `x NOT IN (..., NULL, ...)` is NULL (never TRUE) in SQL 3-valued
+		# logic, so a None in the $nin list would drop every row — breaking bare
+		# truthiness checks (_TRUTHY uses $nin: [None, '', False, 0]). The None must be
+		# pulled out into an explicit `IS NOT NULL` guard, NOT IN only the non-null values.
+		from secator.query.sqlite import _build_where
+		sql, params = _build_where({'verified': {'$nin': [None, '', False, 0]}})
+		self.assertIn('IS NOT NULL', sql)
+		self.assertIn('NOT IN (?, ?, ?)', sql)  # only the 3 non-null values
+		self.assertNotIn(None, params)
+		self.assertEqual(params, ['', False, 0])
+
+	def test_nin_without_none_unchanged(self):
+		from secator.query.sqlite import _build_where
+		sql, params = _build_where({'status': {'$nin': ['a', 'b']}})
+		self.assertIn('NOT IN (?, ?)', sql)
+		self.assertNotIn('IS NOT NULL', sql)
+		self.assertEqual(params, ['a', 'b'])
+
+	def test_nin_only_none_is_null_guard_only(self):
+		from secator.query.sqlite import _build_where
+		sql, params = _build_where({'verified': {'$nin': [None]}})
+		self.assertIn('IS NOT NULL', sql)
+		self.assertNotIn('NOT IN', sql)
+		self.assertEqual(params, [])

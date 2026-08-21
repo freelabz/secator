@@ -31,14 +31,14 @@ class TestErrorScoping(unittest.TestCase):
 		wf = self._workflow()
 		# An error produced by a different (earlier) workflow, forwarded into this one.
 		foreign = Error(message='boom', _source='other.task', _context={'ancestor_id': 'other_workflow'})
-		wf.add_result(foreign, print=False, output=False, hooks=False, queue=False)
+		wf.add_result(foreign, print=False, output=False, queue=False)
 		self.assertEqual(wf.self_errors, [], 'workflow must not inherit a sibling workflow error')
 		self.assertEqual(wf.status, 'SUCCESS')
 
 	def test_workflow_counts_its_own_subtree_error(self):
 		wf = self._workflow()
 		own = Error(message='mine', _source=f'{wf.config.name}.task', _context={'ancestor_id': wf.config.name})
-		wf.add_result(own, print=False, output=False, hooks=False, queue=False)
+		wf.add_result(own, print=False, output=False, queue=False)
 		self.assertIn(own, wf.self_errors)
 		self.assertEqual(wf.status, 'FAILURE')
 
@@ -46,7 +46,7 @@ class TestErrorScoping(unittest.TestCase):
 		# A workflow-level error (not from a task) carries the workflow's own _source.
 		wf = self._workflow()
 		direct = Error(message='wf-level', _source=wf.unique_name)
-		wf.add_result(direct, print=False, output=False, hooks=False, queue=False)
+		wf.add_result(direct, print=False, output=False, queue=False)
 		self.assertIn(direct, wf.self_errors)
 		self.assertEqual(wf.status, 'FAILURE')
 
@@ -54,12 +54,12 @@ class TestErrorScoping(unittest.TestCase):
 		scans = get_configs_by_type('scan')
 		if not scans:
 			self.skipTest('No scans configured')
-		scan = Scan(scans[0], inputs=['example.com'], run_opts={'dry_run': True}, context={})
+		scan = Scan(scans[0], inputs=['example.com'], run_opts={}, context={})
 		scan.started = True
 		scan.done = True
 		# An error from any child workflow's subtree must make the scan FAILURE.
 		e = Error(message='child failed', _source='wf.task', _context={'ancestor_id': 'some_workflow'})
-		scan.add_result(e, print=False, output=False, hooks=False, queue=False)
+		scan.add_result(e, print=False, output=False, queue=False)
 		self.assertIn(e, scan.self_errors)
 		self.assertEqual(scan.status, 'FAILURE')
 
