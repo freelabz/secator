@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.1](https://github.com/freelabz/secator/compare/v0.42.0...v0.42.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **template:** parse templates with yaml.safe_load ([#1341](https://github.com/freelabz/secator/issues/1341)) ([5f391e7](https://github.com/freelabz/secator/commit/5f391e79e69365545ed2a1559f374c976b4eb337))
+
 ## [0.42.0](https://github.com/freelabz/secator/compare/v0.41.0...v0.42.0) (2026-08-18)
 
 
