@@ -141,3 +141,61 @@ the watchdog). `celery_result` stays on the runner for dispatch + revoke.
   correct under the redelivery/duplicate-write hazards already documented in `hooks/json.py`.
 - **`count` semantics** parity with the old panel (findings owned by the runner vs all
   descendants).
+
+## Amendment (2026-08-21): poll-source selection + Celery fallback
+
+The "Store-always-present" gate in *Risks* turned out to be false for a real topology:
+**a remote worker + a filesystem store**. The store poll reads the run's resolved store
+backend, but `local`/`sqlite` are **per-machine** — a worker on another host writes to *its*
+disk, which the client can't read, so the poll never sees the run and hangs to the inactivity
+timeout. Reachability doesn't save this: the client's own disk is always "reachable" yet isn't
+the worker's disk. This partially reverses §4/§5 — the Celery poll returns as a **fallback**,
+not the default.
+
+### Rule — decide the poller once, at poll start (`_base._poll_results`)
+
+```
+resolved store backend ∈ {mongodb, api} AND backend.is_reachable()  -> StorePoller  (shared, both sides read it)
+no celery result (in-process / sync run)                            -> StorePoller  (local store, same machine)
+otherwise: filesystem store on a dispatched run, or a network store
+           that is unreachable right now                            -> CeleryData poll (result_backend)
+```
+
+- Reachability is meaningful **only** for network stores; filesystem backends are never
+  consulted (`QueryEngine.pollable_shared_store()` name-gates on
+  `SHARED_POLL_BACKENDS = {mongodb, api}` before calling `is_reachable()`).
+- `is_reachable()`: `MongoDBBackend` pings under a `pymongo.timeout(1.0)` bound; `ApiBackend`
+  does a `HEAD` with `timeout=1` (any HTTP status = reachable). Base default `True`.
+- The decision is **one-shot** at start — no grace window, no mid-run switching. A wrong guess
+  is asymmetric-cheap: a same-host `file://` setup that takes the Celery poll still works
+  (its `result_backend` is local and readable), and the fallback only *needs* to be correct
+  in the genuinely-distributed case, where the store poll unambiguously sees nothing.
+
+### Consequences for §4/§5
+
+- **§4 reinstated:** the worker's `update_state(state='RUNNING', meta=…)` write is restored —
+  read **only** by the `CeleryData` fallback. The store poll still ignores it (findings/status
+  persist via the `on_item`/`on_interval` hooks regardless).
+- **§5 reinstated:** `secator/celery_utils.py` (`CeleryData.iter_results`/`poll`/`get_all_data`
+  /`get_tasks_data`) is restored verbatim as the fallback poller.
+
+### No new infrastructure
+
+The fallback polls `CONFIG.celery.result_backend` — the shared broker/result backend that
+*any* distributed Celery run already requires. So the remote-worker case works out of the box
+with no Redis store driver, no Mongo. Filesystem-store dispatched runs (incl. same-host)
+therefore take the Celery poll; the store poll owns the reachable network-store cases
+(Cloud/Mongo — the originally-validated path).
+
+### Reversibility
+
+This keeps two poll paths + `update_state` alive (accepted as interim). The cleaner endgame —
+a `redis` **store driver** (worker-side hooks + a `RedisBackend`) reusing the existing
+`result_backend` Redis — would let the store poll cover the distributed case as a single path
+and delete this fallback. Speced but not built.
+
+### Tests
+
+`tests/unit/test_poll_selection.py` (the `pollable_shared_store` decision) +
+`tests/unit/test_runner_store_poll.py` (all four `_poll_results` branches: shared+reachable →
+store, in-process → store, dispatched+non-shared → Celery fallback, no-scope → empty).
