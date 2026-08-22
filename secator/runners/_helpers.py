@@ -4,6 +4,7 @@ import re
 from secator.config import CONFIG
 from secator.output_types import Error
 from secator.query.ast import substitute_ctx_constants
+from secator.scope import as_scope_list, host_in_scope
 from secator.utils import deduplicate, debug
 
 
@@ -124,6 +125,20 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		if combined:
 			debug('using scope-tagged targets as inputs', obj=combined, sub='extractors')
 			inputs = combined
+	# Enforce a generic target-scope allow/deny list on the resolved inputs. This is the
+	# single fan-in choke point every runner's inputs flow through (user-supplied AND
+	# dynamically discovered, e.g. subdomain_recon -> host_recon), so filtering here drops
+	# out-of-scope discovered targets before any downstream task acts on them. The API derives
+	# in_scope/out_of_scope from the run's authorized scope (mandate) and passes them as plain
+	# run-options; core stays authorization-agnostic. See secator/scope.py.
+	in_scope = as_scope_list(opts.get('in_scope'))
+	out_of_scope = as_scope_list(opts.get('out_of_scope'))
+	if inputs and (in_scope or out_of_scope):
+		kept = [t for t in inputs if host_in_scope(t, in_scope, out_of_scope)]
+		dropped = [t for t in inputs if t not in kept]
+		if dropped:
+			debug(f'dropped {len(dropped)} out-of-scope target(s): {dropped}', sub='scope')
+		inputs = kept
 	if computed_opts:
 		debug('computed_opts', obj=computed_opts, sub='extractors')
 	return inputs, opts, errors
