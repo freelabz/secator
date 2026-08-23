@@ -255,11 +255,27 @@ class TestClassifyTarget(unittest.TestCase):
 				'example.*',
 				'[a-z].example.com',  # char-class
 				'exa mple.com',       # space
-				'[::1]:443',          # bracketed IPv6 + port -> ambiguous, fail closed
 			]:
 				with self.subTest(token=token):
 					self.assertFalse(classify_target(token, resolve=True).is_network,
 						f'{token} slipped through as network')
+
+	def test_ip_literal_host_is_network_no_dns(self):
+		# Fail-open regression: an IP literal hiding in host:port / [IPv6]:port / URL host is a
+		# concrete target the scanner WILL hit -> must be network BY CONSTRUCTION, never via DNS.
+		with mock.patch.object(dns.resolver.Resolver, 'resolve', side_effect=AssertionError('DNS called')):
+			for token in [
+				'8.8.8.8:443',
+				'192.168.1.1:22',
+				'[2001:db8::1]:443',   # canonicalizes to a valid IPv6 literal
+				'2001:db8::1:443',     # bare 8-group IPv6 literal
+				'http://8.8.8.8:443/',  # URL whose host is an IPv4 literal
+				'https://[2001:db8::1]/',  # URL whose host is a bracketed IPv6 literal
+			]:
+				with self.subTest(token=token):
+					info = classify_target(token, resolve=True)
+					self.assertTrue(info.is_network and info.reachable,
+						f'{token} was NOT classified network by construction')
 
 
 from secator.utils import remove_duplicates

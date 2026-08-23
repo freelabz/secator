@@ -1073,12 +1073,6 @@ def validate_cidr_range(target):
 # HOST covers both bare hostnames and registrable domains (autodetect_type returns HOST for both).
 NETWORK_TYPES = (IP, CIDR_RANGE, HOST, HOST_PORT, URL)
 
-# Wildcard / regex markers. A token carrying any of these is a SCOPE entry (e.g. '*.example.com',
-# '.*\\.corp$'), never a concrete target, so classify_target must never call it a network target.
-# Fully anchored char-class, single bounded quantifier -> ReDoS-safe. `?`, `(`, `)`, `|` are NOT
-# listed because they legitimately appear in URLs (query strings); we fail closed on the rest.
-_SCOPE_META = re.compile(r'^.*[*\\^$\[\]].*$', re.DOTALL)
-
 
 @dataclass
 class TargetInfo:
@@ -1109,11 +1103,13 @@ def canonicalize_target(raw):
 	if not token:
 		return ''
 
-	# Strip IPv6 brackets on a bare bracketed address: [2001:db8::1] -> 2001:db8::1.
-	# A bracket+port form ([::1]:443) is left untouched: unbracketing it is ambiguous (that is
-	# exactly why brackets exist), so it falls through to classify as non-network (fail closed).
-	if token.startswith('[') and token.endswith(']'):
-		token = token[1:-1]
+	# Strip IPv6 brackets, keeping any :port, but ONLY when the bracketed content is a real IP
+	# literal (what brackets are for): [2001:db8::1] -> 2001:db8::1 , [2001:db8::1]:443 ->
+	# 2001:db8::1:443. A non-IP like [a-z].example.com keeps its brackets -> caught as a scope entry.
+	if token.startswith('['):
+		end = token.find(']')
+		if end != -1 and _is_ip_literal(token[1:end]):
+			token = token[1:end] + token[end + 1:]
 
 	# Alternate IPv4 encodings -> dotted-quad, using inet_aton (same parser nmap/ping/libc use).
 	# Only numeric-ish tokens reach a match; hostnames and out-of-range ints raise and fall through.
@@ -1192,6 +1188,15 @@ def _resolve_host(host, timeout):
 	return False
 
 
+def _is_ip_literal(host):
+	"""True if host is a v4 or v6 IP literal. Pure -- ipaddress does no DNS."""
+	try:
+		ipaddress.ip_address(host)
+		return True
+	except ValueError:
+		return False
+
+
 def _target_host(canonical, ttype):
 	"""Extract the DNS-resolvable host from a canonical url / host / host:port token. Pure."""
 	if ttype == URL:
@@ -1220,9 +1225,10 @@ def classify_target(token, *, resolve=True, timeout=2.0):
 	ttype = autodetect_type(canonical)
 	info = TargetInfo(type=ttype, is_network=False, root=canonical, reachable=False)
 
-	# Non-network types (slug/email/iban/uuid/path/mac/...) and scope entries (wildcard/regex,
-	# which fail closed) keep the False defaults.
-	if ttype not in NETWORK_TYPES or _SCOPE_META.match(canonical):
+	# Non-network types keep the False defaults. This also fails scope entries closed: wildcard /
+	# regex forms (*.example.com, .*\.corp$, [a-z].example.com) are rejected by autodetect_type's
+	# strict validators to STRING, so they are never in NETWORK_TYPES.
+	if ttype not in NETWORK_TYPES:
 		return info
 
 	if ttype == IP:
@@ -1232,12 +1238,17 @@ def classify_target(token, *, resolve=True, timeout=2.0):
 		info.root = str(ipaddress.ip_network(canonical, strict=False).network_address)
 		info.is_network = info.reachable = True
 	elif ttype in (URL, HOST, HOST_PORT):
+		host = _target_host(canonical, ttype)
 		if ttype == URL:
-			info.root = _target_host(canonical, ttype)
-		if resolve:
-			ok = _resolve_host(_target_host(canonical, ttype), timeout)
+			info.root = host
+		if _is_ip_literal(host):
+			# An IP literal hiding in url/host:port (8.8.8.8:443, http://8.8.8.8/) is network
+			# BY CONSTRUCTION -- never gate its network-ness on DNS (it won't resolve as a name).
+			info.is_network = info.reachable = True
+		elif resolve:
+			ok = _resolve_host(host, timeout)
 			info.is_network = info.reachable = ok
-		# resolve=False -> pure path: leave is_network/reachable False (unverified).
+		# genuine hostname + resolve=False -> pure path: leave is_network/reachable False (unverified).
 
 	return info
 
