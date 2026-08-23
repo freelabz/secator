@@ -154,6 +154,114 @@ Content-Type: text/html"""
 		self.assertEqual(result, {})
 
 
+from unittest import mock
+import dns.resolver
+from secator.utils import canonicalize_target, split_targets, classify_target
+
+
+class TestCanonicalizeTarget(unittest.TestCase):
+	def test_canonicalize_and_classify_network_forms(self):
+		# (raw, expected canonical, expected type) -- all must canonicalize to the real host
+		# and classify as a network type. Covers the smuggling vectors + IDN + bracketed IPv6.
+		cases = [
+			(' 1.2.3.4', '1.2.3.4', IP),          # whitespace
+			('2130706433', '127.0.0.1', IP),      # decimal inet_aton
+			('0177.0.0.1', '127.0.0.1', IP),      # octal
+			('127.1', '127.0.0.1', IP),           # short form
+			('0x7f.0.0.1', '127.0.0.1', IP),      # hex
+			('täst.de', 'xn--tst-qla.de', HOST),  # IDN host -> punycode
+			('[2001:db8::1]', '2001:db8::1', IP),  # bracketed IPv6
+		]
+		for raw, canon, ttype in cases:
+			with self.subTest(raw=raw):
+				self.assertEqual(canonicalize_target(raw), canon)
+				# resolve=False keeps it pure; type detection still sees the canonical (network) form.
+				self.assertEqual(classify_target(raw, resolve=False).type, ttype)
+
+	def test_canonicalize_empty(self):
+		self.assertEqual(canonicalize_target('  '), '')
+		self.assertEqual(canonicalize_target(None), '')
+
+
+class TestSplitTargets(unittest.TestCase):
+	def test_split_on_comma_and_newline(self):
+		self.assertEqual(
+			split_targets('a.com,b.com\n1.2.3.4 , \n c.com'),
+			['a.com', 'b.com', '1.2.3.4', 'c.com'],
+		)
+		self.assertEqual(split_targets(['a.com,b.com', 'c.com']), ['a.com', 'b.com', 'c.com'])
+		self.assertEqual(split_targets(''), [])
+
+
+class TestClassifyTarget(unittest.TestCase):
+	def test_type_detection(self):
+		# type mirrors autodetect_type across network + one non-network example
+		cases = [
+			('1.2.3.4', IP),
+			('192.168.1.0/24', CIDR_RANGE),
+			('example.com', HOST),               # registrable domain -> HOST
+			('sub.example.com', HOST),           # bare hostname -> HOST
+			('https://example.com/path', URL),
+			('test@example.com', EMAIL),         # non-network
+		]
+		for token, ttype in cases:
+			with self.subTest(token=token):
+				self.assertEqual(classify_target(token, resolve=False).type, ttype)
+
+	def test_ip_cidr_network_by_construction_no_dns(self):
+		# ip/cidr are network+reachable WITHOUT any DNS call, even with resolve=True.
+		with mock.patch.object(dns.resolver.Resolver, 'resolve', side_effect=AssertionError('DNS called')):
+			ip = classify_target('1.2.3.4', resolve=True)
+			self.assertTrue(ip.is_network and ip.reachable)
+			self.assertEqual(ip.root, '1.2.3.4')
+			cidr = classify_target('10.0.0.0/8', resolve=True)
+			self.assertTrue(cidr.is_network and cidr.reachable)
+			self.assertEqual(cidr.root, '10.0.0.0')  # cidr root = network address
+
+	def test_is_network_dns_resolves(self):
+		with mock.patch.object(dns.resolver.Resolver, 'resolve', return_value=mock.MagicMock()) as m:
+			info = classify_target('example.com', resolve=True)
+			self.assertTrue(info.is_network and info.reachable)
+			m.assert_called()
+
+	def test_is_network_dns_nxdomain(self):
+		with mock.patch.object(dns.resolver.Resolver, 'resolve', side_effect=dns.resolver.NXDOMAIN):
+			info = classify_target('nope.invalid', resolve=True)
+			self.assertFalse(info.is_network)
+			self.assertFalse(info.reachable)
+
+	def test_url_root_is_hostname_and_resolves(self):
+		with mock.patch.object(dns.resolver.Resolver, 'resolve', return_value=mock.MagicMock()):
+			info = classify_target('https://sub.example.com:8443/a?b=c', resolve=True)
+			self.assertEqual(info.root, 'sub.example.com')
+			self.assertTrue(info.is_network)
+
+	def test_resolve_false_is_pure_no_io(self):
+		# The pure path must NOT touch DNS: a resolver that raises if called proves it.
+		with mock.patch.object(dns.resolver.Resolver, 'resolve', side_effect=AssertionError('DNS called')):
+			host = classify_target('example.com', resolve=False)
+			self.assertEqual(host.type, HOST)
+			self.assertFalse(host.is_network)  # unverified without DNS
+			# autodetect_type itself is pure regex -> also must not call DNS
+			self.assertEqual(autodetect_type('example.com'), HOST)
+
+	def test_scope_and_near_miss_forms_never_network(self):
+		# Adversarial: wildcard/regex scope entries and near-miss junk must classify non-network,
+		# never smuggled in as a network target.
+		with mock.patch.object(dns.resolver.Resolver, 'resolve', return_value=mock.MagicMock()):
+			for token in [
+				'*.example.com',      # wildcard scope
+				'.*\\.corp$',         # regex scope
+				'example.*',
+				'[a-z].example.com',  # char-class
+				'exa mple.com',       # space
+				'[::1]:443',          # bracketed IPv6 + port -> ambiguous, fail closed
+			]:
+				with self.subTest(token=token):
+					self.assertFalse(classify_target(token, resolve=True).is_network,
+						f'{token} slipped through as network')
+
+
 from secator.utils import remove_duplicates
 from secator.output_types import Vulnerability
 

@@ -10,6 +10,7 @@ import os
 import re
 import select
 import signal
+import socket
 import sys
 import tempfile
 import threading
@@ -18,7 +19,12 @@ import traceback
 import validators
 import warnings
 
+import dns.exception
+import dns.resolver
+import idna
+
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import reduce
 from pathlib import Path
@@ -1061,6 +1067,179 @@ def validate_cidr_range(target):
 		return True
 	except ValueError:
 		return False
+
+
+# Network types that name a routable target (as opposed to slug / email / iban / ...).
+# HOST covers both bare hostnames and registrable domains (autodetect_type returns HOST for both).
+NETWORK_TYPES = (IP, CIDR_RANGE, HOST, HOST_PORT, URL)
+
+# Wildcard / regex markers. A token carrying any of these is a SCOPE entry (e.g. '*.example.com',
+# '.*\\.corp$'), never a concrete target, so classify_target must never call it a network target.
+# Fully anchored char-class, single bounded quantifier -> ReDoS-safe. `?`, `(`, `)`, `|` are NOT
+# listed because they legitimately appear in URLs (query strings); we fail closed on the rest.
+_SCOPE_META = re.compile(r'^.*[*\\^$\[\]].*$', re.DOTALL)
+
+
+@dataclass
+class TargetInfo:
+	"""Result of classify_target(). Single source of truth the API imports (never reimplement)."""
+	type: str          # autodetect_type() taxonomy: ip / cidr_range / host / url / slug / email / ...
+	is_network: bool    # ip|cidr: valid by construction (no DNS). host|url: DNS resolved. else False.
+	root: str           # url -> hostname ; cidr -> network address ; else the (canonical) token
+	reachable: bool     # ip|cidr: validity. host|url: DNS success. else False.
+
+
+def canonicalize_target(raw):
+	"""Normalize a single raw target token to the form a scanner/resolver would actually hit.
+
+	This closes classification-smuggling gaps: alternate IPv4 encodings (decimal 2130706433,
+	octal 0177.0.0.1, short 127.1, hex 0x7f.0.0.1 -- all via inet_aton semantics), IDNA/Unicode
+	hostnames, bracketed IPv6, and surrounding whitespace all collapse to their canonical string
+	BEFORE type detection runs. Pure function, no network I/O.
+
+	Args:
+		raw (str): A single target token (not a list -- use split_targets first).
+
+	Returns:
+		str: Canonical target string.
+	"""
+	if raw is None:
+		return ''
+	token = str(raw).strip()
+	if not token:
+		return ''
+
+	# Strip IPv6 brackets on a bare bracketed address: [2001:db8::1] -> 2001:db8::1.
+	# A bracket+port form ([::1]:443) is left untouched: unbracketing it is ambiguous (that is
+	# exactly why brackets exist), so it falls through to classify as non-network (fail closed).
+	if token.startswith('[') and token.endswith(']'):
+		token = token[1:-1]
+
+	# Alternate IPv4 encodings -> dotted-quad, using inet_aton (same parser nmap/ping/libc use).
+	# Only numeric-ish tokens reach a match; hostnames and out-of-range ints raise and fall through.
+	try:
+		token = socket.inet_ntoa(socket.inet_aton(token))
+		return token
+	except OSError:
+		pass
+
+	# IDNA-encode Unicode hostnames (bare host or URL netloc) to punycode.
+	if not token.isascii():
+		token = _idna_encode(token)
+
+	return token
+
+
+def _idna_encode(token):
+	"""Best-effort IDNA (punycode) encoding of a Unicode host or URL netloc. Pure, no I/O."""
+	scheme = rest = ''
+	host = token
+	if '://' in token:
+		scheme, _, after = token.partition('://')
+		scheme += '://'
+		# split host from path/query/port
+		slash = after.find('/')
+		host, rest = (after, '') if slash == -1 else (after[:slash], after[slash:])
+	try:
+		encoded = idna.encode(host, uts46=True).decode('ascii')
+	except (idna.IDNAError, UnicodeError):
+		return token  # not a valid IDN host -> leave as-is (will classify non-network)
+	return f'{scheme}{encoded}{rest}'
+
+
+def split_targets(raw):
+	"""Split a raw multi-target input into individual tokens on comma AND newline.
+
+	Consolidates the two split styles core already used ad hoc (CLI split(',') and stdin/file
+	splitlines()) into one reusable, whitespace-trimming, empty-dropping helper.
+
+	Args:
+		raw (str | list): Raw input, possibly containing commas and/or newlines, or a list thereof.
+
+	Returns:
+		list[str]: Non-empty, stripped tokens.
+	"""
+	if raw is None:
+		return []
+	if isinstance(raw, (list, tuple)):
+		out = []
+		for item in raw:
+			out.extend(split_targets(item))
+		return out
+	# Char-class split, no backtracking -> ReDoS-safe.
+	return [t.strip() for t in re.split(r'[,\n]', str(raw)) if t.strip()]
+
+
+def _resolve_host(host, timeout):
+	"""DNS-resolve a hostname (A then AAAA) with a short timeout. Network I/O.
+
+	Returns:
+		bool: True if it resolves, False on NXDOMAIN / no answer / timeout / any DNS error.
+	"""
+	if not host:
+		return False
+	resolver = dns.resolver.Resolver()
+	resolver.timeout = timeout
+	resolver.lifetime = timeout
+	for rdtype in ('A', 'AAAA'):
+		try:
+			resolver.resolve(host, rdtype)
+			return True
+		except dns.resolver.NoAnswer:
+			continue  # no A record, try AAAA
+		except (dns.resolver.NXDOMAIN, dns.resolver.NoNameservers, dns.exception.DNSException):
+			return False
+	return False
+
+
+def _target_host(canonical, ttype):
+	"""Extract the DNS-resolvable host from a canonical url / host / host:port token. Pure."""
+	if ttype == URL:
+		return (urlparse(canonical).hostname or '')
+	if ttype == HOST_PORT:
+		return canonical.rsplit(':', 1)[0]
+	return canonical
+
+
+def classify_target(token, *, resolve=True, timeout=2.0):
+	"""Classify a single target token. THE single-source classifier -- callers must not reimplement.
+
+	Type detection reuses the pure regex `autodetect_type`; all network I/O lives here behind
+	`resolve=True`. With `resolve=False` this is a pure no-I/O path (host/url reachability is left
+	False/unknown; ip/cidr are still resolved by construction).
+
+	Args:
+		token (str): A single target token (use split_targets first for multi-target input).
+		resolve (bool): If True, DNS-resolve host/url targets. If False, no network I/O at all.
+		timeout (float): Per-query DNS timeout in seconds (short; server-side safe).
+
+	Returns:
+		TargetInfo: {type, is_network, root, reachable}.
+	"""
+	canonical = canonicalize_target(token)
+	ttype = autodetect_type(canonical)
+	info = TargetInfo(type=ttype, is_network=False, root=canonical, reachable=False)
+
+	# Non-network types (slug/email/iban/uuid/path/mac/...) and scope entries (wildcard/regex,
+	# which fail closed) keep the False defaults.
+	if ttype not in NETWORK_TYPES or _SCOPE_META.match(canonical):
+		return info
+
+	if ttype == IP:
+		# Validity already proven by autodetect_type (validators/ipaddress) -- no DNS needed.
+		info.is_network = info.reachable = True
+	elif ttype == CIDR_RANGE:
+		info.root = str(ipaddress.ip_network(canonical, strict=False).network_address)
+		info.is_network = info.reachable = True
+	elif ttype in (URL, HOST, HOST_PORT):
+		if ttype == URL:
+			info.root = _target_host(canonical, ttype)
+		if resolve:
+			ok = _resolve_host(_target_host(canonical, ttype), timeout)
+			info.is_network = info.reachable = ok
+		# resolve=False -> pure path: leave is_network/reachable False (unverified).
+
+	return info
 
 
 def get_versions_from_string(string):
