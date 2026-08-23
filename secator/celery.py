@@ -422,10 +422,7 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		target_extractor_opts = {
 			k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'
 		}
-		# Inherit the run's scope so this dynamic-spawn producer emits only in-scope scope-tagged
-		# Targets (subdomain_recon -> host_recon fan-out). Consumers re-filter via the same
-		# host_in_scope choke point in run_extractors, but filtering here keeps out-of-scope
-		# discovered targets out of the store entirely. See secator/runners/_helpers.py.
+		# Inherit scope so discovered targets are filtered before they're stored.
 		for k in ('in_scope', 'out_of_scope'):
 			if runner.run_opts.get(k):
 				target_extractor_opts[k] = runner.run_opts[k]
