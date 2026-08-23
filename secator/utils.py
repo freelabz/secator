@@ -1010,16 +1010,34 @@ def is_host_port(target):
 	Returns:
 		bool: True if the target is a host:port, False otherwise.
 	"""
-	split = target.split(':')
-	if not (validators.domain(split[0]) or validators.ipv4(split[0]) or validators.ipv6(split[0]) or split[0] == 'localhost'):  # noqa: E501
+	host, port = _split_host_port(target)
+	if not port:
+		return False
+	if not (validators.domain(host) or validators.ipv4(host) or validators.ipv6(host) or host == 'localhost'):
 		return False
 	try:
-		port = int(split[1])
+		port = int(port)
 		if port < 1 or port > 65535:
 			return False
 	except ValueError:
 		return False
 	return True
+
+
+def _split_host_port(target):
+	"""Split a host:port token into (host, port_str), unwrapping a bracketed IPv6 host.
+
+	[2001:db8::1]:443 -> ('2001:db8::1', '443') -- the brackets, not the last colon, delimit the
+	host, since an IPv6 literal contains colons of its own. A bare hostname/IP with no port yields
+	(host, ''). Pure, no I/O.
+	"""
+	if target.startswith('[') and ']:' in target:
+		host, _, port = target[1:].partition(']:')
+		return host, port
+	host, sep, port = target.rpartition(':')
+	if not sep:
+		return port, ''  # no colon -> rpartition puts the whole token in the last field
+	return host, port
 
 
 def autodetect_type(target):
@@ -1103,13 +1121,16 @@ def canonicalize_target(raw):
 	if not token:
 		return ''
 
-	# Strip IPv6 brackets, keeping any :port, but ONLY when the bracketed content is a real IP
-	# literal (what brackets are for): [2001:db8::1] -> 2001:db8::1 , [2001:db8::1]:443 ->
-	# 2001:db8::1:443. A non-IP like [a-z].example.com keeps its brackets -> caught as a scope entry.
+	# Bracketed IPv6, but ONLY when the bracketed content is a real IP literal (what brackets are for).
+	# Bare [2001:db8::1] -> 2001:db8::1 (brackets unwrapped). With a trailing :port the brackets are
+	# the canonical RFC 3986 host:port separator and MUST be kept -- unwrapping [2001:db8::1]:443 to
+	# 2001:db8::1:443 re-parses as a DIFFERENT valid IPv6 (443 becomes a hextet), absorbing the port.
+	# So keep the bracketed form and let is_host_port / _target_host split host from port.
+	# A non-IP like [a-z].example.com keeps its brackets -> caught as a scope entry.
 	if token.startswith('['):
 		end = token.find(']')
-		if end != -1 and _is_ip_literal(token[1:end]):
-			token = token[1:end] + token[end + 1:]
+		if end != -1 and _is_ip_literal(token[1:end]) and token[end + 1:] == '':
+			token = token[1:end]
 
 	# Alternate IPv4 encodings -> dotted-quad, using inet_aton (same parser nmap/ping/libc use).
 	# Only numeric-ish tokens reach a match; hostnames and out-of-range ints raise and fall through.
@@ -1202,7 +1223,7 @@ def _target_host(canonical, ttype):
 	if ttype == URL:
 		return (urlparse(canonical).hostname or '')
 	if ttype == HOST_PORT:
-		return canonical.rsplit(':', 1)[0]
+		return _split_host_port(canonical)[0]
 	return canonical
 
 

@@ -156,7 +156,7 @@ Content-Type: text/html"""
 
 from unittest import mock
 import dns.resolver
-from secator.utils import canonicalize_target, split_targets, classify_target
+from secator.utils import canonicalize_target, split_targets, classify_target, _target_host
 
 
 class TestCanonicalizeTarget(unittest.TestCase):
@@ -170,7 +170,11 @@ class TestCanonicalizeTarget(unittest.TestCase):
 			('127.1', '127.0.0.1', IP),           # short form
 			('0x7f.0.0.1', '127.0.0.1', IP),      # hex
 			('täst.de', 'xn--tst-qla.de', HOST),  # IDN host -> punycode
-			('[2001:db8::1]', '2001:db8::1', IP),  # bracketed IPv6
+			('[2001:db8::1]', '2001:db8::1', IP),  # bracketed IPv6, no port -> unwrapped
+			# Bracketed IPv6 WITH a port: brackets kept as the host:port delimiter (RFC 3986). They
+			# must NOT be dropped -- '2001:db8::1:443' is a DIFFERENT valid IPv6 (443 as a hextet).
+			('[2001:db8::1]:443', '[2001:db8::1]:443', HOST_PORT),
+			('[::1]:80', '[::1]:80', HOST_PORT),
 		]
 		for raw, canon, ttype in cases:
 			with self.subTest(raw=raw):
@@ -267,8 +271,9 @@ class TestClassifyTarget(unittest.TestCase):
 			for token in [
 				'8.8.8.8:443',
 				'192.168.1.1:22',
-				'[2001:db8::1]:443',   # canonicalizes to a valid IPv6 literal
-				'2001:db8::1:443',     # bare 8-group IPv6 literal
+				'[2001:db8::1]:443',   # bracketed IPv6 + port -> host:port over an IPv6 literal
+				'[::1]:80',            # loopback IPv6 + port
+				'2001:db8::1:443',     # bare 8-group IPv6 literal (distinct from the bracketed form)
 				'http://8.8.8.8:443/',  # URL whose host is an IPv4 literal
 				'https://[2001:db8::1]/',  # URL whose host is a bracketed IPv6 literal
 			]:
@@ -276,6 +281,22 @@ class TestClassifyTarget(unittest.TestCase):
 					info = classify_target(token, resolve=True)
 					self.assertTrue(info.is_network and info.reachable,
 						f'{token} was NOT classified network by construction')
+
+	def test_bracketed_ipv6_with_port_keeps_host_and_port_distinct(self):
+		# The port must NOT be absorbed into the address: [2001:db8::1]:443 must extract host
+		# 2001:db8::1, NOT the different valid IPv6 2001:db8::1:443 (443 smuggled in as a hextet).
+		with mock.patch.object(dns.resolver.Resolver, 'resolve', side_effect=AssertionError('DNS called')):
+			for token, real_host, absorbed in [
+				('[2001:db8::1]:443', '2001:db8::1', '2001:db8::1:443'),
+				('[::1]:80', '::1', '::1:80'),
+			]:
+				with self.subTest(token=token):
+					info = classify_target(token, resolve=True)
+					self.assertEqual(info.type, HOST_PORT)
+					self.assertTrue(info.is_network and info.reachable)  # IP literal -> no DNS
+					host = _target_host(canonicalize_target(token), info.type)
+					self.assertEqual(host, real_host)
+					self.assertNotEqual(host, absorbed)
 
 
 from secator.utils import remove_duplicates
