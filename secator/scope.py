@@ -1,40 +1,14 @@
-"""Generic target-scope allow/deny filtering.
+"""Match a target against ``in_scope`` / ``out_of_scope`` allow/deny lists.
 
-secator core has NO concept of mandates, bug-bounty programs, or any platform
-authorization model -- and it must not. This module is a neutral host/target
-scope matcher: given a target string and plain scope entries (a host, a
-``*.wildcard``, a CIDR, or an anchored regex), decide whether the target is in
-scope.
+Pure, no network I/O (parsing via ``classify_target(resolve=False)``). Only
+network targets (ip/cidr/host/host:port/url) are checked; non-network items
+(email, username, path, ...) are always kept. Deny wins; empty ``in_scope`` =
+allow-all (subject to deny).
 
-The platform (secator-api) derives the effective authorized scope from whatever
-authorization model it uses and passes it in as generic ``in_scope`` /
-``out_of_scope`` run-options. Core then enforces that allow-list on EVERY target
-it acts on -- including subdomains discovered mid-scan (subdomain_recon output
-fed into host_recon) -- closing the scope-escape where dynamically-discovered
-targets were never checked against the run's authorized scope.
-
-The matching rules here intentionally mirror the platform's own scope matcher so
-a target that the ingress gate would reject is dropped identically mid-scan. The
-API imports THIS module rather than forking it, so the matcher stays pure and
-dependency-light: it does NO network I/O (target parsing runs through the shared
-``classify_target(..., resolve=False)`` classifier -- see ``secator/utils.py``).
-
-Semantics (see ``host_in_scope``):
-- Only NETWORK targets (ip / cidr / host / host:port / url) are scope-checked.
-A non-network discovered item (email, username, path, uuid, ...) is never
-subject to scope and is always kept -- this matcher gates scan INPUTS, not
-finding emission.
-- deny wins: any ``out_of_scope`` match drops the target regardless of allow.
-- empty ``in_scope`` means allow-all (subject to deny).
-
-Scope entry kinds:
-- IP / CIDR: ``ipaddress`` containment (v4 AND v6). An IP target inside a CIDR
-entry; a CIDR target that is ``subnet_of`` the entry.
-- exact host: canonical-host equality (``app.acme.com``).
-- wildcard: ``*.acme.com`` matches sub-domains only; the apex ``acme.com`` is
-NOT covered (add it as its own entry).
-- regex: ``re.fullmatch``-ANCHORED (both ends). ``acme\\.com`` does NOT match
-``evil-acme.com.attacker.net``. Author regex are scope entries, never targets.
+Entry kinds: IP/CIDR (``ipaddress`` containment, v4+v6, ``subnet_of``); exact
+host; ``*.acme.com`` wildcard (sub-domains only, not the apex); ``re.fullmatch``-
+anchored regex (``acme\\.com`` never matches ``evil-acme.com.x``). Regexes are
+scope entries, never targets.
 """
 
 import ipaddress
