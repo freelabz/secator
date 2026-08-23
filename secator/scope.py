@@ -1,116 +1,192 @@
 """Generic target-scope allow/deny filtering.
 
 secator core has NO concept of mandates, bug-bounty programs, or any platform
-authorization model — and it must not. This module is a neutral host/target
+authorization model -- and it must not. This module is a neutral host/target
 scope matcher: given a target string and plain scope entries (a host, a
-``*.wildcard``, a CIDR, or a regex), decide whether the target is in scope.
+``*.wildcard``, a CIDR, or an anchored regex), decide whether the target is in
+scope.
 
 The platform (secator-api) derives the effective authorized scope from whatever
 authorization model it uses and passes it in as generic ``in_scope`` /
 ``out_of_scope`` run-options. Core then enforces that allow-list on EVERY target
-it acts on — including subdomains discovered mid-scan (subdomain_recon output
-fed into host_recon) — closing the scope-escape where dynamically-discovered
+it acts on -- including subdomains discovered mid-scan (subdomain_recon output
+fed into host_recon) -- closing the scope-escape where dynamically-discovered
 targets were never checked against the run's authorized scope.
 
 The matching rules here intentionally mirror the platform's own scope matcher so
 a target that the ingress gate would reject is dropped identically mid-scan. The
-two copies share no code (separate repos, and core stays authorization-agnostic
-by design); keep the semantics in sync — see ``test_scope.py`` for the shared
-vectors.
+API imports THIS module rather than forking it, so the matcher stays pure and
+dependency-light: it does NO network I/O (target parsing runs through the shared
+``classify_target(..., resolve=False)`` classifier -- see ``secator/utils.py``).
+
+Semantics (see ``host_in_scope``):
+- Only NETWORK targets (ip / cidr / host / host:port / url) are scope-checked.
+A non-network discovered item (email, username, path, uuid, ...) is never
+subject to scope and is always kept -- this matcher gates scan INPUTS, not
+finding emission.
+- deny wins: any ``out_of_scope`` match drops the target regardless of allow.
+- empty ``in_scope`` means allow-all (subject to deny).
+
+Scope entry kinds:
+- IP / CIDR: ``ipaddress`` containment (v4 AND v6). An IP target inside a CIDR
+entry; a CIDR target that is ``subnet_of`` the entry.
+- exact host: canonical-host equality (``app.acme.com``).
+- wildcard: ``*.acme.com`` matches sub-domains only; the apex ``acme.com`` is
+NOT covered (add it as its own entry).
+- regex: ``re.fullmatch``-ANCHORED (both ends). ``acme\\.com`` does NOT match
+``evil-acme.com.attacker.net``. Author regex are scope entries, never targets.
 """
 
 import ipaddress
+import logging
 import re
-from urllib.parse import urlparse
+
+from secator.definitions import CIDR_RANGE, IP
+from secator.utils import (
+	NETWORK_TYPES,
+	_is_ip_literal,
+	_target_host,
+	canonicalize_target,
+	classify_target,
+)
+
+logger = logging.getLogger(__name__)
+
+# Regex scope entries are AUTHOR-controlled (platform mandate config), but the
+# TARGET they match is attacker-controlled (a discovered subdomain), so a
+# vulnerable author pattern + crafted target is a ReDoS vector. Python's `re`
+# has no match timeout, so we mitigate at COMPILE time: reject patterns with
+# nested quantifiers (the classic catastrophic-backtracking shape) and cap the
+# length of the string we ever feed to a regex. Both are best-effort.
+_MAX_REGEX_INPUT = 2048
+# Heuristic: a quantified group whose body also contains a quantifier -> (a+)+,
+# (a*)*, (a+)*b, ... Best-effort (single-level groups); flagged in the report.
+_NESTED_QUANTIFIER = re.compile(r'\([^()]*[+*?][^()]*\)[+*]')
+
+# Regex metacharacters that mark an entry as a regex rather than a structural
+# host/wildcard/CIDR. `.` and `*` are excluded: they are the ordinary furniture
+# of hostnames (`app.acme.com`) and wildcards (`*.acme.com`).
+_REGEX_META = set('[](){}|+?^$\\')
+
+# Compiled-regex cache. Value is a compiled pattern, or None for an entry that
+# failed to compile / was rejected as catastrophic (-> treated as non-matching).
+_regex_cache = {}
 
 
-def _looks_like_regex(entry: str) -> bool:
-	"""Heuristic: does this scope entry use regex metacharacters?
+def _compile_entry(entry):
+	"""Compile a regex scope entry once, fail-safe. Returns a compiled pattern or None.
 
-	A plain host/wildcard/CIDR entry (``app.acme.com``, ``*.acme.com``,
-	``1.2.3.0/24``) is matched with the structural host/network logic below. An
-	entry containing regex metacharacters other than the ``*``/``.`` used by
-	wildcards/hostnames is treated as a regex and matched against the raw target.
+	None means the entry never matches. On a bad/catastrophic pattern we log a
+	warning: a broken ALLOW entry silently narrows scope; a broken DENY entry
+	silently stops excluding -- see the fail-safe note in the module docstring
+	and the PR report. We deliberately do NOT fail a broken deny closed (deny
+	everything), because a single mistyped exclusion would otherwise DoS the
+	whole scan; the (non-empty) allow-list remains the primary boundary.
 	"""
-	regex_meta = set("[](){}|+?^$\\")
-	return any(c in regex_meta for c in entry)
+	if entry in _regex_cache:
+		return _regex_cache[entry]
+	compiled = None
+	if _NESTED_QUANTIFIER.search(entry):
+		logger.warning('scope: skipping regex entry with catastrophic (ReDoS) pattern: %r', entry)
+	else:
+		try:
+			compiled = re.compile(entry)
+		except re.error as e:
+			logger.warning('scope: skipping un-compilable regex entry %r: %s', entry, e)
+	_regex_cache[entry] = compiled
+	return compiled
 
 
-def _entry_matches_regex(target: str, entry: str) -> bool:
-	"""True if `entry` is a regex that matches the raw target string."""
+class _Shape:
+	"""Parsed target: exactly one of net / ip / host is set. `canonical` is the
+	full canonical target string (what regex entries fullmatch against)."""
+	__slots__ = ('net', 'ip', 'host', 'canonical')
+
+	def __init__(self, net=None, ip=None, host=None, canonical=''):
+		self.net = net
+		self.ip = ip
+		self.host = host
+		self.canonical = canonical
+
+
+def _target_shape(target):
+	"""Parse a target into a `_Shape`, or return None if it is not a NETWORK target.
+
+	Reuses PR1's single-source classifier for type detection and canonicalization
+	(alternate IPv4 encodings, IDNA, bracketed IPv6, ...) -- NO IP/host parsing is
+	re-implemented here. `resolve=False` keeps this pure (no DNS).
+	"""
+	info = classify_target(target, resolve=False)
+	if info.type not in NETWORK_TYPES:
+		return None
+	canonical = canonicalize_target(target)
+	if info.type == CIDR_RANGE:
+		return _Shape(net=ipaddress.ip_network(canonical, strict=False), canonical=canonical)
+	if info.type == IP and _is_ip_literal(canonical):
+		return _Shape(ip=ipaddress.ip_address(canonical), canonical=canonical)
+	# URL / HOST / HOST_PORT (and `localhost`, typed IP but not a real IP literal):
+	# pull the host out (strips scheme / port / path).
+	host = _target_host(canonical, info.type)
+	if _is_ip_literal(host):
+		# IP literal hiding in a url / host:port (8.8.8.8:443, http://8.8.8.8/) --
+		# match it by network containment, never as a hostname string.
+		return _Shape(ip=ipaddress.ip_address(host), canonical=canonical)
+	return _Shape(host=host.lower().rstrip('.'), canonical=canonical)
+
+
+def _entry_net(entry):
+	"""Parse a scope entry as an IP or CIDR network, or None. A bare IP -> /32 or /128."""
 	try:
-		return re.search(entry, target) is not None
-	except re.error:
-		return False
-
-
-def _host_of(target: str) -> str:
-	"""Extract a comparable host from a target string (url/host/domain)."""
-	t = target.strip()
-	if "://" in t:
-		return urlparse(t).hostname or ""
-	return t.split("/")[0].split(":")[0]
-
-
-def _as_network(value: str):
-	try:
-		return ipaddress.ip_network(value, strict=False)
+		return ipaddress.ip_network(entry, strict=False)
 	except ValueError:
 		return None
 
 
-def target_in_scope(target: str, scope: list) -> bool:
-	"""True if target string is covered by any scope entry.
+def _shape_matches_entry(shape, entry):
+	"""True if the parsed target `shape` is covered by a single scope `entry`."""
+	entry = entry.strip()
+	if not entry:
+		return False
 
-	Each entry is treated as a single-or-regex value: a plain host/wildcard/CIDR
-	is matched structurally (exact host, ``*.wildcard`` subdomain, IP-in-CIDR,
-	CIDR-subnet-of), while an entry containing regex metacharacters is matched as
-	a regex against the raw target string.
+	# Wildcard: *.acme.com covers sub-domains, NOT the apex.
+	if entry.startswith('*.'):
+		if shape.host is None:
+			return False
+		base = entry[2:].lower().rstrip('.')
+		return bool(base) and shape.host.endswith('.' + base)
+
+	# IP / CIDR entry: pure network containment (v4 and v6).
+	entry_net = _entry_net(entry)
+	if entry_net is not None:
+		if shape.net is not None:
+			return shape.net.version == entry_net.version and shape.net.subnet_of(entry_net)
+		if shape.ip is not None:
+			return shape.ip.version == entry_net.version and shape.ip in entry_net
+		return False  # hostname target can't be inside an IP network
+
+	# Regex entry: FULLMATCH-anchored (both ends), ReDoS-guarded.
+	if any(c in _REGEX_META for c in entry):
+		compiled = _compile_entry(entry)
+		if compiled is None or len(shape.canonical) > _MAX_REGEX_INPUT:
+			return False
+		return compiled.fullmatch(shape.canonical) is not None
+
+	# Exact host entry: canonical-host equality.
+	if shape.host is None:
+		return False
+	return shape.host == entry.lower().rstrip('.')
+
+
+def target_in_scope(target, scope):
+	"""True if a NETWORK target string is covered by any entry in `scope`.
+
+	Non-network targets return False here (the keep decision for them lives in
+	``host_in_scope``, which never routes them through this predicate).
 	"""
-	target = target.strip()
-	# Regex entries: match against the raw target first.
-	for entry in scope:
-		entry = entry.strip()
-		if _looks_like_regex(entry) and _entry_matches_regex(target, entry):
-			return True
-	target_net = _as_network(target) if ("/" in target or target.replace(".", "").isdigit()) else None
-	# IP/CIDR matching
-	for entry in scope:
-		entry = entry.strip()
-		if _looks_like_regex(entry):
-			continue
-		entry_net = _as_network(entry)
-		if entry_net is not None:
-			if target_net is not None:
-				if target_net.subnet_of(entry_net):
-					return True
-			else:
-				host = _host_of(target)
-				try:
-					if ipaddress.ip_address(host) in entry_net:
-						return True
-				except ValueError:
-					pass
-	# A pure IP/CIDR target only matches via network containment (handled above);
-	# never fall through to hostname matching, otherwise "1.2.3.0/24" and
-	# "1.2.3.0/25" would match as equal hostnames ("1.2.3.0").
-	if target_net is not None:
+	shape = _target_shape(target)
+	if shape is None:
 		return False
-	# hostname matching
-	host = _host_of(target).lower().rstrip(".")
-	if not host:
-		return False
-	for entry in scope:
-		if _looks_like_regex(entry):
-			continue
-		e = _host_of(entry).lower().rstrip(".")
-		if e.startswith("*."):
-			base = e[2:]
-			if host.endswith("." + base):
-				return True
-		elif host == e:
-			return True
-	return False
+	return any(_shape_matches_entry(shape, e) for e in scope)
 
 
 def as_scope_list(val):
@@ -121,21 +197,27 @@ def as_scope_list(val):
 	if not val:
 		return []
 	if isinstance(val, str):
-		return [v.strip() for v in val.split(",") if v.strip()]
+		return [v.strip() for v in val.split(',') if v.strip()]
 	return [str(v).strip() for v in val if str(v).strip()]
 
 
-def host_in_scope(target: str, in_scope=None, out_of_scope=None) -> bool:
-	"""Allow/deny decision for a single target. Deny wins.
+def host_in_scope(target, in_scope=None, out_of_scope=None):
+	"""Allow/deny scope decision for a single target. Deny wins.
 
-	- ``out_of_scope`` match  -> out (deny wins over allow).
-	- non-empty ``in_scope``  -> target must match an allow entry.
-	- empty ``in_scope``      -> allow-all (subject to deny).
+	- Non-network target (email / username / path / ...) -> True (never scoped).
+	- ``out_of_scope`` match                             -> False (deny wins over allow).
+	- non-empty ``in_scope``                             -> target must match an allow entry.
+	- empty ``in_scope``                                 -> allow-all (subject to deny).
 	"""
 	in_scope = as_scope_list(in_scope)
 	out_of_scope = as_scope_list(out_of_scope)
-	if out_of_scope and target_in_scope(target, out_of_scope):
+	if not in_scope and not out_of_scope:
+		return True
+	shape = _target_shape(target)
+	if shape is None:
+		return True  # non-network item: scope is network-only, always kept
+	if out_of_scope and any(_shape_matches_entry(shape, e) for e in out_of_scope):
 		return False
 	if in_scope:
-		return target_in_scope(target, in_scope)
+		return any(_shape_matches_entry(shape, e) for e in in_scope)
 	return True
