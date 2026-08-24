@@ -339,6 +339,21 @@ class TestExtractorFunctions(unittest.TestCase):
         self.assertEqual(updated_opts['other'], ['<DYNAMIC(url.url)>'])
         self.assertEqual(errors, [])
 
+    def test_run_extractors_out_of_scope_emits_warning(self):
+        """An out-of-scope target is dropped AND surfaces a Warning naming it."""
+        from secator.output_types import Warning
+        opts = {'in_scope': ['acme.test', '*.acme.test']}
+        inputs = ['app.acme.test', 'evil.attacker.test']
+        kept, _opts, messages = run_extractors([], opts, inputs=inputs)
+        self.assertEqual(kept, ['app.acme.test'])
+        warnings = [m for m in messages if isinstance(m, Warning)]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn('evil.attacker.test', warnings[0].message)
+        # No scope opts -> allow-all -> no warning.
+        kept, _opts, messages = run_extractors([], {}, inputs=inputs)
+        self.assertEqual(sorted(kept), sorted(inputs))
+        self.assertEqual([m for m in messages if isinstance(m, Warning)], [])
+
     def test_run_extractors_with_group_by(self):
         """Full pipeline: Technology items → grouped search_vulns inputs via group_by extractor."""
         tech1 = Technology(match='10.0.0.1:80', product='apache httpd', version='2.4.50')
