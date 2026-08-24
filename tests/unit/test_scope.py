@@ -131,12 +131,16 @@ class TestRunExtractorsScopeFilter(unittest.TestCase):
 	def test_discovered_subdomain_filtered_against_allowlist(self):
 		# Simulates subdomain_recon feeding host_recon: claris.com in scope (apex only),
 		# www.claris.com discovered -> must be dropped before host_recon scans it.
+		from secator.output_types import Warning
 		discovered = ['claris.com', 'www.claris.com', 'api.claris.com']
-		inputs, _opts, errors = run_extractors(
+		inputs, _opts, messages = run_extractors(
 			[], {'in_scope': ['claris.com']}, inputs=discovered
 		)
-		self.assertEqual(errors, [])
 		self.assertEqual(inputs, ['claris.com'])
+		warnings = [m for m in messages if isinstance(m, Warning)]
+		self.assertEqual(len(warnings), 1)
+		self.assertIn('www.claris.com', warnings[0].message)
+		self.assertIn('api.claris.com', warnings[0].message)
 
 	def test_wildcard_scope_keeps_subdomains(self):
 		discovered = ['claris.com', 'www.claris.com', 'evil.com']
