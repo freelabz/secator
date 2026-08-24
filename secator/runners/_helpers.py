@@ -2,7 +2,7 @@ import os
 import re
 
 from secator.config import CONFIG
-from secator.output_types import Error
+from secator.output_types import Error, Warning
 from secator.query.ast import substitute_ctx_constants
 from secator.scope import as_scope_list, host_in_scope
 from secator.utils import deduplicate, debug
@@ -68,7 +68,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		dry_run (bool): Dry run.
 
 	Returns:
-		tuple: inputs, options, errors.
+		tuple: inputs, options, messages (Error/Warning items to surface).
 	"""
 	if inputs is None:
 		inputs = []
@@ -95,7 +95,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		opts.update(dry_opts)
 		return inputs, opts, []
 
-	errors = []
+	messages = []
 	computed_inputs = []
 	input_extractors = False
 	computed_opts = {}
@@ -104,7 +104,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		key = key.rstrip('_')
 		ctx['key'] = key
 		values, err = extract_from_results(results, val, ctx=ctx)
-		errors.extend(err)
+		messages.extend(err)
 		if key == 'targets':
 			input_extractors = True
 			targets = deduplicate(values)
@@ -138,10 +138,12 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		dropped = [t for t in inputs if t not in kept]
 		if dropped:
 			debug(f'dropped {len(dropped)} out-of-scope target(s): {dropped}', sub='scope')
+			shown = ', '.join(dropped[:10]) + (f' (+{len(dropped) - 10} more)' if len(dropped) > 10 else '')
+			messages.append(Warning(message=f'Dropped {len(dropped)} out-of-scope target(s): {shown}'))
 		inputs = kept
 	if computed_opts:
 		debug('computed_opts', obj=computed_opts, sub='extractors')
-	return inputs, opts, errors
+	return inputs, opts, messages
 
 
 def fmt_extractor(extractor):
