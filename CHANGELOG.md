@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.2](https://github.com/freelabz/secator/compare/v0.43.1...v0.43.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* wpprobe multi-inputs broken ([#1355](https://github.com/freelabz/secator/issues/1355)) ([8a2a359](https://github.com/freelabz/secator/commit/8a2a3593bbf31d92226e8b2f7944ce46a13d9973))
+
 ## [0.43.1](https://github.com/freelabz/secator/compare/v0.43.0...v0.43.1) (2026-08-25)
 
 
