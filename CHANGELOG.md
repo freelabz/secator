@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.1](https://github.com/freelabz/secator/compare/v0.43.0...v0.43.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* wpprobe json parsing error ([#1212](https://github.com/freelabz/secator/issues/1212)) ([dd01985](https://github.com/freelabz/secator/commit/dd01985896f2a7eeb12eab8a79b83842aa124d86))
+
 ## [0.43.0](https://github.com/freelabz/secator/compare/v0.42.0...v0.43.0) (2026-08-24)
 
 
