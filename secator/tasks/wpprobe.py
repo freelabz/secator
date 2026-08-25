@@ -18,9 +18,10 @@ class wpprobe(Command):
 	"""Fast wordpress plugin enumeration tool."""
 	cmd = 'wpprobe'
 	input_types = [URL]
+	input_chunk_size = 1
 	output_types = [Vulnerability, Tag]
 	tags = ['vuln', 'scan', 'wordpress']
-	file_flag = '-f'
+	# file_flag = '-f'
 	input_flag = '-u'
 	opt_prefix = '-'
 	opts = {
