@@ -1127,11 +1127,6 @@ def list_aliases(silent):
 @click.pass_context
 def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, save):
 	"""Query"""
-	# Empty query: return all results (subject to the enforced base query),
-	# optionally scoped by --report-filter / --workspace.
-	if not arg:
-		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder)
-		return
 
 	# 0. Save the expression under a name, then exit (reuse later with `secator q <name>`).
 	if save:
@@ -1141,6 +1136,12 @@ def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_fi
 			console.print(f'[bold green]:tada: Saved query "{save}". Run it with[/] [bold]secator q {save}[/].')
 		else:
 			console.print(Error(message='Invalid config, not saving it.'))
+		return
+
+	# Empty query: return all results (subject to the enforced base query),
+	# optionally scoped by --report-filter / --workspace.
+	if not arg:
+		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder)
 		return
 
 	# 1. Saved query name
@@ -2843,6 +2844,13 @@ def update(all):
 			ret = Command.execute(f'{sys.executable} -m pip install secator=={latest_version}')
 		if not ret.return_code == 0:
 			sys.exit(1)
+
+	# Refresh the CISA KEV catalog cache from the live feed (falls back to the bundled
+	# mirror if unreachable), so `kev` tagging uses the latest known-exploited CVEs.
+	from secator.kev import refresh_kev
+	console.print('[bold gold3]:wrench: Refreshing CISA KEV catalog ...[/]')
+	kev_ids = refresh_kev()
+	console.print(Info(message=f'CISA KEV catalog: {len(kev_ids)} known-exploited CVEs.'))
 
 	# Update tools
 	if all:

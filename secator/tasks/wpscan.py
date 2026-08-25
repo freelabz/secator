@@ -134,6 +134,11 @@ class wpscan(VulnHttp):
 					'type': wp_version,
 					'references': {},
 				})
+				# wpscan's version dict carries its own `status` ('outdated' = the WP
+				# *version* is outdated). Drop it so it doesn't leak into the finding's
+				# triage status field (NEW/ACKNOWLEDGED/FIXED), which would otherwise
+				# be set to 'outdated' and never match status filters.
+				vuln.pop('status', None)
 				yield vuln
 
 		# Main theme

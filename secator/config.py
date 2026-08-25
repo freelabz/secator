@@ -119,6 +119,7 @@ class Security(StrictModel):
 	auto_install_commands: bool = True
 	force_source_install: bool = False
 	prompt_sudo_password: bool = True
+	sudo_password: str = ''  # non-interactive sudo password (e.g. SECATOR_SECURITY_SUDO_PASSWORD) for headless workers
 
 
 class HTTP(StrictModel):
@@ -453,7 +454,7 @@ class Config(DotMap):
 					console.print(f'[bold orange1]Value "{item}" not found in {key}[/].')
 					return
 			value = current
-		else:
+		elif value is not None:
 			# Try to convert value to expected type
 			try:
 				if isinstance(existing_value, list):

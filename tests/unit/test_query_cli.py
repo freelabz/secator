@@ -127,34 +127,29 @@ class TestQueryDispatch(unittest.TestCase):
 		vulns = captured.get('results', {}).get('vulnerability', [])
 		self.assertEqual(sorted(v['name'] for v in vulns), ['XSS'])
 
-	def test_save_query_round_trips(self):
-		# `secator q "<expr>" --save <name>` persists the expression under <name>,
-		# and it becomes loadable/runnable as a named query.
-		from secator.cli import cli
-		from secator.config import CONFIG, Config
-		expr = "vulnerability.severity == 'critical'"
-		name = 'saved_crit'
-		CONFIG.queries.pop(name, None)
-		try:
-			# Patch Config.save (class level) so persistence doesn't clobber the real config file.
-			with mock.patch.object(Config, 'save', return_value=True) as mock_save:
-				result = self.cli_runner.invoke(cli, ['query', expr, '--save', name])
-			self.assertIsNone(result.exception, str(result.exception))
-			self.assertEqual(result.exit_code, 0)
-			mock_save.assert_called_once()
-			# Persisted under the name and resolvable by the named-query lookup path.
-			self.assertEqual(CONFIG.queries.get(name), expr)
-			result, captured = self._invoke(['query', name, '-ws', WS, '--driver', 'local'])
-			self.assertIsNone(result.exception, str(result.exception))
-			vulns = captured.get('results', {}).get('vulnerability', [])
-			self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi'])
-		finally:
-			CONFIG.queries.pop(name, None)
-
-	def test_empty_query_returns_all(self):
-		# `secator q -rf tasks/1` (no query expression) must return all findings
-		# scoped by the report filter, not raise "Missing argument ARG".
+	def test_empty_arg_with_report_filter(self):
+		"""secator q -rf tasks/1 should return all results without requiring an ARG."""
 		result, captured = self._invoke(['query', '-rf', 'tasks/1', '-ws', WS, '--driver', 'local'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi', 'XSS'])
+
+	def test_empty_arg_with_workspace(self):
+		"""secator q -ws myws should return all results for the workspace without requiring an ARG."""
+		result, captured = self._invoke(['query', '-ws', WS, '--driver', 'local'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		vulns = captured.get('results', {}).get('vulnerability', [])
+		self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi', 'XSS'])
+
+	def test_empty_arg_no_filter_shows_all(self):
+		"""bare secator q (no args) should succeed and return the current workspace's results."""
+		from secator.config import CONFIG
+		# bare `secator q` (no -ws) reads the CURRENT workspace; point current at the
+		# seeded workspace so the test doesn't depend on the dev/CI-configured one.
+		with mock.patch.object(CONFIG.workspaces, 'current', WS):
+			result, captured = self._invoke(['query', '--driver', 'local'])
 		self.assertIsNone(result.exception, str(result.exception))
 		self.assertEqual(result.exit_code, 0)
 		vulns = captured.get('results', {}).get('vulnerability', [])

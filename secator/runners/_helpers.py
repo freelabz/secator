@@ -2,8 +2,9 @@ import os
 import re
 
 from secator.config import CONFIG
-from secator.output_types import Error
+from secator.output_types import Error, Warning
 from secator.query.ast import substitute_ctx_constants
+from secator.scope import as_scope_list, host_in_scope
 from secator.utils import deduplicate, debug
 
 
@@ -67,7 +68,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		dry_run (bool): Dry run.
 
 	Returns:
-		tuple: inputs, options, errors.
+		tuple: inputs, options, messages (Error/Warning items to surface).
 	"""
 	if inputs is None:
 		inputs = []
@@ -94,7 +95,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		opts.update(dry_opts)
 		return inputs, opts, []
 
-	errors = []
+	messages = []
 	computed_inputs = []
 	input_extractors = False
 	computed_opts = {}
@@ -103,7 +104,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		key = key.rstrip('_')
 		ctx['key'] = key
 		values, err = extract_from_results(results, val, ctx=ctx)
-		errors.extend(err)
+		messages.extend(err)
 		if key == 'targets':
 			input_extractors = True
 			targets = deduplicate(values)
@@ -124,9 +125,25 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		if combined:
 			debug('using scope-tagged targets as inputs', obj=combined, sub='extractors')
 			inputs = combined
+	# Enforce a generic target-scope allow/deny list on the resolved inputs. This is the
+	# single fan-in choke point every runner's inputs flow through (user-supplied AND
+	# dynamically discovered, e.g. subdomain_recon -> host_recon), so filtering here drops
+	# out-of-scope discovered targets before any downstream task acts on them. The API derives
+	# in_scope/out_of_scope from the run's authorized scope (mandate) and passes them as plain
+	# run-options; core stays authorization-agnostic. See secator/scope.py.
+	in_scope = as_scope_list(opts.get('in_scope'))
+	out_of_scope = as_scope_list(opts.get('out_of_scope'))
+	if inputs and (in_scope or out_of_scope):
+		kept = [t for t in inputs if host_in_scope(t, in_scope, out_of_scope)]
+		dropped = [t for t in inputs if t not in kept]
+		if dropped:
+			debug(f'dropped {len(dropped)} out-of-scope target(s): {dropped}', sub='scope')
+			shown = ', '.join(dropped[:10]) + (f' (+{len(dropped) - 10} more)' if len(dropped) > 10 else '')
+			messages.append(Warning(message=f'Dropped {len(dropped)} out-of-scope target(s): {shown}'))
+		inputs = kept
 	if computed_opts:
 		debug('computed_opts', obj=computed_opts, sub='extractors')
-	return inputs, opts, errors
+	return inputs, opts, messages
 
 
 def fmt_extractor(extractor):
@@ -246,7 +263,12 @@ def build_extractor_query(extractor, ctx):
 	# Additional narrowing the old per-item eval applied within the run.
 	parent_scope = ctx.get('parent_scope')
 	ancestor_id = ctx.get('ancestor_id')
-	if _type == 'target' and parent_scope:
+	# `scope_producer` marks the mark_runner_started pass that RESOLVES a workflow's own
+	# targets_ in order to emit the scope-tagged Targets (see secator/celery.py). That pass must
+	# query the UPSTREAM targets — filtering by `parent_scope` here would look for the very scope
+	# it is about to create, always yield nothing, and leave every task in the workflow with no
+	# inputs (freelabz/secator#1328). Consumers (task extractors) still filter by the scope.
+	if _type == 'target' and parent_scope and not ctx.get('scope_producer', False):
 		query['_context.scope'] = parent_scope
 	elif ancestor_id and not ctx.get('node_chain_start', False):
 		query['_context.ancestor_id'] = str(ancestor_id)
