@@ -428,6 +428,10 @@ def mark_runner_started(results, runner, enable_hooks=True):
 		target_extractor_opts = {
 			k: v for k, v in runner.dynamic_opts.items() if k.rstrip('_') == 'targets'
 		}
+		# Inherit scope so discovered targets are filtered before they're stored.
+		for k in ('in_scope', 'out_of_scope'):
+			if runner.run_opts.get(k):
+				target_extractor_opts[k] = runner.run_opts[k]
 		# Start from the runner's full store-resolution context (preserves run-scoping keys like
 		# parent_scope, workspace_id, drivers, {type}_id) so the local/json driver scopes correctly,
 		# then overlay only the extractor-specific values.

@@ -795,9 +795,9 @@ class Runner:
 			'workflow_id': self.context.get('workflow_id'),
 			'task_id': self.context.get('task_id'),
 		}
-		inputs, run_opts, errors = run_extractors([], self.run_opts, self.inputs, ctx=ctx, dry_run=self.dry_run)
-		for error in errors:
-			self.add_result(error)
+		inputs, run_opts, messages = run_extractors([], self.run_opts, self.inputs, ctx=ctx, dry_run=self.dry_run)
+		for message in messages:
+			self.add_result(message)
 		self.inputs = sorted(list(set(inputs)))
 		self.debug(f'extracted {len(self.inputs)} inputs', sub='init')
 		self.run_opts = run_opts

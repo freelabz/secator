@@ -2845,6 +2845,13 @@ def update(all):
 		if not ret.return_code == 0:
 			sys.exit(1)
 
+	# Refresh the CISA KEV catalog cache from the live feed (falls back to the bundled
+	# mirror if unreachable), so `kev` tagging uses the latest known-exploited CVEs.
+	from secator.kev import refresh_kev
+	console.print('[bold gold3]:wrench: Refreshing CISA KEV catalog ...[/]')
+	kev_ids = refresh_kev()
+	console.print(Info(message=f'CISA KEV catalog: {len(kev_ids)} known-exploited CVEs.'))
+
 	# Update tools
 	if all:
 		return_code = 0
