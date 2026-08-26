@@ -967,27 +967,29 @@ class PermissionEngine:
 				values_to_check.append(f"{parsed.hostname}:{parsed.port}")
 
 		# Mandate scope boundary (in_scope/out_of_scope, derived by the API from the
-		# run's covering mandates and injected as run-opts). Deny-wins and fail-closed;
-		# a non-empty in_scope authorizes in-scope targets without prompting. An
-		# out-of-in_scope target falls through to the config/runtime rules + the
-		# interactive `ask` below, so the CLI approve path is preserved. Empty scope
-		# (CLI default) skips this entirely. Matched via the same host_in_scope every
-		# other runner uses.
-		if rule_type == "target" and (self.in_scope or self.out_of_scope):
-			if self.out_of_scope:
-				for v in values_to_check:
-					if not host_in_scope(v, [], self.out_of_scope):
-						return PermissionResult(decision="deny", reason=f"Out of scope: target({v})")
-			if self.in_scope:
-				for v in values_to_check:
-					if host_in_scope(v, self.in_scope, self.out_of_scope):
-						return PermissionResult(decision="allow", reason=f"In scope: target({v})")
+		# run's covering mandates and injected as run-opts). Deny-wins / fail-closed.
+		# BOTH out_of_scope AND the config safety-denies (metadata/localhost/127.0.0.1)
+		# are checked BEFORE the in_scope allow, so a broad mandate can never authorize
+		# a hard-denied target. A non-empty in_scope then authorizes in-scope targets
+		# without prompting; an out-of-in_scope target falls through to the config/
+		# runtime rules + the interactive `ask` below, so the CLI approve path is
+		# preserved. Empty scope (CLI default) skips the mandate checks. Same
+		# host_in_scope every other runner uses.
+		if rule_type == "target" and self.out_of_scope:
+			for v in values_to_check:
+				if not host_in_scope(v, [], self.out_of_scope):
+					return PermissionResult(decision="deny", reason=f"Out of scope: target({v})")
 
 		for rt, patterns in self.rules["deny"]:
 			if rt == rule_type:
 				for v in values_to_check:
 					if match_rule(v, patterns):
 						return PermissionResult(decision="deny", reason=f"Denied by rule: {rule_type}({v})")
+
+		if rule_type == "target" and self.in_scope:
+			for v in values_to_check:
+				if host_in_scope(v, self.in_scope, self.out_of_scope):
+					return PermissionResult(decision="allow", reason=f"In scope: target({v})")
 
 		for rt, patterns in self.rules["allow"]:
 			if rt == rule_type:

@@ -170,6 +170,15 @@ class TestScopeGate(unittest.TestCase):
 		self.assertEqual(e.out_of_scope, [])
 		self.assertEqual(e._check_values("target", ["x.com"]).decision, "ask")
 
+	def test_config_safety_deny_beats_broad_in_scope(self):
+		# A hard config deny (metadata/localhost) must win even when a broad mandate
+		# in_scope (e.g. a wide CIDR) would otherwise cover the target. Config deny is
+		# checked BEFORE the in_scope allow.
+		cfg = dict(allow=[], deny=['target(127.0.0.1)', 'target(169.254.169.254)'], ask=[])
+		e = PermissionEngine(cfg, in_scope=["127.0.0.0/8", "169.254.0.0/16"])
+		self.assertEqual(e._check_value("target", "127.0.0.1").decision, "deny")
+		self.assertEqual(e._check_value("target", "169.254.169.254").decision, "deny")
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestDetection(unittest.TestCase):
