@@ -198,7 +198,6 @@ class TestAiModelRecording(unittest.TestCase):
 			stack.enter_context(patch('secator.tasks.ai.PermissionEngine'))
 			stack.enter_context(patch('secator.tasks.ai.create_backend'))
 			stack.enter_context(patch('secator.tasks.ai.SensitiveDataEncryptor'))
-			stack.enter_context(patch.object(ai, '_auto_approve_workspace_targets'))
 			stack.enter_context(patch.object(type(task), 'reports_folder', property(lambda self: None)))
 			stack.enter_context(patch.object(type(task), 'id', 'task-id', create=True))
 			task._init_options()

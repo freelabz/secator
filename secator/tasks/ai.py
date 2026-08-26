@@ -161,17 +161,17 @@ class ai(PythonRunner):
 			"internal": True,
 			"help": "Context to pass to AI (findings, scope, objective)"
 		},
-		"allowed_targets": {
+		"in_scope": {
 			"type": list,
 			"default": None,
 			"internal": True,
-			"help": "Platform-set allow-list of target strings/regexes the AI must stay within (e.g. validated mandates)"  # noqa: E501
+			"help": "Platform-set allow-list of targets the AI must stay within (mandate scope; same host_in_scope as in_scope/out_of_scope run options)"  # noqa: E501
 		},
-		"denied_targets": {
+		"out_of_scope": {
 			"type": list,
 			"default": None,
 			"internal": True,
-			"help": "Platform-set deny-list of target strings/regexes the AI must never touch (deny wins over allowed_targets)"  # noqa: E501
+			"help": "Platform-set deny-list of targets the AI must never touch (mandate deny scope; deny wins over in_scope)"  # noqa: E501
 		},
 		"subagent": {
 			"is_flag": True,
@@ -535,6 +535,8 @@ class ai(PythonRunner):
 			backend=self.backend,
 			session_id=self.session_id,
 			permission_engine=self.permission_engine,
+			in_scope=self.in_scope,
+			out_of_scope=self.out_of_scope,
 		)
 
 		# Wire query_engine to remote backend if needed
@@ -756,8 +758,8 @@ class ai(PythonRunner):
 		self.passed_context = self.run_opts.get("context") or {}
 		self.async_tasks = self.get_opt_value("async_tasks")
 		self.dangerous = self.get_opt_value("dangerous")
-		self.allowed_targets = self.get_opt_value("allowed_targets") or []
-		self.denied_targets = self.get_opt_value("denied_targets") or []
+		self.in_scope = self.get_opt_value("in_scope") or []
+		self.out_of_scope = self.get_opt_value("out_of_scope") or []
 
 		# Interactive mode: "local" / "remote" / "auto"
 		interactive = self.get_opt_value("interactive")
@@ -782,8 +784,8 @@ class ai(PythonRunner):
 			CONFIG.addons.ai.permissions,
 			targets=self.inputs,
 			workspace=self.reports_folder or "",
-			allowed_targets=self.allowed_targets,
-			denied_targets=self.denied_targets,
+			in_scope=self.in_scope,
+			out_of_scope=self.out_of_scope,
 		)
 
 		# Per-run billed-token accounting (AI analog of context.scan_hours), read
@@ -815,9 +817,6 @@ class ai(PythonRunner):
 		if self.context is not None:
 			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
-
-		# Auto-approve workspace targets
-		self._auto_approve_workspace_targets()
 
 		# Suppress noisy output for subagents
 		if self.is_subagent:
@@ -897,24 +896,6 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# Workspace helpers
 	# -------------------------------------------------------------------------
-
-	def _auto_approve_workspace_targets(self):
-		"""Auto-approve all targets found in the workspace."""
-		workspace_id = self.context.get("workspace_id", "")
-		if not workspace_id:
-			return
-		try:
-			engine = self._get_query_engine()
-			results = engine.search({"_type": "target"}, limit=1000)
-			target_names = {r.get("name") or r.get("_name", "") for r in results if r}
-			target_names.discard("")
-			self.debug(f'[workspace] found {len(results)} target(s): {list(target_names)[:20]}', sub='guardrail')
-			if target_names:
-				rule = f"target({','.join(target_names)})"
-				self.debug(f'[workspace] auto-approve: {rule}', sub='guardrail')
-				self.permission_engine.add_runtime_allow([rule])
-		except Exception as e:
-			self.debug(f'[workspace] failed to query targets: {e}', sub='guardrail')
 
 	# -------------------------------------------------------------------------
 	# Mid-flight steering

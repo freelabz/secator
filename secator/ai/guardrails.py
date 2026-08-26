@@ -8,6 +8,7 @@ from functools import lru_cache
 from typing import Dict, List, Optional, Tuple, Union
 
 from secator.ai.encryption import PII_PATTERNS
+from secator.scope import host_in_scope, as_scope_list
 
 # URL pattern for target detection
 URL_PATTERN = re.compile(r'https?://[^\s\'"]+')
@@ -229,25 +230,22 @@ def _is_file_path(value: str) -> bool:
 
 
 def _is_network_target(value: str) -> bool:
-	"""Check if a value looks like a valid network target (IP, hostname, URL, CIDR),
-	filtering out descriptive strings that aren't actual targets."""
+	"""Check if a value looks like a valid network target (IP, hostname, URL, CIDR).
+
+	Filters out descriptive strings that aren't actual targets.
+	"""
+	# Reuse the shipped classifier (same detection the in_scope/out_of_scope options
+	# use) instead of a parallel regex set. resolve=False keeps it pure (no DNS).
+	from secator.utils import classify_target, NETWORK_TYPES
 	if ' ' in value.strip():
 		return False
-	if value.startswith(('http://', 'https://')):
-		return True
-	if PII_PATTERNS["ipv4"].fullmatch(value):
-		return True
-	# CIDR notation (e.g. 10.0.0.0/24)
-	if '/' in value and PII_PATTERNS["ipv4"].match(value.split('/')[0]):
-		return True
-	if PII_PATTERNS["host"].fullmatch(value):
-		return True
-	# host:port
-	if ':' in value:
-		host_part = value.rsplit(':', 1)[0]
-		if PII_PATTERNS["ipv4"].fullmatch(host_part) or PII_PATTERNS["host"].fullmatch(host_part):
-			return True
-	return False
+	# For extracting targets from a shell command, require a structural marker
+	# ('.', ':', '/') — otherwise a bare token like a timeout arg '60' (a decimal-
+	# encoded IP to the classifier) or a command name ('curl', a single-label host)
+	# would be mistaken for a target. IP/CIDR/URL/host:port/FQDN all carry a marker.
+	if not any(ch in value for ch in './:'):
+		return False
+	return classify_target(value, resolve=False).type in NETWORK_TYPES
 
 
 @lru_cache(maxsize=256)
@@ -746,9 +744,9 @@ def _is_default_deny(result: "PermissionResult") -> bool:
 	return "No rule for" in result.reason
 
 
-# Finding types downstream auto-trusts. tasks/ai.py _auto_approve_workspace_targets()
-# searches _type:"target" findings and auto-approves them as in-scope, so an injected
-# add_finding of one of these silently widens scope.
+# Scope-adjacent finding types: a `target` finding feeds the workspace's targets/scope,
+# so an injected add_finding of one could widen what later runs treat as in-scope. Minting
+# one requires human approval (see _check_action) rather than the blanket add_finding allow.
 _PRIVILEGED_FINDING_TYPES = frozenset({"target"})
 
 
@@ -766,55 +764,24 @@ class PermissionEngine:
 
 	def __init__(
 		self, config: Dict, targets: List[str] = None, workspace: str = "",
-		allowed_targets: List[str] = None, denied_targets: List[str] = None
+		in_scope=None, out_of_scope=None
 	):
 		self.targets = targets or []
 		self.workspace = str(workspace)
+		# Mandate-derived allow/deny target lists (run-opts injected by the API from the
+		# run's covering mandates). Empty = no mandate boundary (CLI): fall through to the
+		# config/runtime rules + interactive ask. Same host_in_scope every runner uses —
+		# CIDR containment + anchored regex, not the old parallel _compile_patterns.
+		self.in_scope = as_scope_list(in_scope)
+		self.out_of_scope = as_scope_list(out_of_scope)
 		self.rules = {"allow": [], "deny": [], "ask": []}
 		self.runtime_allow: List[Tuple[str, List[str]]] = []
-
-		# Platform-supplied allow-list of target regexes (e.g. validated workspace mandates):
-		# constrains the AI to this scope. Regex full-match, falls back to literal match.
-		self.allowed_targets: List = self._compile_patterns(allowed_targets)
-
-		# Platform-supplied deny-list of target regexes (mandate `deny` scope). Symmetric
-		# to allowed_targets but DENY WINS, mirroring the mandate scope matcher.
-		self.denied_targets: List = self._compile_patterns(denied_targets)
 
 		for category in ("allow", "deny", "ask"):
 			for rule_str in config.get(category, []):
 				resolved = self._resolve_variables(rule_str)
 				rule_type, patterns = parse_rule(resolved)
 				self.rules[category].append((rule_type, patterns))
-
-	@staticmethod
-	def _compile_patterns(patterns: List[str]) -> List:
-		"""Compile a list of regex patterns, falling back to a literal-escaped match on error."""
-		compiled: List = []
-		for pat in (patterns or []):
-			if not pat:
-				continue
-			try:
-				compiled.append(re.compile(pat))
-			except re.error:
-				compiled.append(re.compile(re.escape(pat)))
-		return compiled
-
-	@staticmethod
-	def _matches_any(patterns: List, value: str) -> bool:
-		"""Check if a value matches any of the given compiled regexes (full or partial match)."""
-		for rx in patterns:
-			if rx.fullmatch(value) or rx.match(value):
-				return True
-		return False
-
-	def _matches_allowed_targets(self, value: str) -> bool:
-		"""Check if a target value matches any platform-supplied allowed_targets regex."""
-		return self._matches_any(self.allowed_targets, value)
-
-	def _matches_denied_targets(self, value: str) -> bool:
-		"""Check if a target value matches any platform-supplied denied_targets regex."""
-		return self._matches_any(self.denied_targets, value)
 
 	def _resolve_variables(self, rule: str) -> str:
 		"""Replace {workspace} and {targets} variables in a rule string."""
@@ -901,8 +868,8 @@ class PermissionEngine:
 
 	def _has_rules_for(self, rule_type: str) -> bool:
 		"""Check if any rules exist for the given rule type."""
-		# allowed_targets/denied_targets force the target-check step so out-of-scope/denied targets are caught.
-		if rule_type == "target" and (self.allowed_targets or self.denied_targets):
+		# in_scope/out_of_scope force the target-check step so out-of-scope targets are caught.
+		if rule_type == "target" and (self.in_scope or self.out_of_scope):
 			return True
 		for category in ("allow", "deny", "ask"):
 			for rt, _ in self.rules[category]:
@@ -968,7 +935,7 @@ class PermissionEngine:
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
 		elif action_type in ("query", "follow_up", "add_finding"):
-			# Don't let injected add_finding mint a trusted target that auto-approve later trusts
+			# Don't let an injected add_finding silently mint a scope-widening target finding
 			if action_type == "add_finding" and _is_privileged_finding_type(action):
 				ftype = str(action.get("_type", "")).strip().lower()
 				return PermissionResult(
@@ -1013,20 +980,24 @@ class PermissionEngine:
 					if match_rule(v, patterns):
 						return PermissionResult(decision="deny", reason=f"Denied by rule: {rule_type}({v})")
 
-		# Platform-supplied denied_targets (regex) deny-list — checked before the
-		# allowed_targets allow-list so DENY WINS: a target matching both an allow
-		# and a deny mandate scope is denied (mirrors the mandate scope matcher).
-		if rule_type == "target" and self.denied_targets:
+		# Mandate out_of_scope deny — checked after the config deny loop above (both
+		# deny, so order is immaterial) and BEFORE the in_scope allow below so DENY
+		# WINS: a target in both a mandate's allow and deny scope is denied. Same
+		# host_in_scope every runner uses (deny-wins / fail-closed).
+		if rule_type == "target" and self.out_of_scope:
 			for v in values_to_check:
-				if self._matches_denied_targets(v):
-					return PermissionResult(decision="deny", reason=f"Denied by mandate: target({v})")
+				if not host_in_scope(v, [], self.out_of_scope):
+					return PermissionResult(decision="deny", reason=f"Out of scope: target({v})")
 
-		# Platform-supplied allowed_targets (regex) allow-list — checked after deny
-		# (deny still wins) but before config/runtime allow rules.
-		if rule_type == "target" and self.allowed_targets:
+		# Mandate in_scope allow — checked AFTER both deny loops (config deny + the
+		# out_of_scope deny above still win) but before config/runtime allow rules.
+		# A target outside a non-empty in_scope falls through to the config/runtime
+		# rules + the interactive ask, preserving the CLI approve path. Empty scope
+		# (CLI default) skips this entirely.
+		if rule_type == "target" and self.in_scope:
 			for v in values_to_check:
-				if self._matches_allowed_targets(v):
-					return PermissionResult(decision="allow", reason=f"Allowed by mandate: target({v})")
+				if host_in_scope(v, self.in_scope, self.out_of_scope):
+					return PermissionResult(decision="allow", reason=f"In scope: target({v})")
 
 		for rt, patterns in self.rules["allow"]:
 			if rt == rule_type:

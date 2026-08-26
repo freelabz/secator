@@ -683,7 +683,6 @@ class TestSessionIdStampedOnContext(unittest.TestCase):
 			stack.enter_context(patch('secator.tasks.ai.PermissionEngine'))
 			stack.enter_context(patch('secator.tasks.ai.create_backend'))
 			stack.enter_context(patch('secator.tasks.ai.SensitiveDataEncryptor'))
-			stack.enter_context(patch.object(ai, '_auto_approve_workspace_targets'))
 			stack.enter_context(patch.object(type(task), 'reports_folder', property(lambda self: None)))
 			stack.enter_context(patch.object(type(task), 'id', 'runner-id-42', create=True))
 			task._init_options()
@@ -755,7 +754,6 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 			patch('secator.tasks.ai.PermissionEngine'),
 			patch('secator.tasks.ai.create_backend'),
 			patch('secator.tasks.ai.SensitiveDataEncryptor'),
-			patch.object(ai, '_auto_approve_workspace_targets'),
 			patch('secator.tasks.ai.get_system_prompt', return_value='SYS'),
 			patch('secator.tasks.ai.build_tool_schemas', return_value=[]),
 		)

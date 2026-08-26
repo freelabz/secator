@@ -414,132 +414,124 @@ class TestPermissionEngine(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
-class TestAllowedTargets(unittest.TestCase):
-	"""Platform-supplied allowed_targets (e.g. validated mandates) constrain target scope."""
+class TestInScope(unittest.TestCase):
+	"""Mandate in_scope (run-opt) constrains target scope via the shipped host_in_scope."""
 
-	def _make_engine(self, allow=None, deny=None, ask=None, targets=None, allowed_targets=None, workspace="/tmp/workspace"):  # noqa: E501
+	def _make_engine(self, allow=None, deny=None, ask=None, targets=None, in_scope=None, workspace="/tmp/workspace"):  # noqa: E501
 		config = {"allow": allow or [], "deny": deny or [], "ask": ask or []}
 		return PermissionEngine(
-			config, targets=targets or [], workspace=workspace, allowed_targets=allowed_targets or [])
+			config, targets=targets or [], workspace=workspace, in_scope=in_scope or [])
 
-	def test_allowed_target_literal_match(self):
-		engine = self._make_engine(allow=["shell(nmap)"], allowed_targets=["example.com"])
+	def test_in_scope_exact_match(self):
+		engine = self._make_engine(allow=["shell(nmap)"], in_scope=["example.com"])
 		result = engine.check_action({"action": "shell", "command": "nmap example.com"})
 		self.assertEqual(result.decision, "allow")
 
-	def test_allowed_target_regex_match(self):
-		engine = self._make_engine(allow=["shell(nmap)"], allowed_targets=[r".*\.example\.com"])
+	def test_in_scope_wildcard_match(self):
+		engine = self._make_engine(allow=["shell(nmap)"], in_scope=["*.example.com"])
 		result = engine.check_action({"action": "shell", "command": "nmap api.example.com"})
 		self.assertEqual(result.decision, "allow")
 
-	def test_target_outside_allowed_targets_is_constrained(self):
-		"""A target not matching any allowed_targets regex must NOT be silently allowed."""
-		engine = self._make_engine(allow=["shell(nmap)"], allowed_targets=[r".*\.example\.com"])
+	def test_target_outside_in_scope_is_constrained(self):
+		"""A target not covered by in_scope must NOT be silently allowed."""
+		engine = self._make_engine(allow=["shell(nmap)"], in_scope=["*.example.com"])
 		result = engine.check_action({"action": "shell", "command": "nmap evil.attacker.com"})
 		self.assertNotEqual(result.decision, "allow")
 
-	def test_allowed_targets_presence_forces_target_check(self):
-		"""Even with no config target rules, allowed_targets makes the target step run."""
-		engine = self._make_engine(allow=["task(*)"], allowed_targets=["10.0.0.1"])
+	def test_in_scope_presence_forces_target_check(self):
+		"""Even with no config target rules, in_scope makes the target step run."""
+		engine = self._make_engine(allow=["task(*)"], in_scope=["10.0.0.1"])
 		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["8.8.8.8"]})
 		self.assertNotEqual(result.decision, "allow")
 
-	def test_allowed_target_task_in_scope(self):
-		engine = self._make_engine(allow=["task(*)"], allowed_targets=[r"10\.0\.0\.\d+"])
+	def test_in_scope_task_cidr(self):
+		engine = self._make_engine(allow=["task(*)"], in_scope=["10.0.0.0/24"])
 		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.5"]})
 		self.assertEqual(result.decision, "allow")
 
-	def test_deny_still_wins_over_allowed_targets(self):
+	def test_config_safety_deny_beats_broad_in_scope(self):
+		"""A broad mandate in_scope must NEVER authorize a config safety-denied target
+		(metadata IP). The config deny is checked before the in_scope allow."""
 		engine = self._make_engine(
-			allow=["shell(nmap)"], deny=["target(169.254.169.254)"], allowed_targets=[r".*"])
+			allow=["shell(nmap)"], deny=["target(169.254.169.254)"], in_scope=["169.254.0.0/16"])
 		result = engine.check_action({"action": "shell", "command": "nmap 169.254.169.254"})
 		self.assertEqual(result.decision, "deny")
 
-	def test_invalid_regex_falls_back_to_literal(self):
-		# '[' is invalid regex → treated as a literal string
-		engine = self._make_engine(allow=["shell(nmap)"], allowed_targets=["host[1"])
-		self.assertEqual(len(engine.allowed_targets), 1)
-
-	def test_allowed_target_url_host_component(self):
-		engine = self._make_engine(allow=["shell(curl)"], allowed_targets=["example.com"])
+	def test_in_scope_url_host_component(self):
+		engine = self._make_engine(allow=["shell(curl)"], in_scope=["example.com"])
 		result = engine.check_action({"action": "shell", "command": "curl https://example.com/path"})
 		self.assertEqual(result.decision, "allow")
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
-class TestDeniedTargets(unittest.TestCase):
-	"""Platform-supplied denied_targets (e.g. mandate deny scope) block target scope. Deny wins."""
+class TestOutOfScope(unittest.TestCase):
+	"""Mandate out_of_scope (run-opt) blocks target scope via host_in_scope. Deny wins."""
 
-	def _make_engine(self, allow=None, deny=None, ask=None, targets=None, allowed_targets=None,  # noqa: E501
-		denied_targets=None, workspace="/tmp/workspace"):
+	def _make_engine(self, allow=None, deny=None, ask=None, targets=None, in_scope=None,  # noqa: E501
+		out_of_scope=None, workspace="/tmp/workspace"):
 		config = {"allow": allow or [], "deny": deny or [], "ask": ask or []}
 		return PermissionEngine(
 			config, targets=targets or [], workspace=workspace,
-			allowed_targets=allowed_targets or [], denied_targets=denied_targets or [])
+			in_scope=in_scope or [], out_of_scope=out_of_scope or [])
 
-	def test_denied_target_literal_match(self):
+	def test_out_of_scope_ip_match(self):
 		# IP targets are extracted without DNS, so deny applies directly.
-		engine = self._make_engine(allow=["shell(nmap)"], denied_targets=["10.0.0.1"])
+		engine = self._make_engine(allow=["shell(nmap)"], out_of_scope=["10.0.0.1"])
 		result = engine.check_action({"action": "shell", "command": "nmap 10.0.0.1"})
 		self.assertEqual(result.decision, "deny")
 
-	def test_denied_target_regex_match(self):
+	def test_out_of_scope_wildcard_match(self):
 		# Hostnames are only extracted if they resolve — patch DNS so the host is seen.
-		engine = self._make_engine(allow=["shell(nmap)"], denied_targets=[r".*\.evil\.com"])
+		engine = self._make_engine(allow=["shell(nmap)"], out_of_scope=["*.evil.com"])
 		with patch("secator.ai.guardrails._resolves", return_value=True):
 			result = engine.check_action({"action": "shell", "command": "nmap api.evil.com"})
 		self.assertEqual(result.decision, "deny")
 
-	def test_deny_wins_over_allow_when_target_matches_both(self):
-		"""A target matching BOTH allowed_targets and denied_targets must be DENIED."""
+	def test_deny_wins_when_target_in_both_scopes(self):
+		"""A target in BOTH in_scope and out_of_scope must be DENIED."""
 		engine = self._make_engine(
-			allow=["shell(nmap)"], allowed_targets=[r".*\.example\.com"], denied_targets=[r"admin\.example\.com"])
+			allow=["shell(nmap)"], in_scope=["*.example.com"], out_of_scope=["admin.example.com"])
 		with patch("secator.ai.guardrails._resolves", return_value=True):
 			result = engine.check_action({"action": "shell", "command": "nmap admin.example.com"})
 		self.assertEqual(result.decision, "deny")
 
-	def test_deny_wins_over_allow_at_check_value_level(self):
-		"""Unit-level deny-wins: _check_value denies a target in both allow + deny lists."""
+	def test_deny_wins_at_check_value_level(self):
+		"""Unit-level deny-wins: _check_value denies a target in both in_scope + out_of_scope."""
 		engine = self._make_engine(
-			allow=["shell(nmap)"], allowed_targets=[r".*"], denied_targets=[r"169\.254\.169\.254"])
+			allow=["shell(nmap)"], in_scope=["169.254.0.0/16"], out_of_scope=["169.254.169.254"])
 		result = engine._check_value("target", "169.254.169.254")
 		self.assertEqual(result.decision, "deny")
 
-	def test_allow_only_target_is_allowed(self):
-		"""allow-only (in allowed, not in denied) → allowed."""
+	def test_in_scope_only_target_is_allowed(self):
+		"""In in_scope, not in out_of_scope → allowed."""
 		engine = self._make_engine(
-			allow=["shell(nmap)"], allowed_targets=[r".*"], denied_targets=[r"169\.254\.169\.254"])
-		result = engine._check_value("target", "10.0.0.5")
+			allow=["shell(nmap)"], in_scope=["169.254.0.0/16"], out_of_scope=["169.254.169.254"])
+		result = engine._check_value("target", "169.254.169.5")
 		self.assertEqual(result.decision, "allow")
 
-	def test_deny_only_target_is_denied(self):
-		"""deny-only (matches denied, no allowed entries) → denied."""
-		engine = self._make_engine(allow=["shell(nmap)"], denied_targets=[r"10\.0\.0\.1"])
+	def test_out_of_scope_only_target_is_denied(self):
+		"""Matches out_of_scope, no in_scope entries → denied."""
+		engine = self._make_engine(allow=["shell(nmap)"], out_of_scope=["10.0.0.1"])
 		result = engine.check_action({"action": "shell", "command": "nmap 10.0.0.1"})
 		self.assertEqual(result.decision, "deny")
 
-	def test_denied_targets_presence_forces_target_check(self):
-		"""Even with no config target rules, denied_targets makes the target step run."""
-		engine = self._make_engine(allow=["task(*)"], denied_targets=["10.0.0.1"])
+	def test_out_of_scope_presence_forces_target_check(self):
+		"""Even with no config target rules, out_of_scope makes the target step run."""
+		engine = self._make_engine(allow=["task(*)"], out_of_scope=["10.0.0.1"])
 		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.1"]})
 		self.assertEqual(result.decision, "deny")
 
-	def test_denied_target_task_in_deny_scope(self):
+	def test_out_of_scope_task_in_deny_scope(self):
 		engine = self._make_engine(
-			allow=["task(*)"], allowed_targets=[r"10\.0\.0\.\d+"], denied_targets=[r"10\.0\.0\.1"])
+			allow=["task(*)"], in_scope=["10.0.0.0/24"], out_of_scope=["10.0.0.1"])
 		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.1"]})
 		self.assertEqual(result.decision, "deny")
 
-	def test_denied_target_url_host_component(self):
-		engine = self._make_engine(allow=["shell(curl)"], denied_targets=["evil.com"])
+	def test_out_of_scope_url_host_component(self):
+		engine = self._make_engine(allow=["shell(curl)"], out_of_scope=["evil.com"])
 		with patch("secator.ai.guardrails._resolves", return_value=True):
 			result = engine.check_action({"action": "shell", "command": "curl https://evil.com/path"})
 		self.assertEqual(result.decision, "deny")
-
-	def test_invalid_regex_falls_back_to_literal(self):
-		# '[' is invalid regex → treated as a literal string
-		engine = self._make_engine(allow=["shell(nmap)"], denied_targets=["host[1"])
-		self.assertEqual(len(engine.denied_targets), 1)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

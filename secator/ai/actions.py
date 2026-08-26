@@ -64,6 +64,10 @@ class ActionContext:
 	interactive: Any = "local"  # "local", "remote", "auto", or bool (legacy)
 	backend: Any = field(default=None, repr=False)
 	session_id: str = ""
+	# Mandate scope (run-opts) propagated to spawned child runners so they enforce the
+	# same in_scope/out_of_scope boundary via secator's shipped scope-gate.
+	in_scope: List = field(default_factory=list)
+	out_of_scope: List = field(default_factory=list)
 	_query_engine: Any = field(default=None, repr=False)
 	permission_engine: Any = field(default=None, repr=False)
 
@@ -428,7 +432,7 @@ def _gather_subagent_evidence(ctx: "ActionContext", targets: list, limit: int = 
 
 def _child_run_opts(ctx: ActionContext) -> Dict:
 	"""Common run_opts shared by every child runner (task/workflow/shell command)."""
-	return {
+	opts = {
 		"print_item": not ctx.silent,
 		"print_line": ctx.verbose and not ctx.silent,
 		"print_progress": False,
@@ -437,6 +441,12 @@ def _child_run_opts(ctx: ActionContext) -> Dict:
 		"exporters": [],
 		"sync": ctx.sync,
 	}
+	# Flow the mandate scope down so each child runner enforces it too (shipped gate).
+	if ctx.in_scope:
+		opts["in_scope"] = ctx.in_scope
+	if ctx.out_of_scope:
+		opts["out_of_scope"] = ctx.out_of_scope
+	return opts
 
 
 def _child_preamble(ctx: ActionContext, context: Dict) -> Tuple[Dict, Optional["Warning"]]:
