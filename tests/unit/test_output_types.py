@@ -44,16 +44,21 @@ class TestOutputTypes(unittest.TestCase):
 
 class TestVulnerabilityStatus(unittest.TestCase):
 
-	def test_status_defaults_to_empty(self):
-		# status is a plain field: untouched vulns default to '' (rendered/treated
-		# as NEW downstream), which lets dedup carry a prior status forward generically.
+	def test_status_defaults_to_new(self):
 		vuln = Vulnerability(name='CVE-2025-53020')
-		assert vuln.status == ''
+		assert vuln.status == 'NEW'
 
-	def test_status_value_preserved_as_is(self):
-		# No coercion / uppercasing — treated like any other field.
+	def test_status_empty_coerces_to_new(self):
+		assert Vulnerability(name='CVE-2025-53020', status='').status == 'NEW'
+		assert Vulnerability(name='CVE-2025-53020', status=None).status == 'NEW'
+
+	def test_status_unknown_coerces_to_new(self):
+		assert Vulnerability(name='CVE-2025-53020', status='bogus').status == 'NEW'
+
+	def test_status_valid_values_preserved_and_uppercased(self):
 		assert Vulnerability(name='CVE-2025-53020', status='ACKNOWLEDGED').status == 'ACKNOWLEDGED'
-		assert Vulnerability(name='CVE-2025-53020', status='FIXED').status == 'FIXED'
+		assert Vulnerability(name='CVE-2025-53020', status='fixed').status == 'FIXED'
+		assert Vulnerability(name='CVE-2025-53020', status='  new  ').status == 'NEW'
 
 	def test_status_does_not_affect_equality(self):
 		# Same identity (name/id/matched_at) but different status must still be equal (dedup-safe).
@@ -108,3 +113,73 @@ class TestWarningRich(unittest.TestCase):
 		warn = Warning(message='watch out')
 		rich_str = warn.__rich__()
 		assert 'watch out' in rich_str
+
+
+class TestAiMessageField(unittest.TestCase):
+
+	def test_ai_message_roundtrips_through_todict(self):
+		from secator.output_types.ai import Ai
+		msg = {'role': 'user', 'content': 'x'}
+		ai = Ai(content='x', message=msg)
+		assert ai.message == msg
+		d = ai.toDict()
+		assert d['message'] == msg
+
+	def test_ai_message_defaults_empty(self):
+		from secator.output_types.ai import Ai
+		ai = Ai(content='x')
+		assert ai.message == {}
+		assert ai.toDict()['message'] == {}
+
+
+class TestAiUnknownAiTypeRendersSafely(unittest.TestCase):
+	"""Task 6 Step 4 (UI-safety guard): `tool_result` (and any other new/unknown
+	ai_type not in AI_TYPES) must not raise or produce garbage when rendered.
+
+	Ai has no __rich__/__rich_console__ of its own (unlike most other output
+	types) -- __repr__ carries the full rendering logic directly, and it is
+	what `console.print(item)` actually invokes for a plain object with no
+	Rich protocol methods. AI_TYPES.get(self.ai_type, {...default...}) already
+	falls back gracefully for an unrecognized ai_type, so no production change
+	was needed here; this test locks that guarantee in so a future edit to
+	__repr__ can't silently regress it back to a KeyError/crash.
+	"""
+
+	def test_tool_result_str_does_not_raise(self):
+		from secator.output_types.ai import Ai
+		ai = Ai(content="[run_task] 1 result(s)", ai_type="tool_result",
+				message={"role": "tool", "tool_call_id": "c1", "name": "run_task", "content": "80/open"})
+		# Must not raise.
+		str(ai)
+
+	def test_tool_result_repr_renders_compact_line_without_raising(self):
+		from secator.output_types.ai import Ai
+		ai = Ai(content="[run_task] 1 result(s)", ai_type="tool_result",
+				message={"role": "tool", "tool_call_id": "c1", "name": "run_task", "content": "80/open"})
+		rendered = repr(ai)
+		# Falls back to the unrecognized-ai_type label, not a raw dict/garbage dump.
+		# (content is rich-markup-escaped, so brackets may be backslash-escaped.)
+		self.assertIn("TOOL_RESULT", rendered)
+		self.assertIn("run_task", rendered)
+		self.assertIn("result(s)", rendered)
+
+	def test_tool_result_console_print_does_not_raise(self):
+		"""Exercise the actual rendering path used by session.py's replay_session
+		(`console.print(item, highlight=False)`) end to end."""
+		from io import StringIO
+		from rich.console import Console
+		from secator.output_types.ai import Ai
+		ai = Ai(content="[run_task] 1 result(s)", ai_type="tool_result",
+				message={"role": "tool", "tool_call_id": "c1", "name": "run_task", "content": "80/open"})
+		buf = StringIO()
+		console = Console(file=buf, force_terminal=True, width=80)
+		console.print(ai, highlight=False)  # must not raise
+		self.assertIn("TOOL_RESULT", buf.getvalue())
+
+	def test_arbitrary_unknown_ai_type_also_falls_back_safely(self):
+		"""Not just `tool_result` -- ANY ai_type absent from AI_TYPES must be safe."""
+		from secator.output_types.ai import Ai
+		ai = Ai(content="whatever", ai_type="some_future_type_nobody_registered_yet")
+		rendered = repr(ai)
+		self.assertIn("SOME_FUTURE_TYPE_NOBODY_REGISTERED_YET", rendered)
+		self.assertIn("whatever", rendered)

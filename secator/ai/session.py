@@ -61,6 +61,16 @@ def list_sessions(max_sessions=20):
 					first_prompt = item.get('content', '')
 					session_name = (item.get('_context') or {}).get('session_name', '') or (item.get('_context') or {}).get('name', '')
 					break
+			# session_id: first non-empty `_context.session_id` across ALL ai docs
+			# (not just prompt docs) -- every persisted item stamps it (see
+			# ai.py:_init_options), so any doc suffices. Needed so a resumed run
+			# can adopt this session's id instead of minting a fresh one.
+			session_id = ''
+			for item in ai_items:
+				sid = (item.get('_context') or {}).get('session_id', '')
+				if sid:
+					session_id = sid
+					break
 			info = data.get('info', {})
 			sessions.append({
 				'folder': str(history_path.parent),
@@ -68,6 +78,7 @@ def list_sessions(max_sessions=20):
 				'report_path': str(report_path),
 				'name': session_name,
 				'prompt': first_prompt,
+				'session_id': session_id,
 				'targets': info.get('targets', []),
 				'timestamp': info.get('end_time') or info.get('start_time') or 0,
 				'mtime': history_path.stat().st_mtime,
@@ -125,6 +136,42 @@ def show_session_picker():
 	return sessions[idx]
 
 
+def print_session_results(session):
+	"""Print a prior session's persisted results (findings + ai turns) to the
+	console in ``_timestamp`` order — the visible "here's where you left off"
+	replay shown on resume. Reads the session's ``report.json``; best-effort
+	(never raises), so a resume is never blocked by a display error.
+
+	Args:
+		session: Session dict from show_session_picker (uses ``report_path``).
+	"""
+	from secator.output_types import OUTPUT_TYPES
+
+	report_path = session.get('report_path')
+	if not report_path:
+		return
+	type_map = {cls.__name__.lower(): cls for cls in OUTPUT_TYPES}
+	try:
+		with open(report_path) as f:
+			data = json.load(f)
+	except (json.JSONDecodeError, OSError):
+		return
+	# Flatten all items with their type class, then print in timestamp order
+	all_items = []
+	for type_name, items in data.get('results', {}).items():
+		cls = type_map.get(type_name)
+		if not cls:
+			continue
+		for item_data in items:
+			all_items.append((item_data, cls))
+	all_items.sort(key=lambda x: x[0].get('_timestamp', 0))
+	for item_data, cls in all_items:
+		try:
+			console.print(cls.load(item_data), highlight=False)
+		except Exception:
+			continue
+
+
 def replay_session(session):
 	"""Replay all results from a previous session and restore history.
 
@@ -135,36 +182,9 @@ def replay_session(session):
 		ChatHistory: Restored history, or None on error.
 	"""
 	from secator.ai.history import ChatHistory
-	from secator.output_types import OUTPUT_TYPES
 
-	# Build type map for loading items
-	type_map = {cls.__name__.lower(): cls for cls in OUTPUT_TYPES}
-
-	# Load and replay all results from report.json, sorted by timestamp
-	report_path = session.get('report_path')
-	if report_path:
-		try:
-			with open(report_path) as f:
-				data = json.load(f)
-			results = data.get('results', {})
-			# Flatten all items with their type class
-			all_items = []
-			for type_name, items in results.items():
-				cls = type_map.get(type_name)
-				if not cls:
-					continue
-				for item_data in items:
-					all_items.append((item_data, cls))
-			# Sort by _timestamp
-			all_items.sort(key=lambda x: x[0].get('_timestamp', 0))
-			for item_data, cls in all_items:
-				try:
-					item = cls.load(item_data)
-					console.print(item, highlight=False)
-				except Exception:
-					continue
-		except (json.JSONDecodeError, OSError):
-			pass
+	# Show the prior conversation + findings on the console
+	print_session_results(session)
 
 	# Load history
 	history_path = session['history_path']
@@ -177,3 +197,98 @@ def replay_session(session):
 	except (json.JSONDecodeError, OSError) as e:
 		console.print(Error(message=f'Failed to load history: {e}'))
 		return None
+
+
+def restore_history_from_db(session_id, query_engine, model=None, encryptor=None, system_prompt=None):
+	"""Rebuild an in-memory ChatHistory from the workspace's `_type:"ai"` Mongo docs.
+
+	Headless equivalent of ``replay_session`` for the remote (web) path: a
+	respawned ``ai`` task on a different worker pod has no local report files, so
+	the conversation is rebuilt from the channel docs themselves (queried by
+	``session_id``, ordered by ``_timestamp``).
+
+	This is a **faithful, valid litellm transcript continuation** for docs
+	carrying a raw litellm ``message`` dict (persisted by Tasks 2-3 for every
+	prompt/assistant/tool_result turn, including tool_calls and tool_call_id
+	pairing): each persisted message is appended verbatim, in ``_timestamp``
+	order. Internal loop nudges (the synthetic "continue"/"retry" ``user``
+	prompts the run appends to live history but never persists as docs) are not
+	restored and so are omitted here — the result is therefore NOT literally
+	byte-identical to the live in-memory history, but it stays a valid transcript
+	(a clean tool→assistant continuation the model can resume from). Persisted
+	``message.content`` is already encrypted (the encryption happens at persist
+	time, not at read time), so it is NOT re-encrypted here — doing so would
+	double-encrypt it.
+
+	Docs from before this feature shipped don't carry a ``message`` field at
+	all (only the human-readable ``content`` used for the channel/report
+	display). Those fall back to the legacy **text-only** reconstruction: only
+	``ai_type="prompt"``/``"response"`` docs become ``user``/``assistant``
+	messages (re-encrypted here, since their plaintext ``content`` was never
+	encrypted at persist time), and intermediate tool-call/tool-result activity
+	is collapsed away (it was never captured verbatim pre-upgrade).
+
+	Ordering assumption: a single session is either entirely message-carrying
+	(post-upgrade) or entirely legacy (pre-upgrade) — sessions aren't upgraded
+	mid-conversation. So it is safe to restore all message-docs first (in
+	their own timestamp order) and then append any legacy docs (in their own
+	timestamp order); within a real session only one of the two groups will be
+	non-empty, so this two-pass split never reorders an actual transcript.
+
+	Args:
+		session_id: The conversation's session id (UUID generated by the UI).
+		query_engine: A ``QueryEngine`` (must resolve to the workspace Mongo
+			backend for the docs to be visible).
+		model: Optional LLM model name to set on the returned history.
+		encryptor: Optional ``SensitiveDataEncryptor``, used only for the legacy
+			text-only fallback (message-docs are already encrypted verbatim).
+		system_prompt: Optional system prompt to set as the first message.
+
+	Returns:
+		ChatHistory: The rebuilt history (possibly with only a system prompt if
+		no prior docs exist).
+	"""
+	from secator.ai.history import ChatHistory
+	from secator.ai.encryption import maybe_encrypt
+	from secator.ai.utils import _repair_orphan_tool_uses, _strip_leading_orphan_tools
+
+	history = ChatHistory(model=model)
+	if system_prompt is not None:
+		history.set_system(maybe_encrypt(system_prompt, encryptor))
+
+	try:
+		docs = query_engine.search({'_type': 'ai', '_context.session_id': session_id})
+	except Exception as e:  # noqa: BLE001 - backend errors must not crash the worker
+		console.print(Warning(message=f'Failed to restore session from DB: {e}'))
+		return history
+
+	docs = sorted(docs or [], key=lambda d: d.get('_timestamp', 0))
+	legacy = []  # docs without a raw message (pre-upgrade) -> text-only fallback
+	for doc in docs:
+		msg = doc.get('message')
+		if isinstance(msg, dict) and msg.get('role'):
+			# Byte-exact: the persisted message already holds encrypted content, so
+			# append verbatim (no re-encryption) — mirrors a fresh run's history.
+			history.messages.append(dict(msg))
+		else:
+			legacy.append(doc)
+
+	# Legacy docs (no message field): fall back to text-only prompt/response.
+	for doc in legacy:
+		ai_type = doc.get('ai_type')
+		content = doc.get('content', '')
+		if not content:
+			continue
+		if ai_type == 'prompt':
+			history.add_user(maybe_encrypt(content, encryptor))
+		elif ai_type == 'response':
+			history.add_assistant(maybe_encrypt(content, encryptor))
+		# All other ai_types (action displays, follow_up/permission prompts,
+		# shell_output, summaries) are channel/UX artifacts, not conversation
+		# turns — intentionally skipped for a valid litellm transcript.
+
+	# Guard against a partially-persisted turn producing an orphan tool result.
+	_repair_orphan_tool_uses(history.messages)
+	_strip_leading_orphan_tools(history.messages)
+
+	return history

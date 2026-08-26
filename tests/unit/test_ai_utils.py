@@ -82,15 +82,18 @@ class TestCallLLM(unittest.TestCase):
         self.assertEqual(result["tool_calls"], [])
         mock_completion.assert_called_once()
 
+    @patch('litellm.token_counter')
     @patch('litellm.completion')
-    def test_call_llm_no_usage(self, mock_completion):
-        """Response without usage data."""
+    def test_call_llm_no_usage_estimates_tokens(self, mock_completion, mock_token_counter):
+        """M5: response without usage still yields a non-zero estimated token count."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Response"
         mock_response.choices[0].message.tool_calls = None
         mock_response.usage = None
         mock_completion.return_value = mock_response
+        # prompt (messages=...) then completion (text=...)
+        mock_token_counter.side_effect = [42, 8]
 
         from secator.ai.utils import call_llm
         result = call_llm(
@@ -99,7 +102,11 @@ class TestCallLLM(unittest.TestCase):
         )
 
         self.assertEqual(result["content"], "Response")
-        self.assertIsNone(result["usage"])
+        self.assertIsNotNone(result["usage"])
+        self.assertEqual(result["usage"]["tokens"], 50)
+        self.assertEqual(result["usage"]["prompt_tokens"], 42)
+        self.assertEqual(result["usage"]["completion_tokens"], 8)
+        self.assertIsNone(result["usage"]["cost"])
         self.assertEqual(result["tool_calls"], [])
 
     @patch('litellm.completion')
@@ -233,6 +240,126 @@ class TestCallLLM(unittest.TestCase):
         self.assertEqual(tc.id, "call_bad")
         self.assertEqual(tc.function.name, "broken_tool")
         self.assertEqual(tc.function.arguments, "{not valid json")
+
+    @patch('time.sleep')
+    @patch('litellm.completion')
+    def test_call_llm_non_orphan_400_fails_fast(self, mock_completion, mock_sleep):
+        """M4: a plain (non-orphan) 400 is raised immediately, NOT retried 3x."""
+        import litellm
+        from secator.ai.utils import call_llm
+
+        err = litellm.BadRequestError(
+            message="litellm.BadRequestError: context_length_exceeded",
+            model="test-model", llm_provider="anthropic",
+        )
+        mock_completion.side_effect = err
+
+        with self.assertRaises(litellm.BadRequestError):
+            call_llm([{"role": "user", "content": "hi"}], "test-model", max_retries=3)
+
+        self.assertEqual(mock_completion.call_count, 1)  # no 3x spin
+        mock_sleep.assert_not_called()
+
+    @patch('time.sleep')
+    @patch('litellm.completion')
+    def test_call_llm_orphan_400_repairs_and_retries(self, mock_completion, mock_sleep):
+        """M4: the orphan tool_use 400 still triggers repair-and-retry (no fail-fast)."""
+        import litellm
+        from secator.ai.utils import call_llm
+
+        ok_response = MagicMock()
+        ok_response.choices = [MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+        ok_response.usage = None
+
+        err = litellm.BadRequestError(
+            message="AnthropicException - tool_use ids were found without tool_result blocks",
+            model="claude", llm_provider="anthropic",
+        )
+
+        calls = []
+
+        def side_effect(**kwargs):
+            if not calls:  # first call: inject orphan, then raise the orphan 400
+                kwargs["messages"].insert(0, {
+                    "role": "assistant", "content": None,
+                    "tool_calls": [{"id": "toolu_late", "type": "function",
+                                    "function": {"name": "f", "arguments": "{}"}}],
+                })
+                calls.append(1)
+                raise err
+            return ok_response
+
+        mock_completion.side_effect = side_effect
+        result = call_llm([{"role": "user", "content": "hi"}], "claude", max_retries=3)
+
+        self.assertEqual(result["content"], "ok")
+        self.assertEqual(mock_completion.call_count, 2)  # repaired then succeeded
+        mock_sleep.assert_not_called()  # repair skips the backoff
+
+    @patch('time.sleep')
+    @patch('litellm.completion')
+    def test_call_llm_duplicate_tool_result_400_repairs_and_retries(self, mock_completion, mock_sleep):
+        """A 'multiple tool_result blocks with id' 400 is now deduped and retried,
+        instead of failing fast as non-retryable."""
+        import litellm
+        from secator.ai.utils import call_llm
+
+        ok_response = MagicMock()
+        ok_response.choices = [MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+        ok_response.usage = None
+
+        err = litellm.BadRequestError(
+            message=("messages.24.content.3: each tool_use must have a single result. "
+                     "Found multiple tool_result blocks with id: toolu_dup"),
+            model="claude", llm_provider="anthropic",
+        )
+        calls = []
+
+        def side_effect(**kwargs):
+            if not calls:  # first call: inject an assistant + duplicate tool_results, then raise
+                kwargs["messages"][:0] = [
+                    {"role": "assistant", "content": None,
+                     "tool_calls": [{"id": "toolu_dup", "type": "function",
+                                     "function": {"name": "f", "arguments": "{}"}}]},
+                    {"role": "tool", "tool_call_id": "toolu_dup", "name": "f", "content": "r1"},
+                    {"role": "tool", "tool_call_id": "toolu_dup", "name": "f", "content": "r2"},
+                ]
+                calls.append(1)
+                raise err
+            return ok_response
+
+        mock_completion.side_effect = side_effect
+        result = call_llm([{"role": "user", "content": "hi"}], "claude", max_retries=3)
+
+        self.assertEqual(result["content"], "ok")
+        self.assertEqual(mock_completion.call_count, 2)  # deduped then succeeded
+        mock_sleep.assert_not_called()
+
+    @patch('time.sleep')
+    @patch('litellm.completion')
+    @patch('litellm.completion_cost')
+    def test_call_llm_transient_error_still_retries(self, mock_cost, mock_completion, mock_sleep):
+        """M4: genuinely-transient errors (429/500) still retry then succeed."""
+        import litellm
+        from secator.ai.utils import call_llm
+
+        ok_response = MagicMock()
+        ok_response.choices = [MagicMock()]
+        ok_response.choices[0].message.content = "ok"
+        ok_response.choices[0].message.tool_calls = None
+        ok_response.usage.total_tokens = 10
+        mock_cost.return_value = 0.0
+
+        err = litellm.RateLimitError(
+            message="rate limited", model="test-model", llm_provider="anthropic",
+        )
+        mock_completion.side_effect = [err, ok_response]
+
+        result = call_llm([{"role": "user", "content": "hi"}], "test-model", max_retries=3)
+
+        self.assertEqual(result["content"], "ok")
+        self.assertEqual(mock_completion.call_count, 2)  # transient retry honored
+        mock_sleep.assert_called_once()
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -470,6 +597,64 @@ class TestRepairOrphanToolUses(unittest.TestCase):
 
         self.assertEqual(result["content"], "ok")
         mock_sleep.assert_not_called()  # repair branch should skip the backoff sleep
+
+
+class TestDedupeToolResults(unittest.TestCase):
+    """Providers reject >1 tool_result per tool_use id ('multiple tool_result blocks
+    with id X') — a non-retryable 400. Duplicates arise from batch results grouped
+    out of order or history trim/compaction; drop the extras, keep the first."""
+
+    def test_drops_consecutive_duplicate_same_id(self):
+        from secator.ai.utils import _dedupe_tool_results
+        messages = [
+            {"role": "assistant", "content": None,
+             "tool_calls": [{"id": "x", "type": "function", "function": {"name": "f", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "x", "name": "f", "content": "first"},
+            {"role": "tool", "tool_call_id": "y", "name": "f", "content": "other"},
+            {"role": "tool", "tool_call_id": "x", "name": "f", "content": "DUP"},
+            {"role": "user", "content": "next"},
+        ]
+        removed = _dedupe_tool_results(messages)
+        self.assertEqual(removed, 1)
+        tool_ids = [m["tool_call_id"] for m in messages if m.get("role") == "tool"]
+        self.assertEqual(tool_ids, ["x", "y"])  # first x kept, dup dropped, y intact
+        # the kept x is the FIRST result
+        self.assertEqual(next(m for m in messages if m.get("tool_call_id") == "x")["content"], "first")
+
+    def test_no_op_when_unique(self):
+        from secator.ai.utils import _dedupe_tool_results
+        messages = [
+            {"role": "tool", "tool_call_id": "a", "content": "1"},
+            {"role": "tool", "tool_call_id": "b", "content": "2"},
+        ]
+        before = [dict(m) for m in messages]
+        self.assertEqual(_dedupe_tool_results(messages), 0)
+        self.assertEqual(messages, before)
+
+    def test_dedupe_scoped_per_consecutive_run(self):
+        """The same id in two SEPARATE tool runs (own assistant each) is not a dup."""
+        from secator.ai.utils import _dedupe_tool_results
+        messages = [
+            {"role": "tool", "tool_call_id": "x", "content": "r1"},
+            {"role": "assistant", "content": "thinking"},
+            {"role": "tool", "tool_call_id": "x", "content": "r2"},
+        ]
+        self.assertEqual(_dedupe_tool_results(messages), 0)  # separated by a non-tool msg
+
+    def test_repair_dedupes_duplicate_tool_results(self):
+        """_repair_orphan_tool_uses now removes duplicates as part of its pass."""
+        from secator.ai.utils import _repair_orphan_tool_uses
+        messages = [
+            {"role": "assistant", "content": None,
+             "tool_calls": [{"id": "x", "type": "function", "function": {"name": "f", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "x", "name": "f", "content": "first"},
+            {"role": "tool", "tool_call_id": "x", "name": "f", "content": "DUP"},
+            {"role": "user", "content": "next"},
+        ]
+        changed = _repair_orphan_tool_uses(messages)
+        self.assertGreaterEqual(changed, 1)
+        tool_ids = [m["tool_call_id"] for m in messages if m.get("role") == "tool"]
+        self.assertEqual(tool_ids, ["x"])  # exactly one result for x
 
 
 if __name__ == '__main__':
