@@ -749,7 +749,6 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		return task, engine
 
 	def _patches(self):
-		from secator.tasks.ai import ai
 		return (
 			patch('secator.tasks.ai.PermissionEngine'),
 			patch('secator.tasks.ai.create_backend'),
