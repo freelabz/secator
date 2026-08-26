@@ -667,7 +667,7 @@ class TestSessionIdStampedOnContext(unittest.TestCase):
 		task = ai.__new__(ai)
 		task.context = context
 		task.run_opts = run_opts or {}
-		task.results = []
+		task._view = lambda *a, **kw: []  # results property reads _view()
 		task.inputs = []
 		task._reports_folder = None
 		task.sync = True
@@ -720,7 +720,7 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 
 		task = ai.__new__(ai)
 		task.inputs = []
-		task.results = []
+		task._view = lambda *a, **kw: []  # results property reads _view()
 		task.run_opts = {"resume": True}
 		task.sync = True
 		task._reports_folder = tempfile.mkdtemp(prefix="secator-test-")

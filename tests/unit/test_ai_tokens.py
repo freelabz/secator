@@ -169,8 +169,10 @@ class TestAiModelRecording(unittest.TestCase):
 		task = ai.__new__(ai)
 		task.context = {}
 		task.run_opts = {}
-		task.results = []
+		task._view = lambda *a, **kw: []  # results property reads _view()
 		task.inputs = []
+		task.in_scope = []
+		task.out_of_scope = []
 		task._reports_folder = None
 		task.sync = True
 
@@ -241,6 +243,8 @@ class TestAiTokenAccountingEndToEnd(unittest.TestCase):
 		task = _make_task()
 		# Minimal state _run_loop reads.
 		task.inputs = []
+		task.in_scope = []
+		task.out_of_scope = []
 		task.model = "test-model"
 		task.intent_model = "test-model"
 		task.temp = 0.7
@@ -254,7 +258,7 @@ class TestAiTokenAccountingEndToEnd(unittest.TestCase):
 		task.dry_run = False
 		task.mode = "chat"
 		task.scope = "workspace"
-		task.results = []
+		task._view = lambda *a, **kw: []  # results property reads _view()
 		task.encryptor = None
 		task.tool_schemas = []
 		task.permission_engine = None
@@ -367,6 +371,8 @@ class TestAiRateLimitTermination(unittest.TestCase):
 	def _make_loop_task(self, max_iterations):
 		task = _make_task()
 		task.inputs = []
+		task.in_scope = []
+		task.out_of_scope = []
 		task.model = "test-model"
 		task.intent_model = "test-model"
 		task.temp = 0.7
@@ -380,7 +386,7 @@ class TestAiRateLimitTermination(unittest.TestCase):
 		task.dry_run = False
 		task.mode = "chat"
 		task.scope = "workspace"
-		task.results = []
+		task._view = lambda *a, **kw: []  # results property reads _view()
 		task.encryptor = None
 		task.tool_schemas = []
 		task.permission_engine = None
