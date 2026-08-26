@@ -34,6 +34,8 @@ class ActionContext:
 	verbose: bool = False
 	context: Dict = field(default_factory=dict)
 	scope: str = "workspace"
+	in_scope: Any = None  # mandate allow-list (run-opt); routed to every spawned child
+	out_of_scope: Any = None  # mandate deny-list (run-opt)
 	results: Optional[List[Dict]] = None
 	max_workers: int = 3
 	in_batch: bool = False  # H4: set on the per-batch ctx so the per-turn fan-out cap applies
@@ -648,6 +650,10 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		"sync": ctx.sync,
 		"tty": not ctx.subagent and ctx.sync,
 		**opts,
+		# Force the run's mandate scope AFTER **opts so the LLM can't widen it; the
+		# child filters its inputs (LLM-generated + discovered) via host_in_scope.
+		"in_scope": ctx.in_scope,
+		"out_of_scope": ctx.out_of_scope,
 	}
 	if runner_type == "workflow":
 		run_opts["print_start"] = not ctx.silent and not ctx.subagent
@@ -813,6 +819,8 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			"sync": ctx.sync,
 			"dangerous": False,
 			"env": _sanitized_env(),
+			"in_scope": ctx.in_scope,
+			"out_of_scope": ctx.out_of_scope,
 		}
 
 		# Instantiate the concrete `command` task directly (NOT the generic Task

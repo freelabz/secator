@@ -8,6 +8,7 @@ from functools import lru_cache
 from typing import Dict, List, Optional, Tuple, Union
 
 from secator.ai.encryption import PII_PATTERNS
+from secator.scope import host_in_scope, as_scope_list
 
 # URL pattern for target detection
 URL_PATTERN = re.compile(r'https?://[^\s\'"]+')
@@ -235,23 +236,18 @@ def _is_network_target(value: str) -> bool:
 
 	Filters out descriptive strings that aren't actual targets.
 	"""
+	# Reuse the shipped classifier (same detection the in_scope/out_of_scope options
+	# use) instead of a parallel regex set. resolve=False keeps it pure (no DNS).
+	from secator.utils import classify_target, NETWORK_TYPES
 	if ' ' in value.strip():
 		return False
-	if value.startswith(('http://', 'https://')):
-		return True
-	if PII_PATTERNS["ipv4"].fullmatch(value):
-		return True
-	# CIDR notation (e.g. 10.0.0.0/24)
-	if '/' in value and PII_PATTERNS["ipv4"].match(value.split('/')[0]):
-		return True
-	if PII_PATTERNS["host"].fullmatch(value):
-		return True
-	# host:port
-	if ':' in value:
-		host_part = value.rsplit(':', 1)[0]
-		if PII_PATTERNS["ipv4"].fullmatch(host_part) or PII_PATTERNS["host"].fullmatch(host_part):
-			return True
-	return False
+	# For extracting targets from a shell command, require a structural marker
+	# ('.', ':', '/') — otherwise a bare token like a timeout arg '60' (a decimal-
+	# encoded IP to the classifier) or a command name ('curl', a single-label host)
+	# would be mistaken for a target. IP/CIDR/URL/host:port/FQDN all carry a marker.
+	if not any(ch in value for ch in './:'):
+		return False
+	return classify_target(value, resolve=False).type in NETWORK_TYPES
 
 
 @lru_cache(maxsize=256)
@@ -773,9 +769,14 @@ class PermissionEngine:
 	Two-step validation: (1) action type check, (2) target/path check.
 	"""
 
-	def __init__(self, config: Dict, targets: List[str] = None, workspace: str = ""):
+	def __init__(self, config: Dict, targets: List[str] = None, workspace: str = "",
+				in_scope=None, out_of_scope=None):
 		self.targets = targets or []
 		self.workspace = str(workspace)
+		# Mandate-derived allow/deny target lists (run-opts). Empty = no mandate
+		# boundary (CLI): fall through to the config/runtime rules + interactive ask.
+		self.in_scope = as_scope_list(in_scope)
+		self.out_of_scope = as_scope_list(out_of_scope)
 		self.rules = {"allow": [], "deny": [], "ask": []}
 		self.runtime_allow: List[Tuple[str, List[str]]] = []
 
@@ -964,6 +965,23 @@ class PermissionEngine:
 				values_to_check.append(parsed.hostname)
 			if parsed.port:
 				values_to_check.append(f"{parsed.hostname}:{parsed.port}")
+
+		# Mandate scope boundary (in_scope/out_of_scope, derived by the API from the
+		# run's covering mandates and injected as run-opts). Deny-wins and fail-closed;
+		# a non-empty in_scope authorizes in-scope targets without prompting. An
+		# out-of-in_scope target falls through to the config/runtime rules + the
+		# interactive `ask` below, so the CLI approve path is preserved. Empty scope
+		# (CLI default) skips this entirely. Matched via the same host_in_scope every
+		# other runner uses.
+		if rule_type == "target" and (self.in_scope or self.out_of_scope):
+			if self.out_of_scope:
+				for v in values_to_check:
+					if not host_in_scope(v, [], self.out_of_scope):
+						return PermissionResult(decision="deny", reason=f"Out of scope: target({v})")
+			if self.in_scope:
+				for v in values_to_check:
+					if host_in_scope(v, self.in_scope, self.out_of_scope):
+						return PermissionResult(decision="allow", reason=f"In scope: target({v})")
 
 		for rt, patterns in self.rules["deny"]:
 			if rt == rule_type:

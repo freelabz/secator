@@ -137,6 +137,41 @@ class TestEncodedIPDeny(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestScopeGate(unittest.TestCase):
+	"""in_scope/out_of_scope (mandate) boundary on target rules — the scope-gate
+	migration. Deny-wins; in_scope auto-allows; an out-of-in_scope target falls
+	through to the interactive `ask` (CLI approve preserved); empty scope (CLI
+	default) imposes no boundary. Matched via the shared host_in_scope."""
+	CFG = dict(allow=[], deny=[], ask=[])
+
+	def _eng(self, **kw):
+		return PermissionEngine(self.CFG, **kw)
+
+	def test_out_of_scope_denied(self):
+		e = self._eng(in_scope=["acme.test", "*.acme.test"], out_of_scope=["evil.test"])
+		self.assertEqual(e._check_value("target", "evil.test").decision, "deny")
+
+	def test_in_scope_allowed_without_prompting(self):
+		e = self._eng(in_scope=["acme.test", "*.acme.test"])
+		self.assertEqual(e._check_value("target", "app.acme.test").decision, "allow")
+		# URL host is matched too
+		self.assertEqual(e._check_value("target", "http://app.acme.test/x").decision, "allow")
+
+	def test_out_of_in_scope_reaches_ask(self):
+		# not in a non-empty in_scope and not denied -> no target rule -> the interactive
+		# `ask` path (CLI approve). _check_values turns the "No rule" default into ask.
+		e = self._eng(in_scope=["acme.test"])
+		self.assertEqual(e._check_values("target", ["other.test"]).decision, "ask")
+
+	def test_empty_scope_no_boundary(self):
+		# CLI default: empty in_scope/out_of_scope -> scope block skipped entirely
+		e = self._eng()
+		self.assertEqual(e.in_scope, [])
+		self.assertEqual(e.out_of_scope, [])
+		self.assertEqual(e._check_values("target", ["x.com"]).decision, "ask")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestDetection(unittest.TestCase):
 
 	def test_extract_command_targets_ip(self):

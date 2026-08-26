@@ -447,6 +447,8 @@ class ai(PythonRunner):
 			verbose=self.verbose,
 			context=self.context or {},
 			scope=self.scope,
+			in_scope=self.run_opts.get('in_scope'),
+			out_of_scope=self.run_opts.get('out_of_scope'),
 			# AI accumulates its own action results here; queries the store on demand (avoids OOM on the full subtree)
 			results=[],
 			max_workers=self.max_workers,
@@ -699,7 +701,9 @@ class ai(PythonRunner):
 		self.permission_engine = PermissionEngine(
 			CONFIG.addons.ai.permissions,
 			targets=self.inputs,
-			workspace=self.reports_folder or ""
+			workspace=self.reports_folder or "",
+			in_scope=self.run_opts.get('in_scope'),
+			out_of_scope=self.run_opts.get('out_of_scope'),
 		)
 
 		# Per-run billed-token accounting. The platform billing chore reads
@@ -746,9 +750,6 @@ class ai(PythonRunner):
 		if self.context is not None:
 			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
-
-		# Auto-approve workspace targets
-		self._auto_approve_workspace_targets()
 
 		# Suppress noisy output for subagents
 		if self.is_subagent:
@@ -829,25 +830,6 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# Workspace helpers
 	# -------------------------------------------------------------------------
-
-	def _auto_approve_workspace_targets(self):
-		"""Auto-approve all targets found in the workspace."""
-		workspace_id = self.context.get("workspace_id", "")
-		if not workspace_id:
-			return
-		try:
-			from secator.query import QueryEngine
-			engine = QueryEngine(workspace_id, context=dict(self.context))
-			results = engine.search({"_type": "target"}, limit=1000)
-			target_names = {r.get("name") or r.get("_name", "") for r in results if r}
-			target_names.discard("")
-			self.debug(f'[workspace] found {len(results)} target(s): {list(target_names)[:20]}', sub='guardrail')
-			if target_names:
-				rule = f"target({','.join(target_names)})"
-				self.debug(f'[workspace] auto-approve: {rule}', sub='guardrail')
-				self.permission_engine.add_runtime_allow([rule])
-		except Exception as e:
-			self.debug(f'[workspace] failed to query targets: {e}', sub='guardrail')
 
 	# -------------------------------------------------------------------------
 	# Summarization / compaction
