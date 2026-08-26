@@ -77,7 +77,9 @@ def _make_loop_task():
 	task.dry_run = True
 	task.mode = "chat"
 	task.scope = "workspace"   # + empty workspace_id -> query short-circuits, no real search
-	task.results = []
+	task._view = lambda *a, **kw: []  # results property reads _view()
+	task.in_scope = []
+	task.out_of_scope = []
 	task.encryptor = None
 	task.tool_schemas = []
 	task.permission_engine = None

@@ -194,12 +194,15 @@ def _union_live_results(persisted: List[Dict], live_results: List[Dict], query_f
 	"""
 	if not live_results:
 		return persisted
-	from secator.query import QueryEngine
-	# workspace_id "" + a `results` context => an in-memory json backend that filters
-	# the provided results by the query (no disk access).
-	live = QueryEngine("", context={"results": live_results}).search(query_filter, limit=limit or 0)
+	# Filter this run's in-memory findings by the SAME query in-process. The JsonBackend
+	# no longer reads an in-memory `results` context (it streams from disk), so we match
+	# each live dict directly with the store's own matcher, then merge into the disk-backed
+	# results and dedupe by ``_uuid`` (backend wins), respecting ``limit``.
+	from secator.query.json import match_query
 	seen = {r.get("_uuid") for r in persisted if r.get("_uuid")}
-	for r in live:
+	for r in live_results:
+		if not match_query(r, query_filter):
+			continue
 		u = r.get("_uuid")
 		if u and u in seen:
 			continue
