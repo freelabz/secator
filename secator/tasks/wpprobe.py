@@ -1,7 +1,7 @@
+import json
 import os
 import re
 import click
-import yaml
 import shlex
 
 from secator.decorators import task
@@ -10,19 +10,22 @@ from secator.definitions import OUTPUT_PATH, THREADS, URL
 from secator.output_types import Vulnerability, Tag, Info, Warning, Error
 from secator.tasks._categories import OPTS
 
+WPPROBE_MODES = ['scan', 'update', 'update-db']
+
 
 @task()
 class wpprobe(Command):
 	"""Fast wordpress plugin enumeration tool."""
 	cmd = 'wpprobe'
 	input_types = [URL]
+	input_chunk_size = 1
 	output_types = [Vulnerability, Tag]
 	tags = ['vuln', 'scan', 'wordpress']
-	file_flag = '-f'
+	# file_flag = '-f'
 	input_flag = '-u'
 	opt_prefix = '-'
 	opts = {
-		'mode': {'type': click.Choice(['scan', 'update', 'update-db']), 'default': 'scan', 'help': 'WPProbe mode', 'required': True, 'internal': True},  # noqa: E501
+		'mode': {'type': click.Choice(WPPROBE_MODES), 'default': 'scan', 'help': 'WPProbe mode', 'required': True, 'internal': True},  # noqa: E501
 		'output_path': {'type': str, 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},  # noqa: E501
 	}
 	meta_opts = {
@@ -41,6 +44,11 @@ class wpprobe(Command):
 	@staticmethod
 	def on_cmd(self):
 		mode = self.get_opt_value('mode')
+		# `mode` is `internal` (not shlex-quoted) and interpolated into the command
+		# below; click.Choice is only enforced by the CLI parser, so re-validate it
+		# here for the API/Celery construction path.
+		if mode not in WPPROBE_MODES:
+			raise ValueError(f'Invalid mode: {mode}')
 		if mode == 'update' or mode == 'update-db':
 			self.cmd = f'{wpprobe.cmd} {mode}'
 			return
@@ -62,7 +70,7 @@ class wpprobe(Command):
 
 		yield Info(message=f'JSON results saved to {self.output_path}')
 		with open(self.output_path, 'r') as f:
-			results = yaml.safe_load(f.read())
+			results = json.load(f)
 			if not results or 'url' not in results:
 				yield Warning(message='No results found !')
 				return

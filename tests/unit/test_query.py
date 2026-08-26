@@ -283,7 +283,7 @@ class TestQueryUtils(unittest.TestCase):
 		from secator.query.utils import python_expr_to_mongo
 
 		result = python_expr_to_mongo('vulnerability.id ~= 123')
-		self.assertEqual(result, {'_type': 'vulnerability', 'id': {'$regex': '123'}})
+		self.assertEqual(result, {'_type': 'vulnerability', 'id': {'$regex': '(?i)123'}})
 		self.assertIsInstance(result['id']['$regex'], str)
 
 	def test_regex_value_with_glob_start(self):
@@ -291,7 +291,7 @@ class TestQueryUtils(unittest.TestCase):
 		from secator.query.utils import python_expr_to_mongo
 
 		result = python_expr_to_mongo("vulnerability.id ~= '*CVE-2026-28780'")
-		self.assertEqual(result['id'], {'$regex': '*CVE-2026-28780'})
+		self.assertEqual(result['id'], {'$regex': '(?i)*CVE-2026-28780'})
 
 	def test_numeric_comparison_still_converts(self):
 		"""Non-regex operators should still coerce numeric RHS values."""
@@ -360,10 +360,21 @@ class TestQueryEngine(unittest.TestCase):
 		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['api', 'mongodb']})
 		self.assertIsInstance(engine.backend, MongoDBBackend)
 
+	def _engine_over_store(self, findings):
+		"""QueryEngine on a local store (report.json) holding `findings` — store-only model."""
+		import json
+		import tempfile
+		from pathlib import Path
+		from secator.query import QueryEngine
+		report_dir = Path(tempfile.mkdtemp())
+		grouped = {}
+		for f in findings:
+			grouped.setdefault(f['_type'], []).append(f)
+		(report_dir / 'report.json').write_text(json.dumps({'info': {}, 'results': grouped}))
+		return QueryEngine('test_ws', context={'workspace_name': 'test_ws', 'report_dir': str(report_dir)})
+
 	def test_query_engine_search_dedupe_removes_duplicates(self):
 		"""QueryEngine.search(dedupe=True) should remove duplicate findings."""
-		from secator.query import QueryEngine
-
 		duplicate_finding = {
 			'_type': 'vulnerability',
 			'name': 'CVE-2021-1234',
@@ -371,21 +382,19 @@ class TestQueryEngine(unittest.TestCase):
 			'_context': {'workspace_id': 'test_ws', 'workspace_duplicate': False},
 			'is_false_positive': False,
 		}
-		engine = QueryEngine('test_ws', context={'results': [duplicate_finding, duplicate_finding.copy()]})
+		engine = self._engine_over_store([duplicate_finding, duplicate_finding.copy()])
 		results = engine.search({}, dedupe=True)
 		assert len(results) == 1
 
 	def test_query_engine_search_no_dedupe_keeps_duplicates(self):
 		"""QueryEngine.search(dedupe=False) should keep all findings."""
-		from secator.query import QueryEngine
-
 		duplicate_finding = {
 			'_type': 'vulnerability',
 			'name': 'CVE-2021-1234',
 			'_context': {'workspace_id': 'test_ws', 'workspace_duplicate': False},
 			'is_false_positive': False,
 		}
-		engine = QueryEngine('test_ws', context={'results': [duplicate_finding, duplicate_finding.copy()]})
+		engine = self._engine_over_store([duplicate_finding, duplicate_finding.copy()])
 		results = engine.search({}, dedupe=False)
 		assert len(results) == 2
 
@@ -409,30 +418,43 @@ class TestQueryEngine(unittest.TestCase):
 class TestQueryEngineUpdate(unittest.TestCase):
 	"""Tests for QueryEngine.update method."""
 
-	def test_json_backend_update(self):
+	def _backend_with_store(self, findings):
+		"""JsonBackend scoped to a report.json written with `findings` (store-only model)."""
+		import json
+		import tempfile
+		from pathlib import Path
 		from secator.query.json import JsonBackend
-		backend = JsonBackend('test', results=[
+		report_dir = Path(tempfile.mkdtemp())
+		grouped = {}
+		for f in findings:
+			grouped.setdefault(f['_type'], []).append(f)
+		(report_dir / 'report.json').write_text(json.dumps({'info': {}, 'results': grouped}))
+		return JsonBackend('test', context={'report_dir': str(report_dir)})
+
+	def test_json_backend_update(self):
+		backend = self._backend_with_store([
 			{'_type': 'ai', 'ai_type': 'follow_up', 'session_id': 's1', 'status': 'pending'},
 			{'_type': 'url', 'url': 'http://a.com'},
 		])
-		backend.update(
+		count = backend.update(
 			{'_type': 'ai', 'session_id': 's1', 'status': 'pending'},
 			{'$set': {'status': 'timed_out'}}
 		)
+		self.assertEqual(count, 1)
 		results = backend.search({'_type': 'ai', 'session_id': 's1'})
 		self.assertEqual(len(results), 1)
 		self.assertEqual(results[0]['status'], 'timed_out')
 
 	def test_json_backend_update_no_match(self):
-		from secator.query.json import JsonBackend
-		backend = JsonBackend('test', results=[
+		backend = self._backend_with_store([
 			{'_type': 'url', 'url': 'http://a.com'},
 		])
-		# Should not raise
-		backend.update(
+		# Should not raise, and change nothing
+		count = backend.update(
 			{'_type': 'ai', 'session_id': 's1'},
 			{'$set': {'status': 'timed_out'}}
 		)
+		self.assertEqual(count, 0)
 
 	def test_query_engine_update_delegates(self):
 		from secator.query import QueryEngine

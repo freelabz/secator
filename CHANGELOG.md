@@ -1,5 +1,84 @@
 # Changelog
 
+## [0.43.2](https://github.com/freelabz/secator/compare/v0.43.1...v0.43.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* wpprobe multi-inputs broken ([#1355](https://github.com/freelabz/secator/issues/1355)) ([8a2a359](https://github.com/freelabz/secator/commit/8a2a3593bbf31d92226e8b2f7944ce46a13d9973))
+
+## [0.43.1](https://github.com/freelabz/secator/compare/v0.43.0...v0.43.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* wpprobe json parsing error ([#1212](https://github.com/freelabz/secator/issues/1212)) ([dd01985](https://github.com/freelabz/secator/commit/dd01985896f2a7eeb12eab8a79b83842aa124d86))
+
+## [0.43.0](https://github.com/freelabz/secator/compare/v0.42.0...v0.43.0) (2026-08-24)
+
+
+### Features
+
+* **core:** promote target scope-gate to main (classifier + scope matcher + discovered-target enforcement) ([#1350](https://github.com/freelabz/secator/issues/1350)) ([a894404](https://github.com/freelabz/secator/commit/a894404dc5e82f3202ccff005f8d9bd901870381))
+
+
+### Bug Fixes
+
+* **template:** parse templates with yaml.safe_load ([#1341](https://github.com/freelabz/secator/issues/1341)) ([5f391e7](https://github.com/freelabz/secator/commit/5f391e79e69365545ed2a1559f374c976b4eb337))
+
+## [0.42.0](https://github.com/freelabz/secator/compare/v0.41.0...v0.42.0) (2026-08-18)
+
+
+### Features
+
+* **kev:** bundle a local CISA KEV mirror as an offline fallback ([#1331](https://github.com/freelabz/secator/issues/1331)) ([4f1ff5c](https://github.com/freelabz/secator/commit/4f1ff5cdbbdff4073fa296eaaafe04bfddae8028))
+* **output-types:** tag known-exploited vulnerabilities with `kev` ([#1319](https://github.com/freelabz/secator/issues/1319)) ([#1321](https://github.com/freelabz/secator/issues/1321)) ([fc1dcaf](https://github.com/freelabz/secator/commit/fc1dcaf13e02a77be7c35857dfcafd88cc5063b5))
+* **security:** non-interactive sudo password for headless workers ([#1335](https://github.com/freelabz/secator/issues/1335)) ([8aa0031](https://github.com/freelabz/secator/commit/8aa0031c184b0a5a987609feae1827b62a68e71e))
+
+
+### Bug Fixes
+
+* **command:** don't crash on sudo prompt when TTY detection is wrong ([#1332](https://github.com/freelabz/secator/issues/1332)) ([#1333](https://github.com/freelabz/secator/issues/1333)) ([1ac6207](https://github.com/freelabz/secator/commit/1ac6207810d511776a87ba526977d440c2a980f0))
+* **command:** tty issue dumb terminals ([#1324](https://github.com/freelabz/secator/issues/1324)) ([f5af590](https://github.com/freelabz/secator/commit/f5af59020d2067766cacaa5d20f5625d0bd8cb5f))
+* **config:** allow unsetting int/float config keys ([#1320](https://github.com/freelabz/secator/issues/1320)) ([4f380c0](https://github.com/freelabz/secator/commit/4f380c06b5ea9a3b3c4150da3f865e0603f26502))
+* **docker:** bump alpine runtime to 3.23 (Go 1.25.10) for tool installs ([#1330](https://github.com/freelabz/secator/issues/1330)) ([fa6c647](https://github.com/freelabz/secator/commit/fa6c64715238b93782a8aba11003014f9c270a15))
+* **lint,test:** cli.py lint + deterministic empty-arg query test ([#1327](https://github.com/freelabz/secator/issues/1327)) ([7d79d91](https://github.com/freelabz/secator/commit/7d79d91dff823bac01c35b94f876d5c8810d45c9))
+* **query:** allow empty ARG when a filter option is provided ([#1211](https://github.com/freelabz/secator/issues/1211)) ([6206b14](https://github.com/freelabz/secator/commit/6206b140c9789b8e0c8272cf20b38efb981c926b))
+* **runners:** nested target filter dropping task inputs since [#1312](https://github.com/freelabz/secator/issues/1312) ([#1329](https://github.com/freelabz/secator/issues/1329)) ([9929ac3](https://github.com/freelabz/secator/commit/9929ac3d283afb74993de09fb965c31851b06c6d))
+* **tasks:** force system OpenSSL in testssl to fix missing libproviders.so in Docker ([#1134](https://github.com/freelabz/secator/issues/1134)) ([b528cfb](https://github.com/freelabz/secator/commit/b528cfb6ca6dfcdc9288debce4fea93bb26483ea))
+* **wpscan:** don't leak wpscan's version status into the finding status ([#1326](https://github.com/freelabz/secator/issues/1326)) ([428557b](https://github.com/freelabz/secator/commit/428557b2a3d7081442539bcf468634cd376e39d1))
+
+## [0.41.0](https://github.com/freelabz/secator/compare/v0.40.1...v0.41.0) (2026-07-24)
+
+
+### Features
+
+* **query:** add --save option to secator q ([#1303](https://github.com/freelabz/secator/issues/1303)) ([37c156d](https://github.com/freelabz/secator/commit/37c156deb8c134cbb899d5fea88eff0c3583bca8))
+* **runners:** store-backed results, JSON driver, streaming fan-in ([#1312](https://github.com/freelabz/secator/issues/1312)) ([93638a1](https://github.com/freelabz/secator/commit/93638a15883bebfd4686ec19e689c89bdcbc2405))
+
+
+### Bug Fixes
+
+* **grype:** update parsing for v0.115.0 output ([#1313](https://github.com/freelabz/secator/issues/1313)) ([6f6c64f](https://github.com/freelabz/secator/commit/6f6c64f1a94c83cac5376fc1894ef6aec5e2f427))
+* harden Redis connection resilience (broker + result backend) ([#1317](https://github.com/freelabz/secator/issues/1317)) ([158427d](https://github.com/freelabz/secator/commit/158427dbac4f96b9f0dbfd8108258e40ed93da66))
+* **query:** allow empty query in secator q ([#1302](https://github.com/freelabz/secator/issues/1302)) ([bf2fd8f](https://github.com/freelabz/secator/commit/bf2fd8f51a7d07ab8326aa9c11c387de7ba16f63))
+* **target validation:** ignore all invalid targets, not just one ([#1301](https://github.com/freelabz/secator/issues/1301)) ([eae2ced](https://github.com/freelabz/secator/commit/eae2cede400f6dc522304709b2139092ddbf2183))
+* **tasks:** validate bbot presets and wpprobe mode on the construction path ([#1309](https://github.com/freelabz/secator/issues/1309)) ([532c88b](https://github.com/freelabz/secator/commit/532c88b93f7ea7a2cc206a87417b283d6ff4163e))
+
+
+### Performance Improvements
+
+* **mongodb:** index-seek untagged findings in tag_duplicates (was 12s O(workspace) scan) ([#1316](https://github.com/freelabz/secator/issues/1316)) ([2504e2b](https://github.com/freelabz/secator/commit/2504e2b6ee00fdf496c0f46b8b4d901c2c4a45c5))
+
+## [0.40.1](https://github.com/freelabz/secator/compare/v0.40.0...v0.40.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **core:** remove command info messages to not pollute self.output ([#1290](https://github.com/freelabz/secator/issues/1290)) ([ff3a1ef](https://github.com/freelabz/secator/commit/ff3a1ef55da294681e7c002cdafbded8d7fdfa60))
+* **gitleaks:** set input_chunk_size to 1 ([#1291](https://github.com/freelabz/secator/issues/1291)) ([a7ea3d7](https://github.com/freelabz/secator/commit/a7ea3d7be480214ffb76e42e303059eec7b64c61))
+* **output_types:** strip short content for tags ([#1292](https://github.com/freelabz/secator/issues/1292)) ([383894f](https://github.com/freelabz/secator/commit/383894f014ba311ca48c5a122b616bd8372ae45f))
+
 ## [0.40.0](https://github.com/freelabz/secator/compare/v0.39.0...v0.40.0) (2026-07-06)
 
 

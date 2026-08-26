@@ -135,16 +135,15 @@ class TestCommandRunner(unittest.TestCase):
 		# Run the command using mock_command
 		with mock_command(MyCommand, TARGETS, {}, fixture, 'run'):
 			for hook, mock in mock_hooks.items():
-				# 'on_build' is a build-time hook fired by a PARENT runner during
-				# Celery canvas assembly, not during the runner's own execution.
-				# It will never be called in a standalone Command/Task run.
-				if hook == 'on_build':
+				# 'on_build' is a build-time hook fired by a PARENT runner during Celery canvas
+				# assembly, not during the runner's own execution. 'on_duplicate' is no longer
+				# fired at all — the in-runner mark_duplicates was removed (dedup is store-side).
+				if hook in ('on_build', 'on_duplicate'):
 					self.assertFalse(mock.called, f"Hook '{hook}' should NOT be called during runner execution")
 					continue
 				self.assertTrue(mock.called, f"Hook '{hook}' was not called")
 			self.assertEqual(mock_hooks['on_json_loaded'].call_count, 3)
-			self.assertGreaterEqual(mock_hooks['on_duplicate'].call_count, 1)
-			for item_hook in ['on_item_pre_convert', 'on_item', 'on_line', 'on_duplicate', 'on_json_loaded']:
+			for item_hook in ['on_item_pre_convert', 'on_item', 'on_line', 'on_json_loaded']:
 				for call in mock_hooks[item_hook].call_args_list:
 					self.assertEqual(len(call[0]), 2)  # self and item arguments
 					self.assertIsInstance(call[0][1], (str, dict, OutputType))  # result
@@ -904,7 +903,7 @@ class TestIsOwnSource(unittest.TestCase):
 		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
 			cmd.name = 'nmap'
 			cmd.unique_name = 'nmap'
-			cmd.results.append(prior_error)
+			cmd.add_result(prior_error, print=False)
 			self.assertEqual(cmd.self_errors, [])
 
 	def test_self_errors_includes_own_errors(self):
@@ -913,7 +912,7 @@ class TestIsOwnSource(unittest.TestCase):
 		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
 			cmd.name = 'nmap'
 			cmd.unique_name = 'nmap'
-			cmd.results.append(own_error)
+			cmd.add_result(own_error, print=False)
 			self.assertEqual(cmd.self_errors, [own_error])
 
 	def test_self_errors_includes_chunk_errors(self):
@@ -922,5 +921,5 @@ class TestIsOwnSource(unittest.TestCase):
 		with mock_command(MyCommand, TARGETS, {}, []) as cmd:
 			cmd.name = 'nmap'
 			cmd.unique_name = 'nmap'
-			cmd.results.append(chunk_error)
+			cmd.add_result(chunk_error, print=False)
 			self.assertEqual(cmd.self_errors, [chunk_error])

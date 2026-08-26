@@ -1,0 +1,57 @@
+name: Update CISA KEV mirror
+
+on:
+  schedule:
+    - cron: '30 2 * * *'  # nightly, after the tools-version job
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  update-kev:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download and minify the CISA KEV catalog
+      run: |
+        set -euo pipefail
+        url="https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+        curl -fsSL --retry 3 "$url" -o /tmp/kev.json
+        python3 - <<'PY'
+        import json
+        data = json.load(open('/tmp/kev.json'))
+        vulns = data.get('vulnerabilities')
+        assert vulns, 'empty or malformed KEV feed'  # never overwrite the mirror with junk
+        json.dump(data, open('secator/data/known_exploited_vulnerabilities.json', 'w'),
+                  separators=(',', ':'))
+        print(f"KEV catalog: {len(vulns)} vulns, catalogVersion={data.get('catalogVersion')}")
+        PY
+
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v6
+      with:
+        token: ${{ secrets.RELEASE_TOKEN }}
+        commit-message: "chore(kev): update bundled CISA KEV mirror"
+        committer: GitHub <noreply@github.com>
+        author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+        signoff: false
+        branch: chore/update-kev-mirror
+        delete-branch: true
+        title: 'chore(kev): update bundled CISA KEV mirror'
+        body: |
+          Automated nightly refresh of the bundled CISA KEV catalog mirror
+          (`secator/data/known_exploited_vulnerabilities.json`) from the live feed.
+
+          It is the offline fallback for `kev` vulnerability tagging, so constrained
+          environments that can't reach cisa.gov still tag known-exploited CVEs.
+        labels: |
+          dependencies
+          automated

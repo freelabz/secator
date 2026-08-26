@@ -1,9 +1,10 @@
 import os
 import re
 
-from dotmap import DotMap
 from secator.config import CONFIG
-from secator.output_types import Error
+from secator.output_types import Error, Warning
+from secator.query.ast import substitute_ctx_constants
+from secator.scope import as_scope_list, host_in_scope
 from secator.utils import deduplicate, debug
 
 
@@ -67,7 +68,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		dry_run (bool): Dry run.
 
 	Returns:
-		tuple: inputs, options, errors.
+		tuple: inputs, options, messages (Error/Warning items to surface).
 	"""
 	if inputs is None:
 		inputs = []
@@ -94,7 +95,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		opts.update(dry_opts)
 		return inputs, opts, []
 
-	errors = []
+	messages = []
 	computed_inputs = []
 	input_extractors = False
 	computed_opts = {}
@@ -103,7 +104,7 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		key = key.rstrip('_')
 		ctx['key'] = key
 		values, err = extract_from_results(results, val, ctx=ctx)
-		errors.extend(err)
+		messages.extend(err)
 		if key == 'targets':
 			input_extractors = True
 			targets = deduplicate(values)
@@ -117,17 +118,32 @@ def run_extractors(results, opts, inputs=None, ctx=None, dry_run=False):
 		debug('computed_inputs', obj=computed_inputs, sub='extractors')
 		inputs = computed_inputs
 	elif parent_scope and not opts.get('chunk'):
-		scoped_targets = [
-			item.name for item in results
-			if item._type == 'target' and item._context.get('scope') == parent_scope
-		]
+		# Scoped target fallback: query scope-tagged Targets via the same engine (backend
+		# does the filtering) instead of scanning the full in-memory fan-in.
+		scoped_targets = process_extractor(results, {'type': 'target', 'field': 'name'}, ctx=ctx)
 		combined = deduplicate(scoped_targets)
 		if combined:
 			debug('using scope-tagged targets as inputs', obj=combined, sub='extractors')
 			inputs = combined
+	# Enforce a generic target-scope allow/deny list on the resolved inputs. This is the
+	# single fan-in choke point every runner's inputs flow through (user-supplied AND
+	# dynamically discovered, e.g. subdomain_recon -> host_recon), so filtering here drops
+	# out-of-scope discovered targets before any downstream task acts on them. The API derives
+	# in_scope/out_of_scope from the run's authorized scope (mandate) and passes them as plain
+	# run-options; core stays authorization-agnostic. See secator/scope.py.
+	in_scope = as_scope_list(opts.get('in_scope'))
+	out_of_scope = as_scope_list(opts.get('out_of_scope'))
+	if inputs and (in_scope or out_of_scope):
+		kept = [t for t in inputs if host_in_scope(t, in_scope, out_of_scope)]
+		dropped = [t for t in inputs if t not in kept]
+		if dropped:
+			debug(f'dropped {len(dropped)} out-of-scope target(s): {dropped}', sub='scope')
+			shown = ', '.join(dropped[:10]) + (f' (+{len(dropped) - 10} more)' if len(dropped) > 10 else '')
+			messages.append(Warning(message=f'Dropped {len(dropped)} out-of-scope target(s): {shown}'))
+		inputs = kept
 	if computed_opts:
 		debug('computed_opts', obj=computed_opts, sub='extractors')
-	return inputs, opts, errors
+	return inputs, opts, messages
 
 
 def fmt_extractor(extractor):
@@ -214,89 +230,119 @@ def parse_extractor(extractor):
 	return _type, _field, _condition, _group_by
 
 
+def run_scope_query(ctx):
+	"""Bound a query to the current run via the top-most present ancestry id (scan > workflow >
+	task). Each store driver mints its {type}_id at on_init (native format) and stamps it into
+	context, so descendants inherit it and findings carry it — uniform across all drivers, local
+	json included. Without it, store backends leak across runs in a shared workspace."""
+	for level in ('scan', 'workflow', 'task'):
+		rid = ctx.get(f'{level}_id')
+		if rid:
+			return {f'_context.{level}_id': str(rid)}
+	return {}
+
+
+def build_extractor_query(extractor, ctx):
+	"""Translate an extractor (type + condition) into a Mongo-style query dict, or None when a
+	constant gate makes it yield nothing."""
+	from secator.query.utils import python_expr_to_mongo
+	parsed = parse_extractor(extractor)
+	if not parsed:
+		return None
+	_type, _field, _condition, _group_by = parsed
+	query = {'_type': _type}
+	residual = substitute_ctx_constants(_condition, ctx)
+	if residual is None:
+		return None
+	if residual:
+		# python_expr_to_mongo treats `item.` as neutral (no _type), so force the extractor's
+		# declared type afterwards — it is authoritative over any prefix in the condition.
+		query.update(python_expr_to_mongo(residual))
+		query['_type'] = _type
+	query.update(run_scope_query(ctx))
+	# Additional narrowing the old per-item eval applied within the run.
+	parent_scope = ctx.get('parent_scope')
+	ancestor_id = ctx.get('ancestor_id')
+	# `scope_producer` marks the mark_runner_started pass that RESOLVES a workflow's own
+	# targets_ in order to emit the scope-tagged Targets (see secator/celery.py). That pass must
+	# query the UPSTREAM targets — filtering by `parent_scope` here would look for the very scope
+	# it is about to create, always yield nothing, and leave every task in the workflow with no
+	# inputs (freelabz/secator#1328). Consumers (task extractors) still filter by the scope.
+	if _type == 'target' and parent_scope and not ctx.get('scope_producer', False):
+		query['_context.scope'] = parent_scope
+	elif ancestor_id and not ctx.get('node_chain_start', False):
+		query['_context.ancestor_id'] = str(ancestor_id)
+	return query
+
+
 def process_extractor(results, extractor, ctx=None):
-	"""Process extractor.
+	"""Process an extractor against the run's store.
+
+	Streams the matched findings from the store — the fan-in is never materialized (peak memory is
+	O(extracted), not O(N findings)) — and returns either the raw findings or, when the extractor
+	declares a ``field``, the formatted (and optionally grouped) field values.
 
 	Args:
-		results (list): List of results.
+		results (list): legacy positional kept for call-site compatibility; findings live in the
+			store now, so it is only returned verbatim when the extractor can't be parsed.
 		extractor (dict / str): extractor definition.
+		ctx (dict): run context (drivers, workspace, report_dir, run-scope ids).
 
 	Returns:
-		list: List of extracted results.
+		list: extracted results (findings, or formatted field values).
 	"""
 	if ctx is None:
 		ctx = {}
-	# debug('before extract', obj={'results_count': len(results), 'extractor': extractor, 'key': ctx.get('key')}, sub='extractor')  # noqa: E501
-	ancestor_id = ctx.get('ancestor_id')
-	node_chain_start = ctx.get('node_chain_start', False)
-	parent_scope = ctx.get('parent_scope')
 	key = ctx.get('key')
-
-	# Parse extractor, it can be a dict or a string (shortcut)
 	parsed_extractor = parse_extractor(extractor)
 	if not parsed_extractor:
 		return results
 	_type, _field, _condition, _group_by = parsed_extractor
 
-	# Evaluate condition for each result
-	if _condition:
-		tmp_results = []
-		if _type == 'target' and parent_scope:
-			_condition = _condition + f' and item._context.get("scope") == "{parent_scope}"'
-		elif ancestor_id and not node_chain_start:
-			_condition = _condition + f' and item._context.get("ancestor_id") == "{str(ancestor_id)}"'
-		for item in results:
-			if item._type != _type:
+	query = build_extractor_query(extractor, ctx)
+	if query is None:
+		return []
+
+	from secator.query import QueryEngine
+	engine = QueryEngine(ctx.get('workspace_id'), context={
+		'drivers': ctx.get('drivers', []),
+		'workspace_name': ctx.get('workspace_name'),
+		'report_dir': ctx.get('report_dir'),
+	})
+
+	def _matched():
+		# Stream the store cursor one finding at a time — DB backends push the filter down, the local
+		# backend reads the run's report.json/ndjson; findings come back as raw dicts.
+		for batch in engine.iterate(query):
+			for item in batch:
+				yield item
+
+	if not _field:
+		results = list(_matched())
+		debug(f'extracted {len(results)} results (key: {key}) via query {query}', sub='extractor')
+		return results
+
+	already_formatted = '{' in _field and '}' in _field
+	_field = '{' + _field + '}' if not already_formatted else _field
+	if _group_by:
+		already_formatted_gb = '{' in _group_by and '}' in _group_by
+		_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
+		groups = {}
+		for item in _matched():
+			group_key = _format_nested(_group_by, item)
+			value = _format_nested(_field, item)
+			if not group_key or not value:
 				continue
-			ctx['item'] = DotMap(item.toDict())
-			ctx[f'{_type}'] = DotMap(item.toDict())
-			safe_globals = {
-				'__builtins__': {'len': len},
-				're_match': lambda pattern, value: bool(re.search(pattern, str(value))) if value is not None else False,
-			}
-			_eval_condition = re.sub(r'([\w.]+)\s*~=\s*(.+?)(?=\s+(?:and|or)\s+|$)', r're_match(\2, \1)', _condition)
-			eval_result = eval(_eval_condition, safe_globals, ctx)
-			if eval_result:
-				tmp_results.append(item)
-			del ctx['item']
-			del ctx[f'{_type}']
-		# debug(f'kept {len(tmp_results)} / {len(results)} items after condition [bold]{_condition}[/bold]', sub='extractor')  # noqa: E501
-		results = tmp_results
+			prefix = value.split('~')[0] if '~' in value else value
+			if not prefix:
+				continue
+			bucket = groups.setdefault(group_key, [])
+			if prefix not in bucket:
+				bucket.append(prefix)
+		results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
 	else:
-		results = [item for item in results if item._type == _type]
-		if _type == 'target' and parent_scope:
-			results = [item for item in results if item._context.get('scope') == parent_scope]
-		elif ancestor_id and not node_chain_start:
-			results = [item for item in results if item._context.get('ancestor_id') == ancestor_id]
-
-	results_str = "\n".join([f'{repr(item)} [{str(item._context.get("ancestor_id", ""))}]' for item in results])
-	debug(f'extracted results ([bold]ancestor_id[/]: {ancestor_id}, [bold]key[/]: {key}):\n{results_str}', sub='extractor')
-
-	# Format field if needed
-	if _field:
-		already_formatted = '{' in _field and '}' in _field
-		_field = '{' + _field + '}' if not already_formatted else _field
-
-		if _group_by:
-			already_formatted_gb = '{' in _group_by and '}' in _group_by
-			_group_by = '{' + _group_by + '}' if not already_formatted_gb else _group_by
-			groups = {}
-			for item in results:
-				item_dict = item.toDict()
-				group_key = _format_nested(_group_by, item_dict)
-				value = _format_nested(_field, item_dict)
-				if not group_key or not value:
-					continue
-				prefix = value.split('~')[0] if '~' in value else value
-				if not prefix:
-					continue
-				bucket = groups.setdefault(group_key, [])
-				if prefix not in bucket:
-					bucket.append(prefix)
-			results = [','.join(hosts) + '~' + group_key for group_key, hosts in groups.items()]
-		else:
-			results = [v for v in (_format_nested(_field, item.toDict()) for item in results) if v]
-	# debug('after extract', obj={'results_count': len(results), 'key': ctx.get('key')}, sub='extractor')
+		results = [v for v in (_format_nested(_field, item) for item in _matched()) if v]
+	debug(f'extracted {len(results)} results (key: {key}) via query {query}', sub='extractor')
 	return results
 
 

@@ -25,6 +25,7 @@ class gitleaks(Command):
 	"""Tool for detecting secrets like passwords, API keys, and tokens in git repos, files, and stdin."""
 	cmd = 'gitleaks'
 	tags = ['secret', 'scan']
+	input_chunk_size = 1
 	input_types = [PATH]
 	input_flag = None
 	json_flag = '-f json'

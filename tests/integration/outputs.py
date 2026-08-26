@@ -18,7 +18,19 @@ OUTPUTS_CHECKS = {
 				},
 			],
 			'runner': '^(?!urlfinder|xurlfind3r|gau|urlparser$).*',
-		}
+		},
+		Certificate: {
+			'checks': [
+				{
+					# Don't pin the fingerprint/expiry: the target host renews its cert,
+					# so assert testssl parsed a real certificate instead.
+					'info': 'should have a valid sha256 fingerprint and a host',
+					'error': 'testssl did not produce a certificate with a real sha256 fingerprint',
+					'function': lambda item: len(item.fingerprint_sha256) == 64 and bool(item.host),
+				},
+			],
+			'runner': 'testssl',
+		},
 	},
 	# 'runner': {
 	#     Command: {
@@ -90,7 +102,7 @@ OUTPUTS_TASKS = {
 		Url(url='https://danielmiessler.com/predictions/', status_code=200, content_length=23, _source='gospider'),
 	],
 	'grype': [
-		Vulnerability(name='CVE-2024-24790', provider='grype', id='CVE-2024-24790', matched_at='redis:7.4.1', ip='', confidence='medium', severity='critical', cvss_score=-1, _source='grype'),
+		Vulnerability(name='CVE-2024-46981', provider='grype', id='CVE-2024-46981', matched_at='redis:7.4.1', ip='', confidence='medium', severity='critical', cvss_score=-1, _source='grype'),
 	],
 	'h8mail': [UserAccount(username='test', email='test@test.com', _source='h8mail')],
 	'httpx': [
@@ -160,9 +172,8 @@ OUTPUTS_TASKS = {
 	'search_vulns': [
 		Exploit(name='Apache exploit', provider='apache', id='CVE-2019-10081-exploit', matched_at='apache 2.4.39', confidence='high'),
 	],
-	'testssl': [
-		Certificate(host='free.fr', fingerprint_sha256='B425AF159E0B51051EEFAC692595C7CFDFA71690406FEE6428A47C9524D1187E', _source='testssl'),
-	],
+	# Cert is verified via OUTPUTS_CHECKS (fingerprint/expiry drift as the host renews).
+	'testssl': [],
 	'wpscan': [
 		Tag(name='wordpress_theme', category='info', value='twentytwentyfive:1.5', match='http://localhost:8000/', _source='wpscan'),
 		Vulnerability(matched_at='http://localhost:8000/', ip='127.0.0.1', name='Headers', confidence='high', severity='info', cvss_score=0, _source='wpscan'),

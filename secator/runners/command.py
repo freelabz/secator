@@ -16,7 +16,7 @@ from time import time
 import psutil
 from fp.fp import FreeProxy
 
-from secator.definitions import IN_WORKER, OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
+from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
@@ -31,6 +31,14 @@ logger = logging.getLogger(__name__)
 # responsive even when stat_update_frequency is large, so an evicted task stops well within the
 # pod's termination grace period.
 MONITOR_POLL_SECONDS = 5
+
+# Serialize interactive sudo prompts and cache the verified password for the process lifetime.
+# Under the gevent worker (default -c 100) many tasks call getpass on the same tty at once and
+# corrupt its termios state (issue #1332); the lock prompts one at a time and the cache lets the
+# rest reuse the password instead of re-prompting. threading.Lock is gevent-cooperative once
+# monkey-patched, and a plain lock otherwise.
+_SUDO_PROMPT_LOCK = threading.Lock()
+_SUDO_PASSWORD_CACHE = None
 
 
 class Command(Runner):
@@ -79,6 +87,9 @@ class Command(Runner):
 	# Current working directory
 	cwd = None
 	cwd_isolated = False
+
+	# Extra environment variables for subprocess
+	extra_env = {}
 
 	# Output encoding
 	encoding = 'utf-8'
@@ -222,7 +233,8 @@ class Command(Runner):
 		try:
 			self.has_tty = self.run_opts.get('tty', sys.stdin.isatty())
 		except (ValueError, AttributeError, OSError):
-			self.has_tty = self.run_opts.get('tty', False)
+			is_not_dumb = os.environ.get('TERM', '').lower() != 'dumb'
+			self.has_tty = self.run_opts.get('tty', is_not_dumb)
 
 		# Stat update
 		self.last_updated_stat = None
@@ -506,20 +518,6 @@ class Command(Runner):
 			self.print_description()
 			self.print_command()
 
-			# In remote worker mode, stream description and cmd back to the client
-			if IN_WORKER and self.print_cmd:
-				cmd_str = _s(self.cmd_for_display)
-				if self.chunk and self.chunk_count:
-					cmd_str += f' ({self.chunk}/{self.chunk_count})'
-				if self.description:
-					task_part = f'{self.description} ([bold gold3]{self.unique_name}[/])'
-				else:
-					task_part = f'[bold gold3]{self.unique_name}[/]'
-				yield Info(
-					message=f'Started task {task_part} (cmd=[dim white]{cmd_str}[/])',
-					_source=self.unique_name,
-				)
-
 			# Check for sudo requirements and prepare the password if needed
 			sudo_required = re.search(r'\bsudo\b', self.cmd)
 			sudo_password = None
@@ -557,11 +555,11 @@ class Command(Runner):
 
 			# Run the command using subprocess. A caller may pass a sanitized/custom env
 			# via the `env` run_opt (e.g. the AI shell handler strips LLM/cloud secrets so
-			# an AI-run `env`/`printenv` can't dump them). Defaults to the process env when
-			# the opt is absent (existing behavior unchanged). Uses `.get(key, default)`
-			# (not `or`) so an explicit empty `env={}` — a deliberate empty environment —
-			# is honored rather than silently falling back to the full process env.
-			env = self.run_opts.get('env', os.environ)
+			# an AI-run `env`/`printenv` can't dump them). Uses `.get(key, default)` (not
+			# `or`) so an explicit empty `env={}` — a deliberate empty environment — is
+			# honored rather than silently falling back. Absent the opt, defaults to the
+			# process env merged with task extra_env (existing behavior unchanged).
+			env = self.run_opts.get('env', {**os.environ, **self.extra_env})
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
@@ -940,6 +938,7 @@ class Command(Runner):
 		Returns:
 			tuple: (sudo password, error).
 		"""
+		global _SUDO_PASSWORD_CACHE
 		sudo_password = None
 
 		# Check if sudo is required by the command
@@ -953,6 +952,25 @@ class Command(Runner):
 		except ValueError:
 			self._print('[bold orange3]Could not run sudo check test.[/][bold green]Passing.[/]')
 
+		# Non-interactive password source: a configured password (e.g. SECATOR_SECURITY_SUDO_PASSWORD)
+		# lets headless workers — Celery, systemd, docker — sudo without a TTY. It stays in the worker's
+		# env/config and never travels through the broker.
+		configured = CONFIG.security.sudo_password
+		if configured:
+			result = subprocess.run(
+				['sudo', '-S', '-p', '', 'true'],
+				input=configured + '\n',
+				text=True,
+				capture_output=True,
+			)
+			if result.returncode == 0:
+				return configured, None
+			return -1, 'Configured sudo password (security.sudo_password) is incorrect.'
+
+		# Reuse a password already entered this process (by a prior task) — no re-prompt, no tty.
+		if _SUDO_PASSWORD_CACHE is not None:
+			return _SUDO_PASSWORD_CACHE, None
+
 		# Check if we have a tty
 		if not self.has_tty:
 			error = (
@@ -961,23 +979,39 @@ class Command(Runner):
 			)
 			return -1, error
 
-		# If not, prompt the user for a password
-		self._print('[bold red]Please enter sudo password to continue.[/]', rich=True)
-		for _ in range(3):
-			user = getpass.getuser()
-			self._print(rf'\[sudo] password for {user}: ▌', rich=True)
-			sudo_password = getpass.getpass()
-			result = subprocess.run(
-				['sudo', '-S', '-p', '', 'true'],
-				input=sudo_password + '\n',
-				text=True,
-				capture_output=True,
-			)
-			if result.returncode == 0:
-				return sudo_password, None  # Password is correct
-			self._print('Sorry, try again.')
-		error = 'Sudo password verification failed after 3 attempts.'
-		return -1, error
+		# Prompt one task at a time (lock) so concurrent greenlets don't race on the tty, and cache
+		# the verified password so tasks queued behind the lock reuse it instead of re-prompting.
+		with _SUDO_PROMPT_LOCK:
+			if _SUDO_PASSWORD_CACHE is not None:  # another task prompted while we waited
+				return _SUDO_PASSWORD_CACHE, None
+			self._print('[bold red]Please enter sudo password to continue.[/]', rich=True)
+			for _ in range(3):
+				user = getpass.getuser()
+				self._print(rf'\[sudo] password for {user}: ▌', rich=True)
+				try:
+					sudo_password = getpass.getpass()
+				except (EOFError, ValueError, OSError):
+					# has_tty can disagree with the real stdin (closed / redirected under Celery or
+					# gevent, dumb terminals): getpass then blows up on termios / a closed stream.
+					# Degrade to the same graceful error as the no-TTY case instead of crashing.
+					error = (
+						'Sudo password required but no usable TTY (non-interactive mode). '
+						'Retry without sudo-requiring options (e.g. use nmap -sT instead of -sS), '
+						'or configure passwordless sudo.'
+					)
+					return -1, error
+				result = subprocess.run(
+					['sudo', '-S', '-p', '', 'true'],
+					input=sudo_password + '\n',
+					text=True,
+					capture_output=True,
+				)
+				if result.returncode == 0:
+					_SUDO_PASSWORD_CACHE = sudo_password
+					return sudo_password, None  # Password is correct
+				self._print('Sorry, try again.')
+			error = 'Sudo password verification failed after 3 attempts.'
+			return -1, error
 
 	def _wait_for_end(self):
 		"""Wait for process to finish and process output and return code."""

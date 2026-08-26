@@ -80,7 +80,7 @@ tasks:
     targets_:
       - type: tag
         field: '{match}?{value}=FUZZ'
-        condition: item._source.startswith('urlparser') or item._source.startswith('arjun') or item._source.startswith('x8')
+        condition: item._source ~= ^urlparser or item._source ~= ^arjun or item._source ~= ^x8
     if: opts.fuzz_values
 
   trufflehog:

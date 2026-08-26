@@ -45,6 +45,7 @@ class Tag(OutputType):
 		small_content = False
 		if len(content) < 100:
 			small_content = True
+			content = content.strip()
 		# content_xs = trim_string(content, max_length=50).replace('\n', '/')
 		if small_content:
 			s += f' [bold orange4]{_s(content)}[/]'

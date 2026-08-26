@@ -55,7 +55,7 @@ LLM_SPINNER_MESSAGES = [
 ]
 
 # Available drivers and exporters
-AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord', 'sqlite']
+AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord', 'sqlite', 'json']
 AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'jsonl', 'markdown', 'table', 'txt']
 
 # Canonical execution priority for drivers whose hooks share a lifecycle event.
@@ -67,7 +67,7 @@ AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'jsonl', 'markdown', 'table', 't
 #      directly to the store the API reads.
 # Drivers not listed here (e.g. discord notifications, external drivers) are not
 # ranked and keep their relative order after the ranked ones.
-DRIVER_PRIORITY = ['gcs', 'mongodb', 'sqlite', 'api']
+DRIVER_PRIORITY = ['gcs', 'mongodb', 'sqlite', 'json', 'api']
 
 # Vocab
 ALIVE = 'alive'

@@ -71,17 +71,25 @@ class TestOnBuildMongo:
         sink = _patch_mongo(monkeypatch)
         spec = {'name': 'httpx', 'context': {'workspace_id': 'ws1'}}
         on_build(_FakeParent('workflow'), spec)
+        from bson.objectid import ObjectId
         assert sink[0][0] == 'tasks'                       # inserted into tasks collection
         assert sink[0][1]['status'] == 'PENDING'
-        assert spec['context']['task_id'] == 'oid-tasks-0' # stamped back into spec context
+        # on_build mints an ObjectId task_id into spec context and stores the pending doc as
+        # _id=ObjectId(task_id) — so _id == context.task_id.
+        assert ObjectId.is_valid(spec['context']['task_id'])
+        assert sink[0][1]['context']['task_id'] == spec['context']['task_id']
+        assert sink[0][1]['_id'] == ObjectId(spec['context']['task_id'])
 
     def test_scan_parent_inserts_workflow_doc_and_stamps_workflow_id(self, monkeypatch):
         from secator.hooks.mongodb import on_build
         sink = _patch_mongo(monkeypatch)
         spec = {'name': 'url_fuzz', 'context': {'workspace_id': 'ws1'}}
         on_build(_FakeParent('scan'), spec)
+        from bson.objectid import ObjectId
         assert sink[0][0] == 'workflows'
-        assert spec['context']['workflow_id'] == 'oid-workflows-0'
+        assert ObjectId.is_valid(spec['context']['workflow_id'])
+        assert sink[0][1]['context']['workflow_id'] == spec['context']['workflow_id']
+        assert sink[0][1]['_id'] == ObjectId(spec['context']['workflow_id'])
 
     def test_chunk_spec_stamps_task_chunk_id_and_chunk_flags(self, monkeypatch):
         from secator.hooks.mongodb import on_build
@@ -90,9 +98,12 @@ class TestOnBuildMongo:
         on_build(_FakeParent('task'), spec)
         assert sink[0][0] == 'tasks'
         doc = sink[0][1]
+        from bson.objectid import ObjectId
         assert doc['has_parent'] is True
         assert doc['chunk'] == 2 and doc['chunk_count'] == 5
-        assert spec['context']['task_chunk_id'] == 'oid-tasks-0'
+        assert ObjectId.is_valid(spec['context']['task_chunk_id'])
+        assert doc['context']['task_chunk_id'] == spec['context']['task_chunk_id']
+        assert doc['_id'] == ObjectId(spec['context']['task_chunk_id'])
 
 
 def _fresh_mongo_hooks():
@@ -193,7 +204,7 @@ class _RecordingCollection:
         self.calls.append(('insert', self.name))
         return _FakeInsertResult(f'{"a" * 24}')
 
-    def update_one(self, flt, update):
+    def update_one(self, flt, update, **kwargs):
         self.calls.append(('update', self.name, flt))
 
 
@@ -281,7 +292,7 @@ class TestOnBuildChunkWiring(unittest.TestCase):
                 task = ChunkedHttpx(targets, sync=False, hooks=task_hooks,
                                     context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
                 task.has_children = True
-                workflow = break_task(task, {'name': 'httpx', 'sync': False}, results=[])
+                workflow = break_task(task, {'name': 'httpx', 'sync': False})
         finally:
             m.get_mongodb_client = orig
 
