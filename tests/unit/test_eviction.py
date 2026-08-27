@@ -68,14 +68,32 @@ class TestEvictionSelfFinalize(unittest.TestCase):
 			'monitor did not emit the eviction warning',
 		)
 
-	def test_monitor_clears_stale_flag_at_start(self):
-		"""The monitor clears any pre-existing (stale) flag at start, so a flag left by a previous
-		worker sharing the state dir does not stop a fresh task. Regression for the integration leak:
-		a leaked flag had been self-aborting every later task."""
-		cmd = self._bare_command(None)                 # process=None -> loop breaks right after the clear
+	def test_monitor_does_not_clear_flag(self):
+		"""The monitor is READ-ONLY w.r.t. the eviction flag: a flag raised during the run must not
+		be wiped by the monitor, else a real eviction raised in the Popen->monitor window would be
+		lost. Stale-flag clearing moved to once before Popen (see Command._run / _monitor_process)."""
+		worker_shutting_down_handler()
+		self.assertTrue(is_worker_shutting_down())
+		cmd = self._bare_command(None)                 # process=None -> loop breaks immediately
 		with unittest.mock.patch('secator.celery_signals.clear_shutdown_flag') as mock_clear:
 			cmd._monitor_process()
-		mock_clear.assert_called_once()
+		mock_clear.assert_not_called()
+		self.assertTrue(is_worker_shutting_down())     # flag survived the monitor
+
+	def test_run_clears_stale_flag_before_start(self):
+		"""A stale flag left by a previous task sharing the state dir must be cleared BEFORE a fresh
+		task's subprocess starts, so it isn't self-aborted. Regression for the integration leak:
+		a leaked flag had been self-aborting every later task."""
+		from secator.tasks.command import command
+		worker_shutting_down_handler()                 # leave a stale flag
+		self.assertTrue(is_worker_shutting_down())
+		runner = command(
+			inputs=["echo secator-evict"],
+			run_opts={"sync": True, "print_line": False, "print_item": False},
+		)
+		runner.run()
+		self.assertEqual(runner.status, "SUCCESS")     # not aborted by the stale flag
+		self.assertFalse(is_worker_shutting_down())    # cleared before the subprocess started
 
 
 if __name__ == '__main__':
