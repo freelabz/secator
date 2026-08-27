@@ -72,14 +72,19 @@ class ActionContext:
 	permission_engine: Any = field(default=None, repr=False)
 
 	def get_query_engine(self):
-		"""Get or create a QueryEngine (cached for reuse across queries)."""
+		"""Get or create a QueryEngine (cached for reuse across queries).
+
+		Always queries through the run's REAL driver (mongodb/api on the platform,
+		local json on the CLI) — the driver's context carries `drivers`, so the
+		backend resolves correctly. The old scope=="current" path passed only
+		`{"results": self.results}` with no driver; the JsonBackend no longer reads
+		an in-memory results context (it streams from disk), so that path silently
+		returned nothing. This run's live in-flight findings are unioned in for the
+		local driver in handle_query (mongodb/api persist them already).
+		"""
 		if self._query_engine is None:
 			from secator.query import QueryEngine
-			if self.scope == "current":
-				query_context = {"results": self.results or []}
-			else:
-				query_context = dict(self.context)
-			self._query_engine = QueryEngine(self.context.get("workspace_id", ""), context=query_context)
+			self._query_engine = QueryEngine(self.context.get("workspace_id", ""), context=dict(self.context))
 		return self._query_engine
 
 
@@ -700,7 +705,8 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 
 	Args:
 		action: Action dict with query (MongoDB query dict)
-		ctx: Action context (scope='current' passes results to QueryEngine in-memory)
+		ctx: Action context (queries through the run's real driver; live in-run
+			findings are unioned in for the local json driver)
 	"""
 	context = _get_result_context(action, ctx)
 	query_filter = action.get("query", {})
@@ -742,16 +748,17 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	# A non-local backend (mongodb/api) needs a workspace to query. The local (json)
 	# driver can always answer from this run's in-memory findings (unioned below), so
 	# it is exempt from the workspace_id requirement.
-	if not is_local and ctx.scope != "current" and not ctx.context.get("workspace_id"):
+	if not is_local and not ctx.context.get("workspace_id"):
 		yield Warning(message="No workspace available for query", _context=context)
 		return
 
 	try:
 		query_str = json.dumps(query_filter, separators=(',', ':'))
 		results = engine.search(query_filter, limit=limit)
-		# Local driver only writes to disk at end-of-run, so union in-memory live results
-		# to make query_workspace the source of truth (mongodb/api persist live already).
-		if is_local and ctx.scope != "current":
+		# Local driver only writes to disk at end-of-run, so union this run's live
+		# in-flight findings to make query_workspace the source of truth (mongodb/api
+		# persist live already, so they need no union).
+		if is_local:
 			results = _union_live_results(results, ctx.results or [], query_filter, limit)
 		yield Ai(
 			content=query_str,

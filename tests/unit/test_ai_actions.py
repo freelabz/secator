@@ -338,12 +338,15 @@ class TestHandleQuery(unittest.TestCase):
 		self.assertIsInstance(results[0], Warning)
 		self.assertIn('workspace', results[0].message.lower())
 
-	def test_query_current_scope_no_workspace_ok(self):
-		"""Scope='current' should work without workspace_id."""
-		ctx = ActionContext(targets=['t.com'], model='m', context={}, scope='current', results=[{'host': 'a.com', 'port': 80}])
+	def test_query_local_driver_no_workspace_ok(self):
+		"""The local (json) driver answers without a workspace_id (it reads this run's
+		findings); only a non-local driver requires a workspace."""
+		ctx = ActionContext(targets=['t.com'], model='m', context={},
+							results=[{'host': 'a.com', 'port': 80, '_type': 'port', '_context': {}}])
 
 		with patch.object(ctx, 'get_query_engine') as mock_get_engine:
 			mock_engine = MagicMock()
+			mock_engine.backend.name = "json"  # local driver
 			mock_engine.search.return_value = [{'host': 'a.com', 'port': 80, '_context': {}}]
 			mock_get_engine.return_value = mock_engine
 
@@ -938,21 +941,26 @@ class TestGetQueryEngine(unittest.TestCase):
 
 	# -- scope=current: always JsonBackend with in-memory results --
 
-	def test_current_scope_uses_json_backend(self):
-		"""scope=current always selects JsonBackend, even if drivers has mongodb."""
+	def test_uses_context_driver_backend(self):
+		"""The query engine ALWAYS resolves its backend from the context driver — even for
+		scope='current' — so a platform run queries mongodb, not the (disk-only) json backend."""
+		from secator.query.mongodb import MongoDBBackend
 		from secator.query.json import JsonBackend
 
 		results = [{'_type': 'url', 'url': 'http://a.com'}]
-		ctx = ActionContext(
-			targets=['t.com'],
-			model='m',
+		mongo_ctx = ActionContext(
+			targets=['t.com'], model='m',
 			context={'workspace_id': 'ws1', 'drivers': ['mongodb']},
-			scope='current',
-			results=results,
+			scope='current', results=results,
 		)
-		engine = ctx.get_query_engine()
+		self.assertIsInstance(mongo_ctx.get_query_engine().backend, MongoDBBackend)
 
-		self.assertIsInstance(engine.backend, JsonBackend)
+		# No driver in context -> local json backend (CLI default).
+		local_ctx = ActionContext(
+			targets=['t.com'], model='m', context={'workspace_id': 'ws1'},
+			scope='current', results=results,
+		)
+		self.assertIsInstance(local_ctx.get_query_engine().backend, JsonBackend)
 
 	@unittest.skip("current-scope query migrates to the report.json store in the AI-rework PR; re-enable + fix there")
 	def test_current_scope_passes_results(self):
@@ -969,8 +977,9 @@ class TestGetQueryEngine(unittest.TestCase):
 
 		self.assertIs(engine.backend._results, results)
 
-	def test_current_scope_does_not_pass_drivers(self):
-		"""scope=current context should not contain drivers."""
+	def test_passes_context_drivers(self):
+		"""The context drivers ARE passed to the engine (so the backend resolves), even for
+		scope='current' — the old behavior stripped them, which silently forced the json backend."""
 		ctx = ActionContext(
 			targets=['t.com'],
 			model='m',
@@ -980,7 +989,7 @@ class TestGetQueryEngine(unittest.TestCase):
 		)
 		engine = ctx.get_query_engine()
 
-		self.assertEqual(engine.context.get('drivers', []), [])
+		self.assertEqual(engine.context.get('drivers', []), ['mongodb'])
 
 	@unittest.skip("current-scope query migrates to the report.json store in the AI-rework PR; re-enable + fix there")
 	def test_current_scope_search_queries_in_memory(self):
