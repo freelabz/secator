@@ -657,5 +657,25 @@ class TestDedupeToolResults(unittest.TestCase):
         self.assertEqual(tool_ids, ["x"])  # exactly one result for x
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSanitizedEnv(unittest.TestCase):
+    """_sanitized_env must strip secrets case-INSENSITIVELY so lowercase/mixed-case
+    names (openai_api_key, database_password) can't leak to AI-run shell commands."""
+
+    def test_strips_secrets_regardless_of_case(self):
+        from secator.ai.utils import _sanitized_env
+        env = {
+            "PATH": "/usr/bin",
+            "openai_api_key": "sk-leak",
+            "AWS_SECRET_ACCESS_KEY": "leak",
+            "database_password": "leak",
+            "My_Token": "leak",
+            "HOME": "/home/u",
+        }
+        with patch("secator.ai.utils.os.environ", env):
+            out = _sanitized_env()
+        self.assertEqual(set(out), {"PATH", "HOME"})
+
+
 if __name__ == '__main__':
     unittest.main()

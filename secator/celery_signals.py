@@ -29,8 +29,11 @@ def is_worker_shutting_down():
 
 def clear_shutdown_flag():
 	"""Remove the eviction flag (called on worker boot to drop any stale flag)."""
-	if SHUTDOWN_FLAG.exists():
+	# Atomic unlink: exists()+unlink() would race a concurrent clear on a shared state dir.
+	try:
 		SHUTDOWN_FLAG.unlink()
+	except FileNotFoundError:
+		pass
 
 
 def worker_shutting_down_handler(**kwargs):

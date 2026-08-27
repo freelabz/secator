@@ -185,12 +185,17 @@ class RemoteBackend(InteractivityBackend):
 			content = doc.get("content") or doc.get("answer") or ""
 			if content:
 				contents.append(content)
-		# Mark this session's pending steers consumed so they inject exactly once.
+		# Consume EXACTLY the docs we fetched (by _uuid), not the broad pending filter: a steer
+		# that arrives between the search and this update would otherwise be flipped to consumed
+		# without ever being injected (lost). Scoping to the fetched uuids also makes every
+		# backend consume the same set (MongoDB update_one vs JSON/SQLite update_many).
+		uuids = [doc.get("_uuid") for doc in results if doc.get("_uuid")]
 		try:
-			self.query_engine.update(
-				{**base},
-				{"$set": {"status": "consumed"}},
-			)
+			if uuids:
+				self.query_engine.update(
+					{**base, "_uuid": {"$in": uuids}},
+					{"$set": {"status": "consumed"}},
+				)
 		except Exception:  # noqa: BLE001 - consume failure must not crash the run
 			pass
 		return contents
@@ -279,14 +284,19 @@ class RemoteBackend(InteractivityBackend):
 		"""
 		if not self.query_engine:
 			return
-		self.query_engine.update(
-			{
-				"_type": "ai",
-				"_context.session_id": session_id,
-				"status": "pending",
-			},
-			{"$set": {"status": "timed_out"}},
-		)
+		# Only expire PROMPT-like docs (follow_up / permission). A blanket match on every
+		# pending AI doc would also time out mid-flight `steer` interjections before
+		# poll_steers/_drain_steers can consume them.
+		for ai_type in ("follow_up", "permission"):
+			self.query_engine.update(
+				{
+					"_type": "ai",
+					"ai_type": ai_type,
+					"_context.session_id": session_id,
+					"status": "pending",
+				},
+				{"$set": {"status": "timed_out"}},
+			)
 
 	@staticmethod
 	def _add_permission_rules(engine, ptype, value):

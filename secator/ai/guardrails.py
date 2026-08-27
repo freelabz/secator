@@ -51,6 +51,11 @@ EXEC_WRAPPERS = frozenset({
 # (e.g. `-c 'curl evil'`) are re-parsed and peeled so the payload is checked, not skipped.
 _EMPTY = frozenset()
 _WRAPPER_ARG_GRAMMAR = {
+	# env/xargs take value options BEFORE the inner command; without their grammar the peel
+	# stops at the option operand (`env -u TOKEN rm`, `xargs -I {} rm`) and the inner-command
+	# deny never fires. (env's VAR=val assignments are already handled by _is_wrapper_operand.)
+	"env":          (frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}), 0, _EMPTY),
+	"xargs":        (frozenset({"-I", "--replace", "-E", "--eof", "-n", "--max-args", "-P", "--max-procs", "-s", "--max-chars", "-L", "--max-lines", "-a", "--arg-file", "-d", "--delimiter"}), 0, _EMPTY),  # noqa: E501
 	"flock":        (frozenset({"-w", "--timeout", "-E", "--conflict-exit-code"}), 1, frozenset({"-c", "--command"})),
 	"runuser":      (frozenset({"-u", "--user", "-g", "--group", "-G", "--supp-group", "-s", "--shell"}), 0, frozenset({"-c", "--command"})),  # noqa: E501
 	"su":           (frozenset({"-s", "--shell", "-g", "--group", "-G", "--supp-group"}), 1, frozenset({"-c", "--command"})),  # noqa: E501
@@ -935,12 +940,15 @@ class PermissionEngine:
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
 		elif action_type in ("query", "follow_up", "add_finding"):
-			# Don't let an injected add_finding silently mint a scope-widening target finding
+			# Don't let an injected add_finding silently mint a scope-widening target finding.
+			# Deny (fail-closed) rather than "ask": there is no add_finding prompt layer, so an
+			# "ask" here isn't surfaceable — it would just spin the prompt loop until it denies
+			# anyway. A human adds a target through the UI/mandates, not via the AI's add_finding.
 			if action_type == "add_finding" and _is_privileged_finding_type(action):
 				ftype = str(action.get("_type", "")).strip().lower()
 				return PermissionResult(
-					decision="ask",
-					reason=f"add_finding of privileged type '{ftype}' requires approval",
+					decision="deny",
+					reason=f"add_finding of scope-sensitive type '{ftype}' is not allowed from the AI",
 				)
 			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
 		return PermissionResult(decision="deny", reason=f"Unknown action type: {action_type}")

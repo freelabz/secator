@@ -69,11 +69,9 @@ class command(Command):
 		"""
 		runner = cls(inputs=[command_line], context=context or {}, hooks=hooks or {})
 
-		# mark_started() fires the on_start hook. It also stamps start_time = now(), so
-		# apply the caller-supplied start_time right after (mark_started() unconditionally
-		# overwrites it, there's no way to seed it beforehand).
-		runner.mark_started()
-		runner.start_time = start_time or datetime.fromtimestamp(time(), timezone.utc)
+		# Seed the caller-supplied start_time BEFORE mark_started() fires on_start, so the
+		# hook persists the imported time rather than the auto-stamped now().
+		runner.mark_started(start_time=start_time or datetime.fromtimestamp(time(), timezone.utc))
 
 		# Populate the captured result.
 		runner.output = output
@@ -88,10 +86,8 @@ class command(Command):
 				output=False,
 			)
 
-		# mark_completed() fires the on_end hook (the persistence path). Same caveat as
-		# start_time: it unconditionally stamps end_time = now(), so apply the
-		# caller-supplied end_time right after.
-		runner.mark_completed()
-		runner.end_time = end_time or datetime.fromtimestamp(time(), timezone.utc)
+		# Seed the caller-supplied end_time BEFORE mark_completed() fires on_end (the
+		# persistence path), so the hook saves the imported time rather than now().
+		runner.mark_completed(end_time=end_time or datetime.fromtimestamp(time(), timezone.utc))
 
 		return runner

@@ -282,12 +282,17 @@ class TestRemoteBackend(unittest.TestCase):
 			prompt_uuid="uuid-new",
 		)
 
-		# An update flipping this session's pending docs to timed_out must fire.
-		mock_engine.update.assert_called_once()
-		flip_query, flip_update = mock_engine.update.call_args[0]
-		self.assertEqual(flip_query.get("_context.session_id"), "session1")
-		self.assertEqual(flip_query.get("status"), "pending")
-		self.assertEqual(flip_update, {"$set": {"status": "timed_out"}})
+		# Prompt-like pending docs are flipped to timed_out — one scoped update per prompt
+		# ai_type (follow_up, permission), NOT a blanket match that would also expire steers.
+		self.assertEqual(mock_engine.update.call_count, 2)
+		flipped_types = set()
+		for call in mock_engine.update.call_args_list:
+			flip_query, flip_update = call[0]
+			self.assertEqual(flip_query.get("_context.session_id"), "session1")
+			self.assertEqual(flip_query.get("status"), "pending")
+			self.assertEqual(flip_update, {"$set": {"status": "timed_out"}})
+			flipped_types.add(flip_query.get("ai_type"))
+		self.assertEqual(flipped_types, {"follow_up", "permission"})
 
 	def test_expire_stale_pending_noop_without_engine(self):
 		"""No query engine -> no crash, no update."""
@@ -375,8 +380,8 @@ class TestRemoteBackendSteer(unittest.TestCase):
 		from secator.ai.interactivity import RemoteBackend
 		mock_engine = MagicMock()
 		mock_engine.search.return_value = [
-			{"content": "actually focus on the API", "_timestamp": 2},
-			{"content": "and skip port 80", "_timestamp": 1},
+			{"content": "actually focus on the API", "_timestamp": 2, "_uuid": "s2"},
+			{"content": "and skip port 80", "_timestamp": 1, "_uuid": "s1"},
 		]
 		mock_engine.update = MagicMock()
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)

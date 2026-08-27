@@ -33,9 +33,13 @@ def _sanitized_env() -> dict:
 	`env`/`printenv` can't dump the LLM key + cloud creds into output that flows
 	back to the LLM and is persisted to Mongo.
 	"""
-	return {k: v for k, v in os.environ.items()
-			if not any(k.startswith(p) for p in SENSITIVE_ENV_PREFIXES)
-			and "KEY" not in k and "SECRET" not in k and "TOKEN" not in k and "PASSWORD" not in k}
+	# Case-insensitive: lowercase/mixed-case names (openai_api_key, database_password)
+	# must be filtered too, so match against the upper-cased name.
+	def _sensitive(name: str) -> bool:
+		u = name.upper()
+		return (any(u.startswith(p) for p in SENSITIVE_ENV_PREFIXES)
+				or any(s in u for s in ("KEY", "SECRET", "TOKEN", "PASSWORD")))
+	return {k: v for k, v in os.environ.items() if not _sensitive(k)}
 
 
 def _build_action_display(action: Dict) -> str:

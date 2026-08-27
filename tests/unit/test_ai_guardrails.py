@@ -268,14 +268,16 @@ class TestPermissionEngine(unittest.TestCase):
 		self.assertEqual(result.decision, "allow")
 
 	def test_add_finding_target_type_not_allowed(self):
+		# A scope-sensitive target finding is denied (fail-closed): there is no add_finding
+		# prompt layer, so an "ask" here would only spin the prompt loop until it denied anyway.
 		engine = self._make_engine()
 		result = engine.check_action({"action": "add_finding", "_type": "target", "name": "evil.com"})
-		self.assertEqual(result.decision, "ask")
+		self.assertEqual(result.decision, "deny")
 
 	def test_add_finding_target_type_case_insensitive(self):
 		engine = self._make_engine()
 		result = engine.check_action({"action": "add_finding", "_type": " Target ", "name": "evil.com"})
-		self.assertEqual(result.decision, "ask")
+		self.assertEqual(result.decision, "deny")
 
 	# --- Target checks ---
 
@@ -435,7 +437,9 @@ class TestInScope(unittest.TestCase):
 	def test_target_outside_in_scope_is_constrained(self):
 		"""A target not covered by in_scope must NOT be silently allowed."""
 		engine = self._make_engine(allow=["shell(nmap)"], in_scope=["*.example.com"])
-		result = engine.check_action({"action": "shell", "command": "nmap evil.attacker.com"})
+		# Patch DNS so the hostname target is extracted deterministically (no network).
+		with patch("secator.ai.guardrails._resolves", return_value=True):
+			result = engine.check_action({"action": "shell", "command": "nmap evil.attacker.com"})
 		self.assertNotEqual(result.decision, "allow")
 
 	def test_in_scope_presence_forces_target_check(self):
@@ -877,6 +881,20 @@ class TestDefaultPermissions(unittest.TestCase):
 		engine = self._engine()
 		result = engine.check_action({"action": "shell", "command": "sudo rm -rf /"})
 		self.assertEqual(result.decision, "deny")
+
+	def test_xargs_value_option_does_not_stop_peel_before_destructive_inner(self):
+		"""`xargs -I {} rm -rf /`: the -I value option must not stop wrapper peeling at its
+		operand — the destructive inner `rm -rf /` must still be denied, not laundered."""
+		engine = self._engine()
+		for cmd in ("xargs -I {} rm -rf /", "xargs -n 1 rm -rf /"):
+			self.assertEqual(
+				engine.check_action({"action": "shell", "command": cmd}).decision, "deny", cmd)
+
+	def test_env_value_option_does_not_stop_peel_before_destructive_inner(self):
+		"""`env -u TOKEN rm -rf /`: the -u value option must not stop peeling; inner rm denied."""
+		engine = self._engine()
+		self.assertEqual(
+			engine.check_action({"action": "shell", "command": "env -u TOKEN rm -rf /"}).decision, "deny")
 
 	def test_destructive_root_rm_denied(self):
 		"""Bare `rm -rf /` (and one level under /) must be denied (H6)."""

@@ -560,6 +560,12 @@ class Command(Runner):
 			# honored rather than silently falling back. Absent the opt, defaults to the
 			# process env merged with task extra_env (existing behavior unchanged).
 			env = self.run_opts.get('env', {**os.environ, **self.extra_env})
+			# Drop any stale eviction flag left by a previous task sharing this machine's state
+			# dir (tests / a long-lived `secator worker`) BEFORE the subprocess starts, so the
+			# monitor thread only ever READS the flag. Clearing it inside the monitor (which
+			# starts after Popen) could wipe a real eviction raised in the Popen→monitor window.
+			from secator.celery_signals import clear_shutdown_flag
+			clear_shutdown_flag()
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
@@ -746,12 +752,9 @@ class Command(Runner):
 
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
-		from secator.celery_signals import clear_shutdown_flag, is_worker_shutting_down
-		# Only honour a shutdown raised *during* this run: clear any stale flag left by a previous
-		# worker/task sharing this machine's state dir. In prod each task gets a fresh pod (and /tmp),
-		# but tests and a long-lived `secator worker` reuse it, so a leftover flag would otherwise
-		# wrongly stop every later task.
-		clear_shutdown_flag()
+		# Read-only w.r.t. the eviction flag: the stale-flag clear happens once before Popen
+		# (see above), so a real eviction raised during this run is never wiped here.
+		from secator.celery_signals import is_worker_shutting_down
 		last_stats_time = 0
 
 		while not self.monitor_stop_event.is_set():

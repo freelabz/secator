@@ -361,9 +361,14 @@ class ai(PythonRunner):
 		return self.system_prompt, self.tool_schemas
 
 	def _resolve_prompt(self):
-		"""Resolve the ``prompt`` run option, reading it from a file if it names one."""
+		"""Resolve the ``prompt`` run option, reading it from a file if it names one.
+
+		File-path expansion is CLI/local only: on the remote path the prompt comes from
+		the web UI, so a string that happens to name a worker-local file must NOT be read
+		and leaked into the transcript.
+		"""
 		prompt = self.run_opts.get("prompt", "")
-		if prompt and Path(prompt).is_file():
+		if self.interactive != "remote" and prompt and Path(prompt).is_file():
 			prompt = Path(prompt).read_text().strip()
 		return prompt
 
@@ -621,7 +626,7 @@ class ai(PythonRunner):
 					content=display_content,
 					ai_type="response",
 					mode=self.mode,
-					model=self.intent_model,
+					model=self.model,
 					summary=not tool_calls,
 					message=cap_message(assistant_msg),
 					extra_data={
@@ -1109,7 +1114,9 @@ class ai(PythonRunner):
 					# remote run, stamp status="pending" + choices + session_id first.
 					if isinstance(self.backend, RemoteBackend):
 						follow_up_ai.status = "pending"
-						follow_up_ai.session_id = self.session_id
+						# Correlate on the PERSISTED _context.session_id (a top-level session_id
+						# attr wouldn't serialize) — the same field poll_steers/the UI/api use.
+						follow_up_ai._context = {**(follow_up_ai._context or {}), "session_id": self.session_id}
 						if not follow_up_ai.choices and follow_up_choices:
 							follow_up_ai.choices = list(follow_up_choices)
 						# Stamp a unique correlation id so the poll resolves only this prompt's

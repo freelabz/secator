@@ -490,13 +490,17 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		opts["subagent"] = True
 		opts["interactive"] = False
 		# Inherit the parent's resolved LLM config (else it falls back to the default
-		# model/provider with no key set -> AuthenticationError). setdefault so an
-		# explicit LLM-supplied model/key still wins.
+		# model/provider with no key set -> AuthenticationError). The model may be
+		# LLM-chosen (setdefault), but transport CREDENTIALS are forced from the parent:
+		# a tool-supplied api_base could otherwise redirect the injected parent api_key
+		# to an attacker endpoint (setdefault wouldn't override it). Never trust opts here.
 		opts.setdefault("model", ctx.model)
+		opts.pop("api_key", None)
+		opts.pop("api_base", None)
 		if ctx.api_key:
-			opts.setdefault("api_key", ctx.api_key)
+			opts["api_key"] = ctx.api_key
 		if ctx.api_base:
-			opts.setdefault("api_base", ctx.api_base)
+			opts["api_base"] = ctx.api_base
 		# 1.b/1.c: structure the subagent's prompt and inject prior findings for its
 		# scope so it doesn't re-run work already done.
 		_objective = opts.get("prompt", "")
@@ -558,7 +562,8 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		ai_type=runner_type,
 		extra_data={
 			"targets": targets,
-			"opts": opts,
+			# Never persist transport credentials into the (DB-stored, UI-rendered) action item.
+			"opts": {k: v for k, v in opts.items() if k not in ("api_key", "api_base")},
 			"runner_id": runner_id,
 			"runner_type": runner_type,
 		},

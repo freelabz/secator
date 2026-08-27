@@ -385,7 +385,7 @@ class TestRemoteFollowUpPersistence(unittest.TestCase):
 		doc = fu_docs[0]
 		self.assertEqual(doc.status, "pending")
 		self.assertEqual(doc.choices, ["Fuzz parameters", "Run nuclei", "Deep crawl"])
-		self.assertEqual(doc.session_id, "sess-123")
+		self.assertEqual(doc._context.get("session_id"), "sess-123")
 		# Same object → single doc by _uuid.
 		self.assertIs(doc, follow_up)
 
@@ -1177,7 +1177,7 @@ class TestDrainSteers(unittest.TestCase):
 		from secator.ai.interactivity import RemoteBackend
 		mock_engine = MagicMock()
 		mock_engine.search.return_value = [
-			{"content": "actually focus on the API", "_timestamp": 1},
+			{"content": "actually focus on the API", "_timestamp": 1, "_uuid": "steer-1"},
 		]
 		mock_engine.update = MagicMock()
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
@@ -1194,9 +1194,11 @@ class TestDrainSteers(unittest.TestCase):
 		# persisted transcript entry, so a second steer Ai would double-render.
 		self.assertEqual(yielded, [])
 
-		# Marked consumed so it injects exactly once.
-		update_set = mock_engine.update.call_args[0][1]
+		# Marked consumed so it injects exactly once — scoped to the fetched doc's _uuid
+		# (not the broad pending filter), so a steer arriving mid-poll isn't wrongly consumed.
+		update_filter, update_set = mock_engine.update.call_args[0]
 		self.assertEqual(update_set["$set"]["status"], "consumed")
+		self.assertEqual(update_filter["_uuid"], {"$in": ["steer-1"]})
 
 	def test_no_steer_is_noop_and_preserves_loop(self):
 		"""No pending steer -> nothing injected, history untouched (loop intact)."""
