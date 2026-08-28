@@ -9,7 +9,7 @@ from secator.definitions import ADDONS_ENABLED
 if ADDONS_ENABLED['ai']:
 	from secator.ai.actions import (
 		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
-		_handle_query, _handle_add_finding, _run_runner, _decrypt_dict,
+		_handle_query, _handle_add_finding, _handle_add_vuln_poc, _run_runner, _decrypt_dict,
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
 		_build_child_hooks_or_denial,
 		_MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
@@ -1586,6 +1586,63 @@ class TestGatherSubagentEvidence(unittest.TestCase):
 		ctx = ActionContext(targets=[], model='m', context={'workspace_id': 'ws1'})
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
 			self.assertEqual(_gather_subagent_evidence(ctx, ["t"], limit=40), "")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestHandleAddVulnPoc(unittest.TestCase):
+	"""Tests for _handle_add_vuln_poc — record a PoC on an existing vulnerability."""
+
+	def _ctx(self):
+		return ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
+
+	def test_add_vuln_poc_updates_and_yields_finding(self):
+		"""Valid uuid + poc -> $set-updates the vuln's poc and yields an add_vuln_poc Ai
+		carrying the refreshed finding."""
+		mock_engine = MagicMock()
+		mock_engine.update.return_value = 1
+		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability", "poc": "# poc"}]
+		ctx = self._ctx()
+		action = {"action": "add_vuln_poc", "_uuid": "u1", "poc": "# poc\ncmd -> output"}
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_add_vuln_poc(action, ctx))
+		# update called with a $set on poc, scoped to the vuln uuid
+		q, upd = mock_engine.update.call_args[0]
+		self.assertEqual(q, {"_type": "vulnerability", "_uuid": "u1"})
+		self.assertEqual(upd, {"$set": {"poc": "# poc\ncmd -> output"}})
+		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"]
+		self.assertEqual(len(ais), 1)
+		self.assertEqual(ais[0].extra_data.get("finding", {}).get("poc"), "# poc")
+		self.assertFalse([r for r in results if isinstance(r, Error)])
+
+	def test_add_vuln_poc_no_match_yields_error(self):
+		"""uuid matches nothing -> Error (so the LLM re-checks the uuid), no update-yield."""
+		mock_engine = MagicMock()
+		mock_engine.update.return_value = 0
+		ctx = self._ctx()
+		action = {"action": "add_vuln_poc", "_uuid": "missing", "poc": "x"}
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_add_vuln_poc(action, ctx))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertTrue(any("No vulnerability found" in e.message for e in errors))
+		self.assertFalse([r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"])
+
+	def test_add_vuln_poc_missing_uuid_errors(self):
+		"""No _uuid -> Error, engine never touched."""
+		mock_engine = MagicMock()
+		ctx = self._ctx()
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_add_vuln_poc({"action": "add_vuln_poc", "poc": "x"}, ctx))
+		self.assertTrue([r for r in results if isinstance(r, Error)])
+		mock_engine.update.assert_not_called()
+
+	def test_add_vuln_poc_empty_poc_errors(self):
+		"""Blank poc -> Error, engine never touched."""
+		mock_engine = MagicMock()
+		ctx = self._ctx()
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_add_vuln_poc({"action": "add_vuln_poc", "_uuid": "u1", "poc": "   "}, ctx))
+		self.assertTrue([r for r in results if isinstance(r, Error)])
+		mock_engine.update.assert_not_called()
 
 
 if __name__ == '__main__':

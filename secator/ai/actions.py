@@ -342,6 +342,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"query": _handle_query,
 		"follow_up": _handle_follow_up,
 		"add_finding": _handle_add_finding,
+		"add_vuln_poc": _handle_add_vuln_poc,
 		"stop": _handle_stop,
 	}
 
@@ -886,6 +887,59 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield finding
 	except Exception as e:
 		yield Error(message=f"Failed to create {finding_type}: {e}\nExpected schema:\n{cls.schema()}", _context=context)
+
+
+def _handle_add_vuln_poc(action: Dict, ctx: ActionContext) -> Generator:
+	"""Record a proof-of-concept on an EXISTING vulnerability after exploitation.
+
+	Fills the target vulnerability's ``poc`` field (markdown: the commands + outputs
+	that prove a true exploitation) with an in-place ``$set`` update matched by the
+	``_uuid`` the LLM saw in ``query_workspace`` results. This is the exploitation-result
+	sink the LLM uses INSTEAD of ``add_finding(exploit)``: an exploited vuln ends up with
+	its own filled ``poc``, not a separate Exploit finding.
+
+	Uses ``QueryEngine.update`` (a ``$set`` on the matched doc, workspace-scoped) rather
+	than re-yielding the finding: the persistence hook keys updates on ``ObjectId(_uuid)``
+	but findings carry a non-ObjectId ``_uuid``, so a re-yield would INSERT a duplicate. A
+	scoped ``$set`` touches only ``poc`` and can't clobber the vuln's other fields.
+	"""
+	context = _get_result_context(action, ctx)
+	uuid = str(action.get("_uuid") or "").strip()
+	poc = action.get("poc") or ""
+	if ctx.encryptor:
+		poc = _decrypt_dict({"poc": poc}, ctx.encryptor).get("poc", poc)
+
+	if not uuid:
+		yield Error(message="add_vuln_poc requires the vulnerability `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
+		return
+	if not str(poc).strip():
+		yield Error(message="add_vuln_poc requires a non-empty `poc` (commands + outputs proving exploitation).", _context=context)  # noqa: E501
+		return
+
+	engine = ctx.get_query_engine()
+	query = {"_type": "vulnerability", "_uuid": uuid}
+	try:
+		modified = engine.update(query, {"$set": {"poc": poc}})
+	except Exception as e:
+		yield Error(message=f"Failed to record vulnerability PoC: {e}", _context=context)
+		return
+
+	if not modified:
+		yield Error(
+			message=f"No vulnerability found with _uuid={uuid} in this workspace. "
+			        "Re-check the `_uuid` from query_workspace results.",
+			_context=context,
+		)
+		return
+
+	# Re-fetch so the chat can render the updated VulnerabilityCard (now carrying the poc).
+	updated = (engine.search(query, limit=1) or [None])[0]
+	yield Ai(
+		content=f"Recorded proof-of-concept on vulnerability {uuid}.",
+		ai_type="add_vuln_poc",
+		extra_data={"finding": updated} if updated else {},
+		_context=context,
+	)
 
 
 def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:

@@ -59,17 +59,17 @@ SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 MODES = {
 	"attack": {
 		"system_prompt": SYSTEM_ATTACK,
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
 		"system_prompt": SYSTEM_CHAT,
-		"allowed_actions": ["query", "follow_up", "add_finding", "shell", "stop"],
+		"allowed_actions": ["query", "follow_up", "add_finding", "add_vuln_poc", "shell", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
 		"system_prompt": SYSTEM_EXPLOIT,
-		"allowed_actions": ["task", "workflow", "shell", "add_finding", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "add_finding", "add_vuln_poc", "stop"],
 		"max_iterations": 5,
 	},
 }

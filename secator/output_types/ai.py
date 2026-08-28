@@ -63,6 +63,7 @@ AI_TYPES = {
 	'workflow': {'label': '🟢', 'color': 'magenta'},
 	'shell': {'label': '🟢', 'color': 'magenta'},
 	'add_finding': {'label': '🟢', 'color': 'magenta'},
+	'add_vuln_poc': {'label': '💥', 'color': 'magenta'},
 	'shell_output': {'label': '◀', 'color': 'dim white'},
 	'query': {'label': '🟢', 'color': 'magenta'},
 	'stopped': {'label': '🛑', 'color': 'orange3'},
@@ -70,7 +71,7 @@ AI_TYPES = {
 	'steer': {'label': '[STEER]', 'color': 'cyan'},
 }
 
-ACTION_TYPES = ('task', 'workflow', 'shell', 'add_finding', 'query', 'stopped')
+ACTION_TYPES = ('task', 'workflow', 'shell', 'add_finding', 'add_vuln_poc', 'query', 'stopped')
 
 
 @dataclass

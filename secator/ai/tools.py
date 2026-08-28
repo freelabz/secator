@@ -12,6 +12,7 @@ TOOL_ACTION_MAP = {
 	"query_workspace": "query",
 	"follow_up": "follow_up",
 	"add_finding": "add_finding",
+	"add_vuln_poc": "add_vuln_poc",
 	"stop": "stop",
 }
 
@@ -144,6 +145,35 @@ TOOL_SCHEMAS = {
 				},
 				"required": ["_type"],
 				"additionalProperties": True
+			}
+		}
+	},
+	"add_vuln_poc": {
+		"type": "function",
+		"function": {
+			"name": "add_vuln_poc",
+			"description": (
+				"Record a proof-of-concept on an EXISTING vulnerability after you have successfully "
+				"exploited it. Use this INSTEAD of add_finding(exploit): it fills the vulnerability's "
+				"`poc` field with the exact commands and outputs that prove the exploitation. "
+				"Identify the vulnerability by the `_uuid` you saw in query_workspace results."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"_uuid": {
+						"type": "string",
+						"description": "The `_uuid` of the vulnerability to annotate (from query_workspace results)."
+					},
+					"poc": {
+						"type": "string",
+						"description": (
+							"Markdown proof-of-concept: the exact commands run and their outputs demonstrating a "
+							"true, successful exploitation (not a scanner match). Be concrete and reproducible."
+						)
+					}
+				},
+				"required": ["_uuid", "poc"]
 			}
 		}
 	},
