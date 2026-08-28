@@ -1068,7 +1068,10 @@ class ai(PythonRunner):
 				denial_display = f"{denial}\n[gray42]{cmd_display}[/gray42]" if cmd_display else denial
 				yield Warning(message=denial_display)
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
-				yield _reject_tool_call(self, name, tc_id, error_msg, "denied")
+				# Surface the actual reason in the chat (not a bare "denied"): the Warning
+				# above isn't an `ai` transcript doc, so this tool_result bubble is the only
+				# place the user sees WHY (e.g. "Action denied: shell command not approved").
+				yield _reject_tool_call(self, name, tc_id, error_msg, denial)
 				continue
 
 			actions.append(action)
