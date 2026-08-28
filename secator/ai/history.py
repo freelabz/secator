@@ -94,12 +94,15 @@ def truncate_to_tokens(
 
     # Determine file hint
     if fallback_path and fallback_path.exists():
-        file_hint = f"\nFull output: {fallback_path}"
+        # Give the model the CONCRETE path plus the explore hint together. Without a
+        # real path, suggesting "explore with jq" makes the model run a command
+        # against the literal <OUTPUT_PATH> placeholder from the prompt examples
+        # (there is nothing to substitute), so only hint when a file actually exists.
+        file_hint = f"\nFull output saved to: {fallback_path}"
+        file_hint += f"\nUse shell commands to explore THIS path ({fallback_path}): grep, head, tail, jq"
         debug(f'using existing fallback: {fallback_path}', sub='runner.ai.context')
     else:
         file_hint = ""
-
-    file_hint += "\nUse shell commands to explore: grep, head, tail, jq"
 
     # Truncate content (ratio-based with 10% safety margin)
     ratio = max_tokens / current
