@@ -13,11 +13,12 @@ from secator.definitions import (CONTENT_LENGTH, CONTENT_TYPE, DATA, DELAY, DEPT
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, URL, HOST, HOST_PORT, IP)
 # fmt: on
 from secator.output_types import Url, Info, Error
-from secator.tasks._categories import HttpFuzzer
+from secator.tasks._categories import HttpFuzzerMixin
+from secator.runners import Command
 
 
 # @task()
-class dirsearch(HttpFuzzer):
+class dirsearch(Command, HttpFuzzerMixin):
 	"""Advanced web path brute-forcer."""
 
 	cmd = 'dirsearch'

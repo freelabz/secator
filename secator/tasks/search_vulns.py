@@ -9,11 +9,12 @@ from secator.definitions import (
 # fmt: on
 from secator.output_types import Exploit, Info, Vulnerability, Warning
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import Vuln
+from secator.tasks._categories import VulnMixin
+from secator.runners import Command
 
 
 @task()
-class search_vulns(Vuln):
+class search_vulns(Command, VulnMixin):
 	"""Search for known vulnerabilities in software by product name or CPE."""
 
 	cmd = 'search_vulns'
@@ -120,7 +121,7 @@ class search_vulns(Vuln):
 				'tags': tags,
 			}
 			if int(cvss_score) == 0:
-				vuln = Vuln.lookup_cve(cve_id)
+				vuln = VulnMixin.lookup_cve(cve_id)
 				if vuln:
 					data.update(vuln.toDict())
 					data['confidence'] = confidence
