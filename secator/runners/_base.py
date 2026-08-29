@@ -13,7 +13,6 @@ from dotmap import DotMap
 import humanize
 
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
-from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import (
 	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
@@ -1022,6 +1021,77 @@ class Runner:
 			kwargs['id'] = self.id
 		debug(*args, **kwargs)
 
+	def _record_chunk_task_id(self, item):
+		"""Register a dynamically-created chunk task id (from its 'Celery chunked task created' Info)
+		into celery_ids_map, so stop_celery_tasks can revoke it. Format: '... created (i / n): <id>'."""
+		if isinstance(item, Info) and str(getattr(item, 'message', '')).startswith('Celery chunked task created'):
+			task_id = item.message.split(' ')[-1]
+			if task_id and task_id not in self.celery_ids_map:
+				self.celery_ids_map[task_id] = {
+					'id': task_id, 'name': item._source, 'full_name': item._source,
+					'descr': '', 'state': 'PENDING', 'count': 0, 'progress': 0, 'chunk': True,
+				}
+
+	def _get_store_poller(self):
+		"""Build a StorePoller for this run, or None if there's no store scope to poll.
+
+		Mirrors process_extractor's QueryEngine construction (drivers/workspace/report_dir from
+		context) and scopes to this runner's own {type}_id."""
+		rtype = self.config.type
+		root_id = self.context.get(f'{rtype}_id')
+		if not root_id:
+			return None
+		from secator.query import QueryEngine
+		from secator.store_utils import StorePoller
+		rf = self.reports_folder
+		report_dir = str(rf) if rf and (Path(rf) / 'report.json').exists() else None
+		engine = QueryEngine(self.context.get('workspace_id'), context={
+			'drivers': self.context.get('drivers', []),
+			'workspace_name': self.workspace_name,
+			'report_dir': report_dir,
+		})
+		return StorePoller(
+			engine,
+			findings_query={f'_context.{rtype}_id': str(root_id)},
+			root_id=root_id,
+			root_type=rtype,
+			report_dir=report_dir,
+			ids_map=self.celery_ids_map,
+			main_id=str(self.celery_result.id) if self.celery_result else None,
+			revoked=self.revoked,
+			print_remote_info=self.print_remote_info,
+			print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
+		)
+
+	def _poll_results(self):
+		"""Live-poll this run's findings + progress.
+
+		Pick the poller once, at start. Use the store poll (StorePoller) when the resolved
+		store backend is a reachable *shared* store (mongodb/api) — worker and client both read
+		it — or when there is no Celery result to poll (in-process/sync run, where the local
+		store is trivially on the same machine). Otherwise (a filesystem store on a dispatched
+		run, or an unreachable network store) fall back to the Celery result-backend poll, which
+		works whenever a shared broker/result_backend exists — the requirement for any
+		distributed run."""
+		poller = self._get_store_poller()
+		use_store = poller is not None and (
+			not self.celery_result or poller.engine.pollable_shared_store()
+		)
+		if use_store:
+			return poller.iter_results()
+		if self.celery_result:
+			from secator.celery_utils import CeleryData
+			self.debug('store not a reachable shared store; polling celery result backend', sub='start')
+			return CeleryData.iter_results(
+				self.celery_result,
+				ids_map=self.celery_ids_map,
+				revoked=self.revoked,
+				print_remote_info=self.print_remote_info,
+				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
+			)
+		self.debug('no store scope and no celery result to poll', sub='start')
+		return iter(())
+
 	def yielder(self):
 		"""Base yielder implementation.
 
@@ -1031,16 +1101,9 @@ class Runner:
 		Yields:
 			secator.output_types.OutputType: Secator output type.
 		"""
-		# If existing celery result, yield from it
+		# If existing celery result, live-poll the store for it
 		if self.celery_result:
-			yield from CeleryData.iter_results(
-				self.celery_result,
-				ids_map=self.celery_ids_map,
-				description=True,
-				revoked=self.revoked,
-				print_remote_info=self.print_remote_info,
-				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
-			)
+			yield from self._poll_results()
 			return
 
 		# Build Celery workflow
@@ -1073,13 +1136,7 @@ class Runner:
 				self.enable_reports = False
 				self.no_process = True
 				return
-			results = CeleryData.iter_results(
-				self.celery_result,
-				ids_map=self.celery_ids_map,
-				description=True,
-				print_remote_info=self.print_remote_info,
-				print_remote_title=f'[bold gold3]{self.__class__.__name__.capitalize()}[/] [bold magenta]{self.name}[/] results',
-			)
+			results = self._poll_results()
 
 		# Yield results
 		yield from results
@@ -1454,6 +1511,11 @@ class Runner:
 			self.output += item + '\n' if output else ''
 			self._print_item(item) if item and print else ''
 			return
+
+		# Record dynamically-created chunk task ids for revoke. The Celery poll used to harvest these
+		# from the "Celery chunked task created" Info; the store poll surfaces the same Info, so
+		# capture it here instead so stop_celery_tasks can still revoke chunk children.
+		self._record_chunk_task_id(item)
 
 		# Abort further processing if no_process is set
 		if self.no_process:

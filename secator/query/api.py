@@ -31,6 +31,16 @@ class ApiBackend(QueryBackend):
         base['_tagged'] = True
         return base
 
+    def is_reachable(self) -> bool:
+        """True if the remote API host answers a quick request (any HTTP status = reachable)."""
+        if not self.api_url:
+            return False
+        try:
+            requests.head(self.api_url, timeout=1)
+            return True
+        except Exception:
+            return False
+
     def _make_request(self, method: str, endpoint: str, data: dict = None) -> dict:
         """Make HTTP request to API."""
         url = f"{self.api_url.rstrip('/')}/{endpoint.lstrip('/')}"
