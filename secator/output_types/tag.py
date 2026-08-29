@@ -27,6 +27,8 @@ class Tag(OutputType):
 
 	_table_fields = ['match', 'category', 'name', 'extra_data']
 	_sort_by = ('match', 'name')
+	_group_by = ('category', 'name')
+	_group_aggregate = 'match'
 
 	def __post_init__(self):
 		super().__post_init__()
