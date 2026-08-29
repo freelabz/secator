@@ -1,1 +1,35 @@
-.docker/Dockerfile.alpine
+FROM alpine:3.21 AS builder
+
+ENV PATH="${PATH}:/root/.local/bin"
+RUN apk add --no-cache \
+	flock \
+	gcc \
+	musl-dev \
+	linux-headers \
+	pipx \
+	python3-dev
+COPY . /code
+WORKDIR /code
+
+RUN pipx install --pip-args="--no-cache-dir" . && \
+	secator install addons worker && \
+	secator install addons gdrive && \
+	secator install addons gcs && \
+	secator install addons mongodb && \
+	secator install addons redis && \
+	secator install addons dev
+
+FROM python:3.14.0-alpine3.21
+ARG flavor=full
+ARG build_from_source=false
+ENV TERM="xterm-256color"
+ENV PATH="${PATH}:/root/.local/bin"
+ENV GOBIN="/root/.local/bin"
+COPY --from=builder /root/.local /root/.local
+RUN apk add --no-cache \
+	flock \
+	pipx \
+	sudo
+RUN if [ "$build_from_source" = "true" ]; then secator config set security.force_source_install 1; fi
+RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast; fi
+ENTRYPOINT ["secator"]
