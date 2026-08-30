@@ -49,11 +49,12 @@ def _tc(name, args, call_id="tc1"):
 	return types.SimpleNamespace(id=call_id, function=types.SimpleNamespace(name=name, arguments=arguments))
 
 
-def _resp(content=None, tool_calls=None, usage="default"):
+def _resp(content=None, tool_calls=None, usage="default", finish_reason=None):
 	"""A call_llm() return dict."""
 	if usage == "default":
 		usage = {"tokens": 100, "cost": 0.001}
-	return {"content": content, "tool_calls": tool_calls or [], "usage": usage}
+	return {"content": content, "tool_calls": tool_calls or [], "usage": usage,
+			"finish_reason": finish_reason}
 
 
 def _make_loop_task():
@@ -126,6 +127,8 @@ def _driven(task, weird_responses):
 
 	with contextlib.ExitStack() as stack:
 		stack.enter_context(patch('secator.tasks.ai.call_llm', side_effect=_next))
+		# empty-response retries back off with time.sleep — make it instant in tests
+		stack.enter_context(patch('secator.tasks.ai.time.sleep'))
 		stack.enter_context(patch('secator.tasks.ai.get_context_window', return_value=8000))
 		stack.enter_context(patch('secator.ai.history.get_context_window', return_value=8000))
 		stack.enter_context(patch('secator.tasks.ai.save_history'))
@@ -234,6 +237,25 @@ class TestWeirdContentResponses(unittest.TestCase):
 		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[]) for _ in range(3)])
 		self.assertIsNone(aborted)  # a deliberate Error(485), not the catch-all
 		self.assertTrue(any(getattr(i, '_type', '') == 'error' for i in items))
+
+	def test_empty_error_does_not_blame_tool_calling(self):
+		"""The empty-response error must not (mis)claim the model can't call tools —
+		most models can; empties are transient-provider / truncation conditions."""
+		task = _make_loop_task()
+		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[]) for _ in range(3)])
+		err = next((i for i in items if getattr(i, '_type', '') == 'error'), None)
+		self.assertIsNotNone(err)
+		self.assertNotIn('support tool calling', getattr(err, 'message', ''))
+
+	def test_length_finish_reason_reports_truncation(self):
+		"""An empty turn with finish_reason=length is reported as a truncation/output-cap
+		issue, not a generic empty response."""
+		task = _make_loop_task()
+		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[], finish_reason="length")])
+		self.assertIsNone(aborted)
+		self.assertGreaterEqual(n, 2)  # recovered and asked again
+		warns = [getattr(i, 'message', '') for i in items if getattr(i, '_type', '') == 'warning']
+		self.assertTrue(any('truncated' in w or 'length' in w for w in warns), warns)
 
 	def test_missing_usage_does_not_crash(self):
 		"""usage=None must not crash accounting."""

@@ -1,6 +1,7 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task."""
 import json
+import time
 import uuid
 from pathlib import Path
 from typing import Generator
@@ -597,6 +598,7 @@ class ai(PythonRunner):
 				content = result["content"]
 				tool_calls = result.get("tool_calls", [])
 				usage = result.get("usage", {})
+				finish_reason = result.get("finish_reason")
 
 				# Accumulate billed tokens for this run (read by the billing chore
 				# as context.ai_tokens). Done here, before any empty-response
@@ -605,14 +607,27 @@ class ai(PythonRunner):
 
 				self.debug(f'content: {content[:200] if content else "(empty)"}', sub='llm')
 
-				# Empty response
+				# Empty response — neither content nor a tool call. This is almost
+				# never "the model can't call tools" (most models can, and a wrong
+				# model name 400s rather than returning empty); the usual causes are
+				# a transient provider hiccup (empty upstream response) or a truncated
+				# turn (finish_reason == "length"). Report the real reason, back off
+				# to let a transient blip recover, and retry a few times before giving up.
 				if not content and not tool_calls:
 					empty_streak += 1
-					yield Warning(message="LLM returned empty response")
+					if finish_reason == "length":
+						reason = "response truncated (finish_reason=length) — the model hit its output-token cap"
+					else:
+						reason = f"empty response from the provider (finish_reason={finish_reason or 'unknown'})"
+					yield Warning(message=f"LLM returned an {reason}")
 					if empty_streak >= 3:
-						yield Error(message="3 consecutive empty responses - the model may not support tool calling. Stopping.")
+						yield Error(message=(
+							f"3 consecutive empty responses — {reason}. This is usually a transient "
+							"provider issue or an output-token cap, not a lack of tool-calling support — "
+							"retry, or try a different model."))
 						self._save_history()
 						return
+					time.sleep(min(2 ** empty_streak, 8))  # brief backoff for a transient provider blip
 					continue
 
 				empty_streak = 0
