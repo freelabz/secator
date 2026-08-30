@@ -752,8 +752,12 @@ def call_llm(
 
 	# Get tool calls
 	tool_calls = getattr(message, 'tool_calls', None) or []
+	# finish_reason distinguishes a genuinely-empty turn from a truncated one
+	# (finish_reason == "length") — the caller uses it to report the real cause
+	# of an empty response instead of blaming tool-calling support.
+	finish_reason = getattr(response.choices[0], 'finish_reason', None)
 
-	return {"content": content, "usage": usage, "tool_calls": tool_calls}
+	return {"content": content, "usage": usage, "tool_calls": tool_calls, "finish_reason": finish_reason}
 
 
 MODEL_COLORS = [
