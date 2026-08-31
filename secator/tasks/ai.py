@@ -607,40 +607,37 @@ class ai(PythonRunner):
 
 				self.debug(f'content: {content[:200] if content else "(empty)"}', sub='llm')
 
-				# Empty response — neither content nor a tool call. This is almost
-				# never "the model can't call tools" (most models can, and a wrong
-				# model name 400s rather than returning empty); the usual causes are
-				# a transient provider hiccup (empty upstream response) or a truncated
-				# turn (finish_reason == "length"). Report the real reason, back off
-				# to let a transient blip recover, and retry a few times before giving up.
+				# Empty response — neither content nor a tool call. This is almost never
+				# "the model can't call tools" (most can, and a wrong model name 400s
+				# rather than returning empty). The real causes, by finish_reason:
+				#  - "content_filter": a provider moderation block. Via OpenRouter this is
+				#    INTERMITTENT + route-dependent (it load-balances across upstream
+				#    providers; some moderate offensive-security content, some don't), so a
+				#    retry can land a clean route and succeed — keep retrying with backoff.
+				#  - "length": the turn was truncated at the output-token cap.
+				#  - otherwise: a transient provider hiccup (empty upstream body).
+				# All are retried a few times (backoff lets a blip / bad route pass) before
+				# giving up with an accurate, actionable message.
+				MAX_EMPTY_RETRIES = 5  # a bit generous so OpenRouter route-roulette can recover
 				if not content and not tool_calls:
-					# Content moderation is deterministic — retrying just re-blocks. Stop
-					# immediately with an accurate, actionable message. This is a provider
-					# moderation decision (e.g. some OpenRouter routes moderate offensive-
-					# security content), not a secator or tool-calling issue.
-					if finish_reason == "content_filter":
-						yield Error(message=(
-							"The provider blocked this response with a content filter "
-							"(finish_reason=content_filter) and returned no content — a provider "
-							"moderation decision, not a secator or tool-calling issue. Some model/"
-							"provider routes moderate offensive-security content; try a different "
-							"model or provider, or rephrase the request."))
-						self._save_history()
-						return
 					empty_streak += 1
-					if finish_reason == "length":
+					if finish_reason == "content_filter":
+						reason = ("blocked by a provider content filter (finish_reason=content_filter) — "
+								  "intermittent provider moderation, not a secator or tool-calling issue")
+					elif finish_reason == "length":
 						reason = "response truncated (finish_reason=length) — the model hit its output-token cap"
 					else:
 						reason = f"empty response from the provider (finish_reason={finish_reason or 'unknown'})"
 					yield Warning(message=f"LLM returned an {reason}")
-					if empty_streak >= 3:
+					if empty_streak >= MAX_EMPTY_RETRIES:
 						yield Error(message=(
-							f"3 consecutive empty responses — {reason}. This is usually a transient "
-							"provider issue or an output-token cap, not a lack of tool-calling support — "
-							"retry, or try a different model."))
+							f"{MAX_EMPTY_RETRIES} consecutive empty responses — {reason}. Not a lack of "
+							"tool-calling support. If it persists, try a different model or provider — "
+							"e.g. route Anthropic directly instead of via OpenRouter, which can moderate "
+							"offensive-security content on some routes."))
 						self._save_history()
 						return
-					time.sleep(min(2 ** empty_streak, 8))  # brief backoff for a transient provider blip
+					time.sleep(min(2 ** empty_streak, 8))  # backoff so a blip / bad route can pass
 					continue
 
 				empty_streak = 0

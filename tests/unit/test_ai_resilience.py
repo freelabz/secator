@@ -231,29 +231,39 @@ class TestWeirdContentResponses(unittest.TestCase):
 		self.assertIsNone(aborted)
 		self.assertGreaterEqual(n, 2)  # recovered and asked again
 
-	def test_three_empty_responses_stop_cleanly(self):
-		"""Three consecutive empties stop with a clean Error (intended), no abort."""
+	def test_five_empty_responses_stop_cleanly(self):
+		"""Five consecutive empties (the retry budget) stop with a clean Error, no abort."""
 		task = _make_loop_task()
-		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[]) for _ in range(3)])
-		self.assertIsNone(aborted)  # a deliberate Error(485), not the catch-all
+		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[]) for _ in range(5)])
+		self.assertIsNone(aborted)  # a deliberate Error, not the catch-all
 		self.assertTrue(any(getattr(i, '_type', '') == 'error' for i in items))
 
 	def test_empty_error_does_not_blame_tool_calling(self):
 		"""The empty-response error must not (mis)claim the model can't call tools —
-		most models can; empties are transient-provider / truncation conditions."""
+		most models can; empties are transient-provider / moderation / truncation."""
 		task = _make_loop_task()
-		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[]) for _ in range(3)])
+		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[]) for _ in range(5)])
 		err = next((i for i in items if getattr(i, '_type', '') == 'error'), None)
 		self.assertIsNotNone(err)
 		self.assertNotIn('support tool calling', getattr(err, 'message', ''))
 
-	def test_content_filter_stops_immediately_with_accurate_message(self):
-		"""A content_filter empty turn is a deterministic moderation block — stop at
-		once (no 3x retry) with a message naming the content filter, not tool support."""
+	def test_content_filter_is_retried_and_can_recover(self):
+		"""content_filter is intermittent + route-dependent (OpenRouter), so it must be
+		RETRIED (a fresh route can succeed), not stopped at once."""
 		task = _make_loop_task()
+		# one content_filter, then the harness's terminating content turn -> recovers
 		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[], finish_reason="content_filter")])
 		self.assertIsNone(aborted)
-		self.assertEqual(n, 1)  # did NOT retry — content filter is deterministic
+		self.assertGreaterEqual(n, 2)  # retried after the filtered turn
+		warns = [getattr(i, 'message', '') for i in items if getattr(i, '_type', '') == 'warning']
+		self.assertTrue(any('content filter' in w for w in warns), warns)
+
+	def test_persistent_content_filter_error_names_the_filter(self):
+		"""If every route filters, the final Error names the content filter (and points at
+		using a different model/provider), never 'tool calling'."""
+		task = _make_loop_task()
+		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[], finish_reason="content_filter")
+										  for _ in range(5)])
 		err = next((i for i in items if getattr(i, '_type', '') == 'error'), None)
 		self.assertIsNotNone(err)
 		msg = getattr(err, 'message', '')
