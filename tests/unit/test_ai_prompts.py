@@ -249,7 +249,7 @@ class TestPrompts(unittest.TestCase):
 
 	def test_exploit_mode_config_has_correct_allowed_actions(self):
 		exploit_config = MODES["exploit"]
-		expected_actions = ["task", "workflow", "shell", "add_finding", "stop"]
+		expected_actions = ["task", "workflow", "shell", "add_finding", "add_vuln_poc", "stop"]
 		self.assertEqual(exploit_config["allowed_actions"], expected_actions)
 
 	def test_exploit_mode_config_has_max_iterations_5(self):
@@ -258,12 +258,12 @@ class TestPrompts(unittest.TestCase):
 
 	def test_attack_mode_config_has_correct_allowed_actions(self):
 		attack_config = MODES["attack"]
-		expected_actions = ["task", "workflow", "shell", "query", "follow_up", "add_finding", "stop"]
+		expected_actions = ["task", "workflow", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"]
 		self.assertEqual(attack_config["allowed_actions"], expected_actions)
 
 	def test_chat_mode_config_has_correct_allowed_actions(self):
 		chat_config = MODES["chat"]
-		expected_actions = ["query", "follow_up", "add_finding", "shell", "stop"]
+		expected_actions = ["query", "follow_up", "add_finding", "add_vuln_poc", "shell", "stop"]
 		self.assertEqual(chat_config["allowed_actions"], expected_actions)
 
 	def test_all_modes_have_max_iterations_5(self):

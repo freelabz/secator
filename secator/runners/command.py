@@ -27,11 +27,6 @@ from secator.utils import debug, rich_escape as _s, signal_to_name
 
 logger = logging.getLogger(__name__)
 
-# Upper bound on the monitor thread's poll interval (seconds). Keeps the shutdown/timeout checks
-# responsive even when stat_update_frequency is large, so an evicted task stops well within the
-# pod's termination grace period.
-MONITOR_POLL_SECONDS = 5
-
 # Serialize interactive sudo prompts and cache the verified password for the process lifetime.
 # Under the gevent worker (default -c 100) many tasks call getpass on the same tty at once and
 # corrupt its termios state (issue #1332); the lock prompts one at a time and the cache lets the
@@ -553,19 +548,8 @@ class Command(Runner):
 				self.cwd = f'{self.reports_folder}/.outputs/{self.fqn}'
 				os.makedirs(self.cwd, exist_ok=True)
 
-			# Run the command using subprocess. A caller may pass a sanitized/custom env
-			# via the `env` run_opt (e.g. the AI shell handler strips LLM/cloud secrets so
-			# an AI-run `env`/`printenv` can't dump them). Uses `.get(key, default)` (not
-			# `or`) so an explicit empty `env={}` — a deliberate empty environment — is
-			# honored rather than silently falling back. Absent the opt, defaults to the
-			# process env merged with task extra_env (existing behavior unchanged).
-			env = self.run_opts.get('env', {**os.environ, **self.extra_env})
-			# Drop any stale eviction flag left by a previous task sharing this machine's state
-			# dir (tests / a long-lived `secator worker`) BEFORE the subprocess starts, so the
-			# monitor thread only ever READS the flag. Clearing it inside the monitor (which
-			# starts after Popen) could wipe a real eviction raised in the Popen→monitor window.
-			from secator.celery_signals import clear_shutdown_flag
-			clear_shutdown_flag()
+			# Run the command using subprocess
+			env = {**os.environ, **self.extra_env}
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
@@ -752,9 +736,6 @@ class Command(Runner):
 
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
-		# Read-only w.r.t. the eviction flag: the stale-flag clear happens once before Popen
-		# (see above), so a real eviction raised during this run is never wiped here.
-		from secator.celery_signals import is_worker_shutting_down
 		last_stats_time = 0
 
 		while not self.monitor_stop_event.is_set():
@@ -764,16 +745,6 @@ class Command(Runner):
 			try:
 				current_time = time()
 				self.debug('Collecting monitor items', sub='monitor')
-
-				# Worker is shutting down (e.g. K8s pod eviction): stop early and save partial
-				# results so the surrounding chord proceeds, rather than hang until the broker
-				# visibility timeout redelivers this task.
-				if is_worker_shutting_down():
-					warning = Warning(message='Worker shutting down (eviction): stopping task early, saving incomplete results')
-					if self.monitor_queue is not None:
-						self.monitor_queue.put(warning)
-					self.stop_process(exit_ok=True, sig=signal.SIGTERM)
-					break
 
 				# Collect and queue stats at regular intervals
 				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
@@ -823,10 +794,8 @@ class Command(Runner):
 					self.monitor_queue.put(warning)
 				break
 
-			# Wake at least every MONITOR_POLL_SECONDS so the shutdown/timeout checks stay
-			# responsive (stats themselves are still gated to stat_update_frequency above), so
-			# an eviction is caught well within the pod's termination grace period.
-			self.monitor_stop_event.wait(min(CONFIG.runners.stat_update_frequency, MONITOR_POLL_SECONDS))
+			# Sleep for a short interval before next check (stat update frequency)
+			self.monitor_stop_event.wait(CONFIG.runners.stat_update_frequency)
 
 	def _collect_stats(self):
 		"""Collect stats about the current running process, if any."""
