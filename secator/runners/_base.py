@@ -10,6 +10,7 @@ from pathlib import Path
 from time import time
 
 from dotmap import DotMap
+from rich.errors import MarkupError as RichMarkupError
 import humanize
 
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
@@ -995,7 +996,14 @@ class Runner:
 						_console = console
 					else:
 						_console = console_stdout if item_out == sys.stdout else console
-					_console.print(rich_str, end='\n', highlight=False, soft_wrap=True)
+					try:
+						_console.print(rich_str, end='\n', highlight=False, soft_wrap=True)
+					except RichMarkupError:
+						# The item carried stray Rich markup in its content (e.g. an AI
+						# response or prompt containing "[/]"): re-print it literally so
+						# one bad item can't raise out of the print loop and abort the
+						# whole run (observed crashing an `ai` chat turn).
+						_console.print(rich_str, end='\n', highlight=False, soft_wrap=True, markup=False)
 
 		# Item is a line
 		elif isinstance(item, str):
