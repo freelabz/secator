@@ -369,8 +369,15 @@ class ai(PythonRunner):
 		and leaked into the transcript.
 		"""
 		prompt = self.run_opts.get("prompt", "")
-		if self.interactive != "remote" and prompt and Path(prompt).is_file():
-			prompt = Path(prompt).read_text().strip()
+		if self.interactive != "remote" and prompt:
+			# A prompt is arbitrary user text; treating it as a path can raise
+			# (e.g. OSError "Filename too long" on a long exploit prompt). Guard so
+			# a non-path prompt is always used verbatim instead of crashing the run.
+			try:
+				if Path(prompt).is_file():
+					prompt = Path(prompt).read_text().strip()
+			except OSError:
+				pass
 		return prompt
 
 	def _emit_user_prompt(self, prompt):
