@@ -88,20 +88,22 @@ class TestRemoteBackend(unittest.TestCase):
 		self.assertEqual(result["answer"], "option A")
 
 	@patch('secator.ai.interactivity.sleep')
-	def test_ask_user_polls_until_timeout(self, mock_sleep):
-		from secator.ai.interactivity import RemoteBackend
+	def test_ask_user_raises_on_timeout_leaves_pending(self, mock_sleep):
+		from secator.ai.interactivity import RemoteBackend, UserInputTimeout
 		mock_engine = MagicMock()
 		mock_engine.search.return_value = []  # never answered
 		mock_engine.update = MagicMock()
 		backend = RemoteBackend(timeout=10, query_engine=mock_engine, poll_interval=5)
 
-		result = backend.ask_user("What next?", [], "session1")
+		# On timeout the prompt is NOT auto-denied: it raises so the worker exits
+		# cleanly, and the pending doc is LEFT pending (no timed_out flip).
+		with self.assertRaises(UserInputTimeout):
+			backend.ask_user("What next?", [], "session1")
 
-		self.assertIsNone(result)
 		# Should have polled twice (0s, 5s) then timed out at 10s
 		self.assertEqual(mock_sleep.call_count, 2)
-		# Should have called update to set timed_out
-		mock_engine.update.assert_called_once()
+		# Must NOT flip the doc to timed_out — it stays pending for the user to answer.
+		mock_engine.update.assert_not_called()
 
 	def test_poll_scopes_query_to_prompt_uuid(self):
 		"""The poll must correlate on the specific prompt's uuid.
@@ -127,21 +129,19 @@ class TestRemoteBackend(unittest.TestCase):
 		self.assertEqual(search_query.get("status"), "answered")
 
 	@patch('secator.ai.interactivity.sleep')
-	def test_timeout_update_scoped_to_prompt_uuid(self, mock_sleep):
-		"""On timeout, only THIS prompt's pending doc is flipped to timed_out."""
-		from secator.ai.interactivity import RemoteBackend
+	def test_timeout_leaves_prompt_pending_and_raises(self, mock_sleep):
+		"""On timeout the prompt is left pending (not flipped) and the loop unwinds."""
+		from secator.ai.interactivity import RemoteBackend, UserInputTimeout
 		mock_engine = MagicMock()
 		mock_engine.search.return_value = []  # never answered
 		mock_engine.update = MagicMock()
 		backend = RemoteBackend(timeout=5, query_engine=mock_engine, poll_interval=5)
 
-		result = backend.ask_user("What next?", [], "session1", prompt_uuid="abc-123")
+		with self.assertRaises(UserInputTimeout):
+			backend.ask_user("What next?", [], "session1", prompt_uuid="abc-123")
 
-		self.assertIsNone(result)
-		mock_engine.update.assert_called_once()
-		update_query = mock_engine.update.call_args[0][0]
-		self.assertEqual(update_query.get("extra_data.prompt_uuid"), "abc-123")
-		self.assertEqual(update_query.get("status"), "pending")
+		# No timed_out flip — the pending doc survives for the user to answer later.
+		mock_engine.update.assert_not_called()
 
 	def test_build_pending_prompt_stamps_permission_prompt_uuid(self):
 		"""A permission pending doc carries its prompt_uuid in extra_data."""
@@ -160,7 +160,7 @@ class TestRemoteBackend(unittest.TestCase):
 	@patch('secator.ai.interactivity.sleep')
 	def test_later_permission_layer_does_not_resolve_from_earlier_allow(self, mock_sleep):
 		"""H7: a later guardrail layer must not auto-resolve from an earlier 'allow'."""
-		from secator.ai.interactivity import RemoteBackend
+		from secator.ai.interactivity import RemoteBackend, UserInputTimeout
 
 		# Fake "DB": one answered doc from the FIRST (shell) layer only.
 		answered_db = [{
@@ -190,9 +190,10 @@ class TestRemoteBackend(unittest.TestCase):
 		first = backend._poll_for_answer("session1", "permission", prompt_uuid="uuid-shell")
 		self.assertEqual(first, "allow")
 
-		# Second (target) layer must NOT pick up the shell layer's "allow".
-		second = backend._poll_for_answer("session1", "permission", prompt_uuid="uuid-target")
-		self.assertIsNone(second)
+		# Second (target) layer must NOT pick up the shell layer's "allow": with no
+		# answer of its own it times out (raises), leaving its prompt pending.
+		with self.assertRaises(UserInputTimeout):
+			backend._poll_for_answer("session1", "permission", prompt_uuid="uuid-target")
 
 	def test_poll_returns_newest_answered_doc(self):
 		"""Defense in depth: resolve against the NEWEST answered doc by _timestamp."""

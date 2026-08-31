@@ -12,6 +12,17 @@ from typing import Any, Dict, List, Optional
 from secator.ai.tools import STOP_TOOL_SCHEMA
 
 
+class UserInputTimeout(Exception):
+	"""Raised by the RemoteBackend when a prompt goes unanswered past the timeout.
+
+	On the platform a prompt is NOT auto-denied on timeout (that produced weird
+	states — an action silently denied while the user was away). Instead the
+	pending doc is LEFT pending and this exception unwinds the AI loop so the
+	worker exits cleanly (saving infra $). When the user next opens the chat they
+	answer the still-pending prompt, which respawns the `ai` task to continue.
+	"""
+
+
 class InteractivityBackend:
 	"""Base class for AI interactivity backends."""
 
@@ -248,18 +259,13 @@ class RemoteBackend(InteractivityBackend):
 		answer = self._resolve_answer(answered_query)
 		if answer is not None:
 			return answer
-		# Timeout: atomically flip ONLY a doc that is STILL pending, so a concurrent
-		# older pending doc isn't disturbed. If the answer landed in the race window
-		# the doc is already 'answered' and this no-ops -- re-read rather than abandon it.
-		modified = self.query_engine.update(
-			{**base, "status": "pending"},
-			{"$set": {"status": "timed_out"}}
-		)
-		if not modified:
-			answer = self._resolve_answer(answered_query)
-			if answer is not None:
-				return answer
-		return None
+		# Timeout with no answer. Do NOT flip the doc to timed_out and do NOT
+		# return None (which the guardrail would treat as a deny) — that produced
+		# the "silently auto-denied while the user was away" state. Instead LEAVE
+		# the doc pending and raise, so the AI loop unwinds and the worker exits
+		# cleanly (saving infra $). The pending prompt survives; when the user next
+		# answers it, the chat respawns the `ai` task to continue where it left off.
+		raise UserInputTimeout(f"No answer for {prompt_type} prompt after {self.timeout}s; worker exiting, prompt left pending")  # noqa: E501
 
 	def _resolve_answer(self, answered_query):
 		"""Return the newest answered doc's answer, or None if none answered.
