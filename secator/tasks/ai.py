@@ -18,7 +18,7 @@ from secator.ai.actions import (
 	ActionContext, check_guardrails, safe_dispatch_action, _run_batch
 )
 from secator.ai.guardrails import PermissionEngine
-from secator.ai.interactivity import create_backend, RemoteBackend
+from secator.ai.interactivity import create_backend, RemoteBackend, UserInputTimeout
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
@@ -721,14 +721,15 @@ class ai(PythonRunner):
 				continue_msg = format_continue(iteration, self.max_iterations, stop_or_continue)
 				self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
 
-			except KeyboardInterrupt:
-				yield Warning(message="Interrupted by user.")
-				result = self._prompt_and_redetect([])
-				if result is None:
-					self._save_history()
-					return
-				yield from result
-				continue
+			except UserInputTimeout as e:
+				# A remote prompt went unanswered past the timeout. The pending doc
+				# is LEFT pending (not denied) — exit the worker cleanly to save infra
+				# $. Emit the notice to the console/pod-logs ONLY (not a persisted
+				# Warning), so it does NOT surface in the chat: the still-pending
+				# prompt is the user-facing state, and answering it later respawns
+				# the task to continue.
+				console.print(Warning(message=str(e)))
+				return
 
 			except Exception as e:
 				if isinstance(e, litellm.RateLimitError):
