@@ -247,6 +247,19 @@ class TestWeirdContentResponses(unittest.TestCase):
 		self.assertIsNotNone(err)
 		self.assertNotIn('support tool calling', getattr(err, 'message', ''))
 
+	def test_content_filter_stops_immediately_with_accurate_message(self):
+		"""A content_filter empty turn is a deterministic moderation block — stop at
+		once (no 3x retry) with a message naming the content filter, not tool support."""
+		task = _make_loop_task()
+		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[], finish_reason="content_filter")])
+		self.assertIsNone(aborted)
+		self.assertEqual(n, 1)  # did NOT retry — content filter is deterministic
+		err = next((i for i in items if getattr(i, '_type', '') == 'error'), None)
+		self.assertIsNotNone(err)
+		msg = getattr(err, 'message', '')
+		self.assertIn('content filter', msg)
+		self.assertNotIn('support tool calling', msg)
+
 	def test_length_finish_reason_reports_truncation(self):
 		"""An empty turn with finish_reason=length is reported as a truncation/output-cap
 		issue, not a generic empty response."""

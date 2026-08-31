@@ -614,6 +614,19 @@ class ai(PythonRunner):
 				# turn (finish_reason == "length"). Report the real reason, back off
 				# to let a transient blip recover, and retry a few times before giving up.
 				if not content and not tool_calls:
+					# Content moderation is deterministic — retrying just re-blocks. Stop
+					# immediately with an accurate, actionable message. This is a provider
+					# moderation decision (e.g. some OpenRouter routes moderate offensive-
+					# security content), not a secator or tool-calling issue.
+					if finish_reason == "content_filter":
+						yield Error(message=(
+							"The provider blocked this response with a content filter "
+							"(finish_reason=content_filter) and returned no content — a provider "
+							"moderation decision, not a secator or tool-calling issue. Some model/"
+							"provider routes moderate offensive-security content; try a different "
+							"model or provider, or rephrase the request."))
+						self._save_history()
+						return
 					empty_streak += 1
 					if finish_reason == "length":
 						reason = "response truncated (finish_reason=length) — the model hit its output-token cap"
