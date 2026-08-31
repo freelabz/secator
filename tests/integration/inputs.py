@@ -46,6 +46,12 @@ INPUTS_WORKFLOWS = {
 	'subdomain_recon': 'api.github.com',
 	'url_crawl': 'localhost:3000',
 	'url_fuzz': 'http://localhost:3000',
+	# Served by the js_server container (docker-compose.yml), which exposes tests/integration/js.
+	# No expected outputs: retire.js matches inside httpx's stored response, whose path carries a
+	# per-run report folder and a hashed file name, so `matched_at` -- a compared field on
+	# Vulnerability -- is never stable across runs. Same reason url_crawl asserts no trufflehog
+	# finding. The retirejs parsing itself is covered by OUTPUTS_TASKS['retirejs'].
+	'url_js_scan': 'http://localhost:8901/jquery-1.8.3.min.js',
 	'url_nuclei': [
 		'http://localhost:3000',
 		'http://localhost:8080',
