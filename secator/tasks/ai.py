@@ -454,6 +454,10 @@ class ai(PythonRunner):
 			encryptor=self.encryptor, system_prompt=self.system_prompt)
 		self.history.model = self.model
 
+		# Seed the encryptor's map so tokens minted by earlier turns still decrypt
+		# (else `[IPV4:...]`/`[HOST:...]` leak into shell commands + scope checks).
+		self._restore_pii_map()
+
 		# Append the new user message that respawned the conversation
 		if self.prompt:
 			yield self._emit_user_prompt(self.prompt)
@@ -519,6 +523,48 @@ class ai(PythonRunner):
 			status="completed",
 			extra_data={"turn_uuid": turn_uuid},
 		), print=False)
+
+	def _persist_pii_map(self):
+		"""Persist the encryptor's placeholder->value map for this session.
+
+		The map (``[IPV4:...]``/``[HOST:...]`` -> real value) is in-memory and
+		per-worker, built as values are encrypted. Without persisting it, a RESUMED
+		worker starts with an EMPTY map and cannot decrypt tokens minted by earlier
+		turns — so those tokens leak verbatim into shell commands (DNS fails) and
+		scope/IP checks (ValueError). Store it as an internal ``ai_type="pii_map"``
+		doc (one per session, upserted): restore_history_from_db skips it so it never
+		enters the LLM transcript, and the UI hides it. The plaintext values already
+		live in the workspace findings, so this adds no LLM-provider exposure.
+		"""
+		if self.interactive != "remote" or not self.encryptor or not self.encryptor.pii_map:
+			return
+		payload = {"pii_map": dict(self.encryptor.pii_map), "hash_map": dict(self.encryptor.hash_map)}
+		try:
+			modified = self._get_query_engine().update(
+				{"_type": "ai", "ai_type": "pii_map", "_context.session_id": self.session_id},
+				{"$set": {"extra_data": payload}},
+			)
+		except Exception as e:  # noqa: BLE001 - persistence best-effort; never crash the run
+			self.debug(f'pii_map persist failed: {e}', sub='llm')
+			return
+		if not modified:
+			# No existing doc yet — insert one; subsequent turns update it in place.
+			self.add_result(Ai(content="", ai_type="pii_map", extra_data=payload), print=False)
+
+	def _restore_pii_map(self):
+		"""Seed the encryptor's map from the persisted session doc (see _persist_pii_map)."""
+		if self.interactive != "remote" or not self.encryptor:
+			return
+		try:
+			docs = self._get_query_engine().search(
+				{"_type": "ai", "ai_type": "pii_map", "_context.session_id": self.session_id}, limit=1)
+		except Exception as e:  # noqa: BLE001 - restore best-effort; a fresh map still works forward
+			self.debug(f'pii_map restore failed: {e}', sub='llm')
+			return
+		if docs:
+			ed = docs[0].get("extra_data") or {}
+			self.encryptor.pii_map.update(ed.get("pii_map") or {})
+			self.encryptor.hash_map.update(ed.get("hash_map") or {})
 
 	# -------------------------------------------------------------------------
 	# _run_loop: main LLM interaction loop
@@ -689,6 +735,10 @@ class ai(PythonRunner):
 					follow_up_choices = dispatch_result.get("follow_up_choices")
 					stop_reason = dispatch_result.get("stop_reason")
 					follow_up_prompt_uuid = dispatch_result.get("follow_up_prompt_uuid")
+
+					# Persist the encryptor's map (grown by this turn's tool/query
+					# results) so a later resumed worker can decrypt these tokens.
+					self._persist_pii_map()
 
 					if len(actions) > 1:
 						yield Info(message=f"Executed {len(actions)} actions.")
@@ -1096,7 +1146,15 @@ class ai(PythonRunner):
 			if self.dangerous:
 				denial = None
 			else:
-				denial = yield from check_guardrails(action, ctx)
+				try:
+					denial = yield from check_guardrails(action, ctx)
+				except Exception as e:  # noqa: BLE001
+					# A guardrail check must never abort the whole chat — e.g. a
+					# malformed/unresolved target crashing the scope parser
+					# (ipaddress ValueError). Turn it into a denial so it's fed back
+					# to the LLM as a tool error (retry with a valid target), instead
+					# of terminating the run via the loop's outer handler.
+					denial = f"Guardrail check failed for this action: {e}. Fix the arguments (e.g. a malformed or unresolvable target) and retry."  # noqa: E501
 
 			act_desc = args.get("command") or args.get("name") or args.get("query")
 			self.debug(f'[guardrails] {name}({act_desc}) => {"denied" if denial else "ok"}', sub='guardrail')
