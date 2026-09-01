@@ -349,3 +349,24 @@ class TestMalformedArgFuzzer(unittest.TestCase):
 			if aborted is not None:
 				failures.append(f"#{i} {name} args={raw!r} -> ABORTED ({type(aborted).__name__}: {aborted})")
 		self.assertEqual(failures, [], f"{len(failures)} resilience failures:\n" + "\n".join(failures[:20]))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestDetectModeEmptyPromptSetsTools(unittest.TestCase):
+	"""Regression: an empty-prompt RESUME (respawn after the worker exited on a
+	pending prompt) must still leave `tool_schemas` set. The empty-prompt branch of
+	_detect_mode used to return early without building tools, so _run_loop then
+	raised `AttributeError: 'ai' object has no attribute 'tool_schemas'`."""
+
+	def test_empty_prompt_builds_tools_and_defaults_chat(self):
+		task = ai.__new__(ai)
+		task.prompt = ""      # empty (resume)
+		task.mode = None      # not yet set
+		built = []
+		task._rebuild_prompt_and_tools = lambda: (built.append(True), setattr(task, 'tool_schemas', []))
+
+		task._detect_mode()
+
+		self.assertTrue(built, "_detect_mode must build tools on the empty-prompt path")
+		self.assertEqual(task.mode, "chat")
+		self.assertTrue(hasattr(task, "tool_schemas"))
