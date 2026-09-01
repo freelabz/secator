@@ -94,18 +94,25 @@ def _target_shape(target):
 	if info.type not in NETWORK_TYPES:
 		return None
 	canonical = canonicalize_target(target)
-	if info.type == CIDR_RANGE:
-		return _Shape(net=ipaddress.ip_network(canonical, strict=False), canonical=canonical)
-	if info.type == IP and _is_ip_literal(canonical):
-		return _Shape(ip=ipaddress.ip_address(canonical), canonical=canonical)
-	# URL / HOST / HOST_PORT (and `localhost`, typed IP but not a real IP literal):
-	# pull the host out (strips scheme / port / path).
-	host = _target_host(canonical, info.type)
-	if _is_ip_literal(host):
-		# IP literal hiding in a url / host:port (8.8.8.8:443, http://8.8.8.8/) --
-		# match it by network containment, never as a hostname string.
-		return _Shape(ip=ipaddress.ip_address(host), canonical=canonical)
-	return _Shape(host=host.lower().rstrip('.'), canonical=canonical)
+	# A target the classifier typed as IP/CIDR but that ipaddress can't actually
+	# parse (a malformed / not-really-an-IP string, e.g. a leaked `HOST:...` token)
+	# must not raise out of the scope check — treat it as an unparseable target
+	# (None) so the caller denies it, rather than crashing the whole run.
+	try:
+		if info.type == CIDR_RANGE:
+			return _Shape(net=ipaddress.ip_network(canonical, strict=False), canonical=canonical)
+		if info.type == IP and _is_ip_literal(canonical):
+			return _Shape(ip=ipaddress.ip_address(canonical), canonical=canonical)
+		# URL / HOST / HOST_PORT (and `localhost`, typed IP but not a real IP literal):
+		# pull the host out (strips scheme / port / path).
+		host = _target_host(canonical, info.type)
+		if _is_ip_literal(host):
+			# IP literal hiding in a url / host:port (8.8.8.8:443, http://8.8.8.8/) --
+			# match it by network containment, never as a hostname string.
+			return _Shape(ip=ipaddress.ip_address(host), canonical=canonical)
+		return _Shape(host=host.lower().rstrip('.'), canonical=canonical)
+	except ValueError:
+		return None
 
 
 def _entry_net(entry):
