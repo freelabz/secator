@@ -900,7 +900,12 @@ class ai(PythonRunner):
 				self._rebuild_prompt_and_tools()
 			return
 		if not self.prompt:
-			self.mode = "chat"
+			# No prompt to classify (e.g. an empty-prompt RESUME after the worker
+			# exited on a pending prompt). Keep any restored mode, default to chat,
+			# and build tools — the early return must still leave tool_schemas set,
+			# else _run_loop raises AttributeError: 'ai' has no attribute 'tool_schemas'.
+			self.mode = self.mode or "chat"
+			self._rebuild_prompt_and_tools()
 			return
 		# Resolve unambiguous prompts deterministically; skip the intent LLM round-trip.
 		fast_mode = fast_detect_mode(self.prompt)
