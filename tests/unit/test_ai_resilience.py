@@ -350,6 +350,54 @@ class TestMalformedArgFuzzer(unittest.TestCase):
 		self.assertEqual(failures, [], f"{len(failures)} resilience failures:\n" + "\n".join(failures[:20]))
 
 
+@unittest.skipUnless(HAS_AI, 'ai addon required')
+class TestUserInputTimeoutPropagates(unittest.TestCase):
+	"""A remote permission prompt that times out (UserInputTimeout raised inside
+	check_guardrails) must NOT be swallowed as a fed-back 'Guardrail check failed'
+	denial — that made the model retry into another prompt → another timeout, a loop
+	that left the runner stuck RUNNING. It must propagate to the loop's outer handler,
+	which exits the worker cleanly with the prompt left pending (one LLM call, no loop)."""
+
+	def test_timeout_exits_clean_not_looped(self):
+		from secator.ai.interactivity import UserInputTimeout
+
+		def _timeout_guardrails(action, ctx):
+			if False:  # make this a generator (matches `yield from check_guardrails`)
+				yield
+			raise UserInputTimeout("No answer for permission prompt after 600s")
+
+		task = _make_loop_task()
+		task.dangerous = False  # exercise the guardrail path
+		with patch('secator.tasks.ai.check_guardrails', _timeout_guardrails):
+			items, calls, aborted = _run(
+				task, [_resp(tool_calls=[_tc('run_shell', '{"command": "nmap -sV x"}')])])
+
+		texts = " ".join(
+			str(getattr(i, 'content', '') or getattr(i, 'message', '') or '') for i in items)
+		# Not turned into a denial fed back to the LLM
+		self.assertNotIn("Guardrail check failed", texts)
+		# Exited after the single turn instead of looping back into another LLM call
+		self.assertEqual(calls, 1)
+
+	def test_arg_error_still_fed_back_as_denial(self):
+		"""Contrast: a ValueError (bad action args) is STILL turned into a denial and
+		fed back so the model can retry with a valid target (loop continues)."""
+		def _bad_args(action, ctx):
+			if False:
+				yield
+			raise ValueError("'HOST:xyz' does not appear to be an IPv4 or IPv6 address")
+
+		task = _make_loop_task()
+		task.dangerous = False  # exercise the guardrail path
+		with patch('secator.tasks.ai.check_guardrails', _bad_args):
+			items, calls, aborted = _run(
+				task, [_resp(tool_calls=[_tc('run_shell', '{"command": "nmap x"}')])])
+		texts = " ".join(
+			str(getattr(i, 'content', '') or getattr(i, 'message', '') or '') for i in items)
+		self.assertIn("Guardrail check failed", texts)
+		self.assertGreaterEqual(calls, 2)  # fed back -> model asked again
+
+
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestDetectModeEmptyPromptSetsTools(unittest.TestCase):
 	"""Regression: an empty-prompt RESUME (respawn after the worker exited on a

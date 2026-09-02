@@ -1166,12 +1166,21 @@ class ai(PythonRunner):
 			else:
 				try:
 					denial = yield from check_guardrails(action, ctx)
-				except Exception as e:  # noqa: BLE001
-					# A guardrail check must never abort the whole chat — e.g. a
-					# malformed/unresolved target crashing the scope parser
-					# (ipaddress ValueError). Turn it into a denial so it's fed back
-					# to the LLM as a tool error (retry with a valid target), instead
-					# of terminating the run via the loop's outer handler.
+				except UserInputTimeout:
+					# NOT an error: a remote permission prompt went unanswered past the
+					# timeout. It MUST propagate to the loop's outer handler, which exits
+					# the worker cleanly and LEAVES THE PROMPT PENDING for the user to
+					# answer later (a respawn then continues). Swallowing it here (as a
+					# denial fed back to the LLM) makes the model retry into another
+					# prompt → another timeout, looping and leaving the runner stuck.
+					raise
+				except (ValueError, TypeError) as e:
+					# A guardrail check must never abort the whole chat over bad ACTION
+					# ARGUMENTS — e.g. a malformed/unresolved target crashing the scope
+					# parser (ipaddress ValueError). Turn only these into a denial so
+					# they're fed back to the LLM as a tool error (retry with a valid
+					# target), instead of terminating the run via the loop's outer
+					# handler. Any other exception propagates (genuine failure).
 					denial = f"Guardrail check failed for this action: {e}. Fix the arguments (e.g. a malformed or unresolvable target) and retry."  # noqa: E501
 
 			act_desc = args.get("command") or args.get("name") or args.get("query")
