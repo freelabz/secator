@@ -270,14 +270,23 @@ class bbot(Command):
 			'extra_data': 'extra_data',
 		}
 	}
+	# bbot's deps (regex, yara-python) ship no prebuilt wheels for newer Pythons
+	# (e.g. 3.14), so pip builds them from source — which needs the Python dev
+	# headers (Python.h) plus a C toolchain. The apt/dnf paths lacked
+	# python3-dev/python3-devel, so `secator install bbot` failed on Ubuntu/Debian
+	# with `fatal error: Python.h: No such file or directory`.
 	install_pre = {
 		'apk': ['python3-dev', 'linux-headers', 'musl-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
+		'apt': ['python3-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
+		'dnf|yum|zypper': ['python3-devel', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
 		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium']
 	}
 	install_version = '2.7.2'
 	install_cmd = 'pipx install bbot==[install_version] --force'
 	install_post = {
-		'*': f'rm -fr {CONFIG.dirs.share}/pipx/venvs/bbot/lib/python3.12/site-packages/ansible_collections/*'
+		# Glob the python minor version so this cleanup isn't silently skipped when
+		# the pipx venv runs on a different Python than a hardcoded one (e.g. 3.14).
+		'*': f'rm -fr {CONFIG.dirs.share}/pipx/venvs/bbot/lib/python3.*/site-packages/ansible_collections/*'
 	}
 
 	@staticmethod
