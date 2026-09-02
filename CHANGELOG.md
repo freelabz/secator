@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.43.3](https://github.com/freelabz/secator/compare/v0.43.2...v0.43.3) (2026-09-02)
+
+
+### Bug Fixes
+
+* **bbot:** add python dev headers to apt/dnf install prereqs ([#1369](https://github.com/freelabz/secator/issues/1369)) ([f491d05](https://github.com/freelabz/secator/commit/f491d05332181a288ed7a57b36757c7e89abd891))
+* **hooks:** carry task description into PENDING doc at on_build time ([#1361](https://github.com/freelabz/secator/issues/1361)) ([fa32f58](https://github.com/freelabz/secator/commit/fa32f58bc69a3ff44aedebb020921626f096801e))
+* **wpprobe:** restore -f multi-target scanning ([#1357](https://github.com/freelabz/secator/issues/1357)) ([4bc9a1c](https://github.com/freelabz/secator/commit/4bc9a1c73885433ace245272349c61ab214b0029))
+* **wpscan:** install into a fixed gem dir + set GEM_HOME (fixes exegol crash [#1366](https://github.com/freelabz/secator/issues/1366)) ([#1367](https://github.com/freelabz/secator/issues/1367)) ([1b242ab](https://github.com/freelabz/secator/commit/1b242ab5a9b29295377228108e2d181b960b512d))
+
 ## [0.43.2](https://github.com/freelabz/secator/compare/v0.43.1...v0.43.2) (2026-08-25)
 
 
