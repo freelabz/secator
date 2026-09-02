@@ -275,6 +275,10 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 			)
 			if denial:
 				return denial
+			# Approved: mark the WHOLE command approved for this run so the re-check
+			# below doesn't re-parse its sub-commands and re-prompt (one prompt, not
+			# max_rounds). Hard-deny checks still apply on the next check_action.
+			ctx.permission_engine.approved_shell_commands.add(result.shell_command.strip())
 			if parse_failed:
 				return None
 

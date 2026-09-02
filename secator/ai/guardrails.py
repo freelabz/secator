@@ -781,6 +781,10 @@ class PermissionEngine:
 		self.out_of_scope = as_scope_list(out_of_scope)
 		self.rules = {"allow": [], "deny": [], "ask": []}
 		self.runtime_allow: List[Tuple[str, List[str]]] = []
+		# Exact shell command strings the user approved this run (allow / allow_all).
+		# The re-check after an approval consults this so a compound command isn't
+		# re-parsed and re-prompted per round (it prompts once, then resolves).
+		self.approved_shell_commands: set = set()
 
 		for category in ("allow", "deny", "ask"):
 			for rule_str in config.get(category, []):
@@ -926,6 +930,12 @@ class PermissionEngine:
 					most_restrictive = result
 				elif most_restrictive is None:
 					most_restrictive = result
+			# The whole command was already approved this run (allow / allow_all). The
+			# hard-deny checks above still apply, but don't re-prompt for its unmatched
+			# sub-commands — resolve to allow so a compound command prompts once, not
+			# once per re-check round.
+			if command.strip() in self.approved_shell_commands:
+				return PermissionResult(decision="allow", reason="shell command approved this run")
 			if unmatched:
 				return PermissionResult(
 					decision="ask",
