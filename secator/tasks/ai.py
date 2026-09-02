@@ -673,11 +673,29 @@ class ai(PythonRunner):
 				# giving up with an accurate, actionable message.
 				MAX_EMPTY_RETRIES = 5  # a bit generous so OpenRouter route-roulette can recover
 				if not content and not tool_calls:
-					empty_streak += 1
+					# A provider CONTENT FILTER block is different from a transient empty
+					# body: retrying rarely helps (the same content re-triggers moderation)
+					# and killing the task forces the user to re-send, which reboots a new
+					# worker. Instead warn ONCE and WAIT for the user to steer (refine the
+					# request / switch model) in THIS worker — no retry spam, no kill+reboot.
+					# (If the user takes too long the wait exits cleanly via UserInputTimeout
+					# and their next message respawns and continues — same graceful path.)
 					if finish_reason == "content_filter":
-						reason = ("blocked by a provider content filter (finish_reason=content_filter) — "
-								  "intermittent provider moderation, not a secator or tool-calling issue")
-					elif finish_reason == "length":
+						yield Warning(message=(
+							"The model provider's content filter blocked this response "
+							"(finish_reason=content_filter) — intermittent, route-dependent moderation, "
+							"not a secator or tool-calling issue. Refine your request (or switch model) "
+							"and I'll continue."))
+						result = self._prompt_and_redetect([])
+						if result is None:
+							self._save_history()
+							return
+						yield from result
+						continue
+					# `length` / transient empty body: a retry with backoff can land a clean
+					# route / a shorter turn, so keep retrying a few times before giving up.
+					empty_streak += 1
+					if finish_reason == "length":
 						reason = "response truncated (finish_reason=length) — the model hit its output-token cap"
 					else:
 						reason = f"empty response from the provider (finish_reason={finish_reason or 'unknown'})"

@@ -247,28 +247,27 @@ class TestWeirdContentResponses(unittest.TestCase):
 		self.assertIsNotNone(err)
 		self.assertNotIn('support tool calling', getattr(err, 'message', ''))
 
-	def test_content_filter_is_retried_and_can_recover(self):
-		"""content_filter is intermittent + route-dependent (OpenRouter), so it must be
-		RETRIED (a fresh route can succeed), not stopped at once."""
+	def test_content_filter_warns_once_and_waits_for_steer(self):
+		"""content_filter is NOT retried or killed: warn ONCE, then wait for the user
+		to steer (refine the request) in the same worker. With AutoBackend the wait
+		returns None -> clean exit, no Error, no retry spam."""
 		task = _make_loop_task()
-		# one content_filter, then the harness's terminating content turn -> recovers
 		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[], finish_reason="content_filter")])
 		self.assertIsNone(aborted)
-		self.assertGreaterEqual(n, 2)  # retried after the filtered turn
-		warns = [getattr(i, 'message', '') for i in items if getattr(i, '_type', '') == 'warning']
-		self.assertTrue(any('content filter' in w for w in warns), warns)
+		filt = [getattr(i, 'message', '') for i in items
+				if getattr(i, '_type', '') == 'warning' and 'content filter' in getattr(i, 'message', '')]
+		self.assertEqual(len(filt), 1, filt)  # exactly one content-filter warning
+		self.assertFalse([i for i in items if getattr(i, '_type', '') == 'error'])  # not killed
 
-	def test_persistent_content_filter_error_names_the_filter(self):
-		"""If every route filters, the final Error names the content filter (and points at
-		using a different model/provider), never 'tool calling'."""
+	def test_persistent_content_filter_never_errors(self):
+		"""Repeated content_filter must never exhaust retries into an Error/kill — it
+		warns once then waits for the user (exits cleanly under AutoBackend), so the
+		task is resumable instead of dead."""
 		task = _make_loop_task()
 		items, n, aborted = _run(task, [_resp(content=None, tool_calls=[], finish_reason="content_filter")
 										  for _ in range(5)])
-		err = next((i for i in items if getattr(i, '_type', '') == 'error'), None)
-		self.assertIsNotNone(err)
-		msg = getattr(err, 'message', '')
-		self.assertIn('content filter', msg)
-		self.assertNotIn('support tool calling', msg)
+		self.assertIsNone(aborted)
+		self.assertFalse([i for i in items if getattr(i, '_type', '') == 'error'])
 
 	def test_length_finish_reason_reports_truncation(self):
 		"""An empty turn with finish_reason=length is reported as a truncation/output-cap
