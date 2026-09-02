@@ -119,7 +119,16 @@ def build_pending_doc(parent, task_spec, child_type):
 		'name': task_spec.get('name'),
 		'status': 'PENDING',
 		'done': False,
-		'config': {'type': child_type, 'name': task_spec.get('name')},
+		# Carry the build-time description (workflow-node override, e.g.
+		# "Find open ports (light)") so the UI shows it while PENDING, not only
+		# once the child runs. The UI reads config.description (falling back to
+		# config.name), and update_runner overwrites this with the full config
+		# on first run — which resolves to the same description.
+		'config': {
+			'type': child_type,
+			'name': task_spec.get('name'),
+			'description': task_spec.get('description', ''),
+		},
 		'context': dict(task_spec.get('context', {})),
 		'has_parent': True,
 		'chunk': task_spec.get('chunk'),
