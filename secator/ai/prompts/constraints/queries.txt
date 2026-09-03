@@ -1,6 +1,5 @@
 <queries>
-Use the query_workspace tool to read what already exists in the workspace — it is the single source of truth for prior findings (targets, vulnerabilities, exploits, tags, etc.). Query whenever it helps you decide or avoids redundant work; when exploiting, the related exploits and the vulnerability itself live here, so query them first.
-Keep queries targeted — avoid broad or redundant ones.
+Use query_workspace to read existing findings in the workspace (targets, vulnerabilities, exploits, tags). EVERY query MUST be targeted: always include a `_type` filter AND at least one specific field (id, cve, cves, name, matched_at, severity, ...). NEVER send an empty or unscoped query like {} — it just returns the first 100 of everything and wastes the turn. If a query returns the 100-result cap, it was too broad: narrow it. Do NOT re-query for data that is already in your context (e.g. a vulnerability you were handed) — query only for what you don't already have.
 If a query fails, analyze the error and retry with corrected parameters. If you hit a result limit, use more specific queries. Do not give up after a single failure.
 
 The following MongoDB operators can be used:
