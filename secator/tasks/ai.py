@@ -147,7 +147,7 @@ class ai(PythonRunner):
 		"api_key": {"type": str, "default": "", "sensitive": True, "help": "API key for LLM provider (defaults to configured key)"},  # noqa: E501
 		"api_base": {"type": str, "default": "", "help": "API base URL (defaults to configured base)"},
 		"sensitive": {"is_flag": True, "default": True, "help": "Encrypt sensitive data"},
-		"max_iterations": {"type": int, "default": 10, "help": "Max iterations"},
+		"max_iterations": {"type": int, "default": CONFIG.addons.ai.max_iterations, "help": "Max iterations"},
 		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
 		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
