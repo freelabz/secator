@@ -727,7 +727,10 @@ class ai(PythonRunner):
 					message=cap_message(assistant_msg),
 					extra_data={
 						"iteration": iteration,
-						"max_iterations": self.max_iterations,
+						# Persist -1 (not float('inf')) for the uncapped case: inf is not
+						# JSON-compliant and 500s the transcript search (strict json.dumps),
+						# which makes the whole conversation fail to load in the UI.
+						"max_iterations": (-1 if self.max_iterations == float('inf') else self.max_iterations),
 						"tokens": usage.get("tokens") if usage else None,
 						"cost": usage.get("cost") if usage else None,
 					},
