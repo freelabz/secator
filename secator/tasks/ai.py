@@ -998,14 +998,21 @@ class ai(PythonRunner):
 				self.mode = "chat"
 		if not self.mode:
 			self.mode = "chat"
-		# Effective max = the largest of: the run-opt value, the mode floor, and the
-		# runtime config floor (CONFIG.addons.ai.max_iterations, env-overridable via
-		# SECATOR_ADDONS_AI_MAX_ITERATIONS). The config floor matters because the API
-		# bakes a run-opt `max_iterations` default at dispatch using ITS installed
-		# core, which can be stale/lower — without this floor a raised worker config
-		# would be silently ignored.
-		mode_max = get_mode_config(self.mode).get("max_iterations", 0)
-		self.max_iterations = max(self.max_iterations, mode_max, CONFIG.addons.ai.max_iterations)
+		# Resolve the agent-loop cap.
+		#  - A config value <= 0 (SECATOR_ADDONS_AI_MAX_ITERATIONS=-1) DISABLES the cap:
+		#    the run continues until the model sends `stop` (or returns no tool call).
+		#    Useful for long exploitation runs where hitting the cap kills the worker
+		#    and loses locally checked-out PoCs.
+		#  - Otherwise the effective cap is the largest of the run-opt value, the mode
+		#    floor, and the config floor. The config floor matters because the API bakes
+		#    a run-opt `max_iterations` default at dispatch using ITS installed core,
+		#    which can be stale/lower — without it a raised worker config is ignored.
+		config_max = CONFIG.addons.ai.max_iterations
+		if config_max is not None and config_max <= 0:
+			self.max_iterations = float('inf')  # unlimited — model self-terminates via `stop`
+		else:
+			mode_max = get_mode_config(self.mode).get("max_iterations", 0)
+			self.max_iterations = max(self.max_iterations, mode_max, config_max)
 		self.system_prompt = self._system_prompt_for(self.mode)
 		if not hasattr(self, 'tool_schemas') or not old_mode or old_mode != self.mode:
 			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)

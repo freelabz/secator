@@ -311,7 +311,7 @@ def format_continue(iteration: int, max_iterations: int, instruction="continue")
 	"""
 	return json.dumps({
 		"iteration": iteration,
-		"max": max_iterations,
+		"max": "unlimited" if max_iterations == float('inf') else max_iterations,
 		"instruction": instruction
 	}, separators=(',', ':'))
 
