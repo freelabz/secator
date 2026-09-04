@@ -250,6 +250,9 @@ class AiAddon(StrictModel):
 	# Max agent loop iterations for an AI run. Env-overridable via
 	# SECATOR_ADDONS_AI_MAX_ITERATIONS (autonomous exploitation needs many steps —
 	# recon, clone/read a PoC, run, debug, retry). Mode configs impose a floor.
+	# Set to -1 (or any value <= 0) to DISABLE the cap entirely: the run then continues
+	# until the model sends `stop` — avoids killing the worker mid-exploit and losing
+	# locally checked-out PoCs.
 	max_iterations: int = 25
 	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
