@@ -73,7 +73,7 @@ class ffuf(HttpFuzzer):
 	}
 	encoding = 'ansi'
 	has_fuzz_keyword = False
-	install_version = 'v2.1.0'
+	install_version = 'v2.2.1'
 	install_cmd = 'go install -v github.com/ffuf/ffuf/v2@[install_version]'
 	github_handle = 'ffuf/ffuf'
 	proxychains = False
