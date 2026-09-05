@@ -1,6 +1,6 @@
 <queries>
-Use the query_workspace tool when you REALLY need to query existing findings in the workspace (unlikely).
-Try to make as few queries as possible.
+Use query_workspace to read existing findings in the workspace (targets, vulnerabilities, exploits, tags). EVERY query MUST be targeted: always include a `_type` filter AND at least one specific field (id, cve, cves, name, matched_at, severity, ...). NEVER send an empty or unscoped query like {} — it just returns the first 100 of everything and wastes the turn. If a query returns the 100-result cap, it was too broad: narrow it. Do NOT re-query for data that is already in your context (e.g. a vulnerability you were handed) — query only for what you don't already have.
+query_workspace is the ONLY supported way to read the workspace. Each result includes its `_uuid` — that stable id is the handle you pass to tools like add_vuln_poc. The `_uuid` you need is therefore ALWAYS either already in your context (the finding you were handed) or in a query_workspace result. NEVER try to reach the workspace database directly, read its connection string, dump config/env, or scan the filesystem stores to find a `_uuid` or a finding — those sources are blocked, off-limits, and unnecessary. If you can't obtain a needed `_uuid` from context or a query, stop and say so; do not go hunting.
 If a query fails, analyze the error and retry with corrected parameters. If you hit a result limit, use more specific queries. Do not give up after a single failure.
 
 The following MongoDB operators can be used:
