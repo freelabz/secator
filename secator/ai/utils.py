@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import random
+import re
 from dataclasses import fields
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -40,6 +41,67 @@ def _sanitized_env() -> dict:
 		return (any(u.startswith(p) for p in SENSITIVE_ENV_PREFIXES)
 				or any(s in u for s in ("KEY", "SECRET", "TOKEN", "PASSWORD")))
 	return {k: v for k, v in os.environ.items() if not _sensitive(k)}
+
+
+# Files/paths that hold platform secrets (Mongo/Celery URLs, LLM keys). Reading any
+# of these from an AI shell command is forbidden UNCONDITIONALLY — this deny lives
+# outside the permission engine on purpose, so it still holds when dangerous=True
+# nulls the engine and disables every other guardrail.
+_SECRET_READ_MARKERS = ("/.secator/config.yml", "/.secator/config.yaml", "/.secator/.env")
+_PROC_ENVIRON_RE = re.compile(r"/proc/\S*/environ")
+# A connection URL carrying inline credentials: scheme://user:pass@host…
+_CREDS_URL_RE = re.compile(r"[a-zA-Z][\w+.\-]*://[^\s:/@]+:[^\s@/]+@[^\s'\"]*")
+
+
+def _denied_secret_read(command: str) -> Optional[str]:
+	"""Return a denial reason if the command would read a secator secret source, else None.
+
+	Blocks the two file sources (``~/.secator/config.yml`` / ``.env``) and the
+	parent-process env-leak vector (``/proc/<pid>/environ`` bypasses _sanitized_env,
+	which only cleans the child's own environment). Reads elsewhere (e.g. the run's
+	report outputs under ~/.secator/reports/) are unaffected.
+	"""
+	c = command.lower()
+	if any(m in c for m in _SECRET_READ_MARKERS):
+		return "Reading secator config/.env files is forbidden — they contain platform secrets."
+	if _PROC_ENVIRON_RE.search(c):
+		return "Reading process environment via /proc is forbidden — it exposes platform secrets."
+	return None
+
+
+def _secret_values() -> set:
+	"""Concrete secret strings that must never reach the LLM/transcript.
+
+	Values of clearly-secret env vars (LLM/cloud keys, tokens, passwords) plus any
+	env value that is a credentialed connection URL (Mongo/AMQP/redis). Non-secret
+	SECATOR_* values (ports, frequencies) are deliberately excluded so scrubbing
+	can't corrupt legitimate output.
+	"""
+	vals = set()
+	for k, v in os.environ.items():
+		if not v or len(v) < 8:
+			continue
+		u = k.upper()
+		looks_secret = any(s in u for s in ("KEY", "SECRET", "TOKEN", "PASSWORD", "PRIVATE"))
+		is_conn = "://" in v and re.search(r"://[^\s:/@]+:[^\s@/]+@", v) is not None
+		if looks_secret or is_conn:
+			vals.add(v)
+	return vals
+
+
+def _scrub_secrets(text: str) -> str:
+	"""Redact platform secrets from shell output before it is persisted/shown.
+
+	Defense-in-depth for every leak vector _sanitized_env can't cover (config files,
+	/proc, process args): redacts exact secret values verbatim, then redacts any
+	remaining credentialed connection URL whole (scheme through host/path).
+	"""
+	if not text:
+		return text
+	for v in _secret_values():
+		text = text.replace(v, "[REDACTED]")
+	text = _CREDS_URL_RE.sub("[REDACTED]", text)
+	return text
 
 
 def _build_action_display(action: Dict) -> str:

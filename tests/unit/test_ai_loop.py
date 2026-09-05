@@ -911,6 +911,7 @@ class TestMainLoopRemoteE2E(unittest.TestCase):
 		engine = PermissionEngine(_make_permission_config(), targets=["10.0.0.1"], workspace="/tmp/ws")
 
 		call_count = [0]
+
 		def mock_ask(question="", choices=None, session_id="", prompt_type="", **kwargs):
 			call_count[0] += 1
 			if prompt_type == "permission":
@@ -1231,6 +1232,48 @@ class TestDrainSteers(unittest.TestCase):
 		# Should not raise, yields nothing, history untouched.
 		self.assertEqual(list(task._drain_steers()), [])
 		self.assertEqual(task.history.to_messages(), [])
+
+
+@unittest.skipUnless(HAS_AI, "AI addon not installed")
+class TestYieldToolResultsUuid(unittest.TestCase):
+	"""query_workspace results must keep `_uuid` (the handle add_vuln_poc requires);
+	other tool results keep stripping it."""
+
+	def _run(self, tool_name):
+		import importlib
+		ai_mod = importlib.import_module("secator.tasks.ai")
+		runner = MagicMock()
+		runner.history.get_action_budget.return_value = 100000
+		runner.reports_folder = None
+		runner.model = "gpt-x"
+		runner.context = {}
+		runner.encryptor = None
+		collected = [{
+			"_type": "vulnerability", "id": "CVE-2021-41773", "name": "Apache PT",
+			"_uuid": "abc-123", "_context": {"tool_call_id": "t1", "tool_call_name": tool_name},
+			"_related": ["x"], "_duplicate": False,
+		}]
+		captured = {}
+
+		def _spy(name, status, count, results, max_items=100):
+			captured["results"] = results
+			return json.dumps(results)
+
+		with patch.object(ai_mod, "format_tool_result", _spy), \
+			patch.object(ai_mod, "truncate_to_tokens", lambda s, *a, **k: s), \
+			patch.object(ai_mod, "maybe_encrypt", lambda s, *a, **k: s):
+			list(ai_mod._yield_tool_results(runner, collected))
+		return captured["results"][0]
+
+	def test_query_keeps_uuid_strips_other_internals(self):
+		r = self._run("query_workspace")
+		self.assertEqual(r.get("_uuid"), "abc-123")
+		self.assertNotIn("_context", r)
+		self.assertNotIn("_related", r)
+
+	def test_non_query_strips_uuid(self):
+		r = self._run("run_shell")
+		self.assertNotIn("_uuid", r)
 
 
 if __name__ == "__main__":

@@ -677,5 +677,43 @@ class TestSanitizedEnv(unittest.TestCase):
         self.assertEqual(set(out), {"PATH", "HOME"})
 
 
+class TestSecretGuards(unittest.TestCase):
+    """Unconditional secret protection for AI shell commands (holds even when
+    dangerous=True disables the permission engine)."""
+
+    def test_denies_config_env_and_proc_environ_reads(self):
+        from secator.ai.utils import _denied_secret_read
+        for cmd in (
+            "cat /home/secator/.secator/config.yml",
+            "cat ~/.secator/config.yaml",
+            "grep mongo ~/.secator/.env",
+            "cat /proc/1/environ",
+            "cat /proc/self/environ | tr '\\0' '\\n'",
+        ):
+            self.assertIsNotNone(_denied_secret_read(cmd), cmd)
+
+    def test_allows_legit_reads(self):
+        from secator.ai.utils import _denied_secret_read
+        for cmd in (
+            "cat ~/.secator/reports/Test_lab/tasks/0/.outputs/CVE-2021-41773/Dockerfile",
+            "curl http://target/etc/passwd",
+            "ls -la",
+        ):
+            self.assertIsNone(_denied_secret_read(cmd), cmd)
+
+    def test_scrubs_connection_string_and_key_values(self):
+        from secator.ai.utils import _scrub_secrets
+        env = {"SECATOR_ADDONS_MONGODB_URL": "mongodb://secator:s3cr3tpw@mongo-svc:27017?authSource=admin",
+               "OPENAI_API_KEY": "sk-abcdef123456"}
+        with patch("secator.ai.utils.os.environ", env):
+            out = _scrub_secrets(
+                "url=mongodb://secator:s3cr3tpw@mongo-svc:27017?authSource=admin key=sk-abcdef123456 "
+                "broker=amqp://user:pass@rabbit:5672//")
+        self.assertNotIn("s3cr3tpw", out)
+        self.assertNotIn("sk-abcdef123456", out)
+        self.assertNotIn("user:pass", out)   # credentialed URL redacted even if not in env
+        self.assertIn("[REDACTED]", out)
+
+
 if __name__ == '__main__':
     unittest.main()

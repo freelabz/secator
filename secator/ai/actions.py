@@ -15,6 +15,7 @@ from secator.ai.utils import (
 	_sanitized_env, _build_action_display, _is_approved, _truncate, _format_action_error,
 	_is_heavy_runner, _sanitize_child_opts, build_subagent_prompt, _union_live_results,
 	_coerce_finding_fields, _get_action_label, _decrypt_dict,
+	_denied_secret_read, _scrub_secrets,
 )
 
 
@@ -643,6 +644,14 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 	if ctx.encryptor:
 		command = ctx.encryptor.decrypt(command)
 
+	# Unconditional secret-source deny (holds even when dangerous=True disables the
+	# permission engine): never let the AI read secator's config/.env or /proc environ.
+	secret_denial = _denied_secret_read(command)
+	if secret_denial:
+		yield Ai(content=command, ai_type="shell", _context=context)
+		yield Ai(content=f"[denied] {secret_denial}", ai_type="shell_output", _context=context)
+		return
+
 	if ctx.dry_run:
 		yield Info(message=f"[DRY RUN] Would run: {command}", _context=context)
 		return
@@ -698,7 +707,9 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		# the single shell_output below is the contract.
 		runner.run()
 
-		output = _truncate(runner.output or "(no output)", _MAX_SHELL_OUTPUT_CHARS)  # cap so it can't blow up history
+		# Scrub secrets BEFORE truncating (a secret in the middle would survive if we
+		# truncated first), then cap so it can't blow up history.
+		output = _truncate(_scrub_secrets(runner.output or "(no output)"), _MAX_SHELL_OUTPUT_CHARS)
 		yield Ai(content=output, ai_type="shell_output", _context=context)
 
 	except Exception as e:
