@@ -106,8 +106,14 @@ def _yield_tool_results(runner, collected):
 	for tc_id, group_results in grouped.items():
 		tc_name = group_results[0]["_context"]['tool_call_name']
 		has_errors = any(r["_type"] == "error" for r in group_results)
+		# `_uuid` is normally internal, but for query_workspace results it is the
+		# stable, cross-backend handle the model must reference later — notably
+		# add_vuln_poc requires the `_uuid` "seen in query_workspace results". Keep
+		# it for queries; strip the rest of INTERNAL_FIELDS as usual.
+		strip_fields = tuple(f for f in INTERNAL_FIELDS if f != "_uuid") \
+			if tc_name == "query_workspace" else INTERNAL_FIELDS
 		serialized = [
-			{k: v for k, v in r.items() if k not in INTERNAL_FIELDS}
+			{k: v for k, v in r.items() if k not in strip_fields}
 			for r in group_results
 		]
 		tool_result_str = format_tool_result(
