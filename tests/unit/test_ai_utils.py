@@ -677,6 +677,30 @@ class TestSanitizedEnv(unittest.TestCase):
         self.assertEqual(set(out), {"PATH", "HOME"})
 
 
+class TestLoadsLenient(unittest.TestCase):
+    """Tolerate a stray trailing brace / prose the LLM appends after valid JSON."""
+
+    def test_parses_valid(self):
+        from secator.ai.utils import loads_lenient
+        self.assertEqual(loads_lenient('{"_type": "vulnerability"}'), {"_type": "vulnerability"})
+
+    def test_recovers_from_trailing_brace(self):
+        from secator.ai.utils import loads_lenient
+        # The exact string that failed in production (one stray trailing '}').
+        s = '{"_type": "vulnerability", "id": {"$regex": "CVE-2021-41773"}}}'
+        self.assertEqual(loads_lenient(s), {"_type": "vulnerability", "id": {"$regex": "CVE-2021-41773"}})
+
+    def test_recovers_from_trailing_prose(self):
+        from secator.ai.utils import loads_lenient
+        self.assertEqual(loads_lenient('{"_type": "port"}  <- my query'), {"_type": "port"})
+
+    def test_still_raises_on_truly_broken(self):
+        import json
+        from secator.ai.utils import loads_lenient
+        with self.assertRaises(json.JSONDecodeError):
+            loads_lenient('{"_type": "vulnerability"')  # unclosed, no balanced prefix
+
+
 class TestSecretGuards(unittest.TestCase):
     """Unconditional secret protection for AI shell commands (holds even when
     dangerous=True disables the permission engine)."""

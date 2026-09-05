@@ -69,6 +69,46 @@ def _denied_secret_read(command: str) -> Optional[str]:
 	return None
 
 
+def loads_lenient(s: str):
+	"""json.loads, tolerating trailing junk after a complete top-level {...}/[...].
+
+	LLMs occasionally append an extra brace or prose after an otherwise-valid JSON
+	object (observed: `{"_type":"vulnerability",...}}}` with a stray `}`). A strict
+	json.loads rejects the whole thing; here, on failure, we re-parse just the first
+	balanced top-level object/array. Raises the ORIGINAL JSONDecodeError if no such
+	balanced prefix exists, so the caller's clear error message still fires.
+	"""
+	try:
+		return json.loads(s)
+	except json.JSONDecodeError as first:
+		s2 = s.strip()
+		if not s2 or s2[0] not in "{[":
+			raise first
+		open_ch = s2[0]
+		close_ch = "}" if open_ch == "{" else "]"
+		depth = 0
+		in_str = False
+		esc = False
+		for i, ch in enumerate(s2):
+			if in_str:
+				if esc:
+					esc = False
+				elif ch == "\\":
+					esc = True
+				elif ch == '"':
+					in_str = False
+				continue
+			if ch == '"':
+				in_str = True
+			elif ch == open_ch:
+				depth += 1
+			elif ch == close_ch:
+				depth -= 1
+				if depth == 0:
+					return json.loads(s2[:i + 1])  # may raise; the balanced prefix is still invalid
+		raise first
+
+
 def _secret_values() -> set:
 	"""Concrete secret strings that must never reach the LLM/transcript.
 
