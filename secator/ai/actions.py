@@ -813,10 +813,14 @@ def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
 	choices = action.get("choices", [])
+	multiple = bool(action.get("multiple", False))
 	# Store choices on the top-level `choices` field (what the web UI reads) AND in
 	# extra_data (back-compat). Without the top-level field, the persisted follow-up
-	# doc has `choices: []` and the UI renders no choice buttons.
-	yield Ai(content=reason, ai_type="follow_up", choices=choices, extra_data={"choices": choices}, _context=context)
+	# doc has `choices: []` and the UI renders no choice buttons. `multiple` tells
+	# the UI to render multi-select (checkboxes) vs single-pick.
+	yield Ai(
+		content=reason, ai_type="follow_up", choices=choices, multiple=multiple,
+		extra_data={"choices": choices, "multiple": multiple}, _context=context)
 
 
 def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:

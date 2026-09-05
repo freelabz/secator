@@ -124,6 +124,10 @@ TOOL_SCHEMAS = {
 						"type": "array",
 						"items": {"type": "string"},
 						"description": "Optional list of concrete action choices for the user."
+					},
+					"multiple": {
+						"type": "boolean",
+						"description": "Set true when the user may select SEVERAL of the choices (multi-select); omit or false for a pick-exactly-one question."  # noqa: E501
 					}
 				},
 				"required": ["reason"]
