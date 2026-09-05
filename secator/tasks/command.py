@@ -17,6 +17,9 @@ class command(Command):
 	# 'slug', not 'str', so [STRING] would strip most bare commands -> empty cmd -> FAILURE).
 	input_types = []
 	output_types = []
+	# Inputs here are raw shell command lines, not targets — never persist them as
+	# Target findings (they'd pollute the workspace target list).
+	enable_targets = False
 
 	def _build_cmd(self):
 		"""Set the command to the raw input verbatim (no flag/opt append, no quoting)."""
