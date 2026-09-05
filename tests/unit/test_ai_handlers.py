@@ -90,6 +90,24 @@ class TestDispatchAction(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]._type, 'ai')
         self.assertIn('Test complete', results[0].content)
+        # Default follow-up is single-select.
+        self.assertFalse(results[0].multiple)
+
+    def test_dispatch_follow_up_multiple(self):
+        from secator.ai.actions import ActionContext, dispatch_action
+
+        ctx = ActionContext(targets=['target.com'], model='gpt-4')
+        action = {
+            'action': 'follow_up',
+            'reason': 'Pick targets',
+            'choices': ['a', 'b', 'c'],
+            'multiple': True,
+        }
+        results = list(dispatch_action(action, ctx))
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0].multiple)
+        self.assertEqual(results[0].choices, ['a', 'b', 'c'])
+        self.assertTrue(results[0].extra_data.get('multiple'))
 
     def test_dispatch_task_dry_run(self):
         from secator.ai.actions import ActionContext, dispatch_action
