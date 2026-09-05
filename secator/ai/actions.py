@@ -15,7 +15,7 @@ from secator.ai.utils import (
 	_sanitized_env, _build_action_display, _is_approved, _truncate, _format_action_error,
 	_is_heavy_runner, _sanitize_child_opts, build_subagent_prompt, _union_live_results,
 	_coerce_finding_fields, _get_action_label, _decrypt_dict,
-	_denied_secret_read, _scrub_secrets,
+	_denied_secret_read, _scrub_secrets, loads_lenient,
 )
 
 
@@ -736,10 +736,11 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		limit = 100
 
 	# Some providers serialize `query` as a JSON string despite the object schema
-	# (known tool-calling quirk); coerce it back, else fail with a clear LLM error.
+	# (known tool-calling quirk); coerce it back, tolerating a stray trailing brace /
+	# prose the LLM sometimes appends (loads_lenient), else fail with a clear error.
 	if isinstance(query_filter, str):
 		try:
-			query_filter = json.loads(query_filter)
+			query_filter = loads_lenient(query_filter)
 		except (json.JSONDecodeError, TypeError):
 			yield Error(
 				message='query must be a JSON object (e.g. {"_type": "vulnerability"}); '
