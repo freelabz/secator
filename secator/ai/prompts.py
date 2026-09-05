@@ -59,17 +59,17 @@ SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 MODES = {
 	"attack": {
 		"system_prompt": SYSTEM_ATTACK,
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
 		"system_prompt": SYSTEM_CHAT,
-		"allowed_actions": ["query", "follow_up", "add_finding", "shell", "stop"],
+		"allowed_actions": ["query", "follow_up", "add_finding", "add_vuln_poc", "shell", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
 		"system_prompt": SYSTEM_EXPLOIT,
-		"allowed_actions": ["task", "workflow", "shell", "add_finding", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "add_finding", "add_vuln_poc", "stop"],
 		"max_iterations": 5,
 	},
 }
@@ -241,13 +241,14 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None) -> str:
 	system_prompt = mode_config["system_prompt"]
 	ws = workspace_path or "<workspace>"
 
-	path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
-	if mode == "attack":
-		result = system_prompt.safe_substitute(library_reference=build_library_reference(), **path_vars)
-	elif mode == "exploit":
-		result = system_prompt.safe_substitute(library_reference=build_library_reference(), **path_vars)
-	else:  # chat mode
-		result = system_prompt.safe_substitute(output_types_reference=build_output_types_reference())
+	# The queries.txt constraint (included by every mode) references $query_types and
+	# $output_types_reference, so they must be substituted for all modes — derive both
+	# from FINDING_TYPES so they never drift from the registry.
+	subst = dict(query_types=build_query_types(), output_types_reference=build_output_types_reference())
+	if mode in ("attack", "exploit"):
+		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
+		subst.update(library_reference=build_library_reference(), **path_vars)
+	result = system_prompt.safe_substitute(**subst)
 
 	# Determine interaction rules based on backend
 	# The mode templates already include ${follow_up} for interactive modes.
@@ -258,27 +259,6 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None) -> str:
 			result += "\n" + load_prompt("constraints/stop.txt")
 
 	return result.replace("$workspace_path", ws)
-
-
-# def format_user_initial(targets: List[str], instructions: str, previous_results: List[Dict] = None) -> str:
-# 	"""Format initial user message as compact JSON.
-
-# 	Args:
-# 		targets: List of target hosts/URLs
-# 		instructions: User instructions for the task
-# 		previous_results: Optional list of result dicts from upstream tasks
-
-# 	Returns:
-# 		Compact JSON string (no whitespace)
-# 	"""
-# 	results_str = json.dumps(previous_results, default=str)
-# 	instructions_str = json.dumps(instructions or "Analyze the previous results first")
-# 	return f"""
-# <previous_results>
-# {instructions_str}
-# {results_str}
-# </previous_results>
-# 	"""
 
 
 def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = 100) -> str:
@@ -328,7 +308,7 @@ def format_continue(iteration: int, max_iterations: int, instruction="continue")
 	"""
 	return json.dumps({
 		"iteration": iteration,
-		"max": max_iterations,
+		"max": "unlimited" if max_iterations == float('inf') else max_iterations,
 		"instruction": instruction
 	}, separators=(',', ':'))
 

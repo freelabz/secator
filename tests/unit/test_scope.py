@@ -157,3 +157,28 @@ class TestRunExtractorsScopeFilter(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+class TestScopeMalformedTargetNoCrash(unittest.TestCase):
+	"""A target the classifier types as IP/CIDR but ipaddress can't parse (a
+	malformed string, e.g. a leaked `HOST:...` token) must NOT raise out of the
+	scope check — it returns "not a network target" so the caller decides, instead
+	of a ValueError crashing the whole AI run."""
+
+	def test_target_shape_guards_valueerror(self):
+		from unittest.mock import patch
+		from secator.scope import _target_shape
+		import secator.scope as scope
+		# Force the IP branch on a value ipaddress rejects.
+		fake = type("Info", (), {"type": scope.IP})()
+		with patch.object(scope, "classify_target", return_value=fake), \
+			patch.object(scope, "canonicalize_target", return_value="not-an-ip"), \
+			patch.object(scope, "_is_ip_literal", return_value=True):
+			self.assertIsNone(_target_shape("not-an-ip"))  # no raise
+
+	def test_host_in_scope_does_not_raise_on_malformed(self):
+		# Whatever the verdict, it must return a bool, never raise.
+		self.assertIn(
+			host_in_scope("HOST:4f2456c7dedf", in_scope=["10.0.0.0/8"], out_of_scope=[]),
+			(True, False),
+		)

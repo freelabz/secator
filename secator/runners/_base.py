@@ -10,6 +10,7 @@ from pathlib import Path
 from time import time
 
 from dotmap import DotMap
+from rich.errors import MarkupError as RichMarkupError
 import humanize
 
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
@@ -77,6 +78,12 @@ class Runner:
 
 	# Input field (mostly for tests and CLI)
 	input_types = []
+
+	# Whether the runner's inputs are real targets that should be persisted as
+	# Target findings. True for every real task; the built-in `command` task sets
+	# this False because its "inputs" are raw shell commands, not targets (else
+	# they pollute the workspace target list).
+	enable_targets = True
 
 	# Output types
 	output_types = []
@@ -218,7 +225,7 @@ class Runner:
 		self.debug(f'resolving inputs with {len(self.dynamic_opts)} dynamic opts', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		self.inputs = list(dict.fromkeys(self.inputs))
-		if self.caller != 'Task':
+		if self.caller != 'Task' and self.enable_targets:
 			targets = [Target(name=target) for target in self.inputs]
 			for target in targets:
 				self.add_result(target, print=False, output=False)
@@ -337,7 +344,7 @@ class Runner:
 
 	@property
 	def resolved_opts(self):
-		opts = {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_')}  # noqa: E501
+		opts = {k: v for k, v in self.run_opts.items() if v is not None and not k.startswith('print_') and not k.endswith('_') and k != 'env'}  # noqa: E501
 		sensitive = self.sensitive_opt_names
 		if sensitive:
 			opts = {k: (REDACTED_OPT_VALUE if (k in sensitive and v) else v) for k, v in opts.items()}
@@ -995,7 +1002,14 @@ class Runner:
 						_console = console
 					else:
 						_console = console_stdout if item_out == sys.stdout else console
-					_console.print(rich_str, end='\n', highlight=False, soft_wrap=True)
+					try:
+						_console.print(rich_str, end='\n', highlight=False, soft_wrap=True)
+					except RichMarkupError:
+						# The item carried stray Rich markup in its content (e.g. an AI
+						# response or prompt containing "[/]"): re-print it literally so
+						# one bad item can't raise out of the print loop and abort the
+						# whole run (observed crashing an `ai` chat turn).
+						_console.print(rich_str, end='\n', highlight=False, soft_wrap=True, markup=False)
 
 		# Item is a line
 		elif isinstance(item, str):
@@ -1254,24 +1268,32 @@ class Runner:
 				self.debug('validator registered', obj={'name': key, 'fun': fun}, sub='init')
 			self.resolved_validators[key].extend(user_validators)
 
-	def mark_started(self):
-		"""Mark runner as started."""
+	def mark_started(self, start_time=None):
+		"""Mark runner as started.
+
+		``start_time`` (optional): seed a caller-supplied start (e.g. rehydrating an
+		externally-run result) so the on_start hook persists it instead of ``now()``.
+		"""
 		if self.started:
 			return
 		self.started = True
-		self.start_time = datetime.fromtimestamp(time(), timezone.utc)
+		self.start_time = start_time or datetime.fromtimestamp(time(), timezone.utc)
 		self.debug(f'started (sync: {self.sync}, hooks: {self.enable_hooks}), chunk: {self.chunk}, chunk_count: {self.chunk_count}', sub='start')  # noqa: E501
 		self.log_start()
 		self.run_hooks('on_start', sub='start')
 
-	def mark_completed(self):
-		"""Mark runner as completed."""
+	def mark_completed(self, end_time=None):
+		"""Mark runner as completed.
+
+		``end_time`` (optional): seed a caller-supplied end (e.g. rehydrating an
+		externally-run result) so the on_end hook persists it instead of ``now()``.
+		"""
 		if self.done:
 			return
 		self.started = True
 		self.done = True
 		self.progress = 100
-		self.end_time = datetime.fromtimestamp(time(), timezone.utc)
+		self.end_time = end_time or datetime.fromtimestamp(time(), timezone.utc)
 		# Lazy: `self.status` (a store count query) is computed ONLY when the 'end' debug sub is
 		# active — the lazy callback runs after debug()'s enable-gate, so it's free when debug is off.
 		self.debug('completed', sub='end', lazy=lambda m: f'{m} (status: {self.status}, sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})')  # noqa: E501

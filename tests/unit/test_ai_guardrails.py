@@ -1,6 +1,6 @@
 # tests/unit/test_ai_guardrails.py
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from secator.definitions import ADDONS_ENABLED
 
@@ -10,7 +10,8 @@ if ADDONS_ENABLED['ai']:
 	from secator.ai.guardrails import (
 		parse_rule, match_rule, extract_command_targets, detect_paths, detect_paths_with_access,
 		detect_sensitive_env_vars, classify_command, build_target_choices, PermissionEngine,
-		_is_file_path
+		_is_file_path, _normalize_ip, _peel_wrapper, _exec_wrappers, EXEC_WRAPPERS,
+		_parse_subcommands,
 	)
 	from secator.output_types import Warning, Error
 
@@ -86,6 +87,53 @@ class TestRuleParser(unittest.TestCase):
 		self.assertTrue(match_rule("/home/user/cert.pem", ["*.pem"]))
 		# Non-path values should not get basename matching
 		self.assertFalse(match_rule("example.com", [".com"]))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestEncodedIPDeny(unittest.TestCase):
+	"""M8: alternate IP encodings must not evade an IP/CIDR deny rule."""
+
+	META = "169.254.169.254"
+
+	def test_normalize_ip_encodings(self):
+		import ipaddress
+		expected = ipaddress.ip_address(self.META)
+		for enc in ("2852039166", "0xA9FEA9FE", "0xa9fea9fe",
+					"::ffff:169.254.169.254", "[::ffff:169.254.169.254]",
+					"0xA9.0xFE.0xA9.0xFE", "169.254.169.254"):
+			self.assertEqual(_normalize_ip(enc), expected, enc)
+
+	def test_normalize_ip_non_ip(self):
+		# Hostnames and port-suffixed values are not IPs (no DNS resolution here)
+		self.assertIsNone(_normalize_ip("example.com"))
+		self.assertIsNone(_normalize_ip("10.0.0.1:8080"))
+
+	def test_encoded_forms_denied(self):
+		deny = ["169.254.169.254"]
+		for enc in ("2852039166", "0xA9FEA9FE", "::ffff:169.254.169.254", "169.254.169.254"):
+			self.assertTrue(match_rule(enc, deny), enc)
+
+	def test_public_ip_still_allowed(self):
+		# A normal public IP must not match the metadata deny rule
+		self.assertFalse(match_rule("8.8.8.8", ["169.254.169.254"]))
+		self.assertFalse(match_rule("93.184.216.34", ["169.254.169.254"]))
+
+	def test_cidr_deny_membership(self):
+		# Encoded link-local addresses fall inside a CIDR deny rule
+		self.assertTrue(match_rule("2852039166", ["169.254.0.0/16"]))
+		self.assertFalse(match_rule("8.8.8.8", ["169.254.0.0/16"]))
+
+	def test_check_value_denies_encoded_targets(self):
+		engine = PermissionEngine(config=dict(deny=["target(169.254.169.254)"], allow=["target(*)"]))
+		for enc in ("2852039166", "0xA9FEA9FE", "::ffff:169.254.169.254"):
+			self.assertEqual(engine._check_value("target", enc).decision, "deny", enc)
+		self.assertEqual(engine._check_value("target", "8.8.8.8").decision, "allow")
+
+	def test_encoded_url_target_denied(self):
+		# curl http://<decimal>/ resolves to the metadata IP → deny (via URL host extraction)
+		engine = PermissionEngine(config=dict(deny=["target(169.254.169.254)"], allow=["task(*)", "target(*)"]))
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["http://2852039166/latest/meta-data/"]})
+		self.assertEqual(result.decision, "deny")
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -212,6 +260,25 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "follow_up", "reason": "test"})
 		self.assertEqual(result.decision, "allow")
 
+	# --- M7: add_finding privileged-type gating ---
+
+	def test_add_finding_benign_allowed(self):
+		engine = self._make_engine()
+		result = engine.check_action({"action": "add_finding", "_type": "vulnerability", "name": "XSS"})
+		self.assertEqual(result.decision, "allow")
+
+	def test_add_finding_target_type_not_allowed(self):
+		# A scope-sensitive target finding is denied (fail-closed): there is no add_finding
+		# prompt layer, so an "ask" here would only spin the prompt loop until it denied anyway.
+		engine = self._make_engine()
+		result = engine.check_action({"action": "add_finding", "_type": "target", "name": "evil.com"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_add_finding_target_type_case_insensitive(self):
+		engine = self._make_engine()
+		result = engine.check_action({"action": "add_finding", "_type": " Target ", "name": "evil.com"})
+		self.assertEqual(result.decision, "deny")
+
 	# --- Target checks ---
 
 	def test_target_allowed_via_targets_variable(self):
@@ -236,6 +303,13 @@ class TestPermissionEngine(unittest.TestCase):
 			ask=["target(*)"]
 		)
 		result = engine.check_action({"action": "shell", "command": "nmap 10.5.2.3"})
+		self.assertEqual(result.decision, "ask")
+		self.assertIn("10.5.2.3", result.targets)
+
+	def test_target_no_catchall_asks_not_allows(self):
+		"""M6: with no target rule/catch-all configured, an unknown target must ask (fail-safe), not silently allow."""
+		engine = self._make_engine(allow=["task(*)"])  # no target(...) rule in any category
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.5.2.3"]})
 		self.assertEqual(result.decision, "ask")
 		self.assertIn("10.5.2.3", result.targets)
 
@@ -342,6 +416,129 @@ class TestPermissionEngine(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestInScope(unittest.TestCase):
+	"""Mandate in_scope (run-opt) constrains target scope via the shipped host_in_scope."""
+
+	def _make_engine(self, allow=None, deny=None, ask=None, targets=None, in_scope=None, workspace="/tmp/workspace"):  # noqa: E501
+		config = {"allow": allow or [], "deny": deny or [], "ask": ask or []}
+		return PermissionEngine(
+			config, targets=targets or [], workspace=workspace, in_scope=in_scope or [])
+
+	def test_in_scope_exact_match(self):
+		engine = self._make_engine(allow=["shell(nmap)"], in_scope=["example.com"])
+		result = engine.check_action({"action": "shell", "command": "nmap example.com"})
+		self.assertEqual(result.decision, "allow")
+
+	def test_in_scope_wildcard_match(self):
+		engine = self._make_engine(allow=["shell(nmap)"], in_scope=["*.example.com"])
+		result = engine.check_action({"action": "shell", "command": "nmap api.example.com"})
+		self.assertEqual(result.decision, "allow")
+
+	def test_target_outside_in_scope_is_constrained(self):
+		"""A target not covered by in_scope must NOT be silently allowed."""
+		engine = self._make_engine(allow=["shell(nmap)"], in_scope=["*.example.com"])
+		# Patch DNS so the hostname target is extracted deterministically (no network).
+		with patch("secator.ai.guardrails._resolves", return_value=True):
+			result = engine.check_action({"action": "shell", "command": "nmap evil.attacker.com"})
+		self.assertNotEqual(result.decision, "allow")
+
+	def test_in_scope_presence_forces_target_check(self):
+		"""Even with no config target rules, in_scope makes the target step run."""
+		engine = self._make_engine(allow=["task(*)"], in_scope=["10.0.0.1"])
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["8.8.8.8"]})
+		self.assertNotEqual(result.decision, "allow")
+
+	def test_in_scope_task_cidr(self):
+		engine = self._make_engine(allow=["task(*)"], in_scope=["10.0.0.0/24"])
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.5"]})
+		self.assertEqual(result.decision, "allow")
+
+	def test_config_safety_deny_beats_broad_in_scope(self):
+		"""A broad mandate in_scope must NEVER authorize a config safety-denied target
+		(metadata IP). The config deny is checked before the in_scope allow."""
+		engine = self._make_engine(
+			allow=["shell(nmap)"], deny=["target(169.254.169.254)"], in_scope=["169.254.0.0/16"])
+		result = engine.check_action({"action": "shell", "command": "nmap 169.254.169.254"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_in_scope_url_host_component(self):
+		engine = self._make_engine(allow=["shell(curl)"], in_scope=["example.com"])
+		result = engine.check_action({"action": "shell", "command": "curl https://example.com/path"})
+		self.assertEqual(result.decision, "allow")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestOutOfScope(unittest.TestCase):
+	"""Mandate out_of_scope (run-opt) blocks target scope via host_in_scope. Deny wins."""
+
+	def _make_engine(self, allow=None, deny=None, ask=None, targets=None, in_scope=None,  # noqa: E501
+		out_of_scope=None, workspace="/tmp/workspace"):
+		config = {"allow": allow or [], "deny": deny or [], "ask": ask or []}
+		return PermissionEngine(
+			config, targets=targets or [], workspace=workspace,
+			in_scope=in_scope or [], out_of_scope=out_of_scope or [])
+
+	def test_out_of_scope_ip_match(self):
+		# IP targets are extracted without DNS, so deny applies directly.
+		engine = self._make_engine(allow=["shell(nmap)"], out_of_scope=["10.0.0.1"])
+		result = engine.check_action({"action": "shell", "command": "nmap 10.0.0.1"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_out_of_scope_wildcard_match(self):
+		# Hostnames are only extracted if they resolve — patch DNS so the host is seen.
+		engine = self._make_engine(allow=["shell(nmap)"], out_of_scope=["*.evil.com"])
+		with patch("secator.ai.guardrails._resolves", return_value=True):
+			result = engine.check_action({"action": "shell", "command": "nmap api.evil.com"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_deny_wins_when_target_in_both_scopes(self):
+		"""A target in BOTH in_scope and out_of_scope must be DENIED."""
+		engine = self._make_engine(
+			allow=["shell(nmap)"], in_scope=["*.example.com"], out_of_scope=["admin.example.com"])
+		with patch("secator.ai.guardrails._resolves", return_value=True):
+			result = engine.check_action({"action": "shell", "command": "nmap admin.example.com"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_deny_wins_at_check_value_level(self):
+		"""Unit-level deny-wins: _check_value denies a target in both in_scope + out_of_scope."""
+		engine = self._make_engine(
+			allow=["shell(nmap)"], in_scope=["169.254.0.0/16"], out_of_scope=["169.254.169.254"])
+		result = engine._check_value("target", "169.254.169.254")
+		self.assertEqual(result.decision, "deny")
+
+	def test_in_scope_only_target_is_allowed(self):
+		"""In in_scope, not in out_of_scope → allowed."""
+		engine = self._make_engine(
+			allow=["shell(nmap)"], in_scope=["169.254.0.0/16"], out_of_scope=["169.254.169.254"])
+		result = engine._check_value("target", "169.254.169.5")
+		self.assertEqual(result.decision, "allow")
+
+	def test_out_of_scope_only_target_is_denied(self):
+		"""Matches out_of_scope, no in_scope entries → denied."""
+		engine = self._make_engine(allow=["shell(nmap)"], out_of_scope=["10.0.0.1"])
+		result = engine.check_action({"action": "shell", "command": "nmap 10.0.0.1"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_out_of_scope_presence_forces_target_check(self):
+		"""Even with no config target rules, out_of_scope makes the target step run."""
+		engine = self._make_engine(allow=["task(*)"], out_of_scope=["10.0.0.1"])
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.1"]})
+		self.assertEqual(result.decision, "deny")
+
+	def test_out_of_scope_task_in_deny_scope(self):
+		engine = self._make_engine(
+			allow=["task(*)"], in_scope=["10.0.0.0/24"], out_of_scope=["10.0.0.1"])
+		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.1"]})
+		self.assertEqual(result.decision, "deny")
+
+	def test_out_of_scope_url_host_component(self):
+		engine = self._make_engine(allow=["shell(curl)"], out_of_scope=["evil.com"])
+		with patch("secator.ai.guardrails._resolves", return_value=True):
+			result = engine.check_action({"action": "shell", "command": "curl https://evil.com/path"})
+		self.assertEqual(result.decision, "deny")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestTargetPrompt(unittest.TestCase):
 
 	def test_build_target_choices_ip(self):
@@ -409,6 +606,54 @@ class TestPromptTarget(unittest.TestCase):
 		with patch.object(engine, '_show_target_menu', return_value=[4]):
 			result = engine.prompt_target("10.5.2.3", interactive=True)
 		self.assertEqual(result, "deny")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestPromptShell(unittest.TestCase):
+
+	def _make_engine(self, allow=None, deny=None, ask=None):
+		config = {"allow": allow or [], "deny": deny or [], "ask": ask or []}
+		return PermissionEngine(config)
+
+	def _menu_returning(self, idx):
+		"""Patch the rich menu so .show() yields (idx, label)."""
+		menu = MagicMock()
+		menu.return_value.show.return_value = (idx, "")
+		return menu
+
+	def test_prompt_shell_non_interactive_returns_deny(self):
+		engine = self._make_engine(ask=["shell(*)"])
+		self.assertEqual(engine.prompt_shell("curl https://x", interactive=False), "deny")
+
+	def test_allow_this_command_is_one_shot(self):
+		"""Option 0 approves ONLY this invocation — no session rule; the next call re-prompts (H9)."""
+		engine = self._make_engine(ask=["shell(*)"])
+		with patch('secator.rich.InteractiveMenu', self._menu_returning(0)), \
+		     patch('secator.ai.guardrails._extract_cmd_names', return_value=["curl"]):
+			result = engine.prompt_shell("curl https://good.example")
+		self.assertEqual(result, "allow")
+		# No runtime rule was added, so a second, different-arg curl is NOT auto-allowed
+		self.assertEqual(engine.runtime_allow, [])
+		self.assertEqual(engine._check_value("shell", "curl").decision, "ask")
+
+	def test_allow_all_commands_adds_session_rule(self):
+		"""Option 1 persists a session-wide allow for the command name (unchanged)."""
+		engine = self._make_engine(ask=["shell(*)"])
+		with patch('secator.rich.InteractiveMenu', self._menu_returning(1)), \
+		     patch('secator.ai.guardrails._extract_cmd_names', return_value=["curl"]):
+			result = engine.prompt_shell("curl https://good.example")
+		self.assertEqual(result, "allow")
+		self.assertEqual(engine.runtime_allow, [("shell", ["curl"])])
+		# Now any curl is auto-allowed for the session
+		self.assertEqual(engine._check_value("shell", "curl").decision, "allow")
+
+	def test_deny_choice_blocks(self):
+		engine = self._make_engine(ask=["shell(*)"])
+		with patch('secator.rich.InteractiveMenu', self._menu_returning(2)), \
+		     patch('secator.ai.guardrails._extract_cmd_names', return_value=["curl"]):
+			result = engine.prompt_shell("curl https://good.example")
+		self.assertEqual(result, "deny")
+		self.assertEqual(engine.runtime_allow, [])
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -610,6 +855,69 @@ class TestDefaultPermissions(unittest.TestCase):
 		self.assertEqual(result.decision, "ask")
 		self.assertIn("rm", result.shell_command)
 
+	# === Exec-wrapper laundering (C2) + destructive deny (H6) ===
+
+	def test_timeout_wrapper_does_not_launder_destructive_rm(self):
+		"""`timeout 60 rm -rf /` must NOT auto-allow via the timeout wrapper (C2 + H6)."""
+		engine = self._engine()
+		result = engine.check_action({"action": "shell", "command": "timeout 60 rm -rf /"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_xargs_wrapper_does_not_launder_inner_command(self):
+		"""`xargs ... rm ...` must not auto-allow via the xargs wrapper (C2)."""
+		engine = self._engine()
+		result = engine.check_action({"action": "shell", "command": "xargs -I{} rm -rf {}"})
+		# Inner rm is unknown (not root-destructive) -> prompt, never silent allow.
+		self.assertEqual(result.decision, "ask")
+
+	def test_timeout_wrapper_restores_interpreter_ask_gate(self):
+		"""Wrapping an interpreter (`timeout 60 bash -c ...`) must keep the ask gate (C2)."""
+		engine = self._engine()
+		result = engine.check_action({"action": "shell", "command": "timeout 60 bash -c 'rm -rf /'"})
+		self.assertEqual(result.decision, "ask")
+
+	def test_sudo_wrapper_does_not_launder_destructive_rm(self):
+		"""`sudo rm -rf /` must be denied, not laundered through sudo (C2 + H6)."""
+		engine = self._engine()
+		result = engine.check_action({"action": "shell", "command": "sudo rm -rf /"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_xargs_value_option_does_not_stop_peel_before_destructive_inner(self):
+		"""`xargs -I {} rm -rf /`: the -I value option must not stop wrapper peeling at its
+		operand — the destructive inner `rm -rf /` must still be denied, not laundered."""
+		engine = self._engine()
+		for cmd in ("xargs -I {} rm -rf /", "xargs -n 1 rm -rf /"):
+			self.assertEqual(
+				engine.check_action({"action": "shell", "command": cmd}).decision, "deny", cmd)
+
+	def test_env_value_option_does_not_stop_peel_before_destructive_inner(self):
+		"""`env -u TOKEN rm -rf /`: the -u value option must not stop peeling; inner rm denied."""
+		engine = self._engine()
+		self.assertEqual(
+			engine.check_action({"action": "shell", "command": "env -u TOKEN rm -rf /"}).decision, "deny")
+
+	def test_destructive_root_rm_denied(self):
+		"""Bare `rm -rf /` (and one level under /) must be denied (H6)."""
+		engine = self._engine()
+		self.assertEqual(
+			engine.check_action({"action": "shell", "command": "rm -rf /"}).decision, "deny")
+		self.assertEqual(
+			engine.check_action({"action": "shell", "command": "rm -rf /etc"}).decision, "deny")
+
+	def test_scoped_rm_still_prompts_not_denied(self):
+		"""Scoped `rm -rf /tmp/x` is not catastrophic -> prompt (not silent allow/deny) (H6)."""
+		engine = self._engine()
+		result = engine.check_action({"action": "shell", "command": "rm -rf /tmp/data/x"})
+		self.assertEqual(result.decision, "ask")
+
+	def test_wrapper_preserves_allowed_inner_command(self):
+		"""`timeout 60 curl ...` must not regress: curl stays allowed at the action level."""
+		engine = self._engine(targets=["10.0.0.1"])
+		# Inner curl is allow-listed; the unknown URL target is what triggers the ask,
+		# proving the wrapper was peeled and curl recognised (not denied).
+		result = engine.check_action({"action": "shell", "command": "timeout 60 curl http://10.0.0.1/x"})
+		self.assertEqual(result.decision, "allow")
+
 	# === Should NOT trigger approval (allow) ===
 
 	def test_read_file_in_workspace(self):
@@ -694,6 +1002,23 @@ class TestEdgeCases(unittest.TestCase):
 		access_map = dict(paths)
 		self.assertEqual(access_map["/etc/hosts"], "read")
 		self.assertEqual(access_map["/tmp/copy.txt"], "write")
+
+	# --- M9: output-flag destinations are writes (shfmt-gated: need real shell parser) ---
+
+	def test_curl_output_flag_classified_as_write(self):
+		"""curl -o dest is a write, so `deny write(/etc/*)` fires (not a read)."""
+		paths = detect_paths_with_access("curl -o /etc/passwd http://x")
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_wget_output_flag_classified_as_write(self):
+		"""wget -O dest is a write."""
+		paths = detect_paths_with_access("wget -O /etc/passwd http://x")
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_curl_without_output_flag_stays_read(self):
+		"""curl with no -o only reads (URL is not a file path); no write leaks in."""
+		paths = detect_paths_with_access("curl http://x")
+		self.assertNotIn("write", [a for _, a in paths])
 
 	def test_fd_redirect_2_to_1_not_detected_as_path(self):
 		"""2>&1 is a fd redirect, not a file path."""
@@ -963,6 +1288,185 @@ class TestEdgeCases(unittest.TestCase):
 		self.assertEqual(result.decision, "allow")
 		result = engine.check_action({"action": "shell", "command": "cat /home/user/project/src/deep/file.txt"})
 		self.assertEqual(result.decision, "allow")
+
+
+class TestOutputFlagWrites(unittest.TestCase):
+	"""M9: output-flag write classification, proven locally by stubbing the shell
+	parser (real shfmt is absent in CI-less envs, which makes the tests above no-ops)."""
+
+	def _paths(self, argv, redirects=None):
+		"""Run detect_paths_with_access with a stubbed extract_commands (no shfmt)."""
+		with patch('safecmd.bashxtract.extract_commands',
+				   return_value=([argv], [], redirects or [])):
+			return detect_paths_with_access(" ".join(argv))
+
+	def test_curl_o_space_form_is_write(self):
+		paths = self._paths(["curl", "-o", "/etc/passwd", "http://x"])
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_curl_long_output_equals_form_is_write(self):
+		paths = self._paths(["curl", "--output=/etc/passwd", "http://x"])
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_curl_o_attached_short_form_is_write(self):
+		paths = self._paths(["curl", "-o/etc/passwd", "http://x"])
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_wget_O_form_is_write(self):
+		paths = self._paths(["wget", "-O", "/etc/passwd", "http://x"])
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_wget_output_document_equals_form_is_write(self):
+		paths = self._paths(["wget", "--output-document=/etc/passwd", "http://x"])
+		self.assertIn(("/etc/passwd", "write"), paths)
+
+	def test_curl_no_output_flag_has_no_write(self):
+		paths = self._paths(["curl", "http://x"])
+		self.assertNotIn("write", [a for _, a in paths])
+
+	def test_curl_o_stdout_dash_not_treated_as_file(self):
+		paths = self._paths(["curl", "-o", "-", "http://x"])
+		self.assertEqual(paths, [])
+
+	def test_redirect_still_write_with_output_flag_cmd(self):
+		"""Redirect classification is preserved alongside the new flag handling."""
+		paths = self._paths(["echo", "x"], redirects=[("", "/etc/y")])
+		self.assertIn(("/etc/y", "write"), paths)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestWrapperPeelingM11(unittest.TestCase):
+	"""M11: broadened + arg-grammar-aware exec-wrapper peeling closes the C2 laundering class.
+
+	The `_peel_wrapper` assertions are PROVEN (they take a token list — no shfmt needed).
+	The `check_action` integration assertions stub `extract_commands` (real shfmt is absent
+	in CI-less envs, which no-ops every parser-dependent test), same pattern as
+	TestOutputFlagWrites."""
+
+	# --- PROVEN: peel locates the leaf command past each wrapper's own arg grammar ---
+
+	def test_proxychains_peels_to_inner(self):
+		self.assertEqual(_peel_wrapper(["proxychains", "curl", "http://evil"]), ["curl", "http://evil"])
+
+	def test_proxychains_config_flag_consumed(self):
+		self.assertEqual(_peel_wrapper(["proxychains", "-f", "/etc/pc.conf", "dd"]), ["dd"])
+
+	def test_firejail_peels_past_long_opts(self):
+		self.assertEqual(_peel_wrapper(["firejail", "--net=none", "rm", "-rf", "/tmp/x"]), ["rm", "-rf", "/tmp/x"])
+
+	def test_flock_lockfile_positional_consumed(self):
+		self.assertEqual(_peel_wrapper(["flock", "/tmp/l", "curl", "http://evil"]), ["curl", "http://evil"])
+
+	def test_flock_value_opt_then_lockfile(self):
+		self.assertEqual(_peel_wrapper(["flock", "-w", "5", "/tmp/l", "dd"]), ["dd"])
+
+	def test_runuser_cmd_string_reparsed(self):
+		self.assertEqual(_peel_wrapper(["runuser", "-c", "curl http://evil"]), ["curl", "http://evil"])
+
+	def test_runuser_user_then_dashdash(self):
+		self.assertEqual(_peel_wrapper(["runuser", "-u", "bob", "--", "curl", "http://evil"]), ["curl", "http://evil"])
+
+	def test_su_user_positional_and_cmd_string(self):
+		self.assertEqual(_peel_wrapper(["su", "root", "-c", "dd if=/dev/zero"]), ["dd", "if=/dev/zero"])
+
+	def test_script_cmd_string_reparsed(self):
+		self.assertEqual(_peel_wrapper(["script", "-c", "curl http://evil", "/tmp/log"]), ["curl", "http://evil"])
+
+	def test_torsocks_peels_to_inner(self):
+		self.assertEqual(_peel_wrapper(["torsocks", "curl", "http://evil"]), ["curl", "http://evil"])
+
+	def test_sudo_user_value_opt_consumed(self):
+		# pre-existing C2 gap: `sudo -u bob` mis-read `bob` as the command; grammar now consumes it
+		self.assertEqual(_peel_wrapper(["sudo", "-u", "bob", "rm", "-rf", "/"]), ["rm", "-rf", "/"])
+
+	# --- PROVEN: C2-covered wrappers + normal commands unchanged ---
+
+	def test_c2_timeout_still_peels(self):
+		self.assertEqual(_peel_wrapper(["timeout", "60", "rm", "-rf", "/"]), ["rm", "-rf", "/"])
+
+	def test_c2_interpreter_gate_preserved(self):
+		# bash is NOT a wrapper — it stays the leaf so its ask-gate still fires
+		self.assertEqual(_peel_wrapper(["timeout", "60", "bash", "-c", "rm -rf /"]), ["bash", "-c", "rm -rf /"])
+
+	def test_normal_command_untouched(self):
+		self.assertEqual(_peel_wrapper(["curl", "http://ok"]), ["curl", "http://ok"])
+
+	def test_bare_wrapper_checked_by_name(self):
+		self.assertEqual(_peel_wrapper(["sudo"]), ["sudo"])
+
+	# --- PROVEN: config EXTENDS the built-in baseline (never shrinks below it) ---
+
+	def test_config_added_wrapper_honored(self):
+		try:
+			CONFIG.addons.ai.exec_wrappers = ["myrunner"]
+			self.assertIn("myrunner", _exec_wrappers())
+			self.assertTrue(EXEC_WRAPPERS <= _exec_wrappers())  # baseline is the floor
+			self.assertEqual(_peel_wrapper(["myrunner", "dd", "if=/dev/zero"]), ["dd", "if=/dev/zero"])
+		finally:
+			CONFIG.addons.ai.exec_wrappers = []
+
+	# --- PROVEN-via-stub: end-to-end deny/ask fires on the peeled leaf, not the wrapper name ---
+
+	def _decide(self, argv):
+		engine = PermissionEngine(dict(CONFIG.addons.ai.permissions), targets=["10.0.0.1"],
+								  workspace="/home/user/.secator/reports/test/tasks/ai_1")
+		with patch('safecmd.bashxtract.extract_commands', return_value=([argv], [], [])):
+			return engine.check_action({"action": "shell", "command": " ".join(argv)}).decision
+
+	def test_proxychains_denied_inner_command(self):
+		self.assertEqual(self._decide(["proxychains", "dd", "if=/dev/zero"]), "deny")  # dd is deny-listed
+
+	def test_flock_launders_denied_command(self):
+		self.assertEqual(self._decide(["flock", "/tmp/l", "dd"]), "deny")
+
+	def test_firejail_scoped_rm_asks(self):
+		self.assertEqual(self._decide(["firejail", "rm", "-rf", "/tmp/x"]), "ask")  # not silent-allowed as firejail
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestShellParserFallback(unittest.TestCase):
+	"""When the shfmt-based shell parser (safecmd/shfmt) is unavailable, the
+	guardrail must Warn (NOT claim 'Missing ai addon') and fall back to
+	whole-command approval — an empty sub-command list makes the caller `ask`."""
+
+	def setUp(self):
+		import secator.ai.guardrails as g
+		g._SHELL_PARSER_WARNED = False  # reset warn-once flag per test
+
+	def _run_and_capture(self):
+		printed = []
+		with patch('secator.rich.console.print', side_effect=lambda x, *a, **k: printed.append(x)):
+			result = _parse_subcommands('curl -s https://x.com | head -5')
+		return result, printed
+
+	def test_missing_safecmd_warns_not_ai_addon(self):
+		# Simulate safecmd not installed -> ImportError on the in-function import.
+		with patch.dict('sys.modules', {'safecmd.bashxtract': None}):
+			result, printed = self._run_and_capture()
+		self.assertEqual(result, [])  # unparseable -> caller falls back to ask
+		self.assertEqual(len(printed), 1)
+		item = printed[0]
+		self.assertIsInstance(item, Warning)  # a Warning, not an Error
+		self.assertIn('safecmd', item.message)
+		self.assertNotIn('ai addon', item.message.lower())
+
+	def test_missing_shfmt_binary_warns(self):
+		# safecmd imports, but the shfmt binary it shells out to is not on PATH.
+		with patch('safecmd.bashxtract.extract_commands', side_effect=FileNotFoundError('shfmt')):
+			result, printed = self._run_and_capture()
+		self.assertEqual(result, [])
+		self.assertEqual(len(printed), 1)
+		self.assertIsInstance(printed[0], Warning)
+		self.assertIn('shfmt', printed[0].message)
+		self.assertNotIn('ai addon', printed[0].message.lower())
+
+	def test_warns_only_once_across_commands(self):
+		printed = []
+		with patch('safecmd.bashxtract.extract_commands', side_effect=FileNotFoundError):
+			with patch('secator.rich.console.print', side_effect=lambda x, *a, **k: printed.append(x)):
+				_parse_subcommands('a | b')
+				_parse_subcommands('c | d')
+		self.assertEqual(len(printed), 1)  # warn-once, no per-command spam
 
 
 if __name__ == '__main__':
