@@ -17,6 +17,24 @@ class TestCommandTask(unittest.TestCase):
 		self.assertIn("secator-pr3", runner.output)
 		self.assertEqual(runner.return_code, 0)
 
+	def test_command_inputs_are_not_persisted_as_targets(self):
+		"""The command line is NOT a target: the `command` task must never emit a
+		Target finding for its input (which would pollute the workspace target list).
+		Other runners keep emitting targets (enable_targets defaults True)."""
+		from secator.output_types import Target
+		self.assertFalse(command.enable_targets)
+		self.assertTrue(Command.enable_targets)  # base default unchanged
+		runner = command(
+			inputs=["echo not-a-target"],
+			run_opts={"sync": True, "print_line": False, "print_item": False},
+		)
+		runner.run()
+		self.assertEqual(runner.status, "SUCCESS")
+		self.assertFalse(
+			[r for r in runner.results if isinstance(r, Target)],
+			"command task should not produce Target findings",
+		)
+
 	def test_shell_metacharacters_are_interpreted(self):
 		"""Shell operators (&&) must be interpreted, not passed as literal echo args.
 

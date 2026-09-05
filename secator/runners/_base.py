@@ -79,6 +79,12 @@ class Runner:
 	# Input field (mostly for tests and CLI)
 	input_types = []
 
+	# Whether the runner's inputs are real targets that should be persisted as
+	# Target findings. True for every real task; the built-in `command` task sets
+	# this False because its "inputs" are raw shell commands, not targets (else
+	# they pollute the workspace target list).
+	enable_targets = True
+
 	# Output types
 	output_types = []
 
@@ -219,7 +225,7 @@ class Runner:
 		self.debug(f'resolving inputs with {len(self.dynamic_opts)} dynamic opts', obj=self.dynamic_opts, sub='init')
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		self.inputs = list(dict.fromkeys(self.inputs))
-		if self.caller != 'Task':
+		if self.caller != 'Task' and self.enable_targets:
 			targets = [Target(name=target) for target in self.inputs]
 			for target in targets:
 				self.add_result(target, print=False, output=False)
