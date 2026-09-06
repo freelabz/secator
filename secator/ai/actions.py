@@ -771,7 +771,17 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 
 	try:
 		query_str = json.dumps(query_filter, separators=(',', ':'))
-		results = engine.search(query_filter, limit=limit)
+		# Surface only the PRIMARY of each finding group: skip hidden duplicates
+		# (_context.workspace_duplicate=True) so the AI never operates on a demoted
+		# copy — e.g. records a PoC on a doc that isn't the one the UI shows. Only
+		# the mongo-backed drivers (mongodb/api) tag duplicates; the json driver
+		# doesn't. Respect an explicit _context filter from the model rather than
+		# fighting it. Applied to the search only, so the shown query stays the
+		# model's own.
+		search_query = query_filter
+		if not is_local and "_context" not in query_filter and "_context.workspace_duplicate" not in query_filter:
+			search_query = {**query_filter, "_context.workspace_duplicate": {"$ne": True}}
+		results = engine.search(search_query, limit=limit)
 		# Local driver only writes to disk at end-of-run, so union this run's live
 		# in-flight findings to make query_workspace the source of truth (mongodb/api
 		# persist live already, so they need no union).
