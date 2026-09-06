@@ -373,13 +373,44 @@ class TestHandleQuery(unittest.TestCase):
 		ai_results = [r for r in results if isinstance(r, Ai)]
 		self.assertEqual(len(ai_results), 1)
 		self.assertEqual(ai_results[0].extra_data['results'], 2)
-		mock_engine.search.assert_called_once_with({'port': 80}, limit=10)
+		# Non-local backend: hidden duplicates are excluded from the search.
+		mock_engine.search.assert_called_once_with(
+			{'port': 80, '_context.workspace_duplicate': {'$ne': True}}, limit=10)
+		# ...but the query shown to the user stays the model's own (no injected key).
+		self.assertEqual(ai_results[0].content, '{"port":80}')
 
 		# Query results are marked observation-only so the runner doesn't re-report them.
 		result_dicts = [r for r in results if isinstance(r, dict)]
 		self.assertEqual(len(result_dicts), 2)
 		for r in result_dicts:
 			self.assertTrue(r['_context'].get('ai_query_result'))
+
+	@patch('secator.ai.actions.ActionContext.get_query_engine')
+	def test_query_local_driver_does_not_exclude_duplicates(self, mock_get_engine):
+		"""The local (json) driver doesn't tag duplicates, so no exclusion is injected."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "json"
+		mock_engine.search.return_value = []
+		mock_get_engine.return_value = mock_engine
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+
+		list(_handle_query({'action': 'query', 'query': {'_type': 'vulnerability'}}, ctx))
+
+		mock_engine.search.assert_called_once_with({'_type': 'vulnerability'}, limit=100)
+
+	@patch('secator.ai.actions.ActionContext.get_query_engine')
+	def test_query_respects_explicit_context_filter(self, mock_get_engine):
+		"""An explicit _context filter from the model is left untouched (not fought)."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "mongodb"
+		mock_engine.search.return_value = []
+		mock_get_engine.return_value = mock_engine
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+
+		q = {'_type': 'vulnerability', '_context.workspace_duplicate': True}
+		list(_handle_query({'action': 'query', 'query': q}, ctx))
+
+		mock_engine.search.assert_called_once_with(q, limit=100)
 
 	@patch('secator.ai.actions.ActionContext.get_query_engine')
 	def test_query_stringified_json_is_coerced(self, mock_get_engine):
@@ -398,7 +429,8 @@ class TestHandleQuery(unittest.TestCase):
 			{'action': 'query', 'query': '{"_type": "url", "verified": true}'}, ctx))
 
 		self.assertFalse([r for r in results if isinstance(r, Error)], 'stringified query must not error')
-		mock_engine.search.assert_called_once_with({'_type': 'url', 'verified': True}, limit=100)
+		mock_engine.search.assert_called_once_with(
+			{'_type': 'url', 'verified': True, '_context.workspace_duplicate': {'$ne': True}}, limit=100)
 
 	def test_query_unparseable_string_returns_clean_error(self):
 		"""A non-JSON string yields an Error the LLM can act on — not a crash."""
