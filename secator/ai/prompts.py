@@ -69,7 +69,10 @@ MODES = {
 	},
 	"exploit": {
 		"system_prompt": SYSTEM_EXPLOIT,
-		"allowed_actions": ["task", "workflow", "shell", "add_finding", "add_vuln_poc", "stop"],
+		# "query" is required so the model can pull the workspace's existing exploit
+		# intel (the CVE's `_type:"exploit"` objects / PoC references) before trying
+		# to exploit — without it query_workspace isn't even built for this mode.
+		"allowed_actions": ["task", "workflow", "shell", "query", "add_finding", "add_vuln_poc", "stop"],
 		"max_iterations": 5,
 	},
 }
