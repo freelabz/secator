@@ -213,6 +213,7 @@ class MongodbAddon(StrictModel):
 		'verified',
 		'status',
 		'tags',
+		'poc',
 	]
 
 
@@ -229,6 +230,7 @@ class SqliteAddon(StrictModel):
 		'verified',
 		'status',
 		'tags',
+		'poc',
 	]
 
 
