@@ -294,6 +294,27 @@ def restore_history_from_db(session_id, query_engine, model=None, encryptor=None
 		# shell_output, summaries) are channel/UX artifacts, not conversation
 		# turns — intentionally skipped for a valid litellm transcript.
 
+	# A follow_up that timed out and was answered AFTER the worker exited never got
+	# its answer persisted as a conversation turn: the live path does that in
+	# _prompt_and_redetect (a new `prompt` doc), but the timed-out worker died first,
+	# so the answer only lives on the follow_up doc's `answer` field — which the
+	# passes above skip. If such an answered follow_up is the conversation TAIL
+	# (nothing conversational persisted after it), thread its answer as the next user
+	# turn so the respawn CONTINUES instead of re-asking the same question. An
+	# in-run-answered follow_up is instead followed by its own `prompt` doc (a later
+	# conversational turn), so it is not the tail and is correctly left alone here.
+	answered_fu = [d for d in docs
+		if d.get('ai_type') == 'follow_up' and d.get('status') == 'answered' and d.get('answer')]
+	if answered_fu:
+		latest = answered_fu[-1]  # docs are sorted ascending by _timestamp
+		fu_ts = latest.get('_timestamp', 0)
+		has_later_turn = any(
+			(d.get('message') or d.get('ai_type') in ('prompt', 'response', 'steer'))
+			and d.get('_timestamp', 0) > fu_ts
+			for d in docs)
+		if not has_later_turn:
+			history.add_user(maybe_encrypt(latest['answer'], encryptor))
+
 	# Guard against a partially-persisted turn producing an orphan tool result.
 	_repair_orphan_tool_uses(history.messages)
 	_strip_leading_orphan_tools(history.messages)
