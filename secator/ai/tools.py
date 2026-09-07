@@ -25,9 +25,11 @@ _TARGETS_SCHEMA = {
 
 _DESCRIPTION_SCHEMA = {
 	"type": "string",
-	"description": "A short human-readable description of WHY you are running this and what it does "
-	               "(e.g. 'Fire the reflected-XSS payload at level 1', 'Port-scan the target for open services'). "
-	               "Shown to the user in place of the bare task name — always provide it."
+	"description": "A short plain-English statement of your INTENT — WHY you are running this, in 4-10 words. "
+	               "Do NOT paste the command, and do NOT just repeat the task name; describe the PURPOSE. "
+	               "BAD (never do this): 'nmap', 'httpx', 'curl -sk http://...'. "
+	               "GOOD: 'Scan for open services and versions', 'Probe which HTTP methods are allowed', "
+	               "'Fire the reflected-XSS payload at level 1'. Shown to the user in place of the bare task name."
 }
 
 # OpenAI-format tool schemas keyed by tool name
