@@ -89,6 +89,49 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		history = restore_history_from_db("s6", engine, encryptor=encryptor)
 		self.assertEqual(history.messages, [{"role": "user", "content": "ENC(scan 10.0.0.1)"}])
 
+	def test_trailing_answered_follow_up_threaded_as_user_turn(self):
+		"""A follow_up that timed out then was answered later (the conversation TAIL)
+		must have its answer threaded as the next user turn, so a respawn continues
+		instead of re-asking the same question."""
+		from secator.ai.session import restore_history_from_db
+		engine = MagicMock()
+		engine.search.return_value = [
+			{"ai_type": "prompt", "content": "Scan the target", "_timestamp": 1},
+			{"ai_type": "response", "content": "Which host should I scan?", "_timestamp": 2},
+			{"ai_type": "follow_up", "content": "Which host?", "status": "answered",
+			 "answer": "scanme.nmap.org", "_timestamp": 3},
+		]
+		history = restore_history_from_db("s7", engine)
+		self.assertEqual(history.messages, [
+			{"role": "user", "content": "Scan the target"},
+			{"role": "assistant", "content": "Which host should I scan?"},
+			{"role": "user", "content": "scanme.nmap.org"},
+		])
+
+	def test_in_run_answered_follow_up_not_double_threaded(self):
+		"""A follow_up answered in-run is already followed by its own `prompt` doc
+		(the live path persists the answer as a turn), so it is NOT the tail and its
+		answer must be threaded exactly once (from the prompt doc), not twice."""
+		from secator.ai.session import restore_history_from_db
+		engine = MagicMock()
+		engine.search.return_value = [
+			{"ai_type": "prompt", "content": "Scan the target", "_timestamp": 1},
+			{"ai_type": "response", "content": "Which host should I scan?", "_timestamp": 2},
+			{"ai_type": "follow_up", "content": "Which host?", "status": "answered",
+			 "answer": "scanme.nmap.org", "_timestamp": 3},
+			{"ai_type": "prompt", "content": "scanme.nmap.org", "_timestamp": 4},
+			{"ai_type": "response", "content": "Scanning scanme.nmap.org...", "_timestamp": 5},
+		]
+		history = restore_history_from_db("s8", engine)
+		self.assertEqual(history.messages, [
+			{"role": "user", "content": "Scan the target"},
+			{"role": "assistant", "content": "Which host should I scan?"},
+			{"role": "user", "content": "scanme.nmap.org"},
+			{"role": "assistant", "content": "Scanning scanme.nmap.org..."},
+		])
+		self.assertEqual(
+			sum(1 for m in history.messages if m.get("content") == "scanme.nmap.org"), 1)
+
 	def test_restore_rebuilds_full_transcript_from_message(self):
 		"""A persisted user->assistant(tool_calls)->tool->assistant round-trip
 		restores byte-identically, with tool_call_id pairing intact."""
