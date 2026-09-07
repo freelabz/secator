@@ -207,10 +207,20 @@ class ChatHistory:
         Args:
             max_tokens_total: Requested hard token limit (0 = no explicit cap).
         """
+        from secator.ai.utils import _repair_orphan_tool_uses
         budget = self._trim_budget(max_tokens_total)
-        if budget > 0:
-            return self.trim(budget)
-        return self.messages.copy()
+        msgs = self.trim(budget) if budget > 0 else self.messages.copy()
+        # Repair FORWARD orphan tool_uses before every LLM call: an assistant
+        # tool_call with no matching tool_result. Some handlers (follow_up,
+        # add_vuln_poc, add_finding, stop) yield only an `Ai` and never append a
+        # tool_result, so their tool_calls pile up unmatched over a turn. Providers
+        # reject/degrade on an unmatched tool_call (the model starts narrating options
+        # as prose instead of calling follow_up), so synthesize an acknowledgment.
+        # Mutates the returned COPY only — self.messages (live history) is untouched,
+        # so the synthetic acks stay ephemeral (rebuilt each turn). trim() already
+        # handles LEADING orphans; this covers the forward ones on both paths.
+        _repair_orphan_tool_uses(msgs)
+        return msgs
 
     def _trim_budget(self, max_tokens_total: int = 0) -> int:
         """Effective trim budget, capped to the model's real context window.

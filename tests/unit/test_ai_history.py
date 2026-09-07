@@ -311,6 +311,33 @@ class TestChatHistory(unittest.TestCase):
         if non_system:
             self.assertNotEqual(non_system[0]["role"], "tool")
 
+    def test_to_messages_repairs_forward_orphan_tool_call(self):
+        """A tool_call with no matching tool_result (e.g. follow_up/add_vuln_poc,
+        whose handlers append no tool_result) gets a synthetic tool_result inserted
+        before it reaches the LLM — else the model degrades. The live history is
+        left untouched (repair happens on the returned copy)."""
+        history = ChatHistory()
+        history.add_user("find vulns")
+        history.add_assistant_with_tool_calls(
+            None, [{"id": "call_fu", "type": "function",
+                    "function": {"name": "follow_up", "arguments": "{}"}}])
+        history.add_user("Exploit the first one")  # answer arrives as a user turn
+
+        msgs = history.to_messages()
+
+        # A tool result for call_fu is synthesized, sitting between the assistant
+        # tool_call and the following user turn (valid transcript).
+        roles = [m["role"] for m in msgs]
+        self.assertIn("tool", roles)
+        tool_msgs = [m for m in msgs if m["role"] == "tool"]
+        self.assertEqual(tool_msgs[0].get("tool_call_id"), "call_fu")
+        assistant_idx = next(i for i, m in enumerate(msgs) if m["role"] == "assistant")
+        tool_idx = next(i for i, m in enumerate(msgs) if m["role"] == "tool")
+        self.assertEqual(tool_idx, assistant_idx + 1)
+
+        # Live history must NOT have gained the synthetic tool message.
+        self.assertNotIn("tool", [m["role"] for m in history.messages])
+
     def test_to_messages_no_truncation_when_zero(self):
         """to_messages without max_tokens_total does not truncate."""
         history = ChatHistory()
@@ -624,7 +651,7 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         tool_calls = [{"id": "call_1", "type": "function", "function": {"name": "nmap", "arguments": "{}"}}]
         history.add_assistant_with_tool_calls("Let me scan that.", tool_calls)
 
-        messages = history.to_messages()
+        messages = history.messages  # raw storage (to_messages() repairs orphans)
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["role"], "assistant")
         self.assertEqual(messages[0]["content"], "Let me scan that.")
@@ -636,7 +663,7 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         tool_calls = [{"id": "call_1", "type": "function", "function": {"name": "nmap", "arguments": "{}"}}]
         history.add_assistant_with_tool_calls(None, tool_calls)
 
-        messages = history.to_messages()
+        messages = history.messages  # raw storage (to_messages() repairs orphans)
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["role"], "assistant")
         self.assertIsNone(messages[0].get("content"))
@@ -647,7 +674,7 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         history = ChatHistory()
         history.add_tool_result("nmap", "call_1", "scan complete: 3 ports open")
 
-        messages = history.to_messages()
+        messages = history.messages  # raw storage (to_messages() strips leading orphan tool results)
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["role"], "tool")
         self.assertEqual(messages[0]["tool_call_id"], "call_1")
@@ -659,7 +686,7 @@ class TestChatHistoryToolCalling(unittest.TestCase):
         history.add_tool_result("nmap", "call_1", "result 1")
         history.add_tool_result("httpx", "call_2", "result 2")
 
-        messages = history.to_messages()
+        messages = history.messages  # raw storage (to_messages() strips leading orphan tool results)
         self.assertEqual(len(messages), 2)
         self.assertEqual(messages[0]["tool_call_id"], "call_1")
         self.assertEqual(messages[0]["content"], "result 1")
