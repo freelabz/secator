@@ -476,12 +476,15 @@ def _child_preamble(ctx: ActionContext, context: Dict) -> Tuple[Dict, Optional["
 	Returns ``(hooks, denial)``; if ``denial`` is non-None the caller must yield it
 	and skip the spawn.
 	"""
-	# Link the child as a CHUNK of the parent AI task: its own fresh task_chunk_id
-	# (the mongo hook keys the child's OWN doc on this) + the parent AI task's task_id
-	# (groups it under the parent, exactly like a real task chunk). Falls back to a
-	# fresh id when the parent has no task_id (shouldn't happen for an ai task).
+	# The child gets its own fresh task_chunk_id (the mongo hook keys the child's OWN
+	# doc on it). It does NOT inherit the parent AI task's task_id: a heavy task
+	# (nmap/httpx/nuclei) dispatches ASYNC to celery, where it is tracked/awaited by
+	# its task_id — sharing the parent AI task's id collides with the parent and the
+	# async task never completes (results never flow back, the model gives up and
+	# falls back to bare shell commands). has_parent (run_opts, see _child_run_opts)
+	# already drops these children from the root runners list; explicit chunk grouping
+	# under the parent task_id needs async-aware handling and is deferred.
 	context["task_chunk_id"] = str(uuid.uuid4())
-	context["task_id"] = ctx.context.get("task_id") or str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
 	return _build_child_hooks_or_denial(context)

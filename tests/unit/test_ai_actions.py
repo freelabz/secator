@@ -669,11 +669,11 @@ class TestRunRunner(unittest.TestCase):
 	@patch('secator.ai.actions.TemplateLoader')
 	@patch('secator.ai.actions.Task')
 	@patch('secator.ai.actions._build_hooks_from_context')
-	def test_run_runner_links_child_as_chunk_of_parent(self, mock_build_hooks, mock_task_cls, _mock_tpl):
-		"""AI child runners are chunks of the parent ai task: context.task_id = the
-		parent's task_id, context.task_chunk_id = the child's own id (the hook keys the
-		child doc's _id on it), and run_opts.has_parent = True so it drops out of the
-		root runners list and consumes no concurrency slot. description flows to run_opts."""
+	def test_run_runner_child_gets_own_chunk_id_and_has_parent(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""AI child runners get their OWN task_chunk_id (the hook keys the child doc's
+		_id on it) and run_opts.has_parent = True so they drop out of the root runners
+		list. They do NOT inherit the parent's task_id — that collides with the async
+		celery dispatch of heavy tasks (see _child_preamble). description flows to run_opts."""
 		mock_build_hooks.return_value = {'fake': ['hook']}
 		mock_runner = MagicMock()
 		mock_runner.id = 'runner123'
@@ -693,10 +693,9 @@ class TestRunRunner(unittest.TestCase):
 		_, kwargs = mock_task_cls.call_args
 		sub_context = kwargs.get('context', {})
 		run_opts = kwargs.get('run_opts', {})
-		# Chunk of the parent ai task
-		self.assertEqual(sub_context.get('task_id'), 'PARENT_AI_ID')
+		# Own chunk id, and it must NOT be the parent's task_id (would collide async dispatch)
 		self.assertTrue(sub_context.get('task_chunk_id'))
-		self.assertNotEqual(sub_context.get('task_chunk_id'), 'PARENT_AI_ID')
+		self.assertNotEqual(sub_context.get('task_id'), 'PARENT_AI_ID')
 		# has_parent rides on run_opts (single source of truth), not context
 		self.assertTrue(run_opts.get('has_parent'))
 		self.assertNotIn('has_parent', sub_context)
