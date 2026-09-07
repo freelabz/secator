@@ -23,6 +23,13 @@ _TARGETS_SCHEMA = {
 	"description": "List of targets (hosts, URLs, IPs)."
 }
 
+_DESCRIPTION_SCHEMA = {
+	"type": "string",
+	"description": "A short human-readable description of WHY you are running this and what it does "
+	               "(e.g. 'Fire the reflected-XSS payload at level 1', 'Port-scan the target for open services'). "
+	               "Shown to the user in place of the bare task name — always provide it."
+}
+
 # OpenAI-format tool schemas keyed by tool name
 TOOL_SCHEMAS = {
 	"run_task": {
@@ -38,12 +45,13 @@ TOOL_SCHEMAS = {
 						"description": "The task name (e.g. nmap, httpx, nuclei, ffuf)."
 					},
 					"targets": _TARGETS_SCHEMA,
+					"description": _DESCRIPTION_SCHEMA,
 					"opts": {
 						"type": "object",
 						"description": "Optional task-specific options (e.g. ports, rate_limit). Control/security flags are ignored."
 					}
 				},
-				"required": ["name", "targets"]
+				"required": ["name", "targets", "description"]
 			}
 		}
 	},
@@ -60,12 +68,13 @@ TOOL_SCHEMAS = {
 						"description": "The workflow name."
 					},
 					"targets": _TARGETS_SCHEMA,
+					"description": _DESCRIPTION_SCHEMA,
 					"opts": {
 						"type": "object",
 						"description": "Optional workflow options (e.g. profiles). Control/security flags are ignored."
 					}
 				},
-				"required": ["name", "targets"]
+				"required": ["name", "targets", "description"]
 			}
 		}
 	},
@@ -80,9 +89,10 @@ TOOL_SCHEMAS = {
 					"command": {
 						"type": "string",
 						"description": "The shell command to execute."
-					}
+					},
+					"description": _DESCRIPTION_SCHEMA
 				},
-				"required": ["command"]
+				"required": ["command", "description"]
 			}
 		}
 	},

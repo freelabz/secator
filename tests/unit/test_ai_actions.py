@@ -625,10 +625,14 @@ class TestRunRunner(unittest.TestCase):
 		self.assertEqual(kwargs.get('hooks'), sentinel_hooks)
 		self.assertEqual(kwargs.get('context', {}).get('workspace_id'), 'ws1')
 
-		# Action Ai item carries runner_id + runner_type
+		# Action Ai item carries runner_id + runner_type. The child is a CHUNK of the
+		# parent ai task, so runner_id is its own task_chunk_id (the chunk doc's _id),
+		# NOT the internal runner.id — this is what the UI resolves the RunnerCard by.
 		ai_items = [r for r in results if isinstance(r, Ai) and r.ai_type == 'task']
 		self.assertEqual(len(ai_items), 1)
-		self.assertEqual(ai_items[0].extra_data.get('runner_id'), 'runner123')
+		child_ctx = kwargs.get('context', {})
+		self.assertEqual(ai_items[0].extra_data.get('runner_id'), child_ctx.get('task_chunk_id'))
+		self.assertTrue(child_ctx.get('task_chunk_id'))
 		self.assertEqual(ai_items[0].extra_data.get('runner_type'), 'task')
 
 	@patch('secator.ai.actions.TemplateLoader')
@@ -661,6 +665,43 @@ class TestRunRunner(unittest.TestCase):
 		sub_context = kwargs.get('context', {})
 		self.assertEqual(sub_context.get('session_id'), 'conv-abc-123')
 		self.assertEqual(sub_context.get('workspace_id'), 'ws1')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_links_child_as_chunk_of_parent(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""AI child runners are chunks of the parent ai task: context.task_id = the
+		parent's task_id, context.task_chunk_id = the child's own id (the hook keys the
+		child doc's _id on it), and run_opts.has_parent = True so it drops out of the
+		root runners list and consumes no concurrency slot. description flows to run_opts."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'drivers': ['mongodb'], 'task_id': 'PARENT_AI_ID'},
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1'],
+		          'description': 'Port-scan the target for open services'}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		sub_context = kwargs.get('context', {})
+		run_opts = kwargs.get('run_opts', {})
+		# Chunk of the parent ai task
+		self.assertEqual(sub_context.get('task_id'), 'PARENT_AI_ID')
+		self.assertTrue(sub_context.get('task_chunk_id'))
+		self.assertNotEqual(sub_context.get('task_chunk_id'), 'PARENT_AI_ID')
+		# has_parent rides on run_opts (single source of truth), not context
+		self.assertTrue(run_opts.get('has_parent'))
+		self.assertNotIn('has_parent', sub_context)
+		# LLM-supplied description flows to the runner
+		self.assertEqual(run_opts.get('description'), 'Port-scan the target for open services')
 
 	@patch('secator.ai.actions.TemplateLoader')
 	@patch('secator.ai.actions.Task')
@@ -1558,9 +1599,10 @@ class TestChildContextParenting(unittest.TestCase):
 		self.assertEqual(child['session_id'], 'conv-1')
 		self.assertEqual(child['drivers'], ['mongodb'])
 		self.assertEqual(child['workspace_id'], 'ws1')
-		# marks it a child
-		self.assertTrue(child.get('has_parent'))
-		# does NOT inherit the parent's runner-doc identity (would clobber / suppress its own doc)
+		# has_parent now rides on run_opts (single source of truth), NOT context
+		self.assertNotIn('has_parent', child)
+		# _get_result_context STRIPS the parent's runner-doc identity; _child_preamble
+		# then re-links it as a chunk (task_id=parent + own task_chunk_id) — tested below.
 		self.assertNotIn('task_id', child)
 		self.assertNotIn('workflow_id', child)
 		self.assertNotIn('scan_id', child)
