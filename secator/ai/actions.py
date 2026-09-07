@@ -451,6 +451,11 @@ def _child_run_opts(ctx: ActionContext) -> Dict:
 		"enable_reports": True,
 		"exporters": [],
 		"sync": ctx.sync,
+		# Every runner an AI session spawns is a child of the AI task: mark it so it
+		# drops out of the root runners list and doesn't consume a concurrency slot
+		# (the parent AI task already holds one). run_opts is the single source of
+		# truth for has_parent (Runner reads self.run_opts['has_parent'] at init).
+		"has_parent": True,
 	}
 	# Flow the mandate scope down so each child runner enforces it too (shipped gate).
 	if ctx.in_scope:
@@ -471,7 +476,12 @@ def _child_preamble(ctx: ActionContext, context: Dict) -> Tuple[Dict, Optional["
 	Returns ``(hooks, denial)``; if ``denial`` is non-None the caller must yield it
 	and skip the spawn.
 	"""
+	# Link the child as a CHUNK of the parent AI task: its own fresh task_chunk_id
+	# (the mongo hook keys the child's OWN doc on this) + the parent AI task's task_id
+	# (groups it under the parent, exactly like a real task chunk). Falls back to a
+	# fresh id when the parent has no task_id (shouldn't happen for an ai task).
 	context["task_chunk_id"] = str(uuid.uuid4())
+	context["task_id"] = ctx.context.get("task_id") or str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
 	return _build_child_hooks_or_denial(context)
@@ -542,6 +552,12 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		"tty": not ctx.subagent and ctx.sync,
 		**opts,
 	}
+	# Human-readable description the LLM supplied for this action (Runner maps
+	# run_opts['description'] -> self.description -> persisted `descr`, shown in the UI
+	# instead of the bare task name). Only set when non-empty so it never blanks out a
+	# task's own config.description.
+	if action.get("description"):
+		run_opts["description"] = action["description"]
 	if runner_type == "workflow":
 		run_opts["print_start"] = not ctx.silent and not ctx.subagent
 		run_opts["print_end"] = not ctx.silent and not ctx.subagent
@@ -565,9 +581,12 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		return
 
 	# Emit the action Ai item now the runner exists (on_init stamped the runner id) so
-	# the UI can render a RunnerCard; always emitted, even when silent. Prefer context
-	# `{type}_id` (the persisted doc's `_id`) over `runner.id` (internal, doesn't match).
-	runner_id = context.get(f"{runner_type}_id", "") or runner.id
+	# the UI can render a RunnerCard; always emitted, even when silent. The child is a
+	# CHUNK, so its persisted doc `_id` is keyed on `{type}_chunk_id` (not `{type}_id`,
+	# which now points at the PARENT ai task for grouping). Prefer the chunk id; fall
+	# back to `{type}_id` then `runner.id`.
+	runner_id = (context.get(f"{runner_type}_chunk_id")
+	             or context.get(f"{runner_type}_id", "") or runner.id)
 	yield Ai(
 		content=name,
 		ai_type=runner_type,
@@ -577,6 +596,8 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			"opts": {k: v for k, v in opts.items() if k not in ("api_key", "api_base")},
 			"runner_id": runner_id,
 			"runner_type": runner_type,
+			# LLM-supplied human-readable description, rendered in the AI chat row.
+			"description": action.get("description", ""),
 		},
 		_context=context,
 	)
@@ -593,18 +614,21 @@ def _get_result_context(action, ctx):
 	"""Build the CHILD runner's context.
 
 	Stamps the conversation ``session_id`` (parenting link — see the runner-parenting
-	design) and marks the child ``has_parent``. Critically, it STRIPS the parent's
-	runner-identity keys (`task_id`/`workflow_id`/`scan_id`): a child that inherited
-	them would make `update_runner`/`runner_id` target the PARENT's doc instead of
-	minting its own. The child keeps drivers/workspace so it persists into the same
-	workspace, linked to the conversation by ``session_id``.
+	design) and STRIPS the parent's runner-identity keys (`task_id`/`workflow_id`/
+	`scan_id`): a NON-chunk child that inherited them would make `update_runner`/
+	`runner_id` target the PARENT's doc. ``_child_preamble`` then re-links the child as
+	a CHUNK of the parent AI task (its own ``task_chunk_id`` + the parent's ``task_id``),
+	so the hook keys the child's own doc on ``task_chunk_id`` while ``task_id`` groups it
+	under the parent. The child keeps drivers/workspace so it persists into the same
+	workspace, linked to the conversation by ``session_id``. ``has_parent`` is NOT set
+	here — it rides on ``run_opts`` (the Runner's single source of truth), see
+	``_child_run_opts``.
 	"""
 	new_ctx = ctx.context.copy()
 	for identity_key in ("task_id", "workflow_id", "scan_id", "task_chunk_id"):
 		new_ctx.pop(identity_key, None)
 	if ctx.session_id and not new_ctx.get("session_id"):
 		new_ctx["session_id"] = ctx.session_id
-	new_ctx["has_parent"] = True
 	action_context = {}
 	tool_call_id = action.get("tool_call_id")
 	tool_call_name = action.get("tool_call_name")
@@ -677,6 +701,10 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			"dangerous": False,
 			"env": _sanitized_env(),
 		}
+		# Human-readable description the LLM supplied (shown in the UI instead of the
+		# bare "command" name). See _run_runner for the run_opts['description'] mapping.
+		if action.get("description"):
+			run_opts["description"] = action["description"]
 
 		# Instantiate `command` directly (bypasses the Task wrapper, which discards `.output`)
 		# so stdout survives while persist hooks still fire. Spread **run_opts, not `run_opts=`
@@ -696,8 +724,12 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			content=command,
 			ai_type="shell",
 			extra_data={
-				"runner_id": context.get("task_id", "") or runner.id,
+				# Chunk doc `_id` is keyed on task_chunk_id (task_id now points at the
+				# parent ai task for grouping). See _run_runner for the same ordering.
+				"runner_id": context.get("task_chunk_id") or context.get("task_id", "") or runner.id,
 				"runner_type": "task",
+				# LLM-supplied human-readable description, rendered in the AI chat row.
+				"description": action.get("description", ""),
 			},
 			_context=context,
 		)
