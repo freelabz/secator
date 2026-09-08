@@ -333,3 +333,30 @@ class TestPrompts(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestOperatingRulesRecap(unittest.TestCase):
+	"""Every mode ends with the operating-rules recap in the recency slot.
+
+	The library reference is inlined at the TOP of attack/exploit (long data
+	first), which pushes the persona to the middle of a ~15-60k prompt. A terse
+	recap at the very END keeps the rules the model most often breaks (use
+	follow_up with choices, description=intent, persist, restate-before-retry) in
+	the high-attention tail. Regression guard for that structural fix.
+	"""
+
+	def test_recap_present_and_last_in_every_mode(self):
+		for mode in ("chat", "attack", "exploit"):
+			p = get_system_prompt(mode, workspace_path="<ws>", backend=None)
+			self.assertIn("<operating_rules>", p, f"{mode} missing recap")
+			self.assertTrue(
+				p.rstrip().endswith("</operating_rules>"),
+				f"{mode} recap is not the LAST block (recency slot)")
+
+	def test_recap_covers_the_known_failure_modes(self):
+		p = get_system_prompt("attack", workspace_path="<ws>", backend=None)
+		recap = p[p.index("<operating_rules>"):]
+		self.assertIn("follow_up", recap)          # prose-choices failure
+		self.assertIn("description", recap)         # description-echo failure
+		self.assertIn("Persist", recap)             # early-yield failure

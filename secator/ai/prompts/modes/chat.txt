@@ -16,3 +16,5 @@ ${queries}
 ${findings}
 ${follow_up}
 </constraints>
+
+${operating_rules}
