@@ -54,3 +54,5 @@ During your discovery you discovered a reflected XSS on an endpoint. Instead of 
 </example>
 </vulnerability_handling>
 </constraints>
+
+${operating_rules}
