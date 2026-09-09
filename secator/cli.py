@@ -1346,19 +1346,31 @@ def _apply_format(results, fmt):
 					pass
 			new_results[_type] = formatted
 		else:
-			# No field specified — use each OutputType's __str__ for a clean primary-field repr.
-			# Items from report.data['results'] may be raw dicts; reconstruct via OutputType.load().
-			_otype_map = {cls.get_name(): cls for cls in FINDING_TYPES}
-			otype_cls = _otype_map.get(_type)
+			# No field template. `_type` is a bare token that matched a result type name (e.g.
+			# `-f port`). If that token is ALSO a field on the items, the user means the field
+			# column — emit its value (parity with `-f port.port`). Otherwise fall back to each
+			# OutputType's __str__ for a clean primary-field repr. Items from report.data['results']
+			# may be raw dicts; reconstruct via OutputType.load() for the __str__ path.
+			_first = items[0]
+			_first_d = _first if isinstance(_first, dict) else (_first.toDict() if hasattr(_first, 'toDict') else {})
 			formatted = []
-			for item in items:
-				if isinstance(item, dict) and otype_cls:
-					try:
-						formatted.append(str(otype_cls.load(item)))
-					except Exception:
-						formatted.append(json.dumps(item))
-				else:
-					formatted.append(str(item))
+			if _type in _first_d:
+				for item in items:
+					d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+					val = d.get(_type)
+					if val is not None:
+						formatted.append(str(val))
+			else:
+				_otype_map = {cls.get_name(): cls for cls in FINDING_TYPES}
+				otype_cls = _otype_map.get(_type)
+				for item in items:
+					if isinstance(item, dict) and otype_cls:
+						try:
+							formatted.append(str(otype_cls.load(item)))
+						except Exception:
+							formatted.append(json.dumps(item))
+					else:
+						formatted.append(str(item))
 			new_results[_type] = formatted
 
 	return new_results
