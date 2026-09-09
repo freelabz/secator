@@ -223,6 +223,20 @@ def _fragment(_type, field, value):
     return result
 
 
+def _exists_guard(_type, frag):
+    """Pin `$exists: True` on a negating operator applied to a LOOSE (untyped) field.
+
+    `!=`/`not in`/`!~=` (`$ne`/`$nin`/`$not`) match documents that LACK the field entirely on
+    Mongo + the API backend (and the json backend), so a loose `severity != critical` wrongly
+    returns Ports/Subdomains that have no severity at all. Requiring the field to exist makes it
+    mean "has the field AND the value differs". Only for loose fields — a `type.field` form is
+    already scoped by `_type`. Harmless where a backend already excludes absent fields (sqlite's
+    NULL comparison semantics); the json + sqlite backends implement `$exists` for parity."""
+    if _type is None and isinstance(frag, dict):
+        frag = {**frag, '$exists': True}
+    return frag
+
+
 def _has_in_op_outside_quotes(expr):
     """Return True if ' in [' appears outside of any quoted substring in expr."""
     in_quote = None
@@ -303,7 +317,7 @@ def _parse_single_expr(expr):
         if not _IDENT_RE.match(left):
             raise ValueError(f'Cannot translate expression to query: {expr!r}')
         _type, field = _split_type_field(left)
-        return _fragment(_type, field, {'$nin': _parse_list(m_not_in.group(2))})
+        return _fragment(_type, field, _exists_guard(_type, {'$nin': _parse_list(m_not_in.group(2))}))
 
     # 'in' operator ("type.field in [...]" -> $in)
     m_in = _IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
@@ -333,10 +347,13 @@ def _parse_single_expr(expr):
         if not field:
             return _fragment(_type, field, None)
         if mongo_op == '$not_regex':
-            return _fragment(_type, field, {'$not': {'$regex': value}})
+            return _fragment(_type, field, _exists_guard(_type, {'$not': {'$regex': value}}))
         if mongo_op is None:
             return _fragment(_type, field, value)
-        return _fragment(_type, field, {mongo_op: value})
+        frag = {mongo_op: value}
+        if mongo_op == '$ne':
+            frag = _exists_guard(_type, frag)
+        return _fragment(_type, field, frag)
 
     # Fallback: bare "type.field"/"item.field" is a truthiness check (`ip.alive`, `vuln.id`).
     # $nin keeps only truthy values on both backends (bool and string).
