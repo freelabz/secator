@@ -557,10 +557,17 @@ class Config(DotMap):
 				updated.update(value)
 		else:
 			if subkey:
-				new_val = Config._parse_new_value(value)
-				# For workspaces.profiles, always coerce single strings to list
-				if parent_path == 'workspaces.profiles' and isinstance(new_val, str):
-					new_val = [new_val]
+				# `queries.*` values are raw query-expression strings (Dict[str, str]). A query
+				# like `severity in [high, critical]` must NOT be comma-split / bracket-parsed
+				# into a list by _parse_new_value, or it fails Dict[str, str] validation and the
+				# save is rejected (issue #1340). Store the expression verbatim.
+				if parent_path == 'queries' and isinstance(value, str):
+					new_val = value
+				else:
+					new_val = Config._parse_new_value(value)
+					# For workspaces.profiles, always coerce single strings to list
+					if parent_path == 'workspaces.profiles' and isinstance(new_val, str):
+						new_val = [new_val]
 				updated[subkey] = new_val
 			elif isinstance(value, dict):
 				updated.update(value)
