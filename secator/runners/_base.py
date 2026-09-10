@@ -12,7 +12,7 @@ from time import time
 from dotmap import DotMap
 import humanize
 
-from secator.definitions import ADDONS_ENABLED, STATE_COLORS
+from secator.definitions import ADDONS_ENABLED, IN_WORKER, STATE_COLORS
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import (
@@ -137,6 +137,7 @@ class Runner:
 		self.celery_result = None
 		self.celery_ids_map = {}
 		self.revoked = False
+		self._worker_terminated = False
 		self.skipped = False
 		self.results_buffer = []
 		self._hooks = hooks
@@ -730,7 +731,7 @@ class Runner:
 
 		except BaseException as e:
 			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
-			error = Error.from_exception(e)
+			error = self._handle_worker_termination(e)  # re-raises on a worker SystemExit
 			self.add_result(error)
 			self.revoked = True
 			if not self.sync:  # yield latest results from Celery
@@ -744,10 +745,32 @@ class Runner:
 			self.results_buffer = []
 			self._finalize()
 
+	def _handle_worker_termination(self, exc):
+		"""Decide what a caught exception means for a running task.
+
+		On a worker, a ``SystemExit`` means the worker process is being torn down — a SIGTERM from a
+		node/Job eviction or deadline (external) or from ``app.control.revoke(..., terminate=True)``
+		(intentional). Re-raise it instead of turning it into a returned result: letting it
+		propagate out of the Celery task is what lets Celery apply the right policy — a *revoked*
+		task is acknowledged and never retried, while a task whose worker was *lost* is requeued via
+		``task_reject_on_worker_lost`` (both confirmed with a prefork worker). Swallowing it into a
+		returned Error acks the task and defeats both. Off the worker (CLI run), keep the previous
+		behavior and surface the failure as an Error.
+		"""
+		if IN_WORKER and isinstance(exc, SystemExit):
+			self._worker_terminated = True
+			raise exc
+		return Error.from_exception(exc)
+
 	def _finalize(self):
 		"""Finalize the runner."""
 		self.join_threads()
 		gc.collect()
+		if self._worker_terminated:
+			# Worker torn down mid-task (SIGTERM eviction/deadline, or revoke). Celery will
+			# redeliver or ack-as-revoked; don't record a terminal status or reports for this
+			# aborted attempt — it is wrong and about to be superseded.
+			return
 		if self.sync:
 			self.mark_completed()
 		elif self.celery_result and not self.done:
