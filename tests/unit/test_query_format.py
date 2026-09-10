@@ -29,6 +29,13 @@ class TestApplyFormatBareField(unittest.TestCase):
 		out = _apply_format(dict(results), 'host')
 		self.assertEqual(out['port'], ['h1', 'h2'])
 
+	def test_bare_field_detected_when_first_item_lacks_it(self):
+		# Field presence is checked across ALL items: the first item has no `port`, a later one
+		# does -> still resolve as a field (parity with `-f port.port`), not the __str__ fallback.
+		results = {'port': [{'host': 'h1'}, {'host': 'h2', 'port': 80}]}
+		out = _apply_format(dict(results), 'port')
+		self.assertEqual(out['port'], ['80'])
+
 
 if __name__ == '__main__':
 	unittest.main()
