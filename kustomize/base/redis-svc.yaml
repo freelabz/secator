@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: secator
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    name: client
+  selector:
+    app: redis
