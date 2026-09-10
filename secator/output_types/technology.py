@@ -24,6 +24,8 @@ class Technology(OutputType):
 
 	_table_fields = ['match', 'product', 'version', 'extra_data']
 	_sort_by = ('match', 'product', 'version')
+	_group_by = ('product',)
+	_group_aggregate = 'match'
 
 	def __str__(self) -> str:
 		return self.match
