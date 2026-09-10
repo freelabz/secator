@@ -75,10 +75,6 @@ OPERATORS = {
 	"$lt": lambda field, value: field < value if field is not None else False,
 	"$lte": lambda field, value: field <= value if field is not None else False,
 	"$ne": lambda field, value: field != value,
-	# Field presence. `$exists: True` requires the field (absent/None -> not present); `$exists: False`
-	# requires it to be absent. Pins negating operators (`$ne`/`$nin`/`$not`) to findings that
-	# actually carry the field on a loose query (see query.utils._exists_guard).
-	"$exists": lambda field, value: (field is not None) == bool(value),
 }
 
 

@@ -110,11 +110,6 @@ def _build_where(query: dict):
 					# Negated regex from '!~='.
 					clauses.append(f'{expr} NOT REGEXP ?')
 					params.append(str(val['$regex']))
-				elif op == '$exists':
-					# Field presence guard (see query.utils._exists_guard). Redundant with sqlite's
-					# NULL comparison semantics for `!=`, but needed so a loose `not in`/`!~=` also
-					# excludes rows lacking the field, matching mongo/json.
-					clauses.append(f'{expr} IS NOT NULL' if val else f'{expr} IS NULL')
 				# unknown operators are ignored, matching the json backend
 		else:
 			clauses.append(f'{expr} = ?')
