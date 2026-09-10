@@ -31,6 +31,20 @@ class MongoDBBackend(QueryBackend):
 			self._client = get_mongodb_client()
 		return self._client
 
+	def is_reachable(self) -> bool:
+		"""True if a Mongo ping succeeds within ~1s (else the run falls back to the celery poll)."""
+		try:
+			import pymongo
+			client = self._get_client()
+			try:
+				with pymongo.timeout(1.0):
+					client.admin.command('ping')
+			except AttributeError:  # pymongo < 4.2 has no timeout() ctx; rely on serverSelectionTimeoutMS
+				client.admin.command('ping')
+			return True
+		except Exception:
+			return False
+
 	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
 		"""Search MongoDB for findings matching query."""
 		try:

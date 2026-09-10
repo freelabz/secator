@@ -10,8 +10,8 @@ from celery import Celery, chord
 from celery.canvas import signature
 from celery.app import trace
 
-from rich.logging import RichHandler
 from retry import retry
+from rich.logging import RichHandler
 
 from secator.celery_signals import setup_handlers
 from secator.definitions import IN_WORKER
@@ -131,7 +131,11 @@ if IN_WORKER:
 
 @retry(Exception, tries=3, delay=2)
 def update_state(celery_task, task, force=False):
-	"""Update task state to add metadata information."""
+	"""Publish RUNNING state + counts to the Celery result backend.
+
+	Read only by the CeleryData fallback poller (used when the store is not a reachable shared
+	store — see _base._poll_results). The store poll ignores this; findings/status persist to the
+	store via the on_item / on_interval hooks regardless."""
 	if not IN_WORKER:
 		return
 	if task.no_live_updates:
@@ -139,8 +143,7 @@ def update_state(celery_task, task, force=False):
 	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
 		return
 	task.last_updated_celery = time()
-	# Build the state ONCE (one batched store read) and reuse it for the debug line — the old code
-	# re-read the store for task.status + task.self_findings_count on top of task.celery_state.
+	# Build the state ONCE (one batched store read) and reuse it for the debug line.
 	state = task.celery_state
 	debug(
 		'',
@@ -365,10 +368,13 @@ def run_command(self, results, name, targets, opts={}):
 		if IN_WORKER:
 			console.print(Info(message=f'Task {name} successfully broken into {len(workflow)} chunks'))
 		update_state(self, task, force=True)
-		console.print(Info(message=f'Task {name} updated state, replacing task with Celery chord workflow'))
+		console.print(Info(message=f'Task {name} replacing task with Celery chord workflow'))
 		return replace(self, workflow)
 
-	# Update state live
+	# Drive task execution. Findings/status/progress persist to the store live via the on_item /
+	# on_interval hooks (the store poll reads those). update_state additionally publishes RUNNING
+	# state to the Celery result backend for the fallback poller used when the store is not a
+	# reachable shared store (see _base._poll_results).
 	for _ in task:
 		update_state(self, task)
 	update_state(self, task, force=True)
