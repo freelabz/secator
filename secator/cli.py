@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import sys
 
+from collections import Counter
+
 
 from pathlib import Path
 from stat import S_ISFIFO
@@ -1123,10 +1125,13 @@ def list_aliases(silent):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -severity_score')  # noqa: E501
+@click.option('--count', 'count', is_flag=True, default=False, help='Group identical --format values with an occurrence count (most frequent first; --sort orders by value instead)')  # noqa: E501
+@click.option('--uniq', 'uniq', is_flag=True, default=False, help='Drop duplicate --format values')
 @click.option('--group', is_flag=False, flag_value='', default=None, help='Group findings by field(s) (comma-separated) with auto-aggregation. Bare --group uses per-type defaults.')  # noqa: E501
 @click.option('--save', 'save', type=str, default=None, help='Save the query expression ARG under this name for later reuse (e.g. --save vuln_high)')  # noqa: E501
 @click.pass_context
-def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, group, save):  # noqa: E501
+def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, sort, count, uniq, group, save):  # noqa: E501
 	"""Query"""
 
 	# 0. Save the expression under a name, then exit (reuse later with `secator q <name>`).
@@ -1142,17 +1147,17 @@ def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_fi
 	# Empty query: return all results (subject to the enforced base query),
 	# optionally scoped by --report-filter / --workspace.
 	if not arg:
-		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder)
+		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
 		return
 
 	# 1. Saved query name
 	if arg in CONFIG.queries:
-		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder, group)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
 		return
 
 	# 2. Raw filter expression
 	if _looks_like_query_expr(arg):
-		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder, group)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
 		return
 
 	# 3. Natural language -> AI chat
@@ -1378,7 +1383,61 @@ def _apply_format(results, fmt):
 	return new_results
 
 
-def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, group=None):  # noqa: E501
+def _sort_results_by_field(results, sort):
+	"""Sort each type's findings by a field, in place. Numeric-aware (ints/floats sort naturally);
+	a leading `-` sorts descending. Missing values sort last. Runs before --format, so `--sort port`
+	orders the rows even when --format shows a different field. Backend-agnostic (post-fetch)."""
+	field = sort.strip()
+	reverse = field.startswith('-')
+	if reverse:
+		field = field[1:].strip()
+
+	def _key(item):
+		# Resolve the (dotted) field on dicts OR objects, so `--sort` also reaches attributes like
+		# `_group_count` set by --group on the representative OutputType (dicts don't carry it).
+		val = item
+		for part in field.split('.'):
+			if isinstance(val, dict):
+				val = val.get(part)
+			else:
+				val = getattr(val, part, None)
+			if val is None:
+				break
+		return val
+
+	for _type, items in results.items():
+		keyed = [(_key(it), it) for it in items]
+		try:
+			keyed.sort(key=lambda kv: (kv[0] is None, kv[0]), reverse=reverse)
+		except TypeError:
+			# Mixed/incomparable field types -> stable string ordering.
+			keyed.sort(key=lambda kv: (kv[0] is None, str(kv[0])), reverse=reverse)
+		results[_type] = [it for _, it in keyed]
+
+
+def _aggregate_values(results, count=False, uniq=False, sort_given=False):
+	"""Post-format aggregation of --format output values, per type (backend-agnostic: runs on the
+	already-fetched, formatted rows). `uniq` drops duplicate values (first-seen order). `count`
+	groups identical values into ``"<count>  <value>"`` rows — ordered most-frequent-first by
+	default (classic top-N), or, when --sort was given, kept in the sorted (value) order the
+	findings arrived in."""
+	out = {}
+	for _type, values in results.items():
+		svals = [str(v) for v in values]
+		if count:
+			items = list(Counter(svals).items())  # (value, count), first-seen insertion order
+			if not sort_given:
+				items.sort(key=lambda kv: kv[1], reverse=True)  # top-N: most frequent first
+			width = max((len(str(c)) for _, c in items), default=1)
+			out[_type] = [f'{str(c).rjust(width)}  {v}' for v, c in items]
+		elif uniq:
+			out[_type] = list(dict.fromkeys(svals))
+		else:
+			out[_type] = svals
+	return out
+
+
+def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None):  # noqa: E501
 	"""Build and send a consolidated report. Shared by `report show` and `query`.
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
@@ -1490,9 +1549,13 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	# 6. Build and send report via QueryEngine
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
 	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
-	report.build(query=full_query, dedupe=dedupe_effective, limit=limit)
+	# Fetch the FULL set when reshaping/capping the output — --group / --sort / --uniq / --count
+	# operate post-query, so limiting the backend fetch first would group/sort/dedupe/count only a
+	# partial slice. --limit is then applied to the finished output below.
+	aggregating = bool(sort or count or uniq or group is not None)
+	report.build(query=full_query, dedupe=dedupe_effective, limit=(0 if aggregating else limit))
 
-	# Group findings by field(s) with auto-aggregation (processing-side, post-query).
+	# 1. Group findings by field(s) with auto-aggregation (processing-side, post-query).
 	# `group is None` => disabled; `group == ''` => per-type defaults; else explicit field(s).
 	grouped_types = []
 	if group is not None and not fmt:
@@ -1515,8 +1578,16 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	elif group is not None and fmt:
 		console.print(Warning(message='--group is ignored when --format is used'))
 
+	# 2. Sort findings by a field, AFTER grouping — so `--sort -_group_count` orders the groups
+	# (top-N most/least frequent), which is the ordering --group lacks on its own.
+	if sort:
+		_sort_results_by_field(report.data['results'], sort)
 	if fmt:
 		report.data['results'] = _apply_format(report.data['results'], fmt)
+	if count or uniq:
+		report.data['results'] = _aggregate_values(report.data['results'], count=count, uniq=uniq, sort_given=bool(sort))
+	if aggregating and limit:
+		report.data['results'] = {t: items[:limit] for t, items in report.data['results'].items()}
 	report.send()
 	total_results = sum(len(items) for items in report.data['results'].values())
 	emit_query_warnings(query_warnings)
@@ -1554,11 +1625,14 @@ def run_ai_chat(ctx, prompt, workspace):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -severity_score')  # noqa: E501
+@click.option('--count', 'count', is_flag=True, default=False, help='Group identical --format values with an occurrence count (most frequent first; --sort orders by value instead)')  # noqa: E501
+@click.option('--uniq', 'uniq', is_flag=True, default=False, help='Drop duplicate --format values')
 @click.option('--group', is_flag=False, flag_value='', default=None, help='Group findings by field(s) (comma-separated) with auto-aggregation. Bare --group uses per-type defaults.')  # noqa: E501
 @click.pass_context
-def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt, workspace, driver, dedupe, limit, group):  # noqa: E501
+def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt, workspace, driver, dedupe, limit, sort, count, uniq, group):  # noqa: E501
 	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
-	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder, group)
+	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
 
 
 def _load_report_data(path):
