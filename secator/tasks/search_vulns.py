@@ -4,7 +4,8 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-	DELAY, FOLLOW_REDIRECT, HEADER, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT
+	DELAY, FOLLOW_REDIRECT, HEADER, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, SKIP_SSL_VERIFY, THREADS, TIMEOUT,
+	USER_AGENT
 )
 # fmt: on
 from secator.output_types import Exploit, Info, Vulnerability, Warning
@@ -42,6 +43,7 @@ class search_vulns(Vuln):
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED,
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 	}
 	install_version = '1.0.9'
 	install_cmd = 'pipx install --force search_vulns==[install_version]'

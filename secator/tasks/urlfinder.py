@@ -2,7 +2,7 @@ import validators
 from collections import defaultdict
 from urllib.parse import urlparse, urlunparse, parse_qs
 
-from secator.definitions import HOST, URL, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, USER_AGENT, HEADER, OPT_NOT_SUPPORTED  # noqa: E501
+from secator.definitions import HOST, URL, DELAY, DEPTH, FILTER_CODES, FILTER_REGEX, FILTER_SIZE, FILTER_WORDS, MATCH_CODES, MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, FOLLOW_REDIRECT, METHOD, PROXY, RATE_LIMIT, RETRIES, SKIP_SSL_VERIFY, THREADS, TIMEOUT, USER_AGENT, HEADER, OPT_NOT_SUPPORTED  # noqa: E501
 from secator.output_types import Url
 from secator.decorators import task
 from secator.serializers import JSONSerializer
@@ -59,6 +59,7 @@ class urlfinder(HttpCrawler):
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
 		MATCH_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		METHOD: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 		RATE_LIMIT: 'rl',
