@@ -47,6 +47,11 @@ tasks:
     dnsx:
       description: Resolve DNS records
 
+    shodan:
+      description: Passive DNS records via Shodan
+      operation: dns
+      if: opts.passive
+
   wafw00f:
     description: Check WAF
     targets_:

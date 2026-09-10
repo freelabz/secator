@@ -237,6 +237,11 @@ class VulnersAddon(StrictModel):
 	api_key: str = ''
 
 
+class ShodanAddon(StrictModel):
+	enabled: bool = False
+	api_key: str = ''
+
+
 class AiAddon(StrictModel):
 	enabled: bool = False
 	api_key: str = ''
@@ -327,6 +332,7 @@ class Addons(StrictModel):
 	mongodb: MongodbAddon = MongodbAddon()
 	sqlite: SqliteAddon = SqliteAddon()
 	vulners: VulnersAddon = VulnersAddon()
+	shodan: ShodanAddon = ShodanAddon()
 	discord: DiscordAddon = DiscordAddon()
 	api: ApiAddon = ApiAddon()
 	ai: AiAddon = AiAddon()

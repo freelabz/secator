@@ -20,7 +20,7 @@ runs:
 
   - name: Install secator with pipx
     shell: bash
-    run: pipx install -e .[dev,ai]
+    run: pipx install -e .[dev,ai,shodan]
 
   - name: Add secator to $PATH
     shell: bash
