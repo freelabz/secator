@@ -43,6 +43,7 @@ class nmap(ReconPort):
 		# Host discovery
 		'skip_host_discovery': {'is_flag': True, 'short': 'Pn', 'default': False, 'help': 'Skip host discovery (no ping)'},
 		'skip_dns_resolution': {'is_flag': True, 'short': 'n', 'default': False, 'help': 'Skip DNS resolution'},
+		'host_timeout': {'type': str, 'default': None, 'help': 'Give up on target after this long'},
 		# Service and version detection
 		'version_detection': {'is_flag': True, 'short': 'sV', 'default': False, 'help': 'Enable version detection (slow)'},
 		'detect_all': {'is_flag': True, 'short': 'A', 'default': False, 'help': 'Enable OS detection, version detection, script scanning, and traceroute on open ports'},  # noqa: E501
@@ -95,6 +96,7 @@ class nmap(ReconPort):
 		# Nmap opts
 		'skip_host_discovery': '-Pn',
 		'skip_dns_resolution': '-n',
+		'host_timeout': '--host-timeout',
 		'version_detection': '-sV',
 		'detect_all': '-A',
 		'detect_os': '-O',
