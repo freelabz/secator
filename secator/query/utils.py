@@ -223,6 +223,34 @@ def _fragment(_type, field, value):
     return result
 
 
+def _loose_neg(_type, frag):
+    """Make a LOOSE (untyped) negating operator exclude findings that lack the field OR carry a
+    null value — identically on every backend.
+
+    `!=`/`not in`/`!~=` (`$ne`/`$nin`/`$not`) otherwise return findings that don't have the field
+    at all (`severity != critical` wrongly lists Ports/Subdomains). Two additions, chosen so the
+    query needs NO backend-specific code:
+      - fold `null` into a `$nin` (rewrite `$ne x` -> `$nin [x, null]`, append `null` to an
+        existing `$nin`, or add `$nin [null]` for the `$not` regex form). json + sqlite already
+        drop both absent and null for `$nin`, and Mongo/API do too — so present-null is excluded
+        consistently, avoiding the SQL-NULL-vs-Python-None split that a bare `$ne` has.
+      - pin `$exists: True` because Mongo's `$nin`/`$not` still MATCH documents missing the field;
+        it is a no-op on json/sqlite (they exclude absent via the `$nin`).
+    A typed `type.field` form is already scoped by `_type` and passes through unchanged."""
+    if _type is not None or not isinstance(frag, dict):
+        return frag
+    frag = dict(frag)
+    if '$ne' in frag:
+        frag = {'$nin': [frag.pop('$ne'), None], **frag}
+    elif '$nin' in frag:
+        if None not in frag['$nin']:
+            frag['$nin'] = list(frag['$nin']) + [None]
+    else:
+        frag['$nin'] = [None]
+    frag['$exists'] = True
+    return frag
+
+
 def _has_in_op_outside_quotes(expr):
     """Return True if ' in [' appears outside of any quoted substring in expr."""
     in_quote = None
@@ -303,7 +331,7 @@ def _parse_single_expr(expr):
         if not _IDENT_RE.match(left):
             raise ValueError(f'Cannot translate expression to query: {expr!r}')
         _type, field = _split_type_field(left)
-        return _fragment(_type, field, {'$nin': _parse_list(m_not_in.group(2))})
+        return _fragment(_type, field, _loose_neg(_type, {'$nin': _parse_list(m_not_in.group(2))}))
 
     # 'in' operator ("type.field in [...]" -> $in)
     m_in = _IN_RE.match(expr) if _has_in_op_outside_quotes(expr) else None
@@ -333,10 +361,13 @@ def _parse_single_expr(expr):
         if not field:
             return _fragment(_type, field, None)
         if mongo_op == '$not_regex':
-            return _fragment(_type, field, {'$not': {'$regex': value}})
+            return _fragment(_type, field, _loose_neg(_type, {'$not': {'$regex': value}}))
         if mongo_op is None:
             return _fragment(_type, field, value)
-        return _fragment(_type, field, {mongo_op: value})
+        frag = {mongo_op: value}
+        if mongo_op == '$ne':
+            frag = _loose_neg(_type, frag)
+        return _fragment(_type, field, frag)
 
     # Fallback: bare "type.field"/"item.field" is a truthiness check (`ip.alive`, `vuln.id`).
     # $nin keeps only truthy values on both backends (bool and string).
