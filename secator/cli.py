@@ -874,6 +874,102 @@ def workspace_current():
 	console.print(Info(message=f'Current workspace: [bold gold3]{current}[/]. Use [bold green4]secator ws use <workspace>[/] to switch.'))  # noqa: E501
 
 
+# Built-in `workspace summary` template. It is template-DRIVEN: it calls the `query(...)` helper
+# (exposed in the render context) which runs a real query with the same --format/--count/--sort/
+# --uniq/--limit surface as `secator q`. Override the whole thing with `--template <file>`.
+DEFAULT_SUMMARY_TEMPLATE = """\
+[bold gold3]:clipboard: Workspace summary — {{ workspace }}[/]
+
+[bold cyan]Top ports[/]
+{{ query('port', fmt='port', count=True, limit=15) }}
+
+[bold cyan]Top hosts (IPs)[/]
+{{ query('ip', fmt='ip', count=True, limit=15) }}
+
+[bold cyan]Top subdomains[/]
+{{ query('subdomain', fmt='host', count=True, limit=15) }}
+
+[bold cyan]Top technologies[/]
+{{ query('technology', fmt='product', count=True, limit=15) }}
+
+[bold cyan]Top URLs[/]
+{{ query('url', fmt='url', count=True, limit=15) }}
+
+[bold red3]Vulnerabilities by severity[/]
+{{ query('vulnerability', fmt='severity', count=True) }}
+
+[bold red3]Vulnerabilities by status[/]
+{{ query('vulnerability', fmt='status', count=True) }}
+
+[bold red3]Top vulnerabilities[/]
+{{ query('vulnerability', fmt='name', count=True, limit=15) }}
+"""
+
+
+def _summary_query_engine(workspace, driver):
+	"""Resolve the workspace + query backend for `workspace summary` (mirrors run_report_show)."""
+	workspace_name = workspace or CONFIG.workspaces.current or 'default'
+	effective_driver = QueryEngine.resolve_backend(driver)
+	drivers = [effective_driver] if effective_driver != 'local' else []
+	workspace_id = workspace_name
+	if effective_driver == 'api':
+		from secator.hooks.api import resolve_workspace
+		workspace_id, workspace_name = resolve_workspace(workspace_name)
+	engine = QueryEngine(workspace_id, context={'drivers': drivers, 'workspace_name': workspace_name})
+	return engine, workspace_name
+
+
+def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort=None, limit=0):
+	"""Run one summary query and return rendered rows (newline-joined). Exposed to summary
+	templates as `query(...)`; mirrors the `secator q` pipeline (sort -> format -> count/uniq ->
+	limit) on the fetched findings, so it is backend-agnostic. Row values are rich-escaped so a
+	finding value containing brackets can't corrupt the rendered markup."""
+	from rich.markup import escape
+	from secator.query.utils import python_expr_to_mongo
+	q = python_expr_to_mongo(type_or_expr)
+	aggregating = bool(sort or count or uniq)
+	findings = engine.search(q, limit=(0 if aggregating else limit), dedupe=CONFIG.runners.remove_duplicates)
+	results = {}
+	for f in findings:
+		results.setdefault(f.get('_type', str(type_or_expr)), []).append(f)
+	if sort:
+		_sort_results_by_field(results, sort)
+	if fmt:
+		results = _apply_format(results, fmt)
+	if count or uniq:
+		results = _aggregate_values(results, count=count, uniq=uniq, sort_given=bool(sort))
+	rows = [escape(str(x)) for items in results.values() for x in items]
+	if aggregating and limit:
+		rows = rows[:limit]
+	return '\n'.join(rows) if rows else '[dim](none)[/]'
+
+
+@workspace.command('summary')
+@click.option('-w', '-ws', '--workspace', 'workspace_opt', type=str, default=None, help='Workspace name (default: current)')  # noqa: E501
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--template', 'template_path', type=str, default=None, help='Path to a Jinja2 summary template overriding the built-in one')  # noqa: E501
+def workspace_summary(workspace_opt, driver, template_path):
+	"""Summarize a workspace's findings (top ports/hosts/tech/URLs + vulnerabilities).
+
+	Renders a Jinja2 template that calls `query(type, fmt=.., count=.., uniq=.., sort=.., limit=..)`
+	against the workspace (same surface as `secator q`). Override with --template <file>.
+	"""
+	engine, workspace_name = _summary_query_engine(workspace_opt, driver)
+	if template_path:
+		try:
+			template_str = Path(template_path).read_text(encoding='utf-8')
+		except OSError as e:
+			raise click.UsageError(f'Could not read --template "{template_path}": {e}')
+	else:
+		template_str = DEFAULT_SUMMARY_TEMPLATE
+
+	def _query(type_or_expr, **kwargs):
+		return _summary_query(engine, type_or_expr, **kwargs)
+
+	rendered = Template(template_str).render(workspace=workspace_name, query=_query, q=_query)
+	console.print(rendered)
+
+
 @workspace.command(name='rm', aliases=['remove', 'delete'])
 @click.argument('name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
