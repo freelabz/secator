@@ -111,8 +111,15 @@ class Report:
 			# iterates its type's cursor, so peak stays flat through report generation. Dedup is
 			# store-side (tag_duplicates flags duplicates), excluded by query.
 			if dedupe:
+				# The stream can't dedup in memory (that's the materialized path's `remove_duplicates`),
+				# so it filters on the stored `_context.workspace_duplicate` flag — which nothing marks
+				# at scan time anymore, so tag on demand first (api excepted; its server tags itself).
+				from secator.hooks._dedup import maybe_tag_duplicates
+				maybe_tag_duplicates(engine, workspace_id)
+				# MUST nest in `$and`: a top-level `_context.workspace_duplicate` is a PROTECTED_FIELD
+				# stripped by _merge_query, so a bare merge would silently drop the dedup filter.
 				dup = {'_context.workspace_duplicate': {'$ne': True}}
-				query = {'$and': [query, dup]} if (query and set(query) & set(dup)) else {**query, **dup}
+				query = {'$and': [query, dup]}
 			for output_type in list(FINDING_TYPES) + [Target]:
 				name = output_type.get_name()
 				type_q = {'$and': [query, {'_type': name}]} if '_type' in query else {**query, '_type': name}
