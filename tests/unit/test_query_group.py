@@ -45,6 +45,26 @@ class TestGroupFindings(unittest.TestCase):
 		reps = group_findings(items, ['name', 'matched_at'])          # (A,u1)x2, (A,u2)x1
 		self.assertEqual(sorted(r._group_count for r in reps), [1, 2])
 
+	def test_matched_at_aggregated_across_targets(self):
+		# The core use case: one vulnerability hitting many targets collapses to a single row whose
+		# matched_at lists all its targets.
+		items = [_vuln('XSS', 'a'), _vuln('XSS', 'b'), _vuln('XSS', 'c')]
+		reps = group_findings(items, ['name'], aggregate_field='matched_at')
+		self.assertEqual(len(reps), 1)
+		self.assertEqual(reps[0]._group_count, 3)
+		self.assertEqual(sorted(reps[0].matched_at.split(', ')), ['a', 'b', 'c'])
+
+	def test_per_type_group_defaults(self):
+		# Each type's default group field + aggregate field (used by the `--group` flag).
+		from secator.output_types import Vulnerability, Exploit, Port, Url, Subdomain, Tag, Technology
+		self.assertEqual((tuple(Vulnerability._group_by), Vulnerability._group_aggregate), (('name',), 'matched_at'))
+		self.assertEqual((tuple(Exploit._group_by), Exploit._group_aggregate), (('name',), 'matched_at'))
+		self.assertEqual((tuple(Port._group_by), Port._group_aggregate), (('host',), 'port'))
+		self.assertEqual((tuple(Url._group_by), Url._group_aggregate), (('host',), 'url'))
+		self.assertEqual((tuple(Subdomain._group_by), Subdomain._group_aggregate), (('domain',), 'host'))
+		self.assertEqual((tuple(Tag._group_by), Tag._group_aggregate), (('category', 'name'), 'match'))
+		self.assertEqual((tuple(Technology._group_by), Technology._group_aggregate), (('product',), 'match'))
+
 
 if __name__ == '__main__':
 	unittest.main()
