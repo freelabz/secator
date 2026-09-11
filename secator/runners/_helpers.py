@@ -1,3 +1,4 @@
+import fcntl
 import os
 import re
 
@@ -347,17 +348,36 @@ def process_extractor(results, extractor, ctx=None):
 
 
 def get_task_folder_id(path):
-	names = []
-	if not os.path.exists(path):
-		return 0
-	for f in os.scandir(path):
-		if f.is_dir():
-			try:
-				int(f.name)
-				names.append(int(f.name))
-			except ValueError:
-				continue
-	names.sort()
-	if names:
-		return names[-1] + 1
-	return 0
+	"""Atomically claim the next integer folder id under `path`.
+
+	Was: ``scandir(path)`` + ``max()+1`` on every call — O(folders), i.e. O(N^2) across a
+	chunked run of N tasks (each new task rescans every prior task's folder), and RACY under
+	the gevent worker: 100 concurrent chunks all read the same ``max+1`` and then
+	``mkdir(exist_ok=True)`` the SAME folder, clobbering each other's ``report.json``.
+
+	Now: a ``.next_id`` counter file guarded by an exclusive ``flock``, seeded once from the
+	existing integer folders (back-compat with runs created before this change). O(1) per call
+	and safe across greenlets AND processes (prod prefork workers share the reports volume).
+
+	ponytail: flock briefly blocks the gevent hub, but the critical section is a few-byte
+	read/write (microseconds); move the counter to the broker/DB only if it ever shows in a profile.
+	"""
+	os.makedirs(path, exist_ok=True)
+	counter = os.path.join(path, '.next_id')
+	fd = os.open(counter, os.O_RDWR | os.O_CREAT, 0o644)
+	try:
+		fcntl.flock(fd, fcntl.LOCK_EX)
+		raw = os.read(fd, 32).decode().strip()
+		if raw.isdigit():
+			nxt = int(raw)
+		else:
+			# One-time seed from existing integer-named folders (folders predating .next_id).
+			existing = [int(f.name) for f in os.scandir(path) if f.is_dir() and f.name.isdigit()]
+			nxt = (max(existing) + 1) if existing else 0
+		os.lseek(fd, 0, os.SEEK_SET)
+		os.ftruncate(fd, 0)
+		os.write(fd, str(nxt + 1).encode())
+		return nxt
+	finally:
+		fcntl.flock(fd, fcntl.LOCK_UN)
+		os.close(fd)
