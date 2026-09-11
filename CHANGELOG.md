@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.44.0](https://github.com/freelabz/secator/compare/v0.43.3...v0.44.0) (2026-09-11)
+
+
+### Features
+
+* **cli:** secator workspace summary (template-driven findings summary) ([#1383](https://github.com/freelabz/secator/issues/1383)) ([9c99873](https://github.com/freelabz/secator/commit/9c99873af02ecb13bbf052f5480e2347f8f063b1))
+* **cli:** workspace summary counts UNIQUE vulnerabilities by default ([#1385](https://github.com/freelabz/secator/issues/1385)) ([a2f3bf9](https://github.com/freelabz/secator/commit/a2f3bf97ebd61ecfa15efdd6de5f9fcd864d6d0c))
+* **query:** --group flag with per-type defaults + composes with --format ([#1384](https://github.com/freelabz/secator/issues/1384)) ([a6677bd](https://github.com/freelabz/secator/commit/a6677bd3685ca08f8daaecb089489f27205eb305))
+* **query:** --sort / --count / --uniq for secator q & report show ([#1381](https://github.com/freelabz/secator/issues/1381)) ([78f2e14](https://github.com/freelabz/secator/commit/78f2e14dcadab15e23d7209a7b356582cd0305b4))
+* **query:** group findings by field with aggregation ([#1304](https://github.com/freelabz/secator/issues/1304)) ([4fb4884](https://github.com/freelabz/secator/commit/4fb48844cad7f3c78b9163fa3abccc780a27fee7))
+
+
+### Bug Fixes
+
+* **cli:** resolve bare `-f <field>` as a field when it matches the type name ([#1376](https://github.com/freelabz/secator/issues/1376)) ([e7cc66d](https://github.com/freelabz/secator/commit/e7cc66df96d4eba1a92cb40b44462a6faa1d71d2))
+* **config:** store `queries.*` values verbatim (--save with commas/brackets) ([#1377](https://github.com/freelabz/secator/issues/1377)) ([e58abe0](https://github.com/freelabz/secator/commit/e58abe024ed40780e353b1b26dde044f1fc2c857))
+* **nmap:** add --host-timeout to nmap ([#1380](https://github.com/freelabz/secator/issues/1380)) ([30158a1](https://github.com/freelabz/secator/commit/30158a185018c048bf994e0337baf2e9e7fb38fc))
+* **query:** loose inequality operators ignore findings lacking the field ([#1378](https://github.com/freelabz/secator/issues/1378)) ([e226ed7](https://github.com/freelabz/secator/commit/e226ed7a1ed32e51eb0ef746d33f5e4f3400470a))
+* **runners:** don't record query-task inputs as phantom Targets ([#1382](https://github.com/freelabz/secator/issues/1382)) ([f7ad73e](https://github.com/freelabz/secator/commit/f7ad73ec78c63ab50bc162e3b96bd4cda6f21a96))
+
+
+### Performance Improvements
+
+* **cli:** stream workspace summary queries (memory bounded) ([#1388](https://github.com/freelabz/secator/issues/1388)) ([c699656](https://github.com/freelabz/secator/commit/c6996565731faeb34b069f2ebee63be80fc82b7b))
+
 ## [0.43.3](https://github.com/freelabz/secator/compare/v0.43.2...v0.43.3) (2026-09-02)
 
 
