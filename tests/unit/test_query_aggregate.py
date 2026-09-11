@@ -61,6 +61,26 @@ class TestAggregateValues(unittest.TestCase):
 		out = _aggregate_values(results, uniq=True)
 		self.assertEqual(out['port'], ['443', '80', '22'])
 
+	def test_uniq_without_format_keeps_dicts_for_rich_render(self):
+		# Raw finding dicts (no --format): --uniq keeps the DICTS (so they render richly, not as
+		# str(dict)/JSON), deduped by their OutputType display string.
+		results = {'vulnerability': [
+			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},
+			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},  # dup
+			{'_type': 'vulnerability', 'name': 'SQLi', 'severity': 'critical', 'matched_at': 'b'},
+		]}
+		out = _aggregate_values(results, uniq=True)
+		self.assertEqual(len(out['vulnerability']), 2)                       # deduped
+		self.assertTrue(all(isinstance(x, dict) for x in out['vulnerability']))  # still dicts -> rich
+
+	def test_count_without_format_renders_via_outputtype(self):
+		# --count without --format tallies the exact OutputType display string, not str(dict).
+		from secator.output_types import Vulnerability
+		v = {'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'}
+		out = _aggregate_values({'vulnerability': [dict(v), dict(v)]}, count=True)
+		expected = f'2  {str(Vulnerability.load(dict(v)))}'   # asserting the exact render catches a
+		self.assertEqual(out['vulnerability'], [expected])    # lookup/load failure (JSON fallback)
+
 	def test_cli_options_registered_on_both_commands(self):
 		from secator.cli import query, report_show
 		for cmd in (query, report_show):
@@ -92,6 +112,50 @@ class TestGroupSortComposition(unittest.TestCase):
 		ordered = [(r.name, r._group_count) for r in results['vulnerability']]
 		self.assertEqual(ordered, [('A', 3), ('B', 2)])
 		self.assertEqual(results['vulnerability'][0].name, 'A')  # --limit 1 -> top group
+
+
+class TestStreamingAggregation(unittest.TestCase):
+	"""_aggregate_streamed consumes a ONE-SHOT iterator (like a StreamView cursor) and keeps peak
+	memory bounded by the result size, not the finding count."""
+
+	def _stream(self, items):
+		for it in items:      # a generator: proves we never require list()/len()/indexing
+			yield it
+
+	def test_count_streams(self):
+		from secator.cli import _aggregate_streamed
+		s = self._stream([{'_type': 'port', 'port': 443}, {'_type': 'port', 'port': 443}, {'_type': 'port', 'port': 80}])
+		self.assertEqual(_aggregate_streamed(s, 'port', None, fmt='port', count=True, limit=15), ['2  443', '1  80'])
+
+	def test_uniq_streams_and_keeps_dicts(self):
+		from secator.cli import _aggregate_streamed
+		items = [
+			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},
+			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},
+			{'_type': 'vulnerability', 'name': 'SQLi', 'severity': 'critical', 'matched_at': 'b'},
+		]
+		rows = _aggregate_streamed(self._stream(items), 'vulnerability', None, uniq=True)
+		self.assertEqual(len(rows), 2)
+		self.assertTrue(all(isinstance(x, dict) for x in rows))   # kept as findings -> rich render
+
+	def test_group_streams(self):
+		from secator.cli import _aggregate_streamed
+		from secator.output_types import Vulnerability
+		items = [
+			{'_type': 'vulnerability', 'name': 'XSS', 'matched_at': 'a', 'severity': 'high'},
+			{'_type': 'vulnerability', 'name': 'XSS', 'matched_at': 'b', 'severity': 'high'},
+		]
+		rows = _aggregate_streamed(self._stream(items), 'vulnerability', Vulnerability, group=True)
+		self.assertEqual(len(rows), 1)
+		self.assertEqual(getattr(rows[0], '_group_count', None), 2)
+
+	def test_count_is_bounded_over_a_huge_stream(self):
+		# 200k findings but only 3 distinct ports -> result stays 3 rows (memory ~ #distinct).
+		from secator.cli import _aggregate_streamed
+		big = ({'_type': 'port', 'port': (443, 80, 22)[i % 3]} for i in range(200000))
+		rows = _aggregate_streamed(big, 'port', None, fmt='port', count=True)
+		self.assertEqual(len(rows), 3)
+		self.assertTrue(rows[0].endswith('443') or rows[0].endswith('80') or rows[0].endswith('22'))
 
 
 if __name__ == '__main__':

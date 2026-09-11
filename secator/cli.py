@@ -1475,16 +1475,8 @@ def _apply_format(results, fmt):
 					if val is not None:
 						formatted.append(str(val))
 			else:
-				_otype_map = {cls.get_name(): cls for cls in FINDING_TYPES}
-				otype_cls = _otype_map.get(_type)
-				for item in items:
-					if isinstance(item, dict) and otype_cls:
-						try:
-							formatted.append(str(otype_cls.load(item)))
-						except Exception:
-							formatted.append(json.dumps(item))
-					else:
-						formatted.append(str(item))
+				# No matching field — render each finding via its OutputType (primary-field repr).
+				formatted = [_render_finding(item, _type) for item in items]
 			new_results[_type] = formatted
 
 	return new_results
@@ -1522,26 +1514,131 @@ def _sort_results_by_field(results, sort):
 		results[_type] = [it for _, it in keyed]
 
 
+def _render_finding(item, _type):
+	"""Render a finding to its display string — the OutputType's __str__ (what the console shows),
+	falling back to JSON. Used when aggregating WITHOUT --format so raw finding dicts aren't shown
+	as Python-dict / JSON reprs. Already-formatted strings pass through unchanged."""
+	if not isinstance(item, dict):
+		return str(item)
+	otype_cls = {cls.get_name(): cls for cls in FINDING_TYPES}.get(_type)
+	if otype_cls:
+		try:
+			return str(otype_cls.load(item))
+		except Exception:
+			return json.dumps(item)
+	return json.dumps(item)
+
+
 def _aggregate_values(results, count=False, uniq=False, sort_given=False):
-	"""Post-format aggregation of --format output values, per type (backend-agnostic: runs on the
-	already-fetched, formatted rows). `uniq` drops duplicate values (first-seen order). `count`
-	groups identical values into ``"<count>  <value>"`` rows — ordered most-frequent-first by
-	default (classic top-N), or, when --sort was given, kept in the sorted (value) order the
-	findings arrived in."""
+	"""Post-fetch aggregation of results, per type (backend-agnostic). `uniq` drops duplicate rows
+	(first-seen order); `count` groups identical rows into ``"<count>  <value>"`` — most-frequent
+	first by default, or in the sorted order the findings arrived in when --sort was given.
+
+	Rows may be already-formatted strings (from --format) or raw finding dicts (no --format). For
+	`uniq` the ORIGINAL item is kept (so raw findings still render richly via their OutputType, not
+	as str(dict) JSON lines); the dedup key is the finding's display string."""
 	out = {}
 	for _type, values in results.items():
-		svals = [str(v) for v in values]
-		if count:
+		if uniq and not count:
+			seen = set()
+			kept = []
+			for v in values:
+				key = v if isinstance(v, str) else _render_finding(v, _type)
+				if key not in seen:
+					seen.add(key)
+					kept.append(v)   # keep original -> dicts render richly, strings stay strings
+			out[_type] = kept
+		elif count:
+			svals = [v if isinstance(v, str) else _render_finding(v, _type) for v in values]
 			items = list(Counter(svals).items())  # (value, count), first-seen insertion order
 			if not sort_given:
 				items.sort(key=lambda kv: kv[1], reverse=True)  # top-N: most frequent first
 			width = max((len(str(c)) for _, c in items), default=1)
 			out[_type] = [f'{str(c).rjust(width)}  {v}' for v, c in items]
-		elif uniq:
-			out[_type] = list(dict.fromkeys(svals))
 		else:
-			out[_type] = svals
+			out[_type] = list(values)
 	return out
+
+
+def _num_key(s):
+	"""Numeric-aware sort key for a rendered value string: numbers sort numerically (so '80' <
+	'443'), non-numbers fall back to string order."""
+	try:
+		return (0, float(s))
+	except (TypeError, ValueError):
+		return (1, str(s))
+
+
+def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=False, group=False, limit=0):
+	"""Aggregate a type's StreamView with peak memory bounded by the RESULT size, not the number of
+	findings — safe for 100k+.
+
+	- --group: group_findings() consumes the cursor in a single streaming pass (memory ~ #groups),
+	  then the small rep set is finished with the normal helpers.
+	- --count / --uniq: collapse the stream incrementally (Counter / seen-set), batching through
+	  _apply_format only for the --format path; memory ~ #distinct values / #unique rows.
+	- --sort alone: a correct global sort needs the whole set, so it materializes (inherent; combine
+	  with --count/--group to stay bounded, or push down in a future pass).
+	"""
+	from secator.query.utils import group_findings
+
+	def _finish(items):
+		res = {_type: items}
+		if sort:
+			_sort_results_by_field(res, sort)
+		if fmt:
+			res = _apply_format(res, fmt)
+		if count or uniq:
+			res = _aggregate_values(res, count=count, uniq=uniq, sort_given=bool(sort))
+		rows = res[_type]
+		return rows[:limit] if limit else rows
+
+	if group and cls is not None and getattr(cls, '_group_by', None):
+		reps = group_findings(sv, list(cls._group_by), getattr(cls, '_group_aggregate', None))
+		return _finish(reps)
+
+	if count or uniq:
+		counter, seen, kept, batch = Counter(), set(), [], []
+
+		def _flush():
+			if not batch:
+				return
+			if fmt:
+				for v in _apply_format({_type: list(batch)}, fmt).get(_type, []):
+					if count:
+						counter[v] += 1
+					elif v not in seen:
+						seen.add(v)
+						kept.append(v)
+			else:
+				for it in batch:
+					v = _render_finding(it, _type)
+					if count:
+						counter[v] += 1
+					elif v not in seen:
+						seen.add(v)
+						kept.append(it)   # keep the finding -> renders richly, not str(dict)
+			batch.clear()
+
+		for item in sv:
+			batch.append(item)
+			if len(batch) >= 2000:
+				_flush()
+		_flush()
+
+		if uniq:
+			return kept[:limit] if limit else kept
+		items = list(counter.items())
+		if sort:
+			items.sort(key=lambda kv: _num_key(kv[0]), reverse=sort.strip().startswith('-'))
+		else:
+			items.sort(key=lambda kv: kv[1], reverse=True)   # most-frequent-first
+		width = max((len(str(c)) for _, c in items), default=1)
+		rows = [f'{str(c).rjust(width)}  {v}' for v, c in items]
+		return rows[:limit] if limit else rows
+
+	# --sort alone: full ordering needs the whole set.
+	return _finish(list(sv))
 
 
 def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None):  # noqa: E501
@@ -1656,41 +1753,27 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	# 6. Build and send report via QueryEngine
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
 	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
-	# Fetch the FULL set when reshaping/capping the output — --group / --sort / --uniq / --count
-	# operate post-query, so limiting the backend fetch first would group/sort/dedupe/count only a
-	# partial slice. --limit is then applied to the finished output below.
-	aggregating = bool(sort or count or uniq or group is not None)
-	report.build(query=full_query, dedupe=dedupe_effective, limit=(0 if aggregating else limit))
-
-	# 1. Group findings by each type's DEFAULT field(s) with auto-aggregation (processing-side,
-	# post-query). --group is a flag: types with no `_group_by` default are left ungrouped.
+	# --group / --sort / --uniq / --count reshape or cap the output post-query. STREAM the findings
+	# (stream=True yields per-type StreamViews — nothing materialized) and aggregate incrementally,
+	# so peak memory is bounded by the RESULT size, not the finding count (safe for 100k+). --limit
+	# applies to the finished output, inside _aggregate_streamed.
+	aggregating = bool(sort or count or uniq or group)
 	grouped_types = []
-	if group:
-		from secator.query.utils import group_findings
+	if aggregating:
+		report.build(query=full_query, dedupe=dedupe_effective, limit=0, stream=True)
 		type_map = {cls.get_name(): cls for cls in FINDING_TYPES}
-		for type_name, items in report.data['results'].items():
+		for type_name, sv in list(report.data['results'].items()):
 			cls = type_map.get(type_name)
-			if not items or cls is None:
-				continue
-			group_by = list(getattr(cls, '_group_by', ()) or ())
-			if not group_by:
-				continue
-			aggregate_field = getattr(cls, '_group_aggregate', None)
-			report.data['results'][type_name] = group_findings(items, group_by, aggregate_field)
-			grouped_types.append((type_name, ', '.join(group_by)))
-		if not grouped_types:
+			report.data['results'][type_name] = _aggregate_streamed(
+				sv, type_name, cls, fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)
+			if group and cls is not None and getattr(cls, '_group_by', None) and report.data['results'][type_name]:
+				grouped_types.append((type_name, ', '.join(cls._group_by)))
+		if group and not grouped_types:
 			console.print(Warning(message='--group: no groupable finding types in results'))
-
-	# 2. Sort findings by a field, AFTER grouping — so `--sort -_group_count` orders the groups
-	# (top-N most/least frequent), which is the ordering --group lacks on its own.
-	if sort:
-		_sort_results_by_field(report.data['results'], sort)
-	if fmt:
-		report.data['results'] = _apply_format(report.data['results'], fmt)
-	if count or uniq:
-		report.data['results'] = _aggregate_values(report.data['results'], count=count, uniq=uniq, sort_given=bool(sort))
-	if aggregating and limit:
-		report.data['results'] = {t: items[:limit] for t, items in report.data['results'].items()}
+	else:
+		report.build(query=full_query, dedupe=dedupe_effective, limit=limit)
+		if fmt:
+			report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
 	total_results = sum(len(items) for items in report.data['results'].values())
 	emit_query_warnings(query_warnings)
