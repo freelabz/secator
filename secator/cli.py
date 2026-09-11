@@ -929,29 +929,37 @@ def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort
 	`_group_aggregate`), so a subsequent count reflects UNIQUE findings — e.g. a vulnerability
 	hitting many targets counts once."""
 	from rich.markup import escape
-	from secator.query.utils import python_expr_to_mongo, group_findings
-	q = python_expr_to_mongo(type_or_expr)
+	from secator.query.utils import python_expr_to_mongo
+	from secator.query._stream import StreamView
+	raw = python_expr_to_mongo(type_or_expr)
+	# Resolve the concrete finding type(s) BEFORE wrapping, so a compound/dedup `$and` never hides
+	# `_type` (a `{'$in': [...]}` type filter or a non-type expr means "span every type").
+	typemap = {c.get_name(): c for c in FINDING_TYPES}
+	tv = raw.get('_type')
+	if isinstance(tv, str):
+		types = [tv]
+	elif isinstance(tv, dict):
+		types = list(tv.get('$in') or typemap)
+	else:
+		types = list(typemap)
+	base = {k: v for k, v in raw.items() if k != '_type'}
+	# Store-side dedup (mirrors report.build's stream path). MUST nest in `$and`: a top-level
+	# `_context.workspace_duplicate` is a PROTECTED_FIELD and gets stripped by _merge_query.
+	dup = {'_context.workspace_duplicate': {'$ne': True}} if CONFIG.runners.remove_duplicates else None
 	aggregating = bool(sort or count or uniq or group)
-	findings = engine.search(q, limit=(0 if aggregating else limit), dedupe=CONFIG.runners.remove_duplicates)
-	results = {}
-	for f in findings:
-		results.setdefault(f.get('_type', str(type_or_expr)), []).append(f)
-	if group:
-		type_map = {cls.get_name(): cls for cls in FINDING_TYPES}
-		for _tname, _items in list(results.items()):
-			cls = type_map.get(_tname)
-			group_by = list(getattr(cls, '_group_by', ()) or ()) if cls else []
-			if group_by:
-				results[_tname] = group_findings(_items, group_by, getattr(cls, '_group_aggregate', None))
-	if sort:
-		_sort_results_by_field(results, sort)
-	if fmt:
-		results = _apply_format(results, fmt)
-	if count or uniq:
-		results = _aggregate_values(results, count=count, uniq=uniq, sort_given=bool(sort))
-	rows = [escape(str(x)) for items in results.values() for x in items]
-	if aggregating and limit:
-		rows = rows[:limit]
+	# STREAM per concrete type (never materialize all N); _aggregate_streamed collapses incrementally
+	# so peak memory is bounded by the result size, not the finding count — safe for 100k+.
+	rows = []
+	for name in types:
+		clauses = [{'_type': name}]
+		if base:
+			clauses.append(base)
+		if dup:
+			clauses.append(dup)
+		type_q = clauses[0] if len(clauses) == 1 else {'$and': clauses}
+		sv = StreamView(engine, type_q, limit=(0 if aggregating else limit))
+		rows += _aggregate_streamed(sv, name, typemap.get(name), fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)  # noqa: E501
+	rows = [escape(r if isinstance(r, str) else str(r)) for r in rows]
 	return '\n'.join(rows) if rows else '[dim](none)[/]'
 
 
@@ -1627,6 +1635,13 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 		_flush()
 
 		if uniq:
+			if sort:  # sort the COLLAPSED set (bounded by #unique), not the raw stream
+				if fmt:
+					kept.sort(key=_num_key, reverse=sort.strip().startswith('-'))
+				else:
+					res = {_type: kept}
+					_sort_results_by_field(res, sort)
+					kept = res[_type]
 			return kept[:limit] if limit else kept
 		items = list(counter.items())
 		if sort:
