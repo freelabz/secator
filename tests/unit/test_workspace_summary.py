@@ -34,6 +34,20 @@ class TestSummaryQuery(unittest.TestCase):
 		out = _summary_query(FakeEngine([]), 'vulnerability', fmt='status', count=True)
 		self.assertEqual(out, '[dim](none)[/]')
 
+	def test_group_collapses_to_unique_before_count(self):
+		# Same vuln (name) on two targets -> group by name collapses to ONE, so the severity count
+		# reflects UNIQUE vulns (1 high), not instances (2). matched_at is the aggregate field.
+		findings = [
+			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},
+			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'b'},
+			{'_type': 'vulnerability', 'name': 'SQLi', 'severity': 'critical', 'matched_at': 'c'},
+		]
+		grouped = _summary_query(FakeEngine(findings), 'vulnerability', group=True, fmt='severity', count=True)
+		self.assertEqual(grouped, '1  high\n1  critical')     # unique: XSS counted once
+		# Without group it counts instances (2 high) — proves group changes the result.
+		ungrouped = _summary_query(FakeEngine(findings), 'vulnerability', fmt='severity', count=True)
+		self.assertEqual(ungrouped, '2  high\n1  critical')
+
 	def test_row_values_are_markup_escaped(self):
 		# A finding value with brackets must not corrupt the rendered rich markup.
 		findings = [{'_type': 'vulnerability', 'name': 'CVE [test]', 'severity': 'high'}]
