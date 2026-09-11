@@ -61,6 +61,29 @@ class TestAggregateValues(unittest.TestCase):
 		out = _aggregate_values(results, uniq=True)
 		self.assertEqual(out['port'], ['443', '80', '22'])
 
+	def test_uniq_without_format_keeps_dicts_for_rich_render(self):
+		# Raw finding dicts (no --format): --uniq keeps the DICTS (so they render richly, not as
+		# str(dict)/JSON), deduped by their OutputType display string.
+		results = {'vulnerability': [
+			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},
+			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},  # dup
+			{'_type': 'vulnerability', 'name': 'SQLi', 'severity': 'critical', 'matched_at': 'b'},
+		]}
+		out = _aggregate_values(results, uniq=True)
+		self.assertEqual(len(out['vulnerability']), 2)                       # deduped
+		self.assertTrue(all(isinstance(x, dict) for x in out['vulnerability']))  # still dicts -> rich
+
+	def test_count_without_format_renders_via_outputtype(self):
+		# --count without --format tallies the OutputType display string, not str(dict).
+		results = {'vulnerability': [
+			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},
+			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},
+		]}
+		out = _aggregate_values(results, count=True)
+		self.assertEqual(len(out['vulnerability']), 1)
+		self.assertTrue(out['vulnerability'][0].startswith('2  '))           # "2  <rendered>"
+		self.assertNotIn("{'_type'", out['vulnerability'][0])                # not a raw dict repr
+
 	def test_cli_options_registered_on_both_commands(self):
 		from secator.cli import query, report_show
 		for cmd in (query, report_show):

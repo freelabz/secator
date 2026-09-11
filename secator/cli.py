@@ -1475,16 +1475,8 @@ def _apply_format(results, fmt):
 					if val is not None:
 						formatted.append(str(val))
 			else:
-				_otype_map = {cls.get_name(): cls for cls in FINDING_TYPES}
-				otype_cls = _otype_map.get(_type)
-				for item in items:
-					if isinstance(item, dict) and otype_cls:
-						try:
-							formatted.append(str(otype_cls.load(item)))
-						except Exception:
-							formatted.append(json.dumps(item))
-					else:
-						formatted.append(str(item))
+				# No matching field — render each finding via its OutputType (primary-field repr).
+				formatted = [_render_finding(item, _type) for item in items]
 			new_results[_type] = formatted
 
 	return new_results
@@ -1522,25 +1514,49 @@ def _sort_results_by_field(results, sort):
 		results[_type] = [it for _, it in keyed]
 
 
+def _render_finding(item, _type):
+	"""Render a finding to its display string — the OutputType's __str__ (what the console shows),
+	falling back to JSON. Used when aggregating WITHOUT --format so raw finding dicts aren't shown
+	as Python-dict / JSON reprs. Already-formatted strings pass through unchanged."""
+	if not isinstance(item, dict):
+		return str(item)
+	otype_cls = {cls.get_name(): cls for cls in FINDING_TYPES}.get(_type)
+	if otype_cls:
+		try:
+			return str(otype_cls.load(item))
+		except Exception:
+			return json.dumps(item)
+	return json.dumps(item)
+
+
 def _aggregate_values(results, count=False, uniq=False, sort_given=False):
-	"""Post-format aggregation of --format output values, per type (backend-agnostic: runs on the
-	already-fetched, formatted rows). `uniq` drops duplicate values (first-seen order). `count`
-	groups identical values into ``"<count>  <value>"`` rows — ordered most-frequent-first by
-	default (classic top-N), or, when --sort was given, kept in the sorted (value) order the
-	findings arrived in."""
+	"""Post-fetch aggregation of results, per type (backend-agnostic). `uniq` drops duplicate rows
+	(first-seen order); `count` groups identical rows into ``"<count>  <value>"`` — most-frequent
+	first by default, or in the sorted order the findings arrived in when --sort was given.
+
+	Rows may be already-formatted strings (from --format) or raw finding dicts (no --format). For
+	`uniq` the ORIGINAL item is kept (so raw findings still render richly via their OutputType, not
+	as str(dict) JSON lines); the dedup key is the finding's display string."""
 	out = {}
 	for _type, values in results.items():
-		svals = [str(v) for v in values]
-		if count:
+		if uniq and not count:
+			seen = set()
+			kept = []
+			for v in values:
+				key = v if isinstance(v, str) else _render_finding(v, _type)
+				if key not in seen:
+					seen.add(key)
+					kept.append(v)   # keep original -> dicts render richly, strings stay strings
+			out[_type] = kept
+		elif count:
+			svals = [v if isinstance(v, str) else _render_finding(v, _type) for v in values]
 			items = list(Counter(svals).items())  # (value, count), first-seen insertion order
 			if not sort_given:
 				items.sort(key=lambda kv: kv[1], reverse=True)  # top-N: most frequent first
 			width = max((len(str(c)) for _, c in items), default=1)
 			out[_type] = [f'{str(c).rjust(width)}  {v}' for v, c in items]
-		elif uniq:
-			out[_type] = list(dict.fromkeys(svals))
 		else:
-			out[_type] = svals
+			out[_type] = list(values)
 	return out
 
 
