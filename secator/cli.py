@@ -895,13 +895,13 @@ DEFAULT_SUMMARY_TEMPLATE = """\
 [bold cyan]Top URLs[/]
 {{ query('url', fmt='url', count=True, limit=15) }}
 
-[bold red3]Vulnerabilities by severity[/]
-{{ query('vulnerability', fmt='severity', count=True) }}
+[bold red3]Unique vulnerabilities by severity[/]
+{{ query('vulnerability', group=True, fmt='severity', count=True) }}
 
-[bold red3]Vulnerabilities by status[/]
-{{ query('vulnerability', fmt='status', count=True) }}
+[bold red3]Unique vulnerabilities by status[/]
+{{ query('vulnerability', group=True, fmt='status', count=True) }}
 
-[bold red3]Top vulnerabilities[/]
+[bold red3]Top vulnerabilities (by targets hit)[/]
 {{ query('vulnerability', fmt='name', count=True, limit=15) }}
 """
 
@@ -919,19 +919,30 @@ def _summary_query_engine(workspace, driver):
 	return engine, workspace_name
 
 
-def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort=None, limit=0):
+def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort=None, limit=0, group=False):
 	"""Run one summary query and return rendered rows (newline-joined). Exposed to summary
-	templates as `query(...)`; mirrors the `secator q` pipeline (sort -> format -> count/uniq ->
-	limit) on the fetched findings, so it is backend-agnostic. Row values are rich-escaped so a
-	finding value containing brackets can't corrupt the rendered markup."""
+	templates as `query(...)`; mirrors the `secator q` pipeline (group -> sort -> format ->
+	count/uniq -> limit) on the fetched findings, so it is backend-agnostic. Row values are
+	rich-escaped so a finding value containing brackets can't corrupt the rendered markup.
+
+	`group=True` first collapses findings by each type's default `_group_by` (aggregating its
+	`_group_aggregate`), so a subsequent count reflects UNIQUE findings — e.g. a vulnerability
+	hitting many targets counts once."""
 	from rich.markup import escape
-	from secator.query.utils import python_expr_to_mongo
+	from secator.query.utils import python_expr_to_mongo, group_findings
 	q = python_expr_to_mongo(type_or_expr)
-	aggregating = bool(sort or count or uniq)
+	aggregating = bool(sort or count or uniq or group)
 	findings = engine.search(q, limit=(0 if aggregating else limit), dedupe=CONFIG.runners.remove_duplicates)
 	results = {}
 	for f in findings:
 		results.setdefault(f.get('_type', str(type_or_expr)), []).append(f)
+	if group:
+		type_map = {cls.get_name(): cls for cls in FINDING_TYPES}
+		for _tname, _items in list(results.items()):
+			cls = type_map.get(_tname)
+			group_by = list(getattr(cls, '_group_by', ()) or ()) if cls else []
+			if group_by:
+				results[_tname] = group_findings(_items, group_by, getattr(cls, '_group_aggregate', None))
 	if sort:
 		_sort_results_by_field(results, sort)
 	if fmt:
