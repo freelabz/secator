@@ -61,12 +61,25 @@ class TestSummaryQuery(unittest.TestCase):
 		self.assertIn(r'\[test]', out)          # escaped, not a live markup tag
 
 
+class _StubBackend:
+	"""Minimal backend for the maybe_tag_duplicates() call in the dedup path (no findings to tag)."""
+	name = 'fake'
+	workspace_id = 'ws1'
+
+	def _execute_search(self, query, limit=0):
+		return []
+
+	def _execute_update(self, query, update):
+		return 0
+
+
 class RecordingEngine:
 	"""Filters findings by the query's _type clause (top-level or $and-nested) and records the
 	queries passed to iterate(), so tests can assert on the query shape (dedup nesting)."""
 	def __init__(self, findings):
 		self._f = findings
 		self.queries = []
+		self.backend = _StubBackend()
 
 	def _type_of(self, q):
 		if isinstance(q.get('_type'), str):
