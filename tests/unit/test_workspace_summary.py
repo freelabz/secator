@@ -15,6 +15,12 @@ class FakeEngine:
 	def __init__(self, findings):
 		self._findings = findings
 
+	def iterate(self, query, batch_size=1000):   # StreamView streams via iterate() (batches)
+		yield list(self._findings)
+
+	def count(self, query):
+		return len(self._findings)
+
 	def search(self, query, limit=0, dedupe=False):
 		return list(self._findings)
 
@@ -80,6 +86,29 @@ class TestSummaryCommandWiring(unittest.TestCase):
 		self.assertIn('summary', workspace.commands)
 		params = {p.name for p in workspace.commands['summary'].params}
 		self.assertTrue({'workspace_opt', 'driver', 'template_path'} <= params)
+
+	def test_summary_streams_via_iterate_not_search(self):
+		# _summary_query must STREAM (iterate) and never materialize via search() -> bounded memory.
+		class IterOnly:
+			def __init__(self, f):
+				self._f = f
+
+			def iterate(self, query, batch_size=1000):
+				yield list(self._f)
+
+			def count(self, query):
+				return len(self._f)
+
+			def search(self, *a, **k):
+				raise AssertionError('summary must stream via iterate(), not search()')
+
+		findings = [
+			{'_type': 'port', 'port': 443, 'ip': '1'},
+			{'_type': 'port', 'port': 443, 'ip': '2'},
+			{'_type': 'port', 'port': 80, 'ip': '3'},
+		]
+		out = _summary_query(IterOnly(findings), 'port', fmt='port', count=True)
+		self.assertEqual(out, '2  443\n1  80')
 
 
 if __name__ == '__main__':
