@@ -74,15 +74,12 @@ class TestAggregateValues(unittest.TestCase):
 		self.assertTrue(all(isinstance(x, dict) for x in out['vulnerability']))  # still dicts -> rich
 
 	def test_count_without_format_renders_via_outputtype(self):
-		# --count without --format tallies the OutputType display string, not str(dict).
-		results = {'vulnerability': [
-			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},
-			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},
-		]}
-		out = _aggregate_values(results, count=True)
-		self.assertEqual(len(out['vulnerability']), 1)
-		self.assertTrue(out['vulnerability'][0].startswith('2  '))           # "2  <rendered>"
-		self.assertNotIn("{'_type'", out['vulnerability'][0])                # not a raw dict repr
+		# --count without --format tallies the exact OutputType display string, not str(dict).
+		from secator.output_types import Vulnerability
+		v = {'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'}
+		out = _aggregate_values({'vulnerability': [dict(v), dict(v)]}, count=True)
+		expected = f'2  {str(Vulnerability.load(dict(v)))}'   # asserting the exact render catches a
+		self.assertEqual(out['vulnerability'], [expected])    # lookup/load failure (JSON fallback)
 
 	def test_cli_options_registered_on_both_commands(self):
 		from secator.cli import query, report_show
