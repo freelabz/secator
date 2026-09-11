@@ -931,18 +931,34 @@ def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort
 	from rich.markup import escape
 	from secator.query.utils import python_expr_to_mongo
 	from secator.query._stream import StreamView
-	q = python_expr_to_mongo(type_or_expr)
-	# Store-side dedup (mirrors report.build's stream path) so streaming needs no in-memory pass.
-	if CONFIG.runners.remove_duplicates:
-		dup = {'_context.workspace_duplicate': {'$ne': True}}
-		q = {'$and': [q, dup]} if (q and set(q) & set(dup)) else {**q, **dup}
-	_type = q.get('_type') or str(type_or_expr)
-	cls = {c.get_name(): c for c in FINDING_TYPES}.get(_type)
+	raw = python_expr_to_mongo(type_or_expr)
+	# Resolve the concrete finding type(s) BEFORE wrapping, so a compound/dedup `$and` never hides
+	# `_type` (a `{'$in': [...]}` type filter or a non-type expr means "span every type").
+	typemap = {c.get_name(): c for c in FINDING_TYPES}
+	tv = raw.get('_type')
+	if isinstance(tv, str):
+		types = [tv]
+	elif isinstance(tv, dict):
+		types = list(tv.get('$in') or typemap)
+	else:
+		types = list(typemap)
+	base = {k: v for k, v in raw.items() if k != '_type'}
+	# Store-side dedup (mirrors report.build's stream path). MUST nest in `$and`: a top-level
+	# `_context.workspace_duplicate` is a PROTECTED_FIELD and gets stripped by _merge_query.
+	dup = {'_context.workspace_duplicate': {'$ne': True}} if CONFIG.runners.remove_duplicates else None
 	aggregating = bool(sort or count or uniq or group)
-	# STREAM the findings (never materialize all N); _aggregate_streamed collapses incrementally so
-	# peak memory is bounded by the result size, not the finding count — safe for 100k+.
-	sv = StreamView(engine, q, limit=(0 if aggregating else limit))
-	rows = _aggregate_streamed(sv, _type, cls, fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)
+	# STREAM per concrete type (never materialize all N); _aggregate_streamed collapses incrementally
+	# so peak memory is bounded by the result size, not the finding count — safe for 100k+.
+	rows = []
+	for name in types:
+		clauses = [{'_type': name}]
+		if base:
+			clauses.append(base)
+		if dup:
+			clauses.append(dup)
+		type_q = clauses[0] if len(clauses) == 1 else {'$and': clauses}
+		sv = StreamView(engine, type_q, limit=(0 if aggregating else limit))
+		rows += _aggregate_streamed(sv, name, typemap.get(name), fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)  # noqa: E501
 	rows = [escape(r if isinstance(r, str) else str(r)) for r in rows]
 	return '\n'.join(rows) if rows else '[dim](none)[/]'
 
@@ -1619,6 +1635,13 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 		_flush()
 
 		if uniq:
+			if sort:  # sort the COLLAPSED set (bounded by #unique), not the raw stream
+				if fmt:
+					kept.sort(key=_num_key, reverse=sort.strip().startswith('-'))
+				else:
+					res = {_type: kept}
+					_sort_results_by_field(res, sort)
+					kept = res[_type]
 			return kept[:limit] if limit else kept
 		items = list(counter.items())
 		if sort:

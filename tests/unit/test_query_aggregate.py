@@ -149,6 +149,15 @@ class TestStreamingAggregation(unittest.TestCase):
 		self.assertEqual(len(rows), 1)
 		self.assertEqual(getattr(rows[0], '_group_count', None), 2)
 
+	def test_uniq_sort_orders_the_collapsed_set(self):
+		# --uniq --sort must sort the deduped values (bounded), not return first-seen order.
+		from secator.cli import _aggregate_streamed
+		items = [{'_type': 'port', 'port': p} for p in (443, 80, 22, 80, 443)]
+		asc = _aggregate_streamed(self._stream(items), 'port', None, fmt='port', uniq=True, sort='port')
+		self.assertEqual(asc, ['22', '80', '443'])          # not first-seen ['443','80','22']
+		desc = _aggregate_streamed(self._stream(items), 'port', None, fmt='port', uniq=True, sort='-port')
+		self.assertEqual(desc, ['443', '80', '22'])
+
 	def test_count_is_bounded_over_a_huge_stream(self):
 		# 200k findings but only 3 distinct ports -> result stays 3 rows (memory ~ #distinct).
 		from secator.cli import _aggregate_streamed
