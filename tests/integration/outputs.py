@@ -133,6 +133,15 @@ OUTPUTS_TASKS = {
 	'nuclei': [
 		Vulnerability(matched_at='http://localhost:3000/metrics', name='Prometheus Metrics - Detect', confidence='high', severity='medium', cvss_score=5.3, _source='nuclei'),
 	],
+	'retirejs': [
+		# Asserting a vuln identified only by a retire.js issue id (no CVE / no GHSA), so the expectation
+		# stays stable: those never go through the CVE lookup that rewrites `name`.
+		Vulnerability(
+			name='parseHTML() executes scripts in event handlers', id='',
+			matched_at=f'{ROOT_FOLDER}/tests/integration/js/jquery-1.8.3.min.js',
+			provider='retire.js', confidence='medium', severity='medium', cvss_score=-1, _source='retirejs'
+		),
+	],
 	'subfinder': [
 		Subdomain(host='community.github.com', domain='github.com', _source='subfinder'),
 	],
