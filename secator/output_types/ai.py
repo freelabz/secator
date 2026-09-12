@@ -63,13 +63,15 @@ AI_TYPES = {
 	'workflow': {'label': '🟢', 'color': 'magenta'},
 	'shell': {'label': '🟢', 'color': 'magenta'},
 	'add_finding': {'label': '🟢', 'color': 'magenta'},
+	'add_vuln_poc': {'label': '💥', 'color': 'magenta'},
 	'shell_output': {'label': '◀', 'color': 'dim white'},
 	'query': {'label': '🟢', 'color': 'magenta'},
 	'stopped': {'label': '🛑', 'color': 'orange3'},
 	'follow_up': {'label': '[FOLLOW UP]', 'color': 'orange3'},
+	'steer': {'label': '[STEER]', 'color': 'cyan'},
 }
 
-ACTION_TYPES = ('task', 'workflow', 'shell', 'add_finding', 'query', 'stopped')
+ACTION_TYPES = ('task', 'workflow', 'shell', 'add_finding', 'add_vuln_poc', 'query', 'stopped')
 
 
 @dataclass
@@ -84,7 +86,10 @@ class Ai(OutputType):
 	status: str = field(default='', compare=False)
 	answer: str = field(default='', compare=False)
 	choices: list = field(default_factory=list, compare=False)
-	session_id: str = field(default='', compare=False)
+	# For a follow_up: whether the user may pick SEVERAL of `choices` (multi-select)
+	# vs exactly one. The web UI renders checkboxes vs single-pick rows accordingly.
+	multiple: bool = field(default=False, compare=False)
+	message: dict = field(default_factory=dict, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='ai', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)
@@ -162,11 +167,10 @@ class Ai(OutputType):
 			action_label_str = action_label.capitalize().replace('_', ' ')
 			line = f'{s}[bold blue]{action_label_str}[/]'
 			content = _s(self.content)
-			if self.ai_type in ['task', 'workflow', 'scan']:
+			if self.ai_type in ['task', 'workflow']:
 				colors = {
 					'task': 'bold gold3',
 					'workflow': 'bold dark_orange3',
-					'scan': 'bold red',
 				}
 				color = colors[self.ai_type]
 				content = f'[{color}]{content}[/]'

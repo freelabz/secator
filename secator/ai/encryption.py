@@ -129,14 +129,10 @@ class SensitiveDataEncryptor:
 		"""Restore original sensitive values from placeholders."""
 		result = text
 
-		# Full placeholders [TYPE:hash]
+		# Full placeholders [TYPE:hash] and their bracket-stripped form TYPE:hash
 		for placeholder, original in self.pii_map.items():
 			result = result.replace(placeholder, original)
-
-		# Without brackets TYPE:hash
-		for placeholder, original in self.pii_map.items():
-			no_brackets = placeholder[1:-1]
-			result = result.replace(no_brackets, original)
+			result = result.replace(placeholder[1:-1], original)
 
 		# Bare hashes
 		for hash_value, original in self.hash_map.items():

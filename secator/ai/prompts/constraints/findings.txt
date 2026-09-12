@@ -21,17 +21,17 @@ add_finding(
 )
 </example_vulnerability>
 
+When you SUCCESSFULLY EXPLOIT a vulnerability, do NOT create a separate exploit finding.
+Instead record the proof-of-concept ON the vulnerability itself with add_vuln_poc, identifying
+it by the `_uuid` you saw in query_workspace results. The `poc` is markdown containing the exact
+commands you ran and their outputs, proving a true, reproducible exploitation (see the
+<exploitation_report> format). If the vulnerability is not yet recorded, add_finding(_type="vulnerability")
+first, then add_vuln_poc on it (or pass `poc=` directly in that add_finding call).
+
 <example_exploit>
-add_finding(
-  _type="exploit",
-  name="Terrapin Attack (CVE-2023-48795)",
-  provider="ai",
-  id="CVE-2023-48795",
-  matched_at="target.example.com:22",
-  confidence="high",
-  cves=["CVE-2023-48795"],
-  tags=["ssh", "terrapin"],
-  extra_data={"description": "SSH prefix truncation attack", "proof": "..."}
+add_vuln_poc(
+  _uuid="161e68b6-8cbd-4cc5-b9cc-7b4dadf3c64f",
+  poc="# Exploitation report: SQL Injection ...\n\n## Proof-of-Concept\n**Request:**\n```sh\ncurl ...\n```\n**Response:**\n```\n...\n```\n"
 )
 </example_exploit>
 
