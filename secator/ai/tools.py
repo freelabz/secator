@@ -169,10 +169,14 @@ TOOL_SCHEMAS = {
 		"function": {
 			"name": "add_vuln_poc",
 			"description": (
-				"Record a proof-of-concept on an EXISTING vulnerability after you have successfully "
-				"exploited it. Use this INSTEAD of add_finding(exploit): it fills the vulnerability's "
-				"`poc` field with the exact commands and outputs that prove the exploitation. "
-				"Identify the vulnerability by the `_uuid` you saw in query_workspace results."
+				"Record the exploitation OUTCOME of an EXISTING vulnerability after you attempted to "
+				"exploit it. Use this INSTEAD of add_finding(exploit). Identify the vulnerability by the "
+				"`_uuid` you saw in query_workspace results.\n"
+				"- If you exploited it: set exploited=true and fill `poc` with the exact commands and "
+				"outputs proving it. The vuln is marked status='Exploited' (verified).\n"
+				"- If you could NOT exploit it (scanner false positive, not reachable, patched): set "
+				"exploited=false. The vuln is marked as a false positive; explain why in `extra_data`.\n"
+				"Set `confidence` to re-prioritize the vuln based on what you learned."
 			),
 			"parameters": {
 				"type": "object",
@@ -181,15 +185,39 @@ TOOL_SCHEMAS = {
 						"type": "string",
 						"description": "The `_uuid` of the vulnerability to annotate (from query_workspace results)."
 					},
+					"exploited": {
+						"type": "boolean",
+						"description": (
+							"true if you successfully exploited the vulnerability (requires `poc`); false if it "
+							"could not be exploited (a false positive) -- explain why in `extra_data`."
+						)
+					},
 					"poc": {
 						"type": "string",
 						"description": (
 							"Markdown proof-of-concept: the exact commands run and their outputs demonstrating a "
-							"true, successful exploitation (not a scanner match). Be concrete and reproducible."
+							"true, successful exploitation (not a scanner match). Required when exploited=true; "
+							"be concrete and reproducible."
 						)
+					},
+					"confidence": {
+						"type": "string",
+						"enum": ["low", "medium", "high"],
+						"description": (
+							"Re-prioritize the vulnerability: 'high' for a confirmed exploitation, 'low' when it "
+							"looks like a false positive. Optional -- omit to leave unchanged."
+						)
+					},
+					"extra_data": {
+						"type": "object",
+						"description": (
+							"Extra structured context to merge into the vuln (e.g. a reason when exploited=false). "
+							"Optional; merged into existing extra_data, existing keys preserved."
+						),
+						"additionalProperties": True
 					}
 				},
-				"required": ["_uuid", "poc"]
+				"required": ["_uuid", "exploited"]
 			}
 		}
 	},
@@ -291,5 +319,13 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 	if not isinstance(arguments, dict):
 		return None
 	safe_arguments = {k: v for k, v in arguments.items() if k not in {"action", "description"}}
-	descr = safe_arguments.get("name", "") or safe_arguments.get("query") or safe_arguments.get("command", "unknown")
+	# Prefer the description the model was asked to provide (run_task/run_workflow/run_shell all
+	# require it); fall back to name/query/command only when it's missing. Was previously dropped
+	# here, so the AI-chat background-tasks list showed the raw command instead of the description.
+	descr = (
+		arguments.get("description")
+		or safe_arguments.get("name", "")
+		or safe_arguments.get("query")
+		or safe_arguments.get("command", "unknown")
+	)
 	return {"action": action_type, "description": descr, **safe_arguments}

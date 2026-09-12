@@ -970,6 +970,7 @@ def _handle_add_vuln_poc(action: Dict, ctx: ActionContext) -> Generator:
 	"""
 	context = _get_result_context(action, ctx)
 	uuid = str(action.get("_uuid") or "").strip()
+	exploited = bool(action.get("exploited"))
 	poc = action.get("poc") or ""
 	if ctx.encryptor:
 		poc = _decrypt_dict({"poc": poc}, ctx.encryptor).get("poc", poc)
@@ -977,14 +978,42 @@ def _handle_add_vuln_poc(action: Dict, ctx: ActionContext) -> Generator:
 	if not uuid:
 		yield Error(message="add_vuln_poc requires the vulnerability `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
 		return
-	if not str(poc).strip():
-		yield Error(message="add_vuln_poc requires a non-empty `poc` (commands + outputs proving exploitation).", _context=context)  # noqa: E501
+	# A claimed exploitation must carry proof; a false-positive verdict needs none.
+	if exploited and not str(poc).strip():
+		yield Error(message="add_vuln_poc with exploited=true requires a non-empty `poc` (commands + outputs proving exploitation).", _context=context)  # noqa: E501
 		return
+
+	# Build a scoped $set: exploited -> status Exploited + verified; not-exploited -> false positive
+	# (mirrors the UI, where FALSE_POSITIVE is stored as is_false_positive, not in `status`).
+	update = {}
+	if exploited:
+		update["poc"] = poc
+		update["status"] = "EXPLOITED"
+		update["verified"] = True
+		update["is_false_positive"] = False
+	else:
+		update["is_false_positive"] = True
+		if str(poc).strip():
+			update["poc"] = poc
+
+	# Confidence re-prioritizes the vuln (confidence_nb: high=1 sorts first .. low=3).
+	confidence = str(action.get("confidence") or "").strip().lower()
+	if confidence in ("low", "medium", "high"):
+		update["confidence"] = confidence
+		update["confidence_nb"] = {"high": 1, "medium": 2, "low": 3}[confidence]
+
+	# Merge extra_data with dotted keys so existing keys survive.
+	extra_data = action.get("extra_data")
+	if isinstance(extra_data, dict):
+		for k, v in extra_data.items():
+			key = str(k)
+			if key and "." not in key and not key.startswith("$"):
+				update[f"extra_data.{key}"] = v
 
 	engine = ctx.get_query_engine()
 	query = {"_type": "vulnerability", "_uuid": uuid}
 	try:
-		modified = engine.update(query, {"$set": {"poc": poc}})
+		modified = engine.update(query, {"$set": update})
 	except Exception as e:
 		yield Error(message=f"Failed to record vulnerability PoC: {e}", _context=context)
 		return
@@ -997,10 +1026,12 @@ def _handle_add_vuln_poc(action: Dict, ctx: ActionContext) -> Generator:
 		)
 		return
 
-	# Re-fetch so the chat can render the updated VulnerabilityCard (now carrying the poc).
+	# Re-fetch so the chat can render the updated VulnerabilityCard (now carrying the poc/status).
 	updated = (engine.search(query, limit=1) or [None])[0]
+	msg = (f"Recorded exploitation PoC on vulnerability {uuid} (marked Exploited)." if exploited
+		else f"Marked vulnerability {uuid} as a false positive (could not be exploited).")
 	yield Ai(
-		content=f"Recorded proof-of-concept on vulnerability {uuid}.",
+		content=msg,
 		ai_type="add_vuln_poc",
 		extra_data={"finding": updated} if updated else {},
 		_context=context,

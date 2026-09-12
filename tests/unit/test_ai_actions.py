@@ -1668,31 +1668,56 @@ class TestHandleAddVulnPoc(unittest.TestCase):
 	def _ctx(self):
 		return ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
 
-	def test_add_vuln_poc_updates_and_yields_finding(self):
-		"""Valid uuid + poc -> $set-updates the vuln's poc and yields an add_vuln_poc Ai
-		carrying the refreshed finding."""
+	def test_add_vuln_poc_exploited_sets_status_and_poc(self):
+		"""exploited=true -> $set poc + status=EXPLOITED + verified + is_false_positive=False,
+		and yields an add_vuln_poc Ai carrying the refreshed finding."""
 		mock_engine = MagicMock()
 		mock_engine.update.return_value = 1
 		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability", "poc": "# poc"}]
 		ctx = self._ctx()
-		action = {"action": "add_vuln_poc", "_uuid": "u1", "poc": "# poc\ncmd -> output"}
+		action = {"action": "add_vuln_poc", "_uuid": "u1", "exploited": True, "poc": "# poc\ncmd -> output",
+			"confidence": "high", "extra_data": {"reason": "rce confirmed"}}
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
 			results = list(_handle_add_vuln_poc(action, ctx))
-		# update called with a $set on poc, scoped to the vuln uuid
 		q, upd = mock_engine.update.call_args[0]
 		self.assertEqual(q, {"_type": "vulnerability", "_uuid": "u1"})
-		self.assertEqual(upd, {"$set": {"poc": "# poc\ncmd -> output"}})
+		sset = upd["$set"]
+		self.assertEqual(sset["poc"], "# poc\ncmd -> output")
+		self.assertEqual(sset["status"], "EXPLOITED")
+		self.assertTrue(sset["verified"])
+		self.assertFalse(sset["is_false_positive"])
+		self.assertEqual(sset["confidence"], "high")
+		self.assertEqual(sset["confidence_nb"], 1)
+		self.assertEqual(sset["extra_data.reason"], "rce confirmed")
 		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"]
 		self.assertEqual(len(ais), 1)
 		self.assertEqual(ais[0].extra_data.get("finding", {}).get("poc"), "# poc")
 		self.assertFalse([r for r in results if isinstance(r, Error)])
+
+	def test_add_vuln_poc_not_exploited_marks_false_positive(self):
+		"""exploited=false -> $set is_false_positive=True (no status/verified), poc not required."""
+		mock_engine = MagicMock()
+		mock_engine.update.return_value = 1
+		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability"}]
+		ctx = self._ctx()
+		action = {"action": "add_vuln_poc", "_uuid": "u1", "exploited": False,
+			"confidence": "low", "extra_data": {"reason": "target not reachable"}}
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_add_vuln_poc(action, ctx))
+		sset = mock_engine.update.call_args[0][1]["$set"]
+		self.assertTrue(sset["is_false_positive"])
+		self.assertNotIn("status", sset)
+		self.assertNotIn("poc", sset)
+		self.assertEqual(sset["confidence_nb"], 3)
+		self.assertEqual(sset["extra_data.reason"], "target not reachable")
+		self.assertEqual(len([r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"]), 1)
 
 	def test_add_vuln_poc_no_match_yields_error(self):
 		"""uuid matches nothing -> Error (so the LLM re-checks the uuid), no update-yield."""
 		mock_engine = MagicMock()
 		mock_engine.update.return_value = 0
 		ctx = self._ctx()
-		action = {"action": "add_vuln_poc", "_uuid": "missing", "poc": "x"}
+		action = {"action": "add_vuln_poc", "_uuid": "missing", "exploited": True, "poc": "x"}
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
 			results = list(_handle_add_vuln_poc(action, ctx))
 		errors = [r for r in results if isinstance(r, Error)]
@@ -1704,16 +1729,16 @@ class TestHandleAddVulnPoc(unittest.TestCase):
 		mock_engine = MagicMock()
 		ctx = self._ctx()
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc({"action": "add_vuln_poc", "poc": "x"}, ctx))
+			results = list(_handle_add_vuln_poc({"action": "add_vuln_poc", "exploited": True, "poc": "x"}, ctx))
 		self.assertTrue([r for r in results if isinstance(r, Error)])
 		mock_engine.update.assert_not_called()
 
-	def test_add_vuln_poc_empty_poc_errors(self):
-		"""Blank poc -> Error, engine never touched."""
+	def test_add_vuln_poc_exploited_empty_poc_errors(self):
+		"""exploited=true with blank poc -> Error, engine never touched."""
 		mock_engine = MagicMock()
 		ctx = self._ctx()
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc({"action": "add_vuln_poc", "_uuid": "u1", "poc": "   "}, ctx))
+			results = list(_handle_add_vuln_poc({"action": "add_vuln_poc", "_uuid": "u1", "exploited": True, "poc": "   "}, ctx))
 		self.assertTrue([r for r in results if isinstance(r, Error)])
 		mock_engine.update.assert_not_called()
 
