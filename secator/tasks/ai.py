@@ -30,6 +30,12 @@ from secator.ai.session import (
 from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status, _decrypt_dict, _build_action_display
 
 
+# Hard upper bound on agent-loop iterations even when max_iterations is configured
+# "uncapped" (<= 0). A real infinity lets a wedged/looping model hold a worker and
+# spend tokens without limit; this keeps the uncapped mode generous (~40x the default
+# 25) yet bounded. The model still normally self-terminates via `stop` well before it.
+_HARD_ITERATION_CEILING = 1000
+
 # High-precision cues for the deterministic mode fast-path. Only unambiguous
 # prompts (cues for exactly one of attack/chat, and no exploit-ish cue) are
 # resolved here; everything else defers to the LLM classifier.
@@ -1018,7 +1024,11 @@ class ai(PythonRunner):
 		#    which can be stale/lower — without it a raised worker config is ignored.
 		config_max = CONFIG.addons.ai.max_iterations
 		if config_max is not None and config_max <= 0:
-			self.max_iterations = float('inf')  # unlimited — model self-terminates via `stop`
+			# "Uncapped" for long exploitation runs, but never truly unbounded: a genuine
+			# infinity lets a wedged/looping model occupy a worker and burn tokens without
+			# limit. Keep a high HARD ceiling so the model still normally self-terminates
+			# via `stop`, but a runaway loop is bounded.
+			self.max_iterations = _HARD_ITERATION_CEILING
 		else:
 			mode_max = get_mode_config(self.mode).get("max_iterations", 0)
 			self.max_iterations = max(self.max_iterations, mode_max, config_max)

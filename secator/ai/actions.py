@@ -751,6 +751,37 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error(message=f"Shell command failed: {e}", _context=context)
 
 
+# Mongo operators the LLM must never send: server-side JS / arbitrary expression
+# evaluation (per-document code execution — a DoS and, on some drivers, worse). The
+# workspace scope filter still bounds WHICH docs are seen, but a $where runs code
+# against each. Workspace queries never legitimately need these.
+_FORBIDDEN_QUERY_OPERATORS = frozenset({"$where", "$expr", "$function", "$accumulator"})
+# Cap regex length fed to Mongo to bound catastrophic-backtracking DoS (reuses the
+# scope engine's ceiling).
+_MAX_QUERY_REGEX = 2048
+
+
+def _validate_query_operators(node) -> Optional[str]:
+	"""Recursively reject forbidden Mongo operators and over-long $regex in an LLM
+	query. Returns an error message, or None if the query is acceptable."""
+	if isinstance(node, dict):
+		for key, value in node.items():
+			if key in _FORBIDDEN_QUERY_OPERATORS:
+				return (f"query operator {key} is not allowed. Use plain field filters "
+				        "($in/$regex/$gt/$lt/etc.) on finding fields.")
+			if key == "$regex" and isinstance(value, str) and len(value) > _MAX_QUERY_REGEX:
+				return f"$regex is too long ({len(value)} chars, max {_MAX_QUERY_REGEX})."
+			err = _validate_query_operators(value)
+			if err:
+				return err
+	elif isinstance(node, list):
+		for item in node:
+			err = _validate_query_operators(item)
+			if err:
+				return err
+	return None
+
+
 def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	"""Query workspace or current results for findings.
 
@@ -793,6 +824,13 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	# Decrypt query values
 	if ctx.encryptor:
 		query_filter = _decrypt_dict(query_filter, ctx.encryptor)
+
+	# Reject server-side-JS / expression operators and over-long regex before the
+	# query reaches the DB (workspace scope bounds WHICH docs, not per-doc code cost).
+	op_err = _validate_query_operators(query_filter)
+	if op_err:
+		yield Error(message=op_err, _context=context)
+		return
 
 	engine = ctx.get_query_engine()
 	is_local = getattr(engine.backend, "name", "") == "json"
