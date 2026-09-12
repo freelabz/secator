@@ -147,12 +147,16 @@ class RemoteBackend(InteractivityBackend):
 		if prompt_type == "permission":
 			engine = context.get("engine")
 			if answer in ("allow", "allow_all"):
-				# allow_all persists a session-scoped allow rule; single allow is
-				# a true one-shot that adds NO rule — next match re-prompts.
-				if answer == "allow_all" and engine:
+				# BOTH persist a session-scoped rule so the guardrail re-check (which
+				# re-evaluates the whole action after each approval to peel the next
+				# layer) actually passes — a rule-less "one-shot" allow left the target
+				# still unknown, so the re-check looped and re-prompted the same
+				# target/path until it gave up (only allow_all, which persisted, worked).
+				# `allow` = this exact value; `allow_all` = broader (whole host / parent).
+				if engine:
 					ptype = context.get("permission_type")
 					value = context.get("value", "")
-					self._add_permission_rules(engine, ptype, value)
+					self._add_permission_rules(engine, ptype, value, all_scope=(answer == "allow_all"))
 				return {"answer": "allow"}
 			return {"answer": "deny"}
 
@@ -305,10 +309,20 @@ class RemoteBackend(InteractivityBackend):
 			)
 
 	@staticmethod
-	def _add_permission_rules(engine, ptype, value):
-		"""Add runtime allow rules after a remote permission approval."""
-		from secator.ai.guardrails import _extract_cmd_names
+	def _add_permission_rules(engine, ptype, value, all_scope=False):
+		"""Add runtime allow rules after a remote permission approval.
+
+		``all_scope`` False (the "allow" button) grants the exact value; True (the
+		"allow all" button) grants a broader scope — the whole host for a target, the
+		parent directory for a path — mirroring the CLI's narrow-vs-broad menu.
+		"""
+		from secator.ai.guardrails import _extract_cmd_names, build_target_choices
 		if ptype == "shell":
+			# A single "allow" approves only the EXACT command (recorded separately in
+			# approved_shell_commands by the caller), so add no broad rule here; only
+			# "allow all" grants the binary(ies) for the whole run.
+			if not all_scope:
+				return
 			cmd_names = _extract_cmd_names(value)
 			if cmd_names:
 				engine.add_runtime_allow([f"shell({','.join(cmd_names)})"])
@@ -316,9 +330,20 @@ class RemoteBackend(InteractivityBackend):
 				first_word = value.split()[0] if value.split() else value
 				engine.add_runtime_allow([f"shell({first_word})"])
 		elif ptype == "target":
-			engine.add_runtime_allow([f"target({value})"])
+			# Reuse the CLI menu's rule sets: narrow-first, broad-last. "allow" takes
+			# the exact-value choice; "allow all" the broadest (whole host).
+			choices = [c for c in build_target_choices(value) if c.get("rules")]
+			if choices:
+				rules = (choices[-1] if all_scope else choices[0])["rules"]
+			else:
+				rules = [f"target({value})"]
+			engine.add_runtime_allow(rules)
 		elif ptype in ("read", "write"):
-			engine.add_runtime_allow([f"{ptype}({value})"])
+			if all_scope and "/" in value:
+				parent = value.rsplit("/", 1)[0] or "/"
+				engine.add_runtime_allow([f"{ptype}({parent}/*)", f"{ptype}({parent})"])
+			else:
+				engine.add_runtime_allow([f"{ptype}({value})"])
 
 
 class AutoBackend(InteractivityBackend):

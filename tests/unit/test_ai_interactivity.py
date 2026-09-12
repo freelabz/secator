@@ -87,6 +87,48 @@ class TestRemoteBackend(unittest.TestCase):
 		self.assertIsNotNone(result)
 		self.assertEqual(result["answer"], "option A")
 
+	def test_permission_allow_persists_rule_so_recheck_passes(self):
+		"""A single 'allow' on a target must persist a runtime rule so the guardrail
+		re-check passes. Regression: it used to add NO rule ("one-shot"), so the
+		re-check loop saw the target still unknown and re-prompted until it gave up —
+		only 'allow_all' worked. 'allow' = this exact target; a different host re-asks."""
+		from secator.ai.interactivity import RemoteBackend
+		from secator.ai.guardrails import PermissionEngine
+		eng = PermissionEngine(dict(allow=["shell(git)"], deny=[], ask=[]),
+							   targets=["scanme.example.com"], workspace="/tmp/ws")
+		cmd = "git clone https://github.com/o/r"
+		self.assertEqual(eng.check_action({"action": "shell", "command": cmd}).decision, "ask")
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": "allow"}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		res = backend.ask_user("Target requires approval", ["allow", "allow_all", "deny"], "s1",
+							   prompt_type="permission", permission_type="target",
+							   value="https://github.com/o/r", engine=eng)
+		self.assertEqual(res["answer"], "allow")
+		self.assertEqual(eng.check_action({"action": "shell", "command": cmd}).decision, "allow")
+		# narrow: a DIFFERENT host still asks
+		self.assertEqual(
+			eng.check_action({"action": "shell", "command": "git clone https://github.com/x/y"}).decision,
+			"ask")
+
+	def test_permission_allow_all_broadens_to_host(self):
+		"""'allow_all' persists a broader rule (whole host), so other URLs from the
+		same host are then allowed without re-prompting."""
+		from secator.ai.interactivity import RemoteBackend
+		from secator.ai.guardrails import PermissionEngine
+		eng = PermissionEngine(dict(allow=["shell(git)"], deny=[], ask=[]),
+							   targets=["scanme.example.com"], workspace="/tmp/ws")
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": "allow_all"}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		backend.ask_user("Target requires approval", ["allow", "allow_all", "deny"], "s1",
+						 prompt_type="permission", permission_type="target",
+						 value="https://github.com/o/r", engine=eng)
+		# broad: another URL from the SAME host is now allowed
+		self.assertEqual(
+			eng.check_action({"action": "shell", "command": "git clone https://github.com/x/y"}).decision,
+			"allow")
+
 	@patch('secator.ai.interactivity.sleep')
 	def test_ask_user_raises_on_timeout_leaves_pending(self, mock_sleep):
 		from secator.ai.interactivity import RemoteBackend, UserInputTimeout
