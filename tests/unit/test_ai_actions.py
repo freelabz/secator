@@ -338,6 +338,28 @@ class TestHandleQuery(unittest.TestCase):
 		self.assertIsInstance(results[0], Warning)
 		self.assertIn('workspace', results[0].message.lower())
 
+	def test_query_rejects_server_side_js_operators(self):
+		"""$where / $expr (server-side JS / per-doc expression eval) are rejected before
+		the query reaches the DB — yields an Error, engine never queried."""
+		mock_engine = MagicMock()
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			for q in ({'$where': 'this.x==1'}, {'_type': 'vulnerability', '$expr': {'$gt': ['$a', '$b']}},
+			          {'$or': [{'name': {'$regex': 'x'}}, {'$where': '1'}]}):
+				results = list(_handle_query({'action': 'query', 'query': q}, ctx))
+				self.assertTrue(any(isinstance(r, Error) and 'not allowed' in r.message for r in results),
+				                f"expected rejection for {q}")
+		mock_engine.search.assert_not_called()
+
+	def test_query_rejects_overlong_regex(self):
+		"""An over-long $regex (ReDoS vector) is rejected."""
+		mock_engine = MagicMock()
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_query({'action': 'query', 'query': {'name': {'$regex': 'a' * 5000}}}, ctx))
+		self.assertTrue(any(isinstance(r, Error) and 'too long' in r.message for r in results))
+		mock_engine.search.assert_not_called()
+
 	def test_query_local_driver_no_workspace_ok(self):
 		"""The local (json) driver answers without a workspace_id (it reads this run's
 		findings); only a non-local driver requires a workspace."""
