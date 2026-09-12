@@ -950,9 +950,9 @@ class PermissionEngine:
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
 		elif action_type in ("query", "follow_up", "add_finding", "add_vuln_poc"):
-			# add_vuln_poc only $set-updates the `poc` field of an EXISTING vulnerability
-			# (workspace-scoped, no new/scope-widening finding), so it's safe to auto-allow
-			# alongside query/add_finding.
+			# add_vuln_poc only $set-updates fields (poc/status/confidence/extra_data/
+			# is_false_positive) on an EXISTING vulnerability (workspace-scoped, no new/
+			# scope-widening finding), so it's safe to auto-allow alongside query/add_finding.
 			# Don't let an injected add_finding silently mint a scope-widening target finding.
 			# Deny (fail-closed) rather than "ask": there is no add_finding prompt layer, so an
 			# "ask" here isn't surfaceable — it would just spin the prompt loop until it denies
