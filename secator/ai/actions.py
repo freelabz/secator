@@ -670,8 +670,10 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
 	yield from _run_runner(action, ctx, "workflow")
 
 
-# --isolated sandbox: image + resource caps for the per-runner DinD container. Env-overridable
-# now; wire to CONFIG.addons.ai.* when the settings surface lands.
+# --isolated sandbox: image + resource caps for the per-runner DinD container. Stock Kali image
+# (no custom build) — the LLM apt-gets anything extra it needs inside the container. Override the
+# image via env (e.g. kali-linux-headless/-large for a fuller toolset); env-overridable now, wire
+# to CONFIG.addons.ai.* when the settings surface lands.
 _SANDBOX_IMAGE = os.environ.get("SECATOR_AI_SANDBOX_IMAGE", "kalilinux/kali-rolling")
 _SANDBOX_MEMORY = os.environ.get("SECATOR_AI_SANDBOX_MEMORY", "1g")
 _SANDBOX_PIDS = os.environ.get("SECATOR_AI_SANDBOX_PIDS", "256")
