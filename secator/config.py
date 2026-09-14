@@ -120,6 +120,7 @@ class Security(StrictModel):
 	force_source_install: bool = False
 	prompt_sudo_password: bool = True
 	sudo_password: str = ''  # non-interactive sudo password (e.g. SECATOR_SECURITY_SUDO_PASSWORD) for headless workers
+	shell_isolated: bool = False  # default for the AI task's --isolated (run_shell in a Docker sandbox); set SECATOR_SECURITY_SHELL_ISOLATED=1 on sandboxed workers  # noqa: E501
 
 
 class HTTP(StrictModel):

@@ -225,7 +225,10 @@ class ai(PythonRunner):
 		},
 		"isolated": {
 			"is_flag": True,
-			"default": False,
+			# Default from config so a sandboxed worker (SECATOR_SECURITY_SHELL_ISOLATED=1) makes
+			# every AI task isolated without the caller passing the flag. The API forbids callers
+			# from setting this option, so the worker's config value is authoritative.
+			"default": CONFIG.security.shell_isolated,
 			"help": "Run every run_shell command inside a per-runner Docker container (DinD). Drops "
 			        "path/command permission prompts (the container is the boundary); target prompts remain."
 		},
