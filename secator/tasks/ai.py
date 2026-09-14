@@ -223,6 +223,12 @@ class ai(PythonRunner):
 			"default": False,
 			"help": "Skip all permission engine checks (dangerous!)"
 		},
+		"isolated": {
+			"is_flag": True,
+			"default": False,
+			"help": "Run every run_shell command inside a per-runner Docker container (DinD). Drops "
+			        "path/command permission prompts (the container is the boundary); target prompts remain."
+		},
 	}
 
 	@classmethod
@@ -318,6 +324,7 @@ class ai(PythonRunner):
 			yield from result
 			yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
 			yield from self._run_loop()
+			self._teardown_isolation()
 			return
 
 		# Get user prompt
@@ -355,6 +362,7 @@ class ai(PythonRunner):
 
 		# Run loop
 		yield from self._run_loop()
+		self._teardown_isolation()
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 
 	# -------------------------------------------------------------------------
@@ -476,6 +484,7 @@ class ai(PythonRunner):
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		yield from self._run_loop()
+		self._teardown_isolation()
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 		return True
 
@@ -608,7 +617,9 @@ class ai(PythonRunner):
 			permission_engine=self.permission_engine,
 			in_scope=self.in_scope,
 			out_of_scope=self.out_of_scope,
+			isolated=self.isolated,
 		)
+		self._isolation_ctx = ctx  # for sandbox-container teardown at task end
 
 		# Wire query_engine to remote backend if needed
 		if isinstance(self.backend, RemoteBackend):
@@ -854,6 +865,18 @@ class ai(PythonRunner):
 		self._save_history()
 		yield Info(message=f"Reached max iterations ({iteration}/{self.max_iterations})")
 
+	def _teardown_isolation(self):
+		"""Remove this run's --isolated sandbox container at turn end (best-effort, idempotent).
+		No-op unless isolated. Orphans from an uncaught crash are cleared on pod restart (dockerd's
+		/var/lib/docker is an emptyDir) — see ai-shell-isolation-spec open questions."""
+		if not getattr(self, "isolated", False):
+			return
+		ctx = getattr(self, "_isolation_ctx", None)
+		if ctx is None:
+			return
+		from secator.ai.actions import _teardown_sandbox_container
+		_teardown_sandbox_container(ctx, self.context or {})
+
 	# -------------------------------------------------------------------------
 	# Init
 	# -------------------------------------------------------------------------
@@ -879,6 +902,7 @@ class ai(PythonRunner):
 		self.passed_context = self.run_opts.get("context") or {}
 		self.async_tasks = self.get_opt_value("async_tasks")
 		self.dangerous = self.get_opt_value("dangerous")
+		self.isolated = self.get_opt_value("isolated")
 		self.in_scope = self.get_opt_value("in_scope") or []
 		self.out_of_scope = self.get_opt_value("out_of_scope") or []
 

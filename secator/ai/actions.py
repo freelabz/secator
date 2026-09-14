@@ -1,5 +1,7 @@
 """Action handlers for AI task."""
 import json
+import os
+import re
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -65,6 +67,11 @@ class ActionContext:
 	interactive: Any = "local"  # "local", "remote", "auto", or bool (legacy)
 	backend: Any = field(default=None, repr=False)
 	session_id: str = ""
+	# --isolated: run every run_shell inside a per-runner Docker container (DinD). When set,
+	# path/command permission prompts are dropped (the container is the boundary); target
+	# (network) prompts remain. Keyed per runner, NOT per session — subagents may run on
+	# another pod's dockerd, so they can't share the parent's container.
+	isolated: bool = False
 	# Mandate scope (run-opts) propagated to spawned child runners so they enforce the
 	# same in_scope/out_of_scope boundary via secator's shipped scope-gate.
 	in_scope: List = field(default_factory=list)
@@ -264,7 +271,12 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 		cmd_display = _build_action_display(action)
 
 		# Handle shell command prompts (unknown commands or parse failures)
-		if result.shell_command:
+		# --isolated: the container is the command/path boundary, so drop the shell (command)
+		# ask entirely — mark it approved so the re-check clears this layer. Target (network)
+		# asks below are unaffected and still prompt.
+		if result.shell_command and ctx.isolated:
+			ctx.permission_engine.approved_shell_commands.add(result.shell_command.strip())
+		elif result.shell_command:
 			parse_failed = "Could not parse" in (result.reason or "")
 			denial = yield from _ask_and_check(
 				ctx, is_remote,
@@ -303,18 +315,25 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 		if result.paths:
 			cmd = action.get("command", "")
 			path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
-			for path in result.paths:
-				access_type = path_access_map.get(path, "read")
-				denial = yield from _ask_and_check(
-					ctx, is_remote,
-					question=f"{access_type.capitalize()} access to {path} requires approval",
-					permission_type=access_type,
-					value=path,
-					deny_message=f"Action denied: {access_type} access to {path} not approved",
-					command=cmd_display,
+			if ctx.isolated:
+				# --isolated: the container is the filesystem boundary, so drop path asks —
+				# runtime-allow each path so the re-check clears this layer (no prompt).
+				ctx.permission_engine.add_runtime_allow(
+					[f"{path_access_map.get(p, 'read')}({p})" for p in result.paths]
 				)
-				if denial:
-					return denial
+			else:
+				for path in result.paths:
+					access_type = path_access_map.get(path, "read")
+					denial = yield from _ask_and_check(
+						ctx, is_remote,
+						question=f"{access_type.capitalize()} access to {path} requires approval",
+						permission_type=access_type,
+						value=path,
+						deny_message=f"Action denied: {access_type} access to {path} not approved",
+						command=cmd_display,
+					)
+					if denial:
+						return denial
 
 		# Re-check to see if more layers need prompting
 		result = ctx.permission_engine.check_action(action)
@@ -651,6 +670,56 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
 	yield from _run_runner(action, ctx, "workflow")
 
 
+# --isolated sandbox: image + resource caps for the per-runner DinD container. Env-overridable
+# now; wire to CONFIG.addons.ai.* when the settings surface lands.
+_SANDBOX_IMAGE = os.environ.get("SECATOR_AI_SANDBOX_IMAGE", "kalilinux/kali-rolling")
+_SANDBOX_MEMORY = os.environ.get("SECATOR_AI_SANDBOX_MEMORY", "1g")
+_SANDBOX_PIDS = os.environ.get("SECATOR_AI_SANDBOX_PIDS", "256")
+
+
+def _sandbox_container_name(ctx: "ActionContext", context: Dict) -> str:
+	"""Per-RUNNER container name (run_id), not per-session: a subagent may run on another pod's
+	dockerd, so it can't share the parent's container. Falls back to session id / 'adhoc'."""
+	key = str(context.get("run_id") or getattr(ctx, "session_id", "") or "adhoc")
+	return "sbx-" + re.sub(r"[^A-Za-z0-9_.-]", "-", key)[:48]
+
+
+def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
+	"""Lazily create the per-runner Kali sandbox container (idempotent via docker inspect).
+	Returns the container name. dockerd runs in the pod (DinD); the metadata DROP + egress policy
+	are set once in the pod's DinD entrypoint, not here."""
+	import subprocess
+	name = _sandbox_container_name(ctx, context)
+	running = subprocess.run(
+		["docker", "inspect", "-f", "{{.State.Running}}", name], capture_output=True, text=True)
+	if running.returncode == 0 and running.stdout.strip() == "true":
+		return name
+	subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+	subprocess.run([
+		"docker", "run", "-d", "--name", name,
+		"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
+		"-v", f"{name}:/work", "-w", "/work",
+		_SANDBOX_IMAGE, "sleep", "infinity",
+	], check=True, capture_output=True)
+	return name
+
+
+def _teardown_sandbox_container(ctx: "ActionContext", context: Dict) -> None:
+	"""Remove the per-runner sandbox container (+ its /work volume). Best-effort; called at AI-task
+	end and as orphan cleanup. Safe to call when isolation was never used (no-op)."""
+	import subprocess
+	name = _sandbox_container_name(ctx, context)
+	subprocess.run(["docker", "rm", "-f", "-v", name], capture_output=True)
+
+
+def _wrap_docker_exec(name: str, command: str) -> str:
+	"""Wrap an arbitrary shell command to run inside the sandbox container. base64 round-trip so any
+	quoting in `command` survives verbatim (no shell-escaping pitfalls)."""
+	import base64
+	b64 = base64.b64encode(command.encode()).decode()
+	return f"docker exec {name} sh -lc 'echo {b64} | base64 -d | sh'"
+
+
 def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 	"""Execute a shell command as a `command` task runner.
 
@@ -673,15 +742,31 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 
 	# Unconditional secret-source deny (holds even when dangerous=True disables the
 	# permission engine): never let the AI read secator's config/.env or /proc environ.
-	secret_denial = _denied_secret_read(command)
-	if secret_denial:
-		yield Ai(content=command, ai_type="shell", _context=context)
-		yield Ai(content=f"[denied] {secret_denial}", ai_type="shell_output", _context=context)
-		return
+	# Skipped when --isolated: the command runs in the container, which has none of the
+	# worker's config/.env/secrets, so the deny is moot (and would over-block in-container reads).
+	if not ctx.isolated:
+		secret_denial = _denied_secret_read(command)
+		if secret_denial:
+			yield Ai(content=command, ai_type="shell", _context=context)
+			yield Ai(content=f"[denied] {secret_denial}", ai_type="shell_output", _context=context)
+			return
 
 	if ctx.dry_run:
-		yield Info(message=f"[DRY RUN] Would run: {command}", _context=context)
+		where = f" (in sandbox {_sandbox_container_name(ctx, context)})" if ctx.isolated else ""
+		yield Info(message=f"[DRY RUN]{where} Would run: {command}", _context=context)
 		return
+
+	# --isolated: run the command inside a per-runner Kali container via `docker exec`. The Ai
+	# transcript still shows the ORIGINAL command; only what CommandTask executes is wrapped.
+	exec_command = command
+	if ctx.isolated:
+		try:
+			exec_command = _wrap_docker_exec(_ensure_sandbox_container(ctx, context), command)
+		except Exception as e:
+			yield Ai(content=command, ai_type="shell", _context=context)
+			yield Ai(content=f"[sandbox error] could not start isolation container: {e}",
+			         ai_type="shell_output", _context=context)
+			return
 
 	try:
 		# Don't silently run a persistence-less child when the parent has drivers
@@ -713,7 +798,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		# so stdout survives while persist hooks still fire. Spread **run_opts, not `run_opts=`
 		# (would nest and drop `env`); import locally to avoid a circular import.
 		from secator.tasks.command import command as CommandTask
-		runner = CommandTask([command], hooks=hooks, context=context, **run_opts)
+		runner = CommandTask([exec_command], hooks=hooks, context=context, **run_opts)
 
 		# 60s cap on ad-hoc AI shell commands. max_timeout is NOT run_opts-settable
 		# (Command.__init__ resolves it from CONFIG.tasks.overrides); setting the
