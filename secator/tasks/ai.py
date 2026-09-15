@@ -326,8 +326,10 @@ class ai(PythonRunner):
 			self.context["session_name"] = self.session_name
 			yield from result
 			yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
-			yield from self._run_loop()
-			self._teardown_isolation()
+			try:
+				yield from self._run_loop()
+			finally:
+				self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 			return
 
 		# Get user prompt
@@ -364,8 +366,10 @@ class ai(PythonRunner):
 		yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
 
 		# Run loop
-		yield from self._run_loop()
-		self._teardown_isolation()
+		try:
+			yield from self._run_loop()
+		finally:
+			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 
 	# -------------------------------------------------------------------------
@@ -486,8 +490,10 @@ class ai(PythonRunner):
 			yield self._emit_user_prompt(self.prompt)
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
-		yield from self._run_loop()
-		self._teardown_isolation()
+		try:
+			yield from self._run_loop()
+		finally:
+			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 		return True
 
