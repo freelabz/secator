@@ -248,7 +248,13 @@ class nmapData(dict):
 				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
 				service_confidence = extra_data.get('confidence', 'low')
-				if service_confidence != 'low':
+				# On an IDS mass-scan host every port is suspect (the IDS answers
+				# probes on all of them), so a confident service banner on one port
+				# must NOT flip the whole host back to 'high'. Without this guard the
+				# upgrade persisted across the port loop and left ~half of an IDS
+				# host's ports mislabeled confidence='high'. Only a non-mass-scan
+				# host upgrades on a confidently-detected service.
+				if not is_mass_scan and service_confidence != 'low':
 					global_confidence = 'high'
 
 				# Grab CPEs

@@ -270,3 +270,57 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 		self.assertEqual(len(vulns), cve_count * 2)
 		matched_ats = {v.matched_at for v in vulns}
 		self.assertEqual(matched_ats, {'10.0.0.1:80', '10.0.0.2:80'})
+
+
+class TestNmapIdsConfidence(unittest.TestCase):
+	"""On an IDS mass-scan host (>20 open ports) every port must stay confidence='low'.
+
+	Regression: a confident service banner on one port used to flip the shared
+	global_confidence back to 'high' for all later ports, leaving ~half of an IDS
+	host's ports mislabeled 'high'. The 'ids' tag must be present on all of them.
+	"""
+
+	def _parse_ports(self, content):
+		from secator.output_types import Port
+		fixtures_dir = os.path.join(os.path.dirname(__file__), '..', 'fixtures')
+		path = os.path.join(fixtures_dir, '_nmap_ids_test.xml')
+		with open(path, 'w') as f:
+			f.write(content)
+		try:
+			from secator.tasks.nmap import nmap
+			task = nmap.__new__(nmap)
+			task.output_path = path
+			results = list(task.xml_to_json())
+		finally:
+			os.remove(path)
+		return [r for r in results if isinstance(r, Port)]
+
+	def _mass_scan_xml(self):
+		ports = []
+		for i in range(1, 26):  # 25 ports -> is_mass_scan (>20)
+			# first port carries a confident service banner (conf=10 -> service_confidence 'high')
+			svc = '<service name="http" product="nginx" method="probed" conf="10"/>' if i == 1 \
+				else '<service name="tcpwrapped" method="probed" conf="3"/>'
+			ports.append(
+				f'<port protocol="tcp" portid="{i}"><state state="open" reason="syn-ack"/>{svc}</port>'
+			)
+		return (
+			'<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE nmaprun>\n'
+			'<nmaprun scanner="nmap" args="nmap" start="1" version="7.98">\n'
+			'<host><status state="up" reason="syn-ack"/>'
+			'<address addr="1.2.3.4" addrtype="ipv4"/>'
+			'<hostnames><hostname name="ids.example.net" type="PTR"/></hostnames>'
+			'<ports>' + ''.join(ports) + '</ports></host>\n</nmaprun>\n'
+		)
+
+	def test_ids_host_keeps_all_ports_low_confidence(self):
+		ports = self._parse_ports(self._mass_scan_xml())
+		self.assertEqual(len(ports), 25)
+		# every port on an IDS host is low-confidence and carries the 'ids' tag
+		self.assertTrue(all(p.confidence == 'low' for p in ports),
+			'a confident service must not flip the IDS host back to high')
+		self.assertTrue(all('ids' in p.tags for p in ports))
+		# the confident port still records its per-port service_confidence truthfully
+		p1 = [p for p in ports if p.port == 1][0]
+		self.assertEqual(p1.service_confidence, 'high')
+		self.assertEqual(p1.confidence, 'low')
