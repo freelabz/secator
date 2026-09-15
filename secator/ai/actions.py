@@ -705,13 +705,23 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 		"-v", f"{name}:/work", "-w", "/work",
 		_SANDBOX_IMAGE, "sleep", "infinity",
 	], check=True, capture_output=True)
+	# gVisor's sandbox network is IPv4-only, but DNS returns AAAA records → every hostname op
+	# (git/curl/ssh/pip/apt) tries IPv6 first and HANGS. Prefer IPv4 in glibc via gai.conf (fixes
+	# git/curl/ssh/python); apt needs its own ForceIPv4 (libapt ignores gai.conf). Best-effort.
+	try:
+		subprocess.run(
+			["docker", "exec", name, "sh", "-c", 'printf "precedence ::ffff:0:0/96 100\\n" > /etc/gai.conf'],
+			capture_output=True, timeout=30)
+	except Exception:
+		pass
 	# Auto-install the base toolset (bare kali-rolling lacks git/curl/python; the LLM doesn't
 	# reliably self-install). Best-effort + bounded — a failure here must not break the shell path.
 	if _SANDBOX_PACKAGES.strip():
 		try:
 			subprocess.run(
 				["docker", "exec", name, "sh", "-c",
-				 f"apt-get update -qq && apt-get install -y -qq --no-install-recommends {_SANDBOX_PACKAGES}"],
+				 "apt-get -o Acquire::ForceIPv4=true update -qq && "
+				 f"apt-get -o Acquire::ForceIPv4=true install -y -qq --no-install-recommends {_SANDBOX_PACKAGES}"],
 				capture_output=True, timeout=300)
 		except Exception:
 			pass  # tools missing → the LLM can still apt-get on demand
