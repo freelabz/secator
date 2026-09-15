@@ -671,12 +671,14 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
 
 
 # --isolated sandbox: image + resource caps for the per-runner DinD container. Stock Kali image
-# (no custom build) — the LLM apt-gets anything extra it needs inside the container. Override the
-# image via env (e.g. kali-linux-headless/-large for a fuller toolset); env-overridable now, wire
-# to CONFIG.addons.ai.* when the settings surface lands.
+# (no custom build); kali-rolling is bare (no pre-toolset Kali image exists — "headless" is an apt
+# metapackage), so we auto-install a base toolset at container spin-up (SECATOR_AI_SANDBOX_PACKAGES)
+# since the LLM doesn't reliably self-install. The LLM apt-gets anything extra at runtime.
 _SANDBOX_IMAGE = os.environ.get("SECATOR_AI_SANDBOX_IMAGE", "kalilinux/kali-rolling")
 _SANDBOX_MEMORY = os.environ.get("SECATOR_AI_SANDBOX_MEMORY", "1g")
 _SANDBOX_PIDS = os.environ.get("SECATOR_AI_SANDBOX_PIDS", "256")
+# Base tools the exploit workflow needs (clone/fetch/run PoCs). Empty string disables auto-install.
+_SANDBOX_PACKAGES = os.environ.get("SECATOR_AI_SANDBOX_PACKAGES", "git curl wget python3 python3-pip ca-certificates")
 
 
 def _sandbox_container_name(ctx: "ActionContext", context: Dict) -> str:
@@ -703,6 +705,16 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 		"-v", f"{name}:/work", "-w", "/work",
 		_SANDBOX_IMAGE, "sleep", "infinity",
 	], check=True, capture_output=True)
+	# Auto-install the base toolset (bare kali-rolling lacks git/curl/python; the LLM doesn't
+	# reliably self-install). Best-effort + bounded — a failure here must not break the shell path.
+	if _SANDBOX_PACKAGES.strip():
+		try:
+			subprocess.run(
+				["docker", "exec", name, "sh", "-c",
+				 f"apt-get update -qq && apt-get install -y -qq --no-install-recommends {_SANDBOX_PACKAGES}"],
+				capture_output=True, timeout=300)
+		except Exception:
+			pass  # tools missing → the LLM can still apt-get on demand
 	return name
 
 
