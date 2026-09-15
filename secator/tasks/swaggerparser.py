@@ -52,69 +52,72 @@ class swaggerparser(PythonRunner):
 		headers = headers_to_dict(self.get_opt_value(HEADER)) if self.get_opt_value(HEADER) else {}
 
 		for target in self.inputs:
-			spec_url, spec, tried = self._resolve_spec(target, headers, insecure, timeout)
-			if spec is None:
+			specs, tried = self._resolve_specs(target, headers, insecure, timeout)
+			if not specs:
 				# Never fail silently: list what was fetched so the real spec URL can be spotted.
 				yield Warning(message=f'No OpenAPI / Swagger spec found from {target}. Tried {len(tried)} URL(s): ' + ', '.join(tried[:12]) + ('...' if len(tried) > 12 else ''))  # noqa: E501
 				continue
 
-			yield Info(message=f'Spec loaded from {spec_url} (OpenAPI/Swagger)')
-			base_url = self._base_url(spec, spec_url)
-			count = 0
-			for url_obj in self._iter_operations(spec, base_url):
-				count += 1
-				yield url_obj
-			yield Info(message=f'Parsed {count} operations from {spec_url}')
+			if len(specs) > 1:
+				yield Info(message=f'{len(specs)} specs found from {target}')
+			for spec_url, spec in specs:
+				yield Info(message=f'Spec loaded from {spec_url} (OpenAPI/Swagger)')
+				base_url = self._base_url(spec, spec_url)
+				schemes = self._security_schemes(spec)
+				default_security = spec.get('security')
+				count = 0
+				for url_obj in self._iter_operations(spec, base_url, schemes, default_security):
+					count += 1
+					yield url_obj
+				yield Info(message=f'Parsed {count} operations from {spec_url}')
 
 	# -- spec discovery ------------------------------------------------------------------------
 
-	def _resolve_spec(self, target, headers, insecure, timeout):
-		"""Return (spec_url, parsed_spec, tried) resolving the real spec even when *target* points at
-		the Swagger UI HTML page or at the bare host. *tried* is the list of URLs fetched, for
-		diagnostics. Returns (None, None, tried) when nothing parses."""
+	def _resolve_specs(self, target, headers, insecure, timeout):
+		"""Return (specs, tried) where *specs* is a list of (spec_url, parsed_spec) — every spec the
+		target exposes, not just the first: a Swagger UI page / swagger-config.json can declare
+		several (e.g. Swashbuckle discoveryPaths [v1, v2, internal]). *tried* is the list of URLs
+		fetched, for diagnostics. Autodiscovery (well-known paths) still stops at the first hit."""
 		tried = []
+		specs = []
+		seen_specs = set()
 
-		def try_url(url):
-			"""Fetch *url*; return a parsed spec, or follow a Swagger UI config (swagger-config.json,
-			which lists specs under `url` / `urls`) one level down. Returns (spec_url, spec) or None."""
+		def add(url, spec):
+			if url not in seen_specs:
+				seen_specs.add(url)
+				specs.append((url, spec))
+
+		def follow(url, depth=0):
+			"""Fetch *url*; add it if it is a spec, otherwise follow every spec / config URL it
+			references (swagger-config.json `url`/`urls`, or a Swagger UI page). Returns the number of
+			specs added."""
+			if depth > 3 or url in tried:
+				return 0
 			tried.append(url)
 			body, ctype = self._fetch(url, headers, insecure, timeout)
 			if body is None:
-				return None
+				return 0
 			spec = self._parse_spec(body)
 			if spec:
-				return url, spec
-			# A swagger-config.json points at the real spec(s) rather than being one.
+				add(url, spec)
+				return 1
+			added = 0
 			for nested in self._spec_urls_from_config(body, url):
-				if nested in tried:
-					continue
-				tried.append(nested)
-				sub_body, _ = self._fetch(nested, headers, insecure, timeout)
-				if sub_body:
-					nested_spec = self._parse_spec(sub_body)
-					if nested_spec:
-						return nested, nested_spec
-			# An HTML Swagger UI page: follow every spec / config URL it references.
+				added += follow(nested, depth + 1)
 			if 'html' in (ctype or '') or '<html' in body[:400].lower() or body.lstrip().lower().startswith('<!doctype'):  # noqa: E501
 				for found in self._spec_urls_from_html(body, url):
-					if found in tried:
-						continue
-					got = try_url(found)
-					if got:
-						return got
-			return None
+					added += follow(found, depth + 1)
+			return added
 
-		# 1. The target itself (spec, config, or Swagger UI page).
-		got = try_url(target)
-		if got:
-			return got[0], got[1], tried
+		# 1. The target itself (spec, config, or Swagger UI page) — collect every spec it exposes.
+		if follow(target):
+			return specs, tried
 
 		# 2. Autodiscovery over well-known paths, tried both at the origin and relative to the
 		#    target's path prefix (e.g. a "/swagger/..." mount -> "/swagger/v1/swagger.json").
 		parsed = urlparse(target)
 		origin = urlunparse((parsed.scheme or 'https', parsed.netloc or parsed.path, '', '', '', ''))
 		bases = [origin]
-		# Path prefixes: /swagger/ui/index -> ['/swagger/ui', '/swagger']
 		segments = [seg for seg in parsed.path.split('/') if seg]
 		for i in range(len(segments) - 1, 0, -1):
 			bases.append(origin + '/' + '/'.join(segments[:i]))
@@ -125,10 +128,9 @@ class swaggerparser(PythonRunner):
 				if candidate in seen:
 					continue
 				seen.add(candidate)
-				got = try_url(candidate)
-				if got:
-					return got[0], got[1], tried
-		return None, None, tried
+				if follow(candidate):
+					return specs, tried
+		return specs, tried
 
 	def _fetch(self, url, headers, insecure, timeout):
 		"""Return (text, content_type) or (None, None) on any failure / non-2xx."""
@@ -192,7 +194,11 @@ class swaggerparser(PythonRunner):
 		root_m = re.search(r'rootUrl\s*[:=]\s*[\'"]([^\'"]+)[\'"]', html)
 		paths_m = re.search(r'discoveryPaths\s*[:=]\s*(?:arrayFrom\()?\s*\[?\s*([^\]);]+)', html)
 		if paths_m:
-			disc = re.findall(r'[\'"]([^\'"]+)[\'"]', paths_m.group(1))
+			# discoveryPaths is often a single quoted string with pipe-separated paths
+			# (Swashbuckle's arrayFrom('a|b')), or a real JS array of quoted strings.
+			disc = []
+			for chunk in re.findall(r'[\'"]([^\'"]+)[\'"]', paths_m.group(1)):
+				disc.extend(part for part in chunk.split('|'))
 			root = root_m.group(1).rstrip('/') if root_m else None
 			for d in disc:
 				d = d.strip()
@@ -241,7 +247,7 @@ class swaggerparser(PythonRunner):
 
 	# -- operations ----------------------------------------------------------------------------
 
-	def _iter_operations(self, spec, base_url):
+	def _iter_operations(self, spec, base_url, schemes, default_security):
 		paths = spec.get('paths') or {}
 		for path, path_item in paths.items():
 			if not isinstance(path_item, dict):
@@ -251,9 +257,9 @@ class swaggerparser(PythonRunner):
 			for method, operation in path_item.items():
 				if method.lower() not in HTTP_METHODS or not isinstance(operation, dict):
 					continue
-				yield self._build_url(spec, base_url, path, method.lower(), operation, shared_params)
+				yield self._build_url(spec, base_url, path, method.lower(), operation, shared_params, schemes, default_security)  # noqa: E501
 
-	def _build_url(self, spec, base_url, path, method, operation, shared_params):
+	def _build_url(self, spec, base_url, path, method, operation, shared_params, schemes, default_security):  # noqa: E501
 		full_url = base_url.rstrip('/') + '/' + path.lstrip('/')
 		all_params = shared_params + (operation.get('parameters', []) or [])
 		params = [self._describe_param(spec, p) for p in all_params]
@@ -285,13 +291,57 @@ class swaggerparser(PythonRunner):
 					extra_data['required'] = body['required']
 				extra_data['body_example'] = body['example']
 
+		# Auth requirements: an operation-level `security` overrides the spec-level default; an empty
+		# list means explicitly public. This tells a caller which token/header an endpoint needs — and,
+		# just as usefully, which endpoints are reachable with no auth at all.
+		security = operation.get('security', default_security)
+		public = not security  # None or [] -> no auth required
+		tags = ['openapi']
+		if public:
+			extra_data['public'] = True
+			tags.append('public')
+		else:
+			extra_data['security'] = self._describe_security(security, schemes)
+
 		return Url(
 			url=full_url,
 			method=method.upper(),
 			confidence='high',
 			extra_data=extra_data,
-			tags=['openapi'],
+			tags=tags,
 		)
+
+	@staticmethod
+	def _security_schemes(spec):
+		"""Map scheme name -> definition. OpenAPI 3: components.securitySchemes; Swagger 2:
+		securityDefinitions."""
+		schemes = (spec.get('components', {}) or {}).get('securitySchemes')
+		if not schemes:
+			schemes = spec.get('securityDefinitions')
+		return schemes or {}
+
+	@staticmethod
+	def _describe_security(security, schemes):
+		"""Turn a `security` requirement list into readable entries, resolved against the scheme
+		definitions (type, where the credential goes, and its name)."""
+		out = []
+		for requirement in security or []:
+			if not isinstance(requirement, dict):
+				continue
+			for name, scopes in requirement.items():
+				scheme = schemes.get(name, {}) if isinstance(schemes, dict) else {}
+				stype = scheme.get('type', '')
+				entry = {'name': name, 'type': stype}
+				if stype == 'apiKey':
+					entry['in'] = scheme.get('in', '')
+					entry['key'] = scheme.get('name', '')
+				elif stype in ('http', 'basic'):
+					entry['scheme'] = scheme.get('scheme', 'basic' if stype == 'basic' else '')
+				elif stype == 'oauth2':
+					if scopes:
+						entry['scopes'] = list(scopes)
+				out.append(entry)
+		return out
 
 	@staticmethod
 	def _describe_param(spec, param):
