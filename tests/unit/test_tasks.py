@@ -273,11 +273,12 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 
 
 class TestNmapIdsConfidence(unittest.TestCase):
-	"""On an IDS mass-scan host (>20 open ports) every port must stay confidence='low'.
+	"""On an IDS mass-scan host, only `tcpwrapped` ports are demoted to
+	confidence='low'; genuinely fingerprinted services keep their real confidence.
 
-	Regression: a confident service banner on one port used to flip the shared
-	global_confidence back to 'high' for all later ports, leaving ~half of an IDS
-	host's ports mislabeled 'high'. The 'ids' tag must be present on all of them.
+	Regression: `tcpwrapped` (nmap conf=8) used to flip the shared global_confidence
+	to 'high', mislabeling ~half an IDS host's ports. The demotion is now scoped to
+	tcpwrapped only; the 'ids' tag still marks every port on the host.
 	"""
 
 	def _parse_ports(self, content):
@@ -298,9 +299,10 @@ class TestNmapIdsConfidence(unittest.TestCase):
 	def _mass_scan_xml(self):
 		ports = []
 		for i in range(1, 26):  # 25 ports -> is_mass_scan (>20)
-			# first port carries a confident service banner (conf=10 -> service_confidence 'high')
+			# port 1 is a genuinely fingerprinted service; the rest are tcpwrapped
+			# noise (nmap scores tcpwrapped conf=8 -> service_confidence 'high').
 			svc = '<service name="http" product="nginx" method="probed" conf="10"/>' if i == 1 \
-				else '<service name="tcpwrapped" method="probed" conf="3"/>'
+				else '<service name="tcpwrapped" method="probed" conf="8"/>'
 			ports.append(
 				f'<port protocol="tcp" portid="{i}"><state state="open" reason="syn-ack"/>{svc}</port>'
 			)
@@ -313,14 +315,16 @@ class TestNmapIdsConfidence(unittest.TestCase):
 			'<ports>' + ''.join(ports) + '</ports></host>\n</nmaprun>\n'
 		)
 
-	def test_ids_host_keeps_all_ports_low_confidence(self):
+	def test_tcpwrapped_low_real_service_high(self):
 		ports = self._parse_ports(self._mass_scan_xml())
 		self.assertEqual(len(ports), 25)
-		# every port on an IDS host is low-confidence and carries the 'ids' tag
-		self.assertTrue(all(p.confidence == 'low' for p in ports),
-			'a confident service must not flip the IDS host back to high')
+		# host IDS marker still on every port
 		self.assertTrue(all('ids' in p.tags for p in ports))
-		# the confident port still records its per-port service_confidence truthfully
-		p1 = [p for p in ports if p.port == 1][0]
-		self.assertEqual(p1.service_confidence, 'high')
-		self.assertEqual(p1.confidence, 'low')
+		tcpw = [p for p in ports if p.service_name == 'tcpwrapped']
+		real = [p for p in ports if p.port == 1][0]
+		self.assertEqual(len(tcpw), 24)
+		# tcpwrapped: demoted to low despite nmap's conf=8 service_confidence='high'
+		self.assertTrue(all(p.confidence == 'low' for p in tcpw), 'tcpwrapped must be low')
+		self.assertTrue(all(p.service_confidence == 'high' for p in tcpw))
+		# genuinely fingerprinted service keeps its real (high) confidence
+		self.assertEqual(real.confidence, 'high')

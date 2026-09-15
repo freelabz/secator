@@ -248,13 +248,15 @@ class nmapData(dict):
 				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
 				service_confidence = extra_data.get('confidence', 'low')
-				# On an IDS mass-scan host every port is suspect (the IDS answers
-				# probes on all of them), so a confident service banner on one port
-				# must NOT flip the whole host back to 'high'. Without this guard the
-				# upgrade persisted across the port loop and left ~half of an IDS
-				# host's ports mislabeled confidence='high'. Only a non-mass-scan
-				# host upgrades on a confidently-detected service.
-				if not is_mass_scan and service_confidence != 'low':
+				# `tcpwrapped` = a port that completes the TCP handshake then drops the
+				# connection with no service data — a confirmed non-service, the
+				# signature of an IDS/firewall answering probes on every port. nmap
+				# still scores it conf=8 ('high'), which used to flip the shared
+				# global_confidence to 'high' and mislabel ~half an IDS host's ports.
+				# Scope the demotion to tcpwrapped only (see the per-port `confidence`
+				# below): it must neither upgrade the host confidence nor be reported
+				# high itself, while genuinely fingerprinted services still can.
+				if service_name != 'tcpwrapped' and service_confidence != 'low':
 					global_confidence = 'high'
 
 				# Grab CPEs
@@ -275,7 +277,7 @@ class nmapData(dict):
 					service_name=service_name,
 					protocol=protocol,
 					extra_data=extra_data,
-					confidence=global_confidence,
+					confidence=('low' if service_name == 'tcpwrapped' else global_confidence),
 					service_confidence=service_confidence,
 					tags=tags + [scan_type, reason],
 				)
