@@ -8,7 +8,6 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from time import time
-from urllib.parse import urlparse
 
 from dotmap import DotMap
 from rich.errors import MarkupError as RichMarkupError
@@ -23,7 +22,7 @@ from secator.output_types import (
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import get_task_folder_id, run_extractors
-from secator.scope import as_scope_list, host_in_scope
+from secator.scope import as_scope_list, finding_scope_host, host_in_scope
 from secator.query import QueryEngine
 from secator.query._stream import StreamView
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
@@ -50,28 +49,6 @@ VALIDATORS = ['validate_input', 'validate_item']
 # Placeholder substituted for option values flagged ``sensitive: True`` in any
 # serialized/printed runner state (see Runner.sensitive_opt_names).
 REDACTED_OPT_VALUE = '[REDACTED]'
-
-
-def _finding_scope_host(item):
-	"""Return the host/ip a finding should be scope-checked against, or None for finding types that
-	carry no host (vulns, tags, info, ... -> never scoped). Mirror of the input filter's host
-	extraction (secator/runners/_helpers.py) applied at the OUTPUT choke point."""
-	t = item._type
-	if t == 'url':
-		return getattr(item, 'host', None) or urlparse(getattr(item, 'url', '') or '').hostname
-	if t == 'subdomain':
-		return getattr(item, 'host', None)
-	if t == 'ip':
-		return getattr(item, 'ip', None)
-	if t == 'port':
-		return getattr(item, 'ip', None) or getattr(item, 'host', None)
-	if t == 'certificate':
-		return getattr(item, 'host', None)
-	if t == 'target':
-		return getattr(item, 'name', None)
-	if t == 'domain':
-		return getattr(item, 'domain', None)
-	return None
 
 
 def format_runner_name(runner):
@@ -130,6 +107,11 @@ class Runner:
 	# Run duplicate check
 	enable_duplicate_check = True
 
+	# Opt-in output-side scope filtering. Off by default so tasks pay ZERO per-finding
+	# cost; a task that floods out-of-scope findings (e.g. gau's passive archive) sets
+	# this True to have add_result drop host-bearing findings outside the run's scope.
+	output_scope_filter = False
+
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
 		self.serialize_config = run_opts.get('serialize_config', True)
@@ -146,6 +128,8 @@ class Runner:
 		self._scope_in = as_scope_list(self.run_opts.get('in_scope'))
 		self._scope_out = as_scope_list(self.run_opts.get('out_of_scope'))
 		self._scope_dropped = 0
+		# Precompute once: only opted-in tasks with a scope set do the per-finding check.
+		self._scope_active = bool(self.output_scope_filter and (self._scope_in or self._scope_out))
 		# Mint the run-scope {type}_id before any add_result so every finding carries the scope key.
 		key = f'{self.config.type}_id'
 		if not self.context.get(key):
@@ -869,11 +853,11 @@ class Runner:
 
 		No-op (False) when no scope is set, so default/unscoped runs are unchanged. Reuses the input
 		filter's predicate (secator.scope.host_in_scope): non-network / hostless items
-		(_finding_scope_host -> None) and vulns/tags/info are never scoped.
+		(finding_scope_host -> None) and vulns/tags/info are never scoped.
 		"""
-		if not (self._scope_in or self._scope_out) or not is_output_type(item):
+		if not self._scope_active or not is_output_type(item):
 			return False
-		host = _finding_scope_host(item)
+		host = finding_scope_host(item)
 		return bool(host) and not host_in_scope(host, self._scope_in, self._scope_out)
 
 	def add_result(self, item, print=True, output=True, hooks=True, queue=True):
@@ -894,7 +878,7 @@ class Runner:
 		# their whole archive and discovered hosts get minted into Targets. Drop out-of-scope
 		# host-bearing findings BEFORE any on_item hook persists them. Aggregated (not per-item) to
 		# avoid emitting 65k warnings at scale — one debug at mark_completed.
-		if self._out_of_scope(item):
+		if self._scope_active and self._out_of_scope(item):
 			self._scope_dropped += 1
 			return
 
@@ -1552,7 +1536,7 @@ class Runner:
 
 		# Don't emit dropped findings to the live stream either (else -json / downstream consumers
 		# still see the out-of-scope host add_result refused to persist).
-		if self._out_of_scope(item):
+		if self._scope_active and self._out_of_scope(item):
 			return
 
 		# Yield item

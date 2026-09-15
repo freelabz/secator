@@ -4,7 +4,8 @@ Passive tasks (gau, subfinder, xurlfind3r, ...) persist their whole archive, so 
 scoped run still minted out-of-scope discovered hosts into Subdomain/Url/Target findings (a prod
 workspace accumulated ~65k out-of-scope target findings this way). The guard drops host-bearing
 findings whose host is out of scope at the single output choke point, reusing the input filter's
-predicate (secator.scope.host_in_scope), and is a no-op when no scope is set.
+predicate (secator.scope.host_in_scope). It is OPT-IN per task via `output_scope_filter` (default
+False, so un-opted tasks pay zero per-finding cost) and a no-op when no scope is set.
 """
 import unittest
 
@@ -26,6 +27,7 @@ STR_OUT = 'xnkib_227077.s3.bhs.cloud.ovh.net'
 class scopeprobe(PythonRunner):
 	input_types = None
 	output_types = [Subdomain, Url, Target, Vulnerability]
+	output_scope_filter = True   # opt in
 
 	def yielder(self):
 		yield Subdomain(host=IN_SUB, domain='vps592398.ovh.net')
@@ -35,6 +37,18 @@ class scopeprobe(PythonRunner):
 		yield Url(url=f'https://{OUT_HOST}/a')
 		yield Target(name=OUT_HOST)
 		yield Vulnerability(name='V', severity='high', confidence='high', matched_at=IN_SUB)
+
+
+@task()
+class scopeprobe_noopt(PythonRunner):
+	"""Same output, but does NOT opt in (output_scope_filter stays False)."""
+	input_types = None
+	output_types = [Subdomain, Url, Target, Vulnerability]
+
+	def yielder(self):
+		yield Subdomain(host=IN_SUB, domain='vps592398.ovh.net')
+		yield Subdomain(host=OUT_HOST, domain='cloud.ovh.net')
+		yield Target(name=OUT_HOST)
 
 
 def _vals(results, _type, attr):
@@ -74,6 +88,13 @@ class TestScopeOutputGuard(unittest.TestCase):
 		self.assertIn(IN_SUB, subs)
 		self.assertIn(OUT_HOST, subs)
 
+		self.assertIn(OUT_HOST, _vals(results, 'target', 'name'))
+
+	def test_opt_out_task_does_not_filter_even_with_scope(self):
+		# A task without output_scope_filter keeps out-of-scope findings even with a
+		# scope set — the guard is opt-in (zero cost for tasks that don't need it).
+		results = scopeprobe_noopt(inputs=[IN], in_scope=['*.vps592398.ovh.net']).run()
+		self.assertIn(OUT_HOST, _vals(results, 'subdomain', 'host'))
 		self.assertIn(OUT_HOST, _vals(results, 'target', 'name'))
 
 
