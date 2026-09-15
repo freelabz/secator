@@ -699,10 +699,16 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 	if running.returncode == 0 and running.stdout.strip() == "true":
 		return name
 	subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+	# Bind-mount the reports dir into the sandbox at the SAME path so the LLM's clone/build/run
+	# in ~/.secator/reports/<ws>/tasks/<n>/.outputs/ works (that path lives on a shared volume the
+	# worker + dind both mount; the dind bind resolves it into the nested container). Without this
+	# the model's worker-style paths 404 and it wastes a turn `mkdir -p`-ing them.
+	from secator.config import CONFIG
+	reports_dir = str(CONFIG.dirs.reports)
 	subprocess.run([
 		"docker", "run", "-d", "--name", name,
 		"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
-		"-v", f"{name}:/work", "-w", "/work",
+		"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}", "-w", "/work",
 		_SANDBOX_IMAGE, "sleep", "infinity",
 	], check=True, capture_output=True)
 	# gVisor's sandbox network is IPv4-only, but DNS returns AAAA records → every hostname op
