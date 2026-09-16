@@ -220,13 +220,11 @@ class nmapData(dict):
 		for host in hosts:
 			hostname = self._get_hostname(host)
 			tags = []
-			global_confidence = 'high'
 			is_mass_scan = len(self._get_ports(host)) > 20
 			if is_mass_scan:
 				yield Warning(
 					message=f'Unusual number of ports found for host {hostname}. There might be an IDS interfering with the scan.',
 				)
-				global_confidence = 'low'
 				tags = ['ids']
 			ip = self._get_ip(host)
 			if ip and ip not in ips:
@@ -248,16 +246,23 @@ class nmapData(dict):
 				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
 				service_confidence = extra_data.get('confidence', 'low')
-				# `tcpwrapped` = a port that completes the TCP handshake then drops the
-				# connection with no service data — a confirmed non-service, the
-				# signature of an IDS/firewall answering probes on every port. nmap
-				# still scores it conf=8 ('high'), which used to flip the shared
-				# global_confidence to 'high' and mislabel ~half an IDS host's ports.
-				# Scope the demotion to tcpwrapped only (see the per-port `confidence`
-				# below): it must neither upgrade the host confidence nor be reported
-				# high itself, while genuinely fingerprinted services still can.
-				if service_name != 'tcpwrapped' and service_confidence != 'low':
-					global_confidence = 'high'
+				# Port `confidence` = how much we trust this open port is real. It is
+				# computed PER PORT and never carried across the loop — the shared
+				# `global_confidence` that one confident port flipped to 'high' for every
+				# later port (clobbering low-confidence ports back to 'high') was the bug.
+				# `tcpwrapped` completes the TCP handshake then drops with no service data:
+				# a confirmed non-service and the signature of an IDS/firewall answering
+				# every probe. nmap still scores it conf=8, so force both confidences to
+				# 'low' and never let that score leak. On an IDS mass-scan host every port
+				# is noise ('low') UNLESS a service is genuinely fingerprinted
+				# (service_confidence 'high'); off an IDS host an open port is trusted.
+				if service_name == 'tcpwrapped':
+					service_confidence = 'low'
+					port_confidence = 'low'
+				elif is_mass_scan:
+					port_confidence = 'high' if service_confidence == 'high' else 'low'
+				else:
+					port_confidence = 'high'
 
 				# Grab CPEs
 				cpes = extra_data.get('cpe', [])
@@ -277,7 +282,7 @@ class nmapData(dict):
 					service_name=service_name,
 					protocol=protocol,
 					extra_data=extra_data,
-					confidence=('low' if service_name == 'tcpwrapped' else global_confidence),
+					confidence=port_confidence,
 					service_confidence=service_confidence,
 					tags=tags + [scan_type, reason],
 				)
@@ -311,7 +316,7 @@ class nmapData(dict):
 						data.matched_at = f'{hostname}:{port_number}'
 						data.ip = ip
 						data.extra_data.update(extra_data)
-						confidence = global_confidence
+						confidence = port_confidence
 						if 'cpe-match' in data.tags:
 							confidence = 'high' if version_exact else 'medium'
 						data.confidence = confidence

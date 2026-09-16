@@ -273,12 +273,15 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 
 
 class TestNmapIdsConfidence(unittest.TestCase):
-	"""On an IDS mass-scan host, only `tcpwrapped` ports are demoted to
-	confidence='low'; genuinely fingerprinted services keep their real confidence.
+	"""On an IDS mass-scan host, `confidence` is computed PER PORT: every port is
+	'low' (noise) unless a service is genuinely fingerprinted (service_confidence
+	'high' and not tcpwrapped). `tcpwrapped` is forced to confidence='low' AND
+	service_confidence='low' — nmap scores it conf=8, but it's a confirmed non-service.
 
-	Regression: `tcpwrapped` (nmap conf=8) used to flip the shared global_confidence
-	to 'high', mislabeling ~half an IDS host's ports. The demotion is now scoped to
-	tcpwrapped only; the 'ids' tag still marks every port on the host.
+	Regression: the old code carried a shared global_confidence that the first
+	confident port flipped to 'high', clobbering every later port — including
+	low-confidence, non-tcpwrapped ports — back to 'high'. The 'ids' tag still marks
+	every port on the host.
 	"""
 
 	def _parse_ports(self, content):
@@ -297,14 +300,21 @@ class TestNmapIdsConfidence(unittest.TestCase):
 		return [r for r in results if isinstance(r, Port)]
 
 	def _mass_scan_xml(self):
+		# Mirrors the reviewer's example: two genuine services (conf=10), a run of
+		# tcpwrapped noise (conf=8), and a low-confidence non-tcpwrapped port (conf=1)
+		# LAST — the one the old shared-variable clobber wrongly reported 'high'.
+		def svc(i):
+			if i == 1:
+				return '<service name="nfs" product="rpcbind" method="probed" conf="10"/>'
+			if i == 24:
+				return '<service name="ftp" product="vsftpd" method="probed" conf="10"/>'
+			if i == 25:
+				return '<service name="ms-wbt-server" method="table" conf="1"/>'  # rdp, low conf
+			return '<service name="tcpwrapped" method="probed" conf="8"/>'
 		ports = []
 		for i in range(1, 26):  # 25 ports -> is_mass_scan (>20)
-			# port 1 is a genuinely fingerprinted service; the rest are tcpwrapped
-			# noise (nmap scores tcpwrapped conf=8 -> service_confidence 'high').
-			svc = '<service name="http" product="nginx" method="probed" conf="10"/>' if i == 1 \
-				else '<service name="tcpwrapped" method="probed" conf="8"/>'
 			ports.append(
-				f'<port protocol="tcp" portid="{i}"><state state="open" reason="syn-ack"/>{svc}</port>'
+				f'<port protocol="tcp" portid="{i}"><state state="open" reason="syn-ack"/>{svc(i)}</port>'
 			)
 		return (
 			'<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE nmaprun>\n'
@@ -315,16 +325,20 @@ class TestNmapIdsConfidence(unittest.TestCase):
 			'<ports>' + ''.join(ports) + '</ports></host>\n</nmaprun>\n'
 		)
 
-	def test_tcpwrapped_low_real_service_high(self):
-		ports = self._parse_ports(self._mass_scan_xml())
+	def test_per_port_confidence_no_clobber(self):
+		ports = {p.port: p for p in self._parse_ports(self._mass_scan_xml())}
 		self.assertEqual(len(ports), 25)
 		# host IDS marker still on every port
-		self.assertTrue(all('ids' in p.tags for p in ports))
-		tcpw = [p for p in ports if p.service_name == 'tcpwrapped']
-		real = [p for p in ports if p.port == 1][0]
-		self.assertEqual(len(tcpw), 24)
-		# tcpwrapped: demoted to low despite nmap's conf=8 service_confidence='high'
+		self.assertTrue(all('ids' in p.tags for p in ports.values()))
+		# genuine services (service_confidence high, not tcpwrapped) bypass the IDS 'low'
+		self.assertEqual(ports[1].confidence, 'high')   # nfs conf=10
+		self.assertEqual(ports[24].confidence, 'high')  # ftp conf=10
+		# tcpwrapped: confidence low AND service_confidence downgraded to low (was conf=8)
+		tcpw = [p for p in ports.values() if p.service_name == 'tcpwrapped']
+		self.assertEqual(len(tcpw), 22)
 		self.assertTrue(all(p.confidence == 'low' for p in tcpw), 'tcpwrapped must be low')
-		self.assertTrue(all(p.service_confidence == 'high' for p in tcpw))
-		# genuinely fingerprinted service keeps its real (high) confidence
-		self.assertEqual(real.confidence, 'high')
+		self.assertTrue(all(p.service_confidence == 'low' for p in tcpw), 'tcpwrapped service_confidence downgraded')
+		# THE REGRESSION: a low-confidence, non-tcpwrapped port that comes AFTER confident
+		# ports must stay 'low' — the old shared global_confidence clobbered it to 'high'.
+		self.assertEqual(ports[25].service_name, 'ms-wbt-server')
+		self.assertEqual(ports[25].confidence, 'low')
