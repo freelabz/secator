@@ -148,6 +148,10 @@ class ai(PythonRunner):
 	tags = ["ai", "analysis", "pentest"]
 	default_inputs = ''
 	install_cmd = 'pipx install shfmt-py'
+	# Default so _run_loop (which reads self.isolated for the ActionContext) is safe on any
+	# path that drives the loop before setup runs get_opt_value("isolated") — a resume/respawn
+	# via ai.__new__(ai), or the bare-task test harnesses. Real runs override this in setup.
+	isolated = False
 	opts = {
 		"name": {"type": str, "default": "", "short": "n", "internal_name": "session_name", "help": "Name for the AI session or subagent"},  # noqa: E501
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
