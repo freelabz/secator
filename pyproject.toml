@@ -62,7 +62,7 @@ dependencies = [
   'retry < 1',
   'tldextract < 6',
   'typing_extensions < 5',
-  'validators < 1',
+  'validators >=0.34, <1',  # >=0.34 for domain(rfc_2782=) — underscore hostnames
   'xmltodict < 1'
 ]
 

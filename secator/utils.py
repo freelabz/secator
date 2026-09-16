@@ -1013,7 +1013,8 @@ def is_host_port(target):
 	host, port = _split_host_port(target)
 	if not port:
 		return False
-	if not (validators.domain(host) or validators.ipv4(host) or validators.ipv6(host) or host == 'localhost'):
+	# rfc_2782=True permits underscores (cloud reverse-DNS hosts) — mirrors autodetect_type.
+	if not (validators.domain(host, rfc_2782=True) or validators.ipv4(host) or validators.ipv6(host) or host == 'localhost'):  # noqa: E501
 		return False
 	try:
 		port = int(port)
@@ -1057,7 +1058,12 @@ def autodetect_type(target):
 		return CIDR_RANGE
 	elif validators.ipv4(target) or validators.ipv6(target) or target == 'localhost':
 		return IP
-	elif validators.domain(target):
+	elif validators.domain(target, rfc_2782=True):
+		# rfc_2782=True permits underscores in labels. Cloud reverse-DNS / PTR
+		# names (e.g. OVH's xnkib_227077.s3.bhs.cloud.ovh.net) are RFC-1035-invalid
+		# but real, and scanners connect to them. Without this they classify as a
+		# non-network `str`, and host_in_scope() fails OPEN on non-network tokens —
+		# letting out-of-scope underscore hosts through the mandate scope filter.
 		return HOST
 	elif is_host_port(target):
 		return HOST_PORT
