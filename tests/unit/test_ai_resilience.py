@@ -417,3 +417,32 @@ class TestDetectModeEmptyPromptSetsTools(unittest.TestCase):
 		self.assertTrue(built, "_detect_mode must build tools on the empty-prompt path")
 		self.assertEqual(task.mode, "chat")
 		self.assertTrue(hasattr(task, "tool_schemas"))
+
+
+@unittest.skipUnless(HAS_AI, 'ai addon required')
+class TestUncappedIterationsRunLoop(unittest.TestCase):
+	"""Regression: a non-positive `max_iterations` (the "uncapped" sentinel, e.g. a
+	raw -1 run-opt left over on a resume right after a permission deny) must mean
+	"no user cap" — run up to the hard ceiling — NOT zero iterations.
+
+	Before the fix, `while iteration < -1` was immediately false: the loop never
+	ran, call_llm was never invoked, and the turn yielded
+	"Reached max iterations (0/-1)" — silently killing the whole conversation."""
+
+	def _assert_runs(self, max_iterations):
+		from secator.tasks.ai import _HARD_ITERATION_CEILING
+		task = _make_loop_task()
+		task.max_iterations = max_iterations
+		items, calls, aborted = _run(task, [_resp(content="__done__", tool_calls=[])])
+		self.assertIsNone(aborted)
+		self.assertGreaterEqual(calls, 1, "loop must run at least one iteration, not skip")
+		self.assertEqual(task.max_iterations, _HARD_ITERATION_CEILING)
+		texts = " ".join(
+			str(getattr(i, 'content', '') or getattr(i, 'message', '') or '') for i in items)
+		self.assertNotIn("Reached max iterations", texts)
+
+	def test_negative_one_runs_to_ceiling(self):
+		self._assert_runs(-1)
+
+	def test_zero_runs_to_ceiling(self):
+		self._assert_runs(0)

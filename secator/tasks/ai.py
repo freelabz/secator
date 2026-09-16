@@ -148,6 +148,10 @@ class ai(PythonRunner):
 	tags = ["ai", "analysis", "pentest"]
 	default_inputs = ''
 	install_cmd = 'pipx install shfmt-py'
+	# Default so _run_loop (which reads self.isolated for the ActionContext) is safe on any
+	# path that drives the loop before setup runs get_opt_value("isolated") — a resume/respawn
+	# via ai.__new__(ai), or the bare-task test harnesses. Real runs override this in setup.
+	isolated = False
 	opts = {
 		"name": {"type": str, "default": "", "short": "n", "internal_name": "session_name", "help": "Name for the AI session or subagent"},  # noqa: E501
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
@@ -639,6 +643,16 @@ class ai(PythonRunner):
 		empty_streak = 0
 		rate_limit_streak = 0
 		self._context_warnings_shown = set()
+
+		# Normalize the "uncapped" sentinel at the one place every path converges. A
+		# non-positive max_iterations (SECATOR_ADDONS_AI_MAX_ITERATIONS<=0, or a raw -1
+		# run-opt left over on a resume before the mode/config resolution re-ran) means
+		# "no user cap" — run up to the hard ceiling, NOT zero iterations. Without this,
+		# `while iteration < -1` is immediately false, the loop never runs, and the turn
+		# yields "Reached max iterations (0/-1)" — silently killing the conversation
+		# (notably right after a permission deny).
+		if not self.max_iterations or self.max_iterations <= 0:
+			self.max_iterations = _HARD_ITERATION_CEILING
 
 		while iteration < self.max_iterations:
 			iteration += 1
