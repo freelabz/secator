@@ -1,3 +1,5 @@
+import os
+import shutil
 import unittest
 from unittest.mock import patch
 
@@ -382,40 +384,43 @@ class TestExtractorFunctions(unittest.TestCase):
         nginx_input = next(i for i in inputs if 'nginx' in i)
         self.assertEqual(nginx_input, '10.0.0.3:80~nginx 1.21.0')
 
-    @patch('os.scandir')
-    @patch('os.path.exists')
-    def test_get_task_folder_id(self, mock_exists, mock_scandir):
-        """Test get_task_folder_id function."""
-        # Test with non-existent path
-        mock_exists.return_value = False
-        result = get_task_folder_id('/dummy/path')
-        self.assertEqual(result, 0)
+    def test_get_task_folder_id(self):
+        """Atomic, race-free, back-compatible folder-id allocation."""
+        import tempfile
+        import threading
 
-        # Test with empty directory
-        mock_exists.return_value = True
-        mock_scandir.return_value = []
-        result = get_task_folder_id('/dummy/path')
-        self.assertEqual(result, 0)
+        # Empty directory (or one that doesn't exist yet) -> starts at 0, then increments.
+        d = tempfile.mkdtemp()
+        os.rmdir(d)  # non-existent path: created on demand
+        self.assertEqual(get_task_folder_id(d), 0)
+        self.assertEqual(get_task_folder_id(d), 1)
+        shutil.rmtree(d, ignore_errors=True)
 
-        # Test with numeric directory names
-        class MockDirEntry:
-            def __init__(self, name, is_dir_val=True):
-                self.name = name
-                self._is_dir = is_dir_val
+        # Back-compat: seed from pre-existing integer-named folders (created before .next_id),
+        # ignoring non-numeric names and non-directories.
+        d = tempfile.mkdtemp()
+        for name in ('1', '3', '2', 'not_a_number'):
+            os.mkdir(os.path.join(d, name))
+        open(os.path.join(d, '5'), 'w').close()  # a file named '5' is not a dir -> ignored
+        self.assertEqual(get_task_folder_id(d), 4)  # max integer dir (3) + 1
+        shutil.rmtree(d, ignore_errors=True)
 
-            def is_dir(self):
-                return self._is_dir
+        # Race-free under concurrency: N threads must get N unique, dense ids (0..N-1).
+        d = tempfile.mkdtemp()
+        ids, lock = [], threading.Lock()
 
-        mock_exists.return_value = True
-        mock_scandir.return_value = [
-            MockDirEntry('1'),
-            MockDirEntry('3'),
-            MockDirEntry('2'),
-            MockDirEntry('not_a_number'),
-            MockDirEntry('5', is_dir_val=False)  # Not a directory
-        ]
-        result = get_task_folder_id('/dummy/path')
-        self.assertEqual(result, 4)  # Max numeric dir (3) + 1
+        def claim():
+            i = get_task_folder_id(d)
+            with lock:
+                ids.append(i)
+
+        threads = [threading.Thread(target=claim) for _ in range(100)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sorted(ids), list(range(100)))  # unique + dense, no collisions
+        shutil.rmtree(d, ignore_errors=True)
 
 
 class TestLoadOutputTypes(unittest.TestCase):

@@ -182,3 +182,29 @@ class TestScopeMalformedTargetNoCrash(unittest.TestCase):
 			host_in_scope("HOST:4f2456c7dedf", in_scope=["10.0.0.0/8"], out_of_scope=[]),
 			(True, False),
 		)
+
+
+class TestUnderscoreHostnameScope(unittest.TestCase):
+	"""Underscore hostnames (RFC-1035-invalid but real, e.g. cloud reverse-DNS) must
+	classify as hosts and obey scope. Regression: they classified as `str`, and the
+	scope matcher fails OPEN on non-network tokens, letting out-of-scope hosts through.
+	"""
+
+	IN_SCOPE = ['vps592398.ovh.net', '*.vps592398.ovh.net']
+	UNDERSCORE = 'xnkib_227077.s3.bhs.cloud.ovh.net'
+
+	def test_underscore_hostname_classifies_as_host(self):
+		from secator.utils import autodetect_type
+		from secator.definitions import HOST, HOST_PORT
+		self.assertEqual(autodetect_type(self.UNDERSCORE), HOST)
+		self.assertEqual(autodetect_type(self.UNDERSCORE + ':34654'), HOST_PORT)
+
+	def test_out_of_scope_underscore_host_is_rejected(self):
+		# the incident: this must be False, not fail-open True.
+		self.assertFalse(host_in_scope(self.UNDERSCORE, self.IN_SCOPE, []))
+		self.assertFalse(host_in_scope(self.UNDERSCORE + ':34654', self.IN_SCOPE, []))
+
+	def test_in_scope_still_kept_and_plain_out_still_dropped(self):
+		self.assertTrue(host_in_scope('vps592398.ovh.net', self.IN_SCOPE, []))
+		self.assertTrue(host_in_scope('a.vps592398.ovh.net', self.IN_SCOPE, []))
+		self.assertFalse(host_in_scope('evil.com', self.IN_SCOPE, []))

@@ -61,6 +61,8 @@ class Url(OutputType):
 		'screenshot_path',
 	]
 	_sort_by = (URL,)
+	_group_by = ('host',)        # collapse a host's URLs into one row
+	_group_aggregate = URL
 
 	def __post_init__(self):
 		super().__post_init__()

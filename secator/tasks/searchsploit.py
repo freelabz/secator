@@ -20,6 +20,8 @@ class searchsploit(Command):
 	output_types = [Exploit]
 	tags = ['exploit', 'recon']
 	input_chunk_size = 1
+	# Inputs are product/CPE query strings (fan-in: `matched_at~id`), not targets.
+	enable_targets = False
 	json_flag = '--json'
 	version_flag = OPT_NOT_SUPPORTED
 	opts = {

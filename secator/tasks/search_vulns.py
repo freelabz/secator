@@ -21,6 +21,9 @@ class search_vulns(Vuln):
 	tags = ['vuln', 'recon']
 	input_flag = '-q'
 	input_chunk_size = 1
+	# Inputs are product/CPE query strings (fan-in: `matched_at~product version`),
+	# not targets — never persist them as phantom Target findings.
+	enable_targets = False
 	item_loaders = [JSONSerializer()]
 	json_flag = '-f json'
 	version_flag = '-V'

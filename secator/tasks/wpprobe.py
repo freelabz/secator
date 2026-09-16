@@ -18,10 +18,9 @@ class wpprobe(Command):
 	"""Fast wordpress plugin enumeration tool."""
 	cmd = 'wpprobe'
 	input_types = [URL]
-	input_chunk_size = 1
 	output_types = [Vulnerability, Tag]
 	tags = ['vuln', 'scan', 'wordpress']
-	# file_flag = '-f'
+	file_flag = '-f'
 	input_flag = '-u'
 	opt_prefix = '-'
 	opts = {
@@ -34,7 +33,7 @@ class wpprobe(Command):
 	opt_key_map = {
 		THREADS: 't'
 	}
-	install_version = 'v0.11.1'
+	install_version = 'v0.12.11'
 	install_cmd = 'go install github.com/Chocapikk/wpprobe@[install_version]'
 	github_handle = 'Chocapikk/wpprobe'
 	install_post = {
@@ -71,17 +70,28 @@ class wpprobe(Command):
 		yield Info(message=f'JSON results saved to {self.output_path}')
 		with open(self.output_path, 'r') as f:
 			results = json.load(f)
-			if not results or 'url' not in results:
-				yield Warning(message='No results found !')
-				return
-			url = results['url']
+
+		# wpprobe >= v0.12.11 always emits a JSON array, one object per target
+		# (https://github.com/Chocapikk/wpprobe/issues/33). Older versions emitted
+		# a single object, so accept both shapes.
+		if isinstance(results, dict):
+			results = [results]
+
+		if not results:
+			yield Warning(message='No results found !')
+			return
+
+		for result in results:
+			if 'url' not in result:
+				continue
+			url = result['url']
 
 			# Parse plugins
-			for item in wpprobe._parse_software(results.get('plugins', {}), url, 'plugin'):
+			for item in wpprobe._parse_software(result.get('plugins', {}), url, 'plugin'):
 				yield item
 
 			# Parse themes (v0.11.0+, absent in older versions)
-			for item in wpprobe._parse_software(results.get('themes', {}), url, 'theme'):
+			for item in wpprobe._parse_software(result.get('themes', {}), url, 'theme'):
 				yield item
 
 	@staticmethod

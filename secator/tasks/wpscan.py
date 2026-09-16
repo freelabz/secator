@@ -74,22 +74,32 @@ class wpscan(VulnHttp):
 			PROVIDER: 'wpscan',
 		},
 	}
+	# Dedicated ruby gem home for wpscan. We install with --install-dir (not
+	# --user-install) and point GEM_HOME here when running (see extra_env), so the
+	# generated `wpscan` wrapper resolves the gem no matter how the host manages
+	# ruby. On RVM (e.g. exegol) a --user-install gem is NOT on the wrapper's
+	# Gem.path, so `wpscan` died with `Gem::GemNotFoundException: can't find gem
+	# wpscan` while the pre-installed system wpscan (in an RVM gemset) worked (#1366).
+	install_gem_dir = str(CONFIG.dirs.share / 'ruby')
 	install_version = 'v3.8.28'
 	install_pre_cmd = {
 		'apt': ['make', 'kali:libcurl4t64', 'libffi-dev'],
 		'pacman': ['make', 'ruby-erb'],
 		'*': ['make']
 	}
-	install_cmd = f'gem install wpscan -v [install_version_strip] --user-install -n {CONFIG.dirs.bin}'
+	install_cmd = f'gem install wpscan -v [install_version_strip] --install-dir {install_gem_dir} -n {CONFIG.dirs.bin}'
 	install_post = {
 		'kali': (
-			f'gem uninstall nokogiri --user-install -n {CONFIG.dirs.bin} --force --executables && '
-			f'gem install nokogiri --user-install -n {CONFIG.dirs.bin} --platform=ruby'
+			f'gem uninstall nokogiri --install-dir {install_gem_dir} --force --executables && '
+			f'gem install nokogiri --install-dir {install_gem_dir} --platform=ruby'
 		)
 	}
 	install_github_bin = False
 	github_handle = 'wpscanteam/wpscan'
 	proxychains = False
+	# GEM_HOME makes the wpscan wrapper find the gem in install_gem_dir at runtime,
+	# independent of the host's Gem.path (RVM excludes it otherwise) — see #1366.
+	extra_env = {'GEM_HOME': install_gem_dir}
 	proxy_http = True
 	proxy_socks5 = False
 	profile = 'small'

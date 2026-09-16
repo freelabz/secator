@@ -57,12 +57,12 @@ class TestApplyFormat(unittest.TestCase):
 		out = _apply_format(results, 'url')
 		self.assertEqual(out, {'url': ['https://example.com']})
 
-	def test_type_only_spec_port_uses_str_repr(self):
-		"""--format port (no dot) should use Port.__str__ (returns host:port), not dict repr."""
+	def test_type_only_spec_port_resolves_as_field(self):
+		"""--format port (no dot) resolves the `port` field (parity with `-f port.port`), NOT the
+		Port.__str__ host:port repr — a bare token that is also a field is treated as the field."""
 		results = {'port': [self._make_port(ip='1.2.3.4', port=8080)]}
 		out = _apply_format(results, 'port')
-		# Port.__str__ returns 'host:port'
-		self.assertEqual(out, {'port': ['example.com:8080']})
+		self.assertEqual(out, {'port': ['8080']})
 
 	def test_brace_style_field_only_single_type(self):
 		"""Brace-style with direct field names works when only one type is present."""

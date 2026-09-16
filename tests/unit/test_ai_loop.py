@@ -453,12 +453,22 @@ class TestRemoteBackendPermissions(unittest.TestCase):
 	"""Test RemoteBackend._add_permission_rules (rule addition logic)."""
 
 	def test_shell_rule_added(self):
-		"""Shell permission adds a shell runtime rule."""
-		engine = PermissionEngine(_make_permission_config(), targets=["10.0.0.1"], workspace="/tmp/ws")
-		RemoteBackend._add_permission_rules(engine, "shell", "python3 exploit.py")
+		"""A single shell 'allow' is one-shot (no rule); 'allow all' persists the binary.
 
-		check = engine._check_value("shell", "python3")
-		self.assertEqual(check.decision, "allow")
+		Per M12/H9 a bare shell "allow" approves only the exact command (recorded in
+		approved_shell_commands by the caller), so it adds NO broad rule; only "allow all"
+		grants the binary(ies) for the whole run. Target/path allows still persist (tested
+		separately) — shell is the deliberate one-shot exception.
+		"""
+		engine = PermissionEngine(_make_permission_config(), targets=["10.0.0.1"], workspace="/tmp/ws")
+
+		# Single "allow" (all_scope=False) -> one-shot, no persistent rule.
+		RemoteBackend._add_permission_rules(engine, "shell", "python3 exploit.py")
+		self.assertNotEqual(engine._check_value("shell", "python3").decision, "allow")
+
+		# "allow all" (all_scope=True) -> persists the binary for the whole run.
+		RemoteBackend._add_permission_rules(engine, "shell", "python3 exploit.py", all_scope=True)
+		self.assertEqual(engine._check_value("shell", "python3").decision, "allow")
 
 	def test_target_rule_added(self):
 		"""Target permission adds a target runtime rule."""
@@ -706,7 +716,10 @@ class TestAutoModeFlow(unittest.TestCase):
 		self.assertIsNotNone(denial)
 		self.assertIn("not approved", denial)
 
-		# In the main loop, the denial is added to history as a tool result error
+		# In the main loop, the denial is added to history as a tool result error. The
+		# assistant's tool_call must be recorded first, else the tool result is a leading
+		# orphan that to_messages() strips for provider-compat.
+		history.add_assistant_with_tool_calls(None, [_make_tool_call("run_shell", shell_action, tc_id="tc1")])
 		error_msg = json.dumps({"error": denial})
 		history.add_tool_result("run_shell", "tc1", error_msg)
 
@@ -802,7 +815,11 @@ class TestSubagentPermissionDelegation(unittest.TestCase):
 				ptype = kwargs.get("permission_type")
 				value = kwargs.get("value", "")
 				if eng:
-					RemoteBackend._add_permission_rules(eng, ptype, value)
+					# Mirror RemoteBackend on "allow all": persist a runtime rule so the
+					# subagent (shared engine) inherits it. A single shell "allow" is a
+					# one-shot exact-command grant, invisible across contexts. The backend
+					# still maps the answer to "allow" for the caller.
+					RemoteBackend._add_permission_rules(eng, ptype, value, all_scope=True)
 				return {"answer": "allow"}
 			return {"answer": "yes"}
 

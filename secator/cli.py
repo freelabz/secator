@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import sys
 
+from collections import Counter
+
 
 from pathlib import Path
 from stat import S_ISFIFO
@@ -872,6 +874,121 @@ def workspace_current():
 	console.print(Info(message=f'Current workspace: [bold gold3]{current}[/]. Use [bold green4]secator ws use <workspace>[/] to switch.'))  # noqa: E501
 
 
+# Built-in `workspace summary` template. It is template-DRIVEN: it calls the `query(...)` helper
+# (exposed in the render context) which runs a real query with the same --format/--count/--sort/
+# --uniq/--limit surface as `secator q`. Override the whole thing with `--template <file>`.
+DEFAULT_SUMMARY_TEMPLATE = """\
+[bold gold3]:clipboard: Workspace summary — {{ workspace }}[/]
+
+[bold cyan]Top ports[/]
+{{ query('port', fmt='port', count=True, limit=15) }}
+
+[bold cyan]Top hosts (IPs)[/]
+{{ query('ip', fmt='ip', count=True, limit=15) }}
+
+[bold cyan]Top subdomains[/]
+{{ query('subdomain', fmt='host', count=True, limit=15) }}
+
+[bold cyan]Top technologies[/]
+{{ query('technology', fmt='product', count=True, limit=15) }}
+
+[bold cyan]Top URLs[/]
+{{ query('url', fmt='url', count=True, limit=15) }}
+
+[bold red3]Unique vulnerabilities by severity[/]
+{{ query('vulnerability', group=True, fmt='severity', count=True) }}
+
+[bold red3]Unique vulnerabilities by status[/]
+{{ query('vulnerability', group=True, fmt='status', count=True) }}
+
+[bold red3]Top vulnerabilities (by targets hit)[/]
+{{ query('vulnerability', fmt='name', count=True, limit=15) }}
+"""
+
+
+def _summary_query_engine(workspace, driver):
+	"""Resolve the workspace + query backend for `workspace summary` (mirrors run_report_show)."""
+	workspace_name = workspace or CONFIG.workspaces.current or 'default'
+	effective_driver = QueryEngine.resolve_backend(driver)
+	drivers = [effective_driver] if effective_driver != 'local' else []
+	workspace_id = workspace_name
+	if effective_driver == 'api':
+		from secator.hooks.api import resolve_workspace
+		workspace_id, workspace_name = resolve_workspace(workspace_name)
+	engine = QueryEngine(workspace_id, context={'drivers': drivers, 'workspace_name': workspace_name})
+	return engine, workspace_name
+
+
+def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort=None, limit=0, group=False):
+	"""Run one summary query and return rendered rows (newline-joined). Exposed to summary
+	templates as `query(...)`; mirrors the `secator q` pipeline (group -> sort -> format ->
+	count/uniq -> limit) on the fetched findings, so it is backend-agnostic. Row values are
+	rich-escaped so a finding value containing brackets can't corrupt the rendered markup.
+
+	`group=True` first collapses findings by each type's default `_group_by` (aggregating its
+	`_group_aggregate`), so a subsequent count reflects UNIQUE findings — e.g. a vulnerability
+	hitting many targets counts once."""
+	from rich.markup import escape
+	from secator.query.utils import python_expr_to_mongo
+	from secator.query._stream import StreamView
+	raw = python_expr_to_mongo(type_or_expr)
+	# Resolve the concrete finding type(s) BEFORE wrapping, so a compound/dedup `$and` never hides
+	# `_type` (a `{'$in': [...]}` type filter or a non-type expr means "span every type").
+	typemap = {c.get_name(): c for c in FINDING_TYPES}
+	tv = raw.get('_type')
+	if isinstance(tv, str):
+		types = [tv]
+	elif isinstance(tv, dict):
+		types = list(tv.get('$in') or typemap)
+	else:
+		types = list(typemap)
+	base = {k: v for k, v in raw.items() if k != '_type'}
+	# Store-side dedup (mirrors report.build's stream path). MUST nest in `$and`: a top-level
+	# `_context.workspace_duplicate` is a PROTECTED_FIELD and gets stripped by _merge_query.
+	dup = {'_context.workspace_duplicate': {'$ne': True}} if CONFIG.runners.remove_duplicates else None
+	aggregating = bool(sort or count or uniq or group)
+	# STREAM per concrete type (never materialize all N); _aggregate_streamed collapses incrementally
+	# so peak memory is bounded by the result size, not the finding count — safe for 100k+.
+	rows = []
+	for name in types:
+		clauses = [{'_type': name}]
+		if base:
+			clauses.append(base)
+		if dup:
+			clauses.append(dup)
+		type_q = clauses[0] if len(clauses) == 1 else {'$and': clauses}
+		sv = StreamView(engine, type_q, limit=(0 if aggregating else limit))
+		rows += _aggregate_streamed(sv, name, typemap.get(name), fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)  # noqa: E501
+	rows = [escape(r if isinstance(r, str) else str(r)) for r in rows]
+	return '\n'.join(rows) if rows else '[dim](none)[/]'
+
+
+@workspace.command('summary')
+@click.option('-w', '-ws', '--workspace', 'workspace_opt', type=str, default=None, help='Workspace name (default: current)')  # noqa: E501
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--template', 'template_path', type=str, default=None, help='Path to a Jinja2 summary template overriding the built-in one')  # noqa: E501
+def workspace_summary(workspace_opt, driver, template_path):
+	"""Summarize a workspace's findings (top ports/hosts/tech/URLs + vulnerabilities).
+
+	Renders a Jinja2 template that calls `query(type, fmt=.., count=.., uniq=.., sort=.., limit=..)`
+	against the workspace (same surface as `secator q`). Override with --template <file>.
+	"""
+	engine, workspace_name = _summary_query_engine(workspace_opt, driver)
+	if template_path:
+		try:
+			template_str = Path(template_path).read_text(encoding='utf-8')
+		except OSError as e:
+			raise click.UsageError(f'Could not read --template "{template_path}": {e}')
+	else:
+		template_str = DEFAULT_SUMMARY_TEMPLATE
+
+	def _query(type_or_expr, **kwargs):
+		return _summary_query(engine, type_or_expr, **kwargs)
+
+	rendered = Template(template_str).render(workspace=workspace_name, query=_query, q=_query)
+	console.print(rendered)
+
+
 @workspace.command(name='rm', aliases=['remove', 'delete'])
 @click.argument('name')
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
@@ -1123,9 +1240,13 @@ def list_aliases(silent):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -severity_score')  # noqa: E501
+@click.option('--count', 'count', is_flag=True, default=False, help='Group identical --format values with an occurrence count (most frequent first; --sort orders by value instead)')  # noqa: E501
+@click.option('--uniq', 'uniq', is_flag=True, default=False, help='Drop duplicate --format values')
+@click.option('--group', is_flag=True, default=False, help="Group findings by each output type's default field(s), aggregating a related field (e.g. vulnerabilities by name with their matched_at targets).")  # noqa: E501
 @click.option('--save', 'save', type=str, default=None, help='Save the query expression ARG under this name for later reuse (e.g. --save vuln_high)')  # noqa: E501
 @click.pass_context
-def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, save):
+def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, sort, count, uniq, group, save):  # noqa: E501
 	"""Query"""
 
 	# 0. Save the expression under a name, then exit (reuse later with `secator q <name>`).
@@ -1141,17 +1262,17 @@ def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_fi
 	# Empty query: return all results (subject to the enforced base query),
 	# optionally scoped by --report-filter / --workspace.
 	if not arg:
-		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder)
+		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
 		return
 
 	# 1. Saved query name
 	if arg in CONFIG.queries:
-		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
 		return
 
 	# 2. Raw filter expression
 	if _looks_like_query_expr(arg):
-		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder)
+		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
 		return
 
 	# 3. Natural language -> AI chat
@@ -1346,25 +1467,196 @@ def _apply_format(results, fmt):
 					pass
 			new_results[_type] = formatted
 		else:
-			# No field specified — use each OutputType's __str__ for a clean primary-field repr.
-			# Items from report.data['results'] may be raw dicts; reconstruct via OutputType.load().
-			_otype_map = {cls.get_name(): cls for cls in FINDING_TYPES}
-			otype_cls = _otype_map.get(_type)
+			# No field template. `_type` is a bare token that matched a result type name (e.g.
+			# `-f port`). If that token is ALSO a field on the items, the user means the field
+			# column — emit its value (parity with `-f port.port`). Otherwise fall back to each
+			# OutputType's __str__ for a clean primary-field repr. Items from report.data['results']
+			# may be raw dicts; reconstruct via OutputType.load() for the __str__ path.
+			# Detect the field across the WHOLE result set (not just the first item), so a
+			# heterogeneous type whose first item lacks the field still resolves the field values.
+			_dicts = [item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
+					  for item in items]
 			formatted = []
-			for item in items:
-				if isinstance(item, dict) and otype_cls:
-					try:
-						formatted.append(str(otype_cls.load(item)))
-					except Exception:
-						formatted.append(json.dumps(item))
-				else:
-					formatted.append(str(item))
+			if any(_type in d for d in _dicts):
+				for d in _dicts:
+					val = d.get(_type)
+					if val is not None:
+						formatted.append(str(val))
+			else:
+				# No matching field — render each finding via its OutputType (primary-field repr).
+				formatted = [_render_finding(item, _type) for item in items]
 			new_results[_type] = formatted
 
 	return new_results
 
 
-def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None):
+def _sort_results_by_field(results, sort):
+	"""Sort each type's findings by a field, in place. Numeric-aware (ints/floats sort naturally);
+	a leading `-` sorts descending. Missing values sort last. Runs before --format, so `--sort port`
+	orders the rows even when --format shows a different field. Backend-agnostic (post-fetch)."""
+	field = sort.strip()
+	reverse = field.startswith('-')
+	if reverse:
+		field = field[1:].strip()
+
+	def _key(item):
+		# Resolve the (dotted) field on dicts OR objects, so `--sort` also reaches attributes like
+		# `_group_count` set by --group on the representative OutputType (dicts don't carry it).
+		val = item
+		for part in field.split('.'):
+			if isinstance(val, dict):
+				val = val.get(part)
+			else:
+				val = getattr(val, part, None)
+			if val is None:
+				break
+		return val
+
+	for _type, items in results.items():
+		keyed = [(_key(it), it) for it in items]
+		try:
+			keyed.sort(key=lambda kv: (kv[0] is None, kv[0]), reverse=reverse)
+		except TypeError:
+			# Mixed/incomparable field types -> stable string ordering.
+			keyed.sort(key=lambda kv: (kv[0] is None, str(kv[0])), reverse=reverse)
+		results[_type] = [it for _, it in keyed]
+
+
+def _render_finding(item, _type):
+	"""Render a finding to its display string — the OutputType's __str__ (what the console shows),
+	falling back to JSON. Used when aggregating WITHOUT --format so raw finding dicts aren't shown
+	as Python-dict / JSON reprs. Already-formatted strings pass through unchanged."""
+	if not isinstance(item, dict):
+		return str(item)
+	otype_cls = {cls.get_name(): cls for cls in FINDING_TYPES}.get(_type)
+	if otype_cls:
+		try:
+			return str(otype_cls.load(item))
+		except Exception:
+			return json.dumps(item)
+	return json.dumps(item)
+
+
+def _aggregate_values(results, count=False, uniq=False, sort_given=False):
+	"""Post-fetch aggregation of results, per type (backend-agnostic). `uniq` drops duplicate rows
+	(first-seen order); `count` groups identical rows into ``"<count>  <value>"`` — most-frequent
+	first by default, or in the sorted order the findings arrived in when --sort was given.
+
+	Rows may be already-formatted strings (from --format) or raw finding dicts (no --format). For
+	`uniq` the ORIGINAL item is kept (so raw findings still render richly via their OutputType, not
+	as str(dict) JSON lines); the dedup key is the finding's display string."""
+	out = {}
+	for _type, values in results.items():
+		if uniq and not count:
+			seen = set()
+			kept = []
+			for v in values:
+				key = v if isinstance(v, str) else _render_finding(v, _type)
+				if key not in seen:
+					seen.add(key)
+					kept.append(v)   # keep original -> dicts render richly, strings stay strings
+			out[_type] = kept
+		elif count:
+			svals = [v if isinstance(v, str) else _render_finding(v, _type) for v in values]
+			items = list(Counter(svals).items())  # (value, count), first-seen insertion order
+			if not sort_given:
+				items.sort(key=lambda kv: kv[1], reverse=True)  # top-N: most frequent first
+			width = max((len(str(c)) for _, c in items), default=1)
+			out[_type] = [f'{str(c).rjust(width)}  {v}' for v, c in items]
+		else:
+			out[_type] = list(values)
+	return out
+
+
+def _num_key(s):
+	"""Numeric-aware sort key for a rendered value string: numbers sort numerically (so '80' <
+	'443'), non-numbers fall back to string order."""
+	try:
+		return (0, float(s))
+	except (TypeError, ValueError):
+		return (1, str(s))
+
+
+def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=False, group=False, limit=0):
+	"""Aggregate a type's StreamView with peak memory bounded by the RESULT size, not the number of
+	findings — safe for 100k+.
+
+	- --group: group_findings() consumes the cursor in a single streaming pass (memory ~ #groups),
+	  then the small rep set is finished with the normal helpers.
+	- --count / --uniq: collapse the stream incrementally (Counter / seen-set), batching through
+	  _apply_format only for the --format path; memory ~ #distinct values / #unique rows.
+	- --sort alone: a correct global sort needs the whole set, so it materializes (inherent; combine
+	  with --count/--group to stay bounded, or push down in a future pass).
+	"""
+	from secator.query.utils import group_findings
+
+	def _finish(items):
+		res = {_type: items}
+		if sort:
+			_sort_results_by_field(res, sort)
+		if fmt:
+			res = _apply_format(res, fmt)
+		if count or uniq:
+			res = _aggregate_values(res, count=count, uniq=uniq, sort_given=bool(sort))
+		rows = res[_type]
+		return rows[:limit] if limit else rows
+
+	if group and cls is not None and getattr(cls, '_group_by', None):
+		reps = group_findings(sv, list(cls._group_by), getattr(cls, '_group_aggregate', None))
+		return _finish(reps)
+
+	if count or uniq:
+		counter, seen, kept, batch = Counter(), set(), [], []
+
+		def _flush():
+			if not batch:
+				return
+			if fmt:
+				for v in _apply_format({_type: list(batch)}, fmt).get(_type, []):
+					if count:
+						counter[v] += 1
+					elif v not in seen:
+						seen.add(v)
+						kept.append(v)
+			else:
+				for it in batch:
+					v = _render_finding(it, _type)
+					if count:
+						counter[v] += 1
+					elif v not in seen:
+						seen.add(v)
+						kept.append(it)   # keep the finding -> renders richly, not str(dict)
+			batch.clear()
+
+		for item in sv:
+			batch.append(item)
+			if len(batch) >= 2000:
+				_flush()
+		_flush()
+
+		if uniq:
+			if sort:  # sort the COLLAPSED set (bounded by #unique), not the raw stream
+				if fmt:
+					kept.sort(key=_num_key, reverse=sort.strip().startswith('-'))
+				else:
+					res = {_type: kept}
+					_sort_results_by_field(res, sort)
+					kept = res[_type]
+			return kept[:limit] if limit else kept
+		items = list(counter.items())
+		if sort:
+			items.sort(key=lambda kv: _num_key(kv[0]), reverse=sort.strip().startswith('-'))
+		else:
+			items.sort(key=lambda kv: kv[1], reverse=True)   # most-frequent-first
+		width = max((len(str(c)) for _, c in items), default=1)
+		rows = [f'{str(c).rjust(width)}  {v}' for v, c in items]
+		return rows[:limit] if limit else rows
+
+	# --sort alone: full ordering needs the whole set.
+	return _finish(list(sv))
+
+
+def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None):  # noqa: E501
 	"""Build and send a consolidated report. Shared by `report show` and `query`.
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
@@ -1476,9 +1768,27 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	# 6. Build and send report via QueryEngine
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
 	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
-	report.build(query=full_query, dedupe=dedupe_effective, limit=limit)
-	if fmt:
-		report.data['results'] = _apply_format(report.data['results'], fmt)
+	# --group / --sort / --uniq / --count reshape or cap the output post-query. STREAM the findings
+	# (stream=True yields per-type StreamViews — nothing materialized) and aggregate incrementally,
+	# so peak memory is bounded by the RESULT size, not the finding count (safe for 100k+). --limit
+	# applies to the finished output, inside _aggregate_streamed.
+	aggregating = bool(sort or count or uniq or group)
+	grouped_types = []
+	if aggregating:
+		report.build(query=full_query, dedupe=dedupe_effective, limit=0, stream=True)
+		type_map = {cls.get_name(): cls for cls in FINDING_TYPES}
+		for type_name, sv in list(report.data['results'].items()):
+			cls = type_map.get(type_name)
+			report.data['results'][type_name] = _aggregate_streamed(
+				sv, type_name, cls, fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)
+			if group and cls is not None and getattr(cls, '_group_by', None) and report.data['results'][type_name]:
+				grouped_types.append((type_name, ', '.join(cls._group_by)))
+		if group and not grouped_types:
+			console.print(Warning(message='--group: no groupable finding types in results'))
+	else:
+		report.build(query=full_query, dedupe=dedupe_effective, limit=limit)
+		if fmt:
+			report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()
 	total_results = sum(len(items) for items in report.data['results'].values())
 	emit_query_warnings(query_warnings)
@@ -1488,6 +1798,8 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 		if searched:
 			info_msg += f' (searched: [bold cyan]{searched}[/])'
 	console.print(Info(message=info_msg))
+	for type_name, field_str in grouped_types:
+		console.print(Info(message=f'{type_name} grouped by {field_str}. To show complete results, remove the --group option.'))  # noqa: E501
 
 
 def run_ai_chat(ctx, prompt, workspace):
@@ -1514,10 +1826,14 @@ def run_ai_chat(ctx, prompt, workspace):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
+@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -severity_score')  # noqa: E501
+@click.option('--count', 'count', is_flag=True, default=False, help='Group identical --format values with an occurrence count (most frequent first; --sort orders by value instead)')  # noqa: E501
+@click.option('--uniq', 'uniq', is_flag=True, default=False, help='Drop duplicate --format values')
+@click.option('--group', is_flag=True, default=False, help="Group findings by each output type's default field(s), aggregating a related field (e.g. vulnerabilities by name with their matched_at targets).")  # noqa: E501
 @click.pass_context
-def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt, workspace, driver, dedupe, limit):
+def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt, workspace, driver, dedupe, limit, sort, count, uniq, group):  # noqa: E501
 	"""Show report results. REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3)."""
-	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder)
+	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
 
 
 def _load_report_data(path):
