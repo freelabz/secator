@@ -123,13 +123,15 @@ class Runner:
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
-		# Output-side scope guard: coerce once (see add_result). Empty => guard is a no-op, so
-		# default/unscoped runs are unchanged. Mirrors the input filter in _helpers.run_extractors.
-		self._scope_in = as_scope_list(self.run_opts.get('in_scope'))
-		self._scope_out = as_scope_list(self.run_opts.get('out_of_scope'))
+		# Output-side scope guard state (see _out_of_scope / add_result). Scope is an authorization
+		# input read from run_opts at CHECK time — after profile/extractor option merges (which
+		# replace self.run_opts, e.g. _run_extractors) — and re-coerced only when the raw values
+		# change, so the guard reflects the final options instead of a snapshot that could go stale.
+		# Empty => no-op, so default/unscoped runs are unchanged.
+		self._scope_raw = None
+		self._scope_in = []
+		self._scope_out = []
 		self._scope_dropped = 0
-		# Precompute once: only opted-in tasks with a scope set do the per-finding check.
-		self._scope_active = bool(self.output_scope_filter and (self._scope_in or self._scope_out))
 		# Mint the run-scope {type}_id before any add_result so every finding carries the scope key.
 		key = f'{self.config.type}_id'
 		if not self.context.get(key):
@@ -851,11 +853,21 @@ class Runner:
 	def _out_of_scope(self, item):
 		"""True if `item` is a host-bearing finding whose host falls outside the run's scope.
 
-		No-op (False) when no scope is set, so default/unscoped runs are unchanged. Reuses the input
-		filter's predicate (secator.scope.host_in_scope): non-network / hostless items
-		(finding_scope_host -> None) and vulns/tags/info are never scoped.
+		Scope (in_scope/out_of_scope) is an authorization input, read from run_opts HERE — after any
+		profile/extractor option merges — and re-coerced only when the raw values change, so the
+		guard never acts on a stale pre-merge snapshot. No-op (False) when no scope is set, so
+		default/unscoped runs are unchanged. Reuses the input filter's predicate
+		(secator.scope.host_in_scope): non-network / hostless items (finding_scope_host -> None) and
+		vulns/tags/info are never scoped.
 		"""
-		if not self._scope_active or not is_output_type(item):
+		if not is_output_type(item):
+			return False
+		raw = (self.run_opts.get('in_scope'), self.run_opts.get('out_of_scope'))
+		if raw != self._scope_raw:  # refresh coerced lists on first use and after any opt merge
+			self._scope_raw = raw
+			self._scope_in = as_scope_list(raw[0])
+			self._scope_out = as_scope_list(raw[1])
+		if not (self._scope_in or self._scope_out):
 			return False
 		host = finding_scope_host(item)
 		return bool(host) and not host_in_scope(host, self._scope_in, self._scope_out)
@@ -878,7 +890,7 @@ class Runner:
 		# their whole archive and discovered hosts get minted into Targets. Drop out-of-scope
 		# host-bearing findings BEFORE any on_item hook persists them. Aggregated (not per-item) to
 		# avoid emitting 65k warnings at scale — one debug at mark_completed.
-		if self._scope_active and self._out_of_scope(item):
+		if self.output_scope_filter and self._out_of_scope(item):
 			self._scope_dropped += 1
 			return
 
@@ -1536,7 +1548,7 @@ class Runner:
 
 		# Don't emit dropped findings to the live stream either (else -json / downstream consumers
 		# still see the out-of-scope host add_result refused to persist).
-		if self._scope_active and self._out_of_scope(item):
+		if self.output_scope_filter and self._out_of_scope(item):
 			return
 
 		# Yield item

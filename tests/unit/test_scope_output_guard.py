@@ -14,13 +14,13 @@ from secator.runners import PythonRunner
 from secator.output_types import Subdomain, Url, Target, Vulnerability
 
 
-IN = 'app.vps592398.ovh.net'          # in-scope input
-IN_SUB = 'api.vps592398.ovh.net'      # in-scope discovered host
-OUT_HOST = 's3.bhs.cloud.ovh.net'     # out-of-scope discovered host (classifies as a network host)
-# Real-world out-of-scope host from the incident: the underscore makes it classify as `str`
-# (non-network), so host_in_scope fail-opens it — exactly as the INPUT filter already does. This
-# `str`-host blind spot is a pre-existing limitation of the shared predicate, not of this guard.
-STR_OUT = 'xnkib_227077.s3.bhs.cloud.ovh.net'
+IN = 'app.example.com'          # in-scope input
+IN_SUB = 'api.example.com'      # in-scope discovered host
+OUT_HOST = 'assets.example.net'     # out-of-scope discovered host (classifies as a network host)
+# An out-of-scope host whose underscore makes it classify as `str` (non-network), so
+# host_in_scope fail-opens it — exactly as the INPUT filter already does. This `str`-host blind
+# spot is a pre-existing limitation of the shared predicate, not of this guard.
+STR_OUT = 'bucket_1234.example.net'
 
 
 @task()
@@ -30,9 +30,9 @@ class scopeprobe(PythonRunner):
 	output_scope_filter = True   # opt in
 
 	def yielder(self):
-		yield Subdomain(host=IN_SUB, domain='vps592398.ovh.net')
-		yield Subdomain(host=OUT_HOST, domain='cloud.ovh.net')
-		yield Subdomain(host=STR_OUT, domain='cloud.ovh.net')
+		yield Subdomain(host=IN_SUB, domain='example.com')
+		yield Subdomain(host=OUT_HOST, domain='example.net')
+		yield Subdomain(host=STR_OUT, domain='example.net')
 		yield Url(url=f'https://{IN_SUB}/a')
 		yield Url(url=f'https://{OUT_HOST}/a')
 		yield Target(name=OUT_HOST)
@@ -46,8 +46,8 @@ class scopeprobe_noopt(PythonRunner):
 	output_types = [Subdomain, Url, Target, Vulnerability]
 
 	def yielder(self):
-		yield Subdomain(host=IN_SUB, domain='vps592398.ovh.net')
-		yield Subdomain(host=OUT_HOST, domain='cloud.ovh.net')
+		yield Subdomain(host=IN_SUB, domain='example.com')
+		yield Subdomain(host=OUT_HOST, domain='example.net')
 		yield Target(name=OUT_HOST)
 
 
@@ -61,7 +61,7 @@ class TestScopeOutputGuard(unittest.TestCase):
 		return scopeprobe(inputs=[IN], **opts).run()
 
 	def test_scope_drops_out_of_scope_output(self):
-		results = self._run(in_scope=['*.vps592398.ovh.net'])
+		results = self._run(in_scope=['*.example.com'])
 
 		subs = _vals(results, 'subdomain', 'host')
 		self.assertIn(IN_SUB, subs)
@@ -93,7 +93,7 @@ class TestScopeOutputGuard(unittest.TestCase):
 	def test_opt_out_task_does_not_filter_even_with_scope(self):
 		# A task without output_scope_filter keeps out-of-scope findings even with a
 		# scope set — the guard is opt-in (zero cost for tasks that don't need it).
-		results = scopeprobe_noopt(inputs=[IN], in_scope=['*.vps592398.ovh.net']).run()
+		results = scopeprobe_noopt(inputs=[IN], in_scope=['*.example.com']).run()
 		self.assertIn(OUT_HOST, _vals(results, 'subdomain', 'host'))
 		self.assertIn(OUT_HOST, _vals(results, 'target', 'name'))
 
