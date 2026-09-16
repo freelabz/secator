@@ -640,6 +640,16 @@ class ai(PythonRunner):
 		rate_limit_streak = 0
 		self._context_warnings_shown = set()
 
+		# Normalize the "uncapped" sentinel at the one place every path converges. A
+		# non-positive max_iterations (SECATOR_ADDONS_AI_MAX_ITERATIONS<=0, or a raw -1
+		# run-opt left over on a resume before the mode/config resolution re-ran) means
+		# "no user cap" — run up to the hard ceiling, NOT zero iterations. Without this,
+		# `while iteration < -1` is immediately false, the loop never runs, and the turn
+		# yields "Reached max iterations (0/-1)" — silently killing the conversation
+		# (notably right after a permission deny).
+		if not self.max_iterations or self.max_iterations <= 0:
+			self.max_iterations = _HARD_ITERATION_CEILING
+
 		while iteration < self.max_iterations:
 			iteration += 1
 
