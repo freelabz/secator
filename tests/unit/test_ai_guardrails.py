@@ -42,6 +42,47 @@ class TestGuardrailsConfig(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestGithubCloneAlwaysAllowed(unittest.TestCase):
+	"""GitHub PoC/exploit clones are always in scope for the AI: those URLs are
+	covered by a public mandate but never land in a run's in_scope/out_of_scope,
+	so without a default allow they'd hit the target(*) ask on every clone."""
+
+	def _engine(self, **kw):
+		return PermissionEngine(config=CONFIG.addons.ai.permissions, **kw)
+
+	def _clone(self, url):
+		return {"action": "shell", "command": f"git clone {url}"}
+
+	def test_git_clone_github_allowed_no_prompt(self):
+		"""A github.com clone resolves to allow, not ask, with no mandate scope set."""
+		for url in (
+			"https://github.com/foo/bar.git",
+			"https://github.com/foo/bar",
+			"https://raw.githubusercontent.com/foo/bar/main/poc.py",
+			"https://gist.github.com/foo/deadbeef",
+		):
+			res = self._engine().check_action(self._clone(url))
+			self.assertEqual(res.decision, "allow", f"{url} -> {res.decision} ({res.reason})")
+
+	def test_github_still_denied_when_out_of_scope(self):
+		"""Deny-wins: an org that puts github.com in a mandate out_of_scope still blocks it."""
+		res = self._engine(out_of_scope=["github.com"]).check_action(
+			self._clone("https://github.com/foo/bar.git"))
+		self.assertEqual(res.decision, "deny")
+
+	def test_non_github_target_still_asks(self):
+		"""The default allow is GitHub-only — an arbitrary host still prompts."""
+		res = self._engine().check_action(self._clone("https://evil.example.com/foo/bar.git"))
+		self.assertEqual(res.decision, "ask")
+
+	def test_github_userinfo_spoof_not_allowed(self):
+		"""`github.com@evil.com` parses to host evil.com — not covered, still asks."""
+		res = self._engine().check_action(
+			self._clone("https://github.com@evil.example.com/foo/bar.git"))
+		self.assertEqual(res.decision, "ask")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestRuleParser(unittest.TestCase):
 
 	def test_parse_rule_target(self):

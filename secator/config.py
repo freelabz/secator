@@ -263,6 +263,12 @@ class AiAddon(StrictModel):
 	permissions: Dict = {
 		'allow': [
 			'target({targets})',
+			# GitHub is always in scope for the AI: public PoC/exploit repos are
+			# cloned/fetched from here, and those URLs are covered by a public mandate
+			# but never land in a run's in_scope/out_of_scope — so without this they'd
+			# hit the target(*) ask on every clone. Checked AFTER both deny layers
+			# (config deny + mandate out_of_scope), so an org can still exclude it.
+			'target(github.com,*.github.com,*.githubusercontent.com)',
 			'read({workspace}/*,/dev/null,/tmp/*)',
 			'write({workspace}/.outputs/*,/dev/null,/tmp/*)',
 			'shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,'
