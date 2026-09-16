@@ -39,6 +39,19 @@ class TestComputeDuplicateUpdates(unittest.TestCase):
 		updates = compute_duplicate_updates([prev], [new], copy_fields=['status'])
 		assert 'status' not in updates['new']
 
+	def test_poc_carried_forward_onto_new_main(self):
+		"""A recorded PoC on a demoted main carries onto the re-found main.
+
+		Regression: add_vuln_poc fills `poc` on the finding that is main at the
+		time; a later rescan creates a new main and demotes the poc'd doc to a
+		hidden duplicate. Without `poc` in copy_fields the exploitation report is
+		orphaned on the duplicate and the workspace finding shows an empty PoC.
+		"""
+		prev = _vuln('prev', poc='## Exploitation Report\ncurl ... -> alert(1)')
+		new = _vuln('new')  # re-found, no poc yet
+		updates = compute_duplicate_updates([prev], [new], copy_fields=['poc'])
+		assert updates['new']['poc'] == '## Exploitation Report\ncurl ... -> alert(1)'
+
 	def test_non_status_field_keeps_not_value_semantics(self):
 		"""Generic fields still use the `not value` emptiness check."""
 		# Prior verified=True copies onto new verified=False (falsy -> empty).

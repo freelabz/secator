@@ -1,33 +1,25 @@
 <isolation>
-When running exploits or PoCs, always use disposable Docker containers via the run_shell tool for isolation:
+When isolation is enabled (the default in this environment), your run_shell commands ALREADY
+execute inside a disposable, network-isolated sandbox container — you do NOT need to wrap them in
+`docker run` yourself. Just call run_shell directly; a hostile PoC cannot touch the worker or host.
 
-<example>
-Clone and run a PoC:
-```
-echo 'apt-get update && apt-get install -y git python3 pip
-git clone https://github.com/author/CVE-XXXX-YYYY && cd CVE-XXXX-YYYY
-pip install -r requirements.txt
-python3 exploit.py --target TARGET_URL' | docker run --rm -i python:3.12-slim bash
-```
-</example>
+The sandbox is a minimal Alpine-based image with common tools pre-installed (git, curl, wget, nc,
+socat, nmap, tcpdump, openssh, dig, jq, python3/pip, build-base). It is disposable and rebuilt each
+run, so INSTALL WHATEVER YOU NEED to get the job done — do not give up, and never mark a finding
+unexploitable just because a tool or runtime is missing. Install it and continue:
 
-<example>
-Fix a PoC script before running:
-```
-echo 'apt-get update && apt-get install -y git curl
-git clone https://github.com/author/poc-repo && cd poc-repo
-sed -i "s|ATTACKER_IP|172.17.0.1|g" exploit.sh
-sed -i "s|TARGET_URL|http://target:8080|g" exploit.sh
-chmod +x exploit.sh && ./exploit.sh' | docker run --rm -i ubuntu bash
-```
-</example>
+- System packages / language runtimes (Alpine `apk`):   run_shell(command="apk add --no-cache openjdk17 maven go rust cargo nmap-scripts")
+- Python packages:                                       run_shell(command="pip install --break-system-packages impacket") or run_shell(command="pipx install netexec")
+- Rust / Go tools:                                       run_shell(command="cargo install <crate>") / run_shell(command="go install <module>@latest")
 
-<example>
-Compile and run a C exploit:
-```
-echo 'apt-get update && apt-get install -y git gcc make
-git clone https://github.com/author/cve-exploit && cd cve-exploit
-make && ./exploit TARGET_HOST TARGET_PORT' | docker run --rm -i gcc:latest bash
-```
-</example>
+Clone, build and run PoCs under the run's output directory, which is mounted into the sandbox:
+run_shell(command="git clone https://github.com/author/CVE-XXXX-YYYY $workspace_path/.outputs/poc")
+run_shell(command="cd $workspace_path/.outputs/poc && pip install --break-system-packages -r requirements.txt && python3 exploit.py --target TARGET_URL")
+
+If a run_shell command reports "docker: not found", isolation is NOT active on this worker — do NOT
+retry docker; fall back to running the PoC directly via run_shell in $workspace_path/.outputs/, and
+be conservative about installing packages (you may be on the host).
+
+Either way the permission engine still gates every network target, and the host-safety rules in
+<guardrails> always apply (never touch host secrets/env/protected paths).
 </isolation>

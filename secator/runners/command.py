@@ -549,7 +549,7 @@ class Command(Runner):
 				os.makedirs(self.cwd, exist_ok=True)
 
 			# Run the command using subprocess
-			env = {**os.environ, **self.extra_env}
+			env = {**self.run_opts.get('env', os.environ), **self.extra_env}
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,

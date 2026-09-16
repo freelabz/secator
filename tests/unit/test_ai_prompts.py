@@ -101,6 +101,26 @@ class TestPrompts(unittest.TestCase):
 		self.assertIn("exploitation verification specialist", prompt)
 		self.assertIn("proof-of-concept", prompt)
 
+	def test_get_system_prompt_exploit_no_leftover_placeholders(self):
+		"""D2: exploit renders fully — no unresolved ${include} or template $vars.
+
+		(Literal Mongo operators like $in/$regex and example secrets like $API_KEY
+		are content, not Template vars, so we check the template names explicitly.)
+		"""
+		import re
+		prompt = get_system_prompt("exploit")
+		# All ${include} directives resolved (load_prompt) and $var substitutions done.
+		self.assertEqual(re.findall(r'\$\{\w+\}', prompt), [], "unresolved ${include} in exploit prompt")
+		template_vars = [
+			"library_reference", "discovery", "common", "queries", "findings",
+			"arsenal", "guardrails", "isolation", "exploitation_report",
+			"workspace_path", "query_types", "output_types_reference",
+		]
+		leftover = [v for v in template_vars if f"${v}" in prompt]
+		self.assertEqual(leftover, [], f"unresolved template vars in exploit prompt: {leftover}")
+		# uses the exploit template, not attack/chat
+		self.assertIn("exploitation verification specialist", prompt)
+
 	def test_get_system_prompt_attack_has_library_reference(self):
 		prompt = get_system_prompt("attack")
 		self.assertIn('<tasks>', prompt)
@@ -229,7 +249,9 @@ class TestPrompts(unittest.TestCase):
 
 	def test_exploit_mode_config_has_correct_allowed_actions(self):
 		exploit_config = MODES["exploit"]
-		expected_actions = ["task", "workflow", "shell", "add_finding", "stop"]
+		# "query" is included so the model can pull existing exploit intel before
+		# exploiting; "follow_up" is excluded (exploit runs autonomously).
+		expected_actions = ["task", "workflow", "shell", "query", "add_finding", "add_vuln_poc", "stop"]
 		self.assertEqual(exploit_config["allowed_actions"], expected_actions)
 
 	def test_exploit_mode_config_has_max_iterations_5(self):
@@ -238,12 +260,12 @@ class TestPrompts(unittest.TestCase):
 
 	def test_attack_mode_config_has_correct_allowed_actions(self):
 		attack_config = MODES["attack"]
-		expected_actions = ["task", "workflow", "shell", "query", "follow_up", "add_finding", "stop"]
+		expected_actions = ["task", "workflow", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"]
 		self.assertEqual(attack_config["allowed_actions"], expected_actions)
 
 	def test_chat_mode_config_has_correct_allowed_actions(self):
 		chat_config = MODES["chat"]
-		expected_actions = ["query", "follow_up", "add_finding", "shell", "stop"]
+		expected_actions = ["query", "follow_up", "add_finding", "add_vuln_poc", "shell", "stop"]
 		self.assertEqual(chat_config["allowed_actions"], expected_actions)
 
 	def test_all_modes_have_max_iterations_5(self):
@@ -281,6 +303,60 @@ class TestPrompts(unittest.TestCase):
 		self.assertNotIn("NEVER INVENT", COMMON_RULES)
 		self.assertNotIn("ALWAYS provide", COMMON_RULES)
 
+	# === Template-drift regression tests (D1) ===
+
+	def test_rendered_prompts_have_no_unsubstituted_template_vars(self):
+		"""Rendered prompts must not leak $query_types / $output_types_reference (D1)."""
+		for mode in ("attack", "chat", "exploit"):
+			prompt = get_system_prompt(mode)
+			self.assertNotIn("$query_types", prompt, f"$query_types leaked in {mode!r} prompt")
+			self.assertNotIn("$output_types_reference", prompt, f"$output_types_reference leaked in {mode!r} prompt")
+
+	def test_rendered_prompts_substitute_query_types_from_registry(self):
+		"""$query_types renders to the real FINDING_TYPES names, not a placeholder."""
+		from secator.ai.prompts import build_query_types
+		expected = build_query_types()
+		self.assertIn("vulnerability", expected)
+		for mode in ("attack", "chat", "exploit"):
+			self.assertIn(expected, get_system_prompt(mode))
+
+	def test_rendered_prompts_have_no_phantom_run_query_tool(self):
+		"""Examples must call the real query_workspace tool, never a phantom run_query (D1)."""
+		from secator.ai.tools import TOOL_ACTION_MAP
+		self.assertEqual(TOOL_ACTION_MAP["query_workspace"], "query")
+		self.assertNotIn("run_query", TOOL_ACTION_MAP)
+		for mode in ("attack", "chat", "exploit"):
+			prompt = get_system_prompt(mode)
+			self.assertNotIn("run_query", prompt, f"phantom run_query in {mode!r} prompt")
+			self.assertIn("query_workspace", prompt)
+
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestOperatingRulesRecap(unittest.TestCase):
+	"""Every mode ends with the operating-rules recap in the recency slot.
+
+	The library reference is inlined at the TOP of attack/exploit (long data
+	first), which pushes the persona to the middle of a ~15-60k prompt. A terse
+	recap at the very END keeps the rules the model most often breaks (use
+	follow_up with choices, description=intent, persist, restate-before-retry) in
+	the high-attention tail. Regression guard for that structural fix.
+	"""
+
+	def test_recap_present_and_last_in_every_mode(self):
+		for mode in ("chat", "attack", "exploit"):
+			p = get_system_prompt(mode, workspace_path="<ws>", backend=None)
+			self.assertIn("<operating_rules>", p, f"{mode} missing recap")
+			self.assertTrue(
+				p.rstrip().endswith("</operating_rules>"),
+				f"{mode} recap is not the LAST block (recency slot)")
+
+	def test_recap_covers_the_known_failure_modes(self):
+		p = get_system_prompt("attack", workspace_path="<ws>", backend=None)
+		recap = p[p.index("<operating_rules>"):]
+		self.assertIn("follow_up", recap)          # prose-choices failure
+		self.assertIn("description", recap)         # description-echo failure
+		self.assertIn("Persist", recap)             # early-yield failure

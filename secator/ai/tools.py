@@ -1,5 +1,7 @@
 """Tool schema definitions for native LLM tool calling."""
 
+import json
+
 from secator.ai.prompts import get_mode_config
 
 # Map tool names to action types used by existing action handlers
@@ -10,11 +12,25 @@ TOOL_ACTION_MAP = {
 	"query_workspace": "query",
 	"follow_up": "follow_up",
 	"add_finding": "add_finding",
+	"add_vuln_poc": "add_vuln_poc",
 	"stop": "stop",
 }
 
-# Reverse mapping: action type -> tool name
-ACTION_TOOL_MAP = {v: k for k, v in TOOL_ACTION_MAP.items()}
+# Shared "targets" parameter schema (identical across run_task/run_workflow)
+_TARGETS_SCHEMA = {
+	"type": "array",
+	"items": {"type": "string"},
+	"description": "List of targets (hosts, URLs, IPs)."
+}
+
+_DESCRIPTION_SCHEMA = {
+	"type": "string",
+	"description": "A short plain-English statement of your INTENT — WHY you are running this, in 4-10 words. "
+	               "Do NOT paste the command, and do NOT just repeat the task name; describe the PURPOSE. "
+	               "BAD (never do this): 'nmap', 'httpx', 'curl -sk http://...'. "
+	               "GOOD: 'Scan for open services and versions', 'Probe which HTTP methods are allowed', "
+	               "'Fire the reflected-XSS payload at level 1'. Shown to the user in place of the bare task name."
+}
 
 # OpenAI-format tool schemas keyed by tool name
 TOOL_SCHEMAS = {
@@ -30,17 +46,14 @@ TOOL_SCHEMAS = {
 						"type": "string",
 						"description": "The task name (e.g. nmap, httpx, nuclei, ffuf)."
 					},
-					"targets": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "List of targets (hosts, URLs, IPs)."
-					},
+					"targets": _TARGETS_SCHEMA,
+					"description": _DESCRIPTION_SCHEMA,
 					"opts": {
 						"type": "object",
-						"description": "Optional task-specific options (e.g. ports, rate_limit, timeout)."
+						"description": "Optional task-specific options (e.g. ports, rate_limit). Control/security flags are ignored."
 					}
 				},
-				"required": ["name", "targets"]
+				"required": ["name", "targets", "description"]
 			}
 		}
 	},
@@ -56,17 +69,14 @@ TOOL_SCHEMAS = {
 						"type": "string",
 						"description": "The workflow name."
 					},
-					"targets": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "List of targets (hosts, URLs, IPs)."
-					},
+					"targets": _TARGETS_SCHEMA,
+					"description": _DESCRIPTION_SCHEMA,
 					"opts": {
 						"type": "object",
-						"description": "Optional workflow options (e.g. profiles)."
+						"description": "Optional workflow options (e.g. profiles). Control/security flags are ignored."
 					}
 				},
-				"required": ["name", "targets"]
+				"required": ["name", "targets", "description"]
 			}
 		}
 	},
@@ -81,9 +91,10 @@ TOOL_SCHEMAS = {
 					"command": {
 						"type": "string",
 						"description": "The shell command to execute."
-					}
+					},
+					"description": _DESCRIPTION_SCHEMA
 				},
-				"required": ["command"]
+				"required": ["command", "description"]
 			}
 		}
 	},
@@ -125,6 +136,10 @@ TOOL_SCHEMAS = {
 						"type": "array",
 						"items": {"type": "string"},
 						"description": "Optional list of concrete action choices for the user."
+					},
+					"multiple": {
+						"type": "boolean",
+						"description": "Set true when the user may select SEVERAL of the choices (multi-select); omit or false for a pick-exactly-one question."  # noqa: E501
 					}
 				},
 				"required": ["reason"]
@@ -146,6 +161,63 @@ TOOL_SCHEMAS = {
 				},
 				"required": ["_type"],
 				"additionalProperties": True
+			}
+		}
+	},
+	"add_vuln_poc": {
+		"type": "function",
+		"function": {
+			"name": "add_vuln_poc",
+			"description": (
+				"Record the exploitation OUTCOME of an EXISTING vulnerability after you attempted to "
+				"exploit it. Use this INSTEAD of add_finding(exploit). Identify the vulnerability by the "
+				"`_uuid` you saw in query_workspace results.\n"
+				"- If you exploited it: set exploited=true and fill `poc` with the exact commands and "
+				"outputs proving it. The vuln is marked status='Exploited' (verified).\n"
+				"- If you could NOT exploit it (scanner false positive, not reachable, patched): set "
+				"exploited=false. The vuln is marked as a false positive; explain why in `extra_data`.\n"
+				"Set `confidence` to re-prioritize the vuln based on what you learned."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"_uuid": {
+						"type": "string",
+						"description": "The `_uuid` of the vulnerability to annotate (from query_workspace results)."
+					},
+					"exploited": {
+						"type": "boolean",
+						"description": (
+							"true if you successfully exploited the vulnerability (requires `poc`); false if it "
+							"could not be exploited (a false positive) -- explain why in `extra_data`."
+						)
+					},
+					"poc": {
+						"type": "string",
+						"description": (
+							"Markdown proof-of-concept: the exact commands run and their outputs demonstrating a "
+							"true, successful exploitation (not a scanner match). Required when exploited=true; "
+							"be concrete and reproducible."
+						)
+					},
+					"confidence": {
+						"type": "string",
+						"enum": ["low", "medium", "high"],
+						"description": (
+							"Re-prioritize the vulnerability: 'high' for a confirmed exploitation, 'low' when it "
+							"looks like a false positive. Optional -- omit to leave unchanged."
+						)
+					},
+					"extra_data": {
+						"type": "object",
+						"description": (
+							"Extra structured context to merge into the vuln (e.g. a reason when exploited=false). "
+							"Optional; merged into existing extra_data, existing keys preserved."
+						),
+						"additionalProperties": True
+					}
+				},
+				"required": ["_uuid", "exploited"]
 			}
 		}
 	},
@@ -200,6 +272,33 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> li
 	return schemas
 
 
+def coerce_stringified_args(tool_name: str, arguments: dict) -> dict:
+	"""Coerce args the model serialized as JSON strings back to their declared type.
+
+	Some providers stringify nested object/array parameters even when the tool
+	schema says ``type: object`` / ``array`` (e.g. ``opts`` or ``query`` arriving
+	as a JSON string). Downstream handlers then call ``.get()`` / ``**opts`` /
+	``.items()`` on a ``str`` and raise ``AttributeError`` — or silently drop the
+	value (``_sanitize_child_opts`` returns ``{}`` for a non-dict). Parse any such
+	arg once, here at the tool-call boundary, so every consumer gets the declared
+	type. Best-effort: an unparseable value is left as-is so the handler can return
+	a clean error rather than crash.
+
+	Must run BEFORE arg decryption — ``_decrypt_dict`` would otherwise treat a
+	stringified object as a single encrypted value.
+	"""
+	if not isinstance(arguments, dict):
+		return arguments
+	props = TOOL_SCHEMAS.get(tool_name, {}).get("function", {}).get("parameters", {}).get("properties", {})
+	for key, spec in props.items():
+		if spec.get("type") in ("object", "array") and isinstance(arguments.get(key), str):
+			try:
+				arguments[key] = json.loads(arguments[key])
+			except (json.JSONDecodeError, TypeError, ValueError):
+				pass
+	return arguments
+
+
 def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 	"""Convert a tool call to an action dict compatible with existing action handlers.
 
@@ -215,6 +314,18 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 		return None
 	if not arguments:
 		return None
+	# A model may emit non-object arguments (bare JSON int/array/string) -- `.items()`
+	# below would raise and abort the loop, so reject cleanly and let the caller retry.
+	if not isinstance(arguments, dict):
+		return None
 	safe_arguments = {k: v for k, v in arguments.items() if k not in {"action", "description"}}
-	descr = safe_arguments.get("name", "") or safe_arguments.get("query") or safe_arguments.get("command", "unknown")
+	# Prefer the description the model was asked to provide (run_task/run_workflow/run_shell all
+	# require it); fall back to name/query/command only when it's missing. Was previously dropped
+	# here, so the AI-chat background-tasks list showed the raw command instead of the description.
+	descr = (
+		arguments.get("description")
+		or safe_arguments.get("name", "")
+		or safe_arguments.get("query")
+		or safe_arguments.get("command", "unknown")
+	)
 	return {"action": action_type, "description": descr, **safe_arguments}

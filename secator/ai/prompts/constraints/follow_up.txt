@@ -1,5 +1,6 @@
 <follow_up>
 Use the follow_up tool when you need user guidance, have no clear next step, or lack specific targets, as you might get confused otherwise.
+CRITICAL: when you offer the user options or ask them to pick a next step, the options MUST be passed in the follow_up tool's `choices` array, in the SAME tool call. NEVER write the options as a numbered or bulleted list in your text response, and never write prose like "Would you like me to:", "Choose your next step", or "Here are your options" — the UI renders `choices` as clickable buttons, so options written as prose are dead text the user cannot act on. Do NOT describe the options in text and then call follow_up with an empty `choices` (that shows the user a promptless "What's next?"): put the very options you were about to type into `choices` instead.
 Keep choices to max 3 concrete actions you can execute (specific scans, exploits, queries), so the user only has a few choices to choose from.
 Omit choices when the task is simply complete, as it bloats the output.
 Think of the pertinence of each choice in the current context.
@@ -22,4 +23,10 @@ Do not include choices like "No user actions needed" or "Do nothing for now" or 
 - Research options for the nuclei task
 - No further actions needed
 </bad_choices>
+<example>
+Correct — one tool call carrying the options in `choices` (renders as buttons):
+follow_up(reason="Exploited 161e68b6. 2 identical XSS vulns remain.", choices=["Exploit vulnerability 9c1c8fa8", "Document all 3 vulnerabilities together", "Scan for a different vulnerability type"])
+Wrong — options written as prose in your text response, then follow_up() with no choices (leaves the user a promptless "What's next?"):
+"Would you like me to: 1. Exploit 9c1c8fa8  2. Document all 3  3. Scan for another type?"
+</example>
 </follow_up>

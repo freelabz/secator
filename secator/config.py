@@ -120,6 +120,7 @@ class Security(StrictModel):
 	force_source_install: bool = False
 	prompt_sudo_password: bool = True
 	sudo_password: str = ''  # non-interactive sudo password (e.g. SECATOR_SECURITY_SUDO_PASSWORD) for headless workers
+	shell_isolated: bool = False  # default for the AI task's --isolated (run_shell in a Docker sandbox); set SECATOR_SECURITY_SHELL_ISOLATED=1 on sandboxed workers  # noqa: E501
 
 
 class HTTP(StrictModel):
@@ -213,6 +214,7 @@ class MongodbAddon(StrictModel):
 		'verified',
 		'status',
 		'tags',
+		'poc',
 	]
 
 
@@ -229,6 +231,7 @@ class SqliteAddon(StrictModel):
 		'verified',
 		'status',
 		'tags',
+		'poc',
 	]
 
 
@@ -247,12 +250,25 @@ class AiAddon(StrictModel):
 	max_tokens: int = 30000
 	max_tokens_total: int = 100000
 	max_results: int = 500
+	# Max agent loop iterations for an AI run. Env-overridable via
+	# SECATOR_ADDONS_AI_MAX_ITERATIONS (autonomous exploitation needs many steps —
+	# recon, clone/read a PoC, run, debug, retry). Mode configs impose a floor.
+	# Set to -1 (or any value <= 0) to DISABLE the cap entirely: the run then continues
+	# until the model sends `stop` — avoids killing the worker mid-exploit and losing
+	# locally checked-out PoCs.
+	max_iterations: int = 25
 	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
 	permissions: Dict = {
 		'allow': [
 			'target({targets})',
+			# GitHub is always in scope for the AI: public PoC/exploit repos are
+			# cloned/fetched from here, and those URLs are covered by a public mandate
+			# but never land in a run's in_scope/out_of_scope — so without this they'd
+			# hit the target(*) ask on every clone. Checked AFTER both deny layers
+			# (config deny + mandate out_of_scope), so an org can still exclude it.
+			'target(github.com,*.github.com,*.githubusercontent.com)',
 			'read({workspace}/*,/dev/null,/tmp/*)',
 			'write({workspace}/.outputs/*,/dev/null,/tmp/*)',
 			'shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,'
