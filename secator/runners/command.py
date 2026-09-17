@@ -523,13 +523,19 @@ class Command(Runner):
 					yield Error(message=error)
 					return
 
-			# Prepare cmds
-			command = self.cmd if self.shell else shlex.split(self.cmd)
-
-			# Check command is installed and auto-install
+			# Resolve the command before exec: prefer a PATH binary; if none, try a
+			# shell alias. Some environments (Exegol/RVM) expose tools ONLY as shell
+			# aliases, which live in the shell runtime — not on PATH — so which /
+			# shutil.which miss them. When a tool resolves only via an alias, splice the
+			# expansion into the cmd so the subprocess can run it, and skip installing a
+			# conflicting copy. Auto-install only when the tool is nowhere to be found.
 			if not self.no_process and not self.is_installed():
-				self.debug('command is not installed, auto-installing', sub='start')
-				if CONFIG.security.auto_install_commands:
+				alias = self._resolve_shell_alias(self.cmd_name)
+				if alias:
+					self._splice_resolved_command(alias)
+					self.debug(f'{self.cmd_name} not on PATH; using shell alias -> {alias}', sub='start')
+				elif CONFIG.security.auto_install_commands:
+					self.debug('command is not installed, auto-installing', sub='start')
 					from secator.installer import ToolInstaller
 
 					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
@@ -537,6 +543,9 @@ class Command(Runner):
 					if not status.is_ok():
 						yield Error(message=f'Failed installing {self.cmd_name}')
 						return
+
+			# Prepare cmds (after any alias substitution)
+			command = self.cmd if self.shell else shlex.split(self.cmd)
 
 			# Output and results
 			self.return_code = 0
@@ -600,18 +609,59 @@ class Command(Runner):
 			yield from self._wait_for_end()
 
 	def is_installed(self):
-		"""Check if a command is installed by using `which`.
+		"""Whether the command binary is on PATH.
 
-		Args:
-			command (str): The command to check.
+		Uses shutil.which (pure-Python, cross-platform) — no subprocess, and it works
+		on Windows too. NOTE: this is PATH-only; tools exposed solely as a shell alias
+		(e.g. Exegol/RVM) are not on PATH and are resolved separately at exec time via
+		`_resolve_shell_alias` (aliases aren't files, so no PATH lookup can find them).
 
 		Returns:
-			bool: True if the command is installed, False otherwise.
+			bool: True if the command is on PATH, False otherwise.
 		"""
-		cmd = ['which', self.cmd_name]
-		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-		result.communicate()
-		return result.returncode == 0
+		return shutil.which(self.cmd_name) is not None
+
+	@staticmethod
+	def _resolve_shell_alias(name):
+		"""Resolve a command that is not on PATH but exists as a shell alias.
+
+		Aliases live in the shell runtime, not the filesystem, so shutil.which / the
+		`which` binary can't see them — only an interactive login shell that sourced
+		its rc can. We query the `alias` builtin (bash + zsh) because it prints the
+		alias in its literal, locale-independent form (`[alias ]name='<expansion>'`),
+		unlike `type`, whose prose is translated by the shell locale (e.g. a French
+		bash prints "est un alias vers", which no English regex would match).
+
+		Args:
+			name (str): Command name to resolve.
+
+		Returns:
+			str | None: The resolved invocation (e.g. '/rvm/wrappers/ruby /rvm/bin/wpscan'),
+				or None if it isn't a shell alias / can't be resolved.
+		"""
+		shell = os.environ.get('SHELL') or ''
+		if not shell:
+			return None
+		try:
+			result = subprocess.run(
+				[shell, '-ic', f'alias {shlex.quote(name)}'],
+				capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL,
+				env={**os.environ, 'LC_ALL': 'C'},
+			)
+		except Exception:
+			return None
+		# bash: "alias name='<expansion>'"   zsh: "name='<expansion>'"
+		match = re.search(rf"^(?:alias\s+)?{re.escape(name)}='(.*)'\s*$", (result.stdout or '').strip())
+		return match.group(1) if match else None
+
+	def _splice_resolved_command(self, resolved):
+		"""Replace the cmd_name token in self.cmd with a resolved alias expansion.
+
+		Only the first whole-word occurrence is replaced, so any `sudo`/`proxychains`
+		prefix already prepended to self.cmd is preserved.
+		"""
+		self.cmd = re.sub(
+			rf'(?<!\S){re.escape(self.cmd_name)}(?!\S)', lambda _: resolved, self.cmd, count=1)
 
 	def process_line(self, line):
 		"""Process a single line of output emitted on stdout / stderr and yield results."""
