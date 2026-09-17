@@ -2471,7 +2471,11 @@ def health(json_, debug, strict, bleeding):
 	upgrade_cmd = 'secator install tools'
 	with contextmanager:
 		for tool in tools:
-			if hasattr(tool, 'cmd'):
+			# Only version-check tools that declare a real binary. A generic runner with a
+			# blank `cmd` (e.g. the `command` task, which runs an arbitrary shell line) has no
+			# binary to `which`; treat it as a python/generic task so --strict doesn't flag it
+			# as "not installed".
+			if getattr(tool, 'cmd', ''):
 				info = get_version_info(
 					tool.cmd.split(' ')[0],
 					tool.version_flag or f'{tool.opt_prefix}version',
