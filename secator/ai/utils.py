@@ -245,8 +245,7 @@ _FORBIDDEN_CHILD_OPT_KEYS = frozenset({
 	"dry_run",
 	"exporters",
 	"enable_reports",
-	# A child must never lower its isolation level: `isolated` is force-inherited from the
-	# parent in _child_run_opts, so a child-supplied value is stripped here.
+	# SECURITY (ISOLATION): child can't lower isolation — `isolated` is force-inherited, stripped here.
 	"isolated",
 })
 
