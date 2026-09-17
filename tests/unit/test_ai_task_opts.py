@@ -82,31 +82,61 @@ class TestDetectMode(unittest.TestCase):
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestResolveLlmCredentials(unittest.TestCase):
-    """The configured API key must never be sent to a caller-overridden api_base."""
+    """The `custom_disallow_config_token` flag gates whether the configured key may reach a
+    caller-overridden api_base. Off (default) = it may (normal CLI setup); on = it must not,
+    and the run is refused via a returned error string (never a raise)."""
 
     CONFIG_KEY = "CONFIGURED_KEY"
 
     def test_default_base_uses_configured_key(self):
         from secator.tasks.ai import resolve_llm_credentials
-        base, key = resolve_llm_credentials("", "", "", self.CONFIG_KEY)
+        base, key, err = resolve_llm_credentials("", "", "", self.CONFIG_KEY, True)
         self.assertEqual(base, "")
         self.assertEqual(key, self.CONFIG_KEY)
+        self.assertIsNone(err)
 
-    def test_base_matching_configured_uses_configured_key(self):
+    def test_flag_off_custom_base_reuses_configured_key(self):
+        # Flag OFF (default): a CLI user with api_key + api_base both set in config works normally.
         from secator.tasks.ai import resolve_llm_credentials
-        base, key = resolve_llm_credentials("https://configured/v1", "", "https://configured/v1", self.CONFIG_KEY)
+        base, key, err = resolve_llm_credentials("https://custom/v1", "", "https://configured/v1", self.CONFIG_KEY, False)
+        self.assertEqual(base, "https://custom/v1")
         self.assertEqual(key, self.CONFIG_KEY)
+        self.assertIsNone(err)
 
-    def test_custom_base_with_own_key_uses_own_key(self):
+    def test_flag_on_base_matching_configured_uses_configured_key(self):
         from secator.tasks.ai import resolve_llm_credentials
-        base, key = resolve_llm_credentials("https://custom/v1", "MYKEY", "", self.CONFIG_KEY)
+        _, key, err = resolve_llm_credentials("https://configured/v1", "", "https://configured/v1", self.CONFIG_KEY, True)
+        self.assertEqual(key, self.CONFIG_KEY)
+        self.assertIsNone(err)
+
+    def test_flag_on_custom_base_with_own_key_uses_own_key(self):
+        from secator.tasks.ai import resolve_llm_credentials
+        base, key, err = resolve_llm_credentials("https://custom/v1", "MYKEY", "", self.CONFIG_KEY, True)
         self.assertEqual(base, "https://custom/v1")
         self.assertEqual(key, "MYKEY")
+        self.assertIsNone(err)
 
-    def test_custom_base_without_key_refuses_and_never_leaks_configured_key(self):
+    def test_flag_on_custom_base_without_key_refuses_without_raising(self):
+        # Refuses via an error string and never leaks the configured key — no exception.
         from secator.tasks.ai import resolve_llm_credentials
-        with self.assertRaises(ValueError):
-            resolve_llm_credentials("https://custom/v1", "", "", self.CONFIG_KEY)
+        base, key, err = resolve_llm_credentials("https://custom/v1", "", "", self.CONFIG_KEY, True)
+        self.assertNotEqual(key, self.CONFIG_KEY)
+        self.assertTrue(err)
+
+    def test_yielder_yields_error_output_not_raises_on_refusal(self):
+        # The task surfaces a credential refusal as an Error() output type — never a raised
+        # exception. _init_options is stubbed to set the error resolve_llm_credentials would.
+        from secator.tasks.ai import ai
+        from secator.output_types import Error
+        runner = ai(["hi"], run_opts={})
+
+        def _stub_init():
+            runner._credential_error = "A custom api_base requires you to provide your own api_key."
+        with patch.object(runner, "_init_options", _stub_init):
+            results = list(runner.yielder())   # must not raise
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], Error)
+        self.assertIn("api_key", results[0].message)
 
 
 if __name__ == '__main__':
