@@ -22,6 +22,10 @@ class gau(HttpCrawler):
 	input_types = [URL, HOST]
 	output_types = [Url, Subdomain]
 	tags = ['url', 'crawl', 'passive']
+	# gau fetches passive archives (Wayback / CommonCrawl / OTX / URLScan) that return
+	# the entire namespace of a seed domain, flooding the store with out-of-scope
+	# subdomains/urls. Opt in to output-side scope filtering to drop them at the source.
+	output_scope_filter = True
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'

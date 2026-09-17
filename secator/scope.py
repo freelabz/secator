@@ -14,6 +14,7 @@ scope entries, never targets.
 import ipaddress
 import logging
 import re
+from urllib.parse import urlparse
 
 from secator.definitions import CIDR_RANGE, IP
 from secator.utils import (
@@ -202,3 +203,27 @@ def host_in_scope(target, in_scope=None, out_of_scope=None):
 	if in_scope:
 		return any(_shape_matches_entry(shape, e) for e in in_scope)
 	return True
+
+
+def finding_scope_host(item):
+	"""Return the host/ip a finding (an OutputType) should be scope-checked against,
+	or None for finding types that carry no host (vulns, tags, info, ... -> never
+	scoped). The output-side counterpart of the input filter's host extraction
+	(secator/runners/_helpers.py), kept here next to ``host_in_scope`` so callers
+	don't reimplement it. Pure."""
+	t = getattr(item, '_type', None)
+	if t == 'url':
+		return getattr(item, 'host', None) or urlparse(getattr(item, 'url', '') or '').hostname
+	if t == 'subdomain':
+		return getattr(item, 'host', None)
+	if t == 'ip':
+		return getattr(item, 'ip', None)
+	if t == 'port':
+		return getattr(item, 'ip', None) or getattr(item, 'host', None)
+	if t == 'certificate':
+		return getattr(item, 'host', None)
+	if t == 'target':
+		return getattr(item, 'name', None)
+	if t == 'domain':
+		return getattr(item, 'domain', None)
+	return None
