@@ -594,7 +594,10 @@ class Command(Runner):
 		except BaseException as e:
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
 			self.stop_process()
-			yield Error.from_exception(e)
+			# On a worker, a SystemExit (SIGTERM: eviction/deadline or revoke terminate=True)
+			# re-raises here so it propagates out of the Celery task and Celery can redeliver
+			# (worker lost) or ack-as-revoked (revoked). Off the worker it surfaces as an Error.
+			yield self._handle_worker_termination(e)
 
 		finally:
 			yield from self._wait_for_end()
