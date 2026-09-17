@@ -141,6 +141,30 @@ def _yield_tool_results(runner, collected):
 		         _context=dict(runner.context))
 
 
+def resolve_llm_credentials(caller_api_base, caller_api_key, config_api_base, config_api_key):
+	"""Resolve the (api_base, api_key) pair for an AI run, safely (V-AI-01).
+
+	A caller-supplied ``api_base`` that OVERRIDES the platform's configured base must never be
+	handed the platform LLM key — that would exfiltrate it to an attacker-chosen endpoint (and
+	enable SSRF). When the base is overridden the caller MUST supply their own key; otherwise
+	the run is refused rather than silently falling back to the platform key. The default (unset
+	or platform-matching) base still uses the platform key. Mirrors the subagent guard in
+	ai/actions.py (a tool-supplied api_base redirecting the injected parent api_key).
+
+	Raises:
+		ValueError: a custom api_base was given without a caller-supplied api_key.
+	"""
+	api_base = caller_api_base or config_api_base
+	if caller_api_base and caller_api_base != config_api_base:
+		if not caller_api_key:
+			raise ValueError(
+				"A custom api_base requires your own api_key: the platform LLM key is "
+				"never sent to a non-default api_base."
+			)
+		return api_base, caller_api_key
+	return api_base, (caller_api_key or config_api_key)
+
+
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (attack or chat mode)."""
@@ -910,8 +934,11 @@ class ai(PythonRunner):
 		self.is_subagent = self.get_opt_value("subagent")
 		self.model = self.get_opt_value("model")
 		self.intent_model = self.get_opt_value("intent_model")
-		self.api_base = self.get_opt_value("api_base") or CONFIG.addons.ai.api_base
-		self.api_key = self.get_opt_value("api_key") or CONFIG.addons.ai.api_key
+		# V-AI-01: never send the platform LLM key to a caller-overridden api_base.
+		self.api_base, self.api_key = resolve_llm_credentials(
+			self.get_opt_value("api_base"), self.get_opt_value("api_key"),
+			CONFIG.addons.ai.api_base, CONFIG.addons.ai.api_key,
+		)
 		self.sensitive = self.get_opt_value("sensitive")
 		self.mode = self.get_opt_value("mode")
 		self.max_tokens_total = self.get_opt_value("max_tokens_total")

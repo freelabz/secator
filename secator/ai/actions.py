@@ -475,6 +475,10 @@ def _child_run_opts(ctx: ActionContext) -> Dict:
 		# (the parent AI task already holds one). run_opts is the single source of
 		# truth for has_parent (Runner reads self.run_opts['has_parent'] at init).
 		"has_parent": True,
+		# M1: force-inherit the sandbox switch from the parent AI task. The LLM/child can't
+		# set `isolated` (stripped by _sanitize_child_opts / _FORBIDDEN_CHILD_OPT_KEYS), so a
+		# spawned child always runs at the parent's isolation level and can never weaken it.
+		"isolated": ctx.isolated,
 	}
 	# Flow the mandate scope down so each child runner enforces it too (shipped gate).
 	if ctx.in_scope:

@@ -80,5 +80,34 @@ class TestDetectMode(unittest.TestCase):
         self.assertEqual(self._run_detect("take a look at this thing", "banana"), "chat")
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestResolveLlmCredentials(unittest.TestCase):
+    """V-AI-01: the platform LLM key must never be sent to a caller-overridden api_base."""
+
+    PLAT_KEY = "PLATFORM_KEY"
+
+    def test_default_base_uses_platform_key(self):
+        from secator.tasks.ai import resolve_llm_credentials
+        base, key = resolve_llm_credentials("", "", "", self.PLAT_KEY)
+        self.assertEqual(base, "")
+        self.assertEqual(key, self.PLAT_KEY)
+
+    def test_base_matching_platform_uses_platform_key(self):
+        from secator.tasks.ai import resolve_llm_credentials
+        base, key = resolve_llm_credentials("https://plat/v1", "", "https://plat/v1", self.PLAT_KEY)
+        self.assertEqual(key, self.PLAT_KEY)
+
+    def test_custom_base_with_own_key_uses_own_key(self):
+        from secator.tasks.ai import resolve_llm_credentials
+        base, key = resolve_llm_credentials("https://attacker/v1", "MYKEY", "", self.PLAT_KEY)
+        self.assertEqual(base, "https://attacker/v1")
+        self.assertEqual(key, "MYKEY")
+
+    def test_custom_base_without_key_refuses_and_never_leaks_platform_key(self):
+        from secator.tasks.ai import resolve_llm_credentials
+        with self.assertRaises(ValueError):
+            resolve_llm_credentials("https://attacker/v1", "", "", self.PLAT_KEY)
+
+
 if __name__ == '__main__':
     unittest.main()

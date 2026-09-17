@@ -245,6 +245,9 @@ _FORBIDDEN_CHILD_OPT_KEYS = frozenset({
 	"dry_run",
 	"exporters",
 	"enable_reports",
+	# M1: a child must never lower the sandbox — `isolated` is force-inherited from the
+	# parent in _child_run_opts, so the LLM/child cannot set it here.
+	"isolated",
 })
 
 # Cap a spawned subagent's iteration budget so it can't be told to loop unbounded.
