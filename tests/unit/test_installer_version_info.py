@@ -4,9 +4,12 @@ from unittest import mock
 
 import requests
 
+from secator.config import CONFIG
 from secator.installer import get_version_info
 
 
+# CI runs with SECATOR_OFFLINE_MODE=1, which skips the remote lookup entirely.
+@mock.patch.object(CONFIG, 'offline_mode', False)
 class TestGetVersionInfoUnreachable(unittest.TestCase):
 
 	@mock.patch('secator.installer.get_version', return_value='1.2.3')
