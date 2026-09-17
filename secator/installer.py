@@ -696,18 +696,23 @@ def get_version_info(name, version_flag=None, github_handle=None, install_github
 				info['latest_version'] = latest_version
 				info['source'] = 'github'
 			elif install_cmd and install_cmd.startswith('pip'):
-				req = requests.get(f'https://pypi.python.org/pypi/{name}/json')
-				version = parse_version('0')
-				if req.status_code == requests.codes.ok:
+				try:
+					req = requests.get(f'https://pypi.org/pypi/{name}/json', timeout=5)
+				except requests.RequestException as e:  # proxy / TLS / DNS: degrade to "latest unknown"
+					debug(f'Failed to fetch latest version for {name} from pypi: {e}', sub='installer')
+					info['errors'].append(f'Cannot reach pypi to get latest version: {e}')
+					req = None
+				# NB: do NOT reuse `version` here — it holds the caller's current version.
+				pypi_version = parse_version('0')
+				if req is not None and req.status_code == requests.codes.ok:
 					j = json.loads(req.text.encode(req.encoding))
 					releases = j.get('releases', [])
 					for release in releases:
 						ver = parse_version(release)
 						if ver and not ver.is_prerelease and not ver.is_postrelease and not ver.is_devrelease:
-							version = max(version, ver)
-							latest_version = str(version)
+							pypi_version = max(pypi_version, ver)
+							latest_version = str(pypi_version)
 							info['source'] = 'pypi'
-				version = str(version) if version else None
 			else:
 				info['errors'].append('Cannot get latest version for query method (github, pip) is available')
 	info['latest_version'] = f'v{latest_version}' if install_version and install_version.startswith('v') else latest_version  # noqa: E501
@@ -746,6 +751,8 @@ def get_version_info(name, version_flag=None, github_handle=None, install_github
 		info['status'] = 'latest unknown'
 		if CONFIG.offline_mode:
 			info['status'] += r' [dim orange1]\[offline][/]'
+		elif any('Cannot reach' in e for e in info['errors']):
+			info['status'] += r' [dim orange1]\[unreachable][/]'
 
 	return info
 
