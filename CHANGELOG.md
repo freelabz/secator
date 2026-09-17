@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.1](https://github.com/freelabz/secator/compare/v0.44.0...v0.44.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **cli:** workspace summary crashes when a finding type is empty ([#1404](https://github.com/freelabz/secator/issues/1404)) ([c542207](https://github.com/freelabz/secator/commit/c5422072be9d4b6949582e56ab03aca4137263e0))
+
 ## [0.44.0](https://github.com/freelabz/secator/compare/v0.43.3...v0.44.0) (2026-09-17)
 
 
