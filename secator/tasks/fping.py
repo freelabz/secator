@@ -8,12 +8,13 @@ from secator.definitions import (
 )
 # fmt: on
 from secator.output_types import Ip
-from secator.tasks._categories import ReconIp
+from secator.tasks._categories import ReconMixin
+from secator.runners import Command
 from secator.utils import validate_cidr_range
 
 
 @task()
-class fping(ReconIp):
+class fping(Command, ReconMixin):
 	"""Send ICMP echo probes to network hosts, similar to ping, but much better."""
 
 	cmd = 'fping -a -A'

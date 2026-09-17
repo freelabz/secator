@@ -3,11 +3,12 @@ from secator.definitions import (DELAY, DOMAIN, HOST, OPT_NOT_SUPPORTED, PROXY,
 							   RATE_LIMIT, RETRIES, THREADS, TIMEOUT)
 from secator.output_types import Subdomain
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import ReconDns
+from secator.tasks._categories import ReconMixin
+from secator.runners import Command
 
 
 @task()
-class subfinder(ReconDns):
+class subfinder(Command, ReconMixin):
 	"""Fast passive subdomain enumeration tool."""
 	cmd = 'subfinder -cs'
 	input_types = [HOST]

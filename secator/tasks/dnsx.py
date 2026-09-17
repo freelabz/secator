@@ -6,13 +6,14 @@ from secator.definitions import (HOST, CIDR_RANGE, DELAY, IP, OPT_PIPE_INPUT, PR
 								 RATE_LIMIT, RETRIES, THREADS, TIMEOUT, WORDLIST, OPT_NOT_SUPPORTED)
 from secator.output_types import Record, Ip, Subdomain, Error, Warning
 from secator.output_types.ip import IpProtocol
-from secator.tasks._categories import ReconDns
+from secator.tasks._categories import ReconMixin
+from secator.runners import Command
 from secator.serializers import JSONSerializer
 from secator.utils import extract_domain_info, process_wordlist
 
 
 @task()
-class dnsx(ReconDns):
+class dnsx(Command, ReconMixin):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
 	cmd = 'dnsx -resp -recon'
 	tags = ['dns', 'fuzz']
