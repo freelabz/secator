@@ -12,6 +12,18 @@ tags: [recon, cidr, dns, network, internal, http, crawl, ssl, vuln, secrets]
 input_types:
   - cidr_range
   - slug
+
+options:
+  passive:
+    is_flag: True
+    default: False
+    help: "Passive scan (no active requests to targets)"
+    short: ps
+    set:
+      host_recon_passive: True
+      url_crawl_passive: True
+      url_vuln_passive: True
+
 workflows:
   cidr_recon:
   host_recon:
