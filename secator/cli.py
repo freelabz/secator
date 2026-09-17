@@ -1415,7 +1415,7 @@ def _apply_format(results, fmt):
 						if val is not None:
 							formatted.append(str(val))
 					new_results[_actual_type] = formatted
-				else:
+				elif nonempty_types:
 					console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
 			elif _type not in FINDING_TYPES_LOWER:
 				# Dotted field path (e.g. extra_data.published) where the first part is not a
@@ -1598,7 +1598,7 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 			res = _apply_format(res, fmt)
 		if count or uniq:
 			res = _aggregate_values(res, count=count, uniq=uniq, sort_given=bool(sort))
-		rows = res[_type]
+		rows = res.get(_type, [])  # _apply_format drops the type when there is nothing to format
 		return rows[:limit] if limit else rows
 
 	if group and cls is not None and getattr(cls, '_group_by', None):
