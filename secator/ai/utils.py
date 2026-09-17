@@ -245,6 +245,9 @@ _FORBIDDEN_CHILD_OPT_KEYS = frozenset({
 	"dry_run",
 	"exporters",
 	"enable_reports",
+	# A child must never lower its isolation level: `isolated` is force-inherited from the
+	# parent in _child_run_opts, so a child-supplied value is stripped here.
+	"isolated",
 })
 
 # Cap a spawned subagent's iteration budget so it can't be told to loop unbounded.

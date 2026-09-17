@@ -80,5 +80,34 @@ class TestDetectMode(unittest.TestCase):
         self.assertEqual(self._run_detect("take a look at this thing", "banana"), "chat")
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestResolveLlmCredentials(unittest.TestCase):
+    """The configured API key must never be sent to a caller-overridden api_base."""
+
+    CONFIG_KEY = "CONFIGURED_KEY"
+
+    def test_default_base_uses_configured_key(self):
+        from secator.tasks.ai import resolve_llm_credentials
+        base, key = resolve_llm_credentials("", "", "", self.CONFIG_KEY)
+        self.assertEqual(base, "")
+        self.assertEqual(key, self.CONFIG_KEY)
+
+    def test_base_matching_configured_uses_configured_key(self):
+        from secator.tasks.ai import resolve_llm_credentials
+        base, key = resolve_llm_credentials("https://configured/v1", "", "https://configured/v1", self.CONFIG_KEY)
+        self.assertEqual(key, self.CONFIG_KEY)
+
+    def test_custom_base_with_own_key_uses_own_key(self):
+        from secator.tasks.ai import resolve_llm_credentials
+        base, key = resolve_llm_credentials("https://custom/v1", "MYKEY", "", self.CONFIG_KEY)
+        self.assertEqual(base, "https://custom/v1")
+        self.assertEqual(key, "MYKEY")
+
+    def test_custom_base_without_key_refuses_and_never_leaks_configured_key(self):
+        from secator.tasks.ai import resolve_llm_credentials
+        with self.assertRaises(ValueError):
+            resolve_llm_credentials("https://custom/v1", "", "", self.CONFIG_KEY)
+
+
 if __name__ == '__main__':
     unittest.main()
