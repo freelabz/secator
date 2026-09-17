@@ -45,7 +45,7 @@ class nuclei(VulnMulti):
 		'display_templates': {'is_flag': True, 'default': False, 'short': 'dt', 'help': 'Display loaded template names.'},
 		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
 		'exclude_tags': {'type': str, 'short': 'etags', 'help': 'Exclude tags'},
-		'hang_monitor': {'is_flag': True, 'short': 'hm', 'default': True, 'help': 'Enable nuclei hang monitoring'},
+		'hang_monitor': {'is_flag': True, 'short': 'hm', 'default': False, 'help': 'Enable nuclei hang monitoring (debug: nuclei os.Exit(1)s itself when its goroutines look stuck for ~60s, e.g. slow OAST/RPC templates)'},  # noqa: E501
 		'headless_bulk_size': {'type': int, 'short': 'hbs', 'help': 'Maximum number of headless hosts to be analzyed in parallel per template'},  # noqa: E501
 		'input_mode': {'type': str, 'short': 'im', 'help': 'Mode of input file (list, burp, jsonl, yaml, openapi, swagger)'},
 		'interactsh_server': {'type': str, 'default': None, 'short': 'iserver', 'help': 'InteractSH server url for self-hosted instance (default: oast.pro,oast.live,oast.site,oast.online,oast.fun,oast.me)'},  # noqa: E501
