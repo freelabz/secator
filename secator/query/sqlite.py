@@ -122,9 +122,49 @@ class SqliteBackend(QueryBackend):
 
 	name = 'sqlite'
 
+	# Runner tables (one JSON-blob row per runner), per hooks/sqlite.py schema.
+	RUNNER_TABLES = ('tasks', 'workflows', 'scans')
+
 	def _get_conn(self):
 		from secator.hooks.sqlite import get_sqlite_conn
 		return get_sqlite_conn(self.config.get('db_path'))
+
+	def list_runners(self, workspace_id=None, runner_type=None, has_parent=None):
+		"""List runners from the tasks/workflows/scans tables (unpacking the JSON ``data`` blob).
+
+		Mirrors the mongodb backend's contract (tags each doc with ``_type``/``_id_str``/
+		``_workspace``). Without this, SqliteBackend inherited the base stub returning ``[]`` — so
+		the store-driven live poll read no status/progress on sqlite: the panel stayed PENDING and
+		the poll never reached a terminal status (hung until the inactivity timeout).
+		"""
+		try:
+			conn = self._get_conn()
+			if runner_type:
+				rtype = runner_type.rstrip('s') + 's'
+				tables = [rtype] if rtype in self.RUNNER_TABLES else []
+			else:
+				tables = list(self.RUNNER_TABLES)
+			runners = []
+			for table in tables:
+				sql = f'SELECT data FROM {table}'
+				params = []
+				if workspace_id:
+					sql += ' WHERE workspace_id = ?'
+					params.append(workspace_id)
+				for (data,) in conn.execute(sql, params).fetchall():
+					doc = json.loads(data)
+					if has_parent is not None and bool(doc.get('has_parent')) != has_parent:
+						continue
+					doc['_type'] = table
+					singular = table.rstrip('s')
+					runner_id = doc.get('context', {}).get(f'{singular}_id', '')
+					doc['_id_str'] = f'{table}/{runner_id}' if runner_id else table
+					doc['_workspace'] = doc.get('context', {}).get('workspace_name', '')
+					runners.append(doc)
+			return runners
+		except Exception as e:
+			console.print(Warning(message=f'SQLite list_runners failed: {e}'))
+			return []
 
 	def _execute_search(self, query: dict, limit: int = 0, exclude_fields: list = None) -> List[Dict[str, Any]]:
 		try:

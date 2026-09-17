@@ -75,6 +75,40 @@ def update_runner(self):
 	debug(f'wrote runner info to {path}', sub='hooks.json', verbose=True)
 
 
+def _child_fqn(task_spec):
+	"""The fqn a child runner will use for its report_<fqn>.json — must match Runner.fqn so the
+	child overwrites the same file when it runs (node_id, '.'/'/' -> '_', '_<chunk>' if chunked)."""
+	ctx = task_spec.get('context', {}) or {}
+	base = (ctx.get('node_id') or task_spec.get('name', '')).replace('.', '_').replace('/', '_')
+	chunk = task_spec.get('chunk')
+	return f'{base}_{chunk}' if chunk else base
+
+
+def on_build(self, task_spec):
+	"""Write a PENDING child runner doc at build time (mongodb/sqlite parity), so list_runners shows
+	the full task tree before children run. json shards per-child by fqn; the child overwrites its
+	own report_<fqn>.json via update_runner when it starts."""
+	parent_type = self.config.type
+	child_type = 'workflow' if parent_type == 'scan' else 'task'
+	path = Path(self.reports_folder) / f'report_{_child_fqn(task_spec)}.json'
+	doc = {
+		'name': task_spec.get('name'),
+		'status': 'PENDING',
+		'done': False,
+		'progress': 0,
+		'has_parent': True,
+		'chunk': task_spec.get('chunk'),
+		'chunk_count': task_spec.get('chunk_count'),
+		'config': {'type': child_type, 'name': task_spec.get('name')},
+		'context': dict(task_spec.get('context', {})),
+	}
+	with atomic_json(path, default=_empty_report) as data:
+		# Don't clobber a child that already started (redelivery / rebuild race).
+		if (data.get('info') or {}).get('status') in (None, '', 'PENDING'):
+			data['info'] = doc
+	return task_spec
+
+
 def update_finding(self, item):
 	"""Append a single finding to this runner's results.ndjson (live, O(1)).
 
@@ -98,6 +132,7 @@ def update_finding(self, item):
 
 HOOKS = {
 	Scan: {
+		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],
@@ -105,6 +140,7 @@ HOOKS = {
 		'on_end': [update_runner, announce_report],
 	},
 	Workflow: {
+		'on_build': [on_build],
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],
