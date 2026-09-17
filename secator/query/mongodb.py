@@ -9,6 +9,15 @@ from secator.rich import console
 RUNNER_COLLECTIONS = ('tasks', 'workflows', 'scans')
 
 
+def _carry_uuid(doc):
+	"""Drop the native `_id` but surface it as `_uuid` — the backend-agnostic finding id every
+	backend returns, so callers (dedup, updates) can key on one field across mongodb/sqlite/json."""
+	_id = doc.pop('_id', None)
+	if _id is not None and not doc.get('_uuid'):
+		doc['_uuid'] = str(_id)
+	return doc
+
+
 class MongoDBBackend(QueryBackend):
 	"""Query backend for MongoDB."""
 
@@ -46,7 +55,7 @@ class MongoDBBackend(QueryBackend):
 
 			results = []
 			for doc in cursor:
-				doc.pop('_id', None)
+				_carry_uuid(doc)
 				results.append(doc)
 
 			return results
@@ -61,7 +70,7 @@ class MongoDBBackend(QueryBackend):
 			db = client.main
 			batch = []
 			for doc in db.findings.find(query).batch_size(batch_size):
-				doc.pop('_id', None)
+				_carry_uuid(doc)
 				batch.append(doc)
 				if len(batch) >= batch_size:
 					yield batch
@@ -83,8 +92,15 @@ class MongoDBBackend(QueryBackend):
 			return 0
 
 	def _execute_update(self, query: dict, update: dict) -> int:
-		"""Update documents matching query in MongoDB."""
+		"""Update documents matching query in MongoDB. A `_uuid` predicate is translated to the native
+		`_id` — findings are keyed on ObjectId; `_uuid` is the backend-agnostic id surfaced by
+		search/iterate (see `_carry_uuid`)."""
+		from bson import ObjectId
 		client = self._get_client()
+		uid = query.get('_uuid')
+		if uid is not None and ObjectId.is_valid(uid):
+			query = {k: v for k, v in query.items() if k != '_uuid'}
+			query['_id'] = ObjectId(uid)
 		result = client.main.findings.update_one(query, update)
 		return result.modified_count
 

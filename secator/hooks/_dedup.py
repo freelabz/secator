@@ -1,6 +1,45 @@
 # secator/hooks/_dedup.py
 
 
+def tag_duplicates(engine, ws_id, exclude_types=(), max_items=0, copy_fields=None):
+	"""Tag duplicate findings in a workspace via a QueryEngine — backend-agnostic.
+
+	Reads/writes through the backend's raw `_execute_search`/`_execute_update` (bypassing the
+	base-query PROTECTED_FIELDS strip, so `_context.workspace_duplicate` and `_tagged` are usable)
+	and keys every update on the uniform `_uuid` that every backend now surfaces.
+
+	Full evaluation (not incremental): the incremental `_tagged:{$in:[False,None]}` filter relies on
+	Mongo's null-matching, which SQL `IN`/`!=` don't share — so we re-evaluate the whole workspace,
+	capped by `max_items`. On-demand (CLI `--dedupe` / `workspace summary`), correctness over speed.
+	Returns the number of findings updated.
+	# ponytail: full scan each call; add per-backend incremental (NULL-safe untagged filter) only if
+	# dedupe becomes a hot path.
+	"""
+	from secator.output_types._base import load_output_types
+	b = engine.backend
+	ws = {'_context.workspace_id': str(ws_id)}
+	keep = lambda f: f._type not in exclude_types  # noqa: E731
+	mains = [f for f in load_output_types(
+		b._execute_search({**ws, '_context.workspace_duplicate': False, '_tagged': True}, limit=0)
+	) if keep(f)]
+	untagged = [f for f in load_output_types(
+		b._execute_search(dict(ws), limit=max_items or 0)
+	) if keep(f)]
+	updates = compute_duplicate_updates(mains, untagged, copy_fields)
+	for uuid_, upd in updates.items():
+		if uuid_:
+			b._execute_update({'_uuid': uuid_}, {'$set': upd})
+	return len(updates)
+
+
+def maybe_tag_duplicates(engine, ws_id=None, **kwargs):
+	"""Tag duplicates for on-demand dedup, unless the backend is `api` (the cloud server tags its
+	own store — client-side tagging would be chatty and race it). Returns the number updated."""
+	if engine.backend.name == 'api':
+		return 0
+	return tag_duplicates(engine, ws_id or engine.backend.workspace_id, **kwargs)
+
+
 def compute_duplicate_updates(workspace_findings, untagged_findings, copy_fields=None):
 	"""Compute duplicate-tagging updates for a set of findings (backend-agnostic).
 

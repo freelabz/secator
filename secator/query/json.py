@@ -95,6 +95,19 @@ def get_nested_field(item, key: str) -> Any:
 	return value
 
 
+def _set_nested(item: dict, key: str, value) -> None:
+	"""Set a dot-notation field (e.g. '_context.workspace_duplicate'), creating intermediate dicts,
+	so `get_nested_field` reads it back. A bare key is a plain assignment."""
+	keys = key.split('.')
+	for k in keys[:-1]:
+		nxt = item.get(k)
+		if not isinstance(nxt, dict):
+			nxt = {}
+			item[k] = nxt
+		item = nxt
+	item[keys[-1]] = value
+
+
 def match_query(item: dict, query: dict) -> bool:
 	"""Check if item matches MongoDB-style query."""
 	if '$and' in query:
@@ -318,7 +331,8 @@ class JsonBackend(QueryBackend):
 					if isinstance(bucket, list):
 						for item in bucket:
 							if match_query(item, query):
-								item.update(set_fields)
+								for k, v in set_fields.items():
+									_set_nested(item, k, v)   # dotted key -> nested, so get_nested_field reads it back
 								count += 1
 		return count
 

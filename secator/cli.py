@@ -946,6 +946,9 @@ def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort
 	# Store-side dedup (mirrors report.build's stream path). MUST nest in `$and`: a top-level
 	# `_context.workspace_duplicate` is a PROTECTED_FIELD and gets stripped by _merge_query.
 	dup = {'_context.workspace_duplicate': {'$ne': True}} if CONFIG.runners.remove_duplicates else None
+	if dup:  # nothing tags duplicates at scan time anymore — tag on demand (api excepted)
+		from secator.hooks._dedup import maybe_tag_duplicates
+		maybe_tag_duplicates(engine)
 	aggregating = bool(sort or count or uniq or group)
 	# STREAM per concrete type (never materialize all N); _aggregate_streamed collapses incrementally
 	# so peak memory is bounded by the result size, not the finding count — safe for 100k+.
