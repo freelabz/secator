@@ -17,10 +17,9 @@ from secator.output_types import Subdomain, Url, Target, Vulnerability
 IN = 'app.example.com'          # in-scope input
 IN_SUB = 'api.example.com'      # in-scope discovered host
 OUT_HOST = 'assets.example.net'     # out-of-scope discovered host (classifies as a network host)
-# An out-of-scope host whose underscore makes it classify as `str` (non-network), so
-# host_in_scope fail-opens it — exactly as the INPUT filter already does. This `str`-host blind
-# spot is a pre-existing limitation of the shared predicate, not of this guard.
-STR_OUT = 'bucket_1234.example.net'
+# Out-of-scope host with an underscore label (cloud PTR-style). Since #1393 autodetect_type
+# classifies these as hosts (rfc_2782), so the guard drops them too instead of failing open.
+UNDERSCORE_OUT = 'bucket_1234.example.net'
 
 
 @task()
@@ -32,7 +31,7 @@ class scopeprobe(PythonRunner):
 	def yielder(self):
 		yield Subdomain(host=IN_SUB, domain='example.com')
 		yield Subdomain(host=OUT_HOST, domain='example.net')
-		yield Subdomain(host=STR_OUT, domain='example.net')
+		yield Subdomain(host=UNDERSCORE_OUT, domain='example.net')
 		yield Url(url=f'https://{IN_SUB}/a')
 		yield Url(url=f'https://{OUT_HOST}/a')
 		yield Target(name=OUT_HOST)
@@ -78,8 +77,8 @@ class TestScopeOutputGuard(unittest.TestCase):
 		# Hostless findings (vulns/tags/info) are never scoped.
 		self.assertTrue(any(r._type == 'vulnerability' for r in results))
 
-		# Documented pass-through: a `str`-classified host fail-opens (same as the input filter).
-		self.assertIn(STR_OUT, subs)
+		# Underscore hosts are network hosts since #1393 -> scoped like any other host.
+		self.assertNotIn(UNDERSCORE_OUT, subs)
 
 	def test_default_run_persists_everything(self):
 		results = self._run()  # no scope -> guard is a no-op
