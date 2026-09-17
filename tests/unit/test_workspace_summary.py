@@ -171,3 +171,8 @@ class TestSummaryCommandWiring(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+	def test_empty_group_returns_none_marker(self):
+		# #1402: the default template groups vulns first; an empty workspace must not KeyError.
+		out = _summary_query(FakeEngine([]), 'vulnerability', group=True, fmt='severity', count=True)
+		self.assertEqual(out, '[dim](none)[/]')
