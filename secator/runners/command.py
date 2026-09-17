@@ -737,6 +737,7 @@ class Command(Runner):
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
 		last_stats_time = 0
+		monitor_errors = 0
 
 		while not self.monitor_stop_event.is_set():
 			if not self.process or not self.process.pid:
@@ -788,11 +789,12 @@ class Command(Runner):
 				self.debug('Monitor: process exited', sub='monitor')
 				break
 			except Exception as e:
-				self.debug(f'Monitor thread error: {e}', sub='monitor')
-				warning = Warning(message=f'Monitor thread error: {e}')
-				if self.monitor_queue is not None:
-					self.monitor_queue.put(warning)
-				break
+				# Transient errors (e.g. EMFILE while reading /proc under fd pressure) must not stop the
+				# monitor: it also enforces the timeout and memory limit. Warn once, retry next tick.
+				monitor_errors += 1
+				self.debug(f'Monitor thread error ({monitor_errors}): {e}', sub='monitor')
+				if monitor_errors == 1 and self.monitor_queue is not None:
+					self.monitor_queue.put(Warning(message=f'Monitor thread error: {e}'))
 
 			# Sleep for a short interval before next check (stat update frequency)
 			self.monitor_stop_event.wait(CONFIG.runners.stat_update_frequency)
@@ -802,7 +804,7 @@ class Command(Runner):
 		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True)
+		stats = Command.get_process_info(proc, children=True, attrs=Command.MONITOR_ATTRS)
 		total_mem = 0
 		for info in stats:
 			name = info['name']
@@ -812,7 +814,7 @@ class Command(Runner):
 			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
 			total_mem += mem_rss
 			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
-			net_conns = info.get('net_connections') or []
+			net_conns = info.get('net_connections') or info.get('connections') or []
 			# extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
 			yield Stat(
 				name=name,
@@ -842,7 +844,7 @@ class Command(Runner):
 			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
 			total_mem += mem_rss
 			self.debug(f'process: {name} pid: {pid} memory: {mem_rss}MB', sub='stats')
-			net_conns = info.get('net_connections') or []
+			net_conns = info.get('net_connections') or info.get('connections') or []
 			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
 			yield Stat(
 				name=name,
@@ -856,19 +858,25 @@ class Command(Runner):
 		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
 			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
 
+	# The only psutil attrs the monitor thread reads. as_dict() with no attrs collects everything
+	# (memory_maps, open_files, environ, ...): ~10x the cost and many more /proc opens per tick.
+	MONITOR_ATTRS = ['name', 'pid', 'cpu_percent', 'memory_info', 'memory_percent',
+		'net_connections' if hasattr(psutil.Process, 'net_connections') else 'connections']  # renamed in psutil 6
+
 	@staticmethod
-	def get_process_info(process, children=False):
+	def get_process_info(process, children=False, attrs=None):
 		"""Get process information from psutil.
 
 		Args:
 			process (subprocess.Process): Process.
 			children (bool): Whether to gather stats about children processes too.
+			attrs (list[str] | None): psutil attrs to collect (None: everything).
 		"""
 		try:
 			# fmt: off
 			data = {
 				k: v._asdict() if hasattr(v, '_asdict') else v
-				for k, v in process.as_dict().items()
+				for k, v in process.as_dict(attrs=attrs).items()
 				if k not in ['memory_maps', 'open_files', 'environ']
 			}
 			# fmt: on
@@ -877,7 +885,7 @@ class Command(Runner):
 			return
 		if children:
 			for subproc in process.children(recursive=True):
-				yield from Command.get_process_info(subproc, children=False)
+				yield from Command.get_process_info(subproc, children=False, attrs=attrs)
 
 	def run_item_loaders(self, line):
 		"""Run item loaders against an output line.
