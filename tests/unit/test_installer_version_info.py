@@ -8,9 +8,16 @@ from secator.config import CONFIG
 from secator.installer import get_version_info
 
 
-# CI runs with SECATOR_OFFLINE_MODE=1, which skips the remote lookup entirely.
-@mock.patch.object(CONFIG, 'offline_mode', False)
 class TestGetVersionInfoUnreachable(unittest.TestCase):
+
+	# CI runs with SECATOR_OFFLINE_MODE=1, which skips the remote lookup entirely. Save/restore by
+	# hand: mock.patch.object on the pydantic CONFIG restores a bogus value and leaks to other tests.
+	def setUp(self):
+		self._offline = CONFIG.offline_mode
+		CONFIG.offline_mode = False
+
+	def tearDown(self):
+		CONFIG.offline_mode = self._offline
 
 	@mock.patch('secator.installer.get_version', return_value='1.2.3')
 	@mock.patch('secator.installer.which')
