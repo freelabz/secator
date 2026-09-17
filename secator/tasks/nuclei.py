@@ -1,8 +1,12 @@
+import json
 import shlex
+
+from pathlib import Path
 
 from secator.config import CONFIG
 from secator.cve import extract_software_and_version
 from secator.decorators import task
+from secator.utils import download_file
 
 # fmt: off
 from secator.definitions import (
@@ -11,7 +15,7 @@ from secator.definitions import (
 	REMEDIATION, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT
 )
 # fmt: on
-from secator.output_types import Progress, Tag, Technology, Vulnerability
+from secator.output_types import Info, Progress, Tag, Technology, Vulnerability
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
 
@@ -41,6 +45,7 @@ class nuclei(VulnMulti):
 	opts = {
 		'automatic_scan': {'is_flag': True, 'short': 'as', 'help': 'Automatic web scan using wappalyzer technology detection to tags mapping'},  # noqa: E501
 		'bulk_size': {'type': int, 'short': 'bs', 'help': 'Maximum number of hosts to be analyzed in parallel per template'},  # noqa: E501
+		'dast': {'is_flag': True, 'default': False, 'help': 'Enable DAST fuzzing templates (required to fuzz OpenAPI/Swagger endpoints)'},  # noqa: E501
 		'debug': {'type': str, 'help': 'Debug mode'},
 		'display_templates': {'is_flag': True, 'default': False, 'short': 'dt', 'help': 'Display loaded template names.'},
 		'exclude_severity': {'type': str, 'short': 'es', 'help': 'Exclude severity'},
@@ -152,6 +157,32 @@ class nuclei(VulnMulti):
 			self.cmd += ' -ts'
 			self.cmd += f' -elog {output_folder}/{self.fqn}_error.json'
 			self.cmd += f' -tlog {output_folder}/{self.fqn}_trace.json'
+
+	@staticmethod
+	def on_cmd(self):
+		# In openapi/swagger input-mode, nuclei reads the spec from an input file (-l), not from a target (-u).
+		# When the spec is a remote URL, download it first and pass it via -l so the input provider is not empty.
+		input_mode = self.get_opt_value('input_mode')
+		if input_mode in ('openapi', 'swagger') and self.inputs:
+			spec = self.inputs[0]
+			if spec.startswith(('http://', 'https://')):
+				dest = Path(f'{self.reports_folder}/.inputs')
+				dest.mkdir(parents=True, exist_ok=True)
+				spec_file = download_file(spec, target_folder=dest, offline_mode=CONFIG.offline_mode, type='openapi spec')
+				if spec_file:
+					# nuclei's openapi import only supports OpenAPI 3.0. Skip 3.1+ specs gracefully (schemathesis
+					# covers them) instead of crashing on the incompatible schema.
+					version = ''
+					try:
+						with open(spec_file) as f:
+							version = str(json.load(f).get('openapi', ''))
+					except Exception:
+						pass
+					if version.startswith('3.1'):
+						self.add_result(Info(message=f'Skipping nuclei openapi scan: OpenAPI {version} is not supported by nuclei (3.0 only)'))  # noqa: E501
+						self.cmd = 'true'
+						return
+					self.cmd = self.cmd.replace(f'-u {spec}', f'-l {shlex.quote(str(spec_file))}')
 
 	@staticmethod
 	def id_extractor(item):
