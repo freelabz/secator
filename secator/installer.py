@@ -402,8 +402,9 @@ class SourceInstaller:
 
 		# Run command. Authenticate git clones from GitHub with the configured token (via git's env-based
 		# config, so the token never shows up in the printed command): anonymous clones get rate-limited.
+		# git only applies the rewrite to URLs starting with https://github.com/, so it's a no-op otherwise.
 		cls_attributes = {'shell': True}
-		if 'github.com' in install_cmd and CONFIG.cli.github_token:
+		if CONFIG.cli.github_token:
 			cls_attributes['extra_env'] = {
 				'GIT_CONFIG_COUNT': '1',
 				'GIT_CONFIG_KEY_0': f'url.https://x-access-token:{CONFIG.cli.github_token}@github.com/.insteadOf',
