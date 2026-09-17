@@ -244,6 +244,8 @@ class AiAddon(StrictModel):
 	enabled: bool = False
 	api_key: str = ''
 	api_base: str = ''
+	# SECURITY (LLM CREDS): gate the "custom api_base needs a caller-supplied api_key" rule; off = configured key is reused for any base. Env: SECATOR_ADDONS_AI_CUSTOM_DISALLOW_CONFIG_TOKEN.
+	custom_disallow_config_token: bool = False
 	default_model: str = 'claude-sonnet-4-6'
 	intent_model: str = 'claude-haiku-4-5'
 	temperature: float = 0.7

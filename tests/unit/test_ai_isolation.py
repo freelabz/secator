@@ -82,5 +82,32 @@ class TestIsolatedShellRouting(unittest.TestCase):
 		self.assertTrue(any(isinstance(r, Ai) and r.ai_type == "shell_output" for r in results))
 
 
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestChildInheritsIsolated(unittest.TestCase):
+	"""A spawned child force-inherits the parent's `isolated` and can never lower it."""
+
+	def test_child_inherits_parent_isolated_true(self):
+		from secator.ai.actions import _child_run_opts
+		self.assertTrue(_child_run_opts(_ctx(isolated=True))["isolated"])
+
+	def test_child_inherits_parent_isolated_false(self):
+		from secator.ai.actions import _child_run_opts
+		self.assertFalse(_child_run_opts(_ctx(isolated=False))["isolated"])
+
+	def test_llm_cannot_set_isolated_on_child(self):
+		from secator.ai.utils import _sanitize_child_opts
+		# An LLM-supplied `isolated` is stripped before it can reach the child run_opts.
+		self.assertNotIn("isolated", _sanitize_child_opts({"isolated": False, "ports": "80"}))
+
+	def test_child_cannot_lower_isolated(self):
+		# Parent is isolated; LLM tries isolated=False. After sanitize + the real merge order
+		# used in _run_runner ({**_child_run_opts(ctx), **llm_opts}), isolation stays True.
+		from secator.ai.actions import _child_run_opts
+		from secator.ai.utils import _sanitize_child_opts
+		llm_opts = _sanitize_child_opts({"isolated": False})
+		run_opts = {**_child_run_opts(_ctx(isolated=True)), **llm_opts}
+		self.assertTrue(run_opts["isolated"])
+
+
 if __name__ == '__main__':
 	unittest.main()

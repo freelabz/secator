@@ -87,6 +87,21 @@ class TestScopeMatcher(unittest.TestCase):
 		self.assertFalse(result)  # bad allow entry -> nothing matches -> out of scope
 		self.assertLess(elapsed, 1.0)
 
+	def test_alternation_under_quantifier_is_rejected(self):
+		# (a|aa)+ style: overlapping alternatives under an unbounded quantifier
+		# backtrack exponentially even with no quantifier *inside* the group.
+		# Must be rejected fast (fail-safe non-matching), not executed.
+		for bad in [r'(a|aa)+x', r'(foo|foobar)*', r'(a|a?)*b']:
+			start = time.monotonic()
+			result = host_in_scope('a' * 40 + '.com', [bad], [])
+			elapsed = time.monotonic() - start
+			self.assertFalse(result, bad)
+			self.assertLess(elapsed, 1.0, bad)
+		# Normal scope regexes / globs must still compile and match.
+		self.assertTrue(target_in_scope('app.acme.com', [r'app\.acme\.com']))
+		self.assertTrue(target_in_scope('dev.acme.com', [r'(dev|staging|prod)\.acme\.com']))
+		self.assertTrue(target_in_scope('www.acme.com', ['*.acme.com']))
+
 	def test_uncompilable_regex_is_skipped(self):
 		# An un-compilable entry contributes no match (does not raise).
 		self.assertFalse(target_in_scope('acme.com', [r'(unclosed']))

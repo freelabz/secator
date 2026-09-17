@@ -141,6 +141,22 @@ def _yield_tool_results(runner, collected):
 		         _context=dict(runner.context))
 
 
+def resolve_llm_credentials(caller_api_base, caller_api_key, config_api_base, config_api_key, disallow_config_token=False):
+	"""Resolve the (api_base, api_key, error) triple for an AI run.
+
+	SECURITY (LLM CREDS): when ``disallow_config_token`` is on and a caller overrides ``api_base``
+	without supplying their own ``api_key``, the configured key is NOT reused (it would be sent to
+	an unintended endpoint) and the run is refused. ``error`` is then a short message the caller
+	yields as an ``Error()`` output — tasks never raise. Off (default) reuses the configured key
+	for any base, so a normal CLI user who sets both keys in config keeps working.
+	"""
+	api_base = caller_api_base or config_api_base
+	custom_base = bool(caller_api_base) and caller_api_base != config_api_base
+	if disallow_config_token and custom_base and not caller_api_key:
+		return api_base, None, "A custom api_base requires you to provide your own api_key."
+	return api_base, (caller_api_key or config_api_key), None
+
+
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (attack or chat mode)."""
@@ -269,6 +285,11 @@ class ai(PythonRunner):
 
 		# Init all options
 		self._init_options()
+
+		# SECURITY (LLM CREDS): refuse (yield Error, never raise) if creds can't be safely resolved.
+		if self._credential_error:
+			yield Error(message=self._credential_error)
+			return
 
 		# Show prompt mode (diagnostic)
 		if self.run_opts.get("show_prompt", False):
@@ -910,8 +931,12 @@ class ai(PythonRunner):
 		self.is_subagent = self.get_opt_value("subagent")
 		self.model = self.get_opt_value("model")
 		self.intent_model = self.get_opt_value("intent_model")
-		self.api_base = self.get_opt_value("api_base") or CONFIG.addons.ai.api_base
-		self.api_key = self.get_opt_value("api_key") or CONFIG.addons.ai.api_key
+		# SECURITY (LLM CREDS): don't reuse the configured key on a caller-overridden api_base (gated).
+		self.api_base, self.api_key, self._credential_error = resolve_llm_credentials(
+			self.get_opt_value("api_base"), self.get_opt_value("api_key"),
+			CONFIG.addons.ai.api_base, CONFIG.addons.ai.api_key,
+			CONFIG.addons.ai.custom_disallow_config_token,
+		)
 		self.sensitive = self.get_opt_value("sensitive")
 		self.mode = self.get_opt_value("mode")
 		self.max_tokens_total = self.get_opt_value("max_tokens_total")
