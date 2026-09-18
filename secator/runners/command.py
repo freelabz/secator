@@ -233,6 +233,7 @@ class Command(Runner):
 
 		# Stat update
 		self.last_updated_stat = None
+		self._cpu_cache = {}  # {pid: (cpu_time, timestamp)}, for CPU % deltas across monitor ticks
 
 		# Process
 		self.process = None
@@ -802,7 +803,7 @@ class Command(Runner):
 		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True)
+		stats = Command.get_process_info(proc, children=True, cpu_cache=self._cpu_cache)
 		total_mem = 0
 		for info in stats:
 			name = info['name']
@@ -857,12 +858,48 @@ class Command(Runner):
 			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
 
 	@staticmethod
-	def get_process_info(process, children=False):
+	def compute_cpu_percent(info, cpu_cache=None):
+		"""Compute CPU usage percent for a process from its ``cpu_times``.
+
+		``psutil.Process.cpu_percent(interval=None)`` always returns ``0.0`` on the first call for a
+		given ``Process`` object, and we build a fresh ``psutil.Process`` on every monitor tick, so
+		``as_dict()['cpu_percent']`` is unusable here (always 0). Derive it from ``cpu_times``
+		instead: difference against the previous sample for this pid when we have one, else average
+		over the process lifetime (so short-lived tasks that never get a 2nd tick still report).
+
+		Args:
+			info (dict): Process info dict (as built by `get_process_info`).
+			cpu_cache (dict): Optional {pid: (cpu_time, timestamp)} carried across ticks.
+
+		Returns:
+			float: CPU usage percent (can exceed 100 on multi-threaded processes).
+		"""
+		times = info.get('cpu_times') or {}
+		# ponytail: user+system only, children_* would double-count live children (reported as their own Stat)
+		cpu_time = (times.get('user') or 0) + (times.get('system') or 0)
+		now = time()
+		pid = info.get('pid')
+		prev = cpu_cache.get(pid) if cpu_cache is not None else None
+		if prev:
+			prev_cpu_time, prev_ts = prev
+			cpu_delta, elapsed = cpu_time - prev_cpu_time, now - prev_ts
+		else:
+			cpu_delta, elapsed = cpu_time, now - (info.get('create_time') or now)
+		if cpu_cache is not None:
+			cpu_cache[pid] = (cpu_time, now)
+		# ponytail: sub-100ms windows (1st tick fires right after spawn) give noisy ratios, report 0
+		if elapsed < 0.1 or cpu_delta < 0:
+			return 0.0
+		return round(cpu_delta / elapsed * 100, 2)
+
+	@staticmethod
+	def get_process_info(process, children=False, cpu_cache=None):
 		"""Get process information from psutil.
 
 		Args:
 			process (subprocess.Process): Process.
 			children (bool): Whether to gather stats about children processes too.
+			cpu_cache (dict): Optional {pid: (cpu_time, timestamp)} carried across monitor ticks.
 		"""
 		try:
 			# fmt: off
@@ -872,12 +909,13 @@ class Command(Runner):
 				if k not in ['memory_maps', 'open_files', 'environ']
 			}
 			# fmt: on
+			data['cpu_percent'] = Command.compute_cpu_percent(data, cpu_cache)
 			yield data
 		except (psutil.Error, FileNotFoundError):
 			return
 		if children:
 			for subproc in process.children(recursive=True):
-				yield from Command.get_process_info(subproc, children=False)
+				yield from Command.get_process_info(subproc, children=False, cpu_cache=cpu_cache)
 
 	def run_item_loaders(self, line):
 		"""Run item loaders against an output line.
