@@ -43,7 +43,7 @@ class wafw00f(Command):
 		'find_all': 'findall',
 		'no_follow_redirects': 'noredirect',
 	}
-	install_version = 'v2.3.1'
+	install_version = 'v2.4.2'
 	install_cmd = 'pipx install git+https://github.com/EnableSecurity/wafw00f.git@[install_version] --force'
 	install_github_bin = False
 	github_handle = 'EnableSecurity/wafw00f'
