@@ -276,7 +276,9 @@ class ai(PythonRunner):
 		# Show prompt mode (diagnostic)
 		if self.run_opts.get("show_prompt", False):
 			show_mode = self.mode or "attack"
-			prompt = get_system_prompt(show_mode, workspace_path=str(self.reports_folder), backend=self.backend)
+			prompt = get_system_prompt(
+				show_mode, workspace_path=str(self.reports_folder), backend=self.backend,
+				in_scope=self.in_scope, out_of_scope=self.out_of_scope)
 			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
 			console.print(prompt, highlight=False, soft_wrap=True)
 			return
@@ -385,7 +387,9 @@ class ai(PythonRunner):
 
 	def _system_prompt_for(self, mode):
 		"""Compute the system prompt for ``mode`` using this runner's workspace + backend."""
-		return get_system_prompt(mode, workspace_path=str(self.reports_folder), backend=self.backend)
+		return get_system_prompt(
+			mode, workspace_path=str(self.reports_folder), backend=self.backend,
+			in_scope=getattr(self, "in_scope", None), out_of_scope=getattr(self, "out_of_scope", None))
 
 	def _rebuild_prompt_and_tools(self):
 		"""Rebuild system_prompt + tool_schemas for the current mode and store them.
