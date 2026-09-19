@@ -313,8 +313,13 @@ class TestRemoteBackend(unittest.TestCase):
 		result = backend._poll_for_answer("session1", "permission", prompt_uuid="abc-123")
 		self.assertEqual(result, "raced in")
 
-	def test_build_pending_prompt_expires_prior_pending(self):
-		"""M10: starting a new prompt marks prior still-pending docs stale."""
+	def test_build_pending_prompt_expires_only_same_type(self):
+		"""M10: a new prompt supersedes prior still-pending docs OF ITS OWN TYPE only.
+
+		A permission prompt must NOT expire a still-pending follow_up (and vice
+		versa) — the two can be outstanding at once, and cross-expiring orphaned the
+		other prompt so it stopped awaiting an answer.
+		"""
 		from secator.ai.interactivity import RemoteBackend
 		mock_engine = MagicMock()
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
@@ -325,17 +330,49 @@ class TestRemoteBackend(unittest.TestCase):
 			prompt_uuid="uuid-new",
 		)
 
-		# Prompt-like pending docs are flipped to timed_out — one scoped update per prompt
-		# ai_type (follow_up, permission), NOT a blanket match that would also expire steers.
-		self.assertEqual(mock_engine.update.call_count, 2)
-		flipped_types = set()
-		for call in mock_engine.update.call_args_list:
-			flip_query, flip_update = call[0]
-			self.assertEqual(flip_query.get("_context.session_id"), "session1")
-			self.assertEqual(flip_query.get("status"), "pending")
-			self.assertEqual(flip_update, {"$set": {"status": "timed_out"}})
-			flipped_types.add(flip_query.get("ai_type"))
-		self.assertEqual(flipped_types, {"follow_up", "permission"})
+		# Exactly one scoped update, and only for the incoming type (permission).
+		self.assertEqual(mock_engine.update.call_count, 1)
+		flip_query, flip_update = mock_engine.update.call_args_list[0][0]
+		self.assertEqual(flip_query.get("_context.session_id"), "session1")
+		self.assertEqual(flip_query.get("status"), "pending")
+		self.assertEqual(flip_query.get("ai_type"), "permission")
+		self.assertEqual(flip_update, {"$set": {"status": "timed_out"}})
+
+	def test_permission_prompt_does_not_expire_pending_follow_up(self):
+		"""Building a permission prompt leaves a still-pending follow_up untouched."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+
+		backend.build_pending_prompt(
+			"Shell command requires approval", ["allow", "deny"], "s1",
+			prompt_type="permission", permission_type="shell", value="nmap",
+			prompt_uuid="p1",
+		)
+		expired_types = {c[0][0].get("ai_type") for c in mock_engine.update.call_args_list}
+		self.assertNotIn("follow_up", expired_types)
+
+	def test_follow_up_prompt_does_not_expire_pending_permission(self):
+		"""Building a follow_up prompt leaves a still-pending permission untouched."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+
+		backend.build_pending_prompt(
+			"Which target next?", ["a", "b"], "s1",
+			prompt_type="follow_up", prompt_uuid="f1",
+		)
+		expired_types = {c[0][0].get("ai_type") for c in mock_engine.update.call_args_list}
+		self.assertNotIn("permission", expired_types)
+
+	def test_expire_stale_pending_legacy_expires_both(self):
+		"""Called with no ai_type (legacy), it still expires both prompt types."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+		backend._expire_stale_pending("s1")
+		expired_types = {c[0][0].get("ai_type") for c in mock_engine.update.call_args_list}
+		self.assertEqual(expired_types, {"follow_up", "permission"})
 
 	def test_expire_stale_pending_noop_without_engine(self):
 		"""No query engine -> no crash, no update."""
