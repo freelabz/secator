@@ -13,6 +13,7 @@ if ADDONS_ENABLED['ai']:
 		get_mode_config,
 		format_tool_result,
 		format_continue,
+		build_scope_section,
 	)
 
 
@@ -329,6 +330,33 @@ class TestPrompts(unittest.TestCase):
 			prompt = get_system_prompt(mode)
 			self.assertNotIn("run_query", prompt, f"phantom run_query in {mode!r} prompt")
 			self.assertIn("query_workspace", prompt)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestScopeInPrompt(unittest.TestCase):
+	"""Authorized scope is surfaced in the system prompt so the model stays in
+	scope up front (fewer guardrail-denied retries), and is omitted when absent."""
+
+	def test_scope_absent_by_default(self):
+		p = get_system_prompt("attack", workspace_path="<ws>", backend=None)
+		self.assertNotIn("<scope>", p)
+		self.assertEqual(build_scope_section(), "")
+		self.assertEqual(build_scope_section([], []), "")
+
+	def test_in_scope_surfaced(self):
+		p = get_system_prompt(
+			"attack", workspace_path="<ws>", backend=None,
+			in_scope=["scanme.nmap.org", "10.0.0.1"])
+		self.assertIn("<scope>", p)
+		self.assertIn("scanme.nmap.org", p)
+		self.assertIn("10.0.0.1", p)
+
+	def test_out_of_scope_surfaced(self):
+		section = build_scope_section(in_scope="a.example.com", out_of_scope="b.example.com")
+		self.assertIn("In-scope", section)
+		self.assertIn("a.example.com", section)
+		self.assertIn("Out-of-scope", section)
+		self.assertIn("b.example.com", section)
 
 
 if __name__ == '__main__':

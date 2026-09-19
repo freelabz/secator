@@ -6,6 +6,7 @@ import os
 import random
 import re
 from dataclasses import fields
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 from secator.definitions import LLM_SPINNER_MESSAGES
@@ -860,6 +861,89 @@ def call_llm(
 	finish_reason = getattr(response.choices[0], 'finish_reason', None)
 
 	return {"content": content, "usage": usage, "tool_calls": tool_calls, "finish_reason": finish_reason}
+
+
+# Some models (Hermes-style / XML tool-calling) emit tool calls as TEXT in the
+# message content instead of native structured `tool_calls`. litellm hands that
+# text back as `content` with an empty `tool_calls`. These regexes recover the
+# calls so the loop can dispatch them like native ones.
+_TOOL_CALL_BLOCK_RE = re.compile(r'<tool_call>\s*(.*?)\s*</tool_call>', re.DOTALL | re.IGNORECASE)
+_FUNCTION_RE = re.compile(r'<function=([^>\s]+)\s*>', re.IGNORECASE)
+_PARAM_RE = re.compile(
+	r'<parameter=([^>\s]+)\s*>(.*?)(?=<parameter=|</parameter>|</function>|</tool_call>|\Z)',
+	re.DOTALL | re.IGNORECASE,
+)
+
+
+def _coerce_param_value(raw: str) -> Any:
+	"""A <parameter> value may be JSON (number/bool/object/array/quoted string) or
+	plain text. Try JSON; fall back to the raw string on failure."""
+	if raw == "":
+		return raw
+	try:
+		return json.loads(raw)
+	except (json.JSONDecodeError, ValueError):
+		return raw
+
+
+def _parse_tool_call_block(block: str, index: int):
+	"""Parse one <tool_call> body into a litellm-shaped call, or None if unparseable.
+
+	Supports both bodies models emit:
+	  * XML-style:  <function=NAME> <parameter=KEY>VALUE</parameter> ...
+	  * JSON-style: {"name": "NAME", "arguments": {...}}
+	"""
+	name = None
+	args: Dict = {}
+	fn = _FUNCTION_RE.search(block)
+	if fn:
+		name = fn.group(1).strip()
+		for key, raw in _PARAM_RE.findall(block):
+			args[key.strip()] = _coerce_param_value(raw.strip())
+	else:
+		try:
+			data = json.loads(block.strip())
+		except (json.JSONDecodeError, TypeError, ValueError):
+			return None
+		if not isinstance(data, dict):
+			return None
+		name = data.get("name") or data.get("function")
+		args = data.get("arguments") or data.get("parameters") or {}
+		if isinstance(args, str):
+			try:
+				args = json.loads(args)
+			except (json.JSONDecodeError, ValueError):
+				pass
+	if not name:
+		return None
+	# Shape it exactly like a native litellm tool call (attribute access + JSON-string
+	# arguments) so _process_tool_calls / _add_assistant_to_history consume it unchanged.
+	return SimpleNamespace(
+		id=f"textcall_{index}_{name}",
+		type="function",
+		function=SimpleNamespace(name=name, arguments=json.dumps(args)),
+	)
+
+
+def parse_text_tool_calls(content: Optional[str]) -> Tuple[List, Optional[str]]:
+	"""Recover tool calls a model emitted as text inside `content`.
+
+	Returns (tool_calls, cleaned_content):
+	  * tool_calls — litellm-shaped calls (empty if none found / all unparseable);
+	  * cleaned_content — `content` with every consumed <tool_call> block stripped,
+	    so the raw XML is not shown to the user. Unchanged when nothing is parsed.
+	Never raises: malformed blocks are skipped.
+	"""
+	if not content or '<tool_call>' not in content.lower():
+		return [], content
+	tool_calls = [
+		call for i, block in enumerate(_TOOL_CALL_BLOCK_RE.findall(content))
+		if (call := _parse_tool_call_block(block, i)) is not None
+	]
+	if not tool_calls:
+		return [], content
+	cleaned = _TOOL_CALL_BLOCK_RE.sub('', content).strip()
+	return tool_calls, cleaned
 
 
 MODEL_COLORS = [
