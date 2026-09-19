@@ -739,5 +739,83 @@ class TestSecretGuards(unittest.TestCase):
         self.assertIn("[REDACTED]", out)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestParseTextToolCalls(unittest.TestCase):
+    """Tests for recovering text/Hermes-style <tool_call> blocks from content."""
+
+    def test_parses_xml_style_block_and_dispatches(self):
+        from secator.ai.utils import parse_text_tool_calls
+        from secator.ai.tools import tool_call_to_action
+        import json
+
+        content = (
+            "I'll scan the host now.\n"
+            "<tool_call>\n"
+            "<function=run_task>\n"
+            "<parameter=description>\nRun a nuclei scan\n</parameter>\n"
+            "<parameter=task>\nnuclei\n</parameter>\n"
+            "<parameter=targets>\n[\"scanme.example.org\"]\n</parameter>\n"
+            "</function>\n"
+            "</tool_call>\n"
+        )
+        calls, cleaned = parse_text_tool_calls(content)
+        self.assertEqual(len(calls), 1)
+        tc = calls[0]
+        self.assertEqual(tc.function.name, "run_task")
+        args = json.loads(tc.function.arguments)
+        self.assertEqual(args["task"], "nuclei")
+        self.assertEqual(args["description"], "Run a nuclei scan")
+        self.assertEqual(args["targets"], ["scanme.example.org"])  # JSON value coerced
+        # The raw XML must be stripped from the displayed content.
+        self.assertNotIn("<tool_call>", cleaned)
+        self.assertIn("I'll scan the host now.", cleaned)
+        # And the recovered call dispatches through the normal action path.
+        action = tool_call_to_action(tc.function.name, args)
+        self.assertIsNotNone(action)
+        self.assertEqual(action["action"], "task")
+
+    def test_parses_multiple_blocks(self):
+        from secator.ai.utils import parse_text_tool_calls
+        content = (
+            "<tool_call><function=run_shell><parameter=description>list</parameter>"
+            "<parameter=command>ls -la</parameter></function></tool_call>"
+            "<tool_call><function=query_workspace><parameter=description>find</parameter>"
+            "<parameter=query>type:port</parameter></function></tool_call>"
+        )
+        calls, cleaned = parse_text_tool_calls(content)
+        self.assertEqual([c.function.name for c in calls], ["run_shell", "query_workspace"])
+        self.assertEqual(cleaned, "")
+
+    def test_parses_json_style_block(self):
+        from secator.ai.utils import parse_text_tool_calls
+        import json
+        content = '<tool_call>{"name": "run_task", "arguments": {"task": "nmap", "description": "d"}}</tool_call>'
+        calls, _ = parse_text_tool_calls(content)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].function.name, "run_task")
+        self.assertEqual(json.loads(calls[0].function.arguments)["task"], "nmap")
+
+    def test_malformed_block_is_ignored_not_raised(self):
+        from secator.ai.utils import parse_text_tool_calls
+        # No <function=...> and not valid JSON -> skipped, content returned unchanged.
+        content = "<tool_call>garbage without function or json</tool_call>"
+        calls, cleaned = parse_text_tool_calls(content)
+        self.assertEqual(calls, [])
+        self.assertEqual(cleaned, content)
+
+    def test_plain_content_is_untouched(self):
+        """A normal assistant message (no <tool_call>) is returned verbatim."""
+        from secator.ai.utils import parse_text_tool_calls
+        content = "Here is a summary of the findings. No tools to call."
+        calls, cleaned = parse_text_tool_calls(content)
+        self.assertEqual(calls, [])
+        self.assertEqual(cleaned, content)
+
+    def test_empty_content(self):
+        from secator.ai.utils import parse_text_tool_calls
+        self.assertEqual(parse_text_tool_calls(""), ([], ""))
+        self.assertEqual(parse_text_tool_calls(None), ([], None))
+
+
 if __name__ == '__main__':
     unittest.main()

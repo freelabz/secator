@@ -27,7 +27,10 @@ from secator.ai.prompts import (
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
 from secator.ai.session import (
 	save_history, show_session_picker, replay_session, restore_history_from_db, print_session_results)
-from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status, _decrypt_dict, _build_action_display
+from secator.ai.utils import (
+	call_llm, init_llm, setup_ai, format_llm_status, parse_text_tool_calls,
+	_decrypt_dict, _build_action_display,
+)
 
 
 # Hard upper bound on agent-loop iterations even when max_iterations is configured
@@ -696,6 +699,16 @@ class ai(PythonRunner):
 
 				content = result["content"]
 				tool_calls = result.get("tool_calls", [])
+
+				# Fallback: some models emit tool calls as TEXT (Hermes/XML-style
+				# <tool_call>...</tool_call> blocks) in `content` instead of native
+				# structured tool_calls. Recover them so they dispatch like native
+				# calls, and strip the consumed blocks so the raw XML isn't shown.
+				if not tool_calls and content:
+					parsed_calls, content = parse_text_tool_calls(content)
+					if parsed_calls:
+						tool_calls = parsed_calls
+
 				usage = result.get("usage", {})
 				finish_reason = result.get("finish_reason")
 
