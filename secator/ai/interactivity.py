@@ -123,10 +123,13 @@ class RemoteBackend(InteractivityBackend):
 		prompt_uuid = context.get("prompt_uuid")
 		if prompt_uuid:
 			extra_data["prompt_uuid"] = prompt_uuid
-		# A new prompt for this session supersedes any older still-pending one
-		# (e.g. a worker that died mid-poll). Expire them BEFORE this doc is
-		# persisted so only the current prompt stays live.
-		self._expire_stale_pending(session_id)
+		# A new prompt for this session supersedes any older still-pending one OF THE
+		# SAME TYPE (e.g. a worker that died mid-poll re-issuing the same kind of
+		# prompt). Expire them BEFORE this doc is persisted so only the current prompt
+		# stays live. Scope to `prompt_type` only: a permission prompt must NOT expire a
+		# still-pending follow_up (and vice versa) — the two can be outstanding at once,
+		# and cross-expiring orphaned the other prompt so it stopped awaiting an answer.
+		self._expire_stale_pending(session_id, ai_type=prompt_type)
 		# The conversation id rides on `_context.session_id` (auto-stamped from the
 		# runner context on persist) — the poll + restore + secator-api all key on
 		# that, so this pending doc needs no top-level session_id field.
@@ -283,13 +286,19 @@ class RemoteBackend(InteractivityBackend):
 		newest = max(results, key=lambda r: r.get("_timestamp", 0))
 		return newest.get("answer")
 
-	def _expire_stale_pending(self, session_id):
-		"""Mark any older still-pending prompt for this session as timed_out.
+	def _expire_stale_pending(self, session_id, ai_type=None):
+		"""Mark older still-pending prompt(s) for this session as timed_out.
 
 		Called when a NEW prompt starts (before it is persisted), so it only
 		affects prior prompts. Stops stale 'pending' docs from accumulating —
 		a worker that dies mid-poll otherwise leaves the UI 'thinking' forever
 		and lets crud.answer_ai_prompt's "latest pending" collide.
+
+		``ai_type`` scopes the expiry to a single prompt type (the type of the
+		incoming prompt). A permission prompt must NOT expire a still-pending
+		follow_up (and vice versa): both can be outstanding at the same time, and
+		expiring across types orphaned the other prompt so it stopped awaiting its
+		answer. When ``ai_type`` is None both prompt types are expired (legacy).
 		FLAG: a DB-layer TTL index on pending Ai docs is the durable follow-up.
 		"""
 		if not self.query_engine:
@@ -297,7 +306,8 @@ class RemoteBackend(InteractivityBackend):
 		# Only expire PROMPT-like docs (follow_up / permission). A blanket match on every
 		# pending AI doc would also time out mid-flight `steer` interjections before
 		# poll_steers/_drain_steers can consume them.
-		for ai_type in ("follow_up", "permission"):
+		ai_types = (ai_type,) if ai_type else ("follow_up", "permission")
+		for ai_type in ai_types:
 			self.query_engine.update(
 				{
 					"_type": "ai",
