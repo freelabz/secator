@@ -945,6 +945,17 @@ class ai(PythonRunner):
 		self.isolated = self.get_opt_value("isolated")
 		self.in_scope = self.get_opt_value("in_scope") or []
 		self.out_of_scope = self.get_opt_value("out_of_scope") or []
+		# Resolve in-scope hostnames to their current IPs so the AI can reach an
+		# in-scope host by IP (host_in_scope matches literally, with no DNS at check
+		# time). Done here, once, on the worker — the expanded lists flow to both the
+		# PermissionEngine below and every child runner (via ctx.in_scope). Deny scope
+		# is resolved too so deny-wins still covers a denied host's IPs.
+		if self.in_scope or self.out_of_scope:
+			from secator.scope import resolve_scope_hostnames
+			if self.in_scope:
+				self.in_scope = resolve_scope_hostnames(self.in_scope)
+			if self.out_of_scope:
+				self.out_of_scope = resolve_scope_hostnames(self.out_of_scope)
 
 		# Interactive mode: "local" / "remote" / "auto"
 		interactive = self.get_opt_value("interactive")
