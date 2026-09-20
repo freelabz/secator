@@ -1061,7 +1061,9 @@ class PermissionEngine:
 		if rule_type == "target" and self.out_of_scope:
 			for v in values_to_check:
 				if not host_in_scope(v, [], self.out_of_scope):
-					return PermissionResult(decision="deny", reason=f"Out of scope: target({v})")
+					# Structured deny: machine-readable reason + the offending target so a
+					# UI/CLI can render "Target X is not in the allowed scope" and attach an action.
+					return PermissionResult(decision="deny", reason="out_of_scope", targets=[v])
 
 		# Mandate in_scope allow — checked AFTER both deny loops (config deny + the
 		# out_of_scope deny above still win) but before config/runtime allow rules.
@@ -1095,11 +1097,18 @@ class PermissionEngine:
 	def _check_values(self, rule_type: str, values: List[str]) -> PermissionResult:
 		"""Check multiple values, return the most restrictive result."""
 		ask_targets = []
+		from secator.config import CONFIG
 		for value in values:
 			result = self._check_value(rule_type, value)
 			if result.decision == "deny":
 				# "No rule for" default deny → ask user instead of blocking
 				if _is_default_deny(result):
+					# scope_hard_deny: with a defined in_scope, an out-of-scope target is
+					# denied outright (structured: target + machine-readable reason) instead
+					# of prompting — the model then retries an in-scope target. Flag off
+					# (default) preserves the interactive ask below (standalone CLI behavior).
+					if rule_type == "target" and self.in_scope and CONFIG.security.scope_hard_deny:
+						return PermissionResult(decision="deny", reason="out_of_scope", targets=[value])
 					ask_targets.append(value)
 				else:
 					return result  # Explicit deny rule: block

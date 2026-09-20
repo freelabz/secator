@@ -258,6 +258,11 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 
 	result = ctx.permission_engine.check_action(action)
 	if result.decision == "deny":
+		# Out-of-scope denials carry the target + a machine-readable reason so the UI/CLI
+		# can render a clear "Target X is not in the allowed scope" message (and the model
+		# can retry an in-scope target) rather than a bare reason code.
+		if result.reason == "out_of_scope" and result.targets:
+			return f"Target {result.targets[0]} is not in the allowed scope (reason: out_of_scope)"
 		return f"Action denied by guardrails: {result.reason}"
 
 	is_remote = isinstance(ctx.backend, RemoteBackend)

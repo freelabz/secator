@@ -245,7 +245,7 @@ def build_scope_section(in_scope=None, out_of_scope=None) -> str:
 		return ""
 	lines = ["<scope>"]
 	if in_scope:
-		lines.append("In-scope targets — stay within these; prefer the in-scope hostname form when retrying:")
+		lines.append("In-scope targets — stay within these. When a host is in scope by name, use the hostname, not its resolved IP, unless that exact IP is also listed:")
 		lines.extend(f"- {t}" for t in in_scope)
 	if out_of_scope:
 		lines.append("Out-of-scope targets — never touch these:")
