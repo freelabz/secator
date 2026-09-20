@@ -232,29 +232,10 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 	Use from regular code: denial, items = check_guardrails_sync(action, ctx)
 	"""
 	from secator.ai.interactivity import RemoteBackend
-	from secator.output_types import Warning as Warn
+	from secator.ai.guardrails import detect_paths_with_access
 
 	if ctx.permission_engine is None:
 		return None
-
-	# Check for non-existent file paths (warn but don't block)
-	from secator.ai.guardrails import detect_paths, detect_paths_with_access, classify_command
-	from pathlib import Path
-	action_type = action.get("action", "")
-	if action_type == "shell":
-		cmd = action.get("command", "")
-		cmd_name = cmd.split()[0] if cmd.split() else ""
-		cmd_class = classify_command(cmd_name)
-		if cmd_class == "read":
-			for path in detect_paths(cmd):
-				if any(c in path for c in ('*', '?', '[', ']')):
-					continue
-				try:
-					expanded = Path(path).expanduser()
-					if not expanded.exists():
-						yield Warn(message=f"Path does not exist: {path}")
-				except (OSError, ValueError):
-					pass
 
 	result = ctx.permission_engine.check_action(action)
 	if result.decision == "deny":
