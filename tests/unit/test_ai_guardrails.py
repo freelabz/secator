@@ -1563,5 +1563,61 @@ class TestRunShellScopeHardening(unittest.TestCase):
 		self.assertEqual(self._decision("nmap example.com"), "allow")
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestScopeHardDeny(unittest.TestCase):
+	"""SECATOR_SECURITY_SCOPE_HARD_DENY flips an out-of-scope network target from an
+	interactive ASK (standalone-CLI default) to a hard DENY carrying the target + a
+	machine-readable reason, so a deployment can run non-interactively."""
+
+	def _engine(self):
+		return PermissionEngine(
+			{"allow": ["task(*)"], "deny": [], "ask": []},
+			targets=[], workspace="/tmp/ws", in_scope=["10.0.0.1"])
+
+	def _out_of_scope_action(self):
+		return {"action": "task", "name": "nmap", "targets": ["8.8.8.8"]}
+
+	def test_default_asks(self):
+		"""Flag off (default): an out-of-scope target still prompts for approval."""
+		self.assertFalse(CONFIG.security.scope_hard_deny)
+		result = self._engine().check_action(self._out_of_scope_action())
+		self.assertEqual(result.decision, "ask")
+
+	def test_flag_denies_with_target_and_reason(self):
+		"""Flag on: out-of-scope target is denied (no prompt) and the deny object
+		carries the target value + a machine-readable reason."""
+		try:
+			CONFIG.security.scope_hard_deny = True
+			result = self._engine().check_action(self._out_of_scope_action())
+		finally:
+			CONFIG.security.scope_hard_deny = False
+		self.assertEqual(result.decision, "deny")
+		self.assertEqual(result.reason, "out_of_scope")
+		self.assertIn("8.8.8.8", result.targets)
+
+	def test_flag_does_not_deny_in_scope_target(self):
+		"""Flag on must not affect an in-scope target (still allowed, no prompt)."""
+		try:
+			CONFIG.security.scope_hard_deny = True
+			result = self._engine().check_action(
+				{"action": "task", "name": "nmap", "targets": ["10.0.0.1"]})
+		finally:
+			CONFIG.security.scope_hard_deny = False
+		self.assertEqual(result.decision, "allow")
+
+	def test_flag_noop_without_scope(self):
+		"""No in_scope configured (standalone CLI): flag on still ASKS, never a blanket
+		deny — 'out of scope' is undefined without a scope."""
+		engine = PermissionEngine(
+			{"allow": ["task(*)"], "deny": [], "ask": []}, targets=[], workspace="/tmp/ws")
+		try:
+			CONFIG.security.scope_hard_deny = True
+			result = engine.check_action({"action": "task", "name": "nmap", "targets": ["8.8.8.8"]})
+		finally:
+			CONFIG.security.scope_hard_deny = False
+		self.assertEqual(result.decision, "ask")
+
+
+
 if __name__ == '__main__':
 	unittest.main()
