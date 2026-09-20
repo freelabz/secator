@@ -1630,6 +1630,26 @@ class TestScopeHardDeny(unittest.TestCase):
 			CONFIG.security.scope_hard_deny = False
 		self.assertEqual(result.decision, "ask")
 
+	def test_flag_denies_even_with_catch_all_ask_rule(self):
+		"""Regression: the shipped AI config carries a catch-all ``ask: target(*)`` rule,
+		so an out-of-scope target matches ASK in ``_check_value`` BEFORE any default-deny.
+		The hard-deny must beat that ask rule (it lives in ``_check_value``, not only the
+		``_check_values`` default-deny path) — otherwise cloud runs keep prompting for
+		out-of-scope targets even with the flag on."""
+		engine = PermissionEngine(
+			{"allow": ["task(*)"], "deny": [], "ask": ["target(*)"]},
+			targets=[], workspace="/tmp/ws", in_scope=["10.0.0.1"])
+		# Flag off: the catch-all ask still governs → prompt (CLI approve path intact).
+		self.assertEqual(engine.check_action(self._out_of_scope_action()).decision, "ask")
+		try:
+			CONFIG.security.scope_hard_deny = True
+			result = engine.check_action(self._out_of_scope_action())
+		finally:
+			CONFIG.security.scope_hard_deny = False
+		self.assertEqual(result.decision, "deny")
+		self.assertEqual(result.reason, "out_of_scope")
+		self.assertIn("8.8.8.8", result.targets)
+
 
 
 if __name__ == '__main__':
