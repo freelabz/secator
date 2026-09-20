@@ -1074,6 +1074,15 @@ class PermissionEngine:
 			for v in values_to_check:
 				if host_in_scope(v, self.in_scope, self.out_of_scope):
 					return PermissionResult(decision="allow", reason=f"In scope: target({v})")
+			# Out of a defined in_scope. With scope_hard_deny (cloud), deny outright
+			# — structured: machine-readable reason + the offending target — BEFORE the
+			# interactive `ask` rules below (there is a catch-all `ask: target(*)`, so a
+			# hard-deny placed only in the default-deny path never fires). The model then
+			# retries an in-scope target. Flag off (CLI default) falls through to the ask
+			# so a human can still approve on the terminal.
+			from secator.config import CONFIG
+			if CONFIG.security.scope_hard_deny:
+				return PermissionResult(decision="deny", reason="out_of_scope", targets=[value])
 
 		for rt, patterns in self.rules["allow"]:
 			if rt == rule_type:
@@ -1097,21 +1106,17 @@ class PermissionEngine:
 	def _check_values(self, rule_type: str, values: List[str]) -> PermissionResult:
 		"""Check multiple values, return the most restrictive result."""
 		ask_targets = []
-		from secator.config import CONFIG
 		for value in values:
 			result = self._check_value(rule_type, value)
 			if result.decision == "deny":
-				# "No rule for" default deny → ask user instead of blocking
+				# "No rule for" default deny → ask user instead of blocking. The
+				# scope_hard_deny short-circuit lives in _check_value now (it must beat
+				# the catch-all `ask: target(*)` rule), and returns an explicit
+				# out_of_scope deny that falls through the `else` below.
 				if _is_default_deny(result):
-					# scope_hard_deny: with a defined in_scope, an out-of-scope target is
-					# denied outright (structured: target + machine-readable reason) instead
-					# of prompting — the model then retries an in-scope target. Flag off
-					# (default) preserves the interactive ask below (standalone CLI behavior).
-					if rule_type == "target" and self.in_scope and CONFIG.security.scope_hard_deny:
-						return PermissionResult(decision="deny", reason="out_of_scope", targets=[value])
 					ask_targets.append(value)
 				else:
-					return result  # Explicit deny rule: block
+					return result  # Explicit deny rule (incl. out_of_scope): block
 			if result.decision == "ask":
 				ask_targets.append(value)
 		if ask_targets:
