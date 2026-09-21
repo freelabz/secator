@@ -751,9 +751,16 @@ class Command(Runner):
 
 	# Delay before the FIRST stats tick. The t=0 tick is skipped deliberately: the CPU
 	# baseline is primed at process start, so a tick fired microseconds later has no
-	# interval to measure and reports 0.0 every time. One second in, there is something
-	# real to report. Later ticks use stat_update_frequency as before.
-	FIRST_STAT_DELAY = 1.0
+	# interval to measure and reports 0.0 every time. Later ticks use
+	# stat_update_frequency as before.
+	#
+	# 0.3s is a deliberate floor, not a round number. A task that exits before the first
+	# tick produces NO Stat at all -- there is no end-of-run sample, because by the time
+	# the monitor stops the process is gone and psutil cannot read it. In prod 18% of task
+	# runs finish under 1s but only ~5% finish under 0.3s, so this keeps memory telemetry
+	# for most short tasks while still leaving an interval ~30x the 10ms clock granularity,
+	# i.e. long enough for the CPU delta to be meaningful rather than quantisation noise.
+	FIRST_STAT_DELAY = 0.3
 
 	@staticmethod
 	def _initial_stats_time(now, frequency, first_delay):

@@ -91,7 +91,7 @@ class TestFirstStatsTick(unittest.TestCase):
 		while t <= frequency * 2:
 			if (t - last) >= frequency:
 				return t
-			t = round(t + 0.05, 2)
+			t = round(t + 0.01, 2)
 		return None
 
 	def test_no_tick_at_process_start(self):
@@ -101,6 +101,10 @@ class TestFirstStatsTick(unittest.TestCase):
 
 	def test_first_tick_lands_at_the_delay(self):
 		self.assertAlmostEqual(self._first_tick_at(20), Command.FIRST_STAT_DELAY, places=1)
+
+	def test_delay_is_long_enough_to_measure(self):
+		"""Below ~10x the 10ms clock granularity the CPU delta is quantisation noise."""
+		self.assertGreaterEqual(Command.FIRST_STAT_DELAY, 0.1)
 
 	def test_delay_is_shorter_than_the_cadence(self):
 		"""A delay >= frequency would push the first sample out, not pull it in."""
