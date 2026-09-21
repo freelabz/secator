@@ -22,6 +22,7 @@ from secator.output_types import (
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import get_task_folder_id, run_extractors
+from secator.scope import as_scope_list, finding_scope_host, host_in_scope
 from secator.query import QueryEngine
 from secator.query._stream import StreamView
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
@@ -106,6 +107,11 @@ class Runner:
 	# Run duplicate check
 	enable_duplicate_check = True
 
+	# Opt-in output-side scope filtering. Off by default so tasks pay ZERO per-finding
+	# cost; a task that floods out-of-scope findings (e.g. gau's passive archive) sets
+	# this True to have add_result drop host-bearing findings outside the run's scope.
+	output_scope_filter = False
+
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
 		self.serialize_config = run_opts.get('serialize_config', True)
@@ -117,6 +123,15 @@ class Runner:
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
+		# Output-side scope guard state (see _out_of_scope / add_result). Scope is an authorization
+		# input read from run_opts at CHECK time — after profile/extractor option merges (which
+		# replace self.run_opts, e.g. _run_extractors) — and re-coerced only when the raw values
+		# change, so the guard reflects the final options instead of a snapshot that could go stale.
+		# Empty => no-op, so default/unscoped runs are unchanged.
+		self._scope_raw = None
+		self._scope_in = []
+		self._scope_out = []
+		self._scope_dropped = 0
 		# Mint the run-scope {type}_id before any add_result so every finding carries the scope key.
 		key = f'{self.config.type}_id'
 		if not self.context.get(key):
@@ -226,6 +241,9 @@ class Runner:
 		self.inputs = [inputs] if not isinstance(inputs, list) else inputs
 		self.inputs = list(dict.fromkeys(self.inputs))
 		if self.caller != 'Task' and self.enable_targets:
+			# add_result scope-guards each minted Target (drops out-of-scope inputs), so the mint stays
+			# here (before extractors) — moving it after _run_extractors broke the target-filtering
+			# extractor chain (tests/unit/test_target_filtering.py) for no scope benefit.
 			targets = [Target(name=target) for target in self.inputs]
 			for target in targets:
 				self.add_result(target, print=False, output=False)
@@ -832,6 +850,28 @@ class Runner:
 			except Exception as e:
 				self.debug(f'persist-to-store hook failed: {e}', sub='item')
 
+	def _out_of_scope(self, item):
+		"""True if `item` is a host-bearing finding whose host falls outside the run's scope.
+
+		Scope (in_scope/out_of_scope) is an authorization input, read from run_opts HERE — after any
+		profile/extractor option merges — and re-coerced only when the raw values change, so the
+		guard never acts on a stale pre-merge snapshot. No-op (False) when no scope is set, so
+		default/unscoped runs are unchanged. Reuses the input filter's predicate
+		(secator.scope.host_in_scope): non-network / hostless items (finding_scope_host -> None) and
+		vulns/tags/info are never scoped.
+		"""
+		if not is_output_type(item):
+			return False
+		raw = (self.run_opts.get('in_scope'), self.run_opts.get('out_of_scope'))
+		if raw != self._scope_raw:  # refresh coerced lists on first use and after any opt merge
+			self._scope_raw = raw
+			self._scope_in = as_scope_list(raw[0])
+			self._scope_out = as_scope_list(raw[1])
+		if not (self._scope_in or self._scope_out):
+			return False
+		host = finding_scope_host(item)
+		return bool(host) and not host_in_scope(host, self._scope_in, self._scope_out)
+
 	def add_result(self, item, print=True, output=True, hooks=True, queue=True):
 		"""Add item to runner results.
 
@@ -843,6 +883,15 @@ class Runner:
 			queue (bool): Whether to queue the item for later processing.
 		"""
 		if item._uuid and item._uuid in self.uuids:
+			return
+
+		# Output-side scope guard (see _out_of_scope). Secator scope is otherwise enforced only on
+		# task INPUTS (_helpers.run_extractors), so passive tasks (gau, subfinder, ...) still persist
+		# their whole archive and discovered hosts get minted into Targets. Drop out-of-scope
+		# host-bearing findings BEFORE any on_item hook persists them. Aggregated (not per-item) to
+		# avoid emitting 65k warnings at scale — one debug at mark_completed.
+		if self.output_scope_filter and self._out_of_scope(item):
+			self._scope_dropped += 1
 			return
 
 		# Update context with runner info
@@ -1294,6 +1343,8 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = end_time or datetime.fromtimestamp(time(), timezone.utc)
+		if self._scope_dropped:
+			self.debug(f'scope guard dropped {self._scope_dropped} out-of-scope finding(s)', sub='scope')
 		# Lazy: `self.status` (a store count query) is computed ONLY when the 'end' debug sub is
 		# active — the lazy callback runs after debug()'s enable-gate, so it's free when debug is off.
 		self.debug('completed', sub='end', lazy=lambda m: f'{m} (status: {self.status}, sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})')  # noqa: E501
@@ -1492,8 +1543,13 @@ class Runner:
 				return
 			item = self._convert_item_schema(item)
 
-		# Add item to results
+		# Add item to results (add_result drops out-of-scope host-bearing findings from the store)
 		self.add_result(item, print=print, queue=False)
+
+		# Don't emit dropped findings to the live stream either (else -json / downstream consumers
+		# still see the out-of-scope host add_result refused to persist).
+		if self.output_scope_filter and self._out_of_scope(item):
+			return
 
 		# Yield item
 		yield item
