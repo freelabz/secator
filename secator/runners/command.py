@@ -11,7 +11,7 @@ import subprocess
 import sys
 import threading
 
-from time import time
+from time import sleep, time
 
 import psutil
 from fp.fp import FreeProxy
@@ -856,6 +856,10 @@ class Command(Runner):
 		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
 			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
 
+	# How long to let CPU time accumulate before reading it. Paid ONCE per call,
+	# not once per process -- see get_process_info.
+	CPU_SAMPLE_SECONDS = 0.1
+
 	@staticmethod
 	def get_process_info(process, children=False):
 		"""Get process information from psutil.
@@ -864,26 +868,49 @@ class Command(Runner):
 			process (subprocess.Process): Process.
 			children (bool): Whether to gather stats about children processes too.
 		"""
-		try:
-			# fmt: off
-			data = {
-				k: v._asdict() if hasattr(v, '_asdict') else v
-				for k, v in process.as_dict().items()
-				if k not in ['memory_maps', 'open_files', 'environ']
-			}
-			# fmt: on
-			# psutil caches the CPU baseline on the Process object and we build a fresh one on every
-			# monitor tick, so as_dict()'s cpu_percent is always a first call -> always 0.0. Sample
-			# over a short blocking window instead, so even the first (often only) tick is real.
-			# ponytail: 100ms per process, serially; batch (sample all, sleep once, re-sample) only
-			# if a task ever spawns enough children for N * 100ms to matter at stat_update_frequency.
-			data['cpu_percent'] = process.cpu_percent(interval=0.1)
-			yield data
-		except (psutil.Error, FileNotFoundError):
-			return
+		procs = [process]
 		if children:
-			for subproc in process.children(recursive=True):
-				yield from Command.get_process_info(subproc, children=False)
+			try:
+				procs.extend(process.children(recursive=True))
+			except (psutil.Error, FileNotFoundError):
+				pass
+
+		# psutil keeps the CPU baseline ON THE Process OBJECT, and we build fresh ones every
+		# monitor tick, so as_dict()'s cpu_percent is always a first call -> always 0.0. We
+		# need two reads separated by real time.
+		#
+		# Prime every process FIRST, then wait once, then read them all. Using
+		# cpu_percent(interval=...) per process would instead block N * 0.1s serially, and
+		# _monitor_process() materializes this generator BEFORE it checks the memory limit --
+		# so a wide tree (katana runs ~109 concurrent Chrome children in prod) would delay the
+		# memory guard by ~11s, precisely on the tasks where that guard matters most.
+		for proc in procs:
+			try:
+				proc.cpu_percent()
+			except (psutil.Error, FileNotFoundError):
+				continue
+		sleep(Command.CPU_SAMPLE_SECONDS)
+
+		for proc in procs:
+			try:
+				# Read CPU BEFORE as_dict(). Non-blocking: this is the second read, so it
+				# returns the delta accumulated since priming. Order matters -- as_dict()
+				# itself calls cpu_percent(), which RESETS the baseline, so doing it the
+				# other way round reads ~0 every time (the bug this whole change fixes,
+				# reintroduced one line later).
+				cpu_percent = proc.cpu_percent()
+				# fmt: off
+				data = {
+					k: v._asdict() if hasattr(v, '_asdict') else v
+					for k, v in proc.as_dict().items()
+					if k not in ['memory_maps', 'open_files', 'environ']
+				}
+				# fmt: on
+				data['cpu_percent'] = cpu_percent
+			except (psutil.Error, FileNotFoundError):
+				# Process exited between priming and reading -- skip it, keep the rest.
+				continue
+			yield data
 
 	def run_item_loaders(self, line):
 		"""Run item loaders against an output line.
