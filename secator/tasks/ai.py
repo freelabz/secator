@@ -3,6 +3,7 @@
 import json
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
@@ -288,12 +289,13 @@ class ai(PythonRunner):
 		if not self.model:
 			return
 
-		# Remote (web) resume: a respawned chat task restores its history from the
-		# workspace Mongo `_type:"ai"` docs (headless — no local files, no TUI).
+		# Remote (web) turn: a respawned/redelivered chat task restores its history
+		# from the workspace Mongo `_type:"ai"` docs (headless — no local files, no
+		# TUI). Wrapped in a per-session single-flight lock so a redelivered or
+		# late-answered task can't run concurrently with the in-flight one.
 		if self.interactive == "remote":
-			restored = yield from self._maybe_resume_remote()
-			if restored:
-				return
+			yield from self._run_remote_turn()
+			return
 
 		# Resume session
 		if self.resume and not self.is_subagent:
@@ -341,6 +343,14 @@ class ai(PythonRunner):
 				self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 			return
 
+		# Fresh (local) turn
+		yield from self._run_fresh_turn()
+
+	def _run_fresh_turn(self) -> Generator:
+		"""Start a brand-new turn (no prior history to restore): resolve the prompt,
+		set up session metadata + mode + system prompt, run the agent loop, then mark
+		the turn completed. Shared by the local path and the fresh remote path (the
+		latter runs it while holding the per-session single-flight lock)."""
 		# Get user prompt
 		self.prompt = self._resolve_prompt()
 		if not self.prompt and not self.is_subagent:
@@ -380,6 +390,87 @@ class ai(PythonRunner):
 		finally:
 			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
+
+	# -------------------------------------------------------------------------
+	# Per-session single-flight (concurrent redelivery / late-answer respawn)
+	# -------------------------------------------------------------------------
+
+	def _run_remote_turn(self) -> Generator:
+		"""Run one remote (web) turn under the per-session single-flight lock, then
+		resume from DB or start fresh. Split out of ``yielder`` so the lock wiring
+		(no-op on contention) is unit-testable. The lock is held across BOTH the
+		completed-turn marker check and the run, so a waiter that acquires it later
+		re-observes the finished state and no-ops instead of replaying."""
+		with self._single_flight() as acquired:
+			if not acquired:
+				# Another delivery of this session is in-flight and doing the work;
+				# skip silently rather than replaying its turn.
+				self.debug('single-flight: session lock held by another delivery; skipping duplicate', sub='llm')
+				yield Info(message="Skipping duplicate delivery: this session is already running.")
+				return
+			restored = yield from self._maybe_resume_remote()
+			if restored:
+				return
+			yield from self._run_fresh_turn()
+
+	def _make_session_lock(self):
+		"""Build a Redis lock keyed by this conversation's ``session_id``, or None.
+
+		Returns None — meaning "run unlocked" (fail-open) — off the remote channel,
+		with no session_id, or when the Celery backend/broker is not Redis (e.g. the
+		filesystem broker in local dev) or ``redis`` is unavailable. A missing lock
+		backend must never wedge a run. TTL = ``broker_visibility_timeout`` so a
+		crashed holder's lock expires exactly when the broker redelivers the task —
+		the redelivery then acquires it and resumes.
+		"""
+		if self.interactive != "remote" or not self.session_id:
+			return None
+		url = CONFIG.celery.result_backend or CONFIG.celery.broker_url
+		if not str(url).startswith(("redis://", "rediss://")):
+			return None
+		try:
+			import redis
+			client = redis.Redis.from_url(url)
+			return client.lock(
+				f"secator:ai:single-flight:{self.session_id}",
+				timeout=CONFIG.celery.broker_visibility_timeout,
+			)
+		except Exception as e:  # noqa: BLE001 - lock backend errors must not wedge the run
+			self.debug(f'single-flight: lock unavailable ({e}); running unlocked', sub='llm')
+			return None
+
+	@contextmanager
+	def _single_flight(self):
+		"""Guard a remote turn so a redelivered / late-answered task can't run
+		concurrently with the in-flight one for the SAME session. Yields True when
+		this task holds the lock (it should run) or False when another delivery
+		already holds it (this task must no-op — the holder is doing the work).
+		Fail-open: yields True when no Redis lock backend is available.
+
+		ponytail: non-blocking single-flight keyed by session_id via redis-py's Lock
+		(token + Lua safe release); different conversations still run in parallel, and
+		the TTL bounds a crashed holder so it can't wedge the session.
+		"""
+		lock = self._make_session_lock()
+		if lock is None:
+			yield True
+			return
+		try:
+			acquired = lock.acquire(blocking=False)
+		except Exception as e:  # noqa: BLE001 - acquire failure must not wedge the run
+			self.debug(f'single-flight: acquire failed ({e}); running unlocked', sub='llm')
+			yield True
+			return
+		if not acquired:
+			yield False
+			return
+		try:
+			yield True
+		finally:
+			try:
+				lock.release()
+			except Exception:  # noqa: BLE001 - already expired/lost is a safe release
+				pass
 
 	# -------------------------------------------------------------------------
 	# Remote (web) session restore

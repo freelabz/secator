@@ -1168,5 +1168,112 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 		self.assertEqual(doc.message["content"], error_content)
 
 
+class TestSingleFlight(unittest.TestCase):
+	"""A redelivered / late-answered ai task must not run concurrently with the
+	in-flight one for the SAME session: the second no-ops, never duplicates."""
+
+	class _FakeLock:
+		"""Minimal stand-in for a redis-py Lock backed by a shared dict, so two
+		'tasks' sharing it get real mutual exclusion (non-blocking acquire)."""
+		def __init__(self, shared):
+			self._shared = shared
+		def acquire(self, blocking=False):
+			if self._shared.get("locked"):
+				return False
+			self._shared["locked"] = True
+			return True
+		def release(self):
+			self._shared["locked"] = False
+
+	def _make_task(self, lock):
+		from secator.tasks.ai import ai
+		task = ai.__new__(ai)
+		task.interactive = "remote"
+		task.session_id = "sess-123"
+		task.debug = MagicMock()
+		task._make_session_lock = MagicMock(return_value=lock)
+		return task
+
+	def _drive(self, gen):
+		items = []
+		try:
+			while True:
+				items.append(next(gen))
+		except StopIteration:
+			pass
+		return items
+
+	def test_two_concurrent_invocations_only_one_runs(self):
+		"""Both deliveries share one lock. The first holds it and runs the turn;
+		the second finds it held and no-ops (never touches resume/fresh)."""
+		shared = {}
+		task_a = self._make_task(self._FakeLock(shared))
+		task_b = self._make_task(self._FakeLock(shared))
+		task_a._maybe_resume_remote = MagicMock(return_value=iter([]))
+		task_a._run_fresh_turn = MagicMock(return_value=iter([]))
+		task_b._maybe_resume_remote = MagicMock(return_value=iter([]))
+		task_b._run_fresh_turn = MagicMock(return_value=iter([]))
+
+		# A enters its lock and, while still holding it, B tries to run.
+		with task_a._single_flight() as a_go:
+			self.assertTrue(a_go)
+			self._drive(task_b._run_remote_turn())
+			# B was contended out -> ran nothing.
+			task_b._maybe_resume_remote.assert_not_called()
+			task_b._run_fresh_turn.assert_not_called()
+
+		# After A releases, a later delivery acquires and runs normally.
+		task_a._maybe_resume_remote.return_value = iter([])
+		self._drive(task_a._run_remote_turn())
+		task_a._maybe_resume_remote.assert_called_once()
+
+	def test_contended_delivery_short_circuits_before_resume(self):
+		shared = {"locked": True}  # someone else already holds it
+		task = self._make_task(self._FakeLock(shared))
+		task._maybe_resume_remote = MagicMock(return_value=iter([]))
+		task._run_fresh_turn = MagicMock(return_value=iter([]))
+		self._drive(task._run_remote_turn())
+		task._maybe_resume_remote.assert_not_called()
+		task._run_fresh_turn.assert_not_called()
+
+	def test_fresh_remote_turn_runs_inside_lock(self):
+		"""Uncontended: resume returns False -> the fresh path runs, holding the lock."""
+		task = self._make_task(self._FakeLock({}))
+		task._maybe_resume_remote = MagicMock(return_value=iter([]))  # returns None -> falsey
+		task._run_fresh_turn = MagicMock(return_value=iter([]))
+		self._drive(task._run_remote_turn())
+		task._maybe_resume_remote.assert_called_once()
+		task._run_fresh_turn.assert_called_once()
+
+	def test_fail_open_when_no_lock_backend(self):
+		"""No Redis lock (None) -> run unlocked rather than wedge the run."""
+		task = self._make_task(lock=None)
+		with task._single_flight() as go:
+			self.assertTrue(go)
+
+	def test_make_session_lock_none_for_non_redis_and_local(self):
+		from secator.tasks.ai import ai
+		from secator.config import CONFIG
+		task = ai.__new__(ai)
+		task.interactive = "remote"
+		task.session_id = "s1"
+		task.debug = MagicMock()
+		with patch.object(CONFIG.celery, "result_backend", "file:///tmp/x"), \
+		     patch.object(CONFIG.celery, "broker_url", "filesystem://"):
+			self.assertIsNone(task._make_session_lock())
+		# Local channel never locks even with a redis backend configured.
+		task.interactive = "local"
+		with patch.object(CONFIG.celery, "result_backend", "redis://localhost:6379/0"):
+			self.assertIsNone(task._make_session_lock())
+
+	def test_release_error_is_swallowed(self):
+		class _BadRelease(self._FakeLock):
+			def release(self):
+				raise RuntimeError("lock lost")
+		task = self._make_task(_BadRelease({}))
+		with task._single_flight() as go:  # must not raise on exit
+			self.assertTrue(go)
+
+
 if __name__ == "__main__":
 	unittest.main()
