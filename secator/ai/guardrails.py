@@ -13,6 +13,37 @@ from secator.scope import host_in_scope, as_scope_list
 # URL pattern for target detection
 URL_PATTERN = re.compile(r'https?://[^\s\'"]+')
 
+# Code-hosting / PoC-source hosts are ALWAYS allowed as network targets, regardless of
+# workspace scope (in_scope/out_of_scope) and regardless of scope_hard_deny: cloning a
+# PoC/exploit from GitHub et al. is tooling, not a pentest target, so scope must never
+# deny it. Matched host-based (exact or `*.suffix`) so both `git clone
+# https://github.com/x/y` and a raw-file fetch pass. Extend as new hosts are needed.
+ALWAYS_ALLOWED_HOSTS = (
+	'github.com', '*.github.com',
+	'raw.githubusercontent.com', 'codeload.github.com',
+	'gist.github.com', 'objects.githubusercontent.com',
+	'gitlab.com', '*.gitlab.com',
+	'bitbucket.org', '*.bitbucket.org',
+)
+
+
+def _host_of(value: str) -> str:
+	"""Bare host of a target value (strips scheme/port/path); '' if none."""
+	from urllib.parse import urlparse
+	if value.startswith(('http://', 'https://')):
+		return (urlparse(value).hostname or '').lower().rstrip('.')
+	host = value.split('/', 1)[0]
+	if ':' in host and not host.startswith('['):
+		host = host.rsplit(':', 1)[0]
+	return host.lower().rstrip('.')
+
+
+def _is_always_allowed_host(value: str) -> bool:
+	"""True if the target's host is a code-hosting / PoC-source host (see ALWAYS_ALLOWED_HOSTS)."""
+	host = _host_of(value)
+	return bool(host) and any(fnmatch.fnmatch(host, pat) for pat in ALWAYS_ALLOWED_HOSTS)
+
+
 # Shell operators that chain commands
 SHELL_OPERATORS = re.compile(r'\s*(?:&&|\|\||[;|])\s*')
 
@@ -1088,6 +1119,16 @@ class PermissionEngine:
 				values_to_check.append(parsed.hostname)
 			if parsed.port:
 				values_to_check.append(f"{parsed.hostname}:{parsed.port}")
+
+		# Top precedence for targets: code-hosting / PoC-source hosts are always allowed,
+		# ahead of every deny/scope layer below (config deny, mandate out_of_scope, and
+		# scope_hard_deny). GitHub et al. are tooling, not a pentest target, so scope must
+		# never block a PoC clone or raw-file fetch. Host-based, so a userinfo spoof like
+		# `github.com@evil.com` (host = evil.com) is NOT covered and still scoped normally.
+		if rule_type == "target":
+			for v in values_to_check:
+				if _is_always_allowed_host(v):
+					return PermissionResult(decision="allow", reason=f"Always-allowed code-hosting host: target({v})")
 
 		for rt, patterns in self.rules["deny"]:
 			if rt == rule_type:
