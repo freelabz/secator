@@ -76,6 +76,9 @@ class Command(Runner):
 	# Output map to transform JSON output keys
 	output_map = {}
 
+	# Delay before the first stats tick. Skipping t=0 is deliberate -- see _monitor_process.
+	first_stat_delay = 0.3
+
 	# Run in shell if True (not recommended)
 	shell = False
 
@@ -236,11 +239,6 @@ class Command(Runner):
 
 		# Process
 		self.process = None
-
-		# pid -> psutil.Process, reused across monitor ticks so cpu_percent() measures a real
-		# interval instead of always being a first call (which returns 0.0). Scoped to this
-		# Command, so it dies with the task -- no pruning needed.
-		self._ps_cache = {}
 
 		# Monitor thread (lazy initialization)
 		self.monitor_thread = None
@@ -572,16 +570,6 @@ class Command(Runner):
 			self._init_monitor_objects()
 			self.process_start_time = time()
 			self.monitor_stop_event.clear()
-			# Prime the CPU baseline the moment the process exists, so the first monitor tick
-			# reports CPU since launch rather than 0.0. cpu_percent()'s first call on a Process
-			# only establishes the baseline; every later call returns the delta since it.
-			try:
-				proc = psutil.Process(self.process.pid)
-				proc.cpu_percent()
-				self._ps_cache[proc.pid] = proc
-			except (psutil.Error, FileNotFoundError):
-				pass
-
 			self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
 			self.monitor_thread.start()
 
@@ -749,34 +737,21 @@ class Command(Runner):
 			return self.max_timeout
 		return CONFIG.celery.task_max_timeout
 
-	# Delay before the FIRST stats tick. The t=0 tick is skipped deliberately: the CPU
-	# baseline is primed at process start, so a tick fired microseconds later has no
-	# interval to measure and reports 0.0 every time. Later ticks use
-	# stat_update_frequency as before.
-	#
-	# 0.3s is a deliberate floor, not a round number. A task that exits before the first
-	# tick produces NO Stat at all -- there is no end-of-run sample, because by the time
-	# the monitor stops the process is gone and psutil cannot read it. In prod 18% of task
-	# runs finish under 1s but only ~5% finish under 0.3s, so this keeps memory telemetry
-	# for most short tasks while still leaving an interval ~30x the 10ms clock granularity,
-	# i.e. long enough for the CPU delta to be meaningful rather than quantisation noise.
-	FIRST_STAT_DELAY = 0.3
-
-	@staticmethod
-	def _initial_stats_time(now, frequency, first_delay):
-		"""Backdated 'last tick' so the stats gate opens at `first_delay`, not immediately.
-
-		The gate is `now - last_stats_time >= frequency`, so backdating by
-		`frequency - first_delay` makes it open exactly `first_delay` after start.
-		"""
-		return now - frequency + first_delay
-
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
-		last_stats_time = Command._initial_stats_time(
-			time(), CONFIG.runners.stat_update_frequency, Command.FIRST_STAT_DELAY
-		)
-		poll_interval = Command.FIRST_STAT_DELAY
+		# psutil derives cpu_percent() from the delta between two calls on the SAME Process
+		# object, so we hold them here for the life of the thread. Building a fresh one per
+		# tick makes every read a first call, which returns 0.0 by definition.
+		procs = {}
+		list(self._collect_stats(procs))
+
+		# That first pass only establishes the CPU baselines, so its numbers are meaningless
+		# and are discarded. Backdate last_stats_time so the first REAL tick lands
+		# `first_stat_delay` in rather than immediately; later ticks use stat_update_frequency.
+		# A task exiting before that first tick yields no stats at all, which is why the delay
+		# is short: in prod 18% of runs finish under 1s but only 5% under 0.3s.
+		last_stats_time = time() - CONFIG.runners.stat_update_frequency + self.first_stat_delay
+		poll_interval = self.first_stat_delay
 
 		while not self.monitor_stop_event.is_set():
 			if not self.process or not self.process.pid:
@@ -788,7 +763,7 @@ class Command(Runner):
 
 				# Collect and queue stats at regular intervals
 				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
-					stats_items = list(self._collect_stats())
+					stats_items = list(self._collect_stats(procs))
 					for stat_item in stats_items:
 						if self.monitor_queue is not None:
 							self.monitor_queue.put(stat_item)
@@ -839,12 +814,16 @@ class Command(Runner):
 			# Only the first pass is short; settle into the configured cadence after it.
 			poll_interval = CONFIG.runners.stat_update_frequency
 
-	def _collect_stats(self):
-		"""Collect stats about the current running process, if any."""
+	def _collect_stats(self, procs):
+		"""Collect stats about the current running process, if any.
+
+		Args:
+			procs (dict): pid -> psutil.Process, owned by _monitor_process and reused across
+				ticks so CPU is measured over a real interval.
+		"""
 		if not self.process or not self.process.pid:
 			return
-		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True, cache=self._ps_cache)
+		stats = Command.get_process_info(psutil.Process(self.process.pid), children=True, procs=procs)
 		total_mem = 0
 		for info in stats:
 			name = info['name']
@@ -869,80 +848,37 @@ class Command(Runner):
 		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
 		# 	raise MemoryError(f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
 
-	def stats(self, memory_limit_mb=None):
-		"""Gather stats about the current running process, if any."""
-		if not self.process or not self.process.pid:
-			return
-		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True, cache=self._ps_cache)
-		total_mem = 0
-		for info in stats:
-			name = info['name']
-			pid = info['pid']
-			cpu_percent = info['cpu_percent']
-			mem_percent = info['memory_percent']
-			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
-			total_mem += mem_rss
-			self.debug(f'process: {name} pid: {pid} memory: {mem_rss}MB', sub='stats')
-			net_conns = info.get('net_connections') or []
-			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
-			yield Stat(
-				name=name,
-				pid=pid,
-				cpu=cpu_percent,
-				memory=mem_percent,
-				net_conns=len(net_conns),
-				extra_data=extra_data,
-			)
-		self.debug(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}', sub='stats')
-		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
-			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
-
 	@staticmethod
-	def get_process_info(process, children=False, cache=None):
+	def get_process_info(process, children=False, procs=None):
 		"""Get process information from psutil.
 
 		Args:
 			process (psutil.Process): Process.
 			children (bool): Whether to gather stats about children processes too.
-			cache (dict): pid -> psutil.Process, reused across monitor ticks. See below.
+			procs (dict): pid -> psutil.Process reused across calls. psutil keeps the CPU
+				baseline on the object, so passing this is what makes cpu_percent() a real
+				measurement instead of a first call (always 0.0).
 		"""
-		procs = [process]
+		targets = [process]
 		if children:
+			targets.extend(process.children(recursive=True))
+		for proc in targets:
+			if procs is not None:
+				proc = procs.setdefault(proc.pid, proc)
 			try:
-				procs.extend(process.children(recursive=True))
-			except (psutil.Error, FileNotFoundError):
-				pass
-
-		for proc in procs:
-			try:
-				# psutil keeps the CPU baseline ON THE Process OBJECT. A fresh object per tick
-				# makes every read a first call, which returns 0.0 by definition -- that was the
-				# bug (every Stat.cpu in prod was 0). Reusing the object means cpu_percent()
-				# measures the real interval since the previous tick, with NO blocking sleep.
-				#
-				# The process is primed at start (see _start_process), so the very first tick
-				# reports CPU since launch. Children appear mid-run: they are primed on the tick
-				# that first sees them and report from the next one.
-				if cache is not None:
-					proc = cache.setdefault(proc.pid, proc)
-
-				# Read CPU BEFORE as_dict(). as_dict() calls cpu_percent() itself, which RESETS
-				# the baseline -- reading after it yields ~0 every time and silently restores the
-				# original bug. Its reset is harmless here (it re-primes for the next tick), but
-				# only if we have already taken our reading.
+				# Read CPU first: as_dict() calls cpu_percent() itself, which resets the
+				# baseline, so reading after it always yields ~0.
 				cpu_percent = proc.cpu_percent()
-				# fmt: off
 				data = {
 					k: v._asdict() if hasattr(v, '_asdict') else v
 					for k, v in proc.as_dict().items()
 					if k not in ['memory_maps', 'open_files', 'environ']
 				}
-				# fmt: on
-				data['cpu_percent'] = cpu_percent
-			except (psutil.Error, FileNotFoundError):
-				# Process exited between listing and reading -- skip it, keep the rest.
+			except psutil.Error:
+				# A child exited between listing and reading. Skip it, keep the rest -- letting
+				# this escape would break the whole monitor loop over one short-lived child.
 				continue
+			data['cpu_percent'] = cpu_percent
 			yield data
 
 	def run_item_loaders(self, line):
