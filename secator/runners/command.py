@@ -872,6 +872,12 @@ class Command(Runner):
 				if k not in ['memory_maps', 'open_files', 'environ']
 			}
 			# fmt: on
+			# psutil caches the CPU baseline on the Process object and we build a fresh one on every
+			# monitor tick, so as_dict()'s cpu_percent is always a first call -> always 0.0. Sample
+			# over a short blocking window instead, so even the first (often only) tick is real.
+			# ponytail: 100ms per process, serially; batch (sample all, sleep once, re-sample) only
+			# if a task ever spawns enough children for N * 100ms to matter at stat_update_frequency.
+			data['cpu_percent'] = process.cpu_percent(interval=0.1)
 			yield data
 		except (psutil.Error, FileNotFoundError):
 			return
