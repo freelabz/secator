@@ -237,6 +237,9 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 	if ctx.permission_engine is None:
 		return None
 
+	# The engine is THE decision point: it returns the final verdict already accounting
+	# for isolation and any checker fault (see PermissionEngine.check_action). We only act
+	# on allow/deny/ask here — no post-processing of the verdict.
 	result = ctx.permission_engine.check_action(action)
 	if result.decision == "deny":
 		# Out-of-scope denials carry the target + a machine-readable reason so the UI/CLI
@@ -256,13 +259,10 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 		rounds += 1
 		cmd_display = _build_action_display(action)
 
-		# Handle shell command prompts (unknown commands or parse failures)
-		# --isolated: the container is the command/path boundary, so drop the shell (command)
-		# ask entirely — mark it approved so the re-check clears this layer. Target (network)
-		# asks below are unaffected and still prompt.
-		if result.shell_command and ctx.isolated:
-			ctx.permission_engine.approved_shell_commands.add(result.shell_command.strip())
-		elif result.shell_command:
+		# Handle shell command prompts (unknown commands or parse failures). Isolation is
+		# already resolved by the engine (isolated shell never reaches here as an ask), so
+		# this is purely the interactive/remote approval path.
+		if result.shell_command:
 			parse_failed = "Could not parse" in (result.reason or "")
 			denial = yield from _ask_and_check(
 				ctx, is_remote,
@@ -297,29 +297,23 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 			if denial:
 				return denial
 
-		# Handle path prompts
+		# Handle path prompts. Isolation is resolved by the engine (isolated path asks never
+		# reach here), so this is purely the interactive/remote approval path.
 		if result.paths:
 			cmd = action.get("command", "")
 			path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
-			if ctx.isolated:
-				# --isolated: the container is the filesystem boundary, so drop path asks —
-				# runtime-allow each path so the re-check clears this layer (no prompt).
-				ctx.permission_engine.add_runtime_allow(
-					[f"{path_access_map.get(p, 'read')}({p})" for p in result.paths]
+			for path in result.paths:
+				access_type = path_access_map.get(path, "read")
+				denial = yield from _ask_and_check(
+					ctx, is_remote,
+					question=f"{access_type.capitalize()} access to {path} requires approval",
+					permission_type=access_type,
+					value=path,
+					deny_message=f"Action denied: {access_type} access to {path} not approved",
+					command=cmd_display,
 				)
-			else:
-				for path in result.paths:
-					access_type = path_access_map.get(path, "read")
-					denial = yield from _ask_and_check(
-						ctx, is_remote,
-						question=f"{access_type.capitalize()} access to {path} requires approval",
-						permission_type=access_type,
-						value=path,
-						deny_message=f"Action denied: {access_type} access to {path} not approved",
-						command=cmd_display,
-					)
-					if denial:
-						return denial
+				if denial:
+					return denial
 
 		# Re-check to see if more layers need prompting
 		result = ctx.permission_engine.check_action(action)
@@ -538,11 +532,44 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	# defense in depth: a spawned runner is never dangerous (CLI --dangerous unaffected)
 	opts["dangerous"] = False
 
+	# Validate the runner NAME up front and fail with a clean, actionable message.
+	# An LLM routinely invents task/workflow names (e.g. `url_crawl`, `code_scan`).
+	# For a task, `TemplateLoader(input=...)` accepts any name and the miss only
+	# surfaces later inside `build_celery_workflow -> get_task_class`, which raises a
+	# `TaskNotFoundError` DURING `yield from runner` — escaping as a full Python
+	# TRACEBACK in the tool result (the construction-time `except TaskNotFoundError`
+	# below never sees it). For a workflow, an unknown name loads an EMPTY template
+	# that fails obscurely downstream. Both waste iterations and pollute the model's
+	# context with a stack trace; catch them here and hand back the valid names.
 	if runner_type == "task":
+		try:
+			Task.get_task_class(name)
+		except TaskNotFoundError:
+			from secator.loader import discover_tasks, find_templates
+			available = sorted(t.__name__ for t in discover_tasks())
+			# The most common miss is a real WORKFLOW name called via run_task (the
+			# model confuses the two tools — e.g. `url_crawl`, `code_scan`). Point it
+			# at the right tool instead of only listing tasks.
+			workflows = {t['name'] for t in find_templates() if t.get('type') == 'workflow'}
+			hint = (f" '{name}' IS a workflow — call it with run_workflow, not run_task."
+			        if name in workflows else
+			        f" Pick one of the available tasks: {', '.join(available)}.")
+			yield Error(message=(
+				f"Task '{name}' not found — not a valid secator task.{hint}"
+			), _context=context)
+			return
 		tpl = TemplateLoader(input={'type': 'task', 'name': name})
 		runner_cls = Task
 	else:
 		tpl = TemplateLoader(name=f'workflows/{name}')
+		if not tpl.get('name'):
+			from secator.loader import find_templates
+			available = sorted(t['name'] for t in find_templates() if t.get('type') == 'workflow')
+			yield Error(message=(
+				f"Workflow '{name}' not found — not a valid secator workflow. "
+				f"Pick one of the available workflows: {', '.join(available)}."
+			), _context=context)
+			return
 		runner_cls = Workflow
 
 	# Decrypt targets
