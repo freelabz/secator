@@ -42,12 +42,6 @@ class dnsx(ReconDns):
 	install_version = 'v1.2.2'
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@[install_version]'
 	github_handle = 'projectdiscovery/dnsx'
-	# `dnsx/brute` (subdomain bruteforce, driven by a wordlist) is a different
-	# workload from a plain `dnsx` resolve: prod shows it peaking ~449 MiB and
-	# ~503 mc over ~2h runs, against the small pool's admitted 500m / 512 MiB.
-	# Plain `dnsx` stays small (<=75 MiB, seconds). Split on the wordlist, which is
-	# what actually puts it in brute mode -- see the `dnsx/brute` entry in
-	# configs/workflows/subdomain_recon.yaml.
 	profile = lambda opts: dnsx.dynamic_profile(opts)  # noqa: E731
 
 	@staticmethod
@@ -58,9 +52,6 @@ class dnsx(ReconDns):
 			opts_conf=dict(dnsx.opts, **dnsx.meta_opts),
 			opt_aliases=opts.get('aliases', []),
 			preprocess=True,
-			# process=False on purpose: the wordlist processor resolves a name to a path
-			# and raises on None, which is the normal case for a plain `dnsx` resolve.
-			# We only need to know whether a wordlist was requested at all.
 			process=False,
 		)
 		return 'medium' if wordlist else 'small'
