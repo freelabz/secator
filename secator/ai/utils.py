@@ -363,6 +363,26 @@ def _coerce_finding_fields(cls, data: Dict) -> Dict:
 		expected = field_types.get(key)
 		if expected is None or value is None:
 			continue
+		# A scalar `str` field handed list-shaped data: the model packs multiple values into a
+		# single field (e.g. `matched_at` as '["http://a","http://b"]' or a real list). A str value
+		# already "matches" str and would slip past the type check below and get stored as an ugly
+		# literal; a real list would be rejected by validate_fields. Unwrap to the first element so
+		# it lands as a clean scalar. ponytail: first element is the representative location; extra
+		# ones are dropped (a scalar field holds one). Mirrors the list-field coercion below.
+		if expected is str:
+			parsed = value
+			if isinstance(value, str):
+				s = value.strip()
+				if s.startswith('[') and s.endswith(']'):
+					try:
+						loaded = json.loads(s)
+						if isinstance(loaded, list):
+							parsed = loaded
+					except (json.JSONDecodeError, TypeError):
+						parsed = value
+			if isinstance(parsed, list):
+				data[key] = str(parsed[0]) if parsed else ''
+			continue
 		# Already the right type (note: bool is a subclass of int, so guard it).
 		if isinstance(value, expected) and not (expected is int and isinstance(value, bool)):
 			continue
