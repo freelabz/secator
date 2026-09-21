@@ -35,6 +35,13 @@ BUP_BYPASS_MODES_STR = ','.join(BUP_BYPASS_MODES)
 @task()
 class bup(HttpBase):
 	"""40X bypasser."""
+	# Prod peaks ~365 MiB / ~551 mc, against the small pool's admitted
+	# 500m / 512 MiB -- CPU is already over the request (throttled), and memory
+	# is close enough that a heavier target OOMs the pod. That kills PID 1, so it
+	# surfaces as an abandoned task with no error rather than an OOMKilled event.
+	# Low sample (n=1); medium costs only +0.5 GiB billed at this pool's tiny
+	# pod-hours, so the trade is heavily in favour of not OOMing.
+	profile = 'medium'
 
 	cmd = 'bup -d'
 	input_types = [URL]
