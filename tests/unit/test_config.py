@@ -141,6 +141,17 @@ class TestConfig(unittest.TestCase):
 		config = self._parse_with_env(SECATOR_CELERY_TASK_MAX_TIMEOUT='999')
 		self.assertEqual(config.celery.task_max_timeout, 999)
 
+	def test_celery_redis_health_check_interval_default(self):
+		"""The redis result-backend health-check interval defaults to 30 (no behavior change)."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		self.assertEqual(config.celery.redis_backend_health_check_interval, 30)
+
+	def test_env_override_celery_redis_health_check_interval(self):
+		"""SECATOR_CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL=0 disables the health check (gevent chord hang fix)."""
+		config = self._parse_with_env(SECATOR_CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL='0')
+		self.assertEqual(config.celery.redis_backend_health_check_interval, 0)
+
 	def test_env_override_unknown_addon_key_does_not_break_config(self):
 		"""An invalid SECATOR_ADDONS_* key is ignored and leaves the typed addons model intact (#1204).
 

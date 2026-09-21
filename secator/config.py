@@ -71,6 +71,13 @@ class Celery(StrictModel):
 	result_backend: StrExpandHome = ''
 	result_backend_transport_options: str = ''
 	result_expires: int = 86400  # 1 day
+	# Interval (seconds) for the redis result-backend pubsub health check. The default 30 keeps
+	# a long-lived idle result connection alive, but under the gevent result-backend pubsub it
+	# triggers `redis.exceptions.PubSubError: A non health check response was cleaned ...` mid-chord
+	# and hangs the workflow. Set SECATOR_CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL=0 on gevent
+	# deployments to disable it (upstream of gke-admin's patch_celery.sh). See resiliency backlog
+	# for the deeper chord fix.
+	redis_backend_health_check_interval: int = 30
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False

@@ -822,10 +822,15 @@ class PermissionEngine:
 
 	def __init__(
 		self, config: Dict, targets: List[str] = None, workspace: str = "",
-		in_scope=None, out_of_scope=None
+		in_scope=None, out_of_scope=None, isolated: bool = False
 	):
 		self.targets = targets or []
 		self.workspace = str(workspace)
+		# --isolated: every run_shell executes inside a per-runner sandbox container, so
+		# the container (not the host rules) is the command/filesystem boundary. The engine
+		# bakes this into its verdict — shell-command + path asks resolve to `allow`, while
+		# target (network egress) and sensitive-env decisions are unaffected. See check_action.
+		self.isolated = bool(isolated)
 		# Mandate-derived allow/deny target lists (run-opts injected by the API from the
 		# run's covering mandates). Empty = no mandate boundary (CLI): fall through to the
 		# config/runtime rules + interactive ask. Same host_in_scope every runner uses —
@@ -858,18 +863,48 @@ class PermissionEngine:
 		return result
 
 	def check_action(self, action: Dict) -> PermissionResult:
-		"""Validate an action against permission rules (two-step)."""
-		action_type = action.get("action", "")
+		"""THE single decision point: return the FINAL verdict for an action.
 
-		# Step 1: Check action itself (shell commands, task/workflow names)
-		# Return immediately on deny OR ask so shell approval happens
-		# before targets/paths are checked (each recheck peels one layer)
+		Precedence deny > allow > ask > default-deny, evaluated over ordered layers
+		(action-type/shell, targets, paths, sensitive-env). Two cross-cutting rules are
+		baked in here so the caller acts on the verdict with no post-processing:
+
+		* Isolation (``self.isolated``): the sandbox container is the command/filesystem
+		  boundary, so the shell-command and path layers are dropped to ``allow``. Target
+		  (network egress) and sensitive-env layers are UNAFFECTED — those still gate.
+		* Fail-safe: a fault in the sub-steps (scope/target resolution, rule/regex
+		  matching, path/env detection — all over LLM-shaped input) resolves
+		  deterministically to a non-``ask`` verdict (isolated shell -> allow, else
+		  fail-closed deny), never an ``ask`` (which would spin the caller's prompt loop)
+		  and never a propagated crash.
+		"""
+		action_type = action.get("action", "")
+		try:
+			return self._decide(action_type, action)
+		except (ValueError, TypeError, re.error) as e:
+			# Enumerated faults the layers below can raise on malformed/unresolvable
+			# input: ipaddress/urlparse scope resolution -> ValueError; rule + scope
+			# matching -> re.error; path/env detection -> ValueError/TypeError. A
+			# guardrail fault must fail-safe, not ask/crash (see docstring).
+			if self.isolated and action_type == "shell":
+				return PermissionResult(decision="allow", reason="isolated: checker error, sandbox is the boundary")
+			return PermissionResult(decision="deny", reason=f"guardrail check error (fail-closed): {type(e).__name__}")
+
+	def _decide(self, action_type: str, action: Dict) -> PermissionResult:
+		"""Ordered layer evaluation for :meth:`check_action` (see it for the contract)."""
+		# Layer 1: the action itself (shell sub-commands, task/workflow names).
 		result = self._check_action_type(action_type, action)
-		if result.decision in ("deny", "ask"):
+		if result.decision == "deny":
+			return result
+		# Isolation drops the shell-command layer: an unknown-command / parse-failure
+		# `ask` on a shell action becomes allow, but we fall through to still enforce
+		# targets + sensitive-env below (network/secret access is NOT the sandbox's job).
+		isolated_shell = self.isolated and action_type == "shell"
+		if result.decision == "ask" and not isolated_shell:
 			return result
 
-		# Step 2: Check targets. Always enforce when targets exist — a missing
-		# catch-all must fall to ask (via _check_values "No rule"), never default-allow.
+		# Layer 2: targets (network egress) — UNAFFECTED by isolation. Always enforce when
+		# targets exist — a missing catch-all falls to ask (via _check_values), never allow.
 		targets_to_check = self._extract_targets(action)
 		if targets_to_check:
 			target_result = self._check_values("target", targets_to_check)
@@ -882,36 +917,35 @@ class PermissionEngine:
 					targets=target_result.targets
 				)
 
-		# Step 3: Check paths (for shell commands)
+		# Layer 3: paths (shell only). Explicit path-deny rules ALWAYS block (even isolated);
+		# only "no rule" path asks are dropped to allow under isolation (the sandbox is the
+		# filesystem boundary).
 		if action_type == "shell":
 			command = action.get("command", "")
 			paths_with_access = detect_paths_with_access(command)
-			if paths_with_access:  # Always enforce — no read/write rule must ask, not allow
-				# Check each path with its correct access type
+			if paths_with_access:
 				ask_paths = []
 				for path, access in paths_with_access:
 					path_result = self._check_value(access, path)
 					if path_result.decision == "deny":
-						# Explicit deny rule: block immediately
-						# "No rule" default deny: prompt user instead
 						if _is_default_deny(path_result):
-							ask_paths.append((path, access))
+							ask_paths.append((path, access))  # unknown path -> ask (or dropped if isolated)
 						else:
-							return PermissionResult(
+							return PermissionResult(  # explicit deny rule: block even in isolation
 								decision="deny",
 								reason=path_result.reason,
 								paths=[path]
 							)
 					if path_result.decision == "ask":
 						ask_paths.append((path, access))
-				if ask_paths:
+				if ask_paths and not isolated_shell:
 					return PermissionResult(
 						decision="ask",
 						reason=f"Unknown {ask_paths[0][1]}(s): {ask_paths[0][0]}",
 						paths=[p for p, _ in ask_paths]
 					)
 
-		# Step 4: Check for sensitive env variable references (for shell commands)
+		# Layer 4: sensitive env variable references (shell only) — UNAFFECTED by isolation.
 		if action_type == "shell":
 			command = action.get("command", "")
 			sensitive_vars = detect_sensitive_env_vars(command)
@@ -922,10 +956,12 @@ class PermissionEngine:
 					targets=sensitive_vars,
 				)
 
-		# If Step 1 was "allow" and no target/path/env issues, allow
+		# No blocking layer fired: allow when layer 1 allowed (or was an isolated-shell
+		# drop); otherwise default-deny.
 		if result.decision == "allow":
 			return result
-
+		if isolated_shell:
+			return PermissionResult(decision="allow", reason="isolated: shell/path allowed (sandbox is the boundary)")
 		return PermissionResult(decision="deny", reason=f"No matching rule for {action_type}")
 
 	def _has_rules_for(self, rule_type: str) -> bool:
@@ -951,6 +987,15 @@ class PermissionEngine:
 			command = action.get("command", "")
 			if not command.strip():
 				return PermissionResult(decision="deny", reason="Empty command")
+			# Whole-command-approved short-circuit — checked BEFORE parsing. A command
+			# approved this run (an isolated-mode drop, or a prior interactive allow/
+			# allow_all) must resolve to allow even when the shell parser can't parse it
+			# (compound `for..do..done`, unbalanced quotes, long `&&` chains). The
+			# parse-failure `ask` below returns early, so if this check lived only after
+			# it, the re-check never cleared and the guardrail loop spun `max_rounds`
+			# and then denied with NO prompt (the canary isolated spin-deny, RC1).
+			if command.strip() in self.approved_shell_commands:
+				return PermissionResult(decision="allow", reason="shell command approved this run")
 			subcommands = _parse_subcommands(command)
 			if not subcommands:
 				# Parse failure — prompt user for the whole command
@@ -983,12 +1028,8 @@ class PermissionEngine:
 					most_restrictive = result
 				elif most_restrictive is None:
 					most_restrictive = result
-			# The whole command was already approved this run (allow / allow_all). The
-			# hard-deny checks above still apply, but don't re-prompt for its unmatched
-			# sub-commands — resolve to allow so a compound command prompts once, not
-			# once per re-check round.
-			if command.strip() in self.approved_shell_commands:
-				return PermissionResult(decision="allow", reason="shell command approved this run")
+			# (whole-command-approved short-circuit handled at the top of this branch,
+			# before parsing, so a parse-failure re-check clears too — see above.)
 			if unmatched:
 				return PermissionResult(
 					decision="ask",

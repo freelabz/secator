@@ -27,7 +27,9 @@ def _config():
 
 
 def _ctx(isolated, backend="auto"):
-	engine = PermissionEngine(_config(), targets=["10.0.0.1"], workspace="/tmp/ws")
+	# The engine owns the isolation verdict now (isolated shell/path -> allow), so thread
+	# it in at build time — the caller no longer post-processes for isolation.
+	engine = PermissionEngine(_config(), targets=["10.0.0.1"], workspace="/tmp/ws", isolated=isolated)
 	return ActionContext(
 		targets=["10.0.0.1"], model="m", interactive=backend, backend=create_backend(backend),
 		session_id="s", permission_engine=engine, isolated=isolated,
