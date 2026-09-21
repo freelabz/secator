@@ -96,19 +96,22 @@ class TestRemoteBackend(unittest.TestCase):
 		from secator.ai.guardrails import PermissionEngine
 		eng = PermissionEngine(dict(allow=["shell(git)"], deny=[], ask=[]),
 							   targets=["scanme.example.com"], workspace="/tmp/ws")
-		cmd = "git clone https://github.com/o/r"
+		# Use a non-code-hosting host: code hosts (github/gitlab/...) are now in
+		# ALWAYS_ALLOWED_HOSTS, so they'd short-circuit to 'allow' and never exercise
+		# the approve-then-persist path this test is about.
+		cmd = "git clone https://poc-host.example/o/r"
 		self.assertEqual(eng.check_action({"action": "shell", "command": cmd}).decision, "ask")
 		mock_engine = MagicMock()
 		mock_engine.search.return_value = [{"answer": "allow"}]
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
 		res = backend.ask_user("Target requires approval", ["allow", "allow_all", "deny"], "s1",
 							   prompt_type="permission", permission_type="target",
-							   value="https://github.com/o/r", engine=eng)
+							   value="https://poc-host.example/o/r", engine=eng)
 		self.assertEqual(res["answer"], "allow")
 		self.assertEqual(eng.check_action({"action": "shell", "command": cmd}).decision, "allow")
 		# narrow: a DIFFERENT host still asks
 		self.assertEqual(
-			eng.check_action({"action": "shell", "command": "git clone https://github.com/x/y"}).decision,
+			eng.check_action({"action": "shell", "command": "git clone https://other-host.example/x/y"}).decision,
 			"ask")
 
 	def test_permission_allow_all_broadens_to_host(self):
@@ -121,12 +124,14 @@ class TestRemoteBackend(unittest.TestCase):
 		mock_engine = MagicMock()
 		mock_engine.search.return_value = [{"answer": "allow_all"}]
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		# non-code-hosting host (see the persist test) so allow_all's host rule is what
+		# grants the second URL, not ALWAYS_ALLOWED_HOSTS.
 		backend.ask_user("Target requires approval", ["allow", "allow_all", "deny"], "s1",
 						 prompt_type="permission", permission_type="target",
-						 value="https://github.com/o/r", engine=eng)
+						 value="https://poc-host.example/o/r", engine=eng)
 		# broad: another URL from the SAME host is now allowed
 		self.assertEqual(
-			eng.check_action({"action": "shell", "command": "git clone https://github.com/x/y"}).decision,
+			eng.check_action({"action": "shell", "command": "git clone https://poc-host.example/x/y"}).decision,
 			"allow")
 
 	@patch('secator.ai.interactivity.sleep')
