@@ -202,3 +202,40 @@ def host_in_scope(target, in_scope=None, out_of_scope=None):
 	if in_scope:
 		return any(_shape_matches_entry(shape, e) for e in in_scope)
 	return True
+
+
+def resolve_scope_hostnames(scope):
+	"""Expand a scope list with the resolved IP(s) of its plain-hostname entries.
+
+	DNS-RESOLVING — NOT pure. Unlike ``host_in_scope`` (which never touches the
+	network), this is meant to run ONCE at run setup to widen an allow/deny list so a
+	target can be matched by its host's CURRENT IP; the per-check ``host_in_scope`` then
+	matches that IP literally. IP / CIDR / wildcard / regex entries are passed through
+	unresolved (an IP is already literal; the others don't name a single host to look
+	up). Returns the original entries plus any newly-resolved IPs (deduped, order-stable).
+
+	CAVEAT: a CDN / shared-hosting front resolves to an IP shared with other sites, so
+	adding it authorizes every co-tenant on that IP. Only widen scope this way under an
+	explicit engagement scope (the platform's mandate-derived in_scope).
+	"""
+	import socket
+	entries = as_scope_list(scope)
+	out = list(entries)
+	seen = set(entries)
+	for entry in entries:
+		# Skip anything that isn't a single plain hostname: wildcard, regex, and
+		# (via _target_shape) IP / CIDR / non-network entries have nothing to resolve.
+		if entry.startswith('*.') or any(c in _REGEX_META for c in entry):
+			continue
+		shape = _target_shape(entry)
+		if shape is None or not shape.host:
+			continue
+		try:
+			ips = {info[4][0] for info in socket.getaddrinfo(shape.host, None)}
+		except (OSError, UnicodeError):
+			ips = set()
+		for ip in sorted(ips):
+			if ip not in seen:
+				seen.add(ip)
+				out.append(ip)
+	return out

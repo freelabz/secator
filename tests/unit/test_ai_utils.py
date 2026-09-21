@@ -819,3 +819,41 @@ class TestParseTextToolCalls(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestCoerceMatchedAt(unittest.TestCase):
+	"""`matched_at` is a scalar `str` field, but the model often packs multiple locations into it
+	as a stringified JSON list ('["http://a","http://b"]') or a real list. `_coerce_finding_fields`
+	skips it (a str value already matches the str type), so it was stored as an ugly literal and,
+	for a real list, rejected by validate_fields. Coerce it to a clean scalar (first location)."""
+
+	def _coerce(self, **fields):
+		from secator.ai.utils import _coerce_finding_fields
+		from secator.output_types.vulnerability import Vulnerability
+		return _coerce_finding_fields(Vulnerability, dict(name='x', **fields))
+
+	def test_stringified_list_becomes_scalar_first(self):
+		out = self._coerce(matched_at='["http://a","http://b"]')
+		self.assertEqual(out['matched_at'], 'http://a')
+
+	def test_real_list_becomes_scalar_first(self):
+		out = self._coerce(matched_at=['http://a', 'http://b'])
+		self.assertEqual(out['matched_at'], 'http://a')
+
+	def test_single_element_stringified_list_unwraps(self):
+		out = self._coerce(matched_at='["http://a"]')
+		self.assertEqual(out['matched_at'], 'http://a')
+
+	def test_plain_string_passes_through(self):
+		out = self._coerce(matched_at='http://a')
+		self.assertEqual(out['matched_at'], 'http://a')
+
+	def test_ipv6_bracket_literal_not_mangled(self):
+		# starts with '[' but is not a JSON list -> left untouched
+		out = self._coerce(matched_at='[2001:db8::1]:80')
+		self.assertEqual(out['matched_at'], '[2001:db8::1]:80')
+
+	def test_coerced_value_validates_as_str(self):
+		from secator.output_types.vulnerability import Vulnerability
+		out = self._coerce(matched_at=['http://a', 'http://b'])
+		self.assertEqual(Vulnerability.validate_fields(out), [])
