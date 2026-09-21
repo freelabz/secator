@@ -39,6 +39,13 @@ from secator.ai.utils import (
 # 25) yet bounded. The model still normally self-terminates via `stop` well before it.
 _HARD_ITERATION_CEILING = 1000
 
+# Max number of times an answered follow-up may auto-extend the iteration budget in
+# one run. Each answer adds `extra_iters` to `max_iterations`, cancelling the loop's
+# own `iteration += 1`; without a cap an endlessly re-answered follow-up (e.g. the
+# answer channel re-serving the same standing message) never terminates. 200 is far
+# beyond any real human chat, so it only ever trips a runaway auto-answered loop.
+_MAX_FOLLOWUP_EXTENSIONS = 200
+
 # High-precision cues for the deterministic mode fast-path. Only unambiguous
 # prompts (cues for exactly one of attack/chat, and no exploit-ish cue) are
 # resolved here; everything else defers to the LLM classifier.
@@ -424,6 +431,27 @@ class ai(PythonRunner):
 		self.history.add_user(encrypted)
 		return Ai(content=prompt, ai_type="prompt", message={"role": "user", "content": encrypted})
 
+	def _prompt_already_tail(self, prompt):
+		"""True if ``prompt`` already equals the last user turn in the restored history.
+
+		Guards the resume re-emit against duplicating a turn restore already rebuilt.
+		Compares on plaintext (decrypting the stored turn when an encryptor is set) so
+		it works for both legacy and message-carrying docs; any decrypt error falls
+		back to "not a duplicate" (emit), i.e. today's behaviour — never over-suppress a
+		genuinely-new answer (the legit answer-after-stop respawn).
+		"""
+		for msg in reversed(self.history.messages):
+			if msg.get("role") != "user":
+				continue
+			content = msg.get("content") or ""
+			if self.encryptor:
+				try:
+					content = self.encryptor.decrypt(content)
+				except Exception:  # noqa: BLE001 - a decrypt miss must not suppress a real prompt
+					return False
+			return content.strip() == (prompt or "").strip()
+		return False
+
 	def _get_query_engine(self):
 		"""Build a workspace-scoped QueryEngine from the runner context.
 
@@ -496,8 +524,15 @@ class ai(PythonRunner):
 		# (else `[IPV4:...]`/`[HOST:...]` leak into shell commands + scope checks).
 		self._restore_pii_map()
 
-		# Append the new user message that respawned the conversation
-		if self.prompt:
+		# Append the new user message that respawned the conversation — but ONLY if it
+		# isn't already the tail of the restored history. A respawn's run_opts["prompt"]
+		# is the LAST user message, which restore_history_from_db already reconstructed
+		# (the prompt doc itself, or the threaded answered-follow_up tail). Re-emitting it
+		# unconditionally duplicated that turn AND persisted a duplicate `prompt` doc on
+		# every respawn — the observed repeat (initial prompt re-appended after recon; a
+		# prior follow-up answer / pasted message re-served as a fresh prompt to each new
+		# invocation). Emit only a genuinely-new prompt (the legit answer-after-stop case).
+		if self.prompt and not self._prompt_already_tail(self.prompt):
 			yield self._emit_user_prompt(self.prompt)
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
@@ -1523,7 +1558,20 @@ class ai(PythonRunner):
 		self.history.add_user(maybe_encrypt(answer, self.encryptor))
 
 		# Handle explicit mode switch (e.g. summarize → chat)
-		self.max_iterations += extra_iters
+		# Extend the iteration budget for this answer — but BOUND the total number of
+		# auto-extensions. Each follow-up/content-only turn both bumps `iteration` (in
+		# the loop) and `max_iterations` here by `extra_iters`, so the two grow in
+		# lockstep and the `while iteration < max_iterations` cap can NEVER terminate an
+		# endlessly-answered follow-up loop. If the answer channel keeps re-serving the
+		# same standing message (a stopped→answered respawn racing / a buggy UI resubmit),
+		# the run spins until the worker deadline. Cap the auto-extensions so a runaway
+		# terminates; a real human back-and-forth never approaches the ceiling.
+		extends = getattr(self, "_followup_extensions", 0)
+		if not isinstance(extends, int):  # ponytail: tolerate a mock/uninit self
+			extends = 0
+		if extends < _MAX_FOLLOWUP_EXTENSIONS:
+			self.max_iterations += extra_iters
+			self._followup_extensions = extends + 1
 		if response.get("switch_mode"):
 			self.mode = response["switch_mode"]
 			self._rebuild_prompt_and_tools()
