@@ -538,11 +538,44 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	# defense in depth: a spawned runner is never dangerous (CLI --dangerous unaffected)
 	opts["dangerous"] = False
 
+	# Validate the runner NAME up front and fail with a clean, actionable message.
+	# An LLM routinely invents task/workflow names (e.g. `url_crawl`, `code_scan`).
+	# For a task, `TemplateLoader(input=...)` accepts any name and the miss only
+	# surfaces later inside `build_celery_workflow -> get_task_class`, which raises a
+	# `TaskNotFoundError` DURING `yield from runner` — escaping as a full Python
+	# TRACEBACK in the tool result (the construction-time `except TaskNotFoundError`
+	# below never sees it). For a workflow, an unknown name loads an EMPTY template
+	# that fails obscurely downstream. Both waste iterations and pollute the model's
+	# context with a stack trace; catch them here and hand back the valid names.
 	if runner_type == "task":
+		try:
+			Task.get_task_class(name)
+		except TaskNotFoundError:
+			from secator.loader import discover_tasks, find_templates
+			available = sorted(t.__name__ for t in discover_tasks())
+			# The most common miss is a real WORKFLOW name called via run_task (the
+			# model confuses the two tools — e.g. `url_crawl`, `code_scan`). Point it
+			# at the right tool instead of only listing tasks.
+			workflows = {t['name'] for t in find_templates() if t.get('type') == 'workflow'}
+			hint = (f" '{name}' IS a workflow — call it with run_workflow, not run_task."
+			        if name in workflows else
+			        f" Pick one of the available tasks: {', '.join(available)}.")
+			yield Error(message=(
+				f"Task '{name}' not found — not a valid secator task.{hint}"
+			), _context=context)
+			return
 		tpl = TemplateLoader(input={'type': 'task', 'name': name})
 		runner_cls = Task
 	else:
 		tpl = TemplateLoader(name=f'workflows/{name}')
+		if not tpl.get('name'):
+			from secator.loader import find_templates
+			available = sorted(t['name'] for t in find_templates() if t.get('type') == 'workflow')
+			yield Error(message=(
+				f"Workflow '{name}' not found — not a valid secator workflow. "
+				f"Pick one of the available workflows: {', '.join(available)}."
+			), _context=context)
+			return
 		runner_cls = Workflow
 
 	# Decrypt targets
