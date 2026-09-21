@@ -78,3 +78,31 @@ class TestGetProcessInfoCpu(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+class TestFirstStatsTick(unittest.TestCase):
+	"""The t=0 tick is skipped on purpose; the first real sample lands at FIRST_STAT_DELAY."""
+
+	def _first_tick_at(self, frequency):
+		"""Replay the monitor's gate and return when the first tick fires, in seconds."""
+		now = 0.0
+		last = Command._initial_stats_time(now, frequency, Command.FIRST_STAT_DELAY)
+		t = 0.0
+		while t <= frequency * 2:
+			if (t - last) >= frequency:
+				return t
+			t = round(t + 0.05, 2)
+		return None
+
+	def test_no_tick_at_process_start(self):
+		"""A tick at t=0 has no interval to measure and always reports cpu 0."""
+		last = Command._initial_stats_time(0.0, 20, Command.FIRST_STAT_DELAY)
+		self.assertLess(0.0 - last, 20, 'gate opened at t=0 — first tick would report cpu 0')
+
+	def test_first_tick_lands_at_the_delay(self):
+		self.assertAlmostEqual(self._first_tick_at(20), Command.FIRST_STAT_DELAY, places=1)
+
+	def test_delay_is_shorter_than_the_cadence(self):
+		"""A delay >= frequency would push the first sample out, not pull it in."""
+		self.assertGreater(Command.FIRST_STAT_DELAY, 0)
+		self.assertLess(Command.FIRST_STAT_DELAY, 20)

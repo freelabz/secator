@@ -749,9 +749,27 @@ class Command(Runner):
 			return self.max_timeout
 		return CONFIG.celery.task_max_timeout
 
+	# Delay before the FIRST stats tick. The t=0 tick is skipped deliberately: the CPU
+	# baseline is primed at process start, so a tick fired microseconds later has no
+	# interval to measure and reports 0.0 every time. One second in, there is something
+	# real to report. Later ticks use stat_update_frequency as before.
+	FIRST_STAT_DELAY = 1.0
+
+	@staticmethod
+	def _initial_stats_time(now, frequency, first_delay):
+		"""Backdated 'last tick' so the stats gate opens at `first_delay`, not immediately.
+
+		The gate is `now - last_stats_time >= frequency`, so backdating by
+		`frequency - first_delay` makes it open exactly `first_delay` after start.
+		"""
+		return now - frequency + first_delay
+
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
-		last_stats_time = 0
+		last_stats_time = Command._initial_stats_time(
+			time(), CONFIG.runners.stat_update_frequency, Command.FIRST_STAT_DELAY
+		)
+		poll_interval = Command.FIRST_STAT_DELAY
 
 		while not self.monitor_stop_event.is_set():
 			if not self.process or not self.process.pid:
@@ -810,7 +828,9 @@ class Command(Runner):
 				break
 
 			# Sleep for a short interval before next check (stat update frequency)
-			self.monitor_stop_event.wait(CONFIG.runners.stat_update_frequency)
+			self.monitor_stop_event.wait(poll_interval)
+			# Only the first pass is short; settle into the configured cadence after it.
+			poll_interval = CONFIG.runners.stat_update_frequency
 
 	def _collect_stats(self):
 		"""Collect stats about the current running process, if any."""
