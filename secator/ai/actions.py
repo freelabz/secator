@@ -1,6 +1,5 @@
 """Action handlers for AI task."""
 import json
-import logging
 import os
 import re
 import threading
@@ -37,31 +36,6 @@ _MAX_SHELL_OUTPUT_CHARS = 4000
 # instance attribute post-construction (see _handle_shell) since max_timeout is not a
 # run_opts-settable field.
 _SHELL_TIMEOUT = 60
-
-logger = logging.getLogger(__name__)
-
-
-def _safe_check_action(ctx: "ActionContext", action: Dict):
-	"""``permission_engine.check_action`` wrapped so ANY exception in the checker
-	(parsing, scope, path detection) resolves to a DETERMINISTIC, non-spinning verdict
-	— never an ``ask`` (so it can never re-enter the prompt loop or hang). Fail-safe:
-
-	- isolated + shell/path  -> ``allow`` (the sandbox container is the boundary);
-	- otherwise              -> ``deny`` (fail closed — returned to the model, which pivots).
-
-	An out-of-scope target under ``scope_hard_deny`` is already a plain ``deny`` on the
-	happy path; the fail-closed ``deny`` here is at least as strict, so scope is never
-	widened by a checker error.
-	"""
-	from secator.ai.guardrails import PermissionResult
-	try:
-		return ctx.permission_engine.check_action(action)
-	except Exception as e:  # noqa: BLE001 - a checker crash must never spin/hang the run
-		atype = action.get("action", "")
-		logger.error("guardrail check errored for action %s: %r; resolving fail-safe", atype, e)
-		if ctx.isolated and atype == "shell":
-			return PermissionResult(decision="allow", reason="isolated: checker error, sandbox is the boundary")
-		return PermissionResult(decision="deny", reason="guardrail check error (fail-closed)")
 
 
 @dataclass
@@ -263,7 +237,10 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 	if ctx.permission_engine is None:
 		return None
 
-	result = _safe_check_action(ctx, action)
+	# The engine is THE decision point: it returns the final verdict already accounting
+	# for isolation and any checker fault (see PermissionEngine.check_action). We only act
+	# on allow/deny/ask here — no post-processing of the verdict.
+	result = ctx.permission_engine.check_action(action)
 	if result.decision == "deny":
 		# Out-of-scope denials carry the target + a machine-readable reason so the UI/CLI
 		# can render a clear "Target X is not in the allowed scope" message (and the model
@@ -282,13 +259,10 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 		rounds += 1
 		cmd_display = _build_action_display(action)
 
-		# Handle shell command prompts (unknown commands or parse failures)
-		# --isolated: the container is the command/path boundary, so drop the shell (command)
-		# ask entirely — mark it approved so the re-check clears this layer. Target (network)
-		# asks below are unaffected and still prompt.
-		if result.shell_command and ctx.isolated:
-			ctx.permission_engine.approved_shell_commands.add(result.shell_command.strip())
-		elif result.shell_command:
+		# Handle shell command prompts (unknown commands or parse failures). Isolation is
+		# already resolved by the engine (isolated shell never reaches here as an ask), so
+		# this is purely the interactive/remote approval path.
+		if result.shell_command:
 			parse_failed = "Could not parse" in (result.reason or "")
 			denial = yield from _ask_and_check(
 				ctx, is_remote,
@@ -323,32 +297,26 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 			if denial:
 				return denial
 
-		# Handle path prompts
+		# Handle path prompts. Isolation is resolved by the engine (isolated path asks never
+		# reach here), so this is purely the interactive/remote approval path.
 		if result.paths:
 			cmd = action.get("command", "")
 			path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
-			if ctx.isolated:
-				# --isolated: the container is the filesystem boundary, so drop path asks —
-				# runtime-allow each path so the re-check clears this layer (no prompt).
-				ctx.permission_engine.add_runtime_allow(
-					[f"{path_access_map.get(p, 'read')}({p})" for p in result.paths]
+			for path in result.paths:
+				access_type = path_access_map.get(path, "read")
+				denial = yield from _ask_and_check(
+					ctx, is_remote,
+					question=f"{access_type.capitalize()} access to {path} requires approval",
+					permission_type=access_type,
+					value=path,
+					deny_message=f"Action denied: {access_type} access to {path} not approved",
+					command=cmd_display,
 				)
-			else:
-				for path in result.paths:
-					access_type = path_access_map.get(path, "read")
-					denial = yield from _ask_and_check(
-						ctx, is_remote,
-						question=f"{access_type.capitalize()} access to {path} requires approval",
-						permission_type=access_type,
-						value=path,
-						deny_message=f"Action denied: {access_type} access to {path} not approved",
-						command=cmd_display,
-					)
-					if denial:
-						return denial
+				if denial:
+					return denial
 
 		# Re-check to see if more layers need prompting
-		result = _safe_check_action(ctx, action)
+		result = ctx.permission_engine.check_action(action)
 		if result.decision == "deny":
 			return f"Action denied after prompt: {result.reason}"
 

@@ -78,6 +78,9 @@ def _engine(in_scope=None, out_of_scope=None):
 
 
 def _ctx(engine, backend, isolated):
+	# The engine owns the isolation verdict now, so thread it into the engine (the caller
+	# no longer post-processes). ctx.isolated is still used downstream by _handle_shell.
+	engine.isolated = isolated
 	return ActionContext(
 		targets=[], model="m", permission_engine=engine, backend=backend,
 		isolated=isolated, session_id="s", context={"run_id": "r1"},
@@ -222,11 +225,15 @@ class TestNonIsolatedModes(unittest.TestCase):
 class TestCheckerExceptionIsDeterministic(unittest.TestCase):
 	"""ANY exception in the checker resolves to a deterministic verdict, never a spin."""
 
+	# The engine now OWNS the fail-safe (check_action catches its sub-step faults and
+	# returns a deterministic verdict), so a checker fault is a fault INSIDE check_action —
+	# raised here from an internal layer (_check_action_type) rather than by replacing the
+	# whole method. ValueError stands in for the enumerated scope/regex/path faults.
 	def test_isolated_shell_exception_allows(self):
 		engine = _engine()
 		backend = SpyCLI()
 		ctx = _ctx(engine, backend, isolated=True)
-		with patch.object(engine, "check_action", side_effect=RuntimeError("boom")):
+		with patch.object(engine, "_check_action_type", side_effect=ValueError("boom")):
 			denial, _ = check_guardrails_sync(ACTIONS["shell-simple"], ctx)
 		self.assertIsNone(denial)             # sandbox is the boundary
 		self.assertEqual(backend.ask_calls, 0)
@@ -235,7 +242,7 @@ class TestCheckerExceptionIsDeterministic(unittest.TestCase):
 		engine = _engine()
 		backend = SpyAuto()
 		ctx = _ctx(engine, backend, isolated=False)
-		with patch.object(engine, "check_action", side_effect=RuntimeError("boom")):
+		with patch.object(engine, "_check_action_type", side_effect=ValueError("boom")):
 			denial, _ = check_guardrails_sync(ACTIONS["shell-simple"], ctx)
 		self.assertIsNotNone(denial)
 		self.assertNotIn("unresolved after", denial)

@@ -1017,6 +1017,7 @@ class ai(PythonRunner):
 			workspace=self.reports_folder or "",
 			in_scope=self.in_scope,
 			out_of_scope=self.out_of_scope,
+			isolated=self.isolated,
 		)
 
 		# Per-run billed-token accounting (AI analog of context.scan_hours), read
