@@ -23,7 +23,7 @@ HAS_AI = ADDONS_ENABLED.get('ai', False)
 if HAS_AI:
 	from secator.ai.history import ChatHistory
 	from secator.ai.interactivity import RemoteBackend
-	from secator.output_types import Ai as AiOut
+	from secator.output_types import Ai as AiOut, Warning as WarningOut
 	from secator.tasks.ai import ai as AiTask
 
 SID = "sess-e2e"
@@ -263,16 +263,34 @@ class TestConversationE2E(unittest.TestCase):
 		hist = restore_history_from_db(SID, e)
 		self.assertEqual(sum("focus on the API" in m for m in _user_turns(hist)), 1)
 
-	# Scenario 4: the channel re-answers EVERY follow_up with the same standing message
-	# -> the loop is now BOUNDED (terminates) instead of running to the deadline.
+	# Scenario 4 (case a): the channel re-answers EVERY follow_up with the SAME standing
+	# message -> the precise same-answer breaker STOPS in ~_MAX_REPEATED_ANSWERS turns
+	# (well before the extension backstop / ceiling), and emits the stop Warning.
 	def test_runaway_standing_answer_loop_terminates(self):
-		with patch("secator.tasks.ai._MAX_FOLLOWUP_EXTENSIONS", 6):
+		# High cap + high extension backstop: only the same-answer breaker can stop this.
+		with patch("secator.tasks.ai._MAX_FOLLOWUP_EXTENSIONS", 200):
 			e = ChannelEngine(answers=["identifier,asset_type,instruction"], standing=True)
-			t = _make_task(e, content_only_llm(), seed_user="initial prompt")
+			t = _make_task(e, content_only_llm(), initial_cap=500, seed_user="initial prompt")
 			_drive(t, "_run_loop")   # returns => it terminated, did not spin forever
 		csv = [p for p in _prompt_docs(t) if p.content == "identifier,asset_type,instruction"]
-		self.assertGreaterEqual(len(csv), 6)
-		self.assertLessEqual(len(csv), 8 + 6 + 1)   # bounded ~ initial_cap + ceiling
+		# Only 2 answers served before the 3rd identical one trips the breaker (no prompt
+		# doc on the tripping turn) — nowhere near the 500-iteration ceiling.
+		self.assertEqual(len(csv), 2)
+		stops = [e_ for e_ in t.emitted
+				 if isinstance(e_, WarningOut) and "isn't progressing" in e_.message]
+		self.assertEqual(len(stops), 1)
+
+	# Scenario 4b (case c): two identical answers then a DIFFERENT one resets the counter,
+	# so the breaker never trips; the run continues and parks normally (no stop Warning).
+	def test_two_same_then_different_resets_counter(self):
+		e = ChannelEngine(answers=["same", "same", "different"])   # then the script parks
+		t = _make_task(e, content_only_llm(), seed_user="initial prompt")
+		_drive(t, "_run_loop")
+		served = [p.content for p in _prompt_docs(t)]
+		self.assertEqual(served, ["same", "same", "different"])   # all three applied, none capped
+		stops = [e_ for e_ in t.emitted
+				 if isinstance(e_, WarningOut) and "isn't progressing" in e_.message]
+		self.assertEqual(stops, [])
 
 	# Scenario 5: two/three concurrent respawns -> no duplicate prompt docs pile up.
 	def test_concurrent_respawns_no_duplicate_prompts(self):

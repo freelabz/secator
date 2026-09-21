@@ -31,7 +31,7 @@ HAS_AI = ADDONS_ENABLED.get('ai', False)
 if HAS_AI:
 	from secator.ai.session import restore_history_from_db
 	from secator.ai.interactivity import RemoteBackend
-	from secator.output_types import Ai as AiOut
+	from secator.output_types import Ai as AiOut, Warning as WarningOut
 	from secator.ai.history import ChatHistory
 	from secator.tasks.ai import ai as AiTask
 
@@ -384,17 +384,19 @@ class TestWithinRunLoop(unittest.TestCase):
 		self.assertEqual(len(self._csv_prompts(emitted)), 1)
 
 	# RC2 FIX: when the answer channel re-answers EVERY follow_up with the same CSV,
-	# the loop is now BOUNDED — auto-extensions are capped, so it TERMINATES instead
-	# of spinning to the worker deadline. (answer_cap huge so only the ceiling stops it.)
+	# the precise same-answer breaker STOPS the run in _MAX_REPEATED_ANSWERS turns —
+	# long before the extension backstop / ceiling — and emits the stop Warning.
+	# (High caps so ONLY the same-answer breaker can end this.)
 	def test_followup_loop_now_bounded_by_extension_ceiling(self):
-		with patch("secator.tasks.ai._MAX_FOLLOWUP_EXTENSIONS", 5):
+		with patch("secator.tasks.ai._MAX_FOLLOWUP_EXTENSIONS", 10_000):
 			engine = _ApiAnswerEngine(answer_cap=10_000)
-			t, emitted = _drive_content_only_loop(engine, initial_cap=8)
-		n = len(self._csv_prompts(emitted))
-		# The run TERMINATED (this test returning proves it didn't spin forever) and the
-		# CSV was served a bounded number of times ~ initial_cap + ceiling, not unbounded.
-		self.assertGreaterEqual(n, 5)
-		self.assertLessEqual(n, 8 + 5 + 1)
+			t, emitted = _drive_content_only_loop(engine, initial_cap=10_000)
+		# Two identical answers served, then the 3rd trips the breaker (no prompt doc on
+		# the tripping turn) — nowhere near the 10k ceiling => it did not spin forever.
+		self.assertEqual(len(self._csv_prompts(emitted)), 2)
+		stops = [e for e in emitted
+				 if isinstance(e, WarningOut) and "isn't progressing" in e.message]
+		self.assertEqual(len(stops), 1)
 
 
 if __name__ == "__main__":

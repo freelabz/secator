@@ -46,6 +46,13 @@ _HARD_ITERATION_CEILING = 1000
 # beyond any real human chat, so it only ever trips a runaway auto-answered loop.
 _MAX_FOLLOWUP_EXTENSIONS = 200
 
+# When the SAME answer is served to this many CONSECUTIVE follow-ups, the run isn't
+# progressing (e.g. the answer channel re-serving one standing message, seen on canary
+# ws bb_21_arcbbc) — stop now instead of burning up to _MAX_FOLLOWUP_EXTENSIONS
+# iterations / the worker deadline. A genuine back-and-forth (distinct answers) resets
+# the counter and never trips this.
+_MAX_REPEATED_ANSWERS = 3
+
 # High-precision cues for the deterministic mode fast-path. Only unambiguous
 # prompts (cues for exactly one of attack/chat, and no exploit-ish cue) are
 # resolved here; everything else defers to the LLM classifier.
@@ -697,6 +704,12 @@ class ai(PythonRunner):
 			self.max_iterations = _HARD_ITERATION_CEILING
 
 		while iteration < self.max_iterations:
+			# The same-answer loop breaker (see _prompt_and_redetect) yielded its stop
+			# Warning last iteration and asked to end the run — do it before more work.
+			# `is True` (not truthy): tolerates a MagicMock self in unit tests.
+			if getattr(self, "_followup_repeat_stop", False) is True:
+				self._save_history()
+				return
 			iteration += 1
 
 			try:
@@ -1551,6 +1564,24 @@ class ai(PythonRunner):
 			return None
 
 		answer = response["answer"]
+
+		# Same-answer loop breaker: if consecutive follow-ups keep being answered with
+		# the SAME content (normalized), the conversation isn't progressing — end the
+		# run cleanly in a few iterations rather than waiting on the extension backstop.
+		# A DIFFERENT answer resets the counter, so a real back-and-forth never trips.
+		norm = self.encryptor.decrypt(answer) if self.encryptor else answer
+		norm = (norm or "").strip().casefold()
+		if norm and norm == getattr(self, "_last_followup_answer", None):
+			self._repeated_answer_count = getattr(self, "_repeated_answer_count", 1) + 1
+		else:
+			self._repeated_answer_count = 1
+			self._last_followup_answer = norm
+		if self._repeated_answer_count >= _MAX_REPEATED_ANSWERS:
+			self._followup_repeat_stop = True
+			return [Warning(message=(
+				"Stopping: the same answer was provided to repeated follow-ups; "
+				"the run isn't progressing."))]
+
 		extra_iters = response.get("extra_iters", 1)
 		self.prompt = answer
 		items = []
