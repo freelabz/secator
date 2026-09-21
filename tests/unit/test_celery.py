@@ -632,3 +632,16 @@ class TestRunnerPickle(unittest.TestCase):
 
 		finally:
 			del sys.modules['secator.hooks.faketaskdriver']
+
+
+class TestCeleryRedisHealthCheckInterval(unittest.TestCase):
+	"""The redis result-backend health-check interval must be config-driven, not hardcoded, so
+	gevent deployments can set SECATOR_CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL=0 to disable the
+	pubsub health check that triggers the chord-hanging PubSubError (upstream of patch_celery.sh)."""
+
+	def test_app_conf_reads_config_value(self):
+		from secator.config import CONFIG
+		self.assertEqual(
+			app.conf['redis_backend_health_check_interval'],
+			CONFIG.celery.redis_backend_health_check_interval,
+		)

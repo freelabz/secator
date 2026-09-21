@@ -86,7 +86,7 @@ app.conf.update(
 		# workflow. Keep the connection alive (keepalive + health-check) AND retry the
 		# store on a transient error so a reset can't fail the task.
 		'redis_socket_keepalive': True,
-		'redis_backend_health_check_interval': 30,
+		'redis_backend_health_check_interval': CONFIG.celery.redis_backend_health_check_interval,
 		'redis_retry_on_timeout': True,
 		'result_backend_always_retry': True,
 		'result_backend_max_retries': 20,
