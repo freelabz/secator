@@ -1,11 +1,4 @@
 """Worker-profile regression checks.
-
-A task's `profile` selects the Celery queue, and therefore the Kubernetes worker
-pool and its resource request. Getting it wrong is not a tidiness issue: on GKE
-Autopilot the small pool is admitted at 500m / 512 MiB, and a task that exceeds
-that is either CPU-throttled or OOM-killed. The OOM kills PID 1, so the container
-exits 137 with no output and the run surfaces as an abandoned task with NO error
-message -- which is how `wpscan` failed 10/10 times for a month unnoticed.
 """
 import unittest
 
