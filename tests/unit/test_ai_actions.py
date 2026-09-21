@@ -1765,5 +1765,65 @@ class TestHandleAddVulnPoc(unittest.TestCase):
 		mock_engine.update.assert_not_called()
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestRunRunnerNameValidation(unittest.TestCase):
+	"""An LLM-invented task/workflow name must fail with a clean, actionable message
+	instead of leaking a raw Python traceback (regression from two canary AI runs where
+	the model invented `url_crawl` / `code_scan`, each dumping a full
+	`TaskNotFoundError` stack trace into the tool result)."""
+
+	def _ctx(self):
+		return ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+
+	def test_unknown_task_name_clean_error_no_traceback(self):
+		"""A fully-invented task name -> clean error listing real tasks, no traceback."""
+		results = list(_run_runner(
+			{'action': 'run_task', 'name': 'bogus_task_xyz', 'targets': ['t.com']},
+			self._ctx(), 'task'))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1)
+		msg = errors[0].message
+		self.assertIn("bogus_task_xyz", msg)
+		self.assertIn("not found", msg)
+		# No stack trace, and no runner ever dispatched (no Ai action item emitted).
+		self.assertNotIn("Traceback", msg)
+		self.assertFalse([r for r in results if isinstance(r, Ai)])
+		# Message names real, discoverable tasks so the model can self-correct.
+		self.assertIn("httpx", msg)
+
+	def test_workflow_name_called_as_task_cross_hints(self):
+		"""The exact transcript failure: a real WORKFLOW (`url_crawl`) called via
+		run_task must error cleanly AND point the model at run_workflow — not dump a
+		`TaskNotFoundError` traceback."""
+		results = list(_run_runner(
+			{'action': 'run_task', 'name': 'url_crawl', 'targets': ['t.com']},
+			self._ctx(), 'task'))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1)
+		msg = errors[0].message
+		self.assertIn("url_crawl", msg)
+		self.assertIn("run_workflow", msg)
+		self.assertNotIn("Traceback", msg)
+		self.assertFalse([r for r in results if isinstance(r, Ai)])
+
+	def test_valid_task_name_passes_validation(self):
+		"""A real task name is NOT rejected by the new guard (dry-run stops before dispatch)."""
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'}, dry_run=True)
+		results = list(_run_runner(
+			{'action': 'run_task', 'name': 'httpx', 'targets': ['t.com']}, ctx, 'task'))
+		self.assertFalse([r for r in results if isinstance(r, Error)])
+		self.assertTrue(any(isinstance(r, Info) and 'DRY RUN' in r.message for r in results))
+
+	def test_unknown_workflow_name_clean_error(self):
+		results = list(_run_runner(
+			{'action': 'run_workflow', 'name': 'bogus_workflow_xyz', 'targets': ['t.com']},
+			self._ctx(), 'workflow'))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1)
+		self.assertIn("bogus_workflow_xyz", errors[0].message)
+		self.assertIn("not found", errors[0].message)
+		self.assertNotIn("Traceback", errors[0].message)
+
+
 if __name__ == '__main__':
 	unittest.main()
