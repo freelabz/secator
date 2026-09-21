@@ -11,7 +11,7 @@ import subprocess
 import sys
 import threading
 
-from time import sleep, time
+from time import time
 
 import psutil
 from fp.fp import FreeProxy
@@ -236,6 +236,11 @@ class Command(Runner):
 
 		# Process
 		self.process = None
+
+		# pid -> psutil.Process, reused across monitor ticks so cpu_percent() measures a real
+		# interval instead of always being a first call (which returns 0.0). Scoped to this
+		# Command, so it dies with the task -- no pruning needed.
+		self._ps_cache = {}
 
 		# Monitor thread (lazy initialization)
 		self.monitor_thread = None
@@ -567,6 +572,16 @@ class Command(Runner):
 			self._init_monitor_objects()
 			self.process_start_time = time()
 			self.monitor_stop_event.clear()
+			# Prime the CPU baseline the moment the process exists, so the first monitor tick
+			# reports CPU since launch rather than 0.0. cpu_percent()'s first call on a Process
+			# only establishes the baseline; every later call returns the delta since it.
+			try:
+				proc = psutil.Process(self.process.pid)
+				proc.cpu_percent()
+				self._ps_cache[proc.pid] = proc
+			except (psutil.Error, FileNotFoundError):
+				pass
+
 			self.monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
 			self.monitor_thread.start()
 
@@ -802,7 +817,7 @@ class Command(Runner):
 		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True)
+		stats = Command.get_process_info(proc, children=True, cache=self._ps_cache)
 		total_mem = 0
 		for info in stats:
 			name = info['name']
@@ -832,7 +847,7 @@ class Command(Runner):
 		if not self.process or not self.process.pid:
 			return
 		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True)
+		stats = Command.get_process_info(proc, children=True, cache=self._ps_cache)
 		total_mem = 0
 		for info in stats:
 			name = info['name']
@@ -856,17 +871,14 @@ class Command(Runner):
 		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
 			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
 
-	# How long to let CPU time accumulate before reading it. Paid ONCE per call,
-	# not once per process -- see get_process_info.
-	CPU_SAMPLE_SECONDS = 0.1
-
 	@staticmethod
-	def get_process_info(process, children=False):
+	def get_process_info(process, children=False, cache=None):
 		"""Get process information from psutil.
 
 		Args:
-			process (subprocess.Process): Process.
+			process (psutil.Process): Process.
 			children (bool): Whether to gather stats about children processes too.
+			cache (dict): pid -> psutil.Process, reused across monitor ticks. See below.
 		"""
 		procs = [process]
 		if children:
@@ -875,29 +887,23 @@ class Command(Runner):
 			except (psutil.Error, FileNotFoundError):
 				pass
 
-		# psutil keeps the CPU baseline ON THE Process OBJECT, and we build fresh ones every
-		# monitor tick, so as_dict()'s cpu_percent is always a first call -> always 0.0. We
-		# need two reads separated by real time.
-		#
-		# Prime every process FIRST, then wait once, then read them all. Using
-		# cpu_percent(interval=...) per process would instead block N * 0.1s serially, and
-		# _monitor_process() materializes this generator BEFORE it checks the memory limit --
-		# so a wide tree (katana runs ~109 concurrent Chrome children in prod) would delay the
-		# memory guard by ~11s, precisely on the tasks where that guard matters most.
 		for proc in procs:
 			try:
-				proc.cpu_percent()
-			except (psutil.Error, FileNotFoundError):
-				continue
-		sleep(Command.CPU_SAMPLE_SECONDS)
+				# psutil keeps the CPU baseline ON THE Process OBJECT. A fresh object per tick
+				# makes every read a first call, which returns 0.0 by definition -- that was the
+				# bug (every Stat.cpu in prod was 0). Reusing the object means cpu_percent()
+				# measures the real interval since the previous tick, with NO blocking sleep.
+				#
+				# The process is primed at start (see _start_process), so the very first tick
+				# reports CPU since launch. Children appear mid-run: they are primed on the tick
+				# that first sees them and report from the next one.
+				if cache is not None:
+					proc = cache.setdefault(proc.pid, proc)
 
-		for proc in procs:
-			try:
-				# Read CPU BEFORE as_dict(). Non-blocking: this is the second read, so it
-				# returns the delta accumulated since priming. Order matters -- as_dict()
-				# itself calls cpu_percent(), which RESETS the baseline, so doing it the
-				# other way round reads ~0 every time (the bug this whole change fixes,
-				# reintroduced one line later).
+				# Read CPU BEFORE as_dict(). as_dict() calls cpu_percent() itself, which RESETS
+				# the baseline -- reading after it yields ~0 every time and silently restores the
+				# original bug. Its reset is harmless here (it re-primes for the next tick), but
+				# only if we have already taken our reading.
 				cpu_percent = proc.cpu_percent()
 				# fmt: off
 				data = {
@@ -908,7 +914,7 @@ class Command(Runner):
 				# fmt: on
 				data['cpu_percent'] = cpu_percent
 			except (psutil.Error, FileNotFoundError):
-				# Process exited between priming and reading -- skip it, keep the rest.
+				# Process exited between listing and reading -- skip it, keep the rest.
 				continue
 			yield data
 
