@@ -1296,11 +1296,16 @@ class ai(PythonRunner):
 			if denial:
 				cmd_display = _build_action_display(action)
 				denial_display = f"{denial}\n[gray42]{cmd_display}[/gray42]" if cmd_display else denial
-				yield Warning(message=denial_display)
+				# Log the denial to the console / pod-logs ONLY — the _reject_tool_call
+				# tool_result below already surfaces the SAME reason in the chat (it is
+				# what the model reads). Yielding a Warning too rendered the denial TWICE
+				# in the live UI (a Warning line + the tool_result bubble). One denial,
+				# one message.
+				console.print(Warning(message=denial_display))
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
-				# Surface the actual reason in the chat (not a bare "denied"): the Warning
-				# above isn't an `ai` transcript doc, so this tool_result bubble is the only
-				# place the user sees WHY (e.g. "Action denied: shell command not approved").
+				# Surface the actual reason in the chat (not a bare "denied"): this
+				# tool_result bubble is the only place the user sees WHY
+				# (e.g. "Action denied: shell command not approved").
 				yield _reject_tool_call(self, name, tc_id, error_msg, denial)
 				continue
 
