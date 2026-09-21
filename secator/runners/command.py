@@ -76,6 +76,9 @@ class Command(Runner):
 	# Output map to transform JSON output keys
 	output_map = {}
 
+	# Delay before the first stats tick (t=0 has no interval to measure).
+	first_stat_delay = 0.3
+
 	# Run in shell if True (not recommended)
 	shell = False
 
@@ -736,7 +739,12 @@ class Command(Runner):
 
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
-		last_stats_time = 0
+		# psutil measures cpu_percent() between two calls on the same Process, so reuse them.
+		procs = {}
+		list(self._collect_stats(procs))  # discarded: establishes the CPU baselines
+
+		last_stats_time = time() - CONFIG.runners.stat_update_frequency + self.first_stat_delay
+		poll_interval = self.first_stat_delay
 
 		while not self.monitor_stop_event.is_set():
 			if not self.process or not self.process.pid:
@@ -748,7 +756,7 @@ class Command(Runner):
 
 				# Collect and queue stats at regular intervals
 				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
-					stats_items = list(self._collect_stats())
+					stats_items = list(self._collect_stats(procs))
 					for stat_item in stats_items:
 						if self.monitor_queue is not None:
 							self.monitor_queue.put(stat_item)
@@ -795,14 +803,18 @@ class Command(Runner):
 				break
 
 			# Sleep for a short interval before next check (stat update frequency)
-			self.monitor_stop_event.wait(CONFIG.runners.stat_update_frequency)
+			self.monitor_stop_event.wait(poll_interval)
+			poll_interval = CONFIG.runners.stat_update_frequency
 
-	def _collect_stats(self):
-		"""Collect stats about the current running process, if any."""
+	def _collect_stats(self, procs):
+		"""Collect stats about the current running process, if any.
+
+		Args:
+			procs (dict): pid -> psutil.Process, reused across ticks (see _monitor_process).
+		"""
 		if not self.process or not self.process.pid:
 			return
-		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True)
+		stats = Command.get_process_info(psutil.Process(self.process.pid), children=True, procs=procs)
 		total_mem = 0
 		for info in stats:
 			name = info['name']
@@ -827,57 +839,33 @@ class Command(Runner):
 		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
 		# 	raise MemoryError(f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
 
-	def stats(self, memory_limit_mb=None):
-		"""Gather stats about the current running process, if any."""
-		if not self.process or not self.process.pid:
-			return
-		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True)
-		total_mem = 0
-		for info in stats:
-			name = info['name']
-			pid = info['pid']
-			cpu_percent = info['cpu_percent']
-			mem_percent = info['memory_percent']
-			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
-			total_mem += mem_rss
-			self.debug(f'process: {name} pid: {pid} memory: {mem_rss}MB', sub='stats')
-			net_conns = info.get('net_connections') or []
-			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
-			yield Stat(
-				name=name,
-				pid=pid,
-				cpu=cpu_percent,
-				memory=mem_percent,
-				net_conns=len(net_conns),
-				extra_data=extra_data,
-			)
-		self.debug(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}', sub='stats')
-		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
-			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
-
 	@staticmethod
-	def get_process_info(process, children=False):
+	def get_process_info(process, children=False, procs=None):
 		"""Get process information from psutil.
 
 		Args:
-			process (subprocess.Process): Process.
+			process (psutil.Process): Process.
 			children (bool): Whether to gather stats about children processes too.
+			procs (dict): pid -> psutil.Process reused across calls. Without it every
+				cpu_percent() is a first call, which returns 0.0.
 		"""
-		try:
-			# fmt: off
-			data = {
-				k: v._asdict() if hasattr(v, '_asdict') else v
-				for k, v in process.as_dict().items()
-				if k not in ['memory_maps', 'open_files', 'environ']
-			}
-			# fmt: on
-			yield data
-		except (psutil.Error, FileNotFoundError):
-			return
+		targets = [process]
 		if children:
-			for subproc in process.children(recursive=True):
-				yield from Command.get_process_info(subproc, children=False)
+			targets.extend(process.children(recursive=True))
+		for proc in targets:
+			if procs is not None:
+				proc = procs.setdefault(proc.pid, proc)
+			try:
+				cpu_percent = proc.cpu_percent()  # before as_dict(), which resets the baseline
+				data = {
+					k: v._asdict() if hasattr(v, '_asdict') else v
+					for k, v in proc.as_dict().items()
+					if k not in ['memory_maps', 'open_files', 'environ']
+				}
+			except psutil.Error:  # child exited mid-walk; keep the rest
+				continue
+			data['cpu_percent'] = cpu_percent
+			yield data
 
 	def run_item_loaders(self, line):
 		"""Run item loaders against an output line.
