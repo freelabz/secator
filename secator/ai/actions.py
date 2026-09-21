@@ -1,5 +1,6 @@
 """Action handlers for AI task."""
 import json
+import logging
 import os
 import re
 import threading
@@ -36,6 +37,31 @@ _MAX_SHELL_OUTPUT_CHARS = 4000
 # instance attribute post-construction (see _handle_shell) since max_timeout is not a
 # run_opts-settable field.
 _SHELL_TIMEOUT = 60
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_check_action(ctx: "ActionContext", action: Dict):
+	"""``permission_engine.check_action`` wrapped so ANY exception in the checker
+	(parsing, scope, path detection) resolves to a DETERMINISTIC, non-spinning verdict
+	— never an ``ask`` (so it can never re-enter the prompt loop or hang). Fail-safe:
+
+	- isolated + shell/path  -> ``allow`` (the sandbox container is the boundary);
+	- otherwise              -> ``deny`` (fail closed — returned to the model, which pivots).
+
+	An out-of-scope target under ``scope_hard_deny`` is already a plain ``deny`` on the
+	happy path; the fail-closed ``deny`` here is at least as strict, so scope is never
+	widened by a checker error.
+	"""
+	from secator.ai.guardrails import PermissionResult
+	try:
+		return ctx.permission_engine.check_action(action)
+	except Exception as e:  # noqa: BLE001 - a checker crash must never spin/hang the run
+		atype = action.get("action", "")
+		logger.error("guardrail check errored for action %s: %r; resolving fail-safe", atype, e)
+		if ctx.isolated and atype == "shell":
+			return PermissionResult(decision="allow", reason="isolated: checker error, sandbox is the boundary")
+		return PermissionResult(decision="deny", reason="guardrail check error (fail-closed)")
 
 
 @dataclass
@@ -256,7 +282,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 				except (OSError, ValueError):
 					pass
 
-	result = ctx.permission_engine.check_action(action)
+	result = _safe_check_action(ctx, action)
 	if result.decision == "deny":
 		# Out-of-scope denials carry the target + a machine-readable reason so the UI/CLI
 		# can render a clear "Target X is not in the allowed scope" message (and the model
@@ -341,7 +367,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 						return denial
 
 		# Re-check to see if more layers need prompting
-		result = ctx.permission_engine.check_action(action)
+		result = _safe_check_action(ctx, action)
 		if result.decision == "deny":
 			return f"Action denied after prompt: {result.reason}"
 
