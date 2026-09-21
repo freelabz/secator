@@ -951,6 +951,15 @@ class PermissionEngine:
 			command = action.get("command", "")
 			if not command.strip():
 				return PermissionResult(decision="deny", reason="Empty command")
+			# Whole-command-approved short-circuit — checked BEFORE parsing. A command
+			# approved this run (an isolated-mode drop, or a prior interactive allow/
+			# allow_all) must resolve to allow even when the shell parser can't parse it
+			# (compound `for..do..done`, unbalanced quotes, long `&&` chains). The
+			# parse-failure `ask` below returns early, so if this check lived only after
+			# it, the re-check never cleared and the guardrail loop spun `max_rounds`
+			# and then denied with NO prompt (the canary isolated spin-deny, RC1).
+			if command.strip() in self.approved_shell_commands:
+				return PermissionResult(decision="allow", reason="shell command approved this run")
 			subcommands = _parse_subcommands(command)
 			if not subcommands:
 				# Parse failure — prompt user for the whole command
@@ -983,12 +992,8 @@ class PermissionEngine:
 					most_restrictive = result
 				elif most_restrictive is None:
 					most_restrictive = result
-			# The whole command was already approved this run (allow / allow_all). The
-			# hard-deny checks above still apply, but don't re-prompt for its unmatched
-			# sub-commands — resolve to allow so a compound command prompts once, not
-			# once per re-check round.
-			if command.strip() in self.approved_shell_commands:
-				return PermissionResult(decision="allow", reason="shell command approved this run")
+			# (whole-command-approved short-circuit handled at the top of this branch,
+			# before parsing, so a parse-failure re-check clears too — see above.)
 			if unmatched:
 				return PermissionResult(
 					decision="ask",
