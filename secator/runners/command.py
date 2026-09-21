@@ -76,7 +76,7 @@ class Command(Runner):
 	# Output map to transform JSON output keys
 	output_map = {}
 
-	# Delay before the first stats tick. Skipping t=0 is deliberate -- see _monitor_process.
+	# Delay before the first stats tick (t=0 has no interval to measure).
 	first_stat_delay = 0.3
 
 	# Run in shell if True (not recommended)
@@ -739,17 +739,10 @@ class Command(Runner):
 
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
-		# psutil derives cpu_percent() from the delta between two calls on the SAME Process
-		# object, so we hold them here for the life of the thread. Building a fresh one per
-		# tick makes every read a first call, which returns 0.0 by definition.
+		# psutil measures cpu_percent() between two calls on the same Process, so reuse them.
 		procs = {}
-		list(self._collect_stats(procs))
+		list(self._collect_stats(procs))  # discarded: establishes the CPU baselines
 
-		# That first pass only establishes the CPU baselines, so its numbers are meaningless
-		# and are discarded. Backdate last_stats_time so the first REAL tick lands
-		# `first_stat_delay` in rather than immediately; later ticks use stat_update_frequency.
-		# A task exiting before that first tick yields no stats at all, which is why the delay
-		# is short: in prod 18% of runs finish under 1s but only 5% under 0.3s.
 		last_stats_time = time() - CONFIG.runners.stat_update_frequency + self.first_stat_delay
 		poll_interval = self.first_stat_delay
 
@@ -811,15 +804,13 @@ class Command(Runner):
 
 			# Sleep for a short interval before next check (stat update frequency)
 			self.monitor_stop_event.wait(poll_interval)
-			# Only the first pass is short; settle into the configured cadence after it.
 			poll_interval = CONFIG.runners.stat_update_frequency
 
 	def _collect_stats(self, procs):
 		"""Collect stats about the current running process, if any.
 
 		Args:
-			procs (dict): pid -> psutil.Process, owned by _monitor_process and reused across
-				ticks so CPU is measured over a real interval.
+			procs (dict): pid -> psutil.Process, reused across ticks (see _monitor_process).
 		"""
 		if not self.process or not self.process.pid:
 			return
@@ -855,9 +846,8 @@ class Command(Runner):
 		Args:
 			process (psutil.Process): Process.
 			children (bool): Whether to gather stats about children processes too.
-			procs (dict): pid -> psutil.Process reused across calls. psutil keeps the CPU
-				baseline on the object, so passing this is what makes cpu_percent() a real
-				measurement instead of a first call (always 0.0).
+			procs (dict): pid -> psutil.Process reused across calls. Without it every
+				cpu_percent() is a first call, which returns 0.0.
 		"""
 		targets = [process]
 		if children:
@@ -866,17 +856,13 @@ class Command(Runner):
 			if procs is not None:
 				proc = procs.setdefault(proc.pid, proc)
 			try:
-				# Read CPU first: as_dict() calls cpu_percent() itself, which resets the
-				# baseline, so reading after it always yields ~0.
-				cpu_percent = proc.cpu_percent()
+				cpu_percent = proc.cpu_percent()  # before as_dict(), which resets the baseline
 				data = {
 					k: v._asdict() if hasattr(v, '_asdict') else v
 					for k, v in proc.as_dict().items()
 					if k not in ['memory_maps', 'open_files', 'environ']
 				}
-			except psutil.Error:
-				# A child exited between listing and reading. Skip it, keep the rest -- letting
-				# this escape would break the whole monitor loop over one short-lived child.
+			except psutil.Error:  # child exited mid-walk; keep the rest
 				continue
 			data['cpu_percent'] = cpu_percent
 			yield data

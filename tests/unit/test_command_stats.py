@@ -8,8 +8,7 @@ import psutil
 from secator.runners import Command
 
 
-# Flushed readiness marker before spinning: Popen returns as soon as the fork
-# succeeds, and interpreter startup can outlast the interval we measure over.
+# Readiness marker: Popen returns before the interpreter reaches the loop.
 BUSY = (
 	'import sys, time\n'
 	'sys.stdout.write("READY\\n")\n'
@@ -27,8 +26,7 @@ def _spawn():
 
 
 class TestGetProcessInfoCpu(unittest.TestCase):
-	"""Regression: as_dict()'s cpu_percent is psutil's FIRST call on that object, which is
-	always 0.0. Every Stat.cpu in prod was 0 because a fresh Process was built per tick."""
+	"""Regression: a fresh psutil.Process per tick made every cpu read a first call (0.0)."""
 
 	def test_reusing_processes_reports_real_cpu(self):
 		proc = _spawn()
@@ -43,7 +41,7 @@ class TestGetProcessInfoCpu(unittest.TestCase):
 			proc.wait()
 
 	def test_without_procs_cpu_is_always_zero(self):
-		"""Shows the bug directly: no reuse means every read is a first call."""
+		"""The bug itself: no reuse, every read is a first call."""
 		proc = _spawn()
 		try:
 			next(Command.get_process_info(psutil.Process(proc.pid)))
@@ -55,7 +53,7 @@ class TestGetProcessInfoCpu(unittest.TestCase):
 			proc.wait()
 
 	def test_collection_does_not_block(self):
-		"""It reads a counter; it must not watch the process."""
+		"""It reads a counter, it does not watch the process."""
 		proc = _spawn()
 		procs = {}
 		try:
@@ -68,7 +66,7 @@ class TestGetProcessInfoCpu(unittest.TestCase):
 			proc.wait()
 
 	def test_same_process_object_is_reused(self):
-		"""The baseline lives on the object, so swapping it silently restores the bug."""
+		"""The baseline lives on the object; swapping it silently restores the bug."""
 		proc = _spawn()
 		procs = {}
 		try:
@@ -81,8 +79,7 @@ class TestGetProcessInfoCpu(unittest.TestCase):
 			proc.wait()
 
 	def test_first_stat_delay_is_measurable_but_short(self):
-		"""Long enough to beat the 10ms clock granularity, short enough that few tasks
-		exit before the first tick (prod: 18% finish under 1s, 5% under 0.3s)."""
+		"""Long enough to beat clock granularity, short enough that few tasks exit first."""
 		self.assertGreaterEqual(Command.first_stat_delay, 0.1)
 		self.assertLess(Command.first_stat_delay, 1.0)
 
