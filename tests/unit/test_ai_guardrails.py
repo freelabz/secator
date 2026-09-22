@@ -54,26 +54,69 @@ class TestGithubCloneAlwaysAllowed(unittest.TestCase):
 		return {"action": "shell", "command": f"git clone {url}"}
 
 	def test_git_clone_github_allowed_no_prompt(self):
-		"""A github.com clone resolves to allow, not ask, with no mandate scope set."""
+		"""A code-hosting clone resolves to allow, not ask, with no mandate scope set."""
 		for url in (
 			"https://github.com/foo/bar.git",
 			"https://github.com/foo/bar",
 			"https://raw.githubusercontent.com/foo/bar/main/poc.py",
+			"https://codeload.github.com/foo/bar/zip/refs/heads/main",
 			"https://gist.github.com/foo/deadbeef",
+			"https://gitlab.com/foo/bar",
+			"https://bitbucket.org/foo/bar",
 		):
 			res = self._engine().check_action(self._clone(url))
 			self.assertEqual(res.decision, "allow", f"{url} -> {res.decision} ({res.reason})")
 
-	def test_github_still_denied_when_out_of_scope(self):
-		"""Deny-wins: an org that puts github.com in a mandate out_of_scope still blocks it."""
+	def test_github_allowed_even_when_out_of_scope(self):
+		"""Standing rule: code-hosting is ALWAYS allowed — a mandate out_of_scope
+		entry for github.com must NOT block a PoC clone (regression fix)."""
 		res = self._engine(out_of_scope=["github.com"]).check_action(
 			self._clone("https://github.com/foo/bar.git"))
-		self.assertEqual(res.decision, "deny")
+		self.assertEqual(res.decision, "allow")
+
+	def test_github_wildcard_host_allowed_out_of_scope(self):
+		"""A `*.github.com` match (codeload) is allowed even with the host out_of_scope."""
+		res = self._engine(out_of_scope=["*.github.com"]).check_action(
+			self._clone("https://codeload.github.com/foo/bar/zip/main"))
+		self.assertEqual(res.decision, "allow")
+
+	def test_raw_github_allowed_with_in_scope_set(self):
+		"""A raw-file fetch host is allowed even when a restrictive in_scope excludes it."""
+		res = self._engine(in_scope=["10.0.0.0/8"]).check_action(
+			{"action": "shell", "command": "curl https://raw.githubusercontent.com/foo/bar/main/poc.py"})
+		self.assertEqual(res.decision, "allow")
+
+	def test_github_allowed_even_with_hard_deny(self):
+		"""scope_hard_deny (cloud) must not block code-hosting: allowed for github.com,
+		a wildcard host, and raw.githubusercontent.com even when out of a defined scope."""
+		try:
+			CONFIG.security.scope_hard_deny = True
+			for url in (
+				"https://github.com/foo/bar.git",
+				"https://codeload.github.com/foo/bar/zip/main",
+				"https://raw.githubusercontent.com/foo/bar/main/poc.py",
+			):
+				res = self._engine(in_scope=["10.0.0.0/8"]).check_action(self._clone(url))
+				self.assertEqual(res.decision, "allow", f"{url} -> {res.decision} ({res.reason})")
+		finally:
+			CONFIG.security.scope_hard_deny = False
+
+	def test_github_clone_allowed_when_isolated(self):
+		"""Isolated run + a github clone shell command still resolves to allow."""
+		res = self._engine(isolated=True).check_action(self._clone("https://github.com/foo/bar.git"))
+		self.assertEqual(res.decision, "allow")
 
 	def test_non_github_target_still_asks(self):
-		"""The default allow is GitHub-only — an arbitrary host still prompts."""
+		"""The allowlist is code-hosting-only — an arbitrary host still prompts."""
 		res = self._engine().check_action(self._clone("https://evil.example.com/foo/bar.git"))
 		self.assertEqual(res.decision, "ask")
+
+	def test_non_github_out_of_scope_still_denied(self):
+		"""An ordinary out-of-scope host is still denied (deny-wins) — the allowlist
+		does not widen anything but the code-hosting hosts."""
+		res = self._engine(out_of_scope=["evil.example.com"]).check_action(
+			self._clone("https://evil.example.com/foo/bar.git"))
+		self.assertEqual(res.decision, "deny")
 
 	def test_github_userinfo_spoof_not_allowed(self):
 		"""`github.com@evil.com` parses to host evil.com — not covered, still asks."""
@@ -756,8 +799,9 @@ class TestGuardrailsIntegration(unittest.TestCase):
 	def test_multi_prompt_target_then_path(self):
 		"""Commands with both unknown targets AND unknown paths should prompt for each layer.
 
-		Simulates: cd /tmp && git clone https://github.com/user/repo.git 2>&1 | head -20
-		- First ask: URL target (github.com)
+		Simulates: cd /tmp && git clone https://scanme.nmap.org/user/repo.git 2>&1 | head -20
+		(a non-code-hosting host, since code-hosting hosts are always allowed)
+		- First ask: URL target (scanme.nmap.org)
 		- Second ask: path (/tmp)
 		Both approved → action should be allowed.
 		"""
@@ -772,7 +816,7 @@ class TestGuardrailsIntegration(unittest.TestCase):
 			targets=["10.0.0.1"], model="test", permission_engine=engine, interactive=True,
 			backend=backend,
 		)
-		action = {"action": "shell", "command": "cd /tmp && git clone https://github.com/RUB-NDS/Terrapin-Scanner.git 2>&1 | head -20"}
+		action = {"action": "shell", "command": "cd /tmp && git clone https://scanme.nmap.org/x/y.git 2>&1 | head -20"}
 
 		# First check_action returns ask for target (github URL)
 		result = engine.check_action(action)
@@ -798,7 +842,7 @@ class TestGuardrailsIntegration(unittest.TestCase):
 			targets=["10.0.0.1"], model="test", permission_engine=engine, interactive=True,
 			backend=backend,
 		)
-		action = {"action": "shell", "command": "cd /tmp && git clone https://github.com/RUB-NDS/Terrapin-Scanner.git 2>&1 | head -20"}
+		action = {"action": "shell", "command": "cd /tmp && git clone https://scanme.nmap.org/x/y.git 2>&1 | head -20"}
 
 		with patch.object(engine, '_show_target_menu', return_value=[4]):  # Deny
 			denial, warnings = check_guardrails(action, ctx)
@@ -1561,6 +1605,82 @@ class TestRunShellScopeHardening(unittest.TestCase):
 	def test_in_scope_still_allowed(self):
 		self.assertEqual(self._decision("curl http://example.com/"), "allow")
 		self.assertEqual(self._decision("nmap example.com"), "allow")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestScopeHardDeny(unittest.TestCase):
+	"""SECATOR_SECURITY_SCOPE_HARD_DENY flips an out-of-scope network target from an
+	interactive ASK (standalone-CLI default) to a hard DENY carrying the target + a
+	machine-readable reason, so a deployment can run non-interactively."""
+
+	def _engine(self):
+		return PermissionEngine(
+			{"allow": ["task(*)"], "deny": [], "ask": []},
+			targets=[], workspace="/tmp/ws", in_scope=["10.0.0.1"])
+
+	def _out_of_scope_action(self):
+		return {"action": "task", "name": "nmap", "targets": ["8.8.8.8"]}
+
+	def test_default_asks(self):
+		"""Flag off (default): an out-of-scope target still prompts for approval."""
+		self.assertFalse(CONFIG.security.scope_hard_deny)
+		result = self._engine().check_action(self._out_of_scope_action())
+		self.assertEqual(result.decision, "ask")
+
+	def test_flag_denies_with_target_and_reason(self):
+		"""Flag on: out-of-scope target is denied (no prompt) and the deny object
+		carries the target value + a machine-readable reason."""
+		try:
+			CONFIG.security.scope_hard_deny = True
+			result = self._engine().check_action(self._out_of_scope_action())
+		finally:
+			CONFIG.security.scope_hard_deny = False
+		self.assertEqual(result.decision, "deny")
+		self.assertEqual(result.reason, "out_of_scope")
+		self.assertIn("8.8.8.8", result.targets)
+
+	def test_flag_does_not_deny_in_scope_target(self):
+		"""Flag on must not affect an in-scope target (still allowed, no prompt)."""
+		try:
+			CONFIG.security.scope_hard_deny = True
+			result = self._engine().check_action(
+				{"action": "task", "name": "nmap", "targets": ["10.0.0.1"]})
+		finally:
+			CONFIG.security.scope_hard_deny = False
+		self.assertEqual(result.decision, "allow")
+
+	def test_flag_noop_without_scope(self):
+		"""No in_scope configured (standalone CLI): flag on still ASKS, never a blanket
+		deny — 'out of scope' is undefined without a scope."""
+		engine = PermissionEngine(
+			{"allow": ["task(*)"], "deny": [], "ask": []}, targets=[], workspace="/tmp/ws")
+		try:
+			CONFIG.security.scope_hard_deny = True
+			result = engine.check_action({"action": "task", "name": "nmap", "targets": ["8.8.8.8"]})
+		finally:
+			CONFIG.security.scope_hard_deny = False
+		self.assertEqual(result.decision, "ask")
+
+	def test_flag_denies_even_with_catch_all_ask_rule(self):
+		"""Regression: the shipped AI config carries a catch-all ``ask: target(*)`` rule,
+		so an out-of-scope target matches ASK in ``_check_value`` BEFORE any default-deny.
+		The hard-deny must beat that ask rule (it lives in ``_check_value``, not only the
+		``_check_values`` default-deny path) — otherwise cloud runs keep prompting for
+		out-of-scope targets even with the flag on."""
+		engine = PermissionEngine(
+			{"allow": ["task(*)"], "deny": [], "ask": ["target(*)"]},
+			targets=[], workspace="/tmp/ws", in_scope=["10.0.0.1"])
+		# Flag off: the catch-all ask still governs → prompt (CLI approve path intact).
+		self.assertEqual(engine.check_action(self._out_of_scope_action()).decision, "ask")
+		try:
+			CONFIG.security.scope_hard_deny = True
+			result = engine.check_action(self._out_of_scope_action())
+		finally:
+			CONFIG.security.scope_hard_deny = False
+		self.assertEqual(result.decision, "deny")
+		self.assertEqual(result.reason, "out_of_scope")
+		self.assertIn("8.8.8.8", result.targets)
+
 
 
 if __name__ == '__main__':

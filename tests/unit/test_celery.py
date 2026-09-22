@@ -632,3 +632,31 @@ class TestRunnerPickle(unittest.TestCase):
 
 		finally:
 			del sys.modules['secator.hooks.faketaskdriver']
+
+
+class TestCeleryRedisHealthCheckInterval(unittest.TestCase):
+	"""The redis result-backend health-check interval must be config-driven, not hardcoded, so
+	gevent deployments can set SECATOR_CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL=0 to disable the
+	pubsub health check that triggers the chord-hanging PubSubError (upstream of patch_celery.sh)."""
+
+	def test_app_conf_reads_config_value(self):
+		from secator.config import CONFIG
+		self.assertEqual(
+			app.conf['redis_backend_health_check_interval'],
+			CONFIG.celery.redis_backend_health_check_interval,
+		)
+
+	def test_health_check_interval_is_config_driven_not_hardcoded(self):
+		"""Guard the exact regression CodeRabbit flagged: the equality test above passes
+		even if celery.py hard-codes 30 (CONFIG also defaults to 30). Rebuilding the app
+		with a non-default value is the only runtime proof, but reloading the Celery app
+		mid-suite is fragile; assert at the source that the setting is wired FROM CONFIG,
+		not a literal — which is precisely what a 'regression to a hard-coded 30' breaks."""
+		import inspect
+		import secator.celery as cel
+		src = inspect.getsource(cel)
+		self.assertRegex(
+			src,
+			r"""['"]redis_backend_health_check_interval['"]\s*:\s*CONFIG\.celery\.redis_backend_health_check_interval""",
+			"celery.py must source redis_backend_health_check_interval from CONFIG, not a literal",
+		)

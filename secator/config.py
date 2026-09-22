@@ -71,6 +71,13 @@ class Celery(StrictModel):
 	result_backend: StrExpandHome = ''
 	result_backend_transport_options: str = ''
 	result_expires: int = 86400  # 1 day
+	# Interval (seconds) for the redis result-backend pubsub health check. The default 30 keeps
+	# a long-lived idle result connection alive, but under the gevent result-backend pubsub it
+	# triggers `redis.exceptions.PubSubError: A non health check response was cleaned ...` mid-chord
+	# and hangs the workflow. Set SECATOR_CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL=0 on gevent
+	# deployments to disable it (upstream of gke-admin's patch_celery.sh). See resiliency backlog
+	# for the deeper chord fix.
+	redis_backend_health_check_interval: int = 30
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
@@ -121,6 +128,7 @@ class Security(StrictModel):
 	prompt_sudo_password: bool = True
 	sudo_password: str = ''  # non-interactive sudo password (e.g. SECATOR_SECURITY_SUDO_PASSWORD) for headless workers
 	shell_isolated: bool = False  # default for the AI task's --isolated (run_shell in a Docker sandbox); set SECATOR_SECURITY_SHELL_ISOLATED=1 on sandboxed workers  # noqa: E501
+	scope_hard_deny: bool = False  # when set (SECATOR_SECURITY_SCOPE_HARD_DENY=1) an out-of-scope AI network target is denied outright instead of prompting for approval  # noqa: E501
 
 
 class HTTP(StrictModel):

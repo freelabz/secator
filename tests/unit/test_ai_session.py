@@ -1167,6 +1167,52 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 		self.assertEqual(doc.message["tool_call_id"], tc_id)
 		self.assertEqual(doc.message["content"], error_content)
 
+	def test_guardrail_denial_emits_tool_result_not_warning(self):
+		"""A guardrail denial (e.g. out-of-scope target) must surface the reason ONCE —
+		the tool_result bubble the model reads — and NOT also yield a redundant Warning
+		into the stream (which rendered the denial twice in the live UI). Regression from
+		two canary AI runs where every out-of-scope run_task showed the reason twice."""
+		import json
+		from secator.tasks.ai import ai as AiTask
+		from secator.output_types import Ai, Warning as WarningItem
+
+		class _FakeHistory:
+			def __init__(self):
+				self.tool_results = []
+
+			def add_tool_result(self, name, tc_id, content):
+				self.tool_results.append((name, tc_id, content))
+
+		fake_self = MagicMock()
+		fake_self.encryptor = None
+		fake_self.context = {}
+		fake_self.history = _FakeHistory()
+		fake_self.debug = MagicMock()
+		fake_self.dangerous = False  # run the guardrail path
+
+		tc = MagicMock()
+		tc.id = "tc_scope"
+		tc.function.name = "run_task"
+		tc.function.arguments = json.dumps({"name": "httpx", "targets": ["64.130.50.49:22"]})
+
+		denial = "Target 64.130.50.49:22 is not in the allowed scope (reason: out_of_scope)"
+
+		def _fake_check_guardrails(action, ctx_):
+			if False:
+				yield  # make it a generator
+			return denial
+
+		ctx = MagicMock()
+		with patch("secator.tasks.ai.check_guardrails", _fake_check_guardrails):
+			items = list(AiTask._process_tool_calls(fake_self, [tc], ctx))
+
+		# Exactly one denial surfaced to the model, via the tool_result — no Warning.
+		tool_results = [i for i in items if isinstance(i, Ai) and i.ai_type == "tool_result"]
+		warnings = [i for i in items if isinstance(i, WarningItem)]
+		self.assertEqual(len(tool_results), 1)
+		self.assertIn("out_of_scope", tool_results[0].message["content"])
+		self.assertEqual(warnings, [])
+
 
 if __name__ == "__main__":
 	unittest.main()
