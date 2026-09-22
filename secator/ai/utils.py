@@ -381,7 +381,12 @@ def _coerce_finding_fields(cls, data: Dict) -> Dict:
 					except (json.JSONDecodeError, TypeError):
 						parsed = value
 			if isinstance(parsed, list):
-				data[key] = str(parsed[0]) if parsed else ''
+				if not parsed:
+					data[key] = ''
+				elif isinstance(parsed[0], str):
+					data[key] = parsed[0]
+				# else: a non-string element (None, dict, ...) — leave the value unchanged so
+				# validate_fields rejects the malformed type instead of storing "None"/a dict repr.
 			continue
 		# Already the right type (note: bool is a subclass of int, so guard it).
 		if isinstance(value, expected) and not (expected is int and isinstance(value, bool)):

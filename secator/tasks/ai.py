@@ -1378,6 +1378,14 @@ class ai(PythonRunner):
 		follow_up_ai = None
 		follow_up_prompt_uuid = None
 
+		# Progress signal for the same-answer loop-breaker (see _prompt_and_redetect):
+		# count substantive actions actually dispatched this turn (a follow_up/steer is
+		# not work). A follow-up answered the same way but with real work in between is
+		# PROGRESS and must NOT trip the breaker; only same-answer-with-no-new-action
+		# means the run is stuck.
+		self._progress_actions = getattr(self, "_progress_actions", 0) + sum(
+			1 for a in actions if a.get("action") not in ("follow_up", "steer"))
+
 		is_batch = len(actions) > 1
 		# safe_dispatch_action wraps dispatch so a handler error becomes an Error item
 		# fed back to the LLM, instead of killing the main loop (_run_batch does the
@@ -1566,16 +1574,22 @@ class ai(PythonRunner):
 		answer = response["answer"]
 
 		# Same-answer loop breaker: if consecutive follow-ups keep being answered with
-		# the SAME content (normalized), the conversation isn't progressing — end the
-		# run cleanly in a few iterations rather than waiting on the extension backstop.
-		# A DIFFERENT answer resets the counter, so a real back-and-forth never trips.
+		# the SAME content (normalized) AND no substantive action ran in between, the
+		# conversation isn't progressing — end the run cleanly in a few iterations rather
+		# than waiting on the extension backstop. A DIFFERENT answer OR new work done
+		# since the last identical answer resets the counter, so answering "yes" to a
+		# series of distinct AI proposals (each of which does real work) never trips.
 		norm = self.encryptor.decrypt(answer) if self.encryptor else answer
 		norm = (norm or "").strip().casefold()
-		if norm and norm == getattr(self, "_last_followup_answer", None):
+		progress = getattr(self, "_progress_actions", 0)
+		same_answer = bool(norm) and norm == getattr(self, "_last_followup_answer", None)
+		no_new_work = progress == getattr(self, "_last_followup_progress", -1)
+		if same_answer and no_new_work:
 			self._repeated_answer_count = getattr(self, "_repeated_answer_count", 1) + 1
 		else:
 			self._repeated_answer_count = 1
 			self._last_followup_answer = norm
+		self._last_followup_progress = progress
 		if self._repeated_answer_count >= _MAX_REPEATED_ANSWERS:
 			self._followup_repeat_stop = True
 			return [Warning(message=(

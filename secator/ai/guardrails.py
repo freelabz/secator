@@ -903,11 +903,13 @@ class PermissionEngine:
 		* Isolation (``self.isolated``): the sandbox container is the command/filesystem
 		  boundary, so the shell-command and path layers are dropped to ``allow``. Target
 		  (network egress) and sensitive-env layers are UNAFFECTED — those still gate.
-		* Fail-safe: a fault in the sub-steps (scope/target resolution, rule/regex
-		  matching, path/env detection — all over LLM-shaped input) resolves
-		  deterministically to a non-``ask`` verdict (isolated shell -> allow, else
-		  fail-closed deny), never an ``ask`` (which would spin the caller's prompt loop)
-		  and never a propagated crash.
+		* Fail-safe: a fault in the sub-steps (rule/regex matching, path/env detection —
+		  all over LLM-shaped input) resolves deterministically to a non-``ask`` verdict,
+		  never an ``ask`` (which would spin the caller's prompt loop) and never a
+		  propagated crash. The authz-critical layers fail CLOSED regardless of isolation:
+		  a target/scope-resolution or sensitive-env fault is a ``deny`` (handled inside
+		  ``_decide``), so isolation's ``allow`` fallback (below) covers ONLY shell-command
+		  and path faults — the layers the sandbox legitimately bounds.
 		"""
 		action_type = action.get("action", "")
 		try:
@@ -938,7 +940,15 @@ class PermissionEngine:
 		# targets exist — a missing catch-all falls to ask (via _check_values), never allow.
 		targets_to_check = self._extract_targets(action)
 		if targets_to_check:
-			target_result = self._check_values("target", targets_to_check)
+			# Network-egress authz must fail CLOSED even under isolation: isolation drops
+			# only the shell-command/path layers, NOT targets. A scope/target-resolution
+			# fault here is a deny (never the outer isolated-shell allow), so an exception
+			# on one target can't skip authz for the rest. (CodeRabbit CWE-863.)
+			try:
+				target_result = self._check_values("target", targets_to_check)
+			except (ValueError, TypeError, re.error) as e:
+				return PermissionResult(
+					decision="deny", reason=f"target check error (fail-closed): {type(e).__name__}")
 			if target_result.decision == "deny":
 				return target_result
 			if target_result.decision == "ask":
@@ -979,7 +989,13 @@ class PermissionEngine:
 		# Layer 4: sensitive env variable references (shell only) — UNAFFECTED by isolation.
 		if action_type == "shell":
 			command = action.get("command", "")
-			sensitive_vars = detect_sensitive_env_vars(command)
+			# Secret-reference detection also fails CLOSED even under isolation (waiving it
+			# is not the sandbox's job): a detector fault is a deny, not an isolated allow.
+			try:
+				sensitive_vars = detect_sensitive_env_vars(command)
+			except (ValueError, TypeError, re.error) as e:
+				return PermissionResult(
+					decision="deny", reason=f"sensitive-env check error (fail-closed): {type(e).__name__}")
 			if sensitive_vars:
 				return PermissionResult(
 					decision="ask",

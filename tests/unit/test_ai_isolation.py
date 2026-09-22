@@ -57,6 +57,16 @@ class TestIsolatedGuardrails(unittest.TestCase):
 		self.assertIsNotNone(denial)                 # target prompt still enforced
 		self.assertIn("9.9.9.9", denial)
 
+	def test_isolated_target_check_error_fails_closed(self):
+		# A fault in the TARGET layer (network egress) must fail CLOSED even under isolation
+		# — isolation drops only the shell/path layers, never targets. Force _check_values to
+		# raise and assert the verdict is deny (not the isolated-shell allow). CodeRabbit CWE-863.
+		eng = PermissionEngine(_config(), targets=["10.0.0.1"], workspace="/tmp/ws", isolated=True)
+		with patch.object(eng, "_check_values", side_effect=ValueError("boom")):
+			res = eng.check_action({"action": "shell", "command": "curl http://9.9.9.9/"})
+		self.assertEqual(res.decision, "deny")
+		self.assertIn("fail-closed", res.reason)
+
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
 class TestIsolatedShellRouting(unittest.TestCase):
