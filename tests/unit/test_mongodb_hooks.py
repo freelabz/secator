@@ -15,7 +15,7 @@ import pytest
 pymongo = pytest.importorskip("pymongo")
 
 from secator.hooks import mongodb  # noqa: E402
-from secator.output_types import Info, Warning  # noqa: E402
+from secator.output_types import Info, Warning, Vulnerability  # noqa: E402
 
 
 class _Cfg:
@@ -70,19 +70,29 @@ class TestMongoDocumentTooLarge(unittest.TestCase):
 
 
 class TestMongoTaggedDefault(unittest.TestCase):
-    """#1315: new findings must be stamped `_tagged: False` on insert so tag_duplicates
-    can index-seek untagged findings instead of a `$ne: True` whole-workspace scan."""
+    """#1315 + backlog fix: a real (dedupable) finding is stamped `_tagged: False` on
+    insert so tag_duplicates index-seeks it, but an execution-metadata type
+    (info/warning/error/stat) is stamped `_tagged: True` so it NEVER enters the untagged
+    backlog (it's dropped by tag_duplicates anyway, and clogged 85% of prod's backlog)."""
 
-    def test_new_finding_stamped_untagged_on_insert(self):
+    def _inserted_doc(self, item):
         from bson.objectid import ObjectId
         client = MagicMock()
         coll = client.main.__getitem__.return_value
         coll.insert_one.return_value = MagicMock(inserted_id=ObjectId())
         with patch.object(mongodb, "get_mongodb_client", return_value=client):
-            mongodb.update_finding(_FakeRunner(), Info(message="x"))
-        doc = coll.insert_one.call_args[0][0]
+            mongodb.update_finding(_FakeRunner(), item)
+        return coll.insert_one.call_args[0][0]
+
+    def test_dedupable_finding_stamped_untagged(self):
+        doc = self._inserted_doc(Vulnerability(name='CVE-2025-53020', id='CVE-2025-53020', matched_at='h:80'))
         self.assertIn("_tagged", doc)
         self.assertFalse(doc["_tagged"])
+
+    def test_metadata_type_stamped_tagged(self):
+        # `info` is in CONFIG.addons.mongodb.duplicate_exclude_types -> tagged True on insert.
+        doc = self._inserted_doc(Info(message="x"))
+        self.assertTrue(doc["_tagged"])
 
 
 if __name__ == "__main__":

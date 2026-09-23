@@ -214,6 +214,11 @@ class MongodbAddon(StrictModel):
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
 	max_items: int = -1
+	# Output types that are execution metadata, not dedupable findings: they are
+	# stamped `_tagged: True` on insert (never enter the untagged backlog) and
+	# skipped by tag_duplicates. Keep in sync with secator-cloud's
+	# DUPLICATE_EXCLUDE_TYPES (the value passed as tag_duplicates(exclude_types=...)).
+	duplicate_exclude_types: List[str] = ['info', 'warning', 'error', 'stat']
 	duplicate_main_copy_fields: List[str] = [
 		'screenshot_path',
 		'stored_response_path',
