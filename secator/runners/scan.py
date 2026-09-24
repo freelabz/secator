@@ -39,6 +39,10 @@ class Scan(Runner):
 		for name, workflow_opts in self.config.workflows.items():
 			run_opts = self.run_opts.copy()
 			run_opts.pop('profiles', None)
+			# A scan-level `description` belongs to the SCAN, not its workflows/tasks —
+			# don't cascade it or every child shows the scan description instead of its
+			# own (see the same guard in Workflow.build_celery_workflow).
+			run_opts.pop('description', None)
 			run_opts['no_poll'] = True
 			run_opts['caller'] = 'Scan'
 			run_opts['has_parent'] = True

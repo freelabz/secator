@@ -31,6 +31,11 @@ class Workflow(Runner):
 		opts.pop('output', None)
 		opts.pop('no_poll', False)
 		opts.pop('print_profiles', False)
+		# A workflow-level `description` (e.g. the AI's run_workflow description, or a
+		# CLI `--description`) belongs to the WORKFLOW, not its tasks. Don't cascade it
+		# into the child opts or it overrides every task's own YAML `description`
+		# (each task shows the workflow description instead of "Detect services…" etc.).
+		opts.pop('description', None)
 
 		# Set hooks and reports
 		self.enable_hooks = False   # Celery will handle hooks
