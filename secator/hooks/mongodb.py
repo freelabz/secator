@@ -6,7 +6,7 @@ from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.hooks._dedup import compute_duplicate_updates
+from secator.hooks._dedup import build_baseline_index, compute_duplicate_updates
 from secator.output_types import OUTPUT_TYPES, Warning, is_output_type
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
@@ -255,14 +255,27 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 	untagged_query = {'_context.workspace_id': str(ws_id), '_tagged': {'$in': [False, None]}}
 	if full_scan:
 		del untagged_query['_tagged']
-	workspace_findings = load_findings(list(db.findings.find(workspace_query).sort('_timestamp', -1)), exclude_types)
+	# Baseline (already-tagged non-duplicate findings) is UNBOUNDED and OOM-killed a 2Gi worker
+	# on large workspaces (#prod 2026-09-15: 47k+ docs, growing). Instead of materializing every
+	# full finding, stream the cursor and fold it into a compact index (uuids/_related/copy-fields
+	# per equality key) — peak memory is O(distinct keys × tiny payload), independent of full-doc
+	# size. See build_baseline_index. ponytail: streaming folds the peak; add a server-side field
+	# projection to the cursor if the transient per-batch load ever matters.
+	baseline_stream = (
+		load_finding(doc, exclude_types)
+		for doc in db.findings.find(workspace_query).sort('_timestamp', -1)
+	)
+	baseline_index = build_baseline_index(
+		(f for f in baseline_stream if f is not None),
+		CONFIG.addons.mongodb.duplicate_main_copy_fields,
+	)
 	untagged_query_cursor = db.findings.find(untagged_query).sort('_timestamp', -1)
 	if max_items != -1:
 		debug(f'Limiting untagged query to {max_items} items', sub='hooks.mongodb', log_hook=log_hook)
 		untagged_query_cursor = untagged_query_cursor.limit(max_items)
 	untagged_findings = load_findings(list(untagged_query_cursor), exclude_types)
 	debug(
-		f'Workspace non-duplicates findings: {len(workspace_findings)} '
+		f'Workspace baseline groups: {len(baseline_index)} '
 		f'Untagged findings: {len(untagged_findings)}. Max items: {max_items}. Excluded types: {exclude_types}. '
 		f'Query time: {time.time() - start_time}s',
 		sub='hooks.mongodb',
@@ -270,9 +283,10 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 	)
 	start_time = time.time()
 	db_updates = compute_duplicate_updates(
-		workspace_findings,
+		[],
 		untagged_findings,
 		CONFIG.addons.mongodb.duplicate_main_copy_fields,
+		baseline_index=baseline_index,
 	)
 	debug(f'Finished processing untagged findings in {time.time() - start_time}s', sub='hooks.mongodb', log_hook=log_hook)
 	start_time = time.time()
