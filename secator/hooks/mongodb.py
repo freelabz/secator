@@ -179,7 +179,11 @@ def update_finding(self, item):
 		else:
 			# Stamp an explicit untagged default so tag_duplicates can index-seek untagged
 			# findings (`_tagged: False`) instead of a `$ne: True` whole-workspace scan (#1315).
-			update.setdefault('_tagged', False)
+			# Execution-metadata types (stat/info/warning/error) are NOT dedupable and are
+			# dropped by tag_duplicates, so stamping them `_tagged: False` clogged the untagged
+			# backlog forever (85% of it in prod) AND starved real findings out of the bounded
+			# scan window. Stamp them `_tagged: True` so they never enter the backlog.
+			update.setdefault('_tagged', _type in CONFIG.addons.mongodb.duplicate_exclude_types)
 			finding = db['findings'].insert_one(update)
 			item._uuid = str(finding.inserted_id)
 			status = 'CREATED'
@@ -253,6 +257,11 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 	# findings stamped `_tagged: False` on insert AND legacy docs where the field is absent (indexed
 	# as null), so no backfill is required. See #1315.
 	untagged_query = {'_context.workspace_id': str(ws_id), '_tagged': {'$in': [False, None]}}
+	if exclude_types:
+		# Don't fetch execution-metadata types (stat/info/warning/error): load_findings drops
+		# them below anyway, so pulling them into the bounded (max_items) scan window wastes the
+		# budget and starves real dedupable findings — the whole reason the backlog never cleared.
+		untagged_query['_type'] = {'$nin': exclude_types}
 	if full_scan:
 		del untagged_query['_tagged']
 	# Baseline (already-tagged non-duplicate findings) is UNBOUNDED and OOM-killed a 2Gi worker
