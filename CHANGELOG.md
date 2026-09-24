@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.45.0](https://github.com/freelabz/secator/compare/v0.44.0...v0.45.0) (2026-09-24)
+
+
+### Features
+
+* **ai:** reliability, scope injection, model selection, resume + guardrail refactor ([#1431](https://github.com/freelabz/secator/issues/1431)) ([934dd89](https://github.com/freelabz/secator/commit/934dd89b4770971bed18c6cd3f3a89cea59dfe15))
+
+
+### Bug Fixes
+
+* **ai:** parse text tool-calls, fix guardrail/concurrent prompts, surface scope in prompt ([#1415](https://github.com/freelabz/secator/issues/1415)) ([e7e515c](https://github.com/freelabz/secator/commit/e7e515c95a058bb4419911bc1c1bc91ecbeca1ff))
+* **ai:** stop emitting "Path does not exist" warnings on shell actions ([#1417](https://github.com/freelabz/secator/issues/1417)) ([ca5f514](https://github.com/freelabz/secator/commit/ca5f514de4e748b9fa564747454bc930f6bf12c1))
+* **cli:** workspace summary crashes when a finding type is empty ([#1404](https://github.com/freelabz/secator/issues/1404)) ([c542207](https://github.com/freelabz/secator/commit/c5422072be9d4b6949582e56ab03aca4137263e0))
+* **command:** CPU stats were always 0 (fresh psutil.Process has no CPU baseline) ([#1420](https://github.com/freelabz/secator/issues/1420)) ([2d56749](https://github.com/freelabz/secator/commit/2d5674913fe02113dc7308e2a064bcc3c9fa11e2))
+* **mongodb:** bound tag_duplicates baseline load to prevent worker OOM ([#1394](https://github.com/freelabz/secator/issues/1394)) ([7d0d5b8](https://github.com/freelabz/secator/commit/7d0d5b84e0212d99cf7a1b69ec4826ff05ebb573))
+* **tasks:** move arjun, bup and dnsx/brute off the small worker profile ([#1419](https://github.com/freelabz/secator/issues/1419)) ([9101021](https://github.com/freelabz/secator/commit/91010215afd667f633976a7d1ac6c4de2316d1b1))
+* **wpscan:** run on the medium worker profile (small pool OOM-kills it) ([#1418](https://github.com/freelabz/secator/issues/1418)) ([5e05195](https://github.com/freelabz/secator/commit/5e05195be7a872e46f79604aa10d9aee4ee041aa))
+
 ## [0.44.0](https://github.com/freelabz/secator/compare/v0.43.3...v0.44.0) (2026-09-17)
 
 
