@@ -455,6 +455,8 @@ def _child_run_opts(ctx: ActionContext) -> Dict:
 		# (the parent AI task already holds one). run_opts is the single source of
 		# truth for has_parent (Runner reads self.run_opts['has_parent'] at init).
 		"has_parent": True,
+		# SECURITY (ISOLATION): child force-inherits the parent `isolated`; it can't set or lower it.
+		"isolated": ctx.isolated,
 	}
 	# Flow the mandate scope down so each child runner enforces it too (shipped gate).
 	if ctx.in_scope:
