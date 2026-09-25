@@ -544,6 +544,7 @@ class Command(Runner):
 			# Output and results
 			self.return_code = 0
 			self.killed = False
+			self.cmd_done_hooks_ran = False
 			self.memory_limit_mb = CONFIG.celery.task_memory_limit_mb
 
 			# Isolated CWD
@@ -587,6 +588,7 @@ class Command(Runner):
 				yield from self.process_monitor_queue()
 
 			# Run hooks after cmd has completed successfully
+			self.cmd_done_hooks_ran = True
 			result = self.run_hooks('on_cmd_done', sub='end')
 			if result:
 				yield from result
@@ -992,6 +994,16 @@ class Command(Runner):
 		if self.killed:
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
 			yield Error(message=error)
+			# Still run on_cmd_done so tools that write an output file (nmap XML, ...) get their
+			# partial results parsed. Skip if the hooks already ran (killed while parsing).
+			if not getattr(self, 'cmd_done_hooks_ran', True):
+				self.cmd_done_hooks_ran = True
+				try:
+					result = self.run_hooks('on_cmd_done', sub='end')
+					if result:
+						yield from result
+				except Exception as e:
+					yield Error.from_exception(e, message='on_cmd_done failed on partial output')
 
 		elif self.return_code != 0:
 			error = f'Command failed with return code {self.return_code}'
