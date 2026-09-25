@@ -3442,7 +3442,7 @@ def task(name, verbose, check, system_exit):
 			warn=True,
 		)
 		check_test(
-			status != 'latest unknown',
+			not status.startswith('latest unknown'),
 			'Check latest version',
 			'Failed to detect latest version.',
 			warnings,
