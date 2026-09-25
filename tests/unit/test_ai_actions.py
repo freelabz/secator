@@ -11,7 +11,7 @@ if ADDONS_ENABLED['ai']:
 		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
 		_handle_query, _handle_add_finding, _handle_add_vuln_poc, _run_runner, _decrypt_dict,
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
-		_build_child_hooks_or_denial,
+		_build_child_hooks_or_denial, _child_preamble,
 		_MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
 		_MAX_SHELL_OUTPUT_CHARS, _truncate,
 	)
@@ -1823,6 +1823,68 @@ class TestRunRunnerNameValidation(unittest.TestCase):
 		self.assertIn("bogus_workflow_xyz", errors[0].message)
 		self.assertIn("not found", errors[0].message)
 		self.assertNotIn("Traceback", errors[0].message)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestChildPreambleChunkId(unittest.TestCase):
+	"""An AI child's own doc key must match its runner type.
+
+	The mongo hook keys a runner's doc on `{runner.type}_chunk_id` (falling back to
+	`{type}_id`). A run_workflow / run_scan child persists to the workflows/scans
+	collection, so stamping a `task_chunk_id` left it with no valid doc id — the
+	workflow/scan minted a fresh doc every update and stayed PENDING forever.
+	"""
+
+	def _ctx(self):
+		# No drivers => _build_child_hooks_or_denial returns ({}, None), so the
+		# preamble runs cleanly without a mongo/api backend.
+		return ActionContext(targets=['t.com'], model='m', context={})
+
+	def test_task_child_keyed_on_task_chunk_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'task')
+		self.assertIsNone(denial)
+		self.assertIn('task_chunk_id', context)
+		self.assertNotIn('workflow_chunk_id', context)
+
+	def test_workflow_child_keyed_on_workflow_chunk_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'workflow')
+		self.assertIsNone(denial)
+		self.assertIn('workflow_chunk_id', context)
+		self.assertNotIn('task_chunk_id', context)
+
+	def test_scan_child_keyed_on_scan_chunk_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'scan')
+		self.assertIsNone(denial)
+		self.assertIn('scan_chunk_id', context)
+
+	def test_default_runner_type_is_task(self):
+		# _handle_shell relies on the default: a shell command persists as a `task`.
+		context = {}
+		_child_preamble(self._ctx(), context)
+		self.assertIn('task_chunk_id', context)
+
+
+class TestEnsureMongoRunIdCoercion(unittest.TestCase):
+	"""Every `{type}_chunk_id` (not just task) must coerce a uuid to an
+	ObjectId, else `ObjectId(uuid)` raises / mints a fresh doc per write."""
+
+	def test_workflow_and_scan_chunk_ids_coerced(self):
+		try:
+			from bson import ObjectId
+			from secator.hooks.mongodb import ensure_mongo_run_id
+		except Exception as e:  # noqa: BLE001
+			self.skipTest(f'mongodb addon not available: {e}')
+		context = {
+			'workflow_chunk_id': 'not-an-objectid',
+			'scan_chunk_id': 'also-not-one',
+			'task_chunk_id': 'still-not-one',
+		}
+		ensure_mongo_run_id(context)
+		for key in ('workflow_chunk_id', 'scan_chunk_id', 'task_chunk_id'):
+			self.assertTrue(ObjectId.is_valid(context[key]), key)
 
 
 if __name__ == '__main__':
