@@ -1,3 +1,5 @@
+import re
+
 from secator.decorators import task
 
 # fmt: off
@@ -125,8 +127,11 @@ class ffuf(HttpFuzzer):
 		has_status_code_3xx = str(status_code).startswith('3')
 		is_redirect = (self.get_opt_value('follow_redirect') and 'redirectlocation' in item) or has_status_code_3xx
 		auto_calibration = self.get_opt_value('auto_calibration')
+		# Collapse redundant slashes in the path (e.g. host//api from a path-list wordlist whose entries
+		# start with '/'), while preserving the scheme's '://'.
+		url = re.sub(r'(?<!:)/{2,}', '/', item['url'])
 		yield Url(
-			url=item['url'],
+			url=url,
 			host=item['host'],
 			verified=auto_calibration,
 			status_code=status_code,
