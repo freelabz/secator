@@ -106,6 +106,9 @@ ai = [
 	# the safecmd Python package. Without it the guardrail shell parser degrades.
 	'shfmt-py'
 ]
+shodan = [
+	'shodan < 2'
+]
 
 [project.scripts]
 secator = 'secator.cli:cli'
