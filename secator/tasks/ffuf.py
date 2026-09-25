@@ -9,14 +9,15 @@ from secator.definitions import (
 # fmt: on
 from secator.output_types import Info, Progress, Subdomain, Url, Warning
 from secator.serializers import JSONSerializer, RegexSerializer
-from secator.tasks._categories import HttpFuzzer
+from secator.tasks._categories import HttpFuzzerMixin
+from secator.runners import Command
 from secator.utils import extract_domain_info
 
 FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[\d/\d\] :: (?P<rps>\d+) req/sec :: Duration: \[(?P<duration>[\d:]+)\] :: Errors: (?P<errors>\d+) ::'  # noqa: E501
 
 
 @task()
-class ffuf(HttpFuzzer):
+class ffuf(Command, HttpFuzzerMixin):
 	"""Fast web fuzzer written in Go."""
 
 	cmd = 'ffuf -noninteractive'
@@ -82,8 +83,8 @@ class ffuf(HttpFuzzer):
 
 	@staticmethod
 	def before_init(self):
-		# Call parent's before_init to process raw HTTP request
-		HttpFuzzer.before_init(self)
+		# Call the mixin's before_init to process raw HTTP request
+		HttpFuzzerMixin.before_init(self)
 
 		# Add /FUZZ to URL if needed
 		recursion = self.get_opt_value('recursion')

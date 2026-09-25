@@ -5,13 +5,14 @@ from secator.definitions import HOST, URL, DELAY, DEPTH, FILTER_CODES, FILTER_RE
 from secator.output_types import Url
 from secator.decorators import task
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpCrawler
+from secator.tasks._categories import HttpCrawlerMixin
+from secator.runners import Command
 
 MAX_PARAM_OCCURRENCES = 10
 
 
 @task()
-class xurlfind3r(HttpCrawler):
+class xurlfind3r(Command, HttpCrawlerMixin):
 	"""Discover URLs for a given domain in a simple, passive and efficient way"""
 	cmd = 'xurlfind3r'
 	tags = ['url', 'crawl', 'passive']
@@ -60,7 +61,7 @@ class xurlfind3r(HttpCrawler):
 	@staticmethod
 	def before_init(self):
 		# Call parent's before_init to process raw HTTP request
-		HttpCrawler.before_init(self)
+		HttpCrawlerMixin.before_init(self)
 
 		for idx, input in enumerate(self.inputs):
 			if validators.url(input):

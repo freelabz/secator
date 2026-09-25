@@ -13,12 +13,13 @@ from secator.definitions import (
 )
 # fmt: on
 from secator.output_types import Info, Tag, Url, Warning
-from secator.tasks._categories import HttpBase
+from secator.tasks._categories import HttpBaseMixin
+from secator.runners import Command
 from secator.utils import process_wordlist
 
 
 @task()
-class arjun(HttpBase):
+class arjun(Command, HttpBaseMixin):
 	"""HTTP Parameter Discovery Suite."""
 
 	cmd = 'arjun'
