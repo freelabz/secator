@@ -1713,7 +1713,9 @@ class TestHandleAddVulnPoc(unittest.TestCase):
 		self.assertEqual(sset["extra_data.reason"], "rce confirmed")
 		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"]
 		self.assertEqual(len(ais), 1)
-		self.assertEqual(ais[0].extra_data.get("finding", {}).get("poc"), "# poc")
+		# The re-fetched finding reflects the $set we just applied (not a stale line).
+		self.assertEqual(ais[0].extra_data.get("finding", {}).get("poc"), "# poc\ncmd -> output")
+		self.assertEqual(ais[0].extra_data.get("finding", {}).get("status"), "EXPLOITED")
 		self.assertFalse([r for r in results if isinstance(r, Error)])
 
 	def test_add_vuln_poc_not_exploited_marks_false_positive(self):

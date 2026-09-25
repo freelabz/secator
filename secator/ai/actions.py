@@ -1226,8 +1226,14 @@ def _handle_add_vuln_poc(action: Dict, ctx: ActionContext) -> Generator:
 		)
 		return
 
-	# Re-fetch so the chat can render the updated VulnerabilityCard (now carrying the poc/status).
+	# Re-fetch so the chat can render the updated VulnerabilityCard, then apply the
+	# same $set to it: the json store is append-only (last-wins on read) and a tight
+	# limit can return a pre-update line, so reflect the change we just made. On the
+	# store-backed drivers the fetch is already current, so this is a no-op there.
 	updated = (engine.search(query, limit=1) or [None])[0]
+	if updated:
+		from secator.query.json import _apply_set
+		_apply_set(updated, update)
 	msg = (f"Recorded exploitation PoC on vulnerability {uuid} (marked Exploited)." if exploited
 		else f"Marked vulnerability {uuid} as a false positive (could not be exploited).")
 	yield Ai(

@@ -267,5 +267,59 @@ class TestJsonDriverConcurrency(JsonDriverTestBase):
 		self._assert_no_loss(folder, 2 * self.N_WORKERS * self.PER_WORKER)
 
 
+class TestJsonDriverUpdate(JsonDriverTestBase):
+	"""_execute_update must patch the LIVE results.ndjson store (append a $set-applied
+	copy, last-wins on read), not the end-of-run report.json — else an update-by-uuid
+	on a finding recorded this run finds nothing (the add_vuln_poc "not found" bug)."""
+
+	def _vuln(self, name, matched_at, ws='ws1'):
+		from secator.output_types import Vulnerability
+		return Vulnerability(
+			name=name, matched_at=matched_at,
+			_context={'workspace_id': ws, 'workspace_duplicate': False},
+		)
+
+	def _backend(self):
+		from secator.query.json import JsonBackend
+		# report_dir hint points straight at the runner's live ndjson dir.
+		return JsonBackend(
+			'ws1', config={'reports_dir': self.temp_dir},
+			context={'report_dir': self.temp_dir},
+		)
+
+	def test_update_patches_live_ndjson(self):
+		from secator.hooks import json as hooks
+		runner = self._runner(name='nuclei')
+		v = hooks.update_finding(runner, self._vuln('JDWP - Unauthenticated Access', 'localhost:8000'))
+		uuid = v._uuid
+		self.assertTrue(uuid)
+
+		be = self._backend()
+		n = be._execute_update(
+			{'_type': 'vulnerability', '_uuid': uuid},
+			{'$set': {'status': 'EXPLOITED', 'poc': 'jdb eval RCE', 'extra_data.jdwp_port': 8087}},
+		)
+		self.assertEqual(n, 1)
+		# Full read (limit=0) so last-wins dedup returns the appended update, not the
+		# first line (a tight limit can break before the updated line — see the
+		# re-fetch $set in add_vuln_poc).
+		got = be.search({'_type': 'vulnerability', '_uuid': uuid}, limit=0)
+		self.assertEqual(len(got), 1)
+		self.assertEqual(got[0]['status'], 'EXPLOITED')
+		self.assertEqual(got[0]['poc'], 'jdb eval RCE')
+		# dotted $set resolves to a nested key (like MongoDB's $set).
+		self.assertEqual((got[0].get('extra_data') or {}).get('jdwp_port'), 8087)
+
+	def test_update_no_match_returns_zero(self):
+		from secator.hooks import json as hooks
+		runner = self._runner(name='nuclei')
+		hooks.update_finding(runner, self._vuln('X', 'a:1'))
+		be = self._backend()
+		self.assertEqual(
+			be._execute_update({'_type': 'vulnerability', '_uuid': 'nope'}, {'$set': {'status': 'EXPLOITED'}}),
+			0,
+		)
+
+
 if __name__ == '__main__':
 	unittest.main()
