@@ -239,7 +239,12 @@ def mock_command(cls, inputs=[], opts={}, fixture=None, method=''):
 	else:
 		mocks.append(fixture)
 
-	with mock_subprocess_popen(mocks):
+	# Mocked commands never actually run or install, so treat them as installed —
+	# otherwise the runner's presence check (shutil.which on the fake `cmd`) fails
+	# and triggers auto-install during the test.
+	with contextlib.ExitStack() as stack:
+		stack.enter_context(mock_subprocess_popen(mocks))
+		stack.enter_context(unittest.mock.patch.object(cls, 'is_installed', return_value=True))
 		command = cls(inputs, **opts)
 		if method == 'run':
 			yield cls(inputs, **opts).run()
