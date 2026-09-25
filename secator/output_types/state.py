@@ -11,6 +11,7 @@ class State(OutputType):
 
 	task_id: str
 	state: str
+	extra_data: dict = field(default_factory=dict)
 	_type: str = field(default='state', repr=True)
 	_source: str = field(default='', repr=True, compare=False)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)

@@ -70,6 +70,20 @@ class Report:
 		data['info']['errors'] = list(getattr(self.runner, 'errors', None) or [])
 		data['info']['warnings'] = list(self.runner.warnings)
 
+		# Celery / MongoDB poller metadata (used by `secator poll`).
+		data['info']['celery_id'] = self.runner.celery_result.id if self.runner.celery_result else None
+		data['info']['celery_ids'] = list(self.runner.celery_ids_map.keys())
+		ids_map = self.runner.celery_ids_map.copy()
+		for _, val in ids_map.items():
+			if 'results' in val:
+				del val['results']
+			if 'ready' in val:
+				del val['ready']
+		data['info']['celery_ids_map'] = ids_map
+		runner_type = self.runner.config.type
+		data['info']['mongodb_runner_type'] = runner_type
+		data['info']['mongodb_id'] = self.runner.context.get(f'{runner_type}_id')
+
 		# Build context for QueryEngine.
 		# Query the store for this run's findings. With the inter-task result payload
 		# dropped, a live run's findings live only in the store (the live report.json files
