@@ -343,12 +343,19 @@ class JsonBackend(QueryBackend):
 		return None
 
 	def list_runners(self, workspace_id: Optional[str] = None, runner_type: Optional[str] = None,
-					 has_parent: Optional[bool] = None):
+					 has_parent: Optional[bool] = None, report_dir: Optional[str] = None):
 		"""List runners from local report JSON files.
 
 		has_parent: when not None, only return runners matching that parent relationship
 		(False = outermost runners only, True = nested children only).
+		report_dir: when set, discover the run's own tree — ``report.json`` AND the per-child
+		``report_<fqn>.json`` shards under that dir (children share the parent's reports_folder,
+		see secator/hooks/json.py). This surfaces the individual tasks composing a workflow/scan,
+		which the workspace-wide ``list_reports`` scan (report.json only) does not. Used by the
+		store-driven live poll.
 		"""
+		if report_dir:
+			return self._list_runners_in_dir(Path(report_dir), has_parent)
 		from secator.utils import list_reports, get_info_from_report_path
 		paths = list_reports(workspace=workspace_id, type=runner_type)
 		runners = []
@@ -363,6 +370,32 @@ class JsonBackend(QueryBackend):
 				info['_type'] = path_info.get('type', '')
 				info['_id'] = path_info.get('type', '') + '/' + path_info.get('id', '')
 				info['_workspace'] = path_info.get('workspace', '')
+				info['_path'] = str(path)
+				runners.append(info)
+			except Exception as e:
+				debug(f'failed to load runner report {path}: {e}', sub='query.json')
+				continue
+		return runners
+
+	def _list_runners_in_dir(self, report_dir: Path, has_parent: Optional[bool] = None):
+		"""Load every runner report under ``report_dir`` (report.json + report_<fqn>.json shards).
+
+		The ``_type``/``_id`` come from the info block's ``config.type`` (NOT the path — child shards
+		live in the parent's directory, so a path-derived type would be wrong).
+		"""
+		runners = []
+		for path in sorted(report_dir.rglob('report*.json')):
+			try:
+				with open(path, 'r') as f:
+					info = json.load(f).get('info', {})
+				if not info:
+					continue
+				if has_parent is not None and info.get('has_parent', False) != has_parent:
+					continue
+				_type = (info.get('config') or {}).get('type', '')
+				rid = (info.get('context') or {}).get(f'{_type}_id', '')
+				info['_type'] = _type
+				info['_id'] = f'{_type}/{rid}' if rid else _type
 				info['_path'] = str(path)
 				runners.append(info)
 			except Exception as e:
