@@ -1778,7 +1778,7 @@ def atomic_json(path, default=dict):
 	path.parent.mkdir(parents=True, exist_ok=True)
 	lock_path = str(path) + '.lock'
 	# Perf instrumentation (SECATOR_DEBUG=perf): one line per call with the lock-acquire wait and
-	# write time, to diagnose gevent-hub stalls / lock contention on the json write path in prod.
+	# write time, to diagnose gevent-hub stalls / lock contention on the json write path under concurrency.
 	_t0 = monotonic()
 	lock_wait_ms = write_ms = 0.0
 	with _get_path_lock(path):                        # (1) in-process (greenlet/thread cooperative)

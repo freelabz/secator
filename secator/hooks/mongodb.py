@@ -112,7 +112,7 @@ def build_pending_doc(parent, task_spec, child_type):
 	"""Minimal PENDING placeholder doc for a not-yet-run child runner.
 
 	The runtime update_runner does {'$set': self.toDict()} and fully overwrites
-	this once the child executes, so only the fields the UI tree / watchdog need
+	this once the child executes, so only the fields a consumer / watchdog need
 	before that have to be correct here.
 	"""
 	return {
@@ -120,8 +120,8 @@ def build_pending_doc(parent, task_spec, child_type):
 		'status': 'PENDING',
 		'done': False,
 		# Carry the build-time description (workflow-node override, e.g.
-		# "Find open ports (light)") so the UI shows it while PENDING, not only
-		# once the child runs. The UI reads config.description (falling back to
+		# "Find open ports (light)") so clients show it while PENDING, not only
+		# once the child runs. Clients read config.description (falling back to
 		# config.name), and update_runner overwrites this with the full config
 		# on first run — which resolves to the same description.
 		'config': {
@@ -181,7 +181,7 @@ def update_finding(self, item):
 			# findings (`_tagged: False`) instead of a `$ne: True` whole-workspace scan (#1315).
 			# Execution-metadata types (stat/info/warning/error) are NOT dedupable and are
 			# dropped by tag_duplicates, so stamping them `_tagged: False` clogged the untagged
-			# backlog forever (85% of it in prod) AND starved real findings out of the bounded
+			# backlog forever (the bulk of it at scale) AND starved real findings out of the bounded
 			# scan window. Stamp them `_tagged: True` so they never enter the backlog.
 			update.setdefault('_tagged', _type in CONFIG.addons.mongodb.duplicate_exclude_types)
 			finding = db['findings'].insert_one(update)
@@ -265,7 +265,7 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 	if full_scan:
 		del untagged_query['_tagged']
 	# Baseline (already-tagged non-duplicate findings) is UNBOUNDED and OOM-killed a 2Gi worker
-	# on large workspaces (#prod 2026-09-15: 47k+ docs, growing). Instead of materializing every
+	# on large workspaces (observed at scale: 47k+ docs, growing). Instead of materializing every
 	# full finding, stream the cursor and fold it into a compact index (uuids/_related/copy-fields
 	# per equality key) — peak memory is O(distinct keys × tiny payload), independent of full-doc
 	# size. See build_baseline_index. ponytail: streaming folds the peak; add a server-side field

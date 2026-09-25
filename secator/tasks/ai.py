@@ -47,7 +47,7 @@ _HARD_ITERATION_CEILING = 1000
 _MAX_FOLLOWUP_EXTENSIONS = 200
 
 # When the SAME answer is served to this many CONSECUTIVE follow-ups, the run isn't
-# progressing (e.g. the answer channel re-serving one standing message, seen on canary
+# progressing (e.g. the answer channel re-serving one standing message, observed in remote runs
 # ws bb_21_arcbbc) — stop now instead of burning up to _MAX_FOLLOWUP_EXTENSIONS
 # iterations / the worker deadline. A genuine back-and-forth (distinct answers) resets
 # the counter and never trips this.
@@ -174,8 +174,8 @@ class ai(PythonRunner):
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": f"Mode: {', '.join(MODES)}"},  # derive from MODES, don't drift
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
-		# Never default this to CONFIG.addons.ai.api_key: secator-api serves task opts
-		# (incl. defaults) to the UI, which would leak the key into the runner form.
+		# Never default this to CONFIG.addons.ai.api_key: a remote server serves task opts
+		# (incl. defaults) to clients, which would leak the key into client-rendered run options.
 		# Falls back to CONFIG at runtime instead; still `sensitive` so it's redacted.
 		"api_key": {"type": str, "default": "", "sensitive": True, "help": "API key for LLM provider (defaults to configured key)"},  # noqa: E501
 		"api_base": {"type": str, "default": "", "help": "API base URL (defaults to configured base)"},
@@ -417,7 +417,7 @@ class ai(PythonRunner):
 		"""Resolve the ``prompt`` run option, reading it from a file if it names one.
 
 		File-path expansion is CLI/local only: on the remote path the prompt comes from
-		the web UI, so a string that happens to name a worker-local file must NOT be read
+		clients, so a string that happens to name a worker-local file must NOT be read
 		and leaked into the transcript.
 		"""
 		prompt = self.run_opts.get("prompt", "")
@@ -616,7 +616,7 @@ class ai(PythonRunner):
 		turns — so those tokens leak verbatim into shell commands (DNS fails) and
 		scope/IP checks (ValueError). Store it as an internal ``ai_type="pii_map"``
 		doc (one per session, upserted): restore_history_from_db skips it so it never
-		enters the LLM transcript, and the UI hides it. The plaintext values already
+		enters the LLM transcript, and clients hide it. The plaintext values already
 		live in the workspace findings, so this adds no LLM-provider exposure.
 		"""
 		if self.interactive != "remote" or not self.encryptor or not self.encryptor.pii_map:
@@ -840,7 +840,7 @@ class ai(PythonRunner):
 						"iteration": iteration,
 						# Persist -1 (not float('inf')) for the uncapped case: inf is not
 						# JSON-compliant and 500s the transcript search (strict json.dumps),
-						# which makes the whole conversation fail to load in the UI.
+						# which makes the whole conversation fail to load for clients.
 						"max_iterations": (-1 if self.max_iterations == float('inf') else self.max_iterations),
 						"tokens": usage.get("tokens") if usage else None,
 						"cost": usage.get("cost") if usage else None,
@@ -1034,7 +1034,7 @@ class ai(PythonRunner):
 		)
 
 		# Per-run billed-token accounting (AI analog of context.scan_hours), read
-		# by the platform billing chore. Init so it persists even with zero LLM calls.
+		# by the billing chore. Init so it persists even with zero LLM calls.
 		self.context.setdefault("ai_tokens", 0)
 		self.context.setdefault("ai_prompt_tokens", 0)
 		self.context.setdefault("ai_completion_tokens", 0)
@@ -1045,7 +1045,7 @@ class ai(PythonRunner):
 		# configured model even if the user switches mid-session.
 		self.context["ai_model"] = self.model
 
-		# Create interactivity backend. For remote (web), the UI reuses a stable
+		# Create interactivity backend. For remote (web), clients reuse a stable
 		# session_id on respawn so a respawned task finds its prior docs; it arrives
 		# via self.context (authoritative — the dispatcher pops run_opts['context']).
 		self.session_id = (
@@ -1179,10 +1179,10 @@ class ai(PythonRunner):
 		turn. Cooperative — not a hard cancel (Stop already does that).
 
 		The steer doc the API wrote is itself the persisted transcript entry (it
-		carries ``_context.session_id``, so the UI's transcript poll surfaces it as
+		carries ``_context.session_id``, so a client's transcript poll surfaces it as
 		an "interjected" user bubble). We deliberately do NOT yield a second
 		``Ai(ai_type="steer")`` echo here — that would persist a duplicate doc with
-		the same content and double-render in the UI. ``poll_steers`` flips the
+		the same content and double-render on the client. ``poll_steers`` flips the
 		drained doc to ``status:"consumed"`` so it injects exactly once.
 
 		Only the RemoteBackend has a channel to poll; for every other backend this
@@ -1348,7 +1348,7 @@ class ai(PythonRunner):
 				# Log the denial to the console / pod-logs ONLY — the _reject_tool_call
 				# tool_result below already surfaces the SAME reason in the chat (it is
 				# what the model reads). Yielding a Warning too rendered the denial TWICE
-				# in the live UI (a Warning line + the tool_result bubble). One denial,
+				# in the live client view (a Warning line + the tool_result bubble). One denial,
 				# one message.
 				console.print(Warning(message=denial_display))
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
@@ -1410,7 +1410,7 @@ class ai(PythonRunner):
 					if isinstance(self.backend, RemoteBackend):
 						follow_up_ai.status = "pending"
 						# Correlate on the PERSISTED _context.session_id (a top-level session_id
-						# attr wouldn't serialize) — the same field poll_steers/the UI/api use.
+						# attr wouldn't serialize) — the same field poll_steers and clients use.
 						follow_up_ai._context = {**(follow_up_ai._context or {}), "session_id": self.session_id}
 						if not follow_up_ai.choices and follow_up_choices:
 							follow_up_ai.choices = list(follow_up_choices)
@@ -1465,7 +1465,7 @@ class ai(PythonRunner):
 		(`{"tokens", "prompt_tokens", "completion_tokens", "cost"}`) or None.
 		Missing/None usage counts as 0 so accounting never crashes the run. The
 		running total lives on `self.context["ai_tokens"]` (int, cumulative) which
-		is persisted onto the task doc and read by the platform billing chore.
+		is persisted onto the task doc and read by the billing chore.
 		`context["ai_prompt_tokens"]`/`["ai_completion_tokens"]` carry the split.
 		"""
 		if not usage:
@@ -1609,7 +1609,7 @@ class ai(PythonRunner):
 		# the loop) and `max_iterations` here by `extra_iters`, so the two grow in
 		# lockstep and the `while iteration < max_iterations` cap can NEVER terminate an
 		# endlessly-answered follow-up loop. If the answer channel keeps re-serving the
-		# same standing message (a stopped→answered respawn racing / a buggy UI resubmit),
+		# same standing message (a stopped→answered respawn racing / a buggy client resubmit),
 		# the run spins until the worker deadline. Cap the auto-extensions so a runaway
 		# terminates; a real human back-and-forth never approaches the ceiling.
 		extends = getattr(self, "_followup_extensions", 0)

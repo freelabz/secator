@@ -82,7 +82,7 @@ class ActionContext:
 	def get_query_engine(self):
 		"""Get or create a QueryEngine (cached for reuse across queries).
 
-		Always queries through the run's REAL driver (mongodb/api on the platform,
+		Always queries through the run's REAL driver (mongodb/api on a server,
 		local json on the CLI) — the driver's context carries `drivers`, so the
 		backend resolves correctly. The old scope=="current" path passed only
 		`{"results": self.results}` with no driver; the JsonBackend no longer reads
@@ -242,7 +242,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 	# on allow/deny/ask here — no post-processing of the verdict.
 	result = ctx.permission_engine.check_action(action)
 	if result.decision == "deny":
-		# Out-of-scope denials carry the target + a machine-readable reason so the UI/CLI
+		# Out-of-scope denials carry the target + a machine-readable reason so clients/CLI
 		# can render a clear "Target X is not in the allowed scope" message (and the model
 		# can retry an in-scope target) rather than a bare reason code.
 		if result.reason == "out_of_scope" and result.targets:
@@ -588,7 +588,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		**opts,
 	}
 	# Human-readable description the LLM supplied for this action (Runner maps
-	# run_opts['description'] -> self.description -> persisted `descr`, shown in the UI
+	# run_opts['description'] -> self.description -> persisted `descr`, shown by clients
 	# instead of the bare task name). Only set when non-empty so it never blanks out a
 	# task's own config.description.
 	if action.get("description"):
@@ -616,7 +616,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		return
 
 	# Emit the action Ai item now the runner exists (on_init stamped the runner id) so
-	# the UI can render a RunnerCard; always emitted, even when silent. The child is a
+	# clients can render the runner; always emitted, even when silent. The child is a
 	# CHUNK, so its persisted doc `_id` is keyed on `{type}_chunk_id` (not `{type}_id`,
 	# which now points at the PARENT ai task for grouping). Prefer the chunk id; fall
 	# back to `{type}_id` then `runner.id`.
@@ -627,7 +627,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		ai_type=runner_type,
 		extra_data={
 			"targets": targets,
-			# Never persist transport credentials into the (DB-stored, UI-rendered) action item.
+			# Never persist transport credentials into the (DB-stored, client-rendered) action item.
 			"opts": {k: v for k, v in opts.items() if k not in ("api_key", "api_base")},
 			"runner_id": runner_id,
 			"runner_type": runner_type,
@@ -832,7 +832,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			"dangerous": False,
 			"env": _sanitized_env(),
 		}
-		# Human-readable description the LLM supplied (shown in the UI instead of the
+		# Human-readable description the LLM supplied (shown by clients instead of the
 		# bare "command" name). See _run_runner for the run_opts['description'] mapping.
 		if action.get("description"):
 			run_opts["description"] = action["description"]
@@ -849,7 +849,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		runner.max_timeout = _SHELL_TIMEOUT
 
 		# Emit the command Ai now that the runner exists: its on_init hook has
-		# stamped the runner id into context, so the UI can link this item to the
+		# stamped the runner id into context, so clients can link this item to the
 		# persisted runner doc (mirrors _run_runner:688-699).
 		yield Ai(
 			content=command,
@@ -974,7 +974,7 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		query_str = json.dumps(query_filter, separators=(',', ':'))
 		# Surface only the PRIMARY of each finding group: skip hidden duplicates
 		# (_context.workspace_duplicate=True) so the AI never operates on a demoted
-		# copy — e.g. records a PoC on a doc that isn't the one the UI shows. Only
+		# copy — e.g. records a PoC on a doc that isn't the one clients show. Only
 		# the mongo-backed drivers (mongodb/api) tag duplicates; the json driver
 		# doesn't. Respect an explicit _context filter from the model rather than
 		# fighting it. Applied to the search only, so the shown query stays the
@@ -1025,10 +1025,10 @@ def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
 	reason = action.get("reason", "completed")
 	choices = action.get("choices", [])
 	multiple = bool(action.get("multiple", False))
-	# Store choices on the top-level `choices` field (what the web UI reads) AND in
+	# Store choices on the top-level `choices` field (what clients read) AND in
 	# extra_data (back-compat). Without the top-level field, the persisted follow-up
-	# doc has `choices: []` and the UI renders no choice buttons. `multiple` tells
-	# the UI to render multi-select (checkboxes) vs single-pick.
+	# doc has `choices: []` and clients render no choice buttons. `multiple` tells
+	# clients to render multi-select (checkboxes) vs single-pick.
 	yield Ai(
 		content=reason, ai_type="follow_up", choices=choices, multiple=multiple,
 		extra_data={"choices": choices, "multiple": multiple}, _context=context)
@@ -1110,7 +1110,7 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Ai(
 			content=f'{str(finding)}',
 			ai_type="add_finding",
-			# Carry the created finding so the web UI can render its FindingCard
+			# Carry the created finding so clients can render the finding
 			# (VulnerabilityCard/SubdomainCard/…) — it routes on `_type`.
 			extra_data={"finding": finding.toDict()},
 			_context=context
@@ -1150,7 +1150,7 @@ def _handle_add_vuln_poc(action: Dict, ctx: ActionContext) -> Generator:
 		return
 
 	# Build a scoped $set: exploited -> status Exploited + verified; not-exploited -> false positive
-	# (mirrors the UI, where FALSE_POSITIVE is stored as is_false_positive, not in `status`).
+	# (mirrors clients, where FALSE_POSITIVE is stored as is_false_positive, not in `status`).
 	update = {}
 	if exploited:
 		update["poc"] = poc

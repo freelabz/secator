@@ -15,7 +15,7 @@ from secator.ai.tools import STOP_TOOL_SCHEMA
 class UserInputTimeout(Exception):
 	"""Raised by the RemoteBackend when a prompt goes unanswered past the timeout.
 
-	On the platform a prompt is NOT auto-denied on timeout (that produced weird
+	In remote mode a prompt is NOT auto-denied on timeout (that produced weird
 	states — an action silently denied while the user was away). Instead the
 	pending doc is LEFT pending and this exception unwinds the AI loop so the
 	worker exits cleanly (saving infra $). When the user next opens the chat they
@@ -131,7 +131,7 @@ class RemoteBackend(InteractivityBackend):
 		# and cross-expiring orphaned the other prompt so it stopped awaiting an answer.
 		self._expire_stale_pending(session_id, ai_type=prompt_type)
 		# The conversation id rides on `_context.session_id` (auto-stamped from the
-		# runner context on persist) — the poll + restore + secator-api all key on
+		# runner context on persist) — the poll + restore + remote server all key on
 		# that, so this pending doc needs no top-level session_id field.
 		return Ai(
 			content=question,
@@ -291,7 +291,7 @@ class RemoteBackend(InteractivityBackend):
 
 		Called when a NEW prompt starts (before it is persisted), so it only
 		affects prior prompts. Stops stale 'pending' docs from accumulating —
-		a worker that dies mid-poll otherwise leaves the UI 'thinking' forever
+		a worker that dies mid-poll otherwise leaves clients 'thinking' forever
 		and lets crud.answer_ai_prompt's "latest pending" collide.
 
 		``ai_type`` scopes the expiry to a single prompt type (the type of the

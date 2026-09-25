@@ -216,7 +216,7 @@ def resolve_scope_hostnames(scope):
 
 	CAVEAT: a CDN / shared-hosting front resolves to an IP shared with other sites, so
 	adding it authorizes every co-tenant on that IP. Only widen scope this way under an
-	explicit engagement scope (the platform's mandate-derived in_scope).
+	explicit engagement scope (the caller-provided mandate-derived in_scope).
 	"""
 	import socket
 	entries = as_scope_list(scope)

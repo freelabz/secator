@@ -216,7 +216,7 @@ class MongodbAddon(StrictModel):
 	max_items: int = -1
 	# Output types that are execution metadata, not dedupable findings: they are
 	# stamped `_tagged: True` on insert (never enter the untagged backlog) and
-	# skipped by tag_duplicates. Keep in sync with secator-cloud's
+	# skipped by tag_duplicates. Keep in sync with the downstream consumer's
 	# DUPLICATE_EXCLUDE_TYPES (the value passed as tag_duplicates(exclude_types=...)).
 	duplicate_exclude_types: List[str] = ['info', 'warning', 'error', 'stat']
 	duplicate_main_copy_fields: List[str] = [

@@ -87,7 +87,7 @@ class Ai(OutputType):
 	answer: str = field(default='', compare=False)
 	choices: list = field(default_factory=list, compare=False)
 	# For a follow_up: whether the user may pick SEVERAL of `choices` (multi-select)
-	# vs exactly one. The web UI renders checkboxes vs single-pick rows accordingly.
+	# vs exactly one. Clients render checkboxes vs single-pick rows accordingly.
 	multiple: bool = field(default=False, compare=False)
 	message: dict = field(default_factory=dict, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
