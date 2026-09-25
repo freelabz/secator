@@ -87,6 +87,29 @@ class TestRemoteBackend(unittest.TestCase):
 		self.assertIsNotNone(result)
 		self.assertEqual(result["answer"], "option A")
 
+	def test_poll_steers_drops_uuidless_and_consumes_uuid_ones(self):
+		"""A steer WITHOUT a _uuid must not be injected — poll_steers can only mark
+		_uuid'd docs consumed, so returning a _uuid-less one replays it every poll
+		(the duplicated-interjection bug)."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"_uuid": "u1", "content": "steer with uuid", "_timestamp": 1},
+			{"content": "steer without uuid", "_timestamp": 2},  # no _uuid
+		]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+		out = backend.poll_steers("sess")
+		self.assertEqual(out, ["steer with uuid"])           # only the _uuid'd steer injected
+		self.assertEqual(mock_engine.update.call_args[0][0].get("_uuid"), {"$in": ["u1"]})
+
+	def test_poll_steers_all_uuidless_returns_empty_and_no_consume(self):
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"content": "x", "_timestamp": 1}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+		self.assertEqual(backend.poll_steers("sess"), [])
+		mock_engine.update.assert_not_called()
+
 	def test_permission_allow_persists_rule_so_recheck_passes(self):
 		"""A single 'allow' on a target must persist a runtime rule so the guardrail
 		re-check passes. Regression: it used to add NO rule ("one-shot"), so the
