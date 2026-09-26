@@ -158,7 +158,10 @@ def _yield_tool_results(runner, collected):
 		         _context=dict(runner.context))
 
 
-def resolve_llm_credentials(caller_api_base, caller_api_key, config_api_base, config_api_key, disallow_config_token=False):
+def resolve_llm_credentials(
+	caller_api_base, caller_api_key, config_api_base, config_api_key,
+	disallow_config_token=False,
+):
 	"""Resolve the (api_base, api_key, error) triple for an AI run.
 
 	SECURITY (LLM CREDS): when ``disallow_config_token`` is on and a caller overrides ``api_base``
