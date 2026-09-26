@@ -77,14 +77,10 @@ def ensure_mongo_run_id(context):
 	scopes to that same id. Idempotent: a valid ObjectId is kept, so all later writes hit one doc.
 	The json store keeps its uuid; only the mongodb path (which has bson) is coerced.
 
-	All `{type}_chunk_id`s are coerced too, not just `task_chunk_id`: an AI-spawned
-	workflow/scan child keys its doc on `workflow_chunk_id`/`scan_chunk_id`, so a raw
-	uuid there would make `ObjectId(...)` raise (or, when absent, mint a fresh doc every
-	write and leave the run stuck PENDING)."""
-	for key in (
-		'task_id', 'workflow_id', 'scan_id',
-		'task_chunk_id', 'workflow_chunk_id', 'scan_chunk_id',
-	):
+	`task_chunk_id` is coerced too (a task chunk — real chunking or an AI-spawned task
+	child — keys its doc on it). Workflow/scan children key on `{type}_id` (they are
+	standalone runners, not chunks; see ai.actions._child_preamble)."""
+	for key in ('task_id', 'workflow_id', 'scan_id', 'task_chunk_id'):
 		val = context.get(key)
 		if val and not ObjectId.is_valid(val):
 			context[key] = str(ObjectId())

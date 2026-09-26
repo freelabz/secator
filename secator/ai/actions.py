@@ -481,19 +481,19 @@ def _child_preamble(
 	Returns ``(hooks, denial)``; if ``denial`` is non-None the caller must yield it
 	and skip the spawn.
 	"""
-	# The child gets its own fresh {runner_type}_chunk_id — the mongo hook keys the
-	# child's OWN doc on `{child.type}_chunk_id` (falling back to `{type}_id`), so the
-	# key MUST match the child's runner type. A run_workflow/run_scan child persists to
-	# the `workflows`/`scans` collection, keyed on `workflow_chunk_id`/`scan_chunk_id`;
-	# stamping a `task_chunk_id` there left the workflow/scan with no valid doc id, so
-	# `ObjectId(None)` minted a fresh doc on every update and the run was stuck PENDING
-	# forever. It does NOT inherit the parent AI task's {type}_id: a heavy
-	# task dispatches ASYNC to celery where it's awaited by its celery id, not this
-	# context id — but sharing the parent's DOC id would make the child's update_runner
-	# `$set` its own state onto the parent AI task's doc, flipping the AI task to done
-	# mid-conversation (results never flow back). has_parent (run_opts, see
+	# Give the child its own fresh runner id so the driver hooks key its OWN doc.
+	# _get_result_context already stripped the parent's task_id/workflow_id/scan_id, so
+	# there's no parent id to collide with. A task legitimately CHUNKS, so a task child
+	# keeps a `task_chunk_id` (the mongo hook keys a task doc on `task_chunk_id` when
+	# present, else `task_id`). A workflow/scan child is a STANDALONE runner, not a chunk
+	# — key it on `{type}_id`, which BOTH the mongo hook (no chunk id -> `{type}_id`) and
+	# the api hook (`Runner.chunk` unset -> `{type}_id`) agree on, so the AI runner card
+	# points at the id the active driver actually persisted. (Stamping a `task_chunk_id`
+	# on a workflow/scan left it with no valid doc id -> `ObjectId(None)` minted a fresh
+	# doc on every update -> stuck PENDING; see #452.) has_parent (run_opts, see
 	# _child_run_opts) already drops these children from the root runners list.
-	context[f"{runner_type}_chunk_id"] = str(uuid.uuid4())
+	id_key = "task_chunk_id" if runner_type == "task" else f"{runner_type}_id"
+	context[id_key] = str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
 	return _build_child_hooks_or_denial(context)
@@ -626,10 +626,10 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		return
 
 	# Emit the action Ai item now the runner exists (on_init stamped the runner id) so
-	# the UI can render a RunnerCard; always emitted, even when silent. The child is a
-	# CHUNK, so its persisted doc `_id` is keyed on `{type}_chunk_id` (not `{type}_id`,
-	# which now points at the PARENT ai task for grouping). Prefer the chunk id; fall
-	# back to `{type}_id` then `runner.id`.
+	# the UI can render a RunnerCard; always emitted, even when silent. Use the id the
+	# driver keyed the child's doc on: a task child on its own `task_chunk_id`, a
+	# workflow/scan child on its `{type}_id` (see _child_preamble). Fall back through
+	# both, then `runner.id`.
 	runner_id = (context.get(f"{runner_type}_chunk_id")
 	             or context.get(f"{runner_type}_id", "") or runner.id)
 	yield Ai(
