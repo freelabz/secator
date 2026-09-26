@@ -31,12 +31,6 @@ class Workflow(Runner):
 		opts.pop('output', None)
 		opts.pop('no_poll', False)
 		opts.pop('print_profiles', False)
-		# A workflow-level `description` (e.g. the AI's run_workflow description, or a
-		# CLI `--description`) belongs to the WORKFLOW, not its tasks. Don't cascade it
-		# into the child opts or it overrides every task's own YAML `description`
-		# (each task shows the workflow description instead of "Detect services…" etc.).
-		opts.pop('description', None)
-
 		# Set hooks and reports
 		self.enable_hooks = False   # Celery will handle hooks
 		self.enable_reports = True  # Workflow will handle reports
@@ -57,6 +51,14 @@ class Workflow(Runner):
 		for k, v in opts.copy().items():
 			if k.startswith(self.config.name + '_'):
 				opts[k.replace(self.config.name + '_', '')] = v
+
+		# A workflow-level `description` (e.g. the AI's run_workflow description, or a
+		# CLI `--description`) belongs to the WORKFLOW, not its tasks. Don't cascade it
+		# into the child opts or it overrides every task's own YAML `description` (each
+		# task shows the workflow description instead of "Detect services…" etc.). Must
+		# come AFTER the prefix loop above, which would otherwise restore a
+		# `<workflow_name>_description` back into `description`.
+		opts.pop('description', None)
 
 		# Remove dynamic opts from parent runner
 		opts = {k: v for k, v in opts.items() if k not in self.dynamic_opts}
