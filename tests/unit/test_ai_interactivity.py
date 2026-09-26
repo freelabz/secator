@@ -536,10 +536,12 @@ class TestRemoteBackendSteer(unittest.TestCase):
 		"""A steer arriving during a follow-up wait returns as the answer."""
 		from secator.ai.interactivity import RemoteBackend
 		mock_engine = MagicMock()
-		# No follow-up answer ever; a steer arrives on the first poll.
+		# No follow-up answer ever; a steer arrives on the first poll. It MUST carry a
+		# `_uuid` — poll_steers only consumes (and thus injects) steers it can mark
+		# consumed, so a `_uuid`-less steer is dropped instead of replayed.
 		mock_engine.search.side_effect = [
 			[],  # answered? no
-			[{"content": "change course now", "_timestamp": 1}],  # poll_steers -> steer
+			[{"content": "change course now", "_timestamp": 1, "_uuid": "steer-1"}],  # poll_steers -> steer
 		]
 		mock_engine.update = MagicMock()
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
