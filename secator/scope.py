@@ -6,16 +6,18 @@ network targets (ip/cidr/host/host:port/url) are checked; non-network items
 allow-all (subject to deny).
 
 Entry kinds: IP/CIDR (``ipaddress`` containment, v4+v6, ``subnet_of``); exact
-host; ``*.acme.com`` wildcard (sub-domains only, not the apex); ``re.fullmatch``-
-anchored regex (``acme\\.com`` never matches ``evil-acme.com.x``). Regexes are
-scope entries, never targets.
+host; ``host/path`` path-scoped host (matches that host at/under the path, and
+CARVES the sub-tree out of a broader host-level deny); ``*.acme.com`` wildcard
+(sub-domains only, not the apex); ``re.fullmatch``-anchored regex (``acme\\.com``
+never matches ``evil-acme.com.x``). Regexes are scope entries, never targets.
 """
 
 import ipaddress
 import logging
 import re
+from urllib.parse import urlparse
 
-from secator.definitions import CIDR_RANGE, IP
+from secator.definitions import CIDR_RANGE, IP, URL
 from secator.utils import (
 	NETWORK_TYPES,
 	_is_ip_literal,
@@ -73,14 +75,16 @@ def _compile_entry(entry):
 
 class _Shape:
 	"""Parsed target: exactly one of net / ip / host is set. `canonical` is the
-	full canonical target string (what regex entries fullmatch against)."""
-	__slots__ = ('net', 'ip', 'host', 'canonical')
+	full canonical target string (what regex entries fullmatch against). `path` is
+	the URL path (only URL targets carry one; '' otherwise) for path-scoped entries."""
+	__slots__ = ('net', 'ip', 'host', 'canonical', 'path')
 
-	def __init__(self, net=None, ip=None, host=None, canonical=''):
+	def __init__(self, net=None, ip=None, host=None, canonical='', path=''):
 		self.net = net
 		self.ip = ip
 		self.host = host
 		self.canonical = canonical
+		self.path = path
 
 
 def _target_shape(target):
@@ -104,13 +108,15 @@ def _target_shape(target):
 		if info.type == IP and _is_ip_literal(canonical):
 			return _Shape(ip=ipaddress.ip_address(canonical), canonical=canonical)
 		# URL / HOST / HOST_PORT (and `localhost`, typed IP but not a real IP literal):
-		# pull the host out (strips scheme / port / path).
+		# pull the host out (strips scheme / port / path). Only URL targets carry a
+		# path; keep it so path-scoped scope entries can match it.
 		host = _target_host(canonical, info.type)
+		path = urlparse(canonical).path if info.type == URL else ''
 		if _is_ip_literal(host):
 			# IP literal hiding in a url / host:port (8.8.8.8:443, http://8.8.8.8/) --
 			# match it by network containment, never as a hostname string.
-			return _Shape(ip=ipaddress.ip_address(host), canonical=canonical)
-		return _Shape(host=host.lower().rstrip('.'), canonical=canonical)
+			return _Shape(ip=ipaddress.ip_address(host), canonical=canonical, path=path)
+		return _Shape(host=host.lower().rstrip('.'), canonical=canonical, path=path)
 	except ValueError:
 		return None
 
@@ -121,6 +127,28 @@ def _entry_net(entry):
 		return ipaddress.ip_network(entry, strict=False)
 	except ValueError:
 		return None
+
+
+def _is_path_entry(entry):
+	"""True if `entry` is a host/path scope entry (has a path segment), not a
+	CIDR, regex or wildcard. Path entries carve a sub-tree out of a host deny."""
+	entry = entry.strip()
+	return (
+		'/' in entry
+		and not entry.startswith('*.')
+		and _entry_net(entry) is None
+		and not any(c in _REGEX_META for c in entry)
+	)
+
+
+def _path_covers(entry_path, target_path):
+	"""True if `target_path` is at or under `entry_path` at a segment boundary.
+
+	`/docs` covers `/docs` and `/docs/x` but NOT `/docsomething` or `/other`.
+	"""
+	ep = '/' + entry_path.strip('/')
+	tp = '/' + (target_path or '').strip('/')
+	return tp == ep or tp.startswith(ep + '/')
 
 
 def _shape_matches_entry(shape, entry):
@@ -144,6 +172,15 @@ def _shape_matches_entry(shape, entry):
 		if shape.ip is not None:
 			return shape.ip.version == entry_net.version and shape.ip in entry_net
 		return False  # hostname target can't be inside an IP network
+
+	# Path-scoped host entry: host/path. Matches iff the target host equals the
+	# entry host (same host rule as an exact-host entry) AND the target path is at
+	# or under the entry path at a segment boundary.
+	if _is_path_entry(entry):
+		if shape.host is None:
+			return False
+		entry_host, _, entry_path = entry.partition('/')
+		return shape.host == entry_host.lower().rstrip('.') and _path_covers(entry_path, shape.path)
 
 	# Regex entry: FULLMATCH-anchored (both ends), ReDoS-guarded.
 	if any(c in _REGEX_META for c in entry):
@@ -197,6 +234,12 @@ def host_in_scope(target, in_scope=None, out_of_scope=None):
 	shape = _target_shape(target)
 	if shape is None:
 		return True  # non-network item: scope is network-only, always kept
+	# Path carve-out: a path-scoped ALLOW (host/path) overrides a broader host-level
+	# DENY, UNLESS an equally-/more-specific path-scoped DENY also matches (deny wins
+	# at the same specificity). Non-path deny/allow logic below is unchanged.
+	if any(_shape_matches_entry(shape, e) for e in in_scope if _is_path_entry(e)):
+		if not any(_shape_matches_entry(shape, e) for e in out_of_scope if _is_path_entry(e)):
+			return True
 	if out_of_scope and any(_shape_matches_entry(shape, e) for e in out_of_scope):
 		return False
 	if in_scope:

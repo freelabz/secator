@@ -208,3 +208,53 @@ class TestUnderscoreHostnameScope(unittest.TestCase):
 		self.assertTrue(host_in_scope('vps592398.ovh.net', self.IN_SCOPE, []))
 		self.assertTrue(host_in_scope('a.vps592398.ovh.net', self.IN_SCOPE, []))
 		self.assertFalse(host_in_scope('evil.com', self.IN_SCOPE, []))
+
+
+class TestPathScopedCarveOut(unittest.TestCase):
+	"""A path-scoped in-scope entry (host/path) carves a sub-tree out of a broader
+	host-level deny. Deny wins at equal/greater path specificity. Mirrors the
+	secator-api mandate matcher.
+	"""
+
+	# The launchdarkly repro: docs path allowed, apex denied.
+	IN_SCOPE = ['launchdarkly.com/docs', '*.launchdarkly.com']
+	OUT_OF_SCOPE = ['launchdarkly.com']
+
+	def test_path_allow_beats_host_deny(self):
+		self.assertTrue(host_in_scope('https://launchdarkly.com/docs', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_under_allowed_path_allowed(self):
+		self.assertTrue(host_in_scope('https://launchdarkly.com/docs/anything', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_different_path_denied(self):
+		self.assertFalse(host_in_scope('https://launchdarkly.com/other', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_path_prefix_not_a_segment_boundary_denied(self):
+		# /docsomething must NOT match the /docs allow entry.
+		self.assertFalse(host_in_scope('https://launchdarkly.com/docsomething', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_bare_apex_denied(self):
+		self.assertFalse(host_in_scope('launchdarkly.com', self.IN_SCOPE, self.OUT_OF_SCOPE))
+		self.assertFalse(host_in_scope('https://launchdarkly.com', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_subdomain_still_allowed_by_wildcard(self):
+		self.assertTrue(host_in_scope('https://api.launchdarkly.com/x', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_path_level_deny_wins_over_path_allow(self):
+		in_scope = ['launchdarkly.com/docs']
+		out_of_scope = ['launchdarkly.com', 'launchdarkly.com/docs/private']
+		# deny sub-tree wins
+		self.assertFalse(host_in_scope('https://launchdarkly.com/docs/private/x', in_scope, out_of_scope))
+		# sibling under the allow path is still allowed
+		self.assertTrue(host_in_scope('https://launchdarkly.com/docs/public', in_scope, out_of_scope))
+
+	def test_target_in_scope_matches_path_entry(self):
+		self.assertTrue(target_in_scope('https://launchdarkly.com/docs/x', ['launchdarkly.com/docs']))
+		self.assertFalse(target_in_scope('https://launchdarkly.com/other', ['launchdarkly.com/docs']))
+
+	def test_non_path_entries_unchanged(self):
+		# Plain host / wildcard / CIDR / IP matching must be identical with a path
+		# entry present in the list.
+		self.assertTrue(host_in_scope('https://app.acme.com/x', ['app.acme.com', 'acme.com/docs'], []))
+		self.assertTrue(host_in_scope('10.0.0.5', ['10.0.0.0/24', 'acme.com/docs'], []))
+		self.assertFalse(host_in_scope('10.0.1.5', ['10.0.0.0/24', 'acme.com/docs'], []))
