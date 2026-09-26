@@ -348,6 +348,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"workflow": _handle_workflow,
 		"shell": _handle_shell,
 		"query": _handle_query,
+		"list_runners": _handle_list_runners,
 		"follow_up": _handle_follow_up,
 		"add_finding": _handle_add_finding,
 		"add_vuln_poc": _handle_add_vuln_poc,
@@ -1046,6 +1047,66 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			_context=context
 		)
 		yield Error.from_exception(e, _context=context)
+
+
+def _handle_list_runners(action: Dict, ctx: ActionContext) -> Generator:
+	"""List the workspace's runner run-history (scans/workflows/tasks), newest first.
+
+	Read-only observation tool: reads run metadata (status/targets/timing) via
+	``QueryEngine.list_runners`` — it does NOT read findings (use query_workspace for those)
+	and touches no targets, so it is auto-allowed like query. Results are surfaced to the
+	model only (marked ``ai_query_result``); nothing is persisted.
+	"""
+	from secator.ai.runner_history import filter_runners
+	context = _get_result_context(action, ctx)
+
+	runner_type = action.get("runner_type") or None
+	if runner_type:
+		runner_type = str(runner_type).strip().lower() or None
+	since = action.get("since")
+	status = action.get("status")
+	limit = action.get("limit", 50)
+	# Default to outermost runs only (a scan, not its many sub-tasks); include_children opens it up.
+	has_parent = None if action.get("include_children") else False
+
+	workspace_id = ctx.context.get("workspace_id", "")
+	engine = ctx.get_query_engine()
+	is_local = getattr(engine.backend, "name", "") == "json"
+	if not is_local and not workspace_id:
+		yield Warning(message="No workspace available to list runners", _context=context)
+		return
+
+	try:
+		runners = engine.list_runners(
+			workspace_id=workspace_id or None, runner_type=runner_type, has_parent=has_parent)
+	except Exception as e:
+		yield Error(message=f"Failed to list runners: {e}", _context=context)
+		return
+
+	summaries = filter_runners(runners, since=since, status=status, limit=limit)
+	yield Ai(
+		content=(f"{runner_type or 'runner'} history"
+		         + (f" since {since}" if since else "")
+		         + (f" status={status}" if status else "")),
+		ai_type="list_runners",
+		extra_data={"runners": summaries, "count": len(summaries),
+		            "runner_type": runner_type, "since": since, "status": status},
+		_context=context,
+	)
+	if not summaries:
+		yield Info(
+			message=("No runners found"
+			         + (f" of type {runner_type}" if runner_type else "")
+			         + (f" since {since}" if since else "")
+			         + (f" with status {status}" if status else "") + "."),
+			_context=context,
+		)
+		return
+	for row in summaries:
+		row = dict(row)
+		row.setdefault("_type", "runner")
+		row["_context"] = {**context, "ai_query_result": True}
+		yield row
 
 
 def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:

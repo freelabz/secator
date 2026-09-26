@@ -23,4 +23,6 @@ Query tags or vulnerabilities matching my host vulnweb.com:
 query_workspace(query={"_type": "tag", "match": {"regex": "vulnweb.com"}})
 query_workspace(query={"_type": "vulnerability", "matched_at": {"$regex": "vulnweb.com"}})
 </example>
+
+Use list_runners to see the workspace's RUN HISTORY — which scans/workflows/tasks have run, newest first, with status/targets/timing. Answer run-activity questions with it (e.g. "which scans ran in the last 24h?" -> list_runners(runner_type="scan", since="24h")). It is separate from query_workspace: list_runners shows the runs, query_workspace shows the findings those runs produced.
 </queries>
