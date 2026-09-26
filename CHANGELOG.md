@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.45.1](https://github.com/freelabz/secator/compare/v0.45.0...v0.45.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **ai:** AI feature robustness — runner keying, isolation race, local-model completion, local-driver PoC, steer consume ([#1435](https://github.com/freelabz/secator/issues/1435)) ([d373433](https://github.com/freelabz/secator/commit/d3734331cc4419a8856f0157a951519477f2a22d))
+* **celery:** default redis result-backend health check to off (chord PubSubError) ([#1438](https://github.com/freelabz/secator/issues/1438)) ([533348b](https://github.com/freelabz/secator/commit/533348b70279736a5a380ca0c5dccf60b2f82fe1))
+* **runner:** don't cascade workflow/scan description onto child tasks ([#1436](https://github.com/freelabz/secator/issues/1436)) ([88b9208](https://github.com/freelabz/secator/commit/88b9208bc825e9090238ad46858719b6ea2e7eef))
+
 ## [0.45.0](https://github.com/freelabz/secator/compare/v0.44.0...v0.45.0) (2026-09-24)
 
 
