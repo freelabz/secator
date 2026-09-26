@@ -358,6 +358,13 @@ class TestScopeInPrompt(unittest.TestCase):
 		self.assertIn("Out-of-scope", section)
 		self.assertIn("b.example.com", section)
 
+	def test_in_scope_prefers_hostname_wording(self):
+		"""The in-scope guidance proactively tells the model to use the hostname, not its
+		resolved IP, up front (not only reactively after a deny)."""
+		section = build_scope_section(in_scope=["scanme.nmap.org"])
+		self.assertIn("hostname", section)
+		self.assertIn("not its resolved IP", section)
+
 
 if __name__ == '__main__':
 	unittest.main()
