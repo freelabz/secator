@@ -94,5 +94,51 @@ class TestIsolatedShellRouting(unittest.TestCase):
 		self.assertTrue(any(isinstance(r, Ai) and r.ai_type == "shell_output" for r in results))
 
 
+class _CP:
+	def __init__(self, rc=0, out="", err=""):
+		self.returncode, self.stdout, self.stderr = rc, out, err
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestSandboxCreateRace(unittest.TestCase):
+	"""`_ensure_sandbox_container` must survive the create race and surface real errors."""
+
+	def test_run_collision_uses_existing_container(self):
+		from secator.ai import actions as A
+		ctx = _ctx(isolated=True)
+		context = {"run_id": "r-race"}
+		# inspect: initial=false, under-lock=false, post-run-failure=true (a racer won).
+		inspects = iter(["false", "false", "true"])
+
+		def fake_run(argv, **kw):
+			if argv[:2] == ["docker", "inspect"]:
+				return _CP(0, next(inspects))
+			if argv[:2] == ["docker", "run"]:
+				return _CP(1, "", "Conflict. The container name is already in use")
+			return _CP(0)
+
+		with patch("subprocess.run", side_effect=fake_run):
+			name = A._ensure_sandbox_container(ctx, context)
+		self.assertEqual(name, A._sandbox_container_name(ctx, context))
+
+	def test_run_failure_surfaces_stderr(self):
+		from secator.ai import actions as A
+		ctx = _ctx(isolated=True)
+		context = {"run_id": "r-err"}
+		inspects = iter(["false", "false", "false"])  # never comes up
+
+		def fake_run(argv, **kw):
+			if argv[:2] == ["docker", "inspect"]:
+				return _CP(0, next(inspects))
+			if argv[:2] == ["docker", "run"]:
+				return _CP(125, "", "docker: Error response from daemon: no space left on device")
+			return _CP(0)
+
+		with patch("subprocess.run", side_effect=fake_run):
+			with self.assertRaises(RuntimeError) as cm:
+				A._ensure_sandbox_container(ctx, context)
+		self.assertIn("no space left on device", str(cm.exception))
+
+
 if __name__ == '__main__':
 	unittest.main()
