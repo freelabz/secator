@@ -795,9 +795,22 @@ def call_llm(
 	# Initialize litellm once (avoids callback accumulation)
 	init_llm(api_key=api_key)
 
+	# Strip secator-internal per-message fields before sending to the model. Each
+	# message may carry bookkeeping keys ChatHistory owns (e.g. `_token_count` /
+	# `_token_model`, its per-model token cache) — not part of the chat-completion
+	# message schema. Some providers reject them or, worse, silently return an empty
+	# response when a message has unknown keys (observed with a local model). We can't
+	# use litellm's drop_params (it only drops top-level params, not nested message
+	# sub-fields), so copy each message without the `_`-prefixed keys. The originals
+	# are untouched, so the caller's token cache / accounting keep working.
+	llm_messages = [
+		{k: v for k, v in m.items() if not str(k).startswith('_')}
+		for m in messages
+	]
+
 	kwargs = dict(
 		model=model,
-		messages=messages,
+		messages=llm_messages,
 		temperature=temperature,
 		api_base=api_base,
 	)

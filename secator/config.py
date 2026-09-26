@@ -71,13 +71,15 @@ class Celery(StrictModel):
 	result_backend: StrExpandHome = ''
 	result_backend_transport_options: str = ''
 	result_expires: int = 86400  # 1 day
-	# Interval (seconds) for the redis result-backend pubsub health check. The default 30 keeps
-	# a long-lived idle result connection alive, but under the gevent result-backend pubsub it
-	# triggers `redis.exceptions.PubSubError: A non health check response was cleaned ...` mid-chord
-	# and hangs the workflow. Set SECATOR_CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL=0 on gevent
-	# deployments to disable it (upstream of gke-admin's patch_celery.sh). See resiliency backlog
-	# for the deeper chord fix.
-	redis_backend_health_check_interval: int = 30
+	# Interval (seconds) for the redis result-backend health check; 0 disables it.
+	# MUST stay 0: Celery's redis ResultConsumer drives a single pubsub connection and
+	# issues a SUBSCRIBE/UNSUBSCRIBE on it per task result. When redis-py's health check
+	# is enabled (> 0) it reads pending responses off that same connection and raises
+	# `redis.exceptions.PubSubError: A non health check response was cleaned ...` the moment
+	# it meets an UNSUBSCRIBE confirmation instead of its PING reply — aborting the workflow
+	# mid-chord. A reaped idle result connection is already handled by result_backend_always_retry
+	# (it reconnects and retries store_result), so the health check is redundant here.
+	redis_backend_health_check_interval: int = 0
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
