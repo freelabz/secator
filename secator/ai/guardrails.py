@@ -1040,7 +1040,7 @@ class PermissionEngine:
 			# (compound `for..do..done`, unbalanced quotes, long `&&` chains). The
 			# parse-failure `ask` below returns early, so if this check lived only after
 			# it, the re-check never cleared and the guardrail loop spun `max_rounds`
-			# and then denied with NO prompt (the canary isolated spin-deny, RC1).
+			# and then denied with NO prompt (the isolated spin-deny).
 			if command.strip() in self.approved_shell_commands:
 				return PermissionResult(decision="allow", reason="shell command approved this run")
 			subcommands = _parse_subcommands(command)
@@ -1097,7 +1097,7 @@ class PermissionEngine:
 			# Don't let an injected add_finding silently mint a scope-widening target finding.
 			# Deny (fail-closed) rather than "ask": there is no add_finding prompt layer, so an
 			# "ask" here isn't surfaceable — it would just spin the prompt loop until it denies
-			# anyway. A human adds a target through the UI/mandates, not via the AI's add_finding.
+			# anyway. A human adds a target through a client/mandates, not via the AI's add_finding.
 			if action_type == "add_finding" and _is_privileged_finding_type(action):
 				ftype = str(action.get("_type", "")).strip().lower()
 				return PermissionResult(
@@ -1160,7 +1160,7 @@ class PermissionEngine:
 			for v in values_to_check:
 				if not host_in_scope(v, [], self.out_of_scope):
 					# Structured deny: machine-readable reason + the offending target so a
-					# UI/CLI can render "Target X is not in the allowed scope" and attach an action.
+					# clients/CLI can render "Target X is not in the allowed scope" and attach an action.
 					return PermissionResult(decision="deny", reason="out_of_scope", targets=[v])
 
 		# Mandate in_scope allow — checked AFTER both deny loops (config deny + the

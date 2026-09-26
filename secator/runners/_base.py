@@ -727,7 +727,7 @@ class Runner:
 
 			# Backfill store findings the live celery poll never surfaced. Tasks return topology-only
 			# now, so a fast task can finish before a throttled RUNNING update ever publishes its
-			# findings — and the `-json`/UI output that consumes this stream would otherwise be empty.
+			# findings — and the `-json`/client output that consumes this stream would otherwise be empty.
 			# Stream via the StreamView (peak memory stays flat) and skip anything already yielded
 			# during polling (self.uuids). Applies to both Command and Workflow (their yielders differ).
 			if not self.sync and not self.no_process:

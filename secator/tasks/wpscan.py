@@ -105,7 +105,7 @@ class wpscan(VulnHttp):
 	# NOT 'small': ruby + libcurl at --max-threads 50 peaks at ~335MiB RSS on a real
 	# WordPress target, and with the worker's own python processes (~240MiB) that
 	# overruns the small pool's 512MiB cgroup. The OOM kills the whole pod (PID 1
-	# included), so the task is silently redelivered until it's abandoned — prod saw
+	# included), so the task is silently redelivered until it's abandoned — observed:
 	# 10/10 wpscan tasks FAILURE, 0 SUCCESS, every attempt OOM-killed.
 	profile = 'medium'
 

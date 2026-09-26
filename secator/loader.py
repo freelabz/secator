@@ -307,7 +307,7 @@ def apply_default_drivers(drivers, mongodb_enabled):
 	the store instead of the returned results. Locally that store is the per-runner
 	``report.json`` written live by the json driver — so a bare run needs the json
 	driver active. Applied ONLY when no store backend is otherwise active: no
-	mongodb/sqlite/api driver in ``drivers`` and the mongodb addon disabled. In prod
+	mongodb/sqlite/api driver in ``drivers`` and the mongodb addon disabled. In server mode
 	(mongodb addon enabled) mongodb still wins and json is not forced.
 
 	Args:
