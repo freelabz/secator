@@ -669,10 +669,14 @@ class TestRemoteModeFlow(unittest.TestCase):
 		Simulates: write permission_request → client answers → query finds answer.
 		"""
 		mock_qe = MagicMock()
-		# Simulate: first search returns nothing (pending), second returns answered
+		# _poll_for_answer interleaves an answer-poll then a steer-poll each iteration, so
+		# the shared search mock must feed BOTH. The answer must arrive via the ANSWER poll
+		# (a `{"answer": ...}` doc without a _uuid is NOT a valid steer, so poll_steers
+		# ignores it): pending answer -> no steers -> answered.
 		mock_qe.search.side_effect = [
-			[],  # First poll: no answer yet
-			[{"answer": "allow"}],  # Second poll: answer found
+			[],  # iter 1, answer poll: no answer yet
+			[],  # iter 1, steer poll: no steers
+			[{"answer": "allow"}],  # iter 2, answer poll: answer found
 		]
 		perm_engine = PermissionEngine(_make_permission_config(), targets=["10.0.0.1"], workspace="/tmp/ws")
 
@@ -687,7 +691,7 @@ class TestRemoteModeFlow(unittest.TestCase):
 
 		self.assertIsNotNone(result)
 		self.assertEqual(result["answer"], "allow")
-		self.assertEqual(mock_qe.search.call_count, 2)
+		self.assertEqual(mock_qe.search.call_count, 3)
 
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
