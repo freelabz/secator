@@ -348,6 +348,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"workflow": _handle_workflow,
 		"shell": _handle_shell,
 		"query": _handle_query,
+		"web_search": _handle_web_search,
 		"follow_up": _handle_follow_up,
 		"add_finding": _handle_add_finding,
 		"add_vuln_poc": _handle_add_vuln_poc,
@@ -1046,6 +1047,58 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			_context=context
 		)
 		yield Error.from_exception(e, _context=context)
+
+
+def _handle_web_search(action: Dict, ctx: ActionContext) -> Generator:
+	"""Search the public web for external context (CVE write-ups, PoCs, tool docs).
+
+	Read-only and target-agnostic: it hits public search engines, not the engagement
+	targets, so it is NOT gated by target/scope guardrails (see guardrails auto-allow).
+	Results are surfaced to the model only (marked ``ai_query_result``) — they are not
+	persisted as workspace findings. Fails soft: an engine error yields a clean note,
+	never an exception that aborts the AI loop.
+	"""
+	from secator.ai.web_search import web_search, VALID_MODES
+	context = _get_result_context(action, ctx)
+
+	query = action.get("query", "")
+	if ctx.encryptor and isinstance(query, str):
+		query = _decrypt_dict({"query": query}, ctx.encryptor).get("query", query)
+	query = str(query or "").strip()
+	if not query:
+		yield Error(message="web_search requires a non-empty `query`.", _context=context)
+		return
+
+	mode = str(action.get("mode") or "answer").lower()
+	if mode not in VALID_MODES:
+		mode = "answer"
+	max_results = action.get("max_results", 5)
+	exploit_type = str(action.get("exploit_type") or "exploits").lower()
+	sort = str(action.get("sort") or "default").lower()
+
+	results, engine = web_search(
+		query, mode=mode, max_results=max_results, exploit_type=exploit_type, sort=sort)
+
+	yield Ai(
+		content=query,
+		ai_type="web_search",
+		extra_data={"results": results, "count": len(results), "mode": mode, "engine": engine},
+		_context=context,
+	)
+	if not results:
+		# Surface an explicit "no results" to the model (mode/engine included) so it can
+		# reword the query or switch mode rather than assume the tool is broken.
+		yield Info(
+			message=f"web_search ({mode} via {engine}) returned no results for {query!r}.",
+			_context=context,
+		)
+		return
+	# Surface each hit to the model as an observation-only result (like query_workspace):
+	# marked ai_query_result so the runner neither persists nor re-yields it as a finding.
+	for hit in results:
+		hit = dict(hit)
+		hit["_context"] = {**context, "ai_query_result": True}
+		yield hit
 
 
 def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
