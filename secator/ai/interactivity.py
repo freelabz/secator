@@ -196,18 +196,25 @@ class RemoteBackend(InteractivityBackend):
 			return []
 		if not results:
 			return []
-		# Oldest-first so multiple queued steers are injected in send order.
+		# Oldest-first so multiple queued steers are injected in send order. Only inject a
+		# steer we can ALSO mark consumed — i.e. one that carries a `_uuid`. Consume scopes
+		# to the fetched `_uuid`s (below), so returning content for a `_uuid`-less doc would
+		# re-serve the same pending steer on every poll and replay it as the user's answer
+		# each turn until the same-answer loop-breaker trips (the duplicated interjection).
+		# A `_uuid`-less steer is dropped once here instead of replayed forever.
 		results = sorted(results, key=lambda r: r.get("_timestamp", 0))
 		contents = []
+		uuids = []
 		for doc in results:
+			u = doc.get("_uuid")
 			content = doc.get("content") or doc.get("answer") or ""
-			if content:
+			if u and content:
 				contents.append(content)
+				uuids.append(u)
 		# Consume EXACTLY the docs we fetched (by _uuid), not the broad pending filter: a steer
 		# that arrives between the search and this update would otherwise be flipped to consumed
 		# without ever being injected (lost). Scoping to the fetched uuids also makes every
 		# backend consume the same set (MongoDB update_one vs JSON/SQLite update_many).
-		uuids = [doc.get("_uuid") for doc in results if doc.get("_uuid")]
 		try:
 			if uuids:
 				self.query_engine.update(

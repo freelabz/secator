@@ -28,6 +28,10 @@ _MAX_SUBAGENT_DEPTH = 3
 _MAX_SUBAGENTS_PER_TURN = 5
 _SUBAGENT_TURN_LOCK = threading.Lock()
 
+# Serializes isolation-container creation within a process: shells in the same run
+# share one container, and two racing to create it would collide on the name (125).
+_SANDBOX_CREATE_LOCK = threading.Lock()
+
 # Cap shell stdout before it enters AI history so a huge command can't blow up
 # the next prompt's token budget; head+tail keeps both the start and the result.
 _MAX_SHELL_OUTPUT_CHARS = 4000
@@ -464,9 +468,11 @@ def _child_run_opts(ctx: ActionContext) -> Dict:
 	return opts
 
 
-def _child_preamble(ctx: ActionContext, context: Dict) -> Tuple[Dict, Optional["Warning"]]:
-	"""Shared child-runner prelude: stamp task_chunk_id + subagent flag, then rebuild
-	persistence hooks (or return a denial).
+def _child_preamble(
+	ctx: ActionContext, context: Dict, runner_type: str = "task"
+) -> Tuple[Dict, Optional["Warning"]]:
+	"""Shared child-runner prelude: stamp the child's own chunk id + subagent flag,
+	then rebuild persistence hooks (or return a denial).
 
 	Propagates driver hooks (mongodb/api): a sync sub-runner skips the pickle path
 	that normally re-registers them, so without this its results never persist.
@@ -475,15 +481,19 @@ def _child_preamble(ctx: ActionContext, context: Dict) -> Tuple[Dict, Optional["
 	Returns ``(hooks, denial)``; if ``denial`` is non-None the caller must yield it
 	and skip the spawn.
 	"""
-	# The child gets its own fresh task_chunk_id (the mongo hook keys the child's OWN
-	# doc on it). It does NOT inherit the parent AI task's task_id: a heavy task
-	# (nmap/httpx/nuclei) dispatches ASYNC to celery, where it is tracked/awaited by
-	# its task_id — sharing the parent AI task's id collides with the parent and the
-	# async task never completes (results never flow back, the model gives up and
-	# falls back to bare shell commands). has_parent (run_opts, see _child_run_opts)
-	# already drops these children from the root runners list; explicit chunk grouping
-	# under the parent task_id needs async-aware handling and is deferred.
-	context["task_chunk_id"] = str(uuid.uuid4())
+	# Give the child its own fresh runner id so the driver hooks key its OWN doc.
+	# _get_result_context already stripped the parent's task_id/workflow_id/scan_id, so
+	# there's no parent id to collide with. A task legitimately CHUNKS, so a task child
+	# keeps a `task_chunk_id` (the mongo hook keys a task doc on `task_chunk_id` when
+	# present, else `task_id`). A workflow/scan child is a STANDALONE runner, not a chunk
+	# — key it on `{type}_id`, which BOTH the mongo hook (no chunk id -> `{type}_id`) and
+	# the api hook (`Runner.chunk` unset -> `{type}_id`) agree on, so the AI runner card
+	# points at the id the active driver actually persisted. (Stamping a `task_chunk_id`
+	# on a workflow/scan left it with no valid doc id -> `ObjectId(None)` minted a fresh
+	# doc on every update -> stuck PENDING; see #452.) has_parent (run_opts, see
+	# _child_run_opts) already drops these children from the root runners list.
+	id_key = "task_chunk_id" if runner_type == "task" else f"{runner_type}_id"
+	context[id_key] = str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
 	return _build_child_hooks_or_denial(context)
@@ -605,7 +615,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			run_opts["sync"] = False
 			run_opts["tty"] = False
 
-	hooks, denial = _child_preamble(ctx, context)
+	hooks, denial = _child_preamble(ctx, context, runner_type)
 	if denial is not None:
 		yield denial
 		return
@@ -616,10 +626,10 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		return
 
 	# Emit the action Ai item now the runner exists (on_init stamped the runner id) so
-	# the UI can render a RunnerCard; always emitted, even when silent. The child is a
-	# CHUNK, so its persisted doc `_id` is keyed on `{type}_chunk_id` (not `{type}_id`,
-	# which now points at the PARENT ai task for grouping). Prefer the chunk id; fall
-	# back to `{type}_id` then `runner.id`.
+	# the UI can render a RunnerCard; always emitted, even when silent. Use the id the
+	# driver keyed the child's doc on: a task child on its own `task_chunk_id`, a
+	# workflow/scan child on its `{type}_id` (see _child_preamble). Fall back through
+	# both, then `runner.id`.
 	runner_id = (context.get(f"{runner_type}_chunk_id")
 	             or context.get(f"{runner_type}_id", "") or runner.id)
 	yield Ai(
@@ -701,49 +711,73 @@ def _sandbox_container_name(ctx: "ActionContext", context: Dict) -> str:
 	return "sbx-" + re.sub(r"[^A-Za-z0-9_.-]", "-", key)[:48]
 
 
+def _sandbox_is_running(name: str) -> bool:
+	"""True iff a container `name` exists and is running."""
+	import subprocess
+	r = subprocess.run(
+		["docker", "inspect", "-f", "{{.State.Running}}", name], capture_output=True, text=True)
+	return r.returncode == 0 and r.stdout.strip() == "true"
+
+
 def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 	"""Lazily create the per-runner Kali sandbox container (idempotent via docker inspect).
 	Returns the container name. dockerd runs in the pod (DinD); the metadata DROP + egress policy
 	are set once in the pod's DinD entrypoint, not here."""
 	import subprocess
 	name = _sandbox_container_name(ctx, context)
-	running = subprocess.run(
-		["docker", "inspect", "-f", "{{.State.Running}}", name], capture_output=True, text=True)
-	if running.returncode == 0 and running.stdout.strip() == "true":
+	if _sandbox_is_running(name):
 		return name
-	subprocess.run(["docker", "rm", "-f", name], capture_output=True)
 	# Bind-mount the reports dir into the sandbox at the SAME path so the LLM's clone/build/run
 	# in ~/.secator/reports/<ws>/tasks/<n>/.outputs/ works (that path lives on a shared volume the
 	# worker + dind both mount; the dind bind resolves it into the nested container). Without this
 	# the model's worker-style paths 404 and it wastes a turn `mkdir -p`-ing them.
 	from secator.config import CONFIG
 	reports_dir = str(CONFIG.dirs.reports)
-	subprocess.run([
-		"docker", "run", "-d", "--name", name,
-		"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
-		"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}", "-w", "/work",
-		_SANDBOX_IMAGE, "sleep", "infinity",
-	], check=True, capture_output=True)
-	# gVisor's sandbox network is IPv4-only, but DNS returns AAAA records → every hostname op
-	# (git/curl/ssh/pip/apt) tries IPv6 first and HANGS. Prefer IPv4 in glibc via gai.conf (fixes
-	# git/curl/ssh/python); apt needs its own ForceIPv4 (libapt ignores gai.conf). Best-effort.
-	try:
-		subprocess.run(
-			["docker", "exec", name, "sh", "-c", 'printf "precedence ::ffff:0:0/96 100\\n" > /etc/gai.conf'],
-			capture_output=True, timeout=30)
-	except Exception:
-		pass
-	# Auto-install the base toolset (bare kali-rolling lacks git/curl/python; the LLM doesn't
-	# reliably self-install). Best-effort + bounded — a failure here must not break the shell path.
-	if _SANDBOX_PACKAGES.strip():
+	created = False
+	# Serialize the create: shells in the SAME run share one container, so two arriving
+	# before it exists would both `rm` + `run` the same name — the loser's `docker run`
+	# fails "name already in use" (exit 125), the intermittent "could not start isolation
+	# container". The lock covers only the fast create; the slow gai.conf/apt bootstrap
+	# runs outside it so a 5-min install never blocks a shell that just needs the box.
+	with _SANDBOX_CREATE_LOCK:
+		if not _sandbox_is_running(name):
+			subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+			run = subprocess.run([
+				"docker", "run", "-d", "--name", name,
+				"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
+				"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}", "-w", "/work",
+				_SANDBOX_IMAGE, "sleep", "infinity",
+			], capture_output=True, text=True)
+			if run.returncode != 0:
+				# A concurrent creator (another thread on this dockerd) may have won the
+				# race — if the container is up now, use it. Otherwise surface docker's
+				# real stderr, not a bare "exit status 125".
+				if _sandbox_is_running(name):
+					return name
+				err = (run.stderr or run.stdout or "").strip() or f"docker run exited {run.returncode}"
+				raise RuntimeError(err)
+			created = True
+	# Only bootstrap the container WE created (best-effort; a failure must not break the
+	# shell path — the LLM can apt-get on demand).
+	if created:
+		# gVisor's sandbox network is IPv4-only, but DNS returns AAAA records → every hostname op
+		# (git/curl/ssh/pip/apt) tries IPv6 first and HANGS. Prefer IPv4 in glibc via gai.conf (fixes
+		# git/curl/ssh/python); apt needs its own ForceIPv4 (libapt ignores gai.conf).
 		try:
 			subprocess.run(
-				["docker", "exec", name, "sh", "-c",
-				 "apt-get -o Acquire::ForceIPv4=true update -qq && "
-				 f"apt-get -o Acquire::ForceIPv4=true install -y -qq --no-install-recommends {_SANDBOX_PACKAGES}"],
-				capture_output=True, timeout=300)
+				["docker", "exec", name, "sh", "-c", 'printf "precedence ::ffff:0:0/96 100\\n" > /etc/gai.conf'],
+				capture_output=True, timeout=30)
 		except Exception:
-			pass  # tools missing → the LLM can still apt-get on demand
+			pass
+		if _SANDBOX_PACKAGES.strip():
+			try:
+				subprocess.run(
+					["docker", "exec", name, "sh", "-c",
+					 "apt-get -o Acquire::ForceIPv4=true update -qq && "
+					 f"apt-get -o Acquire::ForceIPv4=true install -y -qq --no-install-recommends {_SANDBOX_PACKAGES}"],
+					capture_output=True, timeout=300)
+			except Exception:
+				pass  # tools missing → the LLM can still apt-get on demand
 	return name
 
 
@@ -1192,8 +1226,14 @@ def _handle_add_vuln_poc(action: Dict, ctx: ActionContext) -> Generator:
 		)
 		return
 
-	# Re-fetch so the chat can render the updated VulnerabilityCard (now carrying the poc/status).
+	# Re-fetch so the chat can render the updated VulnerabilityCard, then apply the
+	# same $set to it: the json store is append-only (last-wins on read) and a tight
+	# limit can return a pre-update line, so reflect the change we just made. On the
+	# store-backed drivers the fetch is already current, so this is a no-op there.
 	updated = (engine.search(query, limit=1) or [None])[0]
+	if updated:
+		from secator.query.json import _apply_set
+		_apply_set(updated, update)
 	msg = (f"Recorded exploitation PoC on vulnerability {uuid} (marked Exploited)." if exploited
 		else f"Marked vulnerability {uuid} as a false positive (could not be exploited).")
 	yield Ai(

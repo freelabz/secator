@@ -11,7 +11,7 @@ if ADDONS_ENABLED['ai']:
 		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
 		_handle_query, _handle_add_finding, _handle_add_vuln_poc, _run_runner, _decrypt_dict,
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
-		_build_child_hooks_or_denial,
+		_build_child_hooks_or_denial, _child_preamble,
 		_MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
 		_MAX_SHELL_OUTPUT_CHARS, _truncate,
 	)
@@ -1623,7 +1623,8 @@ class TestChildContextParenting(unittest.TestCase):
 		# has_parent now rides on run_opts (single source of truth), NOT context
 		self.assertNotIn('has_parent', child)
 		# _get_result_context STRIPS the parent's runner-doc identity; _child_preamble
-		# then re-links it as a chunk (task_id=parent + own task_chunk_id) — tested below.
+		# then stamps the child's OWN id (task_chunk_id for a task, {type}_id for a
+		# workflow/scan) — tested below.
 		self.assertNotIn('task_id', child)
 		self.assertNotIn('workflow_id', child)
 		self.assertNotIn('scan_id', child)
@@ -1713,7 +1714,9 @@ class TestHandleAddVulnPoc(unittest.TestCase):
 		self.assertEqual(sset["extra_data.reason"], "rce confirmed")
 		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"]
 		self.assertEqual(len(ais), 1)
-		self.assertEqual(ais[0].extra_data.get("finding", {}).get("poc"), "# poc")
+		# The re-fetched finding reflects the $set we just applied (not a stale line).
+		self.assertEqual(ais[0].extra_data.get("finding", {}).get("poc"), "# poc\ncmd -> output")
+		self.assertEqual(ais[0].extra_data.get("finding", {}).get("status"), "EXPLOITED")
 		self.assertFalse([r for r in results if isinstance(r, Error)])
 
 	def test_add_vuln_poc_not_exploited_marks_false_positive(self):
@@ -1823,6 +1826,73 @@ class TestRunRunnerNameValidation(unittest.TestCase):
 		self.assertIn("bogus_workflow_xyz", errors[0].message)
 		self.assertIn("not found", errors[0].message)
 		self.assertNotIn("Traceback", errors[0].message)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestChildPreambleChunkId(unittest.TestCase):
+	"""An AI child's own doc key must match its runner type.
+
+	The mongo hook keys a task doc on `task_chunk_id` (falling back to `task_id`), and a
+	workflow/scan doc on `{type}_id`. A task child gets a `task_chunk_id`; a workflow/scan
+	child is a STANDALONE runner (not a chunk) and gets a `{type}_id` — both the mongo and
+	api hooks key on that, so the AI runner card points at the persisted id. (Pre-fix, a
+	workflow/scan child stamped a `task_chunk_id`, leaving it with no valid doc id — it
+	minted a fresh doc every update and stayed PENDING forever; see #452.)
+	"""
+
+	def _ctx(self):
+		# No drivers => _build_child_hooks_or_denial returns ({}, None), so the
+		# preamble runs cleanly without a mongo/api backend.
+		return ActionContext(targets=['t.com'], model='m', context={})
+
+	def test_task_child_keyed_on_task_chunk_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'task')
+		self.assertIsNone(denial)
+		self.assertIn('task_chunk_id', context)
+		self.assertNotIn('workflow_chunk_id', context)
+
+	def test_workflow_child_keyed_on_workflow_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'workflow')
+		self.assertIsNone(denial)
+		# A workflow child is a standalone runner, not a chunk.
+		self.assertIn('workflow_id', context)
+		self.assertNotIn('workflow_chunk_id', context)
+		self.assertNotIn('task_chunk_id', context)
+
+	def test_scan_child_keyed_on_scan_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'scan')
+		self.assertIsNone(denial)
+		self.assertIn('scan_id', context)
+		self.assertNotIn('scan_chunk_id', context)
+
+	def test_default_runner_type_is_task(self):
+		# _handle_shell relies on the default: a shell command persists as a `task`.
+		context = {}
+		_child_preamble(self._ctx(), context)
+		self.assertIn('task_chunk_id', context)
+
+
+class TestEnsureMongoRunIdCoercion(unittest.TestCase):
+	"""A raw-uuid runner id must coerce to an ObjectId, else `ObjectId(uuid)` raises /
+	mints a fresh doc per write. Covers task chunks + workflow/scan `{type}_id`s."""
+
+	def test_runner_ids_coerced(self):
+		try:
+			from bson import ObjectId
+			from secator.hooks.mongodb import ensure_mongo_run_id
+		except Exception as e:  # noqa: BLE001
+			self.skipTest(f'mongodb addon not available: {e}')
+		context = {
+			'workflow_id': 'not-an-objectid',
+			'scan_id': 'also-not-one',
+			'task_chunk_id': 'still-not-one',
+		}
+		ensure_mongo_run_id(context)
+		for key in ('workflow_id', 'scan_id', 'task_chunk_id'):
+			self.assertTrue(ObjectId.is_valid(context[key]), key)
 
 
 if __name__ == '__main__':
