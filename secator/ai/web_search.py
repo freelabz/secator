@@ -65,7 +65,8 @@ def _unwrap_ddg_url(href):
 		parsed = urlparse(href)
 	except ValueError:
 		return href
-	if parsed.netloc.endswith('duckduckgo.com') and parsed.path.startswith('/l/'):
+	host = parsed.netloc.lower().split(':')[0]
+	if (host == 'duckduckgo.com' or host.endswith('.duckduckgo.com')) and parsed.path.startswith('/l/'):
 		target = parse_qs(parsed.query).get('uddg', [None])[0]
 		if target:
 			return unquote(target)
