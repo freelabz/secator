@@ -31,6 +31,7 @@ depends on whether you have the `change_mode` tool:
 </mode>
 ${common}
 ${queries}
+${web}
 </constraints>
 
 ${operating_rules}

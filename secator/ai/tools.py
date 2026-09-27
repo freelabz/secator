@@ -485,7 +485,7 @@ TOOL_SCHEMAS = {
 			"description": (
 				"Fetch a single PUBLIC web page and return its readable text — use it to READ a page you "
 				"already know (a HackTricks technique, a vendor advisory, a Debian security-tracker page, a "
-				"blog post on a fresh CVE). Use web_search to FIND pages, fetch_url to read one. Only public "
+				"blog post on a fresh CVE). Only public "
 				"http(s) pages are allowed; internal/private hosts are refused."
 			),
 			"parameters": {
