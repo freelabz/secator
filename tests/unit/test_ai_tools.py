@@ -12,11 +12,10 @@ class TestToolSchemas(unittest.TestCase):
 		from secator.ai.tools import TOOL_SCHEMAS
 		self.assertIsInstance(TOOL_SCHEMAS, dict)
 
-	def test_tool_schemas_has_seven_tools(self):
+	def test_tool_schemas_expected_set(self):
 		from secator.ai.tools import TOOL_SCHEMAS
-		self.assertEqual(len(TOOL_SCHEMAS), 7)
-		expected = {"run_task", "run_workflow", "run_shell", "query_workspace", "follow_up",
-		            "add_finding", "add_vuln_poc"}
+		expected = {"run_task", "run_workflow", "run_shell", "query_workspace", "fetch_url",
+		            "follow_up", "add_finding", "add_vuln_poc"}
 		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)
 
 	def test_tool_schemas_openai_format(self):
@@ -106,7 +105,7 @@ class TestBuildToolSchemas(unittest.TestCase):
 	def test_attack_mode_returns_all_tools(self):
 		from secator.ai.tools import build_tool_schemas, TOOL_SCHEMAS
 		schemas = build_tool_schemas("attack")
-		self.assertEqual(len(schemas), 7)
+		self.assertEqual(len(schemas), len(TOOL_SCHEMAS))
 		names = {s["function"]["name"] for s in schemas}
 		self.assertEqual(names, set(TOOL_SCHEMAS.keys()))
 

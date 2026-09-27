@@ -348,6 +348,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"workflow": _handle_workflow,
 		"shell": _handle_shell,
 		"query": _handle_query,
+		"fetch_url": _handle_fetch_url,
 		"follow_up": _handle_follow_up,
 		"add_finding": _handle_add_finding,
 		"add_vuln_poc": _handle_add_vuln_poc,
@@ -1046,6 +1047,55 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			_context=context
 		)
 		yield Error.from_exception(e, _context=context)
+
+
+def _handle_fetch_url(action: Dict, ctx: ActionContext) -> Generator:
+	"""Fetch one public page and surface its readable text to the model.
+
+	Target-agnostic (reads public sources, not the engagement targets) so it is not
+	scope-gated — but the fetch is SSRF-guarded (public http(s) hosts only; internal /
+	metadata / private hosts and non-http schemes are refused) so it can't be used to reach
+	our own internal surface. Read-only: the page text is observation-only (marked
+	ai_query_result), never persisted as a finding. Fails soft.
+	"""
+	from secator.ai.fetch_url import fetch_url
+	context = _get_result_context(action, ctx)
+	url = action.get("url", "")
+	if ctx.encryptor and isinstance(url, str):
+		url = _decrypt_dict({"url": url}, ctx.encryptor).get("url", url)
+	url = str(url or "").strip()
+	if not url:
+		yield Error(message="fetch_url requires a `url`.", _context=context)
+		return
+	max_chars = action.get("max_chars", 20000)
+
+	result, error = fetch_url(url, max_chars=max_chars)
+	if error:
+		yield Error(message=f"fetch_url: {error}", _context=context)
+		return
+
+	yield Ai(
+		content=result.get("text", ""),
+		ai_type="fetch_url",
+		extra_data={
+			"url": result.get("url"),
+			"status": result.get("status"),
+			"title": result.get("title"),
+			"content_type": result.get("content_type"),
+			"truncated": result.get("truncated"),
+			"ai_query_result": True,
+		},
+		_context=context,
+	)
+	# Surface the extracted text to the model as an observation-only result.
+	yield {
+		"_type": "web_page",
+		"url": result.get("url"),
+		"status": result.get("status"),
+		"title": result.get("title"),
+		"text": result.get("text"),
+		"_context": {**context, "ai_query_result": True},
+	}
 
 
 def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:

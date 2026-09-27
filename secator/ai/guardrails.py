@@ -1090,7 +1090,7 @@ class PermissionEngine:
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
-		elif action_type in ("query", "follow_up", "add_finding", "add_vuln_poc"):
+		elif action_type in ("query", "fetch_url", "follow_up", "add_finding", "add_vuln_poc"):
 			# add_vuln_poc only $set-updates fields (poc/status/confidence/extra_data/
 			# is_false_positive) on an EXISTING vulnerability (workspace-scoped, no new/
 			# scope-widening finding), so it's safe to auto-allow alongside query/add_finding.
