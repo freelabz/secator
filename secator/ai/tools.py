@@ -9,6 +9,8 @@ TOOL_ACTION_MAP = {
 	"run_task": "task",
 	"run_workflow": "workflow",
 	"run_shell": "shell",
+	"read_file": "read_file",
+	"write_file": "write_file",
 	"query_workspace": "query",
 	"follow_up": "follow_up",
 	"add_finding": "add_finding",
@@ -218,6 +220,45 @@ TOOL_SCHEMAS = {
 					}
 				},
 				"required": ["_uuid", "exploited"]
+			}
+		}
+	},
+	"read_file": {
+		"type": "function",
+		"function": {
+			"name": "read_file",
+			"description": (
+				"Read a local file and return its text contents. Use this instead of a `cat` shell command "
+				"when you just need to read a file — the path is permission-checked explicitly (read access) "
+				"and the action reads clearly as a file read."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"path": {"type": "string", "description": "Absolute or workspace-relative path of the file to read."},
+					"max_bytes": {"type": "integer", "description": "Max bytes to read (default 200000). Larger files are truncated."}
+				},
+				"required": ["path"]
+			}
+		}
+	},
+	"write_file": {
+		"type": "function",
+		"function": {
+			"name": "write_file",
+			"description": (
+				"Write text to a local file (create or overwrite; set append=true to append). Use this instead "
+				"of a shell `tee`/redirect when you just need to write a file — the path is permission-checked "
+				"explicitly (write access) and the action reads clearly as a file write."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"path": {"type": "string", "description": "Absolute or workspace-relative path of the file to write."},
+					"content": {"type": "string", "description": "Text content to write."},
+					"append": {"type": "boolean", "description": "Append instead of overwrite (default false)."}
+				},
+				"required": ["path", "content"]
 			}
 		}
 	},
