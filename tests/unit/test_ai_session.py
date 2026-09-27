@@ -42,6 +42,28 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		])
 		self.assertEqual(history.model, "gpt-4o")
 
+	def test_subagent_docs_excluded_from_restored_history(self):
+		# A subagent (run_task name="ai") inherits the parent session_id, so its own
+		# transcript docs share the session but carry `_context.subagent`. They must NOT
+		# be folded into the parent worker's restored history (else several runners'
+		# transcripts interleave and a subagent turn becomes the tail).
+		from secator.ai.session import restore_history_from_db
+		engine = MagicMock()
+		engine.search.return_value = [
+			{"_type": "ai", "ai_type": "prompt", "content": "parent question", "_timestamp": 1},
+			{"_type": "ai", "ai_type": "prompt", "content": "## Objective sub", "_timestamp": 2,
+			 "_context": {"subagent": "Exploit X"}},
+			{"_type": "ai", "ai_type": "response", "content": "sub working", "_timestamp": 3,
+			 "_context": {"subagent": "Exploit X"}},
+			{"_type": "ai", "ai_type": "response", "content": "parent answer", "_timestamp": 4},
+		]
+		history = restore_history_from_db("s", engine)
+		# Only the parent turns survive; the last user turn is the parent's prompt.
+		self.assertEqual(history.messages, [
+			{"role": "user", "content": "parent question"},
+			{"role": "assistant", "content": "parent answer"},
+		])
+
 	def test_no_prior_docs_returns_system_only(self):
 		from secator.ai.session import restore_history_from_db
 		engine = MagicMock()
