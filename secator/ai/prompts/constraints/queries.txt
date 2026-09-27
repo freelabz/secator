@@ -23,6 +23,4 @@ Query tags or vulnerabilities matching my host vulnweb.com:
 query_workspace(query={"_type": "tag", "match": {"regex": "vulnweb.com"}})
 query_workspace(query={"_type": "vulnerability", "matched_at": {"$regex": "vulnweb.com"}})
 </example>
-
-Use fetch_url to READ a specific public page you already know the URL of — a HackTricks technique, a vendor/OS advisory, a Debian security-tracker page, a blog post about a fresh CVE. web_search FINDS pages; fetch_url READS one and returns its extracted text. Only public http(s) pages are allowed (internal/private hosts are refused), and it does not touch the engagement targets.
 </queries>

@@ -21,6 +21,7 @@ You are an autonomous penetration testing agent conducting authorized security t
 <constraints>
 ${common}
 ${queries}
+${web}
 ${findings}
 ${arsenal}
 ${follow_up}
