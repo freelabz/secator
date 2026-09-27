@@ -23,6 +23,4 @@ Query tags or vulnerabilities matching my host vulnweb.com:
 query_workspace(query={"_type": "tag", "match": {"regex": "vulnweb.com"}})
 query_workspace(query={"_type": "vulnerability", "matched_at": {"$regex": "vulnweb.com"}})
 </example>
-
-Use web_search to read the PUBLIC WEB (not the workspace) when you need external context that isn't stored locally: a CVE write-up, a PoC/exploit repo, tool documentation, a hardening note. It is separate from query_workspace (internal findings). Pick mode='answer' for a synthesized answer or links, mode='links' for raw source links, mode='exploit' to find exploit code / PoCs / offensive tools (Sploitus). web_search does NOT touch the engagement targets and is not scope-gated. Prefer query_workspace for anything already in the workspace; use web_search only for external knowledge.
 </queries>
