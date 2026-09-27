@@ -1112,6 +1112,9 @@ class PermissionEngine:
 			# through to the "Unknown action type" deny and silently break run_subagent /
 			# the bare stop() / change_mode.
 			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
+		elif action_type == "screenshot":
+			# The verb is fine; the URL is gated as a TARGET (network egress) in _extract_targets.
+			return PermissionResult(decision="allow", reason="screenshot target checked separately")
 		elif action_type in ("query", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
 			# mark_vuln_exploited / mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
 			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
@@ -1260,6 +1263,9 @@ class PermissionEngine:
 			# subagent's targets are enforced at spawn, in addition to its child actions
 			# being guardrail-checked inside its own run). Filter out file paths / non-network.
 			return [t for t in action.get("targets", []) if _is_network_target(t) and not _is_file_path(t)]
+		elif action_type == "screenshot":
+			url = action.get("url", "")
+			return [url] if url and _is_network_target(url) and not _is_file_path(url) else []
 		return []
 
 	def add_runtime_allow(self, rules: List[str]) -> None:
