@@ -59,7 +59,7 @@ SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 MODES = {
 	"attack": {
 		"system_prompt": SYSTEM_ATTACK,
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"],
+		"allowed_actions": ["task", "workflow", "screenshot", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
@@ -72,7 +72,7 @@ MODES = {
 		# "query" is required so the model can pull the workspace's existing exploit
 		# intel (the CVE's `_type:"exploit"` objects / PoC references) before trying
 		# to exploit — without it query_workspace isn't even built for this mode.
-		"allowed_actions": ["task", "workflow", "shell", "query", "add_finding", "add_vuln_poc", "stop"],
+		"allowed_actions": ["task", "workflow", "screenshot", "shell", "query", "add_finding", "add_vuln_poc", "stop"],
 		"max_iterations": 5,
 	},
 }

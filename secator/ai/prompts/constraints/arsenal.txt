@@ -41,4 +41,5 @@ run_task(name="nmap", targets=["example.com"]) # <- not broad enough
 
 </example>
 
+Use screenshot(url) to capture visual evidence of a page (a login panel, an exposed admin interface, a defaced page). It is headless and scope-checked like any other target. Prefer it over run_task(httpx, screenshot) when you just want the picture.
 </arsenal>

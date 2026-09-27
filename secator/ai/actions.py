@@ -1,6 +1,7 @@
 """Action handlers for AI task."""
 import json
 import os
+from pathlib import Path
 import re
 import threading
 import uuid
@@ -346,6 +347,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	handlers = {
 		"task": _handle_task,
 		"workflow": _handle_workflow,
+		"screenshot": _handle_screenshot,
 		"shell": _handle_shell,
 		"query": _handle_query,
 		"follow_up": _handle_follow_up,
@@ -942,6 +944,128 @@ def _validate_query_operators(node) -> Optional[str]:
 			if err:
 				return err
 	return None
+
+
+# Max screenshot bytes to embed as a data URI in the action doc (so the UI can render it
+# inline without GCS / a worker-local path). Larger screenshots return just the path.
+_MAX_SCREENSHOT_EMBED_BYTES = 1_500_000
+
+
+def _strip_gcs_hooks(hooks: Dict) -> Dict:
+	"""Return a copy of `hooks` with the GCS on_item hook removed from every runner class.
+
+	The screenshot tool needs the PNG to stay LOCAL so we can read it back and embed it —
+	the GCS driver would otherwise upload it and rewrite screenshot_path to a gs:// URI we
+	can't fetch. This disables ONLY the GCS relay for this one child run; every other
+	persistence hook (mongodb/api/sqlite) still fires, so the run is still recorded.
+	"""
+	out = {}
+	for cls, cls_hooks in (hooks or {}).items():
+		new_cls = {}
+		for hook_name, fns in (cls_hooks or {}).items():
+			new_cls[hook_name] = [
+				fn for fn in fns if getattr(fn, "__module__", "") != "secator.hooks.gcs"
+			]
+		out[cls] = new_cls
+	return out
+
+
+def _handle_screenshot(action: Dict, ctx: ActionContext) -> Generator:
+	"""Screenshot a web page (headless httpx) and surface it as visual evidence.
+
+	The URL is scope-checked as a target by the guardrail layer before this runs. The child
+	httpx run has the GCS relay hook stripped (see _strip_gcs_hooks) so the PNG stays local;
+	we then read it and embed it as a data URI on the action doc, which makes the screenshot
+	viewable regardless of whether the GCS driver is active (solves the "can't fetch a gs://
+	object back" problem). Fails soft.
+	"""
+	import base64
+	context = _get_result_context(action, ctx)
+	url = action.get("url", "")
+	if ctx.encryptor and isinstance(url, str):
+		url = ctx.encryptor.decrypt(url)
+	url = str(url or "").strip()
+	if not url:
+		yield Error(message="screenshot requires a `url`.", _context=context)
+		return
+
+	if ctx.dry_run:
+		yield Info(message=f"[DRY RUN] Would screenshot {url}", _context=context)
+		return
+
+	run_opts = {
+		**_child_run_opts(ctx),
+		"screenshot": True,
+		"print_cmd": not ctx.silent and not ctx.subagent,
+		"print_start": False,
+		"print_end": False,
+	}
+	if action.get("description"):
+		run_opts["description"] = action["description"]
+
+	hooks, denial = _child_preamble(ctx, context, "task")
+	if denial is not None:
+		yield denial
+		return
+	hooks = _strip_gcs_hooks(hooks)  # keep the PNG local so we can read + embed it
+
+	try:
+		tpl = TemplateLoader(input={'type': 'task', 'name': 'httpx'})
+		runner = Task(tpl, [url], run_opts=run_opts, hooks=hooks, context=context)
+	except Exception as e:  # noqa: BLE001
+		yield Error(message=f"screenshot: failed to start httpx: {e}", _context=context)
+		return
+
+	screenshot_path = ""
+	for item in runner:
+		# Capture the local screenshot path off the Url finding; forward findings so the
+		# run still persists + shows in history (the Url finding is a normal result).
+		if isinstance(item, OutputType) and getattr(item, "_type", "") == "url":
+			sp = getattr(item, "screenshot_path", "") or ""
+			if sp and not screenshot_path:
+				screenshot_path = sp
+
+	data_uri, embed_note = "", ""
+	if screenshot_path and Path(screenshot_path).is_file():
+		try:
+			raw = Path(screenshot_path).read_bytes()
+			if len(raw) <= _MAX_SCREENSHOT_EMBED_BYTES:
+				ext = Path(screenshot_path).suffix.lower().lstrip(".") or "png"
+				mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+				data_uri = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+			else:
+				embed_note = f" (screenshot {len(raw)} bytes — too large to embed inline)"
+		except Exception as e:  # noqa: BLE001
+			embed_note = f" (could not read screenshot: {e})"
+
+	if not screenshot_path:
+		yield Error(
+			message=(f"screenshot: no image was produced for {url}. Headless capture may be "
+			         "unavailable (needs a headless browser) or the page did not load."),
+			_context=context,
+		)
+		return
+
+	yield Ai(
+		content=f"Screenshot captured for {url}.{embed_note}",
+		ai_type="screenshot",
+		extra_data={
+			"url": url,
+			"screenshot_path": screenshot_path,
+			# Inline image for the UI — never sent to the model (Ai items aren't collected
+			# into the tool result), so the base64 can't blow the token budget.
+			"screenshot_data_uri": data_uri,
+		},
+		_context=context,
+	)
+	# Observation-only text result for the model (NOT the bytes).
+	yield {
+		"_type": "screenshot",
+		"url": url,
+		"screenshot_path": screenshot_path,
+		"captured": True,
+		"_context": {**context, "ai_query_result": True},
+	}
 
 
 def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
