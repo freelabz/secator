@@ -349,6 +349,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"shell": _handle_shell,
 		"query": _handle_query,
 		"follow_up": _handle_follow_up,
+		"update_plan": _handle_update_plan,
 		"add_finding": _handle_add_finding,
 		"add_vuln_poc": _handle_add_vuln_poc,
 		"stop": _handle_stop,
@@ -1046,6 +1047,60 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			_context=context
 		)
 		yield Error.from_exception(e, _context=context)
+
+
+_PLAN_STATUSES = ("pending", "in_progress", "done", "skipped")
+_MAX_PLAN_ITEMS = 30
+_MAX_PLAN_TEXT = 300
+
+
+def _handle_update_plan(action: Dict, ctx: ActionContext) -> Generator:
+	"""Maintain a user-visible to-do list for a multi-step task.
+
+	Each call REPLACES the whole plan (the model sends the full ordered list); the latest
+	Ai(ai_type="plan") doc is the current plan the UI renders. Read-only wrt the workspace
+	(no findings, no targets) — auto-allowed. Normalizes/validates items so a malformed status
+	or a giant list can't break the renderer.
+	"""
+	context = _get_result_context(action, ctx)
+	items = action.get("items", [])
+	if isinstance(items, str):
+		try:
+			items = json.loads(items)
+		except (json.JSONDecodeError, TypeError):
+			items = None
+	if not isinstance(items, list) or not items:
+		yield Error(message="update_plan requires a non-empty `items` list of {text, status}.", _context=context)
+		return
+
+	norm = []
+	for raw in items[:_MAX_PLAN_ITEMS]:
+		if isinstance(raw, str):
+			raw = {"text": raw}
+		if not isinstance(raw, dict):
+			continue
+		text = str(raw.get("text") or "").strip()
+		if not text:
+			continue
+		if ctx.encryptor:
+			text = _decrypt_dict({"text": text}, ctx.encryptor).get("text", text)
+		status = str(raw.get("status") or "pending").strip().lower()
+		if status not in _PLAN_STATUSES:
+			status = "pending"
+		norm.append({"text": text[:_MAX_PLAN_TEXT], "status": status})
+	if not norm:
+		yield Error(message="update_plan: no valid items (each needs a non-empty `text`).", _context=context)
+		return
+
+	done = sum(1 for i in norm if i["status"] in ("done", "skipped"))
+	total = len(norm)
+	current = next((i["text"] for i in norm if i["status"] == "in_progress"), "")
+	yield Ai(
+		content=current or f"{done}/{total} steps done",
+		ai_type="plan",
+		extra_data={"items": norm, "done": done, "total": total},
+		_context=context,
+	)
 
 
 def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
