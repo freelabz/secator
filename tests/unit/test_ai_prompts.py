@@ -310,7 +310,7 @@ class TestPrompts(unittest.TestCase):
 		# self-escalate — it is withheld from a user-PINNED chat in build_tool_schemas (see
 		# test_ai_tools.test_change_mode_gated_by_pin), so read-only stays read-only. Nothing
 		# else here acts on the world or the data.
-		self.assertEqual(set(actions), {"query", "subagent", "change_mode", "stop"})
+		self.assertEqual(set(actions), {"query", "update_plan", "subagent", "change_mode", "stop"})
 		for a in ["shell", "task", "workflow", "add_finding", "update_finding",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:
 			self.assertNotIn(a, actions)
