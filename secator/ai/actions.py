@@ -1,6 +1,7 @@
 """Action handlers for AI task."""
 import json
 import os
+from pathlib import Path
 import re
 import threading
 import uuid
@@ -304,8 +305,14 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 		# Handle path prompts. Isolation is resolved by the engine (isolated path asks never
 		# reach here), so this is purely the interactive/remote approval path.
 		if result.paths:
-			cmd = action.get("command", "")
-			path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
+			action_t = action.get("action", "")
+			if action_t in ("read_file", "write_file"):
+				# File tools carry the access in the verb; the path is action["path"].
+				access = "write" if action_t == "write_file" else "read"
+				path_access_map = {p: access for p in result.paths}
+			else:
+				cmd = action.get("command", "")
+				path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
 			for path in result.paths:
 				access_type = path_access_map.get(path, "read")
 				denial = yield from _ask_and_check(
@@ -347,6 +354,8 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"task": _handle_task,
 		"workflow": _handle_workflow,
 		"shell": _handle_shell,
+		"read_file": _handle_read_file,
+		"write_file": _handle_write_file,
 		"query": _handle_query,
 		"follow_up": _handle_follow_up,
 		"add_finding": _handle_add_finding,
@@ -942,6 +951,120 @@ def _validate_query_operators(node) -> Optional[str]:
 			if err:
 				return err
 	return None
+
+
+# Cap read_file output so a huge file can't blow the token budget / a doc size limit.
+_MAX_READ_FILE_BYTES = 200_000
+
+
+def _file_isolated_exec(ctx: "ActionContext", context: Dict, command: str):
+	"""Run a small file command inside the run's sandbox container and return (rc, stdout, stderr).
+	Used by read_file/write_file under --isolated so they see the SAME filesystem as isolated
+	run_shell (the container), not the worker fs."""
+	import subprocess
+	name = _ensure_sandbox_container(ctx, context)
+	wrapped = _wrap_docker_exec(name, command)
+	r = subprocess.run(wrapped, shell=True, capture_output=True, text=True, timeout=120)
+	return r.returncode, r.stdout, r.stderr
+
+
+def _handle_read_file(action: Dict, ctx: ActionContext) -> Generator:
+	"""Read a local file and surface its text to the model.
+
+	The path is permission-checked (read access) by the guardrail layer before this runs.
+	Under --isolated the read happens inside the sandbox container (same fs as isolated shell).
+	"""
+	context = _get_result_context(action, ctx)
+	path = action.get("path", "")
+	if ctx.encryptor and isinstance(path, str):
+		path = _decrypt_dict({"path": path}, ctx.encryptor).get("path", path)
+	path = str(path or "").strip()
+	if not path:
+		yield Error(message="read_file requires a `path`.", _context=context)
+		return
+	try:
+		max_bytes = int(action.get("max_bytes") or _MAX_READ_FILE_BYTES)
+	except (TypeError, ValueError):
+		max_bytes = _MAX_READ_FILE_BYTES
+	max_bytes = max(1, min(max_bytes, _MAX_READ_FILE_BYTES))
+
+	try:
+		if ctx.isolated:
+			rc, out, err = _file_isolated_exec(ctx, context, f'cat -- "{path}"')
+			if rc != 0:
+				yield Error(message=f"read_file failed: {err.strip() or out.strip() or f'exit {rc}'}", _context=context)
+				return
+			content, truncated = out[:max_bytes], len(out.encode('utf-8', 'replace')) > max_bytes
+		else:
+			p = Path(path)
+			if not p.is_file():
+				yield Error(message=f"read_file: no such file: {path}", _context=context)
+				return
+			raw = p.read_bytes()
+			truncated = len(raw) > max_bytes
+			content = raw[:max_bytes].decode('utf-8', 'replace')
+	except Exception as e:  # noqa: BLE001 - a fs/permission error is data for the model, not a crash
+		yield Error(message=f"read_file failed: {e}", _context=context)
+		return
+
+	if truncated:
+		content += f"\n... [truncated at {max_bytes} bytes]"
+	yield Ai(
+		content=content,
+		ai_type="read_file",
+		extra_data={"path": path, "bytes": len(content), "truncated": truncated, "isolated": ctx.isolated},
+		_context=context,
+	)
+
+
+def _handle_write_file(action: Dict, ctx: ActionContext) -> Generator:
+	"""Write text to a local file (create/overwrite, or append).
+
+	The path is permission-checked (write access) by the guardrail layer before this runs.
+	Under --isolated the write happens inside the sandbox container.
+	"""
+	context = _get_result_context(action, ctx)
+	path = action.get("path", "")
+	content = action.get("content", "")
+	if ctx.encryptor:
+		dec = _decrypt_dict({"path": path, "content": content}, ctx.encryptor)
+		path, content = dec.get("path", path), dec.get("content", content)
+	path = str(path or "").strip()
+	if not path:
+		yield Error(message="write_file requires a `path`.", _context=context)
+		return
+	if content is None:
+		content = ""
+	if not isinstance(content, str):
+		content = str(content)
+	append = bool(action.get("append"))
+
+	try:
+		if ctx.isolated:
+			import base64 as _b64
+			b64 = _b64.b64encode(content.encode('utf-8')).decode()
+			redir = ">>" if append else ">"
+			cmd = f'mkdir -p "$(dirname -- "{path}")" && echo {b64} | base64 -d {redir} "{path}"'
+			rc, out, err = _file_isolated_exec(ctx, context, cmd)
+			if rc != 0:
+				yield Error(message=f"write_file failed: {err.strip() or out.strip() or f'exit {rc}'}", _context=context)
+				return
+		else:
+			p = Path(path)
+			p.parent.mkdir(parents=True, exist_ok=True)
+			with open(p, 'a' if append else 'w', encoding='utf-8') as f:
+				f.write(content)
+	except Exception as e:  # noqa: BLE001 - fs/permission error is data for the model
+		yield Error(message=f"write_file failed: {e}", _context=context)
+		return
+
+	verb = "Appended to" if append else "Wrote"
+	yield Ai(
+		content=f"{verb} {path} ({len(content)} bytes).",
+		ai_type="write_file",
+		extra_data={"path": path, "bytes": len(content), "append": append, "isolated": ctx.isolated},
+		_context=context,
+	)
 
 
 def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
