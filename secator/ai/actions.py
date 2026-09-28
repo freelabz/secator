@@ -515,8 +515,17 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	opts = _sanitize_child_opts(action.get("opts", {}))
 	context = _get_result_context(action, ctx)
 
+	# A subagent is an `ai` task spawned by another `ai` task. It gets its OWN
+	# conversation id (below) so its transcript is a separate conversation, surfaced in
+	# the parent as a single "Ran subagent" card rather than folded/duplicated into the
+	# parent's turns.
+	is_ai_subagent = runner_type == "task" and name.lower() == "ai"
+	parent_session = context.get("session_id")  # the card belongs to THIS (parent) conversation
+	subagent_label = ""
+	sub_session = None
+
 	# Force subagent flags when spawning an AI task from a parent AI task
-	if runner_type == "task" and name.lower() == "ai":
+	if is_ai_subagent:
 		# Bound recursive fan-out before constructing/running the child
 		denial = _guard_subagent_fanout(ctx, context)
 		if denial is not None:
@@ -540,6 +549,15 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		# scope so it doesn't re-run work already done.
 		_objective = opts.get("prompt", "")
 		opts["prompt"] = build_subagent_prompt(_objective, targets, _gather_subagent_evidence(ctx, targets))
+		# Give the subagent its OWN conversation id: its transcript (prompt/responses/tool
+		# calls) and its own child runners persist under this id, keeping the parent
+		# conversation clean. The parent link is preserved for correlation, and the card
+		# emitted below (under the PARENT session) carries this id so a client can open the
+		# subagent's transcript.
+		subagent_label = action.get("description") or _objective
+		sub_session = str(uuid.uuid4())
+		context["parent_session_id"] = parent_session
+		context["session_id"] = sub_session
 
 	# defense in depth: a spawned runner is never dangerous (CLI --dangerous unaffected)
 	opts["dangerous"] = False
@@ -634,19 +652,37 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	# both, then `runner.id`.
 	runner_id = (context.get(f"{runner_type}_chunk_id")
 	             or context.get(f"{runner_type}_id", "") or runner.id)
+	extra_data = {
+		"targets": targets,
+		# Never persist transport credentials into the (DB-stored, client-rendered) action item.
+		"opts": {k: v for k, v in opts.items() if k not in ("api_key", "api_base")},
+		"runner_id": runner_id,
+		"runner_type": runner_type,
+		# LLM-supplied human-readable description, rendered in the AI chat row.
+		"description": action.get("description", ""),
+	}
+	# A subagent card lives in the PARENT conversation and links to the subagent's own
+	# conversation (its transcript). Tag it so clients render a "Ran subagent <desc>" row
+	# that opens `subagent_session_id`, and pin its _context to the parent session (the
+	# runner itself already carries the sub-session in `context`). CRUCIAL: strip the
+	# `_context.subagent` MARKER — that flag means "this doc is subagent-INTERNAL" and is
+	# what restore/UI use to keep subagent chatter out of a conversation. The card is the
+	# parent's record of the spawn, NOT internal, so it must not carry it (a nested
+	# subagent's context DOES set it — `_child_preamble` — which would otherwise drop the
+	# card from the very conversation it belongs to). The label rides on extra_data.subagent.
+	card_context = context
+	if is_ai_subagent:
+		extra_data["subagent"] = subagent_label
+		extra_data["subagent_session_id"] = sub_session
+		card_context = {
+			**{k: v for k, v in context.items() if k != "subagent"},
+			"session_id": parent_session,
+		}
 	yield Ai(
 		content=name,
 		ai_type=runner_type,
-		extra_data={
-			"targets": targets,
-			# Never persist transport credentials into the (DB-stored, client-rendered) action item.
-			"opts": {k: v for k, v in opts.items() if k not in ("api_key", "api_base")},
-			"runner_id": runner_id,
-			"runner_type": runner_type,
-			# LLM-supplied human-readable description, rendered in the AI chat row.
-			"description": action.get("description", ""),
-		},
-		_context=context,
+		extra_data=extra_data,
+		_context=card_context,
 	)
 
 	yield from runner

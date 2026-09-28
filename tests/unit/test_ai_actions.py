@@ -804,6 +804,60 @@ class TestRunRunner(unittest.TestCase):
 		ro = mock_task_cls.call_args[1].get('run_opts', {})
 		self.assertEqual(ro.get('model'), 'explicit/model')
 
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_subagent_gets_own_session_and_parent_card(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""A subagent runs under its OWN conversation id (parent link preserved), while the
+		'Ran subagent' card stays in the PARENT conversation and links to the sub-session."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t'], model='m', session_id='parent-sess',
+							context={'workspace_id': 'ws1', 'session_id': 'parent-sess', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'],
+					  'opts': {'prompt': 'obj'}, 'description': 'Exploit Y'}
+			results = list(_run_runner(action, ctx, 'task'))
+		# The subagent RUNNER runs under a fresh session id, with the parent link kept.
+		runner_ctx = mock_task_cls.call_args[1].get('context', {})
+		self.assertNotEqual(runner_ctx.get('session_id'), 'parent-sess')
+		self.assertTrue(runner_ctx.get('session_id'))
+		self.assertEqual(runner_ctx.get('parent_session_id'), 'parent-sess')
+		# The emitted card belongs to the PARENT conversation and links to the sub-session.
+		card = next(r for r in results if getattr(r, 'ai_type', None) == 'task')
+		self.assertEqual(card._context.get('session_id'), 'parent-sess')
+		self.assertEqual(card.extra_data.get('subagent'), 'Exploit Y')
+		self.assertEqual(card.extra_data.get('subagent_session_id'), runner_ctx.get('session_id'))
+		# The card is the PARENT's record of the spawn, NOT subagent-internal, so it must
+		# NOT carry the `_context.subagent` marker (else restore/UI filters would drop it).
+		self.assertNotIn('subagent', card._context)
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_nested_subagent_card_not_marked_subagent(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""A subagent spawning a sub-subagent: _child_preamble stamps `_context.subagent`
+		on the nested context, but the CARD must still drop it (else it'd be filtered out of
+		the spawning subagent's own transcript)."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		# ctx.subagent=True + a subagent marker on the context => _child_preamble stamps it.
+		ctx = ActionContext(targets=['t'], model='m', session_id='sub1', subagent=True,
+							context={'workspace_id': 'ws1', 'session_id': 'sub1',
+									 'subagent': 'parent objective', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'], 'opts': {'prompt': 'deeper'}}
+			results = list(_run_runner(action, ctx, 'task'))
+		card = next(r for r in results if getattr(r, 'ai_type', None) == 'task')
+		self.assertEqual(card._context.get('session_id'), 'sub1')       # card in the spawning convo
+		self.assertNotIn('subagent', card._context)                    # but NOT marked internal
+		# The nested runner itself still runs as a subagent under its own session.
+		runner_ctx = mock_task_cls.call_args[1].get('context', {})
+		self.assertNotEqual(runner_ctx.get('session_id'), 'sub1')
+		self.assertEqual(runner_ctx.get('subagent'), 'parent objective')
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestSanitizeChildOpts(unittest.TestCase):

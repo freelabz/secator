@@ -266,6 +266,16 @@ def restore_history_from_db(session_id, query_engine, model=None, encryptor=None
 		return history
 
 	docs = sorted(docs or [], key=lambda d: d.get('_timestamp', 0))
+	# Drop subagent transcript docs. A subagent (run_task name="ai") inherits the
+	# parent's session_id so its runners persist into the same workspace and stay
+	# correlated to the conversation — but its OWN `_type:"ai"` turns (its objective
+	# prompt, its responses + tool calls) must NOT be folded into the PARENT worker's
+	# restored history: doing so interleaves several runners' transcripts (mismatched
+	# tool_call/tool_result pairs, a large token blow-up) and leaves a subagent turn as
+	# the tail, which defeats the caller's prompt-dedup guard and re-emits the prompt.
+	# The parent conversation is the session's NON-subagent docs; a subagent runs fresh
+	# (interactive=False) and never restores, so this only ever cleans the parent.
+	docs = [d for d in docs if not (d.get('_context') or {}).get('subagent')]
 	legacy = []  # docs without a raw message (pre-upgrade) -> text-only fallback
 	for doc in docs:
 		msg = doc.get('message')
