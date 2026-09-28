@@ -3,6 +3,8 @@
 import json
 
 from secator.ai.prompts import get_mode_config
+from secator.output_types import Warning
+from secator.rich import console
 
 # Map tool names to action types used by existing action handlers
 TOOL_ACTION_MAP = {
@@ -15,6 +17,73 @@ TOOL_ACTION_MAP = {
 	"add_vuln_poc": "add_vuln_poc",
 	"stop": "stop",
 }
+
+# --- Dynamic (autoloaded) tools -------------------------------------------------
+# Custom AI tools dropped into CONFIG.dirs.templates (a *.py exporting AI_TOOL / AI_TOOLS)
+# are autoloaded at startup by secator.loader.discover_ai_tools() and registered here, the
+# same way external tasks/drivers/exporters are. Registered tools are indistinguishable from
+# built-ins to build_tool_schemas / tool_call_to_action; dispatch_action reads DYNAMIC_HANDLERS
+# and the guardrail auto-allows DYNAMIC_ACTION_TYPES.
+#
+# SECURITY: dynamic tools are the SAFE auto-allow class ONLY — like query/add_finding, they run
+# without target/path network gating. A dynamic tool must therefore have no target/path side
+# effects (no scanning/egress against a target, no arbitrary filesystem writes). Anything that
+# touches a target belongs in a task/workflow (which IS scope-gated), not a dynamic tool.
+DYNAMIC_HANDLERS = {}       # action_type -> handler(action, ctx) generator
+DYNAMIC_ACTION_TYPES = set()  # action types the guardrail auto-allows
+DYNAMIC_TOOL_NAMES = set()  # tool names registered dynamically (for reset/introspection)
+
+
+def register_ai_tool(spec: dict) -> bool:
+	"""Register one dynamic AI tool from a spec dict. Returns True if registered.
+
+	Spec keys: name (str, required), handler (callable(action, ctx) -> generator, required),
+	description (str), parameters (OpenAI JSON-schema object), modes (list of mode names,
+	default: every mode), action_type (str, default: name). Idempotent and fail-safe: a bad
+	spec or a name that clashes with an existing tool is skipped with a warning, never raised.
+	"""
+	from secator.ai.prompts import MODES
+	name = spec.get("name")
+	handler = spec.get("handler")
+	if not isinstance(name, str) or not name.strip():
+		console.print(Warning(message="Skipping dynamic AI tool: missing/invalid 'name'."))
+		return False
+	name = name.strip()
+	if not callable(handler):
+		console.print(Warning(message=f"Skipping dynamic AI tool '{name}': 'handler' is not callable."))
+		return False
+	if name in TOOL_SCHEMAS and name not in DYNAMIC_TOOL_NAMES:
+		console.print(Warning(message=f"Skipping dynamic AI tool '{name}': name clashes with a built-in tool."))
+		return False
+	if name in DYNAMIC_TOOL_NAMES:
+		return True  # already registered this run (idempotent)
+
+	action_type = str(spec.get("action_type") or name).strip()
+	parameters = spec.get("parameters")
+	if not isinstance(parameters, dict):
+		parameters = {"type": "object", "properties": {}}
+	modes = spec.get("modes")
+	if not isinstance(modes, (list, tuple)) or not modes:
+		modes = list(MODES.keys())
+
+	TOOL_SCHEMAS[name] = {
+		"type": "function",
+		"function": {
+			"name": name,
+			"description": str(spec.get("description") or ""),
+			"parameters": parameters,
+		},
+	}
+	TOOL_ACTION_MAP[name] = action_type
+	DYNAMIC_HANDLERS[action_type] = handler
+	DYNAMIC_ACTION_TYPES.add(action_type)
+	DYNAMIC_TOOL_NAMES.add(name)
+	for mode in modes:
+		cfg = MODES.get(mode)
+		if cfg is not None and action_type not in cfg["allowed_actions"]:
+			cfg["allowed_actions"].append(action_type)
+	return True
+
 
 # Shared "targets" parameter schema (identical across run_task/run_workflow)
 _TARGETS_SCHEMA = {
@@ -255,6 +324,8 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> li
 	Returns:
 		List of OpenAI-format tool schema dicts.
 	"""
+	from secator.loader import discover_ai_tools
+	discover_ai_tools()  # autoload custom tools (cached, one-time)
 	config = get_mode_config(mode)
 	allowed_actions = config["allowed_actions"]
 	excluded = set()
