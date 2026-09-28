@@ -409,7 +409,7 @@ class ai(PythonRunner):
 		if self.run_opts.get("show_prompt", False):
 			show_mode = self.mode or "scan"
 			prompt = get_system_prompt(
-				show_mode, workspace_path=str(self.reports_folder), backend=self.backend,
+				show_mode, workspace_path=getattr(self, "ai_work_dir", None) or str(self.reports_folder), backend=self.backend,
 				in_scope=self.in_scope, out_of_scope=self.out_of_scope, is_subagent=self.is_subagent)
 			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
 			console.print(prompt, highlight=False, soft_wrap=True)
@@ -517,7 +517,7 @@ class ai(PythonRunner):
 	def _system_prompt_for(self, mode):
 		"""Compute the system prompt for ``mode`` using this runner's workspace + backend."""
 		return get_system_prompt(
-			mode, workspace_path=str(self.reports_folder), backend=self.backend,
+			mode, workspace_path=getattr(self, "ai_work_dir", None) or str(self.reports_folder), backend=self.backend,
 			in_scope=getattr(self, "in_scope", None), out_of_scope=getattr(self, "out_of_scope", None),
 			isolated=getattr(self, "isolated", False), is_subagent=getattr(self, "is_subagent", False))
 
@@ -1327,10 +1327,33 @@ class ai(PythonRunner):
 		self.encryptor = SensitiveDataEncryptor() if self.sensitive else None
 		self.has_previous_results = len(self.results) > 0
 		self.scope = "current" if self.has_previous_results else "workspace"
+		# Stable per-conversation session id. For remote (web), clients reuse it on respawn so a
+		# respawned task finds its prior docs; it arrives via self.context (authoritative — the
+		# dispatcher pops run_opts['context']). Computed HERE (before permission_engine) so the
+		# session-scoped work dir can key on it.
+		self.session_id = (
+			self.passed_context.get("session_id")
+			or (self.context or {}).get("session_id")
+			or self.session_name
+			or str(self.id)
+		)
+		# Write session_id back onto the context: every persisted item copies self.context into
+		# `_context`, so this stamps `_context.session_id` on all `_type:"ai"` docs (incl.
+		# prompt/response turns). restore_history_from_db + the remote poll key on it.
+		if self.context is not None:
+			self.context["session_id"] = self.session_id
+
+		# Session-scoped work dir: on a WORKER (prod), bind the AI's file workspace to a folder
+		# keyed by the conversation id on the shared ai_sessions volume, so files (cloned PoCs in
+		# .outputs, generated reports) SURVIVE a task timeout — the next AI task for the same
+		# conversation reuses the same folder. On local CLI the filesystem persists anyway, so we
+		# keep the per-run reports folder. See _resolve_ai_work_dir.
+		self.ai_work_dir = self._resolve_ai_work_dir()
+
 		self.permission_engine = PermissionEngine(
 			CONFIG.addons.ai.permissions,
 			targets=self.inputs,
-			workspace=self.reports_folder or "",
+			workspace=self.ai_work_dir or "",
 			in_scope=self.in_scope,
 			out_of_scope=self.out_of_scope,
 			isolated=self.isolated,
@@ -1359,22 +1382,6 @@ class ai(PythonRunner):
 		# auto and keeps re-detecting; it never congeals into the last resolved mode).
 		self.context["ai_mode_is_auto"] = self.mode_is_auto
 
-		# Create interactivity backend. For remote (web), clients reuse a stable
-		# session_id on respawn so a respawned task finds its prior docs; it arrives
-		# via self.context (authoritative — the dispatcher pops run_opts['context']).
-		self.session_id = (
-			self.passed_context.get("session_id")
-			or (self.context or {}).get("session_id")
-			or self.session_name
-			or str(self.id)
-		)
-		# Write session_id back onto the context: every persisted item copies
-		# self.context into `_context`, so this stamps `_context.session_id` on all
-		# `_type:"ai"` docs (incl. prompt/response turns yielded directly here).
-		# restore_history_from_db + the remote poll key on it, so skipping this
-		# would leave the transcript unqueryable and resume would restore nothing.
-		if self.context is not None:
-			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
 		# Let the backend wire up anything it needs for this session (e.g. a display
@@ -1396,6 +1403,30 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# Model verification
 	# -------------------------------------------------------------------------
+
+	def _resolve_ai_work_dir(self):
+		"""Return the directory the AI reads/writes files in ($workspace_path in the prompt).
+
+		Worker + a conversation id -> a persistent per-session folder on the shared ai_sessions
+		volume (survives a task timeout; the next task for the same conversation maps back to it).
+		Otherwise (local CLI) -> this run's reports folder (the filesystem persists there anyway).
+		The session id is sanitized to a single path segment so it can't escape the volume.
+		"""
+		from secator.definitions import IN_WORKER
+		from secator.utils import sanitize_folder_name
+		if not (IN_WORKER and self.session_id):
+			return str(self.reports_folder)
+		safe = sanitize_folder_name(str(self.session_id))
+		work = Path(CONFIG.dirs.ai_sessions) / safe
+		try:
+			work.mkdir(parents=True, exist_ok=True)
+		except OSError as e:
+			# Shared volume not mounted / not writable -> fall back to the per-run folder rather
+			# than crash the task. ponytail: no GC here; a reaper on the ai_sessions volume can
+			# prune stale conversation dirs later.
+			self.debug(f'ai_sessions dir unavailable ({e}); using per-run reports folder', sub='start')
+			return str(self.reports_folder)
+		return str(work)
 
 	def _verify_model(self):
 		"""Check model is configured and that model info is available; yield Error/Warning if not."""
