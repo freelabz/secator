@@ -139,3 +139,56 @@ class TestSandboxBindsSessionDir(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestPruneAiSessions(unittest.TestCase):
+	"""Session GC: remove session dirs inactive longer than the cutoff, keep fresh ones."""
+
+	def setUp(self):
+		from secator.ai.session_gc import prune_ai_sessions
+		self.prune = prune_ai_sessions
+		self.base = tempfile.mkdtemp()
+
+	def _session(self, name, age_days):
+		import os as _os
+		d = os.path.join(self.base, name)
+		os.makedirs(d, exist_ok=True)
+		f = os.path.join(d, 'poc.txt')
+		open(f, 'w').write('x')
+		old = self.time_ago(age_days)
+		_os.utime(f, (old, old))
+		_os.utime(d, (old, old))
+		return d
+
+	@staticmethod
+	def time_ago(days):
+		from time import time
+		return time() - days * 86400
+
+	def test_removes_stale_keeps_fresh(self):
+		stale = self._session('old-conv', 40)
+		fresh = self._session('new-conv', 2)
+		removed = self.prune(base=self.base, max_age_days=30)
+		self.assertIn(stale, removed)
+		self.assertFalse(os.path.exists(stale))
+		self.assertTrue(os.path.exists(fresh))
+
+	def test_dry_run_deletes_nothing(self):
+		stale = self._session('old-conv', 40)
+		removed = self.prune(base=self.base, max_age_days=30, dry_run=True)
+		self.assertIn(stale, removed)
+		self.assertTrue(os.path.exists(stale))  # still there
+
+	def test_recent_child_keeps_session(self):
+		# dir mtime old but a child was just written -> still active, keep it.
+		import os as _os
+		d = self._session('active-conv', 40)
+		newfile = os.path.join(d, 'fresh.txt')
+		open(newfile, 'w').write('y')  # fresh mtime on the child
+		removed = self.prune(base=self.base, max_age_days=30)
+		self.assertNotIn(d, removed)
+		self.assertTrue(os.path.exists(d))
+
+	def test_missing_base_is_noop(self):
+		self.assertEqual(self.prune(base=os.path.join(self.base, 'nope'), max_age_days=30), [])
