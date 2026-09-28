@@ -1,6 +1,7 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task."""
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -65,34 +66,30 @@ _CHAT_CUES = (
 	"how do", "how does", "tell me", "describe", "list the", "show me", "?",
 )
 _EXPLOIT_CUES = ("exploit", "poc", "proof of concept", "cve-", "vulnerabilit")
-# Discovery / read-only framing: a request to FIND / RANK / LIST vulns is a summarize-
-# and-STOP task, even when it mentions "exploitable vulnerabilities".
+# Discovery/read framing: FIND / RANK / LIST vulns is summarize-and-stop, even when it
+# mentions "exploitable vulnerabilities".
 _DISCOVERY_CUES = (
 	"top ", "find ", "which ", "identify", "rank", "how many", "list", "search for", "look for",
 )
-# Imperative exploit verbs: the user actually asks to DO exploitation. Note the trailing
-# space so "exploit " never matches the adjective "exploitable".
-_EXPLOIT_VERBS = (
-	"exploit ", "exploit it", "exploit the", "exploit them", "exploit these", "exploit that",
-	"pwn", "compromise", "gain a shell", "gain access", "get a shell", "pop a shell",
-	"run the exploit", "go exploit", "weaponize",
-)
+# Active-exploit intent: exploit/pwn/compromise as a VERB (word-boundary so "exploitable"
+# and "compromised" don't match).
+_ACTIVE_EXPLOIT_RE = re.compile(r'\b(?:exploit|pwn|compromise|weaponize)\b')
 
 
 def fast_detect_mode(prompt):
-	"""Cheap deterministic pre-classifier. Returns 'attack'/'chat' for
-	unambiguous prompts, else None to defer to the LLM. Exploit-ish prompts
-	return None so the LLM keeps deciding those, EXCEPT a discovery/summary request
-	that merely mentions exploit/vulns ("find the top 3 exploitable vulnerabilities")
-	— that must summarize and STOP (chat), not auto-exploit a live target."""
+	"""Cheap deterministic pre-classifier. Returns 'attack'/'chat' for unambiguous prompts,
+	else None to defer to the LLM. A discovery/summary request that only MENTIONS exploit/
+	vulns ("find the top 3 exploitable vulnerabilities") returns chat (summarize + STOP),
+	not auto-exploit; anything with active-exploit or scan intent defers."""
 	text = (prompt or "").strip().lower()
 	if not text:
 		return "chat"
 	if any(cue in text for cue in _EXPLOIT_CUES):
-		# Discovery framing without an imperative exploit verb -> chat (summarize+stop).
 		discovery = any(c in text for c in _CHAT_CUES) or any(c in text for c in _DISCOVERY_CUES)
-		imperative = any(v in text for v in _EXPLOIT_VERBS)
-		if discovery and not imperative:
+		# Active = exploit verb OR a scan/attack cue (chat mode can't run those, so a mixed
+		# "find vulns AND scan" must defer, not force chat).
+		active = bool(_ACTIVE_EXPLOIT_RE.search(text)) or any(c in text for c in _ATTACK_CUES)
+		if discovery and not active:
 			return "chat"
 		return None
 	has_attack = any(cue in text for cue in _ATTACK_CUES)

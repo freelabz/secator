@@ -659,6 +659,10 @@ class TestFastDetectMode(unittest.TestCase):
 		self.assertEqual(fast_detect_mode("find the top 3 exploitable vulnerabilities"), "chat")
 		self.assertEqual(fast_detect_mode("which CVEs are exploitable?"), "chat")
 		self.assertEqual(fast_detect_mode("list the exploitable vulnerabilities"), "chat")
+		# inflected words are NOT the imperative verb (word-boundary match)
+		self.assertEqual(fast_detect_mode("summarize how the server was compromised and list vulnerabilities"), "chat")
+		# mixed discovery + scan/active intent → defer (chat can't run task/workflow)
+		self.assertIsNone(fast_detect_mode("find vulnerabilities and scan the target"))
 		# conflicting cues → ambiguous → defer to LLM
 		self.assertIsNone(fast_detect_mode("scan and explain the results"))
 		# no cues → ambiguous → defer to LLM
