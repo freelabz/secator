@@ -169,5 +169,56 @@ class TestSessionIndex(unittest.TestCase):
 			self.assertEqual(ai_session.list_sessions(), [])
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestCrossSessionIsolation(unittest.TestCase):
+	"""#1452 security: the AI must not reach another conversation's data dir.
+	Isolated mode skips the path check, so the mount is the boundary; non-isolated mode
+	relies on the {ai_data}-scoped permission rules + path resolution (collapses ..)."""
+
+	def test_sandbox_binds_only_this_session_not_the_ai_base(self):
+		# Binding the ~/.secator/ai BASE would expose every sibling session dir inside the
+		# container. Only the specific <session> subdir may be mounted.
+		import tempfile
+		from secator.ai import actions as A
+		base = tempfile.mkdtemp()
+		data = os.path.join(base, "conv-1")
+		os.makedirs(data, exist_ok=True)
+		captured = {}
+
+		def fake_run(argv, *a, **k):
+			r = mock.Mock(); r.returncode = 0; r.stdout = ""; r.stderr = ""
+			if isinstance(argv, list) and "run" in argv and "-d" in argv:
+				captured["argv"] = argv
+			return r
+
+		ctx = A.ActionContext(targets=[], model='m', context={"ai_data_dir": data}, isolated=True)
+		with mock.patch.object(A, "_sandbox_is_running", return_value=False), 			mock.patch("subprocess.run", side_effect=fake_run):
+			A._ensure_sandbox_container(ctx, {"ai_data_dir": data})
+		argv = captured.get("argv", [])
+		vs = [argv[i + 1] for i, t in enumerate(argv) if t == "-v"]
+		self.assertIn(f"{data}:{data}", vs)                       # this session bound
+		self.assertFalse(any(v.startswith(f"{base}:") for v in vs))  # the ai base is NOT bound
+
+	def test_sibling_session_dir_not_allowed(self):
+		data = "/home/x/.secator/ai/conv-1"
+		eng = PermissionEngine(
+			{"allow": ["read({ai_data}/*,{ai_data})", "write({ai_data}/*,{ai_data})"], "deny": [], "ask": []},
+			ai_data=data)
+		self.assertNotEqual(eng._check_value("read", "/home/x/.secator/ai/conv-2/secret").decision, "allow")
+		self.assertNotEqual(eng._check_value("write", "/home/x/.secator/ai/conv-2/x").decision, "allow")
+
+	def test_traversal_resolves_out_of_data_dir(self):
+		# detect_paths_with_access resolves .. so `$data_path/../conv-2/x` can't ride the {ai_data}/* glob.
+		from secator.ai.guardrails import detect_paths_with_access
+		import tempfile
+		base = tempfile.mkdtemp()
+		data = os.path.join(base, "conv-1")
+		os.makedirs(data, exist_ok=True)
+		paths = detect_paths_with_access(f"cat {data}/../conv-2/secret")
+		resolved = [p for p, _ in paths]
+		self.assertIn(os.path.join(base, "conv-2", "secret"), resolved)   # collapsed, now outside conv-1
+		self.assertNotIn(f"{data}/../conv-2/secret", resolved)
+
+
 if __name__ == '__main__':
 	unittest.main()
