@@ -836,6 +836,33 @@ class TestRunRunner(unittest.TestCase):
 	@patch('secator.ai.actions.TemplateLoader')
 	@patch('secator.ai.actions.Task')
 	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_subagent_final_response_handed_back_to_parent(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""The parent's LLM cannot read the subagent's own transcript, so _run_runner must
+		hand back ONE clean summary (the subagent's final response + what it persisted),
+		stamped with the run_task tool_call_id, instead of the raw fragmented stream."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		sub_out = [
+			Ai(content="cloned PoC, ran it, RCE confirmed", ai_type="response", _context={"subagent": "Exploit Y"}),
+			Ai(content="", ai_type="add_vuln_poc", _context={"subagent": "Exploit Y"}),
+		]
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter(sub_out); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t'], model='m', session_id='parent-sess',
+							context={'workspace_id': 'ws1', 'session_id': 'parent-sess', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'], 'opts': {'prompt': 'obj'},
+					  'description': 'Exploit Y', 'tool_call_id': 'tc-123'}
+			results = list(_run_runner(action, ctx, 'task'))
+		handback = results[-1]
+		self.assertEqual(handback.ai_type, 'response')
+		self.assertEqual(handback._context.get('tool_call_id'), 'tc-123')   # groups as THIS tool_result
+		self.assertIn('RCE confirmed', handback.content)                    # subagent's final summary
+		self.assertIn('add_vuln_poc', handback.content)                     # persist note
+		self.assertIn('handback', handback.content.lower())
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
 	def test_nested_subagent_card_not_marked_subagent(self, mock_build_hooks, mock_task_cls, _tpl):
 		"""A subagent spawning a sub-subagent: _child_preamble stamps `_context.subagent`
 		on the nested context, but the CARD must still drop it (else it'd be filtered out of
@@ -1697,6 +1724,15 @@ class TestBuildSubagentPrompt(unittest.TestCase):
 		self.assertIn("## Already known", p)
 		self.assertIn("- Port 443 open", p)               # evidence injected
 		self.assertIn("## Expected output", p)
+		# The subagent MUST be told (imperatively) to persist via add_vuln_poc/add_finding
+		# with the _uuid — its prose is not saved and the parent can't read its transcript.
+		self.assertIn("add_vuln_poc", p)
+		self.assertIn("add_finding", p)
+		self.assertIn("_uuid", p)
+		self.assertIn("not saved", p.lower())
+		self.assertIn("HANDBACK", p)
+		# a disproved vuln is persisted too (add_vuln_poc exploited=false = false positive)
+		self.assertIn("exploited=false", p)
 
 	def test_empty_evidence_renders_none(self):
 		from secator.ai.actions import build_subagent_prompt

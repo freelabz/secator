@@ -1470,7 +1470,11 @@ class ai(PythonRunner):
 				yield result
 
 			result = result.toDict() if isinstance(result, OutputType) else result
-			collected.append(result)
+			# Subagent-internal outputs stay in the subagent's own transcript; keep them
+			# OUT of the parent's tool_result (the parent reads the clean handback instead
+			# of the child's fragmented stream). Their persistence already happened above.
+			if not is_from_subagent:
+				collected.append(result)
 			ctx.results.append(result)
 
 		yield from _yield_tool_results(self, collected)

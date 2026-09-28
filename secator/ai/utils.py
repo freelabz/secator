@@ -288,8 +288,16 @@ def build_subagent_prompt(objective: str, targets: list, evidence: str) -> str:
 		f"## Objective\n{objective.strip() or '(no explicit objective given)'}\n\n"
 		f"## Scope\nWork ONLY within these target(s): {targets_str}\n\n"
 		f"## Already known (do not re-run tools that would re-discover these)\n{evidence_block}\n\n"
-		f"## Expected output\nInvestigate the objective, then report your findings concisely. "
-		f"Persist any new findings; do not repeat work already listed under 'Already known'."
+		f"## Expected output\n"
+		f"1. Do the work needed to meet the objective, within scope.\n"
+		f"2. PERSIST your result — it's REQUIRED and is the ONLY output that survives (your prose "
+		f"is NOT saved and the parent CANNOT read your transcript). On an EXISTING vulnerability "
+		f"(`_uuid` from query_workspace), call `add_vuln_poc` with that `_uuid`: `exploited=true` "
+		f"for a working PoC, or `exploited=false` to mark it a false positive. For a NEW finding, "
+		f"call `add_finding`. You MUST persist before finishing if you confirmed OR disproved "
+		f"anything.\n"
+		f"3. Finish with a 2-4 line HANDBACK: what you did, the verdict "
+		f"(confirmed / false-positive / inconclusive), and the `_uuid`(s) you persisted."
 	)
 
 

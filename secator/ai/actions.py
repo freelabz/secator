@@ -685,7 +685,29 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		_context=card_context,
 	)
 
-	yield from runner
+	if is_ai_subagent:
+		# The subagent's outputs persist under its OWN session (its transcript), which the
+		# parent's LLM cannot read. Stream them, but ALSO capture the final response + what
+		# it persisted and hand the parent ONE clean summary as the run_task tool_result —
+		# instead of the raw, fragmented output stream it used to receive.
+		last_response = ""
+		persisted = []
+		for out in runner:
+			if isinstance(out, Ai):
+				if out.ai_type == "response" and (out.content or "").strip():
+					last_response = out.content
+				elif out.ai_type in ("add_finding", "add_vuln_poc"):
+					persisted.append(out.ai_type)
+			yield out
+		note = (f" Persisted: {', '.join(persisted)}." if persisted
+		        else " Persisted: NOTHING (subagent made no add_finding/add_vuln_poc call).")
+		handback = (last_response.strip() or "(subagent produced no summary)") + "\n[subagent handback]" + note
+		# Stamped for the PARENT conversation (card_context strips the subagent marker) and
+		# with THIS run_task's tool_call_id so it becomes the tool_result the parent reads.
+		yield Ai(content=handback, ai_type="response",
+		         _context={**card_context, "tool_call_id": action.get("tool_call_id")})
+	else:
+		yield from runner
 
 	# Auto-allow reading from the spawned runner's reports folder
 	if ctx.permission_engine and hasattr(runner, 'reports_folder') and runner.reports_folder:
