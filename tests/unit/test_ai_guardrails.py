@@ -227,6 +227,12 @@ class TestDetection(unittest.TestCase):
 		targets = extract_command_targets("nmap -sV 10.0.0.1")
 		self.assertIn("10.0.0.1", targets)
 
+	def test_decimal_fragment_not_a_target(self):
+		"""`sleep 0.5`: '0.5' is a fragment, not the IP 0.0.0.5 — it must not be extracted
+		and block the shell task (fixed at the root in canonicalize_target)."""
+		self.assertEqual(extract_command_targets("sleep 0.5"), [])
+		self.assertIn("1.2.3.4", extract_command_targets("nmap 1.2.3.4"))  # real IP still a target
+
 	def test_extract_command_targets_host(self):
 		targets = extract_command_targets("nmap example.com")
 		self.assertIn("example.com", targets)
