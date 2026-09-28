@@ -274,6 +274,9 @@ def _is_file_path(value: str) -> bool:
 
 
 _CIDR_RE = re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$')
+# A real IPv4 is a full dotted quad — used to reject abbreviated forms like "0.5"
+# (which Python's ipaddress silently expands to 0.0.0.5).
+_DOTTED_QUAD_RE = re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}$')
 # nmap/masscan-style target-list file flags: the real targets live in a file we
 # can't read at guardrail time, so scope can't be confirmed → fail closed (ask).
 _TARGET_FILE_RE = re.compile(r'(?:^|\s)(?:-iL|--target-file)(?:=|\s)')
@@ -295,7 +298,17 @@ def _is_network_target(value: str) -> bool:
 	# would be mistaken for a target. IP/CIDR/URL/host:port/FQDN all carry a marker.
 	if not any(ch in value for ch in './:'):
 		return False
-	return classify_target(value, resolve=False).type in NETWORK_TYPES
+	info = classify_target(value, resolve=False)
+	if info.type not in NETWORK_TYPES:
+		return False
+	# Reject abbreviated / non-canonical IPv4: Python's ipaddress expands "0.5"->0.0.0.5
+	# and "5.0.7"->5.0.0.7, so a decimal fragment from a command (`sleep 0.5`, `-Pn 0.5`,
+	# `--top-ports 0.5`) classifies as an IP and blocks the whole shell task. A real IPv4
+	# target is a full dotted quad; IPv6 (has ':') is left to the classifier.
+	from secator.definitions import IP
+	if info.type == IP and '.' in value and not _DOTTED_QUAD_RE.match(value):
+		return False
+	return True
 
 
 @lru_cache(maxsize=256)
@@ -350,8 +363,14 @@ def extract_command_targets(command: str) -> List[str]:
 		# Skip file paths, command names
 		if _is_file_path(arg) or arg in cmd_names:
 			return
-		# Skip file-like extensions
-		if arg.endswith(('.py', '.sh', '.txt', '.json', '.yaml', '.yml', '.xml', '.csv', '.log', '.conf', '.cfg')):
+		# Skip file-like extensions (source/doc/config/archive). Without this a token
+		# like `README.md` classifies as host `readme.md` and blocks the shell task.
+		if arg.endswith((
+			'.py', '.sh', '.txt', '.json', '.yaml', '.yml', '.xml', '.csv', '.log', '.conf', '.cfg',
+			'.md', '.rst', '.html', '.htm', '.js', '.ts', '.css', '.c', '.h', '.cpp', '.cc', '.go',
+			'.rs', '.rb', '.php', '.lua', '.pl', '.java', '.sql', '.ini', '.toml', '.env', '.lock',
+			'.pem', '.key', '.crt', '.pdf', '.zip', '.tar', '.gz', '.tgz', '.bin', '.out',
+		)):
 			return
 		# Skip args that are part of detected file paths
 		if any(arg in p for p in paths):
