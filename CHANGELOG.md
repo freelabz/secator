@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.46.0](https://github.com/freelabz/secator/compare/v0.45.1...v0.46.0) (2026-09-28)
+
+
+### Features
+
+* **ai:** give AI subagents their own conversation id ([#1448](https://github.com/freelabz/secator/issues/1448)) ([29412e6](https://github.com/freelabz/secator/commit/29412e646c610fadb0edf61f9eb8dc2277d5ac6b))
+
 ## [0.45.1](https://github.com/freelabz/secator/compare/v0.45.0...v0.45.1) (2026-09-27)
 
 
