@@ -61,6 +61,7 @@ AI_TYPES = {
 	'chat_compacted': {'label': '📦', 'color': 'orange3'},
 	'task': {'label': '🟢', 'color': 'magenta'},
 	'workflow': {'label': '🟢', 'color': 'magenta'},
+	'scan': {'label': '🟢', 'color': 'magenta'},
 	'shell': {'label': '🟢', 'color': 'magenta'},
 	'add_finding': {'label': '🟢', 'color': 'magenta'},
 	'add_vuln_poc': {'label': '💥', 'color': 'magenta'},
@@ -71,7 +72,7 @@ AI_TYPES = {
 	'steer': {'label': '[STEER]', 'color': 'cyan'},
 }
 
-ACTION_TYPES = ('task', 'workflow', 'shell', 'add_finding', 'add_vuln_poc', 'query', 'stopped')
+ACTION_TYPES = ('task', 'workflow', 'scan', 'shell', 'add_finding', 'add_vuln_poc', 'query', 'stopped')
 
 
 @dataclass
@@ -103,7 +104,7 @@ class Ai(OutputType):
 
 	def __repr__(self) -> str:
 		# Internal-only types (not displayed)
-		if self.ai_type == 'token_usage':
+		if self.ai_type in ['token_usage', 'tool_result']:
 			return ' '
 
 		# Get type configuration
