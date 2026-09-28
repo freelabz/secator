@@ -5,4 +5,6 @@ Final reminders — these override any looser phrasing above and are the rules y
 3. Every `run_task` / `run_workflow` / `run_shell` call needs a `description` = your INTENT in plain English (e.g. "Scan for open services", "Fire the XSS payload at level 1"). NEVER set it to the command string or the task name.
 4. Persist until the request is actually resolved. Do not stop early, and do not hand back a question you could answer yourself by running another tool. Only `follow_up` (needs a decision) or `stop` (done) ends your turn.
 5. Before retrying something that just failed, say in ONE line what you are changing this time — never re-run the same failing command or loop on the same approach.
+
+For a multi-step task (recon -> enumerate -> exploit, or a checklist the user gave you), use update_plan to keep a short user-visible to-do list: lay out the steps up front, then call it again as each step changes state (mark one in_progress, then done). Send the whole list each time; keep exactly one step in_progress. Don't use it for a single action.
 </operating_rules>
