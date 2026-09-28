@@ -123,7 +123,20 @@ class TestSessionIndex(unittest.TestCase):
 	"""save_history writes to the data dir; the session index backs --resume (list_sessions)."""
 
 	def _with_ai_base(self, base):
-		return mock.patch.object(CONFIG.dirs, "ai", base)
+		# NOTE: do NOT mock.patch.object(CONFIG.dirs, "ai", ...) — CONFIG.dirs is DotMap-backed and
+		# the patch restores a bogus value (the parent Config), corrupting CONFIG.dirs.ai for later
+		# tests. Save/restore by hand instead.
+		import contextlib
+
+		@contextlib.contextmanager
+		def _ctx():
+			prev = CONFIG.dirs.ai
+			CONFIG.dirs.ai = base
+			try:
+				yield
+			finally:
+				CONFIG.dirs.ai = prev
+		return _ctx()
 
 	def test_save_history_writes_to_data_dir(self):
 		data = tempfile.mkdtemp()
