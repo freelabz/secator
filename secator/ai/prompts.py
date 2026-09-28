@@ -31,10 +31,16 @@ def load_prompt(path: str) -> str:
 	Returns:
 		Prompt string with includes resolved.
 	"""
-	filepath = PROMPTS_DIR / path
-	content = filepath.read_text()
+	return _resolve_includes((PROMPTS_DIR / path).read_text())
 
-	# Resolve ${include_name} patterns that match constraints/ files
+
+def _resolve_includes(content: str) -> str:
+	"""Resolve ${include_name} patterns that match a constraints/<name>.txt file.
+
+	Shared by load_prompt() and custom-mode loading so a user-authored mode can pull
+	the same built-in ${queries}/${common}/... blocks. Unknown ${...} names are left
+	untouched (they are Template variables substituted later).
+	"""
 	common_dir = PROMPTS_DIR / "constraints"
 	available = {f.stem for f in common_dir.glob("*.txt")}
 
@@ -82,12 +88,112 @@ def get_mode_config(mode: str) -> dict:
 	"""Get full config for a mode.
 
 	Args:
-		mode: The mode name (attack, chat, exploit)
+		mode: The mode name (built-in attack/chat/exploit, or a custom auto-loaded mode)
 
 	Returns:
 		Mode configuration dict with system_prompt, allowed_actions, max_iterations
 	"""
 	return MODES.get(mode, MODES["chat"])
+
+
+# Actions a custom mode may enable — the union of the built-in modes' allowed_actions
+# (every real tool action appears in at least one built-in mode). Unknown actions in a
+# custom mode are dropped with a warning.
+# ponytail: if a future tool action is never listed in any built-in mode, add it here.
+_KNOWN_ACTIONS = {a for cfg in MODES.values() for a in cfg["allowed_actions"]}
+
+
+def _parse_frontmatter(text: str):
+	"""Split optional leading ``---`` YAML frontmatter from a mode file.
+
+	Returns ``(meta_dict, body)``. No frontmatter -> ``({}, text)``. A malformed
+	frontmatter block raises (the caller skips that mode).
+	"""
+	if not text.startswith("---"):
+		return {}, text
+	import yaml
+	# Frontmatter is the block between the first line (---) and the next --- line.
+	parts = re.split(r'(?m)^---\s*$', text, maxsplit=2)
+	# parts == ['', '<yaml>', '<body>'] for a well-formed "---\n...\n---\n<body>".
+	if len(parts) < 3:
+		return {}, text
+	meta = yaml.safe_load(parts[1]) or {}
+	if not isinstance(meta, dict):
+		raise ValueError("frontmatter is not a mapping")
+	return meta, parts[2].lstrip("\n")
+
+
+def discover_ai_modes(modes_dir=None) -> dict:
+	"""Discover custom AI modes dropped into ``<templates>/ai/modes/*.txt``.
+
+	Each ``<name>.txt`` becomes a selectable mode alongside the built-ins. The file
+	body is the system prompt (``${constraint}`` includes are resolved like built-in
+	modes); optional leading YAML frontmatter declares metadata::
+
+	    ---
+	    allowed_actions: [query, follow_up, add_finding, stop]
+	    max_iterations: 10
+	    ---
+	    You are a ... (prompt body, may use ${queries} / ${common} / ... includes)
+
+	Missing frontmatter -> inherits chat's allowed_actions + max_iterations. Unknown
+	actions are dropped (warned). Fails soft: a broken file logs a warning and is
+	skipped, never breaking startup.
+
+	Args:
+		modes_dir: Directory to scan (default ``CONFIG.dirs.templates / 'ai' / 'modes'``).
+
+	Returns:
+		dict mapping mode name -> mode config (same shape as built-in MODES entries).
+	"""
+	from secator.rich import console
+	from secator.output_types import Warning
+	if modes_dir is None:
+		from secator.config import CONFIG
+		modes_dir = Path(CONFIG.dirs.templates) / "ai" / "modes"
+	modes_dir = Path(modes_dir)
+	if not modes_dir.is_dir():
+		return {}
+
+	chat = MODES["chat"]
+	discovered = {}
+	for filepath in sorted(modes_dir.glob("*.txt")):
+		name = filepath.stem
+		try:
+			meta, body = _parse_frontmatter(filepath.read_text())
+			if not body.strip():
+				raise ValueError("empty prompt body")
+			actions = meta.get("allowed_actions", chat["allowed_actions"])
+			if not isinstance(actions, list):
+				raise ValueError("allowed_actions must be a list")
+			valid = [a for a in actions if a in _KNOWN_ACTIONS]
+			dropped = [a for a in actions if a not in _KNOWN_ACTIONS]
+			if dropped:
+				console.print(Warning(message=f"Custom AI mode {name!r}: unknown action(s) dropped: {dropped}"))
+			max_iters = meta.get("max_iterations", chat["max_iterations"])
+			discovered[name] = {
+				"system_prompt": Template(_resolve_includes(body)),
+				"allowed_actions": valid,
+				"max_iterations": int(max_iters),
+			}
+		except Exception as e:
+			console.print(Warning(message=f"Skipping invalid custom AI mode {str(filepath)!r}: {e}"))
+	return discovered
+
+
+def register_custom_modes(modes_dir=None) -> list:
+	"""Merge discovered custom modes into MODES. A custom mode whose name clashes with a
+	built-in is skipped (built-ins win) with a warning. Returns the names registered."""
+	from secator.rich import console
+	from secator.output_types import Warning
+	registered = []
+	for name, cfg in discover_ai_modes(modes_dir).items():
+		if name in MODES:
+			console.print(Warning(message=f"Custom AI mode {name!r} clashes with a built-in mode — skipping."))
+			continue
+		MODES[name] = cfg
+		registered.append(name)
+	return registered
 
 
 def _format_opt_type(opt_config: dict) -> str:
@@ -281,7 +387,9 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# $output_types_reference, so they must be substituted for all modes — derive both
 	# from FINDING_TYPES so they never drift from the registry.
 	subst = dict(query_types=build_query_types(), output_types_reference=build_output_types_reference())
-	if mode in ("attack", "exploit"):
+	# Any mode that can run tasks/workflows (built-in attack/exploit, or a custom mode that
+	# enables them) gets the tool library reference + paths substituted.
+	if {"task", "workflow"} & set(mode_config["allowed_actions"]):
 		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 		subst.update(library_reference=build_library_reference(), **path_vars)
 	result = system_prompt.safe_substitute(**subst)
@@ -373,3 +481,11 @@ def build_library_reference() -> str:
 		f"<option_formats>\n{OPTION_FORMATS}\n</option_formats>",
 	]
 	return "\n\n".join(sections)
+
+
+# Auto-load custom AI modes at import so they're selectable everywhere MODES is read
+# (get_mode_config, build_tool_schemas, the `mode` opt help). Fail-soft: never break import.
+try:
+	register_custom_modes()
+except Exception:  # noqa: BLE001 - discovery must never break importing the AI task
+	pass
