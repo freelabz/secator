@@ -735,6 +735,15 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 	# the model's worker-style paths 404 and it wastes a turn `mkdir -p`-ing them.
 	from secator.config import CONFIG
 	reports_dir = str(CONFIG.dirs.reports)
+	# Session-persistence: also bind the shared ai_sessions volume at the SAME path so an
+	# isolated shell's `cd $workspace_path/.outputs/...` (which points into a session dir when
+	# running on a worker) resolves inside the container too. Best-effort mkdir; a distinct path
+	# from reports_dir (else it's a harmless duplicate bind).
+	ai_sessions_dir = str(CONFIG.dirs.ai_sessions)
+	try:
+		os.makedirs(ai_sessions_dir, exist_ok=True)
+	except OSError:
+		pass
 	created = False
 	# Serialize the create: shells in the SAME run share one container, so two arriving
 	# before it exists would both `rm` + `run` the same name — the loser's `docker run`
@@ -747,7 +756,8 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 			run = subprocess.run([
 				"docker", "run", "-d", "--name", name,
 				"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
-				"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}", "-w", "/work",
+				"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}",
+				"-v", f"{ai_sessions_dir}:{ai_sessions_dir}", "-w", "/work",
 				_SANDBOX_IMAGE, "sleep", "infinity",
 			], capture_output=True, text=True)
 			if run.returncode != 0:
