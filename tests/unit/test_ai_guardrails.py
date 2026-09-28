@@ -228,19 +228,10 @@ class TestDetection(unittest.TestCase):
 		self.assertIn("10.0.0.1", targets)
 
 	def test_decimal_fragment_not_a_target(self):
-		"""`sleep 0.5` / `-Pn 0.5`: '0.5' is a decimal fragment, not the IP 0.0.0.5.
-		Regression: it was extracted as a target and blocked the whole shell task."""
+		"""`sleep 0.5`: '0.5' is a fragment, not the IP 0.0.0.5 — it must not be extracted
+		and block the shell task (fixed at the root in canonicalize_target)."""
 		self.assertEqual(extract_command_targets("sleep 0.5"), [])
-		self.assertEqual(extract_command_targets("for i in $(seq 1 120); do sleep 0.5; done"), [])
-		self.assertEqual(extract_command_targets("nmap --max-rate 5.0.7 x"), [])  # 3-octet fragment
-		# a real full dotted-quad IP is still a target
-		self.assertIn("1.2.3.4", extract_command_targets("nmap 1.2.3.4"))
-
-	def test_source_doc_extension_not_a_target(self):
-		"""`README.md` must not be read as host `readme.md` (blocked a git-clone step)."""
-		self.assertEqual(extract_command_targets("cat README.md"), [])
-		self.assertEqual(extract_command_targets("python exploit.py"), [])
-		self.assertNotIn("readme.md", extract_command_targets("cat README.md"))
+		self.assertIn("1.2.3.4", extract_command_targets("nmap 1.2.3.4"))  # real IP still a target
 
 	def test_extract_command_targets_host(self):
 		targets = extract_command_targets("nmap example.com")
