@@ -573,12 +573,14 @@ class ai(PythonRunner):
 		"""
 		if self.interactive == "remote":
 			return
-		save_history(self.history, self.ai_data_dir, debug_fn=self.debug)
+		data_dir = getattr(self, "ai_data_dir", None) or str(self.reports_folder)
+		save_history(self.history, data_dir, debug_fn=self.debug)
 		# Keep the local session index (~/.secator/ai/sessions.json) current so `--resume` lists it.
-		update_session_index(
-			self.session_id, self.ai_data_dir,
-			name=getattr(self, "session_name", "") or "",
-			prompt=self.prompt or "", targets=list(self.inputs or []))
+		if getattr(self, "ai_data_dir", None):
+			update_session_index(
+				getattr(self, "session_id", "") or "", self.ai_data_dir,
+				name=getattr(self, "session_name", "") or "",
+				prompt=getattr(self, "prompt", "") or "", targets=list(getattr(self, "inputs", []) or []))
 
 	# -------------------------------------------------------------------------
 	# Turn-level idempotency (remote/Celery redelivery)

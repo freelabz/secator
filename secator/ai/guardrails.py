@@ -880,6 +880,12 @@ class PermissionEngine:
 
 		for category in ("allow", "deny", "ask"):
 			for rule_str in config.get(category, []):
+				# Drop a rule that references a variable we can't fill: an empty {ai_data}/{workspace}
+				# would collapse e.g. `read({ai_data}/*)` to `read(/*)` and allow the whole filesystem.
+				if "{ai_data}" in rule_str and not self.ai_data:
+					continue
+				if "{workspace}" in rule_str and not self.workspace:
+					continue
 				resolved = self._resolve_variables(rule_str)
 				rule_type, patterns = parse_rule(resolved)
 				self.rules[category].append((rule_type, patterns))
