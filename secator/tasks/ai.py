@@ -65,16 +65,35 @@ _CHAT_CUES = (
 	"how do", "how does", "tell me", "describe", "list the", "show me", "?",
 )
 _EXPLOIT_CUES = ("exploit", "poc", "proof of concept", "cve-", "vulnerabilit")
+# Discovery / read-only framing: a request to FIND / RANK / LIST vulns is a summarize-
+# and-STOP task, even when it mentions "exploitable vulnerabilities".
+_DISCOVERY_CUES = (
+	"top ", "find ", "which ", "identify", "rank", "how many", "list", "search for", "look for",
+)
+# Imperative exploit verbs: the user actually asks to DO exploitation. Note the trailing
+# space so "exploit " never matches the adjective "exploitable".
+_EXPLOIT_VERBS = (
+	"exploit ", "exploit it", "exploit the", "exploit them", "exploit these", "exploit that",
+	"pwn", "compromise", "gain a shell", "gain access", "get a shell", "pop a shell",
+	"run the exploit", "go exploit", "weaponize",
+)
 
 
 def fast_detect_mode(prompt):
 	"""Cheap deterministic pre-classifier. Returns 'attack'/'chat' for
 	unambiguous prompts, else None to defer to the LLM. Exploit-ish prompts
-	return None so the LLM keeps deciding those (no behavior change there)."""
+	return None so the LLM keeps deciding those, EXCEPT a discovery/summary request
+	that merely mentions exploit/vulns ("find the top 3 exploitable vulnerabilities")
+	— that must summarize and STOP (chat), not auto-exploit a live target."""
 	text = (prompt or "").strip().lower()
 	if not text:
 		return "chat"
 	if any(cue in text for cue in _EXPLOIT_CUES):
+		# Discovery framing without an imperative exploit verb -> chat (summarize+stop).
+		discovery = any(c in text for c in _CHAT_CUES) or any(c in text for c in _DISCOVERY_CUES)
+		imperative = any(v in text for v in _EXPLOIT_VERBS)
+		if discovery and not imperative:
+			return "chat"
 		return None
 	has_attack = any(cue in text for cue in _ATTACK_CUES)
 	has_chat = any(cue in text for cue in _CHAT_CUES)

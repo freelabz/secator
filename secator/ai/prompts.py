@@ -72,7 +72,9 @@ MODES = {
 		# "query" is required so the model can pull the workspace's existing exploit
 		# intel (the CVE's `_type:"exploit"` objects / PoC references) before trying
 		# to exploit — without it query_workspace isn't even built for this mode.
-		"allowed_actions": ["task", "workflow", "shell", "query", "add_finding", "add_vuln_poc", "stop"],
+		# "follow_up" lets exploit mode STOP-and-ask (e.g. confirm before a state-changing
+		# action, or hand back after a PoC) instead of only running to its iteration cap.
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"],
 		"max_iterations": 5,
 	},
 }

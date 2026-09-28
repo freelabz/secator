@@ -251,8 +251,10 @@ class TestPrompts(unittest.TestCase):
 	def test_exploit_mode_config_has_correct_allowed_actions(self):
 		exploit_config = MODES["exploit"]
 		# "query" is included so the model can pull existing exploit intel before
-		# exploiting; "follow_up" is excluded (exploit runs autonomously).
-		expected_actions = ["task", "workflow", "shell", "query", "add_finding", "add_vuln_poc", "stop"]
+		# exploiting; "follow_up" is included so exploit mode can STOP-and-ask (confirm
+		# before a state-changing action / hand back after a PoC) instead of only
+		# running to its iteration cap.
+		expected_actions = ["task", "workflow", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"]
 		self.assertEqual(exploit_config["allowed_actions"], expected_actions)
 
 	def test_exploit_mode_config_has_max_iterations_5(self):
