@@ -81,5 +81,61 @@ class TestConfigHasAiSessionsDir(unittest.TestCase):
 		self.assertTrue(str(CONFIG.dirs.ai_sessions))  # non-empty, defaulted under the data dir
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSandboxBindsSessionDir(unittest.TestCase):
+	"""The isolated sandbox must mount the per-session work dir as /work (its cwd), so a bare
+	`git clone` in an isolated shell persists to the shared conversation folder — not an
+	ephemeral per-container volume. Regression for the isolated-container path."""
+
+	def _run_ensure(self, context):
+		from secator.ai import actions as A
+		captured = {}
+
+		def fake_run(argv, *a, **k):
+			# capture the `docker run ...` argv; everything else (inspect/rm) is a no-op success
+			r = mock.Mock()
+			r.returncode = 0
+			r.stdout = ""
+			r.stderr = ""
+			if isinstance(argv, list) and "run" in argv and "-d" in argv:
+				captured["argv"] = argv
+			return r
+
+		ctx = A.ActionContext(targets=[], model='m', context=context, isolated=True)
+		with mock.patch.object(A, "_sandbox_is_running", return_value=False), \
+			mock.patch("subprocess.run", side_effect=fake_run):
+			A._ensure_sandbox_container(ctx, context)
+		return captured.get("argv", [])
+
+	def _work_mount(self, argv):
+		# the value following the FIRST "-v" is the /work mount
+		for i, tok in enumerate(argv):
+			if tok == "-v":
+				return argv[i + 1]
+		return ""
+
+	def test_work_is_bound_to_session_dir(self):
+		work = tempfile.mkdtemp()
+		argv = self._run_ensure({"ai_work_dir": work, "session_id": "conv-1"})
+		self.assertEqual(self._work_mount(argv), f"{work}:/work")
+		self.assertIn("-w", argv)
+		self.assertEqual(argv[argv.index("-w") + 1], "/work")
+
+	def test_distinct_sessions_bind_distinct_dirs(self):
+		w1, w2 = tempfile.mkdtemp(), tempfile.mkdtemp()
+		self.assertNotEqual(w1, w2)
+		m1 = self._work_mount(self._run_ensure({"ai_work_dir": w1, "session_id": "a"}))
+		m2 = self._work_mount(self._run_ensure({"ai_work_dir": w2, "session_id": "b"}))
+		self.assertEqual(m1, f"{w1}:/work")
+		self.assertEqual(m2, f"{w2}:/work")
+		self.assertNotEqual(m1, m2)
+
+	def test_falls_back_to_named_volume_without_work_dir(self):
+		# No ai_work_dir (e.g. no conversation id) -> the old per-container named volume.
+		argv = self._run_ensure({"session_id": "x"})
+		self.assertRegex(self._work_mount(argv), r":/work$")
+		self.assertNotIn("/", self._work_mount(argv).split(":/work")[0])  # a volume name, not a path
+
+
 if __name__ == '__main__':
 	unittest.main()
