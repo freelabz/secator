@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.46.1](https://github.com/freelabz/secator/compare/v0.46.0...v0.46.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **ai:** a discovery/summary request must not auto-exploit a live target ([#1456](https://github.com/freelabz/secator/issues/1456)) ([3459407](https://github.com/freelabz/secator/commit/34594078abe86a17fea1920dd205fd5d9df7422e))
+* **ai:** prettify AI types render ([#1453](https://github.com/freelabz/secator/issues/1453)) ([e824e3c](https://github.com/freelabz/secator/commit/e824e3caf55de0e16748f400f829cc3d67faf1e5))
+* **ai:** subagent must persist findings + hand a clean summary back to the parent ([#1457](https://github.com/freelabz/secator/issues/1457)) ([e5ef807](https://github.com/freelabz/secator/commit/e5ef80781d576a1379b334ed1d6aebc45defcc32))
+* **trufflehog:** build the pinned release tag, not upstream HEAD ([#1459](https://github.com/freelabz/secator/issues/1459)) ([6d3be05](https://github.com/freelabz/secator/commit/6d3be05eb0dbf54eb5afde96f6c92e4e97508754))
+* **utils:** don't classify ambiguous short dotted-decimals (0.5) as IPs ([#1455](https://github.com/freelabz/secator/issues/1455)) ([fedf82c](https://github.com/freelabz/secator/commit/fedf82cb3bf3b9bb51bb59cc356340b492cb33d6))
+
 ## [0.46.0](https://github.com/freelabz/secator/compare/v0.45.1...v0.46.0) (2026-09-28)
 
 
