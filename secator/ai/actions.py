@@ -744,6 +744,17 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 		os.makedirs(ai_sessions_dir, exist_ok=True)
 	except OSError:
 		pass
+	# The container's /work (its cwd) must BE the per-session work dir, so a bare `git clone` /
+	# write in an isolated shell lands in the shared, conversation-scoped folder (persists across a
+	# task timeout + is one-per-session) — NOT an ephemeral per-container volume. Fall back to a
+	# named volume only when there is no session work dir (e.g. no conversation id).
+	work_dir = str(context.get("ai_work_dir") or "").strip()
+	if work_dir:
+		try:
+			os.makedirs(work_dir, exist_ok=True)
+		except OSError:
+			work_dir = ""
+	work_mount = f"{work_dir}:/work" if work_dir else f"{name}:/work"
 	created = False
 	# Serialize the create: shells in the SAME run share one container, so two arriving
 	# before it exists would both `rm` + `run` the same name — the loser's `docker run`
@@ -756,7 +767,7 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 			run = subprocess.run([
 				"docker", "run", "-d", "--name", name,
 				"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
-				"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}",
+				"-v", work_mount, "-v", f"{reports_dir}:{reports_dir}",
 				"-v", f"{ai_sessions_dir}:{ai_sessions_dir}", "-w", "/work",
 				_SANDBOX_IMAGE, "sleep", "infinity",
 			], capture_output=True, text=True)

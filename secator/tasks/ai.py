@@ -1074,6 +1074,11 @@ class ai(PythonRunner):
 		# conversation reuses the same folder. On local CLI the filesystem persists anyway, so we
 		# keep the per-run reports folder. See _resolve_ai_work_dir.
 		self.ai_work_dir = self._resolve_ai_work_dir()
+		# Propagate to the runner context so the isolated-sandbox path (actions.py) binds the
+		# SAME per-session dir as the container's /work — otherwise isolated shells write into an
+		# ephemeral per-container volume and the persistence is lost for isolated runs.
+		if self.context is not None:
+			self.context["ai_work_dir"] = self.ai_work_dir
 
 		self.permission_engine = PermissionEngine(
 			CONFIG.addons.ai.permissions,
