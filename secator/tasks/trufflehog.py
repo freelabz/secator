@@ -84,8 +84,13 @@ class trufflehog(Command):
     output_types = [Tag, Info]
     ignore_return_code = True
     install_version = 'v3.91.0'
+    # Clone the pinned release TAG (shallow), not the default branch. Without --branch the clone
+    # checks out upstream HEAD while the dir is named after install_version, so `go build` compiles
+    # whatever is on main that day — which breaks the source install whenever upstream HEAD doesn't
+    # compile (e.g. transient redeclaration errors in pkg/engine). Building the released tag is
+    # reproducible and matches the version the dir name and binary already claim to be.
     install_cmd = (
-        f'git clone https://github.com/trufflesecurity/trufflehog.git '
+        f'git clone --branch [install_version] --depth 1 https://github.com/trufflesecurity/trufflehog.git '
         f'{CONFIG.dirs.share}/trufflehog_[install_version] || true && '
         f'cd {CONFIG.dirs.share}/trufflehog_[install_version] && go build -o trufflehog . && '
         f'mv {CONFIG.dirs.share}/trufflehog_[install_version]/trufflehog {CONFIG.dirs.bin}'
