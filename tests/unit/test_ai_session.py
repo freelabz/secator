@@ -649,12 +649,29 @@ class TestFastDetectMode(unittest.TestCase):
 		self.assertEqual(fast_detect_mode("scan the target"), "attack")
 		self.assertEqual(fast_detect_mode("summarize the findings"), "chat")
 		self.assertEqual(fast_detect_mode(""), "chat")
-		# exploit-ish → defer to LLM (no behavior change for those)
+		# exploit-ish IMPERATIVE → defer to LLM (no behavior change for those)
 		self.assertIsNone(fast_detect_mode("write an exploit for this CVE-2024-1234"))
+		self.assertIsNone(fast_detect_mode("exploit the redis CVE"))
+		# imperative verb wins over discovery framing → still defer (may exploit)
+		self.assertIsNone(fast_detect_mode("exploit the top 3 vulnerabilities"))
+		# DISCOVERY framing that only MENTIONS exploit/vulns → chat (summarize + STOP,
+		# never auto-exploit a live target). Regression: this auto-exploited.
+		self.assertEqual(fast_detect_mode("find the top 3 exploitable vulnerabilities"), "chat")
+		self.assertEqual(fast_detect_mode("which CVEs are exploitable?"), "chat")
+		self.assertEqual(fast_detect_mode("list the exploitable vulnerabilities"), "chat")
+		# inflected words are NOT the imperative verb (word-boundary match)
+		self.assertEqual(fast_detect_mode("summarize how the server was compromised and list vulnerabilities"), "chat")
+		# mixed discovery + scan/active intent → defer (chat can't run task/workflow)
+		self.assertIsNone(fast_detect_mode("find vulnerabilities and scan the target"))
 		# conflicting cues → ambiguous → defer to LLM
 		self.assertIsNone(fast_detect_mode("scan and explain the results"))
 		# no cues → ambiguous → defer to LLM
 		self.assertIsNone(fast_detect_mode("please handle the situation"))
+
+	def test_exploit_mode_can_follow_up(self):
+		"""exploit mode must be able to STOP-and-ask (follow_up), not only run to its cap."""
+		from secator.ai.prompts import get_mode_config
+		self.assertIn("follow_up", get_mode_config("exploit")["allowed_actions"])
 
 	def _make_task(self, prompt, mode=""):
 		from secator.tasks.ai import ai

@@ -1,6 +1,7 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task."""
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -65,16 +66,31 @@ _CHAT_CUES = (
 	"how do", "how does", "tell me", "describe", "list the", "show me", "?",
 )
 _EXPLOIT_CUES = ("exploit", "poc", "proof of concept", "cve-", "vulnerabilit")
+# Discovery/read framing: FIND / RANK / LIST vulns is summarize-and-stop, even when it
+# mentions "exploitable vulnerabilities".
+_DISCOVERY_CUES = (
+	"top ", "find ", "which ", "identify", "rank", "how many", "list", "search for", "look for",
+)
+# Active-exploit intent: exploit/pwn/compromise as a VERB (word-boundary so "exploitable"
+# and "compromised" don't match).
+_ACTIVE_EXPLOIT_RE = re.compile(r'\b(?:exploit|pwn|compromise|weaponize)\b')
 
 
 def fast_detect_mode(prompt):
-	"""Cheap deterministic pre-classifier. Returns 'attack'/'chat' for
-	unambiguous prompts, else None to defer to the LLM. Exploit-ish prompts
-	return None so the LLM keeps deciding those (no behavior change there)."""
+	"""Cheap deterministic pre-classifier. Returns 'attack'/'chat' for unambiguous prompts,
+	else None to defer to the LLM. A discovery/summary request that only MENTIONS exploit/
+	vulns ("find the top 3 exploitable vulnerabilities") returns chat (summarize + STOP),
+	not auto-exploit; anything with active-exploit or scan intent defers."""
 	text = (prompt or "").strip().lower()
 	if not text:
 		return "chat"
 	if any(cue in text for cue in _EXPLOIT_CUES):
+		discovery = any(c in text for c in _CHAT_CUES) or any(c in text for c in _DISCOVERY_CUES)
+		# Active = exploit verb OR a scan/attack cue (chat mode can't run those, so a mixed
+		# "find vulns AND scan" must defer, not force chat).
+		active = bool(_ACTIVE_EXPLOIT_RE.search(text)) or any(c in text for c in _ATTACK_CUES)
+		if discovery and not active:
+			return "chat"
 		return None
 	has_attack = any(cue in text for cue in _ATTACK_CUES)
 	has_chat = any(cue in text for cue in _CHAT_CUES)
