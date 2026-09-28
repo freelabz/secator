@@ -1731,6 +1731,8 @@ class TestBuildSubagentPrompt(unittest.TestCase):
 		self.assertIn("_uuid", p)
 		self.assertIn("not saved", p.lower())
 		self.assertIn("HANDBACK", p)
+		# a disproved vuln is persisted too (add_vuln_poc exploited=false = false positive)
+		self.assertIn("exploited=false", p)
 
 	def test_empty_evidence_renders_none(self):
 		from secator.ai.actions import build_subagent_prompt
