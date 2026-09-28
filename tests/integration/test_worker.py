@@ -34,7 +34,7 @@ class TestWorker(unittest.TestCase):
 
 	def test_host_recon(self):
 		cmd = Command.execute(
-			'secator w host_recon secator.cloud -json -p 443 -tid nginx-version --nuclei',
+			'secator w host_recon secator.cloud -json -p 443 -id nginx-version --nuclei',
 			name='secator_w_host_recon',
 			process=True,
 			quiet=True,
