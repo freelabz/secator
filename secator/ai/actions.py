@@ -664,12 +664,20 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	# A subagent card lives in the PARENT conversation and links to the subagent's own
 	# conversation (its transcript). Tag it so clients render a "Ran subagent <desc>" row
 	# that opens `subagent_session_id`, and pin its _context to the parent session (the
-	# runner itself already carries the sub-session in `context`).
+	# runner itself already carries the sub-session in `context`). CRUCIAL: strip the
+	# `_context.subagent` MARKER — that flag means "this doc is subagent-INTERNAL" and is
+	# what restore/UI use to keep subagent chatter out of a conversation. The card is the
+	# parent's record of the spawn, NOT internal, so it must not carry it (a nested
+	# subagent's context DOES set it — `_child_preamble` — which would otherwise drop the
+	# card from the very conversation it belongs to). The label rides on extra_data.subagent.
 	card_context = context
 	if is_ai_subagent:
 		extra_data["subagent"] = subagent_label
 		extra_data["subagent_session_id"] = sub_session
-		card_context = {**context, "session_id": parent_session}
+		card_context = {
+			**{k: v for k, v in context.items() if k != "subagent"},
+			"session_id": parent_session,
+		}
 	yield Ai(
 		content=name,
 		ai_type=runner_type,
