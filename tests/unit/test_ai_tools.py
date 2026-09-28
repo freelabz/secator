@@ -121,13 +121,13 @@ class TestBuildToolSchemas(unittest.TestCase):
 		self.assertIn("add_finding", names)
 		self.assertIn("run_shell", names)
 
-	def test_exploit_mode_excludes_follow_up_but_includes_query(self):
+	def test_exploit_mode_includes_follow_up_and_query(self):
 		from secator.ai.tools import build_tool_schemas
 		schemas = build_tool_schemas("exploit")
 		names = {s["function"]["name"] for s in schemas}
-		self.assertNotIn("follow_up", names)  # exploit runs autonomously
-		# query_workspace IS available in exploit mode so the model can read the
-		# workspace's existing exploit intel before trying to exploit.
+		# follow_up lets exploit mode stop-and-ask (confirm before a state-changing action /
+		# hand back after a PoC) rather than only running to its iteration cap.
+		self.assertIn("follow_up", names)
 		self.assertIn("query_workspace", names)
 		self.assertIn("run_task", names)
 		self.assertIn("run_workflow", names)
