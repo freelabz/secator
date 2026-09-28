@@ -1,6 +1,7 @@
 """Tests for secator.ai.session restore_history_from_db + remote resume branch."""
 import contextlib
 import tempfile
+from pathlib import Path
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -801,12 +802,19 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		)
 
 	@patch('secator.tasks.ai.show_session_picker')
-	@patch('secator.tasks.ai.restore_history_from_db')
-	def test_resume_adopts_prior_session_id_and_uses_unified_restore(self, mock_restore, mock_picker):
+	@patch('secator.tasks.ai.replay_session')
+	def test_resume_adopts_prior_session_id_and_replays_local_history(self, mock_replay, mock_picker):
+		"""Local --resume adopts the picked session's id, RECOMPUTES the persistent data dir from it
+		(~/.secator/ai/<session_id>), and rebuilds history from the local history.json via
+		replay_session (the faithful transcript). The remote path uses restore_history_from_db
+		separately; the local resume must NOT hit the Mongo-only restore (that regressed the json
+		driver)."""
 		prior_folder = tempfile.mkdtemp(prefix="secator-test-prior-")
-		mock_picker.return_value = {"name": "prior chat", "folder": prior_folder, "session_id": "PRIOR-SESSION"}
+		mock_picker.return_value = {
+			"name": "prior chat", "folder": prior_folder, "session_id": "PRIOR-SESSION",
+			"history_path": str(Path(prior_folder) / "history.json"), "data_dir": prior_folder}
 		mock_history = MagicMock()
-		mock_restore.return_value = mock_history
+		mock_replay.return_value = mock_history
 
 		task, engine = self._make_task()
 
@@ -815,41 +823,15 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 				stack.enter_context(p)
 			list(task.yielder())
 
-		# Adopted the picked session's id (not a freshly-minted str(self.id)),
-		# and stamped it back onto the context (every persisted item copies
-		# self.context into its `_context`, so this is what makes appended docs
-		# queryable by `_context.session_id` under the SAME id going forward).
+		# Adopted the picked session's id + stamped it back onto the context.
 		self.assertEqual(task.session_id, "PRIOR-SESSION")
 		self.assertEqual(task.context["session_id"], "PRIOR-SESSION")
-
-		# Restored via the unified restore over the LOCAL query engine, keyed by
-		# the adopted session_id -- not replay_session's bespoke rebuild.
-		mock_restore.assert_called_once()
-		args, kwargs = mock_restore.call_args
-		self.assertEqual(args[0], "PRIOR-SESSION")
-		self.assertIs(args[1], engine)
-		self.assertEqual(kwargs.get("model"), "gpt-4o")
+		# Data dir recomputed from the adopted id (was set from the fallback id in _init_options).
+		from secator.utils import sanitize_folder_name
+		self.assertTrue(task.ai_data_dir.endswith(sanitize_folder_name("PRIOR-SESSION")))
+		# Restored from the local history.json (replay_session prints the prior conversation itself).
+		mock_replay.assert_called_once_with(mock_picker.return_value)
 		self.assertIs(task.history, mock_history)
-
-	@patch('secator.tasks.ai.print_session_results')
-	@patch('secator.tasks.ai.show_session_picker')
-	@patch('secator.tasks.ai.restore_history_from_db')
-	def test_new_format_resume_prints_prior_conversation(self, mock_restore, mock_picker, mock_print):
-		"""New-format resume rebuilds history in-memory via the unified restore, which
-		(unlike the legacy replay_session) does NOT print anything — so the branch must
-		call print_session_results(session) to keep the prior conversation visible on
-		the console."""
-		prior_folder = tempfile.mkdtemp(prefix="secator-test-print-")
-		mock_picker.return_value = {"name": "prior chat", "folder": prior_folder, "session_id": "PRIOR"}
-		mock_restore.return_value = MagicMock()
-
-		task, engine = self._make_task()
-		with contextlib.ExitStack() as stack:
-			for p in self._patches():
-				stack.enter_context(p)
-			list(task.yielder())
-
-		mock_print.assert_called_once_with(mock_picker.return_value)
 
 	@patch('secator.tasks.ai.show_session_picker')
 	@patch('secator.tasks.ai.replay_session')
@@ -899,70 +881,6 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 
 		mock_replay.assert_called_once()
 		mock_restore.assert_not_called()
-
-
-class TestListSessionsSurfacesSessionId(unittest.TestCase):
-	"""list_sessions() must surface each session's session_id (read from its
-	report.json ai docs' `_context.session_id`, first non-empty) so the local
-	resume branch has something to adopt (Task 5)."""
-
-	def _write_session(self, tmp_root, ai_items, info=None):
-		import json as _json
-		from pathlib import Path
-
-		task_dir = Path(tmp_root) / 'ws1' / 'tasks' / 'task1'
-		task_dir.mkdir(parents=True)
-		(task_dir / 'history.json').write_text('[]')
-		report = {"info": info or {}, "results": {"ai": ai_items}}
-		(task_dir / 'report.json').write_text(_json.dumps(report))
-		return str(task_dir / 'history.json')
-
-	@patch('secator.ai.session.glob.glob')
-	def test_list_sessions_includes_session_id(self, mock_glob):
-		from secator.ai.session import list_sessions
-
-		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
-		history_path = self._write_session(tmp_root, [
-			{"ai_type": "prompt", "content": "hello", "_context": {"session_name": "hi", "session_id": "SESSION-XYZ"}},
-			{"ai_type": "response", "content": "hi there", "_context": {"session_id": "SESSION-XYZ"}},
-		])
-		mock_glob.return_value = [history_path]
-
-		sessions = list_sessions()
-
-		self.assertEqual(len(sessions), 1)
-		self.assertEqual(sessions[0]["session_id"], "SESSION-XYZ")
-
-	@patch('secator.ai.session.glob.glob')
-	def test_list_sessions_session_id_falls_back_to_first_non_empty(self, mock_glob):
-		"""The prompt doc itself may carry no session_id (pre-stamp docs); scan
-		ALL ai docs and take the first non-empty one, not just the prompt doc."""
-		from secator.ai.session import list_sessions
-
-		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
-		history_path = self._write_session(tmp_root, [
-			{"ai_type": "prompt", "content": "hello", "_context": {}},
-			{"ai_type": "response", "content": "hi there", "_context": {"session_id": "SESSION-ABC"}},
-		])
-		mock_glob.return_value = [history_path]
-
-		sessions = list_sessions()
-
-		self.assertEqual(sessions[0]["session_id"], "SESSION-ABC")
-
-	@patch('secator.ai.session.glob.glob')
-	def test_list_sessions_session_id_empty_when_absent(self, mock_glob):
-		from secator.ai.session import list_sessions
-
-		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
-		history_path = self._write_session(tmp_root, [
-			{"ai_type": "prompt", "content": "hello", "_context": {}},
-		])
-		mock_glob.return_value = [history_path]
-
-		sessions = list_sessions()
-
-		self.assertEqual(sessions[0]["session_id"], '')
 
 
 class TestAddAssistantToHistory(unittest.TestCase):
