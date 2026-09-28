@@ -349,19 +349,10 @@ def process_extractor(results, extractor, ctx=None):
 
 def get_task_folder_id(path):
 	"""Atomically claim the next integer folder id under `path`.
-
-	Was: ``scandir(path)`` + ``max()+1`` on every call — O(folders), i.e. O(N^2) across a
-	chunked run of N tasks (each new task rescans every prior task's folder), and RACY under
-	the gevent worker: 100 concurrent chunks all read the same ``max+1`` and then
-	``mkdir(exist_ok=True)`` the SAME folder, clobbering each other's ``report.json``.
-
-	Now: a ``.next_id`` counter file guarded by an exclusive ``flock``, seeded once from the
+	
+	A `.next_id` counter file guarded by an exclusive `flock`, seeded once from the
 	existing integer folders (back-compat with runs created before this change). O(1) per call
-<<<<<<< Updated upstream
 	and safe across greenlets AND processes (server prefork workers share the reports volume).
-=======
-	and safe across greenlets AND processes (prod prefork workers share the reports volume).
->>>>>>> Stashed changes
 
 	ponytail: flock briefly blocks the gevent hub, but the critical section is a few-byte
 	read/write (microseconds); move the counter to the broker/DB only if it ever shows in a profile.
