@@ -178,7 +178,7 @@ def update_finding(self, item):
 	_id = ObjectId(item._uuid) if ObjectId.is_valid(item._uuid) else None
 	try:
 		if _id:
-			finding = db['findings'].update_one({'_id': _id}, {'$set': update})
+			db['findings'].update_one({'_id': _id}, {'$set': update})
 			status = 'UPDATED'
 		else:
 			# Stamp an explicit untagged default so tag_duplicates can index-seek untagged
@@ -188,8 +188,16 @@ def update_finding(self, item):
 			# backlog forever (the bulk of it at scale) AND starved real findings out of the bounded
 			# scan window. Stamp them `_tagged: True` so they never enter the backlog.
 			update.setdefault('_tagged', _type in CONFIG.addons.mongodb.duplicate_exclude_types)
-			finding = db['findings'].insert_one(update)
-			item._uuid = str(finding.inserted_id)
+			# The mongodb driver OWNS the finding identity: mint the ObjectId up front and
+			# store `_uuid = str(_id)` so the persisted `_uuid` IS the native primary key.
+			# (runner core pre-stamps a uuid4 `_uuid` in add_result for backends with no
+			# server-side id — json/sqlite — but on Mongo that uuid4 left `_uuid != _id`,
+			# so a get-by-uuid became a per-workspace scan instead of an `_id` index-seek,
+			# and it diverged from `_related`, which already references findings by str(_id).)
+			oid = ObjectId()
+			update['_uuid'] = str(oid)
+			db['findings'].insert_one({**update, '_id': oid})
+			item._uuid = str(oid)
 			status = 'CREATED'
 	except pymongo.errors.DocumentTooLarge:
 		# The finding exceeds MongoDB's 16MB BSON limit (usually huge outputs).
