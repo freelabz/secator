@@ -42,6 +42,10 @@ def process_item(self, item):
 				continue
 			ext = path.suffix
 			blob_name = f'{item._uuid}_{k}{ext}'
+			# Preserve the id the blob is named by (the current `_uuid`, before a DB
+			# backend may rewrite `_uuid` to its native id). Blob ownership is checked
+			# against this server-owned handle, not the mutable `_uuid`.
+			item._context['blob_uuid'] = str(item._uuid)
 			t = Thread(target=upload_blob, args=(GCS_BUCKET_NAME, v, blob_name))
 			t.start()
 			self.threads.append(t)
