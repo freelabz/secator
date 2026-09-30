@@ -84,5 +84,61 @@ class TestGetProcessInfoCpu(unittest.TestCase):
 		self.assertLess(Command.first_stat_delay, 1.0)
 
 
+# A parent that spawns one child, so the tree has >1 process (like a task that spawns a browser).
+PARENT = (
+	'import subprocess, sys, time\n'
+	'child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(8)"])\n'
+	'sys.stdout.write("READY\\n")\n'
+	'sys.stdout.flush()\n'
+	't = time.time()\n'
+	'while time.time() - t < 6:\n'
+	'\tpass\n'
+)
+
+
+def _spawn_tree():
+	proc = subprocess.Popen([sys.executable, '-c', PARENT], stdout=subprocess.PIPE, text=True)
+	assert proc.stdout.readline().strip() == 'READY', 'parent never signalled readiness'
+	return proc
+
+
+class TestProcessTreeMemory(unittest.TestCase):
+	"""Memory is reported for the whole process tree, once, using PSS (no shared-page double-count)."""
+
+	def test_get_process_info_includes_pss(self):
+		proc = _spawn()
+		procs = {}
+		try:
+			info = next(Command.get_process_info(psutil.Process(proc.pid), procs=procs))
+			self.assertIn('pss', info)
+			self.assertGreater(info['pss'], 0)
+		finally:
+			proc.kill()
+			proc.wait()
+
+	def test_collect_stats_emits_one_aggregate_for_the_tree(self):
+		proc = _spawn_tree()
+		inst = Command.__new__(Command)
+		inst.process = proc
+		inst.cmd_name = 'python-tree'
+		inst.memory_limit_mb = -1
+		inst.debug = lambda *a, **k: None
+		try:
+			list(inst._collect_stats({}))  # cpu baseline
+			time.sleep(Command.first_stat_delay)
+			stats = list(inst._collect_stats({}))
+			# ONE Stat for the whole tree, not one per process
+			self.assertEqual(len(stats), 1)
+			stat = stats[0]
+			self.assertEqual(stat.name, 'python-tree')   # the command (parent), not a child pid
+			self.assertEqual(stat.pid, proc.pid)
+			self.assertGreater(stat.memory, 0)
+			# the tree total covers parent + spawned child, with a per-process breakdown kept aside
+			self.assertGreaterEqual(len(stat.extra_data.get('processes', [])), 2)
+		finally:
+			proc.kill()
+			proc.wait()
+
+
 if __name__ == '__main__':
 	unittest.main()

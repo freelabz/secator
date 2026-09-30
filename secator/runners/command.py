@@ -814,30 +814,33 @@ class Command(Runner):
 		"""
 		if not self.process or not self.process.pid:
 			return
-		stats = Command.get_process_info(psutil.Process(self.process.pid), children=True, procs=procs)
-		total_mem = 0
-		for info in stats:
-			name = info['name']
-			pid = info['pid']
-			cpu_percent = info['cpu_percent']
-			# mem_percent = info['memory_percent']
-			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
-			total_mem += mem_rss
-			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
-			net_conns = info.get('net_connections') or []
-			# extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
-			yield Stat(
-				name=name,
-				pid=pid,
-				cpu=cpu_percent,
-				memory=mem_rss,
-				memory_limit=self.memory_limit_mb,
-				net_conns=len(net_conns),
-				# extra_data=extra_data
-			)
-		# self.debug(f'Total mem: {total_mem}MB, memory limit: {self.memory_limit_mb}', sub='monitor')
-		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
-		# 	raise MemoryError(f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
+		infos = list(Command.get_process_info(psutil.Process(self.process.pid), children=True, procs=procs))
+		if not infos:
+			return
+		# Emit ONE Stat for the task's whole process tree (the command + every process it spawns,
+		# e.g. a browser). Memory is the sum of PSS, which apportions shared pages, so it is the
+		# tree's real footprint; summing per-process RSS instead double-counts the pages a parent
+		# shares with its forks and the shared libraries every process maps. CPU and connections
+		# sum across the tree. Per-process breakdown is kept in extra_data for visibility, but the
+		# headline `memory` is a single, non-double-counted total — also what the memory-limit
+		# check in _monitor_process sums.
+		total_mem = round(sum((i.get('pss') or 0) for i in infos) / 1024 / 1024, 2)
+		total_cpu = round(sum((i.get('cpu_percent') or 0) for i in infos), 2)
+		total_conns = sum(len(i.get('net_connections') or []) for i in infos)
+		processes = [
+			{'name': i.get('name'), 'pid': i.get('pid'), 'memory': round((i.get('pss') or 0) / 1024 / 1024, 2)}
+			for i in infos
+		]
+		self.debug(f'{self.cmd_name} tree: {total_mem}MB PSS across {len(infos)} process(es)', sub='monitor')
+		yield Stat(
+			name=self.cmd_name,
+			pid=self.process.pid,
+			cpu=total_cpu,
+			memory=total_mem,
+			memory_limit=self.memory_limit_mb,
+			net_conns=total_conns,
+			extra_data={'processes': processes},
+		)
 
 	@staticmethod
 	def get_process_info(process, children=False, procs=None):
@@ -865,6 +868,15 @@ class Command(Runner):
 			except psutil.Error:  # child exited mid-walk; keep the rest
 				continue
 			data['cpu_percent'] = cpu_percent
+			# PSS (proportional set size) apportions shared pages, so summing it across a process
+			# tree yields the tree's real footprint — unlike RSS, which counts a parent's
+			# copy-on-write pages (and every shared library) once per process and so double-counts.
+			# PSS is Linux-only; fall back to RSS where it isn't available (macOS/Windows).
+			try:
+				mem_full = proc.memory_full_info()
+				data['pss'] = getattr(mem_full, 'pss', 0) or mem_full.rss
+			except psutil.Error:
+				data['pss'] = (data.get('memory_info') or {}).get('rss', 0)
 			yield data
 
 	def run_item_loaders(self, line):
