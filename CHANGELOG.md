@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.47.0](https://github.com/freelabz/secator/compare/v0.46.1...v0.47.0) (2026-09-30)
+
+
+### Features
+
+* **ai:** dedicated mark_vuln_exploited / mark_vuln_false_positive + update_finding tools ([#1442](https://github.com/freelabz/secator/issues/1442)) ([77a474b](https://github.com/freelabz/secator/commit/77a474bada98d53b7dee471f7fc90257a619b0b6))
+* **loader:** warn on duplicate scan/workflow/task names ([#1334](https://github.com/freelabz/secator/issues/1334)) ([6e1f2fd](https://github.com/freelabz/secator/commit/6e1f2fd09465550ef12e4b7194de7b909e620d71))
+* **runners:** optional worker-process utilization in the stat tree ([#1463](https://github.com/freelabz/secator/issues/1463)) ([d39966d](https://github.com/freelabz/secator/commit/d39966d10722578262d90c13a0adf0c31996ce91))
+
+
+### Bug Fixes
+
+* **ai:** subagent can read its own tool results + inherits parent's turn budget ([#1464](https://github.com/freelabz/secator/issues/1464)) ([98dd8ba](https://github.com/freelabz/secator/commit/98dd8ba93d07e3b1af617d0ce254fa0c2e8cb078))
+* **installer:** health crashes when pypi is unreachable ([#1405](https://github.com/freelabz/secator/issues/1405)) ([620aec9](https://github.com/freelabz/secator/commit/620aec94240acbba05026499953f3cc1b0b62254))
+* **mongodb:** the mongodb driver owns finding identity (_uuid = str(_id)) ([#1461](https://github.com/freelabz/secator/issues/1461)) ([2d976d0](https://github.com/freelabz/secator/commit/2d976d084e338dbcd7c756c248a55c831db03b0e))
+* **nuclei:** stop enabling -hang-monitor by default (nuclei kills itself) ([#1410](https://github.com/freelabz/secator/issues/1410)) ([6614ebb](https://github.com/freelabz/secator/commit/6614ebbd8dde463c776037f4b44371703b8f11c6))
+
 ## [0.46.1](https://github.com/freelabz/secator/compare/v0.46.0...v0.46.1) (2026-09-28)
 
 
