@@ -804,6 +804,18 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 	# the model's worker-style paths 404 and it wastes a turn `mkdir -p`-ing them.
 	from secator.config import CONFIG
 	reports_dir = str(CONFIG.dirs.reports)
+	# Persistent conversation DATA dir (~/.secator/ai/<session_id>): bind it into the container at
+	# the SAME host path so `$data_path` (where the LLM clones PoCs / keeps exploit+report code)
+	# resolves inside the sandbox and survives a task timeout. Scratch `$workspace_path/.outputs/...`
+	# resolves via the reports_dir bind above; /work stays an ephemeral per-container volume (cwd).
+	ai_data_dir = str(context.get("ai_data_dir") or "").strip()
+	data_mounts = []
+	if ai_data_dir:
+		try:
+			os.makedirs(ai_data_dir, exist_ok=True)
+			data_mounts = ["-v", f"{ai_data_dir}:{ai_data_dir}"]
+		except OSError:
+			data_mounts = []
 	created = False
 	# Serialize the create: shells in the SAME run share one container, so two arriving
 	# before it exists would both `rm` + `run` the same name — the loser's `docker run`
@@ -816,7 +828,8 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 			run = subprocess.run([
 				"docker", "run", "-d", "--name", name,
 				"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
-				"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}", "-w", "/work",
+				"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}",
+				*data_mounts, "-w", "/work",
 				_SANDBOX_IMAGE, "sleep", "infinity",
 			], capture_output=True, text=True)
 			if run.returncode != 0:

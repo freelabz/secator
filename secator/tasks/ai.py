@@ -27,7 +27,7 @@ from secator.ai.prompts import (
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
 from secator.ai.session import (
-	save_history, show_session_picker, replay_session, restore_history_from_db, print_session_results)
+	save_history, show_session_picker, replay_session, restore_history_from_db, update_session_index)
 from secator.ai.utils import (
 	call_llm, init_llm, setup_ai, format_llm_status, parse_text_tool_calls,
 	_decrypt_dict, _build_action_display,
@@ -331,7 +331,8 @@ class ai(PythonRunner):
 		if self.run_opts.get("show_prompt", False):
 			show_mode = self.mode or "attack"
 			prompt = get_system_prompt(
-				show_mode, workspace_path=str(self.reports_folder), backend=self.backend,
+				show_mode, workspace_path=str(self.reports_folder),
+				data_path=getattr(self, "ai_data_dir", ""), backend=self.backend,
 				in_scope=self.in_scope, out_of_scope=self.out_of_scope)
 			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
 			console.print(prompt, highlight=False, soft_wrap=True)
@@ -355,29 +356,19 @@ class ai(PythonRunner):
 			if session is None:
 				return
 			self.session_name = session["name"]
-			self._reports_folder = session['folder']
 			if session.get("session_id"):
-				# New-format session: adopt the prior session_id (instead of a fresh
-				# str(self.id)) so appended docs continue the same `_context.session_id`.
+				# Adopt the prior session id so this run's data dir + appended `_context.session_id`
+				# continue the same conversation. The data dir is derived from the session id, so it
+				# must be RECOMPUTED now (it was set from the pre-resume fallback id in _init_options).
 				self.session_id = session["session_id"]
 				self.context["session_id"] = self.session_id
-				# restore_history_from_db seeds system_prompt; no prompt exists yet (asked
-				# interactively below), so seed the same "chat" default `_detect_mode()`
-				# uses — the user's next answer re-detects the real mode and overwrites it.
-				self.mode = self.mode or "chat"
-				self._rebuild_prompt_and_tools()
-				self.history = restore_history_from_db(
-					self.session_id, self._get_query_engine(),
-					model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
-				# Show the prior conversation + findings on the console (the unified
-				# restore only rebuilds in-memory history; replay_session did this for
-				# the legacy path, so print it here to keep resume UX consistent).
-				print_session_results(session)
-			else:
-				# Legacy session: its docs carry no `_context.session_id`, so the unified
-				# restore would rebuild empty history. Fall back to the local
-				# history.json replay instead.
-				self.history = replay_session(session)
+				self._set_ai_data_dir()
+			# Restore the conversation from its persistent local history.json (in the data dir) — the
+			# faithful in-memory transcript incl. tool calls. This is the local `--resume` path; the
+			# remote (web) path rebuilds from Mongo separately (see _maybe_resume_remote).
+			self.mode = self.mode or "chat"
+			self._rebuild_prompt_and_tools()
+			self.history = replay_session(session)
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
 				return
@@ -442,7 +433,7 @@ class ai(PythonRunner):
 	def _system_prompt_for(self, mode):
 		"""Compute the system prompt for ``mode`` using this runner's workspace + backend."""
 		return get_system_prompt(
-			mode, workspace_path=str(self.reports_folder), backend=self.backend,
+			mode, workspace_path=str(self.reports_folder), data_path=getattr(self, "ai_data_dir", ""), backend=self.backend,
 			in_scope=getattr(self, "in_scope", None), out_of_scope=getattr(self, "out_of_scope", None))
 
 	def _rebuild_prompt_and_tools(self):
@@ -598,7 +589,14 @@ class ai(PythonRunner):
 		"""
 		if self.interactive == "remote":
 			return
-		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+		data_dir = getattr(self, "ai_data_dir", None) or str(self.reports_folder)
+		save_history(self.history, data_dir, debug_fn=self.debug)
+		# Keep the local session index (~/.secator/ai/sessions.json) current so `--resume` lists it.
+		if getattr(self, "ai_data_dir", None):
+			update_session_index(
+				getattr(self, "session_id", "") or "", self.ai_data_dir,
+				name=getattr(self, "session_name", "") or "",
+				prompt=getattr(self, "prompt", "") or "", targets=list(getattr(self, "inputs", []) or []))
 
 	# -------------------------------------------------------------------------
 	# Turn-level idempotency (remote/Celery redelivery)
@@ -1069,10 +1067,30 @@ class ai(PythonRunner):
 		self.encryptor = SensitiveDataEncryptor() if self.sensitive else None
 		self.has_previous_results = len(self.results) > 0
 		self.scope = "current" if self.has_previous_results else "workspace"
+		# Stable per-conversation session id. For remote (web), clients reuse it on respawn so a
+		# respawned task finds its prior docs; it arrives via self.context (authoritative — the
+		# dispatcher pops run_opts['context']). Computed HERE (before permission_engine) so the
+		# session-scoped work dir can key on it.
+		self.session_id = (
+			self.passed_context.get("session_id")
+			or (self.context or {}).get("session_id")
+			or self.session_name
+			or str(self.id)
+		)
+		# Write session_id back onto the context: every persisted item copies self.context into
+		# `_context`, so this stamps `_context.session_id` on all `_type:"ai"` docs (incl.
+		# prompt/response turns). restore_history_from_db + the remote poll key on it.
+		if self.context is not None:
+			self.context["session_id"] = self.session_id
+
+		# Per-conversation persistent DATA dir (~/.secator/ai/<session_id>): see _set_ai_data_dir.
+		self._set_ai_data_dir()
+
 		self.permission_engine = PermissionEngine(
 			CONFIG.addons.ai.permissions,
 			targets=self.inputs,
-			workspace=self.reports_folder or "",
+			workspace=str(self.reports_folder),
+			ai_data=self.ai_data_dir,
 			in_scope=self.in_scope,
 			out_of_scope=self.out_of_scope,
 			isolated=self.isolated,
@@ -1090,22 +1108,6 @@ class ai(PythonRunner):
 		# configured model even if the user switches mid-session.
 		self.context["ai_model"] = self.model
 
-		# Create interactivity backend. For remote (web), clients reuse a stable
-		# session_id on respawn so a respawned task finds its prior docs; it arrives
-		# via self.context (authoritative — the dispatcher pops run_opts['context']).
-		self.session_id = (
-			self.passed_context.get("session_id")
-			or (self.context or {}).get("session_id")
-			or self.session_name
-			or str(self.id)
-		)
-		# Write session_id back onto the context: every persisted item copies
-		# self.context into `_context`, so this stamps `_context.session_id` on all
-		# `_type:"ai"` docs (incl. prompt/response turns yielded directly here).
-		# restore_history_from_db + the remote poll key on it, so skipping this
-		# would leave the transcript unqueryable and resume would restore nothing.
-		if self.context is not None:
-			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
 		# Suppress noisy output for subagents
@@ -1117,6 +1119,30 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# Model verification
 	# -------------------------------------------------------------------------
+
+	def _set_ai_data_dir(self):
+		"""(Re)compute the conversation's persistent data dir from self.session_id and expose it.
+
+		~/.secator/ai/<session_id> holds files the AI must keep ACROSS turns / a resumed run — a
+		cloned PoC, exploit/report code, downloaded artifacts. Always used, with NO worker-vs-local
+		branching: on a worker the deployment mounts a shared volume at ~/.secator/ai so it survives a
+		task timeout; on local CLI the filesystem persists anyway. The per-run reports folder stays the
+		ephemeral WORK dir. Called at init AND again after a --resume adopts a prior session id (the id
+		changes, so the dir must be recomputed). Sanitized to one path segment so a client-supplied id
+		can't escape the base dir.
+		"""
+		from secator.utils import sanitize_folder_name
+		self.ai_data_dir = str(Path(CONFIG.dirs.ai) / sanitize_folder_name(str(self.session_id)))
+		try:
+			Path(self.ai_data_dir).mkdir(parents=True, exist_ok=True)
+		except OSError as e:
+			self.debug(f'ai data dir unavailable ({e}); persistence disabled this run', sub='start')
+		# Propagate to the runner context so the isolated sandbox (actions.py) bind-mounts the SAME
+		# dir into the container as $data_path, and refresh the permission engine's {ai_data} rules.
+		if self.context is not None:
+			self.context["ai_data_dir"] = self.ai_data_dir
+		if getattr(self, "permission_engine", None) is not None:
+			self.permission_engine.ai_data = self.ai_data_dir
 
 	def _verify_model(self):
 		"""Check model is configured and that model info is available; yield Error/Warning if not."""

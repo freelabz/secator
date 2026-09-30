@@ -1,7 +1,7 @@
 # secator/ai/session.py
 """AI session management - save, list, pick, replay."""
-import glob
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -10,16 +10,17 @@ from secator.output_types import Error, Warning
 from secator.rich import console
 
 
-def save_history(history, reports_folder, debug_fn=None):
-	"""Save chat history to reports folder.
+def save_history(history, data_dir, debug_fn=None):
+	"""Save chat history to the conversation's persistent data dir (~/.secator/ai/<session_id>).
 
 	Args:
 		history: ChatHistory instance.
-		reports_folder: Path to reports folder.
+		data_dir: The per-conversation data dir (persists across runs/timeouts).
 		debug_fn: Optional debug function for logging.
 	"""
 	try:
-		history_path = Path(reports_folder) / 'history.json'
+		Path(data_dir).mkdir(parents=True, exist_ok=True)
+		history_path = Path(data_dir) / 'history.json'
 		with open(history_path, 'w', encoding='utf-8') as f:
 			json.dump(history.messages, f, indent=2)
 		if debug_fn:
@@ -31,64 +32,79 @@ def save_history(history, reports_folder, debug_fn=None):
 			console.print(Warning(message=f'Failed to save history: {e}'))
 
 
+def _sessions_index_path():
+	return Path(CONFIG.dirs.ai) / 'sessions.json'
+
+
+def update_session_index(session_id, data_dir, name='', prompt='', targets=None):
+	"""Upsert a conversation into ~/.secator/ai/sessions.json — the local session list `--resume`
+	reads. Keyed by session_id; best-effort (never raises)."""
+	if not session_id:
+		return
+	idx = _sessions_index_path()
+	try:
+		data = json.loads(idx.read_text()) if idx.exists() else {}
+	except (json.JSONDecodeError, OSError):
+		data = {}
+	if not isinstance(data, dict):
+		data = {}
+	entry = data.get(session_id, {}) if isinstance(data.get(session_id), dict) else {}
+	entry.update({
+		'session_id': session_id,
+		'data_dir': str(data_dir),
+		'name': name or entry.get('name', ''),
+		'prompt': prompt or entry.get('prompt', ''),
+		'targets': targets if targets is not None else entry.get('targets', []),
+		'updated_at': time.time(),
+	})
+	data[session_id] = entry
+	try:
+		idx.parent.mkdir(parents=True, exist_ok=True)
+		tmp = idx.with_suffix('.json.tmp')
+		tmp.write_text(json.dumps(data, indent=2))
+		tmp.replace(idx)
+	except OSError:
+		pass
+
+
 def list_sessions(max_sessions=20):
-	"""Scan reports folders for AI sessions with history.json.
+	"""List resumable AI sessions from ~/.secator/ai/sessions.json (the local session index),
+	newest first. Each entry points at the conversation's persistent data dir + history.json.
 
 	Args:
 		max_sessions: Maximum number of sessions to return.
 
 	Returns:
-		list: Session dicts sorted by mtime (most recent first), capped at max_sessions.
+		list: Session dicts sorted by most-recent activity, capped at max_sessions.
 	"""
+	idx = _sessions_index_path()
+	try:
+		data = json.loads(idx.read_text()) if idx.exists() else {}
+	except (json.JSONDecodeError, OSError):
+		data = {}
+	if not isinstance(data, dict):
+		return []
 	sessions = []
-	pattern = str(Path(CONFIG.dirs.reports) / '*/tasks/*/history.json')
-	for history_path_str in glob.glob(pattern):
-		history_path = Path(history_path_str)
-		report_path = history_path.parent / 'report.json'
-		if not report_path.exists():
+	for sid, e in data.items():
+		if not isinstance(e, dict):
 			continue
-		try:
-			with open(report_path) as f:
-				data = json.load(f)
-			ai_items = data.get('results', {}).get('ai', [])
-			if not ai_items:
-				continue
-			# Find first user prompt content + session name, and the first non-empty
-			# `_context.session_id` across ALL ai docs (every persisted item stamps it,
-			# letting a resumed run adopt this session's id) -- single pass, stopping
-			# once both have been found.
-			first_prompt = ''
-			session_name = ''
-			session_id = ''
-			found_prompt = False
-			found_session_id = False
-			for item in ai_items:
-				if not found_prompt and item.get('ai_type') == 'prompt':
-					first_prompt = item.get('content', '')
-					session_name = (item.get('_context') or {}).get('session_name', '') or (item.get('_context') or {}).get('name', '')
-					found_prompt = True
-				if not found_session_id:
-					sid = (item.get('_context') or {}).get('session_id', '')
-					if sid:
-						session_id = sid
-						found_session_id = True
-				if found_prompt and found_session_id:
-					break
-			info = data.get('info', {})
-			sessions.append({
-				'folder': str(history_path.parent),
-				'history_path': str(history_path),
-				'report_path': str(report_path),
-				'name': session_name,
-				'prompt': first_prompt,
-				'session_id': session_id,
-				'targets': info.get('targets', []),
-				'timestamp': info.get('end_time') or info.get('start_time') or 0,
-				'mtime': history_path.stat().st_mtime,
-			})
-		except (json.JSONDecodeError, OSError):
-			continue
-
+		data_dir = e.get('data_dir') or str(Path(CONFIG.dirs.ai) / sid)
+		history_path = Path(data_dir) / 'history.json'
+		if not history_path.exists():
+			continue  # nothing to replay (dir GC'd or never saved)
+		sessions.append({
+			'session_id': sid,
+			# `folder` kept for back-compat with callers; points at the data dir now.
+			'folder': data_dir,
+			'data_dir': data_dir,
+			'history_path': str(history_path),
+			'report_path': '',  # findings live in the run's reports; the picker replays history only
+			'name': e.get('name', ''),
+			'prompt': e.get('prompt', ''),
+			'targets': e.get('targets', []),
+			'timestamp': e.get('updated_at', 0),
+			'mtime': history_path.stat().st_mtime,
+		})
 	sessions.sort(key=lambda s: s['mtime'], reverse=True)
 	return sessions[:max_sessions]
 

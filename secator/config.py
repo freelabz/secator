@@ -47,6 +47,7 @@ class Directories(StrictModel):
 	performance: Directory = ''
 	revshells: Directory = ''
 	queries: Directory = ''
+	ai: Directory = ''
 	celery: Directory = ''
 	celery_data: Directory = ''
 	celery_results: Directory = ''
@@ -54,7 +55,7 @@ class Directories(StrictModel):
 	@model_validator(mode='after')
 	def set_default_folders(self) -> Self:
 		"""Set folders to be relative to the data folders if they are unspecified in config."""
-		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'queries', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
+		for folder in ['templates', 'reports', 'wordlists', 'cves', 'payloads', 'performance', 'revshells', 'queries', 'ai', 'celery', 'celery_data', 'celery_results']:  # noqa: E501
 			rel_target = '/'.join(folder.split('_'))
 			val = getattr(self, folder) or self.data / rel_target
 			setattr(self, folder, val)
@@ -295,6 +296,10 @@ class AiAddon(StrictModel):
 			'target(github.com,*.github.com,*.githubusercontent.com)',
 			'read({workspace}/*,/dev/null,/tmp/*)',
 			'write({workspace}/.outputs/*,/dev/null,/tmp/*)',
+			# The per-conversation persistent data dir (~/.secator/ai/<session_id>): the LLM saves
+			# files it must keep across turns/runs here (cloned PoCs, exploit/report code).
+			'read({ai_data}/*,{ai_data})',
+			'write({ai_data}/*,{ai_data})',
 			'shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,'
 			'cd,git,diff,stat,du,df,tree,sort,uniq,cut,tr,echo,realpath,readlink,'
 			'file,strings,xxd,base64,for,while,which,true,timeout,'

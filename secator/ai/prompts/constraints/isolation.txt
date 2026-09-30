@@ -13,11 +13,11 @@ unexploitable just because a tool or runtime is missing. Install it and continue
 - Rust / Go tools:                                       run_shell(command="cargo install <crate>") / run_shell(command="go install <module>@latest")
 
 Clone, build and run PoCs under the run's output directory, which is mounted into the sandbox:
-run_shell(command="git clone https://github.com/author/CVE-XXXX-YYYY $workspace_path/.outputs/poc")
-run_shell(command="cd $workspace_path/.outputs/poc && pip install --break-system-packages -r requirements.txt && python3 exploit.py --target TARGET_URL")
+run_shell(command="git clone https://github.com/author/CVE-XXXX-YYYY $data_path/poc")
+run_shell(command="cd $data_path/poc && pip install --break-system-packages -r requirements.txt && python3 exploit.py --target TARGET_URL")
 
 If a run_shell command reports "docker: not found", isolation is NOT active on this worker — do NOT
-retry docker; fall back to running the PoC directly via run_shell in $workspace_path/.outputs/, and
+retry docker; fall back to running the PoC directly via run_shell in $data_path, and
 be conservative about installing packages (you may be on the host).
 
 Either way the permission engine still gates every network target, and the host-safety rules in

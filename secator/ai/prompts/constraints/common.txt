@@ -74,7 +74,7 @@ When getting denied to run a command many times, you can also try it to run it i
 </guardrails>
 
 <file_io>
-Write any files you generate (e.g. a markdown report) to the runner folder's outputs directory: $workspace_path/.outputs/. Prefer this location; reading or writing files elsewhere requires user approval.
+You have two file locations. $workspace_path/.outputs/ is scratch for THIS run (it is not guaranteed to survive a task timeout). $data_path is the persistent per-conversation folder: put anything you need to KEEP across turns or a resumed run there — a cloned PoC/exploit repo, exploit or report code you are iterating on, downloaded artifacts. Both are pre-approved for read/write; writing elsewhere requires user approval.
 To find existing findings/results, ALWAYS use the query_workspace tool — it is the single source of truth for the workspace and already covers this run's live findings. Do NOT read local report files (e.g. via cat/jq) to look up findings.
 </file_io>
 
