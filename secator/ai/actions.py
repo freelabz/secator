@@ -358,7 +358,9 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"stop": _handle_stop,
 	}
 
-	handler = handlers.get(action_type)
+	# Dynamic (autoloaded) tools register their handlers keyed by action type.
+	from secator.ai.tools import DYNAMIC_HANDLERS
+	handler = handlers.get(action_type) or DYNAMIC_HANDLERS.get(action_type)
 	if handler:
 		yield from handler(action, ctx)
 	else:

@@ -28,6 +28,14 @@ def _file_has_exporter(path):
 		return False
 
 
+def _file_has_ai_tool(path):
+	"""Check if a Python file contains an AI_TOOL / AI_TOOLS variable (dynamic AI tool indicator)."""
+	try:
+		return bool(re.search(r'\bAI_TOOLS?\s*=', path.read_text()))
+	except Exception:
+		return False
+
+
 @cache
 def find_templates():
 	discover_tasks()  # always load tasks first
@@ -120,8 +128,8 @@ def discover_external_tasks():
 	prev_state = sys.dont_write_bytecode
 	sys.dont_write_bytecode = True
 	for path in CONFIG.dirs.templates.glob('**/*.py'):
-		if _file_has_hooks(path) or _file_has_exporter(path):
-			continue  # Skip driver/exporter files
+		if _file_has_hooks(path) or _file_has_exporter(path) or _file_has_ai_tool(path):
+			continue  # Skip driver/exporter/ai-tool files
 		try:
 			task_name = path.stem
 			module_name = f'secator.tasks.{task_name}'
@@ -252,6 +260,52 @@ def discover_external_exporters():
 			console.print(f'[bold red]Could not load external exporter from {path.name}. Reason: {str(e)}.[/] ({path})')
 	sys.dont_write_bytecode = prev_state
 	return output
+
+
+@cache
+def discover_ai_tools():
+	"""Find and register external AI tools (a *.py exporting AI_TOOL / AI_TOOLS).
+
+	Mirrors discover_external_drivers: any file under CONFIG.dirs.templates that defines an
+	``AI_TOOL`` (dict) or ``AI_TOOLS`` (list of dicts) module variable is imported and its
+	tool spec(s) registered via secator.ai.tools.register_ai_tool, making the tool callable by
+	the AI agent without editing core. @cache -> runs once. Fail-safe per file.
+	"""
+	from secator.definitions import ADDONS_ENABLED
+	if not ADDONS_ENABLED.get("ai"):
+		return []
+	from secator.ai.tools import register_ai_tool
+	registered = []
+	prev_state = sys.dont_write_bytecode
+	sys.dont_write_bytecode = True
+	for path in CONFIG.dirs.templates.glob('**/*.py'):
+		if not _file_has_ai_tool(path):
+			continue
+		try:
+			tool_stem = path.stem
+			module_name = f'secator.ai.tools_ext.{tool_stem}'
+			spec = importlib.util.spec_from_file_location(module_name, path)
+			if not spec:
+				console.print(f'[bold red]Could not load external AI tool {path.name}: invalid import spec.[/] ({path})')
+				continue
+			module = importlib.util.module_from_spec(spec)
+			sys.modules[module_name] = module
+			spec.loader.exec_module(module)
+			specs = getattr(module, 'AI_TOOLS', None)
+			if specs is None:
+				single = getattr(module, 'AI_TOOL', None)
+				specs = [single] if single is not None else []
+			if not specs:
+				console.print(f'[bold orange1]Could not load external AI tool from {path.name}: missing AI_TOOL/AI_TOOLS.[/] ({path})')  # noqa: E501
+				continue
+			for tool_spec in specs:
+				if register_ai_tool(tool_spec):
+					registered.append(tool_spec.get('name'))
+					debug(f'[bold green]Successfully loaded external AI tool "{tool_spec.get("name")}"[/] ({path})', sub='loader')  # noqa: E501
+		except Exception as e:
+			console.print(f'[bold red]Could not load external AI tool from {path.name}. Reason: {str(e)}.[/] ({path})')
+	sys.dont_write_bytecode = prev_state
+	return registered
 
 
 @cache
