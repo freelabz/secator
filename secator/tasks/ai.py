@@ -711,6 +711,7 @@ class ai(PythonRunner):
 			# AI accumulates its own action results here; queries the store on demand (avoids OOM on the full subtree)
 			results=[],
 			max_workers=self.max_workers,
+			max_iterations=self.max_iterations,
 			subagent=self.is_subagent,
 			sync=self._sync,
 			interactive=self.interactive,
@@ -1486,10 +1487,15 @@ class ai(PythonRunner):
 				yield result
 
 			result = result.toDict() if isinstance(result, OutputType) else result
-			# Subagent-internal outputs stay in the subagent's own transcript; keep them
-			# OUT of the parent's tool_result (the parent reads the clean handback instead
-			# of the child's fragmented stream). Their persistence already happened above.
-			if not is_from_subagent:
+			# A dispatched CHILD subagent's fragmented output stays OUT of the parent's
+			# tool_result (the parent reads its clean handback instead). But a subagent
+			# ALSO stamps the `subagent` marker on its OWN tool outputs, and those MUST
+			# stay in `collected` — else the subagent never feeds its own tool results
+			# back to its LLM (tool calls acknowledged but empty). Distinguish the two by
+			# session_id: a child has its own (distinct) session_id; my own outputs share
+			# mine. Only a DIFFERENT session_id is a child.
+			is_from_child_subagent = is_from_subagent and result_context.get("session_id") != self.session_id
+			if not is_from_child_subagent:
 				collected.append(result)
 			ctx.results.append(result)
 
