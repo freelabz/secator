@@ -14,6 +14,7 @@ MIRRORED_COLUMNS = {
 	'is_false_positive': 'is_false_positive',
 	'_tagged': '_tagged',
 	'_type': 'type',
+	'_uuid': 'uuid',  # the TEXT PRIMARY KEY (populated by the hook) — seek it, don't json_extract-scan
 }
 
 COMPARISON_OPS = {

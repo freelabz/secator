@@ -94,6 +94,20 @@ class TestMongoTaggedDefault(unittest.TestCase):
         doc = self._inserted_doc(Info(message="x"))
         self.assertTrue(doc["_tagged"])
 
+    def test_finding_uuid_is_native_id_on_insert(self):
+        """The mongodb driver OWNS identity: the inserted doc's `_uuid` == str(_id),
+        overriding any uuid4 runner-core pre-stamped, so get-by-uuid is an `_id`
+        index-seek (not a per-workspace scan) and it matches `_related` (str(_id))."""
+        import uuid as _uuid
+        from bson.objectid import ObjectId
+        v = Vulnerability(name='CVE-2025-53020', id='CVE-2025-53020', matched_at='h:80')
+        prestamped = str(_uuid.uuid4())  # what runner-core add_result stamps for id-less backends
+        v._uuid = prestamped
+        doc = self._inserted_doc(v)
+        self.assertIsInstance(doc["_id"], ObjectId)
+        self.assertEqual(doc["_uuid"], str(doc["_id"]))
+        self.assertNotEqual(doc["_uuid"], prestamped)  # the uuid4 was replaced by the native id
+
 
 if __name__ == "__main__":
     unittest.main()
