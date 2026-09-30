@@ -1427,6 +1427,12 @@ def _handle_mark_vuln_exploit_failed(action: Dict, ctx: ActionContext) -> Genera
 # Fields that must never be overwritten via update_finding (identity / routing / scope).
 _FINDING_IMMUTABLE_FIELDS = {"_uuid", "_type", "_id", "_context", "id"}
 
+# Real scan-finding types (vulnerability/url/port/…) update_finding may edit. Restricting to
+# these stops a known `_uuid` from editing a non-finding record: error/warning/info (EXECUTION_TYPES)
+# and stat (STAT_TYPES) aren't in FINDING_TYPES already, and `ai` IS in FINDING_TYPES but is the
+# conversation/action-doc type — editing it would tamper the transcript, so exclude it.
+_FINDING_TYPE_NAMES = frozenset(cls.get_name().lower() for cls in FINDING_TYPES) - {"ai"}
+
 
 # Server/pipeline-owned finding fields the GENERIC add_finding/update_finding must never let the
 # agent write. The dedicated mark_vuln_* tools set the verdict fields themselves via a server-built
@@ -1509,14 +1515,33 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 			_context=context,
 		)
 		return
-	if str(existing.get("_type", "")).lower() == "target":
+	etype = str(existing.get("_type", "")).lower()
+	if etype == "target":
 		yield Error(message="Refusing to update a 'target' finding (scope integrity).", _context=context)
 		return
+	if etype not in _FINDING_TYPE_NAMES:
+		yield Error(message=f"Refusing to update a non-finding record (_type={etype!r}).", _context=context)
+		return
+	cls = {c.get_name().lower(): c for c in FINDING_TYPES}[etype]
 
-	# Build a scoped $set: only agent-writable content fields (framework/server-owned + `*_path`
-	# stripped) + dotted extra_data merge so existing extra_data keys survive. `id` (a finding's
-	# stable content id) stays blocked on UPDATE via _FINDING_IMMUTABLE_FIELDS below.
+	# Only agent-writable content fields (framework/server-owned + `*_path` stripped); `id`
+	# stays blocked on UPDATE via _FINDING_IMMUTABLE_FIELDS below.
 	fields = _drop_readonly_fields(fields)
+	# An `extra_data` object passed INSIDE `fields` must merge via dotted keys (like the dedicated
+	# `extra_data` arg) — a whole-object $set would clobber existing keys AND conflict with the
+	# dotted `extra_data.*` paths on Mongo. Fold it into extra_data (the dedicated arg wins).
+	fields_extra = fields.pop("extra_data", None)
+	if isinstance(fields_extra, dict):
+		extra_data = {**fields_extra, **extra_data}
+	# Validate the remaining content fields against the finding's schema (coerce sloppy scalars
+	# first, like add_finding) so a wrong-shaped value (e.g. tags="xss" where a list is required)
+	# is rejected up front, not persisted raw.
+	fields = _coerce_finding_fields(cls, fields)
+	errors = cls.validate_fields(fields)
+	if errors:
+		yield Error(message=f"Invalid {etype} fields: {'; '.join(errors)}", _context=context)
+		return
+
 	update = {}
 	for k, v in fields.items():
 		key = str(k)

@@ -32,6 +32,35 @@ class TestSeekByNativeId(unittest.TestCase):
         self.assertNotIn('_id', q)
 
 
+class TestUpdateScopeOnly(unittest.TestCase):
+    """Idempotency: a targeted update is scoped by workspace only — the `is_false_positive`
+    DISPLAY filter must not gate writes, else re-marking an already-FP finding matches 0 rows."""
+
+    def _backend(self):
+        pytest.importorskip("pymongo")
+        from secator.query.mongodb import MongoDBBackend
+        return MongoDBBackend("ws1")  # no client needed for _merge_query
+
+    def test_reads_keep_display_filter_writes_drop_it(self):
+        b = self._backend()
+        read = b._merge_query({'_uuid': 'x'})
+        self.assertIn('is_false_positive', read)                     # reads hide FPs
+        self.assertEqual(read['_context.workspace_id'], 'ws1')
+        write = b._merge_query({'_uuid': 'x'}, scope_only=True)
+        self.assertNotIn('is_false_positive', write)                 # writes reach FP findings
+        self.assertNotIn('_tagged', write)
+        self.assertEqual(write['_context.workspace_id'], 'ws1')      # scope still enforced
+
+    def test_update_passes_scope_only(self):
+        from unittest.mock import patch
+        b = self._backend()
+        with patch.object(b, '_execute_update', return_value=1) as ex:
+            b.update({'_uuid': 'x'}, {'$set': {'a': 1}})
+        q = ex.call_args[0][0]
+        self.assertNotIn('is_false_positive', q)
+        self.assertEqual(q['_context.workspace_id'], 'ws1')
+
+
 class TestSqliteUuidColumn(unittest.TestCase):
     def test_uuid_maps_to_pk_column(self):
         from secator.query.sqlite import _col_expr

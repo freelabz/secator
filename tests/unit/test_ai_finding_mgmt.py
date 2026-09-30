@@ -250,6 +250,34 @@ class TestFindingMgmtTools(unittest.TestCase):
 		self.assertTrue(any(isinstance(o, Error) for o in out))
 		e.update.assert_not_called()
 
+	def test_update_refuses_non_finding_record(self):
+		# CWE-862: a known _uuid must not let the agent edit an internal record (ai/error/…).
+		e = self._engine({'_uuid': 'u1', '_type': 'ai', 'content': 'x'})
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'u1', 'fields': {'content': 'evil'}}, self._ctx(e)))
+		self.assertTrue(any(isinstance(o, Error) for o in out))
+		e.update.assert_not_called()
+
+	def test_update_validates_field_shapes(self):
+		# A wrong-shaped value (tags as a string where a list is required) is rejected, not $set raw.
+		e = self._engine({'_uuid': 'u1', '_type': 'vulnerability', 'severity': 'low'})
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'u1', 'fields': {'tags': 'xss'}}, self._ctx(e)))
+		self.assertTrue(any(isinstance(o, Error) and 'tags' in o.message for o in out))
+		e.update.assert_not_called()
+
+	def test_update_fields_extra_data_merges_dotted(self):
+		# extra_data passed inside `fields` must merge via dotted keys (not a whole-object $set
+		# that clobbers existing keys / conflicts with extra_data.* on Mongo).
+		e = self._engine({'_uuid': 'u1', '_type': 'vulnerability', 'severity': 'low'})
+		list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'u1',
+			 'fields': {'severity': 'high', 'extra_data': {'note': 'x'}}}, self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertEqual(set_arg['severity'], 'high')
+		self.assertEqual(set_arg['extra_data.note'], 'x')  # dotted
+		self.assertNotIn('extra_data', set_arg)            # never a whole-object $set
+
 
 if __name__ == '__main__':
 	unittest.main()
