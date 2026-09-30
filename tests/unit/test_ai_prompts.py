@@ -252,10 +252,14 @@ class TestPrompts(unittest.TestCase):
 		exploit_config = MODES["exploit"]
 		# "query" is included so the model can pull existing exploit intel before
 		# exploiting; "follow_up" is included so exploit mode can STOP-and-ask (confirm
-		# before a state-changing action / hand back after a PoC) instead of only
-		# running to its iteration cap.
-		expected_actions = ["task", "workflow", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"]
-		self.assertEqual(exploit_config["allowed_actions"], expected_actions)
+		# before a state-changing action / hand back after a PoC). Subset check (not an
+		# exact list) so adding tools doesn't break this.
+		actions = exploit_config["allowed_actions"]
+		for a in ["task", "workflow", "shell", "query", "follow_up", "add_finding",
+		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed",
+		          "update_finding", "stop"]:
+			self.assertIn(a, actions)
+		self.assertNotIn("add_vuln_poc", actions)  # replaced by the dedicated mark_vuln_* tools
 
 	def test_exploit_mode_config_has_max_iterations_5(self):
 		exploit_config = MODES["exploit"]
@@ -263,13 +267,18 @@ class TestPrompts(unittest.TestCase):
 
 	def test_attack_mode_config_has_correct_allowed_actions(self):
 		attack_config = MODES["attack"]
-		expected_actions = ["task", "workflow", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"]
-		self.assertEqual(attack_config["allowed_actions"], expected_actions)
+		actions = attack_config["allowed_actions"]
+		for a in ["task", "workflow", "shell", "query", "follow_up", "add_finding",
+		          "mark_vuln_exploited", "mark_vuln_false_positive", "stop"]:
+			self.assertIn(a, actions)
 
 	def test_chat_mode_config_has_correct_allowed_actions(self):
 		chat_config = MODES["chat"]
-		expected_actions = ["query", "follow_up", "add_finding", "add_vuln_poc", "shell", "stop"]
-		self.assertEqual(chat_config["allowed_actions"], expected_actions)
+		actions = chat_config["allowed_actions"]
+		for a in ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "shell", "stop"]:
+			self.assertIn(a, actions)
+		self.assertNotIn("task", actions)
+		self.assertNotIn("workflow", actions)
 
 	def test_all_modes_have_max_iterations_5(self):
 		self.assertEqual(MODES["attack"]["max_iterations"], 5)

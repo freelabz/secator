@@ -12,7 +12,10 @@ TOOL_ACTION_MAP = {
 	"query_workspace": "query",
 	"follow_up": "follow_up",
 	"add_finding": "add_finding",
-	"add_vuln_poc": "add_vuln_poc",
+	"mark_vuln_exploited": "mark_vuln_exploited",
+	"mark_vuln_false_positive": "mark_vuln_false_positive",
+	"mark_vuln_exploit_failed": "mark_vuln_exploit_failed",
+	"update_finding": "update_finding",
 	"stop": "stop",
 }
 
@@ -164,60 +167,170 @@ TOOL_SCHEMAS = {
 			}
 		}
 	},
-	"add_vuln_poc": {
+	"mark_vuln_exploited": {
 		"type": "function",
 		"function": {
-			"name": "add_vuln_poc",
+			"name": "mark_vuln_exploited",
 			"description": (
-				"Record the exploitation OUTCOME of an EXISTING vulnerability after you attempted to "
-				"exploit it. Use this INSTEAD of add_finding(exploit). Identify the vulnerability by the "
-				"`_uuid` you saw in query_workspace results.\n"
-				"- If you exploited it: set exploited=true and fill `poc` with the exact commands and "
-				"outputs proving it. The vuln is marked status='Exploited' (verified).\n"
-				"- If you could NOT exploit it (scanner false positive, not reachable, patched): set "
-				"exploited=false. The vuln is marked as a false positive; explain why in `extra_data`.\n"
-				"Set `confidence` to re-prioritize the vuln based on what you learned."
+				"Mark an EXISTING vulnerability as exploited after you successfully exploited it, recording "
+				"its proof-of-concept. Use this INSTEAD of add_finding(exploit). Identify the vulnerability by "
+				"the `_uuid` you saw in query_workspace results. The vuln is set to status='EXPLOITED' "
+				"(verified). You MUST provide `poc` — the exact commands and outputs proving a true, "
+				"successful exploitation (not just a scanner match). Also provide `remediation` and `impact`, "
+				"which fill the vulnerability's own fields (do NOT put them inside the `poc`). The exploitation "
+				"date is stamped automatically."
 			),
 			"parameters": {
 				"type": "object",
 				"properties": {
 					"_uuid": {
 						"type": "string",
-						"description": "The `_uuid` of the vulnerability to annotate (from query_workspace results)."
-					},
-					"exploited": {
-						"type": "boolean",
-						"description": (
-							"true if you successfully exploited the vulnerability (requires `poc`); false if it "
-							"could not be exploited (a false positive) -- explain why in `extra_data`."
-						)
+						"description": "The `_uuid` of the vulnerability to mark exploited (from query_workspace results)."
 					},
 					"poc": {
 						"type": "string",
 						"description": (
-							"Markdown proof-of-concept: the exact commands run and their outputs demonstrating a "
-							"true, successful exploitation (not a scanner match). Required when exploited=true; "
-							"be concrete and reproducible."
+							"Markdown proof-of-concept demonstrating a true, successful exploitation (not a scanner "
+							"match). Start with `### Description` then `### Details` (the exact commands run and their "
+							"real outputs), optionally `### Extracted information`. Do NOT include a title, a "
+							"vulnerability summary, or remediation — those live on the vuln itself (its name/"
+							"description) and in the `remediation`/`impact` args. Required; be concrete and reproducible."
+						)
+					},
+					"remediation": {
+						"type": "string",
+						"description": (
+							"Markdown remediation steps (prioritized fixes). Fills the vuln's `remediation` field; "
+							"do NOT put this inside `poc`. Optional but strongly encouraged."
+						)
+					},
+					"impact": {
+						"type": "string",
+						"description": (
+							"The concrete impact of the confirmed exploitation (what an attacker gains / data at "
+							"risk). Fills the vuln's `impact` field; do NOT put this inside `poc`. Optional but "
+							"strongly encouraged."
 						)
 					},
 					"confidence": {
 						"type": "string",
 						"enum": ["low", "medium", "high"],
-						"description": (
-							"Re-prioritize the vulnerability: 'high' for a confirmed exploitation, 'low' when it "
-							"looks like a false positive. Optional -- omit to leave unchanged."
-						)
+						"description": "Re-prioritize the vulnerability (e.g. 'high' for a confirmed exploitation). Optional."
 					},
 					"extra_data": {
 						"type": "object",
-						"description": (
-							"Extra structured context to merge into the vuln (e.g. a reason when exploited=false). "
-							"Optional; merged into existing extra_data, existing keys preserved."
-						),
+						"description": "Extra structured context merged into the vuln (existing keys preserved). Optional.",
 						"additionalProperties": True
 					}
 				},
-				"required": ["_uuid", "exploited"]
+				"required": ["_uuid", "poc"]
+			}
+		}
+	},
+	"mark_vuln_false_positive": {
+		"type": "function",
+		"function": {
+			"name": "mark_vuln_false_positive",
+			"description": (
+				"Mark an EXISTING vulnerability as a false positive when you determined it could NOT be "
+				"exploited (scanner false positive, not reachable, already patched). Identify it by the `_uuid` "
+				"from query_workspace results. The vuln is hidden from reports (is_false_positive=true, "
+				"status='FALSE_POSITIVE') but KEPT and recoverable — never deleted. Give a short `reason`."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"_uuid": {
+						"type": "string",
+						"description": "The `_uuid` of the vulnerability to mark false positive (from query_workspace results)."
+					},
+					"reason": {
+						"type": "string",
+						"description": "Short reason why it's a false positive (e.g. 'not reachable', 'patched'). Recorded on the vuln."  # noqa: E501
+					},
+					"extra_data": {
+						"type": "object",
+						"description": "Extra structured context merged into the vuln (existing keys preserved). Optional.",
+						"additionalProperties": True
+					}
+				},
+				"required": ["_uuid"]
+			}
+		}
+	},
+	"mark_vuln_exploit_failed": {
+		"type": "function",
+		"function": {
+			"name": "mark_vuln_exploit_failed",
+			"description": (
+				"Mark an EXISTING vulnerability as EXPLOIT FAILED — a REAL vulnerability that YOU could not "
+				"exploit in this attempt. Identify it by the `_uuid` from query_workspace results. Sets "
+				"status='EXPLOIT FAILED' but keeps the vuln VISIBLE and retryable (does NOT hide it) — a later "
+				"attempt may succeed, and the remediation still applies. Use this (NOT mark_vuln_false_positive) "
+				"whenever the vuln is genuine but your exploitation didn't land. Give a short `reason`; provide "
+				"`remediation`/`impact` if you assessed them."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"_uuid": {
+						"type": "string",
+						"description": "The `_uuid` of the vulnerability to mark exploit-failed (from query_workspace results)."
+					},
+					"reason": {
+						"type": "string",
+						"description": "Short reason the exploit didn't land (e.g. 'WAF blocked payload', 'no reachable sink'). Recorded on the vuln."  # noqa: E501
+					},
+					"remediation": {
+						"type": "string",
+						"description": "Markdown remediation steps for the vuln (it still applies). Fills the vuln's `remediation` field. Optional."  # noqa: E501
+					},
+					"impact": {
+						"type": "string",
+						"description": "The potential impact if it were exploited. Fills the vuln's `impact` field. Optional."
+					},
+					"extra_data": {
+						"type": "object",
+						"description": "Extra structured context merged into the vuln (existing keys preserved). Optional.",
+						"additionalProperties": True
+					}
+				},
+				"required": ["_uuid"]
+			}
+		}
+	},
+	"update_finding": {
+		"type": "function",
+		"function": {
+			"name": "update_finding",
+			"description": (
+				"Update fields on an EXISTING finding (any type) identified by the `_uuid` you saw in "
+				"query_workspace results — e.g. fix a severity, add tags/cves, or enrich extra_data. Only the "
+				"fields you pass are changed; everything else is left intact. For a vulnerability's exploited "
+				"or false-positive verdict, use mark_vuln_exploited / mark_vuln_false_positive instead."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"_uuid": {
+						"type": "string",
+						"description": "The `_uuid` of the finding to update (from query_workspace results)."
+					},
+					"fields": {
+						"type": "object",
+						"description": (
+							"Top-level finding fields to set (e.g. {\"severity\": \"high\", \"tags\": [\"xss\"]}). "
+							"Immutable keys (_uuid, _type, _id, _context, id) are ignored. List fields must be JSON arrays."
+						),
+						"additionalProperties": True
+					},
+					"extra_data": {
+						"type": "object",
+						"description": "Structured context merged into the finding's extra_data (existing keys preserved).",
+						"additionalProperties": True
+					}
+				},
+				"required": ["_uuid"]
 			}
 		}
 	},
@@ -319,6 +432,12 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 	if not isinstance(arguments, dict):
 		return None
 	safe_arguments = {k: v for k, v in arguments.items() if k not in {"action", "description"}}
+	# Some models routinely drop the leading underscore on the `_uuid` identity arg,
+	# sending `uuid` instead — every finding tool (mark_vuln_exploited /
+	# mark_vuln_false_positive / update_finding) then errors "requires `_uuid`".
+	# Normalize the common misspelling so the intent isn't lost to a naming quirk.
+	if "uuid" in safe_arguments and "_uuid" not in safe_arguments:
+		safe_arguments["_uuid"] = safe_arguments.pop("uuid")
 	# Prefer the description the model was asked to provide (run_task/run_workflow/run_shell all
 	# require it); fall back to name/query/command only when it's missing. Was previously dropped
 	# here, so the AI-chat background-tasks list showed the raw command instead of the description.

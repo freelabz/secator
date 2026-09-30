@@ -1090,10 +1090,10 @@ class PermissionEngine:
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
-		elif action_type in ("query", "follow_up", "add_finding", "add_vuln_poc"):
-			# add_vuln_poc only $set-updates fields (poc/status/confidence/extra_data/
-			# is_false_positive) on an EXISTING vulnerability (workspace-scoped, no new/
-			# scope-widening finding), so it's safe to auto-allow alongside query/add_finding.
+		elif action_type in ("query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
+			# mark_vuln_exploited / mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
+			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
+			# so they're safe to auto-allow alongside query/add_finding.
 			# Don't let an injected add_finding silently mint a scope-widening target finding.
 			# Deny (fail-closed) rather than "ask": there is no add_finding prompt layer, so an
 			# "ask" here isn't surfaceable — it would just spin the prompt loop until it denies
