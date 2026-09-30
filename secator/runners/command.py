@@ -826,9 +826,29 @@ class Command(Runner):
 		# root = the command itself), so stats can be nested (show roots, expand children). The
 		# memory-limit check in _monitor_process sums these PSS values, which is now correct.
 		tree_pids = {i['pid'] for i in infos}
+		# Optionally emit the worker process (the process running this task) as an extra root, and
+		# treat it as an in-tree parent so the command nests under it. In a 1-task-per-worker setup
+		# the subtree total then includes the worker's own footprint (its own PSS only — the task
+		# tree below is measured separately, so there is no double-count). Off by default.
+		worker_pid = None
+		if CONFIG.runners.monitor_worker:
+			worker_pid = os.getpid()
+			winfo = next(Command.get_process_info(psutil.Process(worker_pid), children=False, procs=procs), None)
+			if winfo:
+				self.debug(f'worker {worker_pid} (root) {round((winfo.get("pss") or 0) / 1048576, 2)}MB', sub='monitor')
+				yield Stat(
+					name=getattr(self, 'unique_name', None) or self.cmd_name,
+					pid=worker_pid,
+					parent_pid=None,
+					cpu=winfo.get('cpu_percent') or 0,
+					memory=round((winfo.get('pss') or 0) / 1024 / 1024, 2),
+					memory_limit=self.memory_limit_mb,
+					net_conns=len(winfo.get('net_connections') or []),
+				)
+		known = tree_pids | ({worker_pid} if worker_pid else set())
 		for info in infos:
 			ppid = info.get('ppid')
-			parent_pid = ppid if ppid in tree_pids else None
+			parent_pid = ppid if ppid in known else None
 			mem = round((info.get('pss') or 0) / 1024 / 1024, 2)
 			self.debug(f'{info.get("name")} {info.get("pid")} (parent {parent_pid}) {mem}MB', sub='monitor')
 			yield Stat(

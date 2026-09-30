@@ -145,6 +145,36 @@ class TestProcessTreeMemory(unittest.TestCase):
 			proc.kill()
 			proc.wait()
 
+	def test_monitor_worker_flag_prepends_worker_root(self):
+		import os as _os
+		from secator.config import CONFIG
+		proc = _spawn_tree()
+		inst = Command.__new__(Command)
+		inst.process = proc
+		inst.cmd_name = 'katana'
+		inst.unique_name = 'katana_1'
+		inst.memory_limit_mb = -1
+		inst.debug = lambda *a, **k: None
+		saved = CONFIG.runners.monitor_worker
+		CONFIG.set('runners.monitor_worker', True)
+		try:
+			list(inst._collect_stats({}))  # cpu baseline
+			time.sleep(Command.first_stat_delay)
+			stats = list(inst._collect_stats({}))
+			by_pid = {s.pid: s for s in stats}
+			# the worker process (this process) is emitted as the single root, named after the task
+			worker = by_pid.get(_os.getpid())
+			self.assertIsNotNone(worker, 'worker stat not emitted with monitor_worker on')
+			self.assertIsNone(worker.parent_pid)
+			self.assertEqual(worker.name, 'katana_1')
+			self.assertEqual([s.pid for s in stats if s.parent_pid is None], [_os.getpid()])
+			# the task command now nests under the worker (worker -> command -> child)
+			self.assertEqual(by_pid[proc.pid].parent_pid, _os.getpid())
+		finally:
+			CONFIG.set('runners.monitor_worker', saved)
+			proc.kill()
+			proc.wait()
+
 
 if __name__ == '__main__':
 	unittest.main()
