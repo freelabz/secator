@@ -64,7 +64,11 @@ AI_TYPES = {
 	'scan': {'label': '🟢', 'color': 'magenta'},
 	'shell': {'label': '🟢', 'color': 'magenta'},
 	'add_finding': {'label': '🟢', 'color': 'magenta'},
-	'add_vuln_poc': {'label': '💥', 'color': 'magenta'},
+	'mark_vuln_exploited': {'label': '💥', 'color': 'magenta'},
+	'mark_vuln_false_positive': {'label': '🟡', 'color': 'magenta'},
+	'mark_vuln_exploit_failed': {'label': '🛡️', 'color': 'magenta'},
+	'update_finding': {'label': '✏️', 'color': 'magenta'},
+	'add_vuln_poc': {'label': '💥', 'color': 'magenta'},  # legacy: kept so old transcripts still render
 	'shell_output': {'label': '◀', 'color': 'dim white'},
 	'query': {'label': '🟢', 'color': 'magenta'},
 	'stopped': {'label': '🛑', 'color': 'orange3'},
@@ -72,7 +76,25 @@ AI_TYPES = {
 	'steer': {'label': '[STEER]', 'color': 'cyan'},
 }
 
-ACTION_TYPES = ('task', 'workflow', 'scan', 'shell', 'add_finding', 'add_vuln_poc', 'query', 'stopped')
+ACTION_TYPES = ('task', 'workflow', 'scan', 'shell', 'add_finding', 'mark_vuln_exploited',
+                'mark_vuln_false_positive', 'mark_vuln_exploit_failed', 'update_finding',
+                'add_vuln_poc', 'query', 'stopped')
+
+# Friendly console labels for action types whose auto-derived label (capitalize + '_'->' ')
+# reads awkwardly; everything else falls back to that default.
+ACTION_LABELS = {
+	'mark_vuln_exploited': 'Marked exploited',
+	'mark_vuln_false_positive': 'Marked false positive',
+	'mark_vuln_exploit_failed': 'Marked exploit-failed',
+	'update_finding': 'Updated finding',
+}
+
+# Finding-mutation actions: show the target finding's name in the line (the stored content is a
+# full sentence that just repeats the label), falling back to content when no finding is attached.
+# Legacy add_vuln_poc is intentionally excluded — old docs keep rendering exactly as they did.
+_FINDING_NAME_ACTIONS = {
+	'mark_vuln_exploited', 'mark_vuln_false_positive', 'mark_vuln_exploit_failed', 'update_finding',
+}
 
 
 @dataclass
@@ -165,9 +187,14 @@ class Ai(OutputType):
 			action_label = self.ai_type
 			if self.ai_type == 'stopped':
 				action_label = 'done'
-			action_label_str = action_label.capitalize().replace('_', ' ')
+			action_label_str = ACTION_LABELS.get(action_label, action_label.capitalize().replace('_', ' '))
 			line = f'{s}[bold blue]{action_label_str}[/]'
 			content = _s(self.content)
+			if self.ai_type in _FINDING_NAME_ACTIONS:
+				finding = self.extra_data.get('finding')
+				name = finding.get('name') if isinstance(finding, dict) else None
+				if name:
+					content = _s(name)
 			if self.ai_type in ['task', 'workflow']:
 				colors = {
 					'task': 'bold gold3',

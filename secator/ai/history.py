@@ -212,7 +212,7 @@ class ChatHistory:
         msgs = self.trim(budget) if budget > 0 else self.messages.copy()
         # Repair FORWARD orphan tool_uses before every LLM call: an assistant
         # tool_call with no matching tool_result. Some handlers (follow_up,
-        # add_vuln_poc, add_finding, stop) yield only an `Ai` and never append a
+        # mark_vuln_exploited, add_finding, stop) yield only an `Ai` and never append a
         # tool_result, so their tool_calls pile up unmatched over a turn. Providers
         # reject/degrade on an unmatched tool_call (the model starts narrating options
         # as prose instead of calling follow_up), so synthesize an acknowledgment.

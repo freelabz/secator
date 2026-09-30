@@ -147,7 +147,7 @@ def _yield_tool_results(runner, collected):
 		has_errors = any(r["_type"] == "error" for r in group_results)
 		# `_uuid` is normally internal, but for query_workspace results it is the
 		# stable, cross-backend handle the model must reference later — notably
-		# add_vuln_poc requires the `_uuid` "seen in query_workspace results". Keep
+		# mark_vuln_exploited requires the `_uuid` "seen in query_workspace results". Keep
 		# it for queries; strip the rest of INTERNAL_FIELDS as usual.
 		strip_fields = tuple(f for f in INTERNAL_FIELDS if f != "_uuid") \
 			if tc_name == "query_workspace" else INTERNAL_FIELDS

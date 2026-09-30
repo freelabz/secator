@@ -9,7 +9,8 @@ from secator.definitions import ADDONS_ENABLED
 if ADDONS_ENABLED['ai']:
 	from secator.ai.actions import (
 		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
-		_handle_query, _handle_add_finding, _handle_add_vuln_poc, _run_runner, _decrypt_dict,
+		_handle_query, _handle_add_finding, _handle_mark_vuln_exploited,
+		_handle_mark_vuln_false_positive, _run_runner, _decrypt_dict,
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
 		_build_child_hooks_or_denial, _child_preamble,
 		_MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
@@ -1460,8 +1461,8 @@ class TestHandleAddFinding(unittest.TestCase):
 		self.assertEqual(Vulnerability.validate_fields(data), [])
 
 	def test_add_finding_coerces_scalar_types(self):
-		# End-to-end: wrong-typed scalars flow through the handler and validate
-		# clean, producing a Vulnerability with the coerced bool/float values.
+		# End-to-end: wrong-typed CONTENT scalars coerce clean. Read-only/verdict fields
+		# (verified) are stripped as read-only, so a forged 'verified' must NOT land.
 		ctx = ActionContext(targets=['t.com'], model='m')
 		results = list(
 			_handle_add_finding(
@@ -1470,9 +1471,8 @@ class TestHandleAddFinding(unittest.TestCase):
 					'_type': 'vulnerability',
 					'name': 'SQL Injection',
 					'matched_at': 'http://t.com/login',
-					'verified': 'true',
-					'cvss_score': '7.5',
-					'severity_nb': '3',
+					'verified': 'true',   # read-only -> stripped
+					'cvss_score': '7.5',  # content -> coerced
 				},
 				ctx,
 			)
@@ -1482,13 +1482,12 @@ class TestHandleAddFinding(unittest.TestCase):
 		self.assertEqual(len(results), 2)
 		vuln = results[1]
 		self.assertIsInstance(vuln, Vulnerability)
-		self.assertIs(vuln.verified, True)
-		self.assertIsInstance(vuln.verified, bool)
+		self.assertFalse(vuln.verified)  # stripped -> default, not forced True
 		self.assertEqual(vuln.cvss_score, 7.5)
 		self.assertIsInstance(vuln.cvss_score, float)
 
-	def test_add_finding_unparseable_bool_surfaces_error(self):
-		# An unparseable value must NOT be silently dropped; validation reports it.
+	def test_add_finding_unparseable_scalar_surfaces_error(self):
+		# An unparseable CONTENT value must NOT be silently dropped; validation reports it.
 		ctx = ActionContext(targets=['t.com'], model='m')
 		results = list(
 			_handle_add_finding(
@@ -1497,7 +1496,7 @@ class TestHandleAddFinding(unittest.TestCase):
 					'_type': 'vulnerability',
 					'name': 'SQL Injection',
 					'matched_at': 'http://t.com/login',
-					'verified': 'maybe',
+					'cvss_score': 'maybe',
 				},
 				ctx,
 			)
@@ -1505,7 +1504,7 @@ class TestHandleAddFinding(unittest.TestCase):
 
 		self.assertEqual(len(results), 1)
 		self.assertIsInstance(results[0], Error)
-		self.assertIn('verified', results[0].message)
+		self.assertIn('cvss_score', results[0].message)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -1775,85 +1774,114 @@ class TestGatherSubagentEvidence(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
-class TestHandleAddVulnPoc(unittest.TestCase):
-	"""Tests for _handle_add_vuln_poc — record a PoC on an existing vulnerability."""
+class TestHandleMarkVulnExploited(unittest.TestCase):
+	"""Tests for _handle_mark_vuln_exploited — mark an existing vuln exploited + record its PoC."""
 
 	def _ctx(self):
 		return ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
 
-	def test_add_vuln_poc_exploited_sets_status_and_poc(self):
-		"""exploited=true -> $set poc + status=EXPLOITED + verified + is_false_positive=False,
-		and yields an add_vuln_poc Ai carrying the refreshed finding."""
+	def test_exploited_sets_status_and_poc(self):
+		"""$set poc + status=EXPLOITED + verified + is_false_positive=False, yields an Ai
+		carrying the refreshed finding, message names the vuln."""
 		mock_engine = MagicMock()
 		mock_engine.update.return_value = 1
-		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability", "poc": "# poc"}]
+		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability", "name": "SQLi", "poc": "# poc"}]
 		ctx = self._ctx()
-		action = {"action": "add_vuln_poc", "_uuid": "u1", "exploited": True, "poc": "# poc\ncmd -> output",
+		action = {"action": "mark_vuln_exploited", "_uuid": "u1", "poc": "# poc\ncmd -> output",
 			"confidence": "high", "extra_data": {"reason": "rce confirmed"}}
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc(action, ctx))
+			results = list(_handle_mark_vuln_exploited(action, ctx))
 		q, upd = mock_engine.update.call_args[0]
 		self.assertEqual(q, {"_type": "vulnerability", "_uuid": "u1"})
 		sset = upd["$set"]
-		self.assertEqual(sset["poc"], "# poc\ncmd -> output")
+		# the poc is date-stamped server-side and keeps the original body
+		self.assertRegex(sset["poc"], r"^_Exploited on \d{4}-\d{2}-\d{2}_")
+		self.assertIn("# poc\ncmd -> output", sset["poc"])
 		self.assertEqual(sset["status"], "EXPLOITED")
 		self.assertTrue(sset["verified"])
 		self.assertFalse(sset["is_false_positive"])
 		self.assertEqual(sset["confidence"], "high")
 		self.assertEqual(sset["confidence_nb"], 1)
 		self.assertEqual(sset["extra_data.reason"], "rce confirmed")
-		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"]
+		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "mark_vuln_exploited"]
 		self.assertEqual(len(ais), 1)
 		# The re-fetched finding reflects the $set we just applied (not a stale line).
-		self.assertEqual(ais[0].extra_data.get("finding", {}).get("poc"), "# poc\ncmd -> output")
+		self.assertIn("# poc\ncmd -> output", ais[0].extra_data.get("finding", {}).get("poc"))
 		self.assertEqual(ais[0].extra_data.get("finding", {}).get("status"), "EXPLOITED")
+		self.assertIn("SQLi", ais[0].content)
 		self.assertFalse([r for r in results if isinstance(r, Error)])
 
-	def test_add_vuln_poc_not_exploited_marks_false_positive(self):
-		"""exploited=false -> $set is_false_positive=True (no status/verified), poc not required."""
-		mock_engine = MagicMock()
-		mock_engine.update.return_value = 1
-		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability"}]
-		ctx = self._ctx()
-		action = {"action": "add_vuln_poc", "_uuid": "u1", "exploited": False,
-			"confidence": "low", "extra_data": {"reason": "target not reachable"}}
-		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc(action, ctx))
-		sset = mock_engine.update.call_args[0][1]["$set"]
-		self.assertTrue(sset["is_false_positive"])
-		self.assertNotIn("status", sset)
-		self.assertNotIn("poc", sset)
-		self.assertEqual(sset["confidence_nb"], 3)
-		self.assertEqual(sset["extra_data.reason"], "target not reachable")
-		self.assertEqual(len([r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"]), 1)
-
-	def test_add_vuln_poc_no_match_yields_error(self):
-		"""uuid matches nothing -> Error (so the LLM re-checks the uuid), no update-yield."""
+	def test_no_match_yields_error(self):
+		"""uuid matches nothing -> Error (so the LLM re-checks the uuid), no Ai."""
 		mock_engine = MagicMock()
 		mock_engine.update.return_value = 0
 		ctx = self._ctx()
-		action = {"action": "add_vuln_poc", "_uuid": "missing", "exploited": True, "poc": "x"}
+		action = {"action": "mark_vuln_exploited", "_uuid": "missing", "poc": "x"}
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc(action, ctx))
+			results = list(_handle_mark_vuln_exploited(action, ctx))
 		errors = [r for r in results if isinstance(r, Error)]
 		self.assertTrue(any("No vulnerability found" in e.message for e in errors))
-		self.assertFalse([r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"])
+		self.assertFalse([r for r in results if isinstance(r, Ai)])
 
-	def test_add_vuln_poc_missing_uuid_errors(self):
-		"""No _uuid -> Error, engine never touched."""
+	def test_missing_uuid_errors(self):
 		mock_engine = MagicMock()
 		ctx = self._ctx()
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc({"action": "add_vuln_poc", "exploited": True, "poc": "x"}, ctx))
+			results = list(_handle_mark_vuln_exploited({"action": "mark_vuln_exploited", "poc": "x"}, ctx))
 		self.assertTrue([r for r in results if isinstance(r, Error)])
 		mock_engine.update.assert_not_called()
 
-	def test_add_vuln_poc_exploited_empty_poc_errors(self):
-		"""exploited=true with blank poc -> Error, engine never touched."""
+	def test_empty_poc_errors(self):
+		"""Blank poc -> Error, engine never touched (proof is mandatory)."""
 		mock_engine = MagicMock()
 		ctx = self._ctx()
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc({"action": "add_vuln_poc", "_uuid": "u1", "exploited": True, "poc": "   "}, ctx))
+			results = list(_handle_mark_vuln_exploited({"action": "mark_vuln_exploited", "_uuid": "u1", "poc": "   "}, ctx))
+		self.assertTrue([r for r in results if isinstance(r, Error)])
+		mock_engine.update.assert_not_called()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestHandleMarkVulnFalsePositive(unittest.TestCase):
+	"""Tests for _handle_mark_vuln_false_positive — mark an existing vuln as a false positive."""
+
+	def _ctx(self):
+		return ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
+
+	def test_marks_false_positive_and_attaches_finding(self):
+		"""$set is_false_positive=True + status=FALSE_POSITIVE + verified=False; the result
+		carries the re-fetched finding (the old FP path attached none)."""
+		mock_engine = MagicMock()
+		mock_engine.update.return_value = 1
+		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability", "name": "XSS"}]
+		ctx = self._ctx()
+		action = {"action": "mark_vuln_false_positive", "_uuid": "u1", "reason": "target not reachable"}
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_false_positive(action, ctx))
+		sset = mock_engine.update.call_args[0][1]["$set"]
+		self.assertTrue(sset["is_false_positive"])
+		self.assertEqual(sset["status"], "FALSE_POSITIVE")
+		self.assertFalse(sset["verified"])
+		self.assertEqual(sset["extra_data.false_positive_reason"], "target not reachable")
+		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "mark_vuln_false_positive"]
+		self.assertEqual(len(ais), 1)
+		self.assertTrue(ais[0].extra_data.get("finding"))
+		self.assertIn("XSS", ais[0].content)
+
+	def test_no_match_yields_error(self):
+		mock_engine = MagicMock()
+		mock_engine.update.return_value = 0
+		ctx = self._ctx()
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_false_positive({"action": "mark_vuln_false_positive", "_uuid": "x"}, ctx))
+		self.assertTrue(any("No vulnerability found" in e.message for e in results if isinstance(e, Error)))
+		self.assertFalse([r for r in results if isinstance(r, Ai)])
+
+	def test_missing_uuid_errors(self):
+		mock_engine = MagicMock()
+		ctx = self._ctx()
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_false_positive({"action": "mark_vuln_false_positive"}, ctx))
 		self.assertTrue([r for r in results if isinstance(r, Error)])
 		mock_engine.update.assert_not_called()
 

@@ -12,11 +12,11 @@ class TestToolSchemas(unittest.TestCase):
 		from secator.ai.tools import TOOL_SCHEMAS
 		self.assertIsInstance(TOOL_SCHEMAS, dict)
 
-	def test_tool_schemas_has_seven_tools(self):
+	def test_tool_schemas_expected_set(self):
 		from secator.ai.tools import TOOL_SCHEMAS
-		self.assertEqual(len(TOOL_SCHEMAS), 7)
 		expected = {"run_task", "run_workflow", "run_shell", "query_workspace", "follow_up",
-		            "add_finding", "add_vuln_poc"}
+		            "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
+		            "mark_vuln_exploit_failed", "update_finding"}
 		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)
 
 	def test_tool_schemas_openai_format(self):
@@ -106,7 +106,7 @@ class TestBuildToolSchemas(unittest.TestCase):
 	def test_attack_mode_returns_all_tools(self):
 		from secator.ai.tools import build_tool_schemas, TOOL_SCHEMAS
 		schemas = build_tool_schemas("attack")
-		self.assertEqual(len(schemas), 7)
+		self.assertEqual(len(schemas), len(TOOL_SCHEMAS))
 		names = {s["function"]["name"] for s in schemas}
 		self.assertEqual(names, set(TOOL_SCHEMAS.keys()))
 
@@ -187,6 +187,20 @@ class TestToolCallToAction(unittest.TestCase):
 		self.assertEqual(result["action"], "follow_up")
 		self.assertEqual(result["reason"], "need guidance")
 		self.assertEqual(result["choices"], ["a", "b"])
+
+	def test_uuid_arg_is_normalized_to_underscore(self):
+		# Models often drop the leading underscore (`uuid` instead of `_uuid`); the
+		# converter normalizes it so finding tools don't error "requires `_uuid`".
+		from secator.ai.tools import tool_call_to_action
+		result = tool_call_to_action("mark_vuln_exploited", {"uuid": "u1", "poc": "# poc"})
+		self.assertEqual(result["_uuid"], "u1")
+		self.assertNotIn("uuid", result)
+
+	def test_existing_underscore_uuid_wins_over_uuid(self):
+		# If the model already sent `_uuid`, don't clobber it with a stray `uuid`.
+		from secator.ai.tools import tool_call_to_action
+		result = tool_call_to_action("mark_vuln_exploited", {"_uuid": "right", "uuid": "wrong", "poc": "x"})
+		self.assertEqual(result["_uuid"], "right")
 
 	def test_add_finding_conversion(self):
 		from secator.ai.tools import tool_call_to_action

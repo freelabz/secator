@@ -354,7 +354,10 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"query": _handle_query,
 		"follow_up": _handle_follow_up,
 		"add_finding": _handle_add_finding,
-		"add_vuln_poc": _handle_add_vuln_poc,
+		"mark_vuln_exploited": _handle_mark_vuln_exploited,
+		"mark_vuln_false_positive": _handle_mark_vuln_false_positive,
+		"mark_vuln_exploit_failed": _handle_mark_vuln_exploit_failed,
+		"update_finding": _handle_update_finding,
 		"stop": _handle_stop,
 	}
 
@@ -1157,6 +1160,10 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 
 	finding_type = action.get("_type", "")
 	finding_data = {k: v for k, v in action.items() if k not in ("action", "_type", "tool_call_id", "tool_call_name")}
+	# SECURITY: strip framework/server-owned + `*_path` fields the agent must not set (identity,
+	# provenance, dedup, verdict/derived) — see _drop_readonly_fields. `_context` is then set
+	# server-side below, so the finding is always scoped to THIS session's workspace.
+	finding_data = _drop_readonly_fields(finding_data)
 	finding_data["_context"] = context
 
 	# Decrypt field values
@@ -1225,91 +1232,347 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error(message=f"Failed to create {finding_type}: {e}\nExpected schema:\n{cls.schema()}", _context=context)
 
 
-def _handle_add_vuln_poc(action: Dict, ctx: ActionContext) -> Generator:
-	"""Record a proof-of-concept on an EXISTING vulnerability after exploitation.
+def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
+	"""Apply a workspace-scoped ``$set`` to the vulnerability with this ``_uuid``.
 
-	Fills the target vulnerability's ``poc`` field (markdown: the commands + outputs
-	that prove a true exploitation) with an in-place ``$set`` update matched by the
-	``_uuid`` the LLM saw in ``query_workspace`` results. This is the exploitation-result
-	sink the LLM uses INSTEAD of ``add_finding(exploit)``: an exploited vuln ends up with
-	its own filled ``poc``, not a separate Exploit finding.
+	Returns ``(modified, updated, label, error_msg)``: ``modified`` docs count,
+	the re-fetched vuln (dict, or None), a display ``label`` (the vuln's ``name``,
+	falling back to the uuid), and an ``error_msg`` string when nothing matched.
 
-	Uses ``QueryEngine.update`` (a ``$set`` on the matched doc, workspace-scoped) rather
-	than re-yielding the finding: the persistence hook keys updates on ``ObjectId(_uuid)``
-	but findings carry a non-ObjectId ``_uuid``, so a re-yield would INSERT a duplicate. A
-	scoped ``$set`` touches only ``poc`` and can't clobber the vuln's other fields.
+	Uses ``QueryEngine.update`` (an in-place ``$set`` on the matched doc) rather than
+	re-yielding the finding, so it works uniformly across backends without risking a
+	duplicate insert. On the mongodb driver a ``_uuid`` lookup/update is a native ``_id``
+	index seek (the query layer rewrites a valid-ObjectId ``_uuid`` to ``_id`` — findings
+	carry ``_uuid = str(_id)``), so the update + re-fetch are point operations, not
+	workspace scans. After the update it re-fetches and re-applies the same ``$set`` locally
+	— the json store is append-only (last-wins on read) so a tight limit can return a
+	pre-update line; on the store-backed drivers the fetch is already current, a no-op there.
 	"""
-	context = _get_result_context(action, ctx)
-	uuid = str(action.get("_uuid") or "").strip()
-	exploited = bool(action.get("exploited"))
-	poc = action.get("poc") or ""
-	if ctx.encryptor:
-		poc = _decrypt_dict({"poc": poc}, ctx.encryptor).get("poc", poc)
+	engine = ctx.get_query_engine()
+	query = {"_type": "vulnerability", "_uuid": uuid}
+	modified = engine.update(query, {"$set": update})
+	if not modified:
+		return 0, None, uuid, (
+			f"No vulnerability found with _uuid={uuid} in this workspace. "
+			"Re-check the `_uuid` from query_workspace results."
+		)
+	updated = (engine.search(query, limit=1) or [None])[0]
+	if updated:
+		from secator.query.json import _apply_set
+		_apply_set(updated, update)
+	label = (updated.get("name") if isinstance(updated, dict) else None) or uuid
+	return modified, updated, label, None
 
-	if not uuid:
-		yield Error(message="add_vuln_poc requires the vulnerability `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
-		return
-	# A claimed exploitation must carry proof; a false-positive verdict needs none.
-	if exploited and not str(poc).strip():
-		yield Error(message="add_vuln_poc with exploited=true requires a non-empty `poc` (commands + outputs proving exploitation).", _context=context)  # noqa: E501
-		return
 
-	# Build a scoped $set: exploited -> status Exploited + verified; not-exploited -> false positive
-	# (mirrors clients, where FALSE_POSITIVE is stored as is_false_positive, not in `status`).
-	update = {}
-	if exploited:
-		update["poc"] = poc
-		update["status"] = "EXPLOITED"
-		update["verified"] = True
-		update["is_false_positive"] = False
-	else:
-		update["is_false_positive"] = True
-		if str(poc).strip():
-			update["poc"] = poc
-
-	# Confidence re-prioritizes the vuln (confidence_nb: high=1 sorts first .. low=3).
-	confidence = str(action.get("confidence") or "").strip().lower()
-	if confidence in ("low", "medium", "high"):
-		update["confidence"] = confidence
-		update["confidence_nb"] = {"high": 1, "medium": 2, "low": 3}[confidence]
-
-	# Merge extra_data with dotted keys so existing keys survive.
-	extra_data = action.get("extra_data")
+def _merge_extra_data(update: Dict, extra_data) -> None:
+	"""Merge caller ``extra_data`` into ``update`` with dotted keys so existing keys survive."""
 	if isinstance(extra_data, dict):
 		for k, v in extra_data.items():
 			key = str(k)
 			if key and "." not in key and not key.startswith("$"):
 				update[f"extra_data.{key}"] = v
 
-	engine = ctx.get_query_engine()
-	query = {"_type": "vulnerability", "_uuid": uuid}
-	try:
-		modified = engine.update(query, {"$set": update})
-	except Exception as e:
-		yield Error(message=f"Failed to record vulnerability PoC: {e}", _context=context)
+
+def _handle_mark_vuln_exploited(action: Dict, ctx: ActionContext) -> Generator:
+	"""Mark an EXISTING vulnerability as exploited, recording its proof-of-concept.
+
+	Fills the vuln's ``poc`` (markdown: the commands + outputs proving exploitation) and
+	sets ``status=EXPLOITED`` / ``verified=True`` / ``is_false_positive=False`` via a scoped
+	``$set`` matched by the ``_uuid`` the LLM saw in ``query_workspace`` results. This is the
+	exploitation-result sink used INSTEAD of ``add_finding(exploit)``: an exploited vuln ends
+	up with its own filled ``poc``, not a separate Exploit finding. A claimed exploitation
+	MUST carry proof — an empty ``poc`` is refused. Also fills the vuln's own ``remediation``
+	and ``impact`` fields when supplied, and stamps the exploitation date into the ``poc``
+	(the model can't be trusted for the real date, so we set it server-side).
+	"""
+	from datetime import datetime, timezone
+	context = _get_result_context(action, ctx)
+	uuid = str(action.get("_uuid") or "").strip()
+	poc = action.get("poc") or ""
+	remediation = action.get("remediation") or ""
+	impact = action.get("impact") or ""
+	if ctx.encryptor:
+		dec = _decrypt_dict({"poc": poc, "remediation": remediation, "impact": impact}, ctx.encryptor)
+		poc = dec.get("poc", poc)
+		remediation = dec.get("remediation", remediation)
+		impact = dec.get("impact", impact)
+
+	if not uuid:
+		yield Error(message="mark_vuln_exploited requires the vulnerability `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
+		return
+	if not str(poc).strip():
+		yield Error(message="mark_vuln_exploited requires a non-empty `poc` (commands + outputs proving exploitation).", _context=context)  # noqa: E501
 		return
 
-	if not modified:
+	# Stamp the exploitation date at the top of the PoC (authoritative server-side date).
+	poc = f"_Exploited on {datetime.now(timezone.utc).strftime('%Y-%m-%d')}_\n\n{str(poc).strip()}"
+
+	update = {"poc": poc, "status": "EXPLOITED", "verified": True, "is_false_positive": False}
+	if str(remediation).strip():
+		update["remediation"] = str(remediation).strip()
+	if str(impact).strip():
+		update["impact"] = str(impact).strip()
+	# Confidence re-prioritizes the vuln (confidence_nb: high=1 sorts first .. low=3).
+	confidence = str(action.get("confidence") or "").strip().lower()
+	if confidence in ("low", "medium", "high"):
+		update["confidence"] = confidence
+		update["confidence_nb"] = {"high": 1, "medium": 2, "low": 3}[confidence]
+	_merge_extra_data(update, action.get("extra_data"))
+
+	try:
+		modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+	except Exception as e:
+		yield Error(message=f"Failed to mark vulnerability exploited: {e}", _context=context)
+		return
+	if err:
+		yield Error(message=err, _context=context)
+		return
+	yield Ai(
+		content=f"Marked {label} as exploited (PoC recorded).",
+		ai_type="mark_vuln_exploited",
+		extra_data={"finding": updated} if updated else {},
+		_context=context,
+	)
+
+
+def _handle_mark_vuln_false_positive(action: Dict, ctx: ActionContext) -> Generator:
+	"""Mark an EXISTING vulnerability as a false positive.
+
+	Sets ``is_false_positive=True`` (the authoritative hide-flag the store base query
+	filters on EVERY backend, so the finding disappears from all reads/reports),
+	``status=FALSE_POSITIVE`` and ``verified=False`` via a scoped ``$set`` matched by the
+	``_uuid`` from ``query_workspace``. Non-destructive: the finding is kept and stays
+	recoverable (unset ``is_false_positive``). An optional ``reason`` is stored in
+	``extra_data.false_positive_reason``.
+	"""
+	context = _get_result_context(action, ctx)
+	uuid = str(action.get("_uuid") or "").strip()
+	if not uuid:
+		yield Error(message="mark_vuln_false_positive requires the vulnerability `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
+		return
+	reason = str(action.get("reason") or "").strip()
+	if ctx.encryptor and reason:
+		reason = _decrypt_dict({"reason": reason}, ctx.encryptor).get("reason", reason)
+
+	update = {"is_false_positive": True, "status": "FALSE_POSITIVE", "verified": False}
+	if reason:
+		update["extra_data.false_positive_reason"] = reason
+	_merge_extra_data(update, action.get("extra_data"))
+
+	try:
+		modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+	except Exception as e:
+		yield Error(message=f"Failed to mark vulnerability false positive: {e}", _context=context)
+		return
+	if err:
+		yield Error(message=err, _context=context)
+		return
+	msg = f"Marked {label} as a false positive" + (f" ({reason})." if reason else ".")
+	yield Ai(
+		content=msg,
+		ai_type="mark_vuln_false_positive",
+		extra_data={"finding": updated} if updated else {},
+		_context=context,
+	)
+
+
+def _handle_mark_vuln_exploit_failed(action: Dict, ctx: ActionContext) -> Generator:
+	"""Mark an EXISTING vulnerability as EXPLOIT FAILED — a real vuln this attempt could not
+	exploit, kept VISIBLE so a later attempt can retry (unlike mark_vuln_false_positive, which
+	hides a not-real finding). Sets ``status="EXPLOIT FAILED"`` via a scoped ``$set`` matched by
+	``_uuid``; leaves ``is_false_positive`` and ``verified`` untouched. Fills ``remediation`` /
+	``impact`` when supplied (they still apply), and stores an optional ``reason`` in
+	``extra_data.exploit_failed_reason``.
+	"""
+	context = _get_result_context(action, ctx)
+	uuid = str(action.get("_uuid") or "").strip()
+	if not uuid:
+		yield Error(message="mark_vuln_exploit_failed requires the vulnerability `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
+		return
+	reason = str(action.get("reason") or "").strip()
+	remediation = action.get("remediation") or ""
+	impact = action.get("impact") or ""
+	if ctx.encryptor:
+		dec = _decrypt_dict({"reason": reason, "remediation": remediation, "impact": impact}, ctx.encryptor)
+		reason = dec.get("reason", reason)
+		remediation = dec.get("remediation", remediation)
+		impact = dec.get("impact", impact)
+
+	update = {"status": "EXPLOIT FAILED"}
+	if str(remediation).strip():
+		update["remediation"] = str(remediation).strip()
+	if str(impact).strip():
+		update["impact"] = str(impact).strip()
+	if reason:
+		update["extra_data.exploit_failed_reason"] = reason
+	_merge_extra_data(update, action.get("extra_data"))
+
+	try:
+		modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+	except Exception as e:
+		yield Error(message=f"Failed to mark vulnerability exploit-failed: {e}", _context=context)
+		return
+	if err:
+		yield Error(message=err, _context=context)
+		return
+	msg = f"Marked {label} as exploit-failed" + (f" ({reason})." if reason else ".")
+	yield Ai(
+		content=msg,
+		ai_type="mark_vuln_exploit_failed",
+		extra_data={"finding": updated} if updated else {},
+		_context=context,
+	)
+
+
+# Fields that must never be overwritten via update_finding (identity / routing / scope).
+_FINDING_IMMUTABLE_FIELDS = {"_uuid", "_type", "_id", "_context", "id"}
+
+# Real scan-finding types (vulnerability/url/port/…) update_finding may edit. Restricting to
+# these stops a known `_uuid` from editing a non-finding record: error/warning/info (EXECUTION_TYPES)
+# and stat (STAT_TYPES) aren't in FINDING_TYPES already, and `ai` IS in FINDING_TYPES but is the
+# conversation/action-doc type — editing it would tamper the transcript, so exclude it.
+_FINDING_TYPE_NAMES = frozenset(cls.get_name().lower() for cls in FINDING_TYPES) - {"ai"}
+
+
+# Server/pipeline-owned finding fields the GENERIC add_finding/update_finding must never let the
+# agent write. The dedicated mark_vuln_* tools set the verdict fields themselves via a server-built
+# `$set`, so they are unaffected — only the free-form tools are restricted.
+_AGENT_READONLY_FIELDS = frozenset({
+	"workspace_id",                                                 # scope lives on _context, never top-level
+	"verified", "status", "is_false_positive", "is_acknowledged",   # verdict — forging bypasses mark_vuln_* gates
+	"confidence_nb", "severity_nb",                                 # server-derived in __post_init__
+})
+
+
+def _drop_readonly_fields(data: Dict) -> Dict:
+	"""Strip fields an LLM-supplied finding write must not set.
+
+	SECURITY: these tools write STRAIGHT to the store on the worker, bypassing the API's ingest
+	guards, so a prompt-injected agent must not reach:
+	- ``*_path`` — worker-filesystem paths streamed back by the finding-storage endpoint
+	  (authenticated arbitrary-file-read / foreign-blob read);
+	- any ``_``-prefixed framework field — identity/scope (``_uuid``/``_context``/``_id``),
+	  provenance (``_source``/``_timestamp``), dedup (``_tagged``/``_duplicate``/``_related``),
+	  the notification flag (``_email_notified``), etc.;
+	- verdict/derived fields (``_AGENT_READONLY_FIELDS``) — forging ``verified``/``status``/
+	  ``is_false_positive`` bypasses the dedicated tools' gates (e.g. mark_vuln_exploited's
+	  mandatory PoC); ``confidence_nb``/``severity_nb`` are recomputed by the server.
+	Deny-by-default on the framework (``_`` prefix) keeps future ``_``-fields safe automatically.
+	"""
+	return {
+		k: v for k, v in data.items()
+		if not str(k).startswith("_")
+		and not str(k).endswith("_path")
+		and k not in _AGENT_READONLY_FIELDS
+	}
+
+
+def _lookup_finding(ctx: "ActionContext", uuid: str):
+	"""Return the live workspace finding with this ``_uuid`` (dict), or None. Workspace-scoped
+	via the engine's base query, so it never reaches another workspace or an already-removed doc."""
+	engine = ctx.get_query_engine()
+	return (engine.search({"_uuid": uuid}, limit=1) or [None])[0]
+
+
+def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
+	"""Set fields on an EXISTING finding (any type) identified by ``_uuid``.
+
+	A workspace-scoped ``$set`` touching only the caller-named fields — immutable
+	identity/routing keys are stripped, and mutating a ``target`` finding is refused so the
+	AI can't widen scope. Used to fix a wrong field (e.g. severity), add tags/cves, or enrich
+	extra_data. For a vulnerability's exploited / false-positive verdict, prefer the dedicated
+	``mark_vuln_exploited`` / ``mark_vuln_false_positive`` tools.
+	"""
+	context = _get_result_context(action, ctx)
+	uuid = str(action.get("_uuid") or "").strip()
+	if not uuid:
+		yield Error(message="update_finding requires the finding `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
+		return
+
+	fields = action.get("fields") or {}
+	extra_data = action.get("extra_data") or {}
+	if isinstance(fields, str):
+		try:
+			fields = json.loads(fields)
+		except (json.JSONDecodeError, TypeError):
+			fields = {}
+	if isinstance(extra_data, str):
+		try:
+			extra_data = json.loads(extra_data)
+		except (json.JSONDecodeError, TypeError):
+			extra_data = {}
+	if not isinstance(fields, dict) or not isinstance(extra_data, dict):
+		yield Error(message="update_finding `fields` and `extra_data` must be JSON objects.", _context=context)
+		return
+	if ctx.encryptor:
+		fields = _decrypt_dict(fields, ctx.encryptor)
+		extra_data = _decrypt_dict(extra_data, ctx.encryptor)
+
+	existing = _lookup_finding(ctx, uuid)
+	if not existing:
 		yield Error(
-			message=f"No vulnerability found with _uuid={uuid} in this workspace. "
-			        "Re-check the `_uuid` from query_workspace results.",
+			message=f"No finding found with _uuid={uuid} in this workspace. Re-check the `_uuid` from query_workspace results.",  # noqa: E501
 			_context=context,
 		)
 		return
+	etype = str(existing.get("_type", "")).lower()
+	if etype == "target":
+		yield Error(message="Refusing to update a 'target' finding (scope integrity).", _context=context)
+		return
+	if etype not in _FINDING_TYPE_NAMES:
+		yield Error(message=f"Refusing to update a non-finding record (_type={etype!r}).", _context=context)
+		return
+	cls = {c.get_name().lower(): c for c in FINDING_TYPES}[etype]
 
-	# Re-fetch so the chat can render the updated VulnerabilityCard, then apply the
-	# same $set to it: the json store is append-only (last-wins on read) and a tight
-	# limit can return a pre-update line, so reflect the change we just made. On the
-	# store-backed drivers the fetch is already current, so this is a no-op there.
-	updated = (engine.search(query, limit=1) or [None])[0]
+	# Only agent-writable content fields (framework/server-owned + `*_path` stripped); `id`
+	# stays blocked on UPDATE via _FINDING_IMMUTABLE_FIELDS below.
+	fields = _drop_readonly_fields(fields)
+	# An `extra_data` object passed INSIDE `fields` must merge via dotted keys (like the dedicated
+	# `extra_data` arg) — a whole-object $set would clobber existing keys AND conflict with the
+	# dotted `extra_data.*` paths on Mongo. Fold it into extra_data (the dedicated arg wins).
+	fields_extra = fields.pop("extra_data", None)
+	if isinstance(fields_extra, dict):
+		extra_data = {**fields_extra, **extra_data}
+	# Validate the remaining content fields against the finding's schema (coerce sloppy scalars
+	# first, like add_finding) so a wrong-shaped value (e.g. tags="xss" where a list is required)
+	# is rejected up front, not persisted raw.
+	fields = _coerce_finding_fields(cls, fields)
+	errors = cls.validate_fields(fields)
+	if errors:
+		yield Error(message=f"Invalid {etype} fields: {'; '.join(errors)}", _context=context)
+		return
+
+	update = {}
+	for k, v in fields.items():
+		key = str(k)
+		if key in _FINDING_IMMUTABLE_FIELDS or key.startswith("$") or "." in key:
+			continue
+		update[key] = v
+	for k, v in extra_data.items():
+		key = str(k)
+		if key and "." not in key and not key.startswith("$"):
+			update[f"extra_data.{key}"] = v
+	if not update:
+		yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
+		return
+
+	engine = ctx.get_query_engine()
+	try:
+		modified = engine.update({"_uuid": uuid}, {"$set": update})
+	except Exception as e:
+		yield Error(message=f"Failed to update finding: {e}", _context=context)
+		return
+	if not modified:
+		yield Error(message=f"No finding updated for _uuid={uuid}.", _context=context)
+		return
+
+	updated = _lookup_finding(ctx, uuid)
 	if updated:
 		from secator.query.json import _apply_set
 		_apply_set(updated, update)
-	msg = (f"Recorded exploitation PoC on vulnerability {uuid} (marked Exploited)." if exploited
-		else f"Marked vulnerability {uuid} as a false positive (could not be exploited).")
 	yield Ai(
-		content=msg,
-		ai_type="add_vuln_poc",
+		content=f"Updated finding {uuid} ({', '.join(sorted(update.keys()))}).",
+		ai_type="update_finding",
 		extra_data={"finding": updated} if updated else {},
 		_context=context,
 	)
