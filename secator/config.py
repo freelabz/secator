@@ -112,6 +112,11 @@ class Runners(StrictModel):
 	input_chunk_size: int = 100
 	progress_update_frequency: int = 20
 	stat_update_frequency: int = 20
+	# Also emit a Stat for the worker process itself (the process running the task), as an extra
+	# root above the command in the stat tree. Meant for a 1-task-per-worker setup, where the
+	# subtree total then reflects the task's full footprint including the worker; off by default
+	# (in a shared/CLI process the worker's memory isn't attributable to one task).
+	monitor_worker: bool = False
 	backend_update_frequency: int = 5
 	poll_frequency: int = 5
 	skip_cve_search: bool = False

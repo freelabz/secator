@@ -84,5 +84,97 @@ class TestGetProcessInfoCpu(unittest.TestCase):
 		self.assertLess(Command.first_stat_delay, 1.0)
 
 
+# A parent that spawns one child, so the tree has >1 process (like a task that spawns a browser).
+PARENT = (
+	'import subprocess, sys, time\n'
+	'child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(8)"])\n'
+	'sys.stdout.write("READY\\n")\n'
+	'sys.stdout.flush()\n'
+	't = time.time()\n'
+	'while time.time() - t < 6:\n'
+	'\tpass\n'
+)
+
+
+def _spawn_tree():
+	proc = subprocess.Popen([sys.executable, '-c', PARENT], stdout=subprocess.PIPE, text=True)
+	assert proc.stdout.readline().strip() == 'READY', 'parent never signalled readiness'
+	return proc
+
+
+class TestProcessTreeMemory(unittest.TestCase):
+	"""Memory is reported for the whole process tree, once, using PSS (no shared-page double-count)."""
+
+	def test_get_process_info_includes_pss(self):
+		proc = _spawn()
+		procs = {}
+		try:
+			info = next(Command.get_process_info(psutil.Process(proc.pid), procs=procs))
+			self.assertIn('pss', info)
+			self.assertGreater(info['pss'], 0)
+		finally:
+			proc.kill()
+			proc.wait()
+
+	def test_collect_stats_emits_per_process_with_parent_links(self):
+		proc = _spawn_tree()
+		inst = Command.__new__(Command)
+		inst.process = proc
+		inst.cmd_name = 'python-tree'
+		inst.memory_limit_mb = -1
+		inst.debug = lambda *a, **k: None
+		try:
+			list(inst._collect_stats({}))  # cpu baseline
+			time.sleep(Command.first_stat_delay)
+			stats = list(inst._collect_stats({}))
+			# One Stat PER process (drill-down), not a single aggregate: parent + spawned child.
+			self.assertGreaterEqual(len(stats), 2)
+			pids = {s.pid for s in stats}
+			roots = [s for s in stats if s.parent_pid is None]
+			# Exactly one root = the task command itself; its parent is outside the tree.
+			self.assertEqual(len(roots), 1)
+			self.assertEqual(roots[0].pid, proc.pid)
+			# Every non-root points at a parent that is itself in the tree (nestable).
+			for s in stats:
+				if s.parent_pid is not None:
+					self.assertIn(s.parent_pid, pids)
+			# Per-process PSS; the subtree sum is the true footprint.
+			self.assertTrue(all(s.memory >= 0 for s in stats))
+			self.assertGreater(sum(s.memory for s in stats), 0)
+		finally:
+			proc.kill()
+			proc.wait()
+
+	def test_monitor_worker_flag_prepends_worker_root(self):
+		import os as _os
+		from secator.config import CONFIG
+		proc = _spawn_tree()
+		inst = Command.__new__(Command)
+		inst.process = proc
+		inst.cmd_name = 'katana'
+		inst.unique_name = 'katana_1'
+		inst.memory_limit_mb = -1
+		inst.debug = lambda *a, **k: None
+		saved = CONFIG.runners.monitor_worker
+		CONFIG.set('runners.monitor_worker', True)
+		try:
+			list(inst._collect_stats({}))  # cpu baseline
+			time.sleep(Command.first_stat_delay)
+			stats = list(inst._collect_stats({}))
+			by_pid = {s.pid: s for s in stats}
+			# the worker process (this process) is emitted as the single root, named after the task
+			worker = by_pid.get(_os.getpid())
+			self.assertIsNotNone(worker, 'worker stat not emitted with monitor_worker on')
+			self.assertIsNone(worker.parent_pid)
+			self.assertEqual(worker.name, 'katana_1')
+			self.assertEqual([s.pid for s in stats if s.parent_pid is None], [_os.getpid()])
+			# the task command now nests under the worker (worker -> command -> child)
+			self.assertEqual(by_pid[proc.pid].parent_pid, _os.getpid())
+		finally:
+			CONFIG.set('runners.monitor_worker', saved)
+			proc.kill()
+			proc.wait()
+
+
 if __name__ == '__main__':
 	unittest.main()
