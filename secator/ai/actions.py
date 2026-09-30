@@ -64,6 +64,10 @@ class ActionContext:
 	scope: str = "workspace"
 	results: Optional[List[Dict]] = None
 	max_workers: int = 3
+	# Parent's RESOLVED agent-loop cap, handed down so a spawned AI subagent gets the
+	# SAME turn budget as the parent (else the mode floor of 5 starves it). Trusted
+	# (operator/config-resolved, not LLM-set), so it bypasses the _MAX_CHILD_ITERATIONS clamp.
+	max_iterations: int = 0
 	in_batch: bool = False  # set on the per-batch ctx so the per-turn fan-out cap applies
 	subagent: bool = False
 	silent: bool = False
@@ -558,6 +562,13 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		sub_session = str(uuid.uuid4())
 		context["parent_session_id"] = parent_session
 		context["session_id"] = sub_session
+		# Give the subagent the SAME turn budget as the parent (else the exploit/attack
+		# mode floor of 5 iterations starves it). setdefault so an explicit per-subagent
+		# max_iterations the LLM supplied (already clamped to _MAX_CHILD_ITERATIONS by
+		# _sanitize_child_opts above) still wins. inf/0 parents are skipped -> subagent
+		# resolves via its own mode/config path (uncapped stays uncapped for both).
+		if isinstance(ctx.max_iterations, int) and ctx.max_iterations > 0:
+			opts.setdefault("max_iterations", ctx.max_iterations)
 
 	# defense in depth: a spawned runner is never dangerous (CLI --dangerous unaffected)
 	opts["dangerous"] = False
