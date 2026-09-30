@@ -116,7 +116,7 @@ class TestProcessTreeMemory(unittest.TestCase):
 			proc.kill()
 			proc.wait()
 
-	def test_collect_stats_emits_one_aggregate_for_the_tree(self):
+	def test_collect_stats_emits_per_process_with_parent_links(self):
 		proc = _spawn_tree()
 		inst = Command.__new__(Command)
 		inst.process = proc
@@ -127,14 +127,20 @@ class TestProcessTreeMemory(unittest.TestCase):
 			list(inst._collect_stats({}))  # cpu baseline
 			time.sleep(Command.first_stat_delay)
 			stats = list(inst._collect_stats({}))
-			# ONE Stat for the whole tree, not one per process
-			self.assertEqual(len(stats), 1)
-			stat = stats[0]
-			self.assertEqual(stat.name, 'python-tree')   # the command (parent), not a child pid
-			self.assertEqual(stat.pid, proc.pid)
-			self.assertGreater(stat.memory, 0)
-			# the tree total covers parent + spawned child, with a per-process breakdown kept aside
-			self.assertGreaterEqual(len(stat.extra_data.get('processes', [])), 2)
+			# One Stat PER process (drill-down), not a single aggregate: parent + spawned child.
+			self.assertGreaterEqual(len(stats), 2)
+			pids = {s.pid for s in stats}
+			roots = [s for s in stats if s.parent_pid is None]
+			# Exactly one root = the task command itself; its parent is outside the tree.
+			self.assertEqual(len(roots), 1)
+			self.assertEqual(roots[0].pid, proc.pid)
+			# Every non-root points at a parent that is itself in the tree (nestable).
+			for s in stats:
+				if s.parent_pid is not None:
+					self.assertIn(s.parent_pid, pids)
+			# Per-process PSS; the subtree sum is the true footprint.
+			self.assertTrue(all(s.memory >= 0 for s in stats))
+			self.assertGreater(sum(s.memory for s in stats), 0)
 		finally:
 			proc.kill()
 			proc.wait()

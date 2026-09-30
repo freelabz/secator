@@ -817,30 +817,29 @@ class Command(Runner):
 		infos = list(Command.get_process_info(psutil.Process(self.process.pid), children=True, procs=procs))
 		if not infos:
 			return
-		# Emit ONE Stat for the task's whole process tree (the command + every process it spawns,
-		# e.g. a browser). Memory is the sum of PSS, which apportions shared pages, so it is the
-		# tree's real footprint; summing per-process RSS instead double-counts the pages a parent
-		# shares with its forks and the shared libraries every process maps. CPU and connections
-		# sum across the tree. Per-process breakdown is kept in extra_data for visibility, but the
-		# headline `memory` is a single, non-double-counted total — also what the memory-limit
-		# check in _monitor_process sums.
-		total_mem = round(sum((i.get('pss') or 0) for i in infos) / 1024 / 1024, 2)
-		total_cpu = round(sum((i.get('cpu_percent') or 0) for i in infos), 2)
-		total_conns = sum(len(i.get('net_connections') or []) for i in infos)
-		processes = [
-			{'name': i.get('name'), 'pid': i.get('pid'), 'memory': round((i.get('pss') or 0) / 1024 / 1024, 2)}
-			for i in infos
-		]
-		self.debug(f'{self.cmd_name} tree: {total_mem}MB PSS across {len(infos)} process(es)', sub='monitor')
-		yield Stat(
-			name=self.cmd_name,
-			pid=self.process.pid,
-			cpu=total_cpu,
-			memory=total_mem,
-			memory_limit=self.memory_limit_mb,
-			net_conns=total_conns,
-			extra_data={'processes': processes},
-		)
+		# One Stat PER process in the task's tree (the command + everything it spawns, e.g. a
+		# browser), so a consumer can drill into per-process utilization. Each memory is that
+		# process's PSS (proportional set size), which apportions shared pages — so summing PSS
+		# across the tree (or any subtree) gives its true footprint, unlike RSS which counts a
+		# parent's copy-on-write pages and the shared libraries every process maps once per
+		# process. `parent_pid` links each process to its parent within the tree (None for the
+		# root = the command itself), so stats can be nested (show roots, expand children). The
+		# memory-limit check in _monitor_process sums these PSS values, which is now correct.
+		tree_pids = {i['pid'] for i in infos}
+		for info in infos:
+			ppid = info.get('ppid')
+			parent_pid = ppid if ppid in tree_pids else None
+			mem = round((info.get('pss') or 0) / 1024 / 1024, 2)
+			self.debug(f'{info.get("name")} {info.get("pid")} (parent {parent_pid}) {mem}MB', sub='monitor')
+			yield Stat(
+				name=info.get('name'),
+				pid=info.get('pid'),
+				parent_pid=parent_pid,
+				cpu=info.get('cpu_percent') or 0,
+				memory=mem,
+				memory_limit=self.memory_limit_mb,
+				net_conns=len(info.get('net_connections') or []),
+			)
 
 	@staticmethod
 	def get_process_info(process, children=False, procs=None):
