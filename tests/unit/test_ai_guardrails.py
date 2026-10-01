@@ -233,6 +233,19 @@ class TestDetection(unittest.TestCase):
 		self.assertEqual(extract_command_targets("sleep 0.5"), [])
 		self.assertIn("1.2.3.4", extract_command_targets("nmap 1.2.3.4"))  # real IP still a target
 
+	def test_extract_command_targets_ip_hidden_in_code_string(self):
+		"""An IP buried in a `python3 -c "..."` code string (one multi-token arg the
+		per-arg walk skips) must still be extracted, so the scope gate sees it and a
+		shell command can't route around an out-of-scope deny. Regression for the
+		raw-sweep moving into the parse-failure branch only."""
+		cmd = "python3 -c \"import socket; s=socket.socket(); s.connect(('34.118.226.132',21))\""
+		self.assertIn("34.118.226.132", extract_command_targets(cmd))
+
+	def test_extract_command_targets_ip_in_non_http_scheme(self):
+		"""A non-http(s) scheme the URL regex ignores (ftp://IP) must still surface its
+		IP as a target."""
+		self.assertIn("34.118.226.132", extract_command_targets("curl -sv ftp://34.118.226.132/"))
+
 	def test_extract_command_targets_host(self):
 		targets = extract_command_targets("nmap example.com")
 		self.assertIn("example.com", targets)
