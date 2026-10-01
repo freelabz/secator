@@ -1175,6 +1175,39 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 # =============================================================================
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
+class TestModeAutoVsPinned(unittest.TestCase):
+    """A HARD-SET mode is sticky and non-escalating; an AUTO mode re-detects every turn."""
+
+    def test_hardset_mode_never_escalates(self):
+        """mode_is_auto=False: _detect_mode keeps the pinned mode and never classifies,
+        even when the prompt screams exploit — a chat session can't silently escalate."""
+        from secator.tasks.ai import ai as AiTask
+        fake = MagicMock()
+        fake.mode_is_auto = False
+        fake.mode = "chat"
+        fake.tool_schemas = []  # already built, same mode -> no rebuild
+        with patch("secator.tasks.ai.fast_detect_mode") as fd:
+            AiTask._detect_mode(fake)
+        self.assertEqual(fake.mode, "chat")
+        fd.assert_not_called()  # pinned mode is never re-classified
+
+    def test_auto_mode_redetects_each_turn(self):
+        """mode_is_auto=True: _detect_mode re-classifies the current prompt and adopts
+        the detected mode (fluid chat<->attack<->exploit), even if it was chat before."""
+        from secator.tasks.ai import ai as AiTask
+        fake = MagicMock()
+        fake.mode_is_auto = True
+        fake.mode = "chat"
+        fake.prompt = "exploit the Apache path traversal now"
+        fake.is_subagent = False
+        fake.max_iterations = 5
+        with patch("secator.tasks.ai.fast_detect_mode", return_value="attack"), \
+             patch("secator.tasks.ai.build_tool_schemas", return_value=[]):
+            AiTask._detect_mode(fake)
+        self.assertEqual(fake.mode, "attack")
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
 class TestSubagentOwnToolResults(unittest.TestCase):
 	"""A subagent stamps the `subagent` marker on its OWN tool outputs too. Those
 	must still be fed back to its LLM (collected -> add_tool_result), else its tool

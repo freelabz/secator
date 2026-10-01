@@ -677,6 +677,8 @@ class TestFastDetectMode(unittest.TestCase):
 		from secator.tasks.ai import ai
 		task = ai.__new__(ai)
 		task.mode = mode
+		# Mirror _resolve_opts: empty/"auto" opt -> auto-detect; a concrete mode -> hard-set.
+		task.mode_is_auto = mode in ("", "auto")
 		task.prompt = prompt
 		task.intent_model = "intent-model"
 		task.model = "main-model"
@@ -717,21 +719,30 @@ class TestFastDetectMode(unittest.TestCase):
 		self.assertEqual(mock_llm.call_args[0][1], "intent-model")  # uses intent_model
 		self.assertEqual(task.mode, "chat")
 
-	def test_force_redetects_over_explicit_mode(self):
-		"""force=True re-detects even when mode was explicitly set (fast-path applies)."""
-		task = self._make_task("scan the target", mode="chat")
+	def test_hardset_mode_is_sticky_even_with_force(self):
+		"""A hard-set (user-pinned) mode never re-detects — not without force, and NOT
+		with force. A chat session can't silently escalate into attack, even on a prompt
+		whose fast-path cue is attack. (force is now vestigial for a pinned mode.)"""
+		task = self._make_task("scan the target", mode="chat")  # mode_is_auto=False
 		p_sys, p_tools, p_cfg = self._patches()
-		# Without force, explicit mode short-circuits (no detection, no LLM).
+		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm, \
+				patch("secator.tasks.ai.fast_detect_mode") as mock_fast:
+			task._detect_mode()
+			task._detect_mode(force=True)
+		self.assertEqual(task.mode, "chat")       # stayed chat both times
+		mock_llm.assert_not_called()
+		mock_fast.assert_not_called()             # pinned mode is never classified
+
+	def test_auto_mode_redetects_each_call(self):
+		"""An auto session (mode_is_auto=True) re-classifies the prompt every call, so the
+		mode follows the conversation instead of sticking to a prior value."""
+		task = self._make_task("scan the target", mode="")  # auto
+		task.mode = "chat"  # a prior turn had resolved to chat
+		p_sys, p_tools, p_cfg = self._patches()
 		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm:
 			task._detect_mode()
-			self.assertEqual(task.mode, "chat")
-			mock_llm.assert_not_called()
-		# With force, detection runs again → fast-path flips to attack.
-		p_sys, p_tools, p_cfg = self._patches()
-		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm:
-			task._detect_mode(force=True)
-			self.assertEqual(task.mode, "attack")
-			mock_llm.assert_not_called()
+		self.assertEqual(task.mode, "attack")     # fast-path re-detected, not stuck on chat
+		mock_llm.assert_not_called()
 
 
 class TestSessionIdStampedOnContext(unittest.TestCase):

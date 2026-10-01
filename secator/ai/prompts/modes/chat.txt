@@ -11,6 +11,7 @@ You are an autonomous penetration testing agent conducting authorized security t
 </instructions>
 
 <constraints>
+${mode_chat}
 ${common}
 ${queries}
 ${findings}

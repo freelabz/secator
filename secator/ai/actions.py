@@ -70,6 +70,10 @@ class ActionContext:
 	max_iterations: int = 0
 	in_batch: bool = False  # set on the per-batch ctx so the per-turn fan-out cap applies
 	subagent: bool = False
+	# Parent's resolved mode (chat/attack/exploit), handed to a spawned AI subagent so
+	# it INHERITS the parent's mode instead of re-detecting into a higher one — a chat
+	# parent can't escalate by spawning an attack subagent.
+	mode: str = ""
 	silent: bool = False
 	sync: bool = True
 	interactive: Any = "local"  # "local", "remote", "auto", or bool (legacy)
@@ -540,6 +544,12 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			return
 		opts["subagent"] = True
 		opts["interactive"] = False
+		# Inherit the parent's mode so the subagent runs AT the parent's level and cannot
+		# escalate (a chat parent spawns a chat subagent, not an attack one). setdefault so
+		# an explicit per-subagent mode the parent LLM supplied still wins; a concrete mode
+		# is hard-set in the child, so the child never re-detects upward.
+		if ctx.mode:
+			opts.setdefault("mode", ctx.mode)
 		# Inherit the parent's resolved LLM config (else it falls back to the default
 		# model/provider with no key set -> AuthenticationError). The model may be
 		# LLM-chosen (setdefault), but transport CREDENTIALS are forced from the parent:
