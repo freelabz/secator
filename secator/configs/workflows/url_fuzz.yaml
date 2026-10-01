@@ -11,6 +11,11 @@ tags: [http, fuzz, secrets]
 input_types:
   - url
 
+important_opts:
+  - wordlist
+  - fuzzers
+  - hunt_secrets
+
 default_options:
   auto_calibration: true
   follow_redirect: true

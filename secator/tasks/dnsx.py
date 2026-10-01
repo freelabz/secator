@@ -36,7 +36,7 @@ class dnsx(ReconDns):
 		'wildcard_domain': {'type': str, 'short': 'wd', 'help': 'Domain name for wildcard filtering'},
 		'rc': {'type': str, 'short': 'rc', 'help': 'DNS return code to filter (noerror, formerr, servfail, nxdomain, notimp, refused, yxdomain, xrrset, notauth, notzone)'},  # noqa: E501
 		'subdomains_only': {'is_flag': True, 'short': 'so', 'default': False, 'internal': True, 'help': 'Only return subdomains'},  # noqa: E501
-		WORDLIST: {'type': str, 'short': 'w', 'default': None, 'process': process_wordlist, 'help': 'Wordlist to use'},  # noqa: E501
+		WORDLIST: {'type': 'wordlist', 'short': 'w', 'default': None, 'process': process_wordlist, 'help': 'Wordlist to use'},  # noqa: E501
 	}
 	item_loaders = [JSONSerializer()]
 	install_version = 'v1.2.2'

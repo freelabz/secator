@@ -11,6 +11,12 @@ tags: [http, fuzz, secrets]
 input_types:
   - url
 
+important_opts:
+  - wordlist
+  - fuzzers
+  - fuzz_values
+  - probe
+
 options:
   hunt_secrets:
     is_flag: True
