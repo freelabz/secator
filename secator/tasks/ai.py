@@ -557,6 +557,50 @@ class ai(PythonRunner):
 			self.session_name = _truncate_label(self.prompt, self.prompt)
 		self.context["session_name"] = self.session_name
 
+		# Restore a prior user PIN before detecting. `_resolve_opts` recomputed
+		# `mode_is_auto` from the incoming run-opt, which on a respawn is usually empty/
+		# "auto" — so a mode the user pinned via `switch_mode` (persisted as
+		# `ai_mode_is_auto=False`) would otherwise be lost and this turn re-detected. Only
+		# restore when the incoming opt itself left the session auto (so an explicit new
+		# pin from the client still wins); read the pinned mode from the persisted docs.
+		if getattr(self, "mode_is_auto", True):
+			try:
+				pinned = query_engine.search({
+					"_type": "ai", "_context.session_id": self.session_id,
+					"_context.ai_mode_is_auto": False,
+				}, limit=1)
+			except Exception as e:  # noqa: BLE001 - a lookup must not crash the worker
+				self.debug(f'resume: pin lookup failed: {e}', sub='llm')
+				pinned = None
+			if pinned:
+				pinned_mode = pinned[0].get("mode") or (pinned[0].get("_context") or {}).get("ai_mode")
+				if pinned_mode in MODES:
+					self.mode_is_auto = False
+					self.mode = pinned_mode
+					self.context["ai_mode_is_auto"] = False
+
+		# Carry the last auto-detected mode across a resume. A respawned worker starts at
+		# the default ("chat"), so `_detect_mode`'s no-de-escalation clamp (F3) would have
+		# no prior mode to anchor to — an AUTO session that had escalated to attack/exploit
+		# then silently drops back to chat on the resumed turn (e.g. answering "Sure" to a
+		# follow-up re-classifies as chat). Seed `self.mode` from the newest persisted doc
+		# that carries a concrete mode so the clamp preserves it (escalation and
+		# attack<->exploit stay free; only the silent drop to chat is blocked). Skip when a
+		# pin was just restored above (hard-set modes don't re-detect anyway).
+		if getattr(self, "mode_is_auto", True):
+			try:
+				mode_docs = query_engine.search({
+					"_type": "ai", "_context.session_id": self.session_id,
+					"mode": {"$in": list(MODES)},
+				})
+			except Exception as e:  # noqa: BLE001 - a lookup must not crash the worker
+				self.debug(f'resume: last-mode lookup failed: {e}', sub='llm')
+				mode_docs = None
+			if mode_docs:
+				last_mode = max(mode_docs, key=lambda d: d.get("_timestamp", 0)).get("mode")
+				if last_mode in MODES:
+					self.mode = last_mode
+
 		# Detect mode (defaults to chat) and build the system prompt + tools
 		self._detect_mode()
 		self.system_prompt = self._system_prompt_for(self.mode)
@@ -713,6 +757,8 @@ class ai(PythonRunner):
 			max_workers=self.max_workers,
 			max_iterations=self.max_iterations,
 			subagent=self.is_subagent,
+			mode=self.mode,
+			mode_is_auto=getattr(self, "mode_is_auto", True),
 			sync=self._sync,
 			interactive=self.interactive,
 			backend=self.backend,
@@ -1023,7 +1069,15 @@ class ai(PythonRunner):
 			CONFIG.addons.ai.custom_disallow_config_token,
 		)
 		self.sensitive = self.get_opt_value("sensitive")
-		self.mode = self.get_opt_value("mode")
+		# Mode intent. An empty opt or the explicit "auto" sentinel means AUTO-DETECT:
+		# the mode follows the conversation and is re-classified every turn (chat <->
+		# attack <-> exploit). A concrete mode is HARD-SET by the user: it sticks for the
+		# whole session and the AI must NOT silently escalate out of it (a chat session
+		# stays informational). `mode_is_auto` is the single source of truth for that
+		# distinction; it is stamped onto the runner context so resume keeps the intent.
+		_mode_opt = (self.get_opt_value("mode") or "").strip().lower()
+		self.mode_is_auto = _mode_opt in ("", "auto")
+		self.mode = "" if self.mode_is_auto else _mode_opt
 		self.max_tokens_total = self.get_opt_value("max_tokens_total")
 		self.max_workers = self.get_opt_value("max_workers")
 		self.max_iterations = self.get_opt_value("max_iterations")
@@ -1089,6 +1143,9 @@ class ai(PythonRunner):
 		# the model registry. Set unconditionally (not setdefault) — records the
 		# configured model even if the user switches mid-session.
 		self.context["ai_model"] = self.model
+		# Persist the auto/hard-set intent so a resume keeps it (an auto session stays
+		# auto and keeps re-detecting; it never congeals into the last resolved mode).
+		self.context["ai_mode_is_auto"] = self.mode_is_auto
 
 		# Create interactivity backend. For remote (web), clients reuse a stable
 		# session_id on respawn so a respawned task finds its prior docs; it arrives
@@ -1143,12 +1200,20 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 
 	def _detect_mode(self, force=False):
-		"""Detect mode using a fast LLM call for intent analysis.
-		Skips detection if mode was explicitly set (e.g. by subagent or CLI option),
-		unless force=True (used for follow-up re-detection)."""
+		"""Resolve the mode for the current turn.
+
+		AUTO (``mode_is_auto``): re-classify the current prompt EVERY turn so the mode
+		follows the conversation (chat <-> attack <-> exploit), including on resume.
+		HARD-SET: the user pinned a mode — it sticks for the whole session and we never
+		re-classify, so a chat session cannot silently escalate into attack/exploit.
+		``force`` is kept for call-site compatibility but no longer overrides a pin (an
+		auto session always re-detects; a hard-set one never does)."""
 		old_mode = self.mode
-		if old_mode and not force:
-			if not hasattr(self, 'tool_schemas'):
+		if not getattr(self, 'mode_is_auto', True):
+			# Hard-set: keep the pinned mode verbatim, just make sure tools/prompt exist.
+			if not self.mode:
+				self.mode = "chat"
+			if not hasattr(self, 'tool_schemas') or old_mode != self.mode:
 				self._rebuild_prompt_and_tools()
 			return
 		if not self.prompt:
@@ -1182,6 +1247,15 @@ class ai(PythonRunner):
 				self.mode = "chat"
 		if not self.mode:
 			self.mode = "chat"
+		# F3: never auto-DE-escalate to read-only `chat` once the session has entered an
+		# action mode. A mid-engagement aside ("which of these looks most exploitable?")
+		# classifies as chat, but dropping there would strip run_shell/run_task/add_finding
+		# and could lose an unrecorded finding. Escalation and attack<->exploit stay free;
+		# only the silent drop back to chat is blocked — an explicit switch_mode can still
+		# go read-only (the user's conscious choice).
+		if self.mode == "chat" and old_mode in ("attack", "exploit"):
+			console.print(rf"[bold green]\[INF][/] Keeping [bold]{old_mode}[/] mode (auto won't de-escalate to chat)")
+			self.mode = old_mode
 		# Resolve the agent-loop cap.
 		#  - A config value <= 0 (SECATOR_ADDONS_AI_MAX_ITERATIONS=-1) DISABLES the cap:
 		#    the run continues until the model sends `stop` (or returns no tool call).
@@ -1673,7 +1747,11 @@ class ai(PythonRunner):
 			self.max_iterations += extra_iters
 			self._followup_extensions = extends + 1
 		if response.get("switch_mode"):
+			# An explicit user mode switch is a conscious decision: pin it (leave auto)
+			# so the session now sticks to the chosen mode instead of re-detecting away.
 			self.mode = response["switch_mode"]
+			self.mode_is_auto = False
+			self.context["ai_mode_is_auto"] = False
 			self._rebuild_prompt_and_tools()
 			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 			items.append(Info(message=f"Switched to {self.mode} mode"))

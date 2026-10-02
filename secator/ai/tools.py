@@ -7,6 +7,7 @@ from secator.ai.prompts import get_mode_config
 # Map tool names to action types used by existing action handlers
 TOOL_ACTION_MAP = {
 	"run_task": "task",
+	"run_subagent": "subagent",
 	"run_workflow": "workflow",
 	"run_shell": "shell",
 	"query_workspace": "query",
@@ -41,7 +42,9 @@ TOOL_SCHEMAS = {
 		"type": "function",
 		"function": {
 			"name": "run_task",
-			"description": "Run a secator security task (e.g. nmap, httpx, nuclei, ai) against targets. Use name 'ai' to spawn an AI subagent.",  # noqa: E501
+			"description": "Run a secator security task (e.g. nmap, httpx, nuclei) against targets. To spawn an AI subagent use run_subagent (NOT name='ai'). "  # noqa: E501
+			               "Example (good): run_task(name='nmap', targets=['10.0.0.1'], opts={'ports':'1-1000'}, description='Scan common ports'). "  # noqa: E501
+			               "Bad: run_task(name='nmap') — no targets; run_task() — no args.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -57,6 +60,49 @@ TOOL_SCHEMAS = {
 					}
 				},
 				"required": ["name", "targets", "description"]
+			}
+		}
+	},
+	"run_subagent": {
+		"type": "function",
+		"function": {
+			"name": "run_subagent",
+			"description": (
+				"Spawn an autonomous AI subagent with a fresh context window that works the objective "
+				"non-interactively and hands back a summary — the ONLY way to spawn a subagent (do NOT "
+				"use run_task with name='ai'). Use it to parallelize or offload a focused sub-task.\n"
+				"Mode: in an AUTO or attack session you MAY set `mode` to pick the subagent's mode "
+				"(e.g. hand a confirmed vuln to an `exploit` subagent). In a user-PINNED read-only `chat` "
+				"session the subagent is forced to `chat`; do NOT set a different `mode` there.\n"
+				"Example (good): run_subagent(objective='Validate and exploit CVE-2021-41773 on "
+				"10.0.0.9, record a PoC', targets=['10.0.0.9'], "
+				"description='Exploit the Apache path traversal', mode='exploit'). "
+				"Bad: run_subagent(objective='do stuff') — no targets, vague objective."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"objective": {
+						"type": "string",
+						"description": "The subagent's goal, with ALL context it needs (target details, "
+						               "relevant findings as raw JSON, credentials/versions). It has a fresh "
+						               "context window and sees only what you pass here."
+					},
+					"targets": _TARGETS_SCHEMA,
+					"description": _DESCRIPTION_SCHEMA,
+					"mode": {
+						"type": "string",
+						"enum": ["chat", "attack", "exploit"],
+						"description": "Optional mode for the subagent (chat/attack/exploit). Honored only in an "
+						               "auto or attack session; ignored/forced to chat in a pinned chat session. "
+						               "Omit to inherit the current mode."
+					},
+					"model": {
+						"type": "string",
+						"description": "Optional LLM model id for the subagent. Omit to inherit the current model."
+					}
+				},
+				"required": ["objective", "targets", "description"]
 			}
 		}
 	},
@@ -87,7 +133,9 @@ TOOL_SCHEMAS = {
 		"type": "function",
 		"function": {
 			"name": "run_shell",
-			"description": "Run an arbitrary shell command for exploration, exploitation, or data analysis.",
+			"description": "Run an arbitrary shell command for exploration, exploitation, or data analysis. "
+			               "Example (good): run_shell(command='curl -sk https://10.0.0.1/ | head -50', description='Grab the HTTP banner'). "  # noqa: E501
+			               "Bad: run_shell() — no command.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -105,7 +153,9 @@ TOOL_SCHEMAS = {
 		"type": "function",
 		"function": {
 			"name": "query_workspace",
-			"description": "Query the workspace database for stored security findings using MongoDB-style queries.",
+			"description": "Query the workspace database for stored security findings using MongoDB-style queries. "
+			               "Example (good): query_workspace(query={'_type':'vulnerability','severity':{'$in':['high','critical']}}). "  # noqa: E501
+			               "Bad: query_workspace() — no query; query_workspace(query={}) — unscoped, returns noise.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -153,7 +203,9 @@ TOOL_SCHEMAS = {
 		"type": "function",
 		"function": {
 			"name": "add_finding",
-			"description": "Add a security finding to the workspace (e.g. vulnerability, exploit, url).",
+			"description": "Add a security finding to the workspace (e.g. vulnerability, exploit, url). "
+			               "Example (good): add_finding(_type='vulnerability', name='SQLi in login', matched_at='http://x/login', severity='high'). "  # noqa: E501
+			               "Bad: add_finding(name='x', extra_data='y') — missing _type/matched_at, extra_data must be a dict.",
 			"parameters": {
 				"type": "object",
 				"properties": {

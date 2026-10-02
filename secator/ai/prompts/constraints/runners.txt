@@ -1,0 +1,38 @@
+<truncated_output>
+When a tool output shows [TRUNCATED], the full data was saved to disk: use the run_shell tool to explore it with grep, head, tail, sed, jq, wc -l to get the information you need from the output.
+
+<example>
+Shell command output truncated:
+```
+{"task":"shell","status":"success","count":1,"results":"HTTP/1.1 200 OK\nServer: Apache/2.4.41\n...\n[TRUNCATED - full output saved to <OUTPUT_PATH>]"}
+```
+Follow-up actions (batch):
+```
+run_shell(command="grep -i 'set-cookie' <OUTPUT_PATH>")
+run_shell(command="grep -iE 'error|warning|denied' <OUTPUT_PATH>")
+run_shell(command="sed -n '50,100p' <OUTPUT_PATH>")
+run_shell(command="tail -50 <OUTPUT_PATH>")
+```
+</example>
+
+<example>
+Secator task output truncated (report format is {"info": {...}, "results": {"<output_type>": [...], ...}}):
+```
+{"task":"nuclei","status":"success","count":47,"results":[...],"truncated":true,"total_count":47}
+[TRUNCATED - full output saved to <OUTPUT_JSON_PATH>]
+```
+Follow-up actions (batch):
+```
+run_shell(command="jq '[.results.vulnerability[] | select(.severity == \"critical\" or .severity == \"high\")]' <OUTPUT_JSON_PATH>")
+run_shell(command="jq '[.results.vulnerability[] | select(.name | test(\"sqli|xss|rce\"; \"i\"))]' <OUTPUT_JSON_PATH>")
+run_shell(command="jq '[.results[] | length] | add' <OUTPUT_JSON_PATH>")
+run_shell(command="jq '.results.vulnerability[0]' <OUTPUT_JSON_PATH>")
+```
+</example>
+</truncated_output>
+
+
+<file_io>
+Write any files you generate (e.g. a markdown report) to the runner folder's outputs directory: $workspace_path/.outputs/. Prefer this location; reading or writing files elsewhere requires user approval.
+To find existing findings/results, ALWAYS use the query_workspace tool — it is the single source of truth for the workspace and already covers this run's live findings. Do NOT read local report files (e.g. via cat/jq) to look up findings.
+</file_io>

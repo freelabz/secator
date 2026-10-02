@@ -275,10 +275,12 @@ class TestPrompts(unittest.TestCase):
 	def test_chat_mode_config_has_correct_allowed_actions(self):
 		chat_config = MODES["chat"]
 		actions = chat_config["allowed_actions"]
-		for a in ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "shell", "stop"]:
-			self.assertIn(a, actions)
-		self.assertNotIn("task", actions)
-		self.assertNotIn("workflow", actions)
+		# Chat is strictly read-only: read (query), ask/suggest (follow_up), delegate a
+		# same-mode helper (subagent), stop. Nothing that acts on the world or the data.
+		self.assertEqual(set(actions), {"query", "follow_up", "subagent", "stop"})
+		for a in ["shell", "task", "workflow", "add_finding", "update_finding",
+		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:
+			self.assertNotIn(a, actions)
 
 	def test_all_modes_have_max_iterations_5(self):
 		self.assertEqual(MODES["attack"]["max_iterations"], 5)
@@ -301,12 +303,33 @@ class TestPrompts(unittest.TestCase):
 	# === Common rules tests ===
 
 	def test_common_rules_has_xml_tags(self):
-		"""COMMON_RULES should use XML tags for each rule category."""
-		from secator.ai.prompts import COMMON_RULES
+		"""COMMON_RULES holds the UNIVERSAL blocks (safe for read-only chat too).
+		The run_*/shell-specific blocks live in runners.txt now (attack/exploit only)."""
+		from secator.ai.prompts import COMMON_RULES, load_prompt
 		self.assertIn("<tool_calling>", COMMON_RULES)
 		self.assertIn("<response_style>", COMMON_RULES)
-		self.assertIn("<guardrails>", COMMON_RULES)
-		self.assertIn("<truncated_output>", COMMON_RULES)
+		self.assertIn("<encrypted_data>", COMMON_RULES)
+		# These moved out of common into runners.txt (not in chat's read-only surface).
+		self.assertNotIn("<guardrails>", COMMON_RULES)
+		self.assertNotIn("<truncated_output>", COMMON_RULES)
+		runners = load_prompt("constraints/runners.txt")
+		self.assertIn("<truncated_output>", runners)
+		self.assertIn("<file_io>", runners)
+		# guardrails is a SINGLE source (constraints/guardrails.txt), not duplicated in
+		# runners — so attack and exploit get the one strong block, never a weak dup.
+		self.assertNotIn("<guardrails>", runners)
+
+	def test_attack_and_exploit_have_single_strong_guardrails(self):
+		"""Both offensive modes render exactly one guardrails block, and it's the STRONG
+		one (host-secret paths + scope hostname/IP rule). Exploit runs untrusted PoCs, so
+		it must not be left with only a weaker block."""
+		for mode in ("attack", "exploit"):
+			p = get_system_prompt(mode)
+			self.assertEqual(p.count("</guardrails>"), 1, f"{mode}: expected one guardrails block")
+			self.assertIn("~/.secator/config.yml", p, f"{mode}: missing STRONG guardrails")
+			self.assertIn("scope is matched literally", p, f"{mode}: missing scope hostname/IP rule")
+		# chat is read-only and carries no guardrails block
+		self.assertNotIn("</guardrails>", get_system_prompt("chat"))
 
 	def test_common_rules_has_no_shouting(self):
 		"""COMMON_RULES should not have excessive ALL CAPS directives."""

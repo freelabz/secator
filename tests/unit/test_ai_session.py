@@ -529,6 +529,73 @@ class TestRemoteResumeBranch(unittest.TestCase):
 		warnings = [i for i in items if isinstance(i, WarningType)]
 		self.assertTrue(any("remote" in w.message for w in warnings))
 
+	def _run_resume(self, task):
+		gen = task._maybe_resume_remote()
+		try:
+			while True:
+				next(gen)
+		except StopIteration:
+			pass
+
+	@patch("secator.tasks.ai.restore_history_from_db")
+	@patch("secator.tasks.ai.get_system_prompt", return_value="SYS")
+	def test_resume_seeds_last_mode_for_auto_session(self, mock_sys, mock_restore):
+		"""R5: resuming an AUTO session restores the last auto-detected mode as the
+		baseline, so `_detect_mode`'s no-de-escalation clamp can't silently drop
+		attack->chat on the respawned turn. A respawned worker starts at the default
+		`chat`; without the seed there is no action-mode baseline to protect."""
+		mock_restore.return_value = MagicMock(messages=[{"role": "system", "content": "SYS"}])
+		task, engine = self._make_task(prior_docs=[{"ai_type": "prompt", "content": "hi"}])
+		task.mode_is_auto = True
+		task.mode = "chat"  # respawned worker's default
+		task._detect_mode = MagicMock()  # isolate the seed from detection
+		task._run_loop = MagicMock(return_value=iter([]))
+
+		def _search(query, limit=0):
+			if query.get("_context.ai_mode_is_auto") is False:
+				return []  # no pin in this session
+			if query.get("mode"):  # the last-mode lookup
+				return [
+					{"ai_type": "response", "mode": "chat", "_timestamp": 1.0},
+					{"ai_type": "response", "mode": "attack", "_timestamp": 2.0},  # newest
+				]
+			if query.get("_type") == "ai":
+				return [{"ai_type": "prompt", "content": "hi"}]
+			return []
+		engine.search.side_effect = _search
+
+		self._run_resume(task)
+		# Seeded from the newest mode-bearing doc; still auto (seeding is not pinning).
+		self.assertEqual(task.mode, "attack")
+		self.assertTrue(task.mode_is_auto)
+
+	@patch("secator.tasks.ai.restore_history_from_db")
+	@patch("secator.tasks.ai.get_system_prompt", return_value="SYS")
+	def test_resume_pin_wins_over_last_mode(self, mock_sys, mock_restore):
+		"""A user-pinned mode still wins on resume: the seed block is skipped once a pin
+		is restored (mode_is_auto=False), so a prior attack turn doesn't override the pin."""
+		mock_restore.return_value = MagicMock(messages=[{"role": "system", "content": "SYS"}])
+		task, engine = self._make_task(prior_docs=[{"ai_type": "prompt", "content": "hi"}])
+		task.mode_is_auto = True
+		task.mode = "chat"
+		task._detect_mode = MagicMock()
+		task._run_loop = MagicMock(return_value=iter([]))
+
+		def _search(query, limit=0):
+			if query.get("_context.ai_mode_is_auto") is False:
+				return [{"ai_type": "response", "mode": "chat", "_timestamp": 9.0}]  # pinned chat
+			if query.get("mode"):
+				return [{"ai_type": "response", "mode": "attack", "_timestamp": 2.0}]
+			if query.get("_type") == "ai":
+				return [{"ai_type": "prompt", "content": "hi"}]
+			return []
+		engine.search.side_effect = _search
+
+		self._run_resume(task)
+		# Pin restored → mode stays the pinned chat, NOT the prior attack turn.
+		self.assertEqual(task.mode, "chat")
+		self.assertFalse(task.mode_is_auto)
+
 
 class TestTurnIdempotency(unittest.TestCase):
 	"""C3: an acks_late redelivery of an already-completed turn must NOT replay
@@ -677,6 +744,8 @@ class TestFastDetectMode(unittest.TestCase):
 		from secator.tasks.ai import ai
 		task = ai.__new__(ai)
 		task.mode = mode
+		# Mirror _resolve_opts: empty/"auto" opt -> auto-detect; a concrete mode -> hard-set.
+		task.mode_is_auto = mode in ("", "auto")
 		task.prompt = prompt
 		task.intent_model = "intent-model"
 		task.model = "main-model"
@@ -717,21 +786,30 @@ class TestFastDetectMode(unittest.TestCase):
 		self.assertEqual(mock_llm.call_args[0][1], "intent-model")  # uses intent_model
 		self.assertEqual(task.mode, "chat")
 
-	def test_force_redetects_over_explicit_mode(self):
-		"""force=True re-detects even when mode was explicitly set (fast-path applies)."""
-		task = self._make_task("scan the target", mode="chat")
+	def test_hardset_mode_is_sticky_even_with_force(self):
+		"""A hard-set (user-pinned) mode never re-detects — not without force, and NOT
+		with force. A chat session can't silently escalate into attack, even on a prompt
+		whose fast-path cue is attack. (force is now vestigial for a pinned mode.)"""
+		task = self._make_task("scan the target", mode="chat")  # mode_is_auto=False
 		p_sys, p_tools, p_cfg = self._patches()
-		# Without force, explicit mode short-circuits (no detection, no LLM).
+		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm, \
+				patch("secator.tasks.ai.fast_detect_mode") as mock_fast:
+			task._detect_mode()
+			task._detect_mode(force=True)
+		self.assertEqual(task.mode, "chat")       # stayed chat both times
+		mock_llm.assert_not_called()
+		mock_fast.assert_not_called()             # pinned mode is never classified
+
+	def test_auto_mode_redetects_each_call(self):
+		"""An auto session (mode_is_auto=True) re-classifies the prompt every call, so the
+		mode follows the conversation instead of sticking to a prior value."""
+		task = self._make_task("scan the target", mode="")  # auto
+		task.mode = "chat"  # a prior turn had resolved to chat
+		p_sys, p_tools, p_cfg = self._patches()
 		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm:
 			task._detect_mode()
-			self.assertEqual(task.mode, "chat")
-			mock_llm.assert_not_called()
-		# With force, detection runs again → fast-path flips to attack.
-		p_sys, p_tools, p_cfg = self._patches()
-		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm:
-			task._detect_mode(force=True)
-			self.assertEqual(task.mode, "attack")
-			mock_llm.assert_not_called()
+		self.assertEqual(task.mode, "attack")     # fast-path re-detected, not stuck on chat
+		mock_llm.assert_not_called()
 
 
 class TestSessionIdStampedOnContext(unittest.TestCase):

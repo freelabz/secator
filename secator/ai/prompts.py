@@ -59,12 +59,17 @@ SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 MODES = {
 	"attack": {
 		"system_prompt": SYSTEM_ATTACK,
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
 		"system_prompt": SYSTEM_CHAT,
-		"allowed_actions": ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "shell", "stop"],
+		# Chat is strictly READ-ONLY / informational. It can only read workspace data
+		# (`query`), ask/suggest (`follow_up`), delegate a same-mode helper (`subagent`),
+		# and `stop`. NO `shell` (attack surface), NO `task`/`workflow` (escalation), and
+		# NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
+		# changing findings is an active action that belongs in attack/exploit.
+		"allowed_actions": ["query", "follow_up", "subagent", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {

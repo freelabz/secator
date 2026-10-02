@@ -1175,6 +1175,136 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 # =============================================================================
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
+class TestModeAutoVsPinned(unittest.TestCase):
+    """A HARD-SET mode is sticky and non-escalating; an AUTO mode re-detects every turn."""
+
+    def test_hardset_mode_never_escalates(self):
+        """mode_is_auto=False: _detect_mode keeps the pinned mode and never classifies,
+        even when the prompt screams exploit — a chat session can't silently escalate."""
+        from secator.tasks.ai import ai as AiTask
+        fake = MagicMock()
+        fake.mode_is_auto = False
+        fake.mode = "chat"
+        fake.tool_schemas = []  # already built, same mode -> no rebuild
+        with patch("secator.tasks.ai.fast_detect_mode") as fd:
+            AiTask._detect_mode(fake)
+        self.assertEqual(fake.mode, "chat")
+        fd.assert_not_called()  # pinned mode is never re-classified
+
+    def test_auto_mode_redetects_each_turn(self):
+        """mode_is_auto=True: _detect_mode re-classifies the current prompt and adopts
+        the detected mode (fluid chat<->attack<->exploit), even if it was chat before."""
+        from secator.tasks.ai import ai as AiTask
+        fake = MagicMock()
+        fake.mode_is_auto = True
+        fake.mode = "chat"
+        fake.prompt = "exploit the Apache path traversal now"
+        fake.is_subagent = False
+        fake.max_iterations = 5
+        with patch("secator.tasks.ai.fast_detect_mode", return_value="attack"), \
+             patch("secator.tasks.ai.build_tool_schemas", return_value=[]):
+            AiTask._detect_mode(fake)
+        self.assertEqual(fake.mode, "attack")
+
+    def test_chat_mode_tool_surface(self):
+        """Chat is read-only: no run_shell (attack surface), no run_task/run_workflow
+        (escalation); it keeps query + run_subagent (same-mode helper)."""
+        from secator.ai.tools import build_tool_schemas
+        chat = {s["function"]["name"] for s in build_tool_schemas("chat")}
+        # Read-only: no shell/escalation AND no finding writes.
+        for forbidden in ("run_shell", "run_task", "run_workflow", "add_finding",
+                          "update_finding", "mark_vuln_exploited",
+                          "mark_vuln_false_positive", "mark_vuln_exploit_failed"):
+            self.assertNotIn(forbidden, chat)
+        self.assertIn("query_workspace", chat)
+        self.assertIn("run_subagent", chat)
+        # attack keeps shell + escalation tools
+        attack = {s["function"]["name"] for s in build_tool_schemas("attack")}
+        self.assertIn("run_shell", attack)
+        self.assertIn("run_task", attack)
+
+    def test_auto_does_not_deescalate_to_chat(self):
+        """F3: in auto, a chat-classified aside while already in an action mode keeps the
+        action mode — it must not silently drop to read-only chat mid-engagement."""
+        from secator.tasks.ai import ai as AiTask
+        for start in ("attack", "exploit"):
+            fake = MagicMock()
+            fake.mode_is_auto = True
+            fake.mode = start              # already in an action mode
+            fake.prompt = "summarize the findings so far"  # fast_detect_mode -> chat
+            fake.is_subagent = False
+            fake.max_iterations = 5
+            with patch("secator.tasks.ai.build_tool_schemas", return_value=[]):
+                AiTask._detect_mode(fake)
+            self.assertEqual(fake.mode, start, f"auto de-escalated {start}->chat")
+
+    def test_auto_still_escalates_chat_to_action(self):
+        """Escalation is unaffected: a chat session that gets an attack prompt moves up."""
+        from secator.tasks.ai import ai as AiTask
+        fake = MagicMock()
+        fake.mode_is_auto = True
+        fake.mode = "chat"
+        fake.prompt = "run an nmap scan on the target"  # fast_detect_mode -> attack
+        fake.is_subagent = False
+        fake.max_iterations = 5
+        with patch("secator.tasks.ai.build_tool_schemas", return_value=[]):
+            AiTask._detect_mode(fake)
+        self.assertEqual(fake.mode, "attack")
+
+    def _run_subagent(self, ctx, action):
+        """Drive _handle_subagent, capturing the dispatched task action (or the Error)."""
+        from secator.ai import actions as A
+        from secator.output_types import Error
+        captured = {}
+
+        def fake_run_runner(a, c, rtype):
+            captured["action"] = a
+            return iter(())
+
+        with patch.object(A, "_run_runner", fake_run_runner):
+            items = list(A._handle_subagent(action, ctx))
+        errors = [i for i in items if isinstance(i, Error)]
+        return captured.get("action"), errors
+
+    def test_run_subagent_pinned_chat_forces_chat(self):
+        """A user-PINNED read-only chat (mode_is_auto=False) forces the subagent to chat
+        and REJECTS a request for a different mode."""
+        from secator.ai import actions as A
+        ctx = A.ActionContext(targets=["x"], model="m", mode="chat", mode_is_auto=False)
+        # no requested mode -> forced chat
+        act, errs = self._run_subagent(ctx, {"objective": "look", "targets": ["x"], "description": "d"})
+        self.assertFalse(errs)
+        self.assertEqual(act["name"], "ai")
+        self.assertEqual(act["opts"]["mode"], "chat")
+        # requested attack -> error, no dispatch
+        act2, errs2 = self._run_subagent(ctx, {"objective": "o", "targets": ["x"], "description": "d", "mode": "attack"})
+        self.assertIsNone(act2)
+        self.assertTrue(errs2 and "different mode" in errs2[0].message)
+
+    def test_run_subagent_auto_and_attack_allow_mode(self):
+        """An auto session (even if currently chat) or an attack session may set the
+        subagent's mode."""
+        from secator.ai import actions as A
+        auto = A.ActionContext(targets=["x"], model="m", mode="chat", mode_is_auto=True)
+        act, errs = self._run_subagent(auto, {"objective": "o", "targets": ["x"], "description": "d", "mode": "exploit"})
+        self.assertFalse(errs)
+        self.assertEqual(act["opts"]["mode"], "exploit")
+        attack = A.ActionContext(targets=["x"], model="m", mode="attack", mode_is_auto=False)
+        act2, _ = self._run_subagent(attack, {"objective": "o", "targets": ["x"], "description": "d"})
+        self.assertEqual(act2["opts"]["mode"], "attack")  # inherits when omitted
+
+    def test_run_task_name_ai_is_rejected(self):
+        """run_task(name="ai") is refused — spawning goes through run_subagent."""
+        from secator.ai import actions as A
+        from secator.output_types import Error
+        ctx = A.ActionContext(targets=["x"], model="m", mode="attack")
+        with patch.object(A, "_run_runner", lambda *a, **k: iter(())):
+            items = list(A._handle_task({"action": "task", "name": "ai", "targets": ["x"], "description": "d"}, ctx))
+        errs = [i for i in items if isinstance(i, Error)]
+        self.assertTrue(errs and "run_subagent" in errs[0].message)
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
 class TestSubagentOwnToolResults(unittest.TestCase):
 	"""A subagent stamps the `subagent` marker on its OWN tool outputs too. Those
 	must still be fed back to its LLM (collected -> add_tool_result), else its tool
