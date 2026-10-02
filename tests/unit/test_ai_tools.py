@@ -15,7 +15,7 @@ class TestToolSchemas(unittest.TestCase):
 	def test_tool_schemas_expected_set(self):
 		from secator.ai.tools import TOOL_SCHEMAS
 		expected = {"run_task", "run_workflow", "run_shell", "query_workspace", "follow_up",
-		            "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
+		            "run_subagent", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
 		            "mark_vuln_exploit_failed", "update_finding"}
 		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)
 
@@ -114,12 +114,16 @@ class TestBuildToolSchemas(unittest.TestCase):
 		from secator.ai.tools import build_tool_schemas
 		schemas = build_tool_schemas("chat")
 		names = {s["function"]["name"] for s in schemas}
+		# chat is strictly read-only (#1469): no escalation (run_task/run_workflow),
+		# no shell, no finding writes — it keeps query + follow_up + the same-mode
+		# run_subagent helper.
 		self.assertNotIn("run_task", names)
 		self.assertNotIn("run_workflow", names)
+		self.assertNotIn("run_shell", names)
+		self.assertNotIn("add_finding", names)
 		self.assertIn("query_workspace", names)
 		self.assertIn("follow_up", names)
-		self.assertIn("add_finding", names)
-		self.assertIn("run_shell", names)
+		self.assertIn("run_subagent", names)
 
 	def test_exploit_mode_includes_follow_up_and_query(self):
 		from secator.ai.tools import build_tool_schemas

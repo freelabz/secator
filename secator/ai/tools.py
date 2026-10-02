@@ -43,7 +43,7 @@ TOOL_SCHEMAS = {
 		"function": {
 			"name": "run_task",
 			"description": "Run a secator security task (e.g. nmap, httpx, nuclei) against targets. To spawn an AI subagent use run_subagent (NOT name='ai'). "  # noqa: E501
-			               "Example (good): run_task(name='nmap', targets=['10.0.0.1'], opts={'ports':'1-1000'}, description='Scan common ports'). "
+			               "Example (good): run_task(name='nmap', targets=['10.0.0.1'], opts={'ports':'1-1000'}, description='Scan common ports'). "  # noqa: E501
 			               "Bad: run_task(name='nmap') — no targets; run_task() — no args.",
 			"parameters": {
 				"type": "object",
@@ -134,7 +134,7 @@ TOOL_SCHEMAS = {
 		"function": {
 			"name": "run_shell",
 			"description": "Run an arbitrary shell command for exploration, exploitation, or data analysis. "
-			               "Example (good): run_shell(command='curl -sk https://10.0.0.1/ | head -50', description='Grab the HTTP banner'). "
+			               "Example (good): run_shell(command='curl -sk https://10.0.0.1/ | head -50', description='Grab the HTTP banner'). "  # noqa: E501
 			               "Bad: run_shell() — no command.",
 			"parameters": {
 				"type": "object",
@@ -154,7 +154,7 @@ TOOL_SCHEMAS = {
 		"function": {
 			"name": "query_workspace",
 			"description": "Query the workspace database for stored security findings using MongoDB-style queries. "
-			               "Example (good): query_workspace(query={'_type':'vulnerability','severity':{'$in':['high','critical']}}). "
+			               "Example (good): query_workspace(query={'_type':'vulnerability','severity':{'$in':['high','critical']}}). "  # noqa: E501
 			               "Bad: query_workspace() — no query; query_workspace(query={}) — unscoped, returns noise.",
 			"parameters": {
 				"type": "object",
@@ -204,7 +204,7 @@ TOOL_SCHEMAS = {
 		"function": {
 			"name": "add_finding",
 			"description": "Add a security finding to the workspace (e.g. vulnerability, exploit, url). "
-			               "Example (good): add_finding(_type='vulnerability', name='SQLi in login', matched_at='http://x/login', severity='high'). "
+			               "Example (good): add_finding(_type='vulnerability', name='SQLi in login', matched_at='http://x/login', severity='high'). "  # noqa: E501
 			               "Bad: add_finding(name='x', extra_data='y') — missing _type/matched_at, extra_data must be a dict.",
 			"parameters": {
 				"type": "object",

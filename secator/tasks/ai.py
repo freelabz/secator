@@ -1254,7 +1254,7 @@ class ai(PythonRunner):
 		# only the silent drop back to chat is blocked — an explicit switch_mode can still
 		# go read-only (the user's conscious choice).
 		if self.mode == "chat" and old_mode in ("attack", "exploit"):
-			console.print(rf"[bold green]\[INF][/] Keeping [bold]{old_mode}[/] mode (auto won't de-escalate to chat mid-engagement)")
+			console.print(rf"[bold green]\[INF][/] Keeping [bold]{old_mode}[/] mode (auto won't de-escalate to chat)")
 			self.mode = old_mode
 		# Resolve the agent-loop cap.
 		#  - A config value <= 0 (SECATOR_ADDONS_AI_MAX_ITERATIONS=-1) DISABLES the cap:

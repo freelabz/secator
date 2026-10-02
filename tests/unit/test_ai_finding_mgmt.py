@@ -28,14 +28,20 @@ class TestFindingMgmtTools(unittest.TestCase):
 		return e
 
 	def test_tools_exposed_in_modes(self):
-		for mode in ('attack', 'chat', 'exploit'):
+		# Finding-management tools are ACTION-mode only. Since #1469 `chat` is strictly
+		# read-only, so it must NOT expose any finding-write tool (see
+		# test_ai_loop.test_chat_mode_tool_surface).
+		write_tools = ('mark_vuln_exploited', 'mark_vuln_false_positive',
+		               'mark_vuln_exploit_failed', 'update_finding')
+		for mode in ('attack', 'exploit'):
 			names = [s['function']['name'] for s in build_tool_schemas(mode)]
-			self.assertIn('mark_vuln_exploited', names, mode)
-			self.assertIn('mark_vuln_false_positive', names, mode)
-			self.assertIn('mark_vuln_exploit_failed', names, mode)
-			self.assertIn('update_finding', names, mode)
+			for t in write_tools:
+				self.assertIn(t, names, f'{t} missing from {mode}')
 			self.assertNotIn('add_vuln_poc', names, mode)
 			self.assertNotIn('delete_finding', names, mode)
+		chat_names = [s['function']['name'] for s in build_tool_schemas('chat')]
+		for t in write_tools:
+			self.assertNotIn(t, chat_names, f'{t} must not be exposed in read-only chat')
 
 	def test_tool_call_maps_to_action(self):
 		a = tool_call_to_action('mark_vuln_exploited', {'_uuid': 'u1', 'poc': 'x'})
