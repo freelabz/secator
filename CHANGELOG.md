@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.48.0](https://github.com/freelabz/secator/compare/v0.47.0...v0.48.0) (2026-10-02)
+
+
+### Features
+
+* **ai:** auto/pinned mode semantics + same-mode spawn_subagent ([#1469](https://github.com/freelabz/secator/issues/1469)) ([0729048](https://github.com/freelabz/secator/commit/0729048b9ec60bd3d3444cebe7b82beca53e9b02))
+
+
+### Bug Fixes
+
+* **nmap:** keep all IDS mass-scan ports at low confidence ([#1392](https://github.com/freelabz/secator/issues/1392)) ([242925b](https://github.com/freelabz/secator/commit/242925b62b2380f26b412085a208fe276b906782))
+
 ## [0.47.0](https://github.com/freelabz/secator/compare/v0.46.1...v0.47.0) (2026-09-30)
 
 
