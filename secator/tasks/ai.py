@@ -579,6 +579,28 @@ class ai(PythonRunner):
 					self.mode = pinned_mode
 					self.context["ai_mode_is_auto"] = False
 
+		# Carry the last auto-detected mode across a resume. A respawned worker starts at
+		# the default ("chat"), so `_detect_mode`'s no-de-escalation clamp (F3) would have
+		# no prior mode to anchor to — an AUTO session that had escalated to attack/exploit
+		# then silently drops back to chat on the resumed turn (e.g. answering "Sure" to a
+		# follow-up re-classifies as chat). Seed `self.mode` from the newest persisted doc
+		# that carries a concrete mode so the clamp preserves it (escalation and
+		# attack<->exploit stay free; only the silent drop to chat is blocked). Skip when a
+		# pin was just restored above (hard-set modes don't re-detect anyway).
+		if getattr(self, "mode_is_auto", True):
+			try:
+				mode_docs = query_engine.search({
+					"_type": "ai", "_context.session_id": self.session_id,
+					"mode": {"$in": list(MODES)},
+				})
+			except Exception as e:  # noqa: BLE001 - a lookup must not crash the worker
+				self.debug(f'resume: last-mode lookup failed: {e}', sub='llm')
+				mode_docs = None
+			if mode_docs:
+				last_mode = max(mode_docs, key=lambda d: d.get("_timestamp", 0)).get("mode")
+				if last_mode in MODES:
+					self.mode = last_mode
+
 		# Detect mode (defaults to chat) and build the system prompt + tools
 		self._detect_mode()
 		self.system_prompt = self._system_prompt_for(self.mode)

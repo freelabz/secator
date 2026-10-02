@@ -529,6 +529,73 @@ class TestRemoteResumeBranch(unittest.TestCase):
 		warnings = [i for i in items if isinstance(i, WarningType)]
 		self.assertTrue(any("remote" in w.message for w in warnings))
 
+	def _run_resume(self, task):
+		gen = task._maybe_resume_remote()
+		try:
+			while True:
+				next(gen)
+		except StopIteration:
+			pass
+
+	@patch("secator.tasks.ai.restore_history_from_db")
+	@patch("secator.tasks.ai.get_system_prompt", return_value="SYS")
+	def test_resume_seeds_last_mode_for_auto_session(self, mock_sys, mock_restore):
+		"""R5: resuming an AUTO session restores the last auto-detected mode as the
+		baseline, so `_detect_mode`'s no-de-escalation clamp can't silently drop
+		attack->chat on the respawned turn. A respawned worker starts at the default
+		`chat`; without the seed there is no action-mode baseline to protect."""
+		mock_restore.return_value = MagicMock(messages=[{"role": "system", "content": "SYS"}])
+		task, engine = self._make_task(prior_docs=[{"ai_type": "prompt", "content": "hi"}])
+		task.mode_is_auto = True
+		task.mode = "chat"  # respawned worker's default
+		task._detect_mode = MagicMock()  # isolate the seed from detection
+		task._run_loop = MagicMock(return_value=iter([]))
+
+		def _search(query, limit=0):
+			if query.get("_context.ai_mode_is_auto") is False:
+				return []  # no pin in this session
+			if query.get("mode"):  # the last-mode lookup
+				return [
+					{"ai_type": "response", "mode": "chat", "_timestamp": 1.0},
+					{"ai_type": "response", "mode": "attack", "_timestamp": 2.0},  # newest
+				]
+			if query.get("_type") == "ai":
+				return [{"ai_type": "prompt", "content": "hi"}]
+			return []
+		engine.search.side_effect = _search
+
+		self._run_resume(task)
+		# Seeded from the newest mode-bearing doc; still auto (seeding is not pinning).
+		self.assertEqual(task.mode, "attack")
+		self.assertTrue(task.mode_is_auto)
+
+	@patch("secator.tasks.ai.restore_history_from_db")
+	@patch("secator.tasks.ai.get_system_prompt", return_value="SYS")
+	def test_resume_pin_wins_over_last_mode(self, mock_sys, mock_restore):
+		"""A user-pinned mode still wins on resume: the seed block is skipped once a pin
+		is restored (mode_is_auto=False), so a prior attack turn doesn't override the pin."""
+		mock_restore.return_value = MagicMock(messages=[{"role": "system", "content": "SYS"}])
+		task, engine = self._make_task(prior_docs=[{"ai_type": "prompt", "content": "hi"}])
+		task.mode_is_auto = True
+		task.mode = "chat"
+		task._detect_mode = MagicMock()
+		task._run_loop = MagicMock(return_value=iter([]))
+
+		def _search(query, limit=0):
+			if query.get("_context.ai_mode_is_auto") is False:
+				return [{"ai_type": "response", "mode": "chat", "_timestamp": 9.0}]  # pinned chat
+			if query.get("mode"):
+				return [{"ai_type": "response", "mode": "attack", "_timestamp": 2.0}]
+			if query.get("_type") == "ai":
+				return [{"ai_type": "prompt", "content": "hi"}]
+			return []
+		engine.search.side_effect = _search
+
+		self._run_resume(task)
+		# Pin restored → mode stays the pinned chat, NOT the prior attack turn.
+		self.assertEqual(task.mode, "chat")
+		self.assertFalse(task.mode_is_auto)
+
 
 class TestTurnIdempotency(unittest.TestCase):
 	"""C3: an acks_late redelivery of an already-completed turn must NOT replay
