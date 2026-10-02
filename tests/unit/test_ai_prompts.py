@@ -314,8 +314,22 @@ class TestPrompts(unittest.TestCase):
 		self.assertNotIn("<truncated_output>", COMMON_RULES)
 		runners = load_prompt("constraints/runners.txt")
 		self.assertIn("<truncated_output>", runners)
-		self.assertIn("<guardrails>", runners)
 		self.assertIn("<file_io>", runners)
+		# guardrails is a SINGLE source (constraints/guardrails.txt), not duplicated in
+		# runners — so attack and exploit get the one strong block, never a weak dup.
+		self.assertNotIn("<guardrails>", runners)
+
+	def test_attack_and_exploit_have_single_strong_guardrails(self):
+		"""Both offensive modes render exactly one guardrails block, and it's the STRONG
+		one (host-secret paths + scope hostname/IP rule). Exploit runs untrusted PoCs, so
+		it must not be left with only a weaker block."""
+		for mode in ("attack", "exploit"):
+			p = get_system_prompt(mode)
+			self.assertEqual(p.count("</guardrails>"), 1, f"{mode}: expected one guardrails block")
+			self.assertIn("~/.secator/config.yml", p, f"{mode}: missing STRONG guardrails")
+			self.assertIn("scope is matched literally", p, f"{mode}: missing scope hostname/IP rule")
+		# chat is read-only and carries no guardrails block
+		self.assertNotIn("</guardrails>", get_system_prompt("chat"))
 
 	def test_common_rules_has_no_shouting(self):
 		"""COMMON_RULES should not have excessive ALL CAPS directives."""
