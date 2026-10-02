@@ -42,6 +42,28 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		])
 		self.assertEqual(history.model, "gpt-4o")
 
+	def test_subagent_docs_excluded_from_restored_history(self):
+		# A subagent (run_task name="ai") inherits the parent session_id, so its own
+		# transcript docs share the session but carry `_context.subagent`. They must NOT
+		# be folded into the parent worker's restored history (else several runners'
+		# transcripts interleave and a subagent turn becomes the tail).
+		from secator.ai.session import restore_history_from_db
+		engine = MagicMock()
+		engine.search.return_value = [
+			{"_type": "ai", "ai_type": "prompt", "content": "parent question", "_timestamp": 1},
+			{"_type": "ai", "ai_type": "prompt", "content": "## Objective sub", "_timestamp": 2,
+			 "_context": {"subagent": "Exploit X"}},
+			{"_type": "ai", "ai_type": "response", "content": "sub working", "_timestamp": 3,
+			 "_context": {"subagent": "Exploit X"}},
+			{"_type": "ai", "ai_type": "response", "content": "parent answer", "_timestamp": 4},
+		]
+		history = restore_history_from_db("s", engine)
+		# Only the parent turns survive; the last user turn is the parent's prompt.
+		self.assertEqual(history.messages, [
+			{"role": "user", "content": "parent question"},
+			{"role": "assistant", "content": "parent answer"},
+		])
+
 	def test_no_prior_docs_returns_system_only(self):
 		from secator.ai.session import restore_history_from_db
 		engine = MagicMock()
@@ -627,12 +649,29 @@ class TestFastDetectMode(unittest.TestCase):
 		self.assertEqual(fast_detect_mode("scan the target"), "attack")
 		self.assertEqual(fast_detect_mode("summarize the findings"), "chat")
 		self.assertEqual(fast_detect_mode(""), "chat")
-		# exploit-ish → defer to LLM (no behavior change for those)
+		# exploit-ish IMPERATIVE → defer to LLM (no behavior change for those)
 		self.assertIsNone(fast_detect_mode("write an exploit for this CVE-2024-1234"))
+		self.assertIsNone(fast_detect_mode("exploit the redis CVE"))
+		# imperative verb wins over discovery framing → still defer (may exploit)
+		self.assertIsNone(fast_detect_mode("exploit the top 3 vulnerabilities"))
+		# DISCOVERY framing that only MENTIONS exploit/vulns → chat (summarize + STOP,
+		# never auto-exploit a live target). Regression: this auto-exploited.
+		self.assertEqual(fast_detect_mode("find the top 3 exploitable vulnerabilities"), "chat")
+		self.assertEqual(fast_detect_mode("which CVEs are exploitable?"), "chat")
+		self.assertEqual(fast_detect_mode("list the exploitable vulnerabilities"), "chat")
+		# inflected words are NOT the imperative verb (word-boundary match)
+		self.assertEqual(fast_detect_mode("summarize how the server was compromised and list vulnerabilities"), "chat")
+		# mixed discovery + scan/active intent → defer (chat can't run task/workflow)
+		self.assertIsNone(fast_detect_mode("find vulnerabilities and scan the target"))
 		# conflicting cues → ambiguous → defer to LLM
 		self.assertIsNone(fast_detect_mode("scan and explain the results"))
 		# no cues → ambiguous → defer to LLM
 		self.assertIsNone(fast_detect_mode("please handle the situation"))
+
+	def test_exploit_mode_can_follow_up(self):
+		"""exploit mode must be able to STOP-and-ask (follow_up), not only run to its cap."""
+		from secator.ai.prompts import get_mode_config
+		self.assertIn("follow_up", get_mode_config("exploit")["allowed_actions"])
 
 	def _make_task(self, prompt, mode=""):
 		from secator.tasks.ai import ai
@@ -1166,6 +1205,52 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 		self.assertEqual(doc.message["role"], "tool")
 		self.assertEqual(doc.message["tool_call_id"], tc_id)
 		self.assertEqual(doc.message["content"], error_content)
+
+	def test_guardrail_denial_emits_tool_result_not_warning(self):
+		"""A guardrail denial (e.g. out-of-scope target) must surface the reason ONCE —
+		the tool_result bubble the model reads — and NOT also yield a redundant Warning
+		into the stream (which rendered the denial twice in the live UI). Regression from
+		two canary AI runs where every out-of-scope run_task showed the reason twice."""
+		import json
+		from secator.tasks.ai import ai as AiTask
+		from secator.output_types import Ai, Warning as WarningItem
+
+		class _FakeHistory:
+			def __init__(self):
+				self.tool_results = []
+
+			def add_tool_result(self, name, tc_id, content):
+				self.tool_results.append((name, tc_id, content))
+
+		fake_self = MagicMock()
+		fake_self.encryptor = None
+		fake_self.context = {}
+		fake_self.history = _FakeHistory()
+		fake_self.debug = MagicMock()
+		fake_self.dangerous = False  # run the guardrail path
+
+		tc = MagicMock()
+		tc.id = "tc_scope"
+		tc.function.name = "run_task"
+		tc.function.arguments = json.dumps({"name": "httpx", "targets": ["64.130.50.49:22"]})
+
+		denial = "Target 64.130.50.49:22 is not in the allowed scope (reason: out_of_scope)"
+
+		def _fake_check_guardrails(action, ctx_):
+			if False:
+				yield  # make it a generator
+			return denial
+
+		ctx = MagicMock()
+		with patch("secator.tasks.ai.check_guardrails", _fake_check_guardrails):
+			items = list(AiTask._process_tool_calls(fake_self, [tc], ctx))
+
+		# Exactly one denial surfaced to the model, via the tool_result — no Warning.
+		tool_results = [i for i in items if isinstance(i, Ai) and i.ai_type == "tool_result"]
+		warnings = [i for i in items if isinstance(i, WarningItem)]
+		self.assertEqual(len(tool_results), 1)
+		self.assertIn("out_of_scope", tool_results[0].message["content"])
+		self.assertEqual(warnings, [])
 
 
 if __name__ == "__main__":

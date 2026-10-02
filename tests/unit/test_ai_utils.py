@@ -82,6 +82,34 @@ class TestCallLLM(unittest.TestCase):
         self.assertEqual(result["tool_calls"], [])
         mock_completion.assert_called_once()
 
+    @patch('litellm.completion')
+    @patch('litellm.completion_cost')
+    def test_call_llm_strips_internal_message_fields(self, mock_cost, mock_completion):
+        """Internal `_`-prefixed message fields (e.g. the token cache) are not sent to
+        the model, but the caller's messages keep them."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "ok"
+        mock_response.choices[0].message.tool_calls = None
+        mock_response.usage.total_tokens = 10
+        mock_completion.return_value = mock_response
+        mock_cost.return_value = 0.0
+
+        from secator.ai.utils import call_llm
+        messages = [
+            {"role": "user", "content": "hi", "_token_count": 3, "_token_model": "m"},
+        ]
+        call_llm(messages, "test-model")
+
+        sent = mock_completion.call_args.kwargs["messages"][0]
+        self.assertNotIn("_token_count", sent)
+        self.assertNotIn("_token_model", sent)
+        self.assertEqual(sent["role"], "user")
+        self.assertEqual(sent["content"], "hi")
+        # Caller's originals are untouched (ChatHistory still has its token cache).
+        self.assertEqual(messages[0]["_token_count"], 3)
+        self.assertEqual(messages[0]["_token_model"], "m")
+
     @patch('litellm.token_counter')
     @patch('litellm.completion')
     def test_call_llm_no_usage_estimates_tokens(self, mock_completion, mock_token_counter):
@@ -739,5 +767,121 @@ class TestSecretGuards(unittest.TestCase):
         self.assertIn("[REDACTED]", out)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestParseTextToolCalls(unittest.TestCase):
+    """Tests for recovering text/Hermes-style <tool_call> blocks from content."""
+
+    def test_parses_xml_style_block_and_dispatches(self):
+        from secator.ai.utils import parse_text_tool_calls
+        from secator.ai.tools import tool_call_to_action
+        import json
+
+        content = (
+            "I'll scan the host now.\n"
+            "<tool_call>\n"
+            "<function=run_task>\n"
+            "<parameter=description>\nRun a nuclei scan\n</parameter>\n"
+            "<parameter=task>\nnuclei\n</parameter>\n"
+            "<parameter=targets>\n[\"scanme.example.org\"]\n</parameter>\n"
+            "</function>\n"
+            "</tool_call>\n"
+        )
+        calls, cleaned = parse_text_tool_calls(content)
+        self.assertEqual(len(calls), 1)
+        tc = calls[0]
+        self.assertEqual(tc.function.name, "run_task")
+        args = json.loads(tc.function.arguments)
+        self.assertEqual(args["task"], "nuclei")
+        self.assertEqual(args["description"], "Run a nuclei scan")
+        self.assertEqual(args["targets"], ["scanme.example.org"])  # JSON value coerced
+        # The raw XML must be stripped from the displayed content.
+        self.assertNotIn("<tool_call>", cleaned)
+        self.assertIn("I'll scan the host now.", cleaned)
+        # And the recovered call dispatches through the normal action path.
+        action = tool_call_to_action(tc.function.name, args)
+        self.assertIsNotNone(action)
+        self.assertEqual(action["action"], "task")
+
+    def test_parses_multiple_blocks(self):
+        from secator.ai.utils import parse_text_tool_calls
+        content = (
+            "<tool_call><function=run_shell><parameter=description>list</parameter>"
+            "<parameter=command>ls -la</parameter></function></tool_call>"
+            "<tool_call><function=query_workspace><parameter=description>find</parameter>"
+            "<parameter=query>type:port</parameter></function></tool_call>"
+        )
+        calls, cleaned = parse_text_tool_calls(content)
+        self.assertEqual([c.function.name for c in calls], ["run_shell", "query_workspace"])
+        self.assertEqual(cleaned, "")
+
+    def test_parses_json_style_block(self):
+        from secator.ai.utils import parse_text_tool_calls
+        import json
+        content = '<tool_call>{"name": "run_task", "arguments": {"task": "nmap", "description": "d"}}</tool_call>'
+        calls, _ = parse_text_tool_calls(content)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].function.name, "run_task")
+        self.assertEqual(json.loads(calls[0].function.arguments)["task"], "nmap")
+
+    def test_malformed_block_is_ignored_not_raised(self):
+        from secator.ai.utils import parse_text_tool_calls
+        # No <function=...> and not valid JSON -> skipped, content returned unchanged.
+        content = "<tool_call>garbage without function or json</tool_call>"
+        calls, cleaned = parse_text_tool_calls(content)
+        self.assertEqual(calls, [])
+        self.assertEqual(cleaned, content)
+
+    def test_plain_content_is_untouched(self):
+        """A normal assistant message (no <tool_call>) is returned verbatim."""
+        from secator.ai.utils import parse_text_tool_calls
+        content = "Here is a summary of the findings. No tools to call."
+        calls, cleaned = parse_text_tool_calls(content)
+        self.assertEqual(calls, [])
+        self.assertEqual(cleaned, content)
+
+    def test_empty_content(self):
+        from secator.ai.utils import parse_text_tool_calls
+        self.assertEqual(parse_text_tool_calls(""), ([], ""))
+        self.assertEqual(parse_text_tool_calls(None), ([], None))
+
+
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestCoerceMatchedAt(unittest.TestCase):
+	"""`matched_at` is a scalar `str` field, but the model often packs multiple locations into it
+	as a stringified JSON list ('["http://a","http://b"]') or a real list. `_coerce_finding_fields`
+	skips it (a str value already matches the str type), so it was stored as an ugly literal and,
+	for a real list, rejected by validate_fields. Coerce it to a clean scalar (first location)."""
+
+	def _coerce(self, **fields):
+		from secator.ai.utils import _coerce_finding_fields
+		from secator.output_types.vulnerability import Vulnerability
+		return _coerce_finding_fields(Vulnerability, dict(name='x', **fields))
+
+	def test_stringified_list_becomes_scalar_first(self):
+		out = self._coerce(matched_at='["http://a","http://b"]')
+		self.assertEqual(out['matched_at'], 'http://a')
+
+	def test_real_list_becomes_scalar_first(self):
+		out = self._coerce(matched_at=['http://a', 'http://b'])
+		self.assertEqual(out['matched_at'], 'http://a')
+
+	def test_single_element_stringified_list_unwraps(self):
+		out = self._coerce(matched_at='["http://a"]')
+		self.assertEqual(out['matched_at'], 'http://a')
+
+	def test_plain_string_passes_through(self):
+		out = self._coerce(matched_at='http://a')
+		self.assertEqual(out['matched_at'], 'http://a')
+
+	def test_ipv6_bracket_literal_not_mangled(self):
+		# starts with '[' but is not a JSON list -> left untouched
+		out = self._coerce(matched_at='[2001:db8::1]:80')
+		self.assertEqual(out['matched_at'], '[2001:db8::1]:80')
+
+	def test_coerced_value_validates_as_str(self):
+		from secator.output_types.vulnerability import Vulnerability
+		out = self._coerce(matched_at=['http://a', 'http://b'])
+		self.assertEqual(Vulnerability.validate_fields(out), [])

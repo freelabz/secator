@@ -1,6 +1,7 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task."""
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -27,7 +28,10 @@ from secator.ai.prompts import (
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
 from secator.ai.session import (
 	save_history, show_session_picker, replay_session, restore_history_from_db, print_session_results)
-from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status, _decrypt_dict, _build_action_display
+from secator.ai.utils import (
+	call_llm, init_llm, setup_ai, format_llm_status, parse_text_tool_calls,
+	_decrypt_dict, _build_action_display,
+)
 
 
 # Hard upper bound on agent-loop iterations even when max_iterations is configured
@@ -35,6 +39,20 @@ from secator.ai.utils import call_llm, init_llm, setup_ai, format_llm_status, _d
 # spend tokens without limit; this keeps the uncapped mode generous (~40x the default
 # 25) yet bounded. The model still normally self-terminates via `stop` well before it.
 _HARD_ITERATION_CEILING = 1000
+
+# Max number of times an answered follow-up may auto-extend the iteration budget in
+# one run. Each answer adds `extra_iters` to `max_iterations`, cancelling the loop's
+# own `iteration += 1`; without a cap an endlessly re-answered follow-up (e.g. the
+# answer channel re-serving the same standing message) never terminates. 200 is far
+# beyond any real human chat, so it only ever trips a runaway auto-answered loop.
+_MAX_FOLLOWUP_EXTENSIONS = 200
+
+# When the SAME answer is served to this many CONSECUTIVE follow-ups, the run isn't
+# progressing (e.g. the answer channel re-serving one standing message, observed in remote runs
+# ws bb_21_arcbbc) — stop now instead of burning up to _MAX_FOLLOWUP_EXTENSIONS
+# iterations / the worker deadline. A genuine back-and-forth (distinct answers) resets
+# the counter and never trips this.
+_MAX_REPEATED_ANSWERS = 3
 
 # High-precision cues for the deterministic mode fast-path. Only unambiguous
 # prompts (cues for exactly one of attack/chat, and no exploit-ish cue) are
@@ -48,16 +66,31 @@ _CHAT_CUES = (
 	"how do", "how does", "tell me", "describe", "list the", "show me", "?",
 )
 _EXPLOIT_CUES = ("exploit", "poc", "proof of concept", "cve-", "vulnerabilit")
+# Discovery/read framing: FIND / RANK / LIST vulns is summarize-and-stop, even when it
+# mentions "exploitable vulnerabilities".
+_DISCOVERY_CUES = (
+	"top ", "find ", "which ", "identify", "rank", "how many", "list", "search for", "look for",
+)
+# Active-exploit intent: exploit/pwn/compromise as a VERB (word-boundary so "exploitable"
+# and "compromised" don't match).
+_ACTIVE_EXPLOIT_RE = re.compile(r'\b(?:exploit|pwn|compromise|weaponize)\b')
 
 
 def fast_detect_mode(prompt):
-	"""Cheap deterministic pre-classifier. Returns 'attack'/'chat' for
-	unambiguous prompts, else None to defer to the LLM. Exploit-ish prompts
-	return None so the LLM keeps deciding those (no behavior change there)."""
+	"""Cheap deterministic pre-classifier. Returns 'attack'/'chat' for unambiguous prompts,
+	else None to defer to the LLM. A discovery/summary request that only MENTIONS exploit/
+	vulns ("find the top 3 exploitable vulnerabilities") returns chat (summarize + STOP),
+	not auto-exploit; anything with active-exploit or scan intent defers."""
 	text = (prompt or "").strip().lower()
 	if not text:
 		return "chat"
 	if any(cue in text for cue in _EXPLOIT_CUES):
+		discovery = any(c in text for c in _CHAT_CUES) or any(c in text for c in _DISCOVERY_CUES)
+		# Active = exploit verb OR a scan/attack cue (chat mode can't run those, so a mixed
+		# "find vulns AND scan" must defer, not force chat).
+		active = bool(_ACTIVE_EXPLOIT_RE.search(text)) or any(c in text for c in _ATTACK_CUES)
+		if discovery and not active:
+			return "chat"
 		return None
 	has_attack = any(cue in text for cue in _ATTACK_CUES)
 	has_chat = any(cue in text for cue in _CHAT_CUES)
@@ -114,7 +147,7 @@ def _yield_tool_results(runner, collected):
 		has_errors = any(r["_type"] == "error" for r in group_results)
 		# `_uuid` is normally internal, but for query_workspace results it is the
 		# stable, cross-backend handle the model must reference later — notably
-		# add_vuln_poc requires the `_uuid` "seen in query_workspace results". Keep
+		# mark_vuln_exploited requires the `_uuid` "seen in query_workspace results". Keep
 		# it for queries; strip the rest of INTERNAL_FIELDS as usual.
 		strip_fields = tuple(f for f in INTERNAL_FIELDS if f != "_uuid") \
 			if tc_name == "query_workspace" else INTERNAL_FIELDS
@@ -141,6 +174,25 @@ def _yield_tool_results(runner, collected):
 		         _context=dict(runner.context))
 
 
+def resolve_llm_credentials(
+	caller_api_base, caller_api_key, config_api_base, config_api_key,
+	disallow_config_token=False,
+):
+	"""Resolve the (api_base, api_key, error) triple for an AI run.
+
+	SECURITY (LLM CREDS): when ``disallow_config_token`` is on and a caller overrides ``api_base``
+	without supplying their own ``api_key``, the configured key is NOT reused (it would be sent to
+	an unintended endpoint) and the run is refused. ``error`` is then a short message the caller
+	yields as an ``Error()`` output — tasks never raise. Off (default) reuses the configured key
+	for any base, so a normal CLI user who sets both keys in config keeps working.
+	"""
+	api_base = caller_api_base or config_api_base
+	custom_base = bool(caller_api_base) and caller_api_base != config_api_base
+	if disallow_config_token and custom_base and not caller_api_key:
+		return api_base, None, "A custom api_base requires you to provide your own api_key."
+	return api_base, (caller_api_key or config_api_key), None
+
+
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (attack or chat mode)."""
@@ -157,8 +209,8 @@ class ai(PythonRunner):
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": f"Mode: {', '.join(MODES)}"},  # derive from MODES, don't drift
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
-		# Never default this to CONFIG.addons.ai.api_key: secator-api serves task opts
-		# (incl. defaults) to the UI, which would leak the key into the runner form.
+		# Never default this to CONFIG.addons.ai.api_key: a remote server serves task opts
+		# (incl. defaults) to clients, which would leak the key into client-rendered run options.
 		# Falls back to CONFIG at runtime instead; still `sensitive` so it's redacted.
 		"api_key": {"type": str, "default": "", "sensitive": True, "help": "API key for LLM provider (defaults to configured key)"},  # noqa: E501
 		"api_base": {"type": str, "default": "", "help": "API base URL (defaults to configured base)"},
@@ -270,10 +322,17 @@ class ai(PythonRunner):
 		# Init all options
 		self._init_options()
 
+		# SECURITY (LLM CREDS): refuse (yield Error, never raise) if creds can't be safely resolved.
+		if self._credential_error:
+			yield Error(message=self._credential_error)
+			return
+
 		# Show prompt mode (diagnostic)
 		if self.run_opts.get("show_prompt", False):
 			show_mode = self.mode or "attack"
-			prompt = get_system_prompt(show_mode, workspace_path=str(self.reports_folder), backend=self.backend)
+			prompt = get_system_prompt(
+				show_mode, workspace_path=str(self.reports_folder), backend=self.backend,
+				in_scope=self.in_scope, out_of_scope=self.out_of_scope)
 			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
 			console.print(prompt, highlight=False, soft_wrap=True)
 			return
@@ -382,7 +441,9 @@ class ai(PythonRunner):
 
 	def _system_prompt_for(self, mode):
 		"""Compute the system prompt for ``mode`` using this runner's workspace + backend."""
-		return get_system_prompt(mode, workspace_path=str(self.reports_folder), backend=self.backend)
+		return get_system_prompt(
+			mode, workspace_path=str(self.reports_folder), backend=self.backend,
+			in_scope=getattr(self, "in_scope", None), out_of_scope=getattr(self, "out_of_scope", None))
 
 	def _rebuild_prompt_and_tools(self):
 		"""Rebuild system_prompt + tool_schemas for the current mode and store them.
@@ -396,7 +457,7 @@ class ai(PythonRunner):
 		"""Resolve the ``prompt`` run option, reading it from a file if it names one.
 
 		File-path expansion is CLI/local only: on the remote path the prompt comes from
-		the web UI, so a string that happens to name a worker-local file must NOT be read
+		clients, so a string that happens to name a worker-local file must NOT be read
 		and leaked into the transcript.
 		"""
 		prompt = self.run_opts.get("prompt", "")
@@ -416,6 +477,27 @@ class ai(PythonRunner):
 		encrypted = maybe_encrypt(prompt, self.encryptor)
 		self.history.add_user(encrypted)
 		return Ai(content=prompt, ai_type="prompt", message={"role": "user", "content": encrypted})
+
+	def _prompt_already_tail(self, prompt):
+		"""True if ``prompt`` already equals the last user turn in the restored history.
+
+		Guards the resume re-emit against duplicating a turn restore already rebuilt.
+		Compares on plaintext (decrypting the stored turn when an encryptor is set) so
+		it works for both legacy and message-carrying docs; any decrypt error falls
+		back to "not a duplicate" (emit), i.e. today's behaviour — never over-suppress a
+		genuinely-new answer (the legit answer-after-stop respawn).
+		"""
+		for msg in reversed(self.history.messages):
+			if msg.get("role") != "user":
+				continue
+			content = msg.get("content") or ""
+			if self.encryptor:
+				try:
+					content = self.encryptor.decrypt(content)
+				except Exception:  # noqa: BLE001 - a decrypt miss must not suppress a real prompt
+					return False
+			return content.strip() == (prompt or "").strip()
+		return False
 
 	def _get_query_engine(self):
 		"""Build a workspace-scoped QueryEngine from the runner context.
@@ -489,8 +571,15 @@ class ai(PythonRunner):
 		# (else `[IPV4:...]`/`[HOST:...]` leak into shell commands + scope checks).
 		self._restore_pii_map()
 
-		# Append the new user message that respawned the conversation
-		if self.prompt:
+		# Append the new user message that respawned the conversation — but ONLY if it
+		# isn't already the tail of the restored history. A respawn's run_opts["prompt"]
+		# is the LAST user message, which restore_history_from_db already reconstructed
+		# (the prompt doc itself, or the threaded answered-follow_up tail). Re-emitting it
+		# unconditionally duplicated that turn AND persisted a duplicate `prompt` doc on
+		# every respawn — the observed repeat (initial prompt re-appended after recon; a
+		# prior follow-up answer / pasted message re-served as a fresh prompt to each new
+		# invocation). Emit only a genuinely-new prompt (the legit answer-after-stop case).
+		if self.prompt and not self._prompt_already_tail(self.prompt):
 			yield self._emit_user_prompt(self.prompt)
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
@@ -567,7 +656,7 @@ class ai(PythonRunner):
 		turns — so those tokens leak verbatim into shell commands (DNS fails) and
 		scope/IP checks (ValueError). Store it as an internal ``ai_type="pii_map"``
 		doc (one per session, upserted): restore_history_from_db skips it so it never
-		enters the LLM transcript, and the UI hides it. The plaintext values already
+		enters the LLM transcript, and clients hide it. The plaintext values already
 		live in the workspace findings, so this adds no LLM-provider exposure.
 		"""
 		if self.interactive != "remote" or not self.encryptor or not self.encryptor.pii_map:
@@ -622,6 +711,7 @@ class ai(PythonRunner):
 			# AI accumulates its own action results here; queries the store on demand (avoids OOM on the full subtree)
 			results=[],
 			max_workers=self.max_workers,
+			max_iterations=self.max_iterations,
 			subagent=self.is_subagent,
 			sync=self._sync,
 			interactive=self.interactive,
@@ -655,6 +745,12 @@ class ai(PythonRunner):
 			self.max_iterations = _HARD_ITERATION_CEILING
 
 		while iteration < self.max_iterations:
+			# The same-answer loop breaker (see _prompt_and_redetect) yielded its stop
+			# Warning last iteration and asked to end the run — do it before more work.
+			# `is True` (not truthy): tolerates a MagicMock self in unit tests.
+			if getattr(self, "_followup_repeat_stop", False) is True:
+				self._save_history()
+				return
 			iteration += 1
 
 			try:
@@ -696,6 +792,16 @@ class ai(PythonRunner):
 
 				content = result["content"]
 				tool_calls = result.get("tool_calls", [])
+
+				# Fallback: some models emit tool calls as TEXT (Hermes/XML-style
+				# <tool_call>...</tool_call> blocks) in `content` instead of native
+				# structured tool_calls. Recover them so they dispatch like native
+				# calls, and strip the consumed blocks so the raw XML isn't shown.
+				if not tool_calls and content:
+					parsed_calls, content = parse_text_tool_calls(content)
+					if parsed_calls:
+						tool_calls = parsed_calls
+
 				usage = result.get("usage", {})
 				finish_reason = result.get("finish_reason")
 
@@ -775,7 +881,7 @@ class ai(PythonRunner):
 						"iteration": iteration,
 						# Persist -1 (not float('inf')) for the uncapped case: inf is not
 						# JSON-compliant and 500s the transcript search (strict json.dumps),
-						# which makes the whole conversation fail to load in the UI.
+						# which makes the whole conversation fail to load for clients.
 						"max_iterations": (-1 if self.max_iterations == float('inf') else self.max_iterations),
 						"tokens": usage.get("tokens") if usage else None,
 						"cost": usage.get("cost") if usage else None,
@@ -910,8 +1016,12 @@ class ai(PythonRunner):
 		self.is_subagent = self.get_opt_value("subagent")
 		self.model = self.get_opt_value("model")
 		self.intent_model = self.get_opt_value("intent_model")
-		self.api_base = self.get_opt_value("api_base") or CONFIG.addons.ai.api_base
-		self.api_key = self.get_opt_value("api_key") or CONFIG.addons.ai.api_key
+		# SECURITY (LLM CREDS): don't reuse the configured key on a caller-overridden api_base (gated).
+		self.api_base, self.api_key, self._credential_error = resolve_llm_credentials(
+			self.get_opt_value("api_base"), self.get_opt_value("api_key"),
+			CONFIG.addons.ai.api_base, CONFIG.addons.ai.api_key,
+			CONFIG.addons.ai.custom_disallow_config_token,
+		)
 		self.sensitive = self.get_opt_value("sensitive")
 		self.mode = self.get_opt_value("mode")
 		self.max_tokens_total = self.get_opt_value("max_tokens_total")
@@ -928,6 +1038,17 @@ class ai(PythonRunner):
 		self.isolated = self.get_opt_value("isolated")
 		self.in_scope = self.get_opt_value("in_scope") or []
 		self.out_of_scope = self.get_opt_value("out_of_scope") or []
+		# Resolve in-scope hostnames to their current IPs so the AI can reach an
+		# in-scope host by IP (host_in_scope matches literally, with no DNS at check
+		# time). Done here, once, on the worker — the expanded lists flow to both the
+		# PermissionEngine below and every child runner (via ctx.in_scope). Deny scope
+		# is resolved too so deny-wins still covers a denied host's IPs.
+		if self.in_scope or self.out_of_scope:
+			from secator.scope import resolve_scope_hostnames
+			if self.in_scope:
+				self.in_scope = resolve_scope_hostnames(self.in_scope)
+			if self.out_of_scope:
+				self.out_of_scope = resolve_scope_hostnames(self.out_of_scope)
 
 		# Interactive mode: "local" / "remote" / "auto"
 		interactive = self.get_opt_value("interactive")
@@ -954,10 +1075,11 @@ class ai(PythonRunner):
 			workspace=self.reports_folder or "",
 			in_scope=self.in_scope,
 			out_of_scope=self.out_of_scope,
+			isolated=self.isolated,
 		)
 
 		# Per-run billed-token accounting (AI analog of context.scan_hours), read
-		# by the platform billing chore. Init so it persists even with zero LLM calls.
+		# by the billing chore. Init so it persists even with zero LLM calls.
 		self.context.setdefault("ai_tokens", 0)
 		self.context.setdefault("ai_prompt_tokens", 0)
 		self.context.setdefault("ai_completion_tokens", 0)
@@ -968,7 +1090,7 @@ class ai(PythonRunner):
 		# configured model even if the user switches mid-session.
 		self.context["ai_model"] = self.model
 
-		# Create interactivity backend. For remote (web), the UI reuses a stable
+		# Create interactivity backend. For remote (web), clients reuse a stable
 		# session_id on respawn so a respawned task finds its prior docs; it arrives
 		# via self.context (authoritative — the dispatcher pops run_opts['context']).
 		self.session_id = (
@@ -1102,10 +1224,10 @@ class ai(PythonRunner):
 		turn. Cooperative — not a hard cancel (Stop already does that).
 
 		The steer doc the API wrote is itself the persisted transcript entry (it
-		carries ``_context.session_id``, so the UI's transcript poll surfaces it as
+		carries ``_context.session_id``, so a client's transcript poll surfaces it as
 		an "interjected" user bubble). We deliberately do NOT yield a second
 		``Ai(ai_type="steer")`` echo here — that would persist a duplicate doc with
-		the same content and double-render in the UI. ``poll_steers`` flips the
+		the same content and double-render on the client. ``poll_steers`` flips the
 		drained doc to ``status:"consumed"`` so it injects exactly once.
 
 		Only the RemoteBackend has a channel to poll; for every other backend this
@@ -1268,11 +1390,16 @@ class ai(PythonRunner):
 			if denial:
 				cmd_display = _build_action_display(action)
 				denial_display = f"{denial}\n[gray42]{cmd_display}[/gray42]" if cmd_display else denial
-				yield Warning(message=denial_display)
+				# Log the denial to the console / pod-logs ONLY — the _reject_tool_call
+				# tool_result below already surfaces the SAME reason in the chat (it is
+				# what the model reads). Yielding a Warning too rendered the denial TWICE
+				# in the live client view (a Warning line + the tool_result bubble). One denial,
+				# one message.
+				console.print(Warning(message=denial_display))
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
-				# Surface the actual reason in the chat (not a bare "denied"): the Warning
-				# above isn't an `ai` transcript doc, so this tool_result bubble is the only
-				# place the user sees WHY (e.g. "Action denied: shell command not approved").
+				# Surface the actual reason in the chat (not a bare "denied"): this
+				# tool_result bubble is the only place the user sees WHY
+				# (e.g. "Action denied: shell command not approved").
 				yield _reject_tool_call(self, name, tc_id, error_msg, denial)
 				continue
 
@@ -1295,6 +1422,14 @@ class ai(PythonRunner):
 		stop_reason = None
 		follow_up_ai = None
 		follow_up_prompt_uuid = None
+
+		# Progress signal for the same-answer loop-breaker (see _prompt_and_redetect):
+		# count substantive actions actually dispatched this turn (a follow_up/steer is
+		# not work). A follow-up answered the same way but with real work in between is
+		# PROGRESS and must NOT trip the breaker; only same-answer-with-no-new-action
+		# means the run is stuck.
+		self._progress_actions = getattr(self, "_progress_actions", 0) + sum(
+			1 for a in actions if a.get("action") not in ("follow_up", "steer"))
 
 		is_batch = len(actions) > 1
 		# safe_dispatch_action wraps dispatch so a handler error becomes an Error item
@@ -1320,7 +1455,7 @@ class ai(PythonRunner):
 					if isinstance(self.backend, RemoteBackend):
 						follow_up_ai.status = "pending"
 						# Correlate on the PERSISTED _context.session_id (a top-level session_id
-						# attr wouldn't serialize) — the same field poll_steers/the UI/api use.
+						# attr wouldn't serialize) — the same field poll_steers and clients use.
 						follow_up_ai._context = {**(follow_up_ai._context or {}), "session_id": self.session_id}
 						if not follow_up_ai.choices and follow_up_choices:
 							follow_up_ai.choices = list(follow_up_choices)
@@ -1352,7 +1487,16 @@ class ai(PythonRunner):
 				yield result
 
 			result = result.toDict() if isinstance(result, OutputType) else result
-			collected.append(result)
+			# A dispatched CHILD subagent's fragmented output stays OUT of the parent's
+			# tool_result (the parent reads its clean handback instead). But a subagent
+			# ALSO stamps the `subagent` marker on its OWN tool outputs, and those MUST
+			# stay in `collected` — else the subagent never feeds its own tool results
+			# back to its LLM (tool calls acknowledged but empty). Distinguish the two by
+			# session_id: a child has its own (distinct) session_id; my own outputs share
+			# mine. Only a DIFFERENT session_id is a child.
+			is_from_child_subagent = is_from_subagent and result_context.get("session_id") != self.session_id
+			if not is_from_child_subagent:
+				collected.append(result)
 			ctx.results.append(result)
 
 		yield from _yield_tool_results(self, collected)
@@ -1375,7 +1519,7 @@ class ai(PythonRunner):
 		(`{"tokens", "prompt_tokens", "completion_tokens", "cost"}`) or None.
 		Missing/None usage counts as 0 so accounting never crashes the run. The
 		running total lives on `self.context["ai_tokens"]` (int, cumulative) which
-		is persisted onto the task doc and read by the platform billing chore.
+		is persisted onto the task doc and read by the billing chore.
 		`context["ai_prompt_tokens"]`/`["ai_completion_tokens"]` carry the split.
 		"""
 		if not usage:
@@ -1482,6 +1626,30 @@ class ai(PythonRunner):
 			return None
 
 		answer = response["answer"]
+
+		# Same-answer loop breaker: if consecutive follow-ups keep being answered with
+		# the SAME content (normalized) AND no substantive action ran in between, the
+		# conversation isn't progressing — end the run cleanly in a few iterations rather
+		# than waiting on the extension backstop. A DIFFERENT answer OR new work done
+		# since the last identical answer resets the counter, so answering "yes" to a
+		# series of distinct AI proposals (each of which does real work) never trips.
+		norm = self.encryptor.decrypt(answer) if self.encryptor else answer
+		norm = (norm or "").strip().casefold()
+		progress = getattr(self, "_progress_actions", 0)
+		same_answer = bool(norm) and norm == getattr(self, "_last_followup_answer", None)
+		no_new_work = progress == getattr(self, "_last_followup_progress", -1)
+		if same_answer and no_new_work:
+			self._repeated_answer_count = getattr(self, "_repeated_answer_count", 1) + 1
+		else:
+			self._repeated_answer_count = 1
+			self._last_followup_answer = norm
+		self._last_followup_progress = progress
+		if self._repeated_answer_count >= _MAX_REPEATED_ANSWERS:
+			self._followup_repeat_stop = True
+			return [Warning(message=(
+				"Stopping: the same answer was provided to repeated follow-ups; "
+				"the run isn't progressing."))]
+
 		extra_iters = response.get("extra_iters", 1)
 		self.prompt = answer
 		items = []
@@ -1490,7 +1658,20 @@ class ai(PythonRunner):
 		self.history.add_user(maybe_encrypt(answer, self.encryptor))
 
 		# Handle explicit mode switch (e.g. summarize → chat)
-		self.max_iterations += extra_iters
+		# Extend the iteration budget for this answer — but BOUND the total number of
+		# auto-extensions. Each follow-up/content-only turn both bumps `iteration` (in
+		# the loop) and `max_iterations` here by `extra_iters`, so the two grow in
+		# lockstep and the `while iteration < max_iterations` cap can NEVER terminate an
+		# endlessly-answered follow-up loop. If the answer channel keeps re-serving the
+		# same standing message (a stopped→answered respawn racing / a buggy client resubmit),
+		# the run spins until the worker deadline. Cap the auto-extensions so a runaway
+		# terminates; a real human back-and-forth never approaches the ceiling.
+		extends = getattr(self, "_followup_extensions", 0)
+		if not isinstance(extends, int):  # ponytail: tolerate a mock/uninit self
+			extends = 0
+		if extends < _MAX_FOLLOWUP_EXTENSIONS:
+			self.max_iterations += extra_iters
+			self._followup_extensions = extends + 1
 		if response.get("switch_mode"):
 			self.mode = response["switch_mode"]
 			self._rebuild_prompt_and_tools()

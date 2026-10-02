@@ -357,7 +357,7 @@ def get_task_folder_id(path):
 
 	Now: a ``.next_id`` counter file guarded by an exclusive ``flock``, seeded once from the
 	existing integer folders (back-compat with runs created before this change). O(1) per call
-	and safe across greenlets AND processes (prod prefork workers share the reports volume).
+	and safe across greenlets AND processes (server prefork workers share the reports volume).
 
 	ponytail: flock briefly blocks the gevent hub, but the critical section is a few-byte
 	read/write (microseconds); move the counter to the broker/DB only if it ever shows in a profile.

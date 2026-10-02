@@ -27,7 +27,9 @@ def _config():
 
 
 def _ctx(isolated, backend="auto"):
-	engine = PermissionEngine(_config(), targets=["10.0.0.1"], workspace="/tmp/ws")
+	# The engine owns the isolation verdict now (isolated shell/path -> allow), so thread
+	# it in at build time — the caller no longer post-processes for isolation.
+	engine = PermissionEngine(_config(), targets=["10.0.0.1"], workspace="/tmp/ws", isolated=isolated)
 	return ActionContext(
 		targets=["10.0.0.1"], model="m", interactive=backend, backend=create_backend(backend),
 		session_id="s", permission_engine=engine, isolated=isolated,
@@ -55,6 +57,16 @@ class TestIsolatedGuardrails(unittest.TestCase):
 		self.assertIsNotNone(denial)                 # target prompt still enforced
 		self.assertIn("9.9.9.9", denial)
 
+	def test_isolated_target_check_error_fails_closed(self):
+		# A fault in the TARGET layer (network egress) must fail CLOSED even under isolation
+		# — isolation drops only the shell/path layers, never targets. Force _check_values to
+		# raise and assert the verdict is deny (not the isolated-shell allow). CodeRabbit CWE-863.
+		eng = PermissionEngine(_config(), targets=["10.0.0.1"], workspace="/tmp/ws", isolated=True)
+		with patch.object(eng, "_check_values", side_effect=ValueError("boom")):
+			res = eng.check_action({"action": "shell", "command": "curl http://9.9.9.9/"})
+		self.assertEqual(res.decision, "deny")
+		self.assertIn("fail-closed", res.reason)
+
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
 class TestIsolatedShellRouting(unittest.TestCase):
@@ -80,6 +92,79 @@ class TestIsolatedShellRouting(unittest.TestCase):
 		shell_docs = [r for r in results if isinstance(r, Ai) and r.ai_type == "shell"]
 		self.assertEqual(shell_docs[0].content, "id && whoami")      # transcript shows the ORIGINAL
 		self.assertTrue(any(isinstance(r, Ai) and r.ai_type == "shell_output" for r in results))
+
+
+class _CP:
+	def __init__(self, rc=0, out="", err=""):
+		self.returncode, self.stdout, self.stderr = rc, out, err
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestSandboxCreateRace(unittest.TestCase):
+	"""`_ensure_sandbox_container` must survive the create race and surface real errors."""
+
+	def test_run_collision_uses_existing_container(self):
+		from secator.ai import actions as A
+		ctx = _ctx(isolated=True)
+		context = {"run_id": "r-race"}
+		# inspect: initial=false, under-lock=false, post-run-failure=true (a racer won).
+		inspects = iter(["false", "false", "true"])
+
+		def fake_run(argv, **kw):
+			if argv[:2] == ["docker", "inspect"]:
+				return _CP(0, next(inspects))
+			if argv[:2] == ["docker", "run"]:
+				return _CP(1, "", "Conflict. The container name is already in use")
+			return _CP(0)
+
+		with patch("subprocess.run", side_effect=fake_run):
+			name = A._ensure_sandbox_container(ctx, context)
+		self.assertEqual(name, A._sandbox_container_name(ctx, context))
+
+	def test_run_failure_surfaces_stderr(self):
+		from secator.ai import actions as A
+		ctx = _ctx(isolated=True)
+		context = {"run_id": "r-err"}
+		inspects = iter(["false", "false", "false"])  # never comes up
+
+		def fake_run(argv, **kw):
+			if argv[:2] == ["docker", "inspect"]:
+				return _CP(0, next(inspects))
+			if argv[:2] == ["docker", "run"]:
+				return _CP(125, "", "docker: Error response from daemon: no space left on device")
+			return _CP(0)
+
+		with patch("subprocess.run", side_effect=fake_run):
+			with self.assertRaises(RuntimeError) as cm:
+				A._ensure_sandbox_container(ctx, context)
+		self.assertIn("no space left on device", str(cm.exception))
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestChildInheritsIsolated(unittest.TestCase):
+	"""A spawned child force-inherits the parent's `isolated` and can never lower it."""
+
+	def test_child_inherits_parent_isolated_true(self):
+		from secator.ai.actions import _child_run_opts
+		self.assertTrue(_child_run_opts(_ctx(isolated=True))["isolated"])
+
+	def test_child_inherits_parent_isolated_false(self):
+		from secator.ai.actions import _child_run_opts
+		self.assertFalse(_child_run_opts(_ctx(isolated=False))["isolated"])
+
+	def test_llm_cannot_set_isolated_on_child(self):
+		from secator.ai.utils import _sanitize_child_opts
+		# An LLM-supplied `isolated` is stripped before it can reach the child run_opts.
+		self.assertNotIn("isolated", _sanitize_child_opts({"isolated": False, "ports": "80"}))
+
+	def test_child_cannot_lower_isolated(self):
+		# Parent is isolated; LLM tries isolated=False. After sanitize + the real merge order
+		# used in _run_runner ({**_child_run_opts(ctx), **llm_opts}), isolation stays True.
+		from secator.ai.actions import _child_run_opts
+		from secator.ai.utils import _sanitize_child_opts
+		llm_opts = _sanitize_child_opts({"isolated": False})
+		run_opts = {**_child_run_opts(_ctx(isolated=True)), **llm_opts}
+		self.assertTrue(run_opts["isolated"])
 
 
 if __name__ == '__main__':

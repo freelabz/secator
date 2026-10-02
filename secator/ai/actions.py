@@ -28,6 +28,10 @@ _MAX_SUBAGENT_DEPTH = 3
 _MAX_SUBAGENTS_PER_TURN = 5
 _SUBAGENT_TURN_LOCK = threading.Lock()
 
+# Serializes isolation-container creation within a process: shells in the same run
+# share one container, and two racing to create it would collide on the name (125).
+_SANDBOX_CREATE_LOCK = threading.Lock()
+
 # Cap shell stdout before it enters AI history so a huge command can't blow up
 # the next prompt's token budget; head+tail keeps both the start and the result.
 _MAX_SHELL_OUTPUT_CHARS = 4000
@@ -60,6 +64,10 @@ class ActionContext:
 	scope: str = "workspace"
 	results: Optional[List[Dict]] = None
 	max_workers: int = 3
+	# Parent's RESOLVED agent-loop cap, handed down so a spawned AI subagent gets the
+	# SAME turn budget as the parent (else the mode floor of 5 starves it). Trusted
+	# (operator/config-resolved, not LLM-set), so it bypasses the _MAX_CHILD_ITERATIONS clamp.
+	max_iterations: int = 0
 	in_batch: bool = False  # set on the per-batch ctx so the per-turn fan-out cap applies
 	subagent: bool = False
 	silent: bool = False
@@ -82,7 +90,7 @@ class ActionContext:
 	def get_query_engine(self):
 		"""Get or create a QueryEngine (cached for reuse across queries).
 
-		Always queries through the run's REAL driver (mongodb/api on the platform,
+		Always queries through the run's REAL driver (mongodb/api on a server,
 		local json on the CLI) — the driver's context carries `drivers`, so the
 		backend resolves correctly. The old scope=="current" path passed only
 		`{"results": self.results}` with no driver; the JsonBackend no longer reads
@@ -232,32 +240,21 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 	Use from regular code: denial, items = check_guardrails_sync(action, ctx)
 	"""
 	from secator.ai.interactivity import RemoteBackend
-	from secator.output_types import Warning as Warn
+	from secator.ai.guardrails import detect_paths_with_access
 
 	if ctx.permission_engine is None:
 		return None
 
-	# Check for non-existent file paths (warn but don't block)
-	from secator.ai.guardrails import detect_paths, detect_paths_with_access, classify_command
-	from pathlib import Path
-	action_type = action.get("action", "")
-	if action_type == "shell":
-		cmd = action.get("command", "")
-		cmd_name = cmd.split()[0] if cmd.split() else ""
-		cmd_class = classify_command(cmd_name)
-		if cmd_class == "read":
-			for path in detect_paths(cmd):
-				if any(c in path for c in ('*', '?', '[', ']')):
-					continue
-				try:
-					expanded = Path(path).expanduser()
-					if not expanded.exists():
-						yield Warn(message=f"Path does not exist: {path}")
-				except (OSError, ValueError):
-					pass
-
+	# The engine is THE decision point: it returns the final verdict already accounting
+	# for isolation and any checker fault (see PermissionEngine.check_action). We only act
+	# on allow/deny/ask here — no post-processing of the verdict.
 	result = ctx.permission_engine.check_action(action)
 	if result.decision == "deny":
+		# Out-of-scope denials carry the target + a machine-readable reason so clients/CLI
+		# can render a clear "Target X is not in the allowed scope" message (and the model
+		# can retry an in-scope target) rather than a bare reason code.
+		if result.reason == "out_of_scope" and result.targets:
+			return f"Target {result.targets[0]} is not in the allowed scope (reason: out_of_scope)"
 		return f"Action denied by guardrails: {result.reason}"
 
 	is_remote = isinstance(ctx.backend, RemoteBackend)
@@ -270,13 +267,10 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 		rounds += 1
 		cmd_display = _build_action_display(action)
 
-		# Handle shell command prompts (unknown commands or parse failures)
-		# --isolated: the container is the command/path boundary, so drop the shell (command)
-		# ask entirely — mark it approved so the re-check clears this layer. Target (network)
-		# asks below are unaffected and still prompt.
-		if result.shell_command and ctx.isolated:
-			ctx.permission_engine.approved_shell_commands.add(result.shell_command.strip())
-		elif result.shell_command:
+		# Handle shell command prompts (unknown commands or parse failures). Isolation is
+		# already resolved by the engine (isolated shell never reaches here as an ask), so
+		# this is purely the interactive/remote approval path.
+		if result.shell_command:
 			parse_failed = "Could not parse" in (result.reason or "")
 			denial = yield from _ask_and_check(
 				ctx, is_remote,
@@ -311,29 +305,23 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 			if denial:
 				return denial
 
-		# Handle path prompts
+		# Handle path prompts. Isolation is resolved by the engine (isolated path asks never
+		# reach here), so this is purely the interactive/remote approval path.
 		if result.paths:
 			cmd = action.get("command", "")
 			path_access_map = {p: a for p, a in detect_paths_with_access(cmd)}
-			if ctx.isolated:
-				# --isolated: the container is the filesystem boundary, so drop path asks —
-				# runtime-allow each path so the re-check clears this layer (no prompt).
-				ctx.permission_engine.add_runtime_allow(
-					[f"{path_access_map.get(p, 'read')}({p})" for p in result.paths]
+			for path in result.paths:
+				access_type = path_access_map.get(path, "read")
+				denial = yield from _ask_and_check(
+					ctx, is_remote,
+					question=f"{access_type.capitalize()} access to {path} requires approval",
+					permission_type=access_type,
+					value=path,
+					deny_message=f"Action denied: {access_type} access to {path} not approved",
+					command=cmd_display,
 				)
-			else:
-				for path in result.paths:
-					access_type = path_access_map.get(path, "read")
-					denial = yield from _ask_and_check(
-						ctx, is_remote,
-						question=f"{access_type.capitalize()} access to {path} requires approval",
-						permission_type=access_type,
-						value=path,
-						deny_message=f"Action denied: {access_type} access to {path} not approved",
-						command=cmd_display,
-					)
-					if denial:
-						return denial
+				if denial:
+					return denial
 
 		# Re-check to see if more layers need prompting
 		result = ctx.permission_engine.check_action(action)
@@ -366,7 +354,10 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"query": _handle_query,
 		"follow_up": _handle_follow_up,
 		"add_finding": _handle_add_finding,
-		"add_vuln_poc": _handle_add_vuln_poc,
+		"mark_vuln_exploited": _handle_mark_vuln_exploited,
+		"mark_vuln_false_positive": _handle_mark_vuln_false_positive,
+		"mark_vuln_exploit_failed": _handle_mark_vuln_exploit_failed,
+		"update_finding": _handle_update_finding,
 		"stop": _handle_stop,
 	}
 
@@ -475,6 +466,8 @@ def _child_run_opts(ctx: ActionContext) -> Dict:
 		# (the parent AI task already holds one). run_opts is the single source of
 		# truth for has_parent (Runner reads self.run_opts['has_parent'] at init).
 		"has_parent": True,
+		# SECURITY (ISOLATION): child force-inherits the parent `isolated`; it can't set or lower it.
+		"isolated": ctx.isolated,
 	}
 	# Flow the mandate scope down so each child runner enforces it too (shipped gate).
 	if ctx.in_scope:
@@ -484,9 +477,11 @@ def _child_run_opts(ctx: ActionContext) -> Dict:
 	return opts
 
 
-def _child_preamble(ctx: ActionContext, context: Dict) -> Tuple[Dict, Optional["Warning"]]:
-	"""Shared child-runner prelude: stamp task_chunk_id + subagent flag, then rebuild
-	persistence hooks (or return a denial).
+def _child_preamble(
+	ctx: ActionContext, context: Dict, runner_type: str = "task"
+) -> Tuple[Dict, Optional["Warning"]]:
+	"""Shared child-runner prelude: stamp the child's own chunk id + subagent flag,
+	then rebuild persistence hooks (or return a denial).
 
 	Propagates driver hooks (mongodb/api): a sync sub-runner skips the pickle path
 	that normally re-registers them, so without this its results never persist.
@@ -495,15 +490,19 @@ def _child_preamble(ctx: ActionContext, context: Dict) -> Tuple[Dict, Optional["
 	Returns ``(hooks, denial)``; if ``denial`` is non-None the caller must yield it
 	and skip the spawn.
 	"""
-	# The child gets its own fresh task_chunk_id (the mongo hook keys the child's OWN
-	# doc on it). It does NOT inherit the parent AI task's task_id: a heavy task
-	# (nmap/httpx/nuclei) dispatches ASYNC to celery, where it is tracked/awaited by
-	# its task_id — sharing the parent AI task's id collides with the parent and the
-	# async task never completes (results never flow back, the model gives up and
-	# falls back to bare shell commands). has_parent (run_opts, see _child_run_opts)
-	# already drops these children from the root runners list; explicit chunk grouping
-	# under the parent task_id needs async-aware handling and is deferred.
-	context["task_chunk_id"] = str(uuid.uuid4())
+	# Give the child its own fresh runner id so the driver hooks key its OWN doc.
+	# _get_result_context already stripped the parent's task_id/workflow_id/scan_id, so
+	# there's no parent id to collide with. A task legitimately CHUNKS, so a task child
+	# keeps a `task_chunk_id` (the mongo hook keys a task doc on `task_chunk_id` when
+	# present, else `task_id`). A workflow/scan child is a STANDALONE runner, not a chunk
+	# — key it on `{type}_id`, which BOTH the mongo hook (no chunk id -> `{type}_id`) and
+	# the api hook (`Runner.chunk` unset -> `{type}_id`) agree on, so the AI runner card
+	# points at the id the active driver actually persisted. (Stamping a `task_chunk_id`
+	# on a workflow/scan left it with no valid doc id -> `ObjectId(None)` minted a fresh
+	# doc on every update -> stuck PENDING; see #452.) has_parent (run_opts, see
+	# _child_run_opts) already drops these children from the root runners list.
+	id_key = "task_chunk_id" if runner_type == "task" else f"{runner_type}_id"
+	context[id_key] = str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
 	return _build_child_hooks_or_denial(context)
@@ -523,8 +522,17 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	opts = _sanitize_child_opts(action.get("opts", {}))
 	context = _get_result_context(action, ctx)
 
+	# A subagent is an `ai` task spawned by another `ai` task. It gets its OWN
+	# conversation id (below) so its transcript is a separate conversation, surfaced in
+	# the parent as a single "Ran subagent" card rather than folded/duplicated into the
+	# parent's turns.
+	is_ai_subagent = runner_type == "task" and name.lower() == "ai"
+	parent_session = context.get("session_id")  # the card belongs to THIS (parent) conversation
+	subagent_label = ""
+	sub_session = None
+
 	# Force subagent flags when spawning an AI task from a parent AI task
-	if runner_type == "task" and name.lower() == "ai":
+	if is_ai_subagent:
 		# Bound recursive fan-out before constructing/running the child
 		denial = _guard_subagent_fanout(ctx, context)
 		if denial is not None:
@@ -548,15 +556,64 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		# scope so it doesn't re-run work already done.
 		_objective = opts.get("prompt", "")
 		opts["prompt"] = build_subagent_prompt(_objective, targets, _gather_subagent_evidence(ctx, targets))
+		# Give the subagent its OWN conversation id: its transcript (prompt/responses/tool
+		# calls) and its own child runners persist under this id, keeping the parent
+		# conversation clean. The parent link is preserved for correlation, and the card
+		# emitted below (under the PARENT session) carries this id so a client can open the
+		# subagent's transcript.
+		subagent_label = action.get("description") or _objective
+		sub_session = str(uuid.uuid4())
+		context["parent_session_id"] = parent_session
+		context["session_id"] = sub_session
+		# Give the subagent the SAME turn budget as the parent (else the exploit/attack
+		# mode floor of 5 iterations starves it). setdefault so an explicit per-subagent
+		# max_iterations the LLM supplied (already clamped to _MAX_CHILD_ITERATIONS by
+		# _sanitize_child_opts above) still wins. inf/0 parents are skipped -> subagent
+		# resolves via its own mode/config path (uncapped stays uncapped for both).
+		if isinstance(ctx.max_iterations, int) and ctx.max_iterations > 0:
+			opts.setdefault("max_iterations", ctx.max_iterations)
 
 	# defense in depth: a spawned runner is never dangerous (CLI --dangerous unaffected)
 	opts["dangerous"] = False
 
+	# Validate the runner NAME up front and fail with a clean, actionable message.
+	# An LLM routinely invents task/workflow names (e.g. `url_crawl`, `code_scan`).
+	# For a task, `TemplateLoader(input=...)` accepts any name and the miss only
+	# surfaces later inside `build_celery_workflow -> get_task_class`, which raises a
+	# `TaskNotFoundError` DURING `yield from runner` — escaping as a full Python
+	# TRACEBACK in the tool result (the construction-time `except TaskNotFoundError`
+	# below never sees it). For a workflow, an unknown name loads an EMPTY template
+	# that fails obscurely downstream. Both waste iterations and pollute the model's
+	# context with a stack trace; catch them here and hand back the valid names.
 	if runner_type == "task":
+		try:
+			Task.get_task_class(name)
+		except TaskNotFoundError:
+			from secator.loader import discover_tasks, find_templates
+			available = sorted(t.__name__ for t in discover_tasks())
+			# The most common miss is a real WORKFLOW name called via run_task (the
+			# model confuses the two tools — e.g. `url_crawl`, `code_scan`). Point it
+			# at the right tool instead of only listing tasks.
+			workflows = {t['name'] for t in find_templates() if t.get('type') == 'workflow'}
+			hint = (f" '{name}' IS a workflow — call it with run_workflow, not run_task."
+			        if name in workflows else
+			        f" Pick one of the available tasks: {', '.join(available)}.")
+			yield Error(message=(
+				f"Task '{name}' not found — not a valid secator task.{hint}"
+			), _context=context)
+			return
 		tpl = TemplateLoader(input={'type': 'task', 'name': name})
 		runner_cls = Task
 	else:
 		tpl = TemplateLoader(name=f'workflows/{name}')
+		if not tpl.get('name'):
+			from secator.loader import find_templates
+			available = sorted(t['name'] for t in find_templates() if t.get('type') == 'workflow')
+			yield Error(message=(
+				f"Workflow '{name}' not found — not a valid secator workflow. "
+				f"Pick one of the available workflows: {', '.join(available)}."
+			), _context=context)
+			return
 		runner_cls = Workflow
 
 	# Decrypt targets
@@ -575,7 +632,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		**opts,
 	}
 	# Human-readable description the LLM supplied for this action (Runner maps
-	# run_opts['description'] -> self.description -> persisted `descr`, shown in the UI
+	# run_opts['description'] -> self.description -> persisted `descr`, shown by clients
 	# instead of the bare task name). Only set when non-empty so it never blanks out a
 	# task's own config.description.
 	if action.get("description"):
@@ -592,7 +649,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			run_opts["sync"] = False
 			run_opts["tty"] = False
 
-	hooks, denial = _child_preamble(ctx, context)
+	hooks, denial = _child_preamble(ctx, context, runner_type)
 	if denial is not None:
 		yield denial
 		return
@@ -603,28 +660,68 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		return
 
 	# Emit the action Ai item now the runner exists (on_init stamped the runner id) so
-	# the UI can render a RunnerCard; always emitted, even when silent. The child is a
-	# CHUNK, so its persisted doc `_id` is keyed on `{type}_chunk_id` (not `{type}_id`,
-	# which now points at the PARENT ai task for grouping). Prefer the chunk id; fall
-	# back to `{type}_id` then `runner.id`.
+	# clients can render a RunnerCard; always emitted, even when silent. Use the id the
+	# driver keyed the child's doc on: a task child on its own `task_chunk_id`, a
+	# workflow/scan child on its `{type}_id` (see _child_preamble). Fall back through
+	# both, then `runner.id`.
 	runner_id = (context.get(f"{runner_type}_chunk_id")
 	             or context.get(f"{runner_type}_id", "") or runner.id)
+	extra_data = {
+		"targets": targets,
+		# Never persist transport credentials into the (DB-stored, client-rendered) action item.
+		"opts": {k: v for k, v in opts.items() if k not in ("api_key", "api_base")},
+		"runner_id": runner_id,
+		"runner_type": runner_type,
+		# LLM-supplied human-readable description, rendered in the AI chat row.
+		"description": action.get("description", ""),
+	}
+	# A subagent card lives in the PARENT conversation and links to the subagent's own
+	# conversation (its transcript). Tag it so clients render a "Ran subagent <desc>" row
+	# that opens `subagent_session_id`, and pin its _context to the parent session (the
+	# runner itself already carries the sub-session in `context`). CRUCIAL: strip the
+	# `_context.subagent` MARKER — that flag means "this doc is subagent-INTERNAL" and is
+	# what restore/UI use to keep subagent chatter out of a conversation. The card is the
+	# parent's record of the spawn, NOT internal, so it must not carry it (a nested
+	# subagent's context DOES set it — `_child_preamble` — which would otherwise drop the
+	# card from the very conversation it belongs to). The label rides on extra_data.subagent.
+	card_context = context
+	if is_ai_subagent:
+		extra_data["subagent"] = subagent_label
+		extra_data["subagent_session_id"] = sub_session
+		card_context = {
+			**{k: v for k, v in context.items() if k != "subagent"},
+			"session_id": parent_session,
+		}
 	yield Ai(
 		content=name,
 		ai_type=runner_type,
-		extra_data={
-			"targets": targets,
-			# Never persist transport credentials into the (DB-stored, UI-rendered) action item.
-			"opts": {k: v for k, v in opts.items() if k not in ("api_key", "api_base")},
-			"runner_id": runner_id,
-			"runner_type": runner_type,
-			# LLM-supplied human-readable description, rendered in the AI chat row.
-			"description": action.get("description", ""),
-		},
-		_context=context,
+		extra_data=extra_data,
+		_context=card_context,
 	)
 
-	yield from runner
+	if is_ai_subagent:
+		# The subagent's outputs persist under its OWN session (its transcript), which the
+		# parent's LLM cannot read. Stream them, but ALSO capture the final response + what
+		# it persisted and hand the parent ONE clean summary as the run_task tool_result —
+		# instead of the raw, fragmented output stream it used to receive.
+		last_response = ""
+		persisted = []
+		for out in runner:
+			if isinstance(out, Ai):
+				if out.ai_type == "response" and (out.content or "").strip():
+					last_response = out.content
+				elif out.ai_type in ("add_finding", "add_vuln_poc"):
+					persisted.append(out.ai_type)
+			yield out
+		note = (f" Persisted: {', '.join(persisted)}." if persisted
+		        else " Persisted: NOTHING (subagent made no add_finding/add_vuln_poc call).")
+		handback = (last_response.strip() or "(subagent produced no summary)") + "\n[subagent handback]" + note
+		# Stamped for the PARENT conversation (card_context strips the subagent marker) and
+		# with THIS run_task's tool_call_id so it becomes the tool_result the parent reads.
+		yield Ai(content=handback, ai_type="response",
+		         _context={**card_context, "tool_call_id": action.get("tool_call_id")})
+	else:
+		yield from runner
 
 	# Auto-allow reading from the spawned runner's reports folder
 	if ctx.permission_engine and hasattr(runner, 'reports_folder') and runner.reports_folder:
@@ -688,49 +785,73 @@ def _sandbox_container_name(ctx: "ActionContext", context: Dict) -> str:
 	return "sbx-" + re.sub(r"[^A-Za-z0-9_.-]", "-", key)[:48]
 
 
+def _sandbox_is_running(name: str) -> bool:
+	"""True iff a container `name` exists and is running."""
+	import subprocess
+	r = subprocess.run(
+		["docker", "inspect", "-f", "{{.State.Running}}", name], capture_output=True, text=True)
+	return r.returncode == 0 and r.stdout.strip() == "true"
+
+
 def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 	"""Lazily create the per-runner Kali sandbox container (idempotent via docker inspect).
 	Returns the container name. dockerd runs in the pod (DinD); the metadata DROP + egress policy
 	are set once in the pod's DinD entrypoint, not here."""
 	import subprocess
 	name = _sandbox_container_name(ctx, context)
-	running = subprocess.run(
-		["docker", "inspect", "-f", "{{.State.Running}}", name], capture_output=True, text=True)
-	if running.returncode == 0 and running.stdout.strip() == "true":
+	if _sandbox_is_running(name):
 		return name
-	subprocess.run(["docker", "rm", "-f", name], capture_output=True)
 	# Bind-mount the reports dir into the sandbox at the SAME path so the LLM's clone/build/run
 	# in ~/.secator/reports/<ws>/tasks/<n>/.outputs/ works (that path lives on a shared volume the
 	# worker + dind both mount; the dind bind resolves it into the nested container). Without this
 	# the model's worker-style paths 404 and it wastes a turn `mkdir -p`-ing them.
 	from secator.config import CONFIG
 	reports_dir = str(CONFIG.dirs.reports)
-	subprocess.run([
-		"docker", "run", "-d", "--name", name,
-		"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
-		"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}", "-w", "/work",
-		_SANDBOX_IMAGE, "sleep", "infinity",
-	], check=True, capture_output=True)
-	# gVisor's sandbox network is IPv4-only, but DNS returns AAAA records → every hostname op
-	# (git/curl/ssh/pip/apt) tries IPv6 first and HANGS. Prefer IPv4 in glibc via gai.conf (fixes
-	# git/curl/ssh/python); apt needs its own ForceIPv4 (libapt ignores gai.conf). Best-effort.
-	try:
-		subprocess.run(
-			["docker", "exec", name, "sh", "-c", 'printf "precedence ::ffff:0:0/96 100\\n" > /etc/gai.conf'],
-			capture_output=True, timeout=30)
-	except Exception:
-		pass
-	# Auto-install the base toolset (bare kali-rolling lacks git/curl/python; the LLM doesn't
-	# reliably self-install). Best-effort + bounded — a failure here must not break the shell path.
-	if _SANDBOX_PACKAGES.strip():
+	created = False
+	# Serialize the create: shells in the SAME run share one container, so two arriving
+	# before it exists would both `rm` + `run` the same name — the loser's `docker run`
+	# fails "name already in use" (exit 125), the intermittent "could not start isolation
+	# container". The lock covers only the fast create; the slow gai.conf/apt bootstrap
+	# runs outside it so a 5-min install never blocks a shell that just needs the box.
+	with _SANDBOX_CREATE_LOCK:
+		if not _sandbox_is_running(name):
+			subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+			run = subprocess.run([
+				"docker", "run", "-d", "--name", name,
+				"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
+				"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}", "-w", "/work",
+				_SANDBOX_IMAGE, "sleep", "infinity",
+			], capture_output=True, text=True)
+			if run.returncode != 0:
+				# A concurrent creator (another thread on this dockerd) may have won the
+				# race — if the container is up now, use it. Otherwise surface docker's
+				# real stderr, not a bare "exit status 125".
+				if _sandbox_is_running(name):
+					return name
+				err = (run.stderr or run.stdout or "").strip() or f"docker run exited {run.returncode}"
+				raise RuntimeError(err)
+			created = True
+	# Only bootstrap the container WE created (best-effort; a failure must not break the
+	# shell path — the LLM can apt-get on demand).
+	if created:
+		# gVisor's sandbox network is IPv4-only, but DNS returns AAAA records → every hostname op
+		# (git/curl/ssh/pip/apt) tries IPv6 first and HANGS. Prefer IPv4 in glibc via gai.conf (fixes
+		# git/curl/ssh/python); apt needs its own ForceIPv4 (libapt ignores gai.conf).
 		try:
 			subprocess.run(
-				["docker", "exec", name, "sh", "-c",
-				 "apt-get -o Acquire::ForceIPv4=true update -qq && "
-				 f"apt-get -o Acquire::ForceIPv4=true install -y -qq --no-install-recommends {_SANDBOX_PACKAGES}"],
-				capture_output=True, timeout=300)
+				["docker", "exec", name, "sh", "-c", 'printf "precedence ::ffff:0:0/96 100\\n" > /etc/gai.conf'],
+				capture_output=True, timeout=30)
 		except Exception:
-			pass  # tools missing → the LLM can still apt-get on demand
+			pass
+		if _SANDBOX_PACKAGES.strip():
+			try:
+				subprocess.run(
+					["docker", "exec", name, "sh", "-c",
+					 "apt-get -o Acquire::ForceIPv4=true update -qq && "
+					 f"apt-get -o Acquire::ForceIPv4=true install -y -qq --no-install-recommends {_SANDBOX_PACKAGES}"],
+					capture_output=True, timeout=300)
+			except Exception:
+				pass  # tools missing → the LLM can still apt-get on demand
 	return name
 
 
@@ -819,7 +940,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			"dangerous": False,
 			"env": _sanitized_env(),
 		}
-		# Human-readable description the LLM supplied (shown in the UI instead of the
+		# Human-readable description the LLM supplied (shown by clients instead of the
 		# bare "command" name). See _run_runner for the run_opts['description'] mapping.
 		if action.get("description"):
 			run_opts["description"] = action["description"]
@@ -836,7 +957,7 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		runner.max_timeout = _SHELL_TIMEOUT
 
 		# Emit the command Ai now that the runner exists: its on_init hook has
-		# stamped the runner id into context, so the UI can link this item to the
+		# stamped the runner id into context, so clients can link this item to the
 		# persisted runner doc (mirrors _run_runner:688-699).
 		yield Ai(
 			content=command,
@@ -961,7 +1082,7 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		query_str = json.dumps(query_filter, separators=(',', ':'))
 		# Surface only the PRIMARY of each finding group: skip hidden duplicates
 		# (_context.workspace_duplicate=True) so the AI never operates on a demoted
-		# copy — e.g. records a PoC on a doc that isn't the one the UI shows. Only
+		# copy — e.g. records a PoC on a doc that isn't the one clients show. Only
 		# the mongo-backed drivers (mongodb/api) tag duplicates; the json driver
 		# doesn't. Respect an explicit _context filter from the model rather than
 		# fighting it. Applied to the search only, so the shown query stays the
@@ -1012,10 +1133,10 @@ def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
 	reason = action.get("reason", "completed")
 	choices = action.get("choices", [])
 	multiple = bool(action.get("multiple", False))
-	# Store choices on the top-level `choices` field (what the web UI reads) AND in
+	# Store choices on the top-level `choices` field (what clients read) AND in
 	# extra_data (back-compat). Without the top-level field, the persisted follow-up
-	# doc has `choices: []` and the UI renders no choice buttons. `multiple` tells
-	# the UI to render multi-select (checkboxes) vs single-pick.
+	# doc has `choices: []` and clients render no choice buttons. `multiple` tells
+	# clients to render multi-select (checkboxes) vs single-pick.
 	yield Ai(
 		content=reason, ai_type="follow_up", choices=choices, multiple=multiple,
 		extra_data={"choices": choices, "multiple": multiple}, _context=context)
@@ -1039,6 +1160,10 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 
 	finding_type = action.get("_type", "")
 	finding_data = {k: v for k, v in action.items() if k not in ("action", "_type", "tool_call_id", "tool_call_name")}
+	# SECURITY: strip framework/server-owned + `*_path` fields the agent must not set (identity,
+	# provenance, dedup, verdict/derived) — see _drop_readonly_fields. `_context` is then set
+	# server-side below, so the finding is always scoped to THIS session's workspace.
+	finding_data = _drop_readonly_fields(finding_data)
 	finding_data["_context"] = context
 
 	# Decrypt field values
@@ -1097,7 +1222,7 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Ai(
 			content=f'{str(finding)}',
 			ai_type="add_finding",
-			# Carry the created finding so the web UI can render its FindingCard
+			# Carry the created finding so clients can render the finding
 			# (VulnerabilityCard/SubdomainCard/…) — it routes on `_type`.
 			extra_data={"finding": finding.toDict()},
 			_context=context
@@ -1107,85 +1232,347 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error(message=f"Failed to create {finding_type}: {e}\nExpected schema:\n{cls.schema()}", _context=context)
 
 
-def _handle_add_vuln_poc(action: Dict, ctx: ActionContext) -> Generator:
-	"""Record a proof-of-concept on an EXISTING vulnerability after exploitation.
+def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
+	"""Apply a workspace-scoped ``$set`` to the vulnerability with this ``_uuid``.
 
-	Fills the target vulnerability's ``poc`` field (markdown: the commands + outputs
-	that prove a true exploitation) with an in-place ``$set`` update matched by the
-	``_uuid`` the LLM saw in ``query_workspace`` results. This is the exploitation-result
-	sink the LLM uses INSTEAD of ``add_finding(exploit)``: an exploited vuln ends up with
-	its own filled ``poc``, not a separate Exploit finding.
+	Returns ``(modified, updated, label, error_msg)``: ``modified`` docs count,
+	the re-fetched vuln (dict, or None), a display ``label`` (the vuln's ``name``,
+	falling back to the uuid), and an ``error_msg`` string when nothing matched.
 
-	Uses ``QueryEngine.update`` (a ``$set`` on the matched doc, workspace-scoped) rather
-	than re-yielding the finding: the persistence hook keys updates on ``ObjectId(_uuid)``
-	but findings carry a non-ObjectId ``_uuid``, so a re-yield would INSERT a duplicate. A
-	scoped ``$set`` touches only ``poc`` and can't clobber the vuln's other fields.
+	Uses ``QueryEngine.update`` (an in-place ``$set`` on the matched doc) rather than
+	re-yielding the finding, so it works uniformly across backends without risking a
+	duplicate insert. On the mongodb driver a ``_uuid`` lookup/update is a native ``_id``
+	index seek (the query layer rewrites a valid-ObjectId ``_uuid`` to ``_id`` — findings
+	carry ``_uuid = str(_id)``), so the update + re-fetch are point operations, not
+	workspace scans. After the update it re-fetches and re-applies the same ``$set`` locally
+	— the json store is append-only (last-wins on read) so a tight limit can return a
+	pre-update line; on the store-backed drivers the fetch is already current, a no-op there.
 	"""
-	context = _get_result_context(action, ctx)
-	uuid = str(action.get("_uuid") or "").strip()
-	exploited = bool(action.get("exploited"))
-	poc = action.get("poc") or ""
-	if ctx.encryptor:
-		poc = _decrypt_dict({"poc": poc}, ctx.encryptor).get("poc", poc)
+	engine = ctx.get_query_engine()
+	query = {"_type": "vulnerability", "_uuid": uuid}
+	modified = engine.update(query, {"$set": update})
+	if not modified:
+		return 0, None, uuid, (
+			f"No vulnerability found with _uuid={uuid} in this workspace. "
+			"Re-check the `_uuid` from query_workspace results."
+		)
+	updated = (engine.search(query, limit=1) or [None])[0]
+	if updated:
+		from secator.query.json import _apply_set
+		_apply_set(updated, update)
+	label = (updated.get("name") if isinstance(updated, dict) else None) or uuid
+	return modified, updated, label, None
 
-	if not uuid:
-		yield Error(message="add_vuln_poc requires the vulnerability `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
-		return
-	# A claimed exploitation must carry proof; a false-positive verdict needs none.
-	if exploited and not str(poc).strip():
-		yield Error(message="add_vuln_poc with exploited=true requires a non-empty `poc` (commands + outputs proving exploitation).", _context=context)  # noqa: E501
-		return
 
-	# Build a scoped $set: exploited -> status Exploited + verified; not-exploited -> false positive
-	# (mirrors the UI, where FALSE_POSITIVE is stored as is_false_positive, not in `status`).
-	update = {}
-	if exploited:
-		update["poc"] = poc
-		update["status"] = "EXPLOITED"
-		update["verified"] = True
-		update["is_false_positive"] = False
-	else:
-		update["is_false_positive"] = True
-		if str(poc).strip():
-			update["poc"] = poc
-
-	# Confidence re-prioritizes the vuln (confidence_nb: high=1 sorts first .. low=3).
-	confidence = str(action.get("confidence") or "").strip().lower()
-	if confidence in ("low", "medium", "high"):
-		update["confidence"] = confidence
-		update["confidence_nb"] = {"high": 1, "medium": 2, "low": 3}[confidence]
-
-	# Merge extra_data with dotted keys so existing keys survive.
-	extra_data = action.get("extra_data")
+def _merge_extra_data(update: Dict, extra_data) -> None:
+	"""Merge caller ``extra_data`` into ``update`` with dotted keys so existing keys survive."""
 	if isinstance(extra_data, dict):
 		for k, v in extra_data.items():
 			key = str(k)
 			if key and "." not in key and not key.startswith("$"):
 				update[f"extra_data.{key}"] = v
 
-	engine = ctx.get_query_engine()
-	query = {"_type": "vulnerability", "_uuid": uuid}
-	try:
-		modified = engine.update(query, {"$set": update})
-	except Exception as e:
-		yield Error(message=f"Failed to record vulnerability PoC: {e}", _context=context)
+
+def _handle_mark_vuln_exploited(action: Dict, ctx: ActionContext) -> Generator:
+	"""Mark an EXISTING vulnerability as exploited, recording its proof-of-concept.
+
+	Fills the vuln's ``poc`` (markdown: the commands + outputs proving exploitation) and
+	sets ``status=EXPLOITED`` / ``verified=True`` / ``is_false_positive=False`` via a scoped
+	``$set`` matched by the ``_uuid`` the LLM saw in ``query_workspace`` results. This is the
+	exploitation-result sink used INSTEAD of ``add_finding(exploit)``: an exploited vuln ends
+	up with its own filled ``poc``, not a separate Exploit finding. A claimed exploitation
+	MUST carry proof — an empty ``poc`` is refused. Also fills the vuln's own ``remediation``
+	and ``impact`` fields when supplied, and stamps the exploitation date into the ``poc``
+	(the model can't be trusted for the real date, so we set it server-side).
+	"""
+	from datetime import datetime, timezone
+	context = _get_result_context(action, ctx)
+	uuid = str(action.get("_uuid") or "").strip()
+	poc = action.get("poc") or ""
+	remediation = action.get("remediation") or ""
+	impact = action.get("impact") or ""
+	if ctx.encryptor:
+		dec = _decrypt_dict({"poc": poc, "remediation": remediation, "impact": impact}, ctx.encryptor)
+		poc = dec.get("poc", poc)
+		remediation = dec.get("remediation", remediation)
+		impact = dec.get("impact", impact)
+
+	if not uuid:
+		yield Error(message="mark_vuln_exploited requires the vulnerability `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
+		return
+	if not str(poc).strip():
+		yield Error(message="mark_vuln_exploited requires a non-empty `poc` (commands + outputs proving exploitation).", _context=context)  # noqa: E501
 		return
 
-	if not modified:
+	# Stamp the exploitation date at the top of the PoC (authoritative server-side date).
+	poc = f"_Exploited on {datetime.now(timezone.utc).strftime('%Y-%m-%d')}_\n\n{str(poc).strip()}"
+
+	update = {"poc": poc, "status": "EXPLOITED", "verified": True, "is_false_positive": False}
+	if str(remediation).strip():
+		update["remediation"] = str(remediation).strip()
+	if str(impact).strip():
+		update["impact"] = str(impact).strip()
+	# Confidence re-prioritizes the vuln (confidence_nb: high=1 sorts first .. low=3).
+	confidence = str(action.get("confidence") or "").strip().lower()
+	if confidence in ("low", "medium", "high"):
+		update["confidence"] = confidence
+		update["confidence_nb"] = {"high": 1, "medium": 2, "low": 3}[confidence]
+	_merge_extra_data(update, action.get("extra_data"))
+
+	try:
+		modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+	except Exception as e:
+		yield Error(message=f"Failed to mark vulnerability exploited: {e}", _context=context)
+		return
+	if err:
+		yield Error(message=err, _context=context)
+		return
+	yield Ai(
+		content=f"Marked {label} as exploited (PoC recorded).",
+		ai_type="mark_vuln_exploited",
+		extra_data={"finding": updated} if updated else {},
+		_context=context,
+	)
+
+
+def _handle_mark_vuln_false_positive(action: Dict, ctx: ActionContext) -> Generator:
+	"""Mark an EXISTING vulnerability as a false positive.
+
+	Sets ``is_false_positive=True`` (the authoritative hide-flag the store base query
+	filters on EVERY backend, so the finding disappears from all reads/reports),
+	``status=FALSE_POSITIVE`` and ``verified=False`` via a scoped ``$set`` matched by the
+	``_uuid`` from ``query_workspace``. Non-destructive: the finding is kept and stays
+	recoverable (unset ``is_false_positive``). An optional ``reason`` is stored in
+	``extra_data.false_positive_reason``.
+	"""
+	context = _get_result_context(action, ctx)
+	uuid = str(action.get("_uuid") or "").strip()
+	if not uuid:
+		yield Error(message="mark_vuln_false_positive requires the vulnerability `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
+		return
+	reason = str(action.get("reason") or "").strip()
+	if ctx.encryptor and reason:
+		reason = _decrypt_dict({"reason": reason}, ctx.encryptor).get("reason", reason)
+
+	update = {"is_false_positive": True, "status": "FALSE_POSITIVE", "verified": False}
+	if reason:
+		update["extra_data.false_positive_reason"] = reason
+	_merge_extra_data(update, action.get("extra_data"))
+
+	try:
+		modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+	except Exception as e:
+		yield Error(message=f"Failed to mark vulnerability false positive: {e}", _context=context)
+		return
+	if err:
+		yield Error(message=err, _context=context)
+		return
+	msg = f"Marked {label} as a false positive" + (f" ({reason})." if reason else ".")
+	yield Ai(
+		content=msg,
+		ai_type="mark_vuln_false_positive",
+		extra_data={"finding": updated} if updated else {},
+		_context=context,
+	)
+
+
+def _handle_mark_vuln_exploit_failed(action: Dict, ctx: ActionContext) -> Generator:
+	"""Mark an EXISTING vulnerability as EXPLOIT FAILED — a real vuln this attempt could not
+	exploit, kept VISIBLE so a later attempt can retry (unlike mark_vuln_false_positive, which
+	hides a not-real finding). Sets ``status="EXPLOIT FAILED"`` via a scoped ``$set`` matched by
+	``_uuid``; leaves ``is_false_positive`` and ``verified`` untouched. Fills ``remediation`` /
+	``impact`` when supplied (they still apply), and stores an optional ``reason`` in
+	``extra_data.exploit_failed_reason``.
+	"""
+	context = _get_result_context(action, ctx)
+	uuid = str(action.get("_uuid") or "").strip()
+	if not uuid:
+		yield Error(message="mark_vuln_exploit_failed requires the vulnerability `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
+		return
+	reason = str(action.get("reason") or "").strip()
+	remediation = action.get("remediation") or ""
+	impact = action.get("impact") or ""
+	if ctx.encryptor:
+		dec = _decrypt_dict({"reason": reason, "remediation": remediation, "impact": impact}, ctx.encryptor)
+		reason = dec.get("reason", reason)
+		remediation = dec.get("remediation", remediation)
+		impact = dec.get("impact", impact)
+
+	update = {"status": "EXPLOIT FAILED"}
+	if str(remediation).strip():
+		update["remediation"] = str(remediation).strip()
+	if str(impact).strip():
+		update["impact"] = str(impact).strip()
+	if reason:
+		update["extra_data.exploit_failed_reason"] = reason
+	_merge_extra_data(update, action.get("extra_data"))
+
+	try:
+		modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+	except Exception as e:
+		yield Error(message=f"Failed to mark vulnerability exploit-failed: {e}", _context=context)
+		return
+	if err:
+		yield Error(message=err, _context=context)
+		return
+	msg = f"Marked {label} as exploit-failed" + (f" ({reason})." if reason else ".")
+	yield Ai(
+		content=msg,
+		ai_type="mark_vuln_exploit_failed",
+		extra_data={"finding": updated} if updated else {},
+		_context=context,
+	)
+
+
+# Fields that must never be overwritten via update_finding (identity / routing / scope).
+_FINDING_IMMUTABLE_FIELDS = {"_uuid", "_type", "_id", "_context", "id"}
+
+# Real scan-finding types (vulnerability/url/port/…) update_finding may edit. Restricting to
+# these stops a known `_uuid` from editing a non-finding record: error/warning/info (EXECUTION_TYPES)
+# and stat (STAT_TYPES) aren't in FINDING_TYPES already, and `ai` IS in FINDING_TYPES but is the
+# conversation/action-doc type — editing it would tamper the transcript, so exclude it.
+_FINDING_TYPE_NAMES = frozenset(cls.get_name().lower() for cls in FINDING_TYPES) - {"ai"}
+
+
+# Server/pipeline-owned finding fields the GENERIC add_finding/update_finding must never let the
+# agent write. The dedicated mark_vuln_* tools set the verdict fields themselves via a server-built
+# `$set`, so they are unaffected — only the free-form tools are restricted.
+_AGENT_READONLY_FIELDS = frozenset({
+	"workspace_id",                                                 # scope lives on _context, never top-level
+	"verified", "status", "is_false_positive", "is_acknowledged",   # verdict — forging bypasses mark_vuln_* gates
+	"confidence_nb", "severity_nb",                                 # server-derived in __post_init__
+})
+
+
+def _drop_readonly_fields(data: Dict) -> Dict:
+	"""Strip fields an LLM-supplied finding write must not set.
+
+	SECURITY: these tools write STRAIGHT to the store on the worker, bypassing the API's ingest
+	guards, so a prompt-injected agent must not reach:
+	- ``*_path`` — worker-filesystem paths streamed back by the finding-storage endpoint
+	  (authenticated arbitrary-file-read / foreign-blob read);
+	- any ``_``-prefixed framework field — identity/scope (``_uuid``/``_context``/``_id``),
+	  provenance (``_source``/``_timestamp``), dedup (``_tagged``/``_duplicate``/``_related``),
+	  the notification flag (``_email_notified``), etc.;
+	- verdict/derived fields (``_AGENT_READONLY_FIELDS``) — forging ``verified``/``status``/
+	  ``is_false_positive`` bypasses the dedicated tools' gates (e.g. mark_vuln_exploited's
+	  mandatory PoC); ``confidence_nb``/``severity_nb`` are recomputed by the server.
+	Deny-by-default on the framework (``_`` prefix) keeps future ``_``-fields safe automatically.
+	"""
+	return {
+		k: v for k, v in data.items()
+		if not str(k).startswith("_")
+		and not str(k).endswith("_path")
+		and k not in _AGENT_READONLY_FIELDS
+	}
+
+
+def _lookup_finding(ctx: "ActionContext", uuid: str):
+	"""Return the live workspace finding with this ``_uuid`` (dict), or None. Workspace-scoped
+	via the engine's base query, so it never reaches another workspace or an already-removed doc."""
+	engine = ctx.get_query_engine()
+	return (engine.search({"_uuid": uuid}, limit=1) or [None])[0]
+
+
+def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
+	"""Set fields on an EXISTING finding (any type) identified by ``_uuid``.
+
+	A workspace-scoped ``$set`` touching only the caller-named fields — immutable
+	identity/routing keys are stripped, and mutating a ``target`` finding is refused so the
+	AI can't widen scope. Used to fix a wrong field (e.g. severity), add tags/cves, or enrich
+	extra_data. For a vulnerability's exploited / false-positive verdict, prefer the dedicated
+	``mark_vuln_exploited`` / ``mark_vuln_false_positive`` tools.
+	"""
+	context = _get_result_context(action, ctx)
+	uuid = str(action.get("_uuid") or "").strip()
+	if not uuid:
+		yield Error(message="update_finding requires the finding `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
+		return
+
+	fields = action.get("fields") or {}
+	extra_data = action.get("extra_data") or {}
+	if isinstance(fields, str):
+		try:
+			fields = json.loads(fields)
+		except (json.JSONDecodeError, TypeError):
+			fields = {}
+	if isinstance(extra_data, str):
+		try:
+			extra_data = json.loads(extra_data)
+		except (json.JSONDecodeError, TypeError):
+			extra_data = {}
+	if not isinstance(fields, dict) or not isinstance(extra_data, dict):
+		yield Error(message="update_finding `fields` and `extra_data` must be JSON objects.", _context=context)
+		return
+	if ctx.encryptor:
+		fields = _decrypt_dict(fields, ctx.encryptor)
+		extra_data = _decrypt_dict(extra_data, ctx.encryptor)
+
+	existing = _lookup_finding(ctx, uuid)
+	if not existing:
 		yield Error(
-			message=f"No vulnerability found with _uuid={uuid} in this workspace. "
-			        "Re-check the `_uuid` from query_workspace results.",
+			message=f"No finding found with _uuid={uuid} in this workspace. Re-check the `_uuid` from query_workspace results.",  # noqa: E501
 			_context=context,
 		)
 		return
+	etype = str(existing.get("_type", "")).lower()
+	if etype == "target":
+		yield Error(message="Refusing to update a 'target' finding (scope integrity).", _context=context)
+		return
+	if etype not in _FINDING_TYPE_NAMES:
+		yield Error(message=f"Refusing to update a non-finding record (_type={etype!r}).", _context=context)
+		return
+	cls = {c.get_name().lower(): c for c in FINDING_TYPES}[etype]
 
-	# Re-fetch so the chat can render the updated VulnerabilityCard (now carrying the poc/status).
-	updated = (engine.search(query, limit=1) or [None])[0]
-	msg = (f"Recorded exploitation PoC on vulnerability {uuid} (marked Exploited)." if exploited
-		else f"Marked vulnerability {uuid} as a false positive (could not be exploited).")
+	# Only agent-writable content fields (framework/server-owned + `*_path` stripped); `id`
+	# stays blocked on UPDATE via _FINDING_IMMUTABLE_FIELDS below.
+	fields = _drop_readonly_fields(fields)
+	# An `extra_data` object passed INSIDE `fields` must merge via dotted keys (like the dedicated
+	# `extra_data` arg) — a whole-object $set would clobber existing keys AND conflict with the
+	# dotted `extra_data.*` paths on Mongo. Fold it into extra_data (the dedicated arg wins).
+	fields_extra = fields.pop("extra_data", None)
+	if isinstance(fields_extra, dict):
+		extra_data = {**fields_extra, **extra_data}
+	# Validate the remaining content fields against the finding's schema (coerce sloppy scalars
+	# first, like add_finding) so a wrong-shaped value (e.g. tags="xss" where a list is required)
+	# is rejected up front, not persisted raw.
+	fields = _coerce_finding_fields(cls, fields)
+	errors = cls.validate_fields(fields)
+	if errors:
+		yield Error(message=f"Invalid {etype} fields: {'; '.join(errors)}", _context=context)
+		return
+
+	update = {}
+	for k, v in fields.items():
+		key = str(k)
+		if key in _FINDING_IMMUTABLE_FIELDS or key.startswith("$") or "." in key:
+			continue
+		update[key] = v
+	for k, v in extra_data.items():
+		key = str(k)
+		if key and "." not in key and not key.startswith("$"):
+			update[f"extra_data.{key}"] = v
+	if not update:
+		yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
+		return
+
+	engine = ctx.get_query_engine()
+	try:
+		modified = engine.update({"_uuid": uuid}, {"$set": update})
+	except Exception as e:
+		yield Error(message=f"Failed to update finding: {e}", _context=context)
+		return
+	if not modified:
+		yield Error(message=f"No finding updated for _uuid={uuid}.", _context=context)
+		return
+
+	updated = _lookup_finding(ctx, uuid)
+	if updated:
+		from secator.query.json import _apply_set
+		_apply_set(updated, update)
 	yield Ai(
-		content=msg,
-		ai_type="add_vuln_poc",
+		content=f"Updated finding {uuid} ({', '.join(sorted(update.keys()))}).",
+		ai_type="update_finding",
 		extra_data={"finding": updated} if updated else {},
 		_context=context,
 	)

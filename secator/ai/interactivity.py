@@ -15,7 +15,7 @@ from secator.ai.tools import STOP_TOOL_SCHEMA
 class UserInputTimeout(Exception):
 	"""Raised by the RemoteBackend when a prompt goes unanswered past the timeout.
 
-	On the platform a prompt is NOT auto-denied on timeout (that produced weird
+	In remote mode a prompt is NOT auto-denied on timeout (that produced weird
 	states — an action silently denied while the user was away). Instead the
 	pending doc is LEFT pending and this exception unwinds the AI loop so the
 	worker exits cleanly (saving infra $). When the user next opens the chat they
@@ -123,12 +123,15 @@ class RemoteBackend(InteractivityBackend):
 		prompt_uuid = context.get("prompt_uuid")
 		if prompt_uuid:
 			extra_data["prompt_uuid"] = prompt_uuid
-		# A new prompt for this session supersedes any older still-pending one
-		# (e.g. a worker that died mid-poll). Expire them BEFORE this doc is
-		# persisted so only the current prompt stays live.
-		self._expire_stale_pending(session_id)
+		# A new prompt for this session supersedes any older still-pending one OF THE
+		# SAME TYPE (e.g. a worker that died mid-poll re-issuing the same kind of
+		# prompt). Expire them BEFORE this doc is persisted so only the current prompt
+		# stays live. Scope to `prompt_type` only: a permission prompt must NOT expire a
+		# still-pending follow_up (and vice versa) — the two can be outstanding at once,
+		# and cross-expiring orphaned the other prompt so it stopped awaiting an answer.
+		self._expire_stale_pending(session_id, ai_type=prompt_type)
 		# The conversation id rides on `_context.session_id` (auto-stamped from the
-		# runner context on persist) — the poll + restore + secator-api all key on
+		# runner context on persist) — the poll + restore + remote server all key on
 		# that, so this pending doc needs no top-level session_id field.
 		return Ai(
 			content=question,
@@ -193,18 +196,25 @@ class RemoteBackend(InteractivityBackend):
 			return []
 		if not results:
 			return []
-		# Oldest-first so multiple queued steers are injected in send order.
+		# Oldest-first so multiple queued steers are injected in send order. Only inject a
+		# steer we can ALSO mark consumed — i.e. one that carries a `_uuid`. Consume scopes
+		# to the fetched `_uuid`s (below), so returning content for a `_uuid`-less doc would
+		# re-serve the same pending steer on every poll and replay it as the user's answer
+		# each turn until the same-answer loop-breaker trips (the duplicated interjection).
+		# A `_uuid`-less steer is dropped once here instead of replayed forever.
 		results = sorted(results, key=lambda r: r.get("_timestamp", 0))
 		contents = []
+		uuids = []
 		for doc in results:
+			u = doc.get("_uuid")
 			content = doc.get("content") or doc.get("answer") or ""
-			if content:
+			if u and content:
 				contents.append(content)
+				uuids.append(u)
 		# Consume EXACTLY the docs we fetched (by _uuid), not the broad pending filter: a steer
 		# that arrives between the search and this update would otherwise be flipped to consumed
 		# without ever being injected (lost). Scoping to the fetched uuids also makes every
 		# backend consume the same set (MongoDB update_one vs JSON/SQLite update_many).
-		uuids = [doc.get("_uuid") for doc in results if doc.get("_uuid")]
 		try:
 			if uuids:
 				self.query_engine.update(
@@ -283,13 +293,19 @@ class RemoteBackend(InteractivityBackend):
 		newest = max(results, key=lambda r: r.get("_timestamp", 0))
 		return newest.get("answer")
 
-	def _expire_stale_pending(self, session_id):
-		"""Mark any older still-pending prompt for this session as timed_out.
+	def _expire_stale_pending(self, session_id, ai_type=None):
+		"""Mark older still-pending prompt(s) for this session as timed_out.
 
 		Called when a NEW prompt starts (before it is persisted), so it only
 		affects prior prompts. Stops stale 'pending' docs from accumulating —
-		a worker that dies mid-poll otherwise leaves the UI 'thinking' forever
+		a worker that dies mid-poll otherwise leaves clients 'thinking' forever
 		and lets crud.answer_ai_prompt's "latest pending" collide.
+
+		``ai_type`` scopes the expiry to a single prompt type (the type of the
+		incoming prompt). A permission prompt must NOT expire a still-pending
+		follow_up (and vice versa): both can be outstanding at the same time, and
+		expiring across types orphaned the other prompt so it stopped awaiting its
+		answer. When ``ai_type`` is None both prompt types are expired (legacy).
 		FLAG: a DB-layer TTL index on pending Ai docs is the durable follow-up.
 		"""
 		if not self.query_engine:
@@ -297,7 +313,8 @@ class RemoteBackend(InteractivityBackend):
 		# Only expire PROMPT-like docs (follow_up / permission). A blanket match on every
 		# pending AI doc would also time out mid-flight `steer` interjections before
 		# poll_steers/_drain_steers can consume them.
-		for ai_type in ("follow_up", "permission"):
+		ai_types = (ai_type,) if ai_type else ("follow_up", "permission")
+		for ai_type in ai_types:
 			self.query_engine.update(
 				{
 					"_type": "ai",

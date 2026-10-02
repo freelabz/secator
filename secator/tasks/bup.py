@@ -80,6 +80,7 @@ class bup(HttpBase):
 			'tags': lambda x: ['bypass'],
 		}
 	}
+	profile = 'medium'
 	install_version = '0.4.4'
 	install_pre = {
 		'*': ['curl'],

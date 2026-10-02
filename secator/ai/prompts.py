@@ -59,12 +59,12 @@ SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 MODES = {
 	"attack": {
 		"system_prompt": SYSTEM_ATTACK,
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
 		"system_prompt": SYSTEM_CHAT,
-		"allowed_actions": ["query", "follow_up", "add_finding", "add_vuln_poc", "shell", "stop"],
+		"allowed_actions": ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "shell", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
@@ -72,7 +72,9 @@ MODES = {
 		# "query" is required so the model can pull the workspace's existing exploit
 		# intel (the CVE's `_type:"exploit"` objects / PoC references) before trying
 		# to exploit — without it query_workspace isn't even built for this mode.
-		"allowed_actions": ["task", "workflow", "shell", "query", "add_finding", "add_vuln_poc", "stop"],
+		# "follow_up" lets exploit mode STOP-and-ask (e.g. confirm before a state-changing
+		# action, or hand back after a PoC) instead of only running to its iteration cap.
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "stop"],
 		"max_iterations": 5,
 	},
 }
@@ -223,13 +225,46 @@ def build_query_types() -> str:
 	return ", ".join(cls.get_name() for cls in FINDING_TYPES)
 
 
-def get_system_prompt(mode: str, workspace_path: str = "", backend=None) -> str:
+def build_scope_section(in_scope=None, out_of_scope=None) -> str:
+	"""Build an authorized-scope section for the system prompt.
+
+	Lists the in-scope (and out-of-scope, if any) targets so the model knows the
+	allowed scope up front — this cuts guardrail-denied retries where the model
+	guesses a target form that isn't allowed. Returns "" when no scope is set
+	(allow-all), so the section is simply omitted.
+
+	Args:
+		in_scope: Allow-list of targets (list or comma-separated string).
+		out_of_scope: Deny-list of targets (list or comma-separated string).
+
+	Returns:
+		A ``<scope>...</scope>`` block, or "" when no scope is configured.
+	"""
+	from secator.scope import as_scope_list
+	in_scope = as_scope_list(in_scope)
+	out_of_scope = as_scope_list(out_of_scope)
+	if not in_scope and not out_of_scope:
+		return ""
+	lines = ["<scope>"]
+	if in_scope:
+		lines.append("In-scope targets — stay within these. When a host is in scope by name, use the hostname, not its resolved IP, unless that exact IP is also listed:")
+		lines.extend(f"- {t}" for t in in_scope)
+	if out_of_scope:
+		lines.append("Out-of-scope targets — never touch these:")
+		lines.extend(f"- {t}" for t in out_of_scope)
+	lines.append("</scope>")
+	return "\n".join(lines)
+
+
+def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None) -> str:
 	"""Get system prompt for mode with library reference filled in.
 
 	Args:
 		mode: One of "attack", "chat", or "exploit"
 		workspace_path: Path to the workspace/reports directory
 		backend: Optional interactivity backend to determine interaction rules
+		in_scope: Optional allow-list of targets to surface in the prompt.
+		out_of_scope: Optional deny-list of targets to surface in the prompt.
 
 	Returns:
 		Formatted system prompt string
@@ -260,6 +295,10 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None) -> str:
 		excluded = backend.get_excluded_tools()
 		if "follow_up" in excluded:
 			result += "\n" + load_prompt("constraints/stop.txt")
+
+	scope_section = build_scope_section(in_scope, out_of_scope)
+	if scope_section:
+		result += "\n\n" + scope_section
 
 	return result.replace("$workspace_path", ws)
 

@@ -1,8 +1,9 @@
 import time
 import unittest
+from unittest import mock
 
 from secator.runners._helpers import run_extractors
-from secator.scope import as_scope_list, host_in_scope, target_in_scope
+from secator.scope import as_scope_list, host_in_scope, resolve_scope_hostnames, target_in_scope
 
 
 class TestScopeMatcher(unittest.TestCase):
@@ -86,6 +87,21 @@ class TestScopeMatcher(unittest.TestCase):
 		elapsed = time.monotonic() - start
 		self.assertFalse(result)  # bad allow entry -> nothing matches -> out of scope
 		self.assertLess(elapsed, 1.0)
+
+	def test_alternation_under_quantifier_is_rejected(self):
+		# (a|aa)+ style: overlapping alternatives under an unbounded quantifier
+		# backtrack exponentially even with no quantifier *inside* the group.
+		# Must be rejected fast (fail-safe non-matching), not executed.
+		for bad in [r'(a|aa)+x', r'(foo|foobar)*', r'(a|a?)*b']:
+			start = time.monotonic()
+			result = host_in_scope('a' * 40 + '.com', [bad], [])
+			elapsed = time.monotonic() - start
+			self.assertFalse(result, bad)
+			self.assertLess(elapsed, 1.0, bad)
+		# Normal scope regexes / globs must still compile and match.
+		self.assertTrue(target_in_scope('app.acme.com', [r'app\.acme\.com']))
+		self.assertTrue(target_in_scope('dev.acme.com', [r'(dev|staging|prod)\.acme\.com']))
+		self.assertTrue(target_in_scope('www.acme.com', ['*.acme.com']))
 
 	def test_uncompilable_regex_is_skipped(self):
 		# An un-compilable entry contributes no match (does not raise).
@@ -208,3 +224,41 @@ class TestUnderscoreHostnameScope(unittest.TestCase):
 		self.assertTrue(host_in_scope('vps592398.ovh.net', self.IN_SCOPE, []))
 		self.assertTrue(host_in_scope('a.vps592398.ovh.net', self.IN_SCOPE, []))
 		self.assertFalse(host_in_scope('evil.com', self.IN_SCOPE, []))
+
+
+class TestResolveScopeHostnames(unittest.TestCase):
+	"""resolve_scope_hostnames widens a scope list with a hostname's IPs (DNS mocked
+	so the test never touches the network)."""
+
+	def _patch_dns(self, mapping):
+		import socket
+
+		def fake_getaddrinfo(host, *a, **k):
+			if host in mapping:
+				return [(None, None, None, "", (ip, 0)) for ip in mapping[host]]
+			raise socket.gaierror("name resolution failed")
+
+		return mock.patch("socket.getaddrinfo", side_effect=fake_getaddrinfo)
+
+	def test_hostname_expands_to_ip_and_matches(self):
+		with self._patch_dns({"pentest-ground.com": ["178.79.134.182"]}):
+			out = resolve_scope_hostnames(["pentest-ground.com"])
+		self.assertEqual(out, ["pentest-ground.com", "178.79.134.182"])
+		# The resolved IP (and IP:port) now match the widened scope literally.
+		self.assertTrue(host_in_scope("178.79.134.182", out, []))
+		self.assertTrue(host_in_scope("178.79.134.182:6379", out, []))
+		self.assertFalse(host_in_scope("8.8.8.8", out, []))
+
+	def test_non_hostname_entries_pass_through_unresolved(self):
+		with self._patch_dns({}):
+			entries = ["*.acme.com", "10.0.0.0/24", "1.2.3.4", r"acme\.com"]
+			self.assertEqual(resolve_scope_hostnames(entries), entries)
+
+	def test_resolution_failure_is_ignored(self):
+		with self._patch_dns({}):  # every lookup raises
+			self.assertEqual(resolve_scope_hostnames(["nope.invalid"]), ["nope.invalid"])
+
+	def test_dedupes_already_present_ip(self):
+		with self._patch_dns({"h.com": ["1.2.3.4"]}):
+			out = resolve_scope_hostnames(["h.com", "1.2.3.4"])
+		self.assertEqual(out.count("1.2.3.4"), 1)

@@ -13,6 +13,7 @@ if ADDONS_ENABLED['ai']:
 		get_mode_config,
 		format_tool_result,
 		format_continue,
+		build_scope_section,
 	)
 
 
@@ -250,9 +251,15 @@ class TestPrompts(unittest.TestCase):
 	def test_exploit_mode_config_has_correct_allowed_actions(self):
 		exploit_config = MODES["exploit"]
 		# "query" is included so the model can pull existing exploit intel before
-		# exploiting; "follow_up" is excluded (exploit runs autonomously).
-		expected_actions = ["task", "workflow", "shell", "query", "add_finding", "add_vuln_poc", "stop"]
-		self.assertEqual(exploit_config["allowed_actions"], expected_actions)
+		# exploiting; "follow_up" is included so exploit mode can STOP-and-ask (confirm
+		# before a state-changing action / hand back after a PoC). Subset check (not an
+		# exact list) so adding tools doesn't break this.
+		actions = exploit_config["allowed_actions"]
+		for a in ["task", "workflow", "shell", "query", "follow_up", "add_finding",
+		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed",
+		          "update_finding", "stop"]:
+			self.assertIn(a, actions)
+		self.assertNotIn("add_vuln_poc", actions)  # replaced by the dedicated mark_vuln_* tools
 
 	def test_exploit_mode_config_has_max_iterations_5(self):
 		exploit_config = MODES["exploit"]
@@ -260,13 +267,18 @@ class TestPrompts(unittest.TestCase):
 
 	def test_attack_mode_config_has_correct_allowed_actions(self):
 		attack_config = MODES["attack"]
-		expected_actions = ["task", "workflow", "shell", "query", "follow_up", "add_finding", "add_vuln_poc", "stop"]
-		self.assertEqual(attack_config["allowed_actions"], expected_actions)
+		actions = attack_config["allowed_actions"]
+		for a in ["task", "workflow", "shell", "query", "follow_up", "add_finding",
+		          "mark_vuln_exploited", "mark_vuln_false_positive", "stop"]:
+			self.assertIn(a, actions)
 
 	def test_chat_mode_config_has_correct_allowed_actions(self):
 		chat_config = MODES["chat"]
-		expected_actions = ["query", "follow_up", "add_finding", "add_vuln_poc", "shell", "stop"]
-		self.assertEqual(chat_config["allowed_actions"], expected_actions)
+		actions = chat_config["allowed_actions"]
+		for a in ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "shell", "stop"]:
+			self.assertIn(a, actions)
+		self.assertNotIn("task", actions)
+		self.assertNotIn("workflow", actions)
 
 	def test_all_modes_have_max_iterations_5(self):
 		self.assertEqual(MODES["attack"]["max_iterations"], 5)
@@ -329,6 +341,40 @@ class TestPrompts(unittest.TestCase):
 			prompt = get_system_prompt(mode)
 			self.assertNotIn("run_query", prompt, f"phantom run_query in {mode!r} prompt")
 			self.assertIn("query_workspace", prompt)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestScopeInPrompt(unittest.TestCase):
+	"""Authorized scope is surfaced in the system prompt so the model stays in
+	scope up front (fewer guardrail-denied retries), and is omitted when absent."""
+
+	def test_scope_absent_by_default(self):
+		p = get_system_prompt("attack", workspace_path="<ws>", backend=None)
+		self.assertNotIn("<scope>", p)
+		self.assertEqual(build_scope_section(), "")
+		self.assertEqual(build_scope_section([], []), "")
+
+	def test_in_scope_surfaced(self):
+		p = get_system_prompt(
+			"attack", workspace_path="<ws>", backend=None,
+			in_scope=["scanme.nmap.org", "10.0.0.1"])
+		self.assertIn("<scope>", p)
+		self.assertIn("scanme.nmap.org", p)
+		self.assertIn("10.0.0.1", p)
+
+	def test_out_of_scope_surfaced(self):
+		section = build_scope_section(in_scope="a.example.com", out_of_scope="b.example.com")
+		self.assertIn("In-scope", section)
+		self.assertIn("a.example.com", section)
+		self.assertIn("Out-of-scope", section)
+		self.assertIn("b.example.com", section)
+
+	def test_in_scope_prefers_hostname_wording(self):
+		"""The in-scope guidance proactively tells the model to use the hostname, not its
+		resolved IP, up front (not only reactively after a deny)."""
+		section = build_scope_section(in_scope=["scanme.nmap.org"])
+		self.assertIn("hostname", section)
+		self.assertIn("not its resolved IP", section)
 
 
 if __name__ == '__main__':

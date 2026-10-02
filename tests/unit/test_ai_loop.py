@@ -669,10 +669,14 @@ class TestRemoteModeFlow(unittest.TestCase):
 		Simulates: write permission_request → client answers → query finds answer.
 		"""
 		mock_qe = MagicMock()
-		# Simulate: first search returns nothing (pending), second returns answered
+		# _poll_for_answer interleaves an answer-poll then a steer-poll each iteration, so
+		# the shared search mock must feed BOTH. The answer must arrive via the ANSWER poll
+		# (a `{"answer": ...}` doc without a _uuid is NOT a valid steer, so poll_steers
+		# ignores it): pending answer -> no steers -> answered.
 		mock_qe.search.side_effect = [
-			[],  # First poll: no answer yet
-			[{"answer": "allow"}],  # Second poll: answer found
+			[],  # iter 1, answer poll: no answer yet
+			[],  # iter 1, steer poll: no steers
+			[{"answer": "allow"}],  # iter 2, answer poll: answer found
 		]
 		perm_engine = PermissionEngine(_make_permission_config(), targets=["10.0.0.1"], workspace="/tmp/ws")
 
@@ -687,7 +691,7 @@ class TestRemoteModeFlow(unittest.TestCase):
 
 		self.assertIsNotNone(result)
 		self.assertEqual(result["answer"], "allow")
-		self.assertEqual(mock_qe.search.call_count, 2)
+		self.assertEqual(mock_qe.search.call_count, 3)
 
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
@@ -1164,6 +1168,71 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 		self.assertEqual(tc_id, "tc_err")
 		self.assertIn("error", content.lower())
 		self.assertIn("'str' object is not a mapping", content)
+
+
+# =============================================================================
+# Subagent threads its OWN tool results; a child subagent's stream does not
+# =============================================================================
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestSubagentOwnToolResults(unittest.TestCase):
+	"""A subagent stamps the `subagent` marker on its OWN tool outputs too. Those
+	must still be fed back to its LLM (collected -> add_tool_result), else its tool
+	calls come back acknowledged-but-empty. Only a DIFFERENT session_id (a dispatched
+	CHILD subagent) is kept out of the parent's tool_result."""
+
+	def _run(self, result_session_id):
+		from secator.tasks.ai import ai as AiTask
+		from secator.output_types import Url
+
+		tool_results = []
+
+		class _FakeHistory:
+			def get_action_budget(self, model):
+				return 10000
+
+			def add_tool_result(self, name, tc_id, content):
+				tool_results.append((name, tc_id, content))
+
+		fake_self = MagicMock()
+		fake_self.backend = CLIBackend()
+		fake_self.session_id = "sub-sess"  # this runner IS a subagent
+		fake_self.model = "test-model"
+		fake_self.reports_folder = None
+		fake_self.encryptor = None
+		fake_self.context = {"session_id": "sub-sess"}
+		fake_self.history = _FakeHistory()
+		fake_self.add_result = lambda item, **kw: None
+
+		ctx = MagicMock()
+		ctx.results = []
+
+		action = {
+			"action": "shell", "command": "curl http://ex.com",
+			"tool_call_id": "tc1", "tool_call_name": "run_shell",
+		}
+		out = Url(url="http://ex.com", _context={
+			"subagent": "obj", "session_id": result_session_id,
+			"tool_call_id": "tc1", "tool_call_name": "run_shell",
+		})
+
+		def _fake_shell(*a, **k):
+			yield out
+
+		with patch("secator.ai.actions._handle_shell", _fake_shell):
+			list(AiTask._dispatch_and_collect(fake_self, [action], ctx))
+		return tool_results
+
+	def test_subagent_own_output_is_fed_back(self):
+		# result session_id == self.session_id -> my own output -> MUST reach history
+		results = self._run(result_session_id="sub-sess")
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0][1], "tc1")
+
+	def test_child_subagent_output_not_fed_to_parent(self):
+		# result session_id != self.session_id -> a dispatched child -> kept out
+		results = self._run(result_session_id="other-child-sess")
+		self.assertEqual(len(results), 0)
 
 
 # =============================================================================

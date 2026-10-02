@@ -167,7 +167,6 @@ class TestCanonicalizeTarget(unittest.TestCase):
 			(' 1.2.3.4', '1.2.3.4', IP),          # whitespace
 			('2130706433', '127.0.0.1', IP),      # decimal inet_aton
 			('0177.0.0.1', '127.0.0.1', IP),      # octal
-			('127.1', '127.0.0.1', IP),           # short form
 			('0x7f.0.0.1', '127.0.0.1', IP),      # hex
 			('täst.de', 'xn--tst-qla.de', HOST),  # IDN host -> punycode
 			('[2001:db8::1]', '2001:db8::1', IP),  # bracketed IPv6, no port -> unwrapped
@@ -181,6 +180,18 @@ class TestCanonicalizeTarget(unittest.TestCase):
 				self.assertEqual(canonicalize_target(raw), canon)
 				# resolve=False keeps it pure; type detection still sees the canonical (network) form.
 				self.assertEqual(classify_target(raw, resolve=False).type, ttype)
+
+	def test_short_dotted_decimals_are_not_ips(self):
+		# Ambiguous short dotted-decimals (version/float/timeout, e.g. `sleep 0.5`) must NOT
+		# be expanded into an IP. Regression: 0.5 -> 0.0.0.5 classified as IP and the AI
+		# guardrail then blocked the shell task as an out-of-scope target.
+		for t in ('0.5', '5.0.7', '127.1', '1.5'):
+			with self.subTest(t=t):
+				self.assertEqual(canonicalize_target(t), t)          # left as-is
+				self.assertFalse(classify_target(t, resolve=False).is_network)
+		# Full quads and single-int/hex encodings still classify as IPs (smuggle defense).
+		self.assertEqual(classify_target('1.2.3.4', resolve=False).type, IP)
+		self.assertEqual(classify_target('2130706433', resolve=False).type, IP)
 
 	def test_canonicalize_empty(self):
 		self.assertEqual(canonicalize_target('  '), '')

@@ -6,6 +6,7 @@ import os
 import random
 import re
 from dataclasses import fields
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 from secator.definitions import LLM_SPINNER_MESSAGES
@@ -245,6 +246,8 @@ _FORBIDDEN_CHILD_OPT_KEYS = frozenset({
 	"dry_run",
 	"exporters",
 	"enable_reports",
+	# SECURITY (ISOLATION): child can't lower isolation — `isolated` is force-inherited, stripped here.
+	"isolated",
 })
 
 # Cap a spawned subagent's iteration budget so it can't be told to loop unbounded.
@@ -285,8 +288,16 @@ def build_subagent_prompt(objective: str, targets: list, evidence: str) -> str:
 		f"## Objective\n{objective.strip() or '(no explicit objective given)'}\n\n"
 		f"## Scope\nWork ONLY within these target(s): {targets_str}\n\n"
 		f"## Already known (do not re-run tools that would re-discover these)\n{evidence_block}\n\n"
-		f"## Expected output\nInvestigate the objective, then report your findings concisely. "
-		f"Persist any new findings; do not repeat work already listed under 'Already known'."
+		f"## Expected output\n"
+		f"1. Do the work needed to meet the objective, within scope.\n"
+		f"2. PERSIST your result — it's REQUIRED and is the ONLY output that survives (your prose "
+		f"is NOT saved and the parent CANNOT read your transcript). On an EXISTING vulnerability "
+		f"(`_uuid` from query_workspace), call `add_vuln_poc` with that `_uuid`: `exploited=true` "
+		f"for a working PoC, or `exploited=false` to mark it a false positive. For a NEW finding, "
+		f"call `add_finding`. You MUST persist before finishing if you confirmed OR disproved "
+		f"anything.\n"
+		f"3. Finish with a 2-4 line HANDBACK: what you did, the verdict "
+		f"(confirmed / false-positive / inconclusive), and the `_uuid`(s) you persisted."
 	)
 
 
@@ -361,6 +372,31 @@ def _coerce_finding_fields(cls, data: Dict) -> Dict:
 			continue
 		expected = field_types.get(key)
 		if expected is None or value is None:
+			continue
+		# A scalar `str` field handed list-shaped data: the model packs multiple values into a
+		# single field (e.g. `matched_at` as '["http://a","http://b"]' or a real list). A str value
+		# already "matches" str and would slip past the type check below and get stored as an ugly
+		# literal; a real list would be rejected by validate_fields. Unwrap to the first element so
+		# it lands as a clean scalar. ponytail: first element is the representative location; extra
+		# ones are dropped (a scalar field holds one). Mirrors the list-field coercion below.
+		if expected is str:
+			parsed = value
+			if isinstance(value, str):
+				s = value.strip()
+				if s.startswith('[') and s.endswith(']'):
+					try:
+						loaded = json.loads(s)
+						if isinstance(loaded, list):
+							parsed = loaded
+					except (json.JSONDecodeError, TypeError):
+						parsed = value
+			if isinstance(parsed, list):
+				if not parsed:
+					data[key] = ''
+				elif isinstance(parsed[0], str):
+					data[key] = parsed[0]
+				# else: a non-string element (None, dict, ...) — leave the value unchanged so
+				# validate_fields rejects the malformed type instead of storing "None"/a dict repr.
 			continue
 		# Already the right type (note: bool is a subclass of int, so guard it).
 		if isinstance(value, expected) and not (expected is int and isinstance(value, bool)):
@@ -769,9 +805,22 @@ def call_llm(
 	# Initialize litellm once (avoids callback accumulation)
 	init_llm(api_key=api_key)
 
+	# Strip secator-internal per-message fields before sending to the model. Each
+	# message may carry bookkeeping keys ChatHistory owns (e.g. `_token_count` /
+	# `_token_model`, its per-model token cache) — not part of the chat-completion
+	# message schema. Some providers reject them or, worse, silently return an empty
+	# response when a message has unknown keys (observed with a local model). We can't
+	# use litellm's drop_params (it only drops top-level params, not nested message
+	# sub-fields), so copy each message without the `_`-prefixed keys. The originals
+	# are untouched, so the caller's token cache / accounting keep working.
+	llm_messages = [
+		{k: v for k, v in m.items() if not str(k).startswith('_')}
+		for m in messages
+	]
+
 	kwargs = dict(
 		model=model,
-		messages=messages,
+		messages=llm_messages,
 		temperature=temperature,
 		api_base=api_base,
 	)
@@ -860,6 +909,89 @@ def call_llm(
 	finish_reason = getattr(response.choices[0], 'finish_reason', None)
 
 	return {"content": content, "usage": usage, "tool_calls": tool_calls, "finish_reason": finish_reason}
+
+
+# Some models (Hermes-style / XML tool-calling) emit tool calls as TEXT in the
+# message content instead of native structured `tool_calls`. litellm hands that
+# text back as `content` with an empty `tool_calls`. These regexes recover the
+# calls so the loop can dispatch them like native ones.
+_TOOL_CALL_BLOCK_RE = re.compile(r'<tool_call>\s*(.*?)\s*</tool_call>', re.DOTALL | re.IGNORECASE)
+_FUNCTION_RE = re.compile(r'<function=([^>\s]+)\s*>', re.IGNORECASE)
+_PARAM_RE = re.compile(
+	r'<parameter=([^>\s]+)\s*>(.*?)(?=<parameter=|</parameter>|</function>|</tool_call>|\Z)',
+	re.DOTALL | re.IGNORECASE,
+)
+
+
+def _coerce_param_value(raw: str) -> Any:
+	"""A <parameter> value may be JSON (number/bool/object/array/quoted string) or
+	plain text. Try JSON; fall back to the raw string on failure."""
+	if raw == "":
+		return raw
+	try:
+		return json.loads(raw)
+	except (json.JSONDecodeError, ValueError):
+		return raw
+
+
+def _parse_tool_call_block(block: str, index: int):
+	"""Parse one <tool_call> body into a litellm-shaped call, or None if unparseable.
+
+	Supports both bodies models emit:
+	  * XML-style:  <function=NAME> <parameter=KEY>VALUE</parameter> ...
+	  * JSON-style: {"name": "NAME", "arguments": {...}}
+	"""
+	name = None
+	args: Dict = {}
+	fn = _FUNCTION_RE.search(block)
+	if fn:
+		name = fn.group(1).strip()
+		for key, raw in _PARAM_RE.findall(block):
+			args[key.strip()] = _coerce_param_value(raw.strip())
+	else:
+		try:
+			data = json.loads(block.strip())
+		except (json.JSONDecodeError, TypeError, ValueError):
+			return None
+		if not isinstance(data, dict):
+			return None
+		name = data.get("name") or data.get("function")
+		args = data.get("arguments") or data.get("parameters") or {}
+		if isinstance(args, str):
+			try:
+				args = json.loads(args)
+			except (json.JSONDecodeError, ValueError):
+				pass
+	if not name:
+		return None
+	# Shape it exactly like a native litellm tool call (attribute access + JSON-string
+	# arguments) so _process_tool_calls / _add_assistant_to_history consume it unchanged.
+	return SimpleNamespace(
+		id=f"textcall_{index}_{name}",
+		type="function",
+		function=SimpleNamespace(name=name, arguments=json.dumps(args)),
+	)
+
+
+def parse_text_tool_calls(content: Optional[str]) -> Tuple[List, Optional[str]]:
+	"""Recover tool calls a model emitted as text inside `content`.
+
+	Returns (tool_calls, cleaned_content):
+	  * tool_calls — litellm-shaped calls (empty if none found / all unparseable);
+	  * cleaned_content — `content` with every consumed <tool_call> block stripped,
+	    so the raw XML is not shown to the user. Unchanged when nothing is parsed.
+	Never raises: malformed blocks are skipped.
+	"""
+	if not content or '<tool_call>' not in content.lower():
+		return [], content
+	tool_calls = [
+		call for i, block in enumerate(_TOOL_CALL_BLOCK_RE.findall(content))
+		if (call := _parse_tool_call_block(block, i)) is not None
+	]
+	if not tool_calls:
+		return [], content
+	cleaned = _TOOL_CALL_BLOCK_RE.sub('', content).strip()
+	return tool_calls, cleaned
 
 
 MODEL_COLORS = [

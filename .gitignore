@@ -141,4 +141,4 @@ dmypy.json
 
 # Project
 .git/
-images/
+images/.repowise/

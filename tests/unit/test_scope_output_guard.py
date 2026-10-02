@@ -1,11 +1,11 @@
 """Scope is enforced on task OUTPUT, not just input (secator/runners/_base.py:add_result).
 
 Passive tasks (gau, subfinder, xurlfind3r, ...) persist their whole archive, so before this guard a
-scoped run still minted out-of-scope discovered hosts into Subdomain/Url/Target findings (a prod
-workspace accumulated ~65k out-of-scope target findings this way). The guard drops host-bearing
-findings whose host is out of scope at the single output choke point, reusing the input filter's
-predicate (secator.scope.host_in_scope). It is OPT-IN per task via `output_scope_filter` (default
-False, so un-opted tasks pay zero per-finding cost) and a no-op when no scope is set.
+scoped run still minted out-of-scope discovered hosts into Subdomain/Url/Target findings. The guard
+drops host-bearing findings whose host is out of scope at the single output choke point, reusing the
+input filter's predicate (secator.scope.host_in_scope). It is OPT-IN per task via
+`output_scope_filter` (default False, so un-opted tasks pay zero per-finding cost) and a no-op when
+no scope is set.
 """
 import unittest
 

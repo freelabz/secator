@@ -14,7 +14,6 @@ scope entries, never targets.
 import ipaddress
 import logging
 import re
-from urllib.parse import urlparse
 
 from secator.definitions import CIDR_RANGE, IP
 from secator.utils import (
@@ -34,9 +33,18 @@ logger = logging.getLogger(__name__)
 # nested quantifiers (the classic catastrophic-backtracking shape) and cap the
 # length of the string we ever feed to a regex. Both are best-effort.
 _MAX_REGEX_INPUT = 2048
-# Heuristic: a quantified group whose body also contains a quantifier -> (a+)+,
-# (a*)*, (a+)*b, ... Best-effort (single-level groups); flagged in the report.
+# Heuristics for the two classic exponential-backtracking shapes. Both are
+# best-effort, single-level (non-nested) groups; a flagged entry is rejected at
+# compile time and never fed to `fullmatch`.
+#   (1) a quantified group whose body also contains a quantifier -> (a+)+, (a*)*
 _NESTED_QUANTIFIER = re.compile(r'\([^()]*[+*?][^()]*\)[+*]')
+#   (2) alternation inside a quantified group -> (a|aa)+, (foo|foobar)* : the
+#       overlapping alternatives give the same exponential blow-up as (1) even
+#       though no quantifier sits inside the group. A trailing `?` is bounded
+#       (safe), so we only reject unbounded `+`/`*`. A safe non-overlapping
+#       alternation like `([a-z0-9]|-)+` is a false positive here -- rewrite it
+#       as a char class `[a-z0-9-]+`; a rejected ALLOW entry only narrows scope.
+_ALTERNATION_QUANTIFIER = re.compile(r'\([^()]*\|[^()]*\)[+*]')
 
 # Regex metacharacters that mark an entry as a regex rather than a structural
 # host/wildcard/CIDR. `.` and `*` are excluded: they are the ordinary furniture
@@ -61,7 +69,7 @@ def _compile_entry(entry):
 	if entry in _regex_cache:
 		return _regex_cache[entry]
 	compiled = None
-	if _NESTED_QUANTIFIER.search(entry):
+	if _NESTED_QUANTIFIER.search(entry) or _ALTERNATION_QUANTIFIER.search(entry):
 		logger.warning('scope: skipping regex entry with catastrophic (ReDoS) pattern: %r', entry)
 	else:
 		try:
@@ -205,25 +213,48 @@ def host_in_scope(target, in_scope=None, out_of_scope=None):
 	return True
 
 
-def finding_scope_host(item):
-	"""Return the host/ip a finding (an OutputType) should be scope-checked against,
-	or None for finding types that carry no host (vulns, tags, info, ... -> never
-	scoped). The output-side counterpart of the input filter's host extraction
-	(secator/runners/_helpers.py), kept here next to ``host_in_scope`` so callers
-	don't reimplement it. Pure."""
-	t = getattr(item, '_type', None)
-	if t == 'url':
-		return getattr(item, 'host', None) or urlparse(getattr(item, 'url', '') or '').hostname
-	if t == 'subdomain':
-		return getattr(item, 'host', None)
-	if t == 'ip':
-		return getattr(item, 'ip', None)
-	if t == 'port':
-		return getattr(item, 'ip', None) or getattr(item, 'host', None)
-	if t == 'certificate':
-		return getattr(item, 'host', None)
-	if t == 'target':
-		return getattr(item, 'name', None)
-	if t == 'domain':
-		return getattr(item, 'domain', None)
+def finding_scope_target(item):
+	"""Value to scope-check an OutputType against: its first present ``TARGET_FIELDS``
+	entry, or None for hostless types (vulns / tags / info / ...) that are never scoped."""
+	for field in getattr(item, 'TARGET_FIELDS', ()) or ():
+		value = getattr(item, field, None)
+		if value:
+			return value
 	return None
+
+
+def resolve_scope_hostnames(scope):
+	"""Expand a scope list with the resolved IP(s) of its plain-hostname entries.
+
+	DNS-RESOLVING — NOT pure. Unlike ``host_in_scope`` (which never touches the
+	network), this is meant to run ONCE at run setup to widen an allow/deny list so a
+	target can be matched by its host's CURRENT IP; the per-check ``host_in_scope`` then
+	matches that IP literally. IP / CIDR / wildcard / regex entries are passed through
+	unresolved (an IP is already literal; the others don't name a single host to look
+	up). Returns the original entries plus any newly-resolved IPs (deduped, order-stable).
+
+	CAVEAT: a CDN / shared-hosting front resolves to an IP shared with other sites, so
+	adding it authorizes every co-tenant on that IP. Only widen scope this way under an
+	explicit engagement scope (the caller-provided mandate-derived in_scope).
+	"""
+	import socket
+	entries = as_scope_list(scope)
+	out = list(entries)
+	seen = set(entries)
+	for entry in entries:
+		# Skip anything that isn't a single plain hostname: wildcard, regex, and
+		# (via _target_shape) IP / CIDR / non-network entries have nothing to resolve.
+		if entry.startswith('*.') or any(c in _REGEX_META for c in entry):
+			continue
+		shape = _target_shape(entry)
+		if shape is None or not shape.host:
+			continue
+		try:
+			ips = {info[4][0] for info in socket.getaddrinfo(shape.host, None)}
+		except (OSError, UnicodeError):
+			ips = set()
+		for ip in sorted(ips):
+			if ip not in seen:
+				seen.add(ip)
+				out.append(ip)
+	return out

@@ -61,6 +61,7 @@ class Url(OutputType):
 		'screenshot_path',
 	]
 	_sort_by = (URL,)
+	TARGET_FIELDS = ['url']  # fields to scope-check this type against (scope.finding_scope_target)
 	_group_by = ('host',)        # collapse a host's URLs into one row
 	_group_aggregate = URL
 
