@@ -303,12 +303,19 @@ class TestPrompts(unittest.TestCase):
 	# === Common rules tests ===
 
 	def test_common_rules_has_xml_tags(self):
-		"""COMMON_RULES should use XML tags for each rule category."""
-		from secator.ai.prompts import COMMON_RULES
+		"""COMMON_RULES holds the UNIVERSAL blocks (safe for read-only chat too).
+		The run_*/shell-specific blocks live in runners.txt now (attack/exploit only)."""
+		from secator.ai.prompts import COMMON_RULES, load_prompt
 		self.assertIn("<tool_calling>", COMMON_RULES)
 		self.assertIn("<response_style>", COMMON_RULES)
-		self.assertIn("<guardrails>", COMMON_RULES)
-		self.assertIn("<truncated_output>", COMMON_RULES)
+		self.assertIn("<encrypted_data>", COMMON_RULES)
+		# These moved out of common into runners.txt (not in chat's read-only surface).
+		self.assertNotIn("<guardrails>", COMMON_RULES)
+		self.assertNotIn("<truncated_output>", COMMON_RULES)
+		runners = load_prompt("constraints/runners.txt")
+		self.assertIn("<truncated_output>", runners)
+		self.assertIn("<guardrails>", runners)
+		self.assertIn("<file_io>", runners)
 
 	def test_common_rules_has_no_shouting(self):
 		"""COMMON_RULES should not have excessive ALL CAPS directives."""
