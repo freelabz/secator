@@ -59,12 +59,14 @@ SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 MODES = {
 	"attack": {
 		"system_prompt": SYSTEM_ATTACK,
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
 		"system_prompt": SYSTEM_CHAT,
-		"allowed_actions": ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "shell", "stop"],
+		# `subagent` (spawn_subagent) is allowed so chat can delegate a SAME-MODE helper;
+		# `task`/`workflow` are NOT, so chat can't escalate into active scanning.
+		"allowed_actions": ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "shell", "subagent", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {

@@ -7,6 +7,7 @@ from secator.ai.prompts import get_mode_config
 # Map tool names to action types used by existing action handlers
 TOOL_ACTION_MAP = {
 	"run_task": "task",
+	"spawn_subagent": "subagent",
 	"run_workflow": "workflow",
 	"run_shell": "shell",
 	"query_workspace": "query",
@@ -57,6 +58,35 @@ TOOL_SCHEMAS = {
 					}
 				},
 				"required": ["name", "targets", "description"]
+			}
+		}
+	},
+	"spawn_subagent": {
+		"type": "function",
+		"function": {
+			"name": "spawn_subagent",
+			"description": (
+				"Spawn an autonomous AI subagent that runs AT YOUR CURRENT MODE with a fresh "
+				"context window, works the objective non-interactively, and hands back a summary. "
+				"The subagent inherits your mode and CANNOT escalate (a chat agent spawns a chat "
+				"helper, not an attack one), so this is always available — including in chat. "
+				"Use it to parallelize or offload a focused sub-task. To ESCALATE to a higher mode "
+				"(attack/exploit) you must use run_task(name='ai') instead, which is only available "
+				"in attack/exploit mode."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"objective": {
+						"type": "string",
+						"description": "The subagent's goal, with ALL context it needs (target details, "
+						               "relevant findings as raw JSON, credentials/versions). It has a fresh "
+						               "context window and sees only what you pass here."
+					},
+					"targets": _TARGETS_SCHEMA,
+					"description": _DESCRIPTION_SCHEMA,
+				},
+				"required": ["objective", "targets", "description"]
 			}
 		}
 	},

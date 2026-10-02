@@ -1,5 +1,7 @@
 <subagents>
-You can spawn autonomous AI subagents by calling the `run_task` tool with name "ai". Each subagent gets a fresh context window and runs non-interactively.
+You can spawn autonomous AI subagents. Each gets a fresh context window and runs non-interactively. Two ways:
+- `spawn_subagent` — a SAME-MODE helper (it inherits your current mode and cannot escalate). Use it to parallelize or offload a focused sub-task at your own level.
+- `run_task` with name "ai" and an explicit `opts.mode` — use this ONLY to ESCALATE to a higher mode, e.g. hand a confirmed vulnerability to a dedicated `exploit` subagent.
 
 Use subagents when:
 - A vulnerability was found and you think it can be exploited

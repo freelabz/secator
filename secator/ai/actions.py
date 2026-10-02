@@ -353,6 +353,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 
 	handlers = {
 		"task": _handle_task,
+		"subagent": _handle_spawn_subagent,
 		"workflow": _handle_workflow,
 		"shell": _handle_shell,
 		"query": _handle_query,
@@ -770,6 +771,30 @@ def _get_result_context(action, ctx):
 def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
 	"""Execute a secator task."""
 	yield from _run_runner(action, ctx, "task")
+
+
+def _handle_spawn_subagent(action: Dict, ctx: ActionContext) -> Generator:
+	"""Spawn an AI subagent that runs AT THE CALLER'S MODE and cannot escalate.
+
+	This is the non-escalating spawn, available in every mode (including chat): the
+	child's mode is FORCED to the parent's resolved mode, so a chat session spawns a
+	chat helper, never an attack one. (Escalation to a higher mode stays on
+	``run_task(name="ai")``, which is gated to attack/exploit.) It builds the same
+	``name="ai"`` task action ``_run_runner`` already handles — the only differences
+	are that ``mode`` is pinned here, not chosen by the model, and the tool exposes no
+	free-form ``opts`` to smuggle one through."""
+	objective = action.get("objective") or action.get("prompt") or ""
+	opts = {"prompt": objective, "mode": ctx.mode or "chat"}
+	task_action = {
+		"action": "task",
+		"name": "ai",
+		"targets": action.get("targets", ctx.targets),
+		"description": action.get("description", ""),
+		"opts": opts,
+		"tool_call_id": action.get("tool_call_id"),
+		"tool_call_name": action.get("tool_call_name"),
+	}
+	yield from _run_runner(task_action, ctx, "task")
 
 
 def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:

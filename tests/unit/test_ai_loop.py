@@ -1206,6 +1206,26 @@ class TestModeAutoVsPinned(unittest.TestCase):
             AiTask._detect_mode(fake)
         self.assertEqual(fake.mode, "attack")
 
+    def test_spawn_subagent_forces_parent_mode(self):
+        """spawn_subagent dispatches an `ai` task whose mode is FORCED to the caller's
+        mode — a chat agent spawns a chat helper, never an escalation. The model cannot
+        choose the child's mode (the tool exposes no opts)."""
+        from secator.ai import actions as A
+        ctx = A.ActionContext(targets=["scanme.nmap.org"], model="m", mode="chat")
+        captured = {}
+
+        def fake_run_runner(action, c, rtype):
+            captured["action"] = action
+            return iter(())
+
+        with patch.object(A, "_run_runner", fake_run_runner):
+            list(A._handle_spawn_subagent(
+                {"objective": "summarize open ports", "targets": ["x"],
+                 "description": "d", "tool_call_id": "tc"}, ctx))
+        self.assertEqual(captured["action"]["name"], "ai")
+        self.assertEqual(captured["action"]["opts"]["mode"], "chat")  # forced, no escalation
+        self.assertEqual(captured["action"]["opts"]["prompt"], "summarize open ports")
+
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
 class TestSubagentOwnToolResults(unittest.TestCase):
