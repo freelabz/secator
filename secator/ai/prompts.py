@@ -64,11 +64,12 @@ MODES = {
 	},
 	"chat": {
 		"system_prompt": SYSTEM_CHAT,
-		# Chat is read-only/informational: NO `shell` (too much attack surface — it can
-		# run anything), NO `task`/`workflow` (escalation). `subagent` (spawn_subagent) is
-		# allowed for a SAME-MODE helper. Data comes from `query`; findings via the
-		# add/mark/update tools.
-		"allowed_actions": ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "stop"],
+		# Chat is strictly READ-ONLY / informational. It can only read workspace data
+		# (`query`), ask/suggest (`follow_up`), delegate a same-mode helper (`subagent`),
+		# and `stop`. NO `shell` (attack surface), NO `task`/`workflow` (escalation), and
+		# NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
+		# changing findings is an active action that belongs in attack/exploit.
+		"allowed_actions": ["query", "follow_up", "subagent", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {

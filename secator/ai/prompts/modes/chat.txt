@@ -14,7 +14,6 @@ You are an autonomous penetration testing agent conducting authorized security t
 ${mode_chat}
 ${common}
 ${queries}
-${findings}
 ${follow_up}
 </constraints>
 

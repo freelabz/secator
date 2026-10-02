@@ -1211,7 +1211,10 @@ class TestModeAutoVsPinned(unittest.TestCase):
         (escalation); it keeps query + spawn_subagent (same-mode helper)."""
         from secator.ai.tools import build_tool_schemas
         chat = {s["function"]["name"] for s in build_tool_schemas("chat")}
-        for forbidden in ("run_shell", "run_task", "run_workflow"):
+        # Read-only: no shell/escalation AND no finding writes.
+        for forbidden in ("run_shell", "run_task", "run_workflow", "add_finding",
+                          "update_finding", "mark_vuln_exploited",
+                          "mark_vuln_false_positive", "mark_vuln_exploit_failed"):
             self.assertNotIn(forbidden, chat)
         self.assertIn("query_workspace", chat)
         self.assertIn("spawn_subagent", chat)

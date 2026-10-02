@@ -275,12 +275,12 @@ class TestPrompts(unittest.TestCase):
 	def test_chat_mode_config_has_correct_allowed_actions(self):
 		chat_config = MODES["chat"]
 		actions = chat_config["allowed_actions"]
-		for a in ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "subagent", "stop"]:
-			self.assertIn(a, actions)
-		# Chat is read-only / non-escalating: no shell (attack surface), no task/workflow.
-		self.assertNotIn("shell", actions)
-		self.assertNotIn("task", actions)
-		self.assertNotIn("workflow", actions)
+		# Chat is strictly read-only: read (query), ask/suggest (follow_up), delegate a
+		# same-mode helper (subagent), stop. Nothing that acts on the world or the data.
+		self.assertEqual(set(actions), {"query", "follow_up", "subagent", "stop"})
+		for a in ["shell", "task", "workflow", "add_finding", "update_finding",
+		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:
+			self.assertNotIn(a, actions)
 
 	def test_all_modes_have_max_iterations_5(self):
 		self.assertEqual(MODES["attack"]["max_iterations"], 5)
