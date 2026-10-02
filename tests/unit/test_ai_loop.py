@@ -1206,6 +1206,20 @@ class TestModeAutoVsPinned(unittest.TestCase):
             AiTask._detect_mode(fake)
         self.assertEqual(fake.mode, "attack")
 
+    def test_chat_mode_tool_surface(self):
+        """Chat is read-only: no run_shell (attack surface), no run_task/run_workflow
+        (escalation); it keeps query + spawn_subagent (same-mode helper)."""
+        from secator.ai.tools import build_tool_schemas
+        chat = {s["function"]["name"] for s in build_tool_schemas("chat")}
+        for forbidden in ("run_shell", "run_task", "run_workflow"):
+            self.assertNotIn(forbidden, chat)
+        self.assertIn("query_workspace", chat)
+        self.assertIn("spawn_subagent", chat)
+        # attack keeps shell + escalation tools
+        attack = {s["function"]["name"] for s in build_tool_schemas("attack")}
+        self.assertIn("run_shell", attack)
+        self.assertIn("run_task", attack)
+
     def test_spawn_subagent_forces_parent_mode(self):
         """spawn_subagent dispatches an `ai` task whose mode is FORCED to the caller's
         mode — a chat agent spawns a chat helper, never an escalation. The model cannot

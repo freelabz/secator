@@ -64,9 +64,11 @@ MODES = {
 	},
 	"chat": {
 		"system_prompt": SYSTEM_CHAT,
-		# `subagent` (spawn_subagent) is allowed so chat can delegate a SAME-MODE helper;
-		# `task`/`workflow` are NOT, so chat can't escalate into active scanning.
-		"allowed_actions": ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "shell", "subagent", "stop"],
+		# Chat is read-only/informational: NO `shell` (too much attack surface — it can
+		# run anything), NO `task`/`workflow` (escalation). `subagent` (spawn_subagent) is
+		# allowed for a SAME-MODE helper. Data comes from `query`; findings via the
+		# add/mark/update tools.
+		"allowed_actions": ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
