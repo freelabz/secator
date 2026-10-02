@@ -1223,6 +1223,34 @@ class TestModeAutoVsPinned(unittest.TestCase):
         self.assertIn("run_shell", attack)
         self.assertIn("run_task", attack)
 
+    def test_auto_does_not_deescalate_to_chat(self):
+        """F3: in auto, a chat-classified aside while already in an action mode keeps the
+        action mode — it must not silently drop to read-only chat mid-engagement."""
+        from secator.tasks.ai import ai as AiTask
+        for start in ("attack", "exploit"):
+            fake = MagicMock()
+            fake.mode_is_auto = True
+            fake.mode = start              # already in an action mode
+            fake.prompt = "summarize the findings so far"  # fast_detect_mode -> chat
+            fake.is_subagent = False
+            fake.max_iterations = 5
+            with patch("secator.tasks.ai.build_tool_schemas", return_value=[]):
+                AiTask._detect_mode(fake)
+            self.assertEqual(fake.mode, start, f"auto de-escalated {start}->chat")
+
+    def test_auto_still_escalates_chat_to_action(self):
+        """Escalation is unaffected: a chat session that gets an attack prompt moves up."""
+        from secator.tasks.ai import ai as AiTask
+        fake = MagicMock()
+        fake.mode_is_auto = True
+        fake.mode = "chat"
+        fake.prompt = "run an nmap scan on the target"  # fast_detect_mode -> attack
+        fake.is_subagent = False
+        fake.max_iterations = 5
+        with patch("secator.tasks.ai.build_tool_schemas", return_value=[]):
+            AiTask._detect_mode(fake)
+        self.assertEqual(fake.mode, "attack")
+
     def test_spawn_subagent_forces_parent_mode(self):
         """spawn_subagent dispatches an `ai` task whose mode is FORCED to the caller's
         mode — a chat agent spawns a chat helper, never an escalation. The model cannot

@@ -1202,6 +1202,15 @@ class ai(PythonRunner):
 				self.mode = "chat"
 		if not self.mode:
 			self.mode = "chat"
+		# F3: never auto-DE-escalate to read-only `chat` once the session has entered an
+		# action mode. A mid-engagement aside ("which of these looks most exploitable?")
+		# classifies as chat, but dropping there would strip run_shell/run_task/add_finding
+		# and could lose an unrecorded finding. Escalation and attack<->exploit stay free;
+		# only the silent drop back to chat is blocked — an explicit switch_mode can still
+		# go read-only (the user's conscious choice).
+		if self.mode == "chat" and old_mode in ("attack", "exploit"):
+			console.print(rf"[bold green]\[INF][/] Keeping [bold]{old_mode}[/] mode (auto won't de-escalate to chat mid-engagement)")
+			self.mode = old_mode
 		# Resolve the agent-loop cap.
 		#  - A config value <= 0 (SECATOR_ADDONS_AI_MAX_ITERATIONS=-1) DISABLES the cap:
 		#    the run continues until the model sends `stop` (or returns no tool call).
