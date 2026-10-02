@@ -1,25 +1,3 @@
-<tool_examples>
-The "<OUTPUT_PATH>" / "<OUTPUT_JSON_PATH>" tokens in the examples below are placeholders: replace them with the concrete path printed in the "Full output saved to:" line of a truncated tool result. If no such path was shown, the full output is NOT available on disk, so do NOT run a shell command against the literal placeholder: work with the truncated result you already have or re-run the tool differently.
-<correct>
-run_task(name="nmap", targets=["10.0.0.1"])
-run_task(name="nmap", targets=["10.0.0.1"], opts={"ports": "1-1000"})
-run_task(name="httpx", targets=["target2.com"], opts={"profiles": ["aggressive"]})
-run_task(name="httpx", targets=["target3.com"], opts={"rate_limit": 30, "proxy": "tor"})
-run_workflow(name="domain_recon", targets=["example.com"])
-run_shell(command="curl -sk https://10.0.0.1/ | head -50")
-run_task(name="ai", targets=["example.com"], opts={"prompt": "Enumerate subdomains", "mode": "attack", "session_name": "Subdomain enumeration on example.com", "max_iterations": 5})
-query_workspace(query={"_type": "vulnerability", "severity": {"$in": ["high", "critical"]}})
-add_finding(name="XSS vuln", matched_at=["http://testphp.vulnweb.com/hpp/?pp=1"], )
-</correct>
-<wrong>
-run_task() # <- no arguments
-run_shell() # <- no arguments
-run_task(name="nmap") # <- no targets
-query_workspace() # <- no query
-add_finding(name="XSS vuln", extra_data="extra") # <- wrong schema: no 'matched_at' field, 'extra_data' string instead of dict
-</wrong>
-</tool_examples>
-
 <truncated_output>
 When a tool output shows [TRUNCATED], the full data was saved to disk: use the run_shell tool to explore it with grep, head, tail, sed, jq, wc -l to get the information you need from the output.
 

@@ -557,6 +557,28 @@ class ai(PythonRunner):
 			self.session_name = _truncate_label(self.prompt, self.prompt)
 		self.context["session_name"] = self.session_name
 
+		# Restore a prior user PIN before detecting. `_resolve_opts` recomputed
+		# `mode_is_auto` from the incoming run-opt, which on a respawn is usually empty/
+		# "auto" — so a mode the user pinned via `switch_mode` (persisted as
+		# `ai_mode_is_auto=False`) would otherwise be lost and this turn re-detected. Only
+		# restore when the incoming opt itself left the session auto (so an explicit new
+		# pin from the client still wins); read the pinned mode from the persisted docs.
+		if getattr(self, "mode_is_auto", True):
+			try:
+				pinned = query_engine.search({
+					"_type": "ai", "_context.session_id": self.session_id,
+					"_context.ai_mode_is_auto": False,
+				}, limit=1)
+			except Exception as e:  # noqa: BLE001 - a lookup must not crash the worker
+				self.debug(f'resume: pin lookup failed: {e}', sub='llm')
+				pinned = None
+			if pinned:
+				pinned_mode = pinned[0].get("mode") or (pinned[0].get("_context") or {}).get("ai_mode")
+				if pinned_mode in MODES:
+					self.mode_is_auto = False
+					self.mode = pinned_mode
+					self.context["ai_mode_is_auto"] = False
+
 		# Detect mode (defaults to chat) and build the system prompt + tools
 		self._detect_mode()
 		self.system_prompt = self._system_prompt_for(self.mode)
@@ -714,6 +736,7 @@ class ai(PythonRunner):
 			max_iterations=self.max_iterations,
 			subagent=self.is_subagent,
 			mode=self.mode,
+			mode_is_auto=getattr(self, "mode_is_auto", True),
 			sync=self._sync,
 			interactive=self.interactive,
 			backend=self.backend,

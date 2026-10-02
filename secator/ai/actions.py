@@ -70,10 +70,12 @@ class ActionContext:
 	max_iterations: int = 0
 	in_batch: bool = False  # set on the per-batch ctx so the per-turn fan-out cap applies
 	subagent: bool = False
-	# Parent's resolved mode (chat/attack/exploit), handed to a spawned AI subagent so
-	# it INHERITS the parent's mode instead of re-detecting into a higher one — a chat
-	# parent can't escalate by spawning an attack subagent.
+	# Parent's resolved mode (chat/attack/exploit) + whether it is auto. Handed to a
+	# spawned AI subagent so run_subagent can enforce its mode policy: a pinned read-only
+	# `chat` parent forces a chat subagent; an auto/attack parent may pick the subagent's
+	# mode.
 	mode: str = ""
+	mode_is_auto: bool = True
 	silent: bool = False
 	sync: bool = True
 	interactive: Any = "local"  # "local", "remote", "auto", or bool (legacy)
@@ -353,7 +355,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 
 	handlers = {
 		"task": _handle_task,
-		"subagent": _handle_spawn_subagent,
+		"subagent": _handle_subagent,
 		"workflow": _handle_workflow,
 		"shell": _handle_shell,
 		"query": _handle_query,
@@ -545,10 +547,10 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			return
 		opts["subagent"] = True
 		opts["interactive"] = False
-		# Inherit the parent's mode so the subagent runs AT the parent's level and cannot
-		# escalate (a chat parent spawns a chat subagent, not an attack one). setdefault so
-		# an explicit per-subagent mode the parent LLM supplied still wins; a concrete mode
-		# is hard-set in the child, so the child never re-detects upward.
+		# `_handle_subagent` already set the child's mode per the run_subagent policy
+		# (pinned-chat forced to chat; auto/attack may choose). Fall back to the parent's
+		# mode if somehow unset, so a concrete mode is hard-set in the child and it never
+		# re-detects upward.
 		if ctx.mode:
 			opts.setdefault("mode", ctx.mode)
 		# Inherit the parent's resolved LLM config (else it falls back to the default
@@ -769,22 +771,48 @@ def _get_result_context(action, ctx):
 
 
 def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
-	"""Execute a secator task."""
+	"""Execute a secator task. Spawning an AI subagent goes through run_subagent, not
+	run_task(name="ai") — reject the latter with a clear pointer."""
+	if (action.get("name") or "").strip().lower() == "ai":
+		yield Error(
+			message="To spawn an AI subagent, use the run_subagent tool, not run_task(name=\"ai\").",
+			_context=_get_result_context(action, ctx),
+		)
+		return
 	yield from _run_runner(action, ctx, "task")
 
 
-def _handle_spawn_subagent(action: Dict, ctx: ActionContext) -> Generator:
-	"""Spawn an AI subagent that runs AT THE CALLER'S MODE and cannot escalate.
+def _handle_subagent(action: Dict, ctx: ActionContext) -> Generator:
+	"""Spawn an AI subagent (the ONLY subagent entrypoint).
 
-	This is the non-escalating spawn, available in every mode (including chat): the
-	child's mode is FORCED to the parent's resolved mode, so a chat session spawns a
-	chat helper, never an attack one. (Escalation to a higher mode stays on
-	``run_task(name="ai")``, which is gated to attack/exploit.) It builds the same
-	``name="ai"`` task action ``_run_runner`` already handles — the only differences
-	are that ``mode`` is pinned here, not chosen by the model, and the tool exposes no
-	free-form ``opts`` to smuggle one through."""
+	Mode policy:
+	- A user-PINNED read-only ``chat`` session forces the subagent to ``chat``; if the
+	  model asks for a different mode, refuse and tell it to have the user switch to
+	  ``auto`` (a read-only session must not spawn an acting subagent behind the user).
+	- An ``auto`` or ``attack`` session may set the subagent's ``mode`` (e.g. hand a vuln
+	  to an ``exploit`` subagent); omitted means inherit the parent's current mode.
+	``exploit`` mode isn't given this tool at all (see MODES), so a focused exploit run
+	can't fan out."""
+	requested_mode = (action.get("mode") or "").strip().lower() or None
+	pinned_chat = (not getattr(ctx, "mode_is_auto", True)) and ctx.mode == "chat"
+	if pinned_chat:
+		if requested_mode and requested_mode != "chat":
+			yield Error(
+				message=(
+					"A subagent cannot be spawned in a different mode than the current 'chat' mode. "
+					"Ask the user to change the current mode to 'auto' so the subagent can pick its mode."
+				),
+				_context=_get_result_context(action, ctx),
+			)
+			return
+		child_mode = "chat"
+	else:
+		child_mode = requested_mode or ctx.mode or "chat"
 	objective = action.get("objective") or action.get("prompt") or ""
-	opts = {"prompt": objective, "mode": ctx.mode or "chat"}
+	opts = {"prompt": objective, "mode": child_mode}
+	model = (action.get("model") or "").strip()
+	if model:
+		opts["model"] = model
 	task_action = {
 		"action": "task",
 		"name": "ai",
