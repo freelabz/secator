@@ -11,6 +11,11 @@ tags: [recon, dns, ssl, network, http, crawl, takeovers, vuln, secrets]
 input_types:
   - host
 
+important_opts:
+  - passive
+  - brute_dns
+  - brute_http
+
 workflows:
   domain_recon:
   subdomain_recon:

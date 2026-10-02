@@ -196,6 +196,12 @@ class Wordlists(StrictModel):
 		'burp-parameter-names': 'https://raw.githubusercontent.com/danielmiessler/SecLists/refs/heads/master/Discovery/Web-Content/burp-parameter-names.txt',  # noqa: E501
 	}
 	lists: Dict[str, List[str]] = {}
+	descriptions: Dict[str, str] = {  # parallel map, no breaking change to templates/defaults
+		'bo0m_fuzz': 'General-purpose fuzzing wordlist (~4k entries).',
+		'combined_subdomains': 'Large combined subdomain brute list (SecLists).',
+		'directory_list_small': 'Small directory brute list (dirbuster 2.3 small).',
+		'burp-parameter-names': 'Common HTTP parameter names (SecLists).',
+	}
 
 
 class GoogleDriveAddon(StrictModel):
