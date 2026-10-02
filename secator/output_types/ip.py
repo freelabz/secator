@@ -33,6 +33,7 @@ class Ip(OutputType):
 
 	_table_fields = [IP, ALIVE]
 	_sort_by = (IP,)
+	TARGET_FIELDS = ['ip']  # fields to scope-check this type against (scope.finding_scope_target)
 
 	def __str__(self) -> str:
 		return self.ip

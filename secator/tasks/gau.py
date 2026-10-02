@@ -22,6 +22,7 @@ class gau(HttpCrawler):
 	input_types = [URL, HOST]
 	output_types = [Url, Subdomain]
 	tags = ['url', 'crawl', 'passive']
+	output_scope_filter = True
 	file_flag = OPT_PIPE_INPUT
 	json_flag = '--json'
 	opt_prefix = '--'
