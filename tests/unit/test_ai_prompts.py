@@ -275,8 +275,10 @@ class TestPrompts(unittest.TestCase):
 	def test_chat_mode_config_has_correct_allowed_actions(self):
 		chat_config = MODES["chat"]
 		actions = chat_config["allowed_actions"]
-		for a in ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "shell", "stop"]:
+		for a in ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "subagent", "stop"]:
 			self.assertIn(a, actions)
+		# Chat is read-only / non-escalating: no shell (attack surface), no task/workflow.
+		self.assertNotIn("shell", actions)
 		self.assertNotIn("task", actions)
 		self.assertNotIn("workflow", actions)
 
