@@ -246,23 +246,12 @@ class nmapData(dict):
 				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
 				service_confidence = extra_data.get('confidence', 'low')
-				# Port `confidence` = how much we trust this open port is real. It is
-				# computed PER PORT and never carried across the loop — the shared
-				# `global_confidence` that one confident port flipped to 'high' for every
-				# later port (clobbering low-confidence ports back to 'high') was the bug.
-				# `tcpwrapped` completes the TCP handshake then drops with no service data:
-				# a confirmed non-service and the signature of an IDS/firewall answering
-				# every probe. nmap still scores it conf=8, so force both confidences to
-				# 'low' and never let that score leak. On an IDS mass-scan host every port
-				# is noise ('low') UNLESS a service is genuinely fingerprinted
-				# (service_confidence 'high'); off an IDS host an open port is trusted.
-				if service_name == 'tcpwrapped':
-					service_confidence = 'low'
+				# On a masscan/IDS host, degrade a port to 'low' unless its service is genuinely
+				# fingerprinted (service_confidence 'high') and not tcpwrapped. Computed per port.
+				port_confidence = 'high'
+				if is_mass_scan and (service_confidence != 'high' or service_name == 'tcpwrapped'):
 					port_confidence = 'low'
-				elif is_mass_scan:
-					port_confidence = 'high' if service_confidence == 'high' else 'low'
-				else:
-					port_confidence = 'high'
+					service_confidence = 'low'
 
 				# Grab CPEs
 				cpes = extra_data.get('cpe', [])
