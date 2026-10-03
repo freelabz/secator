@@ -67,6 +67,36 @@ def apply_task_overrides(target, task_name=None):
 	return target
 
 
+def resolve_queue_prefix(opts=None):
+	"""Resolve the Celery queue-name prefix for a dispatch (first set wins).
+
+	Order: ``opts["queue_prefix"]`` (set by the ``--queue-prefix`` run flag) ->
+	``CONFIG.celery.queue_prefix`` -> ``None`` (no prefix).
+
+	Args:
+		opts (dict | None): Run options.
+
+	Returns:
+		str | None: The prefix, or None when unset.
+	"""
+	prefix = (opts or {}).get('queue_prefix') or CONFIG.celery.queue_prefix
+	return prefix or None
+
+
+def prefix_queue(queue, opts=None):
+	"""Prefix a resolved queue name when a queue prefix is configured, else return it unchanged.
+
+	Args:
+		queue (str): The resolved (classic) queue name, e.g. ``small``.
+		opts (dict | None): Run options (see ``resolve_queue_prefix``).
+
+	Returns:
+		str: ``<prefix>-<queue>`` when a prefix is set, else ``queue`` unchanged.
+	"""
+	prefix = resolve_queue_prefix(opts)
+	return f'{prefix}-{queue}' if prefix else queue
+
+
 def resolve_task_queue(task_cls, opts):
 	"""Resolve the Celery queue (== task profile) for a task at dispatch time.
 
@@ -85,9 +115,9 @@ def resolve_task_queue(task_cls, opts):
 		str: The queue name.
 	"""
 	if callable(task_cls.profile):
-		return task_cls.profile(opts)
+		return prefix_queue(task_cls.profile(opts), opts)
 	override = get_task_overrides(task_cls.__name__).get('profile')
-	return override if override else task_cls.profile
+	return prefix_queue(override if override else task_cls.profile, opts)
 
 
 def _format_nested(template, data):
