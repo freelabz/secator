@@ -19,7 +19,7 @@ from secator.config import CONFIG
 from secator.output_types import Error, Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.runners._helpers import resolve_task_queue, run_extractors
+from secator.runners._helpers import prefix_queue, resolve_task_queue, run_extractors
 from secator.utils import debug, should_update
 
 
@@ -96,12 +96,16 @@ app.conf.update(
 		'task_create_missing_queues': True,
 		'task_eager_propagates': False,
 		'task_reject_on_worker_lost': CONFIG.celery.task_reject_on_worker_lost,
+		# Deployment-level queue prefix (CONFIG.celery.queue_prefix, no per-run opts here):
+		# prefix the statically-routed queues and the default queue so a prefixed worker
+		# fleet is fully self-contained. prefix_queue() is a no-op when unset.
+		'task_default_queue': prefix_queue('celery'),
 		'task_routes': {
-			'secator.celery.run_workflow': {'queue': 'celery'},
-			'secator.celery.run_scan': {'queue': 'celery'},
-			'secator.celery.run_task': {'queue': 'celery'},
-			'secator.celery.join_results': {'queue': 'results'},
-			'secator.hooks.mongodb.*': {'queue': 'mongodb'},
+			'secator.celery.run_workflow': {'queue': prefix_queue('celery')},
+			'secator.celery.run_scan': {'queue': prefix_queue('celery')},
+			'secator.celery.run_task': {'queue': prefix_queue('celery')},
+			'secator.celery.join_results': {'queue': prefix_queue('results')},
+			'secator.hooks.mongodb.*': {'queue': prefix_queue('mongodb')},
 		},
 		'task_store_eager_result': True,
 		'task_send_sent_event': CONFIG.celery.task_send_sent_event,
@@ -658,7 +662,7 @@ def break_task(task, task_opts):
 	# Build Celery workflow
 	workflow = chord(
 		tuple(sigs),
-		mark_runner_completed.s(runner=task).set(queue='results'),
+		mark_runner_completed.s(runner=task).set(queue=prefix_queue('results', base_opts)),
 	)
 	if IN_WORKER:
 		console.print(Info(message=f'Task {task.unique_name} chord built with {len(sigs)} chunks, returning workflow'))
