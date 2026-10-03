@@ -468,7 +468,7 @@ class ai(PythonRunner):
 
 		Returns the ``(system_prompt, tool_schemas)`` pair for callers that want it."""
 		self.system_prompt = self._system_prompt_for(self.mode)
-		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True))  # noqa: E501
 		return self.system_prompt, self.tool_schemas
 
 	def _resolve_prompt(self):
@@ -973,6 +973,22 @@ class ai(PythonRunner):
 					stop_reason = dispatch_result.get("stop_reason")
 					follow_up_prompt_uuid = dispatch_result.get("follow_up_prompt_uuid")
 
+					# Model-driven mode change (change_mode tool): apply it now so the rest
+					# of the run uses the new mode's tool surface + persona. Stays `auto`
+					# (model-managed) — the F3 clamp in _detect_mode keeps it from being
+					# silently de-escalated on the next turn. The pinned-chat guard is in
+					# the handler + the tool schema (change_mode isn't built for pinned chat).
+					new_mode = dispatch_result.get("new_mode")
+					if new_mode and new_mode != self.mode:
+						self.mode = new_mode
+						# ctx persists across the loop; keep it in sync so a later
+						# run_subagent without an explicit mode inherits the new mode,
+						# not the stale pre-switch one.
+						ctx.mode = new_mode
+						self._rebuild_prompt_and_tools()
+						self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
+						yield Info(message=f"Switched to {new_mode} mode")
+
 					# Persist the encryptor's map (grown by this turn's tool/query
 					# results) so a later resumed worker can decrypt these tokens.
 					self._persist_pii_map()
@@ -1295,7 +1311,7 @@ class ai(PythonRunner):
 			self.max_iterations = max(self.max_iterations, mode_max, config_max)
 		self.system_prompt = self._system_prompt_for(self.mode)
 		if not hasattr(self, 'tool_schemas') or not old_mode or old_mode != self.mode:
-			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True))  # noqa: E501
 
 	# -------------------------------------------------------------------------
 	# Workspace helpers
@@ -1514,6 +1530,7 @@ class ai(PythonRunner):
 		stop_reason = None
 		follow_up_ai = None
 		follow_up_prompt_uuid = None
+		new_mode = None
 
 		# Progress signal for the same-answer loop-breaker (see _prompt_and_redetect):
 		# count substantive actions actually dispatched this turn (a follow_up/steer is
@@ -1563,7 +1580,12 @@ class ai(PythonRunner):
 				if result.ai_type == "stopped":
 					stop_reason = result.content
 					continue
-				if result.ai_type not in ("shell_output", "response"):
+				if result.ai_type == "mode_changed":
+					# The runner applies the switch after this batch (rebuilds tools +
+					# persona). Fall through so the change_mode call still produces a
+					# tool_result — the turn continues and the provider needs a response.
+					new_mode = result.content
+				elif result.ai_type not in ("shell_output", "response"):
 					continue
 			elif isinstance(result, OutputType):
 				self.add_result(result, print=not is_from_subagent)
@@ -1598,6 +1620,7 @@ class ai(PythonRunner):
 			"stop_reason": stop_reason,
 			"follow_up_ai": follow_up_ai,
 			"follow_up_prompt_uuid": follow_up_prompt_uuid,
+			"new_mode": new_mode,
 		}
 
 	# -------------------------------------------------------------------------

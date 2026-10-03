@@ -16,7 +16,7 @@ class TestToolSchemas(unittest.TestCase):
 		from secator.ai.tools import TOOL_SCHEMAS
 		expected = {"run_task", "run_workflow", "run_shell", "query_workspace", "follow_up",
 		            "run_subagent", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
-		            "mark_vuln_exploit_failed", "update_finding"}
+		            "mark_vuln_exploit_failed", "update_finding", "change_mode"}
 		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)
 
 	def test_tool_schemas_openai_format(self):
@@ -138,6 +138,20 @@ class TestBuildToolSchemas(unittest.TestCase):
 		self.assertIn("run_shell", names)
 		self.assertIn("add_finding", names)
 
+	def test_change_mode_gated_by_pin(self):
+		"""change_mode lets the model self-escalate in an AUTO session or from a pinned
+		action mode, but a user-PINNED read-only chat must stay read-only (tool withheld),
+		and a subagent never self-escalates."""
+		from secator.ai.tools import build_tool_schemas
+
+		def names(**kw):
+			return {s["function"]["name"] for s in build_tool_schemas(**kw)}
+		self.assertIn("change_mode", names(mode="chat", mode_is_auto=True))       # auto chat
+		self.assertNotIn("change_mode", names(mode="chat", mode_is_auto=False))   # pinned read-only chat
+		self.assertIn("change_mode", names(mode="attack", mode_is_auto=False))    # pinned attack
+		self.assertIn("change_mode", names(mode="exploit", mode_is_auto=False))   # pinned exploit
+		self.assertNotIn("change_mode", names(mode="attack", is_subagent=True))   # subagent
+
 	def test_unknown_mode_falls_back_to_chat(self):
 		from secator.ai.tools import build_tool_schemas
 		chat_schemas = build_tool_schemas("chat")
@@ -239,6 +253,11 @@ class TestToolCallToAction(unittest.TestCase):
 		self.assertIsNone(tool_call_to_action("run_task", {}))
 		self.assertIsNone(tool_call_to_action("query_workspace", None))
 
+	def test_change_mode_conversion(self):
+		from secator.ai.tools import tool_call_to_action
+		result = tool_call_to_action("change_mode", {"mode": "attack", "reason": "need to scan"})
+		self.assertEqual(result["action"], "change_mode")
+		self.assertEqual(result["mode"], "attack")
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestCoerceStringifiedArgs(unittest.TestCase):
