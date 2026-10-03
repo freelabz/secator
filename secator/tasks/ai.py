@@ -1445,6 +1445,12 @@ class ai(PythonRunner):
 			# decrypt/convert, so handlers get the declared type not a JSON string.
 			args = coerce_stringified_args(name, args)
 
+			# A bare stop() can arrive with no/None args; tool_call_to_action accepts
+			# that for stop, but the rest of this loop (incl. args.get below) needs a
+			# dict. Normalize so a no-arg stop ends the turn cleanly instead of raising
+			# AttributeError (which would defeat the stop).
+			args = args or {}
+
 			# Decrypt args
 			if self.encryptor:
 				args = _decrypt_dict(args, self.encryptor)
