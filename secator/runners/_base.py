@@ -14,7 +14,7 @@ from rich.errors import MarkupError as RichMarkupError
 import humanize
 
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
-from secator.celery_utils import CeleryData
+from secator.pollers import CeleryPoller
 from secator.config import CONFIG
 from secator.output_types import (
 	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
@@ -1047,7 +1047,7 @@ class Runner:
 		"""
 		# If existing celery result, yield from it
 		if self.celery_result:
-			yield from CeleryData.iter_results(
+			yield from CeleryPoller.iter_results(
 				self.celery_result,
 				ids_map=self.celery_ids_map,
 				description=True,
@@ -1084,10 +1084,8 @@ class Runner:
 				self.context['celery_ids'] = list(self.celery_ids_map.keys())
 			yield Info(message=f'Celery task created: {self.celery_result.id}', task_id=self.celery_result.id)
 			if self.no_poll:
-				self.enable_reports = False
-				self.no_process = True
 				return
-			results = CeleryData.iter_results(
+			results = CeleryPoller.iter_results(
 				self.celery_result,
 				ids_map=self.celery_ids_map,
 				description=True,
