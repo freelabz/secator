@@ -17,6 +17,7 @@ TOOL_ACTION_MAP = {
 	"mark_vuln_false_positive": "mark_vuln_false_positive",
 	"mark_vuln_exploit_failed": "mark_vuln_exploit_failed",
 	"update_finding": "update_finding",
+	"change_mode": "change_mode",
 	"stop": "stop",
 }
 
@@ -386,6 +387,35 @@ TOOL_SCHEMAS = {
 			}
 		}
 	},
+	"change_mode": {
+		"type": "function",
+		"function": {
+			"name": "change_mode",
+			"description": (  # noqa: E501
+				"Switch your OWN operating mode when the task needs capabilities your current mode lacks. "
+				"If you are in read-only chat and the user asks you to scan, do recon, attack, or exploit, "
+				"call change_mode(mode='attack') and then carry out the request — do NOT ask the user to "
+				"switch modes, change it yourself. 'attack' unlocks tasks/workflows/shell + finding writes; "
+				"'exploit' is for focused exploitation of a known vulnerability. "
+				"Example (good): change_mode(mode='attack', reason='user asked to run reconnaissance')."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"mode": {
+						"type": "string",
+						"enum": ["attack", "exploit"],
+						"description": "The mode to switch to: 'attack' (recon/scanning/active testing) or 'exploit'."
+					},
+					"reason": {
+						"type": "string",
+						"description": "Short reason for the switch (optional)."
+					}
+				},
+				"required": ["mode"]
+			}
+		}
+	},
 }
 
 
@@ -409,13 +439,18 @@ STOP_TOOL_SCHEMA = {
 }
 
 
-def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> list:
+def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_is_auto: bool = True) -> list:
 	"""Return list of tool schemas filtered by mode's allowed_actions.
 
 	Args:
 		mode: The AI mode (attack, chat, exploit). Unknown modes fall back to chat.
 		is_subagent: If True, exclude follow_up tool (legacy compat).
 		backend: Optional interactivity backend for exclusion/extra tools.
+		mode_is_auto: Whether the session is in auto mode (vs a user-pinned mode).
+			Gates `change_mode`: the model may self-escalate in an auto session or from
+			a pinned ACTION mode, but a user-PINNED read-only `chat` must stay read-only,
+			so `change_mode` is withheld there (the model can only suggest the user
+			switches). An auto session that happens to resolve to chat KEEPS change_mode.
 
 	Returns:
 		List of OpenAI-format tool schema dicts.
@@ -424,7 +459,11 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> li
 	allowed_actions = config["allowed_actions"]
 	excluded = set()
 	if is_subagent:
-		excluded.add("follow_up")
+		# A subagent runs at its assigned mode; it does not self-escalate.
+		excluded.update({"follow_up", "change_mode"})
+	# A user-pinned read-only chat cannot self-escape to an action mode.
+	if not mode_is_auto and mode == "chat":
+		excluded.add("change_mode")
 	if backend is not None:
 		excluded.update(backend.get_excluded_tools())
 	schemas = [
@@ -497,6 +536,8 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 		arguments.get("description")
 		or safe_arguments.get("name", "")
 		or safe_arguments.get("query")
-		or safe_arguments.get("command", "unknown")
+		or safe_arguments.get("command")
+		or safe_arguments.get("mode")
+		or "unknown"
 	)
 	return {"action": action_type, "description": descr, **safe_arguments}

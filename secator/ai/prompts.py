@@ -59,7 +59,7 @@ SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 MODES = {
 	"attack": {
 		"system_prompt": SYSTEM_ATTACK,
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
@@ -69,7 +69,7 @@ MODES = {
 		# and `stop`. NO `shell` (attack surface), NO `task`/`workflow` (escalation), and
 		# NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
 		# changing findings is an active action that belongs in attack/exploit.
-		"allowed_actions": ["query", "follow_up", "subagent", "stop"],
+		"allowed_actions": ["query", "follow_up", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
@@ -79,7 +79,7 @@ MODES = {
 		# to exploit — without it query_workspace isn't even built for this mode.
 		# "follow_up" lets exploit mode STOP-and-ask (e.g. confirm before a state-changing
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 }

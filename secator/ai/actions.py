@@ -365,6 +365,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"mark_vuln_false_positive": _handle_mark_vuln_false_positive,
 		"mark_vuln_exploit_failed": _handle_mark_vuln_exploit_failed,
 		"update_finding": _handle_update_finding,
+		"change_mode": _handle_change_mode,
 		"stop": _handle_stop,
 	}
 
@@ -1210,6 +1211,35 @@ def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
 	yield Ai(content=reason, ai_type="stopped", _context=context)
+
+
+def _handle_change_mode(action: Dict, ctx: ActionContext) -> Generator:
+	"""Handle a model-driven mode change.
+
+	Signals the requested mode back to the loop via ``Ai(ai_type="mode_changed")``;
+	the runner applies it (rebuilds the tool surface + persona and continues the turn).
+	The loop treats this as a normal tool result (the call still gets a response, since
+	the turn continues).
+
+	Gating: a user-PINNED read-only ``chat`` session can never self-escape — the tool
+	is not even built for it (see ``build_tool_schemas``); this rejects it as defense in
+	depth. Self-de-escalation is not allowed (no capability benefit), so the only valid
+	targets are ``attack``/``exploit``.
+	"""
+	context = _get_result_context(action, ctx)
+	requested = (action.get("mode") or "").strip().lower()
+	if (not getattr(ctx, "mode_is_auto", True)) and ctx.mode == "chat":
+		yield Error(
+			message="Cannot change mode: this session is pinned to read-only chat. "
+			"Ask the user to switch the mode to 'auto' or an action mode.",
+			_context=context)
+		return
+	if requested not in ("attack", "exploit"):
+		yield Error(
+			message=f"Invalid change_mode target '{requested}'. Choose 'attack' or 'exploit'.",
+			_context=context)
+		return
+	yield Ai(content=requested, ai_type="mode_changed", _context=context)
 
 
 def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:

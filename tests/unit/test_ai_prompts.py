@@ -276,8 +276,11 @@ class TestPrompts(unittest.TestCase):
 		chat_config = MODES["chat"]
 		actions = chat_config["allowed_actions"]
 		# Chat is strictly read-only: read (query), ask/suggest (follow_up), delegate a
-		# same-mode helper (subagent), stop. Nothing that acts on the world or the data.
-		self.assertEqual(set(actions), {"query", "follow_up", "subagent", "stop"})
+		# same-mode helper (subagent), stop. `change_mode` lets an AUTO-resolved chat turn
+		# self-escalate — it is withheld from a user-PINNED chat in build_tool_schemas (see
+		# test_ai_tools.test_change_mode_gated_by_pin), so read-only stays read-only. Nothing
+		# else here acts on the world or the data.
+		self.assertEqual(set(actions), {"query", "follow_up", "subagent", "change_mode", "stop"})
 		for a in ["shell", "task", "workflow", "add_finding", "update_finding",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:
 			self.assertNotIn(a, actions)
