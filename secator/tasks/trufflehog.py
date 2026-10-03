@@ -83,7 +83,7 @@ class trufflehog(Command):
     }
     output_types = [Tag, Info]
     ignore_return_code = True
-    install_version = 'v3.91.0'
+    install_version = 'v3.97.9'
     # Clone the pinned release TAG (shallow), not the default branch. Without --branch the clone
     # checks out upstream HEAD while the dir is named after install_version, so `go build` compiles
     # whatever is on main that day — which breaks the source install whenever upstream HEAD doesn't
