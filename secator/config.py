@@ -96,6 +96,11 @@ class Celery(StrictModel):
 	# connection, instead of letting them run detached as zombies. Part of the OOM/eviction
 	# robustness layer; enable in deployment alongside task_acks_late + task_reject_on_worker_lost.
 	worker_cancel_long_running_tasks_on_connection_loss: bool = False
+	# Optional prefix prepended (with a `-`) to every Celery queue name, both at
+	# dispatch (task routing) and worker subscription — e.g. `fleet1` routes the
+	# `small` queue to `fleet1-small`. Lets a worker fleet listen on a dedicated set
+	# of queues and a run target it. Empty = no prefix (identical routing to today).
+	queue_prefix: str = ''
 
 
 class Cli(StrictModel):
