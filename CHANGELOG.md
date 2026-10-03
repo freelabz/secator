@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.49.0](https://github.com/freelabz/secator/compare/v0.48.0...v0.49.0) (2026-10-03)
+
+
+### Features
+
+* **ai:** model-driven change_mode (auto self-escalation) ([#1475](https://github.com/freelabz/secator/issues/1475)) ([76ce865](https://github.com/freelabz/secator/commit/76ce865172cecdf03c65cb1168dd8fec80820e57))
+
+
+### Bug Fixes
+
+* **ai:** bare stop() ends the turn; don't re-query after a run ([#1473](https://github.com/freelabz/secator/issues/1473)) ([19546f9](https://github.com/freelabz/secator/commit/19546f962803ecbafa6d210c8626467bce069d10))
+* **ai:** normalize no-arg tool calls so a bare stop() can't raise ([#1478](https://github.com/freelabz/secator/issues/1478)) ([53a8e7b](https://github.com/freelabz/secator/commit/53a8e7bd6ff24a6ffd6000257cf1f37e819ddefe))
+
 ## [0.48.0](https://github.com/freelabz/secator/compare/v0.47.0...v0.48.0) (2026-10-02)
 
 
