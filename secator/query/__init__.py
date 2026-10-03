@@ -11,6 +11,11 @@ from secator.query.sqlite import SqliteBackend
 
 __all__ = ['QueryEngine', 'QueryBackend', 'ApiBackend', 'MongoDBBackend', 'JsonBackend', 'SqliteBackend']
 
+# Store backends that are network-shared between worker and client, so the client can
+# live-poll them directly. Filesystem backends (local/sqlite) are per-machine — a
+# dispatched run on those polls the Celery result backend instead (see _base._poll_results).
+SHARED_POLL_BACKENDS = frozenset({'mongodb', 'api'})
+
 
 class QueryEngine:
     """Query engine with pluggable backends."""
@@ -64,6 +69,15 @@ class QueryEngine:
             return JsonBackend(workspace_name, context=self.context)
         return self.BACKENDS[backend_name](self.workspace_id, context=self.context)
 
+    def pollable_shared_store(self) -> bool:
+        """True if the resolved store backend is a network store shared with the worker AND
+        reachable right now. Filesystem stores (local/sqlite) are per-machine, so a dispatched
+        run on those cannot see a remote worker's writes and polls the Celery result backend
+        instead. Used once, at poll start, to pick StorePoller vs the Celery poll."""
+        if self.backend.name not in SHARED_POLL_BACKENDS:
+            return False
+        return self.backend.is_reachable()
+
     def search(self, query: dict, limit: int = 0, dedupe: bool = False,
                exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
         """Search for findings matching query."""
@@ -95,13 +109,22 @@ class QueryEngine:
         return self.backend.get_workspace(workspace_id)
 
     def list_runners(
-        self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None
+        self, workspace_id: str = None, runner_type: str = None, has_parent: Optional[bool] = None,
+        report_dir: str = None
     ) -> List[Dict[str, Any]]:
         """List runners (tasks/workflows/scans) via the active backend.
 
         has_parent: filter on the runner's parent relationship. None lists all runners,
         False lists only outermost (root) runners, True lists only nested children.
+        report_dir: local (json) hint to read one run's own report tree (report.json + per-child
+        report_<fqn>.json shards); ignored by DB backends. Used by the store-driven live poll.
         """
+        # Only the json backend uses report_dir; keep the DB backends' signature stable.
+        if report_dir is not None and self.backend.name == 'json':
+            return self.backend.list_runners(
+                workspace_id=workspace_id, runner_type=runner_type, has_parent=has_parent,
+                report_dir=report_dir,
+            )
         return self.backend.list_runners(
             workspace_id=workspace_id, runner_type=runner_type, has_parent=has_parent
         )

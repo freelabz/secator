@@ -1,4 +1,3 @@
-from secator.celery_utils import CeleryData
 from secator.runners import Runner
 
 
@@ -8,11 +7,8 @@ class Celery(Runner):
 			result = self.build_celery_workflow()
 		if self.sync:
 			yield from result.apply().get()
-		yield from CeleryData.iter_results(
-			self.celery_result,
-			ids_map=self.celery_ids_map,
-			print_remote_info=False
-		)
+		# Live-poll the store (StorePoller) instead of the Celery result backend.
+		yield from self._poll_results()
 
 	def error_handler(self, e):
 		self.stop_celery_tasks()
