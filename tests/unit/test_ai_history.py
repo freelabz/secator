@@ -1,7 +1,5 @@
 # tests/unit/test_ai_history.py
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from secator.definitions import ADDONS_ENABLED
@@ -586,24 +584,28 @@ class TestChatHistory(unittest.TestCase):
         self.assertLess(len(result), len(content))
 
     @patch('litellm.token_counter')
-    def test_truncate_to_tokens_with_fallback_path(self, mock_token_counter):
-        """truncate_to_tokens includes existing file path in hint."""
+    def test_truncate_to_tokens_appends_hint(self, mock_token_counter):
+        """truncate_to_tokens appends the caller-supplied hint right after [TRUNCATED]."""
         from secator.ai.history import truncate_to_tokens
 
         mock_token_counter.return_value = 1000
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            f.write('{"test": true}')
-            fallback_path = Path(f.name)
+        hint = '\nRead them with query_workspace(query={"_context.task_chunk_id": "abc123"}).'
+        result = truncate_to_tokens("x" * 4000, 100, "gpt-4", hint=hint)
 
-        try:
-            result = truncate_to_tokens("x" * 4000, 100, "gpt-4", fallback_path=fallback_path)
+        self.assertIn("[TRUNCATED]", result)
+        self.assertIn("_context.task_chunk_id", result)
+        self.assertTrue(result.endswith(hint))
 
-            self.assertIn("[TRUNCATED]", result)
-            self.assertIn(str(fallback_path), result)
-            self.assertIn("grep", result)  # Shell command hint
-        finally:
-            fallback_path.unlink()
+    @patch('litellm.token_counter')
+    def test_truncate_to_tokens_no_hint_is_bare_marker(self, mock_token_counter):
+        """With no hint, the marker is bare (other output types just re-run shorter)."""
+        from secator.ai.history import truncate_to_tokens
+
+        mock_token_counter.return_value = 1000
+        result = truncate_to_tokens("x" * 4000, 100, "gpt-4")
+
+        self.assertTrue(result.endswith("[TRUNCATED]"))
 
     @patch('secator.ai.history.get_context_window')
     @patch('secator.ai.utils.call_llm')

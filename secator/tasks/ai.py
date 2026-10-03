@@ -138,7 +138,6 @@ def _yield_tool_results(runner, collected):
 	(rejected by providers).
 	"""
 	budget = runner.history.get_action_budget(runner.model)
-	fallback_path = Path(runner.reports_folder) / "report.json" if runner.reports_folder else None
 	grouped = {}
 	for r in collected:
 		grouped.setdefault(r["_context"]['tool_call_id'], []).append(r)
@@ -158,8 +157,27 @@ def _yield_tool_results(runner, collected):
 		tool_result_str = format_tool_result(
 			tc_name, "error" if has_errors else "success",
 			len(serialized), serialized)
+		# On truncation, tell the model how to get the rest. A task/workflow's results
+		# are persisted as workspace findings keyed by `_context.task_chunk_id` (the
+		# runner's own chunk id), so point it at a TARGETED query_workspace on that id
+		# — works in every mode incl. read-only chat (no shell needed). For any other
+		# tool (shell, query, ...) leave a bare [TRUNCATED]: the model re-runs with a
+		# narrower command/query on its own.
+		trunc_hint = ""
+		if tc_name in ("run_task", "run_workflow"):
+			chunk_id = next(
+				(r.get("_context", {}).get("task_chunk_id")
+				 for r in group_results
+				 if isinstance(r, dict) and r.get("_context", {}).get("task_chunk_id")),
+				None)
+			if chunk_id:
+				trunc_hint = (
+					f'\nThe full results are stored as workspace findings. Read them with a '
+					f'TARGETED query scoped to this run — query_workspace(query={{"_context.task_chunk_id": '
+					f'"{chunk_id}", "_type": "<type>"}}) — and narrow further (severity/name/...). '
+					f'Do NOT re-run the task.')
 		tool_result_str = truncate_to_tokens(
-			tool_result_str, budget, runner.model, fallback_path=fallback_path)
+			tool_result_str, budget, runner.model, hint=trunc_hint)
 		tool_result_str = maybe_encrypt(tool_result_str, runner.encryptor)
 		runner.history.add_tool_result(tc_name, tc_id, tool_result_str)
 		_tool_msg = {"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": tool_result_str}
