@@ -226,6 +226,19 @@ class TestToolCallToAction(unittest.TestCase):
 		for bad in (12345, ["nmap", "10.0.0.1"], "just a string"):
 			self.assertIsNone(tool_call_to_action("run_task", bad))
 
+	def test_stop_with_empty_args_is_valid(self):
+		"""`stop` ends a turn and its `reason` is optional, so a bare stop() with empty
+		or no args must produce a valid action — not get bounced as 'empty arguments'
+		(which left the model nagging via follow_up instead of stopping)."""
+		from secator.ai.tools import tool_call_to_action
+		for empty in ({}, None):
+			action = tool_call_to_action("stop", empty)
+			self.assertIsNotNone(action, empty)
+			self.assertEqual(action["action"], "stop")
+		# the exemption is stop-only: other tools with empty args still reject
+		self.assertIsNone(tool_call_to_action("run_task", {}))
+		self.assertIsNone(tool_call_to_action("query_workspace", None))
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestCoerceStringifiedArgs(unittest.TestCase):
