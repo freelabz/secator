@@ -393,17 +393,29 @@ def extract_command_targets(command: str) -> List[str]:
 			for arg in args[1:]:
 				_check_arg(arg)
 	except Exception:
-		# Fallback: scan raw command with regex
-		for match in URL_PATTERN.finditer(command):
-			_add_target(match.group())
-		for match in PII_PATTERNS["ipv4"].finditer(command):
-			ip = match.group()
-			if not any(ip in t for t in targets) and not any(ip in p for p in paths):
-				_add_target(ip)
+		# Parse failed: the per-arg walk ran nothing, so fall back to the raw-string
+		# host sweep too (the IP/URL sweep below runs unconditionally).
 		for match in PII_PATTERNS["host"].finditer(command):
 			host = match.group()
 			if host not in cmd_names and host not in seen and _resolves(host):
 				_add_target(host)
+
+	# Fail-closed raw-command sweep for IPs and URLs — ALWAYS, not only on parse
+	# failure. The per-argument walk above cannot see a target hidden inside a single
+	# multi-token argument: an IP in a `python3 -c "...s.connect(('10.0.0.9',21))..."`
+	# code string, or a non-http scheme the arg checker's URL regex ignores
+	# (`curl ftp://10.0.0.9/`). A bare IPv4 or an http(s) URL is an UNAMBIGUOUS network
+	# target, so sweeping the whole string for them is false-positive-safe and stops
+	# scope enforcement from being bypassed by where the target sits in the command —
+	# the pre-#949 behaviour this restores. (A bare HOSTNAME buried in a code string
+	# stays a documented residual: resolving it here is DNS-rebinding- and FP-prone.)
+	# ponytail: IP+URL only; hostname-in-code residual, add a quoted-region host sweep if it bites.
+	for match in URL_PATTERN.finditer(command):
+		_add_target(match.group())
+	for match in PII_PATTERNS["ipv4"].finditer(command):
+		ip = match.group()
+		if not any(ip in t for t in targets) and not any(ip in p for p in paths):
+			_add_target(ip)
 
 	# Target-list files (nmap/masscan `-iL`, `--target-file`) hide the real targets in
 	# a file we can't read here, so their scope can't be confirmed. Surface a sentinel
