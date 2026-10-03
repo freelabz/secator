@@ -11,12 +11,13 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   THREADS, TIMEOUT, USER_AGENT, URL, HOST)
 from secator.output_types import Subdomain, Url, Warning
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpCrawler
+from secator.tasks._categories import HttpCrawlerMixin
+from secator.runners import Command
 from secator.utils import extract_domain_info
 
 
 @task()
-class gau(HttpCrawler):
+class gau(Command, HttpCrawlerMixin):
 	"""Fetch known URLs from AlienVault's Open Threat Exchange, the Wayback Machine, Common Crawl, and URLScan."""
 	cmd = 'gau --verbose'
 	input_types = [URL, HOST]
