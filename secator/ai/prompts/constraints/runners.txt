@@ -34,5 +34,5 @@ run_shell(command="jq '.results.vulnerability[0]' <OUTPUT_JSON_PATH>")
 
 <file_io>
 Write any files you generate (e.g. a markdown report) to the runner folder's outputs directory: $workspace_path/.outputs/. Prefer this location; reading or writing files elsewhere requires user approval.
-To find existing findings/results, ALWAYS use the query_workspace tool — it is the single source of truth for the workspace and already covers this run's live findings. Do NOT read local report files (e.g. via cat/jq) to look up findings.
+The results of a task/workflow you just ran are returned to you directly in its tool result — read them THERE. Do NOT re-run query_workspace just to see what a run you launched produced (it is already in the tool result). Use query_workspace only to read findings that are NOT in your current tool results — e.g. findings from earlier/other runs — or to obtain a finding's stable `_uuid` (required by mark_vuln_*/update_finding), since the run tool result omits it. It is the single source of truth and the only supported way to read the workspace. Do NOT read local report files (e.g. via cat/jq) to look up findings.
 </file_io>
