@@ -225,6 +225,16 @@ class TestChangeModeHandler(unittest.TestCase):
             out = self._run({'action': 'change_mode', 'mode': bad}, self._ctx('chat', True))
             self.assertTrue(out and isinstance(out[0], Error), bad)
 
+    def test_cannot_de_escalate(self):
+        # change_mode only escalates: exploit -> attack (downgrade) and a no-op
+        # same-mode switch are both rejected; escalation still works.
+        from secator.output_types import Ai, Error
+        out = self._run({'action': 'change_mode', 'mode': 'attack'}, self._ctx('exploit', True))
+        self.assertTrue(out and isinstance(out[0], Error))
+        self.assertFalse(any(isinstance(o, Ai) and o.ai_type == 'mode_changed' for o in out))
+        same = self._run({'action': 'change_mode', 'mode': 'attack'}, self._ctx('attack', True))
+        self.assertTrue(same and isinstance(same[0], Error))
+
 
 if __name__ == '__main__':
     unittest.main()

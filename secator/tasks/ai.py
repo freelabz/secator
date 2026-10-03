@@ -981,6 +981,10 @@ class ai(PythonRunner):
 					new_mode = dispatch_result.get("new_mode")
 					if new_mode and new_mode != self.mode:
 						self.mode = new_mode
+						# ctx persists across the loop; keep it in sync so a later
+						# run_subagent without an explicit mode inherits the new mode,
+						# not the stale pre-switch one.
+						ctx.mode = new_mode
 						self._rebuild_prompt_and_tools()
 						self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 						yield Info(message=f"Switched to {new_mode} mode")

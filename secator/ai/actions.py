@@ -1239,6 +1239,18 @@ def _handle_change_mode(action: Dict, ctx: ActionContext) -> Generator:
 			message=f"Invalid change_mode target '{requested}'. Choose 'attack' or 'exploit'.",
 			_context=context)
 		return
+	# change_mode only escalates — it can't de-escalate (e.g. exploit -> attack), which
+	# would silently drop capability. Rank chat < attack < exploit; reject anything that
+	# isn't a strict escalation from the current mode. (`auto` ranks below all, so an auto
+	# session can still escalate to either.)
+	_rank = {"chat": 0, "attack": 1, "exploit": 2}
+	current = (getattr(ctx, "mode", "") or "").strip().lower()
+	if _rank[requested] <= _rank.get(current, -1):
+		yield Error(
+			message=f"Cannot change mode from '{current}' to '{requested}': change_mode "
+			"only escalates (e.g. attack -> exploit), it cannot de-escalate.",
+			_context=context)
+		return
 	yield Ai(content=requested, ai_type="mode_changed", _context=context)
 
 
