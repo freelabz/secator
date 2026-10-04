@@ -1102,6 +1102,14 @@ class PermissionEngine:
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
+		elif action_type in ("subagent", "stop", "change_mode"):
+			# Control / meta actions with no network egress or exec of their OWN: `stop`
+			# and `change_mode` only steer the loop, and a `subagent`'s own actions are
+			# guardrail-checked inside its run (its targets are also scope-checked here via
+			# the target layer below). Auto-allow the action itself — without this they fall
+			# through to the "Unknown action type" deny and silently break run_subagent /
+			# the bare stop() / change_mode.
+			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
 		elif action_type in ("query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
 			# mark_vuln_exploited / mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
 			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
@@ -1245,8 +1253,10 @@ class PermissionEngine:
 		action_type = action.get("action", "")
 		if action_type == "shell":
 			return extract_command_targets(action.get("command", ""))
-		elif action_type in ("task", "workflow"):
-			# Filter out file paths and non-network strings from task/workflow targets
+		elif action_type in ("task", "workflow", "subagent"):
+			# task/workflow/subagent all carry a `targets` list — scope-check them (a
+			# subagent's targets are enforced at spawn, in addition to its child actions
+			# being guardrail-checked inside its own run). Filter out file paths / non-network.
 			return [t for t in action.get("targets", []) if _is_network_target(t) and not _is_file_path(t)]
 		return []
 

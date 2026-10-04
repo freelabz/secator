@@ -1702,5 +1702,35 @@ class TestScopeHardDeny(unittest.TestCase):
 
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestControlActionsAllowed(unittest.TestCase):
+	"""Control / meta actions (subagent, stop, change_mode) must NOT be denied as
+	'Unknown action type' — that silently broke run_subagent, bare stop(), and
+	change_mode. They have no egress of their own; a subagent's targets are still
+	scope-checked."""
+
+	def _engine(self, in_scope=None):
+		return PermissionEngine(
+			config={"allow": [], "deny": [], "ask": []}, in_scope=in_scope or ["scanme.nmap.org"])
+
+	def test_control_actions_allowed(self):
+		eng = self._engine()
+		for action in ({"action": "subagent"}, {"action": "stop"},
+		               {"action": "change_mode", "mode": "attack"}):
+			self.assertEqual(eng.check_action(action).decision, "allow", action["action"])
+
+	def test_subagent_in_scope_target_allowed(self):
+		eng = self._engine()
+		r = eng.check_action({"action": "subagent", "targets": ["scanme.nmap.org"]})
+		self.assertEqual(r.decision, "allow")
+
+	def test_subagent_out_of_scope_target_not_allowed(self):
+		"""A subagent spawned at an out-of-scope target is still gated by the target
+		layer (ask/deny) — auto-allowing the action type doesn't skip target scope."""
+		eng = self._engine()
+		r = eng.check_action({"action": "subagent", "targets": ["evil.example.com"]})
+		self.assertNotEqual(r.decision, "allow")
+
+
 if __name__ == '__main__':
 	unittest.main()
