@@ -51,7 +51,6 @@ dependencies = [
   'jinja2 < 4',
   'orjson < 4',
   'packaging < 25',
-  'prompt_toolkit < 4',  # always-on AI input box (CLI)
   'python-dotenv < 2',
   'pyyaml < 7',
   'pydantic < 3',

@@ -57,134 +57,82 @@ class InteractivityBackend:
 
 
 class CLIBackend(InteractivityBackend):
-	"""Local terminal interactive backend with an always-on input box.
+	"""Local terminal interactive backend with a rich-native always-on input.
 
-	A background thread runs a prompt_toolkit ``PromptSession`` that stays pinned at
-	the bottom of the terminal while the agent works; the AI loop wraps itself in
-	``patch_stdout()`` so all rich output scrolls ABOVE the box. Every submitted line
-	lands in one queue, which serves both input paths transparently:
-
-	- mid-flight: ``poll_steers`` drains the queue each iteration and the lines are
-	  injected as ``[User interjected]`` messages (same path a remote steer uses);
-	- end-of-turn: ``ask_user`` blocks on the queue for the next line — so the "What's
-	  next?" prompt IS the same always-on box. Slash-commands (``/exit`` ``/continue``
-	  ``/summarize``) stand in for the old menu actions.
-
-	A raw-mode menu (permission prompt, or the legacy menu on a non-TTY fallback) can't
-	share the terminal with the box, so ``pause()``/``resume()`` suspend it around those.
-	Only runs on a real interactive TTY; otherwise it degrades to the legacy menu.
+	Owns a :class:`secator.ai.chat_console.ChatConsole` — one rich ``Live`` pinned at
+	the bottom (status line + input box, framed by rules with the session name) while
+	findings stream above it. Submitted lines feed one queue: mid-flight ``poll_steers``
+	drains it (injected as ``[User interjected]``); at end of turn ``ask_user`` waits on
+	it (the box IS the "What's next?" prompt, with ``/continue`` ``/summarize`` ``/exit``).
+	Multi-choice follow-ups and permission prompts pause the box and use the rich menu.
+	Non-TTY runs degrade to the legacy menu.
 	"""
 
 	def __init__(self):
-		import queue
-		self._q = queue.Queue()
-		self._session = None
-		self._thread = None
-		self._stop = None      # tear everything down
-		self._paused = None    # suspend the box so a raw-mode menu owns the terminal
-		self._active = False
-
-	# -- lifecycle (start_input/stop_input are driven by the AI loop, inside patch_stdout) --
-	def start_input(self):
-		"""Start the always-on input box (interactive TTY only; else a no-op)."""
-		import sys
-		from secator.definitions import IN_WORKER
-		if self._active or IN_WORKER:
-			return
-		if not getattr(sys, 'stdin', None) or not sys.stdin.isatty():
-			return
-		import threading
-		from prompt_toolkit import PromptSession
-		self._session = PromptSession()
-		self._stop = threading.Event()
-		self._paused = threading.Event()
-		self._active = True
-		self._set_spinner_suppressed(True)
-		self._thread = threading.Thread(target=self._input_loop, daemon=True)
-		self._thread.start()
-
-	def stop_input(self):
-		if not self._active:
-			return
-		self._active = False
-		self._stop.set()
-		self._exit_prompt()
-		self._set_spinner_suppressed(False)
+		self._chat = None
 
 	@property
 	def active(self):
-		return self._active
+		return self._chat is not None and self._chat.active
 
-	def _set_spinner_suppressed(self, on):
-		try:
-			from secator.rich import console
-			console._ai_input_active = on
-		except Exception:
-			pass
+	# -- lifecycle (driven by the AI loop) --
+	def start_input(self, session_name=''):
+		from secator.ai.chat_console import ChatConsole, set_active
+		self._chat = ChatConsole(session_name=session_name)
+		self._chat.start()
+		if self._chat.active:
+			set_active(self._chat)  # so maybe_status surfaces its message in the status line
 
-	def _input_loop(self):
-		from prompt_toolkit.formatted_text import HTML
-		while not self._stop.is_set():
-			if self._paused.is_set():
-				time.sleep(0.05)
-				continue
-			try:
-				line = self._session.prompt(HTML('<ansicyan><b>› </b></ansicyan>'))
-			except (EOFError, KeyboardInterrupt):
-				self._q.put('/exit')  # Ctrl-D / Ctrl-C in the box ends the run
-				return
-			except Exception:
-				time.sleep(0.1)
-				continue
-			if self._stop.is_set() or self._paused.is_set() or line is None:
-				continue
-			text = line.strip()
-			if text:
-				self._q.put(text)
+	def stop_input(self):
+		from secator.ai.chat_console import set_active
+		if self._chat is not None:
+			self._chat.stop()
+			set_active(None)
+			self._chat = None
 
-	def _exit_prompt(self):
-		"""Interrupt a blocked prompt() from another thread (best-effort)."""
-		session = self._session
-		app = getattr(session, 'app', None) if session is not None else None
-		try:
-			if app is not None and app.is_running and app.loop is not None:
-				app.loop.call_soon_threadsafe(lambda: app.exit(result=None))
-		except Exception:
-			pass
+	def _pause(self):
+		if self._chat is not None:
+			self._chat.pause()
 
-	def pause(self):
-		"""Suspend the box so a raw-mode menu can own the terminal."""
-		if not self._active:
-			return
-		self._paused.set()
-		self._exit_prompt()
-		time.sleep(0.2)  # let prompt() unwind and restore the terminal
-
-	def resume(self):
-		if self._active and self._paused is not None:
-			self._paused.clear()
+	def _resume(self):
+		if self._chat is not None:
+			self._chat.resume()
 
 	# -- mid-flight steers --
 	def poll_steers(self, session_id=None):
-		"""Drain lines typed since the last poll (mid-flight steers)."""
-		import queue as _queue
-		out = []
-		while True:
-			try:
-				out.append(self._q.get_nowait())
-			except _queue.Empty:
-				break
-		return out
+		if self._chat is None:
+			return []
+		from secator.ai.chat_console import EXIT
+		return ['/exit' if s == EXIT else s for s in self._chat.poll_steers()]
 
 	# -- prompts --
 	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
 		if prompt_type == "permission":
-			self.pause()  # the permission menu is raw-mode; the box must let go
+			self._pause()  # permission menu is raw-mode; the box lets go
 			try:
 				return self._handle_permission(**context)
 			finally:
-				self.resume()
-		return self._handle_follow_up(choices, **context)
+				self._resume()
+		# Multi-choice follow-up -> the rich menu (box hidden until answered).
+		if choices or not self.active:
+			self._pause()
+			try:
+				return self._handle_menu(choices, **context)
+			finally:
+				self._resume()
+		# Plain end-of-turn: the box IS the prompt — wait for the next submitted line.
+		from secator.ai.chat_console import EXIT
+		line = self._chat.wait_line()
+		if line is None or line == EXIT:
+			return None
+		cmd = line.strip().lower()
+		if cmd in ('/exit', '/quit', 'exit', 'quit'):
+			return None
+		if cmd in ('/continue', '/c', 'continue'):
+			return {"answer": "Continue.", "extra_iters": 1}
+		if cmd == '/summarize':
+			return {"answer": "Summarize all findings so far.", "extra_iters": 1}
+		return {"answer": line, "extra_iters": 1}
 
 	def _handle_permission(self, **context):
 		"""Delegate permission prompts to the PermissionEngine's rich menus."""
@@ -205,42 +153,19 @@ class CLIBackend(InteractivityBackend):
 			return {"answer": decision}
 		return None
 
-	def _handle_follow_up(self, choices, **context):
-		"""End-of-turn prompt.
-
-		With the always-on box active, the box IS the prompt: show the model's
-		suggestions as hints and block for the next line. Slash-commands cover the old
-		menu actions. Without a box (non-TTY / piped), fall back to the legacy menu.
-		"""
-		if not self._active:
-			from secator.ai.utils import prompt_user
-			history = context.get("history")
-			if not history:
-				return None
-			return prompt_user(
-				history,
-				max_iterations=context.get("max_iterations", 10),
-				choices=choices,
-				mode=context.get("mode", "chat"),
-				model=context.get("model"),
-			)
-		try:
-			from secator.rich import console
-			if choices:
-				console.print("[dim]Suggestions:[/] " + "  ".join(f"[cyan]{c}[/]" for c in choices))
-			console.print("[dim]Type a message, or [/][cyan]/continue[/][dim] · [/][cyan]/summarize[/][dim] · [/][cyan]/exit[/]")
-		except Exception:
-			pass
-		line = self._q.get()  # block for the next line from the always-on box
-		cmd = line.strip().lower()
-		if cmd in ('/exit', '/quit', 'exit', 'quit'):
+	def _handle_menu(self, choices, **context):
+		"""The legacy rich multi-choice menu (used for choice-follow-ups / non-TTY)."""
+		from secator.ai.utils import prompt_user
+		history = context.get("history")
+		if not history:
 			return None
-		if cmd in ('/continue', '/c', 'continue'):
-			return {"answer": "Continue.", "extra_iters": 1}
-		if cmd == '/summarize':
-			return {"answer": "Summarize all findings so far.", "extra_iters": 1}
-		return {"answer": line, "extra_iters": 1}
-
+		return prompt_user(
+			history,
+			max_iterations=context.get("max_iterations", 10),
+			choices=choices,
+			mode=context.get("mode", "chat"),
+			model=context.get("model"),
+		)
 
 class RemoteBackend(InteractivityBackend):
 	"""Remote DB-polling interactive backend."""

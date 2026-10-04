@@ -756,11 +756,11 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 
 	def _run_loop_boxed(self) -> Generator:
-		"""Run the LLM loop; in local CLI mode, pin an always-on input box.
+		"""Run the LLM loop; in local CLI mode, pin a rich always-on input box.
 
-		With a CLIBackend on an interactive TTY, wrap the whole loop in
-		prompt_toolkit's ``patch_stdout`` so all rich output scrolls above a pinned
-		input box, and start/stop that box around the run. Otherwise run unchanged.
+		With a CLIBackend on an interactive TTY, start the ChatConsole (one rich Live
+		holding the status line + input box) around the run so findings stream above it.
+		Otherwise run unchanged.
 		"""
 		import sys
 		box = (
@@ -771,13 +771,12 @@ class ai(PythonRunner):
 		if not box:
 			yield from self._run_loop()
 			return
-		from prompt_toolkit.patch_stdout import patch_stdout
-		with patch_stdout(raw=True):
-			self.backend.start_input()
-			try:
-				yield from self._run_loop()
-			finally:
-				self.backend.stop_input()
+		name = getattr(self, 'session_name', None) or getattr(self, 'session_id', '') or 'ai'
+		self.backend.start_input(session_name=str(name))
+		try:
+			yield from self._run_loop()
+		finally:
+			self.backend.stop_input()
 
 	def _run_loop(self) -> Generator:
 		"""Main LLM interaction loop."""
