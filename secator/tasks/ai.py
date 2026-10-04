@@ -981,9 +981,18 @@ class ai(PythonRunner):
 					new_mode = dispatch_result.get("new_mode")
 					if new_mode and new_mode != self.mode:
 						self.mode = new_mode
+						# ctx persists across the loop; keep it in sync so a later
+						# run_subagent without an explicit mode inherits the new mode,
+						# not the stale pre-switch one.
+						ctx.mode = new_mode
 						self._rebuild_prompt_and_tools()
 						self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
-						yield Info(message=f"Switched to {new_mode} mode")
+						# The switch is already recorded by the persisted `mode_changed` doc
+						# (clients render it as a "Switched to <mode> mode" notice, ordered by
+						# its own timestamp). Do NOT also yield a transient Info — it surfaced as
+						# a duplicate line that raced ahead of the user's message. Console-only
+						# for CLI/pod-logs.
+						console.print(Info(message=f"Switched to {new_mode} mode"))
 
 					# Persist the encryptor's map (grown by this turn's tool/query
 					# results) so a later resumed worker can decrypt these tokens.
@@ -1783,6 +1792,7 @@ class ai(PythonRunner):
 		if extends < _MAX_FOLLOWUP_EXTENSIONS:
 			self.max_iterations += extra_iters
 			self._followup_extensions = extends + 1
+		mode_switched_to = None
 		if response.get("switch_mode"):
 			# An explicit user mode switch is a conscious decision: pin it (leave auto)
 			# so the session now sticks to the chosen mode instead of re-detecting away.
@@ -1791,14 +1801,14 @@ class ai(PythonRunner):
 			self.context["ai_mode_is_auto"] = False
 			self._rebuild_prompt_and_tools()
 			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
-			items.append(Info(message=f"Switched to {self.mode} mode"))
+			mode_switched_to = self.mode
 		else:
 			# Re-detect mode (user may switch from chat to attack, etc.)
 			previous_mode = self.mode
 			self._detect_mode(force=True)
 			if self.mode != previous_mode:
 				self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
-				items.append(Info(message=f"Switched to {self.mode} mode"))
+				mode_switched_to = self.mode
 
 		# Token breakdown for prompt display
 		by_role = self.history.count_tokens_by_role(self.model)
@@ -1807,4 +1817,10 @@ class ai(PythonRunner):
 			content=answer, ai_type="prompt", extra_data=extra_data,
 			message={"role": "user", "content": maybe_encrypt(answer, self.encryptor)},
 		))
+		# Record the switch AFTER the prompt doc so it renders as a "Switched to
+		# <mode> mode" notice BELOW the user's message (not before it), same
+		# representation as the change_mode tool path's persisted `mode_changed` doc.
+		if mode_switched_to:
+			console.print(Info(message=f"Switched to {mode_switched_to} mode"))
+			items.append(Ai(content=mode_switched_to, ai_type="mode_changed"))
 		return items
