@@ -76,6 +76,26 @@ class TestFindingMgmtTools(unittest.TestCase):
 			self.assertIn('CVE-2016-20012', plain, action['action'])  # names the finding
 			self.assertNotIn('u1', plain, action['action'])  # not the raw uuid / sentence
 
+	def test_false_positive_refetch_bypasses_display_filter(self):
+		"""A just-marked false positive is HIDDEN by the `is_false_positive:{$ne:True}`
+		display filter, so a plain re-fetch returns nothing and the row degrades to the
+		bare uuid ("Updated Marked <uuid>…"). The re-fetch must pass scope_only=True so the
+		finding (its name) still comes back. Mock search returns the finding ONLY when
+		scope_only=True (modeling the display filter the default _engine mock ignores)."""
+		finding = {'_uuid': 'u1', '_type': 'vulnerability', 'name': 'CVE-2016-20012'}
+		e = MagicMock()
+
+		def _search(query, limit=0, dedupe=False, exclude_fields=None, scope_only=False):
+			return [dict(finding)] if scope_only else []
+		e.search.side_effect = _search
+		e.update.return_value = 1
+		out = list(dispatch_action(
+			{'action': 'mark_vuln_false_positive', '_uuid': 'u1', 'reason': 'dup'}, self._ctx(e)))
+		ai = [o for o in out if isinstance(o, Ai) and o.ai_type == 'mark_vuln_false_positive'][0]
+		self.assertIn('CVE-2016-20012', ai.content)   # names the finding, not the bare uuid
+		self.assertNotIn('u1', ai.content)
+		self.assertTrue(ai.extra_data.get('finding'))  # attached so the UI renders name + card
+
 	# --- mark_vuln_exploited ---
 	def test_exploited_sets_status_and_attaches_finding(self):
 		e = self._engine({'_uuid': 'u1', '_type': 'vulnerability', 'name': 'SQLi'})

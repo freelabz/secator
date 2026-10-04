@@ -1361,7 +1361,12 @@ def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
 			f"No vulnerability found with _uuid={uuid} in this workspace. "
 			"Re-check the `_uuid` from query_workspace results."
 		)
-	updated = (engine.search(query, limit=1) or [None])[0]
+	# scope_only: a just-marked false-positive is hidden by the `is_false_positive:{$ne:True}`
+	# display filter, so a normal re-fetch returns None — `updated` stays empty and `label`
+	# falls back to the bare uuid (the chat row then reads "Updated Marked <uuid>…" instead
+	# of "Updated <name>", and extra_data.finding is empty). Drop the display filters for this
+	# targeted by-uuid read so the finding comes back regardless of its display state.
+	updated = (engine.search(query, limit=1, scope_only=True) or [None])[0]
 	if updated:
 		from secator.query.json import _apply_set
 		_apply_set(updated, update)
