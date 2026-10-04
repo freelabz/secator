@@ -57,11 +57,133 @@ class InteractivityBackend:
 
 
 class CLIBackend(InteractivityBackend):
-	"""Local terminal interactive backend."""
+	"""Local terminal interactive backend with an always-on input box.
 
+	A background thread runs a prompt_toolkit ``PromptSession`` that stays pinned at
+	the bottom of the terminal while the agent works; the AI loop wraps itself in
+	``patch_stdout()`` so all rich output scrolls ABOVE the box. Every submitted line
+	lands in one queue, which serves both input paths transparently:
+
+	- mid-flight: ``poll_steers`` drains the queue each iteration and the lines are
+	  injected as ``[User interjected]`` messages (same path a remote steer uses);
+	- end-of-turn: ``ask_user`` blocks on the queue for the next line — so the "What's
+	  next?" prompt IS the same always-on box. Slash-commands (``/exit`` ``/continue``
+	  ``/summarize``) stand in for the old menu actions.
+
+	A raw-mode menu (permission prompt, or the legacy menu on a non-TTY fallback) can't
+	share the terminal with the box, so ``pause()``/``resume()`` suspend it around those.
+	Only runs on a real interactive TTY; otherwise it degrades to the legacy menu.
+	"""
+
+	def __init__(self):
+		import queue
+		self._q = queue.Queue()
+		self._session = None
+		self._thread = None
+		self._stop = None      # tear everything down
+		self._paused = None    # suspend the box so a raw-mode menu owns the terminal
+		self._active = False
+
+	# -- lifecycle (start_input/stop_input are driven by the AI loop, inside patch_stdout) --
+	def start_input(self):
+		"""Start the always-on input box (interactive TTY only; else a no-op)."""
+		import sys
+		from secator.definitions import IN_WORKER
+		if self._active or IN_WORKER:
+			return
+		if not getattr(sys, 'stdin', None) or not sys.stdin.isatty():
+			return
+		import threading
+		from prompt_toolkit import PromptSession
+		self._session = PromptSession()
+		self._stop = threading.Event()
+		self._paused = threading.Event()
+		self._active = True
+		self._set_spinner_suppressed(True)
+		self._thread = threading.Thread(target=self._input_loop, daemon=True)
+		self._thread.start()
+
+	def stop_input(self):
+		if not self._active:
+			return
+		self._active = False
+		self._stop.set()
+		self._exit_prompt()
+		self._set_spinner_suppressed(False)
+
+	@property
+	def active(self):
+		return self._active
+
+	def _set_spinner_suppressed(self, on):
+		try:
+			from secator.rich import console
+			console._ai_input_active = on
+		except Exception:
+			pass
+
+	def _input_loop(self):
+		from prompt_toolkit.formatted_text import HTML
+		while not self._stop.is_set():
+			if self._paused.is_set():
+				time.sleep(0.05)
+				continue
+			try:
+				line = self._session.prompt(HTML('<ansicyan><b>› </b></ansicyan>'))
+			except (EOFError, KeyboardInterrupt):
+				self._q.put('/exit')  # Ctrl-D / Ctrl-C in the box ends the run
+				return
+			except Exception:
+				time.sleep(0.1)
+				continue
+			if self._stop.is_set() or self._paused.is_set() or line is None:
+				continue
+			text = line.strip()
+			if text:
+				self._q.put(text)
+
+	def _exit_prompt(self):
+		"""Interrupt a blocked prompt() from another thread (best-effort)."""
+		session = self._session
+		app = getattr(session, 'app', None) if session is not None else None
+		try:
+			if app is not None and app.is_running and app.loop is not None:
+				app.loop.call_soon_threadsafe(lambda: app.exit(result=None))
+		except Exception:
+			pass
+
+	def pause(self):
+		"""Suspend the box so a raw-mode menu can own the terminal."""
+		if not self._active:
+			return
+		self._paused.set()
+		self._exit_prompt()
+		time.sleep(0.2)  # let prompt() unwind and restore the terminal
+
+	def resume(self):
+		if self._active and self._paused is not None:
+			self._paused.clear()
+
+	# -- mid-flight steers --
+	def poll_steers(self, session_id=None):
+		"""Drain lines typed since the last poll (mid-flight steers)."""
+		import queue as _queue
+		out = []
+		while True:
+			try:
+				out.append(self._q.get_nowait())
+			except _queue.Empty:
+				break
+		return out
+
+	# -- prompts --
 	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
 		if prompt_type == "permission":
-			return self._handle_permission(**context)
+			self.pause()  # the permission menu is raw-mode; the box must let go
+			try:
+				return self._handle_permission(**context)
+			finally:
+				self.resume()
 		return self._handle_follow_up(choices, **context)
 
 	def _handle_permission(self, **context):
@@ -84,18 +206,40 @@ class CLIBackend(InteractivityBackend):
 		return None
 
 	def _handle_follow_up(self, choices, **context):
-		"""Delegate follow-up prompts to the rich interactive menu."""
-		from secator.ai.utils import prompt_user
-		history = context.get("history")
-		if not history:
+		"""End-of-turn prompt.
+
+		With the always-on box active, the box IS the prompt: show the model's
+		suggestions as hints and block for the next line. Slash-commands cover the old
+		menu actions. Without a box (non-TTY / piped), fall back to the legacy menu.
+		"""
+		if not self._active:
+			from secator.ai.utils import prompt_user
+			history = context.get("history")
+			if not history:
+				return None
+			return prompt_user(
+				history,
+				max_iterations=context.get("max_iterations", 10),
+				choices=choices,
+				mode=context.get("mode", "chat"),
+				model=context.get("model"),
+			)
+		try:
+			from secator.rich import console
+			if choices:
+				console.print("[dim]Suggestions:[/] " + "  ".join(f"[cyan]{c}[/]" for c in choices))
+			console.print("[dim]Type a message, or [/][cyan]/continue[/][dim] · [/][cyan]/summarize[/][dim] · [/][cyan]/exit[/]")
+		except Exception:
+			pass
+		line = self._q.get()  # block for the next line from the always-on box
+		cmd = line.strip().lower()
+		if cmd in ('/exit', '/quit', 'exit', 'quit'):
 			return None
-		return prompt_user(
-			history,
-			max_iterations=context.get("max_iterations", 10),
-			choices=choices,
-			mode=context.get("mode", "chat"),
-			model=context.get("model"),
-		)
+		if cmd in ('/continue', '/c', 'continue'):
+			return {"answer": "Continue.", "extra_iters": 1}
+		if cmd == '/summarize':
+			return {"answer": "Summarize all findings so far.", "extra_iters": 1}
+		return {"answer": line, "extra_iters": 1}
 
 
 class RemoteBackend(InteractivityBackend):

@@ -28,7 +28,9 @@ def maybe_status(*args, **kwargs):
 	"""Return console.status() normally, or nullcontext() when a live display is already active or in a worker."""
 	from secator.definitions import IN_WORKER
 
-	if IN_WORKER or console._live is not None:
+	# Suppress the spinner while the AI always-on input box owns the bottom of the
+	# terminal (a rich Live spinner would fight prompt_toolkit over the cursor).
+	if IN_WORKER or console._live is not None or getattr(console, '_ai_input_active', False):
 		return nullcontext()
 	return console.status(*args, **kwargs)
 
