@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.49.0](https://github.com/freelabz/secator/compare/v0.48.0...v0.49.0) (2026-10-04)
+
+
+### Features
+
+* **ai:** model-driven change_mode (auto self-escalation) ([#1475](https://github.com/freelabz/secator/issues/1475)) ([76ce865](https://github.com/freelabz/secator/commit/76ce865172cecdf03c65cb1168dd8fec80820e57))
+
+
+### Bug Fixes
+
+* **ai:** bare stop() ends the turn; don't re-query after a run ([#1473](https://github.com/freelabz/secator/issues/1473)) ([19546f9](https://github.com/freelabz/secator/commit/19546f962803ecbafa6d210c8626467bce069d10))
+* **ai:** guardrails deny subagent / stop / change_mode as "unknown action type" ([#1480](https://github.com/freelabz/secator/issues/1480)) ([d03511f](https://github.com/freelabz/secator/commit/d03511fa880b78699e3dc6c46e6f710df16580b7))
+* **ai:** normalize no-arg tool calls so a bare stop() can't raise ([#1478](https://github.com/freelabz/secator/issues/1478)) ([53a8e7b](https://github.com/freelabz/secator/commit/53a8e7bd6ff24a6ffd6000257cf1f37e819ddefe))
+* **ai:** render a marked false-positive by name, not bare uuid ([#1479](https://github.com/freelabz/secator/issues/1479)) ([0da4f94](https://github.com/freelabz/secator/commit/0da4f9415c413415bd763a900af5bd5a436f4a70))
+* **ai:** steer auto-chat to change_mode for writes too; drop duplicate switch Info ([#1481](https://github.com/freelabz/secator/issues/1481)) ([5978abb](https://github.com/freelabz/secator/commit/5978abba324c502e1b1e0384094862e9b7dc1921))
+* **search_vulns:** don't fail install when the upstream -u version-check crashes ([#1482](https://github.com/freelabz/secator/issues/1482)) ([a025885](https://github.com/freelabz/secator/commit/a025885ba32691e8db099436d16c1abe44bcac30))
+* **sshaudit:** tolerate bare-string algorithm entries in on_json_loaded ([#1476](https://github.com/freelabz/secator/issues/1476)) ([5546845](https://github.com/freelabz/secator/commit/554684527b7625c64202901d1a463742dcd8b927))
+
 ## [0.48.0](https://github.com/freelabz/secator/compare/v0.47.0...v0.48.0) (2026-10-02)
 
 
