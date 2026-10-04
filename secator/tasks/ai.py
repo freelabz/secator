@@ -987,7 +987,12 @@ class ai(PythonRunner):
 						ctx.mode = new_mode
 						self._rebuild_prompt_and_tools()
 						self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
-						yield Info(message=f"Switched to {new_mode} mode")
+						# The switch is already recorded by the persisted `mode_changed` doc
+						# (clients render it as a "Switched to <mode> mode" notice, ordered by
+						# its own timestamp). Do NOT also yield a transient Info — it surfaced as
+						# a duplicate line that raced ahead of the user's message. Console-only
+						# for CLI/pod-logs.
+						console.print(Info(message=f"Switched to {new_mode} mode"))
 
 					# Persist the encryptor's map (grown by this turn's tool/query
 					# results) so a later resumed worker can decrypt these tokens.
