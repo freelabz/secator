@@ -1633,6 +1633,28 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error(message=f"Refusing to update a non-finding record (_type={etype!r}).", _context=context)
 		return
 	cls = {c.get_name().lower(): c for c in FINDING_TYPES}[etype]
+	cls_fields = set(getattr(cls, "__dataclass_fields__", {}))
+
+	# Attack-surface cleanup verdict (any finding type, not just vulns): the recoverable
+	# hide-flag `is_false_positive` is normally server-owned (stripped by _drop_readonly_fields
+	# so an agent can't forge the verified/exploited verdict). We allow ONLY this one flag here,
+	# server-DERIVED — never `verified`/`status=EXPLOITED` — so a cleanup pass can retire a
+	# finding (subdomain/ip/port/…) that no longer reproduces. It stays recoverable (set back
+	# to False), and the caller stamps an auditable reason in extra_data for bulk reversal.
+	# For a VULNERABILITY the hide verdict belongs to the dedicated mark_vuln_false_positive
+	# tool (its reason/refetch handling + the vuln gate), so is_false_positive stays stripped
+	# here. For every other attack-surface type there is no dedicated tool, so this is the path.
+	verdict = {}
+	if etype != "vulnerability" and "is_false_positive" in fields:
+		if "is_false_positive" not in cls_fields:
+			yield Error(message=f"{etype} findings have no is_false_positive field; downgrade its `confidence` instead or leave it.", _context=context)  # noqa: E501
+			return
+		fp = bool(fields.pop("is_false_positive"))
+		verdict["is_false_positive"] = fp
+		if fp and "status" in cls_fields:
+			verdict["status"] = "FALSE_POSITIVE"
+		if fp and "verified" in cls_fields:
+			verdict["verified"] = False
 
 	# Only agent-writable content fields (framework/server-owned + `*_path` stripped); `id`
 	# stays blocked on UPDATE via _FINDING_IMMUTABLE_FIELDS below.
@@ -1662,6 +1684,14 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 		key = str(k)
 		if key and "." not in key and not key.startswith("$"):
 			update[f"extra_data.{key}"] = v
+	# A confidence downgrade must re-prioritize: recompute the derived sort key where the type
+	# carries it (update_finding writes a raw $set, so __post_init__ never runs to derive it).
+	if "confidence" in update and "confidence_nb" in cls_fields:
+		cn = {"high": 1, "medium": 2, "low": 3}.get(str(update["confidence"]).lower())
+		if cn:
+			update["confidence_nb"] = cn
+	# Server-derived verdict last so it wins over any stale free-form copy.
+	update.update(verdict)
 	if not update:
 		yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
 		return

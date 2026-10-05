@@ -251,6 +251,51 @@ class TestFindingMgmtTools(unittest.TestCase):
 			'verified': True, 'status': 'EXPLOITED', 'confidence_nb': 1, 'workspace_id': 'w'})
 		self.assertEqual(out, {'name': 'x', 'id': 'CVE-2021-41773', 'severity': 'high'})
 
+	# --- update_finding: attack-surface cleanup verdicts on NON-vuln types ---
+	def test_update_hides_non_vuln_finding_via_is_false_positive(self):
+		# A subdomain that no longer resolves: the monitor retires it via the generic hide-flag
+		# (no dedicated tool for non-vuln types). Server-derived, recoverable, reason-stamped.
+		e = self._engine({'_uuid': 's1', '_type': 'subdomain', 'host': 'gone.example.com'})
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 's1',
+			 'fields': {'is_false_positive': True},
+			 'extra_data': {'false_positive_reason': 'attack-surface-monitor: not reproduced 2026-10-05'}},
+			self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertTrue(set_arg['is_false_positive'])
+		self.assertEqual(set_arg['extra_data.false_positive_reason'],
+		                 'attack-surface-monitor: not reproduced 2026-10-05')
+		self.assertTrue(any(isinstance(o, Ai) and o.ai_type == 'update_finding' for o in out))
+
+	def test_update_vuln_still_drops_is_false_positive(self):
+		# A vulnerability keeps using the dedicated mark_vuln_false_positive tool, so the generic
+		# path must still strip is_false_positive for vulns (policy unchanged).
+		e = self._engine({'_uuid': 'u1', '_type': 'vulnerability', 'severity': 'low'})
+		list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'u1',
+			 'fields': {'severity': 'high', 'is_false_positive': True}}, self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertEqual(set_arg['severity'], 'high')
+		self.assertNotIn('is_false_positive', set_arg)
+
+	def test_update_errors_hiding_type_without_flag(self):
+		# A certificate has no is_false_positive field — refuse rather than write a phantom field.
+		e = self._engine({'_uuid': 'c1', '_type': 'certificate', 'host': 'x'})
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'c1', 'fields': {'is_false_positive': True}}, self._ctx(e)))
+		self.assertTrue(any(isinstance(o, Error) for o in out))
+		e.update.assert_not_called()
+
+	def test_update_confidence_downgrade_recomputes_nb(self):
+		# Degraded (not gone): downgrade confidence. Where the type carries confidence_nb the
+		# derived sort key is recomputed so the downgrade actually re-prioritizes.
+		e = self._engine({'_uuid': 'u1', '_type': 'vulnerability', 'confidence': 'high'})
+		list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'u1', 'fields': {'confidence': 'low'}}, self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertEqual(set_arg['confidence'], 'low')
+		self.assertEqual(set_arg['confidence_nb'], 3)
+
 	def test_update_missing_uuid_errors(self):
 		out = list(dispatch_action({'action': 'update_finding', 'fields': {'x': 1}}, self._ctx(self._engine(None))))
 		self.assertTrue(any(isinstance(o, Error) for o in out))
