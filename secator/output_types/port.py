@@ -17,6 +17,7 @@ class Port(OutputType):
 	protocol: str = field(default='tcp', repr=True, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
 	confidence: str = field(default='low', repr=False, compare=False)
+	confidence_nb: int = field(default=0, compare=False)
 	service_confidence: str = field(default='low', repr=False, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
