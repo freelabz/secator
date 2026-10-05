@@ -279,8 +279,17 @@ class TestFindingMgmtTools(unittest.TestCase):
 		self.assertNotIn('is_false_positive', set_arg)
 
 	def test_update_errors_hiding_type_without_flag(self):
-		# A certificate has no is_false_positive field — refuse rather than write a phantom field.
-		e = self._engine({'_uuid': 'c1', '_type': 'certificate', 'host': 'x'})
+		# Hiding a type that has no is_false_positive field must refuse, not write a phantom
+		# field. Pick such a type dynamically: once the finding-verdict-fields schema change
+		# lands, EVERY editable finding type carries the flag and this guard is defensive-only,
+		# so skip rather than asserting on a type that no longer lacks it.
+		from secator.output_types import FINDING_TYPES
+		fieldless = next((c for c in FINDING_TYPES
+		                  if 'is_false_positive' not in getattr(c, '__dataclass_fields__', {})
+		                  and c.get_name() != 'ai'), None)
+		if fieldless is None:
+			self.skipTest('every finding type now carries is_false_positive')
+		e = self._engine({'_uuid': 'c1', '_type': fieldless.get_name(), 'name': 'x', 'host': 'x'})
 		out = list(dispatch_action(
 			{'action': 'update_finding', '_uuid': 'c1', 'fields': {'is_false_positive': True}}, self._ctx(e)))
 		self.assertTrue(any(isinstance(o, Error) for o in out))
