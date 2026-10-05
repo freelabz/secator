@@ -23,7 +23,7 @@ class Domain(OutputType):
 	administrative_info: dict = field(default_factory=dict, compare=False)
 	technical_info: dict = field(default_factory=dict, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
-	confidence: str = field(default='low', compare=False)
+	confidence: str = field(default='high', compare=False)
 	confidence_nb: int = field(default=0, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
