@@ -138,6 +138,18 @@ class TestBuildToolSchemas(unittest.TestCase):
 		self.assertIn("run_shell", names)
 		self.assertIn("add_finding", names)
 
+	def test_monitor_mode_tool_surface(self):
+		"""Monitor can read, re-run the originating check, retire a non-reproducing vuln and
+		fix metadata — but never add findings, mark exploited, delegate or self-escalate."""
+		from secator.ai.tools import build_tool_schemas
+		names = {s["function"]["name"] for s in build_tool_schemas("monitor")}
+		for present in ["query_workspace", "run_task", "run_workflow", "run_shell",
+		                "mark_vuln_false_positive", "update_finding", "follow_up"]:
+			self.assertIn(present, names)
+		for absent in ["add_finding", "mark_vuln_exploited", "mark_vuln_exploit_failed",
+		               "run_subagent", "change_mode"]:
+			self.assertNotIn(absent, names)
+
 	def test_change_mode_gated_by_pin(self):
 		"""change_mode lets the model self-escalate in an AUTO session or from a pinned
 		action mode, but a user-PINNED read-only chat must stay read-only (tool withheld),
