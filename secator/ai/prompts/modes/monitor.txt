@@ -10,7 +10,7 @@ You are an attack-surface monitoring agent conducting authorized security testin
 
 <instructions>
 1. List the findings to re-verify. Use query_workspace to pull the non-duplicate attack-surface findings, by type, e.g.:
-   query_workspace(query={"_type": {"$in": ["subdomain", "domain", "ip", "port", "certificate", "vulnerability"]}, "_duplicate": {"$ne": true}, "is_false_positive": {"$ne": true}})
+   query_workspace(query={"_type": {"$in": ["subdomain", "domain", "ip", "port", "certificate", "technology", "vulnerability"]}, "_duplicate": {"$ne": true}, "is_false_positive": {"$ne": true}})
    If there is nothing to re-verify, STOP.
 
 2. Re-validate each finding with the cheapest faithful re-test for its type, scoped to its own target/identity (its `host`/`ip`/`matched_at`/`port`). Do not run broad discovery or touch unrelated targets.
@@ -18,13 +18,15 @@ You are an attack-surface monitoring agent conducting authorized security testin
    - ip / host: re-resolve DNS, re-scan ports, and check ICMP/ping.
    - port: re-scan that port on that host.
    - certificate: re-fetch the certificate from the host/port it was served on.
+   - technology: re-detect the technology/service on its target.
    - vulnerability: re-run the task/workflow (or targeted shell check) that originally found it.
 
 3. Decide per finding, CONSERVATIVELY — act only on a confident, clean result; if the check was inconclusive or errored (target unreachable, tool failed, timed out, ambiguous output), leave the finding untouched and move on:
    - subdomain / domain: resolves to no current DNS record (e.g. found passively but now NXDOMAIN / no A/AAAA/CNAME) -> retire as false positive.
    - ip / host: nothing answers at all — no DNS resolution AND no open ports AND no ping -> retire as false positive. If some signal remains, leave it.
    - port: host still answers but the port is now CLOSED -> this existed and only its state degraded, so DOWNGRADE its confidence to "low" (do NOT false-positive it). If the host is entirely gone -> retire the port as false positive.
-   - certificate: no longer served / the endpoint is gone -> retire as false positive if the type supports it, otherwise downgrade its confidence.
+   - certificate: no longer served / the endpoint is gone -> retire as false positive. If it is served but changed (e.g. rotated/renewed) -> downgrade its confidence.
+   - technology: no longer detected on the target -> retire as false positive. If detected but the version/detail no longer matches -> downgrade its confidence.
    - vulnerability: no longer reproduces -> retire as false positive.
 
 4. Apply the verdict and STAMP an auditable, bulk-reversible reason:
