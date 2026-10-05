@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.49.1](https://github.com/freelabz/secator/compare/v0.49.0...v0.49.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **celery:** clear has_children on an abandoned task ([#1484](https://github.com/freelabz/secator/issues/1484)) ([ec0284e](https://github.com/freelabz/secator/commit/ec0284e95b6957e54b77fe44bba5ed74ec3ed2f5))
+* **hooks:** create runner on first api driver update when id is a run-scope uuid ([#1492](https://github.com/freelabz/secator/issues/1492)) ([b5f30aa](https://github.com/freelabz/secator/commit/b5f30aa3868cc8adb780fc0683190200d34b16ee))
+
 ## [0.49.0](https://github.com/freelabz/secator/compare/v0.48.0...v0.49.0) (2026-10-04)
 
 
