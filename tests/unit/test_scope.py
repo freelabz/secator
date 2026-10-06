@@ -258,3 +258,89 @@ class TestPathScopedCarveOut(unittest.TestCase):
 		self.assertTrue(host_in_scope('https://app.acme.com/x', ['app.acme.com', 'acme.com/docs'], []))
 		self.assertTrue(host_in_scope('10.0.0.5', ['10.0.0.0/24', 'acme.com/docs'], []))
 		self.assertFalse(host_in_scope('10.0.1.5', ['10.0.0.0/24', 'acme.com/docs'], []))
+
+
+class TestUrlVsHostGrant(unittest.TestCase):
+	"""A URL (web-app) grant authorizes only web targets at its host/IP, never a bare
+	host/IP port scan (shared-hosting: the address isn't yours). A host/IP grant is a
+	superset and authorizes both. Mirrors the secator-api mandate matcher.
+	"""
+
+	URL = ['https://xss-game.appspot.com']
+
+	# --- URL entry: web app yes, bare host/IP no --------------------------
+
+	def test_url_entry_allows_url_target(self):
+		self.assertTrue(host_in_scope('https://xss-game.appspot.com', self.URL, []))
+
+	def test_url_entry_allows_url_subpath(self):
+		self.assertTrue(host_in_scope('https://xss-game.appspot.com/level1/frame', self.URL, []))
+
+	def test_url_entry_denies_bare_host_portscan(self):
+		# The repro: the user's in-scope target is the URL; a bare-host (port-scan)
+		# target must NOT be auto-authorized by it.
+		self.assertFalse(host_in_scope('xss-game.appspot.com', self.URL, []))
+
+	def test_url_entry_denies_bare_ip_portscan(self):
+		self.assertFalse(host_in_scope('172.253.120.153', self.URL, []))
+
+	# --- host entry: superset (authorizes its URLs too) -------------------
+
+	def test_host_entry_allows_its_url(self):
+		self.assertTrue(host_in_scope('https://acme.com/anything', ['acme.com'], []))
+
+	def test_host_entry_allows_bare_host(self):
+		self.assertTrue(host_in_scope('acme.com', ['acme.com'], []))
+
+	def test_wildcard_entry_allows_subdomain_url(self):
+		self.assertTrue(host_in_scope('https://app.acme.com/x', ['*.acme.com'], []))
+
+	def test_ip_entry_allows_url_on_that_ip(self):
+		# bare IP / CIDR grant is host-level -> authorizes web targets on that IP too.
+		self.assertTrue(host_in_scope('https://10.0.0.5/admin', ['10.0.0.0/24'], []))
+		self.assertTrue(host_in_scope('10.0.0.5', ['10.0.0.0/24'], []))
+
+	# --- scheme-less host/path is a URL shape (implicit https) ------------
+
+	def test_schemeless_host_path_is_url_grant(self):
+		sp = ['launchdarkly.com/docs']
+		self.assertTrue(host_in_scope('https://launchdarkly.com/docs/x', sp, []))
+		# still a URL grant: the bare host is not authorized
+		self.assertFalse(host_in_scope('launchdarkly.com', sp, []))
+
+	def test_schemeless_host_only_stays_host_grant(self):
+		# `acme.com` (no path, no scheme) is a HOST grant, not a URL grant.
+		from secator.scope import _is_url_entry
+		self.assertFalse(_is_url_entry('acme.com'))
+		self.assertTrue(_is_url_entry('acme.com/docs'))
+		self.assertTrue(_is_url_entry('https://acme.com'))
+		self.assertFalse(_is_url_entry('*.acme.com'))
+
+	# --- resolve_scope_hostnames: URL -> https://IP, not bare IP ----------
+
+	def test_resolve_url_entry_adds_url_ip_not_bare_ip(self):
+		import socket
+		from secator.scope import resolve_scope_hostnames
+		orig = socket.getaddrinfo
+		socket.getaddrinfo = lambda host, *a, **k: [(2, 1, 6, '', ('93.184.216.34', 0))]
+		try:
+			out = resolve_scope_hostnames(['https://example.com/app'])
+			self.assertIn('https://93.184.216.34/app', out)
+			self.assertNotIn('93.184.216.34', out)  # bare IP must NOT be added for a URL grant
+			# host grant still expands to the bare IP
+			out2 = resolve_scope_hostnames(['example.com'])
+			self.assertIn('93.184.216.34', out2)
+		finally:
+			socket.getaddrinfo = orig
+
+	def test_resolved_url_ip_allows_https_ip_but_not_portscan(self):
+		import socket
+		from secator.scope import resolve_scope_hostnames
+		orig = socket.getaddrinfo
+		socket.getaddrinfo = lambda host, *a, **k: [(2, 1, 6, '', ('93.184.216.34', 0))]
+		try:
+			scope = resolve_scope_hostnames(['https://example.com'])
+			self.assertTrue(host_in_scope('https://93.184.216.34/x', scope, []))   # web via IP: yours
+			self.assertFalse(host_in_scope('93.184.216.34', scope, []))            # port scan: not yours
+		finally:
+			socket.getaddrinfo = orig
