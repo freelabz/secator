@@ -344,3 +344,48 @@ class TestUrlVsHostGrant(unittest.TestCase):
 			self.assertFalse(host_in_scope('93.184.216.34', scope, []))            # port scan: not yours
 		finally:
 			socket.getaddrinfo = orig
+
+
+class TestCanonicalizeScopeEntry(unittest.TestCase):
+    """The single scope-entry normaliser shared by the worker and the platform gate."""
+
+    def test_url_values_become_url_entries(self):
+        from secator.scope import canonicalize_scope_entry as c
+        self.assertEqual(c("https://launchdarkly.com/docs"), "https://launchdarkly.com/docs")
+        self.assertEqual(c("launchdarkly.com/docs"), "https://launchdarkly.com/docs")  # implicit https
+        self.assertEqual(c("https://LaunchDarkly.com/Docs?q=1#f"), "https://launchdarkly.com/Docs")
+        self.assertEqual(c("https://launchdarkly.com/"), "https://launchdarkly.com")  # trivial path = whole site
+        self.assertEqual(c("http://data-api.x.com/"), "https://data-api.x.com")  # scheme normalised
+
+    def test_host_wildcard_cidr_kept_host_level(self):
+        from secator.scope import canonicalize_scope_entry as c
+        self.assertEqual(c("launchdarkly.com"), "launchdarkly.com")
+        self.assertEqual(c("app.aikido.dev"), "app.aikido.dev")
+        self.assertEqual(c("*.launchdarkly.com"), "*.launchdarkly.com")
+        self.assertEqual(c("1.2.3.0/24"), "1.2.3.0/24")
+        self.assertEqual(c("1.2.3.4"), "1.2.3.4")
+
+    def test_non_host_values_rejected(self):
+        from secator.scope import canonicalize_scope_entry as c
+        self.assertIsNone(c("Wellfound"))
+        self.assertIsNone(c("Any resource created with the cloud"))
+        self.assertIsNone(c(""))
+        self.assertIsNone(c(None))
+
+    def test_round_trips_through_the_matcher(self):
+        # A canonicalised URL entry authorizes its web target but not a bare-host scan.
+        from secator.scope import canonicalize_scope_entry as c
+        e = c("https://xss-game.appspot.com")
+        self.assertEqual(e, "https://xss-game.appspot.com")
+        self.assertTrue(host_in_scope("https://xss-game.appspot.com/x", [e], []))
+        self.assertFalse(host_in_scope("xss-game.appspot.com", [e], []))
+
+
+class TestTargetHost(unittest.TestCase):
+    def test_host_ip_cidr_url(self):
+        from secator.scope import target_host
+        self.assertEqual(target_host("https://x.com/p"), "x.com")
+        self.assertEqual(target_host("x.com:8443"), "x.com")
+        self.assertEqual(target_host("1.2.3.4"), "1.2.3.4")
+        self.assertEqual(target_host("*.x.com"), "")   # wildcard has no single host
+        self.assertEqual(target_host("Wellfound"), "")  # non-network

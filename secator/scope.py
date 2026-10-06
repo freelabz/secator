@@ -231,6 +231,63 @@ def _shape_matches_entry(shape, entry):
 	return shape.host == entry.lower().rstrip('.')
 
 
+def target_host(value):
+	"""The canonical host of a target ('' if not a network target). A URL / host /
+	host:port yields its host; an IP literal yields its string form; a bare CIDR has
+	no single host and yields ''. The ONE host-extraction helper -- callers that only
+	need "the host of this value" use this instead of re-implementing scheme/port/path
+	stripping (replaces the ad-hoc `_host_of` copies in ai.guardrails / the API gate).
+	"""
+	shape = _target_shape(value)
+	if shape is None:
+		return ''
+	if shape.host:
+		return shape.host
+	if shape.ip is not None:
+		return str(shape.ip)
+	return ''
+
+
+def canonicalize_scope_entry(value):
+	"""Normalise a raw target value into a canonical scope-entry string, or None if it
+	is not network-addressable. The SINGLE normaliser shared by the worker and the
+	platform gate, so an entry is shaped identically everywhere it is stored or matched:
+
+	- ``*.host``          -> ``*.host`` (host-level wildcard, kept verbatim, lower-cased)
+	- CIDR / IP           -> canonical network / address string
+	- URL / ``host/path`` -> ``https://host[/path]`` (a web-app grant; scheme normalised,
+	                         query/fragment + trailing slash dropped; path case kept)
+	- bare host / host:port -> canonical host (port dropped)
+	- free text / app-id / non-host -> None
+
+	The URL-vs-host distinction is load-bearing: a URL entry authorizes only web
+	targets at that host (see ``_shape_matches_entry``), never a bare host/IP port scan.
+	"""
+	if not isinstance(value, str):
+		return None
+	v = value.strip()
+	if not v:
+		return None
+	if v.startswith('*.'):
+		base = v[2:].strip().lower().rstrip('.')
+		return '*.' + base if base else None
+	shape = _target_shape(v)
+	if shape is None:
+		return None
+	if shape.net is not None:
+		return str(shape.net)
+	if shape.is_url:
+		host = shape.host or (str(shape.ip) if shape.ip is not None else '')
+		if not host:
+			return None
+		return 'https://' + host + shape.path.rstrip('/')
+	if shape.host:
+		return shape.host
+	if shape.ip is not None:
+		return str(shape.ip)
+	return None
+
+
 def target_in_scope(target, scope):
 	"""True if a NETWORK target string is covered by any entry in `scope`.
 
