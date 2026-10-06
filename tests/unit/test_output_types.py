@@ -20,8 +20,8 @@ class TestOutputTypes(unittest.TestCase):
 		vuln1.merge_with(vuln2)
 		assert vuln1.tags == ['nmap', 'cve']
 		assert vuln1.extra_data == {'data': ['cve'], 'a': 1, 'b': 2}
-		assert vuln1.confidence == 'low'
-		assert vuln1.confidence_nb == 3
+		assert vuln1.confidence == 'high'   # default flipped low->high (secator #1489)
+		assert vuln1.confidence_nb == 1
 		assert vuln1.severity == 'unknown'
 		assert vuln1.severity_nb == 5
 
@@ -168,3 +168,22 @@ class TestFindingVerdictFields(unittest.TestCase):
 			self.assertEqual(errs, [], f'{cls.get_name()}: {errs}')
 			bad = cls.validate_fields({'is_false_positive': 'nope'})
 			self.assertTrue(bad)  # wrong type still rejected
+
+	def test_all_finding_types_default_confidence_high(self):
+		# #1489: every finding type that carries `confidence` now defaults 'high' (nb=1).
+		from secator.output_types import FINDING_TYPES
+		for cls in FINDING_TYPES:
+			if cls.get_name() == 'ai' or 'confidence' not in cls.__dataclass_fields__:
+				continue
+			obj = cls(**self._required_kwargs(cls))
+			self.assertEqual(obj.confidence, 'high', cls.get_name())
+			self.assertEqual(obj.confidence_nb, 1, cls.get_name())
+
+	def test_explicit_low_confidence_survives_default_flip(self):
+		# The migration principle: a task/provider that deliberately pins confidence='low'
+		# (e.g. nmap vulscan, the circl CVE provider) still yields 'low' (nb=3), unaffected
+		# by the 'high' type default.
+		from secator.output_types import Vulnerability
+		v = Vulnerability(name='x', confidence='low')
+		self.assertEqual(v.confidence, 'low')
+		self.assertEqual(v.confidence_nb, 3)

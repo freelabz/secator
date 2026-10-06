@@ -28,7 +28,7 @@ class Certificate(OutputType):
 	serial_number: str = field(default='', compare=False)
 	ciphers: list[str] = field(default_factory=list, compare=False)
 	# parent_certificate: 'Certificate' = None  # noqa: F821
-	confidence: str = field(default='low', compare=False)
+	confidence: str = field(default='high', compare=False)
 	confidence_nb: int = field(default=0, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
