@@ -42,6 +42,25 @@ class TestOutputTypes(unittest.TestCase):
 		assert vuln1.name == 'CVE-2025-53020'
 
 
+class TestVulnerabilityCveNormalization(unittest.TestCase):
+	def test_lowercase_cve_id_is_uppercased(self):
+		v = Vulnerability(name='CVE-2024-2473', id='cve-2024-2473', matched_at='http://x')
+		self.assertEqual(v.id, 'CVE-2024-2473')
+		self.assertEqual(v.name, 'CVE-2024-2473')
+
+	def test_mixed_case_cve_findings_dedupe_equal(self):
+		# id is part of Vulnerability equality -> a producer emitting lower-case and one
+		# emitting upper-case must still be equal (so tag_duplicates merges them).
+		lower = Vulnerability(name='CVE-2024-2473', id='cve-2024-2473', matched_at='http://x')
+		upper = Vulnerability(name='CVE-2024-2473', id='CVE-2024-2473', matched_at='http://x')
+		self.assertEqual(lower, upper)
+
+	def test_non_cve_values_untouched(self):
+		v = Vulnerability(name='SQL Injection', id='some-template-id', matched_at='http://x')
+		self.assertEqual(v.name, 'SQL Injection')
+		self.assertEqual(v.id, 'some-template-id')
+
+
 class TestVulnerabilityStatus(unittest.TestCase):
 
 	def test_status_defaults_to_empty(self):
