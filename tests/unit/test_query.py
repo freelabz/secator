@@ -81,6 +81,33 @@ class TestQueryBackendBase(unittest.TestCase):
 		self.assertEqual(backend.last_count_query['_type'], 'vulnerability')
 
 
+	def test_merge_query_makes_raw_regex_case_insensitive(self):
+		# A raw {'$regex': ...} dict (what the AI query_workspace tool and other
+		# programmatic callers pass) must be case-insensitive by default, same as the
+		# `field ~= pat` expression path — so a query for "CVE-..." matches a stored
+		# lower-cased id, and vice-versa.
+		backend = self._create_test_backend(workspace_id='ws123')
+		merged = backend._merge_query({'_type': 'vulnerability', 'id': {'$regex': 'CVE-2024-2473'}})
+		self.assertEqual(merged['id'], {'$regex': '(?i)CVE-2024-2473'})
+
+	def test_merge_query_regex_not_double_prefixed(self):
+		# The `~=` translator already prepends (?i); don't double it.
+		backend = self._create_test_backend(workspace_id='ws123')
+		merged = backend._merge_query({'name': {'$regex': '(?i)already'}})
+		self.assertEqual(merged['name'], {'$regex': '(?i)already'})
+
+	def test_merge_query_regex_case_insensitive_nested(self):
+		# $or / $and arrays and a negated $not regex all get the default too.
+		backend = self._create_test_backend(workspace_id='ws123')
+		merged = backend._merge_query({'$or': [
+			{'name': {'$regex': 'Foo'}},
+			{'id': {'$not': {'$regex': 'Bar'}}},
+		]})
+		self.assertEqual(merged['$or'][0]['name'], {'$regex': '(?i)Foo'})
+		self.assertEqual(merged['$or'][1]['id'], {'$not': {'$regex': '(?i)Bar'}})
+
+
+
 class TestJsonBackend(unittest.TestCase):
 	def setUp(self):
 		import tempfile
@@ -226,6 +253,17 @@ class TestJsonBackend(unittest.TestCase):
 		results = self.backend.search({'$and': [{'_type': first_type}, {'_type': '__impossible__'}]})
 		assert len(results) == 0
 
+
+	def test_json_backend_regex_is_case_insensitive(self):
+		# End-to-end: a raw $regex dict matches regardless of case (the fix: CI default
+		# applies to raw dicts, not only `~=` expressions). Stored name is "SQL Injection".
+		from secator.query.json import JsonBackend
+		backend = JsonBackend(workspace_id=self.workspace_id, config={'reports_dir': self.temp_dir})
+		lower = backend.search({'_type': 'vulnerability', 'name': {'$regex': 'sql injection'}})
+		upper = backend.search({'_type': 'vulnerability', 'name': {'$regex': 'SQL INJECTION'}})
+		self.assertEqual(len(lower), 1)
+		self.assertEqual(lower[0]['name'], 'SQL Injection')
+		self.assertEqual(len(upper), 1)
 
 class TestQueryOperators(unittest.TestCase):
 	def test_get_nested_field(self):

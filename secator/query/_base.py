@@ -64,6 +64,28 @@ class QueryBackend(ABC):
 	# write: an update by id/uuid has to reach a finding regardless of its display state.
 	_DISPLAY_FILTER_FIELDS = ('is_false_positive', '_tagged')
 
+	@staticmethod
+	def _ensure_ci_regex(node):
+		"""Make every ``$regex`` in a query case-insensitive by default.
+
+		The ``field ~= pat`` expression translator already prepends ``(?i)``; this applies
+		the SAME default to a raw ``{'$regex': ...}`` dict (what the AI ``query_workspace``
+		tool and other programmatic callers pass), so "regexes are case-insensitive by
+		default" holds on EVERY path, not just the expression one. The ``(?i)`` inline flag
+		works for both Mongo ``$regex`` and the json/sqlite ``re.search`` backends. A pattern
+		that already carries an inline flag group ``(?...)`` is left untouched.
+		"""
+		if isinstance(node, dict):
+			for k, v in node.items():
+				if k == '$regex' and isinstance(v, str) and not v.startswith('(?'):
+					node[k] = '(?i)' + v
+				else:
+					QueryBackend._ensure_ci_regex(v)
+		elif isinstance(node, list):
+			for item in node:
+				QueryBackend._ensure_ci_regex(item)
+		return node
+
 	def _merge_query(self, query: dict, scope_only: bool = False) -> dict:
 		"""Merge user query with base query. Base query always wins.
 
@@ -82,6 +104,7 @@ class QueryBackend(ABC):
 			base = {k: v for k, v in base.items() if k not in self._DISPLAY_FILTER_FIELDS}
 		merged.update(base)
 
+		self._ensure_ci_regex(merged)
 		return merged
 
 	def search(self, query: dict, limit: int = 0, exclude_fields: List[str] = None,
