@@ -14,6 +14,7 @@ from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_T
 from secator.template import TemplateLoader
 from secator.utils import format_token_count
 from secator.ai.utils import (
+	_PERSIST_AI_TYPES,
 	_sanitized_env, _build_action_display, _is_approved, _truncate, _format_action_error,
 	_is_heavy_runner, _sanitize_child_opts, build_subagent_prompt, _union_live_results,
 	_coerce_finding_fields, _get_action_label, _decrypt_dict,
@@ -724,11 +725,11 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			if isinstance(out, Ai):
 				if out.ai_type == "response" and (out.content or "").strip():
 					last_response = out.content
-				elif out.ai_type in ("add_finding", "add_vuln_poc"):
+				elif out.ai_type in _PERSIST_AI_TYPES:
 					persisted.append(out.ai_type)
 			yield out
 		note = (f" Persisted: {', '.join(persisted)}." if persisted
-		        else " Persisted: NOTHING (subagent made no add_finding/add_vuln_poc call).")
+		        else " Persisted: NOTHING (subagent made no add_finding/mark_vuln_* call).")
 		handback = (last_response.strip() or "(subagent produced no summary)") + "\n[subagent handback]" + note
 		# Stamped for the PARENT conversation (card_context strips the subagent marker) and
 		# with THIS run_task's tool_call_id so it becomes the tool_result the parent reads.
