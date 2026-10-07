@@ -1513,6 +1513,7 @@ class Runner:
 		or the ``SECATOR_GIT_TOKEN`` env var.
 		"""
 		import os
+		import uuid
 		from secator.definitions import URL
 		from secator.sources import clone_git_repo, is_git_url
 		input_types = getattr(self.config, 'input_types', None)
@@ -1523,7 +1524,11 @@ class Runner:
 		for inp in self.inputs:
 			if is_git_url(inp):
 				try:
-					path = clone_git_repo(inp, f'{self.reports_folder}/.sources', token=token)
+					# A unique sub-dir per clone: sibling tasks of a workflow share one reports
+					# folder, so a fixed path would let concurrent clones clobber each other's
+					# checkout (one task's clone rmtree's + re-clones another's mid-scan).
+					dest = f'{self.reports_folder}/.sources/{uuid.uuid4().hex[:12]}'
+					path = clone_git_repo(inp, dest, token=token)
 					self._print(Info(message=f'Cloned source to {path}'), rich=True)
 					resolved.append(path)
 				except Exception as e:  # noqa: BLE001 - never crash init over a clone
