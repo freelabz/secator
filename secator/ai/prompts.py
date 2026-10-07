@@ -26,7 +26,7 @@ def load_prompt(path: str) -> str:
 	Standard $variable substitution is handled later by string.Template.
 
 	Args:
-		path: Relative path within the prompts directory (e.g. 'modes/attack.txt')
+		path: Relative path within the prompts directory (e.g. 'modes/scan.txt')
 
 	Returns:
 		Prompt string with includes resolved.
@@ -51,14 +51,14 @@ def load_prompt(path: str) -> str:
 COMMON_RULES = load_prompt("constraints/common.txt")
 QUERIES = load_prompt("constraints/queries.txt")
 
-SYSTEM_ATTACK = Template(load_prompt("modes/attack.txt"))
+SYSTEM_SCAN = Template(load_prompt("modes/scan.txt"))
 SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
 SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
 MODES = {
-	"attack": {
-		"system_prompt": SYSTEM_ATTACK,
+	"scan": {
+		"system_prompt": SYSTEM_SCAN,
 		"description": "actively scan, run tools / shell, exploit, and write or curate findings",
 		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
@@ -69,7 +69,7 @@ MODES = {
 		# (`query`), ask/suggest (`follow_up`), delegate a same-mode helper (`subagent`),
 		# and `stop`. NO `shell` (attack surface), NO `task`/`workflow` (escalation), and
 		# NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
-		# changing findings is an active action that belongs in attack/exploit.
+		# changing findings is an active action that belongs in scan/exploit.
 		"description": "read-only — read and explain workspace data; you cannot scan, attack or write findings",
 		"allowed_actions": ["query", "follow_up", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
@@ -106,16 +106,27 @@ def build_mode_banner(mode: str, mode_config: dict = None) -> str:
 	return f"<current_mode>\n{line}\n</current_mode>"
 
 
+# Legacy mode names -> current names, so persisted sessions and older callers that
+# still pass "attack" keep working.
+MODE_ALIASES = {"attack": "scan"}
+
+
+def normalize_mode(mode):
+	"""Resolve a legacy mode alias (e.g. "attack") to its current name ("scan")."""
+	mode = (mode or "").strip().lower() if isinstance(mode, str) else mode
+	return MODE_ALIASES.get(mode, mode)
+
+
 def get_mode_config(mode: str) -> dict:
 	"""Get full config for a mode.
 
 	Args:
-		mode: The mode name (attack, chat, exploit)
+		mode: The mode name (scan, chat, exploit)
 
 	Returns:
 		Mode configuration dict with system_prompt, allowed_actions, max_iterations
 	"""
-	return MODES.get(mode, MODES["chat"])
+	return MODES.get(normalize_mode(mode), MODES["chat"])
 
 
 def _format_opt_type(opt_config: dict) -> str:
@@ -286,7 +297,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	"""Get system prompt for mode with library reference filled in.
 
 	Args:
-		mode: One of "attack", "chat", or "exploit"
+		mode: One of "scan", "chat", or "exploit"
 		workspace_path: Path to the workspace/reports directory
 		backend: Optional interactivity backend to determine interaction rules
 		in_scope: Optional allow-list of targets to surface in the prompt.
@@ -295,6 +306,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	Returns:
 		Formatted system prompt string
 	"""
+	mode = normalize_mode(mode)
 	if mode not in MODES:
 		from secator.rich import console
 		from secator.output_types import Warning
@@ -309,7 +321,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# $output_types_reference, so they must be substituted for all modes — derive both
 	# from FINDING_TYPES so they never drift from the registry.
 	subst = dict(query_types=build_query_types(), output_types_reference=build_output_types_reference())
-	if mode in ("attack", "exploit"):
+	if mode in ("scan", "exploit"):
 		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 		subst.update(library_reference=build_library_reference(), **path_vars)
 	result = system_prompt.safe_substitute(**subst)

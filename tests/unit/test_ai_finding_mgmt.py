@@ -33,7 +33,7 @@ class TestFindingMgmtTools(unittest.TestCase):
 		# test_ai_loop.test_chat_mode_tool_surface).
 		write_tools = ('mark_vuln_exploited', 'mark_vuln_false_positive',
 		               'mark_vuln_exploit_failed', 'update_finding')
-		for mode in ('attack', 'exploit'):
+		for mode in ('scan', 'exploit'):
 			names = [s['function']['name'] for s in build_tool_schemas(mode)]
 			for t in write_tools:
 				self.assertIn(t, names, f'{t} missing from {mode}')

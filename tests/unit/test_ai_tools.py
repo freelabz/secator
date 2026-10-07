@@ -103,9 +103,9 @@ class TestToolSchemas(unittest.TestCase):
 class TestBuildToolSchemas(unittest.TestCase):
 	"""Verify build_tool_schemas filters by mode."""
 
-	def test_attack_mode_returns_all_tools(self):
+	def test_scan_mode_returns_all_tools(self):
 		from secator.ai.tools import build_tool_schemas, TOOL_SCHEMAS
-		schemas = build_tool_schemas("attack")
+		schemas = build_tool_schemas("scan")
 		self.assertEqual(len(schemas), len(TOOL_SCHEMAS))
 		names = {s["function"]["name"] for s in schemas}
 		self.assertEqual(names, set(TOOL_SCHEMAS.keys()))
@@ -137,7 +137,7 @@ class TestBuildToolSchemas(unittest.TestCase):
 		self.assertIn("run_workflow", names)
 		self.assertIn("run_shell", names)
 		self.assertIn("add_finding", names)
-		# exploit can delegate a subagent just like attack (the tool docstring even says
+		# exploit can delegate a subagent just like scan (the tool docstring even says
 		# "hand a confirmed vuln to an exploit subagent"); without this, the model tried
 		# the run_task(name="ai") workaround, hit the guard that points at run_subagent,
 		# and dead-ended because the tool wasn't exposed in this mode.
@@ -153,9 +153,9 @@ class TestBuildToolSchemas(unittest.TestCase):
 			return {s["function"]["name"] for s in build_tool_schemas(**kw)}
 		self.assertIn("change_mode", names(mode="chat", mode_is_auto=True))       # auto chat
 		self.assertNotIn("change_mode", names(mode="chat", mode_is_auto=False))   # pinned read-only chat
-		self.assertIn("change_mode", names(mode="attack", mode_is_auto=False))    # pinned attack
+		self.assertIn("change_mode", names(mode="scan", mode_is_auto=False))    # pinned scan
 		self.assertIn("change_mode", names(mode="exploit", mode_is_auto=False))   # pinned exploit
-		self.assertNotIn("change_mode", names(mode="attack", is_subagent=True))   # subagent
+		self.assertNotIn("change_mode", names(mode="scan", is_subagent=True))   # subagent
 
 	def test_unknown_mode_falls_back_to_chat(self):
 		from secator.ai.tools import build_tool_schemas
@@ -167,7 +167,7 @@ class TestBuildToolSchemas(unittest.TestCase):
 
 	def test_returns_list_of_dicts(self):
 		from secator.ai.tools import build_tool_schemas
-		schemas = build_tool_schemas("attack")
+		schemas = build_tool_schemas("scan")
 		self.assertIsInstance(schemas, list)
 		for s in schemas:
 			self.assertIsInstance(s, dict)
@@ -260,9 +260,9 @@ class TestToolCallToAction(unittest.TestCase):
 
 	def test_change_mode_conversion(self):
 		from secator.ai.tools import tool_call_to_action
-		result = tool_call_to_action("change_mode", {"mode": "attack", "reason": "need to scan"})
+		result = tool_call_to_action("change_mode", {"mode": "scan", "reason": "need to scan"})
 		self.assertEqual(result["action"], "change_mode")
-		self.assertEqual(result["mode"], "attack")
+		self.assertEqual(result["mode"], "scan")
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestCoerceStringifiedArgs(unittest.TestCase):

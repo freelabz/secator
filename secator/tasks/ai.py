@@ -23,7 +23,8 @@ from secator.ai.interactivity import create_backend, RemoteBackend, UserInputTim
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
-	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES
+	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES, MODE_ALIASES,
+	normalize_mode,
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
 from secator.ai.session import (
@@ -55,9 +56,9 @@ _MAX_FOLLOWUP_EXTENSIONS = 200
 _MAX_REPEATED_ANSWERS = 3
 
 # High-precision cues for the deterministic mode fast-path. Only unambiguous
-# prompts (cues for exactly one of attack/chat, and no exploit-ish cue) are
+# prompts (cues for exactly one of scan/chat, and no exploit-ish cue) are
 # resolved here; everything else defers to the LLM classifier.
-_ATTACK_CUES = (
+_SCAN_CUES = (
 	"scan", "pentest", "pen test", "enumerate", "enumeration", "recon",
 	"brute", "bruteforce", "fuzz", "attack", "nmap", "nuclei", "subdomain", "hack",
 )
@@ -77,7 +78,7 @@ _ACTIVE_EXPLOIT_RE = re.compile(r'\b(?:exploit|pwn|compromise|weaponize)\b')
 
 
 def fast_detect_mode(prompt):
-	"""Cheap deterministic pre-classifier. Returns 'attack'/'chat' for unambiguous prompts,
+	"""Cheap deterministic pre-classifier. Returns 'scan'/'chat' for unambiguous prompts,
 	else None to defer to the LLM. A discovery/summary request that only MENTIONS exploit/
 	vulns ("find the top 3 exploitable vulnerabilities") returns chat (summarize + STOP),
 	not auto-exploit; anything with active-exploit or scan intent defers."""
@@ -88,15 +89,15 @@ def fast_detect_mode(prompt):
 		discovery = any(c in text for c in _CHAT_CUES) or any(c in text for c in _DISCOVERY_CUES)
 		# Active = exploit verb OR a scan/attack cue (chat mode can't run those, so a mixed
 		# "find vulns AND scan" must defer, not force chat).
-		active = bool(_ACTIVE_EXPLOIT_RE.search(text)) or any(c in text for c in _ATTACK_CUES)
+		active = bool(_ACTIVE_EXPLOIT_RE.search(text)) or any(c in text for c in _SCAN_CUES)
 		if discovery and not active:
 			return "chat"
 		return None
-	has_attack = any(cue in text for cue in _ATTACK_CUES)
+	has_scan = any(cue in text for cue in _SCAN_CUES)
 	has_chat = any(cue in text for cue in _CHAT_CUES)
-	if has_attack and not has_chat:
-		return "attack"
-	if has_chat and not has_attack:
+	if has_scan and not has_chat:
+		return "scan"
+	if has_chat and not has_scan:
 		return "chat"
 	return None
 
@@ -213,7 +214,7 @@ def resolve_llm_credentials(
 
 @task()
 class ai(PythonRunner):
-	"""AI-powered penetration testing assistant (attack or chat mode)."""
+	"""AI-powered penetration testing assistant (scan or chat mode)."""
 	output_types = FINDING_TYPES + [Target]
 	tags = ["ai", "analysis", "pentest"]
 	default_inputs = ''
@@ -347,7 +348,7 @@ class ai(PythonRunner):
 
 		# Show prompt mode (diagnostic)
 		if self.run_opts.get("show_prompt", False):
-			show_mode = self.mode or "attack"
+			show_mode = self.mode or "scan"
 			prompt = get_system_prompt(
 				show_mode, workspace_path=str(self.reports_folder), backend=self.backend,
 				in_scope=self.in_scope, out_of_scope=self.out_of_scope)
@@ -591,7 +592,7 @@ class ai(PythonRunner):
 				self.debug(f'resume: pin lookup failed: {e}', sub='llm')
 				pinned = None
 			if pinned:
-				pinned_mode = pinned[0].get("mode") or (pinned[0].get("_context") or {}).get("ai_mode")
+				pinned_mode = normalize_mode(pinned[0].get("mode") or (pinned[0].get("_context") or {}).get("ai_mode"))
 				if pinned_mode in MODES:
 					self.mode_is_auto = False
 					self.mode = pinned_mode
@@ -599,23 +600,23 @@ class ai(PythonRunner):
 
 		# Carry the last auto-detected mode across a resume. A respawned worker starts at
 		# the default ("chat"), so `_detect_mode`'s no-de-escalation clamp (F3) would have
-		# no prior mode to anchor to — an AUTO session that had escalated to attack/exploit
+		# no prior mode to anchor to — an AUTO session that had escalated to scan/exploit
 		# then silently drops back to chat on the resumed turn (e.g. answering "Sure" to a
 		# follow-up re-classifies as chat). Seed `self.mode` from the newest persisted doc
 		# that carries a concrete mode so the clamp preserves it (escalation and
-		# attack<->exploit stay free; only the silent drop to chat is blocked). Skip when a
+		# scan<->exploit stay free; only the silent drop to chat is blocked). Skip when a
 		# pin was just restored above (hard-set modes don't re-detect anyway).
 		if getattr(self, "mode_is_auto", True):
 			try:
 				mode_docs = query_engine.search({
 					"_type": "ai", "_context.session_id": self.session_id,
-					"mode": {"$in": list(MODES)},
+					"mode": {"$in": [*MODES, *MODE_ALIASES]},
 				})
 			except Exception as e:  # noqa: BLE001 - a lookup must not crash the worker
 				self.debug(f'resume: last-mode lookup failed: {e}', sub='llm')
 				mode_docs = None
 			if mode_docs:
-				last_mode = max(mode_docs, key=lambda d: d.get("_timestamp", 0)).get("mode")
+				last_mode = normalize_mode(max(mode_docs, key=lambda d: d.get("_timestamp", 0)).get("mode"))
 				if last_mode in MODES:
 					self.mode = last_mode
 
@@ -1110,11 +1111,11 @@ class ai(PythonRunner):
 		self.sensitive = self.get_opt_value("sensitive")
 		# Mode intent. An empty opt or the explicit "auto" sentinel means AUTO-DETECT:
 		# the mode follows the conversation and is re-classified every turn (chat <->
-		# attack <-> exploit). A concrete mode is HARD-SET by the user: it sticks for the
+		# scan <-> exploit). A concrete mode is HARD-SET by the user: it sticks for the
 		# whole session and the AI must NOT silently escalate out of it (a chat session
 		# stays informational). `mode_is_auto` is the single source of truth for that
 		# distinction; it is stamped onto the runner context so resume keeps the intent.
-		_mode_opt = (self.get_opt_value("mode") or "").strip().lower()
+		_mode_opt = normalize_mode(self.get_opt_value("mode") or "")
 		self.mode_is_auto = _mode_opt in ("", "auto")
 		self.mode = "" if self.mode_is_auto else _mode_opt
 		self.max_tokens_total = self.get_opt_value("max_tokens_total")
@@ -1242,9 +1243,9 @@ class ai(PythonRunner):
 		"""Resolve the mode for the current turn.
 
 		AUTO (``mode_is_auto``): re-classify the current prompt EVERY turn so the mode
-		follows the conversation (chat <-> attack <-> exploit), including on resume.
+		follows the conversation (chat <-> scan <-> exploit), including on resume.
 		HARD-SET: the user pinned a mode — it sticks for the whole session and we never
-		re-classify, so a chat session cannot silently escalate into attack/exploit.
+		re-classify, so a chat session cannot silently escalate into scan/exploit.
 		``force`` is kept for call-site compatibility but no longer overrides a pin (an
 		auto session always re-detects; a hard-set one never does)."""
 		old_mode = self.mode
@@ -1275,7 +1276,7 @@ class ai(PythonRunner):
 				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
 					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
 				self._account_usage(result.get("usage"))
-				mode = result["content"].strip().lower()
+				mode = normalize_mode(result["content"])
 				if mode in MODES:  # honor any real mode (incl. exploit), don't discard it
 					console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
 					self.mode = mode
@@ -1289,10 +1290,10 @@ class ai(PythonRunner):
 		# F3: never auto-DE-escalate to read-only `chat` once the session has entered an
 		# action mode. A mid-engagement aside ("which of these looks most exploitable?")
 		# classifies as chat, but dropping there would strip run_shell/run_task/add_finding
-		# and could lose an unrecorded finding. Escalation and attack<->exploit stay free;
+		# and could lose an unrecorded finding. Escalation and scan<->exploit stay free;
 		# only the silent drop back to chat is blocked — an explicit switch_mode can still
 		# go read-only (the user's conscious choice).
-		if self.mode == "chat" and old_mode in ("attack", "exploit"):
+		if self.mode == "chat" and old_mode in ("scan", "exploit"):
 			console.print(rf"[bold green]\[INF][/] Keeping [bold]{old_mode}[/] mode (auto won't de-escalate to chat)")
 			self.mode = old_mode
 		# Resolve the agent-loop cap.
@@ -1809,7 +1810,7 @@ class ai(PythonRunner):
 			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 			mode_switched_to = self.mode
 		else:
-			# Re-detect mode (user may switch from chat to attack, etc.)
+			# Re-detect mode (user may switch from chat to scan, etc.)
 			previous_mode = self.mode
 			self._detect_mode(force=True)
 			if self.mode != previous_mode:
