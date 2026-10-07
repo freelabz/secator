@@ -217,9 +217,7 @@ def register_runner(cli_endpoint, config):
 		dry_run = opts['dry_run']
 		yaml = opts['yaml']
 		tree = opts['tree']
-		from click.core import ParameterSource
-		ws_explicit = ctx.get_parameter_source('workspace') == ParameterSource.COMMANDLINE
-		context = {'workspace_name': ws, 'workspace_id': ws, 'workspace_explicit': ws_explicit}
+		context = {'workspace_name': ws, 'workspace_id': ws}
 		enable_pyinstrument = opts['enable_pyinstrument']
 		enable_memray = opts['enable_memray']
 		contextmanager = nullcontext()
@@ -317,7 +315,7 @@ def register_runner(cli_endpoint, config):
 			try:
 				# Resolve the workspace (name or id) to its real id so runners/findings
 				# are tagged with the ObjectId. Note the runner re-resolves this after
-				# profile / route-based workspace assignment (see secator.hooks.api).
+				# profile-based workspace assignment (see secator.hooks.api).
 				from secator.hooks.api import resolve_workspace
 
 				workspace_id, workspace_name = resolve_workspace(context.get('workspace_id'))

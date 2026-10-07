@@ -158,7 +158,7 @@ def resolve_workspace(value):
 	Accepts a 24-char hex ObjectId (looked up by id) or a workspace name (looked up
 	in the workspace list, scoped to the configured org). Cached per input value.
 
-	The runner's profile / route-based workspace assignment overwrites
+	The runner's profile-based workspace assignment overwrites
 	context['workspace_id'] with a workspace name, so callers re-resolve it here to
 	make sure the id sent to the API is always the real ObjectId.
 	"""

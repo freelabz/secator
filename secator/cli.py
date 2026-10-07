@@ -2617,7 +2617,6 @@ q [bright_magenta]"port.state == 'open' && port.port in [22,443]"[/]   [grey42]#
 ws list                                             [grey42]# list workspaces[/]
 ws use prod                                         [grey42]# switch to prod workspace (auto-create if missing)[/]
 s host [blue]-ws[/] [bright_magenta]prod[/] example.com                         [grey42]# run in prod workspace explicitely[/]
-c set --append workspaces.routes.prod *example.com* [grey42]# run in prod workspace implicitely (based on target regex)[/]
 
 [grey42]# Use different backends for results[/]
 s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com                  [grey42]# save results using driver mongodb[/]

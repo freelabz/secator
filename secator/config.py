@@ -31,6 +31,19 @@ USER_AGENTS = {
 }
 
 
+_ROUTES_WARNED = False
+
+
+def _warn_routes_deprecated():
+	global _ROUTES_WARNED
+	if _ROUTES_WARNED:
+		return
+	_ROUTES_WARNED = True
+	console.print(
+		'[bold orange1]Config key "workspaces.routes" is deprecated and ignored: pass -ws <workspace>, '
+		'or set a workspace in a profile, instead.[/]')
+
+
 class StrictModel(BaseModel, extra='forbid'):
 	pass
 
@@ -175,7 +188,6 @@ class Drivers(StrictModel):
 
 class Workspace(StrictModel):
 	current: str = ''
-	routes: Dict[str, List[str]] = {}
 	profiles: Dict[str, List[str]] = {}
 
 
@@ -724,6 +736,10 @@ class Config(DotMap):
 			if path:
 				console.print(f'[bold orange1]Migrating config key "workspaces.default" to "workspaces.current" in {path}[/]')
 			migrated = True
+
+		# Deprecated: 'workspaces.routes' was removed; accept and ignore it
+		if isinstance(ws_data, dict) and ws_data.pop('routes', None):
+			_warn_routes_deprecated()
 
 		if migrated and path:
 			try:
