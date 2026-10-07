@@ -409,7 +409,7 @@ class TestBackendToolSchemas(unittest.TestCase):
 	def test_local_backend_excludes_stop(self):
 		"""CLIBackend excludes the stop tool."""
 		backend = CLIBackend()
-		schemas = build_tool_schemas("attack", backend=backend)
+		schemas = build_tool_schemas("scan", backend=backend)
 		names = {s["function"]["name"] for s in schemas}
 		self.assertNotIn("stop", names)
 		self.assertIn("follow_up", names)
@@ -417,7 +417,7 @@ class TestBackendToolSchemas(unittest.TestCase):
 	def test_auto_backend_excludes_follow_up_includes_stop(self):
 		"""AutoBackend excludes follow_up and injects stop."""
 		backend = AutoBackend()
-		schemas = build_tool_schemas("attack", backend=backend)
+		schemas = build_tool_schemas("scan", backend=backend)
 		names = {s["function"]["name"] for s in schemas}
 		self.assertNotIn("follow_up", names)
 		self.assertIn("stop", names)
@@ -425,7 +425,7 @@ class TestBackendToolSchemas(unittest.TestCase):
 	def test_remote_backend_excludes_stop(self):
 		"""RemoteBackend excludes stop (uses follow_up via DB polling)."""
 		backend = RemoteBackend(timeout=60, query_engine=MagicMock())
-		schemas = build_tool_schemas("attack", backend=backend)
+		schemas = build_tool_schemas("scan", backend=backend)
 		names = {s["function"]["name"] for s in schemas}
 		self.assertNotIn("stop", names)
 		self.assertIn("follow_up", names)
@@ -433,14 +433,14 @@ class TestBackendToolSchemas(unittest.TestCase):
 	def test_system_prompt_includes_stop_rules_for_auto(self):
 		"""Auto backend's system prompt includes stop rules."""
 		backend = AutoBackend()
-		prompt = get_system_prompt("attack", workspace_path="/tmp/ws", backend=backend)
+		prompt = get_system_prompt("scan", workspace_path="/tmp/ws", backend=backend)
 		self.assertIn("<stop>", prompt)
 		self.assertNotIn("<follow_up>", prompt.split("<stop>")[-1])  # stop rules at end
 
 	def test_system_prompt_no_stop_for_local(self):
 		"""Local backend's system prompt does not append stop rules."""
 		backend = CLIBackend()
-		prompt = get_system_prompt("attack", workspace_path="/tmp/ws", backend=backend)
+		prompt = get_system_prompt("scan", workspace_path="/tmp/ws", backend=backend)
 		self.assertNotIn("<stop>", prompt)
 
 
@@ -1193,7 +1193,7 @@ class TestModeAutoVsPinned(unittest.TestCase):
 
     def test_auto_mode_redetects_each_turn(self):
         """mode_is_auto=True: _detect_mode re-classifies the current prompt and adopts
-        the detected mode (fluid chat<->attack<->exploit), even if it was chat before."""
+        the detected mode (fluid chat<->scan<->exploit), even if it was chat before."""
         from secator.tasks.ai import ai as AiTask
         fake = MagicMock()
         fake.mode_is_auto = True
@@ -1201,10 +1201,10 @@ class TestModeAutoVsPinned(unittest.TestCase):
         fake.prompt = "exploit the Apache path traversal now"
         fake.is_subagent = False
         fake.max_iterations = 5
-        with patch("secator.tasks.ai.fast_detect_mode", return_value="attack"), \
+        with patch("secator.tasks.ai.fast_detect_mode", return_value="scan"), \
              patch("secator.tasks.ai.build_tool_schemas", return_value=[]):
             AiTask._detect_mode(fake)
-        self.assertEqual(fake.mode, "attack")
+        self.assertEqual(fake.mode, "scan")
 
     def test_chat_mode_tool_surface(self):
         """Chat is read-only: no run_shell (attack surface), no run_task/run_workflow
@@ -1218,16 +1218,16 @@ class TestModeAutoVsPinned(unittest.TestCase):
             self.assertNotIn(forbidden, chat)
         self.assertIn("query_workspace", chat)
         self.assertIn("run_subagent", chat)
-        # attack keeps shell + escalation tools
-        attack = {s["function"]["name"] for s in build_tool_schemas("attack")}
-        self.assertIn("run_shell", attack)
-        self.assertIn("run_task", attack)
+        # scan keeps shell + escalation tools
+        scan = {s["function"]["name"] for s in build_tool_schemas("scan")}
+        self.assertIn("run_shell", scan)
+        self.assertIn("run_task", scan)
 
     def test_auto_does_not_deescalate_to_chat(self):
         """F3: in auto, a chat-classified aside while already in an action mode keeps the
         action mode — it must not silently drop to read-only chat mid-engagement."""
         from secator.tasks.ai import ai as AiTask
-        for start in ("attack", "exploit"):
+        for start in ("scan", "exploit"):
             fake = MagicMock()
             fake.mode_is_auto = True
             fake.mode = start              # already in an action mode
@@ -1239,17 +1239,17 @@ class TestModeAutoVsPinned(unittest.TestCase):
             self.assertEqual(fake.mode, start, f"auto de-escalated {start}->chat")
 
     def test_auto_still_escalates_chat_to_action(self):
-        """Escalation is unaffected: a chat session that gets an attack prompt moves up."""
+        """Escalation is unaffected: a chat session that gets a scan prompt moves up."""
         from secator.tasks.ai import ai as AiTask
         fake = MagicMock()
         fake.mode_is_auto = True
         fake.mode = "chat"
-        fake.prompt = "run an nmap scan on the target"  # fast_detect_mode -> attack
+        fake.prompt = "run an nmap scan on the target"  # fast_detect_mode -> scan
         fake.is_subagent = False
         fake.max_iterations = 5
         with patch("secator.tasks.ai.build_tool_schemas", return_value=[]):
             AiTask._detect_mode(fake)
-        self.assertEqual(fake.mode, "attack")
+        self.assertEqual(fake.mode, "scan")
 
     def _run_subagent(self, ctx, action):
         """Drive _handle_subagent, capturing the dispatched task action (or the Error)."""
@@ -1276,28 +1276,28 @@ class TestModeAutoVsPinned(unittest.TestCase):
         self.assertFalse(errs)
         self.assertEqual(act["name"], "ai")
         self.assertEqual(act["opts"]["mode"], "chat")
-        # requested attack -> error, no dispatch
-        act2, errs2 = self._run_subagent(ctx, {"objective": "o", "targets": ["x"], "description": "d", "mode": "attack"})
+        # requested scan -> error, no dispatch
+        act2, errs2 = self._run_subagent(ctx, {"objective": "o", "targets": ["x"], "description": "d", "mode": "scan"})
         self.assertIsNone(act2)
         self.assertTrue(errs2 and "different mode" in errs2[0].message)
 
     def test_run_subagent_auto_and_attack_allow_mode(self):
-        """An auto session (even if currently chat) or an attack session may set the
+        """An auto session (even if currently chat) or a scan session may set the
         subagent's mode."""
         from secator.ai import actions as A
         auto = A.ActionContext(targets=["x"], model="m", mode="chat", mode_is_auto=True)
         act, errs = self._run_subagent(auto, {"objective": "o", "targets": ["x"], "description": "d", "mode": "exploit"})
         self.assertFalse(errs)
         self.assertEqual(act["opts"]["mode"], "exploit")
-        attack = A.ActionContext(targets=["x"], model="m", mode="attack", mode_is_auto=False)
-        act2, _ = self._run_subagent(attack, {"objective": "o", "targets": ["x"], "description": "d"})
-        self.assertEqual(act2["opts"]["mode"], "attack")  # inherits when omitted
+        scan = A.ActionContext(targets=["x"], model="m", mode="scan", mode_is_auto=False)
+        act2, _ = self._run_subagent(scan, {"objective": "o", "targets": ["x"], "description": "d"})
+        self.assertEqual(act2["opts"]["mode"], "scan")  # inherits when omitted
 
     def test_run_task_name_ai_is_rejected(self):
         """run_task(name="ai") is refused — spawning goes through run_subagent."""
         from secator.ai import actions as A
         from secator.output_types import Error
-        ctx = A.ActionContext(targets=["x"], model="m", mode="attack")
+        ctx = A.ActionContext(targets=["x"], model="m", mode="scan")
         with patch.object(A, "_run_runner", lambda *a, **k: iter(())):
             items = list(A._handle_task({"action": "task", "name": "ai", "targets": ["x"], "description": "d"}, ctx))
         errs = [i for i in items if isinstance(i, Error)]

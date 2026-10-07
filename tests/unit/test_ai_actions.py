@@ -906,8 +906,8 @@ class TestSanitizeChildOpts(unittest.TestCase):
 		self.assertEqual(clean, {})
 
 	def test_keeps_benign_task_opts(self):
-		clean = _sanitize_child_opts({'ports': '80,443', 'rate_limit': 100, 'mode': 'attack'})
-		self.assertEqual(clean, {'ports': '80,443', 'rate_limit': 100, 'mode': 'attack'})
+		clean = _sanitize_child_opts({'ports': '80,443', 'rate_limit': 100, 'mode': 'scan'})
+		self.assertEqual(clean, {'ports': '80,443', 'rate_limit': 100, 'mode': 'scan'})
 
 	def test_clamps_max_iterations(self):
 		clean = _sanitize_child_opts({'max_iterations': 9999})

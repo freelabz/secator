@@ -59,7 +59,7 @@ def _fold(node, opts, targets):
 	if isinstance(node, ast.Constant):
 		return True, node.value
 
-	# Fold constant container literals (opts.mode in ('attack', 'chat')) so a runtime-only `in`
+	# Fold constant container literals (opts.mode in ('scan', 'chat')) so a runtime-only `in`
 	# gate collapses instead of leaking a fieldless expr to python_expr_to_mongo.
 	# ponytail: dict literals + partially-const containers don't ship; add if one does.
 	if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
