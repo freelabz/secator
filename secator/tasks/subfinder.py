@@ -1,5 +1,5 @@
 from secator.decorators import task
-from secator.definitions import (DELAY, DOMAIN, HOST, OPT_NOT_SUPPORTED, PROXY,
+from secator.definitions import (CONFIDENCE, DELAY, DOMAIN, HOST, OPT_NOT_SUPPORTED, PROXY,
 							   RATE_LIMIT, RETRIES, THREADS, TIMEOUT)
 from secator.output_types import Subdomain
 from secator.serializers import JSONSerializer
@@ -31,6 +31,8 @@ class subfinder(ReconDns):
 	output_map = {
 		Subdomain: {
 			DOMAIN: 'input',
+			# Passive subdomain enumeration (API sources) — not resolved/confirmed, so low.
+			CONFIDENCE: lambda x: 'low',
 		}
 	}
 	install_version = 'v2.7.0'

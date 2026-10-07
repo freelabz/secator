@@ -76,7 +76,8 @@ class naabu(ReconPort):
 				ip=ip,
 				host=host,
 				alive=True,
-				tags=['ping']
+				tags=['ping'],
+				confidence='high',  # actively confirmed reachable
 			)
 			self.hosts.append(host)
 		yield Port(
@@ -84,5 +85,6 @@ class naabu(ReconPort):
 			port=item['port'],
 			host=host,
 			state='open',
-			tags=['syn' if scan_type == 's' else 'connect']
+			tags=['syn' if scan_type == 's' else 'connect'],
+			confidence='high',  # actively confirmed open
 		)
