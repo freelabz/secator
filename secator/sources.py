@@ -92,6 +92,54 @@ def clone_git_repo(url, dest_folder, token=None, depth=1, timeout=300):
 	return str(target)
 
 
+ARCHIVE_EXTENSIONS = ('.zip', '.tar', '.tar.gz', '.tgz', '.tar.bz2')
+
+
+def is_gcs_url(value):
+	"""True if ``value`` is a ``gs://bucket/object`` reference (an uploaded source)."""
+	return isinstance(value, str) and value.startswith('gs://')
+
+
+def is_archive_url(value):
+	"""True if ``value`` points at a code archive that must be extracted to be scanned.
+
+	Distinguishes an uploaded ``gs://…/foo.zip`` (extract) from a plain ``gs://`` bucket
+	prefix a tool may scan natively (leave as-is).
+	"""
+	return isinstance(value, str) and value.lower().endswith(ARCHIVE_EXTENSIONS)
+
+
+def resolve_gcs_archive(gs_url, dest_folder):
+	"""Download a ``gs://`` archive and extract it, returning the local dir to scan.
+
+	Used for uploaded code (a zip/tar the platform stored in GCS). The archive is
+	downloaded into ``dest_folder``, extracted, then removed so a tool scans the code
+	rather than the archive blob. A single top-level directory (the usual archive layout)
+	is returned directly.
+	"""
+	from secator.hooks.gcs import download_blob
+	if not is_gcs_url(gs_url):
+		raise ValueError(f'not a gs:// url: {gs_url}')
+	bucket, _, blob = gs_url[len('gs://'):].partition('/')
+	if not bucket or not blob:
+		raise ValueError(f'malformed gs:// url: {gs_url}')
+	dest_folder = Path(dest_folder)
+	dest_folder.mkdir(parents=True, exist_ok=True)
+	archive = dest_folder / (Path(blob).name or 'archive')
+	download_blob(bucket, blob, str(archive))
+	extract_dir = dest_folder / 'extracted'
+	extract_dir.mkdir(exist_ok=True)
+	shutil.unpack_archive(str(archive), str(extract_dir))
+	try:
+		archive.unlink()
+	except OSError:
+		pass
+	entries = list(extract_dir.iterdir())
+	if len(entries) == 1 and entries[0].is_dir():
+		return str(entries[0])
+	return str(extract_dir)
+
+
 def demo():  # pragma: no cover - a runnable check against a tiny public repo
 	import tempfile
 	assert is_git_url('https://github.com/octocat/Hello-World')

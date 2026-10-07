@@ -35,6 +35,15 @@ class TestSources(unittest.TestCase):
 		self.assertNotIn('SECRET', clean)  # the stored remote never carries the token
 		self.assertEqual(clean, 'https://ghe.acme.internal/org/repo.git')
 
+	def test_gcs_and_archive_detection(self):
+		from secator.sources import is_gcs_url, is_archive_url
+		assert is_gcs_url('gs://bucket/sources/x/app.zip')
+		assert not is_gcs_url('https://github.com/a/b')
+		assert is_archive_url('gs://bucket/x/app.zip')
+		assert is_archive_url('App.TAR.GZ') and is_archive_url('x.tgz')
+		assert not is_archive_url('gs://bucket/some/prefix')  # a bucket, not an archive
+		assert not is_archive_url('x.py')
+
 
 if __name__ == '__main__':
 	unittest.main()
