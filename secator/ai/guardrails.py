@@ -1101,18 +1101,17 @@ class PermissionEngine:
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
-		elif action_type in ("subagent", "stop", "change_mode"):
-			# Control / meta actions with no network egress or exec of their OWN: `stop`
-			# and `change_mode` only steer the loop, and a `subagent`'s own actions are
-			# guardrail-checked inside its run (its targets are also scope-checked here via
-			# the target layer below). Auto-allow the action itself — without this they fall
-			# through to the "Unknown action type" deny and silently break run_subagent /
-			# the bare stop() / change_mode.
-			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
-		elif action_type in ("query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
-			# mark_vuln_exploited / mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
-			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
-			# so they're safe to auto-allow alongside query/add_finding.
+		# Auto-allow is sourced from the tool registry (`tool.auto_allow`), the single
+		# source of truth — not a hand-synced tuple here (that drift is what rotted the
+		# add_vuln_poc rename). Auto-allowed actions are control/meta (`subagent`/`stop`/
+		# `change_mode` only steer the loop; a subagent's own actions + targets are
+		# guardrail-checked inside its run and by the target layer below) and finding
+		# reads/writes (`query`/`follow_up`/`add_finding`/`mark_vuln_*`/`update_finding`
+		# only read or $set-update an EXISTING workspace finding — no scope widening). The
+		# target layer below still scope-checks any `targets` these carry.
+		from secator.ai.tools import TOOLS_BY_ACTION
+		tool = TOOLS_BY_ACTION.get(action_type)
+		if tool is not None and tool.auto_allow:
 			# Don't let an injected add_finding silently mint a scope-widening target finding.
 			# Deny (fail-closed) rather than "ask": there is no add_finding prompt layer, so an
 			# "ask" here isn't surfaceable — it would just spin the prompt loop until it denies
