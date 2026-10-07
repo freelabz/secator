@@ -1,5 +1,106 @@
 # Changelog
 
+## [0.49.1](https://github.com/freelabz/secator/compare/v0.49.0...v0.49.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **celery:** clear has_children on an abandoned task ([#1484](https://github.com/freelabz/secator/issues/1484)) ([ec0284e](https://github.com/freelabz/secator/commit/ec0284e95b6957e54b77fe44bba5ed74ec3ed2f5))
+* **hooks:** create runner on first api driver update when id is a run-scope uuid ([#1492](https://github.com/freelabz/secator/issues/1492)) ([b5f30aa](https://github.com/freelabz/secator/commit/b5f30aa3868cc8adb780fc0683190200d34b16ee))
+
+## [0.49.0](https://github.com/freelabz/secator/compare/v0.48.0...v0.49.0) (2026-10-04)
+
+
+### Features
+
+* **ai:** model-driven change_mode (auto self-escalation) ([#1475](https://github.com/freelabz/secator/issues/1475)) ([76ce865](https://github.com/freelabz/secator/commit/76ce865172cecdf03c65cb1168dd8fec80820e57))
+
+
+### Bug Fixes
+
+* **ai:** bare stop() ends the turn; don't re-query after a run ([#1473](https://github.com/freelabz/secator/issues/1473)) ([19546f9](https://github.com/freelabz/secator/commit/19546f962803ecbafa6d210c8626467bce069d10))
+* **ai:** guardrails deny subagent / stop / change_mode as "unknown action type" ([#1480](https://github.com/freelabz/secator/issues/1480)) ([d03511f](https://github.com/freelabz/secator/commit/d03511fa880b78699e3dc6c46e6f710df16580b7))
+* **ai:** normalize no-arg tool calls so a bare stop() can't raise ([#1478](https://github.com/freelabz/secator/issues/1478)) ([53a8e7b](https://github.com/freelabz/secator/commit/53a8e7bd6ff24a6ffd6000257cf1f37e819ddefe))
+* **ai:** render a marked false-positive by name, not bare uuid ([#1479](https://github.com/freelabz/secator/issues/1479)) ([0da4f94](https://github.com/freelabz/secator/commit/0da4f9415c413415bd763a900af5bd5a436f4a70))
+* **ai:** steer auto-chat to change_mode for writes too; drop duplicate switch Info ([#1481](https://github.com/freelabz/secator/issues/1481)) ([5978abb](https://github.com/freelabz/secator/commit/5978abba324c502e1b1e0384094862e9b7dc1921))
+* **search_vulns:** don't fail install when the upstream -u version-check crashes ([#1482](https://github.com/freelabz/secator/issues/1482)) ([a025885](https://github.com/freelabz/secator/commit/a025885ba32691e8db099436d16c1abe44bcac30))
+* **sshaudit:** tolerate bare-string algorithm entries in on_json_loaded ([#1476](https://github.com/freelabz/secator/issues/1476)) ([5546845](https://github.com/freelabz/secator/commit/554684527b7625c64202901d1a463742dcd8b927))
+
+## [0.48.0](https://github.com/freelabz/secator/compare/v0.47.0...v0.48.0) (2026-10-02)
+
+
+### Features
+
+* **ai:** auto/pinned mode semantics + same-mode spawn_subagent ([#1469](https://github.com/freelabz/secator/issues/1469)) ([0729048](https://github.com/freelabz/secator/commit/0729048b9ec60bd3d3444cebe7b82beca53e9b02))
+
+
+### Bug Fixes
+
+* **nmap:** keep all IDS mass-scan ports at low confidence ([#1392](https://github.com/freelabz/secator/issues/1392)) ([242925b](https://github.com/freelabz/secator/commit/242925b62b2380f26b412085a208fe276b906782))
+
+## [0.47.0](https://github.com/freelabz/secator/compare/v0.46.1...v0.47.0) (2026-09-30)
+
+
+### Features
+
+* **ai:** dedicated mark_vuln_exploited / mark_vuln_false_positive + update_finding tools ([#1442](https://github.com/freelabz/secator/issues/1442)) ([77a474b](https://github.com/freelabz/secator/commit/77a474bada98d53b7dee471f7fc90257a619b0b6))
+* **loader:** warn on duplicate scan/workflow/task names ([#1334](https://github.com/freelabz/secator/issues/1334)) ([6e1f2fd](https://github.com/freelabz/secator/commit/6e1f2fd09465550ef12e4b7194de7b909e620d71))
+* **runners:** optional worker-process utilization in the stat tree ([#1463](https://github.com/freelabz/secator/issues/1463)) ([d39966d](https://github.com/freelabz/secator/commit/d39966d10722578262d90c13a0adf0c31996ce91))
+
+
+### Bug Fixes
+
+* **ai:** subagent can read its own tool results + inherits parent's turn budget ([#1464](https://github.com/freelabz/secator/issues/1464)) ([98dd8ba](https://github.com/freelabz/secator/commit/98dd8ba93d07e3b1af617d0ce254fa0c2e8cb078))
+* **installer:** health crashes when pypi is unreachable ([#1405](https://github.com/freelabz/secator/issues/1405)) ([620aec9](https://github.com/freelabz/secator/commit/620aec94240acbba05026499953f3cc1b0b62254))
+* **mongodb:** the mongodb driver owns finding identity (_uuid = str(_id)) ([#1461](https://github.com/freelabz/secator/issues/1461)) ([2d976d0](https://github.com/freelabz/secator/commit/2d976d084e338dbcd7c756c248a55c831db03b0e))
+* **nuclei:** stop enabling -hang-monitor by default (nuclei kills itself) ([#1410](https://github.com/freelabz/secator/issues/1410)) ([6614ebb](https://github.com/freelabz/secator/commit/6614ebbd8dde463c776037f4b44371703b8f11c6))
+
+## [0.46.1](https://github.com/freelabz/secator/compare/v0.46.0...v0.46.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **ai:** a discovery/summary request must not auto-exploit a live target ([#1456](https://github.com/freelabz/secator/issues/1456)) ([3459407](https://github.com/freelabz/secator/commit/34594078abe86a17fea1920dd205fd5d9df7422e))
+* **ai:** prettify AI types render ([#1453](https://github.com/freelabz/secator/issues/1453)) ([e824e3c](https://github.com/freelabz/secator/commit/e824e3caf55de0e16748f400f829cc3d67faf1e5))
+* **ai:** subagent must persist findings + hand a clean summary back to the parent ([#1457](https://github.com/freelabz/secator/issues/1457)) ([e5ef807](https://github.com/freelabz/secator/commit/e5ef80781d576a1379b334ed1d6aebc45defcc32))
+* **trufflehog:** build the pinned release tag, not upstream HEAD ([#1459](https://github.com/freelabz/secator/issues/1459)) ([6d3be05](https://github.com/freelabz/secator/commit/6d3be05eb0dbf54eb5afde96f6c92e4e97508754))
+* **utils:** don't classify ambiguous short dotted-decimals (0.5) as IPs ([#1455](https://github.com/freelabz/secator/issues/1455)) ([fedf82c](https://github.com/freelabz/secator/commit/fedf82cb3bf3b9bb51bb59cc356340b492cb33d6))
+
+## [0.46.0](https://github.com/freelabz/secator/compare/v0.45.1...v0.46.0) (2026-09-28)
+
+
+### Features
+
+* **ai:** give AI subagents their own conversation id ([#1448](https://github.com/freelabz/secator/issues/1448)) ([29412e6](https://github.com/freelabz/secator/commit/29412e646c610fadb0edf61f9eb8dc2277d5ac6b))
+
+## [0.45.1](https://github.com/freelabz/secator/compare/v0.45.0...v0.45.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **ai,core:** force-inherit isolated to subagents + api_base credential gate + scope-regex ReDoS guard ([#1407](https://github.com/freelabz/secator/issues/1407)) ([ef439d9](https://github.com/freelabz/secator/commit/ef439d988acd2ec24a91bdea166de7b7238c7390))
+* **ai:** AI feature robustness — runner keying, isolation race, local-model completion, local-driver PoC, steer consume ([#1435](https://github.com/freelabz/secator/issues/1435)) ([d373433](https://github.com/freelabz/secator/commit/d3734331cc4419a8856f0157a951519477f2a22d))
+* **celery:** default redis result-backend health check to off (chord PubSubError) ([#1438](https://github.com/freelabz/secator/issues/1438)) ([533348b](https://github.com/freelabz/secator/commit/533348b70279736a5a380ca0c5dccf60b2f82fe1))
+* **runner:** don't cascade workflow/scan description onto child tasks ([#1436](https://github.com/freelabz/secator/issues/1436)) ([88b9208](https://github.com/freelabz/secator/commit/88b9208bc825e9090238ad46858719b6ea2e7eef))
+
+## [0.45.0](https://github.com/freelabz/secator/compare/v0.44.0...v0.45.0) (2026-09-24)
+
+
+### Features
+
+* **ai:** reliability, scope injection, model selection, resume + guardrail refactor ([#1431](https://github.com/freelabz/secator/issues/1431)) ([934dd89](https://github.com/freelabz/secator/commit/934dd89b4770971bed18c6cd3f3a89cea59dfe15))
+
+
+### Bug Fixes
+
+* **ai:** parse text tool-calls, fix guardrail/concurrent prompts, surface scope in prompt ([#1415](https://github.com/freelabz/secator/issues/1415)) ([e7e515c](https://github.com/freelabz/secator/commit/e7e515c95a058bb4419911bc1c1bc91ecbeca1ff))
+* **ai:** stop emitting "Path does not exist" warnings on shell actions ([#1417](https://github.com/freelabz/secator/issues/1417)) ([ca5f514](https://github.com/freelabz/secator/commit/ca5f514de4e748b9fa564747454bc930f6bf12c1))
+* **cli:** workspace summary crashes when a finding type is empty ([#1404](https://github.com/freelabz/secator/issues/1404)) ([c542207](https://github.com/freelabz/secator/commit/c5422072be9d4b6949582e56ab03aca4137263e0))
+* **command:** CPU stats were always 0 (fresh psutil.Process has no CPU baseline) ([#1420](https://github.com/freelabz/secator/issues/1420)) ([2d56749](https://github.com/freelabz/secator/commit/2d5674913fe02113dc7308e2a064bcc3c9fa11e2))
+* **mongodb:** bound tag_duplicates baseline load to prevent worker OOM ([#1394](https://github.com/freelabz/secator/issues/1394)) ([7d0d5b8](https://github.com/freelabz/secator/commit/7d0d5b84e0212d99cf7a1b69ec4826ff05ebb573))
+* **tasks:** move arjun, bup and dnsx/brute off the small worker profile ([#1419](https://github.com/freelabz/secator/issues/1419)) ([9101021](https://github.com/freelabz/secator/commit/91010215afd667f633976a7d1ac6c4de2316d1b1))
+* **wpscan:** run on the medium worker profile (small pool OOM-kills it) ([#1418](https://github.com/freelabz/secator/issues/1418)) ([5e05195](https://github.com/freelabz/secator/commit/5e05195be7a872e46f79604aa10d9aee4ee041aa))
+
 ## [0.44.0](https://github.com/freelabz/secator/compare/v0.43.3...v0.44.0) (2026-09-17)
 
 

@@ -187,5 +187,65 @@ class TestAITask(unittest.TestCase):
         self.assertIn('pentest', ai.tags)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestChangeModeHandler(unittest.TestCase):
+    """_handle_change_mode: model-driven mode switch, with the pinned-chat guard."""
+
+    def _run(self, action, ctx):
+        from secator.ai.actions import _handle_change_mode
+        return list(_handle_change_mode(action, ctx))
+
+    def _ctx(self, mode, mode_is_auto):
+        from secator.ai.actions import ActionContext
+        return ActionContext(targets=[], model='m', mode=mode, mode_is_auto=mode_is_auto)
+
+    def test_auto_escalation_signals_mode_changed(self):
+        from secator.output_types import Ai
+        out = self._run({'action': 'change_mode', 'mode': 'scan'}, self._ctx('chat', True))
+        self.assertEqual(len(out), 1)
+        self.assertIsInstance(out[0], Ai)
+        self.assertEqual(out[0].ai_type, 'mode_changed')
+        self.assertEqual(out[0].content, 'scan')
+
+    def test_legacy_attack_target_aliases_to_scan(self):
+        out = self._run({'action': 'change_mode', 'mode': 'attack'}, self._ctx('chat', True))
+        self.assertEqual(out[0].content, 'scan')
+
+    def test_pinned_chat_cannot_self_escape(self):
+        from secator.output_types import Ai, Error
+        out = self._run({'action': 'change_mode', 'mode': 'scan'}, self._ctx('chat', False))
+        self.assertTrue(out and isinstance(out[0], Error))
+        self.assertFalse(any(isinstance(o, Ai) and o.ai_type == 'mode_changed' for o in out))
+
+    def test_pinned_action_mode_can_switch(self):
+        from secator.output_types import Ai
+        out = self._run({'action': 'change_mode', 'mode': 'exploit'}, self._ctx('scan', False))
+        self.assertTrue(any(isinstance(o, Ai) and o.ai_type == 'mode_changed' and o.content == 'exploit'
+                            for o in out))
+
+    def test_invalid_target_rejected(self):
+        from secator.output_types import Error
+        for bad in ('chat', '', 'nonsense'):
+            out = self._run({'action': 'change_mode', 'mode': bad}, self._ctx('chat', True))
+            self.assertTrue(out and isinstance(out[0], Error), bad)
+
+    def test_cannot_de_escalate(self):
+        # change_mode only escalates: exploit -> scan (downgrade) is rejected with an
+        # Error and never signals mode_changed.
+        from secator.output_types import Ai, Error
+        out = self._run({'action': 'change_mode', 'mode': 'scan'}, self._ctx('exploit', True))
+        self.assertTrue(out and isinstance(out[0], Error))
+        self.assertFalse(any(isinstance(o, Ai) and o.ai_type == 'mode_changed' for o in out))
+
+    def test_same_mode_is_benign_noop(self):
+        # Re-requesting the current mode (the model was unsure which mode it was in) is a
+        # no-op: a calm Info, NOT a scary "cannot de-escalate" Error, and no mode_changed.
+        from secator.output_types import Ai, Error, Info
+        out = self._run({'action': 'change_mode', 'mode': 'scan'}, self._ctx('scan', True))
+        self.assertTrue(out and isinstance(out[0], Info))
+        self.assertFalse(any(isinstance(o, Error) for o in out))
+        self.assertFalse(any(isinstance(o, Ai) and o.ai_type == 'mode_changed' for o in out))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -392,17 +392,29 @@ def extract_command_targets(command: str) -> List[str]:
 			for arg in args[1:]:
 				_check_arg(arg)
 	except Exception:
-		# Fallback: scan raw command with regex
-		for match in URL_PATTERN.finditer(command):
-			_add_target(match.group())
-		for match in PII_PATTERNS["ipv4"].finditer(command):
-			ip = match.group()
-			if not any(ip in t for t in targets) and not any(ip in p for p in paths):
-				_add_target(ip)
+		# Parse failed: the per-arg walk ran nothing, so fall back to the raw-string
+		# host sweep too (the IP/URL sweep below runs unconditionally).
 		for match in PII_PATTERNS["host"].finditer(command):
 			host = match.group()
 			if host not in cmd_names and host not in seen and _resolves(host):
 				_add_target(host)
+
+	# Fail-closed raw-command sweep for IPs and URLs — ALWAYS, not only on parse
+	# failure. The per-argument walk above cannot see a target hidden inside a single
+	# multi-token argument: an IP in a `python3 -c "...s.connect(('10.0.0.9',21))..."`
+	# code string, or a non-http scheme the arg checker's URL regex ignores
+	# (`curl ftp://10.0.0.9/`). A bare IPv4 or an http(s) URL is an UNAMBIGUOUS network
+	# target, so sweeping the whole string for them is false-positive-safe and stops
+	# scope enforcement from being bypassed by where the target sits in the command —
+	# the pre-#949 behaviour this restores. (A bare HOSTNAME buried in a code string
+	# stays a documented residual: resolving it here is DNS-rebinding- and FP-prone.)
+	# ponytail: IP+URL only; hostname-in-code residual, add a quoted-region host sweep if it bites.
+	for match in URL_PATTERN.finditer(command):
+		_add_target(match.group())
+	for match in PII_PATTERNS["ipv4"].finditer(command):
+		ip = match.group()
+		if not any(ip in t for t in targets) and not any(ip in p for p in paths):
+			_add_target(ip)
 
 	# Target-list files (nmap/masscan `-iL`, `--target-file`) hide the real targets in
 	# a file we can't read here, so their scope can't be confirmed. Surface a sentinel
@@ -1039,7 +1051,7 @@ class PermissionEngine:
 			# (compound `for..do..done`, unbalanced quotes, long `&&` chains). The
 			# parse-failure `ask` below returns early, so if this check lived only after
 			# it, the re-check never cleared and the guardrail loop spun `max_rounds`
-			# and then denied with NO prompt (the canary isolated spin-deny, RC1).
+			# and then denied with NO prompt (the isolated spin-deny).
 			if command.strip() in self.approved_shell_commands:
 				return PermissionResult(decision="allow", reason="shell command approved this run")
 			subcommands = _parse_subcommands(command)
@@ -1089,14 +1101,22 @@ class PermissionEngine:
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
-		elif action_type in ("query", "follow_up", "add_finding", "add_vuln_poc"):
-			# add_vuln_poc only $set-updates fields (poc/status/confidence/extra_data/
-			# is_false_positive) on an EXISTING vulnerability (workspace-scoped, no new/
-			# scope-widening finding), so it's safe to auto-allow alongside query/add_finding.
+		elif action_type in ("subagent", "stop", "change_mode"):
+			# Control / meta actions with no network egress or exec of their OWN: `stop`
+			# and `change_mode` only steer the loop, and a `subagent`'s own actions are
+			# guardrail-checked inside its run (its targets are also scope-checked here via
+			# the target layer below). Auto-allow the action itself — without this they fall
+			# through to the "Unknown action type" deny and silently break run_subagent /
+			# the bare stop() / change_mode.
+			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
+		elif action_type in ("query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
+			# mark_vuln_exploited / mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
+			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
+			# so they're safe to auto-allow alongside query/add_finding.
 			# Don't let an injected add_finding silently mint a scope-widening target finding.
 			# Deny (fail-closed) rather than "ask": there is no add_finding prompt layer, so an
 			# "ask" here isn't surfaceable — it would just spin the prompt loop until it denies
-			# anyway. A human adds a target through the UI/mandates, not via the AI's add_finding.
+			# anyway. A human adds a target through a client/mandates, not via the AI's add_finding.
 			if action_type == "add_finding" and _is_privileged_finding_type(action):
 				ftype = str(action.get("_type", "")).strip().lower()
 				return PermissionResult(
@@ -1159,7 +1179,7 @@ class PermissionEngine:
 			for v in values_to_check:
 				if not host_in_scope(v, [], self.out_of_scope):
 					# Structured deny: machine-readable reason + the offending target so a
-					# UI/CLI can render "Target X is not in the allowed scope" and attach an action.
+					# clients/CLI can render "Target X is not in the allowed scope" and attach an action.
 					return PermissionResult(decision="deny", reason="out_of_scope", targets=[v])
 
 		# Mandate in_scope allow — checked AFTER both deny loops (config deny + the
@@ -1232,8 +1252,10 @@ class PermissionEngine:
 		action_type = action.get("action", "")
 		if action_type == "shell":
 			return extract_command_targets(action.get("command", ""))
-		elif action_type in ("task", "workflow"):
-			# Filter out file paths and non-network strings from task/workflow targets
+		elif action_type in ("task", "workflow", "subagent"):
+			# task/workflow/subagent all carry a `targets` list — scope-check them (a
+			# subagent's targets are enforced at spawn, in addition to its child actions
+			# being guardrail-checked inside its own run). Filter out file paths / non-network.
 			return [t for t in action.get("targets", []) if _is_network_target(t) and not _is_file_path(t)]
 		return []
 

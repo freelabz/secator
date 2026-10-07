@@ -22,8 +22,8 @@
 #   locked read-modify-write with an atomic swap, correct under both pools. See
 #   that function's docstring for the layered-lock details.
 #
-# ponytail: no `on_build` PENDING placeholder (mongodb/sqlite mint one so the UI
-# tree shows not-yet-run children). Locally the query backend discovers runners
+# ponytail: no `on_build` PENDING placeholder (mongodb/sqlite mint one so clients
+# show not-yet-run children). Locally the query backend discovers runners
 # by walking report dirs, so a child simply appears once it starts. Add on_build
 # if a live "pending children" view is needed.
 

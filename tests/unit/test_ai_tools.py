@@ -12,11 +12,11 @@ class TestToolSchemas(unittest.TestCase):
 		from secator.ai.tools import TOOL_SCHEMAS
 		self.assertIsInstance(TOOL_SCHEMAS, dict)
 
-	def test_tool_schemas_has_seven_tools(self):
+	def test_tool_schemas_expected_set(self):
 		from secator.ai.tools import TOOL_SCHEMAS
-		self.assertEqual(len(TOOL_SCHEMAS), 7)
 		expected = {"run_task", "run_workflow", "run_shell", "query_workspace", "follow_up",
-		            "add_finding", "add_vuln_poc"}
+		            "run_subagent", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
+		            "mark_vuln_exploit_failed", "update_finding", "change_mode"}
 		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)
 
 	def test_tool_schemas_openai_format(self):
@@ -103,10 +103,10 @@ class TestToolSchemas(unittest.TestCase):
 class TestBuildToolSchemas(unittest.TestCase):
 	"""Verify build_tool_schemas filters by mode."""
 
-	def test_attack_mode_returns_all_tools(self):
+	def test_scan_mode_returns_all_tools(self):
 		from secator.ai.tools import build_tool_schemas, TOOL_SCHEMAS
-		schemas = build_tool_schemas("attack")
-		self.assertEqual(len(schemas), 7)
+		schemas = build_tool_schemas("scan")
+		self.assertEqual(len(schemas), len(TOOL_SCHEMAS))
 		names = {s["function"]["name"] for s in schemas}
 		self.assertEqual(names, set(TOOL_SCHEMAS.keys()))
 
@@ -114,25 +114,48 @@ class TestBuildToolSchemas(unittest.TestCase):
 		from secator.ai.tools import build_tool_schemas
 		schemas = build_tool_schemas("chat")
 		names = {s["function"]["name"] for s in schemas}
+		# chat is strictly read-only (#1469): no escalation (run_task/run_workflow),
+		# no shell, no finding writes — it keeps query + follow_up + the same-mode
+		# run_subagent helper.
 		self.assertNotIn("run_task", names)
 		self.assertNotIn("run_workflow", names)
+		self.assertNotIn("run_shell", names)
+		self.assertNotIn("add_finding", names)
 		self.assertIn("query_workspace", names)
 		self.assertIn("follow_up", names)
-		self.assertIn("add_finding", names)
-		self.assertIn("run_shell", names)
+		self.assertIn("run_subagent", names)
 
-	def test_exploit_mode_excludes_follow_up_but_includes_query(self):
+	def test_exploit_mode_includes_follow_up_and_query(self):
 		from secator.ai.tools import build_tool_schemas
 		schemas = build_tool_schemas("exploit")
 		names = {s["function"]["name"] for s in schemas}
-		self.assertNotIn("follow_up", names)  # exploit runs autonomously
-		# query_workspace IS available in exploit mode so the model can read the
-		# workspace's existing exploit intel before trying to exploit.
+		# follow_up lets exploit mode stop-and-ask (confirm before a state-changing action /
+		# hand back after a PoC) rather than only running to its iteration cap.
+		self.assertIn("follow_up", names)
 		self.assertIn("query_workspace", names)
 		self.assertIn("run_task", names)
 		self.assertIn("run_workflow", names)
 		self.assertIn("run_shell", names)
 		self.assertIn("add_finding", names)
+		# exploit can delegate a subagent just like scan (the tool docstring even says
+		# "hand a confirmed vuln to an exploit subagent"); without this, the model tried
+		# the run_task(name="ai") workaround, hit the guard that points at run_subagent,
+		# and dead-ended because the tool wasn't exposed in this mode.
+		self.assertIn("run_subagent", names)
+
+	def test_change_mode_gated_by_pin(self):
+		"""change_mode lets the model self-escalate in an AUTO session or from a pinned
+		action mode, but a user-PINNED read-only chat must stay read-only (tool withheld),
+		and a subagent never self-escalates."""
+		from secator.ai.tools import build_tool_schemas
+
+		def names(**kw):
+			return {s["function"]["name"] for s in build_tool_schemas(**kw)}
+		self.assertIn("change_mode", names(mode="chat", mode_is_auto=True))       # auto chat
+		self.assertNotIn("change_mode", names(mode="chat", mode_is_auto=False))   # pinned read-only chat
+		self.assertIn("change_mode", names(mode="scan", mode_is_auto=False))    # pinned scan
+		self.assertIn("change_mode", names(mode="exploit", mode_is_auto=False))   # pinned exploit
+		self.assertNotIn("change_mode", names(mode="scan", is_subagent=True))   # subagent
 
 	def test_unknown_mode_falls_back_to_chat(self):
 		from secator.ai.tools import build_tool_schemas
@@ -144,7 +167,7 @@ class TestBuildToolSchemas(unittest.TestCase):
 
 	def test_returns_list_of_dicts(self):
 		from secator.ai.tools import build_tool_schemas
-		schemas = build_tool_schemas("attack")
+		schemas = build_tool_schemas("scan")
 		self.assertIsInstance(schemas, list)
 		for s in schemas:
 			self.assertIsInstance(s, dict)
@@ -188,6 +211,20 @@ class TestToolCallToAction(unittest.TestCase):
 		self.assertEqual(result["reason"], "need guidance")
 		self.assertEqual(result["choices"], ["a", "b"])
 
+	def test_uuid_arg_is_normalized_to_underscore(self):
+		# Models often drop the leading underscore (`uuid` instead of `_uuid`); the
+		# converter normalizes it so finding tools don't error "requires `_uuid`".
+		from secator.ai.tools import tool_call_to_action
+		result = tool_call_to_action("mark_vuln_exploited", {"uuid": "u1", "poc": "# poc"})
+		self.assertEqual(result["_uuid"], "u1")
+		self.assertNotIn("uuid", result)
+
+	def test_existing_underscore_uuid_wins_over_uuid(self):
+		# If the model already sent `_uuid`, don't clobber it with a stray `uuid`.
+		from secator.ai.tools import tool_call_to_action
+		result = tool_call_to_action("mark_vuln_exploited", {"_uuid": "right", "uuid": "wrong", "poc": "x"})
+		self.assertEqual(result["_uuid"], "right")
+
 	def test_add_finding_conversion(self):
 		from secator.ai.tools import tool_call_to_action
 		result = tool_call_to_action("add_finding", {"_type": "vulnerability", "name": "SQLi", "severity": "high"})
@@ -208,6 +245,24 @@ class TestToolCallToAction(unittest.TestCase):
 		for bad in (12345, ["nmap", "10.0.0.1"], "just a string"):
 			self.assertIsNone(tool_call_to_action("run_task", bad))
 
+	def test_stop_with_empty_args_is_valid(self):
+		"""`stop` ends a turn and its `reason` is optional, so a bare stop() with empty
+		or no args must produce a valid action — not get bounced as 'empty arguments'
+		(which left the model nagging via follow_up instead of stopping)."""
+		from secator.ai.tools import tool_call_to_action
+		for empty in ({}, None):
+			action = tool_call_to_action("stop", empty)
+			self.assertIsNotNone(action, empty)
+			self.assertEqual(action["action"], "stop")
+		# the exemption is stop-only: other tools with empty args still reject
+		self.assertIsNone(tool_call_to_action("run_task", {}))
+		self.assertIsNone(tool_call_to_action("query_workspace", None))
+
+	def test_change_mode_conversion(self):
+		from secator.ai.tools import tool_call_to_action
+		result = tool_call_to_action("change_mode", {"mode": "scan", "reason": "need to scan"})
+		self.assertEqual(result["action"], "change_mode")
+		self.assertEqual(result["mode"], "scan")
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestCoerceStringifiedArgs(unittest.TestCase):

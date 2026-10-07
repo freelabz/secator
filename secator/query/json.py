@@ -133,6 +133,24 @@ def match_query(item: dict, query: dict) -> bool:
 	return True
 
 
+def _apply_set(rec: dict, set_fields: dict) -> None:
+	"""Apply a MongoDB-style ``$set`` to ``rec`` in place, resolving dotted keys to
+	nested dicts (``extra_data.foo`` -> ``rec['extra_data']['foo']``)."""
+	for k, v in set_fields.items():
+		if '.' in k:
+			parts = k.split('.')
+			cur = rec
+			for p in parts[:-1]:
+				nxt = cur.get(p)
+				if not isinstance(nxt, dict):
+					nxt = {}
+					cur[p] = nxt
+				cur = nxt
+			cur[parts[-1]] = v
+		else:
+			rec[k] = v
+
+
 class JsonBackend(QueryBackend):
 	"""Query backend for JSON files on filesystem."""
 
@@ -294,31 +312,91 @@ class JsonBackend(QueryBackend):
 				if d.is_dir() and (d / 'report.json').exists():
 					yield d / 'report.json'
 
-	def _execute_update(self, query: dict, update: dict) -> int:
-		"""Apply a ``$set`` update to matching findings directly in the report.json store.
+	def _report_dirs(self):
+		"""Yield each runner's report DIR — the run-scoped dir when ``context['report_dir']``
+		is set, else every runner dir in the workspace. (``_report_files`` yields the legacy
+		``report.json`` paths; this yields the dirs so we can reach the live ``results.ndjson``
+		too.)"""
+		report_dir = self.context.get('report_dir')
+		if report_dir:
+			p = Path(report_dir)
+			if p.exists():
+				yield p
+			return
+		workspace_path = self._get_workspace_path()
+		if not workspace_path.exists():
+			return
+		for runner_type in ['tasks', 'workflows', 'scans']:
+			runner_path = workspace_path / runner_type
+			if not runner_path.exists():
+				continue
+			for d in runner_path.iterdir():
+				if d.is_dir():
+					yield d
 
-		The store is the source of truth (no in-memory results). Each matching file is
-		rewritten atomically; a read-first dirty check skips files with no match so an
-		update never rewrites the whole workspace.
+	def _execute_update(self, query: dict, update: dict) -> int:
+		"""Apply a ``$set`` to matching findings directly in the store.
+
+		The live store is the append-only ``results.ndjson`` (last-wins by ``_uuid`` on
+		read), so an update appends the matched record with the ``$set`` applied — the same
+		mechanism the ``update_finding`` hook uses — instead of rewriting a bucketed
+		``report.json`` the runner only writes at end-of-run (mid-run, findings are queryable
+		from the ndjson but were NOT in report.json, so the old rewrite matched nothing).
+		Legacy dirs that only have a ``report.json`` keep the atomic-rewrite path.
 		"""
 		set_fields = update.get("$set", {})
 		if not set_fields:
 			return 0
-		from secator.utils import atomic_json, read_json
+		from secator.utils import append_ndjson, atomic_json, read_json
 		count = 0
-		for path in self._report_files():
-			data = read_json(path)
+		for d in self._report_dirs():
+			ndjson = d / 'results.ndjson'
+			if ndjson.exists():
+				# Collapse to the latest record per _uuid (matching read-time dedup), then
+				# append an updated copy of each match so it wins on the next read.
+				latest, order = {}, []
+				try:
+					with open(ndjson, 'r') as f:
+						for line in f:
+							line = line.strip()
+							if not line:
+								continue
+							try:
+								rec = orjson.loads(line)
+							except json.JSONDecodeError:
+								continue  # torn final line after a crash -> skip
+							if not isinstance(rec, dict):
+								continue
+							key = rec.get('_uuid') or id(rec)
+							if key not in latest:
+								order.append(key)
+							latest[key] = rec
+				except IOError as e:
+					debug(f'Error reading {ndjson}: {e}', sub='query.json')
+					continue
+				for key in order:
+					rec = latest[key]
+					if match_query(rec, query):
+						_apply_set(rec, set_fields)
+						append_ndjson(ndjson, orjson.dumps(rec, default=str).decode())
+						count += 1
+				continue
+			# Legacy: rewrite the bucketed report.json in place.
+			report = d / 'report.json'
+			if not report.exists():
+				continue
+			data = read_json(report)
 			if not data:
 				continue
 			buckets = data.get('results', {})
 			if not any(match_query(it, query) for b in buckets.values() if isinstance(b, list) for it in b):
 				continue
-			with atomic_json(path, default=lambda: {'info': {}, 'results': {}}) as d:
-				for bucket in d.get('results', {}).values():
+			with atomic_json(report, default=lambda: {'info': {}, 'results': {}}) as dd:
+				for bucket in dd.get('results', {}).values():
 					if isinstance(bucket, list):
 						for item in bucket:
 							if match_query(item, query):
-								item.update(set_fields)
+								_apply_set(item, set_fields)
 								count += 1
 		return count
 

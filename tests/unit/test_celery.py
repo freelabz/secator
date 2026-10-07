@@ -465,6 +465,32 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 			import shutil
 			shutil.rmtree(tmp, ignore_errors=True)
 
+	def test_abandon_task_clears_inherited_has_children(self):
+		"""An abandoned task spawned no children, so its stored doc must have has_children=False
+		even when it inherited has_children=True from a parent workflow/scan (run_opts). Otherwise
+		the UI child-runner list shows the failed task as 'waiting' forever (0 real children)."""
+		from unittest import mock
+		from secator.celery import abandon_task
+		from secator.tasks import httpx
+		if 'httpx' not in TEST_TASK_NAMES:
+			self.skipTest('httpx not available')
+		captured = {}
+
+		class Spy(httpx):
+			def mark_started(self, *a, **k):
+				pass
+
+			def add_result(self, *a, **k):
+				pass
+
+			def mark_completed(self, *a, **k):
+				captured['has_children'] = self.has_children
+
+		with mock.patch('secator.celery.Task.get_task_class', return_value=Spy):
+			# opts carry has_children=True (inherited from the parent workflow)
+			abandon_task('httpx', ['example.com'], {'context': {}, 'has_children': True}, delivery_count=2)
+		self.assertFalse(captured.get('has_children'), 'abandoned task must not keep inherited has_children')
+
 	def test_retries_exhausted_does_not_count_initial_delivery(self):
 		"""delivery_count includes the initial run; task_max_retries=N allows N redeliveries."""
 		from secator.celery import worker_loss_retries_exhausted
@@ -635,9 +661,16 @@ class TestRunnerPickle(unittest.TestCase):
 
 
 class TestCeleryRedisHealthCheckInterval(unittest.TestCase):
-	"""The redis result-backend health-check interval must be config-driven, not hardcoded, so
-	gevent deployments can set SECATOR_CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL=0 to disable the
-	pubsub health check that triggers the chord-hanging PubSubError (upstream of patch_celery.sh)."""
+	"""The redis result-backend health check must default to disabled (0). Celery's redis
+	ResultConsumer drives a single pubsub connection with a SUBSCRIBE/UNSUBSCRIBE per task
+	result; redis-py's health check reads pending responses off that same connection and
+	raises `PubSubError: A non health check response was cleaned ...` when it meets an
+	UNSUBSCRIBE confirmation instead of its PING reply, aborting the workflow mid-chord."""
+
+	def test_default_disables_pubsub_health_check(self):
+		from secator.config import CONFIG
+		# The default MUST be 0 — any positive value re-enables the chord-hanging PubSubError.
+		self.assertEqual(CONFIG.celery.redis_backend_health_check_interval, 0)
 
 	def test_app_conf_reads_config_value(self):
 		from secator.config import CONFIG

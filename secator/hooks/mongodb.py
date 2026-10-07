@@ -6,7 +6,7 @@ from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.hooks._dedup import compute_duplicate_updates
+from secator.hooks._dedup import build_baseline_index, compute_duplicate_updates
 from secator.output_types import OUTPUT_TYPES, Warning, is_output_type
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
@@ -75,7 +75,11 @@ def ensure_mongo_run_id(context):
 	"""Override the runner-core's uuid {type}_id with a Mongo ObjectId, in-place, on the FIRST DB
 	write — so the runner doc _id (ObjectId({type}_id)) equals context.{type}_id and every finding
 	scopes to that same id. Idempotent: a valid ObjectId is kept, so all later writes hit one doc.
-	The json store keeps its uuid; only the mongodb path (which has bson) is coerced."""
+	The json store keeps its uuid; only the mongodb path (which has bson) is coerced.
+
+	`task_chunk_id` is coerced too (a task chunk — real chunking or an AI-spawned task
+	child — keys its doc on it). Workflow/scan children key on `{type}_id` (they are
+	standalone runners, not chunks; see ai.actions._child_preamble)."""
 	for key in ('task_id', 'workflow_id', 'scan_id', 'task_chunk_id'):
 		val = context.get(key)
 		if val and not ObjectId.is_valid(val):
@@ -112,7 +116,7 @@ def build_pending_doc(parent, task_spec, child_type):
 	"""Minimal PENDING placeholder doc for a not-yet-run child runner.
 
 	The runtime update_runner does {'$set': self.toDict()} and fully overwrites
-	this once the child executes, so only the fields the UI tree / watchdog need
+	this once the child executes, so only the fields a consumer / watchdog need
 	before that have to be correct here.
 	"""
 	return {
@@ -120,8 +124,8 @@ def build_pending_doc(parent, task_spec, child_type):
 		'status': 'PENDING',
 		'done': False,
 		# Carry the build-time description (workflow-node override, e.g.
-		# "Find open ports (light)") so the UI shows it while PENDING, not only
-		# once the child runs. The UI reads config.description (falling back to
+		# "Find open ports (light)") so clients show it while PENDING, not only
+		# once the child runs. Clients read config.description (falling back to
 		# config.name), and update_runner overwrites this with the full config
 		# on first run — which resolves to the same description.
 		'config': {
@@ -174,14 +178,26 @@ def update_finding(self, item):
 	_id = ObjectId(item._uuid) if ObjectId.is_valid(item._uuid) else None
 	try:
 		if _id:
-			finding = db['findings'].update_one({'_id': _id}, {'$set': update})
+			db['findings'].update_one({'_id': _id}, {'$set': update})
 			status = 'UPDATED'
 		else:
 			# Stamp an explicit untagged default so tag_duplicates can index-seek untagged
 			# findings (`_tagged: False`) instead of a `$ne: True` whole-workspace scan (#1315).
-			update.setdefault('_tagged', False)
-			finding = db['findings'].insert_one(update)
-			item._uuid = str(finding.inserted_id)
+			# Execution-metadata types (stat/info/warning/error) are NOT dedupable and are
+			# dropped by tag_duplicates, so stamping them `_tagged: False` clogged the untagged
+			# backlog forever (the bulk of it at scale) AND starved real findings out of the bounded
+			# scan window. Stamp them `_tagged: True` so they never enter the backlog.
+			update.setdefault('_tagged', _type in CONFIG.addons.mongodb.duplicate_exclude_types)
+			# The mongodb driver OWNS the finding identity: mint the ObjectId up front and
+			# store `_uuid = str(_id)` so the persisted `_uuid` IS the native primary key.
+			# (runner core pre-stamps a uuid4 `_uuid` in add_result for backends with no
+			# server-side id — json/sqlite — but on Mongo that uuid4 left `_uuid != _id`,
+			# so a get-by-uuid became a per-workspace scan instead of an `_id` index-seek,
+			# and it diverged from `_related`, which already references findings by str(_id).)
+			oid = ObjectId()
+			update['_uuid'] = str(oid)
+			db['findings'].insert_one({**update, '_id': oid})
+			item._uuid = str(oid)
 			status = 'CREATED'
 	except pymongo.errors.DocumentTooLarge:
 		# The finding exceeds MongoDB's 16MB BSON limit (usually huge outputs).
@@ -253,16 +269,34 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 	# findings stamped `_tagged: False` on insert AND legacy docs where the field is absent (indexed
 	# as null), so no backfill is required. See #1315.
 	untagged_query = {'_context.workspace_id': str(ws_id), '_tagged': {'$in': [False, None]}}
+	if exclude_types:
+		# Don't fetch execution-metadata types (stat/info/warning/error): load_findings drops
+		# them below anyway, so pulling them into the bounded (max_items) scan window wastes the
+		# budget and starves real dedupable findings — the whole reason the backlog never cleared.
+		untagged_query['_type'] = {'$nin': exclude_types}
 	if full_scan:
 		del untagged_query['_tagged']
-	workspace_findings = load_findings(list(db.findings.find(workspace_query).sort('_timestamp', -1)), exclude_types)
+	# Baseline (already-tagged non-duplicate findings) is UNBOUNDED and OOM-killed a 2Gi worker
+	# on large workspaces (observed at scale: 47k+ docs, growing). Instead of materializing every
+	# full finding, stream the cursor and fold it into a compact index (uuids/_related/copy-fields
+	# per equality key) — peak memory is O(distinct keys × tiny payload), independent of full-doc
+	# size. See build_baseline_index. ponytail: streaming folds the peak; add a server-side field
+	# projection to the cursor if the transient per-batch load ever matters.
+	baseline_stream = (
+		load_finding(doc, exclude_types)
+		for doc in db.findings.find(workspace_query).sort('_timestamp', -1)
+	)
+	baseline_index = build_baseline_index(
+		(f for f in baseline_stream if f is not None),
+		CONFIG.addons.mongodb.duplicate_main_copy_fields,
+	)
 	untagged_query_cursor = db.findings.find(untagged_query).sort('_timestamp', -1)
 	if max_items != -1:
 		debug(f'Limiting untagged query to {max_items} items', sub='hooks.mongodb', log_hook=log_hook)
 		untagged_query_cursor = untagged_query_cursor.limit(max_items)
 	untagged_findings = load_findings(list(untagged_query_cursor), exclude_types)
 	debug(
-		f'Workspace non-duplicates findings: {len(workspace_findings)} '
+		f'Workspace baseline groups: {len(baseline_index)} '
 		f'Untagged findings: {len(untagged_findings)}. Max items: {max_items}. Excluded types: {exclude_types}. '
 		f'Query time: {time.time() - start_time}s',
 		sub='hooks.mongodb',
@@ -270,9 +304,10 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 	)
 	start_time = time.time()
 	db_updates = compute_duplicate_updates(
-		workspace_findings,
+		[],
 		untagged_findings,
 		CONFIG.addons.mongodb.duplicate_main_copy_fields,
+		baseline_index=baseline_index,
 	)
 	debug(f'Finished processing untagged findings in {time.time() - start_time}s', sub='hooks.mongodb', log_hook=log_hook)
 	start_time = time.time()

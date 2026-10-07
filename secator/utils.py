@@ -1107,6 +1107,11 @@ class TargetInfo:
 	reachable: bool     # ip|cidr: validity. host|url: DNS success. else False.
 
 
+# A short (2-3 part) plain dotted-decimal: ambiguous between an abbreviated IP and a
+# version/float, so NOT canonicalized to an IP (see canonicalize_target).
+_SHORT_DOTTED_DEC = re.compile(r'^\d{1,3}(?:\.\d{1,3}){1,2}$')
+
+
 def canonicalize_target(raw):
 	"""Normalize a single raw target token to the form a scanner/resolver would actually hit.
 
@@ -1139,12 +1144,16 @@ def canonicalize_target(raw):
 			token = token[1:end]
 
 	# Alternate IPv4 encodings -> dotted-quad, using inet_aton (same parser nmap/ping/libc use).
-	# Only numeric-ish tokens reach a match; hostnames and out-of-range ints raise and fall through.
-	try:
-		token = socket.inet_ntoa(socket.inet_aton(token))
-		return token
-	except OSError:
-		pass
+	# Skip AMBIGUOUS short dotted-decimals though: inet_aton reads "0.5"->0.0.0.5, "5.0.7"->
+	# 5.0.0.7, but those are far more often a version/float/timeout (`sleep 0.5`) than an IP,
+	# so leave them as-is (autodetect_type then types them str, not IP). Unambiguous encodings
+	# (single int/hex/octal, dotted-hex/octal, full quad) still canonicalize.
+	if not _SHORT_DOTTED_DEC.match(token):
+		try:
+			token = socket.inet_ntoa(socket.inet_aton(token))
+			return token
+		except OSError:
+			pass
 
 	# IDNA-encode Unicode hostnames (bare host or URL netloc) to punycode.
 	if not token.isascii():
@@ -1778,7 +1787,7 @@ def atomic_json(path, default=dict):
 	path.parent.mkdir(parents=True, exist_ok=True)
 	lock_path = str(path) + '.lock'
 	# Perf instrumentation (SECATOR_DEBUG=perf): one line per call with the lock-acquire wait and
-	# write time, to diagnose gevent-hub stalls / lock contention on the json write path in prod.
+	# write time, to diagnose gevent-hub stalls / lock contention on the json write path under concurrency.
 	_t0 = monotonic()
 	lock_wait_ms = write_ms = 0.0
 	with _get_path_lock(path):                        # (1) in-process (greenlet/thread cooperative)

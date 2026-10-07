@@ -9,9 +9,10 @@ from secator.definitions import ADDONS_ENABLED
 if ADDONS_ENABLED['ai']:
 	from secator.ai.actions import (
 		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
-		_handle_query, _handle_add_finding, _handle_add_vuln_poc, _run_runner, _decrypt_dict,
+		_handle_query, _handle_add_finding, _handle_mark_vuln_exploited,
+		_handle_mark_vuln_false_positive, _run_runner, _decrypt_dict,
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
-		_build_child_hooks_or_denial,
+		_build_child_hooks_or_denial, _child_preamble,
 		_MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
 		_MAX_SHELL_OUTPUT_CHARS, _truncate,
 	)
@@ -804,6 +805,88 @@ class TestRunRunner(unittest.TestCase):
 		ro = mock_task_cls.call_args[1].get('run_opts', {})
 		self.assertEqual(ro.get('model'), 'explicit/model')
 
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_subagent_gets_own_session_and_parent_card(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""A subagent runs under its OWN conversation id (parent link preserved), while the
+		'Ran subagent' card stays in the PARENT conversation and links to the sub-session."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t'], model='m', session_id='parent-sess',
+							context={'workspace_id': 'ws1', 'session_id': 'parent-sess', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'],
+					  'opts': {'prompt': 'obj'}, 'description': 'Exploit Y'}
+			results = list(_run_runner(action, ctx, 'task'))
+		# The subagent RUNNER runs under a fresh session id, with the parent link kept.
+		runner_ctx = mock_task_cls.call_args[1].get('context', {})
+		self.assertNotEqual(runner_ctx.get('session_id'), 'parent-sess')
+		self.assertTrue(runner_ctx.get('session_id'))
+		self.assertEqual(runner_ctx.get('parent_session_id'), 'parent-sess')
+		# The emitted card belongs to the PARENT conversation and links to the sub-session.
+		card = next(r for r in results if getattr(r, 'ai_type', None) == 'task')
+		self.assertEqual(card._context.get('session_id'), 'parent-sess')
+		self.assertEqual(card.extra_data.get('subagent'), 'Exploit Y')
+		self.assertEqual(card.extra_data.get('subagent_session_id'), runner_ctx.get('session_id'))
+		# The card is the PARENT's record of the spawn, NOT subagent-internal, so it must
+		# NOT carry the `_context.subagent` marker (else restore/UI filters would drop it).
+		self.assertNotIn('subagent', card._context)
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_subagent_final_response_handed_back_to_parent(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""The parent's LLM cannot read the subagent's own transcript, so _run_runner must
+		hand back ONE clean summary (the subagent's final response + what it persisted),
+		stamped with the run_task tool_call_id, instead of the raw fragmented stream."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		sub_out = [
+			Ai(content="cloned PoC, ran it, RCE confirmed", ai_type="response", _context={"subagent": "Exploit Y"}),
+			Ai(content="", ai_type="mark_vuln_exploited", _context={"subagent": "Exploit Y"}),
+		]
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter(sub_out); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t'], model='m', session_id='parent-sess',
+							context={'workspace_id': 'ws1', 'session_id': 'parent-sess', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'], 'opts': {'prompt': 'obj'},
+					  'description': 'Exploit Y', 'tool_call_id': 'tc-123'}
+			results = list(_run_runner(action, ctx, 'task'))
+		handback = results[-1]
+		self.assertEqual(handback.ai_type, 'response')
+		self.assertEqual(handback._context.get('tool_call_id'), 'tc-123')   # groups as THIS tool_result
+		self.assertIn('RCE confirmed', handback.content)                    # subagent's final summary
+		self.assertIn('mark_vuln_exploited', handback.content)               # persist note
+		self.assertNotIn('NOTHING', handback.content)
+		self.assertIn('handback', handback.content.lower())
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_nested_subagent_card_not_marked_subagent(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""A subagent spawning a sub-subagent: _child_preamble stamps `_context.subagent`
+		on the nested context, but the CARD must still drop it (else it'd be filtered out of
+		the spawning subagent's own transcript)."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		# ctx.subagent=True + a subagent marker on the context => _child_preamble stamps it.
+		ctx = ActionContext(targets=['t'], model='m', session_id='sub1', subagent=True,
+							context={'workspace_id': 'ws1', 'session_id': 'sub1',
+									 'subagent': 'parent objective', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'], 'opts': {'prompt': 'deeper'}}
+			results = list(_run_runner(action, ctx, 'task'))
+		card = next(r for r in results if getattr(r, 'ai_type', None) == 'task')
+		self.assertEqual(card._context.get('session_id'), 'sub1')       # card in the spawning convo
+		self.assertNotIn('subagent', card._context)                    # but NOT marked internal
+		# The nested runner itself still runs as a subagent under its own session.
+		runner_ctx = mock_task_cls.call_args[1].get('context', {})
+		self.assertNotEqual(runner_ctx.get('session_id'), 'sub1')
+		self.assertEqual(runner_ctx.get('subagent'), 'parent objective')
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestSanitizeChildOpts(unittest.TestCase):
@@ -823,8 +906,8 @@ class TestSanitizeChildOpts(unittest.TestCase):
 		self.assertEqual(clean, {})
 
 	def test_keeps_benign_task_opts(self):
-		clean = _sanitize_child_opts({'ports': '80,443', 'rate_limit': 100, 'mode': 'attack'})
-		self.assertEqual(clean, {'ports': '80,443', 'rate_limit': 100, 'mode': 'attack'})
+		clean = _sanitize_child_opts({'ports': '80,443', 'rate_limit': 100, 'mode': 'scan'})
+		self.assertEqual(clean, {'ports': '80,443', 'rate_limit': 100, 'mode': 'scan'})
 
 	def test_clamps_max_iterations(self):
 		clean = _sanitize_child_opts({'max_iterations': 9999})
@@ -1379,8 +1462,8 @@ class TestHandleAddFinding(unittest.TestCase):
 		self.assertEqual(Vulnerability.validate_fields(data), [])
 
 	def test_add_finding_coerces_scalar_types(self):
-		# End-to-end: wrong-typed scalars flow through the handler and validate
-		# clean, producing a Vulnerability with the coerced bool/float values.
+		# End-to-end: wrong-typed CONTENT scalars coerce clean. Read-only/verdict fields
+		# (verified) are stripped as read-only, so a forged 'verified' must NOT land.
 		ctx = ActionContext(targets=['t.com'], model='m')
 		results = list(
 			_handle_add_finding(
@@ -1389,9 +1472,8 @@ class TestHandleAddFinding(unittest.TestCase):
 					'_type': 'vulnerability',
 					'name': 'SQL Injection',
 					'matched_at': 'http://t.com/login',
-					'verified': 'true',
-					'cvss_score': '7.5',
-					'severity_nb': '3',
+					'verified': 'true',   # read-only -> stripped
+					'cvss_score': '7.5',  # content -> coerced
 				},
 				ctx,
 			)
@@ -1401,13 +1483,12 @@ class TestHandleAddFinding(unittest.TestCase):
 		self.assertEqual(len(results), 2)
 		vuln = results[1]
 		self.assertIsInstance(vuln, Vulnerability)
-		self.assertIs(vuln.verified, True)
-		self.assertIsInstance(vuln.verified, bool)
+		self.assertFalse(vuln.verified)  # stripped -> default, not forced True
 		self.assertEqual(vuln.cvss_score, 7.5)
 		self.assertIsInstance(vuln.cvss_score, float)
 
-	def test_add_finding_unparseable_bool_surfaces_error(self):
-		# An unparseable value must NOT be silently dropped; validation reports it.
+	def test_add_finding_unparseable_scalar_surfaces_error(self):
+		# An unparseable CONTENT value must NOT be silently dropped; validation reports it.
 		ctx = ActionContext(targets=['t.com'], model='m')
 		results = list(
 			_handle_add_finding(
@@ -1416,7 +1497,7 @@ class TestHandleAddFinding(unittest.TestCase):
 					'_type': 'vulnerability',
 					'name': 'SQL Injection',
 					'matched_at': 'http://t.com/login',
-					'verified': 'maybe',
+					'cvss_score': 'maybe',
 				},
 				ctx,
 			)
@@ -1424,7 +1505,7 @@ class TestHandleAddFinding(unittest.TestCase):
 
 		self.assertEqual(len(results), 1)
 		self.assertIsInstance(results[0], Error)
-		self.assertIn('verified', results[0].message)
+		self.assertIn('cvss_score', results[0].message)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -1623,7 +1704,8 @@ class TestChildContextParenting(unittest.TestCase):
 		# has_parent now rides on run_opts (single source of truth), NOT context
 		self.assertNotIn('has_parent', child)
 		# _get_result_context STRIPS the parent's runner-doc identity; _child_preamble
-		# then re-links it as a chunk (task_id=parent + own task_chunk_id) — tested below.
+		# then stamps the child's OWN id (task_chunk_id for a task, {type}_id for a
+		# workflow/scan) — tested below.
 		self.assertNotIn('task_id', child)
 		self.assertNotIn('workflow_id', child)
 		self.assertNotIn('scan_id', child)
@@ -1642,6 +1724,15 @@ class TestBuildSubagentPrompt(unittest.TestCase):
 		self.assertIn("## Already known", p)
 		self.assertIn("- Port 443 open", p)               # evidence injected
 		self.assertIn("## Expected output", p)
+		# The subagent MUST be told (imperatively) to persist via mark_vuln_*/add_finding
+		# with the _uuid — its prose is not saved and the parent can't read its transcript.
+		for tool in ("mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"):
+			self.assertIn(tool, p)
+		self.assertNotIn("add_vuln_poc", p)
+		self.assertIn("add_finding", p)
+		self.assertIn("_uuid", p)
+		self.assertIn("not saved", p.lower())
+		self.assertIn("HANDBACK", p)
 
 	def test_empty_evidence_renders_none(self):
 		from secator.ai.actions import build_subagent_prompt
@@ -1684,83 +1775,114 @@ class TestGatherSubagentEvidence(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
-class TestHandleAddVulnPoc(unittest.TestCase):
-	"""Tests for _handle_add_vuln_poc — record a PoC on an existing vulnerability."""
+class TestHandleMarkVulnExploited(unittest.TestCase):
+	"""Tests for _handle_mark_vuln_exploited — mark an existing vuln exploited + record its PoC."""
 
 	def _ctx(self):
 		return ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
 
-	def test_add_vuln_poc_exploited_sets_status_and_poc(self):
-		"""exploited=true -> $set poc + status=EXPLOITED + verified + is_false_positive=False,
-		and yields an add_vuln_poc Ai carrying the refreshed finding."""
+	def test_exploited_sets_status_and_poc(self):
+		"""$set poc + status=EXPLOITED + verified + is_false_positive=False, yields an Ai
+		carrying the refreshed finding, message names the vuln."""
 		mock_engine = MagicMock()
 		mock_engine.update.return_value = 1
-		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability", "poc": "# poc"}]
+		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability", "name": "SQLi", "poc": "# poc"}]
 		ctx = self._ctx()
-		action = {"action": "add_vuln_poc", "_uuid": "u1", "exploited": True, "poc": "# poc\ncmd -> output",
+		action = {"action": "mark_vuln_exploited", "_uuid": "u1", "poc": "# poc\ncmd -> output",
 			"confidence": "high", "extra_data": {"reason": "rce confirmed"}}
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc(action, ctx))
+			results = list(_handle_mark_vuln_exploited(action, ctx))
 		q, upd = mock_engine.update.call_args[0]
 		self.assertEqual(q, {"_type": "vulnerability", "_uuid": "u1"})
 		sset = upd["$set"]
-		self.assertEqual(sset["poc"], "# poc\ncmd -> output")
+		# the poc is date-stamped server-side and keeps the original body
+		self.assertRegex(sset["poc"], r"^_Exploited on \d{4}-\d{2}-\d{2}_")
+		self.assertIn("# poc\ncmd -> output", sset["poc"])
 		self.assertEqual(sset["status"], "EXPLOITED")
 		self.assertTrue(sset["verified"])
 		self.assertFalse(sset["is_false_positive"])
 		self.assertEqual(sset["confidence"], "high")
 		self.assertEqual(sset["confidence_nb"], 1)
 		self.assertEqual(sset["extra_data.reason"], "rce confirmed")
-		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"]
+		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "mark_vuln_exploited"]
 		self.assertEqual(len(ais), 1)
-		self.assertEqual(ais[0].extra_data.get("finding", {}).get("poc"), "# poc")
+		# The re-fetched finding reflects the $set we just applied (not a stale line).
+		self.assertIn("# poc\ncmd -> output", ais[0].extra_data.get("finding", {}).get("poc"))
+		self.assertEqual(ais[0].extra_data.get("finding", {}).get("status"), "EXPLOITED")
+		self.assertIn("SQLi", ais[0].content)
 		self.assertFalse([r for r in results if isinstance(r, Error)])
 
-	def test_add_vuln_poc_not_exploited_marks_false_positive(self):
-		"""exploited=false -> $set is_false_positive=True (no status/verified), poc not required."""
-		mock_engine = MagicMock()
-		mock_engine.update.return_value = 1
-		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability"}]
-		ctx = self._ctx()
-		action = {"action": "add_vuln_poc", "_uuid": "u1", "exploited": False,
-			"confidence": "low", "extra_data": {"reason": "target not reachable"}}
-		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc(action, ctx))
-		sset = mock_engine.update.call_args[0][1]["$set"]
-		self.assertTrue(sset["is_false_positive"])
-		self.assertNotIn("status", sset)
-		self.assertNotIn("poc", sset)
-		self.assertEqual(sset["confidence_nb"], 3)
-		self.assertEqual(sset["extra_data.reason"], "target not reachable")
-		self.assertEqual(len([r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"]), 1)
-
-	def test_add_vuln_poc_no_match_yields_error(self):
-		"""uuid matches nothing -> Error (so the LLM re-checks the uuid), no update-yield."""
+	def test_no_match_yields_error(self):
+		"""uuid matches nothing -> Error (so the LLM re-checks the uuid), no Ai."""
 		mock_engine = MagicMock()
 		mock_engine.update.return_value = 0
 		ctx = self._ctx()
-		action = {"action": "add_vuln_poc", "_uuid": "missing", "exploited": True, "poc": "x"}
+		action = {"action": "mark_vuln_exploited", "_uuid": "missing", "poc": "x"}
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc(action, ctx))
+			results = list(_handle_mark_vuln_exploited(action, ctx))
 		errors = [r for r in results if isinstance(r, Error)]
 		self.assertTrue(any("No vulnerability found" in e.message for e in errors))
-		self.assertFalse([r for r in results if isinstance(r, Ai) and r.ai_type == "add_vuln_poc"])
+		self.assertFalse([r for r in results if isinstance(r, Ai)])
 
-	def test_add_vuln_poc_missing_uuid_errors(self):
-		"""No _uuid -> Error, engine never touched."""
+	def test_missing_uuid_errors(self):
 		mock_engine = MagicMock()
 		ctx = self._ctx()
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc({"action": "add_vuln_poc", "exploited": True, "poc": "x"}, ctx))
+			results = list(_handle_mark_vuln_exploited({"action": "mark_vuln_exploited", "poc": "x"}, ctx))
 		self.assertTrue([r for r in results if isinstance(r, Error)])
 		mock_engine.update.assert_not_called()
 
-	def test_add_vuln_poc_exploited_empty_poc_errors(self):
-		"""exploited=true with blank poc -> Error, engine never touched."""
+	def test_empty_poc_errors(self):
+		"""Blank poc -> Error, engine never touched (proof is mandatory)."""
 		mock_engine = MagicMock()
 		ctx = self._ctx()
 		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
-			results = list(_handle_add_vuln_poc({"action": "add_vuln_poc", "_uuid": "u1", "exploited": True, "poc": "   "}, ctx))
+			results = list(_handle_mark_vuln_exploited({"action": "mark_vuln_exploited", "_uuid": "u1", "poc": "   "}, ctx))
+		self.assertTrue([r for r in results if isinstance(r, Error)])
+		mock_engine.update.assert_not_called()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestHandleMarkVulnFalsePositive(unittest.TestCase):
+	"""Tests for _handle_mark_vuln_false_positive — mark an existing vuln as a false positive."""
+
+	def _ctx(self):
+		return ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
+
+	def test_marks_false_positive_and_attaches_finding(self):
+		"""$set is_false_positive=True + status=FALSE_POSITIVE + verified=False; the result
+		carries the re-fetched finding (the old FP path attached none)."""
+		mock_engine = MagicMock()
+		mock_engine.update.return_value = 1
+		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability", "name": "XSS"}]
+		ctx = self._ctx()
+		action = {"action": "mark_vuln_false_positive", "_uuid": "u1", "reason": "target not reachable"}
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_false_positive(action, ctx))
+		sset = mock_engine.update.call_args[0][1]["$set"]
+		self.assertTrue(sset["is_false_positive"])
+		self.assertEqual(sset["status"], "FALSE_POSITIVE")
+		self.assertFalse(sset["verified"])
+		self.assertEqual(sset["extra_data.false_positive_reason"], "target not reachable")
+		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "mark_vuln_false_positive"]
+		self.assertEqual(len(ais), 1)
+		self.assertTrue(ais[0].extra_data.get("finding"))
+		self.assertIn("XSS", ais[0].content)
+
+	def test_no_match_yields_error(self):
+		mock_engine = MagicMock()
+		mock_engine.update.return_value = 0
+		ctx = self._ctx()
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_false_positive({"action": "mark_vuln_false_positive", "_uuid": "x"}, ctx))
+		self.assertTrue(any("No vulnerability found" in e.message for e in results if isinstance(e, Error)))
+		self.assertFalse([r for r in results if isinstance(r, Ai)])
+
+	def test_missing_uuid_errors(self):
+		mock_engine = MagicMock()
+		ctx = self._ctx()
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_false_positive({"action": "mark_vuln_false_positive"}, ctx))
 		self.assertTrue([r for r in results if isinstance(r, Error)])
 		mock_engine.update.assert_not_called()
 
@@ -1823,6 +1945,73 @@ class TestRunRunnerNameValidation(unittest.TestCase):
 		self.assertIn("bogus_workflow_xyz", errors[0].message)
 		self.assertIn("not found", errors[0].message)
 		self.assertNotIn("Traceback", errors[0].message)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestChildPreambleChunkId(unittest.TestCase):
+	"""An AI child's own doc key must match its runner type.
+
+	The mongo hook keys a task doc on `task_chunk_id` (falling back to `task_id`), and a
+	workflow/scan doc on `{type}_id`. A task child gets a `task_chunk_id`; a workflow/scan
+	child is a STANDALONE runner (not a chunk) and gets a `{type}_id` — both the mongo and
+	api hooks key on that, so the AI runner card points at the persisted id. (Pre-fix, a
+	workflow/scan child stamped a `task_chunk_id`, leaving it with no valid doc id — it
+	minted a fresh doc every update and stayed PENDING forever; see #452.)
+	"""
+
+	def _ctx(self):
+		# No drivers => _build_child_hooks_or_denial returns ({}, None), so the
+		# preamble runs cleanly without a mongo/api backend.
+		return ActionContext(targets=['t.com'], model='m', context={})
+
+	def test_task_child_keyed_on_task_chunk_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'task')
+		self.assertIsNone(denial)
+		self.assertIn('task_chunk_id', context)
+		self.assertNotIn('workflow_chunk_id', context)
+
+	def test_workflow_child_keyed_on_workflow_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'workflow')
+		self.assertIsNone(denial)
+		# A workflow child is a standalone runner, not a chunk.
+		self.assertIn('workflow_id', context)
+		self.assertNotIn('workflow_chunk_id', context)
+		self.assertNotIn('task_chunk_id', context)
+
+	def test_scan_child_keyed_on_scan_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'scan')
+		self.assertIsNone(denial)
+		self.assertIn('scan_id', context)
+		self.assertNotIn('scan_chunk_id', context)
+
+	def test_default_runner_type_is_task(self):
+		# _handle_shell relies on the default: a shell command persists as a `task`.
+		context = {}
+		_child_preamble(self._ctx(), context)
+		self.assertIn('task_chunk_id', context)
+
+
+class TestEnsureMongoRunIdCoercion(unittest.TestCase):
+	"""A raw-uuid runner id must coerce to an ObjectId, else `ObjectId(uuid)` raises /
+	mints a fresh doc per write. Covers task chunks + workflow/scan `{type}_id`s."""
+
+	def test_runner_ids_coerced(self):
+		try:
+			from bson import ObjectId
+			from secator.hooks.mongodb import ensure_mongo_run_id
+		except Exception as e:  # noqa: BLE001
+			self.skipTest(f'mongodb addon not available: {e}')
+		context = {
+			'workflow_id': 'not-an-objectid',
+			'scan_id': 'also-not-one',
+			'task_chunk_id': 'still-not-one',
+		}
+		ensure_mongo_run_id(context)
+		for key in ('workflow_id', 'scan_id', 'task_chunk_id'):
+			self.assertTrue(ObjectId.is_valid(context[key]), key)
 
 
 if __name__ == '__main__':

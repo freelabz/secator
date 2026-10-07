@@ -246,10 +246,16 @@ _FORBIDDEN_CHILD_OPT_KEYS = frozenset({
 	"dry_run",
 	"exporters",
 	"enable_reports",
+	# SECURITY (ISOLATION): child can't lower isolation — `isolated` is force-inherited, stripped here.
+	"isolated",
 })
 
 # Cap a spawned subagent's iteration budget so it can't be told to loop unbounded.
 _MAX_CHILD_ITERATIONS = 25
+
+# ai_types that mean a subagent persisted something (single source for the handback detector).
+_PERSIST_AI_TYPES = frozenset({
+	"add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"})
 
 
 def _sanitize_child_opts(opts: Any) -> Dict:
@@ -286,8 +292,17 @@ def build_subagent_prompt(objective: str, targets: list, evidence: str) -> str:
 		f"## Objective\n{objective.strip() or '(no explicit objective given)'}\n\n"
 		f"## Scope\nWork ONLY within these target(s): {targets_str}\n\n"
 		f"## Already known (do not re-run tools that would re-discover these)\n{evidence_block}\n\n"
-		f"## Expected output\nInvestigate the objective, then report your findings concisely. "
-		f"Persist any new findings; do not repeat work already listed under 'Already known'."
+		f"## Expected output\n"
+		f"1. Do the work needed to meet the objective, within scope.\n"
+		f"2. PERSIST your result — it's REQUIRED and is the ONLY output that survives (your prose "
+		f"is NOT saved and the parent CANNOT read your transcript). On an EXISTING vulnerability "
+		f"(`_uuid` from query_workspace), call `mark_vuln_exploited` with that `_uuid` "
+		f"(working PoC), `mark_vuln_false_positive` (disproved), or `mark_vuln_exploit_failed` "
+		f"(exploit attempt failed but the vuln may still be real). For a NEW finding, "
+		f"call `add_finding`. You MUST persist before finishing if you confirmed OR disproved "
+		f"anything.\n"
+		f"3. Finish with a 2-4 line HANDBACK: what you did, the verdict "
+		f"(confirmed / false-positive / inconclusive), and the `_uuid`(s) you persisted."
 	)
 
 
@@ -795,9 +810,22 @@ def call_llm(
 	# Initialize litellm once (avoids callback accumulation)
 	init_llm(api_key=api_key)
 
+	# Strip secator-internal per-message fields before sending to the model. Each
+	# message may carry bookkeeping keys ChatHistory owns (e.g. `_token_count` /
+	# `_token_model`, its per-model token cache) — not part of the chat-completion
+	# message schema. Some providers reject them or, worse, silently return an empty
+	# response when a message has unknown keys (observed with a local model). We can't
+	# use litellm's drop_params (it only drops top-level params, not nested message
+	# sub-fields), so copy each message without the `_`-prefixed keys. The originals
+	# are untouched, so the caller's token cache / accounting keep working.
+	llm_messages = [
+		{k: v for k, v in m.items() if not str(k).startswith('_')}
+		for m in messages
+	]
+
 	kwargs = dict(
 		model=model,
-		messages=messages,
+		messages=llm_messages,
 		temperature=temperature,
 		api_base=api_base,
 	)

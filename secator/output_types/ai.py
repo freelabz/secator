@@ -61,9 +61,14 @@ AI_TYPES = {
 	'chat_compacted': {'label': '📦', 'color': 'orange3'},
 	'task': {'label': '🟢', 'color': 'magenta'},
 	'workflow': {'label': '🟢', 'color': 'magenta'},
+	'scan': {'label': '🟢', 'color': 'magenta'},
 	'shell': {'label': '🟢', 'color': 'magenta'},
 	'add_finding': {'label': '🟢', 'color': 'magenta'},
-	'add_vuln_poc': {'label': '💥', 'color': 'magenta'},
+	'mark_vuln_exploited': {'label': '💥', 'color': 'magenta'},
+	'mark_vuln_false_positive': {'label': '🟡', 'color': 'magenta'},
+	'mark_vuln_exploit_failed': {'label': '🛡️', 'color': 'magenta'},
+	'update_finding': {'label': '✏️', 'color': 'magenta'},
+	'add_vuln_poc': {'label': '💥', 'color': 'magenta'},  # legacy: kept so old transcripts still render
 	'shell_output': {'label': '◀', 'color': 'dim white'},
 	'query': {'label': '🟢', 'color': 'magenta'},
 	'stopped': {'label': '🛑', 'color': 'orange3'},
@@ -71,7 +76,25 @@ AI_TYPES = {
 	'steer': {'label': '[STEER]', 'color': 'cyan'},
 }
 
-ACTION_TYPES = ('task', 'workflow', 'shell', 'add_finding', 'add_vuln_poc', 'query', 'stopped')
+ACTION_TYPES = ('task', 'workflow', 'scan', 'shell', 'add_finding', 'mark_vuln_exploited',
+                'mark_vuln_false_positive', 'mark_vuln_exploit_failed', 'update_finding',
+                'add_vuln_poc', 'query', 'stopped')
+
+# Friendly console labels for action types whose auto-derived label (capitalize + '_'->' ')
+# reads awkwardly; everything else falls back to that default.
+ACTION_LABELS = {
+	'mark_vuln_exploited': 'Marked exploited',
+	'mark_vuln_false_positive': 'Marked false positive',
+	'mark_vuln_exploit_failed': 'Marked exploit-failed',
+	'update_finding': 'Updated finding',
+}
+
+# Finding-mutation actions: show the target finding's name in the line (the stored content is a
+# full sentence that just repeats the label), falling back to content when no finding is attached.
+# Legacy add_vuln_poc is intentionally excluded — old docs keep rendering exactly as they did.
+_FINDING_NAME_ACTIONS = {
+	'mark_vuln_exploited', 'mark_vuln_false_positive', 'mark_vuln_exploit_failed', 'update_finding',
+}
 
 
 @dataclass
@@ -79,7 +102,7 @@ class Ai(OutputType):
 	"""Output type for AI-generated content with markdown support."""
 	content: str
 	ai_type: str = field(default='response')  # prompt, response, summary, suggestion, attack_summary
-	mode: str = field(default='', compare=False)  # summarize, suggest, attack
+	mode: str = field(default='', compare=False)  # summarize, suggest, scan
 	model: str = field(default='', compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
 	summary: bool = field(default=False, compare=False)
@@ -87,7 +110,7 @@ class Ai(OutputType):
 	answer: str = field(default='', compare=False)
 	choices: list = field(default_factory=list, compare=False)
 	# For a follow_up: whether the user may pick SEVERAL of `choices` (multi-select)
-	# vs exactly one. The web UI renders checkboxes vs single-pick rows accordingly.
+	# vs exactly one. Clients render checkboxes vs single-pick rows accordingly.
 	multiple: bool = field(default=False, compare=False)
 	message: dict = field(default_factory=dict, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
@@ -103,7 +126,7 @@ class Ai(OutputType):
 
 	def __repr__(self) -> str:
 		# Internal-only types (not displayed)
-		if self.ai_type == 'token_usage':
+		if self.ai_type in ['token_usage', 'tool_result']:
 			return ' '
 
 		# Get type configuration
@@ -164,9 +187,14 @@ class Ai(OutputType):
 			action_label = self.ai_type
 			if self.ai_type == 'stopped':
 				action_label = 'done'
-			action_label_str = action_label.capitalize().replace('_', ' ')
+			action_label_str = ACTION_LABELS.get(action_label, action_label.capitalize().replace('_', ' '))
 			line = f'{s}[bold blue]{action_label_str}[/]'
 			content = _s(self.content)
+			if self.ai_type in _FINDING_NAME_ACTIONS:
+				finding = self.extra_data.get('finding')
+				name = finding.get('name') if isinstance(finding, dict) else None
+				if name:
+					content = _s(name)
 			if self.ai_type in ['task', 'workflow']:
 				colors = {
 					'task': 'bold gold3',

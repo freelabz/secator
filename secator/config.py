@@ -71,13 +71,15 @@ class Celery(StrictModel):
 	result_backend: StrExpandHome = ''
 	result_backend_transport_options: str = ''
 	result_expires: int = 86400  # 1 day
-	# Interval (seconds) for the redis result-backend pubsub health check. The default 30 keeps
-	# a long-lived idle result connection alive, but under the gevent result-backend pubsub it
-	# triggers `redis.exceptions.PubSubError: A non health check response was cleaned ...` mid-chord
-	# and hangs the workflow. Set SECATOR_CELERY_REDIS_BACKEND_HEALTH_CHECK_INTERVAL=0 on gevent
-	# deployments to disable it (upstream of gke-admin's patch_celery.sh). See resiliency backlog
-	# for the deeper chord fix.
-	redis_backend_health_check_interval: int = 30
+	# Interval (seconds) for the redis result-backend health check; 0 disables it.
+	# MUST stay 0: Celery's redis ResultConsumer drives a single pubsub connection and
+	# issues a SUBSCRIBE/UNSUBSCRIBE on it per task result. When redis-py's health check
+	# is enabled (> 0) it reads pending responses off that same connection and raises
+	# `redis.exceptions.PubSubError: A non health check response was cleaned ...` the moment
+	# it meets an UNSUBSCRIBE confirmation instead of its PING reply — aborting the workflow
+	# mid-chord. A reaped idle result connection is already handled by result_backend_always_retry
+	# (it reconnects and retries store_result), so the health check is redundant here.
+	redis_backend_health_check_interval: int = 0
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
@@ -110,6 +112,11 @@ class Runners(StrictModel):
 	input_chunk_size: int = 100
 	progress_update_frequency: int = 20
 	stat_update_frequency: int = 20
+	# Also emit a Stat for the worker process itself (the process running the task), as an extra
+	# root above the command in the stat tree. Meant for a 1-task-per-worker setup, where the
+	# subtree total then reflects the task's full footprint including the worker; off by default
+	# (in a shared/CLI process the worker's memory isn't attributable to one task).
+	monitor_worker: bool = False
 	backend_update_frequency: int = 5
 	poll_frequency: int = 5
 	skip_cve_search: bool = False
@@ -214,6 +221,11 @@ class MongodbAddon(StrictModel):
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
 	max_items: int = -1
+	# Output types that are execution metadata, not dedupable findings: they are
+	# stamped `_tagged: True` on insert (never enter the untagged backlog) and
+	# skipped by tag_duplicates. Keep in sync with the downstream consumer's
+	# DUPLICATE_EXCLUDE_TYPES (the value passed as tag_duplicates(exclude_types=...)).
+	duplicate_exclude_types: List[str] = ['info', 'warning', 'error', 'stat']
 	duplicate_main_copy_fields: List[str] = [
 		'screenshot_path',
 		'stored_response_path',
@@ -252,6 +264,10 @@ class AiAddon(StrictModel):
 	enabled: bool = False
 	api_key: str = ''
 	api_base: str = ''
+	# SECURITY (LLM CREDS): gate the "custom api_base needs a caller-supplied api_key"
+	# rule; off = configured key is reused for any base.
+	# Env: SECATOR_ADDONS_AI_CUSTOM_DISALLOW_CONFIG_TOKEN.
+	custom_disallow_config_token: bool = False
 	default_model: str = 'claude-sonnet-4-6'
 	intent_model: str = 'claude-haiku-4-5'
 	temperature: float = 0.7

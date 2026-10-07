@@ -9,6 +9,25 @@ from secator.rich import console
 RUNNER_COLLECTIONS = ('tasks', 'workflows', 'scans')
 
 
+def _seek_by_native_id(query: dict) -> dict:
+	"""Rewrite a plain-string `_uuid` equality into a native `_id` seek.
+
+	The mongodb driver owns finding identity (`_uuid = str(_id)`), so a valid-ObjectId
+	`_uuid` is always the primary key — querying `_id` uses the index instead of scanning
+	the `_uuid` field. uuid4s (json/sqlite / pre-backfill findings) are NOT valid ObjectIds,
+	so they stay a `_uuid` field match — correct before and after the backfill. Only a plain
+	string equality is rewritten; an operator dict (`$in`/`$ne`/…) or absent `_uuid` is left
+	untouched.
+	"""
+	u = query.get('_uuid')
+	if isinstance(u, str):
+		from bson.objectid import ObjectId
+		if ObjectId.is_valid(u):
+			query = {k: v for k, v in query.items() if k != '_uuid'}
+			query['_id'] = ObjectId(u)
+	return query
+
+
 class MongoDBBackend(QueryBackend):
 	"""Query backend for MongoDB."""
 
@@ -36,6 +55,8 @@ class MongoDBBackend(QueryBackend):
 		try:
 			client = self._get_client()
 			db = client.main
+
+			query = _seek_by_native_id(query)
 
 			# Build projection to exclude fields
 			projection = None
@@ -85,7 +106,7 @@ class MongoDBBackend(QueryBackend):
 	def _execute_update(self, query: dict, update: dict) -> int:
 		"""Update documents matching query in MongoDB."""
 		client = self._get_client()
-		result = client.main.findings.update_one(query, update)
+		result = client.main.findings.update_one(_seek_by_native_id(query), update)
 		return result.modified_count
 
 	def list_workspaces(self):

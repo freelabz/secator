@@ -39,9 +39,18 @@ logger = logging.getLogger(__name__)
 # nested quantifiers (the classic catastrophic-backtracking shape) and cap the
 # length of the string we ever feed to a regex. Both are best-effort.
 _MAX_REGEX_INPUT = 2048
-# Heuristic: a quantified group whose body also contains a quantifier -> (a+)+,
-# (a*)*, (a+)*b, ... Best-effort (single-level groups); flagged in the report.
+# Heuristics for the two classic exponential-backtracking shapes. Both are
+# best-effort, single-level (non-nested) groups; a flagged entry is rejected at
+# compile time and never fed to `fullmatch`.
+#   (1) a quantified group whose body also contains a quantifier -> (a+)+, (a*)*
 _NESTED_QUANTIFIER = re.compile(r'\([^()]*[+*?][^()]*\)[+*]')
+#   (2) alternation inside a quantified group -> (a|aa)+, (foo|foobar)* : the
+#       overlapping alternatives give the same exponential blow-up as (1) even
+#       though no quantifier sits inside the group. A trailing `?` is bounded
+#       (safe), so we only reject unbounded `+`/`*`. A safe non-overlapping
+#       alternation like `([a-z0-9]|-)+` is a false positive here -- rewrite it
+#       as a char class `[a-z0-9-]+`; a rejected ALLOW entry only narrows scope.
+_ALTERNATION_QUANTIFIER = re.compile(r'\([^()]*\|[^()]*\)[+*]')
 
 # Regex metacharacters that mark an entry as a regex rather than a structural
 # host/wildcard/CIDR. `.` and `*` are excluded: they are the ordinary furniture
@@ -66,7 +75,7 @@ def _compile_entry(entry):
 	if entry in _regex_cache:
 		return _regex_cache[entry]
 	compiled = None
-	if _NESTED_QUANTIFIER.search(entry):
+	if _NESTED_QUANTIFIER.search(entry) or _ALTERNATION_QUANTIFIER.search(entry):
 		logger.warning('scope: skipping regex entry with catastrophic (ReDoS) pattern: %r', entry)
 	else:
 		try:
@@ -353,7 +362,7 @@ def resolve_scope_hostnames(scope):
 
 	CAVEAT: a CDN / shared-hosting front resolves to an IP shared with other sites, so
 	adding it authorizes every co-tenant on that IP. Only widen scope this way under an
-	explicit engagement scope (the platform's mandate-derived in_scope).
+	explicit engagement scope (the caller-provided mandate-derived in_scope).
 	"""
 	import socket
 	entries = as_scope_list(scope)

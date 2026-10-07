@@ -227,6 +227,25 @@ class TestDetection(unittest.TestCase):
 		targets = extract_command_targets("nmap -sV 10.0.0.1")
 		self.assertIn("10.0.0.1", targets)
 
+	def test_decimal_fragment_not_a_target(self):
+		"""`sleep 0.5`: '0.5' is a fragment, not the IP 0.0.0.5 — it must not be extracted
+		and block the shell task (fixed at the root in canonicalize_target)."""
+		self.assertEqual(extract_command_targets("sleep 0.5"), [])
+		self.assertIn("1.2.3.4", extract_command_targets("nmap 1.2.3.4"))  # real IP still a target
+
+	def test_extract_command_targets_ip_hidden_in_code_string(self):
+		"""An IP buried in a `python3 -c "..."` code string (one multi-token arg the
+		per-arg walk skips) must still be extracted, so the scope gate sees it and a
+		shell command can't route around an out-of-scope deny. Regression for the
+		raw-sweep moving into the parse-failure branch only."""
+		cmd = "python3 -c \"import socket; s=socket.socket(); s.connect(('34.118.226.132',21))\""
+		self.assertIn("34.118.226.132", extract_command_targets(cmd))
+
+	def test_extract_command_targets_ip_in_non_http_scheme(self):
+		"""A non-http(s) scheme the URL regex ignores (ftp://IP) must still surface its
+		IP as a target."""
+		self.assertIn("34.118.226.132", extract_command_targets("curl -sv ftp://34.118.226.132/"))
+
 	def test_extract_command_targets_host(self):
 		targets = extract_command_targets("nmap example.com")
 		self.assertIn("example.com", targets)
@@ -1681,6 +1700,36 @@ class TestScopeHardDeny(unittest.TestCase):
 		self.assertEqual(result.reason, "out_of_scope")
 		self.assertIn("8.8.8.8", result.targets)
 
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestControlActionsAllowed(unittest.TestCase):
+	"""Control / meta actions (subagent, stop, change_mode) must NOT be denied as
+	'Unknown action type' — that silently broke run_subagent, bare stop(), and
+	change_mode. They have no egress of their own; a subagent's targets are still
+	scope-checked."""
+
+	def _engine(self, in_scope=None):
+		return PermissionEngine(
+			config={"allow": [], "deny": [], "ask": []}, in_scope=in_scope or ["scanme.nmap.org"])
+
+	def test_control_actions_allowed(self):
+		eng = self._engine()
+		for action in ({"action": "subagent"}, {"action": "stop"},
+		               {"action": "change_mode", "mode": "scan"}):
+			self.assertEqual(eng.check_action(action).decision, "allow", action["action"])
+
+	def test_subagent_in_scope_target_allowed(self):
+		eng = self._engine()
+		r = eng.check_action({"action": "subagent", "targets": ["scanme.nmap.org"]})
+		self.assertEqual(r.decision, "allow")
+
+	def test_subagent_out_of_scope_target_not_allowed(self):
+		"""A subagent spawned at an out-of-scope target is still gated by the target
+		layer (ask/deny) — auto-allowing the action type doesn't skip target scope."""
+		eng = self._engine()
+		r = eng.check_action({"action": "subagent", "targets": ["evil.example.com"]})
+		self.assertNotEqual(r.decision, "allow")
 
 
 if __name__ == '__main__':

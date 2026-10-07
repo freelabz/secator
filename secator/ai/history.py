@@ -2,7 +2,6 @@
 """Chat history management for AI task - litellm format."""
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from secator.utils import debug
@@ -71,15 +70,17 @@ def truncate_to_tokens(
     content: str,
     max_tokens: int,
     model: str,
-    fallback_path: Path = None,
+    hint: str = "",
 ) -> str:
-    """Truncate content to fit within token budget, with file fallback.
+    """Truncate content to fit within token budget.
 
     Args:
         content: Content to truncate
         max_tokens: Maximum tokens allowed
         model: LLM model name for token counting
-        fallback_path: Existing file to reference (task/workflow report.json)
+        hint: Optional guidance appended right after the [TRUNCATED] marker, telling
+            the model how to get the rest (the caller knows the result type — e.g. for
+            a task/workflow the findings are queryable by `_context.task_chunk_id`).
 
     Returns:
         Original content if under budget, or truncated with [TRUNCATED] marker
@@ -92,22 +93,10 @@ def truncate_to_tokens(
 
     debug(f'truncating: {current} > {max_tokens} tokens', sub='runner.ai.context')
 
-    # Determine file hint
-    if fallback_path and fallback_path.exists():
-        # Give the model the CONCRETE path plus the explore hint together. Without a
-        # real path, suggesting "explore with jq" makes the model run a command
-        # against the literal <OUTPUT_PATH> placeholder from the prompt examples
-        # (there is nothing to substitute), so only hint when a file actually exists.
-        file_hint = f"\nFull output saved to: {fallback_path}"
-        file_hint += f"\nUse shell commands to explore THIS path ({fallback_path}): grep, head, tail, jq"
-        debug(f'using existing fallback: {fallback_path}', sub='runner.ai.context')
-    else:
-        file_hint = ""
-
     # Truncate content (ratio-based with 10% safety margin)
     ratio = max_tokens / current
     truncate_at = int(len(content) * ratio * 0.9)
-    return content[:truncate_at] + f"\n\n[TRUNCATED]{file_hint}"
+    return content[:truncate_at] + f"\n\n[TRUNCATED]{hint}"
 
 
 def _usable_tokens(model: str) -> int:
@@ -212,7 +201,7 @@ class ChatHistory:
         msgs = self.trim(budget) if budget > 0 else self.messages.copy()
         # Repair FORWARD orphan tool_uses before every LLM call: an assistant
         # tool_call with no matching tool_result. Some handlers (follow_up,
-        # add_vuln_poc, add_finding, stop) yield only an `Ai` and never append a
+        # mark_vuln_exploited, add_finding, stop) yield only an `Ai` and never append a
         # tool_result, so their tool_calls pile up unmatched over a turn. Providers
         # reject/degrade on an unmatched tool_call (the model starts narrating options
         # as prose instead of calling follow_up), so synthesize an acknowledgment.

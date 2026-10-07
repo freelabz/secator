@@ -1,6 +1,7 @@
 # secator/tasks/ai.py
 """AI-powered penetration testing task."""
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -22,7 +23,8 @@ from secator.ai.interactivity import create_backend, RemoteBackend, UserInputTim
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
-	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES
+	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES, MODE_ALIASES,
+	normalize_mode,
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
 from secator.ai.session import (
@@ -47,16 +49,16 @@ _HARD_ITERATION_CEILING = 1000
 _MAX_FOLLOWUP_EXTENSIONS = 200
 
 # When the SAME answer is served to this many CONSECUTIVE follow-ups, the run isn't
-# progressing (e.g. the answer channel re-serving one standing message, seen on canary
+# progressing (e.g. the answer channel re-serving one standing message, observed in remote runs
 # ws bb_21_arcbbc) — stop now instead of burning up to _MAX_FOLLOWUP_EXTENSIONS
 # iterations / the worker deadline. A genuine back-and-forth (distinct answers) resets
 # the counter and never trips this.
 _MAX_REPEATED_ANSWERS = 3
 
 # High-precision cues for the deterministic mode fast-path. Only unambiguous
-# prompts (cues for exactly one of attack/chat, and no exploit-ish cue) are
+# prompts (cues for exactly one of scan/chat, and no exploit-ish cue) are
 # resolved here; everything else defers to the LLM classifier.
-_ATTACK_CUES = (
+_SCAN_CUES = (
 	"scan", "pentest", "pen test", "enumerate", "enumeration", "recon",
 	"brute", "bruteforce", "fuzz", "attack", "nmap", "nuclei", "subdomain", "hack",
 )
@@ -65,22 +67,37 @@ _CHAT_CUES = (
 	"how do", "how does", "tell me", "describe", "list the", "show me", "?",
 )
 _EXPLOIT_CUES = ("exploit", "poc", "proof of concept", "cve-", "vulnerabilit")
+# Discovery/read framing: FIND / RANK / LIST vulns is summarize-and-stop, even when it
+# mentions "exploitable vulnerabilities".
+_DISCOVERY_CUES = (
+	"top ", "find ", "which ", "identify", "rank", "how many", "list", "search for", "look for",
+)
+# Active-exploit intent: exploit/pwn/compromise as a VERB (word-boundary so "exploitable"
+# and "compromised" don't match).
+_ACTIVE_EXPLOIT_RE = re.compile(r'\b(?:exploit|pwn|compromise|weaponize)\b')
 
 
 def fast_detect_mode(prompt):
-	"""Cheap deterministic pre-classifier. Returns 'attack'/'chat' for
-	unambiguous prompts, else None to defer to the LLM. Exploit-ish prompts
-	return None so the LLM keeps deciding those (no behavior change there)."""
+	"""Cheap deterministic pre-classifier. Returns 'scan'/'chat' for unambiguous prompts,
+	else None to defer to the LLM. A discovery/summary request that only MENTIONS exploit/
+	vulns ("find the top 3 exploitable vulnerabilities") returns chat (summarize + STOP),
+	not auto-exploit; anything with active-exploit or scan intent defers."""
 	text = (prompt or "").strip().lower()
 	if not text:
 		return "chat"
 	if any(cue in text for cue in _EXPLOIT_CUES):
+		discovery = any(c in text for c in _CHAT_CUES) or any(c in text for c in _DISCOVERY_CUES)
+		# Active = exploit verb OR a scan/attack cue (chat mode can't run those, so a mixed
+		# "find vulns AND scan" must defer, not force chat).
+		active = bool(_ACTIVE_EXPLOIT_RE.search(text)) or any(c in text for c in _SCAN_CUES)
+		if discovery and not active:
+			return "chat"
 		return None
-	has_attack = any(cue in text for cue in _ATTACK_CUES)
+	has_scan = any(cue in text for cue in _SCAN_CUES)
 	has_chat = any(cue in text for cue in _CHAT_CUES)
-	if has_attack and not has_chat:
-		return "attack"
-	if has_chat and not has_attack:
+	if has_scan and not has_chat:
+		return "scan"
+	if has_chat and not has_scan:
 		return "chat"
 	return None
 
@@ -122,7 +139,6 @@ def _yield_tool_results(runner, collected):
 	(rejected by providers).
 	"""
 	budget = runner.history.get_action_budget(runner.model)
-	fallback_path = Path(runner.reports_folder) / "report.json" if runner.reports_folder else None
 	grouped = {}
 	for r in collected:
 		grouped.setdefault(r["_context"]['tool_call_id'], []).append(r)
@@ -131,7 +147,7 @@ def _yield_tool_results(runner, collected):
 		has_errors = any(r["_type"] == "error" for r in group_results)
 		# `_uuid` is normally internal, but for query_workspace results it is the
 		# stable, cross-backend handle the model must reference later — notably
-		# add_vuln_poc requires the `_uuid` "seen in query_workspace results". Keep
+		# mark_vuln_exploited requires the `_uuid` "seen in query_workspace results". Keep
 		# it for queries; strip the rest of INTERNAL_FIELDS as usual.
 		strip_fields = tuple(f for f in INTERNAL_FIELDS if f != "_uuid") \
 			if tc_name == "query_workspace" else INTERNAL_FIELDS
@@ -142,8 +158,27 @@ def _yield_tool_results(runner, collected):
 		tool_result_str = format_tool_result(
 			tc_name, "error" if has_errors else "success",
 			len(serialized), serialized)
+		# On truncation, tell the model how to get the rest. A task/workflow's results
+		# are persisted as workspace findings keyed by `_context.task_chunk_id` (the
+		# runner's own chunk id), so point it at a TARGETED query_workspace on that id
+		# — works in every mode incl. read-only chat (no shell needed). For any other
+		# tool (shell, query, ...) leave a bare [TRUNCATED]: the model re-runs with a
+		# narrower command/query on its own.
+		trunc_hint = ""
+		if tc_name in ("run_task", "run_workflow"):
+			chunk_id = next(
+				(r.get("_context", {}).get("task_chunk_id")
+				 for r in group_results
+				 if isinstance(r, dict) and r.get("_context", {}).get("task_chunk_id")),
+				None)
+			if chunk_id:
+				trunc_hint = (
+					f'\nThe full results are stored as workspace findings. Read them with a '
+					f'TARGETED query scoped to this run — query_workspace(query={{"_context.task_chunk_id": '
+					f'"{chunk_id}", "_type": "<type>"}}) — and narrow further (severity/name/...). '
+					f'Do NOT re-run the task.')
 		tool_result_str = truncate_to_tokens(
-			tool_result_str, budget, runner.model, fallback_path=fallback_path)
+			tool_result_str, budget, runner.model, hint=trunc_hint)
 		tool_result_str = maybe_encrypt(tool_result_str, runner.encryptor)
 		runner.history.add_tool_result(tc_name, tc_id, tool_result_str)
 		_tool_msg = {"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": tool_result_str}
@@ -158,9 +193,28 @@ def _yield_tool_results(runner, collected):
 		         _context=dict(runner.context))
 
 
+def resolve_llm_credentials(
+	caller_api_base, caller_api_key, config_api_base, config_api_key,
+	disallow_config_token=False,
+):
+	"""Resolve the (api_base, api_key, error) triple for an AI run.
+
+	SECURITY (LLM CREDS): when ``disallow_config_token`` is on and a caller overrides ``api_base``
+	without supplying their own ``api_key``, the configured key is NOT reused (it would be sent to
+	an unintended endpoint) and the run is refused. ``error`` is then a short message the caller
+	yields as an ``Error()`` output — tasks never raise. Off (default) reuses the configured key
+	for any base, so a normal CLI user who sets both keys in config keeps working.
+	"""
+	api_base = caller_api_base or config_api_base
+	custom_base = bool(caller_api_base) and caller_api_base != config_api_base
+	if disallow_config_token and custom_base and not caller_api_key:
+		return api_base, None, "A custom api_base requires you to provide your own api_key."
+	return api_base, (caller_api_key or config_api_key), None
+
+
 @task()
 class ai(PythonRunner):
-	"""AI-powered penetration testing assistant (attack or chat mode)."""
+	"""AI-powered penetration testing assistant (scan or chat mode)."""
 	output_types = FINDING_TYPES + [Target]
 	tags = ["ai", "analysis", "pentest"]
 	default_inputs = ''
@@ -174,8 +228,8 @@ class ai(PythonRunner):
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": f"Mode: {', '.join(MODES)}"},  # derive from MODES, don't drift
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
-		# Never default this to CONFIG.addons.ai.api_key: secator-api serves task opts
-		# (incl. defaults) to the UI, which would leak the key into the runner form.
+		# Never default this to CONFIG.addons.ai.api_key: a remote server serves task opts
+		# (incl. defaults) to clients, which would leak the key into client-rendered run options.
 		# Falls back to CONFIG at runtime instead; still `sensitive` so it's redacted.
 		"api_key": {"type": str, "default": "", "sensitive": True, "help": "API key for LLM provider (defaults to configured key)"},  # noqa: E501
 		"api_base": {"type": str, "default": "", "help": "API base URL (defaults to configured base)"},
@@ -287,9 +341,14 @@ class ai(PythonRunner):
 		# Init all options
 		self._init_options()
 
+		# SECURITY (LLM CREDS): refuse (yield Error, never raise) if creds can't be safely resolved.
+		if self._credential_error:
+			yield Error(message=self._credential_error)
+			return
+
 		# Show prompt mode (diagnostic)
 		if self.run_opts.get("show_prompt", False):
-			show_mode = self.mode or "attack"
+			show_mode = self.mode or "scan"
 			prompt = get_system_prompt(
 				show_mode, workspace_path=str(self.reports_folder), backend=self.backend,
 				in_scope=self.in_scope, out_of_scope=self.out_of_scope)
@@ -410,14 +469,14 @@ class ai(PythonRunner):
 
 		Returns the ``(system_prompt, tool_schemas)`` pair for callers that want it."""
 		self.system_prompt = self._system_prompt_for(self.mode)
-		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True))  # noqa: E501
 		return self.system_prompt, self.tool_schemas
 
 	def _resolve_prompt(self):
 		"""Resolve the ``prompt`` run option, reading it from a file if it names one.
 
 		File-path expansion is CLI/local only: on the remote path the prompt comes from
-		the web UI, so a string that happens to name a worker-local file must NOT be read
+		clients, so a string that happens to name a worker-local file must NOT be read
 		and leaked into the transcript.
 		"""
 		prompt = self.run_opts.get("prompt", "")
@@ -516,6 +575,50 @@ class ai(PythonRunner):
 		if not self.session_name:
 			self.session_name = _truncate_label(self.prompt, self.prompt)
 		self.context["session_name"] = self.session_name
+
+		# Restore a prior user PIN before detecting. `_resolve_opts` recomputed
+		# `mode_is_auto` from the incoming run-opt, which on a respawn is usually empty/
+		# "auto" — so a mode the user pinned via `switch_mode` (persisted as
+		# `ai_mode_is_auto=False`) would otherwise be lost and this turn re-detected. Only
+		# restore when the incoming opt itself left the session auto (so an explicit new
+		# pin from the client still wins); read the pinned mode from the persisted docs.
+		if getattr(self, "mode_is_auto", True):
+			try:
+				pinned = query_engine.search({
+					"_type": "ai", "_context.session_id": self.session_id,
+					"_context.ai_mode_is_auto": False,
+				}, limit=1)
+			except Exception as e:  # noqa: BLE001 - a lookup must not crash the worker
+				self.debug(f'resume: pin lookup failed: {e}', sub='llm')
+				pinned = None
+			if pinned:
+				pinned_mode = normalize_mode(pinned[0].get("mode") or (pinned[0].get("_context") or {}).get("ai_mode"))
+				if pinned_mode in MODES:
+					self.mode_is_auto = False
+					self.mode = pinned_mode
+					self.context["ai_mode_is_auto"] = False
+
+		# Carry the last auto-detected mode across a resume. A respawned worker starts at
+		# the default ("chat"), so `_detect_mode`'s no-de-escalation clamp (F3) would have
+		# no prior mode to anchor to — an AUTO session that had escalated to scan/exploit
+		# then silently drops back to chat on the resumed turn (e.g. answering "Sure" to a
+		# follow-up re-classifies as chat). Seed `self.mode` from the newest persisted doc
+		# that carries a concrete mode so the clamp preserves it (escalation and
+		# scan<->exploit stay free; only the silent drop to chat is blocked). Skip when a
+		# pin was just restored above (hard-set modes don't re-detect anyway).
+		if getattr(self, "mode_is_auto", True):
+			try:
+				mode_docs = query_engine.search({
+					"_type": "ai", "_context.session_id": self.session_id,
+					"mode": {"$in": [*MODES, *MODE_ALIASES]},
+				})
+			except Exception as e:  # noqa: BLE001 - a lookup must not crash the worker
+				self.debug(f'resume: last-mode lookup failed: {e}', sub='llm')
+				mode_docs = None
+			if mode_docs:
+				last_mode = normalize_mode(max(mode_docs, key=lambda d: d.get("_timestamp", 0)).get("mode"))
+				if last_mode in MODES:
+					self.mode = last_mode
 
 		# Detect mode (defaults to chat) and build the system prompt + tools
 		self._detect_mode()
@@ -616,7 +719,7 @@ class ai(PythonRunner):
 		turns — so those tokens leak verbatim into shell commands (DNS fails) and
 		scope/IP checks (ValueError). Store it as an internal ``ai_type="pii_map"``
 		doc (one per session, upserted): restore_history_from_db skips it so it never
-		enters the LLM transcript, and the UI hides it. The plaintext values already
+		enters the LLM transcript, and clients hide it. The plaintext values already
 		live in the workspace findings, so this adds no LLM-provider exposure.
 		"""
 		if self.interactive != "remote" or not self.encryptor or not self.encryptor.pii_map:
@@ -671,7 +774,10 @@ class ai(PythonRunner):
 			# AI accumulates its own action results here; queries the store on demand (avoids OOM on the full subtree)
 			results=[],
 			max_workers=self.max_workers,
+			max_iterations=self.max_iterations,
 			subagent=self.is_subagent,
+			mode=self.mode,
+			mode_is_auto=getattr(self, "mode_is_auto", True),
 			sync=self._sync,
 			interactive=self.interactive,
 			backend=self.backend,
@@ -840,7 +946,7 @@ class ai(PythonRunner):
 						"iteration": iteration,
 						# Persist -1 (not float('inf')) for the uncapped case: inf is not
 						# JSON-compliant and 500s the transcript search (strict json.dumps),
-						# which makes the whole conversation fail to load in the UI.
+						# which makes the whole conversation fail to load for clients.
 						"max_iterations": (-1 if self.max_iterations == float('inf') else self.max_iterations),
 						"tokens": usage.get("tokens") if usage else None,
 						"cost": usage.get("cost") if usage else None,
@@ -867,6 +973,27 @@ class ai(PythonRunner):
 					follow_up_choices = dispatch_result.get("follow_up_choices")
 					stop_reason = dispatch_result.get("stop_reason")
 					follow_up_prompt_uuid = dispatch_result.get("follow_up_prompt_uuid")
+
+					# Model-driven mode change (change_mode tool): apply it now so the rest
+					# of the run uses the new mode's tool surface + persona. Stays `auto`
+					# (model-managed) — the F3 clamp in _detect_mode keeps it from being
+					# silently de-escalated on the next turn. The pinned-chat guard is in
+					# the handler + the tool schema (change_mode isn't built for pinned chat).
+					new_mode = dispatch_result.get("new_mode")
+					if new_mode and new_mode != self.mode:
+						self.mode = new_mode
+						# ctx persists across the loop; keep it in sync so a later
+						# run_subagent without an explicit mode inherits the new mode,
+						# not the stale pre-switch one.
+						ctx.mode = new_mode
+						self._rebuild_prompt_and_tools()
+						self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
+						# The switch is already recorded by the persisted `mode_changed` doc
+						# (clients render it as a "Switched to <mode> mode" notice, ordered by
+						# its own timestamp). Do NOT also yield a transient Info — it surfaced as
+						# a duplicate line that raced ahead of the user's message. Console-only
+						# for CLI/pod-logs.
+						console.print(Info(message=f"Switched to {new_mode} mode"))
 
 					# Persist the encryptor's map (grown by this turn's tool/query
 					# results) so a later resumed worker can decrypt these tokens.
@@ -975,10 +1102,22 @@ class ai(PythonRunner):
 		self.is_subagent = self.get_opt_value("subagent")
 		self.model = self.get_opt_value("model")
 		self.intent_model = self.get_opt_value("intent_model")
-		self.api_base = self.get_opt_value("api_base") or CONFIG.addons.ai.api_base
-		self.api_key = self.get_opt_value("api_key") or CONFIG.addons.ai.api_key
+		# SECURITY (LLM CREDS): don't reuse the configured key on a caller-overridden api_base (gated).
+		self.api_base, self.api_key, self._credential_error = resolve_llm_credentials(
+			self.get_opt_value("api_base"), self.get_opt_value("api_key"),
+			CONFIG.addons.ai.api_base, CONFIG.addons.ai.api_key,
+			CONFIG.addons.ai.custom_disallow_config_token,
+		)
 		self.sensitive = self.get_opt_value("sensitive")
-		self.mode = self.get_opt_value("mode")
+		# Mode intent. An empty opt or the explicit "auto" sentinel means AUTO-DETECT:
+		# the mode follows the conversation and is re-classified every turn (chat <->
+		# scan <-> exploit). A concrete mode is HARD-SET by the user: it sticks for the
+		# whole session and the AI must NOT silently escalate out of it (a chat session
+		# stays informational). `mode_is_auto` is the single source of truth for that
+		# distinction; it is stamped onto the runner context so resume keeps the intent.
+		_mode_opt = normalize_mode(self.get_opt_value("mode") or "")
+		self.mode_is_auto = _mode_opt in ("", "auto")
+		self.mode = "" if self.mode_is_auto else _mode_opt
 		self.max_tokens_total = self.get_opt_value("max_tokens_total")
 		self.max_workers = self.get_opt_value("max_workers")
 		self.max_iterations = self.get_opt_value("max_iterations")
@@ -1034,7 +1173,7 @@ class ai(PythonRunner):
 		)
 
 		# Per-run billed-token accounting (AI analog of context.scan_hours), read
-		# by the platform billing chore. Init so it persists even with zero LLM calls.
+		# by the billing chore. Init so it persists even with zero LLM calls.
 		self.context.setdefault("ai_tokens", 0)
 		self.context.setdefault("ai_prompt_tokens", 0)
 		self.context.setdefault("ai_completion_tokens", 0)
@@ -1044,8 +1183,11 @@ class ai(PythonRunner):
 		# the model registry. Set unconditionally (not setdefault) — records the
 		# configured model even if the user switches mid-session.
 		self.context["ai_model"] = self.model
+		# Persist the auto/hard-set intent so a resume keeps it (an auto session stays
+		# auto and keeps re-detecting; it never congeals into the last resolved mode).
+		self.context["ai_mode_is_auto"] = self.mode_is_auto
 
-		# Create interactivity backend. For remote (web), the UI reuses a stable
+		# Create interactivity backend. For remote (web), clients reuse a stable
 		# session_id on respawn so a respawned task finds its prior docs; it arrives
 		# via self.context (authoritative — the dispatcher pops run_opts['context']).
 		self.session_id = (
@@ -1098,12 +1240,20 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 
 	def _detect_mode(self, force=False):
-		"""Detect mode using a fast LLM call for intent analysis.
-		Skips detection if mode was explicitly set (e.g. by subagent or CLI option),
-		unless force=True (used for follow-up re-detection)."""
+		"""Resolve the mode for the current turn.
+
+		AUTO (``mode_is_auto``): re-classify the current prompt EVERY turn so the mode
+		follows the conversation (chat <-> scan <-> exploit), including on resume.
+		HARD-SET: the user pinned a mode — it sticks for the whole session and we never
+		re-classify, so a chat session cannot silently escalate into scan/exploit.
+		``force`` is kept for call-site compatibility but no longer overrides a pin (an
+		auto session always re-detects; a hard-set one never does)."""
 		old_mode = self.mode
-		if old_mode and not force:
-			if not hasattr(self, 'tool_schemas'):
+		if not getattr(self, 'mode_is_auto', True):
+			# Hard-set: keep the pinned mode verbatim, just make sure tools/prompt exist.
+			if not self.mode:
+				self.mode = "chat"
+			if not hasattr(self, 'tool_schemas') or old_mode != self.mode:
 				self._rebuild_prompt_and_tools()
 			return
 		if not self.prompt:
@@ -1126,7 +1276,7 @@ class ai(PythonRunner):
 				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
 					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
 				self._account_usage(result.get("usage"))
-				mode = result["content"].strip().lower()
+				mode = normalize_mode(result["content"])
 				if mode in MODES:  # honor any real mode (incl. exploit), don't discard it
 					console.print(rf"[bold green]\[INF][/] Detected intent: [bold]{mode}[/]")
 					self.mode = mode
@@ -1137,6 +1287,15 @@ class ai(PythonRunner):
 				self.mode = "chat"
 		if not self.mode:
 			self.mode = "chat"
+		# F3: never auto-DE-escalate to read-only `chat` once the session has entered an
+		# action mode. A mid-engagement aside ("which of these looks most exploitable?")
+		# classifies as chat, but dropping there would strip run_shell/run_task/add_finding
+		# and could lose an unrecorded finding. Escalation and scan<->exploit stay free;
+		# only the silent drop back to chat is blocked — an explicit switch_mode can still
+		# go read-only (the user's conscious choice).
+		if self.mode == "chat" and old_mode in ("scan", "exploit"):
+			console.print(rf"[bold green]\[INF][/] Keeping [bold]{old_mode}[/] mode (auto won't de-escalate to chat)")
+			self.mode = old_mode
 		# Resolve the agent-loop cap.
 		#  - A config value <= 0 (SECATOR_ADDONS_AI_MAX_ITERATIONS=-1) DISABLES the cap:
 		#    the run continues until the model sends `stop` (or returns no tool call).
@@ -1158,7 +1317,7 @@ class ai(PythonRunner):
 			self.max_iterations = max(self.max_iterations, mode_max, config_max)
 		self.system_prompt = self._system_prompt_for(self.mode)
 		if not hasattr(self, 'tool_schemas') or not old_mode or old_mode != self.mode:
-			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend)
+			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True))  # noqa: E501
 
 	# -------------------------------------------------------------------------
 	# Workspace helpers
@@ -1179,10 +1338,10 @@ class ai(PythonRunner):
 		turn. Cooperative — not a hard cancel (Stop already does that).
 
 		The steer doc the API wrote is itself the persisted transcript entry (it
-		carries ``_context.session_id``, so the UI's transcript poll surfaces it as
+		carries ``_context.session_id``, so a client's transcript poll surfaces it as
 		an "interjected" user bubble). We deliberately do NOT yield a second
 		``Ai(ai_type="steer")`` echo here — that would persist a duplicate doc with
-		the same content and double-render in the UI. ``poll_steers`` flips the
+		the same content and double-render on the client. ``poll_steers`` flips the
 		drained doc to ``status:"consumed"`` so it injects exactly once.
 
 		Only the RemoteBackend has a channel to poll; for every other backend this
@@ -1292,6 +1451,12 @@ class ai(PythonRunner):
 			# decrypt/convert, so handlers get the declared type not a JSON string.
 			args = coerce_stringified_args(name, args)
 
+			# A bare stop() can arrive with no/None args; tool_call_to_action accepts
+			# that for stop, but the rest of this loop (incl. args.get below) needs a
+			# dict. Normalize so a no-arg stop ends the turn cleanly instead of raising
+			# AttributeError (which would defeat the stop).
+			args = args or {}
+
 			# Decrypt args
 			if self.encryptor:
 				args = _decrypt_dict(args, self.encryptor)
@@ -1348,7 +1513,7 @@ class ai(PythonRunner):
 				# Log the denial to the console / pod-logs ONLY — the _reject_tool_call
 				# tool_result below already surfaces the SAME reason in the chat (it is
 				# what the model reads). Yielding a Warning too rendered the denial TWICE
-				# in the live UI (a Warning line + the tool_result bubble). One denial,
+				# in the live client view (a Warning line + the tool_result bubble). One denial,
 				# one message.
 				console.print(Warning(message=denial_display))
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
@@ -1377,6 +1542,7 @@ class ai(PythonRunner):
 		stop_reason = None
 		follow_up_ai = None
 		follow_up_prompt_uuid = None
+		new_mode = None
 
 		# Progress signal for the same-answer loop-breaker (see _prompt_and_redetect):
 		# count substantive actions actually dispatched this turn (a follow_up/steer is
@@ -1410,7 +1576,7 @@ class ai(PythonRunner):
 					if isinstance(self.backend, RemoteBackend):
 						follow_up_ai.status = "pending"
 						# Correlate on the PERSISTED _context.session_id (a top-level session_id
-						# attr wouldn't serialize) — the same field poll_steers/the UI/api use.
+						# attr wouldn't serialize) — the same field poll_steers and clients use.
 						follow_up_ai._context = {**(follow_up_ai._context or {}), "session_id": self.session_id}
 						if not follow_up_ai.choices and follow_up_choices:
 							follow_up_ai.choices = list(follow_up_choices)
@@ -1426,7 +1592,12 @@ class ai(PythonRunner):
 				if result.ai_type == "stopped":
 					stop_reason = result.content
 					continue
-				if result.ai_type not in ("shell_output", "response"):
+				if result.ai_type == "mode_changed":
+					# The runner applies the switch after this batch (rebuilds tools +
+					# persona). Fall through so the change_mode call still produces a
+					# tool_result — the turn continues and the provider needs a response.
+					new_mode = result.content
+				elif result.ai_type not in ("shell_output", "response"):
 					continue
 			elif isinstance(result, OutputType):
 				self.add_result(result, print=not is_from_subagent)
@@ -1442,7 +1613,16 @@ class ai(PythonRunner):
 				yield result
 
 			result = result.toDict() if isinstance(result, OutputType) else result
-			collected.append(result)
+			# A dispatched CHILD subagent's fragmented output stays OUT of the parent's
+			# tool_result (the parent reads its clean handback instead). But a subagent
+			# ALSO stamps the `subagent` marker on its OWN tool outputs, and those MUST
+			# stay in `collected` — else the subagent never feeds its own tool results
+			# back to its LLM (tool calls acknowledged but empty). Distinguish the two by
+			# session_id: a child has its own (distinct) session_id; my own outputs share
+			# mine. Only a DIFFERENT session_id is a child.
+			is_from_child_subagent = is_from_subagent and result_context.get("session_id") != self.session_id
+			if not is_from_child_subagent:
+				collected.append(result)
 			ctx.results.append(result)
 
 		yield from _yield_tool_results(self, collected)
@@ -1452,6 +1632,7 @@ class ai(PythonRunner):
 			"stop_reason": stop_reason,
 			"follow_up_ai": follow_up_ai,
 			"follow_up_prompt_uuid": follow_up_prompt_uuid,
+			"new_mode": new_mode,
 		}
 
 	# -------------------------------------------------------------------------
@@ -1465,7 +1646,7 @@ class ai(PythonRunner):
 		(`{"tokens", "prompt_tokens", "completion_tokens", "cost"}`) or None.
 		Missing/None usage counts as 0 so accounting never crashes the run. The
 		running total lives on `self.context["ai_tokens"]` (int, cumulative) which
-		is persisted onto the task doc and read by the platform billing chore.
+		is persisted onto the task doc and read by the billing chore.
 		`context["ai_prompt_tokens"]`/`["ai_completion_tokens"]` carry the split.
 		"""
 		if not usage:
@@ -1609,7 +1790,7 @@ class ai(PythonRunner):
 		# the loop) and `max_iterations` here by `extra_iters`, so the two grow in
 		# lockstep and the `while iteration < max_iterations` cap can NEVER terminate an
 		# endlessly-answered follow-up loop. If the answer channel keeps re-serving the
-		# same standing message (a stopped→answered respawn racing / a buggy UI resubmit),
+		# same standing message (a stopped→answered respawn racing / a buggy client resubmit),
 		# the run spins until the worker deadline. Cap the auto-extensions so a runaway
 		# terminates; a real human back-and-forth never approaches the ceiling.
 		extends = getattr(self, "_followup_extensions", 0)
@@ -1618,18 +1799,23 @@ class ai(PythonRunner):
 		if extends < _MAX_FOLLOWUP_EXTENSIONS:
 			self.max_iterations += extra_iters
 			self._followup_extensions = extends + 1
+		mode_switched_to = None
 		if response.get("switch_mode"):
+			# An explicit user mode switch is a conscious decision: pin it (leave auto)
+			# so the session now sticks to the chosen mode instead of re-detecting away.
 			self.mode = response["switch_mode"]
+			self.mode_is_auto = False
+			self.context["ai_mode_is_auto"] = False
 			self._rebuild_prompt_and_tools()
 			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
-			items.append(Info(message=f"Switched to {self.mode} mode"))
+			mode_switched_to = self.mode
 		else:
-			# Re-detect mode (user may switch from chat to attack, etc.)
+			# Re-detect mode (user may switch from chat to scan, etc.)
 			previous_mode = self.mode
 			self._detect_mode(force=True)
 			if self.mode != previous_mode:
 				self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
-				items.append(Info(message=f"Switched to {self.mode} mode"))
+				mode_switched_to = self.mode
 
 		# Token breakdown for prompt display
 		by_role = self.history.count_tokens_by_role(self.model)
@@ -1638,4 +1824,10 @@ class ai(PythonRunner):
 			content=answer, ai_type="prompt", extra_data=extra_data,
 			message={"role": "user", "content": maybe_encrypt(answer, self.encryptor)},
 		))
+		# Record the switch AFTER the prompt doc so it renders as a "Switched to
+		# <mode> mode" notice BELOW the user's message (not before it), same
+		# representation as the change_mode tool path's persisted `mode_changed` doc.
+		if mode_switched_to:
+			console.print(Info(message=f"Switched to {mode_switched_to} mode"))
+			items.append(Ai(content=mode_switched_to, ai_type="mode_changed"))
 		return items

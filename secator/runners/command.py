@@ -814,57 +814,141 @@ class Command(Runner):
 		"""
 		if not self.process or not self.process.pid:
 			return
-		stats = Command.get_process_info(psutil.Process(self.process.pid), children=True, procs=procs)
-		total_mem = 0
-		for info in stats:
-			name = info['name']
-			pid = info['pid']
-			cpu_percent = info['cpu_percent']
-			# mem_percent = info['memory_percent']
-			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
-			total_mem += mem_rss
-			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
-			net_conns = info.get('net_connections') or []
-			# extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
+		infos = list(Command.get_process_info(psutil.Process(self.process.pid), children=True, procs=procs))
+		if not infos:
+			return
+		# One Stat PER process in the task's tree (the command + everything it spawns, e.g. a
+		# browser), so a consumer can drill into per-process utilization. Each memory is that
+		# process's PSS (proportional set size), which apportions shared pages — so summing PSS
+		# across the tree (or any subtree) gives its true footprint, unlike RSS which counts a
+		# parent's copy-on-write pages and the shared libraries every process maps once per
+		# process. `parent_pid` links each process to its parent within the tree (None for the
+		# root = the command itself), so stats can be nested (show roots, expand children). The
+		# memory-limit check in _monitor_process sums these PSS values, which is now correct.
+		tree_pids = {i['pid'] for i in infos}
+		# Optionally emit the worker process (the process running this task) as an extra root, and
+		# treat it as an in-tree parent so the command nests under it. In a 1-task-per-worker setup
+		# the subtree total then includes the worker's own footprint (its own PSS only — the task
+		# tree below is measured separately, so there is no double-count). Off by default.
+		worker_pid = None
+		if CONFIG.runners.monitor_worker:
+			worker_pid = os.getpid()
+			winfo = next(Command.get_process_info(psutil.Process(worker_pid), children=False, procs=procs), None)
+			if winfo:
+				self.debug(f'worker {worker_pid} (root) {round((winfo.get("pss") or 0) / 1048576, 2)}MB', sub='monitor')
+				yield Stat(
+					name=getattr(self, 'unique_name', None) or self.cmd_name,
+					pid=worker_pid,
+					parent_pid=None,
+					cpu=winfo.get('cpu_percent') or 0,
+					memory=round((winfo.get('pss') or 0) / 1024 / 1024, 2),
+					memory_limit=self.memory_limit_mb,
+					net_conns=len(winfo.get('net_connections') or []),
+				)
+		known = tree_pids | ({worker_pid} if worker_pid else set())
+		for info in infos:
+			ppid = info.get('ppid')
+			parent_pid = ppid if ppid in known else None
+			mem = round((info.get('pss') or 0) / 1024 / 1024, 2)
+			self.debug(f'{info.get("name")} {info.get("pid")} (parent {parent_pid}) {mem}MB', sub='monitor')
 			yield Stat(
-				name=name,
-				pid=pid,
-				cpu=cpu_percent,
-				memory=mem_rss,
+				name=info.get('name'),
+				pid=info.get('pid'),
+				parent_pid=parent_pid,
+				cpu=info.get('cpu_percent') or 0,
+				memory=mem,
 				memory_limit=self.memory_limit_mb,
-				net_conns=len(net_conns),
-				# extra_data=extra_data
+				net_conns=len(info.get('net_connections') or []),
 			)
-		# self.debug(f'Total mem: {total_mem}MB, memory limit: {self.memory_limit_mb}', sub='monitor')
-		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
-		# 	raise MemoryError(f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
+
+	# The only psutil attrs the per-tick monitor consumes. `as_dict()` with no attrs also
+	# collects open_files, net_connections, memory_maps, threads, io_counters, num_fds, ...
+	# — each opening /proc files on every process every tick, all discarded here. That
+	# needless churn is part of #1374. `ppid` is read from the same /proc/<pid>/stat that
+	# `name` already opens (no extra fd); cpu_percent and PSS are read explicitly below.
+	MONITOR_ATTRS = ['name', 'ppid', 'memory_info']
+
+	@staticmethod
+	def _iter_proc_tree(root_pid):
+		"""Yield ``root_pid`` and all its descendant pids.
+
+		Reads the kernel's own ``/proc/<pid>/task/<pid>/children`` lists, so the cost is
+		O(size of the task's own tree). ``psutil.Process.children(recursive=True)`` instead
+		reads ``/proc/<pid>/stat`` for EVERY process on the host on every call (it builds a
+		system-wide ppid map) — on a busy scan host that is hundreds of /proc opens per
+		monitor tick, the root cause of #1374's "too many open files". Falls back to psutil
+		where the children file isn't available (non-Linux, or a kernel without
+		CONFIG_PROC_CHILDREN).
+		"""
+		if not os.path.exists(f'/proc/{root_pid}/task/{root_pid}/children'):
+			try:
+				root = psutil.Process(root_pid)
+			except psutil.Error:
+				return
+			yield root_pid
+			for child in root.children(recursive=True):
+				yield child.pid
+			return
+		stack = [root_pid]
+		while stack:
+			pid = stack.pop()
+			yield pid
+			try:
+				with open(f'/proc/{pid}/task/{pid}/children') as f:
+					kids = f.read().split()
+			except OSError:  # process exited between reads
+				continue
+			stack.extend(int(k) for k in kids)
 
 	@staticmethod
 	def get_process_info(process, children=False, procs=None):
-		"""Get process information from psutil.
+		"""Yield an info dict for ``process`` (and its descendants when ``children``).
+
+		Walks only the task's own process subtree (see :meth:`_iter_proc_tree`) and reads
+		only the psutil attrs the monitor uses (``MONITOR_ATTRS`` + cpu_percent + PSS),
+		avoiding both the host-wide /proc scan and the unused-field collection that caused
+		the fd churn in #1374.
 
 		Args:
-			process (psutil.Process): Process.
-			children (bool): Whether to gather stats about children processes too.
-			procs (dict): pid -> psutil.Process reused across calls. Without it every
+			process (psutil.Process): Root process.
+			children (bool): Also gather descendants.
+			procs (dict): pid -> psutil.Process reused across ticks. Without it every
 				cpu_percent() is a first call, which returns 0.0.
 		"""
-		targets = [process]
-		if children:
-			targets.extend(process.children(recursive=True))
-		for proc in targets:
+		pids = Command._iter_proc_tree(process.pid) if children else [process.pid]
+		for pid in pids:
 			if procs is not None:
-				proc = procs.setdefault(proc.pid, proc)
+				proc = procs.get(pid)
+				if proc is None:
+					try:
+						proc = psutil.Process(pid)
+					except psutil.Error:
+						continue
+					procs[pid] = proc
+			else:
+				try:
+					proc = psutil.Process(pid)
+				except psutil.Error:
+					continue
 			try:
 				cpu_percent = proc.cpu_percent()  # before as_dict(), which resets the baseline
 				data = {
 					k: v._asdict() if hasattr(v, '_asdict') else v
-					for k, v in proc.as_dict().items()
-					if k not in ['memory_maps', 'open_files', 'environ']
+					for k, v in proc.as_dict(attrs=Command.MONITOR_ATTRS).items()
 				}
-			except psutil.Error:  # child exited mid-walk; keep the rest
+			except psutil.Error:  # process exited mid-walk; keep the rest
 				continue
+			data['pid'] = pid
 			data['cpu_percent'] = cpu_percent
+			# PSS (proportional set size) apportions shared pages, so summing it across a process
+			# tree yields the tree's real footprint — unlike RSS, which counts a parent's
+			# copy-on-write pages (and every shared library) once per process and so double-counts.
+			# PSS is Linux-only; fall back to RSS where it isn't available (macOS/Windows).
+			try:
+				mem_full = proc.memory_full_info()
+				data['pss'] = getattr(mem_full, 'pss', 0) or mem_full.rss
+			except psutil.Error:
+				data['pss'] = (data.get('memory_info') or {}).get('rss', 0)
 			yield data
 
 	def run_item_loaders(self, line):

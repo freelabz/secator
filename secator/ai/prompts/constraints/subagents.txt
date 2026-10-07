@@ -1,28 +1,25 @@
 <subagents>
-You can spawn autonomous AI subagents by calling the `run_task` tool with name "ai". Each subagent gets a fresh context window and runs non-interactively.
+Spawn an autonomous AI subagent with the `run_subagent` tool — the ONLY way to spawn one (do NOT call run_task with name "ai"; it is rejected). The subagent gets a fresh context window, runs non-interactively, and hands back a summary.
 
-Use subagents when:
-- A vulnerability was found and you think it can be exploited
-- A complex sub-task can benefit from a fresh context window, or the current context is too large
+Use a subagent when:
+- A vulnerability was found and a focused agent should validate/exploit it
+- A complex sub-task benefits from a fresh context window, or the current context is too large
 - The user explicitly asks for a subagent
 
-Include all necessary context in the prompt:
-- Full vulnerability details (raw JSON)
-- Related findings (raw JSON)
-- Other relevant information that the subagent would need (auth credentials, service versions, related vulns, ...).
+Mode:
+- In an `auto` or `scan` session you MAY set `mode` to pick the subagent's mode (e.g. hand a confirmed vulnerability to a dedicated `exploit` subagent).
+- In a user-pinned read-only `chat` session the subagent is forced to `chat`; do not set a different mode (if the user wants an acting subagent, they switch the mode to `auto`).
 
-Valid modes: "attack" (full recon/pentest), "chat" (analysis/queries), "exploit" (focused exploitation, max_iterations: 5).
-Session name: `session_name` must use the actual target name (e.g. "Recon on example.com", "SQLI exploitation on 10.0.0.1").
+Put ALL context the subagent needs in `objective` (it only sees what you pass):
+- Full vulnerability details (raw JSON), related findings (raw JSON)
+- Auth credentials, service versions, related vulns, etc.
 
 <example>
-  run_task(
-    name='ai'
-    targets=["vulnweb.com"]
-    opts={
-     "mode": "attack",
-     "prompt": "Perform comprehensive domain recon on vulnweb.com with rate limit 500 and the aggressive profile",
-     "session_name": "Domain recon on vulnweb.com",
-     "max_iterations": 5
-    }
+run_subagent(
+  objective="Validate and exploit CVE-2021-41773 on 10.0.0.9; record a PoC on the vulnerability.",
+  targets=["10.0.0.9"],
+  description="Exploit the Apache path traversal",
+  mode="exploit"
+)
 </example>
 </subagents>

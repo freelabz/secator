@@ -65,11 +65,18 @@ class QueryEngine:
         return self.BACKENDS[backend_name](self.workspace_id, context=self.context)
 
     def search(self, query: dict, limit: int = 0, dedupe: bool = False,
-               exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
-        """Search for findings matching query."""
+               exclude_fields: List[str] = None, scope_only: bool = False) -> List[Dict[str, Any]]:
+        """Search for findings matching query.
+
+        ``scope_only`` keeps only the workspace scope of the base query and drops the
+        display filters (``is_false_positive``/``_tagged``) — use it for a targeted
+        by-uuid read that must reach a finding regardless of its display state (e.g.
+        re-fetching a finding right after marking it a false positive, which the normal
+        ``is_false_positive:{$ne:True}`` base filter would otherwise hide).
+        """
         from secator.utils import debug, remove_duplicates
         debug(f'search via {self.backend.name} backend', sub='query', obj=query)
-        results = self.backend.search(query, limit, exclude_fields)
+        results = self.backend.search(query, limit, exclude_fields, scope_only=scope_only)
         if dedupe:
             results = remove_duplicates(results)
         return results

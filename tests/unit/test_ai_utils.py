@@ -82,6 +82,34 @@ class TestCallLLM(unittest.TestCase):
         self.assertEqual(result["tool_calls"], [])
         mock_completion.assert_called_once()
 
+    @patch('litellm.completion')
+    @patch('litellm.completion_cost')
+    def test_call_llm_strips_internal_message_fields(self, mock_cost, mock_completion):
+        """Internal `_`-prefixed message fields (e.g. the token cache) are not sent to
+        the model, but the caller's messages keep them."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "ok"
+        mock_response.choices[0].message.tool_calls = None
+        mock_response.usage.total_tokens = 10
+        mock_completion.return_value = mock_response
+        mock_cost.return_value = 0.0
+
+        from secator.ai.utils import call_llm
+        messages = [
+            {"role": "user", "content": "hi", "_token_count": 3, "_token_model": "m"},
+        ]
+        call_llm(messages, "test-model")
+
+        sent = mock_completion.call_args.kwargs["messages"][0]
+        self.assertNotIn("_token_count", sent)
+        self.assertNotIn("_token_model", sent)
+        self.assertEqual(sent["role"], "user")
+        self.assertEqual(sent["content"], "hi")
+        # Caller's originals are untouched (ChatHistory still has its token cache).
+        self.assertEqual(messages[0]["_token_count"], 3)
+        self.assertEqual(messages[0]["_token_model"], "m")
+
     @patch('litellm.token_counter')
     @patch('litellm.completion')
     def test_call_llm_no_usage_estimates_tokens(self, mock_completion, mock_token_counter):
