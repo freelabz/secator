@@ -403,6 +403,26 @@ class TestScopeInPrompt(unittest.TestCase):
 		self.assertIn("not its resolved IP", section)
 
 
+	def test_current_mode_banner_is_programmatic(self):
+		"""Every mode's rendered prompt starts with a registry-derived current-mode
+		statement, so the model always knows its mode. Adding a mode to MODES gets this
+		for free (no per-prompt-file edit)."""
+		from secator.ai.prompts import get_system_prompt, build_mode_banner, MODES
+		for m in MODES:
+			prompt = get_system_prompt(m)
+			self.assertIn("<current_mode>", prompt)
+			self.assertIn(f"operating in {m.upper()} mode", prompt)
+		# programmatic: a mode name not in MODES still yields a correct banner.
+		banner = build_mode_banner("monitor", {"description": "re-verify the attack surface",
+		                                        "allowed_actions": ["query", "stop"]})
+		self.assertIn("operating in MONITOR mode", banner)
+		self.assertIn("re-verify the attack surface", banner)
+		# no change_mode in that mode -> no change_mode hint
+		self.assertNotIn("change_mode", banner)
+		# a mode WITH change_mode gets the escalation hint
+		self.assertIn("change_mode", build_mode_banner("attack", MODES["attack"]))
+
+
 if __name__ == '__main__':
 	unittest.main()
 
