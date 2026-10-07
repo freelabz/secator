@@ -302,5 +302,62 @@ class TestCoerceStringifiedArgs(unittest.TestCase):
 		self.assertEqual(args["command"], '{"looks": "like json"}')
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestToolRegistry(unittest.TestCase):
+	"""The TOOLS registry is the single source of truth; adding a tool is one class.
+
+	These guard the drift that used to rot the 5 hand-synced surfaces (schema,
+	action map, per-mode allowed_actions, dispatch table, permission auto-allow).
+	"""
+
+	def test_names_and_actions_unique(self):
+		from secator.ai.tools import TOOLS
+		names = [t.name for t in TOOLS]
+		actions = [t.action for t in TOOLS]
+		self.assertEqual(len(names), len(set(names)), "duplicate tool name")
+		self.assertEqual(len(actions), len(set(actions)), "duplicate tool action")
+
+	def test_derived_maps_match_registry(self):
+		from secator.ai.tools import TOOLS, TOOL_ACTION_MAP, TOOL_SCHEMAS, STOP_TOOL_SCHEMA
+		# TOOL_ACTION_MAP covers every tool (incl. injected stop).
+		self.assertEqual(TOOL_ACTION_MAP, {t.name: t.action for t in TOOLS})
+		# TOOL_SCHEMAS excludes injected tools (stop is injected via the backend).
+		self.assertEqual(set(TOOL_SCHEMAS), {t.name for t in TOOLS if not t.injected})
+		self.assertNotIn("stop", TOOL_SCHEMAS)
+		self.assertIn("stop", TOOL_ACTION_MAP)
+		self.assertEqual(STOP_TOOL_SCHEMA["function"]["name"], "stop")
+
+	def test_every_handler_exists(self):
+		from secator.ai import actions
+		from secator.ai.tools import TOOLS
+		for t in TOOLS:
+			self.assertTrue(hasattr(actions, t.handler), f"{t.name} handler {t.handler} missing")
+
+	def test_mode_exposure_matches_allowed_actions(self):
+		"""CONSISTENCY GUARD: a tool exposed in a mode (`tool.modes`) must be in that
+		mode's `allowed_actions`, and every tool-type `allowed_action` must be exposed —
+		so tool exposure (schemas) and the authz gate can't silently drift apart."""
+		from secator.ai.tools import TOOLS, TOOLS_BY_ACTION
+		from secator.ai.prompts import MODES
+		for mode, cfg in MODES.items():
+			exposed = {t.action for t in TOOLS if mode in t.modes}
+			allowed_tool_actions = {a for a in cfg["allowed_actions"] if a in TOOLS_BY_ACTION}
+			self.assertEqual(
+				exposed, allowed_tool_actions,
+				f"mode '{mode}': tool.modes exposure {exposed} != tool-type allowed_actions {allowed_tool_actions}"
+			)
+
+	def test_auto_allow_only_control_and_finding_actions(self):
+		"""task/workflow/shell must NOT be auto-allowed (they get name/scope rule checks);
+		everything else the model can call is auto-allowed at the action-type layer."""
+		from secator.ai.tools import TOOLS_BY_ACTION
+		for act in ("task", "workflow", "shell"):
+			self.assertFalse(TOOLS_BY_ACTION[act].auto_allow, f"{act} should not be auto-allowed")
+		for act in ("subagent", "stop", "change_mode", "query", "follow_up",
+		            "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
+		            "mark_vuln_exploit_failed", "update_finding"):
+			self.assertTrue(TOOLS_BY_ACTION[act].auto_allow, f"{act} should be auto-allowed")
+
+
 if __name__ == "__main__":
 	unittest.main()

@@ -353,27 +353,11 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	Yields:
 		OutputType instances (Info, Warning, Error, Ai)
 	"""
+	from secator.ai.tools import TOOLS_BY_ACTION
 	action_type = action.get("action", "")
-
-	handlers = {
-		"task": _handle_task,
-		"subagent": _handle_subagent,
-		"workflow": _handle_workflow,
-		"shell": _handle_shell,
-		"query": _handle_query,
-		"follow_up": _handle_follow_up,
-		"add_finding": _handle_add_finding,
-		"mark_vuln_exploited": _handle_mark_vuln_exploited,
-		"mark_vuln_false_positive": _handle_mark_vuln_false_positive,
-		"mark_vuln_exploit_failed": _handle_mark_vuln_exploit_failed,
-		"update_finding": _handle_update_finding,
-		"change_mode": _handle_change_mode,
-		"stop": _handle_stop,
-	}
-
-	handler = handlers.get(action_type)
-	if handler:
-		yield from handler(action, ctx)
+	tool = TOOLS_BY_ACTION.get(action_type)
+	if tool:
+		yield from tool.handle(action, ctx)
 	else:
 		context = _get_result_context(action, ctx)
 		yield Warning(message=f"Unknown action: {action_type}", _context=context)
