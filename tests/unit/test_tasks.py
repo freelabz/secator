@@ -376,8 +376,10 @@ class TestConfidenceByNature(unittest.TestCase):
 
 	def test_passive_output_maps_pin_low(self):
 		from secator.definitions import CONFIDENCE
-		from secator.output_types import Subdomain, Exploit
+		from secator.output_types import Subdomain, Exploit, UserAccount
 		from secator.tasks.subfinder import subfinder
 		from secator.tasks.searchsploit import searchsploit
+		from secator.tasks.maigret import maigret
 		self.assertEqual(subfinder.output_map[Subdomain][CONFIDENCE]({}), 'low')
 		self.assertEqual(searchsploit.output_map[Exploit][CONFIDENCE]({}), 'low')
+		self.assertEqual(maigret.output_map[UserAccount][CONFIDENCE]({}), 'low')
