@@ -253,6 +253,10 @@ _FORBIDDEN_CHILD_OPT_KEYS = frozenset({
 # Cap a spawned subagent's iteration budget so it can't be told to loop unbounded.
 _MAX_CHILD_ITERATIONS = 25
 
+# ai_types that mean a subagent persisted something (single source for the handback detector).
+_PERSIST_AI_TYPES = frozenset({
+	"add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"})
+
 
 def _sanitize_child_opts(opts: Any) -> Dict:
 	"""Drop LLM-settable control/security keys from sub-runner opts; clamp max_iterations."""
@@ -292,8 +296,9 @@ def build_subagent_prompt(objective: str, targets: list, evidence: str) -> str:
 		f"1. Do the work needed to meet the objective, within scope.\n"
 		f"2. PERSIST your result — it's REQUIRED and is the ONLY output that survives (your prose "
 		f"is NOT saved and the parent CANNOT read your transcript). On an EXISTING vulnerability "
-		f"(`_uuid` from query_workspace), call `add_vuln_poc` with that `_uuid`: `exploited=true` "
-		f"for a working PoC, or `exploited=false` to mark it a false positive. For a NEW finding, "
+		f"(`_uuid` from query_workspace), call `mark_vuln_exploited` with that `_uuid` "
+		f"(working PoC), `mark_vuln_false_positive` (disproved), or `mark_vuln_exploit_failed` "
+		f"(exploit attempt failed but the vuln may still be real). For a NEW finding, "
 		f"call `add_finding`. You MUST persist before finishing if you confirmed OR disproved "
 		f"anything.\n"
 		f"3. Finish with a 2-4 line HANDBACK: what you did, the verdict "

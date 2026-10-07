@@ -844,7 +844,7 @@ class TestRunRunner(unittest.TestCase):
 		mock_build_hooks.return_value = {'fake': ['hook']}
 		sub_out = [
 			Ai(content="cloned PoC, ran it, RCE confirmed", ai_type="response", _context={"subagent": "Exploit Y"}),
-			Ai(content="", ai_type="add_vuln_poc", _context={"subagent": "Exploit Y"}),
+			Ai(content="", ai_type="mark_vuln_exploited", _context={"subagent": "Exploit Y"}),
 		]
 		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
 		mock_runner.__iter__.return_value = iter(sub_out); mock_task_cls.return_value = mock_runner
@@ -858,7 +858,8 @@ class TestRunRunner(unittest.TestCase):
 		self.assertEqual(handback.ai_type, 'response')
 		self.assertEqual(handback._context.get('tool_call_id'), 'tc-123')   # groups as THIS tool_result
 		self.assertIn('RCE confirmed', handback.content)                    # subagent's final summary
-		self.assertIn('add_vuln_poc', handback.content)                     # persist note
+		self.assertIn('mark_vuln_exploited', handback.content)               # persist note
+		self.assertNotIn('NOTHING', handback.content)
 		self.assertIn('handback', handback.content.lower())
 
 	@patch('secator.ai.actions.TemplateLoader')
@@ -1723,15 +1724,15 @@ class TestBuildSubagentPrompt(unittest.TestCase):
 		self.assertIn("## Already known", p)
 		self.assertIn("- Port 443 open", p)               # evidence injected
 		self.assertIn("## Expected output", p)
-		# The subagent MUST be told (imperatively) to persist via add_vuln_poc/add_finding
+		# The subagent MUST be told (imperatively) to persist via mark_vuln_*/add_finding
 		# with the _uuid — its prose is not saved and the parent can't read its transcript.
-		self.assertIn("add_vuln_poc", p)
+		for tool in ("mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"):
+			self.assertIn(tool, p)
+		self.assertNotIn("add_vuln_poc", p)
 		self.assertIn("add_finding", p)
 		self.assertIn("_uuid", p)
 		self.assertIn("not saved", p.lower())
 		self.assertIn("HANDBACK", p)
-		# a disproved vuln is persisted too (add_vuln_poc exploited=false = false positive)
-		self.assertIn("exploited=false", p)
 
 	def test_empty_evidence_renders_none(self):
 		from secator.ai.actions import build_subagent_prompt
