@@ -176,5 +176,44 @@ class TestProcessTreeMemory(unittest.TestCase):
 			proc.wait()
 
 
+class TestProcessTreeIsTaskLocal(unittest.TestCase):
+	"""#1374: the monitor must walk only the task's own subtree, not every process on the
+	host. psutil.children(recursive=True) builds a system-wide ppid map (reads every
+	/proc/<pid>/stat) every tick — the fd-churn root cause."""
+
+	def test_tree_is_exactly_the_subtree_and_excludes_host_processes(self):
+		parent = _spawn_tree()  # a parent process with a child (see PARENT)
+		decoy = None
+		try:
+			time.sleep(0.3)
+			expected = {parent.pid} | {c.pid for c in psutil.Process(parent.pid).children(recursive=True)}
+			self.assertGreaterEqual(len(expected), 2, 'expected parent + at least one child')
+			self.assertEqual(set(Command._iter_proc_tree(parent.pid)), expected)
+			# A process elsewhere on the host (not a descendant of parent) must never appear.
+			decoy = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(8)'])
+			time.sleep(0.1)
+			self.assertNotIn(decoy.pid, set(Command._iter_proc_tree(parent.pid)))
+		finally:
+			if decoy:
+				decoy.kill()
+				decoy.wait()
+			parent.kill()
+			parent.wait()
+
+	def test_monitor_data_is_lean(self):
+		proc = _spawn()
+		try:
+			info = next(Command.get_process_info(psutil.Process(proc.pid), procs={}))
+			# fd-heavy fields must not be collected on the hot path (#1374)
+			for heavy in ('net_connections', 'connections', 'open_files', 'memory_maps', 'threads'):
+				self.assertNotIn(heavy, info, f'{heavy} should not be collected per tick')
+			# everything _collect_stats consumes is still present
+			for needed in ('pid', 'ppid', 'name', 'cpu_percent', 'pss', 'memory_info'):
+				self.assertIn(needed, info)
+		finally:
+			proc.kill()
+			proc.wait()
+
+
 if __name__ == '__main__':
 	unittest.main()
