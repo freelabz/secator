@@ -137,6 +137,11 @@ class TestBuildToolSchemas(unittest.TestCase):
 		self.assertIn("run_workflow", names)
 		self.assertIn("run_shell", names)
 		self.assertIn("add_finding", names)
+		# exploit can delegate a subagent just like attack (the tool docstring even says
+		# "hand a confirmed vuln to an exploit subagent"); without this, the model tried
+		# the run_task(name="ai") workaround, hit the guard that points at run_subagent,
+		# and dead-ended because the tool wasn't exposed in this mode.
+		self.assertIn("run_subagent", names)
 
 	def test_change_mode_gated_by_pin(self):
 		"""change_mode lets the model self-escalate in an AUTO session or from a pinned
