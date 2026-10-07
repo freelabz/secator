@@ -276,6 +276,17 @@ class TestUrlVsHostGrant(unittest.TestCase):
 	def test_url_entry_allows_url_subpath(self):
 		self.assertTrue(host_in_scope('https://xss-game.appspot.com/level1/frame', self.URL, []))
 
+	def test_url_entry_with_port_and_path(self):
+		# https://HOST:PORT/path is a URL grant: parses to host+path (port normalized
+		# away, consistent with the matcher's host-level design), matches by host+path.
+		e = ['https://app.acme.com:8443/admin']
+		self.assertTrue(host_in_scope('https://app.acme.com:8443/admin', e, []))
+		self.assertTrue(host_in_scope('https://app.acme.com:8443/admin/users', e, []))
+		self.assertFalse(host_in_scope('https://app.acme.com:8443/other', e, []))
+		self.assertFalse(host_in_scope('app.acme.com', e, []))
+		self.assertTrue(host_in_scope('https://app.acme.com:8443/admin', ['app.acme.com'], []))
+		self.assertTrue(host_in_scope('https://app.acme.com:8443/admin', ['app.acme.com:8443/admin'], []))
+
 	def test_url_entry_denies_bare_host_portscan(self):
 		# The repro: the user's in-scope target is the URL; a bare-host (port-scan)
 		# target must NOT be auto-authorized by it.
