@@ -687,3 +687,28 @@ def test_load_report_data_counts_vulns_from_ndjson(tmp_path):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+class TestRunnerHelp(unittest.TestCase):
+	"""`--help` renders for every task, workflow and scan."""
+
+	def _assert_help(self, group):
+		runner = CliRunner()
+		commands = cli.commands[group].commands
+		self.assertTrue(commands)
+		for name in sorted(commands):
+			with self.subTest(runner=f'{group} {name}'):
+				# prog_name must be 'secator' so the per-command rich-click option groups are used
+				result = runner.invoke(cli, [group, name, '--help'], prog_name='secator')
+				self.assertIsNone(result.exception, msg=f'{group} {name} --help: {result.exception!r}')
+				self.assertEqual(result.exit_code, 0)
+				self.assertIn('Usage', result.output)
+
+	def test_task_help(self):
+		self._assert_help('task')
+
+	def test_workflow_help(self):
+		self._assert_help('workflow')
+
+	def test_scan_help(self):
+		self._assert_help('scan')
