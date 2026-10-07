@@ -59,6 +59,7 @@ SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 MODES = {
 	"attack": {
 		"system_prompt": SYSTEM_ATTACK,
+		"description": "actively scan, run tools / shell, exploit, and write or curate findings",
 		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
@@ -69,11 +70,13 @@ MODES = {
 		# and `stop`. NO `shell` (attack surface), NO `task`/`workflow` (escalation), and
 		# NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
 		# changing findings is an active action that belongs in attack/exploit.
+		"description": "read-only — read and explain workspace data; you cannot scan, attack or write findings",
 		"allowed_actions": ["query", "follow_up", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
 		"system_prompt": SYSTEM_EXPLOIT,
+		"description": "verify a single vulnerability by actually exploiting it and record a PoC",
 		# "query" is required so the model can pull the workspace's existing exploit
 		# intel (the CVE's `_type:"exploit"` objects / PoC references) before trying
 		# to exploit — without it query_workspace isn't even built for this mode.
@@ -83,6 +86,24 @@ MODES = {
 		"max_iterations": 5,
 	},
 }
+
+
+def build_mode_banner(mode: str, mode_config: dict = None) -> str:
+	"""Generate the authoritative "you are in <mode> mode" statement for a mode.
+
+	Derived from the MODES registry, so ANY mode (incl. ones added later, e.g. a
+	`monitor` mode) automatically gets a correct current-mode statement — the model
+	always knows which mode it is in and won't redundantly try to switch to it. The
+	`change_mode` hint is added only when that mode can actually change mode.
+	"""
+	cfg = mode_config or MODES.get(mode, {})
+	desc = cfg.get("description")
+	line = f"You are operating in {mode.upper()} mode"
+	line += f": {desc}." if desc else "."
+	if "change_mode" in cfg.get("allowed_actions", []):
+		line += (" You are ALREADY in this mode — do NOT call change_mode to re-enter it; "
+		         "change_mode only moves UP to a more capable mode and cannot de-escalate.")
+	return f"<current_mode>\n{line}\n</current_mode>"
 
 
 def get_mode_config(mode: str) -> dict:
@@ -292,6 +313,11 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 		subst.update(library_reference=build_library_reference(), **path_vars)
 	result = system_prompt.safe_substitute(**subst)
+
+	# Prepend the programmatic current-mode statement (from the registry) so the model
+	# always knows its active mode — prevents redundant change_mode calls. Auto-covers
+	# any mode added to MODES later.
+	result = build_mode_banner(mode, mode_config) + "\n\n" + result
 
 	# Determine interaction rules based on backend
 	# The mode templates already include ${follow_up} for interactive modes.

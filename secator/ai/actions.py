@@ -1246,7 +1246,15 @@ def _handle_change_mode(action: Dict, ctx: ActionContext) -> Generator:
 	# session can still escalate to either.)
 	_rank = {"chat": 0, "attack": 1, "exploit": 2}
 	current = (getattr(ctx, "mode", "") or "").strip().lower()
-	if _rank[requested] <= _rank.get(current, -1):
+	# Already in the requested mode -> benign no-op, NOT a de-escalation. The model
+	# sometimes re-requests its current mode (e.g. unsure which mode it is in); surface a
+	# calm Info ("already there, proceed"), never a scary error.
+	if _rank[requested] == _rank.get(current, -1):
+		yield Info(
+			message=f"Already in '{current}' mode — no change needed; continue with the task.",
+			_context=context)
+		return
+	if _rank[requested] < _rank.get(current, -1):
 		yield Error(
 			message=f"Cannot change mode from '{current}' to '{requested}': change_mode "
 			"only escalates (e.g. attack -> exploit), it cannot de-escalate.",

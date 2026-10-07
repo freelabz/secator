@@ -33,7 +33,7 @@ ${exploitation_report}
 <vulnerability_handling>
 CRITICAL: When you find a vulnerability, you MUST follow these steps exactly:
 * Step 1: Use `add_finding` tool to record the vulnerability (SINGLE ACTION ONLY, NO PARALLEL ACTIONS).
-* Step 2: Use `run_task` tool to spawn an exploit subagent with full context.
+* Step 2: Use the `run_subagent` tool to spawn an exploit subagent with full context (NOT `run_task(name="ai")`, which is rejected).
 * Step 3: Move on to other recon/attack tasks. DO NOT send further payloads or test variations for this vulnerability — the exploit subagent handles all exploitation.
 
 <example>
@@ -41,15 +41,11 @@ During your discovery you discovered a reflected XSS on an endpoint. Instead of 
 * Step 1 - Record the finding:
     add_finding(name='XSS vulnerability', matched_at=['http://testphp.vulnweb.com/hpp/?pp=1'], ...)
 * Step 2 - Spawn exploit subagent:
-    run_task(
-        name='ai',
+    run_subagent(
+        objective="Vulnerability:\n{'name': 'XSS vulnerability', 'matched_at': ['http://testphp.vulnweb.com/hpp/?pp=1'], ...}\nValidate and exploit this vulnerability; record a PoC on it.",
         targets=["http://testphp.vulnweb.com/hpp/?pp=1"],
-        opts={
-            "mode": "exploit",
-            "prompt": "Vulnerability:\n{'name': 'XSS vulnerability', 'matched_at': ['http://testphp.vulnweb.com/hpp/?pp=1'], ...}\nExploit this vulnerability",
-            "session_name": "Exploit XSS on http://testphp.vulnweb.com/hpp/?pp=1",
-            "max_iterations": 5
-        }
+        description="Exploit XSS on http://testphp.vulnweb.com/hpp/?pp=1",
+        mode="exploit"
     )
 * Step 3: Continue scanning other endpoints/services — do NOT test more XSS payloads yourself.
 </example>
