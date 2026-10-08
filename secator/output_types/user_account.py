@@ -13,6 +13,8 @@ class UserAccount(OutputType):
 	email: str = ''
 	site_name: str = ''
 	extra_data: dict = field(default_factory=dict, compare=False)
+	confidence: str = field(default='high', compare=False)
+	confidence_nb: int = field(default=0, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
 	tags: list = field(default_factory=list, compare=False)

@@ -13,6 +13,9 @@ class Technology(OutputType):
 	version: str = None
 	extra_data: dict = field(default_factory=dict, repr=True, compare=False)
 	tags: list = field(default_factory=list, compare=False)
+	confidence: str = field(default='high', compare=False)
+	confidence_nb: int = field(default=0, compare=False)
+	is_false_positive: bool = field(default=False, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='technology', repr=True)
 	_timestamp: float = field(default_factory=lambda: time.time(), compare=False)
