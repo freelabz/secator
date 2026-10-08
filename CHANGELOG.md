@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.49.2](https://github.com/freelabz/secator/compare/v0.49.1...v0.49.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* **ai:** allow run_subagent in exploit mode (parity with attack) ([#1498](https://github.com/freelabz/secator/issues/1498)) ([0319628](https://github.com/freelabz/secator/commit/03196282348d805b5986a09efdf0cbda70fb6cfb))
+* **ai:** programmatic current-mode statement + robust same-mode change_mode ([#1499](https://github.com/freelabz/secator/issues/1499)) ([22b017c](https://github.com/freelabz/secator/commit/22b017cdfbaa25ebc433ffa03d750028fde79417))
+* **ai:** subagent persistence references real mark_vuln_* tools ([#1501](https://github.com/freelabz/secator/issues/1501)) ([efdb027](https://github.com/freelabz/secator/commit/efdb027b25203ec90880227c443a7b7ed9dd90aa))
+* **installer:** authenticate GitHub git clones + explain anonymous-clone refusals ([#1406](https://github.com/freelabz/secator/issues/1406)) ([e26828e](https://github.com/freelabz/secator/commit/e26828e44cf47e14fa21adfb343584c6001db9ab))
+* **scope:** URL web-app grants + make secator.scope the single scope matcher ([#1433](https://github.com/freelabz/secator/issues/1433)) ([d79a38f](https://github.com/freelabz/secator/commit/d79a38f3b18c77743434b0654cd5f60eec512d2b))
+* walk the task's own process tree instead of scanning every host process ([#1374](https://github.com/freelabz/secator/issues/1374)) ([#1497](https://github.com/freelabz/secator/issues/1497)) ([7311245](https://github.com/freelabz/secator/commit/7311245620abba5fdd95987ceb6a2b3e92587fe2))
+
 ## [0.49.1](https://github.com/freelabz/secator/compare/v0.49.0...v0.49.1) (2026-10-05)
 
 
