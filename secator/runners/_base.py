@@ -22,6 +22,7 @@ from secator.output_types import (
 from secator.report import Report
 from secator.rich import console, console_stdout
 from secator.runners._helpers import get_task_folder_id, run_extractors
+from secator.scope import as_scope_list, finding_scope_target, host_in_scope
 from secator.query import QueryEngine
 from secator.query._stream import StreamView
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
@@ -106,6 +107,9 @@ class Runner:
 	# Run duplicate check
 	enable_duplicate_check = True
 
+	# Opt-in: tasks that flood out-of-scope findings set this True to drop them in add_result.
+	output_scope_filter = False
+
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
 		self.serialize_config = run_opts.get('serialize_config', True)
@@ -117,6 +121,11 @@ class Runner:
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
+		# Output-side scope guard state (see _out_of_scope); read from run_opts at check time.
+		self._scope_raw = None
+		self._scope_in = []
+		self._scope_out = []
+		self._scope_dropped = 0
 		# Mint the run-scope {type}_id before any add_result so every finding carries the scope key.
 		key = f'{self.config.type}_id'
 		if not self.context.get(key):
@@ -832,6 +841,31 @@ class Runner:
 			except Exception as e:
 				self.debug(f'persist-to-store hook failed: {e}', sub='item')
 
+	def _out_of_scope(self, item):
+		"""Whether an item's target falls outside the run's scope.
+
+		No-op when no scope is set. Scope is read from run_opts at check time (after
+		option merges) and only host-bearing items are checked (``finding_scope_target``
+		returns None for hostless types, which are always kept).
+
+		Args:
+			item (OutputType): Item to check.
+
+		Returns:
+			bool: True if the item is host-bearing and out of scope.
+		"""
+		if not is_output_type(item):
+			return False
+		raw = (self.run_opts.get('in_scope'), self.run_opts.get('out_of_scope'))
+		if raw != self._scope_raw:  # refresh coerced lists on first use and after any opt merge
+			self._scope_raw = raw
+			self._scope_in = as_scope_list(raw[0])
+			self._scope_out = as_scope_list(raw[1])
+		if not (self._scope_in or self._scope_out):
+			return False
+		target = finding_scope_target(item)
+		return bool(target) and not host_in_scope(target, self._scope_in, self._scope_out)
+
 	def add_result(self, item, print=True, output=True, hooks=True, queue=True):
 		"""Add item to runner results.
 
@@ -843,6 +877,11 @@ class Runner:
 			queue (bool): Whether to queue the item for later processing.
 		"""
 		if item._uuid and item._uuid in self.uuids:
+			return
+
+		# Output-side scope guard (see _out_of_scope): drop out-of-scope findings before any persist hook.
+		if self.output_scope_filter and self._out_of_scope(item):
+			self._scope_dropped += 1
 			return
 
 		# Update context with runner info
@@ -1294,6 +1333,8 @@ class Runner:
 		self.done = True
 		self.progress = 100
 		self.end_time = end_time or datetime.fromtimestamp(time(), timezone.utc)
+		if self._scope_dropped:
+			self.debug(f'scope guard dropped {self._scope_dropped} out-of-scope finding(s)', sub='scope')
 		# Lazy: `self.status` (a store count query) is computed ONLY when the 'end' debug sub is
 		# active — the lazy callback runs after debug()'s enable-gate, so it's free when debug is off.
 		self.debug('completed', sub='end', lazy=lambda m: f'{m} (status: {self.status}, sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})')  # noqa: E501
@@ -1494,6 +1535,10 @@ class Runner:
 
 		# Add item to results
 		self.add_result(item, print=print, queue=False)
+
+		# Don't emit dropped findings to the live stream either.
+		if self.output_scope_filter and self._out_of_scope(item):
+			return
 
 		# Yield item
 		yield item

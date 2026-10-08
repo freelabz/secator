@@ -38,6 +38,7 @@ class Certificate(OutputType):
 	_related: list = field(default_factory=list, compare=False)
 	_table_fields = ['ip', 'host']
 	_sort_by = ('ip',)
+	TARGET_FIELDS = ['host']  # fields to scope-check this type against (scope.finding_scope_target)
 
 	def __post_init__(self):
 		super().__post_init__()
