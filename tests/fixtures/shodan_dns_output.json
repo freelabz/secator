@@ -1,0 +1,13 @@
+{
+  "domain": "example.com",
+  "tags": ["ipv6"],
+  "subdomains": ["www", "mail"],
+  "data": [
+    {"subdomain": "", "type": "A", "value": "93.184.216.34", "last_seen": "2026-06-01T00:00:00"},
+    {"subdomain": "www", "type": "A", "value": "93.184.216.34", "last_seen": "2026-06-01T00:00:00"},
+    {"subdomain": "", "type": "AAAA", "value": "2606:2800:220:1:248:1893:25c8:1946", "last_seen": "2026-06-01T00:00:00"},
+    {"subdomain": "mail", "type": "MX", "value": "mail.example.com", "last_seen": "2026-06-01T00:00:00"},
+    {"subdomain": "", "type": "TXT", "value": "v=spf1 -all", "last_seen": "2026-06-01T00:00:00"},
+    {"subdomain": "internal", "type": "A", "value": "10.0.0.5", "last_seen": "2026-06-01T00:00:00"}
+  ]
+}
