@@ -57,12 +57,82 @@ class InteractivityBackend:
 
 
 class CLIBackend(InteractivityBackend):
-	"""Local terminal interactive backend."""
+	"""Local terminal interactive backend with a rich-native always-on input.
 
+	Owns a :class:`secator.ai.chat_console.ChatConsole` — one rich ``Live`` pinned at
+	the bottom (status line + input box, framed by rules with the session name) while
+	findings stream above it. Submitted lines feed one queue: mid-flight ``poll_steers``
+	drains it (injected as ``[User interjected]``); at end of turn ``ask_user`` waits on
+	it (the box IS the "What's next?" prompt, with ``/continue`` ``/summarize`` ``/exit``).
+	Multi-choice follow-ups and permission prompts pause the box and use the rich menu.
+	Non-TTY runs degrade to the legacy menu.
+	"""
+
+	def __init__(self):
+		self._chat = None
+
+	@property
+	def active(self):
+		return self._chat is not None and self._chat.active
+
+	# -- lifecycle (driven by the AI loop) --
+	def start_input(self, session_name=''):
+		from secator.ai.chat_console import ChatConsole, set_active
+		self._chat = ChatConsole(session_name=session_name)
+		self._chat.start()
+		if self._chat.active:
+			set_active(self._chat)  # so maybe_status surfaces its message in the status line
+
+	def stop_input(self):
+		from secator.ai.chat_console import set_active
+		if self._chat is not None:
+			self._chat.stop()
+			set_active(None)
+			self._chat = None
+
+	def _pause(self):
+		if self._chat is not None:
+			self._chat.pause()
+
+	def _resume(self):
+		if self._chat is not None:
+			self._chat.resume()
+
+	# -- mid-flight steers --
+	def poll_steers(self, session_id=None):
+		if self._chat is None:
+			return []
+		from secator.ai.chat_console import EXIT
+		return ['/exit' if s == EXIT else s for s in self._chat.poll_steers()]
+
+	# -- prompts --
 	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
 		if prompt_type == "permission":
-			return self._handle_permission(**context)
-		return self._handle_follow_up(choices, **context)
+			self._pause()  # permission menu is raw-mode; the box lets go
+			try:
+				return self._handle_permission(**context)
+			finally:
+				self._resume()
+		# Multi-choice follow-up -> the rich menu (box hidden until answered).
+		if choices or not self.active:
+			self._pause()
+			try:
+				return self._handle_menu(choices, **context)
+			finally:
+				self._resume()
+		# Plain end-of-turn: the box IS the prompt — wait for the next submitted line.
+		from secator.ai.chat_console import EXIT
+		line = self._chat.wait_line()
+		if line is None or line == EXIT:
+			return None
+		cmd = line.strip().lower()
+		if cmd in ('/exit', '/quit', 'exit', 'quit'):
+			return None
+		if cmd in ('/continue', '/c', 'continue'):
+			return {"answer": "Continue.", "extra_iters": 1}
+		if cmd == '/summarize':
+			return {"answer": "Summarize all findings so far.", "extra_iters": 1}
+		return {"answer": line, "extra_iters": 1}
 
 	def _handle_permission(self, **context):
 		"""Delegate permission prompts to the PermissionEngine's rich menus."""
@@ -83,8 +153,8 @@ class CLIBackend(InteractivityBackend):
 			return {"answer": decision}
 		return None
 
-	def _handle_follow_up(self, choices, **context):
-		"""Delegate follow-up prompts to the rich interactive menu."""
+	def _handle_menu(self, choices, **context):
+		"""The legacy rich multi-choice menu (used for choice-follow-ups / non-TTY)."""
 		from secator.ai.utils import prompt_user
 		history = context.get("history")
 		if not history:
@@ -96,7 +166,6 @@ class CLIBackend(InteractivityBackend):
 			mode=context.get("mode", "chat"),
 			model=context.get("model"),
 		)
-
 
 class RemoteBackend(InteractivityBackend):
 	"""Remote DB-polling interactive backend."""

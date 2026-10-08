@@ -1,6 +1,6 @@
 import codecs
 import operator
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 import yaml
@@ -25,12 +25,42 @@ class CustomMarkdown(Markdown):
 
 
 def maybe_status(*args, **kwargs):
-	"""Return console.status() normally, or nullcontext() when a live display is already active or in a worker."""
-	from secator.definitions import IN_WORKER
+	"""Return a status context.
 
-	if IN_WORKER or console._live is not None:
+	- in a worker: nullcontext (no TTY);
+	- when the AI chat Live is active: surface the message in its status line (a
+	  second ``console.status`` Live would fight it for the terminal);
+	- when any other Live is active: nullcontext;
+	- otherwise: a normal ``console.status`` spinner.
+	"""
+	from secator.definitions import IN_WORKER
+	if IN_WORKER:
+		return nullcontext()
+	try:
+		from secator.ai.chat_console import get_active
+		chat = get_active()
+	except Exception:
+		chat = None
+	if chat is not None and chat.active:
+		return _chat_status(chat, args[0] if args else '')
+	if console._live is not None:
 		return nullcontext()
 	return console.status(*args, **kwargs)
+
+
+@contextmanager
+def _chat_status(chat, msg):
+	"""Show ``msg`` in the AI chat status line for the duration of the block."""
+	try:
+		from rich.text import Text
+		plain = Text.from_markup(str(msg)).plain if msg else ''
+	except Exception:
+		plain = str(msg) if msg else ''
+	chat.set_status(plain)
+	try:
+		yield
+	finally:
+		chat.clear_status()
 
 
 # handler = RichHandler(rich_tracebacks=True)  # TODO: add logging handler

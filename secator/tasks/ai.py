@@ -19,7 +19,7 @@ from secator.ai.actions import (
 	ActionContext, check_guardrails, safe_dispatch_action, _run_batch
 )
 from secator.ai.guardrails import PermissionEngine
-from secator.ai.interactivity import create_backend, RemoteBackend, UserInputTimeout
+from secator.ai.interactivity import create_backend, CLIBackend, RemoteBackend, UserInputTimeout
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
@@ -409,7 +409,7 @@ class ai(PythonRunner):
 			yield from result
 			yield Info(message=f"Using model: {self.model}, mode: {self.mode}")
 			try:
-				yield from self._run_loop()
+				yield from self._run_loop_boxed()
 			finally:
 				self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 			return
@@ -449,7 +449,7 @@ class ai(PythonRunner):
 
 		# Run loop
 		try:
-			yield from self._run_loop()
+			yield from self._run_loop_boxed()
 		finally:
 			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
@@ -647,7 +647,7 @@ class ai(PythonRunner):
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		try:
-			yield from self._run_loop()
+			yield from self._run_loop_boxed()
 		finally:
 			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
@@ -755,6 +755,29 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# _run_loop: main LLM interaction loop
 	# -------------------------------------------------------------------------
+
+	def _run_loop_boxed(self) -> Generator:
+		"""Run the LLM loop; in local CLI mode, pin a rich always-on input box.
+
+		With a CLIBackend on an interactive TTY, start the ChatConsole (one rich Live
+		holding the status line + input box) around the run so findings stream above it.
+		Otherwise run unchanged.
+		"""
+		import sys
+		box = (
+			isinstance(getattr(self, 'backend', None), CLIBackend)
+			and getattr(sys, 'stdin', None) is not None and sys.stdin.isatty()
+			and getattr(sys, 'stdout', None) is not None and sys.stdout.isatty()
+		)
+		if not box:
+			yield from self._run_loop()
+			return
+		name = getattr(self, 'session_name', None) or getattr(self, 'session_id', '') or 'ai'
+		self.backend.start_input(session_name=str(name))
+		try:
+			yield from self._run_loop()
+		finally:
+			self.backend.stop_input()
 
 	def _run_loop(self) -> Generator:
 		"""Main LLM interaction loop."""
@@ -1352,18 +1375,27 @@ class ai(PythonRunner):
 		items, but kept a generator so future transcript echoes can be added without
 		changing the call site.
 		"""
-		if not isinstance(self.backend, RemoteBackend):
+		poll = getattr(self.backend, 'poll_steers', None)
+		if not callable(poll):
 			return
 		try:
-			steers = self.backend.poll_steers(self.session_id)
+			steers = poll(self.session_id)
 		except Exception as e:  # noqa: BLE001 - a steer must never crash the run
 			self.debug(f'steer: failed to poll steers: {e}', sub='llm')
 			return
+		is_remote = isinstance(self.backend, RemoteBackend)
 		for content in steers:
+			# A slash-command typed into the local always-on box ends the run (the box
+			# also surfaces Ctrl-C / Ctrl-D as '/exit'); stop at the next loop top.
+			if not is_remote and content.strip().lower() in ('/exit', '/quit', 'exit', 'quit'):
+				self._followup_repeat_stop = True
+				return
 			self.debug(f'steer: injecting user interjection: {content[:120]}', sub='llm')
 			self.history.add_user(maybe_encrypt(f"[User interjected]: {content}", self.encryptor))
-		return
-		yield  # noqa: unreachable - keeps this a generator for `yield from`
+			# A local steer has no persisted transcript entry (the remote backend
+			# persists its own), so record one here for the run's transcript / -json.
+			if not is_remote:
+				yield Ai(content=content, ai_type="steer")
 
 	# -------------------------------------------------------------------------
 	# Summarization / compaction
