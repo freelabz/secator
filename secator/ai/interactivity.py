@@ -57,12 +57,76 @@ class InteractivityBackend:
 
 
 class CLIBackend(InteractivityBackend):
-	"""Local terminal interactive backend."""
+	"""Local terminal interactive backend with an always-on input bar.
 
+	Owns a :class:`secator.ai.chat_bar.ChatBar` (a scroll-region bottom bar). Submitted
+	lines feed one queue: mid-flight ``poll_steers`` drains it (injected as
+	``[User interjected]``); at end of turn ``ask_user`` waits on it (the bar IS the
+	"What's next?" prompt, with ``/continue`` ``/summarize`` ``/exit``). Multi-choice
+	follow-ups and permission prompts pause the bar and use the rich menu. Non-TTY runs
+	degrade to the menu. All status/progress keeps rendering normally above the bar.
+	"""
+
+	def __init__(self):
+		self._bar = None
+
+	@property
+	def active(self):
+		return self._bar is not None and self._bar.active
+
+	# -- lifecycle (driven by the AI loop) --
+	def start_input(self, session_name=''):
+		from secator.ai.chat_bar import ChatBar
+		self._bar = ChatBar(session_name=session_name)
+		self._bar.start()
+
+	def stop_input(self):
+		if self._bar is not None:
+			self._bar.stop()
+			self._bar = None
+
+	def _pause(self):
+		if self._bar is not None:
+			self._bar.pause()
+
+	def _resume(self):
+		if self._bar is not None:
+			self._bar.resume()
+
+	# -- mid-flight steers --
+	def poll_steers(self, session_id=None):
+		if self._bar is None:
+			return []
+		from secator.ai.chat_bar import EXIT
+		return ['/exit' if s == EXIT else s for s in self._bar.poll_steers()]
+
+	# -- prompts --
 	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
 		if prompt_type == "permission":
-			return self._handle_permission(**context)
-		return self._handle_follow_up(choices, **context)
+			self._pause()
+			try:
+				return self._handle_permission(**context)
+			finally:
+				self._resume()
+		if choices or not self.active:  # multi-choice -> rich menu (bar hidden); non-TTY fallback
+			self._pause()
+			try:
+				return self._handle_follow_up(choices, **context)
+			finally:
+				self._resume()
+		# Plain end-of-turn: the bar IS the prompt — wait for the next submitted line.
+		from secator.ai.chat_bar import EXIT
+		line = self._bar.wait_line()
+		if line is None or line == EXIT:
+			return None
+		cmd = line.strip().lower()
+		if cmd in ('/exit', '/quit', 'exit', 'quit'):
+			return None
+		if cmd in ('/continue', '/c', 'continue'):
+			return {"answer": "Continue.", "extra_iters": 1}
+		if cmd == '/summarize':
+			return {"answer": "Summarize all findings so far.", "extra_iters": 1}
+		return {"answer": line, "extra_iters": 1}
 
 	def _handle_permission(self, **context):
 		"""Delegate permission prompts to the PermissionEngine's rich menus."""
