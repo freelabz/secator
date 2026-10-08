@@ -40,8 +40,7 @@ def _warn_routes_deprecated():
 		return
 	_ROUTES_WARNED = True
 	console.print(
-		'[bold orange1]Config key "workspaces.routes" is deprecated and ignored: pass -ws <workspace>, '
-		'or set a workspace in a profile, instead.[/]')
+		'[bold orange1]Config key "workspaces.routes" is deprecated and ignored: pass -ws <workspace> instead.[/]')
 
 
 class StrictModel(BaseModel, extra='forbid'):

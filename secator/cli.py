@@ -1100,21 +1100,18 @@ def profile_list():
 	table.add_column('Profile name', style='bold gold3')
 	table.add_column('Description', overflow='fold')
 	table.add_column('Enforced', justify='center')
-	table.add_column('Workspace', overflow='fold')
 	table.add_column('Drivers', overflow='fold')
 	table.add_column('Exporters', overflow='fold')
 	table.add_column('Options', overflow='fold')
 	for profile in PROFILES:
 		opts_str = ', '.join(f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items())
 		enforced_str = '[bold red]✓[/]' if profile.enforce else ''
-		workspace_str = profile.workspace or ''
 		drivers_str = ','.join(profile.drivers) if profile.drivers else ''
 		exporters_str = ','.join(profile.exporters) if profile.exporters else ''
 		table.add_row(
 			profile.name,
 			profile.description or '',
 			enforced_str,
-			workspace_str,
 			drivers_str,
 			exporters_str,
 			opts_str,

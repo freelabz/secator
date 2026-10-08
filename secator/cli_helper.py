@@ -314,8 +314,8 @@ def register_runner(cli_endpoint, config):
 		if 'api' in context['drivers']:
 			try:
 				# Resolve the workspace (name or id) to its real id so runners/findings
-				# are tagged with the ObjectId. Note the runner re-resolves this after
-				# profile-based workspace assignment (see secator.hooks.api).
+				# are tagged with the ObjectId. The runner may carry workspace_id as a
+				# name, so it is re-resolved in secator.hooks.api too.
 				from secator.hooks.api import resolve_workspace
 
 				workspace_id, workspace_name = resolve_workspace(context.get('workspace_id'))

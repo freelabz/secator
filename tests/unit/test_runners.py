@@ -639,69 +639,6 @@ class TestCommandRunner(unittest.TestCase):
 							self.assertEqual(len(cmd.profiles), 1)
 							self.assertEqual(cmd.profiles[0].name, 'shared_profile')
 
-	def test_profile_workspace_applied_when_default(self):
-		"""A non-enforced profile workspace is applied when the user kept the default workspace."""
-		from secator.template import TemplateLoader
-		profile = TemplateLoader(input={
-			'name': 'ws_default_profile',
-			'type': 'profile',
-			'workspace': 'profile-ws',
-		})
-		with mock_command(MyCommand, TARGETS, {'profiles': [profile]}, []) as cmd:
-			self.assertEqual(cmd.workspace_name, 'profile-ws')
-			self.assertEqual(cmd.context.get('workspace_name'), 'profile-ws')
-			self.assertEqual(cmd.context.get('workspace_id'), 'profile-ws')
-
-	def test_profile_workspace_not_applied_when_user_set(self):
-		"""A non-enforced profile workspace yields to a user-specified workspace."""
-		from secator.template import TemplateLoader
-		profile = TemplateLoader(input={
-			'name': 'ws_user_profile',
-			'type': 'profile',
-			'workspace': 'profile-ws',
-		})
-		opts = {'profiles': [profile], 'context': {'workspace_name': 'user-ws'}}
-		with mock_command(MyCommand, TARGETS, opts, []) as cmd:
-			self.assertEqual(cmd.workspace_name, 'user-ws')
-
-	def test_profile_workspace_drives_reports_folder_and_workspace_profiles(self):
-		"""A profile workspace is resolved before the reports folder and workspace default profiles."""
-		from pathlib import Path
-		from secator.template import TemplateLoader
-		ws_profile = TemplateLoader(input={
-			'name': 'ws_switch_profile',
-			'type': 'profile',
-			'workspace': 'profilews',
-		})
-		ws_default = TemplateLoader(input={
-			'name': 'profile_ws_default',
-			'type': 'profile',
-			'opts': {'retries': 7},
-		})
-		with patch('secator.runners._base.CONFIG.profiles.defaults', []), \
-			patch('secator.runners._base.CONFIG.workspaces.profiles', {'profilews': ['profile_ws_default']}), \
-			patch('secator.runners._base.get_configs_by_type', return_value=[ws_profile, ws_default]):
-			# the json driver persists the input targets to the reports folder during init
-			opts = {'profiles': ['ws_switch_profile'], 'context': {'drivers': ['json']}}
-			with mock_command(MyCommand, TARGETS, opts, []) as cmd:
-				self.assertEqual(cmd.workspace_name, 'profilews')
-				self.assertIn('profile_ws_default', [p.name for p in cmd.profiles])
-				self.assertEqual(cmd.run_opts.get('retries'), 7)
-				self.assertEqual(Path(cmd.reports_folder).parent.parent.name, 'profilews')
-
-	def test_profile_workspace_enforced_overrides_user(self):
-		"""An enforced profile workspace overrides a user-specified workspace."""
-		from secator.template import TemplateLoader
-		profile = TemplateLoader(input={
-			'name': 'ws_enforced_profile',
-			'type': 'profile',
-			'enforce': True,
-			'workspace': 'enforced-ws',
-		})
-		opts = {'profiles': [profile], 'context': {'workspace_name': 'user-ws'}}
-		with mock_command(MyCommand, TARGETS, opts, []) as cmd:
-			self.assertEqual(cmd.workspace_name, 'enforced-ws')
-
 	def test_profile_exporters_union(self):
 		"""A non-enforced profile unions its exporters with the user-specified ones."""
 		from secator.template import TemplateLoader
