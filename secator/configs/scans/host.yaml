@@ -12,6 +12,12 @@ input_types:
   - host
   - ip
 
+important_opts:
+  - scanners
+  - ports
+  - nuclei
+  - passive
+
 workflows:
   host_recon:
   url_crawl:

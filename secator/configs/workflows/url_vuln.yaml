@@ -11,6 +11,10 @@ tags: [http, vuln]
 input_types:
   - url
 
+important_opts:
+  - nuclei
+  - passive
+
 options:
   passive:
     is_flag: True
