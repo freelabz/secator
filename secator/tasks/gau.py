@@ -8,7 +8,7 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   HEADER, MATCH_CODES, MATCH_REGEX, MATCH_SIZE,
 							   MATCH_WORDS, METHOD, OPT_NOT_SUPPORTED,
 							   OPT_PIPE_INPUT, PROXY, RATE_LIMIT, RETRIES,
-							   THREADS, TIMEOUT, USER_AGENT, URL, HOST)
+							   SKIP_SSL_VERIFY, THREADS, TIMEOUT, USER_AGENT, URL, HOST)
 from secator.output_types import Subdomain, Url, Warning
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
@@ -44,6 +44,7 @@ class gau(HttpCrawler):
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
 		MATCH_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: OPT_NOT_SUPPORTED,
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		METHOD: OPT_NOT_SUPPORTED,
 		PROXY: 'proxy',
 		RATE_LIMIT: OPT_NOT_SUPPORTED,

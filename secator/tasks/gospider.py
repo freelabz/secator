@@ -6,7 +6,7 @@ from secator.definitions import (CONTENT_LENGTH, DELAY, DEPTH, FILTER_CODES,
 							   FOLLOW_REDIRECT, HEADER, MATCH_CODES,
 							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS,
 							   OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES,
-							   STATUS_CODE, THREADS, TIMEOUT, URL, USER_AGENT)
+							   SKIP_SSL_VERIFY, STATUS_CODE, THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.output_types import Url
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
@@ -32,6 +32,7 @@ class gospider(HttpCrawler):
 		FILTER_SIZE: OPT_NOT_SUPPORTED,
 		FILTER_WORDS: OPT_NOT_SUPPORTED,
 		FOLLOW_REDIRECT: 'no-redirect',
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		MATCH_CODES: OPT_NOT_SUPPORTED,
 		MATCH_REGEX: OPT_NOT_SUPPORTED,
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
