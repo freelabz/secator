@@ -44,12 +44,20 @@ def get_runner_dbg(runner):
 	return {runner.unique_name: runner.status, 'type': runner.config.type, 'class': runner.__class__.__name__, 'caller': runner.config.name, **runner.context}  # noqa: E501
 
 
-def _make_request(method, endpoint, data=None):
+# Transient failures (connection drops, proxy 5xx, rate limits) are retried with
+# exponential backoff: 1s, 2s, 4s.
+API_RETRIES = 3
+API_RETRY_STATUSES = (429, 500, 502, 503, 504)
+
+
+def _make_request(method, endpoint, data=None, idempotency_key=None):
 	"""Make HTTP request to external API endpoint."""
 	url = f'{API_URL.rstrip("/")}/{endpoint.lstrip("/")}'
 	headers = {'Content-Type': 'application/json'}
 	if API_KEY:
 		headers['Authorization'] = f'{API_HEADER_NAME} {API_KEY}'
+	if idempotency_key:
+		headers['Idempotency-Key'] = str(idempotency_key)
 	verify = FORCE_SSL
 	timeout = API_TIMEOUT
 	debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
@@ -57,12 +65,31 @@ def _make_request(method, endpoint, data=None):
 	json_data = json.dumps(data, cls=DataclassEncoder) if data else None
 	if json_data:
 		debug('API data', sub='hooks.api', verbose=True, obj=json_data, obj_after=True)
-	response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)
+	for attempt in range(API_RETRIES + 1):
+		last = attempt == API_RETRIES
+		try:
+			response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)  # noqa: E501
+		except (requests.ConnectionError, requests.Timeout):
+			if last:
+				raise
+			time.sleep(2 ** attempt)
+			continue
+		if response.status_code in API_RETRY_STATUSES and not last:
+			time.sleep(2 ** attempt)
+			continue
+		break
+	if not response.ok:
+		# Error bodies may not be JSON (e.g. an HTML 502 from a proxy): surface the
+		# HTTP error rather than a JSON decode error.
+		try:
+			detail = response.json().get('detail')
+		except (ValueError, AttributeError):
+			detail = None
+		if detail:
+			console.print(Error(message=f'API error: {detail}'))
+		response.raise_for_status()
 	result = response.json()
 	debug('API response', sub='hooks.api', verbose=True, obj=result)
-	if not response.ok and result.get('detail'):
-		console.print(Error(message=f'API error: {result["detail"]}'))
-	response.raise_for_status()
 	return result
 
 
@@ -125,7 +152,8 @@ def update_finding(self, item):
 	if not in_api:
 		# Create new finding
 		update['_context']['api'] = True
-		result = _make_request('POST', API_FINDING_CREATE_ENDPOINT, update)
+		# The pre-stamped finding uuid lets the server dedupe a create retried after a lost response.
+		result = _make_request('POST', API_FINDING_CREATE_ENDPOINT, update, idempotency_key=_uuid)
 		if result and result.get('id'):
 			item._uuid = result.get('id')
 			item._context['api'] = True
