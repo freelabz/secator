@@ -5,7 +5,7 @@ from secator.definitions import ADDONS_ENABLED
 
 if ADDONS_ENABLED['ai']:
 	from secator.ai.prompts import (
-		SYSTEM_ATTACK,
+		SYSTEM_SCAN,
 		SYSTEM_CHAT,
 		SYSTEM_EXPLOIT,
 		MODES,
@@ -22,12 +22,12 @@ class TestPrompts(unittest.TestCase):
 
 	# === Structure tests: XML tags ===
 
-	def test_system_attack_has_xml_structure(self):
-		"""Test SYSTEM_ATTACK uses XML tags for structure."""
-		self.assertIn("<persona>", SYSTEM_ATTACK.template)
-		self.assertIn("<instructions>", SYSTEM_ATTACK.template)
-		self.assertIn("<constraints>", SYSTEM_ATTACK.template)
-		self.assertIn("<context>", SYSTEM_ATTACK.template)
+	def test_system_scan_has_xml_structure(self):
+		"""Test SYSTEM_SCAN uses XML tags for structure."""
+		self.assertIn("<persona>", SYSTEM_SCAN.template)
+		self.assertIn("<instructions>", SYSTEM_SCAN.template)
+		self.assertIn("<constraints>", SYSTEM_SCAN.template)
+		self.assertIn("<context>", SYSTEM_SCAN.template)
 
 	def test_system_chat_has_xml_structure(self):
 		"""Test SYSTEM_CHAT uses XML tags for structure."""
@@ -45,19 +45,19 @@ class TestPrompts(unittest.TestCase):
 	def test_no_markdown_headers_in_templates(self):
 		"""Templates should use XML tags, not markdown ### headers (outside examples)."""
 		import re
-		for template in (SYSTEM_ATTACK, SYSTEM_CHAT, SYSTEM_EXPLOIT):
+		for template in (SYSTEM_SCAN, SYSTEM_CHAT, SYSTEM_EXPLOIT):
 			# Strip content inside <example> tags before checking
 			content = re.sub(r'<example\w*>.*?</example\w*>', '', template.template, flags=re.DOTALL)
 			self.assertNotIn("### ", content)
 
 	# === Content tests ===
 
-	def test_system_attack_has_actions(self):
-		self.assertIn("task", SYSTEM_ATTACK.template)
-		self.assertIn("workflow", SYSTEM_ATTACK.template)
-		self.assertIn("shell", SYSTEM_ATTACK.template)
-		self.assertIn("query", SYSTEM_ATTACK.template)
-		self.assertIn("follow_up", SYSTEM_ATTACK.template)
+	def test_system_scan_has_actions(self):
+		self.assertIn("task", SYSTEM_SCAN.template)
+		self.assertIn("workflow", SYSTEM_SCAN.template)
+		self.assertIn("shell", SYSTEM_SCAN.template)
+		self.assertIn("query", SYSTEM_SCAN.template)
+		self.assertIn("follow_up", SYSTEM_SCAN.template)
 
 	def test_system_chat_has_query(self):
 		self.assertIn("query", SYSTEM_CHAT.template)
@@ -69,15 +69,15 @@ class TestPrompts(unittest.TestCase):
 		self.assertIn("proof-of-concept", SYSTEM_EXPLOIT.template)
 		self.assertIn("docker", SYSTEM_EXPLOIT.template.lower())
 
-	def test_system_attack_has_subagents(self):
-		"""Test SYSTEM_ATTACK has subagent guidance."""
-		self.assertIn("<subagents>", SYSTEM_ATTACK.template)
-		self.assertIn("run_task", SYSTEM_ATTACK.template)
-		self.assertIn('name "ai"', SYSTEM_ATTACK.template)
+	def test_system_scan_has_subagents(self):
+		"""Test SYSTEM_SCAN has subagent guidance."""
+		self.assertIn("<subagents>", SYSTEM_SCAN.template)
+		self.assertIn("run_task", SYSTEM_SCAN.template)
+		self.assertIn('name "ai"', SYSTEM_SCAN.template)
 
 	def test_context_is_at_top(self):
 		"""Best practice: long data (context) should be at top of prompt."""
-		for template in (SYSTEM_ATTACK, SYSTEM_EXPLOIT):
+		for template in (SYSTEM_SCAN, SYSTEM_EXPLOIT):
 			content = template.template.strip()
 			context_pos = content.find("<context>")
 			persona_pos = content.find("<persona>")
@@ -87,8 +87,8 @@ class TestPrompts(unittest.TestCase):
 
 	# === Rendered prompt tests ===
 
-	def test_get_system_prompt_attack(self):
-		prompt = get_system_prompt("attack")
+	def test_get_system_prompt_scan(self):
+		prompt = get_system_prompt("scan")
 		self.assertIn("task", prompt)
 		self.assertIn("<tasks>", prompt)
 
@@ -119,19 +119,19 @@ class TestPrompts(unittest.TestCase):
 		]
 		leftover = [v for v in template_vars if f"${v}" in prompt]
 		self.assertEqual(leftover, [], f"unresolved template vars in exploit prompt: {leftover}")
-		# uses the exploit template, not attack/chat
+		# uses the exploit template, not scan/chat
 		self.assertIn("exploitation verification specialist", prompt)
 
-	def test_get_system_prompt_attack_has_library_reference(self):
-		prompt = get_system_prompt("attack")
+	def test_get_system_prompt_scan_has_library_reference(self):
+		prompt = get_system_prompt("scan")
 		self.assertIn('<tasks>', prompt)
 		self.assertIn('<workflows>', prompt)
 		self.assertIn('<profiles>', prompt)
 		self.assertIn('<output_types>', prompt)
 		self.assertIn('<option_formats>', prompt)
 
-	def test_get_system_prompt_attack_has_query_reference(self):
-		prompt = get_system_prompt("attack")
+	def test_get_system_prompt_scan_has_query_reference(self):
+		prompt = get_system_prompt("scan")
 		self.assertIn('$in', prompt)
 		self.assertIn('$regex', prompt)
 
@@ -244,7 +244,7 @@ class TestPrompts(unittest.TestCase):
 	# === MODES dict tests ===
 
 	def test_modes_dict_exists_with_expected_modes(self):
-		self.assertIn("attack", MODES)
+		self.assertIn("scan", MODES)
 		self.assertIn("chat", MODES)
 		self.assertIn("exploit", MODES)
 
@@ -265,9 +265,9 @@ class TestPrompts(unittest.TestCase):
 		exploit_config = MODES["exploit"]
 		self.assertEqual(exploit_config["max_iterations"], 5)
 
-	def test_attack_mode_config_has_correct_allowed_actions(self):
-		attack_config = MODES["attack"]
-		actions = attack_config["allowed_actions"]
+	def test_scan_mode_config_has_correct_allowed_actions(self):
+		scan_config = MODES["scan"]
+		actions = scan_config["allowed_actions"]
 		for a in ["task", "workflow", "shell", "query", "follow_up", "add_finding",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "stop"]:
 			self.assertIn(a, actions)
@@ -275,19 +275,33 @@ class TestPrompts(unittest.TestCase):
 	def test_chat_mode_config_has_correct_allowed_actions(self):
 		chat_config = MODES["chat"]
 		actions = chat_config["allowed_actions"]
-		for a in ["query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "shell", "stop"]:
-			self.assertIn(a, actions)
-		self.assertNotIn("task", actions)
-		self.assertNotIn("workflow", actions)
+		# Chat is strictly read-only: read (query), ask/suggest (follow_up), delegate a
+		# same-mode helper (subagent), stop. `change_mode` lets an AUTO-resolved chat turn
+		# self-escalate — it is withheld from a user-PINNED chat in build_tool_schemas (see
+		# test_ai_tools.test_change_mode_gated_by_pin), so read-only stays read-only. Nothing
+		# else here acts on the world or the data.
+		self.assertEqual(set(actions), {"query", "follow_up", "subagent", "change_mode", "stop"})
+		for a in ["shell", "task", "workflow", "add_finding", "update_finding",
+		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:
+			self.assertNotIn(a, actions)
 
 	def test_all_modes_have_max_iterations_5(self):
-		self.assertEqual(MODES["attack"]["max_iterations"], 5)
+		self.assertEqual(MODES["scan"]["max_iterations"], 5)
 		self.assertEqual(MODES["chat"]["max_iterations"], 5)
 		self.assertEqual(MODES["exploit"]["max_iterations"], 5)
 
+	def test_legacy_attack_mode_aliases_to_scan(self):
+		from secator.ai.prompts import normalize_mode
+		self.assertEqual(normalize_mode("attack"), "scan")
+		self.assertEqual(normalize_mode(" Attack "), "scan")
+		self.assertEqual(normalize_mode("chat"), "chat")
+		self.assertNotIn("attack", MODES)
+		self.assertIs(get_mode_config("attack"), MODES["scan"])
+		self.assertEqual(get_system_prompt("attack"), get_system_prompt("scan"))
+
 	def test_get_mode_config_returns_correct_mode(self):
-		attack_config = get_mode_config("attack")
-		self.assertEqual(attack_config["system_prompt"], SYSTEM_ATTACK)
+		scan_config = get_mode_config("scan")
+		self.assertEqual(scan_config["system_prompt"], SYSTEM_SCAN)
 		chat_config = get_mode_config("chat")
 		self.assertEqual(chat_config["system_prompt"], SYSTEM_CHAT)
 		exploit_config = get_mode_config("exploit")
@@ -301,12 +315,33 @@ class TestPrompts(unittest.TestCase):
 	# === Common rules tests ===
 
 	def test_common_rules_has_xml_tags(self):
-		"""COMMON_RULES should use XML tags for each rule category."""
-		from secator.ai.prompts import COMMON_RULES
+		"""COMMON_RULES holds the UNIVERSAL blocks (safe for read-only chat too).
+		The run_*/shell-specific blocks live in runners.txt now (scan/exploit only)."""
+		from secator.ai.prompts import COMMON_RULES, load_prompt
 		self.assertIn("<tool_calling>", COMMON_RULES)
 		self.assertIn("<response_style>", COMMON_RULES)
-		self.assertIn("<guardrails>", COMMON_RULES)
-		self.assertIn("<truncated_output>", COMMON_RULES)
+		self.assertIn("<encrypted_data>", COMMON_RULES)
+		# These moved out of common into runners.txt (not in chat's read-only surface).
+		self.assertNotIn("<guardrails>", COMMON_RULES)
+		self.assertNotIn("<truncated_output>", COMMON_RULES)
+		runners = load_prompt("constraints/runners.txt")
+		self.assertIn("<truncated_output>", runners)
+		self.assertIn("<file_io>", runners)
+		# guardrails is a SINGLE source (constraints/guardrails.txt), not duplicated in
+		# runners — so scan and exploit get the one strong block, never a weak dup.
+		self.assertNotIn("<guardrails>", runners)
+
+	def test_scan_and_exploit_have_single_strong_guardrails(self):
+		"""Both offensive modes render exactly one guardrails block, and it's the STRONG
+		one (host-secret paths + scope hostname/IP rule). Exploit runs untrusted PoCs, so
+		it must not be left with only a weaker block."""
+		for mode in ("scan", "exploit"):
+			p = get_system_prompt(mode)
+			self.assertEqual(p.count("</guardrails>"), 1, f"{mode}: expected one guardrails block")
+			self.assertIn("~/.secator/config.yml", p, f"{mode}: missing STRONG guardrails")
+			self.assertIn("scope is matched literally", p, f"{mode}: missing scope hostname/IP rule")
+		# chat is read-only and carries no guardrails block
+		self.assertNotIn("</guardrails>", get_system_prompt("chat"))
 
 	def test_common_rules_has_no_shouting(self):
 		"""COMMON_RULES should not have excessive ALL CAPS directives."""
@@ -319,7 +354,7 @@ class TestPrompts(unittest.TestCase):
 
 	def test_rendered_prompts_have_no_unsubstituted_template_vars(self):
 		"""Rendered prompts must not leak $query_types / $output_types_reference (D1)."""
-		for mode in ("attack", "chat", "exploit"):
+		for mode in ("scan", "chat", "exploit"):
 			prompt = get_system_prompt(mode)
 			self.assertNotIn("$query_types", prompt, f"$query_types leaked in {mode!r} prompt")
 			self.assertNotIn("$output_types_reference", prompt, f"$output_types_reference leaked in {mode!r} prompt")
@@ -329,7 +364,7 @@ class TestPrompts(unittest.TestCase):
 		from secator.ai.prompts import build_query_types
 		expected = build_query_types()
 		self.assertIn("vulnerability", expected)
-		for mode in ("attack", "chat", "exploit"):
+		for mode in ("scan", "chat", "exploit"):
 			self.assertIn(expected, get_system_prompt(mode))
 
 	def test_rendered_prompts_have_no_phantom_run_query_tool(self):
@@ -337,7 +372,7 @@ class TestPrompts(unittest.TestCase):
 		from secator.ai.tools import TOOL_ACTION_MAP
 		self.assertEqual(TOOL_ACTION_MAP["query_workspace"], "query")
 		self.assertNotIn("run_query", TOOL_ACTION_MAP)
-		for mode in ("attack", "chat", "exploit"):
+		for mode in ("scan", "chat", "exploit"):
 			prompt = get_system_prompt(mode)
 			self.assertNotIn("run_query", prompt, f"phantom run_query in {mode!r} prompt")
 			self.assertIn("query_workspace", prompt)
@@ -349,14 +384,14 @@ class TestScopeInPrompt(unittest.TestCase):
 	scope up front (fewer guardrail-denied retries), and is omitted when absent."""
 
 	def test_scope_absent_by_default(self):
-		p = get_system_prompt("attack", workspace_path="<ws>", backend=None)
+		p = get_system_prompt("scan", workspace_path="<ws>", backend=None)
 		self.assertNotIn("<scope>", p)
 		self.assertEqual(build_scope_section(), "")
 		self.assertEqual(build_scope_section([], []), "")
 
 	def test_in_scope_surfaced(self):
 		p = get_system_prompt(
-			"attack", workspace_path="<ws>", backend=None,
+			"scan", workspace_path="<ws>", backend=None,
 			in_scope=["scanme.nmap.org", "10.0.0.1"])
 		self.assertIn("<scope>", p)
 		self.assertIn("scanme.nmap.org", p)
@@ -377,6 +412,26 @@ class TestScopeInPrompt(unittest.TestCase):
 		self.assertIn("not its resolved IP", section)
 
 
+	def test_current_mode_banner_is_programmatic(self):
+		"""Every mode's rendered prompt starts with a registry-derived current-mode
+		statement, so the model always knows its mode. Adding a mode to MODES gets this
+		for free (no per-prompt-file edit)."""
+		from secator.ai.prompts import get_system_prompt, build_mode_banner, MODES
+		for m in MODES:
+			prompt = get_system_prompt(m)
+			self.assertIn("<current_mode>", prompt)
+			self.assertIn(f"operating in {m.upper()} mode", prompt)
+		# programmatic: a mode name not in MODES still yields a correct banner.
+		banner = build_mode_banner("monitor", {"description": "re-verify the attack surface",
+		                                        "allowed_actions": ["query", "stop"]})
+		self.assertIn("operating in MONITOR mode", banner)
+		self.assertIn("re-verify the attack surface", banner)
+		# no change_mode in that mode -> no change_mode hint
+		self.assertNotIn("change_mode", banner)
+		# a mode WITH change_mode gets the escalation hint
+		self.assertIn("change_mode", build_mode_banner("scan", MODES["scan"]))
+
+
 if __name__ == '__main__':
 	unittest.main()
 
@@ -385,7 +440,7 @@ if __name__ == '__main__':
 class TestOperatingRulesRecap(unittest.TestCase):
 	"""Every mode ends with the operating-rules recap in the recency slot.
 
-	The library reference is inlined at the TOP of attack/exploit (long data
+	The library reference is inlined at the TOP of scan/exploit (long data
 	first), which pushes the persona to the middle of a ~15-60k prompt. A terse
 	recap at the very END keeps the rules the model most often breaks (use
 	follow_up with choices, description=intent, persist, restate-before-retry) in
@@ -393,7 +448,7 @@ class TestOperatingRulesRecap(unittest.TestCase):
 	"""
 
 	def test_recap_present_and_last_in_every_mode(self):
-		for mode in ("chat", "attack", "exploit"):
+		for mode in ("chat", "scan", "exploit"):
 			p = get_system_prompt(mode, workspace_path="<ws>", backend=None)
 			self.assertIn("<operating_rules>", p, f"{mode} missing recap")
 			self.assertTrue(
@@ -401,7 +456,7 @@ class TestOperatingRulesRecap(unittest.TestCase):
 				f"{mode} recap is not the LAST block (recency slot)")
 
 	def test_recap_covers_the_known_failure_modes(self):
-		p = get_system_prompt("attack", workspace_path="<ws>", backend=None)
+		p = get_system_prompt("scan", workspace_path="<ws>", backend=None)
 		recap = p[p.index("<operating_rules>"):]
 		self.assertIn("follow_up", recap)          # prose-choices failure
 		self.assertIn("description", recap)         # description-echo failure

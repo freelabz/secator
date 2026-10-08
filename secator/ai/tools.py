@@ -7,6 +7,7 @@ from secator.ai.prompts import get_mode_config
 # Map tool names to action types used by existing action handlers
 TOOL_ACTION_MAP = {
 	"run_task": "task",
+	"run_subagent": "subagent",
 	"run_workflow": "workflow",
 	"run_shell": "shell",
 	"query_workspace": "query",
@@ -16,6 +17,7 @@ TOOL_ACTION_MAP = {
 	"mark_vuln_false_positive": "mark_vuln_false_positive",
 	"mark_vuln_exploit_failed": "mark_vuln_exploit_failed",
 	"update_finding": "update_finding",
+	"change_mode": "change_mode",
 	"stop": "stop",
 }
 
@@ -41,7 +43,9 @@ TOOL_SCHEMAS = {
 		"type": "function",
 		"function": {
 			"name": "run_task",
-			"description": "Run a secator security task (e.g. nmap, httpx, nuclei, ai) against targets. Use name 'ai' to spawn an AI subagent.",  # noqa: E501
+			"description": "Run a secator security task (e.g. nmap, httpx, nuclei) against targets. To spawn an AI subagent use run_subagent (NOT name='ai'). "  # noqa: E501
+			               "Example (good): run_task(name='nmap', targets=['10.0.0.1'], opts={'ports':'1-1000'}, description='Scan common ports'). "  # noqa: E501
+			               "Bad: run_task(name='nmap') — no targets; run_task() — no args.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -57,6 +61,49 @@ TOOL_SCHEMAS = {
 					}
 				},
 				"required": ["name", "targets", "description"]
+			}
+		}
+	},
+	"run_subagent": {
+		"type": "function",
+		"function": {
+			"name": "run_subagent",
+			"description": (
+				"Spawn an autonomous AI subagent with a fresh context window that works the objective "
+				"non-interactively and hands back a summary — the ONLY way to spawn a subagent (do NOT "
+				"use run_task with name='ai'). Use it to parallelize or offload a focused sub-task.\n"
+				"Mode: in an AUTO or scan session you MAY set `mode` to pick the subagent's mode "
+				"(e.g. hand a confirmed vuln to an `exploit` subagent). In a user-PINNED read-only `chat` "
+				"session the subagent is forced to `chat`; do NOT set a different `mode` there.\n"
+				"Example (good): run_subagent(objective='Validate and exploit CVE-2021-41773 on "
+				"10.0.0.9, record a PoC', targets=['10.0.0.9'], "
+				"description='Exploit the Apache path traversal', mode='exploit'). "
+				"Bad: run_subagent(objective='do stuff') — no targets, vague objective."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"objective": {
+						"type": "string",
+						"description": "The subagent's goal, with ALL context it needs (target details, "
+						               "relevant findings as raw JSON, credentials/versions). It has a fresh "
+						               "context window and sees only what you pass here."
+					},
+					"targets": _TARGETS_SCHEMA,
+					"description": _DESCRIPTION_SCHEMA,
+					"mode": {
+						"type": "string",
+						"enum": ["chat", "scan", "exploit"],
+						"description": "Optional mode for the subagent (chat/scan/exploit). Honored only in an "
+						               "auto or scan session; ignored/forced to chat in a pinned chat session. "
+						               "Omit to inherit the current mode."
+					},
+					"model": {
+						"type": "string",
+						"description": "Optional LLM model id for the subagent. Omit to inherit the current model."
+					}
+				},
+				"required": ["objective", "targets", "description"]
 			}
 		}
 	},
@@ -87,7 +134,9 @@ TOOL_SCHEMAS = {
 		"type": "function",
 		"function": {
 			"name": "run_shell",
-			"description": "Run an arbitrary shell command for exploration, exploitation, or data analysis.",
+			"description": "Run an arbitrary shell command for exploration, exploitation, or data analysis. "
+			               "Example (good): run_shell(command='curl -sk https://10.0.0.1/ | head -50', description='Grab the HTTP banner'). "  # noqa: E501
+			               "Bad: run_shell() — no command.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -105,7 +154,9 @@ TOOL_SCHEMAS = {
 		"type": "function",
 		"function": {
 			"name": "query_workspace",
-			"description": "Query the workspace database for stored security findings using MongoDB-style queries.",
+			"description": "Query the workspace database for stored security findings using MongoDB-style queries. "
+			               "Example (good): query_workspace(query={'_type':'vulnerability','severity':{'$in':['high','critical']}}). "  # noqa: E501
+			               "Bad: query_workspace() — no query; query_workspace(query={}) — unscoped, returns noise.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -153,7 +204,9 @@ TOOL_SCHEMAS = {
 		"type": "function",
 		"function": {
 			"name": "add_finding",
-			"description": "Add a security finding to the workspace (e.g. vulnerability, exploit, url).",
+			"description": "Add a security finding to the workspace (e.g. vulnerability, exploit, url). "
+			               "Example (good): add_finding(_type='vulnerability', name='SQLi in login', matched_at='http://x/login', severity='high'). "  # noqa: E501
+			               "Bad: add_finding(name='x', extra_data='y') — missing _type/matched_at, extra_data must be a dict.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -334,6 +387,35 @@ TOOL_SCHEMAS = {
 			}
 		}
 	},
+	"change_mode": {
+		"type": "function",
+		"function": {
+			"name": "change_mode",
+			"description": (  # noqa: E501
+				"Switch your OWN operating mode when the task needs capabilities your current mode lacks. "
+				"If you are in read-only chat and the user asks you to scan, do recon, attack, or exploit, "
+				"call change_mode(mode='scan') and then carry out the request — do NOT ask the user to "
+				"switch modes, change it yourself. 'scan' unlocks tasks/workflows/shell + finding writes; "
+				"'exploit' is for focused exploitation of a known vulnerability. "
+				"Example (good): change_mode(mode='scan', reason='user asked to run reconnaissance')."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"mode": {
+						"type": "string",
+						"enum": ["scan", "exploit"],
+						"description": "The mode to switch to: 'scan' (recon/scanning/active testing) or 'exploit'."
+					},
+					"reason": {
+						"type": "string",
+						"description": "Short reason for the switch (optional)."
+					}
+				},
+				"required": ["mode"]
+			}
+		}
+	},
 }
 
 
@@ -357,13 +439,18 @@ STOP_TOOL_SCHEMA = {
 }
 
 
-def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> list:
+def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_is_auto: bool = True) -> list:
 	"""Return list of tool schemas filtered by mode's allowed_actions.
 
 	Args:
-		mode: The AI mode (attack, chat, exploit). Unknown modes fall back to chat.
+		mode: The AI mode (scan, chat, exploit). Unknown modes fall back to chat.
 		is_subagent: If True, exclude follow_up tool (legacy compat).
 		backend: Optional interactivity backend for exclusion/extra tools.
+		mode_is_auto: Whether the session is in auto mode (vs a user-pinned mode).
+			Gates `change_mode`: the model may self-escalate in an auto session or from
+			a pinned ACTION mode, but a user-PINNED read-only `chat` must stay read-only,
+			so `change_mode` is withheld there (the model can only suggest the user
+			switches). An auto session that happens to resolve to chat KEEPS change_mode.
 
 	Returns:
 		List of OpenAI-format tool schema dicts.
@@ -372,7 +459,11 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None) -> li
 	allowed_actions = config["allowed_actions"]
 	excluded = set()
 	if is_subagent:
-		excluded.add("follow_up")
+		# A subagent runs at its assigned mode; it does not self-escalate.
+		excluded.update({"follow_up", "change_mode"})
+	# A user-pinned read-only chat cannot self-escape to an action mode.
+	if not mode_is_auto and mode == "chat":
+		excluded.add("change_mode")
 	if backend is not None:
 		excluded.update(backend.get_excluded_tools())
 	schemas = [
@@ -426,6 +517,13 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 	if action_type is None:
 		return None
 	if not arguments:
+		# `stop` ends the turn and carries no required data (its `reason` is optional),
+		# so a bare stop() with empty/no args is VALID and must succeed — otherwise the
+		# empty-args reject below bounces every clean stop as "empty arguments" and the
+		# model falls back into a follow-up nag loop instead of ending. Every other tool
+		# needs arguments, so keep rejecting those. Covers native + text-parsed stop.
+		if tool_name == "stop":
+			return {"action": action_type, "description": "stopped"}
 		return None
 	# A model may emit non-object arguments (bare JSON int/array/string) -- `.items()`
 	# below would raise and abort the loop, so reject cleanly and let the caller retry.
@@ -445,6 +543,8 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 		arguments.get("description")
 		or safe_arguments.get("name", "")
 		or safe_arguments.get("query")
-		or safe_arguments.get("command", "unknown")
+		or safe_arguments.get("command")
+		or safe_arguments.get("mode")
+		or "unknown"
 	)
 	return {"action": action_type, "description": descr, **safe_arguments}

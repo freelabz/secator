@@ -71,7 +71,7 @@ class TestDetectMode(unittest.TestCase):
         self.assertEqual(self._run_detect("take a look at this thing", "exploit"), "exploit")
 
     def test_llm_attack_classification_unchanged(self):
-        self.assertEqual(self._run_detect("take a look at this thing", "attack"), "attack")
+        self.assertEqual(self._run_detect("take a look at this thing", "scan"), "scan")
 
     def test_llm_chat_classification_unchanged(self):
         self.assertEqual(self._run_detect("take a look at this thing", "chat"), "chat")

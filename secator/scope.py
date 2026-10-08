@@ -6,16 +6,22 @@ network targets (ip/cidr/host/host:port/url) are checked; non-network items
 allow-all (subject to deny).
 
 Entry kinds: IP/CIDR (``ipaddress`` containment, v4+v6, ``subnet_of``); exact
-host; ``*.acme.com`` wildcard (sub-domains only, not the apex); ``re.fullmatch``-
-anchored regex (``acme\\.com`` never matches ``evil-acme.com.x``). Regexes are
-scope entries, never targets.
+host; ``*.acme.com`` wildcard (sub-domains only, not the apex); a URL entry
+(``https://host``, ``http://host/path``, or scheme-less ``host/path`` -- implicit
+https) which authorizes ONLY a web target at that host/IP at/under the path and
+NEVER a bare host/IP port scan (shared-hosting: the address isn't yours), and
+CARVES its sub-tree out of a broader host-level deny; ``re.fullmatch``-anchored
+regex (``acme\\.com`` never matches ``evil-acme.com.x``). A bare host / wildcard /
+IP / CIDR entry is host-level and DOES authorize web targets on it (host superset
+URL). Regexes are scope entries, never targets.
 """
 
 import ipaddress
 import logging
 import re
+from urllib.parse import urlparse
 
-from secator.definitions import CIDR_RANGE, IP
+from secator.definitions import CIDR_RANGE, IP, URL
 from secator.utils import (
 	NETWORK_TYPES,
 	_is_ip_literal,
@@ -82,14 +88,32 @@ def _compile_entry(entry):
 
 class _Shape:
 	"""Parsed target: exactly one of net / ip / host is set. `canonical` is the
-	full canonical target string (what regex entries fullmatch against)."""
-	__slots__ = ('net', 'ip', 'host', 'canonical')
+	full canonical target string (what regex entries fullmatch against). `path` is
+	the URL path ('' when none). `is_url` marks a WEB (URL) shape -- a web app at a
+	host/IP -- vs a host/IP shape: a URL grant covers only URL targets (path-scoped),
+	a host/IP grant covers both the host/IP and its URLs."""
+	__slots__ = ('net', 'ip', 'host', 'canonical', 'path', 'is_url')
 
-	def __init__(self, net=None, ip=None, host=None, canonical=''):
+	def __init__(self, net=None, ip=None, host=None, canonical='', path='', is_url=False):
 		self.net = net
 		self.ip = ip
 		self.host = host
 		self.canonical = canonical
+		self.path = path
+		self.is_url = is_url
+
+
+def _as_schemeless_url(s):
+	"""`host/path` -> `https://host/path` (implicit https) when the first segment is a
+	network host/IP; else None. Excludes wildcards and regexes (never URL grants) and
+	bare filesystem paths (empty / non-host first segment)."""
+	s = s.strip()
+	if '/' not in s or s.startswith('*.') or any(c in _REGEX_META for c in s):
+		return None
+	head = s.split('/', 1)[0]
+	if not head or classify_target(head, resolve=False).type not in NETWORK_TYPES:
+		return None
+	return 'https://' + s
 
 
 def _target_shape(target):
@@ -100,8 +124,15 @@ def _target_shape(target):
 	re-implemented here. `resolve=False` keeps this pure (no DNS).
 	"""
 	info = classify_target(target, resolve=False)
+	is_url = info.type == URL
 	if info.type not in NETWORK_TYPES:
-		return None
+		# A scheme-less `host/path` is typed `str` by the classifier; it's a URL grant
+		# with an implicit https scheme -- re-parse it as one (wildcards/regexes/paths
+		# excluded). Non-promotable -> genuinely non-network.
+		promoted = _as_schemeless_url(target)
+		if promoted is None:
+			return None
+		target, info, is_url = promoted, classify_target(promoted, resolve=False), True
 	canonical = canonicalize_target(target)
 	# A target the classifier typed as IP/CIDR but that ipaddress can't actually
 	# parse (a malformed / not-really-an-IP string, e.g. a leaked `HOST:...` token)
@@ -113,13 +144,15 @@ def _target_shape(target):
 		if info.type == IP and _is_ip_literal(canonical):
 			return _Shape(ip=ipaddress.ip_address(canonical), canonical=canonical)
 		# URL / HOST / HOST_PORT (and `localhost`, typed IP but not a real IP literal):
-		# pull the host out (strips scheme / port / path).
+		# pull the host out (strips scheme / port / path). Only URL targets carry a
+		# path; keep it so path-scoped scope entries can match it.
 		host = _target_host(canonical, info.type)
+		path = urlparse(canonical).path if info.type == URL else ''
 		if _is_ip_literal(host):
 			# IP literal hiding in a url / host:port (8.8.8.8:443, http://8.8.8.8/) --
 			# match it by network containment, never as a hostname string.
-			return _Shape(ip=ipaddress.ip_address(host), canonical=canonical)
-		return _Shape(host=host.lower().rstrip('.'), canonical=canonical)
+			return _Shape(ip=ipaddress.ip_address(host), canonical=canonical, path=path, is_url=is_url)
+		return _Shape(host=host.lower().rstrip('.'), canonical=canonical, path=path, is_url=is_url)
 	except ValueError:
 		return None
 
@@ -130,6 +163,28 @@ def _entry_net(entry):
 		return ipaddress.ip_network(entry, strict=False)
 	except ValueError:
 		return None
+
+
+def _is_url_entry(entry):
+	"""True if `entry` is a URL (web-app) scope entry: https://host, http://host/path,
+	or scheme-less host/path. A URL entry authorizes only web targets at that host/IP
+	(path-scoped) and carves its sub-tree out of a broader host-level deny; it never
+	authorizes a bare host/IP port scan."""
+	shape = _target_shape(entry)
+	return shape is not None and shape.is_url
+
+
+def _path_covers(entry_path, target_path):
+	"""True if `target_path` is at or under `entry_path` at a segment boundary.
+
+	An empty entry path (``https://host``) is a whole-site grant and covers every
+	path. `/docs` covers `/docs` and `/docs/x` but NOT `/docsomething` or `/other`.
+	"""
+	ep = '/' + entry_path.strip('/')
+	tp = '/' + (target_path or '').strip('/')
+	if ep == '/':
+		return True
+	return tp == ep or tp.startswith(ep + '/')
 
 
 def _shape_matches_entry(shape, entry):
@@ -154,6 +209,24 @@ def _shape_matches_entry(shape, entry):
 			return shape.ip.version == entry_net.version and shape.ip in entry_net
 		return False  # hostname target can't be inside an IP network
 
+	# URL (web-app) entry: https://host, http://host/path, or scheme-less host/path.
+	# Authorizes ONLY a URL-shaped target at the same host/IP whose path is at/under
+	# the entry path (empty entry path = the whole web app). A URL grant NEVER
+	# authorizes a bare host/IP port scan -- shared-hosting: the address isn't yours.
+	entry_shape = _target_shape(entry)
+	if entry_shape is not None and entry_shape.is_url:
+		if not shape.is_url:
+			return False
+		if entry_shape.host is not None:
+			if shape.host != entry_shape.host:
+				return False
+		elif entry_shape.ip is not None:
+			if shape.ip is None or shape.ip != entry_shape.ip:
+				return False
+		else:
+			return False
+		return _path_covers(entry_shape.path, shape.path)
+
 	# Regex entry: FULLMATCH-anchored (both ends), ReDoS-guarded.
 	if any(c in _REGEX_META for c in entry):
 		compiled = _compile_entry(entry)
@@ -165,6 +238,63 @@ def _shape_matches_entry(shape, entry):
 	if shape.host is None:
 		return False
 	return shape.host == entry.lower().rstrip('.')
+
+
+def target_host(value):
+	"""The canonical host of a target ('' if not a network target). A URL / host /
+	host:port yields its host; an IP literal yields its string form; a bare CIDR has
+	no single host and yields ''. The ONE host-extraction helper -- callers that only
+	need "the host of this value" use this instead of re-implementing scheme/port/path
+	stripping (replaces the ad-hoc `_host_of` copies in ai.guardrails / the API gate).
+	"""
+	shape = _target_shape(value)
+	if shape is None:
+		return ''
+	if shape.host:
+		return shape.host
+	if shape.ip is not None:
+		return str(shape.ip)
+	return ''
+
+
+def canonicalize_scope_entry(value):
+	"""Normalise a raw target value into a canonical scope-entry string, or None if it
+	is not network-addressable. The SINGLE normaliser shared by the worker and the
+	platform gate, so an entry is shaped identically everywhere it is stored or matched:
+
+	- ``*.host``          -> ``*.host`` (host-level wildcard, kept verbatim, lower-cased)
+	- CIDR / IP           -> canonical network / address string
+	- URL / ``host/path`` -> ``https://host[/path]`` (a web-app grant; scheme normalised,
+	                         query/fragment + trailing slash dropped; path case kept)
+	- bare host / host:port -> canonical host (port dropped)
+	- free text / app-id / non-host -> None
+
+	The URL-vs-host distinction is load-bearing: a URL entry authorizes only web
+	targets at that host (see ``_shape_matches_entry``), never a bare host/IP port scan.
+	"""
+	if not isinstance(value, str):
+		return None
+	v = value.strip()
+	if not v:
+		return None
+	if v.startswith('*.'):
+		base = v[2:].strip().lower().rstrip('.')
+		return '*.' + base if base else None
+	shape = _target_shape(v)
+	if shape is None:
+		return None
+	if shape.net is not None:
+		return str(shape.net)
+	if shape.is_url:
+		host = shape.host or (str(shape.ip) if shape.ip is not None else '')
+		if not host:
+			return None
+		return 'https://' + host + shape.path.rstrip('/')
+	if shape.host:
+		return shape.host
+	if shape.ip is not None:
+		return str(shape.ip)
+	return None
 
 
 def target_in_scope(target, scope):
@@ -206,6 +336,13 @@ def host_in_scope(target, in_scope=None, out_of_scope=None):
 	shape = _target_shape(target)
 	if shape is None:
 		return True  # non-network item: scope is network-only, always kept
+	# URL carve-out: a URL (web-app) ALLOW overrides a broader host-level DENY, UNLESS
+	# an equally-/more-specific URL DENY also matches (deny wins at the same
+	# specificity). Only fires for URL-shaped targets (a URL entry never matches a
+	# bare host/IP). Host/IP deny/allow logic below is unchanged.
+	if any(_shape_matches_entry(shape, e) for e in in_scope if _is_url_entry(e)):
+		if not any(_shape_matches_entry(shape, e) for e in out_of_scope if _is_url_entry(e)):
+			return True
 	if out_of_scope and any(_shape_matches_entry(shape, e) for e in out_of_scope):
 		return False
 	if in_scope:
@@ -254,7 +391,21 @@ def resolve_scope_hostnames(scope):
 		except (OSError, UnicodeError):
 			ips = set()
 		for ip in sorted(ips):
-			if ip not in seen:
-				seen.add(ip)
-				out.append(ip)
+			# A URL grant authorizes the web app via its ADDRESS too (https://IP) but
+			# never a bare-IP port scan, so add a URL-shaped IP entry. A bare-host grant
+			# is host-level, so add the bare IP (authorizes port scans) as before.
+			new = _url_with_ip(shape, ip) if shape.is_url else ip
+			if new not in seen:
+				seen.add(new)
+				out.append(new)
 	return out
+
+
+def _url_with_ip(shape, ip):
+	"""Rebuild a URL entry with its host swapped for a resolved IP (bracketing v6),
+	preserving scheme + path: https://host/docs -> https://<ip>/docs."""
+	netloc = '[' + ip + ']' if ':' in ip else ip
+	p = urlparse(shape.canonical)
+	if p.scheme:
+		return p._replace(netloc=netloc).geturl()
+	return 'https://' + netloc + (shape.path or '')

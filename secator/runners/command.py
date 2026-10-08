@@ -861,31 +861,84 @@ class Command(Runner):
 				net_conns=len(info.get('net_connections') or []),
 			)
 
+	# The only psutil attrs the per-tick monitor consumes. `as_dict()` with no attrs also
+	# collects open_files, net_connections, memory_maps, threads, io_counters, num_fds, ...
+	# — each opening /proc files on every process every tick, all discarded here. That
+	# needless churn is part of #1374. `ppid` is read from the same /proc/<pid>/stat that
+	# `name` already opens (no extra fd); cpu_percent and PSS are read explicitly below.
+	MONITOR_ATTRS = ['name', 'ppid', 'memory_info']
+
+	@staticmethod
+	def _iter_proc_tree(root_pid):
+		"""Yield ``root_pid`` and all its descendant pids.
+
+		Reads the kernel's own ``/proc/<pid>/task/<pid>/children`` lists, so the cost is
+		O(size of the task's own tree). ``psutil.Process.children(recursive=True)`` instead
+		reads ``/proc/<pid>/stat`` for EVERY process on the host on every call (it builds a
+		system-wide ppid map) — on a busy scan host that is hundreds of /proc opens per
+		monitor tick, the root cause of #1374's "too many open files". Falls back to psutil
+		where the children file isn't available (non-Linux, or a kernel without
+		CONFIG_PROC_CHILDREN).
+		"""
+		if not os.path.exists(f'/proc/{root_pid}/task/{root_pid}/children'):
+			try:
+				root = psutil.Process(root_pid)
+			except psutil.Error:
+				return
+			yield root_pid
+			for child in root.children(recursive=True):
+				yield child.pid
+			return
+		stack = [root_pid]
+		while stack:
+			pid = stack.pop()
+			yield pid
+			try:
+				with open(f'/proc/{pid}/task/{pid}/children') as f:
+					kids = f.read().split()
+			except OSError:  # process exited between reads
+				continue
+			stack.extend(int(k) for k in kids)
+
 	@staticmethod
 	def get_process_info(process, children=False, procs=None):
-		"""Get process information from psutil.
+		"""Yield an info dict for ``process`` (and its descendants when ``children``).
+
+		Walks only the task's own process subtree (see :meth:`_iter_proc_tree`) and reads
+		only the psutil attrs the monitor uses (``MONITOR_ATTRS`` + cpu_percent + PSS),
+		avoiding both the host-wide /proc scan and the unused-field collection that caused
+		the fd churn in #1374.
 
 		Args:
-			process (psutil.Process): Process.
-			children (bool): Whether to gather stats about children processes too.
-			procs (dict): pid -> psutil.Process reused across calls. Without it every
+			process (psutil.Process): Root process.
+			children (bool): Also gather descendants.
+			procs (dict): pid -> psutil.Process reused across ticks. Without it every
 				cpu_percent() is a first call, which returns 0.0.
 		"""
-		targets = [process]
-		if children:
-			targets.extend(process.children(recursive=True))
-		for proc in targets:
+		pids = Command._iter_proc_tree(process.pid) if children else [process.pid]
+		for pid in pids:
 			if procs is not None:
-				proc = procs.setdefault(proc.pid, proc)
+				proc = procs.get(pid)
+				if proc is None:
+					try:
+						proc = psutil.Process(pid)
+					except psutil.Error:
+						continue
+					procs[pid] = proc
+			else:
+				try:
+					proc = psutil.Process(pid)
+				except psutil.Error:
+					continue
 			try:
 				cpu_percent = proc.cpu_percent()  # before as_dict(), which resets the baseline
 				data = {
 					k: v._asdict() if hasattr(v, '_asdict') else v
-					for k, v in proc.as_dict().items()
-					if k not in ['memory_maps', 'open_files', 'environ']
+					for k, v in proc.as_dict(attrs=Command.MONITOR_ATTRS).items()
 				}
-			except psutil.Error:  # child exited mid-walk; keep the rest
+			except psutil.Error:  # process exited mid-walk; keep the rest
 				continue
+			data['pid'] = pid
 			data['cpu_percent'] = cpu_percent
 			# PSS (proportional set size) apportions shared pages, so summing it across a process
 			# tree yields the tree's real footprint — unlike RSS, which counts a parent's

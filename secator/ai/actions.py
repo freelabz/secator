@@ -13,7 +13,9 @@ from secator.runners.task import TaskNotFoundError
 from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_TYPES
 from secator.template import TemplateLoader
 from secator.utils import format_token_count
+from secator.ai.prompts import normalize_mode
 from secator.ai.utils import (
+	_PERSIST_AI_TYPES,
 	_sanitized_env, _build_action_display, _is_approved, _truncate, _format_action_error,
 	_is_heavy_runner, _sanitize_child_opts, build_subagent_prompt, _union_live_results,
 	_coerce_finding_fields, _get_action_label, _decrypt_dict,
@@ -70,6 +72,12 @@ class ActionContext:
 	max_iterations: int = 0
 	in_batch: bool = False  # set on the per-batch ctx so the per-turn fan-out cap applies
 	subagent: bool = False
+	# Parent's resolved mode (chat/scan/exploit) + whether it is auto. Handed to a
+	# spawned AI subagent so run_subagent can enforce its mode policy: a pinned read-only
+	# `chat` parent forces a chat subagent; an auto/scan parent may pick the subagent's
+	# mode.
+	mode: str = ""
+	mode_is_auto: bool = True
 	silent: bool = False
 	sync: bool = True
 	interactive: Any = "local"  # "local", "remote", "auto", or bool (legacy)
@@ -349,6 +357,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 
 	handlers = {
 		"task": _handle_task,
+		"subagent": _handle_subagent,
 		"workflow": _handle_workflow,
 		"shell": _handle_shell,
 		"query": _handle_query,
@@ -358,6 +367,7 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"mark_vuln_false_positive": _handle_mark_vuln_false_positive,
 		"mark_vuln_exploit_failed": _handle_mark_vuln_exploit_failed,
 		"update_finding": _handle_update_finding,
+		"change_mode": _handle_change_mode,
 		"stop": _handle_stop,
 	}
 
@@ -540,6 +550,12 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			return
 		opts["subagent"] = True
 		opts["interactive"] = False
+		# `_handle_subagent` already set the child's mode per the run_subagent policy
+		# (pinned-chat forced to chat; auto/scan may choose). Fall back to the parent's
+		# mode if somehow unset, so a concrete mode is hard-set in the child and it never
+		# re-detects upward.
+		if ctx.mode:
+			opts.setdefault("mode", ctx.mode)
 		# Inherit the parent's resolved LLM config (else it falls back to the default
 		# model/provider with no key set -> AuthenticationError). The model may be
 		# LLM-chosen (setdefault), but transport CREDENTIALS are forced from the parent:
@@ -565,7 +581,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		sub_session = str(uuid.uuid4())
 		context["parent_session_id"] = parent_session
 		context["session_id"] = sub_session
-		# Give the subagent the SAME turn budget as the parent (else the exploit/attack
+		# Give the subagent the SAME turn budget as the parent (else the exploit/scan
 		# mode floor of 5 iterations starves it). setdefault so an explicit per-subagent
 		# max_iterations the LLM supplied (already clamped to _MAX_CHILD_ITERATIONS by
 		# _sanitize_child_opts above) still wins. inf/0 parents are skipped -> subagent
@@ -710,11 +726,11 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			if isinstance(out, Ai):
 				if out.ai_type == "response" and (out.content or "").strip():
 					last_response = out.content
-				elif out.ai_type in ("add_finding", "add_vuln_poc"):
+				elif out.ai_type in _PERSIST_AI_TYPES:
 					persisted.append(out.ai_type)
 			yield out
 		note = (f" Persisted: {', '.join(persisted)}." if persisted
-		        else " Persisted: NOTHING (subagent made no add_finding/add_vuln_poc call).")
+		        else " Persisted: NOTHING (subagent made no add_finding/mark_vuln_* call).")
 		handback = (last_response.strip() or "(subagent produced no summary)") + "\n[subagent handback]" + note
 		# Stamped for the PARENT conversation (card_context strips the subagent marker) and
 		# with THIS run_task's tool_call_id so it becomes the tool_result the parent reads.
@@ -758,8 +774,58 @@ def _get_result_context(action, ctx):
 
 
 def _handle_task(action: Dict, ctx: ActionContext) -> Generator:
-	"""Execute a secator task."""
+	"""Execute a secator task. Spawning an AI subagent goes through run_subagent, not
+	run_task(name="ai") — reject the latter with a clear pointer."""
+	if (action.get("name") or "").strip().lower() == "ai":
+		yield Error(
+			message="To spawn an AI subagent, use the run_subagent tool, not run_task(name=\"ai\").",
+			_context=_get_result_context(action, ctx),
+		)
+		return
 	yield from _run_runner(action, ctx, "task")
+
+
+def _handle_subagent(action: Dict, ctx: ActionContext) -> Generator:
+	"""Spawn an AI subagent (the ONLY subagent entrypoint).
+
+	Mode policy:
+	- A user-PINNED read-only ``chat`` session forces the subagent to ``chat``; if the
+	  model asks for a different mode, refuse and tell it to have the user switch to
+	  ``auto`` (a read-only session must not spawn an acting subagent behind the user).
+	- An ``auto`` or ``scan`` session may set the subagent's ``mode`` (e.g. hand a vuln
+	  to an ``exploit`` subagent); omitted means inherit the parent's current mode.
+	``exploit`` mode isn't given this tool at all (see MODES), so a focused exploit run
+	can't fan out."""
+	requested_mode = normalize_mode(action.get("mode") or "") or None
+	pinned_chat = (not getattr(ctx, "mode_is_auto", True)) and ctx.mode == "chat"
+	if pinned_chat:
+		if requested_mode and requested_mode != "chat":
+			yield Error(
+				message=(
+					"A subagent cannot be spawned in a different mode than the current 'chat' mode. "
+					"Ask the user to change the current mode to 'auto' so the subagent can pick its mode."
+				),
+				_context=_get_result_context(action, ctx),
+			)
+			return
+		child_mode = "chat"
+	else:
+		child_mode = requested_mode or ctx.mode or "chat"
+	objective = action.get("objective") or action.get("prompt") or ""
+	opts = {"prompt": objective, "mode": child_mode}
+	model = (action.get("model") or "").strip()
+	if model:
+		opts["model"] = model
+	task_action = {
+		"action": "task",
+		"name": "ai",
+		"targets": action.get("targets", ctx.targets),
+		"description": action.get("description", ""),
+		"opts": opts,
+		"tool_call_id": action.get("tool_call_id"),
+		"tool_call_name": action.get("tool_call_name"),
+	}
+	yield from _run_runner(task_action, ctx, "task")
 
 
 def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
@@ -1149,6 +1215,55 @@ def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
 	yield Ai(content=reason, ai_type="stopped", _context=context)
 
 
+def _handle_change_mode(action: Dict, ctx: ActionContext) -> Generator:
+	"""Handle a model-driven mode change.
+
+	Signals the requested mode back to the loop via ``Ai(ai_type="mode_changed")``;
+	the runner applies it (rebuilds the tool surface + persona and continues the turn).
+	The loop treats this as a normal tool result (the call still gets a response, since
+	the turn continues).
+
+	Gating: a user-PINNED read-only ``chat`` session can never self-escape — the tool
+	is not even built for it (see ``build_tool_schemas``); this rejects it as defense in
+	depth. Self-de-escalation is not allowed (no capability benefit), so the only valid
+	targets are ``scan``/``exploit`` (legacy ``attack`` is accepted as ``scan``).
+	"""
+	context = _get_result_context(action, ctx)
+	requested = normalize_mode(action.get("mode") or "")
+	if (not getattr(ctx, "mode_is_auto", True)) and ctx.mode == "chat":
+		yield Error(
+			message="Cannot change mode: this session is pinned to read-only chat. "
+			"Ask the user to switch the mode to 'auto' or an action mode.",
+			_context=context)
+		return
+	if requested not in ("scan", "exploit"):
+		yield Error(
+			message=f"Invalid change_mode target '{requested}'. Choose 'scan' or 'exploit'.",
+			_context=context)
+		return
+	# change_mode only escalates — it can't de-escalate (e.g. exploit -> scan), which
+	# would silently drop capability. Rank chat < scan < exploit; reject anything that
+	# isn't a strict escalation from the current mode. (`auto` ranks below all, so an auto
+	# session can still escalate to either.)
+	_rank = {"chat": 0, "scan": 1, "exploit": 2}
+	current = normalize_mode(getattr(ctx, "mode", "") or "")
+	# Already in the requested mode -> benign no-op, NOT a de-escalation. The model
+	# sometimes re-requests its current mode (e.g. unsure which mode it is in); surface a
+	# calm Info ("already there, proceed"), never a scary error.
+	if _rank[requested] == _rank.get(current, -1):
+		yield Info(
+			message=f"Already in '{current}' mode — no change needed; continue with the task.",
+			_context=context)
+		return
+	if _rank[requested] < _rank.get(current, -1):
+		yield Error(
+			message=f"Cannot change mode from '{current}' to '{requested}': change_mode "
+			"only escalates (e.g. scan -> exploit), it cannot de-escalate.",
+			_context=context)
+		return
+	yield Ai(content=requested, ai_type="mode_changed", _context=context)
+
+
 def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 	"""Create a secator finding from LLM-provided data.
 
@@ -1256,7 +1371,12 @@ def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
 			f"No vulnerability found with _uuid={uuid} in this workspace. "
 			"Re-check the `_uuid` from query_workspace results."
 		)
-	updated = (engine.search(query, limit=1) or [None])[0]
+	# scope_only: a just-marked false-positive is hidden by the `is_false_positive:{$ne:True}`
+	# display filter, so a normal re-fetch returns None — `updated` stays empty and `label`
+	# falls back to the bare uuid (the chat row then reads "Updated Marked <uuid>…" instead
+	# of "Updated <name>", and extra_data.finding is empty). Drop the display filters for this
+	# targeted by-uuid read so the finding comes back regardless of its display state.
+	updated = (engine.search(query, limit=1, scope_only=True) or [None])[0]
 	if updated:
 		from secator.query.json import _apply_set
 		_apply_set(updated, update)

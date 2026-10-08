@@ -28,14 +28,20 @@ class TestFindingMgmtTools(unittest.TestCase):
 		return e
 
 	def test_tools_exposed_in_modes(self):
-		for mode in ('attack', 'chat', 'exploit'):
+		# Finding-management tools are ACTION-mode only. Since #1469 `chat` is strictly
+		# read-only, so it must NOT expose any finding-write tool (see
+		# test_ai_loop.test_chat_mode_tool_surface).
+		write_tools = ('mark_vuln_exploited', 'mark_vuln_false_positive',
+		               'mark_vuln_exploit_failed', 'update_finding')
+		for mode in ('scan', 'exploit'):
 			names = [s['function']['name'] for s in build_tool_schemas(mode)]
-			self.assertIn('mark_vuln_exploited', names, mode)
-			self.assertIn('mark_vuln_false_positive', names, mode)
-			self.assertIn('mark_vuln_exploit_failed', names, mode)
-			self.assertIn('update_finding', names, mode)
+			for t in write_tools:
+				self.assertIn(t, names, f'{t} missing from {mode}')
 			self.assertNotIn('add_vuln_poc', names, mode)
 			self.assertNotIn('delete_finding', names, mode)
+		chat_names = [s['function']['name'] for s in build_tool_schemas('chat')]
+		for t in write_tools:
+			self.assertNotIn(t, chat_names, f'{t} must not be exposed in read-only chat')
 
 	def test_tool_call_maps_to_action(self):
 		a = tool_call_to_action('mark_vuln_exploited', {'_uuid': 'u1', 'poc': 'x'})
@@ -69,6 +75,26 @@ class TestFindingMgmtTools(unittest.TestCase):
 			self.assertIn(label, plain, action['action'])
 			self.assertIn('CVE-2016-20012', plain, action['action'])  # names the finding
 			self.assertNotIn('u1', plain, action['action'])  # not the raw uuid / sentence
+
+	def test_false_positive_refetch_bypasses_display_filter(self):
+		"""A just-marked false positive is HIDDEN by the `is_false_positive:{$ne:True}`
+		display filter, so a plain re-fetch returns nothing and the row degrades to the
+		bare uuid ("Updated Marked <uuid>…"). The re-fetch must pass scope_only=True so the
+		finding (its name) still comes back. Mock search returns the finding ONLY when
+		scope_only=True (modeling the display filter the default _engine mock ignores)."""
+		finding = {'_uuid': 'u1', '_type': 'vulnerability', 'name': 'CVE-2016-20012'}
+		e = MagicMock()
+
+		def _search(query, limit=0, dedupe=False, exclude_fields=None, scope_only=False):
+			return [dict(finding)] if scope_only else []
+		e.search.side_effect = _search
+		e.update.return_value = 1
+		out = list(dispatch_action(
+			{'action': 'mark_vuln_false_positive', '_uuid': 'u1', 'reason': 'dup'}, self._ctx(e)))
+		ai = [o for o in out if isinstance(o, Ai) and o.ai_type == 'mark_vuln_false_positive'][0]
+		self.assertIn('CVE-2016-20012', ai.content)   # names the finding, not the bare uuid
+		self.assertNotIn('u1', ai.content)
+		self.assertTrue(ai.extra_data.get('finding'))  # attached so the UI renders name + card
 
 	# --- mark_vuln_exploited ---
 	def test_exploited_sets_status_and_attaches_finding(self):
