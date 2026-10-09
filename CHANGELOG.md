@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.3](https://github.com/freelabz/secator/compare/v0.49.2...v0.49.3) (2026-10-09)
+
+
+### Bug Fixes
+
+* **cli:** --help crash for runners accepting any input type; real --sort example field ([#1504](https://github.com/freelabz/secator/issues/1504)) ([75f1dbe](https://github.com/freelabz/secator/commit/75f1dbe6193be3083a3a283e135570f4de539ef3))
+
 ## [0.49.2](https://github.com/freelabz/secator/compare/v0.49.1...v0.49.2) (2026-10-08)
 
 
