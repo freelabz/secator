@@ -1240,7 +1240,7 @@ def list_aliases(silent):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
-@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -severity_score')  # noqa: E501
+@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -cvss_score')  # noqa: E501
 @click.option('--count', 'count', is_flag=True, default=False, help='Group identical --format values with an occurrence count (most frequent first; --sort orders by value instead)')  # noqa: E501
 @click.option('--uniq', 'uniq', is_flag=True, default=False, help='Drop duplicate --format values')
 @click.option('--group', is_flag=True, default=False, help="Group findings by each output type's default field(s), aggregating a related field (e.g. vulnerabilities by name with their matched_at targets).")  # noqa: E501
@@ -1826,7 +1826,7 @@ def run_ai_chat(ctx, prompt, workspace):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
-@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -severity_score')  # noqa: E501
+@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -cvss_score')  # noqa: E501
 @click.option('--count', 'count', is_flag=True, default=False, help='Group identical --format values with an occurrence count (most frequent first; --sort orders by value instead)')  # noqa: E501
 @click.option('--uniq', 'uniq', is_flag=True, default=False, help='Drop duplicate --format values')
 @click.option('--group', is_flag=True, default=False, help="Group findings by each output type's default field(s), aggregating a related field (e.g. vulnerabilities by name with their matched_at targets).")  # noqa: E501

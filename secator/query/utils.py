@@ -301,7 +301,7 @@ def _parse_list(values_str):
 
 
 def _parse_single_expr(expr):
-    """Parse one expression like 'vulnerability.severity_score > 7' into a query dict."""
+    """Parse one expression like 'vulnerability.cvss_score > 7' into a query dict."""
     expr = expr.strip()
 
     if isinstance(expr, dict):
