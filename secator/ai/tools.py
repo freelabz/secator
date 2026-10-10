@@ -1,25 +1,23 @@
-"""Tool schema definitions for native LLM tool calling."""
+"""Single source of truth for native LLM tools.
+
+Each tool is one self-contained ``BaseTool`` subclass carrying everything that
+used to be hand-synced across 5 places (schema, dispatch action, mode exposure,
+permission auto-allow, handler). The ``TOOLS`` registry is built from the
+subclasses, and every drift-prone view derives from it:
+
+* ``build_tool_schemas(mode, ...)`` filters ``TOOLS`` by ``mode in tool.modes``.
+* ``TOOL_ACTION_MAP`` / ``TOOL_SCHEMAS`` are derived dicts (kept for callers).
+* ``dispatch_action`` (actions.py) routes via ``TOOLS_BY_ACTION[action].handle``.
+* ``PermissionEngine`` (guardrails.py) reads ``tool.auto_allow``.
+
+Adding a tool is ONE edit: define a ``BaseTool`` subclass and list it in
+``_TOOL_CLASSES``. The consistency test (test_ai_tools) fails if a tool's mode
+exposure and a mode's ``allowed_actions`` drift apart.
+"""
 
 import json
 
-from secator.ai.prompts import get_mode_config
-
-# Map tool names to action types used by existing action handlers
-TOOL_ACTION_MAP = {
-	"run_task": "task",
-	"run_subagent": "subagent",
-	"run_workflow": "workflow",
-	"run_shell": "shell",
-	"query_workspace": "query",
-	"follow_up": "follow_up",
-	"add_finding": "add_finding",
-	"mark_vuln_exploited": "mark_vuln_exploited",
-	"mark_vuln_false_positive": "mark_vuln_false_positive",
-	"mark_vuln_exploit_failed": "mark_vuln_exploit_failed",
-	"update_finding": "update_finding",
-	"change_mode": "change_mode",
-	"stop": "stop",
-}
+from secator.ai.prompts import MODES, normalize_mode
 
 # Shared "targets" parameter schema (identical across run_task/run_workflow)
 _TARGETS_SCHEMA = {
@@ -37,9 +35,53 @@ _DESCRIPTION_SCHEMA = {
 	               "'Fire the reflected-XSS payload at level 1'. Shown to the user in place of the bare task name."
 }
 
-# OpenAI-format tool schemas keyed by tool name
-TOOL_SCHEMAS = {
-	"run_task": {
+# Mode-membership sets, so each tool declares exposure declaratively. These mirror
+# the per-mode ``allowed_actions`` in prompts.MODES (enforced by the consistency test).
+_SCAN_EXPLOIT = frozenset({"scan", "exploit"})
+_ALL_MODES = frozenset({"scan", "chat", "exploit"})
+
+
+class BaseTool:
+	"""One AI tool. Subclasses set the class attributes; the registry does the rest.
+
+	Attributes:
+		name: Tool function name exposed to the LLM (e.g. ``run_task``).
+		action: Dispatch key / action type used by handlers (e.g. ``task``).
+		schema: OpenAI-format function schema dict.
+		modes: Set of modes that expose this tool (``build_tool_schemas`` filter).
+		auto_allow: True if ``PermissionEngine`` auto-allows this action at the
+			action-type layer (no name/scope rule needed). task/workflow/shell are
+			False — they have their own layer-1 handling.
+		injected: True for a tool NOT emitted by ``build_tool_schemas`` mode
+			filtering and NOT listed in ``TOOL_SCHEMAS``; it is injected separately
+			via the interactivity backend's ``get_extra_tools`` (``stop``).
+		handler: Name of the ``_handle_*`` generator in ``secator.ai.actions``.
+	"""
+
+	name: str = ""
+	action: str = ""
+	schema: dict = {}
+	modes: frozenset = frozenset()
+	auto_allow: bool = False
+	injected: bool = False
+	handler: str = ""
+
+	def handle(self, action, ctx):
+		"""Dispatch to the existing ``_handle_*`` generator (logic unchanged).
+
+		Lazy import avoids a tools<->actions import cycle (actions dispatches back
+		through this registry).
+		"""
+		from secator.ai import actions
+		return getattr(actions, self.handler)(action, ctx)
+
+
+class RunTaskTool(BaseTool):
+	name = "run_task"
+	action = "task"
+	modes = _SCAN_EXPLOIT
+	handler = "_handle_task"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "run_task",
@@ -63,8 +105,16 @@ TOOL_SCHEMAS = {
 				"required": ["name", "targets", "description"]
 			}
 		}
-	},
-	"run_subagent": {
+	}
+
+
+class RunSubagentTool(BaseTool):
+	name = "run_subagent"
+	action = "subagent"
+	modes = _ALL_MODES
+	auto_allow = True
+	handler = "_handle_subagent"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "run_subagent",
@@ -106,8 +156,15 @@ TOOL_SCHEMAS = {
 				"required": ["objective", "targets", "description"]
 			}
 		}
-	},
-	"run_workflow": {
+	}
+
+
+class RunWorkflowTool(BaseTool):
+	name = "run_workflow"
+	action = "workflow"
+	modes = _SCAN_EXPLOIT
+	handler = "_handle_workflow"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "run_workflow",
@@ -129,8 +186,15 @@ TOOL_SCHEMAS = {
 				"required": ["name", "targets", "description"]
 			}
 		}
-	},
-	"run_shell": {
+	}
+
+
+class RunShellTool(BaseTool):
+	name = "run_shell"
+	action = "shell"
+	modes = _SCAN_EXPLOIT
+	handler = "_handle_shell"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "run_shell",
@@ -149,8 +213,16 @@ TOOL_SCHEMAS = {
 				"required": ["command", "description"]
 			}
 		}
-	},
-	"query_workspace": {
+	}
+
+
+class QueryWorkspaceTool(BaseTool):
+	name = "query_workspace"
+	action = "query"
+	modes = _ALL_MODES
+	auto_allow = True
+	handler = "_handle_query"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "query_workspace",
@@ -173,8 +245,16 @@ TOOL_SCHEMAS = {
 				"required": ["query"]
 			}
 		}
-	},
-	"follow_up": {
+	}
+
+
+class FollowUpTool(BaseTool):
+	name = "follow_up"
+	action = "follow_up"
+	modes = _ALL_MODES
+	auto_allow = True
+	handler = "_handle_follow_up"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "follow_up",
@@ -199,8 +279,16 @@ TOOL_SCHEMAS = {
 				"required": ["reason"]
 			}
 		}
-	},
-	"add_finding": {
+	}
+
+
+class AddFindingTool(BaseTool):
+	name = "add_finding"
+	action = "add_finding"
+	modes = _SCAN_EXPLOIT
+	auto_allow = True
+	handler = "_handle_add_finding"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "add_finding",
@@ -219,8 +307,16 @@ TOOL_SCHEMAS = {
 				"additionalProperties": True
 			}
 		}
-	},
-	"mark_vuln_exploited": {
+	}
+
+
+class MarkVulnExploitedTool(BaseTool):
+	name = "mark_vuln_exploited"
+	action = "mark_vuln_exploited"
+	modes = _SCAN_EXPLOIT
+	auto_allow = True
+	handler = "_handle_mark_vuln_exploited"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "mark_vuln_exploited",
@@ -279,8 +375,16 @@ TOOL_SCHEMAS = {
 				"required": ["_uuid", "poc"]
 			}
 		}
-	},
-	"mark_vuln_false_positive": {
+	}
+
+
+class MarkVulnFalsePositiveTool(BaseTool):
+	name = "mark_vuln_false_positive"
+	action = "mark_vuln_false_positive"
+	modes = _SCAN_EXPLOIT
+	auto_allow = True
+	handler = "_handle_mark_vuln_false_positive"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "mark_vuln_false_positive",
@@ -310,8 +414,16 @@ TOOL_SCHEMAS = {
 				"required": ["_uuid"]
 			}
 		}
-	},
-	"mark_vuln_exploit_failed": {
+	}
+
+
+class MarkVulnExploitFailedTool(BaseTool):
+	name = "mark_vuln_exploit_failed"
+	action = "mark_vuln_exploit_failed"
+	modes = _SCAN_EXPLOIT
+	auto_allow = True
+	handler = "_handle_mark_vuln_exploit_failed"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "mark_vuln_exploit_failed",
@@ -351,8 +463,16 @@ TOOL_SCHEMAS = {
 				"required": ["_uuid"]
 			}
 		}
-	},
-	"update_finding": {
+	}
+
+
+class UpdateFindingTool(BaseTool):
+	name = "update_finding"
+	action = "update_finding"
+	modes = _SCAN_EXPLOIT
+	auto_allow = True
+	handler = "_handle_update_finding"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "update_finding",
@@ -386,8 +506,16 @@ TOOL_SCHEMAS = {
 				"required": ["_uuid"]
 			}
 		}
-	},
-	"change_mode": {
+	}
+
+
+class ChangeModeTool(BaseTool):
+	name = "change_mode"
+	action = "change_mode"
+	modes = _ALL_MODES
+	auto_allow = True
+	handler = "_handle_change_mode"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "change_mode",
@@ -415,36 +543,75 @@ TOOL_SCHEMAS = {
 				"required": ["mode"]
 			}
 		}
-	},
-}
+	}
 
 
-# Stop tool schema — NOT in TOOL_SCHEMAS (injected by AutoBackend via get_extra_tools)
-STOP_TOOL_SCHEMA = {
-	"type": "function",
-	"function": {
-		"name": "stop",
-		"description": "Stop the current session. Call when the user request has been fulfilled or when you encounter a blocker that cannot be resolved without user input.",  # noqa: E501
-		"parameters": {
-			"type": "object",
-			"properties": {
-				"reason": {
-					"type": "string",
-					"description": "Why you are stopping (summary of accomplishments or description of blocker)."
-				}
-			},
-			"required": ["reason"]
+class StopTool(BaseTool):
+	name = "stop"
+	action = "stop"
+	modes = _ALL_MODES
+	auto_allow = True
+	# NOT emitted by build_tool_schemas / not in TOOL_SCHEMAS — injected by
+	# AutoBackend via get_extra_tools (no user to hand control back to).
+	injected = True
+	handler = "_handle_stop"
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "stop",
+			"description": "Stop the current session. Call when the user request has been fulfilled or when you encounter a blocker that cannot be resolved without user input.",  # noqa: E501
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"reason": {
+						"type": "string",
+						"description": "Why you are stopping (summary of accomplishments or description of blocker)."
+					}
+				},
+				"required": ["reason"]
+			}
 		}
 	}
-}
+
+
+# The registry: order mirrors the historical TOOL_SCHEMAS order so build_tool_schemas
+# emits tools in the same order as before (parity).
+_TOOL_CLASSES = [
+	RunTaskTool,
+	RunSubagentTool,
+	RunWorkflowTool,
+	RunShellTool,
+	QueryWorkspaceTool,
+	FollowUpTool,
+	AddFindingTool,
+	MarkVulnExploitedTool,
+	MarkVulnFalsePositiveTool,
+	MarkVulnExploitFailedTool,
+	UpdateFindingTool,
+	ChangeModeTool,
+	StopTool,
+]
+
+TOOLS = [cls() for cls in _TOOL_CLASSES]
+TOOLS_BY_NAME = {t.name: t for t in TOOLS}
+TOOLS_BY_ACTION = {t.action: t for t in TOOLS}
+
+# Derived views (kept for existing callers; no longer hand-synced). TOOL_SCHEMAS
+# excludes `injected` tools (stop), matching the historical contract.
+TOOL_ACTION_MAP = {t.name: t.action for t in TOOLS}
+TOOL_SCHEMAS = {t.name: t.schema for t in TOOLS if not t.injected}
+
+# Stop tool schema — NOT in TOOL_SCHEMAS (injected by AutoBackend via get_extra_tools).
+STOP_TOOL_SCHEMA = TOOLS_BY_NAME["stop"].schema
 
 
 def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_is_auto: bool = True) -> list:
-	"""Return list of tool schemas filtered by mode's allowed_actions.
+	"""Return list of tool schemas exposed in a mode (derived from the registry).
 
 	Args:
 		mode: The AI mode (scan, chat, exploit). Unknown modes fall back to chat.
-		is_subagent: If True, exclude follow_up tool (legacy compat).
+		is_subagent: If True, exclude follow_up + change_mode (a subagent runs at its
+			assigned mode and does not self-escalate / hand back to a user).
 		backend: Optional interactivity backend for exclusion/extra tools.
 		mode_is_auto: Whether the session is in auto mode (vs a user-pinned mode).
 			Gates `change_mode`: the model may self-escalate in an auto session or from
@@ -455,11 +622,15 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 	Returns:
 		List of OpenAI-format tool schema dicts.
 	"""
-	config = get_mode_config(mode)
-	allowed_actions = config["allowed_actions"]
+	# An unknown mode exposes the same tools as chat (historical fallback), but the
+	# pinned-chat `change_mode` gate below keys off the ORIGINAL mode name — an unknown
+	# mode is not literally `chat`, so it is NOT withheld there (parity with the prior
+	# get_mode_config-based filter, which only used the chat fallback for tool exposure).
+	norm = normalize_mode(mode)
+	lookup_mode = norm if norm in MODES else "chat"
 	excluded = set()
 	if is_subagent:
-		# A subagent runs at its assigned mode; it does not self-escalate.
+		# A subagent runs at its assigned mode; it does not self-escalate or hand back.
 		excluded.update({"follow_up", "change_mode"})
 	# A user-pinned read-only chat cannot self-escape to an action mode.
 	if not mode_is_auto and mode == "chat":
@@ -467,9 +638,8 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 	if backend is not None:
 		excluded.update(backend.get_excluded_tools())
 	schemas = [
-		schema for tool_name, schema in TOOL_SCHEMAS.items()
-		if TOOL_ACTION_MAP.get(tool_name) in allowed_actions
-		and tool_name not in excluded
+		t.schema for t in TOOLS
+		if not t.injected and lookup_mode in t.modes and t.name not in excluded
 	]
 	if backend is not None:
 		schemas.extend(backend.get_extra_tools())
