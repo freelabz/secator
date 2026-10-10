@@ -13,7 +13,8 @@ from secator.definitions import (
 # fmt: on
 from secator.output_types import Progress, Tag, Technology, Vulnerability
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import VulnMulti
+from secator.tasks._categories import VulnMixin
+from secator.runners import Command
 
 
 def output_discriminator(self, item):
@@ -27,7 +28,7 @@ def output_discriminator(self, item):
 
 
 @task()
-class nuclei(VulnMulti):
+class nuclei(Command, VulnMixin):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
 
 	cmd = 'nuclei'

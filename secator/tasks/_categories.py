@@ -5,7 +5,6 @@ from functools import cache
 from cpe import CPE
 
 from secator.definitions import (
-	CIDR_RANGE,
 	DATA,
 	DELAY,
 	DEPTH,
@@ -15,14 +14,11 @@ from secator.definitions import (
 	FILTER_WORDS,
 	FOLLOW_REDIRECT,
 	HEADER,
-	HOST,
-	IP,
 	MATCH_CODES,
 	MATCH_REGEX,
 	MATCH_SIZE,
 	MATCH_WORDS,
 	METHOD,
-	PATH,
 	PORTS,
 	PROXY,
 	RATE_LIMIT,
@@ -31,17 +27,19 @@ from secator.definitions import (
 	THREADS,
 	TIMEOUT,
 	TOP_PORTS,
-	URL,
 	USER_AGENT,
-	USERNAME,
 	WORDLIST,
 	REPLAY_PROXY,
 )
-from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
 from secator.config import CONFIG
 from secator.providers._base import CVEProvider
-from secator.runners import Command
+from secator.runners import Command  # noqa: F401  (re-exported for tasks importing Command from this module)
 from secator.utils import debug, process_wordlist, headers_to_dict, parse_raw_http_request
+
+
+# -----------------#
+# Helper functions #
+# -----------------#
 
 
 def process_headers(headers_dict):
@@ -72,7 +70,8 @@ def process_raw_request(file_path):
 def apply_raw_request_options(self):
 	"""Apply raw HTTP request options to task if raw option is provided.
 
-	This function is shared across Http, HttpCrawler, and HttpFuzzer classes.
+	This function is shared across the HTTP mixins (HttpBaseMixin, HttpMixin,
+	HttpCrawlerMixin, HttpFuzzerMixin) through their ``before_init`` hook.
 
 	Args:
 		self: Task instance.
@@ -91,11 +90,7 @@ def apply_raw_request_options(self):
 		if raw_request_data.get('headers'):
 			existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
 			# Raw request headers take precedence
-		if raw_request_data.get('headers'):
-			existing_headers = self.get_opt_value(HEADER, preprocess=True) or {}
-			# Raw request headers take precedence
 			merged_headers = {**existing_headers, **raw_request_data['headers']}
-			self.run_opts[HEADER] = merged_headers
 			self.run_opts[HEADER] = merged_headers
 
 		# Set data from raw request
@@ -189,14 +184,18 @@ OPTS_VULN = [HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, THREADS
 
 
 # ---------------#
-# HTTP category #
+# HTTP mixins   #
 # ---------------#
+#
+# These category classes are pure MIXINS (PR #585 design): they carry shared
+# `meta_opts` plus shared hooks/helpers, but do NOT inherit from `Command`.
+# Tasks compose them as `class X(Command, HttpMixin)` and declare their own
+# `input_types` / `output_types` locally.
 
 
-class HttpBase(Command):
+class HttpBaseMixin:
+	"""Shared HTTP options (base) and raw-request handling."""
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_BASE}
-	input_types = [URL]
-	output_types = [Url]
 
 	@staticmethod
 	def before_init(self):
@@ -204,46 +203,30 @@ class HttpBase(Command):
 		apply_raw_request_options(self)
 
 
-class Http(Command):
+class HttpMixin(HttpBaseMixin):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP}
-	input_types = [URL]
-	output_types = [Url]
-
-	@staticmethod
-	def before_init(self):
-		"""Process raw HTTP request if provided and set appropriate options."""
-		apply_raw_request_options(self)
 
 
-class HttpCrawler(Command):
+class HttpCrawlerMixin(HttpBaseMixin):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_CRAWLERS}
-	input_types = [URL]
-	output_types = [Url]
-
-	@staticmethod
-	def before_init(self):
-		"""Process raw HTTP request if provided and set appropriate options."""
-		apply_raw_request_options(self)
 
 
-class HttpFuzzer(Command):
+class HttpFuzzerMixin(HttpBaseMixin):
 	meta_opts = {k: OPTS[k] for k in OPTS_HTTP_FUZZERS}
-	input_types = [URL]
-	output_types = [Url]
 	enable_duplicate_check = False
-	profile = lambda opts: HttpFuzzer.dynamic_profile(opts)  # noqa: E731
 
-	@staticmethod
-	def before_init(self):
-		"""Process raw HTTP request if provided and set appropriate options."""
-		apply_raw_request_options(self)
+	@classmethod
+	def profile(cls, opts):
+		"""Dynamic Celery queue profile based on wordlist size.
 
-	@staticmethod
-	def dynamic_profile(opts):
-		wordlist = HttpFuzzer._get_opt_value(
+		Defined as a classmethod so that, when mixed into a concrete `Command`
+		task, `cls` resolves the task's own `_get_opt_value` / `opts` while the
+		sizing logic stays homed on the mixin.
+		"""
+		wordlist = cls._get_opt_value(
 			opts,
 			'wordlist',
-			opts_conf=dict(HttpFuzzer.opts, **HttpFuzzer.meta_opts),
+			opts_conf=dict(cls.opts, **cls.meta_opts),
 			opt_aliases=opts.get('aliases', []),
 			preprocess=True,
 			process=True,
@@ -254,49 +237,37 @@ class HttpFuzzer(Command):
 		return 'large' if wordlist_size_mb > 5 else 'medium'
 
 
-class HttpParamsFuzzer(HttpFuzzer):
+class HttpParamsFuzzerMixin(HttpFuzzerMixin):
 	meta_opts = {**{k: OPTS[k] for k in OPTS_HTTP_FUZZERS}, **WORDLIST_PARAMS}
 
 
 # ----------------#
-# Recon category #
+# Recon mixins   #
 # ----------------#
 
 
-class Recon(Command):
+class ReconMixin:
 	meta_opts = {k: OPTS[k] for k in OPTS_RECON}
-	output_types = [Subdomain, UserAccount, Ip, Port]
 
 
-class ReconDns(Recon):
-	input_types = [HOST]
-	output_types = [Subdomain]
-
-
-class ReconUser(Recon):
-	input_types = [USERNAME]
-	output_types = [UserAccount]
-
-
-class ReconIp(Recon):
-	input_types = [CIDR_RANGE]
-	output_types = [Ip]
-
-
-class ReconPort(Recon):
+class ReconPortMixin(ReconMixin):
 	meta_opts = {k: OPTS[k] for k in OPTS_RECON_PORT}
-	input_types = [IP]
-	output_types = [Port]
 
 
 # ---------------#
-# Vuln category #
+# Vuln mixin    #
 # ---------------#
 
 
-class Vuln(Command):
+class VulnMixin:
+	"""Shared vulnerability options plus CVE/CPE lookup helpers.
+
+	CVE data resolution is delegated to ``secator.providers.CVEProvider`` (the
+	extraction that landed on main); this mixin keeps only the CPE matching glue
+	and the public ``lookup_cve`` / ``lookup_cve_from_ghsa`` entry points used by
+	the vuln tasks.
+	"""
 	meta_opts = {k: OPTS[k] for k in OPTS_VULN}
-	output_types = [Vulnerability]
 
 	@staticmethod
 	def create_cpe_string(product_name, version):
@@ -364,7 +335,7 @@ class Vuln(Command):
 		Returns:
 			Vulnerability: Vulnerability object.
 		"""
-		# Lookup CVE data
+		# Lookup CVE data (delegated to CVEProvider, see secator.providers)
 		vuln = CVEProvider.lookup_local_cve(cve_id)
 		if not vuln:
 			vuln = CVEProvider.lookup_external_cve(cve_id)
@@ -380,18 +351,18 @@ class Vuln(Command):
 		cpe_match = False
 		if cpes and cpes_affected:
 			for cpe in cpes:
-				cpe_fs = Vuln.get_cpe_fs(cpe)
+				cpe_fs = VulnMixin.get_cpe_fs(cpe)
 				if not cpe_fs:
 					debug(f'{cve_id}: Failed to parse CPE {cpe} with CPE parser', sub='cve.match', verbose=True)
 					vuln.tags.append('cpe-invalid')
 					continue
 				for cpe_affected in cpes_affected:
-					cpe_affected_fs = Vuln.get_cpe_fs(cpe_affected)
+					cpe_affected_fs = VulnMixin.get_cpe_fs(cpe_affected)
 					if not cpe_affected_fs:
 						debug(f'{cve_id}: Failed to parse CPE {cpe} (from online data) with CPE parser', sub='cve.match', verbose=True)
 						continue
 					debug(f'{cve_id}: Testing {cpe_fs} against {cpe_affected_fs}', sub='cve.match', verbose=True)
-					cpe_match = Vuln.match_cpes(cpe_fs, cpe_affected_fs)
+					cpe_match = VulnMixin.match_cpes(cpe_fs, cpe_affected_fs)
 					if cpe_match:
 						debug(f'{cve_id}: CPE match found for {cpe}.', sub='cve.match')
 						vuln.tags.append('cpe-match')
@@ -421,33 +392,21 @@ class Vuln(Command):
 		return None
 
 
-class VulnHttp(Vuln):
-	input_types = [HOST]
-
-
-class VulnCode(Vuln):
-	input_types = [PATH]
-
-
-class VulnMulti(Vuln):
-	input_types = [HOST]
-	output_types = [Vulnerability]
-
-
 # --------------#
-# Tag category #
+# Tag mixin    #
 # --------------#
 
 
-class Tagger(Command):
-	input_types = [URL]
-	output_types = [Tag]
+class TaggerMixin:
+	"""Marker mixin for URL tagging tasks (kept for API symmetry)."""
+	pass
 
 
 # ----------------#
-# osint category #
+# OSInt mixin    #
 # ----------------#
 
 
-class OSInt(Command):
-	output_types = [UserAccount]
+class OSIntMixin:
+	"""Marker mixin for OSINT / user-account tasks (kept for API symmetry)."""
+	pass
