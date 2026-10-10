@@ -273,6 +273,11 @@ class Runner:
 		# Input post-process
 		self.run_hooks('before_init', sub='init')
 
+		# Resolve a remote git source (a repo URL) to a local path for runners that only
+		# accept a path (so the path-only tool scans the clone). Runs before validation,
+		# which would otherwise drop the URL as an unsupported input type.
+		self._resolve_sources()
+
 		# Check if input is valid
 		self.inputs_valid = self.run_validators('validate_input', self.inputs, sub='init')
 
@@ -1497,6 +1502,60 @@ class Runner:
 
 		# Yield item
 		yield item
+
+	def _resolve_sources(self):
+		"""Clone a git-URL input to a local path when this runner only accepts a path.
+
+		A runner that accepts URL inputs (``url`` in its ``input_types``, e.g. a workflow
+		or trufflehog) handles the remote source itself and is left untouched; so is one
+		that accepts any type. Best-effort: a clone failure leaves the input as-is so
+		validation (or the tool) reports it. The token comes from the ``git_token`` run-opt
+		or the ``SECATOR_GIT_TOKEN`` env var.
+		"""
+		import os
+		import uuid
+		from secator.definitions import URL
+		from secator.sources import (
+			clone_git_repo, is_archive_url, is_gcs_url, is_git_url, resolve_gcs_archive,
+		)
+		if not self.inputs:
+			return
+		input_types = getattr(self.config, 'input_types', None)
+		# Only a leaf task (which actually runs a tool on the path) resolves a source; a
+		# workflow/scan just passes the ref down to its tasks, which resolve per-task on
+		# whichever worker runs them.
+		if getattr(self.config, 'type', None) != 'task':
+			return
+		# Clone a git URL only for a task that does NOT accept url inputs itself (grype,
+		# trivy, gitleaks); a task that accepts url (e.g. trufflehog) clones natively.
+		clones_git = bool(input_types) and URL not in input_types
+		token = self.run_opts.get('git_token') or os.environ.get('SECATOR_GIT_TOKEN')
+		# A unique sub-dir per resolve: sibling tasks of a workflow share one reports folder,
+		# so a fixed path would let concurrent tasks clobber each other's checkout.
+		resolved = []
+		for inp in self.inputs:
+			dest = f'{self.reports_folder}/.sources/{uuid.uuid4().hex[:12]}'
+			# An uploaded archive must be extracted for ANY tool to scan it (no tool reads a
+			# raw gs:// zip) — even tools that otherwise handle gs:// buckets natively.
+			if is_gcs_url(inp) and is_archive_url(inp):
+				try:
+					path = resolve_gcs_archive(inp, dest)
+					self._print(Info(message=f'Extracted uploaded source to {path}'), rich=True)
+					resolved.append(path)
+				except Exception as e:  # noqa: BLE001 - never crash init over a download
+					self._print(Warning(message=f'Could not fetch uploaded source: {e}'), rich=True)
+					resolved.append(inp)
+			elif clones_git and is_git_url(inp):
+				try:
+					path = clone_git_repo(inp, dest, token=token)
+					self._print(Info(message=f'Cloned source to {path}'), rich=True)
+					resolved.append(path)
+				except Exception as e:  # noqa: BLE001 - never crash init over a clone
+					self._print(Warning(message=f'Could not clone source: {e}'), rich=True)
+					resolved.append(inp)
+			else:
+				resolved.append(inp)
+		self.inputs = resolved
 
 	@staticmethod
 	def _validate_inputs(self, inputs):
