@@ -1,5 +1,6 @@
 # tests/unit/test_ai_prompts.py
 import unittest
+from unittest.mock import patch
 
 from secator.definitions import ADDONS_ENABLED
 
@@ -461,3 +462,80 @@ class TestOperatingRulesRecap(unittest.TestCase):
 		self.assertIn("follow_up", recap)          # prose-choices failure
 		self.assertIn("description", recap)         # description-echo failure
 		self.assertIn("Persist", recap)             # early-yield failure
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSessionContext(unittest.TestCase):
+	"""The dynamic <session_context> block: clock + the shell env the AI actually runs in."""
+
+	def _build(self, isolated):
+		from secator.ai.prompts import build_session_context
+		return build_session_context(isolated=isolated)
+
+	def test_clock_present_in_both_modes(self):
+		for iso in (True, False):
+			blk = self._build(iso)
+			self.assertIn("<session_context>", blk)
+			self.assertIn("</session_context>", blk)
+			self.assertIn("Current date:", blk)
+			self.assertIn("UNIX timestamp:", blk)
+
+	def test_isolated_describes_alpine_sandbox_root(self):
+		blk = self._build(True)
+		self.assertIn("apk", blk)
+		self.assertIn("sandbox", blk.lower())
+		self.assertIn("root", blk.lower())
+		self.assertNotIn("sudo requires a password", blk)
+
+	def test_host_describes_os_pm_and_sudo(self):
+		blk = self._build(False)
+		self.assertIn("Package manager:", blk)
+		self.assertIn("Privileges:", blk)
+		# Host block must NOT falsely claim the Alpine sandbox.
+		self.assertNotIn("disposable, network-isolated Alpine sandbox", blk)
+
+	def test_package_manager_override_is_a_bare_string(self):
+		# get_distro_config returns a bare string when SECATOR_PACKAGE_MANAGER is set.
+		from secator.ai import prompts
+		prompts._SHELL_ENV_CACHE.clear()
+		with patch("secator.installer.get_distro_config", return_value="apt"):
+			blk = prompts.build_session_context(isolated=False)
+		prompts._SHELL_ENV_CACHE.clear()
+		self.assertIn("Package manager: apt", blk)
+
+	# --- sudo status branches (no real sudo call) ---
+
+	def _sudo_lines(self, *, euid=1000, which="/usr/bin/sudo", rc=1, configured=""):
+		from secator.ai import prompts
+		import types
+		fake_cfg = types.SimpleNamespace(security=types.SimpleNamespace(sudo_password=configured))
+		with patch("os.geteuid", return_value=euid, create=True), \
+		     patch("shutil.which", return_value=which), \
+		     patch("secator.config.CONFIG", fake_cfg), \
+		     patch("subprocess.run", return_value=type("R", (), {"returncode": rc})()):
+			return "\n".join(prompts._sudo_status_lines())
+
+	def test_sudo_root(self):
+		self.assertIn("running as root", self._sudo_lines(euid=0))
+
+	def test_sudo_configured_password(self):
+		self.assertIn("configured password", self._sudo_lines(configured="hunter2"))
+
+	def test_sudo_not_installed(self):
+		self.assertIn("NOT installed", self._sudo_lines(which=None))
+
+	def test_sudo_passwordless(self):
+		self.assertIn("passwordless sudo IS available", self._sudo_lines(rc=0))
+
+	def test_sudo_requires_password(self):
+		line = self._sudo_lines(rc=1)
+		self.assertIn("Do NOT run sudo", line)
+		self.assertIn("SECATOR_SECURITY_SUDO_PASSWORD", line)
+
+	# --- wiring into get_system_prompt ---
+
+	def test_get_system_prompt_appends_context_only_when_isolated_set(self):
+		self.assertNotIn("<session_context>", get_system_prompt("chat", backend=None))
+		self.assertNotIn("<session_context>", get_system_prompt("chat", backend=None, isolated=None))
+		self.assertIn("<session_context>", get_system_prompt("chat", backend=None, isolated=True))
+		self.assertIn("<session_context>", get_system_prompt("scan", backend=None, isolated=False))

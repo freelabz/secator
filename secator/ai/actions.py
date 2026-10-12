@@ -1005,6 +1005,12 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			"print_cmd": False,
 			"dangerous": False,
 			"env": _sanitized_env(),
+			# Never let an AI-issued command block the loop on an interactive prompt. tty=False
+			# makes Command._prompt_sudo take its non-interactive path: a sudo command with no
+			# passwordless/configured sudo fails fast with an actionable error instead of
+			# hanging on getpass (the stall in a --dangerous, non-isolated TTY session). The
+			# session_context block already tells the model whether sudo is usable.
+			"tty": False,
 		}
 		# Human-readable description the LLM supplied (shown by clients instead of the
 		# bare "command" name). See _run_runner for the run_opts['description'] mapping.

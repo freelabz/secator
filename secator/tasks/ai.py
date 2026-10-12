@@ -462,7 +462,8 @@ class ai(PythonRunner):
 		"""Compute the system prompt for ``mode`` using this runner's workspace + backend."""
 		return get_system_prompt(
 			mode, workspace_path=str(self.reports_folder), backend=self.backend,
-			in_scope=getattr(self, "in_scope", None), out_of_scope=getattr(self, "out_of_scope", None))
+			in_scope=getattr(self, "in_scope", None), out_of_scope=getattr(self, "out_of_scope", None),
+			isolated=getattr(self, "isolated", False))
 
 	def _rebuild_prompt_and_tools(self):
 		"""Rebuild system_prompt + tool_schemas for the current mode and store them.

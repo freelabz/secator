@@ -293,7 +293,117 @@ def build_scope_section(in_scope=None, out_of_scope=None) -> str:
 	return "\n".join(lines)
 
 
-def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None) -> str:
+# Cached per-process shell-environment facts (OS / package manager / sudo). These do
+# not change within a process, and a resume on a different machine is a NEW process, so
+# caching here is safe AND gives the "recompute fresh on resume" property for free. Only
+# the clock (date / timestamp) is recomputed on every build. Keyed by `isolated`.
+_SHELL_ENV_CACHE: Dict[bool, List[str]] = {}
+
+
+def _sudo_status_lines() -> List[str]:
+	"""Describe host sudo availability for the AI, without ever prompting or blocking.
+
+	Order mirrors ``Command._prompt_sudo``: root → configured password → passwordless
+	(`sudo -n`, which NEVER prompts) → unavailable. The unavailable line is actionable:
+	it tells the model not to run sudo (it would fail in this non-interactive session)
+	and how the user can enable it.
+	"""
+	import os
+	import shutil
+	import subprocess
+	if hasattr(os, "geteuid") and os.geteuid() == 0:
+		return ["Privileges: running as root — no sudo needed."]
+	try:
+		from secator.config import CONFIG
+		if CONFIG.security.sudo_password:
+			return ["Privileges: non-root; sudo available via a configured password (security.sudo_password)."]
+	except Exception:
+		pass
+	if shutil.which("sudo") is None:
+		return ["Privileges: non-root and sudo is NOT installed — do not use sudo; run only commands that work unprivileged."]
+	try:
+		# `sudo -n` is guaranteed non-interactive (fails instead of prompting); bound it anyway.
+		rc = subprocess.run(
+			["sudo", "-n", "true"],
+			stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+		).returncode
+		if rc == 0:
+			return ["Privileges: non-root; passwordless sudo IS available."]
+	except Exception:
+		pass
+	return [
+		"Privileges: non-root; sudo requires a password and none is configured. Do NOT run sudo "
+		"commands — they fail fast in this non-interactive session (no password prompt). Prefer an "
+		"unprivileged alternative, or ask the user to enable passwordless sudo or set "
+		"SECATOR_SECURITY_SUDO_PASSWORD.",
+	]
+
+
+def _host_shell_env_lines() -> List[str]:
+	"""Host OS + package manager (read-only; never triggers an install) + sudo status."""
+	lines = ["Shell environment: this host — run_shell commands execute directly on it."]
+	try:
+		from secator.installer import get_distro_config
+		d = get_distro_config()
+		if isinstance(d, str):
+			# SECATOR_PACKAGE_MANAGER override: get_distro_config returns a bare string.
+			lines.append(f"Package manager: {d} (install packages with it).")
+		else:
+			system = getattr(d, "system", "") or ""
+			name = getattr(d, "name", "") or ""
+			pm_name = getattr(d, "pm_name", "") or ""
+			pm_installer = getattr(d, "pm_installer", "") or ""
+			os_line = f"Operating system: {system}" + (f" ({name})" if name else "")
+			lines.append(os_line + ".")
+			if pm_installer:
+				lines.append(f"Package manager: {pm_name} — install packages with `{pm_installer} <pkg>`.")
+			elif pm_name:
+				lines.append(f"Package manager: {pm_name}.")
+			else:
+				lines.append("Package manager: unknown — detect it before installing anything.")
+	except Exception:
+		lines.append("Package manager: unknown — detect it before installing anything.")
+	lines.extend(_sudo_status_lines())
+	return lines
+
+
+def build_session_context(isolated: bool = False) -> str:
+	"""Dynamic per-session context block for the system prompt.
+
+	Two things the model otherwise guesses wrong:
+	- the current date + UNIX timestamp (it has no clock);
+	- the shell environment its ``run_shell`` commands ACTUALLY run in — the disposable
+	  Alpine sandbox (apk, root) when ``--isolated``, otherwise THIS host's OS + package
+	  manager + sudo availability. Stops the model defaulting to ``apk`` on a non-Alpine
+	  host, and stops it issuing a sudo command that can only stall/fail.
+
+	Rebuilt on every ``get_system_prompt`` call (including resume), so the clock is always
+	current and machine-specific facts are re-detected if the session resumes elsewhere.
+	"""
+	import time
+	from datetime import datetime, timezone
+	now = time.time()
+	lines = [
+		"<session_context>",
+		f"Current date: {datetime.fromtimestamp(now, timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+		f"UNIX timestamp: {int(now)}",
+	]
+	if isolated:
+		lines += [
+			"Shell environment: a disposable, network-isolated Alpine sandbox container — run_shell runs there, not on the host.",  # noqa: E501
+			"Package manager: apk — install packages with `apk add --no-cache <pkg>`.",
+			"Privileges: running as root in the sandbox — no sudo needed.",
+		]
+	else:
+		if isolated not in _SHELL_ENV_CACHE:
+			_SHELL_ENV_CACHE[isolated] = _host_shell_env_lines()
+		lines += _SHELL_ENV_CACHE[isolated]
+	lines.append("</session_context>")
+	return "\n".join(lines)
+
+
+def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None,
+                      isolated=None) -> str:
 	"""Get system prompt for mode with library reference filled in.
 
 	Args:
@@ -302,6 +412,9 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 		backend: Optional interactivity backend to determine interaction rules
 		in_scope: Optional allow-list of targets to surface in the prompt.
 		out_of_scope: Optional deny-list of targets to surface in the prompt.
+		isolated: When not None (True/False), append a dynamic ``<session_context>`` block
+			describing the clock + the shell environment (sandbox vs host) for that mode.
+			Left None by callers (e.g. tests) that want a deterministic, static prompt.
 
 	Returns:
 		Formatted system prompt string
@@ -342,6 +455,9 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	scope_section = build_scope_section(in_scope, out_of_scope)
 	if scope_section:
 		result += "\n\n" + scope_section
+
+	if isolated is not None:
+		result += "\n\n" + build_session_context(isolated=bool(isolated))
 
 	return result.replace("$workspace_path", ws)
 
