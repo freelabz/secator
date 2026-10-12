@@ -3070,6 +3070,41 @@ def install_ruby():
 	)
 
 
+def apply_install_overrides(cls, cli_version=None):
+	"""Apply install overrides onto a tool class before ``ToolInstaller.install(cls)``.
+
+	Mutates ``cls.install_cmd`` / ``cls.install_version`` in place. Precedence (highest first):
+
+	1. a CLI-supplied version (``secator install tools <tool>==<version>``);
+	2. ``tasks.overrides.<tool>.install_version`` / ``.install_cmd`` from config;
+	3. the tool class's built-in attributes (left untouched when nothing overrides them).
+
+	The ``v`` prefix is only prepended to a **bare semver** string (digits + dots, e.g.
+	``1.2.3`` -> ``v1.2.3``) and only when the tool already pins a ``v``-prefixed version, so
+	branch names (``main``), commit SHAs, and already-``v``-prefixed versions are left untouched.
+	A custom ``install_cmd`` that doesn't reference ``[install_version]`` simply ignores the
+	version, so overriding the command never breaks version pinning.
+
+	Args:
+		cls: The tool/task class to mutate.
+		cli_version (str, optional): Version supplied on the CLI (wins over config).
+
+	Returns:
+		The same ``cls`` (mutated), for convenience.
+	"""
+	cfg_overrides = CONFIG.tasks.overrides.get(cls.__name__, {})
+	install_cmd = cfg_overrides.get('install_cmd', None)
+	if install_cmd:
+		cls.install_cmd = install_cmd
+	version = cli_version or cfg_overrides.get('install_version', None)
+	if version:
+		if bool(re.match(r'^\d+(\.\d+)*$', version)) and cls.install_version \
+				and cls.install_version.startswith('v') and not version.startswith('v'):
+			version = f'v{version}'
+		cls.install_version = version
+	return cls
+
+
 @install.command('tools')
 @click.argument('cmds', required=False)
 @click.option('--cleanup', is_flag=True, default=False, help='Clean up tools after installation.')
@@ -3080,6 +3115,8 @@ def install_tools(cmds, cleanup, fail_fast):
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 	tools = []
+	# CLI-supplied versions (tool==version) take priority over config overrides.
+	cli_versions = {}
 	if cmds is not None:
 		cmds = cmds.split(',')
 		for cmd in cmds:
@@ -3090,14 +3127,16 @@ def install_tools(cmds, cleanup, fail_fast):
 			cls = next((cls for cls in discover_tasks() if cls.__name__ == cmd), None)
 			if cls:
 				if version:
-					if cls.install_version and cls.install_version.startswith('v') and not version.startswith('v'):
-						version = f'v{version}'
-					cls.install_version = version
+					cli_versions[cls.__name__] = version
 				tools.append(cls)
 			else:
 				console.print(Warning(message=f'Tool {cmd} is not supported or inexistent.'))
 	else:
 		tools = discover_tasks()
+
+	# Apply install overrides on each tool class before installation.
+	for cls in tools:
+		apply_install_overrides(cls, cli_version=cli_versions.get(cls.__name__))
 	tools.sort(key=lambda x: x.__name__)
 	return_code = 0
 	if not tools:
