@@ -38,10 +38,38 @@ _SANDBOX_CREATE_LOCK = threading.Lock()
 # the next prompt's token budget; head+tail keeps both the start and the result.
 _MAX_SHELL_OUTPUT_CHARS = 4000
 
-# Cap on ad-hoc AI shell commands (dispatched as the `command` task). Applied as an
-# instance attribute post-construction (see _handle_shell) since max_timeout is not a
-# run_opts-settable field.
+# Default timeout (seconds) for ad-hoc AI shell commands (dispatched as the `command`
+# task). Applied as an instance attribute post-construction (see _handle_shell) since
+# max_timeout is not a run_opts-settable field. The model may override it per-command via
+# run_shell(timeout=...), clamped by _resolve_shell_timeout — see that helper.
 _SHELL_TIMEOUT = 60
+
+
+def _resolve_shell_timeout(action: Dict) -> int:
+	"""Effective max_timeout (seconds) for a single AI shell command.
+
+	The model may pass ``timeout`` on run_shell to raise it for a slow command (and re-run
+	after a timeout) or lower it to fail fast. The value is clamped to ``[1, ceiling]`` where
+	``ceiling = CONFIG.celery.task_max_timeout`` — the SAME global max-task-timeout cap every
+	task honors — so the model can never grant itself more run time than the operator allows
+	(``task_max_timeout = -1`` means no global cap, matching normal task behavior). An absent
+	or non-numeric ``timeout`` falls back to ``_SHELL_TIMEOUT``. This is run_shell-only; other
+	runners resolve their timeout through the normal config path, unchanged.
+	"""
+	from secator.config import CONFIG
+	requested = action.get("timeout")
+	base = _SHELL_TIMEOUT
+	if requested is not None:
+		try:
+			base = int(requested)
+		except (TypeError, ValueError):
+			base = _SHELL_TIMEOUT
+	if base < 1:
+		base = _SHELL_TIMEOUT
+	ceiling = CONFIG.celery.task_max_timeout
+	if ceiling is not None and ceiling > 0:
+		base = min(base, ceiling)
+	return base
 
 
 @dataclass
@@ -1017,10 +1045,16 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		from secator.tasks.command import command as CommandTask
 		runner = CommandTask([exec_command], hooks=hooks, context=context, **run_opts)
 
-		# 60s cap on ad-hoc AI shell commands. max_timeout is NOT run_opts-settable
-		# (Command.__init__ resolves it from CONFIG.tasks.overrides); setting the
-		# instance attribute here is honored by get_max_timeout().
-		runner.max_timeout = _SHELL_TIMEOUT
+		# Per-command timeout cap. max_timeout is NOT run_opts-settable (Command.__init__
+		# resolves it from CONFIG.tasks.overrides); setting the instance attribute here is
+		# honored by get_max_timeout(). Defaults to _SHELL_TIMEOUT; the model can raise/lower
+		# it via run_shell(timeout=...), bounded by CONFIG.celery.task_max_timeout.
+		effective_timeout = _resolve_shell_timeout(action)
+		runner.max_timeout = effective_timeout
+		# Check the timeout at least once a second: the default monitor cadence is
+		# stat_update_frequency (tens of seconds), which would let a short shell timeout
+		# lapse unenforced. Stats stay gated to their own frequency (no extra overhead).
+		runner.monitor_poll_interval = min(1.0, effective_timeout)
 
 		# Emit the command Ai now that the runner exists: its on_init hook has
 		# stamped the runner id into context, so clients can link this item to the
@@ -1047,6 +1081,18 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		# Scrub secrets BEFORE truncating (a secret in the middle would survive if we
 		# truncated first), then cap so it can't blow up history.
 		output = _truncate(_scrub_secrets(runner.output or "(no output)"), _MAX_SHELL_OUTPUT_CHARS)
+		# On timeout, tell the model it can re-run with a higher `timeout` (and the cap), so it
+		# retries deliberately instead of giving up or blindly re-running the same command.
+		# `is True` (not just truthy): the real runner always sets a bool, and this avoids a
+		# test MagicMock's auto-created attribute reading as "timed out".
+		if getattr(runner, "timed_out", False) is True:
+			from secator.config import CONFIG
+			ceiling = CONFIG.celery.task_max_timeout
+			cap = f" (max {ceiling}s)" if ceiling is not None and ceiling > 0 else ""
+			output += (
+				f"\n\n[timed out after {effective_timeout}s] If this command just needs longer, "
+				f"re-run it with a higher `timeout`{cap}; otherwise change the approach."
+			)
 		yield Ai(content=output, ai_type="shell_output", _context=context)
 
 	except Exception as e:

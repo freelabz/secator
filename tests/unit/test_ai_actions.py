@@ -2016,3 +2016,82 @@ class TestEnsureMongoRunIdCoercion(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestShellTimeout(unittest.TestCase):
+	"""run_shell per-command timeout: model-settable, clamped by CONFIG.celery.task_max_timeout."""
+
+	def _resolve(self, action, ceiling):
+		from secator.ai import actions
+		import types
+		cfg = types.SimpleNamespace(celery=types.SimpleNamespace(task_max_timeout=ceiling))
+		with patch('secator.config.CONFIG', cfg):
+			return actions._resolve_shell_timeout(action)
+
+	def test_default_when_absent(self):
+		from secator.ai.actions import _SHELL_TIMEOUT
+		self.assertEqual(self._resolve({'action': 'shell', 'command': 'x'}, ceiling=-1), _SHELL_TIMEOUT)
+
+	def test_model_can_raise(self):
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 600}, ceiling=-1), 600)
+
+	def test_model_can_lower(self):
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 5}, ceiling=-1), 5)
+
+	def test_clamped_to_ceiling(self):
+		# Requests above the configured max are capped, not rejected.
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 99999}, ceiling=300), 300)
+
+	def test_default_also_capped_below_ceiling(self):
+		# A ceiling tighter than the default still wins.
+		self.assertEqual(self._resolve({'command': 'x'}, ceiling=10), 10)
+
+	def test_non_numeric_falls_back_to_default(self):
+		from secator.ai.actions import _SHELL_TIMEOUT
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 'soon'}, ceiling=-1), _SHELL_TIMEOUT)
+
+	def test_non_positive_falls_back_to_default(self):
+		from secator.ai.actions import _SHELL_TIMEOUT
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 0}, ceiling=-1), _SHELL_TIMEOUT)
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': -5}, ceiling=-1), _SHELL_TIMEOUT)
+
+	@patch('secator.tasks.command.command')
+	def test_handle_shell_applies_resolved_timeout(self, mock_task_cls):
+		fake = MagicMock()
+		fake.id = 'task_t'
+		fake.output = 'ok'
+		fake.timed_out = False
+		mock_task_cls.return_value = fake
+		ctx = ActionContext(targets=['t.com'], model='m')
+		list(_handle_shell({'action': 'shell', 'command': 'echo hi', 'timeout': 5}, ctx))
+		self.assertEqual(fake.max_timeout, 5)
+
+	def test_timeout_emits_retry_hint_end_to_end(self):
+		"""Real run: a command that exceeds its timeout is killed and the output tells the
+		model it may re-run with a higher timeout."""
+		ctx = ActionContext(targets=['t.com'], model='m')
+		results = list(_handle_shell({'action': 'shell', 'command': 'sleep 5', 'timeout': 1}, ctx))
+		out = [r for r in results if isinstance(r, Ai) and r.ai_type == 'shell_output'][0].content
+		self.assertIn('timed out after 1s', out)
+		self.assertIn('higher `timeout`', out)
+
+	def test_run_shell_schema_exposes_timeout(self):
+		from secator.ai.tools import TOOL_SCHEMAS
+		props = TOOL_SCHEMAS['run_shell']['function']['parameters']['properties']
+		self.assertIn('timeout', props)
+		self.assertEqual(props['timeout']['type'], 'integer')
+		self.assertNotIn('timeout', TOOL_SCHEMAS['run_shell']['function']['parameters']['required'])
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestCommandTimedOutFlag(unittest.TestCase):
+	"""Command.timed_out is set when max_timeout is exceeded (the signal _handle_shell reads)."""
+
+	def test_timed_out_flag_set(self):
+		from secator.tasks.command import command as CommandTask
+		runner = CommandTask(['sleep 5'])
+		runner.max_timeout = 1
+		runner.monitor_poll_interval = 0.5  # check sub-cadence so the 1s timeout actually fires
+		runner.run()
+		self.assertTrue(runner.timed_out)

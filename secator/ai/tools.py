@@ -135,6 +135,8 @@ TOOL_SCHEMAS = {
 		"function": {
 			"name": "run_shell",
 			"description": "Run an arbitrary shell command for exploration, exploitation, or data analysis. "
+			               "Commands default to a 60s timeout; if one times out and just needs longer (a slow "
+			               "install, a long scan), re-run it with a higher `timeout`. "
 			               "Example (good): run_shell(command='curl -sk https://10.0.0.1/ | head -50', description='Grab the HTTP banner'). "  # noqa: E501
 			               "Bad: run_shell() — no command.",
 			"parameters": {
@@ -143,6 +145,12 @@ TOOL_SCHEMAS = {
 					"command": {
 						"type": "string",
 						"description": "The shell command to execute."
+					},
+					"timeout": {
+						"type": "integer",
+						"description": "Optional max run time in seconds for THIS command (default 60). Raise it for "
+						               "slow commands and re-run after a timeout; lower it to fail fast. Clamped to the "
+						               "server's configured maximum task timeout — requests above it are capped, not rejected."  # noqa: E501
 					},
 					"description": _DESCRIPTION_SCHEMA
 				},
