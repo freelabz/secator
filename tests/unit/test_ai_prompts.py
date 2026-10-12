@@ -158,6 +158,11 @@ class TestPrompts(unittest.TestCase):
 		self.assertEqual(len(data["results"]), 50)
 		self.assertTrue(data["truncated"])
 		self.assertEqual(data["total_count"], 200)
+		# A model-visible narrowing hint must accompany the truncation flags so the
+		# model is told HOW to see the rest (the console Warning never reaches it).
+		self.assertIn("hint", data)
+		self.assertIn("50", data["hint"])
+		self.assertRegex(data["hint"].lower(), r"narrow|filter|scope|offset")
 
 	def test_format_tool_result_no_truncation_under_max_items(self):
 		items = [{"port": i} for i in range(10)]
@@ -166,6 +171,7 @@ class TestPrompts(unittest.TestCase):
 		data = json.loads(result)
 		self.assertEqual(len(data["results"]), 10)
 		self.assertNotIn("truncated", data)
+		self.assertNotIn("hint", data)
 
 	def test_format_continue(self):
 		result = format_continue(3, 10)
@@ -431,6 +437,23 @@ class TestScopeInPrompt(unittest.TestCase):
 		self.assertNotIn("change_mode", banner)
 		# a mode WITH change_mode gets the escalation hint
 		self.assertIn("change_mode", build_mode_banner("scan", MODES["scan"]))
+
+	def test_system_prompt_head_is_cache_stable(self):
+		"""The system prompt must LEAD with stable, cacheable content (the
+		registry-derived current-mode banner) — never a volatile per-call value such
+		as a second-precise timestamp — so a prompt-prefix cache is not invalidated on
+		every call. If date/time info is ever added, it must NOT be the leading bytes.
+		"""
+		from secator.ai.prompts import get_system_prompt, MODES
+		for m in MODES:
+			prompt = get_system_prompt(m)
+			# Leading content is the stable current-mode banner, not a clock.
+			self.assertTrue(prompt.startswith("<current_mode>"))
+			head = prompt[:200]
+			# No second-precise UTC clock / UNIX timestamp in the leading bytes.
+			self.assertNotRegex(head, r"\d{2}:\d{2}:\d{2}")
+			self.assertNotIn("UNIX timestamp", head)
+			self.assertNotRegex(head.lower(), r"current date|current time")
 
 
 if __name__ == '__main__':

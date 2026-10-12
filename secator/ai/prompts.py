@@ -490,6 +490,14 @@ def format_tool_result(name: str, status: str, count: int, results: Any, max_ite
 	if truncated:
 		data["truncated"] = True
 		data["total_count"] = count
+		# Model-visible narrowing hint: the console Warning below never reaches the
+		# model, so without this the model only sees `truncated`/`total_count` flags and
+		# no guidance. Keep it generic/future-proof (works before an `offset`/paging arg
+		# exists) so it never promises an argument the tool may not yet accept.
+		data["hint"] = (
+			f'Only the first {max_items} of {count} results are shown. Narrow the scope '
+			'to see the rest: add/tighten a filter, target a single runner or item, or '
+			'page through results with an offset once supported.')
 		from secator.rich import console
 		from secator.output_types import Warning
 		console.print(Warning(
