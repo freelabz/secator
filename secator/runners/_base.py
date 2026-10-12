@@ -680,6 +680,7 @@ class Runner:
 			celery.result.AsyncResult: Celery async result.
 		"""
 		from secator.celery import start_runner
+		from secator.runners._helpers import prefix_queue
 
 		hooks = run_opts.pop('hooks', {})
 		results = run_opts.pop('results', [])
@@ -695,7 +696,7 @@ class Runner:
 				'validators': validators,
 				'context': context,
 			},
-			queue='celery',
+			queue=prefix_queue('celery', run_opts),
 		)
 
 	def __iter__(self):

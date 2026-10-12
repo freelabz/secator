@@ -4,6 +4,7 @@ from dotmap import DotMap
 from secator.config import CONFIG
 from secator.output_types.info import Info
 from secator.runners._base import Runner
+from secator.runners._helpers import prefix_queue
 from secator.runners.workflow import Workflow
 from secator.safe_eval import safe_eval_condition
 from secator.utils import merge_opts
@@ -88,8 +89,8 @@ class Scan(Runner):
 
 		if sigs:
 			sig = chain(
-				mark_runner_started.si([], self).set(queue='small'),
+				mark_runner_started.si([], self).set(queue=prefix_queue('small', self.run_opts)),
 				*sigs,
-				mark_runner_completed.si([], self).set(queue='results'),
+				mark_runner_completed.si([], self).set(queue=prefix_queue('results', self.run_opts)),
 			)
 		return sig

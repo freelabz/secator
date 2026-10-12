@@ -150,6 +150,7 @@ for config in SCANS:
 @click.option('-c', '--concurrency', type=int, default=100, help='Number of child processes processing the queue.')
 @click.option('-r', '--reload', is_flag=True, help='Autoreload Celery on code changes.')
 @click.option('-Q', '--queue', type=str, default='', help='Listen to a specific queue.')
+@click.option('-qp', '--queue-prefix', type=str, default='', help='Subscribe to prefixed queue names (e.g. "fleet1" -> listen on "fleet1-small", ...). Defaults to CONFIG.celery.queue_prefix.')  # noqa: E501
 @click.option('-P', '--pool', type=str, default='gevent', help='Pool implementation.')
 @click.option('--quiet', is_flag=True, default=False, help='Quiet mode.')
 @click.option('--loglevel', type=str, default='INFO', help='Log level.')
@@ -161,7 +162,7 @@ for config in SCANS:
 @click.option('--without-gossip', is_flag=True)
 @click.option('--without-mingle', is_flag=True)
 @click.option('--without-heartbeat', is_flag=True)
-def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, dev, stop, show, use_command_runner, without_gossip, without_mingle, without_heartbeat):  # noqa: E501
+def worker(hostname, concurrency, reload, queue, queue_prefix, pool, quiet, loglevel, check, dev, stop, show, use_command_runner, without_gossip, without_mingle, without_heartbeat):  # noqa: E501
 	"""Run a worker"""
 
 	# Check Celery addon is installed
@@ -187,7 +188,13 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		return
 
 	if not queue:
-		queue = 'small,medium,large,extra_large,poll,' + ','.join(set([r['queue'] for r in app.conf.task_routes.values()]))
+		# Build the default queue set from the classic queue names (size pools + the
+		# statically-routed celery/results/mongodb). When a prefix is set (--queue-prefix
+		# or CONFIG.celery.queue_prefix), subscribe to the prefixed names so this worker
+		# only consumes a run dispatched with the matching prefix.
+		prefix = queue_prefix or CONFIG.celery.queue_prefix
+		base_queues = ['small', 'medium', 'large', 'extra_large', 'poll', 'celery', 'results', 'mongodb']
+		queue = ','.join(f'{prefix}-{q}' if prefix else q for q in base_queues)
 
 	app_str = 'secator.celery.app'
 	celery = f'{sys.executable} -m celery'
