@@ -1,0 +1,15 @@
+type: workflow
+name: jdwp
+alias: jdwp
+description: JDWP vulnerability scan
+long_description: |
+  Scans JDWP (Java Debug Wire Protocol) vulnerabilities using specialized tools.
+tags: [jdwp, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  jdwp_shellifier:
+    description: Inject Java code into JVM to test RCE

