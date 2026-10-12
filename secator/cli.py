@@ -21,6 +21,7 @@ from rich.rule import Rule
 from rich.table import Table
 
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path, download_files
+from secator.agent import agent as agent_cli
 from secator.click import OrderedGroup
 from secator.cli_helper import register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STATE_COLORS
@@ -228,6 +229,13 @@ def worker(hostname, concurrency, reload, queue, pool, quiet, loglevel, check, d
 		console.print(f'[bold red]{cmd}[/]')
 		result = subprocess.run(cmd, shell=True, cwd=Path(sys.executable).parent)
 		sys.exit(result.returncode)
+
+
+# -------#
+# AGENT #
+# -------#
+
+cli.add_command(agent_cli)
 
 
 # -------#
@@ -1921,6 +1929,37 @@ def _format_vuln_counts(counts):
 	return '|'.join(parts) if parts else '-'
 
 
+def _print_scheduled_runs(driver):
+	"""Print the driver backend's scheduled runs (`secator x|w|s --schedule`), if any."""
+	import datetime
+	from secator.schedule import get_backend
+	try:
+		schedules = get_backend(driver).list_schedules()
+	except Exception as e:
+		console.print(Warning(message=f'Could not list scheduled runs from the {driver} backend: {e}'))
+		return
+	if not schedules:
+		return
+
+	def when(ts):
+		return humanize_date(datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)) if ts else '-'
+
+	table = Table(title='Scheduled runs')
+	for col in ('Name', 'Cron', 'Next run', 'Last run', 'Agent', 'Last status'):
+		table.add_column(col, overflow='fold')
+	for s in sorted(schedules, key=lambda s: s.get('next_run') or 0):
+		last_status = s.get('last_status') or '-'
+		table.add_row(
+			f'[bold blue]{s.get("name", "")}[/]' + ('' if s.get('enabled', True) else ' [dim](disabled)[/]'),
+			s.get('cron') or '',
+			when(s.get('next_run')),
+			when(s.get('last_run')),
+			s.get('agent') or '[dim]any[/]',
+			f'[{STATE_COLORS.get(last_status, "white")}]{last_status}[/]',
+		)
+	console.print(table)
+
+
 @report.command('list')
 @click.option('-ws', '-w', '--workspace', type=str)
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
@@ -2071,6 +2110,8 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 				shown += 1
 			except Exception as e:
 				console.print(Error(message=f'Could not load {path}: {str(e)}'))
+
+	_print_scheduled_runs(effective_driver)
 
 	if shown > 0:
 		console.print(table)
