@@ -13,4 +13,4 @@ input_types:
 tasks:
   nuclei/redis:
     description: Detect Redis vulnerabilities
-    template_condition: "contains(id, 'ftp') || contains(tags, 'ftp')"
+    template_condition: "contains(id, 'redis') || contains(tags, 'redis')"
