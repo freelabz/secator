@@ -684,6 +684,54 @@ def test_load_report_data_counts_vulns_from_ndjson(tmp_path):
 	assert info['name'] == 'nuclei'
 	assert counts['high'] == 1 and counts['critical'] == 1
 
+def test_load_report_info_skips_results(tmp_path):
+	"""_load_report_info reads only the info block, never touches results.ndjson."""
+	import json
+	from secator.cli import _load_report_info
+	(tmp_path / 'report.json').write_text(json.dumps({
+		'info': {'name': 'fast_runner', 'status': 'SUCCESS'},
+		'results': {'vulnerability': [{'_type': 'vulnerability', 'severity': 'critical'}]},
+	}))
+	# No results.ndjson — confirming info load does not require it.
+	info = _load_report_info(str(tmp_path / 'report.json'))
+	assert info['name'] == 'fast_runner'
+	assert info['status'] == 'SUCCESS'
+	# results key must NOT be present in the returned dict
+	assert 'results' not in info
+
+
+def test_count_report_vulns_from_ndjson(tmp_path):
+	"""_count_report_vulns counts from results.ndjson line-by-line."""
+	import json
+	from secator.cli import _count_report_vulns
+	(tmp_path / 'report.json').write_text(json.dumps({'info': {}}))
+	lines = '\n'.join([
+		json.dumps({'_type': 'vulnerability', 'severity': 'critical'}),
+		json.dumps({'_type': 'vulnerability', 'severity': 'high'}),
+		json.dumps({'_type': 'vulnerability', 'severity': 'high'}),
+		json.dumps({'_type': 'url', 'url': 'http://example.com'}),  # non-vuln ignored
+		json.dumps({'_type': 'vulnerability', 'severity': 'low'}),
+	])
+	(tmp_path / 'results.ndjson').write_text(lines)
+	counts = _count_report_vulns(str(tmp_path / 'report.json'))
+	assert counts == {'critical': 1, 'high': 2, 'medium': 0, 'low': 1}
+
+
+def test_count_report_vulns_legacy_fallback(tmp_path):
+	"""_count_report_vulns falls back to report.json['results'] when no ndjson exists."""
+	import json
+	from secator.cli import _count_report_vulns
+	(tmp_path / 'report.json').write_text(json.dumps({
+		'info': {},
+		'results': {'vulnerability': [
+			{'_type': 'vulnerability', 'severity': 'medium'},
+			{'_type': 'vulnerability', 'severity': 'medium'},
+		]},
+	}))
+	# No results.ndjson — legacy path.
+	counts = _count_report_vulns(str(tmp_path / 'report.json'))
+	assert counts == {'critical': 0, 'high': 0, 'medium': 2, 'low': 0}
+
 
 if __name__ == '__main__':
 	unittest.main()

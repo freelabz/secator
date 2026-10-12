@@ -1836,39 +1836,69 @@ def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt
 	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
 
 
+def _load_report_info(path):
+	"""Read only the lightweight ``info`` block from a report.json.
+
+	Deliberately avoids deserialising the (potentially large) ``results`` key and
+	never touches the sibling ``results.ndjson``.  Used by ``secator r list`` so
+	the metadata table renders instantly without iterating every finding.
+
+	Returns:
+		dict: The ``info`` section of the report, or ``{}`` on error.
+	"""
+	with open(path, 'r') as f:
+		data = json.load(f)
+	return data.get('info', {})
+
+
+def _count_report_vulns(path):
+	"""Count vulnerability severities for a single report (the slow part).
+
+	Reads ``results.ndjson`` line-by-line (or falls back to the legacy
+	``report.json['results']['vulnerability']`` list).  Called lazily so the
+	listing table can appear before all counts are ready.
+
+	Returns:
+		dict: ``{'critical': N, 'high': N, 'medium': N, 'low': N}``
+	"""
+	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+	ndjson = Path(path).parent / 'results.ndjson'
+
+	if ndjson.exists():
+		with open(ndjson, 'r') as f:
+			for line in f:
+				line = line.strip()
+				if not line:
+					continue
+				try:
+					rec = json.loads(line)
+				except json.JSONDecodeError:
+					continue
+				if rec.get('_type') == 'vulnerability':
+					severity = str(rec.get('severity', '')).lower()
+					if severity in vuln_counts:
+						vuln_counts[severity] += 1
+	else:
+		# Legacy: full results embedded in report.json
+		with open(path, 'r') as f:
+			data = json.load(f)
+		for vuln in data.get('results', {}).get('vulnerability', []):
+			severity = str(vuln.get('severity', '')).lower()
+			if severity in vuln_counts:
+				vuln_counts[severity] += 1
+
+	return vuln_counts
+
+
 def _load_report_data(path):
 	"""Read report info + count vulnerability severities.
 
-	Info comes from report.json; vulnerabilities come from the sibling results.ndjson
-	(json driver's live/new store) when present, else from the legacy report.json['results'].
+	Retained for callers outside ``report_list`` (e.g. ``_report_matches_filters``).
+	For the listing command use ``_load_report_info`` + ``_count_report_vulns`` to
+	keep metadata loading and vuln counting separate.
 	"""
-	info = {}
-	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
-	with open(path, 'r') as f:
-		data = json.load(f)
-	info = data.get('info', {})
-	ndjson = Path(path).parent / 'results.ndjson'
-
-	def _iter_vulns():
-		if ndjson.exists():
-			with open(ndjson, 'r') as f:
-				for line in f:
-					line = line.strip()
-					if not line:
-						continue
-					try:
-						rec = json.loads(line)
-					except json.JSONDecodeError:
-						continue
-					if rec.get('_type') == 'vulnerability':
-						yield rec
-		else:
-			yield from data.get('results', {}).get('vulnerability', [])
-
-	for vuln in _iter_vulns():
-		severity = str(vuln.get('severity', '')).lower()
-		if severity in vuln_counts:
-			vuln_counts[severity] += 1
+	info = _load_report_info(path)
+	vuln_counts = _count_report_vulns(path)
 	return info, vuln_counts
 
 
@@ -2031,49 +2061,117 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 			table.add_row(*row)
 			shown += 1
 	else:
-		# Local filesystem listing
+		# Local filesystem listing — two-phase lazy approach:
+		# Phase 1 (fast): read only the ``info`` block from each report.json so
+		#   metadata rows appear in the Live table immediately.
+		# Phase 2 (lazy): iterate results.ndjson per report to fill in vuln counts.
+		# --interesting requires vuln counts to filter correctly, so for that flag
+		# the full count is done upfront and no Live pass is needed.
 		paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 		paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
 
+		# Each entry: {'path': Path, 'row': list[str], 'counted': bool}
+		pending_rows = []
+
+		def _build_local_row(path_info, report_info, vuln_str, show_all, path):
+			runner_id = path_info['type'] + '/' + path_info['id']
+			targets = report_info.get('targets', [])
+			first_target = str(targets[0]) if targets else ''
+			if len(targets) > 1:
+				first_target += f' (+{len(targets) - 1})'
+			profiles = report_info.get('run_opts', {}).get('profiles', [])
+			if isinstance(profiles, str):
+				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
+			profiles_str = ', '.join(profiles) if profiles else ''
+			runner_status = report_info.get('status', '')
+			status_color = STATE_COLORS[runner_status] if runner_status in STATE_COLORS else 'white'
+			row = [
+				path_info['workspace'],
+				f'[bold blue]{report_info.get("name", "")}[/]',
+				f'[link={Path(path).as_uri()}]{runner_id}[/link]',
+				first_target,
+				profiles_str,
+				humanize_date(report_info.get('start_time')),
+				humanize_date(report_info.get('end_time')),
+				report_info.get('elapsed_human', ''),
+				f'[{status_color}]{runner_status}[/]',
+				vuln_str,
+			]
+			if show_all:
+				row.append(str(path))
+			return row
+
+		def _rebuild_local_table(rows_data):
+			"""Rebuild the Rich Table from the current row snapshot for Live updates."""
+			t = Table()
+			t.add_column('Workspace', style='bold gold3', overflow='fold')
+			t.add_column('Name', overflow='fold')
+			t.add_column('Id', overflow='fold')
+			t.add_column('Target', overflow='fold')
+			t.add_column('Profiles', overflow='fold')
+			t.add_column('Start Date', overflow='fold')
+			t.add_column('End Date', overflow='fold')
+			t.add_column('Elapsed', overflow='fold')
+			t.add_column('Status', style='green', overflow='fold')
+			t.add_column('Vulnerabilities', overflow='fold')
+			if show_all:
+				t.add_column('Path', overflow='fold')
+			for r in rows_data:
+				t.add_row(*r['row'])
+			return t
+
+		# Phase 1: metadata only — no results.ndjson touched.
 		for path in paths:
 			try:
 				path_info = get_info_from_report_path(path)
-				report_info, vuln_counts = _load_report_data(path)
-				if not _report_passes_filters(report_info, vuln_counts, interesting, status_pattern):
-					continue
-				runner_id = path_info['type'] + '/' + path_info['id']
-				targets = report_info.get('targets', [])
-				first_target = str(targets[0]) if targets else ''
-				if len(targets) > 1:
-					first_target += f' (+{len(targets) - 1})'
-				profiles = report_info.get('run_opts', {}).get('profiles', [])
-				if isinstance(profiles, str):
-					profiles = [p.strip() for p in profiles.split(',') if p.strip()]
-				profiles_str = ', '.join(profiles) if profiles else ''
+				report_info = _load_report_info(path)
 				runner_status = report_info.get('status', '')
-				status_color = STATE_COLORS[runner_status] if runner_status in STATE_COLORS else 'white'
-
-				row = [
-					path_info['workspace'],
-					f'[bold blue]{report_info.get("name", "")}[/]',
-					f'[link={Path(path).as_uri()}]{runner_id}[/link]',
-					first_target,
-					profiles_str,
-					humanize_date(report_info.get('start_time')),
-					humanize_date(report_info.get('end_time')),
-					report_info.get('elapsed_human', ''),
-					f'[{status_color}]{runner_status}[/]',
-					_format_vuln_counts(vuln_counts),
-				]
-				if show_all:
-					row.append(str(path))
-				table.add_row(*row)
+				# Apply --status filter eagerly (no vuln data needed).
+				if status_pattern and not status_pattern.search(str(runner_status)):
+					continue
+				# --interesting requires vuln counts to filter; count now and skip
+				# zero-vuln reports.  Mark row as already counted so Phase 2 skips it.
+				if interesting:
+					vuln_counts = _count_report_vulns(path)
+					if sum(vuln_counts.values()) == 0:
+						continue
+					vuln_str = _format_vuln_counts(vuln_counts)
+					counted = True
+				else:
+					vuln_str = '[dim]…[/]'
+					counted = False
+				row = _build_local_row(path_info, report_info, vuln_str, show_all, path)
+				pending_rows.append({'path': path, 'row': row, 'counted': counted})
 				shown += 1
 			except Exception as e:
 				console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
+		# Phase 2: fill in vuln counts lazily via a Live-updated table.
+		# Vuln-count column is always at index 9 (or 10 when --show-all appends the path).
+		vuln_col_idx = 10 if show_all else 9
+		needs_live = any(not r['counted'] for r in pending_rows)
+		if needs_live and pending_rows:
+			with Live(_rebuild_local_table(pending_rows), console=console, refresh_per_second=8) as live:
+				for entry in pending_rows:
+					if entry['counted']:
+						continue
+					try:
+						vuln_counts = _count_report_vulns(entry['path'])
+					except Exception:
+						vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+					entry['row'][vuln_col_idx] = _format_vuln_counts(vuln_counts)
+					entry['counted'] = True
+					live.update(_rebuild_local_table(pending_rows))
+			# Live already rendered the final table; skip the static print below.
+			table = None
+		elif pending_rows:
+			# All rows counted upfront (--interesting path); populate the pre-built table.
+			for entry in pending_rows:
+				table.add_row(*entry['row'])
+
 	if shown > 0:
-		console.print(table)
+		if table is not None:
+			console.print(table)
 		console.print(Info(message=f'Found {shown} reports.'))
 		if workspace:
 			console.print(Info(message=f'Current workspace: [bold gold3]{workspace}[/]. Use [bold green4]-ws <workspace_name>[/] to switch.'))  # noqa: E501

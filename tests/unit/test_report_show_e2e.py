@@ -417,7 +417,8 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 		with ctx, \
 				mock.patch('secator.cli.list_reports', return_value=[self.report_path]), \
 				mock.patch('secator.cli.get_info_from_report_path', return_value=info), \
-				mock.patch('secator.cli._load_report_data', return_value=(report_info, vuln_counts)), \
+				mock.patch('secator.cli._load_report_info', return_value=report_info), \
+				mock.patch('secator.cli._count_report_vulns', return_value=vuln_counts), \
 				mock.patch('secator.cli.CONFIG') as cfg, \
 				console.capture() as cap:
 			cfg.workspaces.current = default_ws
