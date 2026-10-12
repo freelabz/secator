@@ -1170,6 +1170,62 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 		self.assertIn("'str' object is not a mapping", content)
 
 
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestYieldToolResultsRunnerScoping(unittest.TestCase):
+	"""_yield_tool_results surfaces the runner id + a scoping hint for run_task /
+	run_workflow on the NORMAL (non-truncated) path, so the model re-reads a runner's
+	findings with a scoped query_workspace instead of re-running the task."""
+
+	def _run(self, collected):
+		from secator.tasks.ai import _yield_tool_results
+		stored = []
+
+		class _FakeHistory:
+			def get_action_budget(self, model):
+				return 1_000_000  # huge: no token truncation
+
+			def add_tool_result(self, name, tc_id, content):
+				stored.append((name, tc_id, content))
+
+		runner = MagicMock()
+		runner.model = "test-model"
+		runner.encryptor = None
+		runner.history = _FakeHistory()
+		runner.context = {"session_id": "s1"}
+		outs = list(_yield_tool_results(runner, collected))
+		return outs, stored
+
+	def test_run_task_result_exposes_runner_id_and_scoping_hint(self):
+		collected = [{
+			"_type": "vulnerability", "name": "CVE-x", "_uuid": "u1",
+			"_context": {
+				"tool_call_id": "tc1", "tool_call_name": "run_task",
+				"task_id": "task-abc", "task_chunk_id": "chunk-xyz",
+			},
+		}]
+		outs, stored = self._run(collected)
+		self.assertEqual(len(stored), 1)
+		name, tc_id, content = stored[0]
+		self.assertEqual(name, "run_task")
+		# runner id + a scoped-query hint are in the MODEL-VISIBLE tool result.
+		self.assertIn("task-abc", content)
+		self.assertIn("task_chunk_id", content)
+		self.assertIn("chunk-xyz", content)
+		self.assertIn("query_workspace", content)
+		# the emitted Ai carries the runner id in extra_data too.
+		self.assertEqual(outs[0].extra_data["runner_id"], "task-abc")
+
+	def test_query_workspace_result_gets_no_runner_scope_note(self):
+		"""Non task/workflow tools must not get the task-scoping note."""
+		collected = [{
+			"_type": "url", "url": "http://x", "_uuid": "u2",
+			"_context": {"tool_call_id": "tc2", "tool_call_name": "query_workspace"},
+		}]
+		_, stored = self._run(collected)
+		_, _, content = stored[0]
+		self.assertNotIn("belong to runner", content)
+
+
 # =============================================================================
 # Subagent threads its OWN tool results; a child subagent's stream does not
 # =============================================================================

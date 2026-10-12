@@ -158,37 +158,64 @@ def _yield_tool_results(runner, collected):
 			{k: v for k, v in r.items() if k not in strip_fields}
 			for r in group_results
 		]
+		# Runner id for this group (task/workflow/scan). Computed once and reused for
+		# both the model-visible scoping hint below and the emitted `extra_data`.
+		_runner_id = next((r.get("_context", {}).get("task_id")
+		                   or r.get("_context", {}).get("workflow_id")
+		                   or r.get("_context", {}).get("scan_id")
+		                   for r in group_results if isinstance(r, dict)), "")
+		# `task_chunk_id` is the exact key the findings carry in the workspace, so it is
+		# the most precise handle for a scoped re-read. Fall back to the runner id.
+		chunk_id = next(
+			(r.get("_context", {}).get("task_chunk_id")
+			 for r in group_results
+			 if isinstance(r, dict) and r.get("_context", {}).get("task_chunk_id")),
+			None)
 		tool_result_str = format_tool_result(
 			tc_name, "error" if has_errors else "success",
 			len(serialized), serialized)
+		# After a task/workflow, tell the model (on the NORMAL, non-truncated path too)
+		# that these findings now live in the workspace keyed by the runner's chunk id,
+		# so it NEVER re-runs the task just to re-read them — it scopes a query instead.
+		if tc_name in ("run_task", "run_workflow") and _runner_id:
+			scope_key = "task_chunk_id" if chunk_id else "task_id"
+			scope_val = chunk_id or _runner_id
+			scope_note = json.dumps({
+				"runner_id": _runner_id,
+				"hint": (
+					f'These findings belong to runner "{_runner_id}" and are now stored in the '
+					f'workspace. To re-read them later, do NOT re-run the task — query scoped to '
+					f'this runner, e.g. query_workspace(query={{"_context.{scope_key}": "{scope_val}", '
+					f'"_type": "<type>"}}).'),
+			}, separators=(',', ':'))
+			tool_result_str = tool_result_str.rstrip() + "\n" + scope_note
 		# On truncation, tell the model how to get the rest. A task/workflow's results
 		# are persisted as workspace findings keyed by `_context.task_chunk_id` (the
 		# runner's own chunk id), so point it at a TARGETED query_workspace on that id
 		# — works in every mode incl. read-only chat (no shell needed). For any other
-		# tool (shell, query, ...) leave a bare [TRUNCATED]: the model re-runs with a
-		# narrower command/query on its own.
+		# tool (query, shell) give a brief narrowing hint: re-run with a narrower
+		# query/command.
 		trunc_hint = ""
-		if tc_name in ("run_task", "run_workflow"):
-			chunk_id = next(
-				(r.get("_context", {}).get("task_chunk_id")
-				 for r in group_results
-				 if isinstance(r, dict) and r.get("_context", {}).get("task_chunk_id")),
-				None)
-			if chunk_id:
-				trunc_hint = (
-					f'\nThe full results are stored as workspace findings. Read them with a '
-					f'TARGETED query scoped to this run — query_workspace(query={{"_context.task_chunk_id": '
-					f'"{chunk_id}", "_type": "<type>"}}) — and narrow further (severity/name/...). '
-					f'Do NOT re-run the task.')
+		if tc_name in ("run_task", "run_workflow") and chunk_id:
+			trunc_hint = (
+				f'\nThe full results are stored as workspace findings. Read them with a '
+				f'TARGETED query scoped to this run — query_workspace(query={{"_context.task_chunk_id": '
+				f'"{chunk_id}", "_type": "<type>"}}) — and narrow further (severity/name/...). '
+				f'Do NOT re-run the task.')
+		elif tc_name == "query_workspace":
+			trunc_hint = (
+				'\nToo many results — re-run query_workspace with a NARROWER query '
+				'(add/tighten a field filter or scope to a single runner via '
+				'`_context.task_chunk_id`).')
+		elif tc_name == "run_shell":
+			trunc_hint = (
+				'\nToo much output — re-run with a narrower command (filter/grep, '
+				'limit the range, or target a single item).')
 		tool_result_str = truncate_to_tokens(
 			tool_result_str, budget, runner.model, hint=trunc_hint)
 		tool_result_str = maybe_encrypt(tool_result_str, runner.encryptor)
 		runner.history.add_tool_result(tc_name, tc_id, tool_result_str)
 		_tool_msg = {"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": tool_result_str}
-		_runner_id = next((r.get("_context", {}).get("task_id")
-		                   or r.get("_context", {}).get("workflow_id")
-		                   or r.get("_context", {}).get("scan_id")
-		                   for r in group_results if isinstance(r, dict)), "")
 		yield Ai(content=f"[{tc_name}] {len(serialized)} result(s)",
 		         ai_type="tool_result",
 		         message=cap_message(_tool_msg),

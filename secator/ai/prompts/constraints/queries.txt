@@ -23,4 +23,10 @@ Query tags or vulnerabilities matching my host vulnweb.com:
 query_workspace(query={"_type": "tag", "match": {"regex": "vulnweb.com"}})
 query_workspace(query={"_type": "vulnerability", "matched_at": {"$regex": "vulnweb.com"}})
 </example>
+
+<example>
+Read the findings produced by ONE runner you just ran (instead of re-scanning the whole workspace): scope by its id from `_context`. A task/workflow result tells you its runner id — query scoped to it:
+query_workspace(query={"_context.task_chunk_id": "<id>", "_type": "vulnerability"})
+query_workspace(query={"_context.task_id": "<id>", "_type": "port"})
+</example>
 </queries>
