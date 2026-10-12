@@ -61,6 +61,7 @@ class h8mail(OSInt):
 						"site_name": site_name,
 						"username": email.split('@')[0],
 						"email": email,
+						"confidence": "low",
 						"extra_data": {
 							'source': source
 						},
@@ -69,6 +70,7 @@ class h8mail(OSInt):
 				yield UserAccount(**{
 					"username": email.split('@')[0],
 					"email": email,
+					"confidence": "low",
 					"extra_data": {
 						'source': self.get_opt_value('local_breach')
 					},

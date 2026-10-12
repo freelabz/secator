@@ -133,6 +133,8 @@ class httpx(Http):
 	@staticmethod
 	def on_json_loaded(self, item):
 		url_item = self._preprocess_url(item)
+		# httpx actively probes the URL (live status/response), so it's a verified observation.
+		url_item.setdefault('confidence', 'high')
 		url = Url(**url_item)
 		yield url
 

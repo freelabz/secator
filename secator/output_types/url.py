@@ -30,6 +30,7 @@ class Url(OutputType):
 	screenshot_path: str = field(default='', compare=False)
 	stored_response_path: str = field(default='', compare=False)
 	confidence: str = field(default='high', compare=False)
+	confidence_nb: int = field(default=0, compare=False)
 	response_headers: dict = field(default_factory=dict, repr=True, compare=False)
 	request_headers: dict = field(default_factory=dict, repr=True, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
