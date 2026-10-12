@@ -1,0 +1,16 @@
+type: workflow
+name: redis
+alias: redis
+description: Redis vulnerability scan
+long_description: |
+  Scans Redis vulnerabilities using specialized tools.
+tags: [redis, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  nuclei/redis:
+    description: Detect Redis vulnerabilities
+    template_condition: "contains(id, 'ftp') || contains(tags, 'ftp')"
