@@ -11,6 +11,9 @@ tags: [recon, dns, ssl, http]
 input_types:
 - host
 
+important_opts:
+  - passive
+
 options:
   passive:
     is_flag: True
