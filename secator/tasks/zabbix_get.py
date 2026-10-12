@@ -54,8 +54,9 @@ class zabbix_get(Command):
 	def on_cmd_done(self):
 		lines = self.output.split('\n')
 		key = self.get_opt_value('key')
-		error = any('ZBX_NOTSUPPORTED' in l or 'permission denied' in l or 'connection error' in l for l in lines)
-		if error:
+		markers = ('zbx_notsupported', 'permission denied', 'connection error', 'get value error', 'check access restrictions')
+		output_lower = self.output.lower()
+		if self.return_code != 0 or not self.output.strip() or any(m in output_lower for m in markers):
 			return
 		if key.startswith('vfs.file.contents'):
 			filepath = key.split('vfs.file.contents')[-1].rstrip(']').lstrip('[')
