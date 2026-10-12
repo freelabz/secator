@@ -154,3 +154,152 @@ class TestQueryDispatch(unittest.TestCase):
 		self.assertEqual(result.exit_code, 0)
 		vulns = captured.get('results', {}).get('vulnerability', [])
 		self.assertEqual(sorted(v['name'] for v in vulns), ['SQLi', 'XSS'])
+
+
+class TestShowAll(unittest.TestCase):
+	"""Tests for the --show-all flag on `secator q`."""
+
+	def setUp(self):
+		self.cli_runner = CliRunner()
+		self.temp_dir = tempfile.mkdtemp()
+		task_dir = Path(self.temp_dir) / WS / 'tasks' / '1'
+		task_dir.mkdir(parents=True)
+		rich_vuln = {
+			'_type': 'vulnerability',
+			'name': 'Log4Shell',
+			'severity': 'critical',
+			'matched_at': 'https://victim.example/api',
+			'epss_score': 0.975,
+			'description': 'Remote code execution via JNDI lookup in log4j2.',
+			'remediation': 'Upgrade log4j2 to 2.17.1 or later.',
+			'impact': 'Full system compromise.',
+			'poc': 'https://github.com/example/log4shell-poc',
+			'is_false_positive': False,
+			'_context': {'workspace_id': WS, 'workspace_duplicate': False},
+		}
+		with open(task_dir / 'report.json', 'w') as f:
+			import json as _json
+			_json.dump({'info': {'name': 't'}, 'results': {'vulnerability': [rich_vuln]}}, f)
+
+	def tearDown(self):
+		shutil.rmtree(self.temp_dir)
+
+	def _invoke(self, args):
+		from secator.cli import cli
+		captured = {}
+
+		def capture_send(report_self):
+			captured['results'] = report_self.data['results']
+			captured['show_all'] = report_self.show_all
+
+		with mock.patch('secator.query.json.CONFIG') as mock_cfg, \
+			mock.patch('secator.report.Report.send', capture_send):
+			mock_cfg.dirs.reports = Path(self.temp_dir)
+			result = self.cli_runner.invoke(cli, args)
+		return result, captured
+
+	def test_show_all_flag_sets_report_attribute(self):
+		"""--show-all is forwarded to the Report instance as show_all=True."""
+		result, captured = self._invoke(
+			['query', 'vulnerability', '-ws', WS, '--driver', 'local', '--show-all'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		self.assertTrue(captured.get('show_all'), 'report.show_all must be True when --show-all is passed')
+
+	def test_default_show_all_is_false(self):
+		"""Without --show-all, report.show_all defaults to False."""
+		result, captured = self._invoke(
+			['query', 'vulnerability', '-ws', WS, '--driver', 'local'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(result.exit_code, 0)
+		self.assertFalse(captured.get('show_all', False), 'report.show_all must be False by default')
+
+	def test_console_exporter_prints_extra_fields(self):
+		"""ConsoleExporter prints epss_score/description/remediation/impact/poc with show_all=True."""
+		from secator.exporters.console import ConsoleExporter
+		from secator.output_types import Vulnerability
+		from unittest.mock import patch, MagicMock
+
+		vuln = Vulnerability(
+			name='Log4Shell', severity='critical',
+			matched_at='https://victim.example/api',
+			epss_score=0.975, description='RCE via JNDI.',
+			remediation='Upgrade log4j2.', impact='Full compromise.',
+			poc='https://example.com/poc',
+		)
+		report = MagicMock()
+		report.show_all = True
+		report.data = {'results': {'vulnerability': [vuln]}}
+
+		printed_lines = []
+		with patch('secator.exporters.console.console_stdout') as mock_console:
+			mock_console.print.side_effect = lambda *a, **kw: printed_lines.append(' '.join(str(x) for x in a))
+			ConsoleExporter(report).send()
+
+		joined = '\n'.join(printed_lines)
+		self.assertIn('Epss Score', joined)
+		self.assertIn('0.975', joined)
+		self.assertIn('Description', joined)
+		self.assertIn('RCE via JNDI', joined)
+		self.assertIn('Remediation', joined)
+		self.assertIn('Impact', joined)
+		self.assertIn('Poc', joined)
+
+	def test_console_exporter_omits_extra_fields_when_not_show_all(self):
+		"""ConsoleExporter does NOT print extra fields when show_all is False."""
+		from secator.exporters.console import ConsoleExporter
+		from secator.output_types import Vulnerability
+		from unittest.mock import patch, MagicMock
+
+		vuln = Vulnerability(
+			name='Log4Shell', severity='critical',
+			matched_at='https://victim.example/api',
+			epss_score=0.975, description='RCE via JNDI.',
+			remediation='Upgrade log4j2.', impact='Full compromise.',
+			poc='https://example.com/poc',
+		)
+		report = MagicMock()
+		report.show_all = False
+		report.data = {'results': {'vulnerability': [vuln]}}
+
+		printed_lines = []
+		with patch('secator.exporters.console.console_stdout') as mock_console:
+			mock_console.print.side_effect = lambda *a, **kw: printed_lines.append(' '.join(str(x) for x in a))
+			ConsoleExporter(report).send()
+
+		joined = '\n'.join(printed_lines)
+		self.assertNotIn('Epss Score', joined)
+		self.assertNotIn('Description', joined)
+
+	def test_table_exporter_adds_extra_columns_with_show_all(self):
+		"""TableExporter appends extra vulnerability columns when show_all=True."""
+		from secator.exporters.table import TableExporter, _VULN_SHOW_ALL_FIELDS
+		from secator.output_types import Vulnerability
+		from unittest.mock import patch, MagicMock
+
+		vuln = Vulnerability(
+			name='Log4Shell', severity='critical',
+			matched_at='https://victim.example/api',
+			epss_score=0.975, description='RCE via JNDI.',
+			remediation='Upgrade log4j2.', impact='Full compromise.',
+			poc='https://example.com/poc',
+		)
+		report = MagicMock()
+		report.show_all = True
+		report.title = ''
+		report.data = {'results': {'vulnerability': [vuln]}}
+
+		captured_fields = {}
+
+		def fake_build_table(items, output_fields=None, sort_by=None):
+			captured_fields['output_fields'] = list(output_fields or [])
+			from rich.table import Table
+			return Table()
+
+		with patch('secator.exporters.table.build_table', fake_build_table), \
+			patch('secator.exporters.table.console'):
+			TableExporter(report).send()
+
+		for f in _VULN_SHOW_ALL_FIELDS:
+			self.assertIn(f, captured_fields.get('output_fields', []),
+				f'{f!r} should be in table columns when --show-all is active')

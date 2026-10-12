@@ -1245,8 +1245,9 @@ def list_aliases(silent):
 @click.option('--uniq', 'uniq', is_flag=True, default=False, help='Drop duplicate --format values')
 @click.option('--group', is_flag=True, default=False, help="Group findings by each output type's default field(s), aggregating a related field (e.g. vulnerabilities by name with their matched_at targets).")  # noqa: E501
 @click.option('--save', 'save', type=str, default=None, help='Save the query expression ARG under this name for later reuse (e.g. --save vuln_high)')  # noqa: E501
+@click.option('--show-all', 'show_all', is_flag=True, default=False, help='Show extra vulnerability fields: epss_score, description, remediation, impact, poc')  # noqa: E501
 @click.pass_context
-def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, sort, count, uniq, group, save):  # noqa: E501
+def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, sort, count, uniq, group, save, show_all):  # noqa: E501
 	"""Query"""
 
 	# 0. Save the expression under a name, then exit (reuse later with `secator q <name>`).
@@ -1262,17 +1263,17 @@ def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_fi
 	# Empty query: return all results (subject to the enforced base query),
 	# optionally scoped by --report-filter / --workspace.
 	if not arg:
-		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all)  # noqa: E501
 		return
 
 	# 1. Saved query name
 	if arg in CONFIG.queries:
-		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all)  # noqa: E501
 		return
 
 	# 2. Raw filter expression
 	if _looks_like_query_expr(arg):
-		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all)  # noqa: E501
 		return
 
 	# 3. Natural language -> AI chat
@@ -1656,7 +1657,7 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 	return _finish(list(sv))
 
 
-def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None):  # noqa: E501
+def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None, show_all=False):  # noqa: E501
 	"""Build and send a consolidated report. Shared by `report show` and `query`.
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
@@ -1767,7 +1768,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 
 	# 6. Build and send report via QueryEngine
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
-	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
+	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters, show_all=show_all)
 	# --group / --sort / --uniq / --count reshape or cap the output post-query. STREAM the findings
 	# (stream=True yields per-type StreamViews — nothing materialized) and aggregate incrementally,
 	# so peak memory is bounded by the RESULT size, not the finding count (safe for 100k+). --limit
