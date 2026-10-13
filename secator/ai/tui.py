@@ -53,6 +53,28 @@ def _finding_text(item, d: dict) -> Text:
 	return Text.from_markup(_finding_markup(d))
 
 
+def _msg_text(item, d: dict):
+	"""Render an info/warning/error line via its OutputType __rich__ (secator-identical,
+	keeps the [INF]/[WRN]/[ERR] tag + message markup)."""
+	r = getattr(item, "__rich__", None)
+	if callable(r):
+		try:
+			s = item.__rich__()
+			if isinstance(s, str):
+				try:
+					return Text.from_markup(s)
+				except Exception:  # noqa: BLE001
+					return Text(s)
+			return s
+		except Exception:  # noqa: BLE001
+			pass
+	msg = str(d.get("message", ""))
+	try:
+		return Text.from_markup(msg)
+	except Exception:  # noqa: BLE001
+		return Text(msg)
+
+
 def _finding_markup(d: dict) -> str:
 	t = d.get("_type", "")
 	src = escape(str(d.get("_source", "")))
@@ -149,6 +171,11 @@ class RunnerPanel(Vertical):
 		# count a finding that landed in a nested sub-panel (container total)
 		self.count += 1
 		self._refresh_head()
+
+	def add_note(self, renderable) -> None:
+		# a workflow/scan-level line (e.g. "Skipped task …") — keeps the box non-empty
+		self.lines += 1
+		self.query_one(".runner-out", Vertical).mount(Static(renderable, classes="out-line"))
 
 	async def subpanel(self, source: str) -> "RunnerPanel":
 		# get/create a nested task panel for a workflow/scan child, keyed by task name.
@@ -485,9 +512,13 @@ class AITUI(App):
 			await self._render_ai(d)
 			return
 		if t in ("info", "warning", "error"):
-			color = {"info": "dim", "warning": "yellow", "error": "red"}[t]
-			await self._append(Static(
-				Text.from_markup(f"[{color}]{escape(str(d.get('message', '')))}[/]"), classes="ai"))
+			renderable = _msg_text(item, d)
+			# inside a workflow/scan these are its own notes (e.g. "Skipped task …") —
+			# nest them so expanding the workflow shows them instead of "(no output)"
+			if self._container is not None:
+				self._container.add_note(renderable)
+			else:
+				await self._append(Static(renderable, classes="ai"))
 			return
 		if t in ("progress", "stat", "state", "target"):  # execution / plumbing types
 			return
