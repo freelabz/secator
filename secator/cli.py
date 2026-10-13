@@ -1960,9 +1960,8 @@ def _format_vuln_counts(counts):
 @click.option('--interesting', '-i', is_flag=True, default=False, help='Only show reports that have vulnerabilities')
 @click.option('--status', type=str, default=None, help="Filter by runner status (case-insensitive regex, e.g. SUCCESS, FAIL, '(RUNNING|FAILURE)')")  # noqa: E501
 @click.option('--show-children', is_flag=True, default=False, help='Include nested sub-tasks / sub-workflows (by default only outermost runners are shown)')  # noqa: E501
-@click.option('--threads', type=int, default=None, help=f'Threads for parallel vuln counting (local driver). Default: runners.threads ({CONFIG.runners.threads}).')  # noqa: E501
 @click.pass_context
-def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, interesting, status, show_children, threads):
+def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, interesting, status, show_children):
 	"""List all secator reports."""
 	effective_driver = QueryEngine.resolve_backend(driver)
 

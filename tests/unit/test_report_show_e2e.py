@@ -423,7 +423,7 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 				console.capture() as cap:
 			report_list.callback(
 				workspace=workspace_opt, runner_type=None, time_delta=None, driver='local', show_all=False,
-				interesting=False, status=None, show_children=False, threads=None,
+				interesting=False, status=None, show_children=False,
 			)
 		# Strip ANSI codes then flatten whitespace so assertions work on plain text
 		return ' '.join(_strip_ansi(cap.get()).split())
