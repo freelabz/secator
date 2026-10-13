@@ -189,7 +189,9 @@ class TestHandleShell(unittest.TestCase):
 		self.assertEqual(captured_context.get('session_id'), 'sess-123')
 
 		fake_runner.run.assert_called_once()
-		self.assertEqual(fake_runner.max_timeout, 60)
+		# No timeout arg -> the configured per-command default (security.shell_default_timeout).
+		from secator.config import CONFIG
+		self.assertEqual(fake_runner.max_timeout, CONFIG.security.shell_default_timeout)
 
 		self.assertEqual(results[0].ai_type, 'shell')
 		# The shell Ai must carry the UI-linking extra_data (runner_type + runner_id)
