@@ -16,7 +16,7 @@ import threading
 from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
 	Header, Input, Markdown, OptionList, SelectionList, Static)
 from textual.widgets.option_list import Option
@@ -117,6 +117,7 @@ class RunnerPanel(Vertical):
 		self.rname = rname
 		self.command = command
 		self.runner_id = runner_id
+		self.source = ""   # the child command's tool name, for routing on_line output
 		self.count = 0
 		self.lines = 0
 		self.done = False
@@ -292,6 +293,28 @@ class _BackBar(Static):
 		self.app._show_main()
 
 
+class _Grip(Static):
+	"""Draggable left edge of the findings panel — drag to resize its width."""
+	_dragging = False
+
+	def on_mouse_down(self, event) -> None:
+		self._dragging = True
+		self.capture_mouse()
+		event.stop()
+
+	def on_mouse_up(self, event) -> None:
+		self._dragging = False
+		self.release_mouse()
+		event.stop()
+
+	def on_mouse_move(self, event) -> None:
+		if not self._dragging:
+			return
+		total = self.app.size.width
+		width = max(24, min(total - 20, total - event.screen_x))
+		self.app.query_one("#findings-panel").styles.width = int(width)
+
+
 class PermissionPrompt(Vertical):
 	"""Neutral, vertically-stacked Approve / Approve all / Deny list for a permission
 	ask (↑/↓ + Enter). Selecting resolves the blocked worker. Typing a/aa/d works too."""
@@ -359,11 +382,11 @@ class AITUI(App):
 	.choice-q { color: #e6c15a; margin: 0 0 1 0; }
 	.choice-list { height: auto; max-height: 12; border: none; background: transparent; }
 
-	/* lazy findings side panel (ctrl+f) */
-	#findings-panel {
-		dock: right; width: 68; display: none; background: transparent;
-		border-left: solid #2b3245; padding: 0 1;
-	}
+	/* lazy findings side panel (ctrl+f); 1/3 width by default, drag the grip to resize */
+	#findings-panel { dock: right; width: 34%; display: none; background: transparent; }
+	#findings-grip { width: 1; height: 1fr; background: #2b3245; color: #6b7187; }
+	#findings-grip:hover { background: #3d6fb4; }
+	#findings-body { width: 1fr; padding: 0 1; }
 	#findings-title { height: 1; color: #c2a0ff; margin: 0 0 1 0; }
 	#findings-list { height: 1fr; background: transparent; border: none; padding: 0; }
 	#findings-list > .option-list--option-highlighted { background: #171a24; }
@@ -410,15 +433,21 @@ class AITUI(App):
 		self._spin_frame = 0
 		self._findings_src = None   # (workspace_id, context, session_id) for lazy querying
 		self._findings_loading = False
+		self._findings_seen: set = set()   # finding _uuids already shown (incremental refresh)
+		self._line_buffers: dict = {}      # source -> {cmd, lines} buffered until its card renders
 
 	def compose(self) -> ComposeResult:
 		yield Header(show_clock=True)
 		yield _BackBar(Text.from_markup("[#7fd1e0]← Back to conversation[/]"), id="backbar")
 		yield Vertical(VerticalScroll(id="convo"), id="views")
 		yield Static("", id="status")
-		yield Vertical(
-			Static("Findings", id="findings-title"),
-			OptionList(id="findings-list"),
+		yield Horizontal(
+			_Grip("│", id="findings-grip"),
+			Vertical(
+				Static("Findings", id="findings-title"),
+				OptionList(id="findings-list"),
+				id="findings-body",
+			),
 			id="findings-panel",
 		)
 		with Vertical(id="input-box"):
@@ -430,7 +459,8 @@ class AITUI(App):
 		self.query_one("#backbar").display = False
 		self._write = self.query_one("#convo", VerticalScroll)
 		self.query_one("#input-box Input", Input).focus()
-		self.set_interval(0.1, self._tick_spinner)   # animate the status spinner
+		self.set_interval(0.1, self._tick_spinner)    # animate the status spinner
+		self.set_interval(3.0, self._tick_findings)   # auto-update the findings panel
 		if self._initial_prompt:
 			# the -p prompt isn't typed into the input, so echo it once up front
 			self.call_later(self._append, Static(
@@ -461,22 +491,37 @@ class AITUI(App):
 	def tui_render_line(self, line: str, source: str = "") -> None:
 		self.call_from_thread(self._render_line, line, source)
 
-	async def _sink(self, source: str) -> "RunnerPanel | None":
-		# where command/output/findings land: a workflow/scan child's sub-panel, else
-		# the current leaf panel
+	async def _sink_for_source(self, source: str) -> "RunnerPanel | None":
+		# Where a command runner's output lands. In a workflow/scan it's the child's
+		# sub-panel. For a leaf it's the current panel ONLY if its source matches — in a
+		# PARALLEL batch several tasks stream at once while the global _current points at
+		# whichever finished first, so matching by source (tool name) avoids cross-wiring.
 		if self._container is not None:
 			return await self._container.subpanel(source)
-		return self._current
+		if self._current is not None and getattr(self._current, "source", "") == source:
+			return self._current
+		return None   # no panel yet (batch card renders on completion) -> buffer
+
+	def _buffer(self, source: str) -> dict:
+		return self._line_buffers.setdefault(source, {"cmd": "", "lines": []})
 
 	async def _set_command(self, cmd: str, source: str = "") -> None:
-		sink = await self._sink(source)
-		if sink is not None and cmd:
+		if not cmd:
+			return
+		sink = await self._sink_for_source(source)
+		if sink is not None:
 			sink.set_command(cmd)
+		else:
+			self._buffer(source)["cmd"] = cmd
 
 	async def _render_line(self, line: str, source: str = "") -> None:
-		sink = await self._sink(source)
-		if sink is not None and isinstance(line, str) and line.strip():
+		if not (isinstance(line, str) and line.strip()):
+			return
+		sink = await self._sink_for_source(source)
+		if sink is not None:
 			sink.add_raw(line)
+		else:
+			self._buffer(source)["lines"].append(line)
 
 	def _convo(self) -> VerticalScroll:
 		# the main conversation (prompts/questions always go here)
@@ -533,11 +578,23 @@ class AITUI(App):
 		if panel.display:
 			if self._findings_src is None:
 				self._set_findings_title(None, note="no findings source yet")
-			elif not self._findings_loading:
-				self._findings_loading = True
-				self.query_one("#findings-list", OptionList).clear_options()
-				self._set_findings_title(None, note="loading…")
-				threading.Thread(target=self._load_findings, daemon=True).start()
+			else:
+				self._refresh_findings()
+
+	def _refresh_findings(self) -> None:
+		# kick an incremental load (adds only unseen findings) off the UI thread
+		if self._findings_src is None or self._findings_loading:
+			return
+		self._findings_loading = True
+		threading.Thread(target=self._load_findings, daemon=True).start()
+
+	def _tick_findings(self) -> None:
+		# auto-update while the panel is open (new findings appear as tasks run)
+		try:
+			if self.query_one("#findings-panel").display:
+				self._refresh_findings()
+		except Exception:  # noqa: BLE001
+			pass
 
 	def _set_findings_title(self, total, note: str = "") -> None:
 		label = "Findings" if total is None else f"Findings ({total})"
@@ -562,12 +619,19 @@ class AITUI(App):
 			query = {"_context.session_id": sid, "_type": {"$in": types}}
 			total = engine.count(query)
 			self.call_from_thread(self._set_findings_title, total)
-			n = 0
+			n = len(self._findings_seen)
 			for batch in engine.iterate(query, batch_size=200):
-				opts = [Option(_finding_text(None, d)) for d in batch]
+				opts = []
+				for d in batch:
+					uid = d.get("_uuid")
+					if uid is not None and uid in self._findings_seen:
+						continue   # incremental: only add findings we haven't shown yet
+					if uid is not None:
+						self._findings_seen.add(uid)
+					opts.append(Option(_finding_text(None, d)))
+					n += 1
 				if opts:
 					self.call_from_thread(self._add_finding_options, opts)
-				n += len(opts)
 				if n >= 5000:   # safety cap on mounted rows
 					self.call_from_thread(self._set_findings_title, total, note=f"showing first {n}")
 					break
@@ -677,10 +741,21 @@ class AITUI(App):
 			else:
 				kind, rname, command = at, desc or content or ed.get("name") or "", ""
 			panel = RunnerPanel(kind, rname, command=command, runner_id=ed.get("runner_id", ""))
+			# the card's content is the tool name (== on_line source) for a task; used to
+			# route this task's live output, incl. output buffered before the card rendered
+			# (parallel batch: cards render on completion, after the output streamed)
+			panel.source = content if at == "task" else ""
 			await self._append(panel)
 			self._current = panel
 			# workflows/scans contain child tasks: nest their findings/output by source
 			self._container = panel if at in ("workflow", "scan") else None
+			if panel.source:
+				buf = self._line_buffers.pop(panel.source, None)
+				if buf:
+					if buf["cmd"]:
+						panel.set_command(buf["cmd"])
+					for ln in buf["lines"]:
+						panel.add_raw(ln)
 			self._set_status(f"running {kind} {rname or command}".strip())
 		elif at == "shell_output":
 			if self._current is not None:
