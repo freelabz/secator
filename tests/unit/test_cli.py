@@ -428,9 +428,7 @@ class TestCli(unittest.TestCase):
 		assert 'cli' in result.output
 		assert 'dirs' in result.output
 
-	@mock.patch('secator.cli.list_reports')
-	def test_workspace_list_command(self, mock_list_reports):
-		mock_list_reports.return_value = []
+	def test_workspace_list_command(self):
 		result = self.runner.invoke(cli, ['workspace', 'list'])
 		assert not result.exception
 		assert result.exit_code == 0
@@ -473,9 +471,7 @@ class TestCli(unittest.TestCase):
 			assert 'Unalias file written' in result.output
 			mock_file.assert_called_once()
 
-	@mock.patch('secator.cli.list_reports')
-	def test_report_show_command(self, mock_list_reports):
-		mock_list_reports.return_value = []
+	def test_report_show_command(self):
 		tf = tempfile.NamedTemporaryFile(delete=False)
 		with open(tf.name, 'w') as f:
 			f.write('{"info":{"name":"test", "title": "test"}, "results":{}}')
@@ -515,9 +511,9 @@ class TestCli(unittest.TestCase):
 				assert 'something went wrong' in result.output
 				assert 'nmap_node_1' in result.output
 
-	@mock.patch('secator.cli.list_reports')
-	def test_report_list_command(self, mock_list_reports):
-		mock_list_reports.return_value = []
+	@mock.patch('secator.cli.QueryEngine.list_runners')
+	def test_report_list_command(self, mock_list_runners):
+		mock_list_runners.return_value = []
 		result = self.runner.invoke(cli, ['report', 'list'])
 		assert not result.exception
 		assert result.exit_code == 0

@@ -751,22 +751,22 @@ def should_update(update_frequency, last_updated=None, timestamp=None):
 
 
 def list_reports(workspace=None, type=None, timedelta=None):
-	"""List all reports in secator reports dir.
+	"""Yield report.json paths in the secator reports dir.
+
+	A generator (lazy) — nothing is accumulated in memory.
 
 	Args:
 		workspace (str): Filter by workspace name.
 		type (str): Filter by runner type.
 		timedelta (None | datetime.timedelta): Keep results newer than timedelta.
 
-	Returns:
-		list: List all JSON reports.
+	Yields:
+		pathlib.Path: Each matching report.json path.
 	"""
 	if workspace:
 		workspace = sanitize_folder_name(workspace)
 	if type and not type.endswith('s'):
 		type += 's'
-	json_reports = []
-	_t = monotonic()
 	# report.json lives at a fixed depth: <reports>/<workspace>/<type>/<id>/report.json.
 	# Glob that exact depth instead of os.walk — the latter descends into every run's
 	# artifact subdirectories (potentially thousands of files on a large reports dir)
@@ -780,9 +780,7 @@ def list_reports(workspace=None, type=None, timedelta=None):
 			continue
 		if timedelta and (datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)) > timedelta:
 			continue
-		json_reports.append(path)
-	debug(f'list_reports: found {len(json_reports)} report(s) in {monotonic() - _t:.3f}s', sub='report')
-	return json_reports
+		yield path
 
 
 def get_info_from_report_path(path):

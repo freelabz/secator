@@ -19,7 +19,6 @@ from jinja2 import Template
 from rich.live import Live
 from secator.rich import CustomMarkdown as Markdown
 from rich.rule import Rule
-from rich.spinner import Spinner
 from rich.table import Table
 
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path, download_files
@@ -38,7 +37,6 @@ from secator.utils import (
 	detect_host,
 	print_version,
 	get_file_timestamp,
-	list_reports,
 	get_info_from_report_path,
 	human_to_timedelta,
 	sanitize_folder_name,
@@ -1999,222 +1997,110 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		table.add_column('Path', overflow='fold')
 
 	shown = 0
+	is_local = effective_driver == 'local'
 
-	if effective_driver in ('mongodb', 'api', 'sqlite'):
-		# --interesting and --time-delta are only supported by the local driver.
+	# --interesting / --time-delta are local-only (other backends don't carry per-run
+	# vuln counts or filesystem mtimes).
+	if not is_local:
 		unsupported = [opt for opt, val in (('--interesting', interesting), ('--time-delta', time_delta)) if val]
 		if unsupported:
 			console.print(Warning(message=f'{", ".join(unsupported)} {"is" if len(unsupported) == 1 else "are"} only supported with the local driver and will be ignored for the {effective_driver} driver.'))  # noqa: E501
-		# Resolve the workspace name to its id for the API backend. The API only
-		# reliably filters runners by workspace_id (ObjectId); passing the raw name
-		# returns nothing (e.g. `r list -ws T2S` finds 0 while `r list` finds all).
-		list_workspace = workspace
-		if effective_driver == 'api' and workspace:
-			try:
-				from secator.hooks.api import resolve_workspace
 
-				list_workspace, _ = resolve_workspace(workspace)
-			except Exception as e:
-				console.print(Error(message=f'Error resolving workspace from API: {e}'))
-				return
-		# Use QueryEngine backend to list runners
-		context = {'drivers': [effective_driver]}
-		engine = QueryEngine(workspace_id=list_workspace or '', context=context)
-		# By default only list outermost runners (has_parent=False). --show-children
-		# drops the filter so nested sub-tasks/sub-workflows are shown too.
-		has_parent = None if show_children else False
+	# Resolve the workspace name to its id for the API backend (it filters by id).
+	list_workspace = workspace
+	if effective_driver == 'api' and workspace:
+		try:
+			from secator.hooks.api import resolve_workspace
+			list_workspace, _ = resolve_workspace(workspace)
+		except Exception as e:
+			console.print(Error(message=f'Error resolving workspace from API: {e}'))
+			return
+
+	# ONE code path for every backend: list runners via the QueryEngine, then stream
+	# rows into a live table. Vuln counts exist only for the local driver (read from
+	# each report's results.ndjson); other backends show '-'.
+	engine = QueryEngine(workspace_id=list_workspace or '', context={'drivers': [effective_driver]})
+	has_parent = None if show_children else False
+	with console.status('[bold]Listing reports …[/]'):
+		_t = time.time()
 		runners = engine.list_runners(workspace_id=list_workspace, runner_type=runner_type, has_parent=has_parent)
-		for runner_info in runners:
-			runner_status = runner_info.get('status', '')
-			status_color = STATE_COLORS.get(runner_status, 'white')
-			if status_pattern and not status_pattern.search(str(runner_status)):
-				continue
-			targets = runner_info.get('targets', [])
-			first_target = str(targets[0]) if targets else ''
-			if len(targets) > 1:
-				first_target += f' (+{len(targets) - 1})'
-			profiles = runner_info.get('run_opts', {}).get('profiles', [])
-			if isinstance(profiles, str):
-				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
-			profiles = [p for p in profiles if p]
-			profiles_str = ', '.join(profiles) if profiles else ''
-			# Show the id as {runner_type}/{runner_id} so it can be passed to `secator r info`.
-			runner_id = runner_info.get('_id_str')
-			if not runner_id:
-				rtype = runner_info.get('_type') or runner_info.get('config', {}).get('type', '')
+		if is_local:
+			# Chronological (oldest first), as before — sort by report mtime.
+			runners = sorted(runners, key=lambda r: Path(r['_path']).stat().st_mtime)
+		debug(f'listed {len(runners)} runner(s) in {time.time() - _t:.3f}s', sub='report')
+
+	# --time-delta cutoff (local only): keep reports whose mtime is newer than the delta.
+	cutoff_ts = None
+	if is_local and time_delta:
+		cutoff_ts = time.time() - human_to_timedelta(time_delta).total_seconds()
+
+	def _build_row(r, vuln_str):
+		runner_id = r.get('_id_str')
+		if not runner_id:
+			rid = r.get('_id', '')
+			if r.get('_path'):  # local: _id is already '<type>/<id>'
+				runner_id = rid
+			else:
+				rtype = r.get('_type') or r.get('config', {}).get('type', '')
 				if rtype and not rtype.endswith('s'):
 					rtype += 's'
-				raw_id = runner_info.get('_id', '')
-				runner_id = f'{rtype}/{raw_id}' if rtype and raw_id else (raw_id or rtype)
-			ws_name = runner_info.get('context', {}).get('workspace_name') or runner_info.get('_workspace', workspace or '')
-			row = [
-				ws_name,
-				f'[bold blue]{runner_info.get("name", "")}[/]',
-				runner_id,
-				first_target,
-				profiles_str,
-				humanize_date(runner_info.get('start_time')),
-				humanize_date(runner_info.get('end_time')),
-				runner_info.get('elapsed_human', ''),
-				f'[{status_color}]{runner_status}[/]',
-				'-',
-			]
-			if show_all:
-				row.append('')
-			table.add_row(*row)
-			shown += 1
-	else:
-		# Local filesystem listing — two-phase lazy approach:
-		# Phase 1 (fast): read only the ``info`` block from each report.json so
-		#   metadata rows appear in the Live table immediately.
-		# Phase 2 (lazy): iterate results.ndjson per report to fill in vuln counts.
-		# --interesting requires vuln counts to filter correctly, so for that flag
-		# the full count is done upfront and no Live pass is needed.
-		# Discovering reports walks the reports dir (can be slow on a large one), so
-		# show a spinner while it runs.
-		_t = time.time()
-		with console.status('[bold]Listing reports …[/]'):
-			paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
-			debug(f'list_reports returned {len(paths)} path(s) in {time.time() - _t:.3f}s', sub='report')
-			_t = time.time()
-			paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
-			debug(f'sorted {len(paths)} path(s) by mtime in {time.time() - _t:.3f}s', sub='report')
+				runner_id = f'{rtype}/{rid}' if rtype and rid else (rid or rtype)
+		path = r.get('_path')
+		id_cell = f'[link={Path(path).as_uri()}]{runner_id}[/link]' if path else runner_id
+		ws_name = r.get('context', {}).get('workspace_name') or r.get('_workspace') or (workspace or '')
+		targets = r.get('targets', [])
+		first_target = str(targets[0]) if targets else ''
+		if len(targets) > 1:
+			first_target += f' (+{len(targets) - 1})'
+		profiles = r.get('run_opts', {}).get('profiles', [])
+		if isinstance(profiles, str):
+			profiles = [p.strip() for p in profiles.split(',') if p.strip()]
+		profiles = [p for p in profiles if p]
+		runner_status = r.get('status', '')
+		status_color = STATE_COLORS.get(runner_status, 'white')
+		row = [
+			ws_name,
+			f'[bold blue]{r.get("name", "")}[/]',
+			id_cell,
+			first_target,
+			', '.join(profiles) if profiles else '',
+			humanize_date(r.get('start_time')),
+			humanize_date(r.get('end_time')),
+			r.get('elapsed_human', ''),
+			f'[{status_color}]{runner_status}[/]',
+			vuln_str,
+		]
+		if show_all:
+			row.append(str(path) if path else '')
+		return row
 
-		# Each entry: {'path': Path, 'row': list[str], 'counted': bool}
-		pending_rows = []
-
-		def _build_local_row(path_info, report_info, vuln_str, show_all, path):
-			runner_id = path_info['type'] + '/' + path_info['id']
-			targets = report_info.get('targets', [])
-			first_target = str(targets[0]) if targets else ''
-			if len(targets) > 1:
-				first_target += f' (+{len(targets) - 1})'
-			profiles = report_info.get('run_opts', {}).get('profiles', [])
-			if isinstance(profiles, str):
-				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
-			profiles_str = ', '.join(profiles) if profiles else ''
-			runner_status = report_info.get('status', '')
-			status_color = STATE_COLORS[runner_status] if runner_status in STATE_COLORS else 'white'
-			row = [
-				path_info['workspace'],
-				f'[bold blue]{report_info.get("name", "")}[/]',
-				f'[link={Path(path).as_uri()}]{runner_id}[/link]',
-				first_target,
-				profiles_str,
-				humanize_date(report_info.get('start_time')),
-				humanize_date(report_info.get('end_time')),
-				report_info.get('elapsed_human', ''),
-				f'[{status_color}]{runner_status}[/]',
-				vuln_str,
-			]
-			if show_all:
-				row.append(str(path))
-			return row
-
-		# Phase 1: metadata only — no results.ndjson touched.
-		_t_phase1 = time.time()
-		for path in paths:
-			try:
-				_t_row = time.time()
-				path_info = get_info_from_report_path(path)
-				report_info = _load_report_info(path)
-				debug(f'loaded metadata {path} in {time.time() - _t_row:.3f}s', sub='report', verbose=True)
-				runner_status = report_info.get('status', '')
-				# Apply --status filter eagerly (no vuln data needed).
-				if status_pattern and not status_pattern.search(str(runner_status)):
+	# transient=False + vertical_overflow='visible': Live leaves the full table in
+	# place (scrollable) on exit, so no reprint. nullcontext when there's nothing to
+	# list, so we never flash an empty table before "No reports found".
+	live_cm = Live(
+		table, console=console, refresh_per_second=4,
+		transient=False, vertical_overflow='visible',
+	) if runners else nullcontext()
+	with live_cm:
+		for r in runners:
+			runner_status = r.get('status', '')
+			if status_pattern and not status_pattern.search(str(runner_status)):
+				continue
+			if is_local:
+				path = r.get('_path')
+				if cutoff_ts is not None and path and Path(path).stat().st_mtime < cutoff_ts:
 					continue
-				# --interesting requires vuln counts to filter; count now and skip
-				# zero-vuln reports.  Mark row as already counted so Phase 2 skips it.
-				if interesting:
-					vuln_counts = _count_report_vulns(path)
-					if sum(vuln_counts.values()) == 0:
-						continue
-					vuln_str = _format_vuln_counts(vuln_counts)
-					counted = True
-				else:
-					# Animated spinner shown in the Vulnerabilities cell while Phase 2
-					# counts; replaced in place by the real count when ready.
-					vuln_str = Spinner('dots', text='[dim]counting…[/]', style='dim')
-					counted = False
-				row = _build_local_row(path_info, report_info, vuln_str, show_all, path)
-				pending_rows.append({'path': path, 'row': row, 'counted': counted})
-				shown += 1
-			except Exception as e:
-				console.print(Error(message=f'Could not load {path}: {str(e)}'))
-		debug(
-			f'phase 1 (metadata) loaded {len(pending_rows)} row(s) in {time.time() - _t_phase1:.3f}s '
-			f'(interesting={interesting})',
-			sub='report')
-
-		# Build the table ONCE, then let Live animate it while Phase 2 fills in the
-		# vuln counts. Per the rich Live docs we pass the single table renderable to
-		# Live and MUTATE it in place (update one cell per finished count) rather than
-		# rebuilding the table each tick — updates are O(1), so total render cost is
-		# O(rows x refresh_ticks), not the O(rows^2) of the old rebuild-every-count.
-		# The Vulnerabilities cell is ALWAYS index 9; --show-all appends Path at
-		# index 10, so the count column index does not shift.
-		vuln_col_idx = 9
-		_t = time.time()
-		for idx, entry in enumerate(pending_rows):
-			entry['row_idx'] = idx
-			table.add_row(*entry['row'])
-		debug(f'built table with {len(pending_rows)} row(s) in {time.time() - _t:.3f}s', sub='report')
-
-		todo = [e for e in pending_rows if not e['counted']]
-		debug(
-			f'phase 2: {len(todo)} report(s) to count '
-			f'(console.is_terminal={getattr(console, "is_terminal", "?")})',
-			sub='report')
-		if todo:
-			from concurrent.futures import ThreadPoolExecutor, as_completed
-
-			def _timed_count(path):
-				_t = time.time()
+				# Lazy vuln count — the slow part, streamed row-by-row under Live.
 				counts = _count_report_vulns(path)
-				debug(f'counted {path} in {time.time() - _t:.3f}s', sub='report', verbose=True)
-				return counts
-
-			def _set_vuln_cell(row_idx, value):
-				# In-place cell update — no table rebuild. Live's auto-refresh renders it.
-				table.columns[vuln_col_idx]._cells[row_idx] = value
-
-			# Worker threads only READ their own file and return counts; the table cell
-			# updates happen solely here on the main thread as futures complete, so no
-			# lock is needed. Cap workers so huge listings don't open too many FDs.
-			n_threads = threads if threads and threads > 0 else CONFIG.runners.threads
-			n_workers = max(1, min(n_threads, len(todo)))
-			debug(f'phase 2: counting with {n_workers} thread(s)', sub='report')
-			_t_phase2 = time.time()
-			# transient=False: Live leaves the fully-counted table in place on exit, so
-			# we don't reprint it. vertical_overflow='visible' lets a table taller than
-			# the terminal render all its rows (into scrollback) instead of clipping to
-			# the viewport. Low refresh rate: we only need cells to fill in as counts
-			# land, not a smooth spinner — fewer re-layouts of a large table.
-			with Live(
-				table, console=console, refresh_per_second=4,
-				transient=False, vertical_overflow='visible',
-			):
-				with ThreadPoolExecutor(max_workers=n_workers) as pool:
-					future_to_entry = {
-						pool.submit(_timed_count, e['path']): e for e in todo
-					}
-					for future in as_completed(future_to_entry):
-						entry = future_to_entry[future]
-						try:
-							vuln_counts = future.result()
-						except Exception:
-							vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
-						_set_vuln_cell(entry['row_idx'], _format_vuln_counts(vuln_counts))
-						entry['counted'] = True
-			debug(f'phase 2 (counting) done in {time.time() - _t_phase2:.3f}s', sub='report')
-			# Live already rendered the final table in place; don't reprint it below.
-			table = None
+				if interesting and sum(counts.values()) == 0:
+					continue
+				vuln_str = _format_vuln_counts(counts)
+			else:
+				vuln_str = '-'
+			table.add_row(*_build_row(r, vuln_str))
+			shown += 1
 
 	if shown > 0:
-		if table is not None:
-			_t = time.time()
-			console.print(table)
-			debug(f'printed table in {time.time() - _t:.3f}s', sub='report')
 		console.print(Info(message=f'Found {shown} reports.'))
 		if workspace:
 			console.print(Info(message=f'Current workspace: [bold gold3]{workspace}[/]. Use [bold green4]-ws <workspace_name>[/] to switch.'))  # noqa: E501
