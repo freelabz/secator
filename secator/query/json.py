@@ -236,22 +236,33 @@ class JsonBackend(QueryBackend):
 				if report_dir.is_dir():
 					yield from self._iter_report_dir(report_dir, runner_type.rstrip('s'))
 
-	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
+	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None,
+	                    offset: int = 0) -> List[Dict[str, Any]]:
 		"""Search findings matching query by FILTERING WHILE STREAMING — peak memory is O(matches),
 		not O(total findings). The fan-in extractor's one store query used to materialize the whole
 		result set before filtering to a handful of matches, which was the O(N)
 		peak that defeated streaming. We iterate records one at a time, match, and keep only matches,
-		deduped last-wins by _uuid over the (small) matched subset."""
+		deduped last-wins by _uuid over the (small) matched subset.
+
+		``offset`` (Python slice fallback — no native skip): dedup must complete across the whole
+		matched set before a stable page can be sliced, so we collect up to ``offset + limit``
+		distinct matches, then drop the first ``offset``. offset=0 keeps the legacy early-break."""
 		by_uuid = {}
+		# With an offset we must keep enough matches to skip past it; the early-break
+		# window grows to offset+limit (still bounded, not O(total)).
+		window = (offset + limit) if (limit and offset) else limit
 		for finding in self._iter_records():
 			if not match_query(finding, query):
 				continue
 			if exclude_fields and isinstance(finding, dict):
 				finding = {k: v for k, v in finding.items() if k not in exclude_fields}
 			by_uuid[(finding.get('_uuid') if isinstance(finding, dict) else None) or id(finding)] = finding
-			if limit and len(by_uuid) >= limit:
+			if window and len(by_uuid) >= window:
 				break
-		return list(by_uuid.values())
+		results = list(by_uuid.values())
+		if offset:
+			results = results[offset:]
+		return results
 
 	def _execute_iterate(self, query: dict, batch_size: int = 1000):
 		"""Stream matching records in batches — O(batch) + O(distinct uuids), never materializing the

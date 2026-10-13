@@ -155,6 +155,23 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		self.assertEqual(len(res), 1)                       # u2 torn line skipped; u1 deduped
 		self.assertEqual(res[0]['status_code'], 200)        # later u1 line wins
 
+	def test_offset_slice_fallback(self):
+		from secator.query.json import JsonBackend
+		folder = Path(self.temp_dir) / 'ws1' / 'tasks' / 'pag1'
+		folder.mkdir(parents=True)
+		nd = folder / 'results.ndjson'
+		nd.write_text('\n'.join(
+			json.dumps({'_type': 'url', '_uuid': f'u{i}', 'url': f'http://x/{i}'})
+			for i in range(10)
+		) + '\n')
+		backend = JsonBackend(workspace_id='ws1', config={'reports_dir': self.temp_dir},
+							  context={'report_dir': str(folder)})
+		# no native skip: slice fallback over the deduped matched set
+		page1 = backend.search({'_type': 'url'}, limit=3, offset=0)
+		page2 = backend.search({'_type': 'url'}, limit=3, offset=3)
+		self.assertEqual([r['_uuid'] for r in page1], ['u0', 'u1', 'u2'])
+		self.assertEqual([r['_uuid'] for r in page2], ['u3', 'u4', 'u5'])
+
 	def test_reader_falls_back_to_old_report_json(self):
 		from secator.query.json import JsonBackend
 		folder = Path(self.temp_dir) / 'ws1' / 'tasks' / 'old1'
