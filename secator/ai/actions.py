@@ -701,22 +701,24 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	if denial is not None:
 		yield denial
 		return
-	# TUI-only: stream the child task's command + raw stdout into its panel. This feeds
-	# the Textual UI directly (never the LLM item stream, so model context stays clean).
-	# on_line fires on the underlying command runner, whose `self.cmd` is the real
-	# command. Keyed on runner_cls so it reaches the child command runner.
-	if runner_type == "task":
+	# TUI-only: stream each child command's command + raw stdout into its panel. This
+	# feeds the Textual UI directly (never the LLM item stream, so model context stays
+	# clean). on_line fires on the underlying command runner, whose `self.cmd` is the
+	# real command and `self.config.name` the task name (used to route into the right
+	# sub-panel for a workflow/scan). Keyed on runner_cls so it reaches the children.
+	if runner_type in ("task", "workflow", "scan"):
 		from secator.rich import get_tui
 		_tui = get_tui()
 		if _tui is not None:
-			_cmd_sent = {}
+			_cmd_sent = set()
 
 			def _tui_on_line(self, line, _tui=_tui, _cmd_sent=_cmd_sent):
 				try:
-					if "x" not in _cmd_sent:
-						_cmd_sent["x"] = True
-						_tui.tui_set_command(getattr(self, "cmd", "") or "")
-					_tui.tui_render_line(line)
+					source = getattr(getattr(self, "config", None), "name", "") or ""
+					if source not in _cmd_sent:
+						_cmd_sent.add(source)
+						_tui.tui_set_command(getattr(self, "cmd", "") or "", source)
+					_tui.tui_render_line(line, source)
 				except Exception:  # noqa: BLE001 - UI feed must never crash a run
 					pass
 				return line

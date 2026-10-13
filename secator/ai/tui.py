@@ -98,6 +98,7 @@ class RunnerPanel(Vertical):
 		self.lines = 0
 		self.done = False
 		self._collapsed = True
+		self.subpanels: dict = {}   # source -> nested RunnerPanel (workflow/scan children)
 
 	def compose(self) -> ComposeResult:
 		yield _Head(self._header(), classes="runner-head")
@@ -141,6 +142,23 @@ class RunnerPanel(Vertical):
 		self.query_one(".runner-out", Vertical).mount(Static(renderable, classes="out-line"))
 		self._refresh_head()
 
+	def bump(self) -> None:
+		# count a finding that landed in a nested sub-panel (container total)
+		self.count += 1
+		self._refresh_head()
+
+	async def subpanel(self, source: str) -> "RunnerPanel":
+		# get/create a nested task panel for a workflow/scan child, keyed by task name.
+		# await the mount so the sub-panel is composed before we write into it.
+		source = source or "results"
+		sp = self.subpanels.get(source)
+		if sp is None:
+			sp = RunnerPanel("task", source)
+			sp.done = self.done
+			self.subpanels[source] = sp
+			await self.query_one(".runner-out", Vertical).mount(sp)
+		return sp
+
 	def set_command(self, cmd: str) -> None:
 		# add/replace the dim `$ command` line at the top of the box (once)
 		if self.command or not cmd:
@@ -162,7 +180,9 @@ class RunnerPanel(Vertical):
 
 	def finish(self) -> None:
 		self.done = True
-		if not self.count and not self.lines and not self.command:
+		for sp in self.subpanels.values():
+			sp.finish()
+		if not self.count and not self.lines and not self.command and not self.subpanels:
 			self.query_one(".runner-out", Vertical).mount(
 				Static(Text.from_markup("[dim i](no output)[/]"), classes="out-line"))
 		self._refresh_head()
@@ -285,6 +305,7 @@ class AITUI(App):
 		self._mode = mode
 		self._initial_prompt = initial_prompt or ""
 		self._current: RunnerPanel | None = None
+		self._container: RunnerPanel | None = None   # active workflow/scan nesting parent
 		self._steers: list[str] = []
 		self._steers_lock = threading.Lock()
 		self._pending_ask = None
@@ -325,19 +346,28 @@ class AITUI(App):
 
 	# thread-safe entries the child-runner on_line hook calls (TUI-only, not in the
 	# LLM stream): the task's command and its raw stdout, routed to the active panel
-	def tui_set_command(self, cmd: str) -> None:
-		self.call_from_thread(self._set_command, cmd)
+	def tui_set_command(self, cmd: str, source: str = "") -> None:
+		self.call_from_thread(self._set_command, cmd, source)
 
-	def tui_render_line(self, line: str) -> None:
-		self.call_from_thread(self._render_line, line)
+	def tui_render_line(self, line: str, source: str = "") -> None:
+		self.call_from_thread(self._render_line, line, source)
 
-	def _set_command(self, cmd: str) -> None:
-		if self._current is not None and cmd:
-			self._current.set_command(cmd)
+	async def _sink(self, source: str) -> "RunnerPanel | None":
+		# where command/output/findings land: a workflow/scan child's sub-panel, else
+		# the current leaf panel
+		if self._container is not None:
+			return await self._container.subpanel(source)
+		return self._current
 
-	def _render_line(self, line: str) -> None:
-		if self._current is not None and isinstance(line, str) and line.strip():
-			self._current.add_raw(line)
+	async def _set_command(self, cmd: str, source: str = "") -> None:
+		sink = await self._sink(source)
+		if sink is not None and cmd:
+			sink.set_command(cmd)
+
+	async def _render_line(self, line: str, source: str = "") -> None:
+		sink = await self._sink(source)
+		if sink is not None and isinstance(line, str) and line.strip():
+			sink.add_raw(line)
 
 	def _convo(self) -> VerticalScroll:
 		return self.query_one("#convo", VerticalScroll)
@@ -367,10 +397,15 @@ class AITUI(App):
 			return
 		if t in ("progress", "stat", "state", "target"):  # execution / plumbing types
 			return
-		# a finding → render with its own __rich__ (secator-identical), into the
-		# current runner's panel (or top-level if none)
+		# a finding → render with its own __rich__ (secator-identical). Inside a
+		# workflow/scan it nests under the child task's sub-panel; a single task goes
+		# straight in; otherwise it lands at top level.
 		renderable = _finding_text(item, d)
-		if self._current is not None:
+		if self._container is not None:
+			sp = await self._container.subpanel(d.get("_source") or "results")
+			sp.add_finding(renderable)
+			self._container.bump()
+		elif self._current is not None:
 			self._current.add_finding(renderable)
 		else:
 			await self._append(Static(renderable, classes="out-line"))
@@ -383,14 +418,11 @@ class AITUI(App):
 			# the ask_user prompt — don't double-render from the item stream
 			return
 		if at == "response":
-			if self._current is not None:
-				self._current.finish()
-				self._current = None
+			self._finish_current()
 			await self._append(Markdown(content, classes="ai"))  # AI text as Markdown
 		elif at in ("task", "workflow", "scan", "query", "shell"):
 			ed = d.get("extra_data") or {}
-			if self._current is not None:
-				self._current.finish()
+			self._finish_current()
 			desc = ed.get("description") or ""
 			if at == "shell":
 				# LLM-supplied description as the title; the command goes in the box
@@ -399,8 +431,11 @@ class AITUI(App):
 				kind, rname, command = "query", desc or content, content
 			else:
 				kind, rname, command = at, desc or content or ed.get("name") or "", ""
-			self._current = RunnerPanel(kind, rname, command=command, runner_id=ed.get("runner_id", ""))
-			await self._append(self._current)
+			panel = RunnerPanel(kind, rname, command=command, runner_id=ed.get("runner_id", ""))
+			await self._append(panel)
+			self._current = panel
+			# workflows/scans contain child tasks: nest their findings/output by source
+			self._container = panel if at in ("workflow", "scan") else None
 			self._set_status(f"running {kind} {rname or command}".strip())
 		elif at == "shell_output":
 			if self._current is not None:
@@ -412,10 +447,14 @@ class AITUI(App):
 		elif at == "error":
 			await self._append(Static(Text.from_markup(f"[red]✖ {escape(content)}[/]"), classes="err"))
 		elif at == "stopped":
-			if self._current is not None:
-				self._current.finish()
-				self._current = None
+			self._finish_current()
 			self._set_status("stopped", False)
+
+	def _finish_current(self) -> None:
+		if self._current is not None:
+			self._current.finish()
+		self._current = None
+		self._container = None
 
 	# input: resolves an open prompt, else becomes a steer
 	async def on_input_submitted(self, event: Input.Submitted) -> None:
