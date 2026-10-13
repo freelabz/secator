@@ -263,13 +263,23 @@ class ChoicePrompt(Vertical):
 
 
 class SubagentRow(Static):
-	"""A clickable 'Ran subagent <label>' row in the main conversation that opens the
-	subagent's own conversation view."""
+	"""A clickable 'Running/Ran subagent <label>' row in the main conversation that
+	opens the subagent's own conversation view — clickable the moment it appears."""
 	def __init__(self, label: str, sid: str):
-		super().__init__(
-			Text.from_markup(f"[b #9aa3b8]Ran subagent[/] [#8a8fa3]{escape(label)}[/]  [#6b7187]▸ open[/]"),
-			classes="subagent-row")
+		super().__init__(classes="subagent-row")
+		self.label = label
 		self.sid = sid
+		self.done = False
+		self.update(self._text())
+
+	def _text(self) -> Text:
+		verb = "Ran" if self.done else "Running"
+		return Text.from_markup(
+			f"[b #9aa3b8]{verb} subagent[/] [#8a8fa3]{escape(self.label)}[/]  [#6b7187]▸ open[/]")
+
+	def mark_done(self) -> None:
+		self.done = True
+		self.update(self._text())
 
 	def on_click(self) -> None:
 		self.app._open_subview(self.sid)
@@ -374,6 +384,8 @@ class AITUI(App):
 		self._container: RunnerPanel | None = None   # active workflow/scan nesting parent
 		self._subviews: dict = {}   # subagent session_id -> VerticalScroll (hidden)
 		self._write: VerticalScroll | None = None   # where incoming items are mounted
+		self._in_subagent: str | None = None        # session_id we're currently writing into
+		self._active_subagent: SubagentRow | None = None
 		self._steers: list[str] = []
 		self._steers_lock = threading.Lock()
 		self._pending_ask = None
@@ -505,7 +517,13 @@ class AITUI(App):
 		ctx = d.get("_context") or {}
 		if ctx.get("subagent"):
 			self._write = await self._ensure_subview(ctx.get("session_id") or "subagent")
+			self._in_subagent = ctx.get("session_id") or "subagent"
 		else:
+			# control returned to the main thread: the active subagent is done
+			if self._in_subagent is not None and self._active_subagent is not None:
+				self._active_subagent.mark_done()
+				self._active_subagent = None
+			self._in_subagent = None
 			self._write = self._convo()
 		t = d.get("_type")
 		if t == "ai":
@@ -559,7 +577,9 @@ class AITUI(App):
 					await sv.mount(Static(
 						Text.from_markup(f"[b]Subagent[/] [dim]{escape(label)}[/]"), classes="subview-title"))
 				self._finish_current()
-				await self._append(SubagentRow(label, sid))
+				row = SubagentRow(label, sid)
+				self._active_subagent = row
+				await self._append(row)
 				return
 			self._finish_current()
 			if at == "shell":
