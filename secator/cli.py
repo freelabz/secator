@@ -2136,8 +2136,9 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		# counting: a Live-updated table re-lays-out every row on each tick, which is
 		# O(rows^2) and, on a big workspace, dwarfs the counting itself (~60s vs ~5s).
 		# The table is built and printed once below, so it also stays scrollable.
-		# Vuln-count column is always at index 9 (or 10 when --show-all appends the path).
-		vuln_col_idx = 10 if show_all else 9
+		# The Vulnerabilities cell is ALWAYS index 9; --show-all appends Path at
+		# index 10, so the count column index does not shift.
+		vuln_col_idx = 9
 		todo = [e for e in pending_rows if not e['counted']]
 		if todo:
 			from concurrent.futures import ThreadPoolExecutor, as_completed
