@@ -54,6 +54,16 @@ def _finding_text(item, d: dict) -> Text:
 	return Text.from_markup(_finding_markup(d))
 
 
+# finding-mutation action rows (secator AI_TYPES markers): marker markup + text color
+_MUTATION_MARKERS = {
+	"mark_vuln_exploited": ("[red]💥[/]", "red"),
+	"add_vuln_poc": ("[red]💥[/]", "red"),            # legacy
+	"update_finding": ("[cyan]✏[/]", "cyan"),
+	"mark_vuln_false_positive": ("[yellow]🟡[/]", "yellow"),
+	"mark_vuln_exploit_failed": ("[blue]🛡[/]", "blue"),
+}
+
+
 def _msg_text(item, d: dict):
 	"""Render an info/warning/error line via its OutputType __rich__ (secator-identical,
 	keeps the [INF]/[WRN]/[ERR] tag + message markup)."""
@@ -362,6 +372,7 @@ class AITUI(App):
 	.ai { color: #cdd6e4; }
 	.user { color: #7fd1e0; margin: 1 0; }
 	.err { color: #ff6b6b; }
+	.action { margin: 1 0; }
 
 	/* Claude-like runner entry: dim one-line header, arrow right after the text */
 	.runner-panel { margin: 1 0; height: auto; }
@@ -435,6 +446,7 @@ class AITUI(App):
 		self._findings_loading = False
 		self._findings_seen: set = set()   # finding _uuids already shown (incremental refresh)
 		self._line_buffers: dict = {}      # source -> {cmd, lines} buffered until its card renders
+		self._added_uuids: set = set()     # findings shown via an add_finding card (skip the raw dup)
 
 	def compose(self) -> ComposeResult:
 		yield Header(show_clock=True)
@@ -691,6 +703,11 @@ class AITUI(App):
 			return
 		if t in ("progress", "stat", "state", "target"):  # execution / plumbing types
 			return
+		# an add_finding card already rendered this finding richly — skip the raw dup
+		uid = d.get("_uuid")
+		if uid is not None and uid in self._added_uuids:
+			self._added_uuids.discard(uid)
+			return
 		# a finding → render with its own __rich__ (secator-identical). Inside a
 		# workflow/scan it nests under the child task's sub-panel; a single task goes
 		# straight in; otherwise it lands at top level.
@@ -760,10 +777,20 @@ class AITUI(App):
 		elif at == "shell_output":
 			if self._current is not None:
 				self._current.add_raw(content)
-		elif at in ("mark_vuln_exploited", "add_vuln_poc"):
-			await self._append(Static(Text.from_markup(f"[red]💥 {escape(content)}[/]"), classes="ai"))
-		elif at in ("mark_vuln_false_positive", "mark_vuln_exploit_failed"):
-			await self._append(Static(Text.from_markup(f"[yellow]{escape(content)}[/]"), classes="ai"))
+		elif at == "add_finding":
+			# the AI recorded a new finding: show it richly (via __rich__) with a + marker;
+			# the raw finding is yielded right after, so remember its uuid to skip the dup
+			fd = (d.get("extra_data") or {}).get("finding") or {}
+			uid = fd.get("_uuid")
+			if uid:
+				self._added_uuids.add(uid)
+			line = Text("➕ added  ", style="green")
+			line.append_text(_finding_text(None, fd) if fd else Text(content))
+			await self._append(Static(line, classes="action"))
+		elif at in _MUTATION_MARKERS:
+			marker, color = _MUTATION_MARKERS[at]
+			await self._append(Static(
+				Text.from_markup(f"{marker} [{color}]{escape(content)}[/]"), classes="action"))
 		elif at == "error":
 			await self._append(Static(Text.from_markup(f"[red]✖ {escape(content)}[/]"), classes="err"))
 		elif at == "stopped":
