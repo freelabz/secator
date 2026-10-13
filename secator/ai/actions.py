@@ -701,6 +701,28 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	if denial is not None:
 		yield denial
 		return
+	# TUI-only: stream the child task's command + raw stdout into its panel. This feeds
+	# the Textual UI directly (never the LLM item stream, so model context stays clean).
+	# on_line fires on the underlying command runner, whose `self.cmd` is the real
+	# command. Keyed on runner_cls so it reaches the child command runner.
+	if runner_type == "task":
+		from secator.rich import get_tui
+		_tui = get_tui()
+		if _tui is not None:
+			_cmd_sent = {}
+
+			def _tui_on_line(self, line, _tui=_tui, _cmd_sent=_cmd_sent):
+				try:
+					if "x" not in _cmd_sent:
+						_cmd_sent["x"] = True
+						_tui.tui_set_command(getattr(self, "cmd", "") or "")
+					_tui.tui_render_line(line)
+				except Exception:  # noqa: BLE001 - UI feed must never crash a run
+					pass
+				return line
+
+			tl = hooks.setdefault(runner_cls, {})
+			tl["on_line"] = list(tl.get("on_line", [])) + [_tui_on_line]
 	try:
 		runner = runner_cls(tpl, targets, run_opts=run_opts, hooks=hooks, context=context)
 	except TaskNotFoundError as e:

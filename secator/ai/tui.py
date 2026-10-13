@@ -16,9 +16,41 @@ import threading
 from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import (
-	Button, Footer, Header, Input, Markdown, OptionList, SelectionList, Static)
+	Footer, Header, Input, Markdown, OptionList, SelectionList, Static)
+
+
+def _rehydrate(d: dict):
+	"""Rebuild an OutputType from a plain dict (query results arrive as dicts) so we
+	can use its own __rich__ rendering."""
+	from secator.output_types import FINDING_TYPES
+	t = d.get("_type")
+	for cls in FINDING_TYPES:
+		try:
+			if cls.get_name() == t:
+				return cls.load(d)
+		except Exception:  # noqa: BLE001
+			return None
+	return None
+
+
+def _finding_text(item, d: dict) -> Text:
+	"""Render a finding EXACTLY like secator's console: use the OutputType's own
+	__rich__ (icons, fields, colors). Falls back to a compact line if that fails."""
+	obj = item if hasattr(item, "__rich__") else _rehydrate(d)
+	if obj is not None:
+		try:
+			s = obj.__rich__()
+			if isinstance(s, str):
+				try:
+					return Text.from_markup(s)
+				except Exception:  # noqa: BLE001 - stray markup in target-controlled fields
+					return Text(s)
+			return s
+		except Exception:  # noqa: BLE001
+			pass
+	return Text.from_markup(_finding_markup(d))
 
 
 def _finding_markup(d: dict) -> str:
@@ -104,15 +136,28 @@ class RunnerPanel(Vertical):
 		self.query_one(".runner-box", Vertical).display = not self._collapsed
 		self._refresh_head()
 
-	def add_finding(self, d: dict) -> None:
+	def add_finding(self, renderable) -> None:
 		self.count += 1
-		self.query_one(".runner-out", Vertical).mount(
-			Static(Text.from_markup(_finding_markup(d)), classes="out-line"))
+		self.query_one(".runner-out", Vertical).mount(Static(renderable, classes="out-line"))
 		self._refresh_head()
 
+	def set_command(self, cmd: str) -> None:
+		# add/replace the dim `$ command` line at the top of the box (once)
+		if self.command or not cmd:
+			return
+		self.command = cmd
+		box = self.query_one(".runner-box", Vertical)
+		out = self.query_one(".runner-out", Vertical)
+		box.mount(Static(Text.from_markup(f"[dim]$ {escape(cmd)}[/]"), classes="runner-cmd"), before=out)
+
 	def add_raw(self, text: str) -> None:
-		# raw output: plain Text, never markup-parsed (target-controlled)
+		# raw output: plain Text, never markup-parsed (target-controlled). Cap the
+		# number of rendered lines so a chatty task can't flood the UI.
+		if self.lines >= 500:
+			return
 		self.lines += 1
+		if self.lines == 500:
+			text = "… (output truncated)"
 		self.query_one(".runner-out", Vertical).mount(Static(Text(text), classes="out-raw"))
 
 	def finish(self) -> None:
@@ -166,31 +211,30 @@ class ChoicePrompt(Vertical):
 
 
 class PermissionPrompt(Vertical):
-	"""Approve / Approve all / Deny buttons for a permission ask. Pressing a button
-	calls back into the app to resolve the blocked worker."""
+	"""Neutral, vertically-stacked Approve / Approve all / Deny list for a permission
+	ask (↑/↓ + Enter). Selecting resolves the blocked worker. Typing a/aa/d works too."""
+
+	_OPTIONS = [("Approve", "allow"), ("Approve all", "allow_all"), ("Deny", "deny")]
 
 	def __init__(self, question: str, resolve):
-		super().__init__(classes="perm")
+		super().__init__(classes="choice")
 		self._question = question
 		self._resolve = resolve
 
 	def compose(self) -> ComposeResult:
-		yield Static(Text.from_markup(f"[b yellow]?[/] {escape(self._question)}"), classes="perm-q")
-		yield Horizontal(
-			Button("Approve", id="allow", variant="success", classes="perm-btn"),
-			Button("Approve all", id="allow_all", variant="primary", classes="perm-btn"),
-			Button("Deny", id="deny", variant="error", classes="perm-btn"),
-			classes="perm-btns",
-		)
+		yield Static(Text.from_markup(f"[b yellow]?[/] {escape(self._question)}"), classes="choice-q")
+		yield OptionList(*[label for label, _ in self._OPTIONS], classes="choice-list")
+		yield Static(Text.from_markup("[dim]↑/↓ to move · enter to select[/]"))
 
-	def on_button_pressed(self, event: Button.Pressed) -> None:
-		choice = event.button.id or "deny"
-		# freeze the buttons + show the decision, then resolve the worker
-		for b in self.query(Button):
-			b.disabled = True
-		label = {"allow": "Approved", "allow_all": "Approved (all)", "deny": "Denied"}.get(choice, choice)
-		self.query_one(".perm-q", Static).update(Text.from_markup(f"[dim]✓ {escape(label)}[/]"))
-		self._resolve(choice)
+	def on_mount(self) -> None:
+		self.query_one(".choice-list").focus()
+
+	def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+		label, value = self._OPTIONS[event.option_index]
+		for w in self.query(".choice-list"):
+			w.disabled = True
+		self.query_one(".choice-q", Static).update(Text.from_markup(f"[dim]✓ {escape(label)}[/]"))
+		self._resolve(value)
 
 
 class AITUI(App):
@@ -217,13 +261,7 @@ class AITUI(App):
 	.out-line { color: #cdd6e4; }
 	.out-raw { color: #9aa3b8; }
 
-	/* permission prompt: clickable buttons */
-	.perm { height: auto; margin: 1 0; }
-	.perm-q { color: #e6c15a; margin: 0 0 1 0; }
-	.perm-btns { height: auto; }
-	.perm-btn { margin: 0 2 0 0; height: 3; }
-
-	/* follow-up suggestion list */
+	/* follow-up / permission suggestion list */
 	.choice { height: auto; margin: 1 0; }
 	.choice-q { color: #e6c15a; margin: 0 0 1 0; }
 	.choice-list { height: auto; max-height: 12; border: none; background: transparent; }
@@ -285,6 +323,22 @@ class AITUI(App):
 	def tui_render(self, item) -> None:
 		self.call_from_thread(self._render, item)
 
+	# thread-safe entries the child-runner on_line hook calls (TUI-only, not in the
+	# LLM stream): the task's command and its raw stdout, routed to the active panel
+	def tui_set_command(self, cmd: str) -> None:
+		self.call_from_thread(self._set_command, cmd)
+
+	def tui_render_line(self, line: str) -> None:
+		self.call_from_thread(self._render_line, line)
+
+	def _set_command(self, cmd: str) -> None:
+		if self._current is not None and cmd:
+			self._current.set_command(cmd)
+
+	def _render_line(self, line: str) -> None:
+		if self._current is not None and isinstance(line, str) and line.strip():
+			self._current.add_raw(line)
+
 	def _convo(self) -> VerticalScroll:
 		return self.query_one("#convo", VerticalScroll)
 
@@ -313,11 +367,13 @@ class AITUI(App):
 			return
 		if t in ("progress", "stat", "state", "target"):  # execution / plumbing types
 			return
-		# a finding → into the current runner's panel (or top-level if none)
+		# a finding → render with its own __rich__ (secator-identical), into the
+		# current runner's panel (or top-level if none)
+		renderable = _finding_text(item, d)
 		if self._current is not None:
-			self._current.add_finding(d)
+			self._current.add_finding(renderable)
 		else:
-			await self._append(Static(Text.from_markup(_finding_markup(d)), classes="out-line"))
+			await self._append(Static(renderable, classes="out-line"))
 
 	async def _render_ai(self, d: dict) -> None:
 		at = d.get("ai_type", "")
