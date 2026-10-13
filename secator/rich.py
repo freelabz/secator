@@ -1,6 +1,7 @@
 import codecs
 import operator
-from contextlib import nullcontext
+import re
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 import yaml
@@ -25,10 +26,41 @@ class CustomMarkdown(Markdown):
 	}
 
 
+# Active Textual TUI (set by the TUI driver via set_tui). When present, every
+# console.status spinner in the codebase routes to the TUI status line instead of
+# opening a Rich Live (which would collide with Textual's own display).
+_TUI = None
+
+
+def set_tui(app):
+	global _TUI
+	_TUI = app
+
+
+def get_tui():
+	return _TUI
+
+
+@contextmanager
+def _tui_status(msg):
+	plain = re.sub(r'\[/?[^\]]*\]', '', str(msg)).strip()
+	tui = _TUI
+	if tui is not None:
+		tui.tui_set_status(plain)
+	try:
+		yield
+	finally:
+		if tui is not None:
+			tui.tui_clear_status()
+
+
 def maybe_status(*args, **kwargs):
-	"""Return console.status() normally, or nullcontext() when a live display is already active or in a worker."""
+	"""Return console.status() normally, or a no-op / TUI-routed status when a live
+	display is already active, a TUI is active, or we're in a worker."""
 	from secator.definitions import IN_WORKER
 
+	if _TUI is not None:
+		return _tui_status(args[0] if args else '')
 	if IN_WORKER or console._live is not None:
 		return nullcontext()
 	return console.status(*args, **kwargs)

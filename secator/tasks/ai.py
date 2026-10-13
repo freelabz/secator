@@ -1157,6 +1157,12 @@ class ai(PythonRunner):
 			self.interactive = interactive
 		if self.is_subagent:
 			self.interactive = "auto"
+		# A Textual TUI (set via secator.rich.set_tui) drives interactivity AND rendering:
+		# steers/prompts/status bridge to it (TUIBackend) and console output is suppressed
+		# by the caller. Auto-select it whenever one is active (not for remote or subagents).
+		from secator.rich import get_tui
+		if get_tui() is not None and self.interactive != "remote" and not self.is_subagent:
+			self.interactive = "tui"
 
 		# Derived state
 		self._sync = False if self.async_tasks else self.sync
@@ -1206,11 +1212,15 @@ class ai(PythonRunner):
 			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
-		# Suppress noisy output for subagents
-		if self.is_subagent:
+		# Suppress noisy console output for subagents, and under a TUI (which owns the
+		# screen and renders the yielded items itself).
+		if self.is_subagent or self.interactive == "tui":
 			self.print_info = False
 			self.print_warning = False
 			self.print_error = False
+		if self.interactive == "tui":
+			self.print_item = False
+			self.print_line = False
 
 	# -------------------------------------------------------------------------
 	# Model verification

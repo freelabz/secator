@@ -112,6 +112,8 @@ class AITUI(App):
 		self._threaded = threaded
 		self._current: RunnerDrop | None = None
 		self._steers: "list[str]" = []
+		self._steers_lock = threading.Lock()
+		self._pending_ask = None  # (event, holder, choices, prompt_type) while a prompt is open
 
 	def compose(self) -> ComposeResult:
 		yield Header(show_clock=True)
@@ -198,18 +200,69 @@ class AITUI(App):
 			self._current = None
 			self._set_status("done", False)
 
-	# --- input → steer queue (a real backend drains this) -------------------
-	def on_input_submitted(self, event: Input.Submitted) -> None:
+	# --- input: resolves an open prompt, else becomes a steer ---------------
+	async def on_input_submitted(self, event: Input.Submitted) -> None:
 		text = event.value.strip()
 		event.input.value = ""
 		if not text:
 			return
-		self._steers.append(text)
-		self._append(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
+		await self._append(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
+		pend = self._pending_ask
+		if pend is not None:  # answering an open ask_user prompt
+			ev, holder, choices, ptype = pend
+			holder["value"] = self._resolve_answer(text, choices, ptype)
+			self._pending_ask = None
+			ev.set()
+			return
+		with self._steers_lock:
+			self._steers.append(text)
 
-	def poll_steers(self):
-		out, self._steers = self._steers, []
+	@staticmethod
+	def _resolve_answer(text: str, choices, ptype: str):
+		if ptype == "permission":
+			t = text.strip().lower()
+			if t in ("a", "allow", "y", "yes"):
+				return "allow"
+			if t in ("aa", "allow_all", "all"):
+				return "allow_all"
+			return "deny"
+		# follow_up: a bare number picks a choice, else free text
+		if choices and text.isdigit():
+			i = int(text) - 1
+			if 0 <= i < len(choices):
+				return choices[i]
+		return text
+
+	# --- thread-safe hooks called by TUIBackend / maybe_status (worker thread) --
+	def tui_set_status(self, text: str) -> None:
+		self.call_from_thread(self._set_status, text, True)
+
+	def tui_clear_status(self) -> None:
+		self.call_from_thread(self._set_status, "", False)
+
+	def tui_poll_steers(self):
+		with self._steers_lock:
+			out, self._steers = self._steers, []
 		return out
+
+	def tui_ask_user(self, question: str, choices, prompt_type: str = "follow_up", **context):
+		"""Block the worker until the user answers via the input box."""
+		import threading as _t
+		ev = _t.Event()
+		holder: dict = {}
+		hint = "  ·  ".join(f"[{i + 1}] {c}" for i, c in enumerate(choices)) if choices else ""
+		if prompt_type == "permission":
+			hint = "[a]llow · [aa] allow-all · [d]eny"
+		self.call_from_thread(self._show_prompt, question, hint, (ev, holder, list(choices or []), prompt_type))
+		ev.wait()
+		return {"answer": holder.get("value")}
+
+	def _show_prompt(self, question: str, hint: str, pending) -> None:
+		self._pending_ask = pending
+		self.query_one("#convo", VerticalScroll).mount(
+			Static(Text.from_markup(f"[b yellow]? {escape(question)}[/]\n[dim]{escape(hint)}[/]"), classes="ai"))
+		self.query_one("#convo", VerticalScroll).scroll_end(animate=False)
+		self._set_status("waiting for your answer…")
 
 
 # --- demo stream of REAL OutputType objects --------------------------------
@@ -233,18 +286,31 @@ def _demo_stream():
 	yield Ai(content="Confirmed RCE — marked exploited with PoC.", ai_type="mark_vuln_exploited")
 
 
-def run_live(prompt: str, workspace: str = None):
-	"""THE LIVE HOOKUP (needs API key + a real model + TTY). Build the ai runner and
-	drive its generator into the TUI instead of the demo stream."""
+def run_live(prompt: str, workspace: str = None, mode: str = "chat"):
+	"""THE LIVE HOOKUP (needs an API key + a real model + TTY).
+
+	Drive the real ai runner into the TUI: interactive='tui' selects the TUIBackend
+	(steers/ask_user/status bridge to this app), print_item/line=False suppresses
+	console output (the TUI renders the yielded items itself), and set_tui(app) makes
+	maybe_status + _run_batch route to / skip the Rich displays (no LiveError)."""
+	from secator.rich import set_tui
+
 	def stream():
-		from secator.template import TemplateLoader
-		from secator.runners.task import Task
-		tpl = TemplateLoader(input="ai")
-		runner = Task(tpl, [prompt], run_opts={"mode": "chat", "interactive": "local", "sync": True})
-		# TODO wire: inject this app as the interactivity backend (poll_steers/ask_user/status)
-		# and suppress the console exporter + _run_batch Live. For now just stream items.
+		from secator.tasks.ai import ai
+		ctx = {"workspace_id": workspace} if workspace else {}
+		# set_tui(app) (below) makes the ai task auto-select the TUIBackend + suppress
+		# console output; opts are passed as kwargs (the prompt is an opt, not an input).
+		runner = ai([], prompt=prompt, mode=mode, sync=True, no_live_updates=True, context=ctx)
 		yield from runner
-	AITUI(stream, session=workspace or "ai", mode="chat").run()
+
+	app = AITUI(stream, session=workspace or "ai", mode=mode)
+	set_tui(app)
+	try:
+		app.run()
+	finally:
+		set_tui(None)
+
+
 
 
 def _screenshot(path: str) -> None:
@@ -263,5 +329,12 @@ def _screenshot(path: str) -> None:
 if __name__ == "__main__":
 	if len(sys.argv) >= 3 and sys.argv[1] == "--shot":
 		_screenshot(sys.argv[2])
+	elif len(sys.argv) >= 2 and sys.argv[1] == "--live":
+		# LIVE: drive the real ai runner (needs a configured model). Optional prompt + -ws.
+		prompt = sys.argv[2] if len(sys.argv) >= 3 and not sys.argv[2].startswith("-") else "What can you help me with on this workspace?"
+		ws = None
+		if "-ws" in sys.argv:
+			ws = sys.argv[sys.argv.index("-ws") + 1]
+		run_live(prompt, workspace=ws)
 	else:
 		AITUI(_demo_stream, session="recon-acme", mode="scan", delay=0.35).run()

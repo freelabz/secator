@@ -1791,7 +1791,10 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 		a.get("action") == "task" and a.get("name", "").lower() == "ai"
 		for a in actions
 	)
-	use_progress = not ctx.subagent and not has_ai_subagent
+	# A Textual TUI owns the screen and shows its own progress — a Rich Progress Live
+	# here would raise "Only one live display may be active at once". Skip it.
+	from secator.rich import get_tui
+	use_progress = not ctx.subagent and not has_ai_subagent and get_tui() is None
 
 	# Print all task start messages before any task begins
 	if use_progress:

@@ -376,11 +376,35 @@ class AutoBackend(InteractivityBackend):
 		return None
 
 
+class TUIBackend(InteractivityBackend):
+	"""Interactive backend bridged to an active Textual TUI (secator.rich.get_tui()).
+
+	Steers and user prompts flow through the TUI's thread-safe hooks instead of the
+	rich prompt_toolkit menus (which would collide with Textual's display)."""
+
+	def poll_steers(self, session_id=None):
+		from secator.rich import get_tui
+		tui = get_tui()
+		try:
+			return tui.tui_poll_steers() if tui is not None else []
+		except Exception:  # noqa: BLE001 - a steer must never crash the run
+			return []
+
+	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
+		from secator.rich import get_tui
+		tui = get_tui()
+		if tui is None:
+			return None
+		return tui.tui_ask_user(question, choices or [], prompt_type, **context)
+
+
 def create_backend(mode: str, timeout: int = 600, query_engine: Any = None, poll_interval: int = 5):
 	"""Factory function to create the appropriate backend."""
 	if mode == "local":
 		return CLIBackend()
 	elif mode == "remote":
 		return RemoteBackend(timeout=timeout, query_engine=query_engine, poll_interval=poll_interval)
+	elif mode == "tui":
+		return TUIBackend()
 	else:
 		return AutoBackend()
