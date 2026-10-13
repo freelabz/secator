@@ -20,7 +20,7 @@ from secator.output_types import (
 	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
 )
 from secator.report import Report
-from secator.rich import console, console_stdout
+from secator.rich import console, console_stdout, live_is_active
 from secator.runners._helpers import get_task_folder_id, run_extractors
 from secator.query import QueryEngine
 from secator.query._stream import StreamView
@@ -998,7 +998,7 @@ class Runner:
 					# that render hook *and* Rich unwraps the FileProxy on `Console.file` via
 					# `rich_proxied_file`, so writes go straight to the raw terminal and corrupt
 					# the Live panel. Route through `console` whenever a Live is active.
-					if console._live is not None:
+					if live_is_active(console):
 						_console = console
 					else:
 						_console = console_stdout if item_out == sys.stdout else console

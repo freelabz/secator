@@ -54,6 +54,18 @@ def _tui_status(msg):
 			tui.tui_clear_status()
 
 
+def live_is_active(c=None):
+	"""True if a Rich ``Live`` display is currently active on the console.
+
+	Rich 15 replaced the single ``console._live`` attribute with a ``_live_stack``;
+	accessing ``_live`` unguarded raises ``AttributeError`` on Rich 15. Check both so
+	we stay correct across versions."""
+	c = c if c is not None else console
+	if getattr(c, '_live', None) is not None:
+		return True
+	return bool(getattr(c, '_live_stack', None))
+
+
 def maybe_status(*args, **kwargs):
 	"""Return console.status() normally, or a no-op / TUI-routed status when a live
 	display is already active, a TUI is active, or we're in a worker."""
@@ -61,7 +73,7 @@ def maybe_status(*args, **kwargs):
 
 	if _TUI is not None:
 		return _tui_status(args[0] if args else '')
-	if IN_WORKER or getattr(console, '_live', None) is not None:
+	if IN_WORKER or live_is_active():
 		return nullcontext()
 	return console.status(*args, **kwargs)
 
