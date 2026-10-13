@@ -1226,6 +1226,15 @@ class ai(PythonRunner):
 			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
+		# Give the Textual TUI what it needs to lazily query this run's findings for its
+		# side panel (workspace-scoped QueryEngine, filtered by _context.session_id).
+		if self.interactive == "tui" and not self.is_subagent:
+			from secator.rich import get_tui
+			tui = get_tui()
+			if tui is not None and hasattr(tui, "set_findings_source"):
+				tui.set_findings_source(
+					self.context.get("workspace_id", ""), dict(self.context), self.session_id)
+
 		# Suppress noisy console output for subagents, and under a TUI (which owns the
 		# screen and renders the yielded items itself).
 		if self.is_subagent or self.interactive == "tui":

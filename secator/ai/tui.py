@@ -19,6 +19,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import (
 	Header, Input, Markdown, OptionList, SelectionList, Static)
+from textual.widgets.option_list import Option
 
 
 def _rehydrate(d: dict):
@@ -358,6 +359,15 @@ class AITUI(App):
 	.choice-q { color: #e6c15a; margin: 0 0 1 0; }
 	.choice-list { height: auto; max-height: 12; border: none; background: transparent; }
 
+	/* lazy findings side panel (ctrl+f) */
+	#findings-panel {
+		dock: right; width: 68; display: none; background: transparent;
+		border-left: solid #2b3245; padding: 0 1;
+	}
+	#findings-title { height: 1; color: #c2a0ff; margin: 0 0 1 0; }
+	#findings-list { height: 1fr; background: transparent; border: none; padding: 0; }
+	#findings-list > .option-list--option-highlighted { background: #171a24; }
+
 	Markdown { background: transparent; margin: 0; padding: 0; }
 	#status { height: 1; color: #d7a93b; padding: 0 1; }
 	#input-box {
@@ -373,6 +383,7 @@ class AITUI(App):
 		# jump to the latest messages (a focused choice/permission list consumes `down`
 		# first for navigation, so this only fires when not selecting)
 		("down", "scroll_latest", "Scroll to latest"),
+		("ctrl+f", "toggle_findings", "Findings panel"),
 	]
 	# full-screen, integrated: use the terminal's own background/palette, no command
 	# palette, no footer chrome
@@ -397,12 +408,19 @@ class AITUI(App):
 		self._status_text = ""
 		self._status_spinning = False
 		self._spin_frame = 0
+		self._findings_src = None   # (workspace_id, context, session_id) for lazy querying
+		self._findings_loading = False
 
 	def compose(self) -> ComposeResult:
 		yield Header(show_clock=True)
 		yield _BackBar(Text.from_markup("[#7fd1e0]← Back to conversation[/]"), id="backbar")
 		yield Vertical(VerticalScroll(id="convo"), id="views")
 		yield Static("", id="status")
+		yield Vertical(
+			Static("Findings", id="findings-title"),
+			OptionList(id="findings-list"),
+			id="findings-panel",
+		)
 		with Vertical(id="input-box"):
 			yield Input(placeholder="Message, or steer a running runner…  (Enter to send)")
 
@@ -503,6 +521,60 @@ class AITUI(App):
 
 	def action_scroll_latest(self) -> None:
 		self._active_view().scroll_end(animate=False)
+
+	# ---- findings side panel (lazy, queried by _context.session_id) ----
+	def set_findings_source(self, workspace_id, context, session_id) -> None:
+		# called from the worker thread when the ai task resolves its session
+		self._findings_src = (workspace_id, dict(context or {}), session_id)
+
+	def action_toggle_findings(self) -> None:
+		panel = self.query_one("#findings-panel")
+		panel.display = not panel.display
+		if panel.display:
+			if self._findings_src is None:
+				self._set_findings_title(None, note="no findings source yet")
+			elif not self._findings_loading:
+				self._findings_loading = True
+				self.query_one("#findings-list", OptionList).clear_options()
+				self._set_findings_title(None, note="loading…")
+				threading.Thread(target=self._load_findings, daemon=True).start()
+
+	def _set_findings_title(self, total, note: str = "") -> None:
+		label = "Findings" if total is None else f"Findings ({total})"
+		if note:
+			label += f"  [dim]{note}[/]"
+		self.query_one("#findings-title", Static).update(Text.from_markup(label))
+
+	def _add_finding_options(self, options) -> None:
+		self.query_one("#findings-list", OptionList).add_options(options)
+
+	def _load_findings(self) -> None:
+		# runs off the UI thread: build a workspace-scoped engine and stream findings
+		# for this session in batches (never materializes all N at once).
+		wsid, context, sid = self._findings_src
+		try:
+			from secator.query import QueryEngine
+			from secator.output_types import FINDING_TYPES
+			engine = QueryEngine(wsid or "", context=dict(context))
+			# only real findings: exclude the ai/conversation type (targets, info/warning/
+			# error, stat and other execution types aren't findings and never match)
+			types = [c.get_name() for c in FINDING_TYPES if c.get_name() != "ai"]
+			query = {"_context.session_id": sid, "_type": {"$in": types}}
+			total = engine.count(query)
+			self.call_from_thread(self._set_findings_title, total)
+			n = 0
+			for batch in engine.iterate(query, batch_size=200):
+				opts = [Option(_finding_text(None, d)) for d in batch]
+				if opts:
+					self.call_from_thread(self._add_finding_options, opts)
+				n += len(opts)
+				if n >= 5000:   # safety cap on mounted rows
+					self.call_from_thread(self._set_findings_title, total, note=f"showing first {n}")
+					break
+		except Exception as e:  # noqa: BLE001
+			self.call_from_thread(self._set_findings_title, None, note=f"error: {e}")
+		finally:
+			self._findings_loading = False
 
 	_SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
