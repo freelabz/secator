@@ -16,13 +16,14 @@ class Report:
 		exporters (list): List of exporter classes.
 	"""
 
-	def __init__(self, runner, title=None, exporters=[]):
+	def __init__(self, runner, title=None, exporters=[], show_all=False):
 		self.title = title or f'{runner.config.type}_{runner.config.name}'
 		self.runner = runner
 		self.timestamp = get_file_timestamp()
 		self.exporters = exporters
 		self.workspace_name = runner.workspace_name
 		self.output_folder = runner.reports_folder
+		self.show_all = show_all
 
 	def send(self):
 		for report_cls in self.exporters:
