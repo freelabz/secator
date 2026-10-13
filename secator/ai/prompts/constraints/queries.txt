@@ -23,4 +23,21 @@ Query tags or vulnerabilities matching my host vulnweb.com:
 query_workspace(query={"_type": "tag", "match": {"regex": "vulnweb.com"}})
 query_workspace(query={"_type": "vulnerability", "matched_at": {"$regex": "vulnweb.com"}})
 </example>
+
+<example>
+Grouped overview first, then drill down. group=True returns ONE representative per group
+(each with a _group_count member count + aggregated targets + its own _uuid) instead of
+every finding — a compact overview that saves context. It requires a single _type.
+query_workspace(query={"_type": "vulnerability"}, group=True)
+# -> a few rows like {name: "CVE-2021-1234", _group_count: 12, matched_at: "a, b, c .. and 9 more", _uuid: "<rep>"}
+# then drill into one group by re-querying its representative _uuid:
+query_workspace(query={"_uuid": "<rep>"})
+</example>
+
+<example>
+Page through a large result set with offset (skip the first N). When a full page comes
+back, the response tells you the next offset to use.
+query_workspace(query={"_type": "vulnerability", "severity": "high"}, limit=100)
+query_workspace(query={"_type": "vulnerability", "severity": "high"}, limit=100, offset=100)
+</example>
 </queries>

@@ -449,7 +449,7 @@ class TestHandleQuery(unittest.TestCase):
 		self.assertEqual(ai_results[0].extra_data['results'], 2)
 		# Non-local backend: hidden duplicates are excluded from the search.
 		mock_engine.search.assert_called_once_with(
-			{'port': 80, '_context.workspace_duplicate': {'$ne': True}}, limit=10)
+			{'port': 80, '_context.workspace_duplicate': {'$ne': True}}, limit=10, offset=0)
 		# ...but the query shown to the user stays the model's own (no injected key).
 		self.assertEqual(ai_results[0].content, '{"port":80}')
 
@@ -470,7 +470,7 @@ class TestHandleQuery(unittest.TestCase):
 
 		list(_handle_query({'action': 'query', 'query': {'_type': 'vulnerability'}}, ctx))
 
-		mock_engine.search.assert_called_once_with({'_type': 'vulnerability'}, limit=100)
+		mock_engine.search.assert_called_once_with({'_type': 'vulnerability'}, limit=100, offset=0)
 
 	@patch('secator.ai.actions.ActionContext.get_query_engine')
 	def test_query_respects_explicit_context_filter(self, mock_get_engine):
@@ -484,7 +484,7 @@ class TestHandleQuery(unittest.TestCase):
 		q = {'_type': 'vulnerability', '_context.workspace_duplicate': True}
 		list(_handle_query({'action': 'query', 'query': q}, ctx))
 
-		mock_engine.search.assert_called_once_with(q, limit=100)
+		mock_engine.search.assert_called_once_with(q, limit=100, offset=0)
 
 	@patch('secator.ai.actions.ActionContext.get_query_engine')
 	def test_query_stringified_json_is_coerced(self, mock_get_engine):
@@ -504,7 +504,7 @@ class TestHandleQuery(unittest.TestCase):
 
 		self.assertFalse([r for r in results if isinstance(r, Error)], 'stringified query must not error')
 		mock_engine.search.assert_called_once_with(
-			{'_type': 'url', 'verified': True, '_context.workspace_duplicate': {'$ne': True}}, limit=100)
+			{'_type': 'url', 'verified': True, '_context.workspace_duplicate': {'$ne': True}}, limit=100, offset=0)
 
 	def test_query_unparseable_string_returns_clean_error(self):
 		"""A non-JSON string yields an Error the LLM can act on — not a crash."""
@@ -1293,6 +1293,7 @@ class TestGetQueryEngine(unittest.TestCase):
 			)
 		)
 		mock_cursor.limit.return_value = mock_cursor
+		mock_cursor.skip.return_value = mock_cursor  # find().skip(offset).limit(limit)
 
 		mock_db = MagicMock()
 		mock_db.findings.find.return_value = mock_cursor

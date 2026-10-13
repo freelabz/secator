@@ -1145,6 +1145,19 @@ def _validate_query_operators(node) -> Optional[str]:
 	return None
 
 
+def _resolve_single_output_type(query: Dict):
+	"""Resolve the OutputType class for a query that targets exactly one `_type`.
+
+	Returns the class, or None if `_type` is missing, operator-wrapped, multi-valued
+	(e.g. `{'$in': [...]}`), or unknown — i.e. the group cannot be unambiguously resolved.
+	"""
+	from secator.output_types import OUTPUT_TYPES
+	type_val = query.get("_type") if isinstance(query, dict) else None
+	if not isinstance(type_val, str) or not type_val:
+		return None
+	return next((cls for cls in OUTPUT_TYPES if cls.get_name() == type_val), None)
+
+
 def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	"""Query workspace or current results for findings.
 
@@ -1163,6 +1176,14 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		limit = int(limit)
 	except (TypeError, ValueError):
 		limit = 100
+	offset = action.get("offset", 0)
+	try:
+		offset = int(offset)
+	except (TypeError, ValueError):
+		offset = 0
+	if offset < 0:
+		offset = 0
+	group = bool(action.get("group", False))
 
 	# Some providers serialize `query` as a JSON string despite the object schema
 	# (known tool-calling quirk); coerce it back, tolerating a stray trailing brace /
@@ -1217,18 +1238,57 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		search_query = query_filter
 		if not is_local and "_context" not in query_filter and "_context.workspace_duplicate" not in query_filter:
 			search_query = {**query_filter, "_context.workspace_duplicate": {"$ne": True}}
-		results = engine.search(search_query, limit=limit)
+
+		# Grouped mode: collapse the fetched page to one representative per group so a
+		# compact overview (with _group_count + aggregated targets + each rep's _uuid)
+		# reaches the model instead of every finding. Requires exactly one _type so we
+		# can resolve its _group_by / _group_aggregate.
+		group_cls = None
+		if group:
+			group_cls = _resolve_single_output_type(query_filter)
+			if group_cls is None:
+				yield Error(
+					message="group=True requires the query to target exactly one _type "
+					"(e.g. query={'_type': 'vulnerability'}); set a single _type and retry.",
+					_context=context,
+				)
+				return
+
+		results = engine.search(search_query, limit=limit, offset=offset)
 		# Local driver only writes to disk at end-of-run, so union this run's live
 		# in-flight findings to make query_workspace the source of truth (mongodb/api
 		# persist live already, so they need no union).
 		if is_local:
 			results = _union_live_results(results, ctx.results or [], query_filter, limit)
+
+		page_len = len(results)
+
+		if group_cls is not None:
+			from secator.query.utils import group_findings
+			results = group_findings(results, list(group_cls._group_by), group_cls._group_aggregate)
+
+		extra = {"results": len(results), "limit": limit, "offset": offset}
+		if group:
+			extra["group"] = True
 		yield Ai(
 			content=query_str,
 			ai_type="query",
-			extra_data={"results": len(results), "limit": limit},
+			extra_data=extra,
 			_context=context
 		)
+
+		# Pagination hint: only when a full page came back (there may be more). Count is
+		# only paid for here, not on every query. Grouping summarizes the fetched page,
+		# so the next-page hint still pages the underlying findings.
+		if limit > 0 and page_len == limit:
+			total = engine.count(search_query)
+			if total > offset + page_len:
+				note = (f"Showing results {offset}-{offset + page_len} of {total}. "
+				        f"Re-query with offset={offset + limit} for the next page.")
+				if group:
+					note += " (group=True summarizes each fetched page; re-group each page.)"
+				yield Info(message=note, _context=context)
+
 		for result in results:
 			if isinstance(result, OutputType):
 				result = result.toDict()
