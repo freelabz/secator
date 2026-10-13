@@ -21,6 +21,7 @@ from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.runners._base import REDACTED_OPT_VALUE
+from secator.runners._helpers import apply_task_overrides
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s, signal_to_name
 
@@ -251,10 +252,8 @@ class Command(Runner):
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
 
-		# Apply task-specific config overrides
-		task_name = self.__class__.__name__
-		for attr, value in CONFIG.tasks.overrides.get(task_name, {}).items():
-			setattr(self, attr, value)
+		# Apply task-specific config overrides (tasks.overrides.<task>.<attr>).
+		apply_task_overrides(self)
 
 		# Build command input
 		self._build_cmd_input()

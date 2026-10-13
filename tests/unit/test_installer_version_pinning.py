@@ -35,14 +35,17 @@ class _FakeOverrides:
 
 
 def _patch_overrides(overrides):
-	"""Patch ``secator.cli.CONFIG`` so ``CONFIG.tasks.overrides`` returns the given per-tool dict.
+	"""Patch ``CONFIG`` so ``CONFIG.tasks.overrides`` returns the given per-tool dict.
 
-	``CONFIG.tasks.overrides`` is a nested Config object that returns a fresh instance on each
-	attribute access, so we swap the whole ``CONFIG`` for a lightweight namespace.
+	Config overrides are applied by the canonical ``apply_task_overrides`` helper
+	(``secator.runners._helpers``), which reads ``CONFIG`` from its own module — so
+	that is where we patch. ``CONFIG.tasks.overrides`` is a nested Config object
+	returning a fresh instance on each attribute access, so we swap the whole
+	``CONFIG`` for a lightweight namespace.
 	"""
 	from types import SimpleNamespace
 	fake_config = SimpleNamespace(tasks=SimpleNamespace(overrides=_FakeOverrides(overrides)))
-	return mock.patch('secator.cli.CONFIG', fake_config)
+	return mock.patch('secator.runners._helpers.CONFIG', fake_config)
 
 
 # ---------------------------------------------------------------------------

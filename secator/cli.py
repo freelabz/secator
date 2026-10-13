@@ -3071,19 +3071,24 @@ def install_ruby():
 
 
 def apply_install_overrides(cls, cli_version=None):
-	"""Apply install overrides onto a tool class before ``ToolInstaller.install(cls)``.
+	"""Resolve install-time overrides for a tool class before ``ToolInstaller.install(cls)``.
 
-	Mutates ``cls.install_cmd`` / ``cls.install_version`` in place. Precedence (highest first):
+	This does NOT implement its own override system — it reuses the one, canonical
+	config-override mechanism (``apply_task_overrides``, the same one
+	``Command.__init__`` applies at runtime), just targeting the **class** because
+	the installer never instantiates the task. So ``tasks.overrides.<tool>.install_cmd``
+	/ ``.install_version`` — and any other attr — are honoured exactly like every
+	other override.
 
-	1. a CLI-supplied version (``secator install tools <tool>==<version>``);
-	2. ``tasks.overrides.<tool>.install_version`` / ``.install_cmd`` from config;
-	3. the tool class's built-in attributes (left untouched when nothing overrides them).
+	On top of that it layers two install-command-specific concerns the generic
+	mechanism has no business knowing about:
 
-	The ``v`` prefix is only prepended to a **bare semver** string (digits + dots, e.g.
-	``1.2.3`` -> ``v1.2.3``) and only when the tool already pins a ``v``-prefixed version, so
-	branch names (``main``), commit SHAs, and already-``v``-prefixed versions are left untouched.
-	A custom ``install_cmd`` that doesn't reference ``[install_version]`` simply ignores the
-	version, so overriding the command never breaks version pinning.
+	1. a CLI-supplied version (``secator install tools <tool>==<version>``) wins over
+	   the config override;
+	2. version normalization: a **bare semver** (``1.2.3`` -> ``v1.2.3``) gets the
+	   ``v`` prefix, but only when the tool's native pin is ``v``-prefixed — so
+	   branch names (``main``), commit SHAs and already-``v`` strings are untouched.
+	   (This fixes #1496, where a bare ref like ``main`` was wrongly ``v``-prefixed.)
 
 	Args:
 		cls: The tool/task class to mutate.
@@ -3092,16 +3097,20 @@ def apply_install_overrides(cls, cli_version=None):
 	Returns:
 		The same ``cls`` (mutated), for convenience.
 	"""
-	cfg_overrides = CONFIG.tasks.overrides.get(cls.__name__, {})
-	install_cmd = cfg_overrides.get('install_cmd', None)
-	if install_cmd:
-		cls.install_cmd = install_cmd
-	version = cli_version or cfg_overrides.get('install_version', None)
-	if version:
-		if bool(re.match(r'^\d+(\.\d+)*$', version)) and cls.install_version \
-				and cls.install_version.startswith('v') and not version.startswith('v'):
-			version = f'v{version}'
-		cls.install_version = version
+	from secator.runners._helpers import apply_task_overrides
+	# The tool's native pin tells us its tag convention (v-prefixed or not).
+	native_version = cls.install_version
+	# 1. Canonical config overrides (install_cmd, install_version, anything else).
+	apply_task_overrides(cls)
+	# 2. A CLI-supplied version wins over the config override.
+	if cli_version:
+		cls.install_version = cli_version
+	# 3. Normalize a bare semver to the tool's v-prefixed convention.
+	version = cls.install_version
+	is_bare_semver = bool(version) and bool(re.match(r'^\d+(\.\d+)*$', str(version)))
+	native_is_v_prefixed = str(native_version).startswith('v')
+	if is_bare_semver and native_is_v_prefixed and not str(version).startswith('v'):
+		cls.install_version = f'v{version}'
 	return cls
 
 
