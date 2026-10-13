@@ -173,21 +173,28 @@ def _yield_tool_results(runner, collected):
 				 for r in group_results
 				 if isinstance(r, dict) and r.get("_context", {}).get(_id_field)),
 				"")
+		# Cap the displayed items; if the runner produced MORE than fits, the tool result
+		# holds only a sample and the model needs the runner id to fetch the rest.
+		max_items = 100
 		tool_result_str = format_tool_result(
 			tc_name, "error" if has_errors else "success",
-			len(serialized), serialized)
-		# After a task/workflow, tell the model (on the NORMAL, non-truncated path too)
-		# that these findings now live in the workspace keyed by the runner's chunk id,
-		# so it NEVER re-runs the task just to re-read them — it scopes a query instead.
-		if runner_type and runner_id:
+			len(serialized), serialized, max_items=max_items)
+		result_incomplete = len(serialized) > max_items
+		# Only nudge a scoped re-query when it ADDS something: the result is item-capped,
+		# so the full set is NOT in context. For a complete result the model already has
+		# everything — re-querying would just waste a turn. (The general "runner findings
+		# persist; re-read by _context.<type>_id, never re-run" rule lives in queries.txt,
+		# which survives in the system prompt for the aged-out case.)
+		if runner_type and runner_id and result_incomplete:
 			scope_note = json.dumps({
 				"runner_id": runner_id,
 				"runner_type": runner_type,
 				"hint": (
-					f'These findings belong to {runner_type} "{runner_id}" and are now stored in '
-					f'the workspace. To re-read them later, do NOT re-run — query scoped to this '
-					f'runner: query_workspace(query={{"_context.{runner_type}_id": "{runner_id}"}}) '
-					f'(optionally add "_type" to narrow, e.g. "vulnerability").'),
+					f'Only the first {max_items} of {len(serialized)} findings from {runner_type} '
+					f'"{runner_id}" are shown; all are stored in the workspace. To read the rest, do '
+					f'NOT re-run — query scoped to this runner: '
+					f'query_workspace(query={{"_context.{runner_type}_id": "{runner_id}"}}) '
+					f'(add "_type"/filters to narrow).'),
 			}, separators=(',', ':'))
 			tool_result_str = tool_result_str.rstrip() + "\n" + scope_note
 		# On truncation, tell the model how to get the rest. A task/workflow's results

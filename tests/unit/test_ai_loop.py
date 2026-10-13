@@ -1195,14 +1195,16 @@ class TestYieldToolResultsRunnerScoping(unittest.TestCase):
 		outs = list(_yield_tool_results(runner, collected))
 		return outs, stored
 
-	def test_run_task_result_exposes_runner_id_and_scoping_hint(self):
+	def test_incomplete_run_task_result_exposes_runner_id_and_scoping_hint(self):
+		# >100 findings: the tool result is item-capped, so the full set is NOT in
+		# context and the scoped-re-query note SHOULD appear.
 		collected = [{
-			"_type": "vulnerability", "name": "CVE-x", "_uuid": "u1",
+			"_type": "vulnerability", "name": f"CVE-{i}", "_uuid": f"u{i}",
 			"_context": {
 				"tool_call_id": "tc1", "tool_call_name": "run_task",
 				"task_id": "task-abc", "task_chunk_id": "chunk-xyz",
 			},
-		}]
+		} for i in range(150)]
 		outs, stored = self._run(collected)
 		self.assertEqual(len(stored), 1)
 		name, tc_id, content = stored[0]
@@ -1218,6 +1220,23 @@ class TestYieldToolResultsRunnerScoping(unittest.TestCase):
 		self.assertEqual(outs[0].extra_data["runner_id"], "task-abc")
 		self.assertEqual(outs[0].extra_data["runner_type"], "task")
 
+	def test_complete_run_task_result_omits_scope_note(self):
+		# A small, fully-in-context result must NOT nudge a re-query (would waste a turn),
+		# but still carries the runner id/type in extra_data.
+		collected = [{
+			"_type": "vulnerability", "name": "CVE-x", "_uuid": "u1",
+			"_context": {
+				"tool_call_id": "tc1", "tool_call_name": "run_task",
+				"task_id": "task-abc", "task_chunk_id": "chunk-xyz",
+			},
+		}]
+		outs, stored = self._run(collected)
+		_, _, content = stored[0]
+		self.assertNotIn("query_workspace", content)
+		self.assertNotIn("_context.task_id", content)
+		self.assertEqual(outs[0].extra_data["runner_id"], "task-abc")
+		self.assertEqual(outs[0].extra_data["runner_type"], "task")
+
 	def test_query_workspace_result_gets_no_runner_scope_note(self):
 		"""Non task/workflow tools must not get the task-scoping note."""
 		collected = [{
@@ -1226,7 +1245,7 @@ class TestYieldToolResultsRunnerScoping(unittest.TestCase):
 		}]
 		_, stored = self._run(collected)
 		_, _, content = stored[0]
-		self.assertNotIn("belong to runner", content)
+		self.assertNotIn("belong to", content)
 
 
 # =============================================================================
