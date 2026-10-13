@@ -38,37 +38,41 @@ _SANDBOX_CREATE_LOCK = threading.Lock()
 # the next prompt's token budget; head+tail keeps both the start and the result.
 _MAX_SHELL_OUTPUT_CHARS = 4000
 
-# Default timeout (seconds) for ad-hoc AI shell commands (dispatched as the `command`
-# task). Applied as an instance attribute post-construction (see _handle_shell) since
-# max_timeout is not a run_opts-settable field. The model may override it per-command via
-# run_shell(timeout=...), clamped by _resolve_shell_timeout — see that helper.
-_SHELL_TIMEOUT = 60
+# Fallback default timeout (seconds) for ad-hoc AI shell commands when no config is
+# available. The real default is CONFIG.security.shell_default_timeout (30s); see
+# _resolve_shell_timeout. Applied as an instance attribute post-construction (see
+# _handle_shell) since max_timeout is not a run_opts-settable field.
+_SHELL_TIMEOUT = 30
 
 
 def _resolve_shell_timeout(action: Dict) -> int:
 	"""Effective max_timeout (seconds) for a single AI shell command.
 
-	The model may pass ``timeout`` on run_shell to raise it for a slow command (and re-run
-	after a timeout) or lower it to fail fast. The value is clamped to ``[1, ceiling]`` where
-	``ceiling = CONFIG.celery.task_max_timeout`` — the SAME global max-task-timeout cap every
-	task honors — so the model can never grant itself more run time than the operator allows
-	(``task_max_timeout = -1`` means no global cap, matching normal task behavior). An absent
-	or non-numeric ``timeout`` falls back to ``_SHELL_TIMEOUT``. This is run_shell-only; other
-	runners resolve their timeout through the normal config path, unchanged.
+	Settable range is ``[default, ceiling]``:
+	- ``default = CONFIG.security.shell_default_timeout`` (30s) — the per-command default so an
+	  interactive user doesn't wait forever when the model runs a command;
+	- ``ceiling = CONFIG.celery.task_max_timeout`` — the SAME global max-task-timeout cap every
+	  task honors (``-1`` = no cap), so a long command can still complete where the operator
+	  allows long tasks, but the model can't exceed that bound.
+
+	The model passes ``timeout`` on run_shell to raise a slow command toward the ceiling (and
+	re-run after a timeout). A value below the default is floored to it; above the ceiling is
+	capped. Absent/non-numeric falls back to the default. run_shell-only; other runners resolve
+	their timeout through the normal config path, unchanged.
 	"""
 	from secator.config import CONFIG
+	default = getattr(getattr(CONFIG, "security", None), "shell_default_timeout", _SHELL_TIMEOUT) or _SHELL_TIMEOUT
 	requested = action.get("timeout")
-	base = _SHELL_TIMEOUT
+	base = default
 	if requested is not None:
 		try:
 			base = int(requested)
 		except (TypeError, ValueError):
-			base = _SHELL_TIMEOUT
-	if base < 1:
-		base = _SHELL_TIMEOUT
+			base = default
+	base = max(base, default)  # floor: never below the per-command default
 	ceiling = CONFIG.celery.task_max_timeout
 	if ceiling is not None and ceiling > 0:
-		base = min(base, ceiling)
+		base = min(base, ceiling)  # cap: never above the global task-timeout ceiling
 	return base
 
 
