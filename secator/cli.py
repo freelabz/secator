@@ -2188,7 +2188,9 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 			# transient: the live frames (with spinners) are cleared on exit; the final
 			# fully-counted table is printed statically by the shared block below, so a
 			# table taller than the terminal stays scrollable in normal scrollback.
-			with Live(table, console=console, refresh_per_second=12, transient=True):
+			# Low refresh rate: we only need cells to fill in as counts land, not a
+			# smooth spinner — fewer re-layouts of a potentially large table.
+			with Live(table, console=console, refresh_per_second=4, transient=True):
 				with ThreadPoolExecutor(max_workers=n_workers) as pool:
 					future_to_entry = {
 						pool.submit(_timed_count, e['path']): e for e in todo
