@@ -465,6 +465,32 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 			import shutil
 			shutil.rmtree(tmp, ignore_errors=True)
 
+	def test_abandon_task_clears_inherited_has_children(self):
+		"""An abandoned task spawned no children, so its stored doc must have has_children=False
+		even when it inherited has_children=True from a parent workflow/scan (run_opts). Otherwise
+		the UI child-runner list shows the failed task as 'waiting' forever (0 real children)."""
+		from unittest import mock
+		from secator.celery import abandon_task
+		from secator.tasks import httpx
+		if 'httpx' not in TEST_TASK_NAMES:
+			self.skipTest('httpx not available')
+		captured = {}
+
+		class Spy(httpx):
+			def mark_started(self, *a, **k):
+				pass
+
+			def add_result(self, *a, **k):
+				pass
+
+			def mark_completed(self, *a, **k):
+				captured['has_children'] = self.has_children
+
+		with mock.patch('secator.celery.Task.get_task_class', return_value=Spy):
+			# opts carry has_children=True (inherited from the parent workflow)
+			abandon_task('httpx', ['example.com'], {'context': {}, 'has_children': True}, delivery_count=2)
+		self.assertFalse(captured.get('has_children'), 'abandoned task must not keep inherited has_children')
+
 	def test_retries_exhausted_does_not_count_initial_delivery(self):
 		"""delivery_count includes the initial run; task_max_retries=N allows N redeliveries."""
 		from secator.celery import worker_loss_retries_exhausted

@@ -1716,7 +1716,7 @@ class TestControlActionsAllowed(unittest.TestCase):
 	def test_control_actions_allowed(self):
 		eng = self._engine()
 		for action in ({"action": "subagent"}, {"action": "stop"},
-		               {"action": "change_mode", "mode": "attack"}):
+		               {"action": "change_mode", "mode": "scan"}):
 			self.assertEqual(eng.check_action(action).decision, "allow", action["action"])
 
 	def test_subagent_in_scope_target_allowed(self):

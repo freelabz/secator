@@ -167,5 +167,23 @@ class TestChildInheritsIsolated(unittest.TestCase):
 		self.assertTrue(run_opts["isolated"])
 
 
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestShellNeverBlocksOnSudo(unittest.TestCase):
+	"""AI-issued shell runs with tty=False so a password-requiring sudo fails fast
+	(Command._prompt_sudo's non-interactive path) instead of hanging on getpass."""
+
+	def test_handle_shell_forces_tty_false(self):
+		ctx = _ctx(isolated=False)
+		# `ls` is in the allow-list so _handle_shell actually runs; tty=False is set for
+		# every AI shell command (it's what makes a sudo command fail fast rather than hang).
+		action = {"action": "shell", "command": "ls -la"}
+		with patch('secator.tasks.command.command') as mock_cmd:
+			fake = mock_cmd.return_value
+			fake.output = "done"
+			fake.id = "task_fake"
+			list(dispatch_action(action, ctx))
+		self.assertIs(mock_cmd.call_args.kwargs.get("tty"), False)
+
+
 if __name__ == '__main__':
 	unittest.main()

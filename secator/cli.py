@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 from collections import Counter
 
@@ -36,7 +37,6 @@ from secator.utils import (
 	detect_host,
 	print_version,
 	get_file_timestamp,
-	list_reports,
 	get_info_from_report_path,
 	human_to_timedelta,
 	sanitize_folder_name,
@@ -1240,13 +1240,14 @@ def list_aliases(silent):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
-@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -severity_score')  # noqa: E501
+@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -cvss_score')  # noqa: E501
 @click.option('--count', 'count', is_flag=True, default=False, help='Group identical --format values with an occurrence count (most frequent first; --sort orders by value instead)')  # noqa: E501
 @click.option('--uniq', 'uniq', is_flag=True, default=False, help='Drop duplicate --format values')
 @click.option('--group', is_flag=True, default=False, help="Group findings by each output type's default field(s), aggregating a related field (e.g. vulnerabilities by name with their matched_at targets).")  # noqa: E501
 @click.option('--save', 'save', type=str, default=None, help='Save the query expression ARG under this name for later reuse (e.g. --save vuln_high)')  # noqa: E501
+@click.option('--show-all', 'show_all', is_flag=True, default=False, help='Show extra vulnerability fields: epss_score, description, remediation, impact, poc')  # noqa: E501
 @click.pass_context
-def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, sort, count, uniq, group, save):  # noqa: E501
+def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, sort, count, uniq, group, save, show_all):  # noqa: E501
 	"""Query"""
 
 	# 0. Save the expression under a name, then exit (reuse later with `secator q <name>`).
@@ -1262,17 +1263,17 @@ def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_fi
 	# Empty query: return all results (subject to the enforced base query),
 	# optionally scoped by --report-filter / --workspace.
 	if not arg:
-		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all)  # noqa: E501
 		return
 
 	# 1. Saved query name
 	if arg in CONFIG.queries:
-		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all)  # noqa: E501
 		return
 
 	# 2. Raw filter expression
 	if _looks_like_query_expr(arg):
-		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all)  # noqa: E501
 		return
 
 	# 3. Natural language -> AI chat
@@ -1656,7 +1657,7 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 	return _finish(list(sv))
 
 
-def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None):  # noqa: E501
+def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None, show_all=False):  # noqa: E501
 	"""Build and send a consolidated report. Shared by `report show` and `query`.
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
@@ -1767,7 +1768,7 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 
 	# 6. Build and send report via QueryEngine
 	dedupe_effective = CONFIG.runners.remove_duplicates if dedupe is None else dedupe
-	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters)
+	report = Report(runner, title=f'Consolidated report - {current}', exporters=exporters, show_all=show_all)
 	# --group / --sort / --uniq / --count reshape or cap the output post-query. STREAM the findings
 	# (stream=True yields per-type StreamViews — nothing materialized) and aggregate incrementally,
 	# so peak memory is bounded by the RESULT size, not the finding count (safe for 100k+). --limit
@@ -1826,7 +1827,7 @@ def run_ai_chat(ctx, prompt, workspace):
 @click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
-@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -severity_score')  # noqa: E501
+@click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -cvss_score')  # noqa: E501
 @click.option('--count', 'count', is_flag=True, default=False, help='Group identical --format values with an occurrence count (most frequent first; --sort orders by value instead)')  # noqa: E501
 @click.option('--uniq', 'uniq', is_flag=True, default=False, help='Drop duplicate --format values')
 @click.option('--group', is_flag=True, default=False, help="Group findings by each output type's default field(s), aggregating a related field (e.g. vulnerabilities by name with their matched_at targets).")  # noqa: E501
@@ -1836,39 +1837,69 @@ def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt
 	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
 
 
+def _load_report_info(path):
+	"""Read only the lightweight ``info`` block from a report.json.
+
+	Deliberately avoids deserialising the (potentially large) ``results`` key and
+	never touches the sibling ``results.ndjson``.  Used by ``secator r list`` so
+	the metadata table renders instantly without iterating every finding.
+
+	Returns:
+		dict: The ``info`` section of the report, or ``{}`` on error.
+	"""
+	with open(path, 'r') as f:
+		data = json.load(f)
+	return data.get('info', {})
+
+
+def _count_report_vulns(path):
+	"""Count vulnerability severities for a single report (the slow part).
+
+	Reads ``results.ndjson`` line-by-line (or falls back to the legacy
+	``report.json['results']['vulnerability']`` list).  Called lazily so the
+	listing table can appear before all counts are ready.
+
+	Returns:
+		dict: ``{'critical': N, 'high': N, 'medium': N, 'low': N}``
+	"""
+	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+	ndjson = Path(path).parent / 'results.ndjson'
+
+	if ndjson.exists():
+		with open(ndjson, 'r') as f:
+			for line in f:
+				line = line.strip()
+				if not line:
+					continue
+				try:
+					rec = json.loads(line)
+				except json.JSONDecodeError:
+					continue
+				if rec.get('_type') == 'vulnerability':
+					severity = str(rec.get('severity', '')).lower()
+					if severity in vuln_counts:
+						vuln_counts[severity] += 1
+	else:
+		# Legacy: full results embedded in report.json
+		with open(path, 'r') as f:
+			data = json.load(f)
+		for vuln in data.get('results', {}).get('vulnerability', []):
+			severity = str(vuln.get('severity', '')).lower()
+			if severity in vuln_counts:
+				vuln_counts[severity] += 1
+
+	return vuln_counts
+
+
 def _load_report_data(path):
 	"""Read report info + count vulnerability severities.
 
-	Info comes from report.json; vulnerabilities come from the sibling results.ndjson
-	(json driver's live/new store) when present, else from the legacy report.json['results'].
+	Retained for callers outside ``report_list`` (e.g. ``_report_matches_filters``).
+	For the listing command use ``_load_report_info`` + ``_count_report_vulns`` to
+	keep metadata loading and vuln counting separate.
 	"""
-	info = {}
-	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
-	with open(path, 'r') as f:
-		data = json.load(f)
-	info = data.get('info', {})
-	ndjson = Path(path).parent / 'results.ndjson'
-
-	def _iter_vulns():
-		if ndjson.exists():
-			with open(ndjson, 'r') as f:
-				for line in f:
-					line = line.strip()
-					if not line:
-						continue
-					try:
-						rec = json.loads(line)
-					except json.JSONDecodeError:
-						continue
-					if rec.get('_type') == 'vulnerability':
-						yield rec
-		else:
-			yield from data.get('results', {}).get('vulnerability', [])
-
-	for vuln in _iter_vulns():
-		severity = str(vuln.get('severity', '')).lower()
-		if severity in vuln_counts:
-			vuln_counts[severity] += 1
+	info = _load_report_info(path)
+	vuln_counts = _count_report_vulns(path)
 	return info, vuln_counts
 
 
@@ -1966,114 +1997,110 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		table.add_column('Path', overflow='fold')
 
 	shown = 0
+	is_local = effective_driver == 'local'
 
-	if effective_driver in ('mongodb', 'api', 'sqlite'):
-		# --interesting and --time-delta are only supported by the local driver.
+	# --interesting / --time-delta are local-only (other backends don't carry per-run
+	# vuln counts or filesystem mtimes).
+	if not is_local:
 		unsupported = [opt for opt, val in (('--interesting', interesting), ('--time-delta', time_delta)) if val]
 		if unsupported:
 			console.print(Warning(message=f'{", ".join(unsupported)} {"is" if len(unsupported) == 1 else "are"} only supported with the local driver and will be ignored for the {effective_driver} driver.'))  # noqa: E501
-		# Resolve the workspace name to its id for the API backend. The API only
-		# reliably filters runners by workspace_id (ObjectId); passing the raw name
-		# returns nothing (e.g. `r list -ws T2S` finds 0 while `r list` finds all).
-		list_workspace = workspace
-		if effective_driver == 'api' and workspace:
-			try:
-				from secator.hooks.api import resolve_workspace
 
-				list_workspace, _ = resolve_workspace(workspace)
-			except Exception as e:
-				console.print(Error(message=f'Error resolving workspace from API: {e}'))
-				return
-		# Use QueryEngine backend to list runners
-		context = {'drivers': [effective_driver]}
-		engine = QueryEngine(workspace_id=list_workspace or '', context=context)
-		# By default only list outermost runners (has_parent=False). --show-children
-		# drops the filter so nested sub-tasks/sub-workflows are shown too.
-		has_parent = None if show_children else False
+	# Resolve the workspace name to its id for the API backend (it filters by id).
+	list_workspace = workspace
+	if effective_driver == 'api' and workspace:
+		try:
+			from secator.hooks.api import resolve_workspace
+			list_workspace, _ = resolve_workspace(workspace)
+		except Exception as e:
+			console.print(Error(message=f'Error resolving workspace from API: {e}'))
+			return
+
+	# ONE code path for every backend: list runners via the QueryEngine, then stream
+	# rows into a live table. Vuln counts exist only for the local driver (read from
+	# each report's results.ndjson); other backends show '-'.
+	engine = QueryEngine(workspace_id=list_workspace or '', context={'drivers': [effective_driver]})
+	has_parent = None if show_children else False
+	with console.status('[bold]Listing reports …[/]'):
+		_t = time.time()
 		runners = engine.list_runners(workspace_id=list_workspace, runner_type=runner_type, has_parent=has_parent)
-		for runner_info in runners:
-			runner_status = runner_info.get('status', '')
-			status_color = STATE_COLORS.get(runner_status, 'white')
-			if status_pattern and not status_pattern.search(str(runner_status)):
-				continue
-			targets = runner_info.get('targets', [])
-			first_target = str(targets[0]) if targets else ''
-			if len(targets) > 1:
-				first_target += f' (+{len(targets) - 1})'
-			profiles = runner_info.get('run_opts', {}).get('profiles', [])
-			if isinstance(profiles, str):
-				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
-			profiles = [p for p in profiles if p]
-			profiles_str = ', '.join(profiles) if profiles else ''
-			# Show the id as {runner_type}/{runner_id} so it can be passed to `secator r info`.
-			runner_id = runner_info.get('_id_str')
-			if not runner_id:
-				rtype = runner_info.get('_type') or runner_info.get('config', {}).get('type', '')
+		if is_local:
+			# Chronological (oldest first), as before — sort by report mtime.
+			runners = sorted(runners, key=lambda r: Path(r['_path']).stat().st_mtime)
+		debug(f'listed {len(runners)} runner(s) in {time.time() - _t:.3f}s', sub='report')
+
+	# --time-delta cutoff (local only): keep reports whose mtime is newer than the delta.
+	cutoff_ts = None
+	if is_local and time_delta:
+		cutoff_ts = time.time() - human_to_timedelta(time_delta).total_seconds()
+
+	def _build_row(r, vuln_str):
+		runner_id = r.get('_id_str')
+		if not runner_id:
+			rid = r.get('_id', '')
+			if r.get('_path'):  # local: _id is already '<type>/<id>'
+				runner_id = rid
+			else:
+				rtype = r.get('_type') or r.get('config', {}).get('type', '')
 				if rtype and not rtype.endswith('s'):
 					rtype += 's'
-				raw_id = runner_info.get('_id', '')
-				runner_id = f'{rtype}/{raw_id}' if rtype and raw_id else (raw_id or rtype)
-			ws_name = runner_info.get('context', {}).get('workspace_name') or runner_info.get('_workspace', workspace or '')
-			row = [
-				ws_name,
-				f'[bold blue]{runner_info.get("name", "")}[/]',
-				runner_id,
-				first_target,
-				profiles_str,
-				humanize_date(runner_info.get('start_time')),
-				humanize_date(runner_info.get('end_time')),
-				runner_info.get('elapsed_human', ''),
-				f'[{status_color}]{runner_status}[/]',
-				'-',
-			]
-			if show_all:
-				row.append('')
-			table.add_row(*row)
-			shown += 1
-	else:
-		# Local filesystem listing
-		paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
-		paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
+				runner_id = f'{rtype}/{rid}' if rtype and rid else (rid or rtype)
+		path = r.get('_path')
+		id_cell = f'[link={Path(path).as_uri()}]{runner_id}[/link]' if path else runner_id
+		ws_name = r.get('context', {}).get('workspace_name') or r.get('_workspace') or (workspace or '')
+		targets = r.get('targets', [])
+		first_target = str(targets[0]) if targets else ''
+		if len(targets) > 1:
+			first_target += f' (+{len(targets) - 1})'
+		profiles = r.get('run_opts', {}).get('profiles', [])
+		if isinstance(profiles, str):
+			profiles = [p.strip() for p in profiles.split(',') if p.strip()]
+		profiles = [p for p in profiles if p]
+		runner_status = r.get('status', '')
+		status_color = STATE_COLORS.get(runner_status, 'white')
+		row = [
+			ws_name,
+			f'[bold blue]{r.get("name", "")}[/]',
+			id_cell,
+			first_target,
+			', '.join(profiles) if profiles else '',
+			humanize_date(r.get('start_time')),
+			humanize_date(r.get('end_time')),
+			r.get('elapsed_human', ''),
+			f'[{status_color}]{runner_status}[/]',
+			vuln_str,
+		]
+		if show_all:
+			row.append(str(path) if path else '')
+		return row
 
-		for path in paths:
-			try:
-				path_info = get_info_from_report_path(path)
-				report_info, vuln_counts = _load_report_data(path)
-				if not _report_passes_filters(report_info, vuln_counts, interesting, status_pattern):
+	# transient=False + vertical_overflow='visible': Live leaves the full table in
+	# place (scrollable) on exit, so no reprint. nullcontext when there's nothing to
+	# list, so we never flash an empty table before "No reports found".
+	live_cm = Live(
+		table, console=console, refresh_per_second=4,
+		transient=False, vertical_overflow='visible',
+	) if runners else nullcontext()
+	with live_cm:
+		for r in runners:
+			runner_status = r.get('status', '')
+			if status_pattern and not status_pattern.search(str(runner_status)):
+				continue
+			if is_local:
+				path = r.get('_path')
+				if cutoff_ts is not None and path and Path(path).stat().st_mtime < cutoff_ts:
 					continue
-				runner_id = path_info['type'] + '/' + path_info['id']
-				targets = report_info.get('targets', [])
-				first_target = str(targets[0]) if targets else ''
-				if len(targets) > 1:
-					first_target += f' (+{len(targets) - 1})'
-				profiles = report_info.get('run_opts', {}).get('profiles', [])
-				if isinstance(profiles, str):
-					profiles = [p.strip() for p in profiles.split(',') if p.strip()]
-				profiles_str = ', '.join(profiles) if profiles else ''
-				runner_status = report_info.get('status', '')
-				status_color = STATE_COLORS[runner_status] if runner_status in STATE_COLORS else 'white'
-
-				row = [
-					path_info['workspace'],
-					f'[bold blue]{report_info.get("name", "")}[/]',
-					f'[link={Path(path).as_uri()}]{runner_id}[/link]',
-					first_target,
-					profiles_str,
-					humanize_date(report_info.get('start_time')),
-					humanize_date(report_info.get('end_time')),
-					report_info.get('elapsed_human', ''),
-					f'[{status_color}]{runner_status}[/]',
-					_format_vuln_counts(vuln_counts),
-				]
-				if show_all:
-					row.append(str(path))
-				table.add_row(*row)
-				shown += 1
-			except Exception as e:
-				console.print(Error(message=f'Could not load {path}: {str(e)}'))
+				# Lazy vuln count — the slow part, streamed row-by-row under Live.
+				counts = _count_report_vulns(path)
+				if interesting and sum(counts.values()) == 0:
+					continue
+				vuln_str = _format_vuln_counts(counts)
+			else:
+				vuln_str = '-'
+			table.add_row(*_build_row(r, vuln_str))
+			shown += 1
 
 	if shown > 0:
-		console.print(table)
 		console.print(Info(message=f'Found {shown} reports.'))
 		if workspace:
 			console.print(Info(message=f'Current workspace: [bold gold3]{workspace}[/]. Use [bold green4]-ws <workspace_name>[/] to switch.'))  # noqa: E501
@@ -3070,6 +3097,50 @@ def install_ruby():
 	)
 
 
+def apply_install_overrides(cls, cli_version=None):
+	"""Resolve install-time overrides for a tool class before ``ToolInstaller.install(cls)``.
+
+	This does NOT implement its own override system — it reuses the one, canonical
+	config-override mechanism (``apply_task_overrides``, the same one
+	``Command.__init__`` applies at runtime), just targeting the **class** because
+	the installer never instantiates the task. So ``tasks.overrides.<tool>.install_cmd``
+	/ ``.install_version`` — and any other attr — are honoured exactly like every
+	other override.
+
+	On top of that it layers two install-command-specific concerns the generic
+	mechanism has no business knowing about:
+
+	1. a CLI-supplied version (``secator install tools <tool>==<version>``) wins over
+	   the config override;
+	2. version normalization: a **bare semver** (``1.2.3`` -> ``v1.2.3``) gets the
+	   ``v`` prefix, but only when the tool's native pin is ``v``-prefixed — so
+	   branch names (``main``), commit SHAs and already-``v`` strings are untouched.
+	   (This fixes #1496, where a bare ref like ``main`` was wrongly ``v``-prefixed.)
+
+	Args:
+		cls: The tool/task class to mutate.
+		cli_version (str, optional): Version supplied on the CLI (wins over config).
+
+	Returns:
+		The same ``cls`` (mutated), for convenience.
+	"""
+	from secator.runners._helpers import apply_task_overrides
+	# The tool's native pin tells us its tag convention (v-prefixed or not).
+	native_version = cls.install_version
+	# 1. Canonical config overrides (install_cmd, install_version, anything else).
+	apply_task_overrides(cls)
+	# 2. A CLI-supplied version wins over the config override.
+	if cli_version:
+		cls.install_version = cli_version
+	# 3. Normalize a bare semver to the tool's v-prefixed convention.
+	version = cls.install_version
+	is_bare_semver = bool(version) and bool(re.match(r'^\d+(\.\d+)*$', str(version)))
+	native_is_v_prefixed = str(native_version).startswith('v')
+	if is_bare_semver and native_is_v_prefixed and not str(version).startswith('v'):
+		cls.install_version = f'v{version}'
+	return cls
+
+
 @install.command('tools')
 @click.argument('cmds', required=False)
 @click.option('--cleanup', is_flag=True, default=False, help='Clean up tools after installation.')
@@ -3080,6 +3151,8 @@ def install_tools(cmds, cleanup, fail_fast):
 		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 	tools = []
+	# CLI-supplied versions (tool==version) take priority over config overrides.
+	cli_versions = {}
 	if cmds is not None:
 		cmds = cmds.split(',')
 		for cmd in cmds:
@@ -3090,14 +3163,16 @@ def install_tools(cmds, cleanup, fail_fast):
 			cls = next((cls for cls in discover_tasks() if cls.__name__ == cmd), None)
 			if cls:
 				if version:
-					if cls.install_version and cls.install_version.startswith('v') and not version.startswith('v'):
-						version = f'v{version}'
-					cls.install_version = version
+					cli_versions[cls.__name__] = version
 				tools.append(cls)
 			else:
 				console.print(Warning(message=f'Tool {cmd} is not supported or inexistent.'))
 	else:
 		tools = discover_tasks()
+
+	# Apply install overrides on each tool class before installation.
+	for cls in tools:
+		apply_install_overrides(cls, cli_version=cli_versions.get(cls.__name__))
 	tools.sort(key=lambda x: x.__name__)
 	return_code = 0
 	if not tools:

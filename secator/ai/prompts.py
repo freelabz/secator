@@ -26,7 +26,7 @@ def load_prompt(path: str) -> str:
 	Standard $variable substitution is handled later by string.Template.
 
 	Args:
-		path: Relative path within the prompts directory (e.g. 'modes/attack.txt')
+		path: Relative path within the prompts directory (e.g. 'modes/scan.txt')
 
 	Returns:
 		Prompt string with includes resolved.
@@ -51,14 +51,15 @@ def load_prompt(path: str) -> str:
 COMMON_RULES = load_prompt("constraints/common.txt")
 QUERIES = load_prompt("constraints/queries.txt")
 
-SYSTEM_ATTACK = Template(load_prompt("modes/attack.txt"))
+SYSTEM_SCAN = Template(load_prompt("modes/scan.txt"))
 SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
 SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
 MODES = {
-	"attack": {
-		"system_prompt": SYSTEM_ATTACK,
+	"scan": {
+		"system_prompt": SYSTEM_SCAN,
+		"description": "actively scan, run tools / shell, exploit, and write or curate findings",
 		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
@@ -68,33 +69,64 @@ MODES = {
 		# (`query`), ask/suggest (`follow_up`), delegate a same-mode helper (`subagent`),
 		# and `stop`. NO `shell` (attack surface), NO `task`/`workflow` (escalation), and
 		# NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
-		# changing findings is an active action that belongs in attack/exploit.
+		# changing findings is an active action that belongs in scan/exploit.
+		"description": "read-only — read and explain workspace data; you cannot scan, attack or write findings",
 		"allowed_actions": ["query", "follow_up", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
 		"system_prompt": SYSTEM_EXPLOIT,
+		"description": "verify a single vulnerability by actually exploiting it and record a PoC",
 		# "query" is required so the model can pull the workspace's existing exploit
 		# intel (the CVE's `_type:"exploit"` objects / PoC references) before trying
 		# to exploit — without it query_workspace isn't even built for this mode.
 		# "follow_up" lets exploit mode STOP-and-ask (e.g. confirm before a state-changing
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 }
+
+
+def build_mode_banner(mode: str, mode_config: dict = None) -> str:
+	"""Generate the authoritative "you are in <mode> mode" statement for a mode.
+
+	Derived from the MODES registry, so ANY mode (incl. ones added later, e.g. a
+	`monitor` mode) automatically gets a correct current-mode statement — the model
+	always knows which mode it is in and won't redundantly try to switch to it. The
+	`change_mode` hint is added only when that mode can actually change mode.
+	"""
+	cfg = mode_config or MODES.get(mode, {})
+	desc = cfg.get("description")
+	line = f"You are operating in {mode.upper()} mode"
+	line += f": {desc}." if desc else "."
+	if "change_mode" in cfg.get("allowed_actions", []):
+		line += (" You are ALREADY in this mode — do NOT call change_mode to re-enter it; "
+		         "change_mode only moves UP to a more capable mode and cannot de-escalate.")
+	return f"<current_mode>\n{line}\n</current_mode>"
+
+
+# Legacy mode names -> current names, so persisted sessions and older callers that
+# still pass "attack" keep working.
+MODE_ALIASES = {"attack": "scan"}
+
+
+def normalize_mode(mode):
+	"""Resolve a legacy mode alias (e.g. "attack") to its current name ("scan")."""
+	mode = (mode or "").strip().lower() if isinstance(mode, str) else mode
+	return MODE_ALIASES.get(mode, mode)
 
 
 def get_mode_config(mode: str) -> dict:
 	"""Get full config for a mode.
 
 	Args:
-		mode: The mode name (attack, chat, exploit)
+		mode: The mode name (scan, chat, exploit)
 
 	Returns:
 		Mode configuration dict with system_prompt, allowed_actions, max_iterations
 	"""
-	return MODES.get(mode, MODES["chat"])
+	return MODES.get(normalize_mode(mode), MODES["chat"])
 
 
 def _format_opt_type(opt_config: dict) -> str:
@@ -261,19 +293,135 @@ def build_scope_section(in_scope=None, out_of_scope=None) -> str:
 	return "\n".join(lines)
 
 
-def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None) -> str:
+# Cached per-process shell-environment facts (OS / package manager / sudo). These do
+# not change within a process, and a resume on a different machine is a NEW process, so
+# caching here is safe AND gives the "recompute fresh on resume" property for free. Only
+# the clock (date / timestamp) is recomputed on every build. Keyed by `isolated`.
+_SHELL_ENV_CACHE: Dict[bool, List[str]] = {}
+
+
+def _sudo_status_lines() -> List[str]:
+	"""Describe host sudo availability for the AI, without ever prompting or blocking.
+
+	Order mirrors ``Command._prompt_sudo``: root → configured password → passwordless
+	(`sudo -n`, which NEVER prompts) → unavailable. The unavailable line is actionable:
+	it tells the model not to run sudo (it would fail in this non-interactive session)
+	and how the user can enable it.
+	"""
+	import os
+	import shutil
+	import subprocess
+	if hasattr(os, "geteuid") and os.geteuid() == 0:
+		return ["Privileges: running as root — no sudo needed."]
+	try:
+		from secator.config import CONFIG
+		if CONFIG.security.sudo_password:
+			return ["Privileges: non-root; sudo available via a configured password (security.sudo_password)."]
+	except Exception:
+		pass
+	if shutil.which("sudo") is None:
+		return ["Privileges: non-root and sudo is NOT installed — do not use sudo; run only commands that work unprivileged."]
+	try:
+		# `sudo -n` is guaranteed non-interactive (fails instead of prompting); bound it anyway.
+		rc = subprocess.run(
+			["sudo", "-n", "true"],
+			stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+		).returncode
+		if rc == 0:
+			return ["Privileges: non-root; passwordless sudo IS available."]
+	except Exception:
+		pass
+	return [
+		"Privileges: non-root; sudo requires a password and none is configured. Do NOT run sudo "
+		"commands — they fail fast in this non-interactive session (no password prompt). Prefer an "
+		"unprivileged alternative, or ask the user to enable passwordless sudo or set "
+		"SECATOR_SECURITY_SUDO_PASSWORD.",
+	]
+
+
+def _host_shell_env_lines() -> List[str]:
+	"""Host OS + package manager (read-only; never triggers an install) + sudo status."""
+	lines = ["Shell environment: this host — run_shell commands execute directly on it."]
+	try:
+		from secator.installer import get_distro_config
+		d = get_distro_config()
+		if isinstance(d, str):
+			# SECATOR_PACKAGE_MANAGER override: get_distro_config returns a bare string.
+			lines.append(f"Package manager: {d} (install packages with it).")
+		else:
+			system = getattr(d, "system", "") or ""
+			name = getattr(d, "name", "") or ""
+			pm_name = getattr(d, "pm_name", "") or ""
+			pm_installer = getattr(d, "pm_installer", "") or ""
+			os_line = f"Operating system: {system}" + (f" ({name})" if name else "")
+			lines.append(os_line + ".")
+			if pm_installer:
+				lines.append(f"Package manager: {pm_name} — install packages with `{pm_installer} <pkg>`.")
+			elif pm_name:
+				lines.append(f"Package manager: {pm_name}.")
+			else:
+				lines.append("Package manager: unknown — detect it before installing anything.")
+	except Exception:
+		lines.append("Package manager: unknown — detect it before installing anything.")
+	lines.extend(_sudo_status_lines())
+	return lines
+
+
+def build_session_context(isolated: bool = False) -> str:
+	"""Dynamic per-session context block for the system prompt.
+
+	Two things the model otherwise guesses wrong:
+	- the current date (it has no clock);
+	- the shell environment its ``run_shell`` commands ACTUALLY run in — the disposable
+	  Alpine sandbox (apk, root) when ``--isolated``, otherwise THIS host's OS + package
+	  manager + sudo availability. Stops the model defaulting to ``apk`` on a non-Alpine
+	  host, and stops it issuing a sudo command that can only stall/fail.
+
+	DATE ONLY, no clock time: this block sits in the cached system-prompt prefix, so a
+	second-precision timestamp would (a) be stale the moment the session runs past it and
+	(b) risk busting prompt caching if the prompt is ever rebuilt mid-session. A day-granular
+	date stays constant across the session, so the cache holds. The model is told to run
+	``date`` when it needs the exact wall-clock time. Rebuilt on every ``get_system_prompt``
+	call (including resume), so the date rolls over and host facts are re-detected on resume.
+	"""
+	from datetime import datetime, timezone
+	lines = [
+		"<session_context>",
+		f"Current date (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d')}. "
+		"Run `date` for the exact current time.",
+	]
+	if isolated:
+		lines += [
+			"Shell environment: a disposable, network-isolated Alpine sandbox container — run_shell runs there, not on the host.",  # noqa: E501
+			"Package manager: apk — install packages with `apk add --no-cache <pkg>`.",
+			"Privileges: running as root in the sandbox — no sudo needed.",
+		]
+	else:
+		if isolated not in _SHELL_ENV_CACHE:
+			_SHELL_ENV_CACHE[isolated] = _host_shell_env_lines()
+		lines += _SHELL_ENV_CACHE[isolated]
+	lines.append("</session_context>")
+	return "\n".join(lines)
+
+
+def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None,
+                      isolated=None) -> str:
 	"""Get system prompt for mode with library reference filled in.
 
 	Args:
-		mode: One of "attack", "chat", or "exploit"
+		mode: One of "scan", "chat", or "exploit"
 		workspace_path: Path to the workspace/reports directory
 		backend: Optional interactivity backend to determine interaction rules
 		in_scope: Optional allow-list of targets to surface in the prompt.
 		out_of_scope: Optional deny-list of targets to surface in the prompt.
+		isolated: When not None (True/False), append a dynamic ``<session_context>`` block
+			describing the clock + the shell environment (sandbox vs host) for that mode.
+			Left None by callers (e.g. tests) that want a deterministic, static prompt.
 
 	Returns:
 		Formatted system prompt string
 	"""
+	mode = normalize_mode(mode)
 	if mode not in MODES:
 		from secator.rich import console
 		from secator.output_types import Warning
@@ -288,10 +436,15 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# $output_types_reference, so they must be substituted for all modes — derive both
 	# from FINDING_TYPES so they never drift from the registry.
 	subst = dict(query_types=build_query_types(), output_types_reference=build_output_types_reference())
-	if mode in ("attack", "exploit"):
+	if mode in ("scan", "exploit"):
 		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 		subst.update(library_reference=build_library_reference(), **path_vars)
 	result = system_prompt.safe_substitute(**subst)
+
+	# Prepend the programmatic current-mode statement (from the registry) so the model
+	# always knows its active mode — prevents redundant change_mode calls. Auto-covers
+	# any mode added to MODES later.
+	result = build_mode_banner(mode, mode_config) + "\n\n" + result
 
 	# Determine interaction rules based on backend
 	# The mode templates already include ${follow_up} for interactive modes.
@@ -304,6 +457,9 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	scope_section = build_scope_section(in_scope, out_of_scope)
 	if scope_section:
 		result += "\n\n" + scope_section
+
+	if isolated is not None:
+		result += "\n\n" + build_session_context(isolated=bool(isolated))
 
 	return result.replace("$workspace_path", ws)
 

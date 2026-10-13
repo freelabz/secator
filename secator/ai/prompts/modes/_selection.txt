@@ -1,7 +1,7 @@
 <mode>
-Classify the following user prompt as exactly one of: 'attack', 'chat', or 'exploit'.
+Classify the following user prompt as exactly one of: 'scan', 'chat', or 'exploit'.
 'chat' = the user wants to ask questions, get summaries, or discuss findings
-'attack' = the user wants to actively scan, test, attack, enumerate, or pentest targets.
+'scan' = the user wants to actively scan, test, attack, enumerate, or pentest targets.
 'exploit' = the user wants to validate a specific vulnerability, or write an exploit report.
-Respond with ONLY the single word 'chat', 'exploit', or 'attack'.
+Respond with ONLY the single word 'chat', 'exploit', or 'scan'.
 </mode>

@@ -28,14 +28,13 @@ ALWAYS_ALLOWED_HOSTS = (
 
 
 def _host_of(value: str) -> str:
-	"""Bare host of a target value (strips scheme/port/path); '' if none."""
-	from urllib.parse import urlparse
-	if value.startswith(('http://', 'https://')):
-		return (urlparse(value).hostname or '').lower().rstrip('.')
-	host = value.split('/', 1)[0]
-	if ':' in host and not host.startswith('['):
-		host = host.rsplit(':', 1)[0]
-	return host.lower().rstrip('.')
+	"""Bare host of a target value (strips scheme/port/path); '' if none.
+
+	Thin alias of the single host-extraction helper in ``secator.scope`` so the
+	guardrail and the scope matcher never diverge on what "the host" is.
+	"""
+	from secator.scope import target_host
+	return target_host(value)
 
 
 def _is_always_allowed_host(value: str) -> bool:

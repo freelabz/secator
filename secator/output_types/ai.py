@@ -102,7 +102,7 @@ class Ai(OutputType):
 	"""Output type for AI-generated content with markdown support."""
 	content: str
 	ai_type: str = field(default='response')  # prompt, response, summary, suggestion, attack_summary
-	mode: str = field(default='', compare=False)  # summarize, suggest, attack
+	mode: str = field(default='', compare=False)  # summarize, suggest, scan
 	model: str = field(default='', compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
 	summary: bool = field(default=False, compare=False)

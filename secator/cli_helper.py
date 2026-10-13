@@ -429,7 +429,7 @@ def generate_rich_click_opt_groups(cli_endpoint, name, input_types, options):
 	opt_group = [
 		{
 			'name': 'Targets',
-			'options': input_types,
+			'options': input_types or [],  # None = any input type
 		},
 	]
 	for prefix in prefixes:

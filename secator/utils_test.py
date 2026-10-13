@@ -132,7 +132,7 @@ META_OPTS = {
 # PythonRunner task-specific test options (keyed by task name)
 PYTHON_RUNNER_OPTS = {
 	'ai': {
-		'mode': 'attack',
+		'mode': 'scan',
 		'interactive': False,
 		'sensitive': False,
 		'prompt': 'Run a full reconnaissance on this target',

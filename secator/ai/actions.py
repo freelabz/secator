@@ -13,7 +13,9 @@ from secator.runners.task import TaskNotFoundError
 from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_TYPES
 from secator.template import TemplateLoader
 from secator.utils import format_token_count
+from secator.ai.prompts import normalize_mode
 from secator.ai.utils import (
+	_PERSIST_AI_TYPES,
 	_sanitized_env, _build_action_display, _is_approved, _truncate, _format_action_error,
 	_is_heavy_runner, _sanitize_child_opts, build_subagent_prompt, _union_live_results,
 	_coerce_finding_fields, _get_action_label, _decrypt_dict,
@@ -36,10 +38,42 @@ _SANDBOX_CREATE_LOCK = threading.Lock()
 # the next prompt's token budget; head+tail keeps both the start and the result.
 _MAX_SHELL_OUTPUT_CHARS = 4000
 
-# Cap on ad-hoc AI shell commands (dispatched as the `command` task). Applied as an
-# instance attribute post-construction (see _handle_shell) since max_timeout is not a
-# run_opts-settable field.
-_SHELL_TIMEOUT = 60
+# Fallback default timeout (seconds) for ad-hoc AI shell commands when no config is
+# available. The real default is CONFIG.security.shell_default_timeout (30s); see
+# _resolve_shell_timeout. Applied as an instance attribute post-construction (see
+# _handle_shell) since max_timeout is not a run_opts-settable field.
+_SHELL_TIMEOUT = 30
+
+
+def _resolve_shell_timeout(action: Dict) -> int:
+	"""Effective max_timeout (seconds) for a single AI shell command.
+
+	Settable range is ``[default, ceiling]``:
+	- ``default = CONFIG.security.shell_default_timeout`` (30s) — the per-command default so an
+	  interactive user doesn't wait forever when the model runs a command;
+	- ``ceiling = CONFIG.celery.task_max_timeout`` — the SAME global max-task-timeout cap every
+	  task honors (``-1`` = no cap), so a long command can still complete where the operator
+	  allows long tasks, but the model can't exceed that bound.
+
+	The model passes ``timeout`` on run_shell to raise a slow command toward the ceiling (and
+	re-run after a timeout). A value below the default is floored to it; above the ceiling is
+	capped. Absent/non-numeric falls back to the default. run_shell-only; other runners resolve
+	their timeout through the normal config path, unchanged.
+	"""
+	from secator.config import CONFIG
+	default = getattr(getattr(CONFIG, "security", None), "shell_default_timeout", _SHELL_TIMEOUT) or _SHELL_TIMEOUT
+	requested = action.get("timeout")
+	base = default
+	if requested is not None:
+		try:
+			base = int(requested)
+		except (TypeError, ValueError):
+			base = default
+	base = max(base, default)  # floor: never below the per-command default
+	ceiling = CONFIG.celery.task_max_timeout
+	if ceiling is not None and ceiling > 0:
+		base = min(base, ceiling)  # cap: never above the global task-timeout ceiling
+	return base
 
 
 @dataclass
@@ -70,9 +104,9 @@ class ActionContext:
 	max_iterations: int = 0
 	in_batch: bool = False  # set on the per-batch ctx so the per-turn fan-out cap applies
 	subagent: bool = False
-	# Parent's resolved mode (chat/attack/exploit) + whether it is auto. Handed to a
+	# Parent's resolved mode (chat/scan/exploit) + whether it is auto. Handed to a
 	# spawned AI subagent so run_subagent can enforce its mode policy: a pinned read-only
-	# `chat` parent forces a chat subagent; an auto/attack parent may pick the subagent's
+	# `chat` parent forces a chat subagent; an auto/scan parent may pick the subagent's
 	# mode.
 	mode: str = ""
 	mode_is_auto: bool = True
@@ -549,7 +583,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		opts["subagent"] = True
 		opts["interactive"] = False
 		# `_handle_subagent` already set the child's mode per the run_subagent policy
-		# (pinned-chat forced to chat; auto/attack may choose). Fall back to the parent's
+		# (pinned-chat forced to chat; auto/scan may choose). Fall back to the parent's
 		# mode if somehow unset, so a concrete mode is hard-set in the child and it never
 		# re-detects upward.
 		if ctx.mode:
@@ -579,7 +613,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		sub_session = str(uuid.uuid4())
 		context["parent_session_id"] = parent_session
 		context["session_id"] = sub_session
-		# Give the subagent the SAME turn budget as the parent (else the exploit/attack
+		# Give the subagent the SAME turn budget as the parent (else the exploit/scan
 		# mode floor of 5 iterations starves it). setdefault so an explicit per-subagent
 		# max_iterations the LLM supplied (already clamped to _MAX_CHILD_ITERATIONS by
 		# _sanitize_child_opts above) still wins. inf/0 parents are skipped -> subagent
@@ -724,11 +758,11 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			if isinstance(out, Ai):
 				if out.ai_type == "response" and (out.content or "").strip():
 					last_response = out.content
-				elif out.ai_type in ("add_finding", "add_vuln_poc"):
+				elif out.ai_type in _PERSIST_AI_TYPES:
 					persisted.append(out.ai_type)
 			yield out
 		note = (f" Persisted: {', '.join(persisted)}." if persisted
-		        else " Persisted: NOTHING (subagent made no add_finding/add_vuln_poc call).")
+		        else " Persisted: NOTHING (subagent made no add_finding/mark_vuln_* call).")
 		handback = (last_response.strip() or "(subagent produced no summary)") + "\n[subagent handback]" + note
 		# Stamped for the PARENT conversation (card_context strips the subagent marker) and
 		# with THIS run_task's tool_call_id so it becomes the tool_result the parent reads.
@@ -790,11 +824,11 @@ def _handle_subagent(action: Dict, ctx: ActionContext) -> Generator:
 	- A user-PINNED read-only ``chat`` session forces the subagent to ``chat``; if the
 	  model asks for a different mode, refuse and tell it to have the user switch to
 	  ``auto`` (a read-only session must not spawn an acting subagent behind the user).
-	- An ``auto`` or ``attack`` session may set the subagent's ``mode`` (e.g. hand a vuln
+	- An ``auto`` or ``scan`` session may set the subagent's ``mode`` (e.g. hand a vuln
 	  to an ``exploit`` subagent); omitted means inherit the parent's current mode.
 	``exploit`` mode isn't given this tool at all (see MODES), so a focused exploit run
 	can't fan out."""
-	requested_mode = (action.get("mode") or "").strip().lower() or None
+	requested_mode = normalize_mode(action.get("mode") or "") or None
 	pinned_chat = (not getattr(ctx, "mode_is_auto", True)) and ctx.mode == "chat"
 	if pinned_chat:
 		if requested_mode and requested_mode != "chat":
@@ -1003,6 +1037,12 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			"print_cmd": False,
 			"dangerous": False,
 			"env": _sanitized_env(),
+			# Never let an AI-issued command block the loop on an interactive prompt. tty=False
+			# makes Command._prompt_sudo take its non-interactive path: a sudo command with no
+			# passwordless/configured sudo fails fast with an actionable error instead of
+			# hanging on getpass (the stall in a --dangerous, non-isolated TTY session). The
+			# session_context block already tells the model whether sudo is usable.
+			"tty": False,
 		}
 		# Human-readable description the LLM supplied (shown by clients instead of the
 		# bare "command" name). See _run_runner for the run_opts['description'] mapping.
@@ -1015,10 +1055,16 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		from secator.tasks.command import command as CommandTask
 		runner = CommandTask([exec_command], hooks=hooks, context=context, **run_opts)
 
-		# 60s cap on ad-hoc AI shell commands. max_timeout is NOT run_opts-settable
-		# (Command.__init__ resolves it from CONFIG.tasks.overrides); setting the
-		# instance attribute here is honored by get_max_timeout().
-		runner.max_timeout = _SHELL_TIMEOUT
+		# Per-command timeout. max_timeout is NOT run_opts-settable (Command.__init__ resolves
+		# it from CONFIG.tasks.overrides); setting the instance attribute here is honored by
+		# get_max_timeout(). Defaults to CONFIG.security.shell_default_timeout (30s); the model
+		# can raise it via run_shell(timeout=...), bounded by CONFIG.celery.task_max_timeout.
+		effective_timeout = _resolve_shell_timeout(action)
+		runner.max_timeout = effective_timeout
+		# Check the timeout at least once a second: the default monitor cadence is
+		# stat_update_frequency (tens of seconds), which would let a short shell timeout
+		# lapse unenforced. Stats stay gated to their own frequency (no extra overhead).
+		runner.monitor_poll_interval = min(1.0, effective_timeout)
 
 		# Emit the command Ai now that the runner exists: its on_init hook has
 		# stamped the runner id into context, so clients can link this item to the
@@ -1045,6 +1091,18 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		# Scrub secrets BEFORE truncating (a secret in the middle would survive if we
 		# truncated first), then cap so it can't blow up history.
 		output = _truncate(_scrub_secrets(runner.output or "(no output)"), _MAX_SHELL_OUTPUT_CHARS)
+		# On timeout, tell the model it can re-run with a higher `timeout` (and the cap), so it
+		# retries deliberately instead of giving up or blindly re-running the same command.
+		# `is True` (not just truthy): the real runner always sets a bool, and this avoids a
+		# test MagicMock's auto-created attribute reading as "timed out".
+		if getattr(runner, "timed_out", False) is True:
+			from secator.config import CONFIG
+			ceiling = CONFIG.celery.task_max_timeout
+			cap = f" (max {ceiling}s)" if ceiling is not None and ceiling > 0 else ""
+			output += (
+				f"\n\n[timed out after {effective_timeout}s] If this command just needs longer, "
+				f"re-run it with a higher `timeout`{cap}; otherwise change the approach."
+			)
 		yield Ai(content=output, ai_type="shell_output", _context=context)
 
 	except Exception as e:
@@ -1224,31 +1282,39 @@ def _handle_change_mode(action: Dict, ctx: ActionContext) -> Generator:
 	Gating: a user-PINNED read-only ``chat`` session can never self-escape — the tool
 	is not even built for it (see ``build_tool_schemas``); this rejects it as defense in
 	depth. Self-de-escalation is not allowed (no capability benefit), so the only valid
-	targets are ``attack``/``exploit``.
+	targets are ``scan``/``exploit`` (legacy ``attack`` is accepted as ``scan``).
 	"""
 	context = _get_result_context(action, ctx)
-	requested = (action.get("mode") or "").strip().lower()
+	requested = normalize_mode(action.get("mode") or "")
 	if (not getattr(ctx, "mode_is_auto", True)) and ctx.mode == "chat":
 		yield Error(
 			message="Cannot change mode: this session is pinned to read-only chat. "
 			"Ask the user to switch the mode to 'auto' or an action mode.",
 			_context=context)
 		return
-	if requested not in ("attack", "exploit"):
+	if requested not in ("scan", "exploit"):
 		yield Error(
-			message=f"Invalid change_mode target '{requested}'. Choose 'attack' or 'exploit'.",
+			message=f"Invalid change_mode target '{requested}'. Choose 'scan' or 'exploit'.",
 			_context=context)
 		return
-	# change_mode only escalates — it can't de-escalate (e.g. exploit -> attack), which
-	# would silently drop capability. Rank chat < attack < exploit; reject anything that
+	# change_mode only escalates — it can't de-escalate (e.g. exploit -> scan), which
+	# would silently drop capability. Rank chat < scan < exploit; reject anything that
 	# isn't a strict escalation from the current mode. (`auto` ranks below all, so an auto
 	# session can still escalate to either.)
-	_rank = {"chat": 0, "attack": 1, "exploit": 2}
-	current = (getattr(ctx, "mode", "") or "").strip().lower()
-	if _rank[requested] <= _rank.get(current, -1):
+	_rank = {"chat": 0, "scan": 1, "exploit": 2}
+	current = normalize_mode(getattr(ctx, "mode", "") or "")
+	# Already in the requested mode -> benign no-op, NOT a de-escalation. The model
+	# sometimes re-requests its current mode (e.g. unsure which mode it is in); surface a
+	# calm Info ("already there, proceed"), never a scary error.
+	if _rank[requested] == _rank.get(current, -1):
+		yield Info(
+			message=f"Already in '{current}' mode — no change needed; continue with the task.",
+			_context=context)
+		return
+	if _rank[requested] < _rank.get(current, -1):
 		yield Error(
 			message=f"Cannot change mode from '{current}' to '{requested}': change_mode "
-			"only escalates (e.g. attack -> exploit), it cannot de-escalate.",
+			"only escalates (e.g. scan -> exploit), it cannot de-escalate.",
 			_context=context)
 		return
 	yield Ai(content=requested, ai_type="mode_changed", _context=context)
