@@ -1207,13 +1207,16 @@ class TestYieldToolResultsRunnerScoping(unittest.TestCase):
 		self.assertEqual(len(stored), 1)
 		name, tc_id, content = stored[0]
 		self.assertEqual(name, "run_task")
-		# runner id + a scoped-query hint are in the MODEL-VISIBLE tool result.
+		# Uniform contract: the model re-reads by `_context.task_id` == runner.id,
+		# NOT task_chunk_id (an internal doc id that differs from runner.id).
 		self.assertIn("task-abc", content)
-		self.assertIn("task_chunk_id", content)
-		self.assertIn("chunk-xyz", content)
+		self.assertIn("_context.task_id", content)
+		self.assertNotIn("task_chunk_id", content)
+		self.assertNotIn("chunk-xyz", content)
 		self.assertIn("query_workspace", content)
-		# the emitted Ai carries the runner id in extra_data too.
+		# the emitted Ai carries the runner id + type in extra_data too.
 		self.assertEqual(outs[0].extra_data["runner_id"], "task-abc")
+		self.assertEqual(outs[0].extra_data["runner_type"], "task")
 
 	def test_query_workspace_result_gets_no_runner_scope_note(self):
 		"""Non task/workflow tools must not get the task-scoping note."""

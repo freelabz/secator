@@ -25,8 +25,9 @@ query_workspace(query={"_type": "vulnerability", "matched_at": {"$regex": "vulnw
 </example>
 
 <example>
-Read the findings produced by ONE runner you just ran (instead of re-scanning the whole workspace): scope by its id from `_context`. A task/workflow result tells you its runner id — query scoped to it:
-query_workspace(query={"_context.task_chunk_id": "<id>", "_type": "vulnerability"})
-query_workspace(query={"_context.task_id": "<id>", "_type": "port"})
+Read the findings produced by ONE runner you just ran (instead of re-scanning the whole workspace): every run_task/run_workflow/run_scan result reports its `runner_id` and `runner_type`. A runner's findings are ALWAYS scoped by `_context.<runner_type>_id` == that runner_id. So query scoped to it (add `_type` to narrow):
+query_workspace(query={"_context.task_id": "<runner_id>", "_type": "vulnerability"})     # a run_task result
+query_workspace(query={"_context.workflow_id": "<runner_id>", "_type": "port"})          # a run_workflow result
+(the same rule holds for scans already in the workspace: scope by `_context.scan_id`.)
 </example>
 </queries>
