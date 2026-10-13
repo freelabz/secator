@@ -419,7 +419,20 @@ class ai(PythonRunner):
 		self.prompt = self._resolve_prompt()
 		if not self.prompt and not self.is_subagent:
 			from secator.definitions import IN_WORKER
-			if not IN_WORKER:
+			if self.interactive == "tui":
+				# Under the Textual TUI there is no rich FullScreenPrompt: ask the TUI
+				# input for the first prompt via the backend (blocks until the user types).
+				response = self.backend.ask_user(
+					question="What do you want to do?",
+					choices=[],
+					session_id=self.session_id,
+					prompt_type="follow_up",
+				)
+				self.prompt = (response or {}).get("answer") or ""
+				if not self.prompt:
+					yield Info(message="No prompt provided. Exiting.")
+					return
+			elif not IN_WORKER:
 				from secator.rich import FullScreenPrompt
 				targets_str = ', '.join(self.inputs) if self.inputs else 'no target'
 				self.prompt = FullScreenPrompt(

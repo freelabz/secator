@@ -86,11 +86,12 @@ class AITUI(App):
 	"""
 	BINDINGS = [("ctrl+c", "quit", "Quit")]
 
-	def __init__(self, runner_builder, session="ai", mode="chat"):
+	def __init__(self, runner_builder, session="ai", mode="chat", initial_prompt=""):
 		super().__init__()
 		self._runner_builder = runner_builder
 		self._session = session
 		self._mode = mode
+		self._initial_prompt = initial_prompt or ""
 		self._current: RunnerDrop | None = None
 		self._steers: list[str] = []
 		self._steers_lock = threading.Lock()
@@ -107,17 +108,27 @@ class AITUI(App):
 	def on_mount(self) -> None:
 		self.title = "secator ai"
 		self.sub_title = f"session: {self._session} · mode: {self._mode}"
+		if self._initial_prompt:
+			# the -p prompt isn't typed into the input, so echo it once up front
+			self.call_later(self._append, Static(
+				Text.from_markup(f"[bold cyan]›[/] {escape(self._initial_prompt)}"), classes="user"))
 		threading.Thread(target=self._consume, daemon=True).start()
 
-	# worker: build + drive the runner, render each item on the UI thread
+	# worker: build + drive the runner. Items are rendered via the on_item hook the
+	# builder wires in (the Task runner yields nothing to the iterator), so this loop
+	# just pumps the generator to completion.
 	def _consume(self) -> None:
 		try:
-			for item in self._runner_builder():
-				self.call_from_thread(self._render, item)
+			for _ in self._runner_builder():
+				pass
 		except Exception as e:  # noqa: BLE001
 			self.call_from_thread(self._set_status, f"error: {e}", False)
 		else:
 			self.call_from_thread(self._set_status, "done", False)
+
+	# thread-safe entry the on_item hook calls from the worker thread
+	def tui_render(self, item) -> None:
+		self.call_from_thread(self._render, item)
 
 	def _convo(self) -> VerticalScroll:
 		return self.query_one("#convo", VerticalScroll)
@@ -156,10 +167,12 @@ class AITUI(App):
 	async def _render_ai(self, d: dict) -> None:
 		at = d.get("ai_type", "")
 		content = d.get("content", "") or ""
+		if at in ("prompt", "steer", "follow_up"):
+			# user-origin / end-of-turn question: already echoed on submit or shown by
+			# the ask_user prompt — don't double-render from the item stream
+			return
 		if at == "response":
 			await self._append(Markdown(content, classes="ai"))  # AI text as Markdown
-		elif at == "steer":
-			await self._append(Static(Text.from_markup(f"[bold cyan]›[/] {escape(content)}"), classes="user"))
 		elif at in ("task", "workflow", "scan", "query", "shell"):
 			ed = d.get("extra_data") or {}
 			kind = "shell" if at == "shell" else at
@@ -245,17 +258,37 @@ class AITUI(App):
 
 def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 	"""Entry used by the CLI: set this app as the active TUI (so the ai task
-	auto-selects the TUIBackend + suppresses console output), then run it. The
-	runner is BUILT inside the worker (after set_tui) so the backend resolves
-	with the TUI active."""
+	auto-selects the TUIBackend + suppresses console output), then run it.
+
+	The ai task is wrapped in a Task runner, which prints items internally but
+	yields NOTHING to the iterator — so we tap the item stream via an on_item hook
+	(merged into the runner's hooks) that marshals each item onto the UI thread. The
+	runner is BUILT inside the worker (after set_tui) so the backend resolves with
+	the TUI active."""
 	from secator.rich import set_tui
 
-	def build():
-		runner = runner_cls(config, inputs, run_opts=opts, hooks=hooks, context=context)
-		yield from runner
-
 	session = opts.get("workspace") or opts.get("prompt", "ai") or "ai"
-	app = AITUI(build, session=str(session)[:30], mode=opts.get("mode", "chat"))
+	app = AITUI(
+		None, session=str(session)[:30], mode=opts.get("mode", "chat"),
+		initial_prompt=opts.get("prompt", ""))
+
+	def _feed(self, item):  # on_item hook: runs in the worker thread
+		app.tui_render(item)
+		return item
+
+	merged = dict(hooks or {})
+	cls_hooks = dict(merged.get(runner_cls, {}))
+	cls_hooks["on_item"] = list(cls_hooks.get("on_item", [])) + [_feed]
+	merged[runner_cls] = cls_hooks
+
+	def build():
+		runner = runner_cls(config, inputs, run_opts=opts, hooks=merged, context=context)
+		for _ in runner:
+			pass
+		if False:  # keep build() a generator (driven by _consume) while yielding nothing
+			yield
+
+	app._runner_builder = build
 	set_tui(app)
 	try:
 		app.run()

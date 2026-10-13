@@ -61,7 +61,7 @@ def maybe_status(*args, **kwargs):
 
 	if _TUI is not None:
 		return _tui_status(args[0] if args else '')
-	if IN_WORKER or console._live is not None:
+	if IN_WORKER or getattr(console, '_live', None) is not None:
 		return nullcontext()
 	return console.status(*args, **kwargs)
 
