@@ -1855,6 +1855,17 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 		from contextlib import nullcontext
 		ctx_mgr = nullcontext()
 
+	# Under a Textual TUI there's no Rich progress panel, so a batch that only yields
+	# at the very end looks stuck for its whole duration. Stream each action's items
+	# (its runner card + findings, collected contiguously) the moment that action
+	# completes. Non-TUI keeps the deterministic sorted-at-end order.
+	stream_live = get_tui() is not None
+	if stream_live:
+		# immediate feedback so a parallel batch never looks stuck before the first
+		# action finishes (the TUI has no Rich progress panel)
+		labels = ", ".join(_get_action_label(a) for a in actions)
+		yield Info(message=f"Running {len(actions)} tasks in parallel: {labels}", _context=ctx.context)
+
 	all_results = []
 	with ctx_mgr:
 		if use_progress:
@@ -1880,7 +1891,11 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 					)
 					progress.refresh()
 
-				all_results.append((idx, result))
+				if stream_live:
+					for item in items:
+						yield item
+				else:
+					all_results.append((idx, result))
 
 	for idx, result in sorted(all_results, key=lambda x: x[0]):
 		for item in result["results"]:
