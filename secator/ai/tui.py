@@ -16,8 +16,8 @@ import threading
 from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.containers import Vertical, VerticalScroll
-from textual.widgets import Collapsible, Footer, Header, Input, Markdown, Static
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.widgets import Button, Footer, Header, Input, Markdown, Static
 
 
 def _finding_markup(d: dict) -> str:
@@ -41,29 +41,100 @@ def _finding_markup(d: dict) -> str:
 	return f"[dim]● {escape(t)}[/]  {escape(str(d))[:100]}"
 
 
-class RunnerDrop:
-	_ICON = {"task": "⚙", "workflow": "❖", "scan": "✦", "shell": "$", "query": "🔎"}
+class RunnerPanel(Vertical):
+	"""A Claude-like collapsible runner entry: a dim one-line header ("Running …" /
+	"Ran …") with the disclosure arrow on the RIGHT, and a bordered box (hidden until
+	expanded) holding the command + its output/findings."""
 
-	def __init__(self, kind: str, name: str, runner_id: str = ""):
+	def __init__(self, kind: str, rname: str, command: str = "", runner_id: str = ""):
+		super().__init__(classes="runner-panel")
 		self.kind = kind
-		self.name = name
+		self.rname = rname
+		self.command = command
 		self.runner_id = runner_id
 		self.count = 0
-		self.body = Vertical(classes="drop-body")
-		self.collapsible = Collapsible(self.body, title=self._title(), collapsed=True, classes="runner")
+		self.done = False
+		self._collapsed = True
 
-	def _title(self, status: str = "running") -> str:
-		icon = self._ICON.get(self.kind, "•")
-		tail = f"{self.count} findings · {status}" if self.count or status != "running" else status
-		return f"{icon} {self.kind}  {self.name}  ·  {tail}"
+	def compose(self) -> ComposeResult:
+		yield _Head(
+			Static(self._label(), classes="runner-label"),
+			Static("▶", classes="runner-arrow"),
+			classes="runner-head",
+		)
+		box = Vertical(classes="runner-box")
+		box.display = False
+		with box:
+			if self.command:
+				yield Static(Text(self.command), classes="runner-cmd")  # dim, no bg, plain
+			yield Vertical(classes="runner-out")
+		yield box
 
-	def add_finding(self, d: dict) -> Static:
+	def _desc(self) -> str:
+		return self.rname or self.kind
+
+	def _label(self) -> Text:
+		verb = "Ran" if self.done else "Running"
+		tail = f"  ·  {self.count} findings" if self.count else ""
+		return Text.from_markup(f"[b]{verb}[/] [cyan]{escape(self.kind)}[/] {escape(self._desc())}{tail}")
+
+	def _refresh_head(self) -> None:
+		self.query_one(".runner-label", Static).update(self._label())
+
+	def toggle(self) -> None:
+		self._collapsed = not self._collapsed
+		self.query_one(".runner-box", Vertical).display = not self._collapsed
+		self.query_one(".runner-arrow", Static).update("▶" if self._collapsed else "▼")
+
+	def add_finding(self, d: dict) -> None:
 		self.count += 1
-		self.collapsible.title = self._title()
-		return Static(Text.from_markup(_finding_markup(d)), classes="drop-line")
+		self.query_one(".runner-out", Vertical).mount(
+			Static(Text.from_markup(_finding_markup(d)), classes="out-line"))
+		self._refresh_head()
 
-	def add_raw(self, text: str) -> Static:
-		return Static(Text(text), classes="drop-line")  # raw output: plain, never markup
+	def add_raw(self, text: str) -> None:
+		# raw output: plain Text, never markup-parsed (target-controlled)
+		self.query_one(".runner-out", Vertical).mount(Static(Text(text), classes="out-line"))
+
+	def finish(self) -> None:
+		self.done = True
+		self._refresh_head()
+
+
+class _Head(Horizontal):
+	"""Clickable header row that toggles its parent RunnerPanel."""
+	def on_click(self) -> None:
+		panel = self.parent
+		if isinstance(panel, RunnerPanel):
+			panel.toggle()
+
+
+class PermissionPrompt(Vertical):
+	"""Approve / Approve all / Deny buttons for a permission ask. Pressing a button
+	calls back into the app to resolve the blocked worker."""
+
+	def __init__(self, question: str, resolve):
+		super().__init__(classes="perm")
+		self._question = question
+		self._resolve = resolve
+
+	def compose(self) -> ComposeResult:
+		yield Static(Text.from_markup(f"[b yellow]?[/] {escape(self._question)}"), classes="perm-q")
+		yield Horizontal(
+			Button("Approve", id="allow", variant="success", classes="perm-btn"),
+			Button("Approve all", id="allow_all", variant="primary", classes="perm-btn"),
+			Button("Deny", id="deny", variant="error", classes="perm-btn"),
+			classes="perm-btns",
+		)
+
+	def on_button_pressed(self, event: Button.Pressed) -> None:
+		choice = event.button.id or "deny"
+		# freeze the buttons + show the decision, then resolve the worker
+		for b in self.query(Button):
+			b.disabled = True
+		label = {"allow": "Approved", "allow_all": "Approved (all)", "deny": "Denied"}.get(choice, choice)
+		self.query_one(".perm-q", Static).update(Text.from_markup(f"[dim]✓ {escape(label)}[/]"))
+		self._resolve(choice)
 
 
 class AITUI(App):
@@ -74,11 +145,27 @@ class AITUI(App):
 	.ai { color: #cdd6e4; }
 	.user { color: #7fd1e0; margin: 1 0; }
 	.err { color: #ff6b6b; }
-	.runner { margin: 0 0 1 0; }
-	.runner > CollapsibleTitle { color: #c2a0ff; background: #171a24; }
-	.runner.-collapsed > CollapsibleTitle { color: #8a8fa3; }
-	.drop-body { background: #10131b; border-left: thick #2b3245; padding: 0 1; }
-	.drop-line { color: #cdd6e4; }
+
+	/* Claude-like runner entry: dim one-line header, arrow on the right */
+	.runner-panel { margin: 1 0; height: auto; }
+	.runner-head { height: 1; }
+	.runner-head:hover { background: #141925; }
+	.runner-label { width: 1fr; color: #8a8fa3; }
+	.runner-arrow { width: auto; color: #6b7187; }
+	.runner-box {
+		height: auto; margin: 1 0 0 0; padding: 0 1;
+		border: round #2b3245; background: #0d1119;
+	}
+	.runner-cmd { color: #7b8296; margin: 0 0 1 0; }   /* command: dim text, no background */
+	.runner-out { height: auto; }
+	.out-line { color: #cdd6e4; }
+
+	/* permission prompt: clickable buttons */
+	.perm { height: auto; margin: 1 0; }
+	.perm-q { color: #e6c15a; margin: 0 0 1 0; }
+	.perm-btns { height: auto; }
+	.perm-btn { margin: 0 2 0 0; height: 3; }
+
 	Markdown { background: #0b0e14; margin: 0; padding: 0; }
 	#status { height: 1; color: #d7a93b; padding: 0 1; }
 	#input-box { border: round #3d6fb4; background: #10141c; height: 3; padding: 0; }
@@ -97,7 +184,7 @@ class AITUI(App):
 		self._session = session
 		self._mode = mode
 		self._initial_prompt = initial_prompt or ""
-		self._current: RunnerDrop | None = None
+		self._current: RunnerPanel | None = None
 		self._steers: list[str] = []
 		self._steers_lock = threading.Lock()
 		self._pending_ask = None
@@ -163,11 +250,11 @@ class AITUI(App):
 			return
 		if t in ("progress", "stat", "state", "target"):  # execution / plumbing types
 			return
-		# a finding → into the current runner's dropdown (or top-level if none)
+		# a finding → into the current runner's panel (or top-level if none)
 		if self._current is not None:
-			await self._current.body.mount(self._current.add_finding(d))
+			self._current.add_finding(d)
 		else:
-			await self._append(Static(Text.from_markup(_finding_markup(d)), classes="drop-line"))
+			await self._append(Static(Text.from_markup(_finding_markup(d)), classes="out-line"))
 
 	async def _render_ai(self, d: dict) -> None:
 		at = d.get("ai_type", "")
@@ -177,17 +264,24 @@ class AITUI(App):
 			# the ask_user prompt — don't double-render from the item stream
 			return
 		if at == "response":
+			if self._current is not None:
+				self._current.finish()
+				self._current = None
 			await self._append(Markdown(content, classes="ai"))  # AI text as Markdown
 		elif at in ("task", "workflow", "scan", "query", "shell"):
 			ed = d.get("extra_data") or {}
-			kind = "shell" if at == "shell" else at
-			name = content or ed.get("name") or ""
-			self._current = RunnerDrop(kind, name, ed.get("runner_id", ""))
-			await self._append(self._current.collapsible)
-			self._set_status(f"running {kind} {name}")
+			if self._current is not None:
+				self._current.finish()
+			if at == "shell":
+				kind, name, command = "shell", ed.get("name") or "", content
+			else:
+				kind, name, command = at, content or ed.get("name") or "", ed.get("command", "")
+			self._current = RunnerPanel(kind, name, command=command, runner_id=ed.get("runner_id", ""))
+			await self._append(self._current)
+			self._set_status(f"running {kind} {name or command}".strip())
 		elif at == "shell_output":
 			if self._current is not None:
-				await self._current.body.mount(self._current.add_raw(content))
+				self._current.add_raw(content)
 		elif at in ("mark_vuln_exploited", "add_vuln_poc"):
 			await self._append(Static(Text.from_markup(f"[red]💥 {escape(content)}[/]"), classes="ai"))
 		elif at in ("mark_vuln_false_positive", "mark_vuln_exploit_failed"):
@@ -195,7 +289,9 @@ class AITUI(App):
 		elif at == "error":
 			await self._append(Static(Text.from_markup(f"[red]✖ {escape(content)}[/]"), classes="err"))
 		elif at == "stopped":
-			self._current = None
+			if self._current is not None:
+				self._current.finish()
+				self._current = None
 			self._set_status("stopped", False)
 
 	# input: resolves an open prompt, else becomes a steer
@@ -208,12 +304,25 @@ class AITUI(App):
 		pend = self._pending_ask
 		if pend is not None:
 			ev, holder, choices, ptype = pend
-			holder["value"] = self._resolve_answer(text, choices, ptype)
-			self._pending_ask = None
-			ev.set()
+			self._resolve_pending(self._resolve_answer(text, choices, ptype))
 			return
 		with self._steers_lock:
 			self._steers.append(text)
+
+	def _resolve_pending(self, value) -> None:
+		"""Unblock the worker waiting in tui_ask_user with `value`."""
+		pend = self._pending_ask
+		if pend is None:
+			return
+		ev, holder, choices, ptype = pend
+		holder["value"] = value
+		self._pending_ask = None
+		self._set_status("waiting…")
+		ev.set()
+		try:
+			self.query_one("#input-box Input", Input).focus()
+		except Exception:  # noqa: BLE001
+			pass
 
 	@staticmethod
 	def _resolve_answer(text, choices, ptype):
@@ -245,18 +354,22 @@ class AITUI(App):
 	def tui_ask_user(self, question, choices, prompt_type="follow_up", **context):
 		ev = threading.Event()
 		holder: dict = {}
-		if prompt_type == "permission":
-			hint = "[a]llow · [aa] allow-all · [d]eny"
-		else:
-			hint = "  ·  ".join(f"[{i + 1}] {c}" for i, c in enumerate(choices or []))
-		self.call_from_thread(self._show_prompt, question, hint, (ev, holder, list(choices or []), prompt_type))
+		self.call_from_thread(self._show_prompt, question, (ev, holder, list(choices or []), prompt_type))
 		ev.wait()
 		return {"answer": holder.get("value")}
 
-	def _show_prompt(self, question, hint, pending) -> None:
+	def _show_prompt(self, question, pending) -> None:
 		self._pending_ask = pending
-		self._convo().mount(
-			Static(Text.from_markup(f"[b yellow]? {escape(question)}[/]\n[dim]{escape(hint)}[/]"), classes="ai"))
+		ptype = pending[3]
+		if ptype == "permission":
+			# clickable Approve / Approve all / Deny buttons (typing a/aa/d still works)
+			self._convo().mount(PermissionPrompt(question, self._resolve_pending))
+		else:
+			hint = "  ·  ".join(f"[{i + 1}] {c}" for i, c in enumerate(pending[2]))
+			line = f"[b yellow]? {escape(question)}[/]"
+			if hint:
+				line += f"\n[dim]{escape(hint)}[/]"
+			self._convo().mount(Static(Text.from_markup(line), classes="ai"))
 		self._convo().scroll_end(animate=False)
 		self._set_status("waiting for your answer…")
 
