@@ -41,6 +41,32 @@ def get_tui():
 	return _TUI
 
 
+def _tui_line_hook(self, line):
+	"""on_line hook (module-level so it stays picklable for async/Celery children):
+	stream a command runner's command + raw stdout into the active display (TUI). In a
+	worker there's no display, so get_tui() is None and this is a no-op. set_command is
+	idempotent, so re-sending it per line is harmless."""
+	tui = _TUI
+	if tui is not None:
+		try:
+			source = getattr(getattr(self, "config", None), "name", "") or ""
+			tui.tui_set_command(getattr(self, "cmd", "") or "", source)
+			tui.tui_render_line(line, source)
+		except Exception:  # noqa: BLE001 - a display feed must never crash a run
+			pass
+	return line
+
+
+def attach_display_output_hook(hooks, runner_cls):
+	"""Append the display output `on_line` hook to a child runner's hooks when a display
+	is active, so its command + stdout stream into the UI. No-op without a display.
+	Keyed on runner_cls so it reaches the underlying command runners."""
+	if _TUI is None:
+		return
+	tl = hooks.setdefault(runner_cls, {})
+	tl["on_line"] = list(tl.get("on_line", [])) + [_tui_line_hook]
+
+
 @contextmanager
 def _tui_status(msg):
 	plain = re.sub(r'\[/?[^\]]*\]', '', str(msg)).strip()

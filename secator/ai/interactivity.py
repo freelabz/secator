@@ -55,6 +55,35 @@ class InteractivityBackend:
 		"""Return additional tool schemas (not in TOOL_SCHEMAS) to inject."""
 		return []
 
+	def poll_steers(self, session_id=None) -> list:
+		"""Drain pending mid-flight steers. No channel by default (CLI/Auto)."""
+		return []
+
+	@property
+	def owns_display(self) -> bool:
+		"""True if this backend owns the terminal (e.g. a full-screen TUI), so the
+		runner should suppress its own console printing."""
+		return False
+
+	def on_session(self, workspace_id, context, session_id) -> None:
+		"""Called once the ai task has resolved its session. No-op by default; a
+		display backend can use it to wire up session-scoped views."""
+		return None
+
+	def get_initial_prompt(self, inputs, **context):
+		"""Acquire the first prompt when none was passed. Default: the local
+		terminal full-screen prompt (CLI/Auto); None in a worker / non-interactive
+		backend (remote), which leaves the prompt to be resolved elsewhere."""
+		from secator.definitions import IN_WORKER
+		if IN_WORKER:
+			return None
+		from secator.rich import FullScreenPrompt
+		targets_str = ', '.join(inputs) if inputs else 'no target'
+		return FullScreenPrompt(
+			title=f"What do you want to do? ({targets_str})",
+			placeholder="e.g. Scan for vulnerabilities on this target...",
+		).show()
+
 
 class CLIBackend(InteractivityBackend):
 	"""Local terminal interactive backend."""
@@ -105,6 +134,11 @@ class RemoteBackend(InteractivityBackend):
 		self.timeout = timeout
 		self.query_engine = query_engine
 		self.poll_interval = poll_interval
+
+	def get_initial_prompt(self, inputs, **context):
+		# remote runs in a worker; the first prompt arrives via context/resume, never
+		# an interactive full-screen prompt
+		return None
 
 	def build_pending_prompt(self, question, choices, session_id, prompt_type="follow_up", **context):
 		"""Build a pending Ai finding for the remote user to see and answer.
@@ -413,6 +447,23 @@ class TUIBackend(InteractivityBackend):
 				return {"answer": "allow"}
 			return {"answer": "deny"}
 		return {"answer": answer}
+
+	@property
+	def owns_display(self) -> bool:
+		return True
+
+	def on_session(self, workspace_id, context, session_id) -> None:
+		from secator.rich import get_tui
+		tui = get_tui()
+		if tui is not None and hasattr(tui, "set_findings_source"):
+			tui.set_findings_source(workspace_id, context, session_id)
+
+	def get_initial_prompt(self, inputs, **context):
+		# a string (possibly "") — NOT None — so the caller treats an empty answer as
+		# "interactive backend, nothing given -> exit" rather than "non-interactive"
+		res = self.ask_user(
+			"What do you want to do?", [], context.get("session_id", ""), prompt_type="follow_up")
+		return (res or {}).get("answer") or ""
 
 
 def create_backend(mode: str, timeout: int = 600, query_engine: Any = None, poll_interval: int = 5):

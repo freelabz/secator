@@ -19,7 +19,7 @@ from secator.ai.actions import (
 	ActionContext, check_guardrails, safe_dispatch_action, _run_batch
 )
 from secator.ai.guardrails import PermissionEngine
-from secator.ai.interactivity import create_backend, RemoteBackend, TUIBackend, UserInputTimeout
+from secator.ai.interactivity import create_backend, RemoteBackend, UserInputTimeout
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
@@ -415,30 +415,14 @@ class ai(PythonRunner):
 				self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 			return
 
-		# Get user prompt
+		# Get user prompt. Interactive backends (CLI full-screen prompt, TUI input)
+		# return a string (exit if empty); non-interactive ones (remote/worker) return
+		# None, leaving the prompt to be resolved from context/resume.
 		self.prompt = self._resolve_prompt()
 		if not self.prompt and not self.is_subagent:
-			from secator.definitions import IN_WORKER
-			if self.interactive == "tui":
-				# Under the Textual TUI there is no rich FullScreenPrompt: ask the TUI
-				# input for the first prompt via the backend (blocks until the user types).
-				response = self.backend.ask_user(
-					question="What do you want to do?",
-					choices=[],
-					session_id=self.session_id,
-					prompt_type="follow_up",
-				)
-				self.prompt = (response or {}).get("answer") or ""
-				if not self.prompt:
-					yield Info(message="No prompt provided. Exiting.")
-					return
-			elif not IN_WORKER:
-				from secator.rich import FullScreenPrompt
-				targets_str = ', '.join(self.inputs) if self.inputs else 'no target'
-				self.prompt = FullScreenPrompt(
-					title=f"What do you want to do? ({targets_str})",
-					placeholder="e.g. Scan for vulnerabilities on this target..."
-				).show()
+			got = self.backend.get_initial_prompt(self.inputs, session_id=self.session_id)
+			if got is not None:
+				self.prompt = got
 				if not self.prompt:
 					yield Info(message="No prompt provided. Exiting.")
 					return
@@ -1226,22 +1210,19 @@ class ai(PythonRunner):
 			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
-		# Give the Textual TUI what it needs to lazily query this run's findings for its
-		# side panel (workspace-scoped QueryEngine, filtered by _context.session_id).
-		if self.interactive == "tui" and not self.is_subagent:
-			from secator.rich import get_tui
-			tui = get_tui()
-			if tui is not None and hasattr(tui, "set_findings_source"):
-				tui.set_findings_source(
-					self.context.get("workspace_id", ""), dict(self.context), self.session_id)
+		# Let the backend wire up anything it needs for this session (e.g. a display
+		# backend's session-scoped views). No-op for non-display backends.
+		if not self.is_subagent:
+			self.backend.on_session(
+				self.context.get("workspace_id", ""), dict(self.context), self.session_id)
 
-		# Suppress noisy console output for subagents, and under a TUI (which owns the
-		# screen and renders the yielded items itself).
-		if self.is_subagent or self.interactive == "tui":
+		# A backend that owns the display (full-screen TUI) renders the yielded items
+		# itself, so suppress the runner's own console printing. Subagents stay quiet too.
+		if self.is_subagent or self.backend.owns_display:
 			self.print_info = False
 			self.print_warning = False
 			self.print_error = False
-		if self.interactive == "tui":
+		if self.backend.owns_display:
 			self.print_item = False
 			self.print_line = False
 
@@ -1378,17 +1359,14 @@ class ai(PythonRunner):
 		the same content and double-render on the client. ``poll_steers`` flips the
 		drained doc to ``status:"consumed"`` so it injects exactly once.
 
-		Only the RemoteBackend has a channel to poll; for every other backend this
-		is a no-op. Robust: a steer must never crash the run, so all backend access
+		Backends without a steer channel (CLI/Auto) return an empty list, so this is a
+		no-op for them. Robust: a steer must never crash the run, so all backend access
 		is best-effort and swallowed.
 
 		Generator (``yield from``-compatible with the loop) — currently yields no
 		items, but kept a generator so future transcript echoes can be added without
 		changing the call site.
 		"""
-		# Both the remote/web channel and the local Textual TUI have a steer channel.
-		if not isinstance(self.backend, (RemoteBackend, TUIBackend)):
-			return
 		try:
 			steers = self.backend.poll_steers(self.session_id)
 		except Exception as e:  # noqa: BLE001 - a steer must never crash the run
