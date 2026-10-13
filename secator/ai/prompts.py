@@ -371,22 +371,24 @@ def build_session_context(isolated: bool = False) -> str:
 	"""Dynamic per-session context block for the system prompt.
 
 	Two things the model otherwise guesses wrong:
-	- the current date + UNIX timestamp (it has no clock);
+	- the current date (it has no clock);
 	- the shell environment its ``run_shell`` commands ACTUALLY run in — the disposable
 	  Alpine sandbox (apk, root) when ``--isolated``, otherwise THIS host's OS + package
 	  manager + sudo availability. Stops the model defaulting to ``apk`` on a non-Alpine
 	  host, and stops it issuing a sudo command that can only stall/fail.
 
-	Rebuilt on every ``get_system_prompt`` call (including resume), so the clock is always
-	current and machine-specific facts are re-detected if the session resumes elsewhere.
+	DATE ONLY, no clock time: this block sits in the cached system-prompt prefix, so a
+	second-precision timestamp would (a) be stale the moment the session runs past it and
+	(b) risk busting prompt caching if the prompt is ever rebuilt mid-session. A day-granular
+	date stays constant across the session, so the cache holds. The model is told to run
+	``date`` when it needs the exact wall-clock time. Rebuilt on every ``get_system_prompt``
+	call (including resume), so the date rolls over and host facts are re-detected on resume.
 	"""
-	import time
 	from datetime import datetime, timezone
-	now = time.time()
 	lines = [
 		"<session_context>",
-		f"Current date: {datetime.fromtimestamp(now, timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
-		f"UNIX timestamp: {int(now)}",
+		f"Current date (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d')}. "
+		"Run `date` for the exact current time.",
 	]
 	if isolated:
 		lines += [

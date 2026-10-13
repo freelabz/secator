@@ -472,13 +472,32 @@ class TestSessionContext(unittest.TestCase):
 		from secator.ai.prompts import build_session_context
 		return build_session_context(isolated=isolated)
 
-	def test_clock_present_in_both_modes(self):
+	def test_date_present_in_both_modes(self):
+		import re
 		for iso in (True, False):
 			blk = self._build(iso)
 			self.assertIn("<session_context>", blk)
 			self.assertIn("</session_context>", blk)
-			self.assertIn("Current date:", blk)
-			self.assertIn("UNIX timestamp:", blk)
+			self.assertIn("Current date", blk)
+			self.assertRegex(blk, r"\d{4}-\d{2}-\d{2}")  # a day-granular date is present
+
+	def test_no_clock_time_for_cache_stability(self):
+		"""DATE only — no second-precision timestamp that would be stale-on-arrival and
+		bust prompt caching. Guards against reintroducing a live clock in the cached prefix."""
+		for iso in (True, False):
+			blk = self._build(iso)
+			self.assertNotIn("UNIX timestamp", blk)
+			# No HH:MM:SS clock time in the block.
+			import re
+			self.assertNotRegex(blk, r"\d{2}:\d{2}:\d{2}")
+			# Tells the model how to get the exact time on demand.
+			self.assertIn("date", blk.lower())
+
+	def test_block_is_stable_across_calls(self):
+		"""Within a day/process the block must be byte-identical across calls, so it never
+		silently invalidates the system-prompt cache."""
+		for iso in (True, False):
+			self.assertEqual(self._build(iso), self._build(iso))
 
 	def test_isolated_describes_alpine_sandbox_root(self):
 		blk = self._build(True)
