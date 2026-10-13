@@ -81,7 +81,12 @@ class AITUI(App):
 	.drop-line { color: #cdd6e4; }
 	Markdown { background: #0b0e14; margin: 0; padding: 0; }
 	#status { height: 1; color: #d7a93b; padding: 0 1; }
-	#input-box { border: round #3d6fb4; background: #10141c; height: 3; }
+	#input-box { border: round #3d6fb4; background: #10141c; height: 3; padding: 0; }
+	#input-box Input {
+		border: none; background: #10141c; color: #e6ecf5; padding: 0 1; height: 1fr;
+	}
+	#input-box Input:focus { border: none; background: #10141c; }
+	#input-box Input > .input--cursor { color: #0b0e14; background: #e6ecf5; }
 	Header { background: #141a26; color: #cdd6e4; }
 	"""
 	BINDINGS = [("ctrl+c", "quit", "Quit")]

@@ -395,7 +395,23 @@ class TUIBackend(InteractivityBackend):
 		tui = get_tui()
 		if tui is None:
 			return None
-		return tui.tui_ask_user(question, choices or [], prompt_type, **context)
+		res = tui.tui_ask_user(question, choices or [], prompt_type)
+		answer = (res or {}).get("answer")
+		if answer is None:
+			return None
+		if prompt_type == "permission":
+			# Mirror RemoteBackend: persist a session-scoped rule so the guardrail
+			# re-check passes — a rule-less one-shot "allow" leaves the value unknown,
+			# so the engine re-prompts the SAME target/path in a loop (the bug).
+			if answer in ("allow", "allow_all"):
+				engine = context.get("engine")
+				if engine:
+					RemoteBackend._add_permission_rules(
+						engine, context.get("permission_type"), context.get("value", ""),
+						all_scope=(answer == "allow_all"))
+				return {"answer": "allow"}
+			return {"answer": "deny"}
+		return {"answer": answer}
 
 
 def create_backend(mode: str, timeout: int = 600, query_engine: Any = None, poll_interval: int = 5):
