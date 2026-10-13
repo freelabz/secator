@@ -18,6 +18,7 @@ from jinja2 import Template
 from rich.live import Live
 from secator.rich import CustomMarkdown as Markdown
 from rich.rule import Rule
+from rich.spinner import Spinner
 from rich.table import Table
 
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path, download_files
@@ -2138,7 +2139,10 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 					vuln_str = _format_vuln_counts(vuln_counts)
 					counted = True
 				else:
-					vuln_str = '[dim]…[/]'
+					# Renderable spinner in the vuln cell while Phase 2 computes the
+					# count — animates under the Live refresh, replaced by the real
+					# counts once ready.
+					vuln_str = Spinner('dots', text='[dim]counting…[/]', style='dim')
 					counted = False
 				row = _build_local_row(path_info, report_info, vuln_str, show_all, path)
 				pending_rows.append({'path': path, 'row': row, 'counted': counted})
@@ -2151,7 +2155,17 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		vuln_col_idx = 10 if show_all else 9
 		needs_live = any(not r['counted'] for r in pending_rows)
 		if needs_live and pending_rows:
-			with Live(_rebuild_local_table(pending_rows), console=console, refresh_per_second=8) as live:
+			# Live is TRANSIENT: it only animates the per-row spinners while counts
+			# are computed, then erases itself on exit. Live repaints a fixed
+			# viewport region (clipped + not added to scrollback), so a table taller
+			# than the terminal can't scroll. We therefore print the fully-counted
+			# table statically below — that lands in normal scrollback and scrolls.
+			with Live(
+				_rebuild_local_table(pending_rows),
+				console=console,
+				refresh_per_second=8,
+				transient=True,
+			) as live:
 				for entry in pending_rows:
 					if entry['counted']:
 						continue
@@ -2162,7 +2176,9 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 					entry['row'][vuln_col_idx] = _format_vuln_counts(vuln_counts)
 					entry['counted'] = True
 					live.update(_rebuild_local_table(pending_rows))
-			# Live already rendered the final table; skip the static print below.
+			# Print the final, fully-counted table statically so it is scrollable
+			# (the transient Live frames above have been cleared).
+			console.print(_rebuild_local_table(pending_rows))
 			table = None
 		elif pending_rows:
 			# All rows counted upfront (--interesting path); populate the pre-built table.
