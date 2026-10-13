@@ -368,7 +368,12 @@ class AITUI(App):
 	#input-box Input > .input--cursor { color: #0b0e14; background: #e6ecf5; }
 	Header { background: transparent; color: #cdd6e4; }
 	"""
-	BINDINGS = [("ctrl+c", "quit", "Quit")]
+	BINDINGS = [
+		("ctrl+c", "quit", "Quit"),
+		# jump to the latest messages (a focused choice/permission list consumes `down`
+		# first for navigation, so this only fires when not selecting)
+		("down", "scroll_latest", "Scroll to latest"),
+	]
 	# full-screen, integrated: use the terminal's own background/palette, no command
 	# palette, no footer chrome
 	ansi_color = True
@@ -488,6 +493,16 @@ class AITUI(App):
 			s.display = False
 		self._convo().display = True
 		self.query_one("#backbar").display = False
+
+	def _active_view(self) -> VerticalScroll:
+		# the currently visible scroll (an open subagent view, else the main convo)
+		for sv in self._subviews.values():
+			if sv.display:
+				return sv
+		return self._convo()
+
+	def action_scroll_latest(self) -> None:
+		self._active_view().scroll_end(animate=False)
 
 	_SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
