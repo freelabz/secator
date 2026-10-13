@@ -230,6 +230,25 @@ class ChoicePrompt(Vertical):
 				self._done(", ".join(picked))
 
 
+class SubagentRow(Static):
+	"""A clickable 'Ran subagent <label>' row in the main conversation that opens the
+	subagent's own conversation view."""
+	def __init__(self, label: str, sid: str):
+		super().__init__(
+			Text.from_markup(f"[b #9aa3b8]Ran subagent[/] [#8a8fa3]{escape(label)}[/]  [#6b7187]▸ open[/]"),
+			classes="subagent-row")
+		self.sid = sid
+
+	def on_click(self) -> None:
+		self.app._open_subview(self.sid)
+
+
+class _BackBar(Static):
+	"""Clickable bar shown while viewing a subagent conversation; returns to main."""
+	def on_click(self) -> None:
+		self.app._show_main()
+
+
 class PermissionPrompt(Vertical):
 	"""Neutral, vertically-stacked Approve / Approve all / Deny list for a permission
 	ask (↑/↓ + Enter). Selecting resolves the blocked worker. Typing a/aa/d works too."""
@@ -262,7 +281,13 @@ class AITUI(App):
 	# no outer box, and the input has no side borders — just a top rule to separate it.
 	CSS = """
 	Screen { background: transparent; }
-	#convo { background: transparent; padding: 0 1; height: 1fr; }
+	#views { height: 1fr; }
+	#convo, .subview { background: transparent; padding: 0 1; height: 1fr; }
+	#backbar { height: 1; padding: 0 1; }
+	#backbar:hover { text-style: bold; }
+	.subview-title { color: #c2a0ff; margin: 0 0 1 0; }
+	.subagent-row { height: 1; }
+	.subagent-row:hover { text-style: bold; }
 	.ai { color: #cdd6e4; }
 	.user { color: #7fd1e0; margin: 1 0; }
 	.err { color: #ff6b6b; }
@@ -306,13 +331,16 @@ class AITUI(App):
 		self._initial_prompt = initial_prompt or ""
 		self._current: RunnerPanel | None = None
 		self._container: RunnerPanel | None = None   # active workflow/scan nesting parent
+		self._subviews: dict = {}   # subagent session_id -> VerticalScroll (hidden)
+		self._write: VerticalScroll | None = None   # where incoming items are mounted
 		self._steers: list[str] = []
 		self._steers_lock = threading.Lock()
 		self._pending_ask = None
 
 	def compose(self) -> ComposeResult:
 		yield Header(show_clock=True)
-		yield VerticalScroll(id="convo")
+		yield _BackBar(Text.from_markup("[#7fd1e0]← Back to conversation[/]"), id="backbar")
+		yield Vertical(VerticalScroll(id="convo"), id="views")
 		yield Static("", id="status")
 		with Vertical(id="input-box"):
 			yield Input(placeholder="Message, or steer a running runner…  (Enter to send)")
@@ -321,6 +349,8 @@ class AITUI(App):
 	def on_mount(self) -> None:
 		self.title = "secator ai"
 		self.sub_title = f"session: {self._session} · mode: {self._mode}"
+		self.query_one("#backbar").display = False
+		self._write = self.query_one("#convo", VerticalScroll)
 		self.query_one("#input-box Input", Input).focus()
 		if self._initial_prompt:
 			# the -p prompt isn't typed into the input, so echo it once up front
@@ -370,11 +400,38 @@ class AITUI(App):
 			sink.add_raw(line)
 
 	def _convo(self) -> VerticalScroll:
+		# the main conversation (prompts/questions always go here)
 		return self.query_one("#convo", VerticalScroll)
 
 	async def _append(self, widget) -> None:
-		await self._convo().mount(widget)
-		self._convo().scroll_end(animate=False)
+		target = self._write or self._convo()
+		await target.mount(widget)
+		target.scroll_end(animate=False)
+
+	async def _ensure_subview(self, sid: str) -> VerticalScroll:
+		sv = self._subviews.get(sid)
+		if sv is None:
+			sv = VerticalScroll(classes="subview")
+			sv.display = False
+			self._subviews[sid] = sv
+			await self.query_one("#views", Vertical).mount(sv)
+		return sv
+
+	def _open_subview(self, sid: str) -> None:
+		sv = self._subviews.get(sid)
+		if sv is None:
+			return
+		self._convo().display = False
+		for s in self._subviews.values():
+			s.display = False
+		sv.display = True
+		self.query_one("#backbar").display = True
+
+	def _show_main(self) -> None:
+		for s in self._subviews.values():
+			s.display = False
+		self._convo().display = True
+		self.query_one("#backbar").display = False
 
 	def _set_status(self, text: str, spinning: bool = True) -> None:
 		s = self.query_one("#status", Static)
@@ -386,6 +443,13 @@ class AITUI(App):
 
 	async def _render(self, item) -> None:
 		d = item.toDict() if hasattr(item, "toDict") else dict(item)
+		# route subagent-internal items into that subagent's own (hidden) view; the
+		# spawn card itself has the marker stripped, so it stays in the main convo
+		ctx = d.get("_context") or {}
+		if ctx.get("subagent"):
+			self._write = await self._ensure_subview(ctx.get("session_id") or "subagent")
+		else:
+			self._write = self._convo()
 		t = d.get("_type")
 		if t == "ai":
 			await self._render_ai(d)
@@ -422,8 +486,21 @@ class AITUI(App):
 			await self._append(Markdown(content, classes="ai"))  # AI text as Markdown
 		elif at in ("task", "workflow", "scan", "query", "shell"):
 			ed = d.get("extra_data") or {}
-			self._finish_current()
 			desc = ed.get("description") or ""
+			if ed.get("subagent"):
+				# subagent spawn: a clickable row in the main convo that opens the
+				# subagent's own conversation view
+				sid = ed.get("subagent_session_id") or ed.get("runner_id") or "subagent"
+				sub = ed.get("subagent")
+				label = sub if isinstance(sub, str) else (desc or content or "subagent")
+				sv = await self._ensure_subview(sid)
+				if not sv.children:
+					await sv.mount(Static(
+						Text.from_markup(f"[b]Subagent[/] [dim]{escape(label)}[/]"), classes="subview-title"))
+				self._finish_current()
+				await self._append(SubagentRow(label, sid))
+				return
+			self._finish_current()
 			if at == "shell":
 				# LLM-supplied description as the title; the command goes in the box
 				kind, rname, command = "shell", desc, content
