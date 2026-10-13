@@ -395,7 +395,8 @@ class TUIBackend(InteractivityBackend):
 		tui = get_tui()
 		if tui is None:
 			return None
-		res = tui.tui_ask_user(question, choices or [], prompt_type)
+		res = tui.tui_ask_user(
+			question, choices or [], prompt_type, multiple=bool(context.get("multiple", False)))
 		answer = (res or {}).get("answer")
 		if answer is None:
 			return None

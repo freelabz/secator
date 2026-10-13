@@ -17,7 +17,8 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Footer, Header, Input, Markdown, Static
+from textual.widgets import (
+	Button, Footer, Header, Input, Markdown, OptionList, SelectionList, Static)
 
 
 def _finding_markup(d: dict) -> str:
@@ -41,10 +42,19 @@ def _finding_markup(d: dict) -> str:
 	return f"[dim]● {escape(t)}[/]  {escape(str(d))[:100]}"
 
 
+class _Head(Static):
+	"""Clickable one-line header that toggles its parent RunnerPanel."""
+	def on_click(self) -> None:
+		panel = self.parent
+		if isinstance(panel, RunnerPanel):
+			panel.toggle()
+
+
 class RunnerPanel(Vertical):
 	"""A Claude-like collapsible runner entry: a dim one-line header ("Running …" /
-	"Ran …") with the disclosure arrow on the RIGHT, and a bordered box (hidden until
-	expanded) holding the command + its output/findings."""
+	"Ran …") with the disclosure arrow immediately after the text (ellipsised if it
+	doesn't fit), and a bordered box (hidden until expanded) holding the command and
+	its output/findings."""
 
 	def __init__(self, kind: str, rname: str, command: str = "", runner_id: str = ""):
 		super().__init__(classes="runner-panel")
@@ -53,38 +63,46 @@ class RunnerPanel(Vertical):
 		self.command = command
 		self.runner_id = runner_id
 		self.count = 0
+		self.lines = 0
 		self.done = False
 		self._collapsed = True
 
 	def compose(self) -> ComposeResult:
-		yield _Head(
-			Static(self._label(), classes="runner-label"),
-			Static("▶", classes="runner-arrow"),
-			classes="runner-head",
-		)
+		yield _Head(self._header(), classes="runner-head")
 		box = Vertical(classes="runner-box")
 		box.display = False
 		with box:
 			if self.command:
-				yield Static(Text(self.command), classes="runner-cmd")  # dim, no bg, plain
+				yield Static(Text.from_markup(f"[dim]$ {escape(self.command)}[/]"), classes="runner-cmd")
 			yield Vertical(classes="runner-out")
 		yield box
 
 	def _desc(self) -> str:
-		return self.rname or self.kind
+		return self.rname or self.command or self.kind
 
-	def _label(self) -> Text:
+	def _header(self) -> Text:
 		verb = "Ran" if self.done else "Running"
+		arrow = "▼" if not self._collapsed else "▶"
 		tail = f"  ·  {self.count} findings" if self.count else ""
-		return Text.from_markup(f"[b]{verb}[/] [cyan]{escape(self.kind)}[/] {escape(self._desc())}{tail}")
+		body = f"{self._desc()}{tail}"
+		# ellipsise the description so the arrow sits right after the text, on one line
+		width = self.app.size.width if self.app else 100
+		budget = max(16, width - len(verb) - 8)
+		if len(body) > budget:
+			body = body[: budget - 1] + "…"
+		t = Text()
+		t.append(f"{verb} ", style="bold #9aa3b8")
+		t.append(body, style="#8a8fa3")
+		t.append(f"  {arrow}", style="#6b7187")
+		return t
 
 	def _refresh_head(self) -> None:
-		self.query_one(".runner-label", Static).update(self._label())
+		self.query_one(".runner-head", _Head).update(self._header())
 
 	def toggle(self) -> None:
 		self._collapsed = not self._collapsed
 		self.query_one(".runner-box", Vertical).display = not self._collapsed
-		self.query_one(".runner-arrow", Static).update("▶" if self._collapsed else "▼")
+		self._refresh_head()
 
 	def add_finding(self, d: dict) -> None:
 		self.count += 1
@@ -94,19 +112,57 @@ class RunnerPanel(Vertical):
 
 	def add_raw(self, text: str) -> None:
 		# raw output: plain Text, never markup-parsed (target-controlled)
-		self.query_one(".runner-out", Vertical).mount(Static(Text(text), classes="out-line"))
+		self.lines += 1
+		self.query_one(".runner-out", Vertical).mount(Static(Text(text), classes="out-raw"))
 
 	def finish(self) -> None:
 		self.done = True
+		if not self.count and not self.lines and not self.command:
+			self.query_one(".runner-out", Vertical).mount(
+				Static(Text.from_markup("[dim i](no output)[/]"), classes="out-line"))
 		self._refresh_head()
 
 
-class _Head(Horizontal):
-	"""Clickable header row that toggles its parent RunnerPanel."""
-	def on_click(self) -> None:
-		panel = self.parent
-		if isinstance(panel, RunnerPanel):
-			panel.toggle()
+class ChoicePrompt(Vertical):
+	"""Navigable suggestion list for a follow-up ask. Single-choice uses an OptionList
+	(↑/↓ then Enter); multi-choice uses a SelectionList (Space toggles, Enter confirms).
+	Typing in the main input still works as a free-form answer."""
+
+	def __init__(self, question: str, choices: list, multiple: bool, resolve):
+		super().__init__(classes="choice")
+		self._question = question
+		self._choices = list(choices)
+		self._multiple = multiple
+		self._resolve = resolve
+
+	def compose(self) -> ComposeResult:
+		yield Static(Text.from_markup(f"[b yellow]?[/] {escape(self._question)}"), classes="choice-q")
+		if self._multiple:
+			yield SelectionList(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
+			yield Static(Text.from_markup("[dim]space to toggle · enter to confirm · or type your own[/]"))
+		else:
+			yield OptionList(*self._choices, classes="choice-list")
+			yield Static(Text.from_markup("[dim]↑/↓ to move · enter to select · or type your own[/]"))
+
+	def on_mount(self) -> None:
+		self.query_one(".choice-list").focus()
+
+	def _done(self, value: str) -> None:
+		for w in self.query(".choice-list"):
+			w.disabled = True
+		self.query_one(".choice-q", Static).update(Text.from_markup(f"[dim]✓ {escape(value)}[/]"))
+		self._resolve(value)
+
+	def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+		self._done(str(event.option.prompt))
+
+	def on_key(self, event) -> None:
+		if self._multiple and event.key == "enter":
+			sel = self.query_one(SelectionList)
+			picked = [self._choices[i] for i in sel.selected]
+			if picked:
+				event.stop()
+				self._done(", ".join(picked))
 
 
 class PermissionPrompt(Vertical):
@@ -146,12 +202,10 @@ class AITUI(App):
 	.user { color: #7fd1e0; margin: 1 0; }
 	.err { color: #ff6b6b; }
 
-	/* Claude-like runner entry: dim one-line header, arrow on the right */
+	/* Claude-like runner entry: dim one-line header, arrow right after the text */
 	.runner-panel { margin: 1 0; height: auto; }
-	.runner-head { height: 1; }
+	.runner-head { height: 1; width: auto; }
 	.runner-head:hover { background: #141925; }
-	.runner-label { width: 1fr; color: #8a8fa3; }
-	.runner-arrow { width: auto; color: #6b7187; }
 	.runner-box {
 		height: auto; margin: 1 0 0 0; padding: 0 1;
 		border: round #2b3245; background: #0d1119;
@@ -159,12 +213,19 @@ class AITUI(App):
 	.runner-cmd { color: #7b8296; margin: 0 0 1 0; }   /* command: dim text, no background */
 	.runner-out { height: auto; }
 	.out-line { color: #cdd6e4; }
+	.out-raw { color: #9aa3b8; }
 
 	/* permission prompt: clickable buttons */
 	.perm { height: auto; margin: 1 0; }
 	.perm-q { color: #e6c15a; margin: 0 0 1 0; }
 	.perm-btns { height: auto; }
 	.perm-btn { margin: 0 2 0 0; height: 3; }
+
+	/* follow-up suggestion list */
+	.choice { height: auto; margin: 1 0; }
+	.choice-q { color: #e6c15a; margin: 0 0 1 0; }
+	.choice-list { height: auto; max-height: 12; border: round #2b3245; background: #0d1119; }
+	.choice-list:focus { border: round #3d6fb4; }
 
 	Markdown { background: #0b0e14; margin: 0; padding: 0; }
 	#status { height: 1; color: #d7a93b; padding: 0 1; }
@@ -272,13 +333,17 @@ class AITUI(App):
 			ed = d.get("extra_data") or {}
 			if self._current is not None:
 				self._current.finish()
+			desc = ed.get("description") or ""
 			if at == "shell":
-				kind, name, command = "shell", ed.get("name") or "", content
+				# LLM-supplied description as the title; the command goes in the box
+				kind, rname, command = "shell", desc, content
+			elif at == "query":
+				kind, rname, command = "query", desc or content, content
 			else:
-				kind, name, command = at, content or ed.get("name") or "", ed.get("command", "")
-			self._current = RunnerPanel(kind, name, command=command, runner_id=ed.get("runner_id", ""))
+				kind, rname, command = at, desc or content or ed.get("name") or "", ""
+			self._current = RunnerPanel(kind, rname, command=command, runner_id=ed.get("runner_id", ""))
 			await self._append(self._current)
-			self._set_status(f"running {kind} {name or command}".strip())
+			self._set_status(f"running {kind} {rname or command}".strip())
 		elif at == "shell_output":
 			if self._current is not None:
 				self._current.add_raw(content)
@@ -351,25 +416,25 @@ class AITUI(App):
 			out, self._steers = self._steers, []
 		return out
 
-	def tui_ask_user(self, question, choices, prompt_type="follow_up", **context):
+	def tui_ask_user(self, question, choices, prompt_type="follow_up", multiple=False, **context):
 		ev = threading.Event()
 		holder: dict = {}
-		self.call_from_thread(self._show_prompt, question, (ev, holder, list(choices or []), prompt_type))
+		self.call_from_thread(
+			self._show_prompt, question, (ev, holder, list(choices or []), prompt_type), bool(multiple))
 		ev.wait()
 		return {"answer": holder.get("value")}
 
-	def _show_prompt(self, question, pending) -> None:
+	def _show_prompt(self, question, pending, multiple=False) -> None:
 		self._pending_ask = pending
-		ptype = pending[3]
+		choices, ptype = pending[2], pending[3]
 		if ptype == "permission":
 			# clickable Approve / Approve all / Deny buttons (typing a/aa/d still works)
 			self._convo().mount(PermissionPrompt(question, self._resolve_pending))
+		elif choices:
+			# navigable suggestion list (↑/↓/space + enter); typing still works
+			self._convo().mount(ChoicePrompt(question, choices, multiple, self._resolve_pending))
 		else:
-			hint = "  ·  ".join(f"[{i + 1}] {c}" for i, c in enumerate(pending[2]))
-			line = f"[b yellow]? {escape(question)}[/]"
-			if hint:
-				line += f"\n[dim]{escape(hint)}[/]"
-			self._convo().mount(Static(Text.from_markup(line), classes="ai"))
+			self._convo().mount(Static(Text.from_markup(f"[b yellow]? {escape(question)}[/]"), classes="ai"))
 		self._convo().scroll_end(animate=False)
 		self._set_status("waiting for your answer…")
 
