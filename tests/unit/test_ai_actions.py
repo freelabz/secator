@@ -2095,3 +2095,25 @@ class TestCommandTimedOutFlag(unittest.TestCase):
 		runner.monitor_poll_interval = 0.5  # check sub-cadence so the 1s timeout actually fires
 		runner.run()
 		self.assertTrue(runner.timed_out)
+
+	def test_fast_poll_does_not_increase_stat_collection(self):
+		"""Perf guard: a short monitor_poll_interval makes the timeout/memory CHECKS more
+		frequent but must NOT collect stats more often — stat collection stays gated by
+		stat_update_frequency. So no extra Stat objects / psutil work from a fast poll."""
+		from secator.tasks.command import command as CommandTask
+		from secator.runners.command import Command
+		calls = {'n': 0}
+		orig = Command._collect_stats
+
+		def counting(self, procs):
+			calls['n'] += 1
+			return orig(self, procs)
+
+		runner = CommandTask(['sleep 2'])
+		runner.max_timeout = 30                 # won't time out
+		runner.monitor_poll_interval = 0.1      # ~20 wakeups over the run
+		with patch.object(Command, '_collect_stats', counting):
+			runner.run()
+		# stat_update_frequency is tens of seconds, so over a ~2s run stats collect at most a
+		# couple of times (baseline + maybe one), NEVER once per 0.1s poll (~20).
+		self.assertLessEqual(calls['n'], 3)
