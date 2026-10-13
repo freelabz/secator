@@ -18,7 +18,7 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import (
-	Footer, Header, Input, Markdown, OptionList, SelectionList, Static)
+	Header, Input, Markdown, OptionList, SelectionList, Static)
 
 
 def _rehydrate(d: dict):
@@ -116,16 +116,19 @@ class RunnerPanel(Vertical):
 	def _header(self) -> Text:
 		verb = "Ran" if self.done else "Running"
 		arrow = "▼" if not self._collapsed else "▶"
+		kind = f" ({self.kind})"   # runner type, so a task/workflow/scan/query/shell is distinguishable
 		tail = f"  ·  {self.count} findings" if self.count else ""
-		body = f"{self._desc()}{tail}"
-		# ellipsise the description so the arrow sits right after the text, on one line
+		desc = self._desc()
+		# ellipsise only the description so the type + arrow stay on one line
 		width = self.app.size.width if self.app else 100
-		budget = max(16, width - len(verb) - 8)
-		if len(body) > budget:
-			body = body[: budget - 1] + "…"
+		budget = max(12, width - len(verb) - len(kind) - len(tail) - 8)
+		if len(desc) > budget:
+			desc = desc[: budget - 1] + "…"
 		t = Text()
 		t.append(f"{verb} ", style="bold #9aa3b8")
-		t.append(body, style="#8a8fa3")
+		t.append(desc, style="#8a8fa3")
+		t.append(kind, style="#5b6070")
+		t.append(tail, style="#6b7187")
 		t.append(f"  {arrow}", style="#6b7187")
 		return t
 
@@ -201,7 +204,8 @@ class ChoicePrompt(Vertical):
 		self._resolve = resolve
 
 	def compose(self) -> ComposeResult:
-		yield Static(Text.from_markup(f"[b yellow]?[/] {escape(self._question)}"), classes="choice-q")
+		if self._question:
+			yield Static(Text.from_markup(f"[b yellow]?[/] {escape(self._question)}"), classes="choice-q")
 		if self._multiple:
 			yield SelectionList(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
 			yield Static(Text.from_markup("[dim]space to toggle · enter to confirm · or type your own[/]"))
@@ -215,7 +219,8 @@ class ChoicePrompt(Vertical):
 	def _done(self, value: str) -> None:
 		for w in self.query(".choice-list"):
 			w.disabled = True
-		self.query_one(".choice-q", Static).update(Text.from_markup(f"[dim]✓ {escape(value)}[/]"))
+		for q in self.query(".choice-q"):
+			q.update(Text.from_markup(f"[dim]✓ {escape(value)}[/]"))
 		self._resolve(value)
 
 	def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -280,7 +285,12 @@ class AITUI(App):
 	# No window chrome: transparent backgrounds so the user's terminal shows through,
 	# no outer box, and the input has no side borders — just a top rule to separate it.
 	CSS = """
-	Screen { background: transparent; }
+	Screen {
+		background: transparent;
+		scrollbar-background: transparent; scrollbar-background-hover: transparent;
+		scrollbar-background-active: transparent; scrollbar-color: #20262f;
+		scrollbar-color-hover: #2b3245; scrollbar-color-active: #2b3245; scrollbar-size-vertical: 1;
+	}
 	#views { height: 1fr; }
 	#convo, .subview { background: transparent; padding: 0 1; height: 1fr; }
 	#backbar { height: 1; padding: 0 1; }
@@ -322,6 +332,10 @@ class AITUI(App):
 	Header { background: transparent; color: #cdd6e4; }
 	"""
 	BINDINGS = [("ctrl+c", "quit", "Quit")]
+	# full-screen, integrated: use the terminal's own background/palette, no command
+	# palette, no footer chrome
+	ansi_color = True
+	ENABLE_COMMAND_PALETTE = False
 
 	def __init__(self, runner_builder, session="ai", mode="chat", initial_prompt=""):
 		super().__init__()
@@ -344,7 +358,6 @@ class AITUI(App):
 		yield Static("", id="status")
 		with Vertical(id="input-box"):
 			yield Input(placeholder="Message, or steer a running runner…  (Enter to send)")
-		yield Footer()
 
 	def on_mount(self) -> None:
 		self.title = "secator ai"
@@ -556,7 +569,7 @@ class AITUI(App):
 		ev, holder, choices, ptype = pend
 		holder["value"] = value
 		self._pending_ask = None
-		self._set_status("waiting…")
+		self._set_status("", False)
 		ev.set()
 		try:
 			self.query_one("#input-box Input", Input).focus()
@@ -600,17 +613,23 @@ class AITUI(App):
 
 	def _show_prompt(self, question, pending, multiple=False) -> None:
 		self._pending_ask = pending
+		self._set_status("", False)   # nothing is running while we wait for the user
 		choices, ptype = pending[2], pending[3]
 		if ptype == "permission":
-			# clickable Approve / Approve all / Deny buttons (typing a/aa/d still works)
+			# neutral Approve / Approve all / Deny list (typing a/aa/d still works)
 			self._convo().mount(PermissionPrompt(question, self._resolve_pending))
+			self._convo().scroll_end(animate=False)
 		elif choices:
-			# navigable suggestion list (↑/↓/space + enter); typing still works
-			self._convo().mount(ChoicePrompt(question, choices, multiple, self._resolve_pending))
+			# navigable suggestion list (↑/↓/space + enter); no generic question header
+			self._convo().mount(ChoicePrompt("", choices, multiple, self._resolve_pending))
+			self._convo().scroll_end(animate=False)
 		else:
-			self._convo().mount(Static(Text.from_markup(f"[b yellow]? {escape(question)}[/]"), classes="ai"))
-		self._convo().scroll_end(animate=False)
-		self._set_status("waiting for your answer…")
+			# a plain end-of-turn follow-up: no "What's next?" / "waiting" noise — the
+			# focused input is enough. Just make sure it's focused.
+			try:
+				self.query_one("#input-box Input", Input).focus()
+			except Exception:  # noqa: BLE001
+				pass
 
 
 def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
