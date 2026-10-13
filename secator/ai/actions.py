@@ -1049,10 +1049,10 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		from secator.tasks.command import command as CommandTask
 		runner = CommandTask([exec_command], hooks=hooks, context=context, **run_opts)
 
-		# Per-command timeout cap. max_timeout is NOT run_opts-settable (Command.__init__
-		# resolves it from CONFIG.tasks.overrides); setting the instance attribute here is
-		# honored by get_max_timeout(). Defaults to _SHELL_TIMEOUT; the model can raise/lower
-		# it via run_shell(timeout=...), bounded by CONFIG.celery.task_max_timeout.
+		# Per-command timeout. max_timeout is NOT run_opts-settable (Command.__init__ resolves
+		# it from CONFIG.tasks.overrides); setting the instance attribute here is honored by
+		# get_max_timeout(). Defaults to CONFIG.security.shell_default_timeout (30s); the model
+		# can raise it via run_shell(timeout=...), bounded by CONFIG.celery.task_max_timeout.
 		effective_timeout = _resolve_shell_timeout(action)
 		runner.max_timeout = effective_timeout
 		# Check the timeout at least once a second: the default monitor cadence is
