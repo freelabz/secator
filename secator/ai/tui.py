@@ -194,10 +194,11 @@ class PermissionPrompt(Vertical):
 
 
 class AITUI(App):
+	# No window chrome: transparent backgrounds so the user's terminal shows through,
+	# no outer box, and the input has no side borders — just a top rule to separate it.
 	CSS = """
-	Screen { background: #0b0e14; }
-	#convo { background: #0b0e14; border: round #2b3245; padding: 0 1; height: 1fr; }
-	#convo:focus-within { border: round #3d6fb4; }
+	Screen { background: transparent; }
+	#convo { background: transparent; padding: 0 1; height: 1fr; }
 	.ai { color: #cdd6e4; }
 	.user { color: #7fd1e0; margin: 1 0; }
 	.err { color: #ff6b6b; }
@@ -205,10 +206,11 @@ class AITUI(App):
 	/* Claude-like runner entry: dim one-line header, arrow right after the text */
 	.runner-panel { margin: 1 0; height: auto; }
 	.runner-head { height: 1; width: auto; }
-	.runner-head:hover { background: #141925; }
+	.runner-head:hover { text-style: bold; }
+	/* expanded content: a left rule (indent), not a box — stays integrated */
 	.runner-box {
-		height: auto; margin: 1 0 0 0; padding: 0 1;
-		border: round #2b3245; background: #0d1119;
+		height: auto; margin: 0 0 0 1; padding: 0 0 0 1;
+		border-left: solid #2b3245; background: transparent;
 	}
 	.runner-cmd { color: #7b8296; margin: 0 0 1 0; }   /* command: dim text, no background */
 	.runner-out { height: auto; }
@@ -224,18 +226,17 @@ class AITUI(App):
 	/* follow-up suggestion list */
 	.choice { height: auto; margin: 1 0; }
 	.choice-q { color: #e6c15a; margin: 0 0 1 0; }
-	.choice-list { height: auto; max-height: 12; border: round #2b3245; background: #0d1119; }
-	.choice-list:focus { border: round #3d6fb4; }
+	.choice-list { height: auto; max-height: 12; border: none; background: transparent; }
 
-	Markdown { background: #0b0e14; margin: 0; padding: 0; }
+	Markdown { background: transparent; margin: 0; padding: 0; }
 	#status { height: 1; color: #d7a93b; padding: 0 1; }
-	#input-box { border: round #3d6fb4; background: #10141c; height: 3; padding: 0; }
-	#input-box Input {
-		border: none; background: #10141c; color: #e6ecf5; padding: 0 1; height: 1fr;
+	#input-box {
+		border: none; border-top: solid #2b3245; background: transparent; height: 3; padding: 0;
 	}
-	#input-box Input:focus { border: none; background: #10141c; }
+	#input-box Input { border: none; background: transparent; color: #e6ecf5; padding: 0 1; height: 1fr; }
+	#input-box Input:focus { border: none; background: transparent; }
 	#input-box Input > .input--cursor { color: #0b0e14; background: #e6ecf5; }
-	Header { background: #141a26; color: #cdd6e4; }
+	Header { background: transparent; color: #cdd6e4; }
 	"""
 	BINDINGS = [("ctrl+c", "quit", "Quit")]
 
@@ -261,6 +262,7 @@ class AITUI(App):
 	def on_mount(self) -> None:
 		self.title = "secator ai"
 		self.sub_title = f"session: {self._session} · mode: {self._mode}"
+		self.query_one("#input-box Input", Input).focus()
 		if self._initial_prompt:
 			# the -p prompt isn't typed into the input, so echo it once up front
 			self.call_later(self._append, Static(
