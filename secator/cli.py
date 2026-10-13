@@ -2185,12 +2185,15 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 			n_workers = max(1, min(n_threads, len(todo)))
 			debug(f'phase 2: counting with {n_workers} thread(s)', sub='report')
 			_t_phase2 = time.time()
-			# transient: the live frames (with spinners) are cleared on exit; the final
-			# fully-counted table is printed statically by the shared block below, so a
-			# table taller than the terminal stays scrollable in normal scrollback.
-			# Low refresh rate: we only need cells to fill in as counts land, not a
-			# smooth spinner — fewer re-layouts of a potentially large table.
-			with Live(table, console=console, refresh_per_second=4, transient=True):
+			# transient=False: Live leaves the fully-counted table in place on exit, so
+			# we don't reprint it. vertical_overflow='visible' lets a table taller than
+			# the terminal render all its rows (into scrollback) instead of clipping to
+			# the viewport. Low refresh rate: we only need cells to fill in as counts
+			# land, not a smooth spinner — fewer re-layouts of a large table.
+			with Live(
+				table, console=console, refresh_per_second=4,
+				transient=False, vertical_overflow='visible',
+			):
 				with ThreadPoolExecutor(max_workers=n_workers) as pool:
 					future_to_entry = {
 						pool.submit(_timed_count, e['path']): e for e in todo
@@ -2204,6 +2207,8 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 						_set_vuln_cell(entry['row_idx'], _format_vuln_counts(vuln_counts))
 						entry['counted'] = True
 			debug(f'phase 2 (counting) done in {time.time() - _t_phase2:.3f}s', sub='report')
+			# Live already rendered the final table in place; don't reprint it below.
+			table = None
 
 	if shown > 0:
 		if table is not None:
