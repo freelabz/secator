@@ -303,3 +303,22 @@ class TestShowAll(unittest.TestCase):
 		for f in _VULN_SHOW_ALL_FIELDS:
 			self.assertIn(f, captured_fields.get('output_fields', []),
 				f'{f!r} should be in table columns when --show-all is active')
+
+
+class TestShowAllFormatters(unittest.TestCase):
+	"""The --show-all table columns must render finding text literally (escaped)
+	and show a blank cell for a zero EPSS score (CodeRabbit #1510)."""
+
+	def test_epss_score_blank_when_zero(self):
+		from secator.rich import FORMATTERS
+		self.assertEqual(FORMATTERS['epss_score'](0.0), '')
+		self.assertEqual(FORMATTERS['epss_score'](0.42), '0.42')
+
+	def test_free_text_fields_escape_markup(self):
+		from secator.rich import FORMATTERS
+		for field_name in ('description', 'remediation', 'impact', 'poc'):
+			self.assertEqual(FORMATTERS[field_name](''), '')
+			out = FORMATTERS[field_name]('bad [/] tag [red]x')
+			# Brackets are backslash-escaped so Rich renders them literally.
+			self.assertIn(r'\[/]', out)
+			self.assertIn(r'\[red]', out)

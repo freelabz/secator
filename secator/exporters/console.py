@@ -1,4 +1,5 @@
 from rich.markdown import Markdown
+from rich.markup import escape
 
 from secator.exporters._base import Exporter
 from secator.output_types import OUTPUT_TYPES
@@ -22,7 +23,9 @@ def _print_vuln_extra(item):
 		label = " ".join(field_name.split("_")).title()
 		if isinstance(value, str) and len(value) > 200:
 			value = value[:200] + "…"
-		console_stdout.print(f"  [dim cyan]{label}:[/] {value}", highlight=False)
+		# Escape the value so finding content with stray Rich tags renders literally
+		# (and can't raise MarkupError); the label styling is preserved.
+		console_stdout.print(f"  [dim cyan]{label}:[/] {escape(str(value))}", highlight=False)
 
 
 class ConsoleExporter(Exporter):

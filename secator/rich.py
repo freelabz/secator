@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.markdown import Heading, Markdown
+from rich.markup import escape
 from rich.table import Table
 
 console = Console(stderr=True, record=True)
@@ -77,6 +78,14 @@ FORMATTERS = {
 	'matched_at': lambda matched_at: f'[link={matched_at}]{matched_at}[/]' if matched_at and matched_at.startswith('http') else (matched_at or ''),  # noqa: E501
 	'match': lambda match: f'[link={match}]{match}[/]' if match else '',
 	'_source': lambda source: f'[bold gold3]{source}[/]',
+	# Extra vulnerability fields (shown in tables via --show-all). epss_score is
+	# blank when 0; the free-text fields are rendered LITERALLY (markup escaped) so
+	# finding content can't break table rendering with stray Rich tags.
+	'epss_score': lambda score: '' if not score else str(score),
+	'description': lambda v: escape(str(v)) if v else '',
+	'remediation': lambda v: escape(str(v)) if v else '',
+	'impact': lambda v: escape(str(v)) if v else '',
+	'poc': lambda v: escape(str(v)) if v else '',
 }
 
 
