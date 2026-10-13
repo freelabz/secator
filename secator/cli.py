@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 from collections import Counter
 
@@ -36,7 +37,6 @@ from secator.utils import (
 	detect_host,
 	print_version,
 	get_file_timestamp,
-	list_reports,
 	get_info_from_report_path,
 	human_to_timedelta,
 	sanitize_folder_name,
@@ -1837,39 +1837,69 @@ def report_show(ctx, report_query, output, output_folder, time_delta, query, fmt
 	run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group)  # noqa: E501
 
 
+def _load_report_info(path):
+	"""Read only the lightweight ``info`` block from a report.json.
+
+	Deliberately avoids deserialising the (potentially large) ``results`` key and
+	never touches the sibling ``results.ndjson``.  Used by ``secator r list`` so
+	the metadata table renders instantly without iterating every finding.
+
+	Returns:
+		dict: The ``info`` section of the report, or ``{}`` on error.
+	"""
+	with open(path, 'r') as f:
+		data = json.load(f)
+	return data.get('info', {})
+
+
+def _count_report_vulns(path):
+	"""Count vulnerability severities for a single report (the slow part).
+
+	Reads ``results.ndjson`` line-by-line (or falls back to the legacy
+	``report.json['results']['vulnerability']`` list).  Called lazily so the
+	listing table can appear before all counts are ready.
+
+	Returns:
+		dict: ``{'critical': N, 'high': N, 'medium': N, 'low': N}``
+	"""
+	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+	ndjson = Path(path).parent / 'results.ndjson'
+
+	if ndjson.exists():
+		with open(ndjson, 'r') as f:
+			for line in f:
+				line = line.strip()
+				if not line:
+					continue
+				try:
+					rec = json.loads(line)
+				except json.JSONDecodeError:
+					continue
+				if rec.get('_type') == 'vulnerability':
+					severity = str(rec.get('severity', '')).lower()
+					if severity in vuln_counts:
+						vuln_counts[severity] += 1
+	else:
+		# Legacy: full results embedded in report.json
+		with open(path, 'r') as f:
+			data = json.load(f)
+		for vuln in data.get('results', {}).get('vulnerability', []):
+			severity = str(vuln.get('severity', '')).lower()
+			if severity in vuln_counts:
+				vuln_counts[severity] += 1
+
+	return vuln_counts
+
+
 def _load_report_data(path):
 	"""Read report info + count vulnerability severities.
 
-	Info comes from report.json; vulnerabilities come from the sibling results.ndjson
-	(json driver's live/new store) when present, else from the legacy report.json['results'].
+	Retained for callers outside ``report_list`` (e.g. ``_report_matches_filters``).
+	For the listing command use ``_load_report_info`` + ``_count_report_vulns`` to
+	keep metadata loading and vuln counting separate.
 	"""
-	info = {}
-	vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
-	with open(path, 'r') as f:
-		data = json.load(f)
-	info = data.get('info', {})
-	ndjson = Path(path).parent / 'results.ndjson'
-
-	def _iter_vulns():
-		if ndjson.exists():
-			with open(ndjson, 'r') as f:
-				for line in f:
-					line = line.strip()
-					if not line:
-						continue
-					try:
-						rec = json.loads(line)
-					except json.JSONDecodeError:
-						continue
-					if rec.get('_type') == 'vulnerability':
-						yield rec
-		else:
-			yield from data.get('results', {}).get('vulnerability', [])
-
-	for vuln in _iter_vulns():
-		severity = str(vuln.get('severity', '')).lower()
-		if severity in vuln_counts:
-			vuln_counts[severity] += 1
+	info = _load_report_info(path)
+	vuln_counts = _count_report_vulns(path)
 	return info, vuln_counts
 
 
@@ -1967,114 +1997,110 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		table.add_column('Path', overflow='fold')
 
 	shown = 0
+	is_local = effective_driver == 'local'
 
-	if effective_driver in ('mongodb', 'api', 'sqlite'):
-		# --interesting and --time-delta are only supported by the local driver.
+	# --interesting / --time-delta are local-only (other backends don't carry per-run
+	# vuln counts or filesystem mtimes).
+	if not is_local:
 		unsupported = [opt for opt, val in (('--interesting', interesting), ('--time-delta', time_delta)) if val]
 		if unsupported:
 			console.print(Warning(message=f'{", ".join(unsupported)} {"is" if len(unsupported) == 1 else "are"} only supported with the local driver and will be ignored for the {effective_driver} driver.'))  # noqa: E501
-		# Resolve the workspace name to its id for the API backend. The API only
-		# reliably filters runners by workspace_id (ObjectId); passing the raw name
-		# returns nothing (e.g. `r list -ws T2S` finds 0 while `r list` finds all).
-		list_workspace = workspace
-		if effective_driver == 'api' and workspace:
-			try:
-				from secator.hooks.api import resolve_workspace
 
-				list_workspace, _ = resolve_workspace(workspace)
-			except Exception as e:
-				console.print(Error(message=f'Error resolving workspace from API: {e}'))
-				return
-		# Use QueryEngine backend to list runners
-		context = {'drivers': [effective_driver]}
-		engine = QueryEngine(workspace_id=list_workspace or '', context=context)
-		# By default only list outermost runners (has_parent=False). --show-children
-		# drops the filter so nested sub-tasks/sub-workflows are shown too.
-		has_parent = None if show_children else False
+	# Resolve the workspace name to its id for the API backend (it filters by id).
+	list_workspace = workspace
+	if effective_driver == 'api' and workspace:
+		try:
+			from secator.hooks.api import resolve_workspace
+			list_workspace, _ = resolve_workspace(workspace)
+		except Exception as e:
+			console.print(Error(message=f'Error resolving workspace from API: {e}'))
+			return
+
+	# ONE code path for every backend: list runners via the QueryEngine, then stream
+	# rows into a live table. Vuln counts exist only for the local driver (read from
+	# each report's results.ndjson); other backends show '-'.
+	engine = QueryEngine(workspace_id=list_workspace or '', context={'drivers': [effective_driver]})
+	has_parent = None if show_children else False
+	with console.status('[bold]Listing reports …[/]'):
+		_t = time.time()
 		runners = engine.list_runners(workspace_id=list_workspace, runner_type=runner_type, has_parent=has_parent)
-		for runner_info in runners:
-			runner_status = runner_info.get('status', '')
-			status_color = STATE_COLORS.get(runner_status, 'white')
-			if status_pattern and not status_pattern.search(str(runner_status)):
-				continue
-			targets = runner_info.get('targets', [])
-			first_target = str(targets[0]) if targets else ''
-			if len(targets) > 1:
-				first_target += f' (+{len(targets) - 1})'
-			profiles = runner_info.get('run_opts', {}).get('profiles', [])
-			if isinstance(profiles, str):
-				profiles = [p.strip() for p in profiles.split(',') if p.strip()]
-			profiles = [p for p in profiles if p]
-			profiles_str = ', '.join(profiles) if profiles else ''
-			# Show the id as {runner_type}/{runner_id} so it can be passed to `secator r info`.
-			runner_id = runner_info.get('_id_str')
-			if not runner_id:
-				rtype = runner_info.get('_type') or runner_info.get('config', {}).get('type', '')
+		if is_local:
+			# Chronological (oldest first), as before — sort by report mtime.
+			runners = sorted(runners, key=lambda r: Path(r['_path']).stat().st_mtime)
+		debug(f'listed {len(runners)} runner(s) in {time.time() - _t:.3f}s', sub='report')
+
+	# --time-delta cutoff (local only): keep reports whose mtime is newer than the delta.
+	cutoff_ts = None
+	if is_local and time_delta:
+		cutoff_ts = time.time() - human_to_timedelta(time_delta).total_seconds()
+
+	def _build_row(r, vuln_str):
+		runner_id = r.get('_id_str')
+		if not runner_id:
+			rid = r.get('_id', '')
+			if r.get('_path'):  # local: _id is already '<type>/<id>'
+				runner_id = rid
+			else:
+				rtype = r.get('_type') or r.get('config', {}).get('type', '')
 				if rtype and not rtype.endswith('s'):
 					rtype += 's'
-				raw_id = runner_info.get('_id', '')
-				runner_id = f'{rtype}/{raw_id}' if rtype and raw_id else (raw_id or rtype)
-			ws_name = runner_info.get('context', {}).get('workspace_name') or runner_info.get('_workspace', workspace or '')
-			row = [
-				ws_name,
-				f'[bold blue]{runner_info.get("name", "")}[/]',
-				runner_id,
-				first_target,
-				profiles_str,
-				humanize_date(runner_info.get('start_time')),
-				humanize_date(runner_info.get('end_time')),
-				runner_info.get('elapsed_human', ''),
-				f'[{status_color}]{runner_status}[/]',
-				'-',
-			]
-			if show_all:
-				row.append('')
-			table.add_row(*row)
-			shown += 1
-	else:
-		# Local filesystem listing
-		paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
-		paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
+				runner_id = f'{rtype}/{rid}' if rtype and rid else (rid or rtype)
+		path = r.get('_path')
+		id_cell = f'[link={Path(path).as_uri()}]{runner_id}[/link]' if path else runner_id
+		ws_name = r.get('context', {}).get('workspace_name') or r.get('_workspace') or (workspace or '')
+		targets = r.get('targets', [])
+		first_target = str(targets[0]) if targets else ''
+		if len(targets) > 1:
+			first_target += f' (+{len(targets) - 1})'
+		profiles = r.get('run_opts', {}).get('profiles', [])
+		if isinstance(profiles, str):
+			profiles = [p.strip() for p in profiles.split(',') if p.strip()]
+		profiles = [p for p in profiles if p]
+		runner_status = r.get('status', '')
+		status_color = STATE_COLORS.get(runner_status, 'white')
+		row = [
+			ws_name,
+			f'[bold blue]{r.get("name", "")}[/]',
+			id_cell,
+			first_target,
+			', '.join(profiles) if profiles else '',
+			humanize_date(r.get('start_time')),
+			humanize_date(r.get('end_time')),
+			r.get('elapsed_human', ''),
+			f'[{status_color}]{runner_status}[/]',
+			vuln_str,
+		]
+		if show_all:
+			row.append(str(path) if path else '')
+		return row
 
-		for path in paths:
-			try:
-				path_info = get_info_from_report_path(path)
-				report_info, vuln_counts = _load_report_data(path)
-				if not _report_passes_filters(report_info, vuln_counts, interesting, status_pattern):
+	# transient=False + vertical_overflow='visible': Live leaves the full table in
+	# place (scrollable) on exit, so no reprint. nullcontext when there's nothing to
+	# list, so we never flash an empty table before "No reports found".
+	live_cm = Live(
+		table, console=console, refresh_per_second=4,
+		transient=False, vertical_overflow='visible',
+	) if runners else nullcontext()
+	with live_cm:
+		for r in runners:
+			runner_status = r.get('status', '')
+			if status_pattern and not status_pattern.search(str(runner_status)):
+				continue
+			if is_local:
+				path = r.get('_path')
+				if cutoff_ts is not None and path and Path(path).stat().st_mtime < cutoff_ts:
 					continue
-				runner_id = path_info['type'] + '/' + path_info['id']
-				targets = report_info.get('targets', [])
-				first_target = str(targets[0]) if targets else ''
-				if len(targets) > 1:
-					first_target += f' (+{len(targets) - 1})'
-				profiles = report_info.get('run_opts', {}).get('profiles', [])
-				if isinstance(profiles, str):
-					profiles = [p.strip() for p in profiles.split(',') if p.strip()]
-				profiles_str = ', '.join(profiles) if profiles else ''
-				runner_status = report_info.get('status', '')
-				status_color = STATE_COLORS[runner_status] if runner_status in STATE_COLORS else 'white'
-
-				row = [
-					path_info['workspace'],
-					f'[bold blue]{report_info.get("name", "")}[/]',
-					f'[link={Path(path).as_uri()}]{runner_id}[/link]',
-					first_target,
-					profiles_str,
-					humanize_date(report_info.get('start_time')),
-					humanize_date(report_info.get('end_time')),
-					report_info.get('elapsed_human', ''),
-					f'[{status_color}]{runner_status}[/]',
-					_format_vuln_counts(vuln_counts),
-				]
-				if show_all:
-					row.append(str(path))
-				table.add_row(*row)
-				shown += 1
-			except Exception as e:
-				console.print(Error(message=f'Could not load {path}: {str(e)}'))
+				# Lazy vuln count — the slow part, streamed row-by-row under Live.
+				counts = _count_report_vulns(path)
+				if interesting and sum(counts.values()) == 0:
+					continue
+				vuln_str = _format_vuln_counts(counts)
+			else:
+				vuln_str = '-'
+			table.add_row(*_build_row(r, vuln_str))
+			shown += 1
 
 	if shown > 0:
-		console.print(table)
 		console.print(Info(message=f'Found {shown} reports.'))
 		if workspace:
 			console.print(Info(message=f'Current workspace: [bold gold3]{workspace}[/]. Use [bold green4]-ws <workspace_name>[/] to switch.'))  # noqa: E501
