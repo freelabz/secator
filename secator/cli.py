@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 from collections import Counter
 
@@ -2068,8 +2069,10 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		# Phase 2 (lazy): iterate results.ndjson per report to fill in vuln counts.
 		# --interesting requires vuln counts to filter correctly, so for that flag
 		# the full count is done upfront and no Live pass is needed.
+		_t = time.time()
 		paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
 		paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
+		debug(f'listed + sorted {len(paths)} report(s) in {time.time() - _t:.3f}s', sub='report')
 
 		# Each entry: {'path': Path, 'row': list[str], 'counted': bool}
 		pending_rows = []
@@ -2103,10 +2106,13 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 			return row
 
 		# Phase 1: metadata only — no results.ndjson touched.
+		_t_phase1 = time.time()
 		for path in paths:
 			try:
+				_t_row = time.time()
 				path_info = get_info_from_report_path(path)
 				report_info = _load_report_info(path)
+				debug(f'loaded metadata {path} in {time.time() - _t_row:.3f}s', sub='report', verbose=True)
 				runner_status = report_info.get('status', '')
 				# Apply --status filter eagerly (no vuln data needed).
 				if status_pattern and not status_pattern.search(str(runner_status)):
@@ -2129,6 +2135,10 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 				shown += 1
 			except Exception as e:
 				console.print(Error(message=f'Could not load {path}: {str(e)}'))
+		debug(
+			f'phase 1 (metadata) loaded {len(pending_rows)} row(s) in {time.time() - _t_phase1:.3f}s '
+			f'(interesting={interesting})',
+			sub='report')
 
 		# Phase 2: resolve vuln counts. Counting is pure I/O (stream each report's
 		# results.ndjson), so run the counts in parallel threads behind a lightweight
@@ -2140,6 +2150,10 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		# index 10, so the count column index does not shift.
 		vuln_col_idx = 9
 		todo = [e for e in pending_rows if not e['counted']]
+		debug(
+			f'phase 2: {len(todo)} report(s) to count '
+			f'(console.is_terminal={getattr(console, "is_terminal", "?")})',
+			sub='report')
 		if todo:
 			from concurrent.futures import ThreadPoolExecutor, as_completed
 			from rich.progress import (
@@ -2147,9 +2161,19 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 				TextColumn, TimeElapsedColumn,
 			)
 
+			def _timed_count(path):
+				_t = time.time()
+				counts = _count_report_vulns(path)
+				debug(f'counted {path} in {time.time() - _t:.3f}s', sub='report', verbose=True)
+				return counts
+
 			# Worker threads only READ their own file and return counts; pending_rows
 			# is mutated solely here on the main thread as futures complete, so no lock
 			# is needed. Cap workers so huge listings don't open too many FDs at once.
+			n_threads = threads if threads and threads > 0 else CONFIG.runners.threads
+			n_workers = max(1, min(n_threads, len(todo)))
+			debug(f'phase 2: counting with {n_workers} thread(s)', sub='report')
+			_t_phase2 = time.time()
 			with Progress(
 				SpinnerColumn(),
 				TextColumn('[progress.description]{task.description}'),
@@ -2160,10 +2184,9 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 				transient=True,
 			) as progress:
 				ptask = progress.add_task('Counting vulnerabilities', total=len(todo))
-				n_threads = threads if threads and threads > 0 else CONFIG.runners.threads
-				with ThreadPoolExecutor(max_workers=max(1, min(n_threads, len(todo)))) as pool:
+				with ThreadPoolExecutor(max_workers=n_workers) as pool:
 					future_to_entry = {
-						pool.submit(_count_report_vulns, e['path']): e for e in todo
+						pool.submit(_timed_count, e['path']): e for e in todo
 					}
 					for future in as_completed(future_to_entry):
 						entry = future_to_entry[future]
@@ -2174,15 +2197,20 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 						entry['row'][vuln_col_idx] = _format_vuln_counts(vuln_counts)
 						entry['counted'] = True
 						progress.advance(ptask)
+			debug(f'phase 2 (counting) done in {time.time() - _t_phase2:.3f}s', sub='report')
 
 		# Populate the pre-built table once; printed by the shared block below so it
 		# lands in normal scrollback and scrolls.
+		_t = time.time()
 		for entry in pending_rows:
 			table.add_row(*entry['row'])
+		debug(f'built table with {len(pending_rows)} row(s) in {time.time() - _t:.3f}s', sub='report')
 
 	if shown > 0:
 		if table is not None:
+			_t = time.time()
 			console.print(table)
+			debug(f'printed table in {time.time() - _t:.3f}s', sub='report')
 		console.print(Info(message=f'Found {shown} reports.'))
 		if workspace:
 			console.print(Info(message=f'Current workspace: [bold gold3]{workspace}[/]. Use [bold green4]-ws <workspace_name>[/] to switch.'))  # noqa: E501
