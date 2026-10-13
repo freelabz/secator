@@ -350,6 +350,9 @@ class AITUI(App):
 		self._steers: list[str] = []
 		self._steers_lock = threading.Lock()
 		self._pending_ask = None
+		self._status_text = ""
+		self._status_spinning = False
+		self._spin_frame = 0
 
 	def compose(self) -> ComposeResult:
 		yield Header(show_clock=True)
@@ -365,6 +368,7 @@ class AITUI(App):
 		self.query_one("#backbar").display = False
 		self._write = self.query_one("#convo", VerticalScroll)
 		self.query_one("#input-box Input", Input).focus()
+		self.set_interval(0.1, self._tick_spinner)   # animate the status spinner
 		if self._initial_prompt:
 			# the -p prompt isn't typed into the input, so echo it once up front
 			self.call_later(self._append, Static(
@@ -446,13 +450,26 @@ class AITUI(App):
 		self._convo().display = True
 		self.query_one("#backbar").display = False
 
+	_SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
 	def _set_status(self, text: str, spinning: bool = True) -> None:
+		self._status_text = text or ""
+		self._status_spinning = bool(spinning) and bool(text)
 		s = self.query_one("#status", Static)
 		if not text:
 			s.update("")
+		elif not spinning:
+			s.update(Text.from_markup(f"[green]✓[/] [gold3]{escape(text)}[/]"))
+		else:
+			# the interval timer animates the glyph; render the first frame now
+			s.update(Text.from_markup(f"[gold3]{self._SPIN[self._spin_frame]} {escape(text)}[/]"))
+
+	def _tick_spinner(self) -> None:
+		if not self._status_spinning or not self._status_text:
 			return
-		dot = "[gold3]⠋[/] " if spinning else "[green]✓[/] "
-		s.update(Text.from_markup(f"{dot}[gold3]{escape(text)}[/]"))
+		self._spin_frame = (self._spin_frame + 1) % len(self._SPIN)
+		self.query_one("#status", Static).update(
+			Text.from_markup(f"[gold3]{self._SPIN[self._spin_frame]} {escape(self._status_text)}[/]"))
 
 	async def _render(self, item) -> None:
 		d = item.toDict() if hasattr(item, "toDict") else dict(item)
