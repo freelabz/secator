@@ -19,7 +19,7 @@ from secator.ai.actions import (
 	ActionContext, check_guardrails, safe_dispatch_action, _run_batch
 )
 from secator.ai.guardrails import PermissionEngine
-from secator.ai.interactivity import create_backend, RemoteBackend, UserInputTimeout
+from secator.ai.interactivity import create_backend, RemoteBackend, TUIBackend, UserInputTimeout
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
@@ -1377,7 +1377,8 @@ class ai(PythonRunner):
 		items, but kept a generator so future transcript echoes can be added without
 		changing the call site.
 		"""
-		if not isinstance(self.backend, RemoteBackend):
+		# Both the remote/web channel and the local Textual TUI have a steer channel.
+		if not isinstance(self.backend, (RemoteBackend, TUIBackend)):
 			return
 		try:
 			steers = self.backend.poll_steers(self.session_id)
