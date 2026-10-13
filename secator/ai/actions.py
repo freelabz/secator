@@ -550,6 +550,23 @@ def _child_preamble(
 	return _build_child_hooks_or_denial(context)
 
 
+def _tui_line_hook(self, line):
+	"""on_line hook (module-level so it stays picklable for async/Celery children):
+	stream a command runner's command + raw stdout into the active Textual panel. In a
+	Celery worker there's no TUI, so get_tui() is None and this is a no-op. set_command
+	is idempotent, so re-sending it per line is harmless."""
+	from secator.rich import get_tui
+	tui = get_tui()
+	if tui is not None:
+		try:
+			source = getattr(getattr(self, "config", None), "name", "") or ""
+			tui.tui_set_command(getattr(self, "cmd", "") or "", source)
+			tui.tui_render_line(line, source)
+		except Exception:  # noqa: BLE001 - a UI feed must never crash a run
+			pass
+	return line
+
+
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
 	"""Execute a secator task or workflow.
 
@@ -701,30 +718,14 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	if denial is not None:
 		yield denial
 		return
-	# TUI-only: stream each child command's command + raw stdout into its panel. This
-	# feeds the Textual UI directly (never the LLM item stream, so model context stays
-	# clean). on_line fires on the underlying command runner, whose `self.cmd` is the
-	# real command and `self.config.name` the task name (used to route into the right
-	# sub-panel for a workflow/scan). Keyed on runner_cls so it reaches the children.
+	# TUI-only: stream each child command's command + raw stdout into its panel. The
+	# hook is the MODULE-LEVEL `_tui_line_hook` (not a closure) so it stays picklable
+	# when a child is dispatched async to a Celery worker — there it just no-ops
+	# (get_tui() is None in the worker process). Keyed on runner_cls so it reaches the
+	# underlying command runners.
 	if runner_type in ("task", "workflow", "scan"):
-		from secator.rich import get_tui
-		_tui = get_tui()
-		if _tui is not None:
-			_cmd_sent = set()
-
-			def _tui_on_line(self, line, _tui=_tui, _cmd_sent=_cmd_sent):
-				try:
-					source = getattr(getattr(self, "config", None), "name", "") or ""
-					if source not in _cmd_sent:
-						_cmd_sent.add(source)
-						_tui.tui_set_command(getattr(self, "cmd", "") or "", source)
-					_tui.tui_render_line(line, source)
-				except Exception:  # noqa: BLE001 - UI feed must never crash a run
-					pass
-				return line
-
-			tl = hooks.setdefault(runner_cls, {})
-			tl["on_line"] = list(tl.get("on_line", [])) + [_tui_on_line]
+		tl = hooks.setdefault(runner_cls, {})
+		tl["on_line"] = list(tl.get("on_line", [])) + [_tui_line_hook]
 	try:
 		runner = runner_cls(tpl, targets, run_opts=run_opts, hooks=hooks, context=context)
 	except TaskNotFoundError as e:
