@@ -766,18 +766,22 @@ def list_reports(workspace=None, type=None, timedelta=None):
 	if type and not type.endswith('s'):
 		type += 's'
 	json_reports = []
-	for root, _, files in os.walk(CONFIG.dirs.reports):
-		for file in files:
-			path = Path(root) / file
-			if not path.parts[-1] == 'report.json':
-				continue
-			if workspace and path.parts[-4] != workspace:
-				continue
-			if type and path.parts[-3] != type:
-				continue
-			if timedelta and (datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)) > timedelta:
-				continue
-			json_reports.append(path)
+	_t = monotonic()
+	# report.json lives at a fixed depth: <reports>/<workspace>/<type>/<id>/report.json.
+	# Glob that exact depth instead of os.walk — the latter descends into every run's
+	# artifact subdirectories (potentially thousands of files on a large reports dir)
+	# just to find the handful of report.json files, which is the dominant cost of
+	# `secator r list`. Local reports don't store nested sub-runner reports, so a
+	# fixed-depth glob is complete.
+	for path in Path(CONFIG.dirs.reports).glob('*/*/*/report.json'):
+		if workspace and path.parts[-4] != workspace:
+			continue
+		if type and path.parts[-3] != type:
+			continue
+		if timedelta and (datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)) > timedelta:
+			continue
+		json_reports.append(path)
+	debug(f'list_reports: found {len(json_reports)} report(s) in {monotonic() - _t:.3f}s', sub='report')
 	return json_reports
 
 

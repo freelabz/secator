@@ -2069,10 +2069,15 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 		# Phase 2 (lazy): iterate results.ndjson per report to fill in vuln counts.
 		# --interesting requires vuln counts to filter correctly, so for that flag
 		# the full count is done upfront and no Live pass is needed.
+		# Discovering reports walks the reports dir (can be slow on a large one), so
+		# show a spinner while it runs.
 		_t = time.time()
-		paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
-		paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
-		debug(f'listed + sorted {len(paths)} report(s) in {time.time() - _t:.3f}s', sub='report')
+		with console.status('[bold]Listing reports …[/]'):
+			paths = list_reports(workspace=workspace, type=runner_type, timedelta=human_to_timedelta(time_delta))
+			debug(f'list_reports returned {len(paths)} path(s) in {time.time() - _t:.3f}s', sub='report')
+			_t = time.time()
+			paths = sorted(paths, key=lambda x: x.stat().st_mtime, reverse=False)
+			debug(f'sorted {len(paths)} path(s) by mtime in {time.time() - _t:.3f}s', sub='report')
 
 		# Each entry: {'path': Path, 'row': list[str], 'counted': bool}
 		pending_rows = []
