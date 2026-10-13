@@ -18,7 +18,6 @@ from jinja2 import Template
 from rich.live import Live
 from secator.rich import CustomMarkdown as Markdown
 from rich.rule import Rule
-from rich.spinner import Spinner
 from rich.table import Table
 
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path, download_files
@@ -2102,25 +2101,6 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 				row.append(str(path))
 			return row
 
-		def _rebuild_local_table(rows_data):
-			"""Rebuild the Rich Table from the current row snapshot for Live updates."""
-			t = Table()
-			t.add_column('Workspace', style='bold gold3', overflow='fold')
-			t.add_column('Name', overflow='fold')
-			t.add_column('Id', overflow='fold')
-			t.add_column('Target', overflow='fold')
-			t.add_column('Profiles', overflow='fold')
-			t.add_column('Start Date', overflow='fold')
-			t.add_column('End Date', overflow='fold')
-			t.add_column('Elapsed', overflow='fold')
-			t.add_column('Status', style='green', overflow='fold')
-			t.add_column('Vulnerabilities', overflow='fold')
-			if show_all:
-				t.add_column('Path', overflow='fold')
-			for r in rows_data:
-				t.add_row(*r['row'])
-			return t
-
 		# Phase 1: metadata only — no results.ndjson touched.
 		for path in paths:
 			try:
@@ -2139,10 +2119,9 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 					vuln_str = _format_vuln_counts(vuln_counts)
 					counted = True
 				else:
-					# Renderable spinner in the vuln cell while Phase 2 computes the
-					# count — animates under the Live refresh, replaced by the real
-					# counts once ready.
-					vuln_str = Spinner('dots', text='[dim]counting…[/]', style='dim')
+					# Placeholder; overwritten with the real count in Phase 2 before
+					# the table is ever rendered.
+					vuln_str = ''
 					counted = False
 				row = _build_local_row(path_info, report_info, vuln_str, show_all, path)
 				pending_rows.append({'path': path, 'row': row, 'counted': counted})
@@ -2150,32 +2129,36 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 			except Exception as e:
 				console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
-		# Phase 2: fill in vuln counts lazily via a Live-updated table.
+		# Phase 2: resolve vuln counts. Counting is pure I/O (stream each report's
+		# results.ndjson), so run the counts in parallel threads behind a lightweight
+		# one-line progress bar. We deliberately do NOT render the table while
+		# counting: a Live-updated table re-lays-out every row on each tick, which is
+		# O(rows^2) and, on a big workspace, dwarfs the counting itself (~60s vs ~5s).
+		# The table is built and printed once below, so it also stays scrollable.
 		# Vuln-count column is always at index 9 (or 10 when --show-all appends the path).
 		vuln_col_idx = 10 if show_all else 9
-		needs_live = any(not r['counted'] for r in pending_rows)
-		if needs_live and pending_rows:
-			# Live is TRANSIENT: it only animates the per-row spinners while counts
-			# are computed, then erases itself on exit. Live repaints a fixed
-			# viewport region (clipped + not added to scrollback), so a table taller
-			# than the terminal can't scroll. We therefore print the fully-counted
-			# table statically below — that lands in normal scrollback and scrolls.
-			# Counting is pure I/O (stream each results.ndjson), so resolve counts in
-			# parallel threads and fill cells in as each finishes. Worker threads only
-			# READ their own file and return counts; the Live table + pending_rows are
-			# mutated solely here on the main thread (as futures complete), so no lock
-			# is needed. Cap workers so huge listings don't open too many FDs at once.
+		todo = [e for e in pending_rows if not e['counted']]
+		if todo:
 			from concurrent.futures import ThreadPoolExecutor, as_completed
+			from rich.progress import (
+				BarColumn, MofNCompleteColumn, Progress, SpinnerColumn,
+				TextColumn, TimeElapsedColumn,
+			)
 
-			todo = [e for e in pending_rows if not e['counted']]
-			max_workers = min(16, len(todo))
-			with Live(
-				_rebuild_local_table(pending_rows),
+			# Worker threads only READ their own file and return counts; pending_rows
+			# is mutated solely here on the main thread as futures complete, so no lock
+			# is needed. Cap workers so huge listings don't open too many FDs at once.
+			with Progress(
+				SpinnerColumn(),
+				TextColumn('[progress.description]{task.description}'),
+				BarColumn(),
+				MofNCompleteColumn(),
+				TimeElapsedColumn(),
 				console=console,
-				refresh_per_second=8,
 				transient=True,
-			) as live:
-				with ThreadPoolExecutor(max_workers=max_workers) as pool:
+			) as progress:
+				ptask = progress.add_task('Counting vulnerabilities', total=len(todo))
+				with ThreadPoolExecutor(max_workers=min(16, len(todo))) as pool:
 					future_to_entry = {
 						pool.submit(_count_report_vulns, e['path']): e for e in todo
 					}
@@ -2187,15 +2170,12 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 							vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
 						entry['row'][vuln_col_idx] = _format_vuln_counts(vuln_counts)
 						entry['counted'] = True
-						live.update(_rebuild_local_table(pending_rows))
-			# Print the final, fully-counted table statically so it is scrollable
-			# (the transient Live frames above have been cleared).
-			console.print(_rebuild_local_table(pending_rows))
-			table = None
-		elif pending_rows:
-			# All rows counted upfront (--interesting path); populate the pre-built table.
-			for entry in pending_rows:
-				table.add_row(*entry['row'])
+						progress.advance(ptask)
+
+		# Populate the pre-built table once; printed by the shared block below so it
+		# lands in normal scrollback and scrolls.
+		for entry in pending_rows:
+			table.add_row(*entry['row'])
 
 	if shown > 0:
 		if table is not None:
