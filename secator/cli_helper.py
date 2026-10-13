@@ -385,6 +385,20 @@ def register_runner(cli_endpoint, config):
 			}
 		)
 
+		# Experimental Textual TUI for the ai task (local interactive). Owns the screen
+		# and drives the runner itself, so branch BEFORE the console-capturing block.
+		if getattr(config, 'name', '') == 'ai' and opts.get('tui'):
+			import sys as _sys
+			from secator.definitions import IN_WORKER
+			if not IN_WORKER and getattr(_sys.stdout, 'isatty', lambda: False)():
+				try:
+					from secator.ai.tui import run_ai_tui
+				except ImportError:
+					console.print('[yellow3]--tui requires textual: `pip install textual`. Using console output.[/]')
+				else:
+					run_ai_tui(runner_cls, config, inputs, opts, hooks, context)
+					return
+
 		# Start runner
 		with contextmanager:
 			if enable_memray:
