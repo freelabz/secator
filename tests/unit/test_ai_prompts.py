@@ -473,7 +473,6 @@ class TestSessionContext(unittest.TestCase):
 		return build_session_context(isolated=isolated)
 
 	def test_date_present_in_both_modes(self):
-		import re
 		for iso in (True, False):
 			blk = self._build(iso)
 			self.assertIn("<session_context>", blk)
@@ -488,7 +487,6 @@ class TestSessionContext(unittest.TestCase):
 			blk = self._build(iso)
 			self.assertNotIn("UNIX timestamp", blk)
 			# No HH:MM:SS clock time in the block.
-			import re
 			self.assertNotRegex(blk, r"\d{2}:\d{2}:\d{2}")
 			# Tells the model how to get the exact time on demand.
 			self.assertIn("date", blk.lower())
