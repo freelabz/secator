@@ -2160,22 +2160,34 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 			# viewport region (clipped + not added to scrollback), so a table taller
 			# than the terminal can't scroll. We therefore print the fully-counted
 			# table statically below — that lands in normal scrollback and scrolls.
+			# Counting is pure I/O (stream each results.ndjson), so resolve counts in
+			# parallel threads and fill cells in as each finishes. Worker threads only
+			# READ their own file and return counts; the Live table + pending_rows are
+			# mutated solely here on the main thread (as futures complete), so no lock
+			# is needed. Cap workers so huge listings don't open too many FDs at once.
+			from concurrent.futures import ThreadPoolExecutor, as_completed
+
+			todo = [e for e in pending_rows if not e['counted']]
+			max_workers = min(16, len(todo))
 			with Live(
 				_rebuild_local_table(pending_rows),
 				console=console,
 				refresh_per_second=8,
 				transient=True,
 			) as live:
-				for entry in pending_rows:
-					if entry['counted']:
-						continue
-					try:
-						vuln_counts = _count_report_vulns(entry['path'])
-					except Exception:
-						vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
-					entry['row'][vuln_col_idx] = _format_vuln_counts(vuln_counts)
-					entry['counted'] = True
-					live.update(_rebuild_local_table(pending_rows))
+				with ThreadPoolExecutor(max_workers=max_workers) as pool:
+					future_to_entry = {
+						pool.submit(_count_report_vulns, e['path']): e for e in todo
+					}
+					for future in as_completed(future_to_entry):
+						entry = future_to_entry[future]
+						try:
+							vuln_counts = future.result()
+						except Exception:
+							vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+						entry['row'][vuln_col_idx] = _format_vuln_counts(vuln_counts)
+						entry['counted'] = True
+						live.update(_rebuild_local_table(pending_rows))
 			# Print the final, fully-counted table statically so it is scrollable
 			# (the transient Live frames above have been cleared).
 			console.print(_rebuild_local_table(pending_rows))
