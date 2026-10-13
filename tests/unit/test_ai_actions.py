@@ -189,7 +189,9 @@ class TestHandleShell(unittest.TestCase):
 		self.assertEqual(captured_context.get('session_id'), 'sess-123')
 
 		fake_runner.run.assert_called_once()
-		self.assertEqual(fake_runner.max_timeout, 60)
+		# No timeout arg -> the configured per-command default (security.shell_default_timeout).
+		from secator.config import CONFIG
+		self.assertEqual(fake_runner.max_timeout, CONFIG.security.shell_default_timeout)
 
 		self.assertEqual(results[0].ai_type, 'shell')
 		# The shell Ai must carry the UI-linking extra_data (runner_type + runner_id)
@@ -2016,3 +2018,110 @@ class TestEnsureMongoRunIdCoercion(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestShellTimeout(unittest.TestCase):
+	"""run_shell per-command timeout: default CONFIG.security.shell_default_timeout, settable by
+	the model within [default, CONFIG.celery.task_max_timeout]."""
+
+	def _resolve(self, action, ceiling, default=30):
+		from secator.ai import actions
+		import types
+		cfg = types.SimpleNamespace(
+			security=types.SimpleNamespace(shell_default_timeout=default),
+			celery=types.SimpleNamespace(task_max_timeout=ceiling),
+		)
+		with patch('secator.config.CONFIG', cfg):
+			return actions._resolve_shell_timeout(action)
+
+	def test_default_when_absent(self):
+		# No timeout arg -> the configured per-command default.
+		self.assertEqual(self._resolve({'action': 'shell', 'command': 'x'}, ceiling=7200, default=30), 30)
+
+	def test_model_can_raise_toward_ceiling(self):
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 600}, ceiling=7200), 600)
+
+	def test_request_below_default_is_floored(self):
+		# Settable range is [default, ceiling]: a value under the default is floored to it.
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 5}, ceiling=7200, default=30), 30)
+
+	def test_capped_at_task_max_timeout(self):
+		# Requests above the global task ceiling are capped, not rejected.
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 99999}, ceiling=7200), 7200)
+
+	def test_no_ceiling_when_task_max_unlimited(self):
+		# task_max_timeout = -1 (no cap) -> the model may raise freely above the default.
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 100000}, ceiling=-1), 100000)
+
+	def test_non_numeric_falls_back_to_default(self):
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 'soon'}, ceiling=7200, default=30), 30)
+
+	def test_non_positive_falls_back_to_default(self):
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 0}, ceiling=7200, default=30), 30)
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': -5}, ceiling=7200, default=30), 30)
+
+	@patch('secator.tasks.command.command')
+	def test_handle_shell_applies_resolved_timeout(self, mock_task_cls):
+		fake = MagicMock()
+		fake.id = 'task_t'
+		fake.output = 'ok'
+		fake.timed_out = False
+		mock_task_cls.return_value = fake
+		ctx = ActionContext(targets=['t.com'], model='m')
+		list(_handle_shell({'action': 'shell', 'command': 'echo hi', 'timeout': 120}, ctx))
+		self.assertEqual(fake.max_timeout, 120)
+
+	def test_timeout_emits_retry_hint_end_to_end(self):
+		"""Real run: a command that exceeds its timeout is killed and the output tells the
+		model it may re-run with a higher timeout. Default patched to 1s so the test is fast
+		(the real 30s default would floor the requested 1s)."""
+		from secator.config import CONFIG
+		ctx = ActionContext(targets=['t.com'], model='m')
+		with patch.object(CONFIG.security, 'shell_default_timeout', 1):
+			results = list(_handle_shell({'action': 'shell', 'command': 'sleep 5', 'timeout': 1}, ctx))
+		out = [r for r in results if isinstance(r, Ai) and r.ai_type == 'shell_output'][0].content
+		self.assertIn('timed out after 1s', out)
+		self.assertIn('higher `timeout`', out)
+
+	def test_run_shell_schema_exposes_timeout(self):
+		from secator.ai.tools import TOOL_SCHEMAS
+		props = TOOL_SCHEMAS['run_shell']['function']['parameters']['properties']
+		self.assertIn('timeout', props)
+		self.assertEqual(props['timeout']['type'], 'integer')
+		self.assertNotIn('timeout', TOOL_SCHEMAS['run_shell']['function']['parameters']['required'])
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestCommandTimedOutFlag(unittest.TestCase):
+	"""Command.timed_out is set when max_timeout is exceeded (the signal _handle_shell reads)."""
+
+	def test_timed_out_flag_set(self):
+		from secator.tasks.command import command as CommandTask
+		runner = CommandTask(['sleep 5'])
+		runner.max_timeout = 1
+		runner.monitor_poll_interval = 0.5  # check sub-cadence so the 1s timeout actually fires
+		runner.run()
+		self.assertTrue(runner.timed_out)
+
+	def test_fast_poll_does_not_increase_stat_collection(self):
+		"""Perf guard: a short monitor_poll_interval makes the timeout/memory CHECKS more
+		frequent but must NOT collect stats more often — stat collection stays gated by
+		stat_update_frequency. So no extra Stat objects / psutil work from a fast poll."""
+		from secator.tasks.command import command as CommandTask
+		from secator.runners.command import Command
+		calls = {'n': 0}
+		orig = Command._collect_stats
+
+		def counting(self, procs):
+			calls['n'] += 1
+			return orig(self, procs)
+
+		runner = CommandTask(['sleep 2'])
+		runner.max_timeout = 30                 # won't time out
+		runner.monitor_poll_interval = 0.1      # ~20 wakeups over the run
+		with patch.object(Command, '_collect_stats', counting):
+			runner.run()
+		# stat_update_frequency is tens of seconds, so over a ~2s run stats collect at most a
+		# couple of times (baseline + maybe one), NEVER once per 0.1s poll (~20).
+		self.assertLessEqual(calls['n'], 3)
