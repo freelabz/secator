@@ -21,6 +21,14 @@ class QueryBackend(ABC):
 		self.config = config or {}
 		self.context = context or {}
 
+	def is_reachable(self) -> bool:
+		"""Liveness check used to decide whether this backend can serve a live poll.
+
+		Default True; network backends (mongodb/api) override with a real, time-bounded
+		check. Filesystem backends are never consulted for this (see
+		``QueryEngine.pollable_shared_store``), so the default is fine for them."""
+		return True
+
 	def list_workspaces(self) -> List[Dict[str, Any]]:
 		"""List all workspaces accessible via this backend."""
 		return []
