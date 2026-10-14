@@ -179,6 +179,14 @@ def _yield_tool_results(runner, collected):
 		tool_result_str = format_tool_result(
 			tc_name, "error" if has_errors else "success",
 			len(serialized), serialized, max_items=max_items)
+		# Fence target-derived content as UNTRUSTED (#1513): field values in scan output /
+		# findings (page titles, banners, cert subjects, matched content, ...) are controlled
+		# by the scanned target, so an instruction-shaped string planted there must be read as
+		# DATA, not obeyed. The <untrusted_data> constraint tells the model what the envelope
+		# means. Only data-returning tools are wrapped; our own guidance (scope_note/trunc_hint)
+		# is appended OUTSIDE the envelope below.
+		if tc_name in ("query_workspace", "run_task", "run_workflow", "run_scan", "run_shell"):
+			tool_result_str = f"<workspace_data>\n{tool_result_str}\n</workspace_data>"
 		result_incomplete = len(serialized) > max_items
 		# Only nudge a scoped re-query when it ADDS something: the result is item-capped,
 		# so the full set is NOT in context. For a complete result the model already has
