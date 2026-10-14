@@ -427,7 +427,8 @@ class ChatHistory:
                 "note": (
                     f'Findings from {rtype} "{rid}" were cleared to save context but are '
                     f'stored in the workspace. Re-read them with query_workspace(query='
-                    f'{{"_context.{rtype}_id": "{rid}"}}) (add "_type"/filters to narrow).'),
+                    f'{{"_context.{rtype}_id": "{rid}"}}) (that key alone is enough; '
+                    f'add "_type"/filters only to narrow).'),
             }, separators=(',', ':'))
             m.pop("_token_count", None)   # content changed -> invalidate the cached count
             m.pop("_token_model", None)

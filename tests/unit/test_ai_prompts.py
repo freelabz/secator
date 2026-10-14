@@ -332,7 +332,9 @@ class TestPrompts(unittest.TestCase):
 		self.assertNotIn("<guardrails>", COMMON_RULES)
 		self.assertNotIn("<truncated_output>", COMMON_RULES)
 		runners = load_prompt("constraints/runners.txt")
-		self.assertIn("<truncated_output>", runners)
+		# Truncated-output guidance was removed (the model re-runs/filters on its own and
+		# shell commands are short/safe to repeat). file_io (output dir) still lives here.
+		self.assertNotIn("<truncated_output>", runners)
 		self.assertIn("<file_io>", runners)
 		# guardrails is a SINGLE source (constraints/guardrails.txt), not duplicated in
 		# runners — so scan and exploit get the one strong block, never a weak dup.
