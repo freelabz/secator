@@ -60,18 +60,19 @@ MODES = {
 	"scan": {
 		"system_prompt": SYSTEM_SCAN,
 		"description": "actively scan, run tools / shell, exploit, and write or curate findings",
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "web_search", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
 		"system_prompt": SYSTEM_CHAT,
 		# Chat is strictly READ-ONLY / informational. It can only read workspace data
-		# (`query`), ask/suggest (`follow_up`), delegate a same-mode helper (`subagent`),
-		# and `stop`. NO `shell` (attack surface), NO `task`/`workflow` (escalation), and
-		# NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
-		# changing findings is an active action that belongs in scan/exploit.
+		# (`query`), search the web (`web_search`, a read-only external lookup), ask/suggest
+		# (`follow_up`), delegate a same-mode helper (`subagent`), and `stop`. NO `shell`
+		# (attack surface), NO `task`/`workflow` (escalation), and NO finding writes
+		# (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or changing findings is
+		# an active action that belongs in scan/exploit.
 		"description": "read-only — read and explain workspace data; you cannot scan, attack or write findings",
-		"allowed_actions": ["query", "follow_up", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["query", "web_search", "follow_up", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
@@ -82,7 +83,7 @@ MODES = {
 		# to exploit — without it query_workspace isn't even built for this mode.
 		# "follow_up" lets exploit mode STOP-and-ask (e.g. confirm before a state-changing
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "web_search", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 }

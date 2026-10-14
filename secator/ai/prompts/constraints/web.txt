@@ -1,0 +1,3 @@
+<web>
+Use web_search to search the PUBLIC WEB (not the workspace) for external context that isn't stored locally: a CVE write-up, a PoC/exploit repo, tool documentation, a hardening note. It is separate from query_workspace, which reads INTERNAL findings — web_search reads the web, query_workspace reads the workspace. Pick mode='answer' for a synthesized answer or links, mode='links' for raw source links, mode='exploit' to find exploit code / PoCs / offensive tools (Sploitus). web_search does NOT touch the engagement targets and is not scope-gated. Prefer query_workspace for anything already in the workspace; use web_search only for external knowledge.
+</web>
