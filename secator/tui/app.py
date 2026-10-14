@@ -205,12 +205,16 @@ class TUIApp(App):
 		# whichever finished first, so matching by source (tool name) avoids cross-wiring.
 		if self._container is not None:
 			return await self._container.subpanel(source)
-		if self._current is not None and getattr(self._current, "source", "") == source:
-			return self._current
+		cur = self._current
+		if cur is not None and (getattr(cur, "source", "") == source or getattr(cur, "kind", "") == "query"):
+			# a leaf whose source matches, or a query panel (its results have task
+			# sources, not the query's — they still belong to the query panel)
+			return cur
 		return None   # no panel yet (batch card renders on completion) -> buffer
 
 	def _buffer(self, source: str) -> dict:
-		return self._line_buffers.setdefault(source, {"cmd": "", "lines": []})
+		return self._line_buffers.setdefault(
+			source, {"cmd": "", "lines": [], "findings": [], "notes": []})
 
 	async def _set_command(self, cmd: str, source: str = "") -> None:
 		if not cmd:
@@ -231,7 +235,8 @@ class TUIApp(App):
 			self._buffer(source)["lines"].append(line)
 
 	def _flush_buffer(self, panel: RunnerPanel) -> None:
-		# attach output that streamed before this panel's card rendered (parallel batch)
+		# attach command/output/findings/notes that streamed before this panel's card
+		# rendered (parallel batch: items arrive during execution, cards on completion)
 		if not panel.source:
 			return
 		buf = self._line_buffers.pop(panel.source, None)
@@ -241,6 +246,10 @@ class TUIApp(App):
 			panel.set_command(buf["cmd"])
 		for ln in buf["lines"]:
 			panel.add_raw(ln)
+		for f in buf["findings"]:
+			panel.add_finding(f)
+		for n in buf["notes"]:
+			panel.add_note(n)
 
 	# ---- mounting + views ----
 	def _convo(self) -> VerticalScroll:
@@ -388,8 +397,11 @@ class TUIApp(App):
 		if not self._status_spinning or not self._status_text:
 			return
 		self._spin_frame = (self._spin_frame + 1) % len(self._SPIN)
-		self.query_one("#status", Static).update(
-			Text.from_markup(f"[gold3]{self._SPIN[self._spin_frame]} {escape(self._status_text)}[/]"))
+		try:
+			self.query_one("#status", Static).update(
+				Text.from_markup(f"[gold3]{self._SPIN[self._spin_frame]} {escape(self._status_text)}[/]"))
+		except Exception:  # noqa: BLE001 - the status node may be gone during teardown
+			pass
 
 	# ---- item rendering (generic) ----
 	async def _route_write(self, d: dict) -> VerticalScroll:
@@ -409,21 +421,22 @@ class TUIApp(App):
 		t = d.get("_type")
 		if t in ("info", "warning", "error"):
 			renderable = message_text(item, d)
+			src = d.get("_source") or ""
 			if self._container is not None:
-				# a note emitted by a child task (e.g. "XML results saved", "N exploits
-				# found") belongs IN that task's sub-panel; a workflow-level note (e.g.
-				# "Skipped task …", whose _source is the workflow itself) stays on the
-				# container.
-				src = d.get("_source") or ""
+				# child-task note (e.g. "XML results saved") nests in that task's sub-panel;
+				# a workflow-level note (_source == the workflow) stays on the container.
 				if src and src != self._container.source:
-					sp = await self._container.subpanel(src)
-					sp.add_note(renderable)
+					(await self._container.subpanel(src)).add_note(renderable)
 				else:
 					self._container.add_note(renderable)
+				return
+			sink = await self._sink_for_source(src)
+			if sink is not None:
+				sink.add_note(renderable)
+			elif src:
+				self._buffer(src)["notes"].append(renderable)   # batch: card not yet rendered
 			elif self._current is not None:
-				# a note/error from the current leaf runner (e.g. a shell command's error
-				# traceback) belongs inside its panel, not at the top level
-				self._current.add_note(renderable)
+				self._current.add_note(renderable)              # source-less leaf note/error
 			else:
 				await self._append(Static(renderable, classes="ai"))
 			return
@@ -437,16 +450,22 @@ class TUIApp(App):
 			if uid in self._shown_uuids:
 				return
 			self._shown_uuids.add(uid)
-		# a finding → render with its own __rich__ (secator-identical). Inside a
-		# workflow/scan it nests under the child task's sub-panel; a single task goes
-		# straight in; otherwise it lands at top level.
+		# a finding → render with its own __rich__ (secator-identical). Inside a workflow/
+		# scan it nests under the child task's sub-panel (by _source); a single task /
+		# query panel gets it directly; in a parallel batch it's buffered by _source until
+		# that task's card renders (otherwise it would cross-wire to a stale _current).
 		renderable = finding_text(item, d)
+		src = d.get("_source") or ""
 		if self._container is not None:
-			sp = await self._container.subpanel(d.get("_source") or "results")
+			sp = await self._container.subpanel(src or "results")
 			sp.add_finding(renderable)
 			self._container.bump()
-		elif self._current is not None:
-			self._current.add_finding(renderable)
+			return
+		sink = await self._sink_for_source(src)
+		if sink is not None:
+			sink.add_finding(renderable)
+		elif src:
+			self._buffer(src)["findings"].append(renderable)
 		else:
 			await self._append(Static(renderable, classes="out-line"))
 

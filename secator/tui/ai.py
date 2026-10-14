@@ -99,7 +99,9 @@ class AITUI(TUIApp):
 			# the card's content is the runner name (== _source of its items). Used to
 			# route a task's live output + buffered output (parallel batch), and to tell a
 			# workflow's OWN notes (_source == workflow name) from its child tasks' items.
-			panel.source = content if at in ("task", "workflow", "scan") else ""
+			# shell items carry _source = the command task's unique_name ("command"); set
+			# it so a shell's error routes to its panel. Runners use the runner name.
+			panel.source = "command" if at == "shell" else (content if at in ("task", "workflow", "scan") else "")
 			await self._append(panel)
 			self._current = panel
 			# workflows/scans contain child tasks: nest their findings/output by source
@@ -107,8 +109,10 @@ class AITUI(TUIApp):
 			self._flush_buffer(panel)
 			self._set_status(f"running {kind} {rname or command}".strip())
 		elif at == "shell_output":
+			# a shell's stdout IS its result (no secator findings) — show it directly,
+			# not hidden behind the command-click like a task's raw output
 			if self._current is not None:
-				self._current.add_raw(content)
+				self._current.add_output(content)
 		elif at in _ACTION_VERBS:
 			# AI action on a finding: a neutral "<Verb> <name>" row (same tone as a runner
 			# header), no icon — icons are for secator findings, not AI actions.

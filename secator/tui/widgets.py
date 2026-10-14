@@ -134,6 +134,16 @@ class RunnerPanel(Vertical):
 		self.lines += 1
 		self.query_one(".runner-out", Vertical).mount(Static(renderable, classes="out-line"))
 
+	def add_output(self, text: str) -> None:
+		# VISIBLE output (e.g. a shell command's stdout — it IS the result, not hidden
+		# behind the command-click like a task's raw stdout). Line-capped, plain text.
+		if self.lines >= 500:
+			return
+		self.lines += 1
+		if self.lines == 500:
+			text = "… (output truncated)"
+		self.query_one(".runner-out", Vertical).mount(Static(Text(text), classes="out-raw"))
+
 	async def subpanel(self, source: str) -> "RunnerPanel":
 		# get/create a nested task panel for a workflow/scan child, keyed by task name.
 		# await the mount so the sub-panel is composed before we write into it.
