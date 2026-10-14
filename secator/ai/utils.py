@@ -549,6 +549,34 @@ def _strip_leading_orphan_tools(messages: List[Dict]) -> int:
 	return removed
 
 
+def _strip_orphan_tool_blocks(messages: List[Dict]) -> int:
+	"""Drop any run of 'tool' messages not rooted at an assistant(tool_calls) parent.
+
+	Generalises ``_strip_leading_orphan_tools``: a tool-result block is valid only when the
+	message immediately before it is an ``assistant`` carrying ``tool_calls``. Trim/compaction
+	can drop that parent while a ``user`` (or other) message survives before the orphaned
+	tool-block — leaving a ``tool`` message after a ``user``, which providers reject with
+	"Unexpected role 'tool' after role 'user'" (#1465). Covers the leading-orphan case too
+	(window starts with a tool whose parent was dropped). Mutates in place; returns count removed.
+	"""
+	removed = 0
+	i = 0
+	while i < len(messages):
+		if messages[i].get("role") != "tool":
+			i += 1
+			continue
+		prev = messages[i - 1] if i > 0 else None
+		rooted = bool(prev and prev.get("role") == "assistant" and prev.get("tool_calls"))
+		if rooted:
+			while i < len(messages) and messages[i].get("role") == "tool":
+				i += 1
+			continue
+		while i < len(messages) and messages[i].get("role") == "tool":
+			messages.pop(i)
+			removed += 1
+	return removed
+
+
 def _dedupe_tool_results(messages: List[Dict]) -> int:
 	"""Drop duplicate tool_result messages sharing a tool_call_id.
 
@@ -598,8 +626,10 @@ def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
 	Returns:
 		Number of messages removed or synthetic tool_results inserted.
 	"""
-	# Leading orphan tool_results have no parent in this window — drop them.
-	repaired = _strip_leading_orphan_tools(messages)
+	# Orphan tool_results (leading, or stranded after a user when the assistant(tool_calls)
+	# parent was trimmed) have no matching tool_use in this window — drop them so providers
+	# don't reject "tool_result without matching tool_use" / "tool after role user".
+	repaired = _strip_orphan_tool_blocks(messages)
 	# Duplicate tool_results for one id are rejected as a non-retryable 400 — drop
 	# extras so the request is valid (and, when hit as a 400, so the retry repairs it).
 	repaired += _dedupe_tool_results(messages)
