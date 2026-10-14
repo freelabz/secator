@@ -947,6 +947,29 @@ class PermissionEngine:
 		if result.decision == "ask" and not isolated_shell:
 			return result
 
+		# File tools (read_file / write_file): gate the single path through the read/write rule
+		# layer, so permission matching is per-path and explicit (the point of these tools over a
+		# shell cat/tee). Explicit deny rules ALWAYS block; an unknown path asks — dropped to allow
+		# under isolation, where the sandbox container is the filesystem boundary.
+		if action_type in ("read_file", "write_file"):
+			path = action.get("path", "")
+			access = "write" if action_type == "write_file" else "read"
+			if path:
+				try:
+					pr = self._check_value(access, path)
+				except (ValueError, TypeError, re.error) as e:
+					return PermissionResult(decision="deny", reason=f"path check error (fail-closed): {type(e).__name__}")
+				if pr.decision == "deny":
+					if _is_default_deny(pr):
+						if not self.isolated:
+							return PermissionResult(decision="ask", reason=f"Unknown {access} path: {path}", paths=[path])
+					else:
+						return PermissionResult(decision="deny", reason=pr.reason, paths=[path])
+				elif pr.decision == "ask" and not self.isolated:
+					return PermissionResult(
+						decision="ask", reason=f"{access} access to {path} requires approval", paths=[path])
+			return PermissionResult(decision="allow", reason=f"{action_type} allowed")
+
 		# Layer 2: targets (network egress) — UNAFFECTED by isolation. Always enforce when
 		# targets exist — a missing catch-all falls to ask (via _check_values), never allow.
 		targets_to_check = self._extract_targets(action)
@@ -1109,6 +1132,9 @@ class PermissionEngine:
 			# through to the "Unknown action type" deny and silently break run_subagent /
 			# the bare stop() / change_mode.
 			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
+		elif action_type in ("read_file", "write_file"):
+			# The verb is always fine; the PATH is gated by the read/write layer in _decide.
+			return PermissionResult(decision="allow", reason=f"{action_type} path checked separately")
 		elif action_type in ("query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
 			# mark_vuln_exploited / mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
 			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
@@ -1124,6 +1150,9 @@ class PermissionEngine:
 					reason=f"add_finding of scope-sensitive type '{ftype}' is not allowed from the AI",
 				)
 			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
+		elif action_type in ("read_file", "write_file"):
+			# The verb is always fine; the PATH is gated by the read/write layer in _decide.
+			return PermissionResult(decision="allow", reason=f"{action_type} path checked separately")
 		return PermissionResult(decision="deny", reason=f"Unknown action type: {action_type}")
 
 	def _match_shell_command_deny(self, tokens: List[str]) -> str:

@@ -60,7 +60,7 @@ MODES = {
 	"scan": {
 		"system_prompt": SYSTEM_SCAN,
 		"description": "actively scan, run tools / shell, exploit, and write or curate findings",
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "read_file", "write_file", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
@@ -82,7 +82,7 @@ MODES = {
 		# to exploit — without it query_workspace isn't even built for this mode.
 		# "follow_up" lets exploit mode STOP-and-ask (e.g. confirm before a state-changing
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "read_file", "write_file", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 }
