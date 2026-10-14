@@ -55,7 +55,10 @@ class TUIApp(App):
 		height: auto; margin: 0 0 0 1; padding: 0 0 0 1;
 		border-left: solid #2b3245; background: transparent;
 	}
+	.runner-cmdwrap { height: auto; }
 	.runner-cmd { color: #7b8296; margin: 0 0 1 0; }   /* command: dim text, no background */
+	.runner-cmd:hover { text-style: bold; }            /* click to reveal the raw output */
+	.runner-raw { height: auto; margin: 0 0 1 0; }     /* raw command output (hidden by default) */
 	.runner-out { height: auto; }
 	.out-line { color: #cdd6e4; }
 	.out-raw { color: #9aa3b8; }
@@ -406,10 +409,17 @@ class TUIApp(App):
 		t = d.get("_type")
 		if t in ("info", "warning", "error"):
 			renderable = message_text(item, d)
-			# inside a workflow/scan these are its own notes (e.g. "Skipped task …") —
-			# nest them so expanding the workflow shows them instead of "(no output)"
 			if self._container is not None:
-				self._container.add_note(renderable)
+				# a note emitted by a child task (e.g. "XML results saved", "N exploits
+				# found") belongs IN that task's sub-panel; a workflow-level note (e.g.
+				# "Skipped task …", whose _source is the workflow itself) stays on the
+				# container.
+				src = d.get("_source") or ""
+				if src and src != self._container.source:
+					sp = await self._container.subpanel(src)
+					sp.add_note(renderable)
+				else:
+					self._container.add_note(renderable)
 			else:
 				await self._append(Static(renderable, classes="ai"))
 			return

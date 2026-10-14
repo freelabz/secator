@@ -96,10 +96,10 @@ class AITUI(TUIApp):
 			else:
 				kind, rname, command = at, desc or content or ed.get("name") or "", ""
 			panel = RunnerPanel(kind, rname, command=command, runner_id=ed.get("runner_id", ""))
-			# the card's content is the tool name (== on_line source) for a task; used to
-			# route this task's live output, incl. output buffered before the card rendered
-			# (parallel batch: cards render on completion, after the output streamed)
-			panel.source = content if at == "task" else ""
+			# the card's content is the runner name (== _source of its items). Used to
+			# route a task's live output + buffered output (parallel batch), and to tell a
+			# workflow's OWN notes (_source == workflow name) from its child tasks' items.
+			panel.source = content if at in ("task", "workflow", "scan") else ""
 			await self._append(panel)
 			self._current = panel
 			# workflows/scans contain child tasks: nest their findings/output by source

@@ -15,12 +15,26 @@ from textual.widgets import OptionList, SelectionList, Static
 from secator.tui.render import command_text
 
 
+def _runner_ancestor(node):
+	while node is not None and not isinstance(node, RunnerPanel):
+		node = node.parent
+	return node
+
+
 class Head(Static):
 	"""Clickable one-line header that toggles its parent RunnerPanel."""
 	def on_click(self) -> None:
 		panel = self.parent
 		if isinstance(panel, RunnerPanel):
 			panel.toggle()
+
+
+class _CmdLine(Static):
+	"""Clickable '$ <command>' line — reveals/hides the runner's RAW output."""
+	def on_click(self) -> None:
+		panel = _runner_ancestor(self.parent)
+		if isinstance(panel, RunnerPanel):
+			panel.toggle_raw()
 
 
 class RunnerPanel(Vertical):
@@ -40,17 +54,36 @@ class RunnerPanel(Vertical):
 		self.lines = 0
 		self.done = False
 		self._collapsed = True
+		self._raw_collapsed = True   # raw command output hidden until the command is clicked
 		self.subpanels: dict = {}   # source -> nested RunnerPanel (workflow/scan children)
 
 	def compose(self) -> ComposeResult:
+		# Level 1: the header (click to expand). Level 2 (box): the command + secator
+		# findings. Level 3: click the command to reveal the RAW command output.
 		yield Head(self._header(), classes="runner-head")
 		box = Vertical(classes="runner-box")
 		box.display = False
 		with box:
-			if self.command:
-				yield Static(command_text(self.command), classes="runner-cmd")
+			with Vertical(classes="runner-cmdwrap"):
+				if self.command:
+					yield _CmdLine(self._cmd_render(), classes="runner-cmd")
+			raw = Vertical(classes="runner-raw")
+			raw.display = False
+			yield raw
 			yield Vertical(classes="runner-out")
 		yield box
+
+	def _cmd_render(self) -> Text:
+		t = command_text(self.command)   # '$ <bash-highlighted command>'
+		arrow = "▼" if not self._raw_collapsed else "▶"
+		t.append(f"  {arrow}", style="#6b7187")   # reveals the raw output
+		return t
+
+	def toggle_raw(self) -> None:
+		self._raw_collapsed = not self._raw_collapsed
+		self.query_one(".runner-raw", Vertical).display = not self._raw_collapsed
+		for cl in self.query(".runner-cmd"):
+			cl.update(self._cmd_render())
 
 	def _desc(self) -> str:
 		return self.rname or self.command or self.kind
@@ -114,23 +147,21 @@ class RunnerPanel(Vertical):
 		return sp
 
 	def set_command(self, cmd: str) -> None:
-		# add/replace the dim `$ command` line at the top of the box (once)
+		# add the clickable '$ command' line (once); click it to reveal the raw output
 		if self.command or not cmd:
 			return
 		self.command = cmd
-		box = self.query_one(".runner-box", Vertical)
-		out = self.query_one(".runner-out", Vertical)
-		box.mount(Static(command_text(cmd), classes="runner-cmd"), before=out)
+		self.query_one(".runner-cmdwrap", Vertical).mount(_CmdLine(self._cmd_render(), classes="runner-cmd"))
 
 	def add_raw(self, text: str) -> None:
-		# raw output: plain Text, never markup-parsed (target-controlled). Cap the
-		# number of rendered lines so a chatty task can't flood the UI.
+		# RAW command output: plain Text, never markup-parsed (target-controlled), kept
+		# hidden under the command line (click the command to reveal). Line-capped.
 		if self.lines >= 500:
 			return
 		self.lines += 1
 		if self.lines == 500:
 			text = "… (output truncated)"
-		self.query_one(".runner-out", Vertical).mount(Static(Text(text), classes="out-raw"))
+		self.query_one(".runner-raw", Vertical).mount(Static(Text(text), classes="out-raw"))
 
 	def finish(self) -> None:
 		self.done = True
