@@ -148,6 +148,12 @@ def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 	inside the worker (after set_tui) so the backend resolves with the TUI active."""
 	from secator.rich import set_tui
 
+	# The TUI drives the ai task IN-PROCESS and is a local interactive frontend — the
+	# interactivity bridge (ask_user/steers) and display hooks only work when the task
+	# runs locally. So force sync: with sync=False the task would dispatch to a worker,
+	# where get_tui() is None, and the TUI would never get a prompt or a response.
+	opts = {**opts, "sync": True}
+
 	session = opts.get("workspace") or opts.get("prompt", "ai") or "ai"
 	app = AITUI(
 		None, session=str(session)[:30], mode=opts.get("mode", "chat"),
