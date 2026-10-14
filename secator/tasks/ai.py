@@ -24,7 +24,7 @@ from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
 	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES, MODE_ALIASES,
-	normalize_mode,
+	normalize_mode, AI_MAX_RESULTS,
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
 from secator.ai.session import (
@@ -175,7 +175,7 @@ def _yield_tool_results(runner, collected):
 				"")
 		# Cap the displayed items; if the runner produced MORE than fits, the tool result
 		# holds only a sample and the model needs the runner id to fetch the rest.
-		max_items = 100
+		max_items = AI_MAX_RESULTS
 		tool_result_str = format_tool_result(
 			tc_name, "error" if has_errors else "success",
 			len(serialized), serialized, max_items=max_items)

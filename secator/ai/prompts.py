@@ -12,6 +12,13 @@ TASKS_PATH = SECATOR_DIR / "tasks"
 WORKFLOWS_PATH = SECATOR_DIR / "configs" / "workflows"
 PROFILES_PATH = SECATOR_DIR / "configs" / "profiles"
 
+# Max result items the AI gets back in ONE page — from a runner tool_result
+# (format_tool_result) AND a query_workspace page. Kept a single constant so "run a task"
+# and "query the workspace" cap alike; a result at this cap is INCOMPLETE and the model is
+# told how to fetch the rest. Mirrors the query backends' default page size
+# (secator/query/*.py `_execute_search(limit=100)`).
+AI_MAX_RESULTS = 100
+
 OPTION_FORMATS = """header|key1:value1;;key2:value2|Multiple headers separated by ;;
 cookie|name1=val1;name2=val2|Standard cookie format
 proxy|http://host:port|HTTP/SOCKS proxy URL
@@ -464,7 +471,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	return result.replace("$workspace_path", ws)
 
 
-def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = 100) -> str:
+def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = AI_MAX_RESULTS) -> str:
 	"""Format tool result as compact JSON, truncating results if too many.
 
 	Args:
@@ -472,7 +479,7 @@ def format_tool_result(name: str, status: str, count: int, results: Any, max_ite
 		status: Execution status (success/error)
 		count: Number of results
 		results: Full results from the action
-		max_items: Maximum number of result items to include (default 100)
+		max_items: Maximum number of result items to include (default :data:`AI_MAX_RESULTS`)
 
 	Returns:
 		Compact JSON string
