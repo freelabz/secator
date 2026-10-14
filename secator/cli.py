@@ -3002,6 +3002,20 @@ def install_build():
 @addons.command('ai')
 def install_ai():
 	"Install AI addon."
+	# Ensure the `shfmt` binary is on PATH for the guardrail shell parser. `pip install
+	# secator[ai]` pulls shfmt-py, but under a pipx-installed secator that binary lives in
+	# the pipx venv and is NOT exposed on PATH (pipx only exposes the main app's scripts, not
+	# a dependency's), so `shutil.which("shfmt")` fails and shell parsing degrades to
+	# whole-command approval (#1460). Install shfmt-py as its own pipx app so `shfmt` is
+	# exposed globally. Best-effort: a missing pipx / offline run must not block the addon.
+	import shutil
+	import subprocess
+	if shutil.which('shfmt') is None and shutil.which('pipx'):
+		console.print('[dim]Installing shfmt binary (pipx install shfmt-py) for shell guardrail parsing...[/]')
+		try:
+			subprocess.run(['pipx', 'install', 'shfmt-py'], check=False)
+		except Exception:  # noqa: BLE001 - never block the pip install below on the pipx step
+			pass
 	run_install(
 		cmd=f'{sys.executable} -m pip install secator[ai]',
 		title='AI addon',
