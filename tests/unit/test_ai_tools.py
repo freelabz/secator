@@ -12,12 +12,14 @@ class TestToolSchemas(unittest.TestCase):
 		from secator.ai.tools import TOOL_SCHEMAS
 		self.assertIsInstance(TOOL_SCHEMAS, dict)
 
-	def test_tool_schemas_expected_set(self):
+	def test_tool_schemas_has_builtin_tools(self):
 		from secator.ai.tools import TOOL_SCHEMAS
-		expected = {"run_task", "run_workflow", "run_shell", "query_workspace", "follow_up",
+		# Built-ins are always present; dynamic (autoloaded) tools may add more, so this is a
+		# subset check, not an exact-set/count assertion.
+		builtins = {"run_task", "run_workflow", "run_shell", "query_workspace", "follow_up",
 		            "run_subagent", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
 		            "mark_vuln_exploit_failed", "update_finding", "change_mode"}
-		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)
+		self.assertTrue(builtins.issubset(set(TOOL_SCHEMAS.keys())))
 
 	def test_tool_schemas_openai_format(self):
 		from secator.ai.tools import TOOL_SCHEMAS
@@ -103,12 +105,17 @@ class TestToolSchemas(unittest.TestCase):
 class TestBuildToolSchemas(unittest.TestCase):
 	"""Verify build_tool_schemas filters by mode."""
 
-	def test_scan_mode_returns_all_tools(self):
-		from secator.ai.tools import build_tool_schemas, TOOL_SCHEMAS
+	def test_scan_mode_returns_allowed_tools(self):
+		from secator.ai.tools import build_tool_schemas, TOOL_SCHEMAS, TOOL_ACTION_MAP
+		from secator.ai.prompts import get_mode_config
 		schemas = build_tool_schemas("scan")
-		self.assertEqual(len(schemas), len(TOOL_SCHEMAS))
 		names = {s["function"]["name"] for s in schemas}
-		self.assertEqual(names, set(TOOL_SCHEMAS.keys()))
+		allowed = set(get_mode_config("scan")["allowed_actions"])
+		# every returned tool maps to an allowed action, and every built-in tool whose action is
+		# allowed is returned (dynamic tools may add to both sides, so compare on this invariant).
+		self.assertTrue(all(TOOL_ACTION_MAP.get(n) in allowed for n in names))
+		builtin_allowed = {n for n, sc in TOOL_SCHEMAS.items() if TOOL_ACTION_MAP.get(n) in allowed}
+		self.assertTrue(builtin_allowed.issubset(names))
 
 	def test_chat_mode_excludes_task_and_workflow(self):
 		from secator.ai.tools import build_tool_schemas
