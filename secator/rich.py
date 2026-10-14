@@ -90,15 +90,22 @@ def display_denial(description, reason, command="", subagent=None):
 
 
 def attach_display_hooks(hooks, runner_cls):
-	"""Append the display hooks (on_line for command output, on_item for findings) to a
-	child runner's hooks when a display is active, so its command/output AND findings
-	stream into the UI. No-op without a display. Keyed on runner_cls so they reach the
-	underlying command runners."""
+	"""Append the display hooks (on_line for command output, on_item for findings) so a
+	child runner's command/output AND findings stream into the UI when a display is
+	active. No-op without a display.
+
+	Keyed on EVERY runner class — not just the top-level one — because a Workflow/Scan
+	hands its children only the ``Task``-keyed hooks (``self._hooks.get(Task)``), so a
+	hook on ``Workflow`` alone never reaches the child tasks' findings (only the
+	workflow's own items). Attaching to Task + Workflow + Scan covers every level; the
+	UI dedups by _uuid, so a finding that fires at more than one level renders once."""
 	if _TUI is None:
 		return
-	tl = hooks.setdefault(runner_cls, {})
-	tl["on_line"] = list(tl.get("on_line", [])) + [_tui_line_hook]
-	tl["on_item"] = list(tl.get("on_item", [])) + [_tui_item_hook]
+	from secator.runners import Scan, Task, Workflow
+	for cls in (Task, Workflow, Scan):
+		tl = hooks.setdefault(cls, {})
+		tl["on_line"] = list(tl.get("on_line", [])) + [_tui_line_hook]
+		tl["on_item"] = list(tl.get("on_item", [])) + [_tui_item_hook]
 
 
 @contextmanager
