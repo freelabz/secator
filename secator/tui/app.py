@@ -420,6 +420,10 @@ class TUIApp(App):
 					sp.add_note(renderable)
 				else:
 					self._container.add_note(renderable)
+			elif self._current is not None:
+				# a note/error from the current leaf runner (e.g. a shell command's error
+				# traceback) belongs inside its panel, not at the top level
+				self._current.add_note(renderable)
 			else:
 				await self._append(Static(renderable, classes="ai"))
 			return
