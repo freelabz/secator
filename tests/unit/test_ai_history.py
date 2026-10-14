@@ -645,6 +645,87 @@ class TestChatHistory(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestCompactionStubPhase(unittest.TestCase):
+    """Compaction phase 1: store-backed runner results are STUBBED to a recoverable
+    workspace pointer (deterministic, no LLM); the LLM summary is only the fallback."""
+
+    def _history(self):
+        import json
+        h = ChatHistory(model="gpt-4o")
+        h.set_system("SYS")
+        h.add_user("scan it")
+        h.add_assistant_with_tool_calls(None, [
+            {"id": "tc1", "type": "function", "function": {"name": "run_task", "arguments": "{}"}}])
+        h.add_tool_result("run_task", "tc1",
+                          json.dumps({"results": [{"x": i} for i in range(200)]}),
+                          runner_id="task-9", runner_type="task")
+        for i in range(4):   # the kept tail (keep_last=4)
+            h.add_user(f"m{i}")
+        return h
+
+    def test_stub_enough_skips_llm_and_preserves_messages(self):
+        import json
+        calls = {"n": 0}
+
+        def fake_llm(*a, **k):
+            calls["n"] += 1
+            return {"content": "SUMMARY", "usage": {}}
+
+        h = self._history()
+        n0 = len(h.messages)
+        # after stubbing we're under threshold -> phase 1 only, no summarization call
+        with patch.object(ChatHistory, "should_compact", return_value=False), \
+             patch("secator.ai.utils.call_llm", fake_llm):
+            h.compact("gpt-4o")
+
+        self.assertEqual(calls["n"], 0)                       # no LLM summary call
+        self.assertEqual(len(h.messages), n0)                 # messages kept in place (no restructure)
+        tool = [m for m in h.messages if m.get("role") == "tool"][0]
+        body = json.loads(tool["content"])
+        self.assertTrue(body["aged_out"])
+        self.assertEqual(body["runner_id"], "task-9")
+        self.assertIn("_context.task_id", body["note"])   # recoverable pointer
+        self.assertIn("task-9", body["note"])
+
+    def test_stub_idempotent_across_repeated_compactions(self):
+        h = self._history()
+        with patch.object(ChatHistory, "should_compact", return_value=False), \
+             patch("secator.ai.utils.call_llm", lambda *a, **k: {"content": "S", "usage": {}}):
+            h.compact("gpt-4o")
+            first = [m for m in h.messages if m.get("role") == "tool"][0]["content"]
+            h.compact("gpt-4o")   # second pass must not double-stub
+            second = [m for m in h.messages if m.get("role") == "tool"][0]["content"]
+        self.assertEqual(first, second)
+
+    def test_falls_back_to_summary_when_stub_insufficient(self):
+        calls = {"n": 0}
+
+        def fake_llm(*a, **k):
+            calls["n"] += 1
+            return {"content": "SUMMARY", "usage": {}}
+
+        h = self._history()
+        # still over threshold after stubbing -> phase 2 LLM summary runs
+        with patch.object(ChatHistory, "should_compact", return_value=True), \
+             patch("secator.ai.utils.call_llm", fake_llm):
+            h.compact("gpt-4o")
+        self.assertEqual(calls["n"], 1)
+        self.assertTrue(any("Summary of previous" in (m.get("content") or "") for m in h.messages))
+
+    def test_only_runner_tagged_tool_results_are_stubbed(self):
+        import json
+        # a run_shell result (no _runner_id) must NOT be stubbed by phase 1
+        h = ChatHistory(model="gpt-4o")
+        h.set_system("SYS")
+        h.add_user("go")
+        h.add_assistant_with_tool_calls(None, [
+            {"id": "s1", "type": "function", "function": {"name": "run_shell", "arguments": "{}"}}])
+        h.add_tool_result("run_shell", "s1", json.dumps({"results": "x" * 500}))  # no runner id
+        stubbed = h._stub_recoverable_tool_results([m for m in h.messages if m["role"] == "tool"])
+        self.assertEqual(stubbed, 0)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestChatHistoryToolCalling(unittest.TestCase):
 
     def test_add_assistant_with_tool_calls(self):

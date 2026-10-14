@@ -1126,7 +1126,7 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 			def get_action_budget(self, model):
 				return 10000
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				tool_results.append((name, tc_id, content))
 
 		persisted = []
@@ -1184,7 +1184,7 @@ class TestYieldToolResultsRunnerScoping(unittest.TestCase):
 			def get_action_budget(self, model):
 				return 1_000_000  # huge: no token truncation
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				stored.append((name, tc_id, content))
 
 		runner = MagicMock()
@@ -1399,7 +1399,7 @@ class TestSubagentOwnToolResults(unittest.TestCase):
 			def get_action_budget(self, model):
 				return 10000
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()

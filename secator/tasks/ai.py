@@ -222,7 +222,10 @@ def _yield_tool_results(runner, collected):
 		tool_result_str = truncate_to_tokens(
 			tool_result_str, budget, runner.model, hint=trunc_hint)
 		tool_result_str = maybe_encrypt(tool_result_str, runner.encryptor)
-		runner.history.add_tool_result(tc_name, tc_id, tool_result_str)
+		# Tag store-backed runner results with their runner id/type so compaction can STUB
+		# them to a recoverable workspace pointer instead of LLM-summarizing them.
+		runner.history.add_tool_result(
+			tc_name, tc_id, tool_result_str, runner_id=runner_id or "", runner_type=runner_type or "")
 		_tool_msg = {"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": tool_result_str}
 		yield Ai(content=f"[{tc_name}] {len(serialized)} result(s)",
 		         ai_type="tool_result",

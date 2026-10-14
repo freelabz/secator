@@ -1151,7 +1151,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def get_action_budget(self, model):
 				return 10000
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
@@ -1258,7 +1258,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def __init__(self):
 				self.tool_results = []
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
@@ -1299,7 +1299,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def __init__(self):
 				self.tool_results = []
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
