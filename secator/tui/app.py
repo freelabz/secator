@@ -45,6 +45,7 @@ class TUIApp(App):
 	.user { color: #7fd1e0; margin: 1 0; }
 	.err { color: #ff6b6b; }
 	.action { margin: 1 0; }
+	.note { margin: 1 0; }
 
 	/* Claude-like runner entry: dim one-line header, arrow right after the text */
 	.runner-panel { margin: 1 0; height: auto; }

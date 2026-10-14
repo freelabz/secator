@@ -149,3 +149,45 @@ async def _workflow_body():
 
 def test_workflow_children_nest_by_source():
 	_run(_workflow_body())
+
+
+def _static_texts(app):
+	from textual.widgets import Static
+	out = []
+	for w in app.query(Static):
+		try:
+			r = w.render()
+		except Exception:
+			continue
+		out.append(r.plain if hasattr(r, "plain") else str(r))
+	return out
+
+
+async def _tool_result_and_mode_body():
+	app = AITUI(None, session="ai", mode="chat")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		base = len(app._convo().children)
+		# a REJECTED tool call (extra_data.error) must surface as a visible failure line
+		await app._render({"_type": "ai", "ai_type": "tool_result",
+		                   "content": "[add_finding] rejected: empty arguments",
+		                   "extra_data": {"error": True, "tool_name": "add_finding",
+		                                  "reason": "rejected: empty arguments"}})
+		# a SUCCESSFUL tool_result is model-facing only — it must render NOTHING
+		await app._render({"_type": "ai", "ai_type": "tool_result",
+		                   "content": "[run_task] 5 result(s)", "extra_data": {}})
+		# a mode switch must show a "Switched to <mode> mode" notice
+		await app._render({"_type": "ai", "ai_type": "mode_changed", "content": "scan"})
+		await pilot.pause(0.05)
+
+		# exactly two lines added (the rejection + the mode notice; success skipped)
+		assert len(app._convo().children) == base + 2
+		texts = _static_texts(app)
+		assert any("tool call failed" in t and "add_finding" in t for t in texts), texts
+		assert any("Switched to" in t and "scan" in t for t in texts), texts
+		# the successful tool_result's content never rendered
+		assert not any("5 result(s)" in t for t in texts), texts
+
+
+def test_tool_result_errors_and_mode_change_render():
+	_run(_tool_result_and_mode_body())

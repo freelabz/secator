@@ -114,6 +114,9 @@ def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason):
 	runner.history.add_tool_result(tool_name, tool_call_id, _error_content)
 	return Ai(content=f"[{tool_name}] {reason}",
 	          ai_type="tool_result",
+	          # Mark the rejection so a display (TUI) can surface the failed tool call —
+	          # a plain tool_result is model-facing only and rendered as nothing.
+	          extra_data={"error": True, "tool_name": tool_name, "reason": reason},
 	          message=cap_message(
 	              {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": _error_content}),
 	          _context=dict(runner.context))

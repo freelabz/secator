@@ -133,6 +133,21 @@ class AITUI(TUIApp):
 				await self._append(ActionPanel(verb, name, renderable))
 		elif at == "error":
 			await self._append(Static(Text.from_markup(f"[red]✖ {escape(content)}[/]"), classes="err"))
+		elif at == "tool_result":
+			# A plain tool_result is model-facing only (its findings render as cards). But a
+			# REJECTED tool call (malformed/empty args, denied) carries extra_data.error — surface
+			# it so a failing tool isn't silently retried behind a frozen-looking screen.
+			ed = d.get("extra_data") or {}
+			if ed.get("error"):
+				reason = ed.get("reason") or content
+				tool = ed.get("tool_name") or ""
+				label = f"{tool}: {reason}" if tool else reason
+				await self._append(Static(Text.from_markup(f"[red]✖ tool call failed — {escape(str(label))}[/]"), classes="err"))
+		elif at == "mode_changed":
+			# content is the new mode name; show the same "Switched to <mode> mode" notice the
+			# console path prints (suppressed under the TUI, which owns the display).
+			await self._append(Static(
+				Text.from_markup(f"[dim]↻ Switched to [b]{escape(content)}[/] mode[/]"), classes="note"))
 		elif at == "stopped":
 			self._finish_current()
 			self._set_status("stopped", False)
