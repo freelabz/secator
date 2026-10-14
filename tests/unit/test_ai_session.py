@@ -1151,7 +1151,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def get_action_budget(self, model):
 				return 10000
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
@@ -1215,35 +1215,37 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 		self.assertEqual(doc.message["content"], tool_result_str)
 
 	def test_tool_result_runner_id_from_group_result_context(self):
-		"""runner_id is pulled from the collected result's own _context
-		(task_id/workflow_id/scan_id), stamped by the persistence hooks -
-		NOT from self.context."""
-		from secator.output_types import Ai
+		"""For a runner tool (run_task/run_workflow/run_scan) runner_id is pulled from the
+		collected finding's own _context.<type>_id (stamped by the persistence hooks),
+		NOT from self.context. Non-runner tools (e.g. run_shell) get no runner_id."""
+		from secator.output_types import Ai, Tag
 
 		ctx = MagicMock()
 		ctx.results = []
 		action = {
-			"action": "shell",
-			"command": "echo hi",
+			"action": "task",
+			"name": "testtask",
+			"targets": [],
 			"tool_call_id": "tc_runner",
-			"tool_call_name": "run_shell",
+			"tool_call_name": "run_task",
 		}
 		fake_self, _persisted = self._make_fake_self()
 
-		def _shell_with_task_id(*a, **k):
-			yield Ai(content="ok", ai_type="shell_output", _context={
+		def _task_with_id(*a, **k):
+			yield Tag(name="t", match="m", value="v", _context={
 				"tool_call_id": action["tool_call_id"],
 				"tool_call_name": action["tool_call_name"],
 				"task_id": "task-xyz",
 			})
 
-		with patch("secator.ai.actions._handle_shell", _shell_with_task_id):
+		with patch("secator.ai.actions._handle_task", _task_with_id):
 			from secator.tasks.ai import ai as AiTask
 			yielded = list(AiTask._dispatch_and_collect(fake_self, [action], ctx))
 
 		tool_result_ais = [r for r in yielded if isinstance(r, Ai) and r.ai_type == "tool_result"]
 		self.assertEqual(len(tool_result_ais), 1)
 		self.assertEqual(tool_result_ais[0].extra_data.get("runner_id"), "task-xyz")
+		self.assertEqual(tool_result_ais[0].extra_data.get("runner_type"), "task")
 
 	def test_tool_result_ai_emitted_on_error_paths(self):
 		"""Malformed-JSON / unknown-tool / guardrail-denial error paths (in
@@ -1256,7 +1258,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def __init__(self):
 				self.tool_results = []
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
@@ -1297,7 +1299,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def __init__(self):
 				self.tool_results = []
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()

@@ -1158,11 +1158,12 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	# The schema declares `limit` an integer, but some models send it as a string
 	# ("10"); a str limit reaches the backend and raises `'>=' not supported between
 	# int and str`. Coerce to int (bad/None values fall back to the default).
-	limit = action.get("limit", 100)
+	from secator.ai.prompts import AI_MAX_RESULTS
+	limit = action.get("limit", AI_MAX_RESULTS)
 	try:
 		limit = int(limit)
 	except (TypeError, ValueError):
-		limit = 100
+		limit = AI_MAX_RESULTS
 
 	# Some providers serialize `query` as a JSON string despite the object schema
 	# (known tool-calling quirk); coerce it back, tolerating a stray trailing brace /
