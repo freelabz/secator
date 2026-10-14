@@ -52,6 +52,7 @@ class RunnerPanel(Vertical):
 		self.source = ""   # the child command's tool name, for routing on_line output
 		self.count = 0
 		self.lines = 0
+		self.raw_lines = 0           # hidden raw-output lines (the reveal arrow only shows if > 0)
 		self.done = False
 		self._collapsed = True
 		self._raw_collapsed = True   # raw command output hidden until the command is clicked
@@ -75,15 +76,21 @@ class RunnerPanel(Vertical):
 
 	def _cmd_render(self) -> Text:
 		t = command_text(self.command)   # '$ <bash-highlighted command>'
-		arrow = "▼" if not self._raw_collapsed else "▶"
-		t.append(f"  {arrow}", style="#6b7187")   # reveals the raw output
+		if self.raw_lines:               # only offer the reveal arrow if there IS raw output
+			arrow = "▼" if not self._raw_collapsed else "▶"
+			t.append(f"  {arrow}", style="#6b7187")
 		return t
 
-	def toggle_raw(self) -> None:
-		self._raw_collapsed = not self._raw_collapsed
-		self.query_one(".runner-raw", Vertical).display = not self._raw_collapsed
+	def _refresh_cmd(self) -> None:
 		for cl in self.query(".runner-cmd"):
 			cl.update(self._cmd_render())
+
+	def toggle_raw(self) -> None:
+		if not self.raw_lines:           # nothing hidden to reveal (e.g. a shell: output is visible)
+			return
+		self._raw_collapsed = not self._raw_collapsed
+		self.query_one(".runner-raw", Vertical).display = not self._raw_collapsed
+		self._refresh_cmd()
 
 	def _desc(self) -> str:
 		return self.rname or self.command or self.kind
@@ -166,10 +173,13 @@ class RunnerPanel(Vertical):
 	def add_raw(self, text: str) -> None:
 		# RAW command output: plain Text, never markup-parsed (target-controlled), kept
 		# hidden under the command line (click the command to reveal). Line-capped.
-		if self.lines >= 500:
+		if self.raw_lines >= 500:
 			return
+		self.raw_lines += 1
 		self.lines += 1
-		if self.lines == 500:
+		if self.raw_lines == 1:
+			self._refresh_cmd()         # now there's raw output -> show the reveal arrow
+		if self.raw_lines == 500:
 			text = "… (output truncated)"
 		self.query_one(".runner-raw", Vertical).mount(Static(Text(text), classes="out-raw"))
 
