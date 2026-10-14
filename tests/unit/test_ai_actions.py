@@ -1437,6 +1437,32 @@ class TestHandleAddFinding(unittest.TestCase):
 		self.assertEqual(results[1].url, 'http://t.com/admin')
 		self.assertEqual(results[1].status_code, 200)
 
+	def test_add_finding_nested_fields(self):
+		# The fix: fields arrive nested under `fields` (a declared object param that
+		# survives strict function-calling providers which strip undeclared top-level
+		# args). They must be unpacked onto the finding exactly like flat siblings.
+		ctx = ActionContext(targets=['t.com'], model='m')
+		results = list(
+			_handle_add_finding(
+				{
+					'action': 'add_finding',
+					'_type': 'vulnerability',
+					'fields': {
+						'name': 'SQL Injection',
+						'severity': 'critical',
+						'matched_at': 'http://t.com/login',
+					},
+				},
+				ctx,
+			)
+		)
+
+		self.assertEqual(len(results), 2)
+		self.assertIsInstance(results[1], Vulnerability)
+		self.assertEqual(results[1].name, 'SQL Injection')
+		self.assertEqual(results[1].severity, 'critical')
+		self.assertEqual(results[1].matched_at, 'http://t.com/login')
+
 	def test_add_finding_unknown_type(self):
 		ctx = ActionContext(targets=['t.com'], model='m')
 		results = list(
