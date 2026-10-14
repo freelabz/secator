@@ -12,6 +12,8 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import OptionList, SelectionList, Static
 
+from secator.tui.render import command_text
+
 
 class Head(Static):
 	"""Clickable one-line header that toggles its parent RunnerPanel."""
@@ -46,7 +48,7 @@ class RunnerPanel(Vertical):
 		box.display = False
 		with box:
 			if self.command:
-				yield Static(Text.from_markup(f"[dim]$ {escape(self.command)}[/]"), classes="runner-cmd")
+				yield Static(command_text(self.command), classes="runner-cmd")
 			yield Vertical(classes="runner-out")
 		yield box
 
@@ -118,7 +120,7 @@ class RunnerPanel(Vertical):
 		self.command = cmd
 		box = self.query_one(".runner-box", Vertical)
 		out = self.query_one(".runner-out", Vertical)
-		box.mount(Static(Text.from_markup(f"[dim]$ {escape(cmd)}[/]"), classes="runner-cmd"), before=out)
+		box.mount(Static(command_text(cmd), classes="runner-cmd"), before=out)
 
 	def add_raw(self, text: str) -> None:
 		# raw output: plain Text, never markup-parsed (target-controlled). Cap the

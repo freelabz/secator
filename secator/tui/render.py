@@ -9,6 +9,24 @@ from rich.markup import escape
 from rich.text import Text
 
 
+def command_text(cmd: str) -> Text:
+	"""Render a '$ <cmd>' line with bash syntax highlighting.
+
+	Uses Rich's Syntax highlighter (pygments), which returns a Text here. Cost is
+	~0.1 ms per command and runs ONCE per runner (only the command line — never the raw
+	output), so it adds no perceptible overhead. Falls back to dim plain text on error.
+	"""
+	t = Text("$ ", style="dim")
+	try:
+		from rich.syntax import Syntax
+		hl = Syntax(cmd, "bash", theme="ansi_dark", background_color="default").highlight(cmd)
+		hl.rstrip()   # highlight() appends a trailing newline
+		t.append_text(hl)
+	except Exception:  # noqa: BLE001
+		t.append(cmd, style="dim")
+	return t
+
+
 def rehydrate(d: dict):
 	"""Rebuild an OutputType from a plain dict (e.g. query results arrive as dicts) so
 	we can use its own __rich__ rendering."""
