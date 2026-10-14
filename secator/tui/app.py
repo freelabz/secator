@@ -79,13 +79,15 @@ class TUIApp(App):
 
 	Markdown { background: transparent; margin: 0; padding: 0; }
 	#status { height: 1; color: #d7a93b; padding: 0 1; }
+	/* lighter top/bottom bars so the chat box stands out from the conversation */
 	#input-box {
-		border: none; border-top: solid #2b3245; background: transparent; height: 3; padding: 0;
+		border: none; border-top: solid #47516b; background: #1a1f2b; height: 3; padding: 0;
 	}
-	#input-box Input { border: none; background: transparent; color: #e6ecf5; padding: 0 1; height: 1fr; }
-	#input-box Input:focus { border: none; background: transparent; }
+	#input-caret { width: 3; height: 1fr; color: #7fd1e0; text-style: bold; content-align: center middle; }
+	#input-box Input { width: 1fr; border: none; background: #1a1f2b; color: #e6ecf5; padding: 0 1; height: 1fr; }
+	#input-box Input:focus { border: none; background: #1a1f2b; }
 	#input-box Input > .input--cursor { color: #0b0e14; background: #e6ecf5; }
-	Header { background: transparent; color: #cdd6e4; }
+	Header { background: #1a1f2b; color: #e6ecf5; }
 	"""
 	BINDINGS = [
 		("ctrl+c", "quit", "Quit"),
@@ -136,8 +138,11 @@ class TUIApp(App):
 			),
 			id="findings-panel",
 		)
-		with Vertical(id="input-box"):
-			yield Input(placeholder="Message, or steer a running runner…  (Enter to send)")
+		yield Horizontal(
+			Static("❯", id="input-caret"),
+			Input(placeholder="Message, or steer a running runner…  (Enter to send)"),
+			id="input-box",
+		)
 
 	def on_mount(self) -> None:
 		self.title = self._title
