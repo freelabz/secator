@@ -1871,6 +1871,37 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 		labels = ", ".join(_get_action_label(a) for a in actions)
 		yield Info(message=f"Running {len(actions)} tasks in parallel: {labels}", _context=ctx.context)
 
+	# TUI: stream each action's items the moment they're PRODUCED (not when the action
+	# completes), via a thread-safe queue the workers push into. This surfaces every
+	# task's "Running <description>" card as its runner starts — so all cards appear up
+	# front (up to max_workers), in parallel, instead of trickling in one-per-completion.
+	# Items interleave across tasks; the TUI routes them to the right panel by _source.
+	if stream_live:
+		import queue as _queue
+		q: Any = _queue.Queue()
+		done_sentinel = object()
+
+		def run_single_stream(act: Dict) -> None:
+			try:
+				for item in safe_dispatch_action(act, batch_ctx):
+					if isinstance(item, Ai) and item.ai_type == "token_usage":
+						continue  # progress-only; no Rich panel under the TUI
+					q.put(item)
+			finally:
+				q.put(done_sentinel)  # always signal completion, even on error
+
+		with ThreadPoolExecutor(max_workers=max_workers) as executor:
+			for a in actions:
+				executor.submit(run_single_stream, a)
+			remaining = len(actions)
+			while remaining:
+				item = q.get()
+				if item is done_sentinel:
+					remaining -= 1
+					continue
+				yield item
+		return
+
 	all_results = []
 	with ctx_mgr:
 		if use_progress:
@@ -1896,11 +1927,7 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 					)
 					progress.refresh()
 
-				if stream_live:
-					for item in items:
-						yield item
-				else:
-					all_results.append((idx, result))
+				all_results.append((idx, result))
 
 	for idx, result in sorted(all_results, key=lambda x: x[0]):
 		for item in result["results"]:
