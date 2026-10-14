@@ -13,7 +13,8 @@ from textual.containers import VerticalScroll
 from textual.widgets import Markdown, Static
 
 from secator.tui.app import TUIApp
-from secator.tui.widgets import RunnerPanel, SubagentRow
+from secator.tui.render import finding_text
+from secator.tui.widgets import ActionPanel, RunnerPanel, SubagentRow
 
 
 # AI finding-action verbs — rendered as a plain "<Verb> <finding name>" line (no icon).
@@ -109,16 +110,23 @@ class AITUI(TUIApp):
 			if self._current is not None:
 				self._current.add_raw(content)
 		elif at in _ACTION_VERBS:
-			# AI action on a finding: a plain neutral "<Verb> <name>" line (same tone as
-			# a runner header), no icon — icons are for secator findings, not AI actions.
-			# add_finding yields the full finding right after, so it renders richly on its
-			# own below; the other actions reference an existing finding by name.
+			# AI action on a finding: a neutral "<Verb> <name>" row (same tone as a runner
+			# header), no icon — icons are for secator findings, not AI actions.
 			fd = (d.get("extra_data") or {}).get("finding") or {}
 			name = fd.get("name") or fd.get("id") or fd.get("matched_at") or content
-			line = Text()
-			line.append(f"{_ACTION_VERBS[at]} ", style="bold #9aa3b8")
-			line.append(str(name), style="#8a8fa3")
-			await self._append(Static(line, classes="action"))
+			verb = _ACTION_VERBS[at]
+			if at == "add_finding":
+				# the full finding is yielded right after and renders richly on its own,
+				# so keep this a plain line (no duplicate)
+				line = Text()
+				line.append(f"{verb} ", style="bold #9aa3b8")
+				line.append(str(name), style="#8a8fa3")
+				await self._append(Static(line, classes="action"))
+			else:
+				# Exploited / Failed to exploit / Updated / … reference an existing finding
+				# not shown elsewhere — make the row expandable to the vuln's rich output.
+				renderable = finding_text(None, fd) if fd else None
+				await self._append(ActionPanel(verb, name, renderable))
 		elif at == "error":
 			await self._append(Static(Text.from_markup(f"[red]✖ {escape(content)}[/]"), classes="err"))
 		elif at == "stopped":

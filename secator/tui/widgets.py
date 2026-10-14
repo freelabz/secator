@@ -199,6 +199,51 @@ class BlockPanel(Vertical):
 		self.query_one(".runner-head", _BlockHead).update(self._header())
 
 
+class _ActionHead(Static):
+	"""Clickable header that toggles its parent ActionPanel."""
+	def on_click(self) -> None:
+		panel = self.parent
+		if isinstance(panel, ActionPanel):
+			panel.toggle()
+
+
+class ActionPanel(Vertical):
+	"""A collapsible AI finding-action row: '<Verb> <name>' (neutral), expand to see the
+	referenced finding rendered richly (its __rich__). Non-collapsible if no finding."""
+
+	def __init__(self, verb: str, name: str, finding_renderable=None):
+		super().__init__(classes="runner-panel")
+		self.verb = verb
+		self.aname = name
+		self.finding = finding_renderable   # a Rich renderable (Text) or None
+		self._collapsed = True
+
+	def compose(self) -> ComposeResult:
+		yield _ActionHead(self._header(), classes="runner-head")
+		box = Vertical(classes="runner-box")
+		box.display = False
+		with box:
+			if self.finding is not None:
+				yield Static(self.finding, classes="out-line")
+		yield box
+
+	def _header(self) -> Text:
+		t = Text()
+		t.append(f"{self.verb} ", style="bold #9aa3b8")
+		t.append(str(self.aname), style="#8a8fa3")
+		if self.finding is not None:
+			arrow = "▼" if not self._collapsed else "▶"
+			t.append(f"  {arrow}", style="#6b7187")
+		return t
+
+	def toggle(self) -> None:
+		if self.finding is None:
+			return
+		self._collapsed = not self._collapsed
+		self.query_one(".runner-box", Vertical).display = not self._collapsed
+		self.query_one(".runner-head", _ActionHead).update(self._header())
+
+
 class ChoicePrompt(Vertical):
 	"""Navigable suggestion list for a follow-up ask. Single-choice uses an OptionList
 	(↑/↓ then Enter); multi-choice uses a SelectionList (Space toggles, Enter confirms).
