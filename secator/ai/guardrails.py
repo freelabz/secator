@@ -1109,8 +1109,9 @@ class PermissionEngine:
 			# through to the "Unknown action type" deny and silently break run_subagent /
 			# the bare stop() / change_mode.
 			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
-		elif action_type in ("query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
-			# mark_vuln_exploited / mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
+		elif action_type in ("query", "list_runners", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
+			# list_runners is a read-only run-history lookup (no mutation). mark_vuln_exploited /
+			# mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
 			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
 			# so they're safe to auto-allow alongside query/add_finding.
 			# Don't let an injected add_finding silently mint a scope-widening target finding.
