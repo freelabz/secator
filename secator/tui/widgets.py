@@ -140,10 +140,19 @@ class RunnerPanel(Vertical):
 		self._refresh_head()
 
 
+class _ChoiceSummary(Static):
+	"""Clickable collapsed summary of a resolved ChoicePrompt; toggles the questionnaire."""
+	def on_click(self) -> None:
+		parent = self.parent
+		if isinstance(parent, ChoicePrompt):
+			parent.toggle_body()
+
+
 class ChoicePrompt(Vertical):
 	"""Navigable suggestion list for a follow-up ask. Single-choice uses an OptionList
 	(↑/↓ then Enter); multi-choice uses a SelectionList (Space toggles, Enter confirms).
-	Typing in the main input still works as a free-form answer."""
+	Typing in the main input still works as a free-form answer. Once answered it collapses
+	to just the picked value — click it to expand the original questionnaire again."""
 
 	def __init__(self, question: str, choices: list, multiple: bool, resolve):
 		super().__init__(classes="choice")
@@ -151,32 +160,60 @@ class ChoicePrompt(Vertical):
 		self._choices = list(choices)
 		self._multiple = multiple
 		self._resolve = resolve
+		self._value = ""
+		self._collapsed = False
 
 	def compose(self) -> ComposeResult:
-		if self._question:
-			yield Static(Text.from_markup(f"[b yellow]?[/] {escape(self._question)}"), classes="choice-q")
-		if self._multiple:
-			yield SelectionList(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
-			yield Static(Text.from_markup("[dim]space to toggle · enter to confirm · or type your own[/]"))
-		else:
-			yield OptionList(*self._choices, classes="choice-list")
-			yield Static(Text.from_markup("[dim]↑/↓ to move · enter to select · or type your own[/]"))
+		yield _ChoiceSummary("", classes="choice-summary")   # hidden until answered
+		body = Vertical(classes="choice-body")
+		with body:
+			if self._question:
+				yield Static(Text.from_markup(f"[b yellow]?[/] {escape(self._question)}"), classes="choice-q")
+			if self._multiple:
+				yield SelectionList(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
+				yield Static(Text.from_markup("[dim]space to toggle · enter to confirm · or type your own[/]"))
+			else:
+				yield OptionList(*self._choices, classes="choice-list")
+				yield Static(Text.from_markup("[dim]↑/↓ to move · enter to select · or type your own[/]"))
+		yield body
 
 	def on_mount(self) -> None:
+		self.query_one(".choice-summary").display = False
 		self.query_one(".choice-list").focus()
 
+	def _summary_text(self) -> Text:
+		arrow = "▶" if self._collapsed else "▼"
+		t = Text()
+		t.append("✓ ", style="green")
+		t.append(self._value or "(none)", style="#8a8fa3")
+		t.append(f"  {arrow}", style="#6b7187")
+		return t
+
 	def _done(self, value: str) -> None:
+		self._value = value
 		for w in self.query(".choice-list"):
 			w.disabled = True
-		for q in self.query(".choice-q"):
-			q.update(Text.from_markup(f"[dim]✓ {escape(value)}[/]"))
+		# collapse to the picked value; click the summary to re-open the questionnaire
+		self._collapsed = True
+		summary = self.query_one(".choice-summary", _ChoiceSummary)
+		summary.update(self._summary_text())
+		summary.display = True
+		self.query_one(".choice-body").display = False
 		self._resolve(value)
 
+	def toggle_body(self) -> None:
+		if not self._value:
+			return
+		self._collapsed = not self._collapsed
+		self.query_one(".choice-body").display = not self._collapsed
+		self.query_one(".choice-summary", _ChoiceSummary).update(self._summary_text())
+
 	def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-		self._done(str(event.option.prompt))
+		if not self._value:   # ignore re-selection after answered
+			self._done(str(event.option.prompt))
 
 	def on_key(self, event) -> None:
-		if self._multiple and event.key == "enter":
+		if self._multiple and event.key == "enter" and not self._value:
 			sel = self.query_one(SelectionList)
 			picked = [self._choices[i] for i in sel.selected]
 			if picked:

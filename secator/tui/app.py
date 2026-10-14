@@ -64,6 +64,9 @@ class TUIApp(App):
 	.choice { height: auto; margin: 1 0; }
 	.choice-q { color: #e6c15a; margin: 0 0 1 0; }
 	.choice-list { height: auto; max-height: 12; border: none; background: transparent; }
+	.choice-summary { height: 1; }
+	.choice-summary:hover { text-style: bold; }
+	.choice-body { height: auto; }
 
 	/* lazy findings side panel (ctrl+f); 1/3 width by default, drag the grip to resize */
 	#findings-panel { dock: right; width: 34%; display: none; background: transparent; }

@@ -970,6 +970,7 @@ class ai(PythonRunner):
 					# Dispatch actions, collect results, add to history
 					dispatch_result = yield from self._dispatch_and_collect(actions, ctx)
 					follow_up_choices = dispatch_result.get("follow_up_choices")
+					follow_up_multiple = dispatch_result.get("follow_up_multiple", False)
 					stop_reason = dispatch_result.get("stop_reason")
 					follow_up_prompt_uuid = dispatch_result.get("follow_up_prompt_uuid")
 
@@ -1021,7 +1022,8 @@ class ai(PythonRunner):
 							and follow_up_choices is None and tool_calls):
 						break
 
-					result = self._prompt_and_redetect(follow_up_choices or [], prompt_uuid=follow_up_prompt_uuid)
+					result = self._prompt_and_redetect(
+						follow_up_choices or [], prompt_uuid=follow_up_prompt_uuid, multiple=follow_up_multiple)
 					if result is None:
 						self._save_history()
 						return
@@ -1639,6 +1641,7 @@ class ai(PythonRunner):
 
 		return {
 			"follow_up_choices": follow_up_choices,
+			"follow_up_multiple": bool(getattr(follow_up_ai, "multiple", False)),
 			"stop_reason": stop_reason,
 			"follow_up_ai": follow_up_ai,
 			"follow_up_prompt_uuid": follow_up_prompt_uuid,
@@ -1724,7 +1727,7 @@ class ai(PythonRunner):
 	# Follow-up / prompt
 	# -------------------------------------------------------------------------
 
-	def _prompt_and_redetect(self, choices, prompt_uuid=None):
+	def _prompt_and_redetect(self, choices, prompt_uuid=None, multiple=False):
 		"""Prompt user via backend and re-detect intent.
 
 		Works for all backends: CLIBackend shows rich menus, RemoteBackend
@@ -1752,6 +1755,7 @@ class ai(PythonRunner):
 			choices=choices,
 			session_id=self.session_id,
 			prompt_type="follow_up",
+			multiple=multiple,
 			history=self.history,
 			encryptor=self.encryptor,
 			max_iterations=self.max_iterations,
