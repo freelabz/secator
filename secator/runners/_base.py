@@ -111,6 +111,14 @@ class Runner:
 		self.serialize_config = run_opts.get('serialize_config', True)
 		self.config = self._process_config(config)
 		self.name = run_opts.get('name', config.name)
+		# A missing template (e.g. TemplateLoader(name='workflows/does_not_exist')) loads as an
+		# EMPTY DotMap: `config.name` is then a DotMap, not a string, and `self.name.replace(...)`
+		# below would fail ~80 lines later with the opaque `'TemplateLoader' object is not
+		# callable`. Fail fast with a clear message instead (#1421).
+		if not isinstance(self.name, str) or not self.name:
+			raise ValueError(
+				f'Runner template is empty or not found (no string `name`). The template likely '
+				f'does not exist. Got config of type {type(config).__name__}.')
 		self.description = run_opts.get('description', config.description or '')
 		self.workspace_name = context.get('workspace_name', CONFIG.workspaces.current or 'default')
 		self.workspace_explicit = context.get('workspace_explicit', False)

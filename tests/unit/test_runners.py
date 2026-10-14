@@ -923,3 +923,16 @@ class TestIsOwnSource(unittest.TestCase):
 			cmd.unique_name = 'nmap'
 			cmd.add_result(chunk_error, print=False)
 			self.assertEqual(cmd.self_errors, [chunk_error])
+
+
+class TestMissingTemplateCleanError(unittest.TestCase):
+	"""A runner built from a missing template (empty TemplateLoader) must fail fast with a
+	clear error, not an opaque `'TemplateLoader' object is not callable` ~80 lines later (#1421)."""
+
+	def test_missing_workflow_template_raises_clean_value_error(self):
+		from secator.runners import Workflow
+		from secator.template import TemplateLoader
+		tpl = TemplateLoader(name='workflows/does_not_exist')
+		with self.assertRaises(ValueError) as ctx:
+			Workflow(tpl, ['example.com'], run_opts={'sync': True}, context={})
+		self.assertIn('empty or not found', str(ctx.exception))
