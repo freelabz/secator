@@ -161,6 +161,14 @@ def _yield_tool_results(runner, collected):
 		tool_result_str = format_tool_result(
 			tc_name, "error" if has_errors else "success",
 			len(serialized), serialized)
+		# Fence target-derived content as UNTRUSTED (#1513): field values in scan output /
+		# findings (page titles, banners, cert subjects, matched content, ...) are controlled
+		# by the scanned target, so an instruction-shaped string planted there must be read as
+		# DATA, not obeyed. The <untrusted_data> constraint tells the model what the envelope
+		# means. Only data-returning tools are wrapped; our own guidance (trunc_hint) is
+		# appended OUTSIDE the envelope below.
+		if tc_name in ("query_workspace", "run_task", "run_workflow", "run_scan", "run_shell"):
+			tool_result_str = f"<workspace_data>\n{tool_result_str}\n</workspace_data>"
 		# On truncation, tell the model how to get the rest. A task/workflow's results
 		# are persisted as workspace findings keyed by `_context.task_chunk_id` (the
 		# runner's own chunk id), so point it at a TARGETED query_workspace on that id
