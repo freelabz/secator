@@ -122,7 +122,8 @@ class TUIApp(App):
 		self._findings_loading = False
 		self._findings_seen: set = set()   # finding _uuids already shown (incremental refresh)
 		self._line_buffers: dict = {}      # source -> {cmd, lines} buffered until its card renders
-		self._added_uuids: set = set()     # findings shown via a domain card (skip the raw dup)
+		self._shown_uuids: set = set()     # findings already rendered inline (skip dups, e.g. a
+		#                                    live-streamed finding later re-read via query_workspace)
 
 	def compose(self) -> ComposeResult:
 		yield Header(show_clock=True)
@@ -403,11 +404,13 @@ class TUIApp(App):
 			return
 		if t in ("progress", "stat", "state", "target"):  # execution / plumbing types
 			return
-		# a domain card already rendered this finding richly — skip the raw dup
+		# dedup: a finding can arrive live (child on_item display hook) and again when the
+		# AI re-reads it via query_workspace — only render it once.
 		uid = d.get("_uuid")
-		if uid is not None and uid in self._added_uuids:
-			self._added_uuids.discard(uid)
-			return
+		if uid is not None:
+			if uid in self._shown_uuids:
+				return
+			self._shown_uuids.add(uid)
 		# a finding → render with its own __rich__ (secator-identical). Inside a
 		# workflow/scan it nests under the child task's sub-panel; a single task goes
 		# straight in; otherwise it lands at top level.

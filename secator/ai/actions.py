@@ -701,11 +701,11 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	if denial is not None:
 		yield denial
 		return
-	# If a display (TUI) is active, let it tap child command output. No-op otherwise;
-	# the hook is picklable so async/Celery children don't break (see secator.rich).
+	# If a display (TUI) is active, let it tap child command output + findings. No-op
+	# otherwise; hooks are picklable so async/Celery children don't break (see secator.rich).
 	if runner_type in ("task", "workflow", "scan"):
-		from secator.rich import attach_display_output_hook
-		attach_display_output_hook(hooks, runner_cls)
+		from secator.rich import attach_display_hooks
+		attach_display_hooks(hooks, runner_cls)
 	try:
 		runner = runner_cls(tpl, targets, run_opts=run_opts, hooks=hooks, context=context)
 	except TaskNotFoundError as e:

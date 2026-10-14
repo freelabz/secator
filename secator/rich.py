@@ -57,14 +57,31 @@ def _tui_line_hook(self, line):
 	return line
 
 
-def attach_display_output_hook(hooks, runner_cls):
-	"""Append the display output `on_line` hook to a child runner's hooks when a display
-	is active, so its command + stdout stream into the UI. No-op without a display.
-	Keyed on runner_cls so it reaches the underlying command runners."""
+def _tui_item_hook(self, item):
+	"""on_item hook (module-level so it stays picklable for async/Celery children):
+	stream a child runner's FINDINGS into the active display. Child task/workflow findings
+	go through on_item (persistence), NOT the iterator the caller yields from, so this is
+	how they reach the TUI panels. No-op in a worker (no display). Returns the item
+	unchanged so persistence hooks are unaffected."""
+	tui = _TUI
+	if tui is not None:
+		try:
+			tui.tui_render(item)
+		except Exception:  # noqa: BLE001 - a display feed must never crash a run
+			pass
+	return item
+
+
+def attach_display_hooks(hooks, runner_cls):
+	"""Append the display hooks (on_line for command output, on_item for findings) to a
+	child runner's hooks when a display is active, so its command/output AND findings
+	stream into the UI. No-op without a display. Keyed on runner_cls so they reach the
+	underlying command runners."""
 	if _TUI is None:
 		return
 	tl = hooks.setdefault(runner_cls, {})
 	tl["on_line"] = list(tl.get("on_line", [])) + [_tui_line_hook]
+	tl["on_item"] = list(tl.get("on_item", [])) + [_tui_item_hook]
 
 
 @contextmanager
