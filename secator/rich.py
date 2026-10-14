@@ -49,7 +49,10 @@ def _tui_line_hook(self, line):
 	tui = _TUI
 	if tui is not None:
 		try:
-			source = getattr(getattr(self, "config", None), "name", "") or ""
+			# match the finding _source, which is the runner's unique_name (e.g.
+			# 'nmap/light' -> 'nmap_light'), NOT config.name (= 'nmap' for the variant) —
+			# otherwise the command lands in a different sub-panel than its findings.
+			source = getattr(self, "unique_name", "") or getattr(getattr(self, "config", None), "name", "") or ""
 			tui.tui_set_command(getattr(self, "cmd", "") or "", source)
 			tui.tui_render_line(line, source)
 		except Exception:  # noqa: BLE001 - a display feed must never crash a run
