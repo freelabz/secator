@@ -217,6 +217,9 @@ class TestReportShowMongoDBBackend(unittest.TestCase):
 		doc_list = [d.copy() for d in docs]
 		mock_cursor = mock.MagicMock()
 		mock_cursor.__iter__ = mock.MagicMock(return_value=iter(doc_list))
+		# The backend chains find().skip(offset).limit(limit); each must return the SAME
+		# cursor so the stubbed __iter__ (the docs) survives the chain.
+		mock_cursor.skip.return_value = mock_cursor
 		mock_cursor.limit.return_value = mock_cursor
 		mock_collection = mock.MagicMock()
 		mock_collection.find.return_value = mock_cursor

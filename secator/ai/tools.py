@@ -176,6 +176,22 @@ TOOL_SCHEMAS = {
 						"type": "integer",
 						"description": "Maximum number of results to return.",
 						"default": 100
+					},
+					"offset": {
+						"type": "integer",
+						"description": "Skip the first N results; use with limit to page through large result sets. "  # noqa: E501
+						               "When a full page is returned, the response says the next offset to use.",
+						"default": 0
+					},
+					"group": {
+						"type": "boolean",
+						"description": "Return aggregated group representatives (one per group, with a _group_count "  # noqa: E501
+						               "member count + aggregated targets) instead of every finding — a compact overview "  # noqa: E501
+						               "that saves context. Requires a single _type in the query. Each representative is "  # noqa: E501
+						               "grouped by that type's key field (shown on the row, e.g. vulnerability->name, "  # noqa: E501
+						               "port->host); drill into a group by re-querying that field — NOT the _uuid, which "  # noqa: E501
+						               "identifies only the one representative finding.",
+						"default": False
 					}
 				},
 				"required": ["query"]
