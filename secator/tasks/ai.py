@@ -954,6 +954,7 @@ class ai(PythonRunner):
 
 				# Process tool calls → validated actions
 				follow_up_choices = None
+				follow_up_multiple = False
 				stop_reason = None
 				follow_up_prompt_uuid = None
 
