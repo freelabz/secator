@@ -1,0 +1,86 @@
+type: workflow
+name: api_discover
+alias: apid
+description: API endpoint discovery
+long_description: |
+  Discovers API endpoints on a target web application.
+  Combines active crawling (katana, which parses JavaScript to surface referenced endpoints) with optional
+  brute-forcing of API routes (ffuf, using Assetnote's HTTP Archive apiroutes wordlist — the same real-world
+  route dataset kiterunner relied on). Discovered endpoints are probed with httpx to verify they are live and
+  fingerprint their technologies. The apiroutes wordlist also covers exposed API specification paths
+  (openapi/swagger); when one is found, the --spec option hands it off to nuclei, which parses the spec
+  (input-mode openapi) and DAST-fuzzes every documented endpoint with the correct method and parameters —
+  recovering the contextual testing kiterunner used to provide, using a maintained tool already in secator.
+tags: [http, api, crawl, fuzz]
+input_types:
+  - url
+
+default_options:
+  follow_redirect: true
+
+options:
+  waf:
+    is_flag: True
+    help: Fingerprint WAF (wafw00f)
+    default: False
+
+  fuzz:
+    is_flag: True
+    help: Brute-force API routes with the apiroutes wordlist (ffuf)
+    default: False
+    short: fuzz
+
+  spec:
+    is_flag: True
+    help: Hand off discovered OpenAPI/Swagger specs to nuclei for endpoint fuzzing (combine with --fuzz to find them)
+    default: False
+    short: spec
+
+tasks:
+  katana:
+    description: Crawl for API endpoints
+
+  urlparser:
+    description: Extract origin URL
+    include: [url_root]
+    targets_:
+      - type: target
+        field: name
+    if: opts.fuzz
+
+  ffuf:
+    description: Brute-force API routes
+    wordlist: apiroutes
+    auto_calibration: true
+    if: opts.fuzz
+    targets_:
+      # Fuzz from the origin (url_root strips path + trailing slash) with /FUZZ so ffuf's auto-calibration
+      # probes hit the right host with a clean path. apiroutes entries are absolute (/api/x), so real routes
+      # come out as host//api — ffuf collapses the redundant slash in its output URLs.
+      - type: tag
+        field: '{value}/FUZZ'
+        condition: item.name == 'url_root'
+
+  wafw00f:
+    description: Fingerprint WAF
+    if: opts.waf
+
+  httpx:
+    description: Probe discovered API endpoints
+    tech_detect: True
+    filter_duplicates: True
+    targets_:
+      - target.name
+      - type: url
+        field: url
+        condition: not url.verified
+
+  nuclei:
+    description: Fuzz endpoints from discovered API specs
+    input_mode: openapi
+    dast: True
+    targets_:
+      - type: url
+        field: url
+        condition: "'openapi' in url.url or 'swagger' in url.url or 'api-docs' in url.url"
+    if: opts.spec

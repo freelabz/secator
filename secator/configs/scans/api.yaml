@@ -1,0 +1,24 @@
+type: scan
+name: api
+description: API security scan
+long_description: |
+  End-to-end security assessment of a web API.
+  Discovers API endpoints (api_discover), then fuzzes their parameters (url_params_fuzz) and scans the
+  discovered surface for common web vulnerabilities and exposed secrets (url_vuln). Composes existing
+  workflows rather than duplicating their logic, so each stage stays independently reusable.
+profile: default
+tags: [http, api, fuzz, vuln, secrets]
+input_types:
+  - url
+workflows:
+  api_discover:
+  url_params_fuzz:
+    targets_:
+    - type: url
+      field: url
+      condition: url.verified
+  url_vuln:
+    targets_:
+    - type: url
+      field: url
+      condition: url.verified

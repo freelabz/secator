@@ -38,6 +38,7 @@ INPUTS_TASKS = {
 }
 
 INPUTS_WORKFLOWS = {
+	'api_discover': 'localhost:3000',
 	'cidr_recon': '127.0.0.1/30',
 	'code_scan': str(ROOT_FOLDER),
 	# 'dir_finder': 'localhost:3000',  # TODO: add fixture with directories
@@ -57,6 +58,7 @@ INPUTS_WORKFLOWS = {
 }
 
 INPUTS_SCANS = {
+	'api': ['http://localhost:3000'],
 	'domain': 'testphp.vulnweb.com',
 	'host': ['localhost'],
 	'network': '127.0.0.1/24',
