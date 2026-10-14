@@ -187,8 +187,10 @@ TOOL_SCHEMAS = {
 						"type": "boolean",
 						"description": "Return aggregated group representatives (one per group, with a _group_count "  # noqa: E501
 						               "member count + aggregated targets) instead of every finding — a compact overview "  # noqa: E501
-						               "that saves context. Requires a single _type in the query. Drill down by "
-						               "re-querying a representative's _uuid.",
+						               "that saves context. Requires a single _type in the query. Each representative is "  # noqa: E501
+						               "grouped by that type's key field (shown on the row, e.g. vulnerability->name, "  # noqa: E501
+						               "port->host); drill into a group by re-querying that field — NOT the _uuid, which "  # noqa: E501
+						               "identifies only the one representative finding.",
 						"default": False
 					}
 				},
