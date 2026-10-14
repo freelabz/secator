@@ -13,8 +13,18 @@ from textual.containers import VerticalScroll
 from textual.widgets import Markdown, Static
 
 from secator.tui.app import TUIApp
-from secator.tui.render import MUTATION_MARKERS, finding_text
 from secator.tui.widgets import RunnerPanel, SubagentRow
+
+
+# AI finding-action verbs — rendered as a plain "<Verb> <finding name>" line (no icon).
+_ACTION_VERBS = {
+	"add_finding": "Added",
+	"update_finding": "Updated",
+	"add_vuln_poc": "Added PoC",
+	"mark_vuln_exploited": "Exploited",
+	"mark_vuln_exploit_failed": "Failed to exploit",
+	"mark_vuln_false_positive": "Marked false positive",
+}
 
 
 class AITUI(TUIApp):
@@ -98,20 +108,17 @@ class AITUI(TUIApp):
 		elif at == "shell_output":
 			if self._current is not None:
 				self._current.add_raw(content)
-		elif at == "add_finding":
-			# the AI recorded a new finding: show it richly (via __rich__) with a + marker;
-			# the raw finding is yielded right after, so remember its uuid to skip the dup
+		elif at in _ACTION_VERBS:
+			# AI action on a finding: a plain neutral "<Verb> <name>" line (same tone as
+			# a runner header), no icon — icons are for secator findings, not AI actions.
+			# add_finding yields the full finding right after, so it renders richly on its
+			# own below; the other actions reference an existing finding by name.
 			fd = (d.get("extra_data") or {}).get("finding") or {}
-			uid = fd.get("_uuid")
-			if uid:
-				self._added_uuids.add(uid)
-			line = Text("➕ added  ", style="green")
-			line.append_text(finding_text(None, fd) if fd else Text(content))
+			name = fd.get("name") or fd.get("id") or fd.get("matched_at") or content
+			line = Text()
+			line.append(f"{_ACTION_VERBS[at]} ", style="bold #9aa3b8")
+			line.append(str(name), style="#8a8fa3")
 			await self._append(Static(line, classes="action"))
-		elif at in MUTATION_MARKERS:
-			marker, color = MUTATION_MARKERS[at]
-			await self._append(Static(
-				Text.from_markup(f"{marker} [{color}]{escape(content)}[/]"), classes="action"))
 		elif at == "error":
 			await self._append(Static(Text.from_markup(f"[red]✖ {escape(content)}[/]"), classes="err"))
 		elif at == "stopped":

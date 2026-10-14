@@ -83,13 +83,3 @@ def finding_markup(d: dict) -> str:
 	if t == "tag":
 		return f"[cyan]●[/] [cyan]TAG[/]   ·  {e('name')}  ·  {e('match')}  [dim]({src})[/]"
 	return f"[dim]● {escape(t)}[/]  {escape(str(d))[:100]}"
-
-
-# Finding-mutation action rows (secator AI_TYPES markers): marker markup + text color.
-MUTATION_MARKERS = {
-	"mark_vuln_exploited": ("[red]💥[/]", "red"),
-	"add_vuln_poc": ("[red]💥[/]", "red"),            # legacy
-	"update_finding": ("[cyan]✏[/]", "cyan"),
-	"mark_vuln_false_positive": ("[yellow]🟡[/]", "yellow"),
-	"mark_vuln_exploit_failed": ("[blue]🛡[/]", "blue"),
-}
