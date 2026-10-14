@@ -405,9 +405,10 @@ class TUIApp(App):
 		if t in ("progress", "stat", "state", "target"):  # execution / plumbing types
 			return
 		# dedup: a finding can arrive live (child on_item display hook) and again when the
-		# AI re-reads it via query_workspace — only render it once.
+		# AI re-reads it via query_workspace — only render it once. Guard on a TRUTHY uuid
+		# (an unpersisted finding has _uuid="" — never treat those as the same finding).
 		uid = d.get("_uuid")
-		if uid is not None:
+		if uid:
 			if uid in self._shown_uuids:
 				return
 			self._shown_uuids.add(uid)
