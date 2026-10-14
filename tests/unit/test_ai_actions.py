@@ -97,6 +97,55 @@ class TestDecryptDict(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestRunBatchStreaming(unittest.TestCase):
+	"""Under a TUI, a parallel batch must STREAM each action's items as they are
+	produced — so every task's runner card surfaces up front — instead of buffering a
+	whole action and flushing it only when it completes (cards trickling in one-per-
+	finish). Regression guard for the "Running <description> one at a time" bug."""
+
+	def _run(self, actions, max_workers=4):
+		import time
+		import secator.ai.actions as A
+		from secator.output_types import Port
+		from secator.rich import set_tui
+
+		def fake_dispatch(action, ctx):
+			name = action['name']
+			yield Ai(content=name, ai_type='task', extra_data={'description': action.get('description', '')})
+			time.sleep(action['_delay'])
+			yield Port(port=80, host=name, ip='1.2.3.4', state='open', _source=name)
+
+		ctx = ActionContext(targets=['t'], model='m', max_workers=max_workers)
+		order = []
+		with patch.object(A, 'safe_dispatch_action', fake_dispatch):
+			set_tui(object())  # activate the stream-live (TUI) path
+			try:
+				for item in A._run_batch(actions, ctx):
+					if isinstance(item, Ai) and item.ai_type == 'task':
+						order.append(('card', item.content))
+					elif item.__class__.__name__ == 'Port':
+						order.append(('finding', item.host))
+			finally:
+				set_tui(None)
+		return order
+
+	def test_cards_stream_before_completion(self):
+		# slow finishes last; its CARD must still appear before its own finding AND
+		# before the fast task finishes — i.e. both cards up front, not finish-ordered.
+		actions = [
+			{'action': 'task', 'name': 'slow', 'description': 'Slow', '_delay': 0.25, 'targets': ['t']},
+			{'action': 'task', 'name': 'fast', 'description': 'Fast', '_delay': 0.01, 'targets': ['t']},
+		]
+		order = self._run(actions)
+		cards = [o for o in order if o[0] == 'card']
+		# both cards emitted, and both before the slow task's finding streams in
+		self.assertEqual(sorted(c[1] for c in cards), ['fast', 'slow'])
+		slow_finding_pos = order.index(('finding', 'slow'))
+		self.assertTrue(all(order.index(c) < slow_finding_pos for c in cards),
+		                f"a card streamed only after slow completed: {order}")
+
+
 class TestHandleFollowUp(unittest.TestCase):
 	"""Tests for the _handle_follow_up action handler."""
 

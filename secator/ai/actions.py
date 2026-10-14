@@ -701,6 +701,11 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	if denial is not None:
 		yield denial
 		return
+	# If a display (TUI) is active, let it tap child command output + findings. No-op
+	# otherwise; hooks are picklable so async/Celery children don't break (see secator.rich).
+	if runner_type in ("task", "workflow", "scan"):
+		from secator.rich import attach_display_hooks
+		attach_display_hooks(hooks, runner_cls)
 	try:
 		runner = runner_cls(tpl, targets, run_opts=run_opts, hooks=hooks, context=context)
 	except TaskNotFoundError as e:
@@ -1791,7 +1796,10 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 		a.get("action") == "task" and a.get("name", "").lower() == "ai"
 		for a in actions
 	)
-	use_progress = not ctx.subagent and not has_ai_subagent
+	# A Textual TUI owns the screen and shows its own progress — a Rich Progress Live
+	# here would raise "Only one live display may be active at once". Skip it.
+	from secator.rich import get_tui
+	use_progress = not ctx.subagent and not has_ai_subagent and get_tui() is None
 
 	# Print all task start messages before any task begins
 	if use_progress:
@@ -1851,6 +1859,48 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 	else:
 		from contextlib import nullcontext
 		ctx_mgr = nullcontext()
+
+	# Under a Textual TUI there's no Rich progress panel, so a batch that only yields
+	# at the very end looks stuck for its whole duration. Stream each action's items
+	# (its runner card + findings, collected contiguously) the moment that action
+	# completes. Non-TUI keeps the deterministic sorted-at-end order.
+	stream_live = get_tui() is not None
+	if stream_live:
+		# immediate feedback so a parallel batch never looks stuck before the first
+		# action finishes (the TUI has no Rich progress panel)
+		labels = ", ".join(_get_action_label(a) for a in actions)
+		yield Info(message=f"Running {len(actions)} tasks in parallel: {labels}", _context=ctx.context)
+
+	# TUI: stream each action's items the moment they're PRODUCED (not when the action
+	# completes), via a thread-safe queue the workers push into. This surfaces every
+	# task's "Running <description>" card as its runner starts — so all cards appear up
+	# front (up to max_workers), in parallel, instead of trickling in one-per-completion.
+	# Items interleave across tasks; the TUI routes them to the right panel by _source.
+	if stream_live:
+		import queue as _queue
+		q: Any = _queue.Queue()
+		done_sentinel = object()
+
+		def run_single_stream(act: Dict) -> None:
+			try:
+				for item in safe_dispatch_action(act, batch_ctx):
+					if isinstance(item, Ai) and item.ai_type == "token_usage":
+						continue  # progress-only; no Rich panel under the TUI
+					q.put(item)
+			finally:
+				q.put(done_sentinel)  # always signal completion, even on error
+
+		with ThreadPoolExecutor(max_workers=max_workers) as executor:
+			for a in actions:
+				executor.submit(run_single_stream, a)
+			remaining = len(actions)
+			while remaining:
+				item = q.get()
+				if item is done_sentinel:
+					remaining -= 1
+					continue
+				yield item
+		return
 
 	all_results = []
 	with ctx_mgr:

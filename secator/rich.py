@@ -1,6 +1,7 @@
 import codecs
 import operator
-from contextlib import nullcontext
+import re
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 import yaml
@@ -25,11 +26,124 @@ class CustomMarkdown(Markdown):
 	}
 
 
+# Active Textual TUI (set by the TUI driver via set_tui). When present, every
+# console.status spinner in the codebase routes to the TUI status line instead of
+# opening a Rich Live (which would collide with Textual's own display).
+_TUI = None
+
+
+def set_tui(app):
+	global _TUI
+	_TUI = app
+
+
+def get_tui():
+	return _TUI
+
+
+def _tui_line_hook(self, line):
+	"""on_line hook (module-level so it stays picklable for async/Celery children):
+	stream a command runner's command + raw stdout into the active display (TUI). In a
+	worker there's no display, so get_tui() is None and this is a no-op. set_command is
+	idempotent, so re-sending it per line is harmless."""
+	tui = _TUI
+	if tui is not None:
+		try:
+			# match the finding _source, which is the runner's unique_name (e.g.
+			# 'nmap/light' -> 'nmap_light'), NOT config.name (= 'nmap' for the variant) —
+			# otherwise the command lands in a different sub-panel than its findings.
+			source = getattr(self, "unique_name", "") or getattr(getattr(self, "config", None), "name", "") or ""
+			tui.tui_set_command(getattr(self, "cmd", "") or "", source)
+			tui.tui_render_line(line, source)
+		except Exception:  # noqa: BLE001 - a display feed must never crash a run
+			pass
+	return line
+
+
+def _tui_item_hook(self, item):
+	"""on_item hook (module-level so it stays picklable for async/Celery children):
+	stream a child runner's FINDINGS into the active display. Child task/workflow findings
+	go through on_item (persistence), NOT the iterator the caller yields from, so this is
+	how they reach the TUI panels. No-op in a worker (no display). Returns the item
+	unchanged so persistence hooks are unaffected."""
+	tui = _TUI
+	if tui is not None:
+		try:
+			tui.tui_render(item)
+		except Exception:  # noqa: BLE001 - a display feed must never crash a run
+			pass
+	return item
+
+
+def display_denial(description, reason, command="", subagent=None):
+	"""Surface a guardrail denial on the display. Under a TUI it shows a collapsible
+	'Blocked <description>' entry (expand -> command + reason), routed to the subagent's
+	view when `subagent` (a session id) is given. Otherwise it prints a Warning to the
+	console (CLI / pod logs) as before."""
+	tui = _TUI
+	if tui is not None and hasattr(tui, "tui_render_block"):
+		try:
+			tui.tui_render_block(description, reason, command, subagent)
+			return
+		except Exception:  # noqa: BLE001 - a display feed must never crash a run
+			pass
+	from secator.output_types import Warning
+	msg = f"{reason}\n[gray42]{command}[/gray42]" if command else reason
+	console.print(Warning(message=msg))
+
+
+def attach_display_hooks(hooks, runner_cls):
+	"""Append the display hooks (on_line for command output, on_item for findings) so a
+	child runner's command/output AND findings stream into the UI when a display is
+	active. No-op without a display.
+
+	Keyed on EVERY runner class — not just the top-level one — because a Workflow/Scan
+	hands its children only the ``Task``-keyed hooks (``self._hooks.get(Task)``), so a
+	hook on ``Workflow`` alone never reaches the child tasks' findings (only the
+	workflow's own items). Attaching to Task + Workflow + Scan covers every level; the
+	UI dedups by _uuid, so a finding that fires at more than one level renders once."""
+	if _TUI is None:
+		return
+	from secator.runners import Scan, Task, Workflow
+	for cls in (Task, Workflow, Scan):
+		tl = hooks.setdefault(cls, {})
+		tl["on_line"] = list(tl.get("on_line", [])) + [_tui_line_hook]
+		tl["on_item"] = list(tl.get("on_item", [])) + [_tui_item_hook]
+
+
+@contextmanager
+def _tui_status(msg):
+	plain = re.sub(r'\[/?[^\]]*\]', '', str(msg)).strip()
+	tui = _TUI
+	if tui is not None:
+		tui.tui_set_status(plain)
+	try:
+		yield
+	finally:
+		if tui is not None:
+			tui.tui_clear_status()
+
+
+def live_is_active(c=None):
+	"""True if a Rich ``Live`` display is currently active on the console.
+
+	Rich 15 replaced the single ``console._live`` attribute with a ``_live_stack``;
+	accessing ``_live`` unguarded raises ``AttributeError`` on Rich 15. Check both so
+	we stay correct across versions."""
+	c = c if c is not None else console
+	if getattr(c, '_live', None) is not None:
+		return True
+	return bool(getattr(c, '_live_stack', None))
+
+
 def maybe_status(*args, **kwargs):
-	"""Return console.status() normally, or nullcontext() when a live display is already active or in a worker."""
+	"""Return console.status() normally, or a no-op / TUI-routed status when a live
+	display is already active, a TUI is active, or we're in a worker."""
 	from secator.definitions import IN_WORKER
 
-	if IN_WORKER or console._live is not None:
+	if _TUI is not None:
+		return _tui_status(args[0] if args else '')
+	if IN_WORKER or live_is_active():
 		return nullcontext()
 	return console.status(*args, **kwargs)
 

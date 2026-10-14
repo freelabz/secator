@@ -55,7 +55,7 @@ dependencies = [
   'pyyaml < 7',
   'pydantic < 3',
   'requests < 3',
-  'rich < 14',
+  'rich >= 14.2, < 16',
   'rich-click < 1.9',
   'click < 8.3',
   'psutil < 7',
@@ -104,7 +104,10 @@ ai = [
 	# safecmd shells out to the `shfmt` binary (via shutil.which); pin shfmt-py
 	# explicitly so `secator install addons ai` always ships the binary, not just
 	# the safecmd Python package. Without it the guardrail shell parser degrades.
-	'shfmt-py'
+	'shfmt-py',
+	# Textual TUI (default for `secator x ai` on a TTY). Needs rich >= 14.2, hence the
+	# core `rich` pin bump above.
+	'textual < 9',
 ]
 
 [project.scripts]

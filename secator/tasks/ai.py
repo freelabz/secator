@@ -114,6 +114,9 @@ def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason):
 	runner.history.add_tool_result(tool_name, tool_call_id, _error_content)
 	return Ai(content=f"[{tool_name}] {reason}",
 	          ai_type="tool_result",
+	          # Mark the rejection so a display (TUI) can surface the failed tool call —
+	          # a plain tool_result is model-facing only and rendered as nothing.
+	          extra_data={"error": True, "tool_name": tool_name, "reason": reason},
 	          message=cap_message(
 	              {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": _error_content}),
 	          _context=dict(runner.context))
@@ -243,6 +246,7 @@ class ai(PythonRunner):
 			"help": "Hard token limit - truncate oldest messages beyond this",
 		},
 		"interactive": {"type": str, "default": "local", "help": "Interactivity mode: local, remote, or auto"},
+		"tui": {"is_flag": True, "default": True, "reverse": True, "help": "Textual TUI for local interactive runs (needs `pip install textual`); --no-tui for plain console"},  # noqa: E501
 		"context": {
 			"type": dict,
 			"default": None,
@@ -414,17 +418,14 @@ class ai(PythonRunner):
 				self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 			return
 
-		# Get user prompt
+		# Get user prompt. Interactive backends (CLI full-screen prompt, TUI input)
+		# return a string (exit if empty); non-interactive ones (remote/worker) return
+		# None, leaving the prompt to be resolved from context/resume.
 		self.prompt = self._resolve_prompt()
 		if not self.prompt and not self.is_subagent:
-			from secator.definitions import IN_WORKER
-			if not IN_WORKER:
-				from secator.rich import FullScreenPrompt
-				targets_str = ', '.join(self.inputs) if self.inputs else 'no target'
-				self.prompt = FullScreenPrompt(
-					title=f"What do you want to do? ({targets_str})",
-					placeholder="e.g. Scan for vulnerabilities on this target..."
-				).show()
+			got = self.backend.get_initial_prompt(self.inputs, session_id=self.session_id)
+			if got is not None:
+				self.prompt = got
 				if not self.prompt:
 					yield Info(message="No prompt provided. Exiting.")
 					return
@@ -956,6 +957,7 @@ class ai(PythonRunner):
 
 				# Process tool calls → validated actions
 				follow_up_choices = None
+				follow_up_multiple = False
 				stop_reason = None
 				follow_up_prompt_uuid = None
 
@@ -972,6 +974,7 @@ class ai(PythonRunner):
 					# Dispatch actions, collect results, add to history
 					dispatch_result = yield from self._dispatch_and_collect(actions, ctx)
 					follow_up_choices = dispatch_result.get("follow_up_choices")
+					follow_up_multiple = dispatch_result.get("follow_up_multiple", False)
 					stop_reason = dispatch_result.get("stop_reason")
 					follow_up_prompt_uuid = dispatch_result.get("follow_up_prompt_uuid")
 
@@ -1000,9 +1003,6 @@ class ai(PythonRunner):
 					# results) so a later resumed worker can decrypt these tokens.
 					self._persist_pii_map()
 
-					if len(actions) > 1:
-						yield Info(message=f"Executed {len(actions)} actions.")
-
 				# Query extension (allow extra iterations for data exploration)
 				if tool_calls and actions and actions[-1].get("action") == "query" and query_extensions < 3:
 					self.max_iterations += 1
@@ -1026,7 +1026,8 @@ class ai(PythonRunner):
 							and follow_up_choices is None and tool_calls):
 						break
 
-					result = self._prompt_and_redetect(follow_up_choices or [], prompt_uuid=follow_up_prompt_uuid)
+					result = self._prompt_and_redetect(
+						follow_up_choices or [], prompt_uuid=follow_up_prompt_uuid, multiple=follow_up_multiple)
 					if result is None:
 						self._save_history()
 						return
@@ -1157,6 +1158,12 @@ class ai(PythonRunner):
 			self.interactive = interactive
 		if self.is_subagent:
 			self.interactive = "auto"
+		# A Textual TUI (set via secator.rich.set_tui) drives interactivity AND rendering:
+		# steers/prompts/status bridge to it (TUIBackend) and console output is suppressed
+		# by the caller. Auto-select it whenever one is active (not for remote or subagents).
+		from secator.rich import get_tui
+		if get_tui() is not None and self.interactive != "remote" and not self.is_subagent:
+			self.interactive = "tui"
 
 		# Derived state
 		self._sync = False if self.async_tasks else self.sync
@@ -1206,11 +1213,21 @@ class ai(PythonRunner):
 			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
-		# Suppress noisy output for subagents
-		if self.is_subagent:
+		# Let the backend wire up anything it needs for this session (e.g. a display
+		# backend's session-scoped views). No-op for non-display backends.
+		if not self.is_subagent:
+			self.backend.on_session(
+				self.context.get("workspace_id", ""), dict(self.context), self.session_id)
+
+		# A backend that owns the display (full-screen TUI) renders the yielded items
+		# itself, so suppress the runner's own console printing. Subagents stay quiet too.
+		if self.is_subagent or self.backend.owns_display:
 			self.print_info = False
 			self.print_warning = False
 			self.print_error = False
+		if self.backend.owns_display:
+			self.print_item = False
+			self.print_line = False
 
 	# -------------------------------------------------------------------------
 	# Model verification
@@ -1345,16 +1362,14 @@ class ai(PythonRunner):
 		the same content and double-render on the client. ``poll_steers`` flips the
 		drained doc to ``status:"consumed"`` so it injects exactly once.
 
-		Only the RemoteBackend has a channel to poll; for every other backend this
-		is a no-op. Robust: a steer must never crash the run, so all backend access
+		Backends without a steer channel (CLI/Auto) return an empty list, so this is a
+		no-op for them. Robust: a steer must never crash the run, so all backend access
 		is best-effort and swallowed.
 
 		Generator (``yield from``-compatible with the loop) — currently yields no
 		items, but kept a generator so future transcript echoes can be added without
 		changing the call site.
 		"""
-		if not isinstance(self.backend, RemoteBackend):
-			return
 		try:
 			steers = self.backend.poll_steers(self.session_id)
 		except Exception as e:  # noqa: BLE001 - a steer must never crash the run
@@ -1510,13 +1525,17 @@ class ai(PythonRunner):
 
 			if denial:
 				cmd_display = _build_action_display(action)
-				denial_display = f"{denial}\n[gray42]{cmd_display}[/gray42]" if cmd_display else denial
-				# Log the denial to the console / pod-logs ONLY — the _reject_tool_call
-				# tool_result below already surfaces the SAME reason in the chat (it is
-				# what the model reads). Yielding a Warning too rendered the denial TWICE
-				# in the live client view (a Warning line + the tool_result bubble). One denial,
-				# one message.
-				console.print(Warning(message=denial_display))
+				# Surface the block on the display ONLY — the _reject_tool_call tool_result
+				# below already carries the SAME reason to the model (and the web client's
+				# tool_result bubble). Under a TUI this shows a collapsible "Blocked <desc>"
+				# (expand -> command + reason); otherwise it prints a Warning to the console.
+				# Not yielded, so there's no double-render in the web client.
+				from secator.rich import display_denial
+				block_desc = action.get("description") or action.get("name") \
+					or action.get("command") or cmd_display or name
+				display_denial(
+					block_desc, denial, cmd_display,
+					subagent=self.session_id if self.is_subagent else None)
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
 				# Surface the actual reason in the chat (not a bare "denied"): this
 				# tool_result bubble is the only place the user sees WHY
@@ -1630,6 +1649,7 @@ class ai(PythonRunner):
 
 		return {
 			"follow_up_choices": follow_up_choices,
+			"follow_up_multiple": bool(getattr(follow_up_ai, "multiple", False)),
 			"stop_reason": stop_reason,
 			"follow_up_ai": follow_up_ai,
 			"follow_up_prompt_uuid": follow_up_prompt_uuid,
@@ -1715,7 +1735,7 @@ class ai(PythonRunner):
 	# Follow-up / prompt
 	# -------------------------------------------------------------------------
 
-	def _prompt_and_redetect(self, choices, prompt_uuid=None):
+	def _prompt_and_redetect(self, choices, prompt_uuid=None, multiple=False):
 		"""Prompt user via backend and re-detect intent.
 
 		Works for all backends: CLIBackend shows rich menus, RemoteBackend
@@ -1743,6 +1763,7 @@ class ai(PythonRunner):
 			choices=choices,
 			session_id=self.session_id,
 			prompt_type="follow_up",
+			multiple=multiple,
 			history=self.history,
 			encryptor=self.encryptor,
 			max_iterations=self.max_iterations,
