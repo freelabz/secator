@@ -11,7 +11,7 @@ from secator.definitions import (
 	REMEDIATION, RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL, USER_AGENT
 )
 # fmt: on
-from secator.output_types import Progress, Tag, Technology, Vulnerability
+from secator.output_types import Progress, Tag, Technology, Vulnerability, Warning
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
 
@@ -140,6 +140,31 @@ class nuclei(VulnMulti):
 	proxy_socks5 = True  # kind of, leaks data when running network / dns templates
 	proxy_http = True  # same
 	profile = 'extra_large'
+
+	# Log line nuclei's hang-monitor prints right before it os.Exit(1)s itself
+	# ("Detected hanging goroutine (count=N/N) = nuclei-stacktrace-<id>.dump").
+	HANG_MONITOR_MARKER = 'Detected hanging goroutine'
+
+	@staticmethod
+	def on_line(self, line):
+		# nuclei's hang-monitor (-hm, on by default) self-kills the whole process with
+		# exit(1) when a goroutine looks stuck for ~60s (slow OAST with no reachable
+		# interactsh, RPC templates, very large host lists). That exit is an infra
+		# condition, not a scan error — ignore the non-zero code so the task doesn't FAIL;
+		# on_cmd_done surfaces a Warning instead. Partial results already parsed stay.
+		if nuclei.HANG_MONITOR_MARKER in line:
+			self._hang_detected = True
+			self.ignore_return_code = True
+		return line
+
+	@staticmethod
+	def on_cmd_done(self):
+		if getattr(self, '_hang_detected', False):
+			yield Warning(message=(
+				'nuclei self-terminated via its hang-monitor (a goroutine was stuck ~60s, e.g. slow '
+				'OAST/RPC templates or a very large host list). Kept partial results instead of failing; '
+				're-run with hang_monitor=False (-hm) or narrow templates/targets if this recurs.'
+			))
 
 	@staticmethod
 	def on_init(self):
