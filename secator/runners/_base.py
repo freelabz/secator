@@ -109,17 +109,11 @@ class Runner:
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
 		self.serialize_config = run_opts.get('serialize_config', True)
+		# _process_config fails fast (clear ValueError) on an empty/missing template, so by
+		# here self.config.name is a valid non-empty string regardless of any run_opts override.
 		self.config = self._process_config(config)
-		self.name = run_opts.get('name', config.name)
-		# A missing template (e.g. TemplateLoader(name='workflows/does_not_exist')) loads as an
-		# EMPTY DotMap: `config.name` is then a DotMap, not a string, and `self.name.replace(...)`
-		# below would fail ~80 lines later with the opaque `'TemplateLoader' object is not
-		# callable`. Fail fast with a clear message instead (#1421).
-		if not isinstance(self.name, str) or not self.name:
-			raise ValueError(
-				f'Runner template is empty or not found (no string `name`). The template likely '
-				f'does not exist. Got config of type {type(config).__name__}.')
-		self.description = run_opts.get('description', config.description or '')
+		self.name = run_opts.get('name', self.config.name)
+		self.description = run_opts.get('description', self.config.description or '')
 		self.workspace_name = context.get('workspace_name', CONFIG.workspaces.current or 'default')
 		self.workspace_explicit = context.get('workspace_explicit', False)
 		self.run_opts = run_opts.copy()
@@ -308,6 +302,7 @@ class Runner:
 		"""
 		from secator.loader import TemplateLoader
 
+		orig_type = type(config).__name__
 		if isinstance(config, TemplateLoader):
 			config = DotMap(config.toDict(serialize=self.serialize_config))
 		elif isinstance(config, dict):
@@ -316,6 +311,15 @@ class Runner:
 			pass
 		else:
 			raise TypeError(f'Invalid configuration type: {type(config)}')
+		# A missing template (e.g. TemplateLoader(name='workflows/does_not_exist')) loads as an
+		# EMPTY DotMap, so `config.name` is a DotMap, not a string — and `self.name.replace(...)`
+		# later would fail with the opaque `'TemplateLoader' object is not callable` ~80 lines in.
+		# Fail fast with a clear message, validated on the CONFIG itself so a run_opts `name`
+		# override can't mask a missing template (#1421).
+		if not isinstance(config.name, str) or not config.name:
+			raise ValueError(
+				f'Runner template is empty or not found (no string `name`). The template likely '
+				f'does not exist. Got config of type {orig_type}.')
 		return config
 
 	@property
