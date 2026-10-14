@@ -21,7 +21,7 @@ from textual.widgets import Header, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from secator.tui.render import finding_text, message_text
-from secator.tui.widgets import BackBar, ChoicePrompt, Grip, PermissionPrompt, RunnerPanel
+from secator.tui.widgets import BackBar, BlockPanel, ChoicePrompt, Grip, PermissionPrompt, RunnerPanel
 
 
 class TUIApp(App):
@@ -182,6 +182,17 @@ class TUIApp(App):
 
 	def tui_render_line(self, line: str, source: str = "") -> None:
 		self.call_from_thread(self._render_line, line, source)
+
+	# a guardrail-denied action — shown as a collapsible "Blocked <desc>" entry
+	def tui_render_block(self, description: str, reason: str = "", command: str = "", subagent=None) -> None:
+		self.call_from_thread(self._render_block, description, reason, command, subagent)
+
+	async def _render_block(self, description, reason="", command="", subagent=None) -> None:
+		# route to the subagent's own view when the block happened inside a subagent,
+		# else the main conversation (independent of the live write target)
+		target = await self._ensure_subview(subagent) if subagent else self._convo()
+		await target.mount(BlockPanel(description, reason, command))
+		target.scroll_end(animate=False)
 
 	# ---- runner output routing (by source so a parallel batch doesn't cross-wire) ----
 	async def _sink_for_source(self, source: str) -> "RunnerPanel | None":

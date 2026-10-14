@@ -72,6 +72,23 @@ def _tui_item_hook(self, item):
 	return item
 
 
+def display_denial(description, reason, command="", subagent=None):
+	"""Surface a guardrail denial on the display. Under a TUI it shows a collapsible
+	'Blocked <description>' entry (expand -> command + reason), routed to the subagent's
+	view when `subagent` (a session id) is given. Otherwise it prints a Warning to the
+	console (CLI / pod logs) as before."""
+	tui = _TUI
+	if tui is not None and hasattr(tui, "tui_render_block"):
+		try:
+			tui.tui_render_block(description, reason, command, subagent)
+			return
+		except Exception:  # noqa: BLE001 - a display feed must never crash a run
+			pass
+	from secator.output_types import Warning
+	msg = f"{reason}\n[gray42]{command}[/gray42]" if command else reason
+	console.print(Warning(message=msg))
+
+
 def attach_display_hooks(hooks, runner_cls):
 	"""Append the display hooks (on_line for command output, on_item for findings) to a
 	child runner's hooks when a display is active, so its command/output AND findings

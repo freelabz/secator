@@ -150,6 +150,55 @@ class _ChoiceSummary(Static):
 			parent.toggle_body()
 
 
+class _BlockHead(Static):
+	"""Clickable header that toggles its parent BlockPanel."""
+	def on_click(self) -> None:
+		panel = self.parent
+		if isinstance(panel, BlockPanel):
+			panel.toggle()
+
+
+class BlockPanel(Vertical):
+	"""A collapsible 'Blocked <description>' entry for a guardrail-denied action —
+	expand to reveal which command/runner was blocked and the reason."""
+
+	def __init__(self, description: str, reason: str = "", command: str = ""):
+		super().__init__(classes="runner-panel")
+		self.description = description or "action"
+		self.reason = reason or ""
+		self.command = command or ""
+		self._collapsed = True
+
+	def compose(self) -> ComposeResult:
+		yield _BlockHead(self._header(), classes="runner-head")
+		box = Vertical(classes="runner-box")
+		box.display = False
+		with box:
+			if self.command:
+				yield Static(command_text(self.command), classes="runner-cmd")
+			if self.reason:
+				yield Static(Text.from_markup(f"[#d98a7a]{escape(self.reason)}[/]"), classes="out-line")
+		yield box
+
+	def _header(self) -> Text:
+		arrow = "▼" if not self._collapsed else "▶"
+		desc = self.description
+		width = self.app.size.width if self.app else 100
+		budget = max(12, width - 20)
+		if len(desc) > budget:
+			desc = desc[: budget - 1] + "…"
+		t = Text()
+		t.append("Blocked ", style="bold red")
+		t.append(desc, style="#8a8fa3")
+		t.append(f"  {arrow}", style="#6b7187")
+		return t
+
+	def toggle(self) -> None:
+		self._collapsed = not self._collapsed
+		self.query_one(".runner-box", Vertical).display = not self._collapsed
+		self.query_one(".runner-head", _BlockHead).update(self._header())
+
+
 class ChoicePrompt(Vertical):
 	"""Navigable suggestion list for a follow-up ask. Single-choice uses an OptionList
 	(↑/↓ then Enter); multi-choice uses a SelectionList (Space toggles, Enter confirms).

@@ -1521,13 +1521,17 @@ class ai(PythonRunner):
 
 			if denial:
 				cmd_display = _build_action_display(action)
-				denial_display = f"{denial}\n[gray42]{cmd_display}[/gray42]" if cmd_display else denial
-				# Log the denial to the console / pod-logs ONLY — the _reject_tool_call
-				# tool_result below already surfaces the SAME reason in the chat (it is
-				# what the model reads). Yielding a Warning too rendered the denial TWICE
-				# in the live client view (a Warning line + the tool_result bubble). One denial,
-				# one message.
-				console.print(Warning(message=denial_display))
+				# Surface the block on the display ONLY — the _reject_tool_call tool_result
+				# below already carries the SAME reason to the model (and the web client's
+				# tool_result bubble). Under a TUI this shows a collapsible "Blocked <desc>"
+				# (expand -> command + reason); otherwise it prints a Warning to the console.
+				# Not yielded, so there's no double-render in the web client.
+				from secator.rich import display_denial
+				block_desc = action.get("description") or action.get("name") \
+					or action.get("command") or cmd_display or name
+				display_denial(
+					block_desc, denial, cmd_display,
+					subagent=self.session_id if self.is_subagent else None)
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
 				# Surface the actual reason in the chat (not a bare "denied"): this
 				# tool_result bubble is the only place the user sees WHY
