@@ -1330,7 +1330,17 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 
 	finding_type = action.get("_type", "")
-	finding_data = {k: v for k, v in action.items() if k not in ("action", "_type", "tool_call_id", "tool_call_name")}
+	# Fields arrive nested under `fields` (a DECLARED object param — survives strict
+	# function-calling providers that drop undeclared top-level args, the add_finding
+	# "arguments stripped to just _type" bug). Fall back to flat siblings for providers
+	# that honor additionalProperties, and merge any stragglers a model put at top level.
+	_meta = ("action", "_type", "fields", "tool_call_id", "tool_call_name")
+	nested = action.get("fields")
+	if isinstance(nested, dict):
+		flat = {k: v for k, v in action.items() if k not in _meta}
+		finding_data = {**flat, **nested}  # nested wins on conflict
+	else:
+		finding_data = {k: v for k, v in action.items() if k not in _meta}
 	# SECURITY: strip framework/server-owned + `*_path` fields the agent must not set (identity,
 	# provenance, dedup, verdict/derived) — see _drop_readonly_fields. `_context` is then set
 	# server-side below, so the finding is always scoped to THIS session's workspace.
