@@ -749,7 +749,13 @@ class Runner:
 			if not self.no_process:
 				for item in self.results:
 					if getattr(item, '_uuid', None) not in self.uuids:
-						yield from self._process_item(item, print=not self.sync)
+						# Already persisted (read back from the store) — re-surface to the iterator
+						# WITHOUT re-firing on_item: a child's items aren't in THIS runner's `uuids`,
+						# so re-running hooks here delivers them to every on_item hook a second time
+						# (double findings/notes on display + driver). Same hooks=False idiom as the
+						# result-seeding path in __init__. add_result still registers the uuid + counts.
+						self.add_result(item, print=not self.sync, hooks=False, queue=False)
+						yield item
 
 		except BaseException as e:
 			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
