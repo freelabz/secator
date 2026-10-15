@@ -79,26 +79,26 @@ class TestDispatchAction(unittest.TestCase):
         self.assertEqual(results[0]._type, 'warning')
         self.assertIn('Unknown action', results[0].message)
 
-    def test_dispatch_follow_up_action(self):
+    def test_dispatch_stop_action(self):
         from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4')
-        action = {'action': 'follow_up', 'reason': 'Test complete'}
+        action = {'action': 'stop', 'reason': 'Test complete'}
 
         results = list(dispatch_action(action, ctx))
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]._type, 'ai')
         self.assertIn('Test complete', results[0].content)
-        # Default follow-up is single-select.
+        # Default stop is single-select.
         self.assertFalse(results[0].multiple)
 
-    def test_dispatch_follow_up_multiple(self):
+    def test_dispatch_stop_multiple(self):
         from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4')
         action = {
-            'action': 'follow_up',
+            'action': 'stop',
             'reason': 'Pick targets',
             'choices': ['a', 'b', 'c'],
             'multiple': True,

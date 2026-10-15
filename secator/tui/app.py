@@ -588,7 +588,7 @@ class TUIApp(App):
 			out, self._steers = self._steers, []
 		return out
 
-	def tui_ask_user(self, question, choices, prompt_type="follow_up", multiple=False, **context):
+	def tui_ask_user(self, question, choices, prompt_type="stopped", multiple=False, **context):
 		ev = threading.Event()
 		holder: dict = {}
 		self.call_from_thread(

@@ -131,18 +131,6 @@ def _reject_malformed_tool_call(runner, name, tc_id, error, extra_fields, reason
 	return _reject_tool_call(runner, name, tc_id, error_msg, reason)
 
 
-def _max_iter_announce(n) -> str:
-	"""The user-facing limit message (also the fallback stop content if the model ignores it)."""
-	return (f'Maximum number of allowed iterations ({n}) has been reached. '
-	        f'Say "continue" if you want me to go on anyways.')
-
-
-def _max_iter_stop_notice(n) -> str:
-	"""Instruction injected for one final turn when the agent-loop cap is hit: ask the model
-	to stop gracefully, announcing the limit so the user can resume with "continue"."""
-	return f'{_max_iter_announce(n)}\nCall the stop action now with this message. Do not run any more tools.'
-
-
 def _yield_tool_results(runner, collected):
 	"""Group ``collected`` results by tool_call_id, add each group's tool result to
 	history, and yield a summary ``Ai(ai_type="tool_result")`` per group. Split out
@@ -697,7 +685,7 @@ class ai(PythonRunner):
 		# Append the new user message that respawned the conversation — but ONLY if it
 		# isn't already the tail of the restored history. A respawn's run_opts["prompt"]
 		# is the LAST user message, which restore_history_from_db already reconstructed
-		# (the prompt doc itself, or the threaded answered-follow_up tail). Re-emitting it
+		# (the prompt doc itself, or the threaded answered-stopped tail). Re-emitting it
 		# unconditionally duplicated that turn AND persisted a duplicate `prompt` doc on
 		# every respawn — the observed repeat (initial prompt re-appended after recon; a
 		# prior follow-up answer / pasted message re-served as a fresh prompt to each new
@@ -1013,37 +1001,11 @@ class ai(PythonRunner):
 					},
 				)
 
-				# One final turn after the max-iter notice: honor ONLY a stop call (reject any
-				# other tool so history stays valid), then END the run regardless of the model's
-				# response — content-only or extra tools never continue the loop.
-				# `is True` (not truthy): tolerates a MagicMock self in unit tests.
-				if getattr(self, "_max_iter_final_turn", False) is True:
-					stopped = False
-					for tc in (tool_calls or []):
-						name = getattr(getattr(tc, "function", None), "name", "")
-						if name == "stop":
-							stop_actions = yield from self._process_tool_calls([tc], ctx)
-							if stop_actions:
-								yield from self._dispatch_and_collect(stop_actions, ctx)
-								stopped = True
-						elif name:
-							yield _reject_tool_call(
-								self, name, tc.id,
-								json.dumps({"error": "Max iterations reached — only the stop action is "
-								            "allowed this turn."}, separators=(',', ':')),
-								"max iterations reached")
-					if not stopped:
-						# model ignored the instruction — announce the limit ourselves and stop
-						yield Ai(content=_max_iter_announce(self._max_iter_cap),
-						         ai_type="stopped", _context=dict(self.context))
-					self._save_history()
-					return
-
 				# Process tool calls → validated actions
-				follow_up_choices = None
-				follow_up_multiple = False
 				stop_reason = None
-				follow_up_prompt_uuid = None
+				stop_choices = None
+				stop_multiple = False
+				stop_prompt_uuid = None
 
 				if tool_calls:
 					actions = yield from self._process_tool_calls(tool_calls, ctx)
@@ -1057,10 +1019,10 @@ class ai(PythonRunner):
 
 					# Dispatch actions, collect results, add to history
 					dispatch_result = yield from self._dispatch_and_collect(actions, ctx)
-					follow_up_choices = dispatch_result.get("follow_up_choices")
-					follow_up_multiple = dispatch_result.get("follow_up_multiple", False)
 					stop_reason = dispatch_result.get("stop_reason")
-					follow_up_prompt_uuid = dispatch_result.get("follow_up_prompt_uuid")
+					stop_choices = dispatch_result.get("stop_choices")
+					stop_multiple = dispatch_result.get("stop_multiple", False)
+					stop_prompt_uuid = dispatch_result.get("stop_prompt_uuid")
 
 					# Model-driven mode change (change_mode tool): apply it now so the rest
 					# of the run uses the new mode's tool surface + persona. Stays `auto`
@@ -1092,42 +1054,32 @@ class ai(PythonRunner):
 					self.max_iterations += 1
 					query_extensions += 1
 
-				# Stop tool → save and exit
-				if stop_reason is not None:
-					self._save_history()
-					return
+				# End of turn converges on a SINGLE path. A turn ends when the model calls
+				# `stop`, replies with content and NO tool call (content-only == stop), or
+				# the hard iteration cap is hit mid-work (pure safety backstop). What happens
+				# next is decided entirely by the backend's ask_user: TUI blocks for the
+				# typed reply, remote persists the pending prompt + polls (then exits on
+				# timeout, resumed later), auto ends immediately.
+				if stop_reason is not None or not tool_calls or iteration >= self.max_iterations:
+					# Steer-before-stop: a steer sent but not yet injected means the user
+					# already asked to go on, so drain it and RESUME the loop instead of
+					# pausing/ending (the drained steer is now in history for the next turn).
+					if (yield from self._drain_steers()):
+						continue
 
-				# Hard turn cap reached while the model is still working: give it ONE final turn to
-				# stop gracefully (announce the limit) instead of an abrupt cutoff — the user can
-				# resume with "continue". INTERACTIVE only: remote (web) keeps the clean break below
-				# (it continues via session resume, not a terminal stop turn). Based on the CONFIGURED
-				# cap: query auto-extensions (model-driven) must NOT defer it; user follow-up
-				# extensions do. The next turn is terminal (handled by the _max_iter_final_turn block).
-				cap = self.max_iterations - query_extensions
-				if (iteration >= cap and tool_calls and follow_up_choices is None
-						and not isinstance(self.backend, RemoteBackend)
-						and getattr(self, "_max_iter_final_turn", False) is not True):
-					self._max_iter_final_turn = True
-					self._max_iter_cap = cap
-					self.history.add_user(maybe_encrypt(_max_iter_stop_notice(cap), self.encryptor))
-					self.max_iterations = iteration + 1   # allow exactly one more (terminal) turn
-					continue
+					# Content-only reply is a stop with that text as the reason (no choices).
+					# Decrypt it like the `response` display so a remote pending prompt shows
+					# the text, not ciphertext.
+					if stop_reason is None and not tool_calls:
+						stop_reason = (self.encryptor.decrypt(content) if (self.encryptor and content)
+						               else (content or ""))
 
-				# Follow-up / content-only / max_iter → prompt user
-				if follow_up_choices is not None or not tool_calls or iteration == self.max_iterations:
-					# Remote follow-up: the pending Ai doc was already stamped + persisted
-					# in _dispatch_and_collect (dedup by _uuid) — nothing to re-yield here.
-
-					# Remote max-iter after tool work is a terminal turn (no further
-					# user input expected) — don't block-poll on prompt_uuid=None with no
-					# answerable pending doc; end cleanly via the loop tail (save + Info).
-					if (isinstance(self.backend, RemoteBackend)
-							and iteration == self.max_iterations
-							and follow_up_choices is None and tool_calls):
-						break
-
+					# A remote stop/content-only already persisted its pending `stopped` doc
+					# (stamped + prompt_uuid) in _dispatch_and_collect; a content-only / cap
+					# turn did not, so _prompt_and_redetect builds one from the stop reason.
 					result = self._prompt_and_redetect(
-						follow_up_choices or [], prompt_uuid=follow_up_prompt_uuid, multiple=follow_up_multiple)
+						stop_choices or [], prompt_uuid=stop_prompt_uuid,
+						multiple=stop_multiple, reason=stop_reason)
 					if result is None:
 						self._save_history()
 						return
@@ -1468,17 +1420,19 @@ class ai(PythonRunner):
 
 		Generator (``yield from``-compatible with the loop) — currently yields no
 		items, but kept a generator so future transcript echoes can be added without
-		changing the call site.
+		changing the call site. Its ``return`` value is True when at least one steer was
+		injected, so the end-of-turn path can RESUME (the user already asked to go on)
+		instead of pausing/ending on a stop.
 		"""
 		try:
 			steers = self.backend.poll_steers(self.session_id)
 		except Exception as e:  # noqa: BLE001 - a steer must never crash the run
 			self.debug(f'steer: failed to poll steers: {e}', sub='llm')
-			return
+			return False
 		for content in steers:
 			self.debug(f'steer: injecting user interjection: {content[:120]}', sub='llm')
 			self.history.add_user(maybe_encrypt(f"[User interjected]: {content}", self.encryptor))
-		return
+		return bool(steers)
 		yield  # noqa: unreachable - keeps this a generator for `yield from`
 
 	# -------------------------------------------------------------------------
@@ -1655,22 +1609,25 @@ class ai(PythonRunner):
 	def _dispatch_and_collect(self, actions, ctx):
 		"""Dispatch actions, yield results, add to history.
 
-		Yields OutputType items. Returns dict with follow_up_choices, stop_reason, follow_up_ai.
+		Yields OutputType items. Returns a dict describing the end-of-turn signal:
+		``stop_reason`` (set when the model called `stop`), the `stop` doc's
+		``stop_choices``/``stop_multiple``/``stop_prompt_uuid`` (for the interactive
+		pause), and ``new_mode``.
 		Use: result = yield from self._dispatch_and_collect(actions, ctx)
 		"""
-		follow_up_choices = None
 		stop_reason = None
-		follow_up_ai = None
-		follow_up_prompt_uuid = None
+		stop_choices = None
+		stop_multiple = False
+		stop_prompt_uuid = None
 		new_mode = None
 
 		# Progress signal for the same-answer loop-breaker (see _prompt_and_redetect):
-		# count substantive actions actually dispatched this turn (a follow_up/steer is
-		# not work). A follow-up answered the same way but with real work in between is
-		# PROGRESS and must NOT trip the breaker; only same-answer-with-no-new-action
-		# means the run is stuck.
+		# count substantive actions actually dispatched this turn (a stop/steer is not
+		# work). A stop answered the same way but with real work in between is PROGRESS
+		# and must NOT trip the breaker; only same-answer-with-no-new-action means the
+		# run is stuck.
 		self._progress_actions = getattr(self, "_progress_actions", 0) + sum(
-			1 for a in actions if a.get("action") not in ("follow_up", "steer"))
+			1 for a in actions if a.get("action") not in ("stop", "steer"))
 
 		is_batch = len(actions) > 1
 		# safe_dispatch_action wraps dispatch so a handler error becomes an Error item
@@ -1687,31 +1644,31 @@ class ai(PythonRunner):
 			is_from_subagent = isinstance(result, OutputType) and bool(result._context.get('subagent'))
 
 			if isinstance(result, Ai):
-				if result.ai_type == "follow_up":
-					follow_up_ai = result
-					follow_up_choices = result.choices or (result.extra_data or {}).get("choices", [])
-					# Persist the follow-up doc in its FINAL renderable state (add_result
-					# dedupes by _uuid, so the later `yield follow_up_ai` is dropped). For a
-					# remote run, stamp status="pending" + choices + session_id first.
+				if result.ai_type == "stopped":
+					# `stop` is the single end-of-turn signal. Persist the stopped doc in its
+					# FINAL renderable state (add_result dedupes by _uuid, so re-yielding it
+					# would be dropped). For a remote run it doubles as the answerable pending
+					# prompt: stamp status="pending" + choices + session_id + a correlation id
+					# so the poll resolves only THIS stop's answer (not a stale one), exactly
+					# as the follow_up pause did before.
+					stop_reason = result.content
+					stop_choices = result.choices or (result.extra_data or {}).get("choices", [])
+					stop_multiple = bool(result.multiple)
 					if isinstance(self.backend, RemoteBackend):
-						follow_up_ai.status = "pending"
+						result.status = "pending"
 						# Correlate on the PERSISTED _context.session_id (a top-level session_id
 						# attr wouldn't serialize) — the same field poll_steers and clients use.
-						follow_up_ai._context = {**(follow_up_ai._context or {}), "session_id": self.session_id}
-						if not follow_up_ai.choices and follow_up_choices:
-							follow_up_ai.choices = list(follow_up_choices)
-						# Stamp a unique correlation id so the poll resolves only this prompt's
-						# answer, not a stale one from a prior turn (not reusing _uuid, which
-						# mongo may reassign on insert).
-						follow_up_prompt_uuid = str(uuid.uuid4())
-						follow_up_ai.extra_data = {
-							**(follow_up_ai.extra_data or {}), "prompt_uuid": follow_up_prompt_uuid}
+						result._context = {**(result._context or {}), "session_id": self.session_id}
+						if not result.choices and stop_choices:
+							result.choices = list(stop_choices)
+						# Stamp a unique correlation id (not reusing _uuid, which mongo may
+						# reassign on insert) so the poll matches this exact prompt.
+						stop_prompt_uuid = str(uuid.uuid4())
+						result.extra_data = {
+							**(result.extra_data or {}), "prompt_uuid": stop_prompt_uuid}
 					self.add_result(result, print=not is_from_subagent)
 					continue
 				self.add_result(result, print=not is_from_subagent)
-				if result.ai_type == "stopped":
-					stop_reason = result.content
-					continue
 				if result.ai_type == "mode_changed":
 					# The runner applies the switch after this batch (rebuilds tools +
 					# persona). Fall through so the change_mode call still produces a
@@ -1748,11 +1705,10 @@ class ai(PythonRunner):
 		yield from _yield_tool_results(self, collected)
 
 		return {
-			"follow_up_choices": follow_up_choices,
-			"follow_up_multiple": bool(getattr(follow_up_ai, "multiple", False)),
 			"stop_reason": stop_reason,
-			"follow_up_ai": follow_up_ai,
-			"follow_up_prompt_uuid": follow_up_prompt_uuid,
+			"stop_choices": stop_choices,
+			"stop_multiple": stop_multiple,
+			"stop_prompt_uuid": stop_prompt_uuid,
 			"new_mode": new_mode,
 		}
 
@@ -1832,37 +1788,41 @@ class ai(PythonRunner):
 		return msg
 
 	# -------------------------------------------------------------------------
-	# Follow-up / prompt
+	# End-of-turn pause / prompt
 	# -------------------------------------------------------------------------
 
-	def _prompt_and_redetect(self, choices, prompt_uuid=None, multiple=False):
-		"""Prompt user via backend and re-detect intent.
+	def _prompt_and_redetect(self, choices, prompt_uuid=None, multiple=False, reason=None):
+		"""Pause on a `stop` (or content-only reply) and re-detect intent on the answer.
 
-		Works for all backends: CLIBackend shows rich menus, RemoteBackend
-		polls DB, AutoBackend returns None (exits).
+		This is the single end-of-turn path for every backend: CLIBackend/TUIBackend
+		block for the user's reply, RemoteBackend persists a pending `stopped` prompt +
+		polls (exiting on timeout, resumed later), AutoBackend returns None (ends).
 
-		``prompt_uuid`` correlates the (remote) poll to the SPECIFIC pending
-		follow_up doc this call raised, so a stale answered follow_up from a prior
-		turn can't resolve it (which would re-inject the old prompt and loop).
+		``prompt_uuid`` correlates the (remote) poll to the SPECIFIC pending `stopped`
+		doc this call raised, so a stale answer from a prior turn can't resolve it
+		(which would re-inject the old prompt and loop). ``reason`` is the stop reason
+		(summary / content-only text) used as the pending prompt's content.
 
 		Returns list of items to yield, or None to exit.
 		"""
-		# Plain-chat remote turns reach here with no pre-persisted pending doc,
-		# so persist one now with a real prompt_uuid (never poll on prompt_uuid=None).
+		# A remote stop/content-only reaching here with no pre-persisted pending doc
+		# (content-only or cap turn) needs one now, with a real prompt_uuid (never poll
+		# on prompt_uuid=None). It is a `stopped` prompt — the single end-of-turn signal.
 		if isinstance(self.backend, RemoteBackend) and not prompt_uuid:
 			prompt_uuid = str(uuid.uuid4())
 			self.add_result(self.backend.build_pending_prompt(
-				question="What's next?",
+				question=reason or "What's next?",
 				choices=choices,
 				session_id=self.session_id,
-				prompt_type="follow_up",
+				prompt_type="stopped",
 				prompt_uuid=prompt_uuid,
+				multiple=multiple,
 			))
 		response = self.backend.ask_user(
-			question="What's next?",
+			question=reason or "What's next?",
 			choices=choices,
 			session_id=self.session_id,
-			prompt_type="follow_up",
+			prompt_type="stopped",
 			multiple=multiple,
 			history=self.history,
 			encryptor=self.encryptor,

@@ -8,7 +8,7 @@ from secator.definitions import ADDONS_ENABLED
 
 if ADDONS_ENABLED['ai']:
 	from secator.ai.actions import (
-		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
+		ActionContext, dispatch_action, _handle_stop, _handle_shell,
 		_handle_query, _handle_add_finding, _handle_mark_vuln_exploited,
 		_handle_mark_vuln_false_positive, _run_runner, _decrypt_dict,
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
@@ -176,46 +176,50 @@ class TestRunBatchStreaming(unittest.TestCase):
 		                f"a card streamed only after slow completed: {order}")
 
 
-class TestHandleFollowUp(unittest.TestCase):
-	"""Tests for the _handle_follow_up action handler."""
+class TestHandleStop(unittest.TestCase):
+	"""Tests for the _handle_stop action handler (the single end-of-turn signal)."""
 
-	def test_follow_up_with_reason(self):
+	def test_stop_with_reason(self):
 		ctx = ActionContext(targets=['t.com'], model='m')
-		results = list(_handle_follow_up({'action': 'follow_up', 'reason': 'All scanned'}, ctx))
+		results = list(_handle_stop({'action': 'stop', 'reason': 'All scanned'}, ctx))
 
 		self.assertEqual(len(results), 1)
 		self.assertIsInstance(results[0], Ai)
-		self.assertEqual(results[0].ai_type, 'follow_up')
+		self.assertEqual(results[0].ai_type, 'stopped')
 		self.assertEqual(results[0].content, 'All scanned')
 		self.assertEqual(results[0].extra_data['choices'], [])
+		self.assertEqual(results[0].extra_data['multiple'], False)
 
-	def test_follow_up_default_reason(self):
+	def test_stop_default_reason(self):
 		ctx = ActionContext(targets=['t.com'], model='m')
-		results = list(_handle_follow_up({'action': 'follow_up'}, ctx))
+		results = list(_handle_stop({'action': 'stop'}, ctx))
 
 		self.assertEqual(results[0].content, 'completed')
 		self.assertEqual(results[0].extra_data['choices'], [])
 
-	def test_follow_up_with_choices(self):
+	def test_stop_with_choices(self):
 		ctx = ActionContext(targets=['t.com'], model='m')
 		results = list(
-			_handle_follow_up(
+			_handle_stop(
 				{
-					'action': 'follow_up',
+					'action': 'stop',
 					'reason': 'What next?',
 					'choices': ['Scan deeper', 'Try SQL injection'],
+					'multiple': True,
 				},
 				ctx,
 			)
 		)
 
 		self.assertEqual(len(results), 1)
-		self.assertEqual(results[0].ai_type, 'follow_up')
+		self.assertEqual(results[0].ai_type, 'stopped')
 		self.assertEqual(results[0].content, 'What next?')
 		self.assertEqual(results[0].extra_data['choices'], ['Scan deeper', 'Try SQL injection'])
+		self.assertEqual(results[0].extra_data['multiple'], True)
 		# Choices must also land on the top-level `choices` field (what the web UI reads),
-		# not only in extra_data — otherwise the persisted follow-up doc renders no buttons.
+		# not only in extra_data — otherwise the persisted stopped doc renders no buttons.
 		self.assertEqual(results[0].choices, ['Scan deeper', 'Try SQL injection'])
+		self.assertEqual(results[0].multiple, True)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

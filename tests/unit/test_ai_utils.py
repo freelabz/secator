@@ -516,7 +516,7 @@ class TestRepairOrphanToolUses(unittest.TestCase):
             "role": "assistant",
             "content": None,
             "tool_calls": [
-                {"id": tc_id, "type": "function", "function": {"name": "follow_up", "arguments": "{}"}}
+                {"id": tc_id, "type": "function", "function": {"name": "stop", "arguments": "{}"}}
                 for tc_id in ids
             ],
         }
@@ -525,7 +525,7 @@ class TestRepairOrphanToolUses(unittest.TestCase):
         from secator.ai.utils import _repair_orphan_tool_uses
         messages = [
             self._assistant_with_tool_calls("toolu_1"),
-            {"role": "tool", "tool_call_id": "toolu_1", "name": "follow_up", "content": "ok"},
+            {"role": "tool", "tool_call_id": "toolu_1", "name": "stop", "content": "ok"},
             {"role": "user", "content": "next"},
         ]
         before = [dict(m) for m in messages]
@@ -549,7 +549,7 @@ class TestRepairOrphanToolUses(unittest.TestCase):
         from secator.ai.utils import _repair_orphan_tool_uses
         messages = [
             self._assistant_with_tool_calls("toolu_a", "toolu_b"),
-            {"role": "tool", "tool_call_id": "toolu_a", "name": "follow_up", "content": "ok"},
+            {"role": "tool", "tool_call_id": "toolu_a", "name": "stop", "content": "ok"},
             {"role": "user", "content": "next"},
         ]
         inserted = _repair_orphan_tool_uses(messages)

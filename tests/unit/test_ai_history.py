@@ -310,7 +310,7 @@ class TestChatHistory(unittest.TestCase):
             self.assertNotEqual(non_system[0]["role"], "tool")
 
     def test_to_messages_repairs_forward_orphan_tool_call(self):
-        """A tool_call with no matching tool_result (e.g. follow_up/add_vuln_poc,
+        """A tool_call with no matching tool_result (e.g. stop/add_vuln_poc,
         whose handlers append no tool_result) gets a synthetic tool_result inserted
         before it reaches the LLM — else the model degrades. The live history is
         left untouched (repair happens on the returned copy)."""
@@ -318,7 +318,7 @@ class TestChatHistory(unittest.TestCase):
         history.add_user("find vulns")
         history.add_assistant_with_tool_calls(
             None, [{"id": "call_fu", "type": "function",
-                    "function": {"name": "follow_up", "arguments": "{}"}}])
+                    "function": {"name": "stop", "arguments": "{}"}}])
         history.add_user("Exploit the first one")  # answer arrives as a user turn
 
         msgs = history.to_messages()
