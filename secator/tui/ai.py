@@ -87,7 +87,6 @@ class AITUI(TUIApp):
 				self._active_subagent = row
 				await self._append(row)
 				return
-			self._finish_current()
 			if at == "shell":
 				# LLM-supplied description as the title; the command goes in the box
 				kind, rname, command = "shell", desc, content
@@ -103,9 +102,9 @@ class AITUI(TUIApp):
 			# it so a shell's error routes to its panel. Runners use the runner name.
 			panel.source = "command" if at == "shell" else (content if at in ("task", "workflow", "scan") else "")
 			await self._append(panel)
-			self._current = panel
-			# workflows/scans contain child tasks: nest their findings/output by source
-			self._container = panel if at in ("workflow", "scan") else None
+			# finish the prior leaf + register this panel; workflows/scans become nesting
+			# containers (their interleaved children route to them by id in a parallel batch)
+			self._start_runner(panel, is_container=at in ("workflow", "scan"))
 			self._flush_buffer(panel)
 			self._set_status(f"running {kind} {rname or command}".strip())
 		elif at == "shell_output":

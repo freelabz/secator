@@ -113,7 +113,9 @@ class TUIApp(App):
 		self._subtitle = subtitle
 		self._initial_prompt = initial_prompt or ""
 		self._current: RunnerPanel | None = None
-		self._container: RunnerPanel | None = None   # active workflow/scan nesting parent
+		self._container: RunnerPanel | None = None   # most-recent workflow/scan nesting parent
+		self._containers: dict = {}   # runner_id -> live workflow/scan panel (parallel batch:
+		#                               several stream at once, routed by item _context id)
 		self._subviews: dict = {}   # secondary-view id -> VerticalScroll (hidden)
 		self._write: VerticalScroll | None = None   # where incoming items are mounted
 		self._steers: list[str] = []
@@ -199,6 +201,20 @@ class TUIApp(App):
 		target.scroll_end(animate=False)
 
 	# ---- runner output routing (by source so a parallel batch doesn't cross-wire) ----
+	def _container_for(self, d: dict) -> "RunnerPanel | None":
+		# Pick the workflow/scan panel a nested item belongs to by its context id. When a
+		# batch runs two workflows/scans in parallel their item streams INTERLEAVE, so a
+		# single "most-recent container" global would funnel the first runner's late notes/
+		# findings into the second's panel. Each item carries its owning runner's id in
+		# _context.workflow_id / _context.scan_id — route on that; fall back to the most
+		# recent container for items with no matching id (single-container case, leaf notes).
+		ctx = d.get("_context") or {}
+		for key in ("workflow_id", "scan_id"):
+			cid = ctx.get(key)
+			if cid and cid in self._containers:
+				return self._containers[cid]
+		return self._container
+
 	async def _sink_for_source(self, source: str) -> "RunnerPanel | None":
 		# Where a command runner's output lands. In a workflow/scan it's the child's
 		# sub-panel. For a leaf it's the current panel ONLY if its source matches — in a
@@ -423,13 +439,14 @@ class TUIApp(App):
 		if t in ("info", "warning", "error"):
 			renderable = message_text(item, d)
 			src = d.get("_source") or ""
-			if self._container is not None:
+			container = self._container_for(d)
+			if container is not None:
 				# child-task note (e.g. "XML results saved") nests in that task's sub-panel;
 				# a workflow-level note (_source == the workflow) stays on the container.
-				if src and src != self._container.source:
-					(await self._container.subpanel(src)).add_note(renderable)
+				if src and src != container.source:
+					(await container.subpanel(src)).add_note(renderable)
 				else:
-					self._container.add_note(renderable)
+					container.add_note(renderable)
 				return
 			sink = await self._sink_for_source(src)
 			if sink is not None:
@@ -457,10 +474,11 @@ class TUIApp(App):
 		# that task's card renders (otherwise it would cross-wire to a stale _current).
 		renderable = finding_text(item, d)
 		src = d.get("_source") or ""
-		if self._container is not None:
-			sp = await self._container.subpanel(src or "results")
+		container = self._container_for(d)
+		if container is not None:
+			sp = await container.subpanel(src or "results")
 			sp.add_finding(renderable)
-			self._container.bump()
+			container.bump()
 			return
 		sink = await self._sink_for_source(src)
 		if sink is not None:
@@ -470,11 +488,32 @@ class TUIApp(App):
 		else:
 			await self._append(Static(renderable, classes="out-line"))
 
+	def _start_runner(self, panel: RunnerPanel, is_container: bool) -> None:
+		# A new runner card is rendering. Finish the previous LEAF so sequential tasks still
+		# flip "Running"->"Ran" as the next starts — but DON'T finish live containers: in a
+		# parallel batch several workflows/scans stream at once and are finished together at
+		# the turn boundary (_finish_current). Register a container so its interleaved child
+		# items route to it by id (see _container_for).
+		cur = self._current
+		if cur is not None and cur not in self._containers.values():
+			cur.finish()
+		self._current = panel
+		if is_container:
+			self._container = panel
+			self._containers[panel.runner_id or str(id(panel))] = panel
+		else:
+			self._container = None
+
 	def _finish_current(self) -> None:
+		# turn boundary (response/stopped/subagent spawn): finish the current leaf AND every
+		# live container, then clear the registry for the next turn.
 		if self._current is not None:
 			self._current.finish()
+		for c in self._containers.values():
+			c.finish()
 		self._current = None
 		self._container = None
+		self._containers = {}
 
 	# ---- input / prompts / steers ----
 	async def on_input_submitted(self, event: Input.Submitted) -> None:

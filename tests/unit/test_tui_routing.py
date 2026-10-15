@@ -151,6 +151,62 @@ def test_workflow_children_nest_by_source():
 	_run(_workflow_body())
 
 
+def _wfcard(name, desc, rid):
+	return {"_type": "ai", "ai_type": "workflow", "content": name,
+	        "extra_data": {"description": desc, "runner_id": rid}}
+
+
+def _wfnote(message, source, wfid):
+	return {"_type": "info", "message": message, "_source": source,
+	        "_context": {"workflow_id": wfid}}
+
+
+def _wffinding(_type, source, uuid, wfid, **fields):
+	return {"_type": _type, "_source": source, "_uuid": uuid,
+	        "_context": {"workflow_id": wfid}, **fields}
+
+
+async def _parallel_workflows_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		# Two workflows run in parallel (one per target): their item streams INTERLEAVE.
+		# Both share the same config name AND a same-named child task ("nmap") — the only
+		# thing distinguishing them is the owning workflow id in each item's _context.
+		await app._render(_wfcard("host_recon", "Recon target A", "wf-A"))
+		# A streams a child finding + its own workflow-level skip note
+		await app._render(_wffinding("port", "nmap", "a1", "wf-A", port=22, host="a", ip="1.1.1.1", state="open"))
+		await app._render(_wfnote("Skipped task naabu", "host_recon", "wf-A"))
+		# NOW B's card arrives (the old single-_container global would repoint here) ...
+		await app._render(_wfcard("host_recon", "Recon target B", "wf-B"))
+		# ... but A is still streaming: these MUST stay on A, not leak into B
+		await app._render(_wfnote("XML saved", "nmap", "wf-A"))
+		await app._render(_wffinding("url", "httpx", "a2", "wf-A", url="http://a", status_code=200))
+		# B's own children
+		await app._render(_wffinding("port", "nmap", "b1", "wf-B", port=80, host="b", ip="2.2.2.2", state="open"))
+		await app._render(_wfnote("Skipped task naabu", "host_recon", "wf-B"))
+		app._finish_current()
+		await pilot.pause(0.05)
+
+		wa = _by_desc(app, "Recon target A")
+		wb = _by_desc(app, "Recon target B")
+		# A kept BOTH its tasks (incl. the ones that streamed after B's card) and its note
+		assert set(wa.subpanels.keys()) == {"nmap", "httpx"}
+		assert wa.subpanels["nmap"].count == 1        # a1 port finding
+		assert wa.subpanels["nmap"].lines == 1        # "XML saved" child note (did NOT leak to B)
+		assert wa.subpanels["httpx"].count == 1       # a2 url finding (streamed after B's card)
+		assert wa.lines == 1                          # A's workflow-level skip note
+		# B got ONLY its own child + note — nothing from A crossed over
+		assert set(wb.subpanels.keys()) == {"nmap"}
+		assert wb.subpanels["nmap"].count == 1        # b1 only
+		assert wb.subpanels["nmap"].lines == 0        # A's "XML saved" note did not land here
+		assert wb.lines == 1                          # B's own skip note
+
+
+def test_parallel_workflows_do_not_crosswire():
+	_run(_parallel_workflows_body())
+
+
 def _static_texts(app):
 	from textual.widgets import Static
 	out = []
