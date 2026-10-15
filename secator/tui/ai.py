@@ -51,15 +51,31 @@ class AITUI(TUIApp):
 		)
 		self._in_subagent: str | None = None          # subagent session we're writing into
 		self._active_subagent: SubagentRow | None = None
-		# One-shot signatures of findings shown via an add_finding action row, so the
-		# finding the handler also yields isn't rendered a second time as a standalone card.
+		# Signatures of findings shown via an add_finding action row. _pending holds the
+		# finding the handler yields right after (no _uuid yet) so it isn't drawn again as a
+		# standalone card; _suppressed keeps that signature until the finding is re-read with a
+		# persisted _uuid (e.g. via query_workspace) so that re-read is deduped too — it was
+		# already shown once, as the row.
 		self._pending_finding_sigs: set = set()
+		self._suppressed_finding_sigs: set = set()
 
 	def _should_skip_finding(self, d: dict) -> bool:
 		# Suppress the standalone card for a finding already shown as an add_finding row.
 		sig = _finding_sig(d)
+		uid = d.get("_uuid")
 		if sig in self._pending_finding_sigs:
 			self._pending_finding_sigs.discard(sig)
+			if uid:
+				self._shown_uuids.add(uid)          # persisted already: _uuid dedup covers re-reads
+			else:
+				self._suppressed_finding_sigs.add(sig)  # no _uuid yet: keep the sig for the re-read
+			return True
+		if sig in self._suppressed_finding_sigs:
+			# Same finding re-read later, now carrying a persisted _uuid: skip it (already shown
+			# as the row) and migrate to _uuid dedup so we stop tracking the coarse signature.
+			if uid:
+				self._shown_uuids.add(uid)
+				self._suppressed_finding_sigs.discard(sig)
 			return True
 		return False
 

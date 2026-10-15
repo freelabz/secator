@@ -312,6 +312,14 @@ async def _add_finding_expandable_body():
 		assert panels[0].verb == "Added"
 		assert panels[0].finding is not None, "the Added row must expand to the rich finding"
 
+		# the SAME finding re-read later (e.g. via query_workspace) now has a persisted _uuid:
+		# it was already shown as the row, so it must NOT render a card either
+		await app._render(_finding("vulnerability", "ws", "persisted-uuid-9", name="XSS",
+		                           matched_at="http://x", severity="high"))
+		await pilot.pause(0.05)
+		assert len(app._convo().children) == base + 1, "re-read of an add_finding finding duplicated"
+		assert "persisted-uuid-9" in app._shown_uuids, "re-read uuid must migrate to _uuid dedup"
+
 
 def test_add_finding_row_is_expandable_and_not_duplicated():
 	_run(_add_finding_expandable_body())
