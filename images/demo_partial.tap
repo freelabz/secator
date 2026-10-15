@@ -1,0 +1,64 @@
+# Create a workspace (one per pentest)...
+secator ws use demo
+
+# List workspaces...
+secator ws list
+
+# List scan profiles
+secator p list
+
+# Let's visualize the host scan...
+secator s host -tree
+Sleep 2s
+clear
+
+# Change options and see the tree change...
+Up 1
+Left 6
+Space 1
+localhost -p 6379,8080 --hunt-secrets --host-recon-nuclei
+Sleep 2s
+
+# Dry-run a host scan on port 6379 and 8080, enabling nuclei,
+# with an aggressive profile, a rate limit overriden at 100k/s,
+# and with only nuclei templates containing 'redis' in their tags...
+Up 1
+Back 5
+-pf aggressive -rl 100000 -tc 'contains(tags, "redis")' -dry
+Sleep 2s
+clear
+
+# List reports
+secator r list -ws demo  # list runs in workspace 'demo' only
+Sleep 3s
+
+# Get info on specific report (current workspace)
+secator r info scans/2
+Sleep 3s
+clear
+
+# Find out what's running on localhost:6379 (current workspace)...
+secator r show -q 'port.host == "localhost" && port.port == 6379' --dedupe
+Sleep 2s
+
+# Query all vulnerabilities (current workspace)...
+secator r show -q 'vulnerability'
+Sleep 2s
+
+# ... or filter on severity 'high' and above
+secator r show -q 'vulnerability.severity in ["high", "critical"]' --dedupe
+Sleep 2s
+
+# ... or filter on vulnerabilities marked as 'exploitable'
+secator r show -q 'vulnerability.tags ~= "exploitable"'
+Sleep 2s
+
+# ... display as table instead
+Up 1
+Space 1
+-o table
+Sleep 2s
+
+# Get related exploits / POCs
+secator r show -q 'exploit.cves ~= 'CVE-2022-0543''
+Sleep 2s

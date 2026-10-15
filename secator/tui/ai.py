@@ -87,9 +87,7 @@ class AITUI(TUIApp):
 				self._active_subagent = row
 				await self._append(row)
 				return
-			# Dedup the runner card: the same card can be delivered to the TUI more than once
-			# (a runner's items fire on_item at every level they bubble through). Re-point at
-			# the existing panel instead of opening a duplicate — its child items keep nesting.
+			# Same runner card can arrive more than once — reuse its panel, don't duplicate it.
 			rid = ed.get("runner_id") or ""
 			if rid and rid in self._card_panels:
 				existing = self._card_panels[rid]

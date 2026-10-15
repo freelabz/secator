@@ -128,8 +128,7 @@ class TUIApp(App):
 		self._line_buffers: dict = {}      # source -> {cmd, lines} buffered until its card renders
 		self._shown_uuids: set = set()     # findings already rendered inline (skip dups, e.g. a
 		#                                    live-streamed finding later re-read via query_workspace)
-		self._card_panels: dict = {}       # runner_id -> RunnerPanel, so a runner card delivered
-		#                                    more than once reuses its panel (no duplicate card)
+		self._card_panels: dict = {}       # runner_id -> RunnerPanel (dedup re-delivered cards)
 
 	def compose(self) -> ComposeResult:
 		yield Header(show_clock=True)
@@ -424,15 +423,10 @@ class TUIApp(App):
 		t = d.get("_type")
 		if t in ("progress", "stat", "state", "target"):  # execution / plumbing types
 			return
-		# dedup EVERYTHING we render — findings AND info/warning/error notes — by _uuid.
-		# The display hooks attach on_item at Task + Workflow + Scan (see attach_display_hooks),
-		# so a single item fires once per runner level it bubbles through: a workflow's child
-		# task note (e.g. "Skipped task …" / "XML results saved") is delivered at the task
-		# level AND again at the workflow level with the SAME _uuid. Findings were already
-		# deduped here; notes were handled ABOVE this check, so they rendered once per level —
-		# duplicating workflow info/warnings into a second card. Dedup before routing fixes
-		# both. Also covers a finding re-read later via query_workspace. Guard on a TRUTHY uuid
-		# (an unpersisted item has _uuid="" — never collapse those together).
+		# Dedup by _uuid before routing — like the mongodb driver's idempotent upsert. The
+		# display hooks fire on_item at Task/Workflow/Scan level, so the same item (findings
+		# AND info/warning notes) reaches the TUI once per level. Guard on a truthy uuid
+		# (unpersisted items share _uuid="").
 		uid = d.get("_uuid")
 		if uid:
 			if uid in self._shown_uuids:
