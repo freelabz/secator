@@ -286,8 +286,10 @@ class AiAddon(StrictModel):
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
 	# --isolated sandbox container image. `{version}` is replaced at runtime with the running
-	# secator version so the sandbox matches the client. Env: SECATOR_ADDONS_AI_ISOLATED_CONTAINER_IMAGE.
-	isolated_container_image: str = 'freelabz/secator-lite:{version}'
+	# secator version so the sandbox matches the client. Default is the release-published lite
+	# tag (`freelabz/secator:<version>-lite`, see publish.yml). Env:
+	# SECATOR_ADDONS_AI_ISOLATED_CONTAINER_IMAGE.
+	isolated_container_image: str = 'freelabz/secator:{version}-lite'
 	permissions: Dict = {
 		'allow': [
 			'target({targets})',

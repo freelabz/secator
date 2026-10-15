@@ -882,10 +882,15 @@ _SANDBOX_PACKAGES = os.environ.get("SECATOR_AI_SANDBOX_PACKAGES", "git curl wget
 def _sandbox_image() -> str:
 	"""Resolve the --isolated sandbox image from `addons.ai.isolated_container_image`, replacing
 	`{version}` with the running secator version so the sandbox matches the client (default:
-	freelabz/secator-lite:<version>)."""
+	freelabz/secator:<version>-lite, the release-published lite tag). When the setting is still
+	the default, the legacy SECATOR_AI_SANDBOX_IMAGE env override is honored for back-compat; an
+	explicitly-configured value takes precedence over it."""
 	from secator.config import CONFIG
 	from secator.definitions import VERSION
-	img = CONFIG.addons.ai.isolated_container_image or 'freelabz/secator-lite:{version}'
+	default = 'freelabz/secator:{version}-lite'
+	img = CONFIG.addons.ai.isolated_container_image or default
+	if img == default:
+		img = os.environ.get('SECATOR_AI_SANDBOX_IMAGE', img)
 	return img.replace('{version}', VERSION)
 
 

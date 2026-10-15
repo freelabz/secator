@@ -24,18 +24,31 @@ if ADDONS_ENABLED['ai']:
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestSandboxImage(unittest.TestCase):
 	"""The --isolated sandbox image is configurable via addons.ai.isolated_container_image,
-	with {version} replaced by the running secator version (default freelabz/secator-lite:<version>)."""
+	with {version} replaced by the running secator version (default freelabz/secator:<version>-lite,
+	the release-published lite tag)."""
 
-	def test_default_resolves_secator_lite_with_version(self):
+	_DEFAULT = 'freelabz/secator:{version}-lite'
+
+	def test_default_resolves_secator_lite_tag_with_version(self):
 		from secator.definitions import VERSION
-		with patch('secator.config.CONFIG.addons.ai.isolated_container_image',
-		           'freelabz/secator-lite:{version}'):
-			self.assertEqual(_sandbox_image(), f'freelabz/secator-lite:{VERSION}')
+		with patch('secator.config.CONFIG.addons.ai.isolated_container_image', self._DEFAULT):
+			self.assertEqual(_sandbox_image(), f'freelabz/secator:{VERSION}-lite')
 
 	def test_custom_image_override_without_version_token(self):
 		with patch('secator.config.CONFIG.addons.ai.isolated_container_image',
 		           'kalilinux/kali-rolling'):
 			self.assertEqual(_sandbox_image(), 'kalilinux/kali-rolling')
+
+	def test_legacy_env_var_honored_only_when_config_is_default(self):
+		from secator.definitions import VERSION
+		# legacy env used when config is still the default
+		with patch('secator.config.CONFIG.addons.ai.isolated_container_image', self._DEFAULT):
+			with patch.dict('os.environ', {'SECATOR_AI_SANDBOX_IMAGE': 'myorg/custom:{version}'}):
+				self.assertEqual(_sandbox_image(), f'myorg/custom:{VERSION}')
+		# explicit config takes precedence over the legacy env
+		with patch('secator.config.CONFIG.addons.ai.isolated_container_image', 'myorg/explicit:latest'):
+			with patch.dict('os.environ', {'SECATOR_AI_SANDBOX_IMAGE': 'myorg/legacy:x'}):
+				self.assertEqual(_sandbox_image(), 'myorg/explicit:latest')
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
