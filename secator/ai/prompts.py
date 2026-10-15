@@ -412,7 +412,7 @@ def build_session_context(isolated: bool = False) -> str:
 
 
 def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None,
-                      isolated=None) -> str:
+                      isolated=None, is_subagent: bool = False) -> str:
 	"""Get system prompt for mode with library reference filled in.
 
 	Args:
@@ -424,6 +424,9 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 		isolated: When not None (True/False), append a dynamic ``<session_context>`` block
 			describing the clock + the shell environment (sandbox vs host) for that mode.
 			Left None by callers (e.g. tests) that want a deterministic, static prompt.
+		is_subagent: When True, strip all subagent-delegation guidance (a subagent has no
+			`run_subagent` tool and must not spawn further subagents) and append the
+			subagent persona so it carries out its assigned objective itself.
 
 	Returns:
 		Formatted system prompt string
@@ -452,6 +455,16 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# always knows its active mode — prevents redundant change_mode calls. Auto-covers
 	# any mode added to MODES later.
 	result = build_mode_banner(mode, mode_config) + "\n\n" + result
+
+	# A subagent has no `run_subagent` tool and must not spawn further subagents. Strip the
+	# baked-in delegation guidance (the <subagents> usage block, and in scan mode the
+	# <vulnerability_handling> block that tells the model to hand exploitation to a subagent),
+	# then append the subagent persona so it carries out its objective itself. Strips are
+	# resilient no-ops when a block is absent (e.g. chat mode has no vulnerability_handling).
+	if is_subagent:
+		result = re.sub(r'\n*<subagents>.*?</subagents>\n*', '\n\n', result, flags=re.DOTALL)
+		result = re.sub(r'\n*<vulnerability_handling>.*?</vulnerability_handling>\n*', '\n\n', result, flags=re.DOTALL)
+		result += "\n\n" + load_prompt("constraints/subagent.txt")
 
 	# Inject the end-of-turn `stop` rules. `stop` is the single end-of-turn signal in
 	# every mode; which guidance applies depends only on whether the backend has a user

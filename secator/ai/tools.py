@@ -489,8 +489,8 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 
 	Args:
 		mode: The AI mode (scan, chat, exploit). Unknown modes fall back to chat.
-		is_subagent: If True, exclude the change_mode tool (a subagent runs at its
-			assigned mode and does not self-escalate).
+		is_subagent: If True, exclude change_mode and run_subagent (a subagent runs at its
+			assigned mode, does not self-escalate, and must not spawn further subagents).
 		backend: Optional interactivity backend for exclusion/extra tools. Every
 			backend injects a `stop` tool via get_extra_tools (interactive backends a
 			`stop` with `choices`, AutoBackend a choiceless one).
@@ -507,8 +507,9 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 	allowed_actions = config["allowed_actions"]
 	excluded = set()
 	if is_subagent:
-		# A subagent runs at its assigned mode; it does not self-escalate.
-		excluded.add("change_mode")
+		# A subagent runs at its assigned mode; it does not self-escalate and
+		# cannot spawn further subagents (no nested subagents).
+		excluded.update({"change_mode", "run_subagent"})
 	# A user-pinned read-only chat cannot self-escape to an action mode.
 	if not mode_is_auto and mode == "chat":
 		excluded.add("change_mode")

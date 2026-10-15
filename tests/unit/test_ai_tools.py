@@ -163,6 +163,16 @@ class TestBuildToolSchemas(unittest.TestCase):
 		self.assertIn("change_mode", names(mode="exploit", mode_is_auto=False))   # pinned exploit
 		self.assertNotIn("change_mode", names(mode="scan", is_subagent=True))   # subagent
 
+	def test_subagent_excludes_run_subagent(self):
+		"""A subagent has no run_subagent tool (no nested subagents); a non-subagent keeps it."""
+		from secator.ai.tools import build_tool_schemas
+		from secator.ai.interactivity import AutoBackend
+
+		def names(**kw):
+			return {s["function"]["name"] for s in build_tool_schemas(**kw)}
+		self.assertNotIn("run_subagent", names(mode="scan", is_subagent=True, backend=AutoBackend()))
+		self.assertIn("run_subagent", names(mode="scan", is_subagent=False, backend=AutoBackend()))
+
 	def test_unknown_mode_falls_back_to_chat(self):
 		from secator.ai.tools import build_tool_schemas
 		chat_schemas = build_tool_schemas("chat")

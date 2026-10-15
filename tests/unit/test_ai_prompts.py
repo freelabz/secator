@@ -142,6 +142,29 @@ class TestPrompts(unittest.TestCase):
 		chat_prompt = get_system_prompt("chat")
 		self.assertEqual(invalid_prompt, chat_prompt)
 
+	def test_get_system_prompt_subagent_strips_delegation(self):
+		"""A subagent prompt has NO run_subagent/subagents/vulnerability_handling guidance
+		and DOES carry the subagent persona's no-nesting rule; a non-subagent keeps them."""
+		# Scan: the mode that bakes in both the <subagents> block and <vulnerability_handling>.
+		normal = get_system_prompt("scan")
+		self.assertIn("run_subagent", normal)
+		self.assertIn("<subagents>", normal)
+		self.assertIn("<vulnerability_handling>", normal)
+
+		sub = get_system_prompt("scan", is_subagent=True)
+		self.assertNotIn("run_subagent", sub)
+		self.assertNotIn("<subagents>", sub)
+		self.assertNotIn("<vulnerability_handling>", sub)
+		# Persona wired in, with the explicit no-nesting rule.
+		self.assertIn("<subagent>", sub)
+		self.assertIn("CANNOT spawn subagents", sub)
+
+		# Chat mode has no <vulnerability_handling> — the strip must be a no-op, not an error.
+		chat_sub = get_system_prompt("chat", is_subagent=True)
+		self.assertNotIn("run_subagent", chat_sub)
+		self.assertNotIn("<subagents>", chat_sub)
+		self.assertIn("CANNOT spawn subagents", chat_sub)
+
 	# === Format functions ===
 
 	def test_format_tool_result(self):

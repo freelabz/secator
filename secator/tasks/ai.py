@@ -401,7 +401,7 @@ class ai(PythonRunner):
 			show_mode = self.mode or "scan"
 			prompt = get_system_prompt(
 				show_mode, workspace_path=str(self.reports_folder), backend=self.backend,
-				in_scope=self.in_scope, out_of_scope=self.out_of_scope)
+				in_scope=self.in_scope, out_of_scope=self.out_of_scope, is_subagent=self.is_subagent)
 			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
 			console.print(prompt, highlight=False, soft_wrap=True)
 			return
@@ -510,7 +510,7 @@ class ai(PythonRunner):
 		return get_system_prompt(
 			mode, workspace_path=str(self.reports_folder), backend=self.backend,
 			in_scope=getattr(self, "in_scope", None), out_of_scope=getattr(self, "out_of_scope", None),
-			isolated=getattr(self, "isolated", False))
+			isolated=getattr(self, "isolated", False), is_subagent=getattr(self, "is_subagent", False))
 
 	def _rebuild_prompt_and_tools(self):
 		"""Rebuild system_prompt + tool_schemas for the current mode and store them.
