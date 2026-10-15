@@ -128,6 +128,8 @@ class TUIApp(App):
 		self._line_buffers: dict = {}      # source -> {cmd, lines} buffered until its card renders
 		self._shown_uuids: set = set()     # findings already rendered inline (skip dups, e.g. a
 		#                                    live-streamed finding later re-read via query_workspace)
+		self._card_panels: dict = {}       # runner_id -> RunnerPanel, so a runner card delivered
+		#                                    more than once reuses its panel (no duplicate card)
 
 	def compose(self) -> ComposeResult:
 		yield Header(show_clock=True)
@@ -420,6 +422,22 @@ class TUIApp(App):
 		if await self._render_domain(d):
 			return
 		t = d.get("_type")
+		if t in ("progress", "stat", "state", "target"):  # execution / plumbing types
+			return
+		# dedup EVERYTHING we render — findings AND info/warning/error notes — by _uuid.
+		# The display hooks attach on_item at Task + Workflow + Scan (see attach_display_hooks),
+		# so a single item fires once per runner level it bubbles through: a workflow's child
+		# task note (e.g. "Skipped task …" / "XML results saved") is delivered at the task
+		# level AND again at the workflow level with the SAME _uuid. Findings were already
+		# deduped here; notes were handled ABOVE this check, so they rendered once per level —
+		# duplicating workflow info/warnings into a second card. Dedup before routing fixes
+		# both. Also covers a finding re-read later via query_workspace. Guard on a TRUTHY uuid
+		# (an unpersisted item has _uuid="" — never collapse those together).
+		uid = d.get("_uuid")
+		if uid:
+			if uid in self._shown_uuids:
+				return
+			self._shown_uuids.add(uid)
 		if t in ("info", "warning", "error"):
 			renderable = message_text(item, d)
 			src = d.get("_source") or ""
@@ -441,16 +459,6 @@ class TUIApp(App):
 			else:
 				await self._append(Static(renderable, classes="ai"))
 			return
-		if t in ("progress", "stat", "state", "target"):  # execution / plumbing types
-			return
-		# dedup: a finding can arrive live (child on_item display hook) and again when the
-		# AI re-reads it via query_workspace — only render it once. Guard on a TRUTHY uuid
-		# (an unpersisted finding has _uuid="" — never treat those as the same finding).
-		uid = d.get("_uuid")
-		if uid:
-			if uid in self._shown_uuids:
-				return
-			self._shown_uuids.add(uid)
 		# a finding → render with its own __rich__ (secator-identical). Inside a workflow/
 		# scan it nests under the child task's sub-panel (by _source); a single task /
 		# query panel gets it directly; in a parallel batch it's buffered by _source until

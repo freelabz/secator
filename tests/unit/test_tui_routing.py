@@ -151,6 +151,43 @@ def test_workflow_children_nest_by_source():
 	_run(_workflow_body())
 
 
+async def _dup_feed_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		base = len(app._convo().children)
+		# A runner's items fire on_item at every level they bubble through (task + workflow +
+		# scan display hooks), so the TUI can receive the SAME item more than once — same card
+		# runner_id, same note _uuid. Findings were already deduped; notes/cards must be too.
+		card = {"_type": "ai", "ai_type": "workflow", "content": "host_recon",
+		        "extra_data": {"description": "Full recon", "runner_id": "wf-1"}}
+		note = {"_type": "info", "message": "Skipped task naabu", "_source": "host_recon",
+		        "_uuid": "n-skip-1", "_context": {}}
+		xml = {"_type": "info", "message": "XML saved", "_source": "nmap",
+		       "_uuid": "n-xml-1", "_context": {}}
+		await app._render(card)
+		await app._render(note)                      # workflow-level note (task + workflow levels...)
+		await app._render(note)                      # ...delivered twice, same _uuid
+		await app._render(_finding("port", "nmap", "p1", port=22, host="x", ip="1.2.3.4", state="open"))
+		await app._render(xml)
+		await app._render(xml)                       # child note delivered twice
+		await app._render(card)                      # the CARD itself re-delivered (same runner_id)
+		app._finish_current()
+		await pilot.pause(0.05)
+
+		wfs = _panels(app, "workflow")
+		assert len(wfs) == 1, f"duplicate workflow card created {len(wfs)} panels"
+		wf = wfs[0]
+		assert len(app._convo().children) == base + 1   # exactly one workflow panel at top level
+		assert wf.lines == 1                             # the skip note appears ONCE, not twice
+		assert wf.subpanels["nmap"].lines == 1           # the "XML saved" child note ONCE
+		assert wf.subpanels["nmap"].count == 1           # the port finding ONCE
+
+
+def test_duplicate_note_and_card_feeds_render_once():
+	_run(_dup_feed_body())
+
+
 def _static_texts(app):
 	from textual.widgets import Static
 	out = []

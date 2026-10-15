@@ -87,6 +87,15 @@ class AITUI(TUIApp):
 				self._active_subagent = row
 				await self._append(row)
 				return
+			# Dedup the runner card: the same card can be delivered to the TUI more than once
+			# (a runner's items fire on_item at every level they bubble through). Re-point at
+			# the existing panel instead of opening a duplicate — its child items keep nesting.
+			rid = ed.get("runner_id") or ""
+			if rid and rid in self._card_panels:
+				existing = self._card_panels[rid]
+				self._current = existing
+				self._container = existing if at in ("workflow", "scan") else None
+				return
 			self._finish_current()
 			if at == "shell":
 				# LLM-supplied description as the title; the command goes in the box
@@ -96,6 +105,8 @@ class AITUI(TUIApp):
 			else:
 				kind, rname, command = at, desc or content or ed.get("name") or "", ""
 			panel = RunnerPanel(kind, rname, command=command, runner_id=ed.get("runner_id", ""))
+			if rid:
+				self._card_panels[rid] = panel
 			# the card's content is the runner name (== _source of its items). Used to
 			# route a task's live output + buffered output (parallel batch), and to tell a
 			# workflow's OWN notes (_source == workflow name) from its child tasks' items.
