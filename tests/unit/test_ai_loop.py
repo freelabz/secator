@@ -328,12 +328,17 @@ class TestMaxIterationsGracefulStop(unittest.TestCase):
 	(announcing the limit) so the user can resume with 'continue'."""
 
 	def test_notice_message_matches_spec(self):
-		from secator.tasks.ai import _max_iter_stop_notice
+		from secator.tasks.ai import _max_iter_stop_notice, _max_iter_announce
 		msg = _max_iter_stop_notice(100)
 		self.assertIn("Maximum number of allowed iterations (100) has been reached", msg)
 		self.assertIn('Say "continue" if you want me to go on anyways', msg)
 		self.assertIn("Call the stop action", msg)
 		self.assertIn("Do not run any more tools", msg)
+		# the announce line (the fallback stop content if the model ignores the notice) is the
+		# user-facing part only — no tool instruction leaks into it
+		announce = _max_iter_announce(100)
+		self.assertIn(announce, msg)
+		self.assertNotIn("Call the stop action", announce)
 
 	def test_default_max_iterations_is_100(self):
 		from secator.config import CONFIG

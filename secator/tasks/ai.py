@@ -131,12 +131,16 @@ def _reject_malformed_tool_call(runner, name, tc_id, error, extra_fields, reason
 	return _reject_tool_call(runner, name, tc_id, error_msg, reason)
 
 
+def _max_iter_announce(n) -> str:
+	"""The user-facing limit message (also the fallback stop content if the model ignores it)."""
+	return (f'Maximum number of allowed iterations ({n}) has been reached. '
+	        f'Say "continue" if you want me to go on anyways.')
+
+
 def _max_iter_stop_notice(n) -> str:
 	"""Instruction injected for one final turn when the agent-loop cap is hit: ask the model
 	to stop gracefully, announcing the limit so the user can resume with "continue"."""
-	announce = (f'Maximum number of allowed iterations ({n}) has been reached. '
-	            f'Say "continue" if you want me to go on anyways.')
-	return f'{announce}\nCall the stop action now with this message. Do not run any more tools.'
+	return f'{_max_iter_announce(n)}\nCall the stop action now with this message. Do not run any more tools.'
 
 
 def _yield_tool_results(runner, collected):
@@ -1009,6 +1013,30 @@ class ai(PythonRunner):
 					},
 				)
 
+				# One final turn after the max-iter notice: honor ONLY a stop call (reject any
+				# other tool so history stays valid), then END the run regardless of the model's
+				# response — content-only or extra tools never continue the loop.
+				if getattr(self, "_max_iter_final_turn", False):
+					stopped = False
+					for tc in (tool_calls or []):
+						if tc.function.name == "stop":
+							stop_actions = yield from self._process_tool_calls([tc], ctx)
+							if stop_actions:
+								yield from self._dispatch_and_collect(stop_actions, ctx)
+								stopped = True
+						else:
+							yield _reject_tool_call(
+								self, tc.function.name, tc.id,
+								json.dumps({"error": "Max iterations reached — only the stop action is "
+								            "allowed this turn."}, separators=(',', ':')),
+								"max iterations reached")
+					if not stopped:
+						# model ignored the instruction — announce the limit ourselves and stop
+						yield Ai(content=_max_iter_announce(self._max_iter_cap),
+						         ai_type="stopped", _context=dict(self.context))
+					self._save_history()
+					return
+
 				# Process tool calls → validated actions
 				follow_up_choices = None
 				follow_up_multiple = False
@@ -1067,15 +1095,18 @@ class ai(PythonRunner):
 					self._save_history()
 					return
 
-				# Hard turn cap reached while the model is still working: give it ONE final turn
-				# to stop gracefully (announce the limit) instead of an abrupt cutoff — the user
-				# can resume with "continue". Fires once; if the model ignores it, the while-loop
-				# cap and the follow-up/break path below still terminate the run.
-				if (iteration >= self.max_iterations and tool_calls and follow_up_choices is None
-						and not getattr(self, "_max_iter_notice_sent", False)):
-					self._max_iter_notice_sent = True
-					self.history.add_user(maybe_encrypt(_max_iter_stop_notice(self.max_iterations), self.encryptor))
-					self.max_iterations += 1   # allow exactly one more turn for the stop announcement
+				# Hard turn cap reached while the model is still working: give it ONE final turn to
+				# stop gracefully (announce the limit) instead of an abrupt cutoff — the user can
+				# resume with "continue". Based on the CONFIGURED cap: query auto-extensions
+				# (query_extensions, model-driven) must NOT defer it; user follow-up extensions do.
+				# The next turn is terminal (handled by the _max_iter_final_turn block above).
+				cap = self.max_iterations - query_extensions
+				if (iteration >= cap and tool_calls and follow_up_choices is None
+						and not getattr(self, "_max_iter_final_turn", False)):
+					self._max_iter_final_turn = True
+					self._max_iter_cap = cap
+					self.history.add_user(maybe_encrypt(_max_iter_stop_notice(cap), self.encryptor))
+					self.max_iterations = iteration + 1   # allow exactly one more (terminal) turn
 					continue
 
 				# Follow-up / content-only / max_iter → prompt user
@@ -1886,8 +1917,6 @@ class ai(PythonRunner):
 		if extends < _MAX_FOLLOWUP_EXTENSIONS:
 			self.max_iterations += extra_iters
 			self._followup_extensions = extends + 1
-			# user chose to continue — allow a fresh max-iter notice if the new cap is hit
-			self._max_iter_notice_sent = False
 		mode_switched_to = None
 		if response.get("switch_mode"):
 			# An explicit user mode switch is a conscious decision: pin it (leave auto)
