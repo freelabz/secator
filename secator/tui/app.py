@@ -41,6 +41,10 @@ class TUIApp(App):
 	.subview-title { color: #c2a0ff; margin: 0 0 1 0; }
 	.subagent-row { height: 1; }
 	.subagent-row:hover { text-style: bold; }
+	/* the subagent's verdict/handback at the end of its view: red-outlined conclusion box */
+	.handback-panel { border: round #c0392b; margin: 1 0; padding: 0 1; height: auto; background: transparent; }
+	.handback-title { margin: 0 0 1 0; }
+	.handback-usage { color: #6b7187; margin: 1 0 0 0; }
 	.ai { color: #cdd6e4; }
 	.user { color: #7fd1e0; margin: 1 0; }
 	.err { color: #ff6b6b; }
@@ -116,6 +120,10 @@ class TUIApp(App):
 		self._container: RunnerPanel | None = None   # most-recent workflow/scan nesting parent
 		self._containers: dict = {}   # runner_id -> live workflow/scan panel (parallel batch:
 		#                               several stream at once, routed by item _context id)
+		self._leaf_panels: dict = {}  # runner_id -> live leaf task/shell panel. A parallel batch
+		#                               of same-tool tasks shares a _source, so items are routed
+		#                               by their OWNING runner id (task_chunk_id) to avoid
+		#                               cross-wiring both tasks' output into one panel.
 		self._subviews: dict = {}   # secondary-view id -> VerticalScroll (hidden)
 		self._write: VerticalScroll | None = None   # where incoming items are mounted
 		self._steers: list[str] = []
@@ -193,11 +201,11 @@ class TUIApp(App):
 		self.call_from_thread(self._render, item)
 
 	# the child-runner on_line hook feeds the task's command + raw stdout (display-only)
-	def tui_set_command(self, cmd: str, source: str = "") -> None:
-		self.call_from_thread(self._set_command, cmd, source)
+	def tui_set_command(self, cmd: str, source: str = "", rid: str = "") -> None:
+		self.call_from_thread(self._set_command, cmd, source, rid)
 
-	def tui_render_line(self, line: str, source: str = "") -> None:
-		self.call_from_thread(self._render_line, line, source)
+	def tui_render_line(self, line: str, source: str = "", rid: str = "") -> None:
+		self.call_from_thread(self._render_line, line, source, rid)
 
 	# a guardrail-denied action — shown as a collapsible "Blocked <desc>" entry
 	def tui_render_block(self, description: str, reason: str = "", command: str = "", subagent=None) -> None:
@@ -225,6 +233,19 @@ class TUIApp(App):
 				return self._containers[cid]
 		return self._container
 
+	def _owning_id(self, d: dict) -> str:
+		"""The id of the runner that produced this item (task_chunk_id, else task_id). Matches
+		a leaf/container panel's runner_id so a batch of same-_source tasks routes correctly."""
+		ctx = d.get("_context") or {}
+		return ctx.get("task_chunk_id") or ctx.get("task_id") or ""
+
+	def _leaf_for_item(self, d: dict) -> "RunnerPanel | None":
+		"""The batch leaf task/shell panel this item belongs to, matched by owning runner id.
+		Parallel tasks that share a tool name (_source) would otherwise cross-wire via the
+		source/_current heuristic — the id disambiguates them."""
+		rid = self._owning_id(d)
+		return self._leaf_panels.get(rid) if rid else None
+
 	async def _sink_for_source(self, source: str) -> "RunnerPanel | None":
 		# Where a command runner's output lands. In a workflow/scan it's the child's
 		# sub-panel. For a leaf it's the current panel ONLY if its source matches — in a
@@ -243,30 +264,34 @@ class TUIApp(App):
 		return self._line_buffers.setdefault(
 			source, {"cmd": "", "lines": [], "findings": [], "notes": []})
 
-	async def _set_command(self, cmd: str, source: str = "") -> None:
+	async def _set_command(self, cmd: str, source: str = "", rid: str = "") -> None:
 		if not cmd:
 			return
-		sink = await self._sink_for_source(source)
+		# prefer the exact owning panel (by runner id) so a batch of same-tool tasks each
+		# gets its OWN command; fall back to source/_current, else buffer keyed by id.
+		sink = (rid and self._leaf_panels.get(rid)) or await self._sink_for_source(source)
 		if sink is not None:
 			sink.set_command(cmd)
 		else:
-			self._buffer(source)["cmd"] = cmd
+			self._buffer(rid or source)["cmd"] = cmd
 
-	async def _render_line(self, line: str, source: str = "") -> None:
+	async def _render_line(self, line: str, source: str = "", rid: str = "") -> None:
 		if not (isinstance(line, str) and line.strip()):
 			return
-		sink = await self._sink_for_source(source)
+		sink = (rid and self._leaf_panels.get(rid)) or await self._sink_for_source(source)
 		if sink is not None:
 			sink.add_raw(line)
 		else:
-			self._buffer(source)["lines"].append(line)
+			self._buffer(rid or source)["lines"].append(line)
 
 	def _flush_buffer(self, panel: RunnerPanel) -> None:
 		# attach command/output/findings/notes that streamed before this panel's card
-		# rendered (parallel batch: items arrive during execution, cards on completion)
-		if not panel.source:
-			return
-		buf = self._line_buffers.pop(panel.source, None)
+		# rendered (parallel batch: items arrive during execution, cards on completion).
+		# Buffers are keyed by owning runner id (same-tool tasks share a source), falling
+		# back to source for items that carried no id.
+		buf = self._line_buffers.pop(panel.runner_id, None) if panel.runner_id else None
+		if buf is None and panel.source:
+			buf = self._line_buffers.pop(panel.source, None)
 		if not buf:
 			return
 		if buf["cmd"]:
@@ -504,11 +529,20 @@ class TUIApp(App):
 			sp.add_finding(renderable)
 			container.bump()
 			return
+		# a parallel batch of same-tool tasks shares a _source — route to the panel of the
+		# task that actually produced this finding (by owning runner id), else fall back to
+		# the source/_current heuristic, else buffer until the card renders (keyed by id).
+		leaf = self._leaf_for_item(d)
+		if leaf is not None:
+			leaf.add_finding(renderable)
+			return
 		sink = await self._sink_for_source(src)
 		if sink is not None:
 			sink.add_finding(renderable)
-		elif src:
-			self._buffer(src)["findings"].append(renderable)
+			return
+		key = self._owning_id(d) or src
+		if key:
+			self._buffer(key)["findings"].append(renderable)
 		else:
 			await self._append(Static(renderable, classes="out-line"))
 
@@ -527,6 +561,8 @@ class TUIApp(App):
 			self._containers[panel.runner_id or str(id(panel))] = panel
 		else:
 			self._container = None
+			if panel.runner_id:
+				self._leaf_panels[panel.runner_id] = panel
 
 	def _finish_current(self) -> None:
 		# turn boundary (response/stopped/subagent spawn): finish the current leaf AND every

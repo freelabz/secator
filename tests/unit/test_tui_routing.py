@@ -400,3 +400,66 @@ async def _parallel_subagent_rows_body():
 
 def test_parallel_subagent_rows_each_marked_done():
 	_run(_parallel_subagent_rows_body())
+
+
+def _idcard(rid, desc):
+	return {"_type": "ai", "ai_type": "task", "content": "httpx", "_uuid": "c-" + rid,
+	        "_context": {}, "extra_data": {"description": desc, "runner_id": rid}}
+
+
+def _idfinding(rid, uid, url):
+	return {"_type": "url", "_source": "httpx", "_uuid": uid, "_context": {"task_chunk_id": rid},
+	        "url": url, "status_code": 200}
+
+
+async def _same_source_batch_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		# two tasks in a parallel batch share the SAME _source ('httpx') and differ only by
+		# their owning runner id (task_chunk_id) — route by id, not source
+		await app._set_command("httpx -u a.com", "httpx", "A")   # streams before cards
+		await app._render(_idfinding("A", "a1", "http://a.com"))
+		await app._set_command("httpx -u b.com", "httpx", "B")
+		await app._render(_idfinding("B", "b1", "http://b.com"))
+		await app._render(_idcard("A", "probe A"))
+		app._finish_current()
+		await app._render(_idcard("B", "probe B"))
+		app._finish_current()
+		# a late finding streams LIVE after both cards — must still land on A, not the last card
+		await app._render(_idfinding("A", "a2", "http://a.com/late"))
+		await pilot.pause(0.05)
+		panels = {p.rname: p for p in _panels(app)}
+		assert panels["probe A"].command == "httpx -u a.com"
+		assert panels["probe A"].count == 2, "task A lost its findings to the same-source sibling"
+		assert panels["probe B"].command == "httpx -u b.com"
+		assert panels["probe B"].count == 1
+
+
+def test_same_source_batch_routes_by_runner_id():
+	_run(_same_source_batch_body())
+
+
+async def _handback_panel_body():
+	from secator.tui.widgets import HandbackPanel
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		await app._render(_subspawn("A", "probe root"))
+		hb = {"_type": "ai", "ai_type": "response", "content": "Verdict: no vulns found.",
+		      "_uuid": "hb-A", "_context": {"session_id": "parent", "tool_call_id": "tc"},
+		      "extra_data": {"subagent_session_id": "A", "usage": {"tokens": 12345, "cost": 0.0123}}}
+		await app._render(hb)
+		await pilot.pause(0.05)
+		# the verdict renders as a HandbackPanel in the SUBAGENT view, not the main convo
+		sv = app._subviews.get("A")
+		assert sv is not None and len(list(sv.query(HandbackPanel))) == 1
+		assert len(list(app._convo().query(HandbackPanel))) == 0
+		# and the usage line is present
+		from textual.widgets import Static
+		texts = [w.render().plain for w in app.query(Static) if hasattr(w.render(), "plain")]
+		assert any("subagent usage" in t and "12,345 tokens" in t for t in texts), texts
+
+
+def test_handback_renders_in_subview_with_usage():
+	_run(_handback_panel_body())

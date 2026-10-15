@@ -14,7 +14,7 @@ from textual.widgets import Markdown, Static
 
 from secator.tui.app import TUIApp
 from secator.tui.render import finding_text
-from secator.tui.widgets import ActionPanel, RunnerPanel, SubagentRow
+from secator.tui.widgets import ActionPanel, HandbackPanel, RunnerPanel, SubagentRow
 
 
 def _finding_sig(d: dict) -> tuple:
@@ -121,12 +121,20 @@ class AITUI(TUIApp):
 		if at == "response":
 			self._finish_current()
 			# A subagent's handback is a `response` stamped (in run_subagent) with its own
-			# session id — mark THAT row "Ran" (parallel subagents hand back independently).
-			hb_sid = (d.get("extra_data") or {}).get("subagent_session_id")
+			# session id. Mark THAT row "Ran" (parallel subagents hand back independently) and
+			# render the verdict at the END of that subagent's view — a red-outlined box with a
+			# token/cost line, so it reads as the conclusion. It's model-facing in the main
+			# conversation (a tool_result, which the TUI suppresses), so show it ONLY there.
+			ed = d.get("extra_data") or {}
+			hb_sid = ed.get("subagent_session_id")
 			if hb_sid:
 				row = self._active_subagents.pop(hb_sid, None)
 				if row is not None:
 					row.mark_done()
+				sv = await self._ensure_subview(hb_sid)
+				await sv.mount(HandbackPanel(content, ed.get("usage") or {}))
+				sv.scroll_end(animate=False)
+				return
 			await self._append(Markdown(content, classes="ai"))  # AI text as Markdown
 		elif at in ("task", "workflow", "scan", "query", "shell"):
 			ed = d.get("extra_data") or {}
