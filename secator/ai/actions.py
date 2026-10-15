@@ -446,6 +446,14 @@ def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["War
 	per-turn counter. Breadth is only counted within a batch (one LLM turn); a
 	lone spawn is inherently breadth-1.
 	"""
+	# A subagent is already scoped to one task and no longer has the run_subagent tool;
+	# refuse a nested spawn defensively, before the depth/breadth caps, in case a call
+	# somehow reaches here (e.g. a replayed/text-parsed tool call).
+	if ctx.subagent:
+		return Warning(
+			message="Subagent spawn denied: a subagent cannot spawn nested subagents",
+			_context=context,
+		)
 	depth = int(ctx.context.get("ai_subagent_depth", 0) or 0)
 	if depth >= _MAX_SUBAGENT_DEPTH:
 		return Warning(

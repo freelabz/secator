@@ -1730,6 +1730,19 @@ class TestSubagentFanoutCap(unittest.TestCase):
 		mock_task_cls.return_value = runner
 		return runner
 
+	def test_subagent_cannot_spawn_nested_subagent(self):
+		"""A subagent (ctx.subagent=True) is refused a nested spawn, before the depth/breadth caps."""
+		ctx = ActionContext(targets=['t.com'], model='m', subagent=True, context={})
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+
+		with patch('secator.ai.actions.Task') as mock_task_cls:
+			results = list(_run_runner(action, ctx, 'task'))
+
+		mock_task_cls.assert_not_called()  # denied before constructing the child
+		self.assertEqual(len(results), 1)
+		self.assertIsInstance(results[0], Warning)
+		self.assertIn('nested subagents', results[0].message)
+
 	def test_depth_cap_refuses_spawn(self):
 		"""Spawning an AI subagent at/over _MAX_SUBAGENT_DEPTH is denied."""
 		ctx = ActionContext(
