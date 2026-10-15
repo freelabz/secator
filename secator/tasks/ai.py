@@ -1065,6 +1065,18 @@ class ai(PythonRunner):
 					# already asked to go on, so drain it and RESUME the loop instead of
 					# pausing/ending (the drained steer is now in history for the next turn).
 					if (yield from self._drain_steers()):
+						# The user steered instead of answering the stop: expire the remote
+						# pending `stopped` doc so it doesn't dangle (best-effort — never block
+						# the resume). And if we hit the cap this turn, grant one more iteration
+						# so the drained steer actually gets a model turn (the `while` guard
+						# would otherwise exit before processing it).
+						if stop_prompt_uuid and isinstance(self.backend, RemoteBackend):
+							try:
+								self.backend._expire_stale_pending(self.session_id, ai_type="stopped")
+							except Exception:  # noqa: BLE001 - expiry must never block the resume
+								pass
+						if iteration >= self.max_iterations:
+							self.max_iterations = iteration + 1
 						continue
 
 					# Content-only reply is a stop with that text as the reason (no choices).

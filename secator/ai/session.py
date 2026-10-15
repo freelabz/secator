@@ -313,8 +313,10 @@ def restore_history_from_db(session_id, query_engine, model=None, encryptor=None
 	# turn so the respawn CONTINUES instead of re-asking the same question. An
 	# in-run-answered `stopped` prompt is instead followed by its own `prompt` doc (a later
 	# conversational turn), so it is not the tail and is correctly left alone here.
+	# Accept the legacy `follow_up` ai_type too, so a session created BEFORE the
+	# unified-stop refactor still threads its answered tail prompt on resume.
 	answered_fu = [d for d in docs
-		if d.get('ai_type') == 'stopped' and d.get('status') == 'answered' and d.get('answer')]
+		if d.get('ai_type') in ('stopped', 'follow_up') and d.get('status') == 'answered' and d.get('answer')]
 	if answered_fu:
 		latest = answered_fu[-1]  # docs are sorted ascending by _timestamp
 		fu_ts = latest.get('_timestamp', 0)
