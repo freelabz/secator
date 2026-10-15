@@ -440,6 +440,31 @@ def test_same_source_batch_routes_by_runner_id():
 	_run(_same_source_batch_body())
 
 
+async def _unmatched_id_buffers_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		# A's card is up; B's output arrives BEFORE B's card renders. It must buffer by B's
+		# id and land on B — NOT fall through to source routing and get captured by A's
+		# same-tool card.
+		await app._render(_idcard("A", "probe A"))
+		app._finish_current()
+		await app._set_command("httpx -u b.com", "httpx", "B")
+		await app._render(_idfinding("B", "b1", "http://b.com"))
+		await app._render(_idcard("B", "probe B"))
+		app._finish_current()
+		await pilot.pause(0.05)
+		panels = {p.rname: p for p in _panels(app)}
+		assert panels["probe A"].command == "", "A captured B's command (fell through to source)"
+		assert panels["probe A"].count == 0, "A captured B's finding (fell through to source)"
+		assert panels["probe B"].command == "httpx -u b.com"
+		assert panels["probe B"].count == 1
+
+
+def test_unmatched_runner_id_buffers_not_cross_wired():
+	_run(_unmatched_id_buffers_body())
+
+
 async def _handback_panel_body():
 	from secator.tui.widgets import HandbackPanel
 	app = AITUI(None, session="ai", mode="scan")

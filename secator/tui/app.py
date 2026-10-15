@@ -267,41 +267,62 @@ class TUIApp(App):
 	async def _set_command(self, cmd: str, source: str = "", rid: str = "") -> None:
 		if not cmd:
 			return
-		# prefer the exact owning panel (by runner id) so a batch of same-tool tasks each
-		# gets its OWN command; fall back to source/_current, else buffer keyed by id.
-		sink = (rid and self._leaf_panels.get(rid)) or await self._sink_for_source(source)
+		# an item that knows its owning runner id goes ONLY to that panel — or its OWN id
+		# buffer until the card renders. Never fall through to source routing: a same-tool
+		# sibling's card would otherwise capture it. Source routing is for id-less items.
+		if rid:
+			panel = self._leaf_panels.get(rid)
+			if panel is not None:
+				panel.set_command(cmd)
+			else:
+				self._buffer(rid)["cmd"] = cmd
+			return
+		sink = await self._sink_for_source(source)
 		if sink is not None:
 			sink.set_command(cmd)
 		else:
-			self._buffer(rid or source)["cmd"] = cmd
+			self._buffer(source)["cmd"] = cmd
 
 	async def _render_line(self, line: str, source: str = "", rid: str = "") -> None:
 		if not (isinstance(line, str) and line.strip()):
 			return
-		sink = (rid and self._leaf_panels.get(rid)) or await self._sink_for_source(source)
+		if rid:
+			panel = self._leaf_panels.get(rid)
+			if panel is not None:
+				panel.add_raw(line)
+			else:
+				self._buffer(rid)["lines"].append(line)
+			return
+		sink = await self._sink_for_source(source)
 		if sink is not None:
 			sink.add_raw(line)
 		else:
-			self._buffer(rid or source)["lines"].append(line)
+			self._buffer(source)["lines"].append(line)
 
 	def _flush_buffer(self, panel: RunnerPanel) -> None:
 		# attach command/output/findings/notes that streamed before this panel's card
 		# rendered (parallel batch: items arrive during execution, cards on completion).
-		# Buffers are keyed by owning runner id (same-tool tasks share a source), falling
-		# back to source for items that carried no id.
-		buf = self._line_buffers.pop(panel.runner_id, None) if panel.runner_id else None
-		if buf is None and panel.source:
-			buf = self._line_buffers.pop(panel.source, None)
-		if not buf:
-			return
-		if buf["cmd"]:
-			panel.set_command(buf["cmd"])
-		for ln in buf["lines"]:
-			panel.add_raw(ln)
-		for f in buf["findings"]:
-			panel.add_finding(f)
-		for n in buf["notes"]:
-			panel.add_note(n)
+		# Items are keyed by owning runner id (same-tool tasks share a source); drain BOTH
+		# the id buffer AND the source buffer, since id-less items for the same card (if any)
+		# land in the source buffer.
+		bufs = []
+		if panel.runner_id:
+			b = self._line_buffers.pop(panel.runner_id, None)
+			if b:
+				bufs.append(b)
+		if panel.source:
+			b = self._line_buffers.pop(panel.source, None)
+			if b:
+				bufs.append(b)
+		for buf in bufs:
+			if buf["cmd"]:
+				panel.set_command(buf["cmd"])
+			for ln in buf["lines"]:
+				panel.add_raw(ln)
+			for f in buf["findings"]:
+				panel.add_finding(f)
+			for n in buf["notes"]:
+				panel.add_note(n)
 
 	# ---- mounting + views ----
 	def _convo(self) -> VerticalScroll:
@@ -529,20 +550,23 @@ class TUIApp(App):
 			sp.add_finding(renderable)
 			container.bump()
 			return
-		# a parallel batch of same-tool tasks shares a _source — route to the panel of the
-		# task that actually produced this finding (by owning runner id), else fall back to
-		# the source/_current heuristic, else buffer until the card renders (keyed by id).
-		leaf = self._leaf_for_item(d)
-		if leaf is not None:
-			leaf.add_finding(renderable)
+		# a parallel batch of same-tool tasks shares a _source — route by the OWNING runner id
+		# so each task's findings land on its own card. An item that knows its id goes ONLY to
+		# that panel (or its id buffer until the card renders); it must NOT fall through to
+		# source routing, where a same-tool sibling's card would capture it.
+		oid = self._owning_id(d)
+		if oid:
+			leaf = self._leaf_panels.get(oid)
+			if leaf is not None:
+				leaf.add_finding(renderable)
+			else:
+				self._buffer(oid)["findings"].append(renderable)
 			return
 		sink = await self._sink_for_source(src)
 		if sink is not None:
 			sink.add_finding(renderable)
-			return
-		key = self._owning_id(d) or src
-		if key:
-			self._buffer(key)["findings"].append(renderable)
+		elif src:
+			self._buffer(src)["findings"].append(renderable)
 		else:
 			await self._append(Static(renderable, classes="out-line"))
 
