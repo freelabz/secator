@@ -130,6 +130,12 @@ class TUIApp(App):
 		self._line_buffers: dict = {}      # source -> {cmd, lines} buffered until its card renders
 		self._shown_uuids: set = set()     # findings already rendered inline (skip dups, e.g. a
 		#                                    live-streamed finding later re-read via query_workspace)
+		# Startup race: the runner takes a few seconds to build (LLM/driver/system-prompt setup)
+		# before it asks for the first prompt. Input typed in that window is held here and handed
+		# to the first ask_user instead of being dropped into _steers. `-p` supplies the prompt,
+		# so there's nothing to await.
+		self._prefill: str = ""
+		self._awaiting_first_prompt: bool = not bool(self._initial_prompt)
 
 	def compose(self) -> ComposeResult:
 		yield Header(show_clock=True)
@@ -164,6 +170,10 @@ class TUIApp(App):
 			self.call_later(self._append, Static(
 				Text.from_markup(f"[bold cyan]›[/] {escape(self._initial_prompt)}"), classes="user"))
 		if self._runner_builder is not None:
+			# The runner build (LLM/driver/system-prompt setup) blocks for a few seconds before
+			# it produces anything or asks for the first prompt — show a spinner so the input
+			# doesn't look dead. The runner's own status / first prompt replaces it.
+			self._set_status("starting…")
 			threading.Thread(target=self._consume, daemon=True).start()
 
 	# worker: build + drive the runner. Items are rendered via the on_item hook the
@@ -527,6 +537,12 @@ class TUIApp(App):
 			ev, holder, choices, ptype = pend
 			self._resolve_pending(self._resolve_answer(text, choices, ptype))
 			return
+		# Typed before the runner finished starting up and asked for the first prompt — hold it
+		# (the first ask_user consumes it). Without this it would leak into _steers and be lost
+		# as the initial prompt, forcing the user to type it again.
+		if self._awaiting_first_prompt and not self._prefill:
+			self._prefill = text
+			return
 		with self._steers_lock:
 			self._steers.append(text)
 
@@ -584,6 +600,14 @@ class TUIApp(App):
 		self._pending_ask = pending
 		self._set_status("", False)   # nothing is running while we wait for the user
 		choices, ptype = pending[2], pending[3]
+		# First ask after startup: if the user already typed a prompt while the runner was
+		# building, answer with it immediately instead of waiting (and stop holding prefill).
+		if self._awaiting_first_prompt:
+			self._awaiting_first_prompt = False
+			if self._prefill:
+				prefill, self._prefill = self._prefill, ""
+				self._resolve_pending(self._resolve_answer(prefill, choices, ptype))
+				return
 		if ptype == "permission":
 			# neutral Approve / Approve all / Deny list (typing a/aa/d still works)
 			self._convo().mount(PermissionPrompt(question, self._resolve_pending))

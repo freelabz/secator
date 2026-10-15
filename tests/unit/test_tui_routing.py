@@ -6,11 +6,13 @@ hooks) BEFORE its card renders, so they must be buffered by _source and flushed 
 the right panel instead of leaking to the top level or cross-wiring to a stale panel.
 """
 import asyncio
+import threading
 
 import pytest
 
 pytest.importorskip("textual")
 
+from textual.widgets import Input            # noqa: E402
 from secator.tui.ai import AITUI          # noqa: E402
 from secator.tui.widgets import RunnerPanel  # noqa: E402
 
@@ -247,3 +249,44 @@ async def _tool_result_and_mode_body():
 
 def test_tool_result_errors_and_mode_change_render():
 	_run(_tool_result_and_mode_body())
+
+
+async def _startup_prefill_body():
+	# no -p prompt -> the runner will ask for the first prompt once it finishes building
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		assert app._awaiting_first_prompt is True
+		inp = app.query_one("#input-box Input", Input)
+		# user types a prompt BEFORE the runner asked for one (the startup race)
+		await app.on_input_submitted(Input.Submitted(inp, "run nmap on scanme.nmap.org"))
+		# held as the initial prompt, NOT leaked into steers (which would lose it)
+		assert app._prefill == "run nmap on scanme.nmap.org"
+		assert app.tui_poll_steers() == []
+		# the runner now asks for the first prompt — the prefill answers it immediately
+		ev, holder = threading.Event(), {}
+		app._show_prompt("What do you want to do?", (ev, holder, [], "follow_up"))
+		assert holder["value"] == "run nmap on scanme.nmap.org"
+		assert ev.is_set()
+		assert app._prefill == ""
+		assert app._awaiting_first_prompt is False
+
+
+def test_startup_prefill_feeds_first_prompt():
+	_run(_startup_prefill_body())
+
+
+async def _steer_after_first_prompt_body():
+	# with -p, the prompt is provided -> early input is a steer, never held as prefill
+	app = AITUI(None, session="ai", mode="scan", initial_prompt="run host_recon on x")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		assert app._awaiting_first_prompt is False
+		inp = app.query_one("#input-box Input", Input)
+		await app.on_input_submitted(Input.Submitted(inp, "focus on port 443"))
+		assert app._prefill == ""
+		assert app.tui_poll_steers() == ["focus on port 443"]
+
+
+def test_input_with_initial_prompt_is_steer():
+	_run(_steer_after_first_prompt_body())
