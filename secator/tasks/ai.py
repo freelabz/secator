@@ -1016,17 +1016,19 @@ class ai(PythonRunner):
 				# One final turn after the max-iter notice: honor ONLY a stop call (reject any
 				# other tool so history stays valid), then END the run regardless of the model's
 				# response — content-only or extra tools never continue the loop.
-				if getattr(self, "_max_iter_final_turn", False):
+				# `is True` (not truthy): tolerates a MagicMock self in unit tests.
+				if getattr(self, "_max_iter_final_turn", False) is True:
 					stopped = False
 					for tc in (tool_calls or []):
-						if tc.function.name == "stop":
+						name = getattr(getattr(tc, "function", None), "name", "")
+						if name == "stop":
 							stop_actions = yield from self._process_tool_calls([tc], ctx)
 							if stop_actions:
 								yield from self._dispatch_and_collect(stop_actions, ctx)
 								stopped = True
-						else:
+						elif name:
 							yield _reject_tool_call(
-								self, tc.function.name, tc.id,
+								self, name, tc.id,
 								json.dumps({"error": "Max iterations reached — only the stop action is "
 								            "allowed this turn."}, separators=(',', ':')),
 								"max iterations reached")
@@ -1097,12 +1099,14 @@ class ai(PythonRunner):
 
 				# Hard turn cap reached while the model is still working: give it ONE final turn to
 				# stop gracefully (announce the limit) instead of an abrupt cutoff — the user can
-				# resume with "continue". Based on the CONFIGURED cap: query auto-extensions
-				# (query_extensions, model-driven) must NOT defer it; user follow-up extensions do.
-				# The next turn is terminal (handled by the _max_iter_final_turn block above).
+				# resume with "continue". INTERACTIVE only: remote (web) keeps the clean break below
+				# (it continues via session resume, not a terminal stop turn). Based on the CONFIGURED
+				# cap: query auto-extensions (model-driven) must NOT defer it; user follow-up
+				# extensions do. The next turn is terminal (handled by the _max_iter_final_turn block).
 				cap = self.max_iterations - query_extensions
 				if (iteration >= cap and tool_calls and follow_up_choices is None
-						and not getattr(self, "_max_iter_final_turn", False)):
+						and not isinstance(self.backend, RemoteBackend)
+						and getattr(self, "_max_iter_final_turn", False) is not True):
 					self._max_iter_final_turn = True
 					self._max_iter_cap = cap
 					self.history.add_user(maybe_encrypt(_max_iter_stop_notice(cap), self.encryptor))
