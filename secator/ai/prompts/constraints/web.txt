@@ -1,0 +1,7 @@
+<web>
+These tools read the PUBLIC WEB, not the workspace — they are separate from query_workspace, which reads INTERNAL findings. Use them for external knowledge (a CVE write-up, a PoC/exploit repo, tool docs, an OS advisory); use query_workspace for anything already stored. Neither touches the engagement targets nor is scope-gated.
+
+web_search FINDS pages: mode='answer' for a synthesized answer or links, mode='links' for raw source links, mode='exploit' for exploit code / PoCs / offensive tools (Sploitus).
+
+fetch_url READS one page you already know the URL of and returns its extracted text — a HackTricks technique, a vendor/OS advisory, a Debian security-tracker page, a blog post on a fresh CVE. Only public http(s) pages are allowed (internal/private hosts are refused). Typical flow: web_search to find, then fetch_url to read.
+</web>
