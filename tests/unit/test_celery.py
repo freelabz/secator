@@ -79,6 +79,32 @@ class TestCelery(unittest.TestCase):
 		                 'backfill must add_result the re-surfaced item with hooks=False (no on_item re-fire)')
 		self.assertIn('persisted-uuid-1', wf.uuids, 'backfill must still register the uuid for dedup')
 
+	def test_sync_backfill_skips_ai_conversation_items(self):
+		"""The backfill recovers FINDINGS the live stream missed — never `Ai` conversation/
+		control items. Those stream live; their live copy carries _uuid='' so the uuid guard
+		can't dedup the store-assigned uuid, and re-surfacing them replays a whole subagent
+		transcript to the parent after handoff (every step double-rendered)."""
+		from secator.runners import Workflow
+		from secator.output_types import Ai
+		from secator.loader import get_configs_by_type
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		wf = Workflow(workflows[0], inputs=['example.com'], context=dict(self.ctx))
+		# A real finding + an Ai conversation item, both persisted and NOT in `uuids`.
+		finding = Url(url='http://child.example', status_code=200, method='GET', _source='child')
+		finding._uuid = 'find-uuid-1'
+		ai_item = Ai(content='subagent step', ai_type='response', _source='child')
+		ai_item._uuid = 'ai-uuid-1'
+		wf._view = lambda _type=None: [ai_item, finding]
+		wf.yielder = lambda: iter([])
+
+		yielded = list(wf)
+
+		self.assertIn(finding, yielded, 'backfill must still re-surface a persisted finding')
+		self.assertNotIn(ai_item, yielded, 'backfill must NOT re-surface an Ai conversation item')
+
 	def test_httpx_chain(self):
 		from secator.tasks import httpx
 		if 'httpx' not in TEST_TASK_NAMES:

@@ -17,7 +17,7 @@ from secator.definitions import ADDONS_ENABLED, STATE_COLORS
 from secator.celery_utils import CeleryData
 from secator.config import CONFIG
 from secator.output_types import (
-	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
+	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, Ai, is_output_type,
 )
 from secator.report import Report
 from secator.rich import console, console_stdout, live_is_active
@@ -748,6 +748,13 @@ class Runner:
 			# the sync backfill only RE-SURFACES items to the iterator. Applies to Command and Workflow.
 			if not self.no_process:
 				for item in self.results:
+					# Backfill recovers FINDINGS the live stream missed — never `Ai`
+					# conversation/control items. Those are streamed live; re-surfacing them
+					# (their live copy carried _uuid='' so this uuid guard can't catch the
+					# store-assigned one) replays a whole subagent transcript to the parent
+					# after handoff, double-rendering every step. See the contract above.
+					if isinstance(item, Ai):
+						continue
 					if getattr(item, '_uuid', None) not in self.uuids:
 						# Already persisted (read back from the store) — re-surface to the iterator
 						# WITHOUT re-firing on_item: a child's items aren't in THIS runner's `uuids`,
