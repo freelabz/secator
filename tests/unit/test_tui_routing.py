@@ -341,3 +341,62 @@ async def _subview_hides_input_body():
 
 def test_subview_hides_input_box():
 	_run(_subview_hides_input_body())
+
+
+def _subspawn(sid, label):
+	return {"_type": "ai", "ai_type": "task", "content": "ai", "_uuid": "c-" + sid,
+	        "_context": {"session_id": "parent"},
+	        "extra_data": {"subagent": label, "subagent_session_id": sid, "runner_id": sid}}
+
+
+def _subitem(sid, uid, text):
+	return {"_type": "ai", "ai_type": "response", "content": text, "_uuid": uid,
+	        "_context": {"subagent": True, "session_id": sid}}
+
+
+def _handback(sid):
+	return {"_type": "ai", "ai_type": "response", "content": "handback " + sid, "_uuid": "hb-" + sid,
+	        "_context": {"session_id": "parent", "tool_call_id": "tc-" + sid},
+	        "extra_data": {"subagent_session_id": sid}}
+
+
+async def _ai_item_dedup_body():
+	from textual.widgets import Markdown
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		base = len(list(app.query(Markdown)))
+		# multi-level display hooks can feed the SAME ai item twice (subagent + parent levels).
+		# A truthy _uuid must dedup it, exactly as findings are deduped.
+		item = _subitem("A", "u-step-1", "a subagent step")
+		await app._render(item)
+		await app._render(item)
+		await pilot.pause(0.05)
+		assert len(list(app.query(Markdown))) - base == 1, "ai item with same _uuid must render once"
+
+
+def test_ai_items_deduped_by_uuid():
+	_run(_ai_item_dedup_body())
+
+
+async def _parallel_subagent_rows_body():
+	from secator.tui.widgets import SubagentRow
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		# two parallel subagents spawn, stream interleaved, then each hands back
+		await app._render(_subspawn("A", "probe root"))
+		await app._render(_subspawn("B", "probe app"))
+		await app._render(_subitem("A", "a1", "step"))
+		await app._render(_subitem("B", "b1", "step"))
+		await app._render(_handback("A"))
+		await app._render(_handback("B"))
+		await pilot.pause(0.05)
+		rows = {r.sid: r for r in app.query(SubagentRow)}
+		# BOTH rows marked "Ran" — not just the last-spawned one
+		assert rows["A"].done is True, "first parallel subagent row stuck on 'Running'"
+		assert rows["B"].done is True
+
+
+def test_parallel_subagent_rows_each_marked_done():
+	_run(_parallel_subagent_rows_body())

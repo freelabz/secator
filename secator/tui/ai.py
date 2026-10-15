@@ -50,7 +50,10 @@ class AITUI(TUIApp):
 			initial_prompt=initial_prompt,
 		)
 		self._in_subagent: str | None = None          # subagent session we're writing into
-		self._active_subagent: SubagentRow | None = None
+		# sid -> SubagentRow for every spawned subagent still running. A dict (not a single
+		# ref) so PARALLEL subagents each keep their own row — each is marked "Ran" when ITS
+		# handback arrives (correlated by subagent_session_id), not when the last one does.
+		self._active_subagents: dict = {}
 		# Signatures of findings shown via an add_finding action row. _pending holds the
 		# finding the handler yields right after (no _uuid yet) so it isn't drawn again as a
 		# standalone card; _suppressed keeps that signature until the finding is re-read with a
@@ -86,10 +89,9 @@ class AITUI(TUIApp):
 		if ctx.get("subagent"):
 			self._in_subagent = ctx.get("session_id") or "subagent"
 			return await self._ensure_subview(self._in_subagent)
-		# control returned to the main thread: the active subagent is done
-		if self._in_subagent is not None and self._active_subagent is not None:
-			self._active_subagent.mark_done()
-			self._active_subagent = None
+		# A main-thread item: a subagent row is marked "Ran" by its own handback (see the
+		# `response` branch in _render_ai), not here — a single "control returned" heuristic
+		# can't tell WHICH of several parallel subagents just finished.
 		self._in_subagent = None
 		return self._convo()
 
@@ -106,8 +108,25 @@ class AITUI(TUIApp):
 			# user-origin message: already echoed on submit — don't double-render
 			# from the item stream
 			return
+		# Multi-level display hooks (a child runner's own hook + the parent's) can feed the
+		# SAME ai item more than once — most visibly a subagent's steps, which fire at both
+		# the subagent and parent levels. Findings are _uuid-deduped in the base; dedup ai
+		# items the same way (completes the attach_display_hooks "UI dedups by _uuid"
+		# contract). Only truthy uuids — unpersisted items (and test fixtures) carry ''.
+		uid = d.get("_uuid")
+		if uid:
+			if uid in self._shown_uuids:
+				return
+			self._shown_uuids.add(uid)
 		if at == "response":
 			self._finish_current()
+			# A subagent's handback is a `response` stamped (in run_subagent) with its own
+			# session id — mark THAT row "Ran" (parallel subagents hand back independently).
+			hb_sid = (d.get("extra_data") or {}).get("subagent_session_id")
+			if hb_sid:
+				row = self._active_subagents.pop(hb_sid, None)
+				if row is not None:
+					row.mark_done()
 			await self._append(Markdown(content, classes="ai"))  # AI text as Markdown
 		elif at in ("task", "workflow", "scan", "query", "shell"):
 			ed = d.get("extra_data") or {}
@@ -124,7 +143,7 @@ class AITUI(TUIApp):
 						Text.from_markup(f"[b]Subagent[/] [dim]{escape(label)}[/]"), classes="subview-title"))
 				self._finish_current()
 				row = SubagentRow(label, sid)
-				self._active_subagent = row
+				self._active_subagents[sid] = row
 				await self._append(row)
 				return
 			if at == "shell":

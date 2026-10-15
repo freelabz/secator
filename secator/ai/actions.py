@@ -798,7 +798,10 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		handback = (last_response.strip() or "(subagent produced no summary)") + "\n[subagent handback]" + note
 		# Stamped for the PARENT conversation (card_context strips the subagent marker) and
 		# with THIS run_task's tool_call_id so it becomes the tool_result the parent reads.
+		# Carries the subagent session id so a client can mark THIS subagent's row done
+		# (parallel subagents each hand back independently).
 		yield Ai(content=handback, ai_type="response",
+		         extra_data={"subagent_session_id": sub_session},
 		         _context={**card_context, "tool_call_id": action.get("tool_call_id")})
 	else:
 		yield from runner
