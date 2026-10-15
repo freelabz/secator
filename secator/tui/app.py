@@ -306,12 +306,18 @@ class TUIApp(App):
 			s.display = False
 		sv.display = True
 		self.query_one("#backbar").display = True
+		# A subview is a read-only drill-in (e.g. a subagent's own conversation) — there is
+		# nothing to steer or answer there, so hide the input box to avoid implying otherwise.
+		self.query_one("#input-box").display = False
 
 	def _show_main(self) -> None:
 		for s in self._subviews.values():
 			s.display = False
 		self._convo().display = True
 		self.query_one("#backbar").display = False
+		# Back on the main conversation: restore the input box and refocus it.
+		self.query_one("#input-box").display = True
+		self.query_one("#input-box Input", Input).focus()
 
 	def _active_view(self) -> VerticalScroll:
 		# the currently visible scroll (an open secondary view, else the main convo)
@@ -440,6 +446,10 @@ class TUIApp(App):
 		"""Handle a frontend-specific item type. Return True if handled (base: no)."""
 		return False
 
+	def _should_skip_finding(self, d: dict) -> bool:
+		"""Frontend hook: True to suppress rendering this finding (base: never)."""
+		return False
+
 	async def _render(self, item) -> None:
 		d = item.toDict() if hasattr(item, "toDict") else dict(item)
 		self._write = await self._route_write(d)
@@ -469,6 +479,10 @@ class TUIApp(App):
 				await self._append(Static(renderable, classes="ai"))
 			return
 		if t in ("progress", "stat", "state", "target"):  # execution / plumbing types
+			return
+		# frontend hook: a finding already surfaced another way (e.g. an AI add_finding row
+		# that renders it expandable) is suppressed here so it isn't shown twice.
+		if self._should_skip_finding(d):
 			return
 		# dedup: a finding can arrive live (child on_item display hook) and again when the
 		# AI re-reads it via query_workspace — only render it once. Guard on a TRUTHY uuid
