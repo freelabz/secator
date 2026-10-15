@@ -947,6 +947,43 @@ class TestRunRunner(unittest.TestCase):
 		self.assertNotIn('NOTHING', handback.content)
 		self.assertIn('handback', handback.content.lower())
 
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_subagent_conversation_not_bubbled_only_findings(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""A subagent's own conversation (Ai items) must NOT bubble up to the parent: its
+		transcript lives under its own session (shown in the drill-in view), and re-yielding
+		those messages makes the parent re-render the whole transcript (Ai items aren't
+		_uuid-deduped like findings). Only real findings bubble up; the parent gets the handback."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		vuln = Vulnerability(name='SQLi', matched_at='http://t/login', severity='high',
+							 _source='child', _context={"subagent": "Exploit Y"})
+		sub_out = [
+			Ai(content="probing the login form", ai_type="response", _context={"subagent": "Exploit Y"}),
+			Ai(content="sqlmap ...", ai_type="shell", _context={"subagent": "Exploit Y"}),
+			vuln,
+			Ai(content="done, SQLi confirmed", ai_type="response", _context={"subagent": "Exploit Y"}),
+		]
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter(sub_out); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t'], model='m', session_id='parent-sess',
+							context={'workspace_id': 'ws1', 'session_id': 'parent-sess', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'], 'opts': {'prompt': 'obj'},
+					  'description': 'Exploit Y', 'tool_call_id': 'tc-9'}
+			results = list(_run_runner(action, ctx, 'task'))
+		# the vuln finding bubbles up
+		self.assertIn(vuln, results)
+		# NONE of the subagent's own conversation items bubble up (they carry the subagent marker;
+		# the parent card + handback are stamped for the parent session, marker stripped)
+		leaked = [r for r in results if isinstance(r, Ai) and r._context.get('subagent')]
+		self.assertEqual(leaked, [], 'subagent conversation items must not bubble up to the parent')
+		# the handback still carries the subagent's final summary
+		handback = results[-1]
+		self.assertEqual(handback.ai_type, 'response')
+		self.assertEqual(handback._context.get('tool_call_id'), 'tc-9')
+		self.assertIn('SQLi confirmed', handback.content)
+
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

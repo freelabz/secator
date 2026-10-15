@@ -79,52 +79,6 @@ class TestCelery(unittest.TestCase):
 		                 'backfill must add_result the re-surfaced item with hooks=False (no on_item re-fire)')
 		self.assertIn('persisted-uuid-1', wf.uuids, 'backfill must still register the uuid for dedup')
 
-	def test_sync_backfill_skips_ai_conversation_items(self):
-		"""The backfill recovers FINDINGS the live stream missed — never `Ai` conversation/
-		control items. Those stream live; their live copy carries _uuid='' so the uuid guard
-		can't dedup the store-assigned uuid, and re-surfacing them replays a whole subagent
-		transcript to the parent after handoff (every step double-rendered)."""
-		from secator.runners import Workflow
-		from secator.output_types import Ai
-		from secator.loader import get_configs_by_type
-		workflows = get_configs_by_type('workflow')
-		if not workflows:
-			self.skipTest('No workflows configured')
-
-		wf = Workflow(workflows[0], inputs=['example.com'], context=dict(self.ctx))
-		# A real finding + an Ai conversation item, both persisted and NOT in `uuids`.
-		finding = Url(url='http://child.example', status_code=200, method='GET', _source='child')
-		finding._uuid = 'find-uuid-1'
-		ai_item = Ai(content='subagent step', ai_type='response', _source='child')
-		ai_item._uuid = 'ai-uuid-1'
-		wf._view = lambda _type=None: [ai_item, finding]
-		wf.yielder = lambda: iter([])
-
-		yielded = list(wf)
-
-		self.assertIn(finding, yielded, 'backfill must still re-surface a persisted finding')
-		self.assertNotIn(ai_item, yielded, 'backfill must NOT re-surface an Ai conversation item')
-
-	def test_live_ai_items_are_yielded_to_the_iterator(self):
-		"""Skipping Ai items in the BACKFILL must not affect the LIVE stream. The live path
-		(`for item in self.yielder(): yield from self._process_item(item)`) is untouched by the
-		change — an Ai item the runner produces is still yielded to the iterator. This is what a
-		library consumer sees, e.g. `for item in ai(..., prompt=...)`."""
-		from secator.runners import Workflow
-		from secator.output_types import Ai
-		from secator.loader import get_configs_by_type
-		workflows = get_configs_by_type('workflow')
-		if not workflows:
-			self.skipTest('No workflows configured')
-
-		wf = Workflow(workflows[0], inputs=['example.com'], context=dict(self.ctx))
-		live_ai = Ai(content='hello from the loop', ai_type='response', _source=wf.unique_name)
-		# The live yield path is the ONLY source of Ai items for a consumer; the backfill change
-		# lives in a separate block that runs after the yielder is exhausted.
-		yielded = list(wf._process_item(live_ai))
-
-		self.assertIn(live_ai, yielded, 'the live Ai item must still be yielded to the iterator')
-
 	def test_httpx_chain(self):
 		from secator.tasks import httpx
 		if 'httpx' not in TEST_TASK_NAMES:
