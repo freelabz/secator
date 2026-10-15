@@ -778,17 +778,30 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		persisted = []
 		for out in runner:
 			if isinstance(out, Ai):
+				# The subagent's conversation lives under its OWN session (its transcript,
+				# shown in the drill-in view and streamed there by its own display hook).
+				# Do NOT bubble those individual messages up to the parent: re-yielding them
+				# makes the parent re-render the whole transcript (its items aren't _uuid-
+				# deduped like findings) and pollutes the parent's stream/store. The parent
+				# gets ONE clean summary — the handback below. Capture what we need first.
 				if out.ai_type == "response" and (out.content or "").strip():
 					last_response = out.content
 				elif out.ai_type in _PERSIST_AI_TYPES:
 					persisted.append(out.ai_type)
-			yield out
+				continue
+			# Only real findings bubble up to the parent (FINDING_TYPES includes `ai`, already
+			# handled above). Execution plumbing/notes stay in the subagent's own transcript.
+			if isinstance(out, tuple(FINDING_TYPES)):
+				yield out
 		note = (f" Persisted: {', '.join(persisted)}." if persisted
 		        else " Persisted: NOTHING (subagent made no add_finding/mark_vuln_* call).")
 		handback = (last_response.strip() or "(subagent produced no summary)") + "\n[subagent handback]" + note
 		# Stamped for the PARENT conversation (card_context strips the subagent marker) and
 		# with THIS run_task's tool_call_id so it becomes the tool_result the parent reads.
+		# Carries the subagent session id so a client can mark THIS subagent's row done
+		# (parallel subagents each hand back independently).
 		yield Ai(content=handback, ai_type="response",
+		         extra_data={"subagent_session_id": sub_session},
 		         _context={**card_context, "tool_call_id": action.get("tool_call_id")})
 	else:
 		yield from runner
