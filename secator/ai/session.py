@@ -300,21 +300,23 @@ def restore_history_from_db(session_id, query_engine, model=None, encryptor=None
 			# A mid-flight steer is a real user turn: preserve it as a user message on
 			# respawn (mirroring the live-loop framing) so the redirect survives a restore.
 			history.add_user(maybe_encrypt(f'[User interjected]: {content}', encryptor))
-		# All other ai_types (action displays, follow_up/permission prompts,
+		# All other ai_types (action displays, stopped/permission prompts,
 		# shell_output, summaries) are channel/UX artifacts, not conversation
 		# turns — intentionally skipped for a valid litellm transcript.
 
-	# A follow_up that timed out and was answered AFTER the worker exited never got
+	# A `stopped` prompt that timed out and was answered AFTER the worker exited never got
 	# its answer persisted as a conversation turn: the live path does that in
 	# _prompt_and_redetect (a new `prompt` doc), but the timed-out worker died first,
-	# so the answer only lives on the follow_up doc's `answer` field — which the
-	# passes above skip. If such an answered follow_up is the conversation TAIL
+	# so the answer only lives on the `stopped` doc's `answer` field — which the
+	# passes above skip. If such an answered `stopped` prompt is the conversation TAIL
 	# (nothing conversational persisted after it), thread its answer as the next user
 	# turn so the respawn CONTINUES instead of re-asking the same question. An
-	# in-run-answered follow_up is instead followed by its own `prompt` doc (a later
+	# in-run-answered `stopped` prompt is instead followed by its own `prompt` doc (a later
 	# conversational turn), so it is not the tail and is correctly left alone here.
+	# Accept the legacy `follow_up` ai_type too, so a session created BEFORE the
+	# unified-stop refactor still threads its answered tail prompt on resume.
 	answered_fu = [d for d in docs
-		if d.get('ai_type') == 'follow_up' and d.get('status') == 'answered' and d.get('answer')]
+		if d.get('ai_type') in ('stopped', 'follow_up') and d.get('status') == 'answered' and d.get('answer')]
 	if answered_fu:
 		latest = answered_fu[-1]  # docs are sorted ascending by _timestamp
 		fu_ts = latest.get('_timestamp', 0)

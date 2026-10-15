@@ -1202,7 +1202,7 @@ def prompt_user(history, max_iterations=10, choices=None,
 	Args:
 		history: ChatHistory instance (read-only, used for token counts and compaction).
 		max_iterations: Current max iterations (used for continue message).
-		choices: Optional list of choice strings from LLM follow_up action.
+		choices: Optional list of choice strings from the LLM's stop action.
 		model: Optional LLM model name for token count display.
 
 	Returns:
@@ -1236,7 +1236,7 @@ def prompt_user(history, max_iterations=10, choices=None,
 				options.append({
 					"label": choice,
 					"input": True,
-					"action": "follow_up",
+					"action": "choice",
 					"selectable": True,
 				})
 
@@ -1298,7 +1298,7 @@ def prompt_user(history, max_iterations=10, choices=None,
 			summary_msg = value if value else "Summarize all findings so far and provide a final report."
 			return {"answer": summary_msg, "extra_iters": 1, "switch_mode": "chat"}
 
-		if action == "follow_up":
+		if action == "choice":
 			choice_label = options[idx].get("label", "")
 			msg = choice_label
 			if value:

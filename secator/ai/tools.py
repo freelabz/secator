@@ -11,7 +11,6 @@ TOOL_ACTION_MAP = {
 	"run_workflow": "workflow",
 	"run_shell": "shell",
 	"query_workspace": "query",
-	"follow_up": "follow_up",
 	"add_finding": "add_finding",
 	"mark_vuln_exploited": "mark_vuln_exploited",
 	"mark_vuln_false_positive": "mark_vuln_false_positive",
@@ -195,32 +194,6 @@ TOOL_SCHEMAS = {
 					}
 				},
 				"required": ["query"]
-			}
-		}
-	},
-	"follow_up": {
-		"type": "function",
-		"function": {
-			"name": "follow_up",
-			"description": "Ask the user a follow-up question to clarify next steps or present options.",
-			"parameters": {
-				"type": "object",
-				"properties": {
-					"reason": {
-						"type": "string",
-						"description": "Why follow-up is needed."
-					},
-					"choices": {
-						"type": "array",
-						"items": {"type": "string"},
-						"description": "Optional list of concrete action choices for the user."
-					},
-					"multiple": {
-						"type": "boolean",
-						"description": "Set true when the user may select SEVERAL of the choices (multi-select); omit or false for a pick-exactly-one question."  # noqa: E501
-					}
-				},
-				"required": ["reason"]
 			}
 		}
 	},
@@ -455,12 +428,48 @@ TOOL_SCHEMAS = {
 }
 
 
-# Stop tool schema — NOT in TOOL_SCHEMAS (injected by AutoBackend via get_extra_tools)
+# Stop tool schemas — NOT in TOOL_SCHEMAS; injected per-backend via get_extra_tools().
+# `stop` is the SINGLE end-of-turn signal in every mode: the backend's own ask_user
+# decides what happens next (interactive pause / wait, or non-interactive end).
+
+# Interactive stop (TUI / CLI / remote): may carry `choices`/`multiple` so the pause
+# offers the user concrete next steps to pick from.
 STOP_TOOL_SCHEMA = {
 	"type": "function",
 	"function": {
 		"name": "stop",
-		"description": "Stop the current session. Call when the user request has been fulfilled or when you encounter a blocker that cannot be resolved without user input.",  # noqa: E501
+		"description": "End your turn. Call when the user's request has been fulfilled, or when you hit a blocker "  # noqa: E501
+		               "you cannot resolve without user input. Offer concrete next steps via `choices` (renders as "  # noqa: E501
+		               "clickable buttons); omit `choices` when the task is simply complete.",
+		"parameters": {
+			"type": "object",
+			"properties": {
+				"reason": {
+					"type": "string",
+					"description": "Why you are stopping (summary of accomplishments or description of blocker)."
+				},
+				"choices": {
+					"type": "array",
+					"items": {"type": "string"},
+					"description": "Optional list of concrete action choices to offer the user as next steps."
+				},
+				"multiple": {
+					"type": "boolean",
+					"description": "Set true when the user may select SEVERAL of the choices (multi-select); omit or false for a pick-exactly-one question."  # noqa: E501
+				}
+			},
+			"required": ["reason"]
+		}
+	}
+}
+
+# Non-interactive stop (AutoBackend: subagents + autonomous workers): a DEFINITIVE stop,
+# so NO `choices` — there is no user to pick a next step.
+STOP_TOOL_SCHEMA_SIMPLE = {
+	"type": "function",
+	"function": {
+		"name": "stop",
+		"description": "Stop the current session. Call when the request has been fulfilled or when you encounter a blocker that cannot be resolved without user input.",  # noqa: E501
 		"parameters": {
 			"type": "object",
 			"properties": {
@@ -480,9 +489,11 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 
 	Args:
 		mode: The AI mode (scan, chat, exploit). Unknown modes fall back to chat.
-		is_subagent: If True, exclude follow_up, change_mode and run_subagent (a
-			subagent is already focused on one task and must not spawn further subagents).
-		backend: Optional interactivity backend for exclusion/extra tools.
+		is_subagent: If True, exclude change_mode and run_subagent (a subagent runs at its
+			assigned mode, does not self-escalate, and must not spawn further subagents).
+		backend: Optional interactivity backend for exclusion/extra tools. Every
+			backend injects a `stop` tool via get_extra_tools (interactive backends a
+			`stop` with `choices`, AutoBackend a choiceless one).
 		mode_is_auto: Whether the session is in auto mode (vs a user-pinned mode).
 			Gates `change_mode`: the model may self-escalate in an auto session or from
 			a pinned ACTION mode, but a user-PINNED read-only `chat` must stay read-only,
@@ -498,7 +509,7 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 	if is_subagent:
 		# A subagent runs at its assigned mode; it does not self-escalate and
 		# cannot spawn further subagents (no nested subagents).
-		excluded.update({"follow_up", "change_mode", "run_subagent"})
+		excluded.update({"change_mode", "run_subagent"})
 	# A user-pinned read-only chat cannot self-escape to an action mode.
 	if not mode_is_auto and mode == "chat":
 		excluded.add("change_mode")
@@ -531,7 +542,10 @@ def coerce_stringified_args(tool_name: str, arguments: dict) -> dict:
 	"""
 	if not isinstance(arguments, dict):
 		return arguments
-	props = TOOL_SCHEMAS.get(tool_name, {}).get("function", {}).get("parameters", {}).get("properties", {})
+	# `stop` lives outside TOOL_SCHEMAS (injected per-backend); fall back to its schema so a
+	# stringified `choices` array is coerced like any other object/array tool arg.
+	schema = STOP_TOOL_SCHEMA if tool_name == "stop" else TOOL_SCHEMAS.get(tool_name, {})
+	props = schema.get("function", {}).get("parameters", {}).get("properties", {})
 	for key, spec in props.items():
 		if spec.get("type") in ("object", "array") and isinstance(arguments.get(key), str):
 			try:

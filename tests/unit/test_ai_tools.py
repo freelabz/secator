@@ -14,7 +14,8 @@ class TestToolSchemas(unittest.TestCase):
 
 	def test_tool_schemas_expected_set(self):
 		from secator.ai.tools import TOOL_SCHEMAS
-		expected = {"run_task", "run_workflow", "run_shell", "query_workspace", "follow_up",
+		# `stop` is NOT in TOOL_SCHEMAS — it is injected per-backend via get_extra_tools.
+		expected = {"run_task", "run_workflow", "run_shell", "query_workspace",
 		            "run_subagent", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
 		            "mark_vuln_exploit_failed", "update_finding", "change_mode"}
 		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)
@@ -77,16 +78,26 @@ class TestToolSchemas(unittest.TestCase):
 		self.assertIn("query", required)
 		self.assertNotIn("limit", required)
 
-	def test_follow_up_params(self):
-		from secator.ai.tools import TOOL_SCHEMAS
-		props = TOOL_SCHEMAS["follow_up"]["function"]["parameters"]["properties"]
-		required = TOOL_SCHEMAS["follow_up"]["function"]["parameters"]["required"]
+	def test_interactive_stop_params(self):
+		# The interactive `stop` carries reason + optional choices/multiple.
+		from secator.ai.tools import STOP_TOOL_SCHEMA
+		props = STOP_TOOL_SCHEMA["function"]["parameters"]["properties"]
+		required = STOP_TOOL_SCHEMA["function"]["parameters"]["required"]
 		self.assertIn("reason", props)
 		self.assertIn("choices", props)
+		self.assertIn("multiple", props)
 		self.assertEqual(props["reason"]["type"], "string")
 		self.assertEqual(props["choices"]["type"], "array")
 		self.assertIn("reason", required)
 		self.assertNotIn("choices", required)
+
+	def test_simple_stop_has_no_choices(self):
+		# The non-interactive (AutoBackend) `stop` is definitive: reason only, no choices.
+		from secator.ai.tools import STOP_TOOL_SCHEMA_SIMPLE
+		props = STOP_TOOL_SCHEMA_SIMPLE["function"]["parameters"]["properties"]
+		self.assertIn("reason", props)
+		self.assertNotIn("choices", props)
+		self.assertNotIn("multiple", props)
 
 	def test_add_finding_params(self):
 		from secator.ai.tools import TOOL_SCHEMAS
@@ -115,23 +126,18 @@ class TestBuildToolSchemas(unittest.TestCase):
 		schemas = build_tool_schemas("chat")
 		names = {s["function"]["name"] for s in schemas}
 		# chat is strictly read-only (#1469): no escalation (run_task/run_workflow),
-		# no shell, no finding writes — it keeps query + follow_up + the same-mode
-		# run_subagent helper.
+		# no shell, no finding writes — it keeps query + the same-mode run_subagent helper.
 		self.assertNotIn("run_task", names)
 		self.assertNotIn("run_workflow", names)
 		self.assertNotIn("run_shell", names)
 		self.assertNotIn("add_finding", names)
 		self.assertIn("query_workspace", names)
-		self.assertIn("follow_up", names)
 		self.assertIn("run_subagent", names)
 
-	def test_exploit_mode_includes_follow_up_and_query(self):
+	def test_exploit_mode_includes_query(self):
 		from secator.ai.tools import build_tool_schemas
 		schemas = build_tool_schemas("exploit")
 		names = {s["function"]["name"] for s in schemas}
-		# follow_up lets exploit mode stop-and-ask (confirm before a state-changing action /
-		# hand back after a PoC) rather than only running to its iteration cap.
-		self.assertIn("follow_up", names)
 		self.assertIn("query_workspace", names)
 		self.assertIn("run_task", names)
 		self.assertIn("run_workflow", names)
@@ -183,6 +189,20 @@ class TestBuildToolSchemas(unittest.TestCase):
 			self.assertIsInstance(s, dict)
 			self.assertEqual(s["type"], "function")
 
+	def test_stop_injected_for_every_backend(self):
+		"""`stop` is the single end-of-turn signal in EVERY mode — every backend injects
+		it via get_extra_tools. Interactive backends inject the choices-capable stop; the
+		AutoBackend a choiceless (definitive) one."""
+		from secator.ai.tools import build_tool_schemas
+		from secator.ai.interactivity import CLIBackend, RemoteBackend, TUIBackend, AutoBackend
+		for backend in (CLIBackend(), RemoteBackend(), TUIBackend()):
+			stop = next(s for s in build_tool_schemas("scan", backend=backend)
+			            if s["function"]["name"] == "stop")
+			self.assertIn("choices", stop["function"]["parameters"]["properties"])
+		auto_stop = next(s for s in build_tool_schemas("scan", backend=AutoBackend())
+		                 if s["function"]["name"] == "stop")
+		self.assertNotIn("choices", auto_stop["function"]["parameters"]["properties"])
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestToolCallToAction(unittest.TestCase):
@@ -214,10 +234,10 @@ class TestToolCallToAction(unittest.TestCase):
 		self.assertEqual(result["query"], {"_type": "vulnerability"})
 		self.assertEqual(result["limit"], 50)
 
-	def test_follow_up_conversion(self):
+	def test_stop_conversion(self):
 		from secator.ai.tools import tool_call_to_action
-		result = tool_call_to_action("follow_up", {"reason": "need guidance", "choices": ["a", "b"]})
-		self.assertEqual(result["action"], "follow_up")
+		result = tool_call_to_action("stop", {"reason": "need guidance", "choices": ["a", "b"]})
+		self.assertEqual(result["action"], "stop")
 		self.assertEqual(result["reason"], "need guidance")
 		self.assertEqual(result["choices"], ["a", "b"])
 
@@ -258,7 +278,7 @@ class TestToolCallToAction(unittest.TestCase):
 	def test_stop_with_empty_args_is_valid(self):
 		"""`stop` ends a turn and its `reason` is optional, so a bare stop() with empty
 		or no args must produce a valid action — not get bounced as 'empty arguments'
-		(which left the model nagging via follow_up instead of stopping)."""
+		(which left the model nagging instead of stopping)."""
 		from secator.ai.tools import tool_call_to_action
 		for empty in ({}, None):
 			action = tool_call_to_action("stop", empty)

@@ -433,7 +433,7 @@ class TestQueryEngineUpdate(unittest.TestCase):
 
 	def test_json_backend_update(self):
 		backend = self._backend_with_store([
-			{'_type': 'ai', 'ai_type': 'follow_up', 'session_id': 's1', 'status': 'pending'},
+			{'_type': 'ai', 'ai_type': 'stopped', 'session_id': 's1', 'status': 'pending'},
 			{'_type': 'url', 'url': 'http://a.com'},
 		])
 		count = backend.update(

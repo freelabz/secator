@@ -393,7 +393,6 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		"workflow": _handle_workflow,
 		"shell": _handle_shell,
 		"query": _handle_query,
-		"follow_up": _handle_follow_up,
 		"add_finding": _handle_add_finding,
 		"mark_vuln_exploited": _handle_mark_vuln_exploited,
 		"mark_vuln_false_positive": _handle_mark_vuln_false_positive,
@@ -1331,31 +1330,26 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error.from_exception(e, _context=context)
 
 
-def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
-	"""Handle follow-up with user.
+def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
+	"""Handle the stop action — the SINGLE end-of-turn signal in every mode.
 
-	Args:
-		action: Action dict with reason and optional choices
-		ctx: Action context
+	Always yields an ``Ai(ai_type="stopped")`` carrying the model's ``reason`` and any
+	``choices``/``multiple`` it offered. The loop decides what happens next from the
+	backend's ask_user: an interactive backend turns this into an end-of-turn pause
+	(the user can pick a choice / type a reply), a non-interactive backend ends.
+
+	``choices`` is stored on the top-level ``choices`` field (what clients read) AND in
+	``extra_data`` (back-compat). Without the top-level field, the persisted doc has
+	``choices: []`` and clients render no choice buttons. ``multiple`` tells clients to
+	render multi-select (checkboxes) vs single-pick.
 	"""
 	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
-	choices = action.get("choices", [])
+	choices = action.get("choices", []) or []
 	multiple = bool(action.get("multiple", False))
-	# Store choices on the top-level `choices` field (what clients read) AND in
-	# extra_data (back-compat). Without the top-level field, the persisted follow-up
-	# doc has `choices: []` and clients render no choice buttons. `multiple` tells
-	# clients to render multi-select (checkboxes) vs single-pick.
 	yield Ai(
-		content=reason, ai_type="follow_up", choices=choices, multiple=multiple,
+		content=reason, ai_type="stopped", choices=choices, multiple=multiple,
 		extra_data={"choices": choices, "multiple": multiple}, _context=context)
-
-
-def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
-	"""Handle stop action - signals session completion."""
-	context = _get_result_context(action, ctx)
-	reason = action.get("reason", "completed")
-	yield Ai(content=reason, ai_type="stopped", _context=context)
 
 
 def _handle_change_mode(action: Dict, ctx: ActionContext) -> Generator:

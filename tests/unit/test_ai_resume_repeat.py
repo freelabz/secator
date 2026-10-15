@@ -144,7 +144,7 @@ class TestAiResumeRepeat(unittest.TestCase):
 		docs = [
 			{"_type": "ai", "ai_type": "prompt", "content": "Scan the target", "_timestamp": 1, "_context": _ctx()},
 			{"_type": "ai", "ai_type": "response", "content": "Which host?", "_timestamp": 2, "_context": _ctx()},
-			{"_type": "ai", "ai_type": "follow_up", "content": "Which host?", "status": "answered",
+			{"_type": "ai", "ai_type": "stopped", "content": "Which host?", "status": "answered",
 			 "answer": "scanme.nmap.org", "_timestamp": 3,
 			 "extra_data": {"prompt_uuid": "u1"}, "_context": _ctx()},
 		]
@@ -204,7 +204,7 @@ class TestAiResumeRepeat(unittest.TestCase):
 			{"_type": "ai", "ai_type": "prompt", "content": "check workspace", "_timestamp": 1, "_context": _ctx()},
 			{"_type": "ai", "ai_type": "response", "content": "next step?", "_timestamp": 2, "_context": _ctx()},
 			# follow_up #1 answered with the CSV, already persisted as its own prompt turn
-			{"_type": "ai", "ai_type": "follow_up", "content": "next?", "status": "answered",
+			{"_type": "ai", "ai_type": "stopped", "content": "next?", "status": "answered",
 			 "answer": csv, "_timestamp": 3, "extra_data": {"prompt_uuid": "u1"}, "_context": _ctx()},
 			{"_type": "ai", "ai_type": "prompt", "content": csv, "_timestamp": 4, "_context": _ctx()},
 			{"_type": "ai", "ai_type": "response", "content": "ran recon", "_timestamp": 5, "_context": _ctx()},
@@ -283,7 +283,7 @@ class _ApiAnswerEngine(FakeQueryEngine):
 	def _api_answer(self):
 		if self.answered >= self.answer_cap:
 			return
-		pend = [d for d in self.docs if d.get("ai_type") == "follow_up" and d.get("status") == "pending"]
+		pend = [d for d in self.docs if d.get("ai_type") == "stopped" and d.get("status") == "pending"]
 		if not pend:
 			return
 		pend.sort(key=lambda d: d.get("_timestamp", 0))
@@ -292,7 +292,7 @@ class _ApiAnswerEngine(FakeQueryEngine):
 		self.answered += 1
 
 	def search(self, query, limit=None):
-		if query.get("status") == "answered" and query.get("ai_type") == "follow_up":
+		if query.get("status") == "answered" and query.get("ai_type") == "stopped":
 			self._api_answer()
 		return super().search(query, limit)
 

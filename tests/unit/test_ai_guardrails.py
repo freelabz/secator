@@ -358,9 +358,9 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "query", "query": {"_type": "vulnerability"}})
 		self.assertEqual(result.decision, "allow")
 
-	def test_follow_up_always_allowed(self):
+	def test_stop_always_allowed(self):
 		engine = self._make_engine()
-		result = engine.check_action({"action": "follow_up", "reason": "test"})
+		result = engine.check_action({"action": "stop", "reason": "test"})
 		self.assertEqual(result.decision, "allow")
 
 	# --- M7: add_finding privileged-type gating ---
@@ -807,7 +807,7 @@ class TestGuardrailsIntegration(unittest.TestCase):
 	def test_dispatch_action_without_engine(self):
 		"""When no permission_engine is set, actions should pass through."""
 		ctx = ActionContext(targets=["example.com"], model="test")
-		action = {"action": "follow_up", "reason": "test"}
+		action = {"action": "stop", "reason": "test"}
 		results = list(dispatch_action(action, ctx))
 		has_denial = any(
 			isinstance(r, (Warning, Error)) and "denied" in getattr(r, 'message', '').lower()

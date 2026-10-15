@@ -58,11 +58,11 @@ class TestPrompts(unittest.TestCase):
 		self.assertIn("workflow", SYSTEM_SCAN.template)
 		self.assertIn("shell", SYSTEM_SCAN.template)
 		self.assertIn("query", SYSTEM_SCAN.template)
-		self.assertIn("follow_up", SYSTEM_SCAN.template)
+		self.assertIn("stop", SYSTEM_SCAN.template)
 
 	def test_system_chat_has_query(self):
 		self.assertIn("query", SYSTEM_CHAT.template)
-		self.assertIn("follow_up", SYSTEM_CHAT.template)
+		self.assertIn("stop", SYSTEM_CHAT.template)
 
 	def test_system_exploit_has_expected_content(self):
 		"""Test SYSTEM_EXPLOIT template mentions expected concepts."""
@@ -281,11 +281,11 @@ class TestPrompts(unittest.TestCase):
 	def test_exploit_mode_config_has_correct_allowed_actions(self):
 		exploit_config = MODES["exploit"]
 		# "query" is included so the model can pull existing exploit intel before
-		# exploiting; "follow_up" is included so exploit mode can STOP-and-ask (confirm
-		# before a state-changing action / hand back after a PoC). Subset check (not an
+		# exploiting; `stop` ends the turn / asks (confirm before a state-changing
+		# action / hand back after a PoC). Subset check (not an
 		# exact list) so adding tools doesn't break this.
 		actions = exploit_config["allowed_actions"]
-		for a in ["task", "workflow", "shell", "query", "follow_up", "add_finding",
+		for a in ["task", "workflow", "shell", "query", "add_finding",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed",
 		          "update_finding", "stop"]:
 			self.assertIn(a, actions)
@@ -298,19 +298,19 @@ class TestPrompts(unittest.TestCase):
 	def test_scan_mode_config_has_correct_allowed_actions(self):
 		scan_config = MODES["scan"]
 		actions = scan_config["allowed_actions"]
-		for a in ["task", "workflow", "shell", "query", "follow_up", "add_finding",
+		for a in ["task", "workflow", "shell", "query", "add_finding",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "stop"]:
 			self.assertIn(a, actions)
 
 	def test_chat_mode_config_has_correct_allowed_actions(self):
 		chat_config = MODES["chat"]
 		actions = chat_config["allowed_actions"]
-		# Chat is strictly read-only: read (query), ask/suggest (follow_up), delegate a
+		# Chat is strictly read-only: read (query), delegate a
 		# same-mode helper (subagent), stop. `change_mode` lets an AUTO-resolved chat turn
 		# self-escalate — it is withheld from a user-PINNED chat in build_tool_schemas (see
 		# test_ai_tools.test_change_mode_gated_by_pin), so read-only stays read-only. Nothing
 		# else here acts on the world or the data.
-		self.assertEqual(set(actions), {"query", "follow_up", "subagent", "change_mode", "stop"})
+		self.assertEqual(set(actions), {"query", "subagent", "change_mode", "stop"})
 		for a in ["shell", "task", "workflow", "add_finding", "update_finding",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:
 			self.assertNotIn(a, actions)
@@ -492,7 +492,7 @@ class TestOperatingRulesRecap(unittest.TestCase):
 	The library reference is inlined at the TOP of scan/exploit (long data
 	first), which pushes the persona to the middle of a ~15-60k prompt. A terse
 	recap at the very END keeps the rules the model most often breaks (use
-	follow_up with choices, description=intent, persist, restate-before-retry) in
+	stop with choices, description=intent, persist, restate-before-retry) in
 	the high-attention tail. Regression guard for that structural fix.
 	"""
 
@@ -507,7 +507,7 @@ class TestOperatingRulesRecap(unittest.TestCase):
 	def test_recap_covers_the_known_failure_modes(self):
 		p = get_system_prompt("scan", workspace_path="<ws>", backend=None)
 		recap = p[p.index("<operating_rules>"):]
-		self.assertIn("follow_up", recap)          # prose-choices failure
+		self.assertIn("stop", recap)               # prose-choices failure (stop carries choices)
 		self.assertIn("description", recap)         # description-echo failure
 		self.assertIn("Persist", recap)             # early-yield failure
 
