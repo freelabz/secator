@@ -131,6 +131,14 @@ def _reject_malformed_tool_call(runner, name, tc_id, error, extra_fields, reason
 	return _reject_tool_call(runner, name, tc_id, error_msg, reason)
 
 
+def _max_iter_stop_notice(n) -> str:
+	"""Instruction injected for one final turn when the agent-loop cap is hit: ask the model
+	to stop gracefully, announcing the limit so the user can resume with "continue"."""
+	announce = (f'Maximum number of allowed iterations ({n}) has been reached. '
+	            f'Say "continue" if you want me to go on anyways.')
+	return f'{announce}\nCall the stop action now with this message. Do not run any more tools.'
+
+
 def _yield_tool_results(runner, collected):
 	"""Group ``collected`` results by tool_call_id, add each group's tool result to
 	history, and yield a summary ``Ai(ai_type="tool_result")`` per group. Split out
@@ -1059,6 +1067,17 @@ class ai(PythonRunner):
 					self._save_history()
 					return
 
+				# Hard turn cap reached while the model is still working: give it ONE final turn
+				# to stop gracefully (announce the limit) instead of an abrupt cutoff — the user
+				# can resume with "continue". Fires once; if the model ignores it, the while-loop
+				# cap and the follow-up/break path below still terminate the run.
+				if (iteration >= self.max_iterations and tool_calls and follow_up_choices is None
+						and not getattr(self, "_max_iter_notice_sent", False)):
+					self._max_iter_notice_sent = True
+					self.history.add_user(maybe_encrypt(_max_iter_stop_notice(self.max_iterations), self.encryptor))
+					self.max_iterations += 1   # allow exactly one more turn for the stop announcement
+					continue
+
 				# Follow-up / content-only / max_iter → prompt user
 				if follow_up_choices is not None or not tool_calls or iteration == self.max_iterations:
 					# Remote follow-up: the pending Ai doc was already stamped + persisted
@@ -1867,6 +1886,8 @@ class ai(PythonRunner):
 		if extends < _MAX_FOLLOWUP_EXTENSIONS:
 			self.max_iterations += extra_iters
 			self._followup_extensions = extends + 1
+			# user chose to continue — allow a fresh max-iter notice if the new cap is hit
+			self._max_iter_notice_sent = False
 		mode_switched_to = None
 		if response.get("switch_mode"):
 			# An explicit user mode switch is a conscious decision: pin it (leave auto)

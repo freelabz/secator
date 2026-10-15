@@ -280,8 +280,9 @@ class AiAddon(StrictModel):
 	# recon, clone/read a PoC, run, debug, retry). Mode configs impose a floor.
 	# Set to -1 (or any value <= 0) to DISABLE the cap entirely: the run then continues
 	# until the model sends `stop` — avoids killing the worker mid-exploit and losing
-	# locally checked-out PoCs.
-	max_iterations: int = 25
+	# locally checked-out PoCs. On reaching the cap, the model is given one final turn to
+	# stop gracefully (announcing the limit) so the user can resume with "continue".
+	max_iterations: int = 100
 	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
