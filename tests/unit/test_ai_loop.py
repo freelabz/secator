@@ -286,25 +286,25 @@ class TestGuardrailsAutoMode(unittest.TestCase):
 # =============================================================================
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
-class TestFollowUpDispatch(unittest.TestCase):
-	"""Test follow_up action dispatch across modes."""
+class TestStopDispatch(unittest.TestCase):
+	"""Test stop action dispatch — the single end-of-turn signal across modes."""
 
-	def test_follow_up_yields_ai_with_choices(self):
-		"""follow_up action yields Ai object with choices."""
+	def test_stop_yields_ai_with_choices(self):
+		"""An interactive stop yields a `stopped` Ai carrying its choices."""
 		ctx = _make_ctx(interactive="local")
 		action = {
-			"action": "follow_up",
+			"action": "stop",
 			"reason": "Scan complete. What next?",
 			"choices": ["Exploit XSS", "Continue scanning", "Generate report"],
-			"tool_call_id": "tc_fu",
-			"tool_call_name": "follow_up",
+			"tool_call_id": "tc_stop",
+			"tool_call_name": "stop",
 		}
 		results = list(dispatch_action(action, ctx))
 		ai_results = [r for r in results if isinstance(r, Ai)]
 		self.assertTrue(len(ai_results) >= 1)
-		fu = ai_results[0]
-		self.assertEqual(fu.ai_type, "follow_up")
-		self.assertIn("Exploit XSS", (fu.extra_data or {}).get("choices", []))
+		st = ai_results[0]
+		self.assertEqual(st.ai_type, "stopped")
+		self.assertIn("Exploit XSS", (st.extra_data or {}).get("choices", []))
 
 	def test_stop_yields_ai_stopped(self):
 		"""stop action yields Ai object with ai_type='stopped'."""
@@ -323,22 +323,8 @@ class TestFollowUpDispatch(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
-class TestMaxIterationsGracefulStop(unittest.TestCase):
-	"""On hitting the agent-loop cap, the model gets one final turn to stop gracefully
-	(announcing the limit) so the user can resume with 'continue'."""
-
-	def test_notice_message_matches_spec(self):
-		from secator.tasks.ai import _max_iter_stop_notice, _max_iter_announce
-		msg = _max_iter_stop_notice(100)
-		self.assertIn("Maximum number of allowed iterations (100) has been reached", msg)
-		self.assertIn('Say "continue" if you want me to go on anyways', msg)
-		self.assertIn("Call the stop action", msg)
-		self.assertIn("Do not run any more tools", msg)
-		# the announce line (the fallback stop content if the model ignores the notice) is the
-		# user-facing part only — no tool instruction leaks into it
-		announce = _max_iter_announce(100)
-		self.assertIn(announce, msg)
-		self.assertNotIn("Call the stop action", announce)
+class TestMaxIterations(unittest.TestCase):
+	"""max_iterations is a pure safety backstop; the default is 100."""
 
 	def test_default_max_iterations_is_100(self):
 		from secator.config import CONFIG
@@ -350,9 +336,9 @@ class TestMaxIterationsGracefulStop(unittest.TestCase):
 # =============================================================================
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
-class TestRemoteFollowUpPersistence(unittest.TestCase):
-	"""In remote mode, the single persisted follow-up doc must be renderable:
-	status=="pending" + non-empty top-level `choices` (what the web UI reads)."""
+class TestRemoteStopPersistence(unittest.TestCase):
+	"""In remote mode, the single persisted `stopped` doc must be renderable AND
+	answerable: status=="pending" + non-empty top-level `choices` + a prompt_uuid."""
 
 	def _run_dispatch(self, backend):
 		"""Drive the real ai._dispatch_and_collect with a minimal fake self.
@@ -363,11 +349,12 @@ class TestRemoteFollowUpPersistence(unittest.TestCase):
 		from secator.tasks.ai import ai as AiTask
 
 		choices = ["Fuzz parameters", "Run nuclei", "Deep crawl"]
-		follow_up = Ai(
+		stopped = Ai(
 			content="Presenting actionable next steps",
-			ai_type="follow_up",
+			ai_type="stopped",
+			choices=choices,
 			extra_data={"choices": choices},
-			_context={"tool_call_id": "tc_fu", "tool_call_name": "follow_up"},
+			_context={"tool_call_id": "tc_stop", "tool_call_name": "stop"},
 		)
 
 		persisted = []
@@ -391,34 +378,35 @@ class TestRemoteFollowUpPersistence(unittest.TestCase):
 		ctx.results = []
 
 		def _fake_dispatch_action(action, c):
-			yield follow_up
+			yield stopped
 
 		with patch("secator.tasks.ai.safe_dispatch_action", _fake_dispatch_action):
-			gen = AiTask._dispatch_and_collect(fake_self, [{"tool_call_id": "tc_fu"}], ctx)
+			gen = AiTask._dispatch_and_collect(fake_self, [{"tool_call_id": "tc_stop"}], ctx)
 			yielded = list(gen)
-		return yielded, persisted, follow_up
+		return yielded, persisted, stopped
 
-	def test_remote_follow_up_persisted_pending_with_choices(self):
+	def test_remote_stop_persisted_pending_with_choices(self):
 		backend = RemoteBackend(timeout=60, query_engine=MagicMock())
-		yielded, persisted, follow_up = self._run_dispatch(backend)
+		yielded, persisted, stopped = self._run_dispatch(backend)
 
-		# Exactly one follow_up Ai is persisted (no duplicate display + pending docs).
-		fu_docs = [p for p in persisted if isinstance(p, Ai) and p.ai_type == "follow_up"]
-		self.assertEqual(len(fu_docs), 1)
-		doc = fu_docs[0]
+		# Exactly one stopped Ai is persisted (no duplicate display + pending docs).
+		docs = [p for p in persisted if isinstance(p, Ai) and p.ai_type == "stopped"]
+		self.assertEqual(len(docs), 1)
+		doc = docs[0]
 		self.assertEqual(doc.status, "pending")
 		self.assertEqual(doc.choices, ["Fuzz parameters", "Run nuclei", "Deep crawl"])
 		self.assertEqual(doc._context.get("session_id"), "sess-123")
+		self.assertTrue((doc.extra_data or {}).get("prompt_uuid"))
 		# Same object → single doc by _uuid.
-		self.assertIs(doc, follow_up)
+		self.assertIs(doc, stopped)
 
-	def test_local_follow_up_not_stamped_pending(self):
+	def test_local_stop_not_stamped_pending(self):
 		"""CLI/local mode must NOT stamp status=pending (drives the TUI menu directly)."""
 		backend = CLIBackend()
-		yielded, persisted, follow_up = self._run_dispatch(backend)
-		fu_docs = [p for p in persisted if isinstance(p, Ai) and p.ai_type == "follow_up"]
-		self.assertEqual(len(fu_docs), 1)
-		self.assertNotEqual(fu_docs[0].status, "pending")
+		yielded, persisted, stopped = self._run_dispatch(backend)
+		docs = [p for p in persisted if isinstance(p, Ai) and p.ai_type == "stopped"]
+		self.assertEqual(len(docs), 1)
+		self.assertNotEqual(docs[0].status, "pending")
 
 
 # =============================================================================
@@ -429,42 +417,40 @@ class TestRemoteFollowUpPersistence(unittest.TestCase):
 class TestBackendToolSchemas(unittest.TestCase):
 	"""Test that backends control tool availability correctly."""
 
-	def test_local_backend_excludes_stop(self):
-		"""CLIBackend excludes the stop tool."""
+	def test_local_backend_includes_stop(self):
+		"""CLIBackend exposes `stop` (the single end-of-turn signal), with choices."""
 		backend = CLIBackend()
 		schemas = build_tool_schemas("scan", backend=backend)
-		names = {s["function"]["name"] for s in schemas}
-		self.assertNotIn("stop", names)
-		self.assertIn("follow_up", names)
+		stop = next(s for s in schemas if s["function"]["name"] == "stop")
+		self.assertIn("choices", stop["function"]["parameters"]["properties"])
 
-	def test_auto_backend_excludes_follow_up_includes_stop(self):
-		"""AutoBackend excludes follow_up and injects stop."""
+	def test_auto_backend_includes_choiceless_stop(self):
+		"""AutoBackend injects a choiceless (definitive) stop."""
 		backend = AutoBackend()
 		schemas = build_tool_schemas("scan", backend=backend)
-		names = {s["function"]["name"] for s in schemas}
-		self.assertNotIn("follow_up", names)
-		self.assertIn("stop", names)
+		stop = next(s for s in schemas if s["function"]["name"] == "stop")
+		self.assertNotIn("choices", stop["function"]["parameters"]["properties"])
 
-	def test_remote_backend_excludes_stop(self):
-		"""RemoteBackend excludes stop (uses follow_up via DB polling)."""
+	def test_remote_backend_includes_stop(self):
+		"""RemoteBackend exposes `stop` with choices (the pause is driven by DB polling)."""
 		backend = RemoteBackend(timeout=60, query_engine=MagicMock())
 		schemas = build_tool_schemas("scan", backend=backend)
-		names = {s["function"]["name"] for s in schemas}
-		self.assertNotIn("stop", names)
-		self.assertIn("follow_up", names)
+		stop = next(s for s in schemas if s["function"]["name"] == "stop")
+		self.assertIn("choices", stop["function"]["parameters"]["properties"])
 
-	def test_system_prompt_includes_stop_rules_for_auto(self):
-		"""Auto backend's system prompt includes stop rules."""
+	def test_system_prompt_autonomous_stop_rules_for_auto(self):
+		"""Auto backend's system prompt uses the autonomous (choiceless) stop rules."""
 		backend = AutoBackend()
 		prompt = get_system_prompt("scan", workspace_path="/tmp/ws", backend=backend)
 		self.assertIn("<stop>", prompt)
-		self.assertNotIn("<follow_up>", prompt.split("<stop>")[-1])  # stop rules at end
+		self.assertIn("non-interactive backend", prompt)
 
-	def test_system_prompt_no_stop_for_local(self):
-		"""Local backend's system prompt does not append stop rules."""
+	def test_system_prompt_interactive_stop_rules_for_local(self):
+		"""Local backend's system prompt uses the interactive (choices) stop rules."""
 		backend = CLIBackend()
 		prompt = get_system_prompt("scan", workspace_path="/tmp/ws", backend=backend)
-		self.assertNotIn("<stop>", prompt)
+		self.assertIn("<stop>", prompt)
+		self.assertIn("clickable buttons", prompt)
 
 
 # =============================================================================
@@ -585,15 +571,15 @@ class TestLocalModeFlow(unittest.TestCase):
 
 		# === Turn 2: Follow-up with choices ===
 		follow_up_action = {
-			"action": "follow_up",
+			"action": "stop",
 			"reason": "Exploit succeeded. What next?",
 			"choices": ["Pivot to internal network", "Generate report"],
 			"tool_call_id": "tc2",
-			"tool_call_name": "follow_up",
+			"tool_call_name": "stop",
 		}
 
 		results2 = list(dispatch_action(follow_up_action, ctx))
-		fu_results = [r for r in results2 if isinstance(r, Ai) and r.ai_type == "follow_up"]
+		fu_results = [r for r in results2 if isinstance(r, Ai) and r.ai_type == "stopped"]
 		self.assertEqual(len(fu_results), 1)
 		fu = fu_results[0]
 		self.assertEqual(fu.content, "Exploit succeeded. What next?")
@@ -660,15 +646,15 @@ class TestRemoteModeFlow(unittest.TestCase):
 
 		# === Turn 2: Follow-up answered via remote backend ===
 		follow_up_action = {
-			"action": "follow_up",
+			"action": "stop",
 			"reason": "Exploit succeeded. What next?",
 			"choices": ["Pivot to internal network", "Generate report"],
 			"tool_call_id": "tc2",
-			"tool_call_name": "follow_up",
+			"tool_call_name": "stop",
 		}
 
 		results2 = list(dispatch_action(follow_up_action, ctx))
-		fu = next(r for r in results2 if isinstance(r, Ai) and r.ai_type == "follow_up")
+		fu = next(r for r in results2 if isinstance(r, Ai) and r.ai_type == "stopped")
 
 		# Simulate the main loop's follow-up handling via backend.ask_user
 		fu.status = "pending"
@@ -677,7 +663,7 @@ class TestRemoteModeFlow(unittest.TestCase):
 			question=fu.content,
 			choices=fu.choices or fu.extra_data.get("choices", []),
 			session_id=ctx.session_id,
-			prompt_type="follow_up",
+			prompt_type="stopped",
 		)
 		self.assertEqual(response["answer"], "Pivot to internal network")
 
@@ -915,7 +901,7 @@ class TestMainLoopLocalE2E(unittest.TestCase):
 		# --- Turn 2: LLM returns follow_up ---
 		llm_response_2 = _make_llm_response(
 			content=None,
-			tool_calls=[_make_tool_call("follow_up", {
+			tool_calls=[_make_tool_call("stop", {
 				"reason": "Found open ports. What next?",
 				"choices": ["Exploit SSH", "Scan more ports"]
 			}, "tc2")]
@@ -927,13 +913,13 @@ class TestMainLoopLocalE2E(unittest.TestCase):
 		action2["tool_call_name"] = tc2.function.name
 
 		results2 = list(dispatch_action(action2, ctx))
-		fu = next(r for r in results2 if isinstance(r, Ai) and r.ai_type == "follow_up")
+		fu = next(r for r in results2 if isinstance(r, Ai) and r.ai_type == "stopped")
 		follow_up_choices = (fu.extra_data or {}).get("choices", [])
 		self.assertEqual(follow_up_choices, ["Exploit SSH", "Scan more ports"])
 
 		# User selects "Exploit SSH"
 		history.add_assistant_with_tool_calls(None, llm_response_2["tool_calls"])
-		history.add_tool_result("follow_up", "tc2", '{"status":"success"}')
+		history.add_tool_result("stop", "tc2", '{"status":"success"}')
 		history.add_user("Exploit SSH")
 
 		# Verify the conversation flow
@@ -995,14 +981,14 @@ class TestMainLoopRemoteE2E(unittest.TestCase):
 
 		# --- Turn 2: Follow-up via remote backend ---
 		action2 = {
-			"action": "follow_up",
+			"action": "stop",
 			"reason": "Found vulns. What next?",
 			"choices": ["Exploit SSH", "Report"],
 			"tool_call_id": "tc2",
-			"tool_call_name": "follow_up",
+			"tool_call_name": "stop",
 		}
 		results2 = list(dispatch_action(action2, ctx))
-		fu = next(r for r in results2 if isinstance(r, Ai) and r.ai_type == "follow_up")
+		fu = next(r for r in results2 if isinstance(r, Ai) and r.ai_type == "stopped")
 
 		# Remote follow-up polling (simulating main loop via _prompt_and_redetect)
 		fu.status = "pending"
@@ -1011,7 +997,7 @@ class TestMainLoopRemoteE2E(unittest.TestCase):
 			question=fu.content,
 			choices=fu.extra_data.get("choices", []),
 			session_id=ctx.session_id,
-			prompt_type="follow_up",
+			prompt_type="stopped",
 		)
 		self.assertEqual(response["answer"], "Exploit SSH")
 		history.add_user(response["answer"])

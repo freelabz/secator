@@ -265,7 +265,7 @@ async def _startup_prefill_body():
 		assert app.tui_poll_steers() == []
 		# the runner now asks for the first prompt — the prefill answers it immediately
 		ev, holder = threading.Event(), {}
-		app._show_prompt("What do you want to do?", (ev, holder, [], "follow_up"))
+		app._show_prompt("What do you want to do?", (ev, holder, [], "stopped"))
 		assert holder["value"] == "run nmap on scanme.nmap.org"
 		assert ev.is_set()
 		assert app._prefill == ""

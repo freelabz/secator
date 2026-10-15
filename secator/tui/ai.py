@@ -62,9 +62,9 @@ class AITUI(TUIApp):
 	async def _render_ai(self, d: dict) -> None:
 		at = d.get("ai_type", "")
 		content = d.get("content", "") or ""
-		if at in ("prompt", "steer", "follow_up"):
-			# user-origin / end-of-turn question: already echoed on submit or shown by
-			# the ask_user prompt — don't double-render from the item stream
+		if at in ("prompt", "steer"):
+			# user-origin message: already echoed on submit — don't double-render
+			# from the item stream
 			return
 		if at == "response":
 			self._finish_current()
@@ -148,7 +148,11 @@ class AITUI(TUIApp):
 			await self._append(Static(
 				Text.from_markup(f"[dim]↻ Switched to [b]{escape(content)}[/] mode[/]"), classes="note"))
 		elif at == "stopped":
+			# End-of-turn stop: show the reason (summary / blocker) as markdown, then go
+			# idle. The ask_user prompt (choices / input box) renders the next-step UI.
 			self._finish_current()
+			if content:
+				await self._append(Markdown(content, classes="ai"))
 			self._set_status("stopped", False)
 
 
