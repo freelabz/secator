@@ -1243,6 +1243,14 @@ class ai(PythonRunner):
 			out_of_scope=self.out_of_scope,
 			isolated=self.isolated,
 		)
+		# A subagent inherits the human-approved runtime allow-list from its parent
+		# (run_subagent snapshots it into context). It runs non-interactively and can't
+		# raise its own `ask`, so without this it would deny every target/shell/path the
+		# user already vetted this session. Scope arrives separately via in_scope/out_of_scope.
+		if self.is_subagent:
+			inherited = self.context.get("ai_inherited_runtime_allow")
+			if inherited:
+				self.permission_engine.add_runtime_allow(inherited)
 
 		# Per-run billed-token accounting (AI analog of context.scan_hours), read
 		# by the billing chore. Init so it persists even with zero LLM calls.
