@@ -501,6 +501,26 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "shell", "command": "nmap 10.5.2.3"})
 		self.assertEqual(result.decision, "allow")
 
+	def test_export_runtime_allow_round_trips_for_subagent_inheritance(self):
+		# A subagent inherits the parent's human-approved runtime allow-list via
+		# export -> add. A target-host approval must keep covering its subpaths in the
+		# child, and the child must still deny an unapproved host.
+		parent = self._make_engine(allow=["target(10.5.2.3)"], ask=["target(*)"])
+		# A host approval (what "allow all URLs from app.example.com" grants) covers
+		# subpaths because _check_value also tests the URL's extracted hostname.
+		parent.add_runtime_allow(["target(app.example.com)"])
+		exported = parent.export_runtime_allow()
+		self.assertIn("target(app.example.com)", exported)
+
+		child = self._make_engine(allow=["target(10.5.2.3)", "task(*)"], ask=["target(*)"])
+		child.add_runtime_allow(exported)
+		approved = child.check_action(
+			{"action": "task", "name": "httpx", "targets": ["https://app.example.com/api/auth/signup"]})
+		self.assertEqual(approved.decision, "allow")
+		unapproved = child.check_action(
+			{"action": "task", "name": "httpx", "targets": ["https://evil.example.org/"]})
+		self.assertEqual(unapproved.decision, "ask")
+
 	# --- Evaluation order ---
 
 	def test_deny_takes_precedence_over_allow(self):

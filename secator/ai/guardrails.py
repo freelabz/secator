@@ -1265,6 +1265,15 @@ class PermissionEngine:
 			rule_type, patterns = parse_rule(rule_str)
 			self.runtime_allow.append((rule_type, patterns))
 
+	def export_runtime_allow(self) -> List[str]:
+		"""Serialize the runtime allow-list back to `type(p1,p2)` rule strings.
+
+		Round-trips through add_runtime_allow so a subagent can inherit the
+		human-approved allowances granted to its parent (it runs non-interactively
+		and can never surface its own `ask` prompt).
+		"""
+		return [f"{rt}({','.join(patterns)})" for rt, patterns in self.runtime_allow]
+
 	def prompt_target(self, target: str, interactive: bool = True, command: str = "") -> str:
 		"""Show interactive prompt for an unknown target.
 

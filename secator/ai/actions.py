@@ -620,6 +620,16 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		sub_session = str(uuid.uuid4())
 		context["parent_session_id"] = parent_session
 		context["session_id"] = sub_session
+		# A subagent runs on the non-interactive AutoBackend — it can never surface an
+		# `ask` prompt, so without the parent's approvals every target/shell/path that
+		# would normally ask (subpaths of an approved host, an approved command, etc.)
+		# auto-denies. Scope (in_scope/out_of_scope) already flows via opts; hand down the
+		# human-granted runtime allow-list too so the child operates within the SAME
+		# envelope the user vetted for the parent.
+		if ctx.permission_engine is not None:
+			inherited = ctx.permission_engine.export_runtime_allow()
+			if inherited:
+				context["ai_inherited_runtime_allow"] = inherited
 		# Give the subagent the SAME turn budget as the parent (else the exploit/scan
 		# mode floor of 5 iterations starves it). setdefault so an explicit per-subagent
 		# max_iterations the LLM supplied (already clamped to _MAX_CHILD_ITERATIONS by
