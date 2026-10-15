@@ -870,15 +870,28 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
 	yield from _run_runner(action, ctx, "workflow")
 
 
-# --isolated sandbox: image + resource caps for the per-runner DinD container. Stock Kali image
-# (no custom build); kali-rolling is bare (no pre-toolset Kali image exists — "headless" is an apt
-# metapackage), so we auto-install a base toolset at container spin-up (SECATOR_AI_SANDBOX_PACKAGES)
-# since the LLM doesn't reliably self-install. The LLM apt-gets anything extra at runtime.
-_SANDBOX_IMAGE = os.environ.get("SECATOR_AI_SANDBOX_IMAGE", "kalilinux/kali-rolling")
+# --isolated sandbox: resource caps for the per-runner DinD container. The image is resolved
+# from config (see _sandbox_image); a base toolset is still auto-installed best-effort at spin-up
+# (SECATOR_AI_SANDBOX_PACKAGES) in case the image is bare and the LLM doesn't self-install.
 _SANDBOX_MEMORY = os.environ.get("SECATOR_AI_SANDBOX_MEMORY", "1g")
 _SANDBOX_PIDS = os.environ.get("SECATOR_AI_SANDBOX_PIDS", "256")
 # Base tools the exploit workflow needs (clone/fetch/run PoCs). Empty string disables auto-install.
 _SANDBOX_PACKAGES = os.environ.get("SECATOR_AI_SANDBOX_PACKAGES", "git curl wget python3 python3-pip ca-certificates")
+
+
+def _sandbox_image() -> str:
+	"""Resolve the --isolated sandbox image from `addons.ai.isolated_container_image`, replacing
+	`{version}` with the running secator version so the sandbox matches the client (default:
+	freelabz/secator:<version>-lite, the release-published lite tag). When the setting is still
+	the default, the legacy SECATOR_AI_SANDBOX_IMAGE env override is honored for back-compat; an
+	explicitly-configured value takes precedence over it."""
+	from secator.config import CONFIG
+	from secator.definitions import VERSION
+	default = 'freelabz/secator:{version}-lite'
+	img = CONFIG.addons.ai.isolated_container_image or default
+	if img == default:
+		img = os.environ.get('SECATOR_AI_SANDBOX_IMAGE', img)
+	return img.replace('{version}', VERSION)
 
 
 def _sandbox_container_name(ctx: "ActionContext", context: Dict) -> str:
@@ -923,7 +936,7 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 				"docker", "run", "-d", "--name", name,
 				"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
 				"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}", "-w", "/work",
-				_SANDBOX_IMAGE, "sleep", "infinity",
+				_sandbox_image(), "sleep", "infinity",
 			], capture_output=True, text=True)
 			if run.returncode != 0:
 				# A concurrent creator (another thread on this dockerd) may have won the

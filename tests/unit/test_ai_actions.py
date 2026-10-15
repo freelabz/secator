@@ -14,11 +14,41 @@ if ADDONS_ENABLED['ai']:
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
 		_build_child_hooks_or_denial, _child_preamble,
 		_MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
-		_MAX_SHELL_OUTPUT_CHARS, _truncate,
+		_MAX_SHELL_OUTPUT_CHARS, _truncate, _sandbox_image,
 	)
 	from secator.ai.utils import _MAX_CHILD_ITERATIONS
 	from secator.runners import Task
 	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSandboxImage(unittest.TestCase):
+	"""The --isolated sandbox image is configurable via addons.ai.isolated_container_image,
+	with {version} replaced by the running secator version (default freelabz/secator:<version>-lite,
+	the release-published lite tag)."""
+
+	_DEFAULT = 'freelabz/secator:{version}-lite'
+
+	def test_default_resolves_secator_lite_tag_with_version(self):
+		from secator.definitions import VERSION
+		with patch('secator.config.CONFIG.addons.ai.isolated_container_image', self._DEFAULT):
+			self.assertEqual(_sandbox_image(), f'freelabz/secator:{VERSION}-lite')
+
+	def test_custom_image_override_without_version_token(self):
+		with patch('secator.config.CONFIG.addons.ai.isolated_container_image',
+		           'kalilinux/kali-rolling'):
+			self.assertEqual(_sandbox_image(), 'kalilinux/kali-rolling')
+
+	def test_legacy_env_var_honored_only_when_config_is_default(self):
+		from secator.definitions import VERSION
+		# legacy env used when config is still the default
+		with patch('secator.config.CONFIG.addons.ai.isolated_container_image', self._DEFAULT):
+			with patch.dict('os.environ', {'SECATOR_AI_SANDBOX_IMAGE': 'myorg/custom:{version}'}):
+				self.assertEqual(_sandbox_image(), f'myorg/custom:{VERSION}')
+		# explicit config takes precedence over the legacy env
+		with patch('secator.config.CONFIG.addons.ai.isolated_container_image', 'myorg/explicit:latest'):
+			with patch.dict('os.environ', {'SECATOR_AI_SANDBOX_IMAGE': 'myorg/legacy:x'}):
+				self.assertEqual(_sandbox_image(), 'myorg/explicit:latest')
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
