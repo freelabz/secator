@@ -4,7 +4,7 @@ Prefer lightweight tools (curl, nslookup, httpx) over slow, noisy ones (nuclei, 
 Only use run_workflow when the workflow to use truly fit the task, or the user explicitly requests comprehensive/full/deep scans or recon.
 For run_task or run_workflow tools:
 * only use options listed in the task reference above otherwise the tasks will fail.
-* use multi-targets inputs (available to all tasks / workflows)
+* run_task/run_workflow/run_subagent are inherently MULTI-TARGET: pass EVERY target of a run in that one call's `targets` list. NEVER fan a run out into one call per target (e.g. the same workflow called once per host) — one runner + many targets is ONE call. Fanning out launches N independent runs of the same thing, duplicating work and splitting the output into separate cards.
 
 <example>
 When the user asks to probe a target example.com without making too much noise:
@@ -37,6 +37,20 @@ run_workflow(name="subdomain_recon", targets=["example.com"], opts={"profiles": 
 <bad>
 run_workflow(name="host_recon", targets=["example.com"], opts={"profiles": ["stealth"]})  # <- not broad enough, scans only a single host, wrong profile
 run_task(name="nmap", targets=["example.com"]) # <- not broad enough
+</bad>
+
+</example>
+
+<example>
+When the user asks to run the SAME task/workflow against several targets (e.g. "crawl both sites example.com and example.org"):
+
+<good>
+run_workflow(name="url_crawl", targets=["example.com", "example.org"], description="Crawl both sites")
+</good>
+
+<bad>
+run_workflow(name="url_crawl", targets=["example.com"], description="Crawl site 1")   # <- fanned out per-target: two independent runs of the same workflow
+run_workflow(name="url_crawl", targets=["example.org"], description="Crawl site 2")   # <- duplicates work and splits the output into two cards
 </bad>
 
 </example>
