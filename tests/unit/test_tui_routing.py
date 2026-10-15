@@ -14,7 +14,7 @@ pytest.importorskip("textual")
 
 from textual.widgets import Input            # noqa: E402
 from secator.tui.ai import AITUI          # noqa: E402
-from secator.tui.widgets import RunnerPanel  # noqa: E402
+from secator.tui.widgets import ActionPanel, RunnerPanel  # noqa: E402
 
 
 def _run(coro):
@@ -290,3 +290,54 @@ async def _steer_after_first_prompt_body():
 
 def test_input_with_initial_prompt_is_steer():
 	_run(_steer_after_first_prompt_body())
+
+
+async def _add_finding_expandable_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		base = len(app._convo().children)
+		fd = {"_type": "vulnerability", "name": "XSS", "matched_at": "http://x",
+		      "severity": "high", "_uuid": ""}
+		# add_finding emits the action row AND (right after) yields the finding itself
+		await app._render({"_type": "ai", "ai_type": "add_finding", "content": "XSS",
+		                   "extra_data": {"finding": fd}})
+		await app._render(_finding("vulnerability", "", "", name="XSS",
+		                           matched_at="http://x", severity="high"))
+		await pilot.pause(0.05)
+		# only the expandable action row was added — the standalone finding card was suppressed
+		assert len(app._convo().children) == base + 1, "add_finding rendered a duplicate card"
+		panels = [p for p in app.query(ActionPanel)]
+		assert len(panels) == 1
+		assert panels[0].verb == "Added"
+		assert panels[0].finding is not None, "the Added row must expand to the rich finding"
+
+		# the SAME finding re-read later (e.g. via query_workspace) now has a persisted _uuid:
+		# it was already shown as the row, so it must NOT render a card either
+		await app._render(_finding("vulnerability", "ws", "persisted-uuid-9", name="XSS",
+		                           matched_at="http://x", severity="high"))
+		await pilot.pause(0.05)
+		assert len(app._convo().children) == base + 1, "re-read of an add_finding finding duplicated"
+		assert "persisted-uuid-9" in app._shown_uuids, "re-read uuid must migrate to _uuid dedup"
+
+
+def test_add_finding_row_is_expandable_and_not_duplicated():
+	_run(_add_finding_expandable_body())
+
+
+async def _subview_hides_input_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		assert app.query_one("#input-box").display is True
+		await app._ensure_subview("sub-1")
+		# drilling into a subagent's (read-only) view hides the input box
+		app._open_subview("sub-1")
+		assert app.query_one("#input-box").display is False
+		# going back to the conversation restores it
+		app._show_main()
+		assert app.query_one("#input-box").display is True
+
+
+def test_subview_hides_input_box():
+	_run(_subview_hides_input_body())

@@ -17,7 +17,20 @@ from secator.tui.render import finding_text
 from secator.tui.widgets import ActionPanel, RunnerPanel, SubagentRow
 
 
-# AI finding-action verbs — rendered as a plain "<Verb> <finding name>" line (no icon).
+def _finding_sig(d: dict) -> tuple:
+	"""Stable identity of a finding for one-shot dedup before it has a _uuid.
+
+	add_finding renders the finding as an expandable action row AND yields the finding
+	itself (which the base renders as a card); this signature lets the base skip that
+	duplicate card. Keyed on the type + the fields that locate a finding.
+	"""
+	return (
+		d.get("_type"), d.get("name"), d.get("matched_at"), d.get("url"),
+		d.get("ip"), d.get("host"), d.get("port"), d.get("severity"),
+	)
+
+
+# AI finding-action verbs — rendered as an expandable "<Verb> <finding name>" row (no icon).
 _ACTION_VERBS = {
 	"add_finding": "Added",
 	"update_finding": "Updated",
@@ -38,6 +51,33 @@ class AITUI(TUIApp):
 		)
 		self._in_subagent: str | None = None          # subagent session we're writing into
 		self._active_subagent: SubagentRow | None = None
+		# Signatures of findings shown via an add_finding action row. _pending holds the
+		# finding the handler yields right after (no _uuid yet) so it isn't drawn again as a
+		# standalone card; _suppressed keeps that signature until the finding is re-read with a
+		# persisted _uuid (e.g. via query_workspace) so that re-read is deduped too — it was
+		# already shown once, as the row.
+		self._pending_finding_sigs: set = set()
+		self._suppressed_finding_sigs: set = set()
+
+	def _should_skip_finding(self, d: dict) -> bool:
+		# Suppress the standalone card for a finding already shown as an add_finding row.
+		sig = _finding_sig(d)
+		uid = d.get("_uuid")
+		if sig in self._pending_finding_sigs:
+			self._pending_finding_sigs.discard(sig)
+			if uid:
+				self._shown_uuids.add(uid)          # persisted already: _uuid dedup covers re-reads
+			else:
+				self._suppressed_finding_sigs.add(sig)  # no _uuid yet: keep the sig for the re-read
+			return True
+		if sig in self._suppressed_finding_sigs:
+			# Same finding re-read later, now carrying a persisted _uuid: skip it (already shown
+			# as the row) and migrate to _uuid dedup so we stop tracking the coarse signature.
+			if uid:
+				self._shown_uuids.add(uid)
+				self._suppressed_finding_sigs.discard(sig)
+			return True
+		return False
 
 	async def _route_write(self, d: dict) -> VerticalScroll:
 		# route subagent-internal items into that subagent's own (hidden) view; the spawn
@@ -114,22 +154,19 @@ class AITUI(TUIApp):
 				self._current.add_output(content)
 		elif at in _ACTION_VERBS:
 			# AI action on a finding: a neutral "<Verb> <name>" row (same tone as a runner
-			# header), no icon — icons are for secator findings, not AI actions.
+			# header), no icon — icons are for secator findings, not AI actions. Expand the
+			# row to see the referenced finding rendered richly (its own __rich__).
 			fd = (d.get("extra_data") or {}).get("finding") or {}
 			name = fd.get("name") or fd.get("id") or fd.get("matched_at") or content
 			verb = _ACTION_VERBS[at]
+			renderable = finding_text(None, fd) if fd else None
 			if at == "add_finding":
-				# the full finding is yielded right after and renders richly on its own,
-				# so keep this a plain line (no duplicate)
-				line = Text()
-				line.append(f"{verb} ", style="bold #9aa3b8")
-				line.append(str(name), style="#8a8fa3")
-				await self._append(Static(line, classes="action"))
-			else:
-				# Exploited / Failed to exploit / Updated / … reference an existing finding
-				# not shown elsewhere — make the row expandable to the vuln's rich output.
-				renderable = finding_text(None, fd) if fd else None
-				await self._append(ActionPanel(verb, name, renderable))
+				# add_finding ALSO yields the full finding right after (for persistence +
+				# non-TUI frontends); it would otherwise render as a 2nd standalone card. We
+				# show it here (expandable) instead, so suppress that duplicate. The finding
+				# has no _uuid yet (assigned on persist), so match on a field signature.
+				self._pending_finding_sigs.add(_finding_sig(fd))
+			await self._append(ActionPanel(verb, name, renderable))
 		elif at == "error":
 			await self._append(Static(Text.from_markup(f"[red]✖ {escape(content)}[/]"), classes="err"))
 		elif at == "tool_result":
