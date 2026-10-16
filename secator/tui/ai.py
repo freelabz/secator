@@ -154,14 +154,25 @@ class AITUI(TUIApp):
 				self._active_subagents[sid] = row
 				await self._append(row)
 				return
+			meta = ""
 			if at == "shell":
 				# LLM-supplied description as the title; the command goes in the box
 				kind, rname, command = "shell", desc, content
 			elif at == "query":
+				# title is the LLM's human description ("Querying/Queried <desc>"); the raw
+				# query is the command; a meta line carries the result count + skip/limit/group
 				kind, rname, command = "query", desc or content, content
+				bits = [f"{ed.get('results', 0)} results"]
+				if ed.get("offset"):
+					bits.append(f"skip={ed.get('offset')}")
+				if ed.get("limit") is not None:
+					bits.append(f"limit={ed.get('limit')}")
+				if ed.get("group"):
+					bits.append("grouped")
+				meta = "  ·  ".join(bits)
 			else:
 				kind, rname, command = at, desc or content or ed.get("name") or "", ""
-			panel = RunnerPanel(kind, rname, command=command, runner_id=ed.get("runner_id", ""))
+			panel = RunnerPanel(kind, rname, command=command, runner_id=ed.get("runner_id", ""), meta=meta)
 			# the card's content is the runner name (== _source of its items). Used to
 			# route a task's live output + buffered output (parallel batch), and to tell a
 			# workflow's OWN notes (_source == workflow name) from its child tasks' items.

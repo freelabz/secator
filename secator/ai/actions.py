@@ -1324,6 +1324,10 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		extra = {"results": len(results), "limit": limit, "offset": offset}
 		if group:
 			extra["group"] = True
+		# human-readable intent the LLM supplies (shown as the card title: "Queried <desc>")
+		description = str(action.get("description") or "").strip()
+		if description:
+			extra["description"] = description
 		yield Ai(
 			content=query_str,
 			ai_type="query",
