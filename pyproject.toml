@@ -109,6 +109,9 @@ ai = [
 	# core `rich` pin bump above.
 	'textual < 9',
 ]
+shodan = [
+	'shodan < 2'
+]
 
 [project.scripts]
 secator = 'secator.cli:cli'

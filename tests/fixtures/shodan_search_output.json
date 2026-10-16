@@ -1,0 +1,17 @@
+{
+  "total": 2,
+  "matches": [
+    {
+      "ip_str": "10.0.0.1", "org": "Example Org", "isp": "Example ISP", "asn": "AS65000",
+      "hostnames": ["a.example.com"],
+      "port": 80, "transport": "tcp", "product": "nginx", "version": "1.21.0",
+      "cpe": ["cpe:/a:nginx:nginx:1.21.0"], "data": "HTTP/1.1 200 OK\r\n",
+      "vulns": {"CVE-2021-23017": {"cvss": "9.8", "summary": "nginx resolver off-by-one"}}
+    },
+    {
+      "ip_str": "10.0.0.2", "org": "Example Org", "hostnames": ["b.example.com"],
+      "port": 22, "transport": "tcp", "product": "OpenSSH", "version": "8.2p1",
+      "data": "SSH-2.0-OpenSSH_8.2p1\r\n"
+    }
+  ]
+}
