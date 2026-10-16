@@ -62,6 +62,7 @@ class TUIApp(App):
 	}
 	.runner-cmdwrap { height: auto; }
 	.runner-cmd { color: #7b8296; margin: 0 0 1 0; }   /* command: dim text, no background */
+	.runner-meta { margin: 0 0 1 0; }                  /* a query's result count + skip/limit/group */
 	.runner-cmd:hover { text-style: bold; }            /* click to reveal the raw output */
 	.runner-raw { height: auto; margin: 0 0 1 0; }     /* raw command output (hidden by default) */
 	.runner-out { height: auto; }
@@ -136,6 +137,8 @@ class TUIApp(App):
 		self._findings_loading = False
 		self._findings_seen: set = set()   # finding _uuids already shown (incremental refresh)
 		self._line_buffers: dict = {}      # source -> {cmd, lines} buffered until its card renders
+		self._parent_source: str = ""      # the top-level runner's source (set by the item feed);
+		#                                    its OWN notes/errors render top-level, not buffered
 		self._shown_uuids: set = set()     # findings already rendered inline (skip dups, e.g. a
 		#                                    live-streamed finding later re-read via query_workspace)
 		# Startup race: the runner takes a few seconds to build (LLM/driver/system-prompt setup)
@@ -505,6 +508,14 @@ class TUIApp(App):
 		if t in ("info", "warning", "error"):
 			renderable = message_text(item, d)
 			src = d.get("_source") or ""
+			# The parent (ai) task's OWN note/error must show in the conversation — checked
+			# FIRST, before any container/sink route. No card ever renders with the parent's
+			# source, so routing it to a sink (e.g. a query panel, which _sink_for_source
+			# matches for ANY source) or buffering it would hide it forever (e.g. a model
+			# NotFoundError showing nothing).
+			if src and src == self._parent_source:
+				await self._append(Static(renderable, classes="err" if t == "error" else "ai"))
+				return
 			container = self._container_for(d)
 			if container is not None:
 				# child-task note (e.g. "XML results saved") nests in that task's sub-panel;

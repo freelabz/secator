@@ -154,14 +154,25 @@ class AITUI(TUIApp):
 				self._active_subagents[sid] = row
 				await self._append(row)
 				return
+			meta = ""
 			if at == "shell":
 				# LLM-supplied description as the title; the command goes in the box
 				kind, rname, command = "shell", desc, content
 			elif at == "query":
+				# title is the LLM's human description ("Querying/Queried <desc>"); the raw
+				# query is the command; a meta line carries the result count + skip/limit/group
 				kind, rname, command = "query", desc or content, content
+				bits = [f"{ed.get('results', 0)} results"]
+				if ed.get("offset"):
+					bits.append(f"skip={ed.get('offset')}")
+				if ed.get("limit") is not None:
+					bits.append(f"limit={ed.get('limit')}")
+				if ed.get("group"):
+					bits.append("grouped")
+				meta = "  ·  ".join(bits)
 			else:
 				kind, rname, command = at, desc or content or ed.get("name") or "", ""
-			panel = RunnerPanel(kind, rname, command=command, runner_id=ed.get("runner_id", ""))
+			panel = RunnerPanel(kind, rname, command=command, runner_id=ed.get("runner_id", ""), meta=meta)
 			# the card's content is the runner name (== _source of its items). Used to
 			# route a task's live output + buffered output (parallel batch), and to tell a
 			# workflow's OWN notes (_source == workflow name) from its child tasks' items.
@@ -236,12 +247,28 @@ def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 	# where get_tui() is None, and the TUI would never get a prompt or a response.
 	opts = {**opts, "sync": True}
 
+	# `-p <file>`: if the prompt is a path to an existing file, use its contents (the task
+	# does the same for the LLM message; resolve here too so the TUI echoes/sessions the
+	# actual prompt, not the literal filename).
+	from pathlib import Path
+	prompt_val = opts.get("prompt", "") or ""
+	if prompt_val:
+		try:
+			if Path(prompt_val).is_file():
+				opts = {**opts, "prompt": Path(prompt_val).read_text(encoding="utf-8").strip()}
+		except OSError:
+			pass
+
 	session = opts.get("workspace") or opts.get("prompt", "ai") or "ai"
 	app = AITUI(
 		None, session=str(session)[:30], mode=opts.get("mode", "chat"),
 		initial_prompt=opts.get("prompt", ""))
 
 	def _feed(self, item):  # on_item hook: runs in the worker thread
+		# `self` is the parent ai runner — remember its source so the display can tell the
+		# parent task's OWN notes/errors (shown top-level) from a child runner's (buffered
+		# under its card). Cheap + idempotent on every item.
+		app._parent_source = getattr(self, "unique_name", "") or app._parent_source
 		app.tui_render(item)
 		return item
 

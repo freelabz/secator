@@ -292,7 +292,7 @@ class ai(PythonRunner):
 			"help": "Hard token limit - truncate oldest messages beyond this",
 		},
 		"interactive": {"type": str, "default": "local", "help": "Interactivity mode: local, remote, or auto"},
-		"tui": {"is_flag": True, "default": True, "reverse": True, "help": "Textual TUI for local interactive runs (needs `pip install textual`); --no-tui for plain console"},  # noqa: E501
+		"headless": {"is_flag": True, "default": False, "help": "Run in the plain console instead of the Textual TUI (local interactive runs use the TUI by default; needs `pip install textual`)"},  # noqa: E501
 		"context": {
 			"type": dict,
 			"default": None,
@@ -534,7 +534,7 @@ class ai(PythonRunner):
 			# a non-path prompt is always used verbatim instead of crashing the run.
 			try:
 				if Path(prompt).is_file():
-					prompt = Path(prompt).read_text().strip()
+					prompt = Path(prompt).read_text(encoding="utf-8").strip()
 			except OSError:
 				pass
 		return prompt
