@@ -776,3 +776,31 @@ async def _runner_status_icon_body():
 
 def test_runner_status_icons_spinner_check_cross():
 	_run(_runner_status_icon_body())
+
+
+async def _error_routes_by_owning_id_body():
+	# two parallel tasks share a _source ("httpx"); an error for ONE must mark only THAT
+	# panel failed (red cross), not its same-source sibling — routed by owning runner id.
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+
+		def card(desc, rid):
+			return {"_type": "ai", "ai_type": "task", "content": "httpx",
+			        "extra_data": {"description": desc, "runner_id": rid}}
+
+		await app._render(card("Probe A", "rid-A"))
+		await app._render(card("Probe B", "rid-B"))
+		await pilot.pause(0.05)
+		a = _by_desc(app, "Probe A")
+		b = _by_desc(app, "Probe B")
+		# an error owned by task B (task_chunk_id=rid-B) with the SHARED source "httpx"
+		await app._render({"_type": "error", "message": "boom", "_source": "httpx",
+		                   "_context": {"task_chunk_id": "rid-B"}})
+		await pilot.pause(0.02)
+		assert b.failed is True, "error should mark its OWNING task failed"
+		assert a.failed is False, "sibling sharing the source must NOT be marked failed"
+
+
+def test_error_marks_only_owning_task_failed():
+	_run(_error_routes_by_owning_id_body())

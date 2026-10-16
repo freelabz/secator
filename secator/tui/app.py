@@ -732,6 +732,22 @@ class TUIApp(App):
 				if is_err:
 					panel.mark_failed()
 				return
+			# A leaf note/error: route by the OWNING runner id FIRST (parallel same-tool batch
+			# tasks share a _source, so source routing alone would mark the WRONG panel failed).
+			# Mirrors the finding routing below. Id-less items fall through to source routing.
+			oid = self._owning_id(d)
+			if oid:
+				leaf = self._leaf_panels.get(oid)
+				if leaf is not None:
+					leaf.add_note(renderable)
+					if is_err:
+						leaf.mark_failed()
+				else:
+					buf = self._buffer(oid)
+					buf["notes"].append(renderable)   # batch: card not yet rendered
+					if is_err:
+						buf["failed"] = True
+				return
 			sink = await self._sink_for_source(src)
 			if sink is not None:
 				sink.add_note(renderable)
