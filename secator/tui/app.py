@@ -79,6 +79,9 @@ class TUIApp(App):
 	.choice-list > .selection-list--button-highlighted { color: #556070; background: transparent; }
 	.choice-list > .selection-list--button-selected { color: #7fd1e0; background: transparent; }
 	.choice-list > .selection-list--button-selected-highlighted { color: #7fd1e0; background: transparent; }
+	/* subtle highlight on the focused choice row (the default is too bright) */
+	.choice-list > .option-list--option-highlighted { background: #1b2130; color: #cdd6e4; }
+	.choice-list:focus > .option-list--option-highlighted { background: #20283a; color: #e6ecf5; }
 
 	/* lazy findings side panel (ctrl+f); 1/3 width by default, drag the grip to resize */
 	#findings-panel { dock: right; width: 34%; display: none; background: transparent; }
@@ -819,6 +822,14 @@ class TUIApp(App):
 
 	def on_descendant_blur(self, event) -> None:
 		self._update_placeholder()
+		# keep the choice box interactive from the keyboard: if focus drifts off its list while
+		# the box is still shown (not the Tab-to-input case, which hides the box), pull it back.
+		if self._active_choice is not None:
+			try:
+				if self.query_one("#choice-host").display:
+					self.call_after_refresh(self._active_choice.focus_list)
+			except Exception:  # noqa: BLE001
+				pass
 
 	async def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
 		text = event.value.strip()
@@ -877,6 +888,8 @@ class TUIApp(App):
 		host.mount(self._active_choice)
 		self.query_one("#input-box").display = False
 		host.display = True
+		# focus the list once the box is laid out, so the keyboard drives it immediately
+		self.call_after_refresh(self._active_choice.focus_list)
 
 	def _resolve_choice(self, value) -> None:
 		"""A choice sent directly (Enter on an option / multi-confirm): echo, restore, resolve."""
