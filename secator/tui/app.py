@@ -630,9 +630,14 @@ class TUIApp(App):
 			if ctx_pct is not None:
 				sm["ctx_pct"] = ctx_pct
 		else:
-			if dangerous is not None:
+			# Don't clobber an optimistic value the user just set that's still queued in
+			# _control (the runner polls control, THEN reports meta a line later — reporting
+			# the pre-toggle state would flip the bar back until the next turn).
+			with self._control_lock:
+				pending = dict(self._control)
+			if dangerous is not None and "dangerous" not in pending:
 				self._meta["dangerous"] = bool(dangerous)
-			if mode is not None:
+			if mode is not None and "mode" not in pending:
 				self._meta["mode"] = "auto" if mode_is_auto else (mode or "auto")
 			if ctx_pct is not None:
 				self._meta["ctx_pct"] = ctx_pct

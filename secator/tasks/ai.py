@@ -1480,7 +1480,12 @@ class ai(PythonRunner):
 			return
 		if 'dangerous' in ctrl:
 			self.dangerous = bool(ctrl['dangerous'])
-			state = "bypassed — guardrails OFF" if self.dangerous else "enforced"
+			# keep the live action context in sync so child runners stop (or resume) getting the
+			# in_scope/out_of_scope boundary (bypass = run freely, no scope filtering).
+			ictx = getattr(self, "_isolation_ctx", None)
+			if ictx is not None:
+				ictx.dangerous = self.dangerous
+			state = "bypassed — guardrails OFF (scope filtering off)" if self.dangerous else "enforced"
 			yield Ai(content=f"Permission guardrails {state} (user toggle).", ai_type="note")
 		if 'mode' in ctrl:
 			requested = ctrl['mode']
@@ -1488,12 +1493,22 @@ class ai(PythonRunner):
 				self.mode_is_auto = True
 				self.context["ai_mode_is_auto"] = True
 				self._detect_mode(force=True)
+				# _detect_mode only rebuilds prompt/tools when the detected mode CHANGES; the
+				# auto-mode policy itself flipped (mode_is_auto False->True), so rebuild
+				# unconditionally or the next LLM call keeps schemas built with mode_is_auto=False.
+				self._rebuild_prompt_and_tools()
 			else:
 				self.mode = normalize_mode(requested)
 				self.mode_is_auto = False
 				self.context["ai_mode_is_auto"] = False
 				self._rebuild_prompt_and_tools()
 			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
+			# keep the live action context in sync so actions dispatched after the switch
+			# (notably a spawned subagent's mode policy) use the new mode, not the pre-switch one.
+			ictx = getattr(self, "_isolation_ctx", None)
+			if ictx is not None:
+				ictx.mode = self.mode
+				ictx.mode_is_auto = self.mode_is_auto
 			yield Ai(content=self.mode or "auto", ai_type="mode_changed")
 		if 'session_name' in ctrl:
 			# user renamed the conversation via /name — persist it so every subsequent item
