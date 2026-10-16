@@ -334,10 +334,16 @@ class ActionPanel(Vertical):
 
 
 class ChoicePrompt(Vertical):
-	"""Navigable suggestion list for a follow-up ask. Single-choice uses an OptionList
-	(↑/↓ then Enter); multi-choice uses a SelectionList (Space toggles, Enter confirms).
-	Typing in the main input still works as a free-form answer. Once answered it collapses
-	to just the picked value — click it to expand the original questionnaire again."""
+	"""Navigable suggestion list for a follow-up ask, wired to the main input box.
+
+	Single-choice: an OptionList (focused on appear — no mouse needed) plus a trailing
+	"Something else" row. ↑/↓/Tab move the highlight and LIVE-COPY the focused option into
+	the input box (empty for "Something else"), so the user can extend it; Tab past the last
+	option focuses the input box to edit; Enter submits the input value. Multi-choice keeps a
+	SelectionList (space toggles, enter confirms). Once answered it collapses to the picked
+	value — click the summary to re-open."""
+
+	_SOMETHING_ELSE = "✎ Something else (type your own)"
 
 	def __init__(self, question: str, choices: list, multiple: bool, resolve):
 		super().__init__(classes="choice")
@@ -358,13 +364,36 @@ class ChoicePrompt(Vertical):
 				yield SelectionList(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
 				yield Static(Text.from_markup("[dim]space to toggle · enter to confirm · or type your own[/]"))
 			else:
-				yield OptionList(*self._choices, classes="choice-list")
-				yield Static(Text.from_markup("[dim]↑/↓ to move · enter to select · or type your own[/]"))
+				yield OptionList(*self._choices, self._SOMETHING_ELSE, classes="choice-list")
+				yield Static(Text.from_markup(
+					"[dim]↑/↓/tab to move · the choice fills the input below (edit it) · enter to send[/]"))
 		yield body
 
 	def on_mount(self) -> None:
 		self.query_one(".choice-summary").display = False
-		self.query_one(".choice-list").focus()
+		# focus the list AFTER the first refresh so it reliably takes focus from the input
+		# box (fixes needing a mouse click to interact with the choices)
+		self.call_after_refresh(self._focus_list)
+
+	def _focus_list(self) -> None:
+		try:
+			self.query_one(".choice-list").focus()
+		except Exception:  # noqa: BLE001 - widget may be gone
+			pass
+
+	def _input(self):
+		try:
+			return self.app.query_one("#input-box Input")
+		except Exception:  # noqa: BLE001
+			return None
+
+	def _set_input(self, text: str) -> None:
+		inp = self._input()
+		if inp is not None:
+			inp.value = text
+
+	def _is_something_else(self, index: int) -> bool:
+		return not self._multiple and index == len(self._choices)
 
 	def _summary_text(self) -> Text:
 		arrow = "▶" if self._collapsed else "▼"
@@ -374,16 +403,22 @@ class ChoicePrompt(Vertical):
 		t.append(f"  {arrow}", style="#6b7187")
 		return t
 
-	def _done(self, value: str) -> None:
+	def collapse_with(self, value: str) -> None:
+		"""Collapse to the given answer WITHOUT re-resolving (used when the answer was
+		submitted via the input box, which already resolved the pending ask)."""
+		if self._value:
+			return
 		self._value = value
 		for w in self.query(".choice-list"):
 			w.disabled = True
-		# collapse to the picked value; click the summary to re-open the questionnaire
 		self._collapsed = True
 		summary = self.query_one(".choice-summary", _ChoiceSummary)
 		summary.update(self._summary_text())
 		summary.display = True
 		self.query_one(".choice-body").display = False
+
+	def _done(self, value: str) -> None:
+		self.collapse_with(value)
 		self._resolve(value)
 
 	def toggle_body(self) -> None:
@@ -393,17 +428,49 @@ class ChoicePrompt(Vertical):
 		self.query_one(".choice-body").display = not self._collapsed
 		self.query_one(".choice-summary", _ChoiceSummary).update(self._summary_text())
 
+	def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+		# live-copy the focused option into the input box so the user can extend it
+		if self._value or self._multiple:
+			return
+		self._set_input("" if self._is_something_else(event.option_index) else self._choices[event.option_index])
+
 	def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-		if not self._value:   # ignore re-selection after answered
-			self._done(str(event.option.prompt))
+		if self._value:   # ignore re-selection after answered
+			return
+		if self._is_something_else(event.option_index):
+			# hand off to the input box for free typing (don't submit an empty answer)
+			self._set_input("")
+			inp = self._input()
+			if inp is not None:
+				inp.focus()
+			return
+		# submit the current input value (honors any edits the user typed in)
+		inp = self._input()
+		value = inp.value.strip() if inp is not None and inp.value.strip() else str(event.option.prompt)
+		self._done(value)
 
 	def on_key(self, event) -> None:
-		if self._multiple and event.key == "enter" and not self._value:
+		if self._value:
+			return
+		if self._multiple and event.key == "enter":
 			sel = self.query_one(SelectionList)
 			picked = [self._choices[i] for i in sel.selected]
 			if picked:
 				event.stop()
 				self._done(", ".join(picked))
+			return
+		# Tab moves the highlight down; past the last option it focuses the input box to edit.
+		if not self._multiple and event.key == "tab":
+			ol = self.query_one(OptionList)
+			cur = ol.highlighted if ol.highlighted is not None else -1
+			if cur < ol.option_count - 1:
+				ol.highlighted = cur + 1
+			else:
+				inp = self._input()
+				if inp is not None:
+					inp.focus()
+			event.stop()
+			event.prevent_default()
 
 
 class PermissionPrompt(Vertical):
@@ -423,7 +490,14 @@ class PermissionPrompt(Vertical):
 		yield Static(Text.from_markup("[dim]↑/↓ to move · enter to select[/]"))
 
 	def on_mount(self) -> None:
-		self.query_one(".choice-list").focus()
+		# focus after the first refresh so it reliably takes focus from the input box (no mouse)
+		self.call_after_refresh(self._focus_list)
+
+	def _focus_list(self) -> None:
+		try:
+			self.query_one(".choice-list").focus()
+		except Exception:  # noqa: BLE001 - widget may be gone
+			pass
 
 	def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
 		label, value = self._OPTIONS[event.option_index]
