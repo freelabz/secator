@@ -229,6 +229,78 @@ class TestTree(unittest.TestCase):
 		self.assertNotIn('Skipped task nuclei/network because condition is not met: opts.nuclei', messages)
 		self.assertNotIn('Skipped task nuclei/host because condition is not met: opts.nuclei', messages)
 
+	def test_important_opts_list_form(self):
+		"""important_opts (list form) flags matching opts with important/important_order."""
+		find_templates.cache_clear()
+		config = TemplateLoader(input={
+			'type': 'workflow',
+			'name': 'test_imp_list',
+			'important_opts': ['nuclei', 'wordlist'],
+			'options': {'nuclei': {'is_flag': True, 'default': False}},
+			'tasks': {'ffuf': {}, 'nuclei': {'if': 'opts.nuclei'}},
+		})
+		opts = get_config_options(config)
+		# workflow option matched by exact name, order 0
+		self.assertTrue(opts['nuclei'].get('important'))
+		self.assertEqual(opts['nuclei']['important_order'], 0)
+		# meta wordlist opt matched by name, order 1
+		self.assertTrue(opts['wordlist'].get('important'))
+		self.assertEqual(opts['wordlist']['important_order'], 1)
+		# an unlisted opt is not flagged
+		self.assertNotIn('important', opts.get('timeout', {}))
+
+	def test_important_opts_bare_suffix_match(self):
+		"""A prefixed opt key (e.g. ffuf-wordlist) matches the bare name 'wordlist'."""
+		find_templates.cache_clear()
+		config = TemplateLoader(input={
+			'type': 'workflow',
+			'name': 'test_imp_suffix',
+			'important_opts': ['wordlist'],
+			'tasks': {'ffuf': {'wordlist': 'directory_list_small'}},
+		})
+		opts = get_config_options(config)
+		self.assertIn('ffuf-wordlist', opts)
+		self.assertTrue(opts['ffuf-wordlist'].get('important'))
+		self.assertEqual(opts['ffuf-wordlist']['important_order'], 0)
+
+	def test_important_opts_map_form_overrides(self):
+		"""important_opts (map form) applies label/placeholder overrides."""
+		find_templates.cache_clear()
+		config = TemplateLoader(input={
+			'type': 'workflow',
+			'name': 'test_imp_map',
+			'important_opts': {'nuclei': {'label': 'Run nuclei', 'placeholder': 'toggle'}},
+			'options': {'nuclei': {'is_flag': True, 'default': False}},
+			'tasks': {'nuclei': {'if': 'opts.nuclei'}},
+		})
+		opts = get_config_options(config)
+		self.assertTrue(opts['nuclei'].get('important'))
+		self.assertEqual(opts['nuclei']['label'], 'Run nuclei')
+		self.assertEqual(opts['nuclei']['placeholder'], 'toggle')
+
+	def test_important_opts_unknown_name_no_crash(self):
+		"""An important_opts entry that matches nothing is skipped (warned), not fatal."""
+		find_templates.cache_clear()
+		config = TemplateLoader(input={
+			'type': 'workflow',
+			'name': 'test_imp_unknown',
+			'important_opts': ['does_not_exist'],
+			'tasks': {'nuclei': {}},
+		})
+		opts = get_config_options(config)  # must not raise
+		self.assertFalse(any(v.get('important') for v in opts.values()))
+
+	def test_wordlist_opt_has_semantic_type(self):
+		"""The WORDLIST opt carries type 'wordlist' through serialization."""
+		find_templates.cache_clear()
+		config = TemplateLoader(input={
+			'type': 'workflow',
+			'name': 'test_wl_type',
+			'tasks': {'ffuf': {}},
+		})
+		opts = get_config_options(config)
+		self.assertEqual(opts['wordlist']['type'], 'wordlist')
+
 	def test_boolean_flag_with_false_default_can_be_overridden(self):
 		"""Test that boolean flags with default False can be overridden in YAML config.
 

@@ -10,6 +10,13 @@ profile: default
 tags: [recon, dns, network, http, crawl, ssl, takeovers, vuln, secrets]
 input_types:
   - host
+
+important_opts:
+  - brute_dns
+  - brute_http
+  - passive
+  - test_ssl
+
 workflows:
   subdomain_recon:
   host_recon:
