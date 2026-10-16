@@ -625,7 +625,8 @@ class BackBar(Static):
 
 
 class Grip(Static):
-	"""Draggable left edge of the findings panel — drag to resize its width."""
+	"""Draggable left edge of a right-docked side panel — drag to resize its width.
+	Resizes its OWN parent panel (the findings panel or the background-tasks panel)."""
 	_dragging = False
 
 	def on_mouse_down(self, event) -> None:
@@ -643,4 +644,5 @@ class Grip(Static):
 			return
 		total = self.app.size.width
 		width = max(24, min(total - 20, total - event.screen_x))
-		self.app.query_one("#findings-panel").styles.width = int(width)
+		if self.parent is not None:
+			self.parent.styles.width = int(width)
