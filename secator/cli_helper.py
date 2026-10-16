@@ -340,10 +340,21 @@ def register_runner(cli_endpoint, config):
 
 		hooks = deep_merge_dicts(*hooks)
 
+		# Resolve the `ai` front-end BEFORE deciding sync/worker: the TUI drives the task
+		# in-process (sync), and `setup`/`--show-prompt` are local plain-console flows — none
+		# of them dispatch to a worker, so they must not trigger the worker/redis checks below.
+		is_ai = getattr(config, 'name', '') == 'ai'
+		is_setup = is_ai and inputs in ('setup', ['setup'])
+		wants_tui = (
+			is_ai and not opts.get('headless', False)
+			and not is_setup and not opts.get('show_prompt', False)
+		)
+		ai_local = is_ai and (is_setup or opts.get('show_prompt', False) or wants_tui)
+
 		# Enable sync or not
-		# Some task invocations are interactive/local-only (e.g. `ai setup`) and must
-		# never be dispatched to a worker, even when one is alive.
-		force_local = cli_endpoint.name == 'task' and task_cls.requires_local_execution(inputs, opts)
+		# Some task invocations are interactive/local-only (e.g. `ai setup`, any TUI run) and
+		# must never be dispatched to a worker, even when one is alive.
+		force_local = (cli_endpoint.name == 'task' and task_cls.requires_local_execution(inputs, opts)) or ai_local
 		if sync or dry_run or force_local:
 			sync = True
 		else:
@@ -385,17 +396,10 @@ def register_runner(cli_endpoint, config):
 			}
 		)
 
-		# Textual TUI for the ai task (local interactive). On by default; `--headless` opts
-		# out. NEVER for the `setup` wizard or `--show-prompt` (both are plain-console flows
-		# that would otherwise be swallowed by the TUI screen). Only on a real TTY (not
-		# piped/worker). Owns the screen and drives the runner itself, so branch BEFORE the
-		# console-capturing block. Falls back to the console run if textual isn't installed.
-		is_ai = getattr(config, 'name', '') == 'ai'
-		is_setup = is_ai and inputs in ('setup', ['setup'])
-		wants_tui = (
-			is_ai and not opts.get('headless', False)
-			and not is_setup and not opts.get('show_prompt', False)
-		)
+		# Textual TUI for the ai task (local interactive). `wants_tui` was resolved above (on
+		# by default; `--headless` opts out; never for `setup`/`--show-prompt`). Only on a real
+		# TTY (not piped/worker). Owns the screen and drives the runner itself, so branch BEFORE
+		# the console-capturing block. Falls back to the console run if textual isn't installed.
 		if wants_tui:
 			import sys as _sys
 			from secator.definitions import IN_WORKER

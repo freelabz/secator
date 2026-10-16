@@ -534,7 +534,7 @@ class ai(PythonRunner):
 			# a non-path prompt is always used verbatim instead of crashing the run.
 			try:
 				if Path(prompt).is_file():
-					prompt = Path(prompt).read_text().strip()
+					prompt = Path(prompt).read_text(encoding="utf-8").strip()
 			except OSError:
 				pass
 		return prompt

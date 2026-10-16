@@ -255,7 +255,7 @@ def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 	if prompt_val:
 		try:
 			if Path(prompt_val).is_file():
-				opts = {**opts, "prompt": Path(prompt_val).read_text().strip()}
+				opts = {**opts, "prompt": Path(prompt_val).read_text(encoding="utf-8").strip()}
 		except OSError:
 			pass
 

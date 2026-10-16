@@ -508,6 +508,14 @@ class TUIApp(App):
 		if t in ("info", "warning", "error"):
 			renderable = message_text(item, d)
 			src = d.get("_source") or ""
+			# The parent (ai) task's OWN note/error must show in the conversation — checked
+			# FIRST, before any container/sink route. No card ever renders with the parent's
+			# source, so routing it to a sink (e.g. a query panel, which _sink_for_source
+			# matches for ANY source) or buffering it would hide it forever (e.g. a model
+			# NotFoundError showing nothing).
+			if src and src == self._parent_source:
+				await self._append(Static(renderable, classes="err" if t == "error" else "ai"))
+				return
 			container = self._container_for(d)
 			if container is not None:
 				# child-task note (e.g. "XML results saved") nests in that task's sub-panel;
@@ -520,11 +528,6 @@ class TUIApp(App):
 			sink = await self._sink_for_source(src)
 			if sink is not None:
 				sink.add_note(renderable)
-			elif src and src == self._parent_source:
-				# the parent (ai) task's OWN note/error — show it in the conversation. It must
-				# NOT buffer: no card ever renders with the parent's source, so a buffered
-				# parent error is lost forever (e.g. a model NotFoundError showing nothing).
-				await self._append(Static(renderable, classes="err" if t == "error" else "ai"))
 			elif src:
 				self._buffer(src)["notes"].append(renderable)   # batch: card not yet rendered
 			elif self._current is not None:
