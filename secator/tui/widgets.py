@@ -163,13 +163,14 @@ class RunnerPanel(Vertical):
 	_FAIL_COLOR = "#ff6b6b"
 
 	def __init__(self, kind: str, rname: str, command: str = "", runner_id: str = "", meta: str = "",
-	             result_count=None):
+	             result_count=None, config_name=None):
 		super().__init__(classes="runner-panel")
 		self.kind = kind
 		self.rname = rname
 		self.command = command
 		self.meta = meta   # optional dim details line (e.g. a query's skip/limit/group)
 		self.result_count = result_count   # query result count, shown inline in the header
+		self.config_name = config_name     # task/workflow/scan config name, shown in the header
 		self.runner_id = runner_id
 		self.source = ""   # the child command's tool name, for routing on_line output
 		self.count = 0
@@ -239,8 +240,8 @@ class RunnerPanel(Vertical):
 			kind = f"  ({self.result_count} results)" if self.result_count is not None else "  (query)"
 			tail = ""
 		else:
-			# runner type suffix so task/workflow/scan/shell are distinguishable
-			kind = f" ({self.kind})"
+			# runner type + the config used, e.g. "(task • nmap)", so it's clear which ran
+			kind = f" ({self.kind} • {self.config_name})" if self.config_name else f" ({self.kind})"
 			tail = f"  ·  {self.count} findings" if self.count else ""
 		desc = self._desc()
 		# ellipsise only the description so the icon + type + arrow stay on one line
