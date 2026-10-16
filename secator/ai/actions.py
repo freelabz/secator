@@ -124,6 +124,10 @@ class ActionContext:
 	# same in_scope/out_of_scope boundary via secator's shipped scope-gate.
 	in_scope: List = field(default_factory=list)
 	out_of_scope: List = field(default_factory=list)
+	# When the operator bypasses the permission engine (`dangerous`), also stop propagating
+	# the in_scope/out_of_scope boundary to child runners — bypass means run freely, so the
+	# shipped scope-gate shouldn't keep dropping out-of-scope targets.
+	dangerous: bool = False
 	_query_engine: Any = field(default=None, repr=False)
 	permission_engine: Any = field(default=None, repr=False)
 
@@ -519,11 +523,14 @@ def _child_run_opts(ctx: ActionContext) -> Dict:
 		# SECURITY (ISOLATION): child force-inherits the parent `isolated`; it can't set or lower it.
 		"isolated": ctx.isolated,
 	}
-	# Flow the mandate scope down so each child runner enforces it too (shipped gate).
-	if ctx.in_scope:
-		opts["in_scope"] = ctx.in_scope
-	if ctx.out_of_scope:
-		opts["out_of_scope"] = ctx.out_of_scope
+	# Flow the mandate scope down so each child runner enforces it too (shipped gate) —
+	# unless the operator bypassed the permission engine (`dangerous`), in which case scope
+	# is intentionally dropped so nothing is filtered as out-of-scope.
+	if not ctx.dangerous:
+		if ctx.in_scope:
+			opts["in_scope"] = ctx.in_scope
+		if ctx.out_of_scope:
+			opts["out_of_scope"] = ctx.out_of_scope
 	return opts
 
 

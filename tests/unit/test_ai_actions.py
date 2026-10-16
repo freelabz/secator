@@ -12,7 +12,7 @@ if ADDONS_ENABLED['ai']:
 		_handle_query, _handle_add_finding, _handle_mark_vuln_exploited,
 		_handle_mark_vuln_false_positive, _run_runner, _decrypt_dict,
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
-		_build_child_hooks_or_denial, _child_preamble,
+		_build_child_hooks_or_denial, _child_preamble, _child_run_opts,
 		_MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
 		_MAX_SHELL_OUTPUT_CHARS, _truncate, _sandbox_image,
 	)
@@ -2261,3 +2261,25 @@ class TestCommandTimedOutFlag(unittest.TestCase):
 		# stat_update_frequency is tens of seconds, so over a ~2s run stats collect at most a
 		# couple of times (baseline + maybe one), NEVER once per 0.1s poll (~20).
 		self.assertLessEqual(calls['n'], 3)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestDangerousClearsScope(unittest.TestCase):
+	"""Bypassing the permission engine (dangerous) also drops the in_scope/out_of_scope
+	boundary from child run-opts, so the shipped scope-gate stops filtering targets."""
+
+	def _ctx(self, dangerous):
+		return ActionContext(
+			targets=['canary.example.com'], model='x',
+			in_scope=['app.example.com'], out_of_scope=['canary.example.com'],
+			dangerous=dangerous)
+
+	def test_scope_propagated_when_not_dangerous(self):
+		opts = _child_run_opts(self._ctx(False))
+		self.assertEqual(opts.get('in_scope'), ['app.example.com'])
+		self.assertEqual(opts.get('out_of_scope'), ['canary.example.com'])
+
+	def test_scope_dropped_when_dangerous(self):
+		opts = _child_run_opts(self._ctx(True))
+		self.assertNotIn('in_scope', opts)
+		self.assertNotIn('out_of_scope', opts)

@@ -843,6 +843,7 @@ class ai(PythonRunner):
 			in_scope=self.in_scope,
 			out_of_scope=self.out_of_scope,
 			isolated=self.isolated,
+			dangerous=bool(self.dangerous),
 		)
 		self._isolation_ctx = ctx  # for sandbox-container teardown at task end
 
@@ -1489,7 +1490,12 @@ class ai(PythonRunner):
 			return
 		if 'dangerous' in ctrl:
 			self.dangerous = bool(ctrl['dangerous'])
-			state = "bypassed — guardrails OFF" if self.dangerous else "enforced"
+			# keep the live action context in sync so child runners stop (or resume) getting the
+			# in_scope/out_of_scope boundary (bypass = run freely, no scope filtering).
+			ictx = getattr(self, "_isolation_ctx", None)
+			if ictx is not None:
+				ictx.dangerous = self.dangerous
+			state = "bypassed — guardrails OFF (scope filtering off)" if self.dangerous else "enforced"
 			yield Ai(content=f"Permission guardrails {state} (user toggle).", ai_type="note")
 		if 'mode' in ctrl:
 			requested = ctrl['mode']
