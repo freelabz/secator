@@ -1454,6 +1454,10 @@ class ai(PythonRunner):
 				mode=normalize_mode(self.mode) or "auto",
 				mode_is_auto=getattr(self, "mode_is_auto", True),
 				ctx_pct=pct)
+			# keep the top-delimiter conversation label in sync with the resolved/renamed name
+			name = getattr(self, "session_name", "") or ""
+			if name and hasattr(tui, "tui_set_session_name"):
+				tui.tui_set_session_name(name)
 		except Exception as e:  # noqa: BLE001 - never crash the loop over a display update
 			self.debug(f'meta report failed: {e}', sub='llm')
 
@@ -1506,6 +1510,13 @@ class ai(PythonRunner):
 				ictx.mode = self.mode
 				ictx.mode_is_auto = self.mode_is_auto
 			yield Ai(content=self.mode or "auto", ai_type="mode_changed")
+		if 'session_name' in ctrl:
+			# user renamed the conversation via /name — persist it so every subsequent item
+			# (and the saved report) carries the new name.
+			name = str(ctrl['session_name']).strip()
+			if name:
+				self.session_name = name
+				self.context["session_name"] = name
 
 	def _drain_steers(self):
 		"""Drain pending mid-flight steers and inject them into the LLM history.
