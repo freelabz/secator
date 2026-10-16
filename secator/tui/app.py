@@ -93,6 +93,17 @@ class TUIApp(App):
 	#findings-list { height: 1fr; background: transparent; border: none; padding: 0; }
 	#findings-list > .option-list--option-highlighted { background: #171a24; }
 
+	/* background-tasks side panel (ctrl+r): this session's runners grouped running/finished */
+	#bgtasks-panel { dock: right; width: 36%; display: none; background: transparent; }
+	#bgtasks-grip { width: 1; height: 1fr; background: #2b3245; color: #6b7187; }
+	#bgtasks-grip:hover { background: #3d6fb4; }
+	#bgtasks-body { width: 1fr; padding: 0 1; }
+	#bgtasks-title { height: 1; color: #c2a0ff; margin: 0 0 1 0; }
+	#bgtasks-list { height: 1fr; background: transparent; }
+	.bg-section { color: #6b7187; margin: 1 0 0 0; }
+	.bg-row { height: auto; }
+	.bg-empty { color: #6b7187; }
+
 	Markdown { background: transparent; margin: 0; padding: 0; }
 	#status { height: 1; color: #d7a93b; padding: 0 1; }
 	/* neutral, no background — just a lighter top rule to set off the chat box. grows with
@@ -143,6 +154,7 @@ class TUIApp(App):
 		("down", "scroll_latest", "Scroll to latest"),
 		("ctrl+o", "expand_all", "Expand/collapse all"),
 		("ctrl+f", "toggle_findings", "Findings panel"),
+		("ctrl+r", "toggle_bgtasks", "Background tasks"),
 	]
 	# full-screen, integrated: use the terminal's own background/palette, no command
 	# palette, no footer chrome
@@ -223,6 +235,16 @@ class TUIApp(App):
 			),
 			id="findings-panel",
 		)
+		# background-tasks overview (ctrl+r): the session's runners grouped running/finished
+		yield Horizontal(
+			Grip("│", id="bgtasks-grip"),
+			Vertical(
+				Static("Background tasks", id="bgtasks-title"),
+				VerticalScroll(id="bgtasks-list"),
+				id="bgtasks-body",
+			),
+			id="bgtasks-panel",
+		)
 		# While a choice ask is active the choice box REPLACES the input box in the same slot
 		# (both carry the same top rule, so the delimiter stays put); Tab swaps the selection
 		# into the input to add details. Only one of the two is ever visible.
@@ -261,6 +283,7 @@ class TUIApp(App):
 		self._set_session_name(self._session_name)
 		self.set_interval(0.1, self._tick_spinner)    # animate the status spinner
 		self.set_interval(3.0, self._tick_findings)   # auto-update the findings panel
+		self.set_interval(1.0, self._tick_bgtasks)    # refresh the background-tasks panel
 		if self._initial_prompt:
 			# the -p prompt isn't typed into the input, so echo it once up front
 			self.call_later(self._append, Static(
@@ -484,6 +507,87 @@ class TUIApp(App):
 		for p in panels:
 			p.set_collapsed(not expand)
 
+	# ---- background-tasks panel (ctrl+r): live overview of this session's runners ----
+	_BG_SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+	def action_toggle_bgtasks(self) -> None:
+		panel = self.query_one("#bgtasks-panel")
+		panel.display = not panel.display
+		if panel.display:
+			# both side panels dock right — only show one at a time
+			self.query_one("#findings-panel").display = False
+			self._bg_sig = None   # force a rebuild on open
+			self.call_later(self._render_bgtasks)
+
+	@staticmethod
+	def _bg_structure_sig(panels) -> tuple:
+		# the set + lifecycle states (NOT the spinner frame) — a rebuild is only needed when
+		# a runner is added/removed or flips done/failed; the spinner animates in place.
+		return tuple((id(p), p.done, getattr(p, "failed", False)) for p in panels)
+
+	def _bg_row_text(self, glyph, color, rname, kind, config) -> Text:
+		t = Text()
+		t.append(f"{glyph} ", style=f"bold {color}")
+		t.append(rname or kind, style="#cdd6e4")
+		t.append(f" ({kind}" + (f" • {config}" if config else "") + ")", style="#6b7187")
+		return t
+
+	def _tick_bgtasks(self) -> None:
+		# Called ~1s. If the runner set/states changed, schedule a rebuild; otherwise just
+		# advance the spinner glyph on the running rows IN PLACE (no remove/mount, no scroll
+		# thrash — addresses the "rebuild every tick" + "remove_children isn't synchronous" bits).
+		try:
+			if not self.query_one("#bgtasks-panel").display:
+				return
+		except Exception:  # noqa: BLE001 - panel gone during teardown
+			return
+		if self._bg_structure_sig(self._bg_rows()) != getattr(self, "_bg_sig", None):
+			self.call_later(self._render_bgtasks)
+			return
+		self._bg_frame = getattr(self, "_bg_frame", 0) + 1
+		spin = self._BG_SPIN[self._bg_frame % len(self._BG_SPIN)]
+		for st, rname, kind, config in getattr(self, "_bg_running_rows", []):
+			try:
+				st.update(self._bg_row_text(spin, "#e0882e", rname, kind, config))
+			except Exception:  # noqa: BLE001 - row removed
+				pass
+
+	def _bg_rows(self) -> list:
+		"""Top-level runner cards in the conversation (the dispatched actions), in order."""
+		return [w for w in self._convo().children if isinstance(w, RunnerPanel)]
+
+	async def _render_bgtasks(self) -> None:
+		# Full rebuild — only when the structure changed (see _bg_structure_sig). Async so the
+		# old rows are AWAITED out before mounting the new ones (remove_children is not sync).
+		panels = self._bg_rows()
+		sig = self._bg_structure_sig(panels)
+		if sig == getattr(self, "_bg_sig", None):
+			return
+		self._bg_sig = sig
+		self._bg_running_rows = []   # (Static, rname, kind, config) for in-place spinner ticks
+		body = self.query_one("#bgtasks-list", VerticalScroll)
+		await body.remove_children()
+		if not panels:
+			await body.mount(Static(
+				Text.from_markup("[#6b7187]No background tasks yet.[/]"), classes="bg-empty"))
+			return
+		spin = self._BG_SPIN[getattr(self, "_bg_frame", 0) % len(self._BG_SPIN)]
+		for label, group in (("Running", [p for p in panels if not p.done]),
+		                     ("Finished", [p for p in panels if p.done])):
+			if not group:
+				continue
+			await body.mount(Static(
+				Text.from_markup(f"[#8a8fa3 b]{label}[/] [#4a5163]({len(group)})[/]"), classes="bg-section"))
+			for p in group:
+				config = getattr(p, "config_name", None)
+				if not p.done:
+					row = Static(self._bg_row_text(spin, "#e0882e", p.rname, p.kind, config), classes="bg-row")
+					self._bg_running_rows.append((row, p.rname, p.kind, config))
+				else:
+					glyph, color = ("✗", "#ff6b6b") if getattr(p, "failed", False) else ("✓", "#3fb950")
+					row = Static(self._bg_row_text(glyph, color, p.rname, p.kind, config), classes="bg-row")
+				await body.mount(row)
+
 	# ---- findings side panel (lazy, queried by _context.session_id) ----
 	def set_findings_source(self, workspace_id, context, session_id) -> None:
 		# called from the worker thread when the runner resolves its session
@@ -493,6 +597,7 @@ class TUIApp(App):
 		panel = self.query_one("#findings-panel")
 		panel.display = not panel.display
 		if panel.display:
+			self.query_one("#bgtasks-panel").display = False   # only one right-docked panel
 			if self._findings_src is None:
 				self._set_findings_title(None, note="no findings source yet")
 			else:

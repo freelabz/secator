@@ -804,3 +804,31 @@ async def _error_routes_by_owning_id_body():
 
 def test_error_marks_only_owning_task_failed():
 	_run(_error_routes_by_owning_id_body())
+
+
+async def _bgtasks_panel_body():
+	from textual.widgets import Static
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		# a FAILED finished task, then a still-running one (the last leaf stays running)
+		await app._render(_card("task", "nmap", "Port scan"))
+		_by_desc(app, "Port scan").failed = True
+		app._finish_current()                       # Port scan -> finished (failed)
+		await app._render(_card("task", "httpx", "Probe"))   # Probe -> current, running
+		await pilot.pause(0.05)
+		# Ctrl+R opens the background-tasks panel
+		app.action_toggle_bgtasks()
+		await pilot.pause(0.05)
+		assert app.query_one("#bgtasks-panel").display is True
+		text = "\n".join(str(s.render()) for s in app.query_one("#bgtasks-list").query(Static))
+		assert "Running" in text and "Finished" in text          # both buckets
+		assert "Probe (task • httpx)" in text                    # running row, (kind • config)
+		assert "✗ Port scan (task • nmap)" in text               # failed row with red cross
+		# opening the findings panel hides this one (both dock right)
+		app.action_toggle_findings()
+		assert app.query_one("#bgtasks-panel").display is False
+
+
+def test_background_tasks_panel_groups_and_toggles():
+	_run(_bgtasks_panel_body())
