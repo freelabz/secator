@@ -162,7 +162,8 @@ TOOL_SCHEMAS = {
 		"function": {
 			"name": "query_workspace",
 			"description": "Query the workspace database for stored security findings using MongoDB-style queries. "
-			               "Example (good): query_workspace(query={'_type':'vulnerability','severity':{'$in':['high','critical']}}). "  # noqa: E501
+			               "Example (good): query_workspace(query={'_type':'vulnerability','severity':{'$in':['high','critical']}}, "  # noqa: E501
+			               "description='Review high/critical vulns'). "
 			               "Bad: query_workspace() — no query; query_workspace(query={}) — unscoped, returns noise.",
 			"parameters": {
 				"type": "object",
@@ -171,6 +172,7 @@ TOOL_SCHEMAS = {
 						"type": "object",
 						"description": "MongoDB-style query object (e.g. {\"_type\": \"vulnerability\", \"severity\": {\"$in\": [\"critical\", \"high\"]}})."  # noqa: E501
 					},
+					"description": _DESCRIPTION_SCHEMA,
 					"limit": {
 						"type": "integer",
 						"description": "Maximum number of results to return.",
@@ -193,7 +195,7 @@ TOOL_SCHEMAS = {
 						"default": False
 					}
 				},
-				"required": ["query"]
+				"required": ["query", "description"]
 			}
 		}
 	},

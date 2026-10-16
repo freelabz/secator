@@ -81,11 +81,15 @@ class RunnerPanel(Vertical):
 	doesn't fit), and a bordered box (hidden until expanded) holding the command and
 	its output/findings. Workflow/scan panels nest child task panels in ``subpanels``."""
 
-	def __init__(self, kind: str, rname: str, command: str = "", runner_id: str = ""):
+	# per-kind header verbs: (running, done). Default is Running/Ran.
+	_VERBS = {"query": ("Querying", "Queried")}
+
+	def __init__(self, kind: str, rname: str, command: str = "", runner_id: str = "", meta: str = ""):
 		super().__init__(classes="runner-panel")
 		self.kind = kind
 		self.rname = rname
 		self.command = command
+		self.meta = meta   # optional dim details line (e.g. a query's result count + skip/limit/group)
 		self.runner_id = runner_id
 		self.source = ""   # the child command's tool name, for routing on_line output
 		self.count = 0
@@ -106,6 +110,8 @@ class RunnerPanel(Vertical):
 			with Vertical(classes="runner-cmdwrap"):
 				if self.command:
 					yield _CmdLine(self._cmd_render(), classes="runner-cmd")
+			if self.meta:
+				yield Static(Text.from_markup(f"[#6b7187]{escape(self.meta)}[/]"), classes="runner-meta")
 			raw = Vertical(classes="runner-raw")
 			raw.display = False
 			yield raw
@@ -134,9 +140,12 @@ class RunnerPanel(Vertical):
 		return self.rname or self.command or self.kind
 
 	def _header(self) -> Text:
-		verb = "Ran" if self.done else "Running"
+		running, done = self._VERBS.get(self.kind, ("Running", "Ran"))
+		verb = done if self.done else running
 		arrow = "▼" if not self._collapsed else "▶"
-		kind = f" ({self.kind})"   # runner type, so a task/workflow/scan/query/shell is distinguishable
+		# runner type suffix so task/workflow/scan/shell are distinguishable; omitted when the
+		# verb already names the action (e.g. "Queried …" needs no "(query)").
+		kind = "" if self.kind in self._VERBS else f" ({self.kind})"
 		tail = f"  ·  {self.count} findings" if self.count else ""
 		desc = self._desc()
 		# ellipsise only the description so the type + arrow stay on one line

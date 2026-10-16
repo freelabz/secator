@@ -578,3 +578,47 @@ async def _choice_numeric_and_clear_body():
 
 def test_choice_prompt_numeric_literal_and_input_cleared():
 	_run(_choice_numeric_and_clear_body())
+async def _parent_error_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		app._parent_source = "ai"   # set by the item feed from the parent runner's unique_name
+		base = len(app._convo().children)
+		# the parent ai task's OWN error (e.g. a model NotFoundError) carries _source == "ai";
+		# it must render in the conversation, not buffer forever under a card that never renders
+		await app._render({"_type": "error", "_source": "ai", "_uuid": "e1", "_context": {},
+		                   "message": "litellm.NotFoundError: model not found"})
+		await pilot.pause(0.05)
+		assert len(app._convo().children) - base == 1, "parent task error was not shown"
+		from textual.widgets import Static
+		texts = [w.render().plain for w in app._convo().query(Static) if hasattr(w.render(), "plain")]
+		assert any("NotFoundError" in t for t in texts), texts
+
+
+def test_parent_task_error_renders_in_conversation():
+	_run(_parent_error_body())
+
+
+async def _query_card_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		ed = {"description": "Find high/critical vulns", "results": 7, "limit": 100, "offset": 20, "group": True}
+		q = {"_type": "ai", "ai_type": "query", "content": '{"_type":"vulnerability"}', "_uuid": "q1",
+		     "_context": {}, "extra_data": ed}
+		await app._render(q)
+		# a result finding routes INTO the query panel
+		await app._render(_finding("vulnerability", "nuclei", "v1", name="XSS", severity="high",
+		                           matched_at="http://x"))
+		await pilot.pause(0.05)
+		p = [x for x in _panels(app) if x.kind == "query"][0]
+		assert "Querying Find high/critical vulns" in p._header().plain  # running verb + description
+		p.done = True
+		assert "Queried Find high/critical vulns" in p._header().plain   # done verb
+		assert "(query)" not in p._header().plain                         # verb already says it
+		assert "7 results" in p.meta and "skip=20" in p.meta and "limit=100" in p.meta and "grouped" in p.meta
+		assert p.count == 1   # the result finding rendered inside the query panel
+
+
+def test_query_card_shows_description_and_meta():
+	_run(_query_card_body())

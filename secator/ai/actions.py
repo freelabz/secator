@@ -1280,6 +1280,10 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		yield Warning(message="No workspace available for query", _context=context)
 		return
 
+	# human-readable intent the LLM supplies (shown as the card title: "Queried <desc>").
+	# Normalized BEFORE the try so a FAILED query card keeps the title too.
+	description = str(action.get("description") or "").strip()
+
 	try:
 		query_str = json.dumps(query_filter, separators=(',', ':'))
 		# Surface only the PRIMARY of each finding group: skip hidden duplicates
@@ -1324,6 +1328,8 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		extra = {"results": len(results), "limit": limit, "offset": offset}
 		if group:
 			extra["group"] = True
+		if description:
+			extra["description"] = description
 		yield Ai(
 			content=query_str,
 			ai_type="query",
@@ -1354,10 +1360,13 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			yield result
 
 	except Exception as e:
+		failed_extra = {"results": "failed", "limit": limit}
+		if description:
+			failed_extra["description"] = description
 		yield Ai(
 			content=str(query_filter),
 			ai_type="query",
-			extra_data={"results": "failed", "limit": limit},
+			extra_data=failed_extra,
 			_context=context
 		)
 		yield Error.from_exception(e, _context=context)
