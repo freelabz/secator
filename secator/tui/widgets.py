@@ -88,12 +88,14 @@ class RunnerPanel(Vertical):
 	_OK_COLOR = "#3fb950"
 	_FAIL_COLOR = "#ff6b6b"
 
-	def __init__(self, kind: str, rname: str, command: str = "", runner_id: str = "", meta: str = ""):
+	def __init__(self, kind: str, rname: str, command: str = "", runner_id: str = "", meta: str = "",
+	             result_count=None):
 		super().__init__(classes="runner-panel")
 		self.kind = kind
 		self.rname = rname
 		self.command = command
-		self.meta = meta   # optional dim details line (e.g. a query's result count + skip/limit/group)
+		self.meta = meta   # optional dim details line (e.g. a query's skip/limit/group)
+		self.result_count = result_count   # query result count, shown inline in the header
 		self.runner_id = runner_id
 		self.source = ""   # the child command's tool name, for routing on_line output
 		self.count = 0
@@ -158,9 +160,14 @@ class RunnerPanel(Vertical):
 	def _header(self) -> Text:
 		glyph, gstyle = self._status_icon()
 		arrow = "▼" if not self._collapsed else "▶"
-		# runner type suffix so task/workflow/scan/shell/query are distinguishable
-		kind = f" ({self.kind})"
-		tail = f"  ·  {self.count} findings" if self.count else ""
+		if self.kind == "query":
+			# a query shows its result count inline, e.g. "<description> (7 results)"
+			kind = f"  ({self.result_count} results)" if self.result_count is not None else "  (query)"
+			tail = ""
+		else:
+			# runner type suffix so task/workflow/scan/shell are distinguishable
+			kind = f" ({self.kind})"
+			tail = f"  ·  {self.count} findings" if self.count else ""
 		desc = self._desc()
 		# ellipsise only the description so the icon + type + arrow stay on one line
 		width = self.app.size.width if self.app else 100
