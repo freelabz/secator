@@ -17,11 +17,12 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Header, Input, OptionList, Static
+from textual.widgets import Header, OptionList, Static
 from textual.widgets.option_list import Option
 
 from secator.tui.render import finding_text, message_text
-from secator.tui.widgets import BackBar, BlockPanel, ChoicePrompt, Grip, PermissionPrompt, RunnerPanel
+from secator.tui.widgets import (
+	BackBar, BlockPanel, ChoicePrompt, Grip, PermissionPrompt, PromptInput, RunnerPanel)
 
 
 class TUIApp(App):
@@ -55,9 +56,10 @@ class TUIApp(App):
 	.runner-panel { margin: 1 0; height: auto; }
 	.runner-head { height: 1; width: auto; }
 	.runner-head:hover { text-style: bold; }
-	/* expanded content: a left rule (indent), not a box — stays integrated */
+	/* expanded content: a left rule (indent), not a box — stays integrated.
+	   a little vertical breathing room above/below so it reads as relaxed, not cramped. */
 	.runner-box {
-		height: auto; margin: 0 0 0 1; padding: 0 0 0 1;
+		height: auto; margin: 1 0 1 1; padding: 0 0 0 1;
 		border-left: solid #2b3245; background: transparent;
 	}
 	.runner-cmdwrap { height: auto; }
@@ -73,9 +75,14 @@ class TUIApp(App):
 	.choice { height: auto; margin: 1 0; }
 	.choice-q { color: #e6c15a; margin: 0 0 1 0; }
 	.choice-list { height: auto; max-height: 12; border: none; background: transparent; }
-	.choice-summary { height: 1; }
-	.choice-summary:hover { text-style: bold; }
-	.choice-body { height: auto; }
+	/* multi-select dot (see ToggleButton glyph override in widgets.py): dim when off, cyan on */
+	.choice-list > .selection-list--button { color: #3a4150; background: transparent; }
+	.choice-list > .selection-list--button-highlighted { color: #556070; background: transparent; }
+	.choice-list > .selection-list--button-selected { color: #7fd1e0; background: transparent; }
+	.choice-list > .selection-list--button-selected-highlighted { color: #7fd1e0; background: transparent; }
+	/* subtle highlight on the focused choice row (the default is too bright) */
+	.choice-list > .option-list--option-highlighted { background: #1b2130; color: #cdd6e4; }
+	.choice-list:focus > .option-list--option-highlighted { background: #20283a; color: #e6ecf5; }
 
 	/* lazy findings side panel (ctrl+f); 1/3 width by default, drag the grip to resize */
 	#findings-panel { dock: right; width: 34%; display: none; background: transparent; }
@@ -88,14 +95,36 @@ class TUIApp(App):
 
 	Markdown { background: transparent; margin: 0; padding: 0; }
 	#status { height: 1; color: #d7a93b; padding: 0 1; }
-	/* neutral, no background — just a lighter top rule to set off the chat box */
+	/* neutral, no background — just a lighter top rule to set off the chat box. grows with
+	   the multi-line input (1 line by default, up to a few). */
 	#input-box {
-		border: none; border-top: solid #47516b; background: transparent; height: 3; padding: 0;
+		border: none; border-top: solid #47516b; background: transparent; height: auto; padding: 1 0;
 	}
-	#input-caret { width: 3; height: 1fr; color: #7fd1e0; text-style: bold; content-align: center middle; }
-	#input-box Input { width: 1fr; border: none; background: transparent; color: #e6ecf5; padding: 0 1; height: 1fr; }
-	#input-box Input:focus { border: none; background: transparent; }
-	#input-box Input > .input--cursor { color: #0b0e14; background: #e6ecf5; }
+	/* the choice box takes the input box's place while a choice ask is active — same top rule
+	   so the delimiter doesn't move (hidden otherwise) */
+	#choice-host {
+		border: none; border-top: solid #47516b; background: transparent;
+		height: auto; display: none; padding: 1 1 0 1;
+	}
+	.choice-box { height: auto; }
+	.choice-hint { color: #6b7187; }
+	#input-caret { width: 3; height: 1; color: #7fd1e0; text-style: bold; content-align: center top; }
+	/* layered field: the input and the placeholder occupy the same space; placeholder on top */
+	#input-field { width: 1fr; height: auto; layers: field hint; }
+	#prompt-input {
+		layer: field; width: 1fr; height: auto; max-height: 8;
+		border: none; background: transparent; color: #e6ecf5; padding: 0 1;
+	}
+	#prompt-input:focus { border: none; background: transparent; }
+	/* TextArea paints the cursor's line + gutter with $boost (a dark bar) once you start
+	   typing — keep them transparent so the input blends into the terminal background. */
+	#prompt-input .text-area--cursor-line { background: transparent; }
+	#prompt-input .text-area--cursor-gutter { background: transparent; }
+	/* light cursor block (dark glyph under it) so the caret is visible on a dark terminal.
+	   text-style: none kills the theme's default `reverse`, which would otherwise swap these
+	   and render a near-black block (what made the cursor look black). */
+	#prompt-input .text-area--cursor { background: #e6ecf5; color: #11141b; text-style: none; }
+	#input-placeholder { layer: hint; width: 1fr; height: 1; padding: 0 1; }
 	Header { background: transparent; color: #cdd6e4; }
 	"""
 	BINDINGS = [
@@ -163,9 +192,23 @@ class TUIApp(App):
 			),
 			id="findings-panel",
 		)
+		# While a choice ask is active the choice box REPLACES the input box in the same slot
+		# (both carry the same top rule, so the delimiter stays put); Tab swaps the selection
+		# into the input to add details. Only one of the two is ever visible.
+		yield Vertical(id="choice-host")
 		yield Horizontal(
 			Static("❯", id="input-caret"),
-			Input(placeholder="Message, or steer a running runner…  (Enter to send)"),
+			# a layered field: the multi-line input, with the placeholder overlaid on top of it
+			# (shown only while empty — TextArea has no native placeholder)
+			Vertical(
+				PromptInput(id="prompt-input"),
+				Static(
+					Text.from_markup(
+						"[#5b6070]Message, or steer a running runner…  (Enter to send · Alt+Enter: newline)[/]"),
+					id="input-placeholder",
+				),
+				id="input-field",
+			),
 			id="input-box",
 		)
 
@@ -174,7 +217,7 @@ class TUIApp(App):
 		self.sub_title = self._subtitle
 		self.query_one("#backbar").display = False
 		self._write = self.query_one("#convo", VerticalScroll)
-		self.query_one("#input-box Input", Input).focus()
+		self.query_one("#prompt-input", PromptInput).focus()
 		self.set_interval(0.1, self._tick_spinner)    # animate the status spinner
 		self.set_interval(3.0, self._tick_findings)   # auto-update the findings panel
 		if self._initial_prompt:
@@ -367,7 +410,7 @@ class TUIApp(App):
 		self.query_one("#backbar").display = False
 		# Back on the main conversation: restore the input box and refocus it.
 		self.query_one("#input-box").display = True
-		self.query_one("#input-box Input", Input).focus()
+		self.query_one("#prompt-input", PromptInput).focus()
 
 	def _active_view(self) -> VerticalScroll:
 		# the currently visible scroll (an open secondary view, else the main convo)
@@ -612,9 +655,41 @@ class TUIApp(App):
 		self._containers = {}
 
 	# ---- input / prompts / steers ----
-	async def on_input_submitted(self, event: Input.Submitted) -> None:
+	def _update_placeholder(self) -> None:
+		# the overlaid placeholder is shown only while the input is empty AND unfocused — so it
+		# doesn't sit on top of (and hide) the cursor once the input itself is focused. Driven by
+		# the PromptInput's own focus/blur/change (NOT app-wide descendant-focus events, which
+		# fired on every focus change in the app and interfered with click-to-expand on runners).
+		try:
+			ta = self.query_one("#prompt-input", PromptInput)
+			self.query_one("#input-placeholder").display = (not ta.text) and (not ta.has_focus)
+		except Exception:  # noqa: BLE001
+			pass
+
+	def on_text_area_changed(self, event) -> None:
+		self._update_placeholder()
+
+	def on_click(self, event) -> None:
+		# A click anywhere in the input box focuses the input. Needed because the placeholder
+		# overlay (on the `hint` layer, above the input) swallows the click while the box is
+		# empty, so the click never reaches the TextArea. Scoped to #input-box, so clicks on
+		# runner lines / choices are unaffected.
+		node = getattr(event, "widget", None)
+		while node is not None:
+			if getattr(node, "id", None) == "input-box":
+				try:
+					self.query_one("#prompt-input", PromptInput).focus()
+				except Exception:  # noqa: BLE001
+					pass
+				return
+			node = node.parent
+
+	async def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
 		text = event.value.strip()
-		event.input.value = ""
+		try:
+			self.query_one("#prompt-input", PromptInput).text = ""
+		except Exception:  # noqa: BLE001
+			pass
 		if not text:
 			return
 		await self._append(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
@@ -625,9 +700,9 @@ class TUIApp(App):
 			# a value an active choice list put in the input is LITERAL — don't reinterpret a
 			# numeric choice (e.g. choices=["2","1"], input "2") as a 1-based index into choices
 			answer = text if (cp is not None and text in choices) else self._resolve_answer(text, choices, ptype)
+			if cp is not None:   # restore the normal input row (the choice box took its slot)
+				self._restore_input()
 			self._resolve_pending(answer)
-			if cp is not None:   # collapse the choice list to the submitted answer
-				cp.collapse_with(answer)
 			return
 		# Typed before the runner finished starting up and asked for the first prompt — hold it
 		# (the first ask_user consumes it). Without this it would leak into _steers and be lost
@@ -637,6 +712,67 @@ class TUIApp(App):
 			return
 		with self._steers_lock:
 			self._steers.append(text)
+
+	# ---- choice box (lives in the input slot while a choice ask is active) ----
+	def _show_choices(self, choices, multiple) -> None:
+		"""Replace the input row with a choice box (same slot) until the user acts on it."""
+		host = self.query_one("#choice-host", Vertical)
+		host.remove_children()
+		self._active_choice = ChoicePrompt(choices, multiple, self._resolve_choice, self._choice_to_input)
+		host.mount(self._active_choice)
+		self.query_one("#input-box").display = False
+		host.display = True
+		# focus the list once the box is laid out, so the keyboard drives it immediately
+		self.call_after_refresh(self._active_choice.focus_list)
+
+	def _resolve_choice(self, value) -> None:
+		"""A choice sent directly (Enter on an option / multi-confirm): echo, restore, resolve."""
+		if self._pending_ask is None:
+			return
+		self._echo_user(value)
+		self._restore_input()
+		self._resolve_pending(value)
+
+	def _choice_to_input(self, text) -> None:
+		"""Tab: hand the current selection to the input box so the user can add more details."""
+		try:
+			inp = self.query_one("#prompt-input", PromptInput)
+		except Exception:  # noqa: BLE001
+			return
+		inp.text = text
+		inp.move_cursor(inp.document.end)
+		self.query_one("#choice-host").display = False
+		self.query_one("#input-box").display = True
+		inp.focus()
+
+	def _back_to_choices(self) -> None:
+		"""Esc from the input box (while a choice ask is active): return to the choice box."""
+		if self._active_choice is None:
+			return
+		self.query_one("#input-box").display = False
+		self.query_one("#choice-host").display = True
+		self._active_choice.focus_list()
+
+	def _restore_input(self) -> None:
+		self.query_one("#choice-host", Vertical).remove_children()
+		self.query_one("#choice-host").display = False
+		self.query_one("#input-box").display = True
+
+	def _echo_user(self, text) -> None:
+		self._convo().mount(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
+		self._convo().scroll_end(animate=False)
+
+	def on_key(self, event) -> None:
+		# Esc in the input box while a choice ask is active returns to the choice box (the input
+		# row is only visible in that state after the user pressed Tab).
+		if event.key == "escape" and self._active_choice is not None:
+			try:
+				if not self.query_one("#choice-host").display:
+					event.stop()
+					event.prevent_default()
+					self._back_to_choices()
+			except Exception:  # noqa: BLE001
+				pass
 
 	def _resolve_pending(self, value) -> None:
 		"""Unblock the worker waiting in tui_ask_user with `value`."""
@@ -650,7 +786,7 @@ class TUIApp(App):
 		self._set_status("", False)
 		ev.set()
 		try:
-			self.query_one("#input-box Input", Input).focus()
+			self.query_one("#prompt-input", PromptInput).focus()
 		except Exception:  # noqa: BLE001
 			pass
 
@@ -706,14 +842,12 @@ class TUIApp(App):
 			self._convo().mount(PermissionPrompt(question, self._resolve_pending))
 			self._convo().scroll_end(animate=False)
 		elif choices:
-			# navigable suggestion list wired to the input box (↑/↓/tab fills it, enter sends)
-			self._active_choice = ChoicePrompt("", choices, multiple, self._resolve_pending)
-			self._convo().mount(self._active_choice)
-			self._convo().scroll_end(animate=False)
+			# the choice box REPLACES the input row (same slot) until the user acts on it
+			self._show_choices(choices, multiple)
 		else:
 			# a plain end-of-turn follow-up: no "What's next?" / "waiting" noise — the
 			# focused input is enough. Just make sure it's focused.
 			try:
-				self.query_one("#input-box Input", Input).focus()
+				self.query_one("#prompt-input", PromptInput).focus()
 			except Exception:  # noqa: BLE001
 				pass

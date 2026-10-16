@@ -10,9 +10,64 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Markdown, OptionList, SelectionList, Static
+from textual.message import Message
+from textual.widgets import Markdown, OptionList, SelectionList, Static, TextArea
+from textual.widgets._toggle_button import ToggleButton
 
 from secator.tui.render import command_text
+
+# Refine the multi-select checkbox: drop Textual's heavy "▐X▌" bars for a single dot that
+# reads empty/filled purely by colour (styled via the .selection-list--button* classes).
+# SelectionList references ToggleButton.BUTTON_* directly, so this is set on the class; it's
+# only reached on the (optional) TUI import path, where SelectionList is our only toggle.
+ToggleButton.BUTTON_LEFT = ""
+ToggleButton.BUTTON_INNER = "●"
+ToggleButton.BUTTON_RIGHT = ""
+
+
+class PromptInput(TextArea):
+	"""Multi-line chat input (grows with content). Enter SENDS the text; Alt+Enter (also
+	Shift+Enter / Ctrl+J, for terminals that don't deliver Alt) inserts a newline.
+
+	Textual's TextArea inserts a newline on Enter by default — we remap Enter to a Submitted
+	message and route newlines to the modifier combos instead.
+	"""
+
+	class Submitted(Message):
+		"""Posted when the user presses Enter — carries the current text."""
+		def __init__(self, value: str):
+			self.value = value
+			super().__init__()
+
+	def __init__(self, **kwargs):
+		super().__init__(soft_wrap=True, tab_behavior="focus", show_line_numbers=False, **kwargs)
+
+	def _refresh_placeholder(self) -> None:
+		# ask the app to re-evaluate the overlaid placeholder (hidden while THIS input is
+		# focused so it doesn't cover the cursor). Scoped to this widget's own focus/blur, so
+		# it never fires for clicks elsewhere (e.g. expanding a runner).
+		app = self.app
+		if hasattr(app, "_update_placeholder"):
+			app.call_after_refresh(app._update_placeholder)
+
+	def on_focus(self) -> None:
+		self._refresh_placeholder()
+
+	def on_blur(self) -> None:
+		self._refresh_placeholder()
+
+	async def _on_key(self, event) -> None:
+		if event.key == "enter":
+			event.stop()
+			event.prevent_default()
+			self.post_message(self.Submitted(self.text))
+			return
+		if event.key in ("alt+enter", "shift+enter", "ctrl+j"):
+			event.stop()
+			event.prevent_default()
+			self.insert("\n")
+			return
+		await super()._on_key(event)
 
 
 def _usage_line(usage: dict) -> "Text | None":
@@ -174,23 +229,27 @@ class RunnerPanel(Vertical):
 			self.toggle()
 
 	def add_finding(self, renderable) -> None:
+		self._clear_empty_note()
 		self.count += 1
 		self.query_one(".runner-out", Vertical).mount(Static(renderable, classes="out-line"))
 		self._refresh_head()
 
 	def bump(self) -> None:
 		# count a finding that landed in a nested sub-panel (container total)
+		self._clear_empty_note()
 		self.count += 1
 		self._refresh_head()
 
 	def add_note(self, renderable) -> None:
 		# a workflow/scan-level line (e.g. "Skipped task …") — keeps the box non-empty
+		self._clear_empty_note()
 		self.lines += 1
 		self.query_one(".runner-out", Vertical).mount(Static(renderable, classes="out-line"))
 
 	def add_output(self, text: str) -> None:
 		# VISIBLE output (e.g. a shell command's stdout — it IS the result, not hidden
 		# behind the command-click like a task's raw stdout). Line-capped, plain text.
+		self._clear_empty_note()
 		if self.lines >= 500:
 			return
 		self.lines += 1
@@ -204,6 +263,7 @@ class RunnerPanel(Vertical):
 		source = source or "results"
 		sp = self.subpanels.get(source)
 		if sp is None:
+			self._clear_empty_note()
 			sp = RunnerPanel("task", source)
 			sp.done = self.done
 			self.subpanels[source] = sp
@@ -214,12 +274,14 @@ class RunnerPanel(Vertical):
 		# add the clickable '$ command' line (once); click it to reveal the raw output
 		if self.command or not cmd:
 			return
+		self._clear_empty_note()   # the command is a task log — drop a stale "(no output)"
 		self.command = cmd
 		self.query_one(".runner-cmdwrap", Vertical).mount(_CmdLine(self._cmd_render(), classes="runner-cmd"))
 
 	def add_raw(self, text: str) -> None:
 		# RAW command output: plain Text, never markup-parsed (target-controlled), kept
 		# hidden under the command line (click the command to reveal). Line-capped.
+		self._clear_empty_note()
 		if self.raw_lines >= 500:
 			return
 		self.raw_lines += 1
@@ -230,22 +292,25 @@ class RunnerPanel(Vertical):
 			text = "… (output truncated)"
 		self.query_one(".runner-raw", Vertical).mount(Static(Text(text), classes="out-raw"))
 
+	def _clear_empty_note(self) -> None:
+		# drop the "(no output)" placeholder once ANY real content arrives — it may have been
+		# added by finish() before a buffered command/finding flushed in (parallel-batch race).
+		try:
+			for n in self.query_one(".runner-out", Vertical).query(".empty-note"):
+				n.remove()
+		except Exception:  # noqa: BLE001 - box may be gone
+			pass
+
 	def finish(self) -> None:
 		self.done = True
 		for sp in self.subpanels.values():
 			sp.finish()
+		# only when the task produced NOTHING to look at — no findings, no output, no command
+		# (the command itself is a task log, so its presence means there's something to see)
 		if not self.count and not self.lines and not self.command and not self.subpanels:
 			self.query_one(".runner-out", Vertical).mount(
-				Static(Text.from_markup("[dim i](no output)[/]"), classes="out-line"))
+				Static(Text.from_markup("[dim i](no output)[/]"), classes="out-line empty-note"))
 		self._refresh_head()
-
-
-class _ChoiceSummary(Static):
-	"""Clickable collapsed summary of a resolved ChoicePrompt; toggles the questionnaire."""
-	def on_click(self) -> None:
-		parent = self.parent
-		if isinstance(parent, ChoicePrompt):
-			parent.toggle_body()
 
 
 class _BlockHead(Static):
@@ -343,146 +408,83 @@ class ActionPanel(Vertical):
 
 
 class ChoicePrompt(Vertical):
-	"""Navigable suggestion list for a follow-up ask, wired to the main input box.
+	"""A follow-up choice box that REPLACES the input box while active (it lives in the input
+	slot, keeping the top rule), so the user must act on it.
 
-	Single-choice: an OptionList (focused on appear — no mouse needed) plus a trailing
-	"Something else" row. ↑/↓/Tab move the highlight and LIVE-COPY the focused option into
-	the input box (empty for "Something else"), so the user can extend it; Tab past the last
-	option focuses the input box to edit; Enter submits the input value. Multi-choice keeps a
-	SelectionList (space toggles, enter confirms). Once answered it collapses to the picked
-	value — click the summary to re-open."""
+	↑/↓ move; Enter sends the highlighted choice directly. Tab hands the current selection to
+	the input box to ADD MORE DETAILS (the app prefills + focuses it; the user edits and
+	Enter sends that). Esc there returns to this choice box to change the selection.
+	Multi-choice uses a SelectionList (space toggles)."""
 
-	_SOMETHING_ELSE = "✎ Something else (type your own)"
-
-	def __init__(self, question: str, choices: list, multiple: bool, resolve):
-		super().__init__(classes="choice")
-		self._question = question
+	def __init__(self, choices: list, multiple: bool, resolve, to_input):
+		super().__init__(classes="choice-box")
 		self._choices = list(choices)
 		self._multiple = multiple
-		self._resolve = resolve
-		self._value = ""
-		self._collapsed = False
+		self._resolve = resolve        # called with the final answer string
+		self._to_input = to_input      # called with the current selection to switch to input mode
+		self._answered = False
 
 	def compose(self) -> ComposeResult:
-		yield _ChoiceSummary("", classes="choice-summary")   # hidden until answered
-		body = Vertical(classes="choice-body")
-		with body:
-			if self._question:
-				yield Static(Text.from_markup(f"[b yellow]?[/] {escape(self._question)}"), classes="choice-q")
-			if self._multiple:
-				yield SelectionList(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
-				yield Static(Text.from_markup("[dim]space to toggle · enter to confirm · or type your own[/]"))
-			else:
-				yield OptionList(*self._choices, self._SOMETHING_ELSE, classes="choice-list")
-				yield Static(Text.from_markup(
-					"[dim]↑/↓/tab to move · the choice fills the input below (edit it) · enter to send[/]"))
-		yield body
+		header = "Pick one or multiple choices" if self._multiple else "Pick one choice"
+		yield Static(Text.from_markup(f"[b #e6c15a]{header}[/]"), classes="choice-q")
+		if self._multiple:
+			yield SelectionList(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
+			yield Static(Text.from_markup(
+				"[dim]space to toggle · enter to send · tab to add more details[/]"), classes="choice-hint")
+		else:
+			yield OptionList(*self._choices, classes="choice-list")
+			yield Static(Text.from_markup(
+				"[dim]↑/↓ to move · enter to send · tab to add more details[/]"), classes="choice-hint")
 
 	def on_mount(self) -> None:
-		self.query_one(".choice-summary").display = False
-		# focus the list AFTER the first refresh so it reliably takes focus from the input
-		# box (fixes needing a mouse click to interact with the choices)
-		self.call_after_refresh(self._focus_list)
+		self.call_after_refresh(self.focus_list)
 
-	def _focus_list(self) -> None:
+	def focus_list(self) -> None:
+		# keep the list focused so the keyboard drives it without clicking into the box first
 		try:
 			self.query_one(".choice-list").focus()
 		except Exception:  # noqa: BLE001 - widget may be gone
 			pass
 
-	def _input(self):
+	def selection_text(self) -> str:
+		"""The toggled choices joined (multi) or the currently highlighted choice (single).
+
+		In multi-choice with nothing toggled yet, fall back to the HIGHLIGHTED row — pressing
+		Enter (or Tab) on a row the user is sitting on should send that row, not an empty answer.
+		"""
 		try:
-			return self.app.query_one("#input-box Input")
+			if self._multiple:
+				sel = self.query_one(SelectionList)
+				if sel.selected:
+					return ", ".join(self._choices[i] for i in sel.selected)
+				h = sel.highlighted
+				return self._choices[h] if h is not None and 0 <= h < len(self._choices) else ""
+			ol = self.query_one(OptionList)
+			i = ol.highlighted if ol.highlighted is not None else 0
+			return self._choices[i] if 0 <= i < len(self._choices) else ""
 		except Exception:  # noqa: BLE001
-			return None
+			return ""
 
-	def _set_input(self, text: str) -> None:
-		inp = self._input()
-		if inp is not None:
-			inp.value = text
-
-	def _is_something_else(self, index: int) -> bool:
-		return not self._multiple and index == len(self._choices)
-
-	def _summary_text(self) -> Text:
-		arrow = "▶" if self._collapsed else "▼"
-		t = Text()
-		t.append("✓ ", style="green")
-		t.append(self._value or "(none)", style="#8a8fa3")
-		t.append(f"  {arrow}", style="#6b7187")
-		return t
-
-	def collapse_with(self, value: str) -> None:
-		"""Collapse to the given answer WITHOUT re-resolving (used when the answer was
-		submitted via the input box, which already resolved the pending ask)."""
-		if self._value:
+	def submit(self, value: str = None) -> None:
+		if self._answered:
 			return
-		self._value = value
-		for w in self.query(".choice-list"):
-			w.disabled = True
-		self._collapsed = True
-		summary = self.query_one(".choice-summary", _ChoiceSummary)
-		summary.update(self._summary_text())
-		summary.display = True
-		self.query_one(".choice-body").display = False
-
-	def _done(self, value: str) -> None:
-		# clear the shared input box so the NEXT ask doesn't inherit this answer (a plain
-		# follow-up with no choices focuses the input — a stale value would be re-submittable)
-		self._set_input("")
-		self.collapse_with(value)
-		self._resolve(value)
-
-	def toggle_body(self) -> None:
-		if not self._value:
-			return
-		self._collapsed = not self._collapsed
-		self.query_one(".choice-body").display = not self._collapsed
-		self.query_one(".choice-summary", _ChoiceSummary).update(self._summary_text())
-
-	def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
-		# live-copy the focused option into the input box so the user can extend it
-		if self._value or self._multiple:
-			return
-		self._set_input("" if self._is_something_else(event.option_index) else self._choices[event.option_index])
+		self._answered = True
+		self._resolve(value if value is not None else self.selection_text())
 
 	def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-		if self._value:   # ignore re-selection after answered
-			return
-		if self._is_something_else(event.option_index):
-			# hand off to the input box for free typing (don't submit an empty answer)
-			self._set_input("")
-			inp = self._input()
-			if inp is not None:
-				inp.focus()
-			return
-		# submit the current input value (honors any edits the user typed in)
-		inp = self._input()
-		value = inp.value.strip() if inp is not None and inp.value.strip() else str(event.option.prompt)
-		self._done(value)
+		# single-choice: Enter (or click) on an option sends it directly
+		self.submit(str(event.option.prompt))
 
 	def on_key(self, event) -> None:
-		if self._value:
+		if self._answered:
 			return
-		if self._multiple and event.key == "enter":
-			sel = self.query_one(SelectionList)
-			picked = [self._choices[i] for i in sel.selected]
-			if picked:
-				event.stop()
-				self._done(", ".join(picked))
-			return
-		# Tab moves the highlight down; past the last option it focuses the input box to edit.
-		if not self._multiple and event.key == "tab":
-			ol = self.query_one(OptionList)
-			cur = ol.highlighted if ol.highlighted is not None else -1
-			if cur < ol.option_count - 1:
-				ol.highlighted = cur + 1
-			else:
-				inp = self._input()
-				if inp is not None:
-					inp.focus()
+		if event.key == "tab":
 			event.stop()
 			event.prevent_default()
+			self._to_input(self.selection_text())
+		elif self._multiple and event.key == "enter":
+			event.stop()
+			self.submit()
 
 
 class PermissionPrompt(Vertical):
