@@ -385,18 +385,25 @@ def register_runner(cli_endpoint, config):
 			}
 		)
 
-		# Textual TUI for the ai task (local interactive). On by default; `--no-tui` opts
-		# out. Only on a real TTY (not piped/worker). Owns the screen and drives the
-		# runner itself, so branch BEFORE the console-capturing block. Falls back to the
-		# console run if textual isn't installed.
-		if getattr(config, 'name', '') == 'ai' and opts.get('tui', True):
+		# Textual TUI for the ai task (local interactive). On by default; `--headless` opts
+		# out. NEVER for the `setup` wizard or `--show-prompt` (both are plain-console flows
+		# that would otherwise be swallowed by the TUI screen). Only on a real TTY (not
+		# piped/worker). Owns the screen and drives the runner itself, so branch BEFORE the
+		# console-capturing block. Falls back to the console run if textual isn't installed.
+		is_ai = getattr(config, 'name', '') == 'ai'
+		is_setup = is_ai and inputs in ('setup', ['setup'])
+		wants_tui = (
+			is_ai and not opts.get('headless', False)
+			and not is_setup and not opts.get('show_prompt', False)
+		)
+		if wants_tui:
 			import sys as _sys
 			from secator.definitions import IN_WORKER
 			if not IN_WORKER and getattr(_sys.stdout, 'isatty', lambda: False)():
 				try:
 					from secator.tui.ai import run_ai_tui
 				except ImportError:
-					console.print('[yellow3]TUI needs textual (`pip install textual`); using console. Use --no-tui to silence.[/]')  # noqa: E501
+					console.print('[yellow3]TUI needs textual (`pip install textual`); using console. Use --headless to silence.[/]')  # noqa: E501
 				else:
 					run_ai_tui(runner_cls, config, inputs, opts, hooks, context)
 					return
