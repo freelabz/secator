@@ -32,6 +32,7 @@ class Port(OutputType):
 
 	_table_fields = [IP, PORT, HOST, CPES, EXTRA_DATA]
 	_sort_by = (PORT, IP)
+	TARGET_FIELDS = ['ip', 'host']  # fields to scope-check this type against (scope.finding_scope_target)
 	_group_by = (HOST,)          # collapse a host's ports into one row
 	_group_aggregate = PORT
 
