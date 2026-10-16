@@ -236,12 +236,28 @@ def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 	# where get_tui() is None, and the TUI would never get a prompt or a response.
 	opts = {**opts, "sync": True}
 
+	# `-p <file>`: if the prompt is a path to an existing file, use its contents (the task
+	# does the same for the LLM message; resolve here too so the TUI echoes/sessions the
+	# actual prompt, not the literal filename).
+	from pathlib import Path
+	prompt_val = opts.get("prompt", "") or ""
+	if prompt_val:
+		try:
+			if Path(prompt_val).is_file():
+				opts = {**opts, "prompt": Path(prompt_val).read_text().strip()}
+		except OSError:
+			pass
+
 	session = opts.get("workspace") or opts.get("prompt", "ai") or "ai"
 	app = AITUI(
 		None, session=str(session)[:30], mode=opts.get("mode", "chat"),
 		initial_prompt=opts.get("prompt", ""))
 
 	def _feed(self, item):  # on_item hook: runs in the worker thread
+		# `self` is the parent ai runner — remember its source so the display can tell the
+		# parent task's OWN notes/errors (shown top-level) from a child runner's (buffered
+		# under its card). Cheap + idempotent on every item.
+		app._parent_source = getattr(self, "unique_name", "") or app._parent_source
 		app.tui_render(item)
 		return item
 

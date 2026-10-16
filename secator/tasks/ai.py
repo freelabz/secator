@@ -292,7 +292,7 @@ class ai(PythonRunner):
 			"help": "Hard token limit - truncate oldest messages beyond this",
 		},
 		"interactive": {"type": str, "default": "local", "help": "Interactivity mode: local, remote, or auto"},
-		"tui": {"is_flag": True, "default": True, "reverse": True, "help": "Textual TUI for local interactive runs (needs `pip install textual`); --no-tui for plain console"},  # noqa: E501
+		"headless": {"is_flag": True, "default": False, "help": "Run in the plain console instead of the Textual TUI (local interactive runs use the TUI by default; needs `pip install textual`)"},  # noqa: E501
 		"context": {
 			"type": dict,
 			"default": None,

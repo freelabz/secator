@@ -136,6 +136,8 @@ class TUIApp(App):
 		self._findings_loading = False
 		self._findings_seen: set = set()   # finding _uuids already shown (incremental refresh)
 		self._line_buffers: dict = {}      # source -> {cmd, lines} buffered until its card renders
+		self._parent_source: str = ""      # the top-level runner's source (set by the item feed);
+		#                                    its OWN notes/errors render top-level, not buffered
 		self._shown_uuids: set = set()     # findings already rendered inline (skip dups, e.g. a
 		#                                    live-streamed finding later re-read via query_workspace)
 		# Startup race: the runner takes a few seconds to build (LLM/driver/system-prompt setup)
@@ -517,6 +519,11 @@ class TUIApp(App):
 			sink = await self._sink_for_source(src)
 			if sink is not None:
 				sink.add_note(renderable)
+			elif src and src == self._parent_source:
+				# the parent (ai) task's OWN note/error — show it in the conversation. It must
+				# NOT buffer: no card ever renders with the parent's source, so a buffered
+				# parent error is lost forever (e.g. a model NotFoundError showing nothing).
+				await self._append(Static(renderable, classes="err" if t == "error" else "ai"))
 			elif src:
 				self._buffer(src)["notes"].append(renderable)   # batch: card not yet rendered
 			elif self._current is not None:

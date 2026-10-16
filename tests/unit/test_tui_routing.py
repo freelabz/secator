@@ -488,3 +488,24 @@ async def _handback_panel_body():
 
 def test_handback_renders_in_subview_with_usage():
 	_run(_handback_panel_body())
+
+
+async def _parent_error_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		app._parent_source = "ai"   # set by the item feed from the parent runner's unique_name
+		base = len(app._convo().children)
+		# the parent ai task's OWN error (e.g. a model NotFoundError) carries _source == "ai";
+		# it must render in the conversation, not buffer forever under a card that never renders
+		await app._render({"_type": "error", "_source": "ai", "_uuid": "e1", "_context": {},
+		                   "message": "litellm.NotFoundError: model not found"})
+		await pilot.pause(0.05)
+		assert len(app._convo().children) - base == 1, "parent task error was not shown"
+		from textual.widgets import Static
+		texts = [w.render().plain for w in app._convo().query(Static) if hasattr(w.render(), "plain")]
+		assert any("NotFoundError" in t for t in texts), texts
+
+
+def test_parent_task_error_renders_in_conversation():
+	_run(_parent_error_body())
