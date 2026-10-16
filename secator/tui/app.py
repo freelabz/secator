@@ -95,12 +95,14 @@ class TUIApp(App):
 	   the multi-line input (1 line by default, up to a few). */
 	#input-box {
 		border: none; border-top: solid #47516b; background: transparent; height: auto; padding: 1 0;
+		border-title-align: right; border-title-color: #6b7187; border-title-background: transparent;
 	}
 	/* the choice box takes the input box's place while a choice ask is active — same top rule
 	   so the delimiter doesn't move (hidden otherwise) */
 	#choice-host {
 		border: none; border-top: solid #47516b; background: transparent;
 		height: auto; display: none; padding: 1 1 0 1;
+		border-title-align: right; border-title-color: #6b7187; border-title-background: transparent;
 	}
 	.choice-box { height: auto; }
 	.choice-hint { color: #6b7187; }
@@ -137,11 +139,12 @@ class TUIApp(App):
 	_MODE_CYCLE = ("auto", "scan", "chat", "exploit")
 
 	def __init__(self, runner_builder=None, title="secator", subtitle="", initial_prompt="",
-	             initial_dangerous=False, initial_mode="auto"):
+	             initial_dangerous=False, initial_mode="auto", session_name=""):
 		super().__init__()
 		self._runner_builder = runner_builder
 		self._title = title
 		self._subtitle = subtitle
+		self._session_name = session_name or ""   # shown on the top delimiter; renamed via /name
 		self._initial_prompt = initial_prompt or ""
 		self._current: RunnerPanel | None = None
 		self._container: RunnerPanel | None = None   # most-recent workflow/scan nesting parent
@@ -240,6 +243,7 @@ class TUIApp(App):
 		self._write = self.query_one("#convo", VerticalScroll)
 		self.query_one("#prompt-input", PromptInput).focus()
 		self._render_meta()
+		self._set_session_name(self._session_name)
 		self.set_interval(0.1, self._tick_spinner)    # animate the status spinner
 		self.set_interval(3.0, self._tick_findings)   # auto-update the findings panel
 		if self._initial_prompt:
@@ -557,6 +561,23 @@ class TUIApp(App):
 		except Exception:  # noqa: BLE001 - the status node may be gone during teardown
 			pass
 
+	# ---- session name (shown on the top delimiter, renamed via /name) ----
+	def _set_session_name(self, name: str) -> None:
+		"""Show the (cropped) conversation name on the far right of the top delimiter."""
+		self._session_name = name or ""
+		label = self._session_name
+		if len(label) > 32:
+			label = label[:31] + "…"
+		for wid in ("#input-box", "#choice-host"):
+			try:
+				self.query_one(wid).border_title = label
+			except Exception:  # noqa: BLE001 - not composed yet
+				pass
+
+	def tui_set_session_name(self, name: str) -> None:
+		"""Thread-safe: the runner reports the resolved session name (e.g. after it loads)."""
+		self.call_from_thread(self._set_session_name, name)
+
 	# ---- meta bar (guardrail setting / mode / context %) ----
 	@staticmethod
 	def _pct_text(pct) -> str:
@@ -787,6 +808,11 @@ class TUIApp(App):
 			pass
 		if not text:
 			return
+		# `/name <name>` renames the conversation (shown on the top delimiter) instead of being
+		# sent to the agent. It's a client command — don't echo it as a prompt or steer.
+		if text.startswith("/name ") or text == "/name":
+			await self._handle_name_command(text)
+			return
 		await self._append(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
 		pend = self._pending_ask
 		if pend is not None:
@@ -807,6 +833,20 @@ class TUIApp(App):
 			return
 		with self._steers_lock:
 			self._steers.append(text)
+
+	async def _handle_name_command(self, text: str) -> None:
+		"""`/name <name>`: rename the conversation. Updates the top-delimiter label now and
+		queues the rename for the runner to persist (it stamps every item with the name)."""
+		name = text[len("/name "):].strip() if text != "/name" else ""
+		if not name:
+			await self._append(Static(
+				Text.from_markup("[#6b7187]usage: /name <conversation name>[/]"), classes="note"))
+			return
+		self._set_session_name(name)
+		with self._control_lock:
+			self._control["session_name"] = name
+		await self._append(Static(
+			Text.from_markup(f"[#6b7187]↻ renamed conversation to [b]{escape(name)}[/][/]"), classes="note"))
 
 	# ---- choice box (lives in the input slot while a choice ask is active) ----
 	def _show_choices(self, choices, multiple) -> None:
