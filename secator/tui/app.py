@@ -116,6 +116,9 @@ class TUIApp(App):
 	   typing — keep them transparent so the input blends into the terminal background. */
 	#prompt-input .text-area--cursor-line { background: transparent; }
 	#prompt-input .text-area--cursor-gutter { background: transparent; }
+	/* light cursor block (dark glyph under it) so the caret is visible on a dark terminal —
+	   the default $input-cursor-background renders near-black and disappears on dark bg. */
+	#prompt-input .text-area--cursor { background: #e6ecf5; color: #11141b; }
 	#input-placeholder { layer: hint; width: 1fr; height: 1; padding: 0 1; }
 	Header { background: transparent; color: #cdd6e4; }
 	"""
@@ -647,13 +650,23 @@ class TUIApp(App):
 		self._containers = {}
 
 	# ---- input / prompts / steers ----
-	def on_text_area_changed(self, event) -> None:
-		# toggle the overlaid placeholder: shown only while the input is empty
+	def _update_placeholder(self) -> None:
+		# the overlaid placeholder is shown only while the input is empty AND unfocused — so it
+		# doesn't sit on top of (and hide) the cursor once the user clicks/focuses the box.
 		try:
 			ta = self.query_one("#prompt-input", PromptInput)
-			self.query_one("#input-placeholder").display = not ta.text
+			self.query_one("#input-placeholder").display = (not ta.text) and (not ta.has_focus)
 		except Exception:  # noqa: BLE001
 			pass
+
+	def on_text_area_changed(self, event) -> None:
+		self._update_placeholder()
+
+	def on_descendant_focus(self, event) -> None:
+		self._update_placeholder()
+
+	def on_descendant_blur(self, event) -> None:
+		self._update_placeholder()
 
 	async def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
 		text = event.value.strip()
