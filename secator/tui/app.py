@@ -108,6 +108,8 @@ class TUIApp(App):
 	}
 	.choice-box { height: auto; }
 	.choice-hint { color: #6b7187; }
+	/* the command/target a permission ask is about, shown above the Approve/Deny list */
+	.perm-cmd { color: #7b8296; margin: 0 0 1 0; height: auto; }
 	#input-caret { width: 3; height: 1; color: #7fd1e0; text-style: bold; content-align: center top; }
 	/* layered field: the input and the placeholder occupy the same space; placeholder on top */
 	#input-field { width: 1fr; height: auto; layers: field hint; }
@@ -160,6 +162,7 @@ class TUIApp(App):
 		self._steers_lock = threading.Lock()
 		self._pending_ask = None
 		self._active_choice = None   # the live ChoicePrompt, so an input-box submit collapses it
+		self._active_permission = None   # the live PermissionPrompt (Approve/Deny), in the input slot
 		self._status_text = ""
 		self._status_spinning = False
 		self._spin_frame = 0
@@ -733,6 +736,23 @@ class TUIApp(App):
 		self._restore_input()
 		self._resolve_pending(value)
 
+	def _show_permission(self, question, command) -> None:
+		"""Replace the input row with an Approve/Deny box (same slot as the choice box)."""
+		host = self.query_one("#choice-host", Vertical)
+		host.remove_children()
+		self._active_permission = PermissionPrompt(question, self._resolve_permission, command=command)
+		host.mount(self._active_permission)
+		self.query_one("#input-box").display = False
+		host.display = True
+
+	def _resolve_permission(self, value) -> None:
+		"""An Approve/Approve all/Deny selection: restore the input row and unblock the worker."""
+		if self._pending_ask is None:
+			return
+		self._active_permission = None
+		self._restore_input()
+		self._resolve_pending(value)
+
 	def _choice_to_input(self, text) -> None:
 		"""Tab: hand the current selection to the input box so the user can add more details."""
 		try:
@@ -817,15 +837,16 @@ class TUIApp(App):
 			out, self._steers = self._steers, []
 		return out
 
-	def tui_ask_user(self, question, choices, prompt_type="stopped", multiple=False, **context):
+	def tui_ask_user(self, question, choices, prompt_type="stopped", multiple=False, command="", **context):
 		ev = threading.Event()
 		holder: dict = {}
 		self.call_from_thread(
-			self._show_prompt, question, (ev, holder, list(choices or []), prompt_type), bool(multiple))
+			self._show_prompt, question, (ev, holder, list(choices or []), prompt_type), bool(multiple),
+			command or "")
 		ev.wait()
 		return {"answer": holder.get("value")}
 
-	def _show_prompt(self, question, pending, multiple=False) -> None:
+	def _show_prompt(self, question, pending, multiple=False, command="") -> None:
 		self._pending_ask = pending
 		self._set_status("", False)   # nothing is running while we wait for the user
 		choices, ptype = pending[2], pending[3]
@@ -838,9 +859,9 @@ class TUIApp(App):
 				self._resolve_pending(self._resolve_answer(prefill, choices, ptype))
 				return
 		if ptype == "permission":
-			# neutral Approve / Approve all / Deny list (typing a/aa/d still works)
-			self._convo().mount(PermissionPrompt(question, self._resolve_pending))
-			self._convo().scroll_end(animate=False)
+			# Approve / Approve all / Deny — REPLACES the input box (same slot as the choice
+			# box), showing the command/target that needs approval so it isn't decided blind.
+			self._show_permission(question, command)
 		elif choices:
 			# the choice box REPLACES the input row (same slot) until the user acts on it
 			self._show_choices(choices, multiple)

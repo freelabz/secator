@@ -488,36 +488,42 @@ class ChoicePrompt(Vertical):
 
 
 class PermissionPrompt(Vertical):
-	"""Neutral, vertically-stacked Approve / Approve all / Deny list for a permission
-	ask (↑/↓ + Enter). Selecting resolves the blocked worker. Typing a/aa/d works too."""
+	"""Neutral Approve / Approve all / Deny list for a permission ask (↑/↓ + Enter). Lives in
+	the input slot (REPLACES the input box, like ChoicePrompt) so the user must act on it, and
+	shows the command/context that needs approval so the decision isn't made blind."""
 
 	_OPTIONS = [("Approve", "allow"), ("Approve all", "allow_all"), ("Deny", "deny")]
 
-	def __init__(self, question: str, resolve):
-		super().__init__(classes="choice")
+	def __init__(self, question: str, resolve, command: str = ""):
+		super().__init__(classes="choice-box")
 		self._question = question
 		self._resolve = resolve
+		self._command = command or ""
+		self._answered = False
 
 	def compose(self) -> ComposeResult:
 		yield Static(Text.from_markup(f"[b yellow]?[/] {escape(self._question)}"), classes="choice-q")
+		# the command (or target/path) this approval is about — dim, so the user sees what runs
+		if self._command:
+			yield Static(Text.from_markup(f"[#7b8296]{escape(self._command)}[/]"), classes="perm-cmd")
 		yield OptionList(*[label for label, _ in self._OPTIONS], classes="choice-list")
-		yield Static(Text.from_markup("[dim]↑/↓ to move · enter to select[/]"))
+		yield Static(Text.from_markup("[dim]↑/↓ to move · enter to select[/]"), classes="choice-hint")
 
 	def on_mount(self) -> None:
 		# focus after the first refresh so it reliably takes focus from the input box (no mouse)
-		self.call_after_refresh(self._focus_list)
+		self.call_after_refresh(self.focus_list)
 
-	def _focus_list(self) -> None:
+	def focus_list(self) -> None:
 		try:
 			self.query_one(".choice-list").focus()
 		except Exception:  # noqa: BLE001 - widget may be gone
 			pass
 
 	def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+		if self._answered:
+			return
+		self._answered = True
 		label, value = self._OPTIONS[event.option_index]
-		for w in self.query(".choice-list"):
-			w.disabled = True
-		self.query_one(".choice-q", Static).update(Text.from_markup(f"[dim]✓ {escape(label)}[/]"))
 		self._resolve(value)
 
 

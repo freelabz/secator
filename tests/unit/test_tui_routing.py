@@ -632,3 +632,34 @@ async def _choice_multi_fallback_body():
 
 def test_choice_multi_enter_without_toggle_sends_highlighted():
 	_run(_choice_multi_fallback_body())
+
+
+async def _permission_in_slot_body():
+	from secator.tui.widgets import PermissionPrompt
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		ev, holder = threading.Event(), {}
+		# a permission ask arrives carrying the command that needs approval
+		app._show_prompt(
+			"No rule for command(s): mk",
+			(ev, holder, ["allow", "allow_all", "deny"], "permission"),
+			False, "mkdir -p /tmp/x && mk run")
+		await pilot.pause(0.1)
+		# it REPLACES the input box (lives in the choice slot), like the choice box
+		assert app.query_one("#choice-host").display is True
+		assert app.query_one("#input-box").display is False
+		pp = app._active_permission
+		assert isinstance(pp, PermissionPrompt)
+		# the command is shown so the decision isn't made blind
+		assert "mkdir -p /tmp/x" in str(pp.query_one(".perm-cmd").render())
+		# selecting Approve all resolves the worker and restores the input box
+		pp.on_option_list_option_selected(type("E", (), {"option_index": 1})())
+		await pilot.pause(0.05)
+		assert holder.get("value") == "allow_all"
+		assert app.query_one("#input-box").display is True
+		assert app.query_one("#choice-host").display is False
+
+
+def test_permission_prompt_renders_in_input_slot_with_command():
+	_run(_permission_in_slot_body())
