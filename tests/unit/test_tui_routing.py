@@ -360,18 +360,18 @@ def _handback(sid):
 
 
 async def _ai_item_dedup_body():
-	from textual.widgets import Markdown
+	# AI responses render as a Static carrying secator's CustomMarkdown (class "ai")
 	app = AITUI(None, session="ai", mode="scan")
 	async with app.run_test(size=(120, 40)) as pilot:
 		await pilot.pause(0.05)
-		base = len(list(app.query(Markdown)))
+		base = len(list(app.query("Static.ai")))
 		# multi-level display hooks can feed the SAME ai item twice (subagent + parent levels).
 		# A truthy _uuid must dedup it, exactly as findings are deduped.
 		item = _subitem("A", "u-step-1", "a subagent step")
 		await app._render(item)
 		await app._render(item)
 		await pilot.pause(0.05)
-		assert len(list(app.query(Markdown))) - base == 1, "ai item with same _uuid must render once"
+		assert len(list(app.query("Static.ai"))) - base == 1, "ai item with same _uuid must render once"
 
 
 def test_ai_items_deduped_by_uuid():
