@@ -867,6 +867,10 @@ class ai(PythonRunner):
 			iteration += 1
 
 			try:
+				# Mid-flight guardrail/mode toggles the user requested from the TUI meta bar
+				# (Shift+Tab / Alt+Shift+Tab). Applied before the next LLM turn.
+				yield from self._apply_tui_control()
+
 				# Mid-flight steering: drain any user messages sent WHILE the agent
 				# was running and inject them into history so the next turn redirects.
 				# Cheap query per iteration; robust (never crashes the loop).
@@ -895,6 +899,9 @@ class ai(PythonRunner):
 				token_count = by_role["total"]
 				ctx_window = get_context_window(self.model)
 				self.debug(f'iter {iteration}/{self.max_iterations}, {token_count} tokens', sub='context')
+
+				# Feed the TUI meta bar with this turn's guardrail/mode/context state.
+				self._report_tui_meta(token_count, ctx_window)
 
 				msg = format_llm_status(token_count, ctx_window, by_role)
 				with maybe_status(msg, spinner="dots"):
@@ -1416,6 +1423,89 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# Mid-flight steering
 	# -------------------------------------------------------------------------
+
+	def _report_tui_meta(self, token_count=None, ctx_window=None):
+		"""Report the live guardrail/mode/context state to the TUI meta bar (local only).
+
+		Best-effort: a missing TUI, a worker run, or any error must never affect the run.
+		Subagents report via their own ``token_usage`` items (handled in the TUI), so this
+		only drives the main conversation's bar.
+		"""
+		if self.is_subagent:
+			return
+		try:
+			from secator.rich import get_tui
+			tui = get_tui()
+			if tui is None or not hasattr(tui, 'tui_set_meta'):
+				return
+			pct = None
+			try:
+				from secator.ai.history import OUTPUT_TOKEN_RESERVATION
+				if token_count is None:
+					token_count = self.history.count_tokens_by_role(self.model)["total"]
+				if ctx_window is None:
+					ctx_window = get_context_window(self.model)
+				usable = ctx_window - OUTPUT_TOKEN_RESERVATION
+				pct = (token_count / usable * 100) if usable > 0 else None
+			except Exception:  # noqa: BLE001
+				pct = None
+			tui.tui_set_meta(
+				dangerous=bool(self.dangerous),
+				mode=normalize_mode(self.mode) or "auto",
+				mode_is_auto=getattr(self, "mode_is_auto", True),
+				ctx_pct=pct)
+		except Exception as e:  # noqa: BLE001 - never crash the loop over a display update
+			self.debug(f'meta report failed: {e}', sub='llm')
+
+	def _apply_tui_control(self):
+		"""Apply mid-flight guardrail/mode changes the user requested from the TUI meta bar.
+
+		Generator (``yield from``-compatible with the loop): yields a note / mode_changed Ai
+		item so the change is visible in the transcript. Best-effort; never crashes the run.
+		"""
+		if self.is_subagent:
+			return
+		try:
+			from secator.rich import get_tui
+			tui = get_tui()
+			if tui is None or not hasattr(tui, 'tui_poll_control'):
+				return
+			ctrl = tui.tui_poll_control() or {}
+		except Exception as e:  # noqa: BLE001
+			self.debug(f'control poll failed: {e}', sub='llm')
+			return
+		if 'dangerous' in ctrl:
+			self.dangerous = bool(ctrl['dangerous'])
+			# keep the live action context in sync so child runners stop (or resume) getting the
+			# in_scope/out_of_scope boundary (bypass = run freely, no scope filtering).
+			ictx = getattr(self, "_isolation_ctx", None)
+			if ictx is not None:
+				ictx.dangerous = self.dangerous
+			state = "bypassed — guardrails OFF (scope filtering off)" if self.dangerous else "enforced"
+			yield Ai(content=f"Permission guardrails {state} (user toggle).", ai_type="note")
+		if 'mode' in ctrl:
+			requested = ctrl['mode']
+			if requested == "auto":
+				self.mode_is_auto = True
+				self.context["ai_mode_is_auto"] = True
+				self._detect_mode(force=True)
+				# _detect_mode only rebuilds prompt/tools when the detected mode CHANGES; the
+				# auto-mode policy itself flipped (mode_is_auto False->True), so rebuild
+				# unconditionally or the next LLM call keeps schemas built with mode_is_auto=False.
+				self._rebuild_prompt_and_tools()
+			else:
+				self.mode = normalize_mode(requested)
+				self.mode_is_auto = False
+				self.context["ai_mode_is_auto"] = False
+				self._rebuild_prompt_and_tools()
+			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
+			# keep the live action context in sync so actions dispatched after the switch
+			# (notably a spawned subagent's mode policy) use the new mode, not the pre-switch one.
+			ictx = getattr(self, "_isolation_ctx", None)
+			if ictx is not None:
+				ictx.mode = self.mode
+				ictx.mode_is_auto = self.mode_is_auto
+			yield Ai(content=self.mode or "auto", ai_type="mode_changed")
 
 	def _drain_steers(self):
 		"""Drain pending mid-flight steers and inject them into the LLM history.

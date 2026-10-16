@@ -663,3 +663,39 @@ async def _permission_in_slot_body():
 
 def test_permission_prompt_renders_in_input_slot_with_command():
 	_run(_permission_in_slot_body())
+
+
+async def _meta_bar_body():
+	app = AITUI(None, session="ai", mode="auto", initial_dangerous=False)
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		# runner reports live state: dangerous ON, scan mode, 42% context
+		app._set_meta(True, "scan", False, 42.0, False, None)
+		await pilot.pause(0.02)
+		assert app._meta["dangerous"] is True
+		assert app._meta["mode"] == "scan"
+		assert "42% context" in str(app.query_one("#meta-right").render())
+		assert "bypass guardrails" in str(app.query_one("#meta-left").render())
+
+		# Shift+Tab toggles the guardrail setting; a control change is queued for the runner
+		app.on_prompt_input_cycle_dangerous(None)
+		assert app._meta["dangerous"] is False
+		# Ctrl+T cycles the mode (scan -> chat)
+		app.on_prompt_input_cycle_mode(None)
+		assert app._meta["mode"] == "chat"
+		ctrl = app.tui_poll_control()
+		assert ctrl == {"dangerous": False, "mode": "chat"}
+		assert app.tui_poll_control() == {}   # drained
+
+		# subagent drill-in: read-only bar (no cycle hints), uses the subagent's own context %
+		app._set_meta(None, None, None, 7.0, True, "sub1")
+		app._viewing_subagent = "sub1"
+		app._render_meta()
+		left = str(app.query_one("#meta-left").render())
+		assert "shift+tab" not in left and "ctrl+t" not in left
+		assert "guardrails enforced" in left
+		assert "7% context" in str(app.query_one("#meta-right").render())
+
+
+def test_meta_bar_reports_cycles_and_subagent_readonly():
+	_run(_meta_bar_body())

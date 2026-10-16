@@ -17,7 +17,7 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Header, OptionList, Static
+from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
 from secator.tui.render import finding_text, message_text
@@ -127,7 +127,12 @@ class TUIApp(App):
 	   and render a near-black block (what made the cursor look black). */
 	#prompt-input .text-area--cursor { background: #e6ecf5; color: #11141b; text-style: none; }
 	#input-placeholder { layer: hint; width: 1fr; height: 1; padding: 0 1; }
-	Header { background: transparent; color: #cdd6e4; }
+	/* meta bar under the input: dangerous + mode on the left, context % on the right.
+	   a top rule separates it from the input/choice box above (the "bottom delimiter"). */
+	#meta-bar { height: auto; padding: 1 1 0 1; background: transparent;
+		border: none; border-top: solid #47516b; }
+	#meta-left { width: 1fr; height: 1; }
+	#meta-right { width: auto; height: 1; content-align: right top; color: #6b7187; }
 	"""
 	BINDINGS = [
 		("ctrl+c", "quit", "Quit"),
@@ -142,7 +147,11 @@ class TUIApp(App):
 	ansi_color = True
 	ENABLE_COMMAND_PALETTE = False
 
-	def __init__(self, runner_builder=None, title="secator", subtitle="", initial_prompt=""):
+	# AI modes the mode-cycle steps through (auto = let the runner detect/keep its mode).
+	_MODE_CYCLE = ("auto", "scan", "chat", "exploit")
+
+	def __init__(self, runner_builder=None, title="secator", subtitle="", initial_prompt="",
+	             initial_dangerous=False, initial_mode="auto"):
 		super().__init__()
 		self._runner_builder = runner_builder
 		self._title = title
@@ -180,9 +189,25 @@ class TUIApp(App):
 		# so there's nothing to await.
 		self._prefill: str = ""
 		self._awaiting_first_prompt: bool = not bool(self._initial_prompt)
+		# ---- meta bar (guardrail setting / mode / context %) ----
+		# Live state the runner reports via tui_set_meta each turn; seeded from the CLI opts so
+		# the bar is correct before the first LLM turn reports back.
+		self._meta: dict = {
+			"dangerous": bool(initial_dangerous),
+			"mode": initial_mode or "auto",
+			"ctx_pct": None,
+		}
+		# Pending user-requested control changes (Shift+Tab / Ctrl+T), drained by the
+		# runner via tui_poll_control at its loop boundary and applied to the live run.
+		self._control: dict = {}
+		self._control_lock = threading.Lock()
+		# Per-subagent latest {mode, ctx_pct} (from its token_usage items), for the read-only
+		# meta bar shown while drilled into that subagent's view.
+		self._subagent_meta: dict = {}
+		self._viewing_subagent: str | None = None   # sid of the open subagent view, else None
 
 	def compose(self) -> ComposeResult:
-		yield Header(show_clock=True)
+		# no top header — the bottom meta bar carries the session/mode state now
 		yield BackBar(Text.from_markup("[#7fd1e0]← Back to conversation[/]"), id="backbar")
 		yield Vertical(VerticalScroll(id="convo"), id="views")
 		yield Static("", id="status")
@@ -214,6 +239,14 @@ class TUIApp(App):
 			),
 			id="input-box",
 		)
+		# meta bar: left = guardrail setting + current mode (cyclable via Shift+Tab /
+		# Ctrl+T on the main conversation; read-only in a subagent drill-in);
+		# right = % of the model context window used.
+		yield Horizontal(
+			Static("", id="meta-left"),
+			Static("", id="meta-right"),
+			id="meta-bar",
+		)
 
 	def on_mount(self) -> None:
 		self.title = self._title
@@ -221,6 +254,7 @@ class TUIApp(App):
 		self.query_one("#backbar").display = False
 		self._write = self.query_one("#convo", VerticalScroll)
 		self.query_one("#prompt-input", PromptInput).focus()
+		self._render_meta()
 		self.set_interval(0.1, self._tick_spinner)    # animate the status spinner
 		self.set_interval(3.0, self._tick_findings)   # auto-update the findings panel
 		if self._initial_prompt:
@@ -405,6 +439,9 @@ class TUIApp(App):
 		# A subview is a read-only drill-in (e.g. a subagent's own conversation) — there is
 		# nothing to steer or answer there, so hide the input box to avoid implying otherwise.
 		self.query_one("#input-box").display = False
+		# the meta bar follows: show the subagent's read-only guardrail/mode/context
+		self._viewing_subagent = sid
+		self._render_meta()
 
 	def _show_main(self) -> None:
 		for s in self._subviews.values():
@@ -414,6 +451,9 @@ class TUIApp(App):
 		# Back on the main conversation: restore the input box and refocus it.
 		self.query_one("#input-box").display = True
 		self.query_one("#prompt-input", PromptInput).focus()
+		# restore the interactive (main-conversation) meta bar
+		self._viewing_subagent = None
+		self._render_meta()
 
 	def _active_view(self) -> VerticalScroll:
 		# the currently visible scroll (an open secondary view, else the main convo)
@@ -531,6 +571,99 @@ class TUIApp(App):
 				Text.from_markup(f"[gold3]{self._SPIN[self._spin_frame]} {escape(self._status_text)}[/]"))
 		except Exception:  # noqa: BLE001 - the status node may be gone during teardown
 			pass
+
+	# ---- meta bar (guardrail setting / mode / context %) ----
+	@staticmethod
+	def _pct_text(pct) -> str:
+		if pct is None:
+			return "[#6b7187]— context[/]"
+		pct = max(0, min(999, int(round(pct))))
+		# color-code fullness: dim under half, amber past half, red when nearly full
+		color = "#6b7187" if pct < 50 else ("#d7a93b" if pct < 85 else "#ff6b6b")
+		return f"[{color}]{pct}% context[/]"
+
+	def _render_meta(self) -> None:
+		"""Redraw the meta bar. Interactive (cyclable) on the main conversation; read-only
+		while drilled into a subagent view (its mode/guardrails can't be changed)."""
+		try:
+			left = self.query_one("#meta-left", Static)
+			right = self.query_one("#meta-right", Static)
+		except Exception:  # noqa: BLE001 - not composed yet
+			return
+		sid = self._viewing_subagent
+		if sid is not None:
+			# read-only subagent view: a spawned runner is never dangerous (defense in depth),
+			# and its mode/context come from its own token_usage reports.
+			sm = self._subagent_meta.get(sid, {})
+			mode = sm.get("mode") or self._meta.get("mode") or "auto"
+			danger = "[#e0b050]▶▶ guardrails enforced[/]"
+			mode_seg = f"[#6b7187]mode:[/] [#7fd1e0]{escape(mode)}[/]"
+			left.update(Text.from_markup(f"{danger}   [#3a4150]·[/]   {mode_seg}"))
+			right.update(Text.from_markup(self._pct_text(sm.get("ctx_pct"))))
+			return
+		m = self._meta
+		if m.get("dangerous"):
+			danger = "[#ff6b6b]▶▶ bypass guardrails[/] [#5b6070](shift+tab)[/]"
+		else:
+			danger = "[#e0b050]▶▶ guardrails enforced[/] [#5b6070](shift+tab)[/]"
+		mode = m.get("mode") or "auto"
+		mode_seg = f"[#6b7187]mode:[/] [#7fd1e0]{escape(mode)}[/] [#5b6070](ctrl+t)[/]"
+		left.update(Text.from_markup(f"{danger}   [#3a4150]·[/]   {mode_seg}"))
+		right.update(Text.from_markup(self._pct_text(m.get("ctx_pct"))))
+
+	def tui_set_meta(self, dangerous=None, mode=None, mode_is_auto=None, ctx_pct=None,
+	                 is_subagent=False, sid=None) -> None:
+		"""Thread-safe: the runner reports its live guardrail/mode/context state each turn."""
+		self.call_from_thread(self._set_meta, dangerous, mode, mode_is_auto, ctx_pct, is_subagent, sid)
+
+	def _set_meta(self, dangerous, mode, mode_is_auto, ctx_pct, is_subagent, sid) -> None:
+		if is_subagent and sid:
+			sm = self._subagent_meta.setdefault(sid, {})
+			if mode is not None:
+				sm["mode"] = "auto" if mode_is_auto else mode
+			if ctx_pct is not None:
+				sm["ctx_pct"] = ctx_pct
+		else:
+			# Don't clobber an optimistic value the user just set that's still queued in
+			# _control (the runner polls control, THEN reports meta a line later — reporting
+			# the pre-toggle state would flip the bar back until the next turn).
+			with self._control_lock:
+				pending = dict(self._control)
+			if dangerous is not None and "dangerous" not in pending:
+				self._meta["dangerous"] = bool(dangerous)
+			if mode is not None and "mode" not in pending:
+				self._meta["mode"] = "auto" if mode_is_auto else (mode or "auto")
+			if ctx_pct is not None:
+				self._meta["ctx_pct"] = ctx_pct
+		self._render_meta()
+
+	def tui_poll_control(self) -> dict:
+		"""Called by the runner at its loop boundary: drain pending user control changes
+		(guardrail toggle / mode switch) so it can apply them to the live run."""
+		with self._control_lock:
+			out, self._control = self._control, {}
+		return out
+
+	def on_prompt_input_cycle_dangerous(self, event) -> None:
+		# Shift+Tab: flip the guardrail setting. Optimistic UI + a queued control change the
+		# runner applies at its next loop boundary (and confirms via tui_set_meta).
+		new = not self._meta.get("dangerous")
+		self._meta["dangerous"] = new
+		with self._control_lock:
+			self._control["dangerous"] = new
+		self._render_meta()
+
+	def on_prompt_input_cycle_mode(self, event) -> None:
+		# Ctrl+T: step through auto -> scan -> chat -> exploit -> auto.
+		cur = self._meta.get("mode") or "auto"
+		try:
+			nxt = self._MODE_CYCLE[(self._MODE_CYCLE.index(cur) + 1) % len(self._MODE_CYCLE)]
+		except ValueError:
+			nxt = self._MODE_CYCLE[0]
+		self._meta["mode"] = nxt
+		with self._control_lock:
+			self._control["mode"] = nxt
+		self._render_meta()
 
 	# ---- item rendering (generic) ----
 	async def _route_write(self, d: dict) -> VerticalScroll:
