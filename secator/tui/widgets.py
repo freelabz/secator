@@ -418,6 +418,9 @@ class ChoicePrompt(Vertical):
 		self.query_one(".choice-body").display = False
 
 	def _done(self, value: str) -> None:
+		# clear the shared input box so the NEXT ask doesn't inherit this answer (a plain
+		# follow-up with no choices focuses the input — a stale value would be re-submittable)
+		self._set_input("")
 		self.collapse_with(value)
 		self._resolve(value)
 

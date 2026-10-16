@@ -610,8 +610,10 @@ class TUIApp(App):
 		pend = self._pending_ask
 		if pend is not None:
 			ev, holder, choices, ptype = pend
-			answer = self._resolve_answer(text, choices, ptype)
 			cp = self._active_choice
+			# a value an active choice list put in the input is LITERAL — don't reinterpret a
+			# numeric choice (e.g. choices=["2","1"], input "2") as a 1-based index into choices
+			answer = text if (cp is not None and text in choices) else self._resolve_answer(text, choices, ptype)
 			self._resolve_pending(answer)
 			if cp is not None:   # collapse the choice list to the submitted answer
 				cp.collapse_with(answer)
