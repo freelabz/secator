@@ -17,11 +17,12 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Header, Input, OptionList, Static
+from textual.widgets import Header, OptionList, Static
 from textual.widgets.option_list import Option
 
 from secator.tui.render import finding_text, message_text
-from secator.tui.widgets import BackBar, BlockPanel, ChoicePrompt, Grip, PermissionPrompt, RunnerPanel
+from secator.tui.widgets import (
+	BackBar, BlockPanel, ChoicePrompt, Grip, PermissionPrompt, PromptInput, RunnerPanel)
 
 
 class TUIApp(App):
@@ -90,9 +91,10 @@ class TUIApp(App):
 
 	Markdown { background: transparent; margin: 0; padding: 0; }
 	#status { height: 1; color: #d7a93b; padding: 0 1; }
-	/* neutral, no background — just a lighter top rule to set off the chat box */
+	/* neutral, no background — just a lighter top rule to set off the chat box. grows with
+	   the multi-line input (1 line by default, up to a few). */
 	#input-box {
-		border: none; border-top: solid #47516b; background: transparent; height: 3; padding: 0;
+		border: none; border-top: solid #47516b; background: transparent; height: auto; padding: 1 0;
 	}
 	/* the choice box takes the input box's place while a choice ask is active — same top rule
 	   so the delimiter doesn't move (hidden otherwise) */
@@ -102,10 +104,15 @@ class TUIApp(App):
 	}
 	.choice-box { height: auto; }
 	.choice-hint { color: #6b7187; }
-	#input-caret { width: 3; height: 1fr; color: #7fd1e0; text-style: bold; content-align: center middle; }
-	#input-box Input { width: 1fr; border: none; background: transparent; color: #e6ecf5; padding: 0 1; height: 1fr; }
-	#input-box Input:focus { border: none; background: transparent; }
-	#input-box Input > .input--cursor { color: #0b0e14; background: #e6ecf5; }
+	#input-caret { width: 3; height: 1; color: #7fd1e0; text-style: bold; content-align: center top; }
+	/* layered field: the input and the placeholder occupy the same space; placeholder on top */
+	#input-field { width: 1fr; height: auto; layers: field hint; }
+	#prompt-input {
+		layer: field; width: 1fr; height: auto; max-height: 8;
+		border: none; background: transparent; color: #e6ecf5; padding: 0 1;
+	}
+	#prompt-input:focus { border: none; background: transparent; }
+	#input-placeholder { layer: hint; width: 1fr; height: 1; padding: 0 1; }
 	Header { background: transparent; color: #cdd6e4; }
 	"""
 	BINDINGS = [
@@ -179,7 +186,17 @@ class TUIApp(App):
 		yield Vertical(id="choice-host")
 		yield Horizontal(
 			Static("❯", id="input-caret"),
-			Input(placeholder="Message, or steer a running runner…  (Enter to send)"),
+			# a layered field: the multi-line input, with the placeholder overlaid on top of it
+			# (shown only while empty — TextArea has no native placeholder)
+			Vertical(
+				PromptInput(id="prompt-input"),
+				Static(
+					Text.from_markup(
+						"[#5b6070]Message, or steer a running runner…  (Enter to send · Alt+Enter: newline)[/]"),
+					id="input-placeholder",
+				),
+				id="input-field",
+			),
 			id="input-box",
 		)
 
@@ -188,7 +205,7 @@ class TUIApp(App):
 		self.sub_title = self._subtitle
 		self.query_one("#backbar").display = False
 		self._write = self.query_one("#convo", VerticalScroll)
-		self.query_one("#input-box Input", Input).focus()
+		self.query_one("#prompt-input", PromptInput).focus()
 		self.set_interval(0.1, self._tick_spinner)    # animate the status spinner
 		self.set_interval(3.0, self._tick_findings)   # auto-update the findings panel
 		if self._initial_prompt:
@@ -381,7 +398,7 @@ class TUIApp(App):
 		self.query_one("#backbar").display = False
 		# Back on the main conversation: restore the input box and refocus it.
 		self.query_one("#input-box").display = True
-		self.query_one("#input-box Input", Input).focus()
+		self.query_one("#prompt-input", PromptInput).focus()
 
 	def _active_view(self) -> VerticalScroll:
 		# the currently visible scroll (an open secondary view, else the main convo)
@@ -626,9 +643,20 @@ class TUIApp(App):
 		self._containers = {}
 
 	# ---- input / prompts / steers ----
-	async def on_input_submitted(self, event: Input.Submitted) -> None:
+	def on_text_area_changed(self, event) -> None:
+		# toggle the overlaid placeholder: shown only while the input is empty
+		try:
+			ta = self.query_one("#prompt-input", PromptInput)
+			self.query_one("#input-placeholder").display = not ta.text
+		except Exception:  # noqa: BLE001
+			pass
+
+	async def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
 		text = event.value.strip()
-		event.input.value = ""
+		try:
+			self.query_one("#prompt-input", PromptInput).text = ""
+		except Exception:  # noqa: BLE001
+			pass
 		if not text:
 			return
 		await self._append(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
@@ -673,10 +701,11 @@ class TUIApp(App):
 	def _choice_to_input(self, text) -> None:
 		"""Tab: hand the current selection to the input box so the user can add more details."""
 		try:
-			inp = self.query_one("#input-box Input", Input)
+			inp = self.query_one("#prompt-input", PromptInput)
 		except Exception:  # noqa: BLE001
 			return
-		inp.value = text
+		inp.text = text
+		inp.move_cursor(inp.document.end)
 		self.query_one("#choice-host").display = False
 		self.query_one("#input-box").display = True
 		inp.focus()
@@ -722,7 +751,7 @@ class TUIApp(App):
 		self._set_status("", False)
 		ev.set()
 		try:
-			self.query_one("#input-box Input", Input).focus()
+			self.query_one("#prompt-input", PromptInput).focus()
 		except Exception:  # noqa: BLE001
 			pass
 
@@ -784,6 +813,6 @@ class TUIApp(App):
 			# a plain end-of-turn follow-up: no "What's next?" / "waiting" noise — the
 			# focused input is enough. Just make sure it's focused.
 			try:
-				self.query_one("#input-box Input", Input).focus()
+				self.query_one("#prompt-input", PromptInput).focus()
 			except Exception:  # noqa: BLE001
 				pass

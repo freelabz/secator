@@ -10,7 +10,8 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Markdown, OptionList, SelectionList, Static
+from textual.message import Message
+from textual.widgets import Markdown, OptionList, SelectionList, Static, TextArea
 from textual.widgets._toggle_button import ToggleButton
 
 from secator.tui.render import command_text
@@ -22,6 +23,37 @@ from secator.tui.render import command_text
 ToggleButton.BUTTON_LEFT = ""
 ToggleButton.BUTTON_INNER = "●"
 ToggleButton.BUTTON_RIGHT = ""
+
+
+class PromptInput(TextArea):
+	"""Multi-line chat input (grows with content). Enter SENDS the text; Alt+Enter (also
+	Shift+Enter / Ctrl+J, for terminals that don't deliver Alt) inserts a newline.
+
+	Textual's TextArea inserts a newline on Enter by default — we remap Enter to a Submitted
+	message and route newlines to the modifier combos instead.
+	"""
+
+	class Submitted(Message):
+		"""Posted when the user presses Enter — carries the current text."""
+		def __init__(self, value: str):
+			self.value = value
+			super().__init__()
+
+	def __init__(self, **kwargs):
+		super().__init__(soft_wrap=True, tab_behavior="focus", show_line_numbers=False, **kwargs)
+
+	async def _on_key(self, event) -> None:
+		if event.key == "enter":
+			event.stop()
+			event.prevent_default()
+			self.post_message(self.Submitted(self.text))
+			return
+		if event.key in ("alt+enter", "shift+enter", "ctrl+j"):
+			event.stop()
+			event.prevent_default()
+			self.insert("\n")
+			return
+		await super()._on_key(event)
 
 
 def _usage_line(usage: dict) -> "Text | None":
