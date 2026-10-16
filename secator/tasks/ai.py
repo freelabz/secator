@@ -107,16 +107,22 @@ def _truncate_label(text, fallback):
 	return (text[:80] + '...') if text and len(text) > 80 else (text or fallback)
 
 
-def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason):
+def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason, blocked=False):
 	"""Shared body for rejecting a tool call: encrypt the error, record it as the
-	tool result in history, and return the ``tool_result`` Ai event to yield."""
+	tool result in history, and return the ``tool_result`` Ai event to yield.
+
+	``blocked=True`` marks a guardrail denial, which is ALSO surfaced as a "Blocked <desc>"
+	panel via ``display_denial`` — the flag lets the display skip the redundant
+	"tool call failed" line so a block isn't shown twice.
+	"""
 	_error_content = maybe_encrypt(error_msg, runner.encryptor)
 	runner.history.add_tool_result(tool_name, tool_call_id, _error_content)
 	return Ai(content=f"[{tool_name}] {reason}",
 	          ai_type="tool_result",
 	          # Mark the rejection so a display (TUI) can surface the failed tool call —
-	          # a plain tool_result is model-facing only and rendered as nothing.
-	          extra_data={"error": True, "tool_name": tool_name, "reason": reason},
+	          # a plain tool_result is model-facing only and rendered as nothing. `blocked`
+	          # denials already render a "Blocked" panel, so the TUI suppresses the extra line.
+	          extra_data={"error": True, "tool_name": tool_name, "reason": reason, "blocked": blocked},
 	          message=cap_message(
 	              {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": _error_content}),
 	          _context=dict(runner.context))
@@ -1702,8 +1708,9 @@ class ai(PythonRunner):
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
 				# Surface the actual reason in the chat (not a bare "denied"): this
 				# tool_result bubble is the only place the user sees WHY
-				# (e.g. "Action denied: shell command not approved").
-				yield _reject_tool_call(self, name, tc_id, error_msg, denial)
+				# (e.g. "Action denied: shell command not approved"). blocked=True so the TUI
+				# skips the "tool call failed" line (the "Blocked" panel above already covers it).
+				yield _reject_tool_call(self, name, tc_id, error_msg, denial, blocked=True)
 				continue
 
 			actions.append(action)

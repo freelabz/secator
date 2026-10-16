@@ -719,3 +719,27 @@ async def _session_name_body():
 
 def test_session_name_label_and_rename_command():
 	_run(_session_name_body())
+
+
+async def _blocked_no_failed_line_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		base = len(app._convo().children)
+
+		def tr(blocked):
+			return {"_type": "ai", "ai_type": "tool_result", "content": "x",
+			        "extra_data": {"error": True, "blocked": blocked, "reason": "denied", "tool_name": "shell"}}
+
+		# a guardrail denial (blocked) already renders a "Blocked" panel — no "tool call failed" line
+		await app._render(tr(True))
+		await pilot.pause(0.02)
+		assert len(app._convo().children) == base, "blocked denial must not add a 'tool call failed' line"
+		# a non-block tool error (e.g. malformed args) still surfaces the line
+		await app._render(tr(False))
+		await pilot.pause(0.02)
+		assert len(app._convo().children) == base + 1
+
+
+def test_blocked_denial_has_no_tool_call_failed_line():
+	_run(_blocked_no_failed_line_body())
