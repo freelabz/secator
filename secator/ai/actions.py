@@ -703,6 +703,12 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		"tty": not ctx.subagent and ctx.sync,
 		**opts,
 	}
+	# `dangerous` runs free: the LLM-supplied `opts` is merged AFTER _child_run_opts, so it
+	# could re-add in_scope/out_of_scope that _child_run_opts dropped and re-enable the child
+	# scope-gate. Strip them so bypass genuinely means no scope filtering.
+	if ctx.dangerous:
+		run_opts.pop("in_scope", None)
+		run_opts.pop("out_of_scope", None)
 	# Human-readable description the LLM supplied for this action (Runner maps
 	# run_opts['description'] -> self.description -> persisted `descr`, shown by clients
 	# instead of the bare task name). Only set when non-empty so it never blanks out a
