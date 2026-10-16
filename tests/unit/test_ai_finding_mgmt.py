@@ -251,6 +251,79 @@ class TestFindingMgmtTools(unittest.TestCase):
 			'verified': True, 'status': 'EXPLOITED', 'confidence_nb': 1, 'workspace_id': 'w'})
 		self.assertEqual(out, {'name': 'x', 'id': 'CVE-2021-41773', 'severity': 'high'})
 
+	# --- update_finding: monitor audit-recording model (notes + verdicts on NON-vuln types) ---
+	def test_update_records_notes_without_changing_verdict(self):
+		# UNCHANGED outcome: a still-present finding is only annotated — a cumulative notes
+		# entry — with NO verdict mutation and no new finding.
+		e = self._engine({'_uuid': 's1', '_type': 'subdomain', 'host': 'a.example.com',
+		                  'extra_data': {'notes': 'prior note'}})
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 's1',
+			 'extra_data': {'notes': 'prior note\nRe-validated by AI on 2026-10-05'}}, self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertEqual(set_arg['extra_data.notes'], 'prior note\nRe-validated by AI on 2026-10-05')
+		self.assertNotIn('is_false_positive', set_arg)   # verdict untouched
+		self.assertNotIn('confidence', set_arg)
+		self.assertTrue(any(isinstance(o, Ai) and o.ai_type == 'update_finding' for o in out))
+
+	def test_update_hides_non_vuln_finding_with_notes(self):
+		# GONE outcome: a subdomain that no longer resolves is retired via the generic hide-flag
+		# and the rationale is recorded in the cumulative notes audit trail (reason kept too).
+		e = self._engine({'_uuid': 's1', '_type': 'subdomain', 'host': 'gone.example.com'})
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 's1',
+			 'fields': {'is_false_positive': True},
+			 'extra_data': {'notes': 'Marked FP by AI on 2026-10-05: subdomain no longer resolves',
+			                'false_positive_reason': 'attack-surface-monitor: not reproduced 2026-10-05'}},
+			self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertTrue(set_arg['is_false_positive'])
+		self.assertEqual(set_arg['extra_data.notes'],
+		                 'Marked FP by AI on 2026-10-05: subdomain no longer resolves')
+		self.assertEqual(set_arg['extra_data.false_positive_reason'],
+		                 'attack-surface-monitor: not reproduced 2026-10-05')
+		self.assertTrue(any(isinstance(o, Ai) and o.ai_type == 'update_finding' for o in out))
+
+	def test_update_vuln_still_drops_is_false_positive(self):
+		# A vulnerability keeps using the dedicated mark_vuln_false_positive tool, so the generic
+		# path must still strip is_false_positive for vulns (policy unchanged).
+		e = self._engine({'_uuid': 'u1', '_type': 'vulnerability', 'severity': 'low'})
+		list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'u1',
+			 'fields': {'severity': 'high', 'is_false_positive': True}}, self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertEqual(set_arg['severity'], 'high')
+		self.assertNotIn('is_false_positive', set_arg)
+
+	def test_update_errors_hiding_type_without_flag(self):
+		# Hiding a type that has no is_false_positive field must refuse, not write a phantom
+		# field. Pick such a type dynamically: once the finding-verdict-fields schema change
+		# lands, EVERY editable finding type carries the flag and this guard is defensive-only,
+		# so skip rather than asserting on a type that no longer lacks it.
+		from secator.output_types import FINDING_TYPES
+		fieldless = next((c for c in FINDING_TYPES
+		                  if 'is_false_positive' not in getattr(c, '__dataclass_fields__', {})
+		                  and c.get_name() != 'ai'), None)
+		if fieldless is None:
+			self.skipTest('every finding type now carries is_false_positive')
+		e = self._engine({'_uuid': 'c1', '_type': fieldless.get_name(), 'name': 'x', 'host': 'x'})
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'c1', 'fields': {'is_false_positive': True}}, self._ctx(e)))
+		self.assertTrue(any(isinstance(o, Error) for o in out))
+		e.update.assert_not_called()
+
+	def test_update_confidence_downgrade_with_notes_recomputes_nb(self):
+		# DEGRADED outcome: downgrade confidence IN PLACE + record a note. Where the type carries
+		# confidence_nb the derived sort key is recomputed so the downgrade actually re-prioritizes.
+		e = self._engine({'_uuid': 'u1', '_type': 'vulnerability', 'confidence': 'high'})
+		list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'u1', 'fields': {'confidence': 'low'},
+			 'extra_data': {'notes': 'Downgraded by AI on 2026-10-05: port now closed'}}, self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertEqual(set_arg['confidence'], 'low')
+		self.assertEqual(set_arg['confidence_nb'], 3)
+		self.assertEqual(set_arg['extra_data.notes'], 'Downgraded by AI on 2026-10-05: port now closed')
+
 	def test_update_missing_uuid_errors(self):
 		out = list(dispatch_action({'action': 'update_finding', 'fields': {'x': 1}}, self._ctx(self._engine(None))))
 		self.assertTrue(any(isinstance(o, Error) for o in out))
