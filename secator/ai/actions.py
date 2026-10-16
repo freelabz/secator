@@ -318,6 +318,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 				permission_type="shell",
 				value=result.shell_command,
 				deny_message="Action denied: shell command not approved",
+				command=result.shell_command,
 				reason=result.reason,
 			)
 			if denial:
