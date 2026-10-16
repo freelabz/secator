@@ -10,9 +10,9 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Markdown, OptionList, SelectionList, Static
+from textual.widgets import OptionList, SelectionList, Static
 
-from secator.tui.render import command_text
+from secator.tui.render import command_text, markdown_text
 
 
 def _usage_line(usage: dict) -> "Text | None":
@@ -47,7 +47,7 @@ class HandbackPanel(Vertical):
 
 	def compose(self) -> ComposeResult:
 		yield Static(Text.from_markup("[b #d98a7a]Verdict — subagent complete[/]"), classes="handback-title")
-		yield Markdown(self._content)
+		yield Static(markdown_text(self._content))
 		line = _usage_line(self._usage)
 		if line is not None:
 			yield Static(line, classes="handback-usage")
