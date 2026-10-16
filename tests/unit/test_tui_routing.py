@@ -500,7 +500,7 @@ async def _choice_replaces_input_body():
 		await pilot.pause(0.1)
 		# the choice box REPLACES the input row (same slot)
 		assert app.query_one("#choice-host").display is True
-		assert app.query_one("#input-row").display is False
+		assert app.query_one("#input-box").display is False
 		cp = app._active_choice
 		cp.query_one(OptionList).highlighted = 0
 		await pilot.pause(0.05)
@@ -509,7 +509,7 @@ async def _choice_replaces_input_body():
 		await pilot.pause(0.05)
 		assert holder.get("value") == "scan port"
 		assert app.query_one("#choice-host").display is False
-		assert app.query_one("#input-row").display is True
+		assert app.query_one("#input-box").display is True
 
 
 def test_choice_box_replaces_input_and_enter_sends():
@@ -531,19 +531,19 @@ async def _choice_tab_esc_body():
 		cp._to_input(cp.selection_text())
 		await pilot.pause(0.05)
 		assert inp.value == "crawl web"
-		assert app.query_one("#input-row").display is True
+		assert app.query_one("#input-box").display is True
 		assert app.query_one("#choice-host").display is False
 		# Esc returns to the choice box to change the selection
 		app._back_to_choices()
 		await pilot.pause(0.05)
 		assert app.query_one("#choice-host").display is True
-		assert app.query_one("#input-row").display is False
+		assert app.query_one("#input-box").display is False
 		# editing the prefilled text and submitting resolves THAT text and restores the input
 		cp._to_input("crawl web")
 		await app.on_input_submitted(Input.Submitted(inp, "crawl web --depth 3"))
 		await pilot.pause(0.05)
 		assert holder.get("value") == "crawl web --depth 3"
-		assert app.query_one("#input-row").display is True
+		assert app.query_one("#input-box").display is True
 
 
 def test_choice_tab_to_input_and_esc_back():

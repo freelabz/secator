@@ -87,16 +87,18 @@ class TUIApp(App):
 	#status { height: 1; color: #d7a93b; padding: 0 1; }
 	/* neutral, no background — just a lighter top rule to set off the chat box */
 	#input-box {
-		border: none; border-top: solid #47516b; background: transparent; height: auto; padding: 0;
+		border: none; border-top: solid #47516b; background: transparent; height: 3; padding: 0;
 	}
-	/* single-line caret + input, vertically centered in the 3-tall row so they stay aligned */
-	#input-row { height: 3; align-vertical: middle; }
-	/* the choice box lives in the input slot while a choice ask is active (hidden otherwise) */
-	#choice-host { height: auto; display: none; padding: 0 1; }
+	/* the choice box takes the input box's place while a choice ask is active — same top rule
+	   so the delimiter doesn't move (hidden otherwise) */
+	#choice-host {
+		border: none; border-top: solid #47516b; background: transparent;
+		height: auto; display: none; padding: 1 1 0 1;
+	}
 	.choice-box { height: auto; }
 	.choice-hint { color: #6b7187; }
-	#input-caret { width: 3; height: 1; color: #7fd1e0; text-style: bold; content-align: center middle; }
-	#input-box Input { width: 1fr; border: none; background: transparent; color: #e6ecf5; padding: 0 1; height: 1; }
+	#input-caret { width: 3; height: 1fr; color: #7fd1e0; text-style: bold; content-align: center middle; }
+	#input-box Input { width: 1fr; border: none; background: transparent; color: #e6ecf5; padding: 0 1; height: 1fr; }
 	#input-box Input:focus { border: none; background: transparent; }
 	#input-box Input > .input--cursor { color: #0b0e14; background: #e6ecf5; }
 	Header { background: transparent; color: #cdd6e4; }
@@ -166,16 +168,13 @@ class TUIApp(App):
 			),
 			id="findings-panel",
 		)
-		# The input box keeps a single top rule. Its slot holds EITHER the text input row or,
-		# while a choice ask is active, the choice box (which replaces the input so the user
-		# must act on it); Tab swaps the selection into the input to add details.
-		yield Vertical(
-			Horizontal(
-				Static("❯", id="input-caret"),
-				Input(placeholder="Message, or steer a running runner…  (Enter to send)"),
-				id="input-row",
-			),
-			Vertical(id="choice-host"),
+		# While a choice ask is active the choice box REPLACES the input box in the same slot
+		# (both carry the same top rule, so the delimiter stays put); Tab swaps the selection
+		# into the input to add details. Only one of the two is ever visible.
+		yield Vertical(id="choice-host")
+		yield Horizontal(
+			Static("❯", id="input-caret"),
+			Input(placeholder="Message, or steer a running runner…  (Enter to send)"),
 			id="input-box",
 		)
 
@@ -655,7 +654,7 @@ class TUIApp(App):
 		host.remove_children()
 		self._active_choice = ChoicePrompt(choices, multiple, self._resolve_choice, self._choice_to_input)
 		host.mount(self._active_choice)
-		self.query_one("#input-row").display = False
+		self.query_one("#input-box").display = False
 		host.display = True
 
 	def _resolve_choice(self, value) -> None:
@@ -674,21 +673,21 @@ class TUIApp(App):
 			return
 		inp.value = text
 		self.query_one("#choice-host").display = False
-		self.query_one("#input-row").display = True
+		self.query_one("#input-box").display = True
 		inp.focus()
 
 	def _back_to_choices(self) -> None:
 		"""Esc from the input box (while a choice ask is active): return to the choice box."""
 		if self._active_choice is None:
 			return
-		self.query_one("#input-row").display = False
+		self.query_one("#input-box").display = False
 		self.query_one("#choice-host").display = True
 		self._active_choice.focus_list()
 
 	def _restore_input(self) -> None:
 		self.query_one("#choice-host", Vertical).remove_children()
 		self.query_one("#choice-host").display = False
-		self.query_one("#input-row").display = True
+		self.query_one("#input-box").display = True
 
 	def _echo_user(self, text) -> None:
 		self._convo().mount(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
