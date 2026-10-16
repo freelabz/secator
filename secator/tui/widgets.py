@@ -425,7 +425,7 @@ class ChoicePrompt(Vertical):
 		self._answered = False
 
 	def compose(self) -> ComposeResult:
-		header = "Pick multiple choices" if self._multiple else "Pick one choice"
+		header = "Pick one or multiple choices" if self._multiple else "Pick one choice"
 		yield Static(Text.from_markup(f"[b #e6c15a]{header}[/]"), classes="choice-q")
 		if self._multiple:
 			yield SelectionList(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
