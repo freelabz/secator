@@ -23,6 +23,27 @@ class StreamView:
 				if self._limit and n >= self._limit:
 					return
 
+	def iter_raw(self):
+		"""Stream raw dicts without rehydrating to OutputType objects.
+
+		Used by grouping paths where only a handful of fields (group-by keys, the aggregate
+		field, and ``_timestamp``) are read from each finding before collapsing to one
+		representative per group.  Skipping full OutputType construction for every finding
+		reduces the per-item cost from O(#fields) dataclass work down to a plain dict
+		lookup, which is significant on large result sets.
+
+		The representative dict for each group IS rehydrated inside ``group_findings()``
+		(one per group, not one per finding), so the final output is identical to the
+		normal rehydrate-then-group path.
+		"""
+		n = 0
+		for batch in self._engine.iterate(self._query, self._batch_size):
+			for item in batch:
+				yield item
+				n += 1
+				if self._limit and n >= self._limit:
+					return
+
 	def __len__(self):
 		n = self._engine.count(self._query)
 		return min(n, self._limit) if self._limit else n
