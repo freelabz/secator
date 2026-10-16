@@ -42,6 +42,20 @@ class PromptInput(TextArea):
 	def __init__(self, **kwargs):
 		super().__init__(soft_wrap=True, tab_behavior="focus", show_line_numbers=False, **kwargs)
 
+	def _refresh_placeholder(self) -> None:
+		# ask the app to re-evaluate the overlaid placeholder (hidden while THIS input is
+		# focused so it doesn't cover the cursor). Scoped to this widget's own focus/blur, so
+		# it never fires for clicks elsewhere (e.g. expanding a runner).
+		app = self.app
+		if hasattr(app, "_update_placeholder"):
+			app.call_after_refresh(app._update_placeholder)
+
+	def on_focus(self) -> None:
+		self._refresh_placeholder()
+
+	def on_blur(self) -> None:
+		self._refresh_placeholder()
+
 	async def _on_key(self, event) -> None:
 		if event.key == "enter":
 			event.stop()

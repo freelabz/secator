@@ -655,7 +655,9 @@ class TUIApp(App):
 	# ---- input / prompts / steers ----
 	def _update_placeholder(self) -> None:
 		# the overlaid placeholder is shown only while the input is empty AND unfocused — so it
-		# doesn't sit on top of (and hide) the cursor once the user clicks/focuses the box.
+		# doesn't sit on top of (and hide) the cursor once the input itself is focused. Driven by
+		# the PromptInput's own focus/blur/change (NOT app-wide descendant-focus events, which
+		# fired on every focus change in the app and interfered with click-to-expand on runners).
 		try:
 			ta = self.query_one("#prompt-input", PromptInput)
 			self.query_one("#input-placeholder").display = (not ta.text) and (not ta.has_focus)
@@ -664,20 +666,6 @@ class TUIApp(App):
 
 	def on_text_area_changed(self, event) -> None:
 		self._update_placeholder()
-
-	def on_descendant_focus(self, event) -> None:
-		self._update_placeholder()
-
-	def on_descendant_blur(self, event) -> None:
-		self._update_placeholder()
-		# keep the choice box interactive from the keyboard: if focus drifts off its list while
-		# the box is still shown (not the Tab-to-input case, which hides the box), pull it back.
-		if self._active_choice is not None:
-			try:
-				if self.query_one("#choice-host").display:
-					self.call_after_refresh(self._active_choice.focus_list)
-			except Exception:  # noqa: BLE001
-				pass
 
 	async def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
 		text = event.value.strip()
