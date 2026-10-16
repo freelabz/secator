@@ -1,0 +1,33 @@
+FROM gentoo/stage3:latest
+ARG flavor=full
+ARG build_from_source=true
+ENV PATH="${PATH}:/root/.local/bin"
+ENV GOBIN="/root/.local/bin"
+ENV CARGO_HOME="/root/.local"
+RUN emerge --sync && \
+    emerge --ask=n --verbose=y \
+	app-shells/bash \
+	dev-lang/go \
+	dev-lang/python \
+	dev-lang/ruby \
+	dev-python/pip \
+	dev-python/pipx \
+	dev-util/cmake \
+	dev-vcs/git \
+	net-misc/curl \
+	net-misc/wget \
+	sys-apps/jq \
+	sys-devel/gcc \
+	sys-devel/make
+COPY . /code
+WORKDIR /code
+RUN pipx install . && \
+	secator install addons worker && \
+	secator install addons gdrive && \
+	secator install addons gcs && \
+	secator install addons mongodb && \
+	secator install addons redis && \
+	secator install addons dev
+RUN if [ "$build_from_source" = "true" ]; then secator config set security.force_source_install 1; fi
+RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup --fail-fast; fi
+ENTRYPOINT ["secator"]
