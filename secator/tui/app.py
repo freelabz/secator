@@ -123,9 +123,10 @@ class TUIApp(App):
 	   typing — keep them transparent so the input blends into the terminal background. */
 	#prompt-input .text-area--cursor-line { background: transparent; }
 	#prompt-input .text-area--cursor-gutter { background: transparent; }
-	/* light cursor block (dark glyph under it) so the caret is visible on a dark terminal —
-	   the default $input-cursor-background renders near-black and disappears on dark bg. */
-	#prompt-input .text-area--cursor { background: #e6ecf5; color: #11141b; }
+	/* light cursor block (dark glyph under it) so the caret is visible on a dark terminal.
+	   text-style: none kills the theme's default `reverse`, which would otherwise swap these
+	   and render a near-black block (what made the cursor look black). */
+	#prompt-input .text-area--cursor { background: #e6ecf5; color: #11141b; text-style: none; }
 	#input-placeholder { layer: hint; width: 1fr; height: 1; padding: 0 1; }
 	/* meta bar under the input: dangerous + mode on the left, context % on the right.
 	   a top rule separates it from the input/choice box above (the "bottom delimiter"). */
