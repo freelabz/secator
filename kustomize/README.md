@@ -1,0 +1,1 @@
+# Kustomize deployment for Secator
