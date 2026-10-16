@@ -304,6 +304,26 @@ class TestConfig(unittest.TestCase):
 		self.assertEqual(list(perms.get('ask', [])), ask0, 'ask list was dropped on reload')
 		self.assertNotIn('target(localhost)', perms.get('deny', []), 'deny item not removed')
 
+	def test_dict_field_edit_does_not_bake_env_override(self):
+		"""Editing a Dict field sub-key must not persist an ENV override of a sibling. With
+		SECATOR_ADDONS_AI_PERMISSIONS_DENY='' (deny -> []), editing `allow` must save the
+		DEFAULT deny, not the env's empty list — else removing the env var never restores it."""
+		from secator.config import Config
+		os.environ['SECATOR_ADDONS_AI_PERMISSIONS_DENY'] = ''
+		try:
+			config = Config.parse(path=self.config_test)
+			self.assertEqual(config.addons.ai.permissions.get('deny'), [])  # env applied to live
+			config.set('addons.ai.permissions.allow', 'target(example.com)', strategy='append')
+			config.save()
+		finally:
+			os.environ.pop('SECATOR_ADDONS_AI_PERMISSIONS_DENY', None)
+		saved = Config.read_yaml(self.config_test)['addons']['ai']['permissions']
+		self.assertNotEqual(saved['deny'], [], 'env-overridden deny=[] was baked into the saved config')
+		self.assertIn('target(example.com)', saved['allow'])
+		# with the env var gone, a reload restores the default deny
+		reloaded = Config.parse(path=self.config_test)
+		self.assertNotEqual(reloaded.addons.ai.permissions.get('deny'), [])
+
 	def test_parse_home_dir_reduce(self):
 		from secator.config import Config
 		with self.config_test.open('w') as f:
