@@ -517,55 +517,76 @@ class TUIApp(App):
 			# both side panels dock right — only show one at a time
 			self.query_one("#findings-panel").display = False
 			self._bg_sig = None   # force a rebuild on open
-			self._render_bgtasks()
+			self.call_later(self._render_bgtasks)
+
+	@staticmethod
+	def _bg_structure_sig(panels) -> tuple:
+		# the set + lifecycle states (NOT the spinner frame) — a rebuild is only needed when
+		# a runner is added/removed or flips done/failed; the spinner animates in place.
+		return tuple((id(p), p.done, getattr(p, "failed", False)) for p in panels)
+
+	def _bg_row_text(self, glyph, color, rname, kind, config) -> Text:
+		t = Text()
+		t.append(f"{glyph} ", style=f"bold {color}")
+		t.append(rname or kind, style="#cdd6e4")
+		t.append(f" ({kind}" + (f" • {config}" if config else "") + ")", style="#6b7187")
+		return t
 
 	def _tick_bgtasks(self) -> None:
+		# Called ~1s. If the runner set/states changed, schedule a rebuild; otherwise just
+		# advance the spinner glyph on the running rows IN PLACE (no remove/mount, no scroll
+		# thrash — addresses the "rebuild every tick" + "remove_children isn't synchronous" bits).
 		try:
-			if self.query_one("#bgtasks-panel").display:
-				self._bg_frame = getattr(self, "_bg_frame", 0) + 1
-				self._render_bgtasks()
-		except Exception:  # noqa: BLE001 - panel may be gone during teardown
-			pass
+			if not self.query_one("#bgtasks-panel").display:
+				return
+		except Exception:  # noqa: BLE001 - panel gone during teardown
+			return
+		if self._bg_structure_sig(self._bg_rows()) != getattr(self, "_bg_sig", None):
+			self.call_later(self._render_bgtasks)
+			return
+		self._bg_frame = getattr(self, "_bg_frame", 0) + 1
+		spin = self._BG_SPIN[self._bg_frame % len(self._BG_SPIN)]
+		for st, rname, kind, config in getattr(self, "_bg_running_rows", []):
+			try:
+				st.update(self._bg_row_text(spin, "#e0882e", rname, kind, config))
+			except Exception:  # noqa: BLE001 - row removed
+				pass
 
 	def _bg_rows(self) -> list:
 		"""Top-level runner cards in the conversation (the dispatched actions), in order."""
 		return [w for w in self._convo().children if isinstance(w, RunnerPanel)]
 
-	def _render_bgtasks(self) -> None:
-		# rebuild only when the set/states changed (so scroll position + the spinner frame
-		# don't thrash); the spinner glyph still advances via _bg_frame on each tick.
+	async def _render_bgtasks(self) -> None:
+		# Full rebuild — only when the structure changed (see _bg_structure_sig). Async so the
+		# old rows are AWAITED out before mounting the new ones (remove_children is not sync).
 		panels = self._bg_rows()
-		frame = getattr(self, "_bg_frame", 0)
-		sig = (frame % len(self._BG_SPIN), tuple((id(p), p.done, p.failed) for p in panels))
+		sig = self._bg_structure_sig(panels)
 		if sig == getattr(self, "_bg_sig", None):
 			return
 		self._bg_sig = sig
+		self._bg_running_rows = []   # (Static, rname, kind, config) for in-place spinner ticks
 		body = self.query_one("#bgtasks-list", VerticalScroll)
-		body.remove_children()
+		await body.remove_children()
 		if not panels:
-			body.mount(Static(Text.from_markup("[#6b7187]No background tasks yet.[/]"), classes="bg-empty"))
+			await body.mount(Static(
+				Text.from_markup("[#6b7187]No background tasks yet.[/]"), classes="bg-empty"))
 			return
-		running = [p for p in panels if not p.done]
-		finished = [p for p in panels if p.done]
-		spin = self._BG_SPIN[frame % len(self._BG_SPIN)]
-		for label, group in (("Running", running), ("Finished", finished)):
+		spin = self._BG_SPIN[getattr(self, "_bg_frame", 0) % len(self._BG_SPIN)]
+		for label, group in (("Running", [p for p in panels if not p.done]),
+		                     ("Finished", [p for p in panels if p.done])):
 			if not group:
 				continue
-			body.mount(Static(
+			await body.mount(Static(
 				Text.from_markup(f"[#8a8fa3 b]{label}[/] [#4a5163]({len(group)})[/]"), classes="bg-section"))
 			for p in group:
+				config = getattr(p, "config_name", None)
 				if not p.done:
-					glyph, color = spin, "#e0882e"
-				elif getattr(p, "failed", False):
-					glyph, color = "✗", "#ff6b6b"
+					row = Static(self._bg_row_text(spin, "#e0882e", p.rname, p.kind, config), classes="bg-row")
+					self._bg_running_rows.append((row, p.rname, p.kind, config))
 				else:
-					glyph, color = "✓", "#3fb950"
-				t = Text()
-				t.append(f"{glyph} ", style=f"bold {color}")
-				t.append(p.rname or p.kind, style="#cdd6e4")
-				suffix = f" ({p.kind}" + (f" • {p.config_name}" if getattr(p, "config_name", None) else "") + ")"
-				t.append(suffix, style="#6b7187")
-				body.mount(Static(t, classes="bg-row"))
+					glyph, color = ("✗", "#ff6b6b") if getattr(p, "failed", False) else ("✓", "#3fb950")
+					row = Static(self._bg_row_text(glyph, color, p.rname, p.kind, config), classes="bg-row")
+				await body.mount(row)
 
 	# ---- findings side panel (lazy, queried by _context.session_id) ----
 	def set_findings_source(self, workspace_id, context, session_id) -> None:
