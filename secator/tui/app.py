@@ -112,6 +112,10 @@ class TUIApp(App):
 		border: none; background: transparent; color: #e6ecf5; padding: 0 1;
 	}
 	#prompt-input:focus { border: none; background: transparent; }
+	/* TextArea paints the cursor's line + gutter with $boost (a dark bar) once you start
+	   typing — keep them transparent so the input blends into the terminal background. */
+	#prompt-input .text-area--cursor-line { background: transparent; }
+	#prompt-input .text-area--cursor-gutter { background: transparent; }
 	#input-placeholder { layer: hint; width: 1fr; height: 1; padding: 0 1; }
 	Header { background: transparent; color: #cdd6e4; }
 	"""
