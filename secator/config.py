@@ -548,6 +548,36 @@ class Config(DotMap):
 			else:
 				partial[final_key] = value
 		target[final_key] = value
+		if set_partial:
+			self._sync_partial_dict_field(self._keymap[map_key])
+
+	def _sync_partial_dict_field(self, path_parts):
+		"""Mirror the full current value of the Dict field on ``path_parts`` into ``_partial``.
+
+		A dynamic Dict field (e.g. ``addons.ai.permissions``, ``wordlists.defaults``) is
+		replaced wholesale when the config reloads — pydantic does NOT deep-merge it with the
+		schema default. So persisting only a changed sub-key would drop the field's OTHER keys
+		on the next load (e.g. unsetting one ``permissions.deny`` item wiped ``permissions``
+		``allow``/``ask``). Store the whole field so the saved override is self-contained.
+		"""
+		import copy
+		field_path = None
+		for i in range(len(path_parts), 0, -1):
+			if Config._is_dynamic_dict_path(path_parts[:i]):
+				field_path = path_parts[:i]
+				break
+		if not field_path:
+			return
+		live = self
+		for part in field_path:
+			if part not in live:
+				return
+			live = live[part]
+		full = live.toDict() if hasattr(live, 'toDict') else live
+		partial = self._partial
+		for part in field_path[:-1]:
+			partial = partial[part]
+		partial[field_path[-1]] = copy.deepcopy(full)
 
 	def _set_dict_key(self, parent_parts, subkey, value, set_partial=True, strategy=None):
 		"""Set or remove a key within a dict config field.
@@ -638,6 +668,8 @@ class Config(DotMap):
 		if set_partial:
 			partial[dict_key] = updated
 		target[dict_key] = updated
+		if set_partial:
+			self._sync_partial_dict_field(parent_parts + ([subkey] if subkey else []))
 
 	def unset(self, key, value=None, set_partial=True):
 		"""Unset a value in the configuration using a dotted path.

@@ -287,6 +287,23 @@ class TestConfig(unittest.TestCase):
 		config.unset('wordlists.defaults.mylist')
 		self.assertNotIn('mylist', config.wordlists.defaults)
 
+	def test_unset_nested_dict_list_preserves_siblings(self):
+		"""Unsetting one item from a list inside a Dict field (addons.ai.permissions.deny) must
+		keep the Dict's OTHER keys (allow/ask). A Dict field is replaced wholesale on reload
+		(pydantic doesn't deep-merge it), so the saved override must carry the full field."""
+		from secator.config import Config
+		config = Config.parse(path=self.config_test)
+		allow0 = list(config.addons.ai.permissions.get('allow', []))
+		ask0 = list(config.addons.ai.permissions.get('ask', []))
+		self.assertTrue(allow0 and ask0, 'precondition: allow/ask defaults exist')
+		config.unset('addons.ai.permissions.deny', value='target(localhost)')
+		config.save()
+		reloaded = Config.parse(path=self.config_test)
+		perms = reloaded.addons.ai.permissions
+		self.assertEqual(list(perms.get('allow', [])), allow0, 'allow list was dropped on reload')
+		self.assertEqual(list(perms.get('ask', [])), ask0, 'ask list was dropped on reload')
+		self.assertNotIn('target(localhost)', perms.get('deny', []), 'deny item not removed')
+
 	def test_parse_home_dir_reduce(self):
 		from secator.config import Config
 		with self.config_test.open('w') as f:
