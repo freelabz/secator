@@ -1089,6 +1089,9 @@ class PermissionEngine:
 			# (whole-command-approved short-circuit handled at the top of this branch,
 			# before parsing, so a parse-failure re-check clears too — see above.)
 			if unmatched:
+				# dedup while preserving order: a command repeated across subcommands (e.g. a
+				# `for`-loop body) must list its name once, not N times.
+				unmatched = list(dict.fromkeys(unmatched))
 				return PermissionResult(
 					decision="ask",
 					reason=f"No rule for command(s): {', '.join(unmatched)}",
