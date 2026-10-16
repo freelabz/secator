@@ -42,12 +42,15 @@ _ACTION_VERBS = {
 
 
 class AITUI(TUIApp):
-	def __init__(self, runner_builder=None, session="ai", mode="chat", initial_prompt=""):
+	def __init__(self, runner_builder=None, session="ai", mode="chat", initial_prompt="",
+	             initial_dangerous=False):
 		super().__init__(
 			runner_builder,
 			title="secator ai",
 			subtitle=f"session: {session} · mode: {mode}",
 			initial_prompt=initial_prompt,
+			initial_dangerous=initial_dangerous,
+			initial_mode=mode or "auto",
 		)
 		self._in_subagent: str | None = None          # subagent session we're writing into
 		# sid -> SubagentRow for every spawned subagent still running. A dict (not a single
@@ -222,6 +225,22 @@ class AITUI(TUIApp):
 			# console path prints (suppressed under the TUI, which owns the display).
 			await self._append(Static(
 				Text.from_markup(f"[dim]↻ Switched to [b]{escape(content)}[/] mode[/]"), classes="note"))
+		elif at == "token_usage":
+			# a subagent reports its running token count each turn — feed the read-only meta bar
+			# shown while drilled into that subagent's view (compute % of usable context)
+			ed = d.get("extra_data") or {}
+			sid = self._in_subagent
+			if sid:
+				tokens = ed.get("tokens") or 0
+				ctx_window = ed.get("context_window") or 0
+				pct = None
+				try:
+					from secator.ai.history import OUTPUT_TOKEN_RESERVATION
+					usable = ctx_window - OUTPUT_TOKEN_RESERVATION
+					pct = (tokens / usable * 100) if usable > 0 else None
+				except Exception:  # noqa: BLE001
+					pct = None
+				self._set_meta(None, None, None, pct, True, sid)
 		elif at == "stopped":
 			# End-of-turn stop: show the reason (summary / blocker) as markdown, then go
 			# idle. The ask_user prompt (choices / input box) renders the next-step UI.
@@ -260,9 +279,11 @@ def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 			pass
 
 	session = opts.get("workspace") or opts.get("prompt", "ai") or "ai"
+	# mode="" / "auto" means auto-detect — show "auto" on the meta bar until the runner reports
+	_mode = opts.get("mode") or "auto"
 	app = AITUI(
-		None, session=str(session)[:30], mode=opts.get("mode", "chat"),
-		initial_prompt=opts.get("prompt", ""))
+		None, session=str(session)[:30], mode=_mode,
+		initial_prompt=opts.get("prompt", ""), initial_dangerous=bool(opts.get("dangerous")))
 
 	def _feed(self, item):  # on_item hook: runs in the worker thread
 		# `self` is the parent ai runner — remember its source so the display can tell the
