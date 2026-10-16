@@ -11,12 +11,13 @@ from secator.definitions import (
 )  # fmt: off
 from secator.output_types import Certificate, Subdomain, Technology, Url, Vulnerability, Tag
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import Http
+from secator.tasks._categories import HttpMixin
+from secator.runners import Command
 from secator.utils import extract_domain_info, extract_subdomains_from_fqdn, sanitize_url
 
 
 @task()
-class httpx(Http):
+class httpx(Command, HttpMixin):
 	"""Fast and multi-purpose HTTP toolkit."""
 
 	cmd = 'httpx-toolkit -irh'

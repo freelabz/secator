@@ -11,13 +11,14 @@ from secator.definitions import (
 )  # fmt: off
 from secator.output_types import Tag, Technology, Url
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpCrawler
+from secator.tasks._categories import HttpCrawlerMixin
+from secator.runners import Command
 
 EXCLUDED_PARAMS = ['v']
 
 
 @task()
-class katana(HttpCrawler):
+class katana(Command, HttpCrawlerMixin):
 	"""Next-generation crawling and spidering framework."""
 
 	cmd = 'katana'

@@ -6,11 +6,12 @@ from secator.definitions import (
 	CIDR_RANGE, DELAY, IP, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT, RETRIES, SLUG, THREADS, TIMEOUT
 )  # fmt: off
 from secator.output_types import Ip
-from secator.tasks._categories import ReconIp
+from secator.tasks._categories import ReconMixin
+from secator.runners import Command
 
 
 @task()
-class mapcidr(ReconIp):
+class mapcidr(Command, ReconMixin):
 	"""Utility program to perform multiple operations for a given subnet/cidr ranges."""
 
 	cmd = 'mapcidr'
