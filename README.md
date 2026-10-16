@@ -133,6 +133,19 @@ pip install secator
 </details>
 
 <details>
+    <summary>OTinstaller (third-party, Linux)</summary>
+
+```sh
+pipx install otinstaller
+otinstaller init
+otinstaller install secator
+otinstaller run --verbose secator -- x httpx example.com   # same as: secator x httpx example.com
+```
+***Note:** [OTinstaller](https://github.com/OSINTVerseHQ/OTinstaller) installs the `secator` PyPI release into its own virtualenv; `secator` still installs the tools it runs (httpx, nmap, ...) itself on first use, as described in [Installing tools](#installing-tools). OTinstaller is not maintained by the secator authors, so please report problems with it [on the OTinstaller tracker](https://github.com/OSINTVerseHQ/OTinstaller/issues).*
+
+</details>
+
+<details>
     <summary>Docker</summary>
 
 ```sh
