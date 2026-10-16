@@ -40,7 +40,7 @@ class TUIApp(App):
 	#backbar { height: 1; padding: 0 1; }
 	#backbar:hover { text-style: bold; }
 	.subview-title { color: #c2a0ff; margin: 0 0 1 0; }
-	.subagent-row { height: 1; }
+	.subagent-row { height: 1; margin: 1 0; }
 	.subagent-row:hover { text-style: bold; }
 	/* the subagent's verdict/handback at the end of its view: red-outlined conclusion box */
 	.handback-panel { border: round #c0392b; margin: 1 0; padding: 0 1; height: auto; background: transparent; }
@@ -443,6 +443,9 @@ class TUIApp(App):
 		# A subview is a read-only drill-in (e.g. a subagent's own conversation) — there is
 		# nothing to steer or answer there, so hide the input box to avoid implying otherwise.
 		self.query_one("#input-box").display = False
+		# the status line reflects the PARENT's live activity (e.g. "running task …") — hide it
+		# here so a subagent's historical transcript doesn't look like it's still thinking.
+		self.query_one("#status").display = False
 		# the meta bar follows: show the subagent's read-only guardrail/mode/context
 		self._viewing_subagent = sid
 		self._render_meta()
@@ -454,6 +457,7 @@ class TUIApp(App):
 		self.query_one("#backbar").display = False
 		# Back on the main conversation: restore the input box and refocus it.
 		self.query_one("#input-box").display = True
+		self.query_one("#status").display = True   # the live status belongs to the main convo
 		self.query_one("#prompt-input", PromptInput).focus()
 		# restore the interactive (main-conversation) meta bar
 		self._viewing_subagent = None
