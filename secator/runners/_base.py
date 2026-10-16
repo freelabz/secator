@@ -696,7 +696,10 @@ class Runner:
 		hooks = run_opts.pop('hooks', {})
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
-		validators = run_opts.pop('validators', [])
+		# validators is a dict[str, list[callable]] (register_validators does validators.get(key));
+		# defaulting to [] crashed the async/worker path with "'list' object has no attribute 'get'"
+		# whenever run_opts carried no validators.
+		validators = run_opts.pop('validators', {})
 		return start_runner.apply_async(
 			kwargs={
 				'config': config,
