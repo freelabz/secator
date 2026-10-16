@@ -300,13 +300,16 @@ class ai(PythonRunner):
 			"help": "Context to pass to AI (findings, scope, objective)"
 		},
 		"in_scope": {
-			"type": list,
+			# "list" (string) → CLICK_LIST via the CLI type map, so `--in-scope a.com,b.com` is
+			# comma-split. The builtin `list` would reach click as a converter and `list()` the
+			# string into single CHARACTERS (so nothing matches host_in_scope).
+			"type": "list",
 			"default": None,
 			"internal": True,
 			"help": "Platform-set allow-list of targets the AI must stay within (mandate scope; same host_in_scope as in_scope/out_of_scope run options)"  # noqa: E501
 		},
 		"out_of_scope": {
-			"type": list,
+			"type": "list",
 			"default": None,
 			"internal": True,
 			"help": "Platform-set deny-list of targets the AI must never touch (mandate deny scope; deny wins over in_scope)"  # noqa: E501
