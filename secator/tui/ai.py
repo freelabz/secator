@@ -210,9 +210,11 @@ class AITUI(TUIApp):
 		elif at == "tool_result":
 			# A plain tool_result is model-facing only (its findings render as cards). But a
 			# REJECTED tool call (malformed/empty args, denied) carries extra_data.error — surface
-			# it so a failing tool isn't silently retried behind a frozen-looking screen.
+			# it so a failing tool isn't silently retried behind a frozen-looking screen. A
+			# guardrail denial (blocked) already renders a "Blocked <desc>" panel, so skip the
+			# redundant "tool call failed" line for those.
 			ed = d.get("extra_data") or {}
-			if ed.get("error"):
+			if ed.get("error") and not ed.get("blocked"):
 				reason = ed.get("reason") or content
 				tool = ed.get("tool_name") or ""
 				label = f"{tool}: {reason}" if tool else reason
