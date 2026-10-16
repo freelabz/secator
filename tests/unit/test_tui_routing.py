@@ -601,10 +601,14 @@ async def _query_card_body():
 		                           matched_at="http://x"))
 		await pilot.pause(0.05)
 		p = [x for x in _panels(app) if x.kind == "query"][0]
-		assert "Querying Find high/critical vulns" in p._header().plain  # running verb + description
+		# running: animated orange spinner glyph + the description + (query) type
+		assert any(c in p._header().plain for c in RunnerPanel._SPIN)   # spinner while running
+		assert "Find high/critical vulns" in p._header().plain
+		assert "(query)" in p._header().plain
 		p.done = True
-		assert "Queried Find high/critical vulns" in p._header().plain   # done verb
-		assert "(query)" not in p._header().plain                         # verb already says it
+		assert "✓" in p._header().plain                                  # green check on success
+		p.failed = True
+		assert "✗" in p._header().plain                                  # red cross when failed
 		assert "7 results" in p.meta and "skip=20" in p.meta and "limit=100" in p.meta and "grouped" in p.meta
 		assert p.count == 1   # the result finding rendered inside the query panel
 
@@ -743,3 +747,29 @@ async def _blocked_no_failed_line_body():
 
 def test_blocked_denial_has_no_tool_call_failed_line():
 	_run(_blocked_no_failed_line_body())
+
+async def _runner_status_icon_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		# a task card renders running (animated spinner)
+		await app._render(_card("task", "nmap", "Port scan"))
+		p = _panels(app, "task")[0]
+		assert any(c in p._header().plain for c in RunnerPanel._SPIN)
+		assert p.done is False and p.failed is False
+		# an error routed to it marks it failed -> red cross once finished
+		await app._render({"_type": "error", "message": "validator failed", "_source": "nmap"})
+		assert p.failed is True
+		app._finish_current()
+		await pilot.pause(0.05)
+		assert "✗" in p._header().plain
+		# a clean task finishes with a green check
+		await app._render(_card("task", "httpx", "Probe"))
+		p2 = _by_desc(app, "Probe")
+		app._finish_current()
+		await pilot.pause(0.05)
+		assert "✓" in p2._header().plain and not p2.failed
+
+
+def test_runner_status_icons_spinner_check_cross():
+	_run(_runner_status_icon_body())
