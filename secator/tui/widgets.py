@@ -248,23 +248,27 @@ class RunnerPanel(Vertical):
 			self.toggle()
 
 	def add_finding(self, renderable) -> None:
+		self._clear_empty_note()
 		self.count += 1
 		self.query_one(".runner-out", Vertical).mount(Static(renderable, classes="out-line"))
 		self._refresh_head()
 
 	def bump(self) -> None:
 		# count a finding that landed in a nested sub-panel (container total)
+		self._clear_empty_note()
 		self.count += 1
 		self._refresh_head()
 
 	def add_note(self, renderable) -> None:
 		# a workflow/scan-level line (e.g. "Skipped task …") — keeps the box non-empty
+		self._clear_empty_note()
 		self.lines += 1
 		self.query_one(".runner-out", Vertical).mount(Static(renderable, classes="out-line"))
 
 	def add_output(self, text: str) -> None:
 		# VISIBLE output (e.g. a shell command's stdout — it IS the result, not hidden
 		# behind the command-click like a task's raw stdout). Line-capped, plain text.
+		self._clear_empty_note()
 		if self.lines >= 500:
 			return
 		self.lines += 1
@@ -278,6 +282,7 @@ class RunnerPanel(Vertical):
 		source = source or "results"
 		sp = self.subpanels.get(source)
 		if sp is None:
+			self._clear_empty_note()
 			sp = RunnerPanel("task", source)
 			sp.done = self.done
 			self.subpanels[source] = sp
@@ -288,12 +293,14 @@ class RunnerPanel(Vertical):
 		# add the clickable '$ command' line (once); click it to reveal the raw output
 		if self.command or not cmd:
 			return
+		self._clear_empty_note()   # the command is a task log — drop a stale "(no output)"
 		self.command = cmd
 		self.query_one(".runner-cmdwrap", Vertical).mount(_CmdLine(self._cmd_render(), classes="runner-cmd"))
 
 	def add_raw(self, text: str) -> None:
 		# RAW command output: plain Text, never markup-parsed (target-controlled), kept
 		# hidden under the command line (click the command to reveal). Line-capped.
+		self._clear_empty_note()
 		if self.raw_lines >= 500:
 			return
 		self.raw_lines += 1
@@ -304,13 +311,24 @@ class RunnerPanel(Vertical):
 			text = "… (output truncated)"
 		self.query_one(".runner-raw", Vertical).mount(Static(Text(text), classes="out-raw"))
 
+	def _clear_empty_note(self) -> None:
+		# drop the "(no output)" placeholder once ANY real content arrives — it may have been
+		# added by finish() before a buffered command/finding flushed in (parallel-batch race).
+		try:
+			for n in self.query_one(".runner-out", Vertical).query(".empty-note"):
+				n.remove()
+		except Exception:  # noqa: BLE001 - box may be gone
+			pass
+
 	def finish(self) -> None:
 		self.done = True
 		for sp in self.subpanels.values():
 			sp.finish()
+		# only when the task produced NOTHING to look at — no findings, no output, no command
+		# (the command itself is a task log, so its presence means there's something to see)
 		if not self.count and not self.lines and not self.command and not self.subpanels:
 			self.query_one(".runner-out", Vertical).mount(
-				Static(Text.from_markup("[dim i](no output)[/]"), classes="out-line"))
+				Static(Text.from_markup("[dim i](no output)[/]"), classes="out-line empty-note"))
 		self._refresh_head()
 
 
