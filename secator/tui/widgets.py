@@ -393,6 +393,8 @@ class ChoicePrompt(Vertical):
 		self._answered = False
 
 	def compose(self) -> ComposeResult:
+		header = "Pick multiple choices" if self._multiple else "Pick one choice"
+		yield Static(Text.from_markup(f"[b #e6c15a]{header}[/]"), classes="choice-q")
 		if self._multiple:
 			yield SelectionList(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
 			yield Static(Text.from_markup(
@@ -406,6 +408,7 @@ class ChoicePrompt(Vertical):
 		self.call_after_refresh(self.focus_list)
 
 	def focus_list(self) -> None:
+		# keep the list focused so the keyboard drives it without clicking into the box first
 		try:
 			self.query_one(".choice-list").focus()
 		except Exception:  # noqa: BLE001 - widget may be gone
