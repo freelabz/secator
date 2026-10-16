@@ -160,6 +160,7 @@ class AITUI(TUIApp):
 				return
 			meta = ""
 			result_count = None
+			config_name = None
 			if at == "shell":
 				# LLM-supplied description as the title; the command goes in the box
 				kind, rname, command = "shell", desc, content
@@ -179,8 +180,11 @@ class AITUI(TUIApp):
 				meta = "  ·  ".join(bits)
 			else:
 				kind, rname, command = at, desc or content or ed.get("name") or "", ""
+				# the actual config used (task/workflow/scan name), shown in the header as
+				# "(<kind> • <config>)" so it's clear which config ran
+				config_name = content or ed.get("name") or ""
 			panel = RunnerPanel(kind, rname, command=command, runner_id=ed.get("runner_id", ""),
-			                    meta=meta, result_count=result_count)
+			                    meta=meta, result_count=result_count, config_name=config_name)
 			# the card's content is the runner name (== _source of its items). Used to
 			# route a task's live output + buffered output (parallel batch), and to tell a
 			# workflow's OWN notes (_source == workflow name) from its child tasks' items.
