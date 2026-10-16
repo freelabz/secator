@@ -601,11 +601,18 @@ async def _query_card_body():
 		                           matched_at="http://x"))
 		await pilot.pause(0.05)
 		p = [x for x in _panels(app) if x.kind == "query"][0]
-		assert "Querying Find high/critical vulns" in p._header().plain  # running verb + description
+		# running: animated orange spinner glyph + description + result count inline
+		assert any(c in p._header().plain for c in RunnerPanel._SPIN)   # spinner while running
+		assert "Find high/critical vulns" in p._header().plain
+		assert "(7 results)" in p._header().plain                       # count inline, not "(query)"
+		assert "(query)" not in p._header().plain
 		p.done = True
-		assert "Queried Find high/critical vulns" in p._header().plain   # done verb
-		assert "(query)" not in p._header().plain                         # verb already says it
-		assert "7 results" in p.meta and "skip=20" in p.meta and "limit=100" in p.meta and "grouped" in p.meta
+		assert "✓" in p._header().plain                                  # green check on success
+		p.failed = True
+		assert "✗" in p._header().plain                                  # red cross when failed
+		# the meta line keeps only the skip/limit/group details (count moved to the header)
+		assert "7 results" not in p.meta
+		assert "skip=20" in p.meta and "limit=100" in p.meta and "grouped" in p.meta
 		assert p.count == 1   # the result finding rendered inside the query panel
 
 
@@ -743,3 +750,57 @@ async def _blocked_no_failed_line_body():
 
 def test_blocked_denial_has_no_tool_call_failed_line():
 	_run(_blocked_no_failed_line_body())
+
+async def _runner_status_icon_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		# a task card renders running (animated spinner)
+		await app._render(_card("task", "nmap", "Port scan"))
+		p = _panels(app, "task")[0]
+		assert any(c in p._header().plain for c in RunnerPanel._SPIN)
+		assert p.done is False and p.failed is False
+		# an error routed to it marks it failed -> red cross once finished
+		await app._render({"_type": "error", "message": "validator failed", "_source": "nmap"})
+		assert p.failed is True
+		app._finish_current()
+		await pilot.pause(0.05)
+		assert "✗" in p._header().plain
+		# a clean task finishes with a green check
+		await app._render(_card("task", "httpx", "Probe"))
+		p2 = _by_desc(app, "Probe")
+		app._finish_current()
+		await pilot.pause(0.05)
+		assert "✓" in p2._header().plain and not p2.failed
+
+
+def test_runner_status_icons_spinner_check_cross():
+	_run(_runner_status_icon_body())
+
+
+async def _error_routes_by_owning_id_body():
+	# two parallel tasks share a _source ("httpx"); an error for ONE must mark only THAT
+	# panel failed (red cross), not its same-source sibling — routed by owning runner id.
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+
+		def card(desc, rid):
+			return {"_type": "ai", "ai_type": "task", "content": "httpx",
+			        "extra_data": {"description": desc, "runner_id": rid}}
+
+		await app._render(card("Probe A", "rid-A"))
+		await app._render(card("Probe B", "rid-B"))
+		await pilot.pause(0.05)
+		a = _by_desc(app, "Probe A")
+		b = _by_desc(app, "Probe B")
+		# an error owned by task B (task_chunk_id=rid-B) with the SHARED source "httpx"
+		await app._render({"_type": "error", "message": "boom", "_source": "httpx",
+		                   "_context": {"task_chunk_id": "rid-B"}})
+		await pilot.pause(0.02)
+		assert b.failed is True, "error should mark its OWNING task failed"
+		assert a.failed is False, "sibling sharing the source must NOT be marked failed"
+
+
+def test_error_marks_only_owning_task_failed():
+	_run(_error_routes_by_owning_id_body())

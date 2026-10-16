@@ -155,21 +155,31 @@ class RunnerPanel(Vertical):
 	doesn't fit), and a bordered box (hidden until expanded) holding the command and
 	its output/findings. Workflow/scan panels nest child task panels in ``subpanels``."""
 
-	# per-kind header verbs: (running, done). Default is Running/Ran.
-	_VERBS = {"query": ("Querying", "Queried")}
+	# status icons replace the old "Running"/"Ran" verbs: an animated orange spinner while
+	# running/pending, a green check on success, a red cross on failure.
+	_SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+	_RUN_COLOR = "#e0882e"
+	_OK_COLOR = "#3fb950"
+	_FAIL_COLOR = "#ff6b6b"
 
-	def __init__(self, kind: str, rname: str, command: str = "", runner_id: str = "", meta: str = ""):
+	def __init__(self, kind: str, rname: str, command: str = "", runner_id: str = "", meta: str = "",
+	             result_count=None, config_name=None):
 		super().__init__(classes="runner-panel")
 		self.kind = kind
 		self.rname = rname
 		self.command = command
-		self.meta = meta   # optional dim details line (e.g. a query's result count + skip/limit/group)
+		self.meta = meta   # optional dim details line (e.g. a query's skip/limit/group)
+		self.result_count = result_count   # query result count, shown inline in the header
+		self.config_name = config_name     # task/workflow/scan config name, shown in the header
 		self.runner_id = runner_id
 		self.source = ""   # the child command's tool name, for routing on_line output
 		self.count = 0
 		self.lines = 0
 		self.raw_lines = 0           # hidden raw-output lines (the reveal arrow only shows if > 0)
 		self.done = False
+		self.failed = False          # an error was routed to this runner -> red cross on finish
+		self._spin_frame = 0
+		self._spin_timer = None
 		self._collapsed = True
 		self._raw_collapsed = True   # raw command output hidden until the command is clicked
 		self.subpanels: dict = {}   # source -> nested RunnerPanel (workflow/scan children)
@@ -213,27 +223,60 @@ class RunnerPanel(Vertical):
 	def _desc(self) -> str:
 		return self.rname or self.command or self.kind
 
+	def _status_icon(self):
+		"""(glyph, style) for the current state: animated orange spinner while running,
+		green check on success, red cross on failure."""
+		if not self.done:
+			return self._SPIN[self._spin_frame % len(self._SPIN)], f"bold {self._RUN_COLOR}"
+		if self.failed:
+			return "✗", f"bold {self._FAIL_COLOR}"
+		return "✓", f"bold {self._OK_COLOR}"
+
 	def _header(self) -> Text:
-		running, done = self._VERBS.get(self.kind, ("Running", "Ran"))
-		verb = done if self.done else running
+		glyph, gstyle = self._status_icon()
 		arrow = "▼" if not self._collapsed else "▶"
-		# runner type suffix so task/workflow/scan/shell are distinguishable; omitted when the
-		# verb already names the action (e.g. "Queried …" needs no "(query)").
-		kind = "" if self.kind in self._VERBS else f" ({self.kind})"
-		tail = f"  ·  {self.count} findings" if self.count else ""
+		if self.kind == "query":
+			# a query shows its result count inline, e.g. "<description> (7 results)"
+			kind = f"  ({self.result_count} results)" if self.result_count is not None else "  (query)"
+			tail = ""
+		else:
+			# runner type + the config used, e.g. "(task • nmap)", so it's clear which ran
+			kind = f" ({self.kind} • {self.config_name})" if self.config_name else f" ({self.kind})"
+			tail = f"  ·  {self.count} findings" if self.count else ""
 		desc = self._desc()
-		# ellipsise only the description so the type + arrow stay on one line
+		# ellipsise only the description so the icon + type + arrow stay on one line
 		width = self.app.size.width if self.app else 100
-		budget = max(12, width - len(verb) - len(kind) - len(tail) - 8)
+		budget = max(12, width - len(kind) - len(tail) - 10)
 		if len(desc) > budget:
 			desc = desc[: budget - 1] + "…"
 		t = Text()
-		t.append(f"{verb} ", style="bold #9aa3b8")
+		t.append(f"{glyph} ", style=gstyle)
 		t.append(desc, style="#8a8fa3")
 		t.append(kind, style="#5b6070")
 		t.append(tail, style="#6b7187")
 		t.append(f"  {arrow}", style="#6b7187")
 		return t
+
+	def on_mount(self) -> None:
+		# animate the spinner while the runner is pending/running; stops at finish()
+		self._spin_timer = self.set_interval(0.12, self._tick_spin)
+
+	def _tick_spin(self) -> None:
+		if self.done:
+			return
+		self._spin_frame = (self._spin_frame + 1) % len(self._SPIN)
+		try:
+			self._refresh_head()
+		except Exception:  # noqa: BLE001 - head may be gone during teardown
+			pass
+
+	def mark_failed(self) -> None:
+		"""An error was routed to this runner — show a red cross (on finish / now if done)."""
+		self.failed = True
+		try:
+			self._refresh_head()
+		except Exception:  # noqa: BLE001
+			pass
 
 	def _refresh_head(self) -> None:
 		self.query_one(".runner-head", Head).update(self._header())
@@ -322,10 +365,16 @@ class RunnerPanel(Vertical):
 
 	def finish(self) -> None:
 		self.done = True
+		if self._spin_timer is not None:
+			self._spin_timer.stop()   # stop animating: the icon is now a check/cross
+			self._spin_timer = None
 		for sp in self.subpanels.values():
 			sp.finish()
-		# only when the task produced NOTHING to look at — no findings, no output, no command
-		# (the command itself is a task log, so its presence means there's something to see)
+		# a container is failed if any child failed (its own error may have landed on a child)
+		if self.subpanels and any(sp.failed for sp in self.subpanels.values()):
+			self.failed = True
+		# "(no output)" only when the task produced NOTHING to look at — no findings, no output,
+		# no command (the command itself is a task log, so its presence means there's something)
 		if not self.count and not self.lines and not self.command and not self.subpanels:
 			self.query_one(".runner-out", Vertical).mount(
 				Static(Text.from_markup("[dim i](no output)[/]"), classes="out-line empty-note"))
