@@ -17,7 +17,7 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Header, OptionList, Static
+from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
 from secator.tui.render import finding_text, message_text
@@ -133,7 +133,6 @@ class TUIApp(App):
 		border: none; border-top: solid #47516b; }
 	#meta-left { width: 1fr; height: 1; }
 	#meta-right { width: auto; height: 1; content-align: right top; color: #6b7187; }
-	Header { background: transparent; color: #cdd6e4; }
 	"""
 	BINDINGS = [
 		("ctrl+c", "quit", "Quit"),
@@ -208,7 +207,7 @@ class TUIApp(App):
 		self._viewing_subagent: str | None = None   # sid of the open subagent view, else None
 
 	def compose(self) -> ComposeResult:
-		yield Header(show_clock=True)
+		# no top header — the bottom meta bar carries the session/mode state now
 		yield BackBar(Text.from_markup("[#7fd1e0]← Back to conversation[/]"), id="backbar")
 		yield Vertical(VerticalScroll(id="convo"), id="views")
 		yield Static("", id="status")
