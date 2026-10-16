@@ -699,3 +699,23 @@ async def _meta_bar_body():
 
 def test_meta_bar_reports_cycles_and_subagent_readonly():
 	_run(_meta_bar_body())
+
+
+async def _session_name_body():
+	app = AITUI(None, session="recon-acme", mode="scan")
+	async with app.run_test(size=(90, 25)) as pilot:
+		await pilot.pause(0.05)
+		# the conversation name shows on the top delimiter (input-box border title)
+		assert app.query_one("#input-box").border_title == "recon-acme"
+		# /name renames it (shown cropped) and queues the rename for the runner to persist
+		await app.on_prompt_input_submitted(PromptInput.Submitted("/name acme external pentest"))
+		await pilot.pause(0.02)
+		assert app.query_one("#input-box").border_title == "acme external pentest"
+		assert app.tui_poll_control() == {"session_name": "acme external pentest"}
+		# a runner-reported (resolved) name updates the label too
+		app._set_session_name("final-name")
+		assert app.query_one("#input-box").border_title == "final-name"
+
+
+def test_session_name_label_and_rename_command():
+	_run(_session_name_body())
