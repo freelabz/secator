@@ -73,9 +73,11 @@ class TUIApp(App):
 	.choice { height: auto; margin: 1 0; }
 	.choice-q { color: #e6c15a; margin: 0 0 1 0; }
 	.choice-list { height: auto; max-height: 12; border: none; background: transparent; }
-	.choice-summary { height: 1; }
-	.choice-summary:hover { text-style: bold; }
-	.choice-body { height: auto; }
+	/* multi-select dot (see ToggleButton glyph override in widgets.py): dim when off, cyan on */
+	.choice-list > .selection-list--button { color: #3a4150; background: transparent; }
+	.choice-list > .selection-list--button-highlighted { color: #556070; background: transparent; }
+	.choice-list > .selection-list--button-selected { color: #7fd1e0; background: transparent; }
+	.choice-list > .selection-list--button-selected-highlighted { color: #7fd1e0; background: transparent; }
 
 	/* lazy findings side panel (ctrl+f); 1/3 width by default, drag the grip to resize */
 	#findings-panel { dock: right; width: 34%; display: none; background: transparent; }
@@ -92,6 +94,14 @@ class TUIApp(App):
 	#input-box {
 		border: none; border-top: solid #47516b; background: transparent; height: 3; padding: 0;
 	}
+	/* the choice box takes the input box's place while a choice ask is active — same top rule
+	   so the delimiter doesn't move (hidden otherwise) */
+	#choice-host {
+		border: none; border-top: solid #47516b; background: transparent;
+		height: auto; display: none; padding: 1 1 0 1;
+	}
+	.choice-box { height: auto; }
+	.choice-hint { color: #6b7187; }
 	#input-caret { width: 3; height: 1fr; color: #7fd1e0; text-style: bold; content-align: center middle; }
 	#input-box Input { width: 1fr; border: none; background: transparent; color: #e6ecf5; padding: 0 1; height: 1fr; }
 	#input-box Input:focus { border: none; background: transparent; }
@@ -163,6 +173,10 @@ class TUIApp(App):
 			),
 			id="findings-panel",
 		)
+		# While a choice ask is active the choice box REPLACES the input box in the same slot
+		# (both carry the same top rule, so the delimiter stays put); Tab swaps the selection
+		# into the input to add details. Only one of the two is ever visible.
+		yield Vertical(id="choice-host")
 		yield Horizontal(
 			Static("❯", id="input-caret"),
 			Input(placeholder="Message, or steer a running runner…  (Enter to send)"),
@@ -625,9 +639,9 @@ class TUIApp(App):
 			# a value an active choice list put in the input is LITERAL — don't reinterpret a
 			# numeric choice (e.g. choices=["2","1"], input "2") as a 1-based index into choices
 			answer = text if (cp is not None and text in choices) else self._resolve_answer(text, choices, ptype)
+			if cp is not None:   # restore the normal input row (the choice box took its slot)
+				self._restore_input()
 			self._resolve_pending(answer)
-			if cp is not None:   # collapse the choice list to the submitted answer
-				cp.collapse_with(answer)
 			return
 		# Typed before the runner finished starting up and asked for the first prompt — hold it
 		# (the first ask_user consumes it). Without this it would leak into _steers and be lost
@@ -637,6 +651,64 @@ class TUIApp(App):
 			return
 		with self._steers_lock:
 			self._steers.append(text)
+
+	# ---- choice box (lives in the input slot while a choice ask is active) ----
+	def _show_choices(self, choices, multiple) -> None:
+		"""Replace the input row with a choice box (same slot) until the user acts on it."""
+		host = self.query_one("#choice-host", Vertical)
+		host.remove_children()
+		self._active_choice = ChoicePrompt(choices, multiple, self._resolve_choice, self._choice_to_input)
+		host.mount(self._active_choice)
+		self.query_one("#input-box").display = False
+		host.display = True
+
+	def _resolve_choice(self, value) -> None:
+		"""A choice sent directly (Enter on an option / multi-confirm): echo, restore, resolve."""
+		if self._pending_ask is None:
+			return
+		self._echo_user(value)
+		self._restore_input()
+		self._resolve_pending(value)
+
+	def _choice_to_input(self, text) -> None:
+		"""Tab: hand the current selection to the input box so the user can add more details."""
+		try:
+			inp = self.query_one("#input-box Input", Input)
+		except Exception:  # noqa: BLE001
+			return
+		inp.value = text
+		self.query_one("#choice-host").display = False
+		self.query_one("#input-box").display = True
+		inp.focus()
+
+	def _back_to_choices(self) -> None:
+		"""Esc from the input box (while a choice ask is active): return to the choice box."""
+		if self._active_choice is None:
+			return
+		self.query_one("#input-box").display = False
+		self.query_one("#choice-host").display = True
+		self._active_choice.focus_list()
+
+	def _restore_input(self) -> None:
+		self.query_one("#choice-host", Vertical).remove_children()
+		self.query_one("#choice-host").display = False
+		self.query_one("#input-box").display = True
+
+	def _echo_user(self, text) -> None:
+		self._convo().mount(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
+		self._convo().scroll_end(animate=False)
+
+	def on_key(self, event) -> None:
+		# Esc in the input box while a choice ask is active returns to the choice box (the input
+		# row is only visible in that state after the user pressed Tab).
+		if event.key == "escape" and self._active_choice is not None:
+			try:
+				if not self.query_one("#choice-host").display:
+					event.stop()
+					event.prevent_default()
+					self._back_to_choices()
+			except Exception:  # noqa: BLE001
+				pass
 
 	def _resolve_pending(self, value) -> None:
 		"""Unblock the worker waiting in tui_ask_user with `value`."""
@@ -706,10 +778,8 @@ class TUIApp(App):
 			self._convo().mount(PermissionPrompt(question, self._resolve_pending))
 			self._convo().scroll_end(animate=False)
 		elif choices:
-			# navigable suggestion list wired to the input box (↑/↓/tab fills it, enter sends)
-			self._active_choice = ChoicePrompt("", choices, multiple, self._resolve_pending)
-			self._convo().mount(self._active_choice)
-			self._convo().scroll_end(animate=False)
+			# the choice box REPLACES the input row (same slot) until the user acts on it
+			self._show_choices(choices, multiple)
 		else:
 			# a plain end-of-turn follow-up: no "What's next?" / "waiting" noise — the
 			# focused input is enough. Just make sure it's focused.
