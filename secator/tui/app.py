@@ -56,9 +56,10 @@ class TUIApp(App):
 	.runner-panel { margin: 1 0; height: auto; }
 	.runner-head { height: 1; width: auto; }
 	.runner-head:hover { text-style: bold; }
-	/* expanded content: a left rule (indent), not a box — stays integrated */
+	/* expanded content: a left rule (indent), not a box — stays integrated.
+	   a little vertical breathing room above/below so it reads as relaxed, not cramped. */
 	.runner-box {
-		height: auto; margin: 0 0 0 1; padding: 0 0 0 1;
+		height: auto; margin: 1 0 1 1; padding: 0 0 0 1;
 		border-left: solid #2b3245; background: transparent;
 	}
 	.runner-cmdwrap { height: auto; }
