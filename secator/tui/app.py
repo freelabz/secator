@@ -820,6 +820,21 @@ class TUIApp(App):
 	def on_text_area_changed(self, event) -> None:
 		self._update_placeholder()
 
+	def on_click(self, event) -> None:
+		# A click anywhere in the input box focuses the input. Needed because the placeholder
+		# overlay (on the `hint` layer, above the input) swallows the click while the box is
+		# empty, so the click never reaches the TextArea. Scoped to #input-box, so clicks on
+		# runner lines / choices are unaffected.
+		node = getattr(event, "widget", None)
+		while node is not None:
+			if getattr(node, "id", None) == "input-box":
+				try:
+					self.query_one("#prompt-input", PromptInput).focus()
+				except Exception:  # noqa: BLE001
+					pass
+				return
+			node = node.parent
+
 	async def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
 		text = event.value.strip()
 		try:
