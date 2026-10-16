@@ -10,10 +10,10 @@ from __future__ import annotations
 from rich.markup import escape
 from rich.text import Text
 from textual.containers import VerticalScroll
-from textual.widgets import Markdown, Static
+from textual.widgets import Static
 
 from secator.tui.app import TUIApp
-from secator.tui.render import finding_text
+from secator.tui.render import finding_text, markdown_text
 from secator.tui.widgets import ActionPanel, HandbackPanel, RunnerPanel, SubagentRow
 
 
@@ -139,7 +139,7 @@ class AITUI(TUIApp):
 				await sv.mount(HandbackPanel(content, ed.get("usage") or {}))
 				sv.scroll_end(animate=False)
 				return
-			await self._append(Markdown(content, classes="ai"))  # AI text as Markdown
+			await self._append(Static(markdown_text(content), classes="ai"))  # AI text as Markdown
 		elif at in ("task", "workflow", "scan", "query", "shell"):
 			ed = d.get("extra_data") or {}
 			desc = ed.get("description") or ""
@@ -249,7 +249,7 @@ class AITUI(TUIApp):
 			# idle. The ask_user prompt (choices / input box) renders the next-step UI.
 			self._finish_current()
 			if content:
-				await self._append(Markdown(content, classes="ai"))
+				await self._append(Static(markdown_text(content), classes="ai"))
 			self._set_status("stopped", False)
 
 
