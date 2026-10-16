@@ -43,7 +43,7 @@ class PromptInput(TextArea):
 		"""Posted on Shift+Tab — request to toggle the guardrail-bypass (dangerous) setting."""
 
 	class CycleMode(Message):
-		"""Posted on Alt+Shift+Tab — request to cycle the AI mode (auto/scan/chat/exploit)."""
+		"""Posted on Ctrl+T — request to cycle the AI mode (auto/scan/chat/exploit)."""
 
 	def __init__(self, **kwargs):
 		super().__init__(soft_wrap=True, tab_behavior="focus", show_line_numbers=False, **kwargs)
@@ -73,14 +73,15 @@ class PromptInput(TextArea):
 			event.prevent_default()
 			self.insert("\n")
 			return
-		# Meta-bar cycles: Shift+Tab flips the guardrail setting, Alt+Shift+Tab cycles the mode.
-		# Ctrl+G / Ctrl+B are plain-key fallbacks for terminals that swallow the Tab combos.
+		# Meta-bar cycles: Shift+Tab flips the guardrail setting, Ctrl+T cycles the mode.
+		# (Alt+Shift+Tab is avoided — it's window-switching on some OSes.) Ctrl+G is a
+		# plain-key fallback for terminals that swallow Shift+Tab.
 		if event.key in ("shift+tab", "ctrl+g"):
 			event.stop()
 			event.prevent_default()
 			self.post_message(self.CycleDangerous())
 			return
-		if event.key in ("alt+shift+tab", "ctrl+b"):
+		if event.key == "ctrl+t":
 			event.stop()
 			event.prevent_default()
 			self.post_message(self.CycleMode())

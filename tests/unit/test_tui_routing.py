@@ -680,7 +680,7 @@ async def _meta_bar_body():
 		# Shift+Tab toggles the guardrail setting; a control change is queued for the runner
 		app.on_prompt_input_cycle_dangerous(None)
 		assert app._meta["dangerous"] is False
-		# Alt+Shift+Tab cycles the mode (scan -> chat)
+		# Ctrl+T cycles the mode (scan -> chat)
 		app.on_prompt_input_cycle_mode(None)
 		assert app._meta["mode"] == "chat"
 		ctrl = app.tui_poll_control()
@@ -692,7 +692,7 @@ async def _meta_bar_body():
 		app._viewing_subagent = "sub1"
 		app._render_meta()
 		left = str(app.query_one("#meta-left").render())
-		assert "shift+tab" not in left and "alt+shift+tab" not in left
+		assert "shift+tab" not in left and "ctrl+t" not in left
 		assert "guardrails enforced" in left
 		assert "7% context" in str(app.query_one("#meta-right").render())
 
