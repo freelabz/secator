@@ -10,9 +10,47 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import OptionList, SelectionList, Static
+from textual.widgets import Markdown, OptionList, SelectionList, Static
 
 from secator.tui.render import command_text
+
+
+def _usage_line(usage: dict) -> "Text | None":
+	"""A compact 'subagent usage: N tokens · $cost' line, or None if nothing was billed."""
+	usage = usage or {}
+	try:
+		tokens = int(usage.get("tokens") or 0)
+	except (TypeError, ValueError):
+		tokens = 0
+	try:
+		cost = float(usage.get("cost") or 0.0)
+	except (TypeError, ValueError):
+		cost = 0.0
+	if not tokens and not cost:
+		return None
+	parts = []
+	if tokens:
+		parts.append(f"{tokens:,} tokens")
+	if cost:
+		parts.append(f"${cost:.4f}")
+	return Text.from_markup(f"[#6b7187]subagent usage: {escape(' · '.join(parts))}[/]")
+
+
+class HandbackPanel(Vertical):
+	"""A subagent's verdict/handback, shown at the END of its drill-in view: a red-outlined
+	box with the summary (markdown) and a token/cost line, so it reads as the conclusion."""
+
+	def __init__(self, content: str, usage: dict = None):
+		super().__init__(classes="handback-panel")
+		self._content = content or ""
+		self._usage = usage or {}
+
+	def compose(self) -> ComposeResult:
+		yield Static(Text.from_markup("[b #d98a7a]Verdict — subagent complete[/]"), classes="handback-title")
+		yield Markdown(self._content)
+		line = _usage_line(self._usage)
+		if line is not None:
+			yield Static(line, classes="handback-usage")
 
 
 def _runner_ancestor(node):

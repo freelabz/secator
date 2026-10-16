@@ -53,8 +53,12 @@ def _tui_line_hook(self, line):
 			# 'nmap/light' -> 'nmap_light'), NOT config.name (= 'nmap' for the variant) —
 			# otherwise the command lands in a different sub-panel than its findings.
 			source = getattr(self, "unique_name", "") or getattr(getattr(self, "config", None), "name", "") or ""
-			tui.tui_set_command(getattr(self, "cmd", "") or "", source)
-			tui.tui_render_line(line, source)
+			# owning runner id (matches the card's runner_id) so a batch of same-tool tasks
+			# routes each command/line to its OWN panel, not just by shared tool name.
+			rctx = getattr(self, "context", None) or {}
+			rid = rctx.get("task_chunk_id") or rctx.get("task_id") or getattr(self, "id", "") or ""
+			tui.tui_set_command(getattr(self, "cmd", "") or "", source, rid)
+			tui.tui_render_line(line, source, rid)
 		except Exception:  # noqa: BLE001 - a display feed must never crash a run
 			pass
 	return line
