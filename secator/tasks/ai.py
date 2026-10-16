@@ -834,6 +834,7 @@ class ai(PythonRunner):
 			in_scope=self.in_scope,
 			out_of_scope=self.out_of_scope,
 			isolated=self.isolated,
+			dangerous=bool(getattr(self, "dangerous", False)),
 		)
 		self._isolation_ctx = ctx  # for sandbox-container teardown at task end
 
