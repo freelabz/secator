@@ -7,7 +7,7 @@ from rich.panel import Panel
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (DELAY, FOLLOW_REDIRECT, HEADER, HOST, OPT_NOT_SUPPORTED, PROXY, RATE_LIMIT,
-								 RETRIES, THREADS, TIMEOUT, USER_AGENT, HOST_PORT, IP)
+								 RETRIES, SKIP_SSL_VERIFY, THREADS, TIMEOUT, USER_AGENT, HOST_PORT, IP)
 from secator.tasks._categories import VulnMulti
 from secator.utils import get_file_timestamp
 
@@ -41,6 +41,7 @@ class msfconsole(VulnMulti):
 		THREADS: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED,
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 	}
 	encoding = 'ansi'
 	ignore_return_code = True

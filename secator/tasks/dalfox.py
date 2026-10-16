@@ -6,7 +6,7 @@ from secator.decorators import task
 from secator.definitions import (CONFIDENCE, DATA, DELAY, EXTRA_DATA, FOLLOW_REDIRECT,
 							   HEADER, ID, MATCHED_AT, METHOD, NAME,
 							   OPT_NOT_SUPPORTED, PROVIDER, PROXY, RATE_LIMIT,
-							   RETRIES, SEVERITY, TAGS, THREADS, TIMEOUT, URL,
+							   RETRIES, SEVERITY, SKIP_SSL_VERIFY, TAGS, THREADS, TIMEOUT, URL,
 							   USER_AGENT)
 from secator.output_types import Vulnerability, Url
 from secator.serializers import JSONSerializer
@@ -37,6 +37,7 @@ class dalfox(HttpBase):
 		HEADER: 'header',
 		DELAY: 'delay',
 		FOLLOW_REDIRECT: 'follow-redirects',
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED,
 		DATA: 'data',
 		METHOD: 'method',
 		PROXY: 'proxy',

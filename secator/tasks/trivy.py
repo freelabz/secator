@@ -8,7 +8,7 @@ from pathlib import Path
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import (THREADS, OUTPUT_PATH, OPT_NOT_SUPPORTED, HEADER, DELAY, FOLLOW_REDIRECT,
-								PATH, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT, STRING)
+								PATH, PROXY, RATE_LIMIT, RETRIES, SKIP_SSL_VERIFY, TIMEOUT, USER_AGENT, STRING)
 from secator.output_types import Vulnerability, Tag, Info, Error
 from secator.tasks._categories import Vuln
 from secator.utils import caml_to_snake
@@ -44,7 +44,8 @@ class trivy(Vuln):
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
 		TIMEOUT: OPT_NOT_SUPPORTED,
-		USER_AGENT: OPT_NOT_SUPPORTED
+		USER_AGENT: OPT_NOT_SUPPORTED,
+		SKIP_SSL_VERIFY: OPT_NOT_SUPPORTED
 	}
 	opt_value_map = {
 		'mode': lambda x: convert_mode(x)
