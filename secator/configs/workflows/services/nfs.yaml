@@ -1,0 +1,20 @@
+type: workflow
+name: nfs
+alias: nfs
+description: NFS vulnerability scan
+long_description: |
+  Scans NFS vulnerabilities using specialized tools.
+tags: [nfs, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  # # RPC templates hang - comment for now
+  # nuclei/nfs:
+  #   description: Detect NFS vulnerabilities
+  #   template_condition: "contains(id, 'nfs') || contains(tags, 'nfs')"
+
+  nfswolf:
+    description: Audit NFS server exports for security misconfigurations
