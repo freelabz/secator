@@ -127,8 +127,10 @@ class TUIApp(App):
 	   and render a near-black block (what made the cursor look black). */
 	#prompt-input .text-area--cursor { background: #e6ecf5; color: #11141b; text-style: none; }
 	#input-placeholder { layer: hint; width: 1fr; height: 1; padding: 0 1; }
-	/* meta bar under the input: dangerous + mode on the left, context % on the right */
-	#meta-bar { height: 1; padding: 0 1; background: transparent; }
+	/* meta bar under the input: dangerous + mode on the left, context % on the right.
+	   a top rule separates it from the input/choice box above (the "bottom delimiter"). */
+	#meta-bar { height: auto; padding: 1 1 0 1; background: transparent;
+		border: none; border-top: solid #47516b; }
 	#meta-left { width: 1fr; height: 1; }
 	#meta-right { width: auto; height: 1; content-align: right top; color: #6b7187; }
 	Header { background: transparent; color: #cdd6e4; }
