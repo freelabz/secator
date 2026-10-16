@@ -89,13 +89,14 @@ class TUIApp(App):
 	#input-box {
 		border: none; border-top: solid #47516b; background: transparent; height: auto; padding: 0;
 	}
-	#input-row { height: 3; }
+	/* single-line caret + input, vertically centered in the 3-tall row so they stay aligned */
+	#input-row { height: 3; align-vertical: middle; }
 	/* the choice box lives in the input slot while a choice ask is active (hidden otherwise) */
 	#choice-host { height: auto; display: none; padding: 0 1; }
 	.choice-box { height: auto; }
 	.choice-hint { color: #6b7187; }
-	#input-caret { width: 3; height: 1fr; color: #7fd1e0; text-style: bold; content-align: center middle; }
-	#input-box Input { width: 1fr; border: none; background: transparent; color: #e6ecf5; padding: 0 1; height: 1fr; }
+	#input-caret { width: 3; height: 1; color: #7fd1e0; text-style: bold; content-align: center middle; }
+	#input-box Input { width: 1fr; border: none; background: transparent; color: #e6ecf5; padding: 0 1; height: 1; }
 	#input-box Input:focus { border: none; background: transparent; }
 	#input-box Input > .input--cursor { color: #0b0e14; background: #e6ecf5; }
 	Header { background: transparent; color: #cdd6e4; }
