@@ -73,6 +73,11 @@ class TUIApp(App):
 	.choice { height: auto; margin: 1 0; }
 	.choice-q { color: #e6c15a; margin: 0 0 1 0; }
 	.choice-list { height: auto; max-height: 12; border: none; background: transparent; }
+	/* multi-select dot (see ToggleButton glyph override in widgets.py): dim when off, cyan on */
+	.choice-list > .selection-list--button { color: #3a4150; background: transparent; }
+	.choice-list > .selection-list--button-highlighted { color: #556070; background: transparent; }
+	.choice-list > .selection-list--button-selected { color: #7fd1e0; background: transparent; }
+	.choice-list > .selection-list--button-selected-highlighted { color: #7fd1e0; background: transparent; }
 
 	/* lazy findings side panel (ctrl+f); 1/3 width by default, drag the grip to resize */
 	#findings-panel { dock: right; width: 34%; display: none; background: transparent; }

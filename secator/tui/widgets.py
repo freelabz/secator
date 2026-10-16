@@ -11,8 +11,17 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Markdown, OptionList, SelectionList, Static
+from textual.widgets._toggle_button import ToggleButton
 
 from secator.tui.render import command_text
+
+# Refine the multi-select checkbox: drop Textual's heavy "▐X▌" bars for a single dot that
+# reads empty/filled purely by colour (styled via the .selection-list--button* classes).
+# SelectionList references ToggleButton.BUTTON_* directly, so this is set on the class; it's
+# only reached on the (optional) TUI import path, where SelectionList is our only toggle.
+ToggleButton.BUTTON_LEFT = ""
+ToggleButton.BUTTON_INNER = "●"
+ToggleButton.BUTTON_RIGHT = ""
 
 
 def _usage_line(usage: dict) -> "Text | None":
