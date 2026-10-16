@@ -5,8 +5,22 @@ reusing each OutputType's own ``__rich__`` so findings / info lines look exactly
 secator's console. Reusable by any TUI frontend (the AI task today, normal task /
 workflow output later).
 """
+import re
+
 from rich.markup import escape
 from rich.text import Text
+
+
+def markdown_text(content: str):
+	"""Render AI markdown with secator's own renderer (``CustomMarkdown``) so TUI responses
+	look like the console (e.g. left-justified headings) instead of Textual's native Markdown.
+
+	Returns a Rich renderable to drop into a Textual ``Static`` (width-aware: it reflows to the
+	widget on render). Collapses 3+ blank lines to one, matching the console path.
+	"""
+	from secator.rich import CustomMarkdown
+	text = re.sub(r"\n{3,}", "\n\n", content or "")
+	return CustomMarkdown(text)
 
 
 def command_text(cmd: str) -> Text:
