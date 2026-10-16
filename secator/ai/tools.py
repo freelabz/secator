@@ -171,6 +171,7 @@ TOOL_SCHEMAS = {
 						"type": "object",
 						"description": "MongoDB-style query object (e.g. {\"_type\": \"vulnerability\", \"severity\": {\"$in\": [\"critical\", \"high\"]}})."  # noqa: E501
 					},
+					"description": _DESCRIPTION_SCHEMA,
 					"limit": {
 						"type": "integer",
 						"description": "Maximum number of results to return.",
@@ -193,7 +194,7 @@ TOOL_SCHEMAS = {
 						"default": False
 					}
 				},
-				"required": ["query"]
+				"required": ["query", "description"]
 			}
 		}
 	},

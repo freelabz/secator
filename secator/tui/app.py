@@ -62,6 +62,7 @@ class TUIApp(App):
 	}
 	.runner-cmdwrap { height: auto; }
 	.runner-cmd { color: #7b8296; margin: 0 0 1 0; }   /* command: dim text, no background */
+	.runner-meta { margin: 0 0 1 0; }                  /* a query's result count + skip/limit/group */
 	.runner-cmd:hover { text-style: bold; }            /* click to reveal the raw output */
 	.runner-raw { height: auto; margin: 0 0 1 0; }     /* raw command output (hidden by default) */
 	.runner-out { height: auto; }
