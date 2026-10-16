@@ -114,6 +114,10 @@ class TUIApp(App):
 		border: none; background: transparent; color: #e6ecf5; padding: 0 1;
 	}
 	#prompt-input:focus { border: none; background: transparent; }
+	/* TextArea paints the cursor's line + gutter with $boost (a dark bar) once you start
+	   typing — keep them transparent so the input blends into the terminal background. */
+	#prompt-input .text-area--cursor-line { background: transparent; }
+	#prompt-input .text-area--cursor-gutter { background: transparent; }
 	#input-placeholder { layer: hint; width: 1fr; height: 1; padding: 0 1; }
 	/* meta bar under the input: dangerous + mode on the left, context % on the right.
 	   a top rule separates it from the input/choice box above (the "bottom delimiter"). */
@@ -186,7 +190,7 @@ class TUIApp(App):
 			"mode": initial_mode or "auto",
 			"ctx_pct": None,
 		}
-		# Pending user-requested control changes (Shift+Tab / Alt+Shift+Tab), drained by the
+		# Pending user-requested control changes (Shift+Tab / Ctrl+T), drained by the
 		# runner via tui_poll_control at its loop boundary and applied to the live run.
 		self._control: dict = {}
 		self._control_lock = threading.Lock()
@@ -229,7 +233,7 @@ class TUIApp(App):
 			id="input-box",
 		)
 		# meta bar: left = guardrail setting + current mode (cyclable via Shift+Tab /
-		# Alt+Shift+Tab on the main conversation; read-only in a subagent drill-in);
+		# Ctrl+T on the main conversation; read-only in a subagent drill-in);
 		# right = % of the model context window used.
 		yield Horizontal(
 			Static("", id="meta-left"),
@@ -596,7 +600,7 @@ class TUIApp(App):
 		else:
 			danger = "[#e0b050]▶▶ guardrails enforced[/] [#5b6070](shift+tab)[/]"
 		mode = m.get("mode") or "auto"
-		mode_seg = f"[#6b7187]mode:[/] [#7fd1e0]{escape(mode)}[/] [#5b6070](alt+shift+tab)[/]"
+		mode_seg = f"[#6b7187]mode:[/] [#7fd1e0]{escape(mode)}[/] [#5b6070](ctrl+t)[/]"
 		left.update(Text.from_markup(f"{danger}   [#3a4150]·[/]   {mode_seg}"))
 		right.update(Text.from_markup(self._pct_text(m.get("ctx_pct"))))
 
@@ -638,7 +642,7 @@ class TUIApp(App):
 		self._render_meta()
 
 	def on_prompt_input_cycle_mode(self, event) -> None:
-		# Alt+Shift+Tab: step through auto -> scan -> chat -> exploit -> auto.
+		# Ctrl+T: step through auto -> scan -> chat -> exploit -> auto.
 		cur = self._meta.get("mode") or "auto"
 		try:
 			nxt = self._MODE_CYCLE[(self._MODE_CYCLE.index(cur) + 1) % len(self._MODE_CYCLE)]
