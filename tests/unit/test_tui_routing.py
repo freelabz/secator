@@ -614,3 +614,24 @@ async def _query_card_body():
 
 def test_query_card_shows_description_and_meta():
 	_run(_query_card_body())
+
+
+async def _choice_multi_fallback_body():
+	from textual.widgets import SelectionList
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		ev, holder = threading.Event(), {}
+		app._show_prompt("", (ev, holder, ["port scan", "dir brute", "vuln scan"], "stopped"), True)
+		await pilot.pause(0.1)
+		cp = app._active_choice
+		cp.query_one(SelectionList).highlighted = 1   # highlight a row, toggle NOTHING
+		await pilot.pause(0.05)
+		# Enter with nothing toggled sends the highlighted row (not an empty answer)
+		cp.submit()
+		await pilot.pause(0.05)
+		assert holder.get("value") == "dir brute"
+
+
+def test_choice_multi_enter_without_toggle_sends_highlighted():
+	_run(_choice_multi_fallback_body())

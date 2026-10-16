@@ -371,11 +371,18 @@ class ChoicePrompt(Vertical):
 			pass
 
 	def selection_text(self) -> str:
-		"""The currently highlighted choice (single) or the toggled choices joined (multi)."""
+		"""The toggled choices joined (multi) or the currently highlighted choice (single).
+
+		In multi-choice with nothing toggled yet, fall back to the HIGHLIGHTED row — pressing
+		Enter (or Tab) on a row the user is sitting on should send that row, not an empty answer.
+		"""
 		try:
 			if self._multiple:
 				sel = self.query_one(SelectionList)
-				return ", ".join(self._choices[i] for i in sel.selected)
+				if sel.selected:
+					return ", ".join(self._choices[i] for i in sel.selected)
+				h = sel.highlighted
+				return self._choices[h] if h is not None and 0 <= h < len(self._choices) else ""
 			ol = self.query_one(OptionList)
 			i = ol.highlighted if ol.highlighted is not None else 0
 			return self._choices[i] if 0 <= i < len(self._choices) else ""
