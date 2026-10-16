@@ -130,6 +130,7 @@ class TUIApp(App):
 		self._steers: list[str] = []
 		self._steers_lock = threading.Lock()
 		self._pending_ask = None
+		self._active_choice = None   # the live ChoicePrompt, so an input-box submit collapses it
 		self._status_text = ""
 		self._status_spinning = False
 		self._spin_frame = 0
@@ -620,7 +621,13 @@ class TUIApp(App):
 		pend = self._pending_ask
 		if pend is not None:
 			ev, holder, choices, ptype = pend
-			self._resolve_pending(self._resolve_answer(text, choices, ptype))
+			cp = self._active_choice
+			# a value an active choice list put in the input is LITERAL — don't reinterpret a
+			# numeric choice (e.g. choices=["2","1"], input "2") as a 1-based index into choices
+			answer = text if (cp is not None and text in choices) else self._resolve_answer(text, choices, ptype)
+			self._resolve_pending(answer)
+			if cp is not None:   # collapse the choice list to the submitted answer
+				cp.collapse_with(answer)
 			return
 		# Typed before the runner finished starting up and asked for the first prompt — hold it
 		# (the first ask_user consumes it). Without this it would leak into _steers and be lost
@@ -639,6 +646,7 @@ class TUIApp(App):
 		ev, holder, choices, ptype = pend
 		holder["value"] = value
 		self._pending_ask = None
+		self._active_choice = None
 		self._set_status("", False)
 		ev.set()
 		try:
@@ -698,8 +706,9 @@ class TUIApp(App):
 			self._convo().mount(PermissionPrompt(question, self._resolve_pending))
 			self._convo().scroll_end(animate=False)
 		elif choices:
-			# navigable suggestion list (↑/↓/space + enter); no generic question header
-			self._convo().mount(ChoicePrompt("", choices, multiple, self._resolve_pending))
+			# navigable suggestion list wired to the input box (↑/↓/tab fills it, enter sends)
+			self._active_choice = ChoicePrompt("", choices, multiple, self._resolve_pending)
+			self._convo().mount(self._active_choice)
 			self._convo().scroll_end(animate=False)
 		else:
 			# a plain end-of-turn follow-up: no "What's next?" / "waiting" noise — the

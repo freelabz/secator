@@ -14,7 +14,8 @@ pytest.importorskip("textual")
 
 from textual.widgets import Input            # noqa: E402
 from secator.tui.ai import AITUI          # noqa: E402
-from secator.tui.widgets import ActionPanel, RunnerPanel  # noqa: E402
+from secator.tui.widgets import ActionPanel, ChoicePrompt, RunnerPanel  # noqa: E402
+from textual.widgets import OptionList  # noqa: E402
 
 
 def _run(coro):
@@ -490,6 +491,93 @@ def test_handback_renders_in_subview_with_usage():
 	_run(_handback_panel_body())
 
 
+async def _choice_prompt_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		resolved = {}
+		cp = ChoicePrompt("", ["scanme.nmap.org", "example.com"], False, lambda v: resolved.setdefault("v", v))
+		await app._convo().mount(cp)
+		app._active_choice = cp
+		await pilot.pause(0.1)
+		ol = cp.query_one(OptionList)
+		inp = app.query_one("#input-box Input", Input)
+		# choices + a trailing "Something else" row
+		assert ol.option_count == 3
+		# highlighting an option live-copies it into the input box; Something else clears it
+		ol.highlighted = 0
+		await pilot.pause(0.05)
+		assert inp.value == "scanme.nmap.org"
+		ol.highlighted = 2
+		await pilot.pause(0.05)
+		assert inp.value == ""
+		# selecting a real option resolves with its text and collapses the prompt
+		ol.highlighted = 0
+		await pilot.pause(0.05)
+		cp.on_option_list_option_selected(OptionList.OptionSelected(ol, ol._options[0], 0))
+		assert resolved.get("v") == "scanme.nmap.org"
+		assert cp._value == "scanme.nmap.org"
+
+
+def test_choice_prompt_prefills_input_and_resolves():
+	_run(_choice_prompt_body())
+
+
+async def _choice_input_submit_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		import threading as _t
+		ev, holder = _t.Event(), {}
+		# simulate an active choice ask (as _show_prompt would set up)
+		app._pending_ask = (ev, holder, ["scanme.nmap.org"], "stopped")
+		cp = ChoicePrompt("", ["scanme.nmap.org"], False, app._resolve_pending)
+		await app._convo().mount(cp)
+		app._active_choice = cp
+		await pilot.pause(0.05)
+		# user edits the prefilled text in the input box and presses Enter
+		inp = app.query_one("#input-box Input", Input)
+		await app.on_input_submitted(Input.Submitted(inp, "scanme.nmap.org --top-ports 100"))
+		await pilot.pause(0.05)
+		assert holder.get("value") == "scanme.nmap.org --top-ports 100"
+		assert cp._value == "scanme.nmap.org --top-ports 100"   # collapsed to the submitted answer
+
+
+def test_choice_prompt_input_submit_collapses_and_resolves():
+	_run(_choice_input_submit_body())
+
+
+async def _choice_numeric_and_clear_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		# numeric choices: submitting "2" via the input must resolve "2", NOT index-2 -> "1"
+		ev, holder = threading.Event(), {}
+		app._pending_ask = (ev, holder, ["2", "1"], "stopped")
+		cp = ChoicePrompt("", ["2", "1"], False, app._resolve_pending)
+		await app._convo().mount(cp)
+		app._active_choice = cp
+		await pilot.pause(0.1)
+		inp = app.query_one("#input-box Input", Input)
+		await app.on_input_submitted(Input.Submitted(inp, "2"))
+		assert holder.get("value") == "2", "numeric choice text was reinterpreted as an index"
+		# selecting an option clears the shared input box (so the next ask starts empty)
+		holder2 = {}
+		app._pending_ask = (threading.Event(), holder2, ["scan", "crawl"], "stopped")
+		cp2 = ChoicePrompt("", ["scan", "crawl"], False, app._resolve_pending)
+		await app._convo().mount(cp2)
+		app._active_choice = cp2
+		await pilot.pause(0.1)
+		ol = cp2.query_one(OptionList)
+		ol.highlighted = 0
+		await pilot.pause(0.05)
+		cp2.on_option_list_option_selected(OptionList.OptionSelected(ol, ol._options[0], 0))
+		assert holder2.get("value") == "scan"
+		assert inp.value == "", "input box not cleared after a list selection"
+
+
+def test_choice_prompt_numeric_literal_and_input_cleared():
+	_run(_choice_numeric_and_clear_body())
 async def _parent_error_body():
 	app = AITUI(None, session="ai", mode="scan")
 	async with app.run_test(size=(120, 40)) as pilot:
