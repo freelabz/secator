@@ -601,15 +601,18 @@ async def _query_card_body():
 		                           matched_at="http://x"))
 		await pilot.pause(0.05)
 		p = [x for x in _panels(app) if x.kind == "query"][0]
-		# running: animated orange spinner glyph + the description + (query) type
+		# running: animated orange spinner glyph + description + result count inline
 		assert any(c in p._header().plain for c in RunnerPanel._SPIN)   # spinner while running
 		assert "Find high/critical vulns" in p._header().plain
-		assert "(query)" in p._header().plain
+		assert "(7 results)" in p._header().plain                       # count inline, not "(query)"
+		assert "(query)" not in p._header().plain
 		p.done = True
 		assert "✓" in p._header().plain                                  # green check on success
 		p.failed = True
 		assert "✗" in p._header().plain                                  # red cross when failed
-		assert "7 results" in p.meta and "skip=20" in p.meta and "limit=100" in p.meta and "grouped" in p.meta
+		# the meta line keeps only the skip/limit/group details (count moved to the header)
+		assert "7 results" not in p.meta
+		assert "skip=20" in p.meta and "limit=100" in p.meta and "grouped" in p.meta
 		assert p.count == 1   # the result finding rendered inside the query panel
 
 
