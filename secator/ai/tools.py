@@ -457,7 +457,10 @@ STOP_TOOL_SCHEMA = {
 				},
 				"multiple": {
 					"type": "boolean",
-					"description": "Set true when the user may select SEVERAL of the choices (multi-select); omit or false for a pick-exactly-one question."  # noqa: E501
+					"description": "Set true when the choices are NOT mutually exclusive and the user could pick SEVERAL "  # noqa: E501
+					               "(multi-select) — common for independent next actions, e.g. ['Port scan', 'Directory "  # noqa: E501
+					               "brute-force', 'Vulnerability scan'] the user may want to run together. Omit or false "  # noqa: E501
+					               "only for a genuine pick-exactly-one question (e.g. 'Which target?')."
 				}
 			},
 			"required": ["reason"]
