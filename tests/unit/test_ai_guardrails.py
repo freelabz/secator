@@ -343,6 +343,16 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "shell", "command": "rm -rf /*"})
 		self.assertEqual(result.decision, "deny")
 
+	def test_shell_unmatched_reason_dedups_command_names(self):
+		# a command whose name repeats across subcommands must list it ONCE in the ask reason,
+		# not N times ("No rule for command(s): mk" — not "mk, mk, mk, ...").
+		engine = self._make_engine(allow=["target(*)"])
+		result = engine.check_action(
+			{"action": "shell", "command": "mk a && mk b && mk c && mk d"})
+		self.assertEqual(result.decision, "ask")
+		self.assertEqual(result.reason, "No rule for command(s): mk")
+		self.assertEqual(result.shell_command, "mk a && mk b && mk c && mk d")
+
 	def test_task_allowed_wildcard(self):
 		engine = self._make_engine(allow=["task(*)", "target(*)"])
 		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.1"]})
