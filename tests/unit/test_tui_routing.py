@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import Input            # noqa: E402
+from secator.tui.widgets import PromptInput  # noqa: E402
 from secator.tui.ai import AITUI          # noqa: E402
 from secator.tui.widgets import ActionPanel, RunnerPanel  # noqa: E402
 from textual.widgets import OptionList  # noqa: E402
@@ -258,9 +258,8 @@ async def _startup_prefill_body():
 	async with app.run_test(size=(120, 40)) as pilot:
 		await pilot.pause(0.05)
 		assert app._awaiting_first_prompt is True
-		inp = app.query_one("#input-box Input", Input)
 		# user types a prompt BEFORE the runner asked for one (the startup race)
-		await app.on_input_submitted(Input.Submitted(inp, "run nmap on scanme.nmap.org"))
+		await app.on_prompt_input_submitted(PromptInput.Submitted("run nmap on scanme.nmap.org"))
 		# held as the initial prompt, NOT leaked into steers (which would lose it)
 		assert app._prefill == "run nmap on scanme.nmap.org"
 		assert app.tui_poll_steers() == []
@@ -283,8 +282,7 @@ async def _steer_after_first_prompt_body():
 	async with app.run_test(size=(120, 40)) as pilot:
 		await pilot.pause(0.05)
 		assert app._awaiting_first_prompt is False
-		inp = app.query_one("#input-box Input", Input)
-		await app.on_input_submitted(Input.Submitted(inp, "focus on port 443"))
+		await app.on_prompt_input_submitted(PromptInput.Submitted("focus on port 443"))
 		assert app._prefill == ""
 		assert app.tui_poll_steers() == ["focus on port 443"]
 
@@ -526,11 +524,11 @@ async def _choice_tab_esc_body():
 		cp = app._active_choice
 		cp.query_one(OptionList).highlighted = 1
 		await pilot.pause(0.05)
-		inp = app.query_one("#input-box Input", Input)
+		inp = app.query_one("#prompt-input", PromptInput)
 		# Tab hands the current selection to the input box to add more details
 		cp._to_input(cp.selection_text())
 		await pilot.pause(0.05)
-		assert inp.value == "crawl web"
+		assert inp.text == "crawl web"
 		assert app.query_one("#input-box").display is True
 		assert app.query_one("#choice-host").display is False
 		# Esc returns to the choice box to change the selection
@@ -540,7 +538,7 @@ async def _choice_tab_esc_body():
 		assert app.query_one("#input-box").display is False
 		# editing the prefilled text and submitting resolves THAT text and restores the input
 		cp._to_input("crawl web")
-		await app.on_input_submitted(Input.Submitted(inp, "crawl web --depth 3"))
+		await app.on_prompt_input_submitted(PromptInput.Submitted("crawl web --depth 3"))
 		await pilot.pause(0.05)
 		assert holder.get("value") == "crawl web --depth 3"
 		assert app.query_one("#input-box").display is True
@@ -559,9 +557,8 @@ async def _choice_numeric_literal_body():
 		await pilot.pause(0.1)
 		cp = app._active_choice
 		cp._to_input("2")   # Tab with "2" highlighted
-		inp = app.query_one("#input-box Input", Input)
 		# submitting "2" (which an active choice list put there) must resolve "2", NOT index-2 -> "1"
-		await app.on_input_submitted(Input.Submitted(inp, "2"))
+		await app.on_prompt_input_submitted(PromptInput.Submitted("2"))
 		await pilot.pause(0.05)
 		assert holder.get("value") == "2", "numeric choice reinterpreted as an index"
 
