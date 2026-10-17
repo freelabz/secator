@@ -1096,12 +1096,28 @@ class ai(PythonRunner):
 							self.max_iterations = iteration + 1
 						continue
 
+					# Only an explicit `stop` TOOL call pre-persisted a `stopped` doc in
+					# _dispatch_and_collect (stop_reason is set from the dispatch result). A
+					# content-only reply (stop_reason still None here) is the normal chat turn —
+					# it must still pause for the user's next message, NOT end.
+					stop_from_tool = stop_reason is not None
+
 					# Content-only reply is a stop with that text as the reason (no choices).
 					# Decrypt it like the `response` display so a remote pending prompt shows
 					# the text, not ciphertext.
 					if stop_reason is None and not tool_calls:
 						stop_reason = (self.encryptor.decrypt(content) if (self.encryptor and content)
 						               else (content or ""))
+
+					# An explicit `stop` with NO choices is a definitive end in remote mode:
+					# there's nothing for the user to pick, so don't raise a pending prompt +
+					# poll. The terminal `stopped` summary was already persisted (non-pending,
+					# see _dispatch_and_collect). End the turn — the user continues anytime with
+					# an ordinary message (a fresh turn on the same session). A content-only
+					# reply or a bare cap hit still pauses (below): that's the normal chat wait.
+					if stop_from_tool and isinstance(self.backend, RemoteBackend) and not (stop_choices or []):
+						self._save_history()
+						return
 
 					# A remote stop/content-only already persisted its pending `stopped` doc
 					# (stamped + prompt_uuid) in _dispatch_and_collect; a content-only / cap
@@ -1786,7 +1802,11 @@ class ai(PythonRunner):
 					stop_reason = result.content
 					stop_choices = result.choices or (result.extra_data or {}).get("choices", [])
 					stop_multiple = bool(result.multiple)
-					if isinstance(self.backend, RemoteBackend):
+					# A stop WITH choices becomes the answerable pending prompt (the user picks
+					# a next step). A stop with NO choices is a definitive end — nothing to pick
+					# — so it stays a terminal (non-pending) `stopped` summary; the loop ends the
+					# turn immediately below instead of raising a prompt + polling.
+					if isinstance(self.backend, RemoteBackend) and stop_choices:
 						result.status = "pending"
 						# Correlate on the PERSISTED _context.session_id (a top-level session_id
 						# attr wouldn't serialize) — the same field poll_steers and clients use.
