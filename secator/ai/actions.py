@@ -1605,64 +1605,88 @@ def _merge_extra_data(update: Dict, extra_data) -> None:
 				update[f"extra_data.{key}"] = v
 
 
+# Per-vulnerability-identity locks so the rollup read-modify-write (read the attempt set -> derive
+# -> $set all occurrences) is serialized WITHIN this worker. Actions in a batch run on a thread pool
+# (_run_batch), so without this a failed-attempt rollup could read before a concurrent success is
+# recorded and then write a stale "EXPLOIT FAILED" over the "EXPLOITED". Cross-worker races are rare
+# (different agents usually target different vulns) and self-heal on the next attempt — the
+# append-only attempts are never lost, so the denormalized verdict re-converges.
+_ROLLUP_LOCKS: Dict = {}
+_ROLLUP_LOCKS_GUARD = threading.Lock()
+
+
+def _rollup_lock(key):
+	with _ROLLUP_LOCKS_GUARD:
+		lk = _ROLLUP_LOCKS.get(key)
+		if lk is None:
+			lk = threading.Lock()
+			_ROLLUP_LOCKS[key] = lk
+		return lk
+
+
 def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, matched_at: str, pending=None):
 	"""Recompute a vulnerability's DERIVED verdict/poc from the SET of its ExploitAttempts.
 
 	Append-only attempts are the source of truth; the vuln's ``status``/``verified``/``poc`` are
 	derived from them with SUCCESS STICKY precedence (EXPLOITED > EXPLOIT FAILED > none), so a late
-	failure can never clobber an earlier success. Also denormalizes a recap count
-	(``extra_data.exploit_attempts = {success, failed, partial}``) so reports/UI get the "N success /
-	M failed" summary without re-querying. Applied to EVERY occurrence of the vuln identity
-	(``name`` + ``id`` + ``matched_at``) so duplicates stay consistent. NEVER touches
-	``is_false_positive`` (owned by mark_vuln_false_positive). Returns the primary re-fetched vuln
-	dict (or None). Pure Python — no LLM judgment.
+	failure can never clobber an earlier success. A vuln ALREADY marked ``EXPLOITED`` (a legacy
+	success from the pre-ExploitAttempt model, or before the backfill runs) is likewise never
+	downgraded by a failed attempt. Also denormalizes a recap count
+	(``extra_data.exploit_attempts = {success, failed, partial}``). Applied to EVERY occurrence of the
+	vuln identity (``name`` + ``id`` + ``matched_at``) so duplicates stay consistent. NEVER touches
+	``is_false_positive`` (owned by mark_vuln_false_positive). The whole read-and-update is serialized
+	per identity (see ``_rollup_lock``). Returns the primary re-fetched vuln dict (or None).
+	Pure Python — no LLM judgment.
 	"""
 	engine = ctx.get_query_engine()
-	attempts = engine.search(
-		{"_type": "exploit_attempt", "vuln_name": vuln_name, "vuln_id": vuln_id, "matched_at": matched_at},
-		scope_only=True,
-	) or []
-	# The attempt just yielded by the handler may not be queryable yet (driver write timing), so
-	# fold it in explicitly — deduped by _uuid (add_result stamps it on the same object instance).
-	if pending is not None:
-		pd = pending.toDict() if hasattr(pending, "toDict") else pending
-		pu = pd.get("_uuid")
-		if not (pu and any(a.get("_uuid") == pu for a in attempts)):
-			attempts = attempts + [pd]
-	if not attempts:
-		return None
-	verdicts = [str(a.get("verdict") or "").lower() for a in attempts]
-	counts = {
-		"success": verdicts.count("success"),
-		"failed": verdicts.count("failed"),
-		"partial": verdicts.count("partial"),
-	}
-	if counts["success"]:
-		status, verified = "EXPLOITED", True
-	elif counts["failed"] or counts["partial"]:
-		status, verified = "EXPLOIT FAILED", False
-	else:
-		return None
-	# Derived poc = the LATEST successful attempt's poc (empty when none succeeded).
-	successes = [a for a in attempts if str(a.get("verdict") or "").lower() == "success"]
-	poc = ""
-	if successes:
-		poc = max(successes, key=lambda a: a.get("_timestamp") or 0).get("poc") or ""
-	update = {"status": status, "verified": verified, "poc": poc, "extra_data.exploit_attempts": counts}
-	# engine.update is update_one, so apply the $set to each occurrence by its own _uuid (point ops).
-	vuln_q = {"_type": "vulnerability", "name": vuln_name, "id": vuln_id, "matched_at": matched_at}
-	occurrences = engine.search(vuln_q, scope_only=True) or []
-	primary = None
 	from secator.query.json import _apply_set
-	for v in occurrences:
-		vu = v.get("_uuid")
-		if not vu:
-			continue
-		engine.update({"_type": "vulnerability", "_uuid": vu}, {"$set": update})
-		_apply_set(v, update)
-		if primary is None or not v.get("_duplicate"):
-			primary = v
-	return primary
+	vuln_q = {"_type": "vulnerability", "name": vuln_name, "id": vuln_id, "matched_at": matched_at}
+	with _rollup_lock((vuln_name, vuln_id, matched_at)):
+		attempts = engine.search(
+			{"_type": "exploit_attempt", "vuln_name": vuln_name, "vuln_id": vuln_id, "matched_at": matched_at},
+			scope_only=True,
+		) or []
+		# The attempt just yielded by the handler may not be queryable yet (driver write timing), so
+		# fold it in explicitly — deduped by _uuid (add_result stamps it on the same object instance).
+		if pending is not None:
+			pd = pending.toDict() if hasattr(pending, "toDict") else pending
+			pu = pd.get("_uuid")
+			if not (pu and any(a.get("_uuid") == pu for a in attempts)):
+				attempts = attempts + [pd]
+		occurrences = engine.search(vuln_q, scope_only=True) or []
+		if not attempts:
+			return next((v for v in occurrences if not v.get("_duplicate")), occurrences[0] if occurrences else None)
+		verdicts = [str(a.get("verdict") or "").lower() for a in attempts]
+		counts = {
+			"success": verdicts.count("success"),
+			"failed": verdicts.count("failed"),
+			"partial": verdicts.count("partial"),
+		}
+		# Current (possibly legacy) vuln state, so a failed attempt never downgrades an EXPLOITED vuln.
+		cur = next((v for v in occurrences if not v.get("_duplicate")), occurrences[0] if occurrences else {})
+		if counts["success"]:
+			successes = [a for a in attempts if str(a.get("verdict") or "").lower() == "success"]
+			status, verified = "EXPLOITED", True
+			poc = max(successes, key=lambda a: a.get("_timestamp") or 0).get("poc") or ""
+		elif (cur or {}).get("status") == "EXPLOITED":
+			# Legacy / pre-backfill success — preserve it (keep the existing poc); do not downgrade.
+			status, verified, poc = "EXPLOITED", True, (cur or {}).get("poc") or ""
+		elif counts["failed"] or counts["partial"]:
+			status, verified, poc = "EXPLOIT FAILED", False, ""
+		else:
+			return cur or None
+		update = {"status": status, "verified": verified, "poc": poc, "extra_data.exploit_attempts": counts}
+		# engine.update is update_one, so apply the $set to each occurrence by its own _uuid (point ops).
+		primary = None
+		for v in occurrences:
+			vu = v.get("_uuid")
+			if not vu:
+				continue
+			engine.update({"_type": "vulnerability", "_uuid": vu}, {"$set": update})
+			_apply_set(v, update)
+			if primary is None or not v.get("_duplicate"):
+				primary = v
+		return primary
 
 
 def _build_exploit_attempt(ctx: ActionContext, context: Dict, vuln: Dict, verdict: str, action: Dict,
@@ -1987,6 +2011,13 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 	etype = str(existing.get("_type", "")).lower()
 	if etype == "target":
 		yield Error(message="Refusing to update a 'target' finding (scope integrity).", _context=context)
+		return
+	if etype == "exploit_attempt":
+		# Append-only history: editing an attempt's evidence (poc/vuln_name/vuln_id/matched_at/verdict)
+		# would rewrite the record a vuln's status is derived from. Record a NEW attempt instead.
+		yield Error(
+			message="Refusing to update an 'exploit_attempt' — attempts are append-only history. Record a "
+			"new attempt via mark_vuln_exploited / mark_vuln_exploit_failed.", _context=context)
 		return
 	if etype not in _FINDING_TYPE_NAMES:
 		yield Error(message=f"Refusing to update a non-finding record (_type={etype!r}).", _context=context)

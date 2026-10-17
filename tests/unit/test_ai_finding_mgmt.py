@@ -432,6 +432,34 @@ class TestExploitAttempt(unittest.TestCase):
 		self.assertTrue(any(isinstance(o, Error) for o in out))
 		self.assertFalse([o for o in out if isinstance(o, ExploitAttempt)])
 
+	def test_update_finding_rejects_exploit_attempt(self):
+		# append-only: update_finding must refuse to edit an attempt's evidence
+		att = {'_uuid': 'a1', '_type': 'exploit_attempt', 'name': 'x', 'verdict': 'failed'}
+		e = FakeEngine([att])
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'a1', 'fields': {'verdict': 'success', 'poc': 'forged'}},
+			self._ctx(e)))
+		self.assertTrue(any(isinstance(o, Error) for o in out))
+		self.assertEqual(e.search({'_uuid': 'a1'})[0]['verdict'], 'failed')  # unchanged
+
+	def test_legacy_exploited_not_downgraded_by_failure(self):
+		# a vuln already EXPLOITED (pre-ExploitAttempt model / before backfill) must NOT be
+		# downgraded to EXPLOIT FAILED by a new failed attempt — its poc is preserved too.
+		vuln = {'_uuid': 'v1', '_type': 'vulnerability', 'name': 'SQLi', 'id': 'CVE-1', 'matched_at': 'http://x',
+		        'status': 'EXPLOITED', 'verified': True, 'poc': 'legacy win'}
+		e = FakeEngine([vuln])
+		self._dispatch(e, {'action': 'mark_vuln_exploit_failed', '_uuid': 'v1', 'reason': 'flaky'})
+		v = e.search({'_uuid': 'v1'})[0]
+		self.assertEqual(v['status'], 'EXPLOITED')
+		self.assertTrue(v['verified'])
+		self.assertEqual(v['poc'], 'legacy win')
+		self.assertEqual(v['extra_data']['exploit_attempts']['failed'], 1)
+
+	def test_rollup_lock_is_per_identity(self):
+		from secator.ai.actions import _rollup_lock
+		self.assertIs(_rollup_lock(('n', 'i', 'm')), _rollup_lock(('n', 'i', 'm')))
+		self.assertIsNot(_rollup_lock(('n', 'i', 'm')), _rollup_lock(('n', 'i', 'OTHER')))
+
 
 if __name__ == '__main__':
 	unittest.main()
