@@ -242,7 +242,9 @@ TOOL_SCHEMAS = {
 				"(verified). You MUST provide `poc` — the exact commands and outputs proving a true, "
 				"successful exploitation (not just a scanner match). Also provide `remediation` and `impact`, "
 				"which fill the vulnerability's own fields (do NOT put them inside the `poc`). The exploitation "
-				"date is stamped automatically."
+				"date is stamped automatically. This RECORDS an append-only exploit attempt (so parallel "
+				"agents accumulate history); the vuln's status is derived server-side from all its attempts "
+				"(a prior success stays sticky). Optionally describe it via technique/tool/command/payload/evidence."
 			),
 			"parameters": {
 				"type": "object",
@@ -280,6 +282,26 @@ TOOL_SCHEMAS = {
 						"type": "string",
 						"enum": ["low", "medium", "high"],
 						"description": "Re-prioritize the vulnerability (e.g. 'high' for a confirmed exploitation). Optional."
+					},
+					"technique": {
+						"type": "string",
+						"description": "Exploitation technique/class (e.g. 'SQLi auth bypass', 'SSRF to metadata'). Optional."
+					},
+					"tool": {
+						"type": "string",
+						"description": "Tool/framework used (e.g. 'sqlmap', 'manual', 'metasploit'). Optional."
+					},
+					"command": {
+						"type": "string",
+						"description": "The exact command run for this attempt. Optional."
+					},
+					"payload": {
+						"type": "string",
+						"description": "The payload used. Optional."
+					},
+					"evidence": {
+						"type": "string",
+						"description": "Short raw output snippet proving the result. Optional."
 					},
 					"extra_data": {
 						"type": "object",
@@ -332,7 +354,10 @@ TOOL_SCHEMAS = {
 				"status='EXPLOIT FAILED' but keeps the vuln VISIBLE and retryable (does NOT hide it) — a later "
 				"attempt may succeed, and the remediation still applies. Use this (NOT mark_vuln_false_positive) "
 				"whenever the vuln is genuine but your exploitation didn't land. Give a short `reason`; provide "
-				"`remediation`/`impact` if you assessed them."
+				"`remediation`/`impact` if you assessed them. This RECORDS an append-only exploit attempt "
+				"(failed, or 'partial' if you made progress); the vuln's status is derived from all attempts, "
+				"so a prior success is never overwritten. Optionally describe it via technique/tool/command/"
+				"payload/evidence."
 			),
 			"parameters": {
 				"type": "object",
@@ -340,6 +365,11 @@ TOOL_SCHEMAS = {
 					"_uuid": {
 						"type": "string",
 						"description": "The `_uuid` of the vulnerability to mark exploit-failed (from query_workspace results)."
+					},
+					"verdict": {
+						"type": "string",
+						"enum": ["failed", "partial"],
+						"description": "'failed' (default) or 'partial' if you made meaningful progress but no full compromise."
 					},
 					"reason": {
 						"type": "string",
@@ -352,6 +382,26 @@ TOOL_SCHEMAS = {
 					"impact": {
 						"type": "string",
 						"description": "The potential impact if it were exploited. Fills the vuln's `impact` field. Optional."
+					},
+					"technique": {
+						"type": "string",
+						"description": "Exploitation technique/class attempted (e.g. 'SQLi auth bypass'). Optional."
+					},
+					"tool": {
+						"type": "string",
+						"description": "Tool/framework used (e.g. 'sqlmap', 'manual'). Optional."
+					},
+					"command": {
+						"type": "string",
+						"description": "The exact command run for this attempt. Optional."
+					},
+					"payload": {
+						"type": "string",
+						"description": "The payload used. Optional."
+					},
+					"evidence": {
+						"type": "string",
+						"description": "Short raw output snippet showing the result. Optional."
 					},
 					"extra_data": {
 						"type": "object",

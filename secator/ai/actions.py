@@ -10,7 +10,7 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from secator.runners import Task, Workflow
 from secator.runners.task import TaskNotFoundError
-from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_TYPES
+from secator.output_types import Ai, Error, ExploitAttempt, Info, Warning, OutputType, FINDING_TYPES
 from secator.template import TemplateLoader
 from secator.utils import format_token_count
 from secator.ai.prompts import normalize_mode
@@ -1467,6 +1467,15 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 
 	finding_type = action.get("_type", "")
+	# ExploitAttempt records are APPEND-ONLY history created ONLY by the gated mark_vuln_* handlers
+	# (which set the verdict + run the vuln rollup). Forbid creating one directly so a `success`
+	# verdict can't be forged via add_finding, bypassing the PoC-required gate + the status rollup.
+	if finding_type == "exploit_attempt":
+		yield Error(
+			message="Cannot add an exploit_attempt directly — use mark_vuln_exploited (success) or "
+			"mark_vuln_exploit_failed (failed/partial): they record the attempt and derive the "
+			"vulnerability's status.", _context=context)
+		return
 	# Fields arrive nested under `fields` (a DECLARED object param — survives strict
 	# function-calling providers that drop undeclared top-level args, the add_finding
 	# "arguments stripped to just _type" bug). Fall back to flat siblings for providers
@@ -1596,6 +1605,99 @@ def _merge_extra_data(update: Dict, extra_data) -> None:
 				update[f"extra_data.{key}"] = v
 
 
+def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, matched_at: str, pending=None):
+	"""Recompute a vulnerability's DERIVED verdict/poc from the SET of its ExploitAttempts.
+
+	Append-only attempts are the source of truth; the vuln's ``status``/``verified``/``poc`` are
+	derived from them with SUCCESS STICKY precedence (EXPLOITED > EXPLOIT FAILED > none), so a late
+	failure can never clobber an earlier success. Also denormalizes a recap count
+	(``extra_data.exploit_attempts = {success, failed, partial}``) so reports/UI get the "N success /
+	M failed" summary without re-querying. Applied to EVERY occurrence of the vuln identity
+	(``name`` + ``id`` + ``matched_at``) so duplicates stay consistent. NEVER touches
+	``is_false_positive`` (owned by mark_vuln_false_positive). Returns the primary re-fetched vuln
+	dict (or None). Pure Python — no LLM judgment.
+	"""
+	engine = ctx.get_query_engine()
+	attempts = engine.search(
+		{"_type": "exploit_attempt", "vuln_name": vuln_name, "vuln_id": vuln_id, "matched_at": matched_at},
+		scope_only=True,
+	) or []
+	# The attempt just yielded by the handler may not be queryable yet (driver write timing), so
+	# fold it in explicitly — deduped by _uuid (add_result stamps it on the same object instance).
+	if pending is not None:
+		pd = pending.toDict() if hasattr(pending, "toDict") else pending
+		pu = pd.get("_uuid")
+		if not (pu and any(a.get("_uuid") == pu for a in attempts)):
+			attempts = attempts + [pd]
+	if not attempts:
+		return None
+	verdicts = [str(a.get("verdict") or "").lower() for a in attempts]
+	counts = {
+		"success": verdicts.count("success"),
+		"failed": verdicts.count("failed"),
+		"partial": verdicts.count("partial"),
+	}
+	if counts["success"]:
+		status, verified = "EXPLOITED", True
+	elif counts["failed"] or counts["partial"]:
+		status, verified = "EXPLOIT FAILED", False
+	else:
+		return None
+	# Derived poc = the LATEST successful attempt's poc (empty when none succeeded).
+	successes = [a for a in attempts if str(a.get("verdict") or "").lower() == "success"]
+	poc = ""
+	if successes:
+		poc = max(successes, key=lambda a: a.get("_timestamp") or 0).get("poc") or ""
+	update = {"status": status, "verified": verified, "poc": poc, "extra_data.exploit_attempts": counts}
+	# engine.update is update_one, so apply the $set to each occurrence by its own _uuid (point ops).
+	vuln_q = {"_type": "vulnerability", "name": vuln_name, "id": vuln_id, "matched_at": matched_at}
+	occurrences = engine.search(vuln_q, scope_only=True) or []
+	primary = None
+	from secator.query.json import _apply_set
+	for v in occurrences:
+		vu = v.get("_uuid")
+		if not vu:
+			continue
+		engine.update({"_type": "vulnerability", "_uuid": vu}, {"$set": update})
+		_apply_set(v, update)
+		if primary is None or not v.get("_duplicate"):
+			primary = v
+	return primary
+
+
+def _build_exploit_attempt(ctx: ActionContext, context: Dict, vuln: Dict, verdict: str, action: Dict,
+                           poc: str = "", reason: str = "") -> ExploitAttempt:
+	"""Build an ExploitAttempt linked to ``vuln`` by IDENTITY (name+id+matched_at)."""
+	fields_in = {
+		"technique": action.get("technique") or "",
+		"tool": action.get("tool") or "",
+		"command": action.get("command") or "",
+		"payload": action.get("payload") or "",
+		"evidence": action.get("evidence") or "",
+	}
+	if ctx.encryptor:
+		fields_in = _decrypt_dict(fields_in, ctx.encryptor)
+	name = str(action.get("name") or vuln.get("name") or "exploit attempt").strip()
+	return ExploitAttempt(
+		name=name,
+		verdict=verdict,
+		vuln_name=vuln.get("name", "") or "",
+		vuln_id=vuln.get("id", "") or "",
+		matched_at=vuln.get("matched_at", "") or "",
+		vulnerability_uuid=vuln.get("_uuid", "") or "",
+		technique=fields_in.get("technique", ""),
+		tool=fields_in.get("tool", ""),
+		command=fields_in.get("command", ""),
+		payload=fields_in.get("payload", ""),
+		evidence=fields_in.get("evidence", ""),
+		poc=poc,
+		reason=reason,
+		session_id=context.get("session_id") or ctx.session_id or "",
+		agent=ctx.model or "",
+		_context=context,
+	)
+
+
 def _handle_mark_vuln_exploited(action: Dict, ctx: ActionContext) -> Generator:
 	"""Mark an EXISTING vulnerability as exploited, recording its proof-of-concept.
 
@@ -1630,30 +1732,50 @@ def _handle_mark_vuln_exploited(action: Dict, ctx: ActionContext) -> Generator:
 	# Stamp the exploitation date at the top of the PoC (authoritative server-side date).
 	poc = f"_Exploited on {datetime.now(timezone.utc).strftime('%Y-%m-%d')}_\n\n{str(poc).strip()}"
 
-	update = {"poc": poc, "status": "EXPLOITED", "verified": True, "is_false_positive": False}
+	# Resolve the vuln this attempt links to (by identity, read from the doc the agent saw).
+	vuln = _lookup_finding(ctx, uuid)
+	if not vuln or vuln.get("_type") != "vulnerability":
+		yield Error(
+			message=f"No vulnerability found with _uuid={uuid} in this workspace. "
+			"Re-check the `_uuid` from query_workspace results.", _context=context)
+		return
+
+	# Record the exploitation as an append-only ExploitAttempt (success) — persisted via the
+	# pipeline, so parallel agents accumulate HISTORY instead of overwriting each other.
+	attempt = _build_exploit_attempt(ctx, context, vuln, "success", action, poc=poc)
+	yield attempt
+
+	# remediation / impact / confidence stay VULN-owned enrichment (not attempt-owned).
+	vuln_update = {}
 	if str(remediation).strip():
-		update["remediation"] = str(remediation).strip()
+		vuln_update["remediation"] = str(remediation).strip()
 	if str(impact).strip():
-		update["impact"] = str(impact).strip()
+		vuln_update["impact"] = str(impact).strip()
 	# Confidence re-prioritizes the vuln (confidence_nb: high=1 sorts first .. low=3).
 	confidence = str(action.get("confidence") or "").strip().lower()
 	if confidence in ("low", "medium", "high"):
-		update["confidence"] = confidence
-		update["confidence_nb"] = {"high": 1, "medium": 2, "low": 3}[confidence]
-	_merge_extra_data(update, action.get("extra_data"))
+		vuln_update["confidence"] = confidence
+		vuln_update["confidence_nb"] = {"high": 1, "medium": 2, "low": 3}[confidence]
+	_merge_extra_data(vuln_update, action.get("extra_data"))
+	if vuln_update:
+		try:
+			_scoped_vuln_update(ctx, uuid, vuln_update)
+		except Exception as e:
+			yield Error(message=f"Failed to enrich vulnerability: {e}", _context=context)
+			return
 
+	# Derive the vuln's status/verified/poc from ALL its attempts (success sticky).
 	try:
-		modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+		updated = _recompute_vuln_rollup(
+			ctx, vuln.get("name", ""), vuln.get("id", ""), vuln.get("matched_at", ""), pending=attempt)
 	except Exception as e:
 		yield Error(message=f"Failed to mark vulnerability exploited: {e}", _context=context)
 		return
-	if err:
-		yield Error(message=err, _context=context)
-		return
+	label = (updated or vuln).get("name") or uuid
 	yield Ai(
 		content=f"Marked {label} as exploited (PoC recorded).",
 		ai_type="mark_vuln_exploited",
-		extra_data={"finding": updated} if updated else {},
+		extra_data={"finding": updated, "attempt": attempt.toDict()} if updated else {"attempt": attempt.toDict()},
 		_context=context,
 	)
 
@@ -1721,28 +1843,51 @@ def _handle_mark_vuln_exploit_failed(action: Dict, ctx: ActionContext) -> Genera
 		remediation = dec.get("remediation", remediation)
 		impact = dec.get("impact", impact)
 
-	update = {"status": "EXPLOIT FAILED"}
+	# verdict: 'failed' (default) or 'partial' (made progress, not a full compromise).
+	verdict = str(action.get("verdict") or "failed").strip().lower()
+	if verdict not in ("failed", "partial"):
+		verdict = "failed"
+
+	vuln = _lookup_finding(ctx, uuid)
+	if not vuln or vuln.get("_type") != "vulnerability":
+		yield Error(
+			message=f"No vulnerability found with _uuid={uuid} in this workspace. "
+			"Re-check the `_uuid` from query_workspace results.", _context=context)
+		return
+
+	# Record the failed/partial attempt as append-only history (kept VISIBLE — a later attempt
+	# can still succeed; the rollup keeps a prior success sticky).
+	attempt = _build_exploit_attempt(ctx, context, vuln, verdict, action, reason=reason)
+	yield attempt
+
+	# remediation / impact stay vuln-owned enrichment (they still apply even on a failed attempt).
+	vuln_update = {}
 	if str(remediation).strip():
-		update["remediation"] = str(remediation).strip()
+		vuln_update["remediation"] = str(remediation).strip()
 	if str(impact).strip():
-		update["impact"] = str(impact).strip()
+		vuln_update["impact"] = str(impact).strip()
 	if reason:
-		update["extra_data.exploit_failed_reason"] = reason
-	_merge_extra_data(update, action.get("extra_data"))
+		vuln_update["extra_data.exploit_failed_reason"] = reason
+	_merge_extra_data(vuln_update, action.get("extra_data"))
+	if vuln_update:
+		try:
+			_scoped_vuln_update(ctx, uuid, vuln_update)
+		except Exception as e:
+			yield Error(message=f"Failed to enrich vulnerability: {e}", _context=context)
+			return
 
 	try:
-		modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+		updated = _recompute_vuln_rollup(
+			ctx, vuln.get("name", ""), vuln.get("id", ""), vuln.get("matched_at", ""), pending=attempt)
 	except Exception as e:
 		yield Error(message=f"Failed to mark vulnerability exploit-failed: {e}", _context=context)
 		return
-	if err:
-		yield Error(message=err, _context=context)
-		return
-	msg = f"Marked {label} as exploit-failed" + (f" ({reason})." if reason else ".")
+	label = (updated or vuln).get("name") or uuid
+	msg = f"Recorded {verdict} exploit attempt on {label}" + (f" ({reason})." if reason else ".")
 	yield Ai(
 		content=msg,
 		ai_type="mark_vuln_exploit_failed",
-		extra_data={"finding": updated} if updated else {},
+		extra_data={"finding": updated, "attempt": attempt.toDict()} if updated else {"attempt": attempt.toDict()},
 		_context=context,
 	)
 
@@ -1763,6 +1908,7 @@ _FINDING_TYPE_NAMES = frozenset(cls.get_name().lower() for cls in FINDING_TYPES)
 _AGENT_READONLY_FIELDS = frozenset({
 	"workspace_id",                                                 # scope lives on _context, never top-level
 	"verified", "status", "is_false_positive", "is_acknowledged",   # verdict — forging bypasses mark_vuln_* gates
+	"verdict",                                                      # exploit-attempt result — mark_vuln_* + rollup only
 	"confidence_nb", "severity_nb",                                 # server-derived in __post_init__
 })
 

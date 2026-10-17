@@ -18,7 +18,8 @@ if ADDONS_ENABLED['ai']:
 	)
 	from secator.ai.utils import _MAX_CHILD_ITERATIONS
 	from secator.runners import Task
-	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
+	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url, ExploitAttempt
+	from tests.unit.test_ai_finding_mgmt import FakeEngine
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -1920,32 +1921,30 @@ class TestHandleMarkVulnExploited(unittest.TestCase):
 		return ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
 
 	def test_exploited_sets_status_and_poc(self):
-		"""$set poc + status=EXPLOITED + verified + is_false_positive=False, yields an Ai
-		carrying the refreshed finding, message names the vuln."""
-		mock_engine = MagicMock()
-		mock_engine.update.return_value = 1
-		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability", "name": "SQLi", "poc": "# poc"}]
+		"""Records a success ExploitAttempt + derives the vuln (EXPLOITED/verified/poc),
+		keeps confidence/extra_data enrichment vuln-owned, yields an Ai naming the vuln."""
+		e = FakeEngine([{"_uuid": "u1", "_type": "vulnerability", "name": "SQLi", "id": "", "matched_at": ""}])
 		ctx = self._ctx()
 		action = {"action": "mark_vuln_exploited", "_uuid": "u1", "poc": "# poc\ncmd -> output",
 			"confidence": "high", "extra_data": {"reason": "rce confirmed"}}
-		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+		with patch.object(ctx, 'get_query_engine', return_value=e):
 			results = list(_handle_mark_vuln_exploited(action, ctx))
-		q, upd = mock_engine.update.call_args[0]
-		self.assertEqual(q, {"_type": "vulnerability", "_uuid": "u1"})
-		sset = upd["$set"]
-		# the poc is date-stamped server-side and keeps the original body
-		self.assertRegex(sset["poc"], r"^_Exploited on \d{4}-\d{2}-\d{2}_")
-		self.assertIn("# poc\ncmd -> output", sset["poc"])
-		self.assertEqual(sset["status"], "EXPLOITED")
-		self.assertTrue(sset["verified"])
-		self.assertFalse(sset["is_false_positive"])
-		self.assertEqual(sset["confidence"], "high")
-		self.assertEqual(sset["confidence_nb"], 1)
-		self.assertEqual(sset["extra_data.reason"], "rce confirmed")
+		# a success attempt is recorded with the date-stamped poc
+		att = [r for r in results if isinstance(r, ExploitAttempt)]
+		self.assertEqual(len(att), 1)
+		self.assertEqual(att[0].verdict, "success")
+		self.assertRegex(att[0].poc, r"^_Exploited on \d{4}-\d{2}-\d{2}_")
+		self.assertIn("# poc\ncmd -> output", att[0].poc)
+		# the vuln is rolled up + enriched
+		v = e.search({"_uuid": "u1"})[0]
+		self.assertEqual(v["status"], "EXPLOITED")
+		self.assertTrue(v["verified"])
+		self.assertIn("# poc\ncmd -> output", v["poc"])
+		self.assertEqual(v["confidence"], "high")
+		self.assertEqual(v["confidence_nb"], 1)
+		self.assertEqual(v["extra_data"]["reason"], "rce confirmed")
 		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "mark_vuln_exploited"]
 		self.assertEqual(len(ais), 1)
-		# The re-fetched finding reflects the $set we just applied (not a stale line).
-		self.assertIn("# poc\ncmd -> output", ais[0].extra_data.get("finding", {}).get("poc"))
 		self.assertEqual(ais[0].extra_data.get("finding", {}).get("status"), "EXPLOITED")
 		self.assertIn("SQLi", ais[0].content)
 		self.assertFalse([r for r in results if isinstance(r, Error)])
