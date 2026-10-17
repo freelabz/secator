@@ -108,9 +108,11 @@ jobs:
           ~/go
           ~/.cargo
           ~/.local/bin
-        key: tools-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('secator/tasks/**/*.py', 'secator/installer.py', 'pyproject.toml') }}
+          ~/.local/share
+          ~/.gf
+        key: tools-v2-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('secator/tasks/**/*.py', 'secator/installer.py', 'pyproject.toml') }}
         restore-keys: |
-          tools-${{ runner.os }}-py${{ matrix.python-version }}-
+          tools-v2-${{ runner.os }}-py${{ matrix.python-version }}-
 
     # Always needed (not covered by the tool cache): the worker addon lives in the pipx venv
     # (fast via the pip cache), and the Go/Ruby language runtimes.
