@@ -95,11 +95,13 @@ jobs:
     - name: Run apt update
       run: sudo apt update
 
-    # Cache the installed security tools (Go/Cargo/GitHub-release binaries). On a hit,
-    # `secator install tools` finds each tool already on PATH and skips it, turning the
-    # ~4.5 min install into a few seconds. Keyed on the task/installer sources so a pinned
-    # tool-version bump busts the cache.
+    # Cache the installed security tools (Go/Cargo/GitHub-release binaries, all in these
+    # dirs). `secator install tools` re-downloads every tool unconditionally (it doesn't
+    # skip already-present binaries), so on a cache hit we RESTORE the binaries and SKIP the
+    # install step entirely — turning the ~4.5 min install into a ~5 s restore. Keyed on the
+    # task/installer sources so a pinned tool-version bump busts the cache.
     - name: Cache installed tools
+      id: toolcache
       uses: actions/cache@v4
       with:
         path: |
@@ -110,12 +112,19 @@ jobs:
         restore-keys: |
           tools-${{ runner.os }}-py${{ matrix.python-version }}-
 
-    - name: Install dependencies
+    # Always needed (not covered by the tool cache): the worker addon lives in the pipx venv
+    # (fast via the pip cache), and the Go/Ruby language runtimes.
+    - name: Install addons and languages
       run: |
         secator install addons worker
         secator install langs go
         secator install langs ruby
-        secator install tools --fail-fast
+
+    # Only when the tool cache MISSED — on a hit the binaries are already restored to
+    # ~/.local/bin / ~/go / ~/.cargo (and on PATH), so re-downloading them is pure waste.
+    - name: Install tools
+      if: steps.toolcache.outputs.cache-hit != 'true'
+      run: secator install tools --fail-fast
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
