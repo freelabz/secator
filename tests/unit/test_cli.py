@@ -619,6 +619,7 @@ class TestCli(unittest.TestCase):
 		assert 'Configuration' in result.output
 		assert 'Quick wins' in result.output
 
+	@pytest.mark.serial  # click completion generation is environment-sensitive; flaky under xdist
 	def test_util_completion_command(self):
 		result = self.runner.invoke(cli, ['util', 'completion', '--shell', 'bash'])
 		assert not result.exception
