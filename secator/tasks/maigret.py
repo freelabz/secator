@@ -42,7 +42,7 @@ class maigret(ReconUser):
 			EXTRA_DATA: lambda x: x['status'].get('ids', {})
 		}
 	}
-	install_version = '0.5.0'
+	install_version = '0.6.6'
 	# install_pre = {
 	# 	'apt': ['libcairo2-dev'],
 	# 	'yum|zypper': ['cairo-devel'],
