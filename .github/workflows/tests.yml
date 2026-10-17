@@ -95,38 +95,18 @@ jobs:
     - name: Run apt update
       run: sudo apt update
 
-    # Cache the installed security tools (Go/Cargo/GitHub-release binaries, all in these
-    # dirs). `secator install tools` re-downloads every tool unconditionally (it doesn't
-    # skip already-present binaries), so on a cache hit we RESTORE the binaries and SKIP the
-    # install step entirely — turning the ~4.5 min install into a ~5 s restore. Keyed on the
-    # task/installer sources so a pinned tool-version bump busts the cache.
-    - name: Cache installed tools
-      id: toolcache
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/go
-          ~/.cargo
-          ~/.local/bin
-          ~/.local/share
-          ~/.gf
-        key: tools-v2-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('secator/tasks/**/*.py', 'secator/installer.py', 'pyproject.toml') }}
-        restore-keys: |
-          tools-v2-${{ runner.os }}-py${{ matrix.python-version }}-
-
-    # Always needed (not covered by the tool cache): the worker addon lives in the pipx venv
-    # (fast via the pip cache), and the Go/Ruby language runtimes.
-    - name: Install addons and languages
+    # NOTE: caching the installed tools to skip this step was tried and reverted — too many
+    # tools keep state OUTSIDE the binary dirs (gf patterns in ~/.gf, the wpscan ruby gem,
+    # nuclei templates, ...), so a cache-restore + skip silently broke them. Safely caching
+    # this needs an installer-level "skip already-installed tool (and its data)" option.
+    # `go install` / `cargo` still benefit from the setup-go + cargo caches. setup-go's module
+    # cache + the pip cache speed the surrounding installs.
+    - name: Install dependencies
       run: |
         secator install addons worker
         secator install langs go
         secator install langs ruby
-
-    # Only when the tool cache MISSED — on a hit the binaries are already restored to
-    # ~/.local/bin / ~/go / ~/.cargo (and on PATH), so re-downloading them is pure waste.
-    - name: Install tools
-      if: steps.toolcache.outputs.cache-hit != 'true'
-      run: secator install tools --fail-fast
+        secator install tools --fail-fast
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
