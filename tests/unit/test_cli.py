@@ -5,6 +5,8 @@ import os
 import unittest
 from unittest import mock
 
+import pytest
+
 from secator.cli import cli, _apply_format
 from secator.definitions import VERSION
 from secator.installer import InstallerStatus
@@ -434,6 +436,7 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 0
 		assert 'Name' in result.output
 
+	@pytest.mark.serial  # `profile list` reads shared config/data state; not xdist-safe
 	def test_profile_list_command(self):
 		# Wide terminal so rich does not wrap the column headers across lines.
 		result = self.runner.invoke(cli, ['profile', 'list'], env={'COLUMNS': '400'})
@@ -442,6 +445,7 @@ class TestCli(unittest.TestCase):
 		for column in ['Profile name', 'Description', 'Enforced', 'Workspace', 'Drivers', 'Exporters', 'Options']:
 			assert column in result.output, f'column {column!r} missing from profile list output'
 
+	@pytest.mark.serial  # `profile list` reads shared config/data state; not xdist-safe
 	def test_profile_list_command_aliases(self):
 		for alias in ['p', 'pf', 'profiles']:
 			result = self.runner.invoke(cli, [alias, 'list'], env={'COLUMNS': '400'})
@@ -621,6 +625,7 @@ class TestCli(unittest.TestCase):
 		assert result.exit_code == 0
 		assert '_secator_completion' in result.output
 
+	@pytest.mark.serial  # globally patches os.path.expanduser; unsafe to run under xdist
 	def test_util_completion_install_command(self):
 		with tempfile.TemporaryDirectory() as tmpdir:
 			bashrc_path = os.path.join(tmpdir, '.bashrc')
@@ -636,6 +641,7 @@ class TestCli(unittest.TestCase):
 					content = f.read()
 					assert '_SECATOR_COMPLETE=bash_source secator' in content
 
+	@pytest.mark.serial  # globally patches os.path.expanduser; unsafe to run under xdist
 	def test_util_completion_already_installed(self):
 		with tempfile.TemporaryDirectory() as tmpdir:
 			bashrc_path = os.path.join(tmpdir, '.bashrc')
