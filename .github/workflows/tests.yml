@@ -25,7 +25,7 @@ jobs:
         python-version: ["3.11"]
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
   
     - name: Install secator
       uses: ./.github/actions/install
@@ -44,16 +44,18 @@ jobs:
         python-version: ["3.8", "3.11"]
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install secator
       uses: ./.github/actions/install
       with:
         python-version: ${{ matrix.python-version }}
 
+    # Coverage is collected only on 3.11 (the leg whose .coverage.unit is uploaded). 3.8 is a
+    # pure compat check, so skip coverage there — it's faster and the data would be discarded.
     - name: Run unit tests
       run: |
-        secator test unit
+        secator test unit ${{ matrix.python-version == '3.8' && '--no-coverage' || '' }}
 
     - name: Archive code coverage results
       uses: actions/upload-artifact@v4
@@ -72,7 +74,7 @@ jobs:
         os: [ubuntu-latest]
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install secator
       uses: ./.github/actions/install
@@ -92,6 +94,21 @@ jobs:
 
     - name: Run apt update
       run: sudo apt update
+
+    # Cache the installed security tools (Go/Cargo/GitHub-release binaries). On a hit,
+    # `secator install tools` finds each tool already on PATH and skips it, turning the
+    # ~4.5 min install into a few seconds. Keyed on the task/installer sources so a pinned
+    # tool-version bump busts the cache.
+    - name: Cache installed tools
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go
+          ~/.cargo
+          ~/.local/bin
+        key: tools-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('secator/tasks/**/*.py', 'secator/installer.py', 'pyproject.toml') }}
+        restore-keys: |
+          tools-${{ runner.os }}-py${{ matrix.python-version }}-
 
     - name: Install dependencies
       run: |
@@ -122,7 +139,7 @@ jobs:
         os: [ubuntu-latest]
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install secator
       uses: ./.github/actions/install
@@ -160,7 +177,7 @@ jobs:
         python-version: ["3.11"]
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install secator
       uses: ./.github/actions/install

@@ -93,6 +93,7 @@ class TestAtomicJson(AtomicJsonTestBase):
 			data.update({'items': ['new']})
 		self.assertEqual(self._items(), ['new'])
 
+	@pytest.mark.serial  # spawns processes + asserts timing; not xdist-safe
 	def test_concurrent_prefork_processes(self):
 		"""N separate OS processes append to one file — no lost updates."""
 		ctx = mp.get_context('fork')
@@ -162,6 +163,7 @@ class TestReadJson(AtomicJsonTestBase):
 			data['items'].append('a')
 		self.assertEqual(read_json(self.path, default=lambda: {'items': []}), {'items': ['a']})
 
+	@pytest.mark.serial  # concurrency timing; not xdist-safe
 	def test_tolerates_concurrent_write(self):
 		"""A lock-free read during concurrent writers always sees a complete old-or-new file."""
 		from secator.utils import read_json
@@ -193,6 +195,7 @@ def test_append_ndjson_appends_lines(tmp_path):
 	assert lines == ['{"_uuid": "a"}', '{"_uuid": "b"}']
 
 
+@pytest.mark.serial  # concurrency timing; not xdist-safe
 def test_append_ndjson_concurrent_no_torn_lines(tmp_path):
 	path = str(tmp_path / 'results.ndjson')
 	ctx = mp.get_context('fork')

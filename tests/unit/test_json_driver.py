@@ -216,6 +216,7 @@ class TestJsonDriverHooks(JsonDriverTestBase):
 		self.assertEqual([r['url'] for r in scoped.search({'_type': 'url'})], ['http://mine/a'])
 
 
+@pytest.mark.serial  # asserts on cross-process concurrency timing; not xdist-safe
 class TestJsonDriverConcurrency(JsonDriverTestBase):
 	N_WORKERS = 4
 	PER_WORKER = 25

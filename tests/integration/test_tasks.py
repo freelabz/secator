@@ -1,6 +1,7 @@
 import os
 import unittest
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import sleep
 
 from secator.loader import discover_tasks
@@ -14,6 +15,10 @@ from tests.integration.outputs import OUTPUTS_TASKS, OUTPUTS_CHECKS
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
 NO_CLEANUP = bool(os.environ.get('TEST_NO_CLEANUP', '0'))
+# Each task runs a real tool against the (shared) lab targets, so it's I/O/network-bound:
+# run them concurrently in one process (the lab is set up once in setUp; no per-task Docker
+# churn and coverage stays intact — unlike pytest-xdist which would re-run setUp per worker).
+TASK_WORKERS = int(os.environ.get('SECATOR_TEST_TASK_WORKERS', '8'))
 
 
 class TestTasks(unittest.TestCase, CommandOutputTester):
@@ -73,34 +78,45 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		del opts['testssl.output_path']
 		del opts['timeout']
 
-		failures = []
-
 		tasks = discover_tasks()
 		test_tasks_names = [t.name for t in TEST_TASKS]
 		TASKS = [t for t in tasks if t.__name__ in test_tasks_names]
 
-		for cls in TASKS:
+		def run_one(cls):
+			"""Run and assert ONE task. Returns an error string on failure, None on pass/skip."""
 			if cls.__name__ == 'msfconsole':  # skip msfconsole test as it's stuck
-				continue
-			with self.subTest(name=cls.__name__):
-				input = INPUTS_TASKS.get(cls.__name__)
-				if input is None and len(cls.input_types) > 0:
-					input = INPUTS_TASKS.get(cls.input_types[0], [])
-				if not input:
-					console.print(f'\tTesting task {cls.__name__} ... [dim gold3] skipped (no input)[/]')
-					continue
-				outputs = OUTPUTS_TASKS.get(cls.__name__, [])
-				task = cls(input, **opts)
-				try:
-					self._test_runner_output(
-						task,
-						expected_output_types=cls.output_types,
-						expected_results=outputs,
-						empty_results_allowed=False,
-						additional_checks=OUTPUTS_CHECKS
-					)
-				except AssertionError as e:
-					failures.append(f'ERROR ({cls.__name__}): {e}')
+				return None
+			input = INPUTS_TASKS.get(cls.__name__)
+			if input is None and len(cls.input_types) > 0:
+				input = INPUTS_TASKS.get(cls.input_types[0], [])
+			if not input:
+				console.print(f'\tTesting task {cls.__name__} ... [dim gold3] skipped (no input)[/]')
+				return None
+			outputs = OUTPUTS_TASKS.get(cls.__name__, [])
+			# Fresh opts per task: runners mutate their run_opts, so sharing one dict across
+			# concurrent runs would race.
+			task = cls(input, **dict(opts))
+			try:
+				self._test_runner_output(
+					task,
+					expected_output_types=cls.output_types,
+					expected_results=outputs,
+					empty_results_allowed=False,
+					additional_checks=OUTPUTS_CHECKS
+				)
+				return None
+			except AssertionError as e:
+				return f'ERROR ({cls.__name__}): {e}'
+
+		# Run the tasks concurrently (I/O-bound). Collect failures and fail once at the end so
+		# every task is still exercised on a run, like the original sequential subTest loop.
+		failures = []
+		with ThreadPoolExecutor(max_workers=TASK_WORKERS) as executor:
+			futures = {executor.submit(run_one, cls): cls for cls in TASKS}
+			for future in as_completed(futures):
+				err = future.result()
+				if err:
+					failures.append(err)
 
 		if failures:
 			raise AssertionError("\n\n" + "\n\n".join(failures))

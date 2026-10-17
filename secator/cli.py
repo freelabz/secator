@@ -3370,13 +3370,29 @@ def unit(tasks, workflows, scans, test, no_coverage):
 	import shutil
 
 	shutil.rmtree('/tmp/.secator', ignore_errors=True)
-	if not no_coverage:
-		cmd = f'{sys.executable} -m coverage run --omit="*test*" --data-file=.coverage.unit -m pytest -s -vv tests/unit --durations=5'  # noqa: E501
-	else:
-		cmd = f'{sys.executable} -m pytest -s -vv tests/unit --durations=5'
+	# Two passes: the bulk of the suite runs in parallel under pytest-xdist; the handful of
+	# tests marked `@pytest.mark.serial` (they read the whole shared reports dir or assert on
+	# process/thread concurrency timing) run in a second serial pass. Coverage uses pytest-cov
+	# (not `coverage run -m pytest`) so it's captured from the xdist worker SUBPROCESSES — plain
+	# `coverage run` only traces the main process and would report ~0% under -n. COVERAGE_FILE
+	# keeps the per-suite data file name `secator test coverage` combine expects; the serial
+	# pass appends to it.
+	workers = os.environ.get('SECATOR_TEST_WORKERS', 'auto')
+	base = f'{sys.executable} -m pytest -s -vv tests/unit --durations=5'
+	kflag = ''
 	if test:
 		test_str = ' or '.join(test.split(','))
-		cmd += f' -k "{test_str}"'
+		kflag = f' -k "{test_str}"'
+	if no_coverage:
+		p1 = f'{base} -n {workers} -m "not serial"{kflag}'
+		p2 = f'{base} -p no:xdist -m "serial"{kflag}'
+	else:
+		cov = 'COVERAGE_FILE=.coverage.unit'
+		p1 = f'{cov} {base} -n {workers} -m "not serial" --cov=secator --cov-report={kflag}'
+		p2 = f'{cov} {base} -p no:xdist -m "serial" --cov=secator --cov-report= --cov-append{kflag}'
+	# Combine the two exit codes; pytest's "no tests collected" (5) is not a failure here (it
+	# happens when a -t filter selects only one pass's tests).
+	cmd = f'{p1}; rc1=$?; [ $rc1 -eq 5 ] && rc1=0; {p2}; rc2=$?; [ $rc2 -eq 5 ] && rc2=0; exit $(( rc1 || rc2 ))'
 	run_test(cmd, 'unit', verbose=True, use_command_runner=False)
 
 
