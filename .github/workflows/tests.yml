@@ -114,7 +114,9 @@ jobs:
           ~/.gf
           ~/nuclei-templates
           ~/.config/nuclei
-        key: tools-v3-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('secator/tasks/**/*.py', 'secator/installer.py', 'pyproject.toml') }}
+          ~/.cache/grype
+          ~/.cache/trivy
+        key: tools-v4-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('secator/tasks/**/*.py', 'secator/installer.py', 'pyproject.toml') }}
 
     # Always needed (not covered by the tool cache): the worker addon (pipx venv, fast via the
     # pip cache) and the Go/Ruby language runtimes.
