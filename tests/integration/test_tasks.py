@@ -2,7 +2,7 @@ import os
 import unittest
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from time import sleep
+from time import sleep, time
 
 from secator.loader import discover_tasks
 from secator.rich import console
@@ -82,6 +82,8 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		test_tasks_names = [t.name for t in TEST_TASKS]
 		TASKS = [t for t in tasks if t.__name__ in test_tasks_names]
 
+		durations = {}
+
 		def run_one(cls):
 			"""Run and assert ONE task. Returns an error string on failure, None on pass/skip."""
 			if cls.__name__ == 'msfconsole':  # skip msfconsole test as it's stuck
@@ -96,6 +98,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			# Fresh opts per task: runners mutate their run_opts, so sharing one dict across
 			# concurrent runs would race.
 			task = cls(input, **dict(opts))
+			started = time()
 			try:
 				self._test_runner_output(
 					task,
@@ -107,6 +110,8 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 				return None
 			except AssertionError as e:
 				return f'ERROR ({cls.__name__}): {e}'
+			finally:
+				durations[cls.__name__] = time() - started
 
 		# Run the tasks concurrently (I/O-bound). Collect failures and fail once at the end so
 		# every task is still exercised on a run, like the original sequential subTest loop.
@@ -117,6 +122,12 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 				err = future.result()
 				if err:
 					failures.append(err)
+
+		# Per-task duration recap (slowest first) — surfaces which tool runs to narrow/parallelize.
+		if durations:
+			console.print('\n[bold]Per-task durations (slowest first):[/]')
+			for name, dur in sorted(durations.items(), key=lambda kv: kv[1], reverse=True):
+				console.print(f'  {dur:6.1f}s  {name}')
 
 		if failures:
 			raise AssertionError("\n\n" + "\n\n".join(failures))

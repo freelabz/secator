@@ -95,18 +95,40 @@ jobs:
     - name: Run apt update
       run: sudo apt update
 
-    # NOTE: caching the installed tools to skip this step was tried and reverted — too many
-    # tools keep state OUTSIDE the binary dirs (gf patterns in ~/.gf, the wpscan ruby gem,
-    # nuclei templates, ...), so a cache-restore + skip silently broke them. Safely caching
-    # this needs an installer-level "skip already-installed tool (and its data)" option.
-    # `go install` / `cargo` still benefit from the setup-go + cargo caches. setup-go's module
-    # cache + the pip cache speed the surrounding installs.
-    - name: Install dependencies
+    # Cache the FULL tool footprint so `secator install tools` (~4.5 min of downloads/builds)
+    # can be skipped on a hit. The install writes to: binaries (~/.local/bin, ~/go, ~/.cargo);
+    # built-from-source clones + the wpscan ruby gem (~/.local/share); gf patterns (~/.gf);
+    # and nuclei templates (~/nuclei-templates, with the installed-version marker in
+    # ~/.config/nuclei). Keyed on the task/installer sources so a pinned tool-version bump
+    # busts the cache. pipx tools reinstall fine without caching (their own pip cache / runner
+    # image), so pipx's home is deliberately NOT cached (it's shared with the editable secator).
+    - name: Cache installed tools
+      id: toolcache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go
+          ~/.cargo
+          ~/.local/bin
+          ~/.local/share
+          ~/.gf
+          ~/nuclei-templates
+          ~/.config/nuclei
+        key: tools-v3-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('secator/tasks/**/*.py', 'secator/installer.py', 'pyproject.toml') }}
+
+    # Always needed (not covered by the tool cache): the worker addon (pipx venv, fast via the
+    # pip cache) and the Go/Ruby language runtimes.
+    - name: Install addons and languages
       run: |
         secator install addons worker
         secator install langs go
         secator install langs ruby
-        secator install tools --fail-fast
+
+    # Only on a cache MISS — on a hit every tool binary + its data (patterns/templates/gems/
+    # source builds) is already restored, so re-downloading is pure waste (~4.5 min saved).
+    - name: Install tools
+      if: steps.toolcache.outputs.cache-hit != 'true'
+      run: secator install tools --fail-fast
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
