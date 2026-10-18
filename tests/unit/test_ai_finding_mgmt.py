@@ -130,7 +130,15 @@ class TestFindingMgmtTools(unittest.TestCase):
 		e = MagicMock()
 
 		def _search(query, limit=0, dedupe=False, exclude_fields=None, scope_only=False):
-			return [dict(finding)] if scope_only else []
+			if query.get('_type') == 'exploit_attempt':
+				return []  # no prior attempts
+			# The post-$set re-fetch carries _type=vulnerability and is hidden by the display
+			# filter unless scope_only=True; the pre-FP lookup (by _uuid, no _type) is visible.
+			if query.get('_type') == 'vulnerability':
+				return [dict(finding)] if scope_only else []
+			if '_uuid' in query:
+				return [dict(finding)]
+			return []
 		e.search.side_effect = _search
 		e.update.return_value = 1
 		out = list(dispatch_action(
@@ -139,6 +147,8 @@ class TestFindingMgmtTools(unittest.TestCase):
 		self.assertIn('CVE-2016-20012', ai.content)   # names the finding, not the bare uuid
 		self.assertNotIn('u1', ai.content)
 		self.assertTrue(ai.extra_data.get('finding'))  # attached so the UI renders name + card
+		# the FP determination is recorded as an append-only attempt
+		self.assertTrue([o for o in out if isinstance(o, ExploitAttempt) and o.verdict == 'false_positive'])
 
 	# --- mark_vuln_exploited ---
 	def test_exploited_sets_status_and_attaches_finding(self):
@@ -409,7 +419,8 @@ class TestExploitAttempt(unittest.TestCase):
 		self.assertEqual(v['status'], 'EXPLOITED')
 		self.assertTrue(v['verified'])
 		self.assertIn('win', v['poc'])  # derived poc comes from the successful attempt
-		self.assertEqual(v['extra_data']['exploit_attempts'], {'success': 1, 'failed': 2, 'partial': 0})
+		self.assertEqual(v['extra_data']['exploit_attempts'],
+						 {'success': 1, 'failed': 2, 'partial': 0, 'false_positive': 0})
 
 	def test_success_then_failed_order_independent(self):
 		e = FakeEngine([dict(self.VULN)])
@@ -431,6 +442,19 @@ class TestExploitAttempt(unittest.TestCase):
 			 'fields': {'name': 'forged', 'verdict': 'success'}}, self._ctx(e)))
 		self.assertTrue(any(isinstance(o, Error) for o in out))
 		self.assertFalse([o for o in out if isinstance(o, ExploitAttempt)])
+
+	def test_false_positive_recorded_as_attempt(self):
+		# mark_vuln_false_positive records a 'false_positive' attempt + the recap, and keeps
+		# the vuln hidden (is_false_positive) — NOT re-derived as EXPLOITED/EXPLOIT FAILED.
+		e = FakeEngine([dict(self.VULN)])
+		self._dispatch(e, {'action': 'mark_vuln_false_positive', '_uuid': 'v1', 'reason': 'not reachable'})
+		att = [d for d in e.docs if d.get('_type') == 'exploit_attempt']
+		self.assertEqual(len(att), 1)
+		self.assertEqual(att[0]['verdict'], 'false_positive')
+		v = e.search({'_uuid': 'v1'})[0]
+		self.assertTrue(v['is_false_positive'])
+		self.assertEqual(v['status'], 'FALSE_POSITIVE')
+		self.assertEqual(v['extra_data']['exploit_attempts']['false_positive'], 1)
 
 	def test_update_finding_rejects_exploit_attempt(self):
 		# append-only: update_finding must refuse to edit an attempt's evidence

@@ -1624,6 +1624,17 @@ def _rollup_lock(key):
 		return lk
 
 
+def _attempt_counts(attempts) -> Dict:
+	"""Verdict recap for a vuln's ``extra_data.exploit_attempts`` summary."""
+	verdicts = [str(a.get("verdict") or "").lower() for a in attempts]
+	return {
+		"success": verdicts.count("success"),
+		"failed": verdicts.count("failed"),
+		"partial": verdicts.count("partial"),
+		"false_positive": verdicts.count("false_positive"),
+	}
+
+
 def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, matched_at: str, pending=None):
 	"""Recompute a vulnerability's DERIVED verdict/poc from the SET of its ExploitAttempts.
 
@@ -1656,12 +1667,7 @@ def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, mat
 		occurrences = engine.search(vuln_q, scope_only=True) or []
 		if not attempts:
 			return next((v for v in occurrences if not v.get("_duplicate")), occurrences[0] if occurrences else None)
-		verdicts = [str(a.get("verdict") or "").lower() for a in attempts]
-		counts = {
-			"success": verdicts.count("success"),
-			"failed": verdicts.count("failed"),
-			"partial": verdicts.count("partial"),
-		}
+		counts = _attempt_counts(attempts)
 		# Current (possibly legacy) vuln state, so a failed attempt never downgrades an EXPLOITED vuln.
 		cur = next((v for v in occurrences if not v.get("_duplicate")), occurrences[0] if occurrences else {})
 		if counts["success"]:
@@ -1823,7 +1829,33 @@ def _handle_mark_vuln_false_positive(action: Dict, ctx: ActionContext) -> Genera
 	if ctx.encryptor and reason:
 		reason = _decrypt_dict({"reason": reason}, ctx.encryptor).get("reason", reason)
 
-	update = {"is_false_positive": True, "status": "FALSE_POSITIVE", "verified": False}
+	vuln = _lookup_finding(ctx, uuid)
+	if not vuln or vuln.get("_type") != "vulnerability":
+		yield Error(
+			message=f"No vulnerability found with _uuid={uuid} in this workspace. "
+			"Re-check the `_uuid` from query_workspace results.", _context=context)
+		return
+
+	# Record the false-positive determination as an append-only attempt, so the vuln's exploit
+	# history shows the FP outcome alongside the success/failed attempts.
+	attempt = _build_exploit_attempt(ctx, context, vuln, "false_positive", action, reason=reason)
+	yield attempt
+
+	# Recap counts across ALL attempts (including this FP, which may not be queryable yet).
+	engine = ctx.get_query_engine()
+	persisted = engine.search(
+		{"_type": "exploit_attempt", "vuln_name": vuln.get("name", ""),
+		 "vuln_id": vuln.get("id", ""), "matched_at": vuln.get("matched_at", "")}, scope_only=True) or []
+	pd = attempt.toDict()
+	if not (pd.get("_uuid") and any(a.get("_uuid") == pd.get("_uuid") for a in persisted)):
+		persisted = persisted + [pd]
+
+	# FP owns is_false_positive + status directly (NOT the exploited/failed rollup — a FP must not
+	# be re-derived as EXPLOITED/EXPLOIT FAILED). Just denormalize the recap alongside the verdict.
+	update = {
+		"is_false_positive": True, "status": "FALSE_POSITIVE", "verified": False,
+		"extra_data.exploit_attempts": _attempt_counts(persisted),
+	}
 	if reason:
 		update["extra_data.false_positive_reason"] = reason
 	_merge_extra_data(update, action.get("extra_data"))
@@ -1840,7 +1872,7 @@ def _handle_mark_vuln_false_positive(action: Dict, ctx: ActionContext) -> Genera
 	yield Ai(
 		content=msg,
 		ai_type="mark_vuln_false_positive",
-		extra_data={"finding": updated} if updated else {},
+		extra_data={"finding": updated, "attempt": attempt.toDict()} if updated else {"attempt": attempt.toDict()},
 		_context=context,
 	)
 
