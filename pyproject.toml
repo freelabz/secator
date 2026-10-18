@@ -71,8 +71,6 @@ dev = [
   'coverage < 8',
   'flake8 < 8',
   'pytest < 9',
-  'pytest-xdist < 4',  # parallel test execution (-n auto)
-  'pytest-cov < 7',    # coverage that works with xdist workers (unlike `coverage run -m pytest`)
   'watchdog < 3',
   'pillow < 13',
 ]
@@ -137,11 +135,3 @@ skip-magic-trailing-comma = false
 multi_line_output = 5
 line_length = 120
 
-[tool.pytest.ini_options]
-markers = [
-  # Tests that are NOT safe to run under pytest-xdist parallelism — they read the whole
-  # shared reports dir (so they see other workers' findings) or assert on process/thread
-  # concurrency timing (which breaks when the box is saturated by workers). `secator test
-  # unit` runs these in a second, serial pass; everything else runs in parallel.
-  "serial: run this test in the serial pass, not under xdist (-n) parallelism",
-]

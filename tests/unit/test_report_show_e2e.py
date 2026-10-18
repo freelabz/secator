@@ -10,7 +10,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import pytest
 from click.testing import CliRunner
 
 
@@ -450,7 +449,6 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 		self.assertIn('to filter on a workspace', out)
 
 
-@pytest.mark.serial  # lists the whole reports dir; sees other workers' reports under xdist
 class TestReportListInteresting(unittest.TestCase):
 	"""`secator r list --interesting/-i` only lists reports that have vulnerabilities."""
 
