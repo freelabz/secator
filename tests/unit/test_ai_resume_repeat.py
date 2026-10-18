@@ -418,6 +418,34 @@ class TestRemoteStopEnds(unittest.TestCase):
 		self.assertTrue(any(d.get("status") == "pending" for d in stopped),
 						"a stop WITH choices must still pause as an answerable prompt")
 
+	def test_choiceless_stop_grace_waits_and_resumes_on_followup(self):
+		# A choiceless stop must NOT exit immediately: it waits a grace window for a
+		# follow-up (a steer = a standard message), drains it, and RESUMES — so the
+		# message reaches the model instead of getting stuck.
+		engine = _ApiAnswerEngine(answer_cap=0)
+		engine.insert({"_type": "ai", "ai_type": "steer", "content": "What else ?",
+					   "status": "pending", "_uuid": "steer-1",
+					   "_context": {"session_id": SID}, "_timestamp": 1.0})
+		calls = {"n": 0}
+
+		def llm(messages, model, temp, api_base, api_key, tools=None):
+			calls["n"] += 1
+			if calls["n"] == 1:
+				tc = MagicMock()
+				tc.id = "call_stop"
+				tc.function.name = "stop"
+				tc.function.arguments = json.dumps({"reason": "done", "choices": []})
+				return {"content": None, "tool_calls": [tc],
+						"usage": {"tokens": 50, "cost": 0.0}, "finish_reason": "tool_calls"}
+			return {"content": "resumed", "tool_calls": [],
+					"usage": {"tokens": 50, "cost": 0.0}, "finish_reason": "stop"}
+
+		t, emitted = _drive_content_only_loop(engine, initial_cap=8, llm_fn=llm)
+		# the loop RESUMED (a 2nd LLM turn ran) and the follow-up steer was consumed
+		self.assertGreaterEqual(calls["n"], 2, "grace-wait should resume on a follow-up")
+		consumed = [d for d in engine.docs if d.get("ai_type") == "steer" and d.get("status") == "consumed"]
+		self.assertTrue(consumed, "the follow-up steer must be drained (consumed), not left stuck")
+
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
 class TestWithinRunLoop(unittest.TestCase):
