@@ -1096,12 +1096,32 @@ class ai(PythonRunner):
 							self.max_iterations = iteration + 1
 						continue
 
+					# Only an explicit `stop` TOOL call pre-persisted a `stopped` doc in
+					# _dispatch_and_collect (stop_reason is set from the dispatch result). A
+					# content-only reply (stop_reason still None here) is the normal chat turn —
+					# it must still pause for the user's next message, NOT end.
+					stop_from_tool = stop_reason is not None
+
 					# Content-only reply is a stop with that text as the reason (no choices).
 					# Decrypt it like the `response` display so a remote pending prompt shows
 					# the text, not ciphertext.
 					if stop_reason is None and not tool_calls:
 						stop_reason = (self.encryptor.decrypt(content) if (self.encryptor and content)
 						               else (content or ""))
+
+					# An explicit `stop` with NO choices ends the TURN but does NOT raise an
+					# approve/deny prompt — the terminal `stopped` summary was already persisted
+					# (non-pending, see _dispatch_and_collect). The worker must NOT exit
+					# immediately though: wait a grace window for a follow-up (a standard user
+					# message over the steer channel) so the user can continue; RESUME if one
+					# arrives, else exit cleanly on the input timeout.
+					if stop_from_tool and isinstance(self.backend, RemoteBackend) and not (stop_choices or []):
+						if self._grace_wait_for_followup():
+							if iteration >= self.max_iterations:
+								self.max_iterations = iteration + 1
+							continue
+						self._save_history()
+						return
 
 					# A remote stop/content-only already persisted its pending `stopped` doc
 					# (stamped + prompt_uuid) in _dispatch_and_collect; a content-only / cap
@@ -1566,6 +1586,33 @@ class ai(PythonRunner):
 		return bool(steers)
 		yield  # noqa: unreachable - keeps this a generator for `yield from`
 
+	def _grace_wait_for_followup(self):
+		"""After a choiceless `stop`, don't exit the worker immediately — wait a grace window
+		for a FOLLOW-UP so the user can continue the conversation (per "we wait for the user
+		input timeout"). A follow-up arrives over the steer channel (a message sent while the
+		worker is still alive); poll until one lands (RESUME) or the backend timeout elapses
+		(exit). The turn has already ended, so inject it as a PLAIN user message — NOT a
+		"[User interjected]:" mid-task steer — and leave the `stopped` summary terminal (no
+		pending approve/deny prompt). Returns True if a follow-up arrived.
+		"""
+		backend = self.backend
+		timeout = getattr(backend, "timeout", 600)
+		poll_interval = max(1, getattr(backend, "poll_interval", 5))
+		elapsed = 0
+		while elapsed < timeout:
+			try:
+				steers = backend.poll_steers(self.session_id)
+			except Exception as e:  # noqa: BLE001 - a follow-up must never crash the run
+				self.debug(f'stop-grace: poll failed: {e}', sub='llm')
+				steers = []
+			if steers:
+				for content in steers:
+					self.history.add_user(maybe_encrypt(content, self.encryptor))
+				return True
+			time.sleep(poll_interval)
+			elapsed += poll_interval
+		return False
+
 	# -------------------------------------------------------------------------
 	# Summarization / compaction
 	# -------------------------------------------------------------------------
@@ -1786,7 +1833,11 @@ class ai(PythonRunner):
 					stop_reason = result.content
 					stop_choices = result.choices or (result.extra_data or {}).get("choices", [])
 					stop_multiple = bool(result.multiple)
-					if isinstance(self.backend, RemoteBackend):
+					# A stop WITH choices becomes the answerable pending prompt (the user picks
+					# a next step). A stop with NO choices is a definitive end — nothing to pick
+					# — so it stays a terminal (non-pending) `stopped` summary; the loop ends the
+					# turn immediately below instead of raising a prompt + polling.
+					if isinstance(self.backend, RemoteBackend) and stop_choices:
 						result.status = "pending"
 						# Correlate on the PERSISTED _context.session_id (a top-level session_id
 						# attr wouldn't serialize) — the same field poll_steers and clients use.
