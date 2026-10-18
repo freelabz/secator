@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.51.0](https://github.com/freelabz/secator/compare/v0.50.0...v0.51.0) (2026-10-18)
+
+
+### Features
+
+* **ai:** track exploits as append-only ExploitAttempt findings ([#1566](https://github.com/freelabz/secator/issues/1566)) ([2fdc8e9](https://github.com/freelabz/secator/commit/2fdc8e967ef8827b68f5496750633fe167bf5c2c))
+
+
+### Bug Fixes
+
+* **ai:** grace-wait for a follow-up after a choiceless stop (no approve/deny gate) ([#1565](https://github.com/freelabz/secator/issues/1565)) ([8d8c113](https://github.com/freelabz/secator/commit/8d8c113b2d4dc76138ccf439416014a3b1107fe2))
+* **ai:** upgrade litellm to 1.106.0 + add mcp dependency ([#1567](https://github.com/freelabz/secator/issues/1567)) ([94f64c3](https://github.com/freelabz/secator/commit/94f64c3cef65485219aaad8e252af9085e4bdedc))
+* **docker:** chown $HOME in alpine image so source-build tools work ([#1569](https://github.com/freelabz/secator/issues/1569)) ([e8a8a46](https://github.com/freelabz/secator/commit/e8a8a4641b651dd8950adecb92a0380fc07c7aed))
+
+
+### Performance Improvements
+
+* **ci:** parallelize tests + cache tool/pip installs to cut CI time ([#1564](https://github.com/freelabz/secator/issues/1564)) ([bd77242](https://github.com/freelabz/secator/commit/bd772422d285cd7bce64b323520daed9f621fd9b))
+
 ## [0.50.0](https://github.com/freelabz/secator/compare/v0.49.2...v0.50.0) (2026-10-16)
 
 
