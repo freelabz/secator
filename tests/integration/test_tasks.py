@@ -52,11 +52,12 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'nmap.tcp_connect': True,
 			'nmap.version_detection': True,
 			'nmap.skip_host_discovery': True,
-			# URL-discovery tools query several public archives; the slow ones (commoncrawl/otx/
-			# urlscan) dominate the task runtime. Restrict them to the wayback archive, which still
-			# carries the URLs these tests assert on — cuts gau ~72s->~15s and xurlfind3r ~60s->~15s.
+			# gau queries several public URL archives; the slow ones (commoncrawl/otx/urlscan)
+			# dominate its runtime. Restrict it to the wayback archive, which reliably carries the
+			# deep URL this test asserts on — cuts gau ~72s -> ~34s. (xurlfind3r is NOT narrowed the
+			# same way: for this target its root URL comes from a non-wayback source, so a single
+			# source is unreliable there.)
 			'gau.providers': 'wayback',
-			'xurlfind3r.sources': 'wayback',
 			'match_codes': '200',
 			'maigret.site': 'github',
 			'trivy.mode': 'repo',
