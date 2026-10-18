@@ -99,7 +99,11 @@ gcs = [
 	'google-cloud-storage < 3'
 ]
 ai = [
-	'litellm < 2',
+	# litellm's library `completion` path imports its proxy MCP handler
+	# (`from mcp.types import CacheableResult`), so `mcp` must be installed even though
+	# we don't use the proxy. Pin to the latest known-good pair for reproducible builds.
+	'litellm == 1.106.0',
+	'mcp >= 2.2.0, < 3',
 	'safecmd',
 	# safecmd shells out to the `shfmt` binary (via shutil.which); pin shfmt-py
 	# explicitly so `secator install addons ai` always ships the binary, not just
