@@ -5,6 +5,7 @@ import os
 import unittest
 from unittest import mock
 
+
 from secator.cli import cli, _apply_format
 from secator.definitions import VERSION
 from secator.installer import InstallerStatus

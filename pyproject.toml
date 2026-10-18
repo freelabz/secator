@@ -138,3 +138,4 @@ skip-magic-trailing-comma = false
 [tool.isort]
 multi_line_output = 5
 line_length = 120
+
