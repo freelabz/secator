@@ -832,3 +832,26 @@ async def _bgtasks_panel_body():
 
 def test_background_tasks_panel_groups_and_toggles():
 	_run(_bgtasks_panel_body())
+
+
+def test_tui_feed_hook_is_picklable():
+	"""The TUI's on_item hook MUST be picklable by qualified name.
+
+	Runners pickle their hooks by qualname (secator#1267); a local closure
+	(`run_ai_tui.<locals>._feed`) has no importable qualname, so serializing any
+	runner that carries it (e.g. a task whose result Celery stores) raises
+	`Can't pickle local object` — the TUI crash this guards against. `_tui_feed` is
+	module-level, so it must round-trip, and no-op (return the item unchanged) when
+	no TUI is active (a worker).
+	"""
+	import pickle
+
+	from secator.rich import set_tui
+	from secator.tui.ai import _tui_feed
+
+	assert "<locals>" not in _tui_feed.__qualname__
+	assert pickle.loads(pickle.dumps(_tui_feed)) is _tui_feed
+
+	set_tui(None)  # worker: no active TUI
+	item = {"_type": "ai", "ai_type": "response", "content": "x"}
+	assert _tui_feed(object(), item) is item  # no-op, no crash
