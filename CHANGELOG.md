@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.1](https://github.com/freelabz/secator/compare/v0.51.0...v0.51.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **ai:** make the TUI on_item hook picklable (module-level, not a closure) ([#1570](https://github.com/freelabz/secator/issues/1570)) ([065f96d](https://github.com/freelabz/secator/commit/065f96dc8fdb3ad84a283f505a978b3426767669))
+
 ## [0.51.0](https://github.com/freelabz/secator/compare/v0.50.0...v0.51.0) (2026-10-18)
 
 
