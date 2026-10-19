@@ -261,6 +261,29 @@ class AITUI(TUIApp):
 			self._set_status("stopped", False)
 
 
+def _tui_feed(self, item):
+	"""on_item hook: marshal each yielded item onto the active TUI.
+
+	MUST be a module-level function, NOT a closure: runners pickle their hooks by
+	qualified name (secator#1267), and a local closure (`run_ai_tui.<locals>._feed`)
+	has no importable qualname — so serializing a runner that carries it (e.g. a task
+	whose result Celery stores) raises `Can't pickle local object`. Looking the TUI up
+	via `get_tui()` instead of closing over `app` keeps it picklable, and makes it a
+	no-op on a worker (where no TUI is set), which is exactly what we want.
+
+	`self` is the parent ai runner — remember its source so the display can tell the
+	parent task's OWN notes/errors (shown top-level) from a child runner's (buffered
+	under its card). Cheap + idempotent on every item.
+	"""
+	from secator.rich import get_tui
+	app = get_tui()
+	if app is None:
+		return item
+	app._parent_source = getattr(self, "unique_name", "") or app._parent_source
+	app.tui_render(item)
+	return item
+
+
 def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 	"""Entry used by the CLI: set this app as the active TUI (so the ai task selects the
 	TUIBackend + suppresses console output), then run it.
@@ -297,17 +320,12 @@ def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 		initial_prompt=opts.get("prompt", ""), initial_dangerous=bool(opts.get("dangerous")),
 		session_name=opts.get("session_name") or "")
 
-	def _feed(self, item):  # on_item hook: runs in the worker thread
-		# `self` is the parent ai runner — remember its source so the display can tell the
-		# parent task's OWN notes/errors (shown top-level) from a child runner's (buffered
-		# under its card). Cheap + idempotent on every item.
-		app._parent_source = getattr(self, "unique_name", "") or app._parent_source
-		app.tui_render(item)
-		return item
-
+	# Tap the item stream via a module-level on_item hook (see `_tui_feed` — it must not be
+	# a local closure or the runner can't pickle its hooks). It renders onto this `app`
+	# because `set_tui(app)` below makes it the active TUI that `get_tui()` returns.
 	merged = dict(hooks or {})
 	cls_hooks = dict(merged.get(runner_cls, {}))
-	cls_hooks["on_item"] = list(cls_hooks.get("on_item", [])) + [_feed]
+	cls_hooks["on_item"] = list(cls_hooks.get("on_item", [])) + [_tui_feed]
 	merged[runner_cls] = cls_hooks
 
 	def build():
