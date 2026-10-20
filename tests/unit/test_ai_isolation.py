@@ -166,6 +166,24 @@ class TestChildInheritsIsolated(unittest.TestCase):
 		run_opts = {**_child_run_opts(_ctx(isolated=True)), **llm_opts}
 		self.assertTrue(run_opts["isolated"])
 
+	def test_ai_subagent_inherits_parent_dangerous(self):
+		# An AI subagent INHERITS the parent's operator-chosen dangerous (so a bypass the
+		# operator enabled extends to the exploit work it delegates — otherwise the subagent
+		# is Blocked on the very actions the operator opted into). dangerous is user-only
+		# (agent-readonly + stripped from LLM child opts), so the LLM still can't escalate.
+		from secator.ai.actions import _child_dangerous, ActionContext
+		self.assertTrue(_child_dangerous(ActionContext(targets=["x"], model="m", dangerous=True),
+		                                 is_ai_subagent=True))
+		self.assertFalse(_child_dangerous(ActionContext(targets=["x"], model="m", dangerous=False),
+		                                  is_ai_subagent=True))
+
+	def test_non_ai_child_never_dangerous(self):
+		# A task/workflow/shell child stays non-dangerous even under a dangerous parent —
+		# dangerous is an ai-task concept, meaningless for them.
+		from secator.ai.actions import _child_dangerous, ActionContext
+		self.assertFalse(_child_dangerous(ActionContext(targets=["x"], model="m", dangerous=True),
+		                                  is_ai_subagent=False))
+
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
 class TestShellNeverBlocksOnSudo(unittest.TestCase):

@@ -505,6 +505,21 @@ def _gather_subagent_evidence(ctx: "ActionContext", targets: list, limit: int = 
 	return "\n".join(lines)
 
 
+def _child_dangerous(ctx: ActionContext, is_ai_subagent: bool) -> bool:
+	"""Whether a spawned child runs in `dangerous` (bypass) mode.
+
+	A spawned runner is NEVER dangerous — EXCEPT an AI subagent, which INHERITS the
+	parent's operator-chosen `dangerous`. `dangerous` is user-only: it is agent-readonly
+	AND an LLM-supplied `dangerous` is stripped from child opts (`_sanitize_child_opts`),
+	so the LLM still cannot self-escalate — but a bypass the OPERATOR enabled
+	(`--dangerous` / shift+tab) must extend to the exploit/recon work it delegates to a
+	subagent, otherwise the subagent gets Blocked on the very actions the operator opted
+	into. Non-AI children (task/workflow/shell) stay False: `dangerous` is an ai-task
+	concept, meaningless for them.
+	"""
+	return bool(ctx.dangerous) if is_ai_subagent else False
+
+
 def _child_run_opts(ctx: ActionContext) -> Dict:
 	"""Common run_opts shared by every child runner (task/workflow/shell command)."""
 	opts = {
@@ -646,8 +661,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		if isinstance(ctx.max_iterations, int) and ctx.max_iterations > 0:
 			opts.setdefault("max_iterations", ctx.max_iterations)
 
-	# defense in depth: a spawned runner is never dangerous (CLI --dangerous unaffected)
-	opts["dangerous"] = False
+	opts["dangerous"] = _child_dangerous(ctx, is_ai_subagent)
 
 	# Validate the runner NAME up front and fail with a clean, actionable message.
 	# An LLM routinely invents task/workflow names (e.g. `url_crawl`, `code_scan`).
