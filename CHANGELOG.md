@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.52.0](https://github.com/freelabz/secator/compare/v0.51.1...v0.52.0) (2026-10-20)
+
+
+### Features
+
+* **ai:** dismiss a follow_up/stop choice prompt to end the turn ([#1574](https://github.com/freelabz/secator/issues/1574)) ([0f86ab3](https://github.com/freelabz/secator/commit/0f86ab3c011f209509c8b6471fadcb611b2f344c))
+
+
+### Bug Fixes
+
+* **ai:** AI subagent inherits the operator's dangerous (bypass) mode ([#1573](https://github.com/freelabz/secator/issues/1573)) ([1c7170c](https://github.com/freelabz/secator/commit/1c7170cc6bb67cf492913ad126bb25f28da04388))
+* **ai:** route shell stdout to its own TUI panel, not the current one ([#1572](https://github.com/freelabz/secator/issues/1572)) ([03d1e96](https://github.com/freelabz/secator/commit/03d1e96b9a837f2f9958267668f34aff10d171a7))
+
+
+### Performance Improvements
+
+* **config:** default runners.threads to a CPU-scaled value ([#1518](https://github.com/freelabz/secator/issues/1518)) ([a02d8a5](https://github.com/freelabz/secator/commit/a02d8a5f02add5753573b64fe5c0f77cfe2de452))
+
 ## [0.51.1](https://github.com/freelabz/secator/compare/v0.51.0...v0.51.1) (2026-10-19)
 
 
