@@ -199,9 +199,18 @@ class AITUI(TUIApp):
 			self._set_status(f"running {kind} {rname or command}".strip())
 		elif at == "shell_output":
 			# a shell's stdout IS its result (no secator findings) — show it directly,
-			# not hidden behind the command-click like a task's raw output
-			if self._current is not None:
-				self._current.add_output(content)
+			# not hidden behind the command-click like a task's raw output. Route to the
+			# command's OWN panel by runner id (the shell_output item carries the same id as
+			# its `shell` item): in a PARALLEL batch several actions stream at once, so
+			# `self._current` may point at a sibling task's panel — appending there would
+			# wire the shell's stdout into the wrong card. Fall back to `self._current` only
+			# when the item has no id (older items) / the panel isn't registered.
+			rid = (d.get("extra_data") or {}).get("runner_id") or ""
+			panel = self._leaf_panels.get(rid) if rid else None
+			if panel is None:
+				panel = self._current
+			if panel is not None:
+				panel.add_output(content)
 		elif at in _ACTION_VERBS:
 			# AI action on a finding: a neutral "<Verb> <name>" row (same tone as a runner
 			# header), no icon — icons are for secator findings, not AI actions. Expand the

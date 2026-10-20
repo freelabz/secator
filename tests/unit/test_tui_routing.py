@@ -128,6 +128,35 @@ def test_shell_output_visible_and_error_nested():
 	_run(_shell_body())
 
 
+async def _batch_shell_output_body():
+	# PARALLEL batch: a shell command and a task stream together. The shell's stdout
+	# (shell_output) must land in the SHELL panel — NOT in whatever panel is "current"
+	# (the task started last). Regression: shell_output used to append to self._current,
+	# so in a batch a shell's output cross-wired into a sibling task's panel.
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		# shell card renders first; its runner id registers the panel
+		await app._render({"_type": "ai", "ai_type": "shell", "content": "ss -tlunp",
+			"extra_data": {"description": "List listening ports", "runner_id": "shell1"}})
+		# a sibling task card renders next -> becomes self._current
+		await app._render({"_type": "ai", "ai_type": "task", "content": "nmap",
+			"extra_data": {"description": "SYN scan", "runner_id": "nmap1"}})
+		# the shell's stdout arrives AFTER the task is current — must still route to the shell
+		await app._render({"_type": "ai", "ai_type": "shell_output", "content": "LISTEN 0.0.0.0:22",
+			"extra_data": {"runner_id": "shell1"}})
+		app._finish_current()
+		await pilot.pause(0.05)
+		shell = _by_desc(app, "List listening ports")
+		nmap = _by_desc(app, "SYN scan")
+		assert shell.lines == 1, "shell stdout should land in the shell panel"
+		assert nmap.lines == 0, "shell stdout must NOT leak into the sibling task's panel"
+
+
+def test_batch_shell_output_routes_to_shell_panel():
+	_run(_batch_shell_output_body())
+
+
 async def _workflow_body():
 	app = AITUI(None, session="ai", mode="scan")
 	async with app.run_test(size=(120, 40)) as pilot:
