@@ -123,7 +123,10 @@ class Runners(StrictModel):
 	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
-	threads: int = 50
+	# Default scales with the host (CPU-bound/IO-bound work plateaus at low
+	# concurrency), capped at 32. Override via `secator config set runners.threads N`
+	# or SECATOR_RUNNERS_THREADS. Replaces the former static default of 50.
+	threads: int = Field(default_factory=lambda: min(32, (os.cpu_count() or 4) * 4))
 	prompt_timeout: int = 20
 	chunk_rate_limit: bool = True
 
