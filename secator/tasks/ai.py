@@ -19,7 +19,7 @@ from secator.ai.actions import (
 	ActionContext, check_guardrails, safe_dispatch_action, _run_batch
 )
 from secator.ai.guardrails import PermissionEngine
-from secator.ai.interactivity import create_backend, RemoteBackend, UserInputTimeout
+from secator.ai.interactivity import create_backend, DISMISS_ANSWER, RemoteBackend, UserInputTimeout
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
@@ -2018,6 +2018,16 @@ class ai(PythonRunner):
 			return None
 
 		answer = response["answer"]
+
+		# Dismiss: the user declined every offered choice ("none of these work for me")
+		# instead of picking one. The pending prompt is already resolved (remote: the doc
+		# is answered with the dismiss value; TUI/CLI: the blocking ask returned), so end
+		# the turn cleanly — exactly like a no-user stop. Do this BEFORE injecting `answer`
+		# as a user message and BEFORE the same-answer loop-breaker, so a dismiss is never
+		# replayed as a message and never trips the repeat guard. The next typed user
+		# message starts a fresh turn via the normal resume/respawn path.
+		if answer == DISMISS_ANSWER:
+			return None
 
 		# Same-answer loop breaker: if consecutive follow-ups keep being answered with
 		# the SAME content (normalized) AND no substantive action ran in between, the

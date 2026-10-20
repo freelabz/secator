@@ -12,6 +12,15 @@ from typing import Any, Dict, List, Optional
 from secator.ai.tools import STOP_TOOL_SCHEMA, STOP_TOOL_SCHEMA_SIMPLE
 
 
+# Sentinel answer meaning "dismiss this follow-up/stop prompt" — the user declined
+# all offered choices ("none of these work for me") instead of picking one. It
+# resolves the pending prompt cleanly and ends the turn (the worker goes idle); the
+# next typed user message starts a fresh turn via the normal resume/respawn path.
+# Applies to `stopped`/`follow_up` CHOICE prompts ONLY, never to `permission`
+# prompts (those stay a mandatory allow/deny). In the TUI the key is ESC.
+DISMISS_ANSWER = "__dismiss__"
+
+
 class UserInputTimeout(Exception):
 	"""Raised by the RemoteBackend when a prompt goes unanswered past the timeout.
 

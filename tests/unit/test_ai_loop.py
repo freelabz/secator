@@ -1614,3 +1614,48 @@ class TestUntrustedDataFencing(unittest.TestCase):
     def test_non_data_tool_result_not_fenced(self):
         out = self._run("add_finding")
         self.assertNotIn("<workspace_data>", out)
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestDismissFollowUp(unittest.TestCase):
+	"""Dismissing a follow_up/stop CHOICE prompt (ESC in the TUI) ends the turn cleanly.
+
+	The pending prompt resolves with the DISMISS_ANSWER sentinel; the end-of-turn handler
+	`_prompt_and_redetect` must return None (worker goes idle, next message starts the next
+	turn) WITHOUT injecting the dismiss as a user message or tripping the same-answer
+	loop-breaker.
+	"""
+
+	def _fake_self(self, answer):
+		from secator.ai.interactivity import CLIBackend
+		backend = MagicMock(spec=CLIBackend)
+		backend.ask_user.return_value = {"answer": answer}
+		fake = MagicMock()
+		fake.backend = backend
+		fake.session_id = "sess-dismiss"
+		fake.encryptor = None
+		fake.history = MagicMock()
+		fake.mode = "chat"
+		fake.model = None
+		fake.max_iterations = 10
+		fake._progress_actions = 0
+		return fake
+
+	def test_dismiss_ends_turn_cleanly(self):
+		from secator.tasks.ai import ai as AiTask, DISMISS_ANSWER
+		fake = self._fake_self(DISMISS_ANSWER)
+		result = AiTask._prompt_and_redetect(fake, choices=["A", "B"], reason="What next?")
+		# Turn ends cleanly, same clean exit as a no-user stop.
+		self.assertIsNone(result)
+		# Dismiss is NOT injected as a user message...
+		fake.history.add_user.assert_not_called()
+		# ...and does NOT touch the loop-breaker / extension state.
+		self.assertFalse(hasattr(fake, "_repeated_answer_count") and isinstance(fake._repeated_answer_count, int))  # noqa: E501
+
+	def test_non_dismiss_answer_still_advances(self):
+		from secator.tasks.ai import ai as AiTask
+		fake = self._fake_self("Exploit SSH")
+		result = AiTask._prompt_and_redetect(fake, choices=["Exploit SSH", "Report"], reason="What next?")
+		# A real choice is NOT a clean exit: the turn continues and the answer is injected.
+		self.assertIsNotNone(result)
+		fake.history.add_user.assert_called_once()

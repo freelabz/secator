@@ -20,6 +20,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
+from secator.ai.interactivity import DISMISS_ANSWER
 from secator.tui.render import finding_text, message_text
 from secator.tui.widgets import (
 	BackBar, BlockPanel, ChoicePrompt, Grip, PermissionPrompt, PromptInput, RunnerPanel)
@@ -1043,7 +1044,11 @@ class TUIApp(App):
 		"""A choice sent directly (Enter on an option / multi-confirm): echo, restore, resolve."""
 		if self._pending_ask is None:
 			return
-		self._echo_user(value)
+		# Escape submits the DISMISS_ANSWER sentinel to end the turn — don't render it
+		# as a user message (it would show the literal "__dismiss__"). Normal choices
+		# are still echoed.
+		if value != DISMISS_ANSWER:
+			self._echo_user(value)
 		self._restore_input()
 		self._resolve_pending(value)
 
