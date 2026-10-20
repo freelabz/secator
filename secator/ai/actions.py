@@ -1175,7 +1175,17 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 				f"\n\n[timed out after {effective_timeout}s] If this command just needs longer, "
 				f"re-run it with a higher `timeout`{cap}; otherwise change the approach."
 			)
-		yield Ai(content=output, ai_type="shell_output", _context=context)
+		yield Ai(
+			content=output,
+			ai_type="shell_output",
+			# Same runner id as the `shell` item above, so a frontend routes this stdout to
+			# the command's OWN panel by id — NOT to whatever panel is "current" (in a parallel
+			# batch several actions stream at once, so `current` may be a sibling task's panel).
+			extra_data={
+				"runner_id": context.get("task_chunk_id") or context.get("task_id", "") or runner.id,
+			},
+			_context=context,
+		)
 
 	except Exception as e:
 		yield Error(message=f"Shell command failed: {e}", _context=context)
