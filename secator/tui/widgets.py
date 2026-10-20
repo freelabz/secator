@@ -14,6 +14,7 @@ from textual.message import Message
 from textual.widgets import OptionList, SelectionList, Static, TextArea
 from textual.widgets._toggle_button import ToggleButton
 
+from secator.ai.interactivity import DISMISS_ANSWER
 from secator.tui.render import command_text, markdown_text
 
 # Refine the multi-select checkbox: drop Textual's heavy "▐X▌" bars for a single dot that
@@ -498,11 +499,13 @@ class ChoicePrompt(Vertical):
 		if self._multiple:
 			yield SelectionList(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
 			yield Static(Text.from_markup(
-				"[dim]space to toggle · enter to send · tab to add more details[/]"), classes="choice-hint")
+				"[dim]space to toggle · enter to send · tab to add more details · esc to dismiss[/]"),
+				classes="choice-hint")
 		else:
 			yield OptionList(*self._choices, classes="choice-list")
 			yield Static(Text.from_markup(
-				"[dim]↑/↓ to move · enter to send · tab to add more details[/]"), classes="choice-hint")
+				"[dim]↑/↓ to move · enter to send · tab to add more details · esc to dismiss[/]"),
+				classes="choice-hint")
 
 	def on_mount(self) -> None:
 		self.call_after_refresh(self.focus_list)
@@ -546,7 +549,14 @@ class ChoicePrompt(Vertical):
 	def on_key(self, event) -> None:
 		if self._answered:
 			return
-		if event.key == "tab":
+		if event.key == "escape":
+			# Dismiss: "none of these choices work for me". Resolve the prompt with the
+			# dismiss sentinel (via the same submit/_resolve path the choices use) so the
+			# turn ends cleanly and the next typed message starts the next turn.
+			event.stop()
+			event.prevent_default()
+			self.submit(DISMISS_ANSWER)
+		elif event.key == "tab":
 			event.stop()
 			event.prevent_default()
 			self._to_input(self.selection_text())
