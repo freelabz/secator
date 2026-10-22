@@ -554,6 +554,20 @@ class ai(PythonRunner):
 		self.history.add_user(encrypted)
 		return Ai(content=prompt, ai_type="prompt", message={"role": "user", "content": encrypted})
 
+	def _user_turn_plaintext(self, msg):
+		"""Decrypt (when an encryptor is set) and return a user message's plaintext.
+
+		Returns None on a decrypt miss so callers can fall back to "not a duplicate"
+		(emit) rather than over-suppress a genuinely-new turn.
+		"""
+		content = msg.get("content") or ""
+		if self.encryptor:
+			try:
+				content = self.encryptor.decrypt(content)
+			except Exception:  # noqa: BLE001 - a decrypt miss must not suppress a real prompt
+				return None
+		return content.strip()
+
 	def _prompt_already_tail(self, prompt):
 		"""True if ``prompt`` already equals the last user turn in the restored history.
 
@@ -566,13 +580,32 @@ class ai(PythonRunner):
 		for msg in reversed(self.history.messages):
 			if msg.get("role") != "user":
 				continue
-			content = msg.get("content") or ""
-			if self.encryptor:
-				try:
-					content = self.encryptor.decrypt(content)
-				except Exception:  # noqa: BLE001 - a decrypt miss must not suppress a real prompt
-					return False
-			return content.strip() == (prompt or "").strip()
+			content = self._user_turn_plaintext(msg)
+			if content is None:
+				return False
+			return content == (prompt or "").strip()
+		return False
+
+	def _prompt_is_initial(self, prompt):
+		"""True if ``prompt`` equals the FIRST user turn (the session's initial prompt).
+
+		A respawn's ``run_opts["prompt"]`` is set by the client. Some clients re-dispatch
+		every respawn carrying the ORIGINAL initial prompt rather than only the newest
+		turn. Once the conversation has moved past it, the initial prompt is no longer the
+		tail, so ``_prompt_already_tail`` no longer suppresses it — and it gets re-emitted
+		and re-persisted as a brand-new ``prompt`` doc on every respawn (the repeated
+		initial message). The initial prompt is restored exactly once by
+		``restore_history_from_db`` and is never a legitimate new turn, so suppress it here
+		regardless of position. Compares on plaintext (decrypting when an encryptor is set);
+		a decrypt miss falls back to "not the initial prompt" (emit), never over-suppressing.
+		"""
+		for msg in self.history.messages:
+			if msg.get("role") != "user":
+				continue
+			content = self._user_turn_plaintext(msg)
+			if content is None:
+				return False
+			return content == (prompt or "").strip()
 		return False
 
 	def _get_query_engine(self):
@@ -677,6 +710,10 @@ class ai(PythonRunner):
 				if last_mode in MODES:
 					self.mode = last_mode
 
+		# Remember the mode restored from the persisted session (the last-mode lookup
+		# above) BEFORE re-detecting, so a stale respawn prompt can't silently reset it.
+		restored_mode = self.mode
+
 		# Detect mode (defaults to chat) and build the system prompt + tools
 		self._detect_mode()
 		self.system_prompt = self._system_prompt_for(self.mode)
@@ -698,9 +735,27 @@ class ai(PythonRunner):
 		# unconditionally duplicated that turn AND persisted a duplicate `prompt` doc on
 		# every respawn — the observed repeat (initial prompt re-appended after recon; a
 		# prior follow-up answer / pasted message re-served as a fresh prompt to each new
-		# invocation). Emit only a genuinely-new prompt (the legit answer-after-stop case).
-		if self.prompt and not self._prompt_already_tail(self.prompt):
+		# invocation). The tail check handles a re-served LATEST turn; a client that keeps
+		# re-dispatching the ORIGINAL initial prompt (no longer the tail once the
+		# conversation progressed) is caught by `_prompt_is_initial`. Emit only a
+		# genuinely-new prompt (the legit answer-after-stop case). Both guards read the
+		# rebuilt history, so they run here rather than before `_detect_mode`.
+		emit_prompt = bool(self.prompt) \
+			and not self._prompt_already_tail(self.prompt) \
+			and not self._prompt_is_initial(self.prompt)
+		if emit_prompt:
 			yield self._emit_user_prompt(self.prompt)
+		elif restored_mode in MODES and self.mode != restored_mode:
+			# The respawn carried a STALE prompt (suppressed above), but `_detect_mode`
+			# already re-classified on it and may have reset the mode restored from the
+			# persisted session — F3 only clamps de-escalation to `chat`, so e.g. an
+			# `exploit` session respawned with the original `scan` prompt would drop back
+			# to `scan`. Keep the session's real mode and rebuild prompt/tools + the
+			# history's seeded system message to match.
+			self.debug(f'resume: keeping restored mode {restored_mode!r} over stale-prompt mode {self.mode!r}', sub='llm')
+			self.mode = restored_mode
+			self._rebuild_prompt_and_tools()
+			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		try:

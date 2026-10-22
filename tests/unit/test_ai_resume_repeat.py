@@ -228,6 +228,58 @@ class TestAiResumeRepeat(unittest.TestCase):
 		self.assertEqual(_user_turns(t.history), ["check workspace overview"])
 		self.assertEqual([p.content for p in prompt_docs], [])
 
+	# --- Scenario 7: INITIAL prompt re-served after the conversation progressed ---
+	def test_s7_initial_prompt_not_reappended_after_progress(self):
+		# The client re-dispatches every respawn carrying the ORIGINAL initial prompt,
+		# but the conversation has since moved on (later follow-up turns). The initial
+		# prompt is no longer the tail, so the tail guard alone would re-emit it; the
+		# `_prompt_is_initial` guard must suppress it (the observed prod repeat).
+		initial = "Blog PHP2Shell: find the RCE across the in-scope hosts"
+		docs = [
+			{"_type": "ai", "ai_type": "prompt", "content": initial, "_timestamp": 1, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "found 2 hosts", "_timestamp": 2, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "prompt", "content": "Spawn an exploit subagent",
+			 "_timestamp": 3, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "disproved RCE", "_timestamp": 4, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "prompt", "content": "Re-fingerprint PHP versions",
+			 "_timestamp": 5, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "re-fingerprinted", "_timestamp": 6, "_context": _ctx()},
+		]
+		t, prompt_docs = _resume(FakeQueryEngine(docs), initial)
+		# The initial prompt appears exactly ONCE (restore), never re-emitted.
+		self.assertEqual(
+			_user_turns(t.history),
+			[initial, "Spawn an exploit subagent", "Re-fingerprint PHP versions"])
+		self.assertEqual([p.content for p in prompt_docs], [])
+
+	# --- Scenario 8: a stale respawn prompt must NOT reset the restored mode ---
+	def test_s8_stale_prompt_does_not_reset_restored_mode(self):
+		# The session escalated to `exploit` (the last persisted mode), but the client
+		# respawns carrying the ORIGINAL initial prompt, which classifies as `scan`.
+		# `_prompt_is_initial` suppresses the prompt — and the restored `exploit` mode
+		# must survive. Without the guard, `_detect_mode` re-classifies on the stale
+		# prompt and F3 (which only clamps de-escalation to `chat`) lets it silently
+		# drop exploit -> scan.
+		initial = "scan the in-scope hosts"
+		docs = [
+			{"_type": "ai", "ai_type": "prompt", "content": initial, "_timestamp": 1, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "found a host", "mode": "scan",
+			 "_timestamp": 2, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "prompt", "content": "exploit it", "_timestamp": 3, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "got shell", "mode": "exploit",
+			 "_timestamp": 4, "_context": _ctx()},
+		]
+		t = _make_resume_task(FakeQueryEngine(docs), initial)
+		# Simulate `_detect_mode` re-classifying the stale initial prompt as `scan`
+		# (the real fast-path) plus a real prompt/tools rebuild on mode correction.
+		t._detect_mode = lambda: setattr(t, "mode", "scan")
+		t._rebuild_prompt_and_tools = lambda: setattr(t, "system_prompt", "SYS")
+		list(t._maybe_resume_remote())
+		# The suppressed stale prompt did NOT drag the restored mode back down,
+		# and the initial prompt was not re-emitted into history.
+		self.assertEqual(t.mode, "exploit")
+		self.assertEqual(_user_turns(t.history), [initial, "exploit it"])
+
 	# --- Guard: a genuinely NEW prompt must still be emitted (no over-suppression) ---
 	def test_new_prompt_still_emitted(self):
 		docs = [
