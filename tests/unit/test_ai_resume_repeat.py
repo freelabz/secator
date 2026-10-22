@@ -252,6 +252,34 @@ class TestAiResumeRepeat(unittest.TestCase):
 			[initial, "Spawn an exploit subagent", "Re-fingerprint PHP versions"])
 		self.assertEqual([p.content for p in prompt_docs], [])
 
+	# --- Scenario 8: a stale respawn prompt must NOT reset the restored mode ---
+	def test_s8_stale_prompt_does_not_reset_restored_mode(self):
+		# The session escalated to `exploit` (the last persisted mode), but the client
+		# respawns carrying the ORIGINAL initial prompt, which classifies as `scan`.
+		# `_prompt_is_initial` suppresses the prompt — and the restored `exploit` mode
+		# must survive. Without the guard, `_detect_mode` re-classifies on the stale
+		# prompt and F3 (which only clamps de-escalation to `chat`) lets it silently
+		# drop exploit -> scan.
+		initial = "scan the in-scope hosts"
+		docs = [
+			{"_type": "ai", "ai_type": "prompt", "content": initial, "_timestamp": 1, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "found a host", "mode": "scan",
+			 "_timestamp": 2, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "prompt", "content": "exploit it", "_timestamp": 3, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "got shell", "mode": "exploit",
+			 "_timestamp": 4, "_context": _ctx()},
+		]
+		t = _make_resume_task(FakeQueryEngine(docs), initial)
+		# Simulate `_detect_mode` re-classifying the stale initial prompt as `scan`
+		# (the real fast-path) plus a real prompt/tools rebuild on mode correction.
+		t._detect_mode = lambda: setattr(t, "mode", "scan")
+		t._rebuild_prompt_and_tools = lambda: setattr(t, "system_prompt", "SYS")
+		list(t._maybe_resume_remote())
+		# The suppressed stale prompt did NOT drag the restored mode back down,
+		# and the initial prompt was not re-emitted into history.
+		self.assertEqual(t.mode, "exploit")
+		self.assertEqual(_user_turns(t.history), [initial, "exploit it"])
+
 	# --- Guard: a genuinely NEW prompt must still be emitted (no over-suppression) ---
 	def test_new_prompt_still_emitted(self):
 		docs = [

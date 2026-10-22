@@ -710,6 +710,10 @@ class ai(PythonRunner):
 				if last_mode in MODES:
 					self.mode = last_mode
 
+		# Remember the mode restored from the persisted session (the last-mode lookup
+		# above) BEFORE re-detecting, so a stale respawn prompt can't silently reset it.
+		restored_mode = self.mode
+
 		# Detect mode (defaults to chat) and build the system prompt + tools
 		self._detect_mode()
 		self.system_prompt = self._system_prompt_for(self.mode)
@@ -734,9 +738,24 @@ class ai(PythonRunner):
 		# invocation). The tail check handles a re-served LATEST turn; a client that keeps
 		# re-dispatching the ORIGINAL initial prompt (no longer the tail once the
 		# conversation progressed) is caught by `_prompt_is_initial`. Emit only a
-		# genuinely-new prompt (the legit answer-after-stop case).
-		if self.prompt and not self._prompt_already_tail(self.prompt) and not self._prompt_is_initial(self.prompt):
+		# genuinely-new prompt (the legit answer-after-stop case). Both guards read the
+		# rebuilt history, so they run here rather than before `_detect_mode`.
+		emit_prompt = bool(self.prompt) \
+			and not self._prompt_already_tail(self.prompt) \
+			and not self._prompt_is_initial(self.prompt)
+		if emit_prompt:
 			yield self._emit_user_prompt(self.prompt)
+		elif restored_mode in MODES and self.mode != restored_mode:
+			# The respawn carried a STALE prompt (suppressed above), but `_detect_mode`
+			# already re-classified on it and may have reset the mode restored from the
+			# persisted session — F3 only clamps de-escalation to `chat`, so e.g. an
+			# `exploit` session respawned with the original `scan` prompt would drop back
+			# to `scan`. Keep the session's real mode and rebuild prompt/tools + the
+			# history's seeded system message to match.
+			self.debug(f'resume: keeping restored mode {restored_mode!r} over stale-prompt mode {self.mode!r}', sub='llm')
+			self.mode = restored_mode
+			self._rebuild_prompt_and_tools()
+			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		try:
