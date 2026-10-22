@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.1](https://github.com/freelabz/secator/compare/v0.52.0...v0.52.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **ai:** don't re-emit the initial prompt on remote session resume ([#1578](https://github.com/freelabz/secator/issues/1578)) ([6d0e30c](https://github.com/freelabz/secator/commit/6d0e30cde6ebcb9d24fe9d11a112e334337fb7dc))
+
 ## [0.52.0](https://github.com/freelabz/secator/compare/v0.51.1...v0.52.0) (2026-10-20)
 
 
