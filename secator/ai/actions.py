@@ -4,6 +4,7 @@ import os
 import re
 import threading
 import uuid
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, fields
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -821,8 +822,15 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			# handled above). Execution plumbing/notes stay in the subagent's own transcript.
 			if isinstance(out, tuple(FINDING_TYPES)):
 				yield out
-		note = (f" Persisted: {', '.join(persisted)}." if persisted
-		        else " Persisted: NOTHING (subagent made no add_finding/mark_vuln_* call).")
+		if persisted:
+			# Collapse repeated action types to counted uniques so a subagent that
+			# made N calls of one type reads "mark_vuln_false_positive ×N" instead of
+			# listing it N times.
+			counts = Counter(persisted)
+			summary = ', '.join(f"{atype} ×{n}" if n > 1 else atype for atype, n in counts.items())
+			note = f" Persisted: {summary}."
+		else:
+			note = " Persisted: NOTHING (subagent made no add_finding/mark_vuln_* call)."
 		handback = (last_response.strip() or "(subagent produced no summary)") + "\n[subagent handback]" + note
 		# Stamped for the PARENT conversation (card_context strips the subagent marker) and
 		# with THIS run_task's tool_call_id so it becomes the tool_result the parent reads.
