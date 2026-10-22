@@ -228,6 +228,30 @@ class TestAiResumeRepeat(unittest.TestCase):
 		self.assertEqual(_user_turns(t.history), ["check workspace overview"])
 		self.assertEqual([p.content for p in prompt_docs], [])
 
+	# --- Scenario 7: INITIAL prompt re-served after the conversation progressed ---
+	def test_s7_initial_prompt_not_reappended_after_progress(self):
+		# The client re-dispatches every respawn carrying the ORIGINAL initial prompt,
+		# but the conversation has since moved on (later follow-up turns). The initial
+		# prompt is no longer the tail, so the tail guard alone would re-emit it; the
+		# `_prompt_is_initial` guard must suppress it (the observed prod repeat).
+		initial = "Blog PHP2Shell: find the RCE across the in-scope hosts"
+		docs = [
+			{"_type": "ai", "ai_type": "prompt", "content": initial, "_timestamp": 1, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "found 2 hosts", "_timestamp": 2, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "prompt", "content": "Spawn an exploit subagent",
+			 "_timestamp": 3, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "disproved RCE", "_timestamp": 4, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "prompt", "content": "Re-fingerprint PHP versions",
+			 "_timestamp": 5, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "re-fingerprinted", "_timestamp": 6, "_context": _ctx()},
+		]
+		t, prompt_docs = _resume(FakeQueryEngine(docs), initial)
+		# The initial prompt appears exactly ONCE (restore), never re-emitted.
+		self.assertEqual(
+			_user_turns(t.history),
+			[initial, "Spawn an exploit subagent", "Re-fingerprint PHP versions"])
+		self.assertEqual([p.content for p in prompt_docs], [])
+
 	# --- Guard: a genuinely NEW prompt must still be emitted (no over-suppression) ---
 	def test_new_prompt_still_emitted(self):
 		docs = [
