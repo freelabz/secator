@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.2](https://github.com/freelabz/secator/compare/v0.52.1...v0.52.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **ai:** collapse repeated action types in the subagent handback summary ([#1580](https://github.com/freelabz/secator/issues/1580)) ([14f5ae8](https://github.com/freelabz/secator/commit/14f5ae8adcc9294e5717f9ff7853fac4c7f7a6f5))
+
 ## [0.52.1](https://github.com/freelabz/secator/compare/v0.52.0...v0.52.1) (2026-10-22)
 
 
