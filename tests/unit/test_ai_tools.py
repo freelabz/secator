@@ -16,6 +16,7 @@ class TestToolSchemas(unittest.TestCase):
 		from secator.ai.tools import TOOL_SCHEMAS
 		# `stop` is NOT in TOOL_SCHEMAS — it is injected per-backend via get_extra_tools.
 		expected = {"run_task", "run_workflow", "run_shell", "query_workspace", "read_file", "write_file",
+		            "fetch_url",
 		            "run_subagent", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
 		            "mark_vuln_exploit_failed", "update_finding", "change_mode"}
 		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)

@@ -13,6 +13,7 @@ TOOL_ACTION_MAP = {
 	"read_file": "read_file",
 	"write_file": "write_file",
 	"query_workspace": "query",
+	"fetch_url": "fetch_url",
 	"add_finding": "add_finding",
 	"mark_vuln_exploited": "mark_vuln_exploited",
 	"mark_vuln_false_positive": "mark_vuln_false_positive",
@@ -515,6 +516,26 @@ TOOL_SCHEMAS = {
 					"append": {"type": "boolean", "description": "Append instead of overwrite (default false)."}
 				},
 				"required": ["path", "content"]
+			}
+		}
+	},
+	"fetch_url": {
+		"type": "function",
+		"function": {
+			"name": "fetch_url",
+			"description": (
+				"Fetch a single PUBLIC web page and return its readable text — use it to READ a page you "
+				"already know (a HackTricks technique, a vendor advisory, a Debian security-tracker page, a "
+				"blog post on a fresh CVE). Only public "
+				"http(s) pages are allowed; internal/private hosts are refused."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"url": {"type": "string", "description": "The http(s) URL to fetch."},
+					"max_chars": {"type": "integer", "description": "Max characters of extracted text to return (default 20000)."}
+				},
+				"required": ["url"]
 			}
 		}
 	},
