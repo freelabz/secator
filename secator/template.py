@@ -289,6 +289,31 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 
 	walk_runner_tree(tree, process_node)
 
+	# Flag author-curated important options (config.important_opts).
+	# ponytail: additive flag, rides the existing serialize passthrough; names match
+	# by exact key OR bare suffix (opts can be prefixed on conflict, e.g. ffuf.wordlist).
+	important = config.important_opts or []
+	if isinstance(important, dict):
+		important = list(important.items())  # (name, override) pairs
+	else:
+		important = [(n, {}) for n in important]
+
+	def _bare(k):
+		return k.rsplit('.', 1)[-1].rsplit('-', 1)[-1]
+
+	for order, (name, override) in enumerate(important):
+		matches = [k for k in all_opts if k == name or _bare(k) == name]
+		if not matches:
+			console.print(Warning(message=f'important_opts: {name!r} not found in {config.name!r}'))
+			continue
+		for k in matches:
+			all_opts[k]['important'] = True
+			all_opts[k]['important_order'] = order
+			if override.get('label'):
+				all_opts[k]['label'] = override['label']
+			if override.get('placeholder'):
+				all_opts[k]['placeholder'] = override['placeholder']
+
 	# Normalize all options
 	debug('[bold yellow3]All opts processed. Showing defaults:[/]', sub=f'cli.{config.name}')
 	normalized_opts = OrderedDict({})
