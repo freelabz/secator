@@ -267,6 +267,12 @@ class VulnersAddon(StrictModel):
 	api_key: str = ''
 
 
+class WebSearchConfig(StrictModel):
+	# Optional Tavily API key for synthesized-answer web search (mode='answer'). When empty,
+	# web_search uses the keyless DuckDuckGo/Sploitus engines. Env: SECATOR_ADDONS_AI_WEB_SEARCH_TAVILY_API_KEY.
+	tavily_api_key: str = ''
+
+
 class AiAddon(StrictModel):
 	enabled: bool = False
 	api_key: str = ''
@@ -275,6 +281,7 @@ class AiAddon(StrictModel):
 	# rule; off = configured key is reused for any base.
 	# Env: SECATOR_ADDONS_AI_CUSTOM_DISALLOW_CONFIG_TOKEN.
 	custom_disallow_config_token: bool = False
+	web_search: WebSearchConfig = WebSearchConfig()
 	default_model: str = 'claude-sonnet-4-6'
 	intent_model: str = 'claude-haiku-4-5'
 	temperature: float = 0.7
