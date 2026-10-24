@@ -66,5 +66,87 @@ class TestGroupFindings(unittest.TestCase):
 		self.assertEqual((tuple(Technology._group_by), Technology._group_aggregate), (('product',), 'match'))
 
 
+class TestGroupFindingsRawDicts(unittest.TestCase):
+	"""group_findings must produce identical results whether it receives raw dicts (the fast
+	path used by --group via StreamView.iter_raw) or pre-rehydrated OutputType objects."""
+
+	def test_dict_input_produces_same_groups_as_object_input(self):
+		"""Raw dicts → group_findings → same representative count and fields as the rehydrated path."""
+		from secator.output_types import Vulnerability
+		dicts = [_vuln('XSS', 'a', ts=1), _vuln('XSS', 'b', ts=3), _vuln('SQLi', 'c', ts=2)]
+		objects = [Vulnerability.load(d) for d in dicts]
+
+		reps_dict = group_findings(dicts, ['name'], aggregate_field='matched_at')
+		reps_obj = group_findings(objects, ['name'], aggregate_field='matched_at')
+
+		self.assertEqual(len(reps_dict), len(reps_obj))
+		self.assertEqual([r.name for r in reps_dict], [r.name for r in reps_obj])
+		for rd, ro in zip(reps_dict, reps_obj):
+			self.assertEqual(rd._group_count, ro._group_count)
+			self.assertEqual(rd.matched_at, ro.matched_at)
+
+	def test_dict_representative_is_newest(self):
+		"""With raw dict input the newest finding (highest _timestamp) wins as representative."""
+		old = _vuln('A', 'u1', ts=1, severity='low')
+		new = _vuln('A', 'u2', ts=9, severity='high')
+		reps = group_findings([old, new], ['name'], aggregate_field='matched_at')
+		self.assertEqual(len(reps), 1)
+		self.assertEqual(reps[0].severity, 'high')   # newest rep field
+		self.assertEqual(reps[0]._group_count, 2)
+
+
+class TestStreamViewIterRaw(unittest.TestCase):
+	"""StreamView.iter_raw() yields the raw backend dicts without rehydration."""
+
+	def _make_sv(self, records):
+		"""Build a StreamView backed by a minimal in-memory engine."""
+		class _FakeEngine:
+			def iterate(self, query, batch_size):
+				# yield all records in one batch (limit ignored for simplicity)
+				yield list(records)
+
+			def count(self, query):
+				return len(records)
+
+		from secator.query._stream import StreamView
+		return StreamView(_FakeEngine(), {})
+
+	def test_iter_raw_yields_dicts(self):
+		raw = [_vuln('A', 'u1'), _vuln('B', 'u2')]
+		sv = self._make_sv(raw)
+		result = list(sv.iter_raw())
+		self.assertEqual(result, raw)
+		for item in result:
+			self.assertIsInstance(item, dict)
+
+	def test_iter_raw_respects_limit(self):
+		raw = [_vuln('A', f'u{i}') for i in range(10)]
+
+		class _FakeEngine:
+			def iterate(self, query, batch_size):
+				yield list(raw)
+
+			def count(self, query):
+				return len(raw)
+
+		from secator.query._stream import StreamView
+		sv = StreamView(_FakeEngine(), {}, limit=3)
+		result = list(sv.iter_raw())
+		self.assertEqual(len(result), 3)
+
+	def test_group_findings_via_iter_raw_matches_normal_path(self):
+		"""End-to-end: iter_raw() fed into group_findings() produces the same grouped output."""
+		raw = [_vuln('XSS', 'a', ts=1), _vuln('XSS', 'b', ts=2), _vuln('SQLi', 'c', ts=1)]
+		sv = self._make_sv(raw)
+
+		reps = group_findings(list(sv.iter_raw()), ['name'], aggregate_field='matched_at')
+		names = [r.name for r in reps]
+		self.assertEqual(sorted(names), ['SQLi', 'XSS'])
+		xss = next(r for r in reps if r.name == 'XSS')
+		self.assertEqual(xss._group_count, 2)
+		self.assertIn('a', xss.matched_at)
+		self.assertIn('b', xss.matched_at)
+
+
 if __name__ == '__main__':
 	unittest.main()

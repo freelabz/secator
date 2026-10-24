@@ -1603,7 +1603,11 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 		return rows[:limit] if limit else rows
 
 	if group and cls is not None and getattr(cls, '_group_by', None):
-		reps = group_findings(sv, list(cls._group_by), getattr(cls, '_group_aggregate', None))
+		# Use raw-dict streaming to avoid O(N) full OutputType rehydration before grouping.
+		# group_findings() accepts dicts natively and only rehydrates the representative
+		# (one per group), so peak cost drops from O(N * #fields) to O(#groups * #fields).
+		raw_iter = sv.iter_raw() if hasattr(sv, 'iter_raw') else sv
+		reps = group_findings(raw_iter, list(cls._group_by), getattr(cls, '_group_aggregate', None))
 		return _finish(reps)
 
 	if count or uniq:
