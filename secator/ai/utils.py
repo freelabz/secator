@@ -830,12 +830,29 @@ def call_llm(
 	api_base: Optional[str] = None,
 	api_key: Optional[str] = None,
 	tools: Optional[List[Dict]] = None,
+	provider: Optional[str] = None,
 ) -> Dict:
-	"""Call litellm completion and return response with usage."""
+	"""Call litellm completion and return response with usage.
+
+	``provider`` selects a named provider preset (see
+	:mod:`secator.ai.providers`). When set, the preset resolves the inference
+	base and key (explicit arguments still win) and the catalog model id is
+	mapped onto the OpenAI-compatible adapter, keeping its own
+	``vendor/model`` namespace. When unset, the call is byte-for-byte the
+	previous litellm-native behaviour.
+	"""
 	import time
 	import litellm
 
+	from secator.ai import providers
+
 	max_retries = 3
+
+	if provider:
+		spec = providers.require_provider(provider)
+		api_base = api_base or providers.resolve_api_base(spec.id)
+		api_key = api_key or providers.resolve_api_key(spec.id)
+		model = providers.to_litellm_model(spec.id, model)
 
 	# Initialize litellm once (avoids callback accumulation)
 	init_llm(api_key=api_key)
@@ -908,9 +925,18 @@ def call_llm(
 				raise
 		except litellm.AuthenticationError as e:
 			console.print(Error(message=e))
-			console.print(Error(
-				message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`'
-			))
+			if provider:
+				spec = providers.require_provider(provider)
+				# A durable provider key that the relay rejects is reauthenticated by
+				# the user, not refreshed: there is no refresh grant to call.
+				console.print(Error(message=(
+					f'{spec.label} rejected the API key. Re-run `secator x ai setup` '
+					f'to store a valid key (manage keys: {spec.console_url}).'
+				)))
+			else:
+				console.print(Error(
+					message='Please set a valid API key with `secator config set addons.ai.api_key <KEY>`'
+				))
 			raise
 
 	message = response.choices[0].message
@@ -1059,10 +1085,205 @@ def format_llm_status(token_count, ctx_window, by_role):
 	)
 
 
-def setup_ai():
-	"""Interactive search-filter-select flow for configuring AI model and API key."""
-	import litellm
+def _select_model(options, formatter):
+	"""Numbered search/filter/select loop shared by every provider flow.
+
+	``options`` are the already capability-filtered choices; the loop can only
+	return one of them (or None on quit), never a free-form string.
+	"""
 	from rich.prompt import Prompt
+
+	displayed = list(options)
+	suffix = ''
+
+	def _show(leading_newline=False):
+		prefix = "\n" if leading_newline else ""
+		console.print(f"{prefix}[bold]  Found {len(displayed)} models{suffix}:[/]")
+		for i, item in enumerate(displayed, 1):
+			console.print(f"[dim]{i:>4}[/] {formatter(item)}", highlight=False)
+
+	_show()
+	while True:
+		console.print()
+		choice = Prompt.ask("[bold cyan]  Filter or select (number/name, q to quit)[/]")
+
+		if not choice:
+			# Empty input: re-show current list
+			_show(leading_newline=True)
+			continue
+
+		if choice.lower() in ('q', 'quit', 'exit'):
+			return None
+
+		# Number → select from current display
+		if choice.isdigit():
+			idx = int(choice)
+			if 1 <= idx <= len(displayed):
+				return displayed[idx - 1]
+			console.print(f"[bold red]  Invalid number: {idx} (valid: 1-{len(displayed)})[/]")
+			continue
+
+		# Check exact match first
+		exact = [m for m in options if m.lower() == choice.lower()]
+		if exact:
+			return exact[0]
+
+		# Text → filter models, re-display
+		query_lower = choice.lower()
+		filtered = [m for m in options if query_lower in m.lower()]
+		if not filtered:
+			console.print(f'[bold yellow]  No models matching "{choice}".[/]')
+			continue
+		if len(filtered) == 1:
+			return filtered[0]
+		displayed = filtered
+		suffix = f' matching "{choice}"'
+		_show(leading_newline=True)
+
+
+def _select_provider():
+	"""Let the user pick a named provider preset or litellm-native models.
+
+	Returns the provider id to configure, or None for the litellm flow.
+	"""
+	from rich.prompt import Prompt
+	from secator.ai import providers
+
+	current = providers.get_provider(CONFIG.addons.ai.provider)
+	console.print()
+	console.print("[bold]  AI provider:[/]")
+	console.print(
+		f"    Current: [bold white]{current.label if current else 'litellm default models'}[/]"
+	)
+	choice = Prompt.ask(
+		"  [bold cyan]Provider[/]",
+		choices=['orcarouter', 'litellm'],
+		default=current.id if current else 'litellm',
+	)
+	if choice == 'orcarouter':
+		return 'orcarouter'
+	# Back to litellm-native model names. Keep the stored key/base untouched: the
+	# user may still be using them with a custom endpoint.
+	if CONFIG.addons.ai.provider:
+		CONFIG.set('addons.ai.provider', '')
+		if CONFIG.validate():
+			CONFIG.save()
+	return None
+
+
+def _setup_named_provider(provider_id):
+	"""Configure a named provider from its live catalog (API-key auth)."""
+	from rich.prompt import Prompt
+	from secator.ai import providers
+
+	spec = providers.require_provider(provider_id)
+	current_model = CONFIG.addons.ai.default_model
+	current_key = providers.resolve_api_key(spec.id, CONFIG.addons.ai.api_key)
+	masked_key = providers.mask_api_key(current_key)
+	try:
+		api_base = providers.resolve_api_base(spec.id, CONFIG.addons.ai.api_base)
+	except providers.ProviderConfigError as e:
+		console.print(f"[bold red]  {e}[/]")
+		return None
+
+	console.print()
+	console.print(f"[bold]  {spec.label} configuration:[/]")
+	console.print(f"    Inference base: [bold white]{api_base}[/]")
+	console.print(f"    Model:          [bold white]{current_model or 'not set'}[/]")
+	console.print(f"    API key:        [bold white]{masked_key or 'not set'}[/]")
+	console.print(f"    Keys:           [dim]{spec.console_url}[/]")
+	console.print("    Clear the key:  [dim]secator config set addons.ai.api_key ''[/]")
+	console.print()
+
+	answer = Prompt.ask(
+		f"  [bold cyan]{spec.label} API key[/] [dim]({spec.key_prefix}…, leave empty to keep current)[/]",
+		password=True,
+		default='',
+		show_default=False,
+	)
+	api_key = (answer or '').strip() or current_key
+	if answer and answer.strip():
+		CONFIG.set('addons.ai.api_key', answer.strip())
+
+	result = None
+	if api_key:
+		if not providers.key_prefix_matches(spec.id, api_key):
+			# Hint only: the key prefix is not proof of validity and is never used
+			# to reject a credential.
+			console.print(
+				f"[dim]  Note: {spec.label} keys usually start with {spec.key_prefix}.[/]"
+			)
+		with maybe_status(f"[bold orange3]Loading {spec.label} model catalog...[/]", spinner="dots"):
+			result = providers.get_catalog(
+				api_key, provider_id=spec.id, api_base=api_base)
+	else:
+		result = providers.CatalogResult(
+			models=providers.VERIFIED_FALLBACK_MODELS,
+			source='fallback', degraded=True,
+			error=f'No {spec.label} API key configured.',
+		)
+
+	if result.degraded:
+		console.print(f"[bold yellow]  Live model catalog unavailable: {result.error}[/]")
+		what = 'verified fallback list' if result.source == 'fallback' else 'last known-good catalog'
+		console.print(f"[bold yellow]  Showing the {what} (degraded).[/]")
+
+	options = [m.id for m in result.models]
+	if not options:
+		console.print("[bold red]  No compatible chat models available.[/]")
+		return None
+	if current_model and current_model not in options:
+		console.print(
+			f"[bold yellow]  Saved model '{current_model}' is not in the current "
+			f"{spec.label} catalog — select a new one.[/]"
+		)
+
+	by_id = {m.id: m for m in result.models}
+	selected = _select_model(options, lambda mid: providers.describe_model(by_id[mid]))
+	if not selected:
+		return None
+
+	console.print(f"\n[bold green]  Selected: [white]{selected}[/][/]")
+	CONFIG.set('addons.ai.provider', spec.id)
+	CONFIG.set('addons.ai.default_model', selected)
+	CONFIG.set('addons.ai.intent_model', selected)
+
+	if CONFIG.validate():
+		CONFIG.save()
+		console.print(f"[bold green]  Default model set to [white]{selected}[/][/]")
+		console.print(f"[bold green]  Intent model set to [white]{selected}[/][/]")
+	else:
+		console.print(f"[bold yellow]  Model selected: {selected} (config validation failed, not saved)[/]")
+
+	console.print()
+	try:
+		with maybe_status("[bold orange3]Verifying model connection...[/]", spinner="dots"):
+			response = call_llm(
+				[{"role": "user", "content": "Reply with only: OK"}],
+				selected, temperature=0, api_base=api_base, api_key=api_key,
+				provider=spec.id,
+			)
+		console.print(f"[bold green]  Connection verified! Response: {response['content'].strip()}[/]")
+	except Exception as e:
+		console.print(f"[bold red]  Connection failed: {e}[/]")
+		console.print(
+			f"[dim]  Check your {spec.label} API key and that the model is enabled "
+			f"for your workspace ({spec.console_url}).[/]"
+		)
+	return selected
+
+
+def setup_ai():
+	"""Interactive flow for configuring the AI provider, model and API key."""
+	provider_id = _select_provider()
+	if provider_id:
+		return _setup_named_provider(provider_id)
+	return _setup_litellm_models()
+
+
+def _setup_litellm_models():
+	"""Interactive search-filter-select flow over litellm's built-in models."""
+	import litellm
 
 	# Load all models, sort, build color map
 	all_models = []
@@ -1078,26 +1299,18 @@ def setup_ai():
 				all_parts.add(p)
 	part_colors = {p: MODEL_COLORS[i % len(MODEL_COLORS)] for i, p in enumerate(sorted(all_parts))}
 
-	def _format_model(m, idx):
+	def _format_model(m):
 		parts = m.split('/')
 		if len(parts) > 1:
 			segments = [f"[bold {part_colors[p]}]{p}[/]" for p in parts[:-1]]
-			colored = '/'.join(segments) + f"/[bold white]{parts[-1]}[/]"
-		else:
-			colored = f"[bold white]{m}[/]"
-		return f"[dim]{idx:>4}[/] " + colored
-
-	def _show_models(displayed, suffix, leading_newline=False):
-		prefix = "\n" if leading_newline else ""
-		console.print(f"{prefix}[bold]  Found {len(displayed)} models{suffix}:[/]")
-		for i, m in enumerate(displayed, 1):
-			console.print(_format_model(m, idx=i), highlight=False)
+			return '/'.join(segments) + f"/[bold white]{parts[-1]}[/]"
+		return f"[bold white]{m}[/]"
 
 	# Show current config
 	current_model = CONFIG.addons.ai.default_model
 	current_intent = CONFIG.addons.ai.intent_model
 	current_key = CONFIG.addons.ai.api_key
-	masked_key = f"{current_key[:8]}...{current_key[-4:]}" if current_key and len(current_key) > 12 else current_key or ""
+	masked_key = f"{current_key[:8]}...{current_key[-4:]}" if current_key and len(current_key) > 12 else current_key or ""  # noqa: E501
 	console.print()
 	console.print("[bold]  Current config:[/]")
 	console.print(f"    Model:        [bold white]{current_model or 'not set'}[/]")
@@ -1105,90 +1318,51 @@ def setup_ai():
 	console.print(f"    API key:      [bold white]{masked_key or 'not set'}[/]")
 	console.print()
 
-	# Display all models numbered
-	displayed = all_models
-	suffix = ''
-	_show_models(displayed, suffix)
+	selected = _select_model(all_models, _format_model)
+	if not selected:
+		return None
 
-	# Enter prompt loop
-	while True:
-		console.print()
-		choice = Prompt.ask("[bold cyan]  Filter or select (number/name, q to quit)[/]")
+	from rich.prompt import Prompt
 
-		if not choice:
-			# Empty input: re-show current list
-			_show_models(displayed, suffix, leading_newline=True)
-			continue
+	# Model selected - save config
+	console.print(f"\n[bold green]  Selected: [white]{selected}[/][/]")
+	CONFIG.set('addons.ai.provider', '')
+	CONFIG.set('addons.ai.default_model', selected)
+	CONFIG.set('addons.ai.intent_model', selected)
 
-		if choice.lower() in ('q', 'quit', 'exit'):
-			return None
+	# Prompt for API key if model changed or key unset
+	api_key = Prompt.ask(
+		"  [bold cyan]API key[/] [dim](leave empty to keep current)[/]",
+		default=masked_key,
+		show_default=bool(masked_key),
+	)
+	if api_key and api_key != masked_key:
+		CONFIG.set('addons.ai.api_key', api_key)
 
-		# Number → select from current display
-		if choice.isdigit():
-			idx = int(choice)
-			if 1 <= idx <= len(displayed):
-				selected = displayed[idx - 1]
-			else:
-				console.print(f"[bold red]  Invalid number: {idx} (valid: 1-{len(displayed)})[/]")
-				continue
-		else:
-			# Check exact match first
-			exact = [m for m in all_models if m.lower() == choice.lower()]
-			if exact:
-				selected = exact[0]
-			else:
-				# Text → filter models, re-display
-				query_lower = choice.lower()
-				filtered = [m for m in all_models if query_lower in m.lower()]
-				if not filtered:
-					console.print(f'[bold yellow]  No models matching "{choice}".[/]')
-					continue
-				if len(filtered) == 1:
-					selected = filtered[0]
-				else:
-					displayed = filtered
-					suffix = f' matching "{choice}"'
-					_show_models(displayed, suffix, leading_newline=True)
-					continue
+	config = CONFIG.validate()
+	if config:
+		CONFIG.save()
+		console.print(f"[bold green]  Default model set to [white]{selected}[/][/]")
+		console.print(f"[bold green]  Intent model set to [white]{selected}[/][/]")
+	else:
+		console.print(f"[bold yellow]  Model selected: {selected} (config validation failed, not saved)[/]")
 
-		# Model selected - save config
-		console.print(f"\n[bold green]  Selected: [white]{selected}[/][/]")
-		CONFIG.set('addons.ai.default_model', selected)
-		CONFIG.set('addons.ai.intent_model', selected)
+	# Verify with a simple LLM call
+	api_key = CONFIG.addons.ai.api_key
+	api_base = CONFIG.addons.ai.api_base
+	console.print()
+	try:
+		with maybe_status("[bold orange3]Verifying model connection...[/]", spinner="dots"):
+			result = call_llm(
+				[{"role": "user", "content": "Reply with only: OK"}],
+				selected, temperature=0, api_base=api_base, api_key=api_key,
+			)
+		console.print(f"[bold green]  Connection verified! Response: {result['content'].strip()}[/]")
+	except Exception as e:
+		console.print(f"[bold red]  Connection failed: {e}[/]")
+		console.print("[dim]  Check your API key and model name.[/]")
 
-		# Prompt for API key if model changed or key unset
-		api_key = Prompt.ask(
-			"  [bold cyan]API key[/] [dim](leave empty to keep current)[/]",
-			default=masked_key,
-			show_default=bool(masked_key),
-		)
-		if api_key and api_key != masked_key:
-			CONFIG.set('addons.ai.api_key', api_key)
-
-		config = CONFIG.validate()
-		if config:
-			CONFIG.save()
-			console.print(f"[bold green]  Default model set to [white]{selected}[/][/]")
-			console.print(f"[bold green]  Intent model set to [white]{selected}[/][/]")
-		else:
-			console.print(f"[bold yellow]  Model selected: {selected} (config validation failed, not saved)[/]")
-
-		# Verify with a simple LLM call
-		api_key = CONFIG.addons.ai.api_key
-		api_base = CONFIG.addons.ai.api_base
-		console.print()
-		try:
-			with maybe_status("[bold orange3]Verifying model connection...[/]", spinner="dots"):
-				result = call_llm(
-					[{"role": "user", "content": "Reply with only: OK"}],
-					selected, temperature=0, api_base=api_base, api_key=api_key,
-				)
-			console.print(f"[bold green]  Connection verified! Response: {result['content'].strip()}[/]")
-		except Exception as e:
-			console.print(f"[bold red]  Connection failed: {e}[/]")
-			console.print("[dim]  Check your API key and model name.[/]")
-
-		return selected
+	return selected
 
 
 def prompt_user(history, max_iterations=10, choices=None,

@@ -250,9 +250,14 @@ def _yield_tool_results(runner, collected):
 
 def resolve_llm_credentials(
 	caller_api_base, caller_api_key, config_api_base, config_api_key,
-	disallow_config_token=False,
+	disallow_config_token=False, provider=None,
 ):
 	"""Resolve the (api_base, api_key, error) triple for an AI run.
+
+	When ``provider`` names a preset (e.g. ``orcarouter``), the preset supplies
+	the inference base (unless explicitly configured) and its environment
+	variable is the last-resort key source. Explicit caller/config values still
+	win, so a self-hosted base or a per-run key keeps working.
 
 	SECURITY (LLM CREDS): when ``disallow_config_token`` is on and a caller overrides ``api_base``
 	without supplying their own ``api_key``, the configured key is NOT reused (it would be sent to
@@ -264,7 +269,20 @@ def resolve_llm_credentials(
 	custom_base = bool(caller_api_base) and caller_api_base != config_api_base
 	if disallow_config_token and custom_base and not caller_api_key:
 		return api_base, None, "A custom api_base requires you to provide your own api_key."
-	return api_base, (caller_api_key or config_api_key), None
+	api_key = caller_api_key or config_api_key
+	if provider:
+		from secator.ai import providers
+		spec = providers.get_provider(provider)
+		if spec is None:
+			known = ', '.join(sorted(providers.PROVIDERS))
+			return api_base, None, f"Unknown AI provider '{provider}'. Supported named providers: {known}."
+		try:
+			if not api_base:
+				api_base = providers.resolve_api_base(spec.id)
+			api_key = providers.resolve_api_key(spec.id, api_key)
+		except providers.ProviderConfigError as e:
+			return api_base, None, str(e)
+	return api_base, api_key, None
 
 
 @task()
@@ -278,11 +296,14 @@ class ai(PythonRunner):
 	# path that drives the loop before setup runs get_opt_value("isolated") — a resume/respawn
 	# via ai.__new__(ai), or the bare-task test harnesses. Real runs override this in setup.
 	isolated = False
+	provider = ''
 	opts = {
 		"name": {"type": str, "default": "", "short": "n", "internal_name": "session_name", "help": "Name for the AI session or subagent"},  # noqa: E501
 		"prompt": {"type": str, "default": "", "short": "p", "help": "Prompt"},
 		"mode": {"type": str, "default": "", "help": f"Mode: {', '.join(MODES)}"},  # derive from MODES, don't drift
 		"model": {"type": str, "default": CONFIG.addons.ai.default_model, "help": "LLM model"},
+		# Named provider preset (e.g. "orcarouter"). Empty = litellm-native model names.
+		"provider": {"type": str, "default": CONFIG.addons.ai.provider, "help": "Named AI provider preset (e.g. orcarouter)"},  # noqa: E501
 		# Never default this to CONFIG.addons.ai.api_key: a remote server serves task opts
 		# (incl. defaults) to clients, which would leak the key into client-rendered run options.
 		# Falls back to CONFIG at runtime instead; still `sensitive` so it's redacted.
@@ -969,8 +990,15 @@ class ai(PythonRunner):
 				self._report_tui_meta(token_count, ctx_window)
 
 				msg = format_llm_status(token_count, ctx_window, by_role)
+				llm_kwargs = {"tools": self.tool_schemas}
+				# Only pass the preset when one is configured: keeps the litellm-native
+				# call signature exactly as before.
+				if self.provider:
+					llm_kwargs["provider"] = self.provider
 				with maybe_status(msg, spinner="dots"):
-					result = call_llm(messages, self.model, self.temp, self.api_base, self.api_key, tools=self.tool_schemas)
+					result = call_llm(
+						messages, self.model, self.temp, self.api_base, self.api_key,
+						**llm_kwargs)
 
 				# reset rate-limit guard on success
 				rate_limit_streak = 0
@@ -1260,11 +1288,13 @@ class ai(PythonRunner):
 		self.is_subagent = self.get_opt_value("subagent")
 		self.model = self.get_opt_value("model")
 		self.intent_model = self.get_opt_value("intent_model")
+		self.provider = self.get_opt_value("provider") or CONFIG.addons.ai.provider
 		# SECURITY (LLM CREDS): don't reuse the configured key on a caller-overridden api_base (gated).
 		self.api_base, self.api_key, self._credential_error = resolve_llm_credentials(
 			self.get_opt_value("api_base"), self.get_opt_value("api_key"),
 			CONFIG.addons.ai.api_base, CONFIG.addons.ai.api_key,
 			CONFIG.addons.ai.custom_disallow_config_token,
+			provider=self.provider,
 		)
 		self.sensitive = self.get_opt_value("sensitive")
 		# Mode intent. An empty opt or the explicit "auto" sentinel means AUTO-DETECT:
@@ -1402,6 +1432,9 @@ class ai(PythonRunner):
 		if not self.model:
 			yield Error(message='No AI model configured. Run `secator ai setup` or set `addons.ai.default_model`.')
 			return
+		if self.provider:
+			yield from self._verify_named_provider_model()
+			return
 		try:
 			import litellm
 			info = litellm.get_model_info(self.model)
@@ -1414,6 +1447,42 @@ class ai(PythonRunner):
 		except Exception:
 			yield Warning(
 				message=f'Could not retrieve model info for "{self.model}". '
+				f'Context window defaults to {CONFIG.addons.ai.context_window} tokens.'
+			)
+
+	def _verify_named_provider_model(self):
+		"""Verify a named provider's model against its own catalog.
+
+		Catalog metadata (context window, modalities) is authoritative for gateway
+		models litellm has never heard of. A cold process has no catalog yet, so the
+		bounded catalog call is made here once; failures degrade to a warning and the
+		verified fallback metadata rather than blocking the run.
+		"""
+		from secator.ai import providers
+		spec = providers.get_provider(self.provider)
+		if spec is None:
+			yield Error(message=f"Unknown AI provider '{self.provider}'.")
+			return
+		if providers.get_known_context_window(self.model):
+			return
+		try:
+			result = providers.get_catalog(
+				self.api_key, provider_id=spec.id, api_base=self.api_base or None)
+			if result.degraded:
+				yield Warning(
+					message=f'{spec.label} model catalog unavailable ({result.error}). '
+					f'Using the verified fallback list; context window defaults to '
+					f'{CONFIG.addons.ai.context_window} tokens for unknown models.'
+				)
+			if not providers.get_known_context_window(self.model):
+				yield Warning(
+					message=f'Model "{self.model}" is not in the current {spec.label} catalog. '
+					f'Context window defaults to {CONFIG.addons.ai.context_window} tokens. '
+					f'Run `secator x ai setup` to pick a catalog model ({spec.docs_url}).'
+				)
+		except Exception as e:
+			yield Warning(
+				message=f'Could not verify "{self.model}" against the {spec.label} catalog: {e}. '
 				f'Context window defaults to {CONFIG.addons.ai.context_window} tokens.'
 			)
 
@@ -1455,8 +1524,11 @@ class ai(PythonRunner):
 			try:
 				selection_prompt = load_prompt("modes/_selection.txt")
 				messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
+				intent_kwargs = {"provider": self.provider} if self.provider else {}
 				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
-					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
+					result = call_llm(
+						messages, self.intent_model, temperature=0.3,
+						api_base=self.api_base, api_key=self.api_key, **intent_kwargs)
 				self._account_usage(result.get("usage"))
 				mode = normalize_mode(result["content"])
 				if mode in MODES:  # honor any real mode (incl. exploit), don't discard it
@@ -1676,7 +1748,7 @@ class ai(PythonRunner):
 		"""Auto-compact history when context exceeds 85% threshold."""
 		self.debug('checking auto-compaction...', sub='context')
 		summarized, old_tokens, new_tokens = self.history.maybe_summarize(
-			self.model, api_base=self.api_base, api_key=self.api_key)
+			self.model, api_base=self.api_base, api_key=self.api_key, provider=self.provider)
 		if summarized:
 			self.debug(f'compacted: {old_tokens} -> {new_tokens} tokens', sub='context')
 			yield Ai(
