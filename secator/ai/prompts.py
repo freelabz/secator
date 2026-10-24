@@ -520,7 +520,7 @@ def build_session_context(isolated: bool = False) -> str:
 
 
 def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None,
-                      isolated=None, is_subagent: bool = False) -> str:
+                      isolated=None, is_subagent: bool = False, data_path: str = "") -> str:
 	"""Get system prompt for mode with library reference filled in.
 
 	Args:
@@ -597,7 +597,8 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	if isolated is not None:
 		result += "\n\n" + build_session_context(isolated=bool(isolated))
 
-	return result.replace("$workspace_path", ws)
+	result = result.replace("$workspace_path", ws)
+	return result.replace("$data_path", data_path or "<session_data_dir>")
 
 
 def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = AI_MAX_RESULTS) -> str:
