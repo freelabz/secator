@@ -37,6 +37,7 @@ class Domain(OutputType):
 
 	_table_fields = [DOMAIN, ALIVE]
 	_sort_by = (DOMAIN,)
+	TARGET_FIELDS = ['domain']  # fields to scope-check this type against (scope.finding_scope_target)
 
 	def __post_init__(self):
 		super().__post_init__()

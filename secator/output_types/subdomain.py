@@ -32,6 +32,7 @@ class Subdomain(OutputType):
 		SOURCES
 	]
 	_sort_by = (HOST,)
+	TARGET_FIELDS = ['host']  # fields to scope-check this type against (scope.finding_scope_target)
 	_group_by = (DOMAIN,)        # collapse a domain's subdomains into one row
 	_group_aggregate = HOST
 
