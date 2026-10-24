@@ -9,6 +9,7 @@ if ADDONS_ENABLED['ai']:
 		SYSTEM_SCAN,
 		SYSTEM_CHAT,
 		SYSTEM_EXPLOIT,
+		SYSTEM_MONITOR,
 		MODES,
 		get_system_prompt,
 		get_mode_config,
@@ -277,6 +278,32 @@ class TestPrompts(unittest.TestCase):
 		self.assertIn("scan", MODES)
 		self.assertIn("chat", MODES)
 		self.assertIn("exploit", MODES)
+		self.assertIn("monitor", MODES)
+
+	def test_monitor_mode_config_has_correct_allowed_actions(self):
+		"""Monitor re-verifies EXISTING vulns: it can read, re-run the originating check,
+		retire a non-reproducing finding, and correct metadata — but never adds findings,
+		exploits, or self-escalates."""
+		actions = MODES["monitor"]["allowed_actions"]
+		self.assertEqual(
+			set(actions),
+			{"query", "task", "workflow", "shell", "mark_vuln_false_positive",
+			 "update_finding", "stop"})
+		for a in ["add_finding", "mark_vuln_exploited", "mark_vuln_exploit_failed",
+		          "subagent", "change_mode"]:
+			self.assertNotIn(a, actions)
+
+	def test_monitor_mode_has_bounded_iterations(self):
+		cap = MODES["monitor"]["max_iterations"]
+		self.assertIsInstance(cap, int)
+		self.assertGreater(cap, 0)
+		self.assertLessEqual(cap, 20)
+
+	def test_monitor_mode_is_selectable(self):
+		"""Pinning -mode monitor resolves to the monitor config (not the chat fallback)."""
+		cfg = get_mode_config("monitor")
+		self.assertEqual(cfg["system_prompt"], SYSTEM_MONITOR)
+		self.assertIn("monitor", MODES)
 
 	def test_exploit_mode_config_has_correct_allowed_actions(self):
 		exploit_config = MODES["exploit"]
@@ -368,7 +395,7 @@ class TestPrompts(unittest.TestCase):
 		"""Both offensive modes render exactly one guardrails block, and it's the STRONG
 		one (host-secret paths + scope hostname/IP rule). Exploit runs untrusted PoCs, so
 		it must not be left with only a weaker block."""
-		for mode in ("scan", "exploit"):
+		for mode in ("scan", "exploit", "monitor"):
 			p = get_system_prompt(mode)
 			self.assertEqual(p.count("</guardrails>"), 1, f"{mode}: expected one guardrails block")
 			self.assertIn("~/.secator/config.yml", p, f"{mode}: missing STRONG guardrails")
@@ -387,7 +414,7 @@ class TestPrompts(unittest.TestCase):
 
 	def test_rendered_prompts_have_no_unsubstituted_template_vars(self):
 		"""Rendered prompts must not leak $query_types / $output_types_reference (D1)."""
-		for mode in ("scan", "chat", "exploit"):
+		for mode in ("scan", "chat", "exploit", "monitor"):
 			prompt = get_system_prompt(mode)
 			self.assertNotIn("$query_types", prompt, f"$query_types leaked in {mode!r} prompt")
 			self.assertNotIn("$output_types_reference", prompt, f"$output_types_reference leaked in {mode!r} prompt")
@@ -397,7 +424,7 @@ class TestPrompts(unittest.TestCase):
 		from secator.ai.prompts import build_query_types
 		expected = build_query_types()
 		self.assertIn("vulnerability", expected)
-		for mode in ("scan", "chat", "exploit"):
+		for mode in ("scan", "chat", "exploit", "monitor"):
 			self.assertIn(expected, get_system_prompt(mode))
 
 	def test_rendered_prompts_have_no_phantom_run_query_tool(self):
@@ -405,7 +432,7 @@ class TestPrompts(unittest.TestCase):
 		from secator.ai.tools import TOOL_ACTION_MAP
 		self.assertEqual(TOOL_ACTION_MAP["query_workspace"], "query")
 		self.assertNotIn("run_query", TOOL_ACTION_MAP)
-		for mode in ("scan", "chat", "exploit"):
+		for mode in ("scan", "chat", "exploit", "monitor"):
 			prompt = get_system_prompt(mode)
 			self.assertNotIn("run_query", prompt, f"phantom run_query in {mode!r} prompt")
 			self.assertIn("query_workspace", prompt)
@@ -498,7 +525,7 @@ class TestOperatingRulesRecap(unittest.TestCase):
 	"""
 
 	def test_recap_present_and_last_in_every_mode(self):
-		for mode in ("chat", "scan", "exploit"):
+		for mode in ("chat", "scan", "exploit", "monitor"):
 			p = get_system_prompt(mode, workspace_path="<ws>", backend=None)
 			self.assertIn("<operating_rules>", p, f"{mode} missing recap")
 			self.assertTrue(

@@ -67,6 +67,7 @@ QUERIES = load_prompt("constraints/queries.txt")
 SYSTEM_SCAN = Template(load_prompt("modes/scan.txt"))
 SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
 SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
+SYSTEM_MONITOR = Template(load_prompt("modes/monitor.txt"))
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
 MODES = {
@@ -99,6 +100,18 @@ MODES = {
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
 		"allowed_actions": ["task", "workflow", "shell", "query", "read_file", "write_file", "fetch_url", "screenshot", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
+	},
+	"monitor": {
+		"system_prompt": SYSTEM_MONITOR,
+		# Attack-surface monitoring: a bounded, recurring re-verification of EXISTING
+		# vulnerabilities. It can read (query), re-run the originating check
+		# (task/workflow/shell) against a finding's own target, retire a finding that no
+		# longer reproduces (mark_vuln_false_positive) and correct metadata
+		# (update_finding). It CANNOT add findings, exploit, or self-escalate: no
+		# add_finding, no mark_vuln_exploited/exploit_failed, no subagent, no change_mode.
+		# Higher iteration cap than the one-shot modes because it walks a finding set.
+		"allowed_actions": ["query", "task", "workflow", "shell", "mark_vuln_false_positive", "update_finding", "stop"],
+		"max_iterations": 10,
 	},
 }
 
@@ -554,8 +567,8 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# $output_types_reference, so they must be substituted for all modes — derive both
 	# from FINDING_TYPES so they never drift from the registry.
 	subst = dict(query_types=build_query_types(), output_types_reference=build_output_types_reference())
-	# Any mode that can run tasks/workflows (built-in scan/exploit, or a custom mode that
-	# enables them) gets the tool library reference + paths substituted.
+	# Any mode that can run tasks/workflows (built-in scan/exploit/monitor, or a custom mode
+	# that enables them) gets the tool library reference + paths substituted.
 	if {"task", "workflow"} & set(mode_config["allowed_actions"]):
 		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 		subst.update(library_reference=build_library_reference(), **path_vars)
