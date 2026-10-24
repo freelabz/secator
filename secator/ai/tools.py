@@ -9,6 +9,7 @@ TOOL_ACTION_MAP = {
 	"run_task": "task",
 	"run_subagent": "subagent",
 	"run_workflow": "workflow",
+	"screenshot": "screenshot",
 	"run_shell": "shell",
 	"read_file": "read_file",
 	"write_file": "write_file",
@@ -534,6 +535,25 @@ TOOL_SCHEMAS = {
 				"properties": {
 					"url": {"type": "string", "description": "The http(s) URL to fetch."},
 					"max_chars": {"type": "integer", "description": "Max characters of extracted text to return (default 20000)."}
+				},
+				"required": ["url"]
+			}
+		}
+	},
+	"screenshot": {
+		"type": "function",
+		"function": {
+			"name": "screenshot",
+			"description": (
+				"Capture a screenshot of a web page as visual evidence (headless browser via httpx). Use it "
+				"to document what a target page looks like — a login panel, a defaced page, an exposed admin "
+				"interface. The URL is scope-checked like any other target."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"url": {"type": "string", "description": "The http(s) URL to screenshot."},
+					"description": _DESCRIPTION_SCHEMA
 				},
 				"required": ["url"]
 			}
