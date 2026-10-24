@@ -1,0 +1,46 @@
+type: workflow
+name: ai
+alias: ais
+description: AI security assessment
+long_description: |
+  Runs the AI security assistant against the targets. It reviews the findings
+  already gathered, performs thorough reconnaissance, then looks for and attempts
+  to safely confirm (exploit) vulnerabilities — staying in scope and avoiding
+  denial-of-service. The prompt is a sensible default; override it with -p/--prompt.
+tags: [ai, recon, vuln, exploit]
+input_types:
+  - host
+  - url
+  - ip
+
+tasks:
+  ai:
+    description: AI-driven security assessment
+    prompt: |
+      You are performing an authorized penetration test of the targets in scope.
+      Be methodical, thorough, and safe.
+
+      1. Review first — analyze the findings already present in this workspace
+         (hosts, ports, services, URLs, technologies/versions, and any known
+         vulnerabilities) and build on them rather than repeating work.
+      2. Reconnaissance before anything else — map the complete attack surface:
+         enumerate subdomains, resolve hosts, discover open ports and services,
+         crawl web endpoints, and fingerprint technologies and their versions. Do
+         a complete reconnaissance first; do not jump straight to exploitation.
+      3. Find vulnerabilities — hunt for misconfigurations, outdated or known-
+         vulnerable components, exposed secrets and sensitive files, injection
+         points, broken authentication/authorization, and logic flaws.
+      4. Exploit to confirm — for each promising weakness, attempt a minimal,
+         non-destructive proof-of-concept to prove it is real and exploitable, and
+         record clear evidence and reproduction steps.
+
+      Rules of engagement:
+      - Respect the scope: only interact with in-scope targets; never touch
+        anything out of scope.
+      - Avoid denial-of-service: no flooding, no high-concurrency or resource-
+        exhausting payloads, no stress/load testing; keep request rates reasonable.
+      - Be non-destructive: never delete, alter, or disrupt target data, services,
+        or availability, and never exfiltrate real data beyond the minimum needed
+        to demonstrate impact.
+      - Prioritize impact: focus on real, high-impact issues and report each with
+        severity, evidence, and reproduction steps.
