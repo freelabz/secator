@@ -1138,7 +1138,7 @@ class PermissionEngine:
 		elif action_type == "screenshot":
 			# The verb is fine; the URL is gated as a TARGET (network egress) in _extract_targets.
 			return PermissionResult(decision="allow", reason="screenshot target checked separately")
-		elif action_type in ("query", "fetch_url", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
+		elif action_type in ("query", "fetch_url", "update_plan", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
 			# mark_vuln_exploited / mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
 			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
 			# so they're safe to auto-allow alongside query/add_finding.
