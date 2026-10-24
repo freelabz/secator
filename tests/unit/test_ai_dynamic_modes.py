@@ -18,7 +18,7 @@ class TestDynamicAiModes(unittest.TestCase):
 		from secator.ai.prompts import discover_ai_modes
 		self._write('recon', (
 			'---\n'
-			'allowed_actions: [query, follow_up, stop]\n'
+			'allowed_actions: [query, shell, stop]\n'
 			'max_iterations: 12\n'
 			'---\n'
 			'You are a recon assistant.\n${queries}\n'
@@ -26,7 +26,7 @@ class TestDynamicAiModes(unittest.TestCase):
 		modes = discover_ai_modes(self.tmp)
 		self.assertIn('recon', modes)
 		cfg = modes['recon']
-		self.assertEqual(cfg['allowed_actions'], ['query', 'follow_up', 'stop'])
+		self.assertEqual(cfg['allowed_actions'], ['query', 'shell', 'stop'])
 		self.assertEqual(cfg['max_iterations'], 12)
 		self.assertIsInstance(cfg['system_prompt'], Template)
 		# ${queries} include resolved into the prompt body

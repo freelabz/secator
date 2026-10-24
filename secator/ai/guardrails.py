@@ -1085,6 +1085,7 @@ class PermissionEngine:
 		(e.g. unbalanced quotes from LLM), prompts the user for the whole command.
 		Returns the most restrictive result (deny > ask > allow).
 		"""
+		from secator.ai.tools import TOOLS_BY_ACTION
 		if action_type == "shell":
 			command = action.get("command", "")
 			if not command.strip():
@@ -1148,24 +1149,26 @@ class PermissionEngine:
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
-		elif action_type in ("subagent", "stop", "change_mode"):
-			# Control / meta actions with no network egress or exec of their OWN: `stop`
-			# and `change_mode` only steer the loop, and a `subagent`'s own actions are
-			# guardrail-checked inside its run (its targets are also scope-checked here via
-			# the target layer below). Auto-allow the action itself — without this they fall
-			# through to the "Unknown action type" deny and silently break run_subagent /
-			# the bare stop() / change_mode.
-			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
 		elif action_type == "screenshot":
 			# The verb is fine; the URL is gated as a TARGET (network egress) in _extract_targets.
 			return PermissionResult(decision="allow", reason="screenshot target checked separately")
-		elif action_type in ("query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding") or _is_dynamic_action(action_type):  # noqa: E501
-			# web_search is a read-only external lookup (no workspace mutation); list_runners is a
-			# read-only run-history lookup (no mutation); a dynamic (autoloaded) tool is auto-allowed
-			# like query. mark_vuln_exploited /
-			# mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
-			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
-			# so they're safe to auto-allow alongside query/add_finding.
+		elif action_type in ("read_file", "write_file"):
+			# The verb is always fine; the PATH is gated by the read/write layer in _decide.
+			return PermissionResult(decision="allow", reason=f"{action_type} path checked separately")
+		# Auto-allow is sourced from the tool registry (`tool.auto_allow`), the single
+		# source of truth — not a hand-synced tuple here (that drift is what rotted the
+		# add_vuln_poc rename). Auto-allowed actions are control/meta (`subagent`/`stop`/
+		# `change_mode` only steer the loop; a subagent's own actions + targets are
+		# guardrail-checked inside its run and by the target layer below), read-only external
+		# lookups (`fetch_url`/`web_search`/`list_runners`), the `update_plan` to-do list, and
+		# finding reads/writes (`query`/`add_finding`/`mark_vuln_*`/`update_finding` only read or
+		# $set-update an EXISTING workspace finding — no scope widening). A dynamic (autoloaded)
+		# tool is auto-allowed like query. The target layer below still scope-checks any
+		# `targets` these carry.
+		elif (
+			((tool := TOOLS_BY_ACTION.get(action_type)) is not None and tool.auto_allow)
+			or _is_dynamic_action(action_type)
+		):
 			# Don't let an injected add_finding silently mint a scope-widening target finding.
 			# Deny (fail-closed) rather than "ask": there is no add_finding prompt layer, so an
 			# "ask" here isn't surfaceable — it would just spin the prompt loop until it denies

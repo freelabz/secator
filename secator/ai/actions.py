@@ -398,35 +398,14 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	Yields:
 		OutputType instances (Info, Warning, Error, Ai)
 	"""
+	from secator.ai.tools import TOOLS_BY_ACTION, DYNAMIC_HANDLERS
 	action_type = action.get("action", "")
-
-	handlers = {
-		"task": _handle_task,
-		"subagent": _handle_subagent,
-		"workflow": _handle_workflow,
-		"screenshot": _handle_screenshot,
-		"shell": _handle_shell,
-		"read_file": _handle_read_file,
-		"write_file": _handle_write_file,
-		"query": _handle_query,
-		"fetch_url": _handle_fetch_url,
-		"update_plan": _handle_update_plan,
-		"web_search": _handle_web_search,
-		"list_runners": _handle_list_runners,
-		"add_finding": _handle_add_finding,
-		"mark_vuln_exploited": _handle_mark_vuln_exploited,
-		"mark_vuln_false_positive": _handle_mark_vuln_false_positive,
-		"mark_vuln_exploit_failed": _handle_mark_vuln_exploit_failed,
-		"update_finding": _handle_update_finding,
-		"change_mode": _handle_change_mode,
-		"stop": _handle_stop,
-	}
-
-	# Dynamic (autoloaded) tools register their handlers keyed by action type.
-	from secator.ai.tools import DYNAMIC_HANDLERS
-	handler = handlers.get(action_type) or DYNAMIC_HANDLERS.get(action_type)
-	if handler:
-		yield from handler(action, ctx)
+	tool = TOOLS_BY_ACTION.get(action_type)
+	if tool:
+		yield from tool.handle(action, ctx)
+	elif action_type in DYNAMIC_HANDLERS:
+		# Dynamic (autoloaded) tools register their handlers keyed by action type.
+		yield from DYNAMIC_HANDLERS[action_type](action, ctx)
 	else:
 		context = _get_result_context(action, ctx)
 		yield Warning(message=f"Unknown action: {action_type}", _context=context)

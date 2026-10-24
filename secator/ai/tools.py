@@ -1,33 +1,25 @@
-"""Tool schema definitions for native LLM tool calling."""
+"""Single source of truth for native LLM tools.
+
+Each tool is one self-contained ``BaseTool`` subclass carrying everything that
+used to be hand-synced across 5 places (schema, dispatch action, mode exposure,
+permission auto-allow, handler). The ``TOOLS`` registry is built from the
+subclasses, and every drift-prone view derives from it:
+
+* ``build_tool_schemas(mode, ...)`` filters ``TOOLS`` by ``mode in tool.modes``.
+* ``TOOL_ACTION_MAP`` / ``TOOL_SCHEMAS`` are derived dicts (kept for callers).
+* ``dispatch_action`` (actions.py) routes via ``TOOLS_BY_ACTION[action].handle``.
+* ``PermissionEngine`` (guardrails.py) reads ``tool.auto_allow``.
+
+Adding a tool is ONE edit: define a ``BaseTool`` subclass and list it in
+``_TOOL_CLASSES``. The consistency test (test_ai_tools) fails if a tool's mode
+exposure and a mode's ``allowed_actions`` drift apart.
+"""
 
 import json
 
-from secator.ai.prompts import get_mode_config
+from secator.ai.prompts import MODES, normalize_mode
 from secator.output_types import Warning
 from secator.rich import console
-
-# Map tool names to action types used by existing action handlers
-TOOL_ACTION_MAP = {
-	"run_task": "task",
-	"run_subagent": "subagent",
-	"run_workflow": "workflow",
-	"screenshot": "screenshot",
-	"run_shell": "shell",
-	"read_file": "read_file",
-	"write_file": "write_file",
-	"query_workspace": "query",
-	"fetch_url": "fetch_url",
-	"update_plan": "update_plan",
-	"web_search": "web_search",
-	"list_runners": "list_runners",
-	"add_finding": "add_finding",
-	"mark_vuln_exploited": "mark_vuln_exploited",
-	"mark_vuln_false_positive": "mark_vuln_false_positive",
-	"mark_vuln_exploit_failed": "mark_vuln_exploit_failed",
-	"update_finding": "update_finding",
-	"change_mode": "change_mode",
-	"stop": "stop",
-}
 
 # --- Dynamic (autoloaded) tools -------------------------------------------------
 # Custom AI tools dropped into CONFIG.dirs.templates (a *.py exporting AI_TOOL / AI_TOOLS)
@@ -77,7 +69,7 @@ def register_ai_tool(spec: dict) -> bool:
 	if not isinstance(modes, (list, tuple)) or not modes:
 		modes = list(MODES.keys())
 
-	TOOL_SCHEMAS[name] = {
+	schema = {
 		"type": "function",
 		"function": {
 			"name": name,
@@ -85,6 +77,31 @@ def register_ai_tool(spec: dict) -> bool:
 			"parameters": parameters,
 		},
 	}
+	tool_modes = frozenset(normalize_mode(m) for m in modes if MODES.get(normalize_mode(m)) is not None)
+
+	# Build a BaseTool instance so the dynamic tool lives in the same registry as the
+	# built-ins — build_tool_schemas iterates TOOLS, dispatch_action reads TOOLS_BY_ACTION,
+	# and the guardrail reads tool.auto_allow. dispatch_action ALSO falls back to
+	# DYNAMIC_HANDLERS, and the guardrail auto-allows via _is_dynamic_action, so a dynamic
+	# tool is auto-allowed (the SAFE class — no target/path side effects, see the module note).
+	dyn_tool = BaseTool()
+	dyn_tool.name = name
+	dyn_tool.action = action_type
+	dyn_tool.schema = schema
+	dyn_tool.modes = tool_modes
+	dyn_tool.auto_allow = True
+	dyn_tool.injected = False
+	# A dynamic tool's handler is the spec callable, not a `_handle_*` in actions.py — bind it
+	# onto the instance so dispatch_action's `tool.handle(action, ctx)` (which finds the tool in
+	# TOOLS_BY_ACTION) runs the custom handler. (DYNAMIC_HANDLERS is still populated for the
+	# legacy fallback path and introspection.)
+	dyn_tool.handle = handler
+	TOOLS.append(dyn_tool)
+	TOOLS_BY_NAME[name] = dyn_tool
+	TOOLS_BY_ACTION[action_type] = dyn_tool
+
+	# Keep the derived views + dynamic bookkeeping in sync.
+	TOOL_SCHEMAS[name] = schema
 	TOOL_ACTION_MAP[name] = action_type
 	DYNAMIC_HANDLERS[action_type] = handler
 	DYNAMIC_ACTION_TYPES.add(action_type)
@@ -114,9 +131,61 @@ _DESCRIPTION_SCHEMA = {
 	               "'Fire the reflected-XSS payload at level 1'. Shown to the user in place of the bare task name."
 }
 
-# OpenAI-format tool schemas keyed by tool name
-TOOL_SCHEMAS = {
-	"run_task": {
+# Mode-membership sets, so each tool declares exposure declaratively. These mirror
+# the per-mode ``allowed_actions`` in prompts.MODES (enforced by the consistency test).
+_SCAN_EXPLOIT = frozenset({"scan", "exploit"})
+_ALL_MODES = frozenset({"scan", "chat", "exploit"})
+# monitor is a bounded re-verification mode: it can run tasks/workflows/shell and query, and
+# retire/correct an EXISTING finding (mark_vuln_false_positive / update_finding) — see
+# prompts.MODES["monitor"]. These sets add monitor to the tools it exposes.
+_SCAN_EXPLOIT_MONITOR = frozenset({"scan", "exploit", "monitor"})
+_QUERY_MODES = frozenset({"scan", "chat", "exploit", "monitor"})
+# Read-only helpers available in the read/write modes + chat (NOT monitor, which is a focused
+# re-verification loop over a finding set).
+_READONLY_HELPER = frozenset({"scan", "chat", "exploit"})
+
+
+class BaseTool:
+	"""One AI tool. Subclasses set the class attributes; the registry does the rest.
+
+	Attributes:
+		name: Tool function name exposed to the LLM (e.g. ``run_task``).
+		action: Dispatch key / action type used by handlers (e.g. ``task``).
+		schema: OpenAI-format function schema dict.
+		modes: Set of modes that expose this tool (``build_tool_schemas`` filter).
+		auto_allow: True if ``PermissionEngine`` auto-allows this action at the
+			action-type layer (no name/scope rule needed). task/workflow/shell are
+			False — they have their own layer-1 handling.
+		injected: True for a tool NOT emitted by ``build_tool_schemas`` mode
+			filtering and NOT listed in ``TOOL_SCHEMAS``; it is injected separately
+			via the interactivity backend's ``get_extra_tools`` (``stop``).
+		handler: Name of the ``_handle_*`` generator in ``secator.ai.actions``.
+	"""
+
+	name: str = ""
+	action: str = ""
+	schema: dict = {}
+	modes: frozenset = frozenset()
+	auto_allow: bool = False
+	injected: bool = False
+	handler: str = ""
+
+	def handle(self, action, ctx):
+		"""Dispatch to the existing ``_handle_*`` generator (logic unchanged).
+
+		Lazy import avoids a tools<->actions import cycle (actions dispatches back
+		through this registry).
+		"""
+		from secator.ai import actions
+		return getattr(actions, self.handler)(action, ctx)
+
+
+class RunTaskTool(BaseTool):
+	name = "run_task"
+	action = "task"
+	modes = _SCAN_EXPLOIT_MONITOR
+	handler = "_handle_task"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "run_task",
@@ -140,8 +209,16 @@ TOOL_SCHEMAS = {
 				"required": ["name", "targets", "description"]
 			}
 		}
-	},
-	"run_subagent": {
+	}
+
+
+class RunSubagentTool(BaseTool):
+	name = "run_subagent"
+	action = "subagent"
+	modes = _ALL_MODES
+	auto_allow = True
+	handler = "_handle_subagent"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "run_subagent",
@@ -183,8 +260,15 @@ TOOL_SCHEMAS = {
 				"required": ["objective", "targets", "description"]
 			}
 		}
-	},
-	"run_workflow": {
+	}
+
+
+class RunWorkflowTool(BaseTool):
+	name = "run_workflow"
+	action = "workflow"
+	modes = _SCAN_EXPLOIT_MONITOR
+	handler = "_handle_workflow"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "run_workflow",
@@ -206,8 +290,15 @@ TOOL_SCHEMAS = {
 				"required": ["name", "targets", "description"]
 			}
 		}
-	},
-	"run_shell": {
+	}
+
+
+class RunShellTool(BaseTool):
+	name = "run_shell"
+	action = "shell"
+	modes = _SCAN_EXPLOIT_MONITOR
+	handler = "_handle_shell"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "run_shell",
@@ -234,8 +325,16 @@ TOOL_SCHEMAS = {
 				"required": ["command", "description"]
 			}
 		}
-	},
-	"query_workspace": {
+	}
+
+
+class QueryWorkspaceTool(BaseTool):
+	name = "query_workspace"
+	action = "query"
+	modes = _QUERY_MODES
+	auto_allow = True
+	handler = "_handle_query"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "query_workspace",
@@ -276,8 +375,16 @@ TOOL_SCHEMAS = {
 				"required": ["query", "description"]
 			}
 		}
-	},
-	"add_finding": {
+	}
+
+
+class AddFindingTool(BaseTool):
+	name = "add_finding"
+	action = "add_finding"
+	modes = _SCAN_EXPLOIT
+	auto_allow = True
+	handler = "_handle_add_finding"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "add_finding",
@@ -308,8 +415,16 @@ TOOL_SCHEMAS = {
 				"additionalProperties": True
 			}
 		}
-	},
-	"mark_vuln_exploited": {
+	}
+
+
+class MarkVulnExploitedTool(BaseTool):
+	name = "mark_vuln_exploited"
+	action = "mark_vuln_exploited"
+	modes = _SCAN_EXPLOIT
+	auto_allow = True
+	handler = "_handle_mark_vuln_exploited"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "mark_vuln_exploited",
@@ -390,8 +505,16 @@ TOOL_SCHEMAS = {
 				"required": ["_uuid", "poc"]
 			}
 		}
-	},
-	"mark_vuln_false_positive": {
+	}
+
+
+class MarkVulnFalsePositiveTool(BaseTool):
+	name = "mark_vuln_false_positive"
+	action = "mark_vuln_false_positive"
+	modes = _SCAN_EXPLOIT_MONITOR
+	auto_allow = True
+	handler = "_handle_mark_vuln_false_positive"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "mark_vuln_false_positive",
@@ -421,8 +544,16 @@ TOOL_SCHEMAS = {
 				"required": ["_uuid"]
 			}
 		}
-	},
-	"mark_vuln_exploit_failed": {
+	}
+
+
+class MarkVulnExploitFailedTool(BaseTool):
+	name = "mark_vuln_exploit_failed"
+	action = "mark_vuln_exploit_failed"
+	modes = _SCAN_EXPLOIT
+	auto_allow = True
+	handler = "_handle_mark_vuln_exploit_failed"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "mark_vuln_exploit_failed",
@@ -490,8 +621,16 @@ TOOL_SCHEMAS = {
 				"required": ["_uuid"]
 			}
 		}
-	},
-	"update_finding": {
+	}
+
+
+class UpdateFindingTool(BaseTool):
+	name = "update_finding"
+	action = "update_finding"
+	modes = _SCAN_EXPLOIT_MONITOR
+	auto_allow = True
+	handler = "_handle_update_finding"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "update_finding",
@@ -525,8 +664,16 @@ TOOL_SCHEMAS = {
 				"required": ["_uuid"]
 			}
 		}
-	},
-	"change_mode": {
+	}
+
+
+class ChangeModeTool(BaseTool):
+	name = "change_mode"
+	action = "change_mode"
+	modes = _ALL_MODES
+	auto_allow = True
+	handler = "_handle_change_mode"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "change_mode",
@@ -554,8 +701,17 @@ TOOL_SCHEMAS = {
 				"required": ["mode"]
 			}
 		}
-	},
-	"read_file": {
+	}
+
+
+class ReadFileTool(BaseTool):
+	name = "read_file"
+	action = "read_file"
+	modes = _SCAN_EXPLOIT
+	# NOT auto_allow: the PATH is gated by the read layer in the guardrail (_check_action_type
+	# returns "path checked separately", then _decide runs the read rules on the path).
+	handler = "_handle_read_file"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "read_file",
@@ -573,8 +729,16 @@ TOOL_SCHEMAS = {
 				"required": ["path"]
 			}
 		}
-	},
-	"write_file": {
+	}
+
+
+class WriteFileTool(BaseTool):
+	name = "write_file"
+	action = "write_file"
+	modes = _SCAN_EXPLOIT
+	# NOT auto_allow: the PATH is gated by the write layer in the guardrail.
+	handler = "_handle_write_file"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "write_file",
@@ -593,8 +757,16 @@ TOOL_SCHEMAS = {
 				"required": ["path", "content"]
 			}
 		}
-	},
-	"fetch_url": {
+	}
+
+
+class FetchUrlTool(BaseTool):
+	name = "fetch_url"
+	action = "fetch_url"
+	modes = _READONLY_HELPER
+	auto_allow = True  # read-only external lookup; SSRF-guarded in the handler, no target scope
+	handler = "_handle_fetch_url"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "fetch_url",
@@ -613,8 +785,17 @@ TOOL_SCHEMAS = {
 				"required": ["url"]
 			}
 		}
-	},
-	"screenshot": {
+	}
+
+
+class ScreenshotTool(BaseTool):
+	name = "screenshot"
+	action = "screenshot"
+	modes = _SCAN_EXPLOIT
+	# NOT auto_allow: the URL is gated as a TARGET (network egress) in the guardrail
+	# (_check_action_type returns "target checked separately", then the target layer scopes it).
+	handler = "_handle_screenshot"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "screenshot",
@@ -632,8 +813,16 @@ TOOL_SCHEMAS = {
 				"required": ["url"]
 			}
 		}
-	},
-	"update_plan": {
+	}
+
+
+class UpdatePlanTool(BaseTool):
+	name = "update_plan"
+	action = "update_plan"
+	modes = _READONLY_HELPER
+	auto_allow = True  # a user-visible to-do list; no workspace mutation, no target/path egress
+	handler = "_handle_update_plan"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "update_plan",
@@ -662,8 +851,16 @@ TOOL_SCHEMAS = {
 				"required": ["items"]
 			}
 		}
-	},
-	"web_search": {
+	}
+
+
+class WebSearchTool(BaseTool):
+	name = "web_search"
+	action = "web_search"
+	modes = _READONLY_HELPER
+	auto_allow = True  # read-only external lookup; no workspace mutation, no target scope
+	handler = "_handle_web_search"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "web_search",
@@ -708,8 +905,16 @@ TOOL_SCHEMAS = {
 				"required": ["query"]
 			}
 		}
-	},
-	"list_runners": {
+	}
+
+
+class ListRunnersTool(BaseTool):
+	name = "list_runners"
+	action = "list_runners"
+	modes = _READONLY_HELPER
+	auto_allow = True  # read-only run-history lookup; no mutation, no target/path egress
+	handler = "_handle_list_runners"
+	schema = {
 		"type": "function",
 		"function": {
 			"name": "list_runners",
@@ -748,8 +953,88 @@ TOOL_SCHEMAS = {
 				"required": []
 			}
 		}
-	},
-}
+	}
+
+
+class StopTool(BaseTool):
+	name = "stop"
+	action = "stop"
+	# `stop` is allowed in EVERY mode (incl. monitor) — it is injected per-backend via
+	# get_extra_tools, not emitted by the build_tool_schemas mode filter, but its modes must
+	# still cover every mode that lists `stop` in allowed_actions (consistency guard).
+	modes = frozenset({"scan", "chat", "exploit", "monitor"})
+	auto_allow = True
+	# NOT emitted by build_tool_schemas / not in TOOL_SCHEMAS — injected per-backend
+	# via get_extra_tools (interactive backends a `stop` with `choices`, AutoBackend a
+	# choiceless one). The registry carries the INTERACTIVE schema so coerce_stringified_args
+	# can coerce a stringified `choices` array; the choiceless variant is STOP_TOOL_SCHEMA_SIMPLE.
+	injected = True
+	handler = "_handle_stop"
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "stop",
+			"description": "End your turn. Call when the user's request has been fulfilled, or when you hit a blocker "  # noqa: E501
+			               "you cannot resolve without user input. Offer concrete next steps via `choices` (renders as "  # noqa: E501
+			               "clickable buttons); omit `choices` when the task is simply complete.",
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"reason": {
+						"type": "string",
+						"description": "Why you are stopping (summary of accomplishments or description of blocker)."
+					},
+					"choices": {
+						"type": "array",
+						"items": {"type": "string"},
+						"description": "Optional list of concrete action choices to offer the user as next steps."
+					},
+					"multiple": {
+						"type": "boolean",
+						"description": "Set true when the choices are NOT mutually exclusive and the user could pick SEVERAL "  # noqa: E501
+						               "(multi-select) — common for independent next actions, e.g. ['Port scan', 'Directory "  # noqa: E501
+						               "brute-force', 'Vulnerability scan'] the user may want to run together. Omit or false "  # noqa: E501
+						               "only for a genuine pick-exactly-one question (e.g. 'Which target?')."
+					}
+				},
+				"required": ["reason"]
+			}
+		}
+	}
+
+
+# The registry: order mirrors the historical TOOL_SCHEMAS order so build_tool_schemas
+# emits tools in the same order as before (parity).
+_TOOL_CLASSES = [
+	RunTaskTool,
+	RunSubagentTool,
+	RunWorkflowTool,
+	RunShellTool,
+	QueryWorkspaceTool,
+	AddFindingTool,
+	MarkVulnExploitedTool,
+	MarkVulnFalsePositiveTool,
+	MarkVulnExploitFailedTool,
+	UpdateFindingTool,
+	ReadFileTool,
+	WriteFileTool,
+	FetchUrlTool,
+	ScreenshotTool,
+	UpdatePlanTool,
+	WebSearchTool,
+	ListRunnersTool,
+	ChangeModeTool,
+	StopTool,
+]
+
+TOOLS = [cls() for cls in _TOOL_CLASSES]
+TOOLS_BY_NAME = {t.name: t for t in TOOLS}
+TOOLS_BY_ACTION = {t.action: t for t in TOOLS}
+
+# Derived views (kept for existing callers; no longer hand-synced). TOOL_SCHEMAS
+# excludes `injected` tools (stop), matching the historical contract.
+TOOL_ACTION_MAP = {t.name: t.action for t in TOOLS}
+TOOL_SCHEMAS = {t.name: t.schema for t in TOOLS if not t.injected}
 
 
 # Stop tool schemas — NOT in TOOL_SCHEMAS; injected per-backend via get_extra_tools().
@@ -757,38 +1042,8 @@ TOOL_SCHEMAS = {
 # decides what happens next (interactive pause / wait, or non-interactive end).
 
 # Interactive stop (TUI / CLI / remote): may carry `choices`/`multiple` so the pause
-# offers the user concrete next steps to pick from.
-STOP_TOOL_SCHEMA = {
-	"type": "function",
-	"function": {
-		"name": "stop",
-		"description": "End your turn. Call when the user's request has been fulfilled, or when you hit a blocker "  # noqa: E501
-		               "you cannot resolve without user input. Offer concrete next steps via `choices` (renders as "  # noqa: E501
-		               "clickable buttons); omit `choices` when the task is simply complete.",
-		"parameters": {
-			"type": "object",
-			"properties": {
-				"reason": {
-					"type": "string",
-					"description": "Why you are stopping (summary of accomplishments or description of blocker)."
-				},
-				"choices": {
-					"type": "array",
-					"items": {"type": "string"},
-					"description": "Optional list of concrete action choices to offer the user as next steps."
-				},
-				"multiple": {
-					"type": "boolean",
-					"description": "Set true when the choices are NOT mutually exclusive and the user could pick SEVERAL "  # noqa: E501
-					               "(multi-select) — common for independent next actions, e.g. ['Port scan', 'Directory "  # noqa: E501
-					               "brute-force', 'Vulnerability scan'] the user may want to run together. Omit or false "  # noqa: E501
-					               "only for a genuine pick-exactly-one question (e.g. 'Which target?')."
-				}
-			},
-			"required": ["reason"]
-		}
-	}
-}
+# offers the user concrete next steps to pick from. This is the registry's StopTool schema.
+STOP_TOOL_SCHEMA = TOOLS_BY_NAME["stop"].schema
 
 # Non-interactive stop (AutoBackend: subagents + autonomous workers): a DEFINITIVE stop,
 # so NO `choices` — there is no user to pick a next step.
@@ -812,7 +1067,7 @@ STOP_TOOL_SCHEMA_SIMPLE = {
 
 
 def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_is_auto: bool = True) -> list:
-	"""Return list of tool schemas filtered by mode's allowed_actions.
+	"""Return list of tool schemas exposed in a mode (derived from the registry).
 
 	Args:
 		mode: The AI mode (scan, chat, exploit). Unknown modes fall back to chat.
@@ -832,8 +1087,12 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 	"""
 	from secator.loader import discover_ai_tools
 	discover_ai_tools()  # autoload custom tools (cached, one-time)
-	config = get_mode_config(mode)
-	allowed_actions = config["allowed_actions"]
+	# An unknown mode exposes the same tools as chat (historical fallback), but the
+	# pinned-chat `change_mode` gate below keys off the ORIGINAL mode name — an unknown
+	# mode is not literally `chat`, so it is NOT withheld there (parity with the prior
+	# get_mode_config-based filter, which only used the chat fallback for tool exposure).
+	norm = normalize_mode(mode)
+	lookup_mode = norm if norm in MODES else "chat"
 	excluded = set()
 	if is_subagent:
 		# A subagent runs at its assigned mode; it does not self-escalate and
@@ -845,9 +1104,8 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 	if backend is not None:
 		excluded.update(backend.get_excluded_tools())
 	schemas = [
-		schema for tool_name, schema in TOOL_SCHEMAS.items()
-		if TOOL_ACTION_MAP.get(tool_name) in allowed_actions
-		and tool_name not in excluded
+		t.schema for t in TOOLS
+		if not t.injected and lookup_mode in t.modes and t.name not in excluded
 	]
 	if backend is not None:
 		schemas.extend(backend.get_extra_tools())

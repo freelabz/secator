@@ -50,14 +50,21 @@ class TestDynamicAiTools(unittest.TestCase):
 		import secator.ai.tools as tools
 		from secator.ai.prompts import MODES
 		loader.discover_ai_tools.cache_clear()
-		for name in list(tools.DYNAMIC_TOOL_NAMES):
+		dynamic_names = set(tools.DYNAMIC_TOOL_NAMES)
+		dynamic_actions = set(tools.DYNAMIC_ACTION_TYPES)
+		for name in list(dynamic_names):
 			tools.TOOL_SCHEMAS.pop(name, None)
 			tools.TOOL_ACTION_MAP.pop(name, None)
-		for at in list(tools.DYNAMIC_ACTION_TYPES):
+			tools.TOOLS_BY_NAME.pop(name, None)
+		for at in list(dynamic_actions):
 			tools.DYNAMIC_HANDLERS.pop(at, None)
+			tools.TOOLS_BY_ACTION.pop(at, None)
 			for cfg in MODES.values():
 				if at in cfg["allowed_actions"]:
 					cfg["allowed_actions"].remove(at)
+		# Drop the dynamic BaseTool instances from the registry list (refactor model: the
+		# tool registry TOOLS is the source of truth build_tool_schemas iterates).
+		tools.TOOLS[:] = [t for t in tools.TOOLS if t.name not in dynamic_names]
 		tools.DYNAMIC_ACTION_TYPES.clear()
 		tools.DYNAMIC_TOOL_NAMES.clear()
 
