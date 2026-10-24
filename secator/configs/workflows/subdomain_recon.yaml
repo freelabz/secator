@@ -11,6 +11,13 @@ tags: [recon, dns, http, ssl, secrets, takeovers]
 input_types:
   - host
 
+important_opts:
+  - wordlist
+  - brute_dns
+  - brute_http
+  - passive
+  - test_ssl
+
 options:
   passive:
     is_flag: True
