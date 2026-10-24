@@ -1,0 +1,17 @@
+type: workflow
+name: swagger
+alias: swag
+description: Swagger / OpenAPI endpoint extraction
+long_description: |
+  Given the address of a Swagger / OpenAPI application (the spec URL, the Swagger UI page, or just
+  the host), resolves the spec and extracts every endpoint as a URL carrying its method, parameters
+  and request body schema. The output is meant to be handed to a human or an AI to craft the actual
+  requests (POST/PUT/PATCH bodies included). No request is sent to the described endpoints: only the
+  spec document itself is fetched.
+tags: [api, openapi, recon]
+input_types:
+- url
+
+tasks:
+  swaggerparser:
+    description: Resolve the OpenAPI spec and extract endpoints with their options
