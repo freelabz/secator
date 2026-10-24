@@ -855,6 +855,18 @@ def _is_privileged_finding_type(action: Dict) -> bool:
 	return str(action.get("_type", "")).strip().lower() in _PRIVILEGED_FINDING_TYPES
 
 
+def _is_dynamic_action(action_type: str) -> bool:
+	"""True if `action_type` was registered by a dynamic (autoloaded) AI tool.
+
+	Dynamic tools are the safe auto-allow class (no target/path side effects), so they are
+	allowed here without target/path gating — see the SECURITY note in secator.ai.tools."""
+	try:
+		from secator.ai.tools import DYNAMIC_ACTION_TYPES
+		return action_type in DYNAMIC_ACTION_TYPES
+	except Exception:
+		return False
+
+
 class PermissionEngine:
 	"""Evaluate AI actions against allow/deny/ask permission rules.
 
@@ -1056,7 +1068,7 @@ class PermissionEngine:
 					return True
 		return any(rt == rule_type for rt, _ in self.runtime_allow)
 
-	def _check_action_type(self, action_type: str, action: Dict) -> PermissionResult:
+	def _check_action_type(self, action_type: str, action: Dict) -> PermissionResult:  # noqa: D401
 		"""Check if the action type is allowed/denied/ask.
 
 		For shell commands, uses safecmd's bash parser (shfmt) to extract
@@ -1138,9 +1150,10 @@ class PermissionEngine:
 		elif action_type == "screenshot":
 			# The verb is fine; the URL is gated as a TARGET (network egress) in _extract_targets.
 			return PermissionResult(decision="allow", reason="screenshot target checked separately")
-		elif action_type in ("query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
+		elif action_type in ("query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding") or _is_dynamic_action(action_type):  # noqa: E501
 			# web_search is a read-only external lookup (no workspace mutation); list_runners is a
-			# read-only run-history lookup (no mutation). mark_vuln_exploited /
+			# read-only run-history lookup (no mutation); a dynamic (autoloaded) tool is auto-allowed
+			# like query. mark_vuln_exploited /
 			# mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
 			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
 			# so they're safe to auto-allow alongside query/add_finding.
