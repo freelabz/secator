@@ -557,6 +557,7 @@ Optional integrations and addon configurations.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `addons.ai.enabled` | `bool` | `false` | Enable AI integration |
+| `addons.ai.provider` | `string` | `''` | Named provider preset. `orcarouter` selects [OrcaRouter](https://www.orcarouter.ai); empty keeps litellm-native model names |
 | `addons.ai.api_key` | `string` | `''` | AI provider API key |
 | `addons.ai.api_base` | `string` | `''` | Custom API base URL |
 | `addons.ai.default_model` | `string` | `claude-sonnet-4-6` | Default AI model |
@@ -594,6 +595,25 @@ addons:
         - "shell(python,bash,sh,exec,…)"
         - "read(*)"
         - "write(*)"
+```
+
+**Named providers — OrcaRouter:**
+
+Set `addons.ai.provider: orcarouter` to use [OrcaRouter](https://www.orcarouter.ai) as a first-class provider. The preset supplies the inference base URL (`https://api.orcarouter.ai/v1`, OpenAI-compatible), the live model catalog and the verified cold-start fallback list; `secator x ai setup` then offers only models the catalog advertises for text chat, and `secator x ai` uses them with the OpenAI-compatible wire format.
+
+- API key: `ORCAROUTER_API_KEY` (fallback) or `addons.ai.api_key` / `SECATOR_ADDONS_AI_API_KEY` (`sk-orca-…`). Keys are stored where every other addon secret lives (`~/.secator/config.yml`); they are never logged.
+- Model ids keep the vendor namespace (`deepseek/deepseek-v4-pro`, `orcarouter/fusion`, `orca/orcacyber-ultra-1.0`, …).
+- Base override precedence: `addons.ai.api_base` → `ORCA_API_BASE_URL` → shared `ORCA_BASE_URL` (+`/v1`) → the official default. HTTPS is required for remote hosts; HTTP is accepted only for loopback development.
+- Model catalog: `GET https://api.orcarouter.ai/v1/models?capability=chat`, cached in-process. If it is unreachable, `secator x ai setup` shows a clearly labelled verified fallback list instead of a free-text prompt.
+
+```yaml
+addons:
+  ai:
+    enabled: true
+    provider: orcarouter
+    api_key: sk-orca-…
+    default_model: deepseek/deepseek-v4-pro
+    intent_model: deepseek/deepseek-v4-pro
 ```
 
 **Full addon example:**

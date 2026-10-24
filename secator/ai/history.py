@@ -39,7 +39,10 @@ def cap_message(msg: dict, max_chars: int = MAX_PERSISTED_MESSAGE_CHARS) -> dict
 
 
 def get_context_window(model: str) -> int:
-    """Get model's context window size from litellm.
+    """Get model's context window size.
+
+    A named provider's catalog (see secator/ai/providers.py) is authoritative for
+    its own models; litellm's registry is used otherwise.
 
     Args:
         model: LLM model name
@@ -48,6 +51,11 @@ def get_context_window(model: str) -> int:
         Context window size in tokens (falls back to CONFIG.addons.ai.context_window on error or empty info)
     """
     from secator.config import CONFIG
+    from secator.ai.providers import get_known_context_window
+    known = get_known_context_window(model)
+    if known:
+        debug(f'context_window={known} (provider catalog)', sub='runner.ai.context', obj={'model': model})
+        return known
     import litellm
     try:
         info = litellm.get_model_info(model)
@@ -380,7 +388,8 @@ class ChatHistory:
         return should
 
     def maybe_summarize(self, model: str, api_base: Optional[str] = None,
-                        api_key: Optional[str] = None) -> Tuple[bool, int, int]:
+                        api_key: Optional[str] = None,
+                        provider: Optional[str] = None) -> Tuple[bool, int, int]:
         """Summarize history if token usage exceeds percentage threshold.
 
         Uses should_compact() to determine if compaction is needed based on
@@ -390,6 +399,7 @@ class ChatHistory:
             model: LLM model name
             api_base: Optional API base URL
             api_key: Optional API key
+            provider: Optional named provider preset (e.g. "orcarouter")
 
         Returns:
             tuple: (compacted, old_tokens, new_tokens)
@@ -400,7 +410,7 @@ class ChatHistory:
             return False, old_tokens, old_tokens
 
         debug(f'compacting: {old_tokens} tokens', sub='runner.ai.context')
-        self.compact(model, api_base, api_key)
+        self.compact(model, api_base, api_key, provider=provider)
         new_tokens = self.count_tokens(model)
         debug(f'compacted: {old_tokens} -> {new_tokens} tokens', sub='runner.ai.context')
         return True, old_tokens, new_tokens
@@ -436,7 +446,8 @@ class ChatHistory:
         return stubbed
 
     def compact(self, model: str, api_base: Optional[str] = None,
-                api_key: Optional[str] = None) -> None:
+                api_key: Optional[str] = None,
+                provider: Optional[str] = None) -> None:
         """Summarize non-system messages using an LLM, keeping the initial system prompt
         and the last few messages intact so the LLM retains recent context.
 
@@ -444,6 +455,7 @@ class ChatHistory:
             model: LLM model name
             api_base: Optional API base URL
             api_key: Optional API key
+            provider: Optional named provider preset (e.g. "orcarouter")
         """
         keep_last = 4
         if len(self.messages) <= 2:
@@ -499,7 +511,11 @@ class ChatHistory:
         prompt = SUMMARIZATION_PROMPT.format(history=history_text, max_words=max_words)
         token_str = format_token_count(self.count_tokens(model), icon='arrow_up')
         with console.status(f"[bold orange3]Compacting chat history...[/] [gray42] • {token_str}[/]", spinner="dots"):
-            result = call_llm([{"role": "user", "content": prompt}], model, 0.3, api_base, api_key)
+            # Only pass the preset when one is configured, keeping the plain
+            # litellm call shape unchanged for existing callers.
+            kwargs = {'provider': provider} if provider else {}
+            result = call_llm([{"role": "user", "content": prompt}], model, 0.3, api_base, api_key,
+                              **kwargs)
 
         # Record billed usage of the summarization call so the owning task can
         # roll it into context.ai_tokens. Missing usage counts as 0.

@@ -265,6 +265,11 @@ class AiAddon(StrictModel):
 	enabled: bool = False
 	api_key: str = ''
 	api_base: str = ''
+	# Named provider preset (see secator/ai/providers.py). Empty = litellm's own
+	# model names, unchanged behaviour. `orcarouter` selects the OrcaRouter
+	# preset: its inference base, key env var and live model catalog.
+	# Env: SECATOR_ADDONS_AI_PROVIDER.
+	provider: str = ''
 	# SECURITY (LLM CREDS): gate the "custom api_base needs a caller-supplied api_key"
 	# rule; off = configured key is reused for any base.
 	# Env: SECATOR_ADDONS_AI_CUSTOM_DISALLOW_CONFIG_TOKEN.
@@ -329,6 +334,25 @@ class AiAddon(StrictModel):
 			'write(*)',
 		],
 	}
+
+	@model_validator(mode='after')
+	def validate_named_provider(self) -> Self:
+		"""Reject an unknown named provider or an unsafe custom API base early."""
+		if not self.provider:
+			return self
+		from secator.ai import providers
+		spec = providers.get_provider(self.provider)
+		if spec is None:
+			known = ', '.join(sorted(providers.PROVIDERS))
+			raise ValueError(
+				f"Unknown AI provider '{self.provider}'. Supported named providers: {known}."
+			)
+		if self.api_base:
+			try:
+				providers.validate_api_base(self.api_base)
+			except providers.ProviderConfigError as e:
+				raise ValueError(str(e)) from None
+		return self
 
 
 class Providers(StrictModel):
