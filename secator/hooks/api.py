@@ -158,9 +158,9 @@ def resolve_workspace(value):
 	Accepts a 24-char hex ObjectId (looked up by id) or a workspace name (looked up
 	in the workspace list, scoped to the configured org). Cached per input value.
 
-	The runner's profile / route-based workspace assignment overwrites
-	context['workspace_id'] with a workspace name, so callers re-resolve it here to
-	make sure the id sent to the API is always the real ObjectId.
+	context['workspace_id'] may be a workspace name (runners default it to the
+	workspace name when no id is set), so callers re-resolve it here to make sure
+	the id sent to the API is always the real ObjectId.
 	"""
 	if value == 'default':
 		raise Exception('Workspace `default` cannot be used for API integration: please use a valid workspace using `-ws <workspace>` (CLI) or `context.workspace_id = <workspace>` (Python API).')  # noqa: E501

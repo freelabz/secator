@@ -115,7 +115,6 @@ class Runner:
 		self.name = run_opts.get('name', self.config.name)
 		self.description = run_opts.get('description', self.config.description or '')
 		self.workspace_name = context.get('workspace_name', CONFIG.workspaces.current or 'default')
-		self.workspace_explicit = context.get('workspace_explicit', False)
 		self.run_opts = run_opts.copy()
 		self.sync = run_opts.get('sync', True)
 		self.context = context
@@ -123,7 +122,7 @@ class Runner:
 		key = f'{self.config.type}_id'
 		if not self.context.get(key):
 			self.context[key] = str(uuid.uuid4())
-		# workspace_id defaults to workspace_name (store folder / query scope); overridden by route/profile below
+		# workspace_id defaults to workspace_name (store folder / query scope)
 		if not self.context.get('workspace_id'):
 			self.context['workspace_id'] = self.workspace_name
 
@@ -243,16 +242,6 @@ class Runner:
 		profiles_str = run_opts.get('profiles') or []
 		self.debug('resolving profiles', obj={'profiles': profiles_str}, sub='init')
 		self.profiles = self.resolve_profiles(profiles_str)
-
-		# Apply route-based workspace if no profile/explicit workspace was set
-		default_ws = CONFIG.workspaces.current or 'default'
-		if not self.workspace_explicit and self.workspace_name == default_ws:
-			route_workspace = self._resolve_route_workspace(self.inputs)
-			if route_workspace:
-				self.debug(f'route workspace -> {route_workspace}', sub='init')
-				self.workspace_name = route_workspace
-				self.context['workspace_name'] = route_workspace
-				self.context['workspace_id'] = route_workspace
 
 		# Determine exporters
 		exporters_str = self.run_opts.get('output') or self.default_exporters
@@ -1627,10 +1616,8 @@ class Runner:
 		non_enforced_templates = [p for p in templates if not p.enforce]
 		templates = non_enforced_templates + enforced_templates
 		profile_opts = {}
-		profile_workspace = None
 		profile_drivers = []
 		profile_exporters = None
-		default_ws = CONFIG.workspaces.current or 'default'
 		for profile in templates:
 			self.debug(f'profile {profile.name} opts (enforced: {profile.enforce}): {profile.opts}', sub='init')
 			enforced = profile.enforce or False
@@ -1641,14 +1628,6 @@ class Runner:
 				profile_opts.update(profile.opts)
 			else:
 				profile_opts.update({k: self.run_opts.get(k) or v for k, v in profile.opts.items()})
-
-			# Merge workspace (scalar): enforced overrides; otherwise apply only if user kept the default
-			ws = profile.workspace or None
-			if ws:
-				if enforced:
-					profile_workspace = ws
-				elif profile_workspace is None and self.workspace_name == default_ws:
-					profile_workspace = ws
 
 			# Merge drivers (list): always additive (hooks cannot be unregistered once loaded)
 			drivers = list(profile.drivers) if profile.drivers else []
@@ -1675,8 +1654,6 @@ class Runner:
 				if enforced:
 					msg += ' [bold red](enforced)[/]'
 				profile_fields = dict(profile.opts)
-				if ws:
-					profile_fields['workspace'] = ws
 				if drivers:
 					profile_fields['drivers'] = drivers
 				if exporters:
@@ -1689,13 +1666,6 @@ class Runner:
 		if profile_opts:
 			self.run_opts.update(profile_opts)
 
-		# Apply workspace (used downstream to build report folders)
-		if profile_workspace:
-			self.debug(f'profile workspace -> {profile_workspace}', sub='init')
-			self.workspace_name = profile_workspace
-			self.context['workspace_name'] = profile_workspace
-			self.context['workspace_id'] = profile_workspace
-
 		# Apply exporters (consumed from run_opts['output'] right after profile resolution)
 		if profile_exporters is not None:
 			self.debug(f'profile exporters -> {profile_exporters}', sub='init')
@@ -1706,27 +1676,6 @@ class Runner:
 			self._apply_profile_drivers(profile_drivers)
 
 		return templates
-
-	def _resolve_route_workspace(self, inputs):
-		"""Resolve workspace from configured routes based on inputs.
-
-		Args:
-			inputs (list[str]): List of inputs to match against route patterns.
-
-		Returns:
-			str | None: Matched workspace name, or None if no route matches.
-		"""
-		import fnmatch
-
-		routes = CONFIG.workspaces.routes
-		if not routes:
-			return None
-		for workspace, patterns in routes.items():
-			for pattern in patterns:
-				for inp in inputs:
-					if fnmatch.fnmatch(str(inp), pattern):
-						return workspace
-		return None
 
 	def _apply_profile_drivers(self, drivers):
 		"""Load and register driver hooks specified by profiles.
