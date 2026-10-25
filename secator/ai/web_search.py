@@ -21,7 +21,8 @@ needs and to zero new dependencies.
 
 import html
 import re
-from urllib.parse import unquote, urlparse, parse_qs
+import urllib.request
+from urllib.parse import unquote, urlparse, parse_qs, urlencode
 
 from secator.config import CONFIG
 from secator.requests import requests
@@ -97,28 +98,34 @@ def _unwrap_ddg_url(href):
 def duckduckgo_search(query, max_results=5):
 	"""Keyless general web search via the DuckDuckGo HTML endpoint.
 
+	Uses stdlib ``urllib`` rather than the shared ``secator.requests`` session ON PURPOSE:
+	DuckDuckGo's anomaly gate fingerprints the ``requests``/urllib3 client (TLS + header
+	signature) and answers it with HTTP 202 + a challenge body (0 results) EVEN with a full
+	browser header set — verified from a datacenter egress: ``requests`` → 202 every time,
+	``urllib`` with the same headers → 200 with results. urllib isn't a perfect disguise
+	(a busy egress IP still gets rate-gated on some queries, hence the Instant-Answer
+	fallback in web_search()), but it's the difference between "never works" and "usually
+	works" without a paid key. (For reliable coverage, set addons.ai.web_search.tavily_api_key.)
+
 	Returns a list of ``{"_type": "web_result", "title", "url", "snippet"}`` dicts
 	(possibly empty). Raises nothing — network/parse faults return ``[]``.
 	"""
 	max_results = _clamp(max_results, 1, 25, 5)
 	try:
-		resp = requests.post(
-			_DDG_URL,
-			data={'q': query, 'kl': 'us-en'},
-			headers=_DDG_HEADERS,
-			timeout=_TIMEOUT,
-		)
-		resp.raise_for_status()
-		body = resp.text
+		data = urlencode({'q': query, 'kl': 'us-en'}).encode()
+		req = urllib.request.Request(_DDG_URL, data=data, headers=_DDG_HEADERS)
+		with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+			status = getattr(resp, 'status', None) or resp.getcode()
+			body = resp.read().decode('utf-8', 'ignore')
 	except Exception as e:  # noqa: BLE001 - fail soft: an engine error is data, not a crash
 		debug(f'duckduckgo search failed: {e}', sub='ai.web_search')
 		return []
-	# The anomaly gate answers with HTTP 202 (a 2xx, so raise_for_status() passes) and a
-	# challenge body carrying no results. Detect it explicitly and fail soft so the caller
-	# falls back to the Instant Answer API instead of silently returning "0 results".
-	if getattr(resp, 'status_code', 200) == 202 or 'result__a' not in body:
-		debug(f'duckduckgo anomaly/empty response (status={getattr(resp, "status_code", "?")}) '
-		      f'for {query!r}', sub='ai.web_search')
+	# The anomaly gate answers with HTTP 202 (a 2xx, so no exception) and a challenge body
+	# carrying no results. Detect it explicitly and fail soft so the caller falls back to
+	# the Instant Answer API instead of silently returning "0 results".
+	if status == 202 or 'result__a' not in body:
+		debug(f'duckduckgo anomaly/empty response (status={status}) for {query!r}',
+		      sub='ai.web_search')
 		return []
 	snippets = [_strip_tags(s) for s in _DDG_SNIPPET_RE.findall(body)]
 	results = []
