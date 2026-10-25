@@ -33,8 +33,19 @@ class TestWebSearchEngines(unittest.TestCase):
 			r.json.return_value = json_data
 		return r
 
+	def _urlopen(self, *, body='', status=200):
+		# duckduckgo_search uses urllib (`with urllib.request.urlopen(...) as resp`), so the
+		# mock must be a context manager whose resp has .read()->bytes and .status.
+		resp = MagicMock()
+		resp.read.return_value = body.encode()
+		resp.status = status
+		cm = MagicMock()
+		cm.__enter__.return_value = resp
+		cm.__exit__.return_value = False
+		return cm
+
 	def test_duckduckgo_parses_and_unwraps(self):
-		with patch.object(ws.requests, 'post', return_value=self._resp(text=_DDG_HTML)):
+		with patch.object(ws.urllib.request, 'urlopen', return_value=self._urlopen(body=_DDG_HTML)):
 			results = ws.duckduckgo_search('log4shell', max_results=5)
 		self.assertEqual(len(results), 2)
 		# uddg-wrapped URL is unwrapped to the real target; entities unescaped
@@ -44,26 +55,24 @@ class TestWebSearchEngines(unittest.TestCase):
 		self.assertEqual(results[1]['url'], 'https://example.org/b')
 
 	def test_duckduckgo_respects_max_results(self):
-		with patch.object(ws.requests, 'post', return_value=self._resp(text=_DDG_HTML)):
+		with patch.object(ws.urllib.request, 'urlopen', return_value=self._urlopen(body=_DDG_HTML)):
 			results = ws.duckduckgo_search('x', max_results=1)
 		self.assertEqual(len(results), 1)
 
 	def test_duckduckgo_fails_soft(self):
-		with patch.object(ws.requests, 'post', side_effect=Exception('network down')):
+		with patch.object(ws.urllib.request, 'urlopen', side_effect=Exception('network down')):
 			results = ws.duckduckgo_search('x')
 		self.assertEqual(results, [])  # no raise
 
 	def test_duckduckgo_detects_anomaly_202(self):
-		# HTTP 202 + challenge body (2xx, so raise_for_status passes) must be treated as empty.
-		r = self._resp(text='<html>... anomaly challenge ...</html>')
-		r.status_code = 202
-		with patch.object(ws.requests, 'post', return_value=r):
+		# HTTP 202 + challenge body (2xx, so no exception) must be treated as empty.
+		with patch.object(ws.urllib.request, 'urlopen',
+		                  return_value=self._urlopen(body='<html>... anomaly challenge ...</html>', status=202)):
 			self.assertEqual(ws.duckduckgo_search('x'), [])
 
 	def test_duckduckgo_empty_body_returns_empty(self):
-		r = self._resp(text='<html>no result markers here</html>')
-		r.status_code = 200
-		with patch.object(ws.requests, 'post', return_value=r):
+		with patch.object(ws.urllib.request, 'urlopen',
+		                  return_value=self._urlopen(body='<html>no result markers here</html>', status=200)):
 			self.assertEqual(ws.duckduckgo_search('x'), [])
 
 	def test_ddg_instant_answer_parses_and_flattens(self):
