@@ -53,6 +53,51 @@ class TestWebSearchEngines(unittest.TestCase):
 			results = ws.duckduckgo_search('x')
 		self.assertEqual(results, [])  # no raise
 
+	def test_duckduckgo_detects_anomaly_202(self):
+		# HTTP 202 + challenge body (2xx, so raise_for_status passes) must be treated as empty.
+		r = self._resp(text='<html>... anomaly challenge ...</html>')
+		r.status_code = 202
+		with patch.object(ws.requests, 'post', return_value=r):
+			self.assertEqual(ws.duckduckgo_search('x'), [])
+
+	def test_duckduckgo_empty_body_returns_empty(self):
+		r = self._resp(text='<html>no result markers here</html>')
+		r.status_code = 200
+		with patch.object(ws.requests, 'post', return_value=r):
+			self.assertEqual(ws.duckduckgo_search('x'), [])
+
+	def test_ddg_instant_answer_parses_and_flattens(self):
+		payload = {
+			'Heading': 'Nmap',
+			'AbstractText': 'Nmap is a network scanner',
+			'AbstractURL': 'https://en.wikipedia.org/wiki/Nmap',
+			'RelatedTopics': [
+				{'Text': 'Port scanners', 'FirstURL': 'https://duckduckgo.com/c/Port_scanners'},
+				{'Name': 'grp', 'Topics': [{'Text': 'Nested', 'FirstURL': 'https://x/y'}]},
+			],
+		}
+		with patch.object(ws.requests, 'get', return_value=self._resp(json_data=payload)):
+			res = ws.ddg_instant_answer('nmap', max_results=5)
+		self.assertEqual(res[0]['_type'], 'web_answer')
+		self.assertEqual(res[0]['snippet'], 'Nmap is a network scanner')
+		urls = [r['url'] for r in res]
+		self.assertIn('https://duckduckgo.com/c/Port_scanners', urls)  # flat topic
+		self.assertIn('https://x/y', urls)  # nested-group topic flattened
+
+	def test_ddg_instant_answer_fails_soft(self):
+		with patch.object(ws.requests, 'get', side_effect=Exception('network down')):
+			self.assertEqual(ws.ddg_instant_answer('x'), [])
+
+	def test_web_search_falls_back_to_instant_answer(self):
+		# When the HTML endpoint is anomaly-gated (empty), answer mode falls back to the
+		# keyless Instant Answer API rather than returning nothing.
+		with patch.object(ws, 'duckduckgo_search', return_value=[]), \
+			patch.object(ws, 'ddg_instant_answer', return_value=[{'_type': 'web_answer'}]) as ia:
+			results, engine = ws.web_search('nmap', mode='answer')
+		self.assertEqual(engine, 'duckduckgo_ia')
+		self.assertEqual(len(results), 1)
+		ia.assert_called_once()
+
 	def test_sploitus_parses(self):
 		payload = {'exploits': [
 			{'title': 'PoC A', 'href': 'https://github.com/x/a', 'score': 9.8, 'type': 'exploit'},
