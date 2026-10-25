@@ -31,7 +31,28 @@ from secator.utils import debug
 _UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 _TIMEOUT = 20
 
+# A UA alone no longer gets past DuckDuckGo's anomaly gate — a bare request is
+# answered with HTTP 202 + a "challenge/anomaly" body (no results). Sending the
+# header set a real browser sends (Accept*/Sec-Fetch*/Referer/Origin) clears the
+# gate for most queries. (Heavy repeated use from one IP can still be rate-gated;
+# see the DDG-Instant-Answer fallback in web_search().)
+_DDG_HEADERS = {
+	'User-Agent': _UA,
+	'Content-Type': 'application/x-www-form-urlencoded',
+	'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+	'Accept-Language': 'en-US,en;q=0.9',
+	'Origin': 'https://html.duckduckgo.com',
+	'Referer': 'https://html.duckduckgo.com/',
+	'Sec-Fetch-Dest': 'document',
+	'Sec-Fetch-Mode': 'navigate',
+	'Sec-Fetch-Site': 'same-origin',
+}
+
 _DDG_URL = 'https://html.duckduckgo.com/html/'
+# Keyless DuckDuckGo Instant Answer API — reliable (not anomaly-gated) but only
+# covers well-known entities/concepts (an abstract + related topics), not a general
+# web crawl. Used as the keyless fallback when the HTML endpoint returns nothing.
+_DDG_IA_URL = 'https://api.duckduckgo.com/'
 _SPLOITUS_URL = 'https://sploitus.com/search'
 _TAVILY_URL = 'https://api.tavily.com/search'
 
@@ -84,13 +105,20 @@ def duckduckgo_search(query, max_results=5):
 		resp = requests.post(
 			_DDG_URL,
 			data={'q': query, 'kl': 'us-en'},
-			headers={'User-Agent': _UA, 'Content-Type': 'application/x-www-form-urlencoded'},
+			headers=_DDG_HEADERS,
 			timeout=_TIMEOUT,
 		)
 		resp.raise_for_status()
 		body = resp.text
 	except Exception as e:  # noqa: BLE001 - fail soft: an engine error is data, not a crash
 		debug(f'duckduckgo search failed: {e}', sub='ai.web_search')
+		return []
+	# The anomaly gate answers with HTTP 202 (a 2xx, so raise_for_status() passes) and a
+	# challenge body carrying no results. Detect it explicitly and fail soft so the caller
+	# falls back to the Instant Answer API instead of silently returning "0 results".
+	if getattr(resp, 'status_code', 200) == 202 or 'result__a' not in body:
+		debug(f'duckduckgo anomaly/empty response (status={getattr(resp, "status_code", "?")}) '
+		      f'for {query!r}', sub='ai.web_search')
 		return []
 	snippets = [_strip_tags(s) for s in _DDG_SNIPPET_RE.findall(body)]
 	results = []
@@ -106,6 +134,57 @@ def duckduckgo_search(query, max_results=5):
 		})
 		if len(results) >= max_results:
 			break
+	return results
+
+
+def ddg_instant_answer(query, max_results=5):
+	"""Keyless fallback via the DuckDuckGo Instant Answer API (``api.duckduckgo.com``).
+
+	Unlike the HTML endpoint this JSON API is not anomaly-gated, so it stays usable from a
+	server IP — but it only knows well-known entities/concepts (a Wikipedia-style abstract
+	plus related topics), not a general web crawl. Returns ``web_answer`` (the abstract) +
+	``web_result`` (related topics) dicts; empty when the query has no instant answer.
+	"""
+	max_results = _clamp(max_results, 1, 25, 5)
+	try:
+		resp = requests.get(
+			_DDG_IA_URL,
+			params={'q': query, 'format': 'json', 'no_html': '1', 'no_redirect': '1'},
+			headers={'User-Agent': _UA, 'Accept': 'application/json'},
+			timeout=_TIMEOUT,
+		)
+		resp.raise_for_status()
+		data = resp.json()
+	except Exception as e:  # noqa: BLE001 - fail soft
+		debug(f'duckduckgo instant-answer failed: {e}', sub='ai.web_search')
+		return []
+	results = []
+	abstract = (data.get('AbstractText') or '').strip()
+	if abstract:
+		results.append({
+			'_type': 'web_answer',
+			'title': (data.get('Heading') or query).strip(),
+			'url': data.get('AbstractURL') or '',
+			'snippet': abstract,
+		})
+
+	# RelatedTopics is a mix of flat {Text, FirstURL} entries and {Name, Topics:[...]} groups;
+	# walk one level into groups so we surface the individual topic links either way.
+	def _flatten(topics):
+		for t in topics:
+			if isinstance(t, dict) and t.get('Topics'):
+				yield from _flatten(t['Topics'])
+			elif isinstance(t, dict) and t.get('FirstURL'):
+				yield t
+	for t in _flatten(data.get('RelatedTopics') or []):
+		if len(results) >= max_results:
+			break
+		results.append({
+			'_type': 'web_result',
+			'title': (t.get('Text') or '').strip()[:120],
+			'url': t.get('FirstURL') or '',
+			'snippet': (t.get('Text') or '').strip(),
+		})
 	return results
 
 
@@ -202,4 +281,13 @@ def web_search(query, mode='answer', max_results=5, exploit_type='exploits', sor
 		if results:
 			return results, 'tavily'
 		# Tavily configured but errored/empty -> fall back to the keyless engine.
-	return duckduckgo_search(query, max_results=max_results), 'duckduckgo'
+	# Keyless web: the DuckDuckGo HTML endpoint first, then the Instant Answer API when the
+	# HTML scrape comes back empty (anomaly-gated or no hits). IA is entity/concept-only, so
+	# it's a fallback, not the primary — but it keeps answer/links useful without an API key.
+	results = duckduckgo_search(query, max_results=max_results)
+	if results:
+		return results, 'duckduckgo'
+	ia = ddg_instant_answer(query, max_results=max_results)
+	if ia:
+		return ia, 'duckduckgo_ia'
+	return [], 'duckduckgo'
