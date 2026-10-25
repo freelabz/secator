@@ -126,5 +126,41 @@ class TestListRunnersTool(unittest.TestCase):
 		self.assertTrue(any(isinstance(o, Info) for o in out))
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestMongoListRunnersScoping(unittest.TestCase):
+	"""The mongodb backend must scope list_runners by the RIGHT field: a 24-char hex
+	ObjectId (what the platform passes) -> context.workspace_id; a name (CLI -ws) ->
+	context.workspace_name. Comparing an id against the name field returned 0 runners."""
+
+	WID = '6ab134f8d9ab36c8f1866a52'  # a valid 24-char hex ObjectId
+	WNAME = 'my-workspace'
+
+	def _backend(self):
+		import pytest
+		pytest.importorskip('mongomock')
+		import mongomock
+		from secator.query.mongodb import MongoDBBackend
+		client = mongomock.MongoClient()
+		client.main.scans.insert_many([
+			{'context': {'scan_id': 's1', 'workspace_id': self.WID, 'workspace_name': self.WNAME},
+			 'has_parent': False, 'status': 'SUCCESS'},
+			{'context': {'scan_id': 's2', 'workspace_id': 'otherid000000000000000000', 'workspace_name': 'other'},
+			 'has_parent': False, 'status': 'SUCCESS'},
+		])
+		b = MongoDBBackend(self.WID)
+		b._client = client
+		return b
+
+	def test_objectid_scopes_by_workspace_id(self):
+		runners = self._backend().list_runners(workspace_id=self.WID, runner_type='scan')
+		ids = sorted(r['context']['scan_id'] for r in runners)
+		self.assertEqual(ids, ['s1'])  # was [] before the fix (id compared to workspace_name)
+
+	def test_name_scopes_by_workspace_name(self):
+		runners = self._backend().list_runners(workspace_id=self.WNAME, runner_type='scan')
+		ids = sorted(r['context']['scan_id'] for r in runners)
+		self.assertEqual(ids, ['s1'])
+
+
 if __name__ == '__main__':
 	unittest.main()
