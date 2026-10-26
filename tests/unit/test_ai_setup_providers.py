@@ -56,6 +56,36 @@ class TestFetchModels:
 			with pytest.raises(Exception):
 				u.fetch_openai_compatible_models('https://g/v1', 'k')
 
+	def test_verify_true_by_default(self, monkeypatch):
+		monkeypatch.delenv('SSL_VERIFY', raising=False)
+		with patch('secator.requests.requests.get', return_value=self._resp({'data': [{'id': 'm'}]})) as g:
+			u.fetch_openai_compatible_models('https://g/v1', 'k')
+		assert g.call_args.kwargs.get('verify') is True
+
+	def test_honors_ssl_verify_false_env(self, monkeypatch):
+		# A self-signed gateway that runs the AI task with SSL_VERIFY=False must also list models.
+		monkeypatch.setenv('SSL_VERIFY', 'false')
+		with patch('secator.requests.requests.get', return_value=self._resp({'data': [{'id': 'm'}]})) as g:
+			u.fetch_openai_compatible_models('https://g/v1', 'k')
+		assert g.call_args.kwargs.get('verify') is False
+
+
+class TestSslVerify:
+
+	def test_default_verifies(self, monkeypatch):
+		monkeypatch.delenv('SSL_VERIFY', raising=False)
+		assert u._ssl_verify() is True
+
+	@pytest.mark.parametrize('val', ['false', 'False', 'FALSE', '0', 'no', 'off'])
+	def test_falsey_disables(self, monkeypatch, val):
+		monkeypatch.setenv('SSL_VERIFY', val)
+		assert u._ssl_verify() is False
+
+	@pytest.mark.parametrize('val', ['true', '1', 'yes'])
+	def test_truthy_verifies(self, monkeypatch, val):
+		monkeypatch.setenv('SSL_VERIFY', val)
+		assert u._ssl_verify() is True
+
 
 class TestLoadProviders:
 

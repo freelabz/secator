@@ -1073,14 +1073,35 @@ def _normalize_api_base(raw):
 	return '', 'API base must be https:// (http:// allowed only for localhost).'
 
 
+def _ssl_verify():
+	"""Whether to verify TLS certs for the setup model-listing call.
+
+	Honors the SAME ``SSL_VERIFY`` env knob litellm reads for the inference call, so a
+	gateway with a self-signed / non-public cert that works for the AI task (``SSL_VERIFY=False``)
+	also works here. Falsey = ``false``/``0``/``no``/``off`` (any case); default is verify.
+	"""
+	val = os.environ.get('SSL_VERIFY')
+	if val is None:
+		return True
+	return val.strip().lower() not in ('false', '0', 'no', 'off', '')
+
+
 def fetch_openai_compatible_models(api_base, api_key, timeout=15):
 	"""List model ids from an OpenAI-compatible endpoint's ``/models`` route.
 
 	A custom base may or may not already include ``/v1``, so try ``{base}/models``
 	then ``{base}/v1/models``. Returns a sorted list of model-id strings; raises on
 	network / auth / parse failure so the caller can fall back to manual entry.
+
+	TLS verification follows ``SSL_VERIFY`` (same knob as the inference call), so a
+	gateway with a self-signed cert lists models iff it also runs.
 	"""
 	from secator.requests import requests
+	verify = _ssl_verify()
+	if not verify:
+		# Silence the per-request urllib3 InsecureRequestWarning spam at setup time.
+		import urllib3
+		urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 	base = (api_base or '').rstrip('/')
 	candidates = [f'{base}/models']
 	if not base.endswith('/v1'):
@@ -1089,7 +1110,7 @@ def fetch_openai_compatible_models(api_base, api_key, timeout=15):
 	last_err = None
 	for url in candidates:
 		try:
-			resp = requests.get(url, headers=headers, timeout=timeout)
+			resp = requests.get(url, headers=headers, timeout=timeout, verify=verify)
 			resp.raise_for_status()
 			data = resp.json()
 		except Exception as e:  # noqa: BLE001 - try the next candidate, surface at the end

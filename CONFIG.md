@@ -577,6 +577,9 @@ catalog** (known providers on their default bases), a **named provider**, or **C
 base** (enter a URL); for a custom/named base it lists the endpoint's live models from
 `GET <api_base>/models` and saves your choice as `openai/<id>`.
 
+For a gateway with a self-signed / non-public TLS cert, set `SSL_VERIFY=False` (the same
+env knob litellm uses for inference) so the model-listing call skips cert verification too.
+
 Named providers come from a small JSON registry — a bundled `secator/ai/providers.json`
 plus an optional user file at `<SECATOR_DIRS_DATA>/ai_providers.json` (which overrides
 bundled entries by `name`). Add a gateway with a data-only entry — no code:
