@@ -116,7 +116,7 @@ class TestLoadProviders:
 	def test_malformed_user_file_is_skipped_not_fatal(self, tmp_path, monkeypatch):
 		monkeypatch.setattr(CONFIG.dirs, 'data', str(tmp_path))
 		(tmp_path / 'ai_providers.json').write_text('{ not json')
-		assert any(p['name'] == 'openrouter' for p in u.load_ai_providers())
+		assert any(p['name'] == 'orcarouter' for p in u.load_ai_providers())
 
 	def test_insecure_registry_base_is_rejected(self, tmp_path, monkeypatch):
 		# A registry entry must pass the same https-or-localhost rule as a typed base.

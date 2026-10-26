@@ -1,13 +1,6 @@
 {
-  "_comment": "Named OpenAI-compatible AI providers (gateways/routers) offered in `secator x ai setup` on top of LiteLLM's built-in catalog. To add one, append an entry here (data only, no code) or in a user file at <SECATOR_DIRS_DATA>/ai_providers.json (which overrides entries by `name`). Per-entry schema: name (id), label (display), api_base (https OpenAI-compatible base, incl. /v1), docs (optional URL), key_hint (optional key prefix shown as a hint). Models are listed live from `<api_base>/models` at setup time, so no model list is hardcoded here.",
+  "_comment": "Named OpenAI-compatible AI gateways/routers offered in `secator x ai setup` ON TOP OF LiteLLM's built-in provider list. Only add gateways LiteLLM does NOT already know (providers already in litellm.models_by_provider — e.g. openrouter — appear natively, no entry needed). To add one, append an entry here (data only, no code) or in a user file at <SECATOR_DIRS_DATA>/ai_providers.json (which overrides entries by `name`). Per-entry schema: name (id), label (display), api_base (https OpenAI-compatible base, incl. /v1), docs (optional URL), key_hint (optional key prefix shown as a hint). Models are listed live from `<api_base>/models` at setup time, so no model list is hardcoded here.",
   "providers": [
-    {
-      "name": "openrouter",
-      "label": "OpenRouter",
-      "api_base": "https://openrouter.ai/api/v1",
-      "docs": "https://openrouter.ai/docs",
-      "key_hint": "sk-or-"
-    },
     {
       "name": "orcarouter",
       "label": "OrcaRouter",
