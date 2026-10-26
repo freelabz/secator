@@ -7,6 +7,9 @@ build-backend = 'hatchling.build'
 # VCS-ignored files by default) — it's the offline fallback for `kev` vulnerability tagging.
 artifacts = [
   'secator/data/known_exploited_vulnerabilities.json',
+  # Bundled AI provider registry (OpenAI-compatible gateways for `ai setup`); *.json is
+  # VCS-ignored so hatchling excludes it by default — force-include it in the wheel.
+  'secator/ai/providers.json',
 ]
 
 [project]

@@ -1059,23 +1059,171 @@ def format_llm_status(token_count, ctx_window, by_role):
 	)
 
 
+def _normalize_api_base(raw):
+	"""Validate/normalize a user-entered API base. Returns ``(base, error|None)``."""
+	base = (raw or '').strip().rstrip('/')
+	if not base:
+		return '', 'API base cannot be empty.'
+	if base.startswith('https://'):
+		return base, None
+	# http:// is allowed only for a localhost dev gateway.
+	host = base.split('://', 1)[-1].split('/')[0].split(':')[0]
+	if base.startswith('http://') and host in ('localhost', '127.0.0.1'):
+		return base, None
+	return '', 'API base must be https:// (http:// allowed only for localhost).'
+
+
+def fetch_openai_compatible_models(api_base, api_key, timeout=15):
+	"""List model ids from an OpenAI-compatible endpoint's ``/models`` route.
+
+	A custom base may or may not already include ``/v1``, so try ``{base}/models``
+	then ``{base}/v1/models``. Returns a sorted list of model-id strings; raises on
+	network / auth / parse failure so the caller can fall back to manual entry.
+	"""
+	from secator.requests import requests
+	base = (api_base or '').rstrip('/')
+	candidates = [f'{base}/models']
+	if not base.endswith('/v1'):
+		candidates.append(f'{base}/v1/models')
+	headers = {'Authorization': f'Bearer {api_key}', 'Accept': 'application/json'}
+	last_err = None
+	for url in candidates:
+		try:
+			resp = requests.get(url, headers=headers, timeout=timeout)
+			resp.raise_for_status()
+			data = resp.json()
+		except Exception as e:  # noqa: BLE001 - try the next candidate, surface at the end
+			last_err = e
+			continue
+		items = data.get('data') if isinstance(data, dict) else data
+		ids = sorted({
+			str(m['id']) for m in (items or [])
+			if isinstance(m, dict) and m.get('id')
+		})
+		if ids:
+			return ids
+		last_err = ValueError(f'no models listed at {url}')
+	raise last_err or ValueError('could not list models from the endpoint')
+
+
+def load_ai_providers():
+	"""Named OpenAI-compatible providers offered in `ai setup`, on top of LiteLLM.
+
+	Merges a bundled registry (``secator/ai/providers.json``) with an optional user
+	file (``<SECATOR_DIRS_DATA>/ai_providers.json``); the user file overrides bundled
+	entries by ``name``. This lets any gateway/router be added by a small JSON entry —
+	no code. Per-entry schema: ``name``, ``label``, ``api_base`` (https, OpenAI-compatible),
+	optional ``docs`` and ``key_hint``. A malformed/missing file is skipped, never fatal.
+	"""
+	from pathlib import Path
+	providers = {}
+	bundled = Path(__file__).parent / 'providers.json'
+	user = Path(str(CONFIG.dirs.data)) / 'ai_providers.json'
+	for path in (bundled, user):
+		try:
+			if not path.exists():
+				continue
+			data = json.loads(path.read_text())
+			for p in data.get('providers', []):
+				if isinstance(p, dict) and p.get('name') and p.get('api_base'):
+					providers[p['name']] = p
+		except Exception as e:  # noqa: BLE001 - a bad provider file must not break setup
+			console.print(f"[dim]  (skipped provider file {path}: {e})[/]")
+	return list(providers.values())
+
+
 def setup_ai():
-	"""Interactive search-filter-select flow for configuring AI model and API key."""
+	"""Interactive flow to configure the AI provider / model / API key.
+
+	Two sources: the built-in LiteLLM catalog (known providers on their default
+	bases) or a CUSTOM OpenAI-compatible base (any gateway/router). For a custom
+	base the key is collected first (its ``/models`` list is authenticated), then
+	the chosen model is saved as ``openai/<id>`` so LiteLLM routes to that base.
+	"""
 	import litellm
 	from rich.prompt import Prompt
 
-	# Load all models, sort, build color map
-	all_models = []
-	all_parts = set()
-	for provider, model_names in litellm.models_by_provider.items():
-		model_names = sorted(model_names)
-		for name in model_names:
-			parts = name.split('/')
-			if parts[0] != provider:
-				parts = [provider] + parts
-			all_models.append('/'.join(parts))
-			for p in parts[:-1]:
-				all_parts.add(p)
+	def _static_catalog():
+		"""All models LiteLLM ships knowledge of, keyed by their default providers."""
+		models, parts = [], set()
+		for provider, model_names in litellm.models_by_provider.items():
+			for name in sorted(model_names):
+				p = name.split('/')
+				if p[0] != provider:
+					p = [provider] + p
+				models.append('/'.join(p))
+				for seg in p[:-1]:
+					parts.add(seg)
+		return models, parts
+
+	# Current config (so the user sees what they're changing).
+	current_key = CONFIG.addons.ai.api_key
+	current_base = CONFIG.addons.ai.api_base
+	masked_key = f"{current_key[:8]}...{current_key[-4:]}" if current_key and len(current_key) > 12 else current_key or ""
+	console.print()
+	console.print("[bold]  Current config:[/]")
+	console.print(f"    Model:        [bold white]{CONFIG.addons.ai.default_model or 'not set'}[/]")
+	console.print(f"    Intent model: [bold white]{CONFIG.addons.ai.intent_model or 'not set'}[/]")
+	console.print(f"    API base:     [bold white]{current_base or 'default (per-provider)'}[/]")
+	console.print(f"    API key:      [bold white]{masked_key or 'not set'}[/]")
+
+	# Step 1 — where models come from: the built-in LiteLLM catalog (known providers on
+	# their default bases), a named gateway from the provider registry (providers.json),
+	# or a one-off custom OpenAI-compatible base. Named-provider and custom converge on
+	# one path: set api_base, collect the key, then list live from `<base>/models`.
+	providers = load_ai_providers()
+	console.print()
+	console.print("[bold]  Where should models come from?[/]")
+	console.print("    [dim]1[/] Built-in catalog (OpenAI, Anthropic, Gemini, … on their default bases)")
+	for i, p in enumerate(providers, start=2):
+		base_hint = f" [dim]{p.get('api_base', '')}[/]" if p.get('api_base') else ''
+		console.print(f"    [dim]{i}[/] {p.get('label') or p['name']} (OpenAI-compatible){base_hint}")
+	custom_n = len(providers) + 2
+	console.print(f"    [dim]{custom_n}[/] Custom OpenAI-compatible base (enter your own URL)")
+	src = Prompt.ask("  [bold cyan]Select[/]", choices=[str(n) for n in range(1, custom_n + 1)], default='1')
+	sel = int(src)
+
+	custom_base, custom_key = '', None
+	if sel == 1:
+		all_models, all_parts = _static_catalog()
+	else:
+		# A named provider pre-fills the base; "custom" prompts for it. Either way the
+		# base's `/models` list is authenticated, so collect the key before listing.
+		if sel == custom_n:
+			while True:
+				base, err = _normalize_api_base(
+					Prompt.ask("  [bold cyan]API base URL[/] [dim](https://…)[/]", default=current_base or None)
+				)
+				if err:
+					console.print(f"[bold red]  {err}[/]")
+					continue
+				custom_base = base
+				break
+		else:
+			preset = providers[sel - 2]
+			custom_base = (preset.get('api_base') or '').rstrip('/')
+			docs = f" • docs: {preset['docs']}" if preset.get('docs') else ''
+			console.print(f"  [dim]Base: {custom_base}{docs}[/]")
+			if preset.get('key_hint'):
+				console.print(f"  [dim](key usually starts with {preset['key_hint']})[/]")
+		custom_key = Prompt.ask(
+			"  [bold cyan]API key[/]", default=masked_key or None, show_default=bool(masked_key)
+		)
+		if custom_key == masked_key:
+			custom_key = current_key
+		try:
+			with maybe_status("[bold orange3]Listing models from the endpoint…[/]", spinner="dots"):
+				ids = fetch_openai_compatible_models(custom_base, custom_key)
+			all_models = [f"openai/{i}" for i in ids]
+			console.print(f"[bold green]  Found {len(all_models)} models at {custom_base}[/]")
+		except Exception as e:  # noqa: BLE001 - fall back to manual id entry
+			console.print(f"[bold yellow]  Could not list models ({e}).[/]")
+			manual = Prompt.ask("  [bold cyan]Enter a model id manually[/] [dim](e.g. my-model)[/]").strip()
+			if not manual:
+				return None
+			all_models = [manual if '/' in manual else f"openai/{manual}"]
+		all_parts = {seg for m in all_models for seg in m.split('/')[:-1]}
+
 	part_colors = {p: MODEL_COLORS[i % len(MODEL_COLORS)] for i, p in enumerate(sorted(all_parts))}
 
 	def _format_model(m, idx):
@@ -1093,19 +1241,8 @@ def setup_ai():
 		for i, m in enumerate(displayed, 1):
 			console.print(_format_model(m, idx=i), highlight=False)
 
-	# Show current config
-	current_model = CONFIG.addons.ai.default_model
-	current_intent = CONFIG.addons.ai.intent_model
-	current_key = CONFIG.addons.ai.api_key
-	masked_key = f"{current_key[:8]}...{current_key[-4:]}" if current_key and len(current_key) > 12 else current_key or ""
+	# Display the chosen source's models numbered.
 	console.print()
-	console.print("[bold]  Current config:[/]")
-	console.print(f"    Model:        [bold white]{current_model or 'not set'}[/]")
-	console.print(f"    Intent model: [bold white]{current_intent or 'not set'}[/]")
-	console.print(f"    API key:      [bold white]{masked_key or 'not set'}[/]")
-	console.print()
-
-	# Display all models numbered
 	displayed = all_models
 	suffix = ''
 	_show_models(displayed, suffix)
@@ -1156,14 +1293,23 @@ def setup_ai():
 		CONFIG.set('addons.ai.default_model', selected)
 		CONFIG.set('addons.ai.intent_model', selected)
 
-		# Prompt for API key if model changed or key unset
-		api_key = Prompt.ask(
-			"  [bold cyan]API key[/] [dim](leave empty to keep current)[/]",
-			default=masked_key,
-			show_default=bool(masked_key),
-		)
-		if api_key and api_key != masked_key:
-			CONFIG.set('addons.ai.api_key', api_key)
+		# Persist base + key. A custom/gateway base already collected the key (and needs
+		# it for routing); the built-in catalog clears any stale custom base and prompts
+		# for the key as before.
+		if custom_base:
+			CONFIG.set('addons.ai.api_base', custom_base)
+			if custom_key:
+				CONFIG.set('addons.ai.api_key', custom_key)
+		else:
+			if current_base:
+				CONFIG.set('addons.ai.api_base', '')
+			api_key = Prompt.ask(
+				"  [bold cyan]API key[/] [dim](leave empty to keep current)[/]",
+				default=masked_key,
+				show_default=bool(masked_key),
+			)
+			if api_key and api_key != masked_key:
+				CONFIG.set('addons.ai.api_key', api_key)
 
 		config = CONFIG.validate()
 		if config:
