@@ -670,7 +670,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	# context with a stack trace; catch them here and hand back the valid names.
 	if runner_type == "task":
 		try:
-			Task.get_task_class(name)
+			task_cls = Task.get_task_class(name)
 		except TaskNotFoundError:
 			from secator.loader import discover_tasks, find_templates
 			available = sorted(t.__name__ for t in discover_tasks())
@@ -685,7 +685,18 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 				f"Task '{name}' not found — not a valid secator task.{hint}"
 			), _context=context)
 			return
-		tpl = TemplateLoader(input={'type': 'task', 'name': name})
+		# Hydrate the task's own metadata (description / input_types / tags) from its class,
+		# the way instantiating the task class directly would. A bare {type, name} template
+		# leaves these UNSET, and DotMap serializes an unset field as `{}` — not a str/list —
+		# which the `api` driver's runner schema rejects (description must be a str,
+		# input_types a list) and which also disables this task's input-type filtering.
+		tpl = TemplateLoader(input={
+			'type': 'task',
+			'name': name,
+			'description': (task_cls.__doc__ or '').strip() or None,
+			'input_types': list(getattr(task_cls, 'input_types', []) or []),
+			'tags': list(getattr(task_cls, 'tags', []) or []),
+		})
 		runner_cls = Task
 	else:
 		tpl = TemplateLoader(name=f'workflows/{name}')
@@ -1443,7 +1454,17 @@ def _handle_screenshot(action: Dict, ctx: ActionContext) -> Generator:
 	hooks = _strip_gcs_hooks(hooks)  # keep the PNG local so we can read + embed it
 
 	try:
-		tpl = TemplateLoader(input={'type': 'task', 'name': 'httpx'})
+		# Hydrate httpx's own metadata from its class (see _run_runner) so a stub
+		# {type, name} template doesn't serialize description/input_types as `{}` and
+		# get rejected by the `api` driver's runner schema.
+		httpx_cls = Task.get_task_class('httpx')
+		tpl = TemplateLoader(input={
+			'type': 'task',
+			'name': 'httpx',
+			'description': (httpx_cls.__doc__ or '').strip() or None,
+			'input_types': list(getattr(httpx_cls, 'input_types', []) or []),
+			'tags': list(getattr(httpx_cls, 'tags', []) or []),
+		})
 		runner = Task(tpl, [url], run_opts=run_opts, hooks=hooks, context=context)
 	except Exception as e:  # noqa: BLE001
 		yield Error(message=f"screenshot: failed to start httpx: {e}", _context=context)
