@@ -113,5 +113,19 @@ class TestLoadProviders:
 		assert any(p['name'] == 'openrouter' for p in u.load_ai_providers())
 
 
+class TestPrettyProvider:
+
+	@pytest.mark.parametrize('pid,expected', [
+		('openai', 'Openai'),
+		('groq', 'Groq'),
+		('vertex_ai', 'Vertex AI'),
+		('together_ai', 'Together AI'),
+		('fireworks_ai', 'Fireworks AI'),
+		('text-completion-openai', 'Text Completion Openai'),
+	])
+	def test_snake_to_title_with_acronyms(self, pid, expected):
+		assert u.pretty_provider(pid) == expected
+
+
 if __name__ == '__main__':
 	pytest.main([__file__, '-q'])

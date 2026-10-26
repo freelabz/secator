@@ -1153,29 +1153,53 @@ def load_ai_providers():
 	return list(providers.values())
 
 
+# Short, well-known tokens to upper-case (not Title-case) when prettifying a
+# snake_case provider id (so `vertex_ai` -> "Vertex AI", not "Vertex Ai").
+_PROVIDER_ACRONYMS = {'ai', 'aws', 'gcp', 'api', 'llm', 'xai', 'ibm', 'hf'}
+
+
+def pretty_provider(provider_id):
+	"""snake_case / kebab-case provider id -> Normal Case, Capitalized.
+
+	e.g. ``vertex_ai`` -> ``Vertex AI``, ``text-completion-openai`` -> ``Text Completion Openai``.
+	"""
+	return ' '.join(
+		w.upper() if w in _PROVIDER_ACRONYMS else w.capitalize()
+		for w in str(provider_id).replace('-', '_').split('_') if w
+	) or str(provider_id)
+
+
 def setup_ai():
 	"""Interactive flow to configure the AI provider / model / API key.
 
-	Two sources: the built-in LiteLLM catalog (known providers on their default
-	bases) or a CUSTOM OpenAI-compatible base (any gateway/router). For a custom
-	base the key is collected first (its ``/models`` list is authenticated), then
-	the chosen model is saved as ``openai/<id>`` so LiteLLM routes to that base.
+	Step 1 picks a PROVIDER: any LiteLLM provider (on its default base), an
+	OpenAI-compatible gateway from the registry (providers.json), or a custom base.
+	A known provider filters the bundled catalog to its models; a gateway/custom base
+	lists live from ``<base>/models`` (key collected first — it's authenticated) and the
+	chosen model is saved as ``openai/<id>`` so LiteLLM routes to that base.
 	"""
 	import litellm
 	from rich.prompt import Prompt
 
-	def _static_catalog():
-		"""All models LiteLLM ships knowledge of, keyed by their default providers."""
+	def _provider_catalog(provider):
+		"""The models LiteLLM knows for ONE provider (ids stay canonical for routing)."""
 		models, parts = [], set()
-		for provider, model_names in litellm.models_by_provider.items():
-			for name in sorted(model_names):
-				p = name.split('/')
-				if p[0] != provider:
-					p = [provider] + p
-				models.append('/'.join(p))
-				for seg in p[:-1]:
-					parts.add(seg)
+		for name in sorted(litellm.models_by_provider.get(provider, [])):
+			p = name.split('/')
+			if p[0] != provider:
+				p = [provider] + p
+			models.append('/'.join(p))
+			for seg in p[:-1]:
+				parts.add(seg)
 		return models, parts
+
+	def _entry_label(entry):
+		kind, val = entry
+		if kind == 'lite':
+			return pretty_provider(val)
+		if kind == 'gateway':
+			return val.get('label') or val['name']
+		return 'Custom'
 
 	# Current config (so the user sees what they're changing).
 	current_key = CONFIG.addons.ai.api_key
@@ -1188,29 +1212,62 @@ def setup_ai():
 	console.print(f"    API base:     [bold white]{current_base or 'default (per-provider)'}[/]")
 	console.print(f"    API key:      [bold white]{masked_key or 'not set'}[/]")
 
-	# Step 1 — where models come from: the built-in LiteLLM catalog (known providers on
-	# their default bases), a named gateway from the provider registry (providers.json),
-	# or a one-off custom OpenAI-compatible base. Named-provider and custom converge on
-	# one path: set api_base, collect the key, then list live from `<base>/models`.
-	providers = load_ai_providers()
+	# Step 1 — pick a PROVIDER. The full LiteLLM provider list (on their default bases),
+	# then any OpenAI-compatible gateways from the registry (providers.json), then a
+	# one-off custom base. A known provider filters the bundled catalog to its models;
+	# a gateway/custom base lists live from `<base>/models` (key collected first — auth'd).
+	lite_providers = sorted(litellm.models_by_provider.keys())
+	gateways = load_ai_providers()
+	entries = ([('lite', p) for p in lite_providers]
+	           + [('gateway', g) for g in gateways]
+	           + [('custom', None)])
+
+	def _show_providers(subset):
+		console.print("[bold]  Select a provider:[/]")
+		for i, e in subset:
+			kind, val = e
+			if kind == 'gateway':
+				base_hint = f" [dim]{val.get('api_base', '')}[/]" if val.get('api_base') else ''
+				suffix = f" [dim](OpenAI-compatible gateway)[/]{base_hint}"
+			elif kind == 'custom':
+				suffix = " [dim](enter your own OpenAI-compatible URL)[/]"
+			else:
+				suffix = ""
+			console.print(f"    [dim]{i:>3}[/] {_entry_label(e)}{suffix}")
+
+	numbered = list(enumerate(entries, start=1))
 	console.print()
-	console.print("[bold]  Where should models come from?[/]")
-	console.print("    [dim]1[/] Built-in catalog (OpenAI, Anthropic, Gemini, … on their default bases)")
-	for i, p in enumerate(providers, start=2):
-		base_hint = f" [dim]{p.get('api_base', '')}[/]" if p.get('api_base') else ''
-		console.print(f"    [dim]{i}[/] {p.get('label') or p['name']} (OpenAI-compatible){base_hint}")
-	custom_n = len(providers) + 2
-	console.print(f"    [dim]{custom_n}[/] Custom OpenAI-compatible base (enter your own URL)")
-	src = Prompt.ask("  [bold cyan]Select[/]", choices=[str(n) for n in range(1, custom_n + 1)], default='1')
-	sel = int(src)
+	_show_providers(numbered)
+	while True:
+		raw = Prompt.ask("  [bold cyan]Select (number, or text to filter)[/]").strip()
+		if raw.isdigit() and 1 <= int(raw) <= len(entries):
+			kind, val = entries[int(raw) - 1]
+			break
+		ql = raw.lower()
+		matches = [(i, e) for i, e in numbered if ql and ql in _entry_label(e).lower()]
+		if len(matches) == 1:
+			kind, val = matches[0][1]
+			break
+		if matches:
+			console.print()
+			_show_providers(matches)
+		else:
+			console.print(f'[bold yellow]  No provider matching "{raw}".[/]')
 
 	custom_base, custom_key = '', None
-	if sel == 1:
-		all_models, all_parts = _static_catalog()
+	if kind == 'lite':
+		all_models, all_parts = _provider_catalog(val)
+		if not all_models:
+			console.print(f"[bold yellow]  LiteLLM lists no models for {pretty_provider(val)} — enter one manually.[/]")
+			manual = Prompt.ask("  [bold cyan]Model id[/]").strip()
+			if not manual:
+				return None
+			all_models = [manual if '/' in manual else f"{val}/{manual}"]
+			all_parts = {seg for m in all_models for seg in m.split('/')[:-1]}
 	else:
-		# A named provider pre-fills the base; "custom" prompts for it. Either way the
-		# base's `/models` list is authenticated, so collect the key before listing.
-		if sel == custom_n:
+		# A gateway pre-fills the base; "custom" prompts for it. Either way the base's
+		# `/models` list is authenticated, so collect the key before listing.
+		if kind == 'custom':
 			while True:
 				base, err = _normalize_api_base(
 					Prompt.ask("  [bold cyan]API base URL[/] [dim](https://…)[/]", default=current_base or None)
@@ -1221,12 +1278,11 @@ def setup_ai():
 				custom_base = base
 				break
 		else:
-			preset = providers[sel - 2]
-			custom_base = (preset.get('api_base') or '').rstrip('/')
-			docs = f" • docs: {preset['docs']}" if preset.get('docs') else ''
+			custom_base = (val.get('api_base') or '').rstrip('/')
+			docs = f" • docs: {val['docs']}" if val.get('docs') else ''
 			console.print(f"  [dim]Base: {custom_base}{docs}[/]")
-			if preset.get('key_hint'):
-				console.print(f"  [dim](key usually starts with {preset['key_hint']})[/]")
+			if val.get('key_hint'):
+				console.print(f"  [dim](key usually starts with {val['key_hint']})[/]")
 		custom_key = Prompt.ask(
 			"  [bold cyan]API key[/]", default=masked_key or None, show_default=bool(masked_key)
 		)

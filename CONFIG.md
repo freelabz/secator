@@ -572,10 +572,11 @@ Optional integrations and addon configurations.
 **Custom provider / OpenAI-compatible gateway.** Any OpenAI-compatible endpoint (a
 gateway/router, a self-hosted server, etc.) works by setting `addons.ai.api_base` +
 `addons.ai.api_key` and using an `openai/<model-id>` model name — LiteLLM then routes
-the OpenAI wire format to your base. `secator x ai setup` automates this: pick **Built-in
-catalog** (known providers on their default bases), a **named provider**, or **Custom
-base** (enter a URL); for a custom/named base it lists the endpoint's live models from
-`GET <api_base>/models` and saves your choice as `openai/<id>`.
+the OpenAI wire format to your base. `secator x ai setup` automates this: first **pick a
+provider** — any LiteLLM provider (on its default base), a **named gateway** from the
+registry, or a **custom base** (enter a URL). A known provider lists just its models; a
+gateway/custom base lists the endpoint's live models from `GET <api_base>/models` and
+saves your choice as `openai/<id>`.
 
 For a gateway with a self-signed / non-public TLS cert, set `SSL_VERIFY=False` (the same
 env knob litellm uses for inference) so the model-listing call skips cert verification too.
