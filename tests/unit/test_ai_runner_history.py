@@ -125,6 +125,37 @@ class TestListRunnersTool(unittest.TestCase):
 		out = list(dispatch_action({'action': 'list_runners', 'runner_type': 'scan'}, self._ctx(e)))
 		self.assertTrue(any(isinstance(o, Info) for o in out))
 
+	def test_archive_days_env(self):
+		import os
+		from secator.ai.actions import _runner_archive_days
+		for v in ('SECATOR_RUNNER_ARCHIVE_AFTER_DAYS', 'ARCHIVE_AFTER_DAYS'):
+			os.environ.pop(v, None)
+		try:
+			self.assertIsNone(_runner_archive_days())
+			os.environ['ARCHIVE_AFTER_DAYS'] = '30'
+			self.assertEqual(_runner_archive_days(), 30)
+			os.environ['SECATOR_RUNNER_ARCHIVE_AFTER_DAYS'] = '7'
+			self.assertEqual(_runner_archive_days(), 7)  # secator var wins
+			os.environ['SECATOR_RUNNER_ARCHIVE_AFTER_DAYS'] = '0'
+			os.environ['ARCHIVE_AFTER_DAYS'] = 'nope'
+			self.assertIsNone(_runner_archive_days())  # 0 / invalid -> no window
+		finally:
+			for v in ('SECATOR_RUNNER_ARCHIVE_AFTER_DAYS', 'ARCHIVE_AFTER_DAYS'):
+				os.environ.pop(v, None)
+
+	def test_empty_message_mentions_archive_window(self):
+		import os
+		os.environ['ARCHIVE_AFTER_DAYS'] = '30'
+		try:
+			e = MagicMock()
+			e.backend.name = 'mongodb'
+			e.list_runners.return_value = []
+			out = list(dispatch_action({'action': 'list_runners', 'runner_type': 'scan'}, self._ctx(e)))
+			msgs = [o.message for o in out if isinstance(o, Info)]
+			self.assertTrue(msgs and 'last 30 days' in msgs[0] and 'archived' in msgs[0], msgs)
+		finally:
+			os.environ.pop('ARCHIVE_AFTER_DAYS', None)
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestMongoListRunnersScoping(unittest.TestCase):

@@ -1419,6 +1419,24 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error.from_exception(e, _context=context)
 
 
+def _runner_archive_days():
+	"""Days after which the hosting platform archives runner docs out of the live
+	collections ``list_runners`` reads — so it effectively only sees runs from the last N
+	days. Read from env (``SECATOR_RUNNER_ARCHIVE_AFTER_DAYS``, else the platform's
+	``ARCHIVE_AFTER_DAYS``) so the AI can say "no runs in the last N days" instead of wrongly
+	implying none ever ran. Returns None when no archival window is known (local/CLI use)."""
+	for var in ('SECATOR_RUNNER_ARCHIVE_AFTER_DAYS', 'ARCHIVE_AFTER_DAYS'):
+		raw = os.environ.get(var)
+		if raw:
+			try:
+				n = int(raw)
+			except (TypeError, ValueError):
+				continue
+			if n > 0:
+				return n
+	return None
+
+
 def _handle_list_runners(action: Dict, ctx: ActionContext) -> Generator:
 	"""List the workspace's runner run-history (scans/workflows/tasks), newest first.
 
@@ -1454,21 +1472,30 @@ def _handle_list_runners(action: Dict, ctx: ActionContext) -> Generator:
 		return
 
 	summaries = filter_runners(runners, since=since, status=status, limit=limit)
+	# The platform archives runs older than N days out of the collections list_runners
+	# reads, so a missing scan may just be archived, not absent. Surface the window so the
+	# model says "no runs in the last N days — older runs are archived" instead of wrongly
+	# concluding nothing ever ran (and can widen the lookback or check the archive).
+	archive_days = _runner_archive_days()
+	window = f" in the last {archive_days} days" if (archive_days and not since) else ""
+	archive_note = " — older runs are archived" if archive_days else ""
 	yield Ai(
 		content=(f"{runner_type or 'runner'} history"
-		         + (f" since {since}" if since else "")
+		         + (f" since {since}" if since else window)
 		         + (f" status={status}" if status else "")),
 		ai_type="list_runners",
 		extra_data={"runners": summaries, "count": len(summaries),
-		            "runner_type": runner_type, "since": since, "status": status},
+		            "runner_type": runner_type, "since": since, "status": status,
+		            "archive_after_days": archive_days},
 		_context=context,
 	)
 	if not summaries:
 		yield Info(
 			message=("No runners found"
 			         + (f" of type {runner_type}" if runner_type else "")
-			         + (f" since {since}" if since else "")
-			         + (f" with status {status}" if status else "") + "."),
+			         + (f" since {since}" if since else window)
+			         + (f" with status {status}" if status else "")
+			         + archive_note + "."),
 			_context=context,
 		)
 		return
