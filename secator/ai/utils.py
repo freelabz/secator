@@ -1066,11 +1066,20 @@ def _normalize_api_base(raw):
 		return '', 'API base cannot be empty.'
 	if base.startswith('https://'):
 		return base, None
-	# http:// is allowed only for a localhost dev gateway.
-	host = base.split('://', 1)[-1].split('/')[0].split(':')[0]
-	if base.startswith('http://') and host in ('localhost', '127.0.0.1'):
+	# http:// is allowed ONLY for a bare localhost dev gateway. Resolve the REAL
+	# destination via urlparse (not string-splitting): `http://localhost@evil` parses
+	# to host `evil`, and embedded userinfo (`user:pass@`) must be rejected — otherwise
+	# the Bearer key would be sent in cleartext to a remote host.
+	from urllib.parse import urlparse
+	try:
+		parsed = urlparse(base)
+	except ValueError:
+		return '', 'Invalid API base URL.'
+	if (parsed.scheme == 'http'
+			and parsed.hostname in ('localhost', '127.0.0.1')
+			and not parsed.username and not parsed.password):
 		return base, None
-	return '', 'API base must be https:// (http:// allowed only for localhost).'
+	return '', 'API base must be https:// (http:// allowed only for a bare localhost host).'
 
 
 def _ssl_verify():
@@ -1146,8 +1155,16 @@ def load_ai_providers():
 				continue
 			data = json.loads(path.read_text())
 			for p in data.get('providers', []):
-				if isinstance(p, dict) and p.get('name') and p.get('api_base'):
-					providers[p['name']] = p
+				if not (isinstance(p, dict) and p.get('name') and p.get('api_base')):
+					continue
+				# SECURITY: a registry entry's base must pass the SAME https-or-localhost
+				# rule as a hand-entered base - else an http://remote/v1 entry would ship
+				# the Bearer key in cleartext when selected.
+				norm, err = _normalize_api_base(p['api_base'])
+				if err:
+					console.print(f"[dim]  (skipped provider {p['name']}: {err})[/]")
+					continue
+				providers[p['name']] = {**p, 'api_base': norm}
 		except Exception as e:  # noqa: BLE001 - a bad provider file must not break setup
 			console.print(f"[dim]  (skipped provider file {path}: {e})[/]")
 	return list(providers.values())
@@ -1278,7 +1295,9 @@ def _setup_ai_interactive():
 	console.print()
 	_show_providers(numbered)
 	while True:
-		raw = Prompt.ask("  [bold cyan]Select (number, or text to filter)[/]").strip()
+		raw = Prompt.ask("  [bold cyan]Select (number, text to filter, q to quit)[/]").strip()
+		if raw.lower() in ('q', 'quit', 'exit'):
+			return None
 		if raw.isdigit() and 1 <= int(raw) <= len(entries):
 			kind, val = entries[int(raw) - 1]
 			break
@@ -1322,11 +1341,20 @@ def _setup_ai_interactive():
 			console.print(f"  [dim]Base: {custom_base}{docs}[/]")
 			if val.get('key_hint'):
 				console.print(f"  [dim](key usually starts with {val['key_hint']})[/]")
+		# Only offer to reuse the saved key when the selected base is the SAME as the
+		# configured one — otherwise reusing it would send the old provider's key to a
+		# DIFFERENT endpoint. On a new base, require a fresh key.
+		same_base = bool(current_base) and custom_base == current_base.rstrip('/')
 		custom_key = Prompt.ask(
-			"  [bold cyan]API key[/]", default=masked_key or None, show_default=bool(masked_key)
+			"  [bold cyan]API key[/]",
+			default=masked_key if same_base else None,
+			show_default=same_base and bool(masked_key),
 		)
-		if custom_key == masked_key:
+		if same_base and custom_key == masked_key:
 			custom_key = current_key
+		if not custom_key:
+			console.print("[bold red]  An API key is required for this endpoint — aborting.[/]")
+			return None
 		try:
 			with maybe_status("[bold orange3]Listing models from the endpoint…[/]", spinner="dots"):
 				ids = fetch_openai_compatible_models(custom_base, custom_key)
@@ -1366,7 +1394,7 @@ def _setup_ai_interactive():
 	# Enter prompt loop
 	while True:
 		console.print()
-		choice = Prompt.ask("[bold cyan]  Filter or select (number/name, q to quit)[/]")
+		choice = Prompt.ask("[bold cyan]  Filter or select (number/name, b to go back, q to quit)[/]")
 
 		if not choice:
 			# Empty input: re-show current list
@@ -1375,6 +1403,10 @@ def _setup_ai_interactive():
 
 		if choice.lower() in ('q', 'quit', 'exit'):
 			return None
+
+		# Go back to provider selection (restart the flow from step 1).
+		if choice.lower() in ('b', 'back'):
+			return _setup_ai_interactive()
 
 		# Number → select from current display
 		if choice.isdigit():

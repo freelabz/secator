@@ -26,6 +26,12 @@ class TestNormalizeApiBase:
 		assert u._normalize_api_base('http://localhost:8080/v1')[1] is None
 		assert u._normalize_api_base('http://127.0.0.1/v1')[1] is None
 
+	def test_http_localhost_with_userinfo_rejected(self):
+		# `http://localhost@evil` resolves to host `evil`; userinfo must not sneak past
+		# the localhost exception (would leak the Bearer key over cleartext to a remote).
+		assert u._normalize_api_base('http://localhost@evil.example/v1')[0] == ''
+		assert u._normalize_api_base('http://user:pass@localhost/v1')[0] == ''
+
 
 class TestFetchModels:
 
@@ -111,6 +117,19 @@ class TestLoadProviders:
 		monkeypatch.setattr(CONFIG.dirs, 'data', str(tmp_path))
 		(tmp_path / 'ai_providers.json').write_text('{ not json')
 		assert any(p['name'] == 'openrouter' for p in u.load_ai_providers())
+
+	def test_insecure_registry_base_is_rejected(self, tmp_path, monkeypatch):
+		# A registry entry must pass the same https-or-localhost rule as a typed base.
+		monkeypatch.setattr(CONFIG.dirs, 'data', str(tmp_path))
+		(tmp_path / 'ai_providers.json').write_text(json.dumps({
+			'providers': [
+				{'name': 'insecure', 'label': 'X', 'api_base': 'http://remote.example/v1'},
+				{'name': 'ok', 'label': 'OK', 'api_base': 'https://ok.example/v1/'},
+			]
+		}))
+		by_name = {p['name']: p for p in u.load_ai_providers()}
+		assert 'insecure' not in by_name  # cleartext remote rejected
+		assert by_name['ok']['api_base'] == 'https://ok.example/v1'  # kept + normalized
 
 
 class TestPrettyProvider:
