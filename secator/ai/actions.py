@@ -2669,9 +2669,12 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 		for a in actions
 	)
 	# A Textual TUI owns the screen and shows its own progress — a Rich Progress Live
-	# here would raise "Only one live display may be active at once". Skip it.
+	# here would raise "Only one live display may be active at once". Skip it. A Celery
+	# worker (headless, client polls the DB) has no use for the Rich panel either and
+	# streams instead (see stream_live below), so skip it there too.
 	from secator.rich import get_tui
-	use_progress = not ctx.subagent and not has_ai_subagent and get_tui() is None
+	from secator.definitions import IN_WORKER
+	use_progress = not ctx.subagent and not has_ai_subagent and get_tui() is None and not IN_WORKER
 
 	# Print all task start messages before any task begins
 	if use_progress:
@@ -2732,22 +2735,25 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 		from contextlib import nullcontext
 		ctx_mgr = nullcontext()
 
-	# Under a Textual TUI there's no Rich progress panel, so a batch that only yields
-	# at the very end looks stuck for its whole duration. Stream each action's items
-	# (its runner card + findings, collected contiguously) the moment that action
-	# completes. Non-TUI keeps the deterministic sorted-at-end order.
-	stream_live = get_tui() is not None
+	# A batch that only yields at the very end looks stuck for its whole duration: no
+	# runner cards, no "Running <description>" rows until everything finishes. Stream
+	# each action's items (runner card + findings) the moment they're produced whenever
+	# there's no Rich progress panel to carry live feedback instead — i.e. under a
+	# Textual TUI (owns the screen) OR inside a Celery worker (headless; the client UI
+	# polls the persisted docs and wants them incrementally). Only the interactive-CLI
+	# Rich-panel path keeps the deterministic sorted-at-end order.
+	stream_live = get_tui() is not None or IN_WORKER
 	if stream_live:
 		# immediate feedback so a parallel batch never looks stuck before the first
 		# action finishes (the TUI has no Rich progress panel)
 		labels = ", ".join(_get_action_label(a) for a in actions)
 		yield Info(message=f"Running {len(actions)} tasks in parallel: {labels}", _context=ctx.context)
 
-	# TUI: stream each action's items the moment they're PRODUCED (not when the action
+	# Stream each action's items the moment they're PRODUCED (not when the action
 	# completes), via a thread-safe queue the workers push into. This surfaces every
 	# task's "Running <description>" card as its runner starts — so all cards appear up
 	# front (up to max_workers), in parallel, instead of trickling in one-per-completion.
-	# Items interleave across tasks; the TUI routes them to the right panel by _source.
+	# Items interleave across tasks; the display routes them to the right panel by _source.
 	if stream_live:
 		import queue as _queue
 		q: Any = _queue.Queue()
