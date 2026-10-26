@@ -1169,10 +1169,31 @@ def pretty_provider(provider_id):
 	) or str(provider_id)
 
 
+# Model modes (litellm metadata) that are NOT text chat — providers whose every known
+# model is one of these (pure TTS/STT/embedding/image) are hidden from `ai setup`.
+_NON_CHAT_MODES = {
+	'audio_transcription', 'audio_speech', 'image_generation', 'embedding',
+	'rerank', 'moderation',
+}
+
+
 def setup_ai():
+	"""Entry point for ``ai setup``.
+
+	Wraps the interactive flow so Ctrl+C / EOF aborts cleanly with a message instead
+	of a traceback (SystemExit).
+	"""
+	try:
+		return _setup_ai_interactive()
+	except (KeyboardInterrupt, EOFError):
+		console.print("\n[bold yellow]  Setup aborted.[/]")
+		return None
+
+
+def _setup_ai_interactive():
 	"""Interactive flow to configure the AI provider / model / API key.
 
-	Step 1 picks a PROVIDER: any LiteLLM provider (on its default base), an
+	Step 1 picks a PROVIDER: any (chat-capable) LiteLLM provider on its default base, an
 	OpenAI-compatible gateway from the registry (providers.json), or a custom base.
 	A known provider filters the bundled catalog to its models; a gateway/custom base
 	lists live from ``<base>/models`` (key collected first — it's authenticated) and the
@@ -1192,6 +1213,24 @@ def setup_ai():
 			for seg in p[:-1]:
 				parts.add(seg)
 		return models, parts
+
+	def _chat_capable(provider):
+		"""Keep a provider unless EVERY model with known metadata is non-chat.
+
+		Lenient on purpose: providers whose models carry no mode metadata (gateways,
+		newer vendors) are kept; only pure audio/image/embedding vendors (polly,
+		deepgram, voyage, …) are dropped from the list."""
+		names = litellm.models_by_provider.get(provider, [])
+		if not names:
+			return True
+		known = []
+		for name in names:
+			info = litellm.model_cost.get(name) or litellm.model_cost.get(name.split('/')[-1]) or {}
+			if info.get('mode') is not None:
+				known.append(info['mode'])
+		if not known:
+			return True
+		return any(m not in _NON_CHAT_MODES for m in known)
 
 	def _entry_label(entry):
 		kind, val = entry
@@ -1216,7 +1255,7 @@ def setup_ai():
 	# then any OpenAI-compatible gateways from the registry (providers.json), then a
 	# one-off custom base. A known provider filters the bundled catalog to its models;
 	# a gateway/custom base lists live from `<base>/models` (key collected first — auth'd).
-	lite_providers = sorted(litellm.models_by_provider.keys())
+	lite_providers = sorted(p for p in litellm.models_by_provider if _chat_capable(p))
 	gateways = load_ai_providers()
 	entries = ([('lite', p) for p in lite_providers]
 	           + [('gateway', g) for g in gateways]
