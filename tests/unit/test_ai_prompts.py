@@ -310,14 +310,12 @@ class TestPrompts(unittest.TestCase):
 		# (subagent), stop. `change_mode` lets an AUTO-resolved chat turn self-escalate — it
 		# is withheld from a user-PINNED chat in build_tool_schemas (see
 		# test_ai_tools.test_change_mode_gated_by_pin), so read-only stays read-only. Nothing
-		# else here acts on the world or the data — notably `screenshot` (which runs a tool)
-		# is excluded.
+		# else here acts on the world or the data.
 		self.assertEqual(
 			set(actions),
 			{"query", "fetch_url", "web_search", "list_runners", "update_plan",
 			 "subagent", "change_mode", "stop"},
 		)
-		self.assertNotIn("screenshot", actions)
 		for a in ["shell", "task", "workflow", "add_finding", "update_finding",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:
 			self.assertNotIn(a, actions)
