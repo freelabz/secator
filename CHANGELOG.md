@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.1](https://github.com/freelabz/secator/compare/v0.53.0...v0.53.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **ai:** scope list_runners by id vs name in the mongodb backend ([#1592](https://github.com/freelabz/secator/issues/1592)) ([13e019b](https://github.com/freelabz/secator/commit/13e019b4448d27df0f5d4495c75ffebdce916b3f))
+
 ## [0.53.0](https://github.com/freelabz/secator/compare/v0.52.1...v0.53.0) (2026-10-27)
 
 
