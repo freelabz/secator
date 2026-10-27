@@ -228,13 +228,7 @@ class MongoDBBackend(QueryBackend):
 					# ObjectId-vs-name detection in the api backend.
 					from bson.objectid import ObjectId
 					if ObjectId.is_valid(workspace_id):
-						# Usually an ObjectId (the platform passes the workspace _id), but a
-						# CLI -ws name could coincidentally be 24 hex chars — match either
-						# field so a hex-named workspace isn't silently dropped.
-						query['$or'] = [
-							{'context.workspace_id': workspace_id},
-							{'context.workspace_name': workspace_id},
-						]
+						query['context.workspace_id'] = workspace_id
 					else:
 						query['context.workspace_name'] = workspace_id
 				if has_parent is not None:
