@@ -261,6 +261,13 @@ class VulnersAddon(StrictModel):
 	api_key: str = ''
 
 
+class WebSearchConfig(StrictModel):
+	# Optional Tavily API key for the AI `web_search` tool's synthesized-answer engine.
+	# When empty, web_search uses the keyless DuckDuckGo/Sploitus engines only.
+	# Env: SECATOR_ADDONS_AI_WEB_SEARCH_TAVILY_API_KEY.
+	tavily_api_key: str = ''
+
+
 class AiAddon(StrictModel):
 	enabled: bool = False
 	api_key: str = ''
@@ -329,6 +336,7 @@ class AiAddon(StrictModel):
 			'write(*)',
 		],
 	}
+	web_search: WebSearchConfig = WebSearchConfig()
 
 
 class Providers(StrictModel):

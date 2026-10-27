@@ -1104,6 +1104,14 @@ class PermissionEngine:
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
+		elif action_type == "screenshot":
+			# Fail CLOSED on a bad/missing scheme: a non-http(s) or empty URL must never
+			# slip through to _handle_screenshot. A valid http(s) URL is still gated as a
+			# TARGET (network egress) in _extract_targets.
+			url = str(action.get("url", "") or "").strip()
+			if not url.lower().startswith(("http://", "https://")):
+				return PermissionResult(decision="deny", reason="screenshot requires an http(s) URL")
+			return PermissionResult(decision="allow", reason="screenshot target checked separately")
 		# Auto-allow is sourced from the tool registry (`tool.auto_allow`), the single
 		# source of truth — not a hand-synced tuple here (that drift is what rotted the
 		# add_vuln_poc rename). Auto-allowed actions are control/meta (`subagent`/`stop`/
@@ -1259,6 +1267,13 @@ class PermissionEngine:
 			# subagent's targets are enforced at spawn, in addition to its child actions
 			# being guardrail-checked inside its own run). Filter out file paths / non-network.
 			return [t for t in action.get("targets", []) if _is_network_target(t) and not _is_file_path(t)]
+		elif action_type == "screenshot":
+			# Any non-empty URL is a target to scope-check. `_is_network_target` was built to
+			# filter descriptive text out of shell commands, not to validate a URL field, and
+			# it rejects single-label internal hosts (`localhost`, `intranet`) — which would
+			# make the scope check fail OPEN. The scheme is enforced in _check_action_type.
+			url = str(action.get("url", "") or "").strip()
+			return [url] if url else []
 		return []
 
 	def add_runtime_allow(self, rules: List[str]) -> None:

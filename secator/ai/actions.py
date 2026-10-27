@@ -4,6 +4,7 @@ import os
 import re
 import threading
 import uuid
+from pathlib import Path
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, fields
@@ -1412,6 +1413,363 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			_context=context
 		)
 		yield Error.from_exception(e, _context=context)
+
+
+# Max screenshot bytes to embed as a data URI on the action doc (so a consumer can render it
+# inline without GCS / a local path). Larger screenshots return just the path.
+_MAX_SCREENSHOT_EMBED_BYTES = 1_500_000
+
+
+def _strip_gcs_hooks(hooks: Dict) -> Dict:
+	"""Return a copy of `hooks` with the GCS on_item hook removed from every runner class.
+
+	The screenshot tool needs the PNG to stay LOCAL so we can read it back and embed it —
+	the GCS driver would otherwise upload it and rewrite screenshot_path to a gs:// URI we
+	can't fetch. This disables ONLY the GCS relay for this one child run; every other
+	persistence hook (mongodb/api/sqlite) still fires, so the run is still recorded.
+	"""
+	out = {}
+	for cls, cls_hooks in (hooks or {}).items():
+		new_cls = {}
+		for hook_name, fns in (cls_hooks or {}).items():
+			new_cls[hook_name] = [
+				fn for fn in fns if getattr(fn, "__module__", "") != "secator.hooks.gcs"
+			]
+		out[cls] = new_cls
+	return out
+
+
+def _handle_screenshot(action: Dict, ctx: ActionContext) -> Generator:
+	"""Screenshot a web page (headless httpx) and surface it as visual evidence.
+
+	The URL is scope-checked as a target by the guardrail layer before this runs. The child
+	httpx run has the GCS relay hook stripped (see _strip_gcs_hooks) so the PNG stays local;
+	we then read it and embed it as a data URI on the action doc, which makes the screenshot
+	viewable regardless of whether the GCS driver is active (solves the "can't fetch a gs://
+	object back" problem). Fails soft.
+	"""
+	import base64
+	context = _get_result_context(action, ctx)
+	url = action.get("url", "")
+	if ctx.encryptor and isinstance(url, str):
+		url = ctx.encryptor.decrypt(url)
+	url = str(url or "").strip()
+	if not url:
+		yield Error(message="screenshot requires a `url`.", _context=context)
+		return
+
+	if ctx.dry_run:
+		yield Info(message=f"[DRY RUN] Would screenshot {url}", _context=context)
+		return
+
+	run_opts = {
+		**_child_run_opts(ctx),
+		"screenshot": True,
+		"print_cmd": not ctx.silent and not ctx.subagent,
+		"print_start": False,
+		"print_end": False,
+	}
+	if action.get("description"):
+		run_opts["description"] = action["description"]
+
+	hooks, denial = _child_preamble(ctx, context, "task")
+	if denial is not None:
+		yield denial
+		return
+	hooks = _strip_gcs_hooks(hooks)  # keep the PNG local so we can read + embed it
+
+	try:
+		# Hydrate httpx's own metadata from its class (see _run_runner) so a stub
+		# {type, name} template doesn't serialize description/input_types as `{}` and
+		# get rejected by the `api` driver's runner schema.
+		httpx_cls = Task.get_task_class('httpx')
+		tpl = TemplateLoader(input={
+			'type': 'task',
+			'name': 'httpx',
+			'description': (httpx_cls.__doc__ or '').strip() or None,
+			'input_types': list(getattr(httpx_cls, 'input_types', []) or []),
+			'tags': list(getattr(httpx_cls, 'tags', []) or []),
+		})
+		runner = Task(tpl, [url], run_opts=run_opts, hooks=hooks, context=context)
+	except Exception as e:  # noqa: BLE001
+		yield Error(message=f"screenshot: failed to start httpx: {e}", _context=context)
+		return
+
+	screenshot_path = ""
+	for item in runner:
+		# Capture the local screenshot path off the Url finding; forward findings so the
+		# run still persists + shows in history (the Url finding is a normal result).
+		if isinstance(item, OutputType) and getattr(item, "_type", "") == "url":
+			sp = getattr(item, "screenshot_path", "") or ""
+			if sp and not screenshot_path:
+				screenshot_path = sp
+
+	data_uri, embed_note = "", ""
+	if screenshot_path and Path(screenshot_path).is_file():
+		try:
+			raw = Path(screenshot_path).read_bytes()
+			if len(raw) <= _MAX_SCREENSHOT_EMBED_BYTES:
+				ext = Path(screenshot_path).suffix.lower().lstrip(".") or "png"
+				mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+				data_uri = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+			else:
+				embed_note = f" (screenshot {len(raw)} bytes — too large to embed inline)"
+		except Exception as e:  # noqa: BLE001
+			embed_note = f" (could not read screenshot: {e})"
+
+	if not screenshot_path:
+		yield Error(
+			message=(f"screenshot: no image was produced for {url}. Headless capture may be "
+			         "unavailable (needs a headless browser) or the page did not load."),
+			_context=context,
+		)
+		return
+
+	yield Ai(
+		content=f"Screenshot captured for {url}.{embed_note}",
+		ai_type="screenshot",
+		extra_data={
+			"url": url,
+			"screenshot_path": screenshot_path,
+			# Inline image for display — never sent to the model (Ai items aren't collected
+			# into the tool result), so the base64 can't blow the token budget.
+			"screenshot_data_uri": data_uri,
+		},
+		_context=context,
+	)
+	# Observation-only text result for the model (NOT the bytes).
+	yield {
+		"_type": "screenshot",
+		"url": url,
+		"screenshot_path": screenshot_path,
+		"captured": True,
+		"_context": {**context, "ai_query_result": True},
+	}
+
+
+def _handle_fetch_url(action: Dict, ctx: ActionContext) -> Generator:
+	"""Fetch one public page and surface its readable text to the model.
+
+	Target-agnostic (reads public sources, not the engagement targets) so it is not
+	scope-gated — but the fetch is SSRF-guarded (public http(s) hosts only; internal /
+	metadata / private hosts and non-http schemes are refused) so it can't be used to reach
+	our own internal surface. Read-only: the page text is observation-only (marked
+	ai_query_result), never persisted as a finding. Fails soft.
+	"""
+	from secator.ai.fetch_url import fetch_url
+	context = _get_result_context(action, ctx)
+	url = action.get("url", "")
+	if ctx.encryptor and isinstance(url, str):
+		url = _decrypt_dict({"url": url}, ctx.encryptor).get("url", url)
+	url = str(url or "").strip()
+	if not url:
+		yield Error(message="fetch_url requires a `url`.", _context=context)
+		return
+	max_chars = action.get("max_chars", 20000)
+
+	result, error = fetch_url(url, max_chars=max_chars)
+	if error:
+		yield Error(message=f"fetch_url: {error}", _context=context)
+		return
+
+	yield Ai(
+		content=result.get("text", ""),
+		ai_type="fetch_url",
+		extra_data={
+			"url": result.get("url"),
+			"status": result.get("status"),
+			"title": result.get("title"),
+			"content_type": result.get("content_type"),
+			"truncated": result.get("truncated"),
+			"ai_query_result": True,
+		},
+		_context=context,
+	)
+	# Surface the extracted text to the model as an observation-only result.
+	yield {
+		"_type": "web_page",
+		"url": result.get("url"),
+		"status": result.get("status"),
+		"title": result.get("title"),
+		"text": result.get("text"),
+		"_context": {**context, "ai_query_result": True},
+	}
+
+
+_PLAN_STATUSES = ("pending", "in_progress", "done", "skipped")
+_MAX_PLAN_ITEMS = 30
+_MAX_PLAN_TEXT = 300
+
+
+def _handle_update_plan(action: Dict, ctx: ActionContext) -> Generator:
+	"""Maintain a user-visible to-do list for a multi-step task.
+
+	Each call REPLACES the whole plan (the model sends the full ordered list); the latest
+	Ai(ai_type="plan") doc is the current plan. Read-only wrt the workspace
+	(no findings, no targets) — auto-allowed. Normalizes/validates items so a malformed status
+	or a giant list can't break the renderer.
+	"""
+	context = _get_result_context(action, ctx)
+	items = action.get("items", [])
+	if isinstance(items, str):
+		try:
+			items = json.loads(items)
+		except (json.JSONDecodeError, TypeError):
+			items = None
+	if not isinstance(items, list) or not items:
+		yield Error(message="update_plan requires a non-empty `items` list of {text, status}.", _context=context)
+		return
+
+	norm = []
+	for raw in items[:_MAX_PLAN_ITEMS]:
+		if isinstance(raw, str):
+			raw = {"text": raw}
+		if not isinstance(raw, dict):
+			continue
+		text = str(raw.get("text") or "").strip()
+		if not text:
+			continue
+		if ctx.encryptor:
+			text = _decrypt_dict({"text": text}, ctx.encryptor).get("text", text)
+		status = str(raw.get("status") or "pending").strip().lower()
+		if status not in _PLAN_STATUSES:
+			status = "pending"
+		norm.append({"text": text[:_MAX_PLAN_TEXT], "status": status})
+	if not norm:
+		yield Error(message="update_plan: no valid items (each needs a non-empty `text`).", _context=context)
+		return
+
+	done = sum(1 for i in norm if i["status"] in ("done", "skipped"))
+	total = len(norm)
+	current = next((i["text"] for i in norm if i["status"] == "in_progress"), "")
+	yield Ai(
+		content=current or f"{done}/{total} steps done",
+		ai_type="plan",
+		extra_data={"items": norm, "done": done, "total": total},
+		_context=context,
+	)
+
+
+def _handle_web_search(action: Dict, ctx: ActionContext) -> Generator:
+	"""Search the public web for external context (CVE write-ups, PoCs, tool docs).
+
+	Read-only and target-agnostic: it hits public search engines, not the engagement
+	targets, so it is NOT gated by target/scope guardrails (see guardrails auto-allow).
+	Results are surfaced to the model only (marked ``ai_query_result``) — they are not
+	persisted as workspace findings. Fails soft: an engine error yields a clean note,
+	never an exception that aborts the AI loop.
+	"""
+	from secator.ai.web_search import web_search, VALID_MODES
+	context = _get_result_context(action, ctx)
+
+	query = action.get("query", "")
+	if ctx.encryptor and isinstance(query, str):
+		query = _decrypt_dict({"query": query}, ctx.encryptor).get("query", query)
+	query = str(query or "").strip()
+	if not query:
+		yield Error(message="web_search requires a non-empty `query`.", _context=context)
+		return
+
+	mode = str(action.get("mode") or "answer").lower()
+	if mode not in VALID_MODES:
+		mode = "answer"
+	max_results = action.get("max_results", 5)
+	exploit_type = str(action.get("exploit_type") or "exploits").lower()
+	sort = str(action.get("sort") or "default").lower()
+
+	results, engine = web_search(
+		query, mode=mode, max_results=max_results, exploit_type=exploit_type, sort=sort)
+
+	yield Ai(
+		content=query,
+		ai_type="web_search",
+		extra_data={"results": results, "count": len(results), "mode": mode, "engine": engine},
+		_context=context,
+	)
+	if not results:
+		# Surface an explicit "no results" to the model (mode/engine included) so it can
+		# reword the query or switch mode rather than assume the tool is broken.
+		yield Info(
+			message=f"web_search ({mode} via {engine}) returned no results for {query!r}.",
+			_context=context,
+		)
+		return
+	# Surface each hit to the model as an observation-only result (like query_workspace):
+	# marked ai_query_result so the runner neither persists nor re-yields it as a finding.
+	for hit in results:
+		hit = dict(hit)
+		hit["_context"] = {**context, "ai_query_result": True}
+		yield hit
+
+
+def _handle_list_runners(action: Dict, ctx: ActionContext) -> Generator:
+	"""List the workspace's runner run-history (scans/workflows/tasks), newest first.
+
+	Read-only observation tool: reads run metadata (status/targets/timing) via
+	``QueryEngine.list_runners`` — it does NOT read findings (use query_workspace for those)
+	and touches no targets, so it is auto-allowed like query. Results are surfaced to the
+	model only (marked ``ai_query_result``); nothing is persisted.
+	"""
+	from secator.ai.runner_history import filter_runners
+	context = _get_result_context(action, ctx)
+
+	runner_type = action.get("runner_type") or None
+	if runner_type:
+		runner_type = str(runner_type).strip().lower() or None
+	since = action.get("since")
+	status = action.get("status")
+	limit = action.get("limit", 50)
+	# Default to outermost runs only (a scan, not its many sub-tasks); include_children opens it up.
+	has_parent = None if action.get("include_children") else False
+
+	workspace_id = ctx.context.get("workspace_id", "")
+	engine = ctx.get_query_engine()
+	is_local = getattr(engine.backend, "name", "") == "json"
+	if not is_local and not workspace_id:
+		yield Warning(message="No workspace available to list runners", _context=context)
+		return
+
+	try:
+		runners = engine.list_runners(
+			workspace_id=workspace_id or None, runner_type=runner_type, has_parent=has_parent)
+	except Exception as e:
+		yield Error(message=f"Failed to list runners: {e}", _context=context)
+		return
+
+	try:
+		summaries = filter_runners(runners, since=since, status=status, limit=limit)
+	except ValueError as e:
+		yield Error(message=str(e), _context=context)
+		return
+	# Signal truncation so the model can tell "exactly limit" from "more exist".
+	try:
+		limit_int = int(limit)
+	except (TypeError, ValueError):
+		limit_int = 50
+	has_more = bool(limit_int > 0 and len(summaries) >= limit_int)
+	yield Ai(
+		content=(f"{runner_type or 'runner'} history"
+		         + (f" since {since}" if since else "")
+		         + (f" status={status}" if status else "")),
+		ai_type="list_runners",
+		extra_data={"runners": summaries, "count": len(summaries), "has_more": has_more,
+		            "runner_type": runner_type, "since": since, "status": status},
+		_context=context,
+	)
+	if not summaries:
+		yield Info(
+			message=("No runners found"
+			         + (f" of type {runner_type}" if runner_type else "")
+			         + (f" since {since}" if since else "")
+			         + (f" with status {status}" if status else "") + "."),
+			_context=context,
+		)
+		return
+	for row in summaries:
+		row = dict(row)
+		row.setdefault("_type", "runner")
+		row["_context"] = {**context, "ai_query_result": True}
+		yield row
 
 
 def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:

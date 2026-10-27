@@ -373,6 +373,30 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "stop", "reason": "test"})
 		self.assertEqual(result.decision, "allow")
 
+	# --- screenshot URL gating (must not fail open) ---
+
+	def test_screenshot_public_url_allowed(self):
+		engine = self._make_engine(allow=["target(*)"])
+		result = engine.check_action({"action": "screenshot", "url": "https://example.com/"})
+		self.assertEqual(result.decision, "allow")
+
+	def test_screenshot_single_label_host_not_allowed(self):
+		# `localhost`/internal single-label hosts used to be dropped by _is_network_target,
+		# which skipped the scope layer and silently ALLOWED the screenshot (fail-open).
+		engine = self._make_engine(allow=["target(example.com)"])
+		result = engine.check_action({"action": "screenshot", "url": "http://localhost/"})
+		self.assertNotEqual(result.decision, "allow")
+
+	def test_screenshot_non_http_scheme_denied(self):
+		engine = self._make_engine(allow=["target(*)"])
+		result = engine.check_action({"action": "screenshot", "url": "file:///etc/passwd"})
+		self.assertEqual(result.decision, "deny")
+
+	def test_screenshot_empty_url_denied(self):
+		engine = self._make_engine(allow=["target(*)"])
+		result = engine.check_action({"action": "screenshot", "url": ""})
+		self.assertEqual(result.decision, "deny")
+
 	# --- M7: add_finding privileged-type gating ---
 
 	def test_add_finding_benign_allowed(self):
