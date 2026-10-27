@@ -69,10 +69,18 @@ def parse_since(since, now=None):
 def summarize_runner(runner):
 	"""Reduce a full runner dict to the compact history summary (SUMMARY_FIELDS + ids)."""
 	out = {k: runner.get(k) for k in SUMMARY_FIELDS if k in runner}
-	out['_type'] = (runner.get('_type') or '').rstrip('s')
+	rtype = (runner.get('_type') or '').rstrip('s')
+	out['_type'] = rtype
 	rid = runner.get('_id') or runner.get('_id_str')
 	if rid:
 		out['_id'] = rid
+	# Surface the raw run-scope id (`_context.{type}_id`) separately from the report id:
+	# `_id` is a report-folder path (`scans/0` on json, `scans/<uuid>` on mongodb), but the
+	# findings carry `_context.{type}_id`, so that is what a follow-up query_workspace needs.
+	context = runner.get('context') or runner.get('_context') or {}
+	scope_id = context.get(f'{rtype}_id') if rtype else None
+	if scope_id:
+		out['run_id'] = scope_id
 	return out
 
 
@@ -83,6 +91,12 @@ def filter_runners(runners, since=None, status=None, limit=50, now=None):
 	Runners with no parseable timestamp are dropped when a ``since`` filter is set (they
 	can't be shown to satisfy a time window) and sorted last otherwise."""
 	cutoff = parse_since(since, now=now)
+	# A non-empty `since` that can't be parsed must be rejected, not silently ignored:
+	# returning unfiltered history under the requested-window label would let the model
+	# report older runs as matches for a window it never actually applied.
+	if cutoff is None and since not in (None, ''):
+		raise ValueError(
+			f'invalid "since" value {since!r}: use a window like "24h"/"7d"/"30m"/"2w" or an ISO-8601 date')
 	status_norm = status.strip().upper() if isinstance(status, str) and status.strip() else None
 	rows = []
 	for r in runners:

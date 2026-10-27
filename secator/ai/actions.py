@@ -1736,13 +1736,23 @@ def _handle_list_runners(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error(message=f"Failed to list runners: {e}", _context=context)
 		return
 
-	summaries = filter_runners(runners, since=since, status=status, limit=limit)
+	try:
+		summaries = filter_runners(runners, since=since, status=status, limit=limit)
+	except ValueError as e:
+		yield Error(message=str(e), _context=context)
+		return
+	# Signal truncation so the model can tell "exactly limit" from "more exist".
+	try:
+		limit_int = int(limit)
+	except (TypeError, ValueError):
+		limit_int = 50
+	has_more = bool(limit_int > 0 and len(summaries) >= limit_int)
 	yield Ai(
 		content=(f"{runner_type or 'runner'} history"
 		         + (f" since {since}" if since else "")
 		         + (f" status={status}" if status else "")),
 		ai_type="list_runners",
-		extra_data={"runners": summaries, "count": len(summaries),
+		extra_data={"runners": summaries, "count": len(summaries), "has_more": has_more,
 		            "runner_type": runner_type, "since": since, "status": status},
 		_context=context,
 	)
