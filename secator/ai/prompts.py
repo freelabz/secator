@@ -67,18 +67,20 @@ MODES = {
 	"scan": {
 		"system_prompt": SYSTEM_SCAN,
 		"description": "actively scan, run tools / shell, exploit, and write or curate findings",
-		"allowed_actions": ["task", "workflow", "shell", "query", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "screenshot", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
 		"system_prompt": SYSTEM_CHAT,
-		# Chat is strictly READ-ONLY / informational. It can only read workspace data
-		# (`query`), delegate a same-mode helper (`subagent`), and end its turn / suggest
-		# next steps (`stop`). NO `shell` (attack surface), NO `task`/`workflow` (escalation), and
-		# NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
+		# Chat is strictly READ-ONLY / informational. It can read workspace data (`query`),
+		# fetch a known page (`fetch_url`), search the web (`web_search`, a read-only external
+		# lookup), look up run history (`list_runners`, read-only), maintain a plan
+		# (`update_plan`), delegate a same-mode helper (`subagent`), and end its turn / suggest
+		# next steps (`stop`). NO `shell` (attack surface), NO `task`/`workflow` (escalation),
+		# and NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
 		# changing findings is an active action that belongs in scan/exploit.
 		"description": "read-only — read and explain workspace data; you cannot scan, attack or write findings",
-		"allowed_actions": ["query", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["query", "fetch_url", "update_plan", "web_search", "list_runners", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
@@ -89,7 +91,7 @@ MODES = {
 		# to exploit — without it query_workspace isn't even built for this mode.
 		# "stop" lets exploit mode end-and-ask (e.g. confirm before a state-changing
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
-		"allowed_actions": ["task", "workflow", "shell", "query", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "screenshot", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 }

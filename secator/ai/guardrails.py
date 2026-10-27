@@ -1104,6 +1104,9 @@ class PermissionEngine:
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
+		elif action_type == "screenshot":
+			# The verb is fine; the URL is gated as a TARGET (network egress) in _extract_targets.
+			return PermissionResult(decision="allow", reason="screenshot target checked separately")
 		# Auto-allow is sourced from the tool registry (`tool.auto_allow`), the single
 		# source of truth — not a hand-synced tuple here (that drift is what rotted the
 		# add_vuln_poc rename). Auto-allowed actions are control/meta (`subagent`/`stop`/
@@ -1259,6 +1262,9 @@ class PermissionEngine:
 			# subagent's targets are enforced at spawn, in addition to its child actions
 			# being guardrail-checked inside its own run). Filter out file paths / non-network.
 			return [t for t in action.get("targets", []) if _is_network_target(t) and not _is_file_path(t)]
+		elif action_type == "screenshot":
+			url = action.get("url", "")
+			return [url] if url and _is_network_target(url) and not _is_file_path(url) else []
 		return []
 
 	def add_runtime_allow(self, rules: List[str]) -> None:

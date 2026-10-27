@@ -39,6 +39,8 @@ _DESCRIPTION_SCHEMA = {
 # the per-mode ``allowed_actions`` in prompts.MODES (enforced by the consistency test).
 _SCAN_EXPLOIT = frozenset({"scan", "exploit"})
 _ALL_MODES = frozenset({"scan", "chat", "exploit"})
+# Read-only helper tools (web/plan/run-history lookups) — exposed in every mode.
+_READONLY_HELPER = frozenset({"scan", "chat", "exploit"})
 
 
 class BaseTool:
@@ -563,6 +565,202 @@ class UpdateFindingTool(BaseTool):
 	}
 
 
+class FetchUrlTool(BaseTool):
+	name = "fetch_url"
+	action = "fetch_url"
+	modes = _READONLY_HELPER
+	auto_allow = True  # read-only external lookup; SSRF-guarded in the handler, no target scope
+	handler = "_handle_fetch_url"
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "fetch_url",
+			"description": (
+				"Fetch a single PUBLIC web page and return its readable text — use it to READ a page you "
+				"already know (a HackTricks technique, a vendor advisory, a Debian security-tracker page, a "
+				"blog post on a fresh CVE). Only public "
+				"http(s) pages are allowed; internal/private hosts are refused."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"url": {"type": "string", "description": "The http(s) URL to fetch."},
+					"max_chars": {"type": "integer", "description": "Max characters of extracted text to return (default 20000)."}
+				},
+				"required": ["url"]
+			}
+		}
+	}
+
+
+class ScreenshotTool(BaseTool):
+	name = "screenshot"
+	action = "screenshot"
+	modes = _SCAN_EXPLOIT
+	# NOT auto_allow: the URL is gated as a TARGET (network egress) in the guardrail
+	# (_check_action_type returns "target checked separately", then the target layer scopes it).
+	handler = "_handle_screenshot"
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "screenshot",
+			"description": (
+				"Capture a screenshot of a web page as visual evidence (headless browser via httpx). Use it "
+				"to document what a target page looks like — a login panel, a defaced page, an exposed admin "
+				"interface. The URL is scope-checked like any other target."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"url": {"type": "string", "description": "The http(s) URL to screenshot."},
+					"description": _DESCRIPTION_SCHEMA
+				},
+				"required": ["url"]
+			}
+		}
+	}
+
+
+class UpdatePlanTool(BaseTool):
+	name = "update_plan"
+	action = "update_plan"
+	modes = _READONLY_HELPER
+	auto_allow = True  # a user-visible to-do list; no workspace mutation, no target/path egress
+	handler = "_handle_update_plan"
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "update_plan",
+			"description": (
+				"Maintain a short, user-visible to-do list for a multi-step task. Call it to lay out your "
+				"plan, and AGAIN each time a step's state changes (mark one in_progress, then done). Pass the "
+				"WHOLE list every time — it replaces the current plan. Keep exactly one step in_progress. Use "
+				"it for genuinely multi-step work (recon -> enumerate -> exploit), not for a single action."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"items": {
+						"type": "array",
+						"description": "The full ordered to-do list (replaces the previous one).",
+						"items": {
+							"type": "object",
+							"properties": {
+								"text": {"type": "string", "description": "Short description of the step."},
+								"status": {"type": "string", "enum": ["pending", "in_progress", "done", "skipped"], "description": "Step state (default pending)."}  # noqa: E501
+							},
+							"required": ["text"]
+						}
+					}
+				},
+				"required": ["items"]
+			}
+		}
+	}
+
+
+class WebSearchTool(BaseTool):
+	name = "web_search"
+	action = "web_search"
+	modes = _READONLY_HELPER
+	auto_allow = True  # read-only external lookup; no workspace mutation, no target scope
+	handler = "_handle_web_search"
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "web_search",
+			"description": (
+				"Search the public web for live external context — CVE write-ups, PoC/exploit repos, "
+				"tool docs, hardening notes. Use this for information NOT in the workspace; use "
+				"query_workspace for stored findings. Targets/scope are NOT checked (this reads public "
+				"sources, it does not touch the engagement targets)."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"query": {
+						"type": "string",
+						"description": "The search query. Keep it short and keyword-focused; write it in English (engines index English best)."  # noqa: E501
+					},
+					"mode": {
+						"type": "string",
+						"enum": ["answer", "links", "exploit"],
+						"description": (
+							"What you need back (default 'answer'). 'answer' — a synthesized answer over live "
+							"sources when configured, else result links. 'links' — a list of source links with "
+							"snippets. 'exploit' — exploit code, PoCs and offensive tools (searches Sploitus)."
+						)
+					},
+					"max_results": {
+						"type": "integer",
+						"description": "Maximum number of results (1-25; default 5).",
+						"default": 5
+					},
+					"exploit_type": {
+						"type": "string",
+						"enum": ["exploits", "tools"],
+						"description": "exploit mode only: 'exploits' (default) for exploit code/PoCs, 'tools' for offensive-security tools."  # noqa: E501
+					},
+					"sort": {
+						"type": "string",
+						"enum": ["default", "date", "score"],
+						"description": "exploit mode only: order by relevance (default), date (newest), or score (highest CVSS)."  # noqa: E501
+					}
+				},
+				"required": ["query"]
+			}
+		}
+	}
+
+
+class ListRunnersTool(BaseTool):
+	name = "list_runners"
+	action = "list_runners"
+	modes = _READONLY_HELPER
+	auto_allow = True  # read-only run-history lookup; no mutation, no target/path egress
+	handler = "_handle_list_runners"
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "list_runners",
+			"description": (
+				"List the run history of this workspace — the scans / workflows / tasks that have run, "
+				"newest first, with their status, targets and timing. Use it to answer questions like "
+				"'which scans ran in the last 24h?' or 'what failed recently?'. This lists RUN activity; "
+				"use query_workspace for the findings those runs produced."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"runner_type": {
+						"type": "string",
+						"enum": ["scan", "workflow", "task"],
+						"description": "Filter to one runner type (e.g. 'scan'). Omit to list all types."
+					},
+					"since": {
+						"type": "string",
+						"description": "Only runners started within this window: a relative age like '24h', '7d', '30m', '2w', or an ISO-8601 date/datetime. Omit for no time filter."  # noqa: E501
+					},
+					"status": {
+						"type": "string",
+						"description": "Filter by run status (e.g. 'SUCCESS', 'FAILURE', 'RUNNING'). Omit for any."
+					},
+					"include_children": {
+						"type": "boolean",
+						"description": "Include nested child runners (a scan's sub-workflows/tasks). Default false = top-level runs only."  # noqa: E501
+					},
+					"limit": {
+						"type": "integer",
+						"description": "Maximum runners to return (default 50).",
+						"default": 50
+					}
+				},
+				"required": []
+			}
+		}
+	}
+
+
 class ChangeModeTool(BaseTool):
 	name = "change_mode"
 	action = "change_mode"
@@ -657,6 +855,11 @@ _TOOL_CLASSES = [
 	MarkVulnFalsePositiveTool,
 	MarkVulnExploitFailedTool,
 	UpdateFindingTool,
+	FetchUrlTool,
+	ScreenshotTool,
+	UpdatePlanTool,
+	WebSearchTool,
+	ListRunnersTool,
 	ChangeModeTool,
 	StopTool,
 ]
