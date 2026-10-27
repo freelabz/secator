@@ -128,6 +128,20 @@ jobs:
 
     # Only on a cache MISS — on a hit every tool binary + its data (patterns/templates/gems/
     # source builds) is already restored, so re-downloading is pure waste (~4.5 min saved).
+    # apt-based tool deps live in /usr and are NOT covered by the tool cache above, so on a
+    # cache HIT the `Install tools` step is skipped and these were never installed — the suite
+    # would then lazily `apt install` them MID-TEST, where a slow/transient apt turns into a
+    # spurious task FAILURE (the long-standing fping/arp-scan/whois flakiness). Install them
+    # here unconditionally (fast, idempotent) with a retry, BEFORE `Install tools`, so both the
+    # tests and secator's own cache-miss install always find them ready.
+    - name: Install apt-based tool deps
+      run: |
+        sudo apt-get update
+        for attempt in 1 2 3; do
+          sudo apt-get install -y --no-install-recommends fping arp-scan whois && break
+          echo "apt-get install failed (attempt ${attempt}), retrying..." && sleep 5
+        done
+
     - name: Install tools
       if: steps.toolcache.outputs.cache-hit != 'true'
       run: secator install tools --fail-fast
