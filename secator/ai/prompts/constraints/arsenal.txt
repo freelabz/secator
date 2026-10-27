@@ -41,4 +41,5 @@ run_task(name="nmap", targets=["example.com"]) # <- not broad enough
 
 </example>
 
+Prefer read_file / write_file over shell cat / tee / redirects when you just need to read or write a single file: the path is permission-checked explicitly and the action is clearer. Use run_shell for anything more (pipelines, editing in place, multiple files).
 </arsenal>
