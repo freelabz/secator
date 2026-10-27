@@ -22,7 +22,7 @@ needs and to zero new dependencies.
 import html
 import re
 import urllib.request
-from urllib.parse import unquote, urlparse, parse_qs, urlencode
+from urllib.parse import urlparse, parse_qs, urlencode
 
 from secator.config import CONFIG
 from secator.requests import requests
@@ -58,7 +58,9 @@ _SPLOITUS_URL = 'https://sploitus.com/search'
 _TAVILY_URL = 'https://api.tavily.com/search'
 
 # Parse the DuckDuckGo HTML result rows: each hit is an <a class="result__a" href=...>title</a>
-# optionally followed by an <a class="result__snippet">snippet</a>.
+# optionally followed by an <a class="result__snippet">snippet</a>. We locate each link, then
+# look only in the span up to the next link for that hit's snippet, so a result with no snippet
+# doesn't steal the next result's snippet (index-based pairing would drift).
 _DDG_LINK_RE = re.compile(r'result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)
 _DDG_SNIPPET_RE = re.compile(r'result__snippet"[^>]*>(.*?)</a>', re.S)
 
@@ -89,9 +91,11 @@ def _unwrap_ddg_url(href):
 		return href
 	host = parsed.netloc.lower().split(':')[0]
 	if (host == 'duckduckgo.com' or host.endswith('.duckduckgo.com')) and parsed.path.startswith('/l/'):
+		# parse_qs already percent-decodes `uddg`; decoding again would corrupt any
+		# encoded delimiter (e.g. %26 -> &) and point the link at a different query.
 		target = parse_qs(parsed.query).get('uddg', [None])[0]
 		if target:
-			return unquote(target)
+			return target
 	return href
 
 
@@ -127,17 +131,22 @@ def duckduckgo_search(query, max_results=5):
 		debug(f'duckduckgo anomaly/empty response (status={status}) for {query!r}',
 		      sub='ai.web_search')
 		return []
-	snippets = [_strip_tags(s) for s in _DDG_SNIPPET_RE.findall(body)]
 	results = []
-	for i, (href, title) in enumerate(_DDG_LINK_RE.findall(body)):
+	links = list(_DDG_LINK_RE.finditer(body))
+	for idx, m in enumerate(links):
+		href, title = m.group(1), m.group(2)
 		url = _unwrap_ddg_url(html.unescape(href))
 		if not url.startswith('http'):
 			continue
+		# Find this hit's snippet only within the span up to the next result link, so a
+		# missing snippet for one result doesn't shift a later snippet onto this URL.
+		span_end = links[idx + 1].start() if idx + 1 < len(links) else len(body)
+		sm = _DDG_SNIPPET_RE.search(body, m.end(), span_end)
 		results.append({
 			'_type': 'web_result',
 			'title': _strip_tags(title),
 			'url': url,
-			'snippet': snippets[i] if i < len(snippets) else '',
+			'snippet': _strip_tags(sm.group(1)) if sm else '',
 		})
 		if len(results) >= max_results:
 			break
@@ -240,13 +249,14 @@ def tavily_search(query, max_results=5, api_key=''):
 		resp = requests.post(
 			_TAVILY_URL,
 			json={
-				'api_key': api_key,
 				'query': query,
 				'max_results': max_results,
 				'include_answer': True,
 				'search_depth': 'basic',
 			},
-			headers={'User-Agent': _UA},
+			# Tavily documents Bearer auth for /search: the key goes in the Authorization
+			# header, not the JSON body.
+			headers={'User-Agent': _UA, 'Authorization': f'Bearer {api_key}'},
 			timeout=_TIMEOUT,
 		)
 		resp.raise_for_status()
