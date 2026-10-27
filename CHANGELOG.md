@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.2](https://github.com/freelabz/secator/compare/v0.53.1...v0.53.2) (2026-10-27)
+
+
+### Bug Fixes
+
+* **ai:** validate required finding fields, coach update_finding, drop screenshot tool ([#1594](https://github.com/freelabz/secator/issues/1594)) ([c763bdb](https://github.com/freelabz/secator/commit/c763bdb2ad1724852a1220f7c5c34759981fbce0))
+
 ## [0.53.1](https://github.com/freelabz/secator/compare/v0.53.0...v0.53.1) (2026-10-27)
 
 
