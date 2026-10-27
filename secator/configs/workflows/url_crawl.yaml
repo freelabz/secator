@@ -11,6 +11,11 @@ tags: [http, crawl, secrets]
 input_types:
   - url
 
+important_opts:
+  - passive
+  - active
+  - hunt_secrets
+
 options:
   passive:
     is_flag: True

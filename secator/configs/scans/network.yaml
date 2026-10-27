@@ -12,6 +12,12 @@ tags: [recon, cidr, dns, network, internal, http, crawl, ssl, vuln, secrets]
 input_types:
   - cidr_range
   - slug
+
+important_opts:
+  - ports
+  - nuclei
+  - passive
+
 workflows:
   cidr_recon:
   host_recon:
