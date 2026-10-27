@@ -183,16 +183,27 @@ class OutputType:
 		return resolved
 
 	@classmethod
-	def validate_fields(cls, data: dict) -> list:
+	def validate_fields(cls, data: dict, require_all: bool = False) -> list:
 		"""Validate data types against dataclass field definitions.
 
-		Returns a list of error messages for invalid fields.
+		Returns a list of error messages for invalid fields. When ``require_all`` is set
+		(a full create, not a partial update), fields that have no default and are missing
+		from ``data`` are reported as required — so a tool call that omits a mandatory field
+		(e.g. a ``Tag`` without ``value``) is rejected with a clear message up front instead
+		of raising a raw ``TypeError`` at instantiation.
 		"""
 		errors = []
 		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
 		expected_types = cls.field_types()
 		for f in fields(cls):
-			if f.name.startswith('_') or f.name not in data:
+			if f.name.startswith('_'):
+				continue
+			if f.name not in data:
+				if require_all:
+					has_default = (not isinstance(f.default, _MISSING_TYPE)
+					               or not isinstance(f.default_factory, _MISSING_TYPE))
+					if not has_default:
+						errors.append(f"'{f.name}' is required")
 				continue
 			value = data[f.name]
 			if value is None:

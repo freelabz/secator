@@ -593,34 +593,6 @@ class FetchUrlTool(BaseTool):
 	}
 
 
-class ScreenshotTool(BaseTool):
-	name = "screenshot"
-	action = "screenshot"
-	modes = _SCAN_EXPLOIT
-	# NOT auto_allow: the URL is gated as a TARGET (network egress) in the guardrail
-	# (_check_action_type returns "target checked separately", then the target layer scopes it).
-	handler = "_handle_screenshot"
-	schema = {
-		"type": "function",
-		"function": {
-			"name": "screenshot",
-			"description": (
-				"Capture a screenshot of a web page as visual evidence (headless browser via httpx). Use it "
-				"to document what a target page looks like — a login panel, a defaced page, an exposed admin "
-				"interface. The URL is scope-checked like any other target."
-			),
-			"parameters": {
-				"type": "object",
-				"properties": {
-					"url": {"type": "string", "description": "The http(s) URL to screenshot."},
-					"description": _DESCRIPTION_SCHEMA
-				},
-				"required": ["url"]
-			}
-		}
-	}
-
-
 class UpdatePlanTool(BaseTool):
 	name = "update_plan"
 	action = "update_plan"
@@ -856,7 +828,6 @@ _TOOL_CLASSES = [
 	MarkVulnExploitFailedTool,
 	UpdateFindingTool,
 	FetchUrlTool,
-	ScreenshotTool,
 	UpdatePlanTool,
 	WebSearchTool,
 	ListRunnersTool,

@@ -4,7 +4,6 @@ import os
 import re
 import threading
 import uuid
-from pathlib import Path
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, fields
@@ -1415,138 +1414,6 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error.from_exception(e, _context=context)
 
 
-# Max screenshot bytes to embed as a data URI on the action doc (so a consumer can render it
-# inline without GCS / a local path). Larger screenshots return just the path.
-_MAX_SCREENSHOT_EMBED_BYTES = 1_500_000
-
-
-def _strip_gcs_hooks(hooks: Dict) -> Dict:
-	"""Return a copy of `hooks` with the GCS on_item hook removed from every runner class.
-
-	The screenshot tool needs the PNG to stay LOCAL so we can read it back and embed it —
-	the GCS driver would otherwise upload it and rewrite screenshot_path to a gs:// URI we
-	can't fetch. This disables ONLY the GCS relay for this one child run; every other
-	persistence hook (mongodb/api/sqlite) still fires, so the run is still recorded.
-	"""
-	out = {}
-	for cls, cls_hooks in (hooks or {}).items():
-		new_cls = {}
-		for hook_name, fns in (cls_hooks or {}).items():
-			new_cls[hook_name] = [
-				fn for fn in fns if getattr(fn, "__module__", "") != "secator.hooks.gcs"
-			]
-		out[cls] = new_cls
-	return out
-
-
-def _handle_screenshot(action: Dict, ctx: ActionContext) -> Generator:
-	"""Screenshot a web page (headless httpx) and surface it as visual evidence.
-
-	The URL is scope-checked as a target by the guardrail layer before this runs. The child
-	httpx run has the GCS relay hook stripped (see _strip_gcs_hooks) so the PNG stays local;
-	we then read it and embed it as a data URI on the action doc, which makes the screenshot
-	viewable regardless of whether the GCS driver is active (solves the "can't fetch a gs://
-	object back" problem). Fails soft.
-	"""
-	import base64
-	context = _get_result_context(action, ctx)
-	url = action.get("url", "")
-	if ctx.encryptor and isinstance(url, str):
-		url = ctx.encryptor.decrypt(url)
-	url = str(url or "").strip()
-	if not url:
-		yield Error(message="screenshot requires a `url`.", _context=context)
-		return
-
-	if ctx.dry_run:
-		yield Info(message=f"[DRY RUN] Would screenshot {url}", _context=context)
-		return
-
-	run_opts = {
-		**_child_run_opts(ctx),
-		"screenshot": True,
-		"print_cmd": not ctx.silent and not ctx.subagent,
-		"print_start": False,
-		"print_end": False,
-	}
-	if action.get("description"):
-		run_opts["description"] = action["description"]
-
-	hooks, denial = _child_preamble(ctx, context, "task")
-	if denial is not None:
-		yield denial
-		return
-	hooks = _strip_gcs_hooks(hooks)  # keep the PNG local so we can read + embed it
-
-	try:
-		# Hydrate httpx's own metadata from its class (see _run_runner) so a stub
-		# {type, name} template doesn't serialize description/input_types as `{}` and
-		# get rejected by the `api` driver's runner schema.
-		httpx_cls = Task.get_task_class('httpx')
-		tpl = TemplateLoader(input={
-			'type': 'task',
-			'name': 'httpx',
-			'description': (httpx_cls.__doc__ or '').strip() or None,
-			'input_types': list(getattr(httpx_cls, 'input_types', []) or []),
-			'tags': list(getattr(httpx_cls, 'tags', []) or []),
-		})
-		runner = Task(tpl, [url], run_opts=run_opts, hooks=hooks, context=context)
-	except Exception as e:  # noqa: BLE001
-		yield Error(message=f"screenshot: failed to start httpx: {e}", _context=context)
-		return
-
-	screenshot_path = ""
-	for item in runner:
-		# Capture the local screenshot path off the Url finding; forward findings so the
-		# run still persists + shows in history (the Url finding is a normal result).
-		if isinstance(item, OutputType) and getattr(item, "_type", "") == "url":
-			sp = getattr(item, "screenshot_path", "") or ""
-			if sp and not screenshot_path:
-				screenshot_path = sp
-
-	data_uri, embed_note = "", ""
-	if screenshot_path and Path(screenshot_path).is_file():
-		try:
-			raw = Path(screenshot_path).read_bytes()
-			if len(raw) <= _MAX_SCREENSHOT_EMBED_BYTES:
-				ext = Path(screenshot_path).suffix.lower().lstrip(".") or "png"
-				mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
-				data_uri = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
-			else:
-				embed_note = f" (screenshot {len(raw)} bytes — too large to embed inline)"
-		except Exception as e:  # noqa: BLE001
-			embed_note = f" (could not read screenshot: {e})"
-
-	if not screenshot_path:
-		yield Error(
-			message=(f"screenshot: no image was produced for {url}. Headless capture may be "
-			         "unavailable (needs a headless browser) or the page did not load."),
-			_context=context,
-		)
-		return
-
-	yield Ai(
-		content=f"Screenshot captured for {url}.{embed_note}",
-		ai_type="screenshot",
-		extra_data={
-			"url": url,
-			"screenshot_path": screenshot_path,
-			# Inline image for display — never sent to the model (Ai items aren't collected
-			# into the tool result), so the base64 can't blow the token budget.
-			"screenshot_data_uri": data_uri,
-		},
-		_context=context,
-	)
-	# Observation-only text result for the model (NOT the bytes).
-	yield {
-		"_type": "screenshot",
-		"url": url,
-		"screenshot_path": screenshot_path,
-		"captured": True,
-		"_context": {**context, "ai_query_result": True},
-	}
-
-
 def _handle_fetch_url(action: Dict, ctx: ActionContext) -> Generator:
 	"""Fetch one public page and surface its readable text to the model.
 
@@ -1923,8 +1790,10 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 	# scalars, e.g. a bool field as the string "true") before validating.
 	finding_data = _coerce_finding_fields(cls, finding_data)
 
-	# Validate field types before instantiation
-	errors = cls.validate_fields(finding_data)
+	# Validate field types AND required fields before instantiation — a create must carry
+	# every mandatory field (require_all), so an omitted required field (e.g. a `tag` without
+	# `value`) is rejected with the schema instead of raising a raw TypeError at `cls(**...)`.
+	errors = cls.validate_fields(finding_data, require_all=True)
 	if errors:
 		error_msg = f"Invalid {finding_type} fields: {'; '.join(errors)}.\nExpected schema:\n{cls.schema()}"
 		yield Error(message=error_msg, _context=context)
@@ -2444,6 +2313,10 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 
 	# Only agent-writable content fields (framework/server-owned + `*_path` stripped); `id`
 	# stays blocked on UPDATE via _FINDING_IMMUTABLE_FIELDS below.
+	# Remember what the model asked to set (minus operators) BEFORE we strip readonly/immutable
+	# fields, so that if nothing survives we can tell it WHICH fields were rejected and where to
+	# set them instead — rather than the misleading "pass fields" (it did pass fields).
+	requested_field_keys = {str(k) for k in fields if not str(k).startswith("$")}
 	fields = _drop_readonly_fields(fields)
 	# An `extra_data` object passed INSIDE `fields` must merge via dotted keys (like the dedicated
 	# `extra_data` arg) — a whole-object $set would clobber existing keys AND conflict with the
@@ -2471,7 +2344,22 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 		if key and "." not in key and not key.startswith("$"):
 			update[f"extra_data.{key}"] = v
 	if not update:
-		yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
+		blocked = sorted(requested_field_keys - set(update))
+		if blocked:
+			# The model DID pass fields, but every one was read-only/verdict/immutable and got
+			# dropped. Name them and point at the right tool so it stops retrying the same call.
+			yield Error(
+				message=(
+					f"update_finding: none of {blocked} can be set here. Verdict fields "
+					"(verified/status/is_false_positive) are set via mark_vuln_exploited / "
+					"mark_vuln_false_positive / mark_vuln_exploit_failed; confidence_nb/severity_nb are "
+					"server-derived; *_path and framework (_-prefixed) fields are read-only. Pass editable "
+					"content (e.g. name, description, severity) or notes under `extra_data` instead."
+				),
+				_context=context,
+			)
+		else:
+			yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
 		return
 
 	engine = ctx.get_query_engine()
