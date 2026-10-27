@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.53.0](https://github.com/freelabz/secator/compare/v0.52.1...v0.53.0) (2026-10-27)
+
+
+### Features
+
+* **ai:** add web_search, list_runners, fetch_url, screenshot, update_plan tools ([#1590](https://github.com/freelabz/secator/issues/1590)) ([b24abda](https://github.com/freelabz/secator/commit/b24abda1d6ff5cc6c0764d6bdb6a9bc9a1f08946))
+* **ai:** custom provider / OpenAI-compatible base in `ai setup` ([#1586](https://github.com/freelabz/secator/issues/1586)) ([9da51f3](https://github.com/freelabz/secator/commit/9da51f32b9f86ee3d68e429d4517db8aae6877e7))
+
+
+### Bug Fixes
+
+* **ai:** collapse repeated action types in the subagent handback summary ([#1580](https://github.com/freelabz/secator/issues/1580)) ([14f5ae8](https://github.com/freelabz/secator/commit/14f5ae8adcc9294e5717f9ff7853fac4c7f7a6f5))
+* **ai:** hydrate run_task config metadata from the task class ([#1588](https://github.com/freelabz/secator/issues/1588)) ([1e6edfd](https://github.com/freelabz/secator/commit/1e6edfdb91a4888cf32d3403b74d1480747ab621))
+* **ai:** stream batch runner cards in a worker instead of buffering to the end ([#1587](https://github.com/freelabz/secator/issues/1587)) ([2ef0426](https://github.com/freelabz/secator/commit/2ef0426b143a66b7b7564a6cd7c56e8a2e9bfb69))
+
 ## [0.52.1](https://github.com/freelabz/secator/compare/v0.52.0...v0.52.1) (2026-10-22)
 
 
