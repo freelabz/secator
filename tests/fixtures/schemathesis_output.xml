@@ -1,0 +1,35 @@
+<?xml version="1.0" ?>
+<testsuites>
+  <testsuite name="schemathesis" errors="0" failures="3" skipped="0" tests="3" time="4.213">
+    <testcase name="GET /api/Products" time="1.102"/>
+    <testcase name="POST /api/Feedbacks" time="1.501">
+      <failure type="failure">1. Test Case ID: AbC123
+
+- Server error
+
+    [500] Internal Server Error
+
+Reproduce with:
+
+    curl -X POST https://host.com/api/Feedbacks -d '{"rating": -2147483648}'
+</failure>
+    </testcase>
+    <testcase name="GET /rest/products/{id}/reviews" time="1.610">
+      <failure type="failure">1. Test Case ID: XyZ789
+
+- Undocumented HTTP status code
+
+    Received: 405
+    Documented: 200
+
+[405] Method Not Allowed
+</failure>
+      <failure type="failure">2. Test Case ID: XyZ790
+
+- Response violates schema
+
+    'id' is a required property
+</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

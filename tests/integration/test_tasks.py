@@ -71,6 +71,7 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 		del opts['trivy.output_path']
 		del opts['wafw00f.output_path']
 		del opts['testssl.output_path']
+		del opts['schemathesis.output_path']
 		del opts['timeout']
 
 		failures = []
