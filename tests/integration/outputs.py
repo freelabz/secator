@@ -136,6 +136,14 @@ OUTPUTS_TASKS = {
 	'subfinder': [
 		Subdomain(host='community.github.com', domain='github.com', _source='subfinder'),
 	],
+	# swaggerparser emits one Url per (path, method) from the spec; only `url` is a compared field,
+	# so assert a few stable petstore v2 endpoints (base path /v2 preserved, body + path params kept).
+	'swaggerparser': [
+		Url(url='https://petstore.swagger.io/v2/pet', method='POST', _source='swaggerparser'),
+		Url(url='https://petstore.swagger.io/v2/pet/findByStatus', method='GET', _source='swaggerparser'),
+		Url(url='https://petstore.swagger.io/v2/store/order', method='POST', _source='swaggerparser'),
+		Url(url='https://petstore.swagger.io/v2/user/login', method='GET', _source='swaggerparser'),
+	],
 	'trivy': [
 		Vulnerability(
 			matched_at='https://github.com/blacklanternsecurity/bbot', provider='ghsa', name='CVE-2024-8775', id='CVE-2024-8775', confidence='high', severity='high', cvss_score=5.5, _source='trivy'
@@ -281,6 +289,13 @@ OUTPUTS_WORKFLOWS = {
 		# Tag(name='kubelet-metrics', value='bogus', match='http://localhost:3000/metrics', category='tech', extra_data={'data': []}, _source='nuclei'),
 		# Tag(name='swagger-api', value='bogus', match='http://localhost:3000/api-docs/swagger.json', category='exposure', extra_data={'data': []}, _source='nuclei'),
 		# Vulnerability(matched_at='http://localhost:8080/', ip='127.0.0.1', name='Spring Boot - Remote Code Execution (Apache Log4j)', provider='', id='cve-2021-44228', confidence='high', severity='critical', cvss_score=10, tags=['cve', 'cve2021', 'springboot', 'rce', 'oast', 'log4j', 'kev'], extra_data={'data': ['192.221.154.139', 'f978d7010c8a']}, description='Spring Boot is susceptible to remote code execution via Apache Log4j.', references=['https://logging.apache.org/log4j/2.x/security.html', 'https://www.lunasec.io/docs/blog/log4j-zero-day/', 'https://github.com/twseptian/spring-boot-log4j-cve-2021-44228-docker-lab', 'https://nvd.nist.gov/vuln/detail/cve-2021-44228'], reference='https://logging.apache.org/log4j/2.x/security.html', confidence_nb=1, severity_nb=0, _source='nuclei', _type='vulnerability', _uuid='3cec387f-ef54-401d-915e-5f361de7896c'),
+	],
+	# The swagger workflow wraps the single swaggerparser task; same stable petstore v2 endpoints.
+	'swagger': [
+		Url(url='https://petstore.swagger.io/v2/pet', method='POST', _source='swaggerparser'),
+		Url(url='https://petstore.swagger.io/v2/pet/findByStatus', method='GET', _source='swaggerparser'),
+		Url(url='https://petstore.swagger.io/v2/store/order', method='POST', _source='swaggerparser'),
+		Url(url='https://petstore.swagger.io/v2/user/login', method='GET', _source='swaggerparser'),
 	],
 	'url_crawl': [
 		Url(url='http://localhost:3000', method='GET', _type='url'),
