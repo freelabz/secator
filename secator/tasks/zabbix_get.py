@@ -27,6 +27,7 @@ class zabbix_get(Command):
 	file_flag = None
 	input_chunk_size = 1
 	input_types = [HOST, HOST_PORT, IP, SLUG, STRING]
+	output_types = [Vulnerability, Tag]
 	opts = {
 		'key': {'type': str, 'default': r"system.run[ls]", 'help': 'Key of the item to retrieve value for (e.g: system.run with ls, or vfs.file.contents of a path)'},  # noqa: E501
 		'zabbix_port': {'type': int, 'default': 10050, 'help': 'Zabbix agent port'}

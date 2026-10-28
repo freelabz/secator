@@ -3,7 +3,7 @@ import re
 from secator.decorators import task
 from secator.definitions import (
 	HOST, HOST_PORT, IP, STRING, THREADS, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT,
-	OPT_NOT_SUPPORTED,
+	OPT_NOT_SUPPORTED, USER_AGENT,
 )
 from secator.output_types import Vulnerability, Tag, Technology, Warning
 from secator.tasks._categories import Vuln
@@ -17,6 +17,7 @@ class nxc_smb(Vuln):
 	input_chunk_size = 1
 	input_types = [HOST, HOST_PORT, IP, STRING]
 	output_types = [Vulnerability, Tag, Technology]
+	ignore_return_code = True
 	opt_prefix = '--'
 	opts = {
 		'username': {'type': str, 'short': 'u', 'default': '', 'help': 'Username'},
@@ -53,6 +54,7 @@ class nxc_smb(Vuln):
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
 		TIMEOUT: 'timeout',
+		USER_AGENT: OPT_NOT_SUPPORTED,
 	}
 	opt_value_map = {
 		DELAY: lambda x: f'{str(x)}-{str(x)}',

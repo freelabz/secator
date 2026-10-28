@@ -66,5 +66,72 @@ services:
       WORDPRESS_ADMIN_USER: 'admin'
       WORDPRESS_ADMIN_PASSWORD: 'admin'
       WORDPRESS_ADMIN_EMAIL: 'admin@example.com'
+
+  # Samba (SMB) — exercises nxc_smb (null-auth + share enumeration).
+  samba:
+    image: dperson/samba
+    restart: always
+    command: >
+      -p
+      -u "testuser;testpass"
+      -s "public;/share;yes;no;yes;all"
+      -s "private;/private;yes;no;no;testuser"
+      -g "map to guest = Bad User"
+    ports:
+      - "127.0.0.1:10445:445"
+    tmpfs:
+      - /share
+      - /private
+
+  # vsftpd (FTP) — exercises nxc_ftp (valid-login tag).
+  ftp:
+    image: fauria/vsftpd
+    restart: always
+    environment:
+      FTP_USER: testuser
+      FTP_PASS: testpass
+      PASV_ADDRESS: 127.0.0.1
+      PASV_MIN_PORT: 21100
+      PASV_MAX_PORT: 21110
+    ports:
+      - "127.0.0.1:10021:21"
+      - "127.0.0.1:21100-21110:21100-21110"
+
+  # Docker Registry v2 (unauthenticated) — exercises dockerregistrygrabber.
+  registry:
+    image: registry:2
+    restart: always
+    ports:
+      - "127.0.0.1:15000:5000"
+
+  # Drupal 7 — exercises droopescan (version/theme/CHANGELOG detection).
+  drupal:
+    image: drupal:7-apache
+    restart: always
+    ports:
+      - "127.0.0.1:18081:80"
+
+  # Zabbix agent with remote commands enabled — exercises zabbix_get RCE detection.
+  zabbix_agent:
+    image: zabbix/zabbix-agent:latest
+    restart: always
+    environment:
+      ZBX_SERVER_HOST: "127.0.0.1"
+      ZBX_PASSIVE_ALLOW: "true"
+      ZBX_ACTIVE_ALLOW: "false"
+      ZBX_ENABLEREMOTECOMMANDS: "1"
+      ZBX_ALLOWKEY: "system.run[*]"
+    ports:
+      - "127.0.0.1:10050:10050"
+
+  # Tomcat with an unauthenticated JMX/RMI endpoint — exercises beanshooter + rmg.
+  jmx:
+    image: tomcat:9.0
+    restart: always
+    environment:
+      JAVA_TOOL_OPTIONS: "-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=1617 -Dcom.sun.management.jmxremote.rmi.port=1617 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.local.only=false -Djava.rmi.server.hostname=127.0.0.1"
+    ports:
+      - "127.0.0.1:1617:1617"
+
 volumes:
   wordpress_data: {}

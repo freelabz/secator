@@ -63,6 +63,17 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'trivy.mode': 'repo',
 			'testssl.server_defaults': True,
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
+			# PR #1512 service tasks (targets wired in inputs.py, services in docker-compose.yml).
+			# nxc needs a real connection timeout (META_OPTS' global TIMEOUT=1 is far too short for
+			# the SMB/FTP handshake + enumeration, which makes nxc exit before producing output).
+			'nxc_smb.shares': True,
+			'nxc_smb.timeout': 30,
+			'nxc_ftp.username': 'testuser',
+			'nxc_ftp.password': 'testpass',
+			'nxc_ftp.timeout': 30,
+			# droopescan.mode defaults to 'drupal', matching the Drupal 7 lab container.
+			# Zabbix agent has remote commands enabled in the lab → exercise the RCE detection path.
+			'zabbix_get.key': 'system.run[id]',
 		}
 		# TODO: copy profile and test with profile
 		# opts['profiles'] = ['all']
