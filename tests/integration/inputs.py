@@ -24,6 +24,7 @@ INPUTS_TASKS = {
 	'nuclei': 'http://localhost:3000/',
 	'searchsploit': 'apache 2.4.5',
 	'subfinder': 'github.com',
+	'swaggerparser': 'https://petstore.swagger.io/v2/swagger.json',
 	'search_vulns': 'apache 2.4.39',
 	'testssl': 'free.fr',
 	'trivy': 'https://github.com/blacklanternsecurity/bbot',
@@ -43,6 +44,7 @@ INPUTS_WORKFLOWS = {
 	# 'dir_finder': 'localhost:3000',  # TODO: add fixture with directories
 	'host_recon': 'secator.cloud',
 	'subdomain_recon': 'api.github.com',
+	'swagger': 'https://petstore.swagger.io/v2/swagger.json',
 	'url_crawl': 'localhost:3000',
 	'url_fuzz': 'http://localhost:3000',
 	'url_nuclei': [
