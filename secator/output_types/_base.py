@@ -13,11 +13,6 @@ logger = logging.getLogger(__name__)
 CONFIDENCE_NB = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4, 'unknown': 5, None: 6}
 
 
-def confidence_to_nb(confidence) -> int:
-	"""Numeric rank for a confidence string (unknown values rank last)."""
-	return CONFIDENCE_NB.get(confidence, 6)
-
-
 @dataclass
 class OutputType:
 	_table_fields = []
@@ -30,6 +25,11 @@ class OutputType:
 	@classmethod
 	def fields(cls):
 		return [f.name for f in fields(cls)]
+
+	@staticmethod
+	def confidence_to_nb(confidence) -> int:
+		"""Numeric rank for a confidence string (unknown values rank last)."""
+		return CONFIDENCE_NB.get(confidence, 6)
 
 	def merge_with(self, data: 'OutputType', exclude_fields=[]):
 		"""Enrich the OutputType object with the data from another object."""
@@ -108,7 +108,7 @@ class OutputType:
 		# (and a monitor/cleanup downgrade re-prioritizes). Non-finding types lack the
 		# fields and are skipped. A subclass may still override after super().__post_init__().
 		if hasattr(self, 'confidence') and hasattr(self, 'confidence_nb'):
-			self.confidence_nb = confidence_to_nb(getattr(self, 'confidence', None))
+			self.confidence_nb = self.confidence_to_nb(getattr(self, 'confidence', None))
 
 	@classmethod
 	def load(cls, item, output_map={}):

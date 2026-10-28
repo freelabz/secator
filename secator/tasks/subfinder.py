@@ -31,7 +31,6 @@ class subfinder(ReconDns):
 	output_map = {
 		Subdomain: {
 			DOMAIN: 'input',
-			# Passive subdomain enumeration (API sources) — not resolved/confirmed, so low.
 			CONFIDENCE: lambda x: 'low',
 		}
 	}

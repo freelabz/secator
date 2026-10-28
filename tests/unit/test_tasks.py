@@ -413,4 +413,3 @@ class TestNucleiHangMonitor(unittest.TestCase):
 		self.assertEqual(len(out), 1)
 		self.assertIsInstance(out[0], Warning)
 		self.assertIn('hang-monitor', out[0].message)
->>>>>>> origin/main

@@ -464,7 +464,9 @@ class nmapData(dict):
 			vuln_id, vuln_title = matches.groups()
 			# confidence='low' kept explicit: vulscan NSE output is noisy, so these start low
 			# confidence by design (a CVE lookup below can raise it). 'high' is the type default.
-			vuln = Vulnerability(id=vuln_id, name=vuln_id, description=vuln_title, provider=provider_name, tags=[provider_name], confidence='low')
+			vuln = Vulnerability(
+				id=vuln_id, name=vuln_id, description=vuln_title, provider=provider_name,
+				tags=[provider_name], confidence='low')
 			if provider_name == 'MITRE CVE':
 				vuln_lookup = VulnMulti.lookup_cve(vuln_id, *cpes)
 				if vuln_lookup:

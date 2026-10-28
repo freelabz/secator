@@ -39,7 +39,6 @@ class maigret(ReconUser):
 		UserAccount: {
 			SITE_NAME: 'sitename',
 			URL: lambda x: x['status']['url'],
-			# OSINT username enumeration across many sites is noisy / FP-prone, so low.
 			CONFIDENCE: lambda x: 'low',
 			EXTRA_DATA: lambda x: x['status'].get('ids', {})
 		}
