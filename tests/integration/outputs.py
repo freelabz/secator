@@ -291,6 +291,12 @@ OUTPUTS_WORKFLOWS = {
 		# Tag(name='swagger-api', value='bogus', match='http://localhost:3000/api-docs/swagger.json', category='exposure', extra_data={'data': []}, _source='nuclei'),
 		# Vulnerability(matched_at='http://localhost:8080/', ip='127.0.0.1', name='Spring Boot - Remote Code Execution (Apache Log4j)', provider='', id='cve-2021-44228', confidence='high', severity='critical', cvss_score=10, tags=['cve', 'cve2021', 'springboot', 'rce', 'oast', 'log4j', 'kev'], extra_data={'data': ['192.221.154.139', 'f978d7010c8a']}, description='Spring Boot is susceptible to remote code execution via Apache Log4j.', references=['https://logging.apache.org/log4j/2.x/security.html', 'https://www.lunasec.io/docs/blog/log4j-zero-day/', 'https://github.com/twseptian/spring-boot-log4j-cve-2021-44228-docker-lab', 'https://nvd.nist.gov/vuln/detail/cve-2021-44228'], reference='https://logging.apache.org/log4j/2.x/security.html', confidence_nb=1, severity_nb=0, _source='nuclei', _type='vulnerability', _uuid='3cec387f-ef54-401d-915e-5f361de7896c'),
 	],
+	# url_js_scan yields retire.js Vulnerability results whose matched_at is httpx's stored-response
+	# path (a per-run report folder + a hashed file name), so no single result is stable enough to
+	# assert by equality (matched_at is a compared field on Vulnerability). The test still enforces a
+	# non-empty result set (empty_results_allowed defaults to False), proving the httpx -> retirejs
+	# handoff produced findings; the stable parsing assertion lives in OUTPUTS_TASKS['retirejs'].
+	'url_js_scan': [],
 	'url_crawl': [
 		Url(url='http://localhost:3000', method='GET', _type='url'),
 		Url(url='http://localhost:3000/runtime.js', method='GET', _type='url'),

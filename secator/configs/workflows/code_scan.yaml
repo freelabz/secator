@@ -25,5 +25,8 @@ tasks:
     gitleaks:
       description: Scan codebase for leaks
       if: not opts.mode or opts.mode in ['filesystem', 'git']
+    retirejs:
+      description: Find vulnerable JavaScript libraries
+      if: not opts.mode or opts.mode in ['filesystem', 'git']
     trufflehog:
       description: Scan codebase for secrets

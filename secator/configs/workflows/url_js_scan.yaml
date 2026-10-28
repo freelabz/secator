@@ -1,0 +1,30 @@
+type: workflow
+name: url_js_scan
+alias: ujs
+description: URL JavaScript library vulnerability scan
+long_description: |
+  Probes URLs and looks for JavaScript libraries with known vulnerabilities in the HTTP responses.
+  Identifies outdated and end-of-life front-end libraries (jQuery, AngularJS, Bootstrap, ...) shipped
+  by a web application, along with the CVEs and advisories affecting them. Complements dependency
+  scanners like grype and trivy, which cover system and container packages but not the vendored
+  JavaScript actually served to browsers.
+tags: [http, vuln, js]
+input_types:
+- url
+
+tasks:
+  httpx:
+    description: Run HTTP probes on URLs
+    tech_detect: True
+
+  retirejs:
+    description: Find vulnerable JS libraries in HTTP responses
+    # httpx stores responses as <sha1>.txt (headers + body), so retire.js needs to be told to look
+    # at .txt files: its default only matches .js. The prepended headers rule out hash-based
+    # detection and the hashed file name rules out filename-based detection, leaving `filecontent`
+    # matching on the response body, which covers 93% of the retire.js library repo.
+    ext: txt
+    targets_:
+    - type: url
+      field: stored_response_path
+      condition: item.stored_response_path != ''

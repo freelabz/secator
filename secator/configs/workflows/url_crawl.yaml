@@ -36,6 +36,12 @@ options:
     default: False
     short: hs
 
+  scan_js:
+    is_flag: True
+    help: Scan HTTP responses for vulnerable JS libraries (retirejs)
+    default: False
+    short: sjs
+
 default_options:
   match_codes: 200,204,301,302,307,401,403,405,500
 
@@ -96,3 +102,13 @@ tasks:
           field: value
           condition: item.name == 'email_address'
       if: opts.hunt_secrets and not opts.passive
+    retirejs:
+      description: Find vulnerable JS libraries in HTTP responses
+      # httpx stores responses as <sha1>.txt (headers + body), so retire.js needs to be told to
+      # look at .txt files: its default only matches .js.
+      ext: txt
+      targets_:
+        - type: url
+          field: stored_response_path
+          condition: item.stored_response_path != ''
+      if: opts.scan_js and not opts.passive

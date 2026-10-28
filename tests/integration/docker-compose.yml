@@ -9,6 +9,15 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
 
+  # Static JS libraries with known vulnerabilities (retire.js / url_js_scan)
+  js_server:
+    image: "nginx:alpine"
+    restart: always
+    volumes:
+      - ./js:/usr/share/nginx/html:ro
+    ports:
+      - "127.0.0.1:8901:80"
+
   # Log4Shell
   cve_2021_44228:
     restart: always
