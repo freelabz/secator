@@ -124,6 +124,13 @@ services:
     ports:
       - "127.0.0.1:10050:10050"
 
+  # Plain Tomcat — exercises apachetomcatscanner (version detection).
+  tomcat:
+    image: tomcat:9.0
+    restart: always
+    ports:
+      - "127.0.0.1:18080:8080"
+
   # Tomcat with an unauthenticated JMX/RMI endpoint — exercises beanshooter + rmg.
   jmx:
     image: tomcat:9.0

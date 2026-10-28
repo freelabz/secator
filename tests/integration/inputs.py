@@ -45,6 +45,7 @@ INPUTS_TASKS = {
 	'beanshooter': '127.0.0.1:1617',
 	'rmg': '127.0.0.1:1617',
 	'eyewitness': 'http://localhost:3000/',
+	'apachetomcatscanner': 'http://127.0.0.1:18080',
 }
 
 INPUTS_WORKFLOWS = {
