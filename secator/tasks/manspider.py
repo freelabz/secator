@@ -5,13 +5,12 @@ manspider
 -u "BFS81NU"
 -p ""
 --content "passw|pwd|secret|superadmin|admb|kdbx|pdtb"
---extensions ini cfg txt bak save sav ps1 ps bat sh bash config kdbx backup cer der cert pem properties cnf conf yaml yml xml
+--extensions ini cfg txt bak save sav ps1 ps bat sh bash config kdbx backup cer der cert pem properties cnf conf yaml yml xml  # noqa: E501
 -m 5
 -s 1M
--l [LOOT DIR] [IP/RANGE/FILE]  
+-l [LOOT DIR] [IP/RANGE/FILE]
 """
 
-from pathlib import Path
 
 from secator.decorators import task
 from secator.definitions import CIDR_RANGE, HOST, HOST_PORT, IP, STRING
@@ -37,28 +36,27 @@ class manspider(Command):
 		'hash': {'type': str, 'default': None, 'help': 'NTLM hash for authentication'},
 		'kerberos': {'is_flag': True, 'default': False, 'help': 'Use Kerberos authentication'},
 		'aes_key': {'type': str, 'default': None, 'help': 'AES key to use for Kerberos Authentication (128 or 256 bits)'},
-		'dc_ip': {'type': str, 'default': None, 'help': 'IP Address of the domain controller. If omitted it will use the domain part (FQDN) of the target'},
+		'dc_ip': {'type': str, 'default': None, 'help': 'IP Address of the domain controller. If omitted it will use the domain part (FQDN) of the target'},  # noqa: E501
 		'threads': {'type': int, 'default': 5, 'help': 'Concurrent threads'},
 		'filenames': {'type': str, 'default': None, 'help': 'Filter filenames using regex (space-separated)'},
 		'extensions': {'type': str, 'default': None, 'help': 'Only show filenames with these extensions (space-separated)'},
 		'exclude_extensions': {'type': str, 'default': None, 'help': 'Ignore files with these extensions (space-separated)'},
 		'content': {'type': str, 'default': None, 'help': 'Search for file content using regex (space-separated)'},
 		'sharenames': {'type': str, 'default': None, 'help': 'Only search shares with these names (space-separated)'},
-		'exclude_sharenames': {'type': str, 'default': None, 'help': 'Do not search shares with these names (space-separated)'},
-		'dirnames': {'type': str, 'default': None, 'help': 'Only search directories containing these strings (space-separated)'},
-		'exclude_dirnames': {'type': str, 'default': None, 'help': 'Do not search directories containing these strings (space-separated)'},
+		'exclude_sharenames': {'type': str, 'default': None, 'help': 'Do not search shares with these names (space-separated)'},  # noqa: E501
+		'dirnames': {'type': str, 'default': None, 'help': 'Only search directories containing these strings (space-separated)'},  # noqa: E501
+		'exclude_dirnames': {'type': str, 'default': None, 'help': 'Do not search directories containing these strings (space-separated)'},  # noqa: E501
 		'no_download': {'is_flag': True, 'default': None, 'help': 'Do not download matching files'},
 		'max_failed_logons': {'type': int, 'default': None, 'help': 'Limit failed logons'},
 		'or_logic': {'is_flag': True, 'default': None, 'help': 'Use OR logic instead of AND'},
-		'max_filesize': {'type': str, 'default': '10M', 'help': 'Do not retrieve files over thise size, e.g: "500K" or ".5M"'},
-		'modified_after': {'type': str, 'default': None, 'help': 'Only show files modified after this date (format: YYYY-MM-DD)'},
-		'modified_before': {'type': str, 'default': None, 'help': 'Only show files modified before this date (format: YYYY-MM-DD)'},
+		'max_filesize': {'type': str, 'default': '10M', 'help': 'Do not retrieve files over thise size, e.g: "500K" or ".5M"'},  # noqa: E501
+		'modified_after': {'type': str, 'default': None, 'help': 'Only show files modified after this date (format: YYYY-MM-DD)'},  # noqa: E501
+		'modified_before': {'type': str, 'default': None, 'help': 'Only show files modified before this date (format: YYYY-MM-DD)'},  # noqa: E501
 	}
 	opt_key_map = {
 		'max_depth': 'maxdepth',
 	}
 	install_cmd = "pipx install --force git+https://github.com/freelabz/MANSPIDER@feature/anon-share-enum-and-json-output"
-
 
 	@staticmethod
 	def on_cmd(self):
@@ -90,7 +88,7 @@ class manspider(Command):
 	def on_json_loaded(self, item):
 		target = item['target'] + ':' + str(item['port'])
 		share = item['share']
-		if item['type'] == 'share': 
+		if item['type'] == 'share':
 			self.shares_found += 1
 			yield Tag(
 				match=target,
@@ -125,7 +123,7 @@ class manspider(Command):
 				category='info',
 				name='smb_share_file',
 				value=item['path'],
-                tags=['network', 'smb', 'file'],
+				tags=['network', 'smb', 'file'],
 				extra_data={
 					'size': item['size'],
 					'share': share
@@ -174,7 +172,7 @@ class manspider(Command):
 				matched_at=target,
 				severity='critical',
 				confidence='high',
-                tags=tags,
+				tags=tags,
 				extra_data={
 					'found': self.secrets_found,
 					'patterns': list(set(patterns))

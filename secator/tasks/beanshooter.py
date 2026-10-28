@@ -39,10 +39,10 @@ class beanshooter(Command):
 	}
 	install_version = '4.1.0'
 	# install_pre = {
-		# '*': ['openjdk-8-jre']
+	# 	'*': ['openjdk-8-jre']
 	# }
 	install_cmd = (
-		'wget https://github.com/qtc-de/beanshooter/releases/download/v[install_version]/beanshooter-[install_version]-jar-with-dependencies.jar && '
+		'wget https://github.com/qtc-de/beanshooter/releases/download/v[install_version]/beanshooter-[install_version]-jar-with-dependencies.jar && '  # noqa: E501
 		f'mv beanshooter-[install_version]-jar-with-dependencies.jar {CONFIG.dirs.bin}/beanshooter.jar && '
 		f'echo "{BEANSHOOTER_BIN}" > {CONFIG.dirs.bin}/beanshooter && '
 		f'chmod +x {CONFIG.dirs.bin}/beanshooter'
@@ -68,7 +68,7 @@ class beanshooter(Command):
 		json_output = parse_beanshooter_output(_strip_ansi(self.output))
 		# self._print(json_output)
 		target = self.inputs[0]
-		if not ':' in self.inputs[0]:
+		if ':' not in self.inputs[0]:
 			target = self.inputs[0] + ':' + str(self.get_opt_value('jmx_port'))
 		for key, value in json_output.items():
 			if key == 'warnings':
@@ -93,7 +93,7 @@ class beanshooter(Command):
 					confidence='high',
 					tags=['java', 'jmx', 'mbean', 'unauth', 'vuln']
 				)
-			elif key == 'preauth_deserialization' and value.get('payload_accepted', False) == True:
+			elif key == 'preauth_deserialization' and value.get('payload_accepted', False) is True:
 				yield Vulnerability(
 					name='Java JMX - Random payload allowed',
 					description="Remote MBean server accepts random payload classes.",

@@ -5,7 +5,7 @@ import click
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import HOST, HOST_PORT, IP
-from secator.output_types import Vulnerability, Tag, Technology, Warning
+from secator.output_types import Vulnerability, Tag, Technology
 from secator.runners import Command
 
 
@@ -34,14 +34,14 @@ class rmg(Command):
 	opt_prefix = '--'
 	install_version = '5.1.0'
 	opts = {
-		'mode': {'type': click.Choice(RMG_MODES), 'default': 'enum', 'internal': True, 'display': True, 'help': f'Scan mode ({", ".join(RMG_MODES)})'},
+		'mode': {'type': click.Choice(RMG_MODES), 'default': 'enum', 'internal': True, 'display': True, 'help': f'Scan mode ({", ".join(RMG_MODES)})'},  # noqa: E501
 		'rmi_port': {'type': int, 'default': 1090, 'internal': True, 'display': True},
 	}
 	# install_pre = {
 	# 	'*': ['openjdk-8-jre']
 	# }
 	install_cmd = (
-		'wget https://github.com/qtc-de/remote-method-guesser/releases/download/v[install_version]/rmg-[install_version]-jar-with-dependencies.jar && '
+		'wget https://github.com/qtc-de/remote-method-guesser/releases/download/v[install_version]/rmg-[install_version]-jar-with-dependencies.jar && '  # noqa: E501
 		f'mv rmg-[install_version]-jar-with-dependencies.jar {CONFIG.dirs.bin}/rmg.jar && '
 		f'echo "{RMG_BIN}" > {CONFIG.dirs.bin}/rmg && '
 		f'chmod +x {CONFIG.dirs.bin}/rmg'
@@ -63,7 +63,6 @@ class rmg(Command):
 		mode = shlex.quote(self.get_opt_value('mode'))
 		self.cmd = self.cmd.replace('rmg ', f'rmg {mode} ')
 		self.cmd = self.cmd.replace(self.inputs[0], replaced)
-
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -174,7 +173,7 @@ class rmg(Command):
 			if json_output["jep290"].get("status") == "Vulnerable":
 				yield Vulnerability(
 					name='Java RMI - Missing JEP290 Deserialization Filtering',
-					description="The Java RMI service does not have JEP290 serialization filtering enabled, allowing raw deserialization of arbitrary objects.",
+					description="The Java RMI service does not have JEP290 serialization filtering enabled, allowing raw deserialization of arbitrary objects.",  # noqa: E501
 					impact="Remote Code Execution (RCE) via deserialization.",
 					remediation="Upgrade Java or configure JEP290 deserialization filters.",
 					cvss_vec='CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
@@ -231,6 +230,7 @@ class rmg(Command):
 
 def _strip_ansi(text):
 	return re.sub(r'\x1b(?:\[[0-9;]*m|\][^\x1b]*\x1b\\)', '', text)
+
 
 def parse_rmg_scan_output(output):
 	result = {

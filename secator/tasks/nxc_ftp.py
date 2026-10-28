@@ -3,15 +3,15 @@ import shutil
 from pathlib import Path
 
 from secator.decorators import task
-from secator.definitions import HOST, HOST_PORT, IP, STRING, THREADS, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, OPT_NOT_SUPPORTED
-from secator.output_types import Vulnerability, Tag, Info, Warning
+from secator.definitions import HOST, HOST_PORT, IP, STRING, THREADS, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, OPT_NOT_SUPPORTED  # noqa: E501
+from secator.output_types import Vulnerability, Tag, Warning
 from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
 
 
 @task()
 class nxc_ftp(Vuln):
-    """NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. FTP Submodule."""
+    """NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. FTP Submodule."""  # noqa: E501
     cmd = 'nxc ftp'
     input_chunk_size = 1
     input_types = [HOST, HOST_PORT, IP, STRING]
@@ -25,7 +25,7 @@ class nxc_ftp(Vuln):
         'dns_timeout': {'type': int, 'default': 3, 'help': 'DNS query timeout in seconds'},
         'cred_id': {'type': str, 'default': None, 'help': 'Database credential ID(s) to use for authentication'},
         'ignore_pw_decoding': {'is_flag': True, 'help': 'Ignore non UTF-8 characters when decoding the password file'},
-        'no_bruteforce': {'is_flag': True, 'help': 'No spray when using file for username and password (user1 => password1, user2 => password2)'},
+        'no_bruteforce': {'is_flag': True, 'help': 'No spray when using file for username and password (user1 => password1, user2 => password2)'},  # noqa: E501
         'continue_on_success': {'is_flag': True, 'help': 'Continues auth attempts even after successes'},
         'kerberos': {'is_flag': True, 'help': 'Use Kerberos authentication'},
         'module': {'type': str, 'help': 'Module to use'},
@@ -130,7 +130,7 @@ class nxc_ftp(Vuln):
         # File list
         if list_mode and line.startswith('FTP'):
             split = [c for c in line.split(' ') if c]
-            if len(split) == 13: # file / dir listing
+            if len(split) == 13:  # file / dir listing
                 _, _, _, _, perms, lcount, uid, gid, size, mod_month, mod_day, mod_time, name = tuple(split)
                 tag_name = 'ftp_dir' if perms.startswith('d') else 'ftp_file'
                 if name in ['.', '..']:

@@ -3,7 +3,10 @@ import os
 import shlex
 
 from secator.decorators import task
-from secator.definitions import IP, HOST, HOST_PORT, CIDR_RANGE, TIMEOUT, PROXY, THREADS, OPT_NOT_SUPPORTED, HEADER, FOLLOW_REDIRECT, USER_AGENT, DELAY, RETRIES, RATE_LIMIT
+from secator.definitions import (
+	IP, HOST, HOST_PORT, CIDR_RANGE, TIMEOUT, PROXY, THREADS, OPT_NOT_SUPPORTED, HEADER, FOLLOW_REDIRECT,
+	USER_AGENT, DELAY, RETRIES, RATE_LIMIT,
+)
 from secator.output_types import Port, Ip, Tag, Vulnerability, Info, Error, Technology
 from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
@@ -126,7 +129,6 @@ class nfswolf(Vuln):
 					techs_grouped[program_full]['program_id'] = program_id
 				security_note = service['security_note']
 				if security_note:
-					entity = program_name.replace('_', ' ').capitalize() + f'v{version}'
 					confidence = 'low' if 'may' in security_note else 'high'
 					tags = ['network', 'nfs']
 					if confidence == 'high':

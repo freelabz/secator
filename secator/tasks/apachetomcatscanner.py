@@ -10,7 +10,7 @@ from secator.definitions import (
 	USER_AGENT
 )
 # fmt: on
-from secator.output_types import Info, Vulnerability, Technology, Url, Tag, Warning
+from secator.output_types import Vulnerability, Technology, Url, Tag, Warning
 from secator.tasks._categories import Vuln
 
 
@@ -54,7 +54,10 @@ class apachetomcatscanner(Vuln):
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
-		self.cmd += f' --list-cves --verbose --debug --show-cves-descriptions --no-colors --export-json {shlex.quote(self.output_path)}'
+		self.cmd += (
+			' --list-cves --verbose --debug --show-cves-descriptions --no-colors'
+			f' --export-json {shlex.quote(self.output_path)}'
+		)
 
 	@staticmethod
 	def on_cmd_done(self):

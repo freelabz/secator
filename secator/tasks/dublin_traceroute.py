@@ -8,7 +8,7 @@ from pathlib import Path
 from secator.runners import Command
 from secator.decorators import task
 from secator.definitions import IP, CIDR_RANGE, HOST
-from secator.output_types import Tag, Vulnerability, Warning, Info, Error
+from secator.output_types import Tag, Vulnerability, Warning, Info
 from secator.utils import autodetect_type
 
 
@@ -25,7 +25,7 @@ class dublin_traceroute(Command):
 		'min_ttl': {'type': int, 'default': 1, 'help': 'Minimum TTL to probe'},
 		'max_ttl': {'type': int, 'default': 30, 'help': 'Maximum TTL to probe'},
 		'delay': {'type': int, 'default': 10, 'help': 'Inter-packet delay in milliseconds'},
-		'broken_nat': {'is_flag': True, 'default': False, 'help': 'Network has a broken NAT configuration (e.g: no payload fixup)'},
+		'broken_nat': {'is_flag': True, 'default': False, 'help': 'Network has a broken NAT configuration (e.g: no payload fixup)'},  # noqa: E501
 		'source_port': {'type': int, 'default': 12345, 'help': 'Source ports to send packets from'}
 	}
 	opt_key_map = {
@@ -89,7 +89,6 @@ class dublin_traceroute(Command):
 					is_last = hop['is_last']
 					rtt_usec = hop.get('rtt_usec') or 0
 					received = hop.get('received') or {}
-					description = received.get('icmp', {}).get('description', '')
 					ip_block = received.get('ip', {})
 					timestamp = received.pop('timestamp', '')
 					ip = ip_block.get('src', '')
@@ -117,7 +116,7 @@ class dublin_traceroute(Command):
 				yield Vulnerability(
 					name="Routing loops detected",
 					description="Packets are bouncing between two network appliances, effectively causing network loops",
-					impact="Network routing loops on firewalls can cause DoS of the target firewalls, especially when scanning with high volume and high TTLs",
+					impact="Network routing loops on firewalls can cause DoS of the target firewalls, especially when scanning with high volume and high TTLs",  # noqa: E501
 					remediation="Adjust the firewall configuration to avoid infinite bouncing",
 					matched_at=self.inputs[0],
 					severity='critical',

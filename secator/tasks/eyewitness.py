@@ -34,7 +34,8 @@ class eyewitness(HttpBase):
 	input_types = [URL]
 	output_types = [Url]
 	tags = ['screenshot', 'web', 'recon']
-	input_flag = None  # EyeWitness only writes Requests.csv (parsed below) in multi mode (`-f <file>`), NOT single mode (`--single`)
+	# EyeWitness only writes Requests.csv (parsed below) in multi mode (`-f <file>`), NOT single mode (`--single`)  # noqa: E501
+	input_flag = None
 	file_flag = '-f'
 	file_eof_newline = True
 	version_flag = OPT_NOT_SUPPORTED
@@ -101,7 +102,7 @@ class eyewitness(HttpBase):
 	def on_cmd_done(self):
 		csv_path = os.path.join(self.output_path, 'Requests.csv')
 		if not os.path.exists(csv_path):
-			yield Warning(message=f'No results found (could not find CSV)')
+			yield Warning(message='No results found (could not find CSV)')
 			return
 		yield Info(message=f'EyeWitness report saved to {self.output_path}')
 
