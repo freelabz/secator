@@ -5,7 +5,6 @@ from secator.decorators import task
 from secator.definitions import URL
 from secator.output_types import Info, Vulnerability, Warning
 from secator.tasks._categories import Vuln
-from secator.utils import autodetect_type
 
 
 DRG_REPO_REGEX = re.compile(r'^\[\+\]\s+(\S+)\s*$')

@@ -1,20 +1,20 @@
 import re
 
 from secator.decorators import task
-from secator.definitions import HOST, HOST_PORT, IP, STRING, THREADS, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, OPT_NOT_SUPPORTED
-from secator.output_types import Vulnerability, Tag, Info, Warning
+from secator.definitions import HOST, HOST_PORT, IP, STRING, THREADS, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, OPT_NOT_SUPPORTED  # noqa: E501
+from secator.output_types import Vulnerability, Tag, Warning
 from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
 
 
-STATUS_REGEX = re.compile(r'\s*(?P<os>((\w+\s?)+))\s\((?P<version>(\d+\s+\d+\.\d+\.\d+))\)\s\(name:(?P<name>(\w-?)+)\)\s\(domain:(?P<domain>(\w\-?\.?)+)?\)\s\(EncryptionReq:(?P<enc>\w+)\)\s\(NTLM:(?P<ntlm>\w+)\)')
-LOGIN_SUCCESS_REGEX = re.compile(r'\s*(?P<domain>(\w+\-?\.?)+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')
+STATUS_REGEX = re.compile(r'\s*(?P<os>((\w+\s?)+))\s\((?P<version>(\d+\s+\d+\.\d+\.\d+))\)\s\(name:(?P<name>(\w-?)+)\)\s\(domain:(?P<domain>(\w\-?\.?)+)?\)\s\(EncryptionReq:(?P<enc>\w+)\)\s\(NTLM:(?P<ntlm>\w+)\)')  # noqa: E501
+LOGIN_SUCCESS_REGEX = re.compile(r'\s*(?P<domain>(\w+\-?\.?)+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')  # noqa: E501
 LOGIN_FAILED_REGEX = re.compile(r'\s*(?P<domain>(\w+\-?\.?)+)\\(?P<username>[^:\n]*):?(?P<password>.*)?')
 
 
 @task()
 class nxc_mssql(Vuln):
-	"""NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. FTP Submodule."""
+	"""NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. FTP Submodule."""  # noqa: E501
 	cmd = 'nxc mssql'
 	input_chunk_size = 1
 	input_types = [HOST, HOST_PORT, IP, STRING]
@@ -29,7 +29,7 @@ class nxc_mssql(Vuln):
 		'dns_timeout': {'type': int, 'default': 3, 'help': 'DNS query timeout in seconds'},
 		'cred_id': {'type': str, 'default': None, 'help': 'Database credential ID(s) to use for authentication'},
 		'ignore_pw_decoding': {'is_flag': True, 'help': 'Ignore non UTF-8 characters when decoding the password file'},
-		'no_bruteforce': {'is_flag': True, 'help': 'No spray when using file for username and password (user1 => password1, user2 => password2)'},
+		'no_bruteforce': {'is_flag': True, 'help': 'No spray when using file for username and password (user1 => password1, user2 => password2)'},  # noqa: E501
 		'continue_on_success': {'is_flag': True, 'help': 'Continues auth attempts even after successes'},
 		'kerberos': {'is_flag': True, 'help': 'Use Kerberos authentication'},
 		'module': {'type': str, 'help': 'Module to use'},

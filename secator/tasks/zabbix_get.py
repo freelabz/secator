@@ -4,7 +4,7 @@ from pathlib import Path
 
 from secator.decorators import task
 from secator.definitions import HOST, HOST_PORT, IP, SLUG, STRING
-from secator.output_types import Vulnerability, Tag, Warning, Info
+from secator.output_types import Vulnerability, Tag
 from secator.runners import Command
 from secator.utils import autodetect_type
 
@@ -15,10 +15,10 @@ HTTPS_PROXY = os.environ.get('https_proxy')
 
 @task()
 class zabbix_get(Command):
-	"""Zabbix get is a command-line utility, which can be used to communicate with Zabbix agent and retrieve required information from the agent."""
+	"""Zabbix get is a command-line utility, which can be used to communicate with Zabbix agent and retrieve required information from the agent."""  # noqa: E501
 	cmd = 'zabbix_get'
 	install_cmd = (
-	    'wget https://repo.zabbix.com/zabbix/7.4/release/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_7.4+ubuntu26.04_all.deb && '
+	    'wget https://repo.zabbix.com/zabbix/7.4/release/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_7.4+ubuntu26.04_all.deb && '  # noqa: E501
 	    'sudo dpkg -i zabbix-release_latest_7.4+ubuntu26.04_all.deb && '
 	    'sudo apt update && '
 	    'sudo apt install zabbix-get'
@@ -28,7 +28,7 @@ class zabbix_get(Command):
 	input_chunk_size = 1
 	input_types = [HOST, HOST_PORT, IP, SLUG, STRING]
 	opts = {
-		'key': {'type': str, 'default': r"system.run[ls]", 'help': 'Key of the item to retrieve value for (e.g: "system.run[ls]", "vfs.file.contents[/etc/passwd]")'},
+		'key': {'type': str, 'default': r"system.run[ls]", 'help': 'Key of the item to retrieve value for (e.g: system.run with ls, or vfs.file.contents of a path)'},  # noqa: E501
 		'zabbix_port': {'type': int, 'default': 10050, 'help': 'Zabbix agent port'}
 	}
 	opt_key_map = {
@@ -52,9 +52,8 @@ class zabbix_get(Command):
 
 	@staticmethod
 	def on_cmd_done(self):
-		lines = self.output.split('\n')
 		key = self.get_opt_value('key')
-		markers = ('zbx_notsupported', 'permission denied', 'connection error', 'get value error', 'check access restrictions')
+		markers = ('zbx_notsupported', 'permission denied', 'connection error', 'get value error', 'check access restrictions')  # noqa: E501
 		output_lower = self.output.lower()
 		if self.return_code != 0 or not self.output.strip() or any(m in output_lower for m in markers):
 			return
@@ -63,20 +62,20 @@ class zabbix_get(Command):
 			yield Vulnerability(
 				name='Zabbix - Local File Inclusion',
 				description=(
-					'It is possible to list folders and read files remotely using the Zabbix agent by using the official zabbix_get tool from the same editor. \n'
-					'On the default Zabbix agent configuration, the "vfs.file.contents" key is disabled, which does not allow folder and file reads. \n'
+					'It is possible to list folders and read files remotely using the Zabbix agent by using the official zabbix_get tool from the same editor. \n'  # noqa: E501
+					'On the default Zabbix agent configuration, the "vfs.file.contents" key is disabled, which does not allow folder and file reads. \n'  # noqa: E501
 					'This means that someone has modified the default server configuration so that this RCE becomes possible.'
 				),
 				impact=(
 					'This can cause significant security risks which varies based on the user rights running the Zabbix agent:\n',
-					'- Reading and exfiltrating files containing sensitive data (app and config files, environment variables, logs, SSH keys, certificates, ...)\n'
+					'- Reading and exfiltrating files containing sensitive data (app and config files, environment variables, logs, SSH keys, certificates, ...)\n'  # noqa: E501
 					'- Causing a Denial of Service\n'
 					'- Executing custom code'
 				),
 				remediation=(
 					'Disable remote command execution immediately in the Zabbix agent configuration by setting:\n'
 					'- Setting `EnableRemoteCommands=0` (if Zabbix agent version < 5)\n'
-					'- Adding an `AllowKey` whitelist in Zabbix agent configuration (see [instructions](https://www.zabbix.com/documentation/current/en/manual/config/items/restrict_checks)) (if Zabbix agent version >= 5.0+)'
+					'- Adding an `AllowKey` whitelist in Zabbix agent configuration (see [instructions](https://www.zabbix.com/documentation/current/en/manual/config/items/restrict_checks)) (if Zabbix agent version >= 5.0+)'  # noqa: E501
 				),
 				cvss_vec='CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
 				cvss_score=7.5,
@@ -99,20 +98,20 @@ class zabbix_get(Command):
 			yield Vulnerability(
 				name='Zabbix - Remote Code Execution',
 				description=(
-					'It is possible to execute remote commands using the Zabbix agent by using the official zabbix_get tool from the same editor. \n'
-					'On the default Zabbix agent configuration, the "system.run" key is disabled, which does not allow remote execution. \n'
+					'It is possible to execute remote commands using the Zabbix agent by using the official zabbix_get tool from the same editor. \n'  # noqa: E501
+					'On the default Zabbix agent configuration, the "system.run" key is disabled, which does not allow remote execution. \n'  # noqa: E501
 					'This means that someone has modified the default server configuration so that this RCE becomes possible.'
 				),
 				impact=(
 					'This can cause significant security risks which varies based on the user rights running the Zabbix agent:\n',
-					'- Reading and exfiltrating files containing sensitive data (app and config files, environment variables, logs, SSH keys, certificates, ...)\n'
+					'- Reading and exfiltrating files containing sensitive data (app and config files, environment variables, logs, SSH keys, certificates, ...)\n'  # noqa: E501
 					'- Causing a Denial of Service\n'
 					'- Executing custom code'
 				),
 				remediation=(
 					'Disable remote command execution immediately in the Zabbix agent configuration by setting:\n'
 					'- Setting `EnableRemoteCommands=0` (if Zabbix agent version < 5)\n'
-					'- Adding an `AllowKey` whitelist in Zabbix agent configuration (see [instructions](https://www.zabbix.com/documentation/current/en/manual/config/items/restrict_checks)) (if Zabbix agent version >= 5.0+)'
+					'- Adding an `AllowKey` whitelist in Zabbix agent configuration (see [instructions](https://www.zabbix.com/documentation/current/en/manual/config/items/restrict_checks)) (if Zabbix agent version >= 5.0+)'  # noqa: E501
 				),
 				cvss_vec='CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
 				cvss_score=9.8,

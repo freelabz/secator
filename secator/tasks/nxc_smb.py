@@ -1,17 +1,18 @@
-import shutil
-
-from pathlib import Path
+import re
 
 from secator.decorators import task
-from secator.definitions import HOST, HOST_PORT, IP, STRING, THREADS, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, OPT_NOT_SUPPORTED
-from secator.output_types import Vulnerability, Tag, Technology, Info, Warning
+from secator.definitions import (
+	HOST, HOST_PORT, IP, STRING, THREADS, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT,
+	OPT_NOT_SUPPORTED,
+)
+from secator.output_types import Vulnerability, Tag, Technology, Warning
 from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
 
 
 @task()
 class nxc_smb(Vuln):
-	"""NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. FTP Submodule."""
+	"""NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. SMB Submodule."""  # noqa: E501
 	cmd = 'nxc smb'
 	input_chunk_size = 1
 	input_types = [HOST, HOST_PORT, IP, STRING]
@@ -26,7 +27,7 @@ class nxc_smb(Vuln):
 		'dns_timeout': {'type': int, 'default': None, 'help': 'DNS query timeout in seconds'},
 		'cred_id': {'type': str, 'default': None, 'help': 'Database credential ID(s) to use for authentication'},
 		'ignore_pw_decoding': {'is_flag': True, 'help': 'Ignore non UTF-8 characters when decoding the password file'},
-		'no_bruteforce': {'is_flag': True, 'help': 'No spray when using file for username and password (user1 => password1, user2 => password2)'},
+		'no_bruteforce': {'is_flag': True, 'help': 'No spray when using file for username and password (user1 => password1, user2 => password2)'},  # noqa: E501
 		'continue_on_success': {'is_flag': True, 'help': 'Continues auth attempts even after successes'},
 		'kerberos': {'is_flag': True, 'help': 'Use Kerberos authentication'},
 		'module': {'type': str, 'help': 'Module to use'},
@@ -35,7 +36,7 @@ class nxc_smb(Vuln):
 		'put': {'type': str, 'help': 'Upload a file (format: LOCAL_FILE REMOTE_FILE)'},
 		'shares': {'is_flag': True, 'help': 'List shares'},
 		'common_vulns': {'is_flag': True, 'default': True, 'internal': True, 'display': True, 'help': 'List SMB metdata and common vulns (null auth, v1 enabled, ...)'},  # noqa: E501
-		'local_auth': {'is_flag':  True, 'default': None, 'help': 'Local authentication'},
+		'local_auth': {'is_flag': True, 'default': None, 'help': 'Local authentication'},
 	}
 	opt_key_map = {
 		'username': '-u',
@@ -178,11 +179,13 @@ class nxc_smb(Vuln):
 			# Valid credentials
 			valid_creds = data.get('valid_creds', [])
 			for cred in valid_creds:
+				username = cred.get('username', '')
+				password = cred.get('secret', '')
 				yield Tag(
 					category='secret',
 					match=self.full_target,
 					name='smb_credentials',
-					value=f'{username}:{secret}',
+					value=f'{username}:{password}',
 					tags=['network', 'smb', 'default-login'],
 					extra_data=cred | {'type': 'standard_credentials'}
 				)
@@ -212,12 +215,12 @@ class nxc_smb(Vuln):
 			admin_hosts = data.get('admin_hosts', [])
 			for host in admin_hosts:
 				username = host.get('username', '')
-				secret = host.get('secret', '')
+				password = host.get('secret', '')
 				yield Tag(
 					category='secret',
 					match=self.full_target,
 					name='smb_credentials',
-					value=f'{username}:{secret}',
+					value=f'{username}:{password}',
 					tags=['network', 'smb', 'admin-login'],
 					extra_data=host | {'type': 'admin_credentials'}
 				)
@@ -337,14 +340,16 @@ class nxc_smb(Vuln):
 		if shares_opt:
 			shares_data = data.get('shares', [])
 			for share in shares_data:
+				share_extra = {k: v for k, v in share.items() if k not in ['share', 'ip']}
+				share_extra['username'] = self.get_opt_value('username')
 				yield Tag(
 					category='info',
 					match=self.full_target,
 					name='smb_share',
 					value=share['share'],
 					tags=['network', 'smb', 'share'],
-					extra_data={k: v for k, v in share.items() if k not in ['share', 'ip']} | {'username': self.get_opt_value('username')}
-			)
+					extra_data=share_extra,
+				)
 			if shares_data and username_opt in [None, '', 'guest']:
 				yield Vulnerability(
 					name='SMB - Unauthenticated Access To Network Share',
@@ -361,13 +366,9 @@ class nxc_smb(Vuln):
 				)
 
 
-"""
-NetExec (NXC) Parser - HorusEye v2
-Handles all common nxc output formats: smb, ldap, winrm, mssql, rdp
-Author: Omar Tamer 🇪🇬
-"""
-import re
-from typing import Dict, List
+# NetExec (NXC) Parser
+# Handles all common nxc output formats: smb, ldap, winrm, mssql, rdp
+from typing import Dict  # noqa: E402
 
 
 class NXCParser:
@@ -430,10 +431,10 @@ class NXCParser:
 	)
 
 	# Password policy lines
-	_RE_POL_MIN   = re.compile(r"Minimum password length:\s*(\d+)")
-	_RE_POL_HIST  = re.compile(r"Password history length:\s*(\d+)")
-	_RE_POL_LOCK  = re.compile(r"Account lockout threshold:\s*(\S+)")
-	_RE_POL_COMP  = re.compile(r"Password Complexity Flags:\s*(.+)")
+	_RE_POL_MIN = re.compile(r"Minimum password length:\s*(\d+)")
+	_RE_POL_HIST = re.compile(r"Password history length:\s*(\d+)")
+	_RE_POL_LOCK = re.compile(r"Account lockout threshold:\s*(\S+)")
+	_RE_POL_COMP = re.compile(r"Password Complexity Flags:\s*(.+)")
 
 	# Local admin line (from --local-auth or Pwn3d!)
 	_RE_ADMIN = re.compile(
@@ -518,11 +519,11 @@ class NXCParser:
 			# ── Auth results ────────────────────────────────────────────────
 			m = self._RE_AUTH.search(line)
 			if m and m.group("status") == "[+]":
-				ip     = m.group("ip")
-				user   = m.group("user")
+				ip = m.group("ip")
+				user = m.group("user")
 				secret = m.group("secret")
 				domain = m.group("domain")
-				pwned  = bool(m.group("pwned"))
+				pwned = bool(m.group("pwned"))
 
 				cred_key = f"{domain}\\{user}:{secret}"
 				if cred_key not in seen_creds:
@@ -555,9 +556,9 @@ class NXCParser:
 			# ── Share enumeration ───────────────────────────────────────────
 			m = self._RE_SHARE.search(line)
 			if m:
-				share  = m.group("share").upper()
-				perms  = m.group("perms")
-				ip     = m.group("ip")
+				share = m.group("share").upper()
+				perms = m.group("perms")
+				ip = m.group("ip")
 
 				if perms != "NO ACCESS":
 					data["shares"].append({
@@ -580,7 +581,7 @@ class NXCParser:
 			# ── Admin hosts (Pwn3d! in any line) ───────────────────────────
 			m = self._RE_ADMIN.search(line)
 			if m:
-				ip       = m.group("ip")
+				ip = m.group("ip")
 				hostname = m.group("hostname")
 				if ip not in [h["ip"] for h in data["admin_hosts"]]:
 					data["admin_hosts"].append({
