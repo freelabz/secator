@@ -82,5 +82,5 @@ tasks:
     targets_:
       - type: url
         field: url
-        condition: "'openapi' in url.url or 'swagger' in url.url or 'api-docs' in url.url"
+        condition: "url.url ~= '(openapi|swagger|api-docs)'"
     if: opts.spec
