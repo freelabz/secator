@@ -28,7 +28,8 @@ from secator.ai.prompts import (
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
 from secator.ai.session import (
-	save_history, show_session_picker, replay_session, restore_history_from_db, print_session_results)
+	save_history, show_session_picker, pick_session_via_backend, replay_session, restore_history_from_db,
+	print_session_results)
 from secator.ai.utils import (
 	call_llm, init_llm, setup_ai, format_llm_status, parse_text_tool_calls,
 	_decrypt_dict, _build_action_display,
@@ -429,7 +430,21 @@ class ai(PythonRunner):
 
 		# Resume session
 		if self.resume and not self.is_subagent:
-			session = show_session_picker()
+			# A frontend that owns the display (the Textual TUI) can't host the plain-console
+			# picker — it drives the terminal directly and collides with Textual. Route the
+			# choice through the backend so that frontend renders the session list instead.
+			if getattr(self.backend, "owns_display", False):
+				# `show_session_picker` prints its own "no sessions" notice on the console; a
+				# display-owning backend has no console, so surface the same thing as a Warning
+				# (and distinguish "none to resume" from a cancelled pick, both of which the
+				# picker signals as None).
+				from secator.ai.session import list_sessions
+				if not list_sessions():
+					yield Warning(message="No previous AI sessions found.")
+					return
+				session = pick_session_via_backend(self.backend, session_id=self.session_id)
+			else:
+				session = show_session_picker()
 			if session is None:
 				return
 			self.session_name = session["name"]
@@ -439,6 +454,12 @@ class ai(PythonRunner):
 				# str(self.id)) so appended docs continue the same `_context.session_id`.
 				self.session_id = session["session_id"]
 				self.context["session_id"] = self.session_id
+				# Rebind the display backend's findings source to the adopted session id:
+				# on_session already ran in setup with the INITIAL id, so without this the
+				# TUI findings panel keeps querying the pre-resume session (shows nothing).
+				if getattr(self.backend, "owns_display", False):
+					self.backend.on_session(
+						self.context.get("workspace_id", ""), dict(self.context), self.session_id)
 				# restore_history_from_db seeds system_prompt; no prompt exists yet (asked
 				# interactively below), so seed the same "chat" default `_detect_mode()`
 				# uses — the user's next answer re-detects the real mode and overwrites it.
@@ -449,8 +470,11 @@ class ai(PythonRunner):
 					model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
 				# Show the prior conversation + findings on the console (the unified
 				# restore only rebuilds in-memory history; replay_session did this for
-				# the legacy path, so print it here to keep resume UX consistent).
-				print_session_results(session)
+				# the legacy path, so print it here to keep resume UX consistent). Skip it
+				# when a frontend owns the display (the TUI) — a raw console print would
+				# corrupt its screen; the restored history still drives the LLM either way.
+				if not getattr(self.backend, "owns_display", False):
+					print_session_results(session)
 			else:
 				# Legacy session: its docs carry no `_context.session_id`, so the unified
 				# restore would rebuild empty history. Fall back to the local
@@ -459,6 +483,15 @@ class ai(PythonRunner):
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
 				return
+			# Replay the restored conversation into a display-owning frontend (the TUI) so the
+			# user sees where they left off. The console path uses print_session_results above;
+			# the TUI can't take a raw print, and the report's ai docs may be empty for legacy
+			# sessions, so render from the restored history (the source of truth) instead.
+			if getattr(self.backend, "owns_display", False):
+				from secator.rich import get_tui
+				tui = get_tui()
+				if tui is not None:
+					tui.tui_replay_history(self.history.messages)
 			self.history.model = self.model
 			result = self._prompt_and_redetect([])
 			if result is None:
