@@ -21,6 +21,7 @@ from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.runners._base import REDACTED_OPT_VALUE
+from secator.runners._helpers import apply_task_overrides
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s, signal_to_name
 
@@ -170,6 +171,14 @@ class Command(Runner):
 	# Overridable via `secator config set tasks.overrides.<task>.max_timeout <seconds>`.
 	max_timeout = None
 
+	# Monitor-thread wake cadence (seconds) for the timeout / memory checks. None => the
+	# default (CONFIG.runners.stat_update_frequency), which also governs stats emission. A
+	# caller that sets a SHORT max_timeout must lower this too, otherwise the check only runs
+	# every stat_update_frequency (e.g. 20s) and a sub-cadence timeout never fires before the
+	# command finishes. Stats stay gated to stat_update_frequency regardless, so a small value
+	# adds no stat overhead — just extra cheap timeout/memory comparisons.
+	monitor_poll_interval = None
+
 	def __init__(self, inputs=[], **run_opts):
 
 		# Build runnerconfig on-the-fly
@@ -251,10 +260,8 @@ class Command(Runner):
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
 
-		# Apply task-specific config overrides
-		task_name = self.__class__.__name__
-		for attr, value in CONFIG.tasks.overrides.get(task_name, {}).items():
-			setattr(self, attr, value)
+		# Apply task-specific config overrides (tasks.overrides.<task>.<attr>).
+		apply_task_overrides(self)
 
 		# Build command input
 		self._build_cmd_input()
@@ -544,6 +551,7 @@ class Command(Runner):
 			# Output and results
 			self.return_code = 0
 			self.killed = False
+			self.timed_out = False
 			self.memory_limit_mb = CONFIG.celery.task_memory_limit_mb
 
 			# Isolated CWD
@@ -780,6 +788,7 @@ class Command(Runner):
 						warning = Warning(message=f'Task timeout {max_timeout}s exceeded: incomplete results saved')
 						if self.monitor_queue is not None:
 							self.monitor_queue.put(warning)
+						self.timed_out = True
 						self.stop_process(exit_ok=True, sig=signal.SIGTERM)
 						break
 
@@ -802,9 +811,11 @@ class Command(Runner):
 					self.monitor_queue.put(warning)
 				break
 
-			# Sleep for a short interval before next check (stat update frequency)
+			# Sleep before the next check. Stats are gated to stat_update_frequency above, so a
+			# shorter cadence (monitor_poll_interval) only makes the timeout/memory checks more
+			# responsive — needed when max_timeout is below stat_update_frequency.
 			self.monitor_stop_event.wait(poll_interval)
-			poll_interval = CONFIG.runners.stat_update_frequency
+			poll_interval = self.monitor_poll_interval or CONFIG.runners.stat_update_frequency
 
 	def _collect_stats(self, procs):
 		"""Collect stats about the current running process, if any.

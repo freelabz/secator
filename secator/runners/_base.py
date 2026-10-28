@@ -20,7 +20,7 @@ from secator.output_types import (
 	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
 )
 from secator.report import Report
-from secator.rich import console, console_stdout
+from secator.rich import console, console_stdout, live_is_active
 from secator.runners._helpers import get_task_folder_id, run_extractors
 from secator.query import QueryEngine
 from secator.query._stream import StreamView
@@ -109,9 +109,11 @@ class Runner:
 	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
 		# Runner config
 		self.serialize_config = run_opts.get('serialize_config', True)
+		# _process_config fails fast (clear ValueError) on an empty/missing template, so by
+		# here self.config.name is a valid non-empty string regardless of any run_opts override.
 		self.config = self._process_config(config)
-		self.name = run_opts.get('name', config.name)
-		self.description = run_opts.get('description', config.description or '')
+		self.name = run_opts.get('name', self.config.name)
+		self.description = run_opts.get('description', self.config.description or '')
 		self.workspace_name = context.get('workspace_name', CONFIG.workspaces.current or 'default')
 		self.workspace_explicit = context.get('workspace_explicit', False)
 		self.run_opts = run_opts.copy()
@@ -300,6 +302,7 @@ class Runner:
 		"""
 		from secator.loader import TemplateLoader
 
+		orig_type = type(config).__name__
 		if isinstance(config, TemplateLoader):
 			config = DotMap(config.toDict(serialize=self.serialize_config))
 		elif isinstance(config, dict):
@@ -308,6 +311,15 @@ class Runner:
 			pass
 		else:
 			raise TypeError(f'Invalid configuration type: {type(config)}')
+		# A missing template (e.g. TemplateLoader(name='workflows/does_not_exist')) loads as an
+		# EMPTY DotMap, so `config.name` is a DotMap, not a string — and `self.name.replace(...)`
+		# later would fail with the opaque `'TemplateLoader' object is not callable` ~80 lines in.
+		# Fail fast with a clear message, validated on the CONFIG itself so a run_opts `name`
+		# override can't mask a missing template (#1421).
+		if not isinstance(config.name, str) or not config.name:
+			raise ValueError(
+				f'Runner template is empty or not found (no string `name`). The template likely '
+				f'does not exist. Got config of type {orig_type}.')
 		return config
 
 	@property
@@ -684,7 +696,10 @@ class Runner:
 		hooks = run_opts.pop('hooks', {})
 		results = run_opts.pop('results', [])
 		context = run_opts.pop('context', {})
-		validators = run_opts.pop('validators', [])
+		# validators is a dict[str, list[callable]] (register_validators does validators.get(key));
+		# defaulting to [] crashed the async/worker path with "'list' object has no attribute 'get'"
+		# whenever run_opts carried no validators.
+		validators = run_opts.pop('validators', {})
 		return start_runner.apply_async(
 			kwargs={
 				'config': config,
@@ -725,15 +740,25 @@ class Runner:
 				yield from self._process_item(item)
 				self.run_hooks('on_interval', sub='item')
 
-			# Backfill store findings the live celery poll never surfaced. Tasks return topology-only
-			# now, so a fast task can finish before a throttled RUNNING update ever publishes its
-			# findings — and the `-json`/client output that consumes this stream would otherwise be empty.
-			# Stream via the StreamView (peak memory stays flat) and skip anything already yielded
-			# during polling (self.uuids). Applies to both Command and Workflow (their yielders differ).
-			if not self.sync and not self.no_process:
+			# Backfill store findings the live stream never surfaced, so iterating a runner always
+			# yields its findings (the documented library contract). A task/workflow returns
+			# topology-only — its findings persist to the store — so without this the iterator would
+			# carry only the target: for async a fast task can finish before a throttled RUNNING
+			# update publishes its findings; for sync the wrapper never yields them at all. Stream
+			# via the StreamView (peak memory stays flat) and skip anything already yielded (self.uuids).
+			# Only PRINT on the async path: a sync run executed its command in-process and already
+			# printed each finding (per print_item), so reprinting here would double the CLI output —
+			# the sync backfill only RE-SURFACES items to the iterator. Applies to Command and Workflow.
+			if not self.no_process:
 				for item in self.results:
 					if getattr(item, '_uuid', None) not in self.uuids:
-						yield from self._process_item(item)
+						# Already persisted (read back from the store) — re-surface to the iterator
+						# WITHOUT re-firing on_item: a child's items aren't in THIS runner's `uuids`,
+						# so re-running hooks here delivers them to every on_item hook a second time
+						# (double findings/notes on display + driver). Same hooks=False idiom as the
+						# result-seeding path in __init__. add_result still registers the uuid + counts.
+						self.add_result(item, print=not self.sync, hooks=False, queue=False)
+						yield item
 
 		except BaseException as e:
 			self.debug(f'encountered exception {type(e).__name__}. Stopping remote tasks.', sub='run')
@@ -998,7 +1023,7 @@ class Runner:
 					# that render hook *and* Rich unwraps the FileProxy on `Console.file` via
 					# `rich_proxied_file`, so writes go straight to the raw terminal and corrupt
 					# the Live panel. Route through `console` whenever a Live is active.
-					if console._live is not None:
+					if live_is_active(console):
 						_console = console
 					else:
 						_console = console_stdout if item_out == sys.stdout else console

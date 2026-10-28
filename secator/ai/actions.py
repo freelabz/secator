@@ -4,13 +4,14 @@ import os
 import re
 import threading
 import uuid
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, fields
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from secator.runners import Task, Workflow
 from secator.runners.task import TaskNotFoundError
-from secator.output_types import Ai, Error, Info, Warning, OutputType, FINDING_TYPES
+from secator.output_types import Ai, Error, ExploitAttempt, Info, Warning, OutputType, FINDING_TYPES
 from secator.template import TemplateLoader
 from secator.utils import format_token_count
 from secator.ai.prompts import normalize_mode
@@ -38,10 +39,42 @@ _SANDBOX_CREATE_LOCK = threading.Lock()
 # the next prompt's token budget; head+tail keeps both the start and the result.
 _MAX_SHELL_OUTPUT_CHARS = 4000
 
-# Cap on ad-hoc AI shell commands (dispatched as the `command` task). Applied as an
-# instance attribute post-construction (see _handle_shell) since max_timeout is not a
-# run_opts-settable field.
-_SHELL_TIMEOUT = 60
+# Fallback default timeout (seconds) for ad-hoc AI shell commands when no config is
+# available. The real default is CONFIG.security.shell_default_timeout (30s); see
+# _resolve_shell_timeout. Applied as an instance attribute post-construction (see
+# _handle_shell) since max_timeout is not a run_opts-settable field.
+_SHELL_TIMEOUT = 30
+
+
+def _resolve_shell_timeout(action: Dict) -> int:
+	"""Effective max_timeout (seconds) for a single AI shell command.
+
+	Settable range is ``[default, ceiling]``:
+	- ``default = CONFIG.security.shell_default_timeout`` (30s) — the per-command default so an
+	  interactive user doesn't wait forever when the model runs a command;
+	- ``ceiling = CONFIG.celery.task_max_timeout`` — the SAME global max-task-timeout cap every
+	  task honors (``-1`` = no cap), so a long command can still complete where the operator
+	  allows long tasks, but the model can't exceed that bound.
+
+	The model passes ``timeout`` on run_shell to raise a slow command toward the ceiling (and
+	re-run after a timeout). A value below the default is floored to it; above the ceiling is
+	capped. Absent/non-numeric falls back to the default. run_shell-only; other runners resolve
+	their timeout through the normal config path, unchanged.
+	"""
+	from secator.config import CONFIG
+	default = getattr(getattr(CONFIG, "security", None), "shell_default_timeout", _SHELL_TIMEOUT) or _SHELL_TIMEOUT
+	requested = action.get("timeout")
+	base = default
+	if requested is not None:
+		try:
+			base = int(requested)
+		except (TypeError, ValueError):
+			base = default
+	base = max(base, default)  # floor: never below the per-command default
+	ceiling = CONFIG.celery.task_max_timeout
+	if ceiling is not None and ceiling > 0:
+		base = min(base, ceiling)  # cap: never above the global task-timeout ceiling
+	return base
 
 
 @dataclass
@@ -92,6 +125,10 @@ class ActionContext:
 	# same in_scope/out_of_scope boundary via secator's shipped scope-gate.
 	in_scope: List = field(default_factory=list)
 	out_of_scope: List = field(default_factory=list)
+	# When the operator bypasses the permission engine (`dangerous`), also stop propagating
+	# the in_scope/out_of_scope boundary to child runners — bypass means run freely, so the
+	# shipped scope-gate shouldn't keep dropping out-of-scope targets.
+	dangerous: bool = False
 	_query_engine: Any = field(default=None, repr=False)
 	permission_engine: Any = field(default=None, repr=False)
 
@@ -286,6 +323,7 @@ def check_guardrails(action: Dict, ctx: ActionContext):
 				permission_type="shell",
 				value=result.shell_command,
 				deny_message="Action denied: shell command not approved",
+				command=result.shell_command,
 				reason=result.reason,
 			)
 			if denial:
@@ -353,27 +391,11 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	Yields:
 		OutputType instances (Info, Warning, Error, Ai)
 	"""
+	from secator.ai.tools import TOOLS_BY_ACTION
 	action_type = action.get("action", "")
-
-	handlers = {
-		"task": _handle_task,
-		"subagent": _handle_subagent,
-		"workflow": _handle_workflow,
-		"shell": _handle_shell,
-		"query": _handle_query,
-		"follow_up": _handle_follow_up,
-		"add_finding": _handle_add_finding,
-		"mark_vuln_exploited": _handle_mark_vuln_exploited,
-		"mark_vuln_false_positive": _handle_mark_vuln_false_positive,
-		"mark_vuln_exploit_failed": _handle_mark_vuln_exploit_failed,
-		"update_finding": _handle_update_finding,
-		"change_mode": _handle_change_mode,
-		"stop": _handle_stop,
-	}
-
-	handler = handlers.get(action_type)
-	if handler:
-		yield from handler(action, ctx)
+	tool = TOOLS_BY_ACTION.get(action_type)
+	if tool:
+		yield from tool.handle(action, ctx)
 	else:
 		context = _get_result_context(action, ctx)
 		yield Warning(message=f"Unknown action: {action_type}", _context=context)
@@ -414,6 +436,14 @@ def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["War
 	per-turn counter. Breadth is only counted within a batch (one LLM turn); a
 	lone spawn is inherently breadth-1.
 	"""
+	# A subagent is already scoped to one task and no longer has the run_subagent tool;
+	# refuse a nested spawn defensively, before the depth/breadth caps, in case a call
+	# somehow reaches here (e.g. a replayed/text-parsed tool call).
+	if ctx.subagent:
+		return Warning(
+			message="Subagent spawn denied: a subagent cannot spawn nested subagents",
+			_context=context,
+		)
 	depth = int(ctx.context.get("ai_subagent_depth", 0) or 0)
 	if depth >= _MAX_SUBAGENT_DEPTH:
 		return Warning(
@@ -461,6 +491,21 @@ def _gather_subagent_evidence(ctx: "ActionContext", targets: list, limit: int = 
 	return "\n".join(lines)
 
 
+def _child_dangerous(ctx: ActionContext, is_ai_subagent: bool) -> bool:
+	"""Whether a spawned child runs in `dangerous` (bypass) mode.
+
+	A spawned runner is NEVER dangerous — EXCEPT an AI subagent, which INHERITS the
+	parent's operator-chosen `dangerous`. `dangerous` is user-only: it is agent-readonly
+	AND an LLM-supplied `dangerous` is stripped from child opts (`_sanitize_child_opts`),
+	so the LLM still cannot self-escalate — but a bypass the OPERATOR enabled
+	(`--dangerous` / shift+tab) must extend to the exploit/recon work it delegates to a
+	subagent, otherwise the subagent gets Blocked on the very actions the operator opted
+	into. Non-AI children (task/workflow/shell) stay False: `dangerous` is an ai-task
+	concept, meaningless for them.
+	"""
+	return bool(ctx.dangerous) if is_ai_subagent else False
+
+
 def _child_run_opts(ctx: ActionContext) -> Dict:
 	"""Common run_opts shared by every child runner (task/workflow/shell command)."""
 	opts = {
@@ -479,11 +524,14 @@ def _child_run_opts(ctx: ActionContext) -> Dict:
 		# SECURITY (ISOLATION): child force-inherits the parent `isolated`; it can't set or lower it.
 		"isolated": ctx.isolated,
 	}
-	# Flow the mandate scope down so each child runner enforces it too (shipped gate).
-	if ctx.in_scope:
-		opts["in_scope"] = ctx.in_scope
-	if ctx.out_of_scope:
-		opts["out_of_scope"] = ctx.out_of_scope
+	# Flow the mandate scope down so each child runner enforces it too (shipped gate) —
+	# unless the operator bypassed the permission engine (`dangerous`), in which case scope
+	# is intentionally dropped so nothing is filtered as out-of-scope.
+	if not ctx.dangerous:
+		if ctx.in_scope:
+			opts["in_scope"] = ctx.in_scope
+		if ctx.out_of_scope:
+			opts["out_of_scope"] = ctx.out_of_scope
 	return opts
 
 
@@ -581,6 +629,16 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		sub_session = str(uuid.uuid4())
 		context["parent_session_id"] = parent_session
 		context["session_id"] = sub_session
+		# A subagent runs on the non-interactive AutoBackend — it can never surface an
+		# `ask` prompt, so without the parent's approvals every target/shell/path that
+		# would normally ask (subpaths of an approved host, an approved command, etc.)
+		# auto-denies. Scope (in_scope/out_of_scope) already flows via opts; hand down the
+		# human-granted runtime allow-list too so the child operates within the SAME
+		# envelope the user vetted for the parent.
+		if ctx.permission_engine is not None:
+			inherited = ctx.permission_engine.export_runtime_allow()
+			if inherited:
+				context["ai_inherited_runtime_allow"] = inherited
 		# Give the subagent the SAME turn budget as the parent (else the exploit/scan
 		# mode floor of 5 iterations starves it). setdefault so an explicit per-subagent
 		# max_iterations the LLM supplied (already clamped to _MAX_CHILD_ITERATIONS by
@@ -589,8 +647,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		if isinstance(ctx.max_iterations, int) and ctx.max_iterations > 0:
 			opts.setdefault("max_iterations", ctx.max_iterations)
 
-	# defense in depth: a spawned runner is never dangerous (CLI --dangerous unaffected)
-	opts["dangerous"] = False
+	opts["dangerous"] = _child_dangerous(ctx, is_ai_subagent)
 
 	# Validate the runner NAME up front and fail with a clean, actionable message.
 	# An LLM routinely invents task/workflow names (e.g. `url_crawl`, `code_scan`).
@@ -603,7 +660,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	# context with a stack trace; catch them here and hand back the valid names.
 	if runner_type == "task":
 		try:
-			Task.get_task_class(name)
+			task_cls = Task.get_task_class(name)
 		except TaskNotFoundError:
 			from secator.loader import discover_tasks, find_templates
 			available = sorted(t.__name__ for t in discover_tasks())
@@ -618,7 +675,18 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 				f"Task '{name}' not found — not a valid secator task.{hint}"
 			), _context=context)
 			return
-		tpl = TemplateLoader(input={'type': 'task', 'name': name})
+		# Hydrate the task's own metadata (description / input_types / tags) from its class,
+		# the way instantiating the task class directly would. A bare {type, name} template
+		# leaves these UNSET, and DotMap serializes an unset field as `{}` — not a str/list —
+		# which the `api` driver's runner schema rejects (description must be a str,
+		# input_types a list) and which also disables this task's input-type filtering.
+		tpl = TemplateLoader(input={
+			'type': 'task',
+			'name': name,
+			'description': (task_cls.__doc__ or '').strip() or None,
+			'input_types': list(getattr(task_cls, 'input_types', []) or []),
+			'tags': list(getattr(task_cls, 'tags', []) or []),
+		})
 		runner_cls = Task
 	else:
 		tpl = TemplateLoader(name=f'workflows/{name}')
@@ -647,6 +715,12 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		"tty": not ctx.subagent and ctx.sync,
 		**opts,
 	}
+	# `dangerous` runs free: the LLM-supplied `opts` is merged AFTER _child_run_opts, so it
+	# could re-add in_scope/out_of_scope that _child_run_opts dropped and re-enable the child
+	# scope-gate. Strip them so bypass genuinely means no scope filtering.
+	if ctx.dangerous:
+		run_opts.pop("in_scope", None)
+		run_opts.pop("out_of_scope", None)
 	# Human-readable description the LLM supplied for this action (Runner maps
 	# run_opts['description'] -> self.description -> persisted `descr`, shown by clients
 	# instead of the bare task name). Only set when non-empty so it never blanks out a
@@ -669,6 +743,11 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	if denial is not None:
 		yield denial
 		return
+	# If a display (TUI) is active, let it tap child command output + findings. No-op
+	# otherwise; hooks are picklable so async/Celery children don't break (see secator.rich).
+	if runner_type in ("task", "workflow", "scan"):
+		from secator.rich import attach_display_hooks
+		attach_display_hooks(hooks, runner_cls)
 	try:
 		runner = runner_cls(tpl, targets, run_opts=run_opts, hooks=hooks, context=context)
 	except TaskNotFoundError as e:
@@ -724,17 +803,47 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		persisted = []
 		for out in runner:
 			if isinstance(out, Ai):
+				# The subagent's conversation lives under its OWN session (its transcript,
+				# shown in the drill-in view and streamed there by its own display hook).
+				# Do NOT bubble those individual messages up to the parent: re-yielding them
+				# makes the parent re-render the whole transcript (its items aren't _uuid-
+				# deduped like findings) and pollutes the parent's stream/store. The parent
+				# gets ONE clean summary — the handback below. Capture what we need first.
 				if out.ai_type == "response" and (out.content or "").strip():
 					last_response = out.content
 				elif out.ai_type in _PERSIST_AI_TYPES:
 					persisted.append(out.ai_type)
-			yield out
-		note = (f" Persisted: {', '.join(persisted)}." if persisted
-		        else " Persisted: NOTHING (subagent made no add_finding/mark_vuln_* call).")
+				continue
+			# Only real findings bubble up to the parent (FINDING_TYPES includes `ai`, already
+			# handled above). Execution plumbing/notes stay in the subagent's own transcript.
+			if isinstance(out, tuple(FINDING_TYPES)):
+				yield out
+		if persisted:
+			# Collapse repeated action types to counted uniques so a subagent that
+			# made N calls of one type reads "mark_vuln_false_positive ×N" instead of
+			# listing it N times.
+			counts = Counter(persisted)
+			summary = ', '.join(f"{atype} ×{n}" if n > 1 else atype for atype, n in counts.items())
+			note = f" Persisted: {summary}."
+		else:
+			note = " Persisted: NOTHING (subagent made no add_finding/mark_vuln_* call)."
 		handback = (last_response.strip() or "(subagent produced no summary)") + "\n[subagent handback]" + note
 		# Stamped for the PARENT conversation (card_context strips the subagent marker) and
 		# with THIS run_task's tool_call_id so it becomes the tool_result the parent reads.
+		# Carries the subagent session id (mark THIS subagent's row done — parallel subagents
+		# hand back independently) and the subagent's billed token/cost totals so a client can
+		# show a usage line under the verdict. The child accumulates usage on ITS OWN
+		# `self.context` (which may be a copy of what we passed), so read from `runner.context`
+		# — the authoritative final totals — not the parent-side `context`.
+		child_ctx = getattr(runner, "context", None) or {}
+		usage = {
+			"tokens": int(child_ctx.get("ai_tokens", 0) or 0),
+			"prompt_tokens": int(child_ctx.get("ai_prompt_tokens", 0) or 0),
+			"completion_tokens": int(child_ctx.get("ai_completion_tokens", 0) or 0),
+			"cost": float(child_ctx.get("ai_cost", 0.0) or 0.0),
+		}
 		yield Ai(content=handback, ai_type="response",
+		         extra_data={"subagent_session_id": sub_session, "usage": usage},
 		         _context={**card_context, "tool_call_id": action.get("tool_call_id")})
 	else:
 		yield from runner
@@ -833,15 +942,28 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
 	yield from _run_runner(action, ctx, "workflow")
 
 
-# --isolated sandbox: image + resource caps for the per-runner DinD container. Stock Kali image
-# (no custom build); kali-rolling is bare (no pre-toolset Kali image exists — "headless" is an apt
-# metapackage), so we auto-install a base toolset at container spin-up (SECATOR_AI_SANDBOX_PACKAGES)
-# since the LLM doesn't reliably self-install. The LLM apt-gets anything extra at runtime.
-_SANDBOX_IMAGE = os.environ.get("SECATOR_AI_SANDBOX_IMAGE", "kalilinux/kali-rolling")
+# --isolated sandbox: resource caps for the per-runner DinD container. The image is resolved
+# from config (see _sandbox_image); a base toolset is still auto-installed best-effort at spin-up
+# (SECATOR_AI_SANDBOX_PACKAGES) in case the image is bare and the LLM doesn't self-install.
 _SANDBOX_MEMORY = os.environ.get("SECATOR_AI_SANDBOX_MEMORY", "1g")
 _SANDBOX_PIDS = os.environ.get("SECATOR_AI_SANDBOX_PIDS", "256")
 # Base tools the exploit workflow needs (clone/fetch/run PoCs). Empty string disables auto-install.
 _SANDBOX_PACKAGES = os.environ.get("SECATOR_AI_SANDBOX_PACKAGES", "git curl wget python3 python3-pip ca-certificates")
+
+
+def _sandbox_image() -> str:
+	"""Resolve the --isolated sandbox image from `addons.ai.isolated_container_image`, replacing
+	`{version}` with the running secator version so the sandbox matches the client (default:
+	freelabz/secator:<version>-lite, the release-published lite tag). When the setting is still
+	the default, the legacy SECATOR_AI_SANDBOX_IMAGE env override is honored for back-compat; an
+	explicitly-configured value takes precedence over it."""
+	from secator.config import CONFIG
+	from secator.definitions import VERSION
+	default = 'freelabz/secator:{version}-lite'
+	img = CONFIG.addons.ai.isolated_container_image or default
+	if img == default:
+		img = os.environ.get('SECATOR_AI_SANDBOX_IMAGE', img)
+	return img.replace('{version}', VERSION)
 
 
 def _sandbox_container_name(ctx: "ActionContext", context: Dict) -> str:
@@ -886,7 +1008,7 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 				"docker", "run", "-d", "--name", name,
 				"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
 				"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}", "-w", "/work",
-				_SANDBOX_IMAGE, "sleep", "infinity",
+				_sandbox_image(), "sleep", "infinity",
 			], capture_output=True, text=True)
 			if run.returncode != 0:
 				# A concurrent creator (another thread on this dockerd) may have won the
@@ -1005,6 +1127,12 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 			"print_cmd": False,
 			"dangerous": False,
 			"env": _sanitized_env(),
+			# Never let an AI-issued command block the loop on an interactive prompt. tty=False
+			# makes Command._prompt_sudo take its non-interactive path: a sudo command with no
+			# passwordless/configured sudo fails fast with an actionable error instead of
+			# hanging on getpass (the stall in a --dangerous, non-isolated TTY session). The
+			# session_context block already tells the model whether sudo is usable.
+			"tty": False,
 		}
 		# Human-readable description the LLM supplied (shown by clients instead of the
 		# bare "command" name). See _run_runner for the run_opts['description'] mapping.
@@ -1017,10 +1145,16 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		from secator.tasks.command import command as CommandTask
 		runner = CommandTask([exec_command], hooks=hooks, context=context, **run_opts)
 
-		# 60s cap on ad-hoc AI shell commands. max_timeout is NOT run_opts-settable
-		# (Command.__init__ resolves it from CONFIG.tasks.overrides); setting the
-		# instance attribute here is honored by get_max_timeout().
-		runner.max_timeout = _SHELL_TIMEOUT
+		# Per-command timeout. max_timeout is NOT run_opts-settable (Command.__init__ resolves
+		# it from CONFIG.tasks.overrides); setting the instance attribute here is honored by
+		# get_max_timeout(). Defaults to CONFIG.security.shell_default_timeout (30s); the model
+		# can raise it via run_shell(timeout=...), bounded by CONFIG.celery.task_max_timeout.
+		effective_timeout = _resolve_shell_timeout(action)
+		runner.max_timeout = effective_timeout
+		# Check the timeout at least once a second: the default monitor cadence is
+		# stat_update_frequency (tens of seconds), which would let a short shell timeout
+		# lapse unenforced. Stats stay gated to their own frequency (no extra overhead).
+		runner.monitor_poll_interval = min(1.0, effective_timeout)
 
 		# Emit the command Ai now that the runner exists: its on_init hook has
 		# stamped the runner id into context, so clients can link this item to the
@@ -1047,7 +1181,29 @@ def _handle_shell(action: Dict, ctx: ActionContext) -> Generator:
 		# Scrub secrets BEFORE truncating (a secret in the middle would survive if we
 		# truncated first), then cap so it can't blow up history.
 		output = _truncate(_scrub_secrets(runner.output or "(no output)"), _MAX_SHELL_OUTPUT_CHARS)
-		yield Ai(content=output, ai_type="shell_output", _context=context)
+		# On timeout, tell the model it can re-run with a higher `timeout` (and the cap), so it
+		# retries deliberately instead of giving up or blindly re-running the same command.
+		# `is True` (not just truthy): the real runner always sets a bool, and this avoids a
+		# test MagicMock's auto-created attribute reading as "timed out".
+		if getattr(runner, "timed_out", False) is True:
+			from secator.config import CONFIG
+			ceiling = CONFIG.celery.task_max_timeout
+			cap = f" (max {ceiling}s)" if ceiling is not None and ceiling > 0 else ""
+			output += (
+				f"\n\n[timed out after {effective_timeout}s] If this command just needs longer, "
+				f"re-run it with a higher `timeout`{cap}; otherwise change the approach."
+			)
+		yield Ai(
+			content=output,
+			ai_type="shell_output",
+			# Same runner id as the `shell` item above, so a frontend routes this stdout to
+			# the command's OWN panel by id — NOT to whatever panel is "current" (in a parallel
+			# batch several actions stream at once, so `current` may be a sibling task's panel).
+			extra_data={
+				"runner_id": context.get("task_chunk_id") or context.get("task_id", "") or runner.id,
+			},
+			_context=context,
+		)
 
 	except Exception as e:
 		yield Error(message=f"Shell command failed: {e}", _context=context)
@@ -1084,6 +1240,19 @@ def _validate_query_operators(node) -> Optional[str]:
 	return None
 
 
+def _resolve_single_output_type(query: Dict):
+	"""Resolve the OutputType class for a query that targets exactly one `_type`.
+
+	Returns the class, or None if `_type` is missing, operator-wrapped, multi-valued
+	(e.g. `{'$in': [...]}`), or unknown — i.e. the group cannot be unambiguously resolved.
+	"""
+	from secator.output_types import OUTPUT_TYPES
+	type_val = query.get("_type") if isinstance(query, dict) else None
+	if not isinstance(type_val, str) or not type_val:
+		return None
+	return next((cls for cls in OUTPUT_TYPES if cls.get_name() == type_val), None)
+
+
 def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	"""Query workspace or current results for findings.
 
@@ -1097,11 +1266,20 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 	# The schema declares `limit` an integer, but some models send it as a string
 	# ("10"); a str limit reaches the backend and raises `'>=' not supported between
 	# int and str`. Coerce to int (bad/None values fall back to the default).
-	limit = action.get("limit", 100)
+	from secator.ai.prompts import AI_MAX_RESULTS
+	limit = action.get("limit", AI_MAX_RESULTS)
 	try:
 		limit = int(limit)
 	except (TypeError, ValueError):
-		limit = 100
+		limit = AI_MAX_RESULTS
+	offset = action.get("offset", 0)
+	try:
+		offset = int(offset)
+	except (TypeError, ValueError):
+		offset = 0
+	if offset < 0:
+		offset = 0
+	group = bool(action.get("group", False))
 
 	# Some providers serialize `query` as a JSON string despite the object schema
 	# (known tool-calling quirk); coerce it back, tolerating a stray trailing brace /
@@ -1144,6 +1322,10 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		yield Warning(message="No workspace available for query", _context=context)
 		return
 
+	# human-readable intent the LLM supplies (shown as the card title: "Queried <desc>").
+	# Normalized BEFORE the try so a FAILED query card keeps the title too.
+	description = str(action.get("description") or "").strip()
+
 	try:
 		query_str = json.dumps(query_filter, separators=(',', ':'))
 		# Surface only the PRIMARY of each finding group: skip hidden duplicates
@@ -1156,18 +1338,59 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 		search_query = query_filter
 		if not is_local and "_context" not in query_filter and "_context.workspace_duplicate" not in query_filter:
 			search_query = {**query_filter, "_context.workspace_duplicate": {"$ne": True}}
-		results = engine.search(search_query, limit=limit)
+
+		# Grouped mode: collapse the fetched page to one representative per group so a
+		# compact overview (with _group_count + aggregated targets + each rep's _uuid)
+		# reaches the model instead of every finding. Requires exactly one _type so we
+		# can resolve its _group_by / _group_aggregate.
+		group_cls = None
+		if group:
+			group_cls = _resolve_single_output_type(query_filter)
+			if group_cls is None:
+				yield Error(
+					message="group=True requires the query to target exactly one _type "
+					"(e.g. query={'_type': 'vulnerability'}); set a single _type and retry.",
+					_context=context,
+				)
+				return
+
+		results = engine.search(search_query, limit=limit, offset=offset)
 		# Local driver only writes to disk at end-of-run, so union this run's live
 		# in-flight findings to make query_workspace the source of truth (mongodb/api
 		# persist live already, so they need no union).
 		if is_local:
 			results = _union_live_results(results, ctx.results or [], query_filter, limit)
+
+		page_len = len(results)
+
+		if group_cls is not None:
+			from secator.query.utils import group_findings
+			results = group_findings(results, list(group_cls._group_by), group_cls._group_aggregate)
+
+		extra = {"results": len(results), "limit": limit, "offset": offset}
+		if group:
+			extra["group"] = True
+		if description:
+			extra["description"] = description
 		yield Ai(
 			content=query_str,
 			ai_type="query",
-			extra_data={"results": len(results), "limit": limit},
+			extra_data=extra,
 			_context=context
 		)
+
+		# Pagination hint: only when a full page came back (there may be more). Count is
+		# only paid for here, not on every query. Grouping summarizes the fetched page,
+		# so the next-page hint still pages the underlying findings.
+		if limit > 0 and page_len == limit:
+			total = engine.count(search_query)
+			if total > offset + page_len:
+				note = (f"Showing results {offset}-{offset + page_len} of {total}. "
+				        f"Re-query with offset={offset + limit} for the next page.")
+				if group:
+					note += " (group=True summarizes each fetched page; re-group each page.)"
+				yield Info(message=note, _context=context)
+
 		for result in results:
 			if isinstance(result, OutputType):
 				result = result.toDict()
@@ -1179,40 +1402,263 @@ def _handle_query(action: Dict, ctx: ActionContext) -> Generator:
 			yield result
 
 	except Exception as e:
+		failed_extra = {"results": "failed", "limit": limit}
+		if description:
+			failed_extra["description"] = description
 		yield Ai(
 			content=str(query_filter),
 			ai_type="query",
-			extra_data={"results": "failed", "limit": limit},
+			extra_data=failed_extra,
 			_context=context
 		)
 		yield Error.from_exception(e, _context=context)
 
 
-def _handle_follow_up(action: Dict, ctx: ActionContext) -> Generator:
-	"""Handle follow-up with user.
+def _handle_fetch_url(action: Dict, ctx: ActionContext) -> Generator:
+	"""Fetch one public page and surface its readable text to the model.
 
-	Args:
-		action: Action dict with reason and optional choices
-		ctx: Action context
+	Target-agnostic (reads public sources, not the engagement targets) so it is not
+	scope-gated — but the fetch is SSRF-guarded (public http(s) hosts only; internal /
+	metadata / private hosts and non-http schemes are refused) so it can't be used to reach
+	our own internal surface. Read-only: the page text is observation-only (marked
+	ai_query_result), never persisted as a finding. Fails soft.
+	"""
+	from secator.ai.fetch_url import fetch_url
+	context = _get_result_context(action, ctx)
+	url = action.get("url", "")
+	if ctx.encryptor and isinstance(url, str):
+		url = _decrypt_dict({"url": url}, ctx.encryptor).get("url", url)
+	url = str(url or "").strip()
+	if not url:
+		yield Error(message="fetch_url requires a `url`.", _context=context)
+		return
+	max_chars = action.get("max_chars", 20000)
+
+	result, error = fetch_url(url, max_chars=max_chars)
+	if error:
+		yield Error(message=f"fetch_url: {error}", _context=context)
+		return
+
+	yield Ai(
+		content=result.get("text", ""),
+		ai_type="fetch_url",
+		extra_data={
+			"url": result.get("url"),
+			"status": result.get("status"),
+			"title": result.get("title"),
+			"content_type": result.get("content_type"),
+			"truncated": result.get("truncated"),
+			"ai_query_result": True,
+		},
+		_context=context,
+	)
+	# Surface the extracted text to the model as an observation-only result.
+	yield {
+		"_type": "web_page",
+		"url": result.get("url"),
+		"status": result.get("status"),
+		"title": result.get("title"),
+		"text": result.get("text"),
+		"_context": {**context, "ai_query_result": True},
+	}
+
+
+_PLAN_STATUSES = ("pending", "in_progress", "done", "skipped")
+_MAX_PLAN_ITEMS = 30
+_MAX_PLAN_TEXT = 300
+
+
+def _handle_update_plan(action: Dict, ctx: ActionContext) -> Generator:
+	"""Maintain a user-visible to-do list for a multi-step task.
+
+	Each call REPLACES the whole plan (the model sends the full ordered list); the latest
+	Ai(ai_type="plan") doc is the current plan. Read-only wrt the workspace
+	(no findings, no targets) — auto-allowed. Normalizes/validates items so a malformed status
+	or a giant list can't break the renderer.
 	"""
 	context = _get_result_context(action, ctx)
-	reason = action.get("reason", "completed")
-	choices = action.get("choices", [])
-	multiple = bool(action.get("multiple", False))
-	# Store choices on the top-level `choices` field (what clients read) AND in
-	# extra_data (back-compat). Without the top-level field, the persisted follow-up
-	# doc has `choices: []` and clients render no choice buttons. `multiple` tells
-	# clients to render multi-select (checkboxes) vs single-pick.
+	items = action.get("items", [])
+	if isinstance(items, str):
+		try:
+			items = json.loads(items)
+		except (json.JSONDecodeError, TypeError):
+			items = None
+	if not isinstance(items, list) or not items:
+		yield Error(message="update_plan requires a non-empty `items` list of {text, status}.", _context=context)
+		return
+
+	norm = []
+	for raw in items[:_MAX_PLAN_ITEMS]:
+		if isinstance(raw, str):
+			raw = {"text": raw}
+		if not isinstance(raw, dict):
+			continue
+		text = str(raw.get("text") or "").strip()
+		if not text:
+			continue
+		if ctx.encryptor:
+			text = _decrypt_dict({"text": text}, ctx.encryptor).get("text", text)
+		status = str(raw.get("status") or "pending").strip().lower()
+		if status not in _PLAN_STATUSES:
+			status = "pending"
+		norm.append({"text": text[:_MAX_PLAN_TEXT], "status": status})
+	if not norm:
+		yield Error(message="update_plan: no valid items (each needs a non-empty `text`).", _context=context)
+		return
+
+	done = sum(1 for i in norm if i["status"] in ("done", "skipped"))
+	total = len(norm)
+	current = next((i["text"] for i in norm if i["status"] == "in_progress"), "")
 	yield Ai(
-		content=reason, ai_type="follow_up", choices=choices, multiple=multiple,
-		extra_data={"choices": choices, "multiple": multiple}, _context=context)
+		content=current or f"{done}/{total} steps done",
+		ai_type="plan",
+		extra_data={"items": norm, "done": done, "total": total},
+		_context=context,
+	)
+
+
+def _handle_web_search(action: Dict, ctx: ActionContext) -> Generator:
+	"""Search the public web for external context (CVE write-ups, PoCs, tool docs).
+
+	Read-only and target-agnostic: it hits public search engines, not the engagement
+	targets, so it is NOT gated by target/scope guardrails (see guardrails auto-allow).
+	Results are surfaced to the model only (marked ``ai_query_result``) — they are not
+	persisted as workspace findings. Fails soft: an engine error yields a clean note,
+	never an exception that aborts the AI loop.
+	"""
+	from secator.ai.web_search import web_search, VALID_MODES
+	context = _get_result_context(action, ctx)
+
+	query = action.get("query", "")
+	if ctx.encryptor and isinstance(query, str):
+		query = _decrypt_dict({"query": query}, ctx.encryptor).get("query", query)
+	query = str(query or "").strip()
+	if not query:
+		yield Error(message="web_search requires a non-empty `query`.", _context=context)
+		return
+
+	mode = str(action.get("mode") or "answer").lower()
+	if mode not in VALID_MODES:
+		mode = "answer"
+	max_results = action.get("max_results", 5)
+	exploit_type = str(action.get("exploit_type") or "exploits").lower()
+	sort = str(action.get("sort") or "default").lower()
+
+	results, engine = web_search(
+		query, mode=mode, max_results=max_results, exploit_type=exploit_type, sort=sort)
+
+	yield Ai(
+		content=query,
+		ai_type="web_search",
+		extra_data={"results": results, "count": len(results), "mode": mode, "engine": engine},
+		_context=context,
+	)
+	if not results:
+		# Surface an explicit "no results" to the model (mode/engine included) so it can
+		# reword the query or switch mode rather than assume the tool is broken.
+		yield Info(
+			message=f"web_search ({mode} via {engine}) returned no results for {query!r}.",
+			_context=context,
+		)
+		return
+	# Surface each hit to the model as an observation-only result (like query_workspace):
+	# marked ai_query_result so the runner neither persists nor re-yields it as a finding.
+	for hit in results:
+		hit = dict(hit)
+		hit["_context"] = {**context, "ai_query_result": True}
+		yield hit
+
+
+def _handle_list_runners(action: Dict, ctx: ActionContext) -> Generator:
+	"""List the workspace's runner run-history (scans/workflows/tasks), newest first.
+
+	Read-only observation tool: reads run metadata (status/targets/timing) via
+	``QueryEngine.list_runners`` — it does NOT read findings (use query_workspace for those)
+	and touches no targets, so it is auto-allowed like query. Results are surfaced to the
+	model only (marked ``ai_query_result``); nothing is persisted.
+	"""
+	from secator.ai.runner_history import filter_runners
+	context = _get_result_context(action, ctx)
+
+	runner_type = action.get("runner_type") or None
+	if runner_type:
+		runner_type = str(runner_type).strip().lower() or None
+	since = action.get("since")
+	status = action.get("status")
+	limit = action.get("limit", 50)
+	# Default to outermost runs only (a scan, not its many sub-tasks); include_children opens it up.
+	has_parent = None if action.get("include_children") else False
+
+	workspace_id = ctx.context.get("workspace_id", "")
+	engine = ctx.get_query_engine()
+	is_local = getattr(engine.backend, "name", "") == "json"
+	if not is_local and not workspace_id:
+		yield Warning(message="No workspace available to list runners", _context=context)
+		return
+
+	try:
+		runners = engine.list_runners(
+			workspace_id=workspace_id or None, runner_type=runner_type, has_parent=has_parent)
+	except Exception as e:
+		yield Error(message=f"Failed to list runners: {e}", _context=context)
+		return
+
+	try:
+		summaries = filter_runners(runners, since=since, status=status, limit=limit)
+	except ValueError as e:
+		yield Error(message=str(e), _context=context)
+		return
+	# Signal truncation so the model can tell "exactly limit" from "more exist".
+	try:
+		limit_int = int(limit)
+	except (TypeError, ValueError):
+		limit_int = 50
+	has_more = bool(limit_int > 0 and len(summaries) >= limit_int)
+	yield Ai(
+		content=(f"{runner_type or 'runner'} history"
+		         + (f" since {since}" if since else "")
+		         + (f" status={status}" if status else "")),
+		ai_type="list_runners",
+		extra_data={"runners": summaries, "count": len(summaries), "has_more": has_more,
+		            "runner_type": runner_type, "since": since, "status": status},
+		_context=context,
+	)
+	if not summaries:
+		yield Info(
+			message=("No runners found"
+			         + (f" of type {runner_type}" if runner_type else "")
+			         + (f" since {since}" if since else "")
+			         + (f" with status {status}" if status else "") + "."),
+			_context=context,
+		)
+		return
+	for row in summaries:
+		row = dict(row)
+		row.setdefault("_type", "runner")
+		row["_context"] = {**context, "ai_query_result": True}
+		yield row
 
 
 def _handle_stop(action: Dict, ctx: ActionContext) -> Generator:
-	"""Handle stop action - signals session completion."""
+	"""Handle the stop action — the SINGLE end-of-turn signal in every mode.
+
+	Always yields an ``Ai(ai_type="stopped")`` carrying the model's ``reason`` and any
+	``choices``/``multiple`` it offered. The loop decides what happens next from the
+	backend's ask_user: an interactive backend turns this into an end-of-turn pause
+	(the user can pick a choice / type a reply), a non-interactive backend ends.
+
+	``choices`` is stored on the top-level ``choices`` field (what clients read) AND in
+	``extra_data`` (back-compat). Without the top-level field, the persisted doc has
+	``choices: []`` and clients render no choice buttons. ``multiple`` tells clients to
+	render multi-select (checkboxes) vs single-pick.
+	"""
 	context = _get_result_context(action, ctx)
 	reason = action.get("reason", "completed")
-	yield Ai(content=reason, ai_type="stopped", _context=context)
+	choices = action.get("choices", []) or []
+	multiple = bool(action.get("multiple", False))
+	yield Ai(
+		content=reason, ai_type="stopped", choices=choices, multiple=multiple,
+		extra_data={"choices": choices, "multiple": multiple}, _context=context)
 
 
 def _handle_change_mode(action: Dict, ctx: ActionContext) -> Generator:
@@ -1274,7 +1720,26 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 	context = _get_result_context(action, ctx)
 
 	finding_type = action.get("_type", "")
-	finding_data = {k: v for k, v in action.items() if k not in ("action", "_type", "tool_call_id", "tool_call_name")}
+	# ExploitAttempt records are APPEND-ONLY history created ONLY by the gated mark_vuln_* handlers
+	# (which set the verdict + run the vuln rollup). Forbid creating one directly so a `success`
+	# verdict can't be forged via add_finding, bypassing the PoC-required gate + the status rollup.
+	if finding_type == "exploit_attempt":
+		yield Error(
+			message="Cannot add an exploit_attempt directly — use mark_vuln_exploited (success) or "
+			"mark_vuln_exploit_failed (failed/partial): they record the attempt and derive the "
+			"vulnerability's status.", _context=context)
+		return
+	# Fields arrive nested under `fields` (a DECLARED object param — survives strict
+	# function-calling providers that drop undeclared top-level args, the add_finding
+	# "arguments stripped to just _type" bug). Fall back to flat siblings for providers
+	# that honor additionalProperties, and merge any stragglers a model put at top level.
+	_meta = ("action", "_type", "fields", "tool_call_id", "tool_call_name")
+	nested = action.get("fields")
+	if isinstance(nested, dict):
+		flat = {k: v for k, v in action.items() if k not in _meta}
+		finding_data = {**flat, **nested}  # nested wins on conflict
+	else:
+		finding_data = {k: v for k, v in action.items() if k not in _meta}
 	# SECURITY: strip framework/server-owned + `*_path` fields the agent must not set (identity,
 	# provenance, dedup, verdict/derived) — see _drop_readonly_fields. `_context` is then set
 	# server-side below, so the finding is always scoped to THIS session's workspace.
@@ -1325,8 +1790,10 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 	# scalars, e.g. a bool field as the string "true") before validating.
 	finding_data = _coerce_finding_fields(cls, finding_data)
 
-	# Validate field types before instantiation
-	errors = cls.validate_fields(finding_data)
+	# Validate field types AND required fields before instantiation — a create must carry
+	# every mandatory field (require_all), so an omitted required field (e.g. a `tag` without
+	# `value`) is rejected with the schema instead of raising a raw TypeError at `cls(**...)`.
+	errors = cls.validate_fields(finding_data, require_all=True)
 	if errors:
 		error_msg = f"Invalid {finding_type} fields: {'; '.join(errors)}.\nExpected schema:\n{cls.schema()}"
 		yield Error(message=error_msg, _context=context)
@@ -1393,6 +1860,129 @@ def _merge_extra_data(update: Dict, extra_data) -> None:
 				update[f"extra_data.{key}"] = v
 
 
+# Per-vulnerability-identity locks so the rollup read-modify-write (read the attempt set -> derive
+# -> $set all occurrences) is serialized WITHIN this worker. Actions in a batch run on a thread pool
+# (_run_batch), so without this a failed-attempt rollup could read before a concurrent success is
+# recorded and then write a stale "EXPLOIT FAILED" over the "EXPLOITED". Cross-worker races are rare
+# (different agents usually target different vulns) and self-heal on the next attempt — the
+# append-only attempts are never lost, so the denormalized verdict re-converges.
+_ROLLUP_LOCKS: Dict = {}
+_ROLLUP_LOCKS_GUARD = threading.Lock()
+
+
+def _rollup_lock(key):
+	with _ROLLUP_LOCKS_GUARD:
+		lk = _ROLLUP_LOCKS.get(key)
+		if lk is None:
+			lk = threading.Lock()
+			_ROLLUP_LOCKS[key] = lk
+		return lk
+
+
+def _attempt_counts(attempts) -> Dict:
+	"""Verdict recap for a vuln's ``extra_data.exploit_attempts`` summary."""
+	verdicts = [str(a.get("verdict") or "").lower() for a in attempts]
+	return {
+		"success": verdicts.count("success"),
+		"failed": verdicts.count("failed"),
+		"partial": verdicts.count("partial"),
+		"false_positive": verdicts.count("false_positive"),
+	}
+
+
+def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, matched_at: str, pending=None):
+	"""Recompute a vulnerability's DERIVED verdict/poc from the SET of its ExploitAttempts.
+
+	Append-only attempts are the source of truth; the vuln's ``status``/``verified``/``poc`` are
+	derived from them with SUCCESS STICKY precedence (EXPLOITED > EXPLOIT FAILED > none), so a late
+	failure can never clobber an earlier success. A vuln ALREADY marked ``EXPLOITED`` (a legacy
+	success from the pre-ExploitAttempt model, or before the backfill runs) is likewise never
+	downgraded by a failed attempt. Also denormalizes a recap count
+	(``extra_data.exploit_attempts = {success, failed, partial}``). Applied to EVERY occurrence of the
+	vuln identity (``name`` + ``id`` + ``matched_at``) so duplicates stay consistent. NEVER touches
+	``is_false_positive`` (owned by mark_vuln_false_positive). The whole read-and-update is serialized
+	per identity (see ``_rollup_lock``). Returns the primary re-fetched vuln dict (or None).
+	Pure Python — no LLM judgment.
+	"""
+	engine = ctx.get_query_engine()
+	from secator.query.json import _apply_set
+	vuln_q = {"_type": "vulnerability", "name": vuln_name, "id": vuln_id, "matched_at": matched_at}
+	with _rollup_lock((vuln_name, vuln_id, matched_at)):
+		attempts = engine.search(
+			{"_type": "exploit_attempt", "vuln_name": vuln_name, "vuln_id": vuln_id, "matched_at": matched_at},
+			scope_only=True,
+		) or []
+		# The attempt just yielded by the handler may not be queryable yet (driver write timing), so
+		# fold it in explicitly — deduped by _uuid (add_result stamps it on the same object instance).
+		if pending is not None:
+			pd = pending.toDict() if hasattr(pending, "toDict") else pending
+			pu = pd.get("_uuid")
+			if not (pu and any(a.get("_uuid") == pu for a in attempts)):
+				attempts = attempts + [pd]
+		occurrences = engine.search(vuln_q, scope_only=True) or []
+		if not attempts:
+			return next((v for v in occurrences if not v.get("_duplicate")), occurrences[0] if occurrences else None)
+		counts = _attempt_counts(attempts)
+		# Current (possibly legacy) vuln state, so a failed attempt never downgrades an EXPLOITED vuln.
+		cur = next((v for v in occurrences if not v.get("_duplicate")), occurrences[0] if occurrences else {})
+		if counts["success"]:
+			successes = [a for a in attempts if str(a.get("verdict") or "").lower() == "success"]
+			status, verified = "EXPLOITED", True
+			poc = max(successes, key=lambda a: a.get("_timestamp") or 0).get("poc") or ""
+		elif (cur or {}).get("status") == "EXPLOITED":
+			# Legacy / pre-backfill success — preserve it (keep the existing poc); do not downgrade.
+			status, verified, poc = "EXPLOITED", True, (cur or {}).get("poc") or ""
+		elif counts["failed"] or counts["partial"]:
+			status, verified, poc = "EXPLOIT FAILED", False, ""
+		else:
+			return cur or None
+		update = {"status": status, "verified": verified, "poc": poc, "extra_data.exploit_attempts": counts}
+		# engine.update is update_one, so apply the $set to each occurrence by its own _uuid (point ops).
+		primary = None
+		for v in occurrences:
+			vu = v.get("_uuid")
+			if not vu:
+				continue
+			engine.update({"_type": "vulnerability", "_uuid": vu}, {"$set": update})
+			_apply_set(v, update)
+			if primary is None or not v.get("_duplicate"):
+				primary = v
+		return primary
+
+
+def _build_exploit_attempt(ctx: ActionContext, context: Dict, vuln: Dict, verdict: str, action: Dict,
+                           poc: str = "", reason: str = "") -> ExploitAttempt:
+	"""Build an ExploitAttempt linked to ``vuln`` by IDENTITY (name+id+matched_at)."""
+	fields_in = {
+		"technique": action.get("technique") or "",
+		"tool": action.get("tool") or "",
+		"command": action.get("command") or "",
+		"payload": action.get("payload") or "",
+		"evidence": action.get("evidence") or "",
+	}
+	if ctx.encryptor:
+		fields_in = _decrypt_dict(fields_in, ctx.encryptor)
+	name = str(action.get("name") or vuln.get("name") or "exploit attempt").strip()
+	return ExploitAttempt(
+		name=name,
+		verdict=verdict,
+		vuln_name=vuln.get("name", "") or "",
+		vuln_id=vuln.get("id", "") or "",
+		matched_at=vuln.get("matched_at", "") or "",
+		vulnerability_uuid=vuln.get("_uuid", "") or "",
+		technique=fields_in.get("technique", ""),
+		tool=fields_in.get("tool", ""),
+		command=fields_in.get("command", ""),
+		payload=fields_in.get("payload", ""),
+		evidence=fields_in.get("evidence", ""),
+		poc=poc,
+		reason=reason,
+		session_id=context.get("session_id") or ctx.session_id or "",
+		agent=ctx.model or "",
+		_context=context,
+	)
+
+
 def _handle_mark_vuln_exploited(action: Dict, ctx: ActionContext) -> Generator:
 	"""Mark an EXISTING vulnerability as exploited, recording its proof-of-concept.
 
@@ -1427,30 +2017,50 @@ def _handle_mark_vuln_exploited(action: Dict, ctx: ActionContext) -> Generator:
 	# Stamp the exploitation date at the top of the PoC (authoritative server-side date).
 	poc = f"_Exploited on {datetime.now(timezone.utc).strftime('%Y-%m-%d')}_\n\n{str(poc).strip()}"
 
-	update = {"poc": poc, "status": "EXPLOITED", "verified": True, "is_false_positive": False}
+	# Resolve the vuln this attempt links to (by identity, read from the doc the agent saw).
+	vuln = _lookup_finding(ctx, uuid)
+	if not vuln or vuln.get("_type") != "vulnerability":
+		yield Error(
+			message=f"No vulnerability found with _uuid={uuid} in this workspace. "
+			"Re-check the `_uuid` from query_workspace results.", _context=context)
+		return
+
+	# Record the exploitation as an append-only ExploitAttempt (success) — persisted via the
+	# pipeline, so parallel agents accumulate HISTORY instead of overwriting each other.
+	attempt = _build_exploit_attempt(ctx, context, vuln, "success", action, poc=poc)
+	yield attempt
+
+	# remediation / impact / confidence stay VULN-owned enrichment (not attempt-owned).
+	vuln_update = {}
 	if str(remediation).strip():
-		update["remediation"] = str(remediation).strip()
+		vuln_update["remediation"] = str(remediation).strip()
 	if str(impact).strip():
-		update["impact"] = str(impact).strip()
+		vuln_update["impact"] = str(impact).strip()
 	# Confidence re-prioritizes the vuln (confidence_nb: high=1 sorts first .. low=3).
 	confidence = str(action.get("confidence") or "").strip().lower()
 	if confidence in ("low", "medium", "high"):
-		update["confidence"] = confidence
-		update["confidence_nb"] = {"high": 1, "medium": 2, "low": 3}[confidence]
-	_merge_extra_data(update, action.get("extra_data"))
+		vuln_update["confidence"] = confidence
+		vuln_update["confidence_nb"] = {"high": 1, "medium": 2, "low": 3}[confidence]
+	_merge_extra_data(vuln_update, action.get("extra_data"))
+	if vuln_update:
+		try:
+			_scoped_vuln_update(ctx, uuid, vuln_update)
+		except Exception as e:
+			yield Error(message=f"Failed to enrich vulnerability: {e}", _context=context)
+			return
 
+	# Derive the vuln's status/verified/poc from ALL its attempts (success sticky).
 	try:
-		modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+		updated = _recompute_vuln_rollup(
+			ctx, vuln.get("name", ""), vuln.get("id", ""), vuln.get("matched_at", ""), pending=attempt)
 	except Exception as e:
 		yield Error(message=f"Failed to mark vulnerability exploited: {e}", _context=context)
 		return
-	if err:
-		yield Error(message=err, _context=context)
-		return
+	label = (updated or vuln).get("name") or uuid
 	yield Ai(
 		content=f"Marked {label} as exploited (PoC recorded).",
 		ai_type="mark_vuln_exploited",
-		extra_data={"finding": updated} if updated else {},
+		extra_data={"finding": updated, "attempt": attempt.toDict()} if updated else {"attempt": attempt.toDict()},
 		_context=context,
 	)
 
@@ -1474,7 +2084,33 @@ def _handle_mark_vuln_false_positive(action: Dict, ctx: ActionContext) -> Genera
 	if ctx.encryptor and reason:
 		reason = _decrypt_dict({"reason": reason}, ctx.encryptor).get("reason", reason)
 
-	update = {"is_false_positive": True, "status": "FALSE_POSITIVE", "verified": False}
+	vuln = _lookup_finding(ctx, uuid)
+	if not vuln or vuln.get("_type") != "vulnerability":
+		yield Error(
+			message=f"No vulnerability found with _uuid={uuid} in this workspace. "
+			"Re-check the `_uuid` from query_workspace results.", _context=context)
+		return
+
+	# Record the false-positive determination as an append-only attempt, so the vuln's exploit
+	# history shows the FP outcome alongside the success/failed attempts.
+	attempt = _build_exploit_attempt(ctx, context, vuln, "false_positive", action, reason=reason)
+	yield attempt
+
+	# Recap counts across ALL attempts (including this FP, which may not be queryable yet).
+	engine = ctx.get_query_engine()
+	persisted = engine.search(
+		{"_type": "exploit_attempt", "vuln_name": vuln.get("name", ""),
+		 "vuln_id": vuln.get("id", ""), "matched_at": vuln.get("matched_at", "")}, scope_only=True) or []
+	pd = attempt.toDict()
+	if not (pd.get("_uuid") and any(a.get("_uuid") == pd.get("_uuid") for a in persisted)):
+		persisted = persisted + [pd]
+
+	# FP owns is_false_positive + status directly (NOT the exploited/failed rollup — a FP must not
+	# be re-derived as EXPLOITED/EXPLOIT FAILED). Just denormalize the recap alongside the verdict.
+	update = {
+		"is_false_positive": True, "status": "FALSE_POSITIVE", "verified": False,
+		"extra_data.exploit_attempts": _attempt_counts(persisted),
+	}
 	if reason:
 		update["extra_data.false_positive_reason"] = reason
 	_merge_extra_data(update, action.get("extra_data"))
@@ -1491,7 +2127,7 @@ def _handle_mark_vuln_false_positive(action: Dict, ctx: ActionContext) -> Genera
 	yield Ai(
 		content=msg,
 		ai_type="mark_vuln_false_positive",
-		extra_data={"finding": updated} if updated else {},
+		extra_data={"finding": updated, "attempt": attempt.toDict()} if updated else {"attempt": attempt.toDict()},
 		_context=context,
 	)
 
@@ -1518,28 +2154,51 @@ def _handle_mark_vuln_exploit_failed(action: Dict, ctx: ActionContext) -> Genera
 		remediation = dec.get("remediation", remediation)
 		impact = dec.get("impact", impact)
 
-	update = {"status": "EXPLOIT FAILED"}
+	# verdict: 'failed' (default) or 'partial' (made progress, not a full compromise).
+	verdict = str(action.get("verdict") or "failed").strip().lower()
+	if verdict not in ("failed", "partial"):
+		verdict = "failed"
+
+	vuln = _lookup_finding(ctx, uuid)
+	if not vuln or vuln.get("_type") != "vulnerability":
+		yield Error(
+			message=f"No vulnerability found with _uuid={uuid} in this workspace. "
+			"Re-check the `_uuid` from query_workspace results.", _context=context)
+		return
+
+	# Record the failed/partial attempt as append-only history (kept VISIBLE — a later attempt
+	# can still succeed; the rollup keeps a prior success sticky).
+	attempt = _build_exploit_attempt(ctx, context, vuln, verdict, action, reason=reason)
+	yield attempt
+
+	# remediation / impact stay vuln-owned enrichment (they still apply even on a failed attempt).
+	vuln_update = {}
 	if str(remediation).strip():
-		update["remediation"] = str(remediation).strip()
+		vuln_update["remediation"] = str(remediation).strip()
 	if str(impact).strip():
-		update["impact"] = str(impact).strip()
+		vuln_update["impact"] = str(impact).strip()
 	if reason:
-		update["extra_data.exploit_failed_reason"] = reason
-	_merge_extra_data(update, action.get("extra_data"))
+		vuln_update["extra_data.exploit_failed_reason"] = reason
+	_merge_extra_data(vuln_update, action.get("extra_data"))
+	if vuln_update:
+		try:
+			_scoped_vuln_update(ctx, uuid, vuln_update)
+		except Exception as e:
+			yield Error(message=f"Failed to enrich vulnerability: {e}", _context=context)
+			return
 
 	try:
-		modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+		updated = _recompute_vuln_rollup(
+			ctx, vuln.get("name", ""), vuln.get("id", ""), vuln.get("matched_at", ""), pending=attempt)
 	except Exception as e:
 		yield Error(message=f"Failed to mark vulnerability exploit-failed: {e}", _context=context)
 		return
-	if err:
-		yield Error(message=err, _context=context)
-		return
-	msg = f"Marked {label} as exploit-failed" + (f" ({reason})." if reason else ".")
+	label = (updated or vuln).get("name") or uuid
+	msg = f"Recorded {verdict} exploit attempt on {label}" + (f" ({reason})." if reason else ".")
 	yield Ai(
 		content=msg,
 		ai_type="mark_vuln_exploit_failed",
-		extra_data={"finding": updated} if updated else {},
+		extra_data={"finding": updated, "attempt": attempt.toDict()} if updated else {"attempt": attempt.toDict()},
 		_context=context,
 	)
 
@@ -1560,6 +2219,7 @@ _FINDING_TYPE_NAMES = frozenset(cls.get_name().lower() for cls in FINDING_TYPES)
 _AGENT_READONLY_FIELDS = frozenset({
 	"workspace_id",                                                 # scope lives on _context, never top-level
 	"verified", "status", "is_false_positive", "is_acknowledged",   # verdict — forging bypasses mark_vuln_* gates
+	"verdict",                                                      # exploit-attempt result — mark_vuln_* + rollup only
 	"confidence_nb", "severity_nb",                                 # server-derived in __post_init__
 })
 
@@ -1639,6 +2299,13 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 	if etype == "target":
 		yield Error(message="Refusing to update a 'target' finding (scope integrity).", _context=context)
 		return
+	if etype == "exploit_attempt":
+		# Append-only history: editing an attempt's evidence (poc/vuln_name/vuln_id/matched_at/verdict)
+		# would rewrite the record a vuln's status is derived from. Record a NEW attempt instead.
+		yield Error(
+			message="Refusing to update an 'exploit_attempt' — attempts are append-only history. Record a "
+			"new attempt via mark_vuln_exploited / mark_vuln_exploit_failed.", _context=context)
+		return
 	if etype not in _FINDING_TYPE_NAMES:
 		yield Error(message=f"Refusing to update a non-finding record (_type={etype!r}).", _context=context)
 		return
@@ -1646,6 +2313,10 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 
 	# Only agent-writable content fields (framework/server-owned + `*_path` stripped); `id`
 	# stays blocked on UPDATE via _FINDING_IMMUTABLE_FIELDS below.
+	# Remember what the model asked to set (minus operators) BEFORE we strip readonly/immutable
+	# fields, so that if nothing survives we can tell it WHICH fields were rejected and where to
+	# set them instead — rather than the misleading "pass fields" (it did pass fields).
+	requested_field_keys = {str(k) for k in fields if not str(k).startswith("$")}
 	fields = _drop_readonly_fields(fields)
 	# An `extra_data` object passed INSIDE `fields` must merge via dotted keys (like the dedicated
 	# `extra_data` arg) — a whole-object $set would clobber existing keys AND conflict with the
@@ -1673,7 +2344,22 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 		if key and "." not in key and not key.startswith("$"):
 			update[f"extra_data.{key}"] = v
 	if not update:
-		yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
+		blocked = sorted(requested_field_keys - set(update))
+		if blocked:
+			# The model DID pass fields, but every one was read-only/verdict/immutable and got
+			# dropped. Name them and point at the right tool so it stops retrying the same call.
+			yield Error(
+				message=(
+					f"update_finding: none of {blocked} can be set here. Verdict fields "
+					"(verified/status/is_false_positive) are set via mark_vuln_exploited / "
+					"mark_vuln_false_positive / mark_vuln_exploit_failed; confidence_nb/severity_nb are "
+					"server-derived; *_path and framework (_-prefixed) fields are read-only. Pass editable "
+					"content (e.g. name, description, severity) or notes under `extra_data` instead."
+				),
+				_context=context,
+			)
+		else:
+			yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
 		return
 
 	engine = ctx.get_query_engine()
@@ -1735,7 +2421,13 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 		a.get("action") == "task" and a.get("name", "").lower() == "ai"
 		for a in actions
 	)
-	use_progress = not ctx.subagent and not has_ai_subagent
+	# A Textual TUI owns the screen and shows its own progress — a Rich Progress Live
+	# here would raise "Only one live display may be active at once". Skip it. A Celery
+	# worker (headless, client polls the DB) has no use for the Rich panel either and
+	# streams instead (see stream_live below), so skip it there too.
+	from secator.rich import get_tui
+	from secator.definitions import IN_WORKER
+	use_progress = not ctx.subagent and not has_ai_subagent and get_tui() is None and not IN_WORKER
 
 	# Print all task start messages before any task begins
 	if use_progress:
@@ -1795,6 +2487,51 @@ def _run_batch(actions: List[Dict], ctx: ActionContext) -> Generator:
 	else:
 		from contextlib import nullcontext
 		ctx_mgr = nullcontext()
+
+	# A batch that only yields at the very end looks stuck for its whole duration: no
+	# runner cards, no "Running <description>" rows until everything finishes. Stream
+	# each action's items (runner card + findings) the moment they're produced whenever
+	# there's no Rich progress panel to carry live feedback instead — i.e. under a
+	# Textual TUI (owns the screen) OR inside a Celery worker (headless; the client UI
+	# polls the persisted docs and wants them incrementally). Only the interactive-CLI
+	# Rich-panel path keeps the deterministic sorted-at-end order.
+	stream_live = get_tui() is not None or IN_WORKER
+	if stream_live:
+		# immediate feedback so a parallel batch never looks stuck before the first
+		# action finishes (the TUI has no Rich progress panel)
+		labels = ", ".join(_get_action_label(a) for a in actions)
+		yield Info(message=f"Running {len(actions)} tasks in parallel: {labels}", _context=ctx.context)
+
+	# Stream each action's items the moment they're PRODUCED (not when the action
+	# completes), via a thread-safe queue the workers push into. This surfaces every
+	# task's "Running <description>" card as its runner starts — so all cards appear up
+	# front (up to max_workers), in parallel, instead of trickling in one-per-completion.
+	# Items interleave across tasks; the display routes them to the right panel by _source.
+	if stream_live:
+		import queue as _queue
+		q: Any = _queue.Queue()
+		done_sentinel = object()
+
+		def run_single_stream(act: Dict) -> None:
+			try:
+				for item in safe_dispatch_action(act, batch_ctx):
+					if isinstance(item, Ai) and item.ai_type == "token_usage":
+						continue  # progress-only; no Rich panel under the TUI
+					q.put(item)
+			finally:
+				q.put(done_sentinel)  # always signal completion, even on error
+
+		with ThreadPoolExecutor(max_workers=max_workers) as executor:
+			for a in actions:
+				executor.submit(run_single_stream, a)
+			remaining = len(actions)
+			while remaining:
+				item = q.get()
+				if item is done_sentinel:
+					remaining -= 1
+					continue
+				yield item
+		return
 
 	all_results = []
 	with ctx_mgr:

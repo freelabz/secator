@@ -72,7 +72,7 @@ AI_TYPES = {
 	'shell_output': {'label': '◀', 'color': 'dim white'},
 	'query': {'label': '🟢', 'color': 'magenta'},
 	'stopped': {'label': '🛑', 'color': 'orange3'},
-	'follow_up': {'label': '[FOLLOW UP]', 'color': 'orange3'},
+	'follow_up': {'label': '[FOLLOW UP]', 'color': 'orange3'},  # legacy: kept so old transcripts still render
 	'steer': {'label': '[STEER]', 'color': 'cyan'},
 }
 
@@ -109,7 +109,7 @@ class Ai(OutputType):
 	status: str = field(default='', compare=False)
 	answer: str = field(default='', compare=False)
 	choices: list = field(default_factory=list, compare=False)
-	# For a follow_up: whether the user may pick SEVERAL of `choices` (multi-select)
+	# For a stopped pause: whether the user may pick SEVERAL of `choices` (multi-select)
 	# vs exactly one. Clients render checkboxes vs single-pick rows accordingly.
 	multiple: bool = field(default=False, compare=False)
 	message: dict = field(default_factory=dict, compare=False)

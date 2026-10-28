@@ -1,5 +1,6 @@
 """Tests for secator.ai.tools module."""
 import unittest
+from unittest import mock
 
 from secator.definitions import ADDONS_ENABLED
 
@@ -14,7 +15,9 @@ class TestToolSchemas(unittest.TestCase):
 
 	def test_tool_schemas_expected_set(self):
 		from secator.ai.tools import TOOL_SCHEMAS
-		expected = {"run_task", "run_workflow", "run_shell", "query_workspace", "follow_up",
+		# `stop` is NOT in TOOL_SCHEMAS — it is injected per-backend via get_extra_tools.
+		expected = {"run_task", "run_workflow", "run_shell", "query_workspace",
+		            "fetch_url", "update_plan", "web_search", "list_runners",
 		            "run_subagent", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
 		            "mark_vuln_exploit_failed", "update_finding", "change_mode"}
 		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)
@@ -77,16 +80,26 @@ class TestToolSchemas(unittest.TestCase):
 		self.assertIn("query", required)
 		self.assertNotIn("limit", required)
 
-	def test_follow_up_params(self):
-		from secator.ai.tools import TOOL_SCHEMAS
-		props = TOOL_SCHEMAS["follow_up"]["function"]["parameters"]["properties"]
-		required = TOOL_SCHEMAS["follow_up"]["function"]["parameters"]["required"]
+	def test_interactive_stop_params(self):
+		# The interactive `stop` carries reason + optional choices/multiple.
+		from secator.ai.tools import STOP_TOOL_SCHEMA
+		props = STOP_TOOL_SCHEMA["function"]["parameters"]["properties"]
+		required = STOP_TOOL_SCHEMA["function"]["parameters"]["required"]
 		self.assertIn("reason", props)
 		self.assertIn("choices", props)
+		self.assertIn("multiple", props)
 		self.assertEqual(props["reason"]["type"], "string")
 		self.assertEqual(props["choices"]["type"], "array")
 		self.assertIn("reason", required)
 		self.assertNotIn("choices", required)
+
+	def test_simple_stop_has_no_choices(self):
+		# The non-interactive (AutoBackend) `stop` is definitive: reason only, no choices.
+		from secator.ai.tools import STOP_TOOL_SCHEMA_SIMPLE
+		props = STOP_TOOL_SCHEMA_SIMPLE["function"]["parameters"]["properties"]
+		self.assertIn("reason", props)
+		self.assertNotIn("choices", props)
+		self.assertNotIn("multiple", props)
 
 	def test_add_finding_params(self):
 		from secator.ai.tools import TOOL_SCHEMAS
@@ -115,23 +128,18 @@ class TestBuildToolSchemas(unittest.TestCase):
 		schemas = build_tool_schemas("chat")
 		names = {s["function"]["name"] for s in schemas}
 		# chat is strictly read-only (#1469): no escalation (run_task/run_workflow),
-		# no shell, no finding writes — it keeps query + follow_up + the same-mode
-		# run_subagent helper.
+		# no shell, no finding writes — it keeps query + the same-mode run_subagent helper.
 		self.assertNotIn("run_task", names)
 		self.assertNotIn("run_workflow", names)
 		self.assertNotIn("run_shell", names)
 		self.assertNotIn("add_finding", names)
 		self.assertIn("query_workspace", names)
-		self.assertIn("follow_up", names)
 		self.assertIn("run_subagent", names)
 
-	def test_exploit_mode_includes_follow_up_and_query(self):
+	def test_exploit_mode_includes_query(self):
 		from secator.ai.tools import build_tool_schemas
 		schemas = build_tool_schemas("exploit")
 		names = {s["function"]["name"] for s in schemas}
-		# follow_up lets exploit mode stop-and-ask (confirm before a state-changing action /
-		# hand back after a PoC) rather than only running to its iteration cap.
-		self.assertIn("follow_up", names)
 		self.assertIn("query_workspace", names)
 		self.assertIn("run_task", names)
 		self.assertIn("run_workflow", names)
@@ -157,6 +165,16 @@ class TestBuildToolSchemas(unittest.TestCase):
 		self.assertIn("change_mode", names(mode="exploit", mode_is_auto=False))   # pinned exploit
 		self.assertNotIn("change_mode", names(mode="scan", is_subagent=True))   # subagent
 
+	def test_subagent_excludes_run_subagent(self):
+		"""A subagent has no run_subagent tool (no nested subagents); a non-subagent keeps it."""
+		from secator.ai.tools import build_tool_schemas
+		from secator.ai.interactivity import AutoBackend
+
+		def names(**kw):
+			return {s["function"]["name"] for s in build_tool_schemas(**kw)}
+		self.assertNotIn("run_subagent", names(mode="scan", is_subagent=True, backend=AutoBackend()))
+		self.assertIn("run_subagent", names(mode="scan", is_subagent=False, backend=AutoBackend()))
+
 	def test_unknown_mode_falls_back_to_chat(self):
 		from secator.ai.tools import build_tool_schemas
 		chat_schemas = build_tool_schemas("chat")
@@ -172,6 +190,20 @@ class TestBuildToolSchemas(unittest.TestCase):
 		for s in schemas:
 			self.assertIsInstance(s, dict)
 			self.assertEqual(s["type"], "function")
+
+	def test_stop_injected_for_every_backend(self):
+		"""`stop` is the single end-of-turn signal in EVERY mode — every backend injects
+		it via get_extra_tools. Interactive backends inject the choices-capable stop; the
+		AutoBackend a choiceless (definitive) one."""
+		from secator.ai.tools import build_tool_schemas
+		from secator.ai.interactivity import CLIBackend, RemoteBackend, TUIBackend, AutoBackend
+		for backend in (CLIBackend(), RemoteBackend(), TUIBackend()):
+			stop = next(s for s in build_tool_schemas("scan", backend=backend)
+			            if s["function"]["name"] == "stop")
+			self.assertIn("choices", stop["function"]["parameters"]["properties"])
+		auto_stop = next(s for s in build_tool_schemas("scan", backend=AutoBackend())
+		                 if s["function"]["name"] == "stop")
+		self.assertNotIn("choices", auto_stop["function"]["parameters"]["properties"])
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -204,10 +236,10 @@ class TestToolCallToAction(unittest.TestCase):
 		self.assertEqual(result["query"], {"_type": "vulnerability"})
 		self.assertEqual(result["limit"], 50)
 
-	def test_follow_up_conversion(self):
+	def test_stop_conversion(self):
 		from secator.ai.tools import tool_call_to_action
-		result = tool_call_to_action("follow_up", {"reason": "need guidance", "choices": ["a", "b"]})
-		self.assertEqual(result["action"], "follow_up")
+		result = tool_call_to_action("stop", {"reason": "need guidance", "choices": ["a", "b"]})
+		self.assertEqual(result["action"], "stop")
 		self.assertEqual(result["reason"], "need guidance")
 		self.assertEqual(result["choices"], ["a", "b"])
 
@@ -248,7 +280,7 @@ class TestToolCallToAction(unittest.TestCase):
 	def test_stop_with_empty_args_is_valid(self):
 		"""`stop` ends a turn and its `reason` is optional, so a bare stop() with empty
 		or no args must produce a valid action — not get bounced as 'empty arguments'
-		(which left the model nagging via follow_up instead of stopping)."""
+		(which left the model nagging instead of stopping)."""
 		from secator.ai.tools import tool_call_to_action
 		for empty in ({}, None):
 			action = tool_call_to_action("stop", empty)
@@ -300,6 +332,103 @@ class TestCoerceStringifiedArgs(unittest.TestCase):
 		from secator.ai.tools import coerce_stringified_args
 		args = coerce_stringified_args("run_shell", {"command": '{"looks": "like json"}'})
 		self.assertEqual(args["command"], '{"looks": "like json"}')
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestToolRegistry(unittest.TestCase):
+	"""The TOOLS registry is the single source of truth; adding a tool is one class.
+
+	These guard the drift that used to rot the 5 hand-synced surfaces (schema,
+	action map, per-mode allowed_actions, dispatch table, permission auto-allow).
+	"""
+
+	def test_names_and_actions_unique(self):
+		from secator.ai.tools import TOOLS
+		names = [t.name for t in TOOLS]
+		actions = [t.action for t in TOOLS]
+		self.assertEqual(len(names), len(set(names)), "duplicate tool name")
+		self.assertEqual(len(actions), len(set(actions)), "duplicate tool action")
+
+	def test_derived_maps_match_registry(self):
+		from secator.ai.tools import TOOLS, TOOL_ACTION_MAP, TOOL_SCHEMAS, STOP_TOOL_SCHEMA
+		# TOOL_ACTION_MAP covers every tool (incl. injected stop).
+		self.assertEqual(TOOL_ACTION_MAP, {t.name: t.action for t in TOOLS})
+		# TOOL_SCHEMAS excludes injected tools (stop is injected via the backend).
+		self.assertEqual(set(TOOL_SCHEMAS), {t.name for t in TOOLS if not t.injected})
+		self.assertNotIn("stop", TOOL_SCHEMAS)
+		self.assertIn("stop", TOOL_ACTION_MAP)
+		self.assertEqual(STOP_TOOL_SCHEMA["function"]["name"], "stop")
+
+	def test_every_handler_exists(self):
+		from secator.ai import actions
+		from secator.ai.tools import TOOLS
+		for t in TOOLS:
+			self.assertTrue(hasattr(actions, t.handler), f"{t.name} handler {t.handler} missing")
+
+	def test_mode_exposure_matches_allowed_actions(self):
+		"""CONSISTENCY GUARD: a tool exposed in a mode (`tool.modes`) must be in that
+		mode's `allowed_actions`, and every tool-type `allowed_action` must be exposed —
+		so tool exposure (schemas) and the authz gate can't silently drift apart."""
+		from secator.ai.tools import TOOLS, TOOLS_BY_ACTION
+		from secator.ai.prompts import MODES
+		for mode, cfg in MODES.items():
+			exposed = {t.action for t in TOOLS if mode in t.modes}
+			allowed_tool_actions = {a for a in cfg["allowed_actions"] if a in TOOLS_BY_ACTION}
+			self.assertEqual(
+				exposed, allowed_tool_actions,
+				f"mode '{mode}': tool.modes exposure {exposed} != tool-type allowed_actions {allowed_tool_actions}"
+			)
+
+	def test_auto_allow_only_control_and_finding_actions(self):
+		"""task/workflow/shell must NOT be auto-allowed (they get name/scope rule checks);
+		everything else the model can call is auto-allowed at the action-type layer."""
+		from secator.ai.tools import TOOLS_BY_ACTION
+		for act in ("task", "workflow", "shell"):
+			self.assertFalse(TOOLS_BY_ACTION[act].auto_allow, f"{act} should not be auto-allowed")
+		for act in ("subagent", "stop", "change_mode", "query",
+		            "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
+		            "mark_vuln_exploit_failed", "update_finding"):
+			self.assertTrue(TOOLS_BY_ACTION[act].auto_allow, f"{act} should be auto-allowed")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestWebSearch(unittest.TestCase):
+	"""DuckDuckGo HTML parsing: snippet/link pairing + uddg unwrap."""
+
+	def test_snippet_paired_with_own_link_when_first_has_none(self):
+		# First result has NO snippet; second has one. Index-based pairing would wrongly
+		# assign the second's snippet to the first URL — block-based pairing must not.
+		from secator.ai.web_search import duckduckgo_search
+		body = (
+			'<a class="result__a" href="https://a.example/">Title A</a>'
+			'<a class="result__a" href="https://b.example/">Title B</a>'
+			'<a class="result__snippet">Snippet for B</a>'
+		)
+
+		class _Resp:
+			status = 200
+
+			def read(self):
+				return body.encode()
+
+			def __enter__(self):
+				return self
+
+			def __exit__(self, *a):
+				return False
+
+		with mock.patch('secator.ai.web_search.urllib.request.urlopen', return_value=_Resp()):
+			results = duckduckgo_search('q')
+		self.assertEqual(results[0]['url'], 'https://a.example/')
+		self.assertEqual(results[0]['snippet'], '')
+		self.assertEqual(results[1]['url'], 'https://b.example/')
+		self.assertEqual(results[1]['snippet'], 'Snippet for B')
+
+	def test_unwrap_ddg_url_preserves_encoded_delimiter(self):
+		# parse_qs already decodes uddg; must not decode again (would corrupt %26 -> &).
+		from secator.ai.web_search import _unwrap_ddg_url
+		wrapped = '//duckduckgo.com/l/?uddg=https%3A%2F%2Fx.example%2F%3Fa%3D1%2526b%3D2'
+		self.assertEqual(_unwrap_ddg_url(wrapped), 'https://x.example/?a=1%26b=2')
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 # tests/unit/test_ai_prompts.py
 import unittest
+from unittest.mock import patch
 
 from secator.definitions import ADDONS_ENABLED
 
@@ -57,11 +58,11 @@ class TestPrompts(unittest.TestCase):
 		self.assertIn("workflow", SYSTEM_SCAN.template)
 		self.assertIn("shell", SYSTEM_SCAN.template)
 		self.assertIn("query", SYSTEM_SCAN.template)
-		self.assertIn("follow_up", SYSTEM_SCAN.template)
+		self.assertIn("stop", SYSTEM_SCAN.template)
 
 	def test_system_chat_has_query(self):
 		self.assertIn("query", SYSTEM_CHAT.template)
-		self.assertIn("follow_up", SYSTEM_CHAT.template)
+		self.assertIn("stop", SYSTEM_CHAT.template)
 
 	def test_system_exploit_has_expected_content(self):
 		"""Test SYSTEM_EXPLOIT template mentions expected concepts."""
@@ -141,6 +142,29 @@ class TestPrompts(unittest.TestCase):
 		chat_prompt = get_system_prompt("chat")
 		self.assertEqual(invalid_prompt, chat_prompt)
 
+	def test_get_system_prompt_subagent_strips_delegation(self):
+		"""A subagent prompt has NO run_subagent/subagents/vulnerability_handling guidance
+		and DOES carry the subagent persona's no-nesting rule; a non-subagent keeps them."""
+		# Scan: the mode that bakes in both the <subagents> block and <vulnerability_handling>.
+		normal = get_system_prompt("scan")
+		self.assertIn("run_subagent", normal)
+		self.assertIn("<subagents>", normal)
+		self.assertIn("<vulnerability_handling>", normal)
+
+		sub = get_system_prompt("scan", is_subagent=True)
+		self.assertNotIn("run_subagent", sub)
+		self.assertNotIn("<subagents>", sub)
+		self.assertNotIn("<vulnerability_handling>", sub)
+		# Persona wired in, with the explicit no-nesting rule.
+		self.assertIn("<subagent>", sub)
+		self.assertIn("CANNOT spawn subagents", sub)
+
+		# Chat mode has no <vulnerability_handling> — the strip must be a no-op, not an error.
+		chat_sub = get_system_prompt("chat", is_subagent=True)
+		self.assertNotIn("run_subagent", chat_sub)
+		self.assertNotIn("<subagents>", chat_sub)
+		self.assertIn("CANNOT spawn subagents", chat_sub)
+
 	# === Format functions ===
 
 	def test_format_tool_result(self):
@@ -157,6 +181,11 @@ class TestPrompts(unittest.TestCase):
 		self.assertEqual(len(data["results"]), 50)
 		self.assertTrue(data["truncated"])
 		self.assertEqual(data["total_count"], 200)
+		# A model-visible narrowing hint must accompany the truncation flags so the
+		# model is told HOW to see the rest (the console Warning never reaches it).
+		self.assertIn("hint", data)
+		self.assertIn("50", data["hint"])
+		self.assertRegex(data["hint"].lower(), r"narrow|filter|scope|offset")
 
 	def test_format_tool_result_no_truncation_under_max_items(self):
 		items = [{"port": i} for i in range(10)]
@@ -165,6 +194,7 @@ class TestPrompts(unittest.TestCase):
 		data = json.loads(result)
 		self.assertEqual(len(data["results"]), 10)
 		self.assertNotIn("truncated", data)
+		self.assertNotIn("hint", data)
 
 	def test_format_continue(self):
 		result = format_continue(3, 10)
@@ -251,11 +281,11 @@ class TestPrompts(unittest.TestCase):
 	def test_exploit_mode_config_has_correct_allowed_actions(self):
 		exploit_config = MODES["exploit"]
 		# "query" is included so the model can pull existing exploit intel before
-		# exploiting; "follow_up" is included so exploit mode can STOP-and-ask (confirm
-		# before a state-changing action / hand back after a PoC). Subset check (not an
+		# exploiting; `stop` ends the turn / asks (confirm before a state-changing
+		# action / hand back after a PoC). Subset check (not an
 		# exact list) so adding tools doesn't break this.
 		actions = exploit_config["allowed_actions"]
-		for a in ["task", "workflow", "shell", "query", "follow_up", "add_finding",
+		for a in ["task", "workflow", "shell", "query", "add_finding",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed",
 		          "update_finding", "stop"]:
 			self.assertIn(a, actions)
@@ -268,19 +298,24 @@ class TestPrompts(unittest.TestCase):
 	def test_scan_mode_config_has_correct_allowed_actions(self):
 		scan_config = MODES["scan"]
 		actions = scan_config["allowed_actions"]
-		for a in ["task", "workflow", "shell", "query", "follow_up", "add_finding",
+		for a in ["task", "workflow", "shell", "query", "add_finding",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "stop"]:
 			self.assertIn(a, actions)
 
 	def test_chat_mode_config_has_correct_allowed_actions(self):
 		chat_config = MODES["chat"]
 		actions = chat_config["allowed_actions"]
-		# Chat is strictly read-only: read (query), ask/suggest (follow_up), delegate a
-		# same-mode helper (subagent), stop. `change_mode` lets an AUTO-resolved chat turn
-		# self-escalate — it is withheld from a user-PINNED chat in build_tool_schemas (see
+		# Chat is strictly read-only: read (query), gather read-only context (fetch_url,
+		# web_search, list_runners), plan (update_plan), delegate a same-mode helper
+		# (subagent), stop. `change_mode` lets an AUTO-resolved chat turn self-escalate — it
+		# is withheld from a user-PINNED chat in build_tool_schemas (see
 		# test_ai_tools.test_change_mode_gated_by_pin), so read-only stays read-only. Nothing
 		# else here acts on the world or the data.
-		self.assertEqual(set(actions), {"query", "follow_up", "subagent", "change_mode", "stop"})
+		self.assertEqual(
+			set(actions),
+			{"query", "fetch_url", "web_search", "list_runners", "update_plan",
+			 "subagent", "change_mode", "stop"},
+		)
 		for a in ["shell", "task", "workflow", "add_finding", "update_finding",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:
 			self.assertNotIn(a, actions)
@@ -325,7 +360,9 @@ class TestPrompts(unittest.TestCase):
 		self.assertNotIn("<guardrails>", COMMON_RULES)
 		self.assertNotIn("<truncated_output>", COMMON_RULES)
 		runners = load_prompt("constraints/runners.txt")
-		self.assertIn("<truncated_output>", runners)
+		# Truncated-output guidance was removed (the model re-runs/filters on its own and
+		# shell commands are short/safe to repeat). file_io (output dir) still lives here.
+		self.assertNotIn("<truncated_output>", runners)
 		self.assertIn("<file_io>", runners)
 		# guardrails is a SINGLE source (constraints/guardrails.txt), not duplicated in
 		# runners — so scan and exploit get the one strong block, never a weak dup.
@@ -431,6 +468,23 @@ class TestScopeInPrompt(unittest.TestCase):
 		# a mode WITH change_mode gets the escalation hint
 		self.assertIn("change_mode", build_mode_banner("scan", MODES["scan"]))
 
+	def test_system_prompt_head_is_cache_stable(self):
+		"""The system prompt must LEAD with stable, cacheable content (the
+		registry-derived current-mode banner) — never a volatile per-call value such
+		as a second-precise timestamp — so a prompt-prefix cache is not invalidated on
+		every call. If date/time info is ever added, it must NOT be the leading bytes.
+		"""
+		from secator.ai.prompts import get_system_prompt, MODES
+		for m in MODES:
+			prompt = get_system_prompt(m)
+			# Leading content is the stable current-mode banner, not a clock.
+			self.assertTrue(prompt.startswith("<current_mode>"))
+			head = prompt[:200]
+			# No second-precise UTC clock / UNIX timestamp in the leading bytes.
+			self.assertNotRegex(head, r"\d{2}:\d{2}:\d{2}")
+			self.assertNotIn("UNIX timestamp", head)
+			self.assertNotRegex(head.lower(), r"current date|current time")
+
 
 if __name__ == '__main__':
 	unittest.main()
@@ -443,7 +497,7 @@ class TestOperatingRulesRecap(unittest.TestCase):
 	The library reference is inlined at the TOP of scan/exploit (long data
 	first), which pushes the persona to the middle of a ~15-60k prompt. A terse
 	recap at the very END keeps the rules the model most often breaks (use
-	follow_up with choices, description=intent, persist, restate-before-retry) in
+	stop with choices, description=intent, persist, restate-before-retry) in
 	the high-attention tail. Regression guard for that structural fix.
 	"""
 
@@ -458,6 +512,100 @@ class TestOperatingRulesRecap(unittest.TestCase):
 	def test_recap_covers_the_known_failure_modes(self):
 		p = get_system_prompt("scan", workspace_path="<ws>", backend=None)
 		recap = p[p.index("<operating_rules>"):]
-		self.assertIn("follow_up", recap)          # prose-choices failure
+		self.assertIn("stop", recap)               # prose-choices failure (stop carries choices)
 		self.assertIn("description", recap)         # description-echo failure
 		self.assertIn("Persist", recap)             # early-yield failure
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSessionContext(unittest.TestCase):
+	"""The dynamic <session_context> block: clock + the shell env the AI actually runs in."""
+
+	def _build(self, isolated):
+		from secator.ai.prompts import build_session_context
+		return build_session_context(isolated=isolated)
+
+	def test_date_present_in_both_modes(self):
+		for iso in (True, False):
+			blk = self._build(iso)
+			self.assertIn("<session_context>", blk)
+			self.assertIn("</session_context>", blk)
+			self.assertIn("Current date", blk)
+			self.assertRegex(blk, r"\d{4}-\d{2}-\d{2}")  # a day-granular date is present
+
+	def test_no_clock_time_for_cache_stability(self):
+		"""DATE only — no second-precision timestamp that would be stale-on-arrival and
+		bust prompt caching. Guards against reintroducing a live clock in the cached prefix."""
+		for iso in (True, False):
+			blk = self._build(iso)
+			self.assertNotIn("UNIX timestamp", blk)
+			# No HH:MM:SS clock time in the block.
+			self.assertNotRegex(blk, r"\d{2}:\d{2}:\d{2}")
+			# Tells the model how to get the exact time on demand.
+			self.assertIn("date", blk.lower())
+
+	def test_block_is_stable_across_calls(self):
+		"""Within a day/process the block must be byte-identical across calls, so it never
+		silently invalidates the system-prompt cache."""
+		for iso in (True, False):
+			self.assertEqual(self._build(iso), self._build(iso))
+
+	def test_isolated_describes_alpine_sandbox_root(self):
+		blk = self._build(True)
+		self.assertIn("apk", blk)
+		self.assertIn("sandbox", blk.lower())
+		self.assertIn("root", blk.lower())
+		self.assertNotIn("sudo requires a password", blk)
+
+	def test_host_describes_os_pm_and_sudo(self):
+		blk = self._build(False)
+		self.assertIn("Package manager:", blk)
+		self.assertIn("Privileges:", blk)
+		# Host block must NOT falsely claim the Alpine sandbox.
+		self.assertNotIn("disposable, network-isolated Alpine sandbox", blk)
+
+	def test_package_manager_override_is_a_bare_string(self):
+		# get_distro_config returns a bare string when SECATOR_PACKAGE_MANAGER is set.
+		from secator.ai import prompts
+		prompts._SHELL_ENV_CACHE.clear()
+		with patch("secator.installer.get_distro_config", return_value="apt"):
+			blk = prompts.build_session_context(isolated=False)
+		prompts._SHELL_ENV_CACHE.clear()
+		self.assertIn("Package manager: apt", blk)
+
+	# --- sudo status branches (no real sudo call) ---
+
+	def _sudo_lines(self, *, euid=1000, which="/usr/bin/sudo", rc=1, configured=""):
+		from secator.ai import prompts
+		import types
+		fake_cfg = types.SimpleNamespace(security=types.SimpleNamespace(sudo_password=configured))
+		with patch("os.geteuid", return_value=euid, create=True), \
+		     patch("shutil.which", return_value=which), \
+		     patch("secator.config.CONFIG", fake_cfg), \
+		     patch("subprocess.run", return_value=type("R", (), {"returncode": rc})()):
+			return "\n".join(prompts._sudo_status_lines())
+
+	def test_sudo_root(self):
+		self.assertIn("running as root", self._sudo_lines(euid=0))
+
+	def test_sudo_configured_password(self):
+		self.assertIn("configured password", self._sudo_lines(configured="hunter2"))
+
+	def test_sudo_not_installed(self):
+		self.assertIn("NOT installed", self._sudo_lines(which=None))
+
+	def test_sudo_passwordless(self):
+		self.assertIn("passwordless sudo IS available", self._sudo_lines(rc=0))
+
+	def test_sudo_requires_password(self):
+		line = self._sudo_lines(rc=1)
+		self.assertIn("Do NOT run sudo", line)
+		self.assertIn("SECATOR_SECURITY_SUDO_PASSWORD", line)
+
+	# --- wiring into get_system_prompt ---
+
+	def test_get_system_prompt_appends_context_only_when_isolated_set(self):
+		self.assertNotIn("<session_context>", get_system_prompt("chat", backend=None))
+		self.assertNotIn("<session_context>", get_system_prompt("chat", backend=None, isolated=None))
+		self.assertIn("<session_context>", get_system_prompt("chat", backend=None, isolated=True))
+		self.assertIn("<session_context>", get_system_prompt("scan", backend=None, isolated=False))
