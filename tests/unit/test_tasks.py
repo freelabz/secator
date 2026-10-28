@@ -344,6 +344,47 @@ class TestNmapIdsConfidence(unittest.TestCase):
 		self.assertEqual(ports[25].confidence, 'low')
 
 
+class TestConfidenceByNature(unittest.TestCase):
+	"""confidence='high' is the schema default (verified/observed); a task pins 'low'
+	explicitly when its discovery is passive/unverified. Regression for the #1489 sweep."""
+
+	def test_passive_gau_yields_low_confidence_url(self):
+		from collections import defaultdict
+		from secator.output_types import Url
+		from secator.tasks.gau import gau
+		task = gau.__new__(gau)
+		task.seen_params = defaultdict(lambda: defaultdict(int))
+		task.max_param_occurrences = 1000
+		task.get_opt_value = lambda k: False  # subs=False -> yield Url
+		urls = [r for r in gau.on_json_loaded(task, {'url': 'http://example.com/a'}) if isinstance(r, Url)]
+		self.assertEqual(len(urls), 1)
+		self.assertEqual(urls[0].confidence, 'low')
+		self.assertEqual(urls[0].confidence_nb, 3)
+
+	def test_active_naabu_yields_high_confidence_port_and_ip(self):
+		from secator.output_types import Port, Ip
+		from secator.tasks.naabu import naabu
+		task = naabu.__new__(naabu)
+		task.hosts = []
+		task.get_opt_value = lambda k: 's'  # scan_type
+		results = list(naabu.on_json_loaded(task, {'ip': '1.2.3.4', 'host': 'h', 'port': 80}))
+		ports = [r for r in results if isinstance(r, Port)]
+		ips = [r for r in results if isinstance(r, Ip)]
+		self.assertEqual(ports[0].confidence, 'high')
+		self.assertEqual(ports[0].confidence_nb, 1)
+		self.assertEqual(ips[0].confidence, 'high')
+
+	def test_passive_output_maps_pin_low(self):
+		from secator.definitions import CONFIDENCE
+		from secator.output_types import Subdomain, Exploit, UserAccount
+		from secator.tasks.subfinder import subfinder
+		from secator.tasks.searchsploit import searchsploit
+		from secator.tasks.maigret import maigret
+		self.assertEqual(subfinder.output_map[Subdomain][CONFIDENCE]({}), 'low')
+		self.assertEqual(searchsploit.output_map[Exploit][CONFIDENCE]({}), 'low')
+		self.assertEqual(maigret.output_map[UserAccount][CONFIDENCE]({}), 'low')
+
+
 class TestNucleiHangMonitor(unittest.TestCase):
 	"""nuclei's hang-monitor self-kills the process (exit 1) when a goroutine looks stuck
 	~60s. secator must surface that as a Warning and NOT fail the task (partial results kept)."""

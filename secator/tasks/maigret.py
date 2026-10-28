@@ -4,7 +4,7 @@ import os
 import re
 
 from secator.decorators import task
-from secator.definitions import (DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
+from secator.definitions import (CONFIDENCE, DELAY, EXTRA_DATA, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY,
 								 RATE_LIMIT, RETRIES, SITE_NAME, THREADS,
 								 TIMEOUT, URL, STRING, SLUG)
 from secator.output_types import UserAccount, Info, Error
@@ -39,6 +39,7 @@ class maigret(ReconUser):
 		UserAccount: {
 			SITE_NAME: 'sitename',
 			URL: lambda x: x['status']['url'],
+			CONFIDENCE: lambda x: 'low',
 			EXTRA_DATA: lambda x: x['status'].get('ids', {})
 		}
 	}
