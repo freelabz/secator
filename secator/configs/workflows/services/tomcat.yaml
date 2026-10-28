@@ -1,0 +1,18 @@
+type: workflow
+name: tomcat
+alias: tomcat
+description: Apache tomcat vulnerability scan
+long_description: |
+  Scans Apache tomcat vulnerabilities using specialized tools.
+tags: [http, tomcat, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  nuclei/tomcat:
+    description: Detect Apache Tomcat vulnerabilities
+    template_condition: "contains(id, 'tomcat') || contains(tags, 'tomcat')"
+  apachetomcatscanner:
+    description: Detect Apache Tomcat vulnerabilities
