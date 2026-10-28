@@ -494,6 +494,10 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	if isolated is not None:
 		result += "\n\n" + build_session_context(isolated=bool(isolated))
 
+	# Substitute $workspace_path in the baked-in prompt BEFORE appending the user
+	# context, so a user note's body is treated verbatim (never token-substituted).
+	result = result.replace("$workspace_path", ws)
+
 	# User-provided engagement context (~/.secator/templates/ai/*.md), appended last so
 	# it reads as an authoritative, run-specific overlay on top of the baked-in prompt.
 	from secator.ai.context import load_context_blocks
@@ -503,7 +507,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 		body = "\n\n".join(blocks)
 		result += f"\n\n<user_context>\n{body}\n</user_context>"
 
-	return result.replace("$workspace_path", ws)
+	return result
 
 
 def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = AI_MAX_RESULTS) -> str:

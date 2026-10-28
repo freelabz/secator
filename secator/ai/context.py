@@ -38,6 +38,10 @@ from secator.rich import console
 # Frontmatter delimiter: a file starts with `---\n`, the YAML block, then `---`.
 _FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*\n?', re.DOTALL)
 
+# Cap a single context body so a runaway note can't blow up the system prompt /
+# token budget. Oversized bodies are truncated (with a marker) rather than dropped.
+_MAX_BODY_CHARS = 20000
+
 
 def _ai_context_dir():
 	return Path(CONFIG.dirs.templates) / 'ai'
@@ -46,11 +50,15 @@ def _ai_context_dir():
 def _parse(path):
 	"""Split a context file into (frontmatter_dict, body).
 
-	A parse error is surfaced as a Warning and the file is skipped (returns None)
-	rather than crashing a run — a malformed engagement note must never take down
-	the AI task.
+	Any read/parse error is surfaced as a Warning and the file is skipped (returns
+	None) rather than crashing a run — a malformed or unreadable engagement note
+	must never take down the AI task.
 	"""
-	text = path.read_text()
+	try:
+		text = path.read_text()
+	except (OSError, UnicodeDecodeError) as e:
+		console.print(Warning(message=f'Skipping AI context {path.name}: unreadable ({e}).'))
+		return None
 	meta, body = {}, text
 	match = _FRONTMATTER.match(text)
 	if match:
@@ -62,8 +70,39 @@ def _parse(path):
 		if not isinstance(meta, dict):
 			console.print(Warning(message=f'Skipping AI context {path.name}: frontmatter is not a mapping.'))
 			return None
+		if not _valid_scope_types(path.name, meta):
+			return None
 		body = text[match.end():]
-	return meta, body.strip()
+	body = body.strip()
+	if len(body) > _MAX_BODY_CHARS:
+		console.print(Warning(message=f'Truncating AI context {path.name}: body exceeds {_MAX_BODY_CHARS} chars.'))
+		body = body[:_MAX_BODY_CHARS] + '\n... [truncated]'
+	return meta, body
+
+
+def _valid_scope_types(name, meta):
+	"""Reject scope keys with the wrong shape (fail-soft: warn + skip the file).
+
+	``modes`` must be a str or list; ``workspaces`` a str, mapping or list. A
+	mapping with a non-string ``regex`` would blow up ``re.search`` later, so it
+	is rejected here too.
+	"""
+	modes = meta.get('modes')
+	if modes is not None and not isinstance(modes, (str, list)):
+		console.print(Warning(message=f'Skipping AI context {name}: `modes` must be a string or list.'))
+		return False
+	workspaces = meta.get('workspaces')
+	if workspaces is None:
+		return True
+	if not isinstance(workspaces, (str, dict, list)):
+		console.print(Warning(message=f'Skipping AI context {name}: `workspaces` must be a string, mapping or list.'))
+		return False
+	specs = workspaces if isinstance(workspaces, list) else [workspaces]
+	for spec in specs:
+		if isinstance(spec, dict) and 'regex' in spec and not isinstance(spec['regex'], str):
+			console.print(Warning(message=f'Skipping AI context {name}: `regex` selector must be a string.'))
+			return False
+	return True
 
 
 def _mode_matches(meta, mode):
@@ -81,7 +120,11 @@ def _one_workspace_matches(spec, name, wid):
 		return spec == name or spec == wid
 	if isinstance(spec, dict):
 		if 'regex' in spec:
-			return bool(name and re.search(spec['regex'], name))
+			try:
+				return bool(name and re.search(spec['regex'], name))
+			except re.error as e:
+				console.print(Warning(message=f'Invalid AI context workspace regex {spec["regex"]!r}: {e}.'))
+				return False
 		if 'name' in spec:
 			return spec['name'] == name
 		if 'id' in spec:

@@ -535,6 +535,13 @@ class TestOperatingRulesRecap(unittest.TestCase):
 		self.assertIn("description", recap)         # description-echo failure
 		self.assertIn("Persist", recap)             # early-yield failure
 
+	def test_user_context_body_is_verbatim_not_token_substituted(self):
+		# $workspace_path in a user note must survive verbatim (substitution happens
+		# on the baked-in prompt before the user block is appended).
+		with patch("secator.ai.context.load_context_blocks", return_value=["path is $workspace_path"]):
+			p = get_system_prompt("scan", workspace_path="/tmp/ws", backend=None)
+		self.assertIn("path is $workspace_path", p)
+
 	def test_subagent_inherits_user_context(self):
 		# A subagent runs on the same path and must NOT have the user context
 		# overlay stripped (it inherits the engagement notes).

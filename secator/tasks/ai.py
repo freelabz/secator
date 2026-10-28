@@ -512,15 +512,35 @@ class ai(PythonRunner):
 	# Remote (web) session restore
 	# -------------------------------------------------------------------------
 
-	def _system_prompt_for(self, mode):
-		"""Compute the system prompt for ``mode`` using this runner's workspace + backend."""
-		# Collect ai_context filenames declared by any applied profile, so a custom
-		# profile pulls its engagement notes in regardless of frontmatter scope.
-		context_includes = []
+	def _resolve_context_includes(self):
+		"""Resolve the forced AI-context filenames (profiles' ``ai_context``) for this run.
+
+		Merges filenames declared by any applied profile with any inherited from the
+		run context (``ai_context_includes``) — a subagent does NOT receive the
+		parent's ad-hoc profiles, so the parent stamps its resolved list into the
+		shared context (below) and the child picks it up here, inheriting the same
+		forced engagement notes (decision: subagents inherit the user context)."""
+		includes = list((getattr(self, "context", None) or {}).get("ai_context_includes") or [])
 		for p in getattr(self, "profiles", []) or []:
 			ac = p.get("ai_context")
 			if ac:
-				context_includes.extend([ac] if isinstance(ac, str) else list(ac))
+				includes.extend([ac] if isinstance(ac, str) else list(ac))
+		# De-dup while preserving order.
+		seen, deduped = set(), []
+		for name in includes:
+			if name not in seen:
+				seen.add(name)
+				deduped.append(name)
+		# Publish for any subagent spawned from this runner to inherit.
+		if deduped and getattr(self, "context", None) is not None:
+			self.context["ai_context_includes"] = deduped
+		return deduped
+
+	def _system_prompt_for(self, mode):
+		"""Compute the system prompt for ``mode`` using this runner's workspace + backend."""
+		# Collect ai_context filenames (from applied profiles + inherited from the parent),
+		# so a custom profile pulls its engagement notes in regardless of frontmatter scope.
+		context_includes = self._resolve_context_includes()
 		return get_system_prompt(
 			mode, workspace_path=str(self.reports_folder), backend=self.backend,
 			in_scope=getattr(self, "in_scope", None), out_of_scope=getattr(self, "out_of_scope", None),

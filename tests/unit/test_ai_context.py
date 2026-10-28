@@ -51,6 +51,39 @@ def test_non_mapping_frontmatter_is_skipped(ctx_dir):
 	assert _load('scan') == []
 
 
+def test_non_utf8_file_is_skipped_not_fatal(ctx_dir):
+	(ctx_dir / 'bin.md').write_bytes(b'\xff\xfe not utf-8')
+	_write(ctx_dir, 'good.md', 'global note')
+	assert _load('scan') == ['global note']
+
+
+def test_invalid_scope_types_are_skipped(ctx_dir):
+	# modes as a mapping / workspaces as an int => wrong shape => skipped, not crash
+	_write(ctx_dir, 'm.md', '---\nmodes: {a: b}\n---\nbody')
+	_write(ctx_dir, 'w.md', '---\nworkspaces: 123\n---\nbody')
+	assert _load('scan') == []
+
+
+def test_invalid_regex_type_is_skipped(ctx_dir):
+	_write(ctx_dir, 'r.md', '---\nworkspaces:\n  - regex: 123\n---\nbody')
+	assert _load('scan', workspace_name='acme') == []
+
+
+def test_invalid_regex_pattern_is_fail_soft(ctx_dir):
+	# a syntactically broken pattern must not crash; it just fails to match
+	_write(ctx_dir, 'r.md', '---\nworkspaces:\n  - regex: "["\n---\nbody')
+	assert _load('scan', workspace_name='acme') == []
+
+
+def test_oversized_body_is_truncated(ctx_dir):
+	from secator.ai import context as ctxmod
+	_write(ctx_dir, 'big.md', 'x' * (ctxmod._MAX_BODY_CHARS + 500))
+	out = _load('scan')
+	assert len(out) == 1
+	assert out[0].endswith('... [truncated]')
+	assert len(out[0]) <= ctxmod._MAX_BODY_CHARS + len('\n... [truncated]')
+
+
 def test_empty_body_is_ignored(ctx_dir):
 	_write(ctx_dir, 'empty.md', '---\nmodes: scan\n---\n   ')
 	assert _load('scan') == []
@@ -136,3 +169,36 @@ def test_profile_include_accepts_path_basename(ctx_dir):
 	_write(ctx_dir, 'eng.md', '---\nmodes: exploit\n---\nforced body')
 	# a path is reduced to its basename for matching
 	assert _load('scan', includes=['/some/dir/eng.md']) == ['forced body']
+
+
+# === subagent inheritance of forced includes (decision #2) ===
+
+class _FakeProfile(dict):
+	"""Stand-in for a TemplateLoader (DotMap) exposing `.get('ai_context')`."""
+
+
+def _resolve(runner):
+	from secator.tasks.ai import ai
+	return ai._resolve_context_includes(runner)
+
+
+def test_resolve_includes_publishes_to_context_for_subagents():
+	from types import SimpleNamespace
+	ctx = {}
+	parent = SimpleNamespace(profiles=[_FakeProfile(ai_context='eng.md')], context=ctx)
+	assert _resolve(parent) == ['eng.md']
+	# published into the shared context so a spawned subagent inherits it
+	assert ctx['ai_context_includes'] == ['eng.md']
+
+	# a child with NO ad-hoc profiles but the inherited context key still resolves it
+	child = SimpleNamespace(profiles=[], context={'ai_context_includes': ['eng.md']})
+	assert _resolve(child) == ['eng.md']
+
+
+def test_resolve_includes_dedups_profile_and_inherited():
+	from types import SimpleNamespace
+	runner = SimpleNamespace(
+		profiles=[_FakeProfile(ai_context=['a.md', 'b.md'])],
+		context={'ai_context_includes': ['a.md']})
+	# inherited first, then profile, de-duplicated, order preserved
+	assert _resolve(runner) == ['a.md', 'b.md']
