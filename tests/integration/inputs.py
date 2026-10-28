@@ -22,7 +22,7 @@ INPUTS_TASKS = {
 	'h8mail': 'test@test.com',
 	'jswhois': 'wikipedia.org',
 	'nuclei': 'http://localhost:3000/',
-	'schemathesis': 'http://localhost:3000/api-docs/swagger.json',
+	'schemathesis': 'https://petstore.swagger.io/v2/swagger.json',
 	'searchsploit': 'apache 2.4.5',
 	'subfinder': 'github.com',
 	'search_vulns': 'apache 2.4.39',

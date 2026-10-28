@@ -1,4 +1,5 @@
 import os
+import posixpath
 import shlex
 
 from urllib.parse import urlparse
@@ -60,7 +61,8 @@ class schemathesis(Command):
 		'checks': 'checks',
 		'auth': 'auth',
 	}
-	install_cmd = 'pipx install schemathesis'
+	install_version = '4.32.7'
+	install_cmd = 'pipx install schemathesis==[install_version] --force'
 	install_github_bin = False
 	proxychains = False
 	proxy_socks5 = False
@@ -70,7 +72,13 @@ class schemathesis(Command):
 		base_url = self.get_opt_value('base_url')
 		if not base_url and self.inputs:
 			parsed = urlparse(self.inputs[0])
-			base_url = f'{parsed.scheme}://{parsed.netloc}'
+			# Preserve the schema path prefix (e.g. '/v2' from '.../v2/swagger.json'); dropping it points
+			# requests at the API origin and 404s most operations. Strip only a trailing spec filename.
+			path = parsed.path
+			if path and not path.endswith('/') and '.' in posixpath.basename(path):
+				path = posixpath.dirname(path)
+			path = path.rstrip('/')
+			base_url = f'{parsed.scheme}://{parsed.netloc}{path}'
 		return base_url or ''
 
 	@staticmethod
@@ -142,18 +150,37 @@ class schemathesis(Command):
 				return line[2:].strip()
 		return ''
 
+	# schemathesis v4 emits stable ST-code check identifiers (e.g. "ST101 Server error"); map by code first,
+	# with phrase fallbacks for older/v3 titles. Run `st explain <code>` for the meaning of each ST code.
+	ST_CODE_SEVERITY = {
+		'ST101': 'high',    # Server error (5xx / crash)
+		'ST102': 'high',    # Use after free
+		'ST103': 'high',    # Ignored authentication
+		'ST104': 'high',    # Broken object-level authorization
+		'ST201': 'high',    # Schema-violating request accepted -> missing input validation
+		'ST108': 'medium',  # Response violates schema (own schema)
+		'ST109': 'medium',  # Malformed response body (JSON deserialization error)
+		'ST105': 'low',     # Schema-compliant request rejected / ensure resource availability
+		'ST202': 'low',     # Negative data rejection edge
+	}
+
 	@staticmethod
 	def _severity_for_check(check):
 		"""Map a schemathesis check to a severity that reflects its real security value."""
 		c = check.lower()
-		if 'server error' in c:
-			return 'high'  # 5xx / crash
-		if 'accepted schema-violating' in c:
+		# v4: match the leading ST code (first token of the extracted title).
+		code = check.split(' ', 1)[0].strip().upper()
+		if code in schemathesis.ST_CODE_SEVERITY:
+			return schemathesis.ST_CODE_SEVERITY[code]
+		# Fallbacks for v3-style phrasing.
+		if 'server error' in c or 'use after free' in c or 'ignored auth' in c or 'authorization' in c:
+			return 'high'
+		if 'request accepted' in c or 'accepted schema-violating' in c or 'data acceptance' in c:
 			return 'high'  # the API accepted invalid data -> missing input validation
-		if 'violates schema' in c or 'malformed' in c:
+		if 'violates schema' in c or 'schema conformance' in c or 'malformed' in c:
 			return 'medium'  # response does not match its own schema
-		if 'rejected schema-compliant' in c:
-			return 'low'  # frequently just authentication or stricter-than-documented validation
-		if c.startswith('undocumented') or 'unsupported method' in c or 'content-type' in c or 'content type' in c or 'header' in c:  # noqa: E501
+		if 'rejected schema-compliant' in c or 'data rejection' in c or 'resource availability' in c:
+			return 'low'
+		if code.startswith('ST') or c.startswith('undocumented') or 'unsupported method' in c or 'content-type' in c or 'content type' in c or 'header' in c or 'status code' in c:  # noqa: E501
 			return 'info'  # pure spec-conformance noise
 		return 'low'
