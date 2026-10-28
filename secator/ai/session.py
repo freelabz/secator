@@ -132,6 +132,9 @@ def _session_label(session, max_label=None):
 		label_text = f"[{name}] {prompt}"
 	else:
 		label_text = prompt or name
+	# Collapse any embedded newlines / whitespace runs so the label stays on ONE line
+	# (prompts are often multi-line "## Objective\n...").
+	label_text = ' '.join(label_text.split())
 	if max_label is not None and len(label_text) > max_label:
 		label_text = label_text[:max_label] + '...'
 	ts = datetime.fromtimestamp(session['mtime']).strftime('%Y-%m-%d %H:%M')
@@ -192,20 +195,27 @@ def pick_session_via_backend(backend, session_id=""):
 	sessions = list_sessions()
 	if not sessions:
 		return None
-	# Choices are the human labels; each must be unique so the answer maps back to exactly
-	# one session. Two sessions can share a label (same prompt), so suffix the timestamp +
-	# a running index to guarantee uniqueness while staying readable.
+	import shutil
+	# Keep every entry on a SINGLE line: a leading "> " picker marker + the label/description,
+	# truncated to the terminal width (leave room for the dedup suffix / padding).
+	width = max(40, shutil.get_terminal_size().columns - 4)
+	# Choices must be unique so the answer maps back to exactly one session. Two sessions can
+	# share a label (same prompt), so suffix a running index to guarantee uniqueness.
 	choices = []
 	by_choice = {}
 	for s in sessions:
 		label, description = _session_label(s)
-		choice = f"{label}  —  {description}"
+		choice = f"> {label}  —  {description}"
+		if len(choice) > width:
+			choice = choice[:width - 1] + '…'
 		if choice in by_choice:
-			choice = f"{choice}  #{len(choices) + 1}"
+			choice = f"{choice} #{len(choices) + 1}"
 		choices.append(choice)
 		by_choice[choice] = s
+	# solo=True asks a display-owning backend (the TUI) to show ONLY this list — hiding the
+	# conversation, input box and meta bar — since there's no chat to steer yet on resume.
 	res = backend.ask_user(
-		"Resume which session?", choices, session_id, prompt_type="stopped")
+		"Resume which session?", choices, session_id, prompt_type="stopped", solo=True)
 	answer = (res or {}).get("answer")
 	return by_choice.get(answer)
 

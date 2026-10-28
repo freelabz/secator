@@ -1486,9 +1486,10 @@ class TestPickSessionViaBackend(unittest.TestCase):
 		# Capture the choices offered, then answer with the SECOND one.
 		captured = {}
 
-		def _ask_user(question, choices, session_id, prompt_type="stopped"):
+		def _ask_user(question, choices, session_id, prompt_type="stopped", **kwargs):
 			captured["choices"] = choices
 			captured["session_id"] = session_id
+			captured["kwargs"] = kwargs
 			return {"answer": choices[1]}
 
 		backend.ask_user.side_effect = _ask_user
@@ -1499,7 +1500,12 @@ class TestPickSessionViaBackend(unittest.TestCase):
 		self.assertEqual(len(captured["choices"]), 2)
 		self.assertEqual(captured["session_id"], "cur")
 		# The raw-console menu must NOT be used under a display-owning backend.
-		self.assertTrue(all("scan the target" in captured["choices"][0] for _ in [0]))
+		self.assertIn("scan the target", captured["choices"][0])
+		# Each entry is a single-line picker row: leading "> " marker, solo mode requested.
+		self.assertTrue(captured["choices"][0].startswith("> "))
+		self.assertTrue(captured["kwargs"].get("solo"))
+		# Every row stays on a single line (no embedded newlines from multi-line prompts).
+		self.assertTrue(all("\n" not in c for c in captured["choices"]))
 
 	def test_cancel_returns_none(self):
 		from secator.ai.session import pick_session_via_backend
@@ -1526,7 +1532,7 @@ class TestPickSessionViaBackend(unittest.TestCase):
 		]
 		backend = MagicMock()
 
-		def _ask_user(question, choices, session_id, prompt_type="stopped"):
+		def _ask_user(question, choices, session_id, prompt_type="stopped", **kwargs):
 			# choices must be unique so the answer disambiguates
 			self.assertEqual(len(set(choices)), 2)
 			return {"answer": choices[1]}

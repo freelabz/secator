@@ -1029,13 +1029,25 @@ class TUIApp(App):
 			Text.from_markup(f"[#6b7187]↻ renamed conversation to [b]{escape(name)}[/][/]"), classes="note"))
 
 	# ---- choice box (lives in the input slot while a choice ask is active) ----
-	def _show_choices(self, choices, multiple) -> None:
-		"""Replace the input row with a choice box (same slot) until the user acts on it."""
+	# Widgets hidden while a "solo" choice (the resume session picker) is shown, so only the
+	# list is visible — restored when the choice resolves. The input box is hidden anyway.
+	_SOLO_HIDDEN = ("#views", "#status", "#meta-bar")
+
+	def _show_choices(self, choices, multiple, solo=False) -> None:
+		"""Replace the input row with a choice box (same slot) until the user acts on it.
+
+		When ``solo`` (the resume session picker), also hide the conversation and meta bar
+		so ONLY the session list shows — there's no chat to steer yet on resume.
+		"""
 		host = self.query_one("#choice-host", Vertical)
 		host.remove_children()
 		self._active_choice = ChoicePrompt(choices, multiple, self._resolve_choice, self._choice_to_input)
 		host.mount(self._active_choice)
 		self.query_one("#input-box").display = False
+		self._solo_choice = solo
+		if solo:
+			for wid in self._SOLO_HIDDEN:
+				self.query_one(wid).display = False
 		host.display = True
 		# focus the list once the box is laid out, so the keyboard drives it immediately
 		self.call_after_refresh(self._active_choice.focus_list)
@@ -1093,6 +1105,10 @@ class TUIApp(App):
 		self.query_one("#choice-host", Vertical).remove_children()
 		self.query_one("#choice-host").display = False
 		self.query_one("#input-box").display = True
+		if getattr(self, "_solo_choice", False):
+			for wid in self._SOLO_HIDDEN:
+				self.query_one(wid).display = True
+			self._solo_choice = False
 
 	def _echo_user(self, text) -> None:
 		self._convo().mount(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
@@ -1158,11 +1174,11 @@ class TUIApp(App):
 		holder: dict = {}
 		self.call_from_thread(
 			self._show_prompt, question, (ev, holder, list(choices or []), prompt_type), bool(multiple),
-			command or "")
+			command or "", bool(context.get("solo", False)))
 		ev.wait()
 		return {"answer": holder.get("value")}
 
-	def _show_prompt(self, question, pending, multiple=False, command="") -> None:
+	def _show_prompt(self, question, pending, multiple=False, command="", solo=False) -> None:
 		self._pending_ask = pending
 		self._set_status("", False)   # nothing is running while we wait for the user
 		choices, ptype = pending[2], pending[3]
@@ -1180,7 +1196,7 @@ class TUIApp(App):
 			self._show_permission(question, command)
 		elif choices:
 			# the choice box REPLACES the input row (same slot) until the user acts on it
-			self._show_choices(choices, multiple)
+			self._show_choices(choices, multiple, solo=solo)
 		else:
 			# a plain end-of-turn follow-up: no "What's next?" / "waiting" noise — the
 			# focused input is enough. Just make sure it's focused.
