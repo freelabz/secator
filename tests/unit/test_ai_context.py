@@ -21,9 +21,21 @@ def _write(d, name, content):
 	(d / name).write_text(content)
 
 
-def _load(mode, **kwargs):
+def _raw(mode, **kwargs):
+	"""Raw blocks as returned (each wrapped in its <type:filename> tag)."""
 	from secator.ai.context import load_context_blocks
 	return load_context_blocks(mode, **kwargs)
+
+
+def _body(block):
+	"""Strip the opening/closing tag lines, returning the bare body."""
+	return block.split('\n', 1)[1].rsplit('\n', 1)[0]
+
+
+def _load(mode, **kwargs):
+	"""Bare bodies (tag wrapper stripped) — lets the scope/parse tests assert on
+	content; the tag/type format is covered by the dedicated tests below via _raw."""
+	return [_body(b) for b in _raw(mode, **kwargs)]
 
 
 # === frontmatter parsing ===
@@ -202,3 +214,35 @@ def test_resolve_includes_dedups_profile_and_inherited():
 		context={'ai_context_includes': ['a.md']})
 	# inherited first, then profile, de-duplicated, order preserved
 	assert _resolve(runner) == ['a.md', 'b.md']
+
+
+# === type + per-file tag wrapping ===
+
+def test_default_type_wraps_as_context(ctx_dir):
+	_write(ctx_dir, 'notes.md', 'Scope is 10.0.0.0/8.')
+	assert _raw('scan') == ['<context:notes.md>\nScope is 10.0.0.0/8.\n</context>']
+
+
+def test_type_rule_wraps_as_rule(ctx_dir):
+	_write(ctx_dir, 'my_rule.md', '---\ntype: rule\n---\nAlways deface respectfully.')
+	assert _raw('scan') == ['<rule:my_rule.md>\nAlways deface respectfully.\n</rule>']
+
+
+def test_type_mode_is_reserved_and_not_injected(ctx_dir):
+	_write(ctx_dir, 'm.md', '---\ntype: mode\n---\nA custom system prompt.')
+	_write(ctx_dir, 'c.md', 'plain context')
+	# mode files are skipped (reserved); the context file still loads.
+	assert _raw('scan') == ['<context:c.md>\nplain context\n</context>']
+
+
+def test_invalid_type_is_skipped(ctx_dir):
+	_write(ctx_dir, 'bad.md', '---\ntype: bogus\n---\nbody')
+	_write(ctx_dir, 'good.md', 'global note')
+	assert _load('scan') == ['global note']
+
+
+def test_filename_is_embedded_in_tag(ctx_dir):
+	_write(ctx_dir, 'engagement.md', '---\ntype: rule\n---\nR1')
+	block = _raw('scan')[0]
+	assert block.startswith('<rule:engagement.md>')
+	assert block.endswith('</rule>')

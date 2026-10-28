@@ -3,6 +3,11 @@
 Each file is a Markdown document with an optional YAML frontmatter block that
 scopes *when* it is autoloaded onto the system prompt. The frontmatter keys:
 
+``type``: ``context`` (default) | ``rule`` | ``mode``. ``context`` and ``rule``
+are both injected into the system prompt, each wrapped in its own
+``<type:filename>`` block so the model can attribute a rule to its file.
+``mode`` is reserved for a future custom-system-prompt feature and is not
+injected yet.
 ``modes``: str | list. Omitted / empty => all modes (scan, chat, exploit).
 ``workspaces``: str | dict | list. Omitted / empty => all workspaces. A bare
 string matches a workspace NAME or ID (exact); a mapping forces the
@@ -41,6 +46,14 @@ _FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*\n?', re.DOTALL)
 # Cap a single context body so a runaway note can't blow up the system prompt /
 # token budget. Oversized bodies are truncated (with a marker) rather than dropped.
 _MAX_BODY_CHARS = 20000
+
+# `type:` frontmatter — what the file is. `context` (default) and `rule` are both
+# injected into the system prompt, each wrapped in its own `<type:filename>` block
+# so the model can attribute a rule to its file. `mode` is RESERVED for a future
+# custom-system-prompt feature and is NOT injected as context yet.
+_DEFAULT_TYPE = 'context'
+_TYPES = ('context', 'rule', 'mode')
+_APPEND_TYPES = ('context', 'rule')
 
 
 def _ai_context_dir():
@@ -87,6 +100,10 @@ def _valid_scope_types(name, meta):
 	mapping with a non-string ``regex`` would blow up ``re.search`` later, so it
 	is rejected here too.
 	"""
+	ctype = meta.get('type')
+	if ctype is not None and (not isinstance(ctype, str) or ctype not in _TYPES):
+		console.print(Warning(message=f'Skipping AI context {name}: `type` must be one of {", ".join(_TYPES)}.'))
+		return False
 	modes = meta.get('modes')
 	if modes is not None and not isinstance(modes, (str, list)):
 		console.print(Warning(message=f'Skipping AI context {name}: `modes` must be a string or list.'))
@@ -152,7 +169,10 @@ def load_context_blocks(mode, workspace_name=None, workspace_id=None, includes=N
 			bypassing the frontmatter mode/workspace scope.
 
 	Returns:
-		list[str]: context bodies, deterministically ordered by filename.
+		list[str]: rendered context blocks, each wrapped as
+		``<type:filename>\n<body>\n</type>`` (type is ``context`` or ``rule``),
+		deterministically ordered by filename. ``type: mode`` files are skipped
+		(reserved for a future feature).
 	"""
 	ctx_dir = _ai_context_dir()
 	if not ctx_dir.is_dir():
@@ -166,7 +186,12 @@ def load_context_blocks(mode, workspace_name=None, workspace_id=None, includes=N
 		meta, body = parsed
 		if not body:
 			continue
+		ctype = meta.get('type') or _DEFAULT_TYPE
+		if ctype not in _APPEND_TYPES:  # e.g. `type: mode` — reserved, not injected yet
+			continue
 		forced = path.name in includes
 		if forced or (_mode_matches(meta, mode) and _workspace_matches(meta, workspace_name, workspace_id)):
-			blocks.append(body)
+			# Tag each block with its type + filename so the model can tell which
+			# user rule/context came from which file.
+			blocks.append(f'<{ctype}:{path.name}>\n{body}\n</{ctype}>')
 	return blocks

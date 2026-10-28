@@ -517,16 +517,17 @@ class TestOperatingRulesRecap(unittest.TestCase):
 					f"{mode} recap is not the LAST block (recency slot)")
 
 	def test_user_context_is_the_tail_after_the_recap(self):
-		# With a user context file, <user_context> is the tail and the recap
+		# With a user context file, its typed block is the tail and the recap
 		# precedes it — the recap stays last among the baked-in blocks.
-		with patch("secator.ai.context.load_context_blocks", return_value=["engagement notes"]):
+		block = "<context:notes.md>\nengagement notes\n</context>"
+		with patch("secator.ai.context.load_context_blocks", return_value=[block]):
 			p = get_system_prompt("scan", workspace_path="<ws>", backend=None)
 		self.assertTrue(
-			p.rstrip().endswith("</user_context>"),
-			"user_context overlay is not the LAST block (recency slot)")
+			p.rstrip().endswith("</context>"),
+			"user context block is not the LAST block (recency slot)")
 		self.assertLess(
-			p.index("</operating_rules>"), p.index("<user_context>"),
-			"operating-rules recap must sit immediately before the user_context tail")
+			p.index("</operating_rules>"), p.index("<context:notes.md>"),
+			"operating-rules recap must sit immediately before the user context tail")
 
 	def test_recap_covers_the_known_failure_modes(self):
 		p = get_system_prompt("scan", workspace_path="<ws>", backend=None)
@@ -538,18 +539,20 @@ class TestOperatingRulesRecap(unittest.TestCase):
 	def test_user_context_body_is_verbatim_not_token_substituted(self):
 		# $workspace_path in a user note must survive verbatim (substitution happens
 		# on the baked-in prompt before the user block is appended).
-		with patch("secator.ai.context.load_context_blocks", return_value=["path is $workspace_path"]):
+		block = "<context:n.md>\npath is $workspace_path\n</context>"
+		with patch("secator.ai.context.load_context_blocks", return_value=[block]):
 			p = get_system_prompt("scan", workspace_path="/tmp/ws", backend=None)
 		self.assertIn("path is $workspace_path", p)
 
 	def test_subagent_inherits_user_context(self):
 		# A subagent runs on the same path and must NOT have the user context
 		# overlay stripped (it inherits the engagement notes).
-		with patch("secator.ai.context.load_context_blocks", return_value=["engagement notes"]):
+		block = "<context:notes.md>\nengagement notes\n</context>"
+		with patch("secator.ai.context.load_context_blocks", return_value=[block]):
 			p = get_system_prompt("scan", workspace_path="<ws>", backend=None, is_subagent=True)
-		self.assertIn("<user_context>", p, "subagent must inherit the user context overlay")
+		self.assertIn("<context:notes.md>", p, "subagent must inherit the user context overlay")
 		self.assertIn("engagement notes", p)
-		self.assertTrue(p.rstrip().endswith("</user_context>"))
+		self.assertTrue(p.rstrip().endswith("</context>"))
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

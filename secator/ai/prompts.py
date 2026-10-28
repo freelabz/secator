@@ -504,8 +504,8 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	blocks = load_context_blocks(
 		mode, workspace_name=workspace_name, workspace_id=workspace_id, includes=context_includes)
 	if blocks:
-		body = "\n\n".join(blocks)
-		result += f"\n\n<user_context>\n{body}\n</user_context>"
+		# Each block is already wrapped in its own <type:filename> tag (context.py).
+		result += "\n\n" + "\n\n".join(blocks)
 
 	return result
 
