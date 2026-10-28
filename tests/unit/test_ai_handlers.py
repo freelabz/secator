@@ -79,26 +79,26 @@ class TestDispatchAction(unittest.TestCase):
         self.assertEqual(results[0]._type, 'warning')
         self.assertIn('Unknown action', results[0].message)
 
-    def test_dispatch_follow_up_action(self):
+    def test_dispatch_stop_action(self):
         from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4')
-        action = {'action': 'follow_up', 'reason': 'Test complete'}
+        action = {'action': 'stop', 'reason': 'Test complete'}
 
         results = list(dispatch_action(action, ctx))
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]._type, 'ai')
         self.assertIn('Test complete', results[0].content)
-        # Default follow-up is single-select.
+        # Default stop is single-select.
         self.assertFalse(results[0].multiple)
 
-    def test_dispatch_follow_up_multiple(self):
+    def test_dispatch_stop_multiple(self):
         from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4')
         action = {
-            'action': 'follow_up',
+            'action': 'stop',
             'reason': 'Pick targets',
             'choices': ['a', 'b', 'c'],
             'multiple': True,
@@ -134,6 +134,40 @@ class TestDispatchAction(unittest.TestCase):
         self.assertEqual(results[0]._type, 'info')
         self.assertIn('DRY RUN', results[0].message)
         self.assertIn('host_recon', results[0].message)
+
+    def test_dispatch_task_config_is_api_serializable(self):
+        """An AI-dispatched task must hydrate its class metadata so the serialized
+        config.description is a str/None and config.input_types a list — NOT the empty
+        DotMap `{}` an un-hydrated {type,name} stub produces, which the `api` driver's
+        runner schema rejects (description must be str, input_types a list)."""
+        import secator.ai.actions as actions
+        from secator.ai.actions import ActionContext, dispatch_action
+        from secator.runners import Task as RealTask
+
+        captured = {}
+
+        class NoRunTask(RealTask):
+            # Capture the processed config at iteration time; don't execute the command.
+            def __iter__(self):
+                captured['config'] = self.toDict()['config']
+                return iter(())
+
+        orig = actions.Task
+        actions.Task = NoRunTask
+        try:
+            ctx = ActionContext(targets=['scanme.example.com'], model='gpt-4',
+                                context={'workspace_id': 'ws'})
+            list(dispatch_action(
+                {'action': 'task', 'name': 'httpx', 'targets': ['scanme.example.com']}, ctx))
+        finally:
+            actions.Task = orig
+
+        self.assertIn('config', captured)
+        config = captured['config']
+        self.assertIsInstance(config['input_types'], list)
+        self.assertNotIsInstance(config['input_types'], dict)
+        self.assertTrue(config['description'] is None or isinstance(config['description'], str))
+        self.assertNotIsInstance(config['description'], dict)
 
     def test_dispatch_shell_dry_run(self):
         from secator.ai.actions import ActionContext, dispatch_action

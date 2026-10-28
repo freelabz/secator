@@ -15,7 +15,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 			{"_type": "ai", "ai_type": "prompt", "content": "Hello", "_timestamp": 1},
 			{"_type": "ai", "ai_type": "shell", "content": "nmap -p- host", "_timestamp": 3},
 			{"_type": "ai", "ai_type": "prompt", "content": "Scan the target", "_timestamp": 4},
-			{"_type": "ai", "ai_type": "follow_up", "content": "What next?", "_timestamp": 5},
+			{"_type": "ai", "ai_type": "stopped", "content": "What next?", "_timestamp": 5},
 			{"_type": "ai", "ai_type": "response", "content": "Found 2 open ports.", "_timestamp": 6},
 		]
 
@@ -112,7 +112,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		self.assertEqual(history.messages, [{"role": "user", "content": "ENC(scan 10.0.0.1)"}])
 
 	def test_trailing_answered_follow_up_threaded_as_user_turn(self):
-		"""A follow_up that timed out then was answered later (the conversation TAIL)
+		"""A `stopped` prompt that timed out then was answered later (the conversation TAIL)
 		must have its answer threaded as the next user turn, so a respawn continues
 		instead of re-asking the same question."""
 		from secator.ai.session import restore_history_from_db
@@ -120,7 +120,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		engine.search.return_value = [
 			{"ai_type": "prompt", "content": "Scan the target", "_timestamp": 1},
 			{"ai_type": "response", "content": "Which host should I scan?", "_timestamp": 2},
-			{"ai_type": "follow_up", "content": "Which host?", "status": "answered",
+			{"ai_type": "stopped", "content": "Which host?", "status": "answered",
 			 "answer": "scanme.nmap.org", "_timestamp": 3},
 		]
 		history = restore_history_from_db("s7", engine)
@@ -131,7 +131,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		])
 
 	def test_in_run_answered_follow_up_not_double_threaded(self):
-		"""A follow_up answered in-run is already followed by its own `prompt` doc
+		"""A `stopped` prompt answered in-run is already followed by its own `prompt` doc
 		(the live path persists the answer as a turn), so it is NOT the tail and its
 		answer must be threaded exactly once (from the prompt doc), not twice."""
 		from secator.ai.session import restore_history_from_db
@@ -139,7 +139,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		engine.search.return_value = [
 			{"ai_type": "prompt", "content": "Scan the target", "_timestamp": 1},
 			{"ai_type": "response", "content": "Which host should I scan?", "_timestamp": 2},
-			{"ai_type": "follow_up", "content": "Which host?", "status": "answered",
+			{"ai_type": "stopped", "content": "Which host?", "status": "answered",
 			 "answer": "scanme.nmap.org", "_timestamp": 3},
 			{"ai_type": "prompt", "content": "scanme.nmap.org", "_timestamp": 4},
 			{"ai_type": "response", "content": "Scanning scanme.nmap.org...", "_timestamp": 5},
@@ -735,10 +735,10 @@ class TestFastDetectMode(unittest.TestCase):
 		# no cues → ambiguous → defer to LLM
 		self.assertIsNone(fast_detect_mode("please handle the situation"))
 
-	def test_exploit_mode_can_follow_up(self):
-		"""exploit mode must be able to STOP-and-ask (follow_up), not only run to its cap."""
+	def test_exploit_mode_can_stop(self):
+		"""exploit mode must be able to end-and-ask (stop), not only run to its cap."""
 		from secator.ai.prompts import get_mode_config
-		self.assertIn("follow_up", get_mode_config("exploit")["allowed_actions"])
+		self.assertIn("stop", get_mode_config("exploit")["allowed_actions"])
 
 	def _make_task(self, prompt, mode=""):
 		from secator.tasks.ai import ai
@@ -1151,7 +1151,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def get_action_budget(self, model):
 				return 10000
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
@@ -1215,35 +1215,37 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 		self.assertEqual(doc.message["content"], tool_result_str)
 
 	def test_tool_result_runner_id_from_group_result_context(self):
-		"""runner_id is pulled from the collected result's own _context
-		(task_id/workflow_id/scan_id), stamped by the persistence hooks -
-		NOT from self.context."""
-		from secator.output_types import Ai
+		"""For a runner tool (run_task/run_workflow/run_scan) runner_id is pulled from the
+		collected finding's own _context.<type>_id (stamped by the persistence hooks),
+		NOT from self.context. Non-runner tools (e.g. run_shell) get no runner_id."""
+		from secator.output_types import Ai, Tag
 
 		ctx = MagicMock()
 		ctx.results = []
 		action = {
-			"action": "shell",
-			"command": "echo hi",
+			"action": "task",
+			"name": "testtask",
+			"targets": [],
 			"tool_call_id": "tc_runner",
-			"tool_call_name": "run_shell",
+			"tool_call_name": "run_task",
 		}
 		fake_self, _persisted = self._make_fake_self()
 
-		def _shell_with_task_id(*a, **k):
-			yield Ai(content="ok", ai_type="shell_output", _context={
+		def _task_with_id(*a, **k):
+			yield Tag(name="t", match="m", value="v", _context={
 				"tool_call_id": action["tool_call_id"],
 				"tool_call_name": action["tool_call_name"],
 				"task_id": "task-xyz",
 			})
 
-		with patch("secator.ai.actions._handle_shell", _shell_with_task_id):
+		with patch("secator.ai.actions._handle_task", _task_with_id):
 			from secator.tasks.ai import ai as AiTask
 			yielded = list(AiTask._dispatch_and_collect(fake_self, [action], ctx))
 
 		tool_result_ais = [r for r in yielded if isinstance(r, Ai) and r.ai_type == "tool_result"]
 		self.assertEqual(len(tool_result_ais), 1)
 		self.assertEqual(tool_result_ais[0].extra_data.get("runner_id"), "task-xyz")
+		self.assertEqual(tool_result_ais[0].extra_data.get("runner_type"), "task")
 
 	def test_tool_result_ai_emitted_on_error_paths(self):
 		"""Malformed-JSON / unknown-tool / guardrail-denial error paths (in
@@ -1256,7 +1258,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def __init__(self):
 				self.tool_results = []
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
@@ -1297,7 +1299,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def __init__(self):
 				self.tool_results = []
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()

@@ -135,6 +135,7 @@ class Security(StrictModel):
 	prompt_sudo_password: bool = True
 	sudo_password: str = ''  # non-interactive sudo password (e.g. SECATOR_SECURITY_SUDO_PASSWORD) for headless workers
 	shell_isolated: bool = False  # default for the AI task's --isolated (run_shell in a Docker sandbox); set SECATOR_SECURITY_SHELL_ISOLATED=1 on sandboxed workers  # noqa: E501
+	shell_default_timeout: int = 30  # default timeout (s) for an AI run_shell command, so an interactive user doesn't wait forever; the model may raise its per-command timeout up to celery.task_max_timeout (SECATOR_SECURITY_SHELL_DEFAULT_TIMEOUT)  # noqa: E501
 	scope_hard_deny: bool = False  # when set (SECATOR_SECURITY_SCOPE_HARD_DENY=1) an out-of-scope AI network target is denied outright instead of prompting for approval  # noqa: E501
 
 
@@ -260,6 +261,13 @@ class VulnersAddon(StrictModel):
 	api_key: str = ''
 
 
+class WebSearchConfig(StrictModel):
+	# Optional Tavily API key for the AI `web_search` tool's synthesized-answer engine.
+	# When empty, web_search uses the keyless DuckDuckGo/Sploitus engines only.
+	# Env: SECATOR_ADDONS_AI_WEB_SEARCH_TAVILY_API_KEY.
+	tavily_api_key: str = ''
+
+
 class AiAddon(StrictModel):
 	enabled: bool = False
 	api_key: str = ''
@@ -279,11 +287,17 @@ class AiAddon(StrictModel):
 	# recon, clone/read a PoC, run, debug, retry). Mode configs impose a floor.
 	# Set to -1 (or any value <= 0) to DISABLE the cap entirely: the run then continues
 	# until the model sends `stop` — avoids killing the worker mid-exploit and losing
-	# locally checked-out PoCs.
-	max_iterations: int = 25
+	# locally checked-out PoCs. On reaching the cap, the model is given one final turn to
+	# stop gracefully (announcing the limit) so the user can resume with "continue".
+	max_iterations: int = 100
 	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
+	# --isolated sandbox container image. `{version}` is replaced at runtime with the running
+	# secator version so the sandbox matches the client. Default is the release-published lite
+	# tag (`freelabz/secator:<version>-lite`, see publish.yml). Env:
+	# SECATOR_ADDONS_AI_ISOLATED_CONTAINER_IMAGE.
+	isolated_container_image: str = 'freelabz/secator:{version}-lite'
 	permissions: Dict = {
 		'allow': [
 			'target({targets})',
@@ -322,6 +336,7 @@ class AiAddon(StrictModel):
 			'write(*)',
 		],
 	}
+	web_search: WebSearchConfig = WebSearchConfig()
 
 
 class Providers(StrictModel):
@@ -541,6 +556,50 @@ class Config(DotMap):
 			else:
 				partial[final_key] = value
 		target[final_key] = value
+		if set_partial:
+			self._sync_partial_dict_field(self._keymap[map_key])
+
+	def _sync_partial_dict_field(self, path_parts):
+		"""Make ``_partial``'s entry for the enclosing Dict field self-contained.
+
+		A dynamic Dict field (e.g. ``addons.ai.permissions``, ``wordlists.defaults``) is
+		replaced wholesale when the config reloads — pydantic does NOT deep-merge it with the
+		schema default. So persisting only a changed sub-key would drop the field's OTHER keys
+		on the next load (e.g. unsetting one ``permissions.deny`` item wiped ``permissions``
+		``allow``/``ask``). Store the whole field so the saved override is self-contained.
+
+		The field is rebuilt from the schema DEFAULT overlaid with the user's accumulated
+		``_partial`` edits — NOT the live config, which has env overrides applied. Baking an
+		env value (e.g. ``SECATOR_ADDONS_AI_PERMISSIONS_DENY=''``) into the saved file would
+		persist it permanently, so removing the env var could never restore the default.
+		"""
+		import copy
+		field_path = None
+		for i in range(len(path_parts), 0, -1):
+			if Config._is_dynamic_dict_path(path_parts[:i]):
+				field_path = path_parts[:i]
+				break
+		if not field_path:
+			return
+
+		def _descend(root):
+			node = root
+			for part in field_path:
+				if not isinstance(node, MutableMapping) or part not in node:
+					return {}
+				node = node[part]
+			return node.toDict() if hasattr(node, 'toDict') else dict(node)
+
+		# schema default (no file/env overrides) overlaid with the user's explicit edits
+		default_cfg = Config.load(SecatorConfig, {}, print_errors=False)
+		default_field = _descend(default_cfg) if default_cfg is not None else {}
+		partial_field = _descend(self._partial)
+		full = {**copy.deepcopy(default_field), **copy.deepcopy(partial_field)}
+
+		partial = self._partial
+		for part in field_path[:-1]:
+			partial = partial[part]
+		partial[field_path[-1]] = full
 
 	def _set_dict_key(self, parent_parts, subkey, value, set_partial=True, strategy=None):
 		"""Set or remove a key within a dict config field.
@@ -631,6 +690,8 @@ class Config(DotMap):
 		if set_partial:
 			partial[dict_key] = updated
 		target[dict_key] = updated
+		if set_partial:
+			self._sync_partial_dict_field(parent_parts + ([subkey] if subkey else []))
 
 	def unset(self, key, value=None, set_partial=True):
 		"""Unset a value in the configuration using a dotted path.

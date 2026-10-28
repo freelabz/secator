@@ -19,12 +19,12 @@ from secator.ai.actions import (
 	ActionContext, check_guardrails, safe_dispatch_action, _run_batch
 )
 from secator.ai.guardrails import PermissionEngine
-from secator.ai.interactivity import create_backend, RemoteBackend, UserInputTimeout
+from secator.ai.interactivity import create_backend, DISMISS_ANSWER, RemoteBackend, UserInputTimeout
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
 	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES, MODE_ALIASES,
-	normalize_mode,
+	normalize_mode, AI_MAX_RESULTS,
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
 from secator.ai.session import (
@@ -107,13 +107,22 @@ def _truncate_label(text, fallback):
 	return (text[:80] + '...') if text and len(text) > 80 else (text or fallback)
 
 
-def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason):
+def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason, blocked=False):
 	"""Shared body for rejecting a tool call: encrypt the error, record it as the
-	tool result in history, and return the ``tool_result`` Ai event to yield."""
+	tool result in history, and return the ``tool_result`` Ai event to yield.
+
+	``blocked=True`` marks a guardrail denial, which is ALSO surfaced as a "Blocked <desc>"
+	panel via ``display_denial`` — the flag lets the display skip the redundant
+	"tool call failed" line so a block isn't shown twice.
+	"""
 	_error_content = maybe_encrypt(error_msg, runner.encryptor)
 	runner.history.add_tool_result(tool_name, tool_call_id, _error_content)
 	return Ai(content=f"[{tool_name}] {reason}",
 	          ai_type="tool_result",
+	          # Mark the rejection so a display (TUI) can surface the failed tool call —
+	          # a plain tool_result is model-facing only and rendered as nothing. `blocked`
+	          # denials already render a "Blocked" panel, so the TUI suppresses the extra line.
+	          extra_data={"error": True, "tool_name": tool_name, "reason": reason, "blocked": blocked},
 	          message=cap_message(
 	              {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": _error_content}),
 	          _context=dict(runner.context))
@@ -155,41 +164,87 @@ def _yield_tool_results(runner, collected):
 			{k: v for k, v in r.items() if k not in strip_fields}
 			for r in group_results
 		]
+		# Uniform runner-scope contract: a runner's findings are ALWAYS scoped by
+		# `_context.<type>_id` == runner.id (the minted {type}_id) — for task/workflow/scan
+		# alike. That single handle is what the model re-reads by. NOT `task_chunk_id`: it
+		# is an internal doc-keying id that, for an AI-spawned task, differs from runner.id,
+		# so pairing it with a `_context.<type>_id` filter returns nothing.
+		runner_type = {"run_task": "task", "run_workflow": "workflow",
+		               "run_scan": "scan"}.get(tc_name)
+		runner_id = ""
+		if runner_type:
+			_id_field = f"{runner_type}_id"
+			runner_id = next(
+				(r.get("_context", {}).get(_id_field)
+				 for r in group_results
+				 if isinstance(r, dict) and r.get("_context", {}).get(_id_field)),
+				"")
+		# Cap the displayed items; if the runner produced MORE than fits, the tool result
+		# holds only a sample and the model needs the runner id to fetch the rest.
+		max_items = AI_MAX_RESULTS
 		tool_result_str = format_tool_result(
 			tc_name, "error" if has_errors else "success",
-			len(serialized), serialized)
+			len(serialized), serialized, max_items=max_items)
+		# Fence target-derived content as UNTRUSTED (#1513): field values in scan output /
+		# findings (page titles, banners, cert subjects, matched content, ...) are controlled
+		# by the scanned target, so an instruction-shaped string planted there must be read as
+		# DATA, not obeyed. The <untrusted_data> constraint tells the model what the envelope
+		# means. Only data-returning tools are wrapped; our own guidance (scope_note/trunc_hint)
+		# is appended OUTSIDE the envelope below.
+		if tc_name in ("query_workspace", "run_task", "run_workflow", "run_scan", "run_shell"):
+			tool_result_str = f"<workspace_data>\n{tool_result_str}\n</workspace_data>"
+		result_incomplete = len(serialized) > max_items
+		# Only nudge a scoped re-query when it ADDS something: the result is item-capped,
+		# so the full set is NOT in context. For a complete result the model already has
+		# everything — re-querying would just waste a turn. (The general "runner findings
+		# persist; re-read by _context.<type>_id, never re-run" rule lives in queries.txt,
+		# which survives in the system prompt for the aged-out case.)
+		if runner_type and runner_id and result_incomplete:
+			scope_note = json.dumps({
+				"runner_id": runner_id,
+				"runner_type": runner_type,
+				"hint": (
+					f'Only the first {max_items} of {len(serialized)} findings from {runner_type} '
+					f'"{runner_id}" are shown; all are stored in the workspace. To read the rest, do '
+					f'NOT re-run — query scoped to this runner: '
+					f'query_workspace(query={{"_context.{runner_type}_id": "{runner_id}"}}) '
+					f'(add "_type"/filters to narrow).'),
+			}, separators=(',', ':'))
+			tool_result_str = tool_result_str.rstrip() + "\n" + scope_note
 		# On truncation, tell the model how to get the rest. A task/workflow's results
 		# are persisted as workspace findings keyed by `_context.task_chunk_id` (the
 		# runner's own chunk id), so point it at a TARGETED query_workspace on that id
 		# — works in every mode incl. read-only chat (no shell needed). For any other
-		# tool (shell, query, ...) leave a bare [TRUNCATED]: the model re-runs with a
-		# narrower command/query on its own.
+		# tool (query, shell) give a brief narrowing hint: re-run with a narrower
+		# query/command.
 		trunc_hint = ""
-		if tc_name in ("run_task", "run_workflow"):
-			chunk_id = next(
-				(r.get("_context", {}).get("task_chunk_id")
-				 for r in group_results
-				 if isinstance(r, dict) and r.get("_context", {}).get("task_chunk_id")),
-				None)
-			if chunk_id:
-				trunc_hint = (
-					f'\nThe full results are stored as workspace findings. Read them with a '
-					f'TARGETED query scoped to this run — query_workspace(query={{"_context.task_chunk_id": '
-					f'"{chunk_id}", "_type": "<type>"}}) — and narrow further (severity/name/...). '
-					f'Do NOT re-run the task.')
+		if runner_type and runner_id:
+			trunc_hint = (
+				f'\nThe full results are stored as workspace findings. Read them with a '
+				f'TARGETED query scoped to this run — query_workspace(query={{"_context.{runner_type}_id": '
+				f'"{runner_id}", "_type": "<type>"}}) — and narrow further (severity/name/...). '
+				f'Do NOT re-run the {runner_type}.')
+		elif tc_name == "query_workspace":
+			trunc_hint = (
+				'\nToo many results — re-run query_workspace with a NARROWER query '
+				'(add/tighten a field filter or scope to a single runner via '
+				'`_context.<type>_id`).')
+		elif tc_name == "run_shell":
+			trunc_hint = (
+				'\nToo much output — re-run with a narrower command (filter/grep, '
+				'limit the range, or target a single item).')
 		tool_result_str = truncate_to_tokens(
 			tool_result_str, budget, runner.model, hint=trunc_hint)
 		tool_result_str = maybe_encrypt(tool_result_str, runner.encryptor)
-		runner.history.add_tool_result(tc_name, tc_id, tool_result_str)
+		# Tag store-backed runner results with their runner id/type so compaction can STUB
+		# them to a recoverable workspace pointer instead of LLM-summarizing them.
+		runner.history.add_tool_result(
+			tc_name, tc_id, tool_result_str, runner_id=runner_id or "", runner_type=runner_type or "")
 		_tool_msg = {"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": tool_result_str}
-		_runner_id = next((r.get("_context", {}).get("task_id")
-		                   or r.get("_context", {}).get("workflow_id")
-		                   or r.get("_context", {}).get("scan_id")
-		                   for r in group_results if isinstance(r, dict)), "")
 		yield Ai(content=f"[{tc_name}] {len(serialized)} result(s)",
 		         ai_type="tool_result",
 		         message=cap_message(_tool_msg),
-		         extra_data={"runner_id": _runner_id},
+		         extra_data={"runner_id": runner_id, "runner_type": runner_type},
 		         _context=dict(runner.context))
 
 
@@ -243,6 +298,7 @@ class ai(PythonRunner):
 			"help": "Hard token limit - truncate oldest messages beyond this",
 		},
 		"interactive": {"type": str, "default": "local", "help": "Interactivity mode: local, remote, or auto"},
+		"headless": {"is_flag": True, "default": False, "help": "Run in the plain console instead of the Textual TUI (local interactive runs use the TUI by default; needs `pip install textual`)"},  # noqa: E501
 		"context": {
 			"type": dict,
 			"default": None,
@@ -250,13 +306,16 @@ class ai(PythonRunner):
 			"help": "Context to pass to AI (findings, scope, objective)"
 		},
 		"in_scope": {
-			"type": list,
+			# "list" (string) → CLICK_LIST via the CLI type map, so `--in-scope a.com,b.com` is
+			# comma-split. The builtin `list` would reach click as a converter and `list()` the
+			# string into single CHARACTERS (so nothing matches host_in_scope).
+			"type": "list",
 			"default": None,
 			"internal": True,
 			"help": "Platform-set allow-list of targets the AI must stay within (mandate scope; same host_in_scope as in_scope/out_of_scope run options)"  # noqa: E501
 		},
 		"out_of_scope": {
-			"type": list,
+			"type": "list",
 			"default": None,
 			"internal": True,
 			"help": "Platform-set deny-list of targets the AI must never touch (mandate deny scope; deny wins over in_scope)"  # noqa: E501
@@ -351,7 +410,7 @@ class ai(PythonRunner):
 			show_mode = self.mode or "scan"
 			prompt = get_system_prompt(
 				show_mode, workspace_path=str(self.reports_folder), backend=self.backend,
-				in_scope=self.in_scope, out_of_scope=self.out_of_scope)
+				in_scope=self.in_scope, out_of_scope=self.out_of_scope, is_subagent=self.is_subagent)
 			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
 			console.print(prompt, highlight=False, soft_wrap=True)
 			return
@@ -414,17 +473,14 @@ class ai(PythonRunner):
 				self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 			return
 
-		# Get user prompt
+		# Get user prompt. Interactive backends (CLI full-screen prompt, TUI input)
+		# return a string (exit if empty); non-interactive ones (remote/worker) return
+		# None, leaving the prompt to be resolved from context/resume.
 		self.prompt = self._resolve_prompt()
 		if not self.prompt and not self.is_subagent:
-			from secator.definitions import IN_WORKER
-			if not IN_WORKER:
-				from secator.rich import FullScreenPrompt
-				targets_str = ', '.join(self.inputs) if self.inputs else 'no target'
-				self.prompt = FullScreenPrompt(
-					title=f"What do you want to do? ({targets_str})",
-					placeholder="e.g. Scan for vulnerabilities on this target..."
-				).show()
+			got = self.backend.get_initial_prompt(self.inputs, session_id=self.session_id)
+			if got is not None:
+				self.prompt = got
 				if not self.prompt:
 					yield Info(message="No prompt provided. Exiting.")
 					return
@@ -462,7 +518,8 @@ class ai(PythonRunner):
 		"""Compute the system prompt for ``mode`` using this runner's workspace + backend."""
 		return get_system_prompt(
 			mode, workspace_path=str(self.reports_folder), backend=self.backend,
-			in_scope=getattr(self, "in_scope", None), out_of_scope=getattr(self, "out_of_scope", None))
+			in_scope=getattr(self, "in_scope", None), out_of_scope=getattr(self, "out_of_scope", None),
+			isolated=getattr(self, "isolated", False), is_subagent=getattr(self, "is_subagent", False))
 
 	def _rebuild_prompt_and_tools(self):
 		"""Rebuild system_prompt + tool_schemas for the current mode and store them.
@@ -486,7 +543,7 @@ class ai(PythonRunner):
 			# a non-path prompt is always used verbatim instead of crashing the run.
 			try:
 				if Path(prompt).is_file():
-					prompt = Path(prompt).read_text().strip()
+					prompt = Path(prompt).read_text(encoding="utf-8").strip()
 			except OSError:
 				pass
 		return prompt
@@ -496,6 +553,20 @@ class ai(PythonRunner):
 		encrypted = maybe_encrypt(prompt, self.encryptor)
 		self.history.add_user(encrypted)
 		return Ai(content=prompt, ai_type="prompt", message={"role": "user", "content": encrypted})
+
+	def _user_turn_plaintext(self, msg):
+		"""Decrypt (when an encryptor is set) and return a user message's plaintext.
+
+		Returns None on a decrypt miss so callers can fall back to "not a duplicate"
+		(emit) rather than over-suppress a genuinely-new turn.
+		"""
+		content = msg.get("content") or ""
+		if self.encryptor:
+			try:
+				content = self.encryptor.decrypt(content)
+			except Exception:  # noqa: BLE001 - a decrypt miss must not suppress a real prompt
+				return None
+		return content.strip()
 
 	def _prompt_already_tail(self, prompt):
 		"""True if ``prompt`` already equals the last user turn in the restored history.
@@ -509,13 +580,32 @@ class ai(PythonRunner):
 		for msg in reversed(self.history.messages):
 			if msg.get("role") != "user":
 				continue
-			content = msg.get("content") or ""
-			if self.encryptor:
-				try:
-					content = self.encryptor.decrypt(content)
-				except Exception:  # noqa: BLE001 - a decrypt miss must not suppress a real prompt
-					return False
-			return content.strip() == (prompt or "").strip()
+			content = self._user_turn_plaintext(msg)
+			if content is None:
+				return False
+			return content == (prompt or "").strip()
+		return False
+
+	def _prompt_is_initial(self, prompt):
+		"""True if ``prompt`` equals the FIRST user turn (the session's initial prompt).
+
+		A respawn's ``run_opts["prompt"]`` is set by the client. Some clients re-dispatch
+		every respawn carrying the ORIGINAL initial prompt rather than only the newest
+		turn. Once the conversation has moved past it, the initial prompt is no longer the
+		tail, so ``_prompt_already_tail`` no longer suppresses it — and it gets re-emitted
+		and re-persisted as a brand-new ``prompt`` doc on every respawn (the repeated
+		initial message). The initial prompt is restored exactly once by
+		``restore_history_from_db`` and is never a legitimate new turn, so suppress it here
+		regardless of position. Compares on plaintext (decrypting when an encryptor is set);
+		a decrypt miss falls back to "not the initial prompt" (emit), never over-suppressing.
+		"""
+		for msg in self.history.messages:
+			if msg.get("role") != "user":
+				continue
+			content = self._user_turn_plaintext(msg)
+			if content is None:
+				return False
+			return content == (prompt or "").strip()
 		return False
 
 	def _get_query_engine(self):
@@ -620,6 +710,10 @@ class ai(PythonRunner):
 				if last_mode in MODES:
 					self.mode = last_mode
 
+		# Remember the mode restored from the persisted session (the last-mode lookup
+		# above) BEFORE re-detecting, so a stale respawn prompt can't silently reset it.
+		restored_mode = self.mode
+
 		# Detect mode (defaults to chat) and build the system prompt + tools
 		self._detect_mode()
 		self.system_prompt = self._system_prompt_for(self.mode)
@@ -637,13 +731,31 @@ class ai(PythonRunner):
 		# Append the new user message that respawned the conversation — but ONLY if it
 		# isn't already the tail of the restored history. A respawn's run_opts["prompt"]
 		# is the LAST user message, which restore_history_from_db already reconstructed
-		# (the prompt doc itself, or the threaded answered-follow_up tail). Re-emitting it
+		# (the prompt doc itself, or the threaded answered-stopped tail). Re-emitting it
 		# unconditionally duplicated that turn AND persisted a duplicate `prompt` doc on
 		# every respawn — the observed repeat (initial prompt re-appended after recon; a
 		# prior follow-up answer / pasted message re-served as a fresh prompt to each new
-		# invocation). Emit only a genuinely-new prompt (the legit answer-after-stop case).
-		if self.prompt and not self._prompt_already_tail(self.prompt):
+		# invocation). The tail check handles a re-served LATEST turn; a client that keeps
+		# re-dispatching the ORIGINAL initial prompt (no longer the tail once the
+		# conversation progressed) is caught by `_prompt_is_initial`. Emit only a
+		# genuinely-new prompt (the legit answer-after-stop case). Both guards read the
+		# rebuilt history, so they run here rather than before `_detect_mode`.
+		emit_prompt = bool(self.prompt) \
+			and not self._prompt_already_tail(self.prompt) \
+			and not self._prompt_is_initial(self.prompt)
+		if emit_prompt:
 			yield self._emit_user_prompt(self.prompt)
+		elif restored_mode in MODES and self.mode != restored_mode:
+			# The respawn carried a STALE prompt (suppressed above), but `_detect_mode`
+			# already re-classified on it and may have reset the mode restored from the
+			# persisted session — F3 only clamps de-escalation to `chat`, so e.g. an
+			# `exploit` session respawned with the original `scan` prompt would drop back
+			# to `scan`. Keep the session's real mode and rebuild prompt/tools + the
+			# history's seeded system message to match.
+			self.debug(f'resume: keeping restored mode {restored_mode!r} over stale-prompt mode {self.mode!r}', sub='llm')
+			self.mode = restored_mode
+			self._rebuild_prompt_and_tools()
+			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
 
 		yield Info(message=f"Resumed session from DB ({len(self.history.messages)} messages), model: {self.model}, mode: {self.mode}")  # noqa: E501
 		try:
@@ -786,6 +898,7 @@ class ai(PythonRunner):
 			in_scope=self.in_scope,
 			out_of_scope=self.out_of_scope,
 			isolated=self.isolated,
+			dangerous=bool(getattr(self, "dangerous", False)),
 		)
 		self._isolation_ctx = ctx  # for sandbox-container teardown at task end
 
@@ -819,6 +932,10 @@ class ai(PythonRunner):
 			iteration += 1
 
 			try:
+				# Mid-flight guardrail/mode toggles the user requested from the TUI meta bar
+				# (Shift+Tab / Alt+Shift+Tab). Applied before the next LLM turn.
+				yield from self._apply_tui_control()
+
 				# Mid-flight steering: drain any user messages sent WHILE the agent
 				# was running and inject them into history so the next turn redirects.
 				# Cheap query per iteration; robust (never crashes the loop).
@@ -847,6 +964,9 @@ class ai(PythonRunner):
 				token_count = by_role["total"]
 				ctx_window = get_context_window(self.model)
 				self.debug(f'iter {iteration}/{self.max_iterations}, {token_count} tokens', sub='context')
+
+				# Feed the TUI meta bar with this turn's guardrail/mode/context state.
+				self._report_tui_meta(token_count, ctx_window)
 
 				msg = format_llm_status(token_count, ctx_window, by_role)
 				with maybe_status(msg, spinner="dots"):
@@ -954,9 +1074,10 @@ class ai(PythonRunner):
 				)
 
 				# Process tool calls → validated actions
-				follow_up_choices = None
 				stop_reason = None
-				follow_up_prompt_uuid = None
+				stop_choices = None
+				stop_multiple = False
+				stop_prompt_uuid = None
 
 				if tool_calls:
 					actions = yield from self._process_tool_calls(tool_calls, ctx)
@@ -970,9 +1091,10 @@ class ai(PythonRunner):
 
 					# Dispatch actions, collect results, add to history
 					dispatch_result = yield from self._dispatch_and_collect(actions, ctx)
-					follow_up_choices = dispatch_result.get("follow_up_choices")
 					stop_reason = dispatch_result.get("stop_reason")
-					follow_up_prompt_uuid = dispatch_result.get("follow_up_prompt_uuid")
+					stop_choices = dispatch_result.get("stop_choices")
+					stop_multiple = dispatch_result.get("stop_multiple", False)
+					stop_prompt_uuid = dispatch_result.get("stop_prompt_uuid")
 
 					# Model-driven mode change (change_mode tool): apply it now so the rest
 					# of the run uses the new mode's tool surface + persona. Stays `auto`
@@ -999,33 +1121,69 @@ class ai(PythonRunner):
 					# results) so a later resumed worker can decrypt these tokens.
 					self._persist_pii_map()
 
-					if len(actions) > 1:
-						yield Info(message=f"Executed {len(actions)} actions.")
-
 				# Query extension (allow extra iterations for data exploration)
 				if tool_calls and actions and actions[-1].get("action") == "query" and query_extensions < 3:
 					self.max_iterations += 1
 					query_extensions += 1
 
-				# Stop tool → save and exit
-				if stop_reason is not None:
-					self._save_history()
-					return
+				# End of turn converges on a SINGLE path. A turn ends when the model calls
+				# `stop`, replies with content and NO tool call (content-only == stop), or
+				# the hard iteration cap is hit mid-work (pure safety backstop). What happens
+				# next is decided entirely by the backend's ask_user: TUI blocks for the
+				# typed reply, remote persists the pending prompt + polls (then exits on
+				# timeout, resumed later), auto ends immediately.
+				if stop_reason is not None or not tool_calls or iteration >= self.max_iterations:
+					# Steer-before-stop: a steer sent but not yet injected means the user
+					# already asked to go on, so drain it and RESUME the loop instead of
+					# pausing/ending (the drained steer is now in history for the next turn).
+					if (yield from self._drain_steers()):
+						# The user steered instead of answering the stop: expire the remote
+						# pending `stopped` doc so it doesn't dangle (best-effort — never block
+						# the resume). And if we hit the cap this turn, grant one more iteration
+						# so the drained steer actually gets a model turn (the `while` guard
+						# would otherwise exit before processing it).
+						if stop_prompt_uuid and isinstance(self.backend, RemoteBackend):
+							try:
+								self.backend._expire_stale_pending(self.session_id, ai_type="stopped")
+							except Exception:  # noqa: BLE001 - expiry must never block the resume
+								pass
+						if iteration >= self.max_iterations:
+							self.max_iterations = iteration + 1
+						continue
 
-				# Follow-up / content-only / max_iter → prompt user
-				if follow_up_choices is not None or not tool_calls or iteration == self.max_iterations:
-					# Remote follow-up: the pending Ai doc was already stamped + persisted
-					# in _dispatch_and_collect (dedup by _uuid) — nothing to re-yield here.
+					# Only an explicit `stop` TOOL call pre-persisted a `stopped` doc in
+					# _dispatch_and_collect (stop_reason is set from the dispatch result). A
+					# content-only reply (stop_reason still None here) is the normal chat turn —
+					# it must still pause for the user's next message, NOT end.
+					stop_from_tool = stop_reason is not None
 
-					# Remote max-iter after tool work is a terminal turn (no further
-					# user input expected) — don't block-poll on prompt_uuid=None with no
-					# answerable pending doc; end cleanly via the loop tail (save + Info).
-					if (isinstance(self.backend, RemoteBackend)
-							and iteration == self.max_iterations
-							and follow_up_choices is None and tool_calls):
-						break
+					# Content-only reply is a stop with that text as the reason (no choices).
+					# Decrypt it like the `response` display so a remote pending prompt shows
+					# the text, not ciphertext.
+					if stop_reason is None and not tool_calls:
+						stop_reason = (self.encryptor.decrypt(content) if (self.encryptor and content)
+						               else (content or ""))
 
-					result = self._prompt_and_redetect(follow_up_choices or [], prompt_uuid=follow_up_prompt_uuid)
+					# An explicit `stop` with NO choices ends the TURN but does NOT raise an
+					# approve/deny prompt — the terminal `stopped` summary was already persisted
+					# (non-pending, see _dispatch_and_collect). The worker must NOT exit
+					# immediately though: wait a grace window for a follow-up (a standard user
+					# message over the steer channel) so the user can continue; RESUME if one
+					# arrives, else exit cleanly on the input timeout.
+					if stop_from_tool and isinstance(self.backend, RemoteBackend) and not (stop_choices or []):
+						if self._grace_wait_for_followup():
+							if iteration >= self.max_iterations:
+								self.max_iterations = iteration + 1
+							continue
+						self._save_history()
+						return
+
+					# A remote stop/content-only already persisted its pending `stopped` doc
+					# (stamped + prompt_uuid) in _dispatch_and_collect; a content-only / cap
+					# turn did not, so _prompt_and_redetect builds one from the stop reason.
+					result = self._prompt_and_redetect(
+						stop_choices or [], prompt_uuid=stop_prompt_uuid,
+						multiple=stop_multiple, reason=stop_reason)
 					if result is None:
 						self._save_history()
 						return
@@ -1156,6 +1314,12 @@ class ai(PythonRunner):
 			self.interactive = interactive
 		if self.is_subagent:
 			self.interactive = "auto"
+		# A Textual TUI (set via secator.rich.set_tui) drives interactivity AND rendering:
+		# steers/prompts/status bridge to it (TUIBackend) and console output is suppressed
+		# by the caller. Auto-select it whenever one is active (not for remote or subagents).
+		from secator.rich import get_tui
+		if get_tui() is not None and self.interactive != "remote" and not self.is_subagent:
+			self.interactive = "tui"
 
 		# Derived state
 		self._sync = False if self.async_tasks else self.sync
@@ -1171,6 +1335,14 @@ class ai(PythonRunner):
 			out_of_scope=self.out_of_scope,
 			isolated=self.isolated,
 		)
+		# A subagent inherits the human-approved runtime allow-list from its parent
+		# (run_subagent snapshots it into context). It runs non-interactively and can't
+		# raise its own `ask`, so without this it would deny every target/shell/path the
+		# user already vetted this session. Scope arrives separately via in_scope/out_of_scope.
+		if self.is_subagent:
+			inherited = self.context.get("ai_inherited_runtime_allow")
+			if inherited:
+				self.permission_engine.add_runtime_allow(inherited)
 
 		# Per-run billed-token accounting (AI analog of context.scan_hours), read
 		# by the billing chore. Init so it persists even with zero LLM calls.
@@ -1205,11 +1377,21 @@ class ai(PythonRunner):
 			self.context["session_id"] = self.session_id
 		self.backend = create_backend(self.interactive, timeout=CONFIG.addons.ai.user_response_timeout)
 
-		# Suppress noisy output for subagents
-		if self.is_subagent:
+		# Let the backend wire up anything it needs for this session (e.g. a display
+		# backend's session-scoped views). No-op for non-display backends.
+		if not self.is_subagent:
+			self.backend.on_session(
+				self.context.get("workspace_id", ""), dict(self.context), self.session_id)
+
+		# A backend that owns the display (full-screen TUI) renders the yielded items
+		# itself, so suppress the runner's own console printing. Subagents stay quiet too.
+		if self.is_subagent or self.backend.owns_display:
 			self.print_info = False
 			self.print_warning = False
 			self.print_error = False
+		if self.backend.owns_display:
+			self.print_item = False
+			self.print_line = False
 
 	# -------------------------------------------------------------------------
 	# Model verification
@@ -1327,6 +1509,100 @@ class ai(PythonRunner):
 	# Mid-flight steering
 	# -------------------------------------------------------------------------
 
+	def _report_tui_meta(self, token_count=None, ctx_window=None):
+		"""Report the live guardrail/mode/context state to the TUI meta bar (local only).
+
+		Best-effort: a missing TUI, a worker run, or any error must never affect the run.
+		Subagents report via their own ``token_usage`` items (handled in the TUI), so this
+		only drives the main conversation's bar.
+		"""
+		if self.is_subagent:
+			return
+		try:
+			from secator.rich import get_tui
+			tui = get_tui()
+			if tui is None or not hasattr(tui, 'tui_set_meta'):
+				return
+			pct = None
+			try:
+				from secator.ai.history import OUTPUT_TOKEN_RESERVATION
+				if token_count is None:
+					token_count = self.history.count_tokens_by_role(self.model)["total"]
+				if ctx_window is None:
+					ctx_window = get_context_window(self.model)
+				usable = ctx_window - OUTPUT_TOKEN_RESERVATION
+				pct = (token_count / usable * 100) if usable > 0 else None
+			except Exception:  # noqa: BLE001
+				pct = None
+			tui.tui_set_meta(
+				dangerous=bool(self.dangerous),
+				mode=normalize_mode(self.mode) or "auto",
+				mode_is_auto=getattr(self, "mode_is_auto", True),
+				ctx_pct=pct)
+			# keep the top-delimiter conversation label in sync with the resolved/renamed name
+			name = getattr(self, "session_name", "") or ""
+			if name and hasattr(tui, "tui_set_session_name"):
+				tui.tui_set_session_name(name)
+		except Exception as e:  # noqa: BLE001 - never crash the loop over a display update
+			self.debug(f'meta report failed: {e}', sub='llm')
+
+	def _apply_tui_control(self):
+		"""Apply mid-flight guardrail/mode changes the user requested from the TUI meta bar.
+
+		Generator (``yield from``-compatible with the loop): yields a note / mode_changed Ai
+		item so the change is visible in the transcript. Best-effort; never crashes the run.
+		"""
+		if self.is_subagent:
+			return
+		try:
+			from secator.rich import get_tui
+			tui = get_tui()
+			if tui is None or not hasattr(tui, 'tui_poll_control'):
+				return
+			ctrl = tui.tui_poll_control() or {}
+		except Exception as e:  # noqa: BLE001
+			self.debug(f'control poll failed: {e}', sub='llm')
+			return
+		if 'dangerous' in ctrl:
+			self.dangerous = bool(ctrl['dangerous'])
+			# keep the live action context in sync so child runners stop (or resume) getting the
+			# in_scope/out_of_scope boundary (bypass = run freely, no scope filtering).
+			ictx = getattr(self, "_isolation_ctx", None)
+			if ictx is not None:
+				ictx.dangerous = self.dangerous
+			state = "bypassed — guardrails OFF (scope filtering off)" if self.dangerous else "enforced"
+			yield Ai(content=f"Permission guardrails {state} (user toggle).", ai_type="note")
+		if 'mode' in ctrl:
+			requested = ctrl['mode']
+			if requested == "auto":
+				self.mode_is_auto = True
+				self.context["ai_mode_is_auto"] = True
+				self._detect_mode(force=True)
+				# _detect_mode only rebuilds prompt/tools when the detected mode CHANGES; the
+				# auto-mode policy itself flipped (mode_is_auto False->True), so rebuild
+				# unconditionally or the next LLM call keeps schemas built with mode_is_auto=False.
+				self._rebuild_prompt_and_tools()
+			else:
+				self.mode = normalize_mode(requested)
+				self.mode_is_auto = False
+				self.context["ai_mode_is_auto"] = False
+				self._rebuild_prompt_and_tools()
+			self.history.set_system(maybe_encrypt(self.system_prompt, self.encryptor))
+			# keep the live action context in sync so actions dispatched after the switch
+			# (notably a spawned subagent's mode policy) use the new mode, not the pre-switch one.
+			ictx = getattr(self, "_isolation_ctx", None)
+			if ictx is not None:
+				ictx.mode = self.mode
+				ictx.mode_is_auto = self.mode_is_auto
+			yield Ai(content=self.mode or "auto", ai_type="mode_changed")
+		if 'session_name' in ctrl:
+			# user renamed the conversation via /name — persist it so every subsequent item
+			# (and the saved report) carries the new name.
+			name = str(ctrl['session_name']).strip()
+			if name:
+				self.session_name = name
+				self.context["session_name"] = name
+
 	def _drain_steers(self):
 		"""Drain pending mid-flight steers and inject them into the LLM history.
 
@@ -1344,26 +1620,53 @@ class ai(PythonRunner):
 		the same content and double-render on the client. ``poll_steers`` flips the
 		drained doc to ``status:"consumed"`` so it injects exactly once.
 
-		Only the RemoteBackend has a channel to poll; for every other backend this
-		is a no-op. Robust: a steer must never crash the run, so all backend access
+		Backends without a steer channel (CLI/Auto) return an empty list, so this is a
+		no-op for them. Robust: a steer must never crash the run, so all backend access
 		is best-effort and swallowed.
 
 		Generator (``yield from``-compatible with the loop) — currently yields no
 		items, but kept a generator so future transcript echoes can be added without
-		changing the call site.
+		changing the call site. Its ``return`` value is True when at least one steer was
+		injected, so the end-of-turn path can RESUME (the user already asked to go on)
+		instead of pausing/ending on a stop.
 		"""
-		if not isinstance(self.backend, RemoteBackend):
-			return
 		try:
 			steers = self.backend.poll_steers(self.session_id)
 		except Exception as e:  # noqa: BLE001 - a steer must never crash the run
 			self.debug(f'steer: failed to poll steers: {e}', sub='llm')
-			return
+			return False
 		for content in steers:
 			self.debug(f'steer: injecting user interjection: {content[:120]}', sub='llm')
 			self.history.add_user(maybe_encrypt(f"[User interjected]: {content}", self.encryptor))
-		return
+		return bool(steers)
 		yield  # noqa: unreachable - keeps this a generator for `yield from`
+
+	def _grace_wait_for_followup(self):
+		"""After a choiceless `stop`, don't exit the worker immediately — wait a grace window
+		for a FOLLOW-UP so the user can continue the conversation (per "we wait for the user
+		input timeout"). A follow-up arrives over the steer channel (a message sent while the
+		worker is still alive); poll until one lands (RESUME) or the backend timeout elapses
+		(exit). The turn has already ended, so inject it as a PLAIN user message — NOT a
+		"[User interjected]:" mid-task steer — and leave the `stopped` summary terminal (no
+		pending approve/deny prompt). Returns True if a follow-up arrived.
+		"""
+		backend = self.backend
+		timeout = getattr(backend, "timeout", 600)
+		poll_interval = max(1, getattr(backend, "poll_interval", 5))
+		elapsed = 0
+		while elapsed < timeout:
+			try:
+				steers = backend.poll_steers(self.session_id)
+			except Exception as e:  # noqa: BLE001 - a follow-up must never crash the run
+				self.debug(f'stop-grace: poll failed: {e}', sub='llm')
+				steers = []
+			if steers:
+				for content in steers:
+					self.history.add_user(maybe_encrypt(content, self.encryptor))
+				return True
+			time.sleep(poll_interval)
+			elapsed += poll_interval
+		return False
 
 	# -------------------------------------------------------------------------
 	# Summarization / compaction
@@ -1509,18 +1812,23 @@ class ai(PythonRunner):
 
 			if denial:
 				cmd_display = _build_action_display(action)
-				denial_display = f"{denial}\n[gray42]{cmd_display}[/gray42]" if cmd_display else denial
-				# Log the denial to the console / pod-logs ONLY — the _reject_tool_call
-				# tool_result below already surfaces the SAME reason in the chat (it is
-				# what the model reads). Yielding a Warning too rendered the denial TWICE
-				# in the live client view (a Warning line + the tool_result bubble). One denial,
-				# one message.
-				console.print(Warning(message=denial_display))
+				# Surface the block on the display ONLY — the _reject_tool_call tool_result
+				# below already carries the SAME reason to the model (and the web client's
+				# tool_result bubble). Under a TUI this shows a collapsible "Blocked <desc>"
+				# (expand -> command + reason); otherwise it prints a Warning to the console.
+				# Not yielded, so there's no double-render in the web client.
+				from secator.rich import display_denial
+				block_desc = action.get("description") or action.get("name") \
+					or action.get("command") or cmd_display or name
+				display_denial(
+					block_desc, denial, cmd_display,
+					subagent=self.session_id if self.is_subagent else None)
 				error_msg = json.dumps({"error": denial}, separators=(',', ':'))
 				# Surface the actual reason in the chat (not a bare "denied"): this
 				# tool_result bubble is the only place the user sees WHY
-				# (e.g. "Action denied: shell command not approved").
-				yield _reject_tool_call(self, name, tc_id, error_msg, denial)
+				# (e.g. "Action denied: shell command not approved"). blocked=True so the TUI
+				# skips the "tool call failed" line (the "Blocked" panel above already covers it).
+				yield _reject_tool_call(self, name, tc_id, error_msg, denial, blocked=True)
 				continue
 
 			actions.append(action)
@@ -1535,22 +1843,25 @@ class ai(PythonRunner):
 	def _dispatch_and_collect(self, actions, ctx):
 		"""Dispatch actions, yield results, add to history.
 
-		Yields OutputType items. Returns dict with follow_up_choices, stop_reason, follow_up_ai.
+		Yields OutputType items. Returns a dict describing the end-of-turn signal:
+		``stop_reason`` (set when the model called `stop`), the `stop` doc's
+		``stop_choices``/``stop_multiple``/``stop_prompt_uuid`` (for the interactive
+		pause), and ``new_mode``.
 		Use: result = yield from self._dispatch_and_collect(actions, ctx)
 		"""
-		follow_up_choices = None
 		stop_reason = None
-		follow_up_ai = None
-		follow_up_prompt_uuid = None
+		stop_choices = None
+		stop_multiple = False
+		stop_prompt_uuid = None
 		new_mode = None
 
 		# Progress signal for the same-answer loop-breaker (see _prompt_and_redetect):
-		# count substantive actions actually dispatched this turn (a follow_up/steer is
-		# not work). A follow-up answered the same way but with real work in between is
-		# PROGRESS and must NOT trip the breaker; only same-answer-with-no-new-action
-		# means the run is stuck.
+		# count substantive actions actually dispatched this turn (a stop/steer is not
+		# work). A stop answered the same way but with real work in between is PROGRESS
+		# and must NOT trip the breaker; only same-answer-with-no-new-action means the
+		# run is stuck.
 		self._progress_actions = getattr(self, "_progress_actions", 0) + sum(
-			1 for a in actions if a.get("action") not in ("follow_up", "steer"))
+			1 for a in actions if a.get("action") not in ("stop", "steer"))
 
 		is_batch = len(actions) > 1
 		# safe_dispatch_action wraps dispatch so a handler error becomes an Error item
@@ -1567,31 +1878,35 @@ class ai(PythonRunner):
 			is_from_subagent = isinstance(result, OutputType) and bool(result._context.get('subagent'))
 
 			if isinstance(result, Ai):
-				if result.ai_type == "follow_up":
-					follow_up_ai = result
-					follow_up_choices = result.choices or (result.extra_data or {}).get("choices", [])
-					# Persist the follow-up doc in its FINAL renderable state (add_result
-					# dedupes by _uuid, so the later `yield follow_up_ai` is dropped). For a
-					# remote run, stamp status="pending" + choices + session_id first.
-					if isinstance(self.backend, RemoteBackend):
-						follow_up_ai.status = "pending"
+				if result.ai_type == "stopped":
+					# `stop` is the single end-of-turn signal. Persist the stopped doc in its
+					# FINAL renderable state (add_result dedupes by _uuid, so re-yielding it
+					# would be dropped). For a remote run it doubles as the answerable pending
+					# prompt: stamp status="pending" + choices + session_id + a correlation id
+					# so the poll resolves only THIS stop's answer (not a stale one), exactly
+					# as the follow_up pause did before.
+					stop_reason = result.content
+					stop_choices = result.choices or (result.extra_data or {}).get("choices", [])
+					stop_multiple = bool(result.multiple)
+					# A stop WITH choices becomes the answerable pending prompt (the user picks
+					# a next step). A stop with NO choices is a definitive end — nothing to pick
+					# — so it stays a terminal (non-pending) `stopped` summary; the loop ends the
+					# turn immediately below instead of raising a prompt + polling.
+					if isinstance(self.backend, RemoteBackend) and stop_choices:
+						result.status = "pending"
 						# Correlate on the PERSISTED _context.session_id (a top-level session_id
 						# attr wouldn't serialize) — the same field poll_steers and clients use.
-						follow_up_ai._context = {**(follow_up_ai._context or {}), "session_id": self.session_id}
-						if not follow_up_ai.choices and follow_up_choices:
-							follow_up_ai.choices = list(follow_up_choices)
-						# Stamp a unique correlation id so the poll resolves only this prompt's
-						# answer, not a stale one from a prior turn (not reusing _uuid, which
-						# mongo may reassign on insert).
-						follow_up_prompt_uuid = str(uuid.uuid4())
-						follow_up_ai.extra_data = {
-							**(follow_up_ai.extra_data or {}), "prompt_uuid": follow_up_prompt_uuid}
+						result._context = {**(result._context or {}), "session_id": self.session_id}
+						if not result.choices and stop_choices:
+							result.choices = list(stop_choices)
+						# Stamp a unique correlation id (not reusing _uuid, which mongo may
+						# reassign on insert) so the poll matches this exact prompt.
+						stop_prompt_uuid = str(uuid.uuid4())
+						result.extra_data = {
+							**(result.extra_data or {}), "prompt_uuid": stop_prompt_uuid}
 					self.add_result(result, print=not is_from_subagent)
 					continue
 				self.add_result(result, print=not is_from_subagent)
-				if result.ai_type == "stopped":
-					stop_reason = result.content
-					continue
 				if result.ai_type == "mode_changed":
 					# The runner applies the switch after this batch (rebuilds tools +
 					# persona). Fall through so the change_mode call still produces a
@@ -1628,10 +1943,10 @@ class ai(PythonRunner):
 		yield from _yield_tool_results(self, collected)
 
 		return {
-			"follow_up_choices": follow_up_choices,
 			"stop_reason": stop_reason,
-			"follow_up_ai": follow_up_ai,
-			"follow_up_prompt_uuid": follow_up_prompt_uuid,
+			"stop_choices": stop_choices,
+			"stop_multiple": stop_multiple,
+			"stop_prompt_uuid": stop_prompt_uuid,
 			"new_mode": new_mode,
 		}
 
@@ -1711,37 +2026,42 @@ class ai(PythonRunner):
 		return msg
 
 	# -------------------------------------------------------------------------
-	# Follow-up / prompt
+	# End-of-turn pause / prompt
 	# -------------------------------------------------------------------------
 
-	def _prompt_and_redetect(self, choices, prompt_uuid=None):
-		"""Prompt user via backend and re-detect intent.
+	def _prompt_and_redetect(self, choices, prompt_uuid=None, multiple=False, reason=None):
+		"""Pause on a `stop` (or content-only reply) and re-detect intent on the answer.
 
-		Works for all backends: CLIBackend shows rich menus, RemoteBackend
-		polls DB, AutoBackend returns None (exits).
+		This is the single end-of-turn path for every backend: CLIBackend/TUIBackend
+		block for the user's reply, RemoteBackend persists a pending `stopped` prompt +
+		polls (exiting on timeout, resumed later), AutoBackend returns None (ends).
 
-		``prompt_uuid`` correlates the (remote) poll to the SPECIFIC pending
-		follow_up doc this call raised, so a stale answered follow_up from a prior
-		turn can't resolve it (which would re-inject the old prompt and loop).
+		``prompt_uuid`` correlates the (remote) poll to the SPECIFIC pending `stopped`
+		doc this call raised, so a stale answer from a prior turn can't resolve it
+		(which would re-inject the old prompt and loop). ``reason`` is the stop reason
+		(summary / content-only text) used as the pending prompt's content.
 
 		Returns list of items to yield, or None to exit.
 		"""
-		# Plain-chat remote turns reach here with no pre-persisted pending doc,
-		# so persist one now with a real prompt_uuid (never poll on prompt_uuid=None).
+		# A remote stop/content-only reaching here with no pre-persisted pending doc
+		# (content-only or cap turn) needs one now, with a real prompt_uuid (never poll
+		# on prompt_uuid=None). It is a `stopped` prompt — the single end-of-turn signal.
 		if isinstance(self.backend, RemoteBackend) and not prompt_uuid:
 			prompt_uuid = str(uuid.uuid4())
 			self.add_result(self.backend.build_pending_prompt(
-				question="What's next?",
+				question=reason or "What's next?",
 				choices=choices,
 				session_id=self.session_id,
-				prompt_type="follow_up",
+				prompt_type="stopped",
 				prompt_uuid=prompt_uuid,
+				multiple=multiple,
 			))
 		response = self.backend.ask_user(
-			question="What's next?",
+			question=reason or "What's next?",
 			choices=choices,
 			session_id=self.session_id,
-			prompt_type="follow_up",
+			prompt_type="stopped",
+			multiple=multiple,
 			history=self.history,
 			encryptor=self.encryptor,
 			max_iterations=self.max_iterations,
@@ -1753,6 +2073,16 @@ class ai(PythonRunner):
 			return None
 
 		answer = response["answer"]
+
+		# Dismiss: the user declined every offered choice ("none of these work for me")
+		# instead of picking one. The pending prompt is already resolved (remote: the doc
+		# is answered with the dismiss value; TUI/CLI: the blocking ask returned), so end
+		# the turn cleanly — exactly like a no-user stop. Do this BEFORE injecting `answer`
+		# as a user message and BEFORE the same-answer loop-breaker, so a dismiss is never
+		# replayed as a message and never trips the repeat guard. The next typed user
+		# message starts a fresh turn via the normal resume/respawn path.
+		if answer == DISMISS_ANSWER:
+			return None
 
 		# Same-answer loop breaker: if consecutive follow-ups keep being answered with
 		# the SAME content (normalized) AND no substantive action ran in between, the

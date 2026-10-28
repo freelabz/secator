@@ -12,6 +12,13 @@ TASKS_PATH = SECATOR_DIR / "tasks"
 WORKFLOWS_PATH = SECATOR_DIR / "configs" / "workflows"
 PROFILES_PATH = SECATOR_DIR / "configs" / "profiles"
 
+# Max result items the AI gets back in ONE page — from a runner tool_result
+# (format_tool_result) AND a query_workspace page. Kept a single constant so "run a task"
+# and "query the workspace" cap alike; a result at this cap is INCOMPLETE and the model is
+# told how to fetch the rest. Mirrors the query backends' default page size
+# (secator/query/*.py `_execute_search(limit=100)`).
+AI_MAX_RESULTS = 100
+
 OPTION_FORMATS = """header|key1:value1;;key2:value2|Multiple headers separated by ;;
 cookie|name1=val1;name2=val2|Standard cookie format
 proxy|http://host:port|HTTP/SOCKS proxy URL
@@ -60,18 +67,20 @@ MODES = {
 	"scan": {
 		"system_prompt": SYSTEM_SCAN,
 		"description": "actively scan, run tools / shell, exploit, and write or curate findings",
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
 		"system_prompt": SYSTEM_CHAT,
-		# Chat is strictly READ-ONLY / informational. It can only read workspace data
-		# (`query`), ask/suggest (`follow_up`), delegate a same-mode helper (`subagent`),
-		# and `stop`. NO `shell` (attack surface), NO `task`/`workflow` (escalation), and
-		# NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
+		# Chat is strictly READ-ONLY / informational. It can read workspace data (`query`),
+		# fetch a known page (`fetch_url`), search the web (`web_search`, a read-only external
+		# lookup), look up run history (`list_runners`, read-only), maintain a plan
+		# (`update_plan`), delegate a same-mode helper (`subagent`), and end its turn / suggest
+		# next steps (`stop`). NO `shell` (attack surface), NO `task`/`workflow` (escalation),
+		# and NO finding writes (`add_finding`/`mark_vuln_*`/`update_finding`) — recording or
 		# changing findings is an active action that belongs in scan/exploit.
 		"description": "read-only — read and explain workspace data; you cannot scan, attack or write findings",
-		"allowed_actions": ["query", "follow_up", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["query", "fetch_url", "update_plan", "web_search", "list_runners", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"exploit": {
@@ -80,9 +89,9 @@ MODES = {
 		# "query" is required so the model can pull the workspace's existing exploit
 		# intel (the CVE's `_type:"exploit"` objects / PoC references) before trying
 		# to exploit — without it query_workspace isn't even built for this mode.
-		# "follow_up" lets exploit mode STOP-and-ask (e.g. confirm before a state-changing
+		# "stop" lets exploit mode end-and-ask (e.g. confirm before a state-changing
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
-		"allowed_actions": ["task", "workflow", "shell", "query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 }
@@ -293,7 +302,119 @@ def build_scope_section(in_scope=None, out_of_scope=None) -> str:
 	return "\n".join(lines)
 
 
-def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None) -> str:
+# Cached per-process shell-environment facts (OS / package manager / sudo). These do
+# not change within a process, and a resume on a different machine is a NEW process, so
+# caching here is safe AND gives the "recompute fresh on resume" property for free. Only
+# the clock (date / timestamp) is recomputed on every build. Keyed by `isolated`.
+_SHELL_ENV_CACHE: Dict[bool, List[str]] = {}
+
+
+def _sudo_status_lines() -> List[str]:
+	"""Describe host sudo availability for the AI, without ever prompting or blocking.
+
+	Order mirrors ``Command._prompt_sudo``: root → configured password → passwordless
+	(`sudo -n`, which NEVER prompts) → unavailable. The unavailable line is actionable:
+	it tells the model not to run sudo (it would fail in this non-interactive session)
+	and how the user can enable it.
+	"""
+	import os
+	import shutil
+	import subprocess
+	if hasattr(os, "geteuid") and os.geteuid() == 0:
+		return ["Privileges: running as root — no sudo needed."]
+	try:
+		from secator.config import CONFIG
+		if CONFIG.security.sudo_password:
+			return ["Privileges: non-root; sudo available via a configured password (security.sudo_password)."]
+	except Exception:
+		pass
+	if shutil.which("sudo") is None:
+		return ["Privileges: non-root and sudo is NOT installed — do not use sudo; run only commands that work unprivileged."]
+	try:
+		# `sudo -n` is guaranteed non-interactive (fails instead of prompting); bound it anyway.
+		rc = subprocess.run(
+			["sudo", "-n", "true"],
+			stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+		).returncode
+		if rc == 0:
+			return ["Privileges: non-root; passwordless sudo IS available."]
+	except Exception:
+		pass
+	return [
+		"Privileges: non-root; sudo requires a password and none is configured. Do NOT run sudo "
+		"commands — they fail fast in this non-interactive session (no password prompt). Prefer an "
+		"unprivileged alternative, or ask the user to enable passwordless sudo or set "
+		"SECATOR_SECURITY_SUDO_PASSWORD.",
+	]
+
+
+def _host_shell_env_lines() -> List[str]:
+	"""Host OS + package manager (read-only; never triggers an install) + sudo status."""
+	lines = ["Shell environment: this host — run_shell commands execute directly on it."]
+	try:
+		from secator.installer import get_distro_config
+		d = get_distro_config()
+		if isinstance(d, str):
+			# SECATOR_PACKAGE_MANAGER override: get_distro_config returns a bare string.
+			lines.append(f"Package manager: {d} (install packages with it).")
+		else:
+			system = getattr(d, "system", "") or ""
+			name = getattr(d, "name", "") or ""
+			pm_name = getattr(d, "pm_name", "") or ""
+			pm_installer = getattr(d, "pm_installer", "") or ""
+			os_line = f"Operating system: {system}" + (f" ({name})" if name else "")
+			lines.append(os_line + ".")
+			if pm_installer:
+				lines.append(f"Package manager: {pm_name} — install packages with `{pm_installer} <pkg>`.")
+			elif pm_name:
+				lines.append(f"Package manager: {pm_name}.")
+			else:
+				lines.append("Package manager: unknown — detect it before installing anything.")
+	except Exception:
+		lines.append("Package manager: unknown — detect it before installing anything.")
+	lines.extend(_sudo_status_lines())
+	return lines
+
+
+def build_session_context(isolated: bool = False) -> str:
+	"""Dynamic per-session context block for the system prompt.
+
+	Two things the model otherwise guesses wrong:
+	- the current date (it has no clock);
+	- the shell environment its ``run_shell`` commands ACTUALLY run in — the disposable
+	  Alpine sandbox (apk, root) when ``--isolated``, otherwise THIS host's OS + package
+	  manager + sudo availability. Stops the model defaulting to ``apk`` on a non-Alpine
+	  host, and stops it issuing a sudo command that can only stall/fail.
+
+	DATE ONLY, no clock time: this block sits in the cached system-prompt prefix, so a
+	second-precision timestamp would (a) be stale the moment the session runs past it and
+	(b) risk busting prompt caching if the prompt is ever rebuilt mid-session. A day-granular
+	date stays constant across the session, so the cache holds. The model is told to run
+	``date`` when it needs the exact wall-clock time. Rebuilt on every ``get_system_prompt``
+	call (including resume), so the date rolls over and host facts are re-detected on resume.
+	"""
+	from datetime import datetime, timezone
+	lines = [
+		"<session_context>",
+		f"Current date (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d')}. "
+		"Run `date` for the exact current time.",
+	]
+	if isolated:
+		lines += [
+			"Shell environment: a disposable, network-isolated Alpine sandbox container — run_shell runs there, not on the host.",  # noqa: E501
+			"Package manager: apk — install packages with `apk add --no-cache <pkg>`.",
+			"Privileges: running as root in the sandbox — no sudo needed.",
+		]
+	else:
+		if isolated not in _SHELL_ENV_CACHE:
+			_SHELL_ENV_CACHE[isolated] = _host_shell_env_lines()
+		lines += _SHELL_ENV_CACHE[isolated]
+	lines.append("</session_context>")
+	return "\n".join(lines)
+
+
+def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None,
+                      isolated=None, is_subagent: bool = False) -> str:
 	"""Get system prompt for mode with library reference filled in.
 
 	Args:
@@ -302,6 +423,12 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 		backend: Optional interactivity backend to determine interaction rules
 		in_scope: Optional allow-list of targets to surface in the prompt.
 		out_of_scope: Optional deny-list of targets to surface in the prompt.
+		isolated: When not None (True/False), append a dynamic ``<session_context>`` block
+			describing the clock + the shell environment (sandbox vs host) for that mode.
+			Left None by callers (e.g. tests) that want a deterministic, static prompt.
+		is_subagent: When True, strip all subagent-delegation guidance (a subagent has no
+			`run_subagent` tool and must not spawn further subagents) and append the
+			subagent persona so it carries out its assigned objective itself.
 
 	Returns:
 		Formatted system prompt string
@@ -331,22 +458,41 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# any mode added to MODES later.
 	result = build_mode_banner(mode, mode_config) + "\n\n" + result
 
-	# Determine interaction rules based on backend
-	# The mode templates already include ${follow_up} for interactive modes.
-	# For non-interactive backends, append stop rules instead.
-	if backend is not None:
-		excluded = backend.get_excluded_tools()
-		if "follow_up" in excluded:
-			result += "\n" + load_prompt("constraints/stop.txt")
+	# A subagent has no `run_subagent` tool and must not spawn further subagents. Strip the
+	# baked-in delegation guidance (the <subagents> usage block, and in scan mode the
+	# <vulnerability_handling> block that tells the model to hand exploitation to a subagent),
+	# then append the subagent persona so it carries out its objective itself. Strips are
+	# resilient no-ops when a block is absent (e.g. chat mode has no vulnerability_handling).
+	if is_subagent:
+		result = re.sub(r'\n*<subagents>.*?</subagents>\n*', '\n\n', result, flags=re.DOTALL)
+		result = re.sub(r'\n*<vulnerability_handling>.*?</vulnerability_handling>\n*', '\n\n', result, flags=re.DOTALL)
+		result += "\n\n" + load_prompt("constraints/subagent.txt")
+
+	# Inject the end-of-turn `stop` rules. `stop` is the single end-of-turn signal in
+	# every mode; which guidance applies depends only on whether the backend has a user
+	# to pause for: interactive backends (CLI/TUI/Remote) get the version that offers
+	# `choices`, a non-interactive AutoBackend the choiceless "decide autonomously" one.
+	# Spliced in BEFORE the <operating_rules> recap so that recap stays in the
+	# high-attention recency tail (see TestOperatingRulesRecap).
+	interactive = getattr(backend, "interactive", True) if backend is not None else True
+	stop_rules = load_prompt("constraints/stop.txt" if interactive else "constraints/stop_autonomous.txt")
+	marker = "<operating_rules>"
+	if marker in result:
+		result = result.replace(marker, stop_rules + "\n\n" + marker, 1)
+	else:
+		result += "\n" + stop_rules
 
 	scope_section = build_scope_section(in_scope, out_of_scope)
 	if scope_section:
 		result += "\n\n" + scope_section
 
+	if isolated is not None:
+		result += "\n\n" + build_session_context(isolated=bool(isolated))
+
 	return result.replace("$workspace_path", ws)
 
 
-def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = 100) -> str:
+def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = AI_MAX_RESULTS) -> str:
 	"""Format tool result as compact JSON, truncating results if too many.
 
 	Args:
@@ -354,7 +500,7 @@ def format_tool_result(name: str, status: str, count: int, results: Any, max_ite
 		status: Execution status (success/error)
 		count: Number of results
 		results: Full results from the action
-		max_items: Maximum number of result items to include (default 100)
+		max_items: Maximum number of result items to include (default :data:`AI_MAX_RESULTS`)
 
 	Returns:
 		Compact JSON string
@@ -372,6 +518,14 @@ def format_tool_result(name: str, status: str, count: int, results: Any, max_ite
 	if truncated:
 		data["truncated"] = True
 		data["total_count"] = count
+		# Model-visible narrowing hint: the console Warning below never reaches the
+		# model, so without this the model only sees `truncated`/`total_count` flags and
+		# no guidance. Keep it generic/future-proof (works before an `offset`/paging arg
+		# exists) so it never promises an argument the tool may not yet accept.
+		data["hint"] = (
+			f'Only the first {max_items} of {count} results are shown. Narrow the scope '
+			'to see the rest: add/tighten a filter, target a single runner or item, or '
+			'page through results with an offset once supported.')
 		from secator.rich import console
 		from secator.output_types import Warning
 		console.print(Warning(

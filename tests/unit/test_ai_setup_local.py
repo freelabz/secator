@@ -48,6 +48,8 @@ class TestAiSetupForcesSync(unittest.TestCase):
 
 		def fake_init(self, config, inputs, run_opts=None, hooks=None, context=None):
 			captured['sync'] = (run_opts or {}).get('sync')
+			captured['in_scope'] = (run_opts or {}).get('in_scope')
+			captured['out_of_scope'] = (run_opts or {}).get('out_of_scope')
 			captured['inputs'] = inputs
 
 		with ExitStack() as stack:
@@ -68,6 +70,19 @@ class TestAiSetupForcesSync(unittest.TestCase):
 		self.assertIsNone(result.exception, str(result.exception))
 		self.assertIn('sync', captured)
 		self.assertFalse(captured.get('sync'), 'normal ai run should dispatch to worker when alive')
+
+	def test_ai_in_scope_comma_split_to_hosts(self):
+		"""`--in-scope a.com,b.com` must parse to a LIST OF HOSTS, not single characters.
+
+		Regression: in_scope/out_of_scope declared `type: list` (builtin) instead of the
+		string `"list"`, so the CLI type map skipped them and click did `list("a.com,...")`
+		-> ['a', '.', 'c', ...], making every target out-of-scope.
+		"""
+		result, captured = self._run_with_worker_alive(
+			['ai', '--in-scope', 'secator.cloud,app.secator.cloud', '--out-of-scope', 'evil.com', 'test'])
+		self.assertIsNone(result.exception, str(result.exception))
+		self.assertEqual(captured.get('in_scope'), ['secator.cloud', 'app.secator.cloud'])
+		self.assertEqual(captured.get('out_of_scope'), ['evil.com'])
 
 
 if __name__ == '__main__':

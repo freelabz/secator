@@ -343,6 +343,16 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "shell", "command": "rm -rf /*"})
 		self.assertEqual(result.decision, "deny")
 
+	def test_shell_unmatched_reason_dedups_command_names(self):
+		# a command whose name repeats across subcommands must list it ONCE in the ask reason,
+		# not N times ("No rule for command(s): mk" — not "mk, mk, mk, ...").
+		engine = self._make_engine(allow=["target(*)"])
+		result = engine.check_action(
+			{"action": "shell", "command": "mk a && mk b && mk c && mk d"})
+		self.assertEqual(result.decision, "ask")
+		self.assertEqual(result.reason, "No rule for command(s): mk")
+		self.assertEqual(result.shell_command, "mk a && mk b && mk c && mk d")
+
 	def test_task_allowed_wildcard(self):
 		engine = self._make_engine(allow=["task(*)", "target(*)"])
 		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.1"]})
@@ -358,9 +368,9 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "query", "query": {"_type": "vulnerability"}})
 		self.assertEqual(result.decision, "allow")
 
-	def test_follow_up_always_allowed(self):
+	def test_stop_always_allowed(self):
 		engine = self._make_engine()
-		result = engine.check_action({"action": "follow_up", "reason": "test"})
+		result = engine.check_action({"action": "stop", "reason": "test"})
 		self.assertEqual(result.decision, "allow")
 
 	# --- M7: add_finding privileged-type gating ---
@@ -500,6 +510,26 @@ class TestPermissionEngine(unittest.TestCase):
 		engine.add_runtime_allow(["target(10.5.2.3)"])
 		result = engine.check_action({"action": "shell", "command": "nmap 10.5.2.3"})
 		self.assertEqual(result.decision, "allow")
+
+	def test_export_runtime_allow_round_trips_for_subagent_inheritance(self):
+		# A subagent inherits the parent's human-approved runtime allow-list via
+		# export -> add. A target-host approval must keep covering its subpaths in the
+		# child, and the child must still deny an unapproved host.
+		parent = self._make_engine(allow=["target(10.5.2.3)"], ask=["target(*)"])
+		# A host approval (what "allow all URLs from app.example.com" grants) covers
+		# subpaths because _check_value also tests the URL's extracted hostname.
+		parent.add_runtime_allow(["target(app.example.com)"])
+		exported = parent.export_runtime_allow()
+		self.assertIn("target(app.example.com)", exported)
+
+		child = self._make_engine(allow=["target(10.5.2.3)", "task(*)"], ask=["target(*)"])
+		child.add_runtime_allow(exported)
+		approved = child.check_action(
+			{"action": "task", "name": "httpx", "targets": ["https://app.example.com/api/auth/signup"]})
+		self.assertEqual(approved.decision, "allow")
+		unapproved = child.check_action(
+			{"action": "task", "name": "httpx", "targets": ["https://evil.example.org/"]})
+		self.assertEqual(unapproved.decision, "ask")
 
 	# --- Evaluation order ---
 
@@ -807,7 +837,7 @@ class TestGuardrailsIntegration(unittest.TestCase):
 	def test_dispatch_action_without_engine(self):
 		"""When no permission_engine is set, actions should pass through."""
 		ctx = ActionContext(targets=["example.com"], model="test")
-		action = {"action": "follow_up", "reason": "test"}
+		action = {"action": "stop", "reason": "test"}
 		results = list(dispatch_action(action, ctx))
 		has_denial = any(
 			isinstance(r, (Warning, Error)) and "denied" in getattr(r, 'message', '').lower()

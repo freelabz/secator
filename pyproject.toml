@@ -7,11 +7,14 @@ build-backend = 'hatchling.build'
 # VCS-ignored files by default) — it's the offline fallback for `kev` vulnerability tagging.
 artifacts = [
   'secator/data/known_exploited_vulnerabilities.json',
+  # Bundled AI provider registry (OpenAI-compatible gateways for `ai setup`); *.json is
+  # VCS-ignored so hatchling excludes it by default — force-include it in the wheel.
+  'secator/ai/providers.json',
 ]
 
 [project]
 name = 'secator'
-version = "0.49.2"
+version = "0.53.2"
 authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
 readme = 'README.md'
 description = "The pentester's swiss knife."
@@ -55,7 +58,7 @@ dependencies = [
   'pyyaml < 7',
   'pydantic < 3',
   'requests < 3',
-  'rich < 14',
+  'rich >= 14.2, < 16',
   'rich-click < 1.9',
   'click < 8.3',
   'psutil < 7',
@@ -99,12 +102,19 @@ gcs = [
 	'google-cloud-storage < 3'
 ]
 ai = [
-	'litellm < 2',
+	# litellm's library `completion` path imports its proxy MCP handler
+	# (`from mcp.types import CacheableResult`), so `mcp` must be installed even though
+	# we don't use the proxy. Pin to the latest known-good pair for reproducible builds.
+	'litellm == 1.106.0',
+	'mcp >= 2.2.0, < 3',
 	'safecmd',
 	# safecmd shells out to the `shfmt` binary (via shutil.which); pin shfmt-py
 	# explicitly so `secator install addons ai` always ships the binary, not just
 	# the safecmd Python package. Without it the guardrail shell parser degrades.
-	'shfmt-py'
+	'shfmt-py',
+	# Textual TUI (default for `secator x ai` on a TTY). Needs rich >= 14.2, hence the
+	# core `rich` pin bump above.
+	'textual < 9',
 ]
 
 [project.scripts]
@@ -131,3 +141,4 @@ skip-magic-trailing-comma = false
 [tool.isort]
 multi_line_output = 5
 line_length = 120
+
