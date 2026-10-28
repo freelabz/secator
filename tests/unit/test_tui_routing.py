@@ -884,3 +884,27 @@ def test_tui_feed_hook_is_picklable():
 	set_tui(None)  # worker: no active TUI
 	item = {"_type": "ai", "ai_type": "response", "content": "x"}
 	assert _tui_feed(object(), item) is item  # no-op, no crash
+
+
+async def _replay_body():
+	# Resume replay: a restored LLM history must render the full prior conversation
+	# (user bubbles, assistant text, a marker per tool call); system/tool turns are skipped.
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		base = len(app._convo().children)
+		msgs = [
+			{"role": "system", "content": "sys prompt"},                 # skipped
+			{"role": "user", "content": "scan example.com"},             # 1 bubble
+			{"role": "assistant", "content": "On it.",
+			 "tool_calls": [{"function": {"name": "nmap"}}]},             # text + 1 marker = 2
+			{"role": "tool", "content": "open: 80"},                     # skipped
+			{"role": "assistant", "content": "Found port 80."},          # 1 text
+		]
+		app._replay_history(msgs)
+		await pilot.pause(0.05)
+		assert len(app._convo().children) - base == 4
+
+
+def test_replay_history_renders_full_conversation():
+	_run(_replay_body())

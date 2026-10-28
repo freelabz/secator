@@ -1114,6 +1114,32 @@ class TUIApp(App):
 		self._convo().mount(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
 		self._convo().scroll_end(animate=False)
 
+	def tui_replay_history(self, messages) -> None:
+		"""Render a restored conversation into the convo view on resume (thread-safe)."""
+		self.call_from_thread(self._replay_history, messages or [])
+
+	def _replay_history(self, messages) -> None:
+		"""Replay prior LLM turns so the user sees where they left off: user prompts as
+		bubbles, assistant text as Markdown, tool calls as a one-line marker. Tool results
+		are omitted (the live view suppresses them in the main conversation too)."""
+		from secator.tui.render import markdown_text
+		convo = self._convo()
+		for m in messages:
+			if not isinstance(m, dict):
+				continue
+			role, content = m.get("role"), (m.get("content") or "").strip()
+			if role == "user":
+				if content:
+					self._echo_user(content)
+			elif role == "assistant":
+				if content:
+					convo.mount(Static(markdown_text(content), classes="ai"))
+				for tc in (m.get("tool_calls") or []):
+					fn = tc.get("function") or {} if isinstance(tc, dict) else {}
+					name = fn.get("name") or "tool"
+					convo.mount(Static(Text.from_markup(f"[#5b6070]⚙ ran [b]{escape(str(name))}[/b][/]"), classes="ai"))
+		convo.scroll_end(animate=False)
+
 	def on_key(self, event) -> None:
 		# Esc in the input box while a choice ask is active returns to the choice box (the input
 		# row is only visible in that state after the user pressed Tab).

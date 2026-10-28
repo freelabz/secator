@@ -483,6 +483,15 @@ class ai(PythonRunner):
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
 				return
+			# Replay the restored conversation into a display-owning frontend (the TUI) so the
+			# user sees where they left off. The console path uses print_session_results above;
+			# the TUI can't take a raw print, and the report's ai docs may be empty for legacy
+			# sessions, so render from the restored history (the source of truth) instead.
+			if getattr(self.backend, "owns_display", False):
+				from secator.rich import get_tui
+				tui = get_tui()
+				if tui is not None:
+					tui.tui_replay_history(self.history.messages)
 			self.history.model = self.model
 			result = self._prompt_and_redetect([])
 			if result is None:
