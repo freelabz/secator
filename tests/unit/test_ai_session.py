@@ -15,7 +15,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 			{"_type": "ai", "ai_type": "prompt", "content": "Hello", "_timestamp": 1},
 			{"_type": "ai", "ai_type": "shell", "content": "nmap -p- host", "_timestamp": 3},
 			{"_type": "ai", "ai_type": "prompt", "content": "Scan the target", "_timestamp": 4},
-			{"_type": "ai", "ai_type": "follow_up", "content": "What next?", "_timestamp": 5},
+			{"_type": "ai", "ai_type": "stopped", "content": "What next?", "_timestamp": 5},
 			{"_type": "ai", "ai_type": "response", "content": "Found 2 open ports.", "_timestamp": 6},
 		]
 
@@ -112,7 +112,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		self.assertEqual(history.messages, [{"role": "user", "content": "ENC(scan 10.0.0.1)"}])
 
 	def test_trailing_answered_follow_up_threaded_as_user_turn(self):
-		"""A follow_up that timed out then was answered later (the conversation TAIL)
+		"""A `stopped` prompt that timed out then was answered later (the conversation TAIL)
 		must have its answer threaded as the next user turn, so a respawn continues
 		instead of re-asking the same question."""
 		from secator.ai.session import restore_history_from_db
@@ -120,7 +120,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		engine.search.return_value = [
 			{"ai_type": "prompt", "content": "Scan the target", "_timestamp": 1},
 			{"ai_type": "response", "content": "Which host should I scan?", "_timestamp": 2},
-			{"ai_type": "follow_up", "content": "Which host?", "status": "answered",
+			{"ai_type": "stopped", "content": "Which host?", "status": "answered",
 			 "answer": "scanme.nmap.org", "_timestamp": 3},
 		]
 		history = restore_history_from_db("s7", engine)
@@ -131,7 +131,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		])
 
 	def test_in_run_answered_follow_up_not_double_threaded(self):
-		"""A follow_up answered in-run is already followed by its own `prompt` doc
+		"""A `stopped` prompt answered in-run is already followed by its own `prompt` doc
 		(the live path persists the answer as a turn), so it is NOT the tail and its
 		answer must be threaded exactly once (from the prompt doc), not twice."""
 		from secator.ai.session import restore_history_from_db
@@ -139,7 +139,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		engine.search.return_value = [
 			{"ai_type": "prompt", "content": "Scan the target", "_timestamp": 1},
 			{"ai_type": "response", "content": "Which host should I scan?", "_timestamp": 2},
-			{"ai_type": "follow_up", "content": "Which host?", "status": "answered",
+			{"ai_type": "stopped", "content": "Which host?", "status": "answered",
 			 "answer": "scanme.nmap.org", "_timestamp": 3},
 			{"ai_type": "prompt", "content": "scanme.nmap.org", "_timestamp": 4},
 			{"ai_type": "response", "content": "Scanning scanme.nmap.org...", "_timestamp": 5},
@@ -542,7 +542,7 @@ class TestRemoteResumeBranch(unittest.TestCase):
 	def test_resume_seeds_last_mode_for_auto_session(self, mock_sys, mock_restore):
 		"""R5: resuming an AUTO session restores the last auto-detected mode as the
 		baseline, so `_detect_mode`'s no-de-escalation clamp can't silently drop
-		attack->chat on the respawned turn. A respawned worker starts at the default
+		scan->chat on the respawned turn. A respawned worker starts at the default
 		`chat`; without the seed there is no action-mode baseline to protect."""
 		mock_restore.return_value = MagicMock(messages=[{"role": "system", "content": "SYS"}])
 		task, engine = self._make_task(prior_docs=[{"ai_type": "prompt", "content": "hi"}])
@@ -557,7 +557,7 @@ class TestRemoteResumeBranch(unittest.TestCase):
 			if query.get("mode"):  # the last-mode lookup
 				return [
 					{"ai_type": "response", "mode": "chat", "_timestamp": 1.0},
-					{"ai_type": "response", "mode": "attack", "_timestamp": 2.0},  # newest
+					{"ai_type": "response", "mode": "scan", "_timestamp": 2.0},  # newest
 				]
 			if query.get("_type") == "ai":
 				return [{"ai_type": "prompt", "content": "hi"}]
@@ -566,14 +566,14 @@ class TestRemoteResumeBranch(unittest.TestCase):
 
 		self._run_resume(task)
 		# Seeded from the newest mode-bearing doc; still auto (seeding is not pinning).
-		self.assertEqual(task.mode, "attack")
+		self.assertEqual(task.mode, "scan")
 		self.assertTrue(task.mode_is_auto)
 
 	@patch("secator.tasks.ai.restore_history_from_db")
 	@patch("secator.tasks.ai.get_system_prompt", return_value="SYS")
 	def test_resume_pin_wins_over_last_mode(self, mock_sys, mock_restore):
 		"""A user-pinned mode still wins on resume: the seed block is skipped once a pin
-		is restored (mode_is_auto=False), so a prior attack turn doesn't override the pin."""
+		is restored (mode_is_auto=False), so a prior scan turn doesn't override the pin."""
 		mock_restore.return_value = MagicMock(messages=[{"role": "system", "content": "SYS"}])
 		task, engine = self._make_task(prior_docs=[{"ai_type": "prompt", "content": "hi"}])
 		task.mode_is_auto = True
@@ -585,14 +585,14 @@ class TestRemoteResumeBranch(unittest.TestCase):
 			if query.get("_context.ai_mode_is_auto") is False:
 				return [{"ai_type": "response", "mode": "chat", "_timestamp": 9.0}]  # pinned chat
 			if query.get("mode"):
-				return [{"ai_type": "response", "mode": "attack", "_timestamp": 2.0}]
+				return [{"ai_type": "response", "mode": "scan", "_timestamp": 2.0}]
 			if query.get("_type") == "ai":
 				return [{"ai_type": "prompt", "content": "hi"}]
 			return []
 		engine.search.side_effect = _search
 
 		self._run_resume(task)
-		# Pin restored → mode stays the pinned chat, NOT the prior attack turn.
+		# Pin restored → mode stays the pinned chat, NOT the prior scan turn.
 		self.assertEqual(task.mode, "chat")
 		self.assertFalse(task.mode_is_auto)
 
@@ -713,7 +713,7 @@ class TestFastDetectMode(unittest.TestCase):
 
 	def test_fast_detect_mode_pure(self):
 		from secator.tasks.ai import fast_detect_mode
-		self.assertEqual(fast_detect_mode("scan the target"), "attack")
+		self.assertEqual(fast_detect_mode("scan the target"), "scan")
 		self.assertEqual(fast_detect_mode("summarize the findings"), "chat")
 		self.assertEqual(fast_detect_mode(""), "chat")
 		# exploit-ish IMPERATIVE → defer to LLM (no behavior change for those)
@@ -735,10 +735,10 @@ class TestFastDetectMode(unittest.TestCase):
 		# no cues → ambiguous → defer to LLM
 		self.assertIsNone(fast_detect_mode("please handle the situation"))
 
-	def test_exploit_mode_can_follow_up(self):
-		"""exploit mode must be able to STOP-and-ask (follow_up), not only run to its cap."""
+	def test_exploit_mode_can_stop(self):
+		"""exploit mode must be able to end-and-ask (stop), not only run to its cap."""
 		from secator.ai.prompts import get_mode_config
-		self.assertIn("follow_up", get_mode_config("exploit")["allowed_actions"])
+		self.assertIn("stop", get_mode_config("exploit")["allowed_actions"])
 
 	def _make_task(self, prompt, mode=""):
 		from secator.tasks.ai import ai
@@ -772,7 +772,7 @@ class TestFastDetectMode(unittest.TestCase):
 		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm:
 			task._detect_mode()
 		mock_llm.assert_not_called()
-		self.assertEqual(task.mode, "attack")
+		self.assertEqual(task.mode, "scan")
 
 	def test_ambiguous_falls_back_to_llm(self):
 		"""Conflicting cues → the LLM classifier still runs and decides."""
@@ -788,8 +788,8 @@ class TestFastDetectMode(unittest.TestCase):
 
 	def test_hardset_mode_is_sticky_even_with_force(self):
 		"""A hard-set (user-pinned) mode never re-detects — not without force, and NOT
-		with force. A chat session can't silently escalate into attack, even on a prompt
-		whose fast-path cue is attack. (force is now vestigial for a pinned mode.)"""
+		with force. A chat session can't silently escalate into scan, even on a prompt
+		whose fast-path cue is scan. (force is now vestigial for a pinned mode.)"""
 		task = self._make_task("scan the target", mode="chat")  # mode_is_auto=False
 		p_sys, p_tools, p_cfg = self._patches()
 		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm, \
@@ -808,7 +808,7 @@ class TestFastDetectMode(unittest.TestCase):
 		p_sys, p_tools, p_cfg = self._patches()
 		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm:
 			task._detect_mode()
-		self.assertEqual(task.mode, "attack")     # fast-path re-detected, not stuck on chat
+		self.assertEqual(task.mode, "scan")     # fast-path re-detected, not stuck on chat
 		mock_llm.assert_not_called()
 
 
@@ -1151,7 +1151,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def get_action_budget(self, model):
 				return 10000
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
@@ -1215,35 +1215,37 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 		self.assertEqual(doc.message["content"], tool_result_str)
 
 	def test_tool_result_runner_id_from_group_result_context(self):
-		"""runner_id is pulled from the collected result's own _context
-		(task_id/workflow_id/scan_id), stamped by the persistence hooks -
-		NOT from self.context."""
-		from secator.output_types import Ai
+		"""For a runner tool (run_task/run_workflow/run_scan) runner_id is pulled from the
+		collected finding's own _context.<type>_id (stamped by the persistence hooks),
+		NOT from self.context. Non-runner tools (e.g. run_shell) get no runner_id."""
+		from secator.output_types import Ai, Tag
 
 		ctx = MagicMock()
 		ctx.results = []
 		action = {
-			"action": "shell",
-			"command": "echo hi",
+			"action": "task",
+			"name": "testtask",
+			"targets": [],
 			"tool_call_id": "tc_runner",
-			"tool_call_name": "run_shell",
+			"tool_call_name": "run_task",
 		}
 		fake_self, _persisted = self._make_fake_self()
 
-		def _shell_with_task_id(*a, **k):
-			yield Ai(content="ok", ai_type="shell_output", _context={
+		def _task_with_id(*a, **k):
+			yield Tag(name="t", match="m", value="v", _context={
 				"tool_call_id": action["tool_call_id"],
 				"tool_call_name": action["tool_call_name"],
 				"task_id": "task-xyz",
 			})
 
-		with patch("secator.ai.actions._handle_shell", _shell_with_task_id):
+		with patch("secator.ai.actions._handle_task", _task_with_id):
 			from secator.tasks.ai import ai as AiTask
 			yielded = list(AiTask._dispatch_and_collect(fake_self, [action], ctx))
 
 		tool_result_ais = [r for r in yielded if isinstance(r, Ai) and r.ai_type == "tool_result"]
 		self.assertEqual(len(tool_result_ais), 1)
 		self.assertEqual(tool_result_ais[0].extra_data.get("runner_id"), "task-xyz")
+		self.assertEqual(tool_result_ais[0].extra_data.get("runner_type"), "task")
 
 	def test_tool_result_ai_emitted_on_error_paths(self):
 		"""Malformed-JSON / unknown-tool / guardrail-denial error paths (in
@@ -1256,7 +1258,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def __init__(self):
 				self.tool_results = []
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
@@ -1297,7 +1299,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def __init__(self):
 				self.tool_results = []
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()

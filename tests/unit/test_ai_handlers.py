@@ -79,26 +79,26 @@ class TestDispatchAction(unittest.TestCase):
         self.assertEqual(results[0]._type, 'warning')
         self.assertIn('Unknown action', results[0].message)
 
-    def test_dispatch_follow_up_action(self):
+    def test_dispatch_stop_action(self):
         from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4')
-        action = {'action': 'follow_up', 'reason': 'Test complete'}
+        action = {'action': 'stop', 'reason': 'Test complete'}
 
         results = list(dispatch_action(action, ctx))
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]._type, 'ai')
         self.assertIn('Test complete', results[0].content)
-        # Default follow-up is single-select.
+        # Default stop is single-select.
         self.assertFalse(results[0].multiple)
 
-    def test_dispatch_follow_up_multiple(self):
+    def test_dispatch_stop_multiple(self):
         from secator.ai.actions import ActionContext, dispatch_action
 
         ctx = ActionContext(targets=['target.com'], model='gpt-4')
         action = {
-            'action': 'follow_up',
+            'action': 'stop',
             'reason': 'Pick targets',
             'choices': ['a', 'b', 'c'],
             'multiple': True,
@@ -134,6 +134,40 @@ class TestDispatchAction(unittest.TestCase):
         self.assertEqual(results[0]._type, 'info')
         self.assertIn('DRY RUN', results[0].message)
         self.assertIn('host_recon', results[0].message)
+
+    def test_dispatch_task_config_is_api_serializable(self):
+        """An AI-dispatched task must hydrate its class metadata so the serialized
+        config.description is a str/None and config.input_types a list — NOT the empty
+        DotMap `{}` an un-hydrated {type,name} stub produces, which the `api` driver's
+        runner schema rejects (description must be str, input_types a list)."""
+        import secator.ai.actions as actions
+        from secator.ai.actions import ActionContext, dispatch_action
+        from secator.runners import Task as RealTask
+
+        captured = {}
+
+        class NoRunTask(RealTask):
+            # Capture the processed config at iteration time; don't execute the command.
+            def __iter__(self):
+                captured['config'] = self.toDict()['config']
+                return iter(())
+
+        orig = actions.Task
+        actions.Task = NoRunTask
+        try:
+            ctx = ActionContext(targets=['scanme.example.com'], model='gpt-4',
+                                context={'workspace_id': 'ws'})
+            list(dispatch_action(
+                {'action': 'task', 'name': 'httpx', 'targets': ['scanme.example.com']}, ctx))
+        finally:
+            actions.Task = orig
+
+        self.assertIn('config', captured)
+        config = captured['config']
+        self.assertIsInstance(config['input_types'], list)
+        self.assertNotIsInstance(config['input_types'], dict)
+        self.assertTrue(config['description'] is None or isinstance(config['description'], str))
+        self.assertNotIsInstance(config['description'], dict)
 
     def test_dispatch_shell_dry_run(self):
         from secator.ai.actions import ActionContext, dispatch_action
@@ -201,21 +235,25 @@ class TestChangeModeHandler(unittest.TestCase):
 
     def test_auto_escalation_signals_mode_changed(self):
         from secator.output_types import Ai
-        out = self._run({'action': 'change_mode', 'mode': 'attack'}, self._ctx('chat', True))
+        out = self._run({'action': 'change_mode', 'mode': 'scan'}, self._ctx('chat', True))
         self.assertEqual(len(out), 1)
         self.assertIsInstance(out[0], Ai)
         self.assertEqual(out[0].ai_type, 'mode_changed')
-        self.assertEqual(out[0].content, 'attack')
+        self.assertEqual(out[0].content, 'scan')
+
+    def test_legacy_attack_target_aliases_to_scan(self):
+        out = self._run({'action': 'change_mode', 'mode': 'attack'}, self._ctx('chat', True))
+        self.assertEqual(out[0].content, 'scan')
 
     def test_pinned_chat_cannot_self_escape(self):
         from secator.output_types import Ai, Error
-        out = self._run({'action': 'change_mode', 'mode': 'attack'}, self._ctx('chat', False))
+        out = self._run({'action': 'change_mode', 'mode': 'scan'}, self._ctx('chat', False))
         self.assertTrue(out and isinstance(out[0], Error))
         self.assertFalse(any(isinstance(o, Ai) and o.ai_type == 'mode_changed' for o in out))
 
     def test_pinned_action_mode_can_switch(self):
         from secator.output_types import Ai
-        out = self._run({'action': 'change_mode', 'mode': 'exploit'}, self._ctx('attack', False))
+        out = self._run({'action': 'change_mode', 'mode': 'exploit'}, self._ctx('scan', False))
         self.assertTrue(any(isinstance(o, Ai) and o.ai_type == 'mode_changed' and o.content == 'exploit'
                             for o in out))
 
@@ -226,14 +264,21 @@ class TestChangeModeHandler(unittest.TestCase):
             self.assertTrue(out and isinstance(out[0], Error), bad)
 
     def test_cannot_de_escalate(self):
-        # change_mode only escalates: exploit -> attack (downgrade) and a no-op
-        # same-mode switch are both rejected; escalation still works.
+        # change_mode only escalates: exploit -> scan (downgrade) is rejected with an
+        # Error and never signals mode_changed.
         from secator.output_types import Ai, Error
-        out = self._run({'action': 'change_mode', 'mode': 'attack'}, self._ctx('exploit', True))
+        out = self._run({'action': 'change_mode', 'mode': 'scan'}, self._ctx('exploit', True))
         self.assertTrue(out and isinstance(out[0], Error))
         self.assertFalse(any(isinstance(o, Ai) and o.ai_type == 'mode_changed' for o in out))
-        same = self._run({'action': 'change_mode', 'mode': 'attack'}, self._ctx('attack', True))
-        self.assertTrue(same and isinstance(same[0], Error))
+
+    def test_same_mode_is_benign_noop(self):
+        # Re-requesting the current mode (the model was unsure which mode it was in) is a
+        # no-op: a calm Info, NOT a scary "cannot de-escalate" Error, and no mode_changed.
+        from secator.output_types import Ai, Error, Info
+        out = self._run({'action': 'change_mode', 'mode': 'scan'}, self._ctx('scan', True))
+        self.assertTrue(out and isinstance(out[0], Info))
+        self.assertFalse(any(isinstance(o, Error) for o in out))
+        self.assertFalse(any(isinstance(o, Ai) and o.ai_type == 'mode_changed' for o in out))
 
 
 if __name__ == '__main__':

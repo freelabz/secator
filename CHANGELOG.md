@@ -1,5 +1,167 @@
 # Changelog
 
+## [0.53.2](https://github.com/freelabz/secator/compare/v0.53.1...v0.53.2) (2026-10-27)
+
+
+### Bug Fixes
+
+* **ai:** validate required finding fields, coach update_finding, drop screenshot tool ([#1594](https://github.com/freelabz/secator/issues/1594)) ([c763bdb](https://github.com/freelabz/secator/commit/c763bdb2ad1724852a1220f7c5c34759981fbce0))
+
+## [0.53.1](https://github.com/freelabz/secator/compare/v0.53.0...v0.53.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **ai:** scope list_runners by id vs name in the mongodb backend ([#1592](https://github.com/freelabz/secator/issues/1592)) ([13e019b](https://github.com/freelabz/secator/commit/13e019b4448d27df0f5d4495c75ffebdce916b3f))
+
+## [0.53.0](https://github.com/freelabz/secator/compare/v0.52.1...v0.53.0) (2026-10-27)
+
+
+### Features
+
+* **ai:** add web_search, list_runners, fetch_url, screenshot, update_plan tools ([#1590](https://github.com/freelabz/secator/issues/1590)) ([b24abda](https://github.com/freelabz/secator/commit/b24abda1d6ff5cc6c0764d6bdb6a9bc9a1f08946))
+* **ai:** custom provider / OpenAI-compatible base in `ai setup` ([#1586](https://github.com/freelabz/secator/issues/1586)) ([9da51f3](https://github.com/freelabz/secator/commit/9da51f32b9f86ee3d68e429d4517db8aae6877e7))
+
+
+### Bug Fixes
+
+* **ai:** collapse repeated action types in the subagent handback summary ([#1580](https://github.com/freelabz/secator/issues/1580)) ([14f5ae8](https://github.com/freelabz/secator/commit/14f5ae8adcc9294e5717f9ff7853fac4c7f7a6f5))
+* **ai:** hydrate run_task config metadata from the task class ([#1588](https://github.com/freelabz/secator/issues/1588)) ([1e6edfd](https://github.com/freelabz/secator/commit/1e6edfdb91a4888cf32d3403b74d1480747ab621))
+* **ai:** stream batch runner cards in a worker instead of buffering to the end ([#1587](https://github.com/freelabz/secator/issues/1587)) ([2ef0426](https://github.com/freelabz/secator/commit/2ef0426b143a66b7b7564a6cd7c56e8a2e9bfb69))
+
+## [0.52.1](https://github.com/freelabz/secator/compare/v0.52.0...v0.52.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **ai:** don't re-emit the initial prompt on remote session resume ([#1578](https://github.com/freelabz/secator/issues/1578)) ([6d0e30c](https://github.com/freelabz/secator/commit/6d0e30cde6ebcb9d24fe9d11a112e334337fb7dc))
+
+## [0.52.0](https://github.com/freelabz/secator/compare/v0.51.1...v0.52.0) (2026-10-20)
+
+
+### Features
+
+* **ai:** dismiss a follow_up/stop choice prompt to end the turn ([#1574](https://github.com/freelabz/secator/issues/1574)) ([0f86ab3](https://github.com/freelabz/secator/commit/0f86ab3c011f209509c8b6471fadcb611b2f344c))
+
+
+### Bug Fixes
+
+* **ai:** AI subagent inherits the operator's dangerous (bypass) mode ([#1573](https://github.com/freelabz/secator/issues/1573)) ([1c7170c](https://github.com/freelabz/secator/commit/1c7170cc6bb67cf492913ad126bb25f28da04388))
+* **ai:** route shell stdout to its own TUI panel, not the current one ([#1572](https://github.com/freelabz/secator/issues/1572)) ([03d1e96](https://github.com/freelabz/secator/commit/03d1e96b9a837f2f9958267668f34aff10d171a7))
+
+
+### Performance Improvements
+
+* **config:** default runners.threads to a CPU-scaled value ([#1518](https://github.com/freelabz/secator/issues/1518)) ([a02d8a5](https://github.com/freelabz/secator/commit/a02d8a5f02add5753573b64fe5c0f77cfe2de452))
+
+## [0.51.1](https://github.com/freelabz/secator/compare/v0.51.0...v0.51.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **ai:** make the TUI on_item hook picklable (module-level, not a closure) ([#1570](https://github.com/freelabz/secator/issues/1570)) ([065f96d](https://github.com/freelabz/secator/commit/065f96dc8fdb3ad84a283f505a978b3426767669))
+
+## [0.51.0](https://github.com/freelabz/secator/compare/v0.50.0...v0.51.0) (2026-10-18)
+
+
+### Features
+
+* **ai:** track exploits as append-only ExploitAttempt findings ([#1566](https://github.com/freelabz/secator/issues/1566)) ([2fdc8e9](https://github.com/freelabz/secator/commit/2fdc8e967ef8827b68f5496750633fe167bf5c2c))
+
+
+### Bug Fixes
+
+* **ai:** grace-wait for a follow-up after a choiceless stop (no approve/deny gate) ([#1565](https://github.com/freelabz/secator/issues/1565)) ([8d8c113](https://github.com/freelabz/secator/commit/8d8c113b2d4dc76138ccf439416014a3b1107fe2))
+* **ai:** upgrade litellm to 1.106.0 + add mcp dependency ([#1567](https://github.com/freelabz/secator/issues/1567)) ([94f64c3](https://github.com/freelabz/secator/commit/94f64c3cef65485219aaad8e252af9085e4bdedc))
+* **docker:** chown $HOME in alpine image so source-build tools work ([#1569](https://github.com/freelabz/secator/issues/1569)) ([e8a8a46](https://github.com/freelabz/secator/commit/e8a8a4641b651dd8950adecb92a0380fc07c7aed))
+
+
+### Performance Improvements
+
+* **ci:** parallelize tests + cache tool/pip installs to cut CI time ([#1564](https://github.com/freelabz/secator/issues/1564)) ([bd77242](https://github.com/freelabz/secator/commit/bd772422d285cd7bce64b323520daed9f621fd9b))
+
+## [0.50.0](https://github.com/freelabz/secator/compare/v0.49.2...v0.50.0) (2026-10-16)
+
+
+### Features
+
+* **ai:** animated status icons for runners (spinner / check / cross) ([#1560](https://github.com/freelabz/secator/issues/1560)) ([ff959b7](https://github.com/freelabz/secator/commit/ff959b72e110538e87cdadb2257fdf70d6636925))
+* **ai:** bypassing the permission engine (dangerous) also drops scope filtering ([#1557](https://github.com/freelabz/secator/issues/1557)) ([29e06bf](https://github.com/freelabz/secator/commit/29e06bf2fddd6b343f4452410aa2dd9a94709072))
+* **ai:** choice box replaces the input while active ([#1551](https://github.com/freelabz/secator/issues/1551)) ([3cbae12](https://github.com/freelabz/secator/commit/3cbae1202d15ca9b4c18a09c4ee6dad543a33f15))
+* **ai:** conversation name on the top delimiter + /name to rename ([#1555](https://github.com/freelabz/secator/issues/1555)) ([c15954b](https://github.com/freelabz/secator/commit/c15954b6a5ed604509f53838bd4cdb6ec128efa0))
+* **ai:** Ctrl+R background-tasks panel in the TUI ([#1563](https://github.com/freelabz/secator/issues/1563)) ([fc57c14](https://github.com/freelabz/secator/commit/fc57c140517220fc89bf33eebc7eda2b7966753e))
+* **ai:** default --isolated sandbox to freelabz/secator-lite:&lt;version&gt;, configurable ([#1538](https://github.com/freelabz/secator/issues/1538)) ([c45b18a](https://github.com/freelabz/secator/commit/c45b18aae2c5c1f1358a7aaefacc37edc3fa09cf))
+* **ai:** graceful stop when the agent-loop cap is hit; raise default to 100 ([#1539](https://github.com/freelabz/secator/issues/1539)) ([f74a66b](https://github.com/freelabz/secator/commit/f74a66bd211539324cc8c02f6414103c91e772a5))
+* **ai:** hide input in subagent view + expandable finding-action rows ([#1543](https://github.com/freelabz/secator/issues/1543)) ([2338867](https://github.com/freelabz/secator/commit/2338867af8bd3a01c1cab668c6374af89533f30a))
+* **ai:** meta bar under the TUI input (guardrails / mode / context %) ([#1553](https://github.com/freelabz/secator/issues/1553)) ([3b5c885](https://github.com/freelabz/secator/commit/3b5c88591e8ea2c4acbb72f14acd0679d0c0aa7c))
+* **ai:** model-settable run_shell timeout, capped by task_max_timeout ([#1515](https://github.com/freelabz/secator/issues/1515)) ([5b160ee](https://github.com/freelabz/secator/commit/5b160ee45835b2f4ff37d4fff03de15bbdb79569))
+* **ai:** orient the model to offer multi-select choices ([#1550](https://github.com/freelabz/secator/issues/1550)) ([1048c7f](https://github.com/freelabz/secator/commit/1048c7fffff32b94146134a588c26c9437e215cc))
+* **ai:** paginated + grouped query_workspace to cut context ([#1517](https://github.com/freelabz/secator/issues/1517)) ([cfcef3e](https://github.com/freelabz/secator/commit/cfcef3e9db726fb53d6b4949ae256eb5bc7529a3))
+* **ai:** prevent subagents from spawning nested subagents ([#1541](https://github.com/freelabz/secator/issues/1541)) ([1865329](https://github.com/freelabz/secator/commit/18653298b946087c1afb04ac7a84f9171d57faae))
+* **ai:** restore CLI flows swallowed by TUI + human-readable query cards ([#1547](https://github.com/freelabz/secator/issues/1547)) ([e8b2541](https://github.com/freelabz/secator/commit/e8b2541462af7e9e602d06a6ceae24cffe3bee23))
+* **ai:** route batch tasks by runner id + subagent verdict panel ([#1545](https://github.com/freelabz/secator/issues/1545)) ([a3aa4f7](https://github.com/freelabz/secator/commit/a3aa4f7c3e57e038ed5634038e0e617192b04f76))
+* **ai:** session-context block + never block on interactive sudo ([#1514](https://github.com/freelabz/secator/issues/1514)) ([abfb337](https://github.com/freelabz/secator/commit/abfb3372faaf301efde758e077a5d4b5e76329c6))
+* **ai:** show the command in permission prompts + render them in the input slot ([#1554](https://github.com/freelabz/secator/issues/1554)) ([209edad](https://github.com/freelabz/secator/commit/209edad4f96fe83b4f2780ced6e4329b659ff163))
+* **ai:** Textual TUI for `secator x ai` (default, with `--no-tui`) ([#1521](https://github.com/freelabz/secator/issues/1521)) ([33d4946](https://github.com/freelabz/secator/commit/33d4946e4acba72cdad7b1d87817578d1ac22add))
+* **ai:** unify end-of-turn on a single `stop` action ([#1540](https://github.com/freelabz/secator/issues/1540)) ([65bed12](https://github.com/freelabz/secator/commit/65bed12348b5d6e2e37a6e48b485110c8a7b4ced))
+* **ai:** wire choice prompts to the input box (fill, edit, submit) ([#1549](https://github.com/freelabz/secator/issues/1549)) ([3544bdd](https://github.com/freelabz/secator/commit/3544bdda379425b534c6f98cfb9f21d1a8ade69a))
+* **nuclei:** treat hang-monitor self-kill as a warning, not a task failure ([#1529](https://github.com/freelabz/secator/issues/1529)) ([035d591](https://github.com/freelabz/secator/commit/035d59107dbbc7c2151a15acf1b04670fd0c32fd))
+* **query:** add --show-all flag to reveal extra vulnerability fields ([#1510](https://github.com/freelabz/secator/issues/1510)) ([c4a6d1c](https://github.com/freelabz/secator/commit/c4a6d1c67e5f25e2a8c689cdea9a0de4a16688bc))
+
+
+### Bug Fixes
+
+* **ai:** --in-scope / --out-of-scope comma-split into hosts ([#1552](https://github.com/freelabz/secator/issues/1552)) ([e9f9d4f](https://github.com/freelabz/secator/commit/e9f9d4fe41da7bc9ac22364bde60dfb484c3d850))
+* **ai:** don't show a 'tool call failed' line for guardrail-blocked actions ([#1556](https://github.com/freelabz/secator/issues/1556)) ([eccdfa2](https://github.com/freelabz/secator/commit/eccdfa2fef80d6fdb0028b095a5fe8f576c2c748))
+* **ai:** drop tool-results stranded after a non-tool_calls parent ([#1530](https://github.com/freelabz/secator/issues/1530)) ([267b1fb](https://github.com/freelabz/secator/commit/267b1fb6b91b5f8a2800e9786ebc035ebb368fb5))
+* **ai:** expose the shfmt binary on PATH when installing the AI addon ([#1531](https://github.com/freelabz/secator/issues/1531)) ([268884a](https://github.com/freelabz/secator/commit/268884a932e3e3e8df65e25a5aa9c45e80f3eb44))
+* **ai:** fence untrusted tool-result content against prompt injection ([#1528](https://github.com/freelabz/secator/issues/1528)) ([f1457ab](https://github.com/freelabz/secator/commit/f1457ab9332defe1df0cb14dc1f5b0f9880da20b))
+* **ai:** hide parent status in subagent view + space out subagent rows ([#1562](https://github.com/freelabz/secator/issues/1562)) ([f734bc7](https://github.com/freelabz/secator/commit/f734bc75725c78eff2edf2efb50b823ade7670c3))
+* **ai:** hold a prompt typed during TUI startup instead of losing it as a steer ([#1537](https://github.com/freelabz/secator/issues/1537)) ([e42a875](https://github.com/freelabz/secator/commit/e42a875a6a39608d3ee8767c301199c11792d5cf))
+* **ai:** nest add_finding fields under a declared `fields` param ([#1525](https://github.com/freelabz/secator/issues/1525)) ([529bf8f](https://github.com/freelabz/secator/commit/529bf8f5b05aac91b98809ada2ea95e8fabf3ab9))
+* **ai:** route parallel workflow/scan output to the right panel in the TUI ([#1533](https://github.com/freelabz/secator/issues/1533)) ([48ab7c8](https://github.com/freelabz/secator/commit/48ab7c8ee7a662260fe427c55e5218c7a0d5c61a))
+* **ai:** stop subagent step duplication + fix parallel subagent rows ([#1544](https://github.com/freelabz/secator/issues/1544)) ([95c5b31](https://github.com/freelabz/secator/commit/95c5b31538ded6bbeaee0bd073942873e2068e27))
+* **ai:** subagent inherits parent's runtime approvals ([#1542](https://github.com/freelabz/secator/issues/1542)) ([44d511e](https://github.com/freelabz/secator/commit/44d511e6c2237b5c717027539e6374f1d8759a26))
+* **cli:** --help crash for runners accepting any input type; real --sort example field ([#1504](https://github.com/freelabz/secator/issues/1504)) ([75f1dbe](https://github.com/freelabz/secator/commit/75f1dbe6193be3083a3a283e135570f4de539ef3))
+* **config:** don't drop sibling keys when editing a Dict field sub-key ([#1548](https://github.com/freelabz/secator/issues/1548)) ([11bb8bc](https://github.com/freelabz/secator/commit/11bb8bcab2cdfee3fdb1cc6272c2c20461955578))
+* **installer:** don't prepend v to branch/SHA versions; honour config install_version override ([#1508](https://github.com/freelabz/secator/issues/1508)) ([cf9edf2](https://github.com/freelabz/secator/commit/cf9edf27bb2680821341a4bb88dab0e066e26a9b))
+* **nuclei:** re-enable -hang-monitor by default (revert [#1410](https://github.com/freelabz/secator/issues/1410)) ([#1520](https://github.com/freelabz/secator/issues/1520)) ([97b5fd5](https://github.com/freelabz/secator/commit/97b5fd553acfe731626e85a833fb8be173c61292))
+* **runners:** default validators to {} (not []) in async delay path ([#1559](https://github.com/freelabz/secator/issues/1559)) ([a5f40df](https://github.com/freelabz/secator/commit/a5f40df83ae05d23ac46ea090b1a033d88e1d0ff))
+* **runners:** don't re-fire on_item when a sync runner backfills store items ([#1536](https://github.com/freelabz/secator/issues/1536)) ([47a68a2](https://github.com/freelabz/secator/commit/47a68a296d7077733bd984b9a521b65538caa1c8))
+* **runners:** fail fast with a clear error on a missing/empty template ([#1527](https://github.com/freelabz/secator/issues/1527)) ([70b233c](https://github.com/freelabz/secator/commit/70b233c416624a0bf00410e9e0f51fc5fcd50667))
+* **runners:** yield store findings when iterating a sync task/workflow ([#1524](https://github.com/freelabz/secator/issues/1524)) ([8ffd136](https://github.com/freelabz/secator/commit/8ffd136e7e55e23fa3049760397fa207506dd934))
+
+
+### Performance Improvements
+
+* **ai:** quickest token-usage wins for the ai task ([#1516](https://github.com/freelabz/secator/issues/1516)) ([2f5d1df](https://github.com/freelabz/secator/commit/2f5d1df9acd635f9d6e876b091959e9d5a9bcada))
+* **report:** speed up listing reports ([#1511](https://github.com/freelabz/secator/issues/1511)) ([929c7a8](https://github.com/freelabz/secator/commit/929c7a84b06c0864e47cbed0a244d8563751ad12))
+
+
+### Documentation
+
+* **ai:** fix malformed syntax in arsenal.txt examples ([#1561](https://github.com/freelabz/secator/issues/1561)) ([c2b065e](https://github.com/freelabz/secator/commit/c2b065ef6a52adfab05f42273ece7f7bb80d47f0))
+
+## [0.49.2](https://github.com/freelabz/secator/compare/v0.49.1...v0.49.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* **ai:** allow run_subagent in exploit mode (parity with attack) ([#1498](https://github.com/freelabz/secator/issues/1498)) ([0319628](https://github.com/freelabz/secator/commit/03196282348d805b5986a09efdf0cbda70fb6cfb))
+* **ai:** programmatic current-mode statement + robust same-mode change_mode ([#1499](https://github.com/freelabz/secator/issues/1499)) ([22b017c](https://github.com/freelabz/secator/commit/22b017cdfbaa25ebc433ffa03d750028fde79417))
+* **ai:** subagent persistence references real mark_vuln_* tools ([#1501](https://github.com/freelabz/secator/issues/1501)) ([efdb027](https://github.com/freelabz/secator/commit/efdb027b25203ec90880227c443a7b7ed9dd90aa))
+* **installer:** authenticate GitHub git clones + explain anonymous-clone refusals ([#1406](https://github.com/freelabz/secator/issues/1406)) ([e26828e](https://github.com/freelabz/secator/commit/e26828e44cf47e14fa21adfb343584c6001db9ab))
+* **scope:** URL web-app grants + make secator.scope the single scope matcher ([#1433](https://github.com/freelabz/secator/issues/1433)) ([d79a38f](https://github.com/freelabz/secator/commit/d79a38f3b18c77743434b0654cd5f60eec512d2b))
+* walk the task's own process tree instead of scanning every host process ([#1374](https://github.com/freelabz/secator/issues/1374)) ([#1497](https://github.com/freelabz/secator/issues/1497)) ([7311245](https://github.com/freelabz/secator/commit/7311245620abba5fdd95987ceb6a2b3e92587fe2))
+
+## [0.49.1](https://github.com/freelabz/secator/compare/v0.49.0...v0.49.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **celery:** clear has_children on an abandoned task ([#1484](https://github.com/freelabz/secator/issues/1484)) ([ec0284e](https://github.com/freelabz/secator/commit/ec0284e95b6957e54b77fe44bba5ed74ec3ed2f5))
+* **hooks:** create runner on first api driver update when id is a run-scope uuid ([#1492](https://github.com/freelabz/secator/issues/1492)) ([b5f30aa](https://github.com/freelabz/secator/commit/b5f30aa3868cc8adb780fc0683190200d34b16ee))
+
 ## [0.49.0](https://github.com/freelabz/secator/compare/v0.48.0...v0.49.0) (2026-10-04)
 
 

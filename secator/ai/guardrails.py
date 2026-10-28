@@ -28,14 +28,13 @@ ALWAYS_ALLOWED_HOSTS = (
 
 
 def _host_of(value: str) -> str:
-	"""Bare host of a target value (strips scheme/port/path); '' if none."""
-	from urllib.parse import urlparse
-	if value.startswith(('http://', 'https://')):
-		return (urlparse(value).hostname or '').lower().rstrip('.')
-	host = value.split('/', 1)[0]
-	if ':' in host and not host.startswith('['):
-		host = host.rsplit(':', 1)[0]
-	return host.lower().rstrip('.')
+	"""Bare host of a target value (strips scheme/port/path); '' if none.
+
+	Thin alias of the single host-extraction helper in ``secator.scope`` so the
+	guardrail and the scope matcher never diverge on what "the host" is.
+	"""
+	from secator.scope import target_host
+	return target_host(value)
 
 
 def _is_always_allowed_host(value: str) -> bool:
@@ -1090,6 +1089,9 @@ class PermissionEngine:
 			# (whole-command-approved short-circuit handled at the top of this branch,
 			# before parsing, so a parse-failure re-check clears too — see above.)
 			if unmatched:
+				# dedup while preserving order: a command repeated across subcommands (e.g. a
+				# `for`-loop body) must list its name once, not N times.
+				unmatched = list(dict.fromkeys(unmatched))
 				return PermissionResult(
 					decision="ask",
 					reason=f"No rule for command(s): {', '.join(unmatched)}",
@@ -1102,18 +1104,17 @@ class PermissionEngine:
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
-		elif action_type in ("subagent", "stop", "change_mode"):
-			# Control / meta actions with no network egress or exec of their OWN: `stop`
-			# and `change_mode` only steer the loop, and a `subagent`'s own actions are
-			# guardrail-checked inside its run (its targets are also scope-checked here via
-			# the target layer below). Auto-allow the action itself — without this they fall
-			# through to the "Unknown action type" deny and silently break run_subagent /
-			# the bare stop() / change_mode.
-			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
-		elif action_type in ("query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
-			# mark_vuln_exploited / mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
-			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
-			# so they're safe to auto-allow alongside query/add_finding.
+		# Auto-allow is sourced from the tool registry (`tool.auto_allow`), the single
+		# source of truth — not a hand-synced tuple here (that drift is what rotted the
+		# add_vuln_poc rename). Auto-allowed actions are control/meta (`subagent`/`stop`/
+		# `change_mode` only steer the loop; a subagent's own actions + targets are
+		# guardrail-checked inside its run and by the target layer below) and finding
+		# reads/writes (`query`/`add_finding`/`mark_vuln_*`/`update_finding` only read or
+		# $set-update an EXISTING workspace finding — no scope widening). The target layer
+		# below still scope-checks any `targets` these carry.
+		from secator.ai.tools import TOOLS_BY_ACTION
+		tool = TOOLS_BY_ACTION.get(action_type)
+		if tool is not None and tool.auto_allow:
 			# Don't let an injected add_finding silently mint a scope-widening target finding.
 			# Deny (fail-closed) rather than "ask": there is no add_finding prompt layer, so an
 			# "ask" here isn't surfaceable — it would just spin the prompt loop until it denies
@@ -1265,6 +1266,15 @@ class PermissionEngine:
 		for rule_str in rules:
 			rule_type, patterns = parse_rule(rule_str)
 			self.runtime_allow.append((rule_type, patterns))
+
+	def export_runtime_allow(self) -> List[str]:
+		"""Serialize the runtime allow-list back to `type(p1,p2)` rule strings.
+
+		Round-trips through add_runtime_allow so a subagent can inherit the
+		human-approved allowances granted to its parent (it runs non-interactively
+		and can never surface its own `ask` prompt).
+		"""
+		return [f"{rt}({','.join(patterns)})" for rt, patterns in self.runtime_allow]
 
 	def prompt_target(self, target: str, interactive: bool = True, command: str = "") -> str:
 		"""Show interactive prompt for an unknown target.

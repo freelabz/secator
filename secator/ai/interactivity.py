@@ -9,7 +9,16 @@ import time
 from time import sleep
 from typing import Any, Dict, List, Optional
 
-from secator.ai.tools import STOP_TOOL_SCHEMA
+from secator.ai.tools import STOP_TOOL_SCHEMA, STOP_TOOL_SCHEMA_SIMPLE
+
+
+# Sentinel answer meaning "dismiss this follow-up/stop prompt" — the user declined
+# all offered choices ("none of these work for me") instead of picking one. It
+# resolves the pending prompt cleanly and ends the turn (the worker goes idle); the
+# next typed user message starts a fresh turn via the normal resume/respawn path.
+# Applies to `stopped`/`follow_up` CHOICE prompts ONLY, never to `permission`
+# prompts (those stay a mandatory allow/deny). In the TUI the key is ESC.
+DISMISS_ANSWER = "__dismiss__"
 
 
 class UserInputTimeout(Exception):
@@ -26,43 +35,82 @@ class UserInputTimeout(Exception):
 class InteractivityBackend:
 	"""Base class for AI interactivity backends."""
 
+	# Whether there is a user to pause for at end-of-turn. True for CLI/TUI/Remote
+	# (stop pauses and waits/polls), False for AutoBackend (stop ends immediately).
+	# Gates the interactive-vs-autonomous `stop` guidance in the system prompt.
+	interactive = True
+
 	def ask_user(self, question: str, choices: List[str], session_id: str,
-				 prompt_type: str = "follow_up", **context) -> Optional[Dict]:
+				 prompt_type: str = "stopped", **context) -> Optional[Dict]:
 		"""Ask the user a question.
 
 		Args:
 			question: The question to ask.
 			choices: List of choice strings.
 			session_id: Session ID for correlating request/response.
-			prompt_type: "follow_up" or "permission".
+			prompt_type: "stopped" (end-of-turn pause) or "permission".
 			**context: Backend-specific context (engine, history, etc.).
 
 		Returns:
 			dict with at least {"answer": str}, or None (exit/timeout/deny).
-			For follow_up: may also include "extra_iters" and "switch_mode".
+			For a stopped pause: may also include "extra_iters" and "switch_mode".
 		"""
 		raise NotImplementedError
 
 	def get_excluded_tools(self) -> set:
 		"""Return tool names to exclude from the LLM's available tools.
 
-		Excludes "stop" by default: only AutoBackend (no user to hand control back
-		to) needs the LLM to have an explicit stop tool.
+		None by default: `stop` is the single end-of-turn signal in EVERY mode, so
+		it's available everywhere. What `stop` does next (pause/wait vs end) is decided
+		entirely by this backend's ask_user, not by withholding the tool.
 		"""
-		return {"stop"}
+		return set()
 
 	def get_extra_tools(self) -> list:
-		"""Return additional tool schemas (not in TOOL_SCHEMAS) to inject."""
+		"""Return additional tool schemas (not in TOOL_SCHEMAS) to inject.
+
+		Interactive backends expose a `stop` that may carry `choices`/`multiple` so the
+		end-of-turn pause can offer the user concrete next steps. AutoBackend overrides
+		this with a choiceless `stop` (a definitive stop — no user to pick a next step)."""
+		return [STOP_TOOL_SCHEMA]
+
+	def poll_steers(self, session_id=None) -> list:
+		"""Drain pending mid-flight steers. No channel by default (CLI/Auto)."""
 		return []
+
+	@property
+	def owns_display(self) -> bool:
+		"""True if this backend owns the terminal (e.g. a full-screen TUI), so the
+		runner should suppress its own console printing."""
+		return False
+
+	def on_session(self, workspace_id, context, session_id) -> None:
+		"""Called once the ai task has resolved its session. No-op by default; a
+		display backend can use it to wire up session-scoped views."""
+		return None
+
+	def get_initial_prompt(self, inputs, **context):
+		"""Acquire the first prompt when none was passed. Default: the local
+		terminal full-screen prompt (CLI/Auto); None in a worker / non-interactive
+		backend (remote), which leaves the prompt to be resolved elsewhere."""
+		from secator.definitions import IN_WORKER
+		if IN_WORKER:
+			return None
+		from secator.rich import FullScreenPrompt
+		targets_str = ', '.join(inputs) if inputs else 'no target'
+		return FullScreenPrompt(
+			title=f"What do you want to do? ({targets_str})",
+			placeholder="e.g. Scan for vulnerabilities on this target...",
+		).show()
 
 
 class CLIBackend(InteractivityBackend):
 	"""Local terminal interactive backend."""
 
-	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
+	def ask_user(self, question, choices, session_id, prompt_type="stopped", **context):
 		if prompt_type == "permission":
 			return self._handle_permission(**context)
-		return self._handle_follow_up(choices, **context)
+		return self._handle_end_prompt(choices, **context)
 
 	def _handle_permission(self, **context):
 		"""Delegate permission prompts to the PermissionEngine's rich menus."""
@@ -83,8 +131,8 @@ class CLIBackend(InteractivityBackend):
 			return {"answer": decision}
 		return None
 
-	def _handle_follow_up(self, choices, **context):
-		"""Delegate follow-up prompts to the rich interactive menu."""
+	def _handle_end_prompt(self, choices, **context):
+		"""Delegate the end-of-turn pause to the rich interactive menu."""
 		from secator.ai.utils import prompt_user
 		history = context.get("history")
 		if not history:
@@ -106,7 +154,12 @@ class RemoteBackend(InteractivityBackend):
 		self.query_engine = query_engine
 		self.poll_interval = poll_interval
 
-	def build_pending_prompt(self, question, choices, session_id, prompt_type="follow_up", **context):
+	def get_initial_prompt(self, inputs, **context):
+		# remote runs in a worker; the first prompt arrives via context/resume, never
+		# an interactive full-screen prompt
+		return None
+
+	def build_pending_prompt(self, question, choices, session_id, prompt_type="stopped", **context):
 		"""Build a pending Ai finding for the remote user to see and answer.
 
 		The caller must yield this item so it gets stored in the workspace
@@ -116,9 +169,14 @@ class RemoteBackend(InteractivityBackend):
 		can match THIS exact prompt, not a stale earlier answer.
 		"""
 		from secator.output_types import Ai
+		multiple = bool(context.get("multiple", False))
 		extra_data = {
 			"permission_type": context.get("permission_type", ""),
 			"value": context.get("value", ""),
+			# Mirror the top-level fields so a `stopped` pause carries its choices the same
+			# way the stop handler's own doc does (clients read either).
+			"choices": list(choices or []),
+			"multiple": multiple,
 		}
 		prompt_uuid = context.get("prompt_uuid")
 		if prompt_uuid:
@@ -127,8 +185,8 @@ class RemoteBackend(InteractivityBackend):
 		# SAME TYPE (e.g. a worker that died mid-poll re-issuing the same kind of
 		# prompt). Expire them BEFORE this doc is persisted so only the current prompt
 		# stays live. Scope to `prompt_type` only: a permission prompt must NOT expire a
-		# still-pending follow_up (and vice versa) — the two can be outstanding at once,
-		# and cross-expiring orphaned the other prompt so it stopped awaiting an answer.
+		# still-pending `stopped` prompt (and vice versa) — the two can be outstanding at
+		# once, and cross-expiring orphaned the other prompt so it stopped awaiting an answer.
 		self._expire_stale_pending(session_id, ai_type=prompt_type)
 		# The conversation id rides on `_context.session_id` (auto-stamped from the
 		# runner context on persist) — the poll + restore + remote server all key on
@@ -137,12 +195,13 @@ class RemoteBackend(InteractivityBackend):
 			content=question,
 			ai_type=prompt_type,
 			status="pending",
-			choices=choices,
+			choices=list(choices or []),
+			multiple=multiple,
 			extra_data=extra_data,
 			_timestamp=time.time(),
 		)
 
-	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
+	def ask_user(self, question, choices, session_id, prompt_type="stopped", **context):
 		answer = self._poll_for_answer(session_id, prompt_type, prompt_uuid=context.get("prompt_uuid"))
 		if answer is None:
 			return None
@@ -163,7 +222,7 @@ class RemoteBackend(InteractivityBackend):
 				return {"answer": "allow"}
 			return {"answer": "deny"}
 
-		# follow_up: return the answer text
+		# stopped pause: return the answer text
 		return {"answer": answer}
 
 	def poll_steers(self, session_id):
@@ -232,7 +291,7 @@ class RemoteBackend(InteractivityBackend):
 		blocked on — identified by ``prompt_uuid`` (stamped into the pending doc's
 		``extra_data.prompt_uuid`` before it was persisted). Matching only on
 		``{session_id, status:"answered"}`` is a bug: a multi-turn conversation
-		accumulates *previously* answered follow-up docs, so an unscoped query
+		accumulates *previously* answered prompt docs, so an unscoped query
 		returns a STALE answer immediately, the worker re-injects that old answer
 		as a brand-new prompt, re-runs the whole turn, asks again, re-matches the
 		same stale doc — an infinite respawn loop that re-runs scans and burns
@@ -240,10 +299,10 @@ class RemoteBackend(InteractivityBackend):
 		prompt's own answer (and time out only THIS prompt's doc).
 
 		A steer (mid-flight user message) breaks the wait: if a pending steer
-		arrives for this session while we're blocked on a follow-up, we return its
+		arrives for this session while we're blocked on a prompt, we return its
 		content as the "answer" so the loop redirects immediately instead of
-		stalling until the follow-up is explicitly answered (or times out). This
-		keeps follow-up semantics intact for the no-steer case.
+		stalling until the prompt is explicitly answered (or times out). This
+		keeps prompt semantics intact for the no-steer case.
 		"""
 		base = {
 			"_type": "ai",
@@ -303,17 +362,17 @@ class RemoteBackend(InteractivityBackend):
 
 		``ai_type`` scopes the expiry to a single prompt type (the type of the
 		incoming prompt). A permission prompt must NOT expire a still-pending
-		follow_up (and vice versa): both can be outstanding at the same time, and
-		expiring across types orphaned the other prompt so it stopped awaiting its
+		`stopped` prompt (and vice versa): both can be outstanding at the same time,
+		and expiring across types orphaned the other prompt so it stopped awaiting its
 		answer. When ``ai_type`` is None both prompt types are expired (legacy).
 		FLAG: a DB-layer TTL index on pending Ai docs is the durable follow-up.
 		"""
 		if not self.query_engine:
 			return
-		# Only expire PROMPT-like docs (follow_up / permission). A blanket match on every
+		# Only expire PROMPT-like docs (stopped / permission). A blanket match on every
 		# pending AI doc would also time out mid-flight `steer` interjections before
 		# poll_steers/_drain_steers can consume them.
-		ai_types = (ai_type,) if ai_type else ("follow_up", "permission")
+		ai_types = (ai_type,) if ai_type else ("stopped", "permission")
 		for ai_type in ai_types:
 			self.query_engine.update(
 				{
@@ -364,16 +423,74 @@ class RemoteBackend(InteractivityBackend):
 
 
 class AutoBackend(InteractivityBackend):
-	"""Non-interactive autonomous backend."""
+	"""Non-interactive autonomous backend (subagents + autonomous remote workers)."""
 
-	def get_excluded_tools(self) -> set:
-		return {"follow_up"}
+	interactive = False
 
 	def get_extra_tools(self) -> list:
-		return [STOP_TOOL_SCHEMA]
+		# A choiceless `stop`: a definitive stop with no user to offer next steps to.
+		return [STOP_TOOL_SCHEMA_SIMPLE]
 
-	def ask_user(self, question, choices, session_id, prompt_type="follow_up", **context):
+	def ask_user(self, question, choices, session_id, prompt_type="stopped", **context):
+		# No user to hand control back to: `stop` (and a content-only reply) ends the run.
 		return None
+
+
+class TUIBackend(InteractivityBackend):
+	"""Interactive backend bridged to an active Textual TUI (secator.rich.get_tui()).
+
+	Steers and user prompts flow through the TUI's thread-safe hooks instead of the
+	rich prompt_toolkit menus (which would collide with Textual's display)."""
+
+	def poll_steers(self, session_id=None):
+		from secator.rich import get_tui
+		tui = get_tui()
+		try:
+			return tui.tui_poll_steers() if tui is not None else []
+		except Exception:  # noqa: BLE001 - a steer must never crash the run
+			return []
+
+	def ask_user(self, question, choices, session_id, prompt_type="stopped", **context):
+		from secator.rich import get_tui
+		tui = get_tui()
+		if tui is None:
+			return None
+		res = tui.tui_ask_user(
+			question, choices or [], prompt_type, multiple=bool(context.get("multiple", False)),
+			command=context.get("command") or context.get("value") or "")
+		answer = (res or {}).get("answer")
+		if answer is None:
+			return None
+		if prompt_type == "permission":
+			# Mirror RemoteBackend: persist a session-scoped rule so the guardrail
+			# re-check passes — a rule-less one-shot "allow" leaves the value unknown,
+			# so the engine re-prompts the SAME target/path in a loop (the bug).
+			if answer in ("allow", "allow_all"):
+				engine = context.get("engine")
+				if engine:
+					RemoteBackend._add_permission_rules(
+						engine, context.get("permission_type"), context.get("value", ""),
+						all_scope=(answer == "allow_all"))
+				return {"answer": "allow"}
+			return {"answer": "deny"}
+		return {"answer": answer}
+
+	@property
+	def owns_display(self) -> bool:
+		return True
+
+	def on_session(self, workspace_id, context, session_id) -> None:
+		from secator.rich import get_tui
+		tui = get_tui()
+		if tui is not None and hasattr(tui, "set_findings_source"):
+			tui.set_findings_source(workspace_id, context, session_id)
+
+	def get_initial_prompt(self, inputs, **context):
+		# a string (possibly "") — NOT None — so the caller treats an empty answer as
+		# "interactive backend, nothing given -> exit" rather than "non-interactive"
+		res = self.ask_user(
+			"What do you want to do?", [], context.get("session_id", ""), prompt_type="stopped")
+		return (res or {}).get("answer") or ""
 
 
 def create_backend(mode: str, timeout: int = 600, query_engine: Any = None, poll_interval: int = 5):
@@ -382,5 +499,7 @@ def create_backend(mode: str, timeout: int = 600, query_engine: Any = None, poll
 		return CLIBackend()
 	elif mode == "remote":
 		return RemoteBackend(timeout=timeout, query_engine=query_engine, poll_interval=poll_interval)
+	elif mode == "tui":
+		return TUIBackend()
 	else:
 		return AutoBackend()

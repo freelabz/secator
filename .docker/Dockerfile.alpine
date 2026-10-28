@@ -55,6 +55,13 @@ RUN echo "secator ALL=(ALL) NOPASSWD: /sbin/apk add *" >> /etc/sudoers && \
 # Ensure proper permissions for sudoers
 RUN chmod 0440 /etc/sudoers
 
+# `COPY --from=builder /home/secator/.local` creates the parent /home/secator as root, and
+# BusyBox `adduser -D` does not chown an already-existing home. Hand it back to secator so
+# tools that write to $HOME during `install tools` work — notably rustup (used to build some
+# tools from source when the GitHub release lookup gets rate-limited), which otherwise dies
+# with "could not write rcfile '/home/secator/.profile': Permission denied".
+RUN chown -R secator:secator /home/secator
+
 # Set up the environment
 USER secator
 ENV PATH="${PATH}:/home/secator/.local/bin"

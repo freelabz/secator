@@ -174,17 +174,27 @@ class ChatHistory:
             msg["content"] = content
         self.messages.append(msg)
 
-    def add_tool_result(self, name: str, tool_call_id: str, content: str) -> None:
+    def add_tool_result(self, name: str, tool_call_id: str, content: str,
+                        runner_id: str = "", runner_type: str = "") -> None:
         """Add a tool result message.
 
         Args:
             name: Function name
             tool_call_id: ID of the tool call this result responds to
             content: The tool's output content
+            runner_id: For a store-backed runner tool (run_task/workflow/scan), the id its
+                findings are scoped by (``_context.<runner_type>_id``). Stamped as a
+                ``_runner_*`` message key (mirrors ``_token_count`` — ignored by providers,
+                persisted with the message) so compaction can STUB this result to a
+                recoverable workspace pointer instead of LLM-summarizing it.
+            runner_type: ``task`` / ``workflow`` / ``scan``.
         """
         msg = {"role": "tool", "tool_call_id": tool_call_id, "name": name, "content": content}
         if name:
             msg["name"] = name
+        if runner_id and runner_type:
+            msg["_runner_id"] = runner_id
+            msg["_runner_type"] = runner_type
         self.messages.append(msg)
 
     def to_messages(self, max_tokens_total: int = 0) -> List[Dict[str, str]]:
@@ -200,11 +210,11 @@ class ChatHistory:
         budget = self._trim_budget(max_tokens_total)
         msgs = self.trim(budget) if budget > 0 else self.messages.copy()
         # Repair FORWARD orphan tool_uses before every LLM call: an assistant
-        # tool_call with no matching tool_result. Some handlers (follow_up,
+        # tool_call with no matching tool_result. Some handlers (stop,
         # mark_vuln_exploited, add_finding, stop) yield only an `Ai` and never append a
         # tool_result, so their tool_calls pile up unmatched over a turn. Providers
         # reject/degrade on an unmatched tool_call (the model starts narrating options
-        # as prose instead of calling follow_up), so synthesize an acknowledgment.
+        # as prose instead of calling stop), so synthesize an acknowledgment.
         # Mutates the returned COPY only — self.messages (live history) is untouched,
         # so the synthetic acks stay ephemeral (rebuilt each turn). trim() already
         # handles LEADING orphans; this covers the forward ones on both paths.
@@ -395,6 +405,36 @@ class ChatHistory:
         debug(f'compacted: {old_tokens} -> {new_tokens} tokens', sub='runner.ai.context')
         return True, old_tokens, new_tokens
 
+    def _stub_recoverable_tool_results(self, msgs: List[Dict[str, str]]) -> int:
+        """Replace store-backed tool results (those stamped with `_runner_id` — the
+        run_task/workflow/scan findings that persist in the workspace) with a compact,
+        recoverable stub pointing at how to re-read them. Deterministic (no LLM), lossless
+        (``query_workspace`` rehydrates by runner id), and the tool message stays in place
+        so tool_call/result pairing is untouched. Mutates the given messages in place (they
+        are the same dict objects as ``self.messages``) and returns the count stubbed.
+        """
+        stubbed = 0
+        for m in msgs:
+            if m.get("role") != "tool" or not m.get("_runner_id"):
+                continue
+            if '"aged_out"' in (m.get("content") or ""):
+                continue  # already stubbed (idempotent across repeated compactions)
+            rid, rtype = m["_runner_id"], m.get("_runner_type") or "task"
+            m["content"] = json.dumps({
+                "aged_out": True,
+                "runner_id": rid,
+                "runner_type": rtype,
+                "note": (
+                    f'Findings from {rtype} "{rid}" were cleared to save context but are '
+                    f'stored in the workspace. Re-read them with query_workspace(query='
+                    f'{{"_context.{rtype}_id": "{rid}"}}) (that key alone is enough; '
+                    f'add "_type"/filters only to narrow).'),
+            }, separators=(',', ':'))
+            m.pop("_token_count", None)   # content changed -> invalidate the cached count
+            m.pop("_token_model", None)
+            stubbed += 1
+        return stubbed
+
     def compact(self, model: str, api_base: Optional[str] = None,
                 api_key: Optional[str] = None) -> None:
         """Summarize non-system messages using an LLM, keeping the initial system prompt
@@ -436,6 +476,20 @@ class ChatHistory:
         # the rebuilt window never begins on an orphan tool_result.
         _strip_leading_orphan_tools(to_keep)
 
+        # Phase 1 — deterministic, recoverable stubbing. Store-backed tool results
+        # (run_task/workflow/scan, tagged with `_runner_id`) are the bulk of the window and
+        # are losslessly re-readable from the workspace, so clear them to a compact pointer
+        # for FREE (no LLM call) instead of summarizing. If that alone brings us back under
+        # the threshold, keep the (now-small) messages in place and skip the summary — it's
+        # cheaper, lossless, keeps tool_call/result pairing intact, and the prefix stays
+        # stable for prompt caching going forward. Only the OLD results (to_summarize) are
+        # touched; the kept tail stays full for the model to work with.
+        self._stub_recoverable_tool_results(to_summarize)
+        if not self.should_compact(model):
+            return
+
+        # Phase 2 — still over budget: summarize the remainder (shell output, reasoning,
+        # non-recoverable results; stubbed results now cost almost nothing to carry).
         # Calculate target summary size based on available context
         usable = _usable_tokens(model)
         target_tokens = int(usable * 0.3)  # Target 30% of usable context

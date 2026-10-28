@@ -127,7 +127,8 @@ class SqliteBackend(QueryBackend):
 		from secator.hooks.sqlite import get_sqlite_conn
 		return get_sqlite_conn(self.config.get('db_path'))
 
-	def _execute_search(self, query: dict, limit: int = 0, exclude_fields: list = None) -> List[Dict[str, Any]]:
+	def _execute_search(self, query: dict, limit: int = 0, exclude_fields: list = None,
+	                    offset: int = 0) -> List[Dict[str, Any]]:
 		try:
 			conn = self._get_conn()
 			where, params = _build_where(query)
@@ -135,6 +136,14 @@ class SqliteBackend(QueryBackend):
 			if limit:  # limit=0 means unlimited (matches ABC contract and JsonBackend)
 				sql += " LIMIT ?"
 				params.append(limit)
+				if offset:
+					# SQLite requires a LIMIT before OFFSET; only valid on the limited path.
+					sql += " OFFSET ?"
+					params.append(offset)
+			elif offset:
+				# limit=0 (unlimited): emulate OFFSET with LIMIT -1 OFFSET ? (SQLite idiom).
+				sql += " LIMIT -1 OFFSET ?"
+				params.append(offset)
 			results = []
 			for (data,) in conn.execute(sql, params).fetchall():
 				finding = json.loads(data)
