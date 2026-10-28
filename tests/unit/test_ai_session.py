@@ -1022,12 +1022,13 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		mock_replay.assert_called_once()
 		mock_restore.assert_not_called()
 
+	@patch('secator.ai.session.list_sessions', return_value=[{"session_id": "PRIOR"}])
 	@patch('secator.tasks.ai.print_session_results')
 	@patch('secator.tasks.ai.pick_session_via_backend')
 	@patch('secator.tasks.ai.show_session_picker')
 	@patch('secator.tasks.ai.restore_history_from_db')
 	def test_display_owning_backend_uses_backend_picker_and_skips_console_replay(
-			self, mock_restore, mock_console_picker, mock_backend_picker, mock_print):
+			self, mock_restore, mock_console_picker, mock_backend_picker, mock_print, mock_list):
 		"""Regression (TUI default broke `--resume`): when the backend owns the display
 		(the Textual TUI), the resume branch must pick via pick_session_via_backend — NOT the
 		raw-console show_session_picker that collides with Textual — and must NOT print the
@@ -1055,6 +1056,38 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		mock_console_picker.assert_not_called()
 		mock_print.assert_not_called()
 		self.assertEqual(task.session_id, "PRIOR")
+		# Findings source rebound to the ADOPTED session id (on_session ran in setup with the
+		# initial id; the resume must re-point the TUI findings panel at the resumed session).
+		on_session_calls = [c for c in tui_backend.on_session.call_args_list if c.args[2] == "PRIOR"]
+		self.assertEqual(len(on_session_calls), 1)
+
+	@patch('secator.tasks.ai.pick_session_via_backend')
+	@patch('secator.ai.session.list_sessions', return_value=[])
+	def test_display_owning_backend_warns_when_no_sessions(self, mock_list, mock_backend_picker):
+		"""No saved sessions under the TUI: the plain-console picker prints a notice, but a
+		display-owning backend has no console, so the branch must yield a Warning (not end
+		silently) and must NOT invoke the picker."""
+		from secator.output_types import Warning as WarningItem
+
+		tui_backend = MagicMock()
+		tui_backend.owns_display = True
+		task, engine = self._make_task()
+		patches = (
+			patch('secator.tasks.ai.PermissionEngine'),
+			patch('secator.tasks.ai.create_backend', return_value=tui_backend),
+			patch('secator.tasks.ai.SensitiveDataEncryptor'),
+			patch('secator.tasks.ai.get_system_prompt', return_value='SYS'),
+			patch('secator.tasks.ai.build_tool_schemas', return_value=[]),
+		)
+		with contextlib.ExitStack() as stack:
+			for p in patches:
+				stack.enter_context(p)
+			items = list(task.yielder())
+
+		mock_backend_picker.assert_not_called()
+		warnings = [i for i in items if isinstance(i, WarningItem)]
+		self.assertEqual(len(warnings), 1)
+		self.assertIn("No previous AI sessions", warnings[0].message)
 
 
 class TestListSessionsSurfacesSessionId(unittest.TestCase):
