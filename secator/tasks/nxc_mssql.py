@@ -7,9 +7,9 @@ from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
 
 
-STATUS_REGEX = re.compile(r'\s*(?P<os>((\w+\s?)+))\s\((?P<version>(\d+\s+\d+\.\d+\.\d+))\)\s\(name:(?P<name>(\w-?)+)\)\s\(domain:(?P<domain>(\w\-?\.?)+)?\)\s\(EncryptionReq:(?P<enc>\w+)\)\s\(NTLM:(?P<ntlm>\w+)\)')  # noqa: E501
-LOGIN_SUCCESS_REGEX = re.compile(r'\s*(?P<domain>(\w+\-?\.?)+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')  # noqa: E501
-LOGIN_FAILED_REGEX = re.compile(r'\s*(?P<domain>(\w+\-?\.?)+)\\(?P<username>[^:\n]*):?(?P<password>.*)?')
+STATUS_REGEX = re.compile(r'\s*(?P<os>[\w ]+?)\s\((?P<version>\d+\s+\d+\.\d+\.\d+)\)\s\(name:(?P<name>[\w-]+)\)\s\(domain:(?P<domain>[\w.\-]*)\)\s\(EncryptionReq:(?P<enc>\w+)\)\s\(NTLM:(?P<ntlm>\w+)\)')  # noqa: E501
+LOGIN_SUCCESS_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')  # noqa: E501
+LOGIN_FAILED_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*):?(?P<password>.*)?')
 
 
 @task()
