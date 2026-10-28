@@ -1154,6 +1154,63 @@ class TestListSessionsSurfacesSessionId(unittest.TestCase):
 		self.assertEqual(sessions[0]["session_id"], '')
 
 
+class TestListSessionsLegacyDiscovery(unittest.TestCase):
+	"""list_sessions() must surface a session whose report has NO `ai` results
+	(legacy sessions: history.json exists, report.results.ai is empty, no stamped
+	session_id). Regression for resume reporting "No previous AI sessions found"
+	for such sessions. It resumes via the legacy history replay (empty session_id)."""
+
+	def _write(self, tmp_root, *, report_name='report.json', results_ai=None, info=None, history='[]'):
+		import json as _json
+		from pathlib import Path
+		task_dir = Path(tmp_root) / 'ws1' / 'tasks' / 'task1'
+		task_dir.mkdir(parents=True)
+		(task_dir / 'history.json').write_text(history)
+		if report_name:
+			report = {"info": info or {}, "results": {"ai": results_ai if results_ai is not None else []}}
+			(task_dir / report_name).write_text(_json.dumps(report))
+		return str(task_dir / 'history.json')
+
+	@patch('secator.ai.session.glob.glob')
+	def test_legacy_session_with_empty_ai_results_is_listed(self, mock_glob):
+		from secator.ai.session import list_sessions
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history_path = self._write(
+			tmp_root,
+			results_ai=[],
+			info={"targets": ["pentest-ground.com"], "run_opts": {"prompt": "Run a pentest"}},
+		)
+		mock_glob.return_value = [history_path]
+		sessions = list_sessions()
+		self.assertEqual(len(sessions), 1)
+		self.assertEqual(sessions[0]["session_id"], '')
+		self.assertEqual(sessions[0]["prompt"], "Run a pentest")  # fell back to run_opts.prompt
+		self.assertEqual(sessions[0]["targets"], ["pentest-ground.com"])
+
+	@patch('secator.ai.session.glob.glob')
+	def test_prompt_falls_back_to_first_user_message_in_history(self, mock_glob):
+		from secator.ai.session import list_sessions
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history = '[{"role": "system", "content": "sys"}, {"role": "user", "content": "do the thing"}]'
+		history_path = self._write(tmp_root, results_ai=[], info={}, history=history)
+		mock_glob.return_value = [history_path]
+		sessions = list_sessions()
+		self.assertEqual(sessions[0]["prompt"], "do the thing")
+
+	@patch('secator.ai.session.glob.glob')
+	def test_report_ai_json_filename_is_found(self, mock_glob):
+		from secator.ai.session import list_sessions
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history_path = self._write(
+			tmp_root, report_name='report_ai.json', results_ai=[],
+			info={"run_opts": {"prompt": "from report_ai"}},
+		)
+		mock_glob.return_value = [history_path]
+		sessions = list_sessions()
+		self.assertEqual(len(sessions), 1)
+		self.assertEqual(sessions[0]["prompt"], "from report_ai")
+
+
 class TestAddAssistantToHistory(unittest.TestCase):
 	"""_add_assistant_to_history must build + append the litellm message to chat
 	history AND return that exact dict, so the caller (the response emission in

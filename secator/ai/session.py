@@ -31,8 +31,34 @@ def save_history(history, reports_folder, debug_fn=None):
 			console.print(Warning(message=f'Failed to save history: {e}'))
 
 
+def _read_json(path):
+	"""Best-effort JSON load; None on a missing or corrupt file."""
+	try:
+		with open(path, encoding='utf-8') as f:
+			return json.load(f)
+	except (json.JSONDecodeError, OSError):
+		return None
+
+
+def _first_user_prompt(history_path):
+	"""The first `user` message in a saved history.json — the resume-prompt fallback."""
+	data = _read_json(history_path)
+	if not isinstance(data, list):
+		return ''
+	for msg in data:
+		if isinstance(msg, dict) and msg.get('role') == 'user':
+			return msg.get('content') or ''
+	return ''
+
+
 def list_sessions(max_sessions=20):
-	"""Scan reports folders for AI sessions with history.json.
+	"""Scan reports folders for resumable AI sessions.
+
+	A session IS its history.json (that's what a resume replays). The sibling report
+	file is only read for nicer metadata (name / prompt / targets / session_id) and is
+	optional: legacy sessions don't stamp `_context.session_id` and their report has no
+	`ai` results, but they still resume fine via the history replay — so we never drop a
+	session just because its report lacks those.
 
 	Args:
 		max_sessions: Maximum number of sessions to return.
@@ -44,50 +70,48 @@ def list_sessions(max_sessions=20):
 	pattern = str(Path(CONFIG.dirs.reports) / '*/tasks/*/history.json')
 	for history_path_str in glob.glob(pattern):
 		history_path = Path(history_path_str)
-		report_path = history_path.parent / 'report.json'
-		if not report_path.exists():
-			continue
-		try:
-			with open(report_path) as f:
-				data = json.load(f)
-			ai_items = data.get('results', {}).get('ai', [])
-			if not ai_items:
-				continue
-			# Find first user prompt content + session name, and the first non-empty
-			# `_context.session_id` across ALL ai docs (every persisted item stamps it,
-			# letting a resumed run adopt this session's id) -- single pass, stopping
-			# once both have been found.
-			first_prompt = ''
-			session_name = ''
-			session_id = ''
-			found_prompt = False
-			found_session_id = False
-			for item in ai_items:
-				if not found_prompt and item.get('ai_type') == 'prompt':
-					first_prompt = item.get('content', '')
-					session_name = (item.get('_context') or {}).get('session_name', '') or (item.get('_context') or {}).get('name', '')
-					found_prompt = True
-				if not found_session_id:
-					sid = (item.get('_context') or {}).get('session_id', '')
-					if sid:
-						session_id = sid
-						found_session_id = True
-				if found_prompt and found_session_id:
-					break
-			info = data.get('info', {})
-			sessions.append({
-				'folder': str(history_path.parent),
-				'history_path': str(history_path),
-				'report_path': str(report_path),
-				'name': session_name,
-				'prompt': first_prompt,
-				'session_id': session_id,
-				'targets': info.get('targets', []),
-				'timestamp': info.get('end_time') or info.get('start_time') or 0,
-				'mtime': history_path.stat().st_mtime,
-			})
-		except (json.JSONDecodeError, OSError):
-			continue
+		folder = history_path.parent
+		# The report filename has varied across versions (report.json / report_ai.json);
+		# prefer the generic name, else fall back to any report*.json for metadata.
+		report_path = next(
+			(p for p in [folder / 'report.json', *sorted(folder.glob('report*.json'))] if p.exists()),
+			None,
+		)
+		data = _read_json(report_path) or {}
+		info = data.get('info', {})
+		ai_items = data.get('results', {}).get('ai', []) or []
+
+		# First user prompt + session name, and the first stamped `_context.session_id`
+		# (a resumed run adopts it) — single pass, stop once both are found.
+		first_prompt = ''
+		session_name = ''
+		session_id = ''
+		for item in ai_items:
+			ctx = item.get('_context') or {}
+			if not first_prompt and item.get('ai_type') == 'prompt':
+				first_prompt = item.get('content', '')
+				session_name = ctx.get('session_name', '') or ctx.get('name', '')
+			if not session_id:
+				session_id = ctx.get('session_id', '')
+			if first_prompt and session_id:
+				break
+
+		# Legacy sessions have no `ai` results: take the prompt from the run opts, else
+		# the first user turn recorded in the history itself.
+		if not first_prompt:
+			first_prompt = (info.get('run_opts') or {}).get('prompt') or _first_user_prompt(history_path)
+
+		sessions.append({
+			'folder': str(folder),
+			'history_path': str(history_path),
+			'report_path': str(report_path) if report_path else '',
+			'name': session_name,
+			'prompt': first_prompt,
+			'session_id': session_id,
+			'targets': info.get('targets', []),
+			'timestamp': info.get('end_time') or info.get('start_time') or 0,
+			'mtime': history_path.stat().st_mtime,
+		})
 
 	sessions.sort(key=lambda s: s['mtime'], reverse=True)
 	return sessions[:max_sessions]
