@@ -28,7 +28,8 @@ from secator.ai.prompts import (
 )
 from secator.ai.tools import build_tool_schemas, tool_call_to_action, coerce_stringified_args, TOOL_SCHEMAS
 from secator.ai.session import (
-	save_history, show_session_picker, replay_session, restore_history_from_db, print_session_results)
+	save_history, show_session_picker, pick_session_via_backend, replay_session, restore_history_from_db,
+	print_session_results)
 from secator.ai.utils import (
 	call_llm, init_llm, setup_ai, format_llm_status, parse_text_tool_calls,
 	_decrypt_dict, _build_action_display,
@@ -429,7 +430,13 @@ class ai(PythonRunner):
 
 		# Resume session
 		if self.resume and not self.is_subagent:
-			session = show_session_picker()
+			# A frontend that owns the display (the Textual TUI) can't host the plain-console
+			# picker — it drives the terminal directly and collides with Textual. Route the
+			# choice through the backend so that frontend renders the session list instead.
+			if getattr(self.backend, "owns_display", False):
+				session = pick_session_via_backend(self.backend, session_id=self.session_id)
+			else:
+				session = show_session_picker()
 			if session is None:
 				return
 			self.session_name = session["name"]
@@ -449,8 +456,11 @@ class ai(PythonRunner):
 					model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
 				# Show the prior conversation + findings on the console (the unified
 				# restore only rebuilds in-memory history; replay_session did this for
-				# the legacy path, so print it here to keep resume UX consistent).
-				print_session_results(session)
+				# the legacy path, so print it here to keep resume UX consistent). Skip it
+				# when a frontend owns the display (the TUI) — a raw console print would
+				# corrupt its screen; the restored history still drives the LLM either way.
+				if not getattr(self.backend, "owns_display", False):
+					print_session_results(session)
 			else:
 				# Legacy session: its docs carry no `_context.session_id`, so the unified
 				# restore would rebuild empty history. Fall back to the local

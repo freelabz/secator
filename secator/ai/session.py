@@ -93,8 +93,32 @@ def list_sessions(max_sessions=20):
 	return sessions[:max_sessions]
 
 
+def _session_label(session, max_label=None):
+	"""Build the human label + one-line description shown for a session in a picker.
+
+	Returns:
+		tuple[str, str]: (label, description). ``label`` is the session name/prompt,
+		truncated to ``max_label`` chars when given; ``description`` is the
+		timestamp / workspace / targets line.
+	"""
+	name = session.get('name', '')
+	prompt = session.get('prompt', '')
+	# Only show bracket label when name is an explicit custom name, not auto-derived from the prompt
+	if name and prompt and name != prompt and not prompt.startswith(name.rstrip('.')):
+		label_text = f"[{name}] {prompt}"
+	else:
+		label_text = prompt or name
+	if max_label is not None and len(label_text) > max_label:
+		label_text = label_text[:max_label] + '...'
+	ts = datetime.fromtimestamp(session['mtime']).strftime('%Y-%m-%d %H:%M')
+	targets = ', '.join(session['targets'][:2]) if session['targets'] else 'no target'
+	workspace = session['folder'].split('/tasks/')[0].split('/')[-1] if '/tasks/' in session['folder'] else ''
+	description = f"{ts} - {workspace} - {targets}"
+	return label_text, description
+
+
 def show_session_picker():
-	"""Show interactive menu to pick a session to resume.
+	"""Show interactive menu to pick a session to resume (plain-console / headless path).
 
 	Returns:
 		dict: Selected session dict, or None if cancelled.
@@ -113,21 +137,8 @@ def show_session_picker():
 
 	options = []
 	for s in sessions:
-		name = s.get('name', '')
-		prompt = s.get('prompt', '')
-		# Only show bracket label when name is an explicit custom name, not auto-derived from the prompt
-		if name and prompt and name != prompt and not prompt.startswith(name.rstrip('.')):
-			label_text = f"[{name}] {prompt}"
-		else:
-			label_text = prompt or name
-		prompt_preview = label_text[:max_label]
-		if len(label_text) > max_label:
-			prompt_preview += '...'
-		ts = datetime.fromtimestamp(s['mtime']).strftime('%Y-%m-%d %H:%M')
-		targets = ', '.join(s['targets'][:2]) if s['targets'] else 'no target'
-		workspace = s['folder'].split('/tasks/')[0].split('/')[-1] if '/tasks/' in s['folder'] else ''
-		description = f"{ts} - {workspace} - {targets}"
-		options.append({"label": prompt_preview, "description": description})
+		label, description = _session_label(s, max_label=max_label)
+		options.append({"label": label, "description": description})
 	options.append({"label": "Cancel"})
 
 	result = InteractiveMenu("Resume a session", options).show()
@@ -137,6 +148,42 @@ def show_session_picker():
 	if idx >= len(sessions):
 		return None
 	return sessions[idx]
+
+
+def pick_session_via_backend(backend, session_id=""):
+	"""Pick a session to resume through an interactivity backend that owns the display.
+
+	The plain-console :func:`show_session_picker` drives the terminal directly
+	(``tty.setraw`` + key reads), which collides with a frontend that already owns the
+	screen (the Textual TUI). Route the choice through ``backend.ask_user`` instead so the
+	frontend renders the list and returns the pick.
+
+	Args:
+		backend: An interactivity backend exposing ``ask_user`` (e.g. ``TUIBackend``).
+		session_id: Current runner session id, forwarded to ``ask_user`` for context.
+
+	Returns:
+		dict: Selected session dict, or None if cancelled / none available.
+	"""
+	sessions = list_sessions()
+	if not sessions:
+		return None
+	# Choices are the human labels; each must be unique so the answer maps back to exactly
+	# one session. Two sessions can share a label (same prompt), so suffix the timestamp +
+	# a running index to guarantee uniqueness while staying readable.
+	choices = []
+	by_choice = {}
+	for s in sessions:
+		label, description = _session_label(s)
+		choice = f"{label}  —  {description}"
+		if choice in by_choice:
+			choice = f"{choice}  #{len(choices) + 1}"
+		choices.append(choice)
+		by_choice[choice] = s
+	res = backend.ask_user(
+		"Resume which session?", choices, session_id, prompt_type="stopped")
+	answer = (res or {}).get("answer")
+	return by_choice.get(answer)
 
 
 def print_session_results(session):
