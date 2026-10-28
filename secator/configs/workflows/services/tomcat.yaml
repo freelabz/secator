@@ -6,6 +6,7 @@ long_description: |
   Scans Apache tomcat vulnerabilities using specialized tools.
 tags: [http, tomcat, vuln]
 input_types:
+  - url
   - ip
   - host
   - host:port

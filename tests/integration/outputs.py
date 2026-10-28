@@ -212,6 +212,8 @@ OUTPUTS_TASKS = {
 	'rmg': [],
 	'eyewitness': [],
 	'cidr_split': [],
+	# apachetomcatscanner against a bare Tomcat yields a Technology (version varies with the image).
+	'apachetomcatscanner': [],
 }
 
 OUTPUTS_WORKFLOWS = {
