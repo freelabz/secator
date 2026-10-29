@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.3](https://github.com/freelabz/secator/compare/v0.53.2...v0.53.3) (2026-10-29)
+
+
+### Bug Fixes
+
+* **ai:** filter file/code tokens as targets; drop localhost from default deny ([#1600](https://github.com/freelabz/secator/issues/1600)) ([dc5280b](https://github.com/freelabz/secator/commit/dc5280b18bdd1d082eda273deb88576b94dfcade))
+
 ## [0.53.2](https://github.com/freelabz/secator/compare/v0.53.1...v0.53.2) (2026-10-27)
 
 
