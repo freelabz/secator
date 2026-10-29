@@ -35,10 +35,13 @@ class TestGuardrailsConfig(unittest.TestCase):
 		self.assertIn("target({targets})", allow)
 
 	def test_ai_permissions_deny_defaults(self):
-		"""Default deny should block AWS metadata and localhost."""
+		"""Default deny blocks the cloud metadata endpoint. localhost/127.0.0.1 are NOT
+		denied by default so local labs / local testing work out of the box; a user who
+		wants them blocked re-adds them to addons.ai.permissions.deny."""
 		deny = CONFIG.addons.ai.permissions["deny"]
 		self.assertIn("target(169.254.169.254)", deny)
-		self.assertIn("target(127.0.0.1)", deny)
+		self.assertNotIn("target(127.0.0.1)", deny)
+		self.assertNotIn("target(localhost)", deny)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
