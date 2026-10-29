@@ -253,6 +253,21 @@ class TestDetection(unittest.TestCase):
 		targets = extract_command_targets("nmap example.com")
 		self.assertIn("example.com", targets)
 
+	def test_file_and_code_tokens_not_targets_for_local_cmds(self):
+		"""A file/code-looking arg to a NON-network command is not a target — many file
+		extensions are real TLDs with parked DNS (README.md) and member-access resolves
+		via a real TLD (Date.now -> .now), so DNS alone can't reject them."""
+		self.assertEqual(extract_command_targets("cat README.md"), [])
+		self.assertEqual(extract_command_targets("head -50 server.js"), [])
+		self.assertEqual(extract_command_targets("grep Date.now app.js"), [])
+		self.assertEqual(extract_command_targets("node -e \"console.log(Date.now())\""), [])
+
+	def test_network_cmd_capitalized_host_still_scoped(self):
+		"""The file/code skip must NOT un-scope a real host on a network command: a
+		capitalized domain (Example.com) or an ext-TLD host on curl/nmap must still reach
+		the target-scope check (regression guard for the skip being command-scoped)."""
+		self.assertIn("Example.com", extract_command_targets("nmap Example.com"))
+
 	def test_extract_command_targets_host_in_url_not_duplicated(self):
 		"""Host inside a URL should not be extracted as a separate target."""
 		targets = extract_command_targets("curl https://example.com/api")
