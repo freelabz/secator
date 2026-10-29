@@ -35,10 +35,13 @@ class TestGuardrailsConfig(unittest.TestCase):
 		self.assertIn("target({targets})", allow)
 
 	def test_ai_permissions_deny_defaults(self):
-		"""Default deny should block AWS metadata and localhost."""
+		"""Default deny blocks the cloud metadata endpoint. localhost/127.0.0.1 are NOT
+		denied by default so local labs / local testing work out of the box; a user who
+		wants them blocked re-adds them to addons.ai.permissions.deny."""
 		deny = CONFIG.addons.ai.permissions["deny"]
 		self.assertIn("target(169.254.169.254)", deny)
-		self.assertIn("target(127.0.0.1)", deny)
+		self.assertNotIn("target(127.0.0.1)", deny)
+		self.assertNotIn("target(localhost)", deny)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -249,6 +252,21 @@ class TestDetection(unittest.TestCase):
 	def test_extract_command_targets_host(self):
 		targets = extract_command_targets("nmap example.com")
 		self.assertIn("example.com", targets)
+
+	def test_file_and_code_tokens_not_targets_for_local_cmds(self):
+		"""A file/code-looking arg to a NON-network command is not a target — many file
+		extensions are real TLDs with parked DNS (README.md) and member-access resolves
+		via a real TLD (Date.now -> .now), so DNS alone can't reject them."""
+		self.assertEqual(extract_command_targets("cat README.md"), [])
+		self.assertEqual(extract_command_targets("head -50 server.js"), [])
+		self.assertEqual(extract_command_targets("grep Date.now app.js"), [])
+		self.assertEqual(extract_command_targets("node -e \"console.log(Date.now())\""), [])
+
+	def test_network_cmd_capitalized_host_still_scoped(self):
+		"""The file/code skip must NOT un-scope a real host on a network command: a
+		capitalized domain (Example.com) or an ext-TLD host on curl/nmap must still reach
+		the target-scope check (regression guard for the skip being command-scoped)."""
+		self.assertIn("Example.com", extract_command_targets("nmap Example.com"))
 
 	def test_extract_command_targets_host_in_url_not_duplicated(self):
 		"""Host inside a URL should not be extracted as a separate target."""

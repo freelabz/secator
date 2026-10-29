@@ -307,6 +307,51 @@ def _resolves(hostname: str) -> bool:
 		return False
 
 
+# File/source/doc/data extensions that look like a host (``name.ext``) and even "resolve"
+# — many extensions double as real TLDs with parked/wildcard DNS (``.md`` Moldova, ``.sh``
+# Saint Helena, ``.zip``/``.mov`` gTLDs), so a token like ``README.md`` passes the classifier
+# AND ``gethostbyname`` returns a parking IP. DNS can't tell these apart; filter by extension.
+_NON_TARGET_EXTS = (
+	# source
+	'.py', '.sh', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.vue', '.go', '.rs', '.rb',
+	'.php', '.java', '.kt', '.c', '.cc', '.cpp', '.h', '.hpp', '.cs', '.swift', '.lua', '.pl',
+	'.r', '.scala', '.clj', '.ex', '.exs', '.dart',
+	# markup / docs / config / data
+	'.txt', '.md', '.rst', '.json', '.jsonl', '.yaml', '.yml', '.xml', '.csv', '.tsv', '.log',
+	'.conf', '.cfg', '.ini', '.toml', '.env', '.lock', '.sql', '.html', '.htm', '.css', '.scss',
+	'.less', '.properties', '.gradle', '.bat', '.ps1', '.ipynb',
+	# archives / media / binaries
+	'.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.rar', '.jar', '.war', '.pdf', '.png',
+	'.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.mp4', '.mov', '.woff', '.woff2', '.ttf',
+	'.map', '.min', '.bak', '.tmp', '.swp', '.pyc', '.class', '.so', '.dll', '.bin', '.dat',
+)
+
+# Code member-access tokens (``Date.now``, ``Math.random``, ``JSON.parse``, ``Buffer.from``):
+# a Capitalized identifier dotted into a lower-case method. These classify as "host" and can
+# resolve (``.now`` is a real TLD), so DNS can't reject them — a security target is never a
+# ``PascalCase.method`` token, so drop them structurally.
+_CODE_MEMBER_RE = re.compile(r'^[A-Z][A-Za-z0-9]*\.[a-z][A-Za-z0-9_]*$')
+
+# Commands that actually reach out over the network. For these, a ``name.ext`` /
+# ``Name.method`` argument must STILL go through the target-scope check — skipping it by
+# extension/pattern would let ``curl example.zip`` or ``nmap Example.com`` run un-scoped.
+# The file/code skips below are therefore applied ONLY for non-network commands, where such
+# an argument is a file/code token (``cat README.md``, ``grep Date.now app.js``), not a host.
+_NETWORK_CMDS = frozenset({
+	'curl', 'wget', 'nc', 'ncat', 'netcat', 'socat', 'telnet', 'ftp', 'tftp', 'ssh', 'scp',
+	'sftp', 'rsync', 'ping', 'ping6', 'traceroute', 'traceroute', 'mtr', 'dig', 'host',
+	'nslookup', 'whois', 'nmap', 'masscan', 'rustscan', 'zmap', 'httpx', 'httprobe', 'nuclei',
+	'nikto', 'sqlmap', 'gobuster', 'feroxbuster', 'ffuf', 'dirb', 'dirsearch', 'wfuzz', 'hydra',
+	'medusa', 'wpscan', 'amass', 'subfinder', 'openssl', 'redis-cli', 'mysql', 'psql', 'mongosh',
+	'smbclient', 'crackmapexec', 'nxc', 'impacket-smbclient', 'evil-winrm', 'kubectl', 'aws',
+})
+
+
+def _cmd_basename(cmd: str) -> str:
+	"""Last path segment of a command token, lowercased (``/usr/bin/curl`` -> ``curl``)."""
+	return cmd.rsplit('/', 1)[-1].lower()
+
+
 def extract_command_targets(command: str) -> List[str]:
 	"""Extract target-like values (IPs, hosts, URLs) from a shell command string.
 
@@ -336,8 +381,14 @@ def extract_command_targets(command: str) -> List[str]:
 			seen.add(value)
 			targets.append(value)
 
-	def _check_arg(arg: str):
-		"""Check a single argument for targets (URLs, IPs, hosts)."""
+	def _check_arg(arg: str, is_network_cmd: bool = False):
+		"""Check a single argument for targets (URLs, IPs, hosts).
+
+		``is_network_cmd`` is True when the owning sub-command actually connects out
+		(curl/nmap/...). For those, file/code-looking args are NOT skipped — they must
+		still reach the target-scope check so a host like ``example.zip`` isn't run
+		un-scoped. The extension/code skips apply only to local/file commands.
+		"""
 		# Skip flags
 		if arg.startswith('-'):
 			return
@@ -349,8 +400,12 @@ def extract_command_targets(command: str) -> List[str]:
 		# Skip file paths, command names
 		if _is_file_path(arg) or arg in cmd_names:
 			return
-		# Skip file-like extensions
-		if arg.endswith(('.py', '.sh', '.txt', '.json', '.yaml', '.yml', '.xml', '.csv', '.log', '.conf', '.cfg')):
+		# Skip file-like extensions and code member-access tokens for NON-network commands.
+		# DNS alone can't reject these — many extensions are real TLDs with parked/wildcard
+		# DNS (README.md, .sh, .zip) and member-access like Date.now resolves via the .now
+		# TLD. Restricted to non-network commands so a real host arg to curl/nmap (e.g.
+		# example.zip, Example.com) still reaches the target-scope check below.
+		if not is_network_cmd and (arg.lower().endswith(_NON_TARGET_EXTS) or _CODE_MEMBER_RE.match(arg)):
 			return
 		# Skip args that are part of detected file paths
 		if any(arg in p for p in paths):
@@ -389,8 +444,9 @@ def extract_command_targets(command: str) -> List[str]:
 			# Skip docker/podman sub-commands
 			if args[0] in ('docker', 'podman'):
 				continue
+			is_network_cmd = _cmd_basename(args[0]) in _NETWORK_CMDS
 			for arg in args[1:]:
-				_check_arg(arg)
+				_check_arg(arg, is_network_cmd)
 	except Exception:
 		# Parse failed: the per-arg walk ran nothing, so fall back to the raw-string
 		# host sweep too (the IP/URL sweep below runs unconditionally).
