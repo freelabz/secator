@@ -258,6 +258,8 @@ class TestTarballGuards(unittest.TestCase):
 		shutil.rmtree(self.tmp, ignore_errors=True)
 
 	def _run_gcs_backend(self, tarball: Path, name='x'):
+		import sys
+		import types
 		from secator import template_source as ts
 		ref = TemplateSourceRef(name=name, url='gs://bucket/prefix', sha='a' * 40)
 		dest = self.tmp / 'dest'
@@ -265,7 +267,13 @@ class TestTarballGuards(unittest.TestCase):
 		def fake_download(bucket, blob_name, out_path):
 			shutil.copy(tarball, out_path)
 
-		with mock.patch('secator.hooks.gcs.download_blob', fake_download):
+		# `gcs_backend` does `from secator.hooks.gcs import download_blob` at call
+		# time. The real module imports `google.cloud.storage`, which is only present
+		# when the GCS addon is installed (absent in the unit-test env), so we inject
+		# a stub module instead of patching the attribute on the (unimportable) real one.
+		stub = types.ModuleType('secator.hooks.gcs')
+		stub.download_blob = fake_download
+		with mock.patch.dict(sys.modules, {'secator.hooks.gcs': stub}):
 			ts.gcs_backend(ref, dest)
 
 	def test_symlink_member_rejected(self):
