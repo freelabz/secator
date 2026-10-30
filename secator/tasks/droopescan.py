@@ -24,6 +24,11 @@ class droopescan(Vuln):
 	input_flag = '-u'
 	file_flag = '-U'
 	json_flag = '--output json'
+	# droopescan exits non-zero even on a successful scan when an individual
+	# enumeration step (plugins/themes/version) can't fully complete or the
+	# target is only partially reachable. The JSON report is still produced and
+	# parsed, so a non-zero exit must not fail the task on its own.
+	ignore_return_code = True
 	opts = {
 		# 'output_path': {'type': str, 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},
 		'mode': {'type': click.Choice(['drupal', '']), 'default': 'drupal', 'help': 'Drupal scan mode', 'internal': True, 'display': True},  # noqa: E501
