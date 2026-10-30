@@ -78,7 +78,7 @@ class beanshooter(Command):
 				yield Technology(
 					product='java rmi',
 					version=None,
-					match=target
+					match=value['target']
 				)
 			if key == 'unauthorized_access' and value.get('status', '') == 'Vulnerable':
 				yield Vulnerability(
@@ -106,7 +106,7 @@ class beanshooter(Command):
 					tags=['java', 'jmx', 'mbean', 'unauth', 'vuln']
 				)
 			elif key == 'mbeans' and value.get('total_count', 0) > 0:
-				bean_classes = sorted(list(set([b['class'] for b in value['beans']])))
+				bean_classes = sorted(set(b['class'] for b in value.get('beans', []) if 'class' in b))
 				for bean in bean_classes:
 					yield Tag(
 						match=target,
@@ -116,9 +116,9 @@ class beanshooter(Command):
 					)
 			elif key == 'tomcat_users' and value:
 				for data in value:
-					username = data['username']
-					password = data['password']
-					value = data['roles']
+					username = data.get('username', '')
+					password = data.get('password', '')
+					value = data.get('roles')
 					yield Tag(
 						match=target,
 						category='secret',

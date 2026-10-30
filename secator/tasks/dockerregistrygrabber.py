@@ -59,7 +59,13 @@ class dockerregistrygrabber(Vuln):
 		if len(self.inputs) > 1:  # parent
 			return opts
 		if self.inputs:
-			split = self.inputs[0].split(':')
+			# Strip any trailing slash so a URL like http://host:5000/ doesn't
+			# leave the port as "5000/" (which would crash int()).
+			target = self.inputs[0].rstrip('/')
+			if target != self.inputs[0]:
+				self.cmd = self.cmd.replace(self.inputs[0], target)
+				self.inputs[0] = target
+			split = target.split(':')
 			if len(split) == 3:  # port is in URL
 				url_wo_port = ':'.join([split[0], split[1]])
 				self.cmd = self.cmd.replace(self.inputs[0], url_wo_port)
@@ -94,6 +100,15 @@ class dockerregistrygrabber(Vuln):
 		host = self.inputs[0] if self.inputs else ''
 		port = self.get_opt_value('docker_port') or 5000
 		matched_at = f'{host}:{port}'
+		# The "unauthenticated access" finding is only valid for anonymous scans.
+		# A credentialed scan ([+] lines from drg.py --list with -U/-P/-A) proves
+		# authenticated access, not an open registry, so don't report it as unauth.
+		credentialed = any(
+			self.get_opt_value(opt) for opt in ('docker_username', 'docker_password', 'docker_token')
+		)
+		if credentialed:
+			yield Info(message=f'Authenticated to Docker registry at {matched_at} ({len(self._repos)} repositories)')
+			return
 		yield Info(message=f'Exposed unauthenticated Docker registry at {matched_at} ({len(self._repos)} repositories)')
 		yield Vulnerability(
 			name='Docker Registry - Unauthenticated Access',
