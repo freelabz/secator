@@ -7,8 +7,8 @@ from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
 
 
-STATUS_REGEX = re.compile(r'\s*(?P<os>(\w+\s)+)\(name:(?P<name>(\w-?)+)\)\s\(domain:(?P<domain>(\w\-?\.?)+)\)\s\(nla:(?P<nla>\w+)\)')  # noqa: E501
-LOGIN_REGEX = re.compile(r'\s*(?P<domain>(\w+\-?\.?)+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')
+STATUS_REGEX = re.compile(r'\s*(?P<os>.+?)\s\(name:(?P<name>[^)]*)\)\s\(domain:(?P<domain>[^)]*)\)\s\(nla:(?P<nla>\w+)\)')  # noqa: E501
+LOGIN_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')
 
 
 @task()
