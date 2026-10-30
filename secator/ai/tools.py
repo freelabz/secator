@@ -135,19 +135,26 @@ _DESCRIPTION_SCHEMA = {
 # the per-mode ``allowed_actions`` in prompts.MODES (enforced by the consistency test).
 # `research` is a full-capability sibling of `exploit` (find/craft + validate a PoC), so it
 # appears wherever `exploit` does — EXCEPT `change_mode` (see _CAN_CHANGE_MODE below).
+# `contribute` AUTHORS secator code: it runs runners + reads/edits files, but writes NO
+# findings and cannot change_mode — so it is added only to the runner/file/helper sets.
 _SCAN_EXPLOIT = frozenset({"scan", "exploit", "research"})
-_ALL_MODES = frozenset({"scan", "chat", "exploit", "research"})
+_ALL_MODES = frozenset({"scan", "chat", "exploit", "research", "contribute"})
 # monitor is a bounded re-verification mode: it can run tasks/workflows/shell and query, and
 # retire/correct an EXISTING finding (mark_vuln_false_positive / update_finding) — see
 # prompts.MODES["monitor"]. These sets add monitor to the tools it exposes.
 _SCAN_EXPLOIT_MONITOR = frozenset({"scan", "exploit", "monitor", "research"})
-_QUERY_MODES = frozenset({"scan", "chat", "exploit", "monitor", "research"})
-# Read-only helpers available in the read/write modes + chat + research (NOT monitor, which is
-# a focused re-verification loop over a finding set).
-_READONLY_HELPER = frozenset({"scan", "chat", "exploit", "research"})
-# `change_mode` is the ONE tool NOT exposed in `research`: it is a deliberate, directly-selected
-# terminal mode that already has the most capable surface, so it neither escalates nor
-# de-escalates. The other modes keep the escalation ladder.
+# Tools that RUN a runner (task/workflow/shell): scan/exploit/monitor/research + contribute
+# (which runs what it authors). NOT the finding-writing subset of _SCAN_EXPLOIT_MONITOR.
+_RUNNER_MODES = frozenset({"scan", "exploit", "monitor", "research", "contribute"})
+# read_file / write_file: the code-touching modes — scan/exploit/research + contribute (which
+# authors task/config files). NOT monitor.
+_FILE_MODES = frozenset({"scan", "exploit", "research", "contribute"})
+_QUERY_MODES = frozenset({"scan", "chat", "exploit", "monitor", "research", "contribute"})
+# Read-only helpers available in the read/write modes + chat + research + contribute (NOT
+# monitor, which is a focused re-verification loop over a finding set).
+_READONLY_HELPER = frozenset({"scan", "chat", "exploit", "research", "contribute"})
+# `change_mode` is NOT exposed in `research` or `contribute`: both are deliberate,
+# directly-selected terminal modes. The other modes keep the escalation ladder.
 _CAN_CHANGE_MODE = frozenset({"scan", "chat", "exploit"})
 
 
@@ -189,7 +196,7 @@ class BaseTool:
 class RunTaskTool(BaseTool):
 	name = "run_task"
 	action = "task"
-	modes = _SCAN_EXPLOIT_MONITOR
+	modes = _RUNNER_MODES
 	handler = "_handle_task"
 	schema = {
 		"type": "function",
@@ -272,7 +279,7 @@ class RunSubagentTool(BaseTool):
 class RunWorkflowTool(BaseTool):
 	name = "run_workflow"
 	action = "workflow"
-	modes = _SCAN_EXPLOIT_MONITOR
+	modes = _RUNNER_MODES
 	handler = "_handle_workflow"
 	schema = {
 		"type": "function",
@@ -302,7 +309,7 @@ class RunWorkflowTool(BaseTool):
 class RunShellTool(BaseTool):
 	name = "run_shell"
 	action = "shell"
-	modes = _SCAN_EXPLOIT_MONITOR
+	modes = _RUNNER_MODES
 	handler = "_handle_shell"
 	schema = {
 		"type": "function",
@@ -713,7 +720,7 @@ class ChangeModeTool(BaseTool):
 class ReadFileTool(BaseTool):
 	name = "read_file"
 	action = "read_file"
-	modes = _SCAN_EXPLOIT
+	modes = _FILE_MODES
 	# NOT auto_allow: the PATH is gated by the read layer in the guardrail (_check_action_type
 	# returns "path checked separately", then _decide runs the read rules on the path).
 	handler = "_handle_read_file"
@@ -741,7 +748,7 @@ class ReadFileTool(BaseTool):
 class WriteFileTool(BaseTool):
 	name = "write_file"
 	action = "write_file"
-	modes = _SCAN_EXPLOIT
+	modes = _FILE_MODES
 	# NOT auto_allow: the PATH is gated by the write layer in the guardrail.
 	handler = "_handle_write_file"
 	schema = {
@@ -968,7 +975,7 @@ class StopTool(BaseTool):
 	# `stop` is allowed in EVERY mode (incl. monitor + research) — it is injected per-backend
 	# via get_extra_tools, not emitted by the build_tool_schemas mode filter, but its modes must
 	# still cover every mode that lists `stop` in allowed_actions (consistency guard).
-	modes = frozenset({"scan", "chat", "exploit", "monitor", "research"})
+	modes = frozenset({"scan", "chat", "exploit", "monitor", "research", "contribute"})
 	auto_allow = True
 	# NOT emitted by build_tool_schemas / not in TOOL_SCHEMAS — injected per-backend
 	# via get_extra_tools (interactive backends a `stop` with `choices`, AutoBackend a

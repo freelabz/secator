@@ -157,6 +157,20 @@ class TestBuildToolSchemas(unittest.TestCase):
 		# and dead-ended because the tool wasn't exposed in this mode.
 		self.assertIn("run_subagent", names)
 
+	def test_contribute_mode_authors_code_not_findings(self):
+		"""contribute is a directly-selected code-authoring mode: it RUNS runners
+		(task/workflow/shell), reads/edits files (read_file/write_file), searches, and
+		delegates to subagents — but it writes NO findings (add_finding/mark_vuln_*) and
+		cannot change_mode (terminal, host-side mode)."""
+		from secator.ai.tools import build_tool_schemas
+		names = {s["function"]["name"] for s in build_tool_schemas("contribute")}
+		for t in ("run_task", "run_workflow", "run_shell", "read_file", "write_file",
+		          "run_subagent", "web_search", "fetch_url", "update_plan"):
+			self.assertIn(t, names, t)
+		for t in ("add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
+		          "mark_vuln_exploit_failed", "update_finding", "change_mode", "screenshot"):
+			self.assertNotIn(t, names, t)
+
 	def test_monitor_mode_tool_surface(self):
 		"""Monitor can read, re-run the originating check, retire a non-reproducing vuln and
 		fix metadata — but never add findings, mark exploited, delegate or self-escalate."""

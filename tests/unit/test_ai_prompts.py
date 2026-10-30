@@ -534,6 +534,30 @@ class TestResearchMode(unittest.TestCase):
 		self.assertIn("CANNOT spawn subagents", p)  # subagent persona's no-nesting rule wired in
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestContributeMode(unittest.TestCase):
+	"""The contribute mode prompt: library-enabled, host/isolation + reproducible-test +
+	lab guidance present, parallel-subagent block stripped for subagents."""
+
+	def test_contribute_prompt_builds_fully(self):
+		from secator.ai.prompts import get_system_prompt
+		p = get_system_prompt("contribute", workspace_path="/tmp/ws")
+		self.assertIn("CONTRIBUTE mode", p)
+		self.assertNotIn("$library_reference", p)      # task/workflow library substituted
+		self.assertIn("<subagents>", p)                # parallelization guidance present
+		self.assertIn("docker-compose", p)             # integration test lab
+		self.assertIn("fixture", p.lower())            # reproducible real fixtures
+		self.assertIn("worker", p.lower())             # sync + with-worker matrix
+		self.assertIn("ISOLATED", p)                   # host-access / non-isolated note
+
+	def test_contribute_subagent_strips_delegation(self):
+		from secator.ai.prompts import get_system_prompt
+		p = get_system_prompt("contribute", workspace_path="/tmp/ws", is_subagent=True)
+		self.assertNotIn("<subagents>", p)
+		self.assertNotIn("run_subagent", p)
+		self.assertIn("CANNOT spawn subagents", p)
+
+
 if __name__ == '__main__':
 	unittest.main()
 

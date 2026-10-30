@@ -69,6 +69,7 @@ SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
 SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 SYSTEM_MONITOR = Template(load_prompt("modes/monitor.txt"))
 SYSTEM_RESEARCH = Template(load_prompt("modes/research.txt"))
+SYSTEM_CONTRIBUTE = Template(load_prompt("modes/contribute.txt"))
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
 MODES = {
@@ -126,6 +127,20 @@ MODES = {
 		# Research is long-running (stand up labs, fan out subagents, iterate on PoCs), so it
 		# gets a higher iteration floor than scan/exploit.
 		"max_iterations": 12,
+	},
+	"contribute": {
+		"system_prompt": SYSTEM_CONTRIBUTE,
+		"description": "author new secator tasks / workflows / scans (or framework code) and prove them with real, reproducible tests",
+		# A code-authoring mode, NOT a findings mode: it RUNS runners (task/workflow/shell) to
+		# exercise the code it writes, reads/edits files (read_file/write_file), searches for
+		# conventions, and delegates to subagents — but it does NOT write findings (no
+		# add_finding / mark_vuln_* / update_finding) and does NOT change_mode (deliberate,
+		# directly-selected terminal mode). It needs HOST filesystem access (run WITHOUT
+		# isolation); writes outside the workspace prompt for approval.
+		"allowed_actions": ["task", "workflow", "shell", "read_file", "write_file", "query", "fetch_url", "update_plan", "web_search", "list_runners", "subagent", "stop"],
+		# Authoring + running the full test matrix (dry-run, single/multi target, sync + worker,
+		# fixtures, lint) is long, so a higher iteration floor than the one-shot modes.
+		"max_iterations": 20,
 	},
 }
 
