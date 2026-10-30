@@ -8,8 +8,8 @@ from secator.utils import autodetect_type
 
 
 STATUS_REGEX = re.compile(r'\s*(?P<os>.+?)\s\((?P<version>[^)]*)\)\s\(name:(?P<name>[^)]*)\)\s\(domain:(?P<domain>[^)]*)\)\s\(EncryptionReq:(?P<enc>[^)]*)\)(?:\s\(NTLM:(?P<ntlm>[^)]*)\))?')  # noqa: E501
-LOGIN_SUCCESS_REGEX = re.compile(r'\s*(?P<domain>(\w+\-?\.?)+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')  # noqa: E501
-LOGIN_FAILED_REGEX = re.compile(r'\s*(?P<domain>(\w+\-?\.?)+)\\(?P<username>[^:\n]*):?(?P<password>.*)?')
+LOGIN_SUCCESS_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')  # noqa: E501
+LOGIN_FAILED_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*):?(?P<password>.*)?')
 
 
 @task()
