@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict
@@ -169,7 +170,24 @@ def _run_git(args, cwd=None):
 # worker. Refuse to materialize a set that carries any `.py`. We also refuse symlinks
 # outright: a symlink can escape the set root (link to /etc, to another task file,
 # or to a `.py` outside the tree that discovery would still exec).
-_MAX_TEMPLATE_SET_BYTES = int(os.environ.get('SECATOR_TEMPLATE_SET_MAX_BYTES', str(512 * 1024 * 1024)))
+def _env_int(name: str, default: int) -> int:
+	"""Parse a positive-int env override, surfacing garbage as a template-source error."""
+	raw = os.environ.get(name)
+	if raw is None:
+		return default
+	try:
+		val = int(raw)
+	except ValueError:
+		raise TemplateSourceError(f'{name} must be an integer (got {raw!r})')
+	if val <= 0:
+		raise TemplateSourceError(f'{name} must be a positive integer (got {val})')
+	return val
+
+
+_MAX_TEMPLATE_SET_BYTES = _env_int('SECATOR_TEMPLATE_SET_MAX_BYTES', 512 * 1024 * 1024)
+# Cap the number of archive members too: a tarball with millions of tiny entries
+# is a DoS even under the byte cap (inode/CPU exhaustion during extraction).
+_MAX_TEMPLATE_SET_MEMBERS = _env_int('SECATOR_TEMPLATE_SET_MAX_MEMBERS', 100_000)
 
 
 def _reject_unsafe_tree(root: Path, name: str) -> None:
@@ -255,12 +273,26 @@ def gcs_backend(ref: TemplateSourceRef, dest: Path) -> None:
 		with tarfile.open(tarball) as tf:
 			base = dest.resolve()
 			total = 0
-			for member in tf.getmembers():
+			members = tf.getmembers()
+			# Member-count cap: millions of tiny entries exhaust inodes/CPU even under
+			# the byte cap.
+			if len(members) > _MAX_TEMPLATE_SET_MEMBERS:
+				raise TemplateSourceError(
+					f'tarball for {ref.name!r} has too many members '
+					f'({len(members)} > {_MAX_TEMPLATE_SET_MEMBERS})'
+				)
+			for member in members:
 				# Reject symlink/hardlink members outright — they can point outside the
 				# tree (RCE/LFI) and symlinks are not valid template data anyway.
 				if member.issym() or member.islnk():
 					raise TemplateSourceError(
 						f'unsafe link member in tarball for {ref.name!r}: {member.name}'
+					)
+				# A template set is plain files + dirs only: reject device/fifo/char
+				# and any other non-regular member type.
+				if not (member.isfile() or member.isdir()):
+					raise TemplateSourceError(
+						f'unsafe member type in tarball for {ref.name!r}: {member.name}'
 					)
 				# Guard against path traversal (member resolving outside base).
 				target = (dest / member.name).resolve()
@@ -308,6 +340,15 @@ def _pin_marker(target: Path) -> Path:
 	return target / '.secator-template-pin'
 
 
+def _pin_value(ref: TemplateSourceRef) -> str:
+	"""Cache identity of a materialized set: SHA plus the promoted subdir.
+
+	Two refs with the same name+SHA but different ``subdir`` promote different
+	content to the set root, so the subdir must be part of the reuse key.
+	"""
+	return f'{ref.sha}|{ref.subdir or ""}'
+
+
 def materialize_template_source(ref: TemplateSourceRef, force: bool = False) -> MaterializeResult:
 	"""Materialize a pinned template set into ``CONFIG.dirs.templates/<name>``.
 
@@ -325,15 +366,21 @@ def materialize_template_source(ref: TemplateSourceRef, force: bool = False) -> 
 	marker = _pin_marker(target)
 
 	if target.exists() and marker.exists() and not force:
-		if marker.read_text().strip().lower() == ref.sha:
+		if marker.read_text().strip() == _pin_value(ref):
 			# The set root already holds the vetted templates (subdir promoted at
 			# materialization), so point straight at it — no residual subdir join.
 			debug(f'reusing {ref.name} @ {ref.sha}', sub='template_source')
 			return MaterializeResult(ref=ref, path=target, refreshed=False, backend=_scheme_of(ref.url) or 'git')
 
 	backend = select_backend(ref)
-	staging = root / f'.{ref.name}.{ref.sha}.staging'
-	shutil.rmtree(staging, ignore_errors=True)
+	# Stage OUTSIDE the templates root: the loader scans CONFIG.dirs.templates
+	# recursively (``**/*.py``) at import time and execs any `.py` it finds, so an
+	# unvetted tree must never sit under that root — not even in a hidden/temp
+	# subdir — or a concurrent import could exec a malicious `.py` before our
+	# _reject_unsafe_tree guard runs. Use a sibling temp dir (same filesystem, so
+	# the final rename stays atomic) and only move the vetted tree in at the end.
+	work = Path(tempfile.mkdtemp(prefix=f'.{ref.name}.{ref.sha}.', dir=root.parent))
+	staging = work / 'set'
 	try:
 		backend(ref, staging)
 		# When a subdir is requested, that subdir IS the template set: promote only
@@ -357,7 +404,7 @@ def materialize_template_source(ref: TemplateSourceRef, force: bool = False) -> 
 				)
 			if sub.is_symlink() or not sub.is_dir():
 				raise TemplateSourceError(f'subdir {ref.subdir!r} not found in template set {ref.name!r}')
-			promoted = root / f'.{ref.name}.{ref.sha}.promoted'
+			promoted = work / 'promoted'
 			shutil.rmtree(promoted, ignore_errors=True)
 			sub.rename(promoted)
 			shutil.rmtree(staging, ignore_errors=True)
@@ -366,12 +413,12 @@ def materialize_template_source(ref: TemplateSourceRef, force: bool = False) -> 
 		# symlinks, no `.py` (import-time RCE), and within the size cap.
 		_reject_unsafe_tree(staging, ref.name)
 		_enforce_size_cap(staging, ref.name)
-		_pin_marker(staging).write_text(ref.sha)
-		# Atomic-ish swap: remove old, move staging into place.
+		_pin_marker(staging).write_text(_pin_value(ref))
+		# Atomic-ish swap: remove old, move the vetted tree into place.
 		shutil.rmtree(target, ignore_errors=True)
 		staging.rename(target)
 	finally:
-		shutil.rmtree(staging, ignore_errors=True)
+		shutil.rmtree(work, ignore_errors=True)
 
 	console.print(f':inbox_tray: Materialized template set [bold]{ref.name}[/] @ {ref.sha[:10]}')
 	# The set root now holds the vetted templates directly (subdir already promoted).
