@@ -282,6 +282,11 @@ class bbot(Command):
 		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium']
 	}
 	install_version = '2.7.2'
+	# bbot pulls `chromium` as an apt dep, which on some CI images (Ubuntu's
+	# chromium-browser snap shim) fails to install non-interactively. bbot is a heavy
+	# optional meta-tool, so don't let its install abort the whole run — the integration
+	# suite skips the task when the binary isn't present.
+	install_optional = True
 	install_cmd = 'pipx install bbot==[install_version] --force'
 	install_post = {
 		# Glob the python minor version so this cleanup isn't silently skipped when
