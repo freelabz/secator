@@ -1,4 +1,5 @@
 import re
+import sys
 
 from secator.config import CONFIG
 from secator.decorators import task
@@ -15,7 +16,11 @@ DRG_ERROR_REGEX = re.compile(r'(Http Error|Error Connecting|Timeout Error|Unauth
 class dockerregistrygrabber(Vuln):
 	"""Exposed Docker registries enumeration."""
 
-	cmd = 'drg.py'
+	# Run drg.py with secator's own interpreter: its shebang is `env python3`, which
+	# may resolve to a python without drg.py's deps (requests/rich/urllib3 are pip-
+	# installed into sys.executable by PipInstaller), causing a silent ModuleNotFound
+	# crash -> no repos parsed -> no finding.
+	cmd = f'{sys.executable} {CONFIG.dirs.bin}/drg.py'
 	input_chunk_size = 1
 	input_types = [URL]
 	output_types = [Vulnerability]
