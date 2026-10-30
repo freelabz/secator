@@ -61,7 +61,7 @@ class nxc_smb(Vuln):
 	}
 	github_handle = 'Pennyw0rth/NetExec'
 	install_github_bin = False
-	install_version = 'v1.5.1'
+	install_version = "30cf1465"
 	install_cmd = "pipx install --force git+https://github.com/Pennyw0rth/NetExec@[install_version]"
 
 	@staticmethod
@@ -189,9 +189,9 @@ class nxc_smb(Vuln):
 					name='smb_credentials',
 					value=f'{username}:{password}',
 					tags=['network', 'smb', 'default-login'],
-					extra_data=cred | {'type': 'standard_credentials'}
+					extra_data={**cred, 'type': 'standard_credentials'}
 				)
-				if username != username_opt and password != password_opt:
+				if username != username_opt or password != password_opt:
 					yield Vulnerability(
 						name='SMB - Credential Weakness',
 						matched_at=self.full_target,
@@ -224,9 +224,9 @@ class nxc_smb(Vuln):
 					name='smb_credentials',
 					value=f'{username}:{password}',
 					tags=['network', 'smb', 'admin-login'],
-					extra_data=host | {'type': 'admin_credentials'}
+					extra_data={**host, 'type': 'admin_credentials'}
 				)
-				if username != username_opt and password != password_opt:
+				if username != username_opt or password != password_opt:
 					yield Vulnerability(
 						name='SMB - Credential Weakness',
 						matched_at=self.full_target,
@@ -252,7 +252,7 @@ class nxc_smb(Vuln):
 			# Hosts
 			for host in data.get('hosts', []):
 				smb_version = host.get('smb_version')
-				signing = host.get('signing', True)
+				signing = host.get('signing')  # None when NetExec omitted the field
 				yield Tag(
 					match=self.full_target,
 					category='info',
@@ -266,7 +266,7 @@ class nxc_smb(Vuln):
 						'signing_enabled': signing,
 					}
 				)
-				if not signing:
+				if signing is False:
 					yield Vulnerability(
 						name='SMB - Message Signing Not Required',
 						description=(
@@ -391,11 +391,13 @@ class NXCParser:
 	"""
 
 	# ── Compiled patterns ──────────────────────────────────────────────────────
+	# Host column: IPv4 dotted-quad or an IPv6 literal (hex groups + ::)
+	_IP = r"(?P<ip>\d+\.\d+\.\d+\.\d+|[0-9A-Fa-f:]+:[0-9A-Fa-f:]*)"
 	# SMB host line:
 	# SMB  10.10.10.5  445  DC01  [*] Windows 10.0 Build 17763 (name:DC01) (domain:corp.local)
 	_RE_HOST = re.compile(
-		r"(?:SMB|LDAP|WINRM|MSSQL|RDP)\s+"
-		r"(?P<ip>\d+\.\d+\.\d+\.\d+)\s+"
+		r"(?:SMB|LDAP|WINRM|MSSQL|RDP)\s+" +
+		_IP + r"\s+" +
 		r"(?P<port>\d+)\s+"
 		r"(?P<hostname>\S+)\s+"
 		r"\[\*\]\s+(?P<info>.+)"
@@ -405,8 +407,8 @@ class NXCParser:
 	# SMB  10.10.10.5  445  DC01  [+] corp.local\svc-sql:ServicePass2024! (Pwn3d!)
 	# SMB  10.10.10.5  445  DC01  [-] corp.local\jsmith:wrongpass
 	_RE_AUTH = re.compile(
-		r"(?:SMB|LDAP|WINRM|MSSQL|RDP)\s+"
-		r"(?P<ip>\d+\.\d+\.\d+\.\d+)\s+"
+		r"(?:SMB|LDAP|WINRM|MSSQL|RDP)\s+" +
+		_IP + r"\s+" +
 		r"\d+\s+\S+\s+"
 		r"(?P<status>\[.\])\s+"
 		r"(?P<domain>[^\\]+)\\(?P<user>\S+?):(?P<secret>\S+)"
@@ -416,8 +418,8 @@ class NXCParser:
 	# Share line:
 	# SMB  10.10.10.5  445  DC01  SYSVOL  READ,WRITE
 	_RE_SHARE = re.compile(
-		r"(?:SMB|LDAP)\s+"
-		r"(?P<ip>\d+\.\d+\.\d+\.\d+)\s+"
+		r"(?:SMB|LDAP)\s+" +
+		_IP + r"\s+" +
 		r"\d+\s+\S+\s+"
 		r"(?P<share>\S+)\s+"
 		r"(?P<perms>READ(?:,WRITE)?|WRITE|NO ACCESS)"
@@ -426,8 +428,8 @@ class NXCParser:
 	# Session line:
 	# SMB  10.10.10.5  445  DC01  jsmith
 	_RE_SESSION = re.compile(
-		r"(?:SMB)\s+"
-		r"(?P<ip>\d+\.\d+\.\d+\.\d+)\s+"
+		r"(?:SMB)\s+" +
+		_IP + r"\s+" +
 		r"\d+\s+\S+\s+"
 		r"(?P<user>[a-zA-Z0-9._-]+)\s*$"
 	)
@@ -440,8 +442,8 @@ class NXCParser:
 
 	# Local admin line (from --local-auth or Pwn3d!)
 	_RE_ADMIN = re.compile(
-		r"(?:SMB|WINRM)\s+"
-		r"(?P<ip>\d+\.\d+\.\d+\.\d+)\s+"
+		r"(?:SMB|WINRM)\s+" +
+		_IP + r"\s+" +
 		r"\d+\s+"
 		r"(?P<hostname>\S+)\s+"
 		r"\[.\]\s+.+\(Pwn3d!\)"
@@ -500,6 +502,11 @@ class NXCParser:
 				# Detect protocol from line start
 				proto = line.split()[0].upper()
 
+				# Parse signing explicitly; keep None when NetExec omits the field
+				# so a missing value is never reported as "signing disabled".
+				sm = re.search(r"signing\s*:\s*(True|False)", info, re.IGNORECASE)
+				signing = (sm.group(1).lower() == "true") if sm else None
+
 				if ip not in seen_hosts:
 					seen_hosts.add(ip)
 					data["hosts"].append({
@@ -507,7 +514,7 @@ class NXCParser:
 						"hostname": hostname,
 						"os":       win_ver or info[:60],
 						"domain":   self._extract_domain(info),
-						"signing":  "signing:True" in info or "signing: True" in info,
+						"signing":  signing,
 						"null_auth": "Null Auth:True" in info or "Null Auth: True" in info,
 						"smb_version": "v1" if "SMBv1:True" in info or "SMBv1: True" in info else "other"
 					})
