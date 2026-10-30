@@ -128,4 +128,15 @@ echo "--- drg.py direct probe (full) ---"
 if command -v drg.py >/dev/null 2>&1; then
 	timeout 25 "$(command -v python3)" "$(command -v drg.py)" http://127.0.0.1 -p 15000 --list 2>&1 | sed 's/^/  /'
 fi
+# Run the ACTUAL tasks via secator with the harness opts + -debug, so the BUILT
+# command and the task-level (parsed) output are visible — this is what differs
+# from the bare probes above.
+if command -v secator >/dev/null 2>&1; then
+	echo "--- secator x nxc_ftp (task, -debug) ---"
+	timeout 60 secator x nxc_ftp 127.0.0.1:10021 -u testuser -p testpass --timeout 30 --threads 50 -debug 2>&1 | grep -iE "Command|nxc ftp|ftp_login|finished with|\[\+\]|\[-\]|found @|cmd:" | sed 's/^/  /' | head -15
+	echo "--- secator x nxc_smb (task, -debug) ---"
+	timeout 70 secator x nxc_smb 127.0.0.1:10445 --shares --timeout 30 --threads 50 -debug 2>&1 | grep -iE "Command|nxc smb|Null Auth|smb_credentials|finished with|found @|cmd:" | sed 's/^/  /' | head -15
+	echo "--- secator x dockerregistrygrabber (task, -debug) ---"
+	timeout 60 secator x dockerregistrygrabber http://127.0.0.1 --docker-port 15000 -debug 2>&1 | grep -iE "Command|drg|Unauthenticated|finished with|Found repo|testrepo|cmd:|-p " | sed 's/^/  /' | head -15
+fi
 echo "===== END LAB DIAGNOSTICS ====="
