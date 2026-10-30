@@ -22,6 +22,7 @@ from secator.runners import Command
 
 @task()
 class manspider(Command):
+	"""Spider SMB shares for files and sensitive content across a network."""
 	cmd = 'manspider'
 	json_flag = '--json'
 	input_types = [STRING, CIDR_RANGE, HOST, HOST_PORT, IP]
