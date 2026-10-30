@@ -81,7 +81,16 @@ class masscan(ReconPort):
 					old_json_path = match.group(1).strip()
 					shutil.copy(old_json_path, self.output_path)
 					content = content.replace(old_json_path, self.output_path)
-			new_resume_conf = f'{self.reports_folder}/.inputs/masscan_paused.conf'
+				else:
+					# Resume file has no output-filename: masscan would write its
+					# default output outside self.output_path. Inject JSON output
+					# settings so results land where on_cmd_done looks for them.
+					content = content.rstrip('\n') + (
+						f'\noutput-format = json\noutput-filename = {self.output_path}\n'
+					)
+			# Use a per-task resume file so concurrent masscan tasks don't
+			# overwrite each other's targets/output filename.
+			new_resume_conf = f'{self.reports_folder}/.inputs/{self.unique_name}_paused.conf'
 			with open(new_resume_conf, 'w') as f:
 				f.write(MASSCAN_NOCAPTURE_REGEX.sub('', content))
 			opts['resume_conf']['value'] = new_resume_conf
@@ -129,7 +138,10 @@ class masscan(ReconPort):
 			for (ix, line) in enumerate(f):
 				if not line.startswith('{'):
 					continue
-				item = json.loads(line.rstrip(','))
+				# masscan JSON-array lines can end with "},\n"; strip the line
+				# ending before the trailing comma, otherwise the comma remains
+				# and json.loads raises.
+				item = json.loads(line.strip().rstrip(','))
 				ip = item.get('ip', '')
 				timestamp = item.get('timestamp', '')
 				ports = item.get('ports', [])
@@ -137,10 +149,12 @@ class masscan(ReconPort):
 				if not ip or not ports:
 					continue
 				if ip not in self.seen_ips:
+					# The host answered with at least one open port, so it is
+					# alive (consistent with the other port scanners).
 					yield Ip(
 						ip=ip,
 						host=ip,
-						alive=False,
+						alive=True,
 						tags=['masscan']
 					)
 					self.seen_ips.append(ip)

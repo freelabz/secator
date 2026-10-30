@@ -17,12 +17,16 @@ HTTPS_PROXY = os.environ.get('https_proxy')
 class zabbix_get(Command):
 	"""Zabbix get is a command-line utility, which can be used to communicate with Zabbix agent and retrieve required information from the agent."""  # noqa: E501
 	cmd = 'zabbix_get'
-	install_cmd = (
-	    'wget https://repo.zabbix.com/zabbix/7.4/release/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_7.4+ubuntu26.04_all.deb && '  # noqa: E501
-	    'sudo dpkg -i zabbix-release_latest_7.4+ubuntu26.04_all.deb && '
-	    'sudo apt update && '
-	    'sudo apt install zabbix-get'
-	)
+	# zabbix_get ships in distro repos, so install it via the package manager
+	# rather than a hardcoded Ubuntu-version-specific .deb (which fails on Debian,
+	# other Ubuntu releases, and non-apt workers).
+	install_pre = {
+		'apt': ['zabbix-get'],
+		'apk': ['zabbix-utils'],
+		'brew': ['zabbix'],
+		'pacman': ['zabbix-agent'],
+		'yum|dnf|zypper': ['zabbix-get'],
+	}
 	input_flag = '-s'
 	file_flag = None
 	input_chunk_size = 1
@@ -54,9 +58,15 @@ class zabbix_get(Command):
 	@staticmethod
 	def on_cmd_done(self):
 		key = self.get_opt_value('key')
-		markers = ('zbx_notsupported', 'permission denied', 'connection error', 'get value error', 'check access restrictions')  # noqa: E501
+		# zabbix_get's own return code is not yet available in this callback (it's
+		# set after on_cmd_done), and ignore_return_code=True would zero it anyway,
+		# so don't gate on self.return_code. Gate on Zabbix-protocol-level error
+		# markers only -- NOT on generic strings like "permission denied", which can
+		# legitimately appear in retrieved command output (e.g.
+		# system.run[echo permission denied]) and would suppress a real finding.
+		markers = ('zbx_notsupported', 'zbx_error', 'get value error', 'check access restrictions')
 		output_lower = self.output.lower()
-		if self.return_code != 0 or not self.output.strip() or any(m in output_lower for m in markers):
+		if not self.output.strip() or any(m in output_lower for m in markers):
 			return
 		if key.startswith('vfs.file.contents'):
 			filepath = key.split('vfs.file.contents')[-1].rstrip(']').lstrip('[')

@@ -56,7 +56,7 @@ class dublin_traceroute(Command):
 		port = opts['source_port']['value']
 		default_port = opts['source_port']['conf']['default']
 		if port == default_port:
-			opts['source_port']['value'] = random.randint(1001, 65536)
+			opts['source_port']['value'] = random.randint(1001, 65535)
 		return opts
 
 	@staticmethod
@@ -80,6 +80,7 @@ class dublin_traceroute(Command):
 				full_fmt_string = f'=== Flow: {flow_idx} / Hops: {len(hops)} ==='
 				flow_idx += 1
 				names = []
+				recv_ips = []
 				for ix, hop in enumerate(hops):
 					is_last = hop['is_last']
 					ttl_sent = hop['sent']['ip']['ttl']
@@ -94,11 +95,12 @@ class dublin_traceroute(Command):
 					ip = ip_block.get('src', '')
 					ttl_received = ip_block.get('ttl', 0)
 					names.append(name)
+					recv_ips.append(ip or '*')
 					fmt_string = f'{ix+1:<3d} {ip:<20s} {name:<35s}'
 					if name != '*':
 						fmt_string += f' (RTT:{rtt_usec:<6d}us TTL -> {ttl_sent:<3d} TTL <- {ttl_received:<3d})'
 					full_fmt_string += f'\n{fmt_string}'
-				loops = dublin_traceroute.detect_routing_loops(names)
+				loops = dublin_traceroute.detect_routing_loops(recv_ips)
 				all_loops.extend(loops)
 				yield Tag(
 					category='info',
@@ -145,8 +147,12 @@ class dublin_traceroute(Command):
 				)
 
 	@staticmethod
-	def detect_routing_loops(names):
-		"""Detects routing loops."""
-		pairs = [(names[i], names[i+1]) for i in range(len(names)-1) if names[i] != '*' and names[i+1] != '*']
+	def detect_routing_loops(hops):
+		"""Detects routing loops by received router identity (IP), not display name.
+
+		Distinct routers can share a reverse-DNS / display name, so counting name
+		pairs can flag a false loop; counting received-IP pairs identifies the
+		same physical router bouncing packets.
+		"""
+		pairs = [(hops[i], hops[i+1]) for i in range(len(hops)-1) if hops[i] != '*' and hops[i+1] != '*']
 		return [(pair, count) for pair, count in Counter(pairs).items() if count > 2]
-		# return [(pair, count) for pair, count in Counter(pairs).items() if count > 2 and pair[0] != pair[1]]
