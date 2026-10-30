@@ -63,6 +63,7 @@ class nuclei(VulnMulti):
 		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store reponses'},
 		'tags': {'type': str, 'help': 'Tags'},
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
+		'templates_source': {'type': str, 'internal': True, 'display': False, 'help': 'Pinned template-source ref (name/url/sha/subdir) materialized into CONFIG.dirs.templates before -t'},  # noqa: E501
 		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
 		'template_condition': {'type': str, 'short': 'tc', 'help': 'Templates to run based on expression condition (ex: "contains(id, "ssh")")'},  # noqa: E501
 	}
