@@ -53,10 +53,9 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'nmap.version_detection': True,
 			'nmap.skip_host_discovery': True,
 			# gau queries several public URL archives; the slow ones (commoncrawl/otx/urlscan)
-			# dominate its runtime. Restrict it to the wayback archive, which reliably carries the
-			# deep URL this test asserts on — cuts gau ~72s -> ~34s. (xurlfind3r is NOT narrowed the
-			# same way: for this target its root URL comes from a non-wayback source, so a single
-			# source is unreliable there.)
+			# dominate its runtime and add flakiness. Restrict it to the wayback archive — reliably
+			# non-empty for this target and ~2x faster (gau ~72s -> ~34s). We no longer assert a
+			# specific archived URL (see outputs.py), so a single reliable source is all we need.
 			'gau.providers': 'wayback',
 			'match_codes': '200',
 			'maigret.site': 'github',
@@ -92,15 +91,16 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 
 		def run_one(cls):
 			"""Run and assert ONE task. Returns an error string on failure, None on pass/skip."""
-			if cls.__name__ == 'msfconsole':  # skip msfconsole test as it's stuck
+			name = cls.__name__
+			if name == 'msfconsole':  # skip msfconsole test as it's stuck
 				return None
-			input = INPUTS_TASKS.get(cls.__name__)
+			input = INPUTS_TASKS.get(name)
 			if input is None and len(cls.input_types) > 0:
 				input = INPUTS_TASKS.get(cls.input_types[0], [])
 			if not input:
-				console.print(f'\tTesting task {cls.__name__} ... [dim gold3] skipped (no input)[/]')
+				console.print(f'\tTesting task {name} ... [dim gold3] skipped (no input)[/]')
 				return None
-			outputs = OUTPUTS_TASKS.get(cls.__name__, [])
+			outputs = OUTPUTS_TASKS.get(name, [])
 			# Fresh opts per task: runners mutate their run_opts, so sharing one dict across
 			# concurrent runs would race.
 			task = cls(input, **dict(opts))
@@ -115,9 +115,9 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 				)
 				return None
 			except AssertionError as e:
-				return f'ERROR ({cls.__name__}): {e}'
+				return f'ERROR ({name}): {e}'
 			finally:
-				durations[cls.__name__] = time() - started
+				durations[name] = time() - started
 
 		# Run the tasks concurrently (I/O-bound). Collect failures and fail once at the end so
 		# every task is still exercised on a run, like the original sequential subTest loop.
