@@ -124,9 +124,12 @@ class TestMaterializeLocalFs(unittest.TestCase):
 
 	def test_materialize_is_idempotent(self):
 		ref = TemplateSourceRef(name='pinned', url=str(self.src), sha=self.sha1)
-		materialize_template_source(ref)
+		first = materialize_template_source(ref)
 		result2 = materialize_template_source(ref)
 		self.assertFalse(result2.refreshed)
+		# Reuse must return the same path and preserve the pinned contents.
+		self.assertEqual(result2.path, first.path)
+		self.assertEqual((result2.path / 'tpl.yaml').read_text(), 'id: test-template-v1\n')
 
 	def test_subdir_is_promoted_to_set_root(self):
 		# A requested subdir IS the template set: only its contents are promoted to
@@ -232,6 +235,17 @@ class TestGitTransportHardening(unittest.TestCase):
 		ref = TemplateSourceRef(name='pwn', url=f'file://{donor}', sha='a' * 40)
 		with self.assertRaises(TemplateSourceError):
 			materialize_template_source(ref)
+
+	def test_git_timeout_surfaces_clean_error(self):
+		# A hung git invocation must raise a clean TemplateSourceError, not hang the worker.
+		from secator import template_source as ts
+		with mock.patch.object(
+			ts.subprocess, 'run',
+			side_effect=subprocess.TimeoutExpired(cmd='git', timeout=ts._GIT_TIMEOUT),
+		):
+			with self.assertRaises(TemplateSourceError) as ctx:
+				ts._run_git(['clone', 'https://example.test/x.git'])
+		self.assertIn('timed out', str(ctx.exception))
 
 
 class TestTarballGuards(unittest.TestCase):
