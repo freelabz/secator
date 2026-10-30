@@ -132,11 +132,7 @@ fi
 # command and the task-level (parsed) output are visible — this is what differs
 # from the bare probes above.
 if command -v secator >/dev/null 2>&1; then
-	echo "--- secator x nxc_ftp (task, -debug) ---"
-	timeout 60 secator x nxc_ftp 127.0.0.1:10021 -u testuser -p testpass --timeout 30 --threads 50 -debug 2>&1 | grep -iE "Command|nxc ftp|ftp_login|finished with|\[\+\]|\[-\]|found @|cmd:" | sed 's/^/  /' | head -15
-	echo "--- secator x nxc_smb (task, -debug) ---"
-	timeout 70 secator x nxc_smb 127.0.0.1:10445 --shares --timeout 30 --threads 50 -debug 2>&1 | grep -iE "Command|nxc smb|Null Auth|smb_credentials|finished with|found @|cmd:" | sed 's/^/  /' | head -15
-	echo "--- secator x dockerregistrygrabber (task, -debug) ---"
-	timeout 60 secator x dockerregistrygrabber http://127.0.0.1 --docker-port 15000 -debug 2>&1 | grep -iE "Command|drg|Unauthenticated|finished with|Found repo|testrepo|cmd:|-p " | sed 's/^/  /' | head -15
+	echo "--- secator x dockerregistrygrabber (task) — show the built drg.py cmd + result ---"
+	timeout 60 secator x dockerregistrygrabber http://127.0.0.1 --docker-port 15000 -debug 2>&1 | grep -iE "drg\.py| -p |Running cmd|Found repo|Unauthenticated|finished with|testrepo|No such|rror" | sed 's/^/  /' | head -20
 fi
 echo "===== END LAB DIAGNOSTICS ====="
