@@ -39,6 +39,10 @@ class zabbix_get(Command):
 		'ubuntu|debian|linuxmint|popos|kali': (
 			'sh -c \''
 			'set -e; . /etc/os-release; '
+			# Run the privileged steps via sudo when not root (the installer runs
+			# unprivileged in CI; a raw install_cmd is NOT auto-prefixed with sudo the
+			# way install_pre/install_cmd_pre package installs are).
+			'SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"; '
 			# Ubuntu AND its derivatives (Mint/PopOS) all set ID_LIKE=debian, so we must
 			# branch on UBUNTU_CODENAME (only set on the Ubuntu family) rather than
 			# ID_LIKE: Ubuntu-family -> Ubuntu repo keyed by the Ubuntu VERSION_ID;
@@ -51,9 +55,9 @@ class zabbix_get(Command):
 			'fi; '
 			'DEB="zabbix-release_7.0-1+${BASE}${REL}_all.deb"; '
 			'wget -q "https://repo.zabbix.com/zabbix/7.0/${BASE}/pool/main/z/zabbix-release/${DEB}" -O /tmp/zabbix-release.deb; '
-			'dpkg -i /tmp/zabbix-release.deb; '
-			'apt-get update; '
-			'apt-get install -y --no-install-recommends zabbix-get'
+			'$SUDO dpkg -i /tmp/zabbix-release.deb; '
+			'$SUDO apt-get update; '
+			'$SUDO apt-get install -y --no-install-recommends zabbix-get'
 			'\''
 		),
 	}
