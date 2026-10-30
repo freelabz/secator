@@ -121,6 +121,14 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			if bin_name and shutil.which(bin_name) is None:
 				console.print(f'\tTesting task {name} ... [dim gold3] skipped (binary {bin_name!r} not installed)[/]')
 				return None
+			# Skip (don't fail) a tool that needs root when we're not root: the CI runner is
+			# unprivileged, so a raw-socket/privileged tool (e.g. masscan) can't run and would
+			# only ever error with a non-zero return code. This is an environment constraint,
+			# not a regression — same rationale as the missing-binary skip above.
+			is_root = hasattr(os, 'geteuid') and os.geteuid() == 0
+			if getattr(cls, 'requires_sudo', False) and not is_root:
+				console.print(f'\tTesting task {name} ... [dim gold3] skipped (requires root, running unprivileged)[/]')
+				return None
 			outputs = OUTPUTS_TASKS.get(name, [])
 			# Fresh opts per task: runners mutate their run_opts, so sharing one dict across
 			# concurrent runs would race.
