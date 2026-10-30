@@ -105,3 +105,27 @@ if command -v nxc >/dev/null 2>&1; then
 else
 	echo "WARN: nxc not installed; skipping Samba readiness wait (nxc_smb test may fail)"
 fi
+
+# ---------------------------------------------------------------------------
+# DIAGNOSTICS (PR #1512 lab services) — dump the real service state + raw tool
+# output so a CI failure can be debugged from actual data (these services behave
+# differently under GHA's container runtime than locally). Remove once stable.
+# ---------------------------------------------------------------------------
+echo "===== LAB DIAGNOSTICS (dockerregistrygrabber / nxc_ftp / nxc_smb) ====="
+echo "--- docker ps ---"; docker ps --format '{{.Names}} {{.Image}} {{.Status}} {{.Ports}}' 2>&1 | grep -iE 'registry|ftp|samba' | sed 's/^/  /'
+for svc in registry ftp samba; do
+	echo "--- $BIN_NAME logs $svc (tail 30) ---"
+	$BIN_NAME logs --tail 30 "$svc" 2>&1 | sed 's/^/  /'
+done
+echo "--- registry /v2/_catalog ---"; curl -s http://127.0.0.1:15000/v2/_catalog 2>&1 | sed 's/^/  /'
+if command -v nxc >/dev/null 2>&1; then
+	echo "--- nxc ftp login probe (full) ---"
+	timeout 25 nxc ftp 127.0.0.1 --port 10021 -u testuser -p testpass 2>&1 | sed 's/^/  /'
+	echo "--- nxc smb --shares probe (full) ---"
+	timeout 35 nxc smb 127.0.0.1 --port 10445 -u '' -p '' --shares 2>&1 | sed 's/^/  /'
+fi
+echo "--- drg.py direct probe (full) ---"
+if command -v drg.py >/dev/null 2>&1; then
+	timeout 25 "$(command -v python3)" "$(command -v drg.py)" http://127.0.0.1 -p 15000 --list 2>&1 | sed 's/^/  /'
+fi
+echo "===== END LAB DIAGNOSTICS ====="
