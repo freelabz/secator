@@ -37,10 +37,15 @@ _DESCRIPTION_SCHEMA = {
 
 # Mode-membership sets, so each tool declares exposure declaratively. These mirror
 # the per-mode ``allowed_actions`` in prompts.MODES (enforced by the consistency test).
-_SCAN_EXPLOIT = frozenset({"scan", "exploit"})
-_ALL_MODES = frozenset({"scan", "chat", "exploit"})
+# Active/mutating tools (run tasks/shell, write findings) — the action modes.
+_ACTIVE_MODES = frozenset({"scan", "exploit", "research"})
+_ALL_MODES = frozenset({"scan", "chat", "exploit", "research"})
 # Read-only helper tools (web/plan/run-history lookups) — exposed in every mode.
-_READONLY_HELPER = frozenset({"scan", "chat", "exploit"})
+_READONLY_HELPER = _ALL_MODES
+# `change_mode` is the ONE tool NOT exposed in `research`: research is a deliberate,
+# directly-selected terminal mode that already has the most capable surface, so it
+# neither escalates nor de-escalates. The other modes keep the escalation ladder.
+_CAN_CHANGE_MODE = frozenset({"scan", "chat", "exploit"})
 
 
 class BaseTool:
@@ -81,7 +86,7 @@ class BaseTool:
 class RunTaskTool(BaseTool):
 	name = "run_task"
 	action = "task"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	handler = "_handle_task"
 	schema = {
 		"type": "function",
@@ -164,7 +169,7 @@ class RunSubagentTool(BaseTool):
 class RunWorkflowTool(BaseTool):
 	name = "run_workflow"
 	action = "workflow"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	handler = "_handle_workflow"
 	schema = {
 		"type": "function",
@@ -194,7 +199,7 @@ class RunWorkflowTool(BaseTool):
 class RunShellTool(BaseTool):
 	name = "run_shell"
 	action = "shell"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	handler = "_handle_shell"
 	schema = {
 		"type": "function",
@@ -279,7 +284,7 @@ class QueryWorkspaceTool(BaseTool):
 class AddFindingTool(BaseTool):
 	name = "add_finding"
 	action = "add_finding"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	auto_allow = True
 	handler = "_handle_add_finding"
 	schema = {
@@ -319,7 +324,7 @@ class AddFindingTool(BaseTool):
 class MarkVulnExploitedTool(BaseTool):
 	name = "mark_vuln_exploited"
 	action = "mark_vuln_exploited"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	auto_allow = True
 	handler = "_handle_mark_vuln_exploited"
 	schema = {
@@ -409,7 +414,7 @@ class MarkVulnExploitedTool(BaseTool):
 class MarkVulnFalsePositiveTool(BaseTool):
 	name = "mark_vuln_false_positive"
 	action = "mark_vuln_false_positive"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	auto_allow = True
 	handler = "_handle_mark_vuln_false_positive"
 	schema = {
@@ -448,7 +453,7 @@ class MarkVulnFalsePositiveTool(BaseTool):
 class MarkVulnExploitFailedTool(BaseTool):
 	name = "mark_vuln_exploit_failed"
 	action = "mark_vuln_exploit_failed"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	auto_allow = True
 	handler = "_handle_mark_vuln_exploit_failed"
 	schema = {
@@ -525,7 +530,7 @@ class MarkVulnExploitFailedTool(BaseTool):
 class UpdateFindingTool(BaseTool):
 	name = "update_finding"
 	action = "update_finding"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	auto_allow = True
 	handler = "_handle_update_finding"
 	schema = {
@@ -736,7 +741,7 @@ class ListRunnersTool(BaseTool):
 class ChangeModeTool(BaseTool):
 	name = "change_mode"
 	action = "change_mode"
-	modes = _ALL_MODES
+	modes = _CAN_CHANGE_MODE  # every mode EXCEPT research (terminal, directly-selected)
 	auto_allow = True
 	handler = "_handle_change_mode"
 	schema = {
