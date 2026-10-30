@@ -233,7 +233,7 @@ OUTPUTS_TASKS = {
 		Tag(name='ftp_login_successful', category='info', match='127.0.0.1:10021', value='testuser:testpass', _source='nxc_ftp'),  # noqa: E501
 	],
 	'dockerregistrygrabber': [
-		Vulnerability(name='Docker Registry - Unauthenticated Access', matched_at='http://127.0.0.1:5000', severity='high', _source='dockerregistrygrabber'),  # noqa: E501
+		Vulnerability(name='Docker Registry - Unauthenticated Access', matched_at='http://127.0.0.1:15000', severity='high', _source='dockerregistrygrabber'),  # noqa: E501
 	],
 	'zabbix_get': [
 		# Lab agent has system.run enabled → critical RCE finding.

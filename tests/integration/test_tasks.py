@@ -71,6 +71,10 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'nxc_ftp.username': 'testuser',
 			'nxc_ftp.password': 'testpass',
 			'nxc_ftp.timeout': 30,
+			# The registry lab maps host 15000 -> container 5000. drg.py wants a port-less
+			# URL + the port via -p, so pass docker_port explicitly (the task's URL-port
+			# parsing doesn't reliably propagate the port to the command).
+			'dockerregistrygrabber.docker_port': 15000,
 			# droopescan.mode defaults to 'drupal', matching the Drupal 7 lab container.
 			# Zabbix agent has remote commands enabled in the lab → exercise the RCE detection path.
 			'zabbix_get.key': 'system.run[id]',
