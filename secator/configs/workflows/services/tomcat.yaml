@@ -12,8 +12,18 @@ input_types:
   - host:port
 
 tasks:
+  httpx:
+    description: URL probe
+    tech_detect: True
+    follow_redirect: True
+
   nuclei/tomcat:
     description: Detect Apache Tomcat vulnerabilities
     template_condition: "contains(id, 'tomcat') || contains(tags, 'tomcat')"
+
   apachetomcatscanner:
     description: Detect Apache Tomcat vulnerabilities
+    # apachetomcatscanner only accepts URLs, so feed it the URLs httpx derived
+    # from host / ip / host:port inputs.
+    targets_:
+    - url.url

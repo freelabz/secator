@@ -28,5 +28,7 @@ done
 if docker pull alpine:latest >/dev/null 2>&1; then
 	docker tag alpine:latest 127.0.0.1:15000/testrepo:latest >/dev/null 2>&1
 	docker push 127.0.0.1:15000/testrepo:latest >/dev/null 2>&1 || \
-		echo "WARN: could not push to local registry (dockerregistrygrabber test may skip)"
+		echo "WARN: could not push to local registry (dockerregistrygrabber test will fail)"
+else
+	echo "WARN: could not pull alpine:latest; local registry left empty (dockerregistrygrabber test will fail)"
 fi

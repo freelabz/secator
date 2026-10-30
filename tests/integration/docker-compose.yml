@@ -116,7 +116,10 @@ services:
     image: zabbix/zabbix-agent:latest
     restart: always
     environment:
-      ZBX_SERVER_HOST: "127.0.0.1"
+      # zabbix_get connects via the host-forwarded port, so the source address
+      # the agent sees is the Docker bridge gateway, not loopback. Allow any
+      # source so forwarded passive checks are accepted in CI.
+      ZBX_SERVER_HOST: "0.0.0.0/0"
       ZBX_PASSIVE_ALLOW: "true"
       ZBX_ACTIVE_ALLOW: "false"
       ZBX_ENABLEREMOTECOMMANDS: "1"
