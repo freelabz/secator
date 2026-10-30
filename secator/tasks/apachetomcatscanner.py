@@ -54,6 +54,10 @@ class apachetomcatscanner(Vuln):
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
+		# Remove any pre-existing output file so a scan that fails before exporting
+		# can't make on_cmd_done parse and re-emit a previous run's results.
+		if os.path.exists(self.output_path):
+			os.remove(self.output_path)
 		self.cmd += (
 			' --list-cves --verbose --debug --show-cves-descriptions --no-colors'
 			f' --export-json {shlex.quote(self.output_path)}'
@@ -141,7 +145,10 @@ class apachetomcatscanner(Vuln):
 			cvss_score = 0.0
 		criticity = (cvss.get('criticity') or '').lower()
 		severity = criticity if criticity and criticity != 'none' else 'unknown'
-		confidence = 'high' if cvss_score > 0 else 'low'
+		# --list-cves lists CVEs that affect the *detected version*; it does not
+		# verify the vulnerable condition on the target. These are therefore
+		# potentially-applicable, not confirmed, so keep confidence low.
+		confidence = 'low'
 		extra_data = {'version': version}
 		if cve.get('vuln_type'):
 			extra_data['vuln_type'] = cve['vuln_type']

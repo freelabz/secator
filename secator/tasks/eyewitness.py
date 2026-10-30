@@ -13,7 +13,12 @@ from secator.tasks._categories import HttpBase
 # else a connection/driver error state. Map those to the closest HTTP status code (the raw text is also kept in
 # extra_data['request_status']). Unknown/driver errors -> 0.
 EYEWITNESS_STATUS_CODES = {
-	'Successful': 200,
+	# "Successful" only means the page loaded in the browser, NOT that the HTTP
+	# status was 200 (it could be 401/403/500). Without the real "Status Code"
+	# column we can't know the code, so map it to 0 (unknown) rather than
+	# fabricating 200 and marking the Url verified. The raw outcome is retained
+	# in extra_data['request_status'].
+	'Successful': 0,
 	'BadStatus': 400,
 	'Timeout': 504,
 	'Connection Reset': 502,
@@ -95,6 +100,13 @@ class eyewitness(HttpBase):
 			with open(targets_file, 'w') as f:
 				f.write(self.inputs[0] + '\n')
 			self.cmd = self.cmd.replace(f' {shlex.quote(self.inputs[0])}', f' -f {shlex.quote(targets_file)}', 1)
+
+		# Remove any pre-existing Requests.csv so a run that fails before
+		# EyeWitness regenerates its report can't make on_cmd_done parse and
+		# emit stale rows from a previous scan as current results.
+		stale_csv = os.path.join(self.output_path, 'Requests.csv')
+		if os.path.exists(stale_csv):
+			os.remove(stale_csv)
 
 		self.cmd += f' --web --no-prompt -d {shlex.quote(self.output_path)}'
 
