@@ -143,16 +143,22 @@ _GIT_TRANSPORT_HARDENING = [
 ]
 _GIT_ALLOW_PROTOCOL = 'https:http:ssh:git'
 
+# Cap every git invocation: a hostile/slow remote (or a prompt git can't suppress)
+# must not hang the worker indefinitely. Overridable for very large sources.
+_GIT_TIMEOUT = int(os.environ.get('SECATOR_TEMPLATE_GIT_TIMEOUT', '300'))
+
 
 def _run_git(args, cwd=None):
 	env = dict(os.environ, GIT_ALLOW_PROTOCOL=_GIT_ALLOW_PROTOCOL, GIT_TERMINAL_PROMPT='0')
 	try:
 		return subprocess.run(
 			['git', *_GIT_TRANSPORT_HARDENING, *args], cwd=cwd, check=True, env=env,
-			stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+			stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=_GIT_TIMEOUT,
 		)
 	except FileNotFoundError:
 		raise TemplateSourceError('git is not installed; required to materialize a git template source')
+	except subprocess.TimeoutExpired:
+		raise TemplateSourceError(f'git {" ".join(args)} timed out after {_GIT_TIMEOUT}s')
 	except subprocess.CalledProcessError as e:
 		raise TemplateSourceError(f'git {" ".join(args)} failed: {e.stderr.strip() or e.returncode}')
 
