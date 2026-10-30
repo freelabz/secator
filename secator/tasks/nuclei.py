@@ -63,6 +63,7 @@ class nuclei(VulnMulti):
 		'store_responses': {'is_flag': True, 'short': 'sr', 'default': CONFIG.http.store_responses, 'help': 'Store reponses'},
 		'tags': {'type': str, 'help': 'Tags'},
 		'templates': {'type': str, 'short': 't', 'help': 'Templates'},
+		'templates_source': {'type': str, 'internal': True, 'display': False, 'help': 'Pinned template-source ref (name/url/sha/subdir) materialized into CONFIG.dirs.templates before -t'},  # noqa: E501
 		'template_id': {'type': str, 'short': 'tid', 'help': 'Template id'},
 		'template_condition': {'type': str, 'short': 'tc', 'help': 'Templates to run based on expression condition (ex: "contains(id, "ssh")")'},  # noqa: E501
 	}
@@ -165,6 +166,26 @@ class nuclei(VulnMulti):
 				'OAST/RPC templates or a very large host list). Kept partial results instead of failing; '
 				're-run with hang_monitor=False (-hm) or narrow templates/targets if this recurs.'
 			))
+
+	@staticmethod
+	def before_init(self):
+		# Materialize a pinned, vetted template source (if one was requested) into the
+		# local templates root and point -t at the verified on-disk path. The set is
+		# passed as a `templates_source` run_opt (name + pinned SHA + storage ref), never
+		# as a raw path, so the templates that run are exactly the pin-verified tree.
+		source = self.run_opts.get('templates_source')
+		if not source:
+			return
+		from secator.template_source import (
+			TemplateSourceError, materialize_template_source, ref_from_dict,
+		)
+		try:
+			ref = source if hasattr(source, 'name') else ref_from_dict(source)
+			result = materialize_template_source(ref)
+		except TemplateSourceError as e:
+			raise Exception(f'Could not materialize template source: {e}')
+		# Override the templates (-t) option with the resolved, verified directory.
+		self.run_opts['templates'] = str(result.path)
 
 	@staticmethod
 	def on_init(self):
