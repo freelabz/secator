@@ -66,6 +66,9 @@ class manspider(Command):
 		self.secrets = []
 		self.secrets_found = 0
 		self.shares_found = 0
+		# Confirmed readable access (files listed / content matched), as opposed
+		# to merely a share being enumerated (which can still be ACCESS_DENIED).
+		self.access_confirmed = 0
 
 	@staticmethod
 	def on_start(self):
@@ -99,6 +102,7 @@ class manspider(Command):
 			)
 		elif item['type'] == 'content_match':
 			self.secrets_found += 1
+			self.access_confirmed += 1
 			for match in item['matches']:
 				secret = Tag(
 					match=target + '//' + item['share'] + '/' + item['path'],
@@ -118,6 +122,7 @@ class manspider(Command):
 				self.secrets.append(secret)
 				yield secret
 		elif item['type'] == 'file':
+			self.access_confirmed += 1
 			yield Tag(
 				match=target,
 				category='info',
@@ -135,7 +140,10 @@ class manspider(Command):
 		target = str(self.inputs[0])
 		username = self.get_opt_value('username')
 		password = self.get_opt_value('password')
-		if self.shares_found and username in [None, '', 'guest']:
+		# Only report unauthenticated access once access is actually confirmed
+		# (a file listed or content matched). A bare 'share' enumeration can still
+		# return ACCESS_DENIED on listing, which is not unauthenticated access.
+		if self.shares_found and self.access_confirmed and username in [None, '', 'guest']:
 			yield Vulnerability(
 				name='SMB - Unauthenticated Share Access',
 				matched_at=target,
