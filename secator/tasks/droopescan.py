@@ -26,7 +26,7 @@ class droopescan(Vuln):
 	opts = {
 		# 'output_path': {'type': str, 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},
 		'mode': {'type': click.Choice(['drupal', '']), 'default': 'drupal', 'help': 'Drupal scan mode', 'internal': True, 'display': True},  # noqa: E501
-		'enumerate': {'type': click.Choice(['a', 'i', 'v', 't', 'p']), 'default': 'a', 'help': 'What to enumerate, comma-separated (a=all, i=interesting URLs, v=version, t=themes, p=plugins)'},  # noqa: E501
+		'enumerate': {'type': str, 'default': 'a', 'help': 'What to enumerate, comma-separated (a=all, i=interesting URLs, v=version, t=themes, p=plugins)'},  # noqa: E501
 	}
 	item_loaders = [
 		JSONSerializer(),
@@ -114,6 +114,6 @@ class droopescan(Vuln):
 				url=url['url'],
 				verified=False,
 				extra_data={
-					'description': url['description']
+					'description': url.get('description')
 				},
 			)

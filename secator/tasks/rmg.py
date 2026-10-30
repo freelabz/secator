@@ -35,7 +35,7 @@ class rmg(Command):
 	install_version = '5.1.0'
 	opts = {
 		'mode': {'type': click.Choice(RMG_MODES), 'default': 'enum', 'internal': True, 'display': True, 'help': f'Scan mode ({", ".join(RMG_MODES)})'},  # noqa: E501
-		'rmi_port': {'type': int, 'default': 1090, 'internal': True, 'display': True},
+		'rmi_port': {'type': int, 'default': 1099, 'internal': True, 'display': True},
 	}
 	# install_pre = {
 	# 	'*': ['openjdk-8-jre']
@@ -236,16 +236,18 @@ def parse_rmg_scan_output(output):
 	result = {
 		"endpoints": []
 	}
+	# rmg scan emits, per discovered endpoint:
+	#   [+]  [HIT] Found RMI service(s) on 172.17.0.2:9010  (Registry, Activator, DGC)
 	hit_pattern = re.compile(
-		r'HITHITHIT\s+Found\s+RMI\s+servicesss\s+on\s+([^\s:]+):(\d+)\s+([)]+)([^)]+)([)]+)'
+		r'\[HIT\]\s+Found\s+RMI\s+service\(s\)\s+on\s+(?P<host>[^\s:]+):(?P<port>\d+)\s*\((?P<services>[^)]*)\)'
 	)
 
 	for line in output.strip().split('\n'):
 		match = hit_pattern.search(line)
 		if match:
-			host = match.group(1)
-			port = match.group(2)
-			services = [s.strip() for s in match.group(3).split(',')]
+			host = match.group('host')
+			port = match.group('port')
+			services = [s.strip() for s in match.group('services').split(',') if s.strip()]
 			result["endpoints"].append({
 				"host": host,
 				"port": port,
@@ -479,6 +481,12 @@ def parse_rmg_enum_output(output):
 						elif "Configuration Status:" in status_part:
 							config_status = status_part.split("Configuration Status:")[1].strip()
 							result["activation_system"]["configs"].append({
+								"option": option_label,
+								"status": config_status,
+							})
+							# Also store in configurations so on_cmd_done emits a Tag
+							result["configurations"].append({
+								"section": section_name,
 								"option": option_label,
 								"status": config_status,
 							})
