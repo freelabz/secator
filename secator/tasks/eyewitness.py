@@ -70,9 +70,17 @@ class eyewitness(HttpBase):
 	proxy_http = False
 	profile = 'large'
 	install_version = 'feat/csv-status-code'
+	# EyeWitness needs a headless Chromium + chromedriver, a virtual X server (Xvfb)
+	# and a Python venv toolchain. Package names differ per distro (all verified in
+	# containers). install_pre keys are *package-manager* names (apt/apk/dnf/...), so
+	# the old 'arch' key never matched (pacman is the pm name) and '*' wrongly applied
+	# apt names everywhere. Map each package manager explicitly.
 	install_pre = {
-		'*': ['chromium', 'chromium-driver', 'xvfb', 'wget', 'curl', 'jq', 'cmake', 'python3-venv', 'python3-dev'],
-		'arch': ['chromium', 'xorg-server-xvfb']
+		'apt': ['chromium', 'chromium-driver', 'xvfb', 'wget', 'curl', 'jq', 'cmake', 'python3-venv', 'python3-dev'],
+		'apk': ['chromium', 'chromium-chromedriver', 'xvfb', 'wget', 'curl', 'jq', 'cmake', 'py3-virtualenv', 'python3-dev'],  # noqa: E501
+		'yum|dnf': ['chromium', 'chromedriver', 'xorg-x11-server-Xvfb', 'wget', 'curl', 'jq', 'cmake', 'python3-devel'],
+		'pacman': ['chromium', 'xorg-server-xvfb', 'wget', 'curl', 'jq', 'cmake'],
+		'brew': ['chromium', 'chromedriver', 'wget', 'curl', 'jq', 'cmake'],
 	}
 	install_cmd = (
 		f'git clone --depth 1 --branch [install_version] https://github.com/freelabz/EyeWitness.git {CONFIG.dirs.share}/EyeWitness || true && '  # noqa: E501

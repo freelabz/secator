@@ -38,9 +38,15 @@ class dublin_traceroute(Command):
 	}
 	github_handle = 'insomniacslk/python-dublin-traceroute'
 	install_github_bin = False
+	# dublin-traceroute is packaged only on Debian/Ubuntu (verified in containers:
+	# present on apt, absent from Alpine/Fedora default repos where it would require a
+	# libtins C++ source build). Scope the package to apt and mark the tool optional so
+	# a non-apt platform (or a CI image lacking the package) degrades gracefully instead
+	# of failing `secator install tools`. It also needs CAP_NET_RAW/root to run.
 	install_pre = {
-		'*': ['dublin-traceroute'],
+		'apt': ['dublin-traceroute'],
 	}
+	install_optional = True
 
 	@staticmethod
 	def on_init(self):

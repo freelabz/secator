@@ -52,6 +52,10 @@ class nfswolf(Vuln):
 	install_binary_name = 'nfswolf'
 	install_version = 'v1.2.0'
 	install_cmd = 'cargo install --git https://github.com/freelabz/NFSWolf --tag [install_version] nfswolf'
+	# nfswolf is a Rust source build and needs a host NFS kernel module to run, which
+	# a vanilla/CI container does not have. Mark optional so a build/runtime gap on a
+	# given platform degrades gracefully instead of failing `secator install tools`.
+	install_optional = True
 	profile = 'small'
 
 	@staticmethod
