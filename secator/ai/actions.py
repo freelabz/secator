@@ -947,6 +947,13 @@ def _handle_workflow(action: Dict, ctx: ActionContext) -> Generator:
 # (SECATOR_AI_SANDBOX_PACKAGES) in case the image is bare and the LLM doesn't self-install.
 _SANDBOX_MEMORY = os.environ.get("SECATOR_AI_SANDBOX_MEMORY", "1g")
 _SANDBOX_PIDS = os.environ.get("SECATOR_AI_SANDBOX_PIDS", "256")
+# Docker network for the sandbox. Empty = Docker's default bridge (isolated per
+# container). Set SECATOR_AI_SANDBOX_NETWORK=host where the nested-bridge RX path is
+# pathologically slow — notably DinD-under-gVisor, whose netstack has no GRO on the
+# forwarded path, so downloads into a bridged sandbox crawl (~50 KB/s vs ~50 MB/s on
+# the host network). Sandboxes on one DinD already share docker0 (mutually reachable),
+# so host networking is a minor isolation change there.
+_SANDBOX_NETWORK = os.environ.get("SECATOR_AI_SANDBOX_NETWORK", "")
 # Base tools the exploit workflow needs (clone/fetch/run PoCs). Empty string disables auto-install.
 _SANDBOX_PACKAGES = os.environ.get("SECATOR_AI_SANDBOX_PACKAGES", "git curl wget python3 python3-pip ca-certificates")
 
@@ -1007,6 +1014,7 @@ def _ensure_sandbox_container(ctx: "ActionContext", context: Dict) -> str:
 			run = subprocess.run([
 				"docker", "run", "-d", "--name", name,
 				"--memory", _SANDBOX_MEMORY, "--pids-limit", _SANDBOX_PIDS,
+				*(["--network", _SANDBOX_NETWORK] if _SANDBOX_NETWORK else []),
 				"-v", f"{name}:/work", "-v", f"{reports_dir}:{reports_dir}", "-w", "/work",
 				_sandbox_image(), "sleep", "infinity",
 			], capture_output=True, text=True)

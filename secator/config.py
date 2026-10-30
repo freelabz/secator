@@ -320,8 +320,6 @@ class AiAddon(StrictModel):
 		],
 		'deny': [
 			'target(169.254.169.254)',
-			'target(127.0.0.1)',
-			'target(localhost)',
 			'read(/etc/shadow)',
 			'read(~/.ssh/*)',
 			'read(~/.aws/*)',

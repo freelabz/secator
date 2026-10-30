@@ -296,13 +296,13 @@ class TestConfig(unittest.TestCase):
 		allow0 = list(config.addons.ai.permissions.get('allow', []))
 		ask0 = list(config.addons.ai.permissions.get('ask', []))
 		self.assertTrue(allow0 and ask0, 'precondition: allow/ask defaults exist')
-		config.unset('addons.ai.permissions.deny', value='target(localhost)')
+		config.unset('addons.ai.permissions.deny', value='target(169.254.169.254)')
 		config.save()
 		reloaded = Config.parse(path=self.config_test)
 		perms = reloaded.addons.ai.permissions
 		self.assertEqual(list(perms.get('allow', [])), allow0, 'allow list was dropped on reload')
 		self.assertEqual(list(perms.get('ask', [])), ask0, 'ask list was dropped on reload')
-		self.assertNotIn('target(localhost)', perms.get('deny', []), 'deny item not removed')
+		self.assertNotIn('target(169.254.169.254)', perms.get('deny', []), 'deny item not removed')
 
 	def test_dict_field_edit_does_not_bake_env_override(self):
 		"""Editing a Dict field sub-key must not persist an ENV override of a sibling. With
