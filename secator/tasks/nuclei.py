@@ -167,6 +167,26 @@ class nuclei(VulnMulti):
 			))
 
 	@staticmethod
+	def before_init(self):
+		# Materialize a pinned, vetted template source (if one was requested) into the
+		# local templates root and point -t at the verified on-disk path. The set is
+		# passed as a `templates_source` run_opt (name + pinned SHA + storage ref), never
+		# as a raw path, so the templates that run are exactly the pin-verified tree.
+		source = self.run_opts.get('templates_source')
+		if not source:
+			return
+		from secator.template_source import (
+			TemplateSourceError, materialize_template_source, ref_from_dict,
+		)
+		try:
+			ref = source if hasattr(source, 'name') else ref_from_dict(source)
+			result = materialize_template_source(ref)
+		except TemplateSourceError as e:
+			raise Exception(f'Could not materialize template source: {e}')
+		# Override the templates (-t) option with the resolved, verified directory.
+		self.run_opts['templates'] = str(result.path)
+
+	@staticmethod
 	def on_init(self):
 		store_responses = self.get_opt_value('store_responses')
 		output_folder = shlex.quote(f'{self.reports_folder}/.outputs')
