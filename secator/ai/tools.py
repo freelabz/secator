@@ -37,10 +37,18 @@ _DESCRIPTION_SCHEMA = {
 
 # Mode-membership sets, so each tool declares exposure declaratively. These mirror
 # the per-mode ``allowed_actions`` in prompts.MODES (enforced by the consistency test).
+# Finding-writing/exploit tools — scan + exploit only (NOT contribute, which authors code,
+# not findings).
 _SCAN_EXPLOIT = frozenset({"scan", "exploit"})
-_ALL_MODES = frozenset({"scan", "chat", "exploit"})
+# Tools that RUN a runner (task/workflow/shell). `contribute` needs these to exercise the
+# code it authors, so it is added here but NOT to the finding-writing set above.
+_RUNNER_MODES = frozenset({"scan", "exploit", "contribute"})
+_ALL_MODES = frozenset({"scan", "chat", "exploit", "contribute"})
 # Read-only helper tools (web/plan/run-history lookups) — exposed in every mode.
-_READONLY_HELPER = frozenset({"scan", "chat", "exploit"})
+_READONLY_HELPER = frozenset({"scan", "chat", "exploit", "contribute"})
+# `change_mode` — every mode EXCEPT contribute, which is a deliberate, directly-selected
+# terminal mode (it authors secator code; there is nothing to escalate to).
+_CAN_CHANGE_MODE = frozenset({"scan", "chat", "exploit"})
 
 
 class BaseTool:
@@ -81,7 +89,7 @@ class BaseTool:
 class RunTaskTool(BaseTool):
 	name = "run_task"
 	action = "task"
-	modes = _SCAN_EXPLOIT
+	modes = _RUNNER_MODES
 	handler = "_handle_task"
 	schema = {
 		"type": "function",
@@ -164,7 +172,7 @@ class RunSubagentTool(BaseTool):
 class RunWorkflowTool(BaseTool):
 	name = "run_workflow"
 	action = "workflow"
-	modes = _SCAN_EXPLOIT
+	modes = _RUNNER_MODES
 	handler = "_handle_workflow"
 	schema = {
 		"type": "function",
@@ -194,7 +202,7 @@ class RunWorkflowTool(BaseTool):
 class RunShellTool(BaseTool):
 	name = "run_shell"
 	action = "shell"
-	modes = _SCAN_EXPLOIT
+	modes = _RUNNER_MODES
 	handler = "_handle_shell"
 	schema = {
 		"type": "function",
@@ -736,7 +744,7 @@ class ListRunnersTool(BaseTool):
 class ChangeModeTool(BaseTool):
 	name = "change_mode"
 	action = "change_mode"
-	modes = _ALL_MODES
+	modes = _CAN_CHANGE_MODE
 	auto_allow = True
 	handler = "_handle_change_mode"
 	schema = {
