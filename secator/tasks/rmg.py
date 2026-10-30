@@ -37,9 +37,17 @@ class rmg(Command):
 		'mode': {'type': click.Choice(RMG_MODES), 'default': 'enum', 'internal': True, 'display': True, 'help': f'Scan mode ({", ".join(RMG_MODES)})'},  # noqa: E501
 		'rmi_port': {'type': int, 'default': 1099, 'internal': True, 'display': True},
 	}
-	# install_pre = {
-	# 	'*': ['openjdk-8-jre']
-	# }
+	# rmg is a Java jar wrapped by a `java -jar` shell script, so a JRE must be
+	# present. JRE package names differ per distro (verified in containers), so map
+	# them per package manager instead of a single apt-only name.
+	install_pre = {
+		'apt': ['default-jre-headless'],
+		'apk': ['openjdk17-jre-headless'],
+		'yum|dnf': ['java-latest-openjdk-headless'],
+		'zypper': ['java-headless'],
+		'pacman': ['jre-openjdk-headless'],
+		'brew': ['openjdk'],
+	}
 	install_cmd = (
 		'wget https://github.com/qtc-de/remote-method-guesser/releases/download/v[install_version]/rmg-[install_version]-jar-with-dependencies.jar && '  # noqa: E501
 		f'mv rmg-[install_version]-jar-with-dependencies.jar {CONFIG.dirs.bin}/rmg.jar && '

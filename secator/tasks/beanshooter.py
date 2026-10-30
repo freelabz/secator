@@ -38,9 +38,17 @@ class beanshooter(Command):
 		'ssl': {'is_flag': True, 'default': None, 'help': 'use SSL for connections'}
 	}
 	install_version = '4.1.0'
-	# install_pre = {
-	# 	'*': ['openjdk-8-jre']
-	# }
+	# beanshooter is a Java jar wrapped by a `java -jar` shell script, so a JRE must
+	# be present. JRE package names differ per distro (verified in containers), so
+	# map them per package manager instead of a single apt-only name.
+	install_pre = {
+		'apt': ['default-jre-headless'],
+		'apk': ['openjdk17-jre-headless'],
+		'yum|dnf': ['java-latest-openjdk-headless'],
+		'zypper': ['java-headless'],
+		'pacman': ['jre-openjdk-headless'],
+		'brew': ['openjdk'],
+	}
 	install_cmd = (
 		'wget https://github.com/qtc-de/beanshooter/releases/download/v[install_version]/beanshooter-[install_version]-jar-with-dependencies.jar && '  # noqa: E501
 		f'mv beanshooter-[install_version]-jar-with-dependencies.jar {CONFIG.dirs.bin}/beanshooter.jar && '
