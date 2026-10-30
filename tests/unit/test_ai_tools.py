@@ -151,6 +151,20 @@ class TestBuildToolSchemas(unittest.TestCase):
 		# and dead-ended because the tool wasn't exposed in this mode.
 		self.assertIn("run_subagent", names)
 
+	def test_contribute_mode_authors_code_not_findings(self):
+		"""contribute is a directly-selected code-authoring mode: it RUNS runners
+		(task/workflow/shell) to exercise what it builds, searches, and delegates to
+		subagents — but it writes NO findings (add_finding/mark_vuln_*) and cannot
+		change_mode (terminal, host-side mode)."""
+		from secator.ai.tools import build_tool_schemas
+		names = {s["function"]["name"] for s in build_tool_schemas("contribute")}
+		for t in ("run_task", "run_workflow", "run_shell", "run_subagent",
+		          "web_search", "fetch_url", "update_plan"):
+			self.assertIn(t, names, t)
+		for t in ("add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
+		          "mark_vuln_exploit_failed", "update_finding", "change_mode"):
+			self.assertNotIn(t, names, t)
+
 	def test_change_mode_gated_by_pin(self):
 		"""change_mode lets the model self-escalate in an AUTO session or from a pinned
 		action mode, but a user-PINNED read-only chat must stay read-only (tool withheld),
