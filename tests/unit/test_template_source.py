@@ -1,5 +1,7 @@
+import os
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -91,8 +93,24 @@ class TestMaterializeLocalFs(unittest.TestCase):
 		self.root.mkdir()
 		self.patcher = mock.patch('secator.template_source.CONFIG.dirs.templates', self.root)
 		self.patcher.start()
+		# These tests exercise backend *mechanics* by cloning a throwaway LOCAL repo,
+		# which git treats as the `file` transport — hardened off in production (where
+		# clone URLs are https-only, enforced by the API scheme allowlist). Re-enable the
+		# file transport just for these mechanics tests. The F1 block is proven separately
+		# in TestGitTransportHardening.
+		self.hardening = mock.patch(
+			'secator.template_source._GIT_TRANSPORT_HARDENING',
+			['-c', 'protocol.file.allow=always'],
+		)
+		self.hardening.start()
+		self.allowproto = mock.patch(
+			'secator.template_source._GIT_ALLOW_PROTOCOL', 'file:https:http:ssh:git'
+		)
+		self.allowproto.start()
 
 	def tearDown(self):
+		self.allowproto.stop()
+		self.hardening.stop()
 		self.patcher.stop()
 		shutil.rmtree(self.tmp, ignore_errors=True)
 
@@ -130,6 +148,153 @@ class TestMaterializeLocalFs(unittest.TestCase):
 		ref = TemplateSourceRef(name='pinned', url=str(self.src), sha='f' * 40)
 		with self.assertRaises(TemplateSourceError):
 			materialize_template_source(ref)
+
+	def test_rejects_py_file_in_tree(self):
+		# A template set carrying a `.py` would be exec'd by the task/driver loader at
+		# import time (worker RCE). Materialization must refuse it.
+		(self.src / 'evil.py').write_text('import os; os.system("id")\n')
+		_git(['add', '-A'], self.src)
+		_git(['commit', '-q', '-m', 'add py'], self.src)
+		sha = subprocess.run(
+			['git', 'rev-parse', 'HEAD'], cwd=self.src, stdout=subprocess.PIPE, text=True
+		).stdout.strip()
+		ref = TemplateSourceRef(name='pinned', url=str(self.src), sha=sha)
+		with self.assertRaises(TemplateSourceError):
+			materialize_template_source(ref)
+
+	def test_rejects_symlink_in_tree(self):
+		os.symlink('/etc/passwd', self.src / 'link')
+		_git(['add', '-A'], self.src)
+		_git(['commit', '-q', '-m', 'add symlink'], self.src)
+		sha = subprocess.run(
+			['git', 'rev-parse', 'HEAD'], cwd=self.src, stdout=subprocess.PIPE, text=True
+		).stdout.strip()
+		ref = TemplateSourceRef(name='pinned', url=str(self.src), sha=sha)
+		with self.assertRaises(TemplateSourceError):
+			materialize_template_source(ref)
+
+	def test_rejects_symlink_subdir_escape(self):
+		# A symlinked subdir that points outside the staged tree must not be promoted.
+		outside = self.tmp / 'outside'
+		outside.mkdir()
+		(outside / 'secret.yaml').write_text('id: secret\n')
+		os.symlink(outside, self.src / 'linkdir')
+		_git(['add', '-A'], self.src)
+		_git(['commit', '-q', '-m', 'add symlink dir'], self.src)
+		sha = subprocess.run(
+			['git', 'rev-parse', 'HEAD'], cwd=self.src, stdout=subprocess.PIPE, text=True
+		).stdout.strip()
+		ref = TemplateSourceRef(name='pinned', url=str(self.src), sha=sha, subdir='linkdir')
+		with self.assertRaises(TemplateSourceError):
+			materialize_template_source(ref)
+
+	def test_rejects_oversized_tree(self):
+		big = self.src / 'big.yaml'
+		big.write_bytes(b'a' * (2 * 1024 * 1024))
+		_git(['add', '-A'], self.src)
+		_git(['commit', '-q', '-m', 'big'], self.src)
+		sha = subprocess.run(
+			['git', 'rev-parse', 'HEAD'], cwd=self.src, stdout=subprocess.PIPE, text=True
+		).stdout.strip()
+		ref = TemplateSourceRef(name='pinned', url=str(self.src), sha=sha)
+		with mock.patch('secator.template_source._MAX_TEMPLATE_SET_BYTES', 1024):
+			with self.assertRaises(TemplateSourceError):
+				materialize_template_source(ref)
+
+
+class TestGitTransportHardening(unittest.TestCase):
+	"""The default git backend must refuse ext::/file:// transports (RCE/LFI)."""
+
+	def setUp(self):
+		self.tmp = Path(tempfile.mkdtemp())
+		self.root = self.tmp / 'templates'
+		self.root.mkdir()
+		self.patcher = mock.patch('secator.template_source.CONFIG.dirs.templates', self.root)
+		self.patcher.start()
+
+	def tearDown(self):
+		self.patcher.stop()
+		shutil.rmtree(self.tmp, ignore_errors=True)
+
+	def test_ext_transport_rejected(self):
+		marker = self.tmp / 'pwned'
+		ref = TemplateSourceRef(
+			name='pwn', url=f"ext::sh -c 'touch {marker}'", sha='a' * 40,
+		)
+		with self.assertRaises(TemplateSourceError):
+			materialize_template_source(ref)
+		self.assertFalse(marker.exists(), 'ext:: transport executed a command (RCE)')
+
+	def test_file_transport_rejected(self):
+		# file:// (and bare local path treated as file transport) must be blocked.
+		donor = self.tmp / 'donor'
+		donor.mkdir()
+		ref = TemplateSourceRef(name='pwn', url=f'file://{donor}', sha='a' * 40)
+		with self.assertRaises(TemplateSourceError):
+			materialize_template_source(ref)
+
+
+class TestTarballGuards(unittest.TestCase):
+	"""gcs_backend tarball extraction must reject link members, traversal, .py, bombs."""
+
+	def setUp(self):
+		self.tmp = Path(tempfile.mkdtemp())
+
+	def tearDown(self):
+		shutil.rmtree(self.tmp, ignore_errors=True)
+
+	def _run_gcs_backend(self, tarball: Path, name='x'):
+		from secator import template_source as ts
+		ref = TemplateSourceRef(name=name, url='gs://bucket/prefix', sha='a' * 40)
+		dest = self.tmp / 'dest'
+
+		def fake_download(bucket, blob_name, out_path):
+			shutil.copy(tarball, out_path)
+
+		with mock.patch('secator.hooks.gcs.download_blob', fake_download):
+			ts.gcs_backend(ref, dest)
+
+	def test_symlink_member_rejected(self):
+		tb = self.tmp / 't.tar.gz'
+		with tarfile.open(tb, 'w:gz') as tf:
+			data = self.tmp / 'ok.yaml'
+			data.write_text('id: ok\n')
+			tf.add(data, arcname='ok.yaml')
+			info = tarfile.TarInfo('link')
+			info.type = tarfile.SYMTYPE
+			info.linkname = '/etc/passwd'
+			tf.addfile(info)
+		with self.assertRaises(TemplateSourceError):
+			self._run_gcs_backend(tb)
+
+	def test_py_member_rejected(self):
+		tb = self.tmp / 't.tar.gz'
+		with tarfile.open(tb, 'w:gz') as tf:
+			evil = self.tmp / 'evil.py'
+			evil.write_text('x = 1\n')
+			tf.add(evil, arcname='evil.py')
+		with self.assertRaises(TemplateSourceError):
+			self._run_gcs_backend(tb)
+
+	def test_traversal_member_rejected(self):
+		tb = self.tmp / 't.tar.gz'
+		with tarfile.open(tb, 'w:gz') as tf:
+			data = self.tmp / 'ok.yaml'
+			data.write_text('id: ok\n')
+			tf.add(data, arcname='../escape.yaml')
+		with self.assertRaises(TemplateSourceError):
+			self._run_gcs_backend(tb)
+
+	def test_oversized_tarball_rejected(self):
+		tb = self.tmp / 't.tar.gz'
+		big = self.tmp / 'big.yaml'
+		big.write_bytes(b'a' * (2 * 1024 * 1024))
+		with tarfile.open(tb, 'w:gz') as tf:
+			tf.add(big, arcname='big.yaml')
+		from secator import template_source as ts
+		with mock.patch.object(ts, '_MAX_TEMPLATE_SET_BYTES', 1024):
+			with self.assertRaises(TemplateSourceError):
+				self._run_gcs_backend(tb)
 
 
 if __name__ == '__main__':

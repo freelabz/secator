@@ -26,6 +26,7 @@ Nothing here references any hosted service, deployment, or UI — it is a generi
 mechanism: *given a pinned reference, produce a verified local template dir*.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -129,10 +130,25 @@ def select_backend(ref: TemplateSourceRef) -> Backend:
 # Default backend: git clone + checkout + verify (local filesystem)
 # ──────────────────────────────────────────────────────────────────────────────
 
+# SECURITY: a template-source URL is remote/untrusted input. git's `ext::` transport
+# runs an arbitrary shell command and `file://`/local transports can read the host
+# filesystem — both are RCE/LFI vectors when a URL is attacker-influenced. Disable
+# every non-network transport on every git invocation (config overrides survive into
+# sub-processes git spawns for a given transport) and pin the allow-list via
+# GIT_ALLOW_PROTOCOL so only http(s)/ssh/git remote transports can ever be used.
+_GIT_TRANSPORT_HARDENING = [
+	'-c', 'protocol.ext.allow=never',
+	'-c', 'protocol.file.allow=never',
+	'-c', 'protocol.fd.allow=never',
+]
+_GIT_ALLOW_PROTOCOL = 'https:http:ssh:git'
+
+
 def _run_git(args, cwd=None):
+	env = dict(os.environ, GIT_ALLOW_PROTOCOL=_GIT_ALLOW_PROTOCOL, GIT_TERMINAL_PROMPT='0')
 	try:
 		return subprocess.run(
-			['git', *args], cwd=cwd, check=True,
+			['git', *_GIT_TRANSPORT_HARDENING, *args], cwd=cwd, check=True, env=env,
 			stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
 		)
 	except FileNotFoundError:
@@ -141,20 +157,65 @@ def _run_git(args, cwd=None):
 		raise TemplateSourceError(f'git {" ".join(args)} failed: {e.stderr.strip() or e.returncode}')
 
 
+# A nuclei template set is YAML/JSON data only. A materialized tree is scanned at
+# import time for external tasks/drivers — any `.py` under the templates root is
+# exec'd — so a stray `.py` in a template source is remote-code-execution on the
+# worker. Refuse to materialize a set that carries any `.py`. We also refuse symlinks
+# outright: a symlink can escape the set root (link to /etc, to another task file,
+# or to a `.py` outside the tree that discovery would still exec).
+_MAX_TEMPLATE_SET_BYTES = int(os.environ.get('SECATOR_TEMPLATE_SET_MAX_BYTES', str(512 * 1024 * 1024)))
+
+
+def _reject_unsafe_tree(root: Path, name: str) -> None:
+	"""Reject a materialized tree containing symlinks or `.py` files (RCE guard)."""
+	root = root.resolve()
+	for p in root.rglob('*'):
+		if p.is_symlink():
+			raise TemplateSourceError(
+				f'template set {name!r} contains a symlink ({p.relative_to(root)}); refusing (symlinks are not allowed)'
+			)
+		if p.is_file() and p.suffix.lower() == '.py':
+			raise TemplateSourceError(
+				f'template set {name!r} contains a Python file ({p.relative_to(root)}); a template set must be '
+				'data only (YAML) — refusing to materialize executable code'
+			)
+
+
+def _enforce_size_cap(root: Path, name: str) -> None:
+	"""Reject a materialized tree whose on-disk size exceeds the cap (zip/clone bomb)."""
+	total = 0
+	for p in root.rglob('*'):
+		if p.is_symlink():
+			continue  # size of the link target is irrelevant; symlinks are rejected separately
+		if p.is_file():
+			try:
+				total += p.stat().st_size
+			except OSError:
+				continue
+			if total > _MAX_TEMPLATE_SET_BYTES:
+				raise TemplateSourceError(
+					f'template set {name!r} exceeds the size cap ({_MAX_TEMPLATE_SET_BYTES} bytes)'
+				)
+
+
 def git_backend(ref: TemplateSourceRef, dest: Path) -> None:
 	"""Clone ``ref.url``, check out ``ref.sha``, and verify ``HEAD == sha``.
 
 	The whole operation happens on the local filesystem; no object store is
 	involved. This is the default backend and the on-prem path.
 	"""
-	_run_git(['clone', '--quiet', '--no-checkout', ref.url, str(dest)])
+	# DoS guard: a blobless partial clone pulls only the commit graph up front, so a
+	# repo with a huge history can't balloon the clone; blobs arrive only on checkout
+	# of the pinned tree, which is then size-capped below.
+	_run_git(['clone', '--quiet', '--no-checkout', '--filter=blob:none', ref.url, str(dest)])
 	# Fetch the exact commit (works even if it is not the branch tip), then check out.
-	_run_git(['fetch', '--quiet', 'origin', ref.sha], cwd=dest)
+	_run_git(['fetch', '--quiet', '--filter=blob:none', 'origin', ref.sha], cwd=dest)
 	_run_git(['checkout', '--quiet', ref.sha], cwd=dest)
 	head = _run_git(['rev-parse', 'HEAD'], cwd=dest).stdout.strip().lower()
 	if head != ref.sha:
 		raise TemplateSourceError(f'pin verification failed for {ref.name!r}: HEAD {head} != pinned {ref.sha}')
 	shutil.rmtree(dest / '.git', ignore_errors=True)
+	_enforce_size_cap(dest, ref.name)
 
 
 register_backend('git-default', git_backend)
@@ -186,15 +247,34 @@ def gcs_backend(ref: TemplateSourceRef, dest: Path) -> None:
 		download_blob(bucket, blob_name, str(tarball))
 		import tarfile
 		with tarfile.open(tarball) as tf:
-			# Guard against path traversal in archive members.
 			base = dest.resolve()
+			total = 0
 			for member in tf.getmembers():
+				# Reject symlink/hardlink members outright — they can point outside the
+				# tree (RCE/LFI) and symlinks are not valid template data anyway.
+				if member.issym() or member.islnk():
+					raise TemplateSourceError(
+						f'unsafe link member in tarball for {ref.name!r}: {member.name}'
+					)
+				# Guard against path traversal (member resolving outside base).
 				target = (dest / member.name).resolve()
-				if not str(target).startswith(str(base)):
+				if target != base and base not in target.parents:
 					raise TemplateSourceError(f'unsafe path in tarball for {ref.name!r}: {member.name}')
+				# Reject executable code: a template set is YAML data only.
+				if member.isfile() and member.name.lower().endswith('.py'):
+					raise TemplateSourceError(
+						f'tarball for {ref.name!r} contains a Python file ({member.name}); refusing'
+					)
+				# Decompression-bomb guard: cap total uncompressed size.
+				total += max(member.size, 0)
+				if total > _MAX_TEMPLATE_SET_BYTES:
+					raise TemplateSourceError(
+						f'tarball for {ref.name!r} exceeds the size cap ({_MAX_TEMPLATE_SET_BYTES} bytes)'
+					)
 			tf.extractall(dest)
 	finally:
 		tarball.unlink(missing_ok=True)
+	_reject_unsafe_tree(dest, ref.name)
 
 
 register_backend('gs', gcs_backend)
@@ -260,13 +340,26 @@ def materialize_template_source(ref: TemplateSourceRef, force: bool = False) -> 
 		# `-t` at the set root (no residual subdir component).
 		if ref.subdir:
 			sub = staging / ref.subdir
-			if not sub.is_dir():
+			# Reject symlink escape: the requested subdir (and every component of its
+			# path) must be a real directory inside the staged tree, never a symlink
+			# that could promote a directory from outside the vetted tree.
+			staging_base = staging.resolve()
+			resolved_sub = sub.resolve()
+			if resolved_sub != staging_base and staging_base not in resolved_sub.parents:
+				raise TemplateSourceError(
+					f'subdir {ref.subdir!r} for set {ref.name!r} escapes the template set root'
+				)
+			if sub.is_symlink() or not sub.is_dir():
 				raise TemplateSourceError(f'subdir {ref.subdir!r} not found in template set {ref.name!r}')
 			promoted = root / f'.{ref.name}.{ref.sha}.promoted'
 			shutil.rmtree(promoted, ignore_errors=True)
 			sub.rename(promoted)
 			shutil.rmtree(staging, ignore_errors=True)
 			staging = promoted
+		# Final guard on the exact tree that will land under the templates root: no
+		# symlinks, no `.py` (import-time RCE), and within the size cap.
+		_reject_unsafe_tree(staging, ref.name)
+		_enforce_size_cap(staging, ref.name)
 		_pin_marker(staging).write_text(ref.sha)
 		# Atomic-ish swap: remove old, move staging into place.
 		shutil.rmtree(target, ignore_errors=True)
