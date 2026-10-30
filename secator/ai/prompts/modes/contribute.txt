@@ -27,12 +27,12 @@ Two delivery targets — pick based on the request:
 4. TEST IT FOR REAL — this is the bulk of the work; exercise EVERY code path, never contribute code you have not run:
    - Dry-run, then real: `secator x <name> <target> --dry-run` (inspect the built command line), then `secator x <name> <target>` and `secator x <name> <target> -json`.
    - Single target AND multi-target: pass several inputs (and a file of inputs) so the chunking path runs; confirm results are correct for both.
-   - WITHOUT a worker (sync — the default) AND WITH a worker (async): start a worker in the background (`secator worker &`), re-run the same task so the Celery dispatch + chunking/chord path is exercised, then stop it.
+   - WITHOUT a worker (sync — the default) AND WITH a worker (async): start a worker in the background with its output redirected so run_shell returns instead of blocking on the open pipe until the timeout — `secator worker > /tmp/secator-worker.log 2>&1 &` — then re-run the same task so the Celery dispatch + chunking/chord path is exercised, and stop the worker afterwards (`secator worker --stop`, or kill it).
    - Verify the parsed OutputTypes and every field against the tool's REAL output — no missing/mis-mapped fields.
 
-5. Make it REPRODUCIBLE (contributions only). Capture a REAL run as a fixture, then ANONYMIZE it (strip real hosts/IPs/creds/PII — never fabricate):
-   `secator x <name> <target> -json > tests/fixtures/<name>_output.json`  (use the right extension: .json / .txt / .xml).
-   Add the task's input in `tests/integration/inputs.py` and expected results in `tests/integration/outputs.py`, then confirm the unit test parses the fixture: `secator test unit --task <name>`.
+5. Make it REPRODUCIBLE (contributions only). The fixture is the TOOL's OWN NATIVE output — unit tests feed the fixture back to the task's item loader AS the tool's stdout, so it must be what the underlying tool emits, NOT secator's serialized findings. Do NOT capture with `secator x <name> ... -json` (that is secator-serialized OutputTypes, which the loader cannot re-parse). Instead run the underlying tool directly with the same output flag the task uses and save that, then ANONYMIZE it (strip real hosts/IPs/creds/PII — never fabricate):
+   `<tool> <its-native-json-or-output-flag> <target> > tests/fixtures/<name>_output.json`  (use the right extension: .json / .txt / .xml — match an existing fixture for a similar task).
+   Use `secator x <name> <target>` / `-json` only to VERIFY the CLI renders your parsed results correctly, not to capture the fixture. Add the task's input in `tests/integration/inputs.py` and expected results in `tests/integration/outputs.py`, then confirm the unit test parses the fixture: `secator test unit --task <name>`.
 
 6. Add a LIVE target to the integration lab when the task needs one. If no existing lab service exercises the tool, add a service to `tests/integration/docker-compose.yml` (PIN the image by tag/digest, bind to `127.0.0.1:<port>`), point `inputs.py` at it, and verify end-to-end: `secator test integration --task <name>` (use `--no-cleanup` while iterating). Prefer an existing lab target when it fits (Juice Shop `:3000`, Log4Shell `:8080`, WordPress `:8000`).
 
