@@ -46,6 +46,27 @@ class TestTemplateSourceRef(unittest.TestCase):
 		self.assertEqual(ref.name, 'php2shell')
 
 
+class TestEnvIntParsing(unittest.TestCase):
+	"""A garbage size-cap override must surface as a clean TemplateSourceError."""
+
+	def test_non_integer_env_raises(self):
+		from secator import template_source as ts
+		with mock.patch.dict(os.environ, {'SECATOR_TEMPLATE_SET_MAX_BYTES': 'lots'}):
+			with self.assertRaises(TemplateSourceError):
+				ts._env_int('SECATOR_TEMPLATE_SET_MAX_BYTES', 1)
+
+	def test_non_positive_env_raises(self):
+		from secator import template_source as ts
+		with mock.patch.dict(os.environ, {'SECATOR_TEMPLATE_SET_MAX_BYTES': '0'}):
+			with self.assertRaises(TemplateSourceError):
+				ts._env_int('SECATOR_TEMPLATE_SET_MAX_BYTES', 1)
+
+	def test_valid_env_parsed(self):
+		from secator import template_source as ts
+		with mock.patch.dict(os.environ, {'SECATOR_TEMPLATE_SET_MAX_BYTES': '2048'}):
+			self.assertEqual(ts._env_int('SECATOR_TEMPLATE_SET_MAX_BYTES', 1), 2048)
+
+
 class TestBackendSelection(unittest.TestCase):
 
 	def test_https_selects_git(self):
@@ -141,6 +162,23 @@ class TestMaterializeLocalFs(unittest.TestCase):
 		self.assertTrue((result.path / 'nested.yaml').exists())
 		# Top-level (non-subdir) files of the source must NOT leak into the set root.
 		self.assertFalse((result.path / 'tpl.yaml').exists())
+
+	def test_same_sha_different_subdir_re_materializes(self):
+		# Reuse must key on subdir too: same name+SHA but a different subdir promotes
+		# different content, so a cache hit on SHA alone would serve the wrong tree.
+		whole = TemplateSourceRef(name='pinned', url=str(self.src), sha=self.sha1)
+		r1 = materialize_template_source(whole)
+		self.assertTrue(r1.refreshed)
+		self.assertTrue((r1.path / 'tpl.yaml').exists())
+		# Now request the 'sub' subdir at the SAME sha — must re-materialize, not reuse.
+		subref = TemplateSourceRef(name='pinned', url=str(self.src), sha=self.sha1, subdir='sub')
+		r2 = materialize_template_source(subref)
+		self.assertTrue(r2.refreshed)
+		self.assertTrue((r2.path / 'nested.yaml').exists())
+		self.assertFalse((r2.path / 'tpl.yaml').exists())
+		# Re-requesting the subdir ref now reuses (same sha + subdir).
+		r3 = materialize_template_source(subref)
+		self.assertFalse(r3.refreshed)
 
 	def test_missing_subdir_raises(self):
 		ref = TemplateSourceRef(name='pinned', url=str(self.src), sha=self.sha1, subdir='nope')
@@ -317,6 +355,27 @@ class TestTarballGuards(unittest.TestCase):
 		with mock.patch.object(ts, '_MAX_TEMPLATE_SET_BYTES', 1024):
 			with self.assertRaises(TemplateSourceError):
 				self._run_gcs_backend(tb)
+
+	def test_too_many_members_rejected(self):
+		tb = self.tmp / 't.tar.gz'
+		data = self.tmp / 'ok.yaml'
+		data.write_text('id: ok\n')
+		with tarfile.open(tb, 'w:gz') as tf:
+			for i in range(5):
+				tf.add(data, arcname=f'ok{i}.yaml')
+		from secator import template_source as ts
+		with mock.patch.object(ts, '_MAX_TEMPLATE_SET_MEMBERS', 3):
+			with self.assertRaises(TemplateSourceError):
+				self._run_gcs_backend(tb)
+
+	def test_non_regular_member_rejected(self):
+		tb = self.tmp / 't.tar.gz'
+		with tarfile.open(tb, 'w:gz') as tf:
+			info = tarfile.TarInfo('dev')
+			info.type = tarfile.CHRTYPE  # character device — not a plain file/dir
+			tf.addfile(info)
+		with self.assertRaises(TemplateSourceError):
+			self._run_gcs_backend(tb)
 
 
 if __name__ == '__main__':
