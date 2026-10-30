@@ -240,18 +240,34 @@ def materialize_template_source(ref: TemplateSourceRef, force: bool = False) -> 
 
 	if target.exists() and marker.exists() and not force:
 		if marker.read_text().strip().lower() == ref.sha:
-			path = target / ref.subdir if ref.subdir else target
+			# The set root already holds the vetted templates (subdir promoted at
+			# materialization), so point straight at it — no residual subdir join.
 			debug(f'reusing {ref.name} @ {ref.sha}', sub='template_source')
-			return MaterializeResult(ref=ref, path=path, refreshed=False, backend=_scheme_of(ref.url) or 'git')
+			return MaterializeResult(ref=ref, path=target, refreshed=False, backend=_scheme_of(ref.url) or 'git')
 
 	backend = select_backend(ref)
 	staging = root / f'.{ref.name}.{ref.sha}.staging'
 	shutil.rmtree(staging, ignore_errors=True)
 	try:
 		backend(ref, staging)
+		# When a subdir is requested, that subdir IS the template set: promote only
+		# its contents to the set root. The templates root is scanned at import time
+		# for external tasks/drivers (any `.py` under it is loaded), so a source repo
+		# that carries non-template files alongside the templates (tooling, a `lab/`,
+		# helper scripts) must not land under the templates root — only the vetted
+		# subdir does. Materializing the whole tree would expose those files to task
+		# discovery. The on-disk set is therefore exactly the subdir, so callers point
+		# `-t` at the set root (no residual subdir component).
+		if ref.subdir:
+			sub = staging / ref.subdir
+			if not sub.is_dir():
+				raise TemplateSourceError(f'subdir {ref.subdir!r} not found in template set {ref.name!r}')
+			promoted = root / f'.{ref.name}.{ref.sha}.promoted'
+			shutil.rmtree(promoted, ignore_errors=True)
+			sub.rename(promoted)
+			shutil.rmtree(staging, ignore_errors=True)
+			staging = promoted
 		_pin_marker(staging).write_text(ref.sha)
-		if ref.subdir and not (staging / ref.subdir).is_dir():
-			raise TemplateSourceError(f'subdir {ref.subdir!r} not found in template set {ref.name!r}')
 		# Atomic-ish swap: remove old, move staging into place.
 		shutil.rmtree(target, ignore_errors=True)
 		staging.rename(target)
@@ -259,8 +275,8 @@ def materialize_template_source(ref: TemplateSourceRef, force: bool = False) -> 
 		shutil.rmtree(staging, ignore_errors=True)
 
 	console.print(f':inbox_tray: Materialized template set [bold]{ref.name}[/] @ {ref.sha[:10]}')
-	path = target / ref.subdir if ref.subdir else target
-	return MaterializeResult(ref=ref, path=path, refreshed=True, backend=_scheme_of(ref.url) or 'git')
+	# The set root now holds the vetted templates directly (subdir already promoted).
+	return MaterializeResult(ref=ref, path=target, refreshed=True, backend=_scheme_of(ref.url) or 'git')
 
 
 def ref_from_dict(data: dict) -> TemplateSourceRef:
