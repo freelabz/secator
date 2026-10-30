@@ -1,24 +1,60 @@
+from urllib.parse import urlparse
+
 from secator.definitions import ROOT_FOLDER
 from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability, Record, Certificate, Exploit, Domain
+
+PASSIVE_URL_DOMAIN = 'xss-game.appspot.com'
+
+
+def url_in_domain(item, domain=PASSIVE_URL_DOMAIN):
+	"""True if the Url's HOST is the domain or a subdomain of it.
+
+	Parses the host instead of a substring match so 'xss-game.appspot.com.evil.com'
+	doesn't pass (and so CodeQL's incomplete-url-substring-sanitization stays happy).
+	"""
+	host = (urlparse(item.url or '').hostname or '').lower()
+	return host == domain or host.endswith('.' + domain)
 
 
 OUTPUTS_CHECKS = {
 	'output_types': {
-		Url: {
-			'checks': [
-				{
-					'info': 'should have request header "Hello"',
-					'error': 'Request header "Hello" not present in URL object',
-					'function': lambda item: 'Hello' in item.request_headers,
-				},
-				{
-					'info': 'should have request header "Hello" set to "World"',
-					'error': 'Request header "Hello" not set to "World"',
-					'function': lambda item: item.request_headers['Hello'] == 'World',
-				},
-			],
-			'runner': '^(?!urlfinder|xurlfind3r|gau|urlparser$|eyewitness$|droopescan$).*',
-		},
+		Url: [
+			{
+				# Active crawlers/fuzzers make real requests, so they must honour the
+				# injected custom header. Passive URL tools (below) make no such request;
+				# eyewitness/droopescan emit Url items without the injected header too.
+				'checks': [
+					{
+						'info': 'should have request header "Hello"',
+						'error': 'Request header "Hello" not present in URL object',
+						'function': lambda item: 'Hello' in item.request_headers,
+					},
+					{
+						'info': 'should have request header "Hello" set to "World"',
+						'error': 'Request header "Hello" not set to "World"',
+						'function': lambda item: item.request_headers['Hello'] == 'World',
+					},
+				],
+				'runner': '^(?!urlfinder|xurlfind3r|gau|urlparser$|eyewitness$|droopescan$).*',
+			},
+			{
+				# Passive URL tools (gau/xurlfind3r/urlfinder) fetch known URLs from
+				# third-party archives (Wayback, Common Crawl, OTX, URLScan, ...). WHICH
+				# exact URLs those archives return for a target is non-deterministic and
+				# drifts over time, so pinning a specific URL is inherently flaky. Instead
+				# of asserting archive *content*, validate the tool's *function*: it ran,
+				# yielded ≥1 well-formed Url (generic checks), and every URL belongs to the
+				# queried domain — i.e. the tool parsed/scoped its output correctly.
+				'checks': [
+					{
+						'info': 'should return URLs for the queried domain',
+						'error': f'Passive URL tool returned a URL outside the queried domain ({PASSIVE_URL_DOMAIN})',
+						'function': url_in_domain,
+					},
+				],
+				'runner': '^(urlfinder|xurlfind3r|gau)$',
+			},
+		],
 		Certificate: {
 			'checks': [
 				{
@@ -85,9 +121,9 @@ OUTPUTS_TASKS = {
 	'fping': [
 		Ip(ip='127.0.0.1', alive=True, _source='fping'),
 	],
-	'gau': [
-		Url(url='http://xss-game.appspot.com/feedback/level1/file/level.py', _source='gau'),
-	],
+	# gau/xurlfind3r: no pinned URL — passive archives are non-deterministic (see the
+	# Url domain check in OUTPUTS_CHECKS). Validated as "runs + ≥1 Url in-domain".
+	'gau': [],
 	'getasn': [
 		Tag(name='asn', category='info', value='AS51602', match='tesla', _source='getasn'),
 	],
@@ -183,7 +219,7 @@ OUTPUTS_TASKS = {
 	'x8': [
 		Tag(name='url_param', category='info', match='https://xss-game.appspot.com/level1/frame', value='query', _source='x8'),
 	],
-	'xurlfind3r': [Url(url='https://xss-game.appspot.com/', _source='xurlfind3r')],
+	'xurlfind3r': [],  # see gau above — validated structurally, not by a pinned URL
 	# PR #1512 service tasks. Assert the stable, deterministic finding each lab service produces;
 	# tasks without a pinned entry here are still validated for non-empty output + correct types
 	# by the harness (empty_results_allowed=False + expected_output_types).
