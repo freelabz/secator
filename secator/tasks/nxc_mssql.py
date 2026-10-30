@@ -7,9 +7,9 @@ from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
 
 
-STATUS_REGEX = re.compile(r'\s*(?P<os>[\w ]+?)\s\((?P<version>\d+\s+\d+\.\d+\.\d+)\)\s\(name:(?P<name>[\w-]+)\)\s\(domain:(?P<domain>[\w.\-]*)\)\s\(EncryptionReq:(?P<enc>\w+)\)\s\(NTLM:(?P<ntlm>\w+)\)')  # noqa: E501
-LOGIN_SUCCESS_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')  # noqa: E501
-LOGIN_FAILED_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*):?(?P<password>.*)?')
+STATUS_REGEX = re.compile(r'\s*(?P<os>.+?)\s\((?P<version>[^)]*)\)\s\(name:(?P<name>[^)]*)\)\s\(domain:(?P<domain>[^)]*)\)\s\(EncryptionReq:(?P<enc>[^)]*)\)(?:\s\(NTLM:(?P<ntlm>[^)]*)\))?')  # noqa: E501
+LOGIN_SUCCESS_REGEX = re.compile(r'\s*(?P<domain>(\w+\-?\.?)+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')  # noqa: E501
+LOGIN_FAILED_REGEX = re.compile(r'\s*(?P<domain>(\w+\-?\.?)+)\\(?P<username>[^:\n]*):?(?P<password>.*)?')
 
 
 @task()
@@ -25,7 +25,7 @@ class nxc_mssql(Vuln):
 		'username': {'type': str, 'short': 'u', 'default': 'anonymous', 'help': 'Username'},
 		'password': {'type': str, 'short': 'p', 'default': '', 'help': 'Password'},
 		'domain': {'type': str, 'default': None, 'help': 'Domain'},
-		'mssql_port': {'type': int, 'default': 21, 'help': 'FTP port'},
+		'mssql_port': {'type': int, 'default': 1433, 'help': 'MSSQL port'},
 		'dns_server': {'type': str, 'default': None, 'help': 'DNS server (default from system)'},
 		'dns_timeout': {'type': int, 'default': 3, 'help': 'DNS query timeout in seconds'},
 		'cred_id': {'type': str, 'default': None, 'help': 'Database credential ID(s) to use for authentication'},
@@ -58,7 +58,7 @@ class nxc_mssql(Vuln):
 	}
 	github_handle = 'Pennyw0rth/NetExec'
 	install_github_bin = False
-	install_version = "v1.5.1"
+	install_version = "30cf1465"
 	install_cmd = "pipx install --force git+https://github.com/Pennyw0rth/NetExec@[install_version]"
 
 	@staticmethod

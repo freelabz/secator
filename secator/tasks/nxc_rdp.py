@@ -7,8 +7,8 @@ from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
 
 
-STATUS_REGEX = re.compile(r'\s*(?P<os>[\w ]+?)\(name:(?P<name>[\w-]+)\)\s\(domain:(?P<domain>[\w.\-]+)\)\s\(nla:(?P<nla>\w+)\)')  # noqa: E501
-LOGIN_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')
+STATUS_REGEX = re.compile(r'\s*(?P<os>(\w+\s)+)\(name:(?P<name>(\w-?)+)\)\s\(domain:(?P<domain>(\w\-?\.?)+)\)\s\(nla:(?P<nla>\w+)\)')  # noqa: E501
+LOGIN_REGEX = re.compile(r'\s*(?P<domain>(\w+\-?\.?)+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')
 
 
 @task()
@@ -58,7 +58,7 @@ class nxc_rdp(Vuln):
 	}
 	github_handle = 'Pennyw0rth/NetExec'
 	install_github_bin = False
-	install_version = "v1.5.1"
+	install_version = "30cf1465"
 	install_cmd = "pipx install --force git+https://github.com/Pennyw0rth/NetExec@[install_version]"
 
 	@staticmethod

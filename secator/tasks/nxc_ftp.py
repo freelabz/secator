@@ -56,7 +56,7 @@ class nxc_ftp(Vuln):
     }
     github_handle = 'Pennyw0rth/NetExec'
     install_github_bin = False
-    install_version = "v1.5.1"
+    install_version = "30cf1465"
     install_cmd = "pipx install --force git+https://github.com/Pennyw0rth/NetExec@[install_version]"
 
     @staticmethod
@@ -109,12 +109,19 @@ class nxc_ftp(Vuln):
             else:
                 yield Warning(message=line.split('ERROR')[-1].strip())
 
-        # Login status
+        # Login status. NetExec logs a login success as `[+] <user>:<pass>`
+        # (optionally with "- Anonymous Login!"). Only treat the line as a
+        # successful login when it carries the `<user>:<pass>` shape, so a
+        # server reply or password that happens to contain `[+]` does not
+        # produce a false login tag.
         info = '[+]' in line
         if info and not any_mode:
             username = self.get_opt_value('username')
             password = self.get_opt_value('password')
-            message = line.split('[+]')[-1].strip()
+            success_marker = line.split('[+]')[-1].strip()
+            if not success_marker.startswith(f'{username}:'):
+                yield line
+                return
             message = f'{username}:{password}'
             yield Tag(
                 category='info',
@@ -160,11 +167,14 @@ class nxc_ftp(Vuln):
         fname = self.get_opt_value('get')
         downloaded_success = 'Downloaded' in self.output
         if fname and downloaded_success:
-            if not Path(fname).exists():
-                yield Warning(message=f'File {fname} not found.')
+            # NetExec saves the downloaded file in the working directory under its
+            # basename, regardless of the remote path passed to --get.
+            local_name = Path(fname).name
+            if not Path(local_name).exists():
+                yield Warning(message=f'File {local_name} not found.')
                 return
-            output_path = f'{self.reports_folder}/.outputs/{fname}'
-            shutil.move(fname, output_path)
+            output_path = f'{self.reports_folder}/.outputs/{local_name}'
+            shutil.move(local_name, output_path)
             with open(output_path) as f:
                 content = f.read()
                 yield Tag(
