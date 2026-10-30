@@ -133,16 +133,22 @@ _DESCRIPTION_SCHEMA = {
 
 # Mode-membership sets, so each tool declares exposure declaratively. These mirror
 # the per-mode ``allowed_actions`` in prompts.MODES (enforced by the consistency test).
-_SCAN_EXPLOIT = frozenset({"scan", "exploit"})
-_ALL_MODES = frozenset({"scan", "chat", "exploit"})
+# `research` is a full-capability sibling of `exploit` (find/craft + validate a PoC), so it
+# appears wherever `exploit` does — EXCEPT `change_mode` (see _CAN_CHANGE_MODE below).
+_SCAN_EXPLOIT = frozenset({"scan", "exploit", "research"})
+_ALL_MODES = frozenset({"scan", "chat", "exploit", "research"})
 # monitor is a bounded re-verification mode: it can run tasks/workflows/shell and query, and
 # retire/correct an EXISTING finding (mark_vuln_false_positive / update_finding) — see
 # prompts.MODES["monitor"]. These sets add monitor to the tools it exposes.
-_SCAN_EXPLOIT_MONITOR = frozenset({"scan", "exploit", "monitor"})
-_QUERY_MODES = frozenset({"scan", "chat", "exploit", "monitor"})
-# Read-only helpers available in the read/write modes + chat (NOT monitor, which is a focused
-# re-verification loop over a finding set).
-_READONLY_HELPER = frozenset({"scan", "chat", "exploit"})
+_SCAN_EXPLOIT_MONITOR = frozenset({"scan", "exploit", "monitor", "research"})
+_QUERY_MODES = frozenset({"scan", "chat", "exploit", "monitor", "research"})
+# Read-only helpers available in the read/write modes + chat + research (NOT monitor, which is
+# a focused re-verification loop over a finding set).
+_READONLY_HELPER = frozenset({"scan", "chat", "exploit", "research"})
+# `change_mode` is the ONE tool NOT exposed in `research`: it is a deliberate, directly-selected
+# terminal mode that already has the most capable surface, so it neither escalates nor
+# de-escalates. The other modes keep the escalation ladder.
+_CAN_CHANGE_MODE = frozenset({"scan", "chat", "exploit"})
 
 
 class BaseTool:
@@ -670,7 +676,7 @@ class UpdateFindingTool(BaseTool):
 class ChangeModeTool(BaseTool):
 	name = "change_mode"
 	action = "change_mode"
-	modes = _ALL_MODES
+	modes = _CAN_CHANGE_MODE  # every mode EXCEPT research (terminal, directly-selected)
 	auto_allow = True
 	handler = "_handle_change_mode"
 	schema = {
@@ -959,10 +965,10 @@ class ListRunnersTool(BaseTool):
 class StopTool(BaseTool):
 	name = "stop"
 	action = "stop"
-	# `stop` is allowed in EVERY mode (incl. monitor) — it is injected per-backend via
-	# get_extra_tools, not emitted by the build_tool_schemas mode filter, but its modes must
+	# `stop` is allowed in EVERY mode (incl. monitor + research) — it is injected per-backend
+	# via get_extra_tools, not emitted by the build_tool_schemas mode filter, but its modes must
 	# still cover every mode that lists `stop` in allowed_actions (consistency guard).
-	modes = frozenset({"scan", "chat", "exploit", "monitor"})
+	modes = frozenset({"scan", "chat", "exploit", "monitor", "research"})
 	auto_allow = True
 	# NOT emitted by build_tool_schemas / not in TOOL_SCHEMAS — injected per-backend
 	# via get_extra_tools (interactive backends a `stop` with `choices`, AutoBackend a

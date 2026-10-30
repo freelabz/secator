@@ -68,6 +68,7 @@ SYSTEM_SCAN = Template(load_prompt("modes/scan.txt"))
 SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
 SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
 SYSTEM_MONITOR = Template(load_prompt("modes/monitor.txt"))
+SYSTEM_RESEARCH = Template(load_prompt("modes/research.txt"))
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
 MODES = {
@@ -112,6 +113,19 @@ MODES = {
 		# Higher iteration cap than the one-shot modes because it walks a finding set.
 		"allowed_actions": ["query", "task", "workflow", "shell", "mark_vuln_false_positive", "update_finding", "stop"],
 		"max_iterations": 10,
+	},
+	"research": {
+		"system_prompt": SYSTEM_RESEARCH,
+		"description": "research a vulnerability (CVE/0-day): find or craft a working PoC in a sandbox lab, with adversarial subagents, and record it",
+		# Full active toolset (same as exploit) MINUS change_mode: research is a deliberate,
+		# directly-selected terminal mode — it already has the most capable surface, so there
+		# is nothing to escalate to and it must not de-escalate out. It leans on `subagent`
+		# (adversarial fan-out), `shell` (stand up a sandbox lab), `web_search` (find PoCs) and
+		# `add_finding` (record the validated Exploit, linked by `cves`).
+		"allowed_actions": ["task", "workflow", "shell", "query", "read_file", "write_file", "fetch_url", "screenshot", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "stop"],
+		# Research is long-running (stand up labs, fan out subagents, iterate on PoCs), so it
+		# gets a higher iteration floor than scan/exploit.
+		"max_iterations": 12,
 	},
 }
 

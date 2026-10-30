@@ -509,6 +509,25 @@ class TestScopeInPrompt(unittest.TestCase):
 			self.assertNotRegex(head.lower(), r"current date|current time")
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestResearchMode(unittest.TestCase):
+	"""The research mode prompt: library-enabled, adversarial-subagent block present and
+	(like scan/exploit) stripped when rendered for a subagent."""
+
+	def test_research_prompt_builds_fully(self):
+		from secator.ai.prompts import get_system_prompt
+		p = get_system_prompt("research", workspace_path="/tmp/ws")
+		self.assertIn("RESEARCH mode", p)
+		self.assertNotIn("$library_reference", p)   # task/workflow library substituted
+		self.assertIn("<subagents>", p)             # adversarial fan-out guidance present
+		self.assertIn("add_finding", p)             # records the validated Exploit
+
+	def test_research_subagent_strips_fanout(self):
+		from secator.ai.prompts import get_system_prompt
+		p = get_system_prompt("research", workspace_path="/tmp/ws", is_subagent=True)
+		self.assertNotIn("<subagents>", p)          # a subagent must not be told to fan out
+
+
 if __name__ == '__main__':
 	unittest.main()
 
