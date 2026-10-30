@@ -39,7 +39,7 @@ INPUTS_TASKS = {
 	'cidr_split': '10.0.0.0/24',
 	'nxc_smb': '127.0.0.1:10445',
 	'nxc_ftp': '127.0.0.1:10021',
-	'dockerregistrygrabber': 'http://127.0.0.1:15000',
+	'dockerregistrygrabber': 'http://127.0.0.1',
 	'droopescan': 'http://127.0.0.1:18081',
 	'zabbix_get': '127.0.0.1:10050',
 	'beanshooter': '127.0.0.1:1617',

@@ -56,24 +56,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# vsftpd (nxc_ftp): wait until the FTP control port accepts a connection and the
-# server greets with its 220 banner. nxc_ftp only emits the ftp_login_successful
-# tag once vsftpd is actually answering logins; a not-yet-ready server produces no
-# finding. We probe the banner directly over the TCP control channel.
+# vsftpd (nxc_ftp): wait until testuser:testpass actually LOGS IN. The 220 banner
+# appears as soon as vsftpd starts, but fauria/vsftpd creates the user a moment
+# later — so a banner-only check races and nxc_ftp sees a failed login (no tag).
+# Poll with the real tool until it reports a successful login (readiness == the
+# exact condition the test asserts). Falls back to the banner probe if nxc is
+# absent.
 # ---------------------------------------------------------------------------
-echo "Waiting for FTP (vsftpd) to be ready ..."
+echo "Waiting for FTP (vsftpd) to accept logins ..."
 ftp_ready=0
 for _ in $(seq 1 30); do
-	# Read the FTP greeting; vsftpd answers "220 ...". Use bash's /dev/tcp so we
-	# don't depend on nc/curl being present. Timeout each attempt so a hung
-	# connection can't stall the loop.
-	banner=$(timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/10021 && head -n 1 <&3' 2>/dev/null)
-	case "$banner" in
-		220*) ftp_ready=1; break ;;
-	esac
+	if command -v nxc >/dev/null 2>&1; then
+		if timeout 15 nxc ftp 127.0.0.1 --port 10021 -u testuser -p testpass 2>&1 | grep -q '\[+\] testuser:testpass'; then
+			ftp_ready=1; break
+		fi
+	else
+		banner=$(timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/10021 && head -n 1 <&3' 2>/dev/null)
+		case "$banner" in
+			220*) ftp_ready=1; break ;;
+		esac
+	fi
 	sleep 1
 done
-[ "$ftp_ready" = 1 ] || echo "WARN: FTP server never returned a 220 banner on :10021 (nxc_ftp test may fail)"
+[ "$ftp_ready" = 1 ] || echo "WARN: FTP login (testuser:testpass) never succeeded on :10021 (nxc_ftp test may fail)"
 
 # ---------------------------------------------------------------------------
 # Samba (nxc_smb): wait until the server is fully initialised the way nxc sees it —
