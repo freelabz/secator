@@ -61,6 +61,11 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			'match_codes': '200',
 			'maigret.site': 'github',
 			'trivy.mode': 'repo',
+			# trufflehog verifies every detected secret via live provider network calls by
+			# default, which is slow and network-flaky in CI (observed up to ~46 min). We only
+			# assert detection of a seeded private key (an offline detector match), so skip
+			# verification to keep the run fast and deterministic.
+			'trufflehog.no_verification': True,
 			'testssl.server_defaults': True,
 			'wordlist': load_fixture('wordlist', INTEGRATION_DIR, only_path=True),
 			# PR #1512 service tasks (targets wired in inputs.py, services in docker-compose.yml).
