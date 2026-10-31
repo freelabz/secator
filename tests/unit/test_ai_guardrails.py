@@ -1762,5 +1762,37 @@ class TestControlActionsAllowed(unittest.TestCase):
 		self.assertNotEqual(r.decision, "allow")
 
 
+class TestMalformedPortAndLoopback(unittest.TestCase):
+	"""A URL target with a non-numeric port (e.g. lifted from `proxy_pass http://h:8080;`)
+	must NOT fail-close the target check with a ValueError; loopback labs are allowed under
+	isolation (they are not egress) but still scoped in a non-isolated run."""
+
+	def _engine(self, in_scope, isolated):
+		return PermissionEngine(
+			config={"allow": [], "deny": [], "ask": []},
+			in_scope=in_scope, isolated=isolated)
+
+	def test_trailing_semicolon_url_does_not_fail_closed(self):
+		# urlparse("http://127.0.0.1:8080;").port raises ValueError; the guardrail must
+		# degrade gracefully, never return the "target check error (fail-closed)" deny.
+		eng = self._engine(in_scope=["app.example.com"], isolated=False)
+		r = eng._check_values("target", ["http://127.0.0.1:8080;"])
+		self.assertNotIn("fail-closed", (r.reason or ""))
+
+	def test_isolated_allows_loopback_lab(self):
+		eng = self._engine(in_scope=["app.example.com"], isolated=True)
+		for t in ("127.0.0.1", "127.0.0.1:8080", "http://127.0.0.1:8080", "localhost:8080"):
+			self.assertEqual(eng._check_values("target", [t]).decision, "allow", t)
+
+	def test_non_isolated_still_scopes_loopback(self):
+		eng = self._engine(in_scope=["app.example.com"], isolated=False)
+		self.assertNotEqual(eng._check_values("target", ["http://127.0.0.1:8080"]).decision, "allow")
+
+	def test_isolated_does_not_blanket_allow_external(self):
+		# loopback-allow must not leak to a real host — an out-of-scope external stays non-allow.
+		eng = self._engine(in_scope=["app.example.com"], isolated=True)
+		self.assertNotEqual(eng._check_values("target", ["http://8.8.8.8/"]).decision, "allow")
+
+
 if __name__ == '__main__':
 	unittest.main()

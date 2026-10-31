@@ -43,6 +43,28 @@ def _is_always_allowed_host(value: str) -> bool:
 	return bool(host) and any(fnmatch.fnmatch(host, pat) for pat in ALWAYS_ALLOWED_HOSTS)
 
 
+def _is_loopback_target(value: str) -> bool:
+	"""True if the target is loopback / localhost (127.0.0.0/8, ::1, the `localhost` name).
+
+	Loopback is NOT network egress — it never leaves the host — so the scope gate (which
+	exists to control egress to third-party hosts) does not meaningfully apply to it. Local
+	PoC/exploit LABS the agent stands up live on loopback, so recognising it lets a sandboxed
+	run validate against its own lab.
+	"""
+	host = _host_of(value)
+	if not host:
+		# A bare `localhost` / `localhost:port` can classify as non-network (no DNS) -> ''.
+		host = value.strip().split('://', 1)[-1].split('/', 1)[0].rsplit('@', 1)[-1]
+		host = host.rsplit(':', 1)[0] if host.count(':') == 1 else host
+	host = host.strip('[]').lower().rstrip('.')
+	if host == 'localhost' or host.endswith('.localhost'):
+		return True
+	try:
+		return ipaddress.ip_address(host).is_loopback
+	except ValueError:
+		return False
+
+
 # Shell operators that chain commands
 SHELL_OPERATORS = re.compile(r'\s*(?:&&|\|\||[;|])\s*')
 
@@ -344,7 +366,11 @@ def extract_command_targets(command: str) -> List[str]:
 		# Check for URLs first (before file path/extension checks — URLs can have .sh etc.)
 		url_match = URL_PATTERN.search(arg)
 		if url_match:
-			_add_target(url_match.group())
+			# Strip trailing shell/sentence punctuation the pattern may have swallowed
+			# (e.g. a config line `proxy_pass http://127.0.0.1:8080;` yields the URL with a
+			# trailing ';'). These are never part of a real target and otherwise produce a
+			# malformed authority downstream (urlparse(...).port on "8080;" raises).
+			_add_target(url_match.group().rstrip('；;,)]}\'">'))
 			return
 		# Skip file paths, command names
 		if _is_file_path(arg) or arg in cmd_names:
@@ -1209,10 +1235,18 @@ class PermissionEngine:
 		if rule_type == "target" and value.startswith(('http://', 'https://')):
 			from urllib.parse import urlparse
 			parsed = urlparse(value)
-			if parsed.hostname:
-				values_to_check.append(parsed.hostname)
-			if parsed.port:
-				values_to_check.append(f"{parsed.hostname}:{parsed.port}")
+			# `.hostname` / `.port` raise ValueError on a malformed authority — e.g. a URL
+			# lifted from a shell command with a trailing delimiter (`proxy_pass
+			# http://127.0.0.1:8080;` -> port "8080;"). A parse quirk on ONE target must NOT
+			# fail-close the whole action (the outer target-check catches ValueError and
+			# DENIES), so degrade gracefully: skip the unparseable component, keep the raw value.
+			try:
+				if parsed.hostname:
+					values_to_check.append(parsed.hostname)
+				if parsed.port:
+					values_to_check.append(f"{parsed.hostname}:{parsed.port}")
+			except ValueError:
+				pass
 
 		# Top precedence for targets: code-hosting / PoC-source hosts are always allowed,
 		# ahead of every deny/scope layer below (config deny, mandate out_of_scope, and
@@ -1223,6 +1257,16 @@ class PermissionEngine:
 			for v in values_to_check:
 				if _is_always_allowed_host(v):
 					return PermissionResult(decision="allow", reason=f"Always-allowed code-hosting host: target({v})")
+
+		# Loopback IS the local sandbox lab, not egress: when isolated, allow 127.0.0.0/8 /
+		# ::1 / localhost so a PoC/exploit lab the agent stood up in its OWN sandbox can be
+		# validated. Isolation is the boundary (the same reason the shell/path layers drop to
+		# allow under it), and loopback can't leave the sandbox. A non-isolated run keeps
+		# scoping loopback normally (there it would mean the host/worker itself).
+		if rule_type == "target" and self.isolated:
+			for v in values_to_check:
+				if _is_loopback_target(v):
+					return PermissionResult(decision="allow", reason=f"Loopback lab (isolated): target({v})")
 
 		for rt, patterns in self.rules["deny"]:
 			if rt == rule_type:
