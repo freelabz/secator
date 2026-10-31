@@ -177,8 +177,18 @@ class nfswolf(Vuln):
 					continue
 				for item in data:
 					allowed = item.get('allowed')
+					# An empty `allowed` list and the available export fields are metadata
+					# only: they describe a discovered export, not a confirmed anonymous
+					# mount. Keep these findings low-confidence/tentative unless NFSWolf
+					# proves access (e.g. a resolved mount handle), and withhold the `vuln`
+					# tag until then so unverified exports stay informational.
+					confirmed = bool(item.get('handle'))
 					if allowed:
 						allowed = ";".join(allowed)
+					confidence = 'high' if confirmed else 'low'
+					tags = ['network', 'nfs', 'unauth']
+					if confirmed:
+						tags.append('vuln')
 					yield Vulnerability(
 						matched_at=full_target,
 						ip=ip,
@@ -195,12 +205,12 @@ class nfswolf(Vuln):
 							'Disable NFS share exports or require authentication to access them.'
 						),
 						severity='high',
-						confidence='high',
+						confidence=confidence,
 						extra_data={
 							'path': item['path'],
 							'handle': item.get('handle'),
 							'allowed': allowed,
 							'version': version
 						},
-						tags=['network', 'nfs', 'unauth', 'vuln'],
+						tags=tags,
 					)

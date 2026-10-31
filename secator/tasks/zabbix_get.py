@@ -1,16 +1,37 @@
 import os
+import re
 
 from pathlib import Path
 
 from secator.decorators import task
 from secator.definitions import HOST, HOST_PORT, IP, SLUG, STRING
-from secator.output_types import Vulnerability, Tag
+from secator.output_types import Error, Vulnerability, Tag
 from secator.runners import Command
 from secator.utils import autodetect_type
 
 
 HTTP_PROXY = os.environ.get('http_proxy')
 HTTPS_PROXY = os.environ.get('https_proxy')
+
+# Transport / protocol diagnostics that zabbix_get emits INSTEAD of an item value.
+# These are NOT item data, so they must never be turned into a system.run /
+# vfs.file.contents finding. zabbix_get prints its own transport failures as
+# "zabbix_get [<pid>]: <reason>" lines (e.g. a connect/timeout error), and the
+# agent returns protocol-level error markers (ZBX_NOTSUPPORTED, etc.) in-band.
+# We classify at the on_cmd_done boundary because the process exit code is not
+# finalized here and ignore_return_code=True would discard it anyway.
+# Anchored / fixed-substring alternation only -> linear-time, ReDoS-safe.
+ZABBIX_DIAGNOSTIC_RE = re.compile(
+	r'(?im)'
+	r'^\s*zabbix_get\s*\[\d+\]:'              # zabbix_get [12345]: <transport error>
+	r'|zbx_notsupported'                      # agent: key not supported
+	r'|zbx_error'                             # agent: generic protocol error
+	r'|get value error'                       # zabbix_get: value retrieval failed
+	r'|check access restrictions'             # agent: denied by AllowKey/DenyKey
+	r'|cannot connect'                        # transport: connect failed
+	r'|connection (?:refused|reset|timed out)'  # transport: connection failures
+	r'|timeout while executing'               # transport: operation timeout
+)
 
 
 @task()
@@ -45,11 +66,25 @@ class zabbix_get(Command):
 			'SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"; '
 			# Ubuntu AND its derivatives (Mint/PopOS) all set ID_LIKE=debian, so we must
 			# branch on UBUNTU_CODENAME (only set on the Ubuntu family) rather than
-			# ID_LIKE: Ubuntu-family -> Ubuntu repo keyed by the Ubuntu VERSION_ID;
+			# ID_LIKE: Ubuntu-family -> Ubuntu repo keyed by the *Ubuntu* release;
 			# everything else (Debian, Kali) -> Debian repo keyed by the major version
 			# (Kali is rolling/based on Debian testing, default to 13/trixie).
+			# On a derivative (e.g. Linux Mint 21) VERSION_ID is the derivative version
+			# (21), NOT the Ubuntu base (22.04), so deriving REL from VERSION_ID builds a
+			# wrong Zabbix URL. Map UBUNTU_CODENAME -> Ubuntu release instead; UBUNTU_CODENAME
+			# is always the *Ubuntu* base codename even on derivatives.
 			'if [ -n "${UBUNTU_CODENAME:-}" ]; then '
-			'  BASE=ubuntu; REL="$VERSION_ID"; '
+			'  BASE=ubuntu; '
+			'  case "$UBUNTU_CODENAME" in '
+			'    focal) REL=20.04 ;; '
+			'    jammy) REL=22.04 ;; '
+			'    noble) REL=24.04 ;; '
+			'    *) REL="$VERSION_ID" ;; '
+			'  esac; '
+			'  # On plain Ubuntu, VERSION_ID already matches the codename; fall back to it '
+			'  # for unmapped (future) releases. On a derivative, VERSION_ID is the '
+			'  # derivative version, so an unmapped codename may still mis-key -- extend '
+			'  # the case list when Zabbix adds a new Ubuntu release. '
 			'else '
 			'  BASE=debian; REL="${VERSION_ID%%.*}"; [ -n "$REL" ] || REL=13; '
 			'fi; '
@@ -94,15 +129,30 @@ class zabbix_get(Command):
 	@staticmethod
 	def on_cmd_done(self):
 		key = self.get_opt_value('key')
+		output = self.output or ''
 		# zabbix_get's own return code is not yet available in this callback (it's
 		# set after on_cmd_done), and ignore_return_code=True would zero it anyway,
-		# so don't gate on self.return_code. Gate on Zabbix-protocol-level error
-		# markers only -- NOT on generic strings like "permission denied", which can
-		# legitimately appear in retrieved command output (e.g.
-		# system.run[echo permission denied]) and would suppress a real finding.
-		markers = ('zbx_notsupported', 'zbx_error', 'get value error', 'check access restrictions')
-		output_lower = self.output.lower()
-		if not self.output.strip() or any(m in output_lower for m in markers):
+		# so we must NOT gate on self.return_code. Instead classify the output itself.
+		#
+		# [B] Reject transport / protocol diagnostics BEFORE emitting any finding. A
+		# nonempty transport diagnostic (a "zabbix_get [pid]: ..." line, a timeout, a
+		# refused/reset connection, or an in-band ZBX_* protocol marker) is NOT item
+		# data -- treating it as such would mint a high-confidence system.run /
+		# vfs.file.contents finding from an error string. We match only Zabbix-specific
+		# transport/protocol diagnostics, NOT generic strings like "permission denied",
+		# which can legitimately appear in retrieved command output
+		# (e.g. system.run[echo permission denied]) and must not suppress a real finding.
+		if ZABBIX_DIAGNOSTIC_RE.search(output):
+			# Surface the diagnostic so a failed/denied probe is never silent.
+			yield Error(message=f'zabbix_get transport/protocol diagnostic: {output.strip()[:500]}')
+			return
+		# [C] Empty output is ambiguous: a successful wait-mode system.run can legitimately
+		# return no data, but so can a silent failure. self.return_code is not finalized at
+		# on_cmd_done, so there is no reliable success signal here to tell them apart.
+		# We deliberately favour correctness (no false-positive RCE/LFI) over catching the
+		# rare empty-but-successful case, and suppress empty output as a non-finding. This
+		# is a documented, accepted limitation: an empty genuine success is not reported.
+		if not output.strip():
 			return
 		if key.startswith('vfs.file.contents'):
 			filepath = key.split('vfs.file.contents')[-1].rstrip(']').lstrip('[')

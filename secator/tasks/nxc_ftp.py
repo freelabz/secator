@@ -118,11 +118,16 @@ class nxc_ftp(Vuln):
         info = '[+]' in line
         if info and not any_mode:
             username = self.get_opt_value('username')
-            password = self.get_opt_value('password')
             success_marker = line.split('[+]')[-1].strip()
             if not success_marker.startswith(f'{username}:'):
                 yield line
                 return
+            # Report the credential NetExec validated, not the configured
+            # `password` option (which may be a password-file path). Parse the
+            # `<user>:<pass>` that NetExec logged. The anonymous-login form is
+            # `<user>: - Anonymous Login!`, where the password is empty.
+            username, _, rest = success_marker.partition(':')
+            password = rest.split(' - Anonymous Login!')[0].strip()
             message = f'{username}:{password}'
             yield Tag(
                 category='info',

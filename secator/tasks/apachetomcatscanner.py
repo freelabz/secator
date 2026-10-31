@@ -94,10 +94,15 @@ class apachetomcatscanner(Vuln):
 						tags=['apache', 'tomcat', 'manager', 'admin'],
 						tech=[f'apache tomcat/{version}'] if version else []
 					)
-				# bugfix: credentials_found in JSON is a list of lists...
-				if isinstance(credentials_found, list) and len(credentials_found) == 1:
-					credentials_found = credentials_found[0]
-				for cred in credentials_found:
+				# credentials_found in JSON is a list of [status_code, credentials] pairs.
+				if not isinstance(credentials_found, list):
+					credentials_found = []
+				for pair in credentials_found:
+					# Each entry is a [status_code, credentials] pair; keep the dict.
+					if isinstance(pair, (list, tuple)):
+						cred = pair[1] if len(pair) > 1 else None
+					else:
+						cred = pair
 					if isinstance(cred, dict):
 						username = cred.get('username', '')
 						password = cred.get('password', '')

@@ -37,7 +37,11 @@ for _ in $(seq 1 30); do
 	curl -sf http://127.0.0.1:15000/v2/ >/dev/null 2>&1 && break
 	sleep 1
 done
-if docker pull alpine:latest >/dev/null 2>&1; then
+# Use the locally-cached image when present; only pull when it's missing. This
+# keeps the seed working on a warm cache even if Docker Hub is rate-limited or
+# unreachable (a bare `docker pull` would fail and skip the seed otherwise).
+docker image inspect alpine:latest >/dev/null 2>&1 || docker pull alpine:latest >/dev/null 2>&1
+if docker image inspect alpine:latest >/dev/null 2>&1; then
 	docker tag alpine:latest 127.0.0.1:15000/testrepo:latest >/dev/null 2>&1
 	docker push 127.0.0.1:15000/testrepo:latest >/dev/null 2>&1 || \
 		echo "WARN: could not push to local registry (dockerregistrygrabber test will fail)"

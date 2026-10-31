@@ -8,7 +8,7 @@ from pathlib import Path
 from secator.runners import Command
 from secator.decorators import task
 from secator.definitions import IP, CIDR_RANGE, HOST
-from secator.output_types import Tag, Vulnerability, Warning, Info
+from secator.output_types import Tag, Vulnerability, Warning, Info, Error
 from secator.utils import autodetect_type
 
 
@@ -69,8 +69,7 @@ class dublin_traceroute(Command):
 	def on_cmd_done(self):
 		output_path = f'{self.cwd}/trace.json' if self.cwd else 'trace.json'
 		if not Path(output_path).exists():
-			yield Warning(message=f'Could not find output JSON {output_path}')
-			self.ignore_return_code = True
+			yield Error(message=f'Could not find output JSON {output_path} (dublin-traceroute may need CAP_NET_RAW/root to run)')  # noqa: E501
 			return
 		self.output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
 		shutil.move(output_path, self.output_path)

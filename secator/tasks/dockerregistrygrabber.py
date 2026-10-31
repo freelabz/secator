@@ -1,6 +1,8 @@
 import re
 import sys
 
+from urllib.parse import urlsplit
+
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import URL
@@ -65,19 +67,21 @@ class dockerregistrygrabber(Vuln):
 		if len(self.inputs) > 1:  # parent
 			return opts
 		if self.inputs:
-			# Strip any trailing slash so a URL like http://host:5000/ doesn't
-			# leave the port as "5000/" (which would crash int()).
-			target = self.inputs[0].rstrip('/')
-			if target != self.inputs[0]:
-				self.cmd = self.cmd.replace(self.inputs[0], target)
-				self.inputs[0] = target
-			split = target.split(':')
-			if len(split) == 3:  # port is in URL
-				url_wo_port = ':'.join([split[0], split[1]])
-				self.cmd = self.cmd.replace(self.inputs[0], url_wo_port)
-				self.full_target = self.inputs[0]
-				self.inputs[0] = url_wo_port
-				opts['docker_port']['value'] = int(split[2])
+			# drg.py appends `:{port}/v2/_catalog` itself, so it must be given a
+			# host-only URL (scheme://host) with no port and no path. Parse the
+			# input with urlsplit so a URL like https://host:15000/v2 doesn't end
+			# up feeding "15000/v2" to int() (which would crash) or leaving a path
+			# on the target.
+			original = self.inputs[0]
+			parts = urlsplit(original)
+			if parts.hostname:
+				host_url = f'{parts.scheme}://{parts.hostname}' if parts.scheme else parts.hostname
+				if host_url != original:
+					self.cmd = self.cmd.replace(original, host_url)
+					self.full_target = original
+					self.inputs[0] = host_url
+				if parts.port is not None:  # port is in URL
+					opts['docker_port']['value'] = parts.port
 		return opts
 
 	@staticmethod
