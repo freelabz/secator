@@ -13,6 +13,7 @@ from secator.utils import autodetect_type
 class nxc_ftp(Vuln):
     """NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. FTP Submodule."""  # noqa: E501
     cmd = 'nxc ftp'
+    encoding = 'ansi'  # nxc colorizes output; strip ANSI before parsing (CI forces color)
     input_chunk_size = 1
     input_types = [HOST, HOST_PORT, IP, STRING]
     output_types = [Vulnerability, Tag]
