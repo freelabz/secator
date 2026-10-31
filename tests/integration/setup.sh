@@ -135,7 +135,7 @@ if command -v drg.py >/dev/null 2>&1; then
 	timeout 25 "$(command -v python3)" "$DRG" http://127.0.0.1 -p 15000 --list 2>&1 | sed 's/^/  /'
 	if command -v secator >/dev/null 2>&1; then
 		# Resolve secator's interpreter (sys.executable) the same way the task does.
-		SECATOR_PY="$(sed -n '1s/^#!//p' "$(command -v secator)")"
+		SECATOR_PY="$(sed -n '1s/^#!//p' "$(command -v secator)" | awk '{print $1}')"
 		echo "--- secator sys.executable = $SECATOR_PY ($("$SECATOR_PY" --version 2>&1)) ---"
 		echo "--- drg.py via secator python (EXACT harness cmd) — stdout+stderr ---"
 		timeout 25 "$SECATOR_PY" "$DRG" http://127.0.0.1 -p 15000 --list; echo "  [exit=$?]"
