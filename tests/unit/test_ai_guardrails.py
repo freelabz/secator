@@ -1762,36 +1762,37 @@ class TestControlActionsAllowed(unittest.TestCase):
 		self.assertNotEqual(r.decision, "allow")
 
 
-class TestMalformedPortAndLoopback(unittest.TestCase):
+class TestMalformedPortUrlTarget(unittest.TestCase):
 	"""A URL target with a non-numeric port (e.g. lifted from `proxy_pass http://h:8080;`)
-	must NOT fail-close the target check with a ValueError; loopback labs are allowed under
-	isolation (they are not egress) but still scoped in a non-isolated run."""
+	must NOT fail-close the target check with a ValueError, and — critically — must NOT
+	fall through as a 'non-network' value that is ALLOWED past an engagement scope."""
 
-	def _engine(self, in_scope, isolated):
-		return PermissionEngine(
-			config={"allow": [], "deny": [], "ask": []},
-			in_scope=in_scope, isolated=isolated)
+	def _engine(self, in_scope):
+		return PermissionEngine(config={"allow": [], "deny": [], "ask": []}, in_scope=in_scope)
 
-	def test_trailing_semicolon_url_does_not_fail_closed(self):
-		# urlparse("http://127.0.0.1:8080;").port raises ValueError; the guardrail must
-		# degrade gracefully, never return the "target check error (fail-closed)" deny.
-		eng = self._engine(in_scope=["app.example.com"], isolated=False)
+	def test_trailing_delim_url_does_not_fail_closed(self):
+		eng = self._engine(in_scope=["app.example.com"])
 		r = eng._check_values("target", ["http://127.0.0.1:8080;"])
 		self.assertNotIn("fail-closed", (r.reason or ""))
 
-	def test_isolated_allows_loopback_lab(self):
-		eng = self._engine(in_scope=["app.example.com"], isolated=True)
-		for t in ("127.0.0.1", "127.0.0.1:8080", "http://127.0.0.1:8080", "localhost:8080"):
-			self.assertEqual(eng._check_values("target", [t]).decision, "allow", t)
+	def test_out_of_scope_malformed_url_is_not_allowed(self):
+		# SECURITY: before the port-guard this input fail-closed (deny); the guard must NOT
+		# turn it into an ALLOW by leaving the raw string to be treated as non-network.
+		eng = self._engine(in_scope=["app.example.com"])
+		for t in ("http://10.1.2.3:8080;", "http://10.1.2.3:8080"):
+			self.assertNotEqual(eng._check_values("target", [t]).decision, "allow", t)
 
-	def test_non_isolated_still_scopes_loopback(self):
-		eng = self._engine(in_scope=["app.example.com"], isolated=False)
-		self.assertNotEqual(eng._check_values("target", ["http://127.0.0.1:8080"]).decision, "allow")
+	def test_balanced_parens_url_preserved(self):
+		from secator.ai.guardrails import extract_command_targets, _strip_trailing_delims
+		url = "https://en.wikipedia.org/wiki/Python_(programming_language)"
+		self.assertEqual(_strip_trailing_delims(url), url)
+		self.assertIn(url, extract_command_targets(f"curl {url}"))
 
-	def test_isolated_does_not_blanket_allow_external(self):
-		# loopback-allow must not leak to a real host — an out-of-scope external stays non-allow.
-		eng = self._engine(in_scope=["app.example.com"], isolated=True)
-		self.assertNotEqual(eng._check_values("target", ["http://8.8.8.8/"]).decision, "allow")
+	def test_trailing_semicolon_stripped_in_extraction(self):
+		from secator.ai.guardrails import extract_command_targets
+		got = extract_command_targets("curl http://127.0.0.1:8080;")
+		self.assertIn("http://127.0.0.1:8080", got)
+		self.assertNotIn("http://127.0.0.1:8080;", got)
 
 
 if __name__ == '__main__':
