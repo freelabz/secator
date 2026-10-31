@@ -20,6 +20,7 @@ class dublin_traceroute(Command):
 	input_chunk_size = 1
 	output_types = [Tag]
 	cwd_isolated = True
+	requires_sudo = True  # needs CAP_NET_RAW to send probes; can't run unprivileged
 	opts = {
 		'npaths': {'type': int, 'default': 20, 'help': 'Number of paths to probe'},
 		'min_ttl': {'type': int, 'default': 1, 'help': 'Minimum TTL to probe'},
