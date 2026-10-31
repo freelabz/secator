@@ -1,0 +1,16 @@
+type: workflow
+name: rpc
+alias: rpc
+description: RPC vulnerability scan
+long_description: |
+  Scans RPC vulnerabilities using specialized tools.
+tags: [rpc, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  nuclei/rpc:
+    description: Detect RPC vulnerabilities
+    template_condition: "contains(id, 'rpc') || contains(tags, 'rpc')"

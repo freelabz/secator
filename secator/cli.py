@@ -3196,9 +3196,13 @@ def install_tools(cmds, cleanup, fail_fast):
 		# with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
 		status = ToolInstaller.install(cls)
 		if not status.is_ok():
-			return_code = 1
-			if fail_fast:
-				sys.exit(return_code)
+			if getattr(cls, 'install_optional', False):
+				console.print(Warning(
+					message=f'{cls.__name__} failed to install but is marked optional (install_optional=True); continuing.'))  # noqa: E501
+			else:
+				return_code = 1
+				if fail_fast:
+					sys.exit(return_code)
 		console.print()
 	if cleanup:
 		distro = get_distro_config()

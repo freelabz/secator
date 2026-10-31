@@ -124,6 +124,12 @@ class Command(Runner):
 	install_ignore_bin = []
 	install_version = None
 	install_binary_name = None
+	# When True, a failed install is reported as a warning and does NOT fail
+	# `secator install tools` (even with --fail-fast). Use ONLY for tools that
+	# genuinely cannot be installed in a vanilla/CI environment on every platform
+	# (e.g. a C++ source build with heavy system deps, a runtime kernel module, or
+	# root/Windows-only tooling). Installable tools must NOT set this.
+	install_optional = False
 	pypi_dependencies = None
 
 	# Serializer

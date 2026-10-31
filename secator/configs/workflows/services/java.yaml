@@ -1,0 +1,23 @@
+type: workflow
+name: java
+alias: java
+description: Java vulnerability scan (JMX, RMI)
+long_description: |
+  Scans JMX and RMI vulnerabilities using specialized tools.
+tags: [jmx, rmi, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  _group:
+    nuclei/jmx_rmi:
+      description: Detect JMX and RMI vulnerabilities
+      template_condition: "contains(id, 'jmx') || contains(tags, 'jmx') || contains(id, 'rmi') || contains(tags, 'rmi')"
+    beanshooter:
+      description: Test Mbean vulnerabilities
+      mode: enum
+    rmg:
+      description: Test RMI vulnerabilities
+      mode: enum

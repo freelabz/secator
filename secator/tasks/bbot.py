@@ -275,11 +275,17 @@ class bbot(Command):
 	# headers (Python.h) plus a C toolchain. The apt/dnf paths lacked
 	# python3-dev/python3-devel, so `secator install bbot` failed on Ubuntu/Debian
 	# with `fatal error: Python.h: No such file or directory`.
+	# NOTE: `chromium` is intentionally NOT listed here. It fails to install
+	# non-interactively on some CI images (Ubuntu's chromium-browser snap shim), and
+	# `install_pre` packages are installed in a single batched package-manager command
+	# whose failure aborts the whole install. It is only needed by bbot's screenshot
+	# modules at runtime, not to install the bbot binary via pipx, so pulling it out
+	# keeps `secator install bbot` green while still failing loudly if pipx itself fails.
 	install_pre = {
-		'apk': ['python3-dev', 'linux-headers', 'musl-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
-		'apt': ['python3-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
-		'dnf|yum|zypper': ['python3-devel', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
-		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium']
+		'apk': ['python3-dev', 'linux-headers', 'musl-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar'],
+		'apt': ['python3-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar'],
+		'dnf|yum|zypper': ['python3-devel', 'gcc', 'git', 'openssl', 'unzip', 'tar'],
+		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar']
 	}
 	install_version = '2.7.2'
 	install_cmd = 'pipx install bbot==[install_version] --force'

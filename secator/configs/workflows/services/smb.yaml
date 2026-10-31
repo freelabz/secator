@@ -1,0 +1,50 @@
+type: workflow
+name: smb
+alias: smb
+description: SMB vulnerability scan
+long_description: |
+  Scans SMB vulnerabilities using specialized tools.
+tags: [smb, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  _group:
+    nuclei/smb:
+      description: Detect SMB vulnerabilities
+      template_condition: "contains(id, 'smb') || contains(tags, 'smb')"
+      exclude_id: smb-signing,smb-anonymous-access,smb-shares
+
+    nxc_smb/null:
+      description: Check SMB null auth
+      username: ''
+      password: ''
+      shares: True
+      common_vulns: True
+
+    nxc_smb/guest:
+      description: Check SMB guest auth
+      username: guest
+      password: ''
+      shares: True
+      common_vulns: True
+
+    nxc_smb/webdav:
+      description: Check SMB webdav enabled
+      module: webdav
+      common_vulns: False
+
+    nxc_smb/spooler:
+      description: Check SMB spooler enabled
+      module: spooler
+      common_vulns: False
+
+    manspider/content:
+      description: Spider SMB shares for sensitive contents
+      content: "passwd|pwd|secret"
+
+    manspider/extensions:
+      description: Spider SMB shares for sensitive files
+      extensions: "ini cfg txt bak save sav ps1 ps bat sh bash config kdbx backup cer der cert pem properties cnf conf yaml yml xml"
