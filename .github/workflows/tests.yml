@@ -135,9 +135,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
     - name: Run integration tests
-      env:
-        SECATOR_DEBUG: "unittest"        # TEMP: log each task's built command (#1512 debug)
-        SECATOR_TEST_TASK_WORKERS: "1"   # TEMP: serialize test_tasks to test the concurrency hypothesis (#1512 debug)
       run: |
         secator test integration --test test_celery,test_worker,test_tasks
 
