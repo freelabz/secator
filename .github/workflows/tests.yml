@@ -136,7 +136,7 @@ jobs:
 
     - name: Run integration tests
       env:
-        SECATOR_DEBUG: "start"   # TEMP: log each task's built command (debug the #1512 nxc spin)
+        SECATOR_DEBUG: "unittest"   # TEMP: log each task's built command (#1512 debug)
       run: |
         secator test integration --test test_celery,test_worker,test_tasks
 
