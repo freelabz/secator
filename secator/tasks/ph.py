@@ -19,7 +19,7 @@ class ph(Tagger):
 	}
 	output_types = [Tag]
 	ignore_return_code = True
-	install_version = 'v0.1.0'
+	install_version = 'v0.1.1'
 	install_cmd = 'go install -v github.com/freelabz/ph/cmd/ph@[install_version]'
 	github_handle = 'freelabz/ph'
 	proxychains = False

@@ -81,7 +81,7 @@ class bup(HttpBase):
 		}
 	}
 	profile = 'medium'
-	install_version = '0.4.4'
+	install_version = '0.14.0'
 	install_pre = {
 		'*': ['curl'],
 	}
