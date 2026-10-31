@@ -124,15 +124,21 @@ if command -v nxc >/dev/null 2>&1; then
 	echo "--- nxc smb --shares probe (full) ---"
 	timeout 35 nxc smb 127.0.0.1 --port 10445 -u '' -p '' --shares 2>&1 | sed 's/^/  /'
 fi
-echo "--- drg.py direct probe (full) ---"
+# drg.py is run by the task with secator's OWN interpreter (sys.executable), which in
+# CI is the pipx venv python (python3.12) — NOT the ambient `python3` (3.11). The bare
+# probe below works under 3.11, but the harness yields nothing. So probe BOTH pythons
+# and show stderr: if the pipx python crashes (traceback on stderr the task swallows),
+# this is where it becomes visible.
 if command -v drg.py >/dev/null 2>&1; then
-	timeout 25 "$(command -v python3)" "$(command -v drg.py)" http://127.0.0.1 -p 15000 --list 2>&1 | sed 's/^/  /'
-fi
-# Run the ACTUAL tasks via secator with the harness opts + -debug, so the BUILT
-# command and the task-level (parsed) output are visible — this is what differs
-# from the bare probes above.
-if command -v secator >/dev/null 2>&1; then
-	echo "--- secator x dockerregistrygrabber (task) — show the built drg.py cmd + result ---"
-	timeout 60 secator x dockerregistrygrabber http://127.0.0.1 --docker-port 15000 -debug 2>&1 | grep -iE "drg\.py| -p |Running cmd|Found repo|Unauthenticated|finished with|testrepo|No such|rror" | sed 's/^/  /' | head -20
+	DRG="$(command -v drg.py)"
+	echo "--- drg.py via ambient python3 ($(command -v python3)) ---"
+	timeout 25 "$(command -v python3)" "$DRG" http://127.0.0.1 -p 15000 --list 2>&1 | sed 's/^/  /'
+	if command -v secator >/dev/null 2>&1; then
+		# Resolve secator's interpreter (sys.executable) the same way the task does.
+		SECATOR_PY="$(sed -n '1s/^#!//p' "$(command -v secator)")"
+		echo "--- secator sys.executable = $SECATOR_PY ($("$SECATOR_PY" --version 2>&1)) ---"
+		echo "--- drg.py via secator python (EXACT harness cmd) — stdout+stderr ---"
+		timeout 25 "$SECATOR_PY" "$DRG" http://127.0.0.1 -p 15000 --list; echo "  [exit=$?]"
+	fi
 fi
 echo "===== END LAB DIAGNOSTICS ====="
