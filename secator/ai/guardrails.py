@@ -43,6 +43,29 @@ def _is_always_allowed_host(value: str) -> bool:
 	return bool(host) and any(fnmatch.fnmatch(host, pat) for pat in ALWAYS_ALLOWED_HOSTS)
 
 
+_TRAILING_ALWAYS = '；;,\'">'
+_TRAILING_CLOSERS = {')': '(', ']': '[', '}': '{'}
+
+
+def _strip_trailing_delims(value: str) -> str:
+	"""Strip trailing shell/sentence delimiters an extracted URL/target may carry — e.g. a
+	config line ``proxy_pass http://127.0.0.1:8080;`` yields ``http://127.0.0.1:8080;``.
+
+	A trailing ``)``/``]``/``}`` is stripped ONLY when unbalanced, so a legitimately
+	bracketed URL (``.../Python_(programming_language)``) is preserved.
+	"""
+	out = value
+	while out:
+		c = out[-1]
+		if c in _TRAILING_ALWAYS:
+			out = out[:-1]
+		elif c in _TRAILING_CLOSERS and out.count(c) > out.count(_TRAILING_CLOSERS[c]):
+			out = out[:-1]
+		else:
+			break
+	return out
+
+
 # Shell operators that chain commands
 SHELL_OPERATORS = re.compile(r'\s*(?:&&|\|\||[;|])\s*')
 
@@ -395,7 +418,12 @@ def extract_command_targets(command: str) -> List[str]:
 		# Check for URLs first (before file path/extension checks — URLs can have .sh etc.)
 		url_match = URL_PATTERN.search(arg)
 		if url_match:
-			_add_target(url_match.group())
+			# Strip trailing shell/sentence punctuation the pattern may have swallowed
+			# (e.g. a config line `proxy_pass http://127.0.0.1:8080;` yields the URL with a
+			# trailing ';'). These are never part of a real target and otherwise produce a
+			# malformed authority downstream (urlparse(...).port on "8080;" raises). A balanced
+			# trailing bracket (a real URL) is kept — see _strip_trailing_delims.
+			_add_target(_strip_trailing_delims(url_match.group()))
 			return
 		# Skip file paths, command names
 		if _is_file_path(arg) or arg in cmd_names:
@@ -466,7 +494,7 @@ def extract_command_targets(command: str) -> List[str]:
 	# stays a documented residual: resolving it here is DNS-rebinding- and FP-prone.)
 	# ponytail: IP+URL only; hostname-in-code residual, add a quoted-region host sweep if it bites.
 	for match in URL_PATTERN.finditer(command):
-		_add_target(match.group())
+		_add_target(_strip_trailing_delims(match.group()))
 	for match in PII_PATTERNS["ipv4"].finditer(command):
 		ip = match.group()
 		if not any(ip in t for t in targets) and not any(ip in p for p in paths):
@@ -1207,11 +1235,29 @@ class PermissionEngine:
 		values_to_check = [value]
 		if rule_type == "target" and value.startswith(('http://', 'https://')):
 			from urllib.parse import urlparse
-			parsed = urlparse(value)
-			if parsed.hostname:
-				values_to_check.append(parsed.hostname)
-			if parsed.port:
-				values_to_check.append(f"{parsed.hostname}:{parsed.port}")
+			from secator.scope import target_host
+			# Clean trailing shell/sentence delimiters first — a URL lifted from a shell
+			# command keeps them (`proxy_pass http://127.0.0.1:8080;` -> port "8080;"), which
+			# both makes urlparse(...).port raise AND, left raw, makes host_in_scope treat the
+			# string as a non-network item it ALLOWS — leaking an out-of-scope host. So scope
+			# the parsed host(s), and keep the URL itself ONLY when it is a real network target
+			# (so a path-scoped URL entry can still match it); an unparseable URL is dropped.
+			cleaned = _strip_trailing_delims(value)
+			host = port = None
+			try:
+				parsed = urlparse(cleaned)
+				host, port = parsed.hostname, parsed.port
+			except ValueError:
+				host = port = None
+			values_to_check = [cleaned] if target_host(cleaned) else []
+			if host:
+				values_to_check.append(host)
+				if port:
+					values_to_check.append(f"{host}:{port}")
+			if not values_to_check:
+				# A URL we cannot resolve to any host must never fall through as a
+				# "non-network" value (which would be allowed) — deny it (fail-safe).
+				return PermissionResult(decision="deny", reason=f"Unparseable target: {value}")
 
 		# Top precedence for targets: code-hosting / PoC-source hosts are always allowed,
 		# ahead of every deny/scope layer below (config deny, mandate out_of_scope, and
