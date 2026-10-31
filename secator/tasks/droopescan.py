@@ -103,7 +103,7 @@ class droopescan(Vuln):
 				name='drupal_theme',
 				value=theme['name'],
 				match=theme['url'],
-				extra_data=theme['imu']
+				extra_data=theme.get('imu', [])
 			)
 		plugins = item.get('plugins', {}).get('finds', [])
 		for plugin in plugins:
@@ -112,7 +112,7 @@ class droopescan(Vuln):
 				name='drupal_plugin',
 				value=plugin['name'],
 				match=plugin['url'],
-				extra_data=plugin['imu']
+				extra_data=plugin.get('imu', [])
 			)
 		interesting_urls = item.get('interesting urls', {}).get('finds', [])
 		for url in interesting_urls:

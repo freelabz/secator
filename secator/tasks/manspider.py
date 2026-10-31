@@ -66,10 +66,14 @@ class manspider(Command):
 		self.line_idx = 0
 		self.secrets = []
 		self.secrets_found = 0
-		self.shares_found = 0
+		# Per-target counters, keyed by the 'host:port' target string emitted on
+		# each output line. One manspider instance can receive up to 100 targets
+		# in async runs, so access must be attributed to the target that produced
+		# it rather than aggregated across the whole instance.
+		self.shares_found = {}
 		# Confirmed readable access (files listed / content matched), as opposed
 		# to merely a share being enumerated (which can still be ACCESS_DENIED).
-		self.access_confirmed = 0
+		self.access_confirmed = {}
 
 	@staticmethod
 	def on_start(self):
@@ -93,7 +97,7 @@ class manspider(Command):
 		target = item['target'] + ':' + str(item['port'])
 		share = item['share']
 		if item['type'] == 'share':
-			self.shares_found += 1
+			self.shares_found[target] = self.shares_found.get(target, 0) + 1
 			yield Tag(
 				match=target,
 				category='info',
@@ -103,7 +107,7 @@ class manspider(Command):
 			)
 		elif item['type'] == 'content_match':
 			self.secrets_found += 1
-			self.access_confirmed += 1
+			self.access_confirmed[target] = self.access_confirmed.get(target, 0) + 1
 			for match in item['matches']:
 				secret = Tag(
 					match=target + '//' + item['share'] + '/' + item['path'],
@@ -123,7 +127,7 @@ class manspider(Command):
 				self.secrets.append(secret)
 				yield secret
 		elif item['type'] == 'file':
-			self.access_confirmed += 1
+			self.access_confirmed[target] = self.access_confirmed.get(target, 0) + 1
 			yield Tag(
 				match=target,
 				category='info',
@@ -138,52 +142,61 @@ class manspider(Command):
 
 	@staticmethod
 	def on_cmd_done(self):
-		target = str(self.inputs[0])
 		username = self.get_opt_value('username')
 		password = self.get_opt_value('password')
 		# Only report unauthenticated access once access is actually confirmed
 		# (a file listed or content matched). A bare 'share' enumeration can still
 		# return ACCESS_DENIED on listing, which is not unauthenticated access.
-		if self.shares_found and self.access_confirmed and username in [None, '', 'guest']:
-			yield Vulnerability(
-				name='SMB - Unauthenticated Share Access',
-				matched_at=target,
-				confidence='high',
-				severity='high',
-				extra_data={
-					'username': username
-				},
-				cvss_score=8.5,
-				cvss_vec='CVSS:3.0/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:L/A:N',
-				description='One or multiple SMB share were accessed unauthenticated.',
-				tags=['network', 'smb', 'share', 'vuln', 'unauth', 'default-login']
-			)
+		# Attribute to the specific target that produced the access, not inputs[0],
+		# since one instance can process many targets in async runs.
+		if username in [None, '', 'guest']:
+			for target in sorted(self.access_confirmed):
+				if not self.shares_found.get(target):
+					continue
+				yield Vulnerability(
+					name='SMB - Unauthenticated Share Access',
+					matched_at=target,
+					confidence='high',
+					severity='high',
+					extra_data={
+						'username': username
+					},
+					cvss_score=8.5,
+					cvss_vec='CVSS:3.0/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:L/A:N',
+					description='One or multiple SMB share were accessed unauthenticated.',
+					tags=['network', 'smb', 'share', 'vuln', 'unauth', 'default-login']
+				)
 		if self.secrets_found > 0:
 			tags = ['network', 'smb', 'secret', 'vuln']
 			if not username and not password:
 				tags.append('unauth')
-			share_names = set(c.extra_data['share'] for c in self.secrets)
-			description = "The following shares contain files with sensitive information: "
-			patterns = []
-			for share in share_names:
-				share_secrets = [c for c in self.secrets if c.extra_data['share'] == share]
-				description += f"\n* {target}//{share}:"
-				for secret in share_secrets:
-					patterns.append(secret.value)
-					description += f"\n\t* {secret.extra_data['pattern']} @ {secret.extra_data['path']}"
-			yield Vulnerability(
-				name='SMB - Secrets Detected',
-				description=description,
-				impact='Secrets can be exfiltrated and used for malicious purposes.',
-				remediation='Remove the secrets from the affected share files ASAP.',
-				cvss_vec='CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N',
-				cvss_score=7.7,
-				matched_at=target,
-				severity='critical',
-				confidence='high',
-				tags=tags,
-				extra_data={
-					'found': self.secrets_found,
-					'patterns': list(set(patterns))
-				}
-			)
+			# Group secrets by the target that produced them, then by share, so each
+			# affected target gets its own vulnerability matched at that target.
+			targets = set(c.extra_data['target'] for c in self.secrets)
+			for target in sorted(targets):
+				target_secrets = [c for c in self.secrets if c.extra_data['target'] == target]
+				share_names = set(c.extra_data['share'] for c in target_secrets)
+				description = "The following shares contain files with sensitive information: "
+				patterns = []
+				for share in share_names:
+					share_secrets = [c for c in target_secrets if c.extra_data['share'] == share]
+					description += f"\n* {target}//{share}:"
+					for secret in share_secrets:
+						patterns.append(secret.value)
+						description += f"\n\t* {secret.extra_data['pattern']} @ {secret.extra_data['path']}"
+				yield Vulnerability(
+					name='SMB - Secrets Detected',
+					description=description,
+					impact='Secrets can be exfiltrated and used for malicious purposes.',
+					remediation='Remove the secrets from the affected share files ASAP.',
+					cvss_vec='CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N',
+					cvss_score=7.7,
+					matched_at=target,
+					severity='critical',
+					confidence='high',
+					tags=tags,
+					extra_data={
+						'found': len(target_secrets),
+						'patterns': list(set(patterns))
+					}
+				)

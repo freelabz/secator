@@ -79,7 +79,14 @@ class masscan(ReconPort):
 				match = MASSCAN_RESUME_REGEX.search(content)
 				if match:
 					old_json_path = match.group(1).strip()
-					shutil.copy(old_json_path, self.output_path)
+					# The resume file may reference an output file that no longer
+					# exists (deleted/moved). Skip the copy in that case so the
+					# resume rewrite still proceeds and masscan writes fresh
+					# results to self.output_path (where on_cmd_done looks).
+					if os.path.exists(old_json_path):
+						shutil.copy(old_json_path, self.output_path)
+					else:
+						console.print(Warning(message=f'Resume output file {old_json_path} not found, starting fresh'))  # noqa: E501
 					content = content.replace(old_json_path, self.output_path)
 				else:
 					# Resume file has no output-filename: masscan would write its

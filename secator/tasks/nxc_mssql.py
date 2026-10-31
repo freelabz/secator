@@ -8,7 +8,7 @@ from secator.utils import autodetect_type
 
 
 STATUS_REGEX = re.compile(r'\s*(?P<os>.+?)\s\((?P<version>[^)]*)\)\s\(name:(?P<name>[^)]*)\)\s\(domain:(?P<domain>[^)]*)\)\s\(EncryptionReq:(?P<enc>[^)]*)\)(?:\s\(NTLM:(?P<ntlm>[^)]*)\))?')  # noqa: E501
-LOGIN_SUCCESS_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*):?(?P<password>.*)?\s+\((?P<status>.*)?\)')  # noqa: E501
+LOGIN_SUCCESS_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*):?(?P<password>.*?)(?:\s+\((?P<status>[^)]*)\))?$')  # noqa: E501
 LOGIN_FAILED_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*):?(?P<password>.*)?')
 
 
@@ -100,10 +100,10 @@ class nxc_mssql(Vuln):
 			match = LOGIN_SUCCESS_REGEX.match(line_content)
 			if match:
 				data = match.groupdict()
-				status = data.get('status', 'UNKNOWN')
+				status = data.get('status') or 'UNKNOWN'
 				if status == 'Pwn3d!':
 					status = 'SUCCESS'
-					data['status'] = status
+				data['status'] = status
 				yield Tag(
 					category='info',
 					match=self.full_target,

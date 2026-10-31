@@ -96,9 +96,9 @@ class nxc_smb(Vuln):
 			else:
 				yield Warning(message=line.split('ERROR')[-1].strip())
 
-		# Login status
+		# Login status (skip guest sessions: a (Guest) line does not confirm the configured creds)
 		info = '[+]' in line
-		if info and not self.any_mode:
+		if info and not self.any_mode and '(Guest)' not in line:
 			username = self.get_opt_value('username')
 			password = self.get_opt_value('password')
 			message = line.split('[+]')[-1].strip()
