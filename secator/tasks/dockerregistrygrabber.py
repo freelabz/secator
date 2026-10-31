@@ -21,6 +21,7 @@ class dockerregistrygrabber(Vuln):
 	# installed into sys.executable by PipInstaller), causing a silent ModuleNotFound
 	# crash -> no repos parsed -> no finding.
 	cmd = f'{sys.executable} {CONFIG.dirs.bin}/drg.py'
+	encoding = 'ansi'  # drg.py colorizes output via rich; strip ANSI before parsing (CI forces color)
 	input_chunk_size = 1
 	input_types = [URL]
 	output_types = [Vulnerability]
