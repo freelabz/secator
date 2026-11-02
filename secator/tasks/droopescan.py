@@ -1,12 +1,12 @@
 import click
-import json
-import os
 import re
-import shlex
 
 from secator.decorators import task
-from secator.definitions import IP, HOST, URL, TIMEOUT, PROXY, THREADS, OPT_NOT_SUPPORTED, PERCENT, EXTRA_DATA, HEADER, FOLLOW_REDIRECT, USER_AGENT, DELAY, RETRIES, RATE_LIMIT
-from secator.output_types import Port, Ip, Tag, Vulnerability, Info, Error, Technology, Progress, Url
+from secator.definitions import (
+	IP, HOST, URL, TIMEOUT, PROXY, THREADS, OPT_NOT_SUPPORTED, HEADER, FOLLOW_REDIRECT,
+	USER_AGENT, DELAY, RETRIES, RATE_LIMIT,
+)
+from secator.output_types import Port, Ip, Tag, Vulnerability, Technology, Progress, Url
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Vuln
 
@@ -16,17 +16,23 @@ PROGRESS_PATTERN_REGEX = re.compile(r'(?P<name>\w+)\s*.+?.+?.+?\s*(?P<current>\d
 
 @task()
 class droopescan(Vuln):
+	"""Scan Drupal/CMS sites for version, themes, plugins and interesting URLs."""
 	cmd = 'droopescan scan'
 	input_types = [IP, HOST, URL]
-	output_types = [Progress, Port, Ip, Tag, Vulnerability, Url]
+	output_types = [Progress, Port, Ip, Tag, Vulnerability, Technology, Url]
 	opt_prefix = '--'
 	input_flag = '-u'
 	file_flag = '-U'
 	json_flag = '--output json'
+	# droopescan exits non-zero even on a successful scan when an individual
+	# enumeration step (plugins/themes/version) can't fully complete or the
+	# target is only partially reachable. The JSON report is still produced and
+	# parsed, so a non-zero exit must not fail the task on its own.
+	ignore_return_code = True
 	opts = {
 		# 'output_path': {'type': str, 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},
-		'mode': {'type': click.Choice(['drupal', '']), 'default': 'drupal', 'help': 'Drupal scan mode', 'internal': True, 'display': True},
-		'enumerate': {'type': click.Choice(['a','i','v','t','p']), 'default': 'a', 'help': 'What to enumerate, comma-separated (a=all, i=interesting URLs, v=version, t=themes, p=plugins)'},
+		'mode': {'type': click.Choice(['drupal', '']), 'default': 'drupal', 'help': 'Drupal scan mode', 'internal': True, 'display': True},  # noqa: E501
+		'enumerate': {'type': str, 'default': 'a', 'help': 'What to enumerate, comma-separated (a=all, i=interesting URLs, v=version, t=themes, p=plugins)'},  # noqa: E501
 	}
 	item_loaders = [
 		JSONSerializer(),
@@ -51,7 +57,7 @@ class droopescan(Vuln):
 	proxy_http = False
 	github_handle = 'SamJoan/droopescan'
 	install_version = '1.45.1'
-	install_cmd = 'pipx install droopescan==[install_version] --force && pipx inject droopescan cement==2.10.14 setuptools '
+	install_cmd = 'pipx install droopescan==[install_version] --force && pipx inject droopescan cement==2.10.14 setuptools '  # noqa: E501
 	install_github_bin = False
 	profile = 'small'
 
@@ -97,7 +103,7 @@ class droopescan(Vuln):
 				name='drupal_theme',
 				value=theme['name'],
 				match=theme['url'],
-				extra_data=theme['imu']
+				extra_data=theme.get('imu', [])
 			)
 		plugins = item.get('plugins', {}).get('finds', [])
 		for plugin in plugins:
@@ -106,7 +112,7 @@ class droopescan(Vuln):
 				name='drupal_plugin',
 				value=plugin['name'],
 				match=plugin['url'],
-				extra_data=plugin['imu']
+				extra_data=plugin.get('imu', [])
 			)
 		interesting_urls = item.get('interesting urls', {}).get('finds', [])
 		for url in interesting_urls:
@@ -114,6 +120,6 @@ class droopescan(Vuln):
 				url=url['url'],
 				verified=False,
 				extra_data={
-					'description': url['description']
+					'description': url.get('description')
 				},
 			)

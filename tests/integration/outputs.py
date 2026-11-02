@@ -21,7 +21,8 @@ OUTPUTS_CHECKS = {
 		Url: [
 			{
 				# Active crawlers/fuzzers make real requests, so they must honour the
-				# injected custom header. Passive URL tools (below) make no such request.
+				# injected custom header. Passive URL tools (below) make no such request;
+				# eyewitness/droopescan emit Url items without the injected header too.
 				'checks': [
 					{
 						'info': 'should have request header "Hello"',
@@ -34,7 +35,7 @@ OUTPUTS_CHECKS = {
 						'function': lambda item: item.request_headers['Hello'] == 'World',
 					},
 				],
-				'runner': '^(?!urlfinder|xurlfind3r|gau|urlparser$).*',
+				'runner': '^(?!urlfinder|xurlfind3r|gau|urlparser$|eyewitness$|droopescan$).*',
 			},
 			{
 				# Passive URL tools (gau/xurlfind3r/urlfinder) fetch known URLs from
@@ -219,6 +220,36 @@ OUTPUTS_TASKS = {
 		Tag(name='url_param', category='info', match='https://xss-game.appspot.com/level1/frame', value='query', _source='x8'),
 	],
 	'xurlfind3r': [],  # see gau above — validated structurally, not by a pinned URL
+	# PR #1512 service tasks. Assert the stable, deterministic finding each lab service produces;
+	# tasks without a pinned entry here are still validated for non-empty output + correct types
+	# by the harness (empty_results_allowed=False + expected_output_types).
+	'nxc_smb': [
+		# dperson/samba allows null-session share enumeration → unauth-share + null-auth vulns.
+		Vulnerability(name='SMB - Null Auth Login', matched_at='127.0.0.1:10445', severity='medium', _source='nxc_smb'),
+		Vulnerability(name='SMB - Unauthenticated Access To Network Share', matched_at='127.0.0.1:10445', severity='high', _source='nxc_smb'),  # noqa: E501
+	],
+	'nxc_ftp': [
+		# vsftpd accepts testuser:testpass → successful-login tag.
+		Tag(name='ftp_login_successful', category='info', match='127.0.0.1:10021', value='testuser:testpass', _source='nxc_ftp'),  # noqa: E501
+	],
+	'dockerregistrygrabber': [
+		Vulnerability(name='Docker Registry - Unauthenticated Access', matched_at='http://127.0.0.1:15000', severity='high', _source='dockerregistrygrabber'),  # noqa: E501
+	],
+	'zabbix_get': [
+		# Lab agent has system.run enabled → critical RCE finding.
+		Vulnerability(name='Zabbix - Remote Code Execution', matched_at='127.0.0.1:10050', severity='critical', _source='zabbix_get'),  # noqa: E501
+	],
+	'beanshooter': [
+		Vulnerability(name='Java JMX - Unauthenticated Access', matched_at='127.0.0.1:1617', severity='high', _source='beanshooter'),  # noqa: E501
+	],
+	# droopescan / rmg / eyewitness / cidr_split: validated by non-empty output + expected types
+	# (their tag/url values are not stable enough to pin — same rationale as gau/testssl above).
+	'droopescan': [],
+	'rmg': [],
+	'eyewitness': [],
+	'cidr_split': [],
+	# apachetomcatscanner against a bare Tomcat yields a Technology (version varies with the image).
+	'apachetomcatscanner': [],
 }
 
 OUTPUTS_WORKFLOWS = {

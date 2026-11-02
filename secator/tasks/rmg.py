@@ -5,7 +5,7 @@ import click
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import HOST, HOST_PORT, IP
-from secator.output_types import Vulnerability, Tag, Technology, Warning
+from secator.output_types import Vulnerability, Tag, Technology
 from secator.runners import Command
 
 
@@ -34,14 +34,22 @@ class rmg(Command):
 	opt_prefix = '--'
 	install_version = '5.1.0'
 	opts = {
-		'mode': {'type': click.Choice(RMG_MODES), 'default': 'enum', 'internal': True, 'display': True, 'help': f'Scan mode ({", ".join(RMG_MODES)})'},
-		'rmi_port': {'type': int, 'default': 1090, 'internal': True, 'display': True},
+		'mode': {'type': click.Choice(RMG_MODES), 'default': 'enum', 'internal': True, 'display': True, 'help': f'Scan mode ({", ".join(RMG_MODES)})'},  # noqa: E501
+		'rmi_port': {'type': int, 'default': 1099, 'internal': True, 'display': True},
 	}
-	# install_pre = {
-	# 	'*': ['openjdk-8-jre']
-	# }
+	# rmg is a Java jar wrapped by a `java -jar` shell script, so a JRE must be
+	# present. JRE package names differ per distro (verified in containers), so map
+	# them per package manager instead of a single apt-only name.
+	install_pre = {
+		'apt': ['default-jre-headless'],
+		'apk': ['openjdk17-jre-headless'],
+		'yum|dnf': ['java-latest-openjdk-headless'],
+		'zypper': ['java-headless'],
+		'pacman': ['jre-openjdk-headless'],
+		'brew': ['openjdk'],
+	}
 	install_cmd = (
-		'wget https://github.com/qtc-de/remote-method-guesser/releases/download/v[install_version]/rmg-[install_version]-jar-with-dependencies.jar && '
+		'wget https://github.com/qtc-de/remote-method-guesser/releases/download/v[install_version]/rmg-[install_version]-jar-with-dependencies.jar && '  # noqa: E501
 		f'mv rmg-[install_version]-jar-with-dependencies.jar {CONFIG.dirs.bin}/rmg.jar && '
 		f'echo "{RMG_BIN}" > {CONFIG.dirs.bin}/rmg && '
 		f'chmod +x {CONFIG.dirs.bin}/rmg'
@@ -63,7 +71,6 @@ class rmg(Command):
 		mode = shlex.quote(self.get_opt_value('mode'))
 		self.cmd = self.cmd.replace('rmg ', f'rmg {mode} ')
 		self.cmd = self.cmd.replace(self.inputs[0], replaced)
-
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -174,7 +181,7 @@ class rmg(Command):
 			if json_output["jep290"].get("status") == "Vulnerable":
 				yield Vulnerability(
 					name='Java RMI - Missing JEP290 Deserialization Filtering',
-					description="The Java RMI service does not have JEP290 serialization filtering enabled, allowing raw deserialization of arbitrary objects.",
+					description="The Java RMI service does not have JEP290 serialization filtering enabled, allowing raw deserialization of arbitrary objects.",  # noqa: E501
 					impact="Remote Code Execution (RCE) via deserialization.",
 					remediation="Upgrade Java or configure JEP290 deserialization filters.",
 					cvss_vec='CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
@@ -232,20 +239,23 @@ class rmg(Command):
 def _strip_ansi(text):
 	return re.sub(r'\x1b(?:\[[0-9;]*m|\][^\x1b]*\x1b\\)', '', text)
 
+
 def parse_rmg_scan_output(output):
 	result = {
 		"endpoints": []
 	}
+	# rmg scan emits, per discovered endpoint:
+	#   [+]  [HIT] Found RMI service(s) on 172.17.0.2:9010  (Registry, Activator, DGC)
 	hit_pattern = re.compile(
-		r'HITHITHIT\s+Found\s+RMI\s+servicesss\s+on\s+([^\s:]+):(\d+)\s+([)]+)([^)]+)([)]+)'
+		r'\[HIT\]\s+Found\s+RMI\s+service\(s\)\s+on\s+(?P<host>[^\s:]+):(?P<port>\d+)\s*\((?P<services>[^)]*)\)'
 	)
 
 	for line in output.strip().split('\n'):
 		match = hit_pattern.search(line)
 		if match:
-			host = match.group(1)
-			port = match.group(2)
-			services = [s.strip() for s in match.group(3).split(',')]
+			host = match.group('host')
+			port = match.group('port')
+			services = [s.strip() for s in match.group('services').split(',') if s.strip()]
 			result["endpoints"].append({
 				"host": host,
 				"port": port,
@@ -479,6 +489,12 @@ def parse_rmg_enum_output(output):
 						elif "Configuration Status:" in status_part:
 							config_status = status_part.split("Configuration Status:")[1].strip()
 							result["activation_system"]["configs"].append({
+								"option": option_label,
+								"status": config_status,
+							})
+							# Also store in configurations so on_cmd_done emits a Tag
+							result["configurations"].append({
+								"section": section_name,
 								"option": option_label,
 								"status": config_status,
 							})

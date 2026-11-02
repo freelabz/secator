@@ -13,7 +13,12 @@ from secator.tasks._categories import HttpBase
 # else a connection/driver error state. Map those to the closest HTTP status code (the raw text is also kept in
 # extra_data['request_status']). Unknown/driver errors -> 0.
 EYEWITNESS_STATUS_CODES = {
-	'Successful': 200,
+	# "Successful" only means the page loaded in the browser, NOT that the HTTP
+	# status was 200 (it could be 401/403/500). Without the real "Status Code"
+	# column we can't know the code, so map it to 0 (unknown) rather than
+	# fabricating 200 and marking the Url verified. The raw outcome is retained
+	# in extra_data['request_status'].
+	'Successful': 0,
 	'BadStatus': 400,
 	'Timeout': 504,
 	'Connection Reset': 502,
@@ -34,7 +39,8 @@ class eyewitness(HttpBase):
 	input_types = [URL]
 	output_types = [Url]
 	tags = ['screenshot', 'web', 'recon']
-	input_flag = None  # EyeWitness only writes Requests.csv (parsed below) in multi mode (`-f <file>`), NOT single mode (`--single`)
+	# EyeWitness only writes Requests.csv (parsed below) in multi mode (`-f <file>`), NOT single mode (`--single`)  # noqa: E501
+	input_flag = None
 	file_flag = '-f'
 	file_eof_newline = True
 	version_flag = OPT_NOT_SUPPORTED
@@ -64,9 +70,21 @@ class eyewitness(HttpBase):
 	proxy_http = False
 	profile = 'large'
 	install_version = 'feat/csv-status-code'
+	# EyeWitness needs a headless Chromium + chromedriver, a virtual X server (Xvfb)
+	# and a Python venv toolchain. Package names differ per distro (all verified in
+	# containers). install_pre keys are *package-manager* names (apt/apk/dnf/...), so
+	# the old 'arch' key never matched (pacman is the pm name) and '*' wrongly applied
+	# apt names everywhere. Map each package manager explicitly.
+	# NOTE: on apt (Debian/Ubuntu) we do NOT install `chromium`/`chromium-driver`:
+	# on modern Ubuntu those are snap-shim transitional packages, and installing the
+	# chromium snap is flaky in CI/containers (and leaves apt half-broken on failure).
+	# Rely on the system-installed Chrome instead — same approach as httpx/katana.
 	install_pre = {
-		'*': ['chromium', 'chromium-driver', 'xvfb', 'wget', 'curl', 'jq', 'cmake', 'python3-venv', 'python3-dev'],
-		'arch': ['chromium', 'xorg-server-xvfb']
+		'apt': ['xvfb', 'wget', 'curl', 'jq', 'cmake', 'python3-venv', 'python3-dev'],
+		'apk': ['chromium', 'chromium-chromedriver', 'xvfb', 'wget', 'curl', 'jq', 'cmake', 'py3-virtualenv', 'python3-dev'],  # noqa: E501
+		'yum|dnf': ['chromium', 'chromedriver', 'xorg-x11-server-Xvfb', 'wget', 'curl', 'jq', 'cmake', 'python3-devel'],
+		'pacman': ['chromium', 'xorg-server-xvfb', 'wget', 'curl', 'jq', 'cmake'],
+		'brew': ['chromium', 'chromedriver', 'wget', 'curl', 'jq', 'cmake'],
 	}
 	install_cmd = (
 		f'git clone --depth 1 --branch [install_version] https://github.com/freelabz/EyeWitness.git {CONFIG.dirs.share}/EyeWitness || true && '  # noqa: E501
@@ -95,13 +113,20 @@ class eyewitness(HttpBase):
 				f.write(self.inputs[0] + '\n')
 			self.cmd = self.cmd.replace(f' {shlex.quote(self.inputs[0])}', f' -f {shlex.quote(targets_file)}', 1)
 
+		# Remove any pre-existing Requests.csv so a run that fails before
+		# EyeWitness regenerates its report can't make on_cmd_done parse and
+		# emit stale rows from a previous scan as current results.
+		stale_csv = os.path.join(self.output_path, 'Requests.csv')
+		if os.path.exists(stale_csv):
+			os.remove(stale_csv)
+
 		self.cmd += f' --web --no-prompt -d {shlex.quote(self.output_path)}'
 
 	@staticmethod
 	def on_cmd_done(self):
 		csv_path = os.path.join(self.output_path, 'Requests.csv')
 		if not os.path.exists(csv_path):
-			yield Warning(message=f'No results found (could not find CSV)')
+			yield Warning(message='No results found (could not find CSV)')
 			return
 		yield Info(message=f'EyeWitness report saved to {self.output_path}')
 
