@@ -111,5 +111,9 @@ class circl(CVEProvider):
 			description=description,
 			references=references,
 			reference=reference,
+			# confidence='low' kept explicit: a bare CVE lookup match is low-confidence until a
+			# scanner corroborates it (and merge_with carries this onto the consumer's vuln).
+			# 'high' is the type default.
+			confidence='low',
 		)
 		return vuln
