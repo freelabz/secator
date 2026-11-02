@@ -63,7 +63,17 @@ class nxc_smb(Vuln):
 	github_handle = 'Pennyw0rth/NetExec'
 	install_github_bin = False
 	install_version = "30cf1465"
-	install_cmd = "pipx install --force git+https://github.com/Pennyw0rth/NetExec@[install_version]"
+	# NetExec pulls `netifaces`, whose old C fails GCC 14's now-fatal -Wint-conversion,
+	# and some deps build native (Rust) extensions. Provide the toolchain and relax the
+	# netifaces build so the pipx install succeeds on newer compilers (e.g. Debian trixie).
+	install_pre = {
+		'apt': ['build-essential', 'python3-dev', 'libssl-dev', 'pkg-config', 'rustc', 'cargo'],
+		'apk': ['build-base', 'python3-dev', 'openssl-dev', 'pkgconfig', 'rust', 'cargo'],
+		'yum|dnf': ['gcc', 'python3-devel', 'openssl-devel', 'pkgconf-pkg-config', 'rust', 'cargo'],
+		'pacman': ['base-devel', 'openssl', 'pkgconf', 'rust'],
+		'brew': ['openssl', 'pkg-config', 'rust'],
+	}
+	install_cmd = 'CFLAGS="-Wno-error=int-conversion" pipx install --force git+https://github.com/Pennyw0rth/NetExec@[install_version]'  # noqa: E501
 
 	@staticmethod
 	def on_cmd_opts(self, opts):
