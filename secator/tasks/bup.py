@@ -35,7 +35,6 @@ BUP_BYPASS_MODES_STR = ','.join(BUP_BYPASS_MODES)
 @task()
 class bup(HttpBase):
 	"""40X bypasser."""
-	friendly_display_name = "403 bypasser (bup)"
 
 	cmd = 'bup -d'
 	input_types = [URL]

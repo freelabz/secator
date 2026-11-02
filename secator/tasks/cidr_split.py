@@ -9,7 +9,6 @@ from secator.runners import PythonRunner
 @task()
 class cidr_split(PythonRunner):
     """CIDR splitter."""
-    friendly_display_name = "CIDR splitter"
 
     input_types = [CIDR_RANGE]
     output_types = [Tag]

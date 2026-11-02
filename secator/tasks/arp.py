@@ -9,7 +9,6 @@ from secator.runners import Command
 @task()
 class arp(Command):
 	"""Display the system ARP cache."""
-	friendly_display_name = "ARP cache reader"
 	cmd = 'arp -a'
 	output_types = [Ip]
 	input_flag = None

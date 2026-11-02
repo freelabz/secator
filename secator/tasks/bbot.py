@@ -182,7 +182,6 @@ def output_discriminator(self, item):
 @task()
 class bbot(Command):
 	"""Multipurpose scanner."""
-	friendly_display_name = "BBOT scanner"
 	cmd = 'bbot -y --allow-deadly --force'
 	input_types = [HOST, IP, URL, PORT, ORG_NAME, USERNAME, FILENAME]
 	output_types = [Vulnerability, Port, Url, Record, Ip]

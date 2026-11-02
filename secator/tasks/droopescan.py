@@ -17,7 +17,6 @@ PROGRESS_PATTERN_REGEX = re.compile(r'(?P<name>\w+)\s*.+?.+?.+?\s*(?P<current>\d
 @task()
 class droopescan(Vuln):
 	"""Scan Drupal/CMS sites for version, themes, plugins and interesting URLs."""
-	friendly_display_name = "Droopescan CMS scanner"
 	cmd = 'droopescan scan'
 	input_types = [IP, HOST, URL]
 	output_types = [Progress, Port, Ip, Tag, Vulnerability, Technology, Url]

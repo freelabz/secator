@@ -34,7 +34,6 @@ EYEWITNESS_STATUS_CODES = {
 @task()
 class eyewitness(HttpBase):
 	"""Screenshot web interfaces and categorize them (login pages, default creds, dir listings, ...)."""
-	friendly_display_name = "EyeWitness screenshotter"
 
 	cmd = 'eyewitness'
 	input_types = [URL]

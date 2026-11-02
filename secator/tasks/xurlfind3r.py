@@ -13,7 +13,6 @@ MAX_PARAM_OCCURRENCES = 10
 @task()
 class xurlfind3r(HttpCrawler):
 	"""Discover URLs for a given domain in a simple, passive and efficient way"""
-	friendly_display_name = "xurlfind3r passive URLs"
 	cmd = 'xurlfind3r'
 	tags = ['url', 'crawl', 'passive']
 	opt_prefix = '--'

@@ -29,7 +29,6 @@ def output_discriminator(self, item):
 @task()
 class nuclei(VulnMulti):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
-	friendly_display_name = "Nuclei vulnerability scan"
 
 	cmd = 'nuclei'
 	input_types = [HOST, HOST_PORT, IP, URL]

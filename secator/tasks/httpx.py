@@ -18,7 +18,6 @@ from secator.utils import extract_domain_info, extract_subdomains_from_fqdn, san
 @task()
 class httpx(Http):
 	"""Fast and multi-purpose HTTP toolkit."""
-	friendly_display_name = "HTTP prober"
 
 	cmd = 'httpx-toolkit -irh'
 	input_types = [HOST, HOST_PORT, IP, URL, STRING]

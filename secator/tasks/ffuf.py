@@ -18,7 +18,6 @@ FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[
 @task()
 class ffuf(HttpFuzzer):
 	"""Fast web fuzzer written in Go."""
-	friendly_display_name = "ffuf fuzzer"
 
 	cmd = 'ffuf -noninteractive'
 	input_types = [URL, STRING]

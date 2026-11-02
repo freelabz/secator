@@ -11,7 +11,6 @@ from secator.output_types import UserAccount, Info, Error
 @task()
 class h8mail(OSInt):
 	"""Email information and password lookup tool."""
-	friendly_display_name = "h8mail breach lookup"
 	cmd = 'h8mail'
 	input_types = [EMAIL]
 	output_types = [UserAccount]

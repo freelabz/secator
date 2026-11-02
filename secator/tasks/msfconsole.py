@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 @task()
 class msfconsole(VulnMulti):
 	"""CLI to access and work with the Metasploit Framework."""
-	friendly_display_name = "Metasploit console"
 	cmd = 'msfconsole --quiet'
 	input_types = [HOST, HOST_PORT, IP]
 	output_types = []

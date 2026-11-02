@@ -9,7 +9,6 @@ from secator.runners import PythonRunner
 @task()
 class netdetect(PythonRunner):
     """Detect local network CIDR ranges."""
-    friendly_display_name = "Local network detector"
     output_types = [Tag, Ip]
     tags = ['network', 'recon']
     default_inputs = ''

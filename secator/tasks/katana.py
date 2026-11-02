@@ -19,7 +19,6 @@ EXCLUDED_PARAMS = ['v']
 @task()
 class katana(HttpCrawler):
 	"""Next-generation crawling and spidering framework."""
-	friendly_display_name = "Katana crawler"
 
 	cmd = 'katana'
 	input_types = [URL, HOST, HOST_PORT, IP]

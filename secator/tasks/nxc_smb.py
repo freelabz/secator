@@ -13,7 +13,6 @@ from secator.utils import autodetect_type
 @task()
 class nxc_smb(Vuln):
 	"""NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. SMB Submodule."""  # noqa: E501
-	friendly_display_name = "NetExec SMB"
 	cmd = 'nxc smb'
 	encoding = 'ansi'  # nxc colorizes output; strip ANSI before parsing (CI forces color)
 	input_chunk_size = 1

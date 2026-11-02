@@ -37,7 +37,6 @@ CARIDDI_RENAME_LIST = {
 @task()
 class cariddi(HttpCrawler):
 	"""Crawl endpoints, secrets, api keys, extensions, tokens..."""
-	friendly_display_name = "Cariddi endpoint crawler"
 	cmd = 'cariddi'
 	input_types = [URL, HOST, HOST_PORT]
 	output_types = [Url, Tag]

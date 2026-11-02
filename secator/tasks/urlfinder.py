@@ -21,7 +21,6 @@ URLFINDER_SOURCES = [
 @task()
 class urlfinder(HttpCrawler):
 	"""Find URLs in text."""
-	friendly_display_name = "URL finder"
 	cmd = 'urlfinder'
 	input_types = [HOST, URL]
 	output_types = [Url]

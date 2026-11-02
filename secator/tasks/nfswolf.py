@@ -15,7 +15,6 @@ from secator.utils import autodetect_type
 @task()
 class nfswolf(Vuln):
 	"""NFSWolf is a complete NFS vulnerability scanner."""
-	friendly_display_name = "NFS vulnerability scanner"
 	cmd = 'nfswolf scan'
 	input_chunk_size = 1
 	input_types = [IP, HOST, HOST_PORT, CIDR_RANGE]

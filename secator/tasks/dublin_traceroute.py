@@ -15,7 +15,6 @@ from secator.utils import autodetect_type
 @task()
 class dublin_traceroute(Command):
 	"""NAT-aware multipath tracerouting tool."""
-	friendly_display_name = "Dublin traceroute"
 	cmd = 'dublin-traceroute'
 	input_types = [IP, CIDR_RANGE, HOST]
 	input_chunk_size = 1

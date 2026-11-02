@@ -15,7 +15,6 @@ from secator.tasks._categories import HttpFuzzer
 @task()
 class feroxbuster(HttpFuzzer):
 	"""Simple, fast, recursive content discovery tool written in Rust"""
-	friendly_display_name = "feroxbuster content discovery"
 	cmd = 'feroxbuster --no-state'
 	input_types = [URL, HOST, HOST_PORT, IP]
 	output_types = [Url]

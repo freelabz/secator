@@ -22,7 +22,6 @@ DALFOX_TYPE_MAP = {
 @task()
 class dalfox(HttpBase):
 	"""Powerful open source XSS scanning tool."""
-	friendly_display_name = "Dalfox XSS scanner"
 	cmd = 'dalfox'
 	input_types = [URL]
 	output_types = [Vulnerability, Url]

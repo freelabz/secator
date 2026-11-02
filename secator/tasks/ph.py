@@ -8,7 +8,6 @@ from secator.serializers import JSONSerializer
 @task()
 class ph(Tagger):
 	"""Fast and customisable vulnerability scanner based on simple YAML based DSL."""
-	friendly_display_name = "Nuclei (ph)"
 	cmd = 'ph'
 	input_types = [URL, STRING]
 	file_flag = OPT_PIPE_INPUT

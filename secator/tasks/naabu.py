@@ -10,7 +10,6 @@ from secator.tasks._categories import ReconPort
 @task()
 class naabu(ReconPort):
 	"""Port scanning tool written in Go."""
-	friendly_display_name = "Naabu port scanner"
 	cmd = 'naabu'
 	input_types = [HOST, IP]
 	output_types = [Port, Ip]

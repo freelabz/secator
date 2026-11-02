@@ -24,7 +24,6 @@ java -jar {CONFIG.dirs.bin}/beanshooter.jar \$@
 @task()
 class beanshooter(Command):
 	"""JMX enumeration and attacking tool."""
-	friendly_display_name = "JMX enumeration (beanshooter)"
 
 	input_types = [IP, HOST, HOST_PORT]
 	output_types = [Vulnerability, Tag, Technology]

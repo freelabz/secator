@@ -17,7 +17,6 @@ DRG_ERROR_REGEX = re.compile(r'(Http Error|Error Connecting|Timeout Error|Unauth
 @task()
 class dockerregistrygrabber(Vuln):
 	"""Exposed Docker registries enumeration."""
-	friendly_display_name = "Docker registry grabber"
 
 	# Run drg.py with secator's own interpreter: its shebang is `env python3`, which
 	# may resolve to a python without drg.py's deps (requests/rich/urllib3 are pip-

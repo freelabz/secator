@@ -37,7 +37,6 @@ def convert_mode(mode):
 @task()
 class grype(VulnCode):
 	"""Vulnerability scanner for container images and filesystems."""
-	friendly_display_name = "Grype vulnerability scanner"
 
 	cmd = 'grype --quiet'
 	input_types = [PATH, STRING]
