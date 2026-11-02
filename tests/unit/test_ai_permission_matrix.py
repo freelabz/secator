@@ -251,12 +251,12 @@ class TestCheckerExceptionIsDeterministic(unittest.TestCase):
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
 class TestFollowUpNotSuppressedByIsolation(unittest.TestCase):
-	"""single/multi-choice follow_up is NOT a permission gate: it passes through in
+	"""single/multi-choice stop is NOT a permission gate: it passes through in
 	every mode, including isolated."""
 
-	def test_follow_up_passes_in_isolated(self):
+	def test_stop_passes_in_isolated(self):
 		denial, pending = _guard(
-			{"action": "follow_up", "reason": "pick one", "choices": ["a", "b"], "multiple": False},
+			{"action": "stop", "reason": "pick one", "choices": ["a", "b"], "multiple": False},
 			isolated=True, backend=SpyAuto(),
 		)
 		self.assertIsNone(denial)

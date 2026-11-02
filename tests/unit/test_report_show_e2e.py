@@ -217,6 +217,9 @@ class TestReportShowMongoDBBackend(unittest.TestCase):
 		doc_list = [d.copy() for d in docs]
 		mock_cursor = mock.MagicMock()
 		mock_cursor.__iter__ = mock.MagicMock(return_value=iter(doc_list))
+		# The backend chains find().skip(offset).limit(limit); each must return the SAME
+		# cursor so the stubbed __iter__ (the docs) survives the chain.
+		mock_cursor.skip.return_value = mock_cursor
 		mock_cursor.limit.return_value = mock_cursor
 		mock_collection = mock.MagicMock()
 		mock_collection.find.return_value = mock_cursor
@@ -405,9 +408,12 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 		import click
 		from secator.cli import report_list, console
 
-		info = {'type': 'tasks', 'id': '1', 'workspace': workspace_opt or default_ws}
-		report_info = {'name': 't', 'targets': [], 'run_opts': {}, 'status': 'completed',
-					   'start_time': None, 'end_time': None, 'elapsed_human': ''}
+		# One runner (as returned by QueryEngine.list_runners for the local backend):
+		# `_path` makes report_list treat it as local and count vulns from that file.
+		runner = {'_id': 'tasks/1', '_type': 'tasks', '_path': str(self.report_path),
+				  'name': 't', 'targets': [], 'run_opts': {}, 'status': 'completed',
+				  'start_time': None, 'end_time': None, 'elapsed_human': '',
+				  '_workspace': workspace_opt or default_ws}
 		vuln_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
 
 		ctx = click.Context(report_list)
@@ -415,12 +421,9 @@ class TestReportListCurrentWorkspace(unittest.TestCase):
 		# `report_list.callback` is the @click.pass_context wrapper: it pulls the context from
 		# click's stack (not from an explicit arg), so we push it via `with ctx:`.
 		with ctx, \
-				mock.patch('secator.cli.list_reports', return_value=[self.report_path]), \
-				mock.patch('secator.cli.get_info_from_report_path', return_value=info), \
-				mock.patch('secator.cli._load_report_data', return_value=(report_info, vuln_counts)), \
-				mock.patch('secator.cli.CONFIG') as cfg, \
+				mock.patch('secator.cli.QueryEngine.list_runners', return_value=[runner]), \
+				mock.patch('secator.cli._count_report_vulns', return_value=vuln_counts), \
 				console.capture() as cap:
-			cfg.workspaces.current = default_ws
 			report_list.callback(
 				workspace=workspace_opt, runner_type=None, time_delta=None, driver='local', show_all=False,
 				interesting=False, status=None, show_children=False,
@@ -483,7 +486,17 @@ class TestReportListInteresting(unittest.TestCase):
 		# plain text in the table — unlike the full path, which only appears via a file://
 		# hyperlink that rich renders only when the console is detected as a terminal.
 		# COLUMNS keeps the table wide so the id isn't wrapped across lines.
-		with mock.patch('secator.cli.list_reports', return_value=[self.with_vuln, self.no_vuln, self.unknown_sev]):
+		# QueryEngine.list_runners yields the runner dicts (with `_path`); report_list then
+		# counts vulns per report via the real _count_report_vulns on those files.
+		runners = [
+			{'_id': 'tasks/1', '_type': 'tasks', '_path': str(self.with_vuln), 'status': 'SUCCESS',
+			 'name': '', 'targets': [], 'run_opts': {}},
+			{'_id': 'tasks/2', '_type': 'tasks', '_path': str(self.no_vuln), 'status': 'FAILURE',
+			 'name': '', 'targets': [], 'run_opts': {}},
+			{'_id': 'tasks/3', '_type': 'tasks', '_path': str(self.unknown_sev), 'status': 'SUCCESS',
+			 'name': '', 'targets': [], 'run_opts': {}},
+		]
+		with mock.patch('secator.cli.QueryEngine.list_runners', return_value=runners):
 			return CliRunner().invoke(cli, ['r', 'list', '--driver', 'local'] + args, env={'COLUMNS': '400'})
 
 	def test_interesting_filters_to_vuln_reports(self):

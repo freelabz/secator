@@ -1,0 +1,57 @@
+type: workflow
+name: ftp
+alias: ftp
+description: FTP vulnerability scan
+long_description: |
+  Scans FTP vulnerabilities using specialized tools.
+tags: [ftp, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+
+tasks:
+  nuclei/ftp:
+    description: Detect FTP vulnerabilities
+    template_condition: "contains(id, 'ftp') || contains(tags, 'ftp')"
+
+  nxc_ftp/guest:
+    description: Check FTP guest login
+    username: ""
+    password: ""
+
+  nxc_ftp/anonymous:
+    description: Check FTP anonymous login
+    username: "anonymous"
+    password: ""
+
+  nxc_ftp/enumeration:
+    description: List files on FTP servers
+    list: true
+    targets_:
+      - type: tag
+        field: extra_data.target
+        condition: tag.name == 'ftp_login_successful'
+    username_:
+      - type: tag
+        field: extra_data.username
+        condition: tag.name == 'ftp_login_successful'
+    password_:
+      - type: tag
+        field: extra_data.password
+        condition: tag.name == 'ftp_login_successful'
+
+  # wget/download:
+  #   description: Download all files on FTP server
+  #   mirror: true
+  #   targets_:
+  #     - type: tag
+  #       field: 'ftp://{extra_data.target}/*'
+  #       condition: tag.name == 'ftp_login_successful'
+  #   username_:
+  #     - type: tag
+  #       field: extra_data.username
+  #   password_:
+  #     - type: tag
+  #       field: extra_data.password

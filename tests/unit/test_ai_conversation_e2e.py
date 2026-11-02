@@ -72,7 +72,7 @@ class ChannelEngine:
 		self.backend = type("B", (), {"name": "mongodb"})()
 
 	def _serve_answer(self):
-		pend = [d for d in self.docs if d.get("ai_type") == "follow_up" and d.get("status") == "pending"]
+		pend = [d for d in self.docs if d.get("ai_type") == "stopped" and d.get("status") == "pending"]
 		if not pend:
 			return
 		if self.standing:
@@ -88,7 +88,7 @@ class ChannelEngine:
 		pend[-1]["answer"] = ans
 
 	def search(self, query, limit=None):
-		if query.get("status") == "answered" and query.get("ai_type") == "follow_up":
+		if query.get("status") == "answered" and query.get("ai_type") == "stopped":
 			self._serve_answer()
 		out = [dict(d) for d in self.docs if _match(d, query)]
 		return out[:limit] if limit else out
@@ -224,7 +224,7 @@ class TestConversationE2E(unittest.TestCase):
 		e.docs = [
 			{"_type": "ai", "ai_type": "prompt", "content": "scan the target", "_timestamp": 1, "_context": _ctx()},
 			{"_type": "ai", "ai_type": "response", "content": "which host?", "_timestamp": 2, "_context": _ctx()},
-			{"_type": "ai", "ai_type": "follow_up", "content": "which host?", "status": "answered",
+			{"_type": "ai", "ai_type": "stopped", "content": "which host?", "status": "answered",
 			 "answer": "scanme.nmap.org", "_timestamp": 3,
 			 "extra_data": {"prompt_uuid": "u1"}, "_context": _ctx()},
 		]

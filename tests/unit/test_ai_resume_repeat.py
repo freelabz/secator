@@ -21,9 +21,10 @@ Scenarios 1/4/5/6 reproduced the repeat pre-fix; with the RC1 guard
 (`_prompt_already_tail`) + the RC2 extension ceiling applied, all pass.
 """
 import copy
+import json
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from secator.definitions import ADDONS_ENABLED
 HAS_AI = ADDONS_ENABLED.get('ai', False)
@@ -144,7 +145,7 @@ class TestAiResumeRepeat(unittest.TestCase):
 		docs = [
 			{"_type": "ai", "ai_type": "prompt", "content": "Scan the target", "_timestamp": 1, "_context": _ctx()},
 			{"_type": "ai", "ai_type": "response", "content": "Which host?", "_timestamp": 2, "_context": _ctx()},
-			{"_type": "ai", "ai_type": "follow_up", "content": "Which host?", "status": "answered",
+			{"_type": "ai", "ai_type": "stopped", "content": "Which host?", "status": "answered",
 			 "answer": "scanme.nmap.org", "_timestamp": 3,
 			 "extra_data": {"prompt_uuid": "u1"}, "_context": _ctx()},
 		]
@@ -204,7 +205,7 @@ class TestAiResumeRepeat(unittest.TestCase):
 			{"_type": "ai", "ai_type": "prompt", "content": "check workspace", "_timestamp": 1, "_context": _ctx()},
 			{"_type": "ai", "ai_type": "response", "content": "next step?", "_timestamp": 2, "_context": _ctx()},
 			# follow_up #1 answered with the CSV, already persisted as its own prompt turn
-			{"_type": "ai", "ai_type": "follow_up", "content": "next?", "status": "answered",
+			{"_type": "ai", "ai_type": "stopped", "content": "next?", "status": "answered",
 			 "answer": csv, "_timestamp": 3, "extra_data": {"prompt_uuid": "u1"}, "_context": _ctx()},
 			{"_type": "ai", "ai_type": "prompt", "content": csv, "_timestamp": 4, "_context": _ctx()},
 			{"_type": "ai", "ai_type": "response", "content": "ran recon", "_timestamp": 5, "_context": _ctx()},
@@ -226,6 +227,58 @@ class TestAiResumeRepeat(unittest.TestCase):
 		t, prompt_docs = _resume(FakeQueryEngine(docs), "check workspace overview")
 		self.assertEqual(_user_turns(t.history), ["check workspace overview"])
 		self.assertEqual([p.content for p in prompt_docs], [])
+
+	# --- Scenario 7: INITIAL prompt re-served after the conversation progressed ---
+	def test_s7_initial_prompt_not_reappended_after_progress(self):
+		# The client re-dispatches every respawn carrying the ORIGINAL initial prompt,
+		# but the conversation has since moved on (later follow-up turns). The initial
+		# prompt is no longer the tail, so the tail guard alone would re-emit it; the
+		# `_prompt_is_initial` guard must suppress it (the observed prod repeat).
+		initial = "Blog PHP2Shell: find the RCE across the in-scope hosts"
+		docs = [
+			{"_type": "ai", "ai_type": "prompt", "content": initial, "_timestamp": 1, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "found 2 hosts", "_timestamp": 2, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "prompt", "content": "Spawn an exploit subagent",
+			 "_timestamp": 3, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "disproved RCE", "_timestamp": 4, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "prompt", "content": "Re-fingerprint PHP versions",
+			 "_timestamp": 5, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "re-fingerprinted", "_timestamp": 6, "_context": _ctx()},
+		]
+		t, prompt_docs = _resume(FakeQueryEngine(docs), initial)
+		# The initial prompt appears exactly ONCE (restore), never re-emitted.
+		self.assertEqual(
+			_user_turns(t.history),
+			[initial, "Spawn an exploit subagent", "Re-fingerprint PHP versions"])
+		self.assertEqual([p.content for p in prompt_docs], [])
+
+	# --- Scenario 8: a stale respawn prompt must NOT reset the restored mode ---
+	def test_s8_stale_prompt_does_not_reset_restored_mode(self):
+		# The session escalated to `exploit` (the last persisted mode), but the client
+		# respawns carrying the ORIGINAL initial prompt, which classifies as `scan`.
+		# `_prompt_is_initial` suppresses the prompt — and the restored `exploit` mode
+		# must survive. Without the guard, `_detect_mode` re-classifies on the stale
+		# prompt and F3 (which only clamps de-escalation to `chat`) lets it silently
+		# drop exploit -> scan.
+		initial = "scan the in-scope hosts"
+		docs = [
+			{"_type": "ai", "ai_type": "prompt", "content": initial, "_timestamp": 1, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "found a host", "mode": "scan",
+			 "_timestamp": 2, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "prompt", "content": "exploit it", "_timestamp": 3, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "got shell", "mode": "exploit",
+			 "_timestamp": 4, "_context": _ctx()},
+		]
+		t = _make_resume_task(FakeQueryEngine(docs), initial)
+		# Simulate `_detect_mode` re-classifying the stale initial prompt as `scan`
+		# (the real fast-path) plus a real prompt/tools rebuild on mode correction.
+		t._detect_mode = lambda: setattr(t, "mode", "scan")
+		t._rebuild_prompt_and_tools = lambda: setattr(t, "system_prompt", "SYS")
+		list(t._maybe_resume_remote())
+		# The suppressed stale prompt did NOT drag the restored mode back down,
+		# and the initial prompt was not re-emitted into history.
+		self.assertEqual(t.mode, "exploit")
+		self.assertEqual(_user_turns(t.history), [initial, "exploit it"])
 
 	# --- Guard: a genuinely NEW prompt must still be emitted (no over-suppression) ---
 	def test_new_prompt_still_emitted(self):
@@ -283,7 +336,7 @@ class _ApiAnswerEngine(FakeQueryEngine):
 	def _api_answer(self):
 		if self.answered >= self.answer_cap:
 			return
-		pend = [d for d in self.docs if d.get("ai_type") == "follow_up" and d.get("status") == "pending"]
+		pend = [d for d in self.docs if d.get("ai_type") == "stopped" and d.get("status") == "pending"]
 		if not pend:
 			return
 		pend.sort(key=lambda d: d.get("_timestamp", 0))
@@ -292,14 +345,15 @@ class _ApiAnswerEngine(FakeQueryEngine):
 		self.answered += 1
 
 	def search(self, query, limit=None):
-		if query.get("status") == "answered" and query.get("ai_type") == "follow_up":
+		if query.get("status") == "answered" and query.get("ai_type") == "stopped":
 			self._api_answer()
 		return super().search(query, limit)
 
 
-def _drive_content_only_loop(engine, initial_cap=8):
+def _drive_content_only_loop(engine, initial_cap=8, llm_fn=None):
 	"""Drive the REAL ai._run_loop with a content-only LLM (every turn triggers
-	`_prompt_and_redetect`). Returns (task, all_emitted_items)."""
+	`_prompt_and_redetect`). Returns (task, all_emitted_items). Pass ``llm_fn`` to
+	script a different LLM response sequence (e.g. a `stop` tool call)."""
 	t = object.__new__(AiTask)
 	t.inputs = []
 	t.model = "gpt-4o"
@@ -320,6 +374,7 @@ def _drive_content_only_loop(engine, initial_cap=8):
 	t.isolated = False
 	t.max_iterations = initial_cap
 	t.max_tokens_total = 100000
+	t.dangerous = False  # needed by the tool-call dispatch path (stop/shell/etc.)
 	t.mode = "chat"
 	t.history = ChatHistory(model="gpt-4o")
 	t.history.set_system("SYS")
@@ -361,13 +416,87 @@ def _drive_content_only_loop(engine, initial_cap=8):
 				"usage": {"tokens": 50, "cost": 0.0}, "finish_reason": "stop"}
 
 	import secator.ai.actions as _act
-	with patch("secator.tasks.ai.call_llm", fake_call_llm), \
+	with patch("secator.tasks.ai.call_llm", llm_fn or fake_call_llm), \
 			patch("secator.tasks.ai.init_llm", lambda **k: None), \
 			patch.object(_act.ActionContext, "get_query_engine", lambda self: engine), \
 			patch("secator.tasks.ai.get_context_window", lambda m: 128000), \
 			patch("secator.tasks.ai.format_llm_status", lambda *a, **k: ""):
 		emitted.extend(list(t._run_loop()))
 	return t, emitted
+
+
+def _stop_tool_llm(choices):
+	"""An LLM fn that calls the `stop` tool once (with ``choices``), then goes
+	content-only (defensive — an empty-choices stop should end before a 2nd call)."""
+	calls = {"n": 0}
+
+	def _fn(messages, model, temp, api_base, api_key, tools=None):
+		calls["n"] += 1
+		if calls["n"] == 1:
+			tc = MagicMock()
+			tc.id = "call_stop"
+			tc.function.name = "stop"
+			tc.function.arguments = json.dumps({"reason": "All done.", "choices": choices})
+			return {"content": None, "tool_calls": [tc],
+					"usage": {"tokens": 50, "cost": 0.0}, "finish_reason": "tool_calls"}
+		return {"content": "still here", "tool_calls": [],
+				"usage": {"tokens": 50, "cost": 0.0}, "finish_reason": "stop"}
+	return _fn
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestRemoteStopEnds(unittest.TestCase):
+	"""A `stop` tool call with NO choices is a definitive end in remote mode — it
+	does NOT raise a pending prompt to validate/approve; it persists a terminal
+	`stopped` summary and ends. A stop WITH choices still pauses (answerable)."""
+
+	def _stopped_docs(self, engine):
+		return [d for d in engine.docs if d.get("ai_type") == "stopped"]
+
+	def test_stop_empty_choices_ends_without_pending_prompt(self):
+		engine = _ApiAnswerEngine(answer_cap=0)  # never answers; only a pending poll could hang
+		t, emitted = _drive_content_only_loop(engine, initial_cap=8, llm_fn=_stop_tool_llm([]))
+		stopped = self._stopped_docs(engine)
+		# A terminal stopped summary was persisted, and NONE of them are pending.
+		self.assertTrue(stopped, "expected a terminal stopped doc")
+		self.assertTrue(all(d.get("status") != "pending" for d in stopped),
+						"empty-choices stop must not raise a pending prompt")
+
+	def test_stop_with_choices_still_pends(self):
+		engine = _ApiAnswerEngine(answer_cap=0)  # unanswered -> poll times out, then ends
+		t, emitted = _drive_content_only_loop(
+			engine, initial_cap=8, llm_fn=_stop_tool_llm(["Scan more", "Write report"]))
+		stopped = self._stopped_docs(engine)
+		self.assertTrue(any(d.get("status") == "pending" for d in stopped),
+						"a stop WITH choices must still pause as an answerable prompt")
+
+	def test_choiceless_stop_grace_waits_and_resumes_on_followup(self):
+		# A choiceless stop must NOT exit immediately: it waits a grace window for a
+		# follow-up (a steer = a standard message), drains it, and RESUMES — so the
+		# message reaches the model instead of getting stuck.
+		engine = _ApiAnswerEngine(answer_cap=0)
+		engine.insert({"_type": "ai", "ai_type": "steer", "content": "What else ?",
+					   "status": "pending", "_uuid": "steer-1",
+					   "_context": {"session_id": SID}, "_timestamp": 1.0})
+		calls = {"n": 0}
+
+		def llm(messages, model, temp, api_base, api_key, tools=None):
+			calls["n"] += 1
+			if calls["n"] == 1:
+				tc = MagicMock()
+				tc.id = "call_stop"
+				tc.function.name = "stop"
+				tc.function.arguments = json.dumps({"reason": "done", "choices": []})
+				return {"content": None, "tool_calls": [tc],
+						"usage": {"tokens": 50, "cost": 0.0}, "finish_reason": "tool_calls"}
+			return {"content": "resumed", "tool_calls": [],
+					"usage": {"tokens": 50, "cost": 0.0}, "finish_reason": "stop"}
+
+		t, emitted = _drive_content_only_loop(engine, initial_cap=8, llm_fn=llm)
+		# the loop RESUMED (a 2nd LLM turn ran) and the follow-up steer was consumed
+		self.assertGreaterEqual(calls["n"], 2, "grace-wait should resume on a follow-up")
+		consumed = [d for d in engine.docs if d.get("ai_type") == "steer" and d.get("status") == "consumed"]
+		self.assertTrue(consumed, "the follow-up steer must be drained (consumed), not left stuck")
 
 
 @unittest.skipUnless(HAS_AI, "ai addon required")

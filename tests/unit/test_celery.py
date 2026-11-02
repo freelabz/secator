@@ -43,6 +43,42 @@ class TestCelery(unittest.TestCase):
 		from secator.query.sqlite import SqliteBackend
 		return SqliteBackend(workspace_id='ws').search({'_type': _type})
 
+	def test_sync_backfill_resurfaces_store_item_without_refiring_on_item(self):
+		"""#1524 regression: iterating a sync runner re-surfaces already-persisted store items
+		to the iterator (so the iterator carries findings, not just the target). A child's items
+		aren't in THIS runner's `uuids`, so that backfill must NOT re-fire on_item — else every
+		finding/note is delivered a SECOND time to every hook (double findings/notes)."""
+		from secator.runners import Workflow
+		from secator.loader import get_configs_by_type
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		wf = Workflow(workflows[0], inputs=['example.com'], context=dict(self.ctx))
+		# A finding already in the store under this runner's id but NOT in its `uuids` (exactly the
+		# child-item case the backfill re-surfaces).
+		persisted = Url(url='http://child.example', status_code=200, method='GET', _source='child')
+		persisted._uuid = 'persisted-uuid-1'
+		wf._view = lambda _type=None: [persisted]   # stub the store view the backfill reads
+		wf.yielder = lambda: iter([])               # no live items; go straight to the backfill
+
+		# spy the hooks arg add_result receives for the re-surfaced item
+		backfill_hooks = []
+		orig_add_result = wf.add_result
+
+		def spy(item, **kw):
+			if getattr(item, '_uuid', None) == 'persisted-uuid-1':
+				backfill_hooks.append(kw.get('hooks', True))
+			return orig_add_result(item, **kw)
+		wf.add_result = spy
+
+		yielded = list(wf)
+
+		self.assertIn(persisted, yielded, 'backfill must re-surface the persisted item to the iterator')
+		self.assertEqual(backfill_hooks, [False],
+		                 'backfill must add_result the re-surfaced item with hooks=False (no on_item re-fire)')
+		self.assertIn('persisted-uuid-1', wf.uuids, 'backfill must still register the uuid for dedup')
+
 	def test_httpx_chain(self):
 		from secator.tasks import httpx
 		if 'httpx' not in TEST_TASK_NAMES:

@@ -1,0 +1,15 @@
+type: workflow
+name: mssql
+alias: mssql
+description: Microsoft SQL vulnerability scan
+long_description: |
+  Scans MSSQL vulnerabilities using specialized tools.
+tags: [mssql, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  nxc_mssql/anonymous:
+    description: Check MSSQL anonymous login

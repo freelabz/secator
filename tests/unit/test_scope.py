@@ -226,6 +226,196 @@ class TestUnderscoreHostnameScope(unittest.TestCase):
 		self.assertFalse(host_in_scope('evil.com', self.IN_SCOPE, []))
 
 
+class TestPathScopedCarveOut(unittest.TestCase):
+	"""A path-scoped in-scope entry (host/path) carves a sub-tree out of a broader
+	host-level deny. Deny wins at equal/greater path specificity. Mirrors the
+	secator-api mandate matcher.
+	"""
+
+	# The launchdarkly repro: docs path allowed, apex denied.
+	IN_SCOPE = ['launchdarkly.com/docs', '*.launchdarkly.com']
+	OUT_OF_SCOPE = ['launchdarkly.com']
+
+	def test_path_allow_beats_host_deny(self):
+		self.assertTrue(host_in_scope('https://launchdarkly.com/docs', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_under_allowed_path_allowed(self):
+		self.assertTrue(host_in_scope('https://launchdarkly.com/docs/anything', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_different_path_denied(self):
+		self.assertFalse(host_in_scope('https://launchdarkly.com/other', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_path_prefix_not_a_segment_boundary_denied(self):
+		# /docsomething must NOT match the /docs allow entry.
+		self.assertFalse(host_in_scope('https://launchdarkly.com/docsomething', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_bare_apex_denied(self):
+		self.assertFalse(host_in_scope('launchdarkly.com', self.IN_SCOPE, self.OUT_OF_SCOPE))
+		self.assertFalse(host_in_scope('https://launchdarkly.com', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_subdomain_still_allowed_by_wildcard(self):
+		self.assertTrue(host_in_scope('https://api.launchdarkly.com/x', self.IN_SCOPE, self.OUT_OF_SCOPE))
+
+	def test_path_level_deny_wins_over_path_allow(self):
+		in_scope = ['launchdarkly.com/docs']
+		out_of_scope = ['launchdarkly.com', 'launchdarkly.com/docs/private']
+		# deny sub-tree wins
+		self.assertFalse(host_in_scope('https://launchdarkly.com/docs/private/x', in_scope, out_of_scope))
+		# sibling under the allow path is still allowed
+		self.assertTrue(host_in_scope('https://launchdarkly.com/docs/public', in_scope, out_of_scope))
+
+	def test_target_in_scope_matches_path_entry(self):
+		self.assertTrue(target_in_scope('https://launchdarkly.com/docs/x', ['launchdarkly.com/docs']))
+		self.assertFalse(target_in_scope('https://launchdarkly.com/other', ['launchdarkly.com/docs']))
+
+	def test_non_path_entries_unchanged(self):
+		# Plain host / wildcard / CIDR / IP matching must be identical with a path
+		# entry present in the list.
+		self.assertTrue(host_in_scope('https://app.acme.com/x', ['app.acme.com', 'acme.com/docs'], []))
+		self.assertTrue(host_in_scope('10.0.0.5', ['10.0.0.0/24', 'acme.com/docs'], []))
+		self.assertFalse(host_in_scope('10.0.1.5', ['10.0.0.0/24', 'acme.com/docs'], []))
+
+
+class TestUrlVsHostGrant(unittest.TestCase):
+	"""A URL (web-app) grant authorizes only web targets at its host/IP, never a bare
+	host/IP port scan (shared-hosting: the address isn't yours). A host/IP grant is a
+	superset and authorizes both. Mirrors the secator-api mandate matcher.
+	"""
+
+	URL = ['https://xss-game.appspot.com']
+
+	# --- URL entry: web app yes, bare host/IP no --------------------------
+
+	def test_url_entry_allows_url_target(self):
+		self.assertTrue(host_in_scope('https://xss-game.appspot.com', self.URL, []))
+
+	def test_url_entry_allows_url_subpath(self):
+		self.assertTrue(host_in_scope('https://xss-game.appspot.com/level1/frame', self.URL, []))
+
+	def test_url_entry_with_port_and_path(self):
+		# https://HOST:PORT/path is a URL grant: parses to host+path (port normalized
+		# away, consistent with the matcher's host-level design), matches by host+path.
+		e = ['https://app.acme.com:8443/admin']
+		self.assertTrue(host_in_scope('https://app.acme.com:8443/admin', e, []))
+		self.assertTrue(host_in_scope('https://app.acme.com:8443/admin/users', e, []))
+		self.assertFalse(host_in_scope('https://app.acme.com:8443/other', e, []))
+		self.assertFalse(host_in_scope('app.acme.com', e, []))
+		self.assertTrue(host_in_scope('https://app.acme.com:8443/admin', ['app.acme.com'], []))
+		self.assertTrue(host_in_scope('https://app.acme.com:8443/admin', ['app.acme.com:8443/admin'], []))
+
+	def test_url_entry_denies_bare_host_portscan(self):
+		# The repro: the user's in-scope target is the URL; a bare-host (port-scan)
+		# target must NOT be auto-authorized by it.
+		self.assertFalse(host_in_scope('xss-game.appspot.com', self.URL, []))
+
+	def test_url_entry_denies_bare_ip_portscan(self):
+		self.assertFalse(host_in_scope('172.253.120.153', self.URL, []))
+
+	# --- host entry: superset (authorizes its URLs too) -------------------
+
+	def test_host_entry_allows_its_url(self):
+		self.assertTrue(host_in_scope('https://acme.com/anything', ['acme.com'], []))
+
+	def test_host_entry_allows_bare_host(self):
+		self.assertTrue(host_in_scope('acme.com', ['acme.com'], []))
+
+	def test_wildcard_entry_allows_subdomain_url(self):
+		self.assertTrue(host_in_scope('https://app.acme.com/x', ['*.acme.com'], []))
+
+	def test_ip_entry_allows_url_on_that_ip(self):
+		# bare IP / CIDR grant is host-level -> authorizes web targets on that IP too.
+		self.assertTrue(host_in_scope('https://10.0.0.5/admin', ['10.0.0.0/24'], []))
+		self.assertTrue(host_in_scope('10.0.0.5', ['10.0.0.0/24'], []))
+
+	# --- scheme-less host/path is a URL shape (implicit https) ------------
+
+	def test_schemeless_host_path_is_url_grant(self):
+		sp = ['launchdarkly.com/docs']
+		self.assertTrue(host_in_scope('https://launchdarkly.com/docs/x', sp, []))
+		# still a URL grant: the bare host is not authorized
+		self.assertFalse(host_in_scope('launchdarkly.com', sp, []))
+
+	def test_schemeless_host_only_stays_host_grant(self):
+		# `acme.com` (no path, no scheme) is a HOST grant, not a URL grant.
+		from secator.scope import _is_url_entry
+		self.assertFalse(_is_url_entry('acme.com'))
+		self.assertTrue(_is_url_entry('acme.com/docs'))
+		self.assertTrue(_is_url_entry('https://acme.com'))
+		self.assertFalse(_is_url_entry('*.acme.com'))
+
+	# --- resolve_scope_hostnames: URL -> https://IP, not bare IP ----------
+
+	def test_resolve_url_entry_adds_url_ip_not_bare_ip(self):
+		import socket
+		from secator.scope import resolve_scope_hostnames
+		orig = socket.getaddrinfo
+		socket.getaddrinfo = lambda host, *a, **k: [(2, 1, 6, '', ('93.184.216.34', 0))]
+		try:
+			out = resolve_scope_hostnames(['https://example.com/app'])
+			self.assertIn('https://93.184.216.34/app', out)
+			self.assertNotIn('93.184.216.34', out)  # bare IP must NOT be added for a URL grant
+			# host grant still expands to the bare IP
+			out2 = resolve_scope_hostnames(['example.com'])
+			self.assertIn('93.184.216.34', out2)
+		finally:
+			socket.getaddrinfo = orig
+
+	def test_resolved_url_ip_allows_https_ip_but_not_portscan(self):
+		import socket
+		from secator.scope import resolve_scope_hostnames
+		orig = socket.getaddrinfo
+		socket.getaddrinfo = lambda host, *a, **k: [(2, 1, 6, '', ('93.184.216.34', 0))]
+		try:
+			scope = resolve_scope_hostnames(['https://example.com'])
+			self.assertTrue(host_in_scope('https://93.184.216.34/x', scope, []))   # web via IP: yours
+			self.assertFalse(host_in_scope('93.184.216.34', scope, []))            # port scan: not yours
+		finally:
+			socket.getaddrinfo = orig
+
+
+class TestCanonicalizeScopeEntry(unittest.TestCase):
+    """The single scope-entry normaliser shared by the worker and the platform gate."""
+
+    def test_url_values_become_url_entries(self):
+        from secator.scope import canonicalize_scope_entry as c
+        self.assertEqual(c("https://launchdarkly.com/docs"), "https://launchdarkly.com/docs")
+        self.assertEqual(c("launchdarkly.com/docs"), "https://launchdarkly.com/docs")  # implicit https
+        self.assertEqual(c("https://LaunchDarkly.com/Docs?q=1#f"), "https://launchdarkly.com/Docs")
+        self.assertEqual(c("https://launchdarkly.com/"), "https://launchdarkly.com")  # trivial path = whole site
+        self.assertEqual(c("http://data-api.x.com/"), "https://data-api.x.com")  # scheme normalised
+
+    def test_host_wildcard_cidr_kept_host_level(self):
+        from secator.scope import canonicalize_scope_entry as c
+        self.assertEqual(c("launchdarkly.com"), "launchdarkly.com")
+        self.assertEqual(c("app.aikido.dev"), "app.aikido.dev")
+        self.assertEqual(c("*.launchdarkly.com"), "*.launchdarkly.com")
+        self.assertEqual(c("1.2.3.0/24"), "1.2.3.0/24")
+        self.assertEqual(c("1.2.3.4"), "1.2.3.4")
+
+    def test_non_host_values_rejected(self):
+        from secator.scope import canonicalize_scope_entry as c
+        self.assertIsNone(c("Wellfound"))
+        self.assertIsNone(c("Any resource created with the cloud"))
+        self.assertIsNone(c(""))
+        self.assertIsNone(c(None))
+
+    def test_round_trips_through_the_matcher(self):
+        # A canonicalised URL entry authorizes its web target but not a bare-host scan.
+        from secator.scope import canonicalize_scope_entry as c
+        e = c("https://xss-game.appspot.com")
+        self.assertEqual(e, "https://xss-game.appspot.com")
+        self.assertTrue(host_in_scope("https://xss-game.appspot.com/x", [e], []))
+        self.assertFalse(host_in_scope("xss-game.appspot.com", [e], []))
+
+
+class TestTargetHost(unittest.TestCase):
+    def test_host_ip_cidr_url(self):
+        from secator.scope import target_host
+        self.assertEqual(target_host("https://x.com/p"), "x.com")
+        self.assertEqual(target_host("x.com:8443"), "x.com")
+        self.assertEqual(target_host("1.2.3.4"), "1.2.3.4")
+        self.assertEqual(target_host("*.x.com"), "")   # wildcard has no single host
+        self.assertEqual(target_host("Wellfound"), "")  # non-network
 class TestResolveScopeHostnames(unittest.TestCase):
 	"""resolve_scope_hostnames widens a scope list with a hostname's IPs (DNS mocked
 	so the test never touches the network)."""

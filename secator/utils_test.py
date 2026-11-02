@@ -329,22 +329,29 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 						f'{runner.name}: item is missing expected keys {set(expected_output_keys)}.\nItem keys: {keys}.\n{item_str}')  # noqa: E501
 
 				if additional_checks and item.__class__ in additional_checks.get('output_types', {}):
-					config = additional_checks['output_types'][item.__class__]
-					runner_regex = config.get('runner', '*')
-					if not re.match(runner_regex, runner.name):
-						continue
-					checks = config.get('checks', [])
-					for check in checks:
-						error = check['error']
-						info = check['info']
-						func = check['function']
-						debug(f'{runner.name} item {info}', sub='unittest')
-						try:
-							result = func(item)
-							if not result:
-								failures.append(f'ERROR ({runner.name}): {error}.\n{item_str}')
-						except Exception as e:
-							failures.append(f'ERROR ({runner.name}): {error}.\n{item_str}\n{traceback_as_string(e)}')
+					# A type's config may be a single check-group (dict) or several
+					# (list) — a list lets different runners validate the same output
+					# type differently (e.g. active crawlers assert request headers,
+					# passive URL tools assert the URL's domain). Each group is scoped
+					# by its own `runner` regex.
+					type_config = additional_checks['output_types'][item.__class__]
+					configs = type_config if isinstance(type_config, list) else [type_config]
+					for config in configs:
+						runner_regex = config.get('runner', '*')
+						if not re.match(runner_regex, runner.name):
+							continue
+						checks = config.get('checks', [])
+						for check in checks:
+							error = check['error']
+							info = check['info']
+							func = check['function']
+							debug(f'{runner.name} item {info}', sub='unittest')
+							try:
+								result = func(item)
+								if not result:
+									failures.append(f'ERROR ({runner.name}): {error}.\n{item_str}')
+							except Exception as e:
+								failures.append(f'ERROR ({runner.name}): {error}.\n{item_str}\n{traceback_as_string(e)}')
 
 			# Additional checks failures
 			if failures:
