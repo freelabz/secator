@@ -53,51 +53,36 @@ class zabbix_get(Command):
 		'pacman': ['zabbix-server'],
 		'yum|dnf|zypper': ['zabbix'],
 	}
-	# apt path needs wget + CA certs to fetch the zabbix-release .deb over HTTPS.
+	# apt path needs wget + CA certs (fetch over HTTPS) and gzip (decompress the repo index).
 	install_cmd_pre = {
-		'apt': ['wget', 'ca-certificates'],
+		'apt': ['wget', 'ca-certificates', 'gzip'],
 	}
+	# zabbix-get is not in the Debian/Ubuntu default repos, and registering the Zabbix
+	# apt repo would need `dpkg -i` + `apt-get update` -- neither is in the platform
+	# Docker images' NOPASSWD sudoers allowlist (only `apt install *` is). So instead we
+	# resolve the exact zabbix-get .deb from the Zabbix repo's Packages index and
+	# `apt install` it directly: its deps (libc6/libssl3/...) come from the already-updated
+	# base repos, so no repo add / apt-get update is needed, and `apt install <deb>` is
+	# allowlisted. `dists`/codename is derived from the OS (Ubuntu codename, or bullseye/
+	# bookworm for Debian/Kali -- Zabbix 7.0 only ships debian11/12).
 	install_cmd = {
 		'ubuntu|debian|linuxmint|popos|kali': (
 			'sh -c \''
 			'set -e; . /etc/os-release; '
-			# Run the privileged steps via sudo when not root (the installer runs
-			# unprivileged in CI; a raw install_cmd is NOT auto-prefixed with sudo the
-			# way install_pre/install_cmd_pre package installs are).
 			'SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"; '
-			# Ubuntu AND its derivatives (Mint/PopOS) all set ID_LIKE=debian, so we must
-			# branch on UBUNTU_CODENAME (only set on the Ubuntu family) rather than
-			# ID_LIKE: Ubuntu-family -> Ubuntu repo keyed by the *Ubuntu* release;
-			# everything else (Debian, Kali) -> Debian repo keyed by the major version
-			# (Kali is rolling/based on Debian testing, default to 13/trixie).
-			# On a derivative (e.g. Linux Mint 21) VERSION_ID is the derivative version
-			# (21), NOT the Ubuntu base (22.04), so deriving REL from VERSION_ID builds a
-			# wrong Zabbix URL. Map UBUNTU_CODENAME -> Ubuntu release instead; UBUNTU_CODENAME
-			# is always the *Ubuntu* base codename even on derivatives.
 			'if [ -n "${UBUNTU_CODENAME:-}" ]; then '
-			'  BASE=ubuntu; '
-			'  case "$UBUNTU_CODENAME" in '
-			'    focal) REL=20.04 ;; '
-			'    jammy) REL=22.04 ;; '
-			'    noble) REL=24.04 ;; '
-			'    *) REL="$VERSION_ID" ;; '
-			'  esac; '
-			# Debian / Kali: Zabbix 7.0 only publishes debian11 + debian12 packages, so a
-			# raw VERSION_ID (debian 13 "trixie", or Kali rolling where VERSION_ID is a
-			# year like 2025.x) builds a 404 URL. Clamp to the latest supported release
-			# (bookworm / 12); the bookworm zabbix-get binary installs fine on newer Debian.
+			'  BASE=ubuntu; DIST="$UBUNTU_CODENAME"; '
 			'else '
 			'  BASE=debian; '
 			'  case "${VERSION_ID%%.*}" in '
-			'    11) REL=11 ;; '
-			'    *) REL=12 ;; '
+			'    11) DIST=bullseye ;; '
+			'    *) DIST=bookworm ;; '
 			'  esac; '
 			'fi; '
-			'DEB="zabbix-release_7.0-1+${BASE}${REL}_all.deb"; '
-			'wget -q "https://repo.zabbix.com/zabbix/7.0/${BASE}/pool/main/z/zabbix-release/${DEB}" -O /tmp/zabbix-release.deb; '
-			'$SUDO dpkg -i /tmp/zabbix-release.deb; '
-			'$SUDO apt-get update; '
-			'$SUDO apt-get install -y --no-install-recommends zabbix-get'
+			'IDX="https://repo.zabbix.com/zabbix/7.0/${BASE}/dists/${DIST}/main/binary-amd64/Packages.gz"; '
+			'FN=$(wget -qO- "$IDX" | gunzip | grep -A30 "^Package: zabbix-get$" | grep -m1 "^Filename:" | cut -d" " -f2); '
+			'wget -q "https://repo.zabbix.com/zabbix/7.0/${BASE}/${FN}" -O /tmp/zabbix-get.deb; '
+			'$SUDO apt install -y /tmp/zabbix-get.deb'
 			'\''
 		),
 	}
