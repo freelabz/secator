@@ -457,7 +457,8 @@ class TUIBackend(InteractivityBackend):
 			return None
 		res = tui.tui_ask_user(
 			question, choices or [], prompt_type, multiple=bool(context.get("multiple", False)),
-			command=context.get("command") or context.get("value") or "")
+			command=context.get("command") or context.get("value") or "",
+			solo=bool(context.get("solo", False)))
 		answer = (res or {}).get("answer")
 		if answer is None:
 			return None

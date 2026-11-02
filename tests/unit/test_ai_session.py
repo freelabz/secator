@@ -909,9 +909,14 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		return task, engine
 
 	def _patches(self):
+		# These resume tests exercise the LOCAL (plain-console) path, so the backend must
+		# report owns_display=False — otherwise the yielder routes the picker through the
+		# backend (the TUI path) instead of show_session_picker.
+		local_backend = MagicMock()
+		local_backend.owns_display = False
 		return (
 			patch('secator.tasks.ai.PermissionEngine'),
-			patch('secator.tasks.ai.create_backend'),
+			patch('secator.tasks.ai.create_backend', return_value=local_backend),
 			patch('secator.tasks.ai.SensitiveDataEncryptor'),
 			patch('secator.tasks.ai.get_system_prompt', return_value='SYS'),
 			patch('secator.tasks.ai.build_tool_schemas', return_value=[]),
@@ -1017,6 +1022,73 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		mock_replay.assert_called_once()
 		mock_restore.assert_not_called()
 
+	@patch('secator.ai.session.list_sessions', return_value=[{"session_id": "PRIOR"}])
+	@patch('secator.tasks.ai.print_session_results')
+	@patch('secator.tasks.ai.pick_session_via_backend')
+	@patch('secator.tasks.ai.show_session_picker')
+	@patch('secator.tasks.ai.restore_history_from_db')
+	def test_display_owning_backend_uses_backend_picker_and_skips_console_replay(
+			self, mock_restore, mock_console_picker, mock_backend_picker, mock_print, mock_list):
+		"""Regression (TUI default broke `--resume`): when the backend owns the display
+		(the Textual TUI), the resume branch must pick via pick_session_via_backend — NOT the
+		raw-console show_session_picker that collides with Textual — and must NOT print the
+		console replay (which would corrupt the TUI screen)."""
+		prior_folder = tempfile.mkdtemp(prefix="secator-test-tui-")
+		mock_backend_picker.return_value = {"name": "prior chat", "folder": prior_folder, "session_id": "PRIOR"}
+		mock_restore.return_value = MagicMock()
+
+		tui_backend = MagicMock()
+		tui_backend.owns_display = True
+		task, engine = self._make_task()
+		patches = (
+			patch('secator.tasks.ai.PermissionEngine'),
+			patch('secator.tasks.ai.create_backend', return_value=tui_backend),
+			patch('secator.tasks.ai.SensitiveDataEncryptor'),
+			patch('secator.tasks.ai.get_system_prompt', return_value='SYS'),
+			patch('secator.tasks.ai.build_tool_schemas', return_value=[]),
+		)
+		with contextlib.ExitStack() as stack:
+			for p in patches:
+				stack.enter_context(p)
+			list(task.yielder())
+
+		mock_backend_picker.assert_called_once()
+		mock_console_picker.assert_not_called()
+		mock_print.assert_not_called()
+		self.assertEqual(task.session_id, "PRIOR")
+		# Findings source rebound to the ADOPTED session id (on_session ran in setup with the
+		# initial id; the resume must re-point the TUI findings panel at the resumed session).
+		on_session_calls = [c for c in tui_backend.on_session.call_args_list if c.args[2] == "PRIOR"]
+		self.assertEqual(len(on_session_calls), 1)
+
+	@patch('secator.tasks.ai.pick_session_via_backend')
+	@patch('secator.ai.session.list_sessions', return_value=[])
+	def test_display_owning_backend_warns_when_no_sessions(self, mock_list, mock_backend_picker):
+		"""No saved sessions under the TUI: the plain-console picker prints a notice, but a
+		display-owning backend has no console, so the branch must yield a Warning (not end
+		silently) and must NOT invoke the picker."""
+		from secator.output_types import Warning as WarningItem
+
+		tui_backend = MagicMock()
+		tui_backend.owns_display = True
+		task, engine = self._make_task()
+		patches = (
+			patch('secator.tasks.ai.PermissionEngine'),
+			patch('secator.tasks.ai.create_backend', return_value=tui_backend),
+			patch('secator.tasks.ai.SensitiveDataEncryptor'),
+			patch('secator.tasks.ai.get_system_prompt', return_value='SYS'),
+			patch('secator.tasks.ai.build_tool_schemas', return_value=[]),
+		)
+		with contextlib.ExitStack() as stack:
+			for p in patches:
+				stack.enter_context(p)
+			items = list(task.yielder())
+
+		mock_backend_picker.assert_not_called()
+		warnings = [i for i in items if isinstance(i, WarningItem)]
+		self.assertEqual(len(warnings), 1)
+		self.assertIn("No previous AI sessions", warnings[0].message)
+
 
 class TestListSessionsSurfacesSessionId(unittest.TestCase):
 	"""list_sessions() must surface each session's session_id (read from its
@@ -1080,6 +1152,63 @@ class TestListSessionsSurfacesSessionId(unittest.TestCase):
 		sessions = list_sessions()
 
 		self.assertEqual(sessions[0]["session_id"], '')
+
+
+class TestListSessionsLegacyDiscovery(unittest.TestCase):
+	"""list_sessions() must surface a session whose report has NO `ai` results
+	(legacy sessions: history.json exists, report.results.ai is empty, no stamped
+	session_id). Regression for resume reporting "No previous AI sessions found"
+	for such sessions. It resumes via the legacy history replay (empty session_id)."""
+
+	def _write(self, tmp_root, *, report_name='report.json', results_ai=None, info=None, history='[]'):
+		import json as _json
+		from pathlib import Path
+		task_dir = Path(tmp_root) / 'ws1' / 'tasks' / 'task1'
+		task_dir.mkdir(parents=True)
+		(task_dir / 'history.json').write_text(history)
+		if report_name:
+			report = {"info": info or {}, "results": {"ai": results_ai if results_ai is not None else []}}
+			(task_dir / report_name).write_text(_json.dumps(report))
+		return str(task_dir / 'history.json')
+
+	@patch('secator.ai.session.glob.glob')
+	def test_legacy_session_with_empty_ai_results_is_listed(self, mock_glob):
+		from secator.ai.session import list_sessions
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history_path = self._write(
+			tmp_root,
+			results_ai=[],
+			info={"targets": ["pentest-ground.com"], "run_opts": {"prompt": "Run a pentest"}},
+		)
+		mock_glob.return_value = [history_path]
+		sessions = list_sessions()
+		self.assertEqual(len(sessions), 1)
+		self.assertEqual(sessions[0]["session_id"], '')
+		self.assertEqual(sessions[0]["prompt"], "Run a pentest")  # fell back to run_opts.prompt
+		self.assertEqual(sessions[0]["targets"], ["pentest-ground.com"])
+
+	@patch('secator.ai.session.glob.glob')
+	def test_prompt_falls_back_to_first_user_message_in_history(self, mock_glob):
+		from secator.ai.session import list_sessions
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history = '[{"role": "system", "content": "sys"}, {"role": "user", "content": "do the thing"}]'
+		history_path = self._write(tmp_root, results_ai=[], info={}, history=history)
+		mock_glob.return_value = [history_path]
+		sessions = list_sessions()
+		self.assertEqual(sessions[0]["prompt"], "do the thing")
+
+	@patch('secator.ai.session.glob.glob')
+	def test_report_ai_json_filename_is_found(self, mock_glob):
+		from secator.ai.session import list_sessions
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history_path = self._write(
+			tmp_root, report_name='report_ai.json', results_ai=[],
+			info={"run_opts": {"prompt": "from report_ai"}},
+		)
+		mock_glob.return_value = [history_path]
+		sessions = list_sessions()
+		self.assertEqual(len(sessions), 1)
+		self.assertEqual(sessions[0]["prompt"], "from report_ai")
 
 
 class TestAddAssistantToHistory(unittest.TestCase):
@@ -1331,6 +1460,87 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 		self.assertEqual(len(tool_results), 1)
 		self.assertIn("out_of_scope", tool_results[0].message["content"])
 		self.assertEqual(warnings, [])
+
+
+class TestPickSessionViaBackend(unittest.TestCase):
+	"""Verify the TUI-safe resume picker routes through the backend (not the raw console menu).
+
+	Regression guard: once the Textual TUI became the default `secator x ai` frontend, the
+	plain-console session picker (tty.setraw + key reads) collided with Textual's hold on the
+	terminal, so `--resume` no longer worked under the TUI. pick_session_via_backend presents
+	the session list via backend.ask_user and maps the chosen label back to its session.
+	"""
+
+	def _sessions(self):
+		return [
+			{"name": "recon", "prompt": "scan the target", "mtime": 1700000000,
+			 "targets": ["example.com"], "folder": "/w/ws1/tasks/ai/recon", "session_id": "s1"},
+			{"name": "chat", "prompt": "chat about results", "mtime": 1700001000,
+			 "targets": [], "folder": "/w/ws1/tasks/ai/chat", "session_id": "s2"},
+		]
+
+	def test_picks_session_by_label_through_backend(self):
+		from secator.ai.session import pick_session_via_backend
+		sessions = self._sessions()
+		backend = MagicMock()
+		# Capture the choices offered, then answer with the SECOND one.
+		captured = {}
+
+		def _ask_user(question, choices, session_id, prompt_type="stopped", **kwargs):
+			captured["choices"] = choices
+			captured["session_id"] = session_id
+			captured["kwargs"] = kwargs
+			return {"answer": choices[1]}
+
+		backend.ask_user.side_effect = _ask_user
+		with patch("secator.ai.session.list_sessions", return_value=sessions):
+			picked = pick_session_via_backend(backend, session_id="cur")
+
+		self.assertIs(picked, sessions[1])
+		self.assertEqual(len(captured["choices"]), 2)
+		self.assertEqual(captured["session_id"], "cur")
+		# The raw-console menu must NOT be used under a display-owning backend.
+		self.assertIn("scan the target", captured["choices"][0])
+		# Each entry is a single-line picker row: leading "> " marker, solo mode requested.
+		self.assertTrue(captured["choices"][0].startswith("> "))
+		self.assertTrue(captured["kwargs"].get("solo"))
+		# Every row stays on a single line (no embedded newlines from multi-line prompts).
+		self.assertTrue(all("\n" not in c for c in captured["choices"]))
+
+	def test_cancel_returns_none(self):
+		from secator.ai.session import pick_session_via_backend
+		backend = MagicMock()
+		backend.ask_user.return_value = {"answer": None}
+		with patch("secator.ai.session.list_sessions", return_value=self._sessions()):
+			self.assertIsNone(pick_session_via_backend(backend))
+
+	def test_no_sessions_returns_none_without_prompting(self):
+		from secator.ai.session import pick_session_via_backend
+		backend = MagicMock()
+		with patch("secator.ai.session.list_sessions", return_value=[]):
+			self.assertIsNone(pick_session_via_backend(backend))
+		backend.ask_user.assert_not_called()
+
+	def test_duplicate_labels_stay_unique_and_map_correctly(self):
+		from secator.ai.session import pick_session_via_backend
+		# Two sessions with the SAME name/prompt/mtime/targets -> identical base label.
+		dup = [
+			{"name": "x", "prompt": "same", "mtime": 1700000000, "targets": ["t"],
+			 "folder": "/w/ws/tasks/ai/a", "session_id": "a"},
+			{"name": "x", "prompt": "same", "mtime": 1700000000, "targets": ["t"],
+			 "folder": "/w/ws/tasks/ai/b", "session_id": "b"},
+		]
+		backend = MagicMock()
+
+		def _ask_user(question, choices, session_id, prompt_type="stopped", **kwargs):
+			# choices must be unique so the answer disambiguates
+			self.assertEqual(len(set(choices)), 2)
+			return {"answer": choices[1]}
+
+		backend.ask_user.side_effect = _ask_user
+		with patch("secator.ai.session.list_sessions", return_value=dup):
+			picked = pick_session_via_backend(backend)
+		self.assertIs(picked, dup[1])
 
 
 if __name__ == "__main__":
