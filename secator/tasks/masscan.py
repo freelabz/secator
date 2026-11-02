@@ -6,7 +6,7 @@ import shutil
 
 from secator.decorators import task
 from secator.definitions import (CIDR_RANGE, DELAY, HOST, IP, OPT_NOT_SUPPORTED,
-								 OUTPUT_PATH, PORTS, PROXY, RATE_LIMIT, RETRIES,
+								 PORTS, PROXY, RATE_LIMIT, RETRIES,
 								 THREADS, TIMEOUT, TOP_PORTS)
 from secator.output_types import Port, Ip, Info, Warning, Error, Progress
 from secator.rich import console
@@ -30,12 +30,12 @@ class masscan(ReconPort):
 	requires_sudo = True
 	opts = {
 		'banners': {'is_flag': True, 'short': 'bn', 'default': False, 'help': 'Grab banners from services'},
-		'connection_timeout': {'type': int, 'short': 'ct', 'default': None, 'help': 'TCP connection timeout in seconds for banner grabbing'},
+		'connection_timeout': {'type': int, 'short': 'ct', 'default': None, 'help': 'TCP connection timeout in seconds for banner grabbing'},  # noqa: E501
 		'source_port': {'type': int, 'short': 'sp', 'default': None, 'help': 'Spoof source port number'},
 		'source_ip': {'type': str, 'short': 'si', 'default': None, 'help': 'Spoof source IP address'},
 		'interface': {'type': str, 'short': 'iface', 'default': None, 'help': 'Network interface to use'},
-		'output_path': {'type': str, 'short': 'oJ', 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},
-		'exclude_ports': {'type': str, 'short': 'ep', 'default': None, 'help': 'Exclude ports from scan', 'internal': True, 'display': True},
+		'output_path': {'type': str, 'short': 'oJ', 'default': None, 'help': 'Output JSON file path', 'internal': True, 'display': False},  # noqa: E501
+		'exclude_ports': {'type': str, 'short': 'ep', 'default': None, 'help': 'Exclude ports from scan', 'internal': True, 'display': True},  # noqa: E501
 		'resume_conf': {'type': str, 'default': None, 'help': 'Path to resume file', 'internal': False, 'display': True},
 		'ttl': {'type': int, 'short': 'ttl', 'default': None, 'help': 'Set TTL', 'requires_sudo': True},
 	}
@@ -79,9 +79,25 @@ class masscan(ReconPort):
 				match = MASSCAN_RESUME_REGEX.search(content)
 				if match:
 					old_json_path = match.group(1).strip()
-					shutil.copy(old_json_path, self.output_path)
+					# The resume file may reference an output file that no longer
+					# exists (deleted/moved). Skip the copy in that case so the
+					# resume rewrite still proceeds and masscan writes fresh
+					# results to self.output_path (where on_cmd_done looks).
+					if os.path.exists(old_json_path):
+						shutil.copy(old_json_path, self.output_path)
+					else:
+						console.print(Warning(message=f'Resume output file {old_json_path} not found, starting fresh'))  # noqa: E501
 					content = content.replace(old_json_path, self.output_path)
-			new_resume_conf = f'{self.reports_folder}/.inputs/masscan_paused.conf'
+				else:
+					# Resume file has no output-filename: masscan would write its
+					# default output outside self.output_path. Inject JSON output
+					# settings so results land where on_cmd_done looks for them.
+					content = content.rstrip('\n') + (
+						f'\noutput-format = json\noutput-filename = {self.output_path}\n'
+					)
+			# Use a per-task resume file so concurrent masscan tasks don't
+			# overwrite each other's targets/output filename.
+			new_resume_conf = f'{self.reports_folder}/.inputs/{self.unique_name}_paused.conf'
 			with open(new_resume_conf, 'w') as f:
 				f.write(MASSCAN_NOCAPTURE_REGEX.sub('', content))
 			opts['resume_conf']['value'] = new_resume_conf
@@ -129,7 +145,10 @@ class masscan(ReconPort):
 			for (ix, line) in enumerate(f):
 				if not line.startswith('{'):
 					continue
-				item = json.loads(line.rstrip(','))
+				# masscan JSON-array lines can end with "},\n"; strip the line
+				# ending before the trailing comma, otherwise the comma remains
+				# and json.loads raises.
+				item = json.loads(line.strip().rstrip(','))
 				ip = item.get('ip', '')
 				timestamp = item.get('timestamp', '')
 				ports = item.get('ports', [])
@@ -137,10 +156,12 @@ class masscan(ReconPort):
 				if not ip or not ports:
 					continue
 				if ip not in self.seen_ips:
+					# The host answered with at least one open port, so it is
+					# alive (consistent with the other port scanners).
 					yield Ip(
 						ip=ip,
 						host=ip,
-						alive=False,
+						alive=True,
 						tags=['masscan']
 					)
 					self.seen_ips.append(ip)

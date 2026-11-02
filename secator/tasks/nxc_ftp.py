@@ -3,19 +3,21 @@ import shutil
 from pathlib import Path
 
 from secator.decorators import task
-from secator.definitions import HOST, HOST_PORT, IP, STRING, THREADS, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, OPT_NOT_SUPPORTED
-from secator.output_types import Vulnerability, Tag, Info, Warning
+from secator.definitions import HOST, HOST_PORT, IP, STRING, THREADS, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, USER_AGENT, OPT_NOT_SUPPORTED  # noqa: E501
+from secator.output_types import Vulnerability, Tag, Warning
 from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
 
 
 @task()
 class nxc_ftp(Vuln):
-    """NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. FTP Submodule."""
+    """NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. FTP Submodule."""  # noqa: E501
     cmd = 'nxc ftp'
+    encoding = 'ansi'  # nxc colorizes output; strip ANSI before parsing (CI forces color)
     input_chunk_size = 1
     input_types = [HOST, HOST_PORT, IP, STRING]
     output_types = [Vulnerability, Tag]
+    ignore_return_code = True
     opt_prefix = '--'
     opts = {
         'username': {'type': str, 'short': 'u', 'default': 'anonymous', 'help': 'Username'},
@@ -25,7 +27,7 @@ class nxc_ftp(Vuln):
         'dns_timeout': {'type': int, 'default': 3, 'help': 'DNS query timeout in seconds'},
         'cred_id': {'type': str, 'default': None, 'help': 'Database credential ID(s) to use for authentication'},
         'ignore_pw_decoding': {'is_flag': True, 'help': 'Ignore non UTF-8 characters when decoding the password file'},
-        'no_bruteforce': {'is_flag': True, 'help': 'No spray when using file for username and password (user1 => password1, user2 => password2)'},
+        'no_bruteforce': {'is_flag': True, 'help': 'No spray when using file for username and password (user1 => password1, user2 => password2)'},  # noqa: E501
         'continue_on_success': {'is_flag': True, 'help': 'Continues auth attempts even after successes'},
         'kerberos': {'is_flag': True, 'help': 'Use Kerberos authentication'},
         'module': {'type': str, 'help': 'Module to use'},
@@ -48,13 +50,14 @@ class nxc_ftp(Vuln):
         RATE_LIMIT: OPT_NOT_SUPPORTED,
         RETRIES: OPT_NOT_SUPPORTED,
         TIMEOUT: 'timeout',
+        USER_AGENT: OPT_NOT_SUPPORTED,
     }
     opt_value_map = {
         DELAY: lambda x: f'{str(x)}-{str(x)}',
     }
     github_handle = 'Pennyw0rth/NetExec'
     install_github_bin = False
-    install_version = "v1.5.1"
+    install_version = "30cf1465"
     install_cmd = "pipx install --force git+https://github.com/Pennyw0rth/NetExec@[install_version]"
 
     @staticmethod
@@ -107,12 +110,24 @@ class nxc_ftp(Vuln):
             else:
                 yield Warning(message=line.split('ERROR')[-1].strip())
 
-        # Login status
+        # Login status. NetExec logs a login success as `[+] <user>:<pass>`
+        # (optionally with "- Anonymous Login!"). Only treat the line as a
+        # successful login when it carries the `<user>:<pass>` shape, so a
+        # server reply or password that happens to contain `[+]` does not
+        # produce a false login tag.
         info = '[+]' in line
         if info and not any_mode:
             username = self.get_opt_value('username')
-            password = self.get_opt_value('password')
-            message = line.split('[+]')[-1].strip()
+            success_marker = line.split('[+]')[-1].strip()
+            if not success_marker.startswith(f'{username}:'):
+                yield line
+                return
+            # Report the credential NetExec validated, not the configured
+            # `password` option (which may be a password-file path). Parse the
+            # `<user>:<pass>` that NetExec logged. The anonymous-login form is
+            # `<user>: - Anonymous Login!`, where the password is empty.
+            username, _, rest = success_marker.partition(':')
+            password = rest.split(' - Anonymous Login!')[0].strip()
             message = f'{username}:{password}'
             yield Tag(
                 category='info',
@@ -130,7 +145,7 @@ class nxc_ftp(Vuln):
         # File list
         if list_mode and line.startswith('FTP'):
             split = [c for c in line.split(' ') if c]
-            if len(split) == 13: # file / dir listing
+            if len(split) == 13:  # file / dir listing
                 _, _, _, _, perms, lcount, uid, gid, size, mod_month, mod_day, mod_time, name = tuple(split)
                 tag_name = 'ftp_dir' if perms.startswith('d') else 'ftp_file'
                 if name in ['.', '..']:
@@ -158,11 +173,14 @@ class nxc_ftp(Vuln):
         fname = self.get_opt_value('get')
         downloaded_success = 'Downloaded' in self.output
         if fname and downloaded_success:
-            if not Path(fname).exists():
-                yield Warning(message=f'File {fname} not found.')
+            # NetExec saves the downloaded file in the working directory under its
+            # basename, regardless of the remote path passed to --get.
+            local_name = Path(fname).name
+            if not Path(local_name).exists():
+                yield Warning(message=f'File {local_name} not found.')
                 return
-            output_path = f'{self.reports_folder}/.outputs/{fname}'
-            shutil.move(fname, output_path)
+            output_path = f'{self.reports_folder}/.outputs/{local_name}'
+            shutil.move(local_name, output_path)
             with open(output_path) as f:
                 content = f.read()
                 yield Tag(

@@ -20,12 +20,13 @@ class dublin_traceroute(Command):
 	input_chunk_size = 1
 	output_types = [Tag]
 	cwd_isolated = True
+	requires_sudo = True  # needs CAP_NET_RAW to send probes; can't run unprivileged
 	opts = {
 		'npaths': {'type': int, 'default': 20, 'help': 'Number of paths to probe'},
 		'min_ttl': {'type': int, 'default': 1, 'help': 'Minimum TTL to probe'},
 		'max_ttl': {'type': int, 'default': 30, 'help': 'Maximum TTL to probe'},
 		'delay': {'type': int, 'default': 10, 'help': 'Inter-packet delay in milliseconds'},
-		'broken_nat': {'is_flag': True, 'default': False, 'help': 'Network has a broken NAT configuration (e.g: no payload fixup)'},
+		'broken_nat': {'is_flag': True, 'default': False, 'help': 'Network has a broken NAT configuration (e.g: no payload fixup)'},  # noqa: E501
 		'source_port': {'type': int, 'default': 12345, 'help': 'Source ports to send packets from'}
 	}
 	opt_key_map = {
@@ -38,9 +39,15 @@ class dublin_traceroute(Command):
 	}
 	github_handle = 'insomniacslk/python-dublin-traceroute'
 	install_github_bin = False
+	# dublin-traceroute is packaged only on Debian/Ubuntu (verified in containers:
+	# present on apt, absent from Alpine/Fedora default repos where it would require a
+	# libtins C++ source build). Scope the package to apt and mark the tool optional so
+	# a non-apt platform (or a CI image lacking the package) degrades gracefully instead
+	# of failing `secator install tools`. It also needs CAP_NET_RAW/root to run.
 	install_pre = {
-		'*': ['dublin-traceroute'],
+		'apt': ['dublin-traceroute'],
 	}
+	install_optional = True
 
 	@staticmethod
 	def on_init(self):
@@ -56,15 +63,14 @@ class dublin_traceroute(Command):
 		port = opts['source_port']['value']
 		default_port = opts['source_port']['conf']['default']
 		if port == default_port:
-			opts['source_port']['value'] = random.randint(1001, 65536)
+			opts['source_port']['value'] = random.randint(1001, 65535)
 		return opts
 
 	@staticmethod
 	def on_cmd_done(self):
 		output_path = f'{self.cwd}/trace.json' if self.cwd else 'trace.json'
 		if not Path(output_path).exists():
-			yield Warning(message=f'Could not find output JSON {output_path}')
-			self.ignore_return_code = True
+			yield Error(message=f'Could not find output JSON {output_path} (dublin-traceroute may need CAP_NET_RAW/root to run)')  # noqa: E501
 			return
 		self.output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
 		shutil.move(output_path, self.output_path)
@@ -80,6 +86,7 @@ class dublin_traceroute(Command):
 				full_fmt_string = f'=== Flow: {flow_idx} / Hops: {len(hops)} ==='
 				flow_idx += 1
 				names = []
+				recv_ips = []
 				for ix, hop in enumerate(hops):
 					is_last = hop['is_last']
 					ttl_sent = hop['sent']['ip']['ttl']
@@ -89,17 +96,17 @@ class dublin_traceroute(Command):
 					is_last = hop['is_last']
 					rtt_usec = hop.get('rtt_usec') or 0
 					received = hop.get('received') or {}
-					description = received.get('icmp', {}).get('description', '')
 					ip_block = received.get('ip', {})
 					timestamp = received.pop('timestamp', '')
 					ip = ip_block.get('src', '')
 					ttl_received = ip_block.get('ttl', 0)
 					names.append(name)
+					recv_ips.append(ip or '*')
 					fmt_string = f'{ix+1:<3d} {ip:<20s} {name:<35s}'
 					if name != '*':
 						fmt_string += f' (RTT:{rtt_usec:<6d}us TTL -> {ttl_sent:<3d} TTL <- {ttl_received:<3d})'
 					full_fmt_string += f'\n{fmt_string}'
-				loops = dublin_traceroute.detect_routing_loops(names)
+				loops = dublin_traceroute.detect_routing_loops(recv_ips)
 				all_loops.extend(loops)
 				yield Tag(
 					category='info',
@@ -117,7 +124,7 @@ class dublin_traceroute(Command):
 				yield Vulnerability(
 					name="Routing loops detected",
 					description="Packets are bouncing between two network appliances, effectively causing network loops",
-					impact="Network routing loops on firewalls can cause DoS of the target firewalls, especially when scanning with high volume and high TTLs",
+					impact="Network routing loops on firewalls can cause DoS of the target firewalls, especially when scanning with high volume and high TTLs",  # noqa: E501
 					remediation="Adjust the firewall configuration to avoid infinite bouncing",
 					matched_at=self.inputs[0],
 					severity='critical',
@@ -146,8 +153,12 @@ class dublin_traceroute(Command):
 				)
 
 	@staticmethod
-	def detect_routing_loops(names):
-		"""Detects routing loops."""
-		pairs = [(names[i], names[i+1]) for i in range(len(names)-1) if names[i] != '*' and names[i+1] != '*']
+	def detect_routing_loops(hops):
+		"""Detects routing loops by received router identity (IP), not display name.
+
+		Distinct routers can share a reverse-DNS / display name, so counting name
+		pairs can flag a false loop; counting received-IP pairs identifies the
+		same physical router bouncing packets.
+		"""
+		pairs = [(hops[i], hops[i+1]) for i in range(len(hops)-1) if hops[i] != '*' and hops[i+1] != '*']
 		return [(pair, count) for pair, count in Counter(pairs).items() if count > 2]
-		# return [(pair, count) for pair, count in Counter(pairs).items() if count > 2 and pair[0] != pair[1]]

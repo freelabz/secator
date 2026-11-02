@@ -1,21 +1,24 @@
-import shutil
-
-from pathlib import Path
+import re
 
 from secator.decorators import task
-from secator.definitions import HOST, HOST_PORT, IP, STRING, THREADS, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT, OPT_NOT_SUPPORTED
-from secator.output_types import Vulnerability, Tag, Technology, Info, Warning
+from secator.definitions import (
+	HOST, HOST_PORT, IP, STRING, THREADS, HEADER, DELAY, FOLLOW_REDIRECT, PROXY, RATE_LIMIT, RETRIES, TIMEOUT,
+	OPT_NOT_SUPPORTED, USER_AGENT,
+)
+from secator.output_types import Vulnerability, Tag, Technology, Warning
 from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
 
 
 @task()
 class nxc_smb(Vuln):
-	"""NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. FTP Submodule."""
+	"""NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. SMB Submodule."""  # noqa: E501
 	cmd = 'nxc smb'
+	encoding = 'ansi'  # nxc colorizes output; strip ANSI before parsing (CI forces color)
 	input_chunk_size = 1
 	input_types = [HOST, HOST_PORT, IP, STRING]
 	output_types = [Vulnerability, Tag, Technology]
+	ignore_return_code = True
 	opt_prefix = '--'
 	opts = {
 		'username': {'type': str, 'short': 'u', 'default': '', 'help': 'Username'},
@@ -26,7 +29,7 @@ class nxc_smb(Vuln):
 		'dns_timeout': {'type': int, 'default': None, 'help': 'DNS query timeout in seconds'},
 		'cred_id': {'type': str, 'default': None, 'help': 'Database credential ID(s) to use for authentication'},
 		'ignore_pw_decoding': {'is_flag': True, 'help': 'Ignore non UTF-8 characters when decoding the password file'},
-		'no_bruteforce': {'is_flag': True, 'help': 'No spray when using file for username and password (user1 => password1, user2 => password2)'},
+		'no_bruteforce': {'is_flag': True, 'help': 'No spray when using file for username and password (user1 => password1, user2 => password2)'},  # noqa: E501
 		'continue_on_success': {'is_flag': True, 'help': 'Continues auth attempts even after successes'},
 		'kerberos': {'is_flag': True, 'help': 'Use Kerberos authentication'},
 		'module': {'type': str, 'help': 'Module to use'},
@@ -35,7 +38,7 @@ class nxc_smb(Vuln):
 		'put': {'type': str, 'help': 'Upload a file (format: LOCAL_FILE REMOTE_FILE)'},
 		'shares': {'is_flag': True, 'help': 'List shares'},
 		'common_vulns': {'is_flag': True, 'default': True, 'internal': True, 'display': True, 'help': 'List SMB metdata and common vulns (null auth, v1 enabled, ...)'},  # noqa: E501
-		'local_auth': {'is_flag':  True, 'default': None, 'help': 'Local authentication'},
+		'local_auth': {'is_flag': True, 'default': None, 'help': 'Local authentication'},
 	}
 	opt_key_map = {
 		'username': '-u',
@@ -52,13 +55,14 @@ class nxc_smb(Vuln):
 		RATE_LIMIT: OPT_NOT_SUPPORTED,
 		RETRIES: OPT_NOT_SUPPORTED,
 		TIMEOUT: 'timeout',
+		USER_AGENT: OPT_NOT_SUPPORTED,
 	}
 	opt_value_map = {
 		DELAY: lambda x: f'{str(x)}-{str(x)}',
 	}
 	github_handle = 'Pennyw0rth/NetExec'
 	install_github_bin = False
-	install_version = 'v1.5.1'
+	install_version = "30cf1465"
 	install_cmd = "pipx install --force git+https://github.com/Pennyw0rth/NetExec@[install_version]"
 
 	@staticmethod
@@ -92,9 +96,9 @@ class nxc_smb(Vuln):
 			else:
 				yield Warning(message=line.split('ERROR')[-1].strip())
 
-		# Login status
+		# Login status (skip guest sessions: a (Guest) line does not confirm the configured creds)
 		info = '[+]' in line
-		if info and not self.any_mode:
+		if info and not self.any_mode and '(Guest)' not in line:
 			username = self.get_opt_value('username')
 			password = self.get_opt_value('password')
 			message = line.split('[+]')[-1].strip()
@@ -178,15 +182,17 @@ class nxc_smb(Vuln):
 			# Valid credentials
 			valid_creds = data.get('valid_creds', [])
 			for cred in valid_creds:
+				username = cred.get('username', '')
+				password = cred.get('secret', '')
 				yield Tag(
 					category='secret',
 					match=self.full_target,
 					name='smb_credentials',
-					value=f'{username}:{secret}',
+					value=f'{username}:{password}',
 					tags=['network', 'smb', 'default-login'],
-					extra_data=cred | {'type': 'standard_credentials'}
+					extra_data={**cred, 'type': 'standard_credentials'}
 				)
-				if username != username_opt and password != password_opt:
+				if username != username_opt or password != password_opt:
 					yield Vulnerability(
 						name='SMB - Credential Weakness',
 						matched_at=self.full_target,
@@ -212,16 +218,16 @@ class nxc_smb(Vuln):
 			admin_hosts = data.get('admin_hosts', [])
 			for host in admin_hosts:
 				username = host.get('username', '')
-				secret = host.get('secret', '')
+				password = host.get('secret', '')
 				yield Tag(
 					category='secret',
 					match=self.full_target,
 					name='smb_credentials',
-					value=f'{username}:{secret}',
+					value=f'{username}:{password}',
 					tags=['network', 'smb', 'admin-login'],
-					extra_data=host | {'type': 'admin_credentials'}
+					extra_data={**host, 'type': 'admin_credentials'}
 				)
-				if username != username_opt and password != password_opt:
+				if username != username_opt or password != password_opt:
 					yield Vulnerability(
 						name='SMB - Credential Weakness',
 						matched_at=self.full_target,
@@ -247,7 +253,7 @@ class nxc_smb(Vuln):
 			# Hosts
 			for host in data.get('hosts', []):
 				smb_version = host.get('smb_version')
-				signing = host.get('signing', True)
+				signing = host.get('signing')  # None when NetExec omitted the field
 				yield Tag(
 					match=self.full_target,
 					category='info',
@@ -261,7 +267,7 @@ class nxc_smb(Vuln):
 						'signing_enabled': signing,
 					}
 				)
-				if not signing:
+				if signing is False:
 					yield Vulnerability(
 						name='SMB - Message Signing Not Required',
 						description=(
@@ -337,14 +343,16 @@ class nxc_smb(Vuln):
 		if shares_opt:
 			shares_data = data.get('shares', [])
 			for share in shares_data:
+				share_extra = {k: v for k, v in share.items() if k not in ['share', 'ip']}
+				share_extra['username'] = self.get_opt_value('username')
 				yield Tag(
 					category='info',
 					match=self.full_target,
 					name='smb_share',
 					value=share['share'],
 					tags=['network', 'smb', 'share'],
-					extra_data={k: v for k, v in share.items() if k not in ['share', 'ip']} | {'username': self.get_opt_value('username')}
-			)
+					extra_data=share_extra,
+				)
 			if shares_data and username_opt in [None, '', 'guest']:
 				yield Vulnerability(
 					name='SMB - Unauthenticated Access To Network Share',
@@ -361,13 +369,9 @@ class nxc_smb(Vuln):
 				)
 
 
-"""
-NetExec (NXC) Parser - HorusEye v2
-Handles all common nxc output formats: smb, ldap, winrm, mssql, rdp
-Author: Omar Tamer 🇪🇬
-"""
-import re
-from typing import Dict, List
+# NetExec (NXC) Parser
+# Handles all common nxc output formats: smb, ldap, winrm, mssql, rdp
+from typing import Dict  # noqa: E402
 
 
 class NXCParser:
@@ -388,11 +392,13 @@ class NXCParser:
 	"""
 
 	# ── Compiled patterns ──────────────────────────────────────────────────────
+	# Host column: IPv4 dotted-quad or an IPv6 literal (hex groups + ::)
+	_IP = r"(?P<ip>\d+\.\d+\.\d+\.\d+|[0-9A-Fa-f:]+:[0-9A-Fa-f:]*)"
 	# SMB host line:
 	# SMB  10.10.10.5  445  DC01  [*] Windows 10.0 Build 17763 (name:DC01) (domain:corp.local)
 	_RE_HOST = re.compile(
-		r"(?:SMB|LDAP|WINRM|MSSQL|RDP)\s+"
-		r"(?P<ip>\d+\.\d+\.\d+\.\d+)\s+"
+		r"(?:SMB|LDAP|WINRM|MSSQL|RDP)\s+" +
+		_IP + r"\s+" +
 		r"(?P<port>\d+)\s+"
 		r"(?P<hostname>\S+)\s+"
 		r"\[\*\]\s+(?P<info>.+)"
@@ -402,8 +408,8 @@ class NXCParser:
 	# SMB  10.10.10.5  445  DC01  [+] corp.local\svc-sql:ServicePass2024! (Pwn3d!)
 	# SMB  10.10.10.5  445  DC01  [-] corp.local\jsmith:wrongpass
 	_RE_AUTH = re.compile(
-		r"(?:SMB|LDAP|WINRM|MSSQL|RDP)\s+"
-		r"(?P<ip>\d+\.\d+\.\d+\.\d+)\s+"
+		r"(?:SMB|LDAP|WINRM|MSSQL|RDP)\s+" +
+		_IP + r"\s+" +
 		r"\d+\s+\S+\s+"
 		r"(?P<status>\[.\])\s+"
 		r"(?P<domain>[^\\]+)\\(?P<user>\S+?):(?P<secret>\S+)"
@@ -413,8 +419,8 @@ class NXCParser:
 	# Share line:
 	# SMB  10.10.10.5  445  DC01  SYSVOL  READ,WRITE
 	_RE_SHARE = re.compile(
-		r"(?:SMB|LDAP)\s+"
-		r"(?P<ip>\d+\.\d+\.\d+\.\d+)\s+"
+		r"(?:SMB|LDAP)\s+" +
+		_IP + r"\s+" +
 		r"\d+\s+\S+\s+"
 		r"(?P<share>\S+)\s+"
 		r"(?P<perms>READ(?:,WRITE)?|WRITE|NO ACCESS)"
@@ -423,22 +429,22 @@ class NXCParser:
 	# Session line:
 	# SMB  10.10.10.5  445  DC01  jsmith
 	_RE_SESSION = re.compile(
-		r"(?:SMB)\s+"
-		r"(?P<ip>\d+\.\d+\.\d+\.\d+)\s+"
+		r"(?:SMB)\s+" +
+		_IP + r"\s+" +
 		r"\d+\s+\S+\s+"
 		r"(?P<user>[a-zA-Z0-9._-]+)\s*$"
 	)
 
 	# Password policy lines
-	_RE_POL_MIN   = re.compile(r"Minimum password length:\s*(\d+)")
-	_RE_POL_HIST  = re.compile(r"Password history length:\s*(\d+)")
-	_RE_POL_LOCK  = re.compile(r"Account lockout threshold:\s*(\S+)")
-	_RE_POL_COMP  = re.compile(r"Password Complexity Flags:\s*(.+)")
+	_RE_POL_MIN = re.compile(r"Minimum password length:\s*(\d+)")
+	_RE_POL_HIST = re.compile(r"Password history length:\s*(\d+)")
+	_RE_POL_LOCK = re.compile(r"Account lockout threshold:\s*(\S+)")
+	_RE_POL_COMP = re.compile(r"Password Complexity Flags:\s*(.+)")
 
 	# Local admin line (from --local-auth or Pwn3d!)
 	_RE_ADMIN = re.compile(
-		r"(?:SMB|WINRM)\s+"
-		r"(?P<ip>\d+\.\d+\.\d+\.\d+)\s+"
+		r"(?:SMB|WINRM)\s+" +
+		_IP + r"\s+" +
 		r"\d+\s+"
 		r"(?P<hostname>\S+)\s+"
 		r"\[.\]\s+.+\(Pwn3d!\)"
@@ -497,6 +503,11 @@ class NXCParser:
 				# Detect protocol from line start
 				proto = line.split()[0].upper()
 
+				# Parse signing explicitly; keep None when NetExec omits the field
+				# so a missing value is never reported as "signing disabled".
+				sm = re.search(r"signing\s*:\s*(True|False)", info, re.IGNORECASE)
+				signing = (sm.group(1).lower() == "true") if sm else None
+
 				if ip not in seen_hosts:
 					seen_hosts.add(ip)
 					data["hosts"].append({
@@ -504,7 +515,7 @@ class NXCParser:
 						"hostname": hostname,
 						"os":       win_ver or info[:60],
 						"domain":   self._extract_domain(info),
-						"signing":  "signing:True" in info or "signing: True" in info,
+						"signing":  signing,
 						"null_auth": "Null Auth:True" in info or "Null Auth: True" in info,
 						"smb_version": "v1" if "SMBv1:True" in info or "SMBv1: True" in info else "other"
 					})
@@ -518,11 +529,11 @@ class NXCParser:
 			# ── Auth results ────────────────────────────────────────────────
 			m = self._RE_AUTH.search(line)
 			if m and m.group("status") == "[+]":
-				ip     = m.group("ip")
-				user   = m.group("user")
+				ip = m.group("ip")
+				user = m.group("user")
 				secret = m.group("secret")
 				domain = m.group("domain")
-				pwned  = bool(m.group("pwned"))
+				pwned = bool(m.group("pwned"))
 
 				cred_key = f"{domain}\\{user}:{secret}"
 				if cred_key not in seen_creds:
@@ -555,9 +566,9 @@ class NXCParser:
 			# ── Share enumeration ───────────────────────────────────────────
 			m = self._RE_SHARE.search(line)
 			if m:
-				share  = m.group("share").upper()
-				perms  = m.group("perms")
-				ip     = m.group("ip")
+				share = m.group("share").upper()
+				perms = m.group("perms")
+				ip = m.group("ip")
 
 				if perms != "NO ACCESS":
 					data["shares"].append({
@@ -580,7 +591,7 @@ class NXCParser:
 			# ── Admin hosts (Pwn3d! in any line) ───────────────────────────
 			m = self._RE_ADMIN.search(line)
 			if m:
-				ip       = m.group("ip")
+				ip = m.group("ip")
 				hostname = m.group("hostname")
 				if ip not in [h["ip"] for h in data["admin_hosts"]]:
 					data["admin_hosts"].append({

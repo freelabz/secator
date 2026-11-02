@@ -38,11 +38,19 @@ class beanshooter(Command):
 		'ssl': {'is_flag': True, 'default': None, 'help': 'use SSL for connections'}
 	}
 	install_version = '4.1.0'
-	# install_pre = {
-		# '*': ['openjdk-8-jre']
-	# }
+	# beanshooter is a Java jar wrapped by a `java -jar` shell script, so a JRE must
+	# be present. JRE package names differ per distro (verified in containers), so
+	# map them per package manager instead of a single apt-only name.
+	install_pre = {
+		'apt': ['default-jre-headless'],
+		'apk': ['openjdk17-jre-headless'],
+		'yum|dnf': ['java-latest-openjdk-headless'],
+		'zypper': ['java-headless'],
+		'pacman': ['jre-openjdk-headless'],
+		'brew': ['openjdk'],
+	}
 	install_cmd = (
-		'wget https://github.com/qtc-de/beanshooter/releases/download/v[install_version]/beanshooter-[install_version]-jar-with-dependencies.jar && '
+		'wget https://github.com/qtc-de/beanshooter/releases/download/v[install_version]/beanshooter-[install_version]-jar-with-dependencies.jar && '  # noqa: E501
 		f'mv beanshooter-[install_version]-jar-with-dependencies.jar {CONFIG.dirs.bin}/beanshooter.jar && '
 		f'echo "{BEANSHOOTER_BIN}" > {CONFIG.dirs.bin}/beanshooter && '
 		f'chmod +x {CONFIG.dirs.bin}/beanshooter'
@@ -68,7 +76,7 @@ class beanshooter(Command):
 		json_output = parse_beanshooter_output(_strip_ansi(self.output))
 		# self._print(json_output)
 		target = self.inputs[0]
-		if not ':' in self.inputs[0]:
+		if ':' not in self.inputs[0]:
 			target = self.inputs[0] + ':' + str(self.get_opt_value('jmx_port'))
 		for key, value in json_output.items():
 			if key == 'warnings':
@@ -78,7 +86,7 @@ class beanshooter(Command):
 				yield Technology(
 					product='java rmi',
 					version=None,
-					match=target
+					match=value['target']
 				)
 			if key == 'unauthorized_access' and value.get('status', '') == 'Vulnerable':
 				yield Vulnerability(
@@ -93,7 +101,7 @@ class beanshooter(Command):
 					confidence='high',
 					tags=['java', 'jmx', 'mbean', 'unauth', 'vuln']
 				)
-			elif key == 'preauth_deserialization' and value.get('payload_accepted', False) == True:
+			elif key == 'preauth_deserialization' and value.get('payload_accepted', False) is True:
 				yield Vulnerability(
 					name='Java JMX - Random payload allowed',
 					description="Remote MBean server accepts random payload classes.",
@@ -106,7 +114,7 @@ class beanshooter(Command):
 					tags=['java', 'jmx', 'mbean', 'unauth', 'vuln']
 				)
 			elif key == 'mbeans' and value.get('total_count', 0) > 0:
-				bean_classes = sorted(list(set([b['class'] for b in value['beans']])))
+				bean_classes = sorted(set(b['class'] for b in value.get('beans', []) if 'class' in b))
 				for bean in bean_classes:
 					yield Tag(
 						match=target,
@@ -116,9 +124,9 @@ class beanshooter(Command):
 					)
 			elif key == 'tomcat_users' and value:
 				for data in value:
-					username = data['username']
-					password = data['password']
-					value = data['roles']
+					username = data.get('username', '')
+					password = data.get('password', '')
+					value = data.get('roles')
 					yield Tag(
 						match=target,
 						category='secret',

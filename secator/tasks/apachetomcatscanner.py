@@ -10,7 +10,7 @@ from secator.definitions import (
 	USER_AGENT
 )
 # fmt: on
-from secator.output_types import Info, Vulnerability, Technology, Url, Tag, Warning
+from secator.output_types import Vulnerability, Technology, Url, Tag, Warning
 from secator.tasks._categories import Vuln
 
 
@@ -54,7 +54,14 @@ class apachetomcatscanner(Vuln):
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
-		self.cmd += f' --list-cves --verbose --debug --show-cves-descriptions --no-colors --export-json {shlex.quote(self.output_path)}'
+		# Remove any pre-existing output file so a scan that fails before exporting
+		# can't make on_cmd_done parse and re-emit a previous run's results.
+		if os.path.exists(self.output_path):
+			os.remove(self.output_path)
+		self.cmd += (
+			' --list-cves --verbose --debug --show-cves-descriptions --no-colors'
+			f' --export-json {shlex.quote(self.output_path)}'
+		)
 
 	@staticmethod
 	def on_cmd_done(self):
@@ -87,10 +94,15 @@ class apachetomcatscanner(Vuln):
 						tags=['apache', 'tomcat', 'manager', 'admin'],
 						tech=[f'apache tomcat/{version}'] if version else []
 					)
-				# bugfix: credentials_found in JSON is a list of lists...
-				if isinstance(credentials_found, list) and len(credentials_found) == 1:
-					credentials_found = credentials_found[0]
-				for cred in credentials_found:
+				# credentials_found in JSON is a list of [status_code, credentials] pairs.
+				if not isinstance(credentials_found, list):
+					credentials_found = []
+				for pair in credentials_found:
+					# Each entry is a [status_code, credentials] pair; keep the dict.
+					if isinstance(pair, (list, tuple)):
+						cred = pair[1] if len(pair) > 1 else None
+					else:
+						cred = pair
 					if isinstance(cred, dict):
 						username = cred.get('username', '')
 						password = cred.get('password', '')
@@ -138,7 +150,10 @@ class apachetomcatscanner(Vuln):
 			cvss_score = 0.0
 		criticity = (cvss.get('criticity') or '').lower()
 		severity = criticity if criticity and criticity != 'none' else 'unknown'
-		confidence = 'high' if cvss_score > 0 else 'low'
+		# --list-cves lists CVEs that affect the *detected version*; it does not
+		# verify the vulnerable condition on the target. These are therefore
+		# potentially-applicable, not confirmed, so keep confidence low.
+		confidence = 'low'
 		extra_data = {'version': version}
 		if cve.get('vuln_type'):
 			extra_data['vuln_type'] = cve['vuln_type']

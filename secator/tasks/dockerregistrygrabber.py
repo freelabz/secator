@@ -1,11 +1,13 @@
 import re
+import sys
+
+from urllib.parse import urlsplit
 
 from secator.config import CONFIG
 from secator.decorators import task
 from secator.definitions import URL
 from secator.output_types import Info, Vulnerability, Warning
 from secator.tasks._categories import Vuln
-from secator.utils import autodetect_type
 
 
 DRG_REPO_REGEX = re.compile(r'^\[\+\]\s+(\S+)\s*$')
@@ -16,7 +18,12 @@ DRG_ERROR_REGEX = re.compile(r'(Http Error|Error Connecting|Timeout Error|Unauth
 class dockerregistrygrabber(Vuln):
 	"""Exposed Docker registries enumeration."""
 
-	cmd = 'drg.py'
+	# Run drg.py with secator's own interpreter: its shebang is `env python3`, which
+	# may resolve to a python without drg.py's deps (requests/rich/urllib3 are pip-
+	# installed into sys.executable by PipInstaller), causing a silent ModuleNotFound
+	# crash -> no repos parsed -> no finding.
+	cmd = f'{sys.executable} {CONFIG.dirs.bin}/drg.py'
+	encoding = 'ansi'  # drg.py colorizes output via rich; strip ANSI before parsing (CI forces color)
 	input_chunk_size = 1
 	input_types = [URL]
 	output_types = [Vulnerability]
@@ -60,13 +67,21 @@ class dockerregistrygrabber(Vuln):
 		if len(self.inputs) > 1:  # parent
 			return opts
 		if self.inputs:
-			split = self.inputs[0].split(':')
-			if len(split) == 3:  # port is in URL
-				url_wo_port = ':'.join([split[0], split[1]])
-				self.cmd = self.cmd.replace(self.inputs[0], url_wo_port)
-				self.full_target = self.inputs[0]
-				self.inputs[0] = url_wo_port
-				opts['docker_port']['value'] = int(split[2])
+			# drg.py appends `:{port}/v2/_catalog` itself, so it must be given a
+			# host-only URL (scheme://host) with no port and no path. Parse the
+			# input with urlsplit so a URL like https://host:15000/v2 doesn't end
+			# up feeding "15000/v2" to int() (which would crash) or leaving a path
+			# on the target.
+			original = self.inputs[0]
+			parts = urlsplit(original)
+			if parts.hostname:
+				host_url = f'{parts.scheme}://{parts.hostname}' if parts.scheme else parts.hostname
+				if host_url != original:
+					self.cmd = self.cmd.replace(original, host_url)
+					self.full_target = original
+					self.inputs[0] = host_url
+				if parts.port is not None:  # port is in URL
+					opts['docker_port']['value'] = parts.port
 		return opts
 
 	@staticmethod
@@ -95,6 +110,15 @@ class dockerregistrygrabber(Vuln):
 		host = self.inputs[0] if self.inputs else ''
 		port = self.get_opt_value('docker_port') or 5000
 		matched_at = f'{host}:{port}'
+		# The "unauthenticated access" finding is only valid for anonymous scans.
+		# A credentialed scan ([+] lines from drg.py --list with -U/-P/-A) proves
+		# authenticated access, not an open registry, so don't report it as unauth.
+		credentialed = any(
+			self.get_opt_value(opt) for opt in ('docker_username', 'docker_password', 'docker_token')
+		)
+		if credentialed:
+			yield Info(message=f'Authenticated to Docker registry at {matched_at} ({len(self._repos)} repositories)')
+			return
 		yield Info(message=f'Exposed unauthenticated Docker registry at {matched_at} ({len(self._repos)} repositories)')
 		yield Vulnerability(
 			name='Docker Registry - Unauthenticated Access',

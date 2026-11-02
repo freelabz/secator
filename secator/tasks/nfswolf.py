@@ -3,7 +3,10 @@ import os
 import shlex
 
 from secator.decorators import task
-from secator.definitions import IP, HOST, HOST_PORT, CIDR_RANGE, TIMEOUT, PROXY, THREADS, OPT_NOT_SUPPORTED, HEADER, FOLLOW_REDIRECT, USER_AGENT, DELAY, RETRIES, RATE_LIMIT
+from secator.definitions import (
+	IP, HOST, HOST_PORT, CIDR_RANGE, TIMEOUT, PROXY, THREADS, OPT_NOT_SUPPORTED, HEADER, FOLLOW_REDIRECT,
+	USER_AGENT, DELAY, RETRIES, RATE_LIMIT,
+)
 from secator.output_types import Port, Ip, Tag, Vulnerability, Info, Error, Technology
 from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
@@ -49,6 +52,10 @@ class nfswolf(Vuln):
 	install_binary_name = 'nfswolf'
 	install_version = 'v1.2.0'
 	install_cmd = 'cargo install --git https://github.com/freelabz/NFSWolf --tag [install_version] nfswolf'
+	# nfswolf is a Rust source build and needs a host NFS kernel module to run, which
+	# a vanilla/CI container does not have. Mark optional so a build/runtime gap on a
+	# given platform degrades gracefully instead of failing `secator install tools`.
+	install_optional = True
 	profile = 'small'
 
 	@staticmethod
@@ -126,7 +133,6 @@ class nfswolf(Vuln):
 					techs_grouped[program_full]['program_id'] = program_id
 				security_note = service['security_note']
 				if security_note:
-					entity = program_name.replace('_', ' ').capitalize() + f'v{version}'
 					confidence = 'low' if 'may' in security_note else 'high'
 					tags = ['network', 'nfs']
 					if confidence == 'high':
@@ -171,8 +177,18 @@ class nfswolf(Vuln):
 					continue
 				for item in data:
 					allowed = item.get('allowed')
+					# An empty `allowed` list and the available export fields are metadata
+					# only: they describe a discovered export, not a confirmed anonymous
+					# mount. Keep these findings low-confidence/tentative unless NFSWolf
+					# proves access (e.g. a resolved mount handle), and withhold the `vuln`
+					# tag until then so unverified exports stay informational.
+					confirmed = bool(item.get('handle'))
 					if allowed:
 						allowed = ";".join(allowed)
+					confidence = 'high' if confirmed else 'low'
+					tags = ['network', 'nfs', 'unauth']
+					if confirmed:
+						tags.append('vuln')
 					yield Vulnerability(
 						matched_at=full_target,
 						ip=ip,
@@ -189,12 +205,12 @@ class nfswolf(Vuln):
 							'Disable NFS share exports or require authentication to access them.'
 						),
 						severity='high',
-						confidence='high',
+						confidence=confidence,
 						extra_data={
 							'path': item['path'],
 							'handle': item.get('handle'),
 							'allowed': allowed,
 							'version': version
 						},
-						tags=['network', 'nfs', 'unauth', 'vuln'],
+						tags=tags,
 					)

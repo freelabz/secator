@@ -1,6 +1,6 @@
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import HOST, IP, OPT_NOT_SUPPORTED, PORT, HOST_PORT
+from secator.definitions import HOST, IP, OPT_NOT_SUPPORTED, HOST_PORT
 from secator.output_types import Info, Vulnerability, Warning
 from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
