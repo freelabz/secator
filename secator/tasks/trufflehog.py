@@ -30,6 +30,7 @@ TRUFFLEHOG_MODES = [
 @task()
 class trufflehog(Command):
     """Tool for finding secrets in git repositories and filesystems using TruffleHog."""
+    friendly_display_name = "TruffleHog secret scanner"
     cmd = 'trufflehog'
     tags = ['secret', 'scan']
     input_types = [PATH, URL, STRING, GCS_URL, SLUG]

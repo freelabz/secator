@@ -1,6 +1,8 @@
 type: scan
 name: url
 description: URL scan
+friendly_display_name: Scan a web app (URL)
+friendly_description: Crawl, fuzz, and vuln-scan a web application
 long_description: |
   Thorough security assessment of web applications and URLs.
   Combines URL crawling, fuzzing, and vulnerability scanning to discover hidden content,

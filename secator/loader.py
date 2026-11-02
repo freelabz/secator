@@ -96,6 +96,8 @@ def get_configs_by_type(type):
 			'name': cls.__name__,
 			'type': 'task',
 			'description': cls.__doc__,
+			'friendly_display_name': getattr(cls, 'friendly_display_name', None),
+			'friendly_description': getattr(cls, 'friendly_description', None),
 			'input_types': cls.input_types,
 			'output_types': [t.get_name() for t in cls.output_types],
 			'default_inputs': cls.default_inputs,

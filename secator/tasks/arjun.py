@@ -20,6 +20,7 @@ from secator.utils import process_wordlist
 @task()
 class arjun(HttpBase):
 	"""HTTP Parameter Discovery Suite."""
+	friendly_display_name = "Arjun parameter discovery"
 
 	cmd = 'arjun'
 	input_types = [URL]

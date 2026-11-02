@@ -1,0 +1,9 @@
+type: profile
+name: screenshot
+category: network
+description: "Capture screenshots and store HTTP responses"
+opts:
+    screenshot: true
+    store_responses: true
+    system_chrome: true
+    no_sandbox: true

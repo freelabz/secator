@@ -28,6 +28,7 @@ NMAP_PROGRESS_REGEX_2 = re.compile(r'(.*) Timing: About (\d+\.\d+)% done; ETC: \
 @task()
 class nmap(ReconPort):
 	"""Network Mapper is a free and open source utility for network discovery and security auditing."""
+	friendly_display_name = "Nmap port scan"
 
 	cmd = 'nmap'
 	input_types = [HOST, IP, CIDR_RANGE, STRING]

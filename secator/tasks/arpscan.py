@@ -7,6 +7,7 @@ from secator.runners import Command
 @task()
 class arpscan(Command):
 	"""Scan a CIDR range for alive hosts using ARP."""
+	friendly_display_name = "ARP host scanner"
 
 	cmd = 'arp-scan --plain --resolve --format="${ip}\t${name}\t${mac}\t${vendor}"'
 	input_types = [CIDR_RANGE, IP, HOST]

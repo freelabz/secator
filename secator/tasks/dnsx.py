@@ -14,6 +14,7 @@ from secator.utils import extract_domain_info, process_wordlist
 @task()
 class dnsx(ReconDns):
 	"""dnsx is a fast and multi-purpose DNS toolkit designed for running various retryabledns library."""
+	friendly_display_name = "dnsx DNS toolkit"
 	cmd = 'dnsx -resp -recon'
 	tags = ['dns', 'fuzz']
 	input_types = [HOST, CIDR_RANGE, IP]

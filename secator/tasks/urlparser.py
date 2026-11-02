@@ -9,6 +9,7 @@ from secator.runners import PythonRunner
 @task()
 class urlparser(PythonRunner):
     """Extract query string parameters from URLs"""
+    friendly_display_name = "URL parameter parser"
     input_types = [URL]
     output_types = [Tag, Url]
     tags = ['url', 'params']

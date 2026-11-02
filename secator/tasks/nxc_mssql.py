@@ -15,6 +15,7 @@ LOGIN_FAILED_REGEX = re.compile(r'\s*(?P<domain>[\w.\-]+)\\(?P<username>[^:\n]*)
 @task()
 class nxc_mssql(Vuln):
 	"""NetExec (a.k.a nxc) is a network service exploitation tool that helps automate assessing the security of large networks. FTP Submodule."""  # noqa: E501
+	friendly_display_name = "NetExec MSSQL"
 	cmd = 'nxc mssql'
 	encoding = 'ansi'  # nxc colorizes output; strip ANSI before parsing (CI forces color)
 	input_chunk_size = 1

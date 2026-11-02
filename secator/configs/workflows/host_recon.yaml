@@ -2,6 +2,8 @@ type: workflow
 name: host_recon
 alias: hostrec
 description: Host reconnaissance
+friendly_display_name: Recon a host
+friendly_description: Ports, services, SSH/HTTP probing, network vulns
 long_description: |
   Performs comprehensive reconnaissance on a host or IP address to identify open ports and services.
   Combines multiple port scanning techniques, detects service versions, searches for known vulnerabilities,

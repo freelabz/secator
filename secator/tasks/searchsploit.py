@@ -15,6 +15,7 @@ SEARCHSPLOIT_TITLE_REGEX = re.compile(r'^((?:[a-zA-Z\-_!\.()]+\d?\s?)+)\.?\s*(.*
 @task()
 class searchsploit(Command):
 	"""Exploit searcher based on ExploitDB."""
+	friendly_display_name = "SearchSploit exploit search"
 	cmd = 'searchsploit'
 	input_types = [STRING, SLUG]
 	output_types = [Exploit]

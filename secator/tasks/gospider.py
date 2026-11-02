@@ -15,6 +15,7 @@ from secator.tasks._categories import HttpCrawler
 @task()
 class gospider(HttpCrawler):
 	"""Fast web spider written in Go."""
+	friendly_display_name = "gospider web spider"
 	cmd = 'gospider'
 	input_types = [URL]
 	output_types = [Url]

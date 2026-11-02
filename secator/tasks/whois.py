@@ -9,6 +9,7 @@ import json
 @task()
 class whois(Command):
 	"""The whois tool from likexian retrieves domain registration information in JSON format."""
+	friendly_display_name = "WHOIS lookup"
 	cmd = 'whois-go'
 	input_flag = None
 	json_flag = None

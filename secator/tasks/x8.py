@@ -10,6 +10,7 @@ from secator.tasks._categories import HttpParamsFuzzer
 @task()
 class x8(HttpParamsFuzzer):
 	"""Hidden parameters discovery suite written in Rust."""
+	friendly_display_name = "x8 hidden parameter discovery"
 	cmd = 'x8'
 	input_types = [URL]
 	output_types = [Url, Tag]

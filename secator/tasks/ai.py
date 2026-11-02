@@ -271,6 +271,7 @@ def resolve_llm_credentials(
 @task()
 class ai(PythonRunner):
 	"""AI-powered penetration testing assistant (scan or chat mode)."""
+	friendly_display_name = "AI pentest assistant"
 	output_types = FINDING_TYPES + [Target]
 	tags = ["ai", "analysis", "pentest"]
 	default_inputs = ''

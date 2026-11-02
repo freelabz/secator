@@ -24,6 +24,7 @@ java -jar {CONFIG.dirs.bin}/rmg.jar \$@
 @task()
 class rmg(Command):
 	"""Java RMI vulnerability scanner and enumerator."""
+	friendly_display_name = "Java RMI scanner (rmg)"
 
 	cmd = 'rmg'
 	input_types = [IP, HOST, HOST_PORT]

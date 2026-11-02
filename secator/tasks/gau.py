@@ -18,6 +18,7 @@ from secator.utils import extract_domain_info
 @task()
 class gau(HttpCrawler):
 	"""Fetch known URLs from AlienVault's Open Threat Exchange, the Wayback Machine, Common Crawl, and URLScan."""
+	friendly_display_name = "gau URL fetcher"
 	cmd = 'gau --verbose'
 	input_types = [URL, HOST]
 	output_types = [Url, Subdomain]

@@ -1,6 +1,8 @@
 type: scan
 name: network
 description: Internal network scan
+friendly_display_name: Scan a network range
+friendly_description: Discover live hosts on a CIDR and assess them
 long_description: |
   Comprehensive security assessment of an internal network or CIDR range.
   Discovers live hosts, scans for services and vulnerabilities, and performs URL-based

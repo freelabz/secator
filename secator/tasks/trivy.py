@@ -25,6 +25,7 @@ def convert_mode(mode):
 @task()
 class trivy(Vuln):
 	"""Comprehensive and versatile security scanner."""
+	friendly_display_name = "Trivy security scanner"
 	cmd = 'trivy'
 	input_types = [PATH, STRING]
 	output_types = [Tag, Vulnerability]

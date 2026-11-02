@@ -19,6 +19,7 @@ from secator.tasks._categories import Command, OPTS
 @task()
 class testssl(Command):
 	"""SSL/TLS security scanner, including ciphers, protocols and cryptographic flaws."""
+	friendly_display_name = "SSL/TLS scanner (testssl)"
 
 	cmd = 'testssl.sh'
 	input_types = [HOST, HOST_PORT, URL, IP]

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 @task()
 class maigret(ReconUser):
 	"""Collect a dossier on a person by username."""
+	friendly_display_name = "Maigret username OSINT"
 	cmd = 'maigret'
 	input_types = [SLUG, STRING]
 	output_types = [UserAccount]

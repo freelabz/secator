@@ -12,6 +12,7 @@ from secator.tasks._categories import ReconIp
 @task()
 class mapcidr(ReconIp):
 	"""Utility program to perform multiple operations for a given subnet/cidr ranges."""
+	friendly_display_name = "mapcidr subnet tool"
 
 	cmd = 'mapcidr'
 	input_types = [CIDR_RANGE, IP, SLUG]

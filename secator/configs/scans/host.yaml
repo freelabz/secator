@@ -1,6 +1,8 @@
 type: scan
 name: host
 description: Host scan
+friendly_display_name: Scan a host or IP
+friendly_description: "Full assessment of one host or IP: ports, services, web, vulns"
 long_description: |
   In-depth security assessment of a specific host or IP address.
   Combines host reconnaissance with URL crawling and vulnerability scanning to identify

@@ -9,6 +9,7 @@ from secator.runners import Command
 @task()
 class command(Command):
 	"""Run an arbitrary shell command verbatim."""
+	friendly_display_name = "Shell command"
 	cmd = ''
 	shell = True
 	input_flag = None

@@ -7,6 +7,7 @@ from secator.tasks._categories import Command
 @task()
 class getasn(Command):
 	"""Get ASN information from IP address."""
+	friendly_display_name = "ASN lookup"
 	cmd = 'getasn'
 	input_chunk_size = 1
 	input_types = [IP, HOST]

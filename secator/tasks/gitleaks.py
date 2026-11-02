@@ -23,6 +23,7 @@ def convert_mode(mode):
 @task()
 class gitleaks(Command):
 	"""Tool for detecting secrets like passwords, API keys, and tokens in git repos, files, and stdin."""
+	friendly_display_name = "Gitleaks secret scanner"
 	cmd = 'gitleaks'
 	tags = ['secret', 'scan']
 	input_chunk_size = 1

@@ -37,6 +37,7 @@ ZABBIX_DIAGNOSTIC_RE = re.compile(
 @task()
 class zabbix_get(Command):
 	"""Zabbix get is a command-line utility, which can be used to communicate with Zabbix agent and retrieve required information from the agent."""  # noqa: E501
+	friendly_display_name = "Zabbix agent query"
 	cmd = 'zabbix_get'
 	# zabbix_get is NOT in the Debian/Ubuntu default repos (Zabbix ships its CLI
 	# tools from repo.zabbix.com). It IS in the default repos of Alpine

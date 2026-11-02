@@ -15,6 +15,7 @@ from secator.tasks._categories import Vuln
 @task()
 class search_vulns(Vuln):
 	"""Search for known vulnerabilities in software by product name or CPE."""
+	friendly_display_name = "Known-vulnerability search"
 
 	cmd = 'search_vulns'
 	output_types = [Vulnerability, Exploit]

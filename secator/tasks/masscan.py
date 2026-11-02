@@ -20,6 +20,7 @@ MASSCAN_NOCAPTURE_REGEX = re.compile(r'^#?nocapture\s*=.*$\n?', flags=re.MULTILI
 @task()
 class masscan(ReconPort):
 	"""Fast TCP port scanner that can scan the entire Internet in under 5 minutes."""
+	friendly_display_name = "Masscan port scanner"
 	cmd = 'masscan'
 	input_types = [HOST, IP, CIDR_RANGE]
 	output_types = [Port, Ip]

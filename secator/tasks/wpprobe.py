@@ -16,6 +16,7 @@ WPPROBE_MODES = ['scan', 'update', 'update-db']
 @task()
 class wpprobe(Command):
 	"""Fast wordpress plugin enumeration tool."""
+	friendly_display_name = "WordPress plugin enum (wpprobe)"
 	cmd = 'wpprobe'
 	input_types = [URL]
 	output_types = [Vulnerability, Tag]

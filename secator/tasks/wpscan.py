@@ -18,6 +18,7 @@ from secator.installer import parse_version
 @task()
 class wpscan(VulnHttp):
 	"""Wordpress security scanner."""
+	friendly_display_name = "WPScan WordPress scanner"
 	cmd = 'wpscan --force --verbose'
 	input_types = [URL, HOST, IP]
 	output_types = [Vulnerability, Tag]

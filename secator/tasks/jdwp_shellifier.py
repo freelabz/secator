@@ -18,6 +18,7 @@ DETECT_BREAK_ON = 'secator.detect.JdwpProbe.probe'
 @task()
 class jdwp_shellifier(Vuln):
 	"""Detect an exposed Java Debug Wire Protocol (JDWP) service (unauthenticated RCE)."""
+	friendly_display_name = "JDWP exploit check"
 
 	cmd = 'jdwp-shellifier'
 	max_timeout = 120

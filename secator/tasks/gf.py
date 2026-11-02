@@ -7,6 +7,7 @@ from secator.tasks._categories import Tagger
 @task()
 class gf(Tagger):
 	"""Wrapper around grep, to help you grep for things."""
+	friendly_display_name = "gf pattern matcher"
 	cmd = 'gf'
 	input_types = None  # anything
 	output_types = [Tag]

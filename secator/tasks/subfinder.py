@@ -9,6 +9,7 @@ from secator.tasks._categories import ReconDns
 @task()
 class subfinder(ReconDns):
 	"""Fast passive subdomain enumeration tool."""
+	friendly_display_name = "Subfinder subdomain enum"
 	cmd = 'subfinder -cs'
 	input_types = [HOST]
 	output_types = [Subdomain]

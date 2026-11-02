@@ -15,6 +15,7 @@ from secator.utils import validate_cidr_range
 @task()
 class fping(ReconIp):
 	"""Send ICMP echo probes to network hosts, similar to ping, but much better."""
+	friendly_display_name = "fping host prober"
 
 	cmd = 'fping -a -A'
 	input_types = [IP, HOST, CIDR_RANGE]

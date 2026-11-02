@@ -47,6 +47,7 @@ def confirm_with_timeout(message, default=True, timeout=CONFIG.runners.prompt_ti
 @task()
 class prompt(PythonRunner):
     """Prompt the user."""
+    friendly_display_name = "User prompt"
     output_types = [Tag]
     tags = ['network', 'recon']
     default_inputs = ''

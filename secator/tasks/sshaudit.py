@@ -21,6 +21,7 @@ def _algo_entry(entry):
 @task()
 class sshaudit(Command):
 	"""SSH server & client security auditing (banner, key exchange, encryption, mac, compression, etc)."""
+	friendly_display_name = "SSH security audit"
 
 	cmd = 'ssh-audit'
 	input_types = [HOST, IP]

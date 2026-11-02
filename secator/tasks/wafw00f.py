@@ -13,6 +13,7 @@ from secator.tasks._categories import OPTS
 @task()
 class wafw00f(Command):
 	"""Web Application Firewall Fingerprinting tool."""
+	friendly_display_name = "WAF fingerprinter"
 	cmd = 'wafw00f'
 	input_types = [URL, HOST, HOST_PORT, IP]
 	output_types = [Tag]

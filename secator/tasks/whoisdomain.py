@@ -8,6 +8,7 @@ from secator.serializers import JSONSerializer
 @task()
 class whoisdomain(Command):
 	"""The whois tool retrieves registration information about domain names and IP addresses."""
+	friendly_display_name = "WHOIS domain lookup"
 	cmd = 'whoisdomain'
 	input_flag = '-d'
 	json_flag = '--json'

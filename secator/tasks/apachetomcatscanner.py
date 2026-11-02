@@ -17,6 +17,7 @@ from secator.tasks._categories import Vuln
 @task()
 class apachetomcatscanner(Vuln):
 	"""Apache Tomcat servers vulnerability scanner."""
+	friendly_display_name = "Apache Tomcat scanner"
 
 	cmd = 'apachetomcatscanner'
 	input_types = [URL]
