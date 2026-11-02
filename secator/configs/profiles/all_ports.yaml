@@ -1,7 +1,8 @@
 type: profile
 name: all_ports
 category: network
-description: "Scan all ports"
+description: "Scan all 65535 ports"
+warning: "Scanning all 65535 ports instead of the common set can increase scan time significantly."
 enforce: true
 opts:
     ports: "-"

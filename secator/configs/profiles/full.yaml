@@ -2,6 +2,7 @@ type: profile
 name: full
 category: general
 description: "Activate all optional features"
+warning: "Enables bruteforcing and other deep-scan features. This runs a much more thorough scan but can increase scan time enormously."
 enforce: true
 opts:
     # Task option overrides
