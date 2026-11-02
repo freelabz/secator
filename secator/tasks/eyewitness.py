@@ -75,8 +75,12 @@ class eyewitness(HttpBase):
 	# containers). install_pre keys are *package-manager* names (apt/apk/dnf/...), so
 	# the old 'arch' key never matched (pacman is the pm name) and '*' wrongly applied
 	# apt names everywhere. Map each package manager explicitly.
+	# NOTE: on apt (Debian/Ubuntu) we do NOT install `chromium`/`chromium-driver`:
+	# on modern Ubuntu those are snap-shim transitional packages, and installing the
+	# chromium snap is flaky in CI/containers (and leaves apt half-broken on failure).
+	# Rely on the system-installed Chrome instead — same approach as httpx/katana.
 	install_pre = {
-		'apt': ['chromium', 'chromium-driver', 'xvfb', 'wget', 'curl', 'jq', 'cmake', 'python3-venv', 'python3-dev'],
+		'apt': ['xvfb', 'wget', 'curl', 'jq', 'cmake', 'python3-venv', 'python3-dev'],
 		'apk': ['chromium', 'chromium-chromedriver', 'xvfb', 'wget', 'curl', 'jq', 'cmake', 'py3-virtualenv', 'python3-dev'],  # noqa: E501
 		'yum|dnf': ['chromium', 'chromedriver', 'xorg-x11-server-Xvfb', 'wget', 'curl', 'jq', 'cmake', 'python3-devel'],
 		'pacman': ['chromium', 'xorg-server-xvfb', 'wget', 'curl', 'jq', 'cmake'],
