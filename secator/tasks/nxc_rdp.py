@@ -64,11 +64,11 @@ class nxc_rdp(Vuln):
 	# and some deps build native (Rust) extensions. Provide the toolchain and relax the
 	# netifaces build so the pipx install succeeds on newer compilers (e.g. Debian trixie).
 	install_pre = {
-		'apt': ['build-essential', 'python3-dev', 'libssl-dev', 'pkg-config', 'rustc', 'cargo'],
-		'apk': ['build-base', 'python3-dev', 'openssl-dev', 'pkgconfig', 'rust', 'cargo'],
-		'yum|dnf': ['gcc', 'python3-devel', 'openssl-devel', 'pkgconf-pkg-config', 'rust', 'cargo'],
-		'pacman': ['base-devel', 'openssl', 'pkgconf', 'rust'],
-		'brew': ['openssl', 'pkg-config', 'rust'],
+		'apt': ['build-essential', 'python3-dev', 'libssl-dev', 'pkg-config'],
+		'apk': ['build-base', 'python3-dev', 'openssl-dev', 'pkgconfig'],
+		'yum|dnf': ['gcc', 'python3-devel', 'openssl-devel', 'pkgconf-pkg-config'],
+		'pacman': ['base-devel', 'openssl', 'pkgconf'],
+		'brew': ['openssl', 'pkg-config'],
 	}
 	install_cmd = 'CFLAGS="-Wno-error=int-conversion" pipx install --force git+https://github.com/Pennyw0rth/NetExec@[install_version]'  # noqa: E501
 
