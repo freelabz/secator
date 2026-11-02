@@ -151,6 +151,18 @@ class TestBuildToolSchemas(unittest.TestCase):
 		# and dead-ended because the tool wasn't exposed in this mode.
 		self.assertIn("run_subagent", names)
 
+	def test_research_mode_full_active_surface_minus_change_mode(self):
+		"""research is a directly-selected terminal action mode: it gets the full active
+		surface (shell to stand up a lab, web_search to find PoCs, run_subagent for
+		adversarial fan-out, add_finding to record the Exploit) but NOT change_mode — it
+		already has the top surface and must not escalate/de-escalate."""
+		from secator.ai.tools import build_tool_schemas
+		names = {s["function"]["name"] for s in build_tool_schemas("research")}
+		for t in ("run_shell", "web_search", "run_subagent", "add_finding", "run_task",
+		          "run_workflow", "query_workspace", "mark_vuln_exploited"):
+			self.assertIn(t, names, t)
+		self.assertNotIn("change_mode", names)
+
 	def test_change_mode_gated_by_pin(self):
 		"""change_mode lets the model self-escalate in an AUTO session or from a pinned
 		action mode, but a user-PINNED read-only chat must stay read-only (tool withheld),

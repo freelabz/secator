@@ -61,6 +61,7 @@ QUERIES = load_prompt("constraints/queries.txt")
 SYSTEM_SCAN = Template(load_prompt("modes/scan.txt"))
 SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
 SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
+SYSTEM_RESEARCH = Template(load_prompt("modes/research.txt"))
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
 MODES = {
@@ -93,6 +94,19 @@ MODES = {
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
 		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
+	},
+	"research": {
+		"system_prompt": SYSTEM_RESEARCH,
+		"description": "research a vulnerability (CVE/0-day): find or craft a working PoC in a sandbox lab, with adversarial subagents, and record it",
+		# Full active toolset (same as exploit) MINUS change_mode: research is a deliberate,
+		# directly-selected terminal mode — it already has the most capable surface, so there
+		# is nothing to escalate to and it must not de-escalate out. It leans on `subagent`
+		# (adversarial fan-out), `shell` (stand up a sandbox lab), `web_search` (find PoCs) and
+		# `add_finding` (record the validated Exploit, linked by `cves`).
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "stop"],
+		# Research is long-running (stand up labs, fan out subagents, iterate on PoCs), so it
+		# gets a higher iteration floor than scan/exploit.
+		"max_iterations": 12,
 	},
 }
 
@@ -448,7 +462,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# $output_types_reference, so they must be substituted for all modes — derive both
 	# from FINDING_TYPES so they never drift from the registry.
 	subst = dict(query_types=build_query_types(), output_types_reference=build_output_types_reference())
-	if mode in ("scan", "exploit"):
+	if mode in ("scan", "exploit", "research"):
 		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 		subst.update(library_reference=build_library_reference(), **path_vars)
 	result = system_prompt.safe_substitute(**subst)
