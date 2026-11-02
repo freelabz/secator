@@ -410,6 +410,14 @@ class SourceInstaller:
 				'GIT_CONFIG_KEY_0': f'url.https://x-access-token:{CONFIG.cli.github_token}@github.com/.insteadOf',
 				'GIT_CONFIG_VALUE_0': 'https://github.com/',
 			}
+		# `go install` module fetches through proxy.golang.org intermittently fail with
+		# HTTP/2 INTERNAL_ERROR in CI and abort the whole build. Fall back to a direct (VCS)
+		# fetch on ANY proxy error (the `|` separator, vs `,` which only falls back on 404/410).
+		# Leave GOSUMDB on: Go refuses to auto-download a newer toolchain with it disabled.
+		if 'go install' in install_cmd or 'go get' in install_cmd:
+			cls_attributes.setdefault('extra_env', {}).update({
+				'GOPROXY': 'https://proxy.golang.org|direct',
+			})
 		ret = Command.execute(install_cmd, cls_attributes=cls_attributes, quiet=False)
 		if ret.return_code != 0:
 			if "could not read Username for 'https://github.com'" in (ret.output or ''):
@@ -708,7 +716,7 @@ def get_version_info(name, version_flag=None, github_handle=None, install_github
 				)
 				info['latest_version'] = latest_version
 				info['source'] = 'github'
-			elif install_cmd and install_cmd.startswith('pip'):
+			elif isinstance(install_cmd, str) and install_cmd.startswith('pip'):
 				try:
 					req = requests.get(f'https://pypi.org/pypi/{name}/json', timeout=5)
 				except requests.RequestException as e:  # proxy / TLS / DNS: degrade to "latest unknown"
