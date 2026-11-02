@@ -94,9 +94,9 @@ class gau(HttpCrawler):
 		if self.get_opt_value('subs'):
 			domain = extract_domain_info(parsed_url.hostname, domain_only=True)
 			if domain:
-				subdomain = Subdomain(host=parsed_url.hostname, domain=domain, tags=['passive'])
+				subdomain = Subdomain(host=parsed_url.hostname, domain=domain, tags=['passive'], confidence='low')
 				if subdomain not in self.subdomains:
 					self.subdomains.append(subdomain)
 					yield subdomain
 		else:
-			yield Url(url=item['url'], host=parsed_url.hostname, tags=['passive'])
+			yield Url(url=item['url'], host=parsed_url.hostname, tags=['passive'], confidence='low')
