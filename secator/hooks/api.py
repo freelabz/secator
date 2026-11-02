@@ -16,6 +16,8 @@ import time
 import requests
 
 from functools import cache
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, Error, Info
@@ -44,10 +46,31 @@ def get_runner_dbg(runner):
 	return {runner.unique_name: runner.status, 'type': runner.config.type, 'class': runner.__class__.__name__, 'caller': runner.config.name, **runner.context}  # noqa: E501
 
 
-# Transient failures (connection drops, proxy 5xx, rate limits) are retried with
-# exponential backoff: 1s, 2s, 4s.
+# Transient failures (connection drops, proxy 5xx, rate limits) are retried by
+# urllib3's Retry via a mounted HTTPAdapter: exponential backoff (backoff_factor=1
+# -> 1s, 2s, 4s) and Retry-After is honoured on 429s. POST/PUT are included in the
+# retried methods because runner/finding writes carry an Idempotency-Key, so a retry
+# is safe.
 API_RETRIES = 3
 API_RETRY_STATUSES = (429, 500, 502, 503, 504)
+
+
+@cache
+def _get_session():
+	"""requests Session with urllib3-backed retries + exponential backoff."""
+	retry = Retry(
+		total=API_RETRIES,
+		backoff_factor=1,
+		status_forcelist=API_RETRY_STATUSES,
+		allowed_methods=frozenset({'GET', 'POST', 'PUT', 'DELETE', 'PATCH'}),
+		raise_on_status=False,
+		respect_retry_after_header=True,
+	)
+	adapter = HTTPAdapter(max_retries=retry)
+	session = requests.Session()
+	session.mount('http://', adapter)
+	session.mount('https://', adapter)
+	return session
 
 
 def _make_request(method, endpoint, data=None, idempotency_key=None):
@@ -58,26 +81,14 @@ def _make_request(method, endpoint, data=None, idempotency_key=None):
 		headers['Authorization'] = f'{API_HEADER_NAME} {API_KEY}'
 	if idempotency_key:
 		headers['Idempotency-Key'] = str(idempotency_key)
-	verify = FORCE_SSL
-	timeout = API_TIMEOUT
 	debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
 	debug('API headers', sub='hooks.api', verbose=True, obj=headers)
 	json_data = json.dumps(data, cls=DataclassEncoder) if data else None
 	if json_data:
 		debug('API data', sub='hooks.api', verbose=True, obj=json_data, obj_after=True)
-	for attempt in range(API_RETRIES + 1):
-		last = attempt == API_RETRIES
-		try:
-			response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)  # noqa: E501
-		except (requests.ConnectionError, requests.Timeout):
-			if last:
-				raise
-			time.sleep(2 ** attempt)
-			continue
-		if response.status_code in API_RETRY_STATUSES and not last:
-			time.sleep(2 ** attempt)
-			continue
-		break
+	response = _get_session().request(
+		method=method, url=url, data=json_data, headers=headers, verify=FORCE_SSL, timeout=API_TIMEOUT,
+	)
 	if not response.ok:
 		# Error bodies may not be JSON (e.g. an HTML 502 from a proxy): surface the
 		# HTTP error rather than a JSON decode error.
