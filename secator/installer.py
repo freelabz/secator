@@ -410,6 +410,15 @@ class SourceInstaller:
 				'GIT_CONFIG_KEY_0': f'url.https://x-access-token:{CONFIG.cli.github_token}@github.com/.insteadOf',
 				'GIT_CONFIG_VALUE_0': 'https://github.com/',
 			}
+		# `go install` fetches through proxy.golang.org / sum.golang.org, which intermittently
+		# fail with HTTP/2 INTERNAL_ERROR in CI and abort the whole build. Fall back to a direct
+		# (VCS) fetch on ANY proxy error (the `|` separator, vs `,` which only falls back on
+		# 404/410) and skip the checksum DB so a transient proxy hiccup doesn't kill the install.
+		if 'go install' in install_cmd or 'go get' in install_cmd:
+			cls_attributes.setdefault('extra_env', {}).update({
+				'GOPROXY': 'https://proxy.golang.org|direct',
+				'GOSUMDB': 'off',
+			})
 		ret = Command.execute(install_cmd, cls_attributes=cls_attributes, quiet=False)
 		if ret.return_code != 0:
 			if "could not read Username for 'https://github.com'" in (ret.output or ''):
