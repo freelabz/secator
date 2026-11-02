@@ -49,9 +49,12 @@ class beanshooter(Command):
 		'pacman': ['jre-openjdk-headless'],
 		'brew': ['openjdk'],
 	}
+	# Download the jar straight to the bin dir with `wget -O`. A bare `wget <url>`
+	# writes to the current working directory, which is not writable in the platform
+	# Docker build (the `secator` user has no write access to WORKDIR) -> "Permission
+	# denied" -> install fails. Writing directly to CONFIG.dirs.bin avoids that.
 	install_cmd = (
-		'wget https://github.com/qtc-de/beanshooter/releases/download/v[install_version]/beanshooter-[install_version]-jar-with-dependencies.jar && '  # noqa: E501
-		f'mv beanshooter-[install_version]-jar-with-dependencies.jar {CONFIG.dirs.bin}/beanshooter.jar && '
+		f'wget -O {CONFIG.dirs.bin}/beanshooter.jar https://github.com/qtc-de/beanshooter/releases/download/v[install_version]/beanshooter-[install_version]-jar-with-dependencies.jar && '  # noqa: E501
 		f'echo "{BEANSHOOTER_BIN}" > {CONFIG.dirs.bin}/beanshooter && '
 		f'chmod +x {CONFIG.dirs.bin}/beanshooter'
 	)

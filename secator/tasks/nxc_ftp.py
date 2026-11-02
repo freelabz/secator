@@ -58,7 +58,29 @@ class nxc_ftp(Vuln):
     github_handle = 'Pennyw0rth/NetExec'
     install_github_bin = False
     install_version = "30cf1465"
-    install_cmd = "pipx install --force git+https://github.com/Pennyw0rth/NetExec@[install_version]"
+    # NetExec pulls `netifaces`, whose old C fails GCC 14's now-fatal -Wint-conversion,
+    # and some deps build native (Rust) extensions. Provide the toolchain and relax the
+    # netifaces build so the pipx install succeeds on newer compilers (e.g. Debian trixie).
+    install_pre = {
+        'apt': ['build-essential', 'python3-dev', 'libssl-dev', 'pkg-config', 'curl'],
+        'apk': ['build-base', 'python3-dev', 'openssl-dev', 'pkgconfig', 'curl'],
+        'yum|dnf': ['gcc', 'python3-devel', 'openssl-devel', 'pkgconf-pkg-config'],
+        'pacman': ['base-devel', 'openssl', 'pkgconf'],
+        'brew': ['openssl', 'pkg-config'],
+    }
+    # NetExec builds native deps: netifaces (old C, fails GCC 14 -Wint-conversion) and a
+    # Rust extension. Bootstrap rustup when no cargo is present (the image bootstraps it
+    # on-demand only for `cargo install` tools, which nxc isn't), then relax the netifaces build.
+    install_cmd = (
+        'sh -c \''
+        'if ! command -v cargo >/dev/null 2>&1; then '
+        '  curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y >/dev/null; '
+        'fi; '
+        'export PATH="$CARGO_HOME/bin:$HOME/.cargo/bin:$PATH"; '
+        'CFLAGS="-Wno-error=int-conversion" '
+        'pipx install --force git+https://github.com/Pennyw0rth/NetExec@[install_version]'
+        '\''
+    )
 
     @staticmethod
     def on_cmd_opts(self, opts):
