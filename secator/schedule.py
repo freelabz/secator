@@ -27,6 +27,7 @@ server side under the same rules.
 import fcntl
 import json
 import os
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -229,10 +230,12 @@ class LocalBackend(_TxBackend):
 			fcntl.flock(lock, fcntl.LOCK_EX)
 			try:
 				rows = json.loads(self.path.read_text()) if self.path.exists() else []
+				before = json.dumps(rows, sort_keys=True)
 				yield rows
-				tmp = self.path.with_suffix('.tmp')
-				tmp.write_text(json.dumps(rows))
-				os.replace(tmp, self.path)
+				if json.dumps(rows, sort_keys=True) != before:  # skip the rewrite on read-only / no-op calls
+					tmp = self.path.with_suffix('.tmp')
+					tmp.write_text(json.dumps(rows))
+					os.replace(tmp, self.path)
 			finally:
 				fcntl.flock(lock, fcntl.LOCK_UN)
 
@@ -249,22 +252,24 @@ class SqliteBackend(_TxBackend):
 		path.parent.mkdir(parents=True, exist_ok=True)
 		self.conn = sqlite3.connect(str(path), timeout=CONFIG.addons.sqlite.busy_timeout_ms / 1000, isolation_level=None, check_same_thread=False)  # noqa: E501
 		self.conn.execute('CREATE TABLE IF NOT EXISTS schedules (id TEXT PRIMARY KEY, data TEXT)')
+		self._lock = threading.Lock()  # one shared connection: serialize transactions across capacity>1 threads
 
 	@contextmanager
 	def _tx(self):
-		self.conn.execute('BEGIN IMMEDIATE')
-		try:
-			rows = [json.loads(d) for (d,) in self.conn.execute('SELECT data FROM schedules')]
-			before = {s['id']: json.dumps(s, sort_keys=True) for s in rows}
-			yield rows
-			for s in rows:
-				data = json.dumps(s, sort_keys=True)
-				if before.get(s['id']) != data:
-					self.conn.execute('INSERT OR REPLACE INTO schedules (id, data) VALUES (?, ?)', (s['id'], data))
-			self.conn.execute('COMMIT')
-		except BaseException:
-			self.conn.execute('ROLLBACK')
-			raise
+		with self._lock:
+			self.conn.execute('BEGIN IMMEDIATE')
+			try:
+				rows = [json.loads(d) for (d,) in self.conn.execute('SELECT data FROM schedules')]
+				before = {s['id']: json.dumps(s, sort_keys=True) for s in rows}
+				yield rows
+				for s in rows:
+					data = json.dumps(s, sort_keys=True)
+					if before.get(s['id']) != data:
+						self.conn.execute('INSERT OR REPLACE INTO schedules (id, data) VALUES (?, ?)', (s['id'], data))
+				self.conn.execute('COMMIT')
+			except BaseException:
+				self.conn.execute('ROLLBACK')
+				raise
 
 
 class MongodbBackend(Backend):

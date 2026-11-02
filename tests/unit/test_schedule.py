@@ -94,6 +94,33 @@ def test_concurrent_claims_fire_once(backend, tmp_path):
 	assert len([r for r in results if r]) == 1
 
 
+def test_sqlite_shared_connection_is_serialized(tmp_path):
+	"""One SqliteBackend (as capacity>1 shares) must serialize concurrent _tx calls, not corrupt/race."""
+	b = SqliteBackend(db_path=tmp_path / 'secator.db')
+	for i in range(8):
+		s = make_schedule({'name': 'httpx', 'type': 'task'}, ['x'], {}, {}, '* * * * *', now=0)
+		s['id'] = f's{i}'
+		b.add_schedule(s)
+	errors = []
+
+	def hammer():
+		try:
+			for _ in range(50):
+				with b._tx() as rows:
+					for s in rows:
+						s['next_run'] = s['next_run'] + 1
+		except BaseException as e:  # noqa: BLE001 - test asserts no exception escaped
+			errors.append(e)
+
+	threads = [threading.Thread(target=hammer) for _ in range(8)]
+	for t in threads:
+		t.start()
+	for t in threads:
+		t.join()
+	assert errors == []
+	assert len(b.list_schedules()) == 8
+
+
 def test_mongodb_claim_is_compare_and_set(tmp_path):
 	"""Two agents read the same due schedule; only the first compare-and-set wins."""
 	b = _mongo_backend(tmp_path)

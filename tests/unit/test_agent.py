@@ -95,21 +95,59 @@ class TestSupervise(unittest.TestCase):
 			calls.append((path, kwargs.get('json')))
 			return _resp(body={'lease_ttl': 90, 'cancel': True}) if path.endswith('heartbeat') else _resp()
 
-		with patch.object(ApiBackend, 'request', side_effect=request), patch.object(agent_mod.subprocess, 'Popen', return_value=proc) as popen:  # noqa: E501
+		with patch.object(ApiBackend, 'request', side_effect=request), \
+			patch.object(agent_mod.os, 'killpg') as killpg, patch.object(agent_mod.os, 'getpgid', return_value=42), \
+			patch.object(agent_mod.subprocess, 'Popen', return_value=proc) as popen:  # noqa: E501
 			a.supervise(_job())
 		env = popen.call_args.kwargs['env']
+		self.assertTrue(popen.call_args.kwargs['start_new_session'])
 		self.assertEqual(env['SECATOR_ADDONS_API_KEY'], 'rt_x')
 		self.assertEqual(env['SECATOR_ADDONS_API_HEADER_NAME'], 'Run')
-		proc.send_signal.assert_called_once_with(signal.SIGINT)
+		killpg.assert_called_once_with(42, signal.SIGINT)
 		self.assertEqual(calls[-1][0], 'agent/jobs/j1/complete')
 		self.assertEqual(calls[-1][1], {'lease_id': 'l1', 'exit_code': 130, 'final_status': 'STOPPED', 'error': None})
 
 	def test_lease_lost_interrupts_child(self, *_):
 		a = _api_agent()
 		proc = _proc(None, 1)
-		with patch.object(ApiBackend, 'request', side_effect=[_resp(409), _resp()]), patch.object(agent_mod.subprocess, 'Popen', return_value=proc):  # noqa: E501
+		with patch.object(ApiBackend, 'request', side_effect=[_resp(409), _resp()]), \
+			patch.object(agent_mod.os, 'killpg') as killpg, patch.object(agent_mod.os, 'getpgid', return_value=42), \
+			patch.object(agent_mod.subprocess, 'Popen', return_value=proc):  # noqa: E501
 			a.supervise(_job())
-		proc.send_signal.assert_called_once_with(signal.SIGINT)
+		killpg.assert_called_once_with(42, signal.SIGINT)
+
+	def test_shutdown_flag_stops_child_and_reports_stopped(self, *_):
+		"""When the agent is shutting down, supervise interrupts the child and completes it as STOPPED."""
+		a = _api_agent()
+		a.shutting_down.set()
+		proc = _proc(None, 130)
+		calls = []
+
+		def request(method, path, **kwargs):
+			calls.append((path, kwargs.get('json')))
+			return _resp()
+
+		with patch.object(ApiBackend, 'request', side_effect=request), \
+			patch.object(agent_mod.os, 'killpg') as killpg, patch.object(agent_mod.os, 'getpgid', return_value=42), \
+			patch.object(agent_mod.subprocess, 'Popen', return_value=proc):
+			a.supervise(_job())
+		killpg.assert_called_once_with(42, signal.SIGINT)
+		self.assertEqual(calls[-1][0], 'agent/jobs/j1/complete')
+		self.assertEqual(calls[-1][1]['final_status'], 'STOPPED')
+
+	def test_max_runtime_exceeded_stops_child(self, *_):
+		"""A job that outlives max_runtime is interrupted with the max-runtime reason."""
+		a = _api_agent()
+		proc = _proc(None, None, 130)
+		job = _job()
+		job['max_runtime'] = 100
+		clock = [0.0]
+		with patch.object(ApiBackend, 'request', return_value=_resp()), \
+			patch.object(agent_mod.os, 'killpg') as killpg, patch.object(agent_mod.os, 'getpgid', return_value=42), \
+			patch.object(agent_mod.time, 'time', side_effect=lambda: clock.append(clock[-1] + 1000) or clock[-1]), \
+			patch.object(agent_mod.subprocess, 'Popen', return_value=proc):
+			a.supervise(job)
+		self.assertEqual(killpg.call_args_list[0].args, (42, signal.SIGINT))
 
 	def test_local_backend_schedule_run(self, *_):
 		"""A due schedule on a local backend is fired, run, heartbeated and completed by the agent."""
