@@ -48,9 +48,11 @@ class rmg(Command):
 		'pacman': ['jre-openjdk-headless'],
 		'brew': ['openjdk'],
 	}
+	# Download the jar straight to the bin dir with `wget -O` (a bare `wget <url>`
+	# writes to the cwd, which is not writable in the platform Docker build -> install
+	# fails with "Permission denied"). Same fix as beanshooter.
 	install_cmd = (
-		'wget https://github.com/qtc-de/remote-method-guesser/releases/download/v[install_version]/rmg-[install_version]-jar-with-dependencies.jar && '  # noqa: E501
-		f'mv rmg-[install_version]-jar-with-dependencies.jar {CONFIG.dirs.bin}/rmg.jar && '
+		f'wget -O {CONFIG.dirs.bin}/rmg.jar https://github.com/qtc-de/remote-method-guesser/releases/download/v[install_version]/rmg-[install_version]-jar-with-dependencies.jar && '  # noqa: E501
 		f'echo "{RMG_BIN}" > {CONFIG.dirs.bin}/rmg && '
 		f'chmod +x {CONFIG.dirs.bin}/rmg'
 	)
