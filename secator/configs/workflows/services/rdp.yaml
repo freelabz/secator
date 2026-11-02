@@ -1,0 +1,18 @@
+type: workflow
+name: rdp
+alias: rdp
+description: RDP vulnerability scan
+long_description: |
+  Scans RDP vulnerabilities using specialized tools.
+tags: [rdp, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  nuclei/rdp:
+    description: Detect RDP vulnerabilities
+    template_condition: "contains(id, 'rdp') || contains(tags, 'rdp')"
+  nxc_rdp/anonymous:
+    description: Check RDP anonymous login
