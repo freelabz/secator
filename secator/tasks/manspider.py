@@ -57,6 +57,18 @@ class manspider(Command):
 	opt_key_map = {
 		'max_depth': 'maxdepth',
 	}
+	# MANSPIDER builds a native wheel (maturin) whose Rust deps pull `openssl-sys`,
+	# which needs the system OpenSSL headers + pkg-config to compile. The minimal
+	# platform Docker images don't ship those, so the pipx build fails with
+	# "Package 'openssl' not found". Provide them per package manager.
+	install_pre = {
+		'apt': ['libssl-dev', 'pkg-config'],
+		'apk': ['openssl-dev', 'pkgconfig'],
+		'yum|dnf': ['openssl-devel', 'pkgconf-pkg-config'],
+		'zypper': ['libopenssl-devel', 'pkg-config'],
+		'pacman': ['openssl', 'pkgconf'],
+		'brew': ['openssl', 'pkg-config'],
+	}
 	install_cmd = "pipx install --force git+https://github.com/freelabz/MANSPIDER@feature/anon-share-enum-and-json-output"
 
 	@staticmethod
