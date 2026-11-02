@@ -49,7 +49,8 @@ class zabbix_get(Command):
 	install_pre = {
 		'apk': ['zabbix-utils'],
 		'brew': ['zabbix'],
-		'pacman': ['zabbix-agent'],
+		# On Arch, zabbix_get ships in `zabbix-server` (not `zabbix-agent`).
+		'pacman': ['zabbix-server'],
 		'yum|dnf|zypper': ['zabbix'],
 	}
 	# apt path needs wget + CA certs to fetch the zabbix-release .deb over HTTPS.
@@ -81,8 +82,16 @@ class zabbix_get(Command):
 			'    noble) REL=24.04 ;; '
 			'    *) REL="$VERSION_ID" ;; '
 			'  esac; '
+			# Debian / Kali: Zabbix 7.0 only publishes debian11 + debian12 packages, so a
+			# raw VERSION_ID (debian 13 "trixie", or Kali rolling where VERSION_ID is a
+			# year like 2025.x) builds a 404 URL. Clamp to the latest supported release
+			# (bookworm / 12); the bookworm zabbix-get binary installs fine on newer Debian.
 			'else '
-			'  BASE=debian; REL="${VERSION_ID%%.*}"; [ -n "$REL" ] || REL=13; '
+			'  BASE=debian; '
+			'  case "${VERSION_ID%%.*}" in '
+			'    11) REL=11 ;; '
+			'    *) REL=12 ;; '
+			'  esac; '
 			'fi; '
 			'DEB="zabbix-release_7.0-1+${BASE}${REL}_all.deb"; '
 			'wget -q "https://repo.zabbix.com/zabbix/7.0/${BASE}/pool/main/z/zabbix-release/${DEB}" -O /tmp/zabbix-release.deb; '
