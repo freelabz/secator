@@ -708,7 +708,7 @@ def get_version_info(name, version_flag=None, github_handle=None, install_github
 				)
 				info['latest_version'] = latest_version
 				info['source'] = 'github'
-			elif install_cmd and install_cmd.startswith('pip'):
+			elif isinstance(install_cmd, str) and install_cmd.startswith('pip'):
 				try:
 					req = requests.get(f'https://pypi.org/pypi/{name}/json', timeout=5)
 				except requests.RequestException as e:  # proxy / TLS / DNS: degrade to "latest unknown"
