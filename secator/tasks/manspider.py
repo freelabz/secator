@@ -61,7 +61,7 @@ class manspider(Command):
 	# The default branch pulls kreuzberg -> ort/ONNX (no musl wheels), which breaks the
 	# pure-Python install on Alpine/musl; with it optional, manspider installs with no
 	# native build deps on every distro.
-	install_cmd = "pipx install --force git+https://github.com/freelabz/MANSPIDER@feature/anon-share-enum-json-optional-kreuzberg"
+	install_cmd = "pipx install --force git+https://github.com/freelabz/MANSPIDER@feature/anon-share-enum-json-optional-kreuzberg"  # noqa: E501
 
 	@staticmethod
 	def on_cmd(self):
