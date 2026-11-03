@@ -19,7 +19,7 @@ class TestToolSchemas(unittest.TestCase):
 		expected = {"run_task", "run_workflow", "run_shell", "query_workspace",
 		            "fetch_url", "update_plan", "web_search", "list_runners",
 		            "run_subagent", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
-		            "mark_vuln_exploit_failed", "update_finding", "change_mode"}
+		            "mark_vuln_exploit_failed", "update_finding", "add_note", "change_mode"}
 		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)
 
 	def test_tool_schemas_openai_format(self):

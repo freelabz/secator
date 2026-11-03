@@ -97,6 +97,11 @@ class QueryEngine:
         """Update records matching query."""
         return self.backend.update(query, update)
 
+    def create_note(self, note: dict) -> int:
+        """Persist a note via the active backend (mongodb/sqlite/json write locally,
+        the api driver POSTs to the notes endpoint). Returns 1 on success, 0 otherwise."""
+        return self.backend.create_note(note)
+
     def list_workspaces(self) -> List[Dict[str, Any]]:
         """List all workspaces via the active backend."""
         return self.backend.list_workspaces()

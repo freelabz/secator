@@ -152,3 +152,25 @@ class QueryBackend(ABC):
 	def _execute_update(self, query: dict, update: dict) -> int:
 		"""Backend-specific update implementation."""
 		pass
+
+	def create_note(self, note: dict) -> int:
+		"""Persist a NOTE to this backend's notes store. Returns 1 on success, 0 otherwise.
+
+		Notes live in a dedicated store (NEVER the findings collection) keyed by the
+		target's ``(target_type, target_key)`` dedup identity — not its mutable ``_uuid`` —
+		so a note survives a re-scan that mints a fresh ``_uuid`` for the same finding.
+		The workspace scope is enforced HERE from the backend's own ``workspace_id`` (never
+		trusted from the note body), mirroring the write gate on ``update``.
+		"""
+		note = dict(note)
+		ctx = note.get('_context')
+		if not isinstance(ctx, dict):
+			ctx = {}
+		ctx['workspace_id'] = self.workspace_id
+		note['_context'] = ctx
+		return self._execute_create_note(note)
+
+	def _execute_create_note(self, note: dict) -> int:
+		"""Backend-specific note insert. Default: no notes store on this backend."""
+		debug(f'create_note not supported by {self.name} backend', sub='query')
+		return 0
