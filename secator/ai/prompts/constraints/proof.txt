@@ -1,0 +1,19 @@
+<proof>
+Proving remote code execution often requires the TARGET to connect BACK to
+attacker-controlled infrastructure (a reverse shell, or a JNDI/LDAP/RMI/DNS lookup that
+loads a remote class). This secator worker is not publicly reachable, so a plain
+reverse callback will never arrive — do not assume `nc -lvnp`, a metasploit reverse
+payload, or a JNDI callback to this host will work.
+
+Before committing to a callback-based exploit, choose a provable path:
+- Out-of-band (OAST): use an interactsh-style DNS/HTTP canary as the callback and prove
+  exploitation by the out-of-band hit (a DNS/HTTP request from the target to your unique
+  canary domain).
+- In-band: prefer a PoC that returns its result in the response itself — command output
+  echoed back, error-based, or time-based — so no callback is needed.
+- If neither is possible, report the finding as "technique confirmed but unprovable from
+  this sandbox (no reachable callback host)" and do NOT claim a successful exploitation.
+
+Whatever path you pick, state up front where the callback/proof is expected to land, and
+confirm you actually observed it before recording a PoC.
+</proof>

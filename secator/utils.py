@@ -751,34 +751,36 @@ def should_update(update_frequency, last_updated=None, timestamp=None):
 
 
 def list_reports(workspace=None, type=None, timedelta=None):
-	"""List all reports in secator reports dir.
+	"""Yield report.json paths in the secator reports dir.
+
+	A generator (lazy) — nothing is accumulated in memory.
 
 	Args:
 		workspace (str): Filter by workspace name.
 		type (str): Filter by runner type.
 		timedelta (None | datetime.timedelta): Keep results newer than timedelta.
 
-	Returns:
-		list: List all JSON reports.
+	Yields:
+		pathlib.Path: Each matching report.json path.
 	"""
 	if workspace:
 		workspace = sanitize_folder_name(workspace)
 	if type and not type.endswith('s'):
 		type += 's'
-	json_reports = []
-	for root, _, files in os.walk(CONFIG.dirs.reports):
-		for file in files:
-			path = Path(root) / file
-			if not path.parts[-1] == 'report.json':
-				continue
-			if workspace and path.parts[-4] != workspace:
-				continue
-			if type and path.parts[-3] != type:
-				continue
-			if timedelta and (datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)) > timedelta:
-				continue
-			json_reports.append(path)
-	return json_reports
+	# report.json lives at a fixed depth: <reports>/<workspace>/<type>/<id>/report.json.
+	# Glob that exact depth instead of os.walk — the latter descends into every run's
+	# artifact subdirectories (potentially thousands of files on a large reports dir)
+	# just to find the handful of report.json files, which is the dominant cost of
+	# `secator r list`. Local reports don't store nested sub-runner reports, so a
+	# fixed-depth glob is complete.
+	for path in Path(CONFIG.dirs.reports).glob('*/*/*/report.json'):
+		if workspace and path.parts[-4] != workspace:
+			continue
+		if type and path.parts[-3] != type:
+			continue
+		if timedelta and (datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)) > timedelta:
+			continue
+		yield path
 
 
 def get_info_from_report_path(path):
@@ -1013,7 +1015,8 @@ def is_host_port(target):
 	host, port = _split_host_port(target)
 	if not port:
 		return False
-	if not (validators.domain(host) or validators.ipv4(host) or validators.ipv6(host) or host == 'localhost'):
+	# rfc_2782=True permits underscores (cloud reverse-DNS hosts) — mirrors autodetect_type.
+	if not (validators.domain(host, rfc_2782=True) or validators.ipv4(host) or validators.ipv6(host) or host == 'localhost'):  # noqa: E501
 		return False
 	try:
 		port = int(port)
@@ -1057,7 +1060,12 @@ def autodetect_type(target):
 		return CIDR_RANGE
 	elif validators.ipv4(target) or validators.ipv6(target) or target == 'localhost':
 		return IP
-	elif validators.domain(target):
+	elif validators.domain(target, rfc_2782=True):
+		# rfc_2782=True permits underscores in labels. Cloud reverse-DNS / PTR
+		# names (e.g. OVH's xnkib_227077.s3.bhs.cloud.ovh.net) are RFC-1035-invalid
+		# but real, and scanners connect to them. Without this they classify as a
+		# non-network `str`, and host_in_scope() fails OPEN on non-network tokens —
+		# letting out-of-scope underscore hosts through the mandate scope filter.
 		return HOST
 	elif is_host_port(target):
 		return HOST_PORT
@@ -1101,6 +1109,11 @@ class TargetInfo:
 	reachable: bool     # ip|cidr: validity. host|url: DNS success. else False.
 
 
+# A short (2-3 part) plain dotted-decimal: ambiguous between an abbreviated IP and a
+# version/float, so NOT canonicalized to an IP (see canonicalize_target).
+_SHORT_DOTTED_DEC = re.compile(r'^\d{1,3}(?:\.\d{1,3}){1,2}$')
+
+
 def canonicalize_target(raw):
 	"""Normalize a single raw target token to the form a scanner/resolver would actually hit.
 
@@ -1133,12 +1146,16 @@ def canonicalize_target(raw):
 			token = token[1:end]
 
 	# Alternate IPv4 encodings -> dotted-quad, using inet_aton (same parser nmap/ping/libc use).
-	# Only numeric-ish tokens reach a match; hostnames and out-of-range ints raise and fall through.
-	try:
-		token = socket.inet_ntoa(socket.inet_aton(token))
-		return token
-	except OSError:
-		pass
+	# Skip AMBIGUOUS short dotted-decimals though: inet_aton reads "0.5"->0.0.0.5, "5.0.7"->
+	# 5.0.0.7, but those are far more often a version/float/timeout (`sleep 0.5`) than an IP,
+	# so leave them as-is (autodetect_type then types them str, not IP). Unambiguous encodings
+	# (single int/hex/octal, dotted-hex/octal, full quad) still canonicalize.
+	if not _SHORT_DOTTED_DEC.match(token):
+		try:
+			token = socket.inet_ntoa(socket.inet_aton(token))
+			return token
+		except OSError:
+			pass
 
 	# IDNA-encode Unicode hostnames (bare host or URL netloc) to punycode.
 	if not token.isascii():
@@ -1772,7 +1789,7 @@ def atomic_json(path, default=dict):
 	path.parent.mkdir(parents=True, exist_ok=True)
 	lock_path = str(path) + '.lock'
 	# Perf instrumentation (SECATOR_DEBUG=perf): one line per call with the lock-acquire wait and
-	# write time, to diagnose gevent-hub stalls / lock contention on the json write path in prod.
+	# write time, to diagnose gevent-hub stalls / lock contention on the json write path under concurrency.
 	_t0 = monotonic()
 	lock_wait_ms = write_ms = 0.0
 	with _get_path_lock(path):                        # (1) in-process (greenlet/thread cooperative)

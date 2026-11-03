@@ -21,6 +21,7 @@ from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.runners._base import REDACTED_OPT_VALUE
+from secator.runners._helpers import apply_task_overrides
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s, signal_to_name
 
@@ -76,6 +77,9 @@ class Command(Runner):
 	# Output map to transform JSON output keys
 	output_map = {}
 
+	# Delay before the first stats tick (t=0 has no interval to measure).
+	first_stat_delay = 0.3
+
 	# Run in shell if True (not recommended)
 	shell = False
 
@@ -120,6 +124,12 @@ class Command(Runner):
 	install_ignore_bin = []
 	install_version = None
 	install_binary_name = None
+	# When True, a failed install is reported as a warning and does NOT fail
+	# `secator install tools` (even with --fail-fast). Use ONLY for tools that
+	# genuinely cannot be installed in a vanilla/CI environment on every platform
+	# (e.g. a C++ source build with heavy system deps, a runtime kernel module, or
+	# root/Windows-only tooling). Installable tools must NOT set this.
+	install_optional = False
 	pypi_dependencies = None
 
 	# Serializer
@@ -166,6 +176,14 @@ class Command(Runner):
 	# Max execution timeout (seconds). If None, defaults to CONFIG.celery.task_max_timeout.
 	# Overridable via `secator config set tasks.overrides.<task>.max_timeout <seconds>`.
 	max_timeout = None
+
+	# Monitor-thread wake cadence (seconds) for the timeout / memory checks. None => the
+	# default (CONFIG.runners.stat_update_frequency), which also governs stats emission. A
+	# caller that sets a SHORT max_timeout must lower this too, otherwise the check only runs
+	# every stat_update_frequency (e.g. 20s) and a sub-cadence timeout never fires before the
+	# command finishes. Stats stay gated to stat_update_frequency regardless, so a small value
+	# adds no stat overhead — just extra cheap timeout/memory comparisons.
+	monitor_poll_interval = None
 
 	def __init__(self, inputs=[], **run_opts):
 
@@ -248,10 +266,8 @@ class Command(Runner):
 		self.proxy = self.run_opts.pop('proxy', False)
 		self.configure_proxy()
 
-		# Apply task-specific config overrides
-		task_name = self.__class__.__name__
-		for attr, value in CONFIG.tasks.overrides.get(task_name, {}).items():
-			setattr(self, attr, value)
+		# Apply task-specific config overrides (tasks.overrides.<task>.<attr>).
+		apply_task_overrides(self)
 
 		# Build command input
 		self._build_cmd_input()
@@ -541,6 +557,7 @@ class Command(Runner):
 			# Output and results
 			self.return_code = 0
 			self.killed = False
+			self.timed_out = False
 			self.memory_limit_mb = CONFIG.celery.task_memory_limit_mb
 
 			# Isolated CWD
@@ -549,7 +566,7 @@ class Command(Runner):
 				os.makedirs(self.cwd, exist_ok=True)
 
 			# Run the command using subprocess
-			env = {**os.environ, **self.extra_env}
+			env = {**self.run_opts.get('env', os.environ), **self.extra_env}
 			self.process = subprocess.Popen(
 				command,
 				stdin=subprocess.PIPE if sudo_password else None,
@@ -736,7 +753,12 @@ class Command(Runner):
 
 	def _monitor_process(self):
 		"""Monitor thread that checks process health and kills if necessary."""
-		last_stats_time = 0
+		# psutil measures cpu_percent() between two calls on the same Process, so reuse them.
+		procs = {}
+		list(self._collect_stats(procs))  # discarded: establishes the CPU baselines
+
+		last_stats_time = time() - CONFIG.runners.stat_update_frequency + self.first_stat_delay
+		poll_interval = self.first_stat_delay
 
 		while not self.monitor_stop_event.is_set():
 			if not self.process or not self.process.pid:
@@ -748,7 +770,7 @@ class Command(Runner):
 
 				# Collect and queue stats at regular intervals
 				if (current_time - last_stats_time) >= CONFIG.runners.stat_update_frequency:
-					stats_items = list(self._collect_stats())
+					stats_items = list(self._collect_stats(procs))
 					for stat_item in stats_items:
 						if self.monitor_queue is not None:
 							self.monitor_queue.put(stat_item)
@@ -772,6 +794,7 @@ class Command(Runner):
 						warning = Warning(message=f'Task timeout {max_timeout}s exceeded: incomplete results saved')
 						if self.monitor_queue is not None:
 							self.monitor_queue.put(warning)
+						self.timed_out = True
 						self.stop_process(exit_ok=True, sig=signal.SIGTERM)
 						break
 
@@ -794,90 +817,156 @@ class Command(Runner):
 					self.monitor_queue.put(warning)
 				break
 
-			# Sleep for a short interval before next check (stat update frequency)
-			self.monitor_stop_event.wait(CONFIG.runners.stat_update_frequency)
+			# Sleep before the next check. Stats are gated to stat_update_frequency above, so a
+			# shorter cadence (monitor_poll_interval) only makes the timeout/memory checks more
+			# responsive — needed when max_timeout is below stat_update_frequency.
+			self.monitor_stop_event.wait(poll_interval)
+			poll_interval = self.monitor_poll_interval or CONFIG.runners.stat_update_frequency
 
-	def _collect_stats(self):
-		"""Collect stats about the current running process, if any."""
-		if not self.process or not self.process.pid:
-			return
-		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True)
-		total_mem = 0
-		for info in stats:
-			name = info['name']
-			pid = info['pid']
-			cpu_percent = info['cpu_percent']
-			# mem_percent = info['memory_percent']
-			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
-			total_mem += mem_rss
-			self.debug(f'{name} {pid} {mem_rss}MB', sub='monitor')
-			net_conns = info.get('net_connections') or []
-			# extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
-			yield Stat(
-				name=name,
-				pid=pid,
-				cpu=cpu_percent,
-				memory=mem_rss,
-				memory_limit=self.memory_limit_mb,
-				net_conns=len(net_conns),
-				# extra_data=extra_data
-			)
-		# self.debug(f'Total mem: {total_mem}MB, memory limit: {self.memory_limit_mb}', sub='monitor')
-		# if self.memory_limit_mb and self.memory_limit_mb != -1 and total_mem > self.memory_limit_mb:
-		# 	raise MemoryError(f'Memory limit {self.memory_limit_mb}MB reached for {self.unique_name}')
-
-	def stats(self, memory_limit_mb=None):
-		"""Gather stats about the current running process, if any."""
-		if not self.process or not self.process.pid:
-			return
-		proc = psutil.Process(self.process.pid)
-		stats = Command.get_process_info(proc, children=True)
-		total_mem = 0
-		for info in stats:
-			name = info['name']
-			pid = info['pid']
-			cpu_percent = info['cpu_percent']
-			mem_percent = info['memory_percent']
-			mem_rss = round(info['memory_info']['rss'] / 1024 / 1024, 2)
-			total_mem += mem_rss
-			self.debug(f'process: {name} pid: {pid} memory: {mem_rss}MB', sub='stats')
-			net_conns = info.get('net_connections') or []
-			extra_data = {k: v for k, v in info.items() if k not in ['cpu_percent', 'memory_percent', 'net_connections']}
-			yield Stat(
-				name=name,
-				pid=pid,
-				cpu=cpu_percent,
-				memory=mem_percent,
-				net_conns=len(net_conns),
-				extra_data=extra_data,
-			)
-		self.debug(f'Total mem: {total_mem}MB, memory limit: {memory_limit_mb}', sub='stats')
-		if memory_limit_mb and memory_limit_mb != -1 and total_mem > memory_limit_mb:
-			raise MemoryError(f'Memory limit {memory_limit_mb}MB reached for {self.unique_name}')
-
-	@staticmethod
-	def get_process_info(process, children=False):
-		"""Get process information from psutil.
+	def _collect_stats(self, procs):
+		"""Collect stats about the current running process, if any.
 
 		Args:
-			process (subprocess.Process): Process.
-			children (bool): Whether to gather stats about children processes too.
+			procs (dict): pid -> psutil.Process, reused across ticks (see _monitor_process).
 		"""
-		try:
-			# fmt: off
-			data = {
-				k: v._asdict() if hasattr(v, '_asdict') else v
-				for k, v in process.as_dict().items()
-				if k not in ['memory_maps', 'open_files', 'environ']
-			}
-			# fmt: on
-			yield data
-		except (psutil.Error, FileNotFoundError):
+		if not self.process or not self.process.pid:
 			return
-		if children:
-			for subproc in process.children(recursive=True):
-				yield from Command.get_process_info(subproc, children=False)
+		infos = list(Command.get_process_info(psutil.Process(self.process.pid), children=True, procs=procs))
+		if not infos:
+			return
+		# One Stat PER process in the task's tree (the command + everything it spawns, e.g. a
+		# browser), so a consumer can drill into per-process utilization. Each memory is that
+		# process's PSS (proportional set size), which apportions shared pages — so summing PSS
+		# across the tree (or any subtree) gives its true footprint, unlike RSS which counts a
+		# parent's copy-on-write pages and the shared libraries every process maps once per
+		# process. `parent_pid` links each process to its parent within the tree (None for the
+		# root = the command itself), so stats can be nested (show roots, expand children). The
+		# memory-limit check in _monitor_process sums these PSS values, which is now correct.
+		tree_pids = {i['pid'] for i in infos}
+		# Optionally emit the worker process (the process running this task) as an extra root, and
+		# treat it as an in-tree parent so the command nests under it. In a 1-task-per-worker setup
+		# the subtree total then includes the worker's own footprint (its own PSS only — the task
+		# tree below is measured separately, so there is no double-count). Off by default.
+		worker_pid = None
+		if CONFIG.runners.monitor_worker:
+			worker_pid = os.getpid()
+			winfo = next(Command.get_process_info(psutil.Process(worker_pid), children=False, procs=procs), None)
+			if winfo:
+				self.debug(f'worker {worker_pid} (root) {round((winfo.get("pss") or 0) / 1048576, 2)}MB', sub='monitor')
+				yield Stat(
+					name=getattr(self, 'unique_name', None) or self.cmd_name,
+					pid=worker_pid,
+					parent_pid=None,
+					cpu=winfo.get('cpu_percent') or 0,
+					memory=round((winfo.get('pss') or 0) / 1024 / 1024, 2),
+					memory_limit=self.memory_limit_mb,
+					net_conns=len(winfo.get('net_connections') or []),
+				)
+		known = tree_pids | ({worker_pid} if worker_pid else set())
+		for info in infos:
+			ppid = info.get('ppid')
+			parent_pid = ppid if ppid in known else None
+			mem = round((info.get('pss') or 0) / 1024 / 1024, 2)
+			self.debug(f'{info.get("name")} {info.get("pid")} (parent {parent_pid}) {mem}MB', sub='monitor')
+			yield Stat(
+				name=info.get('name'),
+				pid=info.get('pid'),
+				parent_pid=parent_pid,
+				cpu=info.get('cpu_percent') or 0,
+				memory=mem,
+				memory_limit=self.memory_limit_mb,
+				net_conns=len(info.get('net_connections') or []),
+			)
+
+	# The only psutil attrs the per-tick monitor consumes. `as_dict()` with no attrs also
+	# collects open_files, net_connections, memory_maps, threads, io_counters, num_fds, ...
+	# — each opening /proc files on every process every tick, all discarded here. That
+	# needless churn is part of #1374. `ppid` is read from the same /proc/<pid>/stat that
+	# `name` already opens (no extra fd); cpu_percent and PSS are read explicitly below.
+	MONITOR_ATTRS = ['name', 'ppid', 'memory_info']
+
+	@staticmethod
+	def _iter_proc_tree(root_pid):
+		"""Yield ``root_pid`` and all its descendant pids.
+
+		Reads the kernel's own ``/proc/<pid>/task/<pid>/children`` lists, so the cost is
+		O(size of the task's own tree). ``psutil.Process.children(recursive=True)`` instead
+		reads ``/proc/<pid>/stat`` for EVERY process on the host on every call (it builds a
+		system-wide ppid map) — on a busy scan host that is hundreds of /proc opens per
+		monitor tick, the root cause of #1374's "too many open files". Falls back to psutil
+		where the children file isn't available (non-Linux, or a kernel without
+		CONFIG_PROC_CHILDREN).
+		"""
+		if not os.path.exists(f'/proc/{root_pid}/task/{root_pid}/children'):
+			try:
+				root = psutil.Process(root_pid)
+			except psutil.Error:
+				return
+			yield root_pid
+			for child in root.children(recursive=True):
+				yield child.pid
+			return
+		stack = [root_pid]
+		while stack:
+			pid = stack.pop()
+			yield pid
+			try:
+				with open(f'/proc/{pid}/task/{pid}/children') as f:
+					kids = f.read().split()
+			except OSError:  # process exited between reads
+				continue
+			stack.extend(int(k) for k in kids)
+
+	@staticmethod
+	def get_process_info(process, children=False, procs=None):
+		"""Yield an info dict for ``process`` (and its descendants when ``children``).
+
+		Walks only the task's own process subtree (see :meth:`_iter_proc_tree`) and reads
+		only the psutil attrs the monitor uses (``MONITOR_ATTRS`` + cpu_percent + PSS),
+		avoiding both the host-wide /proc scan and the unused-field collection that caused
+		the fd churn in #1374.
+
+		Args:
+			process (psutil.Process): Root process.
+			children (bool): Also gather descendants.
+			procs (dict): pid -> psutil.Process reused across ticks. Without it every
+				cpu_percent() is a first call, which returns 0.0.
+		"""
+		pids = Command._iter_proc_tree(process.pid) if children else [process.pid]
+		for pid in pids:
+			if procs is not None:
+				proc = procs.get(pid)
+				if proc is None:
+					try:
+						proc = psutil.Process(pid)
+					except psutil.Error:
+						continue
+					procs[pid] = proc
+			else:
+				try:
+					proc = psutil.Process(pid)
+				except psutil.Error:
+					continue
+			try:
+				cpu_percent = proc.cpu_percent()  # before as_dict(), which resets the baseline
+				data = {
+					k: v._asdict() if hasattr(v, '_asdict') else v
+					for k, v in proc.as_dict(attrs=Command.MONITOR_ATTRS).items()
+				}
+			except psutil.Error:  # process exited mid-walk; keep the rest
+				continue
+			data['pid'] = pid
+			data['cpu_percent'] = cpu_percent
+			# PSS (proportional set size) apportions shared pages, so summing it across a process
+			# tree yields the tree's real footprint — unlike RSS, which counts a parent's
+			# copy-on-write pages (and every shared library) once per process and so double-counts.
+			# PSS is Linux-only; fall back to RSS where it isn't available (macOS/Windows).
+			try:
+				mem_full = proc.memory_full_info()
+				data['pss'] = getattr(mem_full, 'pss', 0) or mem_full.rss
+			except psutil.Error:
+				data['pss'] = (data.get('memory_info') or {}).get('rss', 0)
+			yield data
 
 	def run_item_loaders(self, line):
 		"""Run item loaders against an output line.

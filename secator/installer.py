@@ -65,7 +65,7 @@ class ToolInstaller:
 		name = tool_cls.__name__
 		console.print(Info(message=f'[bold yellow]:wrench: Installing {name} ...[/]'))
 		status = InstallerStatus.UNKNOWN
-		has_cmd = hasattr(tool_cls, 'cmd')
+		has_cmd = bool(getattr(tool_cls, 'cmd', None))  # a generic task (cmd='') has no tool to install
 
 		# For non-Command tasks (e.g. PythonRunner), only proceed if they have an install method
 		if not has_cmd and not getattr(tool_cls, 'install_cmd', None) and not getattr(tool_cls, 'pypi_dependencies', None):
@@ -400,9 +400,30 @@ class SourceInstaller:
 			version = version or 'latest'
 			install_cmd = install_cmd.replace('[install_version_strip]', version.lstrip('v'))
 
-		# Run command
-		ret = Command.execute(install_cmd, cls_attributes={'shell': True}, quiet=False)
+		# Run command. Authenticate git clones from GitHub with the configured token (via git's env-based
+		# config, so the token never shows up in the printed command): anonymous clones get rate-limited.
+		# git only applies the rewrite to URLs starting with https://github.com/, so it's a no-op otherwise.
+		cls_attributes = {'shell': True}
+		if CONFIG.cli.github_token:
+			cls_attributes['extra_env'] = {
+				'GIT_CONFIG_COUNT': '1',
+				'GIT_CONFIG_KEY_0': f'url.https://x-access-token:{CONFIG.cli.github_token}@github.com/.insteadOf',
+				'GIT_CONFIG_VALUE_0': 'https://github.com/',
+			}
+		# `go install` module fetches through proxy.golang.org intermittently fail with
+		# HTTP/2 INTERNAL_ERROR in CI and abort the whole build. Fall back to a direct (VCS)
+		# fetch on ANY proxy error (the `|` separator, vs `,` which only falls back on 404/410).
+		# Leave GOSUMDB on: Go refuses to auto-download a newer toolchain with it disabled.
+		if 'go install' in install_cmd or 'go get' in install_cmd:
+			cls_attributes.setdefault('extra_env', {}).update({
+				'GOPROXY': 'https://proxy.golang.org|direct',
+			})
+		ret = Command.execute(install_cmd, cls_attributes=cls_attributes, quiet=False)
 		if ret.return_code != 0:
+			if "could not read Username for 'https://github.com'" in (ret.output or ''):
+				console.print(Warning(message='GitHub refused the anonymous git clone (rate limit reached, or private / missing repository).'))  # noqa: E501
+				if not CONFIG.cli.github_token:
+					console.print(Warning(message='Consider setting env variable SECATOR_CLI_GITHUB_TOKEN or use secator config set cli.github_token $TOKEN.'))  # noqa: E501
 			return InstallerStatus.INSTALL_FAILED
 
 		# Get binary path
@@ -695,19 +716,24 @@ def get_version_info(name, version_flag=None, github_handle=None, install_github
 				)
 				info['latest_version'] = latest_version
 				info['source'] = 'github'
-			elif install_cmd and install_cmd.startswith('pip'):
-				req = requests.get(f'https://pypi.python.org/pypi/{name}/json')
-				version = parse_version('0')
-				if req.status_code == requests.codes.ok:
+			elif isinstance(install_cmd, str) and install_cmd.startswith('pip'):
+				try:
+					req = requests.get(f'https://pypi.org/pypi/{name}/json', timeout=5)
+				except requests.RequestException as e:  # proxy / TLS / DNS: degrade to "latest unknown"
+					debug(f'Failed to fetch latest version for {name} from pypi: {e}', sub='installer')
+					info['errors'].append(f'Cannot reach pypi to get latest version: {e}')
+					req = None
+				# NB: do NOT reuse `version` here — it holds the caller's current version.
+				pypi_version = parse_version('0')
+				if req is not None and req.status_code == requests.codes.ok:
 					j = json.loads(req.text.encode(req.encoding))
 					releases = j.get('releases', [])
 					for release in releases:
 						ver = parse_version(release)
 						if ver and not ver.is_prerelease and not ver.is_postrelease and not ver.is_devrelease:
-							version = max(version, ver)
-							latest_version = str(version)
+							pypi_version = max(pypi_version, ver)
+							latest_version = str(pypi_version)
 							info['source'] = 'pypi'
-				version = str(version) if version else None
 			else:
 				info['errors'].append('Cannot get latest version for query method (github, pip) is available')
 	info['latest_version'] = f'v{latest_version}' if install_version and install_version.startswith('v') else latest_version  # noqa: E501
@@ -746,6 +772,8 @@ def get_version_info(name, version_flag=None, github_handle=None, install_github
 		info['status'] = 'latest unknown'
 		if CONFIG.offline_mode:
 			info['status'] += r' [dim orange1]\[offline][/]'
+		elif any('Cannot reach' in e for e in info['errors']):
+			info['status'] += r' [dim orange1]\[unreachable][/]'
 
 	return info
 

@@ -86,7 +86,7 @@ app.conf.update(
 		# workflow. Keep the connection alive (keepalive + health-check) AND retry the
 		# store on a transient error so a reset can't fail the task.
 		'redis_socket_keepalive': True,
-		'redis_backend_health_check_interval': 30,
+		'redis_backend_health_check_interval': CONFIG.celery.redis_backend_health_check_interval,
 		'redis_retry_on_timeout': True,
 		'result_backend_always_retry': True,
 		'result_backend_max_retries': 20,
@@ -272,6 +272,12 @@ def abandon_task(name, targets, opts, delivery_count=None):
 	opts['sync'] = True
 	task_cls = Task.get_task_class(name)
 	task = task_cls(targets, **opts)
+	# An abandoned task spawned no children. A task that is a node of a workflow/scan
+	# inherits run_opts['has_children']=True from its parent; the normal run path overwrites
+	# that with needs_chunking() (False for a single-target task), but this abandon path skips
+	# that step, so clear it explicitly. Otherwise the stored doc carries has_children=True with
+	# zero child docs, and the UI child-runner list shows the failed task as "waiting" forever.
+	task.has_children = False
 	task.mark_started()
 	attempts = f'{delivery_count} delivery attempts' if delivery_count is not None else 'repeated delivery attempts'
 	task.add_result(Error(

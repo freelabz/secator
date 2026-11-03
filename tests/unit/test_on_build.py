@@ -310,6 +310,29 @@ class TestOnBuildChunkWiring(unittest.TestCase):
             f'Chunk ids are not all distinct: {chunk_ids}'
 
 
+class TestPendingDocDescription:
+    """build_pending_doc must carry the build-time description into config so the
+    UI shows it while a child task is PENDING (not only once it runs). The UI
+    reads config.description (falling back to config.name); before this the
+    pending doc had no description and every not-yet-run task showed its bare
+    name, then the description popped in on RUNNING."""
+
+    def test_pending_doc_carries_description_into_config(self):
+        from secator.hooks.sqlite import build_pending_doc
+        spec = {'name': 'nmap', 'description': 'Find open ports (light)',
+                'context': {'workspace_id': 'ws1'}}
+        doc = build_pending_doc(_FakeParent('workflow'), spec, 'task')
+        assert doc['config']['description'] == 'Find open ports (light)'
+        assert doc['config']['name'] == 'nmap'
+        assert doc['status'] == 'PENDING'
+
+    def test_pending_doc_description_defaults_to_empty(self):
+        from secator.hooks.sqlite import build_pending_doc
+        spec = {'name': 'nmap', 'context': {}}
+        doc = build_pending_doc(_FakeParent('workflow'), spec, 'task')
+        assert doc['config']['description'] == ''
+
+
 class TestOnBuildSqlite:
     def test_sqlite_on_build_stamps_task_id(self, tmp_path, monkeypatch):
         import secator.hooks.sqlite as sql

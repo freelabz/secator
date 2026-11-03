@@ -43,6 +43,42 @@ class TestCelery(unittest.TestCase):
 		from secator.query.sqlite import SqliteBackend
 		return SqliteBackend(workspace_id='ws').search({'_type': _type})
 
+	def test_sync_backfill_resurfaces_store_item_without_refiring_on_item(self):
+		"""#1524 regression: iterating a sync runner re-surfaces already-persisted store items
+		to the iterator (so the iterator carries findings, not just the target). A child's items
+		aren't in THIS runner's `uuids`, so that backfill must NOT re-fire on_item — else every
+		finding/note is delivered a SECOND time to every hook (double findings/notes)."""
+		from secator.runners import Workflow
+		from secator.loader import get_configs_by_type
+		workflows = get_configs_by_type('workflow')
+		if not workflows:
+			self.skipTest('No workflows configured')
+
+		wf = Workflow(workflows[0], inputs=['example.com'], context=dict(self.ctx))
+		# A finding already in the store under this runner's id but NOT in its `uuids` (exactly the
+		# child-item case the backfill re-surfaces).
+		persisted = Url(url='http://child.example', status_code=200, method='GET', _source='child')
+		persisted._uuid = 'persisted-uuid-1'
+		wf._view = lambda _type=None: [persisted]   # stub the store view the backfill reads
+		wf.yielder = lambda: iter([])               # no live items; go straight to the backfill
+
+		# spy the hooks arg add_result receives for the re-surfaced item
+		backfill_hooks = []
+		orig_add_result = wf.add_result
+
+		def spy(item, **kw):
+			if getattr(item, '_uuid', None) == 'persisted-uuid-1':
+				backfill_hooks.append(kw.get('hooks', True))
+			return orig_add_result(item, **kw)
+		wf.add_result = spy
+
+		yielded = list(wf)
+
+		self.assertIn(persisted, yielded, 'backfill must re-surface the persisted item to the iterator')
+		self.assertEqual(backfill_hooks, [False],
+		                 'backfill must add_result the re-surfaced item with hooks=False (no on_item re-fire)')
+		self.assertIn('persisted-uuid-1', wf.uuids, 'backfill must still register the uuid for dedup')
+
 	def test_httpx_chain(self):
 		from secator.tasks import httpx
 		if 'httpx' not in TEST_TASK_NAMES:
@@ -465,6 +501,32 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 			import shutil
 			shutil.rmtree(tmp, ignore_errors=True)
 
+	def test_abandon_task_clears_inherited_has_children(self):
+		"""An abandoned task spawned no children, so its stored doc must have has_children=False
+		even when it inherited has_children=True from a parent workflow/scan (run_opts). Otherwise
+		the UI child-runner list shows the failed task as 'waiting' forever (0 real children)."""
+		from unittest import mock
+		from secator.celery import abandon_task
+		from secator.tasks import httpx
+		if 'httpx' not in TEST_TASK_NAMES:
+			self.skipTest('httpx not available')
+		captured = {}
+
+		class Spy(httpx):
+			def mark_started(self, *a, **k):
+				pass
+
+			def add_result(self, *a, **k):
+				pass
+
+			def mark_completed(self, *a, **k):
+				captured['has_children'] = self.has_children
+
+		with mock.patch('secator.celery.Task.get_task_class', return_value=Spy):
+			# opts carry has_children=True (inherited from the parent workflow)
+			abandon_task('httpx', ['example.com'], {'context': {}, 'has_children': True}, delivery_count=2)
+		self.assertFalse(captured.get('has_children'), 'abandoned task must not keep inherited has_children')
+
 	def test_retries_exhausted_does_not_count_initial_delivery(self):
 		"""delivery_count includes the initial run; task_max_retries=N allows N redeliveries."""
 		from secator.celery import worker_loss_retries_exhausted
@@ -632,3 +694,38 @@ class TestRunnerPickle(unittest.TestCase):
 
 		finally:
 			del sys.modules['secator.hooks.faketaskdriver']
+
+
+class TestCeleryRedisHealthCheckInterval(unittest.TestCase):
+	"""The redis result-backend health check must default to disabled (0). Celery's redis
+	ResultConsumer drives a single pubsub connection with a SUBSCRIBE/UNSUBSCRIBE per task
+	result; redis-py's health check reads pending responses off that same connection and
+	raises `PubSubError: A non health check response was cleaned ...` when it meets an
+	UNSUBSCRIBE confirmation instead of its PING reply, aborting the workflow mid-chord."""
+
+	def test_default_disables_pubsub_health_check(self):
+		from secator.config import CONFIG
+		# The default MUST be 0 — any positive value re-enables the chord-hanging PubSubError.
+		self.assertEqual(CONFIG.celery.redis_backend_health_check_interval, 0)
+
+	def test_app_conf_reads_config_value(self):
+		from secator.config import CONFIG
+		self.assertEqual(
+			app.conf['redis_backend_health_check_interval'],
+			CONFIG.celery.redis_backend_health_check_interval,
+		)
+
+	def test_health_check_interval_is_config_driven_not_hardcoded(self):
+		"""Guard the exact regression CodeRabbit flagged: the equality test above passes
+		even if celery.py hard-codes 30 (CONFIG also defaults to 30). Rebuilding the app
+		with a non-default value is the only runtime proof, but reloading the Celery app
+		mid-suite is fragile; assert at the source that the setting is wired FROM CONFIG,
+		not a literal — which is precisely what a 'regression to a hard-coded 30' breaks."""
+		import inspect
+		import secator.celery as cel
+		src = inspect.getsource(cel)
+		self.assertRegex(
+			src,
+			r"""['"]redis_backend_health_check_interval['"]\s*:\s*CONFIG\.celery\.redis_backend_health_check_interval""",
+			"celery.py must source redis_backend_health_check_interval from CONFIG, not a literal",
+		)

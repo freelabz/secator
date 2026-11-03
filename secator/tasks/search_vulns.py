@@ -21,6 +21,9 @@ class search_vulns(Vuln):
 	tags = ['vuln', 'recon']
 	input_flag = '-q'
 	input_chunk_size = 1
+	# Inputs are product/CPE query strings (fan-in: `matched_at~product version`),
+	# not targets — never persist them as phantom Target findings.
+	enable_targets = False
 	item_loaders = [JSONSerializer()]
 	json_flag = '-f json'
 	version_flag = '-V'
@@ -45,7 +48,12 @@ class search_vulns(Vuln):
 	}
 	install_version = '1.0.9'
 	install_cmd = 'pipx install --force search_vulns==[install_version]'
-	install_post = {'*': 'search_vulns -u'}
+	# `-u` refreshes the local vuln DB, but upstream's update() first runs an unguarded
+	# version check (is_version_outdated: GitHub releases/latest redirect -> .split()),
+	# which raises AttributeError when GitHub returns no Location header (e.g. it rate-
+	# limits CI runners). Keep the refresh best-effort so that flaky external check can't
+	# fail the whole tool install.
+	install_post = {'*': 'search_vulns -u || true'}
 	github_handle = 'ra1nb0rn/search_vulns'
 	install_github_bin = False
 	proxychains = False

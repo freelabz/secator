@@ -2,8 +2,6 @@
 """Chat history management for AI task - litellm format."""
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from secator.utils import debug
@@ -12,6 +10,32 @@ from secator.utils import debug
 OUTPUT_TOKEN_RESERVATION = 8192  # Reserve for LLM response
 COMPACTION_THRESHOLD_PCT = 85    # Trigger compaction at 85% of usable context
 MAX_ACTION_TOKENS = 10_000       # Hard cap per action result
+
+# Hard cap on a persisted transcript message (BSON-safety backstop, well under
+# Mongo's 16MB doc limit) -- not primary truncation, which happens upstream via truncate_to_tokens.
+MAX_PERSISTED_MESSAGE_CHARS = 12000
+
+
+def _cap(text, max_chars):
+    if isinstance(text, str) and len(text) > max_chars:
+        return text[:max_chars] + '…[capped]'
+    return text
+
+
+def cap_message(msg: dict, max_chars: int = MAX_PERSISTED_MESSAGE_CHARS) -> dict:
+    """Return a copy of a litellm message with content + tool-call arguments
+    capped to max_chars (BSON-safety backstop). Non-string/short fields untouched."""
+    out = dict(msg)
+    if 'content' in out:
+        out['content'] = _cap(out['content'], max_chars)
+    if out.get('tool_calls'):
+        out['tool_calls'] = [
+            {**tc, 'function': {**tc.get('function', {}),
+                                'arguments': _cap(tc.get('function', {}).get('arguments'), max_chars)}}
+            if tc.get('function') else tc
+            for tc in out['tool_calls']
+        ]
+    return out
 
 
 def get_context_window(model: str) -> int:
@@ -46,19 +70,17 @@ def truncate_to_tokens(
     content: str,
     max_tokens: int,
     model: str,
-    fallback_path: Path = None,
-    output_dir: Path = None,
-    result_name: str = "result"
+    hint: str = "",
 ) -> str:
-    """Truncate content to fit within token budget, with file fallback.
+    """Truncate content to fit within token budget.
 
     Args:
         content: Content to truncate
         max_tokens: Maximum tokens allowed
         model: LLM model name for token counting
-        fallback_path: Existing file to reference (task/workflow report.json)
-        output_dir: Directory to save shell output (creates file)
-        result_name: Prefix for saved filename
+        hint: Optional guidance appended right after the [TRUNCATED] marker, telling
+            the model how to get the rest (the caller knows the result type — e.g. for
+            a task/workflow the findings are queryable by `_context.task_chunk_id`).
 
     Returns:
         Original content if under budget, or truncated with [TRUNCATED] marker
@@ -71,26 +93,15 @@ def truncate_to_tokens(
 
     debug(f'truncating: {current} > {max_tokens} tokens', sub='runner.ai.context')
 
-    # Determine file hint
-    if fallback_path and fallback_path.exists():
-        file_hint = f"\nFull output: {fallback_path}"
-        debug(f'using existing fallback: {fallback_path}', sub='runner.ai.context')
-    elif output_dir:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        fallback_path = output_dir / f"{result_name}_{timestamp}.txt"
-        fallback_path.write_text(content)
-        file_hint = f"\nFull output saved to: {fallback_path}"
-        debug(f'saved output to: {fallback_path}', sub='runner.ai.context')
-    else:
-        file_hint = ""
-
-    file_hint += "\nUse shell commands to explore: grep, head, tail, jq"
-
     # Truncate content (ratio-based with 10% safety margin)
     ratio = max_tokens / current
     truncate_at = int(len(content) * ratio * 0.9)
-    return content[:truncate_at] + f"\n\n[TRUNCATED]{file_hint}"
+    return content[:truncate_at] + f"\n\n[TRUNCATED]{hint}"
+
+
+def _usable_tokens(model: str) -> int:
+    """Model's context window minus the reserved output allowance."""
+    return get_context_window(model) - OUTPUT_TOKEN_RESERVATION
 
 
 SUMMARIZATION_PROMPT = """Summarize the following attack session history into a compact context.
@@ -124,9 +135,13 @@ class ChatHistory:
 
     messages: List[Dict[str, str]] = field(default_factory=list)
     model: Optional[str] = None
-
-    def add_system(self, content: str) -> None:
-        self.messages.append({"role": "system", "content": content})
+    # Billed token/cost usage accrued by LLM calls this object makes internally
+    # (history summarization/compaction). The owning `ai` task drains these into
+    # context.ai_tokens so summarization is billed alongside the main loop.
+    billed_tokens: int = 0
+    billed_prompt_tokens: int = 0
+    billed_completion_tokens: int = 0
+    billed_cost: float = 0.0
 
     def set_system(self, content: str) -> None:
         """Replace the first system message, or insert one at the start.
@@ -159,34 +174,68 @@ class ChatHistory:
             msg["content"] = content
         self.messages.append(msg)
 
-    def add_tool_result(self, name: str, tool_call_id: str, content: str) -> None:
+    def add_tool_result(self, name: str, tool_call_id: str, content: str,
+                        runner_id: str = "", runner_type: str = "") -> None:
         """Add a tool result message.
 
         Args:
             name: Function name
             tool_call_id: ID of the tool call this result responds to
             content: The tool's output content
+            runner_id: For a store-backed runner tool (run_task/workflow/scan), the id its
+                findings are scoped by (``_context.<runner_type>_id``). Stamped as a
+                ``_runner_*`` message key (mirrors ``_token_count`` — ignored by providers,
+                persisted with the message) so compaction can STUB this result to a
+                recoverable workspace pointer instead of LLM-summarizing it.
+            runner_type: ``task`` / ``workflow`` / ``scan``.
         """
         msg = {"role": "tool", "tool_call_id": tool_call_id, "name": name, "content": content}
         if name:
             msg["name"] = name
+        if runner_id and runner_type:
+            msg["_runner_id"] = runner_id
+            msg["_runner_type"] = runner_type
         self.messages.append(msg)
 
-    def add_tool(self, content: str) -> None:
-        self.messages.append({"role": "tool", "content": content})
-
     def to_messages(self, max_tokens_total: int = 0) -> List[Dict[str, str]]:
-        """Return a copy of the messages list, trimming if over max_tokens_total.
+        """Return a copy of the messages list, trimming if over the effective budget.
 
         Uses litellm's trim_messages which preserves system messages and recent
         context while removing oldest messages first.
 
         Args:
-            max_tokens_total: Hard token limit. If > 0, trim messages to fit.
+            max_tokens_total: Requested hard token limit (0 = no explicit cap).
         """
+        from secator.ai.utils import _repair_orphan_tool_uses
+        budget = self._trim_budget(max_tokens_total)
+        msgs = self.trim(budget) if budget > 0 else self.messages.copy()
+        # Repair FORWARD orphan tool_uses before every LLM call: an assistant
+        # tool_call with no matching tool_result. Some handlers (stop,
+        # mark_vuln_exploited, add_finding, stop) yield only an `Ai` and never append a
+        # tool_result, so their tool_calls pile up unmatched over a turn. Providers
+        # reject/degrade on an unmatched tool_call (the model starts narrating options
+        # as prose instead of calling stop), so synthesize an acknowledgment.
+        # Mutates the returned COPY only — self.messages (live history) is untouched,
+        # so the synthetic acks stay ephemeral (rebuilt each turn). trim() already
+        # handles LEADING orphans; this covers the forward ones on both paths.
+        _repair_orphan_tool_uses(msgs)
+        return msgs
+
+    def _trim_budget(self, max_tokens_total: int = 0) -> int:
+        """Effective trim budget, capped to the model's real context window.
+
+        A flat max_tokens_total (e.g. 100k) ignores the model window and
+        fails with context_length_exceeded on smaller-window models. Cap it to
+        get_context_window(model) - OUTPUT_TOKEN_RESERVATION (headroom for the
+        response), and use that window-derived budget even when no explicit cap
+        is set. With no model known, keep the legacy caller-driven behavior.
+        """
+        if not self.model:
+            return max_tokens_total
+        window_budget = max(_usable_tokens(self.model), 1)
         if max_tokens_total > 0:
-            return self.trim(max_tokens_total)
-        return self.messages.copy()
+            return min(max_tokens_total, window_budget)
+        return window_budget
 
     def trim(self, max_tokens: int) -> List[Dict[str, str]]:
         """Trim messages to fit under max_tokens using litellm's trim_messages.
@@ -201,11 +250,27 @@ class ChatHistory:
             Trimmed list of messages.
         """
         from litellm.utils import trim_messages
+        from secator.ai.utils import _strip_leading_orphan_tools
         from secator.rich import console
         from secator.output_types import Warning
 
         original_count = len(self.messages)
-        trimmed = trim_messages(self.messages, max_tokens=max_tokens)
+        # litellm's trim_messages does len(msg["content"]), which raises TypeError when an
+        # assistant turn carries only tool_calls (content=None/absent) -- coerce to "" first.
+        # Wrap the call so a trimmer bug degrades to untrimmed history instead of crashing.
+        sanitized = [dict(m, content="") if m.get("content") is None else m for m in self.messages]
+        try:
+            trimmed = trim_messages(sanitized, max_tokens=max_tokens)
+        except Exception as e:  # noqa: BLE001 - a token-trimming crash must never kill the AI loop
+            console.print(Warning(
+                message=f'Chat history trim failed ({type(e).__name__}: {e}); using untrimmed history.'
+            ))
+            trimmed = sanitized
+
+        # litellm drops the OLDEST messages with no tool-pairing awareness, so the
+        # kept window can START with an orphan tool_result whose assistant(tool_calls)
+        # parent was dropped — Anthropic/OpenAI reject that. Drop leading orphans.
+        _strip_leading_orphan_tools(trimmed)
         dropped = original_count - len(trimmed)
 
         if dropped:
@@ -285,7 +350,7 @@ class ChatHistory:
             Available tokens (context - reservation - used)
         """
         context_window = get_context_window(model)
-        usable = context_window - OUTPUT_TOKEN_RESERVATION
+        usable = _usable_tokens(model)
         used = self.count_tokens(model)
         available = usable - used
         debug(
@@ -294,20 +359,18 @@ class ChatHistory:
         )
         return available
 
-    def should_compact(self, model: str, threshold_pct: int = COMPACTION_THRESHOLD_PCT) -> bool:
+    def should_compact(self, model: str) -> bool:
         """Check if compaction needed based on % of context used.
 
         Args:
             model: LLM model name
-            threshold_pct: Percentage threshold (default 85)
 
         Returns:
             True if compaction needed
         """
-        context_window = get_context_window(model)
-        usable = context_window - OUTPUT_TOKEN_RESERVATION
+        usable = _usable_tokens(model)
         used = self.count_tokens(model)
-        threshold = usable * threshold_pct / 100
+        threshold = usable * COMPACTION_THRESHOLD_PCT / 100
         should = used > threshold
         pct_used = (used / usable * 100) if usable > 0 else 0
         debug(
@@ -342,8 +405,38 @@ class ChatHistory:
         debug(f'compacted: {old_tokens} -> {new_tokens} tokens', sub='runner.ai.context')
         return True, old_tokens, new_tokens
 
+    def _stub_recoverable_tool_results(self, msgs: List[Dict[str, str]]) -> int:
+        """Replace store-backed tool results (those stamped with `_runner_id` — the
+        run_task/workflow/scan findings that persist in the workspace) with a compact,
+        recoverable stub pointing at how to re-read them. Deterministic (no LLM), lossless
+        (``query_workspace`` rehydrates by runner id), and the tool message stays in place
+        so tool_call/result pairing is untouched. Mutates the given messages in place (they
+        are the same dict objects as ``self.messages``) and returns the count stubbed.
+        """
+        stubbed = 0
+        for m in msgs:
+            if m.get("role") != "tool" or not m.get("_runner_id"):
+                continue
+            if '"aged_out"' in (m.get("content") or ""):
+                continue  # already stubbed (idempotent across repeated compactions)
+            rid, rtype = m["_runner_id"], m.get("_runner_type") or "task"
+            m["content"] = json.dumps({
+                "aged_out": True,
+                "runner_id": rid,
+                "runner_type": rtype,
+                "note": (
+                    f'Findings from {rtype} "{rid}" were cleared to save context but are '
+                    f'stored in the workspace. Re-read them with query_workspace(query='
+                    f'{{"_context.{rtype}_id": "{rid}"}}) (that key alone is enough; '
+                    f'add "_type"/filters only to narrow).'),
+            }, separators=(',', ':'))
+            m.pop("_token_count", None)   # content changed -> invalidate the cached count
+            m.pop("_token_model", None)
+            stubbed += 1
+        return stubbed
+
     def compact(self, model: str, api_base: Optional[str] = None,
-                api_key: Optional[str] = None, keep_last: int = 4) -> None:
+                api_key: Optional[str] = None) -> None:
         """Summarize non-system messages using an LLM, keeping the initial system prompt
         and the last few messages intact so the LLM retains recent context.
 
@@ -351,8 +444,8 @@ class ChatHistory:
             model: LLM model name
             api_base: Optional API base URL
             api_key: Optional API key
-            keep_last: Number of recent non-system messages to preserve (default 4)
         """
+        keep_last = 4
         if len(self.messages) <= 2:
             return
 
@@ -374,13 +467,31 @@ class ChatHistory:
             to_summarize = rest
             to_keep = []
 
-        from secator.ai.utils import call_llm
+        from secator.ai.utils import call_llm, _strip_leading_orphan_tools
         from secator.rich import console
         from secator.utils import format_token_count
 
+        # The blind keep_last tail cut can leave to_keep STARTING with a tool_result
+        # whose assistant(tool_calls) parent fell into to_summarize — strip those so
+        # the rebuilt window never begins on an orphan tool_result.
+        _strip_leading_orphan_tools(to_keep)
+
+        # Phase 1 — deterministic, recoverable stubbing. Store-backed tool results
+        # (run_task/workflow/scan, tagged with `_runner_id`) are the bulk of the window and
+        # are losslessly re-readable from the workspace, so clear them to a compact pointer
+        # for FREE (no LLM call) instead of summarizing. If that alone brings us back under
+        # the threshold, keep the (now-small) messages in place and skip the summary — it's
+        # cheaper, lossless, keeps tool_call/result pairing intact, and the prefix stays
+        # stable for prompt caching going forward. Only the OLD results (to_summarize) are
+        # touched; the kept tail stays full for the model to work with.
+        self._stub_recoverable_tool_results(to_summarize)
+        if not self.should_compact(model):
+            return
+
+        # Phase 2 — still over budget: summarize the remainder (shell output, reasoning,
+        # non-recoverable results; stubbed results now cost almost nothing to carry).
         # Calculate target summary size based on available context
-        context_window = get_context_window(model)
-        usable = context_window - OUTPUT_TOKEN_RESERVATION
+        usable = _usable_tokens(model)
         target_tokens = int(usable * 0.3)  # Target 30% of usable context
         max_words = target_tokens // 2  # Rough tokens-to-words ratio
 
@@ -389,6 +500,20 @@ class ChatHistory:
         token_str = format_token_count(self.count_tokens(model), icon='arrow_up')
         with console.status(f"[bold orange3]Compacting chat history...[/] [gray42] • {token_str}[/]", spinner="dots"):
             result = call_llm([{"role": "user", "content": prompt}], model, 0.3, api_base, api_key)
+
+        # Record billed usage of the summarization call so the owning task can
+        # roll it into context.ai_tokens. Missing usage counts as 0.
+        usage = result.get("usage") or {}
+        for attr, key, cast in (
+            ("billed_tokens", "tokens", int),
+            ("billed_prompt_tokens", "prompt_tokens", int),
+            ("billed_completion_tokens", "completion_tokens", int),
+            ("billed_cost", "cost", float),
+        ):
+            try:
+                setattr(self, attr, getattr(self, attr) + cast(usage.get(key) or 0))
+            except (TypeError, ValueError):
+                pass
 
         self.messages = []
         if initial_system:

@@ -30,6 +30,7 @@ class Url(OutputType):
 	screenshot_path: str = field(default='', compare=False)
 	stored_response_path: str = field(default='', compare=False)
 	confidence: str = field(default='high', compare=False)
+	confidence_nb: int = field(default=0, compare=False)
 	response_headers: dict = field(default_factory=dict, repr=True, compare=False)
 	request_headers: dict = field(default_factory=dict, repr=True, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
@@ -61,6 +62,8 @@ class Url(OutputType):
 		'screenshot_path',
 	]
 	_sort_by = (URL,)
+	_group_by = ('host',)        # collapse a host's URLs into one row
+	_group_aggregate = URL
 
 	def __post_init__(self):
 		super().__post_init__()

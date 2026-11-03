@@ -270,3 +270,146 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 		self.assertEqual(len(vulns), cve_count * 2)
 		matched_ats = {v.matched_at for v in vulns}
 		self.assertEqual(matched_ats, {'10.0.0.1:80', '10.0.0.2:80'})
+
+
+class TestNmapIdsConfidence(unittest.TestCase):
+	"""On an IDS mass-scan host, `confidence` is computed PER PORT: every port is
+	'low' (noise) unless a service is genuinely fingerprinted (service_confidence
+	'high' and not tcpwrapped). `tcpwrapped` is forced to confidence='low' AND
+	service_confidence='low' — nmap scores it conf=8, but it's a confirmed non-service.
+
+	Regression: the old code carried a shared global_confidence that the first
+	confident port flipped to 'high', clobbering every later port — including
+	low-confidence, non-tcpwrapped ports — back to 'high'. The 'ids' tag still marks
+	every port on the host.
+	"""
+
+	def _parse_ports(self, content):
+		from secator.output_types import Port
+		fixtures_dir = os.path.join(os.path.dirname(__file__), '..', 'fixtures')
+		path = os.path.join(fixtures_dir, '_nmap_ids_test.xml')
+		with open(path, 'w') as f:
+			f.write(content)
+		try:
+			from secator.tasks.nmap import nmap
+			task = nmap.__new__(nmap)
+			task.output_path = path
+			results = list(task.xml_to_json())
+		finally:
+			os.remove(path)
+		return [r for r in results if isinstance(r, Port)]
+
+	def _mass_scan_xml(self):
+		# Mirrors the reviewer's example: two genuine services (conf=10), a run of
+		# tcpwrapped noise (conf=8), and a low-confidence non-tcpwrapped port (conf=1)
+		# LAST — the one the old shared-variable clobber wrongly reported 'high'.
+		def svc(i):
+			if i == 1:
+				return '<service name="nfs" product="rpcbind" method="probed" conf="10"/>'
+			if i == 24:
+				return '<service name="ftp" product="vsftpd" method="probed" conf="10"/>'
+			if i == 25:
+				return '<service name="ms-wbt-server" method="table" conf="1"/>'  # rdp, low conf
+			return '<service name="tcpwrapped" method="probed" conf="8"/>'
+		ports = []
+		for i in range(1, 26):  # 25 ports -> is_mass_scan (>20)
+			ports.append(
+				f'<port protocol="tcp" portid="{i}"><state state="open" reason="syn-ack"/>{svc(i)}</port>'
+			)
+		return (
+			'<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE nmaprun>\n'
+			'<nmaprun scanner="nmap" args="nmap" start="1" version="7.98">\n'
+			'<host><status state="up" reason="syn-ack"/>'
+			'<address addr="1.2.3.4" addrtype="ipv4"/>'
+			'<hostnames><hostname name="ids.example.net" type="PTR"/></hostnames>'
+			'<ports>' + ''.join(ports) + '</ports></host>\n</nmaprun>\n'
+		)
+
+	def test_per_port_confidence_no_clobber(self):
+		ports = {p.port: p for p in self._parse_ports(self._mass_scan_xml())}
+		self.assertEqual(len(ports), 25)
+		# host IDS marker still on every port
+		self.assertTrue(all('ids' in p.tags for p in ports.values()))
+		# genuine services (service_confidence high, not tcpwrapped) bypass the IDS 'low'
+		self.assertEqual(ports[1].confidence, 'high')   # nfs conf=10
+		self.assertEqual(ports[24].confidence, 'high')  # ftp conf=10
+		# tcpwrapped: confidence low AND service_confidence downgraded to low (was conf=8)
+		tcpw = [p for p in ports.values() if p.service_name == 'tcpwrapped']
+		self.assertEqual(len(tcpw), 22)
+		self.assertTrue(all(p.confidence == 'low' for p in tcpw), 'tcpwrapped must be low')
+		self.assertTrue(all(p.service_confidence == 'low' for p in tcpw), 'tcpwrapped service_confidence downgraded')
+		# THE REGRESSION: a low-confidence, non-tcpwrapped port that comes AFTER confident
+		# ports must stay 'low' — the old shared global_confidence clobbered it to 'high'.
+		self.assertEqual(ports[25].service_name, 'ms-wbt-server')
+		self.assertEqual(ports[25].confidence, 'low')
+
+
+class TestConfidenceByNature(unittest.TestCase):
+	"""confidence='high' is the schema default (verified/observed); a task pins 'low'
+	explicitly when its discovery is passive/unverified. Regression for the #1489 sweep."""
+
+	def test_passive_gau_yields_low_confidence_url(self):
+		from collections import defaultdict
+		from secator.output_types import Url
+		from secator.tasks.gau import gau
+		task = gau.__new__(gau)
+		task.seen_params = defaultdict(lambda: defaultdict(int))
+		task.max_param_occurrences = 1000
+		task.get_opt_value = lambda k: False  # subs=False -> yield Url
+		urls = [r for r in gau.on_json_loaded(task, {'url': 'http://example.com/a'}) if isinstance(r, Url)]
+		self.assertEqual(len(urls), 1)
+		self.assertEqual(urls[0].confidence, 'low')
+		self.assertEqual(urls[0].confidence_nb, 3)
+
+	def test_active_naabu_yields_high_confidence_port_and_ip(self):
+		from secator.output_types import Port, Ip
+		from secator.tasks.naabu import naabu
+		task = naabu.__new__(naabu)
+		task.hosts = []
+		task.get_opt_value = lambda k: 's'  # scan_type
+		results = list(naabu.on_json_loaded(task, {'ip': '1.2.3.4', 'host': 'h', 'port': 80}))
+		ports = [r for r in results if isinstance(r, Port)]
+		ips = [r for r in results if isinstance(r, Ip)]
+		self.assertEqual(ports[0].confidence, 'high')
+		self.assertEqual(ports[0].confidence_nb, 1)
+		self.assertEqual(ips[0].confidence, 'high')
+
+	def test_passive_output_maps_pin_low(self):
+		from secator.definitions import CONFIDENCE
+		from secator.output_types import Subdomain, Exploit, UserAccount
+		from secator.tasks.subfinder import subfinder
+		from secator.tasks.searchsploit import searchsploit
+		from secator.tasks.maigret import maigret
+		self.assertEqual(subfinder.output_map[Subdomain][CONFIDENCE]({}), 'low')
+		self.assertEqual(searchsploit.output_map[Exploit][CONFIDENCE]({}), 'low')
+		self.assertEqual(maigret.output_map[UserAccount][CONFIDENCE]({}), 'low')
+
+
+class TestNucleiHangMonitor(unittest.TestCase):
+	"""nuclei's hang-monitor self-kills the process (exit 1) when a goroutine looks stuck
+	~60s. secator must surface that as a Warning and NOT fail the task (partial results kept)."""
+
+	def _task(self):
+		from secator.tasks.nuclei import nuclei
+		t = nuclei.__new__(nuclei)
+		t.ignore_return_code = False  # class default; on_line flips it only on a hang
+		return t
+
+	def test_normal_line_does_not_trip(self):
+		from secator.tasks.nuclei import nuclei
+		t = self._task()
+		nuclei.on_line(t, '{"template-id":"x"}')
+		self.assertFalse(t.ignore_return_code)
+		self.assertEqual(list(nuclei.on_cmd_done(t)), [])
+
+	def test_hang_line_suppresses_failure_and_warns(self):
+		from secator.tasks.nuclei import nuclei
+		from secator.output_types import Warning
+		t = self._task()
+		line = 'Detected hanging goroutine (count=5/5) = nuclei-stacktrace-abc.dump'
+		self.assertEqual(nuclei.on_line(t, line), line)   # line passes through unchanged
+		self.assertTrue(t.ignore_return_code)             # exit(1) no longer fails the task
+		out = list(nuclei.on_cmd_done(t))
+		self.assertEqual(len(out), 1)
+		self.assertIsInstance(out[0], Warning)
+		self.assertIn('hang-monitor', out[0].message)

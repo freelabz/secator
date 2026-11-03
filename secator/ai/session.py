@@ -31,8 +31,34 @@ def save_history(history, reports_folder, debug_fn=None):
 			console.print(Warning(message=f'Failed to save history: {e}'))
 
 
+def _read_json(path):
+	"""Best-effort JSON load; None on a missing or corrupt file."""
+	try:
+		with open(path, encoding='utf-8') as f:
+			return json.load(f)
+	except (json.JSONDecodeError, OSError):
+		return None
+
+
+def _first_user_prompt(history_path):
+	"""The first `user` message in a saved history.json — the resume-prompt fallback."""
+	data = _read_json(history_path)
+	if not isinstance(data, list):
+		return ''
+	for msg in data:
+		if isinstance(msg, dict) and msg.get('role') == 'user':
+			return msg.get('content') or ''
+	return ''
+
+
 def list_sessions(max_sessions=20):
-	"""Scan reports folders for AI sessions with history.json.
+	"""Scan reports folders for resumable AI sessions.
+
+	A session IS its history.json (that's what a resume replays). The sibling report
+	file is only read for nicer metadata (name / prompt / targets / session_id) and is
+	optional: legacy sessions don't stamp `_context.session_id` and their report has no
+	`ai` results, but they still resume fine via the history replay — so we never drop a
+	session just because its report lacks those.
 
 	Args:
 		max_sessions: Maximum number of sessions to return.
@@ -44,43 +70,82 @@ def list_sessions(max_sessions=20):
 	pattern = str(Path(CONFIG.dirs.reports) / '*/tasks/*/history.json')
 	for history_path_str in glob.glob(pattern):
 		history_path = Path(history_path_str)
-		report_path = history_path.parent / 'report.json'
-		if not report_path.exists():
-			continue
-		try:
-			with open(report_path) as f:
-				data = json.load(f)
-			ai_items = data.get('results', {}).get('ai', [])
-			if not ai_items:
-				continue
-			# Find first user prompt content and session name
-			first_prompt = ''
-			session_name = ''
-			for item in ai_items:
-				if item.get('ai_type') == 'prompt':
-					first_prompt = item.get('content', '')
-					session_name = (item.get('_context') or {}).get('session_name', '') or (item.get('_context') or {}).get('name', '')
-					break
-			info = data.get('info', {})
-			sessions.append({
-				'folder': str(history_path.parent),
-				'history_path': str(history_path),
-				'report_path': str(report_path),
-				'name': session_name,
-				'prompt': first_prompt,
-				'targets': info.get('targets', []),
-				'timestamp': info.get('end_time') or info.get('start_time') or 0,
-				'mtime': history_path.stat().st_mtime,
-			})
-		except (json.JSONDecodeError, OSError):
-			continue
+		folder = history_path.parent
+		# The report filename has varied across versions (report.json / report_ai.json);
+		# prefer the generic name, else fall back to any report*.json for metadata.
+		report_path = next(
+			(p for p in [folder / 'report.json', *sorted(folder.glob('report*.json'))] if p.exists()),
+			None,
+		)
+		data = _read_json(report_path) or {}
+		info = data.get('info', {})
+		ai_items = data.get('results', {}).get('ai', []) or []
+
+		# First user prompt + session name, and the first stamped `_context.session_id`
+		# (a resumed run adopts it) — single pass, stop once both are found.
+		first_prompt = ''
+		session_name = ''
+		session_id = ''
+		for item in ai_items:
+			ctx = item.get('_context') or {}
+			if not first_prompt and item.get('ai_type') == 'prompt':
+				first_prompt = item.get('content', '')
+				session_name = ctx.get('session_name', '') or ctx.get('name', '')
+			if not session_id:
+				session_id = ctx.get('session_id', '')
+			if first_prompt and session_id:
+				break
+
+		# Legacy sessions have no `ai` results: take the prompt from the run opts, else
+		# the first user turn recorded in the history itself.
+		if not first_prompt:
+			first_prompt = (info.get('run_opts') or {}).get('prompt') or _first_user_prompt(history_path)
+
+		sessions.append({
+			'folder': str(folder),
+			'history_path': str(history_path),
+			'report_path': str(report_path) if report_path else '',
+			'name': session_name,
+			'prompt': first_prompt,
+			'session_id': session_id,
+			'targets': info.get('targets', []),
+			'timestamp': info.get('end_time') or info.get('start_time') or 0,
+			'mtime': history_path.stat().st_mtime,
+		})
 
 	sessions.sort(key=lambda s: s['mtime'], reverse=True)
 	return sessions[:max_sessions]
 
 
+def _session_label(session, max_label=None):
+	"""Build the human label + one-line description shown for a session in a picker.
+
+	Returns:
+		tuple[str, str]: (label, description). ``label`` is the session name/prompt,
+		truncated to ``max_label`` chars when given; ``description`` is the
+		timestamp / workspace / targets line.
+	"""
+	name = session.get('name', '')
+	prompt = session.get('prompt', '')
+	# Only show bracket label when name is an explicit custom name, not auto-derived from the prompt
+	if name and prompt and name != prompt and not prompt.startswith(name.rstrip('.')):
+		label_text = f"[{name}] {prompt}"
+	else:
+		label_text = prompt or name
+	# Collapse any embedded newlines / whitespace runs so the label stays on ONE line
+	# (prompts are often multi-line "## Objective\n...").
+	label_text = ' '.join(label_text.split())
+	if max_label is not None and len(label_text) > max_label:
+		label_text = label_text[:max_label] + '...'
+	ts = datetime.fromtimestamp(session['mtime']).strftime('%Y-%m-%d %H:%M')
+	targets = ', '.join(session['targets'][:2]) if session['targets'] else 'no target'
+	workspace = session['folder'].split('/tasks/')[0].split('/')[-1] if '/tasks/' in session['folder'] else ''
+	description = f"{ts} - {workspace} - {targets}"
+	return label_text, description
+
+
 def show_session_picker():
-	"""Show interactive menu to pick a session to resume.
+	"""Show interactive menu to pick a session to resume (plain-console / headless path).
 
 	Returns:
 		dict: Selected session dict, or None if cancelled.
@@ -99,21 +164,8 @@ def show_session_picker():
 
 	options = []
 	for s in sessions:
-		name = s.get('name', '')
-		prompt = s.get('prompt', '')
-		# Only show bracket label when name is an explicit custom name, not auto-derived from the prompt
-		if name and prompt and name != prompt and not prompt.startswith(name.rstrip('.')):
-			label_text = f"[{name}] {prompt}"
-		else:
-			label_text = prompt or name
-		prompt_preview = label_text[:max_label]
-		if len(label_text) > max_label:
-			prompt_preview += '...'
-		ts = datetime.fromtimestamp(s['mtime']).strftime('%Y-%m-%d %H:%M')
-		targets = ', '.join(s['targets'][:2]) if s['targets'] else 'no target'
-		workspace = s['folder'].split('/tasks/')[0].split('/')[-1] if '/tasks/' in s['folder'] else ''
-		description = f"{ts} - {workspace} - {targets}"
-		options.append({"label": prompt_preview, "description": description})
+		label, description = _session_label(s, max_label=max_label)
+		options.append({"label": label, "description": description})
 	options.append({"label": "Cancel"})
 
 	result = InteractiveMenu("Resume a session", options).show()
@@ -123,6 +175,85 @@ def show_session_picker():
 	if idx >= len(sessions):
 		return None
 	return sessions[idx]
+
+
+def pick_session_via_backend(backend, session_id=""):
+	"""Pick a session to resume through an interactivity backend that owns the display.
+
+	The plain-console :func:`show_session_picker` drives the terminal directly
+	(``tty.setraw`` + key reads), which collides with a frontend that already owns the
+	screen (the Textual TUI). Route the choice through ``backend.ask_user`` instead so the
+	frontend renders the list and returns the pick.
+
+	Args:
+		backend: An interactivity backend exposing ``ask_user`` (e.g. ``TUIBackend``).
+		session_id: Current runner session id, forwarded to ``ask_user`` for context.
+
+	Returns:
+		dict: Selected session dict, or None if cancelled / none available.
+	"""
+	sessions = list_sessions()
+	if not sessions:
+		return None
+	import shutil
+	# Keep every entry on a SINGLE line: a leading "> " picker marker + the label/description,
+	# truncated to the terminal width (leave room for the dedup suffix / padding).
+	width = max(40, shutil.get_terminal_size().columns - 4)
+	# Choices must be unique so the answer maps back to exactly one session. Two sessions can
+	# share a label (same prompt), so suffix a running index to guarantee uniqueness.
+	choices = []
+	by_choice = {}
+	for s in sessions:
+		label, description = _session_label(s)
+		choice = f"> {label}  —  {description}"
+		if len(choice) > width:
+			choice = choice[:width - 1] + '…'
+		if choice in by_choice:
+			choice = f"{choice} #{len(choices) + 1}"
+		choices.append(choice)
+		by_choice[choice] = s
+	# solo=True asks a display-owning backend (the TUI) to show ONLY this list — hiding the
+	# conversation, input box and meta bar — since there's no chat to steer yet on resume.
+	res = backend.ask_user(
+		"Resume which session?", choices, session_id, prompt_type="stopped", solo=True)
+	answer = (res or {}).get("answer")
+	return by_choice.get(answer)
+
+
+def print_session_results(session):
+	"""Print a prior session's persisted results (findings + ai turns) to the
+	console in ``_timestamp`` order — the visible "here's where you left off"
+	replay shown on resume. Reads the session's ``report.json``; best-effort
+	(never raises), so a resume is never blocked by a display error.
+
+	Args:
+		session: Session dict from show_session_picker (uses ``report_path``).
+	"""
+	from secator.output_types import OUTPUT_TYPES
+
+	report_path = session.get('report_path')
+	if not report_path:
+		return
+	type_map = {cls.__name__.lower(): cls for cls in OUTPUT_TYPES}
+	try:
+		with open(report_path) as f:
+			data = json.load(f)
+	except (json.JSONDecodeError, OSError):
+		return
+	# Flatten all items with their type class, then print in timestamp order
+	all_items = []
+	for type_name, items in data.get('results', {}).items():
+		cls = type_map.get(type_name)
+		if not cls:
+			continue
+		for item_data in items:
+			all_items.append((item_data, cls))
+	all_items.sort(key=lambda x: x[0].get('_timestamp', 0))
+	for item_data, cls in all_items:
+		try:
+			console.print(cls.load(item_data), highlight=False)
+		except Exception:
+			continue
 
 
 def replay_session(session):
@@ -135,36 +266,9 @@ def replay_session(session):
 		ChatHistory: Restored history, or None on error.
 	"""
 	from secator.ai.history import ChatHistory
-	from secator.output_types import OUTPUT_TYPES
 
-	# Build type map for loading items
-	type_map = {cls.__name__.lower(): cls for cls in OUTPUT_TYPES}
-
-	# Load and replay all results from report.json, sorted by timestamp
-	report_path = session.get('report_path')
-	if report_path:
-		try:
-			with open(report_path) as f:
-				data = json.load(f)
-			results = data.get('results', {})
-			# Flatten all items with their type class
-			all_items = []
-			for type_name, items in results.items():
-				cls = type_map.get(type_name)
-				if not cls:
-					continue
-				for item_data in items:
-					all_items.append((item_data, cls))
-			# Sort by _timestamp
-			all_items.sort(key=lambda x: x[0].get('_timestamp', 0))
-			for item_data, cls in all_items:
-				try:
-					item = cls.load(item_data)
-					console.print(item, highlight=False)
-				except Exception:
-					continue
-		except (json.JSONDecodeError, OSError):
-			pass
+	# Show the prior conversation + findings on the console
+	print_session_results(session)
 
 	# Load history
 	history_path = session['history_path']
@@ -177,3 +281,135 @@ def replay_session(session):
 	except (json.JSONDecodeError, OSError) as e:
 		console.print(Error(message=f'Failed to load history: {e}'))
 		return None
+
+
+def restore_history_from_db(session_id, query_engine, model=None, encryptor=None, system_prompt=None):
+	"""Rebuild an in-memory ChatHistory from the workspace's `_type:"ai"` Mongo docs.
+
+	Headless equivalent of ``replay_session`` for the remote (web) path: a
+	respawned ``ai`` task on a different worker pod has no local report files, so
+	the conversation is rebuilt from the channel docs themselves (queried by
+	``session_id``, ordered by ``_timestamp``).
+
+	This is a **faithful, valid litellm transcript continuation** for docs
+	carrying a raw litellm ``message`` dict (persisted by Tasks 2-3 for every
+	prompt/assistant/tool_result turn, including tool_calls and tool_call_id
+	pairing): each persisted message is appended verbatim, in ``_timestamp``
+	order. Internal loop nudges (the synthetic "continue"/"retry" ``user``
+	prompts the run appends to live history but never persists as docs) are not
+	restored and so are omitted here — the result is therefore NOT literally
+	byte-identical to the live in-memory history, but it stays a valid transcript
+	(a clean tool→assistant continuation the model can resume from). Persisted
+	``message.content`` is already encrypted (the encryption happens at persist
+	time, not at read time), so it is NOT re-encrypted here — doing so would
+	double-encrypt it.
+
+	Docs from before this feature shipped don't carry a ``message`` field at
+	all (only the human-readable ``content`` used for the channel/report
+	display). Those fall back to the legacy **text-only** reconstruction: only
+	``ai_type="prompt"``/``"response"`` docs become ``user``/``assistant``
+	messages (re-encrypted here, since their plaintext ``content`` was never
+	encrypted at persist time), and intermediate tool-call/tool-result activity
+	is collapsed away (it was never captured verbatim pre-upgrade).
+
+	Ordering assumption: a single session is either entirely message-carrying
+	(post-upgrade) or entirely legacy (pre-upgrade) — sessions aren't upgraded
+	mid-conversation. So it is safe to restore all message-docs first (in
+	their own timestamp order) and then append any legacy docs (in their own
+	timestamp order); within a real session only one of the two groups will be
+	non-empty, so this two-pass split never reorders an actual transcript.
+
+	Args:
+		session_id: The conversation's session id. It can come from client context or the task's local fallback.
+		query_engine: A ``QueryEngine`` (must resolve to the workspace Mongo
+			backend for the docs to be visible).
+		model: Optional LLM model name to set on the returned history.
+		encryptor: Optional ``SensitiveDataEncryptor``, used only for the legacy
+			text-only fallback (message-docs are already encrypted verbatim).
+		system_prompt: Optional system prompt to set as the first message.
+
+	Returns:
+		ChatHistory: The rebuilt history (possibly with only a system prompt if
+		no prior docs exist).
+	"""
+	from secator.ai.history import ChatHistory
+	from secator.ai.encryption import maybe_encrypt
+	from secator.ai.utils import _repair_orphan_tool_uses, _strip_leading_orphan_tools
+
+	history = ChatHistory(model=model)
+	if system_prompt is not None:
+		history.set_system(maybe_encrypt(system_prompt, encryptor))
+
+	try:
+		docs = query_engine.search({'_type': 'ai', '_context.session_id': session_id})
+	except Exception as e:  # noqa: BLE001 - backend errors must not crash the worker
+		console.print(Warning(message=f'Failed to restore session from DB: {e}'))
+		return history
+
+	docs = sorted(docs or [], key=lambda d: d.get('_timestamp', 0))
+	# Drop subagent transcript docs. A subagent (run_task name="ai") inherits the
+	# parent's session_id so its runners persist into the same workspace and stay
+	# correlated to the conversation — but its OWN `_type:"ai"` turns (its objective
+	# prompt, its responses + tool calls) must NOT be folded into the PARENT worker's
+	# restored history: doing so interleaves several runners' transcripts (mismatched
+	# tool_call/tool_result pairs, a large token blow-up) and leaves a subagent turn as
+	# the tail, which defeats the caller's prompt-dedup guard and re-emits the prompt.
+	# The parent conversation is the session's NON-subagent docs; a subagent runs fresh
+	# (interactive=False) and never restores, so this only ever cleans the parent.
+	docs = [d for d in docs if not (d.get('_context') or {}).get('subagent')]
+	legacy = []  # docs without a raw message (pre-upgrade) -> text-only fallback
+	for doc in docs:
+		msg = doc.get('message')
+		if isinstance(msg, dict) and msg.get('role'):
+			# Byte-exact: the persisted message already holds encrypted content, so
+			# append verbatim (no re-encryption) — mirrors a fresh run's history.
+			history.messages.append(dict(msg))
+		else:
+			legacy.append(doc)
+
+	# Legacy docs (no message field): fall back to text-only prompt/response.
+	for doc in legacy:
+		ai_type = doc.get('ai_type')
+		content = doc.get('content', '')
+		if not content:
+			continue
+		if ai_type == 'prompt':
+			history.add_user(maybe_encrypt(content, encryptor))
+		elif ai_type == 'response':
+			history.add_assistant(maybe_encrypt(content, encryptor))
+		elif ai_type == 'steer':
+			# A mid-flight steer is a real user turn: preserve it as a user message on
+			# respawn (mirroring the live-loop framing) so the redirect survives a restore.
+			history.add_user(maybe_encrypt(f'[User interjected]: {content}', encryptor))
+		# All other ai_types (action displays, stopped/permission prompts,
+		# shell_output, summaries) are channel/UX artifacts, not conversation
+		# turns — intentionally skipped for a valid litellm transcript.
+
+	# A `stopped` prompt that timed out and was answered AFTER the worker exited never got
+	# its answer persisted as a conversation turn: the live path does that in
+	# _prompt_and_redetect (a new `prompt` doc), but the timed-out worker died first,
+	# so the answer only lives on the `stopped` doc's `answer` field — which the
+	# passes above skip. If such an answered `stopped` prompt is the conversation TAIL
+	# (nothing conversational persisted after it), thread its answer as the next user
+	# turn so the respawn CONTINUES instead of re-asking the same question. An
+	# in-run-answered `stopped` prompt is instead followed by its own `prompt` doc (a later
+	# conversational turn), so it is not the tail and is correctly left alone here.
+	# Accept the legacy `follow_up` ai_type too, so a session created BEFORE the
+	# unified-stop refactor still threads its answered tail prompt on resume.
+	answered_fu = [d for d in docs
+		if d.get('ai_type') in ('stopped', 'follow_up') and d.get('status') == 'answered' and d.get('answer')]
+	if answered_fu:
+		latest = answered_fu[-1]  # docs are sorted ascending by _timestamp
+		fu_ts = latest.get('_timestamp', 0)
+		has_later_turn = any(
+			(d.get('message') or d.get('ai_type') in ('prompt', 'response', 'steer'))
+			and d.get('_timestamp', 0) > fu_ts
+			for d in docs)
+		if not has_later_turn:
+			history.add_user(maybe_encrypt(latest['answer'], encryptor))
+
+	# Guard against a partially-persisted turn producing an orphan tool result.
+	_repair_orphan_tool_uses(history.messages)
+	_strip_leading_orphan_tools(history.messages)
+
+	return history

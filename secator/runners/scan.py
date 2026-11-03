@@ -26,7 +26,10 @@ class Scan(Runner):
 		from secator.celery import mark_runner_started, mark_runner_completed
 		from secator.template import TemplateLoader
 
-		scan_opts = self.config.options
+		# A scan-level `description` belongs to the SCAN, not its workflows/tasks. Drop it
+		# from a COPY of the scan options (never mutate self.config.options) so merge_opts
+		# below can't cascade it; a `description` set explicitly on a workflow is kept.
+		scan_opts = {k: v for k, v in self.config.options.items() if k != 'description'}
 
 		# Set hooks and reports
 		self.enable_hooks = False   # Celery will handle hooks
@@ -39,6 +42,10 @@ class Scan(Runner):
 		for name, workflow_opts in self.config.workflows.items():
 			run_opts = self.run_opts.copy()
 			run_opts.pop('profiles', None)
+			# A scan-level `description` belongs to the SCAN, not its workflows/tasks —
+			# don't cascade it or every child shows the scan description instead of its
+			# own (see the same guard in Workflow.build_celery_workflow).
+			run_opts.pop('description', None)
 			run_opts['no_poll'] = True
 			run_opts['caller'] = 'Scan'
 			run_opts['has_parent'] = True

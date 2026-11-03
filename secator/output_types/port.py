@@ -16,7 +16,8 @@ class Port(OutputType):
 	host: str = field(default='', repr=True, compare=False)
 	protocol: str = field(default='tcp', repr=True, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
-	confidence: str = field(default='low', repr=False, compare=False)
+	confidence: str = field(default='high', repr=False, compare=False)
+	confidence_nb: int = field(default=0, compare=False)
 	service_confidence: str = field(default='low', repr=False, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
@@ -32,6 +33,8 @@ class Port(OutputType):
 
 	_table_fields = [IP, PORT, HOST, CPES, EXTRA_DATA]
 	_sort_by = (PORT, IP)
+	_group_by = (HOST,)          # collapse a host's ports into one row
+	_group_aggregate = PORT
 
 	def __gt__(self, other):
 		# favor nmap over other port detection tools

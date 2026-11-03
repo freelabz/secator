@@ -45,6 +45,7 @@ class trufflehog(Command):
             'internal': True
         },
         'status': {'type': str, 'help': 'Results status (verified, unknown, unverified, filtered_unverified)'},
+        'no_verification': {'is_flag': True, 'default': False, 'help': 'Do not verify detected secrets (skip provider network calls)'},  # noqa: E501
         'concurrency': {'type': int, 'help': 'Number of concurrent workers'},
         'config': {'type': str, 'short': 'config', 'help': 'Config file path'},
         'git_branch': {'type': str, 'help': 'Branch to scan (git mode only)'},
@@ -69,6 +70,7 @@ class trufflehog(Command):
         'postman_collection_id': '--collection-id',
         'postman_token': '--token',
         'postman_workspace_id': '--workspace-id',
+        'no_verification': '--no-verification',
         'git_branch': '--branch',
         'git_depth': '--depth',
         'git_since_commit': '--since-commit',
@@ -84,8 +86,13 @@ class trufflehog(Command):
     output_types = [Tag, Info]
     ignore_return_code = True
     install_version = 'v3.91.0'
+    # Clone the pinned release TAG (shallow), not the default branch. Without --branch the clone
+    # checks out upstream HEAD while the dir is named after install_version, so `go build` compiles
+    # whatever is on main that day — which breaks the source install whenever upstream HEAD doesn't
+    # compile (e.g. transient redeclaration errors in pkg/engine). Building the released tag is
+    # reproducible and matches the version the dir name and binary already claim to be.
     install_cmd = (
-        f'git clone https://github.com/trufflesecurity/trufflehog.git '
+        f'git clone --branch [install_version] --depth 1 https://github.com/trufflesecurity/trufflehog.git '
         f'{CONFIG.dirs.share}/trufflehog_[install_version] || true && '
         f'cd {CONFIG.dirs.share}/trufflehog_[install_version] && go build -o trufflehog . && '
         f'mv {CONFIG.dirs.share}/trufflehog_[install_version]/trufflehog {CONFIG.dirs.bin}'

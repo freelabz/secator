@@ -7,15 +7,29 @@ from secator.rich import console
 
 logger = logging.getLogger(__name__)
 
+# Confidence -> numeric rank (lower = more confident) for the finding-type sort key
+# `confidence_nb`. Shared so every finding type derives it identically; mirrors the
+# order the vulnerability type used historically.
+CONFIDENCE_NB = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4, 'unknown': 5, None: 6}
+
 
 @dataclass
 class OutputType:
 	_table_fields = []
 	_sort_by = ()
+	# Fields to group by (tuple) and the field whose values to aggregate/collect
+	# when the CLI `--group` option is used without an explicit field.
+	_group_by = ()
+	_group_aggregate = None
 
 	@classmethod
 	def fields(cls):
 		return [f.name for f in fields(cls)]
+
+	@staticmethod
+	def confidence_to_nb(confidence) -> int:
+		"""Numeric rank for a confidence string (unknown values rank last)."""
+		return CONFIDENCE_NB.get(confidence, 6)
 
 	def merge_with(self, data: 'OutputType', exclude_fields=[]):
 		"""Enrich the OutputType object with the data from another object."""
@@ -89,6 +103,12 @@ class OutputType:
 					setattr(self, field.name, field.default)
 				elif not isinstance(default_factory, _MISSING_TYPE):
 					setattr(self, field.name, default_factory())
+		# Derive the confidence sort key uniformly for every finding type that carries
+		# `confidence` + `confidence_nb`, so a confidence value always has a matching rank
+		# (and a monitor/cleanup downgrade re-prioritizes). Non-finding types lack the
+		# fields and are skipped. A subclass may still override after super().__post_init__().
+		if hasattr(self, 'confidence') and hasattr(self, 'confidence_nb'):
+			self.confidence_nb = self.confidence_to_nb(getattr(self, 'confidence', None))
 
 	@classmethod
 	def load(cls, item, output_map={}):
@@ -148,24 +168,63 @@ class OutputType:
 		return data
 
 	@classmethod
-	def validate_fields(cls, data: dict) -> list:
+	def field_types(cls) -> dict:
+		"""Resolve each non-underscore field's declared type to a concrete builtin type.
+
+		``f.type`` may be an actual type (``bool``), a typing generic (``List[str]``,
+		resolved via ``__origin__``), or — under ``from __future__ import annotations``
+		— a string annotation (``'bool'``, ``'List[str]'``). Returns
+		``{field_name: concrete_type}``, omitting fields that can't be resolved.
+		"""
+		type_map = {
+			'bool': bool, 'int': int, 'float': float,
+			'str': str, 'list': list, 'dict': dict,
+		}
+		resolved = {}
+		for f in fields(cls):
+			if f.name.startswith('_'):
+				continue
+			t = f.type
+			if isinstance(t, type):
+				resolved[f.name] = t
+				continue
+			origin = getattr(t, '__origin__', None)
+			if origin is not None:
+				resolved[f.name] = origin
+				continue
+			if isinstance(t, str):
+				name = t.split('[', 1)[0].strip().lower()
+				if name in type_map:
+					resolved[f.name] = type_map[name]
+		return resolved
+
+	@classmethod
+	def validate_fields(cls, data: dict, require_all: bool = False) -> list:
 		"""Validate data types against dataclass field definitions.
 
-		Returns a list of error messages for invalid fields.
+		Returns a list of error messages for invalid fields. When ``require_all`` is set
+		(a full create, not a partial update), fields that have no default and are missing
+		from ``data`` are reported as required — so a tool call that omits a mandatory field
+		(e.g. a ``Tag`` without ``value``) is rejected with a clear message up front instead
+		of raising a raw ``TypeError`` at instantiation.
 		"""
 		errors = []
 		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
+		expected_types = cls.field_types()
 		for f in fields(cls):
-			if f.name.startswith('_') or f.name not in data:
+			if f.name.startswith('_'):
+				continue
+			if f.name not in data:
+				if require_all:
+					has_default = (not isinstance(f.default, _MISSING_TYPE)
+					               or not isinstance(f.default_factory, _MISSING_TYPE))
+					if not has_default:
+						errors.append(f"'{f.name}' is required")
 				continue
 			value = data[f.name]
 			if value is None:
 				continue
-			expected_type = f.type if isinstance(f.type, type) else None
-			if expected_type is None:
-				origin = getattr(f.type, '__origin__', None)
-				if origin is not None:
-					expected_type = origin
+			expected_type = expected_types.get(f.name)
 			if expected_type and not isinstance(value, expected_type):
 				expected_name = type_names.get(expected_type, getattr(expected_type, '__name__', str(expected_type)))
 				actual_name = type_names.get(type(value), type(value).__name__)

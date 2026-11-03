@@ -9,6 +9,25 @@ from secator.rich import console
 RUNNER_COLLECTIONS = ('tasks', 'workflows', 'scans')
 
 
+def _seek_by_native_id(query: dict) -> dict:
+	"""Rewrite a plain-string `_uuid` equality into a native `_id` seek.
+
+	The mongodb driver owns finding identity (`_uuid = str(_id)`), so a valid-ObjectId
+	`_uuid` is always the primary key — querying `_id` uses the index instead of scanning
+	the `_uuid` field. uuid4s (json/sqlite / pre-backfill findings) are NOT valid ObjectIds,
+	so they stay a `_uuid` field match — correct before and after the backfill. Only a plain
+	string equality is rewritten; an operator dict (`$in`/`$ne`/…) or absent `_uuid` is left
+	untouched.
+	"""
+	u = query.get('_uuid')
+	if isinstance(u, str):
+		from bson.objectid import ObjectId
+		if ObjectId.is_valid(u):
+			query = {k: v for k, v in query.items() if k != '_uuid'}
+			query['_id'] = ObjectId(u)
+	return query
+
+
 class MongoDBBackend(QueryBackend):
 	"""Query backend for MongoDB."""
 
@@ -31,18 +50,22 @@ class MongoDBBackend(QueryBackend):
 			self._client = get_mongodb_client()
 		return self._client
 
-	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
+	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None,
+	                    offset: int = 0) -> List[Dict[str, Any]]:
 		"""Search MongoDB for findings matching query."""
 		try:
 			client = self._get_client()
 			db = client.main
+
+			query = _seek_by_native_id(query)
 
 			# Build projection to exclude fields
 			projection = None
 			if exclude_fields:
 				projection = {field: 0 for field in exclude_fields}
 
-			cursor = db.findings.find(query, projection).limit(limit)
+			# Native server-side pagination: .skip(offset) before .limit(limit).
+			cursor = db.findings.find(query, projection).skip(offset).limit(limit)
 
 			results = []
 			for doc in cursor:
@@ -85,7 +108,7 @@ class MongoDBBackend(QueryBackend):
 	def _execute_update(self, query: dict, update: dict) -> int:
 		"""Update documents matching query in MongoDB."""
 		client = self._get_client()
-		result = client.main.findings.update_one(query, update)
+		result = client.main.findings.update_one(_seek_by_native_id(query), update)
 		return result.modified_count
 
 	def list_workspaces(self):
@@ -197,8 +220,17 @@ class MongoDBBackend(QueryBackend):
 			for rtype in runner_types:
 				query = {}
 				if workspace_id:
-					# Runners are keyed by workspace name for the mongodb backend.
-					query['context.workspace_name'] = workspace_id
+					# Scope by workspace. Runner docs carry BOTH context.workspace_id and
+					# context.workspace_name; callers pass either a 24-char hex ObjectId
+					# (the platform passes the workspace _id) or a workspace name (the CLI's
+					# -ws). Match the right field so an id doesn't get compared to names
+					# (which returned 0 runners for every id-scoped call). Mirrors the
+					# ObjectId-vs-name detection in the api backend.
+					from bson.objectid import ObjectId
+					if ObjectId.is_valid(workspace_id):
+						query['context.workspace_id'] = workspace_id
+					else:
+						query['context.workspace_name'] = workspace_id
 				if has_parent is not None:
 					query['has_parent'] = has_parent
 				for doc in db[rtype].find(query):

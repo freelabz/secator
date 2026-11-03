@@ -50,10 +50,11 @@ class ApiBackend(QueryBackend):
         response.raise_for_status()
         return response.json()
 
-    def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
-        """Search API for findings matching query."""
+    def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None,
+                        offset: int = 0) -> List[Dict[str, Any]]:
+        """Search API for findings matching query (``offset`` maps to the endpoint's skip)."""
         try:
-            endpoint = f"{self.search_endpoint}?skip=0&limit={limit}"
+            endpoint = f"{self.search_endpoint}?skip={offset}&limit={limit}"
             if exclude_fields:
                 endpoint += f"&exclude_fields={','.join(exclude_fields)}"
             result = self._make_request('POST', endpoint, query)

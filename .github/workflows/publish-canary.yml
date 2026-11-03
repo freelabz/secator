@@ -13,10 +13,6 @@ on:
     branches:
       - canary
 
-concurrency:
-  group: publish-canary-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 

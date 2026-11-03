@@ -14,6 +14,8 @@ class Subdomain(OutputType):
 	verified: bool = field(default=False, compare=False)
 	sources: List[str] = field(default_factory=list, compare=False)
 	extra_data: dict = field(default_factory=dict, compare=False)
+	confidence: str = field(default='high', compare=False)
+	confidence_nb: int = field(default=0, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
 	tags: list = field(default_factory=list, compare=False)
@@ -32,6 +34,8 @@ class Subdomain(OutputType):
 		SOURCES
 	]
 	_sort_by = (HOST,)
+	_group_by = (DOMAIN,)        # collapse a domain's subdomains into one row
+	_group_aggregate = HOST
 
 	def __str__(self):
 		return self.host

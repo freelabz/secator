@@ -2,6 +2,9 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from secator.definitions import ADDONS_ENABLED
+HAS_AI = ADDONS_ENABLED.get('ai', False)
+
 
 class TestInteractivityBackendBase(unittest.TestCase):
 	"""Verify base class interface."""
@@ -13,14 +16,19 @@ class TestInteractivityBackendBase(unittest.TestCase):
 			backend.ask_user("question", [], "session1")
 
 	def test_base_get_excluded_tools(self):
+		# `stop` is available in every mode now; nothing excluded by default.
 		from secator.ai.interactivity import InteractivityBackend
 		backend = InteractivityBackend()
 		self.assertEqual(backend.get_excluded_tools(), set())
 
-	def test_base_get_extra_tools(self):
+	def test_base_get_extra_tools_injects_interactive_stop(self):
 		from secator.ai.interactivity import InteractivityBackend
 		backend = InteractivityBackend()
-		self.assertEqual(backend.get_extra_tools(), [])
+		extra = backend.get_extra_tools()
+		self.assertEqual(len(extra), 1)
+		self.assertEqual(extra[0]["function"]["name"], "stop")
+		# interactive stop carries choices
+		self.assertIn("choices", extra[0]["function"]["parameters"]["properties"])
 
 
 class TestCLIBackend(unittest.TestCase):
@@ -29,12 +37,15 @@ class TestCLIBackend(unittest.TestCase):
 	def test_excluded_tools(self):
 		from secator.ai.interactivity import CLIBackend
 		backend = CLIBackend()
-		self.assertEqual(backend.get_excluded_tools(), {"stop"})
+		self.assertEqual(backend.get_excluded_tools(), set())
 
-	def test_extra_tools_empty(self):
+	def test_extra_tools_has_interactive_stop(self):
 		from secator.ai.interactivity import CLIBackend
 		backend = CLIBackend()
-		self.assertEqual(backend.get_extra_tools(), [])
+		extra = backend.get_extra_tools()
+		self.assertEqual(len(extra), 1)
+		self.assertEqual(extra[0]["function"]["name"], "stop")
+		self.assertIn("choices", extra[0]["function"]["parameters"]["properties"])
 
 
 class TestAutoBackend(unittest.TestCase):
@@ -43,17 +54,19 @@ class TestAutoBackend(unittest.TestCase):
 	def test_excluded_tools(self):
 		from secator.ai.interactivity import AutoBackend
 		backend = AutoBackend()
-		self.assertEqual(backend.get_excluded_tools(), {"follow_up"})
+		self.assertEqual(backend.get_excluded_tools(), set())
 
-	def test_extra_tools_has_stop(self):
+	def test_extra_tools_has_choiceless_stop(self):
 		from secator.ai.interactivity import AutoBackend
 		backend = AutoBackend()
 		extra = backend.get_extra_tools()
 		self.assertEqual(len(extra), 1)
 		self.assertEqual(extra[0]["function"]["name"], "stop")
+		# the non-interactive stop is definitive — no choices
+		self.assertNotIn("choices", extra[0]["function"]["parameters"]["properties"])
 
 	def test_ask_user_returns_none(self):
-		"""AutoBackend.ask_user returns None — no user to ask."""
+		"""AutoBackend.ask_user returns None — no user to ask (stop ends the run)."""
 		from secator.ai.interactivity import AutoBackend
 		backend = AutoBackend()
 		result = backend.ask_user("q", [], "s1")
@@ -66,12 +79,15 @@ class TestRemoteBackend(unittest.TestCase):
 	def test_excluded_tools(self):
 		from secator.ai.interactivity import RemoteBackend
 		backend = RemoteBackend(timeout=60, query_engine=MagicMock())
-		self.assertEqual(backend.get_excluded_tools(), {"stop"})
+		self.assertEqual(backend.get_excluded_tools(), set())
 
-	def test_extra_tools_empty(self):
+	def test_extra_tools_has_interactive_stop(self):
 		from secator.ai.interactivity import RemoteBackend
 		backend = RemoteBackend(timeout=60, query_engine=MagicMock())
-		self.assertEqual(backend.get_extra_tools(), [])
+		extra = backend.get_extra_tools()
+		self.assertEqual(len(extra), 1)
+		self.assertEqual(extra[0]["function"]["name"], "stop")
+		self.assertIn("choices", extra[0]["function"]["parameters"]["properties"])
 
 	def test_ask_user_returns_answer_on_found(self):
 		from secator.ai.interactivity import RemoteBackend
@@ -84,30 +100,212 @@ class TestRemoteBackend(unittest.TestCase):
 		self.assertIsNotNone(result)
 		self.assertEqual(result["answer"], "option A")
 
-	@patch('secator.ai.interactivity.sleep')
-	def test_ask_user_polls_until_timeout(self, mock_sleep):
+	def test_poll_steers_drops_uuidless_and_consumes_uuid_ones(self):
+		"""A steer WITHOUT a _uuid must not be injected — poll_steers can only mark
+		_uuid'd docs consumed, so returning a _uuid-less one replays it every poll
+		(the duplicated-interjection bug)."""
 		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"_uuid": "u1", "content": "steer with uuid", "_timestamp": 1},
+			{"content": "steer without uuid", "_timestamp": 2},  # no _uuid
+		]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+		out = backend.poll_steers("sess")
+		self.assertEqual(out, ["steer with uuid"])           # only the _uuid'd steer injected
+		self.assertEqual(mock_engine.update.call_args[0][0].get("_uuid"), {"$in": ["u1"]})
+
+	def test_poll_steers_all_uuidless_returns_empty_and_no_consume(self):
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"content": "x", "_timestamp": 1}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+		self.assertEqual(backend.poll_steers("sess"), [])
+		mock_engine.update.assert_not_called()
+
+	def test_permission_allow_persists_rule_so_recheck_passes(self):
+		"""A single 'allow' on a target must persist a runtime rule so the guardrail
+		re-check passes. Regression: it used to add NO rule ("one-shot"), so the
+		re-check loop saw the target still unknown and re-prompted until it gave up —
+		only 'allow_all' worked. 'allow' = this exact target; a different host re-asks."""
+		from secator.ai.interactivity import RemoteBackend
+		from secator.ai.guardrails import PermissionEngine
+		eng = PermissionEngine(dict(allow=["shell(git)"], deny=[], ask=[]),
+							   targets=["scanme.example.com"], workspace="/tmp/ws")
+		# Use a non-code-hosting host: code hosts (github/gitlab/...) are now in
+		# ALWAYS_ALLOWED_HOSTS, so they'd short-circuit to 'allow' and never exercise
+		# the approve-then-persist path this test is about.
+		cmd = "git clone https://poc-host.example/o/r"
+		self.assertEqual(eng.check_action({"action": "shell", "command": cmd}).decision, "ask")
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": "allow"}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		res = backend.ask_user("Target requires approval", ["allow", "allow_all", "deny"], "s1",
+							   prompt_type="permission", permission_type="target",
+							   value="https://poc-host.example/o/r", engine=eng)
+		self.assertEqual(res["answer"], "allow")
+		self.assertEqual(eng.check_action({"action": "shell", "command": cmd}).decision, "allow")
+		# narrow: a DIFFERENT host still asks
+		self.assertEqual(
+			eng.check_action({"action": "shell", "command": "git clone https://other-host.example/x/y"}).decision,
+			"ask")
+
+	def test_permission_allow_all_broadens_to_host(self):
+		"""'allow_all' persists a broader rule (whole host), so other URLs from the
+		same host are then allowed without re-prompting."""
+		from secator.ai.interactivity import RemoteBackend
+		from secator.ai.guardrails import PermissionEngine
+		eng = PermissionEngine(dict(allow=["shell(git)"], deny=[], ask=[]),
+							   targets=["scanme.example.com"], workspace="/tmp/ws")
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": "allow_all"}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		# non-code-hosting host (see the persist test) so allow_all's host rule is what
+		# grants the second URL, not ALWAYS_ALLOWED_HOSTS.
+		backend.ask_user("Target requires approval", ["allow", "allow_all", "deny"], "s1",
+						 prompt_type="permission", permission_type="target",
+						 value="https://poc-host.example/o/r", engine=eng)
+		# broad: another URL from the SAME host is now allowed
+		self.assertEqual(
+			eng.check_action({"action": "shell", "command": "git clone https://poc-host.example/x/y"}).decision,
+			"allow")
+
+	@patch('secator.ai.interactivity.sleep')
+	def test_ask_user_raises_on_timeout_leaves_pending(self, mock_sleep):
+		from secator.ai.interactivity import RemoteBackend, UserInputTimeout
 		mock_engine = MagicMock()
 		mock_engine.search.return_value = []  # never answered
 		mock_engine.update = MagicMock()
 		backend = RemoteBackend(timeout=10, query_engine=mock_engine, poll_interval=5)
 
-		result = backend.ask_user("What next?", [], "session1")
+		# On timeout the prompt is NOT auto-denied: it raises so the worker exits
+		# cleanly, and the pending doc is LEFT pending (no timed_out flip).
+		with self.assertRaises(UserInputTimeout):
+			backend.ask_user("What next?", [], "session1")
 
-		self.assertIsNone(result)
 		# Should have polled twice (0s, 5s) then timed out at 10s
 		self.assertEqual(mock_sleep.call_count, 2)
-		# Should have called update to set timed_out
-		mock_engine.update.assert_called_once()
+		# Must NOT flip the doc to timed_out — it stays pending for the user to answer.
+		mock_engine.update.assert_not_called()
+
+	def test_poll_scopes_query_to_prompt_uuid(self):
+		"""The poll must correlate on the specific prompt's uuid.
+
+		Regression test for the infinite-respawn loop: without scoping on
+		prompt_uuid, a stale answered follow_up from a prior turn resolves the
+		current wait immediately, the worker re-injects that old answer as a new
+		prompt and re-runs the turn forever. The query MUST include
+		extra_data.prompt_uuid so only THIS prompt's own answer resolves it.
+		"""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": "the right answer"}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		result = backend.ask_user("What next?", [], "session1", prompt_uuid="abc-123")
+
+		self.assertEqual(result["answer"], "the right answer")
+		# The search query must be scoped to this prompt's uuid (else a stale
+		# answered follow_up from a prior turn would match -> loop).
+		search_query = mock_engine.search.call_args[0][0]
+		self.assertEqual(search_query.get("extra_data.prompt_uuid"), "abc-123")
+		self.assertEqual(search_query.get("status"), "answered")
+
+	@patch('secator.ai.interactivity.sleep')
+	def test_timeout_leaves_prompt_pending_and_raises(self, mock_sleep):
+		"""On timeout the prompt is left pending (not flipped) and the loop unwinds."""
+		from secator.ai.interactivity import RemoteBackend, UserInputTimeout
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = []  # never answered
+		mock_engine.update = MagicMock()
+		backend = RemoteBackend(timeout=5, query_engine=mock_engine, poll_interval=5)
+
+		with self.assertRaises(UserInputTimeout):
+			backend.ask_user("What next?", [], "session1", prompt_uuid="abc-123")
+
+		# No timed_out flip — the pending doc survives for the user to answer later.
+		mock_engine.update.assert_not_called()
+
+	def test_build_pending_prompt_stamps_permission_prompt_uuid(self):
+		"""A permission pending doc carries its prompt_uuid in extra_data."""
+		from secator.ai.interactivity import RemoteBackend
+		backend = RemoteBackend(timeout=60, query_engine=MagicMock())
+		item = backend.build_pending_prompt(
+			"Shell `nmap` requires approval", ["allow", "deny"], "session1",
+			prompt_type="permission", permission_type="shell", value="nmap",
+			prompt_uuid="uuid-shell",
+		)
+		self.assertEqual(item.extra_data.get("prompt_uuid"), "uuid-shell")
+		self.assertEqual(item.extra_data.get("permission_type"), "shell")
+		self.assertEqual(item.ai_type, "permission")
+		self.assertEqual(item.status, "pending")
+
+	@patch('secator.ai.interactivity.sleep')
+	def test_later_permission_layer_does_not_resolve_from_earlier_allow(self, mock_sleep):
+		"""H7: a later guardrail layer must not auto-resolve from an earlier 'allow'."""
+		from secator.ai.interactivity import RemoteBackend, UserInputTimeout
+
+		# Fake "DB": one answered doc from the FIRST (shell) layer only.
+		answered_db = [{
+			"_type": "ai", "ai_type": "permission", "status": "answered",
+			"_context": {"session_id": "session1"},
+			"extra_data": {"prompt_uuid": "uuid-shell"},
+			"answer": "allow", "_timestamp": 100.0,
+		}]
+
+		def fake_search(query, *args, **kwargs):
+			# Honor prompt_uuid scoping like a real backend would.
+			want_uuid = query.get("extra_data.prompt_uuid")
+			out = []
+			for d in answered_db:
+				if d.get("status") != query.get("status"):
+					continue
+				if want_uuid is not None and d["extra_data"].get("prompt_uuid") != want_uuid:
+					continue
+				out.append(d)
+			return out
+
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = fake_search
+		backend = RemoteBackend(timeout=5, query_engine=mock_engine, poll_interval=5)
+
+		# First (shell) layer resolves to its own answered "allow".
+		first = backend._poll_for_answer("session1", "permission", prompt_uuid="uuid-shell")
+		self.assertEqual(first, "allow")
+
+		# Second (target) layer must NOT pick up the shell layer's "allow": with no
+		# answer of its own it times out (raises), leaving its prompt pending.
+		with self.assertRaises(UserInputTimeout):
+			backend._poll_for_answer("session1", "permission", prompt_uuid="uuid-target")
+
+	def test_poll_returns_newest_answered_doc(self):
+		"""Defense in depth: resolve against the NEWEST answered doc by _timestamp."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"answer": "stale", "_timestamp": 100.0},
+			{"answer": "fresh", "_timestamp": 200.0},
+		]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+		result = backend._poll_for_answer("session1", "permission", prompt_uuid="abc-123")
+		self.assertEqual(result, "fresh")
 
 	@patch('secator.ai.interactivity.sleep')
 	def test_ask_user_returns_on_second_poll(self, mock_sleep):
 		from secator.ai.interactivity import RemoteBackend
 		mock_engine = MagicMock()
-		mock_engine.search.side_effect = [
-			[],  # first poll: not answered
-			[{"answer": "option B"}],  # second poll: answered
-		]
+		# Query-aware: the follow-up answer poll (ai_type=="follow_up") returns the
+		# answer on the second call; the interleaved steer poll (ai_type=="steer")
+		# always returns nothing — so the steer-break never fires here.
+		answer_calls = {"n": 0}
+
+		def search(query, limit=1):
+			if query.get("ai_type") == "steer":
+				return []
+			answer_calls["n"] += 1
+			return [] if answer_calls["n"] == 1 else [{"answer": "option B"}]
+
+		mock_engine.search.side_effect = search
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=5)
 
 		result = backend.ask_user("What next?", [], "session1")
@@ -115,6 +313,256 @@ class TestRemoteBackend(unittest.TestCase):
 		self.assertIsNotNone(result)
 		self.assertEqual(result["answer"], "option B")
 		self.assertEqual(mock_sleep.call_count, 1)
+
+	@patch('secator.ai.interactivity.sleep')
+	def test_answer_in_final_window_is_not_lost_to_timeout(self, mock_sleep):
+		"""M10: an answer landing in the last sleep window is returned, not lost.
+
+		The poll loop sees only 'pending' until the loop exits, then the answer
+		appears. The final post-loop search must pick it up rather than abandon
+		the turn.
+		"""
+		from secator.ai.interactivity import RemoteBackend
+		answered_doc = [{"answer": "landed late", "_timestamp": 100.0}]
+
+		def fake_search(query, *args, **kwargs):
+			# Answer only becomes visible AFTER the single poll iteration.
+			return list(answered_doc) if mock_sleep.call_count >= 1 else []
+
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = fake_search
+		mock_engine.update.return_value = 0
+		backend = RemoteBackend(timeout=5, query_engine=mock_engine, poll_interval=5)
+
+		result = backend.ask_user("What next?", [], "session1", prompt_uuid="abc-123")
+
+		self.assertIsNotNone(result)
+		self.assertEqual(result["answer"], "landed late")
+
+	@patch('secator.ai.interactivity.sleep')
+	def test_timeout_noop_flip_rereads_answer(self, mock_sleep):
+		"""M10: if the timeout flip modifies 0 rows, re-read the answer."""
+		from secator.ai.interactivity import RemoteBackend
+		# Empty during the loop AND at the first final search, then the answer
+		# appears right as we attempt the (no-op) flip.
+		searches = [[], [], [{"answer": "raced in", "_timestamp": 1.0}]]
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = lambda *a, **k: searches.pop(0) if searches else []
+		mock_engine.update.return_value = 0  # nothing pending -> already answered
+		backend = RemoteBackend(timeout=5, query_engine=mock_engine, poll_interval=5)
+
+		result = backend._poll_for_answer("session1", "permission", prompt_uuid="abc-123")
+		self.assertEqual(result, "raced in")
+
+	def test_build_pending_prompt_expires_only_same_type(self):
+		"""M10: a new prompt supersedes prior still-pending docs OF ITS OWN TYPE only.
+
+		A permission prompt must NOT expire a still-pending `stopped` prompt (and vice
+		versa) — the two can be outstanding at once, and cross-expiring orphaned the
+		other prompt so it stopped awaiting an answer.
+		"""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+
+		backend.build_pending_prompt(
+			"Target x requires approval", ["allow", "deny"], "session1",
+			prompt_type="permission", permission_type="target", value="x",
+			prompt_uuid="uuid-new",
+		)
+
+		# Exactly one scoped update, and only for the incoming type (permission).
+		self.assertEqual(mock_engine.update.call_count, 1)
+		flip_query, flip_update = mock_engine.update.call_args_list[0][0]
+		self.assertEqual(flip_query.get("_context.session_id"), "session1")
+		self.assertEqual(flip_query.get("status"), "pending")
+		self.assertEqual(flip_query.get("ai_type"), "permission")
+		self.assertEqual(flip_update, {"$set": {"status": "timed_out"}})
+
+	def test_permission_prompt_does_not_expire_pending_stopped(self):
+		"""Building a permission prompt leaves a still-pending `stopped` prompt untouched."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+
+		backend.build_pending_prompt(
+			"Shell command requires approval", ["allow", "deny"], "s1",
+			prompt_type="permission", permission_type="shell", value="nmap",
+			prompt_uuid="p1",
+		)
+		expired_types = {c[0][0].get("ai_type") for c in mock_engine.update.call_args_list}
+		self.assertNotIn("stopped", expired_types)
+
+	def test_stopped_prompt_does_not_expire_pending_permission(self):
+		"""Building a `stopped` prompt leaves a still-pending permission untouched."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+
+		backend.build_pending_prompt(
+			"Which target next?", ["a", "b"], "s1",
+			prompt_type="stopped", prompt_uuid="f1",
+		)
+		expired_types = {c[0][0].get("ai_type") for c in mock_engine.update.call_args_list}
+		self.assertNotIn("permission", expired_types)
+
+	def test_expire_stale_pending_legacy_expires_both(self):
+		"""Called with no ai_type (legacy), it still expires both prompt types."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+		backend._expire_stale_pending("s1")
+		expired_types = {c[0][0].get("ai_type") for c in mock_engine.update.call_args_list}
+		self.assertEqual(expired_types, {"stopped", "permission"})
+
+	def test_expire_stale_pending_noop_without_engine(self):
+		"""No query engine -> no crash, no update."""
+		from secator.ai.interactivity import RemoteBackend
+		backend = RemoteBackend(timeout=60, query_engine=None)
+		backend._expire_stale_pending("session1")  # must not raise
+
+	def _permission_backend(self, answer):
+		"""RemoteBackend whose poll resolves to `answer` for a shell prompt."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": answer, "_timestamp": 1.0}]
+		return RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+	@staticmethod
+	def _shell_name_allowed(engine, cmd_name):
+		"""True if the engine auto-allows this shell command NAME (no re-prompt).
+
+		Asserted at the command-name layer (``_check_value``) rather than via
+		check_action() so the test does not depend on the safecmd/shfmt parser,
+		which is not present in every env. This is the exact layer a persisted
+		``shell(<cmd>)`` session rule matches on.
+		"""
+		return engine._check_value("shell", cmd_name).decision == "allow"
+
+	def test_allow_all_persists_session_rule_second_action_auto_allowed(self):
+		"""M12: allow_all adds a session-scoped rule; a 2nd matching action needs no prompt."""
+		from secator.ai.guardrails import PermissionEngine
+		engine = PermissionEngine(config={})  # no static rules: unknown cmd -> no auto-allow
+		backend = self._permission_backend("allow_all")
+
+		# Pre-condition: with no rule, the command name is not pre-allowed.
+		self.assertFalse(self._shell_name_allowed(engine, "nmap"))
+
+		result = backend.ask_user(
+			"Shell `nmap -sV` requires approval", ["deny", "allow", "allow_all"],
+			"session1", prompt_type="permission", engine=engine,
+			permission_type="shell", value="nmap -sV", prompt_uuid="u1",
+		)
+		self.assertEqual(result["answer"], "allow")
+		# A session-scoped shell(nmap) pattern rule must now be present.
+		self.assertTrue(
+			any(rt == "shell" and "nmap" in patterns for rt, patterns in engine.runtime_allow),
+			"allow_all must persist a session-scoped shell(nmap) rule",
+		)
+		# A SECOND, DIFFERENT nmap invocation is auto-allowed without a new prompt.
+		self.assertTrue(self._shell_name_allowed(engine, "nmap"))
+
+	def test_single_allow_does_not_persist_rule_second_action_reprompts(self):
+		"""M12/H9: single allow is one-shot — no rule added, a 2nd match re-prompts."""
+		from secator.ai.guardrails import PermissionEngine
+		engine = PermissionEngine(config={})
+		backend = self._permission_backend("allow")
+
+		result = backend.ask_user(
+			"Shell `nmap -sV` requires approval", ["deny", "allow", "allow_all"],
+			"session1", prompt_type="permission", engine=engine,
+			permission_type="shell", value="nmap -sV", prompt_uuid="u1",
+		)
+		self.assertEqual(result["answer"], "allow")
+		# No session rule was persisted -> a second matching action is not pre-allowed.
+		self.assertEqual(engine.runtime_allow, [])
+		self.assertFalse(self._shell_name_allowed(engine, "nmap"))
+
+	def test_deny_unchanged_no_rule(self):
+		"""deny returns deny and never touches runtime_allow."""
+		from secator.ai.guardrails import PermissionEngine
+		engine = PermissionEngine(config={})
+		backend = self._permission_backend("deny")
+
+		result = backend.ask_user(
+			"Shell `nmap` requires approval", ["deny", "allow", "allow_all"],
+			"session1", prompt_type="permission", engine=engine,
+			permission_type="shell", value="nmap", prompt_uuid="u1",
+		)
+		self.assertEqual(result["answer"], "deny")
+		self.assertEqual(engine.runtime_allow, [])
+
+
+class TestRemoteBackendSteer(unittest.TestCase):
+	"""Verify mid-flight steer draining + the blocked-wait break."""
+
+	def test_poll_steers_returns_and_consumes(self):
+		"""poll_steers returns pending steer content and marks them consumed."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"content": "actually focus on the API", "_timestamp": 2, "_uuid": "s2"},
+			{"content": "and skip port 80", "_timestamp": 1, "_uuid": "s1"},
+		]
+		mock_engine.update = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		steers = backend.poll_steers("session1")
+
+		# Oldest-first by _timestamp
+		self.assertEqual(steers, ["and skip port 80", "actually focus on the API"])
+		# Query scoped to pending steer docs for this session
+		search_query = mock_engine.search.call_args[0][0]
+		self.assertEqual(search_query.get("ai_type"), "steer")
+		self.assertEqual(search_query.get("status"), "pending")
+		self.assertEqual(search_query.get("_context.session_id"), "session1")
+		# Pending steers flipped to consumed (inject exactly once)
+		mock_engine.update.assert_called_once()
+		update_set = mock_engine.update.call_args[0][1]
+		self.assertEqual(update_set["$set"]["status"], "consumed")
+
+	def test_poll_steers_no_pending_returns_empty(self):
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = []
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		self.assertEqual(backend.poll_steers("session1"), [])
+		# Nothing to consume when nothing is pending
+		mock_engine.update.assert_not_called()
+
+	def test_poll_steers_robust_on_backend_error(self):
+		"""A steer must never crash the run: backend errors return []."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = RuntimeError("mongo down")
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		self.assertEqual(backend.poll_steers("session1"), [])
+
+	def test_poll_steers_no_query_engine(self):
+		from secator.ai.interactivity import RemoteBackend
+		backend = RemoteBackend(timeout=60, query_engine=None, poll_interval=0.01)
+		self.assertEqual(backend.poll_steers("session1"), [])
+
+	def test_steer_breaks_blocked_prompt_wait(self):
+		"""A steer arriving during a blocked prompt wait returns as the answer."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		# No follow-up answer ever; a steer arrives on the first poll. It MUST carry a
+		# `_uuid` — poll_steers only consumes (and thus injects) steers it can mark
+		# consumed, so a `_uuid`-less steer is dropped instead of replayed.
+		mock_engine.search.side_effect = [
+			[],  # answered? no
+			[{"content": "change course now", "_timestamp": 1, "_uuid": "steer-1"}],  # poll_steers -> steer
+		]
+		mock_engine.update = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		result = backend.ask_user("What next?", [], "session1", prompt_uuid="uuid-1")
+
+		# The steer content resolves the blocked wait (returned as the answer).
+		self.assertEqual(result["answer"], "change course now")
 
 
 class TestCreateBackend(unittest.TestCase):
@@ -139,6 +587,299 @@ class TestCreateBackend(unittest.TestCase):
 		from secator.ai.interactivity import create_backend, AutoBackend
 		backend = create_backend("unknown")
 		self.assertIsInstance(backend, AutoBackend)
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestRemoteTurnPendingDocCoverage(unittest.TestCase):
+	"""H5: common remote turns (plain-chat reply, max-iter exit) must not poll on
+	prompt_uuid=None. Plain-chat must persist a proper pending doc and poll on its
+	real uuid; the max-iter terminal path must not strand a dangling pending doc."""
+
+	class _FakeHistory:
+		def add_user(self, *a, **k):
+			pass
+
+		def count_tokens_by_role(self, model=None):
+			return {"total": 0}
+
+		def to_messages(self, *a, **k):
+			return []
+
+	def test_plain_chat_remote_persists_pending_doc_and_polls_on_uuid(self):
+		"""A plain-chat remote turn persists a pending `stopped` doc with a
+		non-None prompt_uuid and polls scoped to THAT uuid (never None)."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.ai.interactivity import RemoteBackend
+		from secator.output_types import Ai
+
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": "keep going", "_timestamp": 1.0}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		persisted = []
+		fake_self = MagicMock()
+		fake_self.backend = backend
+		fake_self.session_id = "sess-chat"
+		fake_self.model = "gpt-4o"
+		fake_self.mode = "chat"
+		fake_self.encryptor = None
+		fake_self.max_iterations = 10
+		fake_self.history = self._FakeHistory()
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+
+		# plain-chat turn: no prompt_uuid passed in (this is the H5 path)
+		items = AiTask._prompt_and_redetect(fake_self, [])
+
+		pend = [p for p in persisted if isinstance(p, Ai) and p.status == "pending"]
+		self.assertEqual(len(pend), 1, "exactly one pending doc must be persisted")
+		uuid_stamped = (pend[0].extra_data or {}).get("prompt_uuid")
+		self.assertTrue(uuid_stamped, "pending doc must carry a real (non-None) prompt_uuid")
+		self.assertEqual(pend[0].ai_type, "stopped")
+
+		# the poll must be scoped to THAT prompt's uuid — never None
+		search_query = mock_engine.search.call_args[0][0]
+		self.assertEqual(search_query.get("extra_data.prompt_uuid"), uuid_stamped)
+		# the answer resolved, so the loop continues (non-None items) rather than exiting
+		self.assertIsNotNone(items)
+
+	def test_local_plain_chat_does_not_persist_pending_doc(self):
+		"""Local (CLI) plain-chat must NOT create a pending doc — that is a
+		remote-channel concern only."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.ai.interactivity import CLIBackend
+		from secator.output_types import Ai
+
+		backend = MagicMock(spec=CLIBackend)
+		backend.ask_user.return_value = {"answer": "do x"}
+
+		persisted = []
+		fake_self = MagicMock()
+		fake_self.backend = backend
+		fake_self.session_id = "sess-local"
+		fake_self.model = "gpt-4o"
+		fake_self.mode = "chat"
+		fake_self.encryptor = None
+		fake_self.max_iterations = 10
+		fake_self.history = self._FakeHistory()
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+
+		AiTask._prompt_and_redetect(fake_self, [])
+
+		pend = [p for p in persisted if isinstance(p, Ai) and p.status == "pending"]
+		self.assertEqual(pend, [], "local backend must not persist a pending doc")
+
+	def test_content_only_reason_becomes_stopped_pending_prompt(self):
+		"""A content-only reply (passed as `reason`) persists a `stopped` pending doc
+		whose content is that reason — content-only == stop."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.ai.interactivity import RemoteBackend
+		from secator.output_types import Ai
+
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": "go on", "_timestamp": 1.0}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		persisted = []
+		fake_self = MagicMock()
+		fake_self.backend = backend
+		fake_self.session_id = "sess-co"
+		fake_self.model = "gpt-4o"
+		fake_self.mode = "chat"
+		fake_self.encryptor = None
+		fake_self.max_iterations = 10
+		fake_self.history = self._FakeHistory()
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+
+		AiTask._prompt_and_redetect(fake_self, [], reason="Here is my summary.")
+
+		pend = [p for p in persisted if isinstance(p, Ai) and p.status == "pending"]
+		self.assertEqual(len(pend), 1)
+		self.assertEqual(pend[0].ai_type, "stopped")
+		self.assertEqual(pend[0].content, "Here is my summary.")
+
+	@patch("secator.tasks.ai.init_llm")
+	@patch("secator.tasks.ai.call_llm")
+	def test_steer_before_stop_resumes_instead_of_pausing(self, mock_call_llm, mock_init):
+		"""A pending steer drained at end-of-turn means the user already asked to go on:
+		the loop RESUMES (continues) instead of pausing/ending on the stop."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.ai.interactivity import AutoBackend
+
+		# The model calls stop on turn 1; a steer is pending, so instead of ending the
+		# loop continues to turn 2 (which this time has no steer -> ends via ask_user None).
+		mock_call_llm.side_effect = [
+			{"content": "", "tool_calls": [object()], "usage": {}},
+			{"content": "done for real", "tool_calls": [], "usage": {}},
+		]
+
+		prompt_calls = []
+		# _drain_steers is called at the TOP of each iteration (return ignored) AND at
+		# end-of-turn. Only the end-of-turn call on turn 1 should report a steer: the
+		# call sequence is [t1-top, t1-end, t2-top, t2-end], so True on index 1 only.
+		drain_calls = {"n": 0}
+
+		fake_self = MagicMock()
+		fake_self.backend = AutoBackend()
+		fake_self.session_id = "sess-steer"
+		fake_self.model = "gpt-4o"
+		fake_self.mode = "scan"
+		fake_self.max_iterations = 10
+		fake_self.is_subagent = False
+		fake_self.inputs = []
+		fake_self.context = {}
+		fake_self.scope = "workspace"
+		fake_self.results = []
+		fake_self.max_workers = 3
+		fake_self.encryptor = None
+		fake_self.dry_run = False
+		fake_self.verbose = False
+		fake_self._sync = False
+		fake_self.temp = 0.7
+		fake_self.api_base = ""
+		fake_self.api_key = ""
+		fake_self.tool_schemas = []
+		fake_self.max_tokens_total = 100000
+		fake_self.permission_engine = MagicMock()
+		fake_self.history = self._FakeHistory()
+		fake_self.add_result = lambda item, **kw: None
+
+		def _empty_gen(*a, **k):
+			return
+			yield  # pragma: no cover
+
+		fake_self._summarize_auto = _empty_gen
+		fake_self._summarize_user = _empty_gen
+		fake_self._drain_history_usage = lambda: None
+		fake_self._account_usage = lambda u: None
+		fake_self._add_assistant_to_history = lambda c, t: {"role": "assistant", "content": c}
+		fake_self._save_history = lambda: None
+		fake_self._persist_pii_map = lambda: None
+
+		def _drain(*a, **k):
+			i = drain_calls["n"]
+			drain_calls["n"] += 1
+			return i == 1
+			yield  # pragma: no cover
+
+		fake_self._drain_steers = _drain
+
+		def _fake_process(tool_calls, ctx):
+			return [{"action": "stop", "tool_call_id": "t", "tool_call_name": "stop"}]
+			yield  # pragma: no cover
+
+		fake_self._process_tool_calls = _fake_process
+
+		def _fake_dispatch(actions, ctx):
+			# turn 1: the model called stop
+			return {"stop_reason": "stopping", "stop_choices": None, "stop_multiple": False,
+			        "stop_prompt_uuid": None, "new_mode": None}
+			yield  # pragma: no cover
+
+		fake_self._dispatch_and_collect = _fake_dispatch
+
+		def _track_prompt(choices, prompt_uuid=None, multiple=False, reason=None):
+			prompt_calls.append(reason)
+			return None
+
+		fake_self._prompt_and_redetect = _track_prompt
+
+		list(AiTask._run_loop(fake_self))
+
+		# Turn 1's stop was superseded by the pending steer (RESUME, no pause). Turn 2 is
+		# content-only with no steer -> the single pause, which (AutoBackend) ends the run.
+		self.assertEqual(len(prompt_calls), 1)
+		self.assertEqual(prompt_calls[0], "done for real")
+
+	@patch("secator.query.QueryEngine")
+	@patch("secator.tasks.ai.init_llm")
+	@patch("secator.tasks.ai.call_llm")
+	def test_remote_max_iter_pauses_via_prompt(self, mock_call_llm, mock_init, mock_qe_cls):
+		"""At remote max-iter after tool work, the cap is a backstop that falls into the
+		SAME end-of-turn pause path: the loop routes through _prompt_and_redetect (so the
+		user can resume), it does not abruptly cut off."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.ai.interactivity import RemoteBackend
+		from secator.output_types import Ai  # noqa: F401
+
+		mock_call_llm.return_value = {
+			"content": "working", "tool_calls": [object()], "usage": {"tokens": 100, "cost": 0.001},
+		}
+
+		persisted = []
+		prompt_calls = []
+		backend = RemoteBackend(timeout=60, query_engine=MagicMock(), poll_interval=0.01)
+
+		fake_self = MagicMock()
+		fake_self.backend = backend
+		fake_self.session_id = "sess-max"
+		fake_self.model = "gpt-4o"
+		fake_self.mode = "chat"
+		fake_self.max_iterations = 1
+		fake_self.interactive = "remote"
+		fake_self.is_subagent = False
+		fake_self.inputs = []
+		fake_self.context = {}
+		fake_self.scope = "workspace"
+		fake_self.results = []
+		fake_self.max_workers = 3
+		fake_self.encryptor = None
+		fake_self.dry_run = False
+		fake_self.verbose = False
+		fake_self._sync = False
+		fake_self.temp = 0.7
+		fake_self.api_base = ""
+		fake_self.api_key = ""
+		fake_self.tool_schemas = []
+		fake_self.max_tokens_total = 100000
+		fake_self.permission_engine = MagicMock()
+		fake_self.history = self._FakeHistory()
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+
+		def _empty_gen(*a, **k):
+			return
+			yield  # pragma: no cover - make it a generator
+
+		fake_self._summarize_auto = _empty_gen
+		fake_self._summarize_user = _empty_gen
+		fake_self._drain_history_usage = lambda: None
+		fake_self._account_usage = lambda u: None
+		# _add_assistant_to_history now returns the litellm message dict (the
+		# caller feeds it to cap_message(...) for persistence); the stub must
+		# match that contract instead of returning None -- a bare None broke
+		# cap_message's dict(msg) call and masked this test's real assertions
+		# behind a swallowed exception.
+		fake_self._add_assistant_to_history = lambda c, t: {"role": "assistant", "content": c}
+		fake_self._save_history = lambda: None
+
+		def _fake_process(tool_calls, ctx):
+			return [{"action": "shell", "tool_call_id": "t", "tool_call_name": "run_shell"}]
+			yield  # pragma: no cover
+
+		fake_self._process_tool_calls = _fake_process
+
+		def _fake_dispatch(actions, ctx):
+			return {"stop_reason": None, "stop_choices": None, "stop_multiple": False,
+			        "stop_prompt_uuid": None, "new_mode": None}
+			yield  # pragma: no cover
+
+		fake_self._dispatch_and_collect = _fake_dispatch
+
+		def _empty_drain(*a, **k):
+			return False
+			yield  # pragma: no cover
+
+		fake_self._drain_steers = _empty_drain
+
+		def _track_prompt(choices, prompt_uuid=None, multiple=False, reason=None):
+			prompt_calls.append((choices, prompt_uuid))
+			return None   # end the loop after the pause for this test
+
+		fake_self._prompt_and_redetect = _track_prompt
+
+		list(AiTask._run_loop(fake_self))
+
+		# The cap falls into the SAME pause path — _prompt_and_redetect IS called.
+		self.assertEqual(len(prompt_calls), 1, "remote max-iter must route through the end-of-turn pause")
 
 
 if __name__ == "__main__":

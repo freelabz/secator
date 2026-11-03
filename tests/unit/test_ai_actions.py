@@ -8,10 +8,48 @@ from secator.definitions import ADDONS_ENABLED
 
 if ADDONS_ENABLED['ai']:
 	from secator.ai.actions import (
-		ActionContext, dispatch_action, _handle_follow_up, _handle_shell,
-		_handle_query, _handle_add_finding, _run_runner, _decrypt_dict
+		ActionContext, dispatch_action, _handle_stop, _handle_shell,
+		_handle_query, _handle_add_finding, _handle_mark_vuln_exploited,
+		_handle_mark_vuln_false_positive, _run_runner, _decrypt_dict,
+		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
+		_build_child_hooks_or_denial, _child_preamble, _child_run_opts,
+		_MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
+		_MAX_SHELL_OUTPUT_CHARS, _truncate, _sandbox_image,
 	)
-	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url
+	from secator.ai.utils import _MAX_CHILD_ITERATIONS
+	from secator.runners import Task
+	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url, ExploitAttempt
+	from tests.unit.test_ai_finding_mgmt import FakeEngine
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSandboxImage(unittest.TestCase):
+	"""The --isolated sandbox image is configurable via addons.ai.isolated_container_image,
+	with {version} replaced by the running secator version (default freelabz/secator:<version>-lite,
+	the release-published lite tag)."""
+
+	_DEFAULT = 'freelabz/secator:{version}-lite'
+
+	def test_default_resolves_secator_lite_tag_with_version(self):
+		from secator.definitions import VERSION
+		with patch('secator.config.CONFIG.addons.ai.isolated_container_image', self._DEFAULT):
+			self.assertEqual(_sandbox_image(), f'freelabz/secator:{VERSION}-lite')
+
+	def test_custom_image_override_without_version_token(self):
+		with patch('secator.config.CONFIG.addons.ai.isolated_container_image',
+		           'kalilinux/kali-rolling'):
+			self.assertEqual(_sandbox_image(), 'kalilinux/kali-rolling')
+
+	def test_legacy_env_var_honored_only_when_config_is_default(self):
+		from secator.definitions import VERSION
+		# legacy env used when config is still the default
+		with patch('secator.config.CONFIG.addons.ai.isolated_container_image', self._DEFAULT):
+			with patch.dict('os.environ', {'SECATOR_AI_SANDBOX_IMAGE': 'myorg/custom:{version}'}):
+				self.assertEqual(_sandbox_image(), f'myorg/custom:{VERSION}')
+		# explicit config takes precedence over the legacy env
+		with patch('secator.config.CONFIG.addons.ai.isolated_container_image', 'myorg/explicit:latest'):
+			with patch.dict('os.environ', {'SECATOR_AI_SANDBOX_IMAGE': 'myorg/legacy:x'}):
+				self.assertEqual(_sandbox_image(), 'myorg/explicit:latest')
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -34,6 +72,14 @@ class TestDecryptDict(unittest.TestCase):
 		result = _decrypt_dict({'outer': {'inner': 'value'}}, encryptor)
 
 		self.assertEqual(result['outer']['inner'], 'VALUE')
+
+	def test_decrypt_non_dict_returned_unchanged(self):
+		"""Backstop: a non-dict (e.g. a stringified query arg) must not raise
+		`.items()` — it is returned unchanged instead of crashing the action."""
+		encryptor = MagicMock()
+		self.assertEqual(_decrypt_dict('{"_type": "url"}', encryptor), '{"_type": "url"}')
+		self.assertEqual(_decrypt_dict(['a', 'b'], encryptor), ['a', 'b'])
+		encryptor.decrypt.assert_not_called()
 
 	def test_decrypt_list_values(self):
 		encryptor = MagicMock()
@@ -82,43 +128,99 @@ class TestDecryptDict(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
-class TestHandleFollowUp(unittest.TestCase):
-	"""Tests for the _handle_follow_up action handler."""
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestRunBatchStreaming(unittest.TestCase):
+	"""Under a TUI, a parallel batch must STREAM each action's items as they are
+	produced — so every task's runner card surfaces up front — instead of buffering a
+	whole action and flushing it only when it completes (cards trickling in one-per-
+	finish). Regression guard for the "Running <description> one at a time" bug."""
 
-	def test_follow_up_with_reason(self):
+	def _run(self, actions, max_workers=4):
+		import time
+		import secator.ai.actions as A
+		from secator.output_types import Port
+		from secator.rich import set_tui
+
+		def fake_dispatch(action, ctx):
+			name = action['name']
+			yield Ai(content=name, ai_type='task', extra_data={'description': action.get('description', '')})
+			time.sleep(action['_delay'])
+			yield Port(port=80, host=name, ip='1.2.3.4', state='open', _source=name)
+
+		ctx = ActionContext(targets=['t'], model='m', max_workers=max_workers)
+		order = []
+		with patch.object(A, 'safe_dispatch_action', fake_dispatch):
+			set_tui(object())  # activate the stream-live (TUI) path
+			try:
+				for item in A._run_batch(actions, ctx):
+					if isinstance(item, Ai) and item.ai_type == 'task':
+						order.append(('card', item.content))
+					elif item.__class__.__name__ == 'Port':
+						order.append(('finding', item.host))
+			finally:
+				set_tui(None)
+		return order
+
+	def test_cards_stream_before_completion(self):
+		# slow finishes last; its CARD must still appear before its own finding AND
+		# before the fast task finishes — i.e. both cards up front, not finish-ordered.
+		actions = [
+			{'action': 'task', 'name': 'slow', 'description': 'Slow', '_delay': 0.25, 'targets': ['t']},
+			{'action': 'task', 'name': 'fast', 'description': 'Fast', '_delay': 0.01, 'targets': ['t']},
+		]
+		order = self._run(actions)
+		cards = [o for o in order if o[0] == 'card']
+		# both cards emitted, and both before the slow task's finding streams in
+		self.assertEqual(sorted(c[1] for c in cards), ['fast', 'slow'])
+		slow_finding_pos = order.index(('finding', 'slow'))
+		self.assertTrue(all(order.index(c) < slow_finding_pos for c in cards),
+		                f"a card streamed only after slow completed: {order}")
+
+
+class TestHandleStop(unittest.TestCase):
+	"""Tests for the _handle_stop action handler (the single end-of-turn signal)."""
+
+	def test_stop_with_reason(self):
 		ctx = ActionContext(targets=['t.com'], model='m')
-		results = list(_handle_follow_up({'action': 'follow_up', 'reason': 'All scanned'}, ctx))
+		results = list(_handle_stop({'action': 'stop', 'reason': 'All scanned'}, ctx))
 
 		self.assertEqual(len(results), 1)
 		self.assertIsInstance(results[0], Ai)
-		self.assertEqual(results[0].ai_type, 'follow_up')
+		self.assertEqual(results[0].ai_type, 'stopped')
 		self.assertEqual(results[0].content, 'All scanned')
 		self.assertEqual(results[0].extra_data['choices'], [])
+		self.assertEqual(results[0].extra_data['multiple'], False)
 
-	def test_follow_up_default_reason(self):
+	def test_stop_default_reason(self):
 		ctx = ActionContext(targets=['t.com'], model='m')
-		results = list(_handle_follow_up({'action': 'follow_up'}, ctx))
+		results = list(_handle_stop({'action': 'stop'}, ctx))
 
 		self.assertEqual(results[0].content, 'completed')
 		self.assertEqual(results[0].extra_data['choices'], [])
 
-	def test_follow_up_with_choices(self):
+	def test_stop_with_choices(self):
 		ctx = ActionContext(targets=['t.com'], model='m')
 		results = list(
-			_handle_follow_up(
+			_handle_stop(
 				{
-					'action': 'follow_up',
+					'action': 'stop',
 					'reason': 'What next?',
 					'choices': ['Scan deeper', 'Try SQL injection'],
+					'multiple': True,
 				},
 				ctx,
 			)
 		)
 
 		self.assertEqual(len(results), 1)
-		self.assertEqual(results[0].ai_type, 'follow_up')
+		self.assertEqual(results[0].ai_type, 'stopped')
 		self.assertEqual(results[0].content, 'What next?')
 		self.assertEqual(results[0].extra_data['choices'], ['Scan deeper', 'Try SQL injection'])
+		self.assertEqual(results[0].extra_data['multiple'], True)
+		# Choices must also land on the top-level `choices` field (what the web UI reads),
+		# not only in extra_data — otherwise the persisted stopped doc renders no buttons.
+		self.assertEqual(results[0].choices, ['Scan deeper', 'Try SQL injection'])
+		self.assertEqual(results[0].multiple, True)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -134,52 +236,165 @@ class TestHandleShell(unittest.TestCase):
 		self.assertIn('DRY RUN', results[0].message)
 		self.assertIn('whoami', results[0].message)
 
-	@patch('secator.ai.actions.subprocess.run')
-	def test_shell_execution(self, mock_run):
-		mock_run.return_value = MagicMock(stdout='root\n', stderr='')
+	def test_shell_execution(self):
+		"""Real integration test: `_handle_shell` dispatches the actual `command` task
+		(no driver -> no persistence, but it still runs) and surfaces its stdout."""
 		ctx = ActionContext(targets=['t.com'], model='m')
 
-		results = list(_handle_shell({'action': 'shell', 'command': 'whoami'}, ctx))
+		results = list(_handle_shell({'action': 'shell', 'command': 'echo hello'}, ctx))
 
 		self.assertEqual(len(results), 2)
 		# First: the command being run
 		self.assertIsInstance(results[0], Ai)
 		self.assertEqual(results[0].ai_type, 'shell')
-		self.assertEqual(results[0].content, 'whoami')
+		self.assertEqual(results[0].content, 'echo hello')
 		# Second: the output
 		self.assertIsInstance(results[1], Ai)
 		self.assertEqual(results[1].ai_type, 'shell_output')
-		self.assertIn('root', results[1].content)
+		self.assertIn('hello', results[1].content)
 
-	@patch('secator.ai.actions.subprocess.run')
-	def test_shell_stderr(self, mock_run):
-		mock_run.return_value = MagicMock(stdout='', stderr='error msg')
+	@patch('secator.tasks.command.command')
+	def test_shell_dispatches_command_task_with_parent_context(self, mock_task_cls):
+		"""The shell command must run as a `command` task carrying the parent's context
+		(notably `session_id`), so it persists nested under the conversation."""
+		fake_runner = MagicMock()
+		fake_runner.id = 'task_abc'
+		fake_runner.output = 'hello'
+		mock_task_cls.return_value = fake_runner
+
+		ctx = ActionContext(targets=['t.com'], model='m', session_id='sess-123')
+		results = list(_handle_shell({'action': 'shell', 'command': 'echo hello'}, ctx))
+
+		# CommandTask constructed with the raw command line as its sole input (first
+		# positional arg, since we instantiate the concrete class directly).
+		call_args = mock_task_cls.call_args
+		self.assertEqual(call_args[0][0], ['echo hello'])
+		captured_context = call_args[1]['context']
+		self.assertEqual(captured_context.get('session_id'), 'sess-123')
+
+		fake_runner.run.assert_called_once()
+		# No timeout arg -> the configured per-command default (security.shell_default_timeout).
+		from secator.config import CONFIG
+		self.assertEqual(fake_runner.max_timeout, CONFIG.security.shell_default_timeout)
+
+		self.assertEqual(results[0].ai_type, 'shell')
+		# The shell Ai must carry the UI-linking extra_data (runner_type + runner_id)
+		# so a future regression in that wiring is caught.
+		self.assertEqual(results[0].extra_data.get('runner_type'), 'task')
+		self.assertTrue(results[0].extra_data.get('runner_id'))
+		self.assertEqual(results[-1].ai_type, 'shell_output')
+		self.assertIn('hello', results[-1].content)
+
+	@patch('secator.tasks.command.command')
+	def test_shell_passes_sanitized_env(self, mock_task_cls):
+		"""SECURITY: the sanitized process env is passed via the `env` run_opt so an
+		AI-run `env`/`printenv` can't dump the LLM key / cloud creds into output that
+		reaches the LLM + Mongo."""
+		import os as _os
+		fake_runner = MagicMock()
+		fake_runner.id = 'task_abc'
+		fake_runner.output = ''
+		mock_task_cls.return_value = fake_runner
+
+		with patch.dict(_os.environ, {'ANTHROPIC_API_KEY': 'sk-secret', 'HOME': '/home/x'}):
+			ctx = ActionContext(targets=['t.com'], model='m')
+			list(_handle_shell({'action': 'shell', 'command': 'env'}, ctx))
+
+		# run_opts are spread as kwargs (command takes **run_opts), so `env` is a
+		# top-level kwarg, not nested under a `run_opts` kwarg.
+		passed_env = mock_task_cls.call_args[1]['env']
+		self.assertNotIn('ANTHROPIC_API_KEY', passed_env)
+		# a benign var still passes through so the command can actually run
+		self.assertEqual(passed_env.get('HOME'), '/home/x')
+
+	@patch('secator.ai.actions._build_child_hooks_or_denial')
+	def test_shell_extracts_task_hooks_and_they_fire(self, mock_hooks):
+		"""REGRESSION GUARD (live-Mongo bug): _build_child_hooks_or_denial returns a
+		CLASS-keyed dict ({Task: {on_end: [...]}, ...}). Direct `command` instantiation
+		bypasses the Task wrapper that would extract the Task sub-dict, so _handle_shell
+		must extract `hooks.get(Task, {})` itself — otherwise register_hooks resolves
+		nothing and the mongodb persistence hooks never fire (command runs SUCCESS but
+		no doc is persisted). This asserts the extraction happened AND the hook actually
+		fired during the real run — a flat-dict mock cannot catch the extraction bug.
+		"""
+		fired = []
+
+		def sentinel(runner):
+			fired.append(runner)
+			return runner  # on_end convention: return the runner
+
+		mock_hooks.return_value = ({Task: {'on_end': [sentinel]}}, None)
+
 		ctx = ActionContext(targets=['t.com'], model='m')
+		results = list(_handle_shell({'action': 'shell', 'command': 'echo hi'}, ctx))
 
-		results = list(_handle_shell({'action': 'shell', 'command': 'bad'}, ctx))
+		# The class-keyed dict was extracted to the Task sub-dict, so the on_end hook
+		# resolved and fired against the real command runner.
+		self.assertTrue(fired, "on_end hook did not fire — Task sub-dict was not extracted")
+		self.assertEqual(results[-1].ai_type, 'shell_output')
+		self.assertIn('hi', results[-1].content)
 
-		self.assertEqual(results[1].content, 'error msg')
-
-	@patch('secator.ai.actions.subprocess.run')
-	def test_shell_no_output(self, mock_run):
-		mock_run.return_value = MagicMock(stdout='', stderr='')
+	def test_shell_no_output(self):
 		ctx = ActionContext(targets=['t.com'], model='m')
 
 		results = list(_handle_shell({'action': 'shell', 'command': 'true'}, ctx))
 
 		self.assertEqual(results[1].content, '(no output)')
 
-	@patch('secator.ai.actions.subprocess.run')
-	def test_shell_exception(self, mock_run):
-		mock_run.side_effect = Exception('Command timed out')
+	@patch('secator.tasks.command.command')
+	def test_shell_exception(self, mock_task_cls):
+		mock_task_cls.side_effect = Exception('Command timed out')
 		ctx = ActionContext(targets=['t.com'], model='m')
 
 		results = list(_handle_shell({'action': 'shell', 'command': 'slow'}, ctx))
 
-		# shell Ai + Error
-		self.assertEqual(len(results), 2)
-		self.assertIsInstance(results[1], Error)
-		self.assertIn('failed', results[1].message)
+		# Only the Error (the shell Ai is emitted AFTER construction, which never
+		# succeeds here).
+		self.assertEqual(len(results), 1)
+		self.assertIsInstance(results[0], Error)
+		self.assertIn('failed', results[0].message)
+
+	@patch('secator.tasks.command.command')
+	def test_shell_output_capped_when_over_limit(self, mock_task_cls):
+		# M1: huge stdout must be truncated to <= cap + marker and carry the marker.
+		big = "HEAD_LINE\n" + ("x" * (_MAX_SHELL_OUTPUT_CHARS * 3)) + "\nTAIL_LINE"
+		fake_runner = MagicMock()
+		fake_runner.id = 'task_abc'
+		fake_runner.output = big
+		mock_task_cls.return_value = fake_runner
+		ctx = ActionContext(targets=['t.com'], model='m')
+
+		results = list(_handle_shell({'action': 'shell', 'command': 'dump'}, ctx))
+
+		content = results[1].content
+		self.assertLess(len(content), len(big))
+		# body is bounded by the cap (plus the short marker line)
+		self.assertLessEqual(len(content), _MAX_SHELL_OUTPUT_CHARS + 40)
+		self.assertIn('truncated', content)
+		# head + tail preserved so the model sees the start AND the final lines
+		self.assertIn('HEAD_LINE', content)
+		self.assertIn('TAIL_LINE', content)
+
+	def test_shell_output_short_passes_through_unchanged(self):
+		# M1: short output must pass through untouched (no marker). The `command`
+		# runner rstrips its captured output, so a trailing newline is not expected.
+		ctx = ActionContext(targets=['t.com'], model='m')
+
+		results = list(_handle_shell({'action': 'shell', 'command': 'echo root'}, ctx))
+
+		self.assertEqual(results[1].content, 'root')
+		self.assertNotIn('truncated', results[1].content)
+
+	def test_truncate_short_text_unchanged(self):
+		self.assertEqual(_truncate('short', 100), 'short')
+
+	def test_truncate_keeps_head_and_tail(self):
+		text = 'START' + ('m' * 500) + 'END'
+		out = _truncate(text, 100)
+		self.assertLessEqual(len(out), 100 + 40)
+		self.assertTrue(out.startswith('START'))
+		self.assertTrue(out.endswith('END'))
+		self.assertIn('truncated', out)
 
 	def test_shell_decrypts_command(self):
 		encryptor = MagicMock()
@@ -197,19 +412,50 @@ class TestHandleQuery(unittest.TestCase):
 	"""Tests for the _handle_query action handler."""
 
 	def test_query_no_workspace(self):
+		"""A NON-local backend (mongodb/api) without a workspace_id yields the
+		'No workspace' guard. The local driver is exempt (it answers from in-memory
+		results — see test_query_local_driver_exempt_from_workspace_guard)."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "mongodb"
 		ctx = ActionContext(targets=['t.com'], model='m', context={})
-		results = list(_handle_query({'action': 'query', 'query': {}}, ctx))
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_query({'action': 'query', 'query': {}}, ctx))
 
 		self.assertEqual(len(results), 1)
 		self.assertIsInstance(results[0], Warning)
 		self.assertIn('workspace', results[0].message.lower())
 
-	def test_query_current_scope_no_workspace_ok(self):
-		"""Scope='current' should work without workspace_id."""
-		ctx = ActionContext(targets=['t.com'], model='m', context={}, scope='current', results=[{'host': 'a.com', 'port': 80}])
+	def test_query_rejects_server_side_js_operators(self):
+		"""$where / $expr (server-side JS / per-doc expression eval) are rejected before
+		the query reaches the DB — yields an Error, engine never queried."""
+		mock_engine = MagicMock()
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			for q in ({'$where': 'this.x==1'}, {'_type': 'vulnerability', '$expr': {'$gt': ['$a', '$b']}},
+			          {'$or': [{'name': {'$regex': 'x'}}, {'$where': '1'}]}):
+				results = list(_handle_query({'action': 'query', 'query': q}, ctx))
+				self.assertTrue(any(isinstance(r, Error) and 'not allowed' in r.message for r in results),
+				                f"expected rejection for {q}")
+		mock_engine.search.assert_not_called()
+
+	def test_query_rejects_overlong_regex(self):
+		"""An over-long $regex (ReDoS vector) is rejected."""
+		mock_engine = MagicMock()
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_query({'action': 'query', 'query': {'name': {'$regex': 'a' * 5000}}}, ctx))
+		self.assertTrue(any(isinstance(r, Error) and 'too long' in r.message for r in results))
+		mock_engine.search.assert_not_called()
+
+	def test_query_local_driver_no_workspace_ok(self):
+		"""The local (json) driver answers without a workspace_id (it reads this run's
+		findings); only a non-local driver requires a workspace."""
+		ctx = ActionContext(targets=['t.com'], model='m', context={},
+							results=[{'host': 'a.com', 'port': 80, '_type': 'port', '_context': {}}])
 
 		with patch.object(ctx, 'get_query_engine') as mock_get_engine:
 			mock_engine = MagicMock()
+			mock_engine.backend.name = "json"  # local driver
 			mock_engine.search.return_value = [{'host': 'a.com', 'port': 80, '_context': {}}]
 			mock_get_engine.return_value = mock_engine
 
@@ -236,13 +482,80 @@ class TestHandleQuery(unittest.TestCase):
 		ai_results = [r for r in results if isinstance(r, Ai)]
 		self.assertEqual(len(ai_results), 1)
 		self.assertEqual(ai_results[0].extra_data['results'], 2)
-		mock_engine.search.assert_called_once_with({'port': 80}, limit=10)
+		# Non-local backend: hidden duplicates are excluded from the search.
+		mock_engine.search.assert_called_once_with(
+			{'port': 80, '_context.workspace_duplicate': {'$ne': True}}, limit=10, offset=0)
+		# ...but the query shown to the user stays the model's own (no injected key).
+		self.assertEqual(ai_results[0].content, '{"port":80}')
 
 		# Query results are marked observation-only so the runner doesn't re-report them.
 		result_dicts = [r for r in results if isinstance(r, dict)]
 		self.assertEqual(len(result_dicts), 2)
 		for r in result_dicts:
 			self.assertTrue(r['_context'].get('ai_query_result'))
+
+	@patch('secator.ai.actions.ActionContext.get_query_engine')
+	def test_query_local_driver_does_not_exclude_duplicates(self, mock_get_engine):
+		"""The local (json) driver doesn't tag duplicates, so no exclusion is injected."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "json"
+		mock_engine.search.return_value = []
+		mock_get_engine.return_value = mock_engine
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+
+		list(_handle_query({'action': 'query', 'query': {'_type': 'vulnerability'}}, ctx))
+
+		mock_engine.search.assert_called_once_with({'_type': 'vulnerability'}, limit=100, offset=0)
+
+	@patch('secator.ai.actions.ActionContext.get_query_engine')
+	def test_query_respects_explicit_context_filter(self, mock_get_engine):
+		"""An explicit _context filter from the model is left untouched (not fought)."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "mongodb"
+		mock_engine.search.return_value = []
+		mock_get_engine.return_value = mock_engine
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+
+		q = {'_type': 'vulnerability', '_context.workspace_duplicate': True}
+		list(_handle_query({'action': 'query', 'query': q}, ctx))
+
+		mock_engine.search.assert_called_once_with(q, limit=100, offset=0)
+
+	@patch('secator.ai.actions.ActionContext.get_query_engine')
+	def test_query_stringified_json_is_coerced(self, mock_get_engine):
+		"""A model that passes `query` as a JSON *string* (schema says object) must
+		still work — coerced to a dict, then searched. Regression for the
+		AttributeError('str' object has no attribute 'items') in _decrypt_dict."""
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{'_type': 'url', '_context': {}}]
+		mock_get_engine.return_value = mock_engine
+		# Encryptor active is the exact condition that made the original crash fire.
+		encryptor = MagicMock()
+		encryptor.decrypt.side_effect = lambda s: s
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'}, encryptor=encryptor)
+
+		results = list(_handle_query(
+			{'action': 'query', 'query': '{"_type": "url", "verified": true}'}, ctx))
+
+		self.assertFalse([r for r in results if isinstance(r, Error)], 'stringified query must not error')
+		mock_engine.search.assert_called_once_with(
+			{'_type': 'url', 'verified': True, '_context.workspace_duplicate': {'$ne': True}}, limit=100, offset=0)
+
+	def test_query_unparseable_string_returns_clean_error(self):
+		"""A non-JSON string yields an Error the LLM can act on — not a crash."""
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		results = list(_handle_query({'action': 'query', 'query': 'not json at all'}, ctx))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1)
+		self.assertIn('JSON object', errors[0].message)
+
+	def test_query_non_dict_returns_clean_error(self):
+		"""A non-dict, non-str query (e.g. a list) yields a clean Error, not a crash."""
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		results = list(_handle_query({'action': 'query', 'query': ['_type', 'url']}, ctx))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1)
+		self.assertIn('JSON object', errors[0].message)
 
 	@patch('secator.ai.actions.ActionContext.get_query_engine')
 	def test_query_failure(self, mock_get_engine):
@@ -272,6 +585,82 @@ class TestHandleQuery(unittest.TestCase):
 		mock_engine.search.assert_called_once()
 		call_args = mock_engine.search.call_args[0][0]
 		self.assertEqual(call_args['host'], 'example.com')
+
+	def test_union_live_results_dedup_and_filter(self):
+		"""_union_live_results filters live by the query, merges into backend results,
+		and dedupes by _uuid (backend wins)."""
+		from secator.ai.actions import _union_live_results
+		persisted = [{"_uuid": "a", "_type": "port"}]
+		live = [{"_uuid": "a", "_type": "port"},   # dup -> deduped
+				{"_uuid": "b", "_type": "port"},   # new -> included
+				{"_uuid": "c", "_type": "url"}]    # wrong type -> filtered out by the query
+		out = _union_live_results(list(persisted), live, {"_type": "port"}, 100)
+		self.assertEqual(sorted(r["_uuid"] for r in out), ["a", "b"])
+		# no live results -> persisted returned unchanged
+		self.assertEqual(_union_live_results([{"_uuid": "z"}], [], {}, 0), [{"_uuid": "z"}])
+
+	def test_query_local_driver_unions_live_results(self):
+		"""Local (json) driver: query_workspace unions this run's in-memory findings
+		with the backend (JSON exporter only writes to disk at end-of-run)."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "json"
+		mock_engine.search.return_value = [{"_uuid": "disk1", "_type": "port", "_context": {}}]
+		ctx = ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'},
+							 results=[{"_uuid": "live1", "_type": "port", "_context": {}}])
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_query({'action': 'query', 'query': {'_type': 'port'}}, ctx))
+		uuids = {r.get('_uuid') for r in results if isinstance(r, dict)}
+		self.assertIn('disk1', uuids)   # backend result
+		self.assertIn('live1', uuids)   # unioned live in-memory result
+
+	def test_query_mongodb_driver_does_not_union(self):
+		"""Non-local backend (mongodb) is queried normally — live self.results are NOT unioned."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "mongodb"
+		mock_engine.search.return_value = [{"_uuid": "db1", "_type": "port", "_context": {}}]
+		ctx = ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'},
+							 results=[{"_uuid": "live1", "_type": "port", "_context": {}}])
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_query({'action': 'query', 'query': {'_type': 'port'}}, ctx))
+		uuids = {r.get('_uuid') for r in results if isinstance(r, dict)}
+		self.assertIn('db1', uuids)
+		self.assertNotIn('live1', uuids)   # not unioned for non-local backends
+
+	def test_query_local_driver_exempt_from_workspace_guard(self):
+		"""Local driver with NO workspace_id is not blocked by the 'No workspace' guard —
+		it answers from in-memory results."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "json"
+		mock_engine.search.return_value = []
+		ctx = ActionContext(targets=['t'], model='m', context={},   # no workspace_id
+							 results=[{"_uuid": "live1", "_type": "port", "_context": {}}])
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_query({'action': 'query', 'query': {'_type': 'port'}}, ctx))
+		warnings = [r for r in results if isinstance(r, Warning)]
+		self.assertFalse(any('No workspace' in getattr(w, 'message', '') for w in warnings))
+		uuids = {r.get('_uuid') for r in results if isinstance(r, dict)}
+		self.assertIn('live1', uuids)
+
+	def test_query_stringified_limit_coerced_to_int(self):
+		"""A model-supplied string limit ('10') is coerced to int before the backend
+		(a str limit raises TypeError: '>=' not supported between int and str)."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "mongodb"
+		mock_engine.search.return_value = []
+		ctx = ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			list(_handle_query({'action': 'query', 'query': {'_type': 'ip'}, 'limit': '10'}, ctx))
+		self.assertEqual(mock_engine.search.call_args.kwargs.get('limit'), 10)
+
+	def test_query_bad_limit_falls_back_to_default(self):
+		"""A non-numeric limit falls back to the default (100), not a crash."""
+		mock_engine = MagicMock()
+		mock_engine.backend.name = "mongodb"
+		mock_engine.search.return_value = []
+		ctx = ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			list(_handle_query({'action': 'query', 'query': {}, 'limit': 'notanumber'}, ctx))
+		self.assertEqual(mock_engine.search.call_args.kwargs.get('limit'), 100)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -316,6 +705,498 @@ class TestRunRunner(unittest.TestCase):
 
 		self.assertIn('default.com', results[0].message)
 
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_propagates_hooks_and_emits_runner_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""Sub-runner must receive driver hooks (so its results persist) and the
+		emitted action Ai must carry the created runner's id + type for the UI."""
+		sentinel_hooks = {'fake': ['hook']}
+		mock_build_hooks.return_value = sentinel_hooks
+
+		# Fake runner: an iterable whose id is populated (mimics on_init stamping it)
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'drivers': ['mongodb']},
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+
+		results = list(_run_runner(action, ctx, 'task'))
+
+		# Runner constructed with hooks= from the context drivers
+		_, kwargs = mock_task_cls.call_args
+		self.assertEqual(kwargs.get('hooks'), sentinel_hooks)
+		self.assertEqual(kwargs.get('context', {}).get('workspace_id'), 'ws1')
+
+		# Action Ai item carries runner_id + runner_type. The child is a CHUNK of the
+		# parent ai task, so runner_id is its own task_chunk_id (the chunk doc's _id),
+		# NOT the internal runner.id — this is what the UI resolves the RunnerCard by.
+		ai_items = [r for r in results if isinstance(r, Ai) and r.ai_type == 'task']
+		self.assertEqual(len(ai_items), 1)
+		child_ctx = kwargs.get('context', {})
+		self.assertEqual(ai_items[0].extra_data.get('runner_id'), child_ctx.get('task_chunk_id'))
+		self.assertTrue(child_ctx.get('task_chunk_id'))
+		self.assertEqual(ai_items[0].extra_data.get('runner_type'), 'task')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_propagates_session_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""The dispatched sub-runner's context must carry the ai task's session_id
+		(the conversation id) so its persisted runner doc is queryable by the
+		conversation. session_id may be derived (not already in ctx.context), so
+		it must be stamped from ctx.session_id."""
+		# non-empty: context has drivers, so empty hooks would trip the M2 guard
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		# session_id lives on the ActionContext but NOT in context (it is derived)
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'drivers': ['mongodb']},
+			session_id='conv-abc-123',
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		sub_context = kwargs.get('context', {})
+		self.assertEqual(sub_context.get('session_id'), 'conv-abc-123')
+		self.assertEqual(sub_context.get('workspace_id'), 'ws1')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_child_gets_own_chunk_id_and_has_parent(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""AI child runners get their OWN task_chunk_id (the hook keys the child doc's
+		_id on it) and run_opts.has_parent = True so they drop out of the root runners
+		list. They do NOT inherit the parent's task_id — that collides with the async
+		celery dispatch of heavy tasks (see _child_preamble). description flows to run_opts."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'drivers': ['mongodb'], 'task_id': 'PARENT_AI_ID'},
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1'],
+		          'description': 'Port-scan the target for open services'}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		sub_context = kwargs.get('context', {})
+		run_opts = kwargs.get('run_opts', {})
+		# Own chunk id, and it must NOT be the parent's task_id (would collide async dispatch)
+		self.assertTrue(sub_context.get('task_chunk_id'))
+		self.assertNotEqual(sub_context.get('task_id'), 'PARENT_AI_ID')
+		# has_parent rides on run_opts (single source of truth), not context
+		self.assertTrue(run_opts.get('has_parent'))
+		self.assertNotIn('has_parent', sub_context)
+		# LLM-supplied description flows to the runner
+		self.assertEqual(run_opts.get('description'), 'Port-scan the target for open services')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_preserves_existing_session_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""A session_id already present in ctx.context must not be overwritten."""
+		mock_build_hooks.return_value = {}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'session_id': 'from-context'},
+			session_id='from-ctx-field',
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		self.assertEqual(kwargs.get('context', {}).get('session_id'), 'from-context')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_structures_subagent_prompt(self, mock_build_hooks, mock_task_cls, _tpl):
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['10.0.0.1'], model='m',
+							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value="- port 10.0.0.1:443"):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'],
+					'opts': {'prompt': 'Test auth on the API'}}
+			list(_run_runner(action, ctx, 'task'))
+		_, kwargs = mock_task_cls.call_args
+		prompt = kwargs.get('run_opts', {}).get('prompt', '')
+		self.assertIn('## Objective', prompt)
+		self.assertIn('Test auth on the API', prompt)
+		self.assertIn('- port 10.0.0.1:443', prompt)   # evidence injected
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_subagent_inherits_parent_llm_config(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""A spawned subagent inherits the parent's resolved model/api_key/api_base so it
+		can actually run (else it falls back to CONFIG.default_model with no key)."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['10.0.0.1'], model='openrouter/anthropic/x',
+							api_key='PARENTKEY', api_base='https://base',
+							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'], 'opts': {'prompt': 'do x'}}
+			list(_run_runner(action, ctx, 'task'))
+		ro = mock_task_cls.call_args[1].get('run_opts', {})
+		self.assertEqual(ro.get('model'), 'openrouter/anthropic/x')
+		self.assertEqual(ro.get('api_key'), 'PARENTKEY')
+		self.assertEqual(ro.get('api_base'), 'https://base')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_subagent_explicit_model_wins(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""An explicit LLM-supplied model on the subagent opts is preserved (setdefault)."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t'], model='parent/model',
+							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'],
+					  'opts': {'prompt': 'x', 'model': 'explicit/model'}}
+			list(_run_runner(action, ctx, 'task'))
+		ro = mock_task_cls.call_args[1].get('run_opts', {})
+		self.assertEqual(ro.get('model'), 'explicit/model')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_subagent_gets_own_session_and_parent_card(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""A subagent runs under its OWN conversation id (parent link preserved), while the
+		'Ran subagent' card stays in the PARENT conversation and links to the sub-session."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t'], model='m', session_id='parent-sess',
+							context={'workspace_id': 'ws1', 'session_id': 'parent-sess', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'],
+					  'opts': {'prompt': 'obj'}, 'description': 'Exploit Y'}
+			results = list(_run_runner(action, ctx, 'task'))
+		# The subagent RUNNER runs under a fresh session id, with the parent link kept.
+		runner_ctx = mock_task_cls.call_args[1].get('context', {})
+		self.assertNotEqual(runner_ctx.get('session_id'), 'parent-sess')
+		self.assertTrue(runner_ctx.get('session_id'))
+		self.assertEqual(runner_ctx.get('parent_session_id'), 'parent-sess')
+		# The emitted card belongs to the PARENT conversation and links to the sub-session.
+		card = next(r for r in results if getattr(r, 'ai_type', None) == 'task')
+		self.assertEqual(card._context.get('session_id'), 'parent-sess')
+		self.assertEqual(card.extra_data.get('subagent'), 'Exploit Y')
+		self.assertEqual(card.extra_data.get('subagent_session_id'), runner_ctx.get('session_id'))
+		# The card is the PARENT's record of the spawn, NOT subagent-internal, so it must
+		# NOT carry the `_context.subagent` marker (else restore/UI filters would drop it).
+		self.assertNotIn('subagent', card._context)
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_subagent_final_response_handed_back_to_parent(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""The parent's LLM cannot read the subagent's own transcript, so _run_runner must
+		hand back ONE clean summary (the subagent's final response + what it persisted),
+		stamped with the run_task tool_call_id, instead of the raw fragmented stream."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		sub_out = [
+			Ai(content="cloned PoC, ran it, RCE confirmed", ai_type="response", _context={"subagent": "Exploit Y"}),
+			Ai(content="", ai_type="mark_vuln_exploited", _context={"subagent": "Exploit Y"}),
+		]
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter(sub_out); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t'], model='m', session_id='parent-sess',
+							context={'workspace_id': 'ws1', 'session_id': 'parent-sess', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'], 'opts': {'prompt': 'obj'},
+					  'description': 'Exploit Y', 'tool_call_id': 'tc-123'}
+			results = list(_run_runner(action, ctx, 'task'))
+		handback = results[-1]
+		self.assertEqual(handback.ai_type, 'response')
+		self.assertEqual(handback._context.get('tool_call_id'), 'tc-123')   # groups as THIS tool_result
+		self.assertIn('RCE confirmed', handback.content)                    # subagent's final summary
+		self.assertIn('mark_vuln_exploited', handback.content)               # persist note
+		self.assertNotIn('NOTHING', handback.content)
+		self.assertIn('handback', handback.content.lower())
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_subagent_conversation_not_bubbled_only_findings(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""A subagent's own conversation (Ai items) must NOT bubble up to the parent: its
+		transcript lives under its own session (shown in the drill-in view), and re-yielding
+		those messages makes the parent re-render the whole transcript (Ai items aren't
+		_uuid-deduped like findings). Only real findings bubble up; the parent gets the handback."""
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		vuln = Vulnerability(name='SQLi', matched_at='http://t/login', severity='high',
+							 _source='child', _context={"subagent": "Exploit Y"})
+		sub_out = [
+			Ai(content="probing the login form", ai_type="response", _context={"subagent": "Exploit Y"}),
+			Ai(content="sqlmap ...", ai_type="shell", _context={"subagent": "Exploit Y"}),
+			vuln,
+			Ai(content="done, SQLi confirmed", ai_type="response", _context={"subagent": "Exploit Y"}),
+		]
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter(sub_out); mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t'], model='m', session_id='parent-sess',
+							context={'workspace_id': 'ws1', 'session_id': 'parent-sess', 'drivers': ['mongodb']})
+		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+			action = {'action': 'task', 'name': 'ai', 'targets': ['t'], 'opts': {'prompt': 'obj'},
+					  'description': 'Exploit Y', 'tool_call_id': 'tc-9'}
+			results = list(_run_runner(action, ctx, 'task'))
+		# the vuln finding bubbles up
+		self.assertIn(vuln, results)
+		# NONE of the subagent's own conversation items bubble up (they carry the subagent marker;
+		# the parent card + handback are stamped for the parent session, marker stripped)
+		leaked = [r for r in results if isinstance(r, Ai) and r._context.get('subagent')]
+		self.assertEqual(leaked, [], 'subagent conversation items must not bubble up to the parent')
+		# the handback still carries the subagent's final summary
+		handback = results[-1]
+		self.assertEqual(handback.ai_type, 'response')
+		self.assertEqual(handback._context.get('tool_call_id'), 'tc-9')
+		self.assertIn('SQLi confirmed', handback.content)
+
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSanitizeChildOpts(unittest.TestCase):
+	"""Tests for _sanitize_child_opts (C1: LLM-supplied subagent opts allow-list)."""
+
+	def test_strips_dangerous_and_control_keys(self):
+		opts = {
+			'dangerous': True, 'interactive': 'local', 'hooks': {'x': 1},
+			'sync': False, 'subagent': True, 'tty': True, 'dry_run': True,
+			'exporters': ['csv'], 'enable_reports': False,
+		}
+		clean = _sanitize_child_opts(opts)
+		self.assertEqual(clean, {})
+
+	def test_strips_print_star_keys(self):
+		clean = _sanitize_child_opts({'print_cmd': True, 'print_item': False, 'print_anything': 1})
+		self.assertEqual(clean, {})
+
+	def test_keeps_benign_task_opts(self):
+		clean = _sanitize_child_opts({'ports': '80,443', 'rate_limit': 100, 'mode': 'scan'})
+		self.assertEqual(clean, {'ports': '80,443', 'rate_limit': 100, 'mode': 'scan'})
+
+	def test_clamps_max_iterations(self):
+		clean = _sanitize_child_opts({'max_iterations': 9999})
+		self.assertEqual(clean['max_iterations'], _MAX_CHILD_ITERATIONS)
+		clean = _sanitize_child_opts({'max_iterations': 5})
+		self.assertEqual(clean['max_iterations'], 5)
+		# bool / non-numeric max_iterations is dropped (bool is an int subclass)
+		self.assertNotIn('max_iterations', _sanitize_child_opts({'max_iterations': True}))
+		self.assertNotIn('max_iterations', _sanitize_child_opts({'max_iterations': 'lots'}))
+
+	def test_non_dict_returns_empty(self):
+		self.assertEqual(_sanitize_child_opts(None), {})
+		self.assertEqual(_sanitize_child_opts('dangerous'), {})
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_neutralizes_dangerous_and_interactive(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""C1: an LLM emitting opts={'dangerous': True, 'interactive': 'local'} must NOT
+		propagate either into the spawned child's run_opts — dangerous is forced False
+		and interactive (a control key) is stripped."""
+		mock_build_hooks.return_value = {}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		action = {
+			'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1'],
+			'opts': {'dangerous': True, 'interactive': 'local', 'ports': '80'},
+		}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		run_opts = kwargs.get('run_opts', {})
+		self.assertEqual(run_opts.get('dangerous'), False)
+		self.assertNotEqual(run_opts.get('interactive'), 'local')
+		# benign task opt still passes through
+		self.assertEqual(run_opts.get('ports'), '80')
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_ai_subagent_forced_flags_over_llm_opts(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""Spawning an `ai` subagent with hostile opts: subagent forced True,
+		interactive forced False, dangerous forced False regardless of LLM input."""
+		mock_build_hooks.return_value = {}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		action = {
+			'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'],
+			'opts': {'dangerous': True, 'interactive': 'local', 'subagent': False},
+		}
+
+		list(_run_runner(action, ctx, 'task'))
+
+		_, kwargs = mock_task_cls.call_args
+		run_opts = kwargs.get('run_opts', {})
+		self.assertEqual(run_opts.get('dangerous'), False)
+		self.assertEqual(run_opts.get('interactive'), False)
+		self.assertEqual(run_opts.get('subagent'), True)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestBuildHooksFromContext(unittest.TestCase):
+	"""Tests for _build_hooks_from_context (driver name -> hooks dict)."""
+
+	def test_no_drivers_returns_empty(self):
+		self.assertEqual(_build_hooks_from_context({}), {})
+		self.assertEqual(_build_hooks_from_context({'drivers': []}), {})
+
+	@patch('secator.loader.get_available_drivers')
+	@patch('secator.loader.order_drivers')
+	@patch('secator.loader.discover_external_drivers')
+	@patch('secator.utils.import_dynamic')
+	def test_builds_hooks_from_driver_names(self, mock_import, _disc, mock_order, mock_avail):
+		from secator.runners import Task
+		mock_order.side_effect = lambda d: d
+		mock_avail.return_value = ['mongodb', 'api']
+		mongo_hooks = {Task: {'on_init': ['update_runner']}}
+		mock_import.return_value = mongo_hooks
+
+		hooks = _build_hooks_from_context({'drivers': ['mongodb']})
+
+		mock_import.assert_called_once_with('secator.hooks.mongodb', 'HOOKS')
+		self.assertIn(Task, hooks)
+		self.assertIn('on_init', hooks[Task])
+
+	@patch('secator.loader.get_available_drivers')
+	@patch('secator.loader.order_drivers')
+	@patch('secator.loader.discover_external_drivers')
+	@patch('secator.utils.import_dynamic')
+	def test_skips_unsupported_driver(self, mock_import, _disc, mock_order, mock_avail):
+		mock_order.side_effect = lambda d: d
+		mock_avail.return_value = ['mongodb']
+		hooks = _build_hooks_from_context({'drivers': ['bogus']})
+		self.assertEqual(hooks, {})
+		mock_import.assert_not_called()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestChildHooksOrDenial(unittest.TestCase):
+	"""M2: refuse to spawn a persistence-less child when the parent has drivers."""
+
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_parent_no_drivers_empty_hooks_allowed(self, mock_build):
+		# pure local/no-persistence run: empty hooks child is expected, no denial
+		mock_build.return_value = {}
+		hooks, denial = _build_child_hooks_or_denial({'workspace_id': 'ws1'})
+		self.assertEqual(hooks, {})
+		self.assertIsNone(denial)
+
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_parent_drivers_present_hooks_pass_through(self, mock_build):
+		# normal spawn: drivers present + non-empty hooks -> pass through unchanged
+		sentinel = {'fake': ['hook']}
+		mock_build.return_value = sentinel
+		hooks, denial = _build_child_hooks_or_denial({'drivers': ['mongodb']})
+		self.assertEqual(hooks, sentinel)
+		self.assertIsNone(denial)
+
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_parent_drivers_but_empty_hooks_denied(self, mock_build):
+		# parent HAS drivers but rebuild produced no hooks -> refuse, surface Warning
+		mock_build.return_value = {}
+		hooks, denial = _build_child_hooks_or_denial({'drivers': ['mongodb']})
+		self.assertEqual(hooks, {})
+		self.assertIsInstance(denial, Warning)
+		self.assertIn('drop findings', denial.message)
+
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_rebuild_raise_with_drivers_denied_not_swallowed(self, mock_build):
+		# a raising rebuild must not degrade to hooks={} silently -> Warning
+		mock_build.side_effect = RuntimeError('boom')
+		hooks, denial = _build_child_hooks_or_denial({'drivers': ['mongodb']})
+		self.assertEqual(hooks, {})
+		self.assertIsInstance(denial, Warning)
+		self.assertIn('rebuild failed', denial.message)
+
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_rebuild_raise_no_drivers_allowed(self, mock_build):
+		# no parent drivers: a rebuild error still yields an allowed empty-hooks child
+		mock_build.side_effect = RuntimeError('boom')
+		hooks, denial = _build_child_hooks_or_denial({'workspace_id': 'ws1'})
+		self.assertEqual(hooks, {})
+		self.assertIsNone(denial)
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_refuses_spawn_on_lost_persistence(self, mock_build, mock_task_cls, _tpl):
+		# end-to-end: parent has drivers, rebuild empty -> _run_runner yields a
+		# Warning and never constructs the child runner
+		mock_build.return_value = {}
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'drivers': ['mongodb']},
+		)
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+		results = list(_run_runner(action, ctx, 'task'))
+		mock_task_cls.assert_not_called()
+		warnings = [r for r in results if isinstance(r, Warning)]
+		self.assertEqual(len(warnings), 1)
+		self.assertIn('denied', warnings[0].message)
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_run_runner_no_drivers_spawns_normally(self, mock_build, mock_task_cls, _tpl):
+		# parent has NO drivers: empty-hooks child still spawns (no false alarm)
+		mock_build.return_value = {}
+		mock_runner = MagicMock()
+		mock_runner.id = 'runner123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+		action = {'action': 'task', 'name': 'nmap', 'targets': ['10.0.0.1']}
+		results = list(_run_runner(action, ctx, 'task'))
+		mock_task_cls.assert_called_once()
+		self.assertFalse([r for r in results if isinstance(r, Warning)])
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestGetQueryEngine(unittest.TestCase):
@@ -336,21 +1217,26 @@ class TestGetQueryEngine(unittest.TestCase):
 
 	# -- scope=current: always JsonBackend with in-memory results --
 
-	def test_current_scope_uses_json_backend(self):
-		"""scope=current always selects JsonBackend, even if drivers has mongodb."""
+	def test_uses_context_driver_backend(self):
+		"""The query engine ALWAYS resolves its backend from the context driver — even for
+		scope='current' — so a platform run queries mongodb, not the (disk-only) json backend."""
+		from secator.query.mongodb import MongoDBBackend
 		from secator.query.json import JsonBackend
 
 		results = [{'_type': 'url', 'url': 'http://a.com'}]
-		ctx = ActionContext(
-			targets=['t.com'],
-			model='m',
+		mongo_ctx = ActionContext(
+			targets=['t.com'], model='m',
 			context={'workspace_id': 'ws1', 'drivers': ['mongodb']},
-			scope='current',
-			results=results,
+			scope='current', results=results,
 		)
-		engine = ctx.get_query_engine()
+		self.assertIsInstance(mongo_ctx.get_query_engine().backend, MongoDBBackend)
 
-		self.assertIsInstance(engine.backend, JsonBackend)
+		# No driver in context -> local json backend (CLI default).
+		local_ctx = ActionContext(
+			targets=['t.com'], model='m', context={'workspace_id': 'ws1'},
+			scope='current', results=results,
+		)
+		self.assertIsInstance(local_ctx.get_query_engine().backend, JsonBackend)
 
 	@unittest.skip("current-scope query migrates to the report.json store in the AI-rework PR; re-enable + fix there")
 	def test_current_scope_passes_results(self):
@@ -367,8 +1253,9 @@ class TestGetQueryEngine(unittest.TestCase):
 
 		self.assertIs(engine.backend._results, results)
 
-	def test_current_scope_does_not_pass_drivers(self):
-		"""scope=current context should not contain drivers."""
+	def test_passes_context_drivers(self):
+		"""The context drivers ARE passed to the engine (so the backend resolves), even for
+		scope='current' — the old behavior stripped them, which silently forced the json backend."""
 		ctx = ActionContext(
 			targets=['t.com'],
 			model='m',
@@ -378,7 +1265,7 @@ class TestGetQueryEngine(unittest.TestCase):
 		)
 		engine = ctx.get_query_engine()
 
-		self.assertEqual(engine.context.get('drivers', []), [])
+		self.assertEqual(engine.context.get('drivers', []), ['mongodb'])
 
 	@unittest.skip("current-scope query migrates to the report.json store in the AI-rework PR; re-enable + fix there")
 	def test_current_scope_search_queries_in_memory(self):
@@ -454,6 +1341,7 @@ class TestGetQueryEngine(unittest.TestCase):
 			)
 		)
 		mock_cursor.limit.return_value = mock_cursor
+		mock_cursor.skip.return_value = mock_cursor  # find().skip(offset).limit(limit)
 
 		mock_db = MagicMock()
 		mock_db.findings.find.return_value = mock_cursor
@@ -598,6 +1486,32 @@ class TestHandleAddFinding(unittest.TestCase):
 		self.assertEqual(results[1].url, 'http://t.com/admin')
 		self.assertEqual(results[1].status_code, 200)
 
+	def test_add_finding_nested_fields(self):
+		# The fix: fields arrive nested under `fields` (a declared object param that
+		# survives strict function-calling providers which strip undeclared top-level
+		# args). They must be unpacked onto the finding exactly like flat siblings.
+		ctx = ActionContext(targets=['t.com'], model='m')
+		results = list(
+			_handle_add_finding(
+				{
+					'action': 'add_finding',
+					'_type': 'vulnerability',
+					'fields': {
+						'name': 'SQL Injection',
+						'severity': 'critical',
+						'matched_at': 'http://t.com/login',
+					},
+				},
+				ctx,
+			)
+		)
+
+		self.assertEqual(len(results), 2)
+		self.assertIsInstance(results[1], Vulnerability)
+		self.assertEqual(results[1].name, 'SQL Injection')
+		self.assertEqual(results[1].severity, 'critical')
+		self.assertEqual(results[1].matched_at, 'http://t.com/login')
+
 	def test_add_finding_unknown_type(self):
 		ctx = ActionContext(targets=['t.com'], model='m')
 		results = list(
@@ -650,6 +1564,75 @@ class TestHandleAddFinding(unittest.TestCase):
 		self.assertIsInstance(results[1], Vulnerability)
 		self.assertEqual(results[1].matched_at, 'http://t.com/search')
 
+	def test_coerce_finding_fields_scalar_types(self):
+		# LLMs send wrong-typed scalars (bool as "true", float/int as strings).
+		# The coercion helper fixes them to the declared field types.
+		data = _coerce_finding_fields(
+			Vulnerability,
+			{
+				'name': 'SQL Injection',
+				'verified': 'true',
+				'cvss_score': '7.5',
+				'severity_nb': '3',
+			},
+		)
+		self.assertIs(data['verified'], True)
+		self.assertIsInstance(data['verified'], bool)
+		self.assertEqual(data['cvss_score'], 7.5)
+		self.assertIsInstance(data['cvss_score'], float)
+		self.assertEqual(data['severity_nb'], 3)
+		self.assertIsInstance(data['severity_nb'], int)
+		# str fields are left untouched.
+		self.assertEqual(data['name'], 'SQL Injection')
+		# Coerced data validates clean.
+		self.assertEqual(Vulnerability.validate_fields(data), [])
+
+	def test_add_finding_coerces_scalar_types(self):
+		# End-to-end: wrong-typed CONTENT scalars coerce clean. Read-only/verdict fields
+		# (verified) are stripped as read-only, so a forged 'verified' must NOT land.
+		ctx = ActionContext(targets=['t.com'], model='m')
+		results = list(
+			_handle_add_finding(
+				{
+					'action': 'add_finding',
+					'_type': 'vulnerability',
+					'name': 'SQL Injection',
+					'matched_at': 'http://t.com/login',
+					'verified': 'true',   # read-only -> stripped
+					'cvss_score': '7.5',  # content -> coerced
+				},
+				ctx,
+			)
+		)
+
+		# No validation Error: the sloppy types were coerced before validation.
+		self.assertEqual(len(results), 2)
+		vuln = results[1]
+		self.assertIsInstance(vuln, Vulnerability)
+		self.assertFalse(vuln.verified)  # stripped -> default, not forced True
+		self.assertEqual(vuln.cvss_score, 7.5)
+		self.assertIsInstance(vuln.cvss_score, float)
+
+	def test_add_finding_unparseable_scalar_surfaces_error(self):
+		# An unparseable CONTENT value must NOT be silently dropped; validation reports it.
+		ctx = ActionContext(targets=['t.com'], model='m')
+		results = list(
+			_handle_add_finding(
+				{
+					'action': 'add_finding',
+					'_type': 'vulnerability',
+					'name': 'SQL Injection',
+					'matched_at': 'http://t.com/login',
+					'cvss_score': 'maybe',
+				},
+				ctx,
+			)
+		)
+
+		self.assertEqual(len(results), 1)
+		self.assertIsInstance(results[0], Error)
+		self.assertIn('cvss_score', results[0].message)
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestRunBatch(unittest.TestCase):
@@ -695,6 +1678,607 @@ class TestRunBatch(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertIsInstance(results[0], Warning)
 
+    def test_get_action_label_tolerates_stringified_opts(self):
+        """Regression: a str `opts` (model stringified it) must not crash the
+        batch label with AttributeError('str' object has no attribute 'get')."""
+        from secator.ai.actions import _get_action_label
+        label = _get_action_label(
+            {"action": "task", "name": "nmap", "targets": ["10.0.0.1"], "opts": '{"session_name": "x"}'})
+        self.assertEqual(label, "nmap on 10.0.0.1")  # falls back to name-on-target, no crash
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestCheckGuardrailsFailClosed(unittest.TestCase):
+	"""H10: prompts exhausted with the decision still 'ask' must fail CLOSED (deny)."""
+
+	def test_unresolved_after_max_rounds_denies(self):
+		from secator.ai.actions import check_guardrails_sync
+		# permission engine that never resolves: always 'ask', no shell/target/path layer
+		res = MagicMock(decision="ask", shell_command="", targets=[], paths=[], reason="needs approval")
+		engine = MagicMock()
+		engine.check_action.return_value = res
+		ctx = ActionContext(targets=['t.com'], model='m')
+		ctx.permission_engine = engine
+		denial, _items = check_guardrails_sync({"action": "shell", "command": "x"}, ctx)
+		self.assertIsNotNone(denial, "exhausted-but-unresolved guardrail must deny, not return None")
+		self.assertIn("unresolved", denial)
+
+
+class TestApprovalAllowList(unittest.TestCase):
+	"""Ask-loop approval must be an explicit allow-list: only "allow" proceeds."""
+
+	def _run(self, answer):
+		from secator.ai.actions import check_guardrails_sync
+		ask = MagicMock(decision="ask", shell_command="somecmd", targets=[], paths=[], reason="needs approval")
+		allow = MagicMock(decision="allow", shell_command="", targets=[], paths=[], reason="")
+		engine = MagicMock()
+		engine.check_action.side_effect = [ask, allow]
+		backend = MagicMock()
+		backend.ask_user.return_value = None if answer is None else {"answer": answer}
+		ctx = ActionContext(targets=['t.com'], model='m')
+		ctx.permission_engine = engine
+		ctx.backend = backend
+		denial, _items = check_guardrails_sync({"action": "shell", "command": "somecmd"}, ctx)
+		return denial
+
+	def test_allow_proceeds(self):
+		self.assertIsNone(self._run("allow"))
+
+	def test_deny_denies(self):
+		self.assertIsNotNone(self._run("deny"))
+
+	def test_unexpected_answer_denies(self):
+		# an out-of-vocabulary token must NOT be treated as approval (fail closed)
+		self.assertIsNotNone(self._run("sure"))
+		self.assertIsNotNone(self._run("allow_all_typo"))
+
+	def test_none_response_denies(self):
+		self.assertIsNotNone(self._run(None))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestSubagentFanoutCap(unittest.TestCase):
+	"""H4: recursion depth + per-turn fan-out caps on AI-subagent spawns."""
+
+	def _mock_task(self, mock_task_cls):
+		runner = MagicMock()
+		runner.id = 'runner123'
+		runner.reports_folder = None
+		runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = runner
+		return runner
+
+	def test_subagent_cannot_spawn_nested_subagent(self):
+		"""A subagent (ctx.subagent=True) is refused a nested spawn, before the depth/breadth caps."""
+		ctx = ActionContext(targets=['t.com'], model='m', subagent=True, context={})
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+
+		with patch('secator.ai.actions.Task') as mock_task_cls:
+			results = list(_run_runner(action, ctx, 'task'))
+
+		mock_task_cls.assert_not_called()  # denied before constructing the child
+		self.assertEqual(len(results), 1)
+		self.assertIsInstance(results[0], Warning)
+		self.assertIn('nested subagents', results[0].message)
+
+	def test_depth_cap_refuses_spawn(self):
+		"""Spawning an AI subagent at/over _MAX_SUBAGENT_DEPTH is denied."""
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'ai_subagent_depth': _MAX_SUBAGENT_DEPTH},
+		)
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+
+		with patch('secator.ai.actions.Task') as mock_task_cls:
+			results = list(_run_runner(action, ctx, 'task'))
+
+		mock_task_cls.assert_not_called()  # denied before constructing the child
+		self.assertEqual(len(results), 1)
+		self.assertIsInstance(results[0], Warning)
+		self.assertIn('depth cap', results[0].message)
+		# no Ai task item emitted (spawn refused)
+		self.assertFalse([r for r in results if isinstance(r, Ai) and r.ai_type == 'task'])
+
+	def test_per_turn_breadth_cap_refuses_spawn(self):
+		"""In a batch, spawning past _MAX_SUBAGENTS_PER_TURN is denied."""
+		ctx = ActionContext(
+			targets=['t.com'], model='m', in_batch=True,
+			context={'ai_subagent_turn_count': _MAX_SUBAGENTS_PER_TURN},
+		)
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+
+		with patch('secator.ai.actions.Task') as mock_task_cls:
+			results = list(_run_runner(action, ctx, 'task'))
+
+		mock_task_cls.assert_not_called()
+		self.assertEqual(len(results), 1)
+		self.assertIsInstance(results[0], Warning)
+		self.assertIn('fan-out cap', results[0].message)
+
+	@patch('secator.ai.actions.TemplateLoader')
+	@patch('secator.ai.actions.Task')
+	@patch('secator.ai.actions._build_hooks_from_context')
+	def test_normal_depth1_spawn_succeeds(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""A first-level AI subagent (depth 0 -> 1) still spawns; child inherits depth+1."""
+		mock_build_hooks.return_value = {}
+		self._mock_task(mock_task_cls)
+
+		ctx = ActionContext(targets=['t.com'], model='m', context={})  # depth 0, not in a batch
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+
+		results = list(_run_runner(action, ctx, 'task'))
+
+		mock_task_cls.assert_called_once()
+		ai_items = [r for r in results if isinstance(r, Ai) and r.ai_type == 'task']
+		self.assertEqual(len(ai_items), 1)
+		self.assertFalse([r for r in results if isinstance(r, Warning)])
+		# child context carries incremented depth
+		_, kwargs = mock_task_cls.call_args
+		self.assertEqual(kwargs.get('context', {}).get('ai_subagent_depth'), 1)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestChildContextParenting(unittest.TestCase):
+	"""A spawned sub-runner must get a CLEAN identity: it inherits the conversation
+	session_id + drivers but NOT the parent's runner-doc id, so it mints its own doc
+	(linked to the conversation by session_id), instead of clobbering the parent."""
+
+	def test_child_context_strips_parent_identity_keeps_session(self):
+		from secator.ai.actions import _get_result_context, ActionContext
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={
+				'workspace_id': 'ws1', 'workspace_name': 'w', 'drivers': ['mongodb'],
+				'task_id': 'PARENT_AI_ID',          # the parent ai task's own doc id
+				'session_id': 'conv-1',
+			},
+			session_id='conv-1',
+		)
+		action = {'action': 'task', 'name': 'nmap', 'tool_call_id': 'tc1', 'tool_call_name': 'run_task'}
+		child = _get_result_context(action, ctx)
+		# keeps the conversation link + drivers/workspace
+		self.assertEqual(child['session_id'], 'conv-1')
+		self.assertEqual(child['drivers'], ['mongodb'])
+		self.assertEqual(child['workspace_id'], 'ws1')
+		# has_parent now rides on run_opts (single source of truth), NOT context
+		self.assertNotIn('has_parent', child)
+		# _get_result_context STRIPS the parent's runner-doc identity; _child_preamble
+		# then stamps the child's OWN id (task_chunk_id for a task, {type}_id for a
+		# workflow/scan) — tested below.
+		self.assertNotIn('task_id', child)
+		self.assertNotIn('workflow_id', child)
+		self.assertNotIn('scan_id', child)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestBuildSubagentPrompt(unittest.TestCase):
+	def test_structure_sections_and_objective(self):
+		from secator.ai.actions import build_subagent_prompt
+		p = build_subagent_prompt("Test auth on the API", ["10.0.0.1", "app.x.com"], "- Port 443 open")
+		self.assertIn("## Objective", p)
+		self.assertIn("Test auth on the API", p)          # objective verbatim
+		self.assertIn("## Scope", p)
+		self.assertIn("10.0.0.1", p)
+		self.assertIn("app.x.com", p)
+		self.assertIn("## Already known", p)
+		self.assertIn("- Port 443 open", p)               # evidence injected
+		self.assertIn("## Expected output", p)
+		# The subagent MUST be told (imperatively) to persist via mark_vuln_*/add_finding
+		# with the _uuid — its prose is not saved and the parent can't read its transcript.
+		for tool in ("mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"):
+			self.assertIn(tool, p)
+		self.assertNotIn("add_vuln_poc", p)
+		self.assertIn("add_finding", p)
+		self.assertIn("_uuid", p)
+		self.assertIn("not saved", p.lower())
+		self.assertIn("HANDBACK", p)
+
+	def test_empty_evidence_renders_none(self):
+		from secator.ai.actions import build_subagent_prompt
+		p = build_subagent_prompt("Do X", ["t.com"], "")
+		self.assertIn("(none", p.lower())                 # explicit "none" marker
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestGatherSubagentEvidence(unittest.TestCase):
+	def test_queries_targets_and_formats(self):
+		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [
+			{"_type": "port", "ip": "10.0.0.1", "port": 443},
+			{"_type": "url", "url": "http://app.x.com/login"},
+		]
+		ctx = ActionContext(targets=[], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			out = _gather_subagent_evidence(ctx, ["10.0.0.1", "app.x.com"], limit=40)
+		# queried by an $or over the targets
+		q = mock_engine.search.call_args[0][0]
+		self.assertIn("$or", q)
+		# formatted a compact summary
+		self.assertIn("port", out)
+		self.assertIn("10.0.0.1", out)
+		self.assertIn("url", out)
+
+	def test_no_targets_returns_empty(self):
+		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		ctx = ActionContext(targets=[], model='m', context={})
+		self.assertEqual(_gather_subagent_evidence(ctx, [], limit=40), "")
+
+	def test_search_error_returns_empty(self):
+		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		mock_engine = MagicMock()
+		mock_engine.search.side_effect = Exception("boom")
+		ctx = ActionContext(targets=[], model='m', context={'workspace_id': 'ws1'})
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			self.assertEqual(_gather_subagent_evidence(ctx, ["t"], limit=40), "")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestHandleMarkVulnExploited(unittest.TestCase):
+	"""Tests for _handle_mark_vuln_exploited — mark an existing vuln exploited + record its PoC."""
+
+	def _ctx(self):
+		return ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
+
+	def test_exploited_sets_status_and_poc(self):
+		"""Records a success ExploitAttempt + derives the vuln (EXPLOITED/verified/poc),
+		keeps confidence/extra_data enrichment vuln-owned, yields an Ai naming the vuln."""
+		e = FakeEngine([{"_uuid": "u1", "_type": "vulnerability", "name": "SQLi", "id": "", "matched_at": ""}])
+		ctx = self._ctx()
+		action = {"action": "mark_vuln_exploited", "_uuid": "u1", "poc": "# poc\ncmd -> output",
+			"confidence": "high", "extra_data": {"reason": "rce confirmed"}}
+		with patch.object(ctx, 'get_query_engine', return_value=e):
+			results = list(_handle_mark_vuln_exploited(action, ctx))
+		# a success attempt is recorded with the date-stamped poc
+		att = [r for r in results if isinstance(r, ExploitAttempt)]
+		self.assertEqual(len(att), 1)
+		self.assertEqual(att[0].verdict, "success")
+		self.assertRegex(att[0].poc, r"^_Exploited on \d{4}-\d{2}-\d{2}_")
+		self.assertIn("# poc\ncmd -> output", att[0].poc)
+		# the vuln is rolled up + enriched
+		v = e.search({"_uuid": "u1"})[0]
+		self.assertEqual(v["status"], "EXPLOITED")
+		self.assertTrue(v["verified"])
+		self.assertIn("# poc\ncmd -> output", v["poc"])
+		self.assertEqual(v["confidence"], "high")
+		self.assertEqual(v["confidence_nb"], 1)
+		self.assertEqual(v["extra_data"]["reason"], "rce confirmed")
+		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "mark_vuln_exploited"]
+		self.assertEqual(len(ais), 1)
+		self.assertEqual(ais[0].extra_data.get("finding", {}).get("status"), "EXPLOITED")
+		self.assertIn("SQLi", ais[0].content)
+		self.assertFalse([r for r in results if isinstance(r, Error)])
+
+	def test_no_match_yields_error(self):
+		"""uuid matches nothing -> Error (so the LLM re-checks the uuid), no Ai."""
+		mock_engine = MagicMock()
+		mock_engine.update.return_value = 0
+		ctx = self._ctx()
+		action = {"action": "mark_vuln_exploited", "_uuid": "missing", "poc": "x"}
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_exploited(action, ctx))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertTrue(any("No vulnerability found" in e.message for e in errors))
+		self.assertFalse([r for r in results if isinstance(r, Ai)])
+
+	def test_missing_uuid_errors(self):
+		mock_engine = MagicMock()
+		ctx = self._ctx()
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_exploited({"action": "mark_vuln_exploited", "poc": "x"}, ctx))
+		self.assertTrue([r for r in results if isinstance(r, Error)])
+		mock_engine.update.assert_not_called()
+
+	def test_empty_poc_errors(self):
+		"""Blank poc -> Error, engine never touched (proof is mandatory)."""
+		mock_engine = MagicMock()
+		ctx = self._ctx()
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_exploited({"action": "mark_vuln_exploited", "_uuid": "u1", "poc": "   "}, ctx))
+		self.assertTrue([r for r in results if isinstance(r, Error)])
+		mock_engine.update.assert_not_called()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestHandleMarkVulnFalsePositive(unittest.TestCase):
+	"""Tests for _handle_mark_vuln_false_positive — mark an existing vuln as a false positive."""
+
+	def _ctx(self):
+		return ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
+
+	def test_marks_false_positive_and_attaches_finding(self):
+		"""$set is_false_positive=True + status=FALSE_POSITIVE + verified=False; the result
+		carries the re-fetched finding (the old FP path attached none)."""
+		mock_engine = MagicMock()
+		mock_engine.update.return_value = 1
+		mock_engine.search.return_value = [{"_uuid": "u1", "_type": "vulnerability", "name": "XSS"}]
+		ctx = self._ctx()
+		action = {"action": "mark_vuln_false_positive", "_uuid": "u1", "reason": "target not reachable"}
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_false_positive(action, ctx))
+		sset = mock_engine.update.call_args[0][1]["$set"]
+		self.assertTrue(sset["is_false_positive"])
+		self.assertEqual(sset["status"], "FALSE_POSITIVE")
+		self.assertFalse(sset["verified"])
+		self.assertEqual(sset["extra_data.false_positive_reason"], "target not reachable")
+		ais = [r for r in results if isinstance(r, Ai) and r.ai_type == "mark_vuln_false_positive"]
+		self.assertEqual(len(ais), 1)
+		self.assertTrue(ais[0].extra_data.get("finding"))
+		self.assertIn("XSS", ais[0].content)
+
+	def test_no_match_yields_error(self):
+		mock_engine = MagicMock()
+		mock_engine.update.return_value = 0
+		ctx = self._ctx()
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_false_positive({"action": "mark_vuln_false_positive", "_uuid": "x"}, ctx))
+		self.assertTrue(any("No vulnerability found" in e.message for e in results if isinstance(e, Error)))
+		self.assertFalse([r for r in results if isinstance(r, Ai)])
+
+	def test_missing_uuid_errors(self):
+		mock_engine = MagicMock()
+		ctx = self._ctx()
+		with patch.object(ctx, 'get_query_engine', return_value=mock_engine):
+			results = list(_handle_mark_vuln_false_positive({"action": "mark_vuln_false_positive"}, ctx))
+		self.assertTrue([r for r in results if isinstance(r, Error)])
+		mock_engine.update.assert_not_called()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestRunRunnerNameValidation(unittest.TestCase):
+	"""An LLM-invented task/workflow name must fail with a clean, actionable message
+	instead of leaking a raw Python traceback (regression from two canary AI runs where
+	the model invented `url_crawl` / `code_scan`, each dumping a full
+	`TaskNotFoundError` stack trace into the tool result)."""
+
+	def _ctx(self):
+		return ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'})
+
+	def test_unknown_task_name_clean_error_no_traceback(self):
+		"""A fully-invented task name -> clean error listing real tasks, no traceback."""
+		results = list(_run_runner(
+			{'action': 'run_task', 'name': 'bogus_task_xyz', 'targets': ['t.com']},
+			self._ctx(), 'task'))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1)
+		msg = errors[0].message
+		self.assertIn("bogus_task_xyz", msg)
+		self.assertIn("not found", msg)
+		# No stack trace, and no runner ever dispatched (no Ai action item emitted).
+		self.assertNotIn("Traceback", msg)
+		self.assertFalse([r for r in results if isinstance(r, Ai)])
+		# Message names real, discoverable tasks so the model can self-correct.
+		self.assertIn("httpx", msg)
+
+	def test_workflow_name_called_as_task_cross_hints(self):
+		"""The exact transcript failure: a real WORKFLOW (`url_crawl`) called via
+		run_task must error cleanly AND point the model at run_workflow — not dump a
+		`TaskNotFoundError` traceback."""
+		results = list(_run_runner(
+			{'action': 'run_task', 'name': 'url_crawl', 'targets': ['t.com']},
+			self._ctx(), 'task'))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1)
+		msg = errors[0].message
+		self.assertIn("url_crawl", msg)
+		self.assertIn("run_workflow", msg)
+		self.assertNotIn("Traceback", msg)
+		self.assertFalse([r for r in results if isinstance(r, Ai)])
+
+	def test_valid_task_name_passes_validation(self):
+		"""A real task name is NOT rejected by the new guard (dry-run stops before dispatch)."""
+		ctx = ActionContext(targets=['t.com'], model='m', context={'workspace_id': 'ws1'}, dry_run=True)
+		results = list(_run_runner(
+			{'action': 'run_task', 'name': 'httpx', 'targets': ['t.com']}, ctx, 'task'))
+		self.assertFalse([r for r in results if isinstance(r, Error)])
+		self.assertTrue(any(isinstance(r, Info) and 'DRY RUN' in r.message for r in results))
+
+	def test_unknown_workflow_name_clean_error(self):
+		results = list(_run_runner(
+			{'action': 'run_workflow', 'name': 'bogus_workflow_xyz', 'targets': ['t.com']},
+			self._ctx(), 'workflow'))
+		errors = [r for r in results if isinstance(r, Error)]
+		self.assertEqual(len(errors), 1)
+		self.assertIn("bogus_workflow_xyz", errors[0].message)
+		self.assertIn("not found", errors[0].message)
+		self.assertNotIn("Traceback", errors[0].message)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestChildPreambleChunkId(unittest.TestCase):
+	"""An AI child's own doc key must match its runner type.
+
+	The mongo hook keys a task doc on `task_chunk_id` (falling back to `task_id`), and a
+	workflow/scan doc on `{type}_id`. A task child gets a `task_chunk_id`; a workflow/scan
+	child is a STANDALONE runner (not a chunk) and gets a `{type}_id` — both the mongo and
+	api hooks key on that, so the AI runner card points at the persisted id. (Pre-fix, a
+	workflow/scan child stamped a `task_chunk_id`, leaving it with no valid doc id — it
+	minted a fresh doc every update and stayed PENDING forever; see #452.)
+	"""
+
+	def _ctx(self):
+		# No drivers => _build_child_hooks_or_denial returns ({}, None), so the
+		# preamble runs cleanly without a mongo/api backend.
+		return ActionContext(targets=['t.com'], model='m', context={})
+
+	def test_task_child_keyed_on_task_chunk_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'task')
+		self.assertIsNone(denial)
+		self.assertIn('task_chunk_id', context)
+		self.assertNotIn('workflow_chunk_id', context)
+
+	def test_workflow_child_keyed_on_workflow_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'workflow')
+		self.assertIsNone(denial)
+		# A workflow child is a standalone runner, not a chunk.
+		self.assertIn('workflow_id', context)
+		self.assertNotIn('workflow_chunk_id', context)
+		self.assertNotIn('task_chunk_id', context)
+
+	def test_scan_child_keyed_on_scan_id(self):
+		context = {}
+		_hooks, denial = _child_preamble(self._ctx(), context, 'scan')
+		self.assertIsNone(denial)
+		self.assertIn('scan_id', context)
+		self.assertNotIn('scan_chunk_id', context)
+
+	def test_default_runner_type_is_task(self):
+		# _handle_shell relies on the default: a shell command persists as a `task`.
+		context = {}
+		_child_preamble(self._ctx(), context)
+		self.assertIn('task_chunk_id', context)
+
+
+class TestEnsureMongoRunIdCoercion(unittest.TestCase):
+	"""A raw-uuid runner id must coerce to an ObjectId, else `ObjectId(uuid)` raises /
+	mints a fresh doc per write. Covers task chunks + workflow/scan `{type}_id`s."""
+
+	def test_runner_ids_coerced(self):
+		try:
+			from bson import ObjectId
+			from secator.hooks.mongodb import ensure_mongo_run_id
+		except Exception as e:  # noqa: BLE001
+			self.skipTest(f'mongodb addon not available: {e}')
+		context = {
+			'workflow_id': 'not-an-objectid',
+			'scan_id': 'also-not-one',
+			'task_chunk_id': 'still-not-one',
+		}
+		ensure_mongo_run_id(context)
+		for key in ('workflow_id', 'scan_id', 'task_chunk_id'):
+			self.assertTrue(ObjectId.is_valid(context[key]), key)
+
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestShellTimeout(unittest.TestCase):
+	"""run_shell per-command timeout: default CONFIG.security.shell_default_timeout, settable by
+	the model within [default, CONFIG.celery.task_max_timeout]."""
+
+	def _resolve(self, action, ceiling, default=30):
+		from secator.ai import actions
+		import types
+		cfg = types.SimpleNamespace(
+			security=types.SimpleNamespace(shell_default_timeout=default),
+			celery=types.SimpleNamespace(task_max_timeout=ceiling),
+		)
+		with patch('secator.config.CONFIG', cfg):
+			return actions._resolve_shell_timeout(action)
+
+	def test_default_when_absent(self):
+		# No timeout arg -> the configured per-command default.
+		self.assertEqual(self._resolve({'action': 'shell', 'command': 'x'}, ceiling=7200, default=30), 30)
+
+	def test_model_can_raise_toward_ceiling(self):
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 600}, ceiling=7200), 600)
+
+	def test_request_below_default_is_floored(self):
+		# Settable range is [default, ceiling]: a value under the default is floored to it.
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 5}, ceiling=7200, default=30), 30)
+
+	def test_capped_at_task_max_timeout(self):
+		# Requests above the global task ceiling are capped, not rejected.
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 99999}, ceiling=7200), 7200)
+
+	def test_no_ceiling_when_task_max_unlimited(self):
+		# task_max_timeout = -1 (no cap) -> the model may raise freely above the default.
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 100000}, ceiling=-1), 100000)
+
+	def test_non_numeric_falls_back_to_default(self):
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 'soon'}, ceiling=7200, default=30), 30)
+
+	def test_non_positive_falls_back_to_default(self):
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': 0}, ceiling=7200, default=30), 30)
+		self.assertEqual(self._resolve({'command': 'x', 'timeout': -5}, ceiling=7200, default=30), 30)
+
+	@patch('secator.tasks.command.command')
+	def test_handle_shell_applies_resolved_timeout(self, mock_task_cls):
+		fake = MagicMock()
+		fake.id = 'task_t'
+		fake.output = 'ok'
+		fake.timed_out = False
+		mock_task_cls.return_value = fake
+		ctx = ActionContext(targets=['t.com'], model='m')
+		list(_handle_shell({'action': 'shell', 'command': 'echo hi', 'timeout': 120}, ctx))
+		self.assertEqual(fake.max_timeout, 120)
+
+	def test_timeout_emits_retry_hint_end_to_end(self):
+		"""Real run: a command that exceeds its timeout is killed and the output tells the
+		model it may re-run with a higher timeout. Default patched to 1s so the test is fast
+		(the real 30s default would floor the requested 1s)."""
+		from secator.config import CONFIG
+		ctx = ActionContext(targets=['t.com'], model='m')
+		with patch.object(CONFIG.security, 'shell_default_timeout', 1):
+			results = list(_handle_shell({'action': 'shell', 'command': 'sleep 5', 'timeout': 1}, ctx))
+		out = [r for r in results if isinstance(r, Ai) and r.ai_type == 'shell_output'][0].content
+		self.assertIn('timed out after 1s', out)
+		self.assertIn('higher `timeout`', out)
+
+	def test_run_shell_schema_exposes_timeout(self):
+		from secator.ai.tools import TOOL_SCHEMAS
+		props = TOOL_SCHEMAS['run_shell']['function']['parameters']['properties']
+		self.assertIn('timeout', props)
+		self.assertEqual(props['timeout']['type'], 'integer')
+		self.assertNotIn('timeout', TOOL_SCHEMAS['run_shell']['function']['parameters']['required'])
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestCommandTimedOutFlag(unittest.TestCase):
+	"""Command.timed_out is set when max_timeout is exceeded (the signal _handle_shell reads)."""
+
+	def test_timed_out_flag_set(self):
+		from secator.tasks.command import command as CommandTask
+		runner = CommandTask(['sleep 5'])
+		runner.max_timeout = 1
+		runner.monitor_poll_interval = 0.5  # check sub-cadence so the 1s timeout actually fires
+		runner.run()
+		self.assertTrue(runner.timed_out)
+
+	def test_fast_poll_does_not_increase_stat_collection(self):
+		"""Perf guard: a short monitor_poll_interval makes the timeout/memory CHECKS more
+		frequent but must NOT collect stats more often — stat collection stays gated by
+		stat_update_frequency. So no extra Stat objects / psutil work from a fast poll."""
+		from secator.tasks.command import command as CommandTask
+		from secator.runners.command import Command
+		calls = {'n': 0}
+		orig = Command._collect_stats
+
+		def counting(self, procs):
+			calls['n'] += 1
+			return orig(self, procs)
+
+		runner = CommandTask(['sleep 2'])
+		runner.max_timeout = 30                 # won't time out
+		runner.monitor_poll_interval = 0.1      # ~20 wakeups over the run
+		with patch.object(Command, '_collect_stats', counting):
+			runner.run()
+		# stat_update_frequency is tens of seconds, so over a ~2s run stats collect at most a
+		# couple of times (baseline + maybe one), NEVER once per 0.1s poll (~20).
+		self.assertLessEqual(calls['n'], 3)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestDangerousClearsScope(unittest.TestCase):
+	"""Bypassing the permission engine (dangerous) also drops the in_scope/out_of_scope
+	boundary from child run-opts, so the shipped scope-gate stops filtering targets."""
+
+	def _ctx(self, dangerous):
+		return ActionContext(
+			targets=['canary.example.com'], model='x',
+			in_scope=['app.example.com'], out_of_scope=['canary.example.com'],
+			dangerous=dangerous)
+
+	def test_scope_propagated_when_not_dangerous(self):
+		opts = _child_run_opts(self._ctx(False))
+		self.assertEqual(opts.get('in_scope'), ['app.example.com'])
+		self.assertEqual(opts.get('out_of_scope'), ['canary.example.com'])
+
+	def test_scope_dropped_when_dangerous(self):
+		opts = _child_run_opts(self._ctx(True))
+		self.assertNotIn('in_scope', opts)
+		self.assertNotIn('out_of_scope', opts)

@@ -42,7 +42,19 @@ class dnsx(ReconDns):
 	install_version = 'v1.2.2'
 	install_cmd = 'go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@[install_version]'
 	github_handle = 'projectdiscovery/dnsx'
-	profile = 'small'
+	profile = lambda opts: dnsx.dynamic_profile(opts)  # noqa: E731
+
+	@staticmethod
+	def dynamic_profile(opts):
+		wordlist = dnsx._get_opt_value(
+			opts,
+			'wordlist',
+			opts_conf=dict(dnsx.opts, **dnsx.meta_opts),
+			opt_aliases=opts.get('aliases', []),
+			preprocess=True,
+			process=False,
+		)
+		return 'medium' if wordlist else 'small'
 
 	@staticmethod
 	def validate_input(self, inputs):

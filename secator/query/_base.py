@@ -60,8 +60,17 @@ class QueryBackend(ABC):
 			'is_false_positive': {'$ne': True},
 		}
 
-	def _merge_query(self, query: dict) -> dict:
-		"""Merge user query with base query. Base query always wins."""
+	# Display/perf filters in the base query that scope READS but must NOT gate a targeted
+	# write: an update by id/uuid has to reach a finding regardless of its display state.
+	_DISPLAY_FILTER_FIELDS = ('is_false_positive', '_tagged')
+
+	def _merge_query(self, query: dict, scope_only: bool = False) -> dict:
+		"""Merge user query with base query. Base query always wins.
+
+		``scope_only`` keeps ONLY the workspace-scope of the base query (drops the display
+		filters) — used for updates so re-writing an already-false-positive/marked finding
+		still matches, instead of matching 0 rows and looking like "not found".
+		"""
 		merged = query.copy()
 
 		for field in self.PROTECTED_FIELDS:
@@ -69,24 +78,40 @@ class QueryBackend(ABC):
 				del merged[field]
 
 		base = self.get_base_query()
+		if scope_only:
+			base = {k: v for k, v in base.items() if k not in self._DISPLAY_FILTER_FIELDS}
 		merged.update(base)
 
 		return merged
 
-	def search(self, query: dict, limit: int = 0, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
-		"""Execute query with enforced base query."""
+	def search(self, query: dict, limit: int = 0, exclude_fields: List[str] = None,
+	           scope_only: bool = False, offset: int = 0) -> List[Dict[str, Any]]:
+		"""Execute query with enforced base query.
+
+		``scope_only`` drops the display filters (is_false_positive/_tagged), keeping only
+		the workspace scope — for a targeted read that must reach a finding regardless of
+		its display state (mirrors ``update``'s scope_only merge).
+
+		``offset`` skips the first N matching results (pagination); combine with ``limit``
+		to page through large result sets. offset=0 preserves the legacy behaviour.
+		"""
 		if exclude_fields is None:
 			exclude_fields = []
-		safe_query = self._merge_query(query)
+		safe_query = self._merge_query(query, scope_only=scope_only)
 		debug('context', sub=f'query.{self.name}', obj=self.context)
 		debug('search', sub=f'query.{self.name}', obj=safe_query)
-		results = self._execute_search(safe_query, limit, exclude_fields)
+		results = self._execute_search(safe_query, limit, exclude_fields, offset=offset)
 		debug(f'{len(results)} results', sub=f'query.{self.name}')
 		return results
 
 	@abstractmethod
-	def _execute_search(self, query: dict, limit: int, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
-		"""Backend-specific search implementation."""
+	def _execute_search(self, query: dict, limit: int, exclude_fields: List[str] = None,
+	                    offset: int = 0) -> List[Dict[str, Any]]:
+		"""Backend-specific search implementation.
+
+		``offset`` skips the first N matching results; backends with no native skip apply a
+		Python slice fallback. offset=0 is the legacy no-skip behaviour.
+		"""
 		pass
 
 	def iterate(self, query: dict, batch_size: int = 1000):
@@ -113,8 +138,14 @@ class QueryBackend(ABC):
 		pass
 
 	def update(self, query: dict, update: dict) -> int:
-		"""Update records matching query with enforced base query."""
-		safe_query = self._merge_query(query)
+		"""Update records matching query, scoped to the workspace only.
+
+		The `is_false_positive` display filter is intentionally NOT applied to writes (see
+		`_merge_query(scope_only=True)`): a targeted update must reach the finding even if it's
+		already a false positive / already in the target state — otherwise a legitimate re-mark
+		matches 0 rows and surfaces a misleading "not found".
+		"""
+		safe_query = self._merge_query(query, scope_only=True)
 		return self._execute_update(safe_query, update)
 
 	@abstractmethod

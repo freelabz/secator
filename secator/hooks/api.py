@@ -73,6 +73,12 @@ def update_runner(self):
 	update = self.toDict()
 	chunk = update.get('chunk')
 	_id = self.context.get(f'{runner_type}_chunk_id') if chunk else self.context.get(f'{runner_type}_id')
+	# The runner constructor mints a run-scope uuid {type}_id, but API runner ids are
+	# ObjectIds (same rule as the mongodb hook's ensure_mongo_run_id): a non-ObjectId id
+	# was never created remotely, so create it (POST) and adopt the returned id. An
+	# ObjectId id is an existing runner (e.g. passed in through the context): PUT it.
+	if not _is_object_id(_id):
+		_id = None
 	workspace_id, workspace_name = resolve_workspace(self.context.get('workspace_id'))
 	self.context['workspace_id'] = workspace_id
 	self.context['workspace_name'] = workspace_name
@@ -142,7 +148,7 @@ def update_finding(self, item):
 
 def _is_object_id(value):
 	"""Return True if value looks like a 24-char hex MongoDB ObjectId."""
-	return bool(value) and len(value) == 24 and all(c in '0123456789abcdefABCDEF' for c in value)
+	return isinstance(value, str) and len(value) == 24 and all(c in '0123456789abcdefABCDEF' for c in value)
 
 
 @cache

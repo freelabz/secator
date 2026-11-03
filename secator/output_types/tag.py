@@ -13,6 +13,8 @@ class Tag(OutputType):
 	category: str = field(default='general')
 	extra_data: dict = field(default_factory=dict, repr=True, compare=False)
 	stored_response_path: str = field(default='', compare=False)
+	confidence: str = field(default='high', compare=False)
+	confidence_nb: int = field(default=0, compare=False)
 	is_false_positive: bool = field(default=False, compare=False)
 	is_acknowledged: bool = field(default=False, compare=False)
 	tags: list = field(default_factory=list, compare=False)
@@ -27,6 +29,8 @@ class Tag(OutputType):
 
 	_table_fields = ['match', 'category', 'name', 'extra_data']
 	_sort_by = ('match', 'name')
+	_group_by = ('category', 'name')
+	_group_aggregate = 'match'
 
 	def __post_init__(self):
 		super().__post_init__()

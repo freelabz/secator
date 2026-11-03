@@ -71,6 +71,15 @@ class Celery(StrictModel):
 	result_backend: StrExpandHome = ''
 	result_backend_transport_options: str = ''
 	result_expires: int = 86400  # 1 day
+	# Interval (seconds) for the redis result-backend health check; 0 disables it.
+	# MUST stay 0: Celery's redis ResultConsumer drives a single pubsub connection and
+	# issues a SUBSCRIBE/UNSUBSCRIBE on it per task result. When redis-py's health check
+	# is enabled (> 0) it reads pending responses off that same connection and raises
+	# `redis.exceptions.PubSubError: A non health check response was cleaned ...` the moment
+	# it meets an UNSUBSCRIBE confirmation instead of its PING reply — aborting the workflow
+	# mid-chord. A reaped idle result connection is already handled by result_backend_always_retry
+	# (it reconnects and retries store_result), so the health check is redundant here.
+	redis_backend_health_check_interval: int = 0
 	task_acks_late: bool = False
 	task_send_sent_event: bool = False
 	task_reject_on_worker_lost: bool = False
@@ -103,6 +112,11 @@ class Runners(StrictModel):
 	input_chunk_size: int = 100
 	progress_update_frequency: int = 20
 	stat_update_frequency: int = 20
+	# Also emit a Stat for the worker process itself (the process running the task), as an extra
+	# root above the command in the stat tree. Meant for a 1-task-per-worker setup, where the
+	# subtree total then reflects the task's full footprint including the worker; off by default
+	# (in a shared/CLI process the worker's memory isn't attributable to one task).
+	monitor_worker: bool = False
 	backend_update_frequency: int = 5
 	poll_frequency: int = 5
 	skip_cve_search: bool = False
@@ -120,6 +134,9 @@ class Security(StrictModel):
 	force_source_install: bool = False
 	prompt_sudo_password: bool = True
 	sudo_password: str = ''  # non-interactive sudo password (e.g. SECATOR_SECURITY_SUDO_PASSWORD) for headless workers
+	shell_isolated: bool = False  # default for the AI task's --isolated (run_shell in a Docker sandbox); set SECATOR_SECURITY_SHELL_ISOLATED=1 on sandboxed workers  # noqa: E501
+	shell_default_timeout: int = 30  # default timeout (s) for an AI run_shell command, so an interactive user doesn't wait forever; the model may raise its per-command timeout up to celery.task_max_timeout (SECATOR_SECURITY_SHELL_DEFAULT_TIMEOUT)  # noqa: E501
+	scope_hard_deny: bool = False  # when set (SECATOR_SECURITY_SCOPE_HARD_DENY=1) an out-of-scope AI network target is denied outright instead of prompting for approval  # noqa: E501
 
 
 class HTTP(StrictModel):
@@ -205,6 +222,11 @@ class MongodbAddon(StrictModel):
 	max_pool_size: int = 10
 	server_selection_timeout_ms: int = 5000
 	max_items: int = -1
+	# Output types that are execution metadata, not dedupable findings: they are
+	# stamped `_tagged: True` on insert (never enter the untagged backlog) and
+	# skipped by tag_duplicates. Keep in sync with the downstream consumer's
+	# DUPLICATE_EXCLUDE_TYPES (the value passed as tag_duplicates(exclude_types=...)).
+	duplicate_exclude_types: List[str] = ['info', 'warning', 'error', 'stat']
 	duplicate_main_copy_fields: List[str] = [
 		'screenshot_path',
 		'stored_response_path',
@@ -213,6 +235,7 @@ class MongodbAddon(StrictModel):
 		'verified',
 		'status',
 		'tags',
+		'poc',
 	]
 
 
@@ -229,6 +252,7 @@ class SqliteAddon(StrictModel):
 		'verified',
 		'status',
 		'tags',
+		'poc',
 	]
 
 
@@ -237,22 +261,52 @@ class VulnersAddon(StrictModel):
 	api_key: str = ''
 
 
+class WebSearchConfig(StrictModel):
+	# Optional Tavily API key for the AI `web_search` tool's synthesized-answer engine.
+	# When empty, web_search uses the keyless DuckDuckGo/Sploitus engines only.
+	# Env: SECATOR_ADDONS_AI_WEB_SEARCH_TAVILY_API_KEY.
+	tavily_api_key: str = ''
+
+
 class AiAddon(StrictModel):
 	enabled: bool = False
 	api_key: str = ''
 	api_base: str = ''
+	# SECURITY (LLM CREDS): gate the "custom api_base needs a caller-supplied api_key"
+	# rule; off = configured key is reused for any base.
+	# Env: SECATOR_ADDONS_AI_CUSTOM_DISALLOW_CONFIG_TOKEN.
+	custom_disallow_config_token: bool = False
 	default_model: str = 'claude-sonnet-4-6'
 	intent_model: str = 'claude-haiku-4-5'
 	temperature: float = 0.7
 	max_tokens: int = 30000
 	max_tokens_total: int = 100000
 	max_results: int = 500
+	# Max agent loop iterations for an AI run. Env-overridable via
+	# SECATOR_ADDONS_AI_MAX_ITERATIONS (autonomous exploitation needs many steps —
+	# recon, clone/read a PoC, run, debug, retry). Mode configs impose a floor.
+	# Set to -1 (or any value <= 0) to DISABLE the cap entirely: the run then continues
+	# until the model sends `stop` — avoids killing the worker mid-exploit and losing
+	# locally checked-out PoCs. On reaching the cap, the model is given one final turn to
+	# stop gracefully (announcing the limit) so the user can resume with "continue".
+	max_iterations: int = 100
 	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
+	# --isolated sandbox container image. `{version}` is replaced at runtime with the running
+	# secator version so the sandbox matches the client. Default is the release-published lite
+	# tag (`freelabz/secator:<version>-lite`, see publish.yml). Env:
+	# SECATOR_ADDONS_AI_ISOLATED_CONTAINER_IMAGE.
+	isolated_container_image: str = 'freelabz/secator:{version}-lite'
 	permissions: Dict = {
 		'allow': [
 			'target({targets})',
+			# GitHub is always in scope for the AI: public PoC/exploit repos are
+			# cloned/fetched from here, and those URLs are covered by a public mandate
+			# but never land in a run's in_scope/out_of_scope — so without this they'd
+			# hit the target(*) ask on every clone. Checked AFTER both deny layers
+			# (config deny + mandate out_of_scope), so an org can still exclude it.
+			'target(github.com,*.github.com,*.githubusercontent.com)',
 			'read({workspace}/*,/dev/null,/tmp/*)',
 			'write({workspace}/.outputs/*,/dev/null,/tmp/*)',
 			'shell(curl,wget,dig,whois,host,grep,cat,ls,head,tail,jq,wc,find,'
@@ -266,8 +320,6 @@ class AiAddon(StrictModel):
 		],
 		'deny': [
 			'target(169.254.169.254)',
-			'target(127.0.0.1)',
-			'target(localhost)',
 			'read(/etc/shadow)',
 			'read(~/.ssh/*)',
 			'read(~/.aws/*)',
@@ -282,6 +334,7 @@ class AiAddon(StrictModel):
 			'write(*)',
 		],
 	}
+	web_search: WebSearchConfig = WebSearchConfig()
 
 
 class Providers(StrictModel):
@@ -501,6 +554,50 @@ class Config(DotMap):
 			else:
 				partial[final_key] = value
 		target[final_key] = value
+		if set_partial:
+			self._sync_partial_dict_field(self._keymap[map_key])
+
+	def _sync_partial_dict_field(self, path_parts):
+		"""Make ``_partial``'s entry for the enclosing Dict field self-contained.
+
+		A dynamic Dict field (e.g. ``addons.ai.permissions``, ``wordlists.defaults``) is
+		replaced wholesale when the config reloads — pydantic does NOT deep-merge it with the
+		schema default. So persisting only a changed sub-key would drop the field's OTHER keys
+		on the next load (e.g. unsetting one ``permissions.deny`` item wiped ``permissions``
+		``allow``/``ask``). Store the whole field so the saved override is self-contained.
+
+		The field is rebuilt from the schema DEFAULT overlaid with the user's accumulated
+		``_partial`` edits — NOT the live config, which has env overrides applied. Baking an
+		env value (e.g. ``SECATOR_ADDONS_AI_PERMISSIONS_DENY=''``) into the saved file would
+		persist it permanently, so removing the env var could never restore the default.
+		"""
+		import copy
+		field_path = None
+		for i in range(len(path_parts), 0, -1):
+			if Config._is_dynamic_dict_path(path_parts[:i]):
+				field_path = path_parts[:i]
+				break
+		if not field_path:
+			return
+
+		def _descend(root):
+			node = root
+			for part in field_path:
+				if not isinstance(node, MutableMapping) or part not in node:
+					return {}
+				node = node[part]
+			return node.toDict() if hasattr(node, 'toDict') else dict(node)
+
+		# schema default (no file/env overrides) overlaid with the user's explicit edits
+		default_cfg = Config.load(SecatorConfig, {}, print_errors=False)
+		default_field = _descend(default_cfg) if default_cfg is not None else {}
+		partial_field = _descend(self._partial)
+		full = {**copy.deepcopy(default_field), **copy.deepcopy(partial_field)}
+
+		partial = self._partial
+		for part in field_path[:-1]:
+			partial = partial[part]
+		partial[field_path[-1]] = full
 
 	def _set_dict_key(self, parent_parts, subkey, value, set_partial=True, strategy=None):
 		"""Set or remove a key within a dict config field.
@@ -557,10 +654,17 @@ class Config(DotMap):
 				updated.update(value)
 		else:
 			if subkey:
-				new_val = Config._parse_new_value(value)
-				# For workspaces.profiles, always coerce single strings to list
-				if parent_path == 'workspaces.profiles' and isinstance(new_val, str):
-					new_val = [new_val]
+				# `queries.*` values are raw query-expression strings (Dict[str, str]). A query
+				# like `severity in [high, critical]` must NOT be comma-split / bracket-parsed
+				# into a list by _parse_new_value, or it fails Dict[str, str] validation and the
+				# save is rejected (issue #1340). Store the expression verbatim.
+				if parent_path == 'queries' and isinstance(value, str):
+					new_val = value
+				else:
+					new_val = Config._parse_new_value(value)
+					# For workspaces.profiles, always coerce single strings to list
+					if parent_path == 'workspaces.profiles' and isinstance(new_val, str):
+						new_val = [new_val]
 				updated[subkey] = new_val
 			elif isinstance(value, dict):
 				updated.update(value)
@@ -584,6 +688,8 @@ class Config(DotMap):
 		if set_partial:
 			partial[dict_key] = updated
 		target[dict_key] = updated
+		if set_partial:
+			self._sync_partial_dict_field(parent_parts + ([subkey] if subkey else []))
 
 	def unset(self, key, value=None, set_partial=True):
 		"""Unset a value in the configuration using a dotted path.

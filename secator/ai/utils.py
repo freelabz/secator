@@ -1,31 +1,638 @@
 # secator/ai/utils.py
 """Utility functions for AI task - LLM initialization, calling, and response parsing."""
+import json
 import logging
+import os
 import random
-from typing import Dict, List, Optional
+import re
+from dataclasses import fields
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, Tuple
 
 from secator.definitions import LLM_SPINNER_MESSAGES
 from secator.config import CONFIG
 from secator.output_types import Warning, Error
 from secator.rich import console, maybe_status
+from secator.runners import Task
 from secator.utils import format_token_count
 
 # Module-level state for litellm initialization
 _llm_initialized = False
 
 
-def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
-	"""Insert synthetic tool_result messages for orphan assistant tool_use blocks.
+SENSITIVE_ENV_PREFIXES = (
+	"SECATOR_",
+	"ANTHROPIC_", "OPENAI_", "GOOGLE_", "AZURE_", "AWS_", "GCP_",
+	"GITHUB_TOKEN", "GITLAB_TOKEN", "SLACK_TOKEN", "DISCORD_TOKEN",
+	"SECRET_", "TOKEN_", "API_KEY", "PRIVATE_KEY",
+)
 
-	Anthropic rejects requests where an assistant tool_use block is not
-	immediately followed by a matching tool_result. Mutates `messages` in place.
+
+def _sanitized_env() -> dict:
+	"""Return a copy of os.environ with sensitive variables removed.
+
+	Passed as the `env` run_opt to the AI shell `command` runner so an AI-run
+	`env`/`printenv` can't dump the LLM key + cloud creds into output that flows
+	back to the LLM and is persisted to Mongo.
+	"""
+	# Case-insensitive: lowercase/mixed-case names (openai_api_key, database_password)
+	# must be filtered too, so match against the upper-cased name.
+	def _sensitive(name: str) -> bool:
+		u = name.upper()
+		return (any(u.startswith(p) for p in SENSITIVE_ENV_PREFIXES)
+				or any(s in u for s in ("KEY", "SECRET", "TOKEN", "PASSWORD")))
+	return {k: v for k, v in os.environ.items() if not _sensitive(k)}
+
+
+# Files/paths that hold platform secrets (Mongo/Celery URLs, LLM keys). Reading any
+# of these from an AI shell command is forbidden UNCONDITIONALLY — this deny lives
+# outside the permission engine on purpose, so it still holds when dangerous=True
+# nulls the engine and disables every other guardrail.
+_SECRET_READ_MARKERS = ("/.secator/config.yml", "/.secator/config.yaml", "/.secator/.env")
+_PROC_ENVIRON_RE = re.compile(r"/proc/\S*/environ")
+# A connection URL carrying inline credentials: scheme://user:pass@host…
+_CREDS_URL_RE = re.compile(r"[a-zA-Z][\w+.\-]*://[^\s:/@]+:[^\s@/]+@[^\s'\"]*")
+
+
+def _denied_secret_read(command: str) -> Optional[str]:
+	"""Return a denial reason if the command would read a secator secret source, else None.
+
+	Blocks the two file sources (``~/.secator/config.yml`` / ``.env``) and the
+	parent-process env-leak vector (``/proc/<pid>/environ`` bypasses _sanitized_env,
+	which only cleans the child's own environment). Reads elsewhere (e.g. the run's
+	report outputs under ~/.secator/reports/) are unaffected.
+	"""
+	c = command.lower()
+	if any(m in c for m in _SECRET_READ_MARKERS):
+		return "Reading secator config/.env files is forbidden — they contain platform secrets."
+	if _PROC_ENVIRON_RE.search(c):
+		return "Reading process environment via /proc is forbidden — it exposes platform secrets."
+	return None
+
+
+def loads_lenient(s: str):
+	"""json.loads, tolerating trailing junk after a complete top-level {...}/[...].
+
+	LLMs occasionally append an extra brace or prose after an otherwise-valid JSON
+	object (observed: `{"_type":"vulnerability",...}}}` with a stray `}`). A strict
+	json.loads rejects the whole thing; here, on failure, we re-parse just the first
+	balanced top-level object/array. Raises the ORIGINAL JSONDecodeError if no such
+	balanced prefix exists, so the caller's clear error message still fires.
+	"""
+	try:
+		return json.loads(s)
+	except json.JSONDecodeError as first:
+		s2 = s.strip()
+		if not s2 or s2[0] not in "{[":
+			raise first
+		open_ch = s2[0]
+		close_ch = "}" if open_ch == "{" else "]"
+		depth = 0
+		in_str = False
+		esc = False
+		for i, ch in enumerate(s2):
+			if in_str:
+				if esc:
+					esc = False
+				elif ch == "\\":
+					esc = True
+				elif ch == '"':
+					in_str = False
+				continue
+			if ch == '"':
+				in_str = True
+			elif ch == open_ch:
+				depth += 1
+			elif ch == close_ch:
+				depth -= 1
+				if depth == 0:
+					return json.loads(s2[:i + 1])  # may raise; the balanced prefix is still invalid
+		raise first
+
+
+def _secret_values() -> set:
+	"""Concrete secret strings that must never reach the LLM/transcript.
+
+	Values of clearly-secret env vars (LLM/cloud keys, tokens, passwords) plus any
+	env value that is a credentialed connection URL (Mongo/AMQP/redis). Non-secret
+	SECATOR_* values (ports, frequencies) are deliberately excluded so scrubbing
+	can't corrupt legitimate output.
+	"""
+	vals = set()
+	for k, v in os.environ.items():
+		if not v or len(v) < 8:
+			continue
+		u = k.upper()
+		looks_secret = any(s in u for s in ("KEY", "SECRET", "TOKEN", "PASSWORD", "PRIVATE"))
+		is_conn = "://" in v and re.search(r"://[^\s:/@]+:[^\s@/]+@", v) is not None
+		if looks_secret or is_conn:
+			vals.add(v)
+	return vals
+
+
+def _scrub_secrets(text: str) -> str:
+	"""Redact platform secrets from shell output before it is persisted/shown.
+
+	Defense-in-depth for every leak vector _sanitized_env can't cover (config files,
+	/proc, process args): redacts exact secret values verbatim, then redacts any
+	remaining credentialed connection URL whole (scheme through host/path).
+	"""
+	if not text:
+		return text
+	for v in _secret_values():
+		text = text.replace(v, "[REDACTED]")
+	text = _CREDS_URL_RE.sub("[REDACTED]", text)
+	return text
+
+
+def _build_action_display(action: Dict) -> str:
+	"""Build a display string for the action being checked.
+
+	Returns a concise description of the command/task/workflow for prompt context.
+	"""
+	action_type = action.get("action", "")
+	if action_type == "shell":
+		return action.get("command", "")
+	elif action_type in ("task", "workflow"):
+		name = action.get("name", "")
+		targets = action.get("targets", [])
+		opts = action.get("opts", {})
+		parts = [f"{action_type}: {name}"]
+		if targets:
+			parts.append(f"targets={targets}")
+		if opts:
+			parts.append(f"opts={opts}")
+		return " ".join(parts)
+	return ""
+
+
+def _is_approved(response) -> bool:
+	# Explicit allow-list: only a normalized "allow" answer approves. None, "deny",
+	# or any unexpected token denies (fail closed) — so a new backend or a refactored
+	# answer vocabulary can't silently approve via a "not deny" gap.
+	return bool(response) and response.get("answer") == "allow"
+
+
+def _truncate(text: str, max_chars: int) -> str:
+	"""Cap ``text`` to ~``max_chars``, keeping head + tail so both the start and the
+	final lines survive, with a clear marker for the dropped middle. Short text is
+	returned unchanged (no marker)."""
+	if len(text) <= max_chars:
+		return text
+	dropped = len(text) - max_chars
+	half = max_chars // 2
+	return f"{text[:half]}\n…(truncated {dropped} chars)…\n{text[-(max_chars - half):]}"
+
+
+def _format_action_error(e: Exception, max_chars: int = 400) -> str:
+	"""Build a concise, LLM-facing error string for a failed action dispatch.
+
+	Combines the exception type + message with the last few traceback frames (that's
+	where the actual failure is) so the model can see *where* it failed, then
+	truncates so a deep traceback can't blow up the next prompt's token budget.
+	"""
+	import traceback
+
+	errtype = type(e).__name__
+	msg = str(e)
+	head = f"{errtype}: {msg}" if msg else errtype
+
+	tb_lines = traceback.format_exc().strip().splitlines()
+	tb_tail = "\n".join(tb_lines[-6:]) if tb_lines else ""
+
+	detail = f"{head}\n{tb_tail}" if tb_tail else head
+	detail = _truncate(detail, max_chars)
+	return (
+		f"Action failed with error: {detail}\n"
+		"Fix the issue and try again."
+	)
+
+
+_HEAVY_PROFILES = {'large', 'extra_large'}
+
+
+def _is_heavy_runner(runner_type: str, name: str, opts: dict = None) -> bool:
+	"""Whether a sub-runner is too heavy to run sync in-process inside the ai worker.
+
+	Workflows/scans fan out across multiple pools, so they should always be
+	dispatched rather than run in-process. A task is heavy if its (possibly
+	opts-dependent) profile maps to a large worker pool (``large``/``extra_large``).
+	"""
+	if runner_type != 'task':
+		return True
+	try:
+		cls = Task.get_task_class(name)
+	except Exception:
+		return False
+	profile = getattr(cls, 'profile', 'small')
+	if callable(profile):
+		try:
+			profile = profile(opts or {})  # resolve dynamic profile (mirrors Command.s/si)
+		except Exception:
+			return True  # can't resolve — be conservative and dispatch
+	return profile in _HEAVY_PROFILES
+
+
+# Framework control/security keys the LLM must never set on a spawned sub-runner
+# (esp. `dangerous`, which skips the permission engine). Task/workflow scan opts
+# (nmap ports, httpx rate_limit, ...) are not control keys and pass through.
+_FORBIDDEN_CHILD_OPT_KEYS = frozenset({
+	"dangerous",
+	"interactive",
+	"hooks",
+	"sync",
+	"subagent",
+	"tty",
+	"dry_run",
+	"exporters",
+	"enable_reports",
+	# SECURITY (ISOLATION): child can't lower isolation — `isolated` is force-inherited, stripped here.
+	"isolated",
+})
+
+# Cap a spawned subagent's iteration budget so it can't be told to loop unbounded.
+_MAX_CHILD_ITERATIONS = 25
+
+# ai_types that mean a subagent persisted something (single source for the handback detector).
+_PERSIST_AI_TYPES = frozenset({
+	"add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"})
+
+
+def _sanitize_child_opts(opts: Any) -> Dict:
+	"""Drop LLM-settable control/security keys from sub-runner opts; clamp max_iterations."""
+	if not isinstance(opts, dict):
+		return {}
+	clean = {}
+	for key, value in opts.items():
+		k = str(key)
+		if k in _FORBIDDEN_CHILD_OPT_KEYS or k.startswith("print_"):
+			continue
+		clean[key] = value
+	# Clamp the AI-subagent iteration budget (bool is an int subclass — drop it).
+	mi = clean.get("max_iterations")
+	if isinstance(mi, bool):
+		clean.pop("max_iterations", None)
+	elif isinstance(mi, (int, float)):
+		clean["max_iterations"] = max(1, min(int(mi), _MAX_CHILD_ITERATIONS))
+	elif mi is not None:
+		clean.pop("max_iterations", None)
+	return clean
+
+
+def build_subagent_prompt(objective: str, targets: list, evidence: str) -> str:
+	"""Wrap the LLM-supplied subagent objective in a structured prompt.
+
+	The `objective` is used verbatim (the parent LLM's intent). `targets` scopes
+	the work; `evidence` (auto-gathered, may be empty) is prior findings the
+	subagent should NOT re-discover.
+	"""
+	targets_str = ", ".join(str(t) for t in targets) if targets else "(inherit parent scope)"
+	evidence_block = evidence.strip() if evidence.strip() else "(none — no prior findings for this scope)"
+	return (
+		f"## Objective\n{objective.strip() or '(no explicit objective given)'}\n\n"
+		f"## Scope\nWork ONLY within these target(s): {targets_str}\n\n"
+		f"## Already known (do not re-run tools that would re-discover these)\n{evidence_block}\n\n"
+		f"## Expected output\n"
+		f"1. Do the work needed to meet the objective, within scope.\n"
+		f"2. PERSIST your result — it's REQUIRED and is the ONLY output that survives (your prose "
+		f"is NOT saved and the parent CANNOT read your transcript). On an EXISTING vulnerability "
+		f"(`_uuid` from query_workspace), call `mark_vuln_exploited` with that `_uuid` "
+		f"(working PoC), `mark_vuln_false_positive` (disproved), or `mark_vuln_exploit_failed` "
+		f"(exploit attempt failed but the vuln may still be real). For a NEW finding, "
+		f"call `add_finding`. You MUST persist before finishing if you confirmed OR disproved "
+		f"anything.\n"
+		f"3. Finish with a 2-4 line HANDBACK: what you did, the verdict "
+		f"(confirmed / false-positive / inconclusive), and the `_uuid`(s) you persisted."
+	)
+
+
+def _union_live_results(persisted: List[Dict], live_results: List[Dict], query_filter: Dict, limit: int) -> List[Dict]:
+	"""Union backend results with this run's in-memory findings (local driver only).
+
+	The live findings are filtered by the SAME query via an in-memory json backend,
+	then merged into the backend (disk) results and deduped by ``_uuid`` (backend wins),
+	respecting ``limit``. Makes query_workspace the single source of truth under the
+	local driver, whose JSON exporter only writes to disk at end-of-run.
+	"""
+	if not live_results:
+		return persisted
+	# Filter this run's in-memory findings by the SAME query in-process. The JsonBackend
+	# no longer reads an in-memory `results` context (it streams from disk), so we match
+	# each live dict directly with the store's own matcher, then merge into the disk-backed
+	# results and dedupe by ``_uuid`` (backend wins), respecting ``limit``.
+	from secator.query.json import match_query
+	seen = {r.get("_uuid") for r in persisted if r.get("_uuid")}
+	for r in live_results:
+		if not match_query(r, query_filter):
+			continue
+		u = r.get("_uuid")
+		if u and u in seen:
+			continue
+		persisted.append(r)
+		if u:
+			seen.add(u)
+	return persisted[:limit] if limit else persisted
+
+
+def _resolve_field_type(f) -> Optional[type]:
+	"""Resolve a dataclass field's declared type to a concrete builtin type.
+
+	Mirrors ``OutputType.validate_fields``: ``f.type`` may be an actual type
+	(``bool``) or — under ``from __future__ import annotations`` — a string
+	annotation (``'bool'``). Returns the concrete type (``bool``/``int``/
+	``float``/``list``/``dict``/``str``) or ``None`` if it can't be resolved.
+	"""
+	t = f.type
+	# Actual type, e.g. bool / int / float / str
+	if isinstance(t, type):
+		return t
+	# Typing generic, e.g. List[str] -> list
+	origin = getattr(t, '__origin__', None)
+	if origin is not None:
+		return origin
+	# String annotation, e.g. 'bool', 'int', "List[str]"
+	if isinstance(t, str):
+		name = t.split('[', 1)[0].strip().lower()
+		return {
+			'bool': bool, 'int': int, 'float': float,
+			'str': str, 'list': list, 'dict': dict,
+		}.get(name)
+	return None
+
+
+def _coerce_finding_fields(cls, data: Dict) -> Dict:
+	"""Coerce AI-provided scalar values to a finding class's declared field types.
+
+	LLMs frequently emit wrong-typed scalars (a ``bool`` field as the string
+	``"true"``, an ``int`` as ``"3"``). This fixes *obvious* type mismatches
+	before validation so the finding isn't rejected for model type sloppiness.
+
+	Only coerces when safe; unknown keys, already-correct values, and
+	unparseable values are left untouched (validation will still surface a real
+	error rather than silently dropping data).
+	"""
+	field_types = {f.name: _resolve_field_type(f) for f in fields(cls)}
+	for key, value in list(data.items()):
+		if key.startswith('_'):
+			continue
+		expected = field_types.get(key)
+		if expected is None or value is None:
+			continue
+		# A scalar `str` field handed list-shaped data: the model packs multiple values into a
+		# single field (e.g. `matched_at` as '["http://a","http://b"]' or a real list). A str value
+		# already "matches" str and would slip past the type check below and get stored as an ugly
+		# literal; a real list would be rejected by validate_fields. Unwrap to the first element so
+		# it lands as a clean scalar. ponytail: first element is the representative location; extra
+		# ones are dropped (a scalar field holds one). Mirrors the list-field coercion below.
+		if expected is str:
+			parsed = value
+			if isinstance(value, str):
+				s = value.strip()
+				if s.startswith('[') and s.endswith(']'):
+					try:
+						loaded = json.loads(s)
+						if isinstance(loaded, list):
+							parsed = loaded
+					except (json.JSONDecodeError, TypeError):
+						parsed = value
+			if isinstance(parsed, list):
+				if not parsed:
+					data[key] = ''
+				elif isinstance(parsed[0], str):
+					data[key] = parsed[0]
+				# else: a non-string element (None, dict, ...) — leave the value unchanged so
+				# validate_fields rejects the malformed type instead of storing "None"/a dict repr.
+			continue
+		# Already the right type (note: bool is a subclass of int, so guard it).
+		if isinstance(value, expected) and not (expected is int and isinstance(value, bool)):
+			continue
+
+		if expected is bool:
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, int):
+				data[key] = bool(value)
+			elif isinstance(value, str):
+				s = value.strip().lower()
+				if s in ('true', '1', 'yes', 'on'):
+					data[key] = True
+				elif s in ('false', '0', 'no', 'off', ''):
+					data[key] = False
+		elif expected is int:
+			# Avoid coercing real bools into ints.
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, float):
+				if value.is_integer():
+					data[key] = int(value)
+			elif isinstance(value, str):
+				try:
+					data[key] = int(value)
+				except ValueError:
+					try:
+						f_val = float(value)
+						if f_val.is_integer():
+							data[key] = int(f_val)
+					except ValueError:
+						pass
+		elif expected is float:
+			if isinstance(value, bool):
+				continue
+			if isinstance(value, int):
+				data[key] = float(value)
+			elif isinstance(value, str):
+				try:
+					data[key] = float(value)
+				except ValueError:
+					pass
+		elif expected is list:
+			if isinstance(value, str):
+				s = value.strip()
+				if s.startswith('['):
+					try:
+						parsed = json.loads(s)
+						if isinstance(parsed, list):
+							data[key] = parsed
+					except (json.JSONDecodeError, TypeError):
+						pass
+		# str fields: leave as-is (don't stringify); unknown types: leave untouched.
+	return data
+
+
+def _get_action_label(action: Dict) -> str:
+	"""Get a display label for an action."""
+	act_type = action.get("action", "unknown")
+	if act_type in ("task", "workflow"):
+		name = action.get("name", "?")
+		opts = action.get("opts", {})
+		# Defensive: a model may stringify `opts` (coerced at the tool-call boundary,
+		# but a malformed value can survive as a str) — never crash a display label.
+		session_name = opts.get("session_name", "") if isinstance(opts, dict) else ""
+		if session_name:
+			return session_name
+		targets = action.get("targets", [])
+		target_str = targets[0] if len(targets) == 1 else f"{len(targets)} targets"
+		return f"{name} on {target_str}"
+	elif act_type == "shell":
+		cmd = action.get("command", "")[:40]
+		return f"shell: {cmd}"
+	return act_type
+
+
+def _decrypt_dict(d: Dict, encryptor: Any) -> Dict:
+	"""Recursively decrypt all string values in a dict.
+
+	Args:
+		d: Dictionary to decrypt
+		encryptor: SensitiveDataEncryptor instance
+
+	Returns:
+		Decrypted dictionary
+	"""
+	# Backstop: callers should pass a dict, but a non-dict (e.g. an LLM that
+	# stringified an object arg) must not raise `.items()` here — return it
+	# unchanged rather than crash the whole action.
+	if not isinstance(d, dict):
+		return d
+	result = {}
+	for k, v in d.items():
+		if isinstance(v, str):
+			result[k] = encryptor.decrypt(v)
+		elif isinstance(v, dict):
+			result[k] = _decrypt_dict(v, encryptor)
+		elif isinstance(v, list):
+			result[k] = [
+				encryptor.decrypt(i) if isinstance(i, str)
+				else _decrypt_dict(i, encryptor) if isinstance(i, dict)
+				else i
+				for i in v
+			]
+		else:
+			result[k] = v
+	return result
+
+
+def _tool_call_fields(tc) -> Tuple[str, str]:
+	"""Extract (name, arguments) from a tool_call, handling both the dict shape
+	(litellm/OpenAI JSON) and the SDK object shape (attribute access)."""
+	fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
+	if isinstance(fn, dict):
+		return fn.get("name", ""), fn.get("arguments", "")
+	if fn is not None:
+		return getattr(fn, "name", ""), getattr(fn, "arguments", "")
+	return "", ""
+
+
+def _strip_leading_orphan_tools(messages: List[Dict]) -> int:
+	"""Drop leading 'tool' (tool_result) messages with no preceding tool_use.
+
+	Truncation/compaction drops the OLDEST messages with no tool-pairing
+	awareness, so the kept window can START with a tool_result whose
+	assistant(tool_calls) parent was dropped. Anthropic/OpenAI reject such a
+	leading orphan tool_result ("tool_result without matching tool_use").
+	System messages are preserved; we scan past them and drop the run of
+	leading 'tool' messages that follows. Mutates `messages` in place.
 
 	Args:
 		messages: List of message dicts in litellm/OpenAI format.
 
 	Returns:
-		Number of synthetic tool_results inserted.
+		Number of leading orphan tool messages removed.
 	"""
+	i = 0
+	while i < len(messages) and messages[i].get("role") == "system":
+		i += 1
+	removed = 0
+	while i < len(messages) and messages[i].get("role") == "tool":
+		messages.pop(i)
+		removed += 1
+	return removed
+
+
+def _strip_orphan_tool_blocks(messages: List[Dict]) -> int:
+	"""Drop any run of 'tool' messages not rooted at an assistant(tool_calls) parent.
+
+	Generalises ``_strip_leading_orphan_tools``: a tool-result block is valid only when the
+	message immediately before it is an ``assistant`` carrying ``tool_calls``. Trim/compaction
+	can drop that parent while a ``user`` (or other) message survives before the orphaned
+	tool-block — leaving a ``tool`` message after a ``user``, which providers reject with
+	"Unexpected role 'tool' after role 'user'" (#1465). Covers the leading-orphan case too
+	(window starts with a tool whose parent was dropped). Mutates in place; returns count removed.
+	"""
+	removed = 0
+	i = 0
+	while i < len(messages):
+		if messages[i].get("role") != "tool":
+			i += 1
+			continue
+		prev = messages[i - 1] if i > 0 else None
+		rooted = bool(prev and prev.get("role") == "assistant" and prev.get("tool_calls"))
+		if rooted:
+			while i < len(messages) and messages[i].get("role") == "tool":
+				i += 1
+			continue
+		while i < len(messages) and messages[i].get("role") == "tool":
+			messages.pop(i)
+			removed += 1
+	return removed
+
+
+def _dedupe_tool_results(messages: List[Dict]) -> int:
+	"""Drop duplicate tool_result messages sharing a tool_call_id.
+
+	Anthropic (and OpenRouter's providers) fold consecutive 'tool' messages into a
+	single user turn and reject more than one tool_result per tool_use id
+	("each tool_use must have a single result. Found multiple tool_result blocks
+	with id X") — a NON-retryable 400. Duplicates arise when batch results are
+	grouped out of order (itertools.groupby only groups *consecutive* keys), or
+	when history trim/compaction restructures the window. Within each run of
+	consecutive 'tool' messages, keep the first result for each id and drop the
+	rest (in place). Returns the number removed.
+	"""
+	removed = 0
+	i = 0
+	while i < len(messages):
+		if messages[i].get("role") != "tool":
+			i += 1
+			continue
+		seen = set()
+		j = i
+		while j < len(messages) and messages[j].get("role") == "tool":
+			tc_id = messages[j].get("tool_call_id")
+			if tc_id is not None and tc_id in seen:
+				del messages[j]
+				removed += 1
+				continue  # a message shifted into j; re-check without advancing
+			if tc_id is not None:
+				seen.add(tc_id)
+			j += 1
+		i = j
+	return removed
+
+
+def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
+	"""Repair orphan tool_use/tool_result pairing for Anthropic/OpenAI.
+
+	Two defects are fixed (both mutate `messages` in place):
+	- LEADING orphan tool_results: a kept window starting with a tool_result
+	  whose assistant(tool_calls) parent was trimmed away (see
+	  `_strip_leading_orphan_tools`).
+	- FORWARD orphan tool_uses: an assistant tool_use block not immediately
+	  followed by a matching tool_result (synthesize an acknowledged result).
+
+	Args:
+		messages: List of message dicts in litellm/OpenAI format.
+
+	Returns:
+		Number of messages removed or synthetic tool_results inserted.
+	"""
+	# Orphan tool_results (leading, or stranded after a user when the assistant(tool_calls)
+	# parent was trimmed) have no matching tool_use in this window — drop them so providers
+	# don't reject "tool_result without matching tool_use" / "tool after role user".
+	repaired = _strip_orphan_tool_blocks(messages)
+	# Duplicate tool_results for one id are rejected as a non-retryable 400 — drop
+	# extras so the request is valid (and, when hit as a 400, so the retry repairs it).
+	repaired += _dedupe_tool_results(messages)
 	inserted = 0
 	i = 0
 	while i < len(messages):
@@ -51,11 +658,7 @@ def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
 			tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
 			if not tc_id or tc_id in satisfied:
 				continue
-			fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
-			if isinstance(fn, dict):
-				name = fn.get("name", "")
-			else:
-				name = getattr(fn, "name", "") if fn else ""
+			name, _ = _tool_call_fields(tc)
 			to_insert.append({
 				"role": "tool",
 				"tool_call_id": tc_id,
@@ -69,7 +672,7 @@ def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
 			j += len(to_insert)
 
 		i = j
-	return inserted
+	return repaired + inserted
 
 
 def init_llm(api_key: Optional[str] = None):
@@ -146,9 +749,8 @@ def init_llm(api_key: Optional[str] = None):
 					tool_name = msg.get("name", msg.get("tool_call_id", ""))
 					title_extra = f" [dim]{tool_name}[/]"
 					try:
-						import json as _json
 						from rich.pretty import Pretty
-						data = _json.loads(content)
+						data = json.loads(content)
 						renderable = Pretty(data)
 					except (ValueError, TypeError):
 						pass
@@ -192,25 +794,68 @@ def init_llm(api_key: Optional[str] = None):
 	_llm_initialized = True
 
 
+def _estimate_usage(model: str, messages: List[Dict], content: str, tool_calls) -> Dict:
+	"""Estimate tokens when the provider omits `usage`, so calls are never unmetered.
+
+	Uses litellm's own token counter for the model in use — prompt tokens from the
+	request messages, completion tokens from the response text (+ any tool-call
+	name/arguments). Returns the same shape as the real-usage dict (cost unknown).
+	"""
+	import litellm
+
+	def _count(**kw):
+		try:
+			return litellm.token_counter(model=model, **kw) or 0
+		except Exception:
+			return 0
+
+	prompt_tokens = _count(messages=messages)
+	completion_text = content or ""
+	for tc in tool_calls or []:
+		name, args = _tool_call_fields(tc)
+		completion_text += f" {name} {args}"
+	completion_tokens = _count(text=completion_text)
+	return {
+		"tokens": prompt_tokens + completion_tokens,
+		"prompt_tokens": prompt_tokens,
+		"completion_tokens": completion_tokens,
+		"cost": None,
+	}
+
+
 def call_llm(
 	messages: List[Dict],
 	model: str,
 	temperature: float = 0.7,
 	api_base: Optional[str] = None,
 	api_key: Optional[str] = None,
-	max_retries: int = 3,
 	tools: Optional[List[Dict]] = None,
 ) -> Dict:
 	"""Call litellm completion and return response with usage."""
 	import time
 	import litellm
 
+	max_retries = 3
+
 	# Initialize litellm once (avoids callback accumulation)
 	init_llm(api_key=api_key)
 
+	# Strip secator-internal per-message fields before sending to the model. Each
+	# message may carry bookkeeping keys ChatHistory owns (e.g. `_token_count` /
+	# `_token_model`, its per-model token cache) — not part of the chat-completion
+	# message schema. Some providers reject them or, worse, silently return an empty
+	# response when a message has unknown keys (observed with a local model). We can't
+	# use litellm's drop_params (it only drops top-level params, not nested message
+	# sub-fields), so copy each message without the `_`-prefixed keys. The originals
+	# are untouched, so the caller's token cache / accounting keep working.
+	llm_messages = [
+		{k: v for k, v in m.items() if not str(k).startswith('_')}
+		for m in messages
+	]
+
 	kwargs = dict(
 		model=model,
-		messages=messages,
+		messages=llm_messages,
 		temperature=temperature,
 		api_base=api_base,
 	)
@@ -230,25 +875,30 @@ def call_llm(
 	# a matching tool_result). Safety net in case the caller bypassed ChatHistory.
 	_repair_orphan_tool_uses(kwargs["messages"])
 
+	# 400s are non-transient (malformed request, context_length_exceeded, ...) —
+	# handled separately below and NOT in this transient-retry tuple.
 	retryable = (
 		litellm.InternalServerError, litellm.RateLimitError,
-		litellm.ServiceUnavailableError, litellm.APIConnectionError, litellm.BadRequestError,
+		litellm.ServiceUnavailableError, litellm.APIConnectionError,
 		litellm.APIError
 	)
 	for attempt in range(1, max_retries + 1):
 		try:
 			response = litellm.completion(**kwargs)
 			break
-		except retryable as e:
-			# Detect the specific "orphan tool_use" error and repair before retry.
+		except litellm.BadRequestError as e:
+			# 400s fail fast, except the orphan tool_use case which we repair
+			# and retry (not counted as an attempt — the repair is the real fix).
 			err_str = str(e)
 			if 'tool_use' in err_str and 'tool_result' in err_str:
 				repaired = _repair_orphan_tool_uses(kwargs["messages"])
 				if repaired:
 					console.print(Warning(
 						message=f"Repaired {repaired} orphan tool_use block(s); retrying LLM call."))
-					# Don't count this as a retry attempt — the repair is the real fix.
 					continue
+			console.print(Error(message=f"LLM call failed with non-retryable 400: {e}"))
+			raise
+		except retryable as e:
 			if attempt < max_retries:
 				wait = 2 ** attempt
 				console.print(Warning(
@@ -275,13 +925,108 @@ def call_llm(
 
 		usage = {
 			"tokens": response.usage.total_tokens,
+			"prompt_tokens": getattr(response.usage, "prompt_tokens", None),
+			"completion_tokens": getattr(response.usage, "completion_tokens", None),
 			"cost": cost,
 		}
+	else:
+		# usage missing/empty (streaming, some models) — estimate so the call
+		# is still metered instead of silently counting 0 tokens.
+		usage = _estimate_usage(model, kwargs["messages"], content, getattr(message, 'tool_calls', None))
+		console.print(Warning(
+			message=f"LLM response missing usage; estimated ~{usage['tokens']} tokens for metering."))
 
 	# Get tool calls
 	tool_calls = getattr(message, 'tool_calls', None) or []
+	# finish_reason distinguishes a genuinely-empty turn from a truncated one
+	# (finish_reason == "length") — the caller uses it to report the real cause
+	# of an empty response instead of blaming tool-calling support.
+	finish_reason = getattr(response.choices[0], 'finish_reason', None)
 
-	return {"content": content, "usage": usage, "tool_calls": tool_calls}
+	return {"content": content, "usage": usage, "tool_calls": tool_calls, "finish_reason": finish_reason}
+
+
+# Some models (Hermes-style / XML tool-calling) emit tool calls as TEXT in the
+# message content instead of native structured `tool_calls`. litellm hands that
+# text back as `content` with an empty `tool_calls`. These regexes recover the
+# calls so the loop can dispatch them like native ones.
+_TOOL_CALL_BLOCK_RE = re.compile(r'<tool_call>\s*(.*?)\s*</tool_call>', re.DOTALL | re.IGNORECASE)
+_FUNCTION_RE = re.compile(r'<function=([^>\s]+)\s*>', re.IGNORECASE)
+_PARAM_RE = re.compile(
+	r'<parameter=([^>\s]+)\s*>(.*?)(?=<parameter=|</parameter>|</function>|</tool_call>|\Z)',
+	re.DOTALL | re.IGNORECASE,
+)
+
+
+def _coerce_param_value(raw: str) -> Any:
+	"""A <parameter> value may be JSON (number/bool/object/array/quoted string) or
+	plain text. Try JSON; fall back to the raw string on failure."""
+	if raw == "":
+		return raw
+	try:
+		return json.loads(raw)
+	except (json.JSONDecodeError, ValueError):
+		return raw
+
+
+def _parse_tool_call_block(block: str, index: int):
+	"""Parse one <tool_call> body into a litellm-shaped call, or None if unparseable.
+
+	Supports both bodies models emit:
+	  * XML-style:  <function=NAME> <parameter=KEY>VALUE</parameter> ...
+	  * JSON-style: {"name": "NAME", "arguments": {...}}
+	"""
+	name = None
+	args: Dict = {}
+	fn = _FUNCTION_RE.search(block)
+	if fn:
+		name = fn.group(1).strip()
+		for key, raw in _PARAM_RE.findall(block):
+			args[key.strip()] = _coerce_param_value(raw.strip())
+	else:
+		try:
+			data = json.loads(block.strip())
+		except (json.JSONDecodeError, TypeError, ValueError):
+			return None
+		if not isinstance(data, dict):
+			return None
+		name = data.get("name") or data.get("function")
+		args = data.get("arguments") or data.get("parameters") or {}
+		if isinstance(args, str):
+			try:
+				args = json.loads(args)
+			except (json.JSONDecodeError, ValueError):
+				pass
+	if not name:
+		return None
+	# Shape it exactly like a native litellm tool call (attribute access + JSON-string
+	# arguments) so _process_tool_calls / _add_assistant_to_history consume it unchanged.
+	return SimpleNamespace(
+		id=f"textcall_{index}_{name}",
+		type="function",
+		function=SimpleNamespace(name=name, arguments=json.dumps(args)),
+	)
+
+
+def parse_text_tool_calls(content: Optional[str]) -> Tuple[List, Optional[str]]:
+	"""Recover tool calls a model emitted as text inside `content`.
+
+	Returns (tool_calls, cleaned_content):
+	  * tool_calls — litellm-shaped calls (empty if none found / all unparseable);
+	  * cleaned_content — `content` with every consumed <tool_call> block stripped,
+	    so the raw XML is not shown to the user. Unchanged when nothing is parsed.
+	Never raises: malformed blocks are skipped.
+	"""
+	if not content or '<tool_call>' not in content.lower():
+		return [], content
+	tool_calls = [
+		call for i, block in enumerate(_TOOL_CALL_BLOCK_RE.findall(content))
+		if (call := _parse_tool_call_block(block, i)) is not None
+	]
+	if not tool_calls:
+		return [], content
+	cleaned = _TOOL_CALL_BLOCK_RE.sub('', content).strip()
+	return tool_calls, cleaned
 
 
 MODEL_COLORS = [
@@ -292,8 +1037,9 @@ MODEL_COLORS = [
 ]
 
 
-def format_llm_status(token_count, ctx_window, by_role):
-	"""Format a rich status message for LLM calls with token counts and a spinner message."""
+def _format_token_breakdown(token_count, ctx_window, by_role):
+	"""Format the token/context-window/per-role strings shared by the LLM status
+	spinner and the prompt_user title recap."""
 	token_str = format_token_count(token_count, icon='arrow_up', compact=True)
 	ctx_str = format_token_count(ctx_window, compact=True)
 	role_parts = []
@@ -301,75 +1047,366 @@ def format_llm_status(token_count, ctx_window, by_role):
 		if role in by_role:
 			role_parts.append(f'[orange4]{role}[/]:{format_token_count(by_role[role], compact=True)}')
 	role_str = ' | '.join(role_parts)
+	return token_str, ctx_str, role_str
+
+
+def format_llm_status(token_count, ctx_window, by_role):
+	"""Format a rich status message for LLM calls with token counts and a spinner message."""
+	token_str, ctx_str, role_str = _format_token_breakdown(token_count, ctx_window, by_role)
 	return (
 		f"[bold orange3]{random.choice(LLM_SPINNER_MESSAGES)}[/]"
 		f" [gray42] • {token_str}/[dim red]{ctx_str}[/] ({role_str})[/]"
 	)
 
 
+def _normalize_api_base(raw):
+	"""Validate/normalize a user-entered API base. Returns ``(base, error|None)``."""
+	base = (raw or '').strip().rstrip('/')
+	if not base:
+		return '', 'API base cannot be empty.'
+	if base.startswith('https://'):
+		return base, None
+	# http:// is allowed ONLY for a bare localhost dev gateway. Resolve the REAL
+	# destination via urlparse (not string-splitting): `http://localhost@evil` parses
+	# to host `evil`, and embedded userinfo (`user:pass@`) must be rejected — otherwise
+	# the Bearer key would be sent in cleartext to a remote host.
+	from urllib.parse import urlparse
+	try:
+		parsed = urlparse(base)
+	except ValueError:
+		return '', 'Invalid API base URL.'
+	if (parsed.scheme == 'http'
+			and parsed.hostname in ('localhost', '127.0.0.1')
+			and not parsed.username and not parsed.password):
+		return base, None
+	return '', 'API base must be https:// (http:// allowed only for a bare localhost host).'
+
+
+def _ssl_verify():
+	"""Whether to verify TLS certs for the setup model-listing call.
+
+	Honors the SAME ``SSL_VERIFY`` env knob litellm reads for the inference call, so a
+	gateway with a self-signed / non-public cert that works for the AI task (``SSL_VERIFY=False``)
+	also works here. Falsey = ``false``/``0``/``no``/``off`` (any case); default is verify.
+	"""
+	val = os.environ.get('SSL_VERIFY')
+	if val is None:
+		return True
+	return val.strip().lower() not in ('false', '0', 'no', 'off', '')
+
+
+def fetch_openai_compatible_models(api_base, api_key, timeout=15):
+	"""List model ids from an OpenAI-compatible endpoint's ``/models`` route.
+
+	A custom base may or may not already include ``/v1``, so try ``{base}/models``
+	then ``{base}/v1/models``. Returns a sorted list of model-id strings; raises on
+	network / auth / parse failure so the caller can fall back to manual entry.
+
+	TLS verification follows ``SSL_VERIFY`` (same knob as the inference call), so a
+	gateway with a self-signed cert lists models iff it also runs.
+	"""
+	from secator.requests import requests
+	verify = _ssl_verify()
+	if not verify:
+		# Silence the per-request urllib3 InsecureRequestWarning spam at setup time.
+		import urllib3
+		urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+	base = (api_base or '').rstrip('/')
+	candidates = [f'{base}/models']
+	if not base.endswith('/v1'):
+		candidates.append(f'{base}/v1/models')
+	headers = {'Authorization': f'Bearer {api_key}', 'Accept': 'application/json'}
+	last_err = None
+	for url in candidates:
+		try:
+			resp = requests.get(url, headers=headers, timeout=timeout, verify=verify)
+			resp.raise_for_status()
+			data = resp.json()
+		except Exception as e:  # noqa: BLE001 - try the next candidate, surface at the end
+			last_err = e
+			continue
+		items = data.get('data') if isinstance(data, dict) else data
+		ids = sorted({
+			str(m['id']) for m in (items or [])
+			if isinstance(m, dict) and m.get('id')
+		})
+		if ids:
+			return ids
+		last_err = ValueError(f'no models listed at {url}')
+	raise last_err or ValueError('could not list models from the endpoint')
+
+
+def load_ai_providers():
+	"""Named OpenAI-compatible providers offered in `ai setup`, on top of LiteLLM.
+
+	Merges a bundled registry (``secator/ai/providers.json``) with an optional user
+	file (``<SECATOR_DIRS_DATA>/ai_providers.json``); the user file overrides bundled
+	entries by ``name``. This lets any gateway/router be added by a small JSON entry —
+	no code. Per-entry schema: ``name``, ``label``, ``api_base`` (https, OpenAI-compatible),
+	optional ``docs`` and ``key_hint``. A malformed/missing file is skipped, never fatal.
+	"""
+	from pathlib import Path
+	providers = {}
+	bundled = Path(__file__).parent / 'providers.json'
+	user = Path(str(CONFIG.dirs.data)) / 'ai_providers.json'
+	for path in (bundled, user):
+		try:
+			if not path.exists():
+				continue
+			data = json.loads(path.read_text())
+			for p in data.get('providers', []):
+				if not (isinstance(p, dict) and p.get('name') and p.get('api_base')):
+					continue
+				# SECURITY: a registry entry's base must pass the SAME https-or-localhost
+				# rule as a hand-entered base - else an http://remote/v1 entry would ship
+				# the Bearer key in cleartext when selected.
+				norm, err = _normalize_api_base(p['api_base'])
+				if err:
+					console.print(f"[dim]  (skipped provider {p['name']}: {err})[/]")
+					continue
+				providers[p['name']] = {**p, 'api_base': norm}
+		except Exception as e:  # noqa: BLE001 - a bad provider file must not break setup
+			console.print(f"[dim]  (skipped provider file {path}: {e})[/]")
+	return list(providers.values())
+
+
+# Short, well-known tokens to upper-case (not Title-case) when prettifying a
+# snake_case provider id (so `vertex_ai` -> "Vertex AI", not "Vertex Ai").
+_PROVIDER_ACRONYMS = {'ai', 'aws', 'gcp', 'api', 'llm', 'xai', 'ibm', 'hf'}
+
+
+def pretty_provider(provider_id):
+	"""snake_case / kebab-case provider id -> Normal Case, Capitalized.
+
+	e.g. ``vertex_ai`` -> ``Vertex AI``, ``text-completion-openai`` -> ``Text Completion Openai``.
+	"""
+	return ' '.join(
+		w.upper() if w in _PROVIDER_ACRONYMS else w.capitalize()
+		for w in str(provider_id).replace('-', '_').split('_') if w
+	) or str(provider_id)
+
+
+# Model modes (litellm metadata) that are NOT text chat — providers whose every known
+# model is one of these (pure TTS/STT/embedding/image) are hidden from `ai setup`.
+_NON_CHAT_MODES = {
+	'audio_transcription', 'audio_speech', 'image_generation', 'embedding',
+	'rerank', 'moderation',
+}
+
+
 def setup_ai():
-	"""Interactive search-filter-select flow for configuring AI model and API key."""
+	"""Entry point for ``ai setup``.
+
+	Wraps the interactive flow so Ctrl+C / EOF aborts cleanly with a message instead
+	of a traceback (SystemExit).
+	"""
+	try:
+		return _setup_ai_interactive()
+	except (KeyboardInterrupt, EOFError):
+		console.print("\n[bold yellow]  Setup aborted.[/]")
+		return None
+
+
+def _setup_ai_interactive():
+	"""Interactive flow to configure the AI provider / model / API key.
+
+	Step 1 picks a PROVIDER: any (chat-capable) LiteLLM provider on its default base, an
+	OpenAI-compatible gateway from the registry (providers.json), or a custom base.
+	A known provider filters the bundled catalog to its models; a gateway/custom base
+	lists live from ``<base>/models`` (key collected first — it's authenticated) and the
+	chosen model is saved as ``openai/<id>`` so LiteLLM routes to that base.
+	"""
 	import litellm
 	from rich.prompt import Prompt
 
-	# Load all models, sort, build color map
-	# all_models = sorted(litellm.model_list) # TODO: revise this, check why it doesn't list all models
-	all_models = []
-	all_parts = set()
-	for provider, model_names in litellm.models_by_provider.items():
-		model_names = sorted(model_names)
-		for name in model_names:
-			parts = name.split('/')
-			if parts[0] != provider:
-				parts = [provider] + parts
-			all_models.append('/'.join(parts))
-			for p in parts[:-1]:
-				all_parts.add(p)
+	def _provider_catalog(provider):
+		"""The models LiteLLM knows for ONE provider (ids stay canonical for routing)."""
+		models, parts = [], set()
+		for name in sorted(litellm.models_by_provider.get(provider, [])):
+			p = name.split('/')
+			if p[0] != provider:
+				p = [provider] + p
+			models.append('/'.join(p))
+			for seg in p[:-1]:
+				parts.add(seg)
+		return models, parts
+
+	def _chat_capable(provider):
+		"""Keep a provider unless EVERY model with known metadata is non-chat.
+
+		Lenient on purpose: providers whose models carry no mode metadata (gateways,
+		newer vendors) are kept; only pure audio/image/embedding vendors (polly,
+		deepgram, voyage, …) are dropped from the list."""
+		names = litellm.models_by_provider.get(provider, [])
+		if not names:
+			return True
+		known = []
+		for name in names:
+			info = litellm.model_cost.get(name) or litellm.model_cost.get(name.split('/')[-1]) or {}
+			if info.get('mode') is not None:
+				known.append(info['mode'])
+		if not known:
+			return True
+		return any(m not in _NON_CHAT_MODES for m in known)
+
+	def _entry_label(entry):
+		kind, val = entry
+		if kind == 'lite':
+			return pretty_provider(val)
+		if kind == 'gateway':
+			return val.get('label') or val['name']
+		return 'Custom'
+
+	# Current config (so the user sees what they're changing).
+	current_key = CONFIG.addons.ai.api_key
+	current_base = CONFIG.addons.ai.api_base
+	masked_key = f"{current_key[:8]}...{current_key[-4:]}" if current_key and len(current_key) > 12 else current_key or ""
+	console.print()
+	console.print("[bold]  Current config:[/]")
+	console.print(f"    Model:        [bold white]{CONFIG.addons.ai.default_model or 'not set'}[/]")
+	console.print(f"    Intent model: [bold white]{CONFIG.addons.ai.intent_model or 'not set'}[/]")
+	console.print(f"    API base:     [bold white]{current_base or 'default (per-provider)'}[/]")
+	console.print(f"    API key:      [bold white]{masked_key or 'not set'}[/]")
+
+	# Step 1 — pick a PROVIDER. The full LiteLLM provider list (on their default bases),
+	# then any OpenAI-compatible gateways from the registry (providers.json), then a
+	# one-off custom base. A known provider filters the bundled catalog to its models;
+	# a gateway/custom base lists live from `<base>/models` (key collected first — auth'd).
+	lite_providers = sorted(p for p in litellm.models_by_provider if _chat_capable(p))
+	gateways = load_ai_providers()
+	entries = ([('lite', p) for p in lite_providers]
+	           + [('gateway', g) for g in gateways]
+	           + [('custom', None)])
+
+	def _show_providers(subset):
+		console.print("[bold]  Select a provider:[/]")
+		for i, e in subset:
+			kind, val = e
+			if kind == 'gateway':
+				base_hint = f" [dim]{val.get('api_base', '')}[/]" if val.get('api_base') else ''
+				suffix = f" [dim](OpenAI-compatible gateway)[/]{base_hint}"
+			elif kind == 'custom':
+				suffix = " [dim](enter your own OpenAI-compatible URL)[/]"
+			else:
+				suffix = ""
+			console.print(f"    [dim]{i:>3}[/] {_entry_label(e)}{suffix}")
+
+	numbered = list(enumerate(entries, start=1))
+	console.print()
+	_show_providers(numbered)
+	while True:
+		raw = Prompt.ask("  [bold cyan]Select (number, text to filter, q to quit)[/]").strip()
+		if raw.lower() in ('q', 'quit', 'exit'):
+			return None
+		if raw.isdigit() and 1 <= int(raw) <= len(entries):
+			kind, val = entries[int(raw) - 1]
+			break
+		ql = raw.lower()
+		matches = [(i, e) for i, e in numbered if ql and ql in _entry_label(e).lower()]
+		if len(matches) == 1:
+			kind, val = matches[0][1]
+			break
+		if matches:
+			console.print()
+			_show_providers(matches)
+		else:
+			console.print(f'[bold yellow]  No provider matching "{raw}".[/]')
+
+	custom_base, custom_key = '', None
+	if kind == 'lite':
+		all_models, all_parts = _provider_catalog(val)
+		if not all_models:
+			console.print(f"[bold yellow]  LiteLLM lists no models for {pretty_provider(val)} — enter one manually.[/]")
+			manual = Prompt.ask("  [bold cyan]Model id[/]").strip()
+			if not manual:
+				return None
+			all_models = [manual if '/' in manual else f"{val}/{manual}"]
+			all_parts = {seg for m in all_models for seg in m.split('/')[:-1]}
+	else:
+		# A gateway pre-fills the base; "custom" prompts for it. Either way the base's
+		# `/models` list is authenticated, so collect the key before listing.
+		if kind == 'custom':
+			while True:
+				base, err = _normalize_api_base(
+					Prompt.ask("  [bold cyan]API base URL[/] [dim](https://…)[/]", default=current_base or None)
+				)
+				if err:
+					console.print(f"[bold red]  {err}[/]")
+					continue
+				custom_base = base
+				break
+		else:
+			custom_base = (val.get('api_base') or '').rstrip('/')
+			docs = f" • docs: {val['docs']}" if val.get('docs') else ''
+			console.print(f"  [dim]Base: {custom_base}{docs}[/]")
+			if val.get('key_hint'):
+				console.print(f"  [dim](key usually starts with {val['key_hint']})[/]")
+		# Only offer to reuse the saved key when the selected base is the SAME as the
+		# configured one — otherwise reusing it would send the old provider's key to a
+		# DIFFERENT endpoint. On a new base, require a fresh key.
+		same_base = bool(current_base) and custom_base == current_base.rstrip('/')
+		custom_key = Prompt.ask(
+			"  [bold cyan]API key[/]",
+			default=masked_key if same_base else None,
+			show_default=same_base and bool(masked_key),
+		)
+		if same_base and custom_key == masked_key:
+			custom_key = current_key
+		if not custom_key:
+			console.print("[bold red]  An API key is required for this endpoint — aborting.[/]")
+			return None
+		try:
+			with maybe_status("[bold orange3]Listing models from the endpoint…[/]", spinner="dots"):
+				ids = fetch_openai_compatible_models(custom_base, custom_key)
+			all_models = [f"openai/{i}" for i in ids]
+			console.print(f"[bold green]  Found {len(all_models)} models at {custom_base}[/]")
+		except Exception as e:  # noqa: BLE001 - fall back to manual id entry
+			console.print(f"[bold yellow]  Could not list models ({e}).[/]")
+			manual = Prompt.ask("  [bold cyan]Enter a model id manually[/] [dim](e.g. my-model)[/]").strip()
+			if not manual:
+				return None
+			all_models = [manual if '/' in manual else f"openai/{manual}"]
+		all_parts = {seg for m in all_models for seg in m.split('/')[:-1]}
+
 	part_colors = {p: MODEL_COLORS[i % len(MODEL_COLORS)] for i, p in enumerate(sorted(all_parts))}
 
-	def _format_model(m, idx=None):
+	def _format_model(m, idx):
 		parts = m.split('/')
 		if len(parts) > 1:
 			segments = [f"[bold {part_colors[p]}]{p}[/]" for p in parts[:-1]]
 			colored = '/'.join(segments) + f"/[bold white]{parts[-1]}[/]"
 		else:
 			colored = f"[bold white]{m}[/]"
-		prefix = f"[dim]{idx:>4}[/] " if idx is not None else "  "
-		return prefix + colored
+		return f"[dim]{idx:>4}[/] " + colored
 
-	# Show current config
-	current_model = CONFIG.addons.ai.default_model
-	current_intent = CONFIG.addons.ai.intent_model
-	current_key = CONFIG.addons.ai.api_key
-	masked_key = f"{current_key[:8]}...{current_key[-4:]}" if current_key and len(current_key) > 12 else current_key or ""
-	console.print()
-	console.print("[bold]  Current config:[/]")
-	console.print(f"    Model:        [bold white]{current_model or 'not set'}[/]")
-	console.print(f"    Intent model: [bold white]{current_intent or 'not set'}[/]")
-	console.print(f"    API key:      [bold white]{masked_key or 'not set'}[/]")
-	console.print()
+	def _show_models(displayed, suffix, leading_newline=False):
+		prefix = "\n" if leading_newline else ""
+		console.print(f"{prefix}[bold]  Found {len(displayed)} models{suffix}:[/]")
+		for i, m in enumerate(displayed, 1):
+			console.print(_format_model(m, idx=i), highlight=False)
 
-	# Display all models numbered
+	# Display the chosen source's models numbered.
+	console.print()
 	displayed = all_models
 	suffix = ''
-	console.print(f"[bold]  Found {len(displayed)} models{suffix}:[/]")
-	for i, m in enumerate(displayed, 1):
-		console.print(_format_model(m, idx=i), highlight=False)
+	_show_models(displayed, suffix)
 
 	# Enter prompt loop
 	while True:
 		console.print()
-		choice = Prompt.ask("[bold cyan]  Filter or select (number/name, q to quit)[/]")
+		choice = Prompt.ask("[bold cyan]  Filter or select (number/name, b to go back, q to quit)[/]")
 
 		if not choice:
 			# Empty input: re-show current list
-			console.print(f"\n[bold]  Found {len(displayed)} models{suffix}:[/]")
-			for i, m in enumerate(displayed, 1):
-				console.print(_format_model(m, idx=i), highlight=False)
+			_show_models(displayed, suffix, leading_newline=True)
 			continue
 
 		if choice.lower() in ('q', 'quit', 'exit'):
 			return None
+
+		# Go back to provider selection (restart the flow from step 1).
+		if choice.lower() in ('b', 'back'):
+			return _setup_ai_interactive()
 
 		# Number → select from current display
 		if choice.isdigit():
@@ -396,9 +1433,7 @@ def setup_ai():
 				else:
 					displayed = filtered
 					suffix = f' matching "{choice}"'
-					console.print(f"\n[bold]  Found {len(displayed)} models{suffix}:[/]")
-					for i, m in enumerate(displayed, 1):
-						console.print(_format_model(m, idx=i), highlight=False)
+					_show_models(displayed, suffix, leading_newline=True)
 					continue
 
 		# Model selected - save config
@@ -406,14 +1441,23 @@ def setup_ai():
 		CONFIG.set('addons.ai.default_model', selected)
 		CONFIG.set('addons.ai.intent_model', selected)
 
-		# Prompt for API key if model changed or key unset
-		api_key = Prompt.ask(
-			"  [bold cyan]API key[/] [dim](leave empty to keep current)[/]",
-			default=masked_key,
-			show_default=bool(masked_key),
-		)
-		if api_key and api_key != masked_key:
-			CONFIG.set('addons.ai.api_key', api_key)
+		# Persist base + key. A custom/gateway base already collected the key (and needs
+		# it for routing); the built-in catalog clears any stale custom base and prompts
+		# for the key as before.
+		if custom_base:
+			CONFIG.set('addons.ai.api_base', custom_base)
+			if custom_key:
+				CONFIG.set('addons.ai.api_key', custom_key)
+		else:
+			if current_base:
+				CONFIG.set('addons.ai.api_base', '')
+			api_key = Prompt.ask(
+				"  [bold cyan]API key[/] [dim](leave empty to keep current)[/]",
+				default=masked_key,
+				show_default=bool(masked_key),
+			)
+			if api_key and api_key != masked_key:
+				CONFIG.set('addons.ai.api_key', api_key)
 
 		config = CONFIG.validate()
 		if config:
@@ -441,7 +1485,7 @@ def setup_ai():
 		return selected
 
 
-def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
+def prompt_user(history, max_iterations=10, choices=None,
 				mode="chat", model=None):
 	"""Prompt user for follow-up input via interactive menu.
 
@@ -451,9 +1495,8 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 
 	Args:
 		history: ChatHistory instance (read-only, used for token counts and compaction).
-		encryptor: Optional SensitiveDataEncryptor (unused, kept for compat).
 		max_iterations: Current max iterations (used for continue message).
-		choices: Optional list of choice strings from LLM follow_up action.
+		choices: Optional list of choice strings from the LLM's stop action.
 		model: Optional LLM model name for token count display.
 
 	Returns:
@@ -465,7 +1508,6 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 		return None
 	from secator.rich import InteractiveMenu
 	from secator.ai.prompts import format_continue
-	from secator.utils import format_token_count
 
 	# Build title with token recap
 	title = "What's next?"
@@ -474,13 +1516,7 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 			from secator.ai.history import get_context_window
 			by_role = history.count_tokens_by_role(model)
 			ctx_window = get_context_window(model)
-			token_str = format_token_count(by_role['total'], icon='arrow_up', compact=True)
-			ctx_str = format_token_count(ctx_window, compact=True)
-			role_parts = []
-			for role in ('system', 'user', 'assistant', 'tool'):
-				if role in by_role:
-					role_parts.append(f'[orange4]{role}[/]:{format_token_count(by_role[role], compact=True)}')
-			role_str = ' | '.join(role_parts)
+			token_str, ctx_str, role_str = _format_token_breakdown(by_role['total'], ctx_window, by_role)
 			title += f" [gray42]• {token_str}/[dim red]{ctx_str}[/] ({role_str})[/]"
 		except Exception:
 			pass
@@ -494,7 +1530,7 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 				options.append({
 					"label": choice,
 					"input": True,
-					"action": "follow_up",
+					"action": "choice",
 					"selectable": True,
 				})
 
@@ -556,7 +1592,7 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 			summary_msg = value if value else "Summarize all findings so far and provide a final report."
 			return {"answer": summary_msg, "extra_iters": 1, "switch_mode": "chat"}
 
-		if action == "follow_up":
+		if action == "choice":
 			choice_label = options[idx].get("label", "")
 			msg = choice_label
 			if value:
@@ -575,14 +1611,9 @@ def prompt_user(history, encryptor=None, max_iterations=10, choices=None,
 			history.compact(model)
 			new_tokens = history.count_tokens(model)
 			console.print(f"[bold green]Compacted context: {old_tokens} -> {new_tokens} tokens[/]")
-			return prompt_user(history, encryptor, max_iterations, choices, mode, model)
+			return prompt_user(history, max_iterations, choices, mode, model)
 
 		# exit
 		return None
 	except (KeyboardInterrupt, EOFError):
 		return None
-
-
-def _maybe_encrypt(text, encryptor):
-	"""Encrypt text if encryptor is available, otherwise return as-is."""
-	return encryptor.encrypt(text) if encryptor else text

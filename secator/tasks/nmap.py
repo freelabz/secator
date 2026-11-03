@@ -43,6 +43,7 @@ class nmap(ReconPort):
 		# Host discovery
 		'skip_host_discovery': {'is_flag': True, 'short': 'Pn', 'default': False, 'help': 'Skip host discovery (no ping)'},
 		'skip_dns_resolution': {'is_flag': True, 'short': 'n', 'default': False, 'help': 'Skip DNS resolution'},
+		'host_timeout': {'type': str, 'default': None, 'help': 'Give up on target after this long'},
 		# Service and version detection
 		'version_detection': {'is_flag': True, 'short': 'sV', 'default': False, 'help': 'Enable version detection (slow)'},
 		'detect_all': {'is_flag': True, 'short': 'A', 'default': False, 'help': 'Enable OS detection, version detection, script scanning, and traceroute on open ports'},  # noqa: E501
@@ -95,6 +96,7 @@ class nmap(ReconPort):
 		# Nmap opts
 		'skip_host_discovery': '-Pn',
 		'skip_dns_resolution': '-n',
+		'host_timeout': '--host-timeout',
 		'version_detection': '-sV',
 		'detect_all': '-A',
 		'detect_os': '-O',
@@ -218,13 +220,11 @@ class nmapData(dict):
 		for host in hosts:
 			hostname = self._get_hostname(host)
 			tags = []
-			global_confidence = 'high'
 			is_mass_scan = len(self._get_ports(host)) > 20
 			if is_mass_scan:
 				yield Warning(
 					message=f'Unusual number of ports found for host {hostname}. There might be an IDS interfering with the scan.',
 				)
-				global_confidence = 'low'
 				tags = ['ids']
 			ip = self._get_ip(host)
 			if ip and ip not in ips:
@@ -246,8 +246,12 @@ class nmapData(dict):
 				service_name = extra_data.get('service_name', '')
 				version_exact = extra_data.get('version_exact', False)
 				service_confidence = extra_data.get('confidence', 'low')
-				if service_confidence != 'low':
-					global_confidence = 'high'
+				# On a masscan/IDS host, degrade a port to 'low' unless its service is genuinely
+				# fingerprinted (service_confidence 'high') and not tcpwrapped. Computed per port.
+				port_confidence = 'high'
+				if is_mass_scan and (service_confidence != 'high' or service_name == 'tcpwrapped'):
+					port_confidence = 'low'
+					service_confidence = 'low'
 
 				# Grab CPEs
 				cpes = extra_data.get('cpe', [])
@@ -267,7 +271,7 @@ class nmapData(dict):
 					service_name=service_name,
 					protocol=protocol,
 					extra_data=extra_data,
-					confidence=global_confidence,
+					confidence=port_confidence,
 					service_confidence=service_confidence,
 					tags=tags + [scan_type, reason],
 				)
@@ -301,7 +305,7 @@ class nmapData(dict):
 						data.matched_at = f'{hostname}:{port_number}'
 						data.ip = ip
 						data.extra_data.update(extra_data)
-						confidence = global_confidence
+						confidence = port_confidence
 						if 'cpe-match' in data.tags:
 							confidence = 'high' if version_exact else 'medium'
 						data.confidence = confidence
@@ -458,7 +462,11 @@ class nmapData(dict):
 			if not matches:
 				continue
 			vuln_id, vuln_title = matches.groups()
-			vuln = Vulnerability(id=vuln_id, name=vuln_id, description=vuln_title, provider=provider_name, tags=[provider_name])
+			# confidence='low' kept explicit: vulscan NSE output is noisy, so these start low
+			# confidence by design (a CVE lookup below can raise it). 'high' is the type default.
+			vuln = Vulnerability(
+				id=vuln_id, name=vuln_id, description=vuln_title, provider=provider_name,
+				tags=[provider_name], confidence='low')
 			if provider_name == 'MITRE CVE':
 				vuln_lookup = VulnMulti.lookup_cve(vuln_id, *cpes)
 				if vuln_lookup:
