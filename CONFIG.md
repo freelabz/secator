@@ -266,26 +266,99 @@ runners:
 
 **Type:** `object`
 
-HTTP request and proxy settings.
+HTTP request and proxy settings. See [Routing scans through a proxy / Tor](#routing-scans-through-a-proxy--tor) for how these are used.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `http.socks5_proxy` | `string` | `socks5://127.0.0.1:9050` | SOCKS5 proxy (Tor) |
-| `http.http_proxy` | `string` | `https://127.0.0.1:9080` | HTTP/HTTPS proxy |
+| `http.socks5_proxy` | `string` | `` (empty) | SOCKS5 proxy URL used by `--proxy auto`/`socks5` when set (e.g. `socks5://127.0.0.1:9050`). Empty by default — no proxy unless you configure one. |
+| `http.http_proxy` | `string` | `` (empty) | HTTP/HTTPS proxy URL used by `--proxy auto`/`http` when set (e.g. `http://proxy.example.com:8080`). Empty by default. |
 | `http.store_responses` | `bool` | `true` | Store HTTP responses to disk |
 | `http.response_max_size_bytes` | `int` | `100000` | Max stored response size (~97 KB) |
-| `http.proxychains_command` | `string` | `proxychains` | Proxychains binary |
-| `http.freeproxy_timeout` | `int` | `1` | Free proxy test timeout (s) |
+| `http.proxychains_command` | `string` | `proxychains` | Proxychains binary used by `--proxy proxychains` |
+| `http.freeproxy_timeout` | `int` | `1` | Free proxy test timeout (s) used by `--proxy random` |
 | `http.default_header` | `string` | `User-Agent: Mozilla/5.0 (Windows NT 10.0…) Chrome/134` | Default HTTP header |
 
 ```yaml
 http:
-  socks5_proxy: socks5://127.0.0.1:9050
+  socks5_proxy: socks5://127.0.0.1:9050   # e.g. point at a local Tor SOCKS5 endpoint
   http_proxy: http://proxy.example.com:8080
   store_responses: true
   response_max_size_bytes: 500000
   default_header: "User-Agent: MyCustomAgent/1.0"
 ```
+
+> **Note:** `http.socks5_proxy` and `http.http_proxy` are **empty by default** —
+> secator ships with no built-in proxy. `--proxy auto` only does something once
+> you set one of them (otherwise the proxy is ignored and a warning is printed).
+
+### Routing scans through a proxy / Tor
+
+Many tasks accept a `--proxy` option. The value selects how the command is
+proxied:
+
+| `--proxy` value | Effect |
+|-----------------|--------|
+| `auto` | Use `http.socks5_proxy` if the tool supports SOCKS5 and it is set, otherwise `http.http_proxy` if supported and set. If neither is set, the proxy is ignored (a warning is printed). If the task is marked as a proxychains task, `auto` wraps it with proxychains. |
+| `proxychains` | Wrap the command with the `http.proxychains_command` binary (default `proxychains`). |
+| `random` | Pick a random free public proxy (HTTP only) via FreeProxy, using `http.freeproxy_timeout`. |
+| `socks5://host:port` | Use this explicit SOCKS5 proxy. |
+| `http://host:port` | Use this explicit HTTP proxy. |
+
+Examples:
+
+```bash
+# Use the configured socks5_proxy / http_proxy (whichever the tool supports)
+secator x httpx example.com --proxy auto
+
+# Explicit SOCKS5 proxy (e.g. a local Tor endpoint)
+secator x httpx example.com --proxy socks5://127.0.0.1:9050
+
+# Explicit HTTP proxy
+secator x httpx example.com --proxy http://proxy.example.com:8080
+
+# A random free public proxy (HTTP only)
+secator x httpx example.com --proxy random
+
+# Route through proxychains
+secator x nmap example.com --proxy proxychains
+```
+
+**Setting the default proxy.** Point `--proxy auto` at a fixed proxy either in
+the config file or via `SECATOR_HTTP_*` environment variables:
+
+```bash
+# config file (~/.secator/config.yml)
+secator config set http.socks5_proxy socks5://127.0.0.1:9050
+secator config set http.http_proxy   http://proxy.example.com:8080
+
+# or environment variables
+export SECATOR_HTTP_SOCKS5_PROXY=socks5://127.0.0.1:9050
+export SECATOR_HTTP_HTTP_PROXY=http://proxy.example.com:8080
+```
+
+**Tor recipe.** Run a local Tor daemon that exposes a SOCKS5 endpoint (by
+default `127.0.0.1:9050`), point `http.socks5_proxy` at it, then scan with
+`--proxy auto`:
+
+```bash
+# 1. Start a local Tor service (installs the SOCKS5 listener on 127.0.0.1:9050)
+#    e.g. on Debian/Ubuntu: sudo apt install tor && sudo service tor start
+#    or run the tor binary directly: tor
+
+# 2. Point secator's SOCKS5 proxy at the Tor endpoint
+export SECATOR_HTTP_SOCKS5_PROXY=socks5://127.0.0.1:9050
+
+# 3. Run through Tor
+secator x httpx example.com --proxy auto
+# (equivalently: --proxy socks5://127.0.0.1:9050)
+```
+
+> **Caveats:**
+> - Tor must be running and listening on the SOCKS5 port you configured.
+> - Traffic over Tor is noticeably **slower** than a direct connection.
+> - **Not all tools honour a proxy.** A task that does not support the proxy
+>   option prints a warning and runs unproxied — never assume every task in a
+>   workflow/scan is routed through Tor. Verify per tool.
 
 ---
 
