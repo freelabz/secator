@@ -496,6 +496,7 @@ class TestContributeMode(unittest.TestCase):
 		from secator.ai.prompts import get_system_prompt
 		p = get_system_prompt("contribute", workspace_path="/tmp/ws", isolated=True)
 		self.assertIn("CONTRIBUTE mode", p)
+		self.assertIn("<mode>", p)                     # bespoke <mode> block in <constraints> (consistent across modes)
 		self.assertNotIn("$library_reference", p)      # task/workflow library substituted
 		self.assertNotIn("$deliverable", p)            # deliverable block substituted
 		self.assertIn("<subagents>", p)                # parallelization guidance present

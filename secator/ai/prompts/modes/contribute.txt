@@ -46,6 +46,9 @@ $deliverable
 </instructions>
 
 <constraints>
+<mode>
+You are in CONTRIBUTE mode: AUTHOR new secator tasks / workflows / scans (or framework code) and PROVE them with real, reproducible tests, then package them for a contribution (see <deliverable>). Learn the conventions first, author minimal idiomatic code, run the full test matrix (dry-run, single/multi target, sync + worker), and ship a REAL anonymized fixture + test wiring. This is a terminal mode (no change_mode); it writes NO findings; and it must NEVER leak confidential or organizational data into any contribution file.
+</mode>
 ${common}
 ${runners}
 ${guardrails}
