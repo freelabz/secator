@@ -61,6 +61,7 @@ QUERIES = load_prompt("constraints/queries.txt")
 SYSTEM_SCAN = Template(load_prompt("modes/scan.txt"))
 SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
 SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
+SYSTEM_MONITOR = Template(load_prompt("modes/monitor.txt"))
 SYSTEM_RESEARCH = Template(load_prompt("modes/research.txt"))
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
@@ -68,7 +69,7 @@ MODES = {
 	"scan": {
 		"system_prompt": SYSTEM_SCAN,
 		"description": "actively scan, run tools / shell, exploit, and write or curate findings",
-		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
@@ -92,8 +93,24 @@ MODES = {
 		# to exploit — without it query_workspace isn't even built for this mode.
 		# "stop" lets exploit mode end-and-ask (e.g. confirm before a state-changing
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
-		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
+	},
+	"monitor": {
+		"system_prompt": SYSTEM_MONITOR,
+		"description": "re-verify the EXISTING finding set against its targets and record what changed; you cannot scan for or add new findings",  # noqa: E501
+		# Attack-surface monitoring: a recurring re-verification of the EXISTING finding set.
+		# It reads (query), re-probes a finding against its OWN target with `shell`, and records
+		# the outcome: an unchanged finding gets an `add_note`; a changed one `update_finding` +
+		# `add_note` (the delta); a finding that no longer reproduces is retired with
+		# `mark_vuln_false_positive` (reversible) + a note; a previously-exploited vuln that is now
+		# gone is closed with `mark_vuln_fixed` + a note. It deliberately CANNOT run
+		# tasks/workflows (those re-ingest findings through the normal pipeline and would re-add
+		# the very surface it is auditing), add findings, exploit, spawn subagents, or
+		# self-escalate — no add_finding, no mark_vuln_exploited/exploit_failed, no subagent, no
+		# change_mode. No iteration override/cap: like the other modes it relies on the default
+		# budget and the model calling `stop` when the surface has been walked.
+		"allowed_actions": ["query", "shell", "mark_vuln_false_positive", "mark_vuln_fixed", "update_finding", "add_note", "stop"],  # noqa: E501
 	},
 	"research": {
 		"system_prompt": SYSTEM_RESEARCH,
@@ -103,7 +120,7 @@ MODES = {
 		# is nothing to escalate to and it must not de-escalate out. It leans on `subagent`
 		# (adversarial fan-out), `shell` (stand up a sandbox lab), `web_search` (find PoCs) and
 		# `add_finding` (record the validated Exploit, linked by `cves`).
-		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "add_note", "subagent", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "stop"],
 		# Research is long-running (stand up labs, fan out subagents, iterate on PoCs), so it
 		# gets a higher iteration floor than scan/exploit.
 		"max_iterations": 12,
@@ -467,7 +484,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# $output_types_reference, so they must be substituted for all modes — derive both
 	# from FINDING_TYPES so they never drift from the registry.
 	subst = dict(query_types=build_query_types(), output_types_reference=build_output_types_reference())
-	if mode in ("scan", "exploit", "research"):
+	if mode in ("scan", "exploit", "monitor", "research"):
 		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 		subst.update(library_reference=build_library_reference(), **path_vars)
 	result = system_prompt.safe_substitute(**subst)

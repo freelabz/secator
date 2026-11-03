@@ -37,14 +37,22 @@ _DESCRIPTION_SCHEMA = {
 
 # Mode-membership sets, so each tool declares exposure declaratively. These mirror
 # the per-mode ``allowed_actions`` in prompts.MODES (enforced by the consistency test).
-# Active/mutating tools (run tasks/shell, write findings) — the action modes.
+# Active/mutating tools that escalate/exploit (run a NEW finding, mark exploited) — NOT
+# monitor, which only re-verifies the EXISTING surface.
 _ACTIVE_MODES = frozenset({"scan", "exploit", "research"})
 _ALL_MODES = frozenset({"scan", "chat", "exploit", "research"})
-# Read-only helper tools (web/plan/run-history lookups) — exposed in every mode.
+# monitor is a bounded re-verification mode: it runs tasks/workflows/shell to re-test an
+# existing finding, and retires/annotates it (mark_vuln_false_positive / update_finding) —
+# but never add_finding / mark_vuln_exploited / exploit_failed / subagent / change_mode. This
+# set is the active tools it SHARES with scan/exploit/research.
+_SCAN_EXPLOIT_MONITOR = frozenset({"scan", "exploit", "research", "monitor"})
+# `query` and `stop` are available in EVERY mode (incl. monitor + chat).
+_QUERY_MODES = frozenset({"scan", "chat", "exploit", "research", "monitor"})
+# Read-only helper tools (web/plan/run-history lookups) — scan/chat/exploit/research (NOT
+# monitor, a focused re-verification loop over a finding set).
 _READONLY_HELPER = _ALL_MODES
-# `change_mode` is the ONE tool NOT exposed in `research`: research is a deliberate,
-# directly-selected terminal mode that already has the most capable surface, so it
-# neither escalates nor de-escalates. The other modes keep the escalation ladder.
+# `change_mode` is NOT exposed in `research` (a deliberate, directly-selected terminal mode)
+# nor `monitor` (a bounded, non-escalating pass). The other modes keep the escalation ladder.
 _CAN_CHANGE_MODE = frozenset({"scan", "chat", "exploit"})
 
 
@@ -199,7 +207,7 @@ class RunWorkflowTool(BaseTool):
 class RunShellTool(BaseTool):
 	name = "run_shell"
 	action = "shell"
-	modes = _ACTIVE_MODES
+	modes = _SCAN_EXPLOIT_MONITOR
 	handler = "_handle_shell"
 	schema = {
 		"type": "function",
@@ -234,7 +242,7 @@ class RunShellTool(BaseTool):
 class QueryWorkspaceTool(BaseTool):
 	name = "query_workspace"
 	action = "query"
-	modes = _ALL_MODES
+	modes = _QUERY_MODES
 	auto_allow = True
 	handler = "_handle_query"
 	schema = {
@@ -414,7 +422,7 @@ class MarkVulnExploitedTool(BaseTool):
 class MarkVulnFalsePositiveTool(BaseTool):
 	name = "mark_vuln_false_positive"
 	action = "mark_vuln_false_positive"
-	modes = _ACTIVE_MODES
+	modes = _SCAN_EXPLOIT_MONITOR
 	auto_allow = True
 	handler = "_handle_mark_vuln_false_positive"
 	schema = {
@@ -437,6 +445,47 @@ class MarkVulnFalsePositiveTool(BaseTool):
 					"reason": {
 						"type": "string",
 						"description": "Short reason why it's a false positive (e.g. 'not reachable', 'patched'). Recorded on the vuln."  # noqa: E501
+					},
+					"extra_data": {
+						"type": "object",
+						"description": "Extra structured context merged into the vuln (existing keys preserved). Optional.",
+						"additionalProperties": True
+					}
+				},
+				"required": ["_uuid"]
+			}
+		}
+	}
+
+
+class MarkVulnFixedTool(BaseTool):
+	name = "mark_vuln_fixed"
+	action = "mark_vuln_fixed"
+	modes = _SCAN_EXPLOIT_MONITOR
+	auto_allow = True
+	handler = "_handle_mark_vuln_fixed"
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "mark_vuln_fixed",
+			"description": (
+				"Mark an EXISTING vulnerability as FIXED — a REAL vulnerability (typically one previously "
+				"confirmed EXPLOITED) that no longer reproduces because it has been remediated/patched. "
+				"Identify it by the `_uuid` from query_workspace results. Sets status='FIXED' but keeps the vuln "
+				"VISIBLE (does NOT hide it) — it is a resolved part of the history, not a false positive. Use this "
+				"(NOT mark_vuln_false_positive) when the vuln WAS genuine but is now gone/closed. Give a short "
+				"`reason` (what changed). Prefer pairing it with an `add_note` recording the evidence that it is gone."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"_uuid": {
+						"type": "string",
+						"description": "The `_uuid` of the vulnerability to mark fixed (from query_workspace results)."
+					},
+					"reason": {
+						"type": "string",
+						"description": "Short reason it's now fixed (e.g. 'patched to 1.2.4', 'endpoint removed'). Recorded on the vuln."  # noqa: E501
 					},
 					"extra_data": {
 						"type": "object",
@@ -530,7 +579,7 @@ class MarkVulnExploitFailedTool(BaseTool):
 class UpdateFindingTool(BaseTool):
 	name = "update_finding"
 	action = "update_finding"
-	modes = _ACTIVE_MODES
+	modes = _SCAN_EXPLOIT_MONITOR
 	auto_allow = True
 	handler = "_handle_update_finding"
 	schema = {
@@ -573,7 +622,7 @@ class UpdateFindingTool(BaseTool):
 class AddNoteTool(BaseTool):
 	name = "add_note"
 	action = "add_note"
-	modes = _ACTIVE_MODES
+	modes = _SCAN_EXPLOIT_MONITOR
 	auto_allow = True
 	handler = "_handle_add_note"
 	schema = {
@@ -831,7 +880,7 @@ class ChangeModeTool(BaseTool):
 class StopTool(BaseTool):
 	name = "stop"
 	action = "stop"
-	modes = _ALL_MODES
+	modes = _QUERY_MODES
 	auto_allow = True
 	# NOT emitted by build_tool_schemas / not in TOOL_SCHEMAS — injected per-backend
 	# via get_extra_tools (interactive backends a `stop` with `choices`, AutoBackend a
@@ -883,6 +932,7 @@ _TOOL_CLASSES = [
 	AddFindingTool,
 	MarkVulnExploitedTool,
 	MarkVulnFalsePositiveTool,
+	MarkVulnFixedTool,
 	MarkVulnExploitFailedTool,
 	UpdateFindingTool,
 	AddNoteTool,

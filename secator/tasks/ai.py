@@ -1182,8 +1182,9 @@ class ai(PythonRunner):
 					# results) so a later resumed worker can decrypt these tokens.
 					self._persist_pii_map()
 
-				# Query extension (allow extra iterations for data exploration)
-				if tool_calls and actions and actions[-1].get("action") == "query" and query_extensions < 3:
+				# Query extension (allow extra iterations for data exploration).
+				if (tool_calls and actions and actions[-1].get("action") == "query"
+						and query_extensions < 3):
 					self.max_iterations += 1
 					query_extensions += 1
 
