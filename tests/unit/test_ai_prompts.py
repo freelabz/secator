@@ -136,6 +136,14 @@ class TestPrompts(unittest.TestCase):
 		self.assertIn('$in', prompt)
 		self.assertIn('$regex', prompt)
 
+	def test_core_modes_render_a_mode_block(self):
+		"""Every mode carries a bespoke <mode> recap in the <constraints> recency tail (in
+		addition to the programmatic <current_mode> banner) — kept consistent across modes."""
+		for mode in ("scan", "chat", "exploit"):
+			p = get_system_prompt(mode, workspace_path="<ws>", backend=None)
+			self.assertIn("<mode>", p, f"{mode} missing the <mode> block")
+			self.assertIn("</mode>", p, f"{mode} missing the </mode> close")
+
 	def test_get_system_prompt_invalid_mode_falls_back(self):
 		"""Test get_system_prompt falls back to chat for invalid mode (consistent with get_mode_config)."""
 		invalid_prompt = get_system_prompt("invalid_mode")
