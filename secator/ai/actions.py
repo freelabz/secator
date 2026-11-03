@@ -2317,9 +2317,13 @@ def _handle_add_note(action: Dict, ctx: ActionContext) -> Generator:
 		try:
 			changes = json.loads(changes)
 		except (json.JSONDecodeError, TypeError):
-			changes = None
-	if changes is not None and not isinstance(changes, list):
-		yield Error(message="add_note `changes` must be a list of {field, old, new} objects.", _context=context)
+			yield Error(message="add_note `changes` must be valid JSON (a list of {field, old, new} objects).", _context=context)  # noqa: E501
+			return
+	if changes is not None and (
+		not isinstance(changes, list)
+		or not all(isinstance(c, dict) and str(c.get("field") or "").strip() for c in changes)
+	):
+		yield Error(message="add_note `changes` must be a list of {field, old, new} objects (each with a non-empty `field`).", _context=context)  # noqa: E501
 		return
 
 	target = _lookup_finding(ctx, uuid)

@@ -109,11 +109,21 @@ class TestAddNoteTool(unittest.TestCase):
 		e.create_note.assert_not_called()
 
 	def test_add_note_bad_changes_errors(self):
-		e = self._engine({'_uuid': 'u1', '_type': 'url', 'url': 'http://h'})
-		action = {'action': 'add_note', '_uuid': 'u1', 'body': 'x', 'changes': {'field': 'x'}}
-		out = list(dispatch_action(action, self._ctx(e)))
-		self.assertTrue(any(isinstance(o, Error) for o in out))
-		e.create_note.assert_not_called()
+		# non-list, each-entry-not-a-dict, entry missing `field`, and malformed JSON string
+		# all fail closed (the model is told, the note is NOT persisted).
+		bad_cases = [
+			{'field': 'x'},                 # not a list
+			[123],                          # entry not a dict
+			[{'old': 1, 'new': 2}],         # entry missing `field`
+			[{'field': '  '}],              # blank field
+			'notjson',                      # unparseable string
+		]
+		for bad in bad_cases:
+			e = self._engine({'_uuid': 'u1', '_type': 'url', 'url': 'http://h'})
+			action = {'action': 'add_note', '_uuid': 'u1', 'body': 'x', 'changes': bad}
+			out = list(dispatch_action(action, self._ctx(e)))
+			self.assertTrue(any(isinstance(o, Error) for o in out), f'expected Error for changes={bad!r}')
+			e.create_note.assert_not_called()
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
