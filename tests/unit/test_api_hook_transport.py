@@ -26,11 +26,15 @@ def _resp(status=200, body=None, text=None):
 
 class TestApiRequest(unittest.TestCase):
 
-	def test_uses_shared_retry_session(self):
-		# Retries/backoff are delegated to the shared secator.requests session, not a
-		# bespoke one built in the api hook.
-		from secator.requests import requests as shared_session
-		self.assertIs(api.requests, shared_session)
+	def test_session_retries_writes(self):
+		# Retries/backoff come from the shared secator.requests get_session() helper,
+		# with POST added so idempotency-keyed writes are retried too.
+		retry = api.requests.get_adapter('https://x').max_retries
+		self.assertEqual(retry.total, 3)
+		self.assertEqual(retry.backoff_factor, 1)
+		self.assertIn('POST', retry.allowed_methods)
+		self.assertIn('PUT', retry.allowed_methods)
+		self.assertNotIn(404, retry.status_forcelist)
 
 	def test_non_json_error_raises_http_error(self):
 		with patch.object(api.requests, 'request', return_value=_resp(502, text='<html>bad gateway</html>')):

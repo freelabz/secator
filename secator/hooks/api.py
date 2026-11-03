@@ -18,11 +18,15 @@ from functools import cache
 
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, Error, Info
-from secator.requests import requests
+from secator.requests import get_session
 from secator.runners import Scan, Task, Workflow
 from secator.serializers.dataclass import DataclassEncoder
 from secator.utils import debug
 from secator.rich import console
+
+# Shared urllib3-retry session (secator.requests), but with POST added to the retried
+# methods: runner/finding writes carry an Idempotency-Key, so a retried POST is safe.
+requests = get_session(allowed_methods=frozenset({'GET', 'POST', 'PUT', 'DELETE', 'PATCH'}))
 
 API_URL = CONFIG.addons.api.url
 API_KEY = CONFIG.addons.api.key
