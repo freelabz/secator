@@ -428,6 +428,42 @@ def build_session_context(isolated: bool = False) -> str:
 	return "\n".join(lines)
 
 
+def build_contribute_deliverable(backend=None) -> str:
+	"""The <deliverable> block for contribute mode, chosen from WHERE the run happens.
+
+	- LOCAL (CLI / TUI on the user's machine): the agent can write into the user's checkout and
+	  offer to fork + open the PR directly (the user's git/GitHub creds are available).
+	- HOSTED / non-interactive (a RemoteBackend platform sandbox, or any non-interactive run):
+	  no PR is possible, so every produced file is pasted INLINE as a fenced Markdown code block
+	  headed by its intended repo-relative path, for the user to copy and PR themselves.
+	"""
+	name = backend.__class__.__name__ if backend is not None else "CLIBackend"
+	interactive = getattr(backend, "interactive", True) if backend is not None else True
+	is_local = interactive and name in ("CLIBackend", "TUIBackend")
+	inline = (
+		"Paste EVERY file you produced inline in your final message, each as a fenced code block "
+		"headed by a comment with its intended path RELATIVE TO THE SECATOR REPO — e.g.\n"
+		"```python\n# secator/tasks/manspider.py\n<file contents>\n```\n"
+		"```json\n# tests/fixtures/manspider_output.json\n<anonymized fixture>\n```\n"
+		"Cover the task/config file, the fixtures, and the test wiring (tests/integration/inputs.py "
+		"+ outputs.py). The user copies these into their own clone and opens the PR."
+	)
+	if is_local:
+		return (
+			"<deliverable>\n"
+			"You are on the user's OWN machine. Write the finished files into their Secator checkout, "
+			"then — if they want to contribute — OFFER to fork `freelabz/secator`, apply the files on a "
+			"branch, and open the PR for them (use `gh`; if not authenticated, ask the user to run "
+			"`gh auth login` / provide GitHub credentials). If they decline the PR, fall back to pasting "
+			"the files inline:\n" + inline + "\n</deliverable>"
+		)
+	return (
+		"<deliverable>\n"
+		"You are running on the hosted platform in a DISPOSABLE sandbox — you CANNOT open a PR from here "
+		"and must not try. " + inline + "\n</deliverable>"
+	)
+
+
 def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None,
                       isolated=None, is_subagent: bool = False) -> str:
 	"""Get system prompt for mode with library reference filled in.
@@ -466,6 +502,12 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	if mode in ("scan", "exploit", "contribute"):
 		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 		subst.update(library_reference=build_library_reference(), **path_vars)
+	if mode == "contribute":
+		# How to hand back a finished contribution depends on WHERE this runs: on the user's
+		# own machine (CLI/TUI) the agent can fork + open the PR; on the hosted platform (a
+		# disposable RemoteBackend sandbox, or any non-interactive run) it cannot, so it must
+		# paste the files inline for the user to PR themselves.
+		subst["deliverable"] = build_contribute_deliverable(backend)
 	result = system_prompt.safe_substitute(**subst)
 
 	# Prepend the programmatic current-mode statement (from the registry) so the model
