@@ -64,6 +64,7 @@ class TemplateLoader(DotMap):
 		config_type = d.get('type')
 		if serialize and config_type != 'profile':
 			d['opts'] = serialize_config_options(get_config_options(self))
+			d['applicable_profiles'] = get_applicable_profiles(set(d['opts'].keys()))
 		return d
 
 
@@ -340,3 +341,53 @@ def serialize_config_options(options):
 	options = {k.replace("-", "_"): v for k, v in options.items()}
 	options_str = json.dumps(options, default=str, indent=4)
 	return json.loads(options_str)
+
+
+def profile_applies(profile_opts, config_opt_names):
+	"""Whether a profile applies to a config.
+
+	The authoritative rule: a profile applies to a config iff at least one of the
+	profile's ``opts`` keys exists in that config's resolved option set. A profile's
+	opts are the knobs it flips (e.g. ``screenshot``, ``passive``, ``rate_limit``); if
+	none of those knobs exist on the config, applying the profile would be a no-op, so
+	it does not apply.
+
+	Profile opt keys are normalized to underscores before comparison to match the keys
+	produced by ``serialize_config_options`` (which rewrites ``-`` to ``_``).
+
+	Edge case: a profile with no opts is treated as applying everywhere (there is
+	nothing to intersect, so it is universally harmless).
+
+	Args:
+		profile_opts (dict): The profile's ``opts`` mapping (knob name -> value).
+		config_opt_names (set[str]): The config's resolved option names (serialized
+			``opts`` keys).
+
+	Returns:
+		bool: True if the profile applies to the config.
+	"""
+	if not profile_opts:
+		return True
+	keys = {str(k).replace('-', '_') for k in profile_opts.keys()}
+	return bool(keys & set(config_opt_names))
+
+
+def get_applicable_profiles(config_opt_names):
+	"""Names of the profiles whose opts intersect a config's resolved option names.
+
+	Loads the profile catalog once and reuses it, so this is cheap to call per config.
+
+	Args:
+		config_opt_names (set[str]): The config's resolved option names (serialized
+			``opts`` keys).
+
+	Returns:
+		list[str]: Sorted names of applicable profiles.
+	"""
+	from secator.loader import get_configs_by_type
+	profiles = get_configs_by_type('profile')
+	names = [
+		p.name for p in profiles
+		if profile_applies((p.opts or {}).toDict() if hasattr(p.opts, 'toDict') else (p.opts or {}), config_opt_names)
+	]
+	return sorted(names)
