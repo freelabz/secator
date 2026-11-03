@@ -1,7 +1,0 @@
-type: profile
-name: tor
-category: evasion
-description: "Anonymous scan using Tor network"
-warning: "Routes scan traffic through the Tor network, which can be considerably slower and requires a running Tor proxy."
-opts:
-  proxy: auto
