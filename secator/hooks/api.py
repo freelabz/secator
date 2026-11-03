@@ -13,14 +13,12 @@ Configuration:
 
 import json
 import time
-import requests
 
 from functools import cache
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, Error, Info
+from secator.requests import requests
 from secator.runners import Scan, Task, Workflow
 from secator.serializers.dataclass import DataclassEncoder
 from secator.utils import debug
@@ -46,33 +44,6 @@ def get_runner_dbg(runner):
 	return {runner.unique_name: runner.status, 'type': runner.config.type, 'class': runner.__class__.__name__, 'caller': runner.config.name, **runner.context}  # noqa: E501
 
 
-# Transient failures (connection drops, proxy 5xx, rate limits) are retried by
-# urllib3's Retry via a mounted HTTPAdapter: exponential backoff (backoff_factor=1
-# -> 1s, 2s, 4s) and Retry-After is honoured on 429s. POST/PUT are included in the
-# retried methods because runner/finding writes carry an Idempotency-Key, so a retry
-# is safe.
-API_RETRIES = 3
-API_RETRY_STATUSES = (429, 500, 502, 503, 504)
-
-
-@cache
-def _get_session():
-	"""requests Session with urllib3-backed retries + exponential backoff."""
-	retry = Retry(
-		total=API_RETRIES,
-		backoff_factor=1,
-		status_forcelist=API_RETRY_STATUSES,
-		allowed_methods=frozenset({'GET', 'POST', 'PUT', 'DELETE', 'PATCH'}),
-		raise_on_status=False,
-		respect_retry_after_header=True,
-	)
-	adapter = HTTPAdapter(max_retries=retry)
-	session = requests.Session()
-	session.mount('http://', adapter)
-	session.mount('https://', adapter)
-	return session
-
-
 def _make_request(method, endpoint, data=None, idempotency_key=None):
 	"""Make HTTP request to external API endpoint."""
 	url = f'{API_URL.rstrip("/")}/{endpoint.lstrip("/")}'
@@ -86,7 +57,10 @@ def _make_request(method, endpoint, data=None, idempotency_key=None):
 	json_data = json.dumps(data, cls=DataclassEncoder) if data else None
 	if json_data:
 		debug('API data', sub='hooks.api', verbose=True, obj=json_data, obj_after=True)
-	response = _get_session().request(
+	# Use the shared retry session (secator.requests): urllib3-backed retries with
+	# exponential backoff (backoff_factor=1 -> 1s, 2s, 4s) on connection drops and
+	# transient statuses (408/429/5xx), honouring Retry-After on 429s.
+	response = requests.request(
 		method=method, url=url, data=json_data, headers=headers, verify=FORCE_SSL, timeout=API_TIMEOUT,
 	)
 	if not response.ok:
