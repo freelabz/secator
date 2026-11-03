@@ -495,6 +495,7 @@ class TestResearchMode(unittest.TestCase):
 		from secator.ai.prompts import get_system_prompt
 		p = get_system_prompt("research", workspace_path="/tmp/ws")
 		self.assertIn("RESEARCH mode", p)
+		self.assertIn("<mode>", p)                  # bespoke <mode> block in <constraints> (consistent across modes)
 		self.assertNotIn("$library_reference", p)   # task/workflow library substituted
 		self.assertIn("<subagents>", p)             # adversarial fan-out guidance present
 		self.assertIn("run_subagent", p)            # orchestrator is told how to fan out
