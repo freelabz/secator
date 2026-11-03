@@ -239,6 +239,47 @@ class TestFindingMgmtTools(unittest.TestCase):
 		out = list(dispatch_action({'action': 'mark_vuln_false_positive', '_uuid': 'nope'}, self._ctx(e)))
 		self.assertTrue(any(isinstance(o, Error) for o in out))
 
+	# --- mark_vuln_fixed ---
+	def test_fixed_sets_status_visible_and_attaches_finding(self):
+		e = self._engine({'_uuid': 'u5', '_type': 'vulnerability', 'name': 'RCE'})
+		out = list(dispatch_action(
+			{'action': 'mark_vuln_fixed', '_uuid': 'u5', 'reason': 'patched to 1.2.4'}, self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertEqual(set_arg['status'], 'FIXED')
+		self.assertFalse(set_arg['verified'])
+		# FIXED stays VISIBLE — it must NOT hide the finding.
+		self.assertNotIn('is_false_positive', set_arg)
+		self.assertEqual(set_arg['extra_data.fixed_reason'], 'patched to 1.2.4')
+		ai = [o for o in out if isinstance(o, Ai) and o.ai_type == 'mark_vuln_fixed']
+		self.assertTrue(ai and ai[0].extra_data.get('finding'))
+		self.assertIn('RCE', ai[0].content)
+
+	def test_fixed_records_no_exploit_attempt(self):
+		# FIXED is a remediation status, not an exploitation verdict — no ExploitAttempt is yielded.
+		e = self._engine({'_uuid': 'u5', '_type': 'vulnerability', 'name': 'RCE'})
+		out = list(dispatch_action({'action': 'mark_vuln_fixed', '_uuid': 'u5'}, self._ctx(e)))
+		self.assertFalse([o for o in out if isinstance(o, ExploitAttempt)])
+
+	def test_fixed_missing_uuid_errors(self):
+		e = self._engine(None)
+		out = list(dispatch_action({'action': 'mark_vuln_fixed'}, self._ctx(e)))
+		self.assertTrue(any(isinstance(o, Error) for o in out))
+		e.update.assert_not_called()
+
+	def test_fixed_non_vuln_errors(self):
+		e = self._engine({'_uuid': 'u5', '_type': 'url', 'url': 'http://h'})
+		out = list(dispatch_action({'action': 'mark_vuln_fixed', '_uuid': 'u5'}, self._ctx(e)))
+		self.assertTrue(any(isinstance(o, Error) for o in out))
+		e.update.assert_not_called()
+
+	def test_fixed_guardrails_auto_allow_and_modes(self):
+		engine = PermissionEngine(config={'allow': [], 'deny': [], 'ask': []}, in_scope=['only.example.com'])
+		self.assertEqual(engine.check_action({'action': 'mark_vuln_fixed', '_uuid': 'u1'}).decision, 'allow')
+		for mode in ('scan', 'exploit', 'research', 'monitor'):
+			names = [s['function']['name'] for s in build_tool_schemas(mode)]
+			self.assertIn('mark_vuln_fixed', names, mode)
+		self.assertNotIn('mark_vuln_fixed', [s['function']['name'] for s in build_tool_schemas('chat')])
+
 	# --- mark_vuln_exploit_failed ---
 	def test_exploit_failed_sets_status_without_hiding(self):
 		vuln = {'_uuid': 'u3', '_type': 'vulnerability', 'name': 'RCE', 'id': '', 'matched_at': ''}
@@ -328,6 +369,121 @@ class TestFindingMgmtTools(unittest.TestCase):
 			'screenshot_path': '/etc/passwd', '_source': 'e', '_tagged': True,
 			'verified': True, 'status': 'EXPLOITED', 'confidence_nb': 1, 'workspace_id': 'w'})
 		self.assertEqual(out, {'name': 'x', 'id': 'CVE-2021-41773', 'severity': 'high'})
+
+	# --- update_finding: monitor audit-recording model (notes + verdicts on NON-vuln types) ---
+	def test_update_records_notes_without_changing_verdict(self):
+		# UNCHANGED outcome: a still-present finding is only annotated — a cumulative notes
+		# entry — with NO verdict mutation and no new finding.
+		e = self._engine({'_uuid': 's1', '_type': 'subdomain', 'host': 'a.example.com',
+		                  'extra_data': {'notes': 'prior note'}})
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 's1',
+			 'extra_data': {'notes': 'prior note\nRe-validated by AI on 2026-10-05'}}, self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertEqual(set_arg['extra_data.notes'], 'prior note\nRe-validated by AI on 2026-10-05')
+		self.assertNotIn('is_false_positive', set_arg)   # verdict untouched
+		self.assertNotIn('confidence', set_arg)
+		self.assertTrue(any(isinstance(o, Ai) and o.ai_type == 'update_finding' for o in out))
+
+	def test_update_hides_non_vuln_finding_with_notes(self):
+		# GONE outcome: a subdomain that no longer resolves is retired via the generic hide-flag
+		# and the rationale is recorded in the cumulative notes audit trail (reason kept too).
+		e = self._engine({'_uuid': 's1', '_type': 'subdomain', 'host': 'gone.example.com'})
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 's1',
+			 'fields': {'is_false_positive': True},
+			 'extra_data': {'notes': 'Marked FP by AI on 2026-10-05: subdomain no longer resolves',
+			                'false_positive_reason': 'attack-surface-monitor: not reproduced 2026-10-05'}},
+			self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertTrue(set_arg['is_false_positive'])
+		self.assertEqual(set_arg['extra_data.notes'],
+		                 'Marked FP by AI on 2026-10-05: subdomain no longer resolves')
+		self.assertEqual(set_arg['extra_data.false_positive_reason'],
+		                 'attack-surface-monitor: not reproduced 2026-10-05')
+		self.assertTrue(any(isinstance(o, Ai) and o.ai_type == 'update_finding' for o in out))
+
+	def test_update_finding_boolean_string_false_does_not_hide(self):
+		# `bool("false")` is True — the handler must PARSE the string, so is_false_positive:"false"
+		# does NOT hide a real finding (it sets the flag to False).
+		e = self._engine({'_uuid': 's1', '_type': 'subdomain', 'host': 'a.example.com'})
+		list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 's1', 'fields': {'is_false_positive': 'false'}},
+			self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertEqual(set_arg.get('is_false_positive'), False)
+
+	def test_update_finding_rejects_non_boolean_is_false_positive(self):
+		e = self._engine({'_uuid': 's1', '_type': 'subdomain', 'host': 'a.example.com'})
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 's1', 'fields': {'is_false_positive': 'maybe'}},
+			self._ctx(e)))
+		self.assertTrue(any(isinstance(o, Error) for o in out))
+		e.update.assert_not_called()
+
+	def test_update_finding_hide_does_not_clobber_data_status(self):
+		# A `domain`'s `status` is a WHOIS-observation LIST (data), not an FP verdict — hiding it
+		# must set only is_false_positive, never write status="FALSE_POSITIVE" over the data.
+		e = self._engine({'_uuid': 'd1', '_type': 'domain', 'domain': 'x.example.com',
+		                  'status': ['registered', 'clientTransferProhibited']})
+		list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'd1', 'fields': {'is_false_positive': True}},
+			self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertTrue(set_arg.get('is_false_positive'))
+		self.assertNotIn('status', set_arg)
+
+	def test_update_finding_lookup_bypasses_display_filter(self):
+		# Un-hiding (is_false_positive back to False) requires LOCATING an already-hidden record,
+		# so the lookup must use the scope-only query (bypasses the is_false_positive display
+		# filter). Assert update_finding looks the finding up with scope_only=True.
+		e = self._engine({'_uuid': 's1', '_type': 'subdomain', 'host': 'a.example.com',
+		                  'is_false_positive': True})
+		list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 's1', 'fields': {'is_false_positive': False}},
+			self._ctx(e)))
+		self.assertTrue(any(c.kwargs.get('scope_only') for c in e.search.call_args_list),
+		                "update_finding lookup must use scope_only to locate hidden records")
+
+	def test_update_vuln_still_drops_is_false_positive(self):
+		# A vulnerability keeps using the dedicated mark_vuln_false_positive tool, so the generic
+		# path must still strip is_false_positive for vulns (policy unchanged).
+		e = self._engine({'_uuid': 'u1', '_type': 'vulnerability', 'severity': 'low'})
+		list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'u1',
+			 'fields': {'severity': 'high', 'is_false_positive': True}}, self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertEqual(set_arg['severity'], 'high')
+		self.assertNotIn('is_false_positive', set_arg)
+
+	def test_update_errors_hiding_type_without_flag(self):
+		# Hiding a type that has no is_false_positive field must refuse, not write a phantom
+		# field. Pick such a type dynamically: once the finding-verdict-fields schema change
+		# lands, EVERY editable finding type carries the flag and this guard is defensive-only,
+		# so skip rather than asserting on a type that no longer lacks it.
+		from secator.output_types import FINDING_TYPES
+		fieldless = next((c for c in FINDING_TYPES
+		                  if 'is_false_positive' not in getattr(c, '__dataclass_fields__', {})
+		                  and c.get_name() != 'ai'), None)
+		if fieldless is None:
+			self.skipTest('every finding type now carries is_false_positive')
+		e = self._engine({'_uuid': 'c1', '_type': fieldless.get_name(), 'name': 'x', 'host': 'x'})
+		out = list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'c1', 'fields': {'is_false_positive': True}}, self._ctx(e)))
+		self.assertTrue(any(isinstance(o, Error) for o in out))
+		e.update.assert_not_called()
+
+	def test_update_confidence_downgrade_with_notes_recomputes_nb(self):
+		# DEGRADED outcome: downgrade confidence IN PLACE + record a note. Where the type carries
+		# confidence_nb the derived sort key is recomputed so the downgrade actually re-prioritizes.
+		e = self._engine({'_uuid': 'u1', '_type': 'vulnerability', 'confidence': 'high'})
+		list(dispatch_action(
+			{'action': 'update_finding', '_uuid': 'u1', 'fields': {'confidence': 'low'},
+			 'extra_data': {'notes': 'Downgraded by AI on 2026-10-05: port now closed'}}, self._ctx(e)))
+		set_arg = e.update.call_args[0][1]['$set']
+		self.assertEqual(set_arg['confidence'], 'low')
+		self.assertEqual(set_arg['confidence_nb'], 3)
+		self.assertEqual(set_arg['extra_data.notes'], 'Downgraded by AI on 2026-10-05: port now closed')
 
 	def test_update_missing_uuid_errors(self):
 		out = list(dispatch_action({'action': 'update_finding', 'fields': {'x': 1}}, self._ctx(self._engine(None))))

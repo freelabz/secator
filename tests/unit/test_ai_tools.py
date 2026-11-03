@@ -19,7 +19,7 @@ class TestToolSchemas(unittest.TestCase):
 		expected = {"run_task", "run_workflow", "run_shell", "query_workspace",
 		            "fetch_url", "update_plan", "web_search", "list_runners",
 		            "run_subagent", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
-		            "mark_vuln_exploit_failed", "update_finding", "add_note", "change_mode"}
+		            "mark_vuln_fixed", "mark_vuln_exploit_failed", "update_finding", "add_note", "change_mode"}
 		self.assertEqual(set(TOOL_SCHEMAS.keys()), expected)
 
 	def test_tool_schemas_openai_format(self):
@@ -164,6 +164,21 @@ class TestBuildToolSchemas(unittest.TestCase):
 		for t in ("add_finding", "mark_vuln_exploited", "mark_vuln_false_positive",
 		          "mark_vuln_exploit_failed", "update_finding", "change_mode"):
 			self.assertNotIn(t, names, t)
+
+	def test_monitor_mode_tool_surface(self):
+		"""Monitor reads, re-probes with shell, records outcomes with add_note, retires a gone
+		finding (mark_vuln_false_positive) or closes a remediated exploited vuln (mark_vuln_fixed),
+		and fixes metadata (update_finding) — but never runs tasks/workflows, adds findings, marks
+		exploited, delegates or self-escalates."""
+		from secator.ai.tools import build_tool_schemas
+		from secator.ai.interactivity import CLIBackend
+		names = {s["function"]["name"] for s in build_tool_schemas("monitor", backend=CLIBackend())}
+		for present in ["query_workspace", "run_shell", "mark_vuln_false_positive",
+		                "mark_vuln_fixed", "update_finding", "add_note", "stop"]:
+			self.assertIn(present, names)
+		for absent in ["run_task", "run_workflow", "add_finding", "mark_vuln_exploited",
+		               "mark_vuln_exploit_failed", "run_subagent", "change_mode"]:
+			self.assertNotIn(absent, names)
 
 	def test_research_mode_full_active_surface_minus_change_mode(self):
 		"""research is a directly-selected terminal action mode: it gets the full active
