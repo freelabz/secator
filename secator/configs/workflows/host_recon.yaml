@@ -20,6 +20,7 @@ options:
     is_flag: True
     default: False
     help: Run nuclei scans (slow)
+    warning: "This option is noisy and intrusive, and launches a lot of requests to the targets."
 
   scanners:
     type: list

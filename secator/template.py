@@ -329,6 +329,9 @@ def serialize_config_options(options):
 		applies_to = list(opt_config.get("applies_to", {}))
 		if applies_to:
 			options[opt_name]["applies_to"] = applies_to
+		# Any option can declare a `warning` (in a YAML option block or a task opt);
+		# always surface it (default None) so consumers can caution the user.
+		options[opt_name]["warning"] = opt_config.get("warning")
 		is_flag = opt_config.get("is_flag", False)
 		if type and getattr(type, "__name__", None):
 			options[opt_name]["type"] = type.__name__

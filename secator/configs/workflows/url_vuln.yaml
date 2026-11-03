@@ -24,6 +24,7 @@ options:
     is_flag: True
     default: False
     help: Run nuclei on tagged URLs (slow)
+    warning: "This option is noisy and intrusive, and launches a lot of requests to the targets."
 
 tasks:
   _group/pattern_analysis:
