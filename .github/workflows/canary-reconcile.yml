@@ -16,9 +16,9 @@ name: canary-reconcile
 # Full rationale + diagram: gke-admin docs/branch-pr-canary-workflow.md.
 #
 # IMAGE REBUILDS: default GITHUB_TOKEN pushes do NOT trigger publish-canary (GitHub's
-# loop-guard). Set a PAT secret CANARY_SYNC_TOKEN (contents:write) so the canary image
-# rebuilds after each reconcile. Without it the branch still advances; the image rebuilds
-# on the next manual canary push.
+# loop-guard). We reuse the existing RELEASE_TOKEN PAT (the one release-please already uses
+# to trigger downstream workflows) so the canary image rebuilds after each reconcile. If it
+# is ever unset, the branch still advances; the image just rebuilds on the next manual push.
 
 on:
   check_suite:
@@ -52,7 +52,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.CANARY_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Compute eligible PRs (open, non-draft, base main, head feat/|fix/, ALL checks green)
         uses: actions/github-script@v7
