@@ -299,7 +299,7 @@ proxied:
 | `--proxy` value | Effect |
 |-----------------|--------|
 | `auto` | Use `http.socks5_proxy` if the tool supports SOCKS5 and it is set, otherwise `http.http_proxy` if supported and set. If neither is set, the proxy is ignored (a warning is printed). If the task is marked as a proxychains task, `auto` wraps it with proxychains. |
-| `proxychains` | Wrap the command with the `http.proxychains_command` binary (default `proxychains`). |
+| `proxychains` | On tasks marked as proxychains tasks (e.g. `nmap`), wrap the command with the `http.proxychains_command` binary (default `proxychains`). On other tasks the proxy is ignored and a warning is printed. |
 | `random` | Pick a random free public proxy (HTTP only) via FreeProxy, using `http.freeproxy_timeout`. |
 | `socks5://host:port` | Use this explicit SOCKS5 proxy. |
 | `http://host:port` | Use this explicit HTTP proxy. |
