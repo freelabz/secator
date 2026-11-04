@@ -62,11 +62,10 @@ jobs:
             const pr = context.payload.pull_request;
             const { owner, repo } = context.repo;
             const sameRepo = pr.head.repo && pr.head.repo.full_name === `${owner}/${repo}`;
-            const trustedAuthor = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(pr.author_association);
             const has = (pr.labels || []).some(l => l.name === 'allow-canary');
             // A maintainer's allow-canary vouches for the code AT LABEL TIME. If an external
-            // PR is then updated, drop the label so the new commits can't ride the old approval.
-            if (!(sameRepo && trustedAuthor) && has) {
+            // (fork) PR is then updated, drop the label so new commits can't ride the old approval.
+            if (!sameRepo && has) {
               await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name: 'allow-canary' }).catch(() => {});
               await github.rest.issues.createComment({ owner, repo, issue_number: pr.number,
                 body: '🔒 `allow-canary` auto-removed: this external PR was updated, so the prior approval no longer covers the new commits. A maintainer must re-review and re-add the label to let it into canary.' });
@@ -86,17 +85,18 @@ jobs:
               if (pr.draft) continue;
               if (!/^(feat|fix)\//.test(pr.head.ref)) continue;
               // SECURITY (critical for the PUBLIC core repo): never auto-integrate code from
-              // outside the trusted team — otherwise an external PR, once non-draft + green,
-              // would be squashed onto canary and BUILT/RUN (code exfiltration / malware).
-              // Exclude fork PRs (incl. deleted-fork, head.repo === null) and any author who
-              // is not a repo collaborator.
+              // outside the team — an external PR, once non-draft + green, would be squashed
+              // onto canary and BUILT/RUN (code exfiltration / malware).
+              // Trust signal = the PR is on an IN-REPO branch: creating a branch in the repo
+              // requires write access, so the author is a collaborator. External contributors
+              // can only PR from a FORK (head.repo !== this repo, or null) → excluded unless a
+              // maintainer vouches with the `allow-canary` label.
+              // We deliberately do NOT check author_association: under the Actions GITHUB_TOKEN
+              // it reports CONTRIBUTOR for org MEMBERS whose membership is private (i.e. every
+              // public-repo team PR), which would wrongly exclude the entire team.
               const sameRepo = pr.head.repo && pr.head.repo.full_name === `${owner}/${repo}`;
-              const trustedAuthor = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(pr.author_association);
               const adminAllowed = (pr.labels || []).some(l => l.name === 'allow-canary');
-              // Trusted = team member pushing an in-repo branch. An EXTERNAL/fork PR is only
-              // integrated if a maintainer explicitly adds the `allow-canary` label vouching
-              // for its code (it will be built/run on canary). See anti-TOCTOU strip below.
-              if (!((sameRepo && trustedAuthor) || adminAllowed)) { untrusted.push(pr.number); continue; }
+              if (!(sameRepo || adminAllowed)) { untrusted.push(pr.number); continue; }
               const sha = pr.head.sha;
               const runs = await github.paginate(github.rest.checks.listForRef, {
                 owner, repo, ref: sha, per_page: 100,
