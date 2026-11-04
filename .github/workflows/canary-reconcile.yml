@@ -76,7 +76,11 @@ jobs:
               const anyFail = runs.some(r =>
                 ['failure','cancelled','timed_out','action_required','stale'].includes(r.conclusion));
               const comb = await github.rest.repos.getCombinedStatusForRef({ owner, repo, ref: sha });
-              const st = comb.data.state; // success | pending | failure
+              // getCombinedStatusForRef returns state="pending" when there are ZERO legacy
+              // statuses — and these repos use check-runs, not statuses. So only honor the
+              // combined status when statuses actually exist; otherwise rely on check-runs.
+              const hasStatuses = comb.data.total_count > 0;
+              const st = hasStatuses ? comb.data.state : 'success'; // success | pending | failure
               if (anyFail || st === 'failure' || st === 'error') { failed.push(pr.number); continue; }
               if (anyPending || st === 'pending')               { pending.push(pr.number); continue; }
               eligible.push({ number: pr.number, headRef: pr.head.ref, headSha: sha, title: pr.title });
