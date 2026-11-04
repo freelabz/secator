@@ -1,0 +1,16 @@
+type: workflow
+name: telnet
+alias: telnet
+description: Telnet vulnerability scan
+long_description: |
+  Scans Telnet vulnerabilities using specialized tools.
+tags: [telnet, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  nuclei/telnet:
+    description: Detect Telnet vulnerabilities
+    template_condition: "contains(id, 'telnet') || contains(tags, 'telnet')"

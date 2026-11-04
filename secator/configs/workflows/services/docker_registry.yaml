@@ -1,0 +1,13 @@
+type: workflow
+name: docker_registry
+alias: docker_registry
+description: Docker registry vulnerability scan
+long_description: |
+  Scans Docker registry vulnerabilities using specialized tools.
+tags: [http, vuln]
+input_types:
+  - url
+
+tasks:
+  dockerregistrygrabber:
+    description: Detect Docker registry vulnerabilities

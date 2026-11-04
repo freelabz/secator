@@ -527,6 +527,31 @@ class TestContributeMode(unittest.TestCase):
 		self.assertIn("CANNOT spawn subagents", p)
 
 
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestResearchMode(unittest.TestCase):
+	"""The research mode prompt: library-enabled, adversarial-subagent block present and
+	(like scan/exploit) stripped when rendered for a subagent."""
+
+	def test_research_prompt_builds_fully(self):
+		from secator.ai.prompts import get_system_prompt
+		p = get_system_prompt("research", workspace_path="/tmp/ws")
+		self.assertIn("RESEARCH mode", p)
+		self.assertNotIn("$library_reference", p)   # task/workflow library substituted
+		self.assertIn("<subagents>", p)             # adversarial fan-out guidance present
+		self.assertIn("run_subagent", p)            # orchestrator is told how to fan out
+		self.assertIn("add_finding", p)             # records the validated Exploit
+
+	def test_research_subagent_strips_all_delegation(self):
+		"""A research SUBAGENT has no run_subagent tool and its own sandbox, so the rendered
+		prompt must carry NO fan-out/delegation guidance at all — the <subagents> block AND
+		every mention of run_subagent (delegation only lives inside that stripped block)."""
+		from secator.ai.prompts import get_system_prompt
+		p = get_system_prompt("research", workspace_path="/tmp/ws", is_subagent=True)
+		self.assertNotIn("<subagents>", p)          # fan-out block stripped
+		self.assertNotIn("run_subagent", p)         # no delegation instruction leaks into steps
+		self.assertIn("CANNOT spawn subagents", p)  # subagent persona's no-nesting rule wired in
+
+
 if __name__ == '__main__':
 	unittest.main()
 
@@ -537,18 +562,38 @@ class TestOperatingRulesRecap(unittest.TestCase):
 
 	The library reference is inlined at the TOP of scan/exploit (long data
 	first), which pushes the persona to the middle of a ~15-60k prompt. A terse
-	recap at the very END keeps the rules the model most often breaks (use
+	recap near the END keeps the rules the model most often breaks (use
 	stop with choices, description=intent, persist, restate-before-retry) in
 	the high-attention tail. Regression guard for that structural fix.
+
+	With no user AI context files present, the recap is the LAST block. When
+	user context files exist, the ``<user_context>`` overlay is the legitimate
+	tail (recency slot) and the recap sits immediately before it — the recap
+	must still be the last of the baked-in blocks.
 	"""
 
 	def test_recap_present_and_last_in_every_mode(self):
-		for mode in ("chat", "scan", "exploit"):
-			p = get_system_prompt(mode, workspace_path="<ws>", backend=None)
-			self.assertIn("<operating_rules>", p, f"{mode} missing recap")
-			self.assertTrue(
-				p.rstrip().endswith("</operating_rules>"),
-				f"{mode} recap is not the LAST block (recency slot)")
+		# No user context files => the operating-rules recap is the final block.
+		with patch("secator.ai.context.load_context_blocks", return_value=[]):
+			for mode in ("chat", "scan", "exploit"):
+				p = get_system_prompt(mode, workspace_path="<ws>", backend=None)
+				self.assertIn("<operating_rules>", p, f"{mode} missing recap")
+				self.assertTrue(
+					p.rstrip().endswith("</operating_rules>"),
+					f"{mode} recap is not the LAST block (recency slot)")
+
+	def test_user_context_is_the_tail_after_the_recap(self):
+		# With a user context file, its typed block is the tail and the recap
+		# precedes it — the recap stays last among the baked-in blocks.
+		block = "<context:notes.md>\nengagement notes\n</context>"
+		with patch("secator.ai.context.load_context_blocks", return_value=[block]):
+			p = get_system_prompt("scan", workspace_path="<ws>", backend=None)
+		self.assertTrue(
+			p.rstrip().endswith("</context>"),
+			"user context block is not the LAST block (recency slot)")
+		self.assertLess(
+			p.index("</operating_rules>"), p.index("<context:notes.md>"),
+			"operating-rules recap must sit immediately before the user context tail")
 
 	def test_recap_covers_the_known_failure_modes(self):
 		p = get_system_prompt("scan", workspace_path="<ws>", backend=None)
@@ -556,6 +601,24 @@ class TestOperatingRulesRecap(unittest.TestCase):
 		self.assertIn("stop", recap)               # prose-choices failure (stop carries choices)
 		self.assertIn("description", recap)         # description-echo failure
 		self.assertIn("Persist", recap)             # early-yield failure
+
+	def test_user_context_body_is_verbatim_not_token_substituted(self):
+		# $workspace_path in a user note must survive verbatim (substitution happens
+		# on the baked-in prompt before the user block is appended).
+		block = "<context:n.md>\npath is $workspace_path\n</context>"
+		with patch("secator.ai.context.load_context_blocks", return_value=[block]):
+			p = get_system_prompt("scan", workspace_path="/tmp/ws", backend=None)
+		self.assertIn("path is $workspace_path", p)
+
+	def test_subagent_inherits_user_context(self):
+		# A subagent runs on the same path and must NOT have the user context
+		# overlay stripped (it inherits the engagement notes).
+		block = "<context:notes.md>\nengagement notes\n</context>"
+		with patch("secator.ai.context.load_context_blocks", return_value=[block]):
+			p = get_system_prompt("scan", workspace_path="<ws>", backend=None, is_subagent=True)
+		self.assertIn("<context:notes.md>", p, "subagent must inherit the user context overlay")
+		self.assertIn("engagement notes", p)
+		self.assertTrue(p.rstrip().endswith("</context>"))
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

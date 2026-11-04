@@ -2519,7 +2519,10 @@ def health(json_, debug, strict, bleeding):
 				if not info['installed']:
 					messages.append(f'{tool.__name__} is not installed.')
 					info['next_version'] = tool.install_version
-					error = True
+					# An install_optional tool isn't available on every platform (e.g.
+					# dublin-traceroute is apt-only), so a missing one must not fail --strict.
+					if not getattr(tool, 'install_optional', False):
+						error = True
 				elif info['outdated']:
 					msg = 'latest' if bleeding else 'supported'
 					message = f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
@@ -3196,9 +3199,13 @@ def install_tools(cmds, cleanup, fail_fast):
 		# with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
 		status = ToolInstaller.install(cls)
 		if not status.is_ok():
-			return_code = 1
-			if fail_fast:
-				sys.exit(return_code)
+			if getattr(cls, 'install_optional', False):
+				console.print(Warning(
+					message=f'{cls.__name__} failed to install but is marked optional (install_optional=True); continuing.'))  # noqa: E501
+			else:
+				return_code = 1
+				if fail_fast:
+					sys.exit(return_code)
 		console.print()
 	if cleanup:
 		distro = get_distro_config()

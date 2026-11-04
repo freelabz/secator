@@ -37,17 +37,20 @@ _DESCRIPTION_SCHEMA = {
 
 # Mode-membership sets, so each tool declares exposure declaratively. These mirror
 # the per-mode ``allowed_actions`` in prompts.MODES (enforced by the consistency test).
-# Finding-writing/exploit tools — scan + exploit only (NOT contribute, which authors code,
-# not findings).
-_SCAN_EXPLOIT = frozenset({"scan", "exploit"})
+# Finding-writing / exploit tools (add_finding, mark_vuln_*, update_finding) — the modes
+# that RECORD findings: scan, exploit, research. NOT contribute, which authors code, not
+# findings.
+_ACTIVE_MODES = frozenset({"scan", "exploit", "research"})
 # Tools that RUN a runner (task/workflow/shell). `contribute` needs these to exercise the
-# code it authors, so it is added here but NOT to the finding-writing set above.
-_RUNNER_MODES = frozenset({"scan", "exploit", "contribute"})
-_ALL_MODES = frozenset({"scan", "chat", "exploit", "contribute"})
+# code it authors, so it is added here on top of the finding-writing modes.
+_RUNNER_MODES = frozenset({"scan", "exploit", "research", "contribute"})
+_ALL_MODES = frozenset({"scan", "chat", "exploit", "contribute", "research"})
 # Read-only helper tools (web/plan/run-history lookups) — exposed in every mode.
-_READONLY_HELPER = frozenset({"scan", "chat", "exploit", "contribute"})
-# `change_mode` — every mode EXCEPT contribute, which is a deliberate, directly-selected
-# terminal mode (it authors secator code; there is nothing to escalate to).
+_READONLY_HELPER = _ALL_MODES
+# `change_mode` — every mode EXCEPT contribute and research, both deliberate,
+# directly-selected terminal modes: contribute authors secator code and research already
+# has the most capable surface, so neither escalates nor de-escalates. The other modes keep
+# the escalation ladder.
 _CAN_CHANGE_MODE = frozenset({"scan", "chat", "exploit"})
 
 
@@ -287,7 +290,7 @@ class QueryWorkspaceTool(BaseTool):
 class AddFindingTool(BaseTool):
 	name = "add_finding"
 	action = "add_finding"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	auto_allow = True
 	handler = "_handle_add_finding"
 	schema = {
@@ -327,7 +330,7 @@ class AddFindingTool(BaseTool):
 class MarkVulnExploitedTool(BaseTool):
 	name = "mark_vuln_exploited"
 	action = "mark_vuln_exploited"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	auto_allow = True
 	handler = "_handle_mark_vuln_exploited"
 	schema = {
@@ -417,7 +420,7 @@ class MarkVulnExploitedTool(BaseTool):
 class MarkVulnFalsePositiveTool(BaseTool):
 	name = "mark_vuln_false_positive"
 	action = "mark_vuln_false_positive"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	auto_allow = True
 	handler = "_handle_mark_vuln_false_positive"
 	schema = {
@@ -456,7 +459,7 @@ class MarkVulnFalsePositiveTool(BaseTool):
 class MarkVulnExploitFailedTool(BaseTool):
 	name = "mark_vuln_exploit_failed"
 	action = "mark_vuln_exploit_failed"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	auto_allow = True
 	handler = "_handle_mark_vuln_exploit_failed"
 	schema = {
@@ -533,7 +536,7 @@ class MarkVulnExploitFailedTool(BaseTool):
 class UpdateFindingTool(BaseTool):
 	name = "update_finding"
 	action = "update_finding"
-	modes = _SCAN_EXPLOIT
+	modes = _ACTIVE_MODES
 	auto_allow = True
 	handler = "_handle_update_finding"
 	schema = {
@@ -744,7 +747,7 @@ class ListRunnersTool(BaseTool):
 class ChangeModeTool(BaseTool):
 	name = "change_mode"
 	action = "change_mode"
-	modes = _CAN_CHANGE_MODE
+	modes = _CAN_CHANGE_MODE  # every mode EXCEPT contribute + research (terminal, directly-selected)
 	auto_allow = True
 	handler = "_handle_change_mode"
 	schema = {

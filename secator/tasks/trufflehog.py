@@ -45,6 +45,7 @@ class trufflehog(Command):
             'internal': True
         },
         'status': {'type': str, 'help': 'Results status (verified, unknown, unverified, filtered_unverified)'},
+        'no_verification': {'is_flag': True, 'default': False, 'help': 'Do not verify detected secrets (skip provider network calls)'},  # noqa: E501
         'concurrency': {'type': int, 'help': 'Number of concurrent workers'},
         'config': {'type': str, 'short': 'config', 'help': 'Config file path'},
         'git_branch': {'type': str, 'help': 'Branch to scan (git mode only)'},
@@ -69,6 +70,7 @@ class trufflehog(Command):
         'postman_collection_id': '--collection-id',
         'postman_token': '--token',
         'postman_workspace_id': '--workspace-id',
+        'no_verification': '--no-verification',
         'git_branch': '--branch',
         'git_depth': '--depth',
         'git_since_commit': '--since-commit',
