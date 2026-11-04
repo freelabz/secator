@@ -91,28 +91,59 @@ jobs:
                     + `pending=${pending.join(',') || '-'} failed=${failed.join(',') || '-'}`);
 
       - name: Assemble canary = main + squash(each eligible PR)
+        shell: bash
         run: |
+          set +e  # orchestration: errors handled via explicit checks, not errexit
           git config user.name  "canary-reconcile[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -B canary origin/main
           echo '[]' > skipped.json
+          mkdir -p .cf
           COUNT=$(jq length eligible.json)
+          # Pre-fetch each eligible PR tip and record the files it changes (vs its merge-base
+          # with main) — so a conflict can be ATTRIBUTED to the specific sibling PR on canary.
+          for i in $(seq 0 $((COUNT - 1))); do
+            NUM=$(jq -r ".[$i].number" eligible.json)
+            SHA=$(jq -r ".[$i].headSha" eligible.json)
+            git fetch -q origin "refs/pull/${NUM}/head" || git fetch -q origin "$SHA"
+            MB=$(git merge-base origin/main "$SHA" 2>/dev/null || echo origin/main)
+            git diff --name-only "$MB" "$SHA" > ".cf/${NUM}.files" 2>/dev/null || : > ".cf/${NUM}.files"
+          done
+          INTEGRATED=""
           for i in $(seq 0 $((COUNT - 1))); do
             NUM=$(jq -r ".[$i].number" eligible.json)
             SHA=$(jq -r ".[$i].headSha" eligible.json)
             TITLE=$(jq -r ".[$i].title" eligible.json)
-            git fetch -q origin "refs/pull/${NUM}/head" || git fetch -q origin "$SHA" || true
-            if git merge --squash "$SHA" >/dev/null 2>&1; then
-              if git diff --cached --quiet; then
-                echo "PR #$NUM: no net change vs main, skipping commit"
-              else
-                git commit -q -m "${TITLE} (#${NUM})"
-                echo "PR #$NUM: integrated"
-              fi
-            else
-              git merge --abort || true
+            git merge --squash "$SHA" >/dev/null 2>&1
+            if git ls-files -u | grep -q .; then
+              # CONFLICT — capture WHICH files, WHICH lines, and WHICH sibling PR, before cleanup.
               echo "PR #$NUM: CONFLICT -> skipped"
-              jq ". += [${NUM}]" skipped.json > skipped.tmp && mv skipped.tmp skipped.json
+              FILES_JSON='[]'
+              while IFS= read -r F; do
+                [ -z "$F" ] && continue
+                RANGES=$( { paste -d- \
+                    <(grep -nE '^<<<<<<<' "$F" 2>/dev/null | cut -d: -f1) \
+                    <(grep -nE '^>>>>>>>' "$F" 2>/dev/null | cut -d: -f1); } \
+                    | sed 's/^/L/' | head -10 | jq -R . | jq -s . )
+                WITH='[]'
+                for P in $INTEGRATED; do
+                  grep -qxF "$F" ".cf/${P}.files" 2>/dev/null && WITH=$(echo "$WITH" | jq ". + [${P}]")
+                done
+                FILES_JSON=$(echo "$FILES_JSON" | jq --arg f "$F" --argjson r "${RANGES:-[]}" --argjson w "$WITH" '. + [{path:$f, ranges:$r, withPRs:$w}]')
+              done < <(git diff --name-only --diff-filter=U)
+              WITHPRS=$(echo "$FILES_JSON" | jq '[.[].withPRs[]] | unique')
+              OBJ=$(jq -n --argjson n "$NUM" --argjson f "$FILES_JSON" --argjson w "$WITHPRS" '{number:$n, files:$f, withPRs:$w}')
+              jq ". + [$OBJ]" skipped.json > skipped.tmp && mv skipped.tmp skipped.json
+              # `git merge --squash` records NO MERGE_HEAD, so `git merge --abort` fails and
+              # leaves a DIRTY tree — which makes the NEXT PR spuriously conflict (real bug).
+              # Hard-reset instead; untracked helpers (eligible.json/.cf) survive a hard reset.
+              git reset -q --hard HEAD
+            elif git diff --cached --quiet; then
+              echo "PR #$NUM: no net change vs canary, skipping commit"
+            else
+              git commit -q -m "${TITLE} (#${NUM})"
+              INTEGRATED="$INTEGRATED $NUM"
+              echo "PR #$NUM: integrated"
             fi
           done
           # Push only if the resulting TREE differs from current canary (commit SHAs differ by
@@ -123,13 +154,13 @@ jobs:
           if [ "$NEW" = "$OLD" ]; then
             echo "canary tree unchanged — no push."
           else
-            git push --force origin canary
+            git push --force origin canary || { echo "::error::push to canary failed"; exit 1; }
             echo "canary updated."
           fi
           git merge-base --is-ancestor origin/main canary \
             || { echo "::error::INVARIANT BROKEN — canary is behind main"; exit 1; }
 
-      - name: Report conflicted PRs (abort + notify)
+      - name: Report conflicted PRs (detailed; update-or-create one comment)
         if: always()
         uses: actions/github-script@v7
         with:
@@ -139,21 +170,38 @@ jobs:
             try { skipped = JSON.parse(fs.readFileSync('skipped.json', 'utf8')); } catch (e) {}
             const { owner, repo } = context.repo;
             const marker = '<!-- canary-reconcile-bot -->';
-            for (const num of skipped) {
-              const comments = await github.paginate(github.rest.issues.listComments, {
-                owner, repo, issue_number: num, per_page: 100,
+            const refs = ns => (ns && ns.length) ? ns.map(n => '#' + n).join(', ') : null;
+            for (const s of skipped) {
+              const top = refs(s.withPRs) || 'changes already on canary';
+              const fileLines = (s.files || []).map(f => {
+                const r = (f.ranges && f.ranges.length) ? ` (${f.ranges.join(', ')})` : '';
+                const w = refs(f.withPRs);
+                return `- \`${f.path}\`${r}${w ? ` — overlaps ${w}` : ''}`;
               });
-              if (comments.some(c => c.body.includes(marker))) continue; // one notice per PR
               const body = [
                 marker,
-                '⚠️ **This PR could not be auto-integrated into `canary`** — its tip conflicts',
-                'with another feature already on canary (canary = `main` + all active feature PRs).',
-                'It was skipped; the other PRs still integrated. **Nothing is wrong with your PR.**',
+                `⚠️ **Not auto-integrated into \`canary\` right now** — this PR's tip conflicts with **${top}** when stacked on canary.`,
                 '',
-                'canary will pick it up automatically once the conflict is gone — after the other',
-                'feature merges, or once you rebase this branch on `main`.',
+                '> canary = `main` + every active feature PR. GitHub only tests you against `main`,',
+                '> so this will **not** show as a conflict on the PR and you can still merge to main —',
+                '> it only collides with a *sibling feature* when both sit on canary together.',
+                '',
+                '**Conflicting files:**',
+                ...(fileLines.length ? fileLines : ['- _(structural conflict — no text hunks)_']),
+                '',
+                `canary picks this PR up automatically once the overlap clears — after ${top} merges,`,
+                'or once you rebase this branch (on `main`, and on the sibling if the overlap is real).',
+                'No action needed if you only care about merging to main.',
                 '',
                 'See `gke-admin/docs/branch-pr-canary-workflow.md` (canary lifecycle).',
               ].join('\n');
-              await github.rest.issues.createComment({ owner, repo, issue_number: num, body });
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: s.number, per_page: 100,
+              });
+              const existing = comments.find(c => c.body.includes(marker));
+              if (existing) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number: s.number, body });
+              }
             }
