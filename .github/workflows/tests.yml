@@ -41,7 +41,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.11"]
+        # Test the ends of the supported range: 3.10 (min — 3.8/3.9 dropped as
+        # EOL, and the unit suite's mock.patch usage requires 3.10+) and "3.x"
+        # (the latest stable Python, tracked automatically so new releases are
+        # covered for free). Coverage is uploaded from the latest leg.
+        python-version: ["3.10", "3.x"]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -51,15 +55,15 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    # Coverage is collected only on 3.11 (the leg whose .coverage.unit is uploaded). 3.8 is a
-    # pure compat check, so skip coverage there — it's faster and the data would be discarded.
+    # Coverage is collected only on the latest leg (the one whose .coverage.unit
+    # is uploaded). The min-version leg is a compat check, so skip coverage there.
     - name: Run unit tests
       run: |
-        secator test unit ${{ matrix.python-version == '3.8' && '--no-coverage' || '' }}
+        secator test unit ${{ matrix.python-version == '3.x' && '' || '--no-coverage' }}
 
     - name: Archive code coverage results
       uses: actions/upload-artifact@v4
-      if: ${{ matrix.python-version == '3.11' }}
+      if: ${{ matrix.python-version == '3.x' }}
       with:
         name: coverage-unit
         include-hidden-files: true
@@ -70,7 +74,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11"]
+        # Latest stable Python only.
+        python-version: ["3.x"]
         os: [ubuntu-latest]
     steps:
     - name: Checkout repository
@@ -150,7 +155,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11"]
+        # Latest stable Python only.
+        python-version: ["3.x"]
         os: [ubuntu-latest]
     steps:
     - name: Checkout repository
