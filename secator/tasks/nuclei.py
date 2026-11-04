@@ -177,10 +177,17 @@ class nuclei(VulnMulti):
 		if not source:
 			return
 		from secator.template_source import (
-			TemplateSourceError, materialize_template_source, ref_from_dict,
+			TemplateSourceError, TemplateSourceRef, materialize_template_source, ref_from_dict,
 		)
 		try:
-			ref = source if hasattr(source, 'name') else ref_from_dict(source)
+			# Always construct a validated TemplateSourceRef: a pre-built ref is
+			# re-validated (cheap, idempotent) and a dict goes through ref_from_dict,
+			# so an arbitrary object can't smuggle an unsafe name/subdir past the
+			# TemplateSourceRef constructor's checks.
+			if isinstance(source, TemplateSourceRef):
+				ref = TemplateSourceRef(name=source.name, url=source.url, sha=source.sha, subdir=source.subdir)
+			else:
+				ref = ref_from_dict(source)
 			result = materialize_template_source(ref)
 		except TemplateSourceError as e:
 			raise Exception(f'Could not materialize template source: {e}')
