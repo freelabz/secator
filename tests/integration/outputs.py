@@ -197,10 +197,10 @@ OUTPUTS_TASKS = {
 		Tag(name='waf', category='info', value='Envoy', match='https://netflix.com', _source='wafw00f'),
 	],
 	'whoisdomain': [
-		Domain(domain='wikipedia.org', _source='whoisdomain'),
+		Domain(domain='python.org', _source='whoisdomain'),
 	],
 	'whois': [
-		Domain(domain='wikipedia.org', _source='whois'),
+		Domain(domain='python.org', _source='whois'),
 	],
 	'searchsploit': [
 		Exploit(name='cgi-bin Remote Code Execution', provider='EDB', id='29290', matched_at='apache 2.4.5', confidence='low'),
