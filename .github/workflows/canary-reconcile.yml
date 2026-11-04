@@ -247,3 +247,24 @@ jobs:
                   body: marker + '\n✅ **Now integrated into `canary`** — the earlier conflict cleared; this PR is live on canary.' });
               }
             }
+
+            // 3) Dropped: a PR that WAS integrated (has a ✅ notice) but is no longer on canary
+            //    — went draft, its checks are no longer green, or it became ineligible. Conflicts
+            //    are handled above (they land in `skipped`), so exclude those.
+            const integratedSet = new Set(integrated);
+            const skippedSet = new Set(skipped.map(x => x.number));
+            const openPrs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', base: 'main', per_page: 100,
+            });
+            for (const pr of openPrs) {
+              if (!/^(feat|fix)\//.test(pr.head.ref)) continue;
+              if (integratedSet.has(pr.number) || skippedSet.has(pr.number)) continue;
+              const cs = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: pr.number, per_page: 100,
+              });
+              const ex = cs.find(c => c.body.includes(marker));
+              if (ex && ex.body.includes('✅')) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: ex.id,
+                  body: marker + '\nℹ️ **No longer on `canary`.** This PR was integrated before but has dropped out — it went draft, its checks are no longer green, or it became ineligible. Make it ready + green to re-integrate.' });
+              }
+            }
