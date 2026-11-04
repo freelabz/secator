@@ -94,7 +94,9 @@ class TestBackendSelection(unittest.TestCase):
 		# A ``GS://`` URL routes to the GCS backend (scheme lowercased); the backend
 		# must still parse the bucket from after ``://`` rather than a literal
 		# ``gs://`` split (which would yield an empty bucket).
+		import sys
 		import tempfile
+		import types
 		from secator import template_source as ts
 		ref = TemplateSourceRef(name='x', url='GS://my-bucket/prefix', sha='a' * 40)
 		captured = {}
@@ -104,10 +106,22 @@ class TestBackendSelection(unittest.TestCase):
 			captured['blob_name'] = blob_name
 			raise RuntimeError('stop after capturing args')
 
-		with tempfile.TemporaryDirectory() as tmp:
-			with mock.patch('secator.hooks.gcs.download_blob', fake_download_blob):
+		# gcs_backend does `from secator.hooks.gcs import download_blob` internally;
+		# the gcs hook module isn't importable without the optional GCS addon, so
+		# inject a stub module (restored afterwards) to exercise the url-parsing path.
+		fake_mod = types.ModuleType('secator.hooks.gcs')
+		fake_mod.download_blob = fake_download_blob
+		prev = sys.modules.get('secator.hooks.gcs')
+		sys.modules['secator.hooks.gcs'] = fake_mod
+		try:
+			with tempfile.TemporaryDirectory() as tmp:
 				with self.assertRaises(TemplateSourceError):
 					ts.gcs_backend(ref, Path(tmp) / 'x')
+		finally:
+			if prev is not None:
+				sys.modules['secator.hooks.gcs'] = prev
+			else:
+				sys.modules.pop('secator.hooks.gcs', None)
 		self.assertEqual(captured['bucket'], 'my-bucket')
 		self.assertEqual(captured['blob_name'], f'prefix/x-{"a" * 40}.tar.gz')
 
