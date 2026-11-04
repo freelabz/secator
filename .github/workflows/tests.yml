@@ -41,11 +41,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.8 was dropped (EOL 2024-10; no longer provided by ubuntu-latest /
-        # Ubuntu 26.04 runners). 3.11 is the actively-tested version. A lower
-        # min-version leg (3.9/3.10) is deferred — the unit suite's mock.patch
-        # usage currently assumes 3.10+ and needs a separate compat pass first.
-        python-version: ["3.11"]
+        # Min supported Python is 3.10 (3.8/3.9 dropped: both EOL, and the unit
+        # suite's mock.patch usage assumes 3.10+). "3.x" tracks the latest stable
+        # Python so we catch newest-version breakage early. 3.11 is the leg whose
+        # coverage is uploaded.
+        python-version: ["3.10", "3.11", "3.x"]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -55,9 +55,11 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    # Coverage is collected only on 3.11 (the leg whose .coverage.unit is uploaded).
+    # The other legs are compat checks, so skip coverage there.
     - name: Run unit tests
       run: |
-        secator test unit
+        secator test unit ${{ matrix.python-version == '3.11' && '' || '--no-coverage' }}
 
     - name: Archive code coverage results
       uses: actions/upload-artifact@v4
