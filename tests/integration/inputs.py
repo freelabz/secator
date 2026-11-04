@@ -31,8 +31,8 @@ INPUTS_TASKS = {
 	'urlfinder': 'xss-game.appspot.com',
 	'wpscan': 'http://localhost:8000/',
 	'wafw00f': 'https://netflix.com',
-	'whois': 'wikipedia.org',
-	'whoisdomain': 'wikipedia.org',
+	'whois': 'python.org',
+	'whoisdomain': 'python.org',
 	'x8': 'https://xss-game.appspot.com/level1/frame',
 	'xurlfind3r': 'https://xss-game.appspot.com',
 	# PR #1512 service/recon tasks — each targets a dedicated lab service (see docker-compose.yml).

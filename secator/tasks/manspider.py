@@ -57,7 +57,11 @@ class manspider(Command):
 	opt_key_map = {
 		'max_depth': 'maxdepth',
 	}
-	install_cmd = "pipx install --force git+https://github.com/freelabz/MANSPIDER@feature/anon-share-enum-and-json-output"
+	# Pin the branch where kreuzberg is an optional extra (freelabz/MANSPIDER PR #1).
+	# The default branch pulls kreuzberg -> ort/ONNX (no musl wheels), which breaks the
+	# pure-Python install on Alpine/musl; with it optional, manspider installs with no
+	# native build deps on every distro.
+	install_cmd = "pipx install --force git+https://github.com/freelabz/MANSPIDER@feature/anon-share-enum-json-optional-kreuzberg"  # noqa: E501
 
 	@staticmethod
 	def on_cmd(self):

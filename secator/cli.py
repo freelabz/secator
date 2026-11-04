@@ -2560,7 +2560,10 @@ def health(json_, debug, strict, bleeding):
 				if not info['installed']:
 					messages.append(f'{tool.__name__} is not installed.')
 					info['next_version'] = tool.install_version
-					error = True
+					# An install_optional tool isn't available on every platform (e.g.
+					# dublin-traceroute is apt-only), so a missing one must not fail --strict.
+					if not getattr(tool, 'install_optional', False):
+						error = True
 				elif info['outdated']:
 					msg = 'latest' if bleeding else 'supported'
 					message = f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
