@@ -42,10 +42,11 @@ jobs:
       fail-fast: false
       matrix:
         # Min supported Python is 3.10 (3.8/3.9 dropped: both EOL, and the unit
-        # suite's mock.patch usage assumes 3.10+). "3.x" tracks the latest stable
-        # Python so we catch newest-version breakage early. 3.11 is the leg whose
-        # coverage is uploaded.
-        python-version: ["3.10", "3.11", "3.x"]
+        # suite's mock.patch usage assumes 3.10+). 3.13 is the current latest
+        # stable (Debian 13 "Trixie" default). 3.11 is the leg whose coverage is
+        # uploaded. Pinned rather than "3.x" so a brand-new release can't
+        # silently break CI.
+        python-version: ["3.10", "3.11", "3.13"]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
