@@ -124,6 +124,41 @@ class TestComputeDuplicateUpdates(unittest.TestCase):
 		self.assertEqual(updates['u1'].get('host'), 'example.com')
 
 
+class TestSqliteOffset(SqliteTestBase):
+	def _seed(self, n):
+		from secator.hooks import sqlite as mod
+		from secator.output_types import Url
+
+		class FakeRunner:
+			def __init__(self):
+				self.config = type('C', (), {'name': 'httpx'})()
+				self.context = {'workspace_id': 'ws1'}
+
+		runner = FakeRunner()
+		for i in range(n):
+			mod.update_finding(runner, Url(url=f'http://x/{i}', _context={'workspace_id': 'ws1'}))
+
+	def test_offset_pages_via_native_offset(self):
+		from secator.query.sqlite import SqliteBackend
+		self._seed(10)
+		b = SqliteBackend(workspace_id='ws1')
+		page1 = b.search({'_type': 'url'}, limit=3, offset=0)
+		page2 = b.search({'_type': 'url'}, limit=3, offset=3)
+		self.assertEqual(len(page1), 3)
+		self.assertEqual(len(page2), 3)
+		# disjoint pages
+		u1 = {r['url'] for r in page1}
+		u2 = {r['url'] for r in page2}
+		self.assertEqual(u1 & u2, set())
+
+	def test_offset_unlimited(self):
+		from secator.query.sqlite import SqliteBackend
+		self._seed(5)
+		b = SqliteBackend(workspace_id='ws1')
+		# limit=0 (unlimited) + offset still skips.
+		self.assertEqual(len(b.search({'_type': 'url'}, limit=0, offset=2)), 3)
+
+
 class TestSqliteHooks(SqliteTestBase):
 	def _make_finding(self, url):
 		from secator.output_types import Url

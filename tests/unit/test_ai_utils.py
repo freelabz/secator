@@ -516,7 +516,7 @@ class TestRepairOrphanToolUses(unittest.TestCase):
             "role": "assistant",
             "content": None,
             "tool_calls": [
-                {"id": tc_id, "type": "function", "function": {"name": "follow_up", "arguments": "{}"}}
+                {"id": tc_id, "type": "function", "function": {"name": "stop", "arguments": "{}"}}
                 for tc_id in ids
             ],
         }
@@ -525,7 +525,7 @@ class TestRepairOrphanToolUses(unittest.TestCase):
         from secator.ai.utils import _repair_orphan_tool_uses
         messages = [
             self._assistant_with_tool_calls("toolu_1"),
-            {"role": "tool", "tool_call_id": "toolu_1", "name": "follow_up", "content": "ok"},
+            {"role": "tool", "tool_call_id": "toolu_1", "name": "stop", "content": "ok"},
             {"role": "user", "content": "next"},
         ]
         before = [dict(m) for m in messages]
@@ -549,7 +549,7 @@ class TestRepairOrphanToolUses(unittest.TestCase):
         from secator.ai.utils import _repair_orphan_tool_uses
         messages = [
             self._assistant_with_tool_calls("toolu_a", "toolu_b"),
-            {"role": "tool", "tool_call_id": "toolu_a", "name": "follow_up", "content": "ok"},
+            {"role": "tool", "tool_call_id": "toolu_a", "name": "stop", "content": "ok"},
             {"role": "user", "content": "next"},
         ]
         inserted = _repair_orphan_tool_uses(messages)
@@ -885,3 +885,37 @@ class TestCoerceMatchedAt(unittest.TestCase):
 		from secator.output_types.vulnerability import Vulnerability
 		out = self._coerce(matched_at=['http://a', 'http://b'])
 		self.assertEqual(Vulnerability.validate_fields(out), [])
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestOrphanToolBlockRepair(unittest.TestCase):
+    """A tool-result stranded after a user (parent assistant(tool_calls) trimmed away) must be
+    dropped so providers don't reject 'Unexpected role tool after role user' (#1465)."""
+
+    def _roles(self, m):
+        return [x["role"] for x in m]
+
+    def test_tool_after_user_is_dropped(self):
+        from secator.ai.utils import _repair_orphan_tool_uses
+        m = [
+            {"role": "system", "content": "S"},
+            {"role": "user", "content": "hi"},
+            {"role": "tool", "tool_call_id": "x", "name": "q", "content": "{}"},  # orphan
+            {"role": "user", "content": "next"},
+        ]
+        _repair_orphan_tool_uses(m)
+        self.assertFalse(any(m[i]["role"] == "tool" and m[i - 1]["role"] == "user"
+                             for i in range(1, len(m))))
+        self.assertEqual(self._roles(m), ["system", "user", "user"])
+
+    def test_valid_tool_pairing_preserved(self):
+        from secator.ai.utils import _repair_orphan_tool_uses
+        m = [
+            {"role": "system", "content": "S"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "tool_calls": [
+                {"id": "x", "type": "function", "function": {"name": "q", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "x", "name": "q", "content": "{}"},
+        ]
+        _repair_orphan_tool_uses(m)
+        self.assertEqual(self._roles(m), ["system", "user", "assistant", "tool"])

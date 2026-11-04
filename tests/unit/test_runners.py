@@ -923,3 +923,47 @@ class TestIsOwnSource(unittest.TestCase):
 			cmd.unique_name = 'nmap'
 			cmd.add_result(chunk_error, print=False)
 			self.assertEqual(cmd.self_errors, [chunk_error])
+
+
+class TestMissingTemplateCleanError(unittest.TestCase):
+	"""A runner built from a missing template (empty TemplateLoader) must fail fast with a
+	clear error, not an opaque `'TemplateLoader' object is not callable` ~80 lines later (#1421)."""
+
+	def test_missing_workflow_template_raises_clean_value_error(self):
+		from secator.runners import Workflow
+		from secator.template import TemplateLoader
+		tpl = TemplateLoader(name='workflows/does_not_exist')
+		with self.assertRaises(ValueError) as ctx:
+			Workflow(tpl, ['example.com'], run_opts={'sync': True}, context={})
+		self.assertIn('empty or not found', str(ctx.exception))
+
+	def test_run_opts_name_override_cannot_mask_missing_template(self):
+		"""A `name` override in run_opts must NOT bypass the missing-template error: the
+		check validates the loaded config itself (in _process_config), not self.name."""
+		from secator.runners import Workflow
+		from secator.template import TemplateLoader
+		tpl = TemplateLoader(name='workflows/does_not_exist')
+		with self.assertRaises(ValueError) as ctx:
+			Workflow(tpl, ['example.com'], run_opts={'sync': True, 'name': 'looks_valid'}, context={})
+		self.assertIn('empty or not found', str(ctx.exception))
+
+
+class TestDelayValidatorsDefault(unittest.TestCase):
+	"""Runner.delay must forward `validators` as a dict — register_validators does
+	validators.get(key), so the old []-default crashed the async/worker path with
+	`'list' object has no attribute 'get'` whenever run_opts carried no validators."""
+
+	def test_delay_defaults_validators_to_empty_dict(self):
+		from unittest.mock import patch, MagicMock
+		from secator.runners import Task
+		from secator import celery as celery_mod
+		captured = {}
+
+		def _apply_async(kwargs=None, queue=None):
+			captured.update(kwargs or {})
+			return MagicMock()
+
+		with patch.object(celery_mod.start_runner, 'apply_async', side_effect=_apply_async):
+			Task.delay('dummy-config', ['example.com'])
+		self.assertIsInstance(captured.get('validators'), dict)
+		self.assertEqual(captured['validators'], {})

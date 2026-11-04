@@ -85,25 +85,33 @@ class QueryBackend(ABC):
 		return merged
 
 	def search(self, query: dict, limit: int = 0, exclude_fields: List[str] = None,
-	           scope_only: bool = False) -> List[Dict[str, Any]]:
+	           scope_only: bool = False, offset: int = 0) -> List[Dict[str, Any]]:
 		"""Execute query with enforced base query.
 
 		``scope_only`` drops the display filters (is_false_positive/_tagged), keeping only
 		the workspace scope — for a targeted read that must reach a finding regardless of
 		its display state (mirrors ``update``'s scope_only merge).
+
+		``offset`` skips the first N matching results (pagination); combine with ``limit``
+		to page through large result sets. offset=0 preserves the legacy behaviour.
 		"""
 		if exclude_fields is None:
 			exclude_fields = []
 		safe_query = self._merge_query(query, scope_only=scope_only)
 		debug('context', sub=f'query.{self.name}', obj=self.context)
 		debug('search', sub=f'query.{self.name}', obj=safe_query)
-		results = self._execute_search(safe_query, limit, exclude_fields)
+		results = self._execute_search(safe_query, limit, exclude_fields, offset=offset)
 		debug(f'{len(results)} results', sub=f'query.{self.name}')
 		return results
 
 	@abstractmethod
-	def _execute_search(self, query: dict, limit: int, exclude_fields: List[str] = None) -> List[Dict[str, Any]]:
-		"""Backend-specific search implementation."""
+	def _execute_search(self, query: dict, limit: int, exclude_fields: List[str] = None,
+	                    offset: int = 0) -> List[Dict[str, Any]]:
+		"""Backend-specific search implementation.
+
+		``offset`` skips the first N matching results; backends with no native skip apply a
+		Python slice fallback. offset=0 is the legacy no-skip behaviour.
+		"""
 		pass
 
 	def iterate(self, query: dict, batch_size: int = 1000):

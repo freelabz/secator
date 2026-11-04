@@ -109,7 +109,7 @@ def _driven(task, weird_responses):
 	The abort signal is `Error.from_exception`, which `_run_loop` calls at exactly
 	one site (ai.py) — its `except Exception -> Error.from_exception(e); return`
 	catch-all. `safe_dispatch_action` (per-action resilience) uses plain `Error(...)`,
-	not `from_exception`, and `stop`/`follow_up` end the loop without raising — so a
+	not `from_exception`, and `stop` ends the loop without raising — so a
 	captured `from_exception` means an UNHANDLED exception aborted the session: a
 	resilience failure, distinct from a clean end."""
 	seq = list(weird_responses)
@@ -160,7 +160,7 @@ WEIRD_TOOL_CALLS = [
 	("stringified_opts",      _tc("run_task", '{"name":"nmap","targets":["10.0.0.1"],"opts":"{\\"session_name\\":\\"x\\"}"}')),
 	("stringified_query",     _tc("query_workspace", '{"query":"{\\"_type\\":\\"url\\"}"}')),
 	("stringified_targets",   _tc("run_task", '{"name":"nmap","targets":"10.0.0.1"}')),
-	("stringified_choices",   _tc("follow_up", '{"reason":"pick","choices":"[\\"a\\",\\"b\\"]"}')),
+	("stringified_choices",   _tc("stop", '{"reason":"pick","choices":"[\\"a\\",\\"b\\"]"}')),
 	# --- valid JSON, wrong shape ---
 	("query_as_list",         _tc("query_workspace", {"query": ["_type", "url"]})),
 	("opts_as_int",           _tc("run_task", {"name": "nmap", "targets": ["x"], "opts": 5})),
@@ -296,7 +296,7 @@ class TestWeirdContentResponses(unittest.TestCase):
 # 3. Fuzzer: random malformed arguments across every tool
 # ---------------------------------------------------------------------------
 
-_TOOL_NAMES = ["run_task", "run_workflow", "run_shell", "query_workspace", "follow_up", "add_finding", "stop"]
+_TOOL_NAMES = ["run_task", "run_workflow", "run_shell", "query_workspace", "add_finding", "stop"]
 
 
 def _random_weird_arguments(rng):

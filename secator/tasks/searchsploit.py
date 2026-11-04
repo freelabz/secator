@@ -2,7 +2,7 @@ import re
 
 from secator.config import CONFIG
 from secator.decorators import task
-from secator.definitions import (CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
+from secator.definitions import (CONFIDENCE, CVES, EXTRA_DATA, ID, MATCHED_AT, NAME,
 								 PROVIDER, REFERENCE, TAGS, OPT_NOT_SUPPORTED, STRING, SLUG)
 from secator.output_types import Exploit, Info
 from secator.runners import Command
@@ -34,6 +34,9 @@ class searchsploit(Command):
 			NAME: 'Title',
 			ID: 'EDB-ID',
 			PROVIDER: lambda x: 'EDB',
+			# Exploit-DB name match (a known exploit may exist) — not verified against the
+			# target, so low; an exploitation task raises it when actually confirmed.
+			CONFIDENCE: lambda x: 'low',
 			CVES: lambda x: [c for c in x['Codes'].split(';') if c.startswith('CVE-')],
 			REFERENCE: lambda x: f'https://exploit-db.com/exploits/{x["EDB-ID"]}',
 			TAGS: lambda x: searchsploit.tags_extractor(x),

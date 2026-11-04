@@ -43,6 +43,29 @@ def _is_always_allowed_host(value: str) -> bool:
 	return bool(host) and any(fnmatch.fnmatch(host, pat) for pat in ALWAYS_ALLOWED_HOSTS)
 
 
+_TRAILING_ALWAYS = '；;,\'">'
+_TRAILING_CLOSERS = {')': '(', ']': '[', '}': '{'}
+
+
+def _strip_trailing_delims(value: str) -> str:
+	"""Strip trailing shell/sentence delimiters an extracted URL/target may carry — e.g. a
+	config line ``proxy_pass http://127.0.0.1:8080;`` yields ``http://127.0.0.1:8080;``.
+
+	A trailing ``)``/``]``/``}`` is stripped ONLY when unbalanced, so a legitimately
+	bracketed URL (``.../Python_(programming_language)``) is preserved.
+	"""
+	out = value
+	while out:
+		c = out[-1]
+		if c in _TRAILING_ALWAYS:
+			out = out[:-1]
+		elif c in _TRAILING_CLOSERS and out.count(c) > out.count(_TRAILING_CLOSERS[c]):
+			out = out[:-1]
+		else:
+			break
+	return out
+
+
 # Shell operators that chain commands
 SHELL_OPERATORS = re.compile(r'\s*(?:&&|\|\||[;|])\s*')
 
@@ -307,6 +330,51 @@ def _resolves(hostname: str) -> bool:
 		return False
 
 
+# File/source/doc/data extensions that look like a host (``name.ext``) and even "resolve"
+# — many extensions double as real TLDs with parked/wildcard DNS (``.md`` Moldova, ``.sh``
+# Saint Helena, ``.zip``/``.mov`` gTLDs), so a token like ``README.md`` passes the classifier
+# AND ``gethostbyname`` returns a parking IP. DNS can't tell these apart; filter by extension.
+_NON_TARGET_EXTS = (
+	# source
+	'.py', '.sh', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.vue', '.go', '.rs', '.rb',
+	'.php', '.java', '.kt', '.c', '.cc', '.cpp', '.h', '.hpp', '.cs', '.swift', '.lua', '.pl',
+	'.r', '.scala', '.clj', '.ex', '.exs', '.dart',
+	# markup / docs / config / data
+	'.txt', '.md', '.rst', '.json', '.jsonl', '.yaml', '.yml', '.xml', '.csv', '.tsv', '.log',
+	'.conf', '.cfg', '.ini', '.toml', '.env', '.lock', '.sql', '.html', '.htm', '.css', '.scss',
+	'.less', '.properties', '.gradle', '.bat', '.ps1', '.ipynb',
+	# archives / media / binaries
+	'.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.rar', '.jar', '.war', '.pdf', '.png',
+	'.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.mp4', '.mov', '.woff', '.woff2', '.ttf',
+	'.map', '.min', '.bak', '.tmp', '.swp', '.pyc', '.class', '.so', '.dll', '.bin', '.dat',
+)
+
+# Code member-access tokens (``Date.now``, ``Math.random``, ``JSON.parse``, ``Buffer.from``):
+# a Capitalized identifier dotted into a lower-case method. These classify as "host" and can
+# resolve (``.now`` is a real TLD), so DNS can't reject them — a security target is never a
+# ``PascalCase.method`` token, so drop them structurally.
+_CODE_MEMBER_RE = re.compile(r'^[A-Z][A-Za-z0-9]*\.[a-z][A-Za-z0-9_]*$')
+
+# Commands that actually reach out over the network. For these, a ``name.ext`` /
+# ``Name.method`` argument must STILL go through the target-scope check — skipping it by
+# extension/pattern would let ``curl example.zip`` or ``nmap Example.com`` run un-scoped.
+# The file/code skips below are therefore applied ONLY for non-network commands, where such
+# an argument is a file/code token (``cat README.md``, ``grep Date.now app.js``), not a host.
+_NETWORK_CMDS = frozenset({
+	'curl', 'wget', 'nc', 'ncat', 'netcat', 'socat', 'telnet', 'ftp', 'tftp', 'ssh', 'scp',
+	'sftp', 'rsync', 'ping', 'ping6', 'traceroute', 'traceroute', 'mtr', 'dig', 'host',
+	'nslookup', 'whois', 'nmap', 'masscan', 'rustscan', 'zmap', 'httpx', 'httprobe', 'nuclei',
+	'nikto', 'sqlmap', 'gobuster', 'feroxbuster', 'ffuf', 'dirb', 'dirsearch', 'wfuzz', 'hydra',
+	'medusa', 'wpscan', 'amass', 'subfinder', 'openssl', 'redis-cli', 'mysql', 'psql', 'mongosh',
+	'smbclient', 'crackmapexec', 'nxc', 'impacket-smbclient', 'evil-winrm', 'kubectl', 'aws',
+})
+
+
+def _cmd_basename(cmd: str) -> str:
+	"""Last path segment of a command token, lowercased (``/usr/bin/curl`` -> ``curl``)."""
+	return cmd.rsplit('/', 1)[-1].lower()
+
+
 def extract_command_targets(command: str) -> List[str]:
 	"""Extract target-like values (IPs, hosts, URLs) from a shell command string.
 
@@ -336,21 +404,36 @@ def extract_command_targets(command: str) -> List[str]:
 			seen.add(value)
 			targets.append(value)
 
-	def _check_arg(arg: str):
-		"""Check a single argument for targets (URLs, IPs, hosts)."""
+	def _check_arg(arg: str, is_network_cmd: bool = False):
+		"""Check a single argument for targets (URLs, IPs, hosts).
+
+		``is_network_cmd`` is True when the owning sub-command actually connects out
+		(curl/nmap/...). For those, file/code-looking args are NOT skipped — they must
+		still reach the target-scope check so a host like ``example.zip`` isn't run
+		un-scoped. The extension/code skips apply only to local/file commands.
+		"""
 		# Skip flags
 		if arg.startswith('-'):
 			return
 		# Check for URLs first (before file path/extension checks — URLs can have .sh etc.)
 		url_match = URL_PATTERN.search(arg)
 		if url_match:
-			_add_target(url_match.group())
+			# Strip trailing shell/sentence punctuation the pattern may have swallowed
+			# (e.g. a config line `proxy_pass http://127.0.0.1:8080;` yields the URL with a
+			# trailing ';'). These are never part of a real target and otherwise produce a
+			# malformed authority downstream (urlparse(...).port on "8080;" raises). A balanced
+			# trailing bracket (a real URL) is kept — see _strip_trailing_delims.
+			_add_target(_strip_trailing_delims(url_match.group()))
 			return
 		# Skip file paths, command names
 		if _is_file_path(arg) or arg in cmd_names:
 			return
-		# Skip file-like extensions
-		if arg.endswith(('.py', '.sh', '.txt', '.json', '.yaml', '.yml', '.xml', '.csv', '.log', '.conf', '.cfg')):
+		# Skip file-like extensions and code member-access tokens for NON-network commands.
+		# DNS alone can't reject these — many extensions are real TLDs with parked/wildcard
+		# DNS (README.md, .sh, .zip) and member-access like Date.now resolves via the .now
+		# TLD. Restricted to non-network commands so a real host arg to curl/nmap (e.g.
+		# example.zip, Example.com) still reaches the target-scope check below.
+		if not is_network_cmd and (arg.lower().endswith(_NON_TARGET_EXTS) or _CODE_MEMBER_RE.match(arg)):
 			return
 		# Skip args that are part of detected file paths
 		if any(arg in p for p in paths):
@@ -389,8 +472,9 @@ def extract_command_targets(command: str) -> List[str]:
 			# Skip docker/podman sub-commands
 			if args[0] in ('docker', 'podman'):
 				continue
+			is_network_cmd = _cmd_basename(args[0]) in _NETWORK_CMDS
 			for arg in args[1:]:
-				_check_arg(arg)
+				_check_arg(arg, is_network_cmd)
 	except Exception:
 		# Parse failed: the per-arg walk ran nothing, so fall back to the raw-string
 		# host sweep too (the IP/URL sweep below runs unconditionally).
@@ -410,7 +494,7 @@ def extract_command_targets(command: str) -> List[str]:
 	# stays a documented residual: resolving it here is DNS-rebinding- and FP-prone.)
 	# ponytail: IP+URL only; hostname-in-code residual, add a quoted-region host sweep if it bites.
 	for match in URL_PATTERN.finditer(command):
-		_add_target(match.group())
+		_add_target(_strip_trailing_delims(match.group()))
 	for match in PII_PATTERNS["ipv4"].finditer(command):
 		ip = match.group()
 		if not any(ip in t for t in targets) and not any(ip in p for p in paths):
@@ -1089,6 +1173,9 @@ class PermissionEngine:
 			# (whole-command-approved short-circuit handled at the top of this branch,
 			# before parsing, so a parse-failure re-check clears too — see above.)
 			if unmatched:
+				# dedup while preserving order: a command repeated across subcommands (e.g. a
+				# `for`-loop body) must list its name once, not N times.
+				unmatched = list(dict.fromkeys(unmatched))
 				return PermissionResult(
 					decision="ask",
 					reason=f"No rule for command(s): {', '.join(unmatched)}",
@@ -1101,18 +1188,17 @@ class PermissionEngine:
 		elif action_type in ("task", "workflow"):
 			name = action.get("name", "")
 			return self._check_value(action_type, name)
-		elif action_type in ("subagent", "stop", "change_mode"):
-			# Control / meta actions with no network egress or exec of their OWN: `stop`
-			# and `change_mode` only steer the loop, and a `subagent`'s own actions are
-			# guardrail-checked inside its run (its targets are also scope-checked here via
-			# the target layer below). Auto-allow the action itself — without this they fall
-			# through to the "Unknown action type" deny and silently break run_subagent /
-			# the bare stop() / change_mode.
-			return PermissionResult(decision="allow", reason=f"{action_type} is always allowed")
-		elif action_type in ("query", "follow_up", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding"):  # noqa: E501
-			# mark_vuln_exploited / mark_vuln_false_positive / mark_vuln_exploit_failed / update_finding only $set-update
-			# fields on an EXISTING finding (workspace-scoped, no new/scope-widening finding),
-			# so they're safe to auto-allow alongside query/add_finding.
+		# Auto-allow is sourced from the tool registry (`tool.auto_allow`), the single
+		# source of truth — not a hand-synced tuple here (that drift is what rotted the
+		# add_vuln_poc rename). Auto-allowed actions are control/meta (`subagent`/`stop`/
+		# `change_mode` only steer the loop; a subagent's own actions + targets are
+		# guardrail-checked inside its run and by the target layer below) and finding
+		# reads/writes (`query`/`add_finding`/`mark_vuln_*`/`update_finding` only read or
+		# $set-update an EXISTING workspace finding — no scope widening). The target layer
+		# below still scope-checks any `targets` these carry.
+		from secator.ai.tools import TOOLS_BY_ACTION
+		tool = TOOLS_BY_ACTION.get(action_type)
+		if tool is not None and tool.auto_allow:
 			# Don't let an injected add_finding silently mint a scope-widening target finding.
 			# Deny (fail-closed) rather than "ask": there is no add_finding prompt layer, so an
 			# "ask" here isn't surfaceable — it would just spin the prompt loop until it denies
@@ -1149,11 +1235,29 @@ class PermissionEngine:
 		values_to_check = [value]
 		if rule_type == "target" and value.startswith(('http://', 'https://')):
 			from urllib.parse import urlparse
-			parsed = urlparse(value)
-			if parsed.hostname:
-				values_to_check.append(parsed.hostname)
-			if parsed.port:
-				values_to_check.append(f"{parsed.hostname}:{parsed.port}")
+			from secator.scope import target_host
+			# Clean trailing shell/sentence delimiters first — a URL lifted from a shell
+			# command keeps them (`proxy_pass http://127.0.0.1:8080;` -> port "8080;"), which
+			# both makes urlparse(...).port raise AND, left raw, makes host_in_scope treat the
+			# string as a non-network item it ALLOWS — leaking an out-of-scope host. So scope
+			# the parsed host(s), and keep the URL itself ONLY when it is a real network target
+			# (so a path-scoped URL entry can still match it); an unparseable URL is dropped.
+			cleaned = _strip_trailing_delims(value)
+			host = port = None
+			try:
+				parsed = urlparse(cleaned)
+				host, port = parsed.hostname, parsed.port
+			except ValueError:
+				host = port = None
+			values_to_check = [cleaned] if target_host(cleaned) else []
+			if host:
+				values_to_check.append(host)
+				if port:
+					values_to_check.append(f"{host}:{port}")
+			if not values_to_check:
+				# A URL we cannot resolve to any host must never fall through as a
+				# "non-network" value (which would be allowed) — deny it (fail-safe).
+				return PermissionResult(decision="deny", reason=f"Unparseable target: {value}")
 
 		# Top precedence for targets: code-hosting / PoC-source hosts are always allowed,
 		# ahead of every deny/scope layer below (config deny, mandate out_of_scope, and
@@ -1264,6 +1368,15 @@ class PermissionEngine:
 		for rule_str in rules:
 			rule_type, patterns = parse_rule(rule_str)
 			self.runtime_allow.append((rule_type, patterns))
+
+	def export_runtime_allow(self) -> List[str]:
+		"""Serialize the runtime allow-list back to `type(p1,p2)` rule strings.
+
+		Round-trips through add_runtime_allow so a subagent can inherit the
+		human-approved allowances granted to its parent (it runs non-interactively
+		and can never surface its own `ask` prompt).
+		"""
+		return [f"{rt}({','.join(patterns)})" for rt, patterns in self.runtime_allow]
 
 	def prompt_target(self, target: str, interactive: bool = True, command: str = "") -> str:
 		"""Show interactive prompt for an unknown target.

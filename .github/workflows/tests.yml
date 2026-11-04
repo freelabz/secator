@@ -25,7 +25,7 @@ jobs:
         python-version: ["3.11"]
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
   
     - name: Install secator
       uses: ./.github/actions/install
@@ -41,23 +41,29 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.11"]
+        # Test the ends of the supported range: 3.10 (min — 3.8/3.9 dropped as
+        # EOL, and the unit suite's mock.patch usage requires 3.10+) and "3.x"
+        # (the latest stable Python, tracked automatically so new releases are
+        # covered for free). Coverage is uploaded from the latest leg.
+        python-version: ["3.10", "3.x"]
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install secator
       uses: ./.github/actions/install
       with:
         python-version: ${{ matrix.python-version }}
 
+    # Coverage is collected only on the latest leg (the one whose .coverage.unit
+    # is uploaded). The min-version leg is a compat check, so skip coverage there.
     - name: Run unit tests
       run: |
-        secator test unit
+        secator test unit ${{ matrix.python-version == '3.x' && '' || '--no-coverage' }}
 
     - name: Archive code coverage results
       uses: actions/upload-artifact@v4
-      if: ${{ matrix.python-version == '3.11' }}
+      if: ${{ matrix.python-version == '3.x' }}
       with:
         name: coverage-unit
         include-hidden-files: true
@@ -68,11 +74,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11"]
+        # Latest stable Python only.
+        python-version: ["3.x"]
         os: [ubuntu-latest]
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install secator
       uses: ./.github/actions/install
@@ -93,12 +100,42 @@ jobs:
     - name: Run apt update
       run: sudo apt update
 
-    - name: Install dependencies
+    # Cache the FULL tool footprint so `secator install tools` (~4.5 min of downloads/builds)
+    # can be skipped on a hit. The install writes to: binaries (~/.local/bin, ~/go, ~/.cargo);
+    # built-from-source clones + the wpscan ruby gem (~/.local/share); gf patterns (~/.gf);
+    # and nuclei templates (~/nuclei-templates, with the installed-version marker in
+    # ~/.config/nuclei). Keyed on the task/installer sources so a pinned tool-version bump
+    # busts the cache. pipx tools reinstall fine without caching (their own pip cache / runner
+    # image), so pipx's home is deliberately NOT cached (it's shared with the editable secator).
+    - name: Cache installed tools
+      id: toolcache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go
+          ~/.cargo
+          ~/.local/bin
+          ~/.local/share
+          ~/.gf
+          ~/nuclei-templates
+          ~/.config/nuclei
+          ~/.cache/grype
+          ~/.cache/trivy
+        key: tools-v4-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('secator/tasks/**/*.py', 'secator/installer.py', 'pyproject.toml') }}
+
+    # Always needed (not covered by the tool cache): the worker addon (pipx venv, fast via the
+    # pip cache) and the Go/Ruby language runtimes.
+    - name: Install addons and languages
       run: |
         secator install addons worker
         secator install langs go
         secator install langs ruby
-        secator install tools --fail-fast
+
+    # Only on a cache MISS — on a hit every tool binary + its data (patterns/templates/gems/
+    # source builds) is already restored, so re-downloading is pure waste (~4.5 min saved).
+    - name: Install tools
+      if: steps.toolcache.outputs.cache-hit != 'true'
+      run: secator install tools --fail-fast
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
@@ -118,11 +155,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11"]
+        # Latest stable Python only.
+        python-version: ["3.x"]
         os: [ubuntu-latest]
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install secator
       uses: ./.github/actions/install
@@ -160,7 +198,7 @@ jobs:
         python-version: ["3.11"]
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Install secator
       uses: ./.github/actions/install
