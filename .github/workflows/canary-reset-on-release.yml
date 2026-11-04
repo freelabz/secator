@@ -1,0 +1,82 @@
+name: canary-reset-on-release
+
+# RELEASE BOUNDARY reset: when a GitHub release is published (release-please merging the
+# release PR), reset `canary` to `main`. This is the clean slate that:
+#   - collapses the merge-commit cruft canary-sync accumulates between releases, and
+#   - guarantees canary starts each cycle exactly at the freshly-released main.
+#
+# ⚠️ This FORCE-PUSHES canary. It is DESTRUCTIVE to any feature squashed onto canary whose
+# `-> main` PR has NOT merged yet — that work is only re-attached by RE-SQUASHING it onto
+# the fresh canary. The job lists the open feat/*/fix/* PRs so you know what to re-apply.
+# Because it force-pushes, this workflow is intentionally gated: it is a no-op until it is
+# on `main` AND the repo opts in by setting the CANARY_RESET_ENABLE repo variable to "true"
+# (vars.CANARY_RESET_ENABLE). Leave it unset to keep the reset manual.
+# Full rationale + diagram: gke-admin docs/branch-pr-canary-workflow.md.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: canary-sync       # shared with canary-sync.yml so they never race on canary
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    if: ${{ vars.CANARY_RESET_ENABLE == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.CANARY_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Reset canary to main (force)
+        run: |
+          git fetch origin canary || true
+          # Deliberate hard reset of the throwaway integration branch to the released main.
+          git push origin --force HEAD:canary
+
+      - name: List open feature PRs to re-squash onto the fresh canary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', base: 'main', per_page: 100,
+            });
+            const feats = prs.filter(p => /^(feat|fix)\//.test(p.head.ref));
+            if (!feats.length) {
+              core.info('No open feat/*|fix/* PRs — nothing to re-squash.');
+              return;
+            }
+            const lines = feats.map(p => `- [ ] #${p.number} \`${p.head.ref}\` — ${p.title}`);
+            const body = [
+              '<!-- canary-reset-bot -->',
+              `\`canary\` was reset to \`main\` at release **${context.payload.release?.tag_name || 'manual'}**.`,
+              '',
+              'Re-squash these still-open features onto the fresh canary to keep testing them:',
+              '',
+              ...lines,
+              '',
+              '```bash',
+              'git checkout canary && git pull',
+              'git merge --squash <branch> && git commit -m "feat(x): … (#<main-PR>)"',
+              'git push origin canary',
+              '```',
+              '',
+              'See `gke-admin/docs/branch-pr-canary-workflow.md` (canary lifecycle).',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              title: `♻️ Re-squash open features onto canary (post ${context.payload.release?.tag_name || 'reset'})`,
+              body,
+            });
