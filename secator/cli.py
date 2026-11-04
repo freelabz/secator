@@ -1607,7 +1607,11 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 		# group_findings() accepts dicts natively and only rehydrates the representative
 		# (one per group), so peak cost drops from O(N * #fields) to O(#groups * #fields).
 		raw_iter = sv.iter_raw() if hasattr(sv, 'iter_raw') else sv
-		reps = group_findings(raw_iter, list(cls._group_by), getattr(cls, '_group_aggregate', None))
+		# Pass dataclass defaults so raw-dict grouping fills absent group-by fields
+		# (e.g. a tag with no `category`) the same way rehydration would, keeping
+		# group keys/counts identical to the object path.
+		defaults = cls.field_defaults() if hasattr(cls, 'field_defaults') else None
+		reps = group_findings(raw_iter, list(cls._group_by), getattr(cls, '_group_aggregate', None), defaults=defaults)
 		return _finish(reps)
 
 	if count or uniq:

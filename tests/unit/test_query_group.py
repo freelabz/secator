@@ -95,6 +95,46 @@ class TestGroupFindingsRawDicts(unittest.TestCase):
 		self.assertEqual(reps[0]._group_count, 2)
 
 
+class TestGroupFindingsDefaults(unittest.TestCase):
+	"""Raw-dict grouping must fill absent group-by fields with the OutputType dataclass
+	default (what rehydration does) so it groups identically to the object path.
+
+	Regression: a stored tag omitting `category` must group with a tag whose
+	`category` is explicitly the `general` default, not form a separate `None` group.
+	"""
+
+	def _tag(self, name, match, category=None, ts=0):
+		d = {'_type': 'tag', 'name': name, 'value': name, 'match': match, '_timestamp': ts}
+		if category is not None:
+			d['category'] = category
+		return d
+
+	def test_missing_category_groups_with_default(self):
+		from secator.output_types import Tag
+		defaults = Tag.field_defaults()
+		self.assertEqual(defaults.get('category'), 'general')
+
+		# One tag omits category (stored dict), one sets it to the 'general' default.
+		dicts = [self._tag('T', 'a', category=None, ts=1), self._tag('T', 'b', category='general', ts=2)]
+		objects = [Tag.load(d) for d in dicts]
+
+		reps_dict = group_findings(dicts, ['category', 'name'], aggregate_field='match', defaults=defaults)
+		reps_obj = group_findings(objects, ['category', 'name'], aggregate_field='match')
+
+		# Object path collapses to a single 'general' group; raw path must match.
+		self.assertEqual(len(reps_obj), 1)
+		self.assertEqual(len(reps_dict), len(reps_obj))
+		self.assertEqual(reps_dict[0]._group_count, reps_obj[0]._group_count)
+		self.assertEqual(reps_dict[0].category, reps_obj[0].category)
+		self.assertEqual(sorted(reps_dict[0].match.split(', ')), sorted(reps_obj[0].match.split(', ')))
+
+	def test_without_defaults_missing_field_splits_groups(self):
+		# Documents the bug the defaults map fixes: no defaults -> None vs 'general' split.
+		dicts = [self._tag('T', 'a', category=None, ts=1), self._tag('T', 'b', category='general', ts=2)]
+		reps = group_findings(dicts, ['category', 'name'], aggregate_field='match')
+		self.assertEqual(len(reps), 2)
+
+
 class TestStreamViewIterRaw(unittest.TestCase):
 	"""StreamView.iter_raw() yields the raw backend dicts without rehydration."""
 
