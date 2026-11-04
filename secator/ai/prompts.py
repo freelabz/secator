@@ -61,6 +61,7 @@ QUERIES = load_prompt("constraints/queries.txt")
 SYSTEM_SCAN = Template(load_prompt("modes/scan.txt"))
 SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
 SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
+SYSTEM_RESEARCH = Template(load_prompt("modes/research.txt"))
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
 MODES = {
@@ -93,6 +94,19 @@ MODES = {
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
 		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
+	},
+	"research": {
+		"system_prompt": SYSTEM_RESEARCH,
+		"description": "research a vulnerability (CVE/0-day): find or craft a working PoC in a sandbox lab, with adversarial subagents, and record it",
+		# Full active toolset (same as exploit) MINUS change_mode: research is a deliberate,
+		# directly-selected terminal mode — it already has the most capable surface, so there
+		# is nothing to escalate to and it must not de-escalate out. It leans on `subagent`
+		# (adversarial fan-out), `shell` (stand up a sandbox lab), `web_search` (find PoCs) and
+		# `add_finding` (record the validated Exploit, linked by `cves`).
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "subagent", "stop"],
+		# Research is long-running (stand up labs, fan out subagents, iterate on PoCs), so it
+		# gets a higher iteration floor than scan/exploit.
+		"max_iterations": 12,
 	},
 }
 
@@ -414,7 +428,8 @@ def build_session_context(isolated: bool = False) -> str:
 
 
 def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None,
-                      isolated=None, is_subagent: bool = False) -> str:
+                      isolated=None, is_subagent: bool = False, workspace_name=None, workspace_id=None,
+                      context_includes=None) -> str:
 	"""Get system prompt for mode with library reference filled in.
 
 	Args:
@@ -429,6 +444,10 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 		is_subagent: When True, strip all subagent-delegation guidance (a subagent has no
 			`run_subagent` tool and must not spawn further subagents) and append the
 			subagent persona so it carries out its assigned objective itself.
+		workspace_name: current workspace name, for scoping user AI context files.
+		workspace_id: current workspace id, for scoping user AI context files.
+		context_includes: filenames of user AI context files to force-load (from a
+			profile's ``ai_context``), bypassing frontmatter mode/workspace scope.
 
 	Returns:
 		Formatted system prompt string
@@ -448,7 +467,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# $output_types_reference, so they must be substituted for all modes — derive both
 	# from FINDING_TYPES so they never drift from the registry.
 	subst = dict(query_types=build_query_types(), output_types_reference=build_output_types_reference())
-	if mode in ("scan", "exploit"):
+	if mode in ("scan", "exploit", "research"):
 		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 		subst.update(library_reference=build_library_reference(), **path_vars)
 	result = system_prompt.safe_substitute(**subst)
@@ -489,7 +508,20 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	if isolated is not None:
 		result += "\n\n" + build_session_context(isolated=bool(isolated))
 
-	return result.replace("$workspace_path", ws)
+	# Substitute $workspace_path in the baked-in prompt BEFORE appending the user
+	# context, so a user note's body is treated verbatim (never token-substituted).
+	result = result.replace("$workspace_path", ws)
+
+	# User-provided engagement context (~/.secator/templates/ai/*.md), appended last so
+	# it reads as an authoritative, run-specific overlay on top of the baked-in prompt.
+	from secator.ai.context import load_context_blocks
+	blocks = load_context_blocks(
+		mode, workspace_name=workspace_name, workspace_id=workspace_id, includes=context_includes)
+	if blocks:
+		# Each block is already wrapped in its own <type:filename> tag (context.py).
+		result += "\n\n" + "\n\n".join(blocks)
+
+	return result
 
 
 def format_tool_result(name: str, status: str, count: int, results: Any, max_items: int = AI_MAX_RESULTS) -> str:

@@ -7,6 +7,11 @@ from secator.rich import console
 
 logger = logging.getLogger(__name__)
 
+# Confidence -> numeric rank (lower = more confident) for the finding-type sort key
+# `confidence_nb`. Shared so every finding type derives it identically; mirrors the
+# order the vulnerability type used historically.
+CONFIDENCE_NB = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4, 'unknown': 5, None: 6}
+
 
 @dataclass
 class OutputType:
@@ -20,6 +25,11 @@ class OutputType:
 	@classmethod
 	def fields(cls):
 		return [f.name for f in fields(cls)]
+
+	@staticmethod
+	def confidence_to_nb(confidence) -> int:
+		"""Numeric rank for a confidence string (unknown values rank last)."""
+		return CONFIDENCE_NB.get(confidence, 6)
 
 	def merge_with(self, data: 'OutputType', exclude_fields=[]):
 		"""Enrich the OutputType object with the data from another object."""
@@ -93,6 +103,12 @@ class OutputType:
 					setattr(self, field.name, field.default)
 				elif not isinstance(default_factory, _MISSING_TYPE):
 					setattr(self, field.name, default_factory())
+		# Derive the confidence sort key uniformly for every finding type that carries
+		# `confidence` + `confidence_nb`, so a confidence value always has a matching rank
+		# (and a monitor/cleanup downgrade re-prioritizes). Non-finding types lack the
+		# fields and are skipped. A subclass may still override after super().__post_init__().
+		if hasattr(self, 'confidence') and hasattr(self, 'confidence_nb'):
+			self.confidence_nb = self.confidence_to_nb(getattr(self, 'confidence', None))
 
 	@classmethod
 	def load(cls, item, output_map={}):
