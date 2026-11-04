@@ -68,3 +68,41 @@ jobs:
           SHORT=$(git rev-parse --short=12 "$GITHUB_SHA")
           docker push freelabz/secator:canary
           docker push "freelabz/secator:canary-${SHORT}"
+
+      - name: Prune old canary-<sha> tags (keep latest 3)
+        # The immutable canary-<sha> tags exist only to let the canary worker pull a
+        # content-addressed core image past the mirror.gcr.io lag — they are NOT public
+        # artifacts. Prune them so this PUBLIC repo's tag list stays clean (just :canary,
+        # :latest, release versions). The plain :canary tag and any non-canary-<sha> tag
+        # are never matched/deleted. Best-effort: never fail the build on prune errors.
+        continue-on-error: true
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          KEEP=3
+          REPO="freelabz/secator"
+          # Auth to the Docker Hub HTTP API (separate from the registry login above).
+          JWT=$(curl -sf -H "Content-Type: application/json" \
+            -d "{\"username\":\"${DOCKERHUB_USERNAME}\",\"password\":\"${DOCKERHUB_TOKEN}\"}" \
+            https://hub.docker.com/v2/users/login/ | jq -r .token)
+          if [ -z "$JWT" ] || [ "$JWT" = "null" ]; then
+            echo "::warning::Docker Hub API login failed; skipping prune"; exit 0
+          fi
+          # List canary-* tags, newest first; keep the first $KEEP, delete the rest.
+          # The `name=canary-` filter is a substring match, so exclude the bare :canary
+          # tag defensively (regex anchors canary-<hex>).
+          mapfile -t OLD < <(
+            curl -sf -H "Authorization: JWT ${JWT}" \
+              "https://hub.docker.com/v2/repositories/${REPO}/tags/?page_size=100&name=canary-&ordering=-last_updated" \
+            | jq -r '.results[].name | select(test("^canary-[0-9a-f]+$"))' \
+            | tail -n +$((KEEP + 1))
+          )
+          if [ "${#OLD[@]}" -eq 0 ]; then echo "Nothing to prune."; exit 0; fi
+          for TAG in "${OLD[@]}"; do
+            echo "Pruning ${REPO}:${TAG}"
+            curl -sf -X DELETE -H "Authorization: JWT ${JWT}" \
+              "https://hub.docker.com/v2/repositories/${REPO}/tags/${TAG}/" \
+              || echo "::warning::failed to delete ${TAG}"
+          done
