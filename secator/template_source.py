@@ -41,11 +41,14 @@ from secator.utils import debug
 
 #: A 40-hex git commit SHA. Branch/tag refs are intentionally rejected: only an
 #: immutable, fully-qualified commit is a valid pin.
-SHA_RE = re.compile(r'^[0-9a-f]{40}$')
+#: ``\Z`` (not ``$``) anchors the end: in Python ``re``, ``$`` also matches just
+#: before a trailing newline, which would let a newline-bearing SHA through.
+SHA_RE = re.compile(r'^[0-9a-f]{40}\Z')
 
 #: A template-set *name* becomes an on-disk folder under the templates root, so
-#: it must be a safe slug (no path separators, no traversal).
-NAME_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
+#: it must be a safe slug (no path separators, no traversal). ``\Z`` anchors the
+#: end so a trailing newline can't sneak into an on-disk folder name.
+NAME_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}\Z')
 
 
 class TemplateSourceError(Exception):
@@ -262,15 +265,32 @@ def gcs_backend(ref: TemplateSourceRef, dest: Path) -> None:
 	different object. Used only when the GCS addon is configured.
 	"""
 	from secator.hooks.gcs import download_blob
-	_, _, rest = ref.url.partition('gs://')
+	# Split on the scheme separator, not a case-sensitive ``gs://`` literal: the
+	# backend is selected from a lowercased scheme, so a ``GS://bucket/prefix`` URL
+	# routes here and must still yield the right bucket (not an empty string).
+	_, _, rest = ref.url.partition('://')
 	bucket, _, prefix = rest.partition('/')
 	blob_name = f'{prefix.rstrip("/") + "/" if prefix else ""}{ref.name}-{ref.sha}.tar.gz'
 	dest.mkdir(parents=True, exist_ok=True)
 	tarball = dest.parent / f'.{ref.name}-{ref.sha}.tar.gz'
 	try:
-		download_blob(bucket, blob_name, str(tarball))
+		# Wrap download/open failures: materialize_template_source's contract (and
+		# nuclei.before_init's error conversion) is that backend failures surface as
+		# TemplateSourceError, not a raw google/tarfile exception.
+		try:
+			download_blob(bucket, blob_name, str(tarball))
+		except TemplateSourceError:
+			raise
+		except Exception as e:
+			raise TemplateSourceError(f'failed to fetch GCS object {blob_name!r} for {ref.name!r}: {e}')
 		import tarfile
-		with tarfile.open(tarball) as tf:
+		try:
+			tf_cm = tarfile.open(tarball)
+		except TemplateSourceError:
+			raise
+		except Exception as e:
+			raise TemplateSourceError(f'failed to open tarball for {ref.name!r}: {e}')
+		with tf_cm as tf:
 			base = dest.resolve()
 			total = 0
 			members = tf.getmembers()
@@ -341,12 +361,15 @@ def _pin_marker(target: Path) -> Path:
 
 
 def _pin_value(ref: TemplateSourceRef) -> str:
-	"""Cache identity of a materialized set: SHA plus the promoted subdir.
+	"""Cache identity of a materialized set: source URL, SHA, and promoted subdir.
 
 	Two refs with the same name+SHA but different ``subdir`` promote different
-	content to the set root, so the subdir must be part of the reuse key.
+	content to the set root, so the subdir must be part of the reuse key. The
+	source ``url`` is included too: a GCS (or git) ref with the same name+SHA but a
+	different bucket/prefix/remote is a different source and must not silently reuse
+	the first source's cached tree.
 	"""
-	return f'{ref.sha}|{ref.subdir or ""}'
+	return f'{ref.url}|{ref.sha}|{ref.subdir or ""}'
 
 
 def materialize_template_source(ref: TemplateSourceRef, force: bool = False) -> MaterializeResult:
@@ -414,9 +437,22 @@ def materialize_template_source(ref: TemplateSourceRef, force: bool = False) -> 
 		_reject_unsafe_tree(staging, ref.name)
 		_enforce_size_cap(staging, ref.name)
 		_pin_marker(staging).write_text(_pin_value(ref))
-		# Atomic-ish swap: remove old, move the vetted tree into place.
-		shutil.rmtree(target, ignore_errors=True)
-		staging.rename(target)
+		# Swap in the vetted tree without destroying the previous pin first: move any
+		# existing target aside, rename the new tree into place, then drop the old one.
+		# If the rename fails (or the process dies mid-swap), the previous pinned tree
+		# can be restored instead of being lost and forcing a re-fetch from a backend
+		# that may now be unavailable.
+		backup = None
+		if target.exists():
+			backup = work / 'previous'
+			shutil.rmtree(backup, ignore_errors=True)
+			target.rename(backup)
+		try:
+			staging.rename(target)
+		except OSError:
+			if backup is not None:
+				backup.rename(target)  # restore the previous pin
+			raise
 	finally:
 		shutil.rmtree(work, ignore_errors=True)
 

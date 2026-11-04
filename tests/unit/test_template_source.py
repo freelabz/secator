@@ -26,12 +26,16 @@ class TestTemplateSourceRef(unittest.TestCase):
 		self.assertEqual(ref.name, 'php2shell')
 
 	def test_rejects_non_sha_pin(self):
-		for bad in ['main', 'v1.2.3', 'a' * 39, 'g' * 40, '']:
+		# A trailing newline must be rejected too (``\Z`` anchor, not ``$``): ``$``
+		# would otherwise accept a 40-hex SHA followed by a newline.
+		for bad in ['main', 'v1.2.3', 'a' * 39, 'g' * 40, '', 'a' * 40 + '\n']:
 			with self.assertRaises(TemplateSourceError):
 				TemplateSourceRef(name='x', url='https://e/r.git', sha=bad)
 
 	def test_rejects_bad_name(self):
-		for bad in ['../evil', 'UPPER', 'has space', '/abs', '']:
+		# ``set\n`` must be rejected (``\Z`` anchor) so a newline-bearing name can't
+		# become an on-disk folder under the templates root.
+		for bad in ['../evil', 'UPPER', 'has space', '/abs', '', 'set\n']:
 			with self.assertRaises(TemplateSourceError):
 				TemplateSourceRef(name=bad, url='https://e/r.git', sha='a' * 40)
 
@@ -85,6 +89,27 @@ class TestBackendSelection(unittest.TestCase):
 		from secator.template_source import gcs_backend
 		with mock.patch('secator.template_source.CONFIG.addons.gcs.bucket_name', 'my-bucket'):
 			self.assertIs(select_backend(ref), gcs_backend)
+
+	def test_gcs_backend_parses_uppercase_scheme_bucket(self):
+		# A ``GS://`` URL routes to the GCS backend (scheme lowercased); the backend
+		# must still parse the bucket from after ``://`` rather than a literal
+		# ``gs://`` split (which would yield an empty bucket).
+		import tempfile
+		from secator import template_source as ts
+		ref = TemplateSourceRef(name='x', url='GS://my-bucket/prefix', sha='a' * 40)
+		captured = {}
+
+		def fake_download_blob(bucket, blob_name, path):
+			captured['bucket'] = bucket
+			captured['blob_name'] = blob_name
+			raise RuntimeError('stop after capturing args')
+
+		with tempfile.TemporaryDirectory() as tmp:
+			with mock.patch('secator.hooks.gcs.download_blob', fake_download_blob):
+				with self.assertRaises(TemplateSourceError):
+					ts.gcs_backend(ref, Path(tmp) / 'x')
+		self.assertEqual(captured['bucket'], 'my-bucket')
+		self.assertEqual(captured['blob_name'], f'prefix/x-{"a" * 40}.tar.gz')
 
 
 class TestMaterializeLocalFs(unittest.TestCase):
