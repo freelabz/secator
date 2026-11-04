@@ -362,8 +362,8 @@ def profile_applies(profile_opts, config_opt_names):
 	none of those knobs exist on the config, applying the profile would be a no-op, so
 	it does not apply.
 
-	Profile opt keys are normalized to underscores before comparison to match the keys
-	produced by ``serialize_config_options`` (which rewrites ``-`` to ``_``).
+	Profile opt keys are normalized (every separator ``-``/``.``/``/`` rewritten to ``_``)
+	before comparison to match the keys produced by ``serialize_config_options``.
 
 	Edge case: a profile with no opts is treated as applying everywhere (there is
 	nothing to intersect, so it is universally harmless).
@@ -378,7 +378,13 @@ def profile_applies(profile_opts, config_opt_names):
 	"""
 	if not profile_opts:
 		return True
-	keys = {str(k).replace('-', '_') for k in profile_opts}
+	# Serialized opt names collapse every separator (``-``, ``.``, ``/``) to ``_``
+	# (see get_config_options + serialize_config_options), so normalize profile keys
+	# the same way — otherwise a dotted key like ``nmap.ports`` would miss ``nmap_ports``.
+
+	def _normalize(k):
+		return str(k).replace('-', '_').replace('.', '_').replace('/', '_')
+	keys = {_normalize(k) for k in profile_opts}
 	return bool(keys & set(config_opt_names))
 
 
