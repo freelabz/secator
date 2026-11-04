@@ -91,7 +91,8 @@ def find_templates():
 @cache
 def get_configs_by_type(type):
 	if type == 'task':
-		from secator.template import get_applicable_profiles, get_config_options, serialize_config_options
+		from secator.template import (
+			get_applicable_profiles, get_config_options, get_supported_opt_names, serialize_config_options)
 		tasks = discover_tasks()
 		task_config = []
 		for cls in tasks:
@@ -111,8 +112,8 @@ def get_configs_by_type(type):
 				'install_cmd': getattr(cls, 'install_cmd', None),
 				'tags': getattr(cls, 'tags', []),
 			})  # noqa: E501
-			opt_names = set(serialize_config_options(get_config_options(tpl)).keys())
-			tpl['applicable_profiles'] = get_applicable_profiles(opt_names)
+			opts = serialize_config_options(get_config_options(tpl))
+			tpl['applicable_profiles'] = get_applicable_profiles(get_supported_opt_names(opts))
 			task_config.append(tpl)
 		return sorted(task_config, key=lambda x: x['name'])
 	return sorted([t for t in find_templates() if t.type == type], key=lambda x: x.name)
