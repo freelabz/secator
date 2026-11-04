@@ -312,7 +312,7 @@ class TestReportShowApiBackend(unittest.TestCase):
 		def capture_send(report_self):
 			captured['results'] = report_self.data['results']
 
-		def mock_request(method, url, data=None, **kwargs):
+		def mock_request(session_self, method, url, data=None, **kwargs):
 			import json as _json
 			# The api driver resolves the workspace name to its id first (GET /workspaces).
 			if method == 'GET' and 'workspace' in url:
@@ -332,7 +332,7 @@ class TestReportShowApiBackend(unittest.TestCase):
 		if query_expr:
 			args += ['-q', query_expr]
 
-		with mock.patch('requests.request', side_effect=mock_request), \
+		with mock.patch('requests.sessions.Session.request', autospec=True, side_effect=mock_request), \
 				mock.patch('secator.cli.CONFIG') as mock_cli_cfg, \
 				mock.patch('secator.report.Report.send', capture_send):
 			mock_cli_cfg.dirs.reports = Path(tempfile.mkdtemp())
@@ -378,7 +378,7 @@ class TestReportShowApiBackend(unittest.TestCase):
 		def capture_send(report_self):
 			captured['results'] = report_self.data['results']
 
-		with mock.patch('requests.request', side_effect=Exception('connection refused')), \
+		with mock.patch('requests.sessions.Session.request', side_effect=Exception('connection refused')), \
 				mock.patch('secator.cli.CONFIG') as mock_cli_cfg, \
 				mock.patch('secator.report.Report.send', capture_send):
 			mock_cli_cfg.dirs.reports = Path(tempfile.mkdtemp())

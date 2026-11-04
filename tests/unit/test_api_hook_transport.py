@@ -29,7 +29,7 @@ class TestApiRequest(unittest.TestCase):
 	def test_session_retries_writes(self):
 		# Retries/backoff come from the shared secator.requests get_session() helper,
 		# with POST added so idempotency-keyed writes are retried too.
-		retry = api.requests.get_adapter('https://x').max_retries
+		retry = api._SESSION.get_adapter('https://x').max_retries
 		self.assertEqual(retry.total, 3)
 		self.assertEqual(retry.backoff_factor, 1)
 		self.assertIn('POST', retry.allowed_methods)
@@ -37,18 +37,18 @@ class TestApiRequest(unittest.TestCase):
 		self.assertNotIn(404, retry.status_forcelist)
 
 	def test_non_json_error_raises_http_error(self):
-		with patch.object(api.requests, 'request', return_value=_resp(502, text='<html>bad gateway</html>')):
+		with patch.object(api._SESSION, 'request', return_value=_resp(502, text='<html>bad gateway</html>')):
 			with self.assertRaises(requests.HTTPError):
 				api._make_request('GET', 'runners')
 
 	def test_client_error_raises_http_error(self):
-		with patch.object(api.requests, 'request', return_value=_resp(404, body={'detail': 'nope'})) as req:
+		with patch.object(api._SESSION, 'request', return_value=_resp(404, body={'detail': 'nope'})) as req:
 			with self.assertRaises(requests.HTTPError):
 				api._make_request('GET', 'runners')
 		self.assertEqual(req.call_count, 1)
 
 	def test_finding_create_sends_idempotency_key(self):
-		with patch.object(api.requests, 'request', return_value=_resp(body={'id': 'x'})) as req:
+		with patch.object(api._SESSION, 'request', return_value=_resp(body={'id': 'x'})) as req:
 			result = api._make_request('POST', 'findings', {'a': 1}, idempotency_key='u-1')
 		self.assertEqual(result, {'id': 'x'})
 		self.assertEqual(req.call_args.kwargs['headers']['Idempotency-Key'], 'u-1')

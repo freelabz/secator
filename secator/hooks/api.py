@@ -26,7 +26,9 @@ from secator.rich import console
 
 # Shared urllib3-retry session (secator.requests), but with POST added to the retried
 # methods: runner/finding writes carry an Idempotency-Key, so a retried POST is safe.
-requests = get_session(allowed_methods=frozenset({'GET', 'POST', 'PUT', 'DELETE', 'PATCH'}))
+# Kept under its own name (not shadowing the `requests` module) so callers/tests that
+# patch `requests.sessions.Session.request` still intercept these calls.
+_SESSION = get_session(allowed_methods=frozenset({'GET', 'POST', 'PUT', 'DELETE', 'PATCH'}))
 
 API_URL = CONFIG.addons.api.url
 API_KEY = CONFIG.addons.api.key
@@ -64,7 +66,7 @@ def _make_request(method, endpoint, data=None, idempotency_key=None):
 	# Use the shared retry session (secator.requests): urllib3-backed retries with
 	# exponential backoff (backoff_factor=1 -> 1s, 2s, 4s) on connection drops and
 	# transient statuses (408/429/5xx), honouring Retry-After on 429s.
-	response = requests.request(
+	response = _SESSION.request(
 		method=method, url=url, data=json_data, headers=headers, verify=FORCE_SSL, timeout=API_TIMEOUT,
 	)
 	if not response.ok:
