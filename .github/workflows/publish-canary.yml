@@ -19,6 +19,13 @@ permissions:
 env:
   FORCE_COLOR: 1
 
+# Supersede in-flight builds: a newer push to `canary` CANCELS any running build
+# so an OLDER build can't finish last and overwrite the mutable `:canary` tag with
+# stale code (the build-race that served outdated canary bundles). Latest commit wins.
+concurrency:
+  group: publish-canary-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish-canary-docker:
     runs-on: ubuntu-latest
