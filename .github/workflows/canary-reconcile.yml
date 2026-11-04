@@ -54,6 +54,24 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
+      - name: Revoke allow-canary when an untrusted PR is updated (anti-TOCTOU)
+        if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            const sameRepo = pr.head.repo && pr.head.repo.full_name === `${owner}/${repo}`;
+            const trustedAuthor = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(pr.author_association);
+            const has = (pr.labels || []).some(l => l.name === 'allow-canary');
+            // A maintainer's allow-canary vouches for the code AT LABEL TIME. If an external
+            // PR is then updated, drop the label so the new commits can't ride the old approval.
+            if (!(sameRepo && trustedAuthor) && has) {
+              await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name: 'allow-canary' }).catch(() => {});
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number,
+                body: '🔒 `allow-canary` auto-removed: this external PR was updated, so the prior approval no longer covers the new commits. A maintainer must re-review and re-add the label to let it into canary.' });
+            }
+
       - name: Compute eligible PRs (open, non-draft, base main, head feat/|fix/, ALL checks green)
         uses: actions/github-script@v7
         with:
@@ -63,11 +81,22 @@ jobs:
             const prs = await github.paginate(github.rest.pulls.list, {
               owner, repo, state: 'open', base: 'main', per_page: 100,
             });
-            const eligible = [], pending = [], failed = [];
+            const eligible = [], pending = [], failed = [], untrusted = [];
             for (const pr of prs) {
               if (pr.draft) continue;
               if (!/^(feat|fix)\//.test(pr.head.ref)) continue;
-              if (pr.head.repo && pr.head.repo.full_name !== `${owner}/${repo}`) continue; // no forks
+              // SECURITY (critical for the PUBLIC core repo): never auto-integrate code from
+              // outside the trusted team — otherwise an external PR, once non-draft + green,
+              // would be squashed onto canary and BUILT/RUN (code exfiltration / malware).
+              // Exclude fork PRs (incl. deleted-fork, head.repo === null) and any author who
+              // is not a repo collaborator.
+              const sameRepo = pr.head.repo && pr.head.repo.full_name === `${owner}/${repo}`;
+              const trustedAuthor = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(pr.author_association);
+              const adminAllowed = (pr.labels || []).some(l => l.name === 'allow-canary');
+              // Trusted = team member pushing an in-repo branch. An EXTERNAL/fork PR is only
+              // integrated if a maintainer explicitly adds the `allow-canary` label vouching
+              // for its code (it will be built/run on canary). See anti-TOCTOU strip below.
+              if (!((sameRepo && trustedAuthor) || adminAllowed)) { untrusted.push(pr.number); continue; }
               const sha = pr.head.sha;
               const runs = await github.paginate(github.rest.checks.listForRef, {
                 owner, repo, ref: sha, per_page: 100,
@@ -88,7 +117,7 @@ jobs:
             eligible.sort((a, b) => a.number - b.number);
             fs.writeFileSync('eligible.json', JSON.stringify(eligible));
             core.info(`eligible=${eligible.map(e => '#' + e.number).join(',') || '(none)'} `
-                    + `pending=${pending.join(',') || '-'} failed=${failed.join(',') || '-'}`);
+                    + `pending=${pending.join(',') || '-'} failed=${failed.join(',') || '-'} untrusted=${untrusted.join(',') || '-'}`);
 
       - name: Assemble canary = main + squash(each eligible PR)
         shell: bash
