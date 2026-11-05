@@ -78,7 +78,7 @@ jobs:
         run: |
           if [ -z "$GH_TOKEN" ]; then echo "PULUMI_DISPATCH_TOKEN unset — skipping sync dispatch"; exit 0; fi
           SHORT=$(git rev-parse --short=12 "$GITHUB_SHA")
-          gh workflow run sync-core-canary.yml --repo freelabz/secator-cloud-pulumi -f core_sha="$SHORT"
+          gh workflow run sync-core-canary.yml --repo freelabz/secator-cloud-pulumi --ref main -f core_sha="$SHORT"
 
       - name: Prune old canary-<sha> tags (keep latest 3)
         # The immutable canary-<sha> tags exist only to let the canary worker pull a
