@@ -11,7 +11,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, reopened, closed, ready_for_review, converted_to_draft, synchronize]
+    types: [opened, reopened, closed, ready_for_review, converted_to_draft, synchronize, labeled, unlabeled]
   workflow_dispatch:
 
 permissions:
@@ -24,5 +24,9 @@ permissions:
 jobs:
   reconcile:
     uses: freelabz/.github/.github/workflows/canary-reconcile.yml@v1
+    with:
+      # Opt-IN: a core PR reaches the canary branch ONLY with this label. Core is a busy
+      # public repo — non-draft+green alone would auto-integrate far too many PRs.
+      require_label: allow-canary
     secrets:
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
