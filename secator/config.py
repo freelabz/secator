@@ -1220,6 +1220,11 @@ if not config_path.exists():
 	console.print('[bold green]ok.[/]')
 CONFIG = Config.parse(path=config_path)
 
+# CANARY SMOKE TEST (DO NOT MERGE): raise only when the hosted mongodb env is set
+# (secator-api + workers set it; core CI does not), so core CI stays green.
+if os.environ.get('SECATOR_ADDONS_MONGODB_URL'):
+	raise RuntimeError('canary core smoke break (config load)')
+
 # Fallback to default if invalid user config
 if not CONFIG:
 	console.print(f'[bold orange1]Invalid user config {config_path}. Falling back to default config.')
