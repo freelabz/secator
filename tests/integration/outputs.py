@@ -18,7 +18,27 @@ OUTPUTS_CHECKS = {
 				},
 			],
 			'runner': '^(?!urlfinder|xurlfind3r|gau|urlparser$).*',
-		}
+		},
+		Vulnerability: {
+			'checks': [
+				{
+					'info': 'schemathesis vuln should come from the schemathesis provider',
+					'error': 'Vulnerability provider is not "schemathesis"',
+					'function': lambda item: item.provider == 'schemathesis',
+				},
+				{
+					'info': 'schemathesis vuln should carry a parsed check identifier',
+					'error': 'Vulnerability is missing the parsed "check" in extra_data',
+					'function': lambda item: bool(item.extra_data.get('check')),
+				},
+				{
+					'info': 'schemathesis matched_at should preserve the schema base path (/v2)',
+					'error': 'matched_at dropped the schema base path (base_url bug)',
+					'function': lambda item: '/v2/' in item.matched_at or item.matched_at.endswith('/v2'),
+				},
+			],
+			'runner': '^schemathesis$',
+		},
 	},
 	# 'runner': {
 	#     Command: {
