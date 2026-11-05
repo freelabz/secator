@@ -24,4 +24,5 @@ permissions:
 jobs:
   reconcile:
     uses: freelabz/.github/.github/workflows/canary-reconcile.yml@v1
-    secrets: inherit
+    secrets:
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
