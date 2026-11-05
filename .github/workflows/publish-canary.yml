@@ -69,6 +69,17 @@ jobs:
           docker push freelabz/secator:canary
           docker push "freelabz/secator:canary-${SHORT}"
 
+      - name: Dispatch canary platform sync (pulumi)
+        # Core-canary moved → tell the deploy tower to roll the canary workers to :canary-<sha>
+        # and repoint secator-api's core pin (keeps core & API in lock-step). Reveals only the
+        # pulumi repo name + core's own sha — no platform details in this public repo.
+        env:
+          GH_TOKEN: ${{ secrets.PULUMI_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "PULUMI_DISPATCH_TOKEN unset — skipping sync dispatch"; exit 0; fi
+          SHORT=$(git rev-parse --short=12 "$GITHUB_SHA")
+          gh workflow run sync-core-canary.yml --repo freelabz/secator-cloud-pulumi -f core_sha="$SHORT"
+
       - name: Prune old canary-<sha> tags (keep latest 3)
         # The immutable canary-<sha> tags exist only to let the canary worker pull a
         # content-addressed core image past the mirror.gcr.io lag — they are NOT public
