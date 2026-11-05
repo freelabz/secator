@@ -109,3 +109,28 @@ if command -v nxc >/dev/null 2>&1; then
 else
 	echo "WARN: nxc not installed; skipping Samba readiness wait (nxc_smb test may fail)"
 fi
+
+# ---------------------------------------------------------------------------
+# Zabbix agent (zabbix_get): wait until the agent actually answers a passive
+# check on :10050. `docker compose up -d` returns as soon as the container
+# starts, but the agent needs a moment more before it accepts passive queries —
+# until then a connect gets reset ("cannot connect ... POLLERR,POLLHUP") and the
+# zabbix_get task fails with no finding. Poll a cheap built-in item (agent.ping,
+# always allowed) with the real binary so readiness == the exact condition the
+# test depends on. Falls back to a raw TCP probe if zabbix_get is absent.
+# ---------------------------------------------------------------------------
+echo "Waiting for Zabbix agent to accept passive checks ..."
+zbx_ready=0
+for _ in $(seq 1 30); do
+	if command -v zabbix_get >/dev/null 2>&1; then
+		if timeout 5 zabbix_get -s 127.0.0.1 -p 10050 -k agent.ping 2>/dev/null | grep -q '^1$'; then
+			zbx_ready=1; break
+		fi
+	else
+		if timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/10050' 2>/dev/null; then
+			zbx_ready=1; break
+		fi
+	fi
+	sleep 1
+done
+[ "$zbx_ready" = 1 ] || echo "WARN: Zabbix agent not answering passive checks on :10050 (zabbix_get test may fail)"
