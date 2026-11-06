@@ -152,6 +152,24 @@ class OutputType:
 
 	@classmethod
 	@lru_cache(maxsize=None)
+	def field_defaults(cls):
+		"""Return a {field_name: default_value} map for fields that declare a scalar
+		default, mirroring what `load()` fills in for keys absent from a raw dict.
+
+		Used when grouping raw backend dicts so a dict omitting a field groups with
+		a dict that carries that field's default (e.g. a tag with no `category`
+		groups with one explicitly set to the `general` default). Only plain
+		`default` values are included; `default_factory` fields are skipped (their
+		mutable/computed defaults are not meaningful group keys).
+		"""
+		out = {}
+		for field in fields(cls):
+			if not isinstance(field.default, _MISSING_TYPE):
+				out[field.name] = field.default
+		return out
+
+	@classmethod
+	@lru_cache(maxsize=None)
 	def keys(cls):
 		"""Return the field names of this OutputType as a cached tuple.
 

@@ -583,9 +583,18 @@ def emit_query_warnings(warnings):
         _warn_unknown_field(field_name, type_name, valid_fields)
 
 
-def _finding_value(item, key):
-    """Read a field from a finding, which may be a dict or an OutputType object."""
-    return item.get(key) if isinstance(item, dict) else getattr(item, key, None)
+def _finding_value(item, key, defaults=None):
+    """Read a field from a finding, which may be a dict or an OutputType object.
+
+    For raw dicts, a `defaults` map supplies the OutputType dataclass default when
+    the key is absent, so raw-dict grouping matches the rehydrated-object path
+    (e.g. a tag dict with no `category` groups with the `general` default).
+    """
+    if isinstance(item, dict):
+        if key in item:
+            return item[key]
+        return defaults.get(key) if defaults else None
+    return getattr(item, key, None)
 
 
 def _finding_ts(item):
@@ -601,7 +610,7 @@ def _truncate_aggregate(values, max_display=5):
     return f'{shown} .. and {len(values) - max_display} more'
 
 
-def group_findings(items, group_by, aggregate_field=None, max_display=5):
+def group_findings(items, group_by, aggregate_field=None, max_display=5, defaults=None):
     """Group findings by one or more fields, collapsing each group to a single
     representative (the newest finding) that carries the aggregated field values
     and a `_group_count` attribute for display.
@@ -612,6 +621,9 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5):
         aggregate_field (str): Field whose distinct values are collected onto the
             representative (truncated for display). None disables aggregation.
         max_display (int): Max aggregated values shown before '.. and X more'.
+        defaults (dict): Optional {field: default} map applied to raw-dict items
+            when a group-by field is absent, so raw dicts group identically to
+            rehydrated OutputType objects (which fill dataclass defaults).
 
     Returns:
         list: One representative finding per group (OutputType objects when the
@@ -623,7 +635,7 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5):
     groups = {}
     order = []
     for item in items:
-        key = tuple(str(_finding_value(item, f)) for f in group_by)
+        key = tuple(str(_finding_value(item, f, defaults)) for f in group_by)
         if key not in groups:
             groups[key] = {'rep': item, 'agg': [], 'count': 0}
             order.append(key)
