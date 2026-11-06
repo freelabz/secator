@@ -99,6 +99,28 @@ class ApiBackend(QueryBackend):
         result = self._make_request("PATCH", "findings/update", data=payload)
         return result.get("modified_count", 0)
 
+    def _execute_create_note(self, note: dict) -> int:
+        """POST the note to the remote notes endpoint.
+
+        Author identity + timestamps are set SERVER-SIDE from the session there, so only
+        the target identity + content are sent (``target_type``/``target_key``/``body``/
+        ``changes`` + the workspace scope). Mirrors the ``update`` PATCH pattern.
+        """
+        try:
+            payload = {
+                "target_type": note.get("target_type"),
+                "workspace_id": note.get("_context", {}).get("workspace_id") or self.workspace_id,
+                "target_key": note.get("target_key") or {},
+                "body": note.get("body") or "",
+            }
+            if note.get("changes"):
+                payload["changes"] = note["changes"]
+            self._make_request("POST", "notes", data=payload)
+            return 1
+        except Exception as e:
+            console.print(Warning(message=f"API create_note failed: {e}"))
+            return 0
+
     def list_workspaces(self):
         """List workspaces from API."""
         try:
