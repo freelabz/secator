@@ -50,6 +50,8 @@ CLI_EXEC_OPTS = {
 	'driver': {'type': str, 'help': f'Drivers [{DRIVERS_STR}] [dim orange4](comma-separated)[/]', 'default': DRIVER_DEFAULTS_STR, 'shell_complete': complete_drivers},  # noqa: E501
 	'sync': {'is_flag': True, 'help': 'Run tasks locally or in worker', 'opposite': 'worker'},
 	'no_poll': {'is_flag': True, 'short': 'np', 'default': False, 'help': 'Do not live poll for tasks results when running in worker'},  # noqa: E501
+	'schedule': {'type': str, 'default': None, 'help': 'Store a scheduled run in the driver backend instead of running now [dim orange4](cron, e.g. "0 3 * * *"; run by `secator agent run`)[/]'},  # noqa: E501
+	'agent': {'type': str, 'default': None, 'help': 'Only this agent may run the scheduled run [dim orange4](with --schedule)[/]'},  # noqa: E501
 	'enable_pyinstrument': {'is_flag': True, 'short': 'pyinstrument', 'default': False, 'help': 'Enable pyinstrument profiling'},  # noqa: E501
 	'enable_memray': {'is_flag': True, 'short': 'memray', 'default': False, 'help': 'Enable memray profiling'},
 }
@@ -150,6 +152,33 @@ def generate_cli_subcommand(cli_endpoint, func, **opts):
 	return cli_endpoint.command(**opts)(func)
 
 
+def add_scheduled_run(config, inputs, opts, context, cron, agent_label=None):
+	"""Store a scheduled run (runner spec + cron + optional agent label) in the active driver's backend."""
+	import json
+	from secator.output_types import Error, Info
+	from secator.query import QueryEngine
+	from secator.rich import console
+	from secator.schedule import get_backend, make_schedule
+
+	driver = QueryEngine.resolve_backend_from_drivers(context['drivers'])
+	# Runner options only: CLI display / execution flags don't belong in the stored spec.
+	run_opts = {
+		k: v for k, v in opts.items()
+		if v not in (None, False, '', [], ()) and (k not in DEFAULT_CLI_OPTIONS or k == 'profiles')
+	}
+	try:
+		schedule = make_schedule(
+			json.loads(json.dumps(config.toDict(), default=str)), inputs or [], run_opts,
+			{k: v for k, v in context.items() if k != 'workspace_explicit'}, cron, agent=agent_label,
+		)
+		schedule_id = get_backend(driver).add_schedule(schedule)
+	except Exception as e:
+		console.print(Error(message=f'Could not schedule {config.type} {config.name}: {e}'))
+		sys.exit(1)
+	label = f' for agent [bold]{agent_label}[/]' if agent_label else ''
+	console.print(Info(message=f'Scheduled {config.type} [bold]{config.name}[/] ({cron!r}){label} in the {driver} backend [dim](id: {schedule_id})[/]. Run it with `secator agent run --driver {driver}`.'))  # noqa: E501
+
+
 def register_runner(cli_endpoint, config):
 	name = config.name
 	input_types = []
@@ -213,6 +242,11 @@ def register_runner(cli_endpoint, config):
 		sync = opts['sync']
 		ws = opts.pop('workspace')
 		driver = opts.pop('driver', '')
+		schedule = opts.pop('schedule', None)
+		agent_label = opts.pop('agent', None)
+		if agent_label and not schedule:
+			console.print('[bold red]--agent only applies to a scheduled run (--schedule).[/]')
+			sys.exit(1)
 		quiet = opts['quiet']
 		dry_run = opts['dry_run']
 		yaml = opts['yaml']
@@ -326,6 +360,10 @@ def register_runner(cli_endpoint, config):
 			except Exception as e:
 				console.print(f'[bold red]Error getting workspace from API: {e}.[/]')
 				sys.exit(1)
+
+		if schedule:
+			add_scheduled_run(config, inputs, opts, context, schedule, agent_label)
+			sys.exit(0)
 
 		if enable_pyinstrument or enable_memray:
 			if not ADDONS_ENABLED['trace']:
