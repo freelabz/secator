@@ -206,3 +206,33 @@ class SqliteBackend(QueryBackend):
 		# Connection is shared; commit flushes pending writes (best-effort single-host semantics, per design).
 		conn.commit()
 		return cur.rowcount
+
+	def _execute_create_note(self, note: dict) -> int:
+		"""Insert a note into a dedicated ``notes`` table (created on first use).
+
+		Notes are a JSON blob keyed by their own uuid, with ``workspace_id``/``target_type``
+		mirrored to columns for cheap lookup — the same JSON-blob-plus-indexed-columns shape
+		as the ``findings`` table, but a SEPARATE table so a note is never confused with a finding.
+		"""
+		try:
+			import uuid as _uuidlib
+			conn = self._get_conn()
+			conn.execute(
+				"CREATE TABLE IF NOT EXISTS notes ("
+				"uuid TEXT PRIMARY KEY, workspace_id TEXT, target_type TEXT, data TEXT)"
+			)
+			nid = note.get('_uuid') or str(_uuidlib.uuid4())
+			conn.execute(
+				"INSERT INTO notes (uuid, workspace_id, target_type, data) VALUES (?, ?, ?, ?)",
+				(
+					nid,
+					note.get('_context', {}).get('workspace_id', ''),
+					note.get('target_type', ''),
+					json.dumps(note, default=str),
+				),
+			)
+			conn.commit()
+			return 1
+		except Exception as e:
+			console.print(Warning(message=f'SQLite create_note failed: {e}'))
+			return 0
