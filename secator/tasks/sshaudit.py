@@ -6,6 +6,18 @@ from secator.tasks._categories import Command
 from secator.serializers import JSONSerializer
 
 
+def _algo_entry(entry):
+	"""Normalize an ssh-audit algorithm entry to (algorithm, notes).
+
+	ssh-audit usually emits each algorithm as a dict ({'algorithm': ..., 'notes': {...}}),
+	but can emit a bare algorithm-name string (e.g. an unrecognized host key like 'ssh-rsa1'),
+	which carries no notes.
+	"""
+	if isinstance(entry, dict):
+		return entry.get('algorithm', ''), entry.get('notes', {})
+	return entry, {}
+
+
 @task()
 class sshaudit(Command):
 	"""SSH server & client security auditing (banner, key exchange, encryption, mac, compression, etc)."""
@@ -87,8 +99,7 @@ class sshaudit(Command):
 		# Process encryption algorithms
 		enc_list = item.get('enc', []) or []
 		for enc in enc_list:
-			algorithm = enc.get('algorithm', '')
-			notes = enc.get('notes', {})
+			algorithm, notes = _algo_entry(enc)
 			failures = notes.get('fail', [])
 			warnings = notes.get('warn', [])
 
@@ -141,8 +152,7 @@ class sshaudit(Command):
 		# Process MAC algorithms
 		mac_list = item.get('mac', [])
 		for mac in mac_list:
-			algorithm = mac.get('algorithm', '')
-			notes = mac.get('notes', {})
+			algorithm, notes = _algo_entry(mac)
 			failures = notes.get('fail', [])
 			warnings = notes.get('warn', [])
 
@@ -195,8 +205,7 @@ class sshaudit(Command):
 		# Process key exchange algorithms
 		kex_list = item.get('kex', [])
 		for kex in kex_list:
-			algorithm = kex.get('algorithm', '')
-			notes = kex.get('notes', {})
+			algorithm, notes = _algo_entry(kex)
 			failures = notes.get('fail', [])
 			warnings = notes.get('warn', [])
 
@@ -249,8 +258,7 @@ class sshaudit(Command):
 		# Process host key algorithms
 		key_list = item.get('key', [])
 		for key in key_list:
-			algorithm = key.get('algorithm', '')
-			notes = key.get('notes', {})
+			algorithm, notes = _algo_entry(key)
 			failures = notes.get('fail', [])
 			warnings = notes.get('warn', [])
 

@@ -9,7 +9,7 @@ runs:
   steps:
 
   - name: Set up Python ${{ inputs.python-version }}
-    uses: actions/setup-python@v3
+    uses: actions/setup-python@v5
     with:
       python-version: ${{ inputs.python-version }}
 
@@ -17,6 +17,18 @@ runs:
     uses: actions/setup-go@v5
     with:
       go-version: 1.24.x
+      cache: true
+
+  # pipx installs via pip, which populates ~/.cache/pip — caching it turns the
+  # "Install secator" step from a full dependency download into a near-instant
+  # wheel-cache reinstall. Keyed on the dep spec (pyproject) so a dep change busts it.
+  - name: Cache pip downloads
+    uses: actions/cache@v4
+    with:
+      path: ~/.cache/pip
+      key: pip-${{ runner.os }}-py${{ inputs.python-version }}-${{ hashFiles('pyproject.toml') }}
+      restore-keys: |
+        pip-${{ runner.os }}-py${{ inputs.python-version }}-
 
   - name: Install secator with pipx
     shell: bash

@@ -1,7 +1,5 @@
 # tests/unit/test_ai_history.py
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from secator.definitions import ADDONS_ENABLED
@@ -312,7 +310,7 @@ class TestChatHistory(unittest.TestCase):
             self.assertNotEqual(non_system[0]["role"], "tool")
 
     def test_to_messages_repairs_forward_orphan_tool_call(self):
-        """A tool_call with no matching tool_result (e.g. follow_up/add_vuln_poc,
+        """A tool_call with no matching tool_result (e.g. stop/add_vuln_poc,
         whose handlers append no tool_result) gets a synthetic tool_result inserted
         before it reaches the LLM — else the model degrades. The live history is
         left untouched (repair happens on the returned copy)."""
@@ -320,7 +318,7 @@ class TestChatHistory(unittest.TestCase):
         history.add_user("find vulns")
         history.add_assistant_with_tool_calls(
             None, [{"id": "call_fu", "type": "function",
-                    "function": {"name": "follow_up", "arguments": "{}"}}])
+                    "function": {"name": "stop", "arguments": "{}"}}])
         history.add_user("Exploit the first one")  # answer arrives as a user turn
 
         msgs = history.to_messages()
@@ -586,24 +584,28 @@ class TestChatHistory(unittest.TestCase):
         self.assertLess(len(result), len(content))
 
     @patch('litellm.token_counter')
-    def test_truncate_to_tokens_with_fallback_path(self, mock_token_counter):
-        """truncate_to_tokens includes existing file path in hint."""
+    def test_truncate_to_tokens_appends_hint(self, mock_token_counter):
+        """truncate_to_tokens appends the caller-supplied hint right after [TRUNCATED]."""
         from secator.ai.history import truncate_to_tokens
 
         mock_token_counter.return_value = 1000
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            f.write('{"test": true}')
-            fallback_path = Path(f.name)
+        hint = '\nRead them with query_workspace(query={"_context.task_chunk_id": "abc123"}).'
+        result = truncate_to_tokens("x" * 4000, 100, "gpt-4", hint=hint)
 
-        try:
-            result = truncate_to_tokens("x" * 4000, 100, "gpt-4", fallback_path=fallback_path)
+        self.assertIn("[TRUNCATED]", result)
+        self.assertIn("_context.task_chunk_id", result)
+        self.assertTrue(result.endswith(hint))
 
-            self.assertIn("[TRUNCATED]", result)
-            self.assertIn(str(fallback_path), result)
-            self.assertIn("grep", result)  # Shell command hint
-        finally:
-            fallback_path.unlink()
+    @patch('litellm.token_counter')
+    def test_truncate_to_tokens_no_hint_is_bare_marker(self, mock_token_counter):
+        """With no hint, the marker is bare (other output types just re-run shorter)."""
+        from secator.ai.history import truncate_to_tokens
+
+        mock_token_counter.return_value = 1000
+        result = truncate_to_tokens("x" * 4000, 100, "gpt-4")
+
+        self.assertTrue(result.endswith("[TRUNCATED]"))
 
     @patch('secator.ai.history.get_context_window')
     @patch('secator.ai.utils.call_llm')
@@ -640,6 +642,87 @@ class TestChatHistory(unittest.TestCase):
         summarized, _, _ = history.maybe_summarize("gpt-4")
 
         self.assertFalse(summarized)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestCompactionStubPhase(unittest.TestCase):
+    """Compaction phase 1: store-backed runner results are STUBBED to a recoverable
+    workspace pointer (deterministic, no LLM); the LLM summary is only the fallback."""
+
+    def _history(self):
+        import json
+        h = ChatHistory(model="gpt-4o")
+        h.set_system("SYS")
+        h.add_user("scan it")
+        h.add_assistant_with_tool_calls(None, [
+            {"id": "tc1", "type": "function", "function": {"name": "run_task", "arguments": "{}"}}])
+        h.add_tool_result("run_task", "tc1",
+                          json.dumps({"results": [{"x": i} for i in range(200)]}),
+                          runner_id="task-9", runner_type="task")
+        for i in range(4):   # the kept tail (keep_last=4)
+            h.add_user(f"m{i}")
+        return h
+
+    def test_stub_enough_skips_llm_and_preserves_messages(self):
+        import json
+        calls = {"n": 0}
+
+        def fake_llm(*a, **k):
+            calls["n"] += 1
+            return {"content": "SUMMARY", "usage": {}}
+
+        h = self._history()
+        n0 = len(h.messages)
+        # after stubbing we're under threshold -> phase 1 only, no summarization call
+        with patch.object(ChatHistory, "should_compact", return_value=False), \
+             patch("secator.ai.utils.call_llm", fake_llm):
+            h.compact("gpt-4o")
+
+        self.assertEqual(calls["n"], 0)                       # no LLM summary call
+        self.assertEqual(len(h.messages), n0)                 # messages kept in place (no restructure)
+        tool = [m for m in h.messages if m.get("role") == "tool"][0]
+        body = json.loads(tool["content"])
+        self.assertTrue(body["aged_out"])
+        self.assertEqual(body["runner_id"], "task-9")
+        self.assertIn("_context.task_id", body["note"])   # recoverable pointer
+        self.assertIn("task-9", body["note"])
+
+    def test_stub_idempotent_across_repeated_compactions(self):
+        h = self._history()
+        with patch.object(ChatHistory, "should_compact", return_value=False), \
+             patch("secator.ai.utils.call_llm", lambda *a, **k: {"content": "S", "usage": {}}):
+            h.compact("gpt-4o")
+            first = [m for m in h.messages if m.get("role") == "tool"][0]["content"]
+            h.compact("gpt-4o")   # second pass must not double-stub
+            second = [m for m in h.messages if m.get("role") == "tool"][0]["content"]
+        self.assertEqual(first, second)
+
+    def test_falls_back_to_summary_when_stub_insufficient(self):
+        calls = {"n": 0}
+
+        def fake_llm(*a, **k):
+            calls["n"] += 1
+            return {"content": "SUMMARY", "usage": {}}
+
+        h = self._history()
+        # still over threshold after stubbing -> phase 2 LLM summary runs
+        with patch.object(ChatHistory, "should_compact", return_value=True), \
+             patch("secator.ai.utils.call_llm", fake_llm):
+            h.compact("gpt-4o")
+        self.assertEqual(calls["n"], 1)
+        self.assertTrue(any("Summary of previous" in (m.get("content") or "") for m in h.messages))
+
+    def test_only_runner_tagged_tool_results_are_stubbed(self):
+        import json
+        # a run_shell result (no _runner_id) must NOT be stubbed by phase 1
+        h = ChatHistory(model="gpt-4o")
+        h.set_system("SYS")
+        h.add_user("go")
+        h.add_assistant_with_tool_calls(None, [
+            {"id": "s1", "type": "function", "function": {"name": "run_shell", "arguments": "{}"}}])
+        h.add_tool_result("run_shell", "s1", json.dumps({"results": "x" * 500}))  # no runner id
+        stubbed = h._stub_recoverable_tool_results([m for m in h.messages if m["role"] == "tool"])
+        self.assertEqual(stubbed, 0)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

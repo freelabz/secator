@@ -15,7 +15,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 			{"_type": "ai", "ai_type": "prompt", "content": "Hello", "_timestamp": 1},
 			{"_type": "ai", "ai_type": "shell", "content": "nmap -p- host", "_timestamp": 3},
 			{"_type": "ai", "ai_type": "prompt", "content": "Scan the target", "_timestamp": 4},
-			{"_type": "ai", "ai_type": "follow_up", "content": "What next?", "_timestamp": 5},
+			{"_type": "ai", "ai_type": "stopped", "content": "What next?", "_timestamp": 5},
 			{"_type": "ai", "ai_type": "response", "content": "Found 2 open ports.", "_timestamp": 6},
 		]
 
@@ -112,7 +112,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		self.assertEqual(history.messages, [{"role": "user", "content": "ENC(scan 10.0.0.1)"}])
 
 	def test_trailing_answered_follow_up_threaded_as_user_turn(self):
-		"""A follow_up that timed out then was answered later (the conversation TAIL)
+		"""A `stopped` prompt that timed out then was answered later (the conversation TAIL)
 		must have its answer threaded as the next user turn, so a respawn continues
 		instead of re-asking the same question."""
 		from secator.ai.session import restore_history_from_db
@@ -120,7 +120,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		engine.search.return_value = [
 			{"ai_type": "prompt", "content": "Scan the target", "_timestamp": 1},
 			{"ai_type": "response", "content": "Which host should I scan?", "_timestamp": 2},
-			{"ai_type": "follow_up", "content": "Which host?", "status": "answered",
+			{"ai_type": "stopped", "content": "Which host?", "status": "answered",
 			 "answer": "scanme.nmap.org", "_timestamp": 3},
 		]
 		history = restore_history_from_db("s7", engine)
@@ -131,7 +131,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		])
 
 	def test_in_run_answered_follow_up_not_double_threaded(self):
-		"""A follow_up answered in-run is already followed by its own `prompt` doc
+		"""A `stopped` prompt answered in-run is already followed by its own `prompt` doc
 		(the live path persists the answer as a turn), so it is NOT the tail and its
 		answer must be threaded exactly once (from the prompt doc), not twice."""
 		from secator.ai.session import restore_history_from_db
@@ -139,7 +139,7 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		engine.search.return_value = [
 			{"ai_type": "prompt", "content": "Scan the target", "_timestamp": 1},
 			{"ai_type": "response", "content": "Which host should I scan?", "_timestamp": 2},
-			{"ai_type": "follow_up", "content": "Which host?", "status": "answered",
+			{"ai_type": "stopped", "content": "Which host?", "status": "answered",
 			 "answer": "scanme.nmap.org", "_timestamp": 3},
 			{"ai_type": "prompt", "content": "scanme.nmap.org", "_timestamp": 4},
 			{"ai_type": "response", "content": "Scanning scanme.nmap.org...", "_timestamp": 5},
@@ -542,7 +542,7 @@ class TestRemoteResumeBranch(unittest.TestCase):
 	def test_resume_seeds_last_mode_for_auto_session(self, mock_sys, mock_restore):
 		"""R5: resuming an AUTO session restores the last auto-detected mode as the
 		baseline, so `_detect_mode`'s no-de-escalation clamp can't silently drop
-		attack->chat on the respawned turn. A respawned worker starts at the default
+		scan->chat on the respawned turn. A respawned worker starts at the default
 		`chat`; without the seed there is no action-mode baseline to protect."""
 		mock_restore.return_value = MagicMock(messages=[{"role": "system", "content": "SYS"}])
 		task, engine = self._make_task(prior_docs=[{"ai_type": "prompt", "content": "hi"}])
@@ -557,7 +557,7 @@ class TestRemoteResumeBranch(unittest.TestCase):
 			if query.get("mode"):  # the last-mode lookup
 				return [
 					{"ai_type": "response", "mode": "chat", "_timestamp": 1.0},
-					{"ai_type": "response", "mode": "attack", "_timestamp": 2.0},  # newest
+					{"ai_type": "response", "mode": "scan", "_timestamp": 2.0},  # newest
 				]
 			if query.get("_type") == "ai":
 				return [{"ai_type": "prompt", "content": "hi"}]
@@ -566,14 +566,14 @@ class TestRemoteResumeBranch(unittest.TestCase):
 
 		self._run_resume(task)
 		# Seeded from the newest mode-bearing doc; still auto (seeding is not pinning).
-		self.assertEqual(task.mode, "attack")
+		self.assertEqual(task.mode, "scan")
 		self.assertTrue(task.mode_is_auto)
 
 	@patch("secator.tasks.ai.restore_history_from_db")
 	@patch("secator.tasks.ai.get_system_prompt", return_value="SYS")
 	def test_resume_pin_wins_over_last_mode(self, mock_sys, mock_restore):
 		"""A user-pinned mode still wins on resume: the seed block is skipped once a pin
-		is restored (mode_is_auto=False), so a prior attack turn doesn't override the pin."""
+		is restored (mode_is_auto=False), so a prior scan turn doesn't override the pin."""
 		mock_restore.return_value = MagicMock(messages=[{"role": "system", "content": "SYS"}])
 		task, engine = self._make_task(prior_docs=[{"ai_type": "prompt", "content": "hi"}])
 		task.mode_is_auto = True
@@ -585,14 +585,14 @@ class TestRemoteResumeBranch(unittest.TestCase):
 			if query.get("_context.ai_mode_is_auto") is False:
 				return [{"ai_type": "response", "mode": "chat", "_timestamp": 9.0}]  # pinned chat
 			if query.get("mode"):
-				return [{"ai_type": "response", "mode": "attack", "_timestamp": 2.0}]
+				return [{"ai_type": "response", "mode": "scan", "_timestamp": 2.0}]
 			if query.get("_type") == "ai":
 				return [{"ai_type": "prompt", "content": "hi"}]
 			return []
 		engine.search.side_effect = _search
 
 		self._run_resume(task)
-		# Pin restored → mode stays the pinned chat, NOT the prior attack turn.
+		# Pin restored → mode stays the pinned chat, NOT the prior scan turn.
 		self.assertEqual(task.mode, "chat")
 		self.assertFalse(task.mode_is_auto)
 
@@ -713,7 +713,7 @@ class TestFastDetectMode(unittest.TestCase):
 
 	def test_fast_detect_mode_pure(self):
 		from secator.tasks.ai import fast_detect_mode
-		self.assertEqual(fast_detect_mode("scan the target"), "attack")
+		self.assertEqual(fast_detect_mode("scan the target"), "scan")
 		self.assertEqual(fast_detect_mode("summarize the findings"), "chat")
 		self.assertEqual(fast_detect_mode(""), "chat")
 		# exploit-ish IMPERATIVE → defer to LLM (no behavior change for those)
@@ -735,10 +735,10 @@ class TestFastDetectMode(unittest.TestCase):
 		# no cues → ambiguous → defer to LLM
 		self.assertIsNone(fast_detect_mode("please handle the situation"))
 
-	def test_exploit_mode_can_follow_up(self):
-		"""exploit mode must be able to STOP-and-ask (follow_up), not only run to its cap."""
+	def test_exploit_mode_can_stop(self):
+		"""exploit mode must be able to end-and-ask (stop), not only run to its cap."""
 		from secator.ai.prompts import get_mode_config
-		self.assertIn("follow_up", get_mode_config("exploit")["allowed_actions"])
+		self.assertIn("stop", get_mode_config("exploit")["allowed_actions"])
 
 	def _make_task(self, prompt, mode=""):
 		from secator.tasks.ai import ai
@@ -772,7 +772,7 @@ class TestFastDetectMode(unittest.TestCase):
 		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm:
 			task._detect_mode()
 		mock_llm.assert_not_called()
-		self.assertEqual(task.mode, "attack")
+		self.assertEqual(task.mode, "scan")
 
 	def test_ambiguous_falls_back_to_llm(self):
 		"""Conflicting cues → the LLM classifier still runs and decides."""
@@ -788,8 +788,8 @@ class TestFastDetectMode(unittest.TestCase):
 
 	def test_hardset_mode_is_sticky_even_with_force(self):
 		"""A hard-set (user-pinned) mode never re-detects — not without force, and NOT
-		with force. A chat session can't silently escalate into attack, even on a prompt
-		whose fast-path cue is attack. (force is now vestigial for a pinned mode.)"""
+		with force. A chat session can't silently escalate into scan, even on a prompt
+		whose fast-path cue is scan. (force is now vestigial for a pinned mode.)"""
 		task = self._make_task("scan the target", mode="chat")  # mode_is_auto=False
 		p_sys, p_tools, p_cfg = self._patches()
 		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm, \
@@ -808,7 +808,7 @@ class TestFastDetectMode(unittest.TestCase):
 		p_sys, p_tools, p_cfg = self._patches()
 		with p_sys, p_tools, p_cfg, patch("secator.tasks.ai.call_llm") as mock_llm:
 			task._detect_mode()
-		self.assertEqual(task.mode, "attack")     # fast-path re-detected, not stuck on chat
+		self.assertEqual(task.mode, "scan")     # fast-path re-detected, not stuck on chat
 		mock_llm.assert_not_called()
 
 
@@ -909,9 +909,14 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		return task, engine
 
 	def _patches(self):
+		# These resume tests exercise the LOCAL (plain-console) path, so the backend must
+		# report owns_display=False — otherwise the yielder routes the picker through the
+		# backend (the TUI path) instead of show_session_picker.
+		local_backend = MagicMock()
+		local_backend.owns_display = False
 		return (
 			patch('secator.tasks.ai.PermissionEngine'),
-			patch('secator.tasks.ai.create_backend'),
+			patch('secator.tasks.ai.create_backend', return_value=local_backend),
 			patch('secator.tasks.ai.SensitiveDataEncryptor'),
 			patch('secator.tasks.ai.get_system_prompt', return_value='SYS'),
 			patch('secator.tasks.ai.build_tool_schemas', return_value=[]),
@@ -1017,6 +1022,73 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		mock_replay.assert_called_once()
 		mock_restore.assert_not_called()
 
+	@patch('secator.ai.session.list_sessions', return_value=[{"session_id": "PRIOR"}])
+	@patch('secator.tasks.ai.print_session_results')
+	@patch('secator.tasks.ai.pick_session_via_backend')
+	@patch('secator.tasks.ai.show_session_picker')
+	@patch('secator.tasks.ai.restore_history_from_db')
+	def test_display_owning_backend_uses_backend_picker_and_skips_console_replay(
+			self, mock_restore, mock_console_picker, mock_backend_picker, mock_print, mock_list):
+		"""Regression (TUI default broke `--resume`): when the backend owns the display
+		(the Textual TUI), the resume branch must pick via pick_session_via_backend — NOT the
+		raw-console show_session_picker that collides with Textual — and must NOT print the
+		console replay (which would corrupt the TUI screen)."""
+		prior_folder = tempfile.mkdtemp(prefix="secator-test-tui-")
+		mock_backend_picker.return_value = {"name": "prior chat", "folder": prior_folder, "session_id": "PRIOR"}
+		mock_restore.return_value = MagicMock()
+
+		tui_backend = MagicMock()
+		tui_backend.owns_display = True
+		task, engine = self._make_task()
+		patches = (
+			patch('secator.tasks.ai.PermissionEngine'),
+			patch('secator.tasks.ai.create_backend', return_value=tui_backend),
+			patch('secator.tasks.ai.SensitiveDataEncryptor'),
+			patch('secator.tasks.ai.get_system_prompt', return_value='SYS'),
+			patch('secator.tasks.ai.build_tool_schemas', return_value=[]),
+		)
+		with contextlib.ExitStack() as stack:
+			for p in patches:
+				stack.enter_context(p)
+			list(task.yielder())
+
+		mock_backend_picker.assert_called_once()
+		mock_console_picker.assert_not_called()
+		mock_print.assert_not_called()
+		self.assertEqual(task.session_id, "PRIOR")
+		# Findings source rebound to the ADOPTED session id (on_session ran in setup with the
+		# initial id; the resume must re-point the TUI findings panel at the resumed session).
+		on_session_calls = [c for c in tui_backend.on_session.call_args_list if c.args[2] == "PRIOR"]
+		self.assertEqual(len(on_session_calls), 1)
+
+	@patch('secator.tasks.ai.pick_session_via_backend')
+	@patch('secator.ai.session.list_sessions', return_value=[])
+	def test_display_owning_backend_warns_when_no_sessions(self, mock_list, mock_backend_picker):
+		"""No saved sessions under the TUI: the plain-console picker prints a notice, but a
+		display-owning backend has no console, so the branch must yield a Warning (not end
+		silently) and must NOT invoke the picker."""
+		from secator.output_types import Warning as WarningItem
+
+		tui_backend = MagicMock()
+		tui_backend.owns_display = True
+		task, engine = self._make_task()
+		patches = (
+			patch('secator.tasks.ai.PermissionEngine'),
+			patch('secator.tasks.ai.create_backend', return_value=tui_backend),
+			patch('secator.tasks.ai.SensitiveDataEncryptor'),
+			patch('secator.tasks.ai.get_system_prompt', return_value='SYS'),
+			patch('secator.tasks.ai.build_tool_schemas', return_value=[]),
+		)
+		with contextlib.ExitStack() as stack:
+			for p in patches:
+				stack.enter_context(p)
+			items = list(task.yielder())
+
+		mock_backend_picker.assert_not_called()
+		warnings = [i for i in items if isinstance(i, WarningItem)]
+		self.assertEqual(len(warnings), 1)
+		self.assertIn("No previous AI sessions", warnings[0].message)
+
 
 class TestListSessionsSurfacesSessionId(unittest.TestCase):
 	"""list_sessions() must surface each session's session_id (read from its
@@ -1080,6 +1152,63 @@ class TestListSessionsSurfacesSessionId(unittest.TestCase):
 		sessions = list_sessions()
 
 		self.assertEqual(sessions[0]["session_id"], '')
+
+
+class TestListSessionsLegacyDiscovery(unittest.TestCase):
+	"""list_sessions() must surface a session whose report has NO `ai` results
+	(legacy sessions: history.json exists, report.results.ai is empty, no stamped
+	session_id). Regression for resume reporting "No previous AI sessions found"
+	for such sessions. It resumes via the legacy history replay (empty session_id)."""
+
+	def _write(self, tmp_root, *, report_name='report.json', results_ai=None, info=None, history='[]'):
+		import json as _json
+		from pathlib import Path
+		task_dir = Path(tmp_root) / 'ws1' / 'tasks' / 'task1'
+		task_dir.mkdir(parents=True)
+		(task_dir / 'history.json').write_text(history)
+		if report_name:
+			report = {"info": info or {}, "results": {"ai": results_ai if results_ai is not None else []}}
+			(task_dir / report_name).write_text(_json.dumps(report))
+		return str(task_dir / 'history.json')
+
+	@patch('secator.ai.session.glob.glob')
+	def test_legacy_session_with_empty_ai_results_is_listed(self, mock_glob):
+		from secator.ai.session import list_sessions
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history_path = self._write(
+			tmp_root,
+			results_ai=[],
+			info={"targets": ["pentest-ground.com"], "run_opts": {"prompt": "Run a pentest"}},
+		)
+		mock_glob.return_value = [history_path]
+		sessions = list_sessions()
+		self.assertEqual(len(sessions), 1)
+		self.assertEqual(sessions[0]["session_id"], '')
+		self.assertEqual(sessions[0]["prompt"], "Run a pentest")  # fell back to run_opts.prompt
+		self.assertEqual(sessions[0]["targets"], ["pentest-ground.com"])
+
+	@patch('secator.ai.session.glob.glob')
+	def test_prompt_falls_back_to_first_user_message_in_history(self, mock_glob):
+		from secator.ai.session import list_sessions
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history = '[{"role": "system", "content": "sys"}, {"role": "user", "content": "do the thing"}]'
+		history_path = self._write(tmp_root, results_ai=[], info={}, history=history)
+		mock_glob.return_value = [history_path]
+		sessions = list_sessions()
+		self.assertEqual(sessions[0]["prompt"], "do the thing")
+
+	@patch('secator.ai.session.glob.glob')
+	def test_report_ai_json_filename_is_found(self, mock_glob):
+		from secator.ai.session import list_sessions
+		tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		history_path = self._write(
+			tmp_root, report_name='report_ai.json', results_ai=[],
+			info={"run_opts": {"prompt": "from report_ai"}},
+		)
+		mock_glob.return_value = [history_path]
+		sessions = list_sessions()
+		self.assertEqual(len(sessions), 1)
+		self.assertEqual(sessions[0]["prompt"], "from report_ai")
 
 
 class TestAddAssistantToHistory(unittest.TestCase):
@@ -1151,7 +1280,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def get_action_budget(self, model):
 				return 10000
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
@@ -1215,35 +1344,37 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 		self.assertEqual(doc.message["content"], tool_result_str)
 
 	def test_tool_result_runner_id_from_group_result_context(self):
-		"""runner_id is pulled from the collected result's own _context
-		(task_id/workflow_id/scan_id), stamped by the persistence hooks -
-		NOT from self.context."""
-		from secator.output_types import Ai
+		"""For a runner tool (run_task/run_workflow/run_scan) runner_id is pulled from the
+		collected finding's own _context.<type>_id (stamped by the persistence hooks),
+		NOT from self.context. Non-runner tools (e.g. run_shell) get no runner_id."""
+		from secator.output_types import Ai, Tag
 
 		ctx = MagicMock()
 		ctx.results = []
 		action = {
-			"action": "shell",
-			"command": "echo hi",
+			"action": "task",
+			"name": "testtask",
+			"targets": [],
 			"tool_call_id": "tc_runner",
-			"tool_call_name": "run_shell",
+			"tool_call_name": "run_task",
 		}
 		fake_self, _persisted = self._make_fake_self()
 
-		def _shell_with_task_id(*a, **k):
-			yield Ai(content="ok", ai_type="shell_output", _context={
+		def _task_with_id(*a, **k):
+			yield Tag(name="t", match="m", value="v", _context={
 				"tool_call_id": action["tool_call_id"],
 				"tool_call_name": action["tool_call_name"],
 				"task_id": "task-xyz",
 			})
 
-		with patch("secator.ai.actions._handle_shell", _shell_with_task_id):
+		with patch("secator.ai.actions._handle_task", _task_with_id):
 			from secator.tasks.ai import ai as AiTask
 			yielded = list(AiTask._dispatch_and_collect(fake_self, [action], ctx))
 
 		tool_result_ais = [r for r in yielded if isinstance(r, Ai) and r.ai_type == "tool_result"]
 		self.assertEqual(len(tool_result_ais), 1)
 		self.assertEqual(tool_result_ais[0].extra_data.get("runner_id"), "task-xyz")
+		self.assertEqual(tool_result_ais[0].extra_data.get("runner_type"), "task")
 
 	def test_tool_result_ai_emitted_on_error_paths(self):
 		"""Malformed-JSON / unknown-tool / guardrail-denial error paths (in
@@ -1256,7 +1387,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def __init__(self):
 				self.tool_results = []
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
@@ -1297,7 +1428,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 			def __init__(self):
 				self.tool_results = []
 
-			def add_tool_result(self, name, tc_id, content):
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
 				self.tool_results.append((name, tc_id, content))
 
 		fake_self = MagicMock()
@@ -1329,6 +1460,87 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 		self.assertEqual(len(tool_results), 1)
 		self.assertIn("out_of_scope", tool_results[0].message["content"])
 		self.assertEqual(warnings, [])
+
+
+class TestPickSessionViaBackend(unittest.TestCase):
+	"""Verify the TUI-safe resume picker routes through the backend (not the raw console menu).
+
+	Regression guard: once the Textual TUI became the default `secator x ai` frontend, the
+	plain-console session picker (tty.setraw + key reads) collided with Textual's hold on the
+	terminal, so `--resume` no longer worked under the TUI. pick_session_via_backend presents
+	the session list via backend.ask_user and maps the chosen label back to its session.
+	"""
+
+	def _sessions(self):
+		return [
+			{"name": "recon", "prompt": "scan the target", "mtime": 1700000000,
+			 "targets": ["example.com"], "folder": "/w/ws1/tasks/ai/recon", "session_id": "s1"},
+			{"name": "chat", "prompt": "chat about results", "mtime": 1700001000,
+			 "targets": [], "folder": "/w/ws1/tasks/ai/chat", "session_id": "s2"},
+		]
+
+	def test_picks_session_by_label_through_backend(self):
+		from secator.ai.session import pick_session_via_backend
+		sessions = self._sessions()
+		backend = MagicMock()
+		# Capture the choices offered, then answer with the SECOND one.
+		captured = {}
+
+		def _ask_user(question, choices, session_id, prompt_type="stopped", **kwargs):
+			captured["choices"] = choices
+			captured["session_id"] = session_id
+			captured["kwargs"] = kwargs
+			return {"answer": choices[1]}
+
+		backend.ask_user.side_effect = _ask_user
+		with patch("secator.ai.session.list_sessions", return_value=sessions):
+			picked = pick_session_via_backend(backend, session_id="cur")
+
+		self.assertIs(picked, sessions[1])
+		self.assertEqual(len(captured["choices"]), 2)
+		self.assertEqual(captured["session_id"], "cur")
+		# The raw-console menu must NOT be used under a display-owning backend.
+		self.assertIn("scan the target", captured["choices"][0])
+		# Each entry is a single-line picker row: leading "> " marker, solo mode requested.
+		self.assertTrue(captured["choices"][0].startswith("> "))
+		self.assertTrue(captured["kwargs"].get("solo"))
+		# Every row stays on a single line (no embedded newlines from multi-line prompts).
+		self.assertTrue(all("\n" not in c for c in captured["choices"]))
+
+	def test_cancel_returns_none(self):
+		from secator.ai.session import pick_session_via_backend
+		backend = MagicMock()
+		backend.ask_user.return_value = {"answer": None}
+		with patch("secator.ai.session.list_sessions", return_value=self._sessions()):
+			self.assertIsNone(pick_session_via_backend(backend))
+
+	def test_no_sessions_returns_none_without_prompting(self):
+		from secator.ai.session import pick_session_via_backend
+		backend = MagicMock()
+		with patch("secator.ai.session.list_sessions", return_value=[]):
+			self.assertIsNone(pick_session_via_backend(backend))
+		backend.ask_user.assert_not_called()
+
+	def test_duplicate_labels_stay_unique_and_map_correctly(self):
+		from secator.ai.session import pick_session_via_backend
+		# Two sessions with the SAME name/prompt/mtime/targets -> identical base label.
+		dup = [
+			{"name": "x", "prompt": "same", "mtime": 1700000000, "targets": ["t"],
+			 "folder": "/w/ws/tasks/ai/a", "session_id": "a"},
+			{"name": "x", "prompt": "same", "mtime": 1700000000, "targets": ["t"],
+			 "folder": "/w/ws/tasks/ai/b", "session_id": "b"},
+		]
+		backend = MagicMock()
+
+		def _ask_user(question, choices, session_id, prompt_type="stopped", **kwargs):
+			# choices must be unique so the answer disambiguates
+			self.assertEqual(len(set(choices)), 2)
+			return {"answer": choices[1]}
+
+		backend.ask_user.side_effect = _ask_user
+		with patch("secator.ai.session.list_sessions", return_value=dup):
+			picked = pick_session_via_backend(backend)
+		self.assertIs(picked, dup[1])
 
 
 if __name__ == "__main__":

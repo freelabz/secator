@@ -19,6 +19,13 @@ permissions:
 env:
   FORCE_COLOR: 1
 
+# Supersede in-flight builds: a newer push to `canary` CANCELS any running build
+# so an OLDER build can't finish last and overwrite the mutable `:canary` tag with
+# stale code (the build-race that served outdated canary bundles). Latest commit wins.
+concurrency:
+  group: publish-canary-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish-canary-docker:
     runs-on: ubuntu-latest
@@ -47,8 +54,66 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build Docker image (canary)
-        run: docker build -t freelabz/secator:canary .
+      - name: Build Docker image (canary + immutable per-commit tag)
+        run: |
+          # Also stamp an IMMUTABLE per-commit tag. :canary is mutable and the core
+          # image is pulled through mirror.gcr.io, which lags Docker Hub on mutable
+          # tags — so deploy by :canary-<sha> (unique → never cached stale, forces a
+          # fresh content-addressed pull).
+          SHORT=$(git rev-parse --short=12 "$GITHUB_SHA")
+          docker build -t freelabz/secator:canary -t "freelabz/secator:canary-${SHORT}" .
 
-      - name: Push Docker image (canary)
-        run: docker push freelabz/secator:canary
+      - name: Push Docker image (canary + immutable tag)
+        run: |
+          SHORT=$(git rev-parse --short=12 "$GITHUB_SHA")
+          docker push freelabz/secator:canary
+          docker push "freelabz/secator:canary-${SHORT}"
+
+      - name: Dispatch canary platform sync (pulumi)
+        # Core-canary moved → tell the deploy tower to roll the canary workers to :canary-<sha>
+        # and repoint secator-api's core pin (keeps core & API in lock-step). Reveals only the
+        # pulumi repo name + core's own sha — no platform details in this public repo.
+        env:
+          GH_TOKEN: ${{ secrets.PULUMI_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "PULUMI_DISPATCH_TOKEN unset — skipping sync dispatch"; exit 0; fi
+          SHORT=$(git rev-parse --short=12 "$GITHUB_SHA")
+          gh workflow run sync-core-canary.yml --repo freelabz/secator-cloud-pulumi --ref main -f core_sha="$SHORT"
+
+      - name: Prune old canary-<sha> tags (keep latest 3)
+        # The immutable canary-<sha> tags exist only to let the canary worker pull a
+        # content-addressed core image past the mirror.gcr.io lag — they are NOT public
+        # artifacts. Prune them so this PUBLIC repo's tag list stays clean (just :canary,
+        # :latest, release versions). The plain :canary tag and any non-canary-<sha> tag
+        # are never matched/deleted. Best-effort: never fail the build on prune errors.
+        continue-on-error: true
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          KEEP=3
+          REPO="freelabz/secator"
+          # Auth to the Docker Hub HTTP API (separate from the registry login above).
+          JWT=$(curl -sf -H "Content-Type: application/json" \
+            -d "{\"username\":\"${DOCKERHUB_USERNAME}\",\"password\":\"${DOCKERHUB_TOKEN}\"}" \
+            https://hub.docker.com/v2/users/login/ | jq -r .token)
+          if [ -z "$JWT" ] || [ "$JWT" = "null" ]; then
+            echo "::warning::Docker Hub API login failed; skipping prune"; exit 0
+          fi
+          # List canary-* tags, newest first; keep the first $KEEP, delete the rest.
+          # The `name=canary-` filter is a substring match, so exclude the bare :canary
+          # tag defensively (regex anchors canary-<hex>).
+          mapfile -t OLD < <(
+            curl -sf -H "Authorization: JWT ${JWT}" \
+              "https://hub.docker.com/v2/repositories/${REPO}/tags/?page_size=100&name=canary-&ordering=-last_updated" \
+            | jq -r '.results[].name | select(test("^canary-[0-9a-f]+$"))' \
+            | tail -n +$((KEEP + 1))
+          )
+          if [ "${#OLD[@]}" -eq 0 ]; then echo "Nothing to prune."; exit 0; fi
+          for TAG in "${OLD[@]}"; do
+            echo "Pruning ${REPO}:${TAG}"
+            curl -sf -X DELETE -H "Authorization: JWT ${JWT}" \
+              "https://hub.docker.com/v2/repositories/${REPO}/tags/${TAG}/" \
+              || echo "::warning::failed to delete ${TAG}"
+          done

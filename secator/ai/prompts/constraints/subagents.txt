@@ -7,7 +7,7 @@ Use a subagent when:
 - The user explicitly asks for a subagent
 
 Mode:
-- In an `auto` or `attack` session you MAY set `mode` to pick the subagent's mode (e.g. hand a confirmed vulnerability to a dedicated `exploit` subagent).
+- In an `auto` or `scan` session you MAY set `mode` to pick the subagent's mode (e.g. hand a confirmed vulnerability to a dedicated `exploit` subagent).
 - In a user-pinned read-only `chat` session the subagent is forced to `chat`; do not set a different mode (if the user wants an acting subagent, they switch the mode to `auto`).
 
 Put ALL context the subagent needs in `objective` (it only sees what you pass):

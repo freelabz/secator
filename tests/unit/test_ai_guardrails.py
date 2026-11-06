@@ -35,10 +35,13 @@ class TestGuardrailsConfig(unittest.TestCase):
 		self.assertIn("target({targets})", allow)
 
 	def test_ai_permissions_deny_defaults(self):
-		"""Default deny should block AWS metadata and localhost."""
+		"""Default deny blocks the cloud metadata endpoint. localhost/127.0.0.1 are NOT
+		denied by default so local labs / local testing work out of the box; a user who
+		wants them blocked re-adds them to addons.ai.permissions.deny."""
 		deny = CONFIG.addons.ai.permissions["deny"]
 		self.assertIn("target(169.254.169.254)", deny)
-		self.assertIn("target(127.0.0.1)", deny)
+		self.assertNotIn("target(127.0.0.1)", deny)
+		self.assertNotIn("target(localhost)", deny)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -233,9 +236,37 @@ class TestDetection(unittest.TestCase):
 		self.assertEqual(extract_command_targets("sleep 0.5"), [])
 		self.assertIn("1.2.3.4", extract_command_targets("nmap 1.2.3.4"))  # real IP still a target
 
+	def test_extract_command_targets_ip_hidden_in_code_string(self):
+		"""An IP buried in a `python3 -c "..."` code string (one multi-token arg the
+		per-arg walk skips) must still be extracted, so the scope gate sees it and a
+		shell command can't route around an out-of-scope deny. Regression for the
+		raw-sweep moving into the parse-failure branch only."""
+		cmd = "python3 -c \"import socket; s=socket.socket(); s.connect(('34.118.226.132',21))\""
+		self.assertIn("34.118.226.132", extract_command_targets(cmd))
+
+	def test_extract_command_targets_ip_in_non_http_scheme(self):
+		"""A non-http(s) scheme the URL regex ignores (ftp://IP) must still surface its
+		IP as a target."""
+		self.assertIn("34.118.226.132", extract_command_targets("curl -sv ftp://34.118.226.132/"))
+
 	def test_extract_command_targets_host(self):
 		targets = extract_command_targets("nmap example.com")
 		self.assertIn("example.com", targets)
+
+	def test_file_and_code_tokens_not_targets_for_local_cmds(self):
+		"""A file/code-looking arg to a NON-network command is not a target — many file
+		extensions are real TLDs with parked DNS (README.md) and member-access resolves
+		via a real TLD (Date.now -> .now), so DNS alone can't reject them."""
+		self.assertEqual(extract_command_targets("cat README.md"), [])
+		self.assertEqual(extract_command_targets("head -50 server.js"), [])
+		self.assertEqual(extract_command_targets("grep Date.now app.js"), [])
+		self.assertEqual(extract_command_targets("node -e \"console.log(Date.now())\""), [])
+
+	def test_network_cmd_capitalized_host_still_scoped(self):
+		"""The file/code skip must NOT un-scope a real host on a network command: a
+		capitalized domain (Example.com) or an ext-TLD host on curl/nmap must still reach
+		the target-scope check (regression guard for the skip being command-scoped)."""
+		self.assertIn("Example.com", extract_command_targets("nmap Example.com"))
 
 	def test_extract_command_targets_host_in_url_not_duplicated(self):
 		"""Host inside a URL should not be extracted as a separate target."""
@@ -330,6 +361,16 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "shell", "command": "rm -rf /*"})
 		self.assertEqual(result.decision, "deny")
 
+	def test_shell_unmatched_reason_dedups_command_names(self):
+		# a command whose name repeats across subcommands must list it ONCE in the ask reason,
+		# not N times ("No rule for command(s): mk" — not "mk, mk, mk, ...").
+		engine = self._make_engine(allow=["target(*)"])
+		result = engine.check_action(
+			{"action": "shell", "command": "mk a && mk b && mk c && mk d"})
+		self.assertEqual(result.decision, "ask")
+		self.assertEqual(result.reason, "No rule for command(s): mk")
+		self.assertEqual(result.shell_command, "mk a && mk b && mk c && mk d")
+
 	def test_task_allowed_wildcard(self):
 		engine = self._make_engine(allow=["task(*)", "target(*)"])
 		result = engine.check_action({"action": "task", "name": "nmap", "targets": ["10.0.0.1"]})
@@ -345,9 +386,9 @@ class TestPermissionEngine(unittest.TestCase):
 		result = engine.check_action({"action": "query", "query": {"_type": "vulnerability"}})
 		self.assertEqual(result.decision, "allow")
 
-	def test_follow_up_always_allowed(self):
+	def test_stop_always_allowed(self):
 		engine = self._make_engine()
-		result = engine.check_action({"action": "follow_up", "reason": "test"})
+		result = engine.check_action({"action": "stop", "reason": "test"})
 		self.assertEqual(result.decision, "allow")
 
 	# --- M7: add_finding privileged-type gating ---
@@ -487,6 +528,26 @@ class TestPermissionEngine(unittest.TestCase):
 		engine.add_runtime_allow(["target(10.5.2.3)"])
 		result = engine.check_action({"action": "shell", "command": "nmap 10.5.2.3"})
 		self.assertEqual(result.decision, "allow")
+
+	def test_export_runtime_allow_round_trips_for_subagent_inheritance(self):
+		# A subagent inherits the parent's human-approved runtime allow-list via
+		# export -> add. A target-host approval must keep covering its subpaths in the
+		# child, and the child must still deny an unapproved host.
+		parent = self._make_engine(allow=["target(10.5.2.3)"], ask=["target(*)"])
+		# A host approval (what "allow all URLs from app.example.com" grants) covers
+		# subpaths because _check_value also tests the URL's extracted hostname.
+		parent.add_runtime_allow(["target(app.example.com)"])
+		exported = parent.export_runtime_allow()
+		self.assertIn("target(app.example.com)", exported)
+
+		child = self._make_engine(allow=["target(10.5.2.3)", "task(*)"], ask=["target(*)"])
+		child.add_runtime_allow(exported)
+		approved = child.check_action(
+			{"action": "task", "name": "httpx", "targets": ["https://app.example.com/api/auth/signup"]})
+		self.assertEqual(approved.decision, "allow")
+		unapproved = child.check_action(
+			{"action": "task", "name": "httpx", "targets": ["https://evil.example.org/"]})
+		self.assertEqual(unapproved.decision, "ask")
 
 	# --- Evaluation order ---
 
@@ -794,7 +855,7 @@ class TestGuardrailsIntegration(unittest.TestCase):
 	def test_dispatch_action_without_engine(self):
 		"""When no permission_engine is set, actions should pass through."""
 		ctx = ActionContext(targets=["example.com"], model="test")
-		action = {"action": "follow_up", "reason": "test"}
+		action = {"action": "stop", "reason": "test"}
 		results = list(dispatch_action(action, ctx))
 		has_denial = any(
 			isinstance(r, (Warning, Error)) and "denied" in getattr(r, 'message', '').lower()
@@ -1687,6 +1748,69 @@ class TestScopeHardDeny(unittest.TestCase):
 		self.assertEqual(result.reason, "out_of_scope")
 		self.assertIn("8.8.8.8", result.targets)
 
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestControlActionsAllowed(unittest.TestCase):
+	"""Control / meta actions (subagent, stop, change_mode) must NOT be denied as
+	'Unknown action type' — that silently broke run_subagent, bare stop(), and
+	change_mode. They have no egress of their own; a subagent's targets are still
+	scope-checked."""
+
+	def _engine(self, in_scope=None):
+		return PermissionEngine(
+			config={"allow": [], "deny": [], "ask": []}, in_scope=in_scope or ["scanme.nmap.org"])
+
+	def test_control_actions_allowed(self):
+		eng = self._engine()
+		for action in ({"action": "subagent"}, {"action": "stop"},
+		               {"action": "change_mode", "mode": "scan"}):
+			self.assertEqual(eng.check_action(action).decision, "allow", action["action"])
+
+	def test_subagent_in_scope_target_allowed(self):
+		eng = self._engine()
+		r = eng.check_action({"action": "subagent", "targets": ["scanme.nmap.org"]})
+		self.assertEqual(r.decision, "allow")
+
+	def test_subagent_out_of_scope_target_not_allowed(self):
+		"""A subagent spawned at an out-of-scope target is still gated by the target
+		layer (ask/deny) — auto-allowing the action type doesn't skip target scope."""
+		eng = self._engine()
+		r = eng.check_action({"action": "subagent", "targets": ["evil.example.com"]})
+		self.assertNotEqual(r.decision, "allow")
+
+
+class TestMalformedPortUrlTarget(unittest.TestCase):
+	"""A URL target with a non-numeric port (e.g. lifted from `proxy_pass http://h:8080;`)
+	must NOT fail-close the target check with a ValueError, and — critically — must NOT
+	fall through as a 'non-network' value that is ALLOWED past an engagement scope."""
+
+	def _engine(self, in_scope):
+		return PermissionEngine(config={"allow": [], "deny": [], "ask": []}, in_scope=in_scope)
+
+	def test_trailing_delim_url_does_not_fail_closed(self):
+		eng = self._engine(in_scope=["app.example.com"])
+		r = eng._check_values("target", ["http://127.0.0.1:8080;"])
+		self.assertNotIn("fail-closed", (r.reason or ""))
+
+	def test_out_of_scope_malformed_url_is_not_allowed(self):
+		# SECURITY: before the port-guard this input fail-closed (deny); the guard must NOT
+		# turn it into an ALLOW by leaving the raw string to be treated as non-network.
+		eng = self._engine(in_scope=["app.example.com"])
+		for t in ("http://10.1.2.3:8080;", "http://10.1.2.3:8080"):
+			self.assertNotEqual(eng._check_values("target", [t]).decision, "allow", t)
+
+	def test_balanced_parens_url_preserved(self):
+		from secator.ai.guardrails import extract_command_targets, _strip_trailing_delims
+		url = "https://en.wikipedia.org/wiki/Python_(programming_language)"
+		self.assertEqual(_strip_trailing_delims(url), url)
+		self.assertIn(url, extract_command_targets(f"curl {url}"))
+
+	def test_trailing_semicolon_stripped_in_extraction(self):
+		from secator.ai.guardrails import extract_command_targets
+		got = extract_command_targets("curl http://127.0.0.1:8080;")
+		self.assertIn("http://127.0.0.1:8080", got)
+		self.assertNotIn("http://127.0.0.1:8080;", got)
 
 
 if __name__ == '__main__':
