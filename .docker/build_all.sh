@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define an array of distributions
-DISTROS=("alpine" "arch" "debian" "kali" "osx" "ubuntu")
+DISTROS=("alpine" "arch" "debian" "fedora" "gentoo" "kali" "osx" "ubuntu")
 BUILDER=$(which docker || which podman || which buildah)
 
 if [ -z "$BUILDER" ]; then
