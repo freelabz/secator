@@ -350,6 +350,16 @@ def host_in_scope(target, in_scope=None, out_of_scope=None):
 	return True
 
 
+def finding_scope_target(item):
+	"""Value to scope-check an OutputType against: its first present ``TARGET_FIELDS``
+	entry, or None for hostless types (vulns / tags / info / ...) that are never scoped."""
+	for field in getattr(item, 'TARGET_FIELDS', ()) or ():
+		value = getattr(item, field, None)
+		if value:
+			return value
+	return None
+
+
 def resolve_scope_hostnames(scope):
 	"""Expand a scope list with the resolved IP(s) of its plain-hostname entries.
 

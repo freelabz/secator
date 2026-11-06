@@ -17,6 +17,7 @@ CONFIDENCE_NB = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4, 'un
 class OutputType:
 	_table_fields = []
 	_sort_by = ()
+	TARGET_FIELDS = []  # fields to scope-check this type against (scope.finding_scope_target)
 	# Fields to group by (tuple) and the field whose values to aggregate/collect
 	# when the CLI `--group` option is used without an explicit field.
 	_group_by = ()

@@ -23,6 +23,7 @@ class Target(OutputType):
 		'type',
 	]
 	_sort_by = ('type', 'name')
+	TARGET_FIELDS = ['name']  # fields to scope-check this type against (scope.finding_scope_target)
 
 	def __post_init__(self):
 		if not self.type:
