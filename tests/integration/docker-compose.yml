@@ -113,7 +113,12 @@ services:
 
   # Zabbix agent with remote commands enabled — exercises zabbix_get RCE detection.
   zabbix_agent:
-    image: zabbix/zabbix-agent:latest
+    # Pin a concrete version: the floating ':latest' tag drifted to a release
+    # whose entrypoint renamed ZBX_ALLOWKEY -> indexed ZBX_ALLOWKEY_0 and now
+    # hard-errors on the old var, so the container crash-looped on boot and the
+    # agent never listened (zabbix_get -> POLLERR,POLLHUP). Pinning stops the
+    # lab from silently breaking again when upstream :latest moves.
+    image: zabbix/zabbix-agent:alpine-7.0.32
     restart: always
     environment:
       # zabbix_get connects via the host-forwarded port, so the source address
@@ -123,7 +128,9 @@ services:
       ZBX_PASSIVE_ALLOW: "true"
       ZBX_ACTIVE_ALLOW: "false"
       ZBX_ENABLEREMOTECOMMANDS: "1"
-      ZBX_ALLOWKEY: "system.run[*]"
+      # Zabbix 7.0 requires indexed AllowKey vars (ZBX_ALLOWKEY_0, _1, ...);
+      # the old scalar ZBX_ALLOWKEY is rejected and aborts startup.
+      ZBX_ALLOWKEY_0: "system.run[*]"
     ports:
       - "127.0.0.1:10050:10050"
 

@@ -62,7 +62,7 @@ class testssl(Command):
 	}
 	install_version = 'v3.2.0'
 	install_cmd = (
-		f'git clone --depth 1 --single-branch -b [install_version] https://github.com/drwetter/testssl.sh.git {CONFIG.dirs.share}/testssl.sh_[install_version] || true && '  # noqa: E501
+		f'git clone --depth 1 --single-branch -b [install_version] https://github.com/testssl/testssl.sh.git {CONFIG.dirs.share}/testssl.sh_[install_version] || true && '  # noqa: E501
 		f'ln -sf {CONFIG.dirs.share}/testssl.sh_[install_version]/testssl.sh {CONFIG.dirs.bin}'
 	)
 	install_github_bin = False
