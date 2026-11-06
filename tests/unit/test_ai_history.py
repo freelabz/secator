@@ -6,6 +6,15 @@ from secator.definitions import ADDONS_ENABLED
 
 if ADDONS_ENABLED['ai']:
 	from secator.ai.history import ChatHistory
+	# ChatHistory.compact() lazily does `from secator.ai.utils import call_llm` at
+	# call time. Import it here at collection so it lands in conftest's first-test
+	# `sys.modules['secator.*']` snapshot. Otherwise the first compaction test's lazy
+	# import registers a fresh `secator.ai.utils`, which the snapshot-restore teardown
+	# treats as a changed module generation and purges — evicting the module the NEXT
+	# test's `@patch('secator.ai.utils.call_llm')` targets, so that patch no longer
+	# applies and the real LLM call fires. Importing it up front keeps the generation
+	# stable so the patch holds across tests.
+	import secator.ai.utils  # noqa: F401
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
