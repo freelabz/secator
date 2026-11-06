@@ -10,6 +10,12 @@ profile: default
 tags: [http, crawl, fuzz, vuln, secrets]
 input_types:
   - url
+
+important_opts:
+  - passive
+  - nuclei
+  - wordlist
+
 workflows:
   url_crawl:
   url_fuzz:

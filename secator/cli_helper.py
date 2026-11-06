@@ -56,6 +56,7 @@ CLI_EXEC_OPTS = {
 
 CLI_TYPE_MAPPING = {
 	'str': str,
+	'wordlist': str,  # semantic type; a wordlist name/URL string on the CLI
 	'list': CLICK_LIST,
 	'int': int,
 	'float': float,
@@ -106,6 +107,10 @@ def decorate_command_options(opts):
 			conf.pop('requires_sudo', None)
 			conf.pop('sensitive', None)
 			conf.pop('prefix', None)
+			conf.pop('important', None)
+			conf.pop('important_order', None)
+			conf.pop('label', None)
+			conf.pop('placeholder', None)
 			choices = conf.pop('choices', None)
 			applies_to = conf.pop('applies_to', None)
 			default_from = conf.pop('default_from', None)
