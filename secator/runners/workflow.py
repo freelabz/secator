@@ -3,7 +3,7 @@ from dotmap import DotMap
 from secator.config import CONFIG
 from secator.output_types import Info
 from secator.runners._base import Runner
-from secator.runners._helpers import resolve_task_queue
+from secator.runners._helpers import prefix_queue, resolve_task_queue
 from secator.runners.task import Task
 from secator.safe_eval import safe_eval_condition
 from secator.tree import build_runner_tree, walk_runner_tree
@@ -172,12 +172,13 @@ class Workflow(Runner):
 		# only changes the queue — the `.s(self)` form still receives its forwarded
 		# results, so nothing is dropped.
 		start_queue = 'small' if (light_start or not chain_previous_results) else 'results'
+		start_queue = prefix_queue(start_queue, self.run_opts)
 		start_sig = mark_runner_started.si([], self, enable_hooks=True).set(queue=start_queue)
 		if chain_previous_results:
 			start_sig = mark_runner_started.s(self, enable_hooks=True).set(queue=start_queue)
 		sig = chain(
 			start_sig,
 			*sigs,
-			mark_runner_completed.s(self, enable_hooks=True).set(queue='results'),
+			mark_runner_completed.s(self, enable_hooks=True).set(queue=prefix_queue('results', self.run_opts)),
 		)
 		return sig
