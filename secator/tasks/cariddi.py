@@ -11,7 +11,8 @@ from secator.definitions import (DELAY, DEPTH, FILTER_CODES, FILTER_REGEX,
 							   THREADS, TIMEOUT, URL, USER_AGENT)
 from secator.output_types import Tag, Url
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpCrawler
+from secator.tasks._categories import HttpCrawlerMixin
+from secator.runners import Command
 
 CARIDDI_IGNORE_PATTERNS = re.compile(r"|".join([
 	r"<!--\s*Instance.*\s*-->",
@@ -35,7 +36,7 @@ CARIDDI_RENAME_LIST = {
 
 
 @task()
-class cariddi(HttpCrawler):
+class cariddi(Command, HttpCrawlerMixin):
 	"""Crawl endpoints, secrets, api keys, extensions, tokens..."""
 	cmd = 'cariddi'
 	input_types = [URL, HOST, HOST_PORT]

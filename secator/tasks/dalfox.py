@@ -10,7 +10,8 @@ from secator.definitions import (CONFIDENCE, DATA, DELAY, EXTRA_DATA, FOLLOW_RED
 							   USER_AGENT)
 from secator.output_types import Vulnerability, Url
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpBase
+from secator.tasks._categories import HttpBaseMixin
+from secator.runners import Command
 
 DALFOX_TYPE_MAP = {
 	'G': 'Grep XSS',
@@ -20,7 +21,7 @@ DALFOX_TYPE_MAP = {
 
 
 @task()
-class dalfox(HttpBase):
+class dalfox(Command, HttpBaseMixin):
 	"""Powerful open source XSS scanning tool."""
 	cmd = 'dalfox'
 	input_types = [URL]
