@@ -2,6 +2,7 @@ type: profile
 name: insane
 category: speed
 description: "Local LAN scanning or stress scanning"
+warning: "These settings can trigger denial of service (DoS) on the targeted applications or servers. Make sure they can handle the load."
 opts:
     rate_limit: 100000
     delay: 0

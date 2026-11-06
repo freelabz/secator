@@ -2,6 +2,8 @@ type: workflow
 name: url_bypass
 alias: urlbypass
 description: 4xx URL bypass techniques
+friendly_display_name: Bypass forbidden URLs (403)
+friendly_description: Try access-control bypasses on 4xx URLs
 long_description: |
   Attempts to bypass access restrictions on URLs that return 4xx status codes (forbidden, not found, etc.).
   Uses various HTTP header manipulation and path traversal techniques to potentially gain access

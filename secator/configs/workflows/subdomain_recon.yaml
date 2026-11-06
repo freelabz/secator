@@ -2,6 +2,8 @@ type: workflow
 name: subdomain_recon
 alias: subrec
 description: Subdomain reconnaissance
+friendly_display_name: Find subdomains
+friendly_description: Enumerate, verify, and takeover-check subdomains
 long_description: |
   Discovers subdomains associated with a target domain using multiple passive and active techniques.
   Combines passive sources, DNS queries, TLS certificate analysis, and optional brute-force methods.
