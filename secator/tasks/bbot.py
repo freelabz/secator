@@ -287,7 +287,7 @@ class bbot(Command):
 		'dnf|yum|zypper': ['python3-devel', 'gcc', 'git', 'openssl', 'unzip', 'tar'],
 		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar']
 	}
-	install_version = '2.7.2'
+	install_version = '3.0.2'
 	install_cmd = 'pipx install bbot==[install_version] --force'
 	install_post = {
 		# Glob the python minor version so this cleanup isn't silently skipped when
