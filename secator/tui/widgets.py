@@ -9,7 +9,7 @@ from __future__ import annotations
 from rich.markup import escape
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
 from textual.widgets import OptionList, SelectionList, Static, TextArea
 from textual.widgets._toggle_button import ToggleButton
@@ -24,6 +24,16 @@ from secator.tui.render import command_text, markdown_text
 ToggleButton.BUTTON_LEFT = ""
 ToggleButton.BUTTON_INNER = "●"
 ToggleButton.BUTTON_RIGHT = ""
+
+
+class ConversationScroll(VerticalScroll):
+	"""Scrollable conversation view. A click on a runner moves focus here, and Textual's
+	default focus handler re-matches CSS for the node AND every descendant — the whole
+	conversation. No rule styles a descendant by this container's focus, so restyle only
+	the container itself (and its scrollbars)."""
+
+	def watch_has_focus(self, _has_focus: bool) -> None:
+		self.app.stylesheet.update_nodes([self], animate=True)
 
 
 class PromptInput(TextArea):
@@ -185,6 +195,7 @@ class RunnerPanel(Vertical):
 		self._raw_collapsed = True   # raw command output hidden until the command is clicked
 		self._raw_text = None        # accumulated raw output, rendered by the single _raw_static
 		self._raw_static = None
+		self._cmd_hl = None          # (command, highlighted Text) cache for _cmd_render
 		self.subpanels: dict = {}   # source -> nested RunnerPanel (workflow/scan children)
 
 	def compose(self) -> ComposeResult:
@@ -206,7 +217,10 @@ class RunnerPanel(Vertical):
 		yield box
 
 	def _cmd_render(self) -> Text:
-		t = command_text(self.command)   # '$ <bash-highlighted command>'
+		# '$ <bash-highlighted command>'; highlighting is cached so the reveal toggle stays cheap
+		if self._cmd_hl is None or self._cmd_hl[0] != self.command:
+			self._cmd_hl = (self.command, command_text(self.command))
+		t = self._cmd_hl[1].copy()
 		if self.raw_lines:               # only offer the reveal arrow if there IS raw output
 			arrow = "▼" if not self._raw_collapsed else "▶"
 			t.append(f"  {arrow}", style="#6b7187")
