@@ -17,6 +17,7 @@ RUN sudo pacman -Syu --noconfirm && \
 	go \
     jq \
     openssl \
+    openssl-3 \
 	proxychains \
 	proxychains-ng \
 	pyenv \
@@ -35,7 +36,13 @@ RUN sudo git clone https://github.com/pyenv/pyenv.git $PYENV_ROOT && \
     echo 'eval "$(pyenv init --path)"' | sudo tee -a /etc/profile.d/pyenv.sh && \
     sudo chmod +x /etc/profile.d/pyenv.sh
 
+# Arch ships OpenSSL 4 as the default 'openssl'; older CPython releases do not
+# build their _ssl module against it, so compile against the openssl-3 compat
+# package instead (headers + libs under /usr/include/openssl-3, /usr/lib/openssl-3).
 RUN source /etc/profile.d/pyenv.sh && \
+    PKG_CONFIG_PATH=/usr/lib/openssl-3/pkgconfig \
+    CPPFLAGS="-I/usr/include/openssl-3" \
+    LDFLAGS="-L/usr/lib/openssl-3 -Wl,-rpath,/usr/lib/openssl-3" \
     pyenv install $python_version && \
     pyenv global $python_version
 
