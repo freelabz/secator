@@ -549,7 +549,7 @@ class TUIApp(App):
 		spin = self._BG_SPIN[self._bg_frame % len(self._BG_SPIN)]
 		for st, rname, kind, config in getattr(self, "_bg_running_rows", []):
 			try:
-				st.update(self._bg_row_text(spin, "#e0882e", rname, kind, config))
+				st.update(self._bg_row_text(spin, "#e0882e", rname, kind, config), layout=False)
 			except Exception:  # noqa: BLE001 - row removed
 				pass
 
@@ -684,7 +684,8 @@ class TUIApp(App):
 		self._spin_frame = (self._spin_frame + 1) % len(self._SPIN)
 		try:
 			self.query_one("#status", Static).update(
-				Text.from_markup(f"[gold3]{self._SPIN[self._spin_frame]} {escape(self._status_text)}[/]"))
+				Text.from_markup(f"[gold3]{self._SPIN[self._spin_frame]} {escape(self._status_text)}[/]"),
+				layout=False)   # glyph swap only: same size, no relayout
 		except Exception:  # noqa: BLE001 - the status node may be gone during teardown
 			pass
 

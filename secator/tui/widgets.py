@@ -183,6 +183,8 @@ class RunnerPanel(Vertical):
 		self._spin_timer = None
 		self._collapsed = True
 		self._raw_collapsed = True   # raw command output hidden until the command is clicked
+		self._raw_text = None        # accumulated raw output, rendered by the single _raw_static
+		self._raw_static = None
 		self.subpanels: dict = {}   # source -> nested RunnerPanel (workflow/scan children)
 
 	def compose(self) -> ComposeResult:
@@ -267,7 +269,7 @@ class RunnerPanel(Vertical):
 			return
 		self._spin_frame = (self._spin_frame + 1) % len(self._SPIN)
 		try:
-			self._refresh_head()
+			self._refresh_head(layout=False)   # glyph swap only: same size, no relayout
 		except Exception:  # noqa: BLE001 - head may be gone during teardown
 			pass
 
@@ -279,8 +281,8 @@ class RunnerPanel(Vertical):
 		except Exception:  # noqa: BLE001
 			pass
 
-	def _refresh_head(self) -> None:
-		self.query_one(".runner-head", Head).update(self._header())
+	def _refresh_head(self, layout: bool = True) -> None:
+		self.query_one(".runner-head", Head).update(self._header(), layout=layout)
 
 	def toggle(self) -> None:
 		self._collapsed = not self._collapsed
@@ -353,7 +355,15 @@ class RunnerPanel(Vertical):
 			self._refresh_cmd()         # now there's raw output -> show the reveal arrow
 		if self.raw_lines == 500:
 			text = "… (output truncated)"
-		self.query_one(".runner-raw", Vertical).mount(Static(Text(text), classes="out-raw"))
+		# one growing Static for the whole raw block (not a widget per line): every layout
+		# pass walks all displayed widgets, so hundreds of line widgets make toggles lag.
+		if self._raw_static is None:
+			self._raw_text = Text(text)
+			self._raw_static = Static(self._raw_text, classes="out-raw")
+			self.query_one(".runner-raw", Vertical).mount(self._raw_static)
+		else:
+			self._raw_text.append("\n" + text)
+			self._raw_static.update(self._raw_text)
 
 	def _clear_empty_note(self) -> None:
 		# drop the "(no output)" placeholder once ANY real content arrives — it may have been
