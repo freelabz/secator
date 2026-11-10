@@ -134,6 +134,19 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # to avoid being rate-limited when fetching GitHub releases
 
+    # On a cache HIT, tools installed outside the cached paths (system packages such as nmap /
+    # masscan / arp-scan, and pipx tools) are absent. Install exactly the missing ones so every
+    # task is exercised on every run.
+    - name: Install tools missing from the cache
+      if: steps.toolcache.outputs.cache-hit == 'true'
+      run: |
+        set -o pipefail
+        MISSING=$(secator health --json | jq -r 'select(._type == "tool" and .installed == false) | ._name' | paste -sd, -)
+        echo "Missing tools: ${MISSING:-none}"
+        if [ -n "$MISSING" ]; then secator install tools "$MISSING" --fail-fast; fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Run integration tests
       run: |
         secator test integration --test test_celery,test_worker,test_tasks
