@@ -82,6 +82,8 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			# droopescan.mode defaults to 'drupal', matching the Drupal 7 lab container.
 			# Zabbix agent has remote commands enabled in the lab → exercise the RCE detection path.
 			'zabbix_get.key': 'system.run[id]',
+			# masscan has no default port list and exits non-zero without one.
+			'masscan.ports': '3000',
 		}
 		# TODO: copy profile and test with profile
 		# opts['profiles'] = ['all']
@@ -120,23 +122,14 @@ class TestTasks(unittest.TestCase, CommandOutputTester):
 			if not input:
 				console.print(f'\tTesting task {name} ... [dim gold3] skipped (no input)[/]')
 				return None
-			# Skip (don't fail) when the tool's binary isn't installed: some tools can't be
-			# installed in a vanilla CI image on every platform (e.g. a libtins C++ build, a
-			# runtime kernel module, root/Windows-only tooling). A missing binary is an
-			# environment gap, not a regression — mirror the "skipped (no input)" path. Tools
-			# that DID install still run and assert, so installable coverage is preserved.
-			bin_name = (cls.cmd or '').split()[0] if getattr(cls, 'cmd', None) else None
-			if bin_name and shutil.which(bin_name) is None:
-				console.print(f'\tTesting task {name} ... [dim gold3] skipped (binary {bin_name!r} not installed)[/]')
-				return None
-			# Skip (don't fail) a tool that needs root when we're not root: the CI runner is
-			# unprivileged, so a raw-socket/privileged tool (e.g. masscan) can't run and would
-			# only ever error with a non-zero return code. This is an environment constraint,
-			# not a regression — same rationale as the missing-binary skip above.
-			is_root = hasattr(os, 'geteuid') and os.geteuid() == 0
-			if getattr(cls, 'requires_sudo', False) and not is_root:
-				console.print(f'\tTesting task {name} ... [dim gold3] skipped (requires root, running unprivileged)[/]')
-				return None
+			# Only a tool explicitly marked install_optional (not installable on every platform,
+			# e.g. an apt-only package) may be skipped when its binary is absent. Any other missing
+			# tool is a broken install and must fail the test, not be silently skipped.
+			if getattr(cls, 'install_optional', False):
+				bin_name = (cls.cmd or '').split()[0] if getattr(cls, 'cmd', None) else None
+				if bin_name and shutil.which(bin_name) is None:
+					console.print(f'\tTesting task {name} ... [dim gold3] skipped (optional tool {bin_name!r} not installed)[/]')
+					return None
 			outputs = OUTPUTS_TASKS.get(name, [])
 			# Fresh opts per task: runners mutate their run_opts, so sharing one dict across
 			# concurrent runs would race.

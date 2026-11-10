@@ -46,6 +46,8 @@ INPUTS_TASKS = {
 	'rmg': '127.0.0.1:1617',
 	'eyewitness': 'http://localhost:3000/',
 	'apachetomcatscanner': 'http://127.0.0.1:18080',
+	# masscan takes IPs only (no hostname resolution).
+	'masscan': '127.0.0.1',
 }
 
 INPUTS_WORKFLOWS = {
