@@ -142,3 +142,6 @@ dmypy.json
 # Project
 .git/
 images/.repowise/
+
+# Local agent worktrees
+.claude/worktrees/
