@@ -14,8 +14,6 @@ from secator.output_types import Vulnerability, Technology, Url, Tag, Warning
 from secator.tasks._categories import Vuln
 from secator.utils import autodetect_type
 
-DEFAULT_PORTS = ['80', '443', '8080', '8081', '8180', '9080', '9081', '10080']
-
 
 @task()
 class apachetomcatscanner(Vuln):
@@ -26,7 +24,8 @@ class apachetomcatscanner(Vuln):
 	output_types = [Vulnerability, Technology, Url, Tag]
 	tags = ['tomcat', 'java', 'http']
 	input_flag = '-tt'
-	file_flag = '-tf'
+	file_flag = None
+	input_chunk_size = 1
 	version_flag = '--help'
 	opts = {
 		'only_http': {'is_flag': True, 'default': False, 'help': 'Scan only with HTTP scheme'},
@@ -53,21 +52,12 @@ class apachetomcatscanner(Vuln):
 
 	@staticmethod
 	def before_init(self):
-		# The tool has no host:port target syntax: split it into host + --target-ports.
-		ports, has_bare_host, inputs = set(), False, []
-		for target in self.inputs:
-			_type = autodetect_type(target)
-			if _type == HOST_PORT:
-				target, port = target.rsplit(':', 1)
-				ports.add(port)
-			elif _type != URL:
-				has_bare_host = True
-			inputs.append(target)
-		self.inputs = list(dict.fromkeys(inputs))
-		if ports:
-			if has_bare_host:
-				ports.update(DEFAULT_PORTS)
-			self.cmd += f' -tp {",".join(sorted(ports, key=int))}'
+		# The tool has no host:port syntax: run one target per process and pass the port via --target-ports.
+		if len(self.inputs) != 1 or autodetect_type(self.inputs[0]) != HOST_PORT:
+			return
+		host, port = self.inputs[0].rsplit(':', 1)
+		self.inputs[0] = host.strip('[]')
+		self.cmd += f' -tp {port}'
 
 	@staticmethod
 	def on_cmd(self):
