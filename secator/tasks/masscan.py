@@ -79,10 +79,7 @@ class masscan(ReconPort):
 				match = MASSCAN_RESUME_REGEX.search(content)
 				if match:
 					old_json_path = match.group(1).strip()
-					# The resume file may reference an output file that no longer
-					# exists (deleted/moved). Skip the copy in that case so the
-					# resume rewrite still proceeds and masscan writes fresh
-					# results to self.output_path (where on_cmd_done looks).
+					# Old output file may be gone: skip the copy and start fresh.
 					if os.path.exists(old_json_path):
 						shutil.copy(old_json_path, self.output_path)
 					else:

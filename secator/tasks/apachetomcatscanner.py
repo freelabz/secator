@@ -6,12 +6,15 @@ from secator.decorators import task
 
 # fmt: off
 from secator.definitions import (
-	DELAY, FOLLOW_REDIRECT, HEADER, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT, URL,
-	USER_AGENT
+	DELAY, FOLLOW_REDIRECT, HEADER, HOST, HOST_PORT, IP, OPT_NOT_SUPPORTED, OUTPUT_PATH, PROXY, RATE_LIMIT, RETRIES,
+	THREADS, TIMEOUT, URL, USER_AGENT
 )
 # fmt: on
 from secator.output_types import Vulnerability, Technology, Url, Tag, Warning
 from secator.tasks._categories import Vuln
+from secator.utils import autodetect_type
+
+DEFAULT_PORTS = ['80', '443', '8080', '8081', '8180', '9080', '9081', '10080']
 
 
 @task()
@@ -19,11 +22,11 @@ class apachetomcatscanner(Vuln):
 	"""Apache Tomcat servers vulnerability scanner."""
 
 	cmd = 'apachetomcatscanner'
-	input_types = [URL]
+	input_types = [HOST, IP, HOST_PORT, URL]
 	output_types = [Vulnerability, Technology, Url, Tag]
 	tags = ['tomcat', 'java', 'http']
-	input_flag = '-tu'
-	file_flag = '-tU'
+	input_flag = '-tt'
+	file_flag = '-tf'
 	version_flag = '--help'
 	opts = {
 		'only_http': {'is_flag': True, 'default': False, 'help': 'Scan only with HTTP scheme'},
@@ -49,15 +52,29 @@ class apachetomcatscanner(Vuln):
 	github_handle = 'p0dalirius/ApacheTomcatScanner'
 
 	@staticmethod
+	def before_init(self):
+		# The tool has no host:port target syntax: split it into host + --target-ports.
+		ports, has_bare_host, inputs = set(), False, []
+		for target in self.inputs:
+			_type = autodetect_type(target)
+			if _type == HOST_PORT:
+				target, port = target.rsplit(':', 1)
+				ports.add(port)
+			elif _type != URL:
+				has_bare_host = True
+			inputs.append(target)
+		self.inputs = list(dict.fromkeys(inputs))
+		if ports:
+			if has_bare_host:
+				ports.update(DEFAULT_PORTS)
+			self.cmd += f' -tp {",".join(sorted(ports, key=int))}'
+
+	@staticmethod
 	def on_cmd(self):
 		# Always list CVEs (+ descriptions) and export to JSON for parsing.
 		self.output_path = self.get_opt_value(OUTPUT_PATH)
 		if not self.output_path:
 			self.output_path = f'{self.reports_folder}/.outputs/{self.fqn}.json'
-		# Remove any pre-existing output file so a scan that fails before exporting
-		# can't make on_cmd_done parse and re-emit a previous run's results.
-		if os.path.exists(self.output_path):
-			os.remove(self.output_path)
 		self.cmd += (
 			' --list-cves --verbose --debug --show-cves-descriptions --no-colors'
 			f' --export-json {shlex.quote(self.output_path)}'
@@ -150,10 +167,7 @@ class apachetomcatscanner(Vuln):
 			cvss_score = 0.0
 		criticity = (cvss.get('criticity') or '').lower()
 		severity = criticity if criticity and criticity != 'none' else 'unknown'
-		# --list-cves lists CVEs that affect the *detected version*; it does not
-		# verify the vulnerable condition on the target. These are therefore
-		# potentially-applicable, not confirmed, so keep confidence low.
-		confidence = 'low'
+		confidence = 'high' if cvss_score > 0 else 'low'
 		extra_data = {'version': version}
 		if cve.get('vuln_type'):
 			extra_data['vuln_type'] = cve['vuln_type']
