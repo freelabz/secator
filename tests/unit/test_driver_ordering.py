@@ -80,6 +80,7 @@ class TestHookPhases(unittest.TestCase):
 	driver hook never aborts the remaining hooks — notably the persistence driver's."""
 
 	def setUp(self):
+		"""Build a task whose hooks run (not dry-run) with raise_on_error and no on_item hooks."""
 		import importlib
 		self.calls = []
 		self.task = importlib.import_module('secator.tasks.httpx').httpx(
@@ -89,7 +90,9 @@ class TestHookPhases(unittest.TestCase):
 		self.task.resolved_hooks['on_item'] = []
 
 	def _hook(self, driver, name, fail=False):
+		"""Build a recording hook of ``driver``; ``fail`` mutates the item then raises."""
 		def hook(runner, item):
+			"""Record the call, optionally mutating the item and failing."""
 			self.calls.append((name, item.url))
 			if fail:
 				item.url = 'http://mutated'

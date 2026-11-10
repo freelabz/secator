@@ -495,6 +495,7 @@ class TestItemUpdateHooks(unittest.TestCase):
 		'severity_nb': 3, 'extra_data': {'keep': 1}, 'tags': [], '_context': {'workspace_id': 'ws'}}
 
 	def setUp(self):
+		"""Wire an ActionContext to a real task's run_hooks over an in-memory store."""
 		import copy
 		import importlib
 		from functools import partial
@@ -510,11 +511,14 @@ class TestItemUpdateHooks(unittest.TestCase):
 		self.ctx._query_engine = self.engine
 
 	def _register(self, driver, event, fun):
+		"""Register ``fun`` as an ``event`` hook of driver module ``secator.hooks.<driver>``."""
 		fun.__module__ = f'secator.hooks.{driver}'
 		self.task.register_hooks({event: [fun]})
 
 	def _add_external_driver(self, fail=False):
+		"""Register an external pre driver, a post driver and a persistence on_item hook."""
 		def sync_finding(runner, item):
+			"""Pre on_item_update hook: tag the finding with an external id (optionally failing)."""
 			self.calls.append(('pre', item.severity, item.severity_nb))
 			item.extra_data['synced_id'] = 'ext-1'
 			if fail:
