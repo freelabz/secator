@@ -48,6 +48,8 @@ INPUTS_TASKS = {
 	'apachetomcatscanner': 'http://127.0.0.1:18080',
 	# masscan takes IPs only (no hostname resolution).
 	'masscan': '127.0.0.1',
+	# dublin-traceroute 0.4.2 exits with 'Malformed packet' on the CI runner (works locally); re-enable once fixed.
+	'dublin_traceroute': False,
 }
 
 INPUTS_WORKFLOWS = {
