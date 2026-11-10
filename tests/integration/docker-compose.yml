@@ -8,6 +8,11 @@ services:
     restart: always
     ports:
       - "127.0.0.1:3000:3000"
+    # Fixed non-loopback address so network-path tasks (dublin_traceroute) get a routable target.
+    networks:
+      default:
+      lab:
+        ipv4_address: 172.30.0.10
 
   # Log4Shell
   cve_2021_44228:
@@ -177,3 +182,9 @@ services:
 
 volumes:
   wordpress_data: {}
+
+networks:
+  lab:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

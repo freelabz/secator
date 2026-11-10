@@ -48,6 +48,8 @@ INPUTS_TASKS = {
 	'apachetomcatscanner': 'http://127.0.0.1:18080',
 	# masscan takes IPs only (no hostname resolution).
 	'masscan': '127.0.0.1',
+	# Non-loopback target: the juice_shop lab IP (fixed in docker-compose.yml).
+	'dublin_traceroute': '172.30.0.10',
 }
 
 INPUTS_WORKFLOWS = {
