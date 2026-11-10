@@ -6,7 +6,6 @@ enforce: true
 opts:
     # Task option overrides
     headless: true  # katana
-    system_chrome: true  # katana
     no_sandbox: true  # katana
     screenshot: true  # httpx
     juicy_extensions: 3  # cariddi

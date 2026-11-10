@@ -9,6 +9,7 @@ import operator
 import os
 import re
 import select
+import shutil
 import signal
 import socket
 import sys
@@ -50,6 +51,25 @@ _tasks = []
 
 TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
 CAMEL_TO_SNAKE_REGEX = re.compile(r'(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])')
+
+# Browsers looked up by go-rod's launcher.LookPath (Linux and macOS lists), in the same order.
+SYSTEM_BROWSERS = (
+	'chrome',
+	'google-chrome',
+	'/usr/bin/google-chrome',
+	'microsoft-edge',
+	'/usr/bin/microsoft-edge',
+	'chromium',
+	'chromium-browser',
+	'/usr/bin/google-chrome-stable',
+	'/usr/bin/chromium',
+	'/usr/bin/chromium-browser',
+	'/snap/bin/chromium',
+	'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+	'/Applications/Chromium.app/Contents/MacOS/Chromium',
+	'/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+	'/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+)
 
 
 class TaskError(ValueError):
@@ -1842,3 +1862,12 @@ def read_json(path, default=dict):
 	JSONDecodeError (a real anomaly, not silently masked).
 	"""
 	return _read_json(path, default)
+
+
+def find_system_browser():
+	"""Find a Chromium-based browser installed on the system.
+
+	Returns:
+		str | None: Path to the browser binary, or None if none was found.
+	"""
+	return next(filter(None, map(shutil.which, SYSTEM_BROWSERS)), None)
