@@ -140,6 +140,7 @@ jobs:
     - name: Install tools missing from the cache
       if: steps.toolcache.outputs.cache-hit == 'true'
       run: |
+        set -o pipefail
         MISSING=$(secator health --json | jq -r 'select(._type == "tool" and .installed == false) | ._name' | paste -sd, -)
         echo "Missing tools: ${MISSING:-none}"
         if [ -n "$MISSING" ]; then secator install tools "$MISSING" --fail-fast; fi
