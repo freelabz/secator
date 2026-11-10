@@ -58,16 +58,14 @@ LLM_SPINNER_MESSAGES = [
 AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord', 'sqlite', 'json']
 AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'jsonl', 'markdown', 'table', 'txt']
 
-# Canonical execution priority for drivers whose hooks share a lifecycle event.
-# Hook lists are concatenated in driver order, so this decides run order:
-#   1. Enrichment drivers (gcs) mutate findings (e.g. set screenshot_path) and
-#      must run BEFORE any backend persists them.
-#   2. Backend-type drivers (databases then the relay API) — the authoritative
-#      DB (mongodb) prevails over the relay (api) so status/findings are written
-#      directly to the store the API reads.
-# Drivers not listed here (e.g. discord notifications, external drivers) are not
-# ranked and keep their relative order after the ranked ones.
-DRIVER_PRIORITY = ['gcs', 'mongodb', 'sqlite', 'json', 'api']
+# Driver hook phases, in execution order. Hook lists run phase by phase:
+#   - pre: drivers that mutate items (e.g. gcs sets screenshot_path) BEFORE they are persisted.
+#     Default for any driver that doesn't declare a module-level ``HOOK_PHASE``.
+#   - persist: the store drivers below, in authority order (mongodb prevails as query backend).
+#   - post: drivers relaying already-persisted state (api, notifications); declare
+#     ``HOOK_PHASE = 'post'``.
+HOOK_PHASES = ('pre', 'persist', 'post')
+PERSISTENCE_DRIVERS = ('mongodb', 'sqlite', 'json')
 
 # Vocab
 ALIVE = 'alive'

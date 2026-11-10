@@ -319,38 +319,74 @@ def get_available_drivers():
 	return AVAILABLE_DRIVERS + discover_external_drivers()
 
 
+def get_driver_phase(driver):
+	"""Get a driver's hook phase (``pre``, ``persist`` or ``post``).
+
+	Persistence drivers are the fixed ``PERSISTENCE_DRIVERS``; any other driver module
+	may declare ``HOOK_PHASE = 'pre' | 'post'`` and defaults to ``pre``.
+
+	Args:
+		driver (str): Driver name.
+
+	Returns:
+		str: Hook phase.
+	"""
+	from secator.definitions import PERSISTENCE_DRIVERS
+	if driver in PERSISTENCE_DRIVERS:
+		return 'persist'
+	try:
+		module = importlib.import_module(f'secator.hooks.{driver}')
+	except Exception:
+		return 'pre'
+	phase = getattr(module, 'HOOK_PHASE', 'pre')
+	return phase if phase in ('pre', 'post') else 'pre'
+
+
+def get_hook_driver(hook):
+	"""Get the name of the driver a hook function belongs to, or None for a non-driver hook."""
+	module = getattr(hook, '__module__', None) or ''
+	if not module.startswith('secator.hooks.'):
+		return None
+	return module.split('.')[2]
+
+
+def get_hook_phase(hook):
+	"""Get a hook's phase: its driver's, or ``pre`` for a non-driver hook (runner class, library)."""
+	driver = get_hook_driver(hook)
+	return get_driver_phase(driver) if driver else 'pre'
+
+
+def driver_sort_key(driver):
+	"""Sort key ordering drivers by hook phase, persistence drivers in authority order."""
+	from secator.definitions import HOOK_PHASES, PERSISTENCE_DRIVERS
+	phase = get_driver_phase(driver)
+	rank = PERSISTENCE_DRIVERS.index(driver) if phase == 'persist' else 0
+	return HOOK_PHASES.index(phase), rank
+
+
+def hook_sort_key(hook):
+	"""Sort key ordering hooks by phase (see ``driver_sort_key``); non-driver hooks are ``pre``."""
+	driver = get_hook_driver(hook)
+	return driver_sort_key(driver) if driver else (0, 0)
+
+
 def order_drivers(drivers):
-	"""Order driver names by canonical priority and dedupe.
+	"""Order driver names by hook phase and dedupe.
 
-	Backend selection and hook execution both follow the order of the runner's
-	``context['drivers']`` list (hook lists are concatenated in driver order).
-	The ranking (``DRIVER_PRIORITY``) ensures:
-
-	- enrichment drivers (``gcs``) run before backends, so finding mutations
-	  (e.g. ``screenshot_path``) are present when a backend persists them;
-	- among backend-type drivers (databases then the relay API), the
-	  authoritative DB (``mongodb``) prevails over the relay (``api``) — without
-	  this a runner can execute fine yet stay stuck in PENDING because ``api``
-	  shadowed ``mongodb``'s ``update_runner`` hook.
-
-	Drivers not in ``DRIVER_PRIORITY`` (e.g. ``discord`` notifications, external
-	drivers) are left unranked, keeping their relative order after ranked ones.
+	Backend selection and hook execution both follow this order: ``pre`` drivers
+	(e.g. ``gcs``, external drivers by default) run before the persistence drivers so
+	their item mutations are persisted; ``post`` drivers (e.g. ``api``, ``discord``) run
+	after them, so the authoritative DB (``mongodb``) prevails over the ``api`` relay —
+	without this a runner can execute fine yet stay stuck in PENDING because ``api``
+	shadowed ``mongodb``'s ``update_runner`` hook. Order within a phase is preserved.
 
 	Args:
 		drivers (list[str]): Driver names, in arbitrary order.
 
 	Returns:
-		list[str]: Deduped driver names ordered by canonical priority.
+		list[str]: Deduped driver names ordered by hook phase.
 	"""
-	from secator.definitions import DRIVER_PRIORITY
-
-	def sort_key(driver):
-		try:
-			return (0, DRIVER_PRIORITY.index(driver))
-		except ValueError:
-			return (1, 0)
-
-	return sorted(dict.fromkeys(drivers), key=sort_key)
+	return sorted(dict.fromkeys(drivers), key=driver_sort_key)
 
 
 # Backend drivers that provide their own queryable store. If one of these (or the

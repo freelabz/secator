@@ -1,17 +1,19 @@
-"""Driver ordering regression tests.
+"""Driver hook phase ordering regression tests.
 
-Backends were historically selected via an explicit priority so the authoritative
-persistence driver (``mongodb``) would win over the relay driver (``api``). When
-backend selection was refactored to "derive from the drivers list" the ordering
-guarantee — and its test — was dropped. With both drivers attached, ``api`` could
-then run its HTTP ``update_runner`` hook before ``mongodb`` wrote status straight
-to the DB, leaving runners stuck in PENDING. These tests pin the ordering so
-``mongodb`` (and other DB/storage drivers) always prevail over ``api``.
+Hooks run phase by phase: ``pre`` drivers (default, e.g. ``gcs`` and external drivers),
+then the persistence drivers (``mongodb`` > ``sqlite`` > ``json``), then ``post`` drivers
+(``api``, ``discord``). With both attached, ``api`` running its HTTP ``update_runner`` hook
+before ``mongodb`` wrote status straight to the DB left runners stuck in PENDING, so
+``mongodb`` (and other persistence drivers) must always prevail over ``api``.
 """
 
+import sys
+import types
 import unittest
+from unittest.mock import patch
 
-from secator.loader import order_drivers
+from secator.loader import get_driver_phase, order_drivers
+from secator.output_types import Error, Url
 
 
 class TestDriverOrdering(unittest.TestCase):
@@ -28,25 +30,114 @@ class TestDriverOrdering(unittest.TestCase):
 		self.assertEqual(order_drivers(['sqlite', 'gcs']), ['gcs', 'sqlite'])
 
 	def test_full_canonical_order(self):
-		# Priority (DRIVER_PRIORITY): gcs (enrichment), then backends mongodb >
-		# sqlite > api; unranked drivers (discord) keep their order at the end.
+		# pre (gcs), persistence in authority order (mongodb > sqlite > json), post (api, discord).
 		self.assertEqual(
-			order_drivers(['sqlite', 'api', 'discord', 'gcs', 'mongodb']),
-			['gcs', 'mongodb', 'sqlite', 'api', 'discord'],
+			order_drivers(['json', 'sqlite', 'api', 'discord', 'gcs', 'mongodb']),
+			['gcs', 'mongodb', 'sqlite', 'json', 'api', 'discord'],
 		)
 
-	def test_unknown_drivers_kept_at_end_in_order(self):
-		# External/unknown drivers sort after known ones, preserving their relative order.
+	def test_builtin_phases(self):
+		self.assertEqual(get_driver_phase('gcs'), 'pre')
+		for driver in ('mongodb', 'sqlite', 'json'):
+			self.assertEqual(get_driver_phase(driver), 'persist')
+		for driver in ('api', 'discord'):
+			self.assertEqual(get_driver_phase(driver), 'post')
+
+	def test_unknown_drivers_default_to_pre_in_order(self):
+		# External/unknown drivers default to the pre phase (before persistence), keeping their order.
 		self.assertEqual(
 			order_drivers(['custom_b', 'api', 'custom_a', 'mongodb']),
-			['mongodb', 'api', 'custom_b', 'custom_a'],
+			['custom_b', 'custom_a', 'mongodb', 'api'],
 		)
+
+	def test_external_driver_declaring_post_phase(self):
+		module = types.ModuleType('secator.hooks.custom_post')
+		module.HOOK_PHASE = 'post'
+		sys.modules[module.__name__] = module
+		try:
+			self.assertEqual(
+				order_drivers(['custom_post', 'api', 'custom_pre', 'json']),
+				['custom_pre', 'json', 'custom_post', 'api'],
+			)
+		finally:
+			del sys.modules[module.__name__]
 
 	def test_dedupes_preserving_priority(self):
 		self.assertEqual(order_drivers(['api', 'mongodb', 'api']), ['mongodb', 'api'])
 
 	def test_empty(self):
 		self.assertEqual(order_drivers([]), [])
+
+
+def _driver_hook(driver, fun):
+	"""Make ``fun`` look like a hook defined in driver module ``secator.hooks.<driver>``."""
+	fun.__module__ = f'secator.hooks.{driver}'
+	return fun
+
+
+class TestHookPhases(unittest.TestCase):
+	"""Hooks run phase by phase whatever their registration order, and a failing pre / post
+	driver hook never aborts the remaining hooks — notably the persistence driver's."""
+
+	def setUp(self):
+		import importlib
+		self.calls = []
+		self.task = importlib.import_module('secator.tasks.httpx').httpx(
+			['http://localhost'], enable_hooks=False, dry_run=True, raise_on_error=True)
+		self.task.dry_run = False
+		self.task.enable_hooks = True
+		self.task.resolved_hooks['on_item'] = []
+
+	def _hook(self, driver, name, fail=False):
+		def hook(runner, item):
+			self.calls.append((name, item.url))
+			if fail:
+				item.url = 'http://mutated'
+				raise RuntimeError('boom')
+			return item
+		hook.__name__ = name
+		return _driver_hook(driver, hook)
+
+	def test_registration_sorted_by_phase(self):
+		post = self._hook('api', 'post')
+		persist = self._hook('json', 'persist')
+		pre = self._hook('custom_pre', 'pre')
+		self.task.register_hooks({'on_item': [post, persist, pre]})
+		self.assertEqual([h.__name__ for h in self.task.resolved_hooks['on_item']], ['pre', 'persist', 'post'])
+
+	def test_failing_pre_driver_does_not_abort_persistence(self):
+		persisted = []
+
+		def persist(runner, item):
+			persisted.append(item)
+			return item
+
+		failing = self._hook('custom_pre', 'failing', fail=True)
+		self.task.register_hooks({'on_item': [failing, _driver_hook('json', persist)]})
+		item = Url(url='http://a')
+		with patch.object(self.task, 'add_result') as add_result:
+			result = self.task.run_hooks('on_item', item, sub='item')
+		self.assertIs(result, item)  # passed along as the previous hook left it
+		self.assertEqual(persisted, [item])
+		self.assertEqual(item.url, 'http://mutated')  # partial in-place mutation is persisted
+		error = add_result.call_args[0][0]
+		self.assertIsInstance(error, Error)
+		self.assertIn('custom_pre', error.message)
+
+	def test_failing_post_driver_does_not_raise(self):
+		self.task.register_hooks({'on_item': [self._hook('api', 'post', fail=True)]})
+		self.task.run_hooks('on_item', Url(url='http://a'), sub='item')
+
+	def test_failing_persistence_driver_still_raises(self):
+		self.task.register_hooks({'on_item': [self._hook('json', 'persist', fail=True)]})
+		with self.assertRaises(RuntimeError):
+			self.task.run_hooks('on_item', Url(url='http://a'), sub='item')
+
+	def test_phase_filter(self):
+		self.task.resolved_hooks['on_item_update'] = []
+		self.task.register_hooks({'on_item_update': [self._hook('api', 'post'), self._hook('custom_pre', 'pre')]})
+		self.task.run_hooks('on_item_update', Url(url='http://a'), phase='post')
+		self.assertEqual(self.calls, [('post', 'http://a')])
 
 
 class TestQueryBackendOrdering(unittest.TestCase):
