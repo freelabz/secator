@@ -277,7 +277,10 @@ class bbot(Command):
 	# with `fatal error: Python.h: No such file or directory`.
 	install_pre = {
 		'apk': ['python3-dev', 'linux-headers', 'musl-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
-		'apt': ['python3-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
+		'apt': [
+			'python3-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar',
+			'ubuntu:chromium-browser', 'debian:chromium', 'kali:chromium'
+		],
 		'dnf|yum|zypper': ['python3-devel', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
 		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium']
 	}

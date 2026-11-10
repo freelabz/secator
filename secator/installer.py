@@ -201,7 +201,7 @@ class PackageInstaller:
 			for pkg in pkg_list:
 				if ':' in pkg:
 					pdistro, pkg = pkg.split(':')
-					if pdistro != distribution.name:
+					if pdistro != distro.id():
 						continue
 				pkg_str += f'{pkg} '
 			console.print(Info(message=f'Installing packages {pkg_str}'))
