@@ -29,10 +29,13 @@ class TestFindSystemBrowser(unittest.TestCase):
 
 class TestSystemBrowserDecision(unittest.TestCase):
 
-	def _build(self, cls, browser=None, musl=False, installed=True, **opts):
-		with mock.patch('secator.utils.shutil.which', side_effect=which(browser)), \
+	def _build(self, cls, browser=None, musl=False, installed=True, offline=False, auto_install=True, **opts):
+		with mock.patch('secator.tasks._categories.CONFIG') as config, \
+			mock.patch('secator.utils.shutil.which', side_effect=which(browser)), \
 			mock.patch('secator.tasks._categories.glob.glob', return_value=['/lib/ld-musl-x86_64.so.1'] if musl else []), \
 			mock.patch.object(cls, 'is_installed', return_value=installed):
+			config.offline_mode = offline
+			config.security.auto_install_commands = auto_install
 			task = cls('http://example.com', sync=True, print_cmd=False, run=False, **opts)
 		warnings = [r for r in task.results if r._type == 'warning']
 		return task.cmd.count('-system-chrome'), warnings
@@ -63,12 +66,10 @@ class TestSystemBrowserDecision(unittest.TestCase):
 
 	def test_downloads_disabled(self):
 		for offline, auto_install in [(True, True), (False, False)]:
-			with self.subTest(offline=offline, auto_install=auto_install), \
-				mock.patch('secator.tasks._categories.CONFIG') as config:
-				config.offline_mode = offline
-				config.security.auto_install_commands = auto_install
-				self.assertEqual(self._build(httpx, CHROMIUM, screenshot=True, system_chrome=False), (1, []))
-				count, warnings = self._build(katana, headless=True)
+			with self.subTest(offline=offline, auto_install=auto_install):
+				dl = {'offline': offline, 'auto_install': auto_install}
+				self.assertEqual(self._build(httpx, CHROMIUM, screenshot=True, system_chrome=False, **dl), (1, []))
+				count, warnings = self._build(katana, headless=True, **dl)
 				self.assertEqual(count, 1)
 				self.assertIn('browser downloads are disabled', warnings[0].message)
 
