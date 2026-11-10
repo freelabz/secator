@@ -13,7 +13,8 @@ Hooks run phase by phase, for every event. A driver picks its phase with a modul
 
 - ``'pre'`` (default): before the persistence drivers, so item mutations are persisted. Pre hooks
   run synchronously in the runner: keep network calls short (small HTTP timeouts).
-- ``'post'``: after the persistence drivers, e.g. relays and notifications (``api``, ``discord``).
+- ``'post'``: after the persistence drivers, e.g. notifications (``discord``); items carry their
+  persisted ``_uuid``.
 
 The persistence drivers (``definitions.PERSISTENCE_DRIVERS``) run in between. A failing pre /
 post hook never aborts the remaining hooks, even with ``raise_on_error``: it yields an Error and

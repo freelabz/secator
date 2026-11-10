@@ -533,7 +533,7 @@ class TestItemUpdateHooks(unittest.TestCase):
 			return item
 
 		self._register('external_sync', 'on_item_update', sync_finding)
-		self._register('api', 'on_item_update', notify)
+		self._register('discord', 'on_item_update', notify)
 		self._register('json', 'on_item', persist_on_item)
 
 	def test_update_finding_runs_hooks_around_single_write(self):

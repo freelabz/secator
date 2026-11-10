@@ -24,9 +24,6 @@ from secator.serializers.dataclass import DataclassEncoder
 from secator.utils import debug
 from secator.rich import console
 
-# Relays runner status / findings already persisted by the store drivers.
-HOOK_PHASE = 'post'
-
 API_URL = CONFIG.addons.api.url
 API_KEY = CONFIG.addons.api.key
 API_HEADER_NAME = CONFIG.addons.api.header_name

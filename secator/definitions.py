@@ -61,11 +61,12 @@ AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'jsonl', 'markdown', 'table', 't
 # Driver hook phases, in execution order. Hook lists run phase by phase:
 #   - pre: drivers that mutate items (e.g. gcs sets screenshot_path) BEFORE they are persisted.
 #     Default for any driver that doesn't declare a module-level ``HOOK_PHASE``.
-#   - persist: the store drivers below, in authority order (mongodb prevails as query backend).
-#   - post: drivers relaying already-persisted state (api, notifications); declare
+#   - persist: the store drivers below, in authority order (local stores first, then the remote
+#     api store, which stamps the server id on items; the first active one is the query backend).
+#   - post: drivers acting on already-persisted state (e.g. notifications); declare
 #     ``HOOK_PHASE = 'post'``.
 HOOK_PHASES = ('pre', 'persist', 'post')
-PERSISTENCE_DRIVERS = ('mongodb', 'sqlite', 'json')
+PERSISTENCE_DRIVERS = ('mongodb', 'sqlite', 'json', 'api')
 
 # Vocab
 ALIVE = 'alive'

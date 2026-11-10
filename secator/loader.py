@@ -375,10 +375,11 @@ def order_drivers(drivers):
 
 	Backend selection and hook execution both follow this order: ``pre`` drivers
 	(e.g. ``gcs``, external drivers by default) run before the persistence drivers so
-	their item mutations are persisted; ``post`` drivers (e.g. ``api``, ``discord``) run
-	after them, so the authoritative DB (``mongodb``) prevails over the ``api`` relay —
-	without this a runner can execute fine yet stay stuck in PENDING because ``api``
-	shadowed ``mongodb``'s ``update_runner`` hook. Order within a phase is preserved.
+	their item mutations are persisted; ``post`` drivers (e.g. ``discord``) run after them.
+	Persistence drivers keep their authority order, the remote ``api`` store last, so the
+	local DB (``mongodb``) prevails over ``api`` — without this a runner can execute fine yet
+	stay stuck in PENDING because ``api`` shadowed ``mongodb``'s ``update_runner`` hook.
+	Order within the pre / post phases is preserved.
 
 	Args:
 		drivers (list[str]): Driver names, in arbitrary order.

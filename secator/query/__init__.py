@@ -47,7 +47,7 @@ class QueryEngine:
     @classmethod
     def resolve_backend_from_drivers(cls, drivers) -> str:
         """Resolve the backend name from a drivers list, honouring driver order
-        (persistence drivers before the post-phase api relay), defaulting to 'local'."""
+        (local persistence drivers before the remote api store), defaulting to 'local'."""
         from secator.loader import order_drivers
         ordered = order_drivers(drivers or [])
         return next((d for d in ordered if d in cls.BACKENDS), 'local')
