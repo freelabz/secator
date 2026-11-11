@@ -12,7 +12,8 @@ from secator.definitions import (
 from secator.output_types import Progress, Url
 # fmt: on
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpBase
+from secator.tasks._categories import HttpBaseMixin
+from secator.runners import Command
 
 BUP_BYPASS_MODES = [
 	'all',
@@ -33,7 +34,7 @@ BUP_BYPASS_MODES_STR = ','.join(BUP_BYPASS_MODES)
 
 
 @task()
-class bup(HttpBase):
+class bup(Command, HttpBaseMixin):
 	"""40X bypasser."""
 
 	cmd = 'bup -d'
