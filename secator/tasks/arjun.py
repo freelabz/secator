@@ -34,7 +34,7 @@ class arjun(HttpBase):
 		'include': {'type': str, 'help': 'Include persistent data (e.g: "api_key=xxxxx" or {"api_key": "xxxx"})'},
 		'passive': {'is_flag': True, 'default': False, 'help': 'Passive mode'},
 		'casing': {'type': str, 'help': 'Casing style for params e.g. like_this, likeThis, LIKE_THIS, like_this'},  # noqa: E501
-		WORDLIST: {'type': str, 'short': 'w', 'default': 'burp-parameter-names', 'process': process_wordlist, 'help': 'Wordlist to use (default: arjun wordlist)'},  # noqa: E501
+		WORDLIST: {'type': 'wordlist', 'short': 'w', 'default': 'burp-parameter-names', 'process': process_wordlist, 'help': 'Wordlist to use (default: arjun wordlist)'},  # noqa: E501
 	}
 	opt_key_map = {
 		DATA: OPT_NOT_SUPPORTED,

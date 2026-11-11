@@ -13,6 +13,12 @@ input_types:
   - host
   - cidr_range
 
+important_opts:
+  - scanners
+  - ports
+  - nuclei
+  - passive
+
 options:
   nuclei:
     is_flag: True
