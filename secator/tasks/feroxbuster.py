@@ -5,7 +5,7 @@ from secator.definitions import (CONTENT_TYPE, DATA, DELAY, DEPTH, FILTER_CODES,
 							   FOLLOW_REDIRECT, HEADER, LINES, MATCH_CODES,
 							   MATCH_REGEX, MATCH_SIZE, MATCH_WORDS, METHOD,
 							   OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, PROXY,
-							   RATE_LIMIT, RETRIES, STATUS_CODE,
+							   RATE_LIMIT, RETRIES, SKIP_SSL_VERIFY, STATUS_CODE,
 							   THREADS, TIMEOUT, USER_AGENT, WORDLIST, WORDS, URL, REPLAY_PROXY, HOST, HOST_PORT, IP)
 from secator.output_types import Url, Info
 from secator.serializers import JSONSerializer
@@ -42,6 +42,7 @@ class feroxbuster(HttpFuzzer):
 		FILTER_SIZE: 'filter-size',
 		FILTER_WORDS: 'filter-words',
 		FOLLOW_REDIRECT: 'redirects',
+		SKIP_SSL_VERIFY: 'insecure',
 		MATCH_CODES: 'status-codes',
 		MATCH_REGEX: OPT_NOT_SUPPORTED,
 		MATCH_SIZE: OPT_NOT_SUPPORTED,
@@ -85,7 +86,8 @@ class feroxbuster(HttpFuzzer):
 		auto_tune = self.get_opt_value('auto_tune')
 		proxy = self.get_opt_value('proxy')
 		rproxy = self.get_opt_value('replay_proxy')
-		if (proxy and proxy.startswith('http://')) or (rproxy and rproxy.startswith('http://')):
+		proxy_http = (proxy and proxy.startswith('http://')) or (rproxy and rproxy.startswith('http://'))
+		if proxy_http and '--insecure' not in self.cmd:
 			self.cmd += ' --insecure'
 		if rate_limit is not None and auto_tune:
 			self.add_result(Info(message='Disabling auto-tune since it conflicts with rate-limit'))
