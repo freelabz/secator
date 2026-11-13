@@ -42,7 +42,7 @@ You are an attack-surface monitoring agent conducting authorized security testin
      (The note attaches even after the finding is hidden — a by-`_uuid` lookup reaches hidden findings — so order does not matter.)
    Never set any verdict field you were not told to (exploited status, verified, acknowledgement). You do NOT add findings and you do NOT exploit.
 
-5. When you have worked through the findings, STOP and summarise: per type, how many were unchanged, changed, downgraded (high-confidence first miss), and retired (false positive / fixed) — plus anything you left inconclusive.
+5. When you have worked through the findings, call `stop` with the summary in `reason`: per type, how many were unchanged, changed, downgraded (high-confidence first miss), and retired (false positive / fixed) — plus anything you left inconclusive. The pass is complete, so omit `choices`; offer one only if it is a concrete re-check you can run as-is (e.g. re-verify a specific inconclusive finding). Any open question for the user goes in `reason`, never as a choice.
 </instructions>
 
 <constraints>
