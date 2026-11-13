@@ -16,14 +16,19 @@ class TestInteractivityBackendBase(unittest.TestCase):
 			backend.ask_user("question", [], "session1")
 
 	def test_base_get_excluded_tools(self):
+		# `stop` is available in every mode now; nothing excluded by default.
 		from secator.ai.interactivity import InteractivityBackend
 		backend = InteractivityBackend()
-		self.assertEqual(backend.get_excluded_tools(), {"stop"})
+		self.assertEqual(backend.get_excluded_tools(), set())
 
-	def test_base_get_extra_tools(self):
+	def test_base_get_extra_tools_injects_interactive_stop(self):
 		from secator.ai.interactivity import InteractivityBackend
 		backend = InteractivityBackend()
-		self.assertEqual(backend.get_extra_tools(), [])
+		extra = backend.get_extra_tools()
+		self.assertEqual(len(extra), 1)
+		self.assertEqual(extra[0]["function"]["name"], "stop")
+		# interactive stop carries choices
+		self.assertIn("choices", extra[0]["function"]["parameters"]["properties"])
 
 
 class TestCLIBackend(unittest.TestCase):
@@ -32,12 +37,15 @@ class TestCLIBackend(unittest.TestCase):
 	def test_excluded_tools(self):
 		from secator.ai.interactivity import CLIBackend
 		backend = CLIBackend()
-		self.assertEqual(backend.get_excluded_tools(), {"stop"})
+		self.assertEqual(backend.get_excluded_tools(), set())
 
-	def test_extra_tools_empty(self):
+	def test_extra_tools_has_interactive_stop(self):
 		from secator.ai.interactivity import CLIBackend
 		backend = CLIBackend()
-		self.assertEqual(backend.get_extra_tools(), [])
+		extra = backend.get_extra_tools()
+		self.assertEqual(len(extra), 1)
+		self.assertEqual(extra[0]["function"]["name"], "stop")
+		self.assertIn("choices", extra[0]["function"]["parameters"]["properties"])
 
 
 class TestAutoBackend(unittest.TestCase):
@@ -46,17 +54,19 @@ class TestAutoBackend(unittest.TestCase):
 	def test_excluded_tools(self):
 		from secator.ai.interactivity import AutoBackend
 		backend = AutoBackend()
-		self.assertEqual(backend.get_excluded_tools(), {"follow_up"})
+		self.assertEqual(backend.get_excluded_tools(), set())
 
-	def test_extra_tools_has_stop(self):
+	def test_extra_tools_has_choiceless_stop(self):
 		from secator.ai.interactivity import AutoBackend
 		backend = AutoBackend()
 		extra = backend.get_extra_tools()
 		self.assertEqual(len(extra), 1)
 		self.assertEqual(extra[0]["function"]["name"], "stop")
+		# the non-interactive stop is definitive — no choices
+		self.assertNotIn("choices", extra[0]["function"]["parameters"]["properties"])
 
 	def test_ask_user_returns_none(self):
-		"""AutoBackend.ask_user returns None — no user to ask."""
+		"""AutoBackend.ask_user returns None — no user to ask (stop ends the run)."""
 		from secator.ai.interactivity import AutoBackend
 		backend = AutoBackend()
 		result = backend.ask_user("q", [], "s1")
@@ -69,12 +79,15 @@ class TestRemoteBackend(unittest.TestCase):
 	def test_excluded_tools(self):
 		from secator.ai.interactivity import RemoteBackend
 		backend = RemoteBackend(timeout=60, query_engine=MagicMock())
-		self.assertEqual(backend.get_excluded_tools(), {"stop"})
+		self.assertEqual(backend.get_excluded_tools(), set())
 
-	def test_extra_tools_empty(self):
+	def test_extra_tools_has_interactive_stop(self):
 		from secator.ai.interactivity import RemoteBackend
 		backend = RemoteBackend(timeout=60, query_engine=MagicMock())
-		self.assertEqual(backend.get_extra_tools(), [])
+		extra = backend.get_extra_tools()
+		self.assertEqual(len(extra), 1)
+		self.assertEqual(extra[0]["function"]["name"], "stop")
+		self.assertIn("choices", extra[0]["function"]["parameters"]["properties"])
 
 	def test_ask_user_returns_answer_on_found(self):
 		from secator.ai.interactivity import RemoteBackend
@@ -344,7 +357,7 @@ class TestRemoteBackend(unittest.TestCase):
 	def test_build_pending_prompt_expires_only_same_type(self):
 		"""M10: a new prompt supersedes prior still-pending docs OF ITS OWN TYPE only.
 
-		A permission prompt must NOT expire a still-pending follow_up (and vice
+		A permission prompt must NOT expire a still-pending `stopped` prompt (and vice
 		versa) — the two can be outstanding at once, and cross-expiring orphaned the
 		other prompt so it stopped awaiting an answer.
 		"""
@@ -366,8 +379,8 @@ class TestRemoteBackend(unittest.TestCase):
 		self.assertEqual(flip_query.get("ai_type"), "permission")
 		self.assertEqual(flip_update, {"$set": {"status": "timed_out"}})
 
-	def test_permission_prompt_does_not_expire_pending_follow_up(self):
-		"""Building a permission prompt leaves a still-pending follow_up untouched."""
+	def test_permission_prompt_does_not_expire_pending_stopped(self):
+		"""Building a permission prompt leaves a still-pending `stopped` prompt untouched."""
 		from secator.ai.interactivity import RemoteBackend
 		mock_engine = MagicMock()
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
@@ -378,17 +391,17 @@ class TestRemoteBackend(unittest.TestCase):
 			prompt_uuid="p1",
 		)
 		expired_types = {c[0][0].get("ai_type") for c in mock_engine.update.call_args_list}
-		self.assertNotIn("follow_up", expired_types)
+		self.assertNotIn("stopped", expired_types)
 
-	def test_follow_up_prompt_does_not_expire_pending_permission(self):
-		"""Building a follow_up prompt leaves a still-pending permission untouched."""
+	def test_stopped_prompt_does_not_expire_pending_permission(self):
+		"""Building a `stopped` prompt leaves a still-pending permission untouched."""
 		from secator.ai.interactivity import RemoteBackend
 		mock_engine = MagicMock()
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
 
 		backend.build_pending_prompt(
 			"Which target next?", ["a", "b"], "s1",
-			prompt_type="follow_up", prompt_uuid="f1",
+			prompt_type="stopped", prompt_uuid="f1",
 		)
 		expired_types = {c[0][0].get("ai_type") for c in mock_engine.update.call_args_list}
 		self.assertNotIn("permission", expired_types)
@@ -400,7 +413,7 @@ class TestRemoteBackend(unittest.TestCase):
 		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
 		backend._expire_stale_pending("s1")
 		expired_types = {c[0][0].get("ai_type") for c in mock_engine.update.call_args_list}
-		self.assertEqual(expired_types, {"follow_up", "permission"})
+		self.assertEqual(expired_types, {"stopped", "permission"})
 
 	def test_expire_stale_pending_noop_without_engine(self):
 		"""No query engine -> no crash, no update."""
@@ -532,8 +545,8 @@ class TestRemoteBackendSteer(unittest.TestCase):
 		backend = RemoteBackend(timeout=60, query_engine=None, poll_interval=0.01)
 		self.assertEqual(backend.poll_steers("session1"), [])
 
-	def test_steer_breaks_blocked_follow_up_wait(self):
-		"""A steer arriving during a follow-up wait returns as the answer."""
+	def test_steer_breaks_blocked_prompt_wait(self):
+		"""A steer arriving during a blocked prompt wait returns as the answer."""
 		from secator.ai.interactivity import RemoteBackend
 		mock_engine = MagicMock()
 		# No follow-up answer ever; a steer arrives on the first poll. It MUST carry a
@@ -593,7 +606,7 @@ class TestRemoteTurnPendingDocCoverage(unittest.TestCase):
 			return []
 
 	def test_plain_chat_remote_persists_pending_doc_and_polls_on_uuid(self):
-		"""A plain-chat remote turn persists a pending follow_up doc with a
+		"""A plain-chat remote turn persists a pending `stopped` doc with a
 		non-None prompt_uuid and polls scoped to THAT uuid (never None)."""
 		from secator.tasks.ai import ai as AiTask
 		from secator.ai.interactivity import RemoteBackend
@@ -621,7 +634,7 @@ class TestRemoteTurnPendingDocCoverage(unittest.TestCase):
 		self.assertEqual(len(pend), 1, "exactly one pending doc must be persisted")
 		uuid_stamped = (pend[0].extra_data or {}).get("prompt_uuid")
 		self.assertTrue(uuid_stamped, "pending doc must carry a real (non-None) prompt_uuid")
-		self.assertEqual(pend[0].ai_type, "follow_up")
+		self.assertEqual(pend[0].ai_type, "stopped")
 
 		# the poll must be scoped to THAT prompt's uuid — never None
 		search_query = mock_engine.search.call_args[0][0]
@@ -655,15 +668,138 @@ class TestRemoteTurnPendingDocCoverage(unittest.TestCase):
 		pend = [p for p in persisted if isinstance(p, Ai) and p.status == "pending"]
 		self.assertEqual(pend, [], "local backend must not persist a pending doc")
 
+	def test_content_only_reason_becomes_stopped_pending_prompt(self):
+		"""A content-only reply (passed as `reason`) persists a `stopped` pending doc
+		whose content is that reason — content-only == stop."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.ai.interactivity import RemoteBackend
+		from secator.output_types import Ai
+
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = [{"answer": "go on", "_timestamp": 1.0}]
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine, poll_interval=0.01)
+
+		persisted = []
+		fake_self = MagicMock()
+		fake_self.backend = backend
+		fake_self.session_id = "sess-co"
+		fake_self.model = "gpt-4o"
+		fake_self.mode = "chat"
+		fake_self.encryptor = None
+		fake_self.max_iterations = 10
+		fake_self.history = self._FakeHistory()
+		fake_self.add_result = lambda item, **kw: persisted.append(item)
+
+		AiTask._prompt_and_redetect(fake_self, [], reason="Here is my summary.")
+
+		pend = [p for p in persisted if isinstance(p, Ai) and p.status == "pending"]
+		self.assertEqual(len(pend), 1)
+		self.assertEqual(pend[0].ai_type, "stopped")
+		self.assertEqual(pend[0].content, "Here is my summary.")
+
+	@patch("secator.tasks.ai.init_llm")
+	@patch("secator.tasks.ai.call_llm")
+	def test_steer_before_stop_resumes_instead_of_pausing(self, mock_call_llm, mock_init):
+		"""A pending steer drained at end-of-turn means the user already asked to go on:
+		the loop RESUMES (continues) instead of pausing/ending on the stop."""
+		from secator.tasks.ai import ai as AiTask
+		from secator.ai.interactivity import AutoBackend
+
+		# The model calls stop on turn 1; a steer is pending, so instead of ending the
+		# loop continues to turn 2 (which this time has no steer -> ends via ask_user None).
+		mock_call_llm.side_effect = [
+			{"content": "", "tool_calls": [object()], "usage": {}},
+			{"content": "done for real", "tool_calls": [], "usage": {}},
+		]
+
+		prompt_calls = []
+		# _drain_steers is called at the TOP of each iteration (return ignored) AND at
+		# end-of-turn. Only the end-of-turn call on turn 1 should report a steer: the
+		# call sequence is [t1-top, t1-end, t2-top, t2-end], so True on index 1 only.
+		drain_calls = {"n": 0}
+
+		fake_self = MagicMock()
+		fake_self.backend = AutoBackend()
+		fake_self.session_id = "sess-steer"
+		fake_self.model = "gpt-4o"
+		fake_self.mode = "scan"
+		fake_self.max_iterations = 10
+		fake_self.is_subagent = False
+		fake_self.inputs = []
+		fake_self.context = {}
+		fake_self.scope = "workspace"
+		fake_self.results = []
+		fake_self.max_workers = 3
+		fake_self.encryptor = None
+		fake_self.dry_run = False
+		fake_self.verbose = False
+		fake_self._sync = False
+		fake_self.temp = 0.7
+		fake_self.api_base = ""
+		fake_self.api_key = ""
+		fake_self.tool_schemas = []
+		fake_self.max_tokens_total = 100000
+		fake_self.permission_engine = MagicMock()
+		fake_self.history = self._FakeHistory()
+		fake_self.add_result = lambda item, **kw: None
+
+		def _empty_gen(*a, **k):
+			return
+			yield  # pragma: no cover
+
+		fake_self._summarize_auto = _empty_gen
+		fake_self._summarize_user = _empty_gen
+		fake_self._drain_history_usage = lambda: None
+		fake_self._account_usage = lambda u: None
+		fake_self._add_assistant_to_history = lambda c, t: {"role": "assistant", "content": c}
+		fake_self._save_history = lambda: None
+		fake_self._persist_pii_map = lambda: None
+
+		def _drain(*a, **k):
+			i = drain_calls["n"]
+			drain_calls["n"] += 1
+			return i == 1
+			yield  # pragma: no cover
+
+		fake_self._drain_steers = _drain
+
+		def _fake_process(tool_calls, ctx):
+			return [{"action": "stop", "tool_call_id": "t", "tool_call_name": "stop"}]
+			yield  # pragma: no cover
+
+		fake_self._process_tool_calls = _fake_process
+
+		def _fake_dispatch(actions, ctx):
+			# turn 1: the model called stop
+			return {"stop_reason": "stopping", "stop_choices": None, "stop_multiple": False,
+			        "stop_prompt_uuid": None, "new_mode": None}
+			yield  # pragma: no cover
+
+		fake_self._dispatch_and_collect = _fake_dispatch
+
+		def _track_prompt(choices, prompt_uuid=None, multiple=False, reason=None):
+			prompt_calls.append(reason)
+			return None
+
+		fake_self._prompt_and_redetect = _track_prompt
+
+		list(AiTask._run_loop(fake_self))
+
+		# Turn 1's stop was superseded by the pending steer (RESUME, no pause). Turn 2 is
+		# content-only with no steer -> the single pause, which (AutoBackend) ends the run.
+		self.assertEqual(len(prompt_calls), 1)
+		self.assertEqual(prompt_calls[0], "done for real")
+
 	@patch("secator.query.QueryEngine")
 	@patch("secator.tasks.ai.init_llm")
 	@patch("secator.tasks.ai.call_llm")
-	def test_remote_max_iter_does_not_strand_pending_doc(self, mock_call_llm, mock_init, mock_qe_cls):
-		"""At remote max-iter after tool work, the loop ends cleanly: it does not
-		enter the follow-up poll and does not persist a dangling pending doc."""
+	def test_remote_max_iter_pauses_via_prompt(self, mock_call_llm, mock_init, mock_qe_cls):
+		"""At remote max-iter after tool work, the cap is a backstop that falls into the
+		SAME end-of-turn pause path: the loop routes through _prompt_and_redetect (so the
+		user can resume), it does not abruptly cut off."""
 		from secator.tasks.ai import ai as AiTask
 		from secator.ai.interactivity import RemoteBackend
-		from secator.output_types import Ai, Info
+		from secator.output_types import Ai  # noqa: F401
 
 		mock_call_llm.return_value = {
 			"content": "working", "tool_calls": [object()], "usage": {"tokens": 100, "cost": 0.001},
@@ -722,26 +858,28 @@ class TestRemoteTurnPendingDocCoverage(unittest.TestCase):
 		fake_self._process_tool_calls = _fake_process
 
 		def _fake_dispatch(actions, ctx):
-			return {"follow_up_choices": None, "stop_reason": None, "follow_up_prompt_uuid": None}
+			return {"stop_reason": None, "stop_choices": None, "stop_multiple": False,
+			        "stop_prompt_uuid": None, "new_mode": None}
 			yield  # pragma: no cover
 
 		fake_self._dispatch_and_collect = _fake_dispatch
 
-		def _track_prompt(choices, prompt_uuid=None):
+		def _empty_drain(*a, **k):
+			return False
+			yield  # pragma: no cover
+
+		fake_self._drain_steers = _empty_drain
+
+		def _track_prompt(choices, prompt_uuid=None, multiple=False, reason=None):
 			prompt_calls.append((choices, prompt_uuid))
-			return []
+			return None   # end the loop after the pause for this test
 
 		fake_self._prompt_and_redetect = _track_prompt
 
-		items = list(AiTask._run_loop(fake_self))
+		list(AiTask._run_loop(fake_self))
 
-		self.assertEqual(prompt_calls, [], "remote max-iter must not enter the follow-up poll")
-		pend = [p for p in persisted if isinstance(p, Ai) and getattr(p, "status", None) == "pending"]
-		self.assertEqual(pend, [], "remote max-iter must not persist a dangling pending doc")
-		self.assertTrue(
-			any(isinstance(it, Info) and "max iterations" in it.message.lower() for it in items),
-			"loop must end via the terminal 'reached max iterations' tail",
-		)
+		# The cap falls into the SAME pause path — _prompt_and_redetect IS called.
+		self.assertEqual(len(prompt_calls), 1, "remote max-iter must route through the end-of-turn pause")
 
 
 if __name__ == "__main__":

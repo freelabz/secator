@@ -127,7 +127,8 @@ class SqliteBackend(QueryBackend):
 		from secator.hooks.sqlite import get_sqlite_conn
 		return get_sqlite_conn(self.config.get('db_path'))
 
-	def _execute_search(self, query: dict, limit: int = 0, exclude_fields: list = None) -> List[Dict[str, Any]]:
+	def _execute_search(self, query: dict, limit: int = 0, exclude_fields: list = None,
+	                    offset: int = 0) -> List[Dict[str, Any]]:
 		try:
 			conn = self._get_conn()
 			where, params = _build_where(query)
@@ -135,6 +136,14 @@ class SqliteBackend(QueryBackend):
 			if limit:  # limit=0 means unlimited (matches ABC contract and JsonBackend)
 				sql += " LIMIT ?"
 				params.append(limit)
+				if offset:
+					# SQLite requires a LIMIT before OFFSET; only valid on the limited path.
+					sql += " OFFSET ?"
+					params.append(offset)
+			elif offset:
+				# limit=0 (unlimited): emulate OFFSET with LIMIT -1 OFFSET ? (SQLite idiom).
+				sql += " LIMIT -1 OFFSET ?"
+				params.append(offset)
 			results = []
 			for (data,) in conn.execute(sql, params).fetchall():
 				finding = json.loads(data)
@@ -197,3 +206,33 @@ class SqliteBackend(QueryBackend):
 		# Connection is shared; commit flushes pending writes (best-effort single-host semantics, per design).
 		conn.commit()
 		return cur.rowcount
+
+	def _execute_create_note(self, note: dict) -> int:
+		"""Insert a note into a dedicated ``notes`` table (created on first use).
+
+		Notes are a JSON blob keyed by their own uuid, with ``workspace_id``/``target_type``
+		mirrored to columns for cheap lookup — the same JSON-blob-plus-indexed-columns shape
+		as the ``findings`` table, but a SEPARATE table so a note is never confused with a finding.
+		"""
+		try:
+			import uuid as _uuidlib
+			conn = self._get_conn()
+			conn.execute(
+				"CREATE TABLE IF NOT EXISTS notes ("
+				"uuid TEXT PRIMARY KEY, workspace_id TEXT, target_type TEXT, data TEXT)"
+			)
+			nid = note.get('_uuid') or str(_uuidlib.uuid4())
+			conn.execute(
+				"INSERT INTO notes (uuid, workspace_id, target_type, data) VALUES (?, ?, ?, ?)",
+				(
+					nid,
+					note.get('_context', {}).get('workspace_id', ''),
+					note.get('target_type', ''),
+					json.dumps(note, default=str),
+				),
+			)
+			conn.commit()
+			return 1
+		except Exception as e:
+			console.print(Warning(message=f'SQLite create_note failed: {e}'))
+			return 0

@@ -7,6 +7,11 @@ from secator.rich import console
 
 logger = logging.getLogger(__name__)
 
+# Confidence -> numeric rank (lower = more confident) for the finding-type sort key
+# `confidence_nb`. Shared so every finding type derives it identically; mirrors the
+# order the vulnerability type used historically.
+CONFIDENCE_NB = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4, 'unknown': 5, None: 6}
+
 
 @dataclass
 class OutputType:
@@ -20,6 +25,11 @@ class OutputType:
 	@classmethod
 	def fields(cls):
 		return [f.name for f in fields(cls)]
+
+	@staticmethod
+	def confidence_to_nb(confidence) -> int:
+		"""Numeric rank for a confidence string (unknown values rank last)."""
+		return CONFIDENCE_NB.get(confidence, 6)
 
 	def merge_with(self, data: 'OutputType', exclude_fields=[]):
 		"""Enrich the OutputType object with the data from another object."""
@@ -93,6 +103,12 @@ class OutputType:
 					setattr(self, field.name, field.default)
 				elif not isinstance(default_factory, _MISSING_TYPE):
 					setattr(self, field.name, default_factory())
+		# Derive the confidence sort key uniformly for every finding type that carries
+		# `confidence` + `confidence_nb`, so a confidence value always has a matching rank
+		# (and a monitor/cleanup downgrade re-prioritizes). Non-finding types lack the
+		# fields and are skipped. A subclass may still override after super().__post_init__().
+		if hasattr(self, 'confidence') and hasattr(self, 'confidence_nb'):
+			self.confidence_nb = self.confidence_to_nb(getattr(self, 'confidence', None))
 
 	@classmethod
 	def load(cls, item, output_map={}):
@@ -133,6 +149,24 @@ class OutputType:
 	@classmethod
 	def get_name(cls):
 		return re.sub(r'(?<!^)(?=[A-Z])', '_', cls.__name__).lower()
+
+	@classmethod
+	@lru_cache(maxsize=None)
+	def field_defaults(cls):
+		"""Return a {field_name: default_value} map for fields that declare a scalar
+		default, mirroring what `load()` fills in for keys absent from a raw dict.
+
+		Used when grouping raw backend dicts so a dict omitting a field groups with
+		a dict that carries that field's default (e.g. a tag with no `category`
+		groups with one explicitly set to the `general` default). Only plain
+		`default` values are included; `default_factory` fields are skipped (their
+		mutable/computed defaults are not meaningful group keys).
+		"""
+		out = {}
+		for field in fields(cls):
+			if not isinstance(field.default, _MISSING_TYPE):
+				out[field.name] = field.default
+		return out
 
 	@classmethod
 	@lru_cache(maxsize=None)
@@ -183,16 +217,27 @@ class OutputType:
 		return resolved
 
 	@classmethod
-	def validate_fields(cls, data: dict) -> list:
+	def validate_fields(cls, data: dict, require_all: bool = False) -> list:
 		"""Validate data types against dataclass field definitions.
 
-		Returns a list of error messages for invalid fields.
+		Returns a list of error messages for invalid fields. When ``require_all`` is set
+		(a full create, not a partial update), fields that have no default and are missing
+		from ``data`` are reported as required — so a tool call that omits a mandatory field
+		(e.g. a ``Tag`` without ``value``) is rejected with a clear message up front instead
+		of raising a raw ``TypeError`` at instantiation.
 		"""
 		errors = []
 		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
 		expected_types = cls.field_types()
 		for f in fields(cls):
-			if f.name.startswith('_') or f.name not in data:
+			if f.name.startswith('_'):
+				continue
+			if f.name not in data:
+				if require_all:
+					has_default = (not isinstance(f.default, _MISSING_TYPE)
+					               or not isinstance(f.default_factory, _MISSING_TYPE))
+					if not has_default:
+						errors.append(f"'{f.name}' is required")
 				continue
 			value = data[f.name]
 			if value is None:

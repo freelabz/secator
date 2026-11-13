@@ -50,7 +50,8 @@ class MongoDBBackend(QueryBackend):
 			self._client = get_mongodb_client()
 		return self._client
 
-	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
+	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None,
+	                    offset: int = 0) -> List[Dict[str, Any]]:
 		"""Search MongoDB for findings matching query."""
 		try:
 			client = self._get_client()
@@ -63,7 +64,8 @@ class MongoDBBackend(QueryBackend):
 			if exclude_fields:
 				projection = {field: 0 for field in exclude_fields}
 
-			cursor = db.findings.find(query, projection).limit(limit)
+			# Native server-side pagination: .skip(offset) before .limit(limit).
+			cursor = db.findings.find(query, projection).skip(offset).limit(limit)
 
 			results = []
 			for doc in cursor:
@@ -108,6 +110,22 @@ class MongoDBBackend(QueryBackend):
 		client = self._get_client()
 		result = client.main.findings.update_one(_seek_by_native_id(query), update)
 		return result.modified_count
+
+	def _execute_create_note(self, note: dict) -> int:
+		"""Insert a note into the dedicated ``notes`` collection (NOT findings).
+
+		The shape matches the platform's notes reader — ``target_type`` + ``target_key``
+		identity, ``body``/``changes``, and ``_context.workspace_id`` scope — so a note the
+		AI writes here renders exactly like one posted through the notes endpoint.
+		"""
+		try:
+			client = self._get_client()
+			doc = {k: v for k, v in note.items() if k != '_id'}
+			client.main.notes.insert_one(doc)
+			return 1
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB create_note failed: {e}'))
+			return 0
 
 	def list_workspaces(self):
 		"""List workspaces for the mongodb backend.
@@ -218,8 +236,17 @@ class MongoDBBackend(QueryBackend):
 			for rtype in runner_types:
 				query = {}
 				if workspace_id:
-					# Runners are keyed by workspace name for the mongodb backend.
-					query['context.workspace_name'] = workspace_id
+					# Scope by workspace. Runner docs carry BOTH context.workspace_id and
+					# context.workspace_name; callers pass either a 24-char hex ObjectId
+					# (the platform passes the workspace _id) or a workspace name (the CLI's
+					# -ws). Match the right field so an id doesn't get compared to names
+					# (which returned 0 runners for every id-scoped call). Mirrors the
+					# ObjectId-vs-name detection in the api backend.
+					from bson.objectid import ObjectId
+					if ObjectId.is_valid(workspace_id):
+						query['context.workspace_id'] = workspace_id
+					else:
+						query['context.workspace_name'] = workspace_id
 				if has_parent is not None:
 					query['has_parent'] = has_parent
 				for doc in db[rtype].find(query):

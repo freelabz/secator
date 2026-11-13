@@ -569,6 +569,31 @@ Optional integrations and addon configurations.
 | `addons.ai.encrypt_pii` | `bool` | `true` | Encrypt PII before sending |
 | `addons.ai.permissions` | `dict` | See below | AI permission policy |
 
+**Custom provider / OpenAI-compatible gateway.** Any OpenAI-compatible endpoint (a
+gateway/router, a self-hosted server, etc.) works by setting `addons.ai.api_base` +
+`addons.ai.api_key` and using an `openai/<model-id>` model name — LiteLLM then routes
+the OpenAI wire format to your base. `secator x ai setup` automates this: first **pick a
+provider** — any LiteLLM provider (on its default base), a **named gateway** from the
+registry, or a **custom base** (enter a URL). A known provider lists just its models; a
+gateway/custom base lists the endpoint's live models from `GET <api_base>/models` (falling
+back to `GET <api_base>/v1/models` when the base has no `/v1` suffix) and saves your choice
+as `openai/<id>`.
+
+For a gateway with a self-signed / non-public TLS cert, set `SSL_VERIFY=False` (the same
+env knob litellm uses for inference) so the model-listing call skips cert verification too.
+
+Named providers come from a small JSON registry — a bundled `secator/ai/providers.json`
+plus an optional user file at `<SECATOR_DIRS_DATA>/ai_providers.json` (which overrides
+bundled entries by `name`). Add a gateway with a data-only entry — no code:
+
+```json
+{
+  "providers": [
+    { "name": "myrouter", "label": "My Router", "api_base": "https://api.myrouter.ai/v1", "docs": "https://docs.myrouter.ai", "key_hint": "sk-mr-" }
+  ]
+}
+```
+
 **AI permission policy** (`addons.ai.permissions`) has three keys — `allow`, `deny`, and `ask` — each a list of permission rules:
 
 ```yaml

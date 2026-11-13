@@ -21,7 +21,7 @@ run_task(name="nuclei", targets=["example.com"]) # <- Mass vuln scanner, too noi
 run_task(name="feroxbuster", targets=["example.com"]) # <- HTTP fuzzer, very noisy
 run_task(name="ffuf", targets=["example.com"]) # <- HTTP fuzzer, very noisy
 run_task(name="dalfox", targets=["example.com"]) # <- HTTP fuzzer, very noisy
-run_task(name="nmap", targets=["example.com"], "ports": "1-65536") <- too many ports scan, will trigger IDS
+run_task(name="nmap", targets=["example.com"], opts={"ports": "1-65536"}) # <- too many ports scan, will trigger IDS
 </bad>
 
 </example>
@@ -31,7 +31,7 @@ When the user asks for an aggressive comprehensive recon of example.com and all 
 
 <good>
 run_workflow(name="domain_recon", targets=["example.com"], opts={"profiles": ["full", "aggressive"], "timeout": 5})
-run_workflow(name="subdomain_recon", targets=["example.com"], opts={"profiles": ["full", "aggressive"], "timeout": 5)
+run_workflow(name="subdomain_recon", targets=["example.com"], opts={"profiles": ["full", "aggressive"], "timeout": 5})
 </good>
 
 <bad>

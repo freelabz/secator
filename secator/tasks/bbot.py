@@ -276,10 +276,10 @@ class bbot(Command):
 	# python3-dev/python3-devel, so `secator install bbot` failed on Ubuntu/Debian
 	# with `fatal error: Python.h: No such file or directory`.
 	install_pre = {
-		'apk': ['python3-dev', 'linux-headers', 'musl-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
-		'apt': ['python3-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
-		'dnf|yum|zypper': ['python3-devel', 'gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium'],
-		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar', 'chromium']
+		'apk': ['python3-dev', 'linux-headers', 'musl-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar'],
+		'apt': ['python3-dev', 'gcc', 'git', 'openssl', 'unzip', 'tar'],
+		'dnf|yum|zypper': ['python3-devel', 'gcc', 'git', 'openssl', 'unzip', 'tar'],
+		'*': ['gcc', 'git', 'openssl', 'unzip', 'tar']
 	}
 	install_version = '2.7.2'
 	install_cmd = 'pipx install bbot==[install_version] --force'

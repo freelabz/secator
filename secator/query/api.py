@@ -50,10 +50,11 @@ class ApiBackend(QueryBackend):
         response.raise_for_status()
         return response.json()
 
-    def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None) -> List[Dict[str, Any]]:
-        """Search API for findings matching query."""
+    def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None,
+                        offset: int = 0) -> List[Dict[str, Any]]:
+        """Search API for findings matching query (``offset`` maps to the endpoint's skip)."""
         try:
-            endpoint = f"{self.search_endpoint}?skip=0&limit={limit}"
+            endpoint = f"{self.search_endpoint}?skip={offset}&limit={limit}"
             if exclude_fields:
                 endpoint += f"&exclude_fields={','.join(exclude_fields)}"
             result = self._make_request('POST', endpoint, query)
@@ -97,6 +98,28 @@ class ApiBackend(QueryBackend):
         payload = {"query": query, "update": update}
         result = self._make_request("PATCH", "findings/update", data=payload)
         return result.get("modified_count", 0)
+
+    def _execute_create_note(self, note: dict) -> int:
+        """POST the note to the remote notes endpoint.
+
+        Author identity + timestamps are set SERVER-SIDE from the session there, so only
+        the target identity + content are sent (``target_type``/``target_key``/``body``/
+        ``changes`` + the workspace scope). Mirrors the ``update`` PATCH pattern.
+        """
+        try:
+            payload = {
+                "target_type": note.get("target_type"),
+                "workspace_id": note.get("_context", {}).get("workspace_id") or self.workspace_id,
+                "target_key": note.get("target_key") or {},
+                "body": note.get("body") or "",
+            }
+            if note.get("changes"):
+                payload["changes"] = note["changes"]
+            self._make_request("POST", "notes", data=payload)
+            return 1
+        except Exception as e:
+            console.print(Warning(message=f"API create_note failed: {e}"))
+            return 0
 
     def list_workspaces(self):
         """List workspaces from API."""

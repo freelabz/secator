@@ -1,0 +1,16 @@
+type: workflow
+name: ssh
+alias: ssh
+description: SSH vulnerability scan
+long_description: |
+  Scans SSH vulnerabilities using specialized tools.
+tags: [ssh, vuln]
+input_types:
+  - ip
+  - host
+  - host:port
+
+tasks:
+  nuclei/ssh:
+    description: Detect SSH vulnerabilities
+    template_condition: "contains(id, 'ssh') || contains(tags, 'ssh')"

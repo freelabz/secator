@@ -1,0 +1,15 @@
+type: workflow
+name: cidr_check
+description: "Check if a given CIDR is safe to test and will not break routing infrastructure"
+input_types:
+  - ip
+  - host
+  - cidr_range
+
+tasks:
+  dublin_traceroute:
+    description: Traceroute on CIDR's first IP
+    npaths: 1
+    targets_:
+    - type: target
+      field: name

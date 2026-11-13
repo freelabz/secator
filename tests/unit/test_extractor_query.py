@@ -415,6 +415,18 @@ class TestBackendParity:
 		return build_extractor_query(
 			{'type': 'port', 'field': 'host', 'condition': 'port.service_name ~= ssh'}, _ctx())
 
+	def _json_backend(self, tmp_path, findings):
+		"""A JsonBackend reading from a seeded ``results.ndjson`` (the store IS the source of
+		truth — there is no in-memory results mode), pointed at the run dir via ``report_dir``."""
+		import orjson
+		from secator.query.json import JsonBackend
+		run_dir = tmp_path / 'tasks' / '0'
+		run_dir.mkdir(parents=True)
+		with open(run_dir / 'results.ndjson', 'wb') as f:
+			for rec in findings:
+				f.write(orjson.dumps(rec) + b'\n')
+		return JsonBackend('ws', context={'report_dir': str(run_dir)})
+
 	def test_regex_case_insensitivity_uses_inline_flag(self):
 		# The JSON backend's _regex_match ignores $options, so case-insensitivity MUST ride on an
 		# inline (?i) flag in the pattern (honored by both re.search and Mongo $regex).
@@ -429,11 +441,10 @@ class TestBackendParity:
 		assert match_query({'_type': 'port', 'service_name': 'ssh'}, q)          # lower matches
 		assert not match_query({'_type': 'port', 'service_name': 'http'}, q)
 
-	def test_json_and_mongo_backends_extract_same(self):
+	def test_json_and_mongo_backends_extract_same(self, tmp_path):
 		import pytest
 		pytest.importorskip('mongomock')
 		import mongomock
-		from secator.query.json import JsonBackend
 		from secator.query.mongodb import MongoDBBackend
 		findings = [
 			{'_type': 'port', 'service_name': 'OpenSSH', 'host': 'a',
@@ -442,7 +453,7 @@ class TestBackendParity:
 			 '_context': {'workspace_id': 'ws'}, 'is_false_positive': False},
 		]
 		query = self._regex_query()
-		json_backend = JsonBackend('ws', results=[dict(f) for f in findings])
+		json_backend = self._json_backend(tmp_path, findings)
 		json_hosts = sorted(r['host'] for r in json_backend.search(query))
 
 		client = mongomock.MongoClient()
@@ -452,12 +463,11 @@ class TestBackendParity:
 		mongo_hosts = sorted(r['host'] for r in mongo_backend.search(query))
 		assert json_hosts == mongo_hosts == ['a']
 
-	def test_bare_truthy_string_parity_json_vs_mongo(self):
+	def test_bare_truthy_string_parity_json_vs_mongo(self, tmp_path):
 		# `item.version` -> $nin truthy. Non-empty kept; '' and None excluded on BOTH backends.
 		import pytest
 		pytest.importorskip('mongomock')
 		import mongomock
-		from secator.query.json import JsonBackend
 		from secator.query.mongodb import MongoDBBackend
 		findings = [
 			{'_type': 'technology', 'version': '1.0', 'product': 'a',
@@ -468,7 +478,7 @@ class TestBackendParity:
 			 '_context': {'workspace_id': 'ws'}, 'is_false_positive': False},
 		]
 		query = build_extractor_query({'type': 'technology', 'field': 'product', 'condition': 'item.version'}, _ctx())
-		json_b = JsonBackend('ws', results=[dict(f) for f in findings])
+		json_b = self._json_backend(tmp_path, findings)
 		json_prod = sorted(r['product'] for r in json_b.search(query))
 		client = mongomock.MongoClient()
 		client.main.findings.insert_many([dict(f) for f in findings])

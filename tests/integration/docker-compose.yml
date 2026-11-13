@@ -66,5 +66,114 @@ services:
       WORDPRESS_ADMIN_USER: 'admin'
       WORDPRESS_ADMIN_PASSWORD: 'admin'
       WORDPRESS_ADMIN_EMAIL: 'admin@example.com'
+
+  # Samba (SMB) — exercises nxc_smb (null-auth + share enumeration).
+  samba:
+    image: dperson/samba
+    restart: always
+    command: >
+      -p
+      -u "testuser;testpass"
+      -s "public;/share;yes;no;yes;all"
+      -s "private;/private;yes;no;no;testuser"
+      -g "map to guest = Bad User"
+    ports:
+      - "127.0.0.1:10445:445"
+    tmpfs:
+      - /share
+      - /private
+    # Same probe as the image's built-in HEALTHCHECK (a null-session share list,
+    # i.e. what nxc_smb asserts), but polled fast instead of every 60s.
+    healthcheck:
+      test: ["CMD-SHELL", "smbclient -L localhost -U % -m SMB3"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
+
+  # vsftpd (FTP) — exercises nxc_ftp (valid-login tag).
+  ftp:
+    image: fauria/vsftpd
+    restart: always
+    environment:
+      FTP_USER: testuser
+      FTP_PASS: testpass
+      PASV_ADDRESS: 127.0.0.1
+      PASV_MIN_PORT: 21100
+      PASV_MAX_PORT: 21110
+    ports:
+      - "127.0.0.1:10021:21"
+      - "127.0.0.1:21100-21110:21100-21110"
+    # Healthy once testuser can log in and list (the user is created after the
+    # banner is already up, so a port check alone races).
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "--max-time", "5", "-o", "/dev/null", "ftp://testuser:testpass@127.0.0.1/"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
+
+  # Docker Registry v2 (unauthenticated) — exercises dockerregistrygrabber.
+  registry:
+    image: registry:2
+    restart: always
+    ports:
+      - "127.0.0.1:15000:5000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5000/v2/"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # Drupal 7 — exercises droopescan (version/theme/CHANGELOG detection).
+  drupal:
+    image: drupal:7-apache
+    restart: always
+    ports:
+      - "127.0.0.1:18081:80"
+
+  # Zabbix agent with remote commands enabled — exercises zabbix_get RCE detection.
+  zabbix_agent:
+    # Pin a concrete version: the floating ':latest' tag drifted to a release
+    # whose entrypoint renamed ZBX_ALLOWKEY -> indexed ZBX_ALLOWKEY_0 and now
+    # hard-errors on the old var, so the container crash-looped on boot and the
+    # agent never listened (zabbix_get -> POLLERR,POLLHUP). Pinning stops the
+    # lab from silently breaking again when upstream :latest moves.
+    image: zabbix/zabbix-agent:alpine-7.0.32
+    restart: always
+    environment:
+      # zabbix_get connects via the host-forwarded port, so the source address
+      # the agent sees is the Docker bridge gateway, not loopback. Allow any
+      # source so forwarded passive checks are accepted in CI.
+      ZBX_SERVER_HOST: "0.0.0.0/0"
+      ZBX_PASSIVE_ALLOW: "true"
+      ZBX_ACTIVE_ALLOW: "false"
+      ZBX_ENABLEREMOTECOMMANDS: "1"
+      # Zabbix 7.0 requires indexed AllowKey vars (ZBX_ALLOWKEY_0, _1, ...);
+      # the old scalar ZBX_ALLOWKEY is rejected and aborts startup.
+      ZBX_ALLOWKEY_0: "system.run[*]"
+    ports:
+      - "127.0.0.1:10050:10050"
+    # Healthy once the agent answers a real passive check (not just an open port).
+    healthcheck:
+      test: ["CMD-SHELL", "zabbix_get -s 127.0.0.1 -p 10050 -k agent.ping | grep -qx 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # Plain Tomcat — exercises apachetomcatscanner (version detection).
+  tomcat:
+    image: tomcat:9.0
+    restart: always
+    ports:
+      - "127.0.0.1:18080:8080"
+
+  # Tomcat with an unauthenticated JMX/RMI endpoint — exercises beanshooter + rmg.
+  jmx:
+    image: tomcat:9.0
+    restart: always
+    environment:
+      JAVA_TOOL_OPTIONS: "-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=1617 -Dcom.sun.management.jmxremote.rmi.port=1617 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.local.only=false -Djava.rmi.server.hostname=127.0.0.1"
+    ports:
+      - "127.0.0.1:1617:1617"
+
 volumes:
   wordpress_data: {}

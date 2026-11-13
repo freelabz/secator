@@ -9,6 +9,39 @@ from secator.scope import as_scope_list, host_in_scope
 from secator.utils import deduplicate, debug
 
 
+def apply_task_overrides(target, task_name=None):
+	"""Apply ``tasks.overrides.<task>.<attr>`` config overrides onto a task.
+
+	The single mechanism for config-driven task attribute overrides. Shared by:
+
+	- ``Command.__init__`` — applied to the task **instance** at runtime;
+	- ``secator install tools`` — applied to the task **class** before
+	  ``ToolInstaller.install`` reads ``install_cmd`` / ``install_version`` (the
+	  installer never instantiates the task, which is why the runtime instance
+	  loop alone never covered installs).
+
+	``target`` may be a class or an instance; ``task_name`` defaults to its class
+	name. Overrides are applied verbatim via ``setattr`` (no coercion) — exactly
+	like every other override (``max_timeout``, ``profile``, ``input_chunk_size`` …).
+
+	Args:
+		target: The task class or instance to mutate.
+		task_name (str, optional): Override lookup key; defaults to the class name.
+
+	Returns:
+		The same ``target`` (mutated), for convenience.
+	"""
+	name = task_name or (target.__name__ if isinstance(target, type) else target.__class__.__name__)
+	# CONFIG.tasks.overrides auto-vivifies missing keys to a truthy empty object;
+	# normalize to a plain dict before iterating.
+	overrides = CONFIG.tasks.overrides.get(name, {})
+	if hasattr(overrides, 'toDict'):
+		overrides = overrides.toDict()
+	for attr, value in overrides.items():
+		setattr(target, attr, value)
+	return target
+
+
 def resolve_task_queue(task_cls, opts):
 	"""Resolve the Celery queue (== task profile) for a task at dispatch time.
 

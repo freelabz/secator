@@ -1,0 +1,49 @@
+name: canary-label-guard
+
+# Fork-PR anti-TOCTOU for the canary opt-in label.
+#
+# When a maintainer adds `allow-canary` to an EXTERNAL (fork) PR they vouch for THAT head SHA.
+# If the fork is then updated, the approval must not carry to the new, unreviewed commits.
+#
+# This MUST be `pull_request_target` (not `pull_request`): a fork `pull_request` event runs with
+# a READ-ONLY GITHUB_TOKEN, so `removeLabel` 403s silently and the stale label survives — then a
+# later check_suite run (full token) integrates the unreviewed head. `pull_request_target` runs in
+# the BASE-repo context with a WRITE token even for fork PRs, so the removal actually takes effect.
+#
+# SAFETY: this job NEVER checks out or runs any PR code — it only calls the Issues API with the PR
+# number. That is the one safe use of pull_request_target (no untrusted code execution).
+
+on:
+  pull_request_target:
+    types: [synchronize]
+
+permissions:
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: canary-label-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  strip-fork-approval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            const sameRepo = pr.head.repo && pr.head.repo.full_name === `${owner}/${repo}`;
+            if (sameRepo) return;  // in-repo branches keep their opt-in across pushes (write access already)
+            const has = (pr.labels || []).some(l => l.name === 'allow-canary');
+            if (!has) return;
+            await github.rest.issues.removeLabel({
+              owner, repo, issue_number: pr.number, name: 'allow-canary',
+            }).catch(() => {});
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: pr.number,
+              body: '🔒 `allow-canary` auto-removed: this external PR was updated, so the prior '
+                  + 'approval no longer covers the new commits. A maintainer must re-review and '
+                  + 're-add the label to let it into canary.',
+            });
