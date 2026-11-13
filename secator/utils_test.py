@@ -296,7 +296,8 @@ class CommandOutputTester:  # Mixin for unittest.TestCase
 			if isinstance(runner, Command):
 				if not runner.ignore_return_code:
 					debug(f'{runner.name} should have a 0 return code', sub='unittest')
-					self.assertEqual(runner.return_code, 0, f'{runner.name} should have a 0 return code. Runner return code: {runner.return_code}')  # noqa: E501
+					errors = '\n'.join(f'{e.message}\n{e.traceback}' for e in runner.errors)
+					self.assertEqual(runner.return_code, 0, f'{runner.name} should have a 0 return code. Runner return code: {runner.return_code}. Errors:\n{errors}')  # noqa: E501
 
 			# Check results not empty
 			if not empty_results_allowed:

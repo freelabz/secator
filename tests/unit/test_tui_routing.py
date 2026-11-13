@@ -12,6 +12,7 @@ import pytest
 
 pytest.importorskip("textual")
 
+from secator.definitions import ADDONS_ENABLED  # noqa: E402
 from secator.tui.widgets import PromptInput  # noqa: E402
 from secator.tui.ai import AITUI          # noqa: E402
 from secator.tui.widgets import ActionPanel, RunnerPanel  # noqa: E402
@@ -594,6 +595,48 @@ async def _choice_numeric_literal_body():
 
 def test_choice_numeric_literal_via_input():
 	_run(_choice_numeric_literal_body())
+
+
+async def _choice_escape_resumes_body():
+	from unittest.mock import MagicMock
+	from secator.ai.interactivity import TUIBackend
+	from secator.rich import set_tui
+	from secator.tasks.ai import ai as AiTask
+	fake = MagicMock()
+	fake.backend = TUIBackend()
+	fake.encryptor = None
+	fake.max_iterations = 10
+	fake._progress_actions = 0
+	fake._prompt_and_redetect = lambda *a, **kw: AiTask._prompt_and_redetect(fake, *a, **kw)
+	out, done = {}, threading.Event()
+
+	def build():
+		out["result"] = AiTask._prompt_and_redetect(fake, ["scan port", "crawl web"], reason="What next?")
+		done.set()
+		yield from ()
+
+	app = AITUI(build, session="ai", mode="scan")
+	set_tui(app)
+	try:
+		async with app.run_test(size=(120, 40)) as pilot:
+			await pilot.pause(0.2)
+			assert app._active_choice is not None
+			await pilot.press("escape")
+			await pilot.pause(0.2)
+			# the run stays alive, waiting on a plain follow-up with the input restored
+			assert app._pending_ask is not None
+			assert app.query_one("#input-box").display is True
+			await app.on_prompt_input_submitted(PromptInput.Submitted("try the login page"))
+			assert await asyncio.to_thread(done.wait, 10), "no AI turn after the next message"
+			assert out["result"] is not None
+			fake.history.add_user.assert_called_once_with("try the login page")
+	finally:
+		set_tui(None)
+
+
+@pytest.mark.skipif(not ADDONS_ENABLED.get("ai"), reason="ai addon required")
+def test_choice_escape_then_message_resumes_ai():
+	_run(_choice_escape_resumes_body())
 
 
 async def _parent_error_body():

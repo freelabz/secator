@@ -82,6 +82,13 @@ services:
     tmpfs:
       - /share
       - /private
+    # Same probe as the image's built-in HEALTHCHECK (a null-session share list,
+    # i.e. what nxc_smb asserts), but polled fast instead of every 60s.
+    healthcheck:
+      test: ["CMD-SHELL", "smbclient -L localhost -U % -m SMB3"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
 
   # vsftpd (FTP) — exercises nxc_ftp (valid-login tag).
   ftp:
@@ -96,6 +103,13 @@ services:
     ports:
       - "127.0.0.1:10021:21"
       - "127.0.0.1:21100-21110:21100-21110"
+    # Healthy once testuser can log in and list (the user is created after the
+    # banner is already up, so a port check alone races).
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "--max-time", "5", "-o", "/dev/null", "ftp://testuser:testpass@127.0.0.1/"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
 
   # Docker Registry v2 (unauthenticated) — exercises dockerregistrygrabber.
   registry:
@@ -103,6 +117,11 @@ services:
     restart: always
     ports:
       - "127.0.0.1:15000:5000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5000/v2/"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
 
   # Drupal 7 — exercises droopescan (version/theme/CHANGELOG detection).
   drupal:
@@ -133,6 +152,12 @@ services:
       ZBX_ALLOWKEY_0: "system.run[*]"
     ports:
       - "127.0.0.1:10050:10050"
+    # Healthy once the agent answers a real passive check (not just an open port).
+    healthcheck:
+      test: ["CMD-SHELL", "zabbix_get -s 127.0.0.1 -p 10050 -k agent.ping | grep -qx 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
 
   # Plain Tomcat — exercises apachetomcatscanner (version detection).
   tomcat:

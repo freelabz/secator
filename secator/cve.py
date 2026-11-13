@@ -6,8 +6,9 @@ from packaging import version
 
 from secator.utils import get_versions_from_string
 
-VERSION_SIMPLE = re.compile(r'([a-zA-Z][a-zA-Z\s]*?)\s+([0-9]+\.[0-9]+(?:\.[0-9]+)*)')
-VERSION_POSTFIX = re.compile(r'([a-zA-Z][a-zA-Z\s]*?)\s+([0-9]+\.[0-9]+(?:\.[0-9]+)*(?:[a-zA-Z][0-9])*)')
+SOFTWARE_NAME = r'([a-zA-Z][\w\s.+-]*?)'
+VERSION_SIMPLE = re.compile(SOFTWARE_NAME + r'\s+([0-9]+\.[0-9]+(?:\.[0-9]+)*)')
+VERSION_POSTFIX = re.compile(SOFTWARE_NAME + r'\s+([0-9]+\.[0-9]+(?:\.[0-9]+)*(?:[a-zA-Z][0-9])*)')
 
 
 def extract_software_and_version(version_string: str, postfix=False) -> Tuple[Optional[str], Optional[str]]:
