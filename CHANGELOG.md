@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.54.1](https://github.com/freelabz/secator/compare/v0.54.0...v0.54.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **httpx:** parse tech names containing dots ([#1639](https://github.com/freelabz/secator/issues/1639)) ([f61378d](https://github.com/freelabz/secator/commit/f61378db483be78bef0b0dc9842b58075680787b))
+* **tui:** choice panel focus handling and dismiss button ([#1642](https://github.com/freelabz/secator/issues/1642)) ([7f5c55c](https://github.com/freelabz/secator/commit/7f5c55cb55d501df75df8b7a3d41bcb007e412c7))
+* **tui:** cut relayouts when expanding/collapsing runner panels ([#1632](https://github.com/freelabz/secator/issues/1632)) ([67a0f92](https://github.com/freelabz/secator/commit/67a0f920b3dfb0ada70d8729d35ac9ac430f8fe4))
+* **tui:** resume ai after escaping a question ([#1641](https://github.com/freelabz/secator/issues/1641)) ([7b8cf3e](https://github.com/freelabz/secator/commit/7b8cf3edc440d438cad3284a92a36c70efd36394))
+
 ## [0.54.0](https://github.com/freelabz/secator/compare/v0.53.4...v0.54.0) (2026-11-10)
 
 
