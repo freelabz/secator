@@ -45,12 +45,23 @@ _ACTIVE_MODES = frozenset({"scan", "exploit", "research"})
 # code it authors, so it is added here on top of the finding-writing modes.
 _RUNNER_MODES = frozenset({"scan", "exploit", "research", "contribute"})
 _ALL_MODES = frozenset({"scan", "chat", "exploit", "contribute", "research"})
-# Read-only helper tools (web/plan/run-history lookups) — exposed in every mode.
+# Read-only helper tools (web/plan/run-history lookups) — every mode except monitor.
 _READONLY_HELPER = _ALL_MODES
-# `change_mode` — every mode EXCEPT contribute and research, both deliberate,
-# directly-selected terminal modes: contribute authors secator code and research already
-# has the most capable surface, so neither escalates nor de-escalates. The other modes keep
-# the escalation ladder.
+# monitor is a bounded re-verification mode over the EXISTING finding set: it re-probes a
+# finding with shell, and retires/annotates it (mark_vuln_false_positive / mark_vuln_fixed /
+# update_finding / add_note) — but never runs tasks/workflows, add_finding,
+# mark_vuln_exploited / exploit_failed, subagent or change_mode. This set is the
+# finding-curation tools it SHARES with scan/exploit/research.
+_SCAN_EXPLOIT_MONITOR = frozenset({"scan", "exploit", "research", "monitor"})
+# `run_shell`: the runner modes plus monitor (a targeted re-check of one finding's own target).
+_SHELL_MODES = _RUNNER_MODES | {"monitor"}
+# `query` and `stop` are available in EVERY mode (incl. monitor). The read-only helpers
+# (_READONLY_HELPER) are NOT exposed in monitor, a focused re-verification loop.
+_QUERY_MODES = _ALL_MODES | {"monitor"}
+# `change_mode` — every mode EXCEPT contribute, research and monitor: contribute and research
+# are deliberate, directly-selected terminal modes (contribute authors secator code; research
+# already has the most capable surface), and monitor is a bounded, non-escalating pass. The
+# other modes keep the escalation ladder.
 _CAN_CHANGE_MODE = frozenset({"scan", "chat", "exploit"})
 
 
@@ -205,7 +216,7 @@ class RunWorkflowTool(BaseTool):
 class RunShellTool(BaseTool):
 	name = "run_shell"
 	action = "shell"
-	modes = _RUNNER_MODES
+	modes = _SHELL_MODES
 	handler = "_handle_shell"
 	schema = {
 		"type": "function",
@@ -240,7 +251,7 @@ class RunShellTool(BaseTool):
 class QueryWorkspaceTool(BaseTool):
 	name = "query_workspace"
 	action = "query"
-	modes = _ALL_MODES
+	modes = _QUERY_MODES
 	auto_allow = True
 	handler = "_handle_query"
 	schema = {
@@ -420,7 +431,7 @@ class MarkVulnExploitedTool(BaseTool):
 class MarkVulnFalsePositiveTool(BaseTool):
 	name = "mark_vuln_false_positive"
 	action = "mark_vuln_false_positive"
-	modes = _ACTIVE_MODES
+	modes = _SCAN_EXPLOIT_MONITOR
 	auto_allow = True
 	handler = "_handle_mark_vuln_false_positive"
 	schema = {
@@ -443,6 +454,47 @@ class MarkVulnFalsePositiveTool(BaseTool):
 					"reason": {
 						"type": "string",
 						"description": "Short reason why it's a false positive (e.g. 'not reachable', 'patched'). Recorded on the vuln."  # noqa: E501
+					},
+					"extra_data": {
+						"type": "object",
+						"description": "Extra structured context merged into the vuln (existing keys preserved). Optional.",
+						"additionalProperties": True
+					}
+				},
+				"required": ["_uuid"]
+			}
+		}
+	}
+
+
+class MarkVulnFixedTool(BaseTool):
+	name = "mark_vuln_fixed"
+	action = "mark_vuln_fixed"
+	modes = _SCAN_EXPLOIT_MONITOR
+	auto_allow = True
+	handler = "_handle_mark_vuln_fixed"
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "mark_vuln_fixed",
+			"description": (
+				"Mark an EXISTING vulnerability as FIXED — a REAL vulnerability (typically one previously "
+				"confirmed EXPLOITED) that no longer reproduces because it has been remediated/patched. "
+				"Identify it by the `_uuid` from query_workspace results. Sets status='FIXED' but keeps the vuln "
+				"VISIBLE (does NOT hide it) — it is a resolved part of the history, not a false positive. Use this "
+				"(NOT mark_vuln_false_positive) when the vuln WAS genuine but is now gone/closed. Give a short "
+				"`reason` (what changed). Prefer pairing it with an `add_note` recording the evidence that it is gone."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"_uuid": {
+						"type": "string",
+						"description": "The `_uuid` of the vulnerability to mark fixed (from query_workspace results)."
+					},
+					"reason": {
+						"type": "string",
+						"description": "Short reason it's now fixed (e.g. 'patched to 1.2.4', 'endpoint removed'). Recorded on the vuln."  # noqa: E501
 					},
 					"extra_data": {
 						"type": "object",
@@ -536,7 +588,7 @@ class MarkVulnExploitFailedTool(BaseTool):
 class UpdateFindingTool(BaseTool):
 	name = "update_finding"
 	action = "update_finding"
-	modes = _ACTIVE_MODES
+	modes = _SCAN_EXPLOIT_MONITOR
 	auto_allow = True
 	handler = "_handle_update_finding"
 	schema = {
@@ -579,7 +631,7 @@ class UpdateFindingTool(BaseTool):
 class AddNoteTool(BaseTool):
 	name = "add_note"
 	action = "add_note"
-	modes = _ACTIVE_MODES
+	modes = _SCAN_EXPLOIT_MONITOR
 	auto_allow = True
 	handler = "_handle_add_note"
 	schema = {
@@ -800,7 +852,7 @@ class ListRunnersTool(BaseTool):
 class ChangeModeTool(BaseTool):
 	name = "change_mode"
 	action = "change_mode"
-	modes = _CAN_CHANGE_MODE  # every mode EXCEPT contribute + research (terminal, directly-selected)
+	modes = _CAN_CHANGE_MODE  # NOT contribute / research / monitor (terminal or bounded, directly-selected)
 	auto_allow = True
 	handler = "_handle_change_mode"
 	schema = {
@@ -837,7 +889,7 @@ class ChangeModeTool(BaseTool):
 class StopTool(BaseTool):
 	name = "stop"
 	action = "stop"
-	modes = _ALL_MODES
+	modes = _QUERY_MODES
 	auto_allow = True
 	# NOT emitted by build_tool_schemas / not in TOOL_SCHEMAS — injected per-backend
 	# via get_extra_tools (interactive backends a `stop` with `choices`, AutoBackend a
@@ -891,6 +943,7 @@ _TOOL_CLASSES = [
 	AddFindingTool,
 	MarkVulnExploitedTool,
 	MarkVulnFalsePositiveTool,
+	MarkVulnFixedTool,
 	MarkVulnExploitFailedTool,
 	UpdateFindingTool,
 	AddNoteTool,

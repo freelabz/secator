@@ -2074,6 +2074,54 @@ def _handle_mark_vuln_exploited(action: Dict, ctx: ActionContext) -> Generator:
 	)
 
 
+def _handle_mark_vuln_fixed(action: Dict, ctx: ActionContext) -> Generator:
+	"""Mark an EXISTING vulnerability as FIXED — a genuine vuln (often previously EXPLOITED) that no
+	longer reproduces because it was remediated. Sets ``status="FIXED"`` via a scoped ``$set`` matched
+	by ``_uuid`` and keeps the finding VISIBLE (``is_false_positive`` is left untouched): a fixed vuln
+	is resolved history, not a false positive. Unlike the exploited/failed verdicts this records NO
+	exploit attempt and does NOT run the attempt rollup — FIXED is a terminal remediation status, not
+	an exploitation outcome. An optional ``reason`` is stored in ``extra_data.fixed_reason``.
+	"""
+	context = _get_result_context(action, ctx)
+	uuid = str(action.get("_uuid") or "").strip()
+	if not uuid:
+		yield Error(message="mark_vuln_fixed requires the vulnerability `_uuid` (from query_workspace results).", _context=context)  # noqa: E501
+		return
+	reason = str(action.get("reason") or "").strip()
+	if ctx.encryptor and reason:
+		reason = _decrypt_dict({"reason": reason}, ctx.encryptor).get("reason", reason)
+
+	vuln = _lookup_finding(ctx, uuid)
+	if not vuln or vuln.get("_type") != "vulnerability":
+		yield Error(
+			message=f"No vulnerability found with _uuid={uuid} in this workspace. "
+			"Re-check the `_uuid` from query_workspace results.", _context=context)
+		return
+
+	# FIXED is set directly (no is_false_positive change → stays visible). verified=False: it is no
+	# longer a live/exploitable finding.
+	update = {"status": "FIXED", "verified": False}
+	if reason:
+		update["extra_data.fixed_reason"] = reason
+	_merge_extra_data(update, action.get("extra_data"))
+
+	try:
+		modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+	except Exception as e:
+		yield Error(message=f"Failed to mark vulnerability fixed: {e}", _context=context)
+		return
+	if err:
+		yield Error(message=err, _context=context)
+		return
+	msg = f"Marked {label} as fixed" + (f" ({reason})." if reason else ".")
+	yield Ai(
+		content=msg,
+		ai_type="mark_vuln_fixed",
+		extra_data={"finding": updated} if updated else {},
+		_context=context,
+	)
+
+
 def _handle_mark_vuln_false_positive(action: Dict, ctx: ActionContext) -> Generator:
 	"""Mark an EXISTING vulnerability as a false positive.
 
@@ -2256,14 +2304,33 @@ def _drop_readonly_fields(data: Dict) -> Dict:
 	}
 
 
+def _coerce_bool(value):
+	"""Parse a boolean from the LLM's loosely-typed ``fields`` value. Accepts a real bool, 0/1,
+	or a common boolean string (true/false/1/0/yes/no, case-insensitive); returns None for
+	anything else so the caller rejects it — NOT ``bool(value)``, which treats the string
+	``"false"`` as True and would hide a real finding."""
+	if isinstance(value, bool):
+		return value
+	if isinstance(value, (int, float)) and value in (0, 1):
+		return bool(value)
+	if isinstance(value, str):
+		v = value.strip().lower()
+		if v in ("true", "1", "yes", "y", "on"):
+			return True
+		if v in ("false", "0", "no", "n", "off"):
+			return False
+	return None
+
+
 def _lookup_finding(ctx: "ActionContext", uuid: str):
 	"""Return the workspace finding with this ``_uuid`` (dict), or None.
 
 	A targeted by-``_uuid`` read uses ``scope_only=True`` so it reaches the finding
 	regardless of its display state — a finding already marked ``is_false_positive`` (or
 	otherwise hidden by the base display filter) must still be found by its uuid so the
-	verdict/annotation handlers can act on it. Still workspace-scoped, so it never crosses
-	into another workspace or reaches an already-removed doc."""
+	verdict/annotation/monitor handlers can act on it (e.g. un-hide it, or re-validate a
+	previously-hidden finding). Still workspace-scoped, so it never crosses into another
+	workspace or reaches an already-removed doc."""
 	engine = ctx.get_query_engine()
 	return (engine.search({"_uuid": uuid}, limit=1, scope_only=True) or [None])[0]
 
@@ -2435,6 +2502,34 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error(message=f"Refusing to update a non-finding record (_type={etype!r}).", _context=context)
 		return
 	cls = {c.get_name().lower(): c for c in FINDING_TYPES}[etype]
+	cls_fields = set(getattr(cls, "__dataclass_fields__", {}))
+
+	# Attack-surface cleanup verdict (any finding type, not just vulns): the recoverable
+	# hide-flag `is_false_positive` is normally server-owned (stripped by _drop_readonly_fields
+	# so an agent can't forge the verified/exploited verdict). We allow ONLY this one flag here,
+	# server-DERIVED — never `verified`/`status=EXPLOITED` — so a cleanup pass can retire a
+	# finding (subdomain/ip/port/…) that no longer reproduces. It stays recoverable (set back
+	# to False), and the caller stamps an auditable reason in extra_data for bulk reversal.
+	# For a VULNERABILITY the hide verdict belongs to the dedicated mark_vuln_false_positive
+	# tool (its reason/refetch handling + the vuln gate), so is_false_positive stays stripped
+	# here. For every other attack-surface type there is no dedicated tool, so this is the path.
+	verdict = {}
+	if etype != "vulnerability" and "is_false_positive" in fields:
+		if "is_false_positive" not in cls_fields:
+			yield Error(message=f"{etype} findings have no is_false_positive field; downgrade its `confidence` instead or leave it.", _context=context)  # noqa: E501
+			return
+		fp = _coerce_bool(fields.pop("is_false_positive"))
+		if fp is None:
+			yield Error(message="is_false_positive must be a boolean (true or false).", _context=context)
+			return
+		verdict["is_false_positive"] = fp
+		# Do NOT write `status` here. For the non-vulnerability types this path handles, `status`
+		# is a DATA field (e.g. Domain's WHOIS-observation list, a certificate's validity state) —
+		# writing "FALSE_POSITIVE" would clobber real data. The hide is driven solely by
+		# `is_false_positive`; a vulnerability's verdict `status` is owned by
+		# mark_vuln_false_positive, and vulns never reach this branch.
+		if fp and "verified" in cls_fields:
+			verdict["verified"] = False
 
 	# Only agent-writable content fields (framework/server-owned + `*_path` stripped); `id`
 	# stays blocked on UPDATE via _FINDING_IMMUTABLE_FIELDS below.
@@ -2468,6 +2563,14 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 		key = str(k)
 		if key and "." not in key and not key.startswith("$"):
 			update[f"extra_data.{key}"] = v
+	# A confidence downgrade must re-prioritize: recompute the derived sort key where the type
+	# carries it (update_finding writes a raw $set, so __post_init__ never runs to derive it).
+	if "confidence" in update and "confidence_nb" in cls_fields:
+		cn = {"high": 1, "medium": 2, "low": 3}.get(str(update["confidence"]).lower())
+		if cn:
+			update["confidence_nb"] = cn
+	# Server-derived verdict last so it wins over any stale free-form copy.
+	update.update(verdict)
 	if not update:
 		blocked = sorted(requested_field_keys - set(update))
 		if blocked:
