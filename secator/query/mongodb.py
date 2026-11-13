@@ -111,6 +111,22 @@ class MongoDBBackend(QueryBackend):
 		result = client.main.findings.update_one(_seek_by_native_id(query), update)
 		return result.modified_count
 
+	def _execute_create_note(self, note: dict) -> int:
+		"""Insert a note into the dedicated ``notes`` collection (NOT findings).
+
+		The shape matches the platform's notes reader — ``target_type`` + ``target_key``
+		identity, ``body``/``changes``, and ``_context.workspace_id`` scope — so a note the
+		AI writes here renders exactly like one posted through the notes endpoint.
+		"""
+		try:
+			client = self._get_client()
+			doc = {k: v for k, v in note.items() if k != '_id'}
+			client.main.notes.insert_one(doc)
+			return 1
+		except Exception as e:
+			console.print(Warning(message=f'MongoDB create_note failed: {e}'))
+			return 0
+
 	def list_workspaces(self):
 		"""List workspaces for the mongodb backend.
 
