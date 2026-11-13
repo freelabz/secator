@@ -951,3 +951,66 @@ async def _replay_body():
 
 def test_replay_history_renders_full_conversation():
 	_run(_replay_body())
+
+
+async def _toggle_cost_body():
+	# Guards the cost of expanding/collapsing a runner panel: raw output renders in ONE
+	# widget (not one per line), and a spinner tick repaints the header without a relayout.
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		await app._render(_card("task", "nmap", "Port scan"))
+		await app._set_command("nmap x -p-", "nmap")
+		for i in range(50):
+			await app._render_line(f"{i}/tcp open", "nmap")
+		await pilot.pause(0.05)
+		p = _by_desc(app, "Port scan")
+		assert p.raw_lines == 50
+		raw = p.query_one(".runner-raw")
+		assert len(raw.children) == 1
+		assert str(raw.children[0].render()).splitlines() == [f"{i}/tcp open" for i in range(50)]
+
+		head = p.query_one(".runner-head")
+		layouts = []
+		orig = head.refresh
+		head.refresh = lambda *a, layout=False, **k: (layouts.append(layout), orig(*a, layout=layout, **k))[1]
+		p._tick_spin()
+		assert layouts and not any(layouts)
+		app._finish_current()
+
+
+def test_runner_toggle_cost_bounded():
+	_run(_toggle_cost_body())
+
+
+async def _focus_restyle_body():
+	# Clicking a runner moves focus to the conversation; that must restyle the container only,
+	# not re-match CSS for every widget in the conversation.
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		for k in range(5):
+			await app._render(_card("task", "nmap", f"Port scan {k}"))
+			for i in range(10):
+				await app._render(_finding("port", "nmap", f"f{k}-{i}", port=i, host="x", ip="1.2.3.4", state="open"))
+			app._finish_current()
+		await pilot.pause(0.05)
+		convo = app._convo()
+		assert sum(1 for _ in convo.walk_children()) > 50
+		restyled = []
+		orig = app.stylesheet.update_nodes
+
+		def update_nodes(nodes, animate=False):
+			nodes = list(nodes)
+			restyled.extend(nodes)
+			return orig(nodes, animate=animate)
+
+		app.stylesheet.update_nodes = update_nodes
+		convo.focus()
+		await pilot.pause(0.05)
+		assert app.focused is convo
+		assert convo in restyled and len(restyled) <= 5
+
+
+def test_conversation_focus_restyles_container_only():
+	_run(_focus_restyle_body())

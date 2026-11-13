@@ -112,9 +112,9 @@ ai = [
 	# explicitly so `secator install addons ai` always ships the binary, not just
 	# the safecmd Python package. Without it the guardrail shell parser degrades.
 	'shfmt-py',
-	# Textual TUI (default for `secator x ai` on a TTY). Needs rich >= 14.2, hence the
-	# core `rich` pin bump above.
-	'textual < 9',
+	# Textual TUI (default for `secator x ai` on a TTY); >= 5 for Static.update(layout=).
+	# Needs rich >= 14.2, hence the core `rich` pin bump above.
+	'textual >= 5, < 9',
 ]
 
 [project.scripts]

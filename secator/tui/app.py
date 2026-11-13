@@ -23,7 +23,7 @@ from textual.widgets.option_list import Option
 from secator.ai.interactivity import DISMISS_ANSWER
 from secator.tui.render import finding_text, message_text
 from secator.tui.widgets import (
-	BackBar, BlockPanel, ChoicePrompt, Grip, PermissionPrompt, PromptInput, RunnerPanel)
+	BackBar, BlockPanel, ChoicePrompt, ConversationScroll, Grip, PermissionPrompt, PromptInput, RunnerPanel)
 
 
 class TUIApp(App):
@@ -225,7 +225,7 @@ class TUIApp(App):
 	def compose(self) -> ComposeResult:
 		# no top header — the bottom meta bar carries the session/mode state now
 		yield BackBar(Text.from_markup("[#7fd1e0]← Back to conversation[/]"), id="backbar")
-		yield Vertical(VerticalScroll(id="convo"), id="views")
+		yield Vertical(ConversationScroll(id="convo"), id="views")
 		yield Static("", id="status")
 		yield Horizontal(
 			Grip("│", id="findings-grip"),
@@ -451,7 +451,7 @@ class TUIApp(App):
 	async def _ensure_subview(self, sid: str) -> VerticalScroll:
 		sv = self._subviews.get(sid)
 		if sv is None:
-			sv = VerticalScroll(classes="subview")
+			sv = ConversationScroll(classes="subview")
 			sv.display = False
 			self._subviews[sid] = sv
 			await self.query_one("#views", Vertical).mount(sv)
@@ -549,7 +549,7 @@ class TUIApp(App):
 		spin = self._BG_SPIN[self._bg_frame % len(self._BG_SPIN)]
 		for st, rname, kind, config in getattr(self, "_bg_running_rows", []):
 			try:
-				st.update(self._bg_row_text(spin, "#e0882e", rname, kind, config))
+				st.update(self._bg_row_text(spin, "#e0882e", rname, kind, config), layout=False)
 			except Exception:  # noqa: BLE001 - row removed
 				pass
 
@@ -684,7 +684,8 @@ class TUIApp(App):
 		self._spin_frame = (self._spin_frame + 1) % len(self._SPIN)
 		try:
 			self.query_one("#status", Static).update(
-				Text.from_markup(f"[gold3]{self._SPIN[self._spin_frame]} {escape(self._status_text)}[/]"))
+				Text.from_markup(f"[gold3]{self._SPIN[self._spin_frame]} {escape(self._status_text)}[/]"),
+				layout=False)   # glyph swap only: same size, no relayout
 		except Exception:  # noqa: BLE001 - the status node may be gone during teardown
 			pass
 
