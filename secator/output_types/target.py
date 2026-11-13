@@ -23,6 +23,7 @@ class Target(OutputType):
 		'type',
 	]
 	_sort_by = ('type', 'name')
+	_target_fields = ['name']
 
 	def __post_init__(self):
 		if not self.type:
