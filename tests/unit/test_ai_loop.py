@@ -1620,16 +1620,17 @@ class TestUntrustedDataFencing(unittest.TestCase):
 class TestDismissFollowUp(unittest.TestCase):
 	"""Dismissing a follow_up/stop CHOICE prompt (ESC in the TUI) ends the turn cleanly.
 
-	The pending prompt resolves with the DISMISS_ANSWER sentinel; the end-of-turn handler
-	`_prompt_and_redetect` must return None (worker goes idle, next message starts the next
-	turn) WITHOUT injecting the dismiss as a user message or tripping the same-answer
-	loop-breaker.
+	The pending prompt resolves with the DISMISS_ANSWER sentinel. The dismiss is never
+	injected as a user message nor counted by the same-answer loop-breaker. A remote
+	backend exits (the next message respawns the run); an in-process interactive backend
+	waits for the next message instead, so the session can continue.
 	"""
 
-	def _fake_self(self, answer):
+	def _fake_self(self, *answers, backend_cls=None):
 		from secator.ai.interactivity import CLIBackend
-		backend = MagicMock(spec=CLIBackend)
-		backend.ask_user.return_value = {"answer": answer}
+		from secator.tasks.ai import ai as AiTask
+		backend = MagicMock(spec=backend_cls or CLIBackend)
+		backend.ask_user.side_effect = [{"answer": a} for a in answers]
 		fake = MagicMock()
 		fake.backend = backend
 		fake.session_id = "sess-dismiss"
@@ -1639,18 +1640,30 @@ class TestDismissFollowUp(unittest.TestCase):
 		fake.model = None
 		fake.max_iterations = 10
 		fake._progress_actions = 0
+		fake._prompt_and_redetect = lambda *a, **kw: AiTask._prompt_and_redetect(fake, *a, **kw)
 		return fake
 
-	def test_dismiss_ends_turn_cleanly(self):
+	def test_dismiss_ends_turn_cleanly_remote(self):
+		from secator.ai.interactivity import RemoteBackend
 		from secator.tasks.ai import ai as AiTask, DISMISS_ANSWER
-		fake = self._fake_self(DISMISS_ANSWER)
-		result = AiTask._prompt_and_redetect(fake, choices=["A", "B"], reason="What next?")
+		fake = self._fake_self(DISMISS_ANSWER, backend_cls=RemoteBackend)
+		result = AiTask._prompt_and_redetect(fake, choices=["A", "B"], prompt_uuid="p1", reason="What next?")
 		# Turn ends cleanly, same clean exit as a no-user stop.
 		self.assertIsNone(result)
 		# Dismiss is NOT injected as a user message...
 		fake.history.add_user.assert_not_called()
 		# ...and does NOT touch the loop-breaker / extension state.
 		self.assertFalse(hasattr(fake, "_repeated_answer_count") and isinstance(fake._repeated_answer_count, int))  # noqa: E501
+
+	def test_dismiss_waits_for_next_message_locally(self):
+		from secator.tasks.ai import ai as AiTask, DISMISS_ANSWER
+		fake = self._fake_self(DISMISS_ANSWER, "scan the host instead")
+		result = AiTask._prompt_and_redetect(fake, choices=["A", "B"], reason="What next?")
+		# The run does not end: it re-asks a plain follow-up and continues with that answer.
+		self.assertIsNotNone(result)
+		self.assertEqual(fake.backend.ask_user.call_count, 2)
+		self.assertEqual(fake.backend.ask_user.call_args.kwargs["choices"], [])
+		fake.history.add_user.assert_called_once_with("scan the host instead")
 
 	def test_non_dismiss_answer_still_advances(self):
 		from secator.tasks.ai import ai as AiTask
