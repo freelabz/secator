@@ -9,7 +9,7 @@ from __future__ import annotations
 from rich.markup import escape
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import HorizontalGroup, Vertical, VerticalScroll
 from textual.message import Message
 from textual.widgets import OptionList, SelectionList, Static, TextArea
 from textual.widgets._toggle_button import ToggleButton
@@ -500,6 +500,63 @@ class ActionPanel(Vertical):
 		self.query_one(".runner-head", _ActionHead).update(self._header())
 
 
+class _FocusFirstClick:
+	"""Mixin for a prompt's option list: a click while its prompt is unfocused only focuses it
+	(and highlights the clicked option) instead of answering, so a click meant to focus the
+	prompt can't pick an option by accident. Keyboard selection is unchanged."""
+
+	_focusing_click = False
+
+	def focus_on_click(self) -> bool:
+		# called on mouse down, BEFORE the screen moves focus here
+		self._focusing_click = not self.parent.has_focus_within
+		return True
+
+	def _on_click(self, event) -> None:
+		if not self._focusing_click:
+			return   # the list's own click handler selects the option
+		self._focusing_click = False
+		option = event.style.meta.get("option")
+		if option is not None:
+			self.highlighted = option
+		event.prevent_default()
+
+
+class _ChoiceOptions(_FocusFirstClick, OptionList):
+	pass
+
+
+class _ChoiceSelections(_FocusFirstClick, SelectionList):
+	pass
+
+
+def _prompt_hint(focused_hint: str, *extra) -> HorizontalGroup:
+	"""The hint row under a prompt list: the key hint while the prompt is focused, a
+	"click to focus" hint otherwise (swapped by CSS on :focus-within), plus ``extra``."""
+	return HorizontalGroup(
+		Static(Text.from_markup(f"[dim]{focused_hint}[/]"), classes="choice-hint choice-hint-focused"),
+		Static(Text.from_markup("[dim]click to focus[/]"), classes="choice-hint choice-hint-blurred"),
+		*extra,
+		classes="choice-foot",
+	)
+
+
+class _DismissButton(Static):
+	"""Muted "Dismiss" button on a choice prompt; same path as Esc. Not focusable, so a click
+	while the prompt is unfocused only focuses the prompt (like its options)."""
+
+	def __init__(self):
+		super().__init__("Dismiss", classes="choice-dismiss")
+
+	def on_click(self, event) -> None:
+		event.stop()
+		prompt = self.query_ancestor(ChoicePrompt)
+		if prompt.has_focus_within:
+			prompt.dismiss_prompt()
+		else:
+			prompt.focus_list()
+
+
 class ChoicePrompt(Vertical):
 	"""A follow-up choice box that REPLACES the input box while active (it lives in the input
 	slot, keeping the top rule), so the user must act on it.
@@ -507,7 +564,8 @@ class ChoicePrompt(Vertical):
 	↑/↓ move; Enter sends the highlighted choice directly. Tab hands the current selection to
 	the input box to ADD MORE DETAILS (the app prefills + focuses it; the user edits and
 	Enter sends that). Esc there returns to this choice box to change the selection.
-	Multi-choice uses a SelectionList (space toggles)."""
+	Esc (or the Dismiss button) on the box dismisses it. While the box is unfocused, the
+	first click only focuses it. Multi-choice uses a SelectionList (space toggles)."""
 
 	def __init__(self, choices: list, multiple: bool, resolve, to_input):
 		super().__init__(classes="choice-box")
@@ -521,15 +579,12 @@ class ChoicePrompt(Vertical):
 		header = "Pick one or multiple choices" if self._multiple else "Pick one choice"
 		yield Static(Text.from_markup(f"[b #e6c15a]{header}[/]"), classes="choice-q")
 		if self._multiple:
-			yield SelectionList(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
-			yield Static(Text.from_markup(
-				"[dim]space to toggle · enter to send · tab to add more details · esc to dismiss[/]"),
-				classes="choice-hint")
+			yield _ChoiceSelections(*[(c, i) for i, c in enumerate(self._choices)], classes="choice-list")
+			hint = "space to toggle · enter to send · tab to add more details · esc to dismiss"
 		else:
-			yield OptionList(*self._choices, classes="choice-list")
-			yield Static(Text.from_markup(
-				"[dim]↑/↓ to move · enter to send · tab to add more details · esc to dismiss[/]"),
-				classes="choice-hint")
+			yield _ChoiceOptions(*self._choices, classes="choice-list")
+			hint = "↑/↓ to move · enter to send · tab to add more details · esc to dismiss"
+		yield _prompt_hint(hint, _DismissButton())
 
 	def on_mount(self) -> None:
 		self.call_after_refresh(self.focus_list)
@@ -566,6 +621,11 @@ class ChoicePrompt(Vertical):
 		self._answered = True
 		self._resolve(value if value is not None else self.selection_text())
 
+	def dismiss_prompt(self) -> None:
+		"""Dismiss: "none of these choices work for me" (Esc or the Dismiss button). Resolves
+		the prompt with the dismiss sentinel via the same submit path as the choices."""
+		self.submit(DISMISS_ANSWER)
+
 	def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
 		# single-choice: Enter (or click) on an option sends it directly
 		self.submit(str(event.option.prompt))
@@ -574,12 +634,9 @@ class ChoicePrompt(Vertical):
 		if self._answered:
 			return
 		if event.key == "escape":
-			# Dismiss: "none of these choices work for me". Resolve the prompt with the
-			# dismiss sentinel (via the same submit/_resolve path the choices use) so the
-			# turn ends cleanly and the next typed message starts the next turn.
 			event.stop()
 			event.prevent_default()
-			self.submit(DISMISS_ANSWER)
+			self.dismiss_prompt()
 		elif event.key == "tab":
 			event.stop()
 			event.prevent_default()
@@ -608,8 +665,8 @@ class PermissionPrompt(Vertical):
 		# the command (or target/path) this approval is about — dim, so the user sees what runs
 		if self._command:
 			yield Static(Text.from_markup(f"[#7b8296]{escape(self._command)}[/]"), classes="perm-cmd")
-		yield OptionList(*[label for label, _ in self._OPTIONS], classes="choice-list")
-		yield Static(Text.from_markup("[dim]↑/↓ to move · enter to select[/]"), classes="choice-hint")
+		yield _ChoiceOptions(*[label for label, _ in self._OPTIONS], classes="choice-list")
+		yield _prompt_hint("↑/↓ to move · enter to select")
 
 	def on_mount(self) -> None:
 		# focus after the first refresh so it reliably takes focus from the input box (no mouse)
