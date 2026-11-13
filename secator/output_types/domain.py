@@ -39,6 +39,7 @@ class Domain(OutputType):
 
 	_table_fields = [DOMAIN, ALIVE]
 	_sort_by = (DOMAIN,)
+	_target_fields = ['domain']
 
 	def __post_init__(self):
 		super().__post_init__()

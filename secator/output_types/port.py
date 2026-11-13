@@ -33,6 +33,7 @@ class Port(OutputType):
 
 	_table_fields = [IP, PORT, HOST, CPES, EXTRA_DATA]
 	_sort_by = (PORT, IP)
+	_target_fields = ['ip', 'host']
 	_group_by = (HOST,)          # collapse a host's ports into one row
 	_group_aggregate = PORT
 
