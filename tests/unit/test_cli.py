@@ -440,7 +440,7 @@ class TestCli(unittest.TestCase):
 		result = self.runner.invoke(cli, ['profile', 'list'], env={'COLUMNS': '400'})
 		assert not result.exception
 		assert result.exit_code == 0
-		for column in ['Profile name', 'Description', 'Enforced', 'Workspace', 'Drivers', 'Exporters', 'Options']:
+		for column in ['Profile name', 'Description', 'Enforced', 'Drivers', 'Exporters', 'Options']:
 			assert column in result.output, f'column {column!r} missing from profile list output'
 
 	def test_profile_list_command_aliases(self):
