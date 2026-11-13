@@ -4,12 +4,12 @@ from dataclasses import dataclass, field
 
 from secator.definitions import ALIVE, DOMAIN
 from secator.config import CONFIG
-from secator.output_types import OutputType
+from secator.output_types import Finding
 from secator.utils import rich_to_ansi, format_object
 
 
 @dataclass
-class Domain(OutputType):
+class Domain(Finding):
 	domain: str
 	alive: bool = False
 	creation_date: datetime = field(default=None, compare=False)

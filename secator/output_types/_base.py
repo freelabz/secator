@@ -2,6 +2,7 @@ import logging
 import re
 from functools import lru_cache
 from dataclasses import _MISSING_TYPE, dataclass, fields
+from dataclasses import field as dataclass_field
 from secator.definitions import DEBUG
 from secator.rich import console
 
@@ -12,12 +13,16 @@ logger = logging.getLogger(__name__)
 # order the vulnerability type used historically.
 CONFIDENCE_NB = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4, 'unknown': 5, None: 6}
 
+_TEMPLATE_FIELD = re.compile(r'\{(\w+)\}')
+
 
 @dataclass
 class OutputType:
 	_table_fields = []
 	_sort_by = ()
-	_target_fields = []  # fields checked against the run scope (first non-empty wins)
+	# Ordered target rules: a field name or a template like '{host}:{port}'. The first rule whose
+	# fields are all set gives the item's target (see compute_target), also checked against the run scope.
+	_target_fields = []
 	# Fields to group by (tuple) and the field whose values to aggregate/collect
 	# when the CLI `--group` option is used without an explicit field.
 	_group_by = ()
@@ -26,6 +31,27 @@ class OutputType:
 	@classmethod
 	def fields(cls):
 		return [f.name for f in fields(cls)]
+
+	@classmethod
+	def compute_target(cls, data):
+		"""Compute the target of an item from its fields, using ``_target_fields``.
+
+		Args:
+			data (Mapping): Item fields (``vars(item)`` or a raw store document).
+
+		Returns:
+			tuple[str, str]: ``(target, target_host)``, both '' when no rule applies.
+		"""
+		from secator.scope import normalize_target
+		for rule in cls._target_fields:
+			names = _TEMPLATE_FIELD.findall(rule) or [rule]
+			values = [data.get(name) for name in names]
+			if any(value is None or value == '' for value in values):
+				continue
+			if names == [rule]:
+				return normalize_target(str(values[0]))
+			return normalize_target(rule.format(**{n: _bracket_ipv6(str(v)) for n, v in zip(names, values)}))
+		return '', ''
 
 	@staticmethod
 	def confidence_to_nb(confidence) -> int:
@@ -256,7 +282,7 @@ class OutputType:
 		lines = [f"{cls.__name__}("]
 		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
 		for f in fields(cls):
-			if f.name.startswith('_'):
+			if f.name.startswith('_') or f.metadata.get('derived'):
 				continue
 			type_name = type_names.get(f.type, str(f.type)) if isinstance(f.type, type) else str(f.type)
 			if not isinstance(f.default, _MISSING_TYPE):
@@ -267,6 +293,39 @@ class OutputType:
 				lines.append(f"  {f.name}: {type_name},  # required")
 		lines.append(")")
 		return "\n".join(lines)
+
+
+@dataclass
+class Finding(OutputType):
+	"""Base class of finding types: adds the ``target`` / ``target_host`` fields.
+
+	Both are always derived from the source fields (``_target_fields``): computed at creation and
+	refreshed on every ``toDict()``, so a caller-supplied or stale stored value is never kept.
+	They don't take part in equality, so duplicate detection is unaffected.
+	"""
+	target: str = dataclass_field(default='', compare=False, kw_only=True, metadata={'derived': True})
+	target_host: str = dataclass_field(default='', compare=False, kw_only=True, metadata={'derived': True})
+
+	def __post_init__(self):
+		super().__post_init__()
+		self.refresh_target()
+
+	def refresh_target(self):
+		"""Recompute ``target`` / ``target_host`` from the current field values."""
+		self.target, self.target_host = self.compute_target(vars(self))
+
+	def toDict(self, exclude=[]):
+		self.refresh_target()
+		return super().toDict(exclude)
+
+
+def _bracket_ipv6(value):
+	"""Bracket an IPv6 literal so it can be joined with a port."""
+	if ':' in value and not value.startswith('['):
+		from secator.utils import _is_ip_literal
+		if _is_ip_literal(value):
+			return f'[{value}]'
+	return value
 
 
 def load_output_types(docs):

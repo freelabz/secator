@@ -2,12 +2,12 @@ import time
 from dataclasses import dataclass, field
 
 from secator.definitions import SITE_NAME, URL, USERNAME
-from secator.output_types import OutputType
+from secator.output_types import Finding
 from secator.utils import rich_to_ansi, rich_escape as _s, format_object
 
 
 @dataclass
-class UserAccount(OutputType):
+class UserAccount(Finding):
 	username: str
 	url: str = ''
 	email: str = ''
@@ -29,6 +29,7 @@ class UserAccount(OutputType):
 
 	_table_fields = [SITE_NAME, USERNAME, URL]
 	_sort_by = (URL, USERNAME)
+	_target_fields = ['url', 'email', 'site_name']
 
 	def __str__(self) -> str:
 		return self.url

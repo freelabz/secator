@@ -174,3 +174,32 @@ class QueryBackend(ABC):
 		"""Backend-specific note insert. Default: no notes store on this backend."""
 		debug(f'create_note not supported by {self.name} backend', sub='query')
 		return 0
+
+	# Store-wide maintenance (``secator migrate``): no workspace scope, no display filters.
+
+	def bulk_update(self, query: dict, fn, dry_run: bool = False, batch_size: int = 1000):
+		"""Apply ``fn(doc)`` as a ``$set`` to every finding in the store matching ``query``.
+
+		False positives and every workspace are included.
+
+		Args:
+			query (dict): Store query (MongoDB-style).
+			fn (callable): ``fn(doc)`` returns the fields to set, or None to leave the doc as-is.
+			dry_run (bool): Count the changes without writing them.
+			batch_size (int): Documents per write batch.
+
+		Returns:
+			tuple[int, int]: Matched and changed (or to-be-changed) document counts.
+		"""
+		raise NotImplementedError(f'bulk updates are not supported by the {self.name} backend')
+
+	def get_migrations(self) -> Dict[str, dict]:
+		"""Return the migrations applied to this store, keyed by migration id."""
+		raise NotImplementedError(f'migrations are not supported by the {self.name} backend')
+
+	def set_migration(self, migration_id: str, info: dict):
+		"""Stamp a migration as applied to this store."""
+		raise NotImplementedError(f'migrations are not supported by the {self.name} backend')
+
+	def ensure_index(self, keys: List[str]):
+		"""Create a findings index on ``keys`` (no-op for stores that manage their own)."""

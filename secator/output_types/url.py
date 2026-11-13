@@ -6,13 +6,13 @@ from urllib.parse import urlparse
 
 from secator.cve import extract_software_and_version
 from secator.definitions import CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE, TECH, TITLE, URL, WEBSERVER, METHOD
-from secator.output_types import OutputType, Technology
+from secator.output_types import Finding, Technology
 from secator.utils import rich_to_ansi, trim_string, format_object, rich_escape as _s, to_title_case_hyphenated  # noqa: E501
 from secator.config import CONFIG
 
 
 @dataclass
-class Url(OutputType):
+class Url(Finding):
 	url: str
 	host: str = field(default='', compare=False)
 	verified: bool = field(default=False, compare=False)

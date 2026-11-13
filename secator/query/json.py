@@ -75,6 +75,7 @@ OPERATORS = {
 	"$lt": lambda field, value: field < value if field is not None else False,
 	"$lte": lambda field, value: field <= value if field is not None else False,
 	"$ne": lambda field, value: field != value,
+	"$exists": lambda field, value: (field is not None) == bool(value),
 }
 
 
@@ -410,6 +411,58 @@ class JsonBackend(QueryBackend):
 								_apply_set(item, set_fields)
 								count += 1
 		return count
+
+	def bulk_update(self, query: dict, fn, dry_run: bool = False, batch_size: int = 1000):
+		"""Apply ``fn(doc)`` to matching findings of every workspace, rewriting each report file once.
+
+		Both the live ``results.ndjson`` and the end-of-run ``report.json`` are updated. A finding
+		stored in both, or on several ndjson lines, counts once.
+		"""
+		from secator.utils import atomic_json, read_json, rewrite_ndjson
+		matched, changed = set(), set()
+
+		def updated(rec, report_dir):
+			if not isinstance(rec, dict) or not match_query(rec, query):
+				return None
+			key = (report_dir, rec.get('_uuid') or id(rec))
+			matched.add(key)
+			update = fn(rec)
+			if not update:
+				return None
+			changed.add(key)
+			if dry_run:
+				return None
+			_apply_set(rec, update)
+			return rec
+
+		def report_items(data):
+			return [it for bucket in data.get('results', {}).values() if isinstance(bucket, list) for it in bucket]
+
+		for runner_type in ('tasks', 'workflows', 'scans'):
+			for d in self.reports_dir.glob(f'*/{runner_type}/*'):
+				ndjson, report = d / 'results.ndjson', d / 'report.json'
+				if ndjson.exists():
+					rewrite_ndjson(ndjson, lambda rec: updated(rec, d))
+				if not report.exists():
+					continue
+				# Count on a read-only copy, then rewrite under the lock only if something changes.
+				if any([updated(it, d) is not None for it in report_items(read_json(report))]):
+					with atomic_json(report) as data:
+						for it in report_items(data):
+							updated(it, d)
+		return len(matched), len(changed)
+
+	def _migrations_path(self) -> Path:
+		return self.reports_dir / '.migrations.json'
+
+	def get_migrations(self):
+		from secator.utils import read_json
+		return read_json(self._migrations_path())
+
+	def set_migration(self, migration_id: str, info: dict):
+		from secator.utils import atomic_json
+		with atomic_json(self._migrations_path()) as data:
+			data[migration_id] = info
 
 	def _execute_create_note(self, note: dict) -> int:
 		"""Append the note to a workspace-level ``notes.ndjson`` (append-only, like the

@@ -22,7 +22,7 @@ from secator.output_types import (
 from secator.report import Report
 from secator.rich import console, console_stdout, live_is_active
 from secator.runners._helpers import get_task_folder_id, run_extractors
-from secator.scope import as_scope_list, host_in_scope
+from secator.scope import as_scope_list, item_in_scope
 from secator.query import QueryEngine
 from secator.query._stream import StreamView
 from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
@@ -867,7 +867,7 @@ class Runner:
 				self.debug(f'persist-to-store hook failed: {e}', sub='item')
 
 	def _out_of_scope(self, item):
-		"""Check whether an item's ``_target_fields`` value is outside the run scope.
+		"""Check whether an item's target (see ``OutputType.compute_target``) is outside the run scope.
 
 		Args:
 			item (OutputType): Item to check.
@@ -884,8 +884,9 @@ class Runner:
 			self._scope_out = as_scope_list(raw[1])
 		if not (self._scope_in or self._scope_out):
 			return False
-		target = next((v for v in (getattr(item, f, None) for f in item._target_fields) if v), None)
-		return bool(target) and not host_in_scope(target, self._scope_in, self._scope_out)
+		target, _ = item.compute_target(vars(item))
+		ip = getattr(item, 'ip', '') or ''
+		return bool(target) and not item_in_scope(target, ip, self._scope_in, self._scope_out)
 
 	def add_result(self, item, print=True, output=True, hooks=True, queue=True):
 		"""Add item to runner results.

@@ -200,8 +200,8 @@ _IDENT_RE = re.compile(rf'^{_DOTTED}$')
 _NOT_FIELD_RE = re.compile(rf'^\s*not\s+({_DOTTED})\s*$')
 
 # Truthy match on all backends: json's $nin returns False for falsy/absent and sqlite's NOT IN
-# drops NULL, but Mongo's $nin ALONE keeps absent fields — so $exists pins presence (unknown op,
-# hence a no-op on json/sqlite).
+# drops NULL, but Mongo's $nin ALONE keeps absent fields — so $exists pins presence (redundant on
+# json/sqlite).
 _TRUTHY = {'$nin': [None, '', False, 0], '$exists': True}
 
 
@@ -235,7 +235,7 @@ def _loose_neg(_type, frag):
         drop both absent and null for `$nin`, and Mongo/API do too — so present-null is excluded
         consistently, avoiding the SQL-NULL-vs-Python-None split that a bare `$ne` has.
       - pin `$exists: True` because Mongo's `$nin`/`$not` still MATCH documents missing the field;
-        it is a no-op on json/sqlite (they exclude absent via the `$nin`).
+        it is redundant on json/sqlite (they exclude absent via the `$nin`).
     A typed `type.field` form is already scoped by `_type` and passes through unchanged."""
     if _type is not None or not isinstance(frag, dict):
         return frag

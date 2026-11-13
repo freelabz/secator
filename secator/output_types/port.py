@@ -2,12 +2,12 @@ import time
 from dataclasses import dataclass, field
 
 from secator.definitions import CPES, EXTRA_DATA, HOST, IP, PORT
-from secator.output_types import OutputType
+from secator.output_types import Finding
 from secator.utils import rich_to_ansi, rich_escape as _s, format_object
 
 
 @dataclass
-class Port(OutputType):
+class Port(Finding):
 	port: int
 	ip: str
 	state: str = 'UNKNOWN'
@@ -33,7 +33,7 @@ class Port(OutputType):
 
 	_table_fields = [IP, PORT, HOST, CPES, EXTRA_DATA]
 	_sort_by = (PORT, IP)
-	_target_fields = ['ip', 'host']
+	_target_fields = ['{host}:{port}', '{ip}:{port}']
 	_group_by = (HOST,)          # collapse a host's ports into one row
 	_group_aggregate = PORT
 

@@ -19,6 +19,7 @@ URL). Regexes are scope entries, never targets.
 import ipaddress
 import logging
 import re
+from functools import lru_cache
 from urllib.parse import urlparse
 
 from secator.definitions import CIDR_RANGE, IP, URL
@@ -255,6 +256,50 @@ def target_host(value):
 	if shape.ip is not None:
 		return str(shape.ip)
 	return ''
+
+
+# `[scheme://][userinfo@]host[rest]`: splits off the host so only it (and the scheme) is lowercased.
+_AUTHORITY = re.compile(
+	r'^(?:(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*)://)?(?P<userinfo>[^/?#@]*@)?(?P<host>\[[^\]]*\]|[^/?#:]*)(?P<rest>.*)$',
+	re.S)
+
+
+@lru_cache(maxsize=4096)
+def normalize_target(value):
+	"""Normalize a finding's raw target string.
+
+	A network target gets its scheme and host lowercased and its FQDN trailing dot dropped; path,
+	query and port are kept as-is. Anything else (path, free text, ...) is only stripped.
+
+	Args:
+		value (str): Raw target string (URL, host, host:port, IP, path, free text...).
+
+	Returns:
+		tuple[str, str]: ``(target, target_host)``, ``target_host`` being '' for a non-network target.
+	"""
+	value = str(value).strip()
+	m = _AUTHORITY.match(value)
+	if not m:
+		return value, ''
+	scheme, userinfo, host, rest = m.group('scheme', 'userinfo', 'host', 'rest')
+	scheme = scheme.lower() + '://' if scheme else ''
+	candidate = scheme + (userinfo or '') + host.lower().rstrip('.') + rest
+	host = target_host(candidate)
+	return (candidate, host) if host else (value, '')
+
+
+def item_in_scope(target, ip='', in_scope=None, out_of_scope=None):
+	"""Scope decision for an output item's target, with the item's IP as an alternate allow path.
+
+	A host-bearing item (``host:port``, a vuln ``matched_at``) can also carry the IP it resolved to:
+	an IP / CIDR grant allows it through that IP, while a deny on either value still wins.
+	"""
+	if not ip or target_host(target) == ip:
+		return host_in_scope(target, in_scope, out_of_scope)
+	if not host_in_scope(ip, None, out_of_scope):
+		return False
+	return host_in_scope(target, in_scope, out_of_scope) or (
+		host_in_scope(ip, in_scope, None) and host_in_scope(target, None, out_of_scope))
 
 
 def canonicalize_scope_entry(value):
