@@ -37,14 +37,20 @@ _DESCRIPTION_SCHEMA = {
 
 # Mode-membership sets, so each tool declares exposure declaratively. These mirror
 # the per-mode ``allowed_actions`` in prompts.MODES (enforced by the consistency test).
-# Active/mutating tools (run tasks/shell, write findings) — the action modes.
+# Finding-writing / exploit tools (add_finding, mark_vuln_*, update_finding) — the modes
+# that RECORD findings: scan, exploit, research. NOT contribute, which authors code, not
+# findings.
 _ACTIVE_MODES = frozenset({"scan", "exploit", "research"})
-_ALL_MODES = frozenset({"scan", "chat", "exploit", "research"})
+# Tools that RUN a runner (task/workflow/shell). `contribute` needs these to exercise the
+# code it authors, so it is added here on top of the finding-writing modes.
+_RUNNER_MODES = frozenset({"scan", "exploit", "research", "contribute"})
+_ALL_MODES = frozenset({"scan", "chat", "exploit", "contribute", "research"})
 # Read-only helper tools (web/plan/run-history lookups) — exposed in every mode.
 _READONLY_HELPER = _ALL_MODES
-# `change_mode` is the ONE tool NOT exposed in `research`: research is a deliberate,
-# directly-selected terminal mode that already has the most capable surface, so it
-# neither escalates nor de-escalates. The other modes keep the escalation ladder.
+# `change_mode` — every mode EXCEPT contribute and research, both deliberate,
+# directly-selected terminal modes: contribute authors secator code and research already
+# has the most capable surface, so neither escalates nor de-escalates. The other modes keep
+# the escalation ladder.
 _CAN_CHANGE_MODE = frozenset({"scan", "chat", "exploit"})
 
 
@@ -86,7 +92,7 @@ class BaseTool:
 class RunTaskTool(BaseTool):
 	name = "run_task"
 	action = "task"
-	modes = _ACTIVE_MODES
+	modes = _RUNNER_MODES
 	handler = "_handle_task"
 	schema = {
 		"type": "function",
@@ -169,7 +175,7 @@ class RunSubagentTool(BaseTool):
 class RunWorkflowTool(BaseTool):
 	name = "run_workflow"
 	action = "workflow"
-	modes = _ACTIVE_MODES
+	modes = _RUNNER_MODES
 	handler = "_handle_workflow"
 	schema = {
 		"type": "function",
@@ -199,7 +205,7 @@ class RunWorkflowTool(BaseTool):
 class RunShellTool(BaseTool):
 	name = "run_shell"
 	action = "shell"
-	modes = _ACTIVE_MODES
+	modes = _RUNNER_MODES
 	handler = "_handle_shell"
 	schema = {
 		"type": "function",
@@ -794,7 +800,7 @@ class ListRunnersTool(BaseTool):
 class ChangeModeTool(BaseTool):
 	name = "change_mode"
 	action = "change_mode"
-	modes = _CAN_CHANGE_MODE  # every mode EXCEPT research (terminal, directly-selected)
+	modes = _CAN_CHANGE_MODE  # every mode EXCEPT contribute + research (terminal, directly-selected)
 	auto_allow = True
 	handler = "_handle_change_mode"
 	schema = {

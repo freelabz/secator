@@ -61,6 +61,7 @@ QUERIES = load_prompt("constraints/queries.txt")
 SYSTEM_SCAN = Template(load_prompt("modes/scan.txt"))
 SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
 SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
+SYSTEM_CONTRIBUTE = Template(load_prompt("modes/contribute.txt"))
 SYSTEM_RESEARCH = Template(load_prompt("modes/research.txt"))
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
@@ -94,6 +95,20 @@ MODES = {
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
 		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
+	},
+	"contribute": {
+		"system_prompt": SYSTEM_CONTRIBUTE,
+		"description": "author new secator tasks / workflows / scans (or framework code) and prove them with real, reproducible tests",
+		# A code-authoring mode, NOT a findings mode: it RUNS runners (task/workflow/shell) to
+		# exercise the code it writes, reads/searches for conventions, and delegates to subagents
+		# — but it does NOT write findings (no add_finding / mark_vuln_* / update_finding) and
+		# does NOT change_mode (deliberate, directly-selected terminal mode). It needs HOST
+		# filesystem access (run it WITHOUT --isolated); writes outside the workspace prompt for
+		# approval. On builds that expose read_file/write_file, those are added for this mode too.
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "subagent", "stop"],
+		# Authoring + running the full test matrix (dry-run, single/multi target, sync + worker,
+		# fixtures, lint) is long, so a higher iteration floor than the one-shot modes.
+		"max_iterations": 20,
 	},
 	"research": {
 		"system_prompt": SYSTEM_RESEARCH,
@@ -427,6 +442,42 @@ def build_session_context(isolated: bool = False) -> str:
 	return "\n".join(lines)
 
 
+def build_contribute_deliverable(backend=None) -> str:
+	"""The <deliverable> block for contribute mode, chosen from WHERE the run happens.
+
+	- LOCAL (CLI / TUI on the user's machine): the agent can write into the user's checkout and
+	  offer to fork + open the PR directly (the user's git/GitHub creds are available).
+	- HOSTED / non-interactive (a RemoteBackend platform sandbox, or any non-interactive run):
+	  no PR is possible, so every produced file is pasted INLINE as a fenced Markdown code block
+	  headed by its intended repo-relative path, for the user to copy and PR themselves.
+	"""
+	name = backend.__class__.__name__ if backend is not None else "CLIBackend"
+	interactive = getattr(backend, "interactive", True) if backend is not None else True
+	is_local = interactive and name in ("CLIBackend", "TUIBackend")
+	inline = (
+		"Paste EVERY file you produced inline in your final message, each as a fenced code block "
+		"headed by a comment with its intended path RELATIVE TO THE SECATOR REPO — e.g.\n"
+		"```python\n# secator/tasks/manspider.py\n<file contents>\n```\n"
+		"```json\n# tests/fixtures/manspider_output.json\n<anonymized fixture>\n```\n"
+		"Cover the task/config file, the fixtures, and the test wiring (tests/integration/inputs.py "
+		"+ outputs.py). The user copies these into their own clone and opens the PR."
+	)
+	if is_local:
+		return (
+			"<deliverable>\n"
+			"You are on the user's OWN machine. Write the finished files into their Secator checkout, "
+			"then — if they want to contribute — OFFER to fork `freelabz/secator`, apply the files on a "
+			"branch, and open the PR for them (use `gh`; if not authenticated, ask the user to run "
+			"`gh auth login` / provide GitHub credentials). If they decline the PR, fall back to pasting "
+			"the files inline:\n" + inline + "\n</deliverable>"
+		)
+	return (
+		"<deliverable>\n"
+		"You are running on the hosted platform in a DISPOSABLE sandbox — you CANNOT open a PR from here "
+		"and must not try. " + inline + "\n</deliverable>"
+	)
+
+
 def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scope=None, out_of_scope=None,
                       isolated=None, is_subagent: bool = False, workspace_name=None, workspace_id=None,
                       context_includes=None) -> str:
@@ -467,9 +518,15 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# $output_types_reference, so they must be substituted for all modes — derive both
 	# from FINDING_TYPES so they never drift from the registry.
 	subst = dict(query_types=build_query_types(), output_types_reference=build_output_types_reference())
-	if mode in ("scan", "exploit", "research"):
+	if mode in ("scan", "exploit", "contribute", "research"):
 		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 		subst.update(library_reference=build_library_reference(), **path_vars)
+	if mode == "contribute":
+		# How to hand back a finished contribution depends on WHERE this runs: on the user's
+		# own machine (CLI/TUI) the agent can fork + open the PR; on the hosted platform (a
+		# disposable RemoteBackend sandbox, or any non-interactive run) it cannot, so it must
+		# paste the files inline for the user to PR themselves.
+		subst["deliverable"] = build_contribute_deliverable(backend)
 	result = system_prompt.safe_substitute(**subst)
 
 	# Prepend the programmatic current-mode statement (from the registry) so the model

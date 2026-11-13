@@ -487,6 +487,47 @@ class TestScopeInPrompt(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestContributeMode(unittest.TestCase):
+	"""The contribute mode prompt: library-enabled, WORKS in the isolated sandbox (secator is
+	installed there), reproducible-test + lab + memory-handoff + security guidance present, the
+	deliverable branches local-vs-hosted, and the parallel-subagent block strips for subagents."""
+
+	def test_contribute_prompt_builds_fully(self):
+		from secator.ai.prompts import get_system_prompt
+		p = get_system_prompt("contribute", workspace_path="/tmp/ws", isolated=True)
+		self.assertIn("CONTRIBUTE mode", p)
+		self.assertIn("<mode>", p)                     # bespoke <mode> block in <constraints> (consistent across modes)
+		self.assertNotIn("$library_reference", p)      # task/workflow library substituted
+		self.assertNotIn("$deliverable", p)            # deliverable block substituted
+		self.assertIn("<subagents>", p)                # parallelization guidance present
+		self.assertIn("docker-compose", p)             # integration test lab
+		self.assertIn("fixture", p.lower())            # reproducible real fixtures
+		self.assertIn("worker", p.lower())             # sync + with-worker matrix
+		# isolated no longer refuses — the sandbox is the workbench (secator is installed there):
+		self.assertNotIn("cannot reach the secator repo", p)
+		self.assertIn("templates dir", p.lower())      # author-and-run via ~/.secator/templates
+		self.assertIn("Memory limit", p)               # memory/OOM hand-off (real run_shell wording)
+		self.assertIn("PUBLIC", p)                     # never leak confidential/org data
+
+	def test_contribute_deliverable_branches_local_vs_hosted(self):
+		from secator.ai.prompts import build_contribute_deliverable
+		from secator.ai.interactivity import CLIBackend, AutoBackend
+		# Local CLI/TUI: can fork + open the PR.
+		self.assertIn("OFFER to fork", build_contribute_deliverable(CLIBackend()))
+		# Non-interactive / hosted: inline files only, no PR attempt.
+		hosted = build_contribute_deliverable(AutoBackend())
+		self.assertNotIn("OFFER to fork", hosted)
+		self.assertIn("CANNOT open a PR", hosted)
+
+	def test_contribute_subagent_strips_delegation(self):
+		from secator.ai.prompts import get_system_prompt
+		p = get_system_prompt("contribute", workspace_path="/tmp/ws", is_subagent=True)
+		self.assertNotIn("<subagents>", p)
+		self.assertNotIn("run_subagent", p)
+		self.assertIn("CANNOT spawn subagents", p)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestResearchMode(unittest.TestCase):
 	"""The research mode prompt: library-enabled, adversarial-subagent block present and
 	(like scan/exploit) stripped when rendered for a subagent."""
