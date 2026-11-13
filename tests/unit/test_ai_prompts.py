@@ -561,6 +561,15 @@ class TestOperatingRulesRecap(unittest.TestCase):
 		self.assertIn("description", recap)         # description-echo failure
 		self.assertIn("Persist", recap)             # early-yield failure
 
+	def test_stop_rules_ask_open_questions_without_choices(self):
+		# Interactive stop guidance: info only the user has (e.g. a target) is asked in
+		# `reason` with no `choices` — a choice like "Provide a target" is a wasted turn.
+		p = get_system_prompt("scan", workspace_path="<ws>", backend=None)
+		self.assertIn("Ask open questions in `reason` with NO `choices`", p)
+		self.assertIn('stop(reason="The workspace is empty. Which target should I scan? (domain, IP or URL)")', p)
+		recap = p[p.index("<operating_rules>"):]
+		self.assertIn("ask in `reason` and omit `choices`", recap)
+
 	def test_user_context_body_is_verbatim_not_token_substituted(self):
 		# $workspace_path in a user note must survive verbatim (substitution happens
 		# on the baked-in prompt before the user block is appended).

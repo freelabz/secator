@@ -792,7 +792,8 @@ class StopTool(BaseTool):
 			"name": "stop",
 			"description": "End your turn. Call when the user's request has been fulfilled, or when you hit a blocker "  # noqa: E501
 			               "you cannot resolve without user input. Offer concrete next steps via `choices` (renders as "  # noqa: E501
-			               "clickable buttons); omit `choices` when the task is simply complete.",
+			               "clickable buttons) only when each is executable as-is; omit `choices` when the task is "  # noqa: E501
+			               "simply complete or when asking an open question (e.g. which target) — ask it in `reason`.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -803,7 +804,8 @@ class StopTool(BaseTool):
 					"choices": {
 						"type": "array",
 						"items": {"type": "string"},
-						"description": "Optional list of concrete action choices to offer the user as next steps."
+						"description": "Optional list of concrete actions you can execute as-is, or known options to pick from. "  # noqa: E501
+						               "Never a choice that asks the user to provide input (e.g. 'Provide a target')."
 					},
 					"multiple": {
 						"type": "boolean",
