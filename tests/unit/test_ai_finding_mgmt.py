@@ -239,6 +239,23 @@ class TestFindingMgmtTools(unittest.TestCase):
 		out = list(dispatch_action({'action': 'mark_vuln_false_positive', '_uuid': 'nope'}, self._ctx(e)))
 		self.assertTrue(any(isinstance(o, Error) for o in out))
 
+	# --- dispatch-side mode gate ---
+	def test_dispatch_rejects_action_outside_active_mode(self):
+		# monitor does not expose add_finding; a call naming it must not reach the handler.
+		e = self._engine(None)
+		ctx = self._ctx(e)
+		ctx.mode = 'monitor'
+		out = list(dispatch_action({'action': 'add_finding', '_type': 'url', 'fields': {'url': 'http://x'}}, ctx))
+		self.assertTrue(any(isinstance(o, Error) and 'not allowed in monitor mode' in o.message for o in out))
+		e.update.assert_not_called()
+
+	def test_dispatch_allows_action_inside_active_mode(self):
+		e = self._engine({'_uuid': 'u5', '_type': 'vulnerability', 'name': 'RCE'})
+		ctx = self._ctx(e)
+		ctx.mode = 'monitor'
+		out = list(dispatch_action({'action': 'mark_vuln_fixed', '_uuid': 'u5'}, ctx))
+		self.assertFalse([o for o in out if isinstance(o, Error)])
+
 	# --- mark_vuln_fixed ---
 	def test_fixed_sets_status_visible_and_attaches_finding(self):
 		e = self._engine({'_uuid': 'u5', '_type': 'vulnerability', 'name': 'RCE'})
@@ -634,6 +651,28 @@ class TestExploitAttempt(unittest.TestCase):
 		self.assertTrue(v['verified'])
 		self.assertEqual(v['poc'], 'legacy win')
 		self.assertEqual(v['extra_data']['exploit_attempts']['failed'], 1)
+
+	def test_fixed_not_reopened_by_pre_fix_success_or_failed_retest(self):
+		# success -> FIXED -> failed re-test must stay FIXED (the pre-fix success is behind the
+		# remediation boundary); only the attempt recap is refreshed.
+		e = FakeEngine([dict(self.VULN)])
+		self._dispatch(e, {'action': 'mark_vuln_exploited', '_uuid': 'v1', 'poc': 'old win'})
+		self._dispatch(e, {'action': 'mark_vuln_fixed', '_uuid': 'v1', 'reason': 'patched'})
+		self._dispatch(e, {'action': 'mark_vuln_exploit_failed', '_uuid': 'v1', 'reason': 'patched'})
+		v = e.search({'_uuid': 'v1'})[0]
+		self.assertEqual(v['status'], 'FIXED')
+		self.assertFalse(v['verified'])
+		self.assertEqual(v['extra_data']['exploit_attempts']['failed'], 1)
+
+	def test_fixed_reopened_by_post_fix_success(self):
+		e = FakeEngine([dict(self.VULN)])
+		self._dispatch(e, {'action': 'mark_vuln_exploited', '_uuid': 'v1', 'poc': 'old win'})
+		self._dispatch(e, {'action': 'mark_vuln_fixed', '_uuid': 'v1'})
+		e.docs[0]['extra_data']['fixed_at'] -= 10  # the next attempt lands strictly after the fix
+		self._dispatch(e, {'action': 'mark_vuln_exploited', '_uuid': 'v1', 'poc': 'new win'})
+		v = e.search({'_uuid': 'v1'})[0]
+		self.assertEqual(v['status'], 'EXPLOITED')
+		self.assertIn('new win', v['poc'])
 
 	def test_rollup_lock_is_per_identity(self):
 		from secator.ai.actions import _rollup_lock
