@@ -1,4 +1,5 @@
 """Action handlers for AI task."""
+import copy
 import json
 import os
 import re
@@ -8,13 +9,13 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 from secator.runners import Task, Workflow
 from secator.runners.task import TaskNotFoundError
 from secator.output_types import Ai, Error, ExploitAttempt, Info, Warning, OutputType, FINDING_TYPES
 from secator.template import TemplateLoader
-from secator.utils import format_token_count
+from secator.utils import debug, format_token_count
 from secator.ai.prompts import normalize_mode
 from secator.ai.utils import (
 	_PERSIST_AI_TYPES,
@@ -132,6 +133,9 @@ class ActionContext:
 	dangerous: bool = False
 	_query_engine: Any = field(default=None, repr=False)
 	permission_engine: Any = field(default=None, repr=False)
+	# Runs the runner's on_item_update hooks of one driver phase: ``(item, phase=) -> item``.
+	# None (dry-run / library use) skips them.
+	run_item_update_hooks: Optional[Callable] = field(default=None, repr=False)
 
 	def get_query_engine(self):
 		"""Get or create a QueryEngine (cached for reuse across queries).
@@ -181,8 +185,7 @@ def _build_hooks_from_context(context: Dict) -> Dict:
 	if not drivers:
 		return {}
 	discover_external_drivers()
-	# Order by canonical priority so authoritative backends (e.g. mongodb) register
-	# their hooks before relay drivers (e.g. api) — same ordering as __setstate__.
+	# Order by hook phase (pre, persistence, post) — same ordering as _apply_context_drivers.
 	drivers = order_drivers(drivers)
 	supported = set(get_available_drivers())
 	hooks_list = []
@@ -1823,41 +1826,102 @@ def _handle_add_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error(message=f"Failed to create {finding_type}: {e}\nExpected schema:\n{cls.schema()}", _context=context)
 
 
+def _run_item_update_hooks(ctx: ActionContext, item, phase: str):
+	"""Run the ``on_item_update`` hooks of ``phase`` on ``item``; a failure never fails the caller."""
+	if not ctx.run_item_update_hooks or item is None:
+		return item
+	try:
+		result = ctx.run_item_update_hooks(item, phase=phase)
+	except Exception as e:  # noqa: BLE001 - hooks are best-effort here, the store write is authoritative
+		debug(f"on_item_update {phase} hooks failed: {e}", sub="ai")
+		return item
+	return result if isinstance(result, OutputType) else item
+
+
+def _changed_fields(new: Dict, old: Dict) -> Dict:
+	"""``$set`` fields turning ``old`` into ``new``. A dict that only gained / changed keys is diffed
+	as dotted ``field.key`` paths, so concurrent writes to its other keys survive."""
+	changed = {}
+	for k, v in new.items():
+		prev = old.get(k)
+		if v == prev:
+			continue
+		if isinstance(v, dict) and isinstance(prev, dict) and prev.keys() <= v.keys():
+			changed.update({f"{k}.{sk}": sv for sk, sv in v.items() if sk not in prev or prev[sk] != sv})
+		else:
+			changed[k] = v
+	return changed
+
+
+def _apply_finding_update(ctx: ActionContext, query: Dict, update: Dict, doc: Optional[Dict] = None):
+	"""Apply a ``$set`` to the finding matched by ``query``, running the ``on_item_update`` hooks.
+
+	The finding is rebuilt from its stored ``doc`` with ``update`` applied (so ``__post_init__``
+	recomputes derived fields, e.g. ``severity_nb``), then pre-phase hooks run (they may mutate
+	it), then ONE ``engine.update`` writes ``update`` plus every field the rebuild or the hooks
+	changed, then post-phase hooks run on the persisted item.
+
+	Returns ``(modified, doc)``: the modified docs count and the updated doc (None if no match).
+	"""
+	from secator.output_types._base import load_output_types
+	from secator.query.json import _apply_set
+	engine = ctx.get_query_engine()
+	if doc is None:
+		doc = (engine.search(query, limit=1, scope_only=True) or [None])[0]
+	if doc is None:
+		return 0, None
+	patched = copy.deepcopy(doc)
+	_apply_set(patched, update)
+	try:
+		item = next(load_output_types([copy.deepcopy(patched)]), None)
+	except Exception as e:  # noqa: BLE001 - an unloadable doc still gets the requested $set
+		debug(f"could not rebuild finding from {query}: {e}", sub="ai")
+		item = None
+	set_fields = dict(update)
+	if item is not None:
+		rebuilt = copy.deepcopy(item.toDict())
+		item = _run_item_update_hooks(ctx, item, "pre")
+		hooked = item.toDict()
+		set_fields.update(_changed_fields({k: v for k, v in rebuilt.items() if k in patched}, patched))
+		set_fields.update(_changed_fields(hooked, rebuilt))
+	set_fields = {
+		k: v for k, v in set_fields.items()
+		if k not in _FINDING_IMMUTABLE_FIELDS and k.split(".", 1)[0] not in _FINDING_IMMUTABLE_FIELDS
+	}
+	# A whole-object $set (e.g. a hook dropped an extra_data key) supersedes its dotted sub-keys
+	# (Mongo rejects both in one $set); the object already carries them.
+	set_fields = {k: v for k, v in set_fields.items() if "." not in k or k.split(".", 1)[0] not in set_fields}
+	modified = engine.update(query, {"$set": set_fields})
+	if not modified:
+		return 0, None
+	_apply_set(patched, set_fields)
+	_run_item_update_hooks(ctx, item, "post")
+	return modified, patched
+
+
 def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
 	"""Apply a workspace-scoped ``$set`` to the vulnerability with this ``_uuid``.
 
 	Returns ``(modified, updated, label, error_msg)``: ``modified`` docs count,
-	the re-fetched vuln (dict, or None), a display ``label`` (the vuln's ``name``,
+	the updated vuln (dict, or None), a display ``label`` (the vuln's ``name``,
 	falling back to the uuid), and an ``error_msg`` string when nothing matched.
 
-	Uses ``QueryEngine.update`` (an in-place ``$set`` on the matched doc) rather than
-	re-yielding the finding, so it works uniformly across backends without risking a
-	duplicate insert. On the mongodb driver a ``_uuid`` lookup/update is a native ``_id``
-	index seek (the query layer rewrites a valid-ObjectId ``_uuid`` to ``_id`` — findings
-	carry ``_uuid = str(_id)``), so the update + re-fetch are point operations, not
-	workspace scans. After the update it re-fetches and re-applies the same ``$set`` locally
-	— the json store is append-only (last-wins on read) so a tight limit can return a
-	pre-update line; on the store-backed drivers the fetch is already current, a no-op there.
+	Uses ``QueryEngine.update`` (an in-place ``$set`` on the matched doc, via
+	``_apply_finding_update``) rather than re-yielding the finding, so it works uniformly
+	across backends without risking a duplicate insert. On the mongodb driver a ``_uuid``
+	lookup/update is a native ``_id`` index seek (the query layer rewrites a valid-ObjectId
+	``_uuid`` to ``_id`` — findings carry ``_uuid = str(_id)``), so these are point operations,
+	not workspace scans. The lookup is ``scope_only``: a false-positive vuln is hidden by the
+	``is_false_positive:{$ne:True}`` display filter but must still be reachable here.
 	"""
-	engine = ctx.get_query_engine()
 	query = {"_type": "vulnerability", "_uuid": uuid}
-	modified = engine.update(query, {"$set": update})
+	modified, updated = _apply_finding_update(ctx, query, update)
 	if not modified:
 		return 0, None, uuid, (
 			f"No vulnerability found with _uuid={uuid} in this workspace. "
 			"Re-check the `_uuid` from query_workspace results."
 		)
-	# scope_only: a just-marked false-positive is hidden by the `is_false_positive:{$ne:True}`
-	# display filter, so a normal re-fetch returns None — `updated` stays empty and `label`
-	# falls back to the bare uuid (the chat row then reads "Updated Marked <uuid>…" instead
-	# of "Updated <name>", and extra_data.finding is empty). Drop the display filters for this
-	# targeted by-uuid read so the finding comes back regardless of its display state.
-	updated = (engine.search(query, limit=1, scope_only=True) or [None])[0]
-	if updated:
-		from secator.query.json import _apply_set
-		_apply_set(updated, update)
-	label = (updated.get("name") if isinstance(updated, dict) else None) or uuid
-	return modified, updated, label, None
+	return modified, updated, updated.get("name") or uuid, None
 
 
 def _merge_extra_data(update: Dict, extra_data) -> None:
@@ -1914,7 +1978,6 @@ def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, mat
 	Pure Python — no LLM judgment.
 	"""
 	engine = ctx.get_query_engine()
-	from secator.query.json import _apply_set
 	vuln_q = {"_type": "vulnerability", "name": vuln_name, "id": vuln_id, "matched_at": matched_at}
 	with _rollup_lock((vuln_name, vuln_id, matched_at)):
 		attempts = engine.search(
@@ -1952,9 +2015,8 @@ def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, mat
 			vu = v.get("_uuid")
 			if not vu:
 				continue
-			engine.update({"_type": "vulnerability", "_uuid": vu}, {"$set": update})
-			_apply_set(v, update)
-			if primary is None or not v.get("_duplicate"):
+			_, v = _apply_finding_update(ctx, {"_type": "vulnerability", "_uuid": vu}, update, doc=v)
+			if v and (primary is None or not v.get("_duplicate")):
 				primary = v
 		return primary
 
@@ -2487,9 +2549,8 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 			yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
 		return
 
-	engine = ctx.get_query_engine()
 	try:
-		modified = engine.update({"_uuid": uuid}, {"$set": update})
+		modified, updated = _apply_finding_update(ctx, {"_uuid": uuid}, update, doc=existing)
 	except Exception as e:
 		yield Error(message=f"Failed to update finding: {e}", _context=context)
 		return
@@ -2497,10 +2558,6 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 		yield Error(message=f"No finding updated for _uuid={uuid}.", _context=context)
 		return
 
-	updated = _lookup_finding(ctx, uuid)
-	if updated:
-		from secator.query.json import _apply_set
-		_apply_set(updated, update)
 	yield Ai(
 		content=f"Updated finding {uuid} ({', '.join(sorted(update.keys()))}).",
 		ai_type="update_finding",
