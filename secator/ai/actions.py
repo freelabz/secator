@@ -3,6 +3,7 @@ import json
 import os
 import re
 import threading
+import time
 import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -395,6 +396,13 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	from secator.ai.tools import TOOLS_BY_ACTION
 	action_type = action.get("action", "")
 	tool = TOOLS_BY_ACTION.get(action_type)
+	mode = getattr(ctx, "mode", "")
+	if tool and isinstance(mode, str) and mode and tool.modes and mode not in tool.modes:
+		# Schema exposure already hides tools outside the active mode; this is the dispatch-side
+		# gate so a call naming a hidden tool (hallucinated or injected) never reaches its handler.
+		context = _get_result_context(action, ctx)
+		yield Error(message=f"Action '{action_type}' is not allowed in {mode} mode.", _context=context)
+		return
 	if tool:
 		yield from tool.handle(action, ctx)
 	else:
@@ -1934,18 +1942,27 @@ def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, mat
 		counts = _attempt_counts(attempts)
 		# Current (possibly legacy) vuln state, so a failed attempt never downgrades an EXPLOITED vuln.
 		cur = next((v for v in occurrences if not v.get("_duplicate")), occurrences[0] if occurrences else {})
-		if counts["success"]:
-			successes = [a for a in attempts if str(a.get("verdict") or "").lower() == "success"]
-			status, verified = "EXPLOITED", True
+		successes = [a for a in attempts if str(a.get("verdict") or "").lower() == "success"]
+		fixed = (cur or {}).get("status") == "FIXED"
+		if fixed:
+			# Remediation boundary: a FIXED vuln is re-opened ONLY by a success recorded AFTER it was
+			# fixed (``extra_data.fixed_at``); pre-fix successes and any failed/partial re-test leave
+			# it FIXED (only the attempt recap is refreshed).
+			fixed_at = ((cur or {}).get("extra_data") or {}).get("fixed_at") or 0
+			successes = [a for a in successes if (a.get("_timestamp") or 0) > fixed_at]
+		if successes:
 			poc = max(successes, key=lambda a: a.get("_timestamp") or 0).get("poc") or ""
+			update = {"status": "EXPLOITED", "verified": True, "poc": poc}
+		elif fixed:
+			update = {}
 		elif (cur or {}).get("status") == "EXPLOITED":
 			# Legacy / pre-backfill success — preserve it (keep the existing poc); do not downgrade.
-			status, verified, poc = "EXPLOITED", True, (cur or {}).get("poc") or ""
+			update = {"status": "EXPLOITED", "verified": True, "poc": (cur or {}).get("poc") or ""}
 		elif counts["failed"] or counts["partial"]:
-			status, verified, poc = "EXPLOIT FAILED", False, ""
+			update = {"status": "EXPLOIT FAILED", "verified": False, "poc": ""}
 		else:
 			return cur or None
-		update = {"status": status, "verified": verified, "poc": poc, "extra_data.exploit_attempts": counts}
+		update["extra_data.exploit_attempts"] = counts
 		# engine.update is update_one, so apply the $set to each occurrence by its own _uuid (point ops).
 		primary = None
 		for v in occurrences:
@@ -2100,7 +2117,9 @@ def _handle_mark_vuln_fixed(action: Dict, ctx: ActionContext) -> Generator:
 
 	# FIXED is set directly (no is_false_positive change → stays visible). verified=False: it is no
 	# longer a live/exploitable finding.
-	update = {"status": "FIXED", "verified": False}
+	# fixed_at is the remediation boundary the attempt rollup honours: only a success recorded
+	# after it can re-open the vuln as EXPLOITED.
+	update = {"status": "FIXED", "verified": False, "extra_data.fixed_at": time.time()}
 	if reason:
 		update["extra_data.fixed_reason"] = reason
 	_merge_extra_data(update, action.get("extra_data"))
