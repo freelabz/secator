@@ -14,7 +14,7 @@ artifacts = [
 
 [project]
 name = 'secator'
-version = "0.54.1"
+version = "0.55.0"
 authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
 readme = 'README.md'
 description = "The pentester's swiss knife."
