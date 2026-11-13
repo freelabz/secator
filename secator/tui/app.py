@@ -128,7 +128,7 @@ class TUIApp(App):
 	/* the top rule lights up in the accent colour while the prompt has focus */
 	#choice-host:focus-within { border-top: solid #7fd1e0; }
 	.choice-box { height: auto; }
-	.choice-foot { height: 1; }
+	.choice-foot { height: auto; }
 	.choice-hint { color: #6b7187; width: 1fr; }
 	.choice-hint-focused { display: none; }
 	.choice-box:focus-within .choice-hint-focused { display: block; }
