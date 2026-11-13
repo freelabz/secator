@@ -674,6 +674,32 @@ class TestExploitAttempt(unittest.TestCase):
 		self.assertEqual(v['status'], 'EXPLOITED')
 		self.assertIn('new win', v['poc'])
 
+	def test_fixed_duplicate_not_reopened_by_failed_retest(self):
+		# mark_vuln_fixed on a DUPLICATE occurrence still sets the boundary for the identity.
+		ident = {'_type': 'vulnerability', 'name': 'SQLi', 'id': 'CVE-1', 'matched_at': 'http://x'}
+		e = FakeEngine([{'_uuid': 'v1', **ident}, {'_uuid': 'v2', '_duplicate': True, **ident}])
+		self._dispatch(e, {'action': 'mark_vuln_exploited', '_uuid': 'v1', 'poc': 'old win'})
+		self._dispatch(e, {'action': 'mark_vuln_fixed', '_uuid': 'v2'})
+		self._dispatch(e, {'action': 'mark_vuln_exploit_failed', '_uuid': 'v1'})
+		self.assertEqual(e.search({'_uuid': 'v2'})[0]['status'], 'FIXED')
+
+	def test_legacy_fixed_without_boundary_not_reopened(self):
+		e = FakeEngine([dict(self.VULN, status='FIXED', verified=False)])
+		e.docs.append({'_type': 'exploit_attempt', '_uuid': 'a0', 'vuln_name': 'SQLi', 'vuln_id': 'CVE-1',
+		               'matched_at': 'http://x', 'verdict': 'success', 'poc': 'old', '_timestamp': 1.0})
+		self._dispatch(e, {'action': 'mark_vuln_exploit_failed', '_uuid': 'v1'})
+		self.assertEqual(e.search({'_uuid': 'v1'})[0]['status'], 'FIXED')
+
+	def test_caller_cannot_set_fixed_at(self):
+		e = FakeEngine([dict(self.VULN)])
+		self._dispatch(e, {'action': 'mark_vuln_exploited', '_uuid': 'v1', 'poc': 'old win'})
+		self._dispatch(e, {'action': 'mark_vuln_fixed', '_uuid': 'v1', 'extra_data': {'fixed_at': 0}})
+		self.assertGreater(e.docs[0]['extra_data']['fixed_at'], 0)
+		self._dispatch(e, {'action': 'mark_vuln_exploit_failed', '_uuid': 'v1', 'extra_data': {'fixed_at': 0}})
+		v = e.search({'_uuid': 'v1'})[0]
+		self.assertEqual(v['status'], 'FIXED')
+		self.assertGreater(v['extra_data']['fixed_at'], 0)
+
 	def test_rollup_lock_is_per_identity(self):
 		from secator.ai.actions import _rollup_lock
 		self.assertIs(_rollup_lock(('n', 'i', 'm')), _rollup_lock(('n', 'i', 'm')))
