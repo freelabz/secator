@@ -36,6 +36,7 @@ class TestTargetPerType(unittest.TestCase):
 		(Port(port=443, ip='10.0.0.1', host='app.example.com'), 'app.example.com:443', 'app.example.com'),
 		(Port(port=22, ip='10.0.0.1'), '10.0.0.1:22', '10.0.0.1'),
 		(Port(port=22, ip='2001:db8::1'), '[2001:db8::1]:22', '2001:db8::1'),
+		(Ip(ip='2001:DB8::AB'), '2001:db8::ab', '2001:db8::ab'),
 		(Url(url='HTTPS://App.Example.com:8443/Login?next=/A'), 'https://app.example.com:8443/Login?next=/A', 'app.example.com'),  # noqa: E501
 		(Tag(name='t', value='v', match='https://EXAMPLE.COM/x'), 'https://example.com/x', 'example.com'),
 		(Tag(name='t', value='v', match='src/App.js:12:3'), 'src/App.js:12:3', ''),
@@ -258,6 +259,8 @@ class TestMigrateJson(MigrateTestMixin, unittest.TestCase):
 		run_migrations(self.backend, apply=True)
 		info = json.loads(self.ndjson.read_text().splitlines()[-1])
 		self.assertEqual(info, {'_type': 'info', 'message': 'hi'})
+		run_migrations(self.backend, apply=True, force=True)  # nothing to change: no temp file left behind
+		self.assertEqual(list(self.ndjson.parent.glob('.results-*')), [])
 
 
 class TestMigrateMongo(MigrateTestMixin, unittest.TestCase):

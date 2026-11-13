@@ -278,6 +278,8 @@ def normalize_target(value):
 		tuple[str, str]: ``(target, target_host)``, ``target_host`` being '' for a non-network target.
 	"""
 	value = str(value).strip()
+	if _is_ip_literal(value):
+		return value.lower(), target_host(value)
 	m = _AUTHORITY.match(value)
 	if not m:
 		return value, ''

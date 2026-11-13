@@ -441,7 +441,14 @@ class JsonBackend(QueryBackend):
 		for runner_type in ('tasks', 'workflows', 'scans'):
 			for d in self.reports_dir.glob(f'*/{runner_type}/*'):
 				ndjson, report = d / 'results.ndjson', d / 'report.json'
-				if ndjson.exists():
+				if ndjson.exists() and dry_run:
+					with open(ndjson, 'rb') as f:
+						for line in f:
+							try:
+								updated(orjson.loads(line), d)
+							except orjson.JSONDecodeError:
+								continue
+				elif ndjson.exists():
 					rewrite_ndjson(ndjson, lambda rec: updated(rec, d))
 				if not report.exists():
 					continue

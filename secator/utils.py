@@ -1849,36 +1849,32 @@ def rewrite_ndjson(path, transform):
 	with _get_path_lock(path):
 		with open(str(path) + '.lock', 'w') as lock_fd:
 			fcntl.flock(lock_fd, fcntl.LOCK_EX)
+			fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix='.results-', suffix='.ndjson.tmp')
+			changed = 0
 			try:
-				lines, changed = [], 0
-				with open(path, 'rb') as f:
-					for line in f:
+				with open(path, 'rb') as src, os.fdopen(fd, 'wb') as dst:
+					for line in src:
 						new = None
 						try:
 							new = transform(orjson.loads(line))
 						except orjson.JSONDecodeError:
 							pass
 						if new is None:
-							lines.append(line if line.endswith(b'\n') else line + b'\n')
+							dst.write(line if line.endswith(b'\n') else line + b'\n')
 						else:
-							lines.append(orjson.dumps(new, default=str) + b'\n')
+							dst.write(orjson.dumps(new, default=str) + b'\n')
 							changed += 1
+					if changed:
+						dst.flush()
+						os.fsync(dst.fileno())
 				if changed:
-					fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix='.results-', suffix='.ndjson.tmp')
-					try:
-						with os.fdopen(fd, 'wb') as f:
-							f.writelines(lines)
-							f.flush()
-							os.fsync(f.fileno())
-						os.replace(tmp, path)
-					except BaseException:
-						try:
-							os.unlink(tmp)
-						except OSError:
-							pass
-						raise
+					os.replace(tmp, path)
 				return changed
 			finally:
+				try:
+					os.unlink(tmp)  # already gone once swapped in
+				except OSError:
+					pass
 				fcntl.flock(lock_fd, fcntl.LOCK_UN)
 
 
