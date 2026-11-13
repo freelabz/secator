@@ -2,6 +2,8 @@ type: workflow
 name: url_params_fuzz
 alias: url_params_fuzz
 description: URL parameter fuzzing
+friendly_display_name: Fuzz URL parameters
+friendly_description: Discover and fuzz query/body parameters
 long_description: |
   Identifies and tests URL parameters for vulnerabilities through intelligent fuzzing.
   Extracts parameters from URLs using multiple techniques, then fuzzes them with various payloads

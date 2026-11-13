@@ -2,6 +2,8 @@ type: workflow
 name: code_scan
 alias: codescan
 description: Code vulnerability scan and secret hunt
+friendly_display_name: Scan code
+friendly_description: Dependencies + secrets in a codebase
 long_description: |
   Analyzes source code repositories and filesystems for security vulnerabilities and exposed secrets.
   Scans dependencies for known CVEs, detects hardcoded credentials, API keys, and sensitive data

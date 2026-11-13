@@ -2,6 +2,8 @@ type: workflow
 name: url_dirsearch
 alias: dirfind
 description: URL directory search
+friendly_display_name: "Find hidden files & dirs"
+friendly_description: Directory/file discovery on a web server
 long_description: |
   Searches for hidden directories and files on web servers using content discovery techniques.
   Probes URLs for directory listings, optionally bruteforces directories and crawls discovered

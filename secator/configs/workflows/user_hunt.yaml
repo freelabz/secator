@@ -2,6 +2,8 @@ type: workflow
 name: user_hunt
 alias: userhunt
 description: User account search
+friendly_display_name: Hunt a user/account
+friendly_description: OSINT across accounts and breach data
 long_description: |
   Searches for user accounts and associated information across various online platforms and services.
   Takes usernames, email addresses, or other identifiers and queries multiple sources to find

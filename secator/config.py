@@ -140,8 +140,8 @@ class Security(StrictModel):
 
 
 class HTTP(StrictModel):
-	socks5_proxy: str = 'socks5://127.0.0.1:9050'
-	http_proxy: str = 'https://127.0.0.1:9080'
+	socks5_proxy: str = ''
+	http_proxy: str = ''
 	store_responses: bool = True
 	response_max_size_bytes: int = 100000  # 100MB
 	proxychains_command: str = 'proxychains'

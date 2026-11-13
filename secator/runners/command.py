@@ -473,8 +473,24 @@ class Command(Runner):
 			self.run_opts['proxy'] = proxy
 
 		if proxy != 'proxychains' and self.proxy and not proxy:
-			warning = Warning(message=rf'Ignoring proxy "{self.proxy}" (reason: not supported) \[[bold yellow3]{self.unique_name}[/]]')  # noqa: E501
-			self._print(repr(warning))
+			# A requested proxy mode resolved no URL. If the task supports that route
+			# but no proxy URL is configured, fail closed rather than silently sending
+			# traffic direct to the target. Routes the task does not support keep the
+			# existing warning (there is nothing to configure).
+			requested_route_supported = (
+				(self.proxy in ['auto', 'socks5'] and self.proxy_socks5) or
+				(self.proxy in ['auto', 'http'] and self.proxy_http) or
+				(self.proxy == 'random' and self.proxy_http)
+			)
+			if support_proxy_opt and requested_route_supported:
+				error = Error(message=(
+					f'Ignoring proxy "{self.proxy}" would send traffic directly to the target: no proxy URL is '
+					f'configured for this mode (set http.socks5_proxy / http.http_proxy). Refusing to run {self.unique_name}.'  # noqa: E501
+				))
+				self.add_result(error)
+			else:
+				warning = Warning(message=rf'Ignoring proxy "{self.proxy}" (reason: not supported) \[[bold yellow3]{self.unique_name}[/]]')  # noqa: E501
+				self._print(repr(warning))
 
 	# ----------#
 	# Internal #

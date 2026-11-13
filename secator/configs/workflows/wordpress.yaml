@@ -2,6 +2,8 @@ type: workflow
 name: wordpress
 alias: wordpress
 description: Wordpress vulnerability scan
+friendly_display_name: Scan WordPress
+friendly_description: WordPress plugin/theme vuln scan
 long_description: |
   Specialized security assessment for WordPress websites and installations.
   Identifies WordPress version, installed themes and plugins, known vulnerabilities,

@@ -5,6 +5,7 @@ from collections import OrderedDict
 from dotmap import DotMap
 from pathlib import Path
 
+from secator.definitions import OPT_NOT_SUPPORTED
 from secator.output_types import Error, Warning
 from secator.rich import console
 
@@ -64,6 +65,7 @@ class TemplateLoader(DotMap):
 		config_type = d.get('type')
 		if serialize and config_type != 'profile':
 			d['opts'] = serialize_config_options(get_config_options(self))
+			d['applicable_profiles'] = get_applicable_profiles(get_supported_opt_names(d['opts']))
 		return d
 
 
@@ -206,9 +208,14 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		ancestor_opts_defaults = node.ancestor.default_opts or {}
 		node_id_str = get_short_id(node.id, config.name)
 
+		opt_key_map = getattr(cls, 'opt_key_map', {})
 		for k, v in task_opts_all.items():
 			conf = v.copy()
 			conf['prefix'] = f'Task {node.name}'
+			# Track whether this task actually supports the opt (knobs mapped to
+			# OPT_NOT_SUPPORTED are skipped at runtime). Aggregated across tasks:
+			# the opt is supported if ANY task sharing it supports it.
+			conf['supported'] = opt_key_map.get(k) is not OPT_NOT_SUPPORTED
 			# Use explicit None checks to properly handle boolean False values
 			default_from_config = next(
 				(item for item in [node_opts.get(k), ancestor_opts_defaults.get(k), config_opts_defaults.get(k)]
@@ -285,6 +292,10 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 						# continue
 			else:
 				raise ValueError(f'Unknown option {k} for task {node.id}')
+			# Aggregate `supported` across tasks sharing the same opt name: the opt
+			# is supported if ANY contributing task supports it.
+			if opt_name in all_opts:
+				conf['supported'] = all_opts[opt_name].get('supported', True) or conf.get('supported', True)
 			all_opts[opt_name] = conf
 
 	walk_runner_tree(tree, process_node)
@@ -329,6 +340,9 @@ def serialize_config_options(options):
 		applies_to = list(opt_config.get("applies_to", {}))
 		if applies_to:
 			options[opt_name]["applies_to"] = applies_to
+		# Any option can declare a `warning` (in a YAML option block or a task opt);
+		# always surface it (default None) so consumers can caution the user.
+		options[opt_name]["warning"] = opt_config.get("warning")
 		is_flag = opt_config.get("is_flag", False)
 		if type and getattr(type, "__name__", None):
 			options[opt_name]["type"] = type.__name__
@@ -337,3 +351,75 @@ def serialize_config_options(options):
 	options = {k.replace("-", "_"): v for k, v in options.items()}
 	options_str = json.dumps(options, default=str, indent=4)
 	return json.loads(options_str)
+
+
+def profile_applies(profile_opts, config_opt_names):
+	"""Whether a profile applies to a config.
+
+	The authoritative rule: a profile applies to a config iff at least one of the
+	profile's ``opts`` keys exists in that config's resolved option set. A profile's
+	opts are the knobs it flips (e.g. ``screenshot``, ``passive``, ``rate_limit``); if
+	none of those knobs exist on the config, applying the profile would be a no-op, so
+	it does not apply.
+
+	Profile opt keys are normalized (every separator ``-``/``.``/``/`` rewritten to ``_``)
+	before comparison to match the keys produced by ``serialize_config_options``.
+
+	Edge case: a profile with no opts is treated as applying everywhere (there is
+	nothing to intersect, so it is universally harmless).
+
+	Args:
+		profile_opts (dict): The profile's ``opts`` mapping (knob name -> value).
+		config_opt_names (set[str]): The config's resolved option names (serialized
+			``opts`` keys).
+
+	Returns:
+		bool: True if the profile applies to the config.
+	"""
+	if not profile_opts:
+		return True
+	# Serialized opt names collapse every separator (``-``, ``.``, ``/``) to ``_``
+	# (see get_config_options + serialize_config_options), so normalize profile keys
+	# the same way — otherwise a dotted key like ``nmap.ports`` would miss ``nmap_ports``.
+
+	def _normalize(k):
+		return str(k).replace('-', '_').replace('.', '_').replace('/', '_')
+	keys = {_normalize(k) for k in profile_opts}
+	return bool(keys & set(config_opt_names))
+
+
+def get_supported_opt_names(opts):
+	"""Names of the opts a config actually supports (for profile matching).
+
+	Opts a task maps to ``OPT_NOT_SUPPORTED`` are serialized with ``supported: False``
+	(they are advertised but skipped at runtime); excluding them prevents a profile
+	from being advertised as applicable when all its knobs are no-ops on the config.
+
+	Args:
+		opts (dict): Serialized config options (``opt_name -> metadata``).
+
+	Returns:
+		set[str]: Opt names whose ``supported`` flag is not ``False``.
+	"""
+	return {name for name, meta in (opts or {}).items() if (meta or {}).get('supported', True) is not False}
+
+
+def get_applicable_profiles(config_opt_names):
+	"""Names of the profiles whose opts intersect a config's resolved option names.
+
+	Loads the profile catalog once and reuses it, so this is cheap to call per config.
+
+	Args:
+		config_opt_names (set[str]): The config's resolved option names (serialized
+			``opts`` keys).
+
+	Returns:
+		list[str]: Sorted names of applicable profiles.
+	"""
+	from secator.loader import get_configs_by_type
+	profiles = get_configs_by_type('profile')
+	names = [
+		p.name for p in profiles
+		if profile_applies((p.opts or {}).toDict() if hasattr(p.opts, 'toDict') else (p.opts or {}), config_opt_names)
+	]
+	return sorted(names)

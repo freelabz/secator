@@ -2,6 +2,8 @@ type: workflow
 name: url_vuln
 alias: url_vuln
 description: URL vulnerability scan (gf, dalfox)
+friendly_display_name: "Vuln-test parameterized URLs"
+friendly_description: "Tests URLs that carry query parameters (e.g. ?id=1) for vulns via gf patterns + dalfox/nuclei. For a full web-app vulnerability scan, run the URL scan instead."
 long_description: |
   Scans URLs for common web vulnerabilities using pattern matching and automated testing tools.
   Identifies potential XSS, LFI, SSRF, RCE, IDOR, and other vulnerability indicators in URL parameters.
@@ -22,6 +24,7 @@ options:
     is_flag: True
     default: False
     help: Run nuclei on tagged URLs (slow)
+    warning: "This option is noisy and intrusive, and launches a lot of requests to the targets."
 
 tasks:
   _group/pattern_analysis:
