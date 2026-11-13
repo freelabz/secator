@@ -2143,9 +2143,13 @@ class ai(PythonRunner):
 		# the turn cleanly — exactly like a no-user stop. Do this BEFORE injecting `answer`
 		# as a user message and BEFORE the same-answer loop-breaker, so a dismiss is never
 		# replayed as a message and never trips the repeat guard. The next typed user
-		# message starts a fresh turn via the normal resume/respawn path.
+		# message starts a fresh turn via the normal resume/respawn path. An in-process
+		# interactive backend (TUI) has no respawn path, so it waits here for that message
+		# instead: returning would end the runner and leave the session unable to resume.
 		if answer == DISMISS_ANSWER:
-			return None
+			if isinstance(self.backend, RemoteBackend):
+				return None
+			return self._prompt_and_redetect([])
 
 		# Same-answer loop breaker: if consecutive follow-ups keep being answered with
 		# the SAME content (normalized) AND no substantive action ran in between, the

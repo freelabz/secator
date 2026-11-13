@@ -411,6 +411,21 @@ class JsonBackend(QueryBackend):
 								count += 1
 		return count
 
+	def _execute_create_note(self, note: dict) -> int:
+		"""Append the note to a workspace-level ``notes.ndjson`` (append-only, like the
+		findings store). Notes live beside the runner report dirs, not inside one, so they
+		aren't scoped to a single run — a note annotates a finding identity across re-scans.
+		"""
+		try:
+			from secator.utils import append_ndjson
+			ws = self._get_workspace_path()
+			ws.mkdir(parents=True, exist_ok=True)
+			append_ndjson(ws / 'notes.ndjson', orjson.dumps(note, default=str).decode())
+			return 1
+		except Exception as e:
+			debug(f'JSON create_note failed: {e}', sub='query.json')
+			return 0
+
 	def list_workspaces(self):
 		"""List workspaces from local reports directory."""
 		workspaces = []

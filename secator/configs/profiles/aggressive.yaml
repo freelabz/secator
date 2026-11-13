@@ -2,6 +2,7 @@ type: profile
 name: aggressive
 category: speed
 description: "Internal networks or time-sensitive scans with no rate limiting"
+warning: "These settings can trigger denial of service (DoS) on the targeted applications or servers. Make sure they can handle the load."
 opts:
     rate_limit: 10000
     delay: 0

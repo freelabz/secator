@@ -14,7 +14,7 @@ artifacts = [
 
 [project]
 name = 'secator'
-version = "0.53.4"
+version = "0.54.1"
 authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
 readme = 'README.md'
 description = "The pentester's swiss knife."
@@ -112,9 +112,10 @@ ai = [
 	# explicitly so `secator install addons ai` always ships the binary, not just
 	# the safecmd Python package. Without it the guardrail shell parser degrades.
 	'shfmt-py',
-	# Textual TUI (default for `secator x ai` on a TTY). Needs rich >= 14.2, hence the
-	# core `rich` pin bump above.
-	'textual < 9',
+	# Textual TUI (default for `secator x ai` on a TTY); >= 6.6.0 for Widget.focus_on_click
+	# (choice prompt clicks), which also covers Static.update(layout=).
+	# Needs rich >= 14.2, hence the core `rich` pin bump above.
+	'textual >= 6.6.0, < 9',
 ]
 
 [project.scripts]

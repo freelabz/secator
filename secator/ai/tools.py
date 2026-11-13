@@ -37,14 +37,20 @@ _DESCRIPTION_SCHEMA = {
 
 # Mode-membership sets, so each tool declares exposure declaratively. These mirror
 # the per-mode ``allowed_actions`` in prompts.MODES (enforced by the consistency test).
-# Active/mutating tools (run tasks/shell, write findings) — the action modes.
+# Finding-writing / exploit tools (add_finding, mark_vuln_*, update_finding) — the modes
+# that RECORD findings: scan, exploit, research. NOT contribute, which authors code, not
+# findings.
 _ACTIVE_MODES = frozenset({"scan", "exploit", "research"})
-_ALL_MODES = frozenset({"scan", "chat", "exploit", "research"})
+# Tools that RUN a runner (task/workflow/shell). `contribute` needs these to exercise the
+# code it authors, so it is added here on top of the finding-writing modes.
+_RUNNER_MODES = frozenset({"scan", "exploit", "research", "contribute"})
+_ALL_MODES = frozenset({"scan", "chat", "exploit", "contribute", "research"})
 # Read-only helper tools (web/plan/run-history lookups) — exposed in every mode.
 _READONLY_HELPER = _ALL_MODES
-# `change_mode` is the ONE tool NOT exposed in `research`: research is a deliberate,
-# directly-selected terminal mode that already has the most capable surface, so it
-# neither escalates nor de-escalates. The other modes keep the escalation ladder.
+# `change_mode` — every mode EXCEPT contribute and research, both deliberate,
+# directly-selected terminal modes: contribute authors secator code and research already
+# has the most capable surface, so neither escalates nor de-escalates. The other modes keep
+# the escalation ladder.
 _CAN_CHANGE_MODE = frozenset({"scan", "chat", "exploit"})
 
 
@@ -86,7 +92,7 @@ class BaseTool:
 class RunTaskTool(BaseTool):
 	name = "run_task"
 	action = "task"
-	modes = _ACTIVE_MODES
+	modes = _RUNNER_MODES
 	handler = "_handle_task"
 	schema = {
 		"type": "function",
@@ -169,7 +175,7 @@ class RunSubagentTool(BaseTool):
 class RunWorkflowTool(BaseTool):
 	name = "run_workflow"
 	action = "workflow"
-	modes = _ACTIVE_MODES
+	modes = _RUNNER_MODES
 	handler = "_handle_workflow"
 	schema = {
 		"type": "function",
@@ -199,7 +205,7 @@ class RunWorkflowTool(BaseTool):
 class RunShellTool(BaseTool):
 	name = "run_shell"
 	action = "shell"
-	modes = _ACTIVE_MODES
+	modes = _RUNNER_MODES
 	handler = "_handle_shell"
 	schema = {
 		"type": "function",
@@ -570,6 +576,59 @@ class UpdateFindingTool(BaseTool):
 	}
 
 
+class AddNoteTool(BaseTool):
+	name = "add_note"
+	action = "add_note"
+	modes = _ACTIVE_MODES
+	auto_allow = True
+	handler = "_handle_add_note"
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "add_note",
+			"description": (
+				"Attach a NOTE (an append-only annotation) to an EXISTING finding, identified by the `_uuid` "
+				"from query_workspace results. Use it to record WHY you reached a conclusion, what you observed, "
+				"or what changed on a finding between runs — without modifying the finding itself. The note is "
+				"stored separately and keyed to the finding's stable identity, so it stays attached even after a "
+				"re-scan. Give a clear `body`; when you are recording that specific fields CHANGED, also pass "
+				"`changes` so the delta is structured. For a false-positive / exploited verdict use the dedicated "
+				"mark_vuln_* tools instead — a note does not change status."
+			),
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"_uuid": {
+						"type": "string",
+						"description": "The `_uuid` of the finding to annotate (from query_workspace results)."
+					},
+					"body": {
+						"type": "string",
+						"description": "The note text (plain English / markdown). Required."
+					},
+					"changes": {
+						"type": "array",
+						"description": (
+							"Optional structured list of field changes to record alongside the note, one entry per "
+							"changed field: {\"field\": \"<name>\", \"old\": <before>, \"new\": <after>}."
+						),
+						"items": {
+							"type": "object",
+							"properties": {
+								"field": {"type": "string", "description": "The finding field that changed."},
+								"old": {"description": "The previous value."},
+								"new": {"description": "The new value."}
+							},
+							"required": ["field"]
+						}
+					}
+				},
+				"required": ["_uuid", "body"]
+			}
+		}
+	}
+
+
 class FetchUrlTool(BaseTool):
 	name = "fetch_url"
 	action = "fetch_url"
@@ -741,7 +800,7 @@ class ListRunnersTool(BaseTool):
 class ChangeModeTool(BaseTool):
 	name = "change_mode"
 	action = "change_mode"
-	modes = _CAN_CHANGE_MODE  # every mode EXCEPT research (terminal, directly-selected)
+	modes = _CAN_CHANGE_MODE  # every mode EXCEPT contribute + research (terminal, directly-selected)
 	auto_allow = True
 	handler = "_handle_change_mode"
 	schema = {
@@ -792,7 +851,8 @@ class StopTool(BaseTool):
 			"name": "stop",
 			"description": "End your turn. Call when the user's request has been fulfilled, or when you hit a blocker "  # noqa: E501
 			               "you cannot resolve without user input. Offer concrete next steps via `choices` (renders as "  # noqa: E501
-			               "clickable buttons); omit `choices` when the task is simply complete.",
+			               "clickable buttons) only when each is executable as-is; omit `choices` when the task is "  # noqa: E501
+			               "simply complete or when asking an open question (e.g. which target) — ask it in `reason`.",
 			"parameters": {
 				"type": "object",
 				"properties": {
@@ -803,7 +863,8 @@ class StopTool(BaseTool):
 					"choices": {
 						"type": "array",
 						"items": {"type": "string"},
-						"description": "Optional list of concrete action choices to offer the user as next steps."
+						"description": "Optional list of concrete actions you can execute as-is, or known options to pick from. "  # noqa: E501
+						               "Never a choice that asks the user to provide input (e.g. 'Provide a target')."
 					},
 					"multiple": {
 						"type": "boolean",
@@ -832,6 +893,7 @@ _TOOL_CLASSES = [
 	MarkVulnFalsePositiveTool,
 	MarkVulnExploitFailedTool,
 	UpdateFindingTool,
+	AddNoteTool,
 	FetchUrlTool,
 	UpdatePlanTool,
 	WebSearchTool,

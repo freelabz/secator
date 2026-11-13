@@ -2,6 +2,8 @@ type: workflow
 name: domain_recon
 alias: domrec
 description: Domain reconnaissance
+friendly_display_name: Recon a domain
+friendly_description: WHOIS/ASN/DNS/SSL/WAF recon of the apex
 long_description: |
   Performs comprehensive reconnaissance on a domain to gather essential information.
   Collects WHOIS data, probes HTTP services, detects technologies, analyzes SSL/TLS security,

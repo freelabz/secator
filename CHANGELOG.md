@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.54.1](https://github.com/freelabz/secator/compare/v0.54.0...v0.54.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **httpx:** parse tech names containing dots ([#1639](https://github.com/freelabz/secator/issues/1639)) ([f61378d](https://github.com/freelabz/secator/commit/f61378db483be78bef0b0dc9842b58075680787b))
+* **tui:** choice panel focus handling and dismiss button ([#1642](https://github.com/freelabz/secator/issues/1642)) ([7f5c55c](https://github.com/freelabz/secator/commit/7f5c55cb55d501df75df8b7a3d41bcb007e412c7))
+* **tui:** cut relayouts when expanding/collapsing runner panels ([#1632](https://github.com/freelabz/secator/issues/1632)) ([67a0f92](https://github.com/freelabz/secator/commit/67a0f920b3dfb0ada70d8729d35ac9ac430f8fe4))
+* **tui:** resume ai after escaping a question ([#1641](https://github.com/freelabz/secator/issues/1641)) ([7b8cf3e](https://github.com/freelabz/secator/commit/7b8cf3edc440d438cad3284a92a36c70efd36394))
+
+## [0.54.0](https://github.com/freelabz/secator/compare/v0.53.4...v0.54.0) (2026-11-10)
+
+
+### Features
+
+* **ai:** add a "research" AI mode for PoC investigation ([#1604](https://github.com/freelabz/secator/issues/1604)) ([8e5fc0f](https://github.com/freelabz/secator/commit/8e5fc0f5b0ceeb3a572d7822748cef3bec8556cf))
+* **ai:** user-provided AI context files appended to the system prompt ([#1598](https://github.com/freelabz/secator/issues/1598)) ([863fe04](https://github.com/freelabz/secator/commit/863fe04493e20e51eb516d036d7027d4109119f2))
+* **output-types:** carry is_false_positive/confidence/confidence_nb on all finding types ([#1489](https://github.com/freelabz/secator/issues/1489)) ([2c80066](https://github.com/freelabz/secator/commit/2c800661c402cb2fcdcd08d8e066279f4d462725))
+* **tasks,workflows:** add multiple tasks and workflows ([#1512](https://github.com/freelabz/secator/issues/1512)) ([1582c16](https://github.com/freelabz/secator/commit/1582c1632528e779b049cef1c0a0a7f4827e2ed2))
+* **tasks,workflows:** integrate netexec/JMX/RMI/registry/CMS tasks + workflows ([#1512](https://github.com/freelabz/secator/issues/1512)) ([#1599](https://github.com/freelabz/secator/issues/1599)) ([5eb8580](https://github.com/freelabz/secator/commit/5eb858042c159d4158f0cda89d6a3140c9672eea))
+
+
+### Bug Fixes
+
+* **ai:** guardrail fail-closes on a URL target with a bad port; allow loopback labs when isolated ([#1607](https://github.com/freelabz/secator/issues/1607)) ([8e86eda](https://github.com/freelabz/secator/commit/8e86eda957f16638eb1ad10720a74fb130f1ab07))
+* **ai:** route `--resume` session picker through the TUI backend ([#1597](https://github.com/freelabz/secator/issues/1597)) ([7437057](https://github.com/freelabz/secator/commit/7437057d24c40aea9dfd21f0c6ad533a8fd836f2))
+* **beanshooter,rmg:** download jar to bin dir so platform Docker builds pass ([#1609](https://github.com/freelabz/secator/issues/1609)) ([05a89ef](https://github.com/freelabz/secator/commit/05a89ef955356947bd6c278f23d5f5a912e1b56d))
+* **canary:** rewrite dropped-off-canary comments (integrated→dropped) ([#1620](https://github.com/freelabz/secator/issues/1620)) ([8394a93](https://github.com/freelabz/secator/commit/8394a93f399df6c286cebfd754a39b23e9a8436f))
+* **canary:** trust in-repo-branch PRs (author_association unreliable under GITHUB_TOKEN) ([#1619](https://github.com/freelabz/secator/issues/1619)) ([14d0b23](https://github.com/freelabz/secator/commit/14d0b23ea8a7a349e512e6a3f2797c4f97186c7e))
+* clone testssl.sh from testssl/ org (drwetter repo no longer serves refs) ([#1625](https://github.com/freelabz/secator/issues/1625)) ([3624bbd](https://github.com/freelabz/secator/commit/3624bbd895b3ab78e850312768f9bd2602f1c346))
+* **docker:** build pyenv Python against openssl-3 on Arch-based images ([#1635](https://github.com/freelabz/secator/issues/1635)) ([2175f24](https://github.com/freelabz/secator/commit/2175f2441695e7d73ebf23c04d2ae6ea62f23438))
+* **docker:** bump pinned Go to 1.26.10 to avoid toolchain auto-download ([#1637](https://github.com/freelabz/secator/issues/1637)) ([00ef2de](https://github.com/freelabz/secator/commit/00ef2def27bb9483d35078f50a3afc8185cdd695))
+* **tasks:** address post-merge review of [#1599](https://github.com/freelabz/secator/issues/1599) ([#1629](https://github.com/freelabz/secator/issues/1629)) ([c16694f](https://github.com/freelabz/secator/commit/c16694fc93ad45999e6486b2c418a210a2e71f06))
+* **test:** seed JsonBackend from a real store in backend-parity tests ([#1615](https://github.com/freelabz/secator/issues/1615)) ([036b9ae](https://github.com/freelabz/secator/commit/036b9ae48bb9afbe989d1847e98601d87f1a040c))
+* **tests:** stop silently skipping integration tasks ([#1631](https://github.com/freelabz/secator/issues/1631)) ([660c9bc](https://github.com/freelabz/secator/commit/660c9bc986bcc1d39e58cfcb9ec959e759eef2da))
+
 ## [0.53.4](https://github.com/freelabz/secator/compare/v0.53.3...v0.53.4) (2026-10-29)
 
 

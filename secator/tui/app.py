@@ -23,7 +23,7 @@ from textual.widgets.option_list import Option
 from secator.ai.interactivity import DISMISS_ANSWER
 from secator.tui.render import finding_text, message_text
 from secator.tui.widgets import (
-	BackBar, BlockPanel, ChoicePrompt, Grip, PermissionPrompt, PromptInput, RunnerPanel)
+	BackBar, BlockPanel, ChoicePrompt, ConversationScroll, Grip, PermissionPrompt, PromptInput, RunnerPanel)
 
 
 class TUIApp(App):
@@ -81,9 +81,14 @@ class TUIApp(App):
 	.choice-list > .selection-list--button-highlighted { color: #556070; background: transparent; }
 	.choice-list > .selection-list--button-selected { color: #7fd1e0; background: transparent; }
 	.choice-list > .selection-list--button-selected-highlighted { color: #7fd1e0; background: transparent; }
-	/* subtle highlight on the focused choice row (the default is too bright) */
-	.choice-list > .option-list--option-highlighted { background: #1b2130; color: #cdd6e4; }
-	.choice-list:focus > .option-list--option-highlighted { background: #20283a; color: #e6ecf5; }
+	/* focused list: bold accent bar on the highlighted row. Unfocused: options dimmed and no
+	   highlight bar, so it reads as "not active — the first click only focuses it". */
+	.choice-list > .option-list--option { color: #6b7187; }
+	.choice-list > .option-list--option-highlighted { background: transparent; color: #9aa3b8; }
+	.choice-list:focus > .option-list--option { color: #cdd6e4; }
+	.choice-list:focus > .option-list--option-highlighted {
+		background: #23405a; color: #e6ecf5; text-style: bold;
+	}
 
 	/* lazy findings side panel (ctrl+f); 1/3 width by default, drag the grip to resize */
 	#findings-panel { dock: right; width: 34%; display: none; background: transparent; }
@@ -120,8 +125,16 @@ class TUIApp(App):
 		height: auto; display: none; padding: 1 1 0 1;
 		border-title-align: right; border-title-color: #6b7187; border-title-background: transparent;
 	}
+	/* the top rule lights up in the accent colour while the prompt has focus */
+	#choice-host:focus-within { border-top: solid #7fd1e0; }
 	.choice-box { height: auto; }
-	.choice-hint { color: #6b7187; }
+	.choice-foot { height: auto; }
+	.choice-hint { color: #6b7187; width: 1fr; }
+	.choice-hint-focused { display: none; }
+	.choice-box:focus-within .choice-hint-focused { display: block; }
+	.choice-box:focus-within .choice-hint-blurred { display: none; }
+	.choice-dismiss { width: auto; color: #6b7187; padding: 0 1; }
+	.choice-dismiss:hover { color: #cdd6e4; text-style: bold; }
 	/* the command/target a permission ask is about, shown above the Approve/Deny list */
 	.perm-cmd { color: #7b8296; margin: 0 0 1 0; height: auto; }
 	#input-caret { width: 3; height: 1; color: #7fd1e0; text-style: bold; content-align: center top; }
@@ -225,7 +238,7 @@ class TUIApp(App):
 	def compose(self) -> ComposeResult:
 		# no top header — the bottom meta bar carries the session/mode state now
 		yield BackBar(Text.from_markup("[#7fd1e0]← Back to conversation[/]"), id="backbar")
-		yield Vertical(VerticalScroll(id="convo"), id="views")
+		yield Vertical(ConversationScroll(id="convo"), id="views")
 		yield Static("", id="status")
 		yield Horizontal(
 			Grip("│", id="findings-grip"),
@@ -451,7 +464,7 @@ class TUIApp(App):
 	async def _ensure_subview(self, sid: str) -> VerticalScroll:
 		sv = self._subviews.get(sid)
 		if sv is None:
-			sv = VerticalScroll(classes="subview")
+			sv = ConversationScroll(classes="subview")
 			sv.display = False
 			self._subviews[sid] = sv
 			await self.query_one("#views", Vertical).mount(sv)
@@ -549,7 +562,7 @@ class TUIApp(App):
 		spin = self._BG_SPIN[self._bg_frame % len(self._BG_SPIN)]
 		for st, rname, kind, config in getattr(self, "_bg_running_rows", []):
 			try:
-				st.update(self._bg_row_text(spin, "#e0882e", rname, kind, config))
+				st.update(self._bg_row_text(spin, "#e0882e", rname, kind, config), layout=False)
 			except Exception:  # noqa: BLE001 - row removed
 				pass
 
@@ -684,7 +697,8 @@ class TUIApp(App):
 		self._spin_frame = (self._spin_frame + 1) % len(self._SPIN)
 		try:
 			self.query_one("#status", Static).update(
-				Text.from_markup(f"[gold3]{self._SPIN[self._spin_frame]} {escape(self._status_text)}[/]"))
+				Text.from_markup(f"[gold3]{self._SPIN[self._spin_frame]} {escape(self._status_text)}[/]"),
+				layout=False)   # glyph swap only: same size, no relayout
 		except Exception:  # noqa: BLE001 - the status node may be gone during teardown
 			pass
 

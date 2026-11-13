@@ -136,6 +136,14 @@ class TestPrompts(unittest.TestCase):
 		self.assertIn('$in', prompt)
 		self.assertIn('$regex', prompt)
 
+	def test_core_modes_render_a_mode_block(self):
+		"""Every mode carries a bespoke <mode> recap in the <constraints> recency tail (in
+		addition to the programmatic <current_mode> banner) — kept consistent across modes."""
+		for mode in ("scan", "chat", "exploit"):
+			p = get_system_prompt(mode, workspace_path="<ws>", backend=None)
+			self.assertIn("<mode>", p, f"{mode} missing the <mode> block")
+			self.assertIn("</mode>", p, f"{mode} missing the </mode> close")
+
 	def test_get_system_prompt_invalid_mode_falls_back(self):
 		"""Test get_system_prompt falls back to chat for invalid mode (consistent with get_mode_config)."""
 		invalid_prompt = get_system_prompt("invalid_mode")
@@ -487,6 +495,47 @@ class TestScopeInPrompt(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestContributeMode(unittest.TestCase):
+	"""The contribute mode prompt: library-enabled, WORKS in the isolated sandbox (secator is
+	installed there), reproducible-test + lab + memory-handoff + security guidance present, the
+	deliverable branches local-vs-hosted, and the parallel-subagent block strips for subagents."""
+
+	def test_contribute_prompt_builds_fully(self):
+		from secator.ai.prompts import get_system_prompt
+		p = get_system_prompt("contribute", workspace_path="/tmp/ws", isolated=True)
+		self.assertIn("CONTRIBUTE mode", p)
+		self.assertIn("<mode>", p)                     # bespoke <mode> block in <constraints> (consistent across modes)
+		self.assertNotIn("$library_reference", p)      # task/workflow library substituted
+		self.assertNotIn("$deliverable", p)            # deliverable block substituted
+		self.assertIn("<subagents>", p)                # parallelization guidance present
+		self.assertIn("docker-compose", p)             # integration test lab
+		self.assertIn("fixture", p.lower())            # reproducible real fixtures
+		self.assertIn("worker", p.lower())             # sync + with-worker matrix
+		# isolated no longer refuses — the sandbox is the workbench (secator is installed there):
+		self.assertNotIn("cannot reach the secator repo", p)
+		self.assertIn("templates dir", p.lower())      # author-and-run via ~/.secator/templates
+		self.assertIn("Memory limit", p)               # memory/OOM hand-off (real run_shell wording)
+		self.assertIn("PUBLIC", p)                     # never leak confidential/org data
+
+	def test_contribute_deliverable_branches_local_vs_hosted(self):
+		from secator.ai.prompts import build_contribute_deliverable
+		from secator.ai.interactivity import CLIBackend, AutoBackend
+		# Local CLI/TUI: can fork + open the PR.
+		self.assertIn("OFFER to fork", build_contribute_deliverable(CLIBackend()))
+		# Non-interactive / hosted: inline files only, no PR attempt.
+		hosted = build_contribute_deliverable(AutoBackend())
+		self.assertNotIn("OFFER to fork", hosted)
+		self.assertIn("CANNOT open a PR", hosted)
+
+	def test_contribute_subagent_strips_delegation(self):
+		from secator.ai.prompts import get_system_prompt
+		p = get_system_prompt("contribute", workspace_path="/tmp/ws", is_subagent=True)
+		self.assertNotIn("<subagents>", p)
+		self.assertNotIn("run_subagent", p)
+		self.assertIn("CANNOT spawn subagents", p)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestResearchMode(unittest.TestCase):
 	"""The research mode prompt: library-enabled, adversarial-subagent block present and
 	(like scan/exploit) stripped when rendered for a subagent."""
@@ -560,6 +609,15 @@ class TestOperatingRulesRecap(unittest.TestCase):
 		self.assertIn("stop", recap)               # prose-choices failure (stop carries choices)
 		self.assertIn("description", recap)         # description-echo failure
 		self.assertIn("Persist", recap)             # early-yield failure
+
+	def test_stop_rules_ask_open_questions_without_choices(self):
+		# Interactive stop guidance: info only the user has (e.g. a target) is asked in
+		# `reason` with no `choices` — a choice like "Provide a target" is a wasted turn.
+		p = get_system_prompt("scan", workspace_path="<ws>", backend=None)
+		self.assertIn("Ask open questions in `reason` with NO `choices`", p)
+		self.assertIn('stop(reason="The workspace is empty. Which target should I scan? (domain, IP or URL)")', p)
+		recap = p[p.index("<operating_rules>"):]
+		self.assertIn("ask in `reason` and omit `choices`", recap)
 
 	def test_user_context_body_is_verbatim_not_token_substituted(self):
 		# $workspace_path in a user note must survive verbatim (substitution happens

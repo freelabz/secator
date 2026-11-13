@@ -8,7 +8,7 @@ from secator.output_types import Vulnerability
 from secator.utils_test import FIXTURES_DIR, clear_modules
 from secator.loader import get_configs_by_type, find_templates, discover_tasks
 from secator.tree import build_runner_tree
-from secator.template import TemplateLoader, get_config_options
+from secator.template import TemplateLoader, get_config_options, profile_applies
 
 
 class TestTemplate(unittest.TestCase):
@@ -282,3 +282,45 @@ class TestTree(unittest.TestCase):
 		# Should use the default from httpx task (False)
 		self.assertIn('tls-grab', opts_3)
 		self.assertEqual(opts_3['tls-grab']['default'], False)
+
+	def test_profile_applies(self):
+		# A profile applies iff one of its opt keys exists in the config's opts.
+		self.assertTrue(profile_applies({'screenshot': True}, {'screenshot', 'ports'}))
+		self.assertFalse(profile_applies({'screenshot': True}, {'ports', 'rate_limit'}))
+		# Keys are normalized to underscores to match serialized opt keys.
+		self.assertTrue(profile_applies({'rate-limit': 100}, {'rate_limit'}))
+		# Empty-opts profile is treated as universally applicable.
+		self.assertTrue(profile_applies({}, {'ports'}))
+
+	def test_applicable_profiles_catalog(self):
+		# Authoritative "which profiles apply to this config" computation, exposed
+		# per non-profile config via the catalog serializer.
+		scans = {c.name: c for c in get_configs_by_type('scan')}
+		wfs = {c.name: c for c in get_configs_by_type('workflow')}
+
+		host = scans['host'].toDict(serialize=True)['applicable_profiles']
+		for name in ['stealth', 'http_record', 'passive', 'active', 'full',
+					 'aggressive', 'insane', 'polite', 'paranoid']:
+			self.assertIn(name, host, f'expected {name} applicable to host scan')
+
+		code_scan = wfs['code_scan'].toDict(serialize=True)['applicable_profiles']
+		for name in ['stealth', 'http_record', 'passive', 'active']:
+			self.assertNotIn(name, code_scan, f'did not expect {name} applicable to code_scan')
+
+		user_hunt = wfs['user_hunt'].toDict(serialize=True)['applicable_profiles']
+		for name in ['stealth', 'http_record', 'passive', 'active']:
+			self.assertNotIn(name, user_hunt, f'did not expect {name} applicable to user_hunt')
+
+		url_crawl = wfs['url_crawl'].toDict(serialize=True)['applicable_profiles']
+		for name in ['http_record', 'passive', 'active']:
+			self.assertIn(name, url_crawl, f'expected {name} applicable to url_crawl')
+
+		# get_applicable_profiles returns a sorted list.
+		self.assertEqual(url_crawl, sorted(url_crawl))
+
+	def test_applicable_profiles_on_tasks(self):
+		# Tasks in the catalog also carry applicable_profiles.
+		tasks = {c.name: c for c in get_configs_by_type('task')}
+		self.assertIn('stealth', tasks['nmap']['applicable_profiles'])
+		self.assertIn('http_record', tasks['httpx']['applicable_profiles'])
+		self.assertNotIn('http_record', tasks['grype']['applicable_profiles'])

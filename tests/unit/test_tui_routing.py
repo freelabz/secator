@@ -12,6 +12,8 @@ import pytest
 
 pytest.importorskip("textual")
 
+from secator.ai.interactivity import DISMISS_ANSWER  # noqa: E402
+from secator.definitions import ADDONS_ENABLED  # noqa: E402
 from secator.tui.widgets import PromptInput  # noqa: E402
 from secator.tui.ai import AITUI          # noqa: E402
 from secator.tui.widgets import ActionPanel, RunnerPanel  # noqa: E402
@@ -596,6 +598,100 @@ def test_choice_numeric_literal_via_input():
 	_run(_choice_numeric_literal_body())
 
 
+async def _choice_escape_resumes_body():
+	from unittest.mock import MagicMock
+	from secator.ai.interactivity import TUIBackend
+	from secator.rich import set_tui
+	from secator.tasks.ai import ai as AiTask
+	fake = MagicMock()
+	fake.backend = TUIBackend()
+	fake.encryptor = None
+	fake.max_iterations = 10
+	fake._progress_actions = 0
+	fake._prompt_and_redetect = lambda *a, **kw: AiTask._prompt_and_redetect(fake, *a, **kw)
+	out, done = {}, threading.Event()
+
+	def build():
+		out["result"] = AiTask._prompt_and_redetect(fake, ["scan port", "crawl web"], reason="What next?")
+		done.set()
+		yield from ()
+
+	app = AITUI(build, session="ai", mode="scan")
+	set_tui(app)
+	try:
+		async with app.run_test(size=(120, 40)) as pilot:
+			await pilot.pause(0.2)
+			assert app._active_choice is not None
+			await pilot.press("escape")
+			await pilot.pause(0.2)
+			# the run stays alive, waiting on a plain follow-up with the input restored
+			assert app._pending_ask is not None
+			assert app.query_one("#input-box").display is True
+			await app.on_prompt_input_submitted(PromptInput.Submitted("try the login page"))
+			assert await asyncio.to_thread(done.wait, 10), "no AI turn after the next message"
+			assert out["result"] is not None
+			fake.history.add_user.assert_called_once_with("try the login page")
+	finally:
+		set_tui(None)
+
+
+@pytest.mark.skipif(not ADDONS_ENABLED.get("ai"), reason="ai addon required")
+def test_choice_escape_then_message_resumes_ai():
+	_run(_choice_escape_resumes_body())
+
+
+async def _show_unfocused_choice(app, pilot):
+	ev, holder = threading.Event(), {}
+	app._show_prompt("", (ev, holder, ["scan port", "crawl web"], "stopped"), False)
+	await pilot.pause(0.1)
+	app._convo().focus()   # the user is reading / scrolling the conversation
+	await pilot.pause(0.05)
+	assert not app._active_choice.has_focus_within
+	return holder
+
+
+async def _choice_click_focuses_first_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		holder = await _show_unfocused_choice(app, pilot)
+		cp = app._active_choice
+		ol = cp.query_one(OptionList)
+		# first click on an option only focuses the prompt and highlights the option
+		await pilot.click(ol, offset=(2, 1))
+		await pilot.pause(0.05)
+		assert ol.has_focus and ol.highlighted == 1
+		assert "value" not in holder
+		# once focused, a click selects as usual
+		await pilot.click(ol, offset=(2, 1))
+		await pilot.pause(0.05)
+		assert holder.get("value") == "crawl web"
+
+
+def test_choice_click_on_unfocused_prompt_only_focuses():
+	_run(_choice_click_focuses_first_body())
+
+
+async def _choice_dismiss_button_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		holder = await _show_unfocused_choice(app, pilot)
+		cp = app._active_choice
+		await pilot.click(".choice-dismiss")
+		await pilot.pause(0.05)
+		assert cp.has_focus_within
+		assert "value" not in holder
+		await pilot.click(".choice-dismiss")
+		await pilot.pause(0.05)
+		assert holder.get("value") == DISMISS_ANSWER
+		assert app.query_one("#input-box").display is True
+
+
+def test_choice_dismiss_button():
+	_run(_choice_dismiss_button_body())
+
+
 async def _parent_error_body():
 	app = AITUI(None, session="ai", mode="scan")
 	async with app.run_test(size=(120, 40)) as pilot:
@@ -908,3 +1004,66 @@ async def _replay_body():
 
 def test_replay_history_renders_full_conversation():
 	_run(_replay_body())
+
+
+async def _toggle_cost_body():
+	# Guards the cost of expanding/collapsing a runner panel: raw output renders in ONE
+	# widget (not one per line), and a spinner tick repaints the header without a relayout.
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		await app._render(_card("task", "nmap", "Port scan"))
+		await app._set_command("nmap x -p-", "nmap")
+		for i in range(50):
+			await app._render_line(f"{i}/tcp open", "nmap")
+		await pilot.pause(0.05)
+		p = _by_desc(app, "Port scan")
+		assert p.raw_lines == 50
+		raw = p.query_one(".runner-raw")
+		assert len(raw.children) == 1
+		assert str(raw.children[0].render()).splitlines() == [f"{i}/tcp open" for i in range(50)]
+
+		head = p.query_one(".runner-head")
+		layouts = []
+		orig = head.refresh
+		head.refresh = lambda *a, layout=False, **k: (layouts.append(layout), orig(*a, layout=layout, **k))[1]
+		p._tick_spin()
+		assert layouts and not any(layouts)
+		app._finish_current()
+
+
+def test_runner_toggle_cost_bounded():
+	_run(_toggle_cost_body())
+
+
+async def _focus_restyle_body():
+	# Clicking a runner moves focus to the conversation; that must restyle the container only,
+	# not re-match CSS for every widget in the conversation.
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		for k in range(5):
+			await app._render(_card("task", "nmap", f"Port scan {k}"))
+			for i in range(10):
+				await app._render(_finding("port", "nmap", f"f{k}-{i}", port=i, host="x", ip="1.2.3.4", state="open"))
+			app._finish_current()
+		await pilot.pause(0.05)
+		convo = app._convo()
+		assert sum(1 for _ in convo.walk_children()) > 50
+		restyled = []
+		orig = app.stylesheet.update_nodes
+
+		def update_nodes(nodes, animate=False):
+			nodes = list(nodes)
+			restyled.extend(nodes)
+			return orig(nodes, animate=animate)
+
+		app.stylesheet.update_nodes = update_nodes
+		convo.focus()
+		await pilot.pause(0.05)
+		assert app.focused is convo
+		assert convo in restyled and len(restyled) <= 5
+
+
+def test_conversation_focus_restyles_container_only():
+	_run(_focus_restyle_body())
