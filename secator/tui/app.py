@@ -81,9 +81,14 @@ class TUIApp(App):
 	.choice-list > .selection-list--button-highlighted { color: #556070; background: transparent; }
 	.choice-list > .selection-list--button-selected { color: #7fd1e0; background: transparent; }
 	.choice-list > .selection-list--button-selected-highlighted { color: #7fd1e0; background: transparent; }
-	/* subtle highlight on the focused choice row (the default is too bright) */
-	.choice-list > .option-list--option-highlighted { background: #1b2130; color: #cdd6e4; }
-	.choice-list:focus > .option-list--option-highlighted { background: #20283a; color: #e6ecf5; }
+	/* focused list: bold accent bar on the highlighted row. Unfocused: options dimmed and no
+	   highlight bar, so it reads as "not active — the first click only focuses it". */
+	.choice-list > .option-list--option { color: #6b7187; }
+	.choice-list > .option-list--option-highlighted { background: transparent; color: #9aa3b8; }
+	.choice-list:focus > .option-list--option { color: #cdd6e4; }
+	.choice-list:focus > .option-list--option-highlighted {
+		background: #23405a; color: #e6ecf5; text-style: bold;
+	}
 
 	/* lazy findings side panel (ctrl+f); 1/3 width by default, drag the grip to resize */
 	#findings-panel { dock: right; width: 34%; display: none; background: transparent; }
@@ -120,8 +125,16 @@ class TUIApp(App):
 		height: auto; display: none; padding: 1 1 0 1;
 		border-title-align: right; border-title-color: #6b7187; border-title-background: transparent;
 	}
+	/* the top rule lights up in the accent colour while the prompt has focus */
+	#choice-host:focus-within { border-top: solid #7fd1e0; }
 	.choice-box { height: auto; }
-	.choice-hint { color: #6b7187; }
+	.choice-foot { height: 1; }
+	.choice-hint { color: #6b7187; width: 1fr; }
+	.choice-hint-focused { display: none; }
+	.choice-box:focus-within .choice-hint-focused { display: block; }
+	.choice-box:focus-within .choice-hint-blurred { display: none; }
+	.choice-dismiss { width: auto; color: #6b7187; padding: 0 1; }
+	.choice-dismiss:hover { color: #cdd6e4; text-style: bold; }
 	/* the command/target a permission ask is about, shown above the Approve/Deny list */
 	.perm-cmd { color: #7b8296; margin: 0 0 1 0; height: auto; }
 	#input-caret { width: 3; height: 1; color: #7fd1e0; text-style: bold; content-align: center top; }

@@ -12,6 +12,7 @@ import pytest
 
 pytest.importorskip("textual")
 
+from secator.ai.interactivity import DISMISS_ANSWER  # noqa: E402
 from secator.definitions import ADDONS_ENABLED  # noqa: E402
 from secator.tui.widgets import PromptInput  # noqa: E402
 from secator.tui.ai import AITUI          # noqa: E402
@@ -637,6 +638,58 @@ async def _choice_escape_resumes_body():
 @pytest.mark.skipif(not ADDONS_ENABLED.get("ai"), reason="ai addon required")
 def test_choice_escape_then_message_resumes_ai():
 	_run(_choice_escape_resumes_body())
+
+
+async def _show_unfocused_choice(app, pilot):
+	ev, holder = threading.Event(), {}
+	app._show_prompt("", (ev, holder, ["scan port", "crawl web"], "stopped"), False)
+	await pilot.pause(0.1)
+	app._convo().focus()   # the user is reading / scrolling the conversation
+	await pilot.pause(0.05)
+	assert not app._active_choice.has_focus_within
+	return holder
+
+
+async def _choice_click_focuses_first_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		holder = await _show_unfocused_choice(app, pilot)
+		cp = app._active_choice
+		ol = cp.query_one(OptionList)
+		# first click on an option only focuses the prompt and highlights the option
+		await pilot.click(ol, offset=(2, 1))
+		await pilot.pause(0.05)
+		assert ol.has_focus and ol.highlighted == 1
+		assert "value" not in holder
+		# once focused, a click selects as usual
+		await pilot.click(ol, offset=(2, 1))
+		await pilot.pause(0.05)
+		assert holder.get("value") == "crawl web"
+
+
+def test_choice_click_on_unfocused_prompt_only_focuses():
+	_run(_choice_click_focuses_first_body())
+
+
+async def _choice_dismiss_button_body():
+	app = AITUI(None, session="ai", mode="scan")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		holder = await _show_unfocused_choice(app, pilot)
+		cp = app._active_choice
+		await pilot.click(".choice-dismiss")
+		await pilot.pause(0.05)
+		assert cp.has_focus_within
+		assert "value" not in holder
+		await pilot.click(".choice-dismiss")
+		await pilot.pause(0.05)
+		assert holder.get("value") == DISMISS_ANSWER
+		assert app.query_one("#input-box").display is True
+
+
+def test_choice_dismiss_button():
+	_run(_choice_dismiss_button_body())
 
 
 async def _parent_error_body():
