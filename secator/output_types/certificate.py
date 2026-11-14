@@ -83,6 +83,7 @@ class Certificate(Finding):
 				name='SSL certificate expired',
 				description='The SSL certificate is expired. This can easily lead to domain takeovers',
 				matched_at=self.host,
+				ip=self.ip,
 				tags=['ssl', 'tls'],
 				severity='high',
 				confidence='high',

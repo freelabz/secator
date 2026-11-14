@@ -129,6 +129,7 @@ class wpscan(VulnHttp):
 
 		# Get URL
 		target = data.get('target_url', self.inputs[0])
+		target_ip = data.get('target_ip', '')
 
 		# Get errors
 		scan_aborted = data.get('scan_aborted', False)
@@ -145,6 +146,7 @@ class wpscan(VulnHttp):
 				vuln = version
 				vuln.update({
 					'url': target,
+					'ip': target_ip,
 					'to_s': 'Wordpress outdated version',
 					'type': wp_version,
 					'references': {},
@@ -179,6 +181,7 @@ class wpscan(VulnHttp):
 				if outdated:
 					yield Vulnerability(
 						matched_at=target,
+						ip=target_ip,
 						name=f'Wordpress theme - {slug} {number} outdated',
 						description=f'The wordpress theme {slug} is outdated, consider updating to the latest version {latest_version}',
 						confidence='high',
@@ -216,6 +219,7 @@ class wpscan(VulnHttp):
 				if outdated:
 					yield Vulnerability(
 						matched_at=target,
+						ip=target_ip,
 						name=f'Wordpress plugin - {slug} {number} outdated',
 						description=f'The wordpress plugin {slug} is outdated, consider updating to the latest version {latest_version}.',
 						confidence='high',

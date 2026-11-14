@@ -4,7 +4,7 @@ import json
 import re
 
 from secator.rich import console
-from secator.utils import debug
+from secator.utils import _is_ip_literal, debug
 
 
 def parse_report_paths(paths_str):
@@ -205,6 +205,39 @@ _NOT_FIELD_RE = re.compile(rf'^\s*not\s+({_DOTTED})\s*$')
 _TRUTHY = {'$nin': [None, '', False, 0], '$exists': True}
 
 
+# Virtual fields, for a bare (untyped) operand only; a typed `type.field` still queries the real field.
+# `host` / `domain` (==, !=, in, not in) match the host of the finding's `target` (`domain` also
+# matches subdomains). `ip == <ip literal>` (and !=) matches the real `ip` field OR a `target` on that IP.
+_VIRTUAL_HOST_FIELDS = ('host', 'domain')
+
+
+def _target_host_regex(values, subdomains=False):
+    """Regex matching a `target` whose host is one of `values` (a URL, host, host:port or IP)."""
+    hosts = []
+    for value in values:
+        host = re.escape(str(value).strip().lower())
+        hosts.append(rf'\[{host}\]|{host}' if ':' in host else host)  # IPv6: bracketed in host:port
+    subdomain = r'([^/:?#@]+\.)?' if subdomains else ''
+    return rf'(?i)^([a-z][a-z0-9+.-]*://)?([^/?#@]*@)?{subdomain}({"|".join(hosts)})(:\d+)?([/?#]|$)'
+
+
+def _virtual_host_frag(field, values, negate=False):
+    """Build the `target` regex fragment for a virtual `host` / `domain` comparison."""
+    regex = _target_host_regex(values, subdomains=field == 'domain')
+    frag = _loose_neg(None, {'$not': {'$regex': regex}}) if negate else {'$regex': regex}
+    return {'target': frag}
+
+
+def _virtual_ip_frag(ip, negate=False):
+    """Build the fragment for a virtual `ip` comparison: the `ip` field or a `target` on that IP."""
+    ip = ip.lower()
+    target = _target_host_regex([ip])
+    if negate:
+        exact = f'(?i)^{re.escape(ip)}$'
+        return {'$and': [{'ip': {'$not': {'$regex': exact}}}, {'target': {'$not': {'$regex': target}}}]}
+    return {'$or': [{'ip': ip}, {'target': {'$regex': target}}]}
+
+
 def _split_type_field(dotted):
     """Split a `type.field` operand into (_type, field). `item` is a neutral placeholder
     (the extractor's declared `type:` is authoritative), so `item.field` -> (None, field);
@@ -331,6 +364,8 @@ def _parse_single_expr(expr):
         if not _IDENT_RE.match(left):
             raise ValueError(f'Cannot translate expression to query: {expr!r}')
         _type, field = _split_type_field(left)
+        if _type is None and field in _VIRTUAL_HOST_FIELDS:
+            return _virtual_host_frag(field, _parse_list(m_not_in.group(2)), negate=True)
         return _fragment(_type, field, _loose_neg(_type, {'$nin': _parse_list(m_not_in.group(2))}))
 
     # 'in' operator ("type.field in [...]" -> $in)
@@ -340,6 +375,8 @@ def _parse_single_expr(expr):
         if not _IDENT_RE.match(left):
             raise ValueError(f'Cannot translate expression to query: {expr!r}')
         _type, field = _split_type_field(left)
+        if _type is None and field in _VIRTUAL_HOST_FIELDS:
+            return _virtual_host_frag(field, _parse_list(m_in.group(2)))
         return _fragment(_type, field, {'$in': _parse_list(m_in.group(2))})
 
     # First comparison operator outside quotes (longest-first via alternation order).
@@ -360,6 +397,10 @@ def _parse_single_expr(expr):
             value = _parse_value(right)
         if not field:
             return _fragment(_type, field, None)
+        if _type is None and field in _VIRTUAL_HOST_FIELDS and op_str in ('==', '!='):
+            return _virtual_host_frag(field, [value], negate=op_str == '!=')
+        if _type is None and field == 'ip' and op_str in ('==', '!=') and _is_ip_literal(str(value)):
+            return _virtual_ip_frag(str(value), negate=op_str == '!=')
         if mongo_op == '$not_regex':
             return _fragment(_type, field, _loose_neg(_type, {'$not': {'$regex': value}}))
         if mongo_op is None:
@@ -454,6 +495,9 @@ def python_expr_to_mongo(query):
         merged = {}
         mergeable = True
         for part in parsed:
+            if any(key.startswith('$') for key in part):  # keep $or/$and parts whole (never a mixed dict)
+                mergeable = False
+                break
             for key, val in part.items():
                 if key not in merged or merged[key] == val:
                     merged[key] = val

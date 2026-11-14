@@ -283,6 +283,105 @@ class TestMigrateMongo(MigrateTestMixin, unittest.TestCase):
 		return {d['_uuid']: {k: v for k, v in d.items() if k != '_id'} for d in self.client.main.findings.find()}
 
 
+HOST_DOCS = {
+	'url': Url(url='https://secator.cloud/login'),
+	'port': Port(port=443, ip='10.0.0.2', host='secator.cloud'),
+	'dom': Domain(domain='secator.cloud'),
+	'sub': Subdomain(host='api.secator.cloud', domain='secator.cloud'),
+	'ip': Ip(ip='10.0.0.1'),
+	'v6': Port(port=22, ip='2001:db8::1'),
+	'evil1': Subdomain(host='evil-secator.cloud', domain='evil-secator.cloud'),
+	'evil2': Url(url='https://secator.cloud.evil.com/'),
+	'not': Domain(domain='notsecator.cloud'),
+	'path': Vulnerability(name='v', matched_at='/tmp/secator.cloud'),
+	'pip': Port(port=80, ip='10.0.0.1', host='app.example.net'),
+	'vip': Vulnerability(name='v', matched_at='10.0.0.1:443'),
+	'p10': Port(port=80, ip='10.0.0.10'),
+	'ip110': Ip(ip='110.0.0.1'),
+}
+
+
+class VirtualHostQueryMixin:
+	"""Virtual `host` / `domain` / `ip` query fields match the host of `target` on every finding type."""
+
+	CASES = [
+		("host == 'secator.cloud'", {'url', 'port', 'dom'}),
+		("host == 'SECATOR.cloud'", {'url', 'port', 'dom'}),
+		("host == '10.0.0.1'", {'ip', 'vip'}),
+		("host == '2001:db8::1'", {'v6'}),
+		("domain == 'secator.cloud'", {'url', 'port', 'dom', 'sub'}),
+		("host in ['secator.cloud', '10.0.0.1']", {'url', 'port', 'dom', 'ip', 'vip'}),
+		("host != 'secator.cloud'", set(HOST_DOCS) - {'url', 'port', 'dom'}),
+		("domain not in ['secator.cloud']", set(HOST_DOCS) - {'url', 'port', 'dom', 'sub'}),
+		("host == 'secator.cloud' && port.port == 443", {'port'}),
+		("ip == '10.0.0.1'", {'ip', 'pip', 'vip'}),
+		("ip != '10.0.0.1'", set(HOST_DOCS) - {'ip', 'pip', 'vip'}),
+		("ip == '10.0.0.1' && port.port == 80", {'pip'}),
+		("ip == '2001:db8::1'", {'v6'}),
+	]
+
+	def test_virtual_host_fields(self):
+		for expr, expected in self.CASES:
+			with self.subTest(expr=expr):
+				found = {d['_uuid'] for d in self.backend.search(python_expr_to_mongo(expr))}
+				self.assertEqual(found, expected)
+
+	def test_typed_field_stays_real(self):
+		found = {d['_uuid'] for d in self.backend.search(python_expr_to_mongo("subdomain.domain == 'secator.cloud'"))}
+		self.assertEqual(found, {'sub'})
+
+	@staticmethod
+	def docs():
+		return [{**item.toDict(), '_uuid': uuid, '_context': {'workspace_id': WS}} for uuid, item in HOST_DOCS.items()]
+
+
+class TestVirtualHostSqlite(VirtualHostQueryMixin, unittest.TestCase):
+
+	def setUp(self):
+		import secator.hooks.sqlite as sqlite_mod
+		self.sqlite_mod = sqlite_mod
+		self.tmp = tempfile.mkdtemp()
+		self.backend = SqliteBackend(WS, config={'db_path': str(Path(self.tmp) / 'test.db')})
+		conn = self.backend._get_conn()
+		for doc in self.docs():
+			conn.execute(
+				"INSERT INTO findings (uuid, type, workspace_id, data) VALUES (?, ?, ?, ?)",
+				(doc['_uuid'], doc['_type'], WS, json.dumps(doc, default=str)))
+		conn.commit()
+
+	def tearDown(self):
+		conn = self.sqlite_mod._conns.pop(self.backend.config['db_path'], None)
+		if conn:
+			conn.close()
+		shutil.rmtree(self.tmp)
+
+
+class TestVirtualHostJson(VirtualHostQueryMixin, unittest.TestCase):
+
+	def setUp(self):
+		self.tmp = Path(tempfile.mkdtemp())
+		self.backend = JsonBackend(WS, config={'reports_dir': str(self.tmp)})
+		ndjson = self.tmp / WS / 'tasks' / '0' / 'results.ndjson'
+		ndjson.parent.mkdir(parents=True)
+		ndjson.write_bytes(b''.join(orjson.dumps(d, default=str) + b'\n' for d in self.docs()))
+
+	def tearDown(self):
+		shutil.rmtree(self.tmp)
+
+
+class TestVirtualHostMongo(VirtualHostQueryMixin, unittest.TestCase):
+
+	def setUp(self):
+		import pytest
+		pytest.importorskip('pymongo')
+		mongomock = pytest.importorskip('mongomock')
+		from secator.query.mongodb import MongoDBBackend
+		client = mongomock.MongoClient()
+		client.main.findings.insert_many(self.docs())
+		self.backend = MongoDBBackend(WS)
+		self.backend._client = client
+
+
 class TestMigrateCli(unittest.TestCase):
 
 	def test_api_driver_refused(self):
