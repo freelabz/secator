@@ -3,12 +3,12 @@ from dataclasses import dataclass, field
 from typing import List
 
 from secator.definitions import DOMAIN, HOST, SOURCES
-from secator.output_types import OutputType
+from secator.output_types import Finding
 from secator.utils import rich_to_ansi, format_object
 
 
 @dataclass
-class Subdomain(OutputType):
+class Subdomain(Finding):
 	host: str
 	domain: str
 	verified: bool = field(default=False, compare=False)
@@ -34,6 +34,7 @@ class Subdomain(OutputType):
 		SOURCES
 	]
 	_sort_by = (HOST,)
+	_target_fields = ['host']
 	_group_by = (DOMAIN,)        # collapse a domain's subdomains into one row
 	_group_aggregate = HOST
 

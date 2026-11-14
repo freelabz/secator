@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from secator.definitions import ALIVE, IP
-from secator.output_types import OutputType
+from secator.output_types import Finding
 from secator.utils import rich_to_ansi, format_object
 
 
@@ -13,7 +13,7 @@ class IpProtocol(str, Enum):
 
 
 @dataclass
-class Ip(OutputType):
+class Ip(Finding):
 	ip: str
 	host: str = field(default='', repr=True, compare=False)
 	alive: bool = False
@@ -35,6 +35,7 @@ class Ip(OutputType):
 
 	_table_fields = [IP, ALIVE]
 	_sort_by = (IP,)
+	_target_fields = ['ip']
 
 	def __str__(self) -> str:
 		return self.ip

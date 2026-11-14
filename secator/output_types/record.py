@@ -2,12 +2,12 @@ import time
 from dataclasses import dataclass, field
 
 from secator.definitions import HOST, NAME, TYPE
-from secator.output_types import OutputType
+from secator.output_types import Finding
 from secator.utils import rich_to_ansi, format_object, rich_escape as _s
 
 
 @dataclass
-class Record(OutputType):
+class Record(Finding):
 	name: str
 	type: str
 	host: str = ''
@@ -28,6 +28,7 @@ class Record(OutputType):
 
 	_table_fields = [NAME, HOST, TYPE]
 	_sort_by = (TYPE, NAME)
+	_target_fields = ['host', 'name']
 
 	def __str__(self) -> str:
 		return self.name

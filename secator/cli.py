@@ -3290,6 +3290,40 @@ def update(all):
 		sys.exit(return_code)
 
 
+# --------#
+# MIGRATE #
+# --------#
+
+
+@cli.command('migrate')
+@click.option('--driver', type=click.Choice(['local', 'mongodb', 'sqlite', 'api']), default=None, help='Store to migrate (defaults to the query backend driver)')  # noqa: E501
+@click.option('--apply', 'apply', is_flag=True, default=False, help='Write the changes (dry run otherwise)')
+@click.option('--force', is_flag=True, default=False, help='Re-run migrations already applied to this store')
+def migrate(driver, apply, force):
+	"""Migrate stored findings to the current schema (dry run by default)."""
+	from secator.migrations import run_migrations
+	name = QueryEngine.resolve_backend(driver)
+	if name == 'api':
+		console.print(Error(message='The api driver cannot migrate its store client-side: run `secator migrate` where the store lives, with its mongodb or sqlite driver.'))  # noqa: E501
+		sys.exit(1)
+	try:
+		results = run_migrations(QueryEngine.BACKENDS[name](''), apply=apply, force=force)
+	except Exception as e:
+		console.print(Error(message=f'Migration failed on the {name} store: {type(e).__name__}: {e}'))
+		sys.exit(1)
+	for res in results:
+		line = f'[bold]{res["id"]}[/] {res["description"]}: '
+		if res['status'] == 'applied':
+			line += f'[green]already applied[/] ({res.get("applied_at", "?")}, secator {res.get("version", "?")})'
+		elif res['status'] == 'done':
+			line += f'[green]{res["changed"]} updated[/] / {res["matched"]} matched'
+		else:
+			line += f'[yellow]{res["changed"]} to update[/] / {res["matched"]} matched'
+		console.print(line)
+	if any(res['status'] == 'pending' for res in results):
+		console.print(Info(message=f'Dry run on the {name} store: re-run with --apply to write the changes.'))
+
+
 # ------#
 # TEST #
 # ------#
