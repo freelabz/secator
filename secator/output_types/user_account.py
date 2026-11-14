@@ -29,7 +29,7 @@ class UserAccount(Finding):
 
 	_table_fields = [SITE_NAME, USERNAME, URL]
 	_sort_by = (URL, USERNAME)
-	_target_fields = ['url', 'email', 'site_name']
+	_target_fields = ['email', 'username']
 
 	def __str__(self) -> str:
 		return self.url
