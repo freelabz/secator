@@ -884,7 +884,7 @@ class Runner:
 			self._scope_out = as_scope_list(raw[1])
 		if not (self._scope_in or self._scope_out):
 			return False
-		target, _ = item.compute_target(vars(item))
+		target = item.compute_target(vars(item))
 		ip = getattr(item, 'ip', '') or ''
 		return bool(target) and not item_in_scope(target, ip, self._scope_in, self._scope_out)
 

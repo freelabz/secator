@@ -1,4 +1,4 @@
-"""Derived `target` / `target_host` fields on findings, and their `secator migrate` backfill."""
+"""Derived `target` field on findings, and its `secator migrate` backfill."""
 import json
 import shutil
 import tempfile
@@ -29,43 +29,42 @@ WS = 'ws1'
 class TestTargetPerType(unittest.TestCase):
 
 	CASES = [
-		(Domain(domain='Example.com'), 'example.com', 'example.com'),
-		(Subdomain(host='API.example.com', domain='example.com'), 'api.example.com', 'api.example.com'),
-		(Subdomain(host='www.example.com.', domain='example.com'), 'www.example.com', 'www.example.com'),
-		(Ip(ip='10.0.0.1', host='a.example.com'), '10.0.0.1', '10.0.0.1'),
-		(Port(port=443, ip='10.0.0.1', host='app.example.com'), 'app.example.com:443', 'app.example.com'),
-		(Port(port=22, ip='10.0.0.1'), '10.0.0.1:22', '10.0.0.1'),
-		(Port(port=22, ip='2001:db8::1'), '[2001:db8::1]:22', '2001:db8::1'),
-		(Ip(ip='2001:DB8::AB'), '2001:db8::ab', '2001:db8::ab'),
-		(Url(url='HTTPS://App.Example.com:8443/Login?next=/A'), 'https://app.example.com:8443/Login?next=/A', 'app.example.com'),  # noqa: E501
-		(Tag(name='t', value='v', match='https://EXAMPLE.COM/x'), 'https://example.com/x', 'example.com'),
-		(Tag(name='t', value='v', match='src/App.js:12:3'), 'src/App.js:12:3', ''),
-		(Technology(product='nginx', match='10.0.0.1:80'), '10.0.0.1:80', '10.0.0.1'),
-		(Vulnerability(name='v', matched_at='https://example.com/a'), 'https://example.com/a', 'example.com'),
-		(Vulnerability(name='v', ip='10.0.0.2'), '10.0.0.2', '10.0.0.2'),
-		(Vulnerability(name='v', matched_at='/tmp/Report.txt'), '/tmp/Report.txt', ''),
-		(Exploit(name='e', provider='p', id='1', matched_at='nginx 1.2'), 'nginx 1.2', ''),
-		(ExploitAttempt(name='a', matched_at='app.example.com:443'), 'app.example.com:443', 'app.example.com'),
-		(UserAccount(username='jdoe', url='https://github.com/jdoe'), 'jdoe', ''),
-		(UserAccount(username='jdoe', email='jdoe@example.com'), 'jdoe@example.com', ''),
-		(Certificate(host='example.com', ip='10.0.0.1'), 'example.com', 'example.com'),
-		(Record(name='10.0.0.1', type='A', host='www.example.com'), 'www.example.com', 'www.example.com'),
-		(Record(name='ns1.example.com', type='NS'), 'ns1.example.com', 'ns1.example.com'),
-		(Ai(content='hello'), '', ''),
+		(Domain(domain='Example.com'), 'example.com'),
+		(Subdomain(host='API.example.com', domain='example.com'), 'api.example.com'),
+		(Subdomain(host='www.example.com.', domain='example.com'), 'www.example.com'),
+		(Ip(ip='10.0.0.1', host='a.example.com'), '10.0.0.1'),
+		(Port(port=443, ip='10.0.0.1', host='app.example.com'), 'app.example.com:443'),
+		(Port(port=22, ip='10.0.0.1'), '10.0.0.1:22'),
+		(Port(port=22, ip='2001:db8::1'), '[2001:db8::1]:22'),
+		(Ip(ip='2001:DB8::AB'), '2001:db8::ab'),
+		(Url(url='HTTPS://App.Example.com:8443/Login?next=/A'), 'https://app.example.com:8443/Login?next=/A'),
+		(Tag(name='t', value='v', match='https://EXAMPLE.COM/x'), 'https://example.com/x'),
+		(Tag(name='t', value='v', match='src/App.js:12:3'), 'src/App.js:12:3'),
+		(Technology(product='nginx', match='10.0.0.1:80'), '10.0.0.1:80'),
+		(Vulnerability(name='v', matched_at='https://example.com/a'), 'https://example.com/a'),
+		(Vulnerability(name='v', ip='10.0.0.2'), '10.0.0.2'),
+		(Vulnerability(name='v', matched_at='/tmp/Report.txt'), '/tmp/Report.txt'),
+		(Exploit(name='e', provider='p', id='1', matched_at='nginx 1.2'), 'nginx 1.2'),
+		(ExploitAttempt(name='a', matched_at='app.example.com:443'), 'app.example.com:443'),
+		(UserAccount(username='jdoe', url='https://github.com/jdoe'), 'jdoe'),
+		(UserAccount(username='jdoe', email='jdoe@example.com'), 'jdoe@example.com'),
+		(Certificate(host='example.com', ip='10.0.0.1'), 'example.com'),
+		(Record(name='10.0.0.1', type='A', host='www.example.com'), 'www.example.com'),
+		(Record(name='ns1.example.com', type='NS'), 'ns1.example.com'),
+		(Ai(content='hello'), ''),
 	]
 
 	def test_target_per_type(self):
-		for item, target, target_host in self.CASES:
+		for item, target in self.CASES:
 			with self.subTest(item=item._type, target=target):
-				self.assertEqual((item.target, item.target_host), (target, target_host))
+				self.assertEqual(item.target, target)
 				data = item.toDict()
-				self.assertEqual((data['target'], data['target_host']), (target, target_host))
+				self.assertEqual(data['target'], target)
 
 	def test_every_finding_type_has_the_fields(self):
 		for cls in FINDING_TYPES:
 			with self.subTest(cls=cls.__name__):
 				self.assertIn('target', cls.fields())
-				self.assertIn('target_host', cls.fields())
 				self.assertNotIn('target', cls._table_fields)
 				self.assertNotIn('target', cls.schema())
 
@@ -74,21 +73,20 @@ class TestTargetPerType(unittest.TestCase):
 			self.assertNotIn('target', cls.fields())
 
 	def test_caller_value_ignored(self):
-		vuln = Vulnerability(name='v', matched_at='app.example.com', target='evil.com', target_host='evil.com')
-		self.assertEqual((vuln.target, vuln.target_host), ('app.example.com', 'app.example.com'))
+		vuln = Vulnerability(name='v', matched_at='app.example.com', target='evil.com')
+		self.assertEqual(vuln.target, 'app.example.com')
 
 	def test_recomputed_after_mutation(self):
 		vuln = Vulnerability(name='v', ip='10.0.0.1')
 		vuln.matched_at = 'app.example.com:8080'  # e.g. set by a task after building the item
 		vuln.target = 'stale'
 		self.assertEqual(vuln.toDict()['target'], 'app.example.com:8080')
-		self.assertEqual(vuln.target_host, 'app.example.com')
 
 	def test_old_doc_auto_filled_on_load(self):
 		doc = Port(port=80, ip='10.0.0.1', host='app.example.com').toDict()
-		del doc['target'], doc['target_host']
+		del doc['target']
 		item = Port.load(doc)
-		self.assertEqual((item.target, item.target_host), ('app.example.com:80', 'app.example.com'))
+		self.assertEqual(item.target, 'app.example.com:80')
 		doc['target'] = 'stale'
 		item = next(load_output_types([doc]))
 		self.assertEqual(item.target, 'app.example.com:80')
@@ -100,7 +98,6 @@ class TestTargetDoesNotAffectIdentity(unittest.TestCase):
 		for cls in FINDING_TYPES:
 			compared = [f.name for f in fields(cls) if f.compare]
 			self.assertNotIn('target', compared)
-			self.assertNotIn('target_host', compared)
 
 	def test_dedup_and_uuid_unchanged(self):
 		# Same Port identity (port, ip, state), different host -> different target, still duplicates.
@@ -145,7 +142,7 @@ class TestItemInScope(unittest.TestCase):
 def _legacy(item, uuid, **extra):
 	"""Serialize a finding as stored before the target fields existed."""
 	doc = item.toDict()
-	del doc['target'], doc['target_host']
+	del doc['target']
 	doc.update(_uuid=uuid, _context={'workspace_id': WS}, **extra)
 	return doc
 
@@ -156,9 +153,9 @@ LEGACY = [
 	_legacy(Vulnerability(name='v', matched_at='/tmp/a'), 'u3'),
 ]
 EXPECTED = {
-	'u1': ('app.example.com:443', 'app.example.com'),
-	'u2': ('https://app.example.com/login', 'app.example.com'),
-	'u3': ('/tmp/a', ''),
+	'u1': 'app.example.com:443',
+	'u2': 'https://app.example.com/login',
+	'u3': '/tmp/a',
 }
 
 
@@ -177,7 +174,7 @@ class MigrateTestMixin:
 		[res] = run_migrations(self.backend, apply=True)
 		self.assertEqual((res['status'], res['changed']), ('done', 3))
 		docs = self.stored()
-		self.assertEqual({u: (d['target'], d['target_host']) for u, d in docs.items()}, EXPECTED)
+		self.assertEqual({u: d['target'] for u, d in docs.items()}, EXPECTED)
 		self.assertTrue(docs['u2']['is_false_positive'])
 		self.assertIn(m0001_target_fields.ID, self.backend.get_migrations())
 
@@ -198,8 +195,8 @@ class MigrateTestMixin:
 			return sorted(d['_uuid'] for d in self.backend.search(python_expr_to_mongo(expr)))
 
 		self.assertEqual(found("target ~= 'APP.example.com:443'"), ['u1'])
-		self.assertEqual(found("port.target_host == 'app.example.com'"), ['u1'])
-		self.assertEqual(found("target_host == 'nope.example.com'"), [])
+		self.assertEqual(found("port.target == 'app.example.com:443'"), ['u1'])
+		self.assertEqual(found("target ~= 'nope.example.com'"), [])
 
 
 class TestMigrateSqlite(MigrateTestMixin, unittest.TestCase):
@@ -284,11 +281,6 @@ class TestMigrateMongo(MigrateTestMixin, unittest.TestCase):
 
 	def stored(self):
 		return {d['_uuid']: {k: v for k, v in d.items() if k != '_id'} for d in self.client.main.findings.find()}
-
-	def test_index_created(self):
-		run_migrations(self.backend, apply=True)
-		keys = [[k for k, _ in ix['key']] for ix in self.client.main.findings.index_information().values()]
-		self.assertIn(['_context.workspace_id', 'target_host'], keys)
 
 
 class TestMigrateCli(unittest.TestCase):

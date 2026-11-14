@@ -1,7 +1,7 @@
 """Numbered, idempotent store migrations, run on demand by ``secator migrate``.
 
 Each migration module defines ``ID``, ``DESCRIPTION`` and ``run(backend, dry_run) -> (matched, changed)``
-over the backend's store-wide primitives (``bulk_update``, ``ensure_index``). An applied migration is
+over the backend's store-wide ``bulk_update`` primitive. An applied migration is
 stamped in the store itself, so it runs once per store.
 """
 from datetime import datetime, timezone

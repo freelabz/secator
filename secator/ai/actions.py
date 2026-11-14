@@ -2229,7 +2229,7 @@ _AGENT_READONLY_FIELDS = frozenset({
 	"workspace_id",                                                 # scope lives on _context, never top-level
 	"verified", "status", "is_false_positive", "is_acknowledged",   # verdict — forging bypasses mark_vuln_* gates
 	"verdict",                                                      # exploit-attempt result — mark_vuln_* + rollup only
-	"confidence_nb", "severity_nb", "target", "target_host",        # server-derived in __post_init__
+	"confidence_nb", "severity_nb", "target",                       # server-derived in __post_init__
 })
 
 
@@ -2487,9 +2487,9 @@ def _handle_update_finding(action: Dict, ctx: ActionContext) -> Generator:
 			yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
 		return
 	# Keep the derived target in sync when a source field (e.g. matched_at) changes.
-	target, target_host = cls.compute_target({**existing, **update})
-	if (target, target_host) != (existing.get("target"), existing.get("target_host")):
-		update.update(target=target, target_host=target_host)
+	target = cls.compute_target({**existing, **update})
+	if target != existing.get("target"):
+		update["target"] = target
 
 	engine = ctx.get_query_engine()
 	try:

@@ -200,6 +200,3 @@ class QueryBackend(ABC):
 	def set_migration(self, migration_id: str, info: dict):
 		"""Stamp a migration as applied to this store."""
 		raise NotImplementedError(f'migrations are not supported by the {self.name} backend')
-
-	def ensure_index(self, keys: List[str]):
-		"""Create a findings index on ``keys`` (no-op for stores that manage their own)."""

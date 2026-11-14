@@ -49,7 +49,6 @@ SCHEMA = [
 	)""",
 	"CREATE INDEX IF NOT EXISTS idx_findings_ws ON findings(workspace_id)",
 	"CREATE INDEX IF NOT EXISTS idx_findings_ws_tag ON findings(workspace_id, _tagged)",
-	"CREATE INDEX IF NOT EXISTS idx_findings_ws_target_host ON findings(workspace_id, json_extract(data, '$.target_host'))",  # noqa: E501
 	"CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)",
 	"CREATE TABLE IF NOT EXISTS workflows (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)",
 	"CREATE TABLE IF NOT EXISTS scans (id TEXT PRIMARY KEY, workspace_id TEXT, data TEXT)",

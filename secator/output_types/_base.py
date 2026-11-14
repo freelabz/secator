@@ -40,7 +40,7 @@ class OutputType:
 			data (Mapping): Item fields (``vars(item)`` or a raw store document).
 
 		Returns:
-			tuple[str, str]: ``(target, target_host)``, both '' when no rule applies.
+			str: The target, '' when no rule applies.
 		"""
 		from secator.scope import normalize_target
 		for rule in cls._target_fields:
@@ -51,7 +51,7 @@ class OutputType:
 			if names == [rule]:
 				return normalize_target(str(values[0]))
 			return normalize_target(rule.format(**{n: _bracket_ipv6(str(v)) for n, v in zip(names, values)}))
-		return '', ''
+		return ''
 
 	@staticmethod
 	def confidence_to_nb(confidence) -> int:
@@ -282,7 +282,7 @@ class OutputType:
 		lines = [f"{cls.__name__}("]
 		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
 		for f in fields(cls):
-			if f.name.startswith('_') or f.metadata.get('derived'):
+			if f.name.startswith('_') or f.name == 'target':
 				continue
 			type_name = type_names.get(f.type, str(f.type)) if isinstance(f.type, type) else str(f.type)
 			if not isinstance(f.default, _MISSING_TYPE):
@@ -297,22 +297,21 @@ class OutputType:
 
 @dataclass
 class Finding(OutputType):
-	"""Base class of finding types: adds the ``target`` / ``target_host`` fields.
+	"""Base class of finding types: adds the ``target`` field.
 
-	Both are always derived from the source fields (``_target_fields``): computed at creation and
+	It is always derived from the source fields (``_target_fields``): computed at creation and
 	refreshed on every ``toDict()``, so a caller-supplied or stale stored value is never kept.
-	They don't take part in equality, so duplicate detection is unaffected.
+	It doesn't take part in equality, so duplicate detection is unaffected.
 	"""
-	target: str = dataclass_field(default='', compare=False, kw_only=True, metadata={'derived': True})
-	target_host: str = dataclass_field(default='', compare=False, kw_only=True, metadata={'derived': True})
+	target: str = dataclass_field(default='', compare=False, kw_only=True)
 
 	def __post_init__(self):
 		super().__post_init__()
 		self.refresh_target()
 
 	def refresh_target(self):
-		"""Recompute ``target`` / ``target_host`` from the current field values."""
-		self.target, self.target_host = self.compute_target(vars(self))
+		"""Recompute ``target`` from the current field values."""
+		self.target = self.compute_target(vars(self))
 
 	def toDict(self, exclude=[]):
 		self.refresh_target()

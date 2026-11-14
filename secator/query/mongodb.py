@@ -139,9 +139,6 @@ class MongoDBBackend(QueryBackend):
 	def set_migration(self, migration_id: str, info: dict):
 		self._get_client().main.migrations.replace_one({'_id': migration_id}, info, upsert=True)
 
-	def ensure_index(self, keys):
-		self._get_client().main.findings.create_index([(key, 1) for key in keys])
-
 	def _execute_create_note(self, note: dict) -> int:
 		"""Insert a note into the dedicated ``notes`` collection (NOT findings).
 

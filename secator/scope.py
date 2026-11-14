@@ -275,19 +275,18 @@ def normalize_target(value):
 		value (str): Raw target string (URL, host, host:port, IP, path, free text...).
 
 	Returns:
-		tuple[str, str]: ``(target, target_host)``, ``target_host`` being '' for a non-network target.
+		str: Normalized target.
 	"""
 	value = str(value).strip()
 	if _is_ip_literal(value):
-		return value.lower(), target_host(value)
+		return value.lower()
 	m = _AUTHORITY.match(value)
 	if not m:
-		return value, ''
+		return value
 	scheme, userinfo, host, rest = m.group('scheme', 'userinfo', 'host', 'rest')
 	scheme = scheme.lower() + '://' if scheme else ''
 	candidate = scheme + (userinfo or '') + host.lower().rstrip('.') + rest
-	host = target_host(candidate)
-	return (candidate, host) if host else (value, '')
+	return candidate if target_host(candidate) else value
 
 
 def item_in_scope(target, ip='', in_scope=None, out_of_scope=None):
