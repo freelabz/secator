@@ -298,6 +298,8 @@ HOST_DOCS = {
 	'vip': Vulnerability(name='v', matched_at='10.0.0.1:443'),
 	'p10': Port(port=80, ip='10.0.0.10'),
 	'ip110': Ip(ip='110.0.0.1'),
+	'v6other': Ip(ip='2001:db8::1:443'),
+	'v6upper': Port(port=443, ip='2001:DB8::2', host='v6.example.net'),
 }
 
 
@@ -318,6 +320,8 @@ class VirtualHostQueryMixin:
 		("ip != '10.0.0.1'", set(HOST_DOCS) - {'ip', 'pip', 'vip'}),
 		("ip == '10.0.0.1' && port.port == 80", {'pip'}),
 		("ip == '2001:db8::1'", {'v6'}),
+		("ip == '2001:db8::2'", {'v6upper'}),
+		("host in []", set()),
 	]
 
 	def test_virtual_host_fields(self):

@@ -192,7 +192,7 @@ class wpscan(VulnHttp):
 		# Interesting findings
 		interesting_findings = data.get('interesting_findings', [])
 		for item in interesting_findings:
-			yield item
+			yield {**item, 'ip': target_ip}
 
 		# Plugins
 		plugins = data.get('plugins', {})

@@ -216,9 +216,12 @@ def _target_host_regex(values, subdomains=False):
     hosts = []
     for value in values:
         host = re.escape(str(value).strip().lower())
-        hosts.append(rf'\[{host}\]|{host}' if ':' in host else host)  # IPv6: bracketed in host:port
+        # A bare IPv6 can't take a port (its last `:x` is part of the address): only its bracketed form can.
+        hosts.append(rf'\[{host}\](:\d+)?|{host}' if ':' in host else rf'{host}(:\d+)?')
+    if not hosts:
+        return '(?!)'
     subdomain = r'([^/:?#@]+\.)?' if subdomains else ''
-    return rf'(?i)^([a-z][a-z0-9+.-]*://)?([^/?#@]*@)?{subdomain}({"|".join(hosts)})(:\d+)?([/?#]|$)'
+    return rf'(?i)^([a-z][a-z0-9+.-]*://)?([^/?#@]*@)?{subdomain}({"|".join(hosts)})([/?#]|$)'
 
 
 def _virtual_host_frag(field, values, negate=False):
@@ -230,12 +233,10 @@ def _virtual_host_frag(field, values, negate=False):
 
 def _virtual_ip_frag(ip, negate=False):
     """Build the fragment for a virtual `ip` comparison: the `ip` field or a `target` on that IP."""
-    ip = ip.lower()
-    target = _target_host_regex([ip])
+    exact, target = f'(?i)^{re.escape(ip)}$', _target_host_regex([ip])
     if negate:
-        exact = f'(?i)^{re.escape(ip)}$'
         return {'$and': [{'ip': {'$not': {'$regex': exact}}}, {'target': {'$not': {'$regex': target}}}]}
-    return {'$or': [{'ip': ip}, {'target': {'$regex': target}}]}
+    return {'$or': [{'ip': {'$regex': exact}}, {'target': {'$regex': target}}]}
 
 
 def _split_type_field(dotted):
