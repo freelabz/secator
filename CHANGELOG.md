@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.55.0](https://github.com/freelabz/secator/compare/v0.54.1...v0.55.0) (2026-11-13)
+
+
+### Features
+
+* add human-friendly display names to configs and tasks ([#1610](https://github.com/freelabz/secator/issues/1610)) ([5cd9ca3](https://github.com/freelabz/secator/commit/5cd9ca3bed38f18b46a388abd1d1c8c13d1a50c3))
+* **ai:** add a "contribute" AI mode for authoring tasks/workflows/scans ([#1605](https://github.com/freelabz/secator/issues/1605)) ([fd53f2a](https://github.com/freelabz/secator/commit/fd53f2a9b3cf4da23361aac40a0a639e8ea83263))
+* **ai:** add a &lt;mode&gt; block to scan + exploit (per-mode consistency) ([#1612](https://github.com/freelabz/secator/issues/1612)) ([81e52e8](https://github.com/freelabz/secator/commit/81e52e8e3d1e1a61d6a5638d59ae6cd6767f66a6))
+* **ai:** add bounded `monitor` AI mode — re-validate & clean the attack surface ([#1487](https://github.com/freelabz/secator/issues/1487)) ([38cdee9](https://github.com/freelabz/secator/commit/38cdee919769f84bd04228c935ae46e343abed29))
+* **ai:** add_note tool — annotate a finding across all drivers ([#1613](https://github.com/freelabz/secator/issues/1613)) ([d9ee12b](https://github.com/freelabz/secator/commit/d9ee12b808f3c75ae62379e92ade29c5fedd86b5))
+
+
+### Performance Improvements
+
+* **query:** skip full OutputType rehydration for --group on local driver ([#1509](https://github.com/freelabz/secator/issues/1509)) ([ce9dab9](https://github.com/freelabz/secator/commit/ce9dab9b99e137465d3dc3fcaffbb77a2cb336e7))
+
+
+### Documentation
+
+* proxy / Tor usage + fix stale default-proxy references ([#1614](https://github.com/freelabz/secator/issues/1614)) ([8411453](https://github.com/freelabz/secator/commit/841145349e146e90ab11846992f5c9ad64ecde7a))
+
 ## [0.54.1](https://github.com/freelabz/secator/compare/v0.54.0...v0.54.1) (2026-11-13)
 
 
