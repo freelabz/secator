@@ -135,6 +135,11 @@ class TestCeleryEventsDriver(unittest.TestCase):
 		self.assertEqual(task.status, 'SUCCESS')
 		self.assertEqual(task.errors, [])
 
+	def test_is_an_available_driver(self):
+		# `--driver celery_events` and profile drivers are checked against this list.
+		from secator.loader import get_available_drivers
+		self.assertIn('celery_events', get_available_drivers())
+
 	def test_hooks_cover_every_runner_type(self):
 		for hooks in celery_events.HOOKS.values():
 			self.assertEqual(hooks, {'on_run_end': [celery_events.publish_run_end]})
