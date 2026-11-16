@@ -7,13 +7,19 @@ from unittest.mock import patch, MagicMock
 from secator.definitions import ADDONS_ENABLED
 
 if ADDONS_ENABLED['ai']:
-	from secator.ai.actions import (
-		ActionContext, dispatch_action, _run_runner, _decrypt_dict,
-		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
-		_build_child_hooks_or_denial, _child_preamble, _child_run_opts,
-		_MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
-		_MAX_SHELL_OUTPUT_CHARS, _truncate, _sandbox_image,
+	from secator.ai.actions import ActionContext, dispatch_action
+	from secator.ai.tools._runner import (
+		_run_runner,
+		_build_hooks_from_context,
+		_build_child_hooks_or_denial,
+		_child_preamble,
+		_child_run_opts,
+		_MAX_SUBAGENT_DEPTH,
+		_MAX_SUBAGENTS_PER_TURN,
 	)
+	from secator.ai.tools._sandbox import _sandbox_image
+	from secator.ai.tools.run_shell import _MAX_SHELL_OUTPUT_CHARS
+	from secator.ai.utils import _decrypt_dict, _coerce_finding_fields, _sanitize_child_opts, _truncate
 	# Built-in handlers are now the tools' run() methods (secator/ai/tools/<tool>.py).
 	from secator.ai.tools.stop import Stop
 	from secator.ai.tools.run_shell import RunShell
@@ -600,7 +606,7 @@ class TestHandleQuery(unittest.TestCase):
 	def test_union_live_results_dedup_and_filter(self):
 		"""_union_live_results filters live by the query, merges into backend results,
 		and dedupes by _uuid (backend wins)."""
-		from secator.ai.actions import _union_live_results
+		from secator.ai.utils import _union_live_results
 		persisted = [{"_uuid": "a", "_type": "port"}]
 		live = [{"_uuid": "a", "_type": "port"},   # dup -> deduped
 				{"_uuid": "b", "_type": "port"},   # new -> included
@@ -1692,7 +1698,7 @@ class TestRunBatch(unittest.TestCase):
     def test_get_action_label_tolerates_stringified_opts(self):
         """Regression: a str `opts` (model stringified it) must not crash the
         batch label with AttributeError('str' object has no attribute 'get')."""
-        from secator.ai.actions import _get_action_label
+        from secator.ai.utils import _get_action_label
         label = _get_action_label(
             {"action": "task", "name": "nmap", "targets": ["10.0.0.1"], "opts": '{"session_name": "x"}'})
         self.assertEqual(label, "nmap on 10.0.0.1")  # falls back to name-on-target, no crash
@@ -1864,7 +1870,7 @@ class TestChildContextParenting(unittest.TestCase):
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestBuildSubagentPrompt(unittest.TestCase):
 	def test_structure_sections_and_objective(self):
-		from secator.ai.actions import build_subagent_prompt
+		from secator.ai.utils import build_subagent_prompt
 		p = build_subagent_prompt("Test auth on the API", ["10.0.0.1", "app.x.com"], "- Port 443 open")
 		self.assertIn("## Objective", p)
 		self.assertIn("Test auth on the API", p)          # objective verbatim
@@ -1885,7 +1891,7 @@ class TestBuildSubagentPrompt(unittest.TestCase):
 		self.assertIn("HANDBACK", p)
 
 	def test_empty_evidence_renders_none(self):
-		from secator.ai.actions import build_subagent_prompt
+		from secator.ai.utils import build_subagent_prompt
 		p = build_subagent_prompt("Do X", ["t.com"], "")
 		self.assertIn("(none", p.lower())                 # explicit "none" marker
 
@@ -1893,7 +1899,8 @@ class TestBuildSubagentPrompt(unittest.TestCase):
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestGatherSubagentEvidence(unittest.TestCase):
 	def test_queries_targets_and_formats(self):
-		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		from secator.ai.actions import ActionContext
+		from secator.ai.tools._runner import _gather_subagent_evidence
 		mock_engine = MagicMock()
 		mock_engine.search.return_value = [
 			{"_type": "port", "ip": "10.0.0.1", "port": 443},
@@ -1911,12 +1918,14 @@ class TestGatherSubagentEvidence(unittest.TestCase):
 		self.assertIn("url", out)
 
 	def test_no_targets_returns_empty(self):
-		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		from secator.ai.actions import ActionContext
+		from secator.ai.tools._runner import _gather_subagent_evidence
 		ctx = ActionContext(targets=[], model='m', context={})
 		self.assertEqual(_gather_subagent_evidence(ctx, [], limit=40), "")
 
 	def test_search_error_returns_empty(self):
-		from secator.ai.actions import _gather_subagent_evidence, ActionContext
+		from secator.ai.actions import ActionContext
+		from secator.ai.tools._runner import _gather_subagent_evidence
 		mock_engine = MagicMock()
 		mock_engine.search.side_effect = Exception("boom")
 		ctx = ActionContext(targets=[], model='m', context={'workspace_id': 'ws1'})
@@ -2172,14 +2181,14 @@ class TestShellTimeout(unittest.TestCase):
 	the model within [default, CONFIG.celery.task_max_timeout]."""
 
 	def _resolve(self, action, ceiling, default=30):
-		from secator.ai import actions
+		from secator.ai.tools import run_shell
 		import types
 		cfg = types.SimpleNamespace(
 			security=types.SimpleNamespace(shell_default_timeout=default),
 			celery=types.SimpleNamespace(task_max_timeout=ceiling),
 		)
 		with patch('secator.config.CONFIG', cfg):
-			return actions._resolve_shell_timeout(action)
+			return run_shell._resolve_shell_timeout(action)
 
 	def test_default_when_absent(self):
 		# No timeout arg -> the configured per-command default.
