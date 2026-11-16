@@ -1,4 +1,7 @@
 """AI tool: `stop`."""
+from typing import Dict, Generator
+from secator.output_types import Ai
+from secator.ai.actions import ActionContext, _get_result_context
 from secator.ai.tools.base import BaseTool
 
 
@@ -11,7 +14,6 @@ class Stop(BaseTool):
 	# choiceless one). The registry carries the INTERACTIVE schema so coerce_stringified_args
 	# can coerce a stringified `choices` array; the choiceless variant is STOP_TOOL_SCHEMA_SIMPLE.
 	injected = True
-	handler = "_handle_stop"
 	schema = {
 		"type": "function",
 		"function": {
@@ -46,6 +48,23 @@ class Stop(BaseTool):
 		}
 	}
 
+	def run(self, action: Dict, ctx: ActionContext) -> Generator:
+		"""Handle the stop action — the SINGLE end-of-turn signal in every mode.
 
-# The registry: order mirrors the historical TOOL_SCHEMAS order so build_tool_schemas
-# emits tools in the same order as before (parity).
+		Always yields an ``Ai(ai_type="stopped")`` carrying the model's ``reason`` and any
+		``choices``/``multiple`` it offered. The loop decides what happens next from the
+		backend's ask_user: an interactive backend turns this into an end-of-turn pause
+		(the user can pick a choice / type a reply), a non-interactive backend ends.
+
+		``choices`` is stored on the top-level ``choices`` field (what clients read) AND in
+		``extra_data`` (back-compat). Without the top-level field, the persisted doc has
+		``choices: []`` and clients render no choice buttons. ``multiple`` tells clients to
+		render multi-select (checkboxes) vs single-pick.
+		"""
+		context = _get_result_context(action, ctx)
+		reason = action.get("reason", "completed")
+		choices = action.get("choices", []) or []
+		multiple = bool(action.get("multiple", False))
+		yield Ai(
+			content=reason, ai_type="stopped", choices=choices, multiple=multiple,
+			extra_data={"choices": choices, "multiple": multiple}, _context=context)

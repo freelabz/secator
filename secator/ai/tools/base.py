@@ -1,12 +1,12 @@
 """Base class + shared parameter schemas for native and external AI tools.
 
 An AI tool is one :class:`BaseTool` subclass carrying everything the registry needs
-(schema, dispatch action, permission auto-allow, handler). Built-in tools live
-one-per-file in this package and set ``handler`` to the name of a ``_handle_*``
-generator in :mod:`secator.ai.actions`. An EXTERNAL tool (dropped into the templates
-dir, see :func:`secator.loader.discover_ai_tools`) instead defines its own
-``run(action, ctx)`` generator in its file — the handler travels WITH the tool, exactly
-like a custom secator task.
+(schema, dispatch action, permission auto-allow, handler). Every tool — built-in tools
+one-per-file in this package, and EXTERNAL tools dropped into the templates dir (see
+:func:`secator.loader.discover_ai_tools`) — defines its handler as its own
+``run(action, ctx)`` generator in its file: the handler travels WITH the tool, exactly
+like a custom secator task. Helpers shared by several built-in tools live in
+``_runner.py`` / ``_sandbox.py`` / ``_findings.py``.
 
 A tool does NOT declare which modes expose it. Mode exposure is the mode's
 responsibility: each mode prompt's frontmatter ``tools:`` globs (see
@@ -80,10 +80,12 @@ class BaseTool:
 		injected: True for a tool NOT emitted by ``build_tool_schemas`` mode
 			filtering and NOT listed in ``TOOL_SCHEMAS``; it is injected separately
 			via the interactivity backend's ``get_extra_tools`` (``stop``).
-		handler: Name of the ``_handle_*`` generator in ``secator.ai.actions`` (built-in
-			tools). Leave empty on an external tool and override :meth:`run` instead.
 		external: Set True by the loader for a tool discovered from the templates dir.
-			External tools are exposed to a mode only by an EXACT-name ``tools:`` entry.
+			External tools are never matched by a mode's ``tools:`` globs; they are added
+			per-run via ``extra_tools`` (or ``CONFIG.addons.ai.extra_tools``).
+
+	Every tool — built-in or external — implements its handler as :meth:`run` in its own
+	file; dispatch is identical for both.
 	"""
 
 	name: str = ""
@@ -91,21 +93,12 @@ class BaseTool:
 	schema: dict = {}
 	auto_allow: bool = False
 	injected: bool = False
-	handler: str = ""
 	external: bool = False
 
 	def handle(self, action, ctx):
-		"""Dispatch to the tool's handler.
-
-		Built-in tools name a ``_handle_*`` generator in :mod:`secator.ai.actions`
-		(lazy import avoids a tools<->actions cycle). An external tool leaves
-		``handler`` empty and implements :meth:`run` in its own file.
-		"""
-		if self.handler:
-			from secator.ai import actions
-			return getattr(actions, self.handler)(action, ctx)
+		"""Dispatch to the tool's handler, its :meth:`run` generator."""
 		return self.run(action, ctx)
 
 	def run(self, action, ctx):
-		"""Generator handler for an external tool. Override in the tool file."""
+		"""Generator handler: yields OutputTypes. Every tool overrides this in its file."""
 		raise NotImplementedError(f"AI tool {self.name!r} defines no handler")

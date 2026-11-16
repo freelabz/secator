@@ -1092,7 +1092,7 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 		def _boom(*a, **k):
 			raise TypeError("'str' object is not a mapping")
 
-		with patch("secator.ai.actions._handle_shell", _boom):
+		with patch("secator.ai.tools.run_shell.RunShell.run", staticmethod(_boom)):
 			# Must NOT raise.
 			results = list(safe_dispatch_action(action, ctx))
 
@@ -1119,7 +1119,7 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 			raise KeyboardInterrupt()
 			yield  # pragma: no cover - make it a generator
 
-		with patch("secator.ai.actions._handle_shell", _interrupt):
+		with patch("secator.ai.tools.run_shell.RunShell.run", staticmethod(_interrupt)):
 			with self.assertRaises(KeyboardInterrupt):
 				list(safe_dispatch_action(action, ctx))
 
@@ -1162,7 +1162,7 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 			raise TypeError("'str' object is not a mapping")
 			yield  # pragma: no cover
 
-		with patch("secator.ai.actions._handle_shell", _boom):
+		with patch("secator.ai.tools.run_shell.RunShell.run", staticmethod(_boom)):
 			# Single action → safe_dispatch_action path. Must not raise.
 			gen = AiTask._dispatch_and_collect(fake_self, [action], ctx)
 			yielded = list(gen)
@@ -1339,8 +1339,9 @@ class TestModeAutoVsPinned(unittest.TestCase):
         self.assertEqual(fake.mode, "scan")
 
     def _run_subagent(self, ctx, action):
-        """Drive _handle_subagent, capturing the dispatched task action (or the Error)."""
-        from secator.ai import actions as A
+        """Drive RunSubagent.run, capturing the dispatched task action (or the Error)."""
+        import secator.ai.tools.run_subagent as subagent_mod
+        from secator.ai.tools.run_subagent import RunSubagent
         from secator.output_types import Error
         captured = {}
 
@@ -1348,8 +1349,8 @@ class TestModeAutoVsPinned(unittest.TestCase):
             captured["action"] = a
             return iter(())
 
-        with patch.object(A, "_run_runner", fake_run_runner):
-            items = list(A._handle_subagent(action, ctx))
+        with patch.object(subagent_mod, "_run_runner", fake_run_runner):
+            items = list(RunSubagent().run(action, ctx))
         errors = [i for i in items if isinstance(i, Error)]
         return captured.get("action"), errors
 
@@ -1384,9 +1385,11 @@ class TestModeAutoVsPinned(unittest.TestCase):
         """run_task(name="ai") is refused — spawning goes through run_subagent."""
         from secator.ai import actions as A
         from secator.output_types import Error
+        import secator.ai.tools.run_task as run_task_mod
+        from secator.ai.tools.run_task import RunTask
         ctx = A.ActionContext(targets=["x"], model="m", mode="scan")
-        with patch.object(A, "_run_runner", lambda *a, **k: iter(())):
-            items = list(A._handle_task({"action": "task", "name": "ai", "targets": ["x"], "description": "d"}, ctx))
+        with patch.object(run_task_mod, "_run_runner", lambda *a, **k: iter(())):
+            items = list(RunTask().run({"action": "task", "name": "ai", "targets": ["x"], "description": "d"}, ctx))
         errs = [i for i in items if isinstance(i, Error)]
         self.assertTrue(errs and "run_subagent" in errs[0].message)
 
@@ -1436,7 +1439,7 @@ class TestSubagentOwnToolResults(unittest.TestCase):
 		def _fake_shell(*a, **k):
 			yield out
 
-		with patch("secator.ai.actions._handle_shell", _fake_shell):
+		with patch("secator.ai.tools.run_shell.RunShell.run", staticmethod(_fake_shell)):
 			list(AiTask._dispatch_and_collect(fake_self, [action], ctx))
 		return tool_results
 

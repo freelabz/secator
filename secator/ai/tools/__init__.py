@@ -151,9 +151,9 @@ def _validate_tool_spec(tool):
 		return f"{name!r}: `schema` must be a non-empty dict"
 	# A tool does NOT declare its modes — a mode opts it in via its `tools:` frontmatter
 	# (external tools by EXACT name only). So there is no per-tool mode list to validate.
-	# A tool must be dispatchable: either a built-in-style handler name or an own run().
-	if not tool.handler and type(tool).run is BaseTool.run:
-		return f"{name!r}: defines no handler (override run(action, ctx) or set `handler`)"
+	# A tool must be dispatchable: it overrides run(action, ctx).
+	if type(tool).run is BaseTool.run:
+		return f"{name!r}: defines no handler (override run(action, ctx))"
 	return None
 
 

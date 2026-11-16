@@ -1,4 +1,9 @@
 """AI tool: `run_subagent`."""
+from typing import Dict, Generator
+from secator.output_types import Error
+from secator.ai.prompts import normalize_mode
+from secator.ai.actions import ActionContext, _get_result_context
+from secator.ai.tools._runner import _run_runner
 from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA
 
 
@@ -6,7 +11,6 @@ class RunSubagent(BaseTool):
 	name = "run_subagent"
 	action = "subagent"
 	auto_allow = True
-	handler = "_handle_subagent"
 	schema = {
 		"type": "function",
 		"function": {
@@ -50,3 +54,45 @@ class RunSubagent(BaseTool):
 			}
 		}
 	}
+
+	def run(self, action: Dict, ctx: ActionContext) -> Generator:
+		"""Spawn an AI subagent (the ONLY subagent entrypoint).
+
+		Mode policy:
+		- A user-PINNED read-only ``chat`` session forces the subagent to ``chat``; if the
+		  model asks for a different mode, refuse and tell it to have the user switch to
+		  ``auto`` (a read-only session must not spawn an acting subagent behind the user).
+		- An ``auto`` or ``scan`` session may set the subagent's ``mode`` (e.g. hand a vuln
+		  to an ``exploit`` subagent); omitted means inherit the parent's current mode.
+		``exploit`` mode isn't given this tool at all (see MODES), so a focused exploit run
+		can't fan out."""
+		requested_mode = normalize_mode(action.get("mode") or "") or None
+		pinned_chat = (not getattr(ctx, "mode_is_auto", True)) and ctx.mode == "chat"
+		if pinned_chat:
+			if requested_mode and requested_mode != "chat":
+				yield Error(
+					message=(
+						"A subagent cannot be spawned in a different mode than the current 'chat' mode. "
+						"Ask the user to change the current mode to 'auto' so the subagent can pick its mode."
+					),
+					_context=_get_result_context(action, ctx),
+				)
+				return
+			child_mode = "chat"
+		else:
+			child_mode = requested_mode or ctx.mode or "chat"
+		objective = action.get("objective") or action.get("prompt") or ""
+		opts = {"prompt": objective, "mode": child_mode}
+		model = (action.get("model") or "").strip()
+		if model:
+			opts["model"] = model
+		task_action = {
+			"action": "task",
+			"name": "ai",
+			"targets": action.get("targets", ctx.targets),
+			"description": action.get("description", ""),
+			"opts": opts,
+			"tool_call_id": action.get("tool_call_id"),
+			"tool_call_name": action.get("tool_call_name"),
+		}
+		yield from _run_runner(task_action, ctx, "task")

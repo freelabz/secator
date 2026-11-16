@@ -140,7 +140,7 @@ class TestDispatchAction(unittest.TestCase):
         config.description is a str/None and config.input_types a list — NOT the empty
         DotMap `{}` an un-hydrated {type,name} stub produces, which the `api` driver's
         runner schema rejects (description must be str, input_types a list)."""
-        import secator.ai.actions as actions
+        import secator.ai.tools._runner as runner_mod
         from secator.ai.actions import ActionContext, dispatch_action
         from secator.runners import Task as RealTask
 
@@ -152,15 +152,15 @@ class TestDispatchAction(unittest.TestCase):
                 captured['config'] = self.toDict()['config']
                 return iter(())
 
-        orig = actions.Task
-        actions.Task = NoRunTask
+        orig = runner_mod.Task
+        runner_mod.Task = NoRunTask
         try:
             ctx = ActionContext(targets=['scanme.example.com'], model='gpt-4',
                                 context={'workspace_id': 'ws'})
             list(dispatch_action(
                 {'action': 'task', 'name': 'httpx', 'targets': ['scanme.example.com']}, ctx))
         finally:
-            actions.Task = orig
+            runner_mod.Task = orig
 
         self.assertIn('config', captured)
         config = captured['config']
@@ -223,11 +223,11 @@ class TestAITask(unittest.TestCase):
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestChangeModeHandler(unittest.TestCase):
-    """_handle_change_mode: model-driven mode switch, with the pinned-chat guard."""
+    """ChangeMode.run: model-driven mode switch, with the pinned-chat guard."""
 
     def _run(self, action, ctx):
-        from secator.ai.actions import _handle_change_mode
-        return list(_handle_change_mode(action, ctx))
+        from secator.ai.tools.change_mode import ChangeMode
+        return list(ChangeMode().run(action, ctx))
 
     def _ctx(self, mode, mode_is_auto):
         from secator.ai.actions import ActionContext

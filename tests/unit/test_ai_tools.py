@@ -400,11 +400,26 @@ class TestToolRegistry(unittest.TestCase):
 		self.assertIn("stop", TOOL_ACTION_MAP)
 		self.assertEqual(STOP_TOOL_SCHEMA["function"]["name"], "stop")
 
-	def test_every_handler_exists(self):
-		from secator.ai import actions
+	def test_every_tool_dispatches_to_its_own_run(self):
+		"""Built-in and external tools share ONE contract: the handler is the tool's own
+		`run(action, ctx)` method, defined in its tool file — no `handler` name indirection."""
+		import inspect
+		from unittest import mock
+		from secator.ai.actions import ActionContext, dispatch_action
 		from secator.ai.tools import TOOLS
+		from secator.ai.tools.base import BaseTool
 		for t in TOOLS:
-			self.assertTrue(hasattr(actions, t.handler), f"{t.name} handler {t.handler} missing")
+			self.assertFalse(hasattr(t, "handler"), f"{t.name}: stale `handler` attribute")
+			self.assertIsNot(type(t).run, BaseTool.run, f"{t.name}: does not override run()")
+			# run() is defined in the tool's own module (handlers live in the tool file).
+			self.assertEqual(inspect.getmodule(type(t).run), inspect.getmodule(type(t)), t.name)
+			sentinel = object()
+			with mock.patch.object(type(t), "run", autospec=True, return_value=iter([sentinel])) as run:
+				out = list(dispatch_action({"action": t.action}, ActionContext(targets=[], model="m")))
+			run.assert_called_once()
+			self.assertIs(run.call_args.args[0], t, f"{t.name}: dispatched to a different instance")
+			self.assertEqual(out, [sentinel], t.name)
+		self.assertFalse(hasattr(BaseTool, "handler"), "BaseTool still carries a `handler` attribute")
 
 	def test_mode_exposure_matches_allowed_actions(self):
 		"""CONSISTENCY GUARD: a tool exposed in a mode (resolved from the mode's `tools:`
@@ -441,7 +456,7 @@ class TestWebSearch(unittest.TestCase):
 	def test_snippet_paired_with_own_link_when_first_has_none(self):
 		# First result has NO snippet; second has one. Index-based pairing would wrongly
 		# assign the second's snippet to the first URL — block-based pairing must not.
-		from secator.ai.web_search import duckduckgo_search
+		from secator.ai.tools.web_search import duckduckgo_search
 		body = (
 			'<a class="result__a" href="https://a.example/">Title A</a>'
 			'<a class="result__a" href="https://b.example/">Title B</a>'
@@ -460,7 +475,7 @@ class TestWebSearch(unittest.TestCase):
 			def __exit__(self, *a):
 				return False
 
-		with mock.patch('secator.ai.web_search.urllib.request.urlopen', return_value=_Resp()):
+		with mock.patch('secator.ai.tools.web_search.urllib.request.urlopen', return_value=_Resp()):
 			results = duckduckgo_search('q')
 		self.assertEqual(results[0]['url'], 'https://a.example/')
 		self.assertEqual(results[0]['snippet'], '')
@@ -469,7 +484,7 @@ class TestWebSearch(unittest.TestCase):
 
 	def test_unwrap_ddg_url_preserves_encoded_delimiter(self):
 		# parse_qs already decodes uddg; must not decode again (would corrupt %26 -> &).
-		from secator.ai.web_search import _unwrap_ddg_url
+		from secator.ai.tools.web_search import _unwrap_ddg_url
 		wrapped = '//duckduckgo.com/l/?uddg=https%3A%2F%2Fx.example%2F%3Fa%3D1%2526b%3D2'
 		self.assertEqual(_unwrap_ddg_url(wrapped), 'https://x.example/?a=1%26b=2')
 

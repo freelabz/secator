@@ -362,7 +362,7 @@ class TestFindingMgmtTools(unittest.TestCase):
 			self.assertNotIn(k, set_arg, k)
 
 	def test_drop_readonly_helper(self):
-		from secator.ai.actions import _drop_readonly_fields
+		from secator.ai.tools._findings import _drop_readonly_fields
 		# keeps content (incl. `id` — a vuln's CVE id, legit on create); drops framework/verdict/path
 		out = _drop_readonly_fields({
 			'name': 'x', 'id': 'CVE-2021-41773', 'severity': 'high',  # kept
@@ -636,7 +636,7 @@ class TestExploitAttempt(unittest.TestCase):
 		self.assertEqual(v['extra_data']['exploit_attempts']['failed'], 1)
 
 	def test_rollup_lock_is_per_identity(self):
-		from secator.ai.actions import _rollup_lock
+		from secator.ai.tools._findings import _rollup_lock
 		self.assertIs(_rollup_lock(('n', 'i', 'm')), _rollup_lock(('n', 'i', 'm')))
 		self.assertIsNot(_rollup_lock(('n', 'i', 'm')), _rollup_lock(('n', 'i', 'OTHER')))
 

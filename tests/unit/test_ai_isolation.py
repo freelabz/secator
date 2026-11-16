@@ -12,10 +12,8 @@ from secator.definitions import ADDONS_ENABLED
 HAS_AI = ADDONS_ENABLED.get('ai', False)
 
 if HAS_AI:
-	from secator.ai.actions import (
-		ActionContext, check_guardrails_sync as check_guardrails, dispatch_action,
-		_wrap_docker_exec,
-	)
+	from secator.ai.actions import ActionContext, check_guardrails_sync as check_guardrails, dispatch_action
+	from secator.ai.tools._sandbox import _wrap_docker_exec
 	from secator.ai.guardrails import PermissionEngine
 	from secator.ai.interactivity import create_backend
 	from secator.output_types import Ai
@@ -79,7 +77,7 @@ class TestIsolatedShellRouting(unittest.TestCase):
 	def test_handle_shell_execs_in_container_but_transcript_shows_original(self):
 		ctx = _ctx(isolated=True)
 		action = {"action": "shell", "command": "id && whoami"}
-		with patch('secator.ai.actions._ensure_sandbox_container', return_value="sbx-r123") as ensure, \
+		with patch('secator.ai.tools.run_shell._ensure_sandbox_container', return_value="sbx-r123") as ensure, \
 		     patch('secator.tasks.command.command') as mock_cmd:
 			fake = mock_cmd.return_value
 			fake.output = "uid=0"
@@ -104,7 +102,7 @@ class TestSandboxCreateRace(unittest.TestCase):
 	"""`_ensure_sandbox_container` must survive the create race and surface real errors."""
 
 	def test_run_collision_uses_existing_container(self):
-		from secator.ai import actions as A
+		from secator.ai.tools import _sandbox as A
 		ctx = _ctx(isolated=True)
 		context = {"run_id": "r-race"}
 		# inspect: initial=false, under-lock=false, post-run-failure=true (a racer won).
@@ -122,7 +120,7 @@ class TestSandboxCreateRace(unittest.TestCase):
 		self.assertEqual(name, A._sandbox_container_name(ctx, context))
 
 	def test_run_failure_surfaces_stderr(self):
-		from secator.ai import actions as A
+		from secator.ai.tools import _sandbox as A
 		ctx = _ctx(isolated=True)
 		context = {"run_id": "r-err"}
 		inspects = iter(["false", "false", "false"])  # never comes up
@@ -145,11 +143,11 @@ class TestChildInheritsIsolated(unittest.TestCase):
 	"""A spawned child force-inherits the parent's `isolated` and can never lower it."""
 
 	def test_child_inherits_parent_isolated_true(self):
-		from secator.ai.actions import _child_run_opts
+		from secator.ai.tools._runner import _child_run_opts
 		self.assertTrue(_child_run_opts(_ctx(isolated=True))["isolated"])
 
 	def test_child_inherits_parent_isolated_false(self):
-		from secator.ai.actions import _child_run_opts
+		from secator.ai.tools._runner import _child_run_opts
 		self.assertFalse(_child_run_opts(_ctx(isolated=False))["isolated"])
 
 	def test_llm_cannot_set_isolated_on_child(self):
@@ -160,7 +158,7 @@ class TestChildInheritsIsolated(unittest.TestCase):
 	def test_child_cannot_lower_isolated(self):
 		# Parent is isolated; LLM tries isolated=False. After sanitize + the real merge order
 		# used in _run_runner ({**_child_run_opts(ctx), **llm_opts}), isolation stays True.
-		from secator.ai.actions import _child_run_opts
+		from secator.ai.tools._runner import _child_run_opts
 		from secator.ai.utils import _sanitize_child_opts
 		llm_opts = _sanitize_child_opts({"isolated": False})
 		run_opts = {**_child_run_opts(_ctx(isolated=True)), **llm_opts}
@@ -171,7 +169,8 @@ class TestChildInheritsIsolated(unittest.TestCase):
 		# operator enabled extends to the exploit work it delegates — otherwise the subagent
 		# is Blocked on the very actions the operator opted into). dangerous is user-only
 		# (agent-readonly + stripped from LLM child opts), so the LLM still can't escalate.
-		from secator.ai.actions import _child_dangerous, ActionContext
+		from secator.ai.actions import ActionContext
+		from secator.ai.tools._runner import _child_dangerous
 		self.assertTrue(_child_dangerous(ActionContext(targets=["x"], model="m", dangerous=True),
 		                                 is_ai_subagent=True))
 		self.assertFalse(_child_dangerous(ActionContext(targets=["x"], model="m", dangerous=False),
@@ -180,7 +179,8 @@ class TestChildInheritsIsolated(unittest.TestCase):
 	def test_non_ai_child_never_dangerous(self):
 		# A task/workflow/shell child stays non-dangerous even under a dangerous parent —
 		# dangerous is an ai-task concept, meaningless for them.
-		from secator.ai.actions import _child_dangerous, ActionContext
+		from secator.ai.actions import ActionContext
+		from secator.ai.tools._runner import _child_dangerous
 		self.assertFalse(_child_dangerous(ActionContext(targets=["x"], model="m", dangerous=True),
 		                                  is_ai_subagent=False))
 
