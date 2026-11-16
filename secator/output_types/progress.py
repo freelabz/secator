@@ -8,7 +8,7 @@ from secator.utils import rich_to_ansi, format_object
 @dataclass
 class Progress(OutputType):
 	percent: float = 0
-	extra_data: dict = field(default_factory=dict)
+	extra_data: dict = field(default_factory=dict, compare=False)
 	_source: str = field(default='', repr=True, compare=True)
 	_type: str = field(default='progress', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)

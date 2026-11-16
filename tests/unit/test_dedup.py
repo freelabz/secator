@@ -1,7 +1,9 @@
 import unittest
+from dataclasses import fields
 
-from secator.hooks._dedup import build_baseline_index, compute_duplicate_updates
-from secator.output_types import Vulnerability
+from secator.config import CONFIG
+from secator.hooks._dedup import baseline_fields, build_baseline_index, compute_duplicate_updates
+from secator.output_types import OUTPUT_TYPES, Domain, Port, Progress, Stat, Subdomain, Technology, Url, Vulnerability
 
 
 def _vuln(uuid, status='', verified=False, **kwargs):
@@ -108,6 +110,99 @@ class TestBaselineIndexBounded(unittest.TestCase):
 		index = build_baseline_index([prev], copy_fields=['status'])
 		via_index = compute_duplicate_updates([], [new], copy_fields=['status'], baseline_index=index)
 		assert via_list == via_index
+
+
+class TestBaselineFields(unittest.TestCase):
+	"""Backends fetch only baseline_fields() for the dedup baseline, so a projected doc must
+	group and carry fields forward exactly like the full doc."""
+
+	COPY_FIELDS = CONFIG.addons.mongodb.duplicate_main_copy_fields
+
+	def _samples(self):
+		return [
+			Vulnerability(
+				name='CVE-2025-53020', id='CVE-2025-53020', matched_at='host:80', severity='high',
+				description='long text ' * 50, extra_data={'raw': 'x' * 500}, status='FIXED', poc='curl x',
+				tags=['t1'], _related=['r1'],
+			),
+			Url(
+				url='http://host/a', status_code=200, title='t', response_headers={'server': 'nginx'},
+				screenshot_path='/s.png', verified=True,
+			),
+			Port(port=443, ip='1.2.3.4', state='open', service_name='https', extra_data={'banner': 'b'}),
+			Subdomain(host='a.host', domain='host', sources=['crt']),
+			Technology(product='nginx', match='host:80', version='1.2', extra_data={'x': 1}),
+			Progress(percent=40, extra_data={'rate': '1kpps'}, _source='masscan'),
+		]
+
+	def test_derived_fields_survive_projection(self):
+		"""__post_init__ derives some kept fields from others (Url.verified from confidence +
+		status_code, Domain.alive from status): their inputs must be projected too, including
+		when extra copy fields are configured."""
+		copy_fields = [*self.COPY_FIELDS, 'status_code']
+		names = baseline_fields(copy_fields)
+		samples = [
+			Url(url='http://host/low', confidence='low', status_code=200, verified=False),
+			Domain(domain='host.com', status=['clientTransferProhibited active']),
+		]
+		for i, item in enumerate(samples):
+			with self.subTest(type=item.get_name()):
+				item._uuid = f'd{i}'
+				doc = item.toDict()
+				full = type(item).load(doc)
+				projected = type(item).load({k: v for k, v in doc.items() if k in names})
+				full._uuid = projected._uuid = item._uuid
+				self.assertEqual(projected._compare_key(), full._compare_key())
+				self.assertEqual(
+					build_baseline_index([projected], copy_fields),
+					build_baseline_index([full], copy_fields),
+				)
+		self.assertFalse(Url.load({k: v for k, v in samples[0].toDict().items() if k in names}).verified)
+
+	def test_no_type_compares_on_extra_data(self):
+		for otype in OUTPUT_TYPES:
+			for f in fields(otype):
+				if f.name == 'extra_data':
+					self.assertFalse(f.compare, otype.get_name())
+
+	def test_equality_ignores_extra_data(self):
+		# Same progress point / same process snapshot, whatever the free-form extras.
+		a = Progress(percent=40, extra_data={'rate': '1kpps'}, _source='masscan')
+		b = Progress(percent=40, extra_data={'rate': '2kpps'}, _source='masscan')
+		self.assertEqual(a, b)
+		self.assertNotEqual(a, Progress(percent=41, _source='masscan'))
+		self.assertNotEqual(a, Progress(percent=40, _source='nmap'))
+		s1 = Stat(name='nmap', pid=1, cpu=5, memory=10, memory_limit=-1, extra_data={'x': 1})
+		s2 = Stat(name='nmap', pid=1, cpu=5, memory=10, memory_limit=-1, extra_data={'x': 2})
+		self.assertEqual(s1, s2)
+		self.assertNotEqual(s1, Stat(name='nmap', pid=2, cpu=5, memory=10, memory_limit=-1))
+
+	def test_covers_every_equality_field(self):
+		names = set(baseline_fields(self.COPY_FIELDS))
+		for otype in OUTPUT_TYPES:
+			for f in fields(otype):
+				if f.compare:
+					self.assertIn(f.name, names, f'{otype.get_name()}.{f.name}')
+		self.assertTrue({'_type', '_related', *self.COPY_FIELDS} <= names)
+
+	def test_drops_heavy_fields(self):
+		names = set(baseline_fields(self.COPY_FIELDS))
+		for heavy in ('extra_data', 'description', 'response_headers', 'request_headers', '_context'):
+			self.assertNotIn(heavy, names)
+
+	def test_projected_doc_indexes_like_full_doc(self):
+		names = baseline_fields(self.COPY_FIELDS)
+		for i, item in enumerate(self._samples()):
+			with self.subTest(type=item.get_name()):
+				item._uuid = f'u{i}'
+				doc = item.toDict()
+				projected = type(item).load({k: v for k, v in doc.items() if k in names})
+				projected._uuid = item._uuid
+				self.assertEqual(projected._compare_key(), item._compare_key())
+				self.assertEqual(
+					build_baseline_index([projected], self.COPY_FIELDS),
+					build_baseline_index([item], self.COPY_FIELDS),
+				)
 
 
 if __name__ == '__main__':
