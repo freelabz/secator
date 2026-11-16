@@ -207,7 +207,7 @@ class UpdateFinding(BaseTool):
 					message=(
 						f"update_finding: none of {blocked} can be set here. Verdict fields "
 						"(verified/status/is_false_positive) are set via mark_vuln_exploited / "
-						"mark_vuln_false_positive / mark_vuln_exploit_failed; confidence_nb/severity_nb are "
+						"mark_vuln_false_positive / mark_vuln_exploit_failed; confidence_nb/severity_nb/target are "
 						"server-derived; *_path and framework (_-prefixed) fields are read-only. Pass editable "
 						"content (e.g. name, description, severity) or notes under `extra_data` instead."
 					),
@@ -216,6 +216,10 @@ class UpdateFinding(BaseTool):
 			else:
 				yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
 			return
+		# Keep the derived target in sync when a source field (e.g. matched_at) changes.
+		target = cls.compute_target({**existing, **update})
+		if target != existing.get("target"):
+			update["target"] = target
 
 		engine = ctx.get_query_engine()
 		try:

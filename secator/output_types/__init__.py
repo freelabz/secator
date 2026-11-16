@@ -4,6 +4,7 @@ __all__ = [
 	'Error',
 	'Exploit',
 	'ExploitAttempt',
+	'Finding',
 	'OutputType',
 	'Info',
 	'Ip',
@@ -19,7 +20,7 @@ __all__ = [
 	'Vulnerability',
 	'Warning',
 ]
-from secator.output_types._base import OutputType
+from secator.output_types._base import Finding, OutputType
 from secator.output_types.ai import Ai
 from secator.output_types.progress import Progress
 from secator.output_types.ip import Ip

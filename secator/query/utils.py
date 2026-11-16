@@ -4,7 +4,7 @@ import json
 import re
 
 from secator.rich import console
-from secator.utils import debug
+from secator.utils import _is_ip_literal, debug
 
 
 def parse_report_paths(paths_str):
@@ -200,9 +200,43 @@ _IDENT_RE = re.compile(rf'^{_DOTTED}$')
 _NOT_FIELD_RE = re.compile(rf'^\s*not\s+({_DOTTED})\s*$')
 
 # Truthy match on all backends: json's $nin returns False for falsy/absent and sqlite's NOT IN
-# drops NULL, but Mongo's $nin ALONE keeps absent fields — so $exists pins presence (unknown op,
-# hence a no-op on json/sqlite).
+# drops NULL, but Mongo's $nin ALONE keeps absent fields — so $exists pins presence (redundant on
+# json/sqlite).
 _TRUTHY = {'$nin': [None, '', False, 0], '$exists': True}
+
+
+# Virtual fields, for a bare (untyped) operand only; a typed `type.field` still queries the real field.
+# `host` / `domain` (==, !=, in, not in) match the host of the finding's `target` (`domain` also
+# matches subdomains). `ip == <ip literal>` (and !=) matches the real `ip` field OR a `target` on that IP.
+_VIRTUAL_HOST_FIELDS = ('host', 'domain')
+
+
+def _target_host_regex(values, subdomains=False):
+    """Regex matching a `target` whose host is one of `values` (a URL, host, host:port or IP)."""
+    hosts = []
+    for value in values:
+        host = re.escape(str(value).strip().lower())
+        # A bare IPv6 can't take a port (its last `:x` is part of the address): only its bracketed form can.
+        hosts.append(rf'\[{host}\](:\d+)?|{host}' if ':' in host else rf'{host}(:\d+)?')
+    if not hosts:
+        return '(?!)'
+    subdomain = r'([^/:?#@]+\.)?' if subdomains else ''
+    return rf'(?i)^([a-z][a-z0-9+.-]*://)?([^/?#@]*@)?{subdomain}({"|".join(hosts)})([/?#]|$)'
+
+
+def _virtual_host_frag(field, values, negate=False):
+    """Build the `target` regex fragment for a virtual `host` / `domain` comparison."""
+    regex = _target_host_regex(values, subdomains=field == 'domain')
+    frag = _loose_neg(None, {'$not': {'$regex': regex}}) if negate else {'$regex': regex}
+    return {'target': frag}
+
+
+def _virtual_ip_frag(ip, negate=False):
+    """Build the fragment for a virtual `ip` comparison: the `ip` field or a `target` on that IP."""
+    exact, target = f'(?i)^{re.escape(ip)}$', _target_host_regex([ip])
+    if negate:
+        return {'$and': [{'ip': {'$not': {'$regex': exact}}}, {'target': {'$not': {'$regex': target}}}]}
+    return {'$or': [{'ip': {'$regex': exact}}, {'target': {'$regex': target}}]}
 
 
 def _split_type_field(dotted):
@@ -235,7 +269,7 @@ def _loose_neg(_type, frag):
         drop both absent and null for `$nin`, and Mongo/API do too — so present-null is excluded
         consistently, avoiding the SQL-NULL-vs-Python-None split that a bare `$ne` has.
       - pin `$exists: True` because Mongo's `$nin`/`$not` still MATCH documents missing the field;
-        it is a no-op on json/sqlite (they exclude absent via the `$nin`).
+        it is redundant on json/sqlite (they exclude absent via the `$nin`).
     A typed `type.field` form is already scoped by `_type` and passes through unchanged."""
     if _type is not None or not isinstance(frag, dict):
         return frag
@@ -331,6 +365,8 @@ def _parse_single_expr(expr):
         if not _IDENT_RE.match(left):
             raise ValueError(f'Cannot translate expression to query: {expr!r}')
         _type, field = _split_type_field(left)
+        if _type is None and field in _VIRTUAL_HOST_FIELDS:
+            return _virtual_host_frag(field, _parse_list(m_not_in.group(2)), negate=True)
         return _fragment(_type, field, _loose_neg(_type, {'$nin': _parse_list(m_not_in.group(2))}))
 
     # 'in' operator ("type.field in [...]" -> $in)
@@ -340,6 +376,8 @@ def _parse_single_expr(expr):
         if not _IDENT_RE.match(left):
             raise ValueError(f'Cannot translate expression to query: {expr!r}')
         _type, field = _split_type_field(left)
+        if _type is None and field in _VIRTUAL_HOST_FIELDS:
+            return _virtual_host_frag(field, _parse_list(m_in.group(2)))
         return _fragment(_type, field, {'$in': _parse_list(m_in.group(2))})
 
     # First comparison operator outside quotes (longest-first via alternation order).
@@ -360,6 +398,10 @@ def _parse_single_expr(expr):
             value = _parse_value(right)
         if not field:
             return _fragment(_type, field, None)
+        if _type is None and field in _VIRTUAL_HOST_FIELDS and op_str in ('==', '!='):
+            return _virtual_host_frag(field, [value], negate=op_str == '!=')
+        if _type is None and field == 'ip' and op_str in ('==', '!=') and _is_ip_literal(str(value)):
+            return _virtual_ip_frag(str(value), negate=op_str == '!=')
         if mongo_op == '$not_regex':
             return _fragment(_type, field, _loose_neg(_type, {'$not': {'$regex': value}}))
         if mongo_op is None:
@@ -454,6 +496,9 @@ def python_expr_to_mongo(query):
         merged = {}
         mergeable = True
         for part in parsed:
+            if any(key.startswith('$') for key in part):  # keep $or/$and parts whole (never a mixed dict)
+                mergeable = False
+                break
             for key, val in part.items():
                 if key not in merged or merged[key] == val:
                     merged[key] = val

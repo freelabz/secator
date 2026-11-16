@@ -1833,6 +1833,51 @@ def append_ndjson(path, line):
 				fcntl.flock(lock_fd, fcntl.LOCK_UN)
 
 
+def rewrite_ndjson(path, transform):
+	"""Rewrite an NDJSON file record by record, holding the ``append_ndjson`` lock.
+
+	The file is swapped atomically, and only when a record changed. Unparseable lines are kept.
+
+	Args:
+		path (str | Path): NDJSON file path.
+		transform (callable): ``transform(record)`` returns the new record, or None to keep it.
+
+	Returns:
+		int: Number of changed records.
+	"""
+	path = Path(path)
+	with _get_path_lock(path):
+		with open(str(path) + '.lock', 'w') as lock_fd:
+			fcntl.flock(lock_fd, fcntl.LOCK_EX)
+			fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix='.results-', suffix='.ndjson.tmp')
+			changed = 0
+			try:
+				with open(path, 'rb') as src, os.fdopen(fd, 'wb') as dst:
+					for line in src:
+						new = None
+						try:
+							new = transform(orjson.loads(line))
+						except orjson.JSONDecodeError:
+							pass
+						if new is None:
+							dst.write(line if line.endswith(b'\n') else line + b'\n')
+						else:
+							dst.write(orjson.dumps(new, default=str) + b'\n')
+							changed += 1
+					if changed:
+						dst.flush()
+						os.fsync(dst.fileno())
+				if changed:
+					os.replace(tmp, path)
+				return changed
+			finally:
+				try:
+					os.unlink(tmp)  # already gone once swapped in
+				except OSError:
+					pass
+				fcntl.flock(lock_fd, fcntl.LOCK_UN)
+
+
 def read_json(path, default=dict):
 	"""Lock-free snapshot read of a JSON file written by ``atomic_json``.
 

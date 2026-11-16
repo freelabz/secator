@@ -111,6 +111,34 @@ class MongoDBBackend(QueryBackend):
 		result = client.main.findings.update_one(_seek_by_native_id(query), update)
 		return result.modified_count
 
+	def bulk_update(self, query: dict, fn, dry_run: bool = False, batch_size: int = 1000):
+		"""Apply ``fn(doc)`` to matching findings with unordered ``bulk_write`` batches."""
+		from pymongo import UpdateOne
+		findings = self._get_client().main.findings
+		matched = changed = 0
+		ops = []
+		for doc in findings.find(query).batch_size(batch_size):
+			matched += 1
+			update = fn(doc)
+			if not update:
+				continue
+			changed += 1
+			if dry_run:
+				continue
+			ops.append(UpdateOne({'_id': doc['_id']}, {'$set': update}))
+			if len(ops) >= batch_size:
+				findings.bulk_write(ops, ordered=False)
+				ops = []
+		if ops:
+			findings.bulk_write(ops, ordered=False)
+		return matched, changed
+
+	def get_migrations(self):
+		return {doc.pop('_id'): doc for doc in self._get_client().main.migrations.find()}
+
+	def set_migration(self, migration_id: str, info: dict):
+		self._get_client().main.migrations.replace_one({'_id': migration_id}, info, upsert=True)
+
 	def _execute_create_note(self, note: dict) -> int:
 		"""Insert a note into the dedicated ``notes`` collection (NOT findings).
 

@@ -1,13 +1,13 @@
 import time
 from dataclasses import dataclass, field
 
-from secator.output_types import OutputType
+from secator.output_types import Finding
 from secator.utils import rich_escape as _s
 from secator.utils import rich_to_ansi
 
 
 @dataclass
-class Technology(OutputType):
+class Technology(Finding):
 	product: str
 	match: str
 	version: str = None
@@ -27,6 +27,7 @@ class Technology(OutputType):
 
 	_table_fields = ['match', 'product', 'version', 'extra_data']
 	_sort_by = ('match', 'product', 'version')
+	_target_fields = ['match']
 	_group_by = ('product',)
 	_group_aggregate = 'match'
 

@@ -10,7 +10,7 @@ from rich.text import Text
 from rich.console import Console
 from secator.rich import CustomMarkdown as Markdown
 
-from secator.output_types import OutputType
+from secator.output_types import Finding
 from secator.utils import rich_to_ansi, rich_escape as _s, format_token_count, format_object
 
 
@@ -98,7 +98,7 @@ _FINDING_NAME_ACTIONS = {
 
 
 @dataclass
-class Ai(OutputType):
+class Ai(Finding):
 	"""Output type for AI-generated content with markdown support."""
 	content: str
 	ai_type: str = field(default='response')  # prompt, response, summary, suggestion, attack_summary
