@@ -51,8 +51,8 @@ def classify_user_message(content) -> Tuple[str, str]:
     Recognised from their (code-generated) shape, so it also works on sessions saved before
     any marker existed, and the model-facing messages stay byte-identical:
 
-    - ``internal``: a per-iteration control message from ``format_continue``
-      (``{"iteration": N, "max": M, "instruction": "..."}``) — never displayed;
+    - ``internal``: a per-iteration control message from ``format_continue`` — exactly
+      ``{"iteration": N, "max": M, "instruction": "..."}`` — never displayed;
     - ``summary``: a compaction summary (``Summary of previous iterations: ...``);
     - ``user``: a real user turn (a mid-run steer is shown without its prefix).
     """
@@ -63,7 +63,10 @@ def classify_user_message(content) -> Tuple[str, str]:
             data = json.loads(stripped)
         except ValueError:
             data = None
-        if isinstance(data, dict) and "instruction" in data and "iteration" in data:
+        # the exact shape format_continue produces: {"iteration": int, "max": int|"unlimited",
+        # "instruction": str} — a user pasting JSON with only some of these stays visible
+        if (isinstance(data, dict) and set(data) == {"iteration", "max", "instruction"}
+                and isinstance(data["iteration"], int) and isinstance(data["instruction"], str)):
             return "internal", ""
     if stripped.startswith(SUMMARY_PREFIX):
         return "summary", stripped[len(SUMMARY_PREFIX):].strip()

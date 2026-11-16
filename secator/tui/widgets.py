@@ -7,6 +7,7 @@ stable hooks (``app._open_subview`` / ``app._show_main``) so they stay frontend-
 from __future__ import annotations
 
 import json
+import re
 
 from rich.markup import escape
 from rich.text import Text
@@ -318,7 +319,11 @@ class RunnerPanel(Vertical):
 		return t
 
 	def on_mount(self) -> None:
-		# animate the spinner while the runner is pending/running; stops at finish()
+		# animate the spinner while the runner is pending/running; stops at finish(). A panel
+		# already finished before mounting (a replayed ToolCallPanel, whose own on_mount runs
+		# first) never needs it — don't leave a repeating timer behind.
+		if self.done:
+			return
 		self._spin_timer = self.set_interval(0.12, self._tick_spin)
 
 	def _tick_spin(self) -> None:
@@ -457,22 +462,40 @@ _TOOL_KINDS = {
 _REPLAY_RESULT_LINES = 200
 
 
+_ENVELOPE_RE = re.compile(r"^\s*<workspace_data>\s*(.*?)\s*</workspace_data>(.*)$", re.DOTALL)
+
+
 def _tool_result_text(result) -> "tuple[str, bool, int | None]":
-	"""(display text, failed?, result count) for a tool message's content."""
+	"""(display text, failed?, result count) for a tool message's content.
+
+	Runner/query results are saved as ``format_tool_result`` JSON (``{"status": "success"|
+	"error", "count": N, "results": [...]}``) fenced in ``<workspace_data>`` (plus optional
+	guidance appended after the fence); rejected calls are a bare ``{"error": ...}`` object.
+	"""
 	if result is None:
 		return "", False, None
 	text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+	trailer = ""
+	m = _ENVELOPE_RE.match(text)
+	if m:
+		text, trailer = m.group(1), m.group(2).strip()
 	failed, count = False, None
 	try:
 		data = json.loads(text)
 	except (ValueError, TypeError):
 		data = None
-	if isinstance(data, dict) and data.get("error"):
-		failed = True
-	if isinstance(data, list):
+	if isinstance(data, dict):
+		failed = bool(data.get("error")) or data.get("status") == "error"
+		if isinstance(data.get("results"), list):
+			count = data.get("total_count") or data.get("count")
+			if not isinstance(count, int):
+				count = len(data["results"])
+	elif isinstance(data, list):
 		count = len(data)
 	if data is not None and not isinstance(data, str):
 		text = json.dumps(data, indent=2, ensure_ascii=False, default=str)
+	if trailer:
+		text = f"{text}\n{trailer}"
 	lines = text.splitlines()
 	if len(lines) > _REPLAY_RESULT_LINES:
 		lines = lines[:_REPLAY_RESULT_LINES] + [f"… ({len(lines) - _REPLAY_RESULT_LINES} more lines)"]

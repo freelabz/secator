@@ -19,7 +19,7 @@ pytest.importorskip("textual")
 from textual.widgets import Static  # noqa: E402
 
 from secator.ai.history import ChatHistory, classify_user_message  # noqa: E402
-from secator.ai.prompts import format_continue  # noqa: E402
+from secator.ai.prompts import format_continue, format_tool_result  # noqa: E402
 from secator.ai.session import save_history  # noqa: E402
 from secator.tui.ai import AITUI  # noqa: E402
 from secator.tui.widgets import ToolCallPanel  # noqa: E402
@@ -60,6 +60,9 @@ def test_classify_user_message():
 	assert classify_user_message("scan example.com") == ("user", "scan example.com")
 	# a user who pastes JSON is still a user turn
 	assert classify_user_message('{"instruction": "x"}') == ("user", '{"instruction": "x"}')
+	# only the exact format_continue shape is internal (here: no "max")
+	pasted = '{"instruction": "explain this", "iteration": 2}'
+	assert classify_user_message(pasted) == ("user", pasted)
 
 
 def _texts(app):
@@ -184,3 +187,39 @@ async def _replay_selectable_body():
 
 def test_replayed_messages_are_selectable_and_copy_on_select():
 	asyncio.run(_replay_selectable_body())
+
+
+def _enveloped(name, status, results):
+	# the saved shape of a runner/query result: format_tool_result JSON fenced as untrusted
+	# data (see _yield_tool_results), with guidance appended after the fence
+	return f"<workspace_data>\n{format_tool_result(name, status, len(results), results)}\n</workspace_data>\nhint"
+
+
+async def _replay_envelope_body():
+	app = AITUI(None, session="ai", mode="chat")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		msgs = [
+			{"role": "assistant", "content": "", "tool_calls": [
+				_tc("c1", "run_shell", {"command": "false", "description": "Fails"}),
+				_tc("c2", "query_workspace", {"query": {"_type": "port"}, "description": "Ports"})]},
+			{"role": "tool", "tool_call_id": "c1", "content": _enveloped("run_shell", "error", [{"message": "boom"}])},
+			{"role": "tool", "tool_call_id": "c2",
+			 "content": _enveloped("query_workspace", "success", [{"port": 22}, {"port": 80}, {"port": 443}])},
+		]
+		await app._replay_history(msgs)
+		await pilot.pause(0.05)
+		shell, query = list(app._convo().query(ToolCallPanel))
+		assert shell.failed and not query.failed
+		assert query.result_count == 3
+		# the fence is stripped for display; the guidance after it is kept
+		shell.toggle()
+		await pilot.pause(0.05)
+		body = str(shell.query_one(".tool-result").render())
+		assert "<workspace_data>" not in body and '"status": "error"' in body and body.endswith("hint")
+		# finished cards never keep a spinner timer running
+		assert shell._spin_timer is None and query._spin_timer is None
+
+
+def test_replay_reads_status_from_saved_result_envelope():
+	asyncio.run(_replay_envelope_body())
