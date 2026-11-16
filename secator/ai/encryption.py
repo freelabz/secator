@@ -45,6 +45,34 @@ def _is_hash_filename(hostname: str) -> bool:
 	return False
 
 
+# A placeholder minted by SensitiveDataEncryptor._hash_value: ``[HOST:1a2b3c4d5e6f]``. Matched
+# loosely (any alphanumeric hash) so a model-garbled token like ``[HOST:shhfurirind]`` is caught
+# too; the bracket-stripped form is only matched with the exact 12-hex hash to avoid false hits.
+_PLACEHOLDER_RE = re.compile(
+	r"\[(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[A-Za-z0-9]+\]"
+	r"|\b(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[0-9a-f]{12}\b"
+)
+
+
+def find_placeholders(value) -> list:
+	"""Return every sensitive-data placeholder left in ``value`` (str / dict / list, recursive).
+
+	Run on tool-call arguments AFTER decryption: anything still matching is a placeholder the
+	session's map can't resolve (unknown, garbled, or from a map that was not restored). Such a
+	call must never run as-is — it would hit e.g. ``http://[HOST:...]`` literally.
+	"""
+	found = []
+	if isinstance(value, str):
+		found.extend(m.group() for m in _PLACEHOLDER_RE.finditer(value))
+	elif isinstance(value, dict):
+		for v in value.values():
+			found.extend(find_placeholders(v))
+	elif isinstance(value, (list, tuple)):
+		for v in value:
+			found.extend(find_placeholders(v))
+	return list(dict.fromkeys(found))
+
+
 def maybe_encrypt(text, encryptor):
 	"""Encrypt text if encryptor is available, otherwise return as-is."""
 	return encryptor.encrypt(text) if encryptor else text

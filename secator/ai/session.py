@@ -128,6 +128,9 @@ def list_sessions(max_sessions=20):
 			'name': session_name,
 			'prompt': first_prompt,
 			'session_id': session_id,
+			# The id the session's store docs (e.g. its placeholder map) are stamped with —
+			# from the runner info even when the report carries no ai results.
+			'store_session_id': session_id or (info.get('context') or {}).get('session_id', ''),
 			'targets': info.get('targets', []),
 			'timestamp': info.get('end_time') or info.get('start_time') or 0,
 			'mtime': history_path.stat().st_mtime,

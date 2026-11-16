@@ -20,7 +20,7 @@ from secator.ai.actions import (
 )
 from secator.ai.guardrails import PermissionEngine
 from secator.ai.interactivity import create_backend, DISMISS_ANSWER, RemoteBackend, UserInputTimeout
-from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
+from secator.ai.encryption import SensitiveDataEncryptor, find_placeholders, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
 	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES, MODE_ALIASES,
@@ -472,6 +472,8 @@ class ai(PythonRunner):
 				self.history = restore_history_from_db(
 					self.session_id, self._get_query_engine(),
 					model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
+				# Placeholders minted by earlier turns must still decrypt in tool calls/display.
+				self._restore_pii_map()
 				# Show the prior conversation + findings on the console (the unified
 				# restore only rebuilds in-memory history; replay_session did this for
 				# the legacy path, so print it here to keep resume UX consistent). Skip it
@@ -484,6 +486,9 @@ class ai(PythonRunner):
 				# restore would rebuild empty history. Fall back to the local
 				# history.json replay instead.
 				self.history = replay_session(session)
+				# This run keeps its fresh session id, so seed the placeholder map from the
+				# PRIOR session's stored map (its id is in the session's runner info).
+				self._restore_pii_map(session_id=session.get("store_session_id"))
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
 				return
@@ -901,7 +906,17 @@ class ai(PythonRunner):
 		enters the LLM transcript, and clients hide it. The plaintext values already
 		live in the workspace findings, so this adds no LLM-provider exposure.
 		"""
-		if self.interactive != "remote" or not self.encryptor or not self.encryptor.pii_map:
+		if not self.encryptor or not self.encryptor.pii_map:
+			return
+		# A subagent shares its parent's session id but has its own encryptor: an upsert from
+		# it would overwrite the parent's map. Its placeholders reach the parent through the
+		# handback text, which the parent re-encrypts into its own map.
+		if getattr(self, "is_subagent", False) is True:
+			return
+		# Only write when the map grew since the last persist (it never shrinks): avoids a
+		# store write on every turn that minted no new placeholder.
+		size = len(self.encryptor.pii_map) + len(self.encryptor.hash_map)
+		if size == getattr(self, "_pii_map_persisted_size", 0):
 			return
 		payload = {"pii_map": dict(self.encryptor.pii_map), "hash_map": dict(self.encryptor.hash_map)}
 		try:
@@ -915,19 +930,28 @@ class ai(PythonRunner):
 		if not modified:
 			# No existing doc yet — insert one; subsequent turns update it in place.
 			self.add_result(Ai(content="", ai_type="pii_map", extra_data=payload), print=False)
+		self._pii_map_persisted_size = size
 
-	def _restore_pii_map(self):
-		"""Seed the encryptor's map from the persisted session doc (see _persist_pii_map)."""
-		if self.interactive != "remote" or not self.encryptor:
+	def _restore_pii_map(self, session_id=None):
+		"""Seed the encryptor's map from the persisted session doc (see _persist_pii_map).
+
+		Runs on every resume path (remote respawn and local resume alike) through the active
+		store, so it behaves the same on every driver. ``session_id`` names the PRIOR session
+		when the resumed run keeps a fresh id (local resume of a session whose report carries
+		no ai results). Every stored version is merged (the map only grows): the json store is
+		append-only, so an early-break ``limit=1`` read could return a stale first version.
+		"""
+		session_id = session_id or self.session_id
+		if not self.encryptor or not session_id:
 			return
 		try:
 			docs = self._get_query_engine().search(
-				{"_type": "ai", "ai_type": "pii_map", "_context.session_id": self.session_id}, limit=1)
+				{"_type": "ai", "ai_type": "pii_map", "_context.session_id": session_id})
 		except Exception as e:  # noqa: BLE001 - restore best-effort; a fresh map still works forward
 			self.debug(f'pii_map restore failed: {e}', sub='llm')
 			return
-		if docs:
-			ed = docs[0].get("extra_data") or {}
+		for doc in sorted(docs or [], key=lambda d: d.get("_timestamp", 0)):
+			ed = doc.get("extra_data") or {}
 			self.encryptor.pii_map.update(ed.get("pii_map") or {})
 			self.encryptor.hash_map.update(ed.get("hash_map") or {})
 
@@ -1245,6 +1269,10 @@ class ai(PythonRunner):
 							continue
 						self._save_history()
 						return
+
+					# End of turn: persist the placeholder map (no-op unless it grew), so a
+					# turn with no tool call (e.g. a prompt that minted placeholders) is covered.
+					self._persist_pii_map()
 
 					# End of turn: the assistant reply and every tool result are in history
 					# now. Persist BEFORE handing control back to the user — the run may never
@@ -1837,6 +1865,23 @@ class ai(PythonRunner):
 			# Decrypt args
 			if self.encryptor:
 				args = _decrypt_dict(args, self.encryptor)
+
+			# A placeholder that survived decryption can't be resolved (unknown / garbled
+			# token, or minted under a map this run doesn't have). Never run it as-is: the
+			# literal token would reach a shell / HTTP client / scope check.
+			unresolved = find_placeholders(args)
+			if unresolved:
+				self.debug(f'[tool_call] {name}: unresolved placeholders {unresolved}', sub='llm')
+				yield _reject_tool_call(
+					self, name, tc_id,
+					json.dumps({
+						"error": f"Tool call '{tc_id}' rejected: unknown sensitive-data placeholder(s) "
+						         f"{', '.join(unresolved)}.",
+						"hint": "Only use placeholders exactly as they appear in this conversation's data. "
+						        "Re-query the workspace to get a valid reference to the value, then retry.",
+					}),
+					f"unresolved placeholder(s): {', '.join(unresolved)}")
+				continue
 
 			# Convert to action
 			self.debug(f'[tool_call] {name} id={tc_id} args={args}', sub='llm')
