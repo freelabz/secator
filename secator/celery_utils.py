@@ -3,10 +3,7 @@ import gc
 from contextlib import nullcontext
 from time import sleep
 
-import kombu
-import kombu.exceptions
-
-from celery.result import AsyncResult, GroupResult
+from celery.result import AsyncResult
 from celery.exceptions import TaskRevokedError
 from greenlet import GreenletExit
 from rich.panel import Panel
@@ -370,36 +367,3 @@ class CeleryData(object):
 
 		debug('data', obj=data, sub='celery.data', id=task_id, verbose=True)
 		return data
-
-	@staticmethod
-	def get_task_ids(result, ids=[]):
-		"""Get all Celery task ids recursively.
-
-		Args:
-			result (Union[AsyncResult, GroupResult]): Celery result object.
-			ids (list): List of ids.
-		"""
-		if result is None:
-			return
-
-		try:
-			if isinstance(result, GroupResult):
-				CeleryData.get_task_ids(result.parent, ids=ids)
-
-			elif isinstance(result, AsyncResult):
-				if result.id not in ids:
-					ids.append(result.id)
-
-			if hasattr(result, 'children'):
-				children = result.children
-				if isinstance(children, list):
-					for child in children:
-						CeleryData.get_task_ids(child, ids=ids)
-
-			# Browse parent
-			if hasattr(result, 'parent') and result.parent:
-				CeleryData.get_task_ids(result.parent, ids=ids)
-
-		except kombu.exceptions.DecodeError:
-			debug('kombu decode error', sub='celery.data')
-			return

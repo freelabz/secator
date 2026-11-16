@@ -338,3 +338,59 @@ def test_remove_duplicates_dicts():
 	d3 = {'_type': 'domain', 'name': 'other.com'}
 	result = remove_duplicates([d1, d2, d3])
 	assert len(result) == 2
+
+
+class TestRetry(unittest.TestCase):
+
+	def _flaky(self, failures, exc=ValueError):
+		calls = {'n': 0}
+
+		def func(x):
+			calls['n'] += 1
+			if calls['n'] <= failures:
+				raise exc(f'boom {calls["n"]}')
+			return x * 2
+		return func, calls
+
+	def test_succeeds_after_failures(self):
+		from unittest.mock import patch
+		from secator.utils import retry
+		func, calls = self._flaky(2)
+		with patch('secator.utils.sleep') as sleep:
+			self.assertEqual(retry(ValueError, tries=3, delay=2)(func)(21), 42)
+		self.assertEqual(calls['n'], 3)
+		self.assertEqual([c.args for c in sleep.call_args_list], [(2,), (2,)])
+
+	def test_exhausts_tries_and_reraises_last(self):
+		from unittest.mock import patch
+		from secator.utils import retry
+		func, calls = self._flaky(10)
+		with patch('secator.utils.sleep') as sleep:
+			with self.assertRaisesRegex(ValueError, 'boom 3'):
+				retry(ValueError, tries=3, delay=2)(func)(1)
+		self.assertEqual(calls['n'], 3)
+		self.assertEqual(sleep.call_count, 2)  # no sleep after the final attempt
+
+	def test_unlisted_exception_is_not_retried(self):
+		from unittest.mock import patch
+		from secator.utils import retry
+		func, calls = self._flaky(1, exc=KeyError)
+		with patch('secator.utils.sleep') as sleep:
+			with self.assertRaises(KeyError):
+				retry(ValueError, tries=3, delay=2)(func)(1)
+		self.assertEqual(calls['n'], 1)
+		sleep.assert_not_called()
+
+	def test_no_failure_no_sleep_and_metadata_kept(self):
+		from unittest.mock import patch
+		from secator.utils import retry
+
+		@retry(Exception, tries=3, delay=2)
+		def double(x):
+			"""Doc."""
+			return x * 2
+		with patch('secator.utils.sleep') as sleep:
+			self.assertEqual(double(4), 8)
+		sleep.assert_not_called()
+		self.assertEqual(double.__name__, 'double')
+		self.assertEqual(double.__doc__, 'Doc.')

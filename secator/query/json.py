@@ -315,31 +315,10 @@ class JsonBackend(QueryBackend):
 		"""Count DISTINCT matching findings by their latest record (see ``_iter_latest``)."""
 		return sum(1 for _ in self._iter_latest(query))
 
-	def _report_files(self):
-		"""Yield the report.json paths this backend reads — the run-scoped file when
-		``context['report_dir']`` is set, else every report in the workspace."""
-		report_dir = self.context.get('report_dir')
-		if report_dir:
-			p = Path(report_dir) / 'report.json'
-			if p.exists():
-				yield p
-			return
-		workspace_path = self._get_workspace_path()
-		if not workspace_path.exists():
-			return
-		for runner_type in ['tasks', 'workflows', 'scans']:
-			runner_path = workspace_path / runner_type
-			if not runner_path.exists():
-				continue
-			for d in runner_path.iterdir():
-				if d.is_dir() and (d / 'report.json').exists():
-					yield d / 'report.json'
-
 	def _report_dirs(self):
 		"""Yield each runner's report DIR — the run-scoped dir when ``context['report_dir']``
-		is set, else every runner dir in the workspace. (``_report_files`` yields the legacy
-		``report.json`` paths; this yields the dirs so we can reach the live ``results.ndjson``
-		too.)"""
+		is set, else every runner dir in the workspace. Yields dirs (not ``report.json`` paths) so
+		the live ``results.ndjson`` is reachable too."""
 		report_dir = self.context.get('report_dir')
 		if report_dir:
 			p = Path(report_dir)

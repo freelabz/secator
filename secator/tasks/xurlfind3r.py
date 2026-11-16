@@ -7,8 +7,6 @@ from secator.decorators import task
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import HttpCrawler
 
-MAX_PARAM_OCCURRENCES = 10
-
 
 @task()
 class xurlfind3r(HttpCrawler):

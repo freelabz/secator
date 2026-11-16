@@ -26,9 +26,9 @@ import idna
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from functools import reduce
+from functools import reduce, wraps
 from pathlib import Path
-from time import monotonic, time
+from time import monotonic, sleep, time
 from urllib.parse import urlparse, quote
 
 import humanize
@@ -46,14 +46,8 @@ from secator.rich import console
 
 logger = logging.getLogger(__name__)
 
-_tasks = []
-
 TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
 CAMEL_TO_SNAKE_REGEX = re.compile(r'(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])')
-
-
-class TaskError(ValueError):
-	pass
 
 
 def setup_logging(level):
@@ -728,6 +722,32 @@ def traceback_as_string(exc):
 		string: readable traceback.
 	"""
 	return ' '.join(traceback.format_exception(exc, value=exc, tb=exc.__traceback__))
+
+
+def retry(exceptions=Exception, tries=3, delay=0):
+	"""Retry the decorated function when it raises one of ``exceptions``.
+
+	The function is called at most ``tries`` times in total, sleeping ``delay`` seconds between
+	attempts. The exception from the last attempt is re-raised unchanged.
+
+	Args:
+		exceptions (type | tuple[type, ...]): Exception class(es) that trigger a retry.
+		tries (int): Total number of attempts (>= 1).
+		delay (float): Seconds to sleep between attempts.
+	"""
+	def decorator(func):
+		@wraps(func)
+		def wrapper(*args, **kwargs):
+			for attempt in range(1, max(tries, 1) + 1):
+				try:
+					return func(*args, **kwargs)
+				except exceptions as e:
+					if attempt >= tries:
+						raise
+					logger.warning('%s, retrying in %s seconds...', e, delay)
+					sleep(delay)
+		return wrapper
+	return decorator
 
 
 def should_update(update_frequency, last_updated=None, timestamp=None):

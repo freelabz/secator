@@ -372,13 +372,6 @@ class TUIApp(App):
 		ctx = d.get("_context") or {}
 		return ctx.get("task_chunk_id") or ctx.get("task_id") or ""
 
-	def _leaf_for_item(self, d: dict) -> "RunnerPanel | None":
-		"""The batch leaf task/shell panel this item belongs to, matched by owning runner id.
-		Parallel tasks that share a tool name (_source) would otherwise cross-wire via the
-		source/_current heuristic — the id disambiguates them."""
-		rid = self._owning_id(d)
-		return self._leaf_panels.get(rid) if rid else None
-
 	async def _sink_for_source(self, source: str) -> "RunnerPanel | None":
 		# Where a command runner's output lands. In a workflow/scan it's the child's
 		# sub-panel. For a leaf it's the current panel ONLY if its source matches — in a

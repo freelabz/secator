@@ -170,23 +170,6 @@ class dnsx(ReconDns):
 					yield record
 
 
-def stream_file_up_to_line(file_path, max_lines=50):
-	"""
-	Streams a file line by line up to line 50.
-
-	Args:
-		file_path (str): Path to the file to be streamed.
-
-	Yields:
-		str: Each line from the file up to line 50.
-	"""
-	with open(file_path, 'r') as file:
-		for line_number, line in enumerate(file, start=1):
-			if line_number > max_lines:
-				break
-			yield line
-
-
 def check_dns_response(domain, record_type="A"):
 	try:
 		# Query DNS for the specified record type (A, MX, NS, etc.)

@@ -66,9 +66,6 @@ def _strip_trailing_delims(value: str) -> str:
 	return out
 
 
-# Shell operators that chain commands
-SHELL_OPERATORS = re.compile(r'\s*(?:&&|\|\||[;|])\s*')
-
 # Read-type commands
 READ_COMMANDS = frozenset({
 	"cat", "grep", "head", "tail", "ls", "find", "jq", "wc", "less", "more", "file", "strings",
@@ -1233,17 +1230,6 @@ class PermissionEngine:
 		if isolated_shell:
 			return PermissionResult(decision="allow", reason="isolated: shell/path allowed (sandbox is the boundary)")
 		return PermissionResult(decision="deny", reason=f"No matching rule for {action_type}")
-
-	def _has_rules_for(self, rule_type: str) -> bool:
-		"""Check if any rules exist for the given rule type."""
-		# in_scope/out_of_scope force the target-check step so out-of-scope targets are caught.
-		if rule_type == "target" and (self.in_scope or self.out_of_scope):
-			return True
-		for category in ("allow", "deny", "ask"):
-			for rt, _ in self.rules[category]:
-				if rt == rule_type:
-					return True
-		return any(rt == rule_type for rt, _ in self.runtime_allow)
 
 	def _check_action_type(self, action_type: str, action: Dict) -> PermissionResult:
 		"""Check if the action type is allowed/denied/ask.

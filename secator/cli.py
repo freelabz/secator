@@ -1896,18 +1896,6 @@ def _count_report_vulns(path):
 	return vuln_counts
 
 
-def _load_report_data(path):
-	"""Read report info + count vulnerability severities.
-
-	Retained for callers outside ``report_list`` (e.g. ``_report_matches_filters``).
-	For the listing command use ``_load_report_info`` + ``_count_report_vulns`` to
-	keep metadata loading and vuln counting separate.
-	"""
-	info = _load_report_info(path)
-	vuln_counts = _count_report_vulns(path)
-	return info, vuln_counts
-
-
 def _report_passes_filters(report_info, vuln_counts, interesting, status_pattern):
 	"""Apply the --interesting / --status filters to already-loaded report data.
 
@@ -1930,15 +1918,6 @@ def _report_passes_filters(report_info, vuln_counts, interesting, status_pattern
 	if status_pattern and not status_pattern.search(str(report_info.get('status', ''))):
 		return False
 	return True
-
-
-def _report_matches_filters(path, interesting, status_pattern):
-	"""Load a report once and check it against the active filters (used for piped output)."""
-	try:
-		report_info, vuln_counts = _load_report_data(path)
-	except Exception:
-		return False
-	return _report_passes_filters(report_info, vuln_counts, interesting, status_pattern)
 
 
 def _format_vuln_counts(counts):

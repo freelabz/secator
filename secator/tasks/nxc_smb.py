@@ -659,13 +659,3 @@ class NXCParser:
 			"7601":  "Windows Server 2008 R2",
 		}
 		return builds.get(build, f"Build {build}")
-
-	def summary(self, data: Dict) -> str:
-		"""Return a one-line summary of parse results."""
-		return (
-			f"{len(data['hosts'])} hosts  |  "
-			f"{len(data['admin_hosts'])} admin  |  "
-			f"{len(data['valid_creds'])} valid creds  |  "
-			f"{len(data['shares'])} shares  |  "
-			f"{len(data['sessions'])} sessions"
-		)

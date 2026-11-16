@@ -1465,20 +1465,6 @@ class Runner:
 				data = json.dumps(data, default=str)
 			print(data, file=out)
 
-	def _get_findings_count(self):
-		"""Get finding count.
-
-		Returns:
-			dict[str,int]: Dict of finding type to count.
-		"""
-		count_map = {}
-		for output_type in FINDING_TYPES:
-			name = output_type.get_name()
-			count = len(self._view(name))
-			if count > 0:
-				count_map[name] = count
-		return count_map
-
 	def _process_item(self, item, print=True, output=True):
 		"""Process an item yielded by the derived runner.
 

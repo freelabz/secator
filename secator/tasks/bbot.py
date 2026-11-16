@@ -146,7 +146,6 @@ BBOT_FLAGS = [
 	'web-screenshots',
 	'web-thorough'
 ]
-BBOT_MODULES_STR = ' '.join(BBOT_MODULES)
 BBOT_MAP_TYPES = {
 	'IP_ADDRESS': Ip,
 	'PROTOCOL': Port,
