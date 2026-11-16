@@ -294,6 +294,12 @@ class ai(PythonRunner):
 		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
 		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
+		# Extra (non-core) tools to add on top of the mode's baseline for this run, by name
+		# (e.g. add_suggestion). Merged with CONFIG.addons.ai.extra_tools; every name must
+		# resolve to a loaded tool (templates dir / SECATOR_AI_TOOLS_DIRS / bundle). Generic
+		# and driver-agnostic — the same option lets any caller (CLI, a chore, the platform)
+		# grant a specific external tool to a run without a core edit.
+		"extra_tools": {"type": "list", "default": None, "help": "Extra AI tool names to add on top of the mode baseline"},  # noqa: E501
 		"max_tokens_total": {
 			"type": int, "default": CONFIG.addons.ai.max_tokens_total,
 			"help": "Hard token limit - truncate oldest messages beyond this",
@@ -587,7 +593,7 @@ class ai(PythonRunner):
 
 		Returns the ``(system_prompt, tool_schemas)`` pair for callers that want it."""
 		self.system_prompt = self._system_prompt_for(self.mode)
-		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True))  # noqa: E501
+		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True), extra_tools=getattr(self, "extra_tools", None))  # noqa: E501
 		return self.system_prompt, self.tool_schemas
 
 	def _resolve_prompt(self):
@@ -1560,7 +1566,7 @@ class ai(PythonRunner):
 			self.max_iterations = max(self.max_iterations, mode_max, config_max)
 		self.system_prompt = self._system_prompt_for(self.mode)
 		if not hasattr(self, 'tool_schemas') or not old_mode or old_mode != self.mode:
-			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True))  # noqa: E501
+			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True), extra_tools=getattr(self, "extra_tools", None))  # noqa: E501
 
 	# -------------------------------------------------------------------------
 	# Workspace helpers

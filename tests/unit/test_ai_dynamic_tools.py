@@ -97,25 +97,57 @@ class TestDynamicAITools(unittest.TestCase):
 		self.assertEqual(TOOL_ACTION_MAP["ping_pong"], "ping_pong")
 		self.assertIn("ping_pong", TOOLS_BY_ACTION)
 
-	def test_external_tool_exposed_only_by_exact_name_opt_in(self):
-		"""A mode's broad `*` glob must NOT auto-grant the external tool; an exact-name
-		`tools:` entry does. This is the Q4 guard against silent privilege creep."""
+	def test_external_tool_not_in_baseline_added_only_via_extra_tools(self):
+		"""A mode's globs match CORE tools only — a broad `*` never exposes an external
+		tool. The external tool is added only when passed as `extra_tools` for the run."""
+		self._write("ping_pong.py", _GOOD_TOOL)
+		from secator.loader import discover_ai_tools
+		from secator.ai.tools import build_tool_schemas
+		discover_ai_tools()
+		# scan is `tools: ["*"]` — the glob must not expose the external tool.
+		scan_names = [s["function"]["name"] for s in build_tool_schemas("scan")]
+		self.assertNotIn("ping_pong", scan_names)
+		# Added on top only when requested for the run.
+		chat_names = [s["function"]["name"] for s in build_tool_schemas("chat", extra_tools=["ping_pong"])]
+		self.assertIn("ping_pong", chat_names)
+		# Not sticky: a later run without extra_tools does not expose it.
+		self.assertNotIn("ping_pong", [s["function"]["name"] for s in build_tool_schemas("chat")])
+
+	def test_extra_tools_from_config_default(self):
+		"""`CONFIG.addons.ai.extra_tools` adds a tool to every run, merged with the option."""
+		self._write("ping_pong.py", _GOOD_TOOL)
+		from unittest import mock
+		from secator.config import CONFIG
+		from secator.loader import discover_ai_tools
+		from secator.ai.tools import build_tool_schemas, resolve_extra_tools
+		discover_ai_tools()
+		with mock.patch.object(CONFIG.addons.ai, "extra_tools", ["ping_pong"]):
+			self.assertEqual(resolve_extra_tools(), ["ping_pong"])
+			# config ∪ run option, deduplicated
+			self.assertEqual(resolve_extra_tools(["ping_pong"]), ["ping_pong"])
+			names = [s["function"]["name"] for s in build_tool_schemas("chat")]
+			self.assertIn("ping_pong", names)
+
+	def test_extra_tools_unknown_name_errors(self):
+		"""A configured/requested tool that isn't loaded fails loudly."""
+		from secator.ai.tools import resolve_extra_tools, build_tool_schemas
+		with self.assertRaises(ValueError):
+			resolve_extra_tools(["does_not_exist"])
+		with self.assertRaises(ValueError):
+			build_tool_schemas("chat", extra_tools=["does_not_exist"])
+
+	def test_mode_exclude_overrides_extra_tools(self):
+		"""A mode's `!name` exclude removes a tool even if passed via extra_tools."""
 		self._write("ping_pong.py", _GOOD_TOOL)
 		from secator.loader import discover_ai_tools
 		from secator.ai.tools import build_tool_schemas
 		from secator.ai.prompts import MODES
 		discover_ai_tools()
-		# scan is `tools: ["*"]` — the glob must not expose the external tool.
-		scan_names = [s["function"]["name"] for s in build_tool_schemas("scan")]
-		self.assertNotIn("ping_pong", scan_names)
-		# Opt chat in by EXACT name -> now exposed there, still not in scan.
 		orig = list(MODES["chat"]["tools"])
-		MODES["chat"]["tools"] = orig + ["ping_pong"]
+		MODES["chat"]["tools"] = orig + ["!ping_pong"]
 		try:
-			chat_names = [s["function"]["name"] for s in build_tool_schemas("chat")]
-			scan_names = [s["function"]["name"] for s in build_tool_schemas("scan")]
-			self.assertIn("ping_pong", chat_names)
-			self.assertNotIn("ping_pong", scan_names)
+			names = [s["function"]["name"] for s in build_tool_schemas("chat", extra_tools=["ping_pong"])]
+			self.assertNotIn("ping_pong", names)
 		finally:
 			MODES["chat"]["tools"] = orig
 

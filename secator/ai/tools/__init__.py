@@ -24,7 +24,9 @@ a mode's resolved tool exposure and its ``allowed_actions`` drift apart.
 
 import json
 
-from secator.ai.prompts import MODES, normalize_mode, mode_tool_patterns, tool_matches_mode
+from secator.ai.prompts import (
+	MODES, normalize_mode, mode_tool_patterns, tool_matches_mode, mode_excludes_tool,
+)
 from secator.ai.tools.base import BaseTool  # noqa: F401 (re-exported)
 
 from secator.ai.tools.run_task import RunTask
@@ -185,11 +187,38 @@ def register_ai_tool(tool):
 	return tool
 
 
-def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_is_auto: bool = True) -> list:
+def resolve_extra_tools(extra_tools=None):
+	"""Resolve the effective extra-tool names: config default ∪ the run's ``extra_tools``.
+
+	``CONFIG.addons.ai.extra_tools`` (a custom installation's always-on tools) is merged
+	with the per-run ``extra_tools`` option, order-preserving and deduplicated. Every name
+	must resolve to a loaded, valid tool (built-in or discovered external); an unknown name
+	raises ``ValueError`` with a clear message so a misconfigured/absent tool fails loudly
+	rather than being silently dropped.
+	"""
+	from secator.config import CONFIG
+	names = []
+	for src in (list(CONFIG.addons.ai.extra_tools or []), list(extra_tools or [])):
+		for n in src:
+			if n and n not in names:
+				names.append(n)
+	unknown = [n for n in names if n not in TOOLS_BY_NAME]
+	if unknown:
+		raise ValueError(
+			f"extra_tools refers to unknown AI tool(s): {unknown}. Known tools: "
+			f"{sorted(TOOLS_BY_NAME)}. Check CONFIG.addons.ai.extra_tools / the run's "
+			f"extra_tools, and that the tool dir / bundle is loaded.")
+	return names
+
+
+def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_is_auto: bool = True,
+                       extra_tools=None) -> list:
 	"""Return list of tool schemas exposed in a mode (derived from the registry).
 
 	Triggers external-tool discovery once (cached in the loader) so a tool dropped into
-	the templates dir becomes callable without a core edit.
+	the templates dir becomes callable without a core edit. The effective tool set is the
+	mode's BASELINE (its `tools:` globs over core tools) PLUS ``extra_tools`` (the config
+	default ∪ the run's option), MINUS anything the mode explicitly excludes (`!pattern`).
 
 	Args:
 		mode: The AI mode (scan, chat, exploit). Unknown modes fall back to chat.
@@ -203,6 +232,9 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 			a pinned ACTION mode, but a user-PINNED read-only `chat` must stay read-only,
 			so `change_mode` is withheld there (the model can only suggest the user
 			switches). An auto session that happens to resolve to chat KEEPS change_mode.
+		extra_tools: Names of EXTRA (typically external) tools to add on top of the mode's
+			baseline for this run (e.g. ``["add_suggestion"]``). Merged with
+			``CONFIG.addons.ai.extra_tools``; every name must resolve to a loaded tool.
 
 	Returns:
 		List of OpenAI-format tool schema dicts.
@@ -220,6 +252,7 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 	lookup_mode = norm if norm in MODES else "chat"
 	patterns = mode_tool_patterns(lookup_mode)
 	_validate_mode_patterns(lookup_mode, patterns)
+	extras = set(resolve_extra_tools(extra_tools))
 	excluded = set()
 	if is_subagent:
 		# A subagent runs at its assigned mode; it does not self-escalate and
@@ -230,13 +263,16 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 		excluded.add("change_mode")
 	if backend is not None:
 		excluded.update(backend.get_excluded_tools())
-	# Exposure is driven by the mode's `tools:` frontmatter globs (the single source of
-	# truth) over tool NAMES. External tools opt in by exact name only (external=...).
-	schemas = [
-		t.schema for t in TOOLS
-		if not t.injected and t.name not in excluded
-		and tool_matches_mode(t.name, patterns, external=t.external)
-	]
+	# Effective set = baseline (mode globs over CORE tools) ∪ extras (named, incl. external),
+	# minus the mode's explicit `!` excludes and the runtime exclusions above.
+	schemas = []
+	for t in TOOLS:
+		if t.injected or t.name in excluded:
+			continue
+		in_baseline = tool_matches_mode(t.name, patterns, external=t.external)
+		in_extras = t.name in extras and not mode_excludes_tool(t.name, patterns)
+		if in_baseline or in_extras:
+			schemas.append(t.schema)
 	if backend is not None:
 		schemas.extend(backend.get_extra_tools())
 	return schemas
