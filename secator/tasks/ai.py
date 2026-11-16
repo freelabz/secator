@@ -1314,7 +1314,7 @@ class ai(PythonRunner):
 		ctx = getattr(self, "_isolation_ctx", None)
 		if ctx is None:
 			return
-		from secator.ai.actions import _teardown_sandbox_container
+		from secator.ai.tools._sandbox import _teardown_sandbox_container
 		_teardown_sandbox_container(ctx, self.context or {})
 
 	# -------------------------------------------------------------------------

@@ -17,7 +17,7 @@ _MAX_SHELL_OUTPUT_CHARS = 4000
 # Fallback default timeout (seconds) for ad-hoc AI shell commands when no config is
 # available. The real default is CONFIG.security.shell_default_timeout (30s); see
 # _resolve_shell_timeout. Applied as an instance attribute post-construction (see
-# _handle_shell) since max_timeout is not a run_opts-settable field.
+# RunShell.run) since max_timeout is not a run_opts-settable field.
 _SHELL_TIMEOUT = 30
 
 

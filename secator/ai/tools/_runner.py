@@ -276,7 +276,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			return
 		opts["subagent"] = True
 		opts["interactive"] = False
-		# `_handle_subagent` already set the child's mode per the run_subagent policy
+		# `RunSubagent.run` already set the child's mode per the run_subagent policy
 		# (pinned-chat forced to chat; auto/scan may choose). Fall back to the parent's
 		# mode if somehow unset, so a concrete mode is hard-set in the child and it never
 		# re-detects upward.
