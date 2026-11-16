@@ -18,6 +18,7 @@ Frontmatter schema (see :data:`PROMPT_TYPES`):
 * ``modes`` (list[str], ``type: mode`` only) — the mode(s) this system prompt serves.
 """
 # flake8: noqa: E501
+import fnmatch
 import json
 import re
 from pathlib import Path
@@ -195,6 +196,49 @@ MODES = {
 }
 
 
+# Per-mode tool exposure is declared in each mode prompt's frontmatter `tools:` key — a
+# list of fnmatch globs over tool NAMES (e.g. "run_*", "*", "!change_mode"). This is the
+# single source of truth for which tools a mode exposes; it is loaded into MODES here so
+# MODES stays the one mode registry, and resolved by tool_matches_mode(). (Phase 2 makes
+# this the operative driver of build_tool_schemas and drops the per-tool `modes` list.)
+for _mode, _cfg in MODES.items():
+	_cfg["tools"] = list(load_prompt_meta(f"modes/{_mode}.md").get("tools") or ["*"])
+
+
+def mode_tool_patterns(mode: str) -> List[str]:
+	"""Return the `tools:` fnmatch patterns declared by a mode (default: all tools)."""
+	return MODES.get(normalize_mode(mode), {}).get("tools", ["*"])
+
+
+def tool_matches_mode(tool_name: str, patterns: List[str], external: bool = False) -> bool:
+	"""Whether a tool is exposed to a mode given the mode's `tools:` patterns.
+
+	Patterns are fnmatch globs over tool names, in any order: a plain pattern INCLUDES,
+	a leading ``!`` EXCLUDES (applied after includes). A tool is exposed iff it matches at
+	least one include and no exclude.
+
+	``external=True`` is the opt-in guard for user/bundle-provided tools: an external tool
+	is included ONLY by an EXACT-name pattern, never by a glob (``*`` / ``run_*``), so a
+	broad ``tools: ["*"]`` can never silently grant a newly dropped-in external tool (e.g.
+	``add_suggestion``) to a mode — the mode must name it explicitly.
+	"""
+	includes = [str(p) for p in patterns if not str(p).startswith("!")]
+	excludes = [str(p)[1:] for p in patterns if str(p).startswith("!")]
+
+	def _match(pat: str) -> bool:
+		if external:
+			return pat == tool_name  # externals: exact-name opt-in only
+		return fnmatch.fnmatchcase(tool_name, pat)
+
+	if not any(_match(p) for p in includes):
+		return False
+	for pat in excludes:
+		# Exclusion is always safe (restrictive): fnmatch for built-ins, exact for externals.
+		if pat == tool_name or (not external and fnmatch.fnmatchcase(tool_name, pat)):
+			return False
+	return True
+
+
 def build_mode_banner(mode: str, mode_config: dict = None) -> str:
 	"""Generate the authoritative "you are in <mode> mode" statement for a mode.
 
@@ -207,7 +251,14 @@ def build_mode_banner(mode: str, mode_config: dict = None) -> str:
 	desc = cfg.get("description")
 	line = f"You are operating in {mode.upper()} mode"
 	line += f": {desc}." if desc else "."
-	if "change_mode" in cfg.get("allowed_actions", []):
+	# change_mode availability is derived from the mode's `tools:` patterns (the single
+	# source of truth). Fall back to allowed_actions only for a synthetic mode_config
+	# passed without a `tools` key (e.g. in tests).
+	if "tools" in cfg:
+		can_change_mode = tool_matches_mode("change_mode", cfg["tools"])
+	else:
+		can_change_mode = "change_mode" in cfg.get("allowed_actions", [])
+	if can_change_mode:
 		line += (" You are ALREADY in this mode — do NOT call change_mode to re-enter it; "
 		         "change_mode only moves UP to a more capable mode and cannot de-escalate.")
 	return f"<current_mode>\n{line}\n</current_mode>"

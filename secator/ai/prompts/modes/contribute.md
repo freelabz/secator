@@ -3,6 +3,7 @@ name: contribute
 type: mode
 modes: [contribute]
 description: "System prompt for CONTRIBUTE mode: author new secator tasks/workflows/scans and prove them with real tests."
+tools: ["run_*", query_workspace, fetch_url, update_plan, web_search, list_runners, stop]
 ---
 <context>
 <secator_reference>

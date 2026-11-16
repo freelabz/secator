@@ -820,3 +820,70 @@ class TestPromptFrontmatter(unittest.TestCase):
 		# No frontmatter -> returned untouched.
 		meta2, body2 = split_frontmatter("no header here")
 		self.assertEqual((meta2, body2), ({}, "no header here"))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
+class TestModeToolPatterns(unittest.TestCase):
+	"""Phase 1: each mode's frontmatter `tools:` globs are the declared source of truth
+	for which tools the mode exposes."""
+
+	def test_every_mode_declares_tools_patterns(self):
+		from secator.ai.prompts import MODES
+		for mode, cfg in MODES.items():
+			self.assertIn("tools", cfg, f"{mode}: missing tools patterns")
+			self.assertTrue(cfg["tools"], f"{mode}: empty tools patterns")
+
+	def test_glob_include_exclude_and_literals(self):
+		from secator.ai.prompts import tool_matches_mode as m
+		# plain glob includes
+		self.assertTrue(m("run_task", ["run_*"]))
+		self.assertTrue(m("run_shell", ["run_*"]))
+		self.assertFalse(m("query_workspace", ["run_*"]))
+		# `*` includes everything
+		self.assertTrue(m("anything", ["*"]))
+		# exclusion removes from a broad include
+		self.assertTrue(m("run_task", ["*", "!change_mode"]))
+		self.assertFalse(m("change_mode", ["*", "!change_mode"]))
+		# exact literal
+		self.assertTrue(m("stop", ["stop"]))
+		self.assertFalse(m("stop", ["query_workspace"]))
+
+	def test_external_tools_opt_in_by_exact_name_only(self):
+		"""A broad glob never auto-grants an external tool; an exact name does."""
+		from secator.ai.prompts import tool_matches_mode as m
+		# `*` / `run_*` must NOT expose an external tool
+		self.assertFalse(m("add_suggestion", ["*"], external=True))
+		self.assertFalse(m("run_suggestion", ["run_*"], external=True))
+		# but an exact-name opt-in does
+		self.assertTrue(m("add_suggestion", ["query_workspace", "add_suggestion"], external=True))
+		# a built-in with the same patterns IS matched by the glob (not external)
+		self.assertTrue(m("run_task", ["run_*"], external=False))
+
+	def test_patterns_match_tool_modes_and_allowed_actions(self):
+		"""The declared `tools:` globs resolve (over the real tool registry) to exactly the
+		tools each mode exposes today (tool.modes) and to its allowed_actions — proving the
+		new key is consistent with the existing behaviour before Phase 2 makes it operative."""
+		from secator.ai.tools import TOOLS
+		from secator.ai.prompts import MODES, tool_matches_mode
+		name2action = {t.name: t.action for t in TOOLS}
+		names = [t.name for t in TOOLS]
+		for mode, cfg in MODES.items():
+			exposed = {n for n in names if tool_matches_mode(n, cfg["tools"])}
+			via_modes = {t.name for t in TOOLS if mode in t.modes}
+			self.assertEqual(exposed, via_modes, f"{mode}: tools globs != tool.modes exposure")
+			actions = {name2action[n] for n in exposed}
+			self.assertEqual(actions, set(cfg["allowed_actions"]), f"{mode}: tools globs != allowed_actions")
+
+	def test_every_include_pattern_matches_a_known_tool(self):
+		"""Validation: a mode include pattern that matches no known tool is a bug."""
+		import fnmatch
+		from secator.ai.tools import TOOLS
+		from secator.ai.prompts import MODES
+		names = [t.name for t in TOOLS]
+		for mode, cfg in MODES.items():
+			for pat in cfg["tools"]:
+				if pat.startswith("!"):
+					continue
+				self.assertTrue(
+					any(fnmatch.fnmatchcase(n, pat) for n in names),
+					f"{mode}: include pattern {pat!r} matches no known tool")
