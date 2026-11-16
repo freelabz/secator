@@ -6,7 +6,7 @@ Each built-in tool's handler is its ``run(self, action, ctx)`` method in
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 from secator.output_types import Ai, Error, Info, Warning, OutputType
 from secator.utils import format_token_count
@@ -67,6 +67,9 @@ class ActionContext:
 	dangerous: bool = False
 	_query_engine: Any = field(default=None, repr=False)
 	permission_engine: Any = field(default=None, repr=False)
+	# Runs the runner's on_item_update hooks of one driver phase: ``(item, phase=) -> item``.
+	# None (dry-run / library use) skips them.
+	run_item_update_hooks: Optional[Callable] = field(default=None, repr=False)
 
 	def get_query_engine(self):
 		"""Get or create a QueryEngine (cached for reuse across queries).

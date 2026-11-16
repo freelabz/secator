@@ -138,7 +138,8 @@ class TestCommandRunner(unittest.TestCase):
 				# 'on_build' is a build-time hook fired by a PARENT runner during Celery canvas
 				# assembly, not during the runner's own execution. 'on_duplicate' is no longer
 				# fired at all — the in-runner mark_duplicates was removed (dedup is store-side).
-				if hook in ('on_build', 'on_duplicate'):
+				# 'on_item_update' fires only when an existing finding is updated (ai task tools).
+				if hook in ('on_build', 'on_duplicate', 'on_item_update'):
 					self.assertFalse(mock.called, f"Hook '{hook}' should NOT be called during runner execution")
 					continue
 				self.assertTrue(mock.called, f"Hook '{hook}' was not called")
