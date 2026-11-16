@@ -355,7 +355,7 @@ class TestQueryEngine(unittest.TestCase):
 		from secator.query import QueryEngine
 		from secator.query.mongodb import MongoDBBackend
 
-		# Backend follows driver priority (DRIVER_PRIORITY): the authoritative DB
+		# Backend follows driver order (PERSISTENCE_DRIVERS): the authoritative DB
 		# (mongodb) prevails over the relay (api) regardless of list order.
 		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['api', 'mongodb']})
 		self.assertIsInstance(engine.backend, MongoDBBackend)
@@ -409,7 +409,7 @@ class TestQueryEngine(unittest.TestCase):
 		from secator.query import QueryEngine
 		from secator.query.mongodb import MongoDBBackend
 
-		# Driver priority (DRIVER_PRIORITY) ranks mongodb before sqlite, so mongodb
+		# Driver order (PERSISTENCE_DRIVERS) ranks mongodb before sqlite, so mongodb
 		# is selected regardless of list order.
 		engine = QueryEngine(workspace_id='ws123', context={'drivers': ['sqlite', 'mongodb']})
 		self.assertIsInstance(engine.backend, MongoDBBackend)
