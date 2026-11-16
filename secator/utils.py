@@ -1730,15 +1730,32 @@ def _file_lock(path):
 
 	1. the in-process per-path lock (greenlets / threads),
 	2. ``fcntl.flock`` on the ``<path>.lock`` sidecar (processes on this host).
+
+	The sidecar can be unlinked by ``remove_lock_sidecars`` while another process waits on it.
+	A waiter that then gets the lock on the unlinked inode would not exclude a newcomer that
+	created a fresh sidecar, so after acquiring we check that the locked inode is still the one
+	at ``<path>.lock``, and retry on the current file otherwise. That makes unlinking a sidecar
+	while holding its lock safe.
 	"""
 	lock_path = str(path) + '.lock'
 	with _get_path_lock(path):
-		with open(lock_path, 'a') as lock_fd:
+		while True:
+			lock_fd = open(lock_path, 'a')
 			fcntl.flock(lock_fd, fcntl.LOCK_EX)
 			try:
-				yield lock_path
-			finally:
-				fcntl.flock(lock_fd, fcntl.LOCK_UN)
+				current = os.stat(lock_path)
+			except FileNotFoundError:
+				current = None
+			held = os.fstat(lock_fd.fileno())
+			if current is not None and (current.st_dev, current.st_ino) == (held.st_dev, held.st_ino):
+				break
+			fcntl.flock(lock_fd, fcntl.LOCK_UN)  # the sidecar was removed or replaced while we waited
+			lock_fd.close()
+		try:
+			yield lock_path
+		finally:
+			fcntl.flock(lock_fd, fcntl.LOCK_UN)
+			lock_fd.close()
 
 
 def _read_json(path, default):
@@ -1798,8 +1815,8 @@ def atomic_json(path, default=dict):
 	Notes:
 		- The block runs while the lock is HELD — keep it to the read-modify-write,
 		  no slow I/O / subprocess inside, or you serialize every other writer.
-		- The ``.lock`` sidecar file persists (never unlinked — unlinking races
-		  holders); this is harmless.
+		- The ``.lock`` sidecar persists until ``remove_lock_sidecars`` (run end); a
+		  later writer recreates it (see ``_file_lock``).
 		- Safe under both Celery pools (prefork processes + gevent greenlets).
 	"""
 	path = Path(path)
@@ -1903,6 +1920,39 @@ def compact_ndjson(path):
 				pass
 			raise
 	return True
+
+
+def remove_lock_sidecar(path):
+	"""Remove the ``<path>.lock`` sidecar of one file, if present (best-effort).
+
+	The sidecar is unlinked while its lock is held (see ``_file_lock``), so this is safe even if a
+	writer is waiting on it or arrives later: that writer just recreates the sidecar. A missing
+	sidecar or directory (e.g. a report dir that only exists on another host) is a silent no-op.
+
+	Returns:
+		bool: True if a sidecar was removed.
+	"""
+	lock_path = Path(str(path) + '.lock')
+	if not lock_path.exists():
+		return False
+	try:
+		with _file_lock(path) as held:
+			os.unlink(held)
+	except FileNotFoundError:
+		return False
+	return True
+
+
+def remove_lock_sidecars(folder):
+	"""Remove the ``*.lock`` sidecars of the files in ``folder`` (not recursive, best-effort).
+
+	Returns:
+		int: number of sidecars removed.
+	"""
+	folder = Path(folder)
+	if not folder.is_dir():
+		return 0
+	return sum(remove_lock_sidecar(Path(str(lock)[:-len('.lock')])) for lock in sorted(folder.glob('*.lock')))
 
 
 def read_json(path, default=dict):

@@ -1,8 +1,9 @@
 """The append-only JSON findings store: reads keep each finding's latest record, compaction drops
-superseded versions at the end of a run."""
+superseded versions at the end of a run, and lock sidecars are removed safely."""
 import importlib
 import json
 import multiprocessing
+import os
 import shutil
 import tempfile
 import unittest
@@ -13,7 +14,7 @@ import orjson
 
 from secator.query.json import JsonBackend
 from secator.runners._base import Runner
-from secator.utils import append_ndjson, compact_ndjson
+from secator.utils import _file_lock, append_ndjson, compact_ndjson, remove_lock_sidecar, remove_lock_sidecars
 
 
 def _rec(uid, status='OPEN', **extra):
@@ -149,12 +150,13 @@ def _passthrough_hooks(self, hook_type, *args, **kwargs):
 	return args[0] if args else None
 
 
-class TestRunEndCompaction(_StoreTestBase):
+class TestRunEndStoreFinalization(_StoreTestBase):
 
 	def _run_folder_with_duplicates(self):
 		from secator.hooks import json as json_driver
 		from secator.output_types import Url
 		mod = importlib.import_module('secator.tasks.httpx')
+		(self.tmp / 'run').mkdir(exist_ok=True)
 		with mock.patch.object(Runner, 'run_hooks', _passthrough_hooks):
 			task = mod.httpx(['http://localhost'], reports_folder=str(self.tmp / 'run'),
 				context={'drivers': ['json'], 'workspace_id': 'ws'})
@@ -165,13 +167,99 @@ class TestRunEndCompaction(_StoreTestBase):
 		json_driver.update_runner(task)
 		return task
 
-	def test_store_compacted_at_run_end(self):
+	def test_lock_sidecars_removed_and_store_compacted_at_run_end(self):
 		task = self._run_folder_with_duplicates()
 		folder = Path(task.reports_folder)
+		self.assertTrue(list(folder.glob('*.lock')))
 		task.mark_completed()  # top-level run end: on_run_end
+		self.assertEqual(list(folder.glob('*.lock')), [])
 		lines = (folder / 'results.ndjson').read_bytes().splitlines()
 		self.assertEqual(len(lines), 1)
 		self.assertEqual(orjson.loads(lines[0])['tags'], ['seen'])
+
+	def test_writer_after_cleanup_still_works(self):
+		task = self._run_folder_with_duplicates()
+		task.mark_completed()
+		folder = Path(task.reports_folder)
+		append_ndjson(folder / 'results.ndjson', json.dumps(_rec('late')))
+		self.assertEqual(orjson.loads((folder / 'results.ndjson').read_bytes().splitlines()[-1])['_uuid'], 'late')
+		self.assertTrue((folder / 'results.ndjson.lock').exists())  # recreated by the late writer
+		self.assertEqual(remove_lock_sidecars(folder), 1)
+
+	def _task(self, **opts):
+		from secator.hooks import json as json_driver
+		mod = importlib.import_module('secator.tasks.httpx')
+		(self.tmp / 'run').mkdir(exist_ok=True)
+		with mock.patch.object(Runner, 'run_hooks', _passthrough_hooks):
+			task = mod.httpx(['http://localhost'], reports_folder=str(self.tmp / 'run'),
+				context={'drivers': ['json'], 'workspace_id': 'ws'}, **opts)
+		json_driver.update_runner(task)
+		return task
+
+	def _locks(self):
+		return sorted(p.name for p in (self.tmp / 'run').glob('*.lock'))
+
+	def test_leaf_task_lock_removed_when_it_ends(self):
+		from secator.hooks import json as json_driver
+		from secator.output_types import Url
+		task = self._task(has_parent=True)
+		json_driver.update_finding(task, Url(url='http://localhost/a', _context={'workspace_id': 'ws'}))
+		self.assertEqual(self._locks(), ['report_httpx.json.lock', 'results.ndjson.lock'])
+		task.mark_completed()
+		# its own report lock is gone; the run-shared results.ndjson keeps its lock until the run ends
+		self.assertEqual(self._locks(), ['results.ndjson.lock'])
+
+	def test_leaf_task_lock_removed_when_it_fails(self):
+		from secator.output_types import Error
+		task = self._task(has_parent=True)
+		task.add_result(Error(message='boom', _source=task.unique_name), print=False)
+		task.mark_completed()
+		self.assertEqual(task.status, 'FAILURE')
+		self.assertEqual(self._locks(), ['results.ndjson.lock'])  # the error went to the shared store
+
+	def test_chunked_task_keeps_its_lock_until_the_last_chunk_is_done(self):
+		from secator.celery import mark_runner_completed
+		parent = self._task(has_parent=True, has_children=True)
+		chunks = [self._task(has_parent=True, chunk=n, chunk_count=2) for n in (1, 2)]
+		self.assertEqual(self._locks(), [
+			'report_httpx.json.lock', 'report_httpx_1.json.lock', 'report_httpx_2.json.lock'])
+		chunks[0].mark_completed()
+		self.assertEqual(self._locks(), ['report_httpx.json.lock', 'report_httpx_2.json.lock'])
+		chunks[1].mark_completed()
+		self.assertEqual(self._locks(), ['report_httpx.json.lock'])  # the chunked task itself not done yet
+		mark_runner_completed([], parent)  # chord callback, after every chunk
+		self.assertEqual(self._locks(), [])
+
+	def test_shared_locks_removed_after_the_root_run(self):
+		task = self._run_folder_with_duplicates()
+		child = self._task(has_parent=True)
+		child.mark_completed()
+		self.assertEqual(self._locks(), ['report.json.lock', 'results.ndjson.lock'])
+		task.mark_completed()
+		self.assertEqual(self._locks(), [])
+
+	def test_cleanup_is_silent_when_the_dir_is_not_here(self):
+		self.assertFalse(remove_lock_sidecar(self.tmp / 'elsewhere' / 'report.json'))
+		self.assertEqual(remove_lock_sidecars(self.tmp / 'elsewhere'), 0)
+
+	def test_lock_retries_when_sidecar_replaced_while_waiting(self):
+		"""A waiter that got the lock on a sidecar that was unlinked meanwhile must retry on the
+		current file (else it would not exclude a newcomer that created a new sidecar)."""
+		path = self.tmp / 'results.ndjson'
+		real_stat = os.stat
+		calls = {'n': 0}
+
+		def stat(p, *args, **kwargs):
+			if str(p).endswith('.lock'):
+				calls['n'] += 1
+				if calls['n'] == 1:
+					raise FileNotFoundError(p)  # the sidecar was removed while we waited
+			return real_stat(p, *args, **kwargs)
+
+		with mock.patch('secator.utils.os.stat', side_effect=stat):
+			with _file_lock(path):
+				pass
+		self.assertEqual(calls['n'], 2)
 
 
 if __name__ == '__main__':
