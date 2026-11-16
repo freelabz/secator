@@ -848,16 +848,24 @@ class TestModeToolPatterns(unittest.TestCase):
 		self.assertTrue(m("stop", ["stop"]))
 		self.assertFalse(m("stop", ["query_workspace"]))
 
-	def test_external_tools_opt_in_by_exact_name_only(self):
-		"""A broad glob never auto-grants an external tool; an exact name does."""
+	def test_external_tools_never_matched_by_mode_globs(self):
+		"""A mode's globs match CORE tools only: an external tool is NEVER pulled in by the
+		mode's `tools:` patterns, not even by an exact-name entry. (It is added on top via
+		the ai task's extra_tools option — see Phase 2.)"""
 		from secator.ai.prompts import tool_matches_mode as m
-		# `*` / `run_*` must NOT expose an external tool
 		self.assertFalse(m("add_suggestion", ["*"], external=True))
 		self.assertFalse(m("run_suggestion", ["run_*"], external=True))
-		# but an exact-name opt-in does
-		self.assertTrue(m("add_suggestion", ["query_workspace", "add_suggestion"], external=True))
+		# even an exact-name entry does not match an external tool
+		self.assertFalse(m("add_suggestion", ["query_workspace", "add_suggestion"], external=True))
 		# a built-in with the same patterns IS matched by the glob (not external)
 		self.assertTrue(m("run_task", ["run_*"], external=False))
+
+	def test_mode_excludes_tool(self):
+		from secator.ai.prompts import mode_excludes_tool as ex
+		self.assertTrue(ex("change_mode", ["*", "!change_mode"]))
+		self.assertTrue(ex("run_shell", ["*", "!run_*"]))
+		self.assertFalse(ex("run_task", ["*"]))
+		self.assertFalse(ex("query_workspace", ["*", "!change_mode"]))
 
 	def test_patterns_match_tool_modes_and_allowed_actions(self):
 		"""The declared `tools:` globs resolve (over the real tool registry) to exactly the

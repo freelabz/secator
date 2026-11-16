@@ -198,9 +198,13 @@ MODES = {
 
 # Per-mode tool exposure is declared in each mode prompt's frontmatter `tools:` key — a
 # list of fnmatch globs over tool NAMES (e.g. "run_*", "*", "!change_mode"). This is the
-# single source of truth for which tools a mode exposes; it is loaded into MODES here so
-# MODES stays the one mode registry, and resolved by tool_matches_mode(). (Phase 2 makes
-# this the operative driver of build_tool_schemas and drops the per-tool `modes` list.)
+# single source of truth for a mode's BASELINE tools, and it resolves against CORE
+# (built-in) tools only. External/bundle tools are NEVER matched by these globs; they are
+# added on top per-invocation as `extra_tools` (a generic option on the `ai` task), so a
+# caller grants a non-core tool (e.g. `add_suggestion`) to a mode only when needed. The
+# patterns are loaded into MODES here so MODES stays the one mode registry, and resolved
+# by tool_matches_mode(). (Phase 2 makes this the operative driver of build_tool_schemas,
+# wires `extra_tools`, and drops the per-tool `modes` list.)
 for _mode, _cfg in MODES.items():
 	_cfg["tools"] = list(load_prompt_meta(f"modes/{_mode}.md").get("tools") or ["*"])
 
@@ -210,33 +214,38 @@ def mode_tool_patterns(mode: str) -> List[str]:
 	return MODES.get(normalize_mode(mode), {}).get("tools", ["*"])
 
 
+def mode_excludes_tool(tool_name: str, patterns: List[str]) -> bool:
+	"""Whether a mode's ``!`` exclude patterns remove a tool (by fnmatch over its name).
+
+	Used both for baseline tools and for ``extra_tools`` added on top, so a mode can
+	exclude a specific tool from the effective set regardless of how it was included.
+	"""
+	for pat in patterns:
+		p = str(pat)
+		if p.startswith("!") and fnmatch.fnmatchcase(tool_name, p[1:]):
+			return True
+	return False
+
+
 def tool_matches_mode(tool_name: str, patterns: List[str], external: bool = False) -> bool:
-	"""Whether a tool is exposed to a mode given the mode's `tools:` patterns.
+	"""Whether a CORE tool is in a mode's baseline given the mode's `tools:` patterns.
 
 	Patterns are fnmatch globs over tool names, in any order: a plain pattern INCLUDES,
-	a leading ``!`` EXCLUDES (applied after includes). A tool is exposed iff it matches at
-	least one include and no exclude.
+	a leading ``!`` EXCLUDES (applied after includes). A tool is in the baseline iff it
+	matches at least one include and no exclude.
 
-	``external=True`` is the opt-in guard for user/bundle-provided tools: an external tool
-	is included ONLY by an EXACT-name pattern, never by a glob (``*`` / ``run_*``), so a
-	broad ``tools: ["*"]`` can never silently grant a newly dropped-in external tool (e.g.
-	``add_suggestion``) to a mode — the mode must name it explicitly.
+	``external=True`` short-circuits to ``False``: a mode's globs match CORE tools only.
+	External/bundle tools are never pulled in by a mode's `tools:` globs (not even by an
+	exact-name entry) — they are added on top via the `ai` task's ``extra_tools`` option,
+	so a broad ``tools: ["*"]`` can never grant a mode a non-core tool (e.g.
+	``add_suggestion``). See build_tool_schemas (Phase 2).
 	"""
-	includes = [str(p) for p in patterns if not str(p).startswith("!")]
-	excludes = [str(p)[1:] for p in patterns if str(p).startswith("!")]
-
-	def _match(pat: str) -> bool:
-		if external:
-			return pat == tool_name  # externals: exact-name opt-in only
-		return fnmatch.fnmatchcase(tool_name, pat)
-
-	if not any(_match(p) for p in includes):
+	if external:
 		return False
-	for pat in excludes:
-		# Exclusion is always safe (restrictive): fnmatch for built-ins, exact for externals.
-		if pat == tool_name or (not external and fnmatch.fnmatchcase(tool_name, pat)):
-			return False
-	return True
+	includes = [str(p) for p in patterns if not str(p).startswith("!")]
+	if not any(fnmatch.fnmatchcase(tool_name, p) for p in includes):
+		return False
+	return not mode_excludes_tool(tool_name, patterns)
 
 
 def build_mode_banner(mode: str, mode_config: dict = None) -> str:
