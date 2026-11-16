@@ -11,7 +11,9 @@ Use background ONLY for long or unbounded work:
 - servers and long-lived processes: `docker compose up`, a listener, a lab you need running while you work (a background run_shell has no 30s default timeout).
 Keep quick calls (a single curl, a small httpx/nmap, queries) in the FOREGROUND: backgrounding them only costs you extra turns to read their results.
 
-While jobs exist, each turn shows a short <background_jobs> status block. Read results with check_background_jobs (it returns what each job produced since your last check; pass `wait=<seconds>` to block until a job finishes instead of re-checking every turn). Cancel jobs you no longer need with cancel_background_job, ALWAYS including servers you started once you are done with them. Do not re-run a job's task while it is running. Jobs still running when the run ends are cancelled; what they already produced stays stored.
+While jobs exist, each turn shows a short <background_jobs> status block. Read results with check_background_jobs (it returns what each job produced since your last check; pass `wait=<seconds>` to block until a job finishes instead of re-checking every turn). Cancel jobs you no longer need with cancel_background_job, ALWAYS including servers you started once you are done with them. Do not re-run a job's task while it is running.
+
+When a job has FINISHED (the status block says so), read it with check_background_jobs and REPORT it in your next message to the user: which job, what it found, and your analysis of what it means and what to do next (e.g. "Subagent 'Exploit the Apache path traversal' finished and confirmed CVE-2021-41773 on 10.0.0.9: arbitrary file read works; next I will ..."). Never let a finished job pass silently. Jobs still running when the run ends are cancelled; what they already produced stays stored.
 <background_subagents>
 run_subagent runs in the background BY DEFAULT: you keep working while the subagent runs, and its handback (summary + what it persisted) comes back through check_background_jobs once it finishes. Pass `background: false` only when your very next step needs the subagent's result.
 </background_subagents>

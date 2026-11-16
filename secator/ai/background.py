@@ -270,8 +270,15 @@ class BackgroundJobs:
 		if not jobs:
 			return ""
 		lines = [j.summary() for j in jobs]
+		finished = [j.id for j in jobs if j.finished]
+		note = ""
+		if finished:
+			note = (f"FINISHED since you last read them: {', '.join(finished)}. Read them with "
+			        f"check_background_jobs NOW, then tell the user in your message what each one found, "
+			        f"with your analysis (e.g. 'Subagent <name> finished and exploited <X>: <analysis>'). "
+			        f"Never let a finished job pass silently.\n")
 		return (
-			"<background_jobs>\n" + "\n".join(lines) + "\n"
+			"<background_jobs>\n" + "\n".join(lines) + "\n" + note +
 			"Read results with check_background_jobs (pass wait=<seconds> to block until a job "
 			"finishes); stop one you no longer need with cancel_background_job.\n"
 			"</background_jobs>")

@@ -652,6 +652,8 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 | `addons.ai.max_tokens_total` | `int` | `100000` | Max tokens per session |
 | `addons.ai.max_results` | `int` | `500` | Max results passed to AI |
 | `addons.ai.user_response_timeout` | `int` | `600` | User interaction timeout (s) |
+| `addons.ai.background_max_jobs` | `int` | `3` | Max background jobs (background tool calls and subagents) running at once |
+| `addons.ai.background_max_wait` | `int` | `1800` | Max seconds the AI waits on background jobs at once (explicit wait, end of a non-interactive turn, idle input timer hold) |
 | `addons.ai.encrypt_pii` | `bool` | `true` | Encrypt PII before sending |
 | `addons.ai.permissions` | `dict` | See below | AI permission policy |
 

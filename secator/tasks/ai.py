@@ -342,12 +342,12 @@ class ai(PythonRunner):
 		},
 		"background_max_jobs": {
 			"type": int,
-			"default": 3,
+			"default": CONFIG.addons.ai.background_max_jobs,
 			"help": "Max background jobs (background tool calls and subagents) running at once"
 		},
 		"background_max_wait": {
 			"type": int,
-			"default": 1800,
+			"default": CONFIG.addons.ai.background_max_wait,
 			"help": "Max seconds the AI waits on background jobs at once (explicit wait, end of turn, idle input timer hold)"  # noqa: E501
 		},
 		"resume": {

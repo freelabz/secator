@@ -213,6 +213,22 @@ class TestBackgroundDispatch(unittest.TestCase):
 		block = self.mgr.status_block()
 		self.assertIn("bg-1 [running", block)
 		self.assertIn("check_background_jobs", block)
+		self.assertNotIn("FINISHED", block)
+		self.gate.release.set()
+		self.mgr.get("bg-1").thread.join(5)
+		block = self.mgr.status_block()
+		self.assertIn("FINISHED since you last read them: bg-1", block)
+		self.assertIn("your analysis", block)
+		self.mgr.poll(["bg-1"])  # read: no longer listed
+		self.assertEqual(self.mgr.status_block(), "")
+
+	def test_limits_default_from_config(self):
+		from secator.config import CONFIG
+		from secator.tasks.ai import ai as AiTask
+		self.assertEqual(CONFIG.addons.ai.background_max_jobs, 3)
+		self.assertEqual(CONFIG.addons.ai.background_max_wait, 1800)
+		self.assertEqual(AiTask.opts["background_max_jobs"]["default"], CONFIG.addons.ai.background_max_jobs)
+		self.assertEqual(AiTask.opts["background_max_wait"]["default"], CONFIG.addons.ai.background_max_wait)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
