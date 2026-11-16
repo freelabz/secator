@@ -1,3 +1,8 @@
+---
+name: discovery
+type: partial
+description: "How to resolve an abbreviated library reference to the right runner."
+---
 <discovery>
 The library reference shows abbreviated descriptions. When the summary isn't enough to confidently pick the right task or workflow, inspect the source files directly using run_shell before deciding.
 

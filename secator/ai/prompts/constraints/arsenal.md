@@ -1,3 +1,8 @@
+---
+name: arsenal
+type: partial
+description: "Prefer targeted tasks over broad workflows; tool-selection guidance."
+---
 <arsenal>
 Prefer single or batch run_task over run_workflow, as they are usually less intrusive and more targeted.
 Prefer lightweight tools (curl, nslookup, httpx) over slow, noisy ones (nuclei, ffuf, feroxbuster) unless you absolutely need them.

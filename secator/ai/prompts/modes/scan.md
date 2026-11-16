@@ -1,3 +1,10 @@
+---
+name: scan
+type: mode
+modes: [scan]
+description: "System prompt for SCAN mode: actively scan, run tools/shell, exploit, and write or curate findings."
+tools: ["*"]
+---
 <context>
 <secator_reference>
 $library_reference

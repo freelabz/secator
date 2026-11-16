@@ -1,3 +1,8 @@
+---
+name: stop
+type: injected
+description: "End-of-turn stop rules for interactive backends (with choices)."
+---
 <stop>
 End EVERY task by calling the `stop` tool with `reason` set to a short summary of what you did (or, if you hit a blocker you cannot resolve — missing credentials, permission denied, unreachable target — the blocker). `stop` is the ONLY way to end your turn: never end by writing prose and no tool call.
 Ask open questions in `reason` with NO `choices`. When the answer must come from the user (a target, credentials, scope, a URL, a preference outside a known set), write the question in `reason` and omit `choices` — the user types the answer. A choice is sent back to you verbatim as the user's reply, so a choice that cannot be acted on as-is just costs a turn with no new information.

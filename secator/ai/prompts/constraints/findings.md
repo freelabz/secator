@@ -1,3 +1,8 @@
+---
+name: findings
+type: partial
+description: "How and when to record findings with add_finding."
+---
 <findings>
 Use the add_finding tool to record confirmed or suspected vulnerabilities.
 When summarizing vulnerabilities, always include matched_at targets.

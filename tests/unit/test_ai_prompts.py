@@ -397,7 +397,7 @@ class TestPrompts(unittest.TestCase):
 		# These moved out of common into runners.txt (not in chat's read-only surface).
 		self.assertNotIn("<guardrails>", COMMON_RULES)
 		self.assertNotIn("<truncated_output>", COMMON_RULES)
-		runners = load_prompt("constraints/runners.txt")
+		runners = load_prompt("constraints/runners.md")
 		# Truncated-output guidance was removed (the model re-runs/filters on its own and
 		# shell commands are short/safe to repeat). file_io (output dir) still lives here.
 		self.assertNotIn("<truncated_output>", runners)
@@ -760,3 +760,138 @@ class TestSessionContext(unittest.TestCase):
 		self.assertNotIn("<session_context>", get_system_prompt("chat", backend=None, isolated=None))
 		self.assertIn("<session_context>", get_system_prompt("chat", backend=None, isolated=True))
 		self.assertIn("<session_context>", get_system_prompt("scan", backend=None, isolated=False))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
+class TestPromptFrontmatter(unittest.TestCase):
+	"""Phase 1: prompt files are .md with a YAML frontmatter header, and the
+	rendered body is byte-identical to the pre-frontmatter content."""
+
+	def _prompt_files(self):
+		from secator.ai.prompts import PROMPTS_DIR
+		return sorted(PROMPTS_DIR.glob("**/*.md"))
+
+	def test_no_legacy_txt_prompts_remain(self):
+		from secator.ai.prompts import PROMPTS_DIR
+		self.assertEqual(list(PROMPTS_DIR.glob("**/*.txt")), [], "prompts migrated to .md")
+
+	def test_every_prompt_has_valid_frontmatter(self):
+		"""name == stem, type in PROMPT_TYPES, description present; mode prompts carry
+		a `modes` list of real modes."""
+		from secator.ai.prompts import load_prompt_meta, PROMPT_TYPES, PROMPTS_DIR, MODES
+		for path in self._prompt_files():
+			rel = str(path.relative_to(PROMPTS_DIR))
+			meta = load_prompt_meta(rel)
+			self.assertTrue(meta, f"{rel}: missing frontmatter")
+			self.assertEqual(meta.get("name"), path.stem, f"{rel}: name must equal file stem")
+			self.assertIn(meta.get("type"), PROMPT_TYPES, f"{rel}: bad type {meta.get('type')!r}")
+			self.assertTrue(str(meta.get("description", "")).strip(), f"{rel}: description required")
+			if meta["type"] == "mode":
+				modes = meta.get("modes")
+				self.assertIsInstance(modes, list, f"{rel}: mode prompt needs a `modes` list")
+				for mode in modes:
+					self.assertIn(mode, MODES, f"{rel}: unknown mode {mode!r}")
+
+	def test_every_mode_has_a_mode_prompt_file(self):
+		"""Each MODES entry is backed by exactly one `type: mode` prompt file."""
+		from secator.ai.prompts import load_prompt_meta, PROMPTS_DIR, MODES
+		served = {}
+		for path in self._prompt_files():
+			meta = load_prompt_meta(str(path.relative_to(PROMPTS_DIR)))
+			if meta.get("type") == "mode":
+				for mode in meta.get("modes", []):
+					served.setdefault(mode, []).append(path.name)
+		for mode in MODES:
+			self.assertIn(mode, served, f"mode {mode!r} has no `type: mode` prompt file")
+
+	def test_frontmatter_is_stripped_from_rendered_body(self):
+		"""The rendered prompt never leaks the YAML header."""
+		from secator.ai.prompts import load_prompt, PROMPTS_DIR
+		for path in self._prompt_files():
+			body = load_prompt(str(path.relative_to(PROMPTS_DIR)))
+			self.assertNotIn("\nname:", "\n" + body.split("\n", 1)[0])
+			self.assertFalse(body.lstrip().startswith("---\nname:"), f"{path.name}: frontmatter leaked")
+
+	def test_split_frontmatter_roundtrip(self):
+		from secator.ai.prompts import split_frontmatter
+		meta, body = split_frontmatter("---\nname: x\ntype: partial\n---\nBODY\nkeep")
+		self.assertEqual(meta["name"], "x")
+		self.assertEqual(body, "BODY\nkeep")
+		# No frontmatter -> returned untouched.
+		meta2, body2 = split_frontmatter("no header here")
+		self.assertEqual((meta2, body2), ({}, "no header here"))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
+class TestModeToolPatterns(unittest.TestCase):
+	"""Phase 1: each mode's frontmatter `tools:` globs are the declared source of truth
+	for which tools the mode exposes."""
+
+	def test_every_mode_declares_tools_patterns(self):
+		from secator.ai.prompts import MODES
+		for mode, cfg in MODES.items():
+			self.assertIn("tools", cfg, f"{mode}: missing tools patterns")
+			self.assertTrue(cfg["tools"], f"{mode}: empty tools patterns")
+
+	def test_glob_include_exclude_and_literals(self):
+		from secator.ai.prompts import tool_matches_mode as m
+		# plain glob includes
+		self.assertTrue(m("run_task", ["run_*"]))
+		self.assertTrue(m("run_shell", ["run_*"]))
+		self.assertFalse(m("query_workspace", ["run_*"]))
+		# `*` includes everything
+		self.assertTrue(m("anything", ["*"]))
+		# exclusion removes from a broad include
+		self.assertTrue(m("run_task", ["*", "!change_mode"]))
+		self.assertFalse(m("change_mode", ["*", "!change_mode"]))
+		# exact literal
+		self.assertTrue(m("stop", ["stop"]))
+		self.assertFalse(m("stop", ["query_workspace"]))
+
+	def test_external_tools_never_matched_by_mode_globs(self):
+		"""A mode's globs match CORE tools only: an external tool is NEVER pulled in by the
+		mode's `tools:` patterns, not even by an exact-name entry. (It is added on top via
+		the ai task's extra_tools option — see Phase 2.)"""
+		from secator.ai.prompts import tool_matches_mode as m
+		self.assertFalse(m("add_suggestion", ["*"], external=True))
+		self.assertFalse(m("run_suggestion", ["run_*"], external=True))
+		# even an exact-name entry does not match an external tool
+		self.assertFalse(m("add_suggestion", ["query_workspace", "add_suggestion"], external=True))
+		# a built-in with the same patterns IS matched by the glob (not external)
+		self.assertTrue(m("run_task", ["run_*"], external=False))
+
+	def test_mode_excludes_tool(self):
+		from secator.ai.prompts import mode_excludes_tool as ex
+		self.assertTrue(ex("change_mode", ["*", "!change_mode"]))
+		self.assertTrue(ex("run_shell", ["*", "!run_*"]))
+		self.assertFalse(ex("run_task", ["*"]))
+		self.assertFalse(ex("query_workspace", ["*", "!change_mode"]))
+
+	def test_patterns_match_tool_modes_and_allowed_actions(self):
+		"""The declared `tools:` globs resolve (over the real tool registry) to exactly the
+		tools each mode exposes today (tool.modes) and to its allowed_actions — proving the
+		new key is consistent with the existing behaviour before Phase 2 makes it operative."""
+		from secator.ai.tools import TOOLS
+		from secator.ai.prompts import MODES, tool_matches_mode
+		name2action = {t.name: t.action for t in TOOLS}
+		names = [t.name for t in TOOLS]
+		for mode, cfg in MODES.items():
+			exposed = {n for n in names if tool_matches_mode(n, cfg["tools"])}
+			via_modes = {t.name for t in TOOLS if mode in t.modes}
+			self.assertEqual(exposed, via_modes, f"{mode}: tools globs != tool.modes exposure")
+			actions = {name2action[n] for n in exposed}
+			self.assertEqual(actions, set(cfg["allowed_actions"]), f"{mode}: tools globs != allowed_actions")
+
+	def test_every_include_pattern_matches_a_known_tool(self):
+		"""Validation: a mode include pattern that matches no known tool is a bug."""
+		import fnmatch
+		from secator.ai.tools import TOOLS
+		from secator.ai.prompts import MODES
+		names = [t.name for t in TOOLS]
+		for mode, cfg in MODES.items():
+			for pat in cfg["tools"]:
+				if pat.startswith("!"):
+					continue
+				self.assertTrue(
+					any(fnmatch.fnmatchcase(n, pat) for n in names),
+					f"{mode}: include pattern {pat!r} matches no known tool")

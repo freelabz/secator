@@ -1,3 +1,8 @@
+---
+name: proof
+type: partial
+description: "Proving RCE via a call-back to attacker-controlled infrastructure."
+---
 <proof>
 Proving remote code execution often requires the TARGET to connect BACK to
 attacker-controlled infrastructure (a reverse shell, or a JNDI/LDAP/RMI/DNS lookup that

@@ -1252,7 +1252,7 @@ class ai(PythonRunner):
 					continue
 
 				# Continue prompt (tool results analysed, keep going)
-				stop_or_continue = load_prompt("constraints/tool_result_analysis.txt")
+				stop_or_continue = load_prompt("constraints/tool_result_analysis.md")
 				continue_msg = format_continue(iteration, self.max_iterations, stop_or_continue)
 				self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
 
@@ -1514,7 +1514,7 @@ class ai(PythonRunner):
 			self.mode = fast_mode
 		else:
 			try:
-				selection_prompt = load_prompt("modes/_selection.txt")
+				selection_prompt = load_prompt("modes/_selection.md")
 				messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
 				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
 					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501

@@ -1,3 +1,8 @@
+---
+name: _selection
+type: utility
+description: "Classifier prompt that maps a user request to a mode (scan/chat/exploit)."
+---
 <mode>
 Classify the following user prompt as exactly one of: 'scan', 'chat', or 'exploit'.
 'chat' = the user wants to ask questions, get summaries, or discuss findings
