@@ -510,17 +510,26 @@ class TestFindingUpdatesReadBack(unittest.TestCase):
 		self.assertEqual(results[0]['tags'], ['seen'])
 		self.assertNotIn('_uuid', results[0])
 
-	def _api_backend(self, docs):
-		"""An ApiBackend whose search returns ``docs`` (with the API's ``_id``) and PUTs succeed."""
+	def _api_backend(self, docs, page_cap=None, search_error=None, put=None, ignore_skip=False):
+		"""An ApiBackend whose search returns ``docs`` (with the API's ``_id``) and PUTs succeed.
+
+		page_cap: the API serves at most this many per page; search_error: raised by the search;
+		put: callable(finding_id) -> response (may raise); ignore_skip: always serve the first page."""
 		from unittest.mock import MagicMock
 		from secator.query.api import ApiBackend
 		backend = ApiBackend(workspace_id='ws1')
 
 		def responses(method, endpoint, data=None):
 			if method == 'POST':
+				if search_error:
+					raise search_error
 				query = dict(part.split('=') for part in endpoint.split('?', 1)[1].split('&'))
-				skip, limit = int(query['skip']), int(query['limit'])
+				skip, limit = (0 if ignore_skip else int(query['skip'])), int(query['limit'])
+				if page_cap:
+					limit = min(limit or page_cap, page_cap)
 				return {'items': [dict(d) for d in (docs[skip:skip + limit] if limit else docs[skip:])]}
+			if put:
+				return put(endpoint.rsplit('/', 1)[-1])
 			return {'success': True, 'modified_count': 1}
 
 		backend._make_request = MagicMock(side_effect=responses)
@@ -546,6 +555,43 @@ class TestFindingUpdatesReadBack(unittest.TestCase):
 		backend = self._api_backend(docs)
 		self.assertEqual(backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}}), 1500)
 		self.assertEqual(len(self._puts(backend)), 1500)
+
+	def test_api_update_reaches_every_page_under_an_api_page_cap(self):
+		docs = [{'_id': f'oid{i}', '_uuid': f'u{i}'} for i in range(700)]
+		backend = self._api_backend(docs, page_cap=300)  # the API serves at most 300 per page
+		self.assertEqual(backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}}), 700)
+
+	def test_api_update_stops_if_the_api_ignores_skip(self):
+		docs = [{'_id': f'oid{i}', '_uuid': f'u{i}'} for i in range(5)]
+		backend = self._api_backend(docs, ignore_skip=True)
+		self.assertEqual(backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}}), 5)
+
+	def test_api_update_raises_on_search_error(self):
+		# An auth / server error must not be reported as "no matching finding".
+		backend = self._api_backend([], search_error=RuntimeError('403 Forbidden'))
+		with self.assertRaises(RuntimeError):
+			backend.update({'_uuid': 'u1'}, {'$set': {'tags': ['x']}})
+		self.assertEqual(backend.search({'_uuid': 'u1'}), [])  # plain reads still degrade to []
+
+	def test_api_update_raises_when_every_write_fails(self):
+		def put(finding_id):
+			raise RuntimeError('500 Server Error')
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'u1'}, {'_id': 'oid2', '_uuid': 'u2'}], put=put)
+		with self.assertRaises(RuntimeError):
+			backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}})
+
+	def test_api_update_counts_successful_writes(self):
+		def put(finding_id):
+			if finding_id == 'oid2':
+				raise RuntimeError('500 Server Error')
+			return {'success': True, 'modified_count': 0}  # already in the requested state
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'u1'}, {'_id': 'oid2', '_uuid': 'u2'}], put=put)
+		self.assertEqual(backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}}), 1)
+
+	def test_api_update_without_dotted_paths_sends_fields_as_is(self):
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'u1', 'extra_data': {'keep': 1}}])
+		backend.update({'_uuid': 'u1'}, {'$set': {'status': 'FIXED'}})
+		self.assertEqual(self._puts(backend), [('finding/oid1', {'status': 'FIXED'})])
 
 	def test_api_update_no_match(self):
 		backend = self._api_backend([])
