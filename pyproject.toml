@@ -89,7 +89,7 @@ worker = [
   'flower < 3',
 ]
 redis = [
-  'redis < 6',
+  'celery[redis] < 6',
 ]
 mongodb = [
   'pymongo < 5',
