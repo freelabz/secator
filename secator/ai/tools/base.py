@@ -66,6 +66,22 @@ _DESCRIPTION_SCHEMA = {
 	               "'Fire the reflected-XSS payload at level 1'. Shown to the user in place of the bare task name."
 }
 
+_BACKGROUND_SCHEMA = {
+	"type": "boolean",
+	"description": "Run this call as a BACKGROUND job: it is approved like any call, started, and your turn "
+	               "continues WITHOUT waiting for it (other calls in the same batch still run normally). "
+	               "Read its results later with check_background_jobs; stop it with cancel_background_job. "
+	               "Use it ONLY for long or unbounded work (nuclei on many hosts, a long fuzz, a big "
+	               "workflow, a server or `docker compose up`); keep quick calls in the foreground."
+}
+
+_SUBAGENT_BACKGROUND_SCHEMA = {
+	"type": "boolean",
+	"description": "Defaults to TRUE for subagents: the subagent runs as a background job and you keep "
+	               "working; its handback (summary + persisted findings) comes back through "
+	               "check_background_jobs. Set false only when your very next step needs its result."
+}
+
 
 class BaseTool:
 	"""One AI tool. Subclasses set the class attributes; the registry does the rest.

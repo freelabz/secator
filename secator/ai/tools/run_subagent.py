@@ -4,7 +4,7 @@ from secator.output_types import Error
 from secator.ai.prompts import normalize_mode
 from secator.ai.actions import ActionContext, _get_result_context
 from secator.ai.tools._runner import _run_runner
-from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA
+from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA, _SUBAGENT_BACKGROUND_SCHEMA
 
 
 class RunSubagent(BaseTool):
@@ -38,6 +38,7 @@ class RunSubagent(BaseTool):
 					},
 					"targets": _TARGETS_SCHEMA,
 					"description": _DESCRIPTION_SCHEMA,
+					"background": _SUBAGENT_BACKGROUND_SCHEMA,
 					"mode": {
 						"type": "string",
 						"enum": ["chat", "scan", "exploit"],

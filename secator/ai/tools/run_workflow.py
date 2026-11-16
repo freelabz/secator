@@ -2,7 +2,7 @@
 from typing import Dict, Generator
 from secator.ai.actions import ActionContext
 from secator.ai.tools._runner import _run_runner
-from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA
+from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA, _BACKGROUND_SCHEMA
 
 
 class RunWorkflow(BaseTool):
@@ -22,6 +22,7 @@ class RunWorkflow(BaseTool):
 					},
 					"targets": _TARGETS_SCHEMA,
 					"description": _DESCRIPTION_SCHEMA,
+					"background": _BACKGROUND_SCHEMA,
 					"opts": {
 						"type": "object",
 						"description": "Optional workflow options (e.g. profiles). Control/security flags are ignored."

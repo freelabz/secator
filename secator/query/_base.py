@@ -47,6 +47,23 @@ class QueryBackend(ABC):
 		"""
 		return None
 
+	def get_runner_status(self, runner_id: str, runner_type: str) -> Optional[Dict[str, Any]]:
+		"""Live status of one runner, read from the store (persisted DURING the run by the
+		driver's on_init/on_start/on_interval/on_end hooks on every driver).
+
+		Returns ``{"id", "status", "done", "progress"}`` (status: PENDING/RUNNING/SUCCESS/
+		FAILURE/REVOKED/SKIPPED), or None when the runner is not (yet) in the store.
+		"""
+		doc = self.get_runner(runner_id, runner_type)
+		if not doc:
+			return None
+		return {
+			"id": runner_id,
+			"status": str(doc.get("status") or "PENDING").upper(),
+			"done": bool(doc.get("done", False)),
+			"progress": doc.get("progress", 0),
+		}
+
 	def get_base_query(self) -> dict:
 		"""Base query - ALWAYS enforced, cannot be overridden."""
 		return {

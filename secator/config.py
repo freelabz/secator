@@ -309,6 +309,11 @@ class AiAddon(StrictModel):
 	# locally checked-out PoCs. On reaching the cap, the model is given one final turn to
 	# stop gracefully (announcing the limit) so the user can resume with "continue".
 	max_iterations: int = 100
+	# Background jobs (background tool calls and subagents): max jobs running at once, and
+	# max seconds the AI waits on them at once (explicit wait, end of a non-interactive
+	# turn, idle input timer hold). Per-run overridable via the ai task options.
+	background_max_jobs: int = 3
+	background_max_wait: int = 1800
 	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True

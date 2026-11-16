@@ -3,7 +3,7 @@ from typing import Dict, Generator
 from secator.output_types import Error
 from secator.ai.actions import ActionContext, _get_result_context
 from secator.ai.tools._runner import _run_runner
-from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA
+from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA, _BACKGROUND_SCHEMA
 
 
 class RunTask(BaseTool):
@@ -25,6 +25,7 @@ class RunTask(BaseTool):
 					},
 					"targets": _TARGETS_SCHEMA,
 					"description": _DESCRIPTION_SCHEMA,
+					"background": _BACKGROUND_SCHEMA,
 					"opts": {
 						"type": "object",
 						"description": "Optional task-specific options (e.g. ports, rate_limit). Control/security flags are ignored."

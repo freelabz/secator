@@ -241,7 +241,13 @@ def _child_preamble(
 	context[id_key] = str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
-	return _build_child_hooks_or_denial(context)
+	hooks, denial = _build_child_hooks_or_denial(context)
+	# In a background job thread, let the child runners register on their job so
+	# cancel_background_job (and the end-of-run teardown) can stop them.
+	from secator.ai.background import current_job, add_background_hooks
+	if denial is None and current_job() is not None:
+		hooks = add_background_hooks(hooks)
+	return hooks, denial
 
 
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
@@ -416,6 +422,16 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		if IN_WORKER:
 			run_opts["sync"] = False
 			run_opts["tty"] = False
+
+	# Background job + Celery dispatch: fire-and-forget (no thread blocks polling the Celery
+	# result). The child persists itself through its driver hooks on its worker; the job is
+	# then tracked by its runner id in the store (status + findings), and cancelled by revoke.
+	# A subagent keeps its thread: its handback is built from its live output stream.
+	from secator.ai.background import current_job
+	job = current_job()
+	if job is not None and job.can_detach and not is_ai_subagent and not run_opts.get("sync"):
+		run_opts["no_poll"] = True
+		job.detached = True
 
 	hooks, denial = _child_preamble(ctx, context, runner_type)
 	if denial is not None:
