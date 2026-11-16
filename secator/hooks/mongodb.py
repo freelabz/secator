@@ -6,8 +6,8 @@ from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.hooks._dedup import build_baseline_index, compute_duplicate_updates
-from secator.output_types import OUTPUT_TYPES, Warning, is_output_type
+from secator.hooks._dedup import baseline_fields, build_baseline_index, compute_duplicate_updates
+from secator.output_types import FINDING_TYPES, OUTPUT_TYPES, Warning, is_output_type
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
 
@@ -280,11 +280,21 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 	# on large workspaces (observed at scale: 47k+ docs, growing). Instead of materializing every
 	# full finding, stream the cursor and fold it into a compact index (uuids/_related/copy-fields
 	# per equality key) — peak memory is O(distinct keys × tiny payload), independent of full-doc
-	# size. See build_baseline_index. ponytail: streaming folds the peak; add a server-side field
-	# projection to the cursor if the transient per-batch load ever matters.
+	# size. See build_baseline_index.
+	# Fetch finding types projected to the fields dedup reads (equality fields, _related, copy fields):
+	# the rest of each doc (extra_data, headers, descriptions...) was streamed and discarded on every
+	# pass. Any other type is fetched whole (its equality may need any field). Groups never mix types,
+	# so reading the two cursors one after the other builds the same index.
+	finding_types = [t.get_name() for t in FINDING_TYPES]
+	baseline_projection = dict.fromkeys(baseline_fields(CONFIG.addons.mongodb.duplicate_main_copy_fields), 1)
+	baseline_cursors = (
+		db.findings.find({**workspace_query, '_type': {'$in': finding_types}}, baseline_projection),
+		db.findings.find({**workspace_query, '_type': {'$nin': finding_types + list(exclude_types)}}),
+	)
 	baseline_stream = (
 		load_finding(doc, exclude_types)
-		for doc in db.findings.find(workspace_query).sort('_timestamp', -1)
+		for cursor in baseline_cursors
+		for doc in cursor.sort('_timestamp', -1)
 	)
 	baseline_index = build_baseline_index(
 		(f for f in baseline_stream if f is not None),

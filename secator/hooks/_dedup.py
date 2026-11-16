@@ -1,4 +1,28 @@
 # secator/hooks/_dedup.py
+from dataclasses import fields
+
+
+def baseline_fields(copy_fields=None):
+	"""Field names a baseline *finding* needs for duplicate tagging.
+
+	That is every finding type's equality fields (``compare=True``, which ``_compare_key()`` reads),
+	plus ``_type``, ``_related`` and the ``copy_fields`` kept by ``build_baseline_index``. Backends
+	can fetch only these for finding types instead of whole documents: the baseline is the whole
+	workspace, so dropping heavy fields (``extra_data``, headers, descriptions...) shrinks every dedup
+	pass. Other output types (e.g. ``progress``, whose equality includes ``extra_data``) are not
+	covered and must be fetched whole.
+
+	Args:
+		copy_fields (list): Field names whose first non-empty baseline value is retained.
+
+	Returns:
+		list[str]: Sorted field names.
+	"""
+	from secator.output_types import FINDING_TYPES
+	names = {'_type', '_related', *(copy_fields or [])}
+	for otype in FINDING_TYPES:
+		names.update(f.name for f in fields(otype) if f.compare)
+	return sorted(names)
 
 
 def build_baseline_index(findings, copy_fields=None):
