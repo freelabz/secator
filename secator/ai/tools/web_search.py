@@ -16,6 +16,10 @@ from ``mode`` and returns a list of plain result dicts. Everything uses
 ``secator.requests`` (the shared retry session) and fails soft — a search error
 comes back as an empty list, never an exception that aborts the AI loop.
 
+When ``addons.ai.web_proxy_url`` is set, every engine goes through that proxy (the same one
+``fetch_url`` uses). The DuckDuckGo HTML engine uses stdlib ``urllib``, which only speaks
+http(s) proxies: with a socks proxy it is skipped and the Instant-Answer fallback is used.
+
 Design mirrors Pentagi's ``web_search`` (unified query + intent ``mode``, keyless
 DuckDuckGo/Sploitus as the always-available engines), trimmed to what secator
 needs and to zero new dependencies.
@@ -73,6 +77,23 @@ _DDG_SNIPPET_RE = re.compile(r'result__snippet"[^>]*>(.*?)</a>', re.S)
 VALID_MODES = ('answer', 'links', 'exploit')
 
 
+def _proxies():
+	"""Explicit AI web proxy (``addons.ai.web_proxy_url``) as a requests proxies dict, or None."""
+	from secator.ai.tools.fetch_url import ai_web_proxies
+	return ai_web_proxies() or None
+
+
+def _urlopen(req, timeout):
+	"""``urllib`` open honoring ``addons.ai.web_proxy_url`` (http/https proxies only)."""
+	proxies = _proxies()
+	if not proxies:
+		return urllib.request.urlopen(req, timeout=timeout)
+	if not urlparse(proxies['https']).scheme.startswith('http'):
+		raise ValueError('socks web_proxy_url is not supported by the urllib engine')
+	opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies))
+	return opener.open(req, timeout=timeout)
+
+
 def _clamp(n, lo, hi, default):
 	try:
 		n = int(n)
@@ -124,7 +145,7 @@ def duckduckgo_search(query, max_results=5):
 	try:
 		data = urlencode({'q': query, 'kl': 'us-en'}).encode()
 		req = urllib.request.Request(_DDG_URL, data=data, headers=_DDG_HEADERS)
-		with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+		with _urlopen(req, timeout=_TIMEOUT) as resp:
 			status = getattr(resp, 'status', None) or resp.getcode()
 			body = resp.read().decode('utf-8', 'ignore')
 	except Exception as e:  # noqa: BLE001 - fail soft: an engine error is data, not a crash
@@ -174,6 +195,7 @@ def ddg_instant_answer(query, max_results=5):
 			params={'q': query, 'format': 'json', 'no_html': '1', 'no_redirect': '1'},
 			headers={'User-Agent': _UA, 'Accept': 'application/json'},
 			timeout=_TIMEOUT,
+			proxies=_proxies(),
 		)
 		resp.raise_for_status()
 		data = resp.json()
@@ -226,6 +248,7 @@ def sploitus_search(query, max_results=10, sort='default', exploit_type='exploit
 			json={'type': etype, 'sort': sort, 'query': query, 'title': False, 'offset': 0},
 			headers={'User-Agent': _UA, 'Accept': 'application/json'},
 			timeout=_TIMEOUT,
+			proxies=_proxies(),
 		)
 		resp.raise_for_status()
 		data = resp.json()
@@ -264,6 +287,7 @@ def tavily_search(query, max_results=5, api_key=''):
 			# header, not the JSON body.
 			headers={'User-Agent': _UA, 'Authorization': f'Bearer {api_key}'},
 			timeout=_TIMEOUT,
+			proxies=_proxies(),
 		)
 		resp.raise_for_status()
 		data = resp.json()

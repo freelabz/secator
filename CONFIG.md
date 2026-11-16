@@ -654,6 +654,8 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 | `addons.ai.user_response_timeout` | `int` | `600` | User interaction timeout (s) |
 | `addons.ai.encrypt_pii` | `bool` | `true` | Encrypt PII before sending |
 | `addons.ai.permissions` | `dict` | See below | AI permission policy |
+| `addons.ai.fetch_url_ssrf_protection` | `bool` | `false` | Strict SSRF mode for the AI `fetch_url` tool: resolve the host locally and require public IPs, plus a connected-peer check (DNS rebinding). Off = no address filtering (http/https only). Enable on shared or server-side deployments. |
+| `addons.ai.web_proxy_url` | `string` | `''` | Proxy for the AI's own web calls only (`fetch_url`, `web_search`): `http://`, `https://` or `socks5h://` (socks needs `pip install 'requests[socks]'`). `HTTP(S)_PROXY` env vars are ignored by `fetch_url`. In strict mode the target host must still resolve locally. |
 
 **Custom provider / OpenAI-compatible gateway.** Any OpenAI-compatible endpoint (a
 gateway/router, a self-hosted server, etc.) works by setting `addons.ai.api_base` +
