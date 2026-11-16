@@ -483,7 +483,7 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 		list: Final results
 	"""
 	# Skip if the run was stopped and this runner already completed as REVOKED (on_task_revoked)
-	if not claim_finalizer(mark_runner_completed.request.id):
+	if finalizer_claimed(mark_runner_completed.request.id):
 		debug(f'Runner {runner.unique_name} was already completed on revoke, skipping', sub='celery')
 		return []
 
@@ -532,9 +532,12 @@ def _iter_signatures(sig):
 	sig = sig if isinstance(sig, dict) else dict(sig)
 	yield sig
 	options = sig.get('options') or {}
-	for key in ('chain', 'link'):
-		for child in options.get(key) or []:
-			yield from _iter_signatures(child)
+	for child in reversed(options.get('chain') or []):  # stored next-link-last, like request.chain
+		yield from _iter_signatures(child)
+	for child in options.get('link') or []:
+		yield from _iter_signatures(child)
+	# Continuation of an outer chord (e.g. a chunked task replaced inside a parallel group)
+	yield from _iter_signatures(options.get('chord'))
 	kwargs = sig.get('kwargs') or {}
 	for key in ('tasks', 'header', 'body'):
 		value = kwargs.get(key)
@@ -561,29 +564,49 @@ def pending_finalizers(request):
 	return [sig for sig in sigs if sig.get('task') == FINALIZER_TASK]
 
 
-def claim_finalizer(task_id):
-	"""Claim the right to run the finalizer ``task_id``: True only the first time.
+def _finalizer_key(task_id):
+	return f'finalizer-{task_id}'
 
-	Atomic across workers when the result backend has an atomic ``incr`` (Redis, Memcached);
-	otherwise per worker process. Both the normal ``mark_runner_completed`` run and a revoke
-	claim it, so a runner is never completed twice.
+
+def claim_finalizer(task_id):
+	"""Claim the right to complete the runner of finalizer ``task_id`` on revoke: True only once.
+
+	Atomic across workers when the result backend has an atomic ``incr`` that creates missing keys
+	(e.g. Redis); otherwise per worker process. Only the revoke path claims (it runs in the worker
+	main process and is never redelivered); the normal ``mark_runner_completed`` only checks it,
+	with :func:`finalizer_claimed`, so a redelivered finalizer is never blocked by itself.
 	"""
 	if not task_id:
 		return True
-	backend = app.backend
-	key = backend.get_key_for_task(f'finalizer-{task_id}')
 	try:
-		claimed = backend.incr(key) == 1
-		_expire_state_key(backend, key)
-		return claimed
-	except NotImplementedError:
-		pass
+		backend = app.backend
+		key = backend.get_key_for_task(_finalizer_key(task_id))
+		count = backend.incr(key)
+		if isinstance(count, int):
+			_expire_state_key(backend, key)
+			return count == 1
+	except (AttributeError, NotImplementedError):
+		pass  # backend has no key/value or atomic counter API: per-process fallback below
 	except Exception as e:  # noqa: BLE001
 		debug(f'finalizer claim failed for {task_id}: {e}', sub='celery.state')
 	if task_id in _claimed_finalizers:
 		return False
 	_claimed_finalizers.add(task_id)
 	return True
+
+
+def finalizer_claimed(task_id):
+	"""Whether the runner of finalizer ``task_id`` was already completed on revoke."""
+	if not task_id:
+		return False
+	if task_id in _claimed_finalizers:
+		return True
+	try:
+		backend = app.backend
+		return bool(backend.get(backend.get_key_for_task(_finalizer_key(task_id))))
+	except Exception as e:  # noqa: BLE001 — no key/value API: only the per-process record above
+		debug(f'finalizer check failed for {task_id}: {e}', sub='celery.state')
+		return False
 
 
 def finalize_revoked(sig):

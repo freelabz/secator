@@ -120,6 +120,27 @@ class TestFinalizeRevokedRunners(unittest.TestCase):
 		_run_finalizer(_runner(calls=calls), 'f-root')
 		self.assertEqual([c for c in calls if c[0] == 'on_run_end'], [('on_run_end', 'REVOKED')])
 
+	def test_redelivered_normal_finalizer_is_not_blocked_by_itself(self):
+		calls = []
+		_run_finalizer(_runner(calls=calls), 'f-x')
+		_run_finalizer(_runner(calls=calls), 'f-x')  # e.g. redelivered after a lost worker
+		self.assertEqual([c for c in calls if c[0] == 'on_run_end'], [('on_run_end', 'SUCCESS')] * 2)
+
+	def test_nested_chain_options_in_run_order(self):
+		workflow, scan = _runner(has_parent=True), _runner()
+		body = dict(sc.join_results.si().set(task_id='body'))
+		# A continuation chain stored in options, next-link-last: the scan finalizer runs last.
+		body['options']['chain'] = [_finalizer(scan, 'f-scan'), _finalizer(workflow, 'f-wf')]
+		ids = [s['options']['task_id'] for s in pending_finalizers(_request(chord=body))]
+		self.assertEqual(ids, ['f-wf', 'f-scan'])
+
+	def test_outer_chord_continuation_is_found(self):
+		root = _runner()
+		inner_body = dict(sc.join_results.si().set(task_id='inner'))
+		inner_body['options']['chord'] = _finalizer(root, 'f-outer')
+		ids = [s['options']['task_id'] for s in pending_finalizers(_request(chord=inner_body))]
+		self.assertEqual(ids, ['f-outer'])
+
 	def test_normal_finalizer_runs_when_not_revoked(self):
 		calls = []
 		_run_finalizer(_runner(calls=calls), 'f-ok')
@@ -140,15 +161,31 @@ class TestFinalizeRevokedRunners(unittest.TestCase):
 	def test_claim_falls_back_to_process(self):
 		self.assertTrue(sc.claim_finalizer('f1'))
 		self.assertFalse(sc.claim_finalizer('f1'))
+		self.assertTrue(sc.finalizer_claimed('f1'))
 		self.assertTrue(sc.claim_finalizer(None))
+
+	def test_claim_falls_back_when_incr_creates_no_key(self):
+		# e.g. a memcached client returns None when incrementing a missing key
+		mock.patch.object(sc.app.backend, 'incr', return_value=None, create=True).start()
+		self.assertTrue(sc.claim_finalizer('f1'))
+		self.assertFalse(sc.claim_finalizer('f1'))
+
+	def test_claim_falls_back_without_key_value_backend(self):
+		mock.patch.object(sc.app.backend, 'get_key_for_task', side_effect=AttributeError, create=True).start()
+		self.assertTrue(sc.claim_finalizer('f1'))
+		self.assertFalse(sc.claim_finalizer('f1'))
+		self.assertTrue(sc.finalizer_claimed('f1'))
+		self.assertFalse(sc.finalizer_claimed('f2'))
 
 	def test_stop_revokes_the_run_id_first(self):
 		runner = _runner()
-		runner.celery_ids_map = {'child-1': {'full_name': 'a'}, 'child-2': {'full_name': 'b'}, 'run': {'full_name': 'r'}}
+		runner.celery_result = types.SimpleNamespace(id='run')
+		# Chunk ids are discovered while polling, after the run's id was registered.
+		runner.celery_ids_map = {'child': {'full_name': 'a'}, 'run': {'full_name': 'r'}, 'chunk': {'full_name': 'c'}}
 		revoked = []
 		with mock.patch('secator.celery.revoke_task', lambda tid, name=None: revoked.append(tid)):
 			runner.stop_celery_tasks()
-		self.assertEqual(revoked, ['run', 'child-2', 'child-1'])
+		self.assertEqual(revoked, ['run', 'chunk', 'child'])
 
 
 if __name__ == '__main__':
