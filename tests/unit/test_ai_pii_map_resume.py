@@ -130,3 +130,25 @@ class TestPlaceholderMapSurvivesResume(unittest.TestCase):
 	def test_same_value_maps_to_same_placeholder_across_runs(self):
 		# deterministic salted hash: a value re-seen after a resume gets the SAME placeholder
 		self.assertEqual(SensitiveDataEncryptor().encrypt(HOST), SensitiveDataEncryptor().encrypt(HOST))
+
+	def test_tool_call_debug_log_never_holds_decrypted_values(self):
+		placeholder = SensitiveDataEncryptor().encrypt(HOST)
+		logged = []
+		calls = []
+
+		def llm(messages, *a, **k):
+			calls.append(1)
+			if len(calls) == 1:
+				return {"content": "", "usage": {}, "tool_calls": [_plan_call("c1", f"probe {placeholder}")]}
+			return {"content": "done", "tool_calls": [], "usage": {}}
+
+		with tempfile.TemporaryDirectory() as tmp, mock.patch.object(CONFIG.dirs, "reports", Path(tmp)):
+			with mock.patch.object(AiTask, "debug", lambda self, msg, *a, **k: logged.append(str(msg))):
+				items = self._run(_Backend(f"look at {HOST}"), llm)
+		# the call did run with the real value...
+		plans = [i for i in items if isinstance(i, dict) and i.get("ai_type") == "plan"]
+		self.assertEqual(plans[0]["extra_data"]["items"][0]["text"], f"probe {HOST}")
+		# ...but the tool-call debug line only ever carries the placeholder
+		tool_logs = [m for m in logged if m.startswith("[tool_call]")]
+		self.assertTrue(tool_logs)
+		self.assertTrue(all(HOST not in m for m in tool_logs), tool_logs)

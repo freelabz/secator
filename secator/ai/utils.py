@@ -314,6 +314,9 @@ def _union_live_results(persisted: List[Dict], live_results: List[Dict], query_f
 	respecting ``limit``. Makes query_workspace the single source of truth under the
 	local driver, whose JSON exporter only writes to disk at end-of-run.
 	"""
+	from secator.query._base import is_internal_doc
+	# never surface internal ai docs (the placeholder map) to the model, whatever the query
+	persisted = [r for r in persisted if not is_internal_doc(r)]
 	if not live_results:
 		return persisted
 	# Filter this run's in-memory findings by the SAME query in-process. The JsonBackend
@@ -323,7 +326,7 @@ def _union_live_results(persisted: List[Dict], live_results: List[Dict], query_f
 	from secator.query.json import match_query
 	seen = {r.get("_uuid") for r in persisted if r.get("_uuid")}
 	for r in live_results:
-		if not match_query(r, query_filter):
+		if is_internal_doc(r) or not match_query(r, query_filter):
 			continue
 		u = r.get("_uuid")
 		if u and u in seen:

@@ -946,8 +946,9 @@ class ai(PythonRunner):
 		if not self.encryptor or not session_id:
 			return
 		try:
+			# the ONLY read allowed to reach this internal doc (normal queries never return it)
 			docs = self._get_query_engine().search(
-				{"_type": "ai", "ai_type": "pii_map", "_context.session_id": session_id})
+				{"_type": "ai", "ai_type": "pii_map", "_context.session_id": session_id}, include_internal=True)
 		except Exception as e:  # noqa: BLE001 - restore best-effort; a fresh map still works forward
 			self.debug(f'pii_map restore failed: {e}', sub='llm')
 			return
@@ -1863,6 +1864,9 @@ class ai(PythonRunner):
 			# AttributeError (which would defeat the stop).
 			args = args or {}
 
+			# Log the args as the model sent them (placeholders), never their decrypted values.
+			self.debug(f'[tool_call] {name} id={tc_id} args={args}', sub='llm')
+
 			# Decrypt args
 			if self.encryptor:
 				args = _decrypt_dict(args, self.encryptor)
@@ -1885,7 +1889,6 @@ class ai(PythonRunner):
 				continue
 
 			# Convert to action
-			self.debug(f'[tool_call] {name} id={tc_id} args={args}', sub='llm')
 			action = tool_call_to_action(name, args)
 			if not action:
 				reason = "empty arguments" if not args else f"unknown tool '{name}'"

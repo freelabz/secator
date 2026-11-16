@@ -66,7 +66,7 @@ class QueryEngine:
 
     def search(self, query: dict, limit: int = 0, dedupe: bool = False,
                exclude_fields: List[str] = None, scope_only: bool = False,
-               offset: int = 0) -> List[Dict[str, Any]]:
+               offset: int = 0, include_internal: bool = False) -> List[Dict[str, Any]]:
         """Search for findings matching query.
 
         ``scope_only`` keeps only the workspace scope of the base query and drops the
@@ -77,10 +77,14 @@ class QueryEngine:
 
         ``offset`` skips the first N matching results (pagination); pair with ``limit``
         to page through large result sets.
+
+        Internal ai docs (the sensitive-data placeholder map) are never returned unless
+        ``include_internal=True`` (reserved for the run's own restore).
         """
         from secator.utils import debug, remove_duplicates
         debug(f'search via {self.backend.name} backend', sub='query', obj=query)
-        results = self.backend.search(query, limit, exclude_fields, scope_only=scope_only, offset=offset)
+        results = self.backend.search(query, limit, exclude_fields, scope_only=scope_only, offset=offset,
+                                      include_internal=include_internal)
         if dedupe:
             results = remove_duplicates(results)
         return results
