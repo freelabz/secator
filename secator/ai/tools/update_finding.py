@@ -4,12 +4,8 @@ from typing import Dict, Generator
 from secator.output_types import Ai, Error, FINDING_TYPES
 from secator.ai.utils import _coerce_finding_fields, _decrypt_dict
 from secator.ai.actions import ActionContext, _get_result_context
-from secator.ai.tools._findings import _drop_readonly_fields, _lookup_finding
+from secator.ai.tools._findings import _FINDING_IMMUTABLE_FIELDS, _drop_readonly_fields, _lookup_finding
 from secator.ai.tools.base import BaseTool
-
-
-# Fields that must never be overwritten via update_finding (identity / routing / scope).
-_FINDING_IMMUTABLE_FIELDS = {"_uuid", "_type", "_id", "_context", "id"}
 
 
 # Real scan-finding types (vulnerability/url/port/…) update_finding may edit. Restricting to

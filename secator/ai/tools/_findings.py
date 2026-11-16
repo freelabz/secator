@@ -181,6 +181,10 @@ def _build_exploit_attempt(ctx: ActionContext, context: Dict, vuln: Dict, verdic
 	)
 
 
+# Fields that must never be overwritten via update_finding (identity / routing / scope).
+_FINDING_IMMUTABLE_FIELDS = {"_uuid", "_type", "_id", "_context", "id"}
+
+
 # Server/pipeline-owned finding fields the GENERIC add_finding/update_finding must never let the
 # agent write. The dedicated mark_vuln_* tools set the verdict fields themselves via a server-built
 # `$set`, so they are unaffected — only the free-form tools are restricted.

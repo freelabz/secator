@@ -543,7 +543,7 @@ _MOVED = {
 	"TemplateLoader": "secator.template",
 	"Workflow": "secator.runners",
 	"_AGENT_READONLY_FIELDS": "secator.ai.tools._findings",
-	"_FINDING_IMMUTABLE_FIELDS": "secator.ai.tools.update_finding",
+	"_FINDING_IMMUTABLE_FIELDS": "secator.ai.tools._findings",
 	"_FINDING_TYPE_NAMES": "secator.ai.tools.update_finding",
 	"_FORBIDDEN_QUERY_OPERATORS": "secator.ai.tools.query_workspace",
 	"_MAX_PLAN_ITEMS": "secator.ai.tools.update_plan",
