@@ -105,8 +105,8 @@ async def _replay_saved_body():
 		await pilot.pause(0.05)
 		assert not fetch._collapsed
 		body = [str(s.render()) for s in fetch.query(".runner-out Static")]
-		assert any("http://example.com" in b for b in body)            # args
-		assert any("Example Domain page text" in b for b in body)      # result (by tool_call id)
+		# args, then the result linked by tool_call id
+		assert body == ['args: {"url": "http://example.com"}', "Example Domain page text"]
 		# a query renders like the live query card: description title, query as command, count
 		assert query.kind == "query" and query.rname == "Known URLs" and query.result_count == 2
 		assert '"_type": "url"' in query.command
@@ -133,9 +133,9 @@ async def _replay_decrypt_body():
 		await app._replay_history(msgs, decrypt=lambda t: t.replace("[HOST:0123456789ab]", "real.example.com"))
 		await pilot.pause(0.05)
 		panel = app._convo().query_one(ToolCallPanel)
-		body = " ".join(str(s.render()) for s in panel.query(".runner-out Static"))
-		assert "http://real.example.com" in body and "page of real.example.com" in body
-		assert any("real.example.com" in t for _, t in _texts(app))
+		body = [str(s.render()) for s in panel.query(".runner-out Static")]
+		assert body == ['args: {"url": "http://real.example.com"}', "page of real.example.com"]
+		assert _texts(app)[-2] == ("user", "› look at real.example.com")
 
 
 def test_replay_decrypts_for_display():
