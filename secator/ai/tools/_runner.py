@@ -60,8 +60,7 @@ def _build_hooks_from_context(context: Dict) -> Dict:
 	if not drivers:
 		return {}
 	discover_external_drivers()
-	# Order by canonical priority so authoritative backends (e.g. mongodb) register
-	# their hooks before relay drivers (e.g. api) — same ordering as __setstate__.
+	# Order by hook phase (pre, persistence, post) — same ordering as _apply_context_drivers.
 	drivers = order_drivers(drivers)
 	supported = set(get_available_drivers())
 	hooks_list = []

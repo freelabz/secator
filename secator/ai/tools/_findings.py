@@ -3,44 +3,111 @@ mark_vuln_*): scoped finding lookup + update, exploit-attempt records and the vu
 
 Moved verbatim from ``secator/ai/actions.py``.
 """
+import copy
 import threading
-from typing import Dict
-from secator.output_types import ExploitAttempt
+from typing import Dict, Optional
+from secator.output_types import ExploitAttempt, OutputType
+from secator.utils import debug
 from secator.ai.utils import _decrypt_dict
 from secator.ai.actions import ActionContext
+
+
+def _run_item_update_hooks(ctx: ActionContext, item, phase: str):
+	"""Run the ``on_item_update`` hooks of ``phase`` on ``item``; a failure never fails the caller."""
+	if not ctx.run_item_update_hooks or item is None:
+		return item
+	try:
+		result = ctx.run_item_update_hooks(item, phase=phase)
+	except Exception as e:  # noqa: BLE001 - hooks are best-effort here, the store write is authoritative
+		debug(f"on_item_update {phase} hooks failed: {e}", sub="ai")
+		return item
+	return result if isinstance(result, OutputType) else item
+
+
+def _changed_fields(new: Dict, old: Dict) -> Dict:
+	"""``$set`` fields turning ``old`` into ``new``. A dict that only gained / changed keys is diffed
+	as dotted ``field.key`` paths, so concurrent writes to its other keys survive."""
+	changed = {}
+	for k, v in new.items():
+		prev = old.get(k)
+		if v == prev:
+			continue
+		if isinstance(v, dict) and isinstance(prev, dict) and prev.keys() <= v.keys():
+			changed.update({f"{k}.{sk}": sv for sk, sv in v.items() if sk not in prev or prev[sk] != sv})
+		else:
+			changed[k] = v
+	return changed
+
+
+def _apply_finding_update(ctx: ActionContext, query: Dict, update: Dict, doc: Optional[Dict] = None):
+	"""Apply a ``$set`` to the finding matched by ``query``, running the ``on_item_update`` hooks.
+
+	The finding is rebuilt from its stored ``doc`` with ``update`` applied (so ``__post_init__``
+	recomputes derived fields, e.g. ``severity_nb``), then pre-phase hooks run (they may mutate
+	it), then ONE ``engine.update`` writes ``update`` plus every field the rebuild or the hooks
+	changed, then post-phase hooks run on the persisted item.
+
+	Returns ``(modified, doc)``: the modified docs count and the updated doc (None if no match).
+	"""
+	from secator.output_types._base import load_output_types
+	from secator.query.json import _apply_set
+	engine = ctx.get_query_engine()
+	if doc is None:
+		doc = (engine.search(query, limit=1, scope_only=True) or [None])[0]
+	if doc is None:
+		return 0, None
+	patched = copy.deepcopy(doc)
+	_apply_set(patched, update)
+	try:
+		item = next(load_output_types([copy.deepcopy(patched)]), None)
+	except Exception as e:  # noqa: BLE001 - an unloadable doc still gets the requested $set
+		debug(f"could not rebuild finding from {query}: {e}", sub="ai")
+		item = None
+	set_fields = dict(update)
+	if item is not None:
+		rebuilt = copy.deepcopy(item.toDict())
+		item = _run_item_update_hooks(ctx, item, "pre")
+		hooked = item.toDict()
+		set_fields.update(_changed_fields({k: v for k, v in rebuilt.items() if k in patched}, patched))
+		set_fields.update(_changed_fields(hooked, rebuilt))
+	set_fields = {
+		k: v for k, v in set_fields.items()
+		if k not in _FINDING_IMMUTABLE_FIELDS and k.split(".", 1)[0] not in _FINDING_IMMUTABLE_FIELDS
+	}
+	# A whole-object $set (e.g. a hook dropped an extra_data key) supersedes its dotted sub-keys
+	# (Mongo rejects both in one $set); the object already carries them.
+	set_fields = {k: v for k, v in set_fields.items() if "." not in k or k.split(".", 1)[0] not in set_fields}
+	modified = engine.update(query, {"$set": set_fields})
+	if not modified:
+		return 0, None
+	_apply_set(patched, set_fields)
+	_run_item_update_hooks(ctx, item, "post")
+	return modified, patched
 
 
 def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
 	"""Apply a workspace-scoped ``$set`` to the vulnerability with this ``_uuid``.
 
 	Returns ``(modified, updated, label, error_msg)``: ``modified`` docs count,
-	the re-fetched vuln (dict, or None), a display ``label`` (the vuln's ``name``,
+	the updated vuln (dict, or None), a display ``label`` (the vuln's ``name``,
 	falling back to the uuid), and an ``error_msg`` string when nothing matched.
 
-	Uses ``QueryEngine.update`` (an in-place ``$set`` on the matched doc) rather than
-	re-yielding the finding, so it works uniformly across backends without risking a
-	duplicate insert. On the mongodb driver a ``_uuid`` lookup/update is a native ``_id``
-	index seek (the query layer rewrites a valid-ObjectId ``_uuid`` to ``_id`` — findings
-	carry ``_uuid = str(_id)``), so the update + re-fetch are point operations, not
-	workspace scans. After the update it re-fetches the finding: every backend returns its
-	current state (the json store resolves its append-only records last-wins on read).
+	Uses ``QueryEngine.update`` (an in-place ``$set`` on the matched doc, via
+	``_apply_finding_update``) rather than re-yielding the finding, so it works uniformly
+	across backends without risking a duplicate insert. On the mongodb driver a ``_uuid``
+	lookup/update is a native ``_id`` index seek (the query layer rewrites a valid-ObjectId
+	``_uuid`` to ``_id`` — findings carry ``_uuid = str(_id)``), so these are point operations,
+	not workspace scans. The lookup is ``scope_only``: a false-positive vuln is hidden by the
+	``is_false_positive:{$ne:True}`` display filter but must still be reachable here.
 	"""
-	engine = ctx.get_query_engine()
 	query = {"_type": "vulnerability", "_uuid": uuid}
-	modified = engine.update(query, {"$set": update})
+	modified, updated = _apply_finding_update(ctx, query, update)
 	if not modified:
 		return 0, None, uuid, (
 			f"No vulnerability found with _uuid={uuid} in this workspace. "
 			"Re-check the `_uuid` from query_workspace results."
 		)
-	# scope_only: a just-marked false-positive is hidden by the `is_false_positive:{$ne:True}`
-	# display filter, so a normal re-fetch returns None — `updated` stays empty and `label`
-	# falls back to the bare uuid (the chat row then reads "Updated Marked <uuid>…" instead
-	# of "Updated <name>", and extra_data.finding is empty). Drop the display filters for this
-	# targeted by-uuid read so the finding comes back regardless of its display state.
-	updated = (engine.search(query, limit=1, scope_only=True) or [None])[0]
-	label = (updated.get("name") if isinstance(updated, dict) else None) or uuid
-	return modified, updated, label, None
+	return modified, updated, updated.get("name") or uuid, None
 
 
 def _merge_extra_data(update: Dict, extra_data) -> None:
@@ -99,7 +166,6 @@ def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, mat
 	Pure Python — no LLM judgment.
 	"""
 	engine = ctx.get_query_engine()
-	from secator.query.json import _apply_set
 	vuln_q = {"_type": "vulnerability", "name": vuln_name, "id": vuln_id, "matched_at": matched_at}
 	with _rollup_lock((vuln_name, vuln_id, matched_at)):
 		attempts = engine.search(
@@ -137,9 +203,8 @@ def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, mat
 			vu = v.get("_uuid")
 			if not vu:
 				continue
-			engine.update({"_type": "vulnerability", "_uuid": vu}, {"$set": update})
-			_apply_set(v, update)
-			if primary is None or not v.get("_duplicate"):
+			_, v = _apply_finding_update(ctx, {"_type": "vulnerability", "_uuid": vu}, update, doc=v)
+			if v and (primary is None or not v.get("_duplicate")):
 				primary = v
 		return primary
 

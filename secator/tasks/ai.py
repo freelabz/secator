@@ -5,6 +5,7 @@ import re
 import sys
 import time
 import uuid
+from functools import partial
 from pathlib import Path
 from typing import Generator
 
@@ -1038,6 +1039,7 @@ class ai(PythonRunner):
 			out_of_scope=self.out_of_scope,
 			isolated=self.isolated,
 			dangerous=bool(getattr(self, "dangerous", False)),
+			run_item_update_hooks=partial(self.run_hooks, 'on_item_update', sub='item'),
 		)
 		self._isolation_ctx = ctx  # for sandbox-container teardown at task end
 
