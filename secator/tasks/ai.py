@@ -985,9 +985,18 @@ class ai(PythonRunner):
 		# Background jobs (background tool calls + subagents): owned by THIS run, cancelled
 		# and recorded at its end (_teardown_background). A remote backend's idle input timer
 		# is frozen while they run (bounded by background_max_wait).
+		# Jobs are tracked in the run's store (by child runner id) whenever the run has drivers;
+		# a run that persists nothing falls back to the in-process job buffers only.
+		store = None
+		if (self.context or {}).get("drivers"):
+			try:
+				store = ctx.get_query_engine()
+			except Exception as e:  # noqa: BLE001 - background jobs still work without a store
+				self.debug(f'background store unavailable: {e}', sub='init')
 		self.background = BackgroundJobs(
 			max_jobs=getattr(self, "background_max_jobs", 3),
-			max_wait=getattr(self, "background_max_wait", 1800))
+			max_wait=getattr(self, "background_max_wait", 1800),
+			store=store)
 		ctx.background = self.background
 		if isinstance(self.backend, RemoteBackend):
 			self.backend.hold_while = self.background.should_hold_idle

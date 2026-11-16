@@ -337,5 +337,158 @@ class TestIdleTimerHold(unittest.TestCase):
 		self.assertTrue(mgr.should_hold_idle())
 
 
+class _FakeStore:
+	"""Stands in for the run's QueryEngine: runner status + findings by runner id."""
+
+	def __init__(self):
+		self.status = "RUNNING"
+		self.findings = []
+		self.status_calls = []
+		self.search_calls = []
+
+	def get_runner_status(self, runner_id, runner_type):
+		self.status_calls.append((runner_id, runner_type))
+		if runner_id != "rid-1":
+			return None
+		return {"id": runner_id, "status": self.status, "done": self.status != "RUNNING", "progress": 40}
+
+	def search(self, query, limit=0):
+		self.search_calls.append(query)
+		return list(self.findings)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestStoreBackedJobs(unittest.TestCase):
+	"""A job dispatched to Celery is fire-and-forget: tracked by runner id in the store."""
+
+	def setUp(self):
+		from secator.ai.background import current_job
+		self.store = _FakeStore()
+		self.mgr = BackgroundJobs(max_jobs=3, max_wait=10, store=self.store)
+		self.mgr.REFRESH_EVERY = 0
+		self.ctx = ActionContext(targets=["example.com"], model="m", results=[], background=self.mgr)
+		self.celery_runner = SimpleNamespace(
+			sync=False, celery_ids_map={"celery-1": {}}, stop_celery_tasks=MagicMock(),
+			config=SimpleNamespace(type="task"), context={"task_chunk_id": "rid-1", "task_id": "tid-1"})
+
+		def detached_dispatch(action, ctx):
+			job = current_job()
+			register_runner_hook(self.celery_runner)  # child runner's on_init
+			job.detached = job.can_detach  # what _run_runner does for a Celery dispatch
+			yield Ai(content="nuclei", ai_type="task", extra_data={"runner_id": "rid-1"},
+			         _context={"tool_call_id": action["tool_call_id"]})
+			# returns right away: no thread waits on the Celery result
+		self.dispatch = detached_dispatch
+
+	def test_detached_job_polled_from_store(self):
+		job = self.mgr.submit(_action("tc", True, name="nuclei"), self.ctx, self.dispatch)
+		job.thread.join(5)
+		self.assertTrue(job.detached)
+		self.assertEqual(job.status, RUNNING)  # thread gone, runner still running elsewhere
+		self.assertIn(job, self.mgr.running())
+		self.assertEqual(job.store_status["status"], "RUNNING")
+		self.assertIn("[running 40%]", job.summary())
+		self.store.findings = [{"_type": "vulnerability", "_uuid": "u1", "name": "CVE-2021-41773"}]
+		self.store.status = "SUCCESS"
+		(polled_job, items), = self.mgr.poll(["bg-1"], wait=5)
+		self.assertEqual(polled_job.status, DONE)
+		self.assertEqual([i.get("_uuid") for i in items if isinstance(i, dict)], ["u1"])
+		self.assertEqual(self.store.search_calls[-1], {"_context.task_chunk_id": "rid-1"})
+		(_, again), = self.mgr.poll(["bg-1"])
+		self.assertEqual(again, [])  # store results are not reported twice
+
+	def test_detached_job_failed_runner(self):
+		job = self.mgr.submit(_action("tc", True, name="nuclei"), self.ctx, self.dispatch)
+		job.thread.join(5)
+		self.store.status = "FAILURE"
+		self.mgr.refresh(force=True)
+		self.assertEqual(job.status, "failed")
+
+	def test_cancel_detached_job_revokes(self):
+		job = self.mgr.submit(_action("tc", True, name="nuclei"), self.ctx, self.dispatch)
+		job.thread.join(5)
+		self.mgr.cancel("bg-1")
+		self.celery_runner.stop_celery_tasks.assert_called_once()
+		self.assertEqual(job.status, CANCELLED)
+
+	def test_no_store_never_detaches(self):
+		mgr = BackgroundJobs(max_jobs=3, max_wait=10)
+		ctx = ActionContext(targets=["example.com"], model="m", results=[], background=mgr)
+		job = mgr.submit(_action("tc", True, name="nuclei"), ctx, self.dispatch)
+		job.thread.join(5)
+		self.assertFalse(job.detached)
+		self.assertEqual(job.status, DONE)
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	def test_run_runner_dispatches_fire_and_forget_in_a_job(self, mock_task_cls, _tpl):
+		"""Inside a store-backed job, a Celery-dispatched child gets no_poll (no blocking poll)."""
+		from secator.ai.background import BackgroundJob, _THREAD_JOBS
+		from secator.ai.tools._runner import _run_runner
+		mock_runner = MagicMock()
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_task_cls.return_value = mock_runner
+		ctx = ActionContext(targets=["example.com"], model="m", sync=False)
+		job = BackgroundJob(id="bg-1", action={}, can_detach=True)
+		_THREAD_JOBS[threading.get_ident()] = job
+		try:
+			list(_run_runner({"action": "task", "name": "nuclei", "targets": ["example.com"]}, ctx, "task"))
+		finally:
+			_THREAD_JOBS.pop(threading.get_ident(), None)
+		run_opts = mock_task_cls.call_args.kwargs["run_opts"]
+		self.assertTrue(run_opts.get("no_poll"))
+		self.assertTrue(job.detached)
+		# Outside a job (foreground): unchanged.
+		list(_run_runner({"action": "task", "name": "nuclei", "targets": ["example.com"]}, ctx, "task"))
+		self.assertFalse(mock_task_cls.call_args.kwargs["run_opts"].get("no_poll"))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestGetRunnerStatusPerDriver(unittest.TestCase):
+	"""get_runner_status(runner_id) reads the live runner doc on every query backend."""
+
+	def test_sqlite(self):
+		import tempfile
+		from pathlib import Path
+		from secator.hooks.sqlite import get_sqlite_conn
+		from secator.query.sqlite import SqliteBackend
+		db = Path(tempfile.mkdtemp()) / "secator.db"
+		conn = get_sqlite_conn(db)
+		doc = {"status": "RUNNING", "done": False, "progress": 10,
+		       "context": {"task_chunk_id": "rid-1", "task_id": "tid-1"}}
+		conn.execute("INSERT INTO tasks (id, workspace_id, data) VALUES (?, ?, ?)", ("tid-1", "ws", json.dumps(doc)))
+		conn.commit()
+		backend = SqliteBackend("ws", config={"db_path": str(db)})
+		for rid in ("tid-1", "rid-1"):  # by row key or by the chunk id in its context
+			st = backend.get_runner_status(rid, "task")
+			self.assertEqual((st["status"], st["done"], st["progress"]), ("RUNNING", False, 10))
+		self.assertIsNone(backend.get_runner_status("nope", "task"))
+
+	def test_json(self):
+		import tempfile
+		from pathlib import Path
+		from secator.query.json import JsonBackend
+		root = Path(tempfile.mkdtemp())
+		run_dir = root / "ws" / "tasks" / "1"
+		run_dir.mkdir(parents=True)
+		info = {"status": "SUCCESS", "done": True, "progress": 100, "config": {"type": "task"},
+		        "context": {"task_chunk_id": "rid-1"}}
+		(run_dir / "report_task_nuclei_1.json").write_text(json.dumps({"info": info, "results": {}}))
+		backend = JsonBackend("ws", config={"reports_dir": str(root)}, context={})
+		st = backend.get_runner_status("rid-1", "task")
+		self.assertEqual((st["status"], st["done"]), ("SUCCESS", True))
+		self.assertIsNone(backend.get_runner_status("rid-1", "workflow"))
+
+	def test_mongodb_and_api_use_get_runner(self):
+		from secator.query.mongodb import MongoDBBackend
+		from secator.query.api import ApiBackend
+		for cls in (MongoDBBackend, ApiBackend):
+			backend = cls.__new__(cls)
+			with patch.object(cls, "get_runner", return_value={"status": "revoked", "done": True}):
+				st = backend.get_runner_status("rid-1", "task")
+			self.assertEqual(st["status"], "REVOKED")
+
+
 if __name__ == '__main__':
 	unittest.main()

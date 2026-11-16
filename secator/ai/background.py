@@ -111,6 +111,15 @@ class BackgroundJob:
 	reported: int = 0
 	# Last status recorded as an Ai item by the ai task (to record each transition once).
 	recorded_status: str = ""
+	# Store-backed tracking. ``detached``: the child was dispatched fire-and-forget to Celery
+	# (no thread waits on it); its completion and results then come from the store only.
+	can_detach: bool = False
+	detached: bool = False
+	store_status: Optional[Dict] = None
+	store_seen: set = field(default_factory=set, repr=False)
+	last_refresh: float = 0.0
+	# Set once the model polled the job after it finished (its final status was seen).
+	final_read: bool = False
 	cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
 	thread: Optional[threading.Thread] = field(default=None, repr=False)
 	_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -149,6 +158,20 @@ class BackgroundJob:
 			self.reported = len(self.items)
 		return [i for i in new if _item_type(i) not in _SKIPPED_TYPES]
 
+	def store_ref(self):
+		"""``(runner_type, [candidate ids])`` of the job's top-level child runner, or None.
+
+		The ids are minted before dispatch (``_child_preamble``); the candidates cover the keys
+		the drivers may have keyed the runner doc on (``{type}_chunk_id`` / ``{type}_id``)."""
+		with self._lock:
+			runner = self.runners[0] if self.runners else None
+		if runner is None:
+			return None
+		rtype = getattr(getattr(runner, "config", None), "type", "") or "task"
+		ctx = getattr(runner, "context", None) or {}
+		ids = [ctx.get(f"{rtype}_chunk_id"), ctx.get(f"{rtype}_id")]
+		return rtype, [i for i in dict.fromkeys(ids) if i]
+
 	def label(self) -> str:
 		name = self.action.get("name") or self.action.get("command") or self.tool
 		return f"{self.tool}({name})" if name != self.tool else self.tool
@@ -160,6 +183,8 @@ class BackgroundJob:
 			line += f" - {self.description}"
 		if pending:
 			line += f" ({pending} unread result(s))"
+		if self.store_status and not self.finished:
+			line += f" [{self.store_status.get('status', '').lower()} {self.store_status.get('progress', 0)}%]"
 		if self.error:
 			line += f" error: {self.error}"
 		return line
@@ -174,6 +199,8 @@ class BackgroundJob:
 			"items": len(self.items),
 			"error": self.error,
 			"runner_ids": self.runner_ids(),
+			"detached": self.detached,
+			"runner_status": (self.store_status or {}).get("status", ""),
 		}
 
 	def runner_ids(self) -> List[str]:
@@ -234,9 +261,18 @@ class BackgroundJobs:
 		max_wait: Upper bound (seconds) of any single wait on background jobs.
 	"""
 
-	def __init__(self, max_jobs: int = 3, max_wait: int = 600):
+	# Store runner statuses that end a job, and the job status they map to.
+	_TERMINAL = {"SUCCESS": DONE, "SKIPPED": DONE, "FAILURE": FAILED, "REVOKED": CANCELLED}
+	# Min seconds between two store status reads for one job.
+	REFRESH_EVERY = 2.0
+
+	def __init__(self, max_jobs: int = 3, max_wait: int = 600, store: Any = None):
 		self.max_jobs = max(int(max_jobs or 0), 0)
 		self.max_wait = max(int(max_wait or 0), 0)
+		# Query engine over the run's drivers (``get_runner_status`` + ``search``), or None when
+		# the run persists nothing. With a store, a job's status and findings are read from it
+		# by runner id, so a job on another worker is polled exactly like an in-process one.
+		self.store = store
 		self.jobs: Dict[str, BackgroundJob] = {}
 		self._ids = itertools.count(1)
 		self._cond = threading.Condition()
@@ -258,14 +294,72 @@ class BackgroundJobs:
 		return self.jobs.get(job_id)
 
 	def running(self) -> List[BackgroundJob]:
+		self.refresh()
 		return [j for j in self.jobs.values() if not j.finished]
+
+	def refresh(self, jobs: Optional[List[BackgroundJob]] = None, force: bool = False):
+		"""Update running jobs from the store (throttled). A detached job finishes only here."""
+		if self.store is None:
+			return
+		now = time.time()
+		for job in (jobs if jobs is not None else list(self.jobs.values())):
+			if job.finished or (not force and now - job.last_refresh < self.REFRESH_EVERY):
+				continue
+			job.last_refresh = now
+			ref = job.store_ref()
+			if not ref:
+				continue
+			rtype, ids = ref
+			for rid in ids:
+				try:
+					st = self.store.get_runner_status(rid, rtype)
+				except Exception:  # noqa: BLE001 - a store hiccup must not break the loop
+					st = None
+				if st:
+					job.store_status = st
+					break
+			final = self._TERMINAL.get((job.store_status or {}).get("status", ""))
+			thread_done = job.thread is None or not job.thread.is_alive()
+			# An in-process job ends with its thread (it also drains its last items); a
+			# detached job (thread already gone) ends when the store says its runner did.
+			if final and job.detached and thread_done:
+				with self._cond:
+					if job.status == RUNNING:
+						job.status = final
+						job.ended = time.time()
+					self._cond.notify_all()
+
+	def store_results(self, job: BackgroundJob) -> List[Dict]:
+		"""Findings of a job's child runner read from the store, not yet reported (by ``_uuid``)."""
+		if self.store is None:
+			return []
+		ref = job.store_ref()
+		if not ref:
+			return []
+		rtype, ids = ref
+		key = f"_context.{rtype}_chunk_id" if rtype == "task" else f"_context.{rtype}_id"
+		try:
+			found = self.store.search({key: ids[0]}, limit=500) or []
+		except Exception:  # noqa: BLE001 - a store hiccup must not break polling
+			return []
+		out = []
+		for r in found:
+			uid = r.get("_uuid") if isinstance(r, dict) else None
+			if uid and uid in job.store_seen:
+				continue
+			if uid:
+				job.store_seen.add(uid)
+			out.append(r)
+		return out
 
 	def unread(self) -> List[BackgroundJob]:
 		"""Jobs still running, or finished with results the model has not read yet."""
-		return [j for j in self.jobs.values() if not j.finished or j.reported < len(j.items)]
+		return [j for j in self.jobs.values()
+		        if not j.finished or j.reported < len(j.items) or not j.final_read]
 
 	def status_block(self) -> str:
 		"""Short per-turn status of the jobs the model still has to care about ("" if none)."""
+		self.refresh()
 		jobs = self.unread()
 		if not jobs:
 			return ""
@@ -304,7 +398,8 @@ class BackgroundJobs:
 		job = BackgroundJob(
 			id=f"bg-{next(self._ids)}",
 			action=dict(action),
-			description=action.get("description", ""))
+			description=action.get("description", ""),
+			can_detach=self.store is not None)
 		self.jobs[job.id] = job
 		job_ctx = replace(ctx, silent=True, in_batch=False)
 
@@ -325,9 +420,11 @@ class BackgroundJobs:
 				_THREAD_JOBS.pop(threading.get_ident(), None)
 				with self._cond:
 					job.ended = time.time()
-					if job.status == RUNNING:
-						has_error = any(_item_type(i) == "error" for i in job.items)
-						job.status = FAILED if (job.error or has_error) else DONE
+					has_error = bool(job.error) or any(_item_type(i) == "error" for i in job.items)
+					# A detached job's thread only dispatched it: unless the dispatch itself
+					# failed, it keeps running until the store reports its runner's end.
+					if job.status == RUNNING and (has_error or not job.detached):
+						job.status = FAILED if has_error else DONE
 					self._cond.notify_all()
 
 		job.thread = threading.Thread(target=_run, name=f"secator-ai-{job.id}", daemon=True)
@@ -366,15 +463,19 @@ class BackgroundJobs:
 		"""
 		timeout = min(max(float(timeout or 0), 0), self.max_wait)
 		deadline = time.time() + timeout
-		with self._cond:
-			while True:
-				watched = [self.jobs[i] for i in job_ids if i in self.jobs]
-				if not watched or any(j.finished for j in watched):
-					return True
-				remaining = deadline - time.time()
-				if remaining <= 0:
-					return False
-				self._cond.wait(timeout=remaining)
+		step = 1.0
+		while True:
+			watched = [self.jobs[i] for i in job_ids if i in self.jobs]
+			self.refresh(watched)
+			if not watched or any(j.finished for j in watched):
+				return True
+			remaining = deadline - time.time()
+			if remaining <= 0:
+				return False
+			# Wake on an in-process job's end (notify), else poll the store with backoff.
+			with self._cond:
+				self._cond.wait(timeout=min(remaining, step))
+			step = min(step * 2, 15.0)
 
 	def wait_any(self, timeout: float) -> bool:
 		"""Block until any CURRENTLY running job finishes (bounded by ``max_wait``)."""
@@ -396,4 +497,15 @@ class BackgroundJobs:
 			if running_ids:
 				self.wait(running_ids, timeout=wait)
 		jobs = [self.jobs[i] for i in ids if i in self.jobs] if ids else list(self.jobs.values())
-		return [(job, job.take_unreported()) for job in jobs]
+		self.refresh(jobs, force=True)
+		out = []
+		for job in jobs:
+			items = job.take_unreported()
+			for i in items:  # the job's own copy wins; the store adds what the job never saw
+				uid = i.get("_uuid") if isinstance(i, dict) else getattr(i, "_uuid", None)
+				if uid:
+					job.store_seen.add(uid)
+			out.append((job, items + self.store_results(job)))
+			if job.finished:
+				job.final_read = True
+		return out

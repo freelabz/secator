@@ -423,6 +423,16 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 			run_opts["sync"] = False
 			run_opts["tty"] = False
 
+	# Background job + Celery dispatch: fire-and-forget (no thread blocks polling the Celery
+	# result). The child persists itself through its driver hooks on its worker; the job is
+	# then tracked by its runner id in the store (status + findings), and cancelled by revoke.
+	# A subagent keeps its thread: its handback is built from its live output stream.
+	from secator.ai.background import current_job
+	job = current_job()
+	if job is not None and job.can_detach and not is_ai_subagent and not run_opts.get("sync"):
+		run_opts["no_poll"] = True
+		job.detached = True
+
 	hooks, denial = _child_preamble(ctx, context, runner_type)
 	if denial is not None:
 		yield denial
