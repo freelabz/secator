@@ -2,6 +2,8 @@
 """AI session management - save, list, pick, replay."""
 import glob
 import json
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -11,24 +13,42 @@ from secator.rich import console
 
 
 def save_history(history, reports_folder, debug_fn=None):
-	"""Save chat history to reports folder.
+	"""Save chat history to reports folder, atomically.
+
+	Called at every end of turn (not only when the run exits), so it must never leave a
+	half-written file behind: the JSON is written to a temp file in the same folder,
+	fsync'd, then swapped in with ``os.replace`` (atomic on POSIX and Windows). A crash or
+	kill mid-save leaves the previous ``history.json`` intact.
 
 	Args:
 		history: ChatHistory instance.
 		reports_folder: Path to reports folder.
 		debug_fn: Optional debug function for logging.
 	"""
+	history_path = Path(reports_folder) / 'history.json'
+	tmp_path = None
 	try:
-		history_path = Path(reports_folder) / 'history.json'
-		with open(history_path, 'w', encoding='utf-8') as f:
+		history_path.parent.mkdir(parents=True, exist_ok=True)
+		fd, tmp_path = tempfile.mkstemp(prefix='.history.', suffix='.json.tmp', dir=str(history_path.parent))
+		with os.fdopen(fd, 'w', encoding='utf-8') as f:
 			json.dump(history.messages, f, indent=2)
+			f.flush()
+			os.fsync(f.fileno())
+		os.replace(tmp_path, history_path)
+		tmp_path = None
 		if debug_fn:
 			debug_fn(f'Saved history to {history_path}', sub='llm')
-	except (OSError, TypeError) as e:
+	except (OSError, TypeError, ValueError) as e:
 		if debug_fn:
 			debug_fn(f'Failed to save history: {e}', sub='llm')
 		else:
 			console.print(Warning(message=f'Failed to save history: {e}'))
+	finally:
+		if tmp_path is not None:
+			try:
+				os.unlink(tmp_path)
+			except OSError:
+				pass
 
 
 def _read_json(path):
