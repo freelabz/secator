@@ -227,10 +227,7 @@ class UpdateFinding(BaseTool):
 			yield Error(message=f"No finding updated for _uuid={uuid}.", _context=context)
 			return
 
-		updated = _lookup_finding(ctx, uuid)
-		if updated:
-			from secator.query.json import _apply_set
-			_apply_set(updated, update)
+		updated = _lookup_finding(ctx, uuid)  # every backend reads back the finding as stored
 		yield Ai(
 			content=f"Updated finding {uuid} ({', '.join(sorted(update.keys()))}).",
 			ai_type="update_finding",
