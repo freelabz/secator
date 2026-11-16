@@ -110,8 +110,16 @@ class ApiBackend(QueryBackend):
         set_fields = update.get("$set") or {}
         if not set_fields:
             return 0
+        # Snapshot every match first (all pages), so writes that change a finding's eligibility
+        # can't shift the pages being read.
+        docs, page_size = [], 1000
+        while True:
+            page = self._search_items(query, limit=page_size, offset=len(docs))
+            docs.extend(page)
+            if len(page) < page_size:
+                break
         modified = 0
-        for doc in self._search_items(query, limit=1000):
+        for doc in docs:
             finding_id = doc.get("_id") if isinstance(doc, dict) else None
             if not finding_id:
                 continue

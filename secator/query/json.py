@@ -239,32 +239,30 @@ class JsonBackend(QueryBackend):
 	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None,
 	                    offset: int = 0) -> List[Dict[str, Any]]:
 		"""Search findings matching query by FILTERING WHILE STREAMING — peak memory is O(matches),
-		not O(total findings), and bounded by ``limit``. The fan-in extractor's one store query used to materialize the whole
+		not O(total findings). The fan-in extractor's one store query used to materialize the whole
 		result set before filtering to a handful of matches, which was the O(N)
-		peak that defeated streaming. We iterate records one at a time, match, and keep only matches,
-		deduped last-wins by _uuid over the (small) matched subset.
+		peak that defeated streaming. We iterate records one at a time and keep only matches,
+		deduped last-wins by _uuid.
 
-		``offset`` (Python slice fallback — no native skip): dedup must complete across the whole
-		matched set before a stable page can be sliced, so we collect up to ``offset + limit``
-		distinct matches, then drop the first ``offset``."""
-		by_uuid = {}
-		# With an offset we must keep enough matches to skip past it; the window grows to
-		# offset+limit (still bounded, not O(total)).
-		window = (offset + limit) if (limit and offset) else limit
+		Updates are appended to the store, so a finding's latest record decides: a later record
+		of a kept finding replaces it, or drops it when it no longer matches. That is why the
+		whole store is scanned even with a ``limit``, and ``offset`` / ``limit`` slice the
+		deduped matches at the end."""
+		matches = {}
 		for finding in self._iter_records():
+			# Identity first: `exclude_fields` may drop `_uuid` from the returned record.
+			key = (finding.get('_uuid') if isinstance(finding, dict) else None) or id(finding)
 			if not match_query(finding, query):
+				matches.pop(key, None)  # its latest record no longer matches
 				continue
 			if exclude_fields and isinstance(finding, dict):
 				finding = {k: v for k, v in finding.items() if k not in exclude_fields}
-			key = (finding.get('_uuid') if isinstance(finding, dict) else None) or id(finding)
-			# Keep scanning once the window is full: an updated finding is appended later in the
-			# store, and last-wins must see that record (an early break returned the stale one).
-			# Past the window, only the kept findings are refreshed, so memory stays bounded.
-			if key in by_uuid or not window or len(by_uuid) < window:
-				by_uuid[key] = finding
-		results = list(by_uuid.values())
+			matches[key] = finding
+		results = list(matches.values())
 		if offset:
 			results = results[offset:]
+		if limit:
+			results = results[:limit]
 		return results
 
 	def _execute_iterate(self, query: dict, batch_size: int = 1000):

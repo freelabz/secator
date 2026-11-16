@@ -491,6 +491,25 @@ class TestFindingUpdatesReadBack(unittest.TestCase):
 		latest = {r['_uuid']: r for r in backend.search({'_type': 'url'}, limit=10)}
 		self.assertEqual(latest['u1']['tags'], ['seen'])
 
+	def test_json_latest_record_decides_whether_a_finding_matches(self):
+		backend = self._ndjson_backend([
+			{'_uuid': 'u1', '_type': 'vulnerability', 'status': 'OPEN'},
+			{'_uuid': 'u2', '_type': 'vulnerability', 'status': 'OPEN'},
+			{'_uuid': 'u1', '_type': 'vulnerability', 'status': 'FIXED'},  # u1 updated later
+		])
+		self.assertEqual([r['_uuid'] for r in backend.search({'status': 'OPEN'}, limit=1)], ['u2'])
+		self.assertEqual([r['_uuid'] for r in backend.search({'status': 'FIXED'})], ['u1'])
+
+	def test_json_dedup_survives_excluding_uuid(self):
+		backend = self._ndjson_backend([
+			{'_uuid': 'u1', '_type': 'url', 'url': 'http://a.com', 'tags': []},
+			{'_uuid': 'u1', '_type': 'url', 'url': 'http://a.com', 'tags': ['seen']},
+		])
+		results = backend.search({'_type': 'url'}, exclude_fields=['_uuid'])
+		self.assertEqual(len(results), 1)  # both records are one finding
+		self.assertEqual(results[0]['tags'], ['seen'])
+		self.assertNotIn('_uuid', results[0])
+
 	def _api_backend(self, docs):
 		"""An ApiBackend whose search returns ``docs`` (with the API's ``_id``) and PUTs succeed."""
 		from unittest.mock import MagicMock
@@ -499,7 +518,9 @@ class TestFindingUpdatesReadBack(unittest.TestCase):
 
 		def responses(method, endpoint, data=None):
 			if method == 'POST':
-				return {'items': [dict(d) for d in docs]}
+				query = dict(part.split('=') for part in endpoint.split('?', 1)[1].split('&'))
+				skip, limit = int(query['skip']), int(query['limit'])
+				return {'items': [dict(d) for d in (docs[skip:skip + limit] if limit else docs[skip:])]}
 			return {'success': True, 'modified_count': 1}
 
 		backend._make_request = MagicMock(side_effect=responses)
@@ -519,6 +540,12 @@ class TestFindingUpdatesReadBack(unittest.TestCase):
 		backend.update({'_uuid': 'u1'}, {'$set': {'status': 'FIXED', 'extra_data.synced': True, 'extra_data.nested.b': 2}})
 		self.assertEqual(self._puts(backend), [('finding/oid1', {
 			'status': 'FIXED', 'extra_data': {'keep': 1, 'synced': True, 'nested': {'a': 1, 'b': 2}}})])
+
+	def test_api_update_reaches_every_page(self):
+		docs = [{'_id': f'oid{i}', '_uuid': f'u{i}'} for i in range(1500)]
+		backend = self._api_backend(docs)
+		self.assertEqual(backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}}), 1500)
+		self.assertEqual(len(self._puts(backend)), 1500)
 
 	def test_api_update_no_match(self):
 		backend = self._api_backend([])
