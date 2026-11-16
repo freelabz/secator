@@ -477,16 +477,23 @@ def _is_ip_literal(value: str) -> bool:
 		return False
 
 
-def _host_of_authority(value: str) -> Optional[str]:
-	"""Host part of a ``host:port`` / ``[v6]:port`` value, else None (bare IPv6 stays whole)."""
+def _authority_check_values(value: str) -> List[str]:
+	"""Extra values a ``host`` / ``host:port`` / ``[v6]:port`` target is also checked as.
+
+	The canonical spelling (lowercase, no trailing dot: ``EXAMPLE.COM.:443`` ->
+	``example.com:443``) and, when a port is present, the bare host, so a rule on a host
+	covers every spelling and port of it (and a deny on it wins). A bare IPv6 literal
+	stays whole. Values that are not an authority (URLs, paths, CIDRs) yield nothing.
+	"""
 	canon = _canonical_authority(value)
-	if not canon or canon != value:
-		return None
+	if not canon:
+		return []
+	extra = [canon]
 	if canon.startswith('['):
-		return canon[:canon.index(']') + 1]
-	if canon.count(':') == 1:
-		return canon.split(':', 1)[0]
-	return None
+		extra.append(canon[:canon.index(']') + 1])
+	elif canon.count(':') == 1:
+		extra.append(canon.split(':', 1)[0])
+	return [v for v in dict.fromkeys(extra) if v != value]
 
 
 def _is_slash_unc(arg: str) -> bool:
@@ -1419,11 +1426,9 @@ class PermissionEngine:
 		values_to_check = [value]
 		if rule_type == "target" and not value.startswith(('http://', 'https://')):
 			# A `host:port` / `[v6]:port` target (e.g. from `redis://10.0.0.5:6379`) is also
-			# checked by its host, as URLs are below: a rule on the host covers its ports, and
-			# a deny on the host still wins.
-			host = _host_of_authority(value)
-			if host and host != value:
-				values_to_check.append(host)
+			# checked by its canonical spelling and its host, as URLs are below: a rule on the
+			# host covers its ports and spellings, and a deny on the host still wins.
+			values_to_check.extend(_authority_check_values(value))
 		if rule_type == "target" and value.startswith(('http://', 'https://')):
 			from urllib.parse import urlparse
 			from secator.scope import target_host
