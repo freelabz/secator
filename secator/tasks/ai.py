@@ -20,6 +20,7 @@ from secator.ai.actions import (
 )
 from secator.ai.guardrails import PermissionEngine
 from secator.ai.interactivity import create_backend, DISMISS_ANSWER, RemoteBackend, UserInputTimeout
+from secator.ai.background import BackgroundJobs, BackgroundLimitError, wants_background
 from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
@@ -192,7 +193,7 @@ def _yield_tool_results(runner, collected):
 		# DATA, not obeyed. The <untrusted_data> constraint tells the model what the envelope
 		# means. Only data-returning tools are wrapped; our own guidance (scope_note/trunc_hint)
 		# is appended OUTSIDE the envelope below.
-		if tc_name in ("query_workspace", "run_task", "run_workflow", "run_scan", "run_shell"):
+		if tc_name in ("query_workspace", "run_task", "run_workflow", "run_scan", "run_shell", "check_background_jobs"):
 			tool_result_str = f"<workspace_data>\n{tool_result_str}\n</workspace_data>"
 		result_incomplete = len(serialized) > max_items
 		# Only nudge a scoped re-query when it ADDS something: the result is item-capped,
@@ -338,6 +339,16 @@ class ai(PythonRunner):
 			"default": 3,
 			"internal": True,
 			"help": "Max concurrent tasks for batch execution"
+		},
+		"background_max_jobs": {
+			"type": int,
+			"default": 3,
+			"help": "Max background jobs (background tool calls and subagents) running at once"
+		},
+		"background_max_wait": {
+			"type": int,
+			"default": 1800,
+			"help": "Max seconds the AI waits on background jobs at once (explicit wait, end of turn, idle input timer hold)"  # noqa: E501
 		},
 		"resume": {
 			"is_flag": True,
@@ -507,6 +518,7 @@ class ai(PythonRunner):
 			try:
 				yield from self._run_loop()
 			finally:
+				self._teardown_background()  # cancel + record still-running background jobs
 				self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 			return
 
@@ -544,6 +556,7 @@ class ai(PythonRunner):
 		try:
 			yield from self._run_loop()
 		finally:
+			self._teardown_background()  # cancel + record still-running background jobs
 			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 
@@ -828,6 +841,7 @@ class ai(PythonRunner):
 		try:
 			yield from self._run_loop()
 		finally:
+			self._teardown_background()  # cancel + record still-running background jobs
 			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 		return True
@@ -968,6 +982,15 @@ class ai(PythonRunner):
 			dangerous=bool(getattr(self, "dangerous", False)),
 		)
 		self._isolation_ctx = ctx  # for sandbox-container teardown at task end
+		# Background jobs (background tool calls + subagents): owned by THIS run, cancelled
+		# and recorded at its end (_teardown_background). A remote backend's idle input timer
+		# is frozen while they run (bounded by background_max_wait).
+		self.background = BackgroundJobs(
+			max_jobs=getattr(self, "background_max_jobs", 3),
+			max_wait=getattr(self, "background_max_wait", 1800))
+		ctx.background = self.background
+		if isinstance(self.backend, RemoteBackend):
+			self.backend.hold_while = self.background.should_hold_idle
 
 		# Wire query_engine to remote backend if needed
 		if isinstance(self.backend, RemoteBackend):
@@ -998,7 +1021,16 @@ class ai(PythonRunner):
 				return
 			iteration += 1
 
+			# Cooperative stop (set when a parent cancels this run as a background subagent).
+			if getattr(self, "stop_requested", False) is True:
+				yield Warning(message="Run stopped: cancelled by its parent.")
+				self._save_history()
+				return
+
 			try:
+				# Persist + stream what background jobs produced since the last turn.
+				yield from self._drain_background()
+
 				# Mid-flight guardrail/mode toggles the user requested from the TUI meta bar
 				# (Shift+Tab / Alt+Shift+Tab). Applied before the next LLM turn.
 				yield from self._apply_tui_control()
@@ -1027,6 +1059,7 @@ class ai(PythonRunner):
 
 				# Call LLM
 				messages = self.history.to_messages(max_tokens_total=self.max_tokens_total)
+				messages = self._with_background_status(messages)
 				by_role = self.history.count_tokens_by_role(self.model)
 				token_count = by_role["total"]
 				ctx_window = get_context_window(self.model)
@@ -1218,6 +1251,15 @@ class ai(PythonRunner):
 							self.max_iterations = iteration + 1
 						continue
 
+					# Non-interactive run ending its turn with background jobs still running:
+					# there is no user to come back later, and ending would cancel them. Wait
+					# (bounded) for one to finish, then give the model a turn to read it.
+					if self._should_wait_background():
+						yield from self._wait_background_end_of_turn()
+						if iteration >= self.max_iterations:
+							self.max_iterations = iteration + 1
+						continue
+
 					# Only an explicit `stop` TOOL call pre-persisted a `stopped` doc in
 					# _dispatch_and_collect (stop_reason is set from the dispatch result). A
 					# content-only reply (stop_reason still None here) is the normal chat turn —
@@ -1345,6 +1387,8 @@ class ai(PythonRunner):
 		self.mode = "" if self.mode_is_auto else _mode_opt
 		self.max_tokens_total = self.get_opt_value("max_tokens_total")
 		self.max_workers = self.get_opt_value("max_workers")
+		self.background_max_jobs = self.get_opt_value("background_max_jobs")
+		self.background_max_wait = self.get_opt_value("background_max_wait")
 		self.max_iterations = self.get_opt_value("max_iterations")
 		self.temp = self.get_opt_value("temperature")
 		self.dry_run = self.run_opts.get("dry_run", False)
@@ -1732,7 +1776,8 @@ class ai(PythonRunner):
 					self.history.add_user(maybe_encrypt(content, self.encryptor))
 				return True
 			time.sleep(poll_interval)
-			elapsed += poll_interval
+			idle_tick = getattr(backend, "idle_tick", None)
+			elapsed = idle_tick(elapsed, poll_interval) if callable(idle_tick) else elapsed + poll_interval
 		return False
 
 	# -------------------------------------------------------------------------
@@ -1930,13 +1975,27 @@ class ai(PythonRunner):
 		self._progress_actions = getattr(self, "_progress_actions", 0) + sum(
 			1 for a in actions if a.get("action") not in ("stop", "steer"))
 
+		# Background calls (already approved by the guardrails in _process_tool_calls) are
+		# started as jobs and acknowledged right away; the turn only waits for the rest.
+		collected = []
+		if isinstance(getattr(ctx, "background", None), BackgroundJobs):
+			fg_actions = []
+			for action in actions:
+				if wants_background(action):
+					yield from self._submit_background(action, ctx, collected)
+				else:
+					fg_actions.append(action)
+			actions = fg_actions
+
 		is_batch = len(actions) > 1
 		# safe_dispatch_action wraps dispatch so a handler error becomes an Error item
 		# fed back to the LLM, instead of killing the main loop (_run_batch does the
 		# same internally for each of its actions).
-		action_iter = _run_batch(actions, ctx) if is_batch else safe_dispatch_action(actions[0], ctx)
+		if not actions:
+			action_iter = iter(())
+		else:
+			action_iter = _run_batch(actions, ctx) if is_batch else safe_dispatch_action(actions[0], ctx)
 
-		collected = []
 		for result in action_iter:
 			# Skip execution-only types
 			if isinstance(result, (Stat, Progress, State, Info)):
@@ -2016,6 +2075,120 @@ class ai(PythonRunner):
 			"stop_prompt_uuid": stop_prompt_uuid,
 			"new_mode": new_mode,
 		}
+
+	# -------------------------------------------------------------------------
+	# Background jobs
+	# -------------------------------------------------------------------------
+
+	def _submit_background(self, action, ctx, collected):
+		"""Start one approved action as a background job and acknowledge it as its tool result."""
+		context = {**dict(self.context or {}), "tool_call_id": action.get("tool_call_id"),
+		           "tool_call_name": action.get("tool_call_name")}
+		try:
+			job = self.background.submit(action, ctx, safe_dispatch_action)
+		except BackgroundLimitError as e:
+			err = Error(message=str(e), _context=context)
+			self.add_result(err, print=False)
+			yield err
+			collected.append(err.toDict())
+			return
+		job.recorded_status = job.status
+		ack = Ai(
+			content=(f"Started background job {job.id}: {job.label()}. It runs while you continue; read its "
+			         f"results with check_background_jobs(job_ids=['{job.id}'])."),
+			ai_type="background_job",
+			extra_data=job.to_dict(),
+			_context=context)
+		self.add_result(ack)
+		yield ack
+		collected.append(ack.toDict())
+
+	def _drain_background_items(self):
+		"""Persist (add_result) what background jobs produced since the last drain, and record
+		each job's final status once. Runs in the ai task's thread only. Returns the items."""
+		mgr = getattr(self, "background", None)
+		if mgr is None:
+			return []
+		ctx = getattr(self, "_isolation_ctx", None)
+		out = []
+		for job in list(mgr.jobs.values()):
+			for item in job.take_undrained():
+				if not isinstance(item, OutputType) or isinstance(item, (Stat, Progress, State, Info)):
+					continue
+				if isinstance(item, Ai) and item.ai_type == "token_usage":
+					continue
+				self.add_result(item, print=not bool(item._context.get("subagent")))
+				if ctx is not None and ctx.results is not None:
+					ctx.results.append(item.toDict())
+				out.append(item)
+			if job.finished and job.recorded_status != job.status:
+				job.recorded_status = job.status
+				record = Ai(
+					content=f"Background job {job.summary()}",
+					ai_type="background_job",
+					extra_data=job.to_dict(),
+					_context={**dict(self.context or {}), "tool_call_id": job.action.get("tool_call_id"),
+					          "tool_call_name": job.action.get("tool_call_name")})
+				self.add_result(record)
+				out.append(record)
+		return out
+
+	def _drain_background(self):
+		"""Generator form of :meth:`_drain_background_items` (streams the items)."""
+		yield from self._drain_background_items()
+
+	def _with_background_status(self, messages):
+		"""Append the short background-jobs status block to the outgoing messages (not to
+		history: it is rebuilt fresh every turn)."""
+		mgr = getattr(self, "background", None)
+		block = mgr.status_block() if mgr is not None else ""
+		if not block:
+			return messages
+		block = maybe_encrypt(block, self.encryptor)
+		messages = list(messages)
+		last = messages[-1] if messages else None
+		if isinstance(last, dict) and last.get("role") == "user" and isinstance(last.get("content"), str):
+			messages[-1] = {**last, "content": f"{last['content']}\n\n{block}"}
+		else:
+			messages.append({"role": "user", "content": block})
+		return messages
+
+	def _should_wait_background(self):
+		"""Wait at end of turn only for a NON-interactive run (no user to resume it later)."""
+		mgr = getattr(self, "background", None)
+		return (mgr is not None and bool(mgr.running())
+		        and getattr(self.backend, "interactive", True) is False)
+
+	def _wait_background_end_of_turn(self):
+		"""Block until a running job finishes (bounded by background_max_wait); on timeout cancel
+		the rest. Then hand the model a turn with the status so it reads, cancels or stops."""
+		mgr = self.background
+		running = mgr.running()
+		console.print(Info(message=f"Waiting for {len(running)} background job(s) (max {mgr.max_wait}s)"))
+		finished = mgr.wait_any(mgr.max_wait)
+		note = "A background job finished."
+		if not finished:
+			cancelled = mgr.cancel_all()
+			note = (f"No background job finished within {mgr.max_wait}s: cancelled "
+			        f"{', '.join(j.id for j in cancelled)}. Their results so far are kept.")
+		yield from self._drain_background()
+		msg = (f"You ended your turn while background jobs were running. {note}\n{mgr.status_block()}\n"
+		       "Read the results you need with check_background_jobs, cancel jobs you no longer need "
+		       "(e.g. servers), then continue or stop. Jobs still running when the run ends are cancelled.")
+		self.history.add_user(maybe_encrypt(msg, self.encryptor))
+
+	def _teardown_background(self):
+		"""Run end (stop, error, max iterations, revoke, input timeout): cancel still-running
+		background jobs and record every job's final status + runner ids. Best-effort."""
+		mgr = getattr(self, "background", None)
+		if mgr is None or not mgr.jobs:
+			return
+		try:
+			if mgr.running():
+				mgr.cancel_all()
+			self._drain_background_items()
+		except Exception as e:  # noqa: BLE001 - teardown must never mask the run's own outcome
+			self.debug(f'background teardown failed: {e}', sub='end')
 
 	# -------------------------------------------------------------------------
 	# History helpers

@@ -6,7 +6,7 @@ from secator.ai.utils import _denied_secret_read, _sanitized_env, _scrub_secrets
 from secator.ai.actions import ActionContext, _get_result_context
 from secator.ai.tools._runner import _child_preamble, _child_run_opts
 from secator.ai.tools._sandbox import _ensure_sandbox_container, _sandbox_container_name, _wrap_docker_exec
-from secator.ai.tools.base import BaseTool, _DESCRIPTION_SCHEMA
+from secator.ai.tools.base import BaseTool, _DESCRIPTION_SCHEMA, _BACKGROUND_SCHEMA
 
 
 # Cap shell stdout before it enters AI history so a huge command can't blow up
@@ -39,6 +39,12 @@ def _resolve_shell_timeout(action: Dict) -> int:
 	from secator.config import CONFIG
 	default = getattr(getattr(CONFIG, "security", None), "shell_default_timeout", _SHELL_TIMEOUT) or _SHELL_TIMEOUT
 	requested = action.get("timeout")
+	ceiling = CONFIG.celery.task_max_timeout
+	# A background command (a server, `docker compose up`, a long fuzz) is not awaited by the
+	# loop, so the interactive 30s default does not apply: with no explicit `timeout` it runs
+	# up to the global task-timeout ceiling (-1 = no cap) and the model cancels it when done.
+	if action.get("background") and requested is None:
+		return ceiling if (ceiling is not None and ceiling > 0) else -1
 	base = default
 	if requested is not None:
 		try:
@@ -46,7 +52,6 @@ def _resolve_shell_timeout(action: Dict) -> int:
 		except (TypeError, ValueError):
 			base = default
 	base = max(base, default)  # floor: never below the per-command default
-	ceiling = CONFIG.celery.task_max_timeout
 	if ceiling is not None and ceiling > 0:
 		base = min(base, ceiling)  # cap: never above the global task-timeout ceiling
 	return base
@@ -75,9 +80,11 @@ class RunShell(BaseTool):
 						"type": "integer",
 						"description": "Optional max run time in seconds for THIS command (default 30). Raise it for a "
 						               "slow command (install, long scan) and re-run after a timeout. Capped at the "
-						               "server's configured maximum task timeout; values below the default are floored."  # noqa: E501
+						               "server's configured maximum task timeout; values below the default are floored. "
+						               "A background command without `timeout` runs up to that maximum."  # noqa: E501
 					},
-					"description": _DESCRIPTION_SCHEMA
+					"description": _DESCRIPTION_SCHEMA,
+					"background": _BACKGROUND_SCHEMA
 				},
 				"required": ["command", "description"]
 			}
@@ -179,7 +186,7 @@ class RunShell(BaseTool):
 			# Check the timeout at least once a second: the default monitor cadence is
 			# stat_update_frequency (tens of seconds), which would let a short shell timeout
 			# lapse unenforced. Stats stay gated to their own frequency (no extra overhead).
-			runner.monitor_poll_interval = min(1.0, effective_timeout)
+			runner.monitor_poll_interval = min(1.0, effective_timeout) if effective_timeout > 0 else 1.0
 
 			# Emit the command Ai now that the runner exists: its on_init hook has
 			# stamped the runner id into context, so clients can link this item to the

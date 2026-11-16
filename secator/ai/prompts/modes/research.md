@@ -49,6 +49,7 @@ You are a vulnerability research specialist conducting authorized security resea
 <constraints>
 ${common}
 ${runners}
+${background}
 ${queries}
 ${findings}
 ${arsenal}

@@ -153,6 +153,21 @@ class RemoteBackend(InteractivityBackend):
 		self.timeout = timeout
 		self.query_engine = query_engine
 		self.poll_interval = poll_interval
+		# Optional ``() -> bool``: while it returns True the idle input timer is FROZEN (the
+		# ai task sets it to "background jobs are still running, within their max wait"), so
+		# an idle user does not end the run and lose that work. Answers and steers are still
+		# polled every tick, so the user can always answer or redirect.
+		self.hold_while = None
+
+	def idle_tick(self, elapsed: float, step: float) -> float:
+		"""Advance the idle timer by ``step`` unless ``hold_while`` freezes it."""
+		hold = self.hold_while
+		try:
+			if hold is not None and hold():
+				return elapsed
+		except Exception:  # noqa: BLE001 - a broken hold must never wedge the wait
+			pass
+		return elapsed + step
 
 	def get_initial_prompt(self, inputs, **context):
 		# remote runs in a worker; the first prompt arrives via context/resume, never
@@ -325,7 +340,7 @@ class RemoteBackend(InteractivityBackend):
 			if steers:
 				return "\n".join(steers)
 			sleep(self.poll_interval)
-			elapsed += self.poll_interval
+			elapsed = self.idle_tick(elapsed, self.poll_interval)
 		# One final search before giving up: the user may have answered during
 		# the last sleep (or between the last search and now). Without this the
 		# answer is silently stranded.

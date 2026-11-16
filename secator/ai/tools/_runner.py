@@ -241,7 +241,13 @@ def _child_preamble(
 	context[id_key] = str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
-	return _build_child_hooks_or_denial(context)
+	hooks, denial = _build_child_hooks_or_denial(context)
+	# In a background job thread, let the child runners register on their job so
+	# cancel_background_job (and the end-of-run teardown) can stop them.
+	from secator.ai.background import current_job, add_background_hooks
+	if denial is None and current_job() is not None:
+		hooks = add_background_hooks(hooks)
+	return hooks, denial
 
 
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:

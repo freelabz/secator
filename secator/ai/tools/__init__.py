@@ -47,6 +47,7 @@ from secator.ai.tools.web_search import WebSearch
 from secator.ai.tools.list_runners import ListRunners
 from secator.ai.tools.change_mode import ChangeMode
 from secator.ai.tools.stop import Stop
+from secator.ai.tools.background_jobs import CheckBackgroundJobs, CancelBackgroundJob
 
 
 # Order mirrors the historical TOOL_SCHEMAS order so build_tool_schemas emits tools
@@ -69,6 +70,8 @@ _TOOL_CLASSES = [
 	WebSearch,
 	ListRunners,
 	ChangeMode,
+	CheckBackgroundJobs,
+	CancelBackgroundJob,
 	Stop,
 ]
 
@@ -361,6 +364,9 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 		# needs arguments, so keep rejecting those. Covers native + text-parsed stop.
 		if tool_name == "stop":
 			return {"action": action_type, "description": "stopped"}
+		# check_background_jobs() with no args (= check all jobs, no wait) is valid too.
+		if tool_name == "check_background_jobs":
+			return {"action": action_type, "description": "Check background jobs"}
 		return None
 	# A model may emit non-object arguments (bare JSON int/array/string) -- `.items()`
 	# below would raise and abort the loop, so reject cleanly and let the caller retry.

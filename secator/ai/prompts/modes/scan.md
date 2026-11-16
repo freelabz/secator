@@ -35,6 +35,7 @@ ${queries}
 ${findings}
 ${arsenal}
 ${subagents}
+${background}
 ${guardrails}
 ${isolation}
 ${exploitation_report}
