@@ -68,6 +68,51 @@ class TestOnRunEndHookPoint(unittest.TestCase):
 			self.assertEqual(cls_hooks['on_run_end'], [json_driver.finalize_store, json_driver.announce_report])
 
 
+class TestRunnerSerializedByOlderVersion(unittest.TestCase):
+	"""A runner serialized by an older version carries a resolved_hooks dict built from that
+	version's HOOKS list, without hook types added since (e.g. on_run_end). Completing it with
+	the current version must not raise."""
+
+	def _old_runner(self, calls):
+		task = _build_task(has_parent=False)
+		task.resolved_hooks['on_end'] = [lambda r: calls.append('on_end')]
+		del task.resolved_hooks['on_run_end']
+		return task
+
+	def test_run_hooks_missing_type_is_a_noop(self):
+		task = _build_task(has_parent=False)
+		del task.resolved_hooks['on_run_end']
+		self.assertEqual(task.run_hooks('on_run_end', 'x'), 'x')
+
+	def test_mark_completed_survives_missing_on_run_end(self):
+		calls = []
+		task = self._old_runner(calls)
+		task.mark_completed()
+		self.assertTrue(task.done)
+		self.assertEqual(calls, ['on_end'])
+
+	def test_unpickled_runner_without_on_run_end(self):
+		task = _build_task(has_parent=False)
+		_strip_store_hooks(task)
+		del task.resolved_hooks['on_run_end']
+		restored = pickle.loads(pickle.dumps(task))
+		self.assertNotIn('on_run_end', restored.resolved_hooks)
+		restored.mark_completed()
+		self.assertTrue(restored.done)
+
+	def test_register_hooks_seeds_missing_hook_type(self):
+		task = _build_task(has_parent=False)
+		del task.resolved_hooks['on_run_end']
+		hook = lambda r: None  # noqa: E731
+		task.register_hooks({'on_run_end': [hook]})
+		self.assertEqual(task.resolved_hooks['on_run_end'], [hook])
+
+	def test_run_validators_missing_type_is_a_noop(self):
+		task = _build_task(has_parent=False)
+		task.resolved_validators.pop('validate_item', None)
+		self.assertTrue(task.run_validators('validate_item', None))
+
+
 class TestCeleryEventsDriver(unittest.TestCase):
 
 	def setUp(self):

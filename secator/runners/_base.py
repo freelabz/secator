@@ -1176,7 +1176,9 @@ class Runner:
 		if self.dry_run:
 			self.debug('hook skipped (dry_run)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
 			return result
-		for hook in self.resolved_hooks[hook_type]:
+		# .get: a runner serialized by an older version carries a resolved_hooks dict built from
+		# that version's HOOKS list, which may lack hook types added since (e.g. on_run_end).
+		for hook in self.resolved_hooks.get(hook_type, []):
 			fun = self.get_func_path(hook)
 			try:
 				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
@@ -1216,7 +1218,7 @@ class Runner:
 		if not self.enable_validators:
 			self.debug('validator skipped (disabled validators)', obj={'name': validator_type}, sub=sub, verbose=True)  # noqa: E501
 			return True
-		for validator in self.resolved_validators[validator_type]:
+		for validator in self.resolved_validators.get(validator_type, []):
 			fun = self.get_func_path(validator)
 			if not validator(self, *args):
 				self.debug('validator failed', obj={'name': validator_type, 'fun': fun}, sub=sub)  # noqa: E501
@@ -1242,8 +1244,10 @@ class Runner:
 		Args:
 			hooks (dict[str, List[Callable]]): List of hooks to register.
 		"""
-		for key in self.resolved_hooks:
-			registered = self.resolved_hooks[key]
+		# Also seed hook types missing from resolved_hooks (a runner serialized by an older
+		# version), so hooks registered afterwards are not silently dropped.
+		for key in list(dict.fromkeys([*HOOKS, *self.resolved_hooks])):
+			registered = self.resolved_hooks.setdefault(key, [])
 
 			# Register class + derived class hooks
 			class_hook = getattr(self, key, None)
