@@ -67,6 +67,20 @@ _DESCRIPTION_SCHEMA = {
 }
 
 
+def _stamp_tool_call(results, call):
+	"""Yield ``results``, adding the ``call`` keys to each item's ``_context`` when it has no call id."""
+	for item in results:
+		if isinstance(item, dict):
+			context = item.get("_context") if isinstance(item.get("_context"), dict) else {}
+			if "tool_call_id" not in context:
+				item["_context"] = {**context, **call}
+		elif hasattr(item, "_context"):
+			context = item._context if isinstance(item._context, dict) else {}
+			if "tool_call_id" not in context:
+				item._context = {**context, **call}
+		yield item
+
+
 class BaseTool:
 	"""One AI tool. Subclasses set the class attributes; the registry does the rest.
 
@@ -96,8 +110,17 @@ class BaseTool:
 	external: bool = False
 
 	def handle(self, action, ctx):
-		"""Dispatch to the tool's handler, its :meth:`run` generator."""
-		return self.run(action, ctx)
+		"""Dispatch to the tool's handler, its :meth:`run` generator.
+
+		Every result is tagged with this tool call (``tool_call_id`` / ``tool_call_name`` in its
+		``_context``) when it does not carry one yet, so the agent loop can attach it to the model's
+		tool call. That covers a result the tool did not stamp itself, and the output of a task it runs
+		through ``run_task_from_tool`` (which dispatches a fresh action with no call id). Results that
+		are already stamped are left unchanged.
+		"""
+		call = {k: action.get(k) for k in ("tool_call_id", "tool_call_name") if action.get(k)}
+		results = self.run(action, ctx)
+		return _stamp_tool_call(results, call) if call else results
 
 	def run(self, action, ctx):
 		"""Generator handler: yields OutputTypes. Every tool overrides this in its file."""

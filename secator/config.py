@@ -25,6 +25,18 @@ LIB_FOLDER = ROOT_FOLDER / 'secator'
 CONFIGS_FOLDER = LIB_FOLDER / 'configs'
 DATA_FOLDER = os.environ.get('SECATOR_DIRS_DATA') or str(Path.home() / '.secator')
 
+# SECATOR_* environment variables that secator reads directly (os.environ), not through the config
+# model. apply_env_overrides skips them silently instead of reporting an unknown config key.
+NON_CONFIG_ENV_VARS = frozenset({
+	'SECATOR_AI_TOOLS_DIRS',  # extra AI tool directories (secator.loader)
+	'SECATOR_AI_SANDBOX_IMAGE',  # --isolated sandbox overrides (secator.ai.tools._sandbox)
+	'SECATOR_AI_SANDBOX_MEMORY',
+	'SECATOR_AI_SANDBOX_NETWORK',
+	'SECATOR_AI_SANDBOX_PACKAGES',
+	'SECATOR_AI_SANDBOX_PIDS',
+	'SECATOR_PACKAGE_MANAGER',  # package manager override (secator.installer)
+})
+
 USER_AGENTS = {
 	'chrome_134.0_win10': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
 	'chrome_134.0_macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',  # noqa: E501
@@ -536,6 +548,16 @@ class Config(DotMap):
 			# Try to convert value to expected type
 			try:
 				if isinstance(existing_value, list):
+					if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
+						# A JSON array (e.g. '["a", "b"]') parses as such; anything else falls back to
+						# the bracketed comma-separated form below (e.g. '[a, b]').
+						import json
+						try:
+							parsed = json.loads(value)
+						except ValueError:
+							parsed = None
+						if isinstance(parsed, list):
+							value = parsed
 					if isinstance(value, str):
 						if value.startswith('[') and value.endswith(']'):
 							value = value[1:-1]
@@ -1023,7 +1045,7 @@ class Config(DotMap):
 		"""
 		prefix = 'SECATOR_'
 		for var in os.environ:
-			if not var.startswith(prefix):
+			if not var.startswith(prefix) or var in NON_CONFIG_ENV_VARS:
 				continue
 			key = var[len(prefix):]  # remove prefix
 			path = self._resolve_env_key(key)

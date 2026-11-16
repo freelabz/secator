@@ -404,3 +404,87 @@ class TestRunTaskFromToolGuardrails(unittest.TestCase):
 			list(actions.run_task_from_tool(self._ctx(engine=object(), dangerous=True), "cockpit"))
 		self.assertEqual(called, [])
 		self.assertEqual(len(dispatched), 1)
+
+
+class _FakeHistory:
+	def __init__(self):
+		self.tool_results = []
+
+	def get_action_budget(self, model):
+		return 10000
+
+	def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
+		self.tool_results.append((name, tc_id, content))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
+class TestToolCallStamping(unittest.TestCase):
+	"""Every tool result reaches the model's tool call: BaseTool.handle stamps the call id on a
+	result that has none, including the output of a task launched with run_task_from_tool."""
+
+	def setUp(self):
+		_reset()
+
+	def tearDown(self):
+		_reset()
+
+	def _tool(self, name, run):
+		from secator.ai.tools import register_ai_tool
+		from secator.ai.tools.base import BaseTool
+		schema = {"type": "function", "function": {"name": name, "description": "x",
+		          "parameters": {"type": "object", "properties": {}}}}
+		register_ai_tool(type(name.title().replace("_", ""), (BaseTool,), {"name": name, "schema": schema, "run": run}))
+
+	def _collect(self, name, ctx):
+		"""Drive one tool call through the agent loop's real collection path."""
+		from unittest.mock import MagicMock
+		from secator.ai.interactivity import CLIBackend
+		from secator.tasks.ai import ai as AiTask
+		fake = MagicMock()
+		fake.backend = CLIBackend()
+		fake.session_id, fake.model, fake.reports_folder, fake.encryptor, fake.context = "s", "m", None, None, {}
+		fake.history = _FakeHistory()
+		fake.add_result = lambda item, **kw: None
+		ctx.results = []
+		action = {"action": name, "tool_call_id": "tc1", "tool_call_name": name, "description": "d"}
+		list(AiTask._dispatch_and_collect(fake, [action], ctx))
+		return fake.history.tool_results
+
+	def test_unstamped_result_reaches_the_model(self):
+		from secator.ai.actions import ActionContext
+		from secator.output_types import Error
+		self._tool("plain_error", lambda self, a, c: iter([Error(message="bad input")]))
+		results = self._collect("plain_error", ActionContext(targets=[], model="m"))
+		self.assertEqual(len(results), 1)
+		self.assertEqual(results[0][1], "tc1")
+		self.assertIn("bad input", results[0][2])
+
+	def test_run_task_from_tool_denial_reaches_the_model(self):
+		from secator.ai.actions import ActionContext, run_task_from_tool
+		from secator.ai.guardrails import PermissionEngine
+		self._tool("runs_task", lambda self, a, c: run_task_from_tool(c, "httpx", targets=["example.com"]))
+		engine = PermissionEngine(config=dict(allow=["target(*)"], deny=["task(httpx)"]), targets=["example.com"])
+		ctx = ActionContext(targets=["example.com"], model="m", permission_engine=engine)
+		results = self._collect("runs_task", ctx)
+		self.assertEqual(len(results), 1)
+		self.assertIn("denied", results[0][2])
+
+	def test_handle_stamps_only_unstamped_results(self):
+		from secator.ai.tools.base import BaseTool
+		from secator.output_types import Warning
+
+		class T(BaseTool):
+			name = "t"
+
+			def run(self, action, ctx):
+				yield Warning(message="no ctx")
+				yield {"_type": "x"}
+				yield Warning(message="own", _context={"tool_call_id": "inner", "tool_call_name": "other"})
+
+		out = list(T().handle({"action": "t", "tool_call_id": "tc9", "tool_call_name": "t"}, None))
+		self.assertEqual(out[0]._context["tool_call_id"], "tc9")
+		self.assertEqual(out[1]["_context"], {"tool_call_id": "tc9", "tool_call_name": "t"})
+		self.assertEqual(out[2]._context["tool_call_id"], "inner")  # already stamped: unchanged
+		# No call id on the action (e.g. a direct call): results pass through untouched.
+		bare = list(T().handle({"action": "t"}, None))
+		self.assertNotIn("tool_call_id", bare[0]._context)
