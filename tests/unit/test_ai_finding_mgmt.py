@@ -736,6 +736,30 @@ class TestItemUpdateHooks(unittest.TestCase):
 		self.assertIn(('post', 'ext-1'), self.calls)
 		self.assertNotIn(('persist_on_item',), self.calls)
 
+	def test_finding_update_tools_run_methods_fire_item_update_hooks(self):
+		"""Each finding-update tool's OWN run() (its handler, in its tool file) still routes the
+		store write through _apply_finding_update, so pre + post on_item_update hooks fire."""
+		import copy
+		from secator.ai.tools import TOOLS_BY_NAME
+		cases = [
+			('update_finding', {'_uuid': 'u1', 'fields': {'severity': 'high'}}),
+			('mark_vuln_exploited', {'_uuid': 'u1', 'poc': '# poc'}),
+			('mark_vuln_false_positive', {'_uuid': 'u1', 'reason': 'dup'}),
+			('mark_vuln_exploit_failed', {'_uuid': 'u1', 'reason': 'payload blocked'}),
+			('mark_vuln_fixed', {'_uuid': 'u1', 'reason': 'no longer reproduces'}),
+		]
+		for name, args in cases:
+			with self.subTest(tool=name):
+				self.engine.docs[:] = [copy.deepcopy(self.VULN)]
+				self.calls.clear()
+				self.task.resolved_hooks['on_item_update'] = []
+				self._add_external_driver()
+				tool = TOOLS_BY_NAME[name]
+				out = list(tool.run({'action': tool.action, **args}, self.ctx))
+				self.assertFalse([o for o in out if isinstance(o, Error)], f"{name}: {out}")
+				self.assertTrue(any(c[0] == 'pre' for c in self.calls), f"{name}: pre hook not fired")
+				self.assertIn(('post', 'ext-1'), self.calls, f"{name}: post hook not fired")
+
 	def test_no_hooks_without_runner(self):
 		self.ctx.run_item_update_hooks = None
 		self._add_external_driver()
