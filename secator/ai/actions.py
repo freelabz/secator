@@ -407,14 +407,18 @@ def run_task_from_tool(ctx: ActionContext, name: str, targets=None, opts=None, d
 	"""Run a secator task/workflow FROM an AI tool handler, via the SAME path the built-in
 	``run_task`` / ``run_workflow`` tools use.
 
-	A custom AI tool must not invoke a runner ad-hoc; it routes through here so the run
-	gets the exact same handling as a model-issued ``run_task``: the shared ``_run_runner``
-	execution, mandate ``in_scope`` / ``out_of_scope`` scope propagation to the child
-	runner, child hook/driver wiring, and result capture. ``name`` is a task/workflow name
-	(built-in or a custom one from the templates dir — see
-	:func:`secator.loader.get_task_class`).
+	A custom AI tool must not invoke a runner ad-hoc; it routes through here so the run gets
+	the exact same handling as a model-issued ``run_task``:
 
-	Yields OutputType instances, exactly like the built-in runner tools.
+	1. the SAME guardrail/permission check as the agent loop (``check_guardrails``): the
+	   same deny rules, the same target approval and the same interactive/remote prompt —
+	   skipped only when the run is ``dangerous``, exactly like the loop. Being called from
+	   an auto-allowed tool grants NOTHING: the task action is checked on its own merits;
+	2. then the shared ``_run_runner`` execution (mandate scope propagation, child
+	   hook/driver wiring, result capture).
+
+	On denial a Warning is yielded and nothing runs. ``name`` is a task/workflow name
+	(built-in or custom — see :func:`secator.loader.get_task_class`).
 	"""
 	action = {
 		"action": runner_type,
@@ -423,6 +427,12 @@ def run_task_from_tool(ctx: ActionContext, name: str, targets=None, opts=None, d
 		"opts": dict(opts or {}),
 		"description": description or f"Run {name}",
 	}
+	if not getattr(ctx, "dangerous", False):
+		denial = yield from check_guardrails(action, ctx)
+		if denial:
+			yield Warning(message=f"{runner_type} {name!r} denied: {denial}",
+			              _context=_get_result_context(action, ctx))
+			return
 	yield from dispatch_action(action, ctx)
 
 

@@ -135,8 +135,10 @@ def _validate_tool_spec(tool):
 	Clear, actionable errors so a bad drop-in is skipped (never crashes startup) and the
 	author sees exactly what is wrong. A dynamic tool is the SAFE auto-allow class only
 	(like query/add_finding): it runs WITHOUT target/path network gating, so it must have
-	no target/path side effects — anything that connects to a target belongs in a
-	task/workflow (which IS scope-gated), not a dynamic tool.
+	no target/path side effects of its OWN — anything that connects to a target must be run
+	as a task/workflow via ``actions.run_task_from_tool``, which applies the SAME guardrail /
+	permission check (deny rules, target approval, prompt) as a model-issued ``run_task``:
+	the tool's auto-allow never extends to the tasks it launches.
 	"""
 	if not isinstance(tool, BaseTool):
 		return "not a BaseTool subclass/instance"

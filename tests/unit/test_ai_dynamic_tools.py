@@ -290,7 +290,8 @@ class TestCustomToolReusesExtensions(unittest.TestCase):
 				calls.append(action)
 				return iter(())
 			with mock.patch.object(actions, "dispatch_action", _rec):
-				list(TOOLS_BY_NAME["export_report"].handle({"action": "export_report"}, ctx=None))
+				list(TOOLS_BY_NAME["export_report"].handle(
+					{"action": "export_report"}, ctx=actions.ActionContext(targets=[], model="m")))
 
 		# The custom HOOK was called.
 		self.assertTrue(self.sentinel.exists())
@@ -298,3 +299,108 @@ class TestCustomToolReusesExtensions(unittest.TestCase):
 		# The custom TASK was run through the run_task path (same as built-in run_task).
 		self.assertTrue(any(c.get("action") == "task" and c.get("name") == "cockpit" for c in calls),
 		                f"task not run via run_task_from_tool path: {calls}")
+
+
+class _AskBackend:
+	"""Minimal interactive backend that records permission prompts and answers them."""
+	interactive = True
+
+	def __init__(self, answer):
+		self.answer = answer
+		self.asked = []
+
+	def ask_user(self, **kwargs):
+		self.asked.append(kwargs)
+		# Like the real backends: an "allow" persists a runtime rule on the engine so the
+		# guardrail re-check resolves.
+		if self.answer == "allow" and kwargs.get("engine") is not None:
+			kwargs["engine"].add_runtime_allow([f"{kwargs['permission_type']}({kwargs['value']})"])
+		return {"answer": self.answer}
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
+class TestRunTaskFromToolGuardrails(unittest.TestCase):
+	"""A task launched by an (auto-allowed) external tool via run_task_from_tool gets the SAME
+	guardrail/permission check as a model-issued run_task: same deny rules, same target
+	approval, same prompt. Being called from an auto-allowed tool grants nothing."""
+
+	def _ctx(self, engine, backend=None, dangerous=False):
+		from secator.ai.actions import ActionContext
+		return ActionContext(targets=["example.com"], model="m", permission_engine=engine,
+		                     backend=backend, dangerous=dangerous)
+
+	def _builtin_action(self, name, targets):
+		from secator.ai.tools import tool_call_to_action
+		return tool_call_to_action("run_task", {"name": name, "targets": targets, "description": "x"})
+
+	def test_checks_the_same_action_as_builtin_run_task(self):
+		from unittest import mock
+		import secator.ai.actions as actions
+		seen = []
+
+		def _check(action, ctx):
+			seen.append(action)
+			return None
+			yield  # pragma: no cover - makes this a generator
+
+		dispatch = mock.patch.object(actions, "dispatch_action", lambda a, c: iter(()))
+		with mock.patch.object(actions, "check_guardrails", _check), dispatch:
+			list(actions.run_task_from_tool(self._ctx(engine=object()), "cockpit", targets=["example.com"]))
+		self.assertEqual(len(seen), 1)
+		builtin = self._builtin_action("cockpit", ["example.com"])
+		for key in ("action", "name", "targets"):
+			self.assertEqual(seen[0][key], builtin[key], key)
+
+	def test_deny_rule_blocks_tool_launched_task_like_run_task(self):
+		from unittest import mock
+		import secator.ai.actions as actions
+		from secator.ai.guardrails import PermissionEngine
+		engine = PermissionEngine(config=dict(allow=["task(*)", "target(*)"], deny=["task(cockpit)"]),
+		                          targets=["example.com"])
+		ctx = self._ctx(engine)
+		# Same verdict as the built-in run_task path...
+		denial, _ = actions.check_guardrails_sync(self._builtin_action("cockpit", ["example.com"]), ctx)
+		self.assertTrue(denial)
+		# ...and the tool path is denied too: nothing dispatched, a Warning is yielded.
+		dispatched = []
+		with mock.patch.object(actions, "dispatch_action", lambda a, c: dispatched.append(a) or iter(())):
+			out = list(actions.run_task_from_tool(ctx, "cockpit", targets=["example.com"]))
+		self.assertEqual(dispatched, [])
+		self.assertTrue(any("denied" in str(getattr(o, "message", "")) for o in out))
+
+	def test_target_needing_approval_prompts_like_run_task(self):
+		from unittest import mock
+		import secator.ai.actions as actions
+		from secator.ai.guardrails import PermissionEngine
+		# task allowed, but no rule covers the target -> the engine asks.
+		engine = PermissionEngine(config=dict(allow=["task(*)"]), targets=[])
+		backend = _AskBackend(answer="deny")
+		dispatched = []
+		with mock.patch.object(actions, "dispatch_action", lambda a, c: dispatched.append(a) or iter(())):
+			list(actions.run_task_from_tool(self._ctx(engine, backend), "cockpit", targets=["unlisted.example"]))
+		self.assertTrue(backend.asked, "tool-launched task must raise the same permission prompt")
+		self.assertEqual(backend.asked[0].get("prompt_type"), "permission")
+		self.assertEqual(dispatched, [])
+		# Approving the same prompt lets it run.
+		backend_ok = _AskBackend(answer="allow")
+		with mock.patch.object(actions, "dispatch_action", lambda a, c: dispatched.append(a) or iter(())):
+			list(actions.run_task_from_tool(self._ctx(engine, backend_ok), "cockpit", targets=["unlisted.example"]))
+		self.assertTrue(backend_ok.asked)
+		self.assertEqual(len(dispatched), 1)
+
+	def test_dangerous_skips_check_like_the_loop(self):
+		from unittest import mock
+		import secator.ai.actions as actions
+		called = []
+
+		def _check(action, ctx):
+			called.append(action)
+			return "nope"
+			yield  # pragma: no cover
+
+		dispatched = []
+		dispatch = mock.patch.object(actions, "dispatch_action", lambda a, c: dispatched.append(a) or iter(()))
+		with mock.patch.object(actions, "check_guardrails", _check), dispatch:
+			list(actions.run_task_from_tool(self._ctx(engine=object(), dangerous=True), "cockpit"))
+		self.assertEqual(called, [])
+		self.assertEqual(len(dispatched), 1)
