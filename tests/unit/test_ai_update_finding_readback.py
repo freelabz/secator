@@ -37,7 +37,7 @@ class _FakeCursor(list):
 
 
 class _FakeFindings:
-	"""In-memory stand-in for the mongodb findings collection (find / update_one)."""
+	"""In-memory stand-in for the mongodb findings collection (find / update_many)."""
 
 	def __init__(self, docs):
 		self.docs = docs
@@ -45,12 +45,11 @@ class _FakeFindings:
 	def find(self, query, projection=None):
 		return _FakeCursor(copy.deepcopy(d) for d in self.docs if match_query(d, query))
 
-	def update_one(self, query, update):
-		for d in self.docs:
-			if match_query(d, query):
-				_apply_set(d, update['$set'])
-				return MagicMock(modified_count=1)
-		return MagicMock(modified_count=0)
+	def update_many(self, query, update):
+		matched = [d for d in self.docs if match_query(d, query)]
+		for d in matched:
+			_apply_set(d, update['$set'])
+		return MagicMock(matched_count=len(matched))
 
 
 class TestUpdateFindingReturnsStoredFinding(unittest.TestCase):

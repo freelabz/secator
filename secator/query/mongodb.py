@@ -106,10 +106,15 @@ class MongoDBBackend(QueryBackend):
 			return 0
 
 	def _execute_update(self, query: dict, update: dict) -> int:
-		"""Update documents matching query in MongoDB."""
+		"""Update every document matching query in MongoDB.
+
+		Returns the number of MATCHED documents, like the other backends: a document already in
+		the requested state still counts (``modified_count`` would be 0 for an idempotent update,
+		which callers would misreport as "not found").
+		"""
 		client = self._get_client()
-		result = client.main.findings.update_one(_seek_by_native_id(query), update)
-		return result.modified_count
+		result = client.main.findings.update_many(_seek_by_native_id(query), update)
+		return result.matched_count
 
 	def _execute_create_note(self, note: dict) -> int:
 		"""Insert a note into the dedicated ``notes`` collection (NOT findings).

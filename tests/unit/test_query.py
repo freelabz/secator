@@ -57,7 +57,8 @@ class TestQueryBackendBase(unittest.TestCase):
 
 		self.assertEqual(merged['_type'], 'url')
 		self.assertEqual(merged['severity'], {'$in': ['critical', 'high']})
-		self.assertEqual(merged['url'], {'$contains': 'login'})
+		# $contains is normalized to a literal, case-insensitive $regex (same result on every backend).
+		self.assertEqual(merged['url'], {'$regex': '(?i)login'})
 
 	def test_count_enforces_base_query(self):
 		"""Verify count() applies base query protection like search()."""
@@ -752,9 +753,10 @@ class TestSqliteTranslator(unittest.TestCase):
 		self.assertEqual(params, ['critical', 'high'])
 
 	def test_contains_op(self):
-		sql, params = self._where({'url': {'$contains': 'login'}})
-		self.assertEqual(sql, "json_extract(data, '$.url') LIKE '%' || ? || '%'")
-		self.assertEqual(params, ['login'])
+		# Literal, case-insensitive substring: no LIKE wildcards (% and _ in the value are literal).
+		sql, params = self._where({'url': {'$contains': 'lo%gin'}})
+		self.assertEqual(sql, "json_extract(data, '$.url') REGEXP ?")
+		self.assertEqual(params, ['(?i)lo%gin'])
 
 	def test_regex_op(self):
 		sql, params = self._where({'url': {'$regex': r'example\.com'}})

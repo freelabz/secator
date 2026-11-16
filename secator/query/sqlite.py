@@ -102,8 +102,10 @@ def _build_where(query: dict):
 					if sub:
 						clauses.append('(' + ' AND '.join(sub) + ')')
 				elif op == '$contains':
-					clauses.append(f"{expr} LIKE '%' || ? || '%'")
-					params.append(val)
+					# Literal, case-insensitive substring (same as the normalized $regex form);
+					# LIKE would treat % and _ in the value as wildcards.
+					clauses.append(f'{expr} REGEXP ?')
+					params.append('(?i)' + re.escape(str(val)))
 				elif op == '$regex':
 					clauses.append(f'{expr} REGEXP ?')
 					params.append(str(val))
