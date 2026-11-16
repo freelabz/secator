@@ -150,3 +150,45 @@ def test_copied_text_drops_line_padding():
 				app._copy("line one    \nline two  ")
 				copy.assert_called_once_with("line one\nline two")
 	_run(body())
+
+
+def test_click_to_expand_still_works_and_does_not_copy():
+	# selection is in-app (no Shift needed): a plain click on a runner header must still
+	# toggle it, and must not be taken as a selection.
+	from secator.tui.widgets import RunnerPanel
+
+	async def body():
+		app = AITUI(None, session="ai", mode="chat")
+		async with app.run_test(size=(100, 30)) as pilot:
+			await pilot.pause(0.05)
+			panel = RunnerPanel("task", "Port scan", command="nmap x")
+			await app._append(panel)
+			await pilot.pause(0.05)
+			with mock.patch.object(app, "copy_to_clipboard") as copy:
+				await pilot.click(panel.query_one(".runner-head"))
+				await pilot.pause(0.05)
+				assert not panel._collapsed
+				copy.assert_not_called()
+	_run(body())
+
+
+def test_mouse_wheel_still_scrolls_the_conversation():
+	async def body():
+		app = AITUI(None, session="ai", mode="chat")
+		async with app.run_test(size=(80, 20)) as pilot:
+			await pilot.pause(0.05)
+			for i in range(60):
+				await app._append(Static(Text(f"line {i}"), classes="ai"))
+			await pilot.pause(0.05)
+			convo = app._convo()
+			convo.scroll_end(animate=False)
+			await pilot.pause(0.05)
+			end = convo.scroll_y
+			assert end > 0
+			# mouse capture stays on (that's what makes in-app selection work): the wheel
+			# still reaches the conversation. Private pilot helper: no public wheel API.
+			from textual import events
+			await pilot._post_mouse_events([events.MouseScrollUp], convo, offset=(5, 5), times=3)
+			await pilot.pause(0.1)
+			assert convo.scroll_y < end
+	_run(body())
