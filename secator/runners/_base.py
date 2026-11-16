@@ -37,6 +37,7 @@ HOOKS = [
 	'on_init',
 	'on_start',
 	'on_end',
+	'on_run_end',
 	'on_item_pre_convert',
 	'on_item',
 	'on_duplicate',
@@ -1312,6 +1313,10 @@ class Runner:
 		# active — the lazy callback runs after debug()'s enable-gate, so it's free when debug is off.
 		self.debug('completed', sub='end', lazy=lambda m: f'{m} (status: {self.status}, sync: {self.sync}, reports: {self.enable_reports}, hooks: {self.enable_hooks})')  # noqa: E501
 		self.run_hooks('on_end', sub='end')
+		# on_run_end: once per top-level run, after every on_end hook has persisted the final
+		# state. Child runners (tasks of a workflow, workflows of a scan, task chunks) never fire it.
+		if not self.has_parent:
+			self.run_hooks('on_run_end', sub='end')
 		self.export_profiler()
 		self.log_results()
 

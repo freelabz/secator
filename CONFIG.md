@@ -606,6 +606,19 @@ Optional integrations and addon configurations.
 | `addons.discord.finding_types` | `list[str]` | `[vulnerability]` | Finding types to notify |
 | `addons.discord.min_severity` | `string` | `high` | Minimum severity for notifications |
 
+### addons.celery_events — Run-end events
+
+Used by the `celery_events` driver (`--driver celery_events`): when a top-level run ends
+(`on_run_end` hook), it publishes a Celery task so a deployment can start post-run
+processing without polling. The task gets keyword arguments only: `runner_type`,
+`runner_id`, `name`, `status`, `workspace_id`, `end_time`. Best effort: a broker error
+is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails the run.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `addons.celery_events.run_end_task` | `string` | `''` | Name of the Celery task to publish. Empty = the driver does nothing |
+| `addons.celery_events.queue` | `string` | `''` | Queue to publish to. Empty = Celery's default routing |
+
 ### addons.api — Secator Cloud API
 
 | Field | Type | Default | Description |

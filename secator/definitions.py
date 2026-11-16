@@ -55,7 +55,7 @@ LLM_SPINNER_MESSAGES = [
 ]
 
 # Available drivers and exporters
-AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord', 'sqlite', 'json']
+AVAILABLE_DRIVERS = ['mongodb', 'gcs', 'api', 'discord', 'sqlite', 'json', 'celery_events']
 AVAILABLE_EXPORTERS = ['csv', 'gdrive', 'json', 'jsonl', 'markdown', 'table', 'txt']
 
 # Canonical execution priority for drivers whose hooks share a lifecycle event.
