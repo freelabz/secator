@@ -402,6 +402,30 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		yield Warning(message=f"Unknown action: {action_type}", _context=context)
 
 
+def run_task_from_tool(ctx: ActionContext, name: str, targets=None, opts=None, description=None,
+                       runner_type: str = "task") -> Generator:
+	"""Run a secator task/workflow FROM an AI tool handler, via the SAME path the built-in
+	``run_task`` / ``run_workflow`` tools use.
+
+	A custom AI tool must not invoke a runner ad-hoc; it routes through here so the run
+	gets the exact same handling as a model-issued ``run_task``: the shared ``_run_runner``
+	execution, mandate ``in_scope`` / ``out_of_scope`` scope propagation to the child
+	runner, child hook/driver wiring, and result capture. ``name`` is a task/workflow name
+	(built-in or a custom one from the templates dir — see
+	:func:`secator.loader.get_task_class`).
+
+	Yields OutputType instances, exactly like the built-in runner tools.
+	"""
+	action = {
+		"action": runner_type,
+		"name": name,
+		"targets": list(targets or []),
+		"opts": dict(opts or {}),
+		"description": description or f"Run {name}",
+	}
+	yield from dispatch_action(action, ctx)
+
+
 def safe_dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	"""Dispatch a single action, converting any raised ``Exception`` into an
 	``Error`` output item instead of letting it abort the AI loop.

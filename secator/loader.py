@@ -357,6 +357,31 @@ def discover_external_exporters():
 	return output
 
 
+def get_task_class(name):
+	"""Return a discovered task class by name (built-in or custom), or None.
+
+	Public accessor for extension authors — e.g. a custom AI tool that wants to run a
+	custom task the org dropped into the templates dir. Triggers task discovery, so the
+	returned class is the same object the ``run_task`` tool would resolve.
+	"""
+	for cls in discover_tasks():
+		if getattr(cls, '__name__', None) == name:
+			return cls
+	return None
+
+
+def get_driver_hooks(name):
+	"""Return the ``HOOKS`` dict of a loaded external driver/hook module by name, or None.
+
+	Public accessor so an extension — e.g. a custom AI tool — can reuse a custom reporting
+	hook that core loaded from the templates dir (the same ``HOOKS`` secator applies as a
+	driver). Triggers external-driver discovery first.
+	"""
+	discover_external_drivers()
+	module = sys.modules.get(f'secator.hooks.{name}')
+	return getattr(module, 'HOOKS', None) if module is not None else None
+
+
 @cache
 def discover_ai_tools():
 	"""Find and register external AI tools (a ``*.py`` defining a BaseTool subclass).
@@ -367,10 +392,20 @@ def discover_ai_tools():
 	tool callable by the AI agent with no core edit — the same drop-in model as custom
 	tasks. ``@cache`` → runs once. Fail-safe per file: a bad import, bad spec or invalid
 	tool is skipped with a clear message, never crashing startup.
+
+	LOAD ORDER: tasks and external drivers/hooks are discovered FIRST, so a tool file can
+	reference custom tasks (:func:`get_task_class`) and custom hooks
+	(:func:`get_driver_hooks`) that core has already loaded. A tool that references a
+	missing task/hook raises inside its own file and is skipped with a clear message,
+	leaving the other tools loaded.
 	"""
 	from secator.definitions import ADDONS_ENABLED
 	if not ADDONS_ENABLED.get('ai'):
 		return []
+	# Tools load AFTER tasks + hooks so references resolve (see get_task_class /
+	# get_driver_hooks). Both are @cache'd, so this is a no-op after the first call.
+	discover_tasks()
+	discover_external_drivers()
 	from secator.ai.tools import register_ai_tool
 	from secator.ai.tools.base import BaseTool
 	registered = []

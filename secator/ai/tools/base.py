@@ -10,10 +10,45 @@ like a custom secator task.
 
 A tool does NOT declare which modes expose it. Mode exposure is the mode's
 responsibility: each mode prompt's frontmatter ``tools:`` globs (see
-:func:`secator.ai.prompts.tool_matches_mode`) are the single source of truth for which
-tools that mode exposes. A built-in is matched by name globs (``*`` / ``run_*``); an
-external tool opts in by EXACT name only, so a broad ``*`` never silently grants a mode
-a newly dropped-in external tool.
+:func:`secator.ai.prompts.tool_matches_mode`) are the single source of truth for the
+mode's BASELINE tools, and resolve against CORE tools only. An external tool is never
+pulled in by a mode's globs; it is added on top per-run via the ``ai`` task's
+``extra_tools`` option (or ``CONFIG.addons.ai.extra_tools``).
+
+Reusing other dynamically-loaded extensions
+--------------------------------------------
+A custom tool can reuse the custom tasks and hooks core has already loaded from the
+templates dir, through the stable public accessors. Tools load AFTER tasks and hooks, so
+the references resolve. Example — an org drops a custom ``cockpit`` task and a custom
+reporting hook (e.g. a SysReptor driver) into ``~/.secator/templates``, then adds a tool
+that uses both::
+
+	from secator.ai.tools.base import BaseTool
+	from secator.loader import get_task_class, get_driver_hooks
+	from secator.ai.actions import run_task_from_tool
+	from secator.output_types import Info
+
+	class ExportReport(BaseTool):
+		name = "export_report"
+		schema = {"type": "function", "function": {"name": "export_report",
+			"description": "Run the cockpit task and push results to the reporting hook.",
+			"parameters": {"type": "object", "properties": {
+				"targets": {"type": "array", "items": {"type": "string"}}}}}}
+
+		def run(self, action, ctx):
+			# Run a CUSTOM task through the SAME path as the built-in run_task tool
+			# (scope/guardrail + child-hook propagation) — never invoke it ad-hoc.
+			if get_task_class("cockpit"):
+				yield from run_task_from_tool(ctx, "cockpit", targets=action.get("targets"),
+				                              description="Collect cockpit data")
+			# Reuse a CUSTOM reporting hook core loaded as a driver.
+			hooks = get_driver_hooks("sysreptor") or {}
+			for fn in hooks.get("on_item", []):
+				fn(action)
+			yield Info(message="exported")
+
+Activation is unchanged: the tool is only active when named in ``extra_tools`` (per run
+or via ``CONFIG.addons.ai.extra_tools``).
 """
 
 _TARGETS_SCHEMA = {
