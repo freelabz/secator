@@ -65,7 +65,7 @@ class TestOnRunEndHookPoint(unittest.TestCase):
 	def test_json_report_announce_moved_to_run_end(self):
 		for cls_hooks in json_driver.HOOKS.values():
 			self.assertNotIn(json_driver.announce_report, cls_hooks['on_end'])
-			self.assertEqual(cls_hooks['on_run_end'], [json_driver.announce_report])
+			self.assertEqual(cls_hooks['on_run_end'], [json_driver.finalize_store, json_driver.announce_report])
 
 
 class TestCeleryEventsDriver(unittest.TestCase):

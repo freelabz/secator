@@ -22,9 +22,8 @@ def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
 	duplicate insert. On the mongodb driver a ``_uuid`` lookup/update is a native ``_id``
 	index seek (the query layer rewrites a valid-ObjectId ``_uuid`` to ``_id`` — findings
 	carry ``_uuid = str(_id)``), so the update + re-fetch are point operations, not
-	workspace scans. After the update it re-fetches and re-applies the same ``$set`` locally
-	— the json store is append-only (last-wins on read) so a tight limit can return a
-	pre-update line; on the store-backed drivers the fetch is already current, a no-op there.
+	workspace scans. After the update it re-fetches the finding: every backend returns its
+	current state (the json store resolves its append-only records last-wins on read).
 	"""
 	engine = ctx.get_query_engine()
 	query = {"_type": "vulnerability", "_uuid": uuid}
@@ -40,9 +39,6 @@ def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
 	# of "Updated <name>", and extra_data.finding is empty). Drop the display filters for this
 	# targeted by-uuid read so the finding comes back regardless of its display state.
 	updated = (engine.search(query, limit=1, scope_only=True) or [None])[0]
-	if updated:
-		from secator.query.json import _apply_set
-		_apply_set(updated, update)
 	label = (updated.get("name") if isinstance(updated, dict) else None) or uuid
 	return modified, updated, label, None
 

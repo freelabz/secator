@@ -174,11 +174,24 @@ class JsonBackend(QueryBackend):
 		workspace_folder = sanitize_folder_name(self.workspace_id)
 		return self.reports_dir / workspace_folder
 
-	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str):
-		"""Yield one runner's records one at a time — the ndjson streamed line-by-line (or a legacy
-		report.json), with the {type}_id injection. No dedup or list here: this is the O(1)-memory
-		read used for filter-while-streaming; last-wins dedup, when needed, is done by the caller over
-		its (small) kept subset, not over the whole file."""
+	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str, query: dict, line_filter: str = None):
+		"""Yield one runner's records matching ``query``, keeping only each finding's LATEST record.
+
+		The live store (``results.ndjson``) is append-only: updating a finding appends a new record
+		for the same ``_uuid`` and the last one wins. A finding therefore matches (or not) by its
+		latest record only — an OPEN finding later updated to FIXED is not returned for
+		``status: OPEN``. Records are yielded at their latest record's position (the order a
+		compacted store keeps, see ``secator.utils.compact_ndjson``).
+
+		Two streaming passes over ONE open file handle: pass 1 indexes each ``_uuid``'s last line
+		(small entries, never full records), pass 2 yields the latest records that match. Using the
+		same handle means a concurrent compaction (which replaces the file) cannot shift positions
+		between the passes. Memory stays O(distinct uuids in this file); the caller can stop early.
+		Each record gets the ``{type}_id`` context injection. A legacy ``report.json`` (no ndjson)
+		is read whole.
+
+		``line_filter``: skip ndjson lines not containing this string before parsing (a cheap
+		prefilter for point reads; the parsed record is still checked)."""
 		runner_id = report_dir.name
 
 		def _tag(rec):
@@ -186,19 +199,42 @@ class JsonBackend(QueryBackend):
 				rec.setdefault('_context', {})[f'{runner_type_singular}_id'] = runner_id
 			return rec
 
+		def _uid(rec):
+			return rec.get('_uuid') if isinstance(rec, dict) else None
+
+		def _latest_matching(records):
+			"""records: callable returning a fresh iterator of (index, record)."""
+			latest = {}
+			for index, rec in records():
+				uid = _uid(rec)
+				if uid:
+					latest[uid] = index
+			for index, rec in records():
+				uid = _uid(rec)
+				if uid and latest.get(uid) != index:
+					continue  # superseded by a later record of the same finding
+				rec = _tag(rec)
+				if match_query(rec, query):
+					yield rec
+
 		ndjson = report_dir / 'results.ndjson'
 		if ndjson.exists():
+			needle = line_filter.encode() if line_filter else None
 			try:
-				with open(ndjson, 'r') as f:
-					for line in f:
-						line = line.strip()
-						if not line:
-							continue
-						try:
-							rec = orjson.loads(line)
-						except json.JSONDecodeError:
-							continue  # torn final line after a crash -> skip
-						yield _tag(rec)
+				with open(ndjson, 'rb') as f:
+					def records():
+						f.seek(0)
+						for index, line in enumerate(f):
+							if needle and needle not in line:
+								continue
+							line = line.strip()
+							if not line:
+								continue
+							try:
+								yield index, orjson.loads(line)
+							except json.JSONDecodeError:
+								continue  # torn final line after a crash -> skip
+					yield from _latest_matching(records)
 			except IOError as e:
 				debug(f'Error reading {ndjson}: {e}', sub='query.json')
 			return
@@ -211,76 +247,63 @@ class JsonBackend(QueryBackend):
 		except (json.JSONDecodeError, IOError) as e:
 			debug(f'Error loading {report_file}: {e}', sub='query.json')
 			return
-		for lst in data.get('results', {}).values():
-			if isinstance(lst, list):
-				for rec in lst:
-					yield _tag(rec)
+		flat = [rec for lst in data.get('results', {}).values() if isinstance(lst, list) for rec in lst]
+		yield from _latest_matching(lambda: enumerate(flat))
 
-	def _iter_records(self):
-		"""Stream store records one at a time — never materializes the full result set. Run-scoped
-		report_dir hot path when hinted, else a full workspace scan."""
+	def _iter_latest(self, query: dict):
+		"""Stream the records matching ``query`` across the run-scoped dir (when hinted) or every
+		runner dir of the workspace, each finding by its latest record (see ``_iter_report_dir``).
+		A point read (``_uuid`` equality) only parses lines containing that uuid. A finding lives in
+		one runner's store; should a ``_uuid`` appear in several, the first runner dir read wins."""
+		uuid = query.get('_uuid') if isinstance(query, dict) else None
+		line_filter = uuid if isinstance(uuid, str) and uuid else None
 		report_dir = self.context.get('report_dir')
 		if report_dir:
 			report_dir = Path(report_dir)
-			singular = report_dir.parent.name.rstrip('s') or 'task'
-			yield from self._iter_report_dir(report_dir, singular)
-			return
-		workspace_path = self._get_workspace_path()
-		if not workspace_path.exists():
-			return
-		for runner_type in ['tasks', 'workflows', 'scans']:
-			runner_path = workspace_path / runner_type
-			if not runner_path.exists():
-				continue
-			for report_dir in runner_path.iterdir():
-				if report_dir.is_dir():
-					yield from self._iter_report_dir(report_dir, runner_type.rstrip('s'))
+			dirs = [(report_dir, report_dir.parent.name.rstrip('s') or 'task')]
+		else:
+			workspace_path = self._get_workspace_path()
+			dirs = []
+			if workspace_path.exists():
+				for runner_type in ['tasks', 'workflows', 'scans']:
+					runner_path = workspace_path / runner_type
+					if runner_path.exists():
+						dirs.extend((d, runner_type.rstrip('s')) for d in runner_path.iterdir() if d.is_dir())
+		seen = set()
+		for d, singular in dirs:
+			for rec in self._iter_report_dir(d, singular, query, line_filter):
+				uid = rec.get('_uuid') if isinstance(rec, dict) else None
+				if uid:
+					if uid in seen:
+						continue
+					seen.add(uid)
+				yield rec
 
 	def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None,
 	                    offset: int = 0) -> List[Dict[str, Any]]:
-		"""Search findings matching query by FILTERING WHILE STREAMING — peak memory is O(matches),
-		not O(total findings). The fan-in extractor's one store query used to materialize the whole
-		result set before filtering to a handful of matches, which was the O(N)
-		peak that defeated streaming. We iterate records one at a time and keep only matches,
-		deduped last-wins by _uuid.
-
-		Updates are appended to the store, so a finding's latest record decides: a later record
-		of a kept finding replaces it, or drops it when it no longer matches. That is why the
-		whole store is scanned even with a ``limit``, and ``offset`` / ``limit`` slice the
-		deduped matches at the end."""
-		matches = {}
-		for finding in self._iter_records():
-			# Identity first: `exclude_fields` may drop `_uuid` from the returned record.
-			key = (finding.get('_uuid') if isinstance(finding, dict) else None) or id(finding)
-			if not match_query(finding, query):
-				matches.pop(key, None)  # its latest record no longer matches
+		"""Search findings matching query by FILTERING WHILE STREAMING over each finding's latest
+		record (``_iter_latest``): peak memory is O(distinct uuids) small index entries plus the
+		returned page, never every matching record, and the scan stops once ``offset + limit``
+		matches are collected."""
+		results = []
+		for rec in self._iter_latest(query):
+			if offset:
+				offset -= 1
 				continue
-			if exclude_fields and isinstance(finding, dict):
-				finding = {k: v for k, v in finding.items() if k not in exclude_fields}
-			matches[key] = finding
-		results = list(matches.values())
-		if offset:
-			results = results[offset:]
-		if limit:
-			results = results[:limit]
+			if exclude_fields and isinstance(rec, dict):
+				rec = {k: v for k, v in rec.items() if k not in exclude_fields}
+			results.append(rec)
+			if limit and len(results) >= limit:
+				break
 		return results
 
 	def _execute_iterate(self, query: dict, batch_size: int = 1000):
-		"""Stream matching records in batches — O(batch) + O(distinct uuids), never materializing the
-		full record set (the base impl does _execute_search(limit=0), which collects everything). Used
-		by the exporters (via StreamView.__iter__) so a report over N findings stays flat. Deduped
-		keep-first by _uuid with a seen-set, so the append-only ndjson's re-emitted lines don't yield
-		duplicate rows. (Keep-first, not last-wins: true last-wins can't stream; fine for a report.)"""
-		seen = set()
+		"""Stream matching records in batches (each finding's latest record, see ``_iter_latest``),
+		never materializing the full record set (the base impl does _execute_search(limit=0), which
+		collects everything). Used by the exporters (via StreamView.__iter__) so a report over N
+		findings stays flat."""
 		batch = []
-		for rec in self._iter_records():
-			if not match_query(rec, query):
-				continue
-			uid = rec.get('_uuid') if isinstance(rec, dict) else None
-			if uid is not None:
-				if uid in seen:
-					continue
-				seen.add(uid)
+		for rec in self._iter_latest(query):
 			batch.append(rec)
 			if len(batch) >= batch_size:
 				yield batch
@@ -289,20 +312,8 @@ class JsonBackend(QueryBackend):
 			yield batch
 
 	def _execute_count(self, query: dict) -> int:
-		"""Count DISTINCT matching findings by streaming (seen-set of _uuids), not by materializing
-		every record — same O(distinct) memory as iterate, not O(all)."""
-		seen = set()
-		n = 0
-		for rec in self._iter_records():
-			if not match_query(rec, query):
-				continue
-			uid = rec.get('_uuid') if isinstance(rec, dict) else None
-			if uid is None:
-				n += 1
-			elif uid not in seen:
-				seen.add(uid)
-				n += 1
-		return n
+		"""Count DISTINCT matching findings by their latest record (see ``_iter_latest``)."""
+		return sum(1 for _ in self._iter_latest(query))
 
 	def _report_files(self):
 		"""Yield the report.json paths this backend reads — the run-scoped file when

@@ -34,7 +34,7 @@ from pathlib import Path
 from secator.output_types import is_output_type, Info
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.utils import append_ndjson, atomic_json, debug
+from secator.utils import append_ndjson, atomic_json, compact_ndjson, debug
 
 
 def _empty_report():
@@ -53,6 +53,21 @@ def _report_path(runner):
 
 def _ndjson_path(runner):
 	return Path(runner.reports_folder) / 'results.ndjson'
+
+
+def finalize_store(self):
+	"""At the end of a top-level run, compact its findings store.
+
+	Registered on ``on_run_end``, which fires once for the whole run, after every runner of it
+	wrote its last record (children complete before their parent). Compaction drops superseded
+	versions of updated findings (see ``secator.utils.compact_ndjson``) and holds the append
+	lock, so a later writer (e.g. a finding updated afterwards) is never lost. Never fails the run."""
+	folder = Path(self.reports_folder)
+	try:
+		compacted = compact_ndjson(folder / 'results.ndjson')
+		debug(f'store finalized: compacted={compacted}', sub='hooks.json')
+	except Exception as e:  # noqa: BLE001 — housekeeping must never fail a finished run
+		debug(f'store finalization failed: {e}', sub='hooks.json')
 
 
 def announce_report(self):
@@ -101,7 +116,7 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_end': [update_runner],
-		'on_run_end': [announce_report],
+		'on_run_end': [finalize_store, announce_report],
 	},
 	Workflow: {
 		'on_init': [update_runner],
@@ -109,7 +124,7 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_end': [update_runner],
-		'on_run_end': [announce_report],
+		'on_run_end': [finalize_store, announce_report],
 	},
 	Task: {
 		'on_init': [update_runner],
@@ -117,6 +132,6 @@ HOOKS = {
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
 		'on_end': [update_runner],
-		'on_run_end': [announce_report],
+		'on_run_end': [finalize_store, announce_report],
 	},
 }
