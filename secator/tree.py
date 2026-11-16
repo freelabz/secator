@@ -169,11 +169,13 @@ def prune_runner_tree(tree: RunnerTree, opts: dict, inputs: list = None) -> Runn
 		try:
 			return bool(safe_eval_condition(node.condition, local_ns, funcs))
 		except Exception as e:
+			from rich.markup import escape
 			from secator.output_types import Warning
 			from secator.rich import console
+			# Escape user-controlled text: Warning strips rich markup, which raises on e.g. '[/red]'.
 			console.print(Warning(
-				message=f'Could not evaluate condition "{node.condition}" of {node.type} {node.name}: '
-				f'{type(e).__name__}: {e}. Keeping it in the tree.'
+				message=f'Could not evaluate condition "{escape(str(node.condition))}" of {node.type} '
+				f'{escape(str(node.name))}: {type(e).__name__}: {escape(str(e))}. Keeping it in the tree.'
 			))
 			return True
 

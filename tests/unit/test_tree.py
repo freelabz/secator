@@ -68,6 +68,17 @@ class TestPruneRunnerTree(unittest.TestCase):
         self.assertEqual(len(tree.root_nodes), 1)
         self.assertEqual(len(tree.root_nodes[0].children), 1)
 
+    def test_bad_condition_with_markup_is_reported_literally(self):
+        """Rich markup-like text in a failing condition must not break the warning."""
+        from secator.output_types import Warning
+        tree = make_tree(make_node('nmap', condition='opts.x == "[/red]" +'))
+        with mock.patch('secator.rich.console.print') as printed:
+            prune_runner_tree(tree, {})
+        self.assertEqual(len(tree.root_nodes), 1)
+        warnings = [c.args[0] for c in printed.call_args_list if isinstance(c.args[0], Warning)]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn('[/red]', warnings[0].message)
+
     def test_child_false_condition_removes_only_child(self):
         """A child with a false condition is removed; parent stays."""
         child = make_node('httpx', condition='opts.run_httpx')
