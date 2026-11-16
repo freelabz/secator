@@ -1114,6 +1114,7 @@ class ai(PythonRunner):
 							"(finish_reason=content_filter) — intermittent, route-dependent moderation, "
 							"not a secator or tool-calling issue. Refine your request (or switch model) "
 							"and I'll continue."))
+						self._save_history()   # end of turn: persist before waiting on the user
 						result = self._prompt_and_redetect([])
 						if result is None:
 							self._save_history()
@@ -1272,6 +1273,12 @@ class ai(PythonRunner):
 					# End of turn: persist the placeholder map (no-op unless it grew), so a
 					# turn with no tool call (e.g. a prompt that minted placeholders) is covered.
 					self._persist_pii_map()
+
+					# End of turn: the assistant reply and every tool result are in history
+					# now. Persist BEFORE handing control back to the user — the run may never
+					# exit cleanly from here (the user quits the TUI, the process is killed
+					# while waiting), and a later resume must still see this turn.
+					self._save_history()
 
 					# A remote stop/content-only already persisted its pending `stopped` doc
 					# (stamped + prompt_uuid) in _dispatch_and_collect; a content-only / cap

@@ -15,7 +15,9 @@ import threading
 
 from rich.markup import escape
 from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
@@ -23,7 +25,8 @@ from textual.widgets.option_list import Option
 from secator.ai.interactivity import DISMISS_ANSWER
 from secator.tui.render import finding_text, message_text
 from secator.tui.widgets import (
-	BackBar, BlockPanel, ChoicePrompt, ConversationScroll, Grip, PermissionPrompt, PromptInput, RunnerPanel)
+	BackBar, BlockPanel, ChoicePrompt, ConversationScroll, Grip, PermissionPrompt, PromptInput, RunnerPanel,
+	SelectableStatic)
 
 
 class TUIApp(App):
@@ -162,7 +165,11 @@ class TUIApp(App):
 	#meta-right { width: auto; height: 1; content-align: right top; color: #6b7187; }
 	"""
 	BINDINGS = [
-		("ctrl+c", "quit", "Quit"),
+		# Ctrl+C copies when text is selected (never quits/cancels the run then), else quits.
+		# Priority so it is decided here first — a focused input can't swallow it.
+		Binding("ctrl+c", "copy_or_quit", "Copy / Quit", priority=True),
+		# copy-only alias (many terminals keep Ctrl+Shift+C for themselves; harmless if so)
+		Binding("ctrl+shift+c,super+c", "copy_selection", "Copy", show=False, priority=True),
 		# jump to the latest messages (a focused choice/permission list consumes `down`
 		# first for navigation, so this only fires when not selecting)
 		("down", "scroll_latest", "Scroll to latest"),
@@ -508,6 +515,56 @@ class TUIApp(App):
 			if sv.display:
 				return sv
 		return self._convo()
+
+	# ---- clipboard: copy-on-select + selection-aware Ctrl+C ----
+	# Textual captures the mouse, so the terminal's own selection only works with Shift held,
+	# and the terminal's Ctrl+C then reaches the app (which used to quit). Instead, the
+	# in-app mouse selection copies itself on release (OSC 52 via App.copy_to_clipboard,
+	# which also works over SSH), and Ctrl+C with a selection copies instead of quitting.
+	def _selected_text(self) -> str:
+		"""The current selection: a mouse selection in the views, else a focused text
+		area's own selection (the prompt input). Empty when nothing is selected."""
+		try:
+			text = self.screen.get_selected_text()
+		except Exception:  # noqa: BLE001 - no screen yet / teardown
+			text = None
+		if text:
+			return text
+		focused = self.focused
+		return (getattr(focused, "selected_text", "") or "") if focused is not None else ""
+
+	def _has_selection(self) -> bool:
+		try:
+			if self.screen.selections:
+				return True
+		except Exception:  # noqa: BLE001
+			pass
+		return bool(getattr(self.focused, "selected_text", "") or "")
+
+	def _copy(self, text: str) -> None:
+		# rendered lines are padded to the view width: drop that trailing padding
+		text = "\n".join(line.rstrip() for line in text.split("\n"))
+		self.copy_to_clipboard(text)
+		n = len(text)
+		self.notify(f"Copied {n} character{'s' if n != 1 else ''} to clipboard", timeout=1.5)
+
+	def on_text_selected(self, event: events.TextSelected) -> None:
+		# fired on every mouse release; a plain click clears the selection (nothing to copy)
+		text = self._selected_text() if self.screen.selections else ""
+		if text:
+			self._copy(text)
+
+	def action_copy_selection(self) -> None:
+		text = self._selected_text()
+		if text:
+			self._copy(text)
+
+	async def action_copy_or_quit(self) -> None:
+		if self._has_selection():
+			# a selection is active: copy (if it has any text) but never quit / cancel the run
+			self.action_copy_selection()
+			return
+		await self.action_quit()
 
 	def action_scroll_latest(self) -> None:
 		self._active_view().scroll_end(animate=False)
@@ -1147,7 +1204,7 @@ class TUIApp(App):
 					self._echo_user(content)
 			elif role == "assistant":
 				if content:
-					convo.mount(Static(markdown_text(content), classes="ai"))
+					convo.mount(SelectableStatic(markdown_text(content), classes="ai"))
 				for tc in (m.get("tool_calls") or []):
 					fn = tc.get("function") or {} if isinstance(tc, dict) else {}
 					name = fn.get("name") or "tool"

@@ -15,7 +15,7 @@ from textual.widgets import OptionList, SelectionList, Static, TextArea
 from textual.widgets._toggle_button import ToggleButton
 
 from secator.ai.interactivity import DISMISS_ANSWER
-from secator.tui.render import command_text, markdown_text
+from secator.tui.render import command_text, flatten_renderable, markdown_text
 
 # Refine the multi-select checkbox: drop Textual's heavy "▐X▌" bars for a single dot that
 # reads empty/filled purely by colour (styled via the .selection-list--button* classes).
@@ -24,6 +24,47 @@ from secator.tui.render import command_text, markdown_text
 ToggleButton.BUTTON_LEFT = ""
 ToggleButton.BUTTON_INNER = "●"
 ToggleButton.BUTTON_RIGHT = ""
+
+
+class SelectableStatic(Static):
+	"""A ``Static`` for a non-text Rich renderable (e.g. the Markdown AI replies) that stays
+	mouse-selectable.
+
+	Textual extracts selected text only from ``Text`` / ``Content`` visuals; a Markdown
+	renderable is an opaque Rich visual, so dragging over it selected nothing. This widget
+	re-renders the renderable into styled, line-broken ``Text`` at the widget's width (cached
+	per width, re-flowed on resize), so it looks the same but can be selected and copied.
+	"""
+
+	def __init__(self, renderable, **kwargs):
+		super().__init__("", **kwargs)
+		self._renderable = renderable
+		self._flat_width = None
+		self._flat = (Text(""), 0)
+		self._target_width = 0
+
+	def _flatten(self, width: int) -> "tuple[Text, int]":
+		width = max(int(width or 0), 1)
+		if width != self._flat_width:
+			try:
+				console = self.app.console
+			except Exception:  # noqa: BLE001 - not attached to an app (tests)
+				console = None
+			self._flat = flatten_renderable(self._renderable, width, console)
+			self._flat_width = width
+		return self._flat
+
+	def get_content_height(self, container, viewport, width: int) -> int:
+		# The layout hands us the width it will give the content: flatten at that width so
+		# the height (one row per rendered line) matches what render() will draw.
+		if not width:
+			return 0
+		self._target_width = width
+		return self._flatten(width)[1]
+
+	def render(self):
+		width = self._target_width or self.content_size.width or self.app.size.width
+		return self._flatten(width)[0]
 
 
 class ConversationScroll(VerticalScroll):
@@ -132,7 +173,7 @@ class HandbackPanel(Vertical):
 
 	def compose(self) -> ComposeResult:
 		yield Static(Text.from_markup("[b #d98a7a]Verdict — subagent complete[/]"), classes="handback-title")
-		yield Static(markdown_text(self._content))
+		yield SelectableStatic(markdown_text(self._content))
 		line = _usage_line(self._usage)
 		if line is not None:
 			yield Static(line, classes="handback-usage")
