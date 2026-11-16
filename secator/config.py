@@ -354,6 +354,17 @@ class AiAddon(StrictModel):
 		],
 	}
 	web_search: WebSearchConfig = WebSearchConfig()
+	# SECURITY (SSRF): strict mode for the AI `fetch_url` tool — resolve the target host
+	# locally and require every record to be a public IP, and re-validate the connected peer
+	# IP (DNS-rebinding guard). Off by default for local CLI use (works without local DNS,
+	# e.g. behind a proxy); enable on shared or server-side deployments. Off = only the
+	# http/https scheme check. Env: SECATOR_ADDONS_AI_FETCH_URL_SSRF_PROTECTION.
+	fetch_url_ssrf_protection: bool = False
+	# Proxy for the AI's own outbound web calls ONLY (`fetch_url` + `web_search`), e.g.
+	# http://proxy:3128 or socks5h://proxy:1080 (socks needs `pip install 'requests[socks]'`).
+	# HTTP(S)_PROXY env vars are NOT used by fetch_url, so the proxy secator tasks see can't
+	# change the AI's egress, and vice-versa. Env: SECATOR_ADDONS_AI_WEB_PROXY_URL.
+	web_proxy_url: str = ''
 
 
 class Providers(StrictModel):

@@ -6,19 +6,27 @@ This lets the agent READ a specific public page it already knows about (a HackTr
 technique, a vendor advisory, a Debian security-tracker page, a blog post on a fresh CVE),
 as opposed to ``web_search`` which discovers pages.
 
-SECURITY — this must never widen our own attack surface (SSRF). The agent picks the URL, so
-before every request (and every redirect hop) we enforce, in :func:`is_safe_public_url`:
+SECURITY — the agent picks the URL, so before every request (and every redirect hop)
+:func:`is_safe_public_url` checks the scheme is ``http`` / ``https`` only (no ``file:``,
+``gopher:``, ``ftp:``, ``dict:`` …).
 
-- scheme is ``http`` / ``https`` only (no ``file:``, ``gopher:``, ``ftp:``, ``dict:`` …);
-- the host does not resolve to a private, loopback, link-local, shared/CGNAT, or otherwise
-non-global address — every resolved A/AAAA record must be a global address, which blocks
-the cloud metadata endpoints (169.254.169.254, 100.100.100.200) and internal services.
+Strict SSRF mode (``addons.ai.fetch_url_ssrf_protection``, off by default for local CLI use;
+enable on shared or server-side deployments) additionally:
 
-Because a TTL-0 domain could still answer with a public IP for the pre-check and an
-internal IP for the real connection (DNS rebinding), the connection itself is made through
-:class:`_PeerValidatingHTTPAdapter`, which re-validates the *connected* peer's IP and tears
-the socket down if it is not public; ambient proxies are disabled so they can't resolve the
-target themselves and bypass the check.
+- requires the host to be a global address: an IP literal is checked directly, a hostname
+is resolved locally and every A/AAAA record must be global. This blocks the cloud metadata
+endpoints (169.254.169.254, 100.100.100.200), loopback (incl. ``localhost``), RFC 1918 and
+other internal addresses;
+- connects through :class:`_PeerValidatingHTTPAdapter`, which re-validates the *connected*
+peer IP and tears the socket down if it is not public (defeats DNS rebinding).
+
+With strict mode off, fetch_url is open: no host/address filtering at all.
+
+Proxy: ``addons.ai.web_proxy_url`` (http/https/socks) is the ONLY proxy ever used — ambient
+``HTTP(S)_PROXY`` env vars are ignored (``trust_env=False``) so the proxy that secator tasks
+see never changes how the AI reaches the web, and vice-versa. With a proxy, the connected peer
+is the proxy itself, so peer validation does not apply; in strict mode the host must still
+resolve locally (see :func:`is_safe_public_url`).
 
 Redirects are followed manually so each hop is re-validated; cookies/auth are never sent;
 the response is size-capped and only text-like content types are read. All failures are
@@ -51,35 +59,64 @@ _WS_RE = re.compile(r'[ \t\r\f\v]+')
 _MULTINL_RE = re.compile(r'\n{3,}')
 
 
+_PROXY_SCHEMES = ('http', 'https', 'socks4', 'socks4a', 'socks5', 'socks5h')
+_NO_DNS_HINT = 'no DNS; configure addons.ai.web_proxy_url if behind a proxy'
+
+
+def _parse_ip_literal(host):
+	"""Return an ``ip_address`` if ``host`` is a (bracketed or plain) IP literal, else None."""
+	literal = host[1:-1] if host.startswith('[') and host.endswith(']') else host
+	try:
+		return ipaddress.ip_address(literal)
+	except ValueError:
+		return None
+
+
+def _resolve(host):
+	"""Resolve ``host`` locally. Returns the set of address strings, or None if it doesn't resolve."""
+	try:
+		infos = socket.getaddrinfo(host, None)
+	except (socket.gaierror, UnicodeError, OSError):
+		return None
+	return {info[4][0] for info in infos} or None
+
+
 def _host_is_public(host):
 	"""True iff every address ``host`` resolves to is a global (public) IP.
 
 	A hostname with any private/loopback/link-local/reserved record is rejected (fail-closed):
 	that closes SSRF to internal services, the cloud metadata IP (link-local 169.254.0.0/16),
 	and DNS-rebinding tricks. A host that can't be resolved is rejected too."""
+	return _check_host(host, strict=True) is None
+
+
+def _check_host(host, strict, proxied=False):
+	"""Return None if ``host`` may be fetched, else a reason string for the model."""
 	if not host:
-		return False
-	# A bracketed/plain IP literal: check it directly.
-	literal = host[1:-1] if host.startswith('[') and host.endswith(']') else host
-	try:
-		ip = ipaddress.ip_address(literal)
-		return _ip_is_public(ip)
-	except ValueError:
-		pass
-	try:
-		infos = socket.getaddrinfo(host, None)
-	except (socket.gaierror, UnicodeError, OSError):
-		return False
-	addrs = {info[4][0] for info in infos}
-	if not addrs:
-		return False
+		return 'URL has no host'
+	if not strict:
+		return None
+	ip = _parse_ip_literal(host)
+	if ip is not None:
+		if not _ip_is_public(ip):
+			return f'host {host} is a private/non-public address (blocked to prevent SSRF)'
+		return None
+	addrs = _resolve(host)
+	if addrs is None:
+		if proxied:
+			return (
+				f'could not resolve host {host} locally: addons.ai.fetch_url_ssrf_protection requires '
+				'local DNS to verify the target, even with addons.ai.web_proxy_url set '
+				'(disable strict mode or provide a local resolver)')
+		return f'could not resolve host {host} ({_NO_DNS_HINT})'
 	for a in addrs:
 		try:
-			if not _ip_is_public(ipaddress.ip_address(a.split('%')[0])):
-				return False
+			public = _ip_is_public(ipaddress.ip_address(a.split('%')[0]))
 		except ValueError:
-			return False
-	return True
+			public = False
+		if not public:
+			return f'host {host} resolves to a private/non-public address {a} (blocked to prevent SSRF)'
+	return None
 
 
 def _ip_is_public(ip):
@@ -101,19 +138,22 @@ def _ip_is_public(ip):
 	)
 
 
-def is_safe_public_url(url):
-	"""Return (ok, reason). ok=True only for an http(s) URL whose host resolves entirely to
-	public addresses. reason explains a rejection (for the model)."""
+def is_safe_public_url(url, strict=True, proxied=False):
+	"""Return (ok, reason). reason explains a rejection (for the model).
+
+	Always: http(s) only. strict=True additionally: an IP-literal host must be public, and a
+	hostname must resolve locally, entirely to public addresses (when ``proxied``, an
+	unresolvable host gets a strict-mode-specific error)."""
 	try:
 		p = urlparse(url)
+		hostname = p.hostname
 	except ValueError:
 		return False, 'unparseable URL'
 	if p.scheme not in ('http', 'https'):
 		return False, f"scheme {p.scheme or '(none)'!r} not allowed (http/https only)"
-	if not p.hostname:
-		return False, 'URL has no host'
-	if not _host_is_public(p.hostname):
-		return False, f'host {p.hostname} is not a public address (blocked to prevent SSRF)'
+	reason = _check_host(hostname, strict=strict, proxied=proxied)
+	if reason:
+		return False, reason
 	return True, ''
 
 
@@ -152,19 +192,72 @@ class _PeerValidatingHTTPAdapter(HTTPAdapter):
 		return resp
 
 
-def _build_session():
-	"""A throwaway session for fetch_url: peer-validating adapter + proxies disabled.
+def _ai_web_settings():
+	"""Return (strict, proxy_url) from ``addons.ai`` (fetch_url_ssrf_protection, web_proxy_url)."""
+	from secator.config import CONFIG
+	ai = getattr(CONFIG.addons, 'ai', None)
+	strict = bool(getattr(ai, 'fetch_url_ssrf_protection', False))
+	proxy = str(getattr(ai, 'web_proxy_url', '') or '').strip()
+	return strict, proxy
 
-	Proxies are forced off (``trust_env=False`` + empty ``proxies``) so an ambient
-	``HTTP(S)_PROXY`` can't route the request through a proxy that resolves the target
-	itself, bypassing the local address check."""
+
+def check_proxy_url(proxy_url):
+	"""Return None if ``proxy_url`` is usable, else an error string.
+
+	socks proxies need PySocks (``pip install 'requests[socks]'``); prefer ``socks5h://`` so
+	the proxy resolves hostnames (``socks5://`` resolves locally, which fails with no DNS)."""
+	try:
+		scheme = urlparse(proxy_url).scheme.lower()
+	except ValueError:
+		scheme = ''
+	if scheme not in _PROXY_SCHEMES:
+		return f"addons.ai.web_proxy_url scheme {scheme or '(none)'!r} not supported (use http, https or socks5h)"
+	if scheme.startswith('socks'):
+		try:
+			import socks  # noqa: F401
+		except ImportError:
+			return "addons.ai.web_proxy_url is a socks proxy but PySocks is not installed (pip install 'requests[socks]')"
+	return None
+
+
+def ai_web_proxies():
+	"""``requests``-style proxies dict for AI outbound web calls (empty when no proxy is set)."""
+	_, proxy = _ai_web_settings()
+	return {'http': proxy, 'https': proxy} if proxy else {}
+
+
+def _build_session(strict=True, proxy_url=''):
+	"""A throwaway session for fetch_url.
+
+	Ambient proxies are always ignored (``trust_env=False``): ``HTTP(S)_PROXY`` / ``NO_PROXY``
+	may be set for secator tasks and must not change how the AI reaches the web. The only
+	proxy used is the explicit ``proxy_url`` (``addons.ai.web_proxy_url``).
+
+	Strict mode without a proxy mounts the peer-validating adapter (DNS-rebinding guard).
+	With a proxy the connected peer is the proxy (often a private IP), so it is not validated."""
 	session = _requests_lib.Session()
 	session.trust_env = False
-	session.proxies = {}
-	adapter = _PeerValidatingHTTPAdapter()
+	session.proxies = {'http': proxy_url, 'https': proxy_url} if proxy_url else {}
+	adapter = _PeerValidatingHTTPAdapter() if (strict and not proxy_url) else HTTPAdapter()
 	session.mount('http://', adapter)
 	session.mount('https://', adapter)
 	return session
+
+
+def _is_dns_failure(exc):
+	"""True if a requests/urllib3 error was caused by local name resolution failing."""
+	seen = set()
+	stack = [exc]
+	while stack:
+		e = stack.pop()
+		if e is None or id(e) in seen:
+			continue
+		seen.add(id(e))
+		if isinstance(e, socket.gaierror) or type(e).__name__ == 'NameResolutionError':
+			return True
+		stack.extend([e.__cause__, e.__context__, getattr(e, 'reason', None)])
+		stack.extend(a for a in getattr(e, 'args', ()) if isinstance(a, BaseException))
+	return False
 
 
 def _extract_text(body, content_type):
@@ -191,8 +284,11 @@ def _extract_text(body, content_type):
 	return title, text
 
 
-def fetch_url(url, max_chars=_MAX_CHARS_DEFAULT, timeout=_TIMEOUT):
+def fetch_url(url, max_chars=_MAX_CHARS_DEFAULT, timeout=_TIMEOUT, strict=None, proxy_url=None):
 	"""Fetch one public page and return (result, error).
+
+	``strict`` / ``proxy_url`` default to ``addons.ai.fetch_url_ssrf_protection`` /
+	``addons.ai.web_proxy_url``.
 
 	result on success: {url (final), status, content_type, title, text, truncated}.
 	error is a string on failure (SSRF block, non-text body, network error, …); result is None then.
@@ -208,15 +304,23 @@ def fetch_url(url, max_chars=_MAX_CHARS_DEFAULT, timeout=_TIMEOUT):
 	if not current:
 		return None, 'fetch_url requires a non-empty url'
 
-	session = _build_session()
+	cfg_strict, cfg_proxy = _ai_web_settings()
+	strict = cfg_strict if strict is None else bool(strict)
+	proxy_url = cfg_proxy if proxy_url is None else str(proxy_url or '').strip()
+	if proxy_url:
+		err = check_proxy_url(proxy_url)
+		if err:
+			return None, err
+
+	session = _build_session(strict=strict, proxy_url=proxy_url)
 	for _hop in range(_MAX_REDIRECTS + 1):
-		ok, reason = is_safe_public_url(current)
+		ok, reason = is_safe_public_url(current, strict=strict, proxied=bool(proxy_url))
 		if not ok:
 			return None, f'refused to fetch {current!r}: {reason}'
 		try:
 			# allow_redirects=False so we re-validate every hop against the SSRF guard;
-			# the peer-validating adapter also re-checks the connected IP (DNS rebinding),
-			# proxies are disabled on the session, and no cookies/auth are attached.
+			# in strict mode the peer-validating adapter also re-checks the connected IP
+			# (DNS rebinding); ambient proxies are ignored, and no cookies/auth are attached.
 			resp = session.get(
 				current,
 				headers={'User-Agent': _UA, 'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8'},
@@ -226,6 +330,8 @@ def fetch_url(url, max_chars=_MAX_CHARS_DEFAULT, timeout=_TIMEOUT):
 			)
 		except Exception as e:  # noqa: BLE001 - network error is data for the model
 			debug(f'fetch_url error for {current}: {e}', sub='ai.fetch_url')
+			if not proxy_url and _is_dns_failure(e):
+				return None, f'failed to fetch {current!r}: could not resolve host {urlparse(current).hostname} ({_NO_DNS_HINT})'
 			return None, f'failed to fetch {current!r}: {e}'
 
 		if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
