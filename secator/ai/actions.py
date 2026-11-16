@@ -402,6 +402,40 @@ def dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		yield Warning(message=f"Unknown action: {action_type}", _context=context)
 
 
+def run_task_from_tool(ctx: ActionContext, name: str, targets=None, opts=None, description=None,
+                       runner_type: str = "task") -> Generator:
+	"""Run a secator task/workflow FROM an AI tool handler, via the SAME path the built-in
+	``run_task`` / ``run_workflow`` tools use.
+
+	A custom AI tool must not invoke a runner ad-hoc; it routes through here so the run gets
+	the exact same handling as a model-issued ``run_task``:
+
+	1. the SAME guardrail/permission check as the agent loop (``check_guardrails``): the
+	   same deny rules, the same target approval and the same interactive/remote prompt —
+	   skipped only when the run is ``dangerous``, exactly like the loop. Being called from
+	   an auto-allowed tool grants NOTHING: the task action is checked on its own merits;
+	2. then the shared ``_run_runner`` execution (mandate scope propagation, child
+	   hook/driver wiring, result capture).
+
+	On denial a Warning is yielded and nothing runs. ``name`` is a task/workflow name
+	(built-in or custom — see :func:`secator.loader.get_task_class`).
+	"""
+	action = {
+		"action": runner_type,
+		"name": name,
+		"targets": list(targets or []),
+		"opts": dict(opts or {}),
+		"description": description or f"Run {name}",
+	}
+	if not getattr(ctx, "dangerous", False):
+		denial = yield from check_guardrails(action, ctx)
+		if denial:
+			yield Warning(message=f"{runner_type} {name!r} denied: {denial}",
+			              _context=_get_result_context(action, ctx))
+			return
+	yield from dispatch_action(action, ctx)
+
+
 def safe_dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 	"""Dispatch a single action, converting any raised ``Exception`` into an
 	``Error`` output item instead of letting it abort the AI loop.

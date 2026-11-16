@@ -867,18 +867,16 @@ class TestModeToolPatterns(unittest.TestCase):
 		self.assertFalse(ex("run_task", ["*"]))
 		self.assertFalse(ex("query_workspace", ["*", "!change_mode"]))
 
-	def test_patterns_match_tool_modes_and_allowed_actions(self):
-		"""The declared `tools:` globs resolve (over the real tool registry) to exactly the
-		tools each mode exposes today (tool.modes) and to its allowed_actions — proving the
-		new key is consistent with the existing behaviour before Phase 2 makes it operative."""
+	def test_patterns_match_allowed_actions(self):
+		"""The declared `tools:` globs resolve (over the real tool registry) to exactly each
+		mode's allowed_actions — the consistency guard that keeps the single source of truth
+		(frontmatter `tools:`) and the authz mirror (allowed_actions) from drifting apart."""
 		from secator.ai.tools import TOOLS
 		from secator.ai.prompts import MODES, tool_matches_mode
 		name2action = {t.name: t.action for t in TOOLS}
 		names = [t.name for t in TOOLS]
 		for mode, cfg in MODES.items():
-			exposed = {n for n in names if tool_matches_mode(n, cfg["tools"])}
-			via_modes = {t.name for t in TOOLS if mode in t.modes}
-			self.assertEqual(exposed, via_modes, f"{mode}: tools globs != tool.modes exposure")
+			exposed = {n for n in names if tool_matches_mode(n, cfg["tools"], external=False)}
 			actions = {name2action[n] for n in exposed}
 			self.assertEqual(actions, set(cfg["allowed_actions"]), f"{mode}: tools globs != allowed_actions")
 
