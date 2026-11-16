@@ -1,5 +1,6 @@
 """update_finding returns the finding as the store holds it after the write, on every backend."""
 import copy
+import importlib.util
 import json
 import shutil
 import tempfile
@@ -11,6 +12,9 @@ from secator.ai.actions import ActionContext
 from secator.ai.tools import TOOLS_BY_NAME
 from secator.query import QueryEngine
 from secator.query.json import _apply_set, match_query
+
+# The mongodb backend needs pymongo (bson) — guarded like the other mongodb unit tests.
+HAS_PYMONGO = importlib.util.find_spec('bson') is not None
 
 WS = 'ws1'
 UUID = '0b8c9d4e-1f2a-4b3c-8d5e-6f7a8b9c0d1e'
@@ -85,21 +89,31 @@ class TestUpdateFindingReturnsStoredFinding(unittest.TestCase):
 			engine.backend._make_request = MagicMock(side_effect=responses)
 		return engine
 
-	def test_returns_the_updated_finding_on_every_backend(self):
+	def _check(self, driver):
 		tool = TOOLS_BY_NAME['update_finding']
-		for driver in ('json', 'sqlite', 'mongodb', 'api'):
-			with self.subTest(driver=driver):
-				engine = self._engine(driver)
-				ctx = ActionContext(targets=[], model='m', context={'workspace_id': WS})
-				ctx._query_engine = engine
-				out = list(tool.run({'action': tool.action, '_uuid': UUID, 'fields': {'description': 'new'}}, ctx))
-				errors = [o.message for o in out if o._type == 'error']
-				self.assertEqual(errors, [])
-				finding = out[-1].extra_data['finding']
-				self.assertEqual(finding['_uuid'], UUID)
-				self.assertEqual(finding['description'], 'new')
-				stored = engine.search({'_uuid': UUID}, limit=1, scope_only=True)[0]
-				self.assertEqual(stored['description'], 'new')
+		engine = self._engine(driver)
+		ctx = ActionContext(targets=[], model='m', context={'workspace_id': WS})
+		ctx._query_engine = engine
+		out = list(tool.run({'action': tool.action, '_uuid': UUID, 'fields': {'description': 'new'}}, ctx))
+		self.assertEqual([o.message for o in out if o._type == 'error'], [])
+		finding = out[-1].extra_data['finding']
+		self.assertEqual(finding['_uuid'], UUID)
+		self.assertEqual(finding['description'], 'new')
+		stored = engine.search({'_uuid': UUID}, limit=1, scope_only=True)[0]
+		self.assertEqual(stored['description'], 'new')
+
+	def test_json(self):
+		self._check('json')
+
+	def test_sqlite(self):
+		self._check('sqlite')
+
+	@unittest.skipUnless(HAS_PYMONGO, 'pymongo not installed')
+	def test_mongodb(self):
+		self._check('mongodb')
+
+	def test_api(self):
+		self._check('api')
 
 
 if __name__ == '__main__':
