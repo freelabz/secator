@@ -8,14 +8,25 @@ from secator.definitions import ADDONS_ENABLED
 
 if ADDONS_ENABLED['ai']:
 	from secator.ai.actions import (
-		ActionContext, dispatch_action, _handle_stop, _handle_shell,
-		_handle_query, _handle_add_finding, _handle_mark_vuln_exploited,
-		_handle_mark_vuln_false_positive, _run_runner, _decrypt_dict,
+		ActionContext, dispatch_action, _run_runner, _decrypt_dict,
 		_build_hooks_from_context, _coerce_finding_fields, _sanitize_child_opts,
 		_build_child_hooks_or_denial, _child_preamble, _child_run_opts,
 		_MAX_SUBAGENT_DEPTH, _MAX_SUBAGENTS_PER_TURN,
 		_MAX_SHELL_OUTPUT_CHARS, _truncate, _sandbox_image,
 	)
+	# Built-in handlers are now the tools' run() methods (secator/ai/tools/<tool>.py).
+	from secator.ai.tools.stop import Stop
+	from secator.ai.tools.run_shell import RunShell
+	from secator.ai.tools.query_workspace import QueryWorkspace
+	from secator.ai.tools.add_finding import AddFinding
+	from secator.ai.tools.mark_vuln_exploited import MarkVulnExploited
+	from secator.ai.tools.mark_vuln_false_positive import MarkVulnFalsePositive
+	_handle_stop = Stop().run
+	_handle_shell = RunShell().run
+	_handle_query = QueryWorkspace().run
+	_handle_add_finding = AddFinding().run
+	_handle_mark_vuln_exploited = MarkVulnExploited().run
+	_handle_mark_vuln_false_positive = MarkVulnFalsePositive().run
 	from secator.ai.utils import _MAX_CHILD_ITERATIONS
 	from secator.runners import Task
 	from secator.output_types import Ai, Error, Info, Warning, Vulnerability, Url, ExploitAttempt
@@ -307,7 +318,7 @@ class TestHandleShell(unittest.TestCase):
 		# a benign var still passes through so the command can actually run
 		self.assertEqual(passed_env.get('HOME'), '/home/x')
 
-	@patch('secator.ai.actions._build_child_hooks_or_denial')
+	@patch('secator.ai.tools._runner._build_child_hooks_or_denial')
 	def test_shell_extracts_task_hooks_and_they_fire(self, mock_hooks):
 		"""REGRESSION GUARD (live-Mongo bug): _build_child_hooks_or_denial returns a
 		CLASS-keyed dict ({Task: {on_end: [...]}, ...}). Direct `command` instantiation
@@ -705,9 +716,9 @@ class TestRunRunner(unittest.TestCase):
 
 		self.assertIn('default.com', results[0].message)
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_propagates_hooks_and_emits_runner_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
 		"""Sub-runner must receive driver hooks (so its results persist) and the
 		emitted action Ai must carry the created runner's id + type for the UI."""
@@ -744,9 +755,9 @@ class TestRunRunner(unittest.TestCase):
 		self.assertTrue(child_ctx.get('task_chunk_id'))
 		self.assertEqual(ai_items[0].extra_data.get('runner_type'), 'task')
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_propagates_session_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
 		"""The dispatched sub-runner's context must carry the ai task's session_id
 		(the conversation id) so its persisted runner doc is queryable by the
@@ -775,9 +786,9 @@ class TestRunRunner(unittest.TestCase):
 		self.assertEqual(sub_context.get('session_id'), 'conv-abc-123')
 		self.assertEqual(sub_context.get('workspace_id'), 'ws1')
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_child_gets_own_chunk_id_and_has_parent(self, mock_build_hooks, mock_task_cls, _mock_tpl):
 		"""AI child runners get their OWN task_chunk_id (the hook keys the child doc's
 		_id on it) and run_opts.has_parent = True so they drop out of the root runners
@@ -811,9 +822,9 @@ class TestRunRunner(unittest.TestCase):
 		# LLM-supplied description flows to the runner
 		self.assertEqual(run_opts.get('description'), 'Port-scan the target for open services')
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_preserves_existing_session_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
 		"""A session_id already present in ctx.context must not be overwritten."""
 		mock_build_hooks.return_value = {}
@@ -835,16 +846,16 @@ class TestRunRunner(unittest.TestCase):
 		_, kwargs = mock_task_cls.call_args
 		self.assertEqual(kwargs.get('context', {}).get('session_id'), 'from-context')
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_structures_subagent_prompt(self, mock_build_hooks, mock_task_cls, _tpl):
 		mock_build_hooks.return_value = {'fake': ['hook']}
 		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
 		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
 		ctx = ActionContext(targets=['10.0.0.1'], model='m',
 							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
-		with patch('secator.ai.actions._gather_subagent_evidence', return_value="- port 10.0.0.1:443"):
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value="- port 10.0.0.1:443"):
 			action = {'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'],
 					'opts': {'prompt': 'Test auth on the API'}}
 			list(_run_runner(action, ctx, 'task'))
@@ -854,9 +865,9 @@ class TestRunRunner(unittest.TestCase):
 		self.assertIn('Test auth on the API', prompt)
 		self.assertIn('- port 10.0.0.1:443', prompt)   # evidence injected
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_subagent_inherits_parent_llm_config(self, mock_build_hooks, mock_task_cls, _tpl):
 		"""A spawned subagent inherits the parent's resolved model/api_key/api_base so it
 		can actually run (else it falls back to CONFIG.default_model with no key)."""
@@ -866,7 +877,7 @@ class TestRunRunner(unittest.TestCase):
 		ctx = ActionContext(targets=['10.0.0.1'], model='openrouter/anthropic/x',
 							api_key='PARENTKEY', api_base='https://base',
 							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
-		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
 			action = {'action': 'task', 'name': 'ai', 'targets': ['10.0.0.1'], 'opts': {'prompt': 'do x'}}
 			list(_run_runner(action, ctx, 'task'))
 		ro = mock_task_cls.call_args[1].get('run_opts', {})
@@ -874,9 +885,9 @@ class TestRunRunner(unittest.TestCase):
 		self.assertEqual(ro.get('api_key'), 'PARENTKEY')
 		self.assertEqual(ro.get('api_base'), 'https://base')
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_subagent_explicit_model_wins(self, mock_build_hooks, mock_task_cls, _tpl):
 		"""An explicit LLM-supplied model on the subagent opts is preserved (setdefault)."""
 		mock_build_hooks.return_value = {'fake': ['hook']}
@@ -884,16 +895,16 @@ class TestRunRunner(unittest.TestCase):
 		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
 		ctx = ActionContext(targets=['t'], model='parent/model',
 							context={'workspace_id': 'ws1', 'drivers': ['mongodb']})
-		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
 			action = {'action': 'task', 'name': 'ai', 'targets': ['t'],
 					  'opts': {'prompt': 'x', 'model': 'explicit/model'}}
 			list(_run_runner(action, ctx, 'task'))
 		ro = mock_task_cls.call_args[1].get('run_opts', {})
 		self.assertEqual(ro.get('model'), 'explicit/model')
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_subagent_gets_own_session_and_parent_card(self, mock_build_hooks, mock_task_cls, _tpl):
 		"""A subagent runs under its OWN conversation id (parent link preserved), while the
 		'Ran subagent' card stays in the PARENT conversation and links to the sub-session."""
@@ -902,7 +913,7 @@ class TestRunRunner(unittest.TestCase):
 		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
 		ctx = ActionContext(targets=['t'], model='m', session_id='parent-sess',
 							context={'workspace_id': 'ws1', 'session_id': 'parent-sess', 'drivers': ['mongodb']})
-		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
 			action = {'action': 'task', 'name': 'ai', 'targets': ['t'],
 					  'opts': {'prompt': 'obj'}, 'description': 'Exploit Y'}
 			results = list(_run_runner(action, ctx, 'task'))
@@ -920,9 +931,9 @@ class TestRunRunner(unittest.TestCase):
 		# NOT carry the `_context.subagent` marker (else restore/UI filters would drop it).
 		self.assertNotIn('subagent', card._context)
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_subagent_final_response_handed_back_to_parent(self, mock_build_hooks, mock_task_cls, _tpl):
 		"""The parent's LLM cannot read the subagent's own transcript, so _run_runner must
 		hand back ONE clean summary (the subagent's final response + what it persisted),
@@ -936,7 +947,7 @@ class TestRunRunner(unittest.TestCase):
 		mock_runner.__iter__.return_value = iter(sub_out); mock_task_cls.return_value = mock_runner
 		ctx = ActionContext(targets=['t'], model='m', session_id='parent-sess',
 							context={'workspace_id': 'ws1', 'session_id': 'parent-sess', 'drivers': ['mongodb']})
-		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
 			action = {'action': 'task', 'name': 'ai', 'targets': ['t'], 'opts': {'prompt': 'obj'},
 					  'description': 'Exploit Y', 'tool_call_id': 'tc-123'}
 			results = list(_run_runner(action, ctx, 'task'))
@@ -948,9 +959,9 @@ class TestRunRunner(unittest.TestCase):
 		self.assertNotIn('NOTHING', handback.content)
 		self.assertIn('handback', handback.content.lower())
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_subagent_conversation_not_bubbled_only_findings(self, mock_build_hooks, mock_task_cls, _tpl):
 		"""A subagent's own conversation (Ai items) must NOT bubble up to the parent: its
 		transcript lives under its own session (shown in the drill-in view), and re-yielding
@@ -969,7 +980,7 @@ class TestRunRunner(unittest.TestCase):
 		mock_runner.__iter__.return_value = iter(sub_out); mock_task_cls.return_value = mock_runner
 		ctx = ActionContext(targets=['t'], model='m', session_id='parent-sess',
 							context={'workspace_id': 'ws1', 'session_id': 'parent-sess', 'drivers': ['mongodb']})
-		with patch('secator.ai.actions._gather_subagent_evidence', return_value=""):
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
 			action = {'action': 'task', 'name': 'ai', 'targets': ['t'], 'opts': {'prompt': 'obj'},
 					  'description': 'Exploit Y', 'tool_call_id': 'tc-9'}
 			results = list(_run_runner(action, ctx, 'task'))
@@ -1021,9 +1032,9 @@ class TestSanitizeChildOpts(unittest.TestCase):
 		self.assertEqual(_sanitize_child_opts(None), {})
 		self.assertEqual(_sanitize_child_opts('dangerous'), {})
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_neutralizes_dangerous_and_interactive(self, mock_build_hooks, mock_task_cls, _mock_tpl):
 		"""C1: an LLM emitting opts={'dangerous': True, 'interactive': 'local'} must NOT
 		propagate either into the spawned child's run_opts — dangerous is forced False
@@ -1050,9 +1061,9 @@ class TestSanitizeChildOpts(unittest.TestCase):
 		# benign task opt still passes through
 		self.assertEqual(run_opts.get('ports'), '80')
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_ai_subagent_forced_flags_over_llm_opts(self, mock_build_hooks, mock_task_cls, _mock_tpl):
 		"""Spawning an `ai` subagent with hostile opts: subagent forced True,
 		interactive forced False, dangerous forced False regardless of LLM input."""
@@ -1119,7 +1130,7 @@ class TestBuildHooksFromContext(unittest.TestCase):
 class TestChildHooksOrDenial(unittest.TestCase):
 	"""M2: refuse to spawn a persistence-less child when the parent has drivers."""
 
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_parent_no_drivers_empty_hooks_allowed(self, mock_build):
 		# pure local/no-persistence run: empty hooks child is expected, no denial
 		mock_build.return_value = {}
@@ -1127,7 +1138,7 @@ class TestChildHooksOrDenial(unittest.TestCase):
 		self.assertEqual(hooks, {})
 		self.assertIsNone(denial)
 
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_parent_drivers_present_hooks_pass_through(self, mock_build):
 		# normal spawn: drivers present + non-empty hooks -> pass through unchanged
 		sentinel = {'fake': ['hook']}
@@ -1136,7 +1147,7 @@ class TestChildHooksOrDenial(unittest.TestCase):
 		self.assertEqual(hooks, sentinel)
 		self.assertIsNone(denial)
 
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_parent_drivers_but_empty_hooks_denied(self, mock_build):
 		# parent HAS drivers but rebuild produced no hooks -> refuse, surface Warning
 		mock_build.return_value = {}
@@ -1145,7 +1156,7 @@ class TestChildHooksOrDenial(unittest.TestCase):
 		self.assertIsInstance(denial, Warning)
 		self.assertIn('drop findings', denial.message)
 
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_rebuild_raise_with_drivers_denied_not_swallowed(self, mock_build):
 		# a raising rebuild must not degrade to hooks={} silently -> Warning
 		mock_build.side_effect = RuntimeError('boom')
@@ -1154,7 +1165,7 @@ class TestChildHooksOrDenial(unittest.TestCase):
 		self.assertIsInstance(denial, Warning)
 		self.assertIn('rebuild failed', denial.message)
 
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_rebuild_raise_no_drivers_allowed(self, mock_build):
 		# no parent drivers: a rebuild error still yields an allowed empty-hooks child
 		mock_build.side_effect = RuntimeError('boom')
@@ -1162,9 +1173,9 @@ class TestChildHooksOrDenial(unittest.TestCase):
 		self.assertEqual(hooks, {})
 		self.assertIsNone(denial)
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_refuses_spawn_on_lost_persistence(self, mock_build, mock_task_cls, _tpl):
 		# end-to-end: parent has drivers, rebuild empty -> _run_runner yields a
 		# Warning and never constructs the child runner
@@ -1180,9 +1191,9 @@ class TestChildHooksOrDenial(unittest.TestCase):
 		self.assertEqual(len(warnings), 1)
 		self.assertIn('denied', warnings[0].message)
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_no_drivers_spawns_normally(self, mock_build, mock_task_cls, _tpl):
 		# parent has NO drivers: empty-hooks child still spawns (no false alarm)
 		mock_build.return_value = {}
@@ -1753,7 +1764,7 @@ class TestSubagentFanoutCap(unittest.TestCase):
 		ctx = ActionContext(targets=['t.com'], model='m', subagent=True, context={})
 		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
 
-		with patch('secator.ai.actions.Task') as mock_task_cls:
+		with patch('secator.ai.tools._runner.Task') as mock_task_cls:
 			results = list(_run_runner(action, ctx, 'task'))
 
 		mock_task_cls.assert_not_called()  # denied before constructing the child
@@ -1769,7 +1780,7 @@ class TestSubagentFanoutCap(unittest.TestCase):
 		)
 		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
 
-		with patch('secator.ai.actions.Task') as mock_task_cls:
+		with patch('secator.ai.tools._runner.Task') as mock_task_cls:
 			results = list(_run_runner(action, ctx, 'task'))
 
 		mock_task_cls.assert_not_called()  # denied before constructing the child
@@ -1787,7 +1798,7 @@ class TestSubagentFanoutCap(unittest.TestCase):
 		)
 		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
 
-		with patch('secator.ai.actions.Task') as mock_task_cls:
+		with patch('secator.ai.tools._runner.Task') as mock_task_cls:
 			results = list(_run_runner(action, ctx, 'task'))
 
 		mock_task_cls.assert_not_called()
@@ -1795,9 +1806,9 @@ class TestSubagentFanoutCap(unittest.TestCase):
 		self.assertIsInstance(results[0], Warning)
 		self.assertIn('fan-out cap', results[0].message)
 
-	@patch('secator.ai.actions.TemplateLoader')
-	@patch('secator.ai.actions.Task')
-	@patch('secator.ai.actions._build_hooks_from_context')
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_normal_depth1_spawn_succeeds(self, mock_build_hooks, mock_task_cls, _mock_tpl):
 		"""A first-level AI subagent (depth 0 -> 1) still spawns; child inherits depth+1."""
 		mock_build_hooks.return_value = {}

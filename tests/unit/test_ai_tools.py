@@ -400,11 +400,26 @@ class TestToolRegistry(unittest.TestCase):
 		self.assertIn("stop", TOOL_ACTION_MAP)
 		self.assertEqual(STOP_TOOL_SCHEMA["function"]["name"], "stop")
 
-	def test_every_handler_exists(self):
-		from secator.ai import actions
+	def test_every_tool_dispatches_to_its_own_run(self):
+		"""Built-in and external tools share ONE contract: the handler is the tool's own
+		`run(action, ctx)` method, defined in its tool file — no `handler` name indirection."""
+		import inspect
+		from unittest import mock
+		from secator.ai.actions import ActionContext, dispatch_action
 		from secator.ai.tools import TOOLS
+		from secator.ai.tools.base import BaseTool
 		for t in TOOLS:
-			self.assertTrue(hasattr(actions, t.handler), f"{t.name} handler {t.handler} missing")
+			self.assertFalse(hasattr(t, "handler"), f"{t.name}: stale `handler` attribute")
+			self.assertIsNot(type(t).run, BaseTool.run, f"{t.name}: does not override run()")
+			# run() is defined in the tool's own module (handlers live in the tool file).
+			self.assertEqual(inspect.getmodule(type(t).run), inspect.getmodule(type(t)), t.name)
+			sentinel = object()
+			with mock.patch.object(type(t), "run", autospec=True, return_value=iter([sentinel])) as run:
+				out = list(dispatch_action({"action": t.action}, ActionContext(targets=[], model="m")))
+			run.assert_called_once()
+			self.assertIs(run.call_args.args[0], t, f"{t.name}: dispatched to a different instance")
+			self.assertEqual(out, [sentinel], t.name)
+		self.assertFalse(hasattr(BaseTool, "handler"), "BaseTool still carries a `handler` attribute")
 
 	def test_mode_exposure_matches_allowed_actions(self):
 		"""CONSISTENCY GUARD: a tool exposed in a mode (resolved from the mode's `tools:`
