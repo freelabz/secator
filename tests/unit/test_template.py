@@ -324,3 +324,17 @@ class TestTree(unittest.TestCase):
 		self.assertIn('stealth', tasks['nmap']['applicable_profiles'])
 		self.assertIn('http_record', tasks['httpx']['applicable_profiles'])
 		self.assertNotIn('http_record', tasks['grype']['applicable_profiles'])
+
+
+class TestTemplateYamlLoader(unittest.TestCase):
+
+	def test_templates_parse_identically_with_fast_loader(self):
+		"""The (C) loader used for templates yields exactly what the pure-Python SafeLoader does."""
+		from pathlib import Path
+		import secator
+		from secator.template import _YAML_LOADER
+		paths = sorted((Path(secator.__file__).parent / 'configs').rglob('*.y*ml'))
+		self.assertTrue(paths)
+		for path in paths:
+			text = path.read_text()
+			self.assertEqual(yaml.load(text, Loader=_YAML_LOADER), yaml.load(text, Loader=yaml.SafeLoader), str(path))
