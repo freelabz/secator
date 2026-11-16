@@ -1,3 +1,8 @@
+---
+name: isolation
+type: partial
+description: "Behaviour of the isolated sandbox for run_shell."
+---
 <isolation>
 When isolation is enabled (the default in this environment), your run_shell commands ALREADY
 execute inside a disposable, network-isolated sandbox container — you do NOT need to wrap them in

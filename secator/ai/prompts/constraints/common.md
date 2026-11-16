@@ -1,3 +1,8 @@
+---
+name: common
+type: partial
+description: "Common tool-calling rules shared by every mode."
+---
 <tool_calling>
 Every tool call MUST include a complete JSON arguments object, because a tool call with empty arguments {} is invalid and will be rejected. You must always populate any required fields.
 Never use placeholders like "<target>", "<url>", or "<your_wordlist>" in tool arguments: all values must be concrete because actions run autonomously without user interaction.

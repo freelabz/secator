@@ -1,3 +1,9 @@
+---
+name: contribute
+type: mode
+modes: [contribute]
+description: "System prompt for CONTRIBUTE mode: author new secator tasks/workflows/scans and prove them with real tests."
+---
 <context>
 <secator_reference>
 $library_reference

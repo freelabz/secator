@@ -1,3 +1,8 @@
+---
+name: subagents
+type: partial
+description: "How to spawn an autonomous AI subagent with run_subagent."
+---
 <subagents>
 Spawn an autonomous AI subagent with the `run_subagent` tool — the ONLY way to spawn one (do NOT call run_task with name "ai"; it is rejected). The subagent gets a fresh context window, runs non-interactively, and hands back a summary.
 

@@ -1,3 +1,8 @@
+---
+name: queries
+type: partial
+description: "How to read workspace findings with query_workspace."
+---
 <queries>
 Use query_workspace to read existing findings in the workspace (targets, vulnerabilities, exploits, tags). The results of a task/workflow/scan you just ran are returned directly in its tool result — read them THERE; do NOT re-run query_workspace just to see what a run you launched produced, UNLESS that result is INCOMPLETE (item-capped; it then carries a scope_note with the runner's `runner_id`/`runner_type`), in which case read the rest scoped to that runner (see the run-scoped example below). Use query_workspace to read findings that are NOT in your current tool results — e.g. from earlier/other runs — or to obtain a finding's stable `_uuid` (required by mark_vuln_*/update_finding), which the run tool result omits.
 Keep every query targeted so it never returns the 100-result cap of noise:

@@ -1,10 +1,30 @@
-"""Compact prompt templates for AI task."""
+"""Compact prompt templates for AI task.
+
+Prompt files are Markdown (``*.md``) with an optional YAML frontmatter header that
+describes the prompt (``name``/``type``/``description``/``modes``). The frontmatter is
+metadata only — it is stripped before the body is rendered, so the rendered prompt is
+exactly the body after the closing ``---``. This reuses the frontmatter convention of
+the user-provided AI context files (``secator/ai/context.py``) and extends it to the
+system prompts.
+
+Frontmatter schema (see :data:`PROMPT_TYPES`):
+
+* ``name`` (str, required) — must equal the file stem.
+* ``type`` (str, required) — one of ``mode`` (a full per-mode system prompt),
+  ``partial`` (a fragment pulled into a mode prompt via a ``${name}`` include),
+  ``injected`` (a fragment appended programmatically at build time, e.g. ``stop``),
+  or ``utility`` (a standalone prompt, e.g. the mode ``_selection`` classifier).
+* ``description`` (str, required) — one-line human description.
+* ``modes`` (list[str], ``type: mode`` only) — the mode(s) this system prompt serves.
+"""
 # flake8: noqa: E501
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 from string import Template
+
+import yaml
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 SECATOR_DIR = Path(__file__).parent.parent
@@ -26,44 +46,76 @@ wordlist|name_or_path|Use predefined name or file path
 ports|1-1000,8080,8443|Comma-separated ports or ranges"""
 
 
-def load_prompt(path: str) -> str:
-	"""Load a prompt file and resolve ${includes} from common/.
+# Valid `type:` frontmatter values (see module docstring).
+PROMPT_TYPES = ("mode", "partial", "injected", "utility")
 
-	Include syntax: ${common_name} resolves to common/<common_name>.txt content.
-	Standard $variable substitution is handled later by string.Template.
+# Frontmatter delimiter: a file may start with `---\n`, the YAML block, then `---`.
+# Same convention as the user AI context files (secator/ai/context.py).
+_FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*\n?', re.DOTALL)
+
+
+def split_frontmatter(text: str) -> Tuple[Dict[str, Any], str]:
+	"""Split a prompt file's text into (frontmatter_dict, body).
+
+	A file with no frontmatter returns ``({}, text)`` unchanged. The body is returned
+	verbatim (no stripping) so the rendered prompt stays byte-for-byte what follows the
+	closing ``---``.
+	"""
+	match = _FRONTMATTER.match(text)
+	if not match:
+		return {}, text
+	meta = yaml.safe_load(match.group(1)) or {}
+	if not isinstance(meta, dict):
+		meta = {}
+	return meta, text[match.end():]
+
+
+def load_prompt_meta(path: str) -> Dict[str, Any]:
+	"""Return the frontmatter dict of a prompt file (empty dict if none)."""
+	meta, _ = split_frontmatter((PROMPTS_DIR / path).read_text())
+	return meta
+
+
+def load_prompt(path: str) -> str:
+	"""Load a prompt file (body only) and resolve ${includes} from constraints/.
+
+	The optional YAML frontmatter header is stripped first (it is metadata, never part
+	of the rendered prompt). Include syntax: ``${name}`` resolves to the BODY of
+	``constraints/<name>.md`` (its own frontmatter stripped). Standard ``$variable``
+	substitution is handled later by :class:`string.Template`.
 
 	Args:
-		path: Relative path within the prompts directory (e.g. 'modes/scan.txt')
+		path: Relative path within the prompts directory (e.g. 'modes/scan.md').
 
 	Returns:
-		Prompt string with includes resolved.
+		Prompt string (body, includes resolved).
 	"""
-	filepath = PROMPTS_DIR / path
-	content = filepath.read_text()
+	_, content = split_frontmatter((PROMPTS_DIR / path).read_text())
 
 	# Resolve ${include_name} patterns that match constraints/ files
 	common_dir = PROMPTS_DIR / "constraints"
-	available = {f.stem for f in common_dir.glob("*.txt")}
+	available = {f.stem for f in common_dir.glob("*.md")}
 
 	def _resolve(match):
 		name = match.group(1)
 		if name in available:
-			return (common_dir / f"{name}.txt").read_text().rstrip()
+			_, body = split_frontmatter((common_dir / f"{name}.md").read_text())
+			return body.rstrip()
 		return match.group(0)  # Leave unresolved (it's a Template variable)
 
 	return re.sub(r'\$\{(\w+)\}', _resolve, content)
 
 
 # Load prompts from files
-COMMON_RULES = load_prompt("constraints/common.txt")
-QUERIES = load_prompt("constraints/queries.txt")
+COMMON_RULES = load_prompt("constraints/common.md")
+QUERIES = load_prompt("constraints/queries.md")
 
-SYSTEM_SCAN = Template(load_prompt("modes/scan.txt"))
-SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
-SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
-SYSTEM_CONTRIBUTE = Template(load_prompt("modes/contribute.txt"))
-SYSTEM_MONITOR = Template(load_prompt("modes/monitor.txt"))
-SYSTEM_RESEARCH = Template(load_prompt("modes/research.txt"))
+SYSTEM_SCAN = Template(load_prompt("modes/scan.md"))
+SYSTEM_CHAT = Template(load_prompt("modes/chat.md"))
+SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.md"))
+SYSTEM_CONTRIBUTE = Template(load_prompt("modes/contribute.md"))
+SYSTEM_MONITOR = Template(load_prompt("modes/monitor.md"))
+SYSTEM_RESEARCH = Template(load_prompt("modes/research.md"))
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
 MODES = {
@@ -559,7 +611,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	if is_subagent:
 		result = re.sub(r'\n*<subagents>.*?</subagents>\n*', '\n\n', result, flags=re.DOTALL)
 		result = re.sub(r'\n*<vulnerability_handling>.*?</vulnerability_handling>\n*', '\n\n', result, flags=re.DOTALL)
-		result += "\n\n" + load_prompt("constraints/subagent.txt")
+		result += "\n\n" + load_prompt("constraints/subagent.md")
 
 	# Inject the end-of-turn `stop` rules. `stop` is the single end-of-turn signal in
 	# every mode; which guidance applies depends only on whether the backend has a user
@@ -568,7 +620,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# Spliced in BEFORE the <operating_rules> recap so that recap stays in the
 	# high-attention recency tail (see TestOperatingRulesRecap).
 	interactive = getattr(backend, "interactive", True) if backend is not None else True
-	stop_rules = load_prompt("constraints/stop.txt" if interactive else "constraints/stop_autonomous.txt")
+	stop_rules = load_prompt("constraints/stop.md" if interactive else "constraints/stop_autonomous.md")
 	marker = "<operating_rules>"
 	if marker in result:
 		result = result.replace(marker, stop_rules + "\n\n" + marker, 1)
