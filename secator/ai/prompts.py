@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Tuple
 from string import Template
 
 import yaml
+from copy import deepcopy
+from functools import lru_cache
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 SECATOR_DIR = Path(__file__).parent.parent
@@ -71,12 +73,27 @@ def split_frontmatter(text: str) -> Tuple[Dict[str, Any], str]:
 	return meta, text[match.end():]
 
 
-def load_prompt_meta(path: str) -> Dict[str, Any]:
-	"""Return the frontmatter dict of a prompt file (empty dict if none)."""
+def _strip_frontmatter(text: str) -> str:
+	"""Return a prompt file's body (frontmatter removed) without YAML-parsing the header."""
+	match = _FRONTMATTER.match(text)
+	return text[match.end():] if match else text
+
+
+@lru_cache(maxsize=None)
+def _load_prompt_meta(path: str) -> Dict[str, Any]:
 	meta, _ = split_frontmatter((PROMPTS_DIR / path).read_text())
 	return meta
 
 
+def load_prompt_meta(path: str) -> Dict[str, Any]:
+	"""Return the frontmatter dict of a prompt file (empty dict if none).
+
+	Prompt files ship with the package, so the parse is cached; callers get their own copy.
+	"""
+	return deepcopy(_load_prompt_meta(path))
+
+
+@lru_cache(maxsize=None)
 def load_prompt(path: str) -> str:
 	"""Load a prompt file (body only) and resolve ${includes} from constraints/.
 
@@ -91,7 +108,8 @@ def load_prompt(path: str) -> str:
 	Returns:
 		Prompt string (body, includes resolved).
 	"""
-	_, content = split_frontmatter((PROMPTS_DIR / path).read_text())
+	# The frontmatter is metadata only: strip it with the regex, no YAML parse needed.
+	content = _strip_frontmatter((PROMPTS_DIR / path).read_text())
 
 	# Resolve ${include_name} patterns that match constraints/ files
 	common_dir = PROMPTS_DIR / "constraints"
@@ -100,7 +118,7 @@ def load_prompt(path: str) -> str:
 	def _resolve(match):
 		name = match.group(1)
 		if name in available:
-			_, body = split_frontmatter((common_dir / f"{name}.md").read_text())
+			body = _strip_frontmatter((common_dir / f"{name}.md").read_text())
 			return body.rstrip()
 		return match.group(0)  # Leave unresolved (it's a Template variable)
 
@@ -777,8 +795,14 @@ Format: name|description|[tags]|options|meta:shared_options
 - Profiles can be applied to any task/workflow via opts: {"profiles": ["profile_name"]}"""
 
 
+@lru_cache(maxsize=1)
 def build_library_reference() -> str:
-	"""Build complete library reference in compact format."""
+	"""Build complete library reference in compact format.
+
+	Built from the discovered tasks/workflows/profiles (themselves cached by the loader) and the
+	configured wordlists, so it is static for the process lifetime: cache it instead of rebuilding
+	it on every system-prompt render (several times per AI session, and on each mode switch).
+	"""
 	sections = [
 		REFERENCE_FORMAT,
 		f"<meta_options>\n{build_meta_options_reference()}\n</meta_options>",
