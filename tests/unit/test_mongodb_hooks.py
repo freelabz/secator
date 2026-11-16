@@ -114,8 +114,8 @@ if __name__ == "__main__":
 
 
 class TestTagDuplicatesBaselineProjection(unittest.TestCase):
-    """The baseline (whole workspace) is read with finding types projected to the dedup
-    fields, and any other type read whole, so a projected pass tags the same duplicates."""
+    """The baseline (whole workspace) is read in one cursor projected to the dedup fields,
+    and a projected pass tags the same duplicates."""
 
     def _run(self, docs_by_call):
         client = MagicMock()
@@ -132,7 +132,7 @@ class TestTagDuplicatesBaselineProjection(unittest.TestCase):
             mongodb.tag_duplicates("ws1", exclude_types=["info"])
         return findings
 
-    def test_finding_types_projected_others_whole(self):
+    def test_baseline_read_in_one_projected_cursor(self):
         from bson.objectid import ObjectId
         base = Vulnerability(name="CVE-1", id="CVE-1", matched_at="h:80", description="d" * 100)
         new = Vulnerability(name="CVE-1", id="CVE-1", matched_at="h:80")
@@ -140,15 +140,14 @@ class TestTagDuplicatesBaselineProjection(unittest.TestCase):
         new_doc = {**new.toDict(), "_id": ObjectId()}
         projected = {k: v for k, v in base_doc.items() if k in mongodb.baseline_fields(
             mongodb.CONFIG.addons.mongodb.duplicate_main_copy_fields) or k == "_id"}
-        findings = self._run([[projected], [], [new_doc]])
+        findings = self._run([[projected], [new_doc]])
 
-        (q1, proj1), (q2,), (q3,) = [c.args for c in findings.find.call_args_list]
-        finding_names = [t.get_name() for t in mongodb.FINDING_TYPES]
-        self.assertEqual(q1["_type"], {"$in": finding_names})
+        (q1, proj1), (q2,) = [c.args for c in findings.find.call_args_list]
+        self.assertNotIn("_type", q1)  # every type, one cursor
+        self.assertTrue(q1["_tagged"])
         self.assertNotIn("description", proj1)
         self.assertNotIn("extra_data", proj1)
-        self.assertEqual(q2["_type"], {"$nin": finding_names + ["info"]})
-        self.assertEqual(q3["_tagged"], {"$in": [False, None]})
+        self.assertEqual(q2["_tagged"], {"$in": [False, None]})
         # The projected baseline doc still matches: the new finding becomes the main one and
         # the baseline doc is tagged its duplicate.
         ops = findings.bulk_write.call_args.args[0]

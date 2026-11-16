@@ -8,15 +8,13 @@ DERIVATION_INPUTS = ('confidence', 'status_code', 'status')
 
 
 def baseline_fields(copy_fields=None):
-	"""Field names a baseline *finding* needs for duplicate tagging.
+	"""Field names a baseline doc needs for duplicate tagging.
 
-	That is every finding type's equality fields (``compare=True``, which ``_compare_key()`` reads),
+	That is every output type's equality fields (``compare=True``, which ``_compare_key()`` reads),
 	plus ``_type``, ``_related``, the ``copy_fields`` kept by ``build_baseline_index``, and the
 	``DERIVATION_INPUTS`` those values are computed from on load. Backends
-	can fetch only these for finding types instead of whole documents: the baseline is the whole
-	workspace, so dropping heavy fields (``extra_data``, headers, descriptions...) shrinks every dedup
-	pass. Other output types (e.g. ``progress``, whose equality includes ``extra_data``) are not
-	covered and must be fetched whole.
+	can fetch only these instead of whole documents: the baseline is the whole workspace, so
+	dropping heavy fields (``extra_data``, headers, descriptions...) shrinks every dedup pass.
 
 	Args:
 		copy_fields (list): Field names whose first non-empty baseline value is retained.
@@ -24,9 +22,9 @@ def baseline_fields(copy_fields=None):
 	Returns:
 		list[str]: Sorted field names.
 	"""
-	from secator.output_types import FINDING_TYPES
+	from secator.output_types import OUTPUT_TYPES
 	names = {'_type', '_related', *DERIVATION_INPUTS, *(copy_fields or [])}
-	for otype in FINDING_TYPES:
+	for otype in OUTPUT_TYPES:
 		names.update(f.name for f in fields(otype) if f.compare)
 	return sorted(names)
 

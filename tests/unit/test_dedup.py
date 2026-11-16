@@ -3,7 +3,7 @@ from dataclasses import fields
 
 from secator.config import CONFIG
 from secator.hooks._dedup import baseline_fields, build_baseline_index, compute_duplicate_updates
-from secator.output_types import FINDING_TYPES, Domain, Port, Subdomain, Technology, Url, Vulnerability
+from secator.output_types import OUTPUT_TYPES, Domain, Port, Progress, Stat, Subdomain, Technology, Url, Vulnerability
 
 
 def _vuln(uuid, status='', verified=False, **kwargs):
@@ -132,6 +132,7 @@ class TestBaselineFields(unittest.TestCase):
 			Port(port=443, ip='1.2.3.4', state='open', service_name='https', extra_data={'banner': 'b'}),
 			Subdomain(host='a.host', domain='host', sources=['crt']),
 			Technology(product='nginx', match='host:80', version='1.2', extra_data={'x': 1}),
+			Progress(percent=40, extra_data={'rate': '1kpps'}, _source='masscan'),
 		]
 
 	def test_derived_fields_survive_projection(self):
@@ -158,9 +159,27 @@ class TestBaselineFields(unittest.TestCase):
 				)
 		self.assertFalse(Url.load({k: v for k, v in samples[0].toDict().items() if k in names}).verified)
 
+	def test_no_type_compares_on_extra_data(self):
+		for otype in OUTPUT_TYPES:
+			for f in fields(otype):
+				if f.name == 'extra_data':
+					self.assertFalse(f.compare, otype.get_name())
+
+	def test_equality_ignores_extra_data(self):
+		# Same progress point / same process snapshot, whatever the free-form extras.
+		a = Progress(percent=40, extra_data={'rate': '1kpps'}, _source='masscan')
+		b = Progress(percent=40, extra_data={'rate': '2kpps'}, _source='masscan')
+		self.assertEqual(a, b)
+		self.assertNotEqual(a, Progress(percent=41, _source='masscan'))
+		self.assertNotEqual(a, Progress(percent=40, _source='nmap'))
+		s1 = Stat(name='nmap', pid=1, cpu=5, memory=10, memory_limit=-1, extra_data={'x': 1})
+		s2 = Stat(name='nmap', pid=1, cpu=5, memory=10, memory_limit=-1, extra_data={'x': 2})
+		self.assertEqual(s1, s2)
+		self.assertNotEqual(s1, Stat(name='nmap', pid=2, cpu=5, memory=10, memory_limit=-1))
+
 	def test_covers_every_equality_field(self):
 		names = set(baseline_fields(self.COPY_FIELDS))
-		for otype in FINDING_TYPES:
+		for otype in OUTPUT_TYPES:
 			for f in fields(otype):
 				if f.compare:
 					self.assertIn(f.name, names, f'{otype.get_name()}.{f.name}')
