@@ -55,11 +55,16 @@ def _make_request(method, endpoint, data=None):
 	debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
 	debug('API headers', sub='hooks.api', verbose=True, obj=headers)
 	json_data = json.dumps(data, cls=DataclassEncoder) if data else None
+	# never log an internal doc's payload (the placeholder map holds real values)
+	from secator.query._base import is_internal_doc
+	internal = isinstance(data, dict) and is_internal_doc(data)
 	if json_data:
-		debug('API data', sub='hooks.api', verbose=True, obj=json_data, obj_after=True)
+		logged = json.dumps({**data, 'extra_data': '<redacted>'}, cls=DataclassEncoder) if internal else json_data
+		debug('API data', sub='hooks.api', verbose=True, obj=logged, obj_after=True)
 	response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)
 	result = response.json()
-	debug('API response', sub='hooks.api', verbose=True, obj=result)
+	debug('API response', sub='hooks.api', verbose=True,
+	      obj='<redacted>' if internal else result)
 	if not response.ok and result.get('detail'):
 		console.print(Error(message=f'API error: {result["detail"]}'))
 	response.raise_for_status()

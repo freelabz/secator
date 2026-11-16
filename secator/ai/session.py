@@ -253,6 +253,7 @@ def print_session_results(session):
 		session: Session dict from show_session_picker (uses ``report_path``).
 	"""
 	from secator.output_types import OUTPUT_TYPES
+	from secator.query._base import is_internal_doc
 
 	report_path = session.get('report_path')
 	if not report_path:
@@ -270,6 +271,8 @@ def print_session_results(session):
 		if not cls:
 			continue
 		for item_data in items:
+			if is_internal_doc(item_data):
+				continue   # bookkeeping (placeholder map), never displayed
 			all_items.append((item_data, cls))
 	all_items.sort(key=lambda x: x[0].get('_timestamp', 0))
 	for item_data, cls in all_items:
