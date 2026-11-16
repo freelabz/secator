@@ -421,6 +421,18 @@ class TestToolRegistry(unittest.TestCase):
 			self.assertEqual(out, [sentinel], t.name)
 		self.assertFalse(hasattr(BaseTool, "handler"), "BaseTool still carries a `handler` attribute")
 
+	def test_dispatch_gate_matches_schema_exposure(self):
+		"""The dispatch-side mode gate and build_tool_schemas share one rule: for every mode, a
+		built-in tool passes the gate exactly when its schema is exposed in that mode."""
+		from secator.ai.tools import TOOLS, build_tool_schemas, tool_exposed_in_mode
+		from secator.ai.prompts import MODES
+		for mode in MODES:
+			exposed = {s["function"]["name"] for s in build_tool_schemas(mode)}
+			for t in TOOLS:
+				if t.injected or t.external:
+					continue
+				self.assertEqual(tool_exposed_in_mode(t, mode), t.name in exposed, f"{mode}/{t.name}")
+
 	def test_mode_exposure_matches_allowed_actions(self):
 		"""CONSISTENCY GUARD: a tool exposed in a mode (resolved from the mode's `tools:`
 		frontmatter globs — the single source of truth) must be in that mode's

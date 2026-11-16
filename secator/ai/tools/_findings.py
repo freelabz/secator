@@ -47,12 +47,18 @@ def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
 	return modified, updated, label, None
 
 
+# extra_data keys only the handlers themselves may write. ``fixed_at`` is the remediation boundary
+# the attempt rollup trusts, so a caller must not be able to move it.
+_SERVER_OWNED_EXTRA_DATA = frozenset({"fixed_at"})
+
+
 def _merge_extra_data(update: Dict, extra_data) -> None:
-	"""Merge caller ``extra_data`` into ``update`` with dotted keys so existing keys survive."""
+	"""Merge caller ``extra_data`` into ``update`` with dotted keys so existing keys survive.
+	Server-owned keys (``_SERVER_OWNED_EXTRA_DATA``) are skipped."""
 	if isinstance(extra_data, dict):
 		for k, v in extra_data.items():
 			key = str(k)
-			if key and "." not in key and not key.startswith("$"):
+			if key and "." not in key and not key.startswith("$") and key not in _SERVER_OWNED_EXTRA_DATA:
 				update[f"extra_data.{key}"] = v
 
 
@@ -123,18 +129,34 @@ def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, mat
 		counts = _attempt_counts(attempts)
 		# Current (possibly legacy) vuln state, so a failed attempt never downgrades an EXPLOITED vuln.
 		cur = next((v for v in occurrences if not v.get("_duplicate")), occurrences[0] if occurrences else {})
-		if counts["success"]:
-			successes = [a for a in attempts if str(a.get("verdict") or "").lower() == "success"]
-			status, verified = "EXPLOITED", True
+		successes = [a for a in attempts if str(a.get("verdict") or "").lower() == "success"]
+		# Remediation boundary: if ANY occurrence of the identity is FIXED (mark_vuln_fixed may have
+		# targeted a duplicate), the vuln is re-opened ONLY by a success recorded AFTER the latest
+		# fix (``extra_data.fixed_at``); pre-fix successes and any failed/partial re-test leave it
+		# FIXED (only the attempt recap is refreshed). A FIXED occurrence with no ``fixed_at`` has
+		# no reliable boundary, so no success qualifies.
+		fixed_occ = [v for v in occurrences if v.get("status") == "FIXED"]
+		fixed = bool(fixed_occ)
+		if fixed:
+			stamps = [(v.get("extra_data") or {}).get("fixed_at") for v in fixed_occ]
+			if all(isinstance(t, (int, float)) for t in stamps):
+				fixed_at = max(stamps)
+				successes = [a for a in successes if (a.get("_timestamp") or 0) > fixed_at]
+			else:
+				successes = []
+		if successes:
 			poc = max(successes, key=lambda a: a.get("_timestamp") or 0).get("poc") or ""
+			update = {"status": "EXPLOITED", "verified": True, "poc": poc}
+		elif fixed:
+			update = {}
 		elif (cur or {}).get("status") == "EXPLOITED":
 			# Legacy / pre-backfill success — preserve it (keep the existing poc); do not downgrade.
-			status, verified, poc = "EXPLOITED", True, (cur or {}).get("poc") or ""
+			update = {"status": "EXPLOITED", "verified": True, "poc": (cur or {}).get("poc") or ""}
 		elif counts["failed"] or counts["partial"]:
-			status, verified, poc = "EXPLOIT FAILED", False, ""
+			update = {"status": "EXPLOIT FAILED", "verified": False, "poc": ""}
 		else:
 			return cur or None
-		update = {"status": status, "verified": verified, "poc": poc, "extra_data.exploit_attempts": counts}
+		update["extra_data.exploit_attempts"] = counts
 		# engine.update is update_one, so apply the $set to each occurrence by its own _uuid (point ops).
 		primary = None
 		for v in occurrences:
