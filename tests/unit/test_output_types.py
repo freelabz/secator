@@ -187,3 +187,27 @@ class TestFindingVerdictFields(unittest.TestCase):
 		v = Vulnerability(name='x', confidence='low')
 		self.assertEqual(v.confidence, 'low')
 		self.assertEqual(v.confidence_nb, 3)
+
+
+class TestUrlIsRoot(unittest.TestCase):
+
+	def test_root_urls(self):
+		from secator.output_types import Url
+		for url in [
+			'http://example.com',
+			'https://example.com/',
+			'https://example.com:8443/',
+			'http://example.com:8080',
+			'http://127.0.0.1:8000/',
+		]:
+			self.assertTrue(Url(url).is_root, url)
+
+	def test_non_root_urls(self):
+		from secator.output_types import Url
+		for url in [
+			'https://example.com/login',
+			'https://example.com:8443/api/',
+			'http://example.com:8080/?q=1',
+			'http://example.com/#top',
+		]:
+			self.assertFalse(Url(url).is_root, url)
