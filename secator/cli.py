@@ -3637,7 +3637,9 @@ def tasks(ctx, check, verbose):
 	sys.exit(0)
 
 
-def check_test(condition, message, fail_message, results=[], warn=False):
+def check_test(condition, message, fail_message, results=None, warn=False):
+	if results is None:
+		results = []
 	console.print(f'[bold magenta]:zap: {message} ...[/]', end='')
 	if not condition:
 		if not warn:

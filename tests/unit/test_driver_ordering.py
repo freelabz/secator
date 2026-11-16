@@ -59,7 +59,7 @@ class TestQueryBackendOrdering(unittest.TestCase):
 
 class TestDefaultDrivers(unittest.TestCase):
 	"""json = implicit local default so there is always a queryable store, without
-	overriding a store backend (mongodb/sqlite/api) or the mongodb addon (prod)."""
+	overriding a store backend (mongodb/sqlite/api) or the mongodb addon."""
 
 	def test_no_driver_local_run_defaults_to_json(self):
 		from secator.loader import apply_default_drivers

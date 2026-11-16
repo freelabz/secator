@@ -73,7 +73,7 @@ class TestMongoTaggedDefault(unittest.TestCase):
     """#1315 + backlog fix: a real (dedupable) finding is stamped `_tagged: False` on
     insert so tag_duplicates index-seeks it, but an execution-metadata type
     (info/warning/error/stat) is stamped `_tagged: True` so it NEVER enters the untagged
-    backlog (it's dropped by tag_duplicates anyway, and clogged 85% of prod's backlog)."""
+    backlog (it's dropped by tag_duplicates anyway, and would otherwise make up most of a large backlog)."""
 
     def _inserted_doc(self, item):
         from bson.objectid import ObjectId

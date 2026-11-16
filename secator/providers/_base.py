@@ -3,16 +3,15 @@ import json
 
 from secator.config import CONFIG
 from secator.output_types import Vulnerability, Exploit
+from secator.decorators import cache_copy
 from secator.utils import debug
-
-from functools import cache
 
 
 class CVEProvider:
 	"""Base class for CVE providers."""
 
-	@cache
 	@staticmethod
+	@cache_copy
 	def lookup_external_cve(cve_id, provider=CONFIG.providers.defaults['cve']):
 		"""Search for a CVE info and return vulnerability data.
 
@@ -57,8 +56,8 @@ class CVEProvider:
 class ExploitProvider:
 	"""Base class for Exploit providers."""
 
-	@cache
 	@staticmethod
+	@cache_copy
 	def lookup_external_exploit(exploit_id, provider=CONFIG.providers.defaults['exploit']):
 		"""Search for a exploit info and return exploit data.
 

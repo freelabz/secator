@@ -9,11 +9,11 @@ from secator.tasks.dnsx import dnsx
 
 class TestTaskProfiles(unittest.TestCase):
 	def test_arjun_not_on_small(self):
-		# ~284 MiB / ~566 mc observed in prod vs a 500m/512Mi admitted request.
+		# Observed peak ~284 MiB / ~566 mc, above the small profile's 500m/512Mi request.
 		self.assertEqual(arjun.profile, 'medium')
 
 	def test_bup_not_on_small(self):
-		# ~365 MiB / ~551 mc observed in prod.
+		# Observed peak ~365 MiB / ~551 mc.
 		self.assertEqual(bup.profile, 'medium')
 
 	def test_dnsx_plain_stays_small(self):
@@ -21,7 +21,7 @@ class TestTaskProfiles(unittest.TestCase):
 		self.assertEqual(dnsx.profile({}), 'small')
 
 	def test_dnsx_brute_is_promoted(self):
-		"""`dnsx/brute` is wordlist-driven: ~449 MiB / ~503 mc over ~2h in prod."""
+		"""`dnsx/brute` is wordlist-driven: observed peak ~449 MiB / ~503 mc over ~2h."""
 		self.assertEqual(dnsx.profile({'wordlist': 'combined_subdomains'}), 'medium')
 
 	def test_dnsx_profile_does_not_raise_without_wordlist(self):

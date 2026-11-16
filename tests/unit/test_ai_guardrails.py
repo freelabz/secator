@@ -1609,7 +1609,7 @@ class TestShellParserFallback(unittest.TestCase):
 
 
 class TestRunShellScopeHardening(unittest.TestCase):
-	"""Pre-prod audit fixes for run_shell: local-file exfiltration via curl/wget
+	"""Audit fixes for run_shell: local-file exfiltration via curl/wget
 	input-file flags (H1), and scope escape via CIDR / user@host / -iL target files
 	(H2). Before these, all of the commands below evaluated to `allow` in the default
 	posture (no dangerous mode)."""
