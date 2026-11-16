@@ -670,6 +670,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# resilient no-ops when a block is absent (e.g. chat mode has no vulnerability_handling).
 	if is_subagent:
 		result = re.sub(r'\n*<subagents>.*?</subagents>\n*', '\n\n', result, flags=re.DOTALL)
+		result = re.sub(r'\n*<background_subagents>.*?</background_subagents>\n*', '\n', result, flags=re.DOTALL)
 		result = re.sub(r'\n*<vulnerability_handling>.*?</vulnerability_handling>\n*', '\n\n', result, flags=re.DOTALL)
 		result += "\n\n" + load_prompt("constraints/subagent.md")
 

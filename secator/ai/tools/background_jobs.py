@@ -56,7 +56,8 @@ class CheckBackgroundJobs(BaseTool):
 						"description": "Optional seconds to wait for one of the jobs to finish before returning "
 						               "(capped by the run's background_max_wait). 0 or omitted = return now."
 					}
-				}
+				},
+				"required": []
 			}
 		}
 	}

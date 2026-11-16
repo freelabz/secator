@@ -352,7 +352,7 @@ class TestPrompts(unittest.TestCase):
 		self.assertEqual(
 			set(actions),
 			{"query", "fetch_url", "web_search", "list_runners", "update_plan",
-			 "subagent", "change_mode", "stop"},
+			 "subagent", "check_background_jobs", "cancel_background_job", "change_mode", "stop"},
 		)
 		for a in ["shell", "task", "workflow", "add_finding", "update_finding",
 		          "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed"]:

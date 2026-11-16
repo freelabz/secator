@@ -235,12 +235,15 @@ class TestBackgroundHelpers(unittest.TestCase):
 		register_runner_hook(MagicMock())  # outside a job thread: no-op
 
 	def test_background_shell_has_no_short_default_timeout(self):
+		from secator.config import CONFIG
+		original = CONFIG.celery.task_max_timeout
+		self.addCleanup(setattr, CONFIG.celery, "task_max_timeout", original)
+		CONFIG.celery.task_max_timeout = -1
 		self.assertEqual(_resolve_shell_timeout({"command": "x"}), 30)
-		with patch("secator.config.CONFIG.celery.task_max_timeout", -1):
-			self.assertEqual(_resolve_shell_timeout({"command": "x", "background": True}), -1)
-		with patch("secator.config.CONFIG.celery.task_max_timeout", 7200):
-			self.assertEqual(_resolve_shell_timeout({"command": "x", "background": True}), 7200)
-			self.assertEqual(_resolve_shell_timeout({"command": "x", "background": True, "timeout": 60}), 60)
+		self.assertEqual(_resolve_shell_timeout({"command": "x", "background": True}), -1)
+		CONFIG.celery.task_max_timeout = 7200
+		self.assertEqual(_resolve_shell_timeout({"command": "x", "background": True}), 7200)
+		self.assertEqual(_resolve_shell_timeout({"command": "x", "background": True, "timeout": 60}), 60)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

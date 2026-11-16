@@ -16,7 +16,7 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.ai.actions import (
-	ActionContext, check_guardrails, safe_dispatch_action, _run_batch
+	ActionContext, check_guardrails, safe_dispatch_action, _run_batch, _get_result_context
 )
 from secator.ai.guardrails import PermissionEngine
 from secator.ai.interactivity import create_backend, DISMISS_ANSWER, RemoteBackend, UserInputTimeout
@@ -1059,7 +1059,9 @@ class ai(PythonRunner):
 
 				# Call LLM
 				messages = self.history.to_messages(max_tokens_total=self.max_tokens_total)
-				messages = self._with_background_status(messages)
+				with_status = self._with_background_status(messages)
+				if isinstance(with_status, list):  # (a MagicMock self in unit tests returns a mock)
+					messages = with_status
 				by_role = self.history.count_tokens_by_role(self.model)
 				token_count = by_role["total"]
 				ctx_window = get_context_window(self.model)
@@ -1254,7 +1256,8 @@ class ai(PythonRunner):
 					# Non-interactive run ending its turn with background jobs still running:
 					# there is no user to come back later, and ending would cancel them. Wait
 					# (bounded) for one to finish, then give the model a turn to read it.
-					if self._should_wait_background():
+					# `is True` (not truthy): tolerates a MagicMock self in unit tests.
+					if self._should_wait_background() is True:
 						yield from self._wait_background_end_of_turn()
 						if iteration >= self.max_iterations:
 							self.max_iterations = iteration + 1
@@ -2082,8 +2085,9 @@ class ai(PythonRunner):
 
 	def _submit_background(self, action, ctx, collected):
 		"""Start one approved action as a background job and acknowledge it as its tool result."""
-		context = {**dict(self.context or {}), "tool_call_id": action.get("tool_call_id"),
-		           "tool_call_name": action.get("tool_call_name")}
+		# The child-runner context (parent runner ids stripped) + this call's tool_call_id, so
+		# the ack never points the model at the ai task's own id.
+		context = _get_result_context(action, ctx)
 		try:
 			job = self.background.submit(action, ctx, safe_dispatch_action)
 		except BackgroundLimitError as e:
