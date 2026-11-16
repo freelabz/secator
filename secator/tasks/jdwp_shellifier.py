@@ -32,7 +32,7 @@ class jdwp_shellifier(Vuln):
 	meta_opts = {}  # jdwp-shellifier takes none of the standard http/proxy/thread opts
 	opts = {
 		'jdwp_port': {'type': int, 'short': 'p', 'default': 8000, 'help': 'JDWP port'},
-		'break_on': {'type': str, 'default': None, 'help': 'Java method to break on (detection sentinel by default)'},  # noqa: E501
+		'break_on': {'type': str, 'default': DETECT_BREAK_ON, 'help': 'Java method to break on (detection sentinel by default)'},  # noqa: E501
 		'exec_cmd': {'type': str, 'default': None, 'help': 'Command to execute remotely (exploitation — off by default)'},  # noqa: E501
 	}
 	opt_key_map = {

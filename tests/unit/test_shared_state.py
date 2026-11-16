@@ -140,3 +140,18 @@ class TestMutableDefaults(unittest.TestCase):
 		params = inspect.signature(start_runner.run).parameters
 		for name in ('results', 'run_opts', 'hooks', 'validators', 'context'):
 			self.assertIsNone(params[name].default, name)
+
+
+class TestJdwpShellifierDefaults(unittest.TestCase):
+
+	def test_break_on_defaults_to_detection_sentinel(self):
+		from secator.tasks.jdwp_shellifier import DETECT_BREAK_ON, jdwp_shellifier
+		self.assertEqual(jdwp_shellifier.opts['break_on']['default'], DETECT_BREAK_ON)
+		task = jdwp_shellifier('10.0.0.1', dry_run=True, print_cmd=False)
+		self.assertIn(f'--break-on {DETECT_BREAK_ON}', task.cmd)
+		self.assertNotIn('--cmd', task.cmd)
+
+	def test_break_on_can_be_overridden(self):
+		from secator.tasks.jdwp_shellifier import jdwp_shellifier
+		task = jdwp_shellifier('10.0.0.1', break_on='java.lang.String.indexOf', dry_run=True, print_cmd=False)
+		self.assertIn('--break-on java.lang.String.indexOf', task.cmd)
