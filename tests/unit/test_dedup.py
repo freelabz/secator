@@ -3,7 +3,7 @@ from dataclasses import fields
 
 from secator.config import CONFIG
 from secator.hooks._dedup import baseline_fields, build_baseline_index, compute_duplicate_updates
-from secator.output_types import FINDING_TYPES, Port, Subdomain, Technology, Url, Vulnerability
+from secator.output_types import FINDING_TYPES, Domain, Port, Subdomain, Technology, Url, Vulnerability
 
 
 def _vuln(uuid, status='', verified=False, **kwargs):
@@ -133,6 +133,30 @@ class TestBaselineFields(unittest.TestCase):
 			Subdomain(host='a.host', domain='host', sources=['crt']),
 			Technology(product='nginx', match='host:80', version='1.2', extra_data={'x': 1}),
 		]
+
+	def test_derived_fields_survive_projection(self):
+		"""__post_init__ derives some kept fields from others (Url.verified from confidence +
+		status_code, Domain.alive from status): their inputs must be projected too, including
+		when extra copy fields are configured."""
+		copy_fields = [*self.COPY_FIELDS, 'status_code']
+		names = baseline_fields(copy_fields)
+		samples = [
+			Url(url='http://host/low', confidence='low', status_code=200, verified=False),
+			Domain(domain='host.com', status=['clientTransferProhibited active']),
+		]
+		for i, item in enumerate(samples):
+			with self.subTest(type=item.get_name()):
+				item._uuid = f'd{i}'
+				doc = item.toDict()
+				full = type(item).load(doc)
+				projected = type(item).load({k: v for k, v in doc.items() if k in names})
+				full._uuid = projected._uuid = item._uuid
+				self.assertEqual(projected._compare_key(), full._compare_key())
+				self.assertEqual(
+					build_baseline_index([projected], copy_fields),
+					build_baseline_index([full], copy_fields),
+				)
+		self.assertFalse(Url.load({k: v for k, v in samples[0].toDict().items() if k in names}).verified)
 
 	def test_covers_every_equality_field(self):
 		names = set(baseline_fields(self.COPY_FIELDS))
