@@ -1724,6 +1724,40 @@ def _get_path_lock(path):
 	return lock
 
 
+@contextmanager
+def _file_lock(path):
+	"""Hold the layered write lock of ``path`` (see the module notes above):
+
+	1. the in-process per-path lock (greenlets / threads),
+	2. ``fcntl.flock`` on the ``<path>.lock`` sidecar (processes on this host).
+
+	The sidecar can be unlinked by ``remove_lock_sidecars`` while another process waits on it.
+	A waiter that then gets the lock on the unlinked inode would not exclude a newcomer that
+	created a fresh sidecar, so after acquiring we check that the locked inode is still the one
+	at ``<path>.lock``, and retry on the current file otherwise. That makes unlinking a sidecar
+	while holding its lock safe.
+	"""
+	lock_path = str(path) + '.lock'
+	with _get_path_lock(path):
+		while True:
+			lock_fd = open(lock_path, 'a')
+			fcntl.flock(lock_fd, fcntl.LOCK_EX)
+			try:
+				current = os.stat(lock_path)
+			except FileNotFoundError:
+				current = None
+			held = os.fstat(lock_fd.fileno())
+			if current is not None and (current.st_dev, current.st_ino) == (held.st_dev, held.st_ino):
+				break
+			fcntl.flock(lock_fd, fcntl.LOCK_UN)  # the sidecar was removed or replaced while we waited
+			lock_fd.close()
+		try:
+			yield lock_path
+		finally:
+			fcntl.flock(lock_fd, fcntl.LOCK_UN)
+			lock_fd.close()
+
+
 def _read_json(path, default):
 	"""Read a JSON file. Absent -> default(); corrupt -> raise.
 
@@ -1781,29 +1815,23 @@ def atomic_json(path, default=dict):
 	Notes:
 		- The block runs while the lock is HELD — keep it to the read-modify-write,
 		  no slow I/O / subprocess inside, or you serialize every other writer.
-		- The ``.lock`` sidecar file persists (never unlinked — unlinking races
-		  holders); this is harmless.
+		- The ``.lock`` sidecar persists until ``remove_lock_sidecars`` (run end); a
+		  later writer recreates it (see ``_file_lock``).
 		- Safe under both Celery pools (prefork processes + gevent greenlets).
 	"""
 	path = Path(path)
 	path.parent.mkdir(parents=True, exist_ok=True)
-	lock_path = str(path) + '.lock'
 	# Perf instrumentation (SECATOR_DEBUG=perf): one line per call with the lock-acquire wait and
 	# write time, to diagnose gevent-hub stalls / lock contention on the json write path under concurrency.
 	_t0 = monotonic()
 	lock_wait_ms = write_ms = 0.0
-	with _get_path_lock(path):                        # (1) in-process (greenlet/thread cooperative)
-		with open(lock_path, 'w') as lock_fd:
-			fcntl.flock(lock_fd, fcntl.LOCK_EX)       # (2) cross-process (prefork); blocking under gevent
-			lock_wait_ms = (monotonic() - _t0) * 1000
-			try:
-				data = _read_json(path, default)
-				yield data
-				_tw = monotonic()
-				_atomic_write(path, data)             # (3) atomic swap (clean exit only)
-				write_ms = (monotonic() - _tw) * 1000
-			finally:
-				fcntl.flock(lock_fd, fcntl.LOCK_UN)
+	with _file_lock(path):                            # (1) in-process + (2) cross-process (flock)
+		lock_wait_ms = (monotonic() - _t0) * 1000
+		data = _read_json(path, default)
+		yield data
+		_tw = monotonic()
+		_atomic_write(path, data)                     # (3) atomic swap (clean exit only)
+		write_ms = (monotonic() - _tw) * 1000
 	debug(
 		f'atomic_json g={threading.get_ident() % 100000} {path.name} '
 		f'lock_wait={lock_wait_ms:.1f}ms write={write_ms:.1f}ms',
@@ -1822,15 +1850,109 @@ def append_ndjson(path, line):
 	"""
 	path = Path(path)
 	path.parent.mkdir(parents=True, exist_ok=True)
-	lock_path = str(path) + '.lock'
-	with _get_path_lock(path):
-		with open(lock_path, 'w') as lock_fd:
-			fcntl.flock(lock_fd, fcntl.LOCK_EX)
+	with _file_lock(path):
+		with open(path, 'a') as f:
+			f.write(line + '\n')
+
+
+def _ndjson_uuid(raw_line):
+	"""The top-level ``_uuid`` of one raw NDJSON line, or None (blank, unparsable, no uuid)."""
+	raw_line = raw_line.strip()
+	if not raw_line:
+		return None
+	try:
+		rec = orjson.loads(raw_line)
+	except orjson.JSONDecodeError:
+		return None
+	return rec.get('_uuid') if isinstance(rec, dict) else None
+
+
+def compact_ndjson(path):
+	"""Compact an append-only NDJSON store: keep only the latest record of each ``_uuid``.
+
+	Updating a record appends a new line for the same ``_uuid`` (the last one wins on read), so
+	the file grows with stale versions. This rewrites it with each ``_uuid``'s latest record, at
+	that record's position (the order reads return). Lines without a ``_uuid`` and unparsable or
+	partial lines are kept as they are (only blank lines and superseded versions are dropped).
+
+	Holds the same lock as ``append_ndjson`` for the whole read + rewrite, so no append is lost:
+	an appender waits, then writes to the compacted file. The rewrite is atomic (temp file in the
+	same dir, fsync, ``os.replace``): on any failure the original file is left untouched.
+	Idempotent, and a no-op (no rewrite) when the file has no superseded versions.
+
+	Args:
+		path (str | Path): NDJSON file.
+
+	Returns:
+		bool: True if the file was rewritten.
+	"""
+	path = Path(path)
+	if not path.exists():
+		return False
+	with _file_lock(path):
+		latest, superseded = {}, False
+		with open(path, 'rb') as f:
+			for index, raw in enumerate(f):
+				uid = _ndjson_uuid(raw)
+				if uid is None:
+					continue
+				superseded = superseded or uid in latest
+				latest[uid] = index
+		if not superseded:
+			return False
+		fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f'.{path.name}-', suffix='.tmp')
+		try:
+			with open(path, 'rb') as f, os.fdopen(fd, 'wb') as out:
+				for index, raw in enumerate(f):
+					if not raw.strip():
+						continue
+					uid = _ndjson_uuid(raw)
+					if uid is not None and latest.get(uid) != index:
+						continue  # superseded version
+					out.write(raw if raw.endswith(b'\n') else raw + b'\n')
+				out.flush()
+				os.fsync(out.fileno())
+			os.replace(tmp, path)
+		except BaseException:
 			try:
-				with open(path, 'a') as f:
-					f.write(line + '\n')
-			finally:
-				fcntl.flock(lock_fd, fcntl.LOCK_UN)
+				os.unlink(tmp)
+			except OSError:
+				pass
+			raise
+	return True
+
+
+def remove_lock_sidecar(path):
+	"""Remove the ``<path>.lock`` sidecar of one file, if present (best-effort).
+
+	The sidecar is unlinked while its lock is held (see ``_file_lock``), so this is safe even if a
+	writer is waiting on it or arrives later: that writer just recreates the sidecar. A missing
+	sidecar or directory (e.g. a report dir that only exists on another host) is a silent no-op.
+
+	Returns:
+		bool: True if a sidecar was removed.
+	"""
+	lock_path = Path(str(path) + '.lock')
+	if not lock_path.exists():
+		return False
+	try:
+		with _file_lock(path) as held:
+			os.unlink(held)
+	except FileNotFoundError:
+		return False
+	return True
+
+
+def remove_lock_sidecars(folder):
+	"""Remove the ``*.lock`` sidecars of the files in ``folder`` (not recursive, best-effort).
+
+	Returns:
+		int: number of sidecars removed.
+	"""
+	folder = Path(folder)
+	if not folder.is_dir():
+		return 0
+	return sum(remove_lock_sidecar(Path(str(lock)[:-len('.lock')])) for lock in sorted(folder.glob('*.lock')))
 
 
 def read_json(path, default=dict):
