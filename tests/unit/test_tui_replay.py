@@ -140,3 +140,47 @@ async def _replay_decrypt_body():
 
 def test_replay_decrypts_for_display():
 	asyncio.run(_replay_decrypt_body())
+
+
+async def _replay_selectable_body():
+	from unittest import mock
+	from secator.tui.widgets import SelectableStatic
+
+	app = AITUI(None, session="ai", mode="chat")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		msgs = [
+			{"role": "user", "content": "scan the box"},
+			{"role": "assistant", "content": "Found **port 80** open.",
+			 "tool_calls": [_tc("c1", "fetch_url", {"url": "http://example.com"})]},
+			{"role": "tool", "tool_call_id": "c1", "content": "Example Domain page text"},
+		]
+		await app._replay_history(msgs)
+		await pilot.pause(0.05)
+		convo = app._convo()
+		reply = convo.query_one(SelectableStatic)            # replayed Markdown reply
+		bubble = convo.query_one(".user")
+		panel = convo.query_one(ToolCallPanel)
+		panel.toggle()
+		await pilot.pause(0.05)
+		result = panel.query_one(".tool-result")
+
+		async def drag(w, end):
+			await pilot.mouse_down(w, offset=(0, 0))
+			await pilot.hover(w, offset=end)
+			await pilot.mouse_up(w, offset=end)
+			await pilot.pause(0.05)
+
+		with mock.patch.object(app, "copy_to_clipboard") as copy, mock.patch.object(app, "notify"):
+			await drag(reply, (14, 0))
+			await drag(bubble, (6, 0))
+			await drag(result, (7, 0))
+		copied = [c.args[0] for c in copy.call_args_list]
+		assert len(copied) == 3, copied
+		assert copied[0].startswith("Found port 80")      # Markdown reply (bold markers rendered)
+		assert copied[1].startswith("› scan")
+		assert copied[2].startswith("Example")             # expanded tool card result
+
+
+def test_replayed_messages_are_selectable_and_copy_on_select():
+	asyncio.run(_replay_selectable_body())
