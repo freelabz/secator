@@ -31,7 +31,8 @@ def _regexp(pattern, value):
 	"""Custom REGEXP function: X REGEXP Y -> regexp(Y, X), so pattern=Y, value=X."""
 	if value is None or pattern is None:
 		return False
-	pattern = str(pattern).lstrip('*')
+	from secator.query._base import strip_leading_glob
+	pattern = strip_leading_glob(pattern)
 	try:
 		return re.search(pattern, str(value)) is not None
 	except re.error as exc:
