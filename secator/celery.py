@@ -6,7 +6,7 @@ import threading
 
 from time import time
 
-from celery import Celery, chord
+from celery import Celery, chord, signals
 from celery.canvas import signature
 from celery.app import trace
 
@@ -194,18 +194,14 @@ def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, valid
 	runner.run()
 
 
-def _expire_worker_loss_key(backend, key):
-	"""Best-effort TTL on a worker-loss counter key so they don't accumulate forever.
-
-	Tied to ``result_expires`` (the lifetime of the task's own result). Not all result
-	backends implement ``expire``; ignore if unsupported.
-	"""
+def _expire_state_key(backend, key):
+	"""Best-effort TTL (``result_expires``) on a result-backend state key."""
 	try:
 		backend.expire(key, CONFIG.celery.result_expires)
 	except (AttributeError, NotImplementedError):
 		pass  # backend doesn't support TTL — best-effort, ignore
 	except Exception as e:  # noqa: BLE001
-		debug(f'worker-loss expire failed for {key}: {e}', sub='celery.state')
+		debug(f'expire failed for {key}: {e}', sub='celery.state')
 
 
 def bump_worker_loss_count(task_id):
@@ -229,7 +225,7 @@ def bump_worker_loss_count(task_id):
 	# Preferred: atomic incr (Redis, Memcached) — race-free.
 	try:
 		count = backend.incr(key)
-		_expire_worker_loss_key(backend, key)
+		_expire_state_key(backend, key)
 		return count
 	except NotImplementedError:
 		pass  # Backend has no atomic counter; fall back to get/set below.
@@ -244,7 +240,7 @@ def bump_worker_loss_count(task_id):
 		raw = backend.get(key)
 		count = (int(raw) if raw else 0) + 1
 		backend.set(key, str(count))
-		_expire_worker_loss_key(backend, key)
+		_expire_state_key(backend, key)
 		return count
 	except Exception as e:
 		debug(f'worker-loss get/set failed for {task_id}: {e}', sub='celery.state')
@@ -486,6 +482,11 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	Returns:
 		list: Final results
 	"""
+	# Skip if the run was stopped and this runner already completed as REVOKED (on_task_revoked)
+	if not claim_finalizer(mark_runner_completed.request.id):
+		debug(f'Runner {runner.unique_name} was already completed on revoke, skipping', sub='celery')
+		return []
+
 	# Log mark_completed start
 	start_time = time()
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
@@ -508,6 +509,124 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 
 	# Topology-only return: the run's results live in the store, not the payload.
 	return []
+
+
+# ------------------------------- #
+# Finalize revoked runners        #
+# ------------------------------- #
+# A workflow or scan run is a chain whose last link is ``mark_runner_completed``. When the run is
+# stopped, its tasks are revoked and that link never completes the runner, so its on_end /
+# on_run_end hooks never fire and the store keeps it RUNNING. A ``task_revoked`` handler finds the
+# pending finalizer(s) of the revoked task's run and completes them with status REVOKED.
+#
+# A stop revokes the run's own result id, which is the id of its final ``mark_runner_completed``
+# link. That tells a stopped run (finalize) from a single revoked task (the run goes on).
+FINALIZER_TASK = 'secator.celery.mark_runner_completed'
+_claimed_finalizers = set()
+
+
+def _iter_signatures(sig):
+	"""Yield a signature and every signature nested in it (chain links, chord bodies, callbacks)."""
+	if not sig:
+		return
+	sig = sig if isinstance(sig, dict) else dict(sig)
+	yield sig
+	options = sig.get('options') or {}
+	for key in ('chain', 'link'):
+		for child in options.get(key) or []:
+			yield from _iter_signatures(child)
+	kwargs = sig.get('kwargs') or {}
+	for key in ('tasks', 'header', 'body'):
+		value = kwargs.get(key)
+		for child in (value if isinstance(value, (list, tuple)) else [value]):
+			yield from _iter_signatures(child)
+
+
+def _signature_id(sig):
+	return (sig.get('options') or {}).get('task_id')
+
+
+def pending_finalizers(request):
+	"""``mark_runner_completed`` signatures the request's run still had to execute, in run order.
+
+	They are found in the remaining chain links (stored next-link-last), the chord body of a
+	parallel group, and the callbacks of the revoked request.
+	"""
+	sigs = []
+	for sig in reversed(getattr(request, 'chain', None) or []):
+		sigs.extend(_iter_signatures(sig))
+	sigs.extend(_iter_signatures(getattr(request, 'chord', None)))
+	for sig in getattr(request, 'callbacks', None) or []:
+		sigs.extend(_iter_signatures(sig))
+	return [sig for sig in sigs if sig.get('task') == FINALIZER_TASK]
+
+
+def claim_finalizer(task_id):
+	"""Claim the right to run the finalizer ``task_id``: True only the first time.
+
+	Atomic across workers when the result backend has an atomic ``incr`` (Redis, Memcached);
+	otherwise per worker process. Both the normal ``mark_runner_completed`` run and a revoke
+	claim it, so a runner is never completed twice.
+	"""
+	if not task_id:
+		return True
+	backend = app.backend
+	key = backend.get_key_for_task(f'finalizer-{task_id}')
+	try:
+		claimed = backend.incr(key) == 1
+		_expire_state_key(backend, key)
+		return claimed
+	except NotImplementedError:
+		pass
+	except Exception as e:  # noqa: BLE001
+		debug(f'finalizer claim failed for {task_id}: {e}', sub='celery.state')
+	if task_id in _claimed_finalizers:
+		return False
+	_claimed_finalizers.add(task_id)
+	return True
+
+
+def finalize_revoked(sig):
+	"""Complete the runner of a pending ``mark_runner_completed`` signature, with status REVOKED.
+
+	Returns:
+		bool: True if the runner was completed here.
+	"""
+	from secator.runners import Runner
+	args = list(sig.get('args') or [])
+	kwargs = dict(sig.get('kwargs') or {})
+	runner = kwargs.get('runner') or next((arg for arg in args if isinstance(arg, Runner)), None)
+	task_id = _signature_id(sig)
+	if runner is None or not claim_finalizer(task_id):
+		return False
+	if IN_WORKER:
+		console.print(Info(message=f'Runner {runner.unique_name} was revoked, running mark_completed'))
+	runner.enable_hooks = kwargs.get('enable_hooks', True)
+	runner.revoked = True
+	runner.mark_completed()
+	return True
+
+
+def on_task_revoked(request=None, **kwargs):
+	"""``task_revoked`` handler: complete the runners of a stopped run as REVOKED."""
+	if request is None:
+		return
+	if getattr(request, 'task', None) == FINALIZER_TASK:
+		# The finalizer itself was revoked (it was queued when the run was stopped).
+		finalize_revoked({'args': request.args, 'kwargs': request.kwargs, 'options': {'task_id': request.id}})
+		return
+	from celery.worker.state import revoked as revoked_ids
+	pending = pending_finalizers(request)
+	stopped = [i for i, sig in enumerate(pending) if _signature_id(sig) in revoked_ids]
+	debug(
+		f'task {request.id} revoked: {len(pending)} pending finalizer(s), stopped run: {bool(stopped)}',
+		sub='celery')
+	if not stopped:
+		return  # only this task was revoked, not its run: the run goes on
+	# Finalizers run inner-first: those before the revoked one complete runners nested in the
+	# stopped run (e.g. the workflows of a scan).
+	for sig in pending[:stopped[-1] + 1]:
+		finalize_revoked(sig)
 
 
 # --------------#
@@ -669,3 +788,7 @@ def break_task(task, task_opts):
 	if IN_WORKER:
 		console.print(Info(message=f'Task {task.unique_name} chord built with {len(sigs)} chunks, returning workflow'))
 	return workflow
+
+
+if IN_WORKER:
+	signals.task_revoked.connect(on_task_revoked)

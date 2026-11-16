@@ -1383,7 +1383,9 @@ class Runner:
 
 		# Use celery_ids_map as the source of truth: it includes both statically registered
 		# task IDs (via add_subtask) and dynamically discovered chunk IDs (via iter_results).
-		for task_id, data in list(self.celery_ids_map.items()):
+		# Newest first: the run's own result id (its final mark_runner_completed link) is registered last,
+		# so revoking it first lets a worker see the run as stopped when its children's revokes arrive.
+		for task_id, data in reversed(list(self.celery_ids_map.items())):
 			name = data.get('full_name')
 			revoke_task(task_id, name)
 
