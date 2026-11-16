@@ -28,6 +28,42 @@ def _file_has_exporter(path):
 		return False
 
 
+def _file_has_ai_tool(path):
+	"""Check if a Python file defines an external AI tool (a BaseTool subclass)."""
+	try:
+		return '(BaseTool)' in path.read_text()
+	except Exception:
+		return False
+
+
+def _ai_tool_dirs():
+	"""Directories scanned for external AI tools.
+
+	Always the templates dir (parity with external tasks/drivers/exporters). A
+	colon-separated ``SECATOR_AI_TOOLS_DIRS`` env var adds more — the groundwork for an
+	operator (or an unpacked override bundle) to point secator at a directory of extra
+	tools without dropping them in the templates dir. Non-existent dirs are skipped.
+	"""
+	import os
+	dirs = []
+	if CONFIG.dirs.templates:
+		dirs.append(Path(CONFIG.dirs.templates))
+	for extra in (os.environ.get('SECATOR_AI_TOOLS_DIRS', '') or '').split(os.pathsep):
+		extra = extra.strip()
+		if extra:
+			dirs.append(Path(extra))
+	seen, out = set(), []
+	for d in dirs:
+		try:
+			rd = d.resolve()
+		except Exception:
+			continue
+		if rd not in seen and d.is_dir():
+			seen.add(rd)
+			out.append(d)
+	return out
+
+
 _warned_duplicate_names = set()
 
 
@@ -184,8 +220,8 @@ def discover_external_tasks():
 	prev_state = sys.dont_write_bytecode
 	sys.dont_write_bytecode = True
 	for path in CONFIG.dirs.templates.glob('**/*.py'):
-		if _file_has_hooks(path) or _file_has_exporter(path):
-			continue  # Skip driver/exporter files
+		if _file_has_hooks(path) or _file_has_exporter(path) or _file_has_ai_tool(path):
+			continue  # Skip driver/exporter/ai-tool files
 		try:
 			task_name = path.stem
 			module_name = f'secator.tasks.{task_name}'
@@ -319,6 +355,61 @@ def discover_external_exporters():
 			console.print(f'[bold red]Could not load external exporter from {path.name}. Reason: {str(e)}.[/] ({path})')
 	sys.dont_write_bytecode = prev_state
 	return output
+
+
+@cache
+def discover_ai_tools():
+	"""Find and register external AI tools (a ``*.py`` defining a BaseTool subclass).
+
+	Mirrors :func:`discover_external_tasks`: any file under an AI-tools dir (the templates
+	dir, plus ``SECATOR_AI_TOOLS_DIRS``) that defines a ``secator.ai.tools.BaseTool``
+	subclass is imported and each subclass registered via ``register_ai_tool``, making the
+	tool callable by the AI agent with no core edit — the same drop-in model as custom
+	tasks. ``@cache`` → runs once. Fail-safe per file: a bad import, bad spec or invalid
+	tool is skipped with a clear message, never crashing startup.
+	"""
+	from secator.definitions import ADDONS_ENABLED
+	if not ADDONS_ENABLED.get('ai'):
+		return []
+	from secator.ai.tools import register_ai_tool
+	from secator.ai.tools.base import BaseTool
+	registered = []
+	seen_files = set()
+	prev_state = sys.dont_write_bytecode
+	sys.dont_write_bytecode = True
+	for base_dir in _ai_tool_dirs():
+		for path in base_dir.glob('**/*.py'):
+			rp = path.resolve()
+			if rp in seen_files or not _file_has_ai_tool(path):
+				continue
+			seen_files.add(rp)
+			try:
+				module_name = f'secator.ai.tools_ext.{path.stem}'
+				spec = importlib.util.spec_from_file_location(module_name, path)
+				if not spec:
+					console.print(f'[bold red]Could not load external AI tool {path.name}: invalid import spec.[/] ({path})')
+					continue
+				module = importlib.util.module_from_spec(spec)
+				sys.modules[module_name] = module
+				spec.loader.exec_module(module)
+				found = False
+				for attr_name in dir(module):
+					attr = getattr(module, attr_name)
+					if inspect.isclass(attr) and issubclass(attr, BaseTool) and attr is not BaseTool:
+						# Only register classes DEFINED in this file (not an imported BaseTool kin).
+						if getattr(attr, '__module__', '') != module_name:
+							continue
+						tool = register_ai_tool(attr)
+						if tool is not None:
+							registered.append(tool.name)
+							found = True
+							debug(f'[bold green]Successfully loaded external AI tool "{tool.name}"[/] ({path})', sub='loader')
+				if not found:
+					console.print(f'[bold orange1]Could not load external AI tool from {path.name}: no valid BaseTool subclass.[/] ({path})')  # noqa: E501
+			except Exception as e:
+				console.print(f'[bold red]Could not load external AI tool from {path.name}. Reason: {str(e)}.[/] ({path})')
+	sys.dont_write_bytecode = prev_state
+	return registered
 
 
 @cache
