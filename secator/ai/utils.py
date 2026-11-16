@@ -823,6 +823,64 @@ def _estimate_usage(model: str, messages: List[Dict], content: str, tool_calls) 
 	}
 
 
+_CACHE_CONTROL = {"type": "ephemeral"}
+
+
+def _mark_content_cached(msg: Dict) -> bool:
+	"""Add a prompt-cache breakpoint to a message's content (cache_control lives on a content
+	block, per Anthropic/litellm). A string content is converted to a single text block carrying
+	cache_control; an existing list gets it on the last text block. Returns True if a breakpoint
+	was placed (skips tool-call-only / empty messages)."""
+	c = msg.get("content")
+	if isinstance(c, str) and c.strip():
+		msg["content"] = [{"type": "text", "text": c, "cache_control": dict(_CACHE_CONTROL)}]
+		return True
+	if isinstance(c, list):
+		for blk in reversed(c):
+			if isinstance(blk, dict) and blk.get("type") == "text":
+				blk["cache_control"] = dict(_CACHE_CONTROL)
+				return True
+	return False
+
+
+def _inject_cache_control(messages: List[Dict], tools, model: str):
+	"""Mark prompt-cache breakpoints so repeat turns read a cached prefix instead of re-billing
+	it: the stable prefix (system prompt + tool definitions) and a rolling breakpoint on the last
+	message (the conversation is append-only, so the prior prefix stays cached). Returns the
+	(possibly new) tools list.
+
+	Gated two ways and a no-op otherwise, so a multi-provider setup is safe:
+	- the model must support prompt caching (litellm's unified ``supports_prompt_caching`` —
+	  e.g. GLM-via-OpenRouter returns False and is skipped), AND
+	- it must be an Anthropic-family model, whose NATIVE mechanism is explicit ``cache_control``.
+	  OpenAI/DeepSeek cache automatically (no markers needed, may reject them) so we don't mark
+	  those; Gemini/others can be added here later.
+
+	``messages`` are the per-call COPIES ``call_llm`` builds, so this never mutates stored
+	history. litellm forwards the markers to the provider's cache API and ignores them elsewhere.
+	"""
+	m = (model or "").lower()
+	if "claude" not in m and "anthropic" not in m:
+		return tools
+	try:
+		from litellm.utils import supports_prompt_caching
+		if not supports_prompt_caching(model=model):
+			return tools
+	except Exception:  # noqa: BLE001 - caching is best-effort; never block the call
+		return tools
+	for msg in messages:  # system prompt (stable, large)
+		if msg.get("role") == "system":
+			_mark_content_cached(msg)
+			break
+	for msg in reversed(messages):  # rolling breakpoint at the end of the conversation
+		if _mark_content_cached(msg):
+			break
+	if tools:  # tool definitions: marking the LAST tool caches the whole tools block
+		tools = list(tools)
+		tools[-1] = {**tools[-1], "cache_control": dict(_CACHE_CONTROL)}
+	return tools
+
+
 def call_llm(
 	messages: List[Dict],
 	model: str,
@@ -874,6 +932,13 @@ def call_llm(
 	# Sanitize orphan tool_use blocks (Anthropic requires every tool_use to have
 	# a matching tool_result). Safety net in case the caller bypassed ChatHistory.
 	_repair_orphan_tool_uses(kwargs["messages"])
+
+	# Prompt caching: mark cache breakpoints on the stable prefix (system + tools) + a rolling
+	# point so repeat turns read the cached prefix. No-op for models without it (see
+	# _inject_cache_control gating). Runs on the per-call copies, after all repair.
+	_marked_tools = _inject_cache_control(kwargs["messages"], kwargs.get("tools"), model)
+	if "tools" in kwargs:
+		kwargs["tools"] = _marked_tools
 
 	# 400s are non-transient (malformed request, context_length_exceeded, ...) —
 	# handled separately below and NOT in this transient-retry tuple.

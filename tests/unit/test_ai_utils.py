@@ -919,3 +919,36 @@ class TestOrphanToolBlockRepair(unittest.TestCase):
         ]
         _repair_orphan_tool_uses(m)
         self.assertEqual(self._roles(m), ["system", "user", "assistant", "tool"])
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestPromptCacheInjection(unittest.TestCase):
+    """cache_control breakpoints are injected only for Anthropic-family models that support
+    prompt caching; other providers (auto-caching OpenAI, unsupported GLM) are left untouched."""
+
+    def _msgs(self):
+        return [
+            {"role": "system", "content": "SYS"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "tool_calls": [
+                {"id": "1", "type": "function", "function": {"name": "q", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "1", "name": "q", "content": "res"},
+        ]
+
+    def test_anthropic_model_gets_breakpoints(self):
+        from secator.ai.utils import _inject_cache_control
+        msgs = self._msgs()
+        tools = [{"type": "function", "function": {"name": "a"}},
+                 {"type": "function", "function": {"name": "b"}}]
+        tools = _inject_cache_control(msgs, tools, "claude-sonnet-4-6")
+        self.assertIsInstance(msgs[0]["content"], list)                       # system -> blocks
+        self.assertEqual(msgs[0]["content"][0]["cache_control"], {"type": "ephemeral"})
+        self.assertEqual(tools[-1]["cache_control"], {"type": "ephemeral"})   # last tool marked
+
+    def test_non_anthropic_model_untouched(self):
+        from secator.ai.utils import _inject_cache_control
+        for model in ("gpt-4o", "openrouter/z-ai/glm-4.6"):
+            msgs = self._msgs()
+            tools = _inject_cache_control(msgs, [{"type": "function", "function": {"name": "a"}}], model)
+            self.assertIsInstance(msgs[0]["content"], str)                    # unchanged
+            self.assertNotIn("cache_control", tools[-1])
