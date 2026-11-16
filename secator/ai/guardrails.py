@@ -241,7 +241,9 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 	norm_ip = _normalize_ip(value)
 	canon = str(norm_ip) if norm_ip is not None else None
 	for pattern in patterns:
-		if pattern == "*":
+		if pattern == "*" or pattern == value:
+			# Literal equality first: an approved `[::1]:445` must match itself even
+			# though fnmatch reads its brackets as a character class.
 			return True
 		if norm_ip is not None:
 			in_pat = _ip_in_pattern(norm_ip, pattern)
@@ -367,7 +369,119 @@ _NETWORK_CMDS = frozenset({
 	'nikto', 'sqlmap', 'gobuster', 'feroxbuster', 'ffuf', 'dirb', 'dirsearch', 'wfuzz', 'hydra',
 	'medusa', 'wpscan', 'amass', 'subfinder', 'openssl', 'redis-cli', 'mysql', 'psql', 'mongosh',
 	'smbclient', 'crackmapexec', 'nxc', 'impacket-smbclient', 'evil-winrm', 'kubectl', 'aws',
+	'rpcclient', 'smbmap', 'smbget', 'smbcacls', 'nmblookup', 'enum4linux', 'enum4linux-ng',
 })
+
+# Host label shape (RFC 1123-ish, plus '_' seen in NetBIOS/AD names). Used only for the
+# structurally-unambiguous forms below (UNC, scheme://, user@host), where the prefix itself
+# marks the token as a host — so single-label names like `localhost` / `fileserver` count.
+_HOST_LABEL_RE = re.compile(r'^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?(?:\.[A-Za-z0-9_-]+)*\.?$')
+_SCHEME_RE = re.compile(r'^([A-Za-z][A-Za-z0-9+.-]*)://')
+
+
+def _canonical_authority(authority: str) -> Optional[str]:
+	"""Canonical ``host``/``host:port``/``[v6]``/``[v6]:port`` of a URL/UNC authority, else None.
+
+	Userinfo (``user:pass@``) is dropped. A bare IPv6 literal (``::1``) is kept bare.
+	"""
+	authority = authority.rsplit('@', 1)[-1]
+	if not authority:
+		return None
+	if authority.startswith('['):
+		end = authority.find(']')
+		if end == -1:
+			return None
+		inner, rest = authority[1:end], authority[end + 1:]
+		try:
+			ipaddress.IPv6Address(inner.split('%', 1)[0])
+		except ValueError:
+			return None
+		if rest and not re.fullmatch(r':\d{1,5}', rest):
+			return None
+		return f'[{inner}]{rest}'
+	if authority.count(':') > 1:  # bare IPv6 literal
+		try:
+			ipaddress.IPv6Address(authority.split('%', 1)[0])
+			return authority
+		except ValueError:
+			return None
+	host, sep, port = authority.partition(':')
+	if sep and not re.fullmatch(r'\d{1,5}', port):
+		return None
+	if not _HOST_LABEL_RE.match(host):
+		return None
+	return authority
+
+
+def _authority_form_host(value: str) -> Optional[str]:
+	"""Host of a UNC / non-HTTP ``scheme://`` token, or None if ``value`` is not one.
+
+	``//host``, ``//host/share``, ``\\\\host\\share``, ``smb://user@host:445/share`` all
+	yield the canonical authority (``host`` / ``host:445``). HTTP(S) URLs are NOT handled
+	here — they keep their own URL handling (path-scoped rules, host/port split). Returns
+	'' for an authority-form token with no valid host (``file:///etc/passwd``).
+	"""
+	v = value.strip()
+	if v.startswith('\\\\'):
+		# Collapse backslash runs: an unquoted `\\\\host\\share` reaches us still shell-escaped.
+		rest = re.sub(r'\\+', '/', v.lstrip('\\'))
+	elif v.startswith('//') and not v.startswith('///'):
+		rest = v[2:]
+	else:
+		m = _SCHEME_RE.match(v)
+		if not m or m.group(1).lower() in ('http', 'https'):
+			return None
+		rest = v[m.end():]
+	authority = re.split(r'[/?#]', rest, maxsplit=1)[0]
+	return _canonical_authority(authority) or ''
+
+
+def normalize_target(value: str) -> str:
+	"""THE canonical form of a target value — shared by extraction, the approval prompt,
+	the rules built from the user's choice, and the permission check, so the value a
+	user approves is byte-for-byte the value that is later checked.
+
+	UNC (``//host/share``, ``\\\\host\\share``) and non-HTTP scheme URLs
+	(``smb://host/share``) collapse to their ``host[:port]``. Everything else (hosts,
+	IPs, ``host:port``, HTTP(S) URLs, CIDRs) is returned stripped but otherwise unchanged.
+	"""
+	v = (value or '').strip()
+	host = _authority_form_host(v)
+	return host if host else v
+
+
+def _is_ip_literal(value: str) -> bool:
+	"""True for an IPv4/IPv6 literal, optionally bracketed and/or with a ``:port``."""
+	v = value
+	if v.startswith('['):
+		v = v[1:].split(']', 1)[0]
+	elif v.count(':') == 1:
+		v = v.split(':', 1)[0]
+	try:
+		ipaddress.ip_address(v.split('%', 1)[0])
+		return True
+	except ValueError:
+		return False
+
+
+def _structural_target(arg: str, is_network_cmd: bool) -> Optional[str]:
+	"""Target carried by a UNC / non-HTTP scheme argument, or None.
+
+	For a network command (smbclient, ssh, ...) any valid host counts, single-label
+	included (``smbclient -L //localhost``). For other commands only an unambiguous
+	network host does (an IP, ``localhost``, or a dotted name), so ``cat //etc/passwd``
+	stays a path. Shared by target extraction and path detection so a token is never
+	both a target and a path.
+	"""
+	host = _authority_form_host(arg)
+	if not host:
+		return None
+	if is_network_cmd:
+		return host
+	bare = _host_of(host) or host
+	if _is_ip_literal(host) or bare.lower() == 'localhost' or '.' in bare.strip('.'):
+		return host
+	return None
 
 
 def _cmd_basename(cmd: str) -> str:
@@ -415,6 +529,12 @@ def extract_command_targets(command: str) -> List[str]:
 		# Skip flags
 		if arg.startswith('-'):
 			return
+		# UNC / non-HTTP scheme forms (`//host/share`, `\\\\host\\share`, `smb://host`):
+		# the target is the authority, never the leading-'/' path pathlib would make of it.
+		structural = _structural_target(arg, is_network_cmd)
+		if structural:
+			_add_target(structural)
+			return
 		# Check for URLs first (before file path/extension checks — URLs can have .sh etc.)
 		url_match = URL_PATTERN.search(arg)
 		if url_match:
@@ -449,14 +569,19 @@ def extract_command_targets(command: str) -> List[str]:
 		# `scp f admin@10.0.0.9:/tmp/` are scoped on the host instead of dropped whole.
 		if '@' in arg and '://' not in arg:
 			host_candidate = arg.rsplit('@', 1)[1]
-			if ':' in host_candidate and '/' in host_candidate.split(':', 1)[1]:
-				host_candidate = host_candidate.split(':', 1)[0]
+			head, sep, tail = host_candidate.partition(':')
+			if sep and not head.startswith('[') and not re.fullmatch(r'\d{1,5}', tail):
+				host_candidate = head  # `host:/remote/path` (keep a numeric `host:port`)
 			if _is_network_target(host_candidate):
 				arg = host_candidate
+			elif is_network_cmd and _canonical_authority(host_candidate):
+				# `ssh root@localhost`: the '@' marks a host even without a dot.
+				_add_target(_canonical_authority(host_candidate))
+				return
 		# Check if it's a network target (IP, host, host:port)
 		if _is_network_target(arg):
 			# For hosts (not IPs), verify DNS resolution
-			if not PII_PATTERNS["ipv4"].fullmatch(arg.split(':')[0]):
+			if not _is_ip_literal(arg):
 				host_part = arg.rsplit(':', 1)[0] if ':' in arg else arg
 				if not _resolves(host_part):
 					return
@@ -776,7 +901,8 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 					_add_path(dest, "write")
 					i += 1
 					continue
-			if not arg.startswith('-') and _is_file_path(arg):
+			is_structural = _structural_target(arg, cmd_base in _NETWORK_CMDS)
+			if not arg.startswith('-') and _is_file_path(arg) and not is_structural:
 				_add_path(arg, base_access)
 			i += 1
 
@@ -845,6 +971,8 @@ def build_target_choices(target: str) -> List[Dict]:
 	"""
 	from urllib.parse import urlparse
 
+	# Build rules from the canonical form the check will look up (see normalize_target).
+	target = normalize_target(target)
 	# Detect if target is a URL and extract components
 	is_url = target.startswith(('http://', 'https://'))
 	if is_url:
@@ -1231,6 +1359,10 @@ class PermissionEngine:
 		For target rules, URL values are also checked by their host and host:port
 		components so that approving 'example.com:8080' covers all URLs under it.
 		"""
+		# Targets are checked in the SAME canonical form the prompt showed and the
+		# approval rules were built from (see normalize_target).
+		if rule_type == "target":
+			value = normalize_target(value)
 		# Build list of values to check (original + URL components for targets)
 		values_to_check = [value]
 		if rule_type == "target" and value.startswith(('http://', 'https://')):
