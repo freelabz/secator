@@ -674,6 +674,50 @@ class TestExploitAttempt(unittest.TestCase):
 		self.assertEqual(v['status'], 'EXPLOITED')
 		self.assertIn('new win', v['poc'])
 
+	# --- monitor mode: mark_vuln_exploited only re-opens a FIXED vuln by replaying its recorded PoC ---
+	def _dispatch_monitor(self, e, action):
+		ctx = self._ctx(e)
+		ctx.mode = 'monitor'
+		out = list(dispatch_action(action, ctx))
+		e.persist([o for o in out if isinstance(o, ExploitAttempt)])
+		return out
+
+	def _fixed_after_success(self, poc):
+		"""A vuln exploited with ``poc`` (outside monitor), then marked FIXED."""
+		e = FakeEngine([dict(self.VULN)])
+		self._dispatch(e, {'action': 'mark_vuln_exploited', '_uuid': 'v1', 'poc': poc})
+		self._dispatch(e, {'action': 'mark_vuln_fixed', '_uuid': 'v1', 'reason': 'patched'})
+		e.docs[0]['extra_data']['fixed_at'] -= 10  # the replay lands strictly after the fix
+		return e
+
+	def test_monitor_reopens_fixed_by_replaying_recorded_poc(self):
+		e = self._fixed_after_success('curl -s http://x/?id=1 -> version 5.1')
+		out = self._dispatch_monitor(e, {'action': 'mark_vuln_exploited', '_uuid': 'v1',
+		                                 'poc': 'curl -s http://x/?id=1 -> version 5.1'})
+		self.assertFalse([o for o in out if isinstance(o, Error)], out)
+		self.assertEqual(e.search({'_uuid': 'v1'})[0]['status'], 'EXPLOITED')
+
+	def test_monitor_refuses_exploiting_a_vuln_not_fixed(self):
+		e = FakeEngine([dict(self.VULN)])
+		out = self._dispatch_monitor(e, {'action': 'mark_vuln_exploited', '_uuid': 'v1', 'poc': 'new exploit'})
+		self.assertTrue(any(isinstance(o, Error) and 'only re-opens a vulnerability marked FIXED' in o.message
+		                    for o in out))
+		self.assertFalse([o for o in out if isinstance(o, ExploitAttempt)])  # nothing recorded
+		self.assertNotEqual(e.search({'_uuid': 'v1'})[0].get('status'), 'EXPLOITED')
+
+	def test_monitor_refuses_reopen_with_a_different_poc(self):
+		e = self._fixed_after_success('curl -s http://x/?id=1 -> version 5.1')
+		out = self._dispatch_monitor(e, {'action': 'mark_vuln_exploited', '_uuid': 'v1', 'poc': 'a new payload'})
+		self.assertTrue(any(isinstance(o, Error) and 'recorded `poc` unchanged' in o.message for o in out))
+		self.assertEqual(e.search({'_uuid': 'v1'})[0]['status'], 'FIXED')
+
+	def test_monitor_refuses_reopen_without_a_recorded_success(self):
+		e = FakeEngine([dict(self.VULN)])
+		self._dispatch(e, {'action': 'mark_vuln_fixed', '_uuid': 'v1', 'reason': 'patched'})
+		out = self._dispatch_monitor(e, {'action': 'mark_vuln_exploited', '_uuid': 'v1', 'poc': 'anything'})
+		self.assertTrue(any(isinstance(o, Error) for o in out))
+		self.assertEqual(e.search({'_uuid': 'v1'})[0]['status'], 'FIXED')
+
 	def test_fixed_duplicate_not_reopened_by_failed_retest(self):
 		# mark_vuln_fixed on a DUPLICATE occurrence still sets the boundary for the identity.
 		ident = {'_type': 'vulnerability', 'name': 'SQLi', 'id': 'CVE-1', 'matched_at': 'http://x'}

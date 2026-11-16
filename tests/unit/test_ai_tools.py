@@ -168,15 +168,16 @@ class TestBuildToolSchemas(unittest.TestCase):
 	def test_monitor_mode_tool_surface(self):
 		"""Monitor reads, re-probes with shell, records outcomes with add_note, retires a gone
 		finding (mark_vuln_false_positive) or closes a remediated exploited vuln (mark_vuln_fixed),
-		and fixes metadata (update_finding) — but never runs tasks/workflows, adds findings, marks
-		exploited, delegates or self-escalates."""
+		fixes metadata (update_finding), and may re-open a FIXED vuln by replaying its recorded PoC
+		(mark_vuln_exploited, restricted by the tool in monitor mode) — but never runs
+		tasks/workflows, adds findings, delegates or self-escalates."""
 		from secator.ai.tools import build_tool_schemas
 		from secator.ai.interactivity import CLIBackend
 		names = {s["function"]["name"] for s in build_tool_schemas("monitor", backend=CLIBackend())}
 		for present in ["query_workspace", "run_shell", "mark_vuln_false_positive",
-		                "mark_vuln_fixed", "update_finding", "add_note", "stop"]:
+		                "mark_vuln_fixed", "mark_vuln_exploited", "update_finding", "add_note", "stop"]:
 			self.assertIn(present, names)
-		for absent in ["run_task", "run_workflow", "add_finding", "mark_vuln_exploited",
+		for absent in ["run_task", "run_workflow", "add_finding",
 		               "mark_vuln_exploit_failed", "run_subagent", "change_mode"]:
 			self.assertNotIn(absent, names)
 

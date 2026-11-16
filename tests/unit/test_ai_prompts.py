@@ -291,16 +291,28 @@ class TestPrompts(unittest.TestCase):
 	def test_monitor_mode_config_has_correct_allowed_actions(self):
 		"""Monitor re-verifies the EXISTING surface: it reads, re-probes with shell, records the
 		outcome with add_note, corrects a changed finding (update_finding), retires a gone one
-		(mark_vuln_false_positive) or closes a remediated exploited vuln (mark_vuln_fixed) — but it
-		never runs tasks/workflows, adds findings, exploits, or self-escalates."""
+		(mark_vuln_false_positive) or closes a remediated exploited vuln (mark_vuln_fixed), and may
+		re-open a FIXED vuln by replaying its recorded PoC (mark_vuln_exploited, restricted by the
+		tool in monitor mode) — but it never runs tasks/workflows, adds findings, or self-escalates."""
 		actions = MODES["monitor"]["allowed_actions"]
 		self.assertEqual(
 			set(actions),
-			{"query", "shell", "mark_vuln_false_positive", "mark_vuln_fixed",
+			{"query", "shell", "mark_vuln_false_positive", "mark_vuln_fixed", "mark_vuln_exploited",
 			 "update_finding", "add_note", "stop"})
-		for a in ["task", "workflow", "add_finding", "mark_vuln_exploited",
+		for a in ["task", "workflow", "add_finding",
 		          "mark_vuln_exploit_failed", "subagent", "change_mode"]:
 			self.assertNotIn(a, actions)
+
+	def test_monitor_prompt_replay_and_reopen_guardrails(self):
+		"""Monitor may replay a recorded PoC and re-open a FIXED vuln, but only under the stated
+		guardrails: the same request against the same target, read-only proof, never a destructive
+		replay, and a FIXED vuln is re-opened only by such a replay (never by a weaker signal)."""
+		prompt = get_system_prompt("monitor")
+		for phrase in ("the SAME request, against the SAME target", "ONLY when it is read-only proof",
+		               "NEVER replay a PoC that writes or uploads data",
+		               "ONLY when replaying its recorded successful PoC",
+		               "never changes its status", "mark_vuln_exploited is ONLY for re-opening a FIXED vulnerability"):
+			self.assertIn(phrase, prompt)
 
 	def test_monitor_mode_has_no_iteration_override_or_cap(self):
 		# Monitor relies on the default iteration budget and the model calling `stop` — it declares
