@@ -77,6 +77,17 @@ jobs:
         # Latest stable Python only.
         python-version: ["3.x"]
         os: [ubuntu-latest]
+    # MongoDB server for the mongodb driver end-to-end test (tests/integration/test_mongodb.py).
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1}).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -149,7 +160,10 @@ jobs:
 
     - name: Run integration tests
       run: |
-        secator test integration --test test_celery,test_worker,test_tasks
+        secator test integration --test test_celery,test_worker,test_tasks,test_mongodb
+      env:
+        SECATOR_ADDONS_MONGODB_URL: mongodb://localhost:27017
+        SECATOR_TEST_MONGODB: '1'  # fail, rather than skip, if the mongo service is unreachable
 
     - name: Archive code coverage results
       uses: actions/upload-artifact@v4

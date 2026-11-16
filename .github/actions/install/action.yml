@@ -30,9 +30,11 @@ runs:
       restore-keys: |
         pip-${{ runner.os }}-py${{ inputs.python-version }}-
 
+  # The mongodb extra (pymongo) is installed so the mongodb driver/backend tests run instead
+  # of skipping (the dev extra brings mongomock for the unit ones).
   - name: Install secator with pipx
     shell: bash
-    run: pipx install -e .[dev,ai]
+    run: pipx install -e .[dev,ai,mongodb]
 
   - name: Add secator to $PATH
     shell: bash

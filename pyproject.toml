@@ -76,6 +76,7 @@ dev = [
   'pytest < 9',
   'watchdog < 3',
   'pillow < 13',
+  'mongomock < 5',
 ]
 build = [
   'hatch < 2',
