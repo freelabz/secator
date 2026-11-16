@@ -362,6 +362,11 @@ class DiscordAddon(StrictModel):
 	min_severity: str = 'high'
 
 
+class CeleryEventsAddon(StrictModel):
+	run_end_task: str = ''
+	queue: str = ''
+
+
 class ApiAddon(StrictModel):
 	enabled: bool = False
 	url: str = 'https://app.secator.cloud/api'
@@ -392,6 +397,7 @@ class Addons(StrictModel):
 	sqlite: SqliteAddon = SqliteAddon()
 	vulners: VulnersAddon = VulnersAddon()
 	discord: DiscordAddon = DiscordAddon()
+	celery_events: CeleryEventsAddon = CeleryEventsAddon()
 	api: ApiAddon = ApiAddon()
 	ai: AiAddon = AiAddon()
 

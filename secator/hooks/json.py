@@ -57,10 +57,8 @@ def _ndjson_path(runner):
 
 def announce_report(self):
 	"""At run end, announce where the live JSON report was written — mirrors the former JSON
-	exporter's message. Only the top-level runner prints (not every child task), gated by
-	``print_reports_message`` like the exporters."""
-	if self.has_parent:
-		return
+	exporter's message. Registered on ``on_run_end``, so only the top-level runner prints (not every
+	child task), gated by ``print_reports_message`` like the exporters."""
 	if self.print_reports_message:
 		console.print(Info(message=f'JSON report written to {_report_path(self)}'))
 
@@ -102,20 +100,23 @@ HOOKS = {
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner, announce_report],
+		'on_end': [update_runner],
+		'on_run_end': [announce_report],
 	},
 	Workflow: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner, announce_report],
+		'on_end': [update_runner],
+		'on_run_end': [announce_report],
 	},
 	Task: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner, announce_report],
+		'on_end': [update_runner],
+		'on_run_end': [announce_report],
 	},
 }
