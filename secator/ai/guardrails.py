@@ -372,6 +372,14 @@ _NETWORK_CMDS = frozenset({
 	'rpcclient', 'smbmap', 'smbget', 'smbcacls', 'nmblookup', 'enum4linux', 'enum4linux-ng',
 })
 
+# SMB / Windows-share tools: for these a ``//host/share`` argument is a UNC share, never a
+# local path. Everywhere else ``//x/y`` is a POSIX path (``rsync //etc/shadow host:``,
+# ``scp //root/.ssh/id_rsa host:``), so it stays subject to the path rules.
+_UNC_CMDS = frozenset({
+	'smbclient', 'impacket-smbclient', 'rpcclient', 'smbmap', 'smbget', 'smbcacls', 'nmblookup',
+	'enum4linux', 'enum4linux-ng', 'crackmapexec', 'nxc', 'mount.cifs',
+})
+
 # Host label shape (RFC 1123-ish, plus '_' seen in NetBIOS/AD names). Used only for the
 # structurally-unambiguous forms below (UNC, scheme://, user@host), where the prefix itself
 # marks the token as a host — so single-label names like `localhost` / `fileserver` count.
@@ -410,7 +418,12 @@ def _canonical_authority(authority: str) -> Optional[str]:
 		return None
 	if not _HOST_LABEL_RE.match(host):
 		return None
-	return authority
+	# DNS names are case-insensitive and a trailing dot only marks them fully qualified:
+	# `smb://EXAMPLE.COM.` is the same target as an approved `example.com`.
+	host = host.rstrip('.').lower()
+	if not host:
+		return None
+	return f'{host}{sep}{port}'
 
 
 def _authority_form_host(value: str) -> Optional[str]:
@@ -464,24 +477,55 @@ def _is_ip_literal(value: str) -> bool:
 		return False
 
 
-def _structural_target(arg: str, is_network_cmd: bool) -> Optional[str]:
+def _host_of_authority(value: str) -> Optional[str]:
+	"""Host part of a ``host:port`` / ``[v6]:port`` value, else None (bare IPv6 stays whole)."""
+	canon = _canonical_authority(value)
+	if not canon or canon != value:
+		return None
+	if canon.startswith('['):
+		return canon[:canon.index(']') + 1]
+	if canon.count(':') == 1:
+		return canon.split(':', 1)[0]
+	return None
+
+
+def _is_slash_unc(arg: str) -> bool:
+	"""True for a ``//x...`` token: a UNC share to SMB tools, a POSIX path to everything else."""
+	v = arg.strip()
+	return v.startswith('//') and not v.startswith('///')
+
+
+def _structural_target(arg: str, is_network_cmd: bool, cmd_base: str = '') -> Optional[str]:
 	"""Target carried by a UNC / non-HTTP scheme argument, or None.
 
 	For a network command (smbclient, ssh, ...) any valid host counts, single-label
 	included (``smbclient -L //localhost``). For other commands only an unambiguous
 	network host does (an IP, ``localhost``, or a dotted name), so ``cat //etc/passwd``
-	stays a path. Shared by target extraction and path detection so a token is never
-	both a target and a path.
+	stays a path. A ``//x`` token is a UNC share only for SMB tools (``_UNC_CMDS``); for
+	any other command it gets the unambiguous-host rule too, so ``rsync //etc/shadow``
+	yields no ``etc`` target. See ``_is_path_free_target`` for the path side.
 	"""
 	host = _authority_form_host(arg)
 	if not host:
 		return None
-	if is_network_cmd:
+	if is_network_cmd and (cmd_base in _UNC_CMDS or not _is_slash_unc(arg)):
 		return host
 	bare = _host_of(host) or host
 	if _is_ip_literal(host) or bare.lower() == 'localhost' or '.' in bare.strip('.'):
 		return host
 	return None
+
+
+def _is_path_free_target(arg: str, cmd_base: str) -> bool:
+	"""True when ``arg`` is a target and can never be a local path, so path detection skips it.
+
+	Backslash UNC and ``scheme://`` forms are never paths. A ``//x/y`` token is a UNC share
+	(not a path) only for SMB tools; for every other command it is still checked as a path
+	(the kernel reads ``//etc/shadow`` as ``/etc/shadow``), even when it also names a host.
+	"""
+	if not _structural_target(arg, cmd_base in _NETWORK_CMDS, cmd_base):
+		return False
+	return cmd_base in _UNC_CMDS or not _is_slash_unc(arg)
 
 
 def _cmd_basename(cmd: str) -> str:
@@ -518,7 +562,7 @@ def extract_command_targets(command: str) -> List[str]:
 			seen.add(value)
 			targets.append(value)
 
-	def _check_arg(arg: str, is_network_cmd: bool = False):
+	def _check_arg(arg: str, is_network_cmd: bool = False, cmd_base: str = ''):
 		"""Check a single argument for targets (URLs, IPs, hosts).
 
 		``is_network_cmd`` is True when the owning sub-command actually connects out
@@ -531,7 +575,7 @@ def extract_command_targets(command: str) -> List[str]:
 			return
 		# UNC / non-HTTP scheme forms (`//host/share`, `\\\\host\\share`, `smb://host`):
 		# the target is the authority, never the leading-'/' path pathlib would make of it.
-		structural = _structural_target(arg, is_network_cmd)
+		structural = _structural_target(arg, is_network_cmd, cmd_base)
 		if structural:
 			_add_target(structural)
 			return
@@ -569,9 +613,17 @@ def extract_command_targets(command: str) -> List[str]:
 		# `scp f admin@10.0.0.9:/tmp/` are scoped on the host instead of dropped whole.
 		if '@' in arg and '://' not in arg:
 			host_candidate = arg.rsplit('@', 1)[1]
-			head, sep, tail = host_candidate.partition(':')
-			if sep and not head.startswith('[') and not re.fullmatch(r'\d{1,5}', tail):
-				host_candidate = head  # `host:/remote/path` (keep a numeric `host:port`)
+			if host_candidate.startswith('[') and ']' in host_candidate:
+				# `user@[v6]:/remote/path` -> `[v6]` (keep a numeric `[v6]:port`)
+				end = host_candidate.index(']') + 1
+				if not re.fullmatch(r'(?::\d{1,5})?', host_candidate[end:]):
+					host_candidate = host_candidate[:end]
+			elif host_candidate.count(':') > 1 and _canonical_authority(host_candidate):
+				pass  # bare IPv6 literal (`ssh root@2001:db8::1`): its colons are not a port/path
+			else:
+				head, sep, tail = host_candidate.partition(':')
+				if sep and not re.fullmatch(r'\d{1,5}', tail):
+					host_candidate = head  # `host:/remote/path` (keep a numeric `host:port`)
 			if _is_network_target(host_candidate):
 				arg = host_candidate
 			elif is_network_cmd and _canonical_authority(host_candidate):
@@ -597,9 +649,10 @@ def extract_command_targets(command: str) -> List[str]:
 			# Skip docker/podman sub-commands
 			if args[0] in ('docker', 'podman'):
 				continue
-			is_network_cmd = _cmd_basename(args[0]) in _NETWORK_CMDS
+			cmd_base = _cmd_basename(args[0])
+			is_network_cmd = cmd_base in _NETWORK_CMDS
 			for arg in args[1:]:
-				_check_arg(arg, is_network_cmd)
+				_check_arg(arg, is_network_cmd, cmd_base)
 	except Exception:
 		# Parse failed: the per-arg walk ran nothing, so fall back to the raw-string
 		# host sweep too (the IP/URL sweep below runs unconditionally).
@@ -901,8 +954,7 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 					_add_path(dest, "write")
 					i += 1
 					continue
-			is_structural = _structural_target(arg, cmd_base in _NETWORK_CMDS)
-			if not arg.startswith('-') and _is_file_path(arg) and not is_structural:
+			if not arg.startswith('-') and _is_file_path(arg) and not _is_path_free_target(arg, cmd_base):
 				_add_path(arg, base_access)
 			i += 1
 
@@ -1365,6 +1417,13 @@ class PermissionEngine:
 			value = normalize_target(value)
 		# Build list of values to check (original + URL components for targets)
 		values_to_check = [value]
+		if rule_type == "target" and not value.startswith(('http://', 'https://')):
+			# A `host:port` / `[v6]:port` target (e.g. from `redis://10.0.0.5:6379`) is also
+			# checked by its host, as URLs are below: a rule on the host covers its ports, and
+			# a deny on the host still wins.
+			host = _host_of_authority(value)
+			if host and host != value:
+				values_to_check.append(host)
 		if rule_type == "target" and value.startswith(('http://', 'https://')):
 			from urllib.parse import urlparse
 			from secator.scope import target_host
