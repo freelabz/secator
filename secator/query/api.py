@@ -53,6 +53,18 @@ class ApiBackend(QueryBackend):
     def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None,
                         offset: int = 0) -> List[Dict[str, Any]]:
         """Search API for findings matching query (``offset`` maps to the endpoint's skip)."""
+        items = self._search_items(query, limit=limit, exclude_fields=exclude_fields, offset=offset)
+        # Drop the backend-only '_id' field so results match the output-type
+        # schema (the CSV exporter rejects unknown fields), matching the
+        # MongoDB backend behaviour.
+        for item in items:
+            if isinstance(item, dict):
+                item.pop('_id', None)
+        return items
+
+    def _search_items(self, query: dict, limit: int = 100, exclude_fields: list = None,
+                      offset: int = 0) -> List[Dict[str, Any]]:
+        """Raw search results, with the API's own ``_id`` kept."""
         try:
             endpoint = f"{self.search_endpoint}?skip={offset}&limit={limit}"
             if exclude_fields:
@@ -67,13 +79,6 @@ class ApiBackend(QueryBackend):
                 items = result['results']
             else:
                 items = []
-
-            # Drop the backend-only '_id' field so results match the output-type
-            # schema (the CSV exporter rejects unknown fields), matching the
-            # MongoDB backend behaviour.
-            for item in items:
-                if isinstance(item, dict):
-                    item.pop('_id', None)
             return items
         except Exception as e:
             console.print(Warning(message=f"API search failed: {e}"))
@@ -94,10 +99,30 @@ class ApiBackend(QueryBackend):
             return 0
 
     def _execute_update(self, query: dict, update: dict) -> int:
-        """Update records via API PATCH endpoint."""
-        payload = {"query": query, "update": update}
-        result = self._make_request("PATCH", "findings/update", data=payload)
-        return result.get("modified_count", 0)
+        """Apply a ``$set`` to the matching findings through the API's per-finding update endpoint.
+
+        The API has no query-based update route: the matches are resolved with a search (which
+        also returns each finding's API id, ``_id``, and current values), then each one is
+        written with ``finding_update_endpoint``, as the api driver does. The endpoint takes
+        top-level fields only, so a dotted ``field.key`` path is folded into the finding's
+        current ``field``.
+        """
+        set_fields = update.get("$set") or {}
+        if not set_fields:
+            return 0
+        modified = 0
+        for doc in self._search_items(query, limit=1000):
+            finding_id = doc.get("_id") if isinstance(doc, dict) else None
+            if not finding_id:
+                continue
+            try:
+                endpoint = CONFIG.addons.api.finding_update_endpoint.format(finding_id=finding_id)
+                result = self._make_request("PUT", endpoint, data=_fold_dotted_fields(doc, set_fields))
+            except Exception as e:
+                console.print(Warning(message=f"API finding update failed for {finding_id}: {e}"))
+                continue
+            modified += int(result.get("modified_count", 1 if result.get("success") else 0) or 0)
+        return modified
 
     def _execute_create_note(self, note: dict) -> int:
         """POST the note to the remote notes endpoint.
@@ -203,3 +228,22 @@ class ApiBackend(QueryBackend):
         except Exception as e:
             console.print(Warning(message=f'API list_runners failed: {e}'))
             return []
+
+
+def _fold_dotted_fields(doc: dict, set_fields: dict) -> dict:
+    """Turn ``{"extra_data.key": v}`` into ``{"extra_data": {..doc's extra_data.., "key": v}}``."""
+    fields = {k: v for k, v in set_fields.items() if "." not in k}
+    for path, value in set_fields.items():
+        if "." not in path:
+            continue
+        top, rest = path.split(".", 1)
+        base = fields.get(top, doc.get(top))
+        obj = dict(base) if isinstance(base, dict) else {}
+        node = obj
+        keys = rest.split(".")
+        for key in keys[:-1]:
+            node[key] = dict(node[key]) if isinstance(node.get(key), dict) else {}
+            node = node[key]
+        node[keys[-1]] = value
+        fields[top] = obj
+    return fields

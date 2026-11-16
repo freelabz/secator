@@ -467,6 +467,69 @@ class TestQueryEngineUpdate(unittest.TestCase):
 		)
 
 
+class TestFindingUpdatesReadBack(unittest.TestCase):
+	"""A finding updated in the store is read back updated, on the json and api backends."""
+
+	def _ndjson_backend(self, records):
+		import json
+		import tempfile
+		from pathlib import Path
+		from secator.query.json import JsonBackend
+		report_dir = Path(tempfile.mkdtemp())
+		(report_dir / 'results.ndjson').write_text(''.join(json.dumps(r) + '\n' for r in records))
+		return JsonBackend('test', context={'report_dir': str(report_dir)})
+
+	def test_json_point_read_returns_the_latest_record(self):
+		backend = self._ndjson_backend([
+			{'_uuid': 'u1', '_type': 'url', 'url': 'http://a.com', 'tags': []},
+			{'_uuid': 'u2', '_type': 'url', 'url': 'http://b.com', 'tags': []},
+		])
+		self.assertEqual(backend.update({'_uuid': 'u1'}, {'$set': {'tags': ['seen']}}), 1)
+		self.assertEqual(backend.search({'_uuid': 'u1'}, limit=1)[0]['tags'], ['seen'])
+		# The limit still bounds the distinct findings returned.
+		self.assertEqual(len(backend.search({'_type': 'url'}, limit=1)), 1)
+		latest = {r['_uuid']: r for r in backend.search({'_type': 'url'}, limit=10)}
+		self.assertEqual(latest['u1']['tags'], ['seen'])
+
+	def _api_backend(self, docs):
+		"""An ApiBackend whose search returns ``docs`` (with the API's ``_id``) and PUTs succeed."""
+		from unittest.mock import MagicMock
+		from secator.query.api import ApiBackend
+		backend = ApiBackend(workspace_id='ws1')
+
+		def responses(method, endpoint, data=None):
+			if method == 'POST':
+				return {'items': [dict(d) for d in docs]}
+			return {'success': True, 'modified_count': 1}
+
+		backend._make_request = MagicMock(side_effect=responses)
+		return backend
+
+	def _puts(self, backend):
+		return [(c.args[1], c.kwargs.get('data')) for c in backend._make_request.call_args_list if c.args[0] == 'PUT']
+
+	def test_api_update_writes_each_match_by_its_api_id(self):
+		# The stored `_uuid` can differ from the API id (`_id`): the write uses the API id.
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'uuid4-a', 'tags': []}, {'_id': 'oid2', '_uuid': 'uuid4-b'}])
+		self.assertEqual(backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}}), 2)
+		self.assertEqual(self._puts(backend), [('finding/oid1', {'tags': ['x']}), ('finding/oid2', {'tags': ['x']})])
+
+	def test_api_update_folds_dotted_paths_into_the_current_value(self):
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'u1', 'extra_data': {'keep': 1, 'nested': {'a': 1}}}])
+		backend.update({'_uuid': 'u1'}, {'$set': {'status': 'FIXED', 'extra_data.synced': True, 'extra_data.nested.b': 2}})
+		self.assertEqual(self._puts(backend), [('finding/oid1', {
+			'status': 'FIXED', 'extra_data': {'keep': 1, 'synced': True, 'nested': {'a': 1, 'b': 2}}})])
+
+	def test_api_update_no_match(self):
+		backend = self._api_backend([])
+		self.assertEqual(backend.update({'_uuid': 'missing'}, {'$set': {'tags': ['x']}}), 0)
+		self.assertEqual(self._puts(backend), [])
+
+	def test_api_search_still_drops_the_api_id(self):
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'u1'}])
+		self.assertEqual(backend.search({'_uuid': 'u1'}), [{'_uuid': 'u1'}])
+
+
 class TestSqliteBackend(unittest.TestCase):
 	def setUp(self):
 		import tempfile
