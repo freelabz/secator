@@ -13,16 +13,22 @@ Configuration:
 
 import json
 import time
-import requests
 
 from functools import cache
 
 from secator.config import CONFIG
 from secator.output_types import FINDING_TYPES, Error, Info
+from secator.requests import get_session
 from secator.runners import Scan, Task, Workflow
 from secator.serializers.dataclass import DataclassEncoder
 from secator.utils import debug
 from secator.rich import console
+
+# Shared urllib3-retry session (secator.requests), but with POST added to the retried
+# methods: runner/finding writes carry an Idempotency-Key, so a retried POST is safe.
+# Kept under its own name (not shadowing the `requests` module) so callers/tests that
+# patch `requests.sessions.Session.request` still intercept these calls.
+_SESSION = get_session(allowed_methods=frozenset({'GET', 'POST', 'PUT', 'DELETE', 'PATCH'}))
 
 API_URL = CONFIG.addons.api.url
 API_KEY = CONFIG.addons.api.key
@@ -44,25 +50,37 @@ def get_runner_dbg(runner):
 	return {runner.unique_name: runner.status, 'type': runner.config.type, 'class': runner.__class__.__name__, 'caller': runner.config.name, **runner.context}  # noqa: E501
 
 
-def _make_request(method, endpoint, data=None):
+def _make_request(method, endpoint, data=None, idempotency_key=None):
 	"""Make HTTP request to external API endpoint."""
 	url = f'{API_URL.rstrip("/")}/{endpoint.lstrip("/")}'
 	headers = {'Content-Type': 'application/json'}
 	if API_KEY:
 		headers['Authorization'] = f'{API_HEADER_NAME} {API_KEY}'
-	verify = FORCE_SSL
-	timeout = API_TIMEOUT
+	if idempotency_key:
+		headers['Idempotency-Key'] = str(idempotency_key)
 	debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
 	debug('API headers', sub='hooks.api', verbose=True, obj=headers)
 	json_data = json.dumps(data, cls=DataclassEncoder) if data else None
 	if json_data:
 		debug('API data', sub='hooks.api', verbose=True, obj=json_data, obj_after=True)
-	response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)
+	# Use the shared retry session (secator.requests): urllib3-backed retries with
+	# exponential backoff (backoff_factor=1 -> 1s, 2s, 4s) on connection drops and
+	# transient statuses (408/429/5xx), honouring Retry-After on 429s.
+	response = _SESSION.request(
+		method=method, url=url, data=json_data, headers=headers, verify=FORCE_SSL, timeout=API_TIMEOUT,
+	)
+	if not response.ok:
+		# Error bodies may not be JSON (e.g. an HTML 502 from a proxy): surface the
+		# HTTP error rather than a JSON decode error.
+		try:
+			detail = response.json().get('detail')
+		except (ValueError, AttributeError):
+			detail = None
+		if detail:
+			console.print(Error(message=f'API error: {detail}'))
+		response.raise_for_status()
 	result = response.json()
 	debug('API response', sub='hooks.api', verbose=True, obj=result)
-	if not response.ok and result.get('detail'):
-		console.print(Error(message=f'API error: {result["detail"]}'))
-	response.raise_for_status()
 	return result
 
 
@@ -125,7 +143,8 @@ def update_finding(self, item):
 	if not in_api:
 		# Create new finding
 		update['_context']['api'] = True
-		result = _make_request('POST', API_FINDING_CREATE_ENDPOINT, update)
+		# The pre-stamped finding uuid lets the server dedupe a create retried after a lost response.
+		result = _make_request('POST', API_FINDING_CREATE_ENDPOINT, update, idempotency_key=_uuid)
 		if result and result.get('id'):
 			item._uuid = result.get('id')
 			item._context['api'] = True

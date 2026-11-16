@@ -38,20 +38,20 @@ class TestApiRunnerId(unittest.TestCase):
 	def test_run_scope_uuid_id_is_created_not_updated(self, _ws):
 		"""The runner constructor mints a uuid {type}_id; the first update must POST (create), not PUT runner/<uuid>."""
 		runner = _FakeRunner({'task_id': str(uuid.uuid4()), 'workspace_id': 'a' * 24})
-		with patch.object(api.requests, 'request', return_value=_resp({'id': 'b' * 24})) as req:
+		with patch.object(api._SESSION, 'request', return_value=_resp({'id': 'b' * 24})) as req:
 			api.update_runner(runner)
 		self.assertEqual(req.call_args.kwargs['method'], 'POST')
 		self.assertTrue(req.call_args.kwargs['url'].endswith('/runners'))
 		self.assertEqual(runner.context['task_id'], 'b' * 24)
 		# Later updates hit the created runner.
-		with patch.object(api.requests, 'request', return_value=_resp({})) as req:
+		with patch.object(api._SESSION, 'request', return_value=_resp({})) as req:
 			api.update_runner(runner)
 		self.assertEqual(req.call_args.kwargs['method'], 'PUT')
 		self.assertTrue(req.call_args.kwargs['url'].endswith('/runner/' + 'b' * 24))
 
 	def test_run_scope_uuid_chunk_id_is_created(self, _ws):
 		runner = _FakeRunner({'task_id': 'c' * 24, 'task_chunk_id': str(uuid.uuid4()), 'workspace_id': 'a' * 24}, chunk=1)
-		with patch.object(api.requests, 'request', return_value=_resp({'id': 'd' * 24})) as req:
+		with patch.object(api._SESSION, 'request', return_value=_resp({'id': 'd' * 24})) as req:
 			api.update_runner(runner)
 		self.assertEqual(req.call_args.kwargs['method'], 'POST')
 		self.assertEqual(runner.context['task_chunk_id'], 'd' * 24)
@@ -60,7 +60,7 @@ class TestApiRunnerId(unittest.TestCase):
 	def test_existing_object_id_is_updated(self, _ws):
 		"""An ObjectId {type}_id (a runner that already exists remotely) is updated in place."""
 		runner = _FakeRunner({'task_id': 'c' * 24, 'workspace_id': 'a' * 24})
-		with patch.object(api.requests, 'request', return_value=_resp({})) as req:
+		with patch.object(api._SESSION, 'request', return_value=_resp({})) as req:
 			api.update_runner(runner)
 		self.assertEqual(req.call_args.kwargs['method'], 'PUT')
 		self.assertTrue(req.call_args.kwargs['url'].endswith('/runner/' + 'c' * 24))
