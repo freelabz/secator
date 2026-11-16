@@ -500,7 +500,8 @@ class ai(PythonRunner):
 				from secator.rich import get_tui
 				tui = get_tui()
 				if tui is not None:
-					tui.tui_replay_history(self.history.messages)
+					tui.tui_replay_history(
+						self.history.messages, decrypt=self.encryptor.decrypt if self.encryptor else None)
 			self.history.model = self.model
 			result = self._prompt_and_redetect([])
 			if result is None:

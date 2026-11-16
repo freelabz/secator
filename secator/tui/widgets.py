@@ -6,6 +6,8 @@ stable hooks (``app._open_subview`` / ``app._show_main``) so they stay frontend-
 """
 from __future__ import annotations
 
+import json
+
 from rich.markup import escape
 from rich.text import Text
 from textual.app import ComposeResult
@@ -445,6 +447,76 @@ class RunnerPanel(Vertical):
 			self.query_one(".runner-out", Vertical).mount(
 				Static(Text.from_markup("[dim i](no output)[/]"), classes="out-line empty-note"))
 		self._refresh_head()
+
+
+# Replayed tool calls use the same card kinds the live stream renders for runner tools.
+_TOOL_KINDS = {
+	"run_task": "task", "run_workflow": "workflow", "run_scan": "scan",
+	"run_shell": "shell", "query_workspace": "query",
+}
+_REPLAY_RESULT_LINES = 200
+
+
+def _tool_result_text(result) -> "tuple[str, bool, int | None]":
+	"""(display text, failed?, result count) for a tool message's content."""
+	if result is None:
+		return "", False, None
+	text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+	failed, count = False, None
+	try:
+		data = json.loads(text)
+	except (ValueError, TypeError):
+		data = None
+	if isinstance(data, dict) and data.get("error"):
+		failed = True
+	if isinstance(data, list):
+		count = len(data)
+	if data is not None and not isinstance(data, str):
+		text = json.dumps(data, indent=2, ensure_ascii=False, default=str)
+	lines = text.splitlines()
+	if len(lines) > _REPLAY_RESULT_LINES:
+		lines = lines[:_REPLAY_RESULT_LINES] + [f"… ({len(lines) - _REPLAY_RESULT_LINES} more lines)"]
+	return "\n".join(lines), failed, count
+
+
+class ToolCallPanel(RunnerPanel):
+	"""A tool call replayed from saved history (resume): a finished, collapsible card like the
+	live runner cards, whose box shows the call's arguments and its result (linked by the
+	tool_call id). Built from the history alone, so it works for any saved session."""
+
+	def __init__(self, name: str, args=None, result=None):
+		args = args if isinstance(args, dict) else {}
+		kind = _TOOL_KINDS.get(name, "tool")
+		desc = str(args.get("description") or "")
+		command, config_name = "", None
+		if kind == "shell":
+			command = str(args.get("command") or "")
+		elif kind == "query":
+			q = args.get("query")
+			command = q if isinstance(q, str) else json.dumps(q, ensure_ascii=False)
+		elif kind in ("task", "workflow", "scan"):
+			config_name = str(args.get("name") or "") or None
+		else:
+			config_name = name
+		text, failed, count = _tool_result_text(result)
+		super().__init__(kind, desc or name, command=command, config_name=config_name,
+		                 result_count=count if kind == "query" else None)
+		self.tool_name = name
+		skip = {"description"} | ({"command"} if kind == "shell" else set()) | ({"query"} if kind == "query" else set())
+		self._args = {k: v for k, v in args.items() if k not in skip}
+		self._result_text = text
+		self.failed = failed
+
+	def on_mount(self) -> None:
+		out = self.query_one(".runner-out", Vertical)
+		if self._args:
+			self.lines += 1
+			out.mount(Static(Text("args: " + json.dumps(self._args, ensure_ascii=False, default=str), style="#7b8296"),
+			                 classes="out-line tool-args"))
+		if self._result_text:
+			self.lines += 1
+			out.mount(Static(Text(self._result_text), classes="out-raw tool-result"))
+		self.finish()   # replayed: already done — no spinner
 
 
 class _BlockHead(Static):

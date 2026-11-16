@@ -38,6 +38,40 @@ def cap_message(msg: dict, max_chars: int = MAX_PERSISTED_MESSAGE_CHARS) -> dict
     return out
 
 
+# Prefixes the loop puts on user-role messages that are not typed by the user as-is.
+STEER_PREFIX = "[User interjected]: "
+SUMMARY_PREFIX = "Summary of previous iterations:"
+
+
+def classify_user_message(content) -> Tuple[str, str]:
+    """Classify a ``user``-role history message for display: ``(kind, text)``.
+
+    The model-facing history mixes the user's own turns with messages the loop injects
+    under the ``user`` role, which a display must not show as if the user typed them.
+    Recognised from their (code-generated) shape, so it also works on sessions saved before
+    any marker existed, and the model-facing messages stay byte-identical:
+
+    - ``internal``: a per-iteration control message from ``format_continue``
+      (``{"iteration": N, "max": M, "instruction": "..."}``) — never displayed;
+    - ``summary``: a compaction summary (``Summary of previous iterations: ...``);
+    - ``user``: a real user turn (a mid-run steer is shown without its prefix).
+    """
+    text = content if isinstance(content, str) else ""
+    stripped = text.strip()
+    if stripped.startswith("{") and '"instruction"' in stripped:
+        try:
+            data = json.loads(stripped)
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and "instruction" in data and "iteration" in data:
+            return "internal", ""
+    if stripped.startswith(SUMMARY_PREFIX):
+        return "summary", stripped[len(SUMMARY_PREFIX):].strip()
+    if text.startswith(STEER_PREFIX):
+        return "user", text[len(STEER_PREFIX):]
+    return "user", text
+
+
 def get_context_window(model: str) -> int:
     """Get model's context window size from litellm.
 
