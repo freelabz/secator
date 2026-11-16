@@ -1,11 +1,10 @@
 """AI tool: `mark_vuln_fixed`."""
-from secator.ai.tools.base import BaseTool, _SCAN_EXPLOIT_MONITOR
+from secator.ai.tools.base import BaseTool
 
 
 class MarkVulnFixed(BaseTool):
 	name = "mark_vuln_fixed"
 	action = "mark_vuln_fixed"
-	modes = _SCAN_EXPLOIT_MONITOR
 	auto_allow = True
 	handler = "_handle_mark_vuln_fixed"
 	schema = {

@@ -1,11 +1,10 @@
 """AI tool: `run_subagent`."""
-from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA, _ALL_MODES
+from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA
 
 
 class RunSubagent(BaseTool):
 	name = "run_subagent"
 	action = "subagent"
-	modes = _ALL_MODES
 	auto_allow = True
 	handler = "_handle_subagent"
 	schema = {

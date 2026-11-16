@@ -1,11 +1,10 @@
 """AI tool: `update_plan`."""
-from secator.ai.tools.base import BaseTool, _READONLY_HELPER
+from secator.ai.tools.base import BaseTool
 
 
 class UpdatePlan(BaseTool):
 	name = "update_plan"
 	action = "update_plan"
-	modes = _READONLY_HELPER
 	auto_allow = True  # a user-visible to-do list; no workspace mutation, no target/path egress
 	handler = "_handle_update_plan"
 	schema = {

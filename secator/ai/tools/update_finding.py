@@ -1,11 +1,10 @@
 """AI tool: `update_finding`."""
-from secator.ai.tools.base import BaseTool, _SCAN_EXPLOIT_MONITOR
+from secator.ai.tools.base import BaseTool
 
 
 class UpdateFinding(BaseTool):
 	name = "update_finding"
 	action = "update_finding"
-	modes = _SCAN_EXPLOIT_MONITOR
 	auto_allow = True
 	handler = "_handle_update_finding"
 	schema = {

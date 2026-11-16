@@ -407,17 +407,19 @@ class TestToolRegistry(unittest.TestCase):
 			self.assertTrue(hasattr(actions, t.handler), f"{t.name} handler {t.handler} missing")
 
 	def test_mode_exposure_matches_allowed_actions(self):
-		"""CONSISTENCY GUARD: a tool exposed in a mode (`tool.modes`) must be in that
-		mode's `allowed_actions`, and every tool-type `allowed_action` must be exposed —
-		so tool exposure (schemas) and the authz gate can't silently drift apart."""
+		"""CONSISTENCY GUARD: a tool exposed in a mode (resolved from the mode's `tools:`
+		frontmatter globs — the single source of truth) must be in that mode's
+		`allowed_actions`, and every tool-type `allowed_action` must be exposed — so tool
+		exposure (schemas) and the authz gate can't silently drift apart."""
 		from secator.ai.tools import TOOLS, TOOLS_BY_ACTION
-		from secator.ai.prompts import MODES
+		from secator.ai.prompts import MODES, mode_tool_patterns, tool_matches_mode
 		for mode, cfg in MODES.items():
-			exposed = {t.action for t in TOOLS if mode in t.modes}
+			patterns = mode_tool_patterns(mode)
+			exposed = {t.action for t in TOOLS if tool_matches_mode(t.name, patterns, external=t.external)}
 			allowed_tool_actions = {a for a in cfg["allowed_actions"] if a in TOOLS_BY_ACTION}
 			self.assertEqual(
 				exposed, allowed_tool_actions,
-				f"mode '{mode}': tool.modes exposure {exposed} != tool-type allowed_actions {allowed_tool_actions}"
+				f"mode '{mode}': tools-glob exposure {exposed} != tool-type allowed_actions {allowed_tool_actions}"
 			)
 
 	def test_auto_allow_only_control_and_finding_actions(self):

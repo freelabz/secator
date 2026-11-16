@@ -1,11 +1,10 @@
 """AI tool: `list_runners`."""
-from secator.ai.tools.base import BaseTool, _READONLY_HELPER
+from secator.ai.tools.base import BaseTool
 
 
 class ListRunners(BaseTool):
 	name = "list_runners"
 	action = "list_runners"
-	modes = _READONLY_HELPER
 	auto_allow = True  # read-only run-history lookup; no mutation, no target/path egress
 	handler = "_handle_list_runners"
 	schema = {

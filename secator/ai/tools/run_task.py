@@ -1,11 +1,10 @@
 """AI tool: `run_task`."""
-from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA, _RUNNER_MODES
+from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA
 
 
 class RunTask(BaseTool):
 	name = "run_task"
 	action = "task"
-	modes = _RUNNER_MODES
 	handler = "_handle_task"
 	schema = {
 		"type": "function",

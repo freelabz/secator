@@ -1,11 +1,10 @@
 """AI tool: `stop`."""
-from secator.ai.tools.base import BaseTool, _QUERY_MODES
+from secator.ai.tools.base import BaseTool
 
 
 class Stop(BaseTool):
 	name = "stop"
 	action = "stop"
-	modes = _QUERY_MODES
 	auto_allow = True
 	# NOT emitted by build_tool_schemas / not in TOOL_SCHEMAS — injected per-backend
 	# via get_extra_tools (interactive backends a `stop` with `choices`, AutoBackend a

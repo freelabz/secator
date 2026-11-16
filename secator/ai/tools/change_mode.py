@@ -1,11 +1,10 @@
 """AI tool: `change_mode`."""
-from secator.ai.tools.base import BaseTool, _CAN_CHANGE_MODE
+from secator.ai.tools.base import BaseTool
 
 
 class ChangeMode(BaseTool):
 	name = "change_mode"
 	action = "change_mode"
-	modes = _CAN_CHANGE_MODE  # NOT contribute / research / monitor (terminal or bounded, directly-selected)
 	auto_allow = True
 	handler = "_handle_change_mode"
 	schema = {

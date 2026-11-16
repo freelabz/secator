@@ -1,11 +1,10 @@
 """AI tool: `web_search`."""
-from secator.ai.tools.base import BaseTool, _READONLY_HELPER
+from secator.ai.tools.base import BaseTool
 
 
 class WebSearch(BaseTool):
 	name = "web_search"
 	action = "web_search"
-	modes = _READONLY_HELPER
 	auto_allow = True  # read-only external lookup; no workspace mutation, no target scope
 	handler = "_handle_web_search"
 	schema = {

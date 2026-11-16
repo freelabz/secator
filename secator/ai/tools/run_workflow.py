@@ -1,11 +1,10 @@
 """AI tool: `run_workflow`."""
-from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA, _RUNNER_MODES
+from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA
 
 
 class RunWorkflow(BaseTool):
 	name = "run_workflow"
 	action = "workflow"
-	modes = _RUNNER_MODES
 	handler = "_handle_workflow"
 	schema = {
 		"type": "function",

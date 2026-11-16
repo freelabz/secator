@@ -32,7 +32,6 @@ _GOOD_TOOL = textwrap.dedent('''
 
 	class PingPong(BaseTool):
 		name = "ping_pong"
-		modes = frozenset({"chat", "scan"})
 		schema = {
 			"type": "function",
 			"function": {
@@ -58,7 +57,6 @@ _CLASH_TOOL = textwrap.dedent('''
 
 	class RunTask(BaseTool):
 		name = "run_task"
-		modes = frozenset({"chat"})
 		schema = {"type": "function", "function": {"name": "run_task"}}
 
 		def run(self, action, ctx):
@@ -86,12 +84,10 @@ class TestDynamicAITools(unittest.TestCase):
 		self.written.append(p)
 		return p
 
-	def test_valid_tool_registers_end_to_end(self):
+	def test_valid_tool_registers_into_the_registry(self):
 		self._write("ping_pong.py", _GOOD_TOOL)
 		from secator.loader import discover_ai_tools
-		from secator.ai.tools import (
-			TOOLS_BY_NAME, TOOLS_BY_ACTION, TOOL_ACTION_MAP, build_tool_schemas,
-		)
+		from secator.ai.tools import TOOLS_BY_NAME, TOOLS_BY_ACTION, TOOL_ACTION_MAP
 		registered = discover_ai_tools()
 		self.assertIn("ping_pong", registered)
 		# In the registry, with action defaulting to the name, and marked external.
@@ -100,11 +96,28 @@ class TestDynamicAITools(unittest.TestCase):
 		self.assertTrue(TOOLS_BY_NAME["ping_pong"].auto_allow)
 		self.assertEqual(TOOL_ACTION_MAP["ping_pong"], "ping_pong")
 		self.assertIn("ping_pong", TOOLS_BY_ACTION)
-		# Exposed in its declared modes, absent from others.
-		chat_names = [s["function"]["name"] for s in build_tool_schemas("chat")]
-		exploit_names = [s["function"]["name"] for s in build_tool_schemas("exploit")]
-		self.assertIn("ping_pong", chat_names)
-		self.assertNotIn("ping_pong", exploit_names)
+
+	def test_external_tool_exposed_only_by_exact_name_opt_in(self):
+		"""A mode's broad `*` glob must NOT auto-grant the external tool; an exact-name
+		`tools:` entry does. This is the Q4 guard against silent privilege creep."""
+		self._write("ping_pong.py", _GOOD_TOOL)
+		from secator.loader import discover_ai_tools
+		from secator.ai.tools import build_tool_schemas
+		from secator.ai.prompts import MODES
+		discover_ai_tools()
+		# scan is `tools: ["*"]` — the glob must not expose the external tool.
+		scan_names = [s["function"]["name"] for s in build_tool_schemas("scan")]
+		self.assertNotIn("ping_pong", scan_names)
+		# Opt chat in by EXACT name -> now exposed there, still not in scan.
+		orig = list(MODES["chat"]["tools"])
+		MODES["chat"]["tools"] = orig + ["ping_pong"]
+		try:
+			chat_names = [s["function"]["name"] for s in build_tool_schemas("chat")]
+			scan_names = [s["function"]["name"] for s in build_tool_schemas("scan")]
+			self.assertIn("ping_pong", chat_names)
+			self.assertNotIn("ping_pong", scan_names)
+		finally:
+			MODES["chat"]["tools"] = orig
 
 	def test_handler_dispatches_through_run(self):
 		self._write("ping_pong.py", _GOOD_TOOL)

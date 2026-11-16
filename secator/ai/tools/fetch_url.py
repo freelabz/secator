@@ -1,11 +1,10 @@
 """AI tool: `fetch_url`."""
-from secator.ai.tools.base import BaseTool, _READONLY_HELPER
+from secator.ai.tools.base import BaseTool
 
 
 class FetchUrl(BaseTool):
 	name = "fetch_url"
 	action = "fetch_url"
-	modes = _READONLY_HELPER
 	auto_allow = True  # read-only external lookup; SSRF-guarded in the handler, no target scope
 	handler = "_handle_fetch_url"
 	schema = {

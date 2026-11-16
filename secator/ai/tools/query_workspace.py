@@ -1,11 +1,10 @@
 """AI tool: `query_workspace`."""
-from secator.ai.tools.base import BaseTool, _DESCRIPTION_SCHEMA, _QUERY_MODES
+from secator.ai.tools.base import BaseTool, _DESCRIPTION_SCHEMA
 
 
 class QueryWorkspace(BaseTool):
 	name = "query_workspace"
 	action = "query"
-	modes = _QUERY_MODES
 	auto_allow = True
 	handler = "_handle_query"
 	schema = {

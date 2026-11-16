@@ -1,11 +1,10 @@
 """AI tool: `mark_vuln_false_positive`."""
-from secator.ai.tools.base import BaseTool, _SCAN_EXPLOIT_MONITOR
+from secator.ai.tools.base import BaseTool
 
 
 class MarkVulnFalsePositive(BaseTool):
 	name = "mark_vuln_false_positive"
 	action = "mark_vuln_false_positive"
-	modes = _SCAN_EXPLOIT_MONITOR
 	auto_allow = True
 	handler = "_handle_mark_vuln_false_positive"
 	schema = {

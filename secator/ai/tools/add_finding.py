@@ -1,11 +1,10 @@
 """AI tool: `add_finding`."""
-from secator.ai.tools.base import BaseTool, _ACTIVE_MODES
+from secator.ai.tools.base import BaseTool
 
 
 class AddFinding(BaseTool):
 	name = "add_finding"
 	action = "add_finding"
-	modes = _ACTIVE_MODES
 	auto_allow = True
 	handler = "_handle_add_finding"
 	schema = {

@@ -1,11 +1,10 @@
 """AI tool: `add_note`."""
-from secator.ai.tools.base import BaseTool, _SCAN_EXPLOIT_MONITOR
+from secator.ai.tools.base import BaseTool
 
 
 class AddNote(BaseTool):
 	name = "add_note"
 	action = "add_note"
-	modes = _SCAN_EXPLOIT_MONITOR
 	auto_allow = True
 	handler = "_handle_add_note"
 	schema = {

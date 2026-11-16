@@ -7,21 +7,24 @@ carries everything that used to be hand-synced across 5 places (schema, dispatch
 action, mode exposure, permission auto-allow, handler), and every drift-prone view
 derives from the ``TOOLS`` registry:
 
-* ``build_tool_schemas(mode, ...)`` filters ``TOOLS`` by ``mode in tool.modes``.
+* ``build_tool_schemas(mode, ...)`` exposes a tool when its NAME matches the mode's
+``tools:`` frontmatter globs (:func:`secator.ai.prompts.tool_matches_mode`) — the single
+source of truth for mode→tool exposure. A tool no longer declares its modes.
 * ``TOOL_ACTION_MAP`` / ``TOOL_SCHEMAS`` are derived dicts (kept for callers).
 * ``dispatch_action`` (actions.py) routes via ``TOOLS_BY_ACTION[action].handle``.
 * ``PermissionEngine`` (guardrails.py) reads ``tool.auto_allow``.
 
-Adding a BUILT-IN tool is one file: drop a ``BaseTool`` subclass in this package and
-list it in ``_TOOL_CLASSES``. An EXTERNAL tool is dropped into the templates dir and
-auto-registered by :func:`secator.loader.discover_ai_tools` via
-:func:`register_ai_tool` — no core edit. The consistency test (test_ai_tools) fails
-if a built-in tool's mode exposure and a mode's ``allowed_actions`` drift apart.
+Adding a BUILT-IN tool is one file: drop a ``BaseTool`` subclass in this package, list
+it in ``_TOOL_CLASSES``, and make sure a mode's ``tools:`` globs reach it. An EXTERNAL
+tool is dropped into the templates dir and auto-registered by
+:func:`secator.loader.discover_ai_tools` via :func:`register_ai_tool` — no core edit —
+and a mode opts it in by its EXACT name. The consistency test (test_ai_tools) fails if
+a mode's resolved tool exposure and its ``allowed_actions`` drift apart.
 """
 
 import json
 
-from secator.ai.prompts import MODES, normalize_mode
+from secator.ai.prompts import MODES, normalize_mode, mode_tool_patterns, tool_matches_mode
 from secator.ai.tools.base import BaseTool  # noqa: F401 (re-exported)
 
 from secator.ai.tools.run_task import RunTask
@@ -142,10 +145,8 @@ def _validate_tool_spec(tool):
 		return f"name {name!r} clashes with an existing tool"
 	if not isinstance(tool.schema, dict) or not tool.schema:
 		return f"{name!r}: `schema` must be a non-empty dict"
-	modes = tool.modes
-	if not modes or not all(m in MODES for m in modes):
-		bad = [m for m in (modes or []) if m not in MODES]
-		return f"{name!r}: `modes` must be a non-empty subset of {sorted(MODES)} (bad: {bad or 'empty'})"
+	# A tool does NOT declare its modes — a mode opts it in via its `tools:` frontmatter
+	# (external tools by EXACT name only). So there is no per-tool mode list to validate.
 	# A tool must be dispatchable: either a built-in-style handler name or an own run().
 	if not tool.handler and type(tool).run is BaseTool.run:
 		return f"{name!r}: defines no handler (override run(action, ctx) or set `handler`)"
@@ -180,6 +181,7 @@ def register_ai_tool(tool):
 		return None
 	TOOLS.append(tool)
 	_rebuild_registry()
+	_invalidate_pattern_cache()  # re-validate mode patterns against the new registry
 	return tool
 
 
@@ -216,6 +218,8 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 	# get_mode_config-based filter, which only used the chat fallback for tool exposure).
 	norm = normalize_mode(mode)
 	lookup_mode = norm if norm in MODES else "chat"
+	patterns = mode_tool_patterns(lookup_mode)
+	_validate_mode_patterns(lookup_mode, patterns)
 	excluded = set()
 	if is_subagent:
 		# A subagent runs at its assigned mode; it does not self-escalate and
@@ -226,13 +230,46 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 		excluded.add("change_mode")
 	if backend is not None:
 		excluded.update(backend.get_excluded_tools())
+	# Exposure is driven by the mode's `tools:` frontmatter globs (the single source of
+	# truth) over tool NAMES. External tools opt in by exact name only (external=...).
 	schemas = [
 		t.schema for t in TOOLS
-		if not t.injected and lookup_mode in t.modes and t.name not in excluded
+		if not t.injected and t.name not in excluded
+		and tool_matches_mode(t.name, patterns, external=t.external)
 	]
 	if backend is not None:
 		schemas.extend(backend.get_extra_tools())
 	return schemas
+
+
+# Modes whose include patterns we've already validated (warn once per mode).
+_VALIDATED_PATTERN_MODES = set()
+
+
+def _validate_mode_patterns(mode, patterns):
+	"""Warn once if a mode's include pattern matches no registered tool (a likely typo).
+
+	Runs against the FULL live registry (built-ins + already-discovered external tools),
+	so an exact-name opt-in for an external tool only warns if that tool really is absent.
+	"""
+	if mode in _VALIDATED_PATTERN_MODES:
+		return
+	_VALIDATED_PATTERN_MODES.add(mode)
+	import fnmatch
+	from secator.output_types import Warning
+	from secator.rich import console
+	names = [t.name for t in TOOLS]
+	for pat in patterns:
+		if str(pat).startswith("!"):
+			continue
+		if not any(fnmatch.fnmatchcase(n, str(pat)) for n in names):
+			console.print(Warning(
+				message=f"AI mode {mode!r}: tools pattern {pat!r} matches no known tool."))
+
+
+def _invalidate_pattern_cache():
+	"""Re-validate mode patterns after the registry changes (e.g. a new external tool)."""
+	_VALIDATED_PATTERN_MODES.clear()
 
 
 def coerce_stringified_args(tool_name: str, arguments: dict) -> dict:

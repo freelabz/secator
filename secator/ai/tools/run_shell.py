@@ -1,11 +1,10 @@
 """AI tool: `run_shell`."""
-from secator.ai.tools.base import BaseTool, _DESCRIPTION_SCHEMA, _SHELL_MODES
+from secator.ai.tools.base import BaseTool, _DESCRIPTION_SCHEMA
 
 
 class RunShell(BaseTool):
 	name = "run_shell"
 	action = "shell"
-	modes = _SHELL_MODES
 	handler = "_handle_shell"
 	schema = {
 		"type": "function",
