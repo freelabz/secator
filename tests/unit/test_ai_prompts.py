@@ -909,7 +909,7 @@ class TestPromptLoadingCache(unittest.TestCase):
 				self.assertEqual(load_prompt(rel), body, rel)
 			else:
 				# includes resolve to other bodies; whatever is left must not start with frontmatter
-				self.assertFalse(re.match(r'^---\\s*\\n', load_prompt(rel)), rel)
+				self.assertFalse(re.match(r'^---\s*\n', load_prompt(rel)), rel)
 
 	def test_load_prompt_meta_returns_independent_copies(self):
 		from secator.ai.prompts import load_prompt_meta
