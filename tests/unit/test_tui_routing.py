@@ -997,7 +997,7 @@ async def _replay_body():
 			{"role": "tool", "content": "open: 80"},                     # skipped
 			{"role": "assistant", "content": "Found port 80."},          # 1 text
 		]
-		app._replay_history(msgs)
+		await app._replay_history(msgs)
 		await pilot.pause(0.05)
 		assert len(app._convo().children) - base == 4
 
