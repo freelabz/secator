@@ -570,10 +570,16 @@ class TUIApp(App):
 		# No native clipboard reachable (e.g. in a container / over SSH): the copy now
 		# depends on the terminal honouring OSC 52. Say so once per process, not per copy.
 		TUIApp._clipboard_hint_shown = True
-		msg = (
-			"Copied via the terminal (OSC 52) only. If pasting outside fails, enable OSC 52 "
-			"clipboard access in your terminal (tmux: set -g set-clipboard on), or hold "
-			"Shift to select with the terminal itself.")
+		install = clipboard.missing_tool_hint()
+		if install:
+			# a display is reachable (e.g. a container sharing the host X11 socket) but no
+			# clipboard command is installed: installing one is the reliable fix
+			msg = f"No system clipboard tool found: {install} so copies reach other apps."
+		else:
+			msg = (
+				"Copied via the terminal (OSC 52) only. If pasting outside fails, enable OSC 52 "
+				"clipboard access in your terminal (tmux: set -g set-clipboard on), or hold "
+				"Shift to select with the terminal itself.")
 		try:
 			self.call_from_thread(self.notify, msg, timeout=8)
 		except Exception:  # noqa: BLE001 - app shutting down

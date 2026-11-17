@@ -84,16 +84,33 @@ def native_backends(env=None, platform=None, which=shutil.which) -> list:
 		if which("xclip"):
 			out.append((["xclip", "-selection", "clipboard"], "utf-8", ["xclip", "-selection", "primary"]))
 		if which("xsel"):
-			out.append((["xsel", "-b", "-i"], "utf-8", ["xsel", "-p", "-i"]))
+			out.append((["xsel", "--clipboard", "--input"], "utf-8", ["xsel", "--primary", "--input"]))
 	if _is_wsl(env) and which("clip.exe"):
 		out.append((["clip.exe"], "utf-16-le", None))
 	return out
 
 
+def missing_tool_hint(env=None, platform=None, which=shutil.which):
+	"""When a display is reachable but no clipboard command is installed, a short hint on
+	what to install (e.g. in a container sharing the host X11 display); else None."""
+	env = os.environ if env is None else env
+	platform = sys.platform if platform is None else platform
+	if platform == "darwin" or platform.startswith("win"):
+		return None
+	if native_backends(env, platform, which):
+		return None
+	if env.get("WAYLAND_DISPLAY"):
+		return "install wl-clipboard (e.g. apt install wl-clipboard) or xclip"
+	if env.get("DISPLAY"):
+		return "install xclip (e.g. apt install xclip) or xsel"
+	return None
+
+
 def _run(argv, data: bytes) -> bool:
 	try:
-		# stdout/stderr to DEVNULL (not pipes): xclip / wl-copy fork a child that keeps
-		# serving the selection; a pipe would make run() wait for that child until timeout.
+		# run(input=...) feeds stdin through a pipe and closes it. stdout/stderr go to
+		# DEVNULL (not pipes): xclip / wl-copy fork a child that keeps owning the selection,
+		# and a pipe would make run() wait for that child's EOF until the timeout.
 		devnull = subprocess.DEVNULL
 		proc = subprocess.run(argv, input=data, stdout=devnull, stderr=devnull, timeout=NATIVE_TIMEOUT, check=False)
 		return proc.returncode == 0

@@ -208,7 +208,8 @@ def test_copy_reaches_terminal_and_native_and_hints_once():
 			app_mod.TUIApp._clipboard_hint_shown = False
 			env = mock.patch.dict("os.environ", {"TMUX": "/tmp/tmux,1,0"})
 			native_ = mock.patch.object(clipboard, "copy_native", return_value=False)
-			with env, mock.patch.object(app._driver, "write") as write, native_ as native, \
+			no_hint = mock.patch.object(clipboard, "missing_tool_hint", return_value=None)
+			with env, no_hint, mock.patch.object(app._driver, "write") as write, native_ as native, \
 				mock.patch.object(app, "notify") as notify:
 				app.copy_to_clipboard("abc")
 				app.copy_to_clipboard("def")

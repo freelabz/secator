@@ -63,7 +63,7 @@ def test_wayland_prefers_wl_copy_then_x():
 def test_x11_xclip_and_xsel():
 	with mock.patch.object(clipboard, "_is_wsl", return_value=False):
 		b = clipboard.native_backends(env={"DISPLAY": ":0"}, platform="linux", which=_which("xclip", "xsel", "wl-copy"))
-	assert _argvs(b) == [["xclip", "-selection", "clipboard"], ["xsel", "-b", "-i"]]
+	assert _argvs(b) == [["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]
 
 
 def test_tool_missing_is_skipped():
@@ -106,7 +106,7 @@ def test_copy_native_falls_through_failures():
 	no_wsl = mock.patch.object(clipboard, "_is_wsl", return_value=False)
 	with no_wsl, mock.patch.object(clipboard.subprocess, "run", side_effect=run) as r:
 		assert clipboard.copy_native("hi", env={"DISPLAY": ":0"}, platform="linux", which=_which("xclip", "xsel"))
-	assert r.call_args_list[1].args[0] == ["xsel", "-b", "-i"]
+	assert r.call_args_list[1].args[0] == ["xsel", "--clipboard", "--input"]
 
 
 def test_copy_native_all_fail_returns_false():
@@ -120,3 +120,25 @@ def test_clip_exe_gets_utf16():
 	with mock.patch.object(clipboard.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as run:
 		clipboard.copy_native("é", env={}, platform="win32", which=_which("clip.exe"))
 	assert run.call_args.kwargs["input"] == "é".encode("utf-16-le")
+
+
+def test_xsel_also_sets_primary():
+	no_wsl = mock.patch.object(clipboard, "_is_wsl", return_value=False)
+	ok = subprocess.CompletedProcess([], 0)
+	with no_wsl, mock.patch.object(clipboard.subprocess, "run", return_value=ok) as run:
+		assert clipboard.copy_native("hi", env={"DISPLAY": ":0"}, platform="linux", which=_which("xsel"))
+	assert [c.args[0] for c in run.call_args_list] == [
+		["xsel", "--clipboard", "--input"], ["xsel", "--primary", "--input"]]
+
+
+def test_missing_tool_hint():
+	no_wsl = mock.patch.object(clipboard, "_is_wsl", return_value=False)
+	with no_wsl:
+		# container sharing the host X11 display, no tool installed: suggest xclip
+		assert "apt install xclip" in clipboard.missing_tool_hint(env={"DISPLAY": ":0"}, platform="linux", which=_which())
+		assert "wl-clipboard" in clipboard.missing_tool_hint(
+			env={"WAYLAND_DISPLAY": "wayland-0"}, platform="linux", which=_which())
+		# tool present, or no display at all: nothing to suggest
+		assert clipboard.missing_tool_hint(env={"DISPLAY": ":0"}, platform="linux", which=_which("xclip")) is None
+		assert clipboard.missing_tool_hint(env={}, platform="linux", which=_which()) is None
+	assert clipboard.missing_tool_hint(env={}, platform="darwin", which=_which()) is None
