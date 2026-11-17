@@ -561,11 +561,23 @@ class TUIApp(App):
 					driver.write(seq)
 				except Exception:  # noqa: BLE001 - never let a copy crash the TUI
 					pass
-		threading.Thread(target=self._copy_native, args=(text,), daemon=True).start()
+		# called on the event loop thread only: no lock needed to bump the sequence
+		self._native_copy_seq += 1
+		seq = self._native_copy_seq
+		threading.Thread(target=self._copy_native, args=(text, seq), daemon=True).start()
 
-	def _copy_native(self, text: str) -> None:
+	_native_copy_lock = threading.Lock()  # serializes native writes (see _copy_native)
+	_native_copy_seq = 0  # bumped per copy; a worker whose seq is stale skips its write
+
+	def _copy_native(self, text: str, seq: int) -> None:
 		from secator.tui import clipboard
-		if clipboard.copy_native(text) or TUIApp._clipboard_hint_shown:
+		# One native write at a time, and a request superseded by a newer copy is dropped,
+		# so a slow older write can never land after (and overwrite) the latest selection.
+		with self._native_copy_lock:
+			if seq != self._native_copy_seq:
+				return
+			copied = clipboard.copy_native(text)
+		if copied or TUIApp._clipboard_hint_shown:
 			return
 		# No native clipboard reachable (e.g. in a container / over SSH): the copy now
 		# depends on the terminal honouring OSC 52. Say so once per process, not per copy.

@@ -22,6 +22,14 @@ from secator.tui.render import flatten_renderable, markdown_text  # noqa: E402
 from secator.tui.widgets import PromptInput, SelectableStatic  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _no_native_clipboard():
+	# copy-on-select also runs a native clipboard command: never touch the real clipboard
+	from secator.tui import clipboard
+	with mock.patch.object(clipboard, "copy_native", return_value=True):
+		yield
+
+
 def _run(coro):
 	asyncio.run(coro)
 
@@ -224,4 +232,25 @@ def test_copy_reaches_terminal_and_native_and_hints_once():
 			assert [c.args[0] for c in native.call_args_list] == ["abc", "def"]
 			assert notify.call_count == 1 and "OSC 52" in notify.call_args.args[0]
 		app_mod.TUIApp._clipboard_hint_shown = False
+	_run(body())
+
+
+def test_superseded_native_copy_is_dropped():
+	# a slow older write must not land after (and overwrite) the latest copy
+	from secator.tui import clipboard
+
+	async def body():
+		app = AITUI(None, session="ai", mode="chat")
+		async with app.run_test(size=(100, 30)) as pilot:
+			await pilot.pause(0.05)
+			with mock.patch.object(clipboard, "copy_native", return_value=True) as native:
+				with app._native_copy_lock:  # hold the worker so both requests queue up
+					app.copy_to_clipboard("old")
+					app.copy_to_clipboard("new")
+				for _ in range(20):
+					await pilot.pause(0.05)
+					if native.called:
+						break
+				await pilot.pause(0.1)
+			assert [c.args[0] for c in native.call_args_list] == ["new"]
 	_run(body())
