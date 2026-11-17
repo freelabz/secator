@@ -146,7 +146,7 @@ class TestFindingMgmtTools(unittest.TestCase):
 		ai = [o for o in out if isinstance(o, Ai) and o.ai_type == 'mark_vuln_false_positive'][0]
 		self.assertIn('CVE-2016-20012', ai.content)   # names the finding, not the bare uuid
 		self.assertNotIn('u1', ai.content)
-		self.assertTrue(ai.extra_data.get('finding'))  # attached so the UI renders name + card
+		self.assertTrue(ai.extra_data.get('finding'))  # attached so consumers can render the finding
 		# the FP determination is recorded as an append-only attempt
 		self.assertTrue([o for o in out if isinstance(o, ExploitAttempt) and o.verdict == 'false_positive'])
 

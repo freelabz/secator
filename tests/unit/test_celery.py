@@ -504,7 +504,7 @@ class TestWorkerLossRetryCap(unittest.TestCase):
 	def test_abandon_task_clears_inherited_has_children(self):
 		"""An abandoned task spawned no children, so its stored doc must have has_children=False
 		even when it inherited has_children=True from a parent workflow/scan (run_opts). Otherwise
-		the UI child-runner list shows the failed task as 'waiting' forever (0 real children)."""
+		a consumer listing child runners shows the failed task as 'waiting' forever (0 real children)."""
 		from unittest import mock
 		from secator.celery import abandon_task
 		from secator.tasks import httpx

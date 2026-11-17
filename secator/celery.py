@@ -276,7 +276,7 @@ def abandon_task(name, targets, opts, delivery_count=None):
 	# inherits run_opts['has_children']=True from its parent; the normal run path overwrites
 	# that with needs_chunking() (False for a single-target task), but this abandon path skips
 	# that step, so clear it explicitly. Otherwise the stored doc carries has_children=True with
-	# zero child docs, and the UI child-runner list shows the failed task as "waiting" forever.
+	# zero child docs, and any consumer listing child runners shows the failed task as "waiting" forever.
 	task.has_children = False
 	task.mark_started()
 	attempts = f'{delivery_count} delivery attempts' if delivery_count is not None else 'repeated delivery attempts'

@@ -87,7 +87,8 @@ class TestMongoDBDriver(unittest.TestCase):
 		self.assertEqual(len(url), 1)
 		self.assertEqual(len(vuln), 1)
 
-		# Updates through the AI tools persist and read back.
+		# Updates through the AI tools persist and read back. Each update runs twice: the second
+		# run changes nothing but still matches the finding, so it must succeed too.
 		from secator.ai.actions import ActionContext
 		from secator.ai.tools import TOOLS_BY_NAME
 		ctx = ActionContext(targets=[], model='m', context=self._context())
@@ -96,8 +97,9 @@ class TestMongoDBDriver(unittest.TestCase):
 			('mark_vuln_fixed', {'_uuid': vuln[0]['_uuid'], 'reason': 'no longer reproduces'}),
 		):
 			tool = TOOLS_BY_NAME[name]
-			out = list(tool.run({'action': tool.action, **args}, ctx))
-			self.assertEqual([o.message for o in out if o._type == 'error'], [], name)
+			for attempt in (1, 2):
+				out = list(tool.run({'action': tool.action, **args}, ctx))
+				self.assertEqual([o.message for o in out if o._type == 'error'], [], f'{name} (run {attempt})')
 
 		engine = self._engine()
 		url_after = engine.search({'_uuid': url[0]['_uuid']}, limit=1)[0]

@@ -13,7 +13,8 @@ from secator.ai.actions import ActionContext
 def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
 	"""Apply a workspace-scoped ``$set`` to the vulnerability with this ``_uuid``.
 
-	Returns ``(modified, updated, label, error_msg)``: ``modified`` docs count,
+	Returns ``(matched, updated, label, error_msg)``: ``matched`` docs count (a doc already in the
+	requested state counts),
 	the re-fetched vuln (dict, or None), a display ``label`` (the vuln's ``name``,
 	falling back to the uuid), and an ``error_msg`` string when nothing matched.
 
