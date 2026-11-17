@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.56.0](https://github.com/freelabz/secator/compare/v0.55.0...v0.56.0) (2026-11-16)
+
+
+### Features
+
+* **ai:** optional strict SSRF mode and dedicated web proxy for fetch_url ([#1660](https://github.com/freelabz/secator/issues/1660)) ([c7ce9a3](https://github.com/freelabz/secator/commit/c7ce9a346f15486bb6cae6835bd125d28acbd618))
+* **hooks:** add on_run_end hook and celery_events driver ([#1650](https://github.com/freelabz/secator/issues/1650)) ([b03446c](https://github.com/freelabz/secator/commit/b03446c0fac79604b46723f197f5bdb9e1ed63a9))
+
+
+### Bug Fixes
+
+* **ai:** copy TUI selection to the clipboard and keep Ctrl+C from quitting ([#1663](https://github.com/freelabz/secator/issues/1663)) ([dfae64c](https://github.com/freelabz/secator/commit/dfae64c7f6d7da16d3061f4a0d402f207fb77299))
+* **ai:** custom tool results reach the model; config env list and notice fixes ([#1662](https://github.com/freelabz/secator/issues/1662)) ([a1335b0](https://github.com/freelabz/secator/commit/a1335b0930f9cfb06e5595b9c32e1a68a0b18f0c))
+* **ai:** keep path checks on //-prefixed paths, scope host:port and IPv6 shell targets ([#1673](https://github.com/freelabz/secator/issues/1673)) ([0c146df](https://github.com/freelabz/secator/commit/0c146dfce31daac93a84355e7ff06c552464fa03))
+* **ai:** never expose the placeholder map to the model ([#1675](https://github.com/freelabz/secator/issues/1675)) ([0049a52](https://github.com/freelabz/secator/commit/0049a5285149bca349c57194b78b10db8efc1bb9))
+* **ai:** replay resumed sessions like the live view ([#1666](https://github.com/freelabz/secator/issues/1666)) ([c8b6a2e](https://github.com/freelabz/secator/commit/c8b6a2e2d50c7cf88fca2fc014a404e1f36e6ab4))
+* **ai:** restore the sensitive-data placeholder map on every resume ([#1665](https://github.com/freelabz/secator/issues/1665)) ([5bf8b43](https://github.com/freelabz/secator/commit/5bf8b4341b4d0dd798f99f4a14982e8ed8421416))
+* **ai:** save the local session at every end of turn, atomically ([#1664](https://github.com/freelabz/secator/issues/1664)) ([19565b8](https://github.com/freelabz/secator/commit/19565b80c54b471ae195820175148df1afd10714))
+* **ai:** treat UNC and scheme host arguments as shell targets, not paths ([#1653](https://github.com/freelabz/secator/issues/1653)) ([1e23e3e](https://github.com/freelabz/secator/commit/1e23e3e558d90df5a691fd221638ecd7039fd122))
+* **deps:** let celery resolve the redis client for the redis addon ([#1656](https://github.com/freelabz/secator/issues/1656)) ([eaf7a5c](https://github.com/freelabz/secator/commit/eaf7a5c382add948895e48022e0deba0a6f7e90c))
+* **docker:** build x8 against OpenSSL 3 on Arch ([#1661](https://github.com/freelabz/secator/issues/1661)) ([6ad485d](https://github.com/freelabz/secator/commit/6ad485db5b4dfb4864a627c5ba181607f32450ba))
+* **docker:** build x8 against OpenSSL 3 on the osx image ([#1671](https://github.com/freelabz/secator/issues/1671)) ([b4f7f8b](https://github.com/freelabz/secator/commit/b4f7f8b59e37aa2e0016de6fc16a9d4100cb839f))
+* **query:** read back and write finding updates on the json and api backends ([#1667](https://github.com/freelabz/secator/issues/1667)) ([78ee15d](https://github.com/freelabz/secator/commit/78ee15d400dd2682ff88e6f3a8b17ba9a553974d))
+* **url:** set is_root for URLs on non-default ports ([#1648](https://github.com/freelabz/secator/issues/1648)) ([6b72123](https://github.com/freelabz/secator/commit/6b72123cb2b69f8e4af64b61c3e49e6d55b70579))
+
+
+### Performance Improvements
+
+* **mongodb:** project the tag_duplicates baseline to dedup fields ([#1651](https://github.com/freelabz/secator/issues/1651)) ([7ef03ef](https://github.com/freelabz/secator/commit/7ef03ef1f07ccd3a3abb70b6ed75974e7043a2f5))
+
 ## [0.55.0](https://github.com/freelabz/secator/compare/v0.54.1...v0.55.0) (2026-11-13)
 
 
