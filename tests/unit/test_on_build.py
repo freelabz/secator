@@ -311,9 +311,9 @@ class TestOnBuildChunkWiring(unittest.TestCase):
 
 
 class TestPendingDocDescription:
-    """build_pending_doc must carry the build-time description into config so the
-    UI shows it while a child task is PENDING (not only once it runs). The UI
-    reads config.description (falling back to config.name); before this the
+    """build_pending_doc must carry the build-time description into config so
+    consumers can show it while a child task is PENDING (not only once it runs). They
+    read config.description (falling back to config.name); before this the
     pending doc had no description and every not-yet-run task showed its bare
     name, then the description popped in on RUNNING."""
 

@@ -13,7 +13,7 @@ from secator.ai.tools.base import BaseTool
 # SAME per-type identity the notes store keys off (the ``compare=True`` non-underscore dataclass
 # fields = ``OutputType._compare_key``): a url keys off {url}, a port off {port, ip, state}, a
 # vulnerability off {name, id, matched_at}. Those survive a re-scan's _uuid churn, so a note
-# re-attaches to the re-found finding. Mirrors the platform notes router's identity derivation.
+# re-attaches to the re-found finding. Mirrors the api driver notes endpoint's identity derivation.
 _NOTE_IDENTITY_FIELDS = {
 	cls.get_name(): [f.name for f in fields(cls) if f.compare and not f.name.startswith("_")]
 	for cls in FINDING_TYPES
@@ -24,7 +24,7 @@ def _note_stringify(v) -> str:
 	"""Coerce an identity value to the stable string form stored in a note's target_key.
 
 	Finding identity fields can be ints/bools (e.g. ``port``, ``state``); the stored key is a
-	string map so a note written here compares byte-for-byte with one posted via the platform
+	string map so a note written here compares byte-for-byte with one posted via the api driver
 	notes endpoint (which stringifies the same way)."""
 	if v is None:
 		return ""
@@ -91,7 +91,7 @@ class AddNote(BaseTool):
 		It is keyed by the finding's stable dedup identity (``target_type`` + ``target_key``), not
 		its mutable ``_uuid``, so the note survives a re-scan that mints a fresh ``_uuid`` for the
 		same finding. Persistence follows the active driver: mongodb/sqlite/json write the note
-		locally; the ``api`` driver POSTs it to the platform notes endpoint (author + timestamps
+		locally; the ``api`` driver POSTs it to the remote notes endpoint (author + timestamps
 		set server-side there). The finding itself is never modified.
 		"""
 		context = _get_result_context(action, ctx)

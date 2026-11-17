@@ -1419,7 +1419,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 		"""A guardrail denial (e.g. out-of-scope target) must surface the reason ONCE —
 		the tool_result bubble the model reads — and NOT also yield a redundant Warning
 		into the stream (which rendered the denial twice in the live UI). Regression from
-		two canary AI runs where every out-of-scope run_task showed the reason twice."""
+		two AI runs where every out-of-scope run_task showed the reason twice."""
 		import json
 		from secator.tasks.ai import ai as AiTask
 		from secator.output_types import Ai, Warning as WarningItem

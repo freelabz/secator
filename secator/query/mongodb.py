@@ -119,7 +119,7 @@ class MongoDBBackend(QueryBackend):
 	def _execute_create_note(self, note: dict) -> int:
 		"""Insert a note into the dedicated ``notes`` collection (NOT findings).
 
-		The shape matches the platform's notes reader — ``target_type`` + ``target_key``
+		The shape matches what consumers reading notes expect — ``target_type`` + ``target_key``
 		identity, ``body``/``changes``, and ``_context.workspace_id`` scope — so a note the
 		AI writes here renders exactly like one posted through the notes endpoint.
 		"""
@@ -243,7 +243,7 @@ class MongoDBBackend(QueryBackend):
 				if workspace_id:
 					# Scope by workspace. Runner docs carry BOTH context.workspace_id and
 					# context.workspace_name; callers pass either a 24-char hex ObjectId
-					# (the platform passes the workspace _id) or a workspace name (the CLI's
+					# (API callers pass the workspace _id) or a workspace name (the CLI's
 					# -ws). Match the right field so an id doesn't get compared to names
 					# (which returned 0 runners for every id-scoped call). Mirrors the
 					# ObjectId-vs-name detection in the api backend.

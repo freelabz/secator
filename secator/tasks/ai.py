@@ -297,7 +297,7 @@ class ai(PythonRunner):
 		# Extra (non-core) tools to add on top of the mode's baseline for this run, by name
 		# (e.g. add_suggestion). Merged with CONFIG.addons.ai.extra_tools; every name must
 		# resolve to a loaded tool (templates dir / SECATOR_AI_TOOLS_DIRS / bundle). Generic
-		# and driver-agnostic — the same option lets any caller (CLI, a chore, the platform)
+		# and driver-agnostic — the same option lets any caller (CLI, a scheduled job, an API client)
 		# grant a specific external tool to a run without a core edit.
 		"extra_tools": {"type": "list", "default": None, "help": "Extra AI tool names to add on top of the mode baseline"},  # noqa: E501
 		"max_tokens_total": {
