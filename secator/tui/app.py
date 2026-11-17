@@ -520,8 +520,9 @@ class TUIApp(App):
 	# ---- clipboard: copy-on-select + selection-aware Ctrl+C ----
 	# Textual captures the mouse, so the terminal's own selection only works with Shift held,
 	# and the terminal's Ctrl+C then reaches the app (which used to quit). Instead, the
-	# in-app mouse selection copies itself on release (OSC 52 via App.copy_to_clipboard,
-	# which also works over SSH), and Ctrl+C with a selection copies instead of quitting.
+	# in-app mouse selection copies itself on release (copy_to_clipboard below: OSC 52, which
+	# also works over SSH, plus a native clipboard command when one is reachable), and Ctrl+C
+	# with a selection copies instead of quitting.
 	def _selected_text(self) -> str:
 		"""The current selection: a mouse selection in the views, else a focused text
 		area's own selection (the prompt input). Empty when nothing is selected."""
@@ -541,6 +542,42 @@ class TUIApp(App):
 		except Exception:  # noqa: BLE001
 			pass
 		return bool(getattr(self.focused, "selected_text", "") or "")
+
+	_clipboard_hint_shown = False
+
+	def copy_to_clipboard(self, text: str) -> None:
+		"""Copy to the app clipboard AND, as far as possible, to the system / terminal one.
+
+		Textual's own implementation only sets ``app.clipboard`` (what in-app paste reads)
+		and writes a bare OSC 52, which many terminals, tmux and screen silently drop. Here
+		the OSC 52 is wrapped for tmux / screen, and a native clipboard command (wl-copy,
+		xclip / xsel, pbcopy, clip.exe) is tried in the background as well."""
+		from secator.tui import clipboard
+		self._clipboard = text
+		driver = self._driver
+		if driver is not None:
+			for seq in clipboard.osc52_sequences(text):
+				try:
+					driver.write(seq)
+				except Exception:  # noqa: BLE001 - never let a copy crash the TUI
+					pass
+		threading.Thread(target=self._copy_native, args=(text,), daemon=True).start()
+
+	def _copy_native(self, text: str) -> None:
+		from secator.tui import clipboard
+		if clipboard.copy_native(text) or TUIApp._clipboard_hint_shown:
+			return
+		# No native clipboard reachable (e.g. in a container / over SSH): the copy now
+		# depends on the terminal honouring OSC 52. Say so once per process, not per copy.
+		TUIApp._clipboard_hint_shown = True
+		msg = (
+			"Copied via the terminal (OSC 52) only. If pasting outside fails, enable OSC 52 "
+			"clipboard access in your terminal (tmux: set -g set-clipboard on), or hold "
+			"Shift to select with the terminal itself.")
+		try:
+			self.call_from_thread(self.notify, msg, timeout=8)
+		except Exception:  # noqa: BLE001 - app shutting down
+			pass
 
 	def _copy(self, text: str) -> None:
 		# rendered lines are padded to the view width: drop that trailing padding

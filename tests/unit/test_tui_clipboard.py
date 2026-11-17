@@ -192,3 +192,35 @@ def test_mouse_wheel_still_scrolls_the_conversation():
 			await pilot.pause(0.1)
 			assert convo.scroll_y < end
 	_run(body())
+
+
+def test_copy_reaches_terminal_and_native_and_hints_once():
+	# the copy writes OSC 52 to the terminal (tmux-wrapped too), keeps the in-app
+	# clipboard for in-app paste, tries a native clipboard, and when none is reachable
+	# shows a one-time hint (not one per copy)
+	from secator.tui import app as app_mod
+	from secator.tui import clipboard
+
+	async def body():
+		app = AITUI(None, session="ai", mode="chat")
+		async with app.run_test(size=(100, 30)) as pilot:
+			await pilot.pause(0.05)
+			app_mod.TUIApp._clipboard_hint_shown = False
+			env = mock.patch.dict("os.environ", {"TMUX": "/tmp/tmux,1,0"})
+			native_ = mock.patch.object(clipboard, "copy_native", return_value=False)
+			with env, mock.patch.object(app._driver, "write") as write, native_ as native, \
+				mock.patch.object(app, "notify") as notify:
+				app.copy_to_clipboard("abc")
+				app.copy_to_clipboard("def")
+				for _ in range(20):
+					await pilot.pause(0.05)
+					if native.call_count == 2 and notify.called:
+						break
+			assert app.clipboard == "def"
+			written = [c.args[0] for c in write.call_args_list]
+			assert any(s.startswith("\x1b]52;c;") for s in written)
+			assert any(s.startswith("\x1bPtmux;") for s in written)
+			assert [c.args[0] for c in native.call_args_list] == ["abc", "def"]
+			assert notify.call_count == 1 and "OSC 52" in notify.call_args.args[0]
+		app_mod.TUIApp._clipboard_hint_shown = False
+	_run(body())
