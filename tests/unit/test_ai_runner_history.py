@@ -150,7 +150,7 @@ class TestListRunnersTool(unittest.TestCase):
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestMongoListRunnersScoping(unittest.TestCase):
 	"""The mongodb backend must scope list_runners by the RIGHT field: a 24-char hex
-	ObjectId (what the platform passes) -> context.workspace_id; a name (CLI -ws) ->
+	ObjectId (what API callers pass) -> context.workspace_id; a name (CLI -ws) ->
 	context.workspace_name. Comparing an id against the name field returned 0 runners."""
 
 	WID = '6ab134f8d9ab36c8f1866a52'  # a valid 24-char hex ObjectId

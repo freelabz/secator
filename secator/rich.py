@@ -98,7 +98,7 @@ def display_denial(description, reason, command="", subagent=None):
 
 def attach_display_hooks(hooks, runner_cls):
 	"""Append the display hooks (on_line for command output, on_item for findings) so a
-	child runner's command/output AND findings stream into the UI when a display is
+	child runner's command/output AND findings stream into the display when one is
 	active. No-op without a display.
 
 	Keyed on EVERY runner class — not just the top-level one — because a Workflow/Scan

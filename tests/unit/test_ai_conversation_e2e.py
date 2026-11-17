@@ -56,7 +56,7 @@ def _match(doc, query):
 class ChannelEngine:
 	"""In-memory workspace channel + a scripted web answer channel.
 
-	`answers`: the sequence of user answers the UI submits. On each worker poll for
+	`answers`: the sequence of user answers a client submits. On each worker poll for
 	a follow-up answer, the latest pending follow-up is flipped to answered with the
 	next scripted answer. `standing=True` re-serves answers[0] forever (models the
 	observed runaway: the same pasted message re-answering every new follow-up).

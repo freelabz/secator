@@ -295,7 +295,7 @@ class TestHandleShell(unittest.TestCase):
 		self.assertEqual(fake_runner.max_timeout, CONFIG.security.shell_default_timeout)
 
 		self.assertEqual(results[0].ai_type, 'shell')
-		# The shell Ai must carry the UI-linking extra_data (runner_type + runner_id)
+		# The shell Ai must carry the runner-linking extra_data (runner_type + runner_id)
 		# so a future regression in that wiring is caught.
 		self.assertEqual(results[0].extra_data.get('runner_type'), 'task')
 		self.assertTrue(results[0].extra_data.get('runner_id'))
@@ -727,7 +727,7 @@ class TestRunRunner(unittest.TestCase):
 	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_run_runner_propagates_hooks_and_emits_runner_id(self, mock_build_hooks, mock_task_cls, _mock_tpl):
 		"""Sub-runner must receive driver hooks (so its results persist) and the
-		emitted action Ai must carry the created runner's id + type for the UI."""
+		emitted action Ai must carry the created runner's id + type for consumers."""
 		sentinel_hooks = {'fake': ['hook']}
 		mock_build_hooks.return_value = sentinel_hooks
 
@@ -753,7 +753,7 @@ class TestRunRunner(unittest.TestCase):
 
 		# Action Ai item carries runner_id + runner_type. The child is a CHUNK of the
 		# parent ai task, so runner_id is its own task_chunk_id (the chunk doc's _id),
-		# NOT the internal runner.id — this is what the UI resolves the RunnerCard by.
+		# NOT the internal runner.id — this is what consumers resolve the runner by.
 		ai_items = [r for r in results if isinstance(r, Ai) and r.ai_type == 'task']
 		self.assertEqual(len(ai_items), 1)
 		child_ctx = kwargs.get('context', {})
@@ -2255,7 +2255,7 @@ class TestHandleMarkVulnFalsePositive(unittest.TestCase):
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestRunRunnerNameValidation(unittest.TestCase):
 	"""An LLM-invented task/workflow name must fail with a clean, actionable message
-	instead of leaking a raw Python traceback (regression from two canary AI runs where
+	instead of leaking a raw Python traceback (regression from two AI runs where
 	the model invented `url_crawl` / `code_scan`, each dumping a full
 	`TaskNotFoundError` stack trace into the tool result)."""
 

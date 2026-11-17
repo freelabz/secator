@@ -1,8 +1,8 @@
 """Tests for per-run billed AI token accounting.
 
 The `ai` task accumulates billed tokens from every LLM call it makes into
-`context.ai_tokens` (and cost into `context.ai_cost`). The platform billing
-chore reads `context.ai_tokens` — the AI analog of `context.scan_hours`.
+`context.ai_tokens` (and cost into `context.ai_cost`). Usage accounting
+reads `context.ai_tokens` — the AI analog of `context.scan_hours`.
 
 These tests verify:
 - N calls with known token counts sum onto `context.ai_tokens`.
@@ -142,7 +142,7 @@ class TestAiTokenAccounting(unittest.TestCase):
 		self.assertEqual(task.context["ai_tokens"], 42)
 
 	def test_field_persisted_on_context(self):
-		"""The platform reads context.ai_tokens — confirm that exact key."""
+		"""Consumers read context.ai_tokens — confirm that exact key."""
 		task = _make_task()
 		task._account_usage({"tokens": 123, "cost": 0.0})
 		self.assertIn("ai_tokens", task.context)

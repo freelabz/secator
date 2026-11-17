@@ -50,7 +50,7 @@ class beanshooter(Command):
 		'brew': ['openjdk'],
 	}
 	# Download the jar straight to the bin dir with `wget -O`. A bare `wget <url>`
-	# writes to the current working directory, which is not writable in the platform
+	# writes to the current working directory, which is not writable in the secator
 	# Docker build (the `secator` user has no write access to WORKDIR) -> "Permission
 	# denied" -> install fails. Writing directly to CONFIG.dirs.bin avoids that.
 	install_cmd = (
