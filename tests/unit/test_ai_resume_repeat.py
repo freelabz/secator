@@ -312,7 +312,7 @@ class TestAiResumeRepeat(unittest.TestCase):
 #     actionable answer) -> the loop runs unbounded: each answer does
 #     `self.max_iterations += extra_iters` in `_prompt_and_redetect`, cancelling
 #     `iteration += 1`, so the `while iteration < max_iterations` cap NEVER bites.
-# => within-run repeat = (external re-answer, in secator-api/UI) x (secator has no
+# => within-run repeat = (external re-answer, in an API client) x (secator has no
 #    effective iteration cap / no same-answer loop-breaker). NOT the RC1 re-append.
 # =============================================================================
 
@@ -324,7 +324,7 @@ CSV = "identifier,asset_type,instruction,eligible_for_bounty"
 
 
 class _ApiAnswerEngine(FakeQueryEngine):
-	"""FakeQueryEngine that also models secator-api's answer channel: just before
+	"""FakeQueryEngine that also models the client's answer channel: just before
 	the worker polls for an answer, flip the latest pending follow_up to
 	answered=CSV. ``answer_cap`` bounds how many times (so the test terminates)."""
 

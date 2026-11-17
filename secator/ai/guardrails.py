@@ -1427,7 +1427,7 @@ class PermissionEngine:
 			for v in values_to_check:
 				if host_in_scope(v, self.in_scope, self.out_of_scope):
 					return PermissionResult(decision="allow", reason=f"In scope: target({v})")
-			# Out of a defined in_scope. With scope_hard_deny (cloud), deny outright
+			# Out of a defined in_scope. With scope_hard_deny enabled, deny outright
 			# — structured: machine-readable reason + the offending target — BEFORE the
 			# interactive `ask` rules below (there is a catch-all `ask: target(*)`, so a
 			# hard-deny placed only in the default-deny path never fires). The model then

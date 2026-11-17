@@ -90,7 +90,7 @@ class TestGithubCloneAlwaysAllowed(unittest.TestCase):
 		self.assertEqual(res.decision, "allow")
 
 	def test_github_allowed_even_with_hard_deny(self):
-		"""scope_hard_deny (cloud) must not block code-hosting: allowed for github.com,
+		"""scope_hard_deny, when enabled, must not block code-hosting: allowed for github.com,
 		a wildcard host, and raw.githubusercontent.com even when out of a defined scope."""
 		try:
 			CONFIG.security.scope_hard_deny = True
@@ -1732,7 +1732,7 @@ class TestScopeHardDeny(unittest.TestCase):
 		"""Regression: the shipped AI config carries a catch-all ``ask: target(*)`` rule,
 		so an out-of-scope target matches ASK in ``_check_value`` BEFORE any default-deny.
 		The hard-deny must beat that ask rule (it lives in ``_check_value``, not only the
-		``_check_values`` default-deny path) — otherwise cloud runs keep prompting for
+		``_check_values`` default-deny path) — otherwise runs with scope_hard_deny keep prompting for
 		out-of-scope targets even with the flag on."""
 		engine = PermissionEngine(
 			{"allow": ["task(*)"], "deny": [], "ask": ["target(*)"]},
