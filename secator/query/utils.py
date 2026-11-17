@@ -636,17 +636,23 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5, default
     order = []
     for item in items:
         key = tuple(str(_finding_value(item, f, defaults)) for f in group_by)
+        ts = _finding_ts(item)
         if key not in groups:
-            groups[key] = {'rep': item, 'agg': [], 'count': 0}
+            # 'agg' is an insertion-ordered set of the distinct aggregated values (dict keys):
+            # a list membership test made grouping quadratic in the size of a group.
+            groups[key] = {'rep': item, 'ts': ts, 'agg': {}, 'count': 0}
             order.append(key)
         group = groups[key]
         group['count'] += 1
-        if _finding_ts(item) >= _finding_ts(group['rep']):
-            group['rep'] = item
+        if ts >= group['ts']:
+            group['rep'], group['ts'] = item, ts
         if aggregate_field:
             value = _finding_value(item, aggregate_field)
-            if value and value not in group['agg']:
-                group['agg'].append(value)
+            if value:
+                try:
+                    group['agg'].setdefault(value, value)
+                except TypeError:  # unhashable value (e.g. a list): dedup on its repr
+                    group['agg'].setdefault(repr(value), value)
 
     out = []
     for key in order:
@@ -663,7 +669,7 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5, default
             # When grouping, other fields (extra_data, etc.) keep the newest
             # finding's values; only the aggregate field is replaced by the
             # truncated collected values.
-            setattr(rep, aggregate_field, _truncate_aggregate(group['agg'], max_display))
+            setattr(rep, aggregate_field, _truncate_aggregate(list(group['agg'].values()), max_display))
         if not isinstance(rep, dict):
             rep._group_count = group['count']
         out.append(rep)
