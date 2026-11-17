@@ -2396,12 +2396,6 @@ def report_delete(runner_ids, workspace, driver, yes):
 # 	"""Deploy secator on docker-compose"""
 # 	pass
 
-# @deploy.command()
-# @click.option('-t', '--target', type=str, default='minikube', help='Deployment target amongst minikube, gke')
-# def k8s():
-# 	"""Deploy secator on Kubernetes"""
-# 	pass
-
 
 # --------#
 # HEALTH #
