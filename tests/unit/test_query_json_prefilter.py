@@ -11,6 +11,7 @@ original list-based implementation.
 """
 import json
 import random
+import re
 import shutil
 import tempfile
 import unittest
@@ -249,7 +250,8 @@ class TestWorkspaceListCounts(unittest.TestCase):
 		with mock.patch.object(CONFIG.dirs, 'reports', tmp):
 			result = CliRunner().invoke(cli, ['workspace', 'list', '--driver', 'local'], env={'COLUMNS': '400'})
 		self.assertEqual(result.exit_code, 0, result.output)
-		counts = {line.split('│')[1].strip(): line.split('│')[2].strip() for line in result.output.splitlines()
+		output = re.sub(r'\x1b\[[0-9;]*m', '', result.output)  # the console may force colors
+		counts = {line.split('│')[1].strip(): line.split('│')[2].strip() for line in output.splitlines()
 				if line.startswith('│')}
 		self.assertEqual(counts, {'alpha': '3', 'beta': '1', 'empty': '0'})
 
