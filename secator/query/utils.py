@@ -1,6 +1,7 @@
 """Utilities for converting CLI query syntax to MongoDB-style queries."""
 
 import json
+import math
 import re
 
 from secator.rich import console
@@ -598,7 +599,44 @@ def _finding_value(item, key, defaults=None):
 
 
 def _finding_ts(item):
-    return _finding_value(item, '_timestamp') or 0
+    """Return a finding's ``_timestamp`` as a float epoch, for ordering.
+
+    Stores do not all hold the same type: findings written by external writers or
+    API clients can carry a numeric string, an ISO 8601 string or a datetime, and
+    some have no timestamp at all. Comparing those raw values raises a TypeError
+    (e.g. ``0 >= '1700000000.5'``), so every value is coerced to a float, and
+    anything missing or unparsable falls back to 0 (sorts oldest).
+    """
+    from datetime import date, datetime, timezone
+    value = _finding_value(item, '_timestamp')
+    if isinstance(value, bool) or value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value) if math.isfinite(value) else 0.0
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.timestamp()
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc).timestamp()
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return 0.0
+        try:
+            ts = float(value)
+            return ts if math.isfinite(ts) else 0.0
+        except ValueError:
+            pass
+        try:
+            # fromisoformat() before 3.11 rejects a trailing 'Z'.
+            dt = datetime.fromisoformat(value[:-1] + '+00:00' if value.endswith(('Z', 'z')) else value)
+        except ValueError:
+            return 0.0
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    return 0.0
 
 
 def _truncate_aggregate(values, max_display=5):

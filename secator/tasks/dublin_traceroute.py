@@ -97,7 +97,6 @@ class dublin_traceroute(Command):
 					rtt_usec = hop.get('rtt_usec') or 0
 					received = hop.get('received') or {}
 					ip_block = received.get('ip', {})
-					timestamp = received.pop('timestamp', '')
 					ip = ip_block.get('src', '')
 					ttl_received = ip_block.get('ttl', 0)
 					names.append(name)
@@ -113,7 +112,6 @@ class dublin_traceroute(Command):
 					match=self.inputs[0],
 					name='traceroute',
 					value=full_fmt_string,
-					_timestamp=timestamp
 				)
 			all_loops = list(set(all_loops))
 			if all_loops:

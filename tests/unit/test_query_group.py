@@ -190,3 +190,84 @@ class TestStreamViewIterRaw(unittest.TestCase):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+def _tag(name, match, ts=None, category='info'):
+	doc = {'_type': 'tag', 'category': category, 'name': name, 'value': match, 'match': match}
+	if ts is not ...:
+		doc['_timestamp'] = ts
+	return doc
+
+
+class TestGroupFindingsMixedTimestamps(unittest.TestCase):
+	"""Stores can hold `_timestamp` as a float, a numeric string, an ISO string, a datetime, or
+	nothing at all. Ordering within a group must not compare those raw values (TypeError)."""
+
+	def test_missing_then_numeric_string_does_not_crash(self):
+		# The original crash: rep has no timestamp (-> 0), next item has a string timestamp.
+		no_ts = _tag('traceroute', 'a', ts=...)
+		str_ts = _tag('traceroute', 'b', ts='1700000000.5')
+		reps = group_findings([no_ts, str_ts], ['category', 'name'], aggregate_field='match')
+		self.assertEqual(len(reps), 1)
+		self.assertEqual(reps[0]._group_count, 2)
+		self.assertEqual(reps[0].value, 'b')  # the string timestamp is the newest
+
+	def test_int_str_empty_none_mixed(self):
+		items = [
+			_tag('t', 'int', ts=1000),
+			_tag('t', 'str', ts='3000'),
+			_tag('t', 'empty', ts=''),
+			_tag('t', 'none', ts=None),
+			_tag('t', 'missing', ts=...),
+			_tag('t', 'float', ts=2000.5),
+		]
+		reps = group_findings(items, ['category', 'name'])
+		self.assertEqual(len(reps), 1)
+		self.assertEqual(reps[0]._group_count, 6)
+		self.assertEqual(reps[0].value, 'str')
+
+	def test_iso_and_datetime_timestamps_order_by_time(self):
+		from datetime import datetime, timezone
+		items = [
+			_tag('t', 'iso_z', ts='2026-01-02T00:00:00Z'),
+			_tag('t', 'dt', ts=datetime(2026, 1, 3, tzinfo=timezone.utc)),
+			_tag('t', 'epoch', ts=datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()),
+			_tag('t', 'garbage', ts='not a date'),
+		]
+		self.assertEqual(group_findings(items, ['name'])[0].value, 'dt')
+		self.assertEqual(group_findings(items[:1] + items[2:], ['name'])[0].value, 'iso_z')
+
+	def test_output_type_objects_with_string_timestamp(self):
+		from secator.output_types import Tag
+		old = Tag(name='t', value='old', match='x', _timestamp=10)
+		new = Tag(name='t', value='new', match='y', _timestamp='20')
+		reps = group_findings([old, new], ['category', 'name'])
+		self.assertEqual(reps[0].value, 'new')
+
+
+class TestFindingTs(unittest.TestCase):
+
+	def test_coercion(self):
+		from datetime import datetime, timezone
+		from secator.query.utils import _finding_ts
+		epoch = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
+		cases = [
+			({'_timestamp': 5}, 5.0),
+			({'_timestamp': 5.5}, 5.5),
+			({'_timestamp': '5.5'}, 5.5),
+			({'_timestamp': ' 7 '}, 7.0),
+			({'_timestamp': '2026-01-01T00:00:00Z'}, epoch),
+			({'_timestamp': '2026-01-01T00:00:00+00:00'}, epoch),
+			({'_timestamp': '2026-01-01T00:00:00'}, epoch),  # naive -> UTC
+			({'_timestamp': datetime(2026, 1, 1)}, epoch),
+			({'_timestamp': ''}, 0.0),
+			({'_timestamp': None}, 0.0),
+			({'_timestamp': 'nan'}, 0.0),
+			({'_timestamp': 'garbage'}, 0.0),
+			({'_timestamp': True}, 0.0),
+			({'_timestamp': [1]}, 0.0),
+			({}, 0.0),
+		]
+		for item, expected in cases:
+			with self.subTest(item=item):
+				self.assertEqual(_finding_ts(item), expected)
