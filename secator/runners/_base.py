@@ -10,7 +10,6 @@ from pathlib import Path
 from time import time
 
 from dotmap import DotMap
-from greenlet import GreenletExit
 from rich.errors import MarkupError as RichMarkupError
 import humanize
 
@@ -761,10 +760,6 @@ class Runner:
 				for item in self.yielder():
 					yield from self._process_item(item)
 					self.run_hooks('on_interval', sub='item')
-			if isinstance(e, GreenletExit):
-				# The greenlet running this runner is being killed (task terminated):
-				# propagate so the caller stops too instead of carrying on.
-				raise
 
 		finally:
 			yield from self.results_buffer
