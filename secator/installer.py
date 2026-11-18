@@ -317,9 +317,23 @@ class SourceInstaller:
 
 		return bin_path
 
+	@staticmethod
+	def _musl_rustflags(current):
+		"""Return RUSTFLAGS with static C runtime linking disabled, keeping any existing flags."""
+		flag = '-Ctarget-feature=-crt-static'
+		if flag in current.split():
+			return current
+		return f'{current} {flag}'.strip()
+
 	@classmethod
 	def _symlink_binary(cls, source_path, target_path):
 		"""Symlink the binary to the given directory."""
+		# The tool may already be installed at the target (e.g. CARGO_HOME/bin is the secator bin
+		# dir). Replacing it would delete the binary and leave a symlink pointing to itself.
+		if os.path.abspath(source_path) == os.path.abspath(target_path) or (
+				os.path.exists(target_path) and os.path.samefile(source_path, target_path)):
+			console.print(Info(message=f'Binary already at {target_path}, no symlink needed'))
+			return
 		console.print(Info(message=f'Symlinking binary {source_path} to {target_path}'))
 		try:
 			os.symlink(source_path, target_path)
@@ -359,6 +373,11 @@ class SourceInstaller:
 		if not install_cmd:
 			return InstallerStatus.INSTALL_SKIPPED_OK
 
+		# On musl (apk), cargo must not link the C runtime statically. Pass the flag through the
+		# environment rather than rewriting the command string: install commands may mention
+		# `cargo` outside an invocation (e.g. a `command -v cargo` guard).
+		extra_env = {}
+
 		# Install build dependencies if needed
 		if install_prereqs:
 			regex = re.compile(r'(cargo\s+|go\s+|gem\s+|git\s+)')
@@ -375,7 +394,7 @@ class SourceInstaller:
 					if not distribution.pm_installer:
 						return InstallerStatus.UNKNOWN_DISTRIBUTION
 					if distribution.pm_name == 'apk':
-						install_cmd = install_cmd.replace('cargo ', 'RUSTFLAGS="-Ctarget-feature=-crt-static" cargo ')
+						extra_env['RUSTFLAGS'] = cls._musl_rustflags(os.environ.get('RUSTFLAGS', ''))
 					status = SourceInstaller.install(rust_install_cmd)
 					if not status.is_ok():
 						return status
@@ -404,12 +423,14 @@ class SourceInstaller:
 		# config, so the token never shows up in the printed command): anonymous clones get rate-limited.
 		# git only applies the rewrite to URLs starting with https://github.com/, so it's a no-op otherwise.
 		cls_attributes = {'shell': True}
+		if extra_env:
+			cls_attributes['extra_env'] = extra_env
 		if CONFIG.cli.github_token:
-			cls_attributes['extra_env'] = {
+			cls_attributes.setdefault('extra_env', {}).update({
 				'GIT_CONFIG_COUNT': '1',
 				'GIT_CONFIG_KEY_0': f'url.https://x-access-token:{CONFIG.cli.github_token}@github.com/.insteadOf',
 				'GIT_CONFIG_VALUE_0': 'https://github.com/',
-			}
+			})
 		# `go install` module fetches through proxy.golang.org intermittently fail with
 		# HTTP/2 INTERNAL_ERROR in CI and abort the whole build. Fall back to a direct (VCS)
 		# fetch on ANY proxy error (the `|` separator, vs `,` which only falls back on 404/410).
