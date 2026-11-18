@@ -131,3 +131,45 @@ class TestRevokedOwnTask(_KillAfterTask):
 
 if __name__ == '__main__':
 	unittest.main()
+
+
+class TestStopConsumingOnReceive(_KillAfterTask):
+	"""A worker that ends after its task stops consuming as soon as that task is received."""
+
+	def _consumer(self):
+		consumer = mock.MagicMock()
+		consumer.task_consumer.queues = [SimpleNamespace(name='small-fast'), SimpleNamespace(name='poll')]
+		return consumer
+
+	def test_received_task_cancels_every_queue(self):
+		consumer = self._consumer()
+		celery_signals.task_received_handler(sender=consumer, request=SimpleNamespace(name='secator.celery.run_command'))
+		self.assertEqual(consumer.cancel_task_queue.call_args_list, [mock.call('small-fast'), mock.call('poll')])
+
+	def test_other_task_keeps_consuming(self):
+		consumer = self._consumer()
+		celery_signals.task_received_handler(sender=consumer, request=SimpleNamespace(name='other.task'))
+		consumer.cancel_task_queue.assert_not_called()
+
+	def test_kill_after_task_off_keeps_consuming(self):
+		consumer = self._consumer()
+		with mock.patch.object(celery_signals.CONFIG.celery, 'worker_kill_after_task', False):
+			celery_signals.task_received_handler(sender=consumer, request=SimpleNamespace(name='secator.celery.run_command'))
+		consumer.cancel_task_queue.assert_not_called()
+
+	def test_registered_only_with_kill_after_task(self):
+		for enabled in (True, False):
+			with (
+				mock.patch.object(celery_signals.CONFIG.celery, 'worker_kill_after_task', enabled),
+				mock.patch.object(celery_signals.CONFIG.celery, 'worker_kill_after_idle_seconds', 20),
+				mock.patch.object(celery_signals.CONFIG.celery, 'override_default_logging', False),
+				mock.patch.object(signals.task_received, 'connect') as connect,
+				mock.patch.object(signals.celeryd_after_setup, 'connect'),
+				mock.patch.object(signals.task_postrun, 'connect'),
+				mock.patch.object(signals.task_prerun, 'connect'),
+				mock.patch.object(signals.task_revoked, 'connect'),
+				mock.patch.object(signals.worker_ready, 'connect'),
+				mock.patch.object(signals.worker_shutdown, 'connect'),
+			):
+				celery_signals.setup_handlers()
+			self.assertEqual(connect.call_args_list, [mock.call(celery_signals.task_received_handler)] if enabled else [])

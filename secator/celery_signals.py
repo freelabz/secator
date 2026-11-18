@@ -126,6 +126,20 @@ def task_prerun_handler(task_id, **kwargs):
 	set_task_running(task_id)
 
 
+def task_received_handler(sender=None, request=None, **kwargs):
+	"""Stop consuming as soon as the task that will end this worker is received.
+
+	Runs in the worker's consumer (its main process, whatever the pool). With
+	``celery.worker_kill_after_task`` the worker runs exactly one task: cancelling its queue
+	consumers here means nothing else is delivered while that task runs, nor between its
+	(late) ack and the worker's shutdown.
+	"""
+	if sender is None or request is None or not kills_after_task(getattr(request, 'name', None)):
+		return
+	for queue in [q.name for q in getattr(sender.task_consumer, 'queues', [])]:
+		sender.cancel_task_queue(queue)
+
+
 def task_postrun_handler(**kwargs):
 	# A task applied eagerly (a child runner run in sync mode inside the task this worker is
 	# executing) also fires task_postrun, in the same process. It must neither clear the
@@ -191,6 +205,8 @@ def setup_handlers():
 		signals.celeryd_after_setup.connect(capture_worker_name)
 		signals.task_postrun.connect(task_postrun_handler)
 		signals.task_prerun.connect(task_prerun_handler)
+		if CONFIG.celery.worker_kill_after_task:
+			signals.task_received.connect(task_received_handler)
 		signals.task_revoked.connect(task_revoked_handler)
 		signals.worker_ready.connect(worker_init_handler)
 		signals.worker_shutdown.connect(worker_shutdown_handler)

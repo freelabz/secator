@@ -15,6 +15,7 @@ from time import time
 
 import psutil
 from fp.fp import FreeProxy
+from greenlet import GreenletExit
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
@@ -623,6 +624,9 @@ class Command(Runner):
 			self.debug(f'{self.unique_name}: {type(e).__name__}.', sub='end')
 			self.stop_process()
 			yield Error.from_exception(e)
+			if isinstance(e, GreenletExit):
+				# Killed (task terminated): propagate instead of ending as a failed command.
+				raise
 
 		finally:
 			yield from self._wait_for_end()
