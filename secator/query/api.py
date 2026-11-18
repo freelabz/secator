@@ -4,12 +4,35 @@ import json
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlencode
 
+import click
 import requests
 
 from secator.output_types import Warning
 from secator.query._base import QueryBackend
 from secator.config import CONFIG
 from secator.rich import console
+
+
+class ApiAuthError(click.ClickException):
+    """The API rejected the request (401/403): the API key is missing, invalid or lacks access.
+
+    Never swallowed by the backend's best-effort reads: an auth failure must surface as an
+    error, not as an empty result ("0 workspaces", "0 findings"). A ``ClickException``, so
+    CLI commands print the message and exit non-zero without a traceback.
+    """
+
+
+def _auth_error_message(status_code: int, url: str, has_key: bool) -> str:
+    if not has_key:
+        return (
+            f'API request to {url} was rejected ({status_code}): no API key is configured. '
+            'Set one with `secator config set addons.api.key <API_KEY>` '
+            '(or the SECATOR_ADDONS_API_KEY environment variable).'
+        )
+    return (
+        f'API request to {url} was rejected ({status_code}): the configured API key '
+        '(addons.api.key) is invalid, expired, or not allowed to access this resource.'
+    )
 
 
 class ApiBackend(QueryBackend):
@@ -41,6 +64,8 @@ class ApiBackend(QueryBackend):
             verify=self.force_ssl,
             timeout=30
         )
+        if response.status_code in (401, 403):
+            raise ApiAuthError(_auth_error_message(response.status_code, url, bool(self.api_key)))
         response.raise_for_status()
         return response.json()
 
@@ -77,6 +102,8 @@ class ApiBackend(QueryBackend):
             else:
                 items = []
             return items
+        except ApiAuthError:
+            raise
         except Exception as e:
             if raise_errors:
                 raise
@@ -93,6 +120,8 @@ class ApiBackend(QueryBackend):
                 return result['total']
 
             return 0
+        except ApiAuthError:
+            raise
         except Exception as e:
             console.print(Warning(message=f"API count failed: {e}"))
             return 0
@@ -121,6 +150,8 @@ class ApiBackend(QueryBackend):
                 endpoint = CONFIG.addons.api.finding_update_endpoint.format(finding_id=finding_id)
                 self._make_request("PUT", endpoint, data=_fold_dotted_fields(doc, set_fields))
                 written += 1
+            except ApiAuthError:
+                raise
             except Exception as e:
                 errors.append(e)
                 console.print(Warning(message=f"API finding update failed for {finding_id}: {e}"))
@@ -161,6 +192,8 @@ class ApiBackend(QueryBackend):
                 payload["changes"] = note["changes"]
             self._make_request("POST", "notes", data=payload)
             return 1
+        except ApiAuthError:
+            raise
         except Exception as e:
             console.print(Warning(message=f"API create_note failed: {e}"))
             return 0
@@ -179,6 +212,8 @@ class ApiBackend(QueryBackend):
             elif isinstance(result, dict) and 'results' in result:
                 return result['results']
             return []
+        except ApiAuthError:
+            raise
         except Exception as e:
             console.print(Warning(message=f'API list_workspaces failed: {e}'))
             return []
@@ -189,6 +224,8 @@ class ApiBackend(QueryBackend):
             endpoint = CONFIG.addons.api.runner_get_endpoint.format(runner_id=runner_id)
             endpoint += f'?type={runner_type}'
             return self._make_request('GET', endpoint)
+        except ApiAuthError:
+            raise
         except Exception as e:
             console.print(Warning(message=f'API get_runner failed: {e}'))
             return None
@@ -198,6 +235,8 @@ class ApiBackend(QueryBackend):
         try:
             endpoint = CONFIG.addons.api.workspace_get_endpoint.format(workspace_id=workspace_id)
             return self._make_request('GET', endpoint)
+        except ApiAuthError:
+            raise
         except Exception as e:
             console.print(Warning(message=f'API get_workspace failed: {e}'))
             return None
@@ -244,6 +283,8 @@ class ApiBackend(QueryBackend):
             elif isinstance(result, dict) and 'results' in result:
                 return result['results']
             return []
+        except ApiAuthError:
+            raise
         except Exception as e:
             console.print(Warning(message=f'API list_runners failed: {e}'))
             return []
