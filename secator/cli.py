@@ -777,7 +777,7 @@ def workspace():
 
 
 @workspace.command('list')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 def workspace_list(driver):
 	"""List workspaces"""
 	effective_driver = QueryEngine.resolve_backend(driver)
@@ -836,7 +836,7 @@ def workspace_list(driver):
 
 @workspace.command(name='use', aliases=['create'])
 @click.argument('name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 def workspace_use(name, driver):
 	"""Use a workspace (set as default). With the api driver, also creates it remotely."""
 	# When the api driver is active (via --driver or drivers.defaults), make sure the
@@ -965,7 +965,7 @@ def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort
 
 @workspace.command('summary')
 @click.option('-w', '-ws', '--workspace', 'workspace_opt', type=str, default=None, help='Workspace name (default: current)')  # noqa: E501
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--template', 'template_path', type=str, default=None, help='Path to a Jinja2 summary template overriding the built-in one')  # noqa: E501
 def workspace_summary(workspace_opt, driver, template_path):
 	"""Summarize a workspace's findings (top ports/hosts/tech/URLs + vulnerabilities).
@@ -991,7 +991,7 @@ def workspace_summary(workspace_opt, driver, template_path):
 
 @workspace.command(name='rm', aliases=['remove', 'delete'])
 @click.argument('name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def workspace_delete(name, driver, yes):
 	"""Delete a workspace and all associated reports. NAME: workspace name"""
@@ -1234,7 +1234,7 @@ def list_aliases(silent):
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{vulnerability.matched_at}'")  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('-rf', '--report-filter', 'report_filter', type=str, default=None, help='Scope the query to runner paths (e.g. scans/5,tasks/3), like the REPORT_QUERY of `report show`')  # noqa: E501
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -cvss_score')  # noqa: E501
@@ -1829,7 +1829,7 @@ def run_ai_chat(ctx, prompt, workspace):
 @click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -cvss_score')  # noqa: E501
@@ -1961,7 +1961,7 @@ def _format_vuln_counts(counts):
 @click.option('-ws', '-w', '--workspace', type=str)
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--show-all', is_flag=True, default=False, help='Show all columns including report path')
 @click.option('--interesting', '-i', is_flag=True, default=False, help='Only show reports that have vulnerabilities')
 @click.option('--status', type=str, default=None, help="Filter by runner status (case-insensitive regex, e.g. SUCCESS, FAIL, '(RUNNING|FAILURE)')")  # noqa: E501
@@ -2118,7 +2118,7 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 @report.command('info')
 @click.argument('runner_id', type=str)
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--show-all', is_flag=True, default=False, help='Show all entries (do not truncate lists/dicts or errors)')  # noqa: E501
 def report_info(runner_id, workspace, driver, show_all):
 	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)"""
@@ -2324,7 +2324,7 @@ def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular,
 @report.command(name='delete', aliases=['rm', 'remove'])
 @click.argument('runner_ids', nargs=-1, required=True)
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def report_delete(runner_ids, workspace, driver, yes):
 	"""Delete one or more reports.
