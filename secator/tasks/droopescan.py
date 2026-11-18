@@ -57,7 +57,11 @@ class droopescan(Vuln):
 	proxy_http = False
 	github_handle = 'SamJoan/droopescan'
 	install_version = '1.45.1'
-	install_cmd = 'pipx install droopescan==[install_version] --force && pipx inject droopescan cement==2.10.14 setuptools '  # noqa: E501
+	# droopescan pins cement<2.6.99, whose cement 2.6.x imports the `imp` module removed in
+	# Python 3.12, so the CLI crashes on start. cement 2.10.14 only imports `imp` on Python < 3.4.
+	# `--force` is required: cement is already in the venv as a droopescan dependency, and
+	# `pipx inject` silently skips a package that is already present.
+	install_cmd = 'pipx install droopescan==[install_version] --force && pipx inject --force droopescan cement==2.10.14 setuptools'  # noqa: E501
 	install_github_bin = False
 	profile = 'small'
 

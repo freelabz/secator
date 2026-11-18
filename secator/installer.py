@@ -648,6 +648,15 @@ def which(command):
 	return Command.execute(f'which {command}', quiet=True, print_errors=False)
 
 
+# A Python tool that cannot even import (missing module, removed stdlib module on a newer
+# interpreter, broken dependency pin) dies with an uncaught traceback on ANY invocation.
+_CRASH_MARKER = 'Traceback (most recent call last):'
+
+
+class VersionCommandCrashed(Exception):
+	"""The tool's version command crashed instead of printing a version."""
+
+
 def get_version(version_cmd):
 	"""Run version command and match first version number found.
 
@@ -655,11 +664,21 @@ def get_version(version_cmd):
 		version_cmd (str): Command to get the version.
 
 	Returns:
-		tuple[str]: Version string, return code.
+		str: Version string, or None when no version is found.
+
+	Raises:
+		VersionCommandCrashed: the command exited non-zero with an uncaught traceback. Its output must not
+			be parsed for a version: interpreter paths in the traceback (e.g. ``python3.12``)
+			would otherwise be reported as the tool's version.
 	"""
 	from secator.runners import Command
 	ret = Command.execute(version_cmd, quiet=True, print_errors=False)
-	versions = get_versions_from_string(ret.output)
+	output = ret.output or ''
+	# Require a failing exit too: a tool may log a handled traceback and still print its version.
+	if ret.return_code != 0 and _CRASH_MARKER in output:
+		lines = [line.strip() for line in output.splitlines() if line.strip()]
+		raise VersionCommandCrashed(lines[-1] if lines else 'uncaught traceback')
+	versions = get_versions_from_string(output)
 	if not versions:
 		return None
 	return versions[0]
@@ -706,6 +725,7 @@ def get_version_info(name, version_flag=None, github_handle=None, install_github
 		'outdated': False,
 		'bleeding': False,
 		'source': None,
+		'broken': False,
 		'errors': [],
 	}
 
@@ -764,7 +784,13 @@ def get_version_info(name, version_flag=None, github_handle=None, install_github
 	if version_flag and not version:
 		version_cmd = f'{name} {version_flag}'
 		info['version_cmd'] = version_cmd
-		version = get_version(version_cmd)
+		try:
+			version = get_version(version_cmd)
+		except VersionCommandCrashed as e:
+			info['errors'].append(f'Version command crashed: {e}. Version command: {version_cmd}')
+			info['status'] = 'broken'
+			info['broken'] = True
+			return info
 		info['version'] = version
 		if not version:
 			info['errors'].append(f'Error fetching version for command. Version command: {version_cmd}')
@@ -888,6 +914,8 @@ def fmt_health_table_row(version_info, category=None):
 		_version = '[dim green]not installed        [/]'
 	elif status == 'ok':
 		_version = '[bold green]ok        [/]'
+	elif status == 'broken':
+		_version = '[bold red]broken[/]     [dim](crashes on start)[/]'
 	elif status == 'version fetch error':
 		_version = '[bold orange1]unknown[/]    [dim](current unknown)[/]'
 	elif status:
