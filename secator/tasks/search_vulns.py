@@ -46,7 +46,7 @@ class search_vulns(Vuln):
 		TIMEOUT: OPT_NOT_SUPPORTED,
 		USER_AGENT: OPT_NOT_SUPPORTED,
 	}
-	install_version = '1.0.9'
+	install_version = '1.2.7'
 	install_cmd = 'pipx install --force search_vulns==[install_version]'
 	# `-u` refreshes the local vuln DB, but upstream's update() first runs an unguarded
 	# version check (is_version_outdated: GitHub releases/latest redirect -> .split()),
