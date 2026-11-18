@@ -668,14 +668,14 @@ class Command(Runner):
 			hints.append(f'{label}: {" ".join(packages)}')
 		hints = '; '.join(hints)
 		pm_name = self._get_package_manager()
-		supported = pm_name is None or any(
+		supported = pm_name is not None and any(
 			managers == '*' or pm_name in managers.split('|') for managers in self.install_pre
 		)
 		if supported:
 			return f'{message}. Install it with {install_tools}, or install the OS package ({hints}).'
 		return (
 			f'{message}. It is installed from an OS package, and none is configured for this platform\'s '
-			f'package manager ({pm_name}). Available packages: {hints}.'
+			f'package manager ({pm_name or "not detected"}). Available packages: {hints}.'
 		)
 
 	@staticmethod
@@ -701,7 +701,8 @@ class Command(Runner):
 		"""
 		# Resolve it like the launch does: with the task's environment (PATH) and working directory.
 		# `which` itself is located on this process' PATH, so the task's PATH needn't contain it.
-		cmd = [shutil.which('which') or 'which', self.cmd_name]
+		which = shutil.which('which')
+		cmd = [os.path.abspath(which) if which else 'which', self.cmd_name]
 		env = {**self.run_opts.get('env', os.environ), **self.extra_env}
 		cwd = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
 		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=cwd)

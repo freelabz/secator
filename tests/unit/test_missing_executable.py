@@ -95,7 +95,9 @@ class TestMissingExecutable(unittest.TestCase):
 		self.assertNotEqual(runner.status, 'SKIPPED')
 		self.assertFalse([w for w in runner.warnings if MISSING_BINARY in w.message])
 
-	def test_failed_auto_install_fails_before_sudo_check(self):
+	def test_failed_auto_install_fails_before_task_sudo_check(self):
+		# Scope: the task's own sudo check for launching the tool. The installer is mocked here; what it
+		# does to install packages (which may itself use sudo) is the installer's concern.
 		status = mock.Mock(is_ok=mock.Mock(return_value=False))
 		with mock.patch('secator.installer.ToolInstaller.install', return_value=status) as install:
 			runner, prompt_sudo, popen = self._run(_missing_privileged_tool, auto_install=True)
@@ -139,6 +141,14 @@ class TestMissingExecutable(unittest.TestCase):
 		message = self._error_messages(runner)[0]
 		self.assertIn(f'Executable "{MISSING_BINARY}" not found', message)
 		self.assertIn('none is configured for this platform\'s package manager (apk)', message)
+		self.assertIn('apt: secator-test-pkg', message)
+		self.assertNotIn('secator install tools', message)
+
+	def test_no_package_manager_detected(self):
+		self.get_package_manager.return_value = None
+		runner, _, _ = self._run(_missing_privileged_tool)
+		message = self._error_messages(runner)[0]
+		self.assertIn('package manager (not detected)', message)
 		self.assertIn('apt: secator-test-pkg', message)
 		self.assertNotIn('secator install tools', message)
 
