@@ -1081,10 +1081,12 @@ def build_target_choices(target: str) -> List[Dict]:
 	if is_url:
 		parsed = urlparse(target)
 		host = parsed.hostname or target
+		malformed_port = False
 		try:
 			port = parsed.port
 		except ValueError:  # malformed port (`http://h:8o/`): offer host-level choices only
 			port = None
+			malformed_port = True
 		base_path = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.path else f"{parsed.scheme}://{parsed.netloc}"
 		host_port = f"{host}:{port}" if port else host
 
@@ -1114,8 +1116,12 @@ def build_target_choices(target: str) -> List[Dict]:
 				"rules": [],
 			},
 		]
+		if malformed_port:
+			# A URL-only rule would be built from the malformed authority and never match
+			# what the check scopes (the host): offer the host-level allow + deny only.
+			choices = [choices[2], choices[4]]
 		# Deduplicate options 2 and 3 when there's no port
-		if not port:
+		elif not port:
 			choices = [choices[0], choices[1], choices[3], choices[4]]
 	else:
 		host_rule = f"target({target})"

@@ -1846,14 +1846,23 @@ class TestUrlTargetMalformedPortKeepsHost(unittest.TestCase):
 		self.assertIn("Denied by rule", r.reason)
 
 	def test_check_action_in_scope_malformed_port_allowed(self):
-		eng = self._engine(in_scope=["testphp.vulnweb.com"])
+		# curl is allowed at the shell-command layer, so the verdict comes from the target check.
+		eng = PermissionEngine(config={"allow": ["shell(curl)"], "deny": [], "ask": ["target(*)"]},
+		                       in_scope=["testphp.vulnweb.com"])
 		r = eng.check_action({"action": "shell", "command": "curl http://testphp.vulnweb.com:8o/"})
-		self.assertNotEqual(r.decision, "deny", r.reason)
+		self.assertEqual(r.decision, "allow", r.reason)
+		# Control: the same command on a host denied by rule is blocked, so the target check ran.
+		deny = PermissionEngine(config={"allow": ["shell(curl)"], "deny": ["target(testphp.vulnweb.com)"],
+		                                "ask": ["target(*)"]}, in_scope=["testphp.vulnweb.com"])
+		r = deny.check_action({"action": "shell", "command": "curl http://testphp.vulnweb.com:8o/"})
+		self.assertEqual(r.decision, "deny", r.reason)
 
 	def test_build_target_choices_malformed_port_does_not_raise(self):
 		choices = build_target_choices("http://testphp.vulnweb.com:8o/")
-		self.assertTrue(choices)
 		self.assertTrue(any("target(testphp.vulnweb.com)" in c["rules"] for c in choices))
+		# No URL-only rule built from the malformed authority.
+		self.assertFalse(any("8o" in r for c in choices for r in c["rules"]), choices)
+		self.assertEqual(choices[-1]["rules"], [])  # deny is still offered
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
@@ -1888,13 +1897,10 @@ class TestIsolatedShellLoopback(unittest.TestCase):
 			self.assertEqual(r.decision, "allow", f"{cmd} -> {r.decision} ({r.reason})")
 
 	def test_isolated_shell_loopback_allowed_with_in_scope_and_hard_deny(self):
-		try:
-			CONFIG.security.scope_hard_deny = True
+		with patch.object(CONFIG.security, "scope_hard_deny", True):
 			eng = self._engine(isolated=True, in_scope=["testphp.vulnweb.com"])
 			r = eng.check_action(self._shell("curl http://127.0.0.1:8080/"))
 			self.assertEqual(r.decision, "allow", r.reason)
-		finally:
-			CONFIG.security.scope_hard_deny = False
 
 	def test_not_isolated_loopback_still_asks(self):
 		eng = self._engine()
@@ -1906,7 +1912,7 @@ class TestIsolatedShellLoopback(unittest.TestCase):
 		eng = self._engine(isolated=True)
 		for action in ("task", "workflow", "subagent"):
 			r = eng.check_action({"action": action, "name": "httpx", "targets": ["127.0.0.1"]})
-			self.assertNotEqual(r.reason, "isolated: sandbox loopback target(127.0.0.1)", action)
+			self.assertNotEqual(r.decision, "allow", f"{action}: {r.reason}")
 
 	def test_host_network_sandbox_loopback_still_asks(self):
 		for net in ("host", "container:other"):
