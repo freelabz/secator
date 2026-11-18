@@ -953,6 +953,76 @@ class TestRunRunner(unittest.TestCase):
 	@patch('secator.ai.tools._runner.TemplateLoader')
 	@patch('secator.ai.tools._runner.Task')
 	@patch('secator.ai.tools._runner._build_hooks_from_context')
+	def test_handback_usage_is_the_subagents_own_calls(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""The handback's usage line sums the subagent's per-call `response` items. The
+		runner's context is not a source: the task it runs works on a copy of it, and
+		parent totals must never show up as the subagent's."""
+		mock_build_hooks.return_value = {}
+		sub_out = [
+			Ai(content="step 1", ai_type="response",
+			   extra_data={"tokens": 300, "prompt_tokens": 250, "completion_tokens": 50, "cost": 0.03}),
+			Ai(content="", ai_type="response", extra_data={"tokens": None, "cost": None}),
+			Ai(content="done", ai_type="response",
+			   extra_data={"tokens": 200, "prompt_tokens": 150, "completion_tokens": 50, "cost": 0.02}),
+		]
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None  # noqa: E702
+		mock_runner.context = {'ai_tokens': 999999, 'ai_cost': 99.0}  # must NOT be read
+		mock_runner.__iter__.return_value = iter(sub_out); mock_task_cls.return_value = mock_runner  # noqa: E702
+		ctx = ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
+			results = list(_run_runner({'action': 'task', 'name': 'ai', 'targets': ['t'],
+										'tool_call_id': 'tc-1'}, ctx, 'task'))
+		handback = [r for r in results if isinstance(r, Ai) and r.ai_type == 'response'][-1]
+		usage = handback.extra_data['usage']
+		self.assertEqual(usage['tokens'], 500)
+		self.assertEqual(usage['prompt_tokens'], 400)
+		self.assertEqual(usage['completion_tokens'], 100)
+		self.assertAlmostEqual(usage['cost'], 0.05)
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
+	def test_ai_alias_name_gets_subagent_controls(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""`ai/<suffix>` runs the `ai` task, so it is a subagent: caps and model apply."""
+		from secator.ai.tools._runner import resolves_to_ai_task
+		self.assertTrue(resolves_to_ai_task('ai/example'))
+		self.assertTrue(resolves_to_ai_task(' AI '))
+		self.assertFalse(resolves_to_ai_task('aiohttp'))
+		self.assertFalse(resolves_to_ai_task('nmap/ai'))
+		mock_build_hooks.return_value = {}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None  # noqa: E702
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner  # noqa: E702
+		ctx = ActionContext(targets=['t'], model='parent/model', context={'workspace_id': 'ws1'})
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
+			list(_run_runner({'action': 'task', 'name': 'ai/example', 'targets': ['t'],
+							  'opts': {'model': 'other/model'}}, ctx, 'task'))
+		ro = mock_task_cls.call_args[1].get('run_opts', {})
+		self.assertTrue(ro.get('subagent'))
+		self.assertEqual(ro.get('model'), 'parent/model')
+		self.assertEqual(ctx.context['ai_subagent_count'], 1)
+		# and a run's subagent cap of 0 refuses it
+		from secator.config import CONFIG
+		self.addCleanup(setattr, CONFIG.addons.ai, 'max_subagents', CONFIG.addons.ai.max_subagents)
+		CONFIG.addons.ai.max_subagents = 0
+		mock_task_cls.reset_mock()
+		results = list(_run_runner({'action': 'task', 'name': 'ai/example', 'targets': ['t']},
+								   ActionContext(targets=['t'], model='m', context={}), 'task'))
+		mock_task_cls.assert_not_called()
+		self.assertIn('maximum of 0 subagents', results[-1].message)
+
+	def test_run_task_refuses_ai_aliases(self):
+		"""run_task points every name that runs the `ai` task at run_subagent."""
+		from secator.ai.tools.run_task import RunTask
+		ctx = ActionContext(targets=['t'], model='m', context={})
+		for name in ('ai', 'ai/example', 'AI/x'):
+			with patch('secator.ai.tools.run_task._run_runner') as mock_run:
+				results = list(RunTask().run({'action': 'task', 'name': name, 'targets': ['t']}, ctx))
+			mock_run.assert_not_called()
+			self.assertIn('run_subagent', results[0].message)
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_subagent_final_response_handed_back_to_parent(self, mock_build_hooks, mock_task_cls, _tpl):
 		"""The parent's LLM cannot read the subagent's own transcript, so _run_runner must
 		hand back ONE clean summary (the subagent's final response + what it persisted),

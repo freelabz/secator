@@ -2,7 +2,7 @@
 from typing import Dict, Generator
 from secator.output_types import Error
 from secator.ai.actions import ActionContext, _get_result_context
-from secator.ai.tools._runner import _run_runner
+from secator.ai.tools._runner import _run_runner, resolves_to_ai_task
 from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA
 
 
@@ -38,7 +38,7 @@ class RunTask(BaseTool):
 	def run(self, action: Dict, ctx: ActionContext) -> Generator:
 		"""Execute a secator task. Spawning an AI subagent goes through run_subagent, not
 		run_task(name="ai") — reject the latter with a clear pointer."""
-		if (action.get("name") or "").strip().lower() == "ai":
+		if resolves_to_ai_task(action.get("name")):
 			yield Error(
 				message="To spawn an AI subagent, use the run_subagent tool, not run_task(name=\"ai\").",
 				_context=_get_result_context(action, ctx),

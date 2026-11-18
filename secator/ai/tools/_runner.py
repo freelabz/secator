@@ -7,7 +7,7 @@ Moved verbatim from ``secator/ai/actions.py``.
 import threading
 import uuid
 from collections import Counter
-from typing import Dict, Generator, Optional, Tuple
+from typing import Any, Dict, Generator, Optional, Tuple
 from secator.runners import Task, Workflow
 from secator.runners.task import TaskNotFoundError
 from secator.output_types import Ai, Error, FINDING_TYPES, Info, Warning
@@ -157,6 +157,13 @@ def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["War
 	return None
 
 
+def resolves_to_ai_task(name: Any) -> bool:
+	"""Whether a task name runs the `ai` task. ``Task.get_task_class`` drops a ``/suffix``
+	(``ai/example`` runs ``ai``), so every subagent control must key on this, not on the
+	raw name."""
+	return str(name or "").split("/")[0].strip().lower() == "ai"
+
+
 def _release_subagent_slot(ctx: "ActionContext") -> None:
 	"""Give back the slot ``_guard_subagent_fanout`` reserved, for a spawn that was
 	admitted but never started (refused or failed before the child was built). A
@@ -167,6 +174,18 @@ def _release_subagent_slot(ctx: "ActionContext") -> None:
 		if ctx.in_batch:
 			turn = int(ctx.context.get("ai_subagent_turn_count", 0) or 0)
 			ctx.context["ai_subagent_turn_count"] = max(0, turn - 1)
+
+
+def _add_call_usage(usage: Dict, extra_data: Any) -> None:
+	"""Add one LLM call's usage (a `response` item's ``extra_data``) to ``usage``.
+	Missing / None / malformed values count as 0."""
+	if not isinstance(extra_data, dict):
+		return
+	for key, cast in (("tokens", int), ("prompt_tokens", int), ("completion_tokens", int), ("cost", float)):
+		try:
+			usage[key] += cast(extra_data.get(key) or 0)
+		except (TypeError, ValueError):
+			pass
 
 
 def _gather_subagent_evidence(ctx: "ActionContext", targets: list, limit: int = 40) -> str:
@@ -306,7 +325,7 @@ def _run_runner_steps(action: Dict, ctx: ActionContext, runner_type: str, spawn:
 	# conversation id (below) so its transcript is a separate conversation, surfaced in
 	# the parent as a single "Ran subagent" card rather than folded/duplicated into the
 	# parent's turns.
-	is_ai_subagent = runner_type == "task" and name.lower() == "ai"
+	is_ai_subagent = runner_type == "task" and resolves_to_ai_task(name)
 	parent_session = context.get("session_id")  # the card belongs to THIS (parent) conversation
 	subagent_label = ""
 	sub_session = None
@@ -527,8 +546,14 @@ def _run_runner_steps(action: Dict, ctx: ActionContext, runner_type: str, spawn:
 		# instead of the raw, fragmented output stream it used to receive.
 		last_response = ""
 		persisted = []
+		usage = {"tokens": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
 		for out in runner:
 			if isinstance(out, Ai):
+				# Each LLM call of the subagent is one `response` item carrying that call's
+				# usage: their sum is the subagent's usage. (Its runner context can't be read
+				# for this: the task it runs works on a copy of it.)
+				if out.ai_type == "response":
+					_add_call_usage(usage, out.extra_data)
 				# The subagent's conversation lives under its OWN session (its transcript,
 				# shown in the drill-in view and streamed there by its own display hook).
 				# Do NOT bubble those individual messages up to the parent: re-yielding them
@@ -557,17 +582,8 @@ def _run_runner_steps(action: Dict, ctx: ActionContext, runner_type: str, spawn:
 		# Stamped for the PARENT conversation (card_context strips the subagent marker) and
 		# with THIS run_task's tool_call_id so it becomes the tool_result the parent reads.
 		# Carries the subagent session id (mark THIS subagent's row done — parallel subagents
-		# hand back independently) and the subagent's billed token/cost totals so a client can
-		# show a usage line under the verdict. The child accumulates usage on ITS OWN
-		# `self.context` (which may be a copy of what we passed), so read from `runner.context`
-		# — the authoritative final totals — not the parent-side `context`.
-		child_ctx = getattr(runner, "context", None) or {}
-		usage = {
-			"tokens": int(child_ctx.get("ai_tokens", 0) or 0),
-			"prompt_tokens": int(child_ctx.get("ai_prompt_tokens", 0) or 0),
-			"completion_tokens": int(child_ctx.get("ai_completion_tokens", 0) or 0),
-			"cost": float(child_ctx.get("ai_cost", 0.0) or 0.0),
-		}
+		# hand back independently) and the subagent's token/cost totals (summed from its
+		# per-call items above) so a client can show a usage line under the verdict.
 		yield Ai(content=handback, ai_type="response",
 		         extra_data={"subagent_session_id": sub_session, "usage": usage},
 		         _context={**card_context, "tool_call_id": action.get("tool_call_id")})

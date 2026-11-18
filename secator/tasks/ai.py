@@ -1163,6 +1163,8 @@ class ai(PythonRunner):
 						# which makes the whole conversation fail to load for clients.
 						"max_iterations": (-1 if self.max_iterations == float('inf') else self.max_iterations),
 						"tokens": usage.get("tokens") if usage else None,
+						"prompt_tokens": usage.get("prompt_tokens") if usage else None,
+						"completion_tokens": usage.get("completion_tokens") if usage else None,
 						"cost": usage.get("cost") if usage else None,
 					},
 				)
