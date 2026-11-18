@@ -28,7 +28,7 @@ class TestPostrunEagerChild(unittest.TestCase):
 		self.addCleanup(signals.task_postrun.disconnect, record)
 		self.addCleanup(signals.task_postrun.disconnect, celery_signals.task_postrun_handler)
 		with (
-			mock.patch.object(celery_signals, 'kill_worker') as kill,
+			mock.patch.object(celery_signals, 'kill_worker', return_value=True) as kill,
 			mock.patch.object(celery_signals, 'clear_task_running') as clear,
 			mock.patch.object(celery_signals, 'IDLE_TIMEOUT', -1),
 			mock.patch.object(celery_signals, '_shutdown_requested', False),
@@ -63,7 +63,7 @@ class _KillAfterTask(unittest.TestCase):
 
 	def setUp(self):
 		patches = [
-			mock.patch.object(celery_signals, 'kill_worker'),
+			mock.patch.object(celery_signals, 'kill_worker', return_value=True),
 			mock.patch.object(celery_signals, 'setup_idle_timer'),
 			mock.patch.object(celery_signals, 'IDLE_TIMEOUT', 20),
 			mock.patch.object(celery_signals, '_shutdown_requested', False),
@@ -102,6 +102,24 @@ class TestRevokedOwnTask(_KillAfterTask):
 		celery_signals.task_revoked_handler(request=SimpleNamespace(id='other'), sender=self.task)
 		self.kill.assert_not_called()
 		self.assertTrue(celery_signals.is_task_running())
+
+	def test_eager_child_keeps_outer_task_marker(self):
+		signals.task_prerun.connect(celery_signals.task_prerun_handler, weak=False)
+		signals.task_postrun.connect(celery_signals.task_postrun_handler, weak=False)
+		self.addCleanup(signals.task_prerun.disconnect, celery_signals.task_prerun_handler)
+		self.addCleanup(signals.task_postrun.disconnect, celery_signals.task_postrun_handler)
+		celery_signals.set_task_running('outer')
+		_noop.apply()  # eager child: prerun + postrun in this process
+		self.assertEqual(celery_signals.get_running_task_id(), 'outer')
+		celery_signals.task_revoked_handler(request=SimpleNamespace(id='outer'), sender=self.task)
+		self.kill.assert_called_once_with(parent=False)
+
+	def test_cancelled_shutdown_can_be_retried(self):
+		self.kill.side_effect = [False, True]
+		celery_signals.shutdown_after_task()
+		celery_signals.shutdown_after_task()
+		celery_signals.shutdown_after_task()
+		self.assertEqual(self.kill.call_count, 2)
 
 	def test_revoke_then_postrun_shuts_down_once(self):
 		celery_signals.set_task_running('t1')

@@ -69,8 +69,9 @@ def kill_worker(parent=False):
 		pid = os.getppid() if parent else os.getpid()
 		console.print(Info(message=f'Sending SIGTERM to worker {worker_name} with pid {pid}'))
 		os.kill(pid, signal.SIGTERM)
-	else:
-		console.print(Info(message=f'Cancelling worker shutdown of {worker_name} since a task is running'))
+		return True
+	console.print(Info(message=f'Cancelling worker shutdown of {worker_name} since a task is running'))
+	return False
 
 
 _shutdown_requested = False
@@ -81,11 +82,11 @@ def shutdown_after_task():
 	global _shutdown_requested
 	if _shutdown_requested:
 		return
-	_shutdown_requested = True
 	worker_name = os.environ.get('WORKER_NAME', 'unknown')
 	console.print(Info(message=f'Shutdown worker {worker_name} since config celery.worker_kill_after_task is set.'))
 	# The worker's main process is this one, unless the task ran in a prefork pool child.
-	kill_worker(parent=in_pool_child())
+	# Only a signal actually sent counts: a cancelled attempt (a task is running) may be retried.
+	_shutdown_requested = kill_worker(parent=in_pool_child())
 
 
 def setup_idle_timer(timeout):
@@ -116,6 +117,11 @@ def worker_init_handler(**kwargs):
 
 
 def task_prerun_handler(task_id, **kwargs):
+	# An eager child task (applied in-process by the task this worker runs) must not replace
+	# the running task's id in the marker.
+	task = kwargs.get('task')
+	if task is not None and getattr(task.request, 'is_eager', False):
+		return
 	# Mark that a task is running
 	set_task_running(task_id)
 
