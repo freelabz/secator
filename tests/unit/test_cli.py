@@ -775,7 +775,12 @@ class TestDriverOptionSpelling(unittest.TestCase):
 
 	def test_every_driver_option_accepts_both_spellings(self):
 		found = list(self._driver_commands())
-		self.assertTrue(found)
+		paths = {path for path, _, _ in found}
+		expected = {
+			('ws', 'list'), ('ws', 'use'), ('ws', 'summary'), ('ws', 'rm'), ('q',),
+			('report', 'show'), ('report', 'list'), ('report', 'info'), ('report', 'delete'),
+		}
+		self.assertTrue(expected <= paths, f'missing driver option on: {sorted(expected - paths)}')
 		for path, _, param in found:
 			with self.subTest(command=' '.join(path)):
 				self.assertIn('--driver', param.opts)
