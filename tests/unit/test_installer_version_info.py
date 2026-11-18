@@ -66,7 +66,7 @@ class TestGetVersionInfoCrashedTool(unittest.TestCase):
 	@mock.patch('secator.runners.Command.execute')
 	@mock.patch('secator.installer.which')
 	def test_traceback_reports_broken(self, mock_which, mock_execute):
-		mock_which.return_value.output = '/usr/bin/python3'
+		mock_which.return_value.output = __file__
 		mock_execute.return_value.output = _CRASH_OUTPUT
 		mock_execute.return_value.return_code = 1
 		info = get_version_info('droopescan', version_flag='--version', install_version='1.45.1')
@@ -80,13 +80,24 @@ class TestGetVersionInfoCrashedTool(unittest.TestCase):
 	@mock.patch('secator.runners.Command.execute')
 	@mock.patch('secator.installer.which')
 	def test_clean_version_output_not_broken(self, mock_which, mock_execute):
-		mock_which.return_value.output = '/usr/bin/python3'
+		mock_which.return_value.output = __file__
 		mock_execute.return_value.output = 'tool v1.45.1'
 		mock_execute.return_value.return_code = 0
 		info = get_version_info('tool', version_flag='--version', install_version='1.45.1')
 		self.assertFalse(info['broken'])
 		self.assertEqual(info['version'], 'v1.45.1')
 		self.assertEqual(info['status'], 'latest')
+
+	@mock.patch('secator.runners.Command.execute')
+	@mock.patch('secator.installer.which')
+	def test_handled_traceback_with_success_exit_not_broken(self, mock_which, mock_execute):
+		# A tool that logs a handled traceback but exits 0 and prints its version is healthy.
+		mock_which.return_value.output = __file__
+		mock_execute.return_value.output = _CRASH_OUTPUT + 'tool v1.45.1\n'
+		mock_execute.return_value.return_code = 0
+		info = get_version_info('tool', version_flag='--version', install_version='1.45.1')
+		self.assertFalse(info['broken'])
+		self.assertNotEqual(info['status'], 'broken')
 
 	def test_broken_row_formatting(self):
 		from secator.installer import fmt_health_table_row

@@ -646,14 +646,15 @@ def get_version(version_cmd):
 		str: Version string, or None when no version is found.
 
 	Raises:
-		VersionCommandCrashed: the command died with an uncaught traceback. Its output must not
+		VersionCommandCrashed: the command exited non-zero with an uncaught traceback. Its output must not
 			be parsed for a version: interpreter paths in the traceback (e.g. ``python3.12``)
 			would otherwise be reported as the tool's version.
 	"""
 	from secator.runners import Command
 	ret = Command.execute(version_cmd, quiet=True, print_errors=False)
 	output = ret.output or ''
-	if _CRASH_MARKER in output:
+	# Require a failing exit too: a tool may log a handled traceback and still print its version.
+	if ret.return_code != 0 and _CRASH_MARKER in output:
 		lines = [line.strip() for line in output.splitlines() if line.strip()]
 		raise VersionCommandCrashed(lines[-1] if lines else 'uncaught traceback')
 	versions = get_versions_from_string(output)

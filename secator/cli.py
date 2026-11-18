@@ -17,6 +17,7 @@ from dotmap import DotMap
 from fp.fp import FreeProxy
 from jinja2 import Template
 from rich.live import Live
+from rich.markup import escape
 from secator.rich import CustomMarkdown as Markdown
 from rich.rule import Rule
 from rich.table import Table
@@ -2531,9 +2532,10 @@ def health(json_, debug, strict, bleeding):
 				elif info.get('broken'):
 					# The binary exists but crashes before doing anything (e.g. a dependency
 					# that no longer imports on this interpreter): it is NOT usable.
-					errs = '; '.join(info.get('errors') or [])
+					errs = escape('; '.join(info.get('errors') or []))
 					messages.append(f'{tool.__name__} is installed but broken ({errs}).')
 					info['next_version'] = tool.install_version
+					info['reinstall'] = True
 					if not getattr(tool, 'install_optional', False):
 						error = True
 				elif info['outdated']:
@@ -2585,6 +2587,8 @@ def health(json_, debug, strict, bleeding):
 			cmds.append('secator update')
 		elif info['_type'] == 'tool' and info.get('next_version'):
 			tool_cmd += f',{info["_name"]}=={info["next_version"]}'
+		elif info['_type'] == 'tool' and info.get('reinstall'):
+			tool_cmd += f',{info["_name"]}'
 
 	if tool_cmd:
 		tool_cmd = f'secator install tools {tool_cmd.lstrip(",")}'
@@ -3292,6 +3296,7 @@ def update(all):
 			info = get_version_info(cmd, version_flag, cls.github_handle, cls.install_github_version_prefix)
 			if not info['installed'] or info.get('broken') or info['outdated'] or not info['latest_version']:
 				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
+				apply_install_overrides(cls)
 				status = ToolInstaller.install(cls)
 				if not status.is_ok():
 					return_code = 1
@@ -3536,12 +3541,14 @@ def task(name, verbose, check, system_exit):
 			'Failed to install command. Fix your installation command.',
 			errors,
 		)
-		check_test(
-			not version_info.get('broken'),
-			'Check task starts without crashing',
-			f'Task binary crashes on start: {"; ".join(version_info.get("errors") or [])}',
-			errors,
-		)
+		# Only meaningful when a version probe actually ran (binary present, version flag supported).
+		if version_info.get('version_cmd'):
+			check_test(
+				not version_info.get('broken'),
+				'Check task starts without crashing',
+				f'Task binary crashes on start: {escape("; ".join(version_info.get("errors") or []))}',
+				errors,
+			)
 		check_test(
 			any(cmd for cmd in [task.install_pre, task.install_cmd, task.github_handle]),
 			'Check task installation command is defined',
