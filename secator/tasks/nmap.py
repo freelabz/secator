@@ -280,7 +280,9 @@ class nmapData(dict):
 				if service_confidence == 'high' and extra_data.get('product'):
 					techs.append(
 						Technology(
-							match=f'{ip}:{port_number}',
+							# Same address as this port's vulnerabilities, so CVEs found from this product
+							# deduplicate with the ones found from an HTTP probe of the same service.
+							match=f'{hostname}:{port_number}',
 							product=extra_data['product'],
 							version=extra_data.get('version'),
 						)

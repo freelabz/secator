@@ -272,6 +272,77 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 		self.assertEqual(matched_ats, {'10.0.0.1:80', '10.0.0.2:80'})
 
 
+class TestSearchVulnsServiceDedup(unittest.TestCase):
+	"""The same service seen by an HTTP probe (`Apache HTTP Server 2.4.7` @ `http://host`) and a port
+	scan (`Apache httpd 2.4.7` @ `host:80`) is queried twice under two product names. Both queries must
+	report each CVE at the same address so the findings deduplicate, instead of every CVE twice."""
+
+	def _vulns(self, task_input):
+		fixture_path = os.path.join(os.path.dirname(__file__), '..', 'fixtures', 'search_vulns_output.json')
+		with open(fixture_path) as f:
+			fixture = json.load(f)
+		task = search_vulns.__new__(search_vulns)
+		task.inputs = [task_input]
+		task.run_opts = {}
+		search_vulns.before_init(task)
+		item = dict([next(iter(fixture.items()))])
+		return [r for r in search_vulns.on_json_loaded(task, item) if isinstance(r, Vulnerability)]
+
+	def test_http_probe_and_port_scan_matches_dedup(self):
+		from_http = self._vulns('http://scanme.nmap.org~apache http server 2.4.7')
+		from_port = self._vulns('scanme.nmap.org:80~apache httpd 2.4.7')
+		self.assertTrue(from_http)
+		self.assertEqual({v.matched_at for v in from_http}, {'scanme.nmap.org:80'})
+		self.assertEqual({v._compare_key() for v in from_http}, {v._compare_key() for v in from_port})
+		# Equal compare keys are what the runner and workspace duplicate tagging collapse on.
+		self.assertEqual(len({v._compare_key() for v in from_http + from_port}), len(from_http))
+
+	def test_urls_of_one_service_collapse(self):
+		task = search_vulns.__new__(search_vulns)
+		task.inputs = ['http://h.test,http://h.test/a/~b,https://h.test:8443/x,h.test:80~nginx 1.21.0']
+		search_vulns.before_init(task)
+		self.assertEqual(task.matched_at, 'h.test:80,h.test:8443')
+		self.assertEqual(task.inputs[0], 'nginx 1.21.0')
+
+	def test_vuln_id_query_keeps_matched_at(self):
+		"""A CVE-id query re-checks a finding: keep its exact matched_at so it merges with it."""
+		task = search_vulns.__new__(search_vulns)
+		task.inputs = ['http://h.test/login~CVE-2021-41773']
+		search_vulns.before_init(task)
+		self.assertEqual(task.matched_at, 'http://h.test/login')
+
+	def test_service_address(self):
+		from secator.tasks.search_vulns import service_address
+		self.assertEqual(service_address('https://h.test/a?b=1'), 'h.test:443')
+		self.assertEqual(service_address('http://[::1]:8080/'), '[::1]:8080')
+		self.assertEqual(service_address('10.0.0.1:22'), '10.0.0.1:22')
+		self.assertEqual(service_address('ftp://h.test'), 'h.test')
+
+	def test_nmap_technology_matches_hostname_like_its_vulns(self):
+		from secator.output_types import Technology
+		from secator.tasks.nmap import nmap
+		xml = (
+			'<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE nmaprun>\n'
+			'<nmaprun scanner="nmap" args="nmap" start="1" version="7.98">\n'
+			'<host><status state="up" reason="syn-ack"/>'
+			'<address addr="45.33.32.156" addrtype="ipv4"/>'
+			'<hostnames><hostname name="scanme.nmap.org" type="user"/></hostnames>'
+			'<ports><port protocol="tcp" portid="80"><state state="open" reason="syn-ack"/>'
+			'<service name="http" product="Apache httpd" version="2.4.7" method="probed" conf="10"/></port></ports>'
+			'</host>\n</nmaprun>\n'
+		)
+		path = os.path.join(os.path.dirname(__file__), '..', 'fixtures', '_nmap_tech_test.xml')
+		with open(path, 'w') as f:
+			f.write(xml)
+		try:
+			task = nmap.__new__(nmap)
+			task.output_path = path
+			techs = [r for r in task.xml_to_json() if isinstance(r, Technology)]
+		finally:
+			os.remove(path)
+		self.assertEqual([(t.match, t.product, t.version) for t in techs], [('scanme.nmap.org:80', 'apache httpd', '2.4.7')])
+
+
 class TestNmapIdsConfidence(unittest.TestCase):
 	"""On an IDS mass-scan host, `confidence` is computed PER PORT: every port is
 	'low' (noise) unless a service is genuinely fingerprinted (service_confidence

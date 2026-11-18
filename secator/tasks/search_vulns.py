@@ -1,3 +1,4 @@
+import re
 from urllib.parse import urlparse
 
 from secator.decorators import task
@@ -10,6 +11,32 @@ from secator.definitions import (
 from secator.output_types import Exploit, Info, Vulnerability, Warning
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Vuln
+
+# A query that is a vulnerability id (fan-in from vulnerability findings) rather than a product.
+VULN_ID_REGEX = re.compile(r'^(CVE-\d{4}-\d+|GHSA(-[0-9a-z]{4}){3})$', re.IGNORECASE)
+DEFAULT_PORTS = {'http': 80, 'https': 443}
+
+
+def service_address(matched_at):
+	"""Reduce a URL to the `host:port` of the service it points to; leave anything else unchanged.
+
+	A product match comes from technology findings, which locate the same service in different forms
+	(an HTTP probe reports `http://host/`, a port scan reports `host:80`). Vulnerabilities found
+	through a product query are about that service, so they share one address and deduplicate.
+	"""
+	if '://' not in matched_at:
+		return matched_at
+	parsed = urlparse(matched_at)
+	host = parsed.hostname
+	if not host:
+		return matched_at
+	try:
+		port = parsed.port or DEFAULT_PORTS.get(parsed.scheme)
+	except ValueError:
+		return matched_at
+	if ':' in host:
+		host = f'[{host}]'
+	return f'{host}:{port}' if port else host
 
 
 @task()
@@ -69,10 +96,18 @@ class search_vulns(Vuln):
 		_in = self.inputs[0]
 		self.matched_at = None
 		if '~' in _in:
-			split = _in.split('~')
+			split = _in.rsplit('~', 1)  # a URL in matched_at may contain '~', a product never does
 			self.matched_at = split[0]
 			self.inputs[0] = split[1]
 		self.inputs[0] = self.inputs[0].replace('/', ' ').rstrip()
+		if self.matched_at and not VULN_ID_REGEX.match(self.inputs[0]):
+			# Product query: report each vuln once per service, whatever form its matches were in.
+			addresses = []
+			for matched_at in self.matched_at.split(','):
+				address = service_address(matched_at)
+				if address not in addresses:
+					addresses.append(address)
+			self.matched_at = ','.join(addresses)
 
 	@staticmethod
 	def on_json_loaded(self, item):
