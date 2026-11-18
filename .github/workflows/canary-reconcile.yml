@@ -2,7 +2,6 @@ name: canary-reconcile
 
 # Thin caller: the reconciler logic is the ORG reusable workflow in freelabz/.github,
 # pinned to a tag (blast-radius control). This file only owns the triggers + secrets.
-# See gke-admin docs/branch-pr-canary-workflow.md.
 #
 # No pull_request trigger here on purpose: concurrency cancels surplus runs, and a cancelled
 # run attached to a PR turns its status red. canary-reconcile-kick.yml dispatches this workflow
