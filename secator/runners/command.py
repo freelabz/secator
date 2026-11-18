@@ -556,9 +556,12 @@ class Command(Runner):
 							install_error = f'Failed installing {self.cmd_name}'
 					except OSError as e:
 						install_error = f'Failed installing {self.cmd_name}: {type(e).__name__}: {e}'
-				if install_error or not self.is_installed():
+				if not self.is_installed():
 					self.return_code = 127
 					yield Error(message=self._missing_executable_message(install_error))
+					return
+				if install_error:
+					yield Error(message=install_error)
 					return
 
 			# Check for sudo requirements and prepare the password if needed
@@ -648,16 +651,44 @@ class Command(Runner):
 		message = f'Executable "{self.cmd_name}" not found'
 		if install_error:
 			message += f' ({install_error})'
-		message += f'. Install it with "secator install tools {self.config.name}"'
-		# Tools installed only from OS packages: also give the package name(s) per package manager.
-		has_other_install = self.install_cmd or (self.github_handle and self.install_github_bin)
-		if self.install_pre and not has_other_install:
-			hints = []
-			for managers, packages in self.install_pre.items():
-				managers = 'any package manager' if managers == '*' else managers.replace('|', '/')
-				hints.append(f'{managers}: {" ".join(packages)}')
-			message += f', or install the OS package ({"; ".join(hints)})'
-		return message + '.'
+		install_tools = f'"secator install tools {self.config.name}"'
+		has_other_install = (
+			self.install_cmd
+			or (self.github_handle and self.install_github_bin)
+			or getattr(self, 'pypi_dependencies', None)
+		)
+		if not self.install_pre or has_other_install:
+			return f'{message}. Install it with {install_tools}.'
+
+		# Tool installed only from OS packages: give the package name(s) per package manager, and say so
+		# when none is configured for this platform's package manager (the installer can't install it here).
+		hints = []
+		for managers, packages in self.install_pre.items():
+			label = 'any package manager' if managers == '*' else managers.replace('|', '/')
+			hints.append(f'{label}: {" ".join(packages)}')
+		hints = '; '.join(hints)
+		pm_name = self._get_package_manager()
+		supported = pm_name is None or any(
+			managers == '*' or pm_name in managers.split('|') for managers in self.install_pre
+		)
+		if supported:
+			return f'{message}. Install it with {install_tools}, or install the OS package ({hints}).'
+		return (
+			f'{message}. It is installed from an OS package, and none is configured for this platform\'s '
+			f'package manager ({pm_name}). Available packages: {hints}.'
+		)
+
+	@staticmethod
+	def _get_package_manager():
+		"""Return this platform's package manager name, or None if it can't be detected."""
+		from secator.installer import get_distro_config
+		try:
+			distribution = get_distro_config()
+		except Exception:
+			return None
+		if isinstance(distribution, str):  # SECATOR_PACKAGE_MANAGER override
+			return distribution.split(' ')[0] or None
+		return getattr(distribution, 'pm_name', None) or None
 
 	def is_installed(self):
 		"""Check if a command is installed by using `which`.
@@ -668,8 +699,11 @@ class Command(Runner):
 		Returns:
 			bool: True if the command is installed, False otherwise.
 		"""
+		# Resolve it like the launch does: with the task's environment (PATH) and working directory.
 		cmd = ['which', self.cmd_name]
-		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		env = {**self.run_opts.get('env', os.environ), **self.extra_env}
+		cwd = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
+		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=cwd)
 		result.communicate()
 		return result.returncode == 0
 

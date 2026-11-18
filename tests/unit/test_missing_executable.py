@@ -32,12 +32,28 @@ class _missing_tool_with_installer(Command):
 	}
 
 
+@task()
+class _missing_pypi_tool(Command):
+	"""Tool whose binary is installed from PyPI, with an OS build dependency."""
+	cmd = MISSING_BINARY
+	input_types = None
+	pypi_dependencies = ['secator-test-pkg']
+	install_pre = {
+		'apt': ['some-build-dep'],
+	}
+
+
 class TestMissingExecutable(unittest.TestCase):
 
-	def _run(self, cls, auto_install=False):
+	def setUp(self):
+		patcher = mock.patch.object(Command, '_get_package_manager', return_value='apt')
+		self.get_package_manager = patcher.start()
+		self.addCleanup(patcher.stop)
+
+	def _run(self, cls, auto_install=False, installed=(False,)):
 		with mock.patch.object(CONFIG.security, 'auto_install_commands', auto_install), \
 				mock.patch.object(CONFIG.security, 'prompt_sudo_password', True), \
-				mock.patch.object(cls, 'is_installed', return_value=False), \
+				mock.patch.object(cls, 'is_installed', side_effect=list(installed) * 3), \
 				mock.patch.object(cls, '_prompt_sudo') as prompt_sudo, \
 				mock.patch('secator.runners.command.subprocess.Popen') as popen:
 			runner = cls('example.com', sync=True, print_item=False, print_line=False)
@@ -105,3 +121,45 @@ class TestMissingExecutable(unittest.TestCase):
 		self.assertIn('Executable "dublin-traceroute" not found', message)
 		self.assertIn('secator install tools dublin_traceroute', message)
 		self.assertIn('apt: dublin-traceroute', message)
+
+	def test_os_package_hint_not_given_for_pypi_tools(self):
+		runner, _, _ = self._run(_missing_pypi_tool)
+		message = self._error_messages(runner)[0]
+		self.assertIn('secator install tools _missing_pypi_tool', message)
+		self.assertNotIn('OS package', message)
+
+	def test_no_package_for_this_platform(self):
+		self.get_package_manager.return_value = 'apk'
+		runner, prompt_sudo, _ = self._run(_missing_privileged_tool)
+		prompt_sudo.assert_not_called()
+		self.assertEqual(runner.status, 'FAILURE')
+		message = self._error_messages(runner)[0]
+		self.assertIn(f'Executable "{MISSING_BINARY}" not found', message)
+		self.assertIn('none is configured for this platform\'s package manager (apk)', message)
+		self.assertIn('apt: secator-test-pkg', message)
+		self.assertNotIn('secator install tools', message)
+
+	def test_failed_install_with_binary_present_does_not_claim_not_found(self):
+		status = mock.Mock(is_ok=mock.Mock(return_value=False))
+		with mock.patch('secator.installer.ToolInstaller.install', return_value=status):
+			runner, prompt_sudo, popen = self._run(_missing_privileged_tool, auto_install=True, installed=(False, True))
+		prompt_sudo.assert_not_called()
+		popen.assert_not_called()
+		self.assertEqual(runner.status, 'FAILURE')
+		messages = self._error_messages(runner)
+		self.assertEqual(messages, [f'Failed installing {MISSING_BINARY}'])
+
+
+class TestIsInstalled(unittest.TestCase):
+
+	def test_uses_task_env_and_cwd(self):
+		runner = _missing_privileged_tool('example.com', sync=True, print_item=False, print_line=False,
+			env={'PATH': '/opt/custom/bin'})
+		runner.cwd = '/'
+		with mock.patch('secator.runners.command.subprocess.Popen') as popen:
+			popen.return_value.returncode = 0
+			self.assertTrue(runner.is_installed())
+		kwargs = popen.call_args.kwargs
+		self.assertEqual(popen.call_args.args[0], ['which', MISSING_BINARY])
+		self.assertEqual(kwargs['env']['PATH'], '/opt/custom/bin')
+		self.assertEqual(kwargs['cwd'], '/')
