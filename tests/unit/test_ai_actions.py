@@ -1855,6 +1855,74 @@ class TestSubagentFanoutCap(unittest.TestCase):
 		self.assertIn('maximum of 2 subagents', results[0].message)
 		self.assertEqual(run_context['ai_subagent_count'], 2)
 
+	def _spawn_with_cap(self, run_context, cap=1, **ctx_kwargs):
+		"""Admit one subagent spawn against a per-run cap of `cap`; return the results."""
+		from secator.config import CONFIG
+		default_cap = CONFIG.addons.ai.max_subagents
+		self.addCleanup(setattr, CONFIG.addons.ai, 'max_subagents', default_cap)
+		CONFIG.addons.ai.max_subagents = cap
+		ctx = ActionContext(targets=['t.com'], model='m', context=run_context, **ctx_kwargs)
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
+			return list(_run_runner(action, ctx, 'task'))
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
+	def test_spawn_refused_by_child_setup_releases_its_slot(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""Admitted, then refused before the child is built (persistence hooks failed):
+		the slot is given back, so a later spawn still fits a cap of 1."""
+		self._mock_task(mock_task_cls)
+		run_context = {'drivers': ['mongodb'], 'ai_subagent_turn_count': 0}
+		mock_build_hooks.side_effect = RuntimeError('driver down')
+		results = self._spawn_with_cap(run_context, in_batch=True)
+		self.assertIn('hook rebuild failed', results[-1].message)
+		mock_task_cls.assert_not_called()
+		self.assertEqual(run_context['ai_subagent_count'], 0)
+		self.assertEqual(run_context['ai_subagent_turn_count'], 0)
+		# the environment recovers: the next spawn is admitted and runs
+		mock_build_hooks.side_effect = None
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		results = self._spawn_with_cap(run_context)
+		self.assertFalse([r for r in results if isinstance(r, Warning)])
+		mock_task_cls.assert_called_once()
+		self.assertEqual(run_context['ai_subagent_count'], 1)
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
+	def test_spawn_failing_with_an_exception_releases_its_slot(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""An exception before the child exists propagates, and the slot is released."""
+		mock_build_hooks.return_value = {}
+		mock_task_cls.side_effect = ValueError('bad template')
+		run_context = {}
+		with self.assertRaises(ValueError):
+			self._spawn_with_cap(run_context)
+		self.assertEqual(run_context['ai_subagent_count'], 0)
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
+	def test_started_subagent_keeps_its_slot_even_if_it_fails(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""Once the child is built it counts, whatever happens while it runs."""
+		mock_build_hooks.return_value = {}
+		runner = self._mock_task(mock_task_cls)
+		runner.__iter__.side_effect = RuntimeError('crashed mid-run')
+		run_context = {}
+		with self.assertRaises(RuntimeError):
+			self._spawn_with_cap(run_context)
+		self.assertEqual(run_context['ai_subagent_count'], 1)
+
+	def test_dry_run_spawn_releases_its_slot(self):
+		"""A dry run never builds the child, so it does not use up the budget."""
+		run_context = {}
+		with patch('secator.ai.tools._runner.Task') as mock_task_cls:
+			mock_task_cls.get_task_class.return_value = MagicMock(__doc__='ai', input_types=[], tags=[])
+			with patch('secator.ai.tools._runner.TemplateLoader'):
+				results = self._spawn_with_cap(run_context, dry_run=True)
+		self.assertIn('DRY RUN', results[-1].message)
+		self.assertEqual(run_context['ai_subagent_count'], 0)
+
 	def test_refused_spawn_does_not_consume_total_budget(self):
 		"""A spawn refused by the per-turn cap does not count toward the per-run total."""
 		run_context = {'ai_subagent_turn_count': _MAX_SUBAGENTS_PER_TURN, 'ai_subagent_count': 1}

@@ -157,6 +157,18 @@ def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["War
 	return None
 
 
+def _release_subagent_slot(ctx: "ActionContext") -> None:
+	"""Give back the slot ``_guard_subagent_fanout`` reserved, for a spawn that was
+	admitted but never started (refused or failed before the child was built). A
+	subagent that started keeps its slot."""
+	with _SUBAGENT_TURN_LOCK:
+		total = int(ctx.context.get("ai_subagent_count", 0) or 0)
+		ctx.context["ai_subagent_count"] = max(0, total - 1)
+		if ctx.in_batch:
+			turn = int(ctx.context.get("ai_subagent_turn_count", 0) or 0)
+			ctx.context["ai_subagent_turn_count"] = max(0, turn - 1)
+
+
 def _gather_subagent_evidence(ctx: "ActionContext", targets: list, limit: int = 40) -> str:
 	"""Auto-assemble prior findings for the subagent's targets so it doesn't redo work.
 
@@ -259,12 +271,30 @@ def _child_preamble(
 
 
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
+	"""Execute a secator task or workflow (see ``_run_runner_steps``).
+
+	Owns the subagent slot: one admitted by ``_guard_subagent_fanout`` but never turned
+	into a running child (a denial, an error or an exception before the child is built,
+	or the caller closing this generator first) is released, so it doesn't count toward
+	the per-run cap.
+	"""
+	spawn = {"slot_held": False}
+	try:
+		yield from _run_runner_steps(action, ctx, runner_type, spawn)
+	finally:
+		if spawn["slot_held"]:
+			_release_subagent_slot(ctx)
+
+
+def _run_runner_steps(action: Dict, ctx: ActionContext, runner_type: str, spawn: Dict) -> Generator:
 	"""Execute a secator task or workflow.
 
 	Args:
 		action: Action dict with name, targets, opts
 		ctx: Action context
 		runner_type: Either "task" or "workflow"
+		spawn: Shared with ``_run_runner``; ``slot_held`` is True while an admitted
+			subagent slot has no child yet.
 	"""
 	name = action.get("name", "")
 	targets = action.get("targets", ctx.targets)
@@ -288,6 +318,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		if denial is not None:
 			yield denial
 			return
+		spawn["slot_held"] = True  # released by _run_runner unless the child gets built
 		opts["subagent"] = True
 		opts["interactive"] = False
 		# `RunSubagent.run` already set the child's mode per the run_subagent policy
@@ -447,6 +478,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	except TaskNotFoundError as e:
 		yield Error(message=str(e), _context=context)
 		return
+	spawn["slot_held"] = False  # the child exists: it keeps its slot
 
 	# Emit the action Ai item now the runner exists (on_init stamped the runner id) so
 	# clients can render a RunnerCard; always emitted, even when silent. Use the id the
