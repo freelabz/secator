@@ -700,7 +700,8 @@ class Command(Runner):
 			bool: True if the command is installed, False otherwise.
 		"""
 		# Resolve it like the launch does: with the task's environment (PATH) and working directory.
-		cmd = ['which', self.cmd_name]
+		# `which` itself is located on this process' PATH, so the task's PATH needn't contain it.
+		cmd = [shutil.which('which') or 'which', self.cmd_name]
 		env = {**self.run_opts.get('env', os.environ), **self.extra_env}
 		cwd = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
 		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=cwd)

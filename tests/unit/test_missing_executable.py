@@ -1,4 +1,7 @@
 """A task whose executable is missing fails explicitly, before any sudo / privilege check."""
+import os
+import shutil
+import tempfile
 import unittest
 from unittest import mock
 
@@ -160,6 +163,22 @@ class TestIsInstalled(unittest.TestCase):
 			popen.return_value.returncode = 0
 			self.assertTrue(runner.is_installed())
 		kwargs = popen.call_args.kwargs
-		self.assertEqual(popen.call_args.args[0], ['which', MISSING_BINARY])
+		which, binary = popen.call_args.args[0]
+		self.assertEqual(os.path.basename(which), 'which')
+		self.assertEqual(binary, MISSING_BINARY)
 		self.assertEqual(kwargs['env']['PATH'], '/opt/custom/bin')
 		self.assertEqual(kwargs['cwd'], '/')
+
+	@unittest.skipUnless(shutil.which('which'), 'needs `which`')
+	def test_finds_binary_on_task_path_without_which(self):
+		# The task's PATH holds only the tool, not `which`: the lookup must still find it.
+		with tempfile.TemporaryDirectory() as bin_dir:
+			binary = os.path.join(bin_dir, MISSING_BINARY)
+			with open(binary, 'w') as f:
+				f.write('#!/bin/sh\n')
+			os.chmod(binary, 0o755)
+			runner = _missing_privileged_tool('example.com', sync=True, print_item=False, print_line=False,
+				env={'PATH': bin_dir})
+			self.assertTrue(runner.is_installed())
+			runner.run_opts['env'] = {'PATH': tempfile.gettempdir()}
+			self.assertFalse(runner.is_installed())
