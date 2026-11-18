@@ -35,6 +35,7 @@ class Ip(OutputType):
 
 	_table_fields = [IP, ALIVE]
 	_sort_by = (IP,)
+	_target_fields = ['ip']
 
 	def __str__(self) -> str:
 		return self.ip

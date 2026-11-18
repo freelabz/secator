@@ -62,6 +62,7 @@ class Url(OutputType):
 		'screenshot_path',
 	]
 	_sort_by = (URL,)
+	_target_fields = ['url']
 	_group_by = ('host',)        # collapse a host's URLs into one row
 	_group_aggregate = URL
 
