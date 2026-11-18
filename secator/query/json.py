@@ -151,6 +151,29 @@ def _apply_set(rec: dict, set_fields: dict) -> None:
 			rec[k] = v
 
 
+def _line_needles(query):
+	"""Byte strings a raw ndjson line must ALL contain to possibly match ``query``: a cheap
+	prefilter that skips most lines without parsing them (a line that passes is still parsed and
+	matched). Taken from equalities at the top level or in ``$and`` branches:
+
+	- ``_uuid`` (a point read): the uuid itself.
+	- ``_type`` (every per-type view, e.g. ``secator q --group``): the JSON-encoded type name
+	  (``"url"``), which every record of that type contains verbatim.
+	"""
+	if not isinstance(query, dict):
+		return []
+	needles = []
+	for key in ('_uuid', '_type'):
+		value = query.get(key)
+		if isinstance(value, str) and value:
+			needles.append(orjson.dumps(value))
+	and_queries = query.get('$and')
+	if isinstance(and_queries, list):
+		for sub in and_queries:
+			needles.extend(_line_needles(sub))
+	return needles
+
+
 class JsonBackend(QueryBackend):
 	"""Query backend for JSON files on filesystem."""
 
@@ -174,7 +197,7 @@ class JsonBackend(QueryBackend):
 		workspace_folder = sanitize_folder_name(self.workspace_id)
 		return self.reports_dir / workspace_folder
 
-	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str, query: dict, line_filter: str = None):
+	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str, query: dict, needles: list = None):
 		"""Yield one runner's records matching ``query``, keeping only each finding's LATEST record.
 
 		The live store (``results.ndjson``) is append-only: updating a finding appends a new record
@@ -184,14 +207,15 @@ class JsonBackend(QueryBackend):
 		compacted store keeps, see ``secator.utils.compact_ndjson``).
 
 		Two streaming passes over ONE open file handle: pass 1 indexes each ``_uuid``'s last line
-		(small entries, never full records), pass 2 yields the latest records that match. Using the
-		same handle means a concurrent compaction (which replaces the file) cannot shift positions
-		between the passes. Memory stays O(distinct uuids in this file); the caller can stop early.
-		Each record gets the ``{type}_id`` context injection. A legacy ``report.json`` (no ndjson)
-		is read whole.
+		(small entries, never full records), pass 2 parses only those latest lines and yields the
+		ones that match. Using the same handle means a concurrent compaction (which replaces the
+		file) cannot shift positions between the passes. Memory stays O(distinct uuids in this
+		file); the caller can stop early. Each record gets the ``{type}_id`` context injection. A
+		legacy ``report.json`` (no ndjson) is read whole.
 
-		``line_filter``: skip ndjson lines not containing this string before parsing (a cheap
-		prefilter for point reads; the parsed record is still checked)."""
+		``needles``: pass 1 skips ndjson lines missing any of these byte strings without parsing
+		them (see ``_line_needles``). Every record of one finding has the same ``_uuid`` and
+		``_type``, so the latest record of each finding that can match is still indexed."""
 		runner_id = report_dir.name
 
 		def _tag(rec):
@@ -199,33 +223,33 @@ class JsonBackend(QueryBackend):
 				rec.setdefault('_context', {})[f'{runner_type_singular}_id'] = runner_id
 			return rec
 
-		def _uid(rec):
-			return rec.get('_uuid') if isinstance(rec, dict) else None
-
 		def _latest_matching(records):
-			"""records: callable returning a fresh iterator of (index, record)."""
-			latest = {}
+			"""records(keep=None): callable returning a fresh iterator of (index, record), only the
+			indexes in ``keep`` when given."""
+			latest, keep = {}, set()
 			for index, rec in records():
-				uid = _uid(rec)
+				uid = rec.get('_uuid') if isinstance(rec, dict) else None
 				if uid:
-					latest[uid] = index
-			for index, rec in records():
-				uid = _uid(rec)
-				if uid and latest.get(uid) != index:
-					continue  # superseded by a later record of the same finding
+					latest[uid] = index  # a later record of the same finding supersedes this one
+				else:
+					keep.add(index)
+			keep.update(latest.values())
+			for _, rec in records(keep):
 				rec = _tag(rec)
 				if match_query(rec, query):
 					yield rec
 
 		ndjson = report_dir / 'results.ndjson'
 		if ndjson.exists():
-			needle = line_filter.encode() if line_filter else None
 			try:
 				with open(ndjson, 'rb') as f:
-					def records():
+					def records(keep=None):
 						f.seek(0)
 						for index, line in enumerate(f):
-							if needle and needle not in line:
+							if keep is not None:
+								if index not in keep:
+									continue
+							elif needles and not all(map(line.__contains__, needles)):
 								continue
 							line = line.strip()
 							if not line:
@@ -248,15 +272,16 @@ class JsonBackend(QueryBackend):
 			debug(f'Error loading {report_file}: {e}', sub='query.json')
 			return
 		flat = [rec for lst in data.get('results', {}).values() if isinstance(lst, list) for rec in lst]
-		yield from _latest_matching(lambda: enumerate(flat))
+		yield from _latest_matching(lambda keep=None: (
+			(index, rec) for index, rec in enumerate(flat) if keep is None or index in keep))
 
 	def _iter_latest(self, query: dict):
 		"""Stream the records matching ``query`` across the run-scoped dir (when hinted) or every
 		runner dir of the workspace, each finding by its latest record (see ``_iter_report_dir``).
-		A point read (``_uuid`` equality) only parses lines containing that uuid. A finding lives in
-		one runner's store; should a ``_uuid`` appear in several, the first runner dir read wins."""
-		uuid = query.get('_uuid') if isinstance(query, dict) else None
-		line_filter = uuid if isinstance(uuid, str) and uuid else None
+		A point read (``_uuid`` equality) or a per-type read (``_type`` equality) only
+		parses the lines containing that uuid / type name. A finding lives in one runner's store;
+		should a ``_uuid`` appear in several, the first runner dir read wins."""
+		needles = _line_needles(query)
 		report_dir = self.context.get('report_dir')
 		if report_dir:
 			report_dir = Path(report_dir)
@@ -271,7 +296,7 @@ class JsonBackend(QueryBackend):
 						dirs.extend((d, runner_type.rstrip('s')) for d in runner_path.iterdir() if d.is_dir())
 		seen = set()
 		for d, singular in dirs:
-			for rec in self._iter_report_dir(d, singular, query, line_filter):
+			for rec in self._iter_report_dir(d, singular, query, needles):
 				uid = rec.get('_uuid') if isinstance(rec, dict) else None
 				if uid:
 					if uid in seen:

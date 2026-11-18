@@ -38,7 +38,7 @@ from secator.utils import (
 	detect_host,
 	print_version,
 	get_file_timestamp,
-	get_info_from_report_path,
+	list_reports,
 	human_to_timedelta,
 	sanitize_folder_name,
 	vhs_tap_to_tape,
@@ -809,22 +809,12 @@ def workspace_list(driver):
 			for child in sorted(reports_dir.iterdir()):
 				if child.is_dir():
 					workspaces_dict[child.name] = {'count': 0, 'path': str(child)}
-		json_reports = []
-		for root, _, files in os.walk(CONFIG.dirs.reports):
-			for file in files:
-				if file.endswith('report.json'):
-					path = Path(root) / file
-					json_reports.append(path)
-		json_reports = sorted(json_reports, key=lambda x: x.stat().st_mtime, reverse=False)
-		for path in json_reports:
-			# Layout: <reports>/<ws>/<runner_type>/<number>/report.json — use the path
-			# helper / Path parts instead of a manual POSIX split.
-			ws = get_info_from_report_path(path).get('workspace')
-			if not ws:
-				continue
-			if ws not in workspaces_dict:
-				workspaces_dict[ws] = {'count': 0, 'path': str(path.parents[2])}
-			workspaces_dict[ws]['count'] += 1
+		# Count runs from the fixed-depth <reports>/<ws>/<type>/<id>/report.json layout (list_reports)
+		# instead of os.walk, which descends into every run's artifact subdirectories.
+		for path in list_reports():
+			ws = path.parts[-4]
+			if ws in workspaces_dict:
+				workspaces_dict[ws]['count'] += 1
 		table.add_column('Name', style='bold gold3')
 		table.add_column('Run count', overflow='fold')
 		table.add_column('Path')
@@ -1659,8 +1649,9 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 		rows = [f'{str(c).rjust(width)}  {v}' for v, c in items]
 		return rows[:limit] if limit else rows
 
-	# --sort alone: full ordering needs the whole set.
-	return _finish(list(sv))
+	# --sort alone: full ordering needs the whole set. list(iter(sv)), not list(sv): list() asks a
+	# sized object for its len() first, which is a full count query on top of the read.
+	return _finish(list(iter(sv)))
 
 
 def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None, show_all=False):  # noqa: E501
