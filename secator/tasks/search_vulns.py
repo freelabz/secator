@@ -15,24 +15,26 @@ from secator.tasks._categories import Vuln
 # A query that is a vulnerability id (fan-in from vulnerability findings) rather than a product.
 VULN_ID_REGEX = re.compile(r'^(CVE-\d{4}-\d+|GHSA(-[0-9a-z]{4}){3})$', re.IGNORECASE)
 DEFAULT_PORTS = {'http': 80, 'https': 443}
+HOST_PORT_REGEX = re.compile(r'^[A-Za-z0-9._-]+:\d+$')
 
 
 def service_address(matched_at):
-	"""Reduce a URL to the `host:port` of the service it points to; leave anything else unchanged.
+	"""Reduce a match to the `host:port` of the service it points to; leave anything else unchanged.
 
 	A product match comes from technology findings, which locate the same service in different forms
 	(an HTTP probe reports `http://host/`, a port scan reports `host:80`). Vulnerabilities found
 	through a product query are about that service, so they share one address and deduplicate.
 	"""
 	if '://' not in matched_at:
-		return matched_at
-	parsed = urlparse(matched_at)
-	host = parsed.hostname
-	if not host:
-		return matched_at
+		# DNS names are case-insensitive: `Host:80` and `http://host/` are the same service.
+		return matched_at.lower() if HOST_PORT_REGEX.match(matched_at) else matched_at
 	try:
+		parsed = urlparse(matched_at)
+		host = parsed.hostname
 		port = parsed.port or DEFAULT_PORTS.get(parsed.scheme)
 	except ValueError:
+		return matched_at
+	if not host:
 		return matched_at
 	if ':' in host:
 		host = f'[{host}]'
@@ -96,7 +98,7 @@ class search_vulns(Vuln):
 		_in = self.inputs[0]
 		self.matched_at = None
 		if '~' in _in:
-			split = _in.rsplit('~', 1)  # a URL in matched_at may contain '~', a product never does
+			split = _in.split('~', 1)  # keep the whole query: a version may contain '~' (e.g. 1.2~rc1)
 			self.matched_at = split[0]
 			self.inputs[0] = split[1]
 		self.inputs[0] = self.inputs[0].replace('/', ' ').rstrip()

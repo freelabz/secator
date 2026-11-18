@@ -286,7 +286,9 @@ class TestSearchVulnsServiceDedup(unittest.TestCase):
 		task.run_opts = {}
 		search_vulns.before_init(task)
 		item = dict([next(iter(fixture.items()))])
-		return [r for r in search_vulns.on_json_loaded(task, item) if isinstance(r, Vulnerability)]
+		# Fixture CVEs have no nested CVSS score: keep the provider fallback offline.
+		with unittest.mock.patch('secator.tasks.search_vulns.Vuln.lookup_cve', return_value=None):
+			return [r for r in search_vulns.on_json_loaded(task, item) if isinstance(r, Vulnerability)]
 
 	def test_http_probe_and_port_scan_matches_dedup(self):
 		from_http = self._vulns('http://scanme.nmap.org~apache http server 2.4.7')
@@ -299,10 +301,10 @@ class TestSearchVulnsServiceDedup(unittest.TestCase):
 
 	def test_urls_of_one_service_collapse(self):
 		task = search_vulns.__new__(search_vulns)
-		task.inputs = ['http://h.test,http://h.test/a/~b,https://h.test:8443/x,h.test:80~nginx 1.21.0']
+		task.inputs = ['http://h.test,http://[broken,https://h.test:8443/x,H.test:80~openssh 1.2~rc1']
 		search_vulns.before_init(task)
-		self.assertEqual(task.matched_at, 'h.test:80,h.test:8443')
-		self.assertEqual(task.inputs[0], 'nginx 1.21.0')
+		self.assertEqual(task.matched_at, 'h.test:80,http://[broken,h.test:8443')
+		self.assertEqual(task.inputs[0], 'openssh 1.2~rc1')
 
 	def test_vuln_id_query_keeps_matched_at(self):
 		"""A CVE-id query re-checks a finding: keep its exact matched_at so it merges with it."""
@@ -317,6 +319,10 @@ class TestSearchVulnsServiceDedup(unittest.TestCase):
 		self.assertEqual(service_address('http://[::1]:8080/'), '[::1]:8080')
 		self.assertEqual(service_address('10.0.0.1:22'), '10.0.0.1:22')
 		self.assertEqual(service_address('ftp://h.test'), 'h.test')
+		self.assertEqual(service_address('http://[broken'), 'http://[broken')
+		self.assertEqual(service_address('App.Example.test:80'), 'app.example.test:80')
+		from secator.tasks.nmap import nmapData
+		self.assertEqual(nmapData._address('2001:db8::1', 80), service_address('http://[2001:db8::1]/'))
 
 	def test_nmap_technology_matches_hostname_like_its_vulns(self):
 		from secator.output_types import Technology

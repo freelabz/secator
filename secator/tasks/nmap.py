@@ -282,7 +282,7 @@ class nmapData(dict):
 						Technology(
 							# Same address as this port's vulnerabilities, so CVEs found from this product
 							# deduplicate with the ones found from an HTTP probe of the same service.
-							match=f'{hostname}:{port_number}',
+							match=self._address(hostname, port_number),
 							product=extra_data['product'],
 							version=extra_data.get('version'),
 						)
@@ -304,7 +304,7 @@ class nmapData(dict):
 						debug(f'Script output parser for "{script_id}" is not supported YET.', sub='cve.nmap')
 						continue
 					for data in func(output, cpes=cpes):
-						data.matched_at = f'{hostname}:{port_number}'
+						data.matched_at = self._address(hostname, port_number)
 						data.ip = ip
 						data.extra_data.update(extra_data)
 						confidence = port_confidence
@@ -339,6 +339,13 @@ class nmapData(dict):
 		if isinstance(ports, dict):
 			ports = [ports]
 		return ports
+
+	@staticmethod
+	def _address(host, port):
+		"""`host:port`, with an IPv6 host bracketed like in a URL."""
+		if host and ':' in host:
+			host = f'[{host}]'
+		return f'{host}:{port}'
 
 	def _get_hostname(self, host_cfg):
 		hostnames = host_cfg.get('hostnames', {})
