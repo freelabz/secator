@@ -2528,6 +2528,14 @@ def health(json_, debug, strict, bleeding):
 					# dublin-traceroute is apt-only), so a missing one must not fail --strict.
 					if not getattr(tool, 'install_optional', False):
 						error = True
+				elif info.get('broken'):
+					# The binary exists but crashes before doing anything (e.g. a dependency
+					# that no longer imports on this interpreter): it is NOT usable.
+					errs = '; '.join(info.get('errors') or [])
+					messages.append(f'{tool.__name__} is installed but broken ({errs}).')
+					info['next_version'] = tool.install_version
+					if not getattr(tool, 'install_optional', False):
+						error = True
 				elif info['outdated']:
 					msg = 'latest' if bleeding else 'supported'
 					message = f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
@@ -3282,7 +3290,7 @@ def update(all):
 			cmd = base_cmd.split(' ')[0]
 			version_flag = cls.get_version_flag()
 			info = get_version_info(cmd, version_flag, cls.github_handle, cls.install_github_version_prefix)
-			if not info['installed'] or info['outdated'] or not info['latest_version']:
+			if not info['installed'] or info.get('broken') or info['outdated'] or not info['latest_version']:
 				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
 				status = ToolInstaller.install(cls)
 				if not status.is_ok():
@@ -3526,6 +3534,12 @@ def task(name, verbose, check, system_exit):
 			version_info['installed'],
 			'Check task is installed',
 			'Failed to install command. Fix your installation command.',
+			errors,
+		)
+		check_test(
+			not version_info.get('broken'),
+			'Check task starts without crashing',
+			f'Task binary crashes on start: {"; ".join(version_info.get("errors") or [])}',
 			errors,
 		)
 		check_test(
