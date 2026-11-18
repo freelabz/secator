@@ -83,11 +83,23 @@ class QueryEngine:
         """
         from secator.utils import debug, remove_duplicates
         debug(f'search via {self.backend.name} backend', sub='query', obj=query)
-        results = self.backend.search(query, limit, exclude_fields, scope_only=scope_only, offset=offset,
-                                      include_internal=include_internal)
-        if dedupe:
-            results = remove_duplicates(results)
-        return results
+        kwargs = dict(scope_only=scope_only, include_internal=include_internal)
+        if not (dedupe and limit):
+            results = self.backend.search(query, limit, exclude_fields, offset=offset, **kwargs)
+            return remove_duplicates(results) if dedupe else results
+        # Deduplicated + limited: `limit` counts unique findings. The store holds raw rows (duplicates
+        # included until a dedup pass tags them), so a single raw `limit` page can come back with fewer
+        # unique findings than exist — keep paging raw rows until `limit` unique ones are collected.
+        raw, unique = [], []
+        page_offset = offset
+        while len(unique) < limit:
+            page = self.backend.search(query, limit, exclude_fields, offset=page_offset, **kwargs)
+            raw.extend(page)
+            unique = remove_duplicates(raw)
+            if len(page) < limit:
+                break
+            page_offset += len(page)
+        return unique[:limit]
 
     def iterate(self, query: dict, batch_size: int = 1000):
         """Stream findings matching query in batches (never materializes all N)."""

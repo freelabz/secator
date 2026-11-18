@@ -60,9 +60,14 @@ class FakeApiStore:
 		self.queries = []
 
 	def __call__(self, method, endpoint, data=None):
+		from urllib.parse import parse_qs, urlparse
 		self.queries.append(data)
+		params = parse_qs(urlparse(endpoint).query)
+		skip = int(params.get('skip', ['0'])[0])
+		limit = int(params.get('limit', ['0'])[0])
 		items = [dict(d) for d in self.docs if match_query(d, data or {})]
-		return {'items': items, 'total': len(items)}
+		page = items[skip:skip + limit] if limit else items[skip:]
+		return {'items': page, 'total': len(items)}
 
 
 class TestApiWorkflowChaining(unittest.TestCase):
@@ -114,6 +119,14 @@ class TestApiWorkflowChaining(unittest.TestCase):
 		engine = QueryEngine(WS, context=self.ctx)
 		results = engine.search({'_context.workflow_id': 'wf1', '_type': 'port'})
 		self.assertEqual(len(results), 5)
+
+	def test_dedupe_limit_counts_unique_findings(self):
+		# 10.0.0.2:443 is stored twice: a raw `limit` page must not let the duplicate take a slot.
+		engine = QueryEngine(WS, context=self.ctx)
+		query = {'_context.workflow_id': 'wf1', '_type': 'port', 'host': {'$in': ['10.0.0.2', '10.0.0.3']}}
+		results = engine.search(query, limit=2, dedupe=True)
+		self.assertEqual(sorted((r['host'], r['port']) for r in results), [('10.0.0.2', 443), ('10.0.0.3', 8080)])
+		self.assertEqual(len(engine.search(query, limit=1, dedupe=True)), 1)
 
 
 if __name__ == '__main__':
