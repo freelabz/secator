@@ -39,6 +39,13 @@ def is_task_running():
 	return get_lock_file_path().exists()
 
 
+def in_pool_child():
+	"""Whether this process is a prefork pool child. Other pools (gevent, threads, solo) run
+	tasks in the worker's main process."""
+	from billiard import current_process
+	return current_process().name != 'MainProcess'
+
+
 def kill_worker(parent=False):
 	"""Kill current worker using its pid by sending a SIGTERM to Celery master process."""
 	worker_name = os.environ.get('WORKER_NAME', 'unknown')
@@ -85,6 +92,13 @@ def task_prerun_handler(task_id, **kwargs):
 
 
 def task_postrun_handler(**kwargs):
+	# A task applied eagerly (a child runner run in sync mode inside the task this worker is
+	# executing) also fires task_postrun, in the same process. It must neither clear the
+	# running-task marker nor trigger kill-after-task: the outer task is still running.
+	task = kwargs.get('task')
+	if task is not None and getattr(task.request, 'is_eager', False):
+		return
+
 	# Mark that no task is running
 	clear_task_running()
 
@@ -95,7 +109,8 @@ def task_postrun_handler(**kwargs):
 	if CONFIG.celery.worker_kill_after_task and (sender_name.startswith('secator.') or sender_name.startswith('api.')):
 		worker_name = os.environ.get('WORKER_NAME', 'unknown')
 		console.print(Info(message=f'Shutdown worker {worker_name} since config celery.worker_kill_after_task is set.'))
-		kill_worker(parent=True)
+		# The worker's main process is this one, unless the task ran in a prefork pool child.
+		kill_worker(parent=in_pool_child())
 		return
 
 	# Set up a new idle timer
