@@ -79,6 +79,10 @@ class QueryBackend(ABC):
 			# — that returned 0 results for fully-populated workspaces. `$ne: True`
 			# keeps false/null/absent and excludes only explicit false positives.
 			'is_false_positive': {'$ne': True},
+			# No `_tagged` filter: findings are written untagged and only tagged later by
+			# an out-of-band dedup pass, so requiring `_tagged: True` hides every finding of
+			# an in-progress run (a workflow's downstream tasks then extract no inputs).
+			# Callers that want the deduplicated set pass `_tagged` explicitly.
 		}
 
 	# Display/perf filters in the base query that scope READS but must NOT gate a targeted

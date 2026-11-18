@@ -37,11 +37,6 @@ class MongoDBBackend(QueryBackend):
 		super().__init__(workspace_id, config, context=context)
 		self._client = None
 
-	def get_base_query(self) -> dict:
-		"""Base query with _tagged for MongoDB."""
-		base = super().get_base_query()
-		return base
-
 	def _get_client(self):
 		"""Get or create MongoDB client."""
 		if self._client is None:
