@@ -422,7 +422,8 @@ class TestPrompts(unittest.TestCase):
 		# chat is read-only and carries no guardrails block
 		self.assertNotIn("</guardrails>", get_system_prompt("chat"))
 
-	def test_every_mode_has_single_scope_respect_section(self):
+	@patch("secator.ai.context.load_context_blocks", return_value=[])
+	def test_every_mode_has_single_scope_respect_section(self, _load_context):
 		"""Every mode (and its subagent variant) renders exactly one <scope_respect>
 		block: never bypass a scope/guardrail denial, and write targets literally so
 		target extraction sees them."""
@@ -433,10 +434,12 @@ class TestPrompts(unittest.TestCase):
 				label = f"{mode} (subagent={is_subagent})"
 				self.assertEqual(p.count("<scope_respect>"), 1, f"{label}: expected one scope_respect block")
 				self.assertEqual(p.count("</scope_respect>"), 1, f"{label}: unterminated scope_respect block")
-				self.assertIn("Never bypass a denial", p, f"{label}: missing no-bypass rule")
-				self.assertIn("Write every target literally", p, f"{label}: missing literal-target rule")
-				self.assertIn("legal and contractual", p, f"{label}: missing rationale")
 				self.assertNotIn("${scope_respect}", p, f"{label}: unresolved include")
+				section = p.split("<scope_respect>", 1)[1].split("</scope_respect>", 1)[0]
+				self.assertIn("Never bypass a denial", section, f"{label}: missing no-bypass rule")
+				self.assertIn("Write every target literally", section, f"{label}: missing literal-target rule")
+				self.assertIn("legal and contractual", section, f"{label}: missing rationale")
+				self.assertIn("listed in scope", section, f"{label}: missing listed-form exception")
 
 	def test_guardrails_isolation_hint_excludes_scope_denials(self):
 		"""The 'retry in an isolated container' hint must not read as a way around a
