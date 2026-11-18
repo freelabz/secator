@@ -540,6 +540,27 @@ class Command(Runner):
 			self.print_description()
 			self.print_command()
 
+			# Check the command is installed (auto-installing it if enabled) BEFORE any sudo / privilege
+			# check, so a missing executable fails with a clear "not found" error instead of a misleading
+			# sudo / TTY error.
+			if not self.no_process and not self.is_installed():
+				self.debug('command is not installed', sub='start')
+				install_error = None
+				if CONFIG.security.auto_install_commands:
+					from secator.installer import ToolInstaller
+
+					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
+					try:
+						status = ToolInstaller.install(self.__class__)
+						if not status.is_ok():
+							install_error = f'Failed installing {self.cmd_name}'
+					except OSError as e:
+						install_error = f'Failed installing {self.cmd_name}: {type(e).__name__}: {e}'
+				if install_error or not self.is_installed():
+					self.return_code = 127
+					yield Error(message=self._missing_executable_message(install_error))
+					return
+
 			# Check for sudo requirements and prepare the password if needed
 			sudo_required = re.search(r'\bsudo\b', self.cmd)
 			sudo_password = None
@@ -552,18 +573,6 @@ class Command(Runner):
 
 			# Prepare cmds
 			command = self.cmd if self.shell else shlex.split(self.cmd)
-
-			# Check command is installed and auto-install
-			if not self.no_process and not self.is_installed():
-				self.debug('command is not installed, auto-installing', sub='start')
-				if CONFIG.security.auto_install_commands:
-					from secator.installer import ToolInstaller
-
-					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
-					status = ToolInstaller.install(self.__class__)
-					if not status.is_ok():
-						yield Error(message=f'Failed installing {self.cmd_name}')
-						return
 
 			# Output and results
 			self.return_code = 0
@@ -626,6 +635,29 @@ class Command(Runner):
 
 		finally:
 			yield from self._wait_for_end()
+
+	def _missing_executable_message(self, install_error=None):
+		"""Build the error message for a missing executable, with install instructions.
+
+		Args:
+			install_error (str, Optional): Auto-install failure to include in the message.
+
+		Returns:
+			str: Error message naming the missing executable and how to install it.
+		"""
+		message = f'Executable "{self.cmd_name}" not found'
+		if install_error:
+			message += f' ({install_error})'
+		message += f'. Install it with "secator install tools {self.config.name}"'
+		# Tools installed only from OS packages: also give the package name(s) per package manager.
+		has_other_install = self.install_cmd or (self.github_handle and self.install_github_bin)
+		if self.install_pre and not has_other_install:
+			hints = []
+			for managers, packages in self.install_pre.items():
+				managers = 'any package manager' if managers == '*' else managers.replace('|', '/')
+				hints.append(f'{managers}: {" ".join(packages)}')
+			message += f', or install the OS package ({"; ".join(hints)})'
+		return message + '.'
 
 	def is_installed(self):
 		"""Check if a command is installed by using `which`.
