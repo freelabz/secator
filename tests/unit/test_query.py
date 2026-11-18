@@ -319,13 +319,13 @@ class TestApiBackend(unittest.TestCase):
 		self.assertEqual(backend.workspace_id, 'ws123')
 		self.assertEqual(backend.name, 'api')
 
-	def test_api_backend_base_query_includes_tagged(self):
+	def test_api_backend_base_query_does_not_filter_tagged(self):
 		from secator.query.api import ApiBackend
 
 		backend = ApiBackend(workspace_id='ws123')
 		base = backend.get_base_query()
 
-		# self.assertEqual(base['_tagged'], True)
+		self.assertNotIn('_tagged', base)
 		self.assertEqual(base['_context.workspace_id'], 'ws123')
 
 

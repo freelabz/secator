@@ -25,12 +25,6 @@ class ApiBackend(QueryBackend):
         self.search_endpoint = CONFIG.addons.api.finding_search_endpoint
         self.force_ssl = CONFIG.addons.api.force_ssl
 
-    def get_base_query(self) -> dict:
-        """Base query with _tagged for API."""
-        base = super().get_base_query()
-        base['_tagged'] = True
-        return base
-
     def _make_request(self, method: str, endpoint: str, data: dict = None) -> dict:
         """Make HTTP request to API."""
         url = f"{self.api_url.rstrip('/')}/{endpoint.lstrip('/')}"
