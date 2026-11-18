@@ -321,6 +321,12 @@ class AiAddon(StrictModel):
 	# locally checked-out PoCs. On reaching the cap, the model is given one final turn to
 	# stop gracefully (announcing the limit) so the user can resume with "continue".
 	max_iterations: int = 100
+	# Inside a worker, a child TASK an AI run starts runs in-process unless it is heavy or wide;
+	# then it is dispatched to its own queue (like a workflow always is) and polled. Heavy = its
+	# queue profile is in `dispatch_profiles`. Wide = it would be split into chunks for its
+	# targets, or has more than `inline_max_targets` targets.
+	dispatch_profiles: List[str] = ['large', 'extra_large']
+	inline_max_targets: int = Field(default=10, ge=1)
 	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
