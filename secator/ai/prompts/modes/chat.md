@@ -37,6 +37,7 @@ depends on whether you have the `change_mode` tool:
   pinned mode is the user's action, not a tool call you make).
 </mode>
 ${common}
+${scope_respect}
 ${queries}
 </constraints>
 
