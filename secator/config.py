@@ -324,6 +324,10 @@ class AiAddon(StrictModel):
 	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True
+	# Max subagents ONE AI run may spawn in total, across all its turns (on top of the
+	# per-turn fan-out cap). Past it, `run_subagent` is refused and the model is told to
+	# do the remaining work itself. 0 disables subagents. Env: SECATOR_ADDONS_AI_MAX_SUBAGENTS.
+	max_subagents: int = Field(default=10, ge=0)
 	# --isolated sandbox container image. `{version}` is replaced at runtime with the running
 	# secator version so the sandbox matches the client. Default is the release-published lite
 	# tag (`freelabz/secator:<version>-lite`, see publish.yml). Env:

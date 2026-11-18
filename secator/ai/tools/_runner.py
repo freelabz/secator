@@ -11,6 +11,7 @@ from typing import Dict, Generator, Optional, Tuple
 from secator.runners import Task, Workflow
 from secator.runners.task import TaskNotFoundError
 from secator.output_types import Ai, Error, FINDING_TYPES, Info, Warning
+from secator.config import CONFIG
 from secator.template import TemplateLoader
 from secator.ai.utils import _PERSIST_AI_TYPES, _is_heavy_runner, _sanitize_child_opts, build_subagent_prompt
 from secator.ai.actions import ActionContext, _get_result_context
@@ -107,12 +108,13 @@ def _build_child_hooks_or_denial(context: Dict) -> Tuple[Dict, Optional["Warning
 
 
 def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["Warning"]:
-	"""Cap AI-subagent recursion depth + per-turn fan-out.
+	"""Cap AI-subagent recursion depth, per-turn fan-out and per-run total.
 
 	Returns a denial ``Warning`` if a cap is hit (caller yields it and skips the
 	spawn); otherwise stamps the child's depth (+1) into ``context`` and bumps the
-	per-turn counter. Breadth is only counted within a batch (one LLM turn); a
-	lone spawn is inherently breadth-1.
+	counters. Breadth is only counted within a batch (one LLM turn); a lone spawn is
+	inherently breadth-1. The per-run total (``CONFIG.addons.ai.max_subagents``)
+	counts every subagent the run spawned, across all its turns.
 	"""
 	# A subagent is already scoped to one task and no longer has the run_subagent tool;
 	# refuse a nested spawn defensively, before the depth/breadth caps, in case a call
@@ -128,17 +130,29 @@ def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["War
 			message=f"Subagent spawn denied: recursion depth cap ({_MAX_SUBAGENT_DEPTH}) reached",
 			_context=context,
 		)
-	if ctx.in_batch:  # per-turn breadth only bites within a batch
-		with _SUBAGENT_TURN_LOCK:
-			turn = int(ctx.context.get("ai_subagent_turn_count", 0) or 0)
-			over_breadth = turn >= _MAX_SUBAGENTS_PER_TURN
-			if not over_breadth:
+	max_total = CONFIG.addons.ai.max_subagents
+	with _SUBAGENT_TURN_LOCK:  # check + bump both counters atomically (a batch spawns in threads)
+		total = int(ctx.context.get("ai_subagent_count", 0) or 0)
+		turn = int(ctx.context.get("ai_subagent_turn_count", 0) or 0)
+		over_total = total >= max_total
+		over_breadth = ctx.in_batch and turn >= _MAX_SUBAGENTS_PER_TURN  # only bites within a batch
+		if not over_total and not over_breadth:
+			ctx.context["ai_subagent_count"] = total + 1
+			if ctx.in_batch:
 				ctx.context["ai_subagent_turn_count"] = turn + 1
-		if over_breadth:
-			return Warning(
-				message=f"Subagent spawn denied: per-turn fan-out cap ({_MAX_SUBAGENTS_PER_TURN}) reached",
-				_context=context,
-			)
+	if over_total:
+		return Warning(
+			message=(
+				f"Subagent spawn denied: this run already spawned its maximum of {max_total} "
+				f"subagents. Do NOT call run_subagent again; carry out the remaining work yourself."
+			),
+			_context=context,
+		)
+	if over_breadth:
+		return Warning(
+			message=f"Subagent spawn denied: per-turn fan-out cap ({_MAX_SUBAGENTS_PER_TURN}) reached",
+			_context=context,
+		)
 	context["ai_subagent_depth"] = depth + 1  # child inherits depth+1
 	return None
 
@@ -283,11 +297,13 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		if ctx.mode:
 			opts.setdefault("mode", ctx.mode)
 		# Inherit the parent's resolved LLM config (else it falls back to the default
-		# model/provider with no key set -> AuthenticationError). The model may be
-		# LLM-chosen (setdefault), but transport CREDENTIALS are forced from the parent:
-		# a tool-supplied api_base could otherwise redirect the injected parent api_key
-		# to an attacker endpoint (setdefault wouldn't override it). Never trust opts here.
-		opts.setdefault("model", ctx.model)
+		# model/provider with no key set -> AuthenticationError). Model AND transport
+		# credentials are FORCED from the parent, never taken from tool-supplied opts: the
+		# model decides what the run costs, and a tool-supplied api_base could redirect
+		# the injected parent api_key to an attacker endpoint. Never trust opts here.
+		opts.pop("model", None)
+		if ctx.model:
+			opts["model"] = ctx.model
 		opts.pop("api_key", None)
 		opts.pop("api_base", None)
 		if ctx.api_key:

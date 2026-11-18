@@ -40,12 +40,73 @@ def _make_task():
 	task = ai.__new__(ai)
 	task.context = {}
 	task.history = ChatHistory()
-	# Mirror what _init_options seeds.
-	task.context.setdefault("ai_tokens", 0)
-	task.context.setdefault("ai_prompt_tokens", 0)
-	task.context.setdefault("ai_completion_tokens", 0)
-	task.context.setdefault("ai_cost", 0.0)
+	task.is_subagent = False
+	task._init_usage_counters()
 	return task
+
+
+def _make_subagent(parent, leaked_context=None):
+	"""Build a subagent `ai` task whose context derives from `parent`'s, the way a spawn
+	does. `leaked_context` simulates a context that still carries inherited counters."""
+	from secator.ai.actions import ActionContext, _get_result_context
+	ctx = ActionContext(targets=["t"], model="m", context=parent.context)
+	sub = ai.__new__(ai)
+	sub.context = dict(leaked_context) if leaked_context is not None else _get_result_context({"name": "ai"}, ctx)
+	sub.history = ChatHistory()
+	sub.is_subagent = True
+	sub._init_usage_counters()
+	return sub
+
+
+@unittest.skipUnless(HAS_AI, 'ai addon required')
+class TestSubagentUsageIsolation(unittest.TestCase):
+	"""A subagent reports only its OWN LLM usage, never its parent's or a sibling's."""
+
+	def test_subagent_usage_equals_only_its_own_calls(self):
+		parent = _make_task()
+		parent._account_usage({"tokens": 5000, "prompt_tokens": 4000, "completion_tokens": 1000, "cost": 0.5})
+		sub = _make_subagent(parent)
+		self.assertEqual(sub.context["ai_tokens"], 0)
+		self.assertEqual(sub.context["ai_cost"], 0.0)
+		sub._account_usage({"tokens": 300, "prompt_tokens": 200, "completion_tokens": 100, "cost": 0.03})
+		sub._account_usage({"tokens": 200, "prompt_tokens": 150, "completion_tokens": 50, "cost": 0.02})
+		self.assertEqual(sub.context["ai_tokens"], 500)
+		self.assertEqual(sub.context["ai_prompt_tokens"], 350)
+		self.assertEqual(sub.context["ai_completion_tokens"], 150)
+		self.assertAlmostEqual(sub.context["ai_cost"], 0.05)
+		# the parent's totals are unaffected by the subagent's calls
+		self.assertEqual(parent.context["ai_tokens"], 5000)
+		self.assertAlmostEqual(parent.context["ai_cost"], 0.5)
+
+	def test_siblings_do_not_inherit_each_other(self):
+		parent = _make_task()
+		parent._account_usage({"tokens": 1000, "cost": 0.1})
+		first = _make_subagent(parent)
+		first._account_usage({"tokens": 700, "cost": 0.07})
+		second = _make_subagent(parent)  # spawned after the first one already spent
+		self.assertEqual(second.context["ai_tokens"], 0)
+		second._account_usage({"tokens": 40, "cost": 0.004})
+		self.assertEqual(first.context["ai_tokens"], 700)
+		self.assertEqual(second.context["ai_tokens"], 40)
+		self.assertAlmostEqual(second.context["ai_cost"], 0.004)
+
+	def test_subagent_resets_counters_found_on_its_context(self):
+		"""Even if inherited counters reach the subagent's context, it starts from zero."""
+		parent = _make_task()
+		sub = _make_subagent(parent, leaked_context={
+			"ai_tokens": 9000, "ai_prompt_tokens": 8000, "ai_completion_tokens": 1000, "ai_cost": 2.0})
+		for key in ("ai_tokens", "ai_prompt_tokens", "ai_completion_tokens"):
+			self.assertEqual(sub.context[key], 0)
+		self.assertEqual(sub.context["ai_cost"], 0.0)
+
+	def test_root_run_keeps_counters_already_on_its_context(self):
+		"""A non-subagent run keeps counters already on its context (seed, not reset)."""
+		task = ai.__new__(ai)
+		task.context = {"ai_tokens": 120}
+		task.is_subagent = False
+		task._init_usage_counters()
+		self.assertEqual(task.context["ai_tokens"], 120)
+		self.assertEqual(task.context["ai_cost"], 0.0)
 
 
 @unittest.skipUnless(HAS_AI, 'ai addon required')

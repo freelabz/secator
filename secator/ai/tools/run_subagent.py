@@ -17,7 +17,7 @@ class RunSubagent(BaseTool):
 			"name": "run_subagent",
 			"description": (
 				"Spawn an autonomous AI subagent with a fresh context window that works the objective "
-				"non-interactively and hands back a summary — the ONLY way to spawn a subagent (do NOT "
+				"non-interactively, on the same model as you, and hands back a summary — the ONLY way to spawn a subagent (do NOT "
 				"use run_task with name='ai'). Use it to parallelize or offload a focused sub-task.\n"
 				"Mode: in an AUTO or scan session you MAY set `mode` to pick the subagent's mode "
 				"(e.g. hand a confirmed vuln to an `exploit` subagent). In a user-PINNED read-only `chat` "
@@ -44,10 +44,6 @@ class RunSubagent(BaseTool):
 						"description": "Optional mode for the subagent (chat/scan/exploit). Honored only in an "
 						               "auto or scan session; ignored/forced to chat in a pinned chat session. "
 						               "Omit to inherit the current mode."
-					},
-					"model": {
-						"type": "string",
-						"description": "Optional LLM model id for the subagent. Omit to inherit the current model."
 					}
 				},
 				"required": ["objective", "targets", "description"]
@@ -82,10 +78,9 @@ class RunSubagent(BaseTool):
 		else:
 			child_mode = requested_mode or ctx.mode or "chat"
 		objective = action.get("objective") or action.get("prompt") or ""
+		# No `model` here: a subagent always runs on its parent's model (forced in
+		# `_run_runner`), so the tool neither exposes nor forwards one.
 		opts = {"prompt": objective, "mode": child_mode}
-		model = (action.get("model") or "").strip()
-		if model:
-			opts["model"] = model
 		task_action = {
 			"action": "task",
 			"name": "ai",
