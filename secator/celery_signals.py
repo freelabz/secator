@@ -39,6 +39,20 @@ def is_task_running():
 	return get_lock_file_path().exists()
 
 
+def get_running_task_id():
+	"""Id of the task marked as running in this worker, or None."""
+	try:
+		return get_lock_file_path().read_text() or None
+	except OSError:
+		return None
+
+
+def kills_after_task(task_name):
+	"""Whether this task ends the worker (``celery.worker_kill_after_task``)."""
+	return bool(CONFIG.celery.worker_kill_after_task) and bool(task_name) and (
+		task_name.startswith('secator.') or task_name.startswith('api.'))
+
+
 def in_pool_child():
 	"""Whether this process is a prefork pool child. Other pools (gevent, threads, solo) run
 	tasks in the worker's main process."""
@@ -57,6 +71,21 @@ def kill_worker(parent=False):
 		os.kill(pid, signal.SIGTERM)
 	else:
 		console.print(Info(message=f'Cancelling worker shutdown of {worker_name} since a task is running'))
+
+
+_shutdown_requested = False
+
+
+def shutdown_after_task():
+	"""Stop the worker once its task is over (``celery.worker_kill_after_task``), at most once."""
+	global _shutdown_requested
+	if _shutdown_requested:
+		return
+	_shutdown_requested = True
+	worker_name = os.environ.get('WORKER_NAME', 'unknown')
+	console.print(Info(message=f'Shutdown worker {worker_name} since config celery.worker_kill_after_task is set.'))
+	# The worker's main process is this one, unless the task ran in a prefork pool child.
+	kill_worker(parent=in_pool_child())
 
 
 def setup_idle_timer(timeout):
@@ -106,11 +135,8 @@ def task_postrun_handler(**kwargs):
 	sender_name = kwargs['sender'].name
 	# console.print(Info(message=f'Task postrun handler --> Sender name: {sender_name}'))
 
-	if CONFIG.celery.worker_kill_after_task and (sender_name.startswith('secator.') or sender_name.startswith('api.')):
-		worker_name = os.environ.get('WORKER_NAME', 'unknown')
-		console.print(Info(message=f'Shutdown worker {worker_name} since config celery.worker_kill_after_task is set.'))
-		# The worker's main process is this one, unless the task ran in a prefork pool child.
-		kill_worker(parent=in_pool_child())
+	if kills_after_task(sender_name):
+		shutdown_after_task()
 		return
 
 	# Set up a new idle timer
@@ -121,8 +147,21 @@ def task_postrun_handler(**kwargs):
 
 def task_revoked_handler(request=None, **kwargs):
 	"""Handle revoked tasks by clearing the task running state"""
+	# A revoked task that is not the one this worker runs (e.g. a revoked message discarded on
+	# arrival) leaves the running task's state alone.
+	task_id = getattr(request, 'id', None)
+	running_id = get_running_task_id()
+	if running_id and task_id and running_id != task_id:
+		return
 	console.print(Info(message='Task was revoked, clearing running state'))
 	clear_task_running()
+
+	# A revoked task does not always reach task_postrun (a terminated prefork child never does):
+	# the worker's own task being revoked still ends the worker under kill-after-task.
+	sender = kwargs.get('sender')
+	if running_id and kills_after_task(getattr(sender, 'name', None)):
+		shutdown_after_task()
+		return
 
 	# Set up a new idle timer
 	if IDLE_TIMEOUT != -1:

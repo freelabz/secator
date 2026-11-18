@@ -31,6 +31,7 @@ class TestPostrunEagerChild(unittest.TestCase):
 			mock.patch.object(celery_signals, 'kill_worker') as kill,
 			mock.patch.object(celery_signals, 'clear_task_running') as clear,
 			mock.patch.object(celery_signals, 'IDLE_TIMEOUT', -1),
+			mock.patch.object(celery_signals, '_shutdown_requested', False),
 			mock.patch.object(celery_signals.CONFIG.celery, 'worker_kill_after_task', True),
 		):
 			if eager:
@@ -56,6 +57,58 @@ class TestPostrunEagerChild(unittest.TestCase):
 
 	def test_main_process_is_not_a_pool_child(self):
 		self.assertFalse(celery_signals.in_pool_child())
+
+
+class _KillAfterTask(unittest.TestCase):
+
+	def setUp(self):
+		patches = [
+			mock.patch.object(celery_signals, 'kill_worker'),
+			mock.patch.object(celery_signals, 'setup_idle_timer'),
+			mock.patch.object(celery_signals, 'IDLE_TIMEOUT', 20),
+			mock.patch.object(celery_signals, '_shutdown_requested', False),
+			mock.patch.object(celery_signals.CONFIG.celery, 'worker_kill_after_task', True),
+		]
+		self.kill, self.timer = patches[0].start(), patches[1].start()
+		for p in patches[2:]:
+			p.start()
+		for p in patches:
+			self.addCleanup(p.stop)
+		self.addCleanup(celery_signals.clear_task_running)
+		celery_signals.clear_task_running()
+
+
+class TestRevokedOwnTask(_KillAfterTask):
+	"""The worker's own task being revoked ends the worker too (no task_postrun after a revoke)."""
+
+	task = SimpleNamespace(name='secator.celery.run_command')
+
+	def test_revoked_own_task_kills_worker(self):
+		celery_signals.set_task_running('t1')
+		celery_signals.task_revoked_handler(request=SimpleNamespace(id='t1'), sender=self.task)
+		self.kill.assert_called_once_with(parent=False)
+		self.assertFalse(celery_signals.is_task_running())
+		self.timer.assert_not_called()
+
+	def test_revoked_with_kill_after_task_off_resets_idle_timer(self):
+		celery_signals.set_task_running('t1')
+		with mock.patch.object(celery_signals.CONFIG.celery, 'worker_kill_after_task', False):
+			celery_signals.task_revoked_handler(request=SimpleNamespace(id='t1'), sender=self.task)
+		self.kill.assert_not_called()
+		self.timer.assert_called_once_with(20)
+
+	def test_revoked_other_task_keeps_running_task(self):
+		celery_signals.set_task_running('t1')
+		celery_signals.task_revoked_handler(request=SimpleNamespace(id='other'), sender=self.task)
+		self.kill.assert_not_called()
+		self.assertTrue(celery_signals.is_task_running())
+
+	def test_revoke_then_postrun_shuts_down_once(self):
+		celery_signals.set_task_running('t1')
+		celery_signals.task_revoked_handler(request=SimpleNamespace(id='t1'), sender=self.task)
+		task = SimpleNamespace(name=self.task.name, request=SimpleNamespace(is_eager=False))
+		celery_signals.task_postrun_handler(sender=task, task=task)
+		self.kill.assert_called_once()
 
 
 if __name__ == '__main__':
