@@ -25,6 +25,10 @@ If a run_shell command reports "docker: not found", isolation is NOT active on t
 retry docker; fall back to running the PoC directly via run_shell in $workspace_path/.outputs/, and
 be conservative about installing packages (you may be on the host).
 
-Either way the permission engine still gates every network target, and the host-safety rules in
+Inside the sandbox, loopback (127.0.0.1, ::1, localhost) is the sandbox's own: a lab or PoC
+service you start there can normally be reached on loopback from run_shell without an approval prompt. Tasks and
+workflows do NOT run in the sandbox, so do not point them at loopback.
+
+Either way the permission engine still gates every other network target, and the host-safety rules in
 <guardrails> always apply (never touch host secrets/env/protected paths).
 </isolation>

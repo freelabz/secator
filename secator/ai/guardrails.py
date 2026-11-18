@@ -1,6 +1,7 @@
 """Permission engine for AI guardrails."""
 import fnmatch
 import ipaddress
+import os
 import re
 import socket
 from dataclasses import dataclass, field
@@ -64,6 +65,49 @@ def _strip_trailing_delims(value: str) -> str:
 		else:
 			break
 	return out
+
+
+def _is_loopback_target(value: str) -> bool:
+	"""True when *value* (host, ``host:port``, ``[v6]:port`` or HTTP(S) URL) names a loopback host:
+	``localhost`` or an address in ``127.0.0.0/8`` / ``::1``.
+
+	Only the exact name ``localhost`` counts — ``*.localhost`` is resolved through DNS in a
+	minimal container and may point anywhere. Anything unparseable is NOT loopback.
+	"""
+	from urllib.parse import urlparse
+	v = _strip_trailing_delims((value or '').strip())
+	if v.lower().startswith(('http://', 'https://')):
+		try:
+			host = urlparse(v).hostname
+		except ValueError:
+			return False
+	else:
+		canon = _canonical_authority(v)
+		if not canon:
+			return False
+		if canon.startswith('['):
+			host = canon[1:canon.index(']')]
+		elif canon.count(':') == 1:
+			host = canon.split(':', 1)[0]
+		else:
+			host = canon
+	if not host:
+		return False
+	host = host.lower().rstrip('.')
+	if host == 'localhost':
+		return True
+	try:
+		return ipaddress.ip_address(host.split('%', 1)[0]).is_loopback
+	except ValueError:
+		return False
+
+
+def _sandbox_has_private_loopback() -> bool:
+	"""True when the isolated run_shell sandbox gets its own network namespace (Docker's default
+	bridge, a named network, or ``none``), i.e. its loopback is not shared with the worker. Mirrors
+	the ``--network`` value the sandbox is started with (``SECATOR_AI_SANDBOX_NETWORK``)."""
+	net = os.environ.get("SECATOR_AI_SANDBOX_NETWORK", "").strip().lower()
+	return not (net == "host" or net.startswith("container:"))
 
 
 # Shell operators that chain commands
@@ -1037,7 +1081,10 @@ def build_target_choices(target: str) -> List[Dict]:
 	if is_url:
 		parsed = urlparse(target)
 		host = parsed.hostname or target
-		port = parsed.port
+		try:
+			port = parsed.port
+		except ValueError:  # malformed port (`http://h:8o/`): offer host-level choices only
+			port = None
 		base_path = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.path else f"{parsed.scheme}://{parsed.netloc}"
 		host_port = f"{host}:{port}" if port else host
 
@@ -1227,7 +1274,8 @@ class PermissionEngine:
 			# fault here is a deny (never the outer isolated-shell allow), so an exception
 			# on one target can't skip authz for the rest. (CodeRabbit CWE-863.)
 			try:
-				target_result = self._check_values("target", targets_to_check)
+				target_result = self._check_values(
+					"target", targets_to_check, isolated_shell=isolated_shell)
 			except (ValueError, TypeError, re.error) as e:
 				return PermissionResult(
 					decision="deny", reason=f"target check error (fail-closed): {type(e).__name__}")
@@ -1412,7 +1460,7 @@ class PermissionEngine:
 					return pattern
 		return ""
 
-	def _check_value(self, rule_type: str, value: str) -> PermissionResult:
+	def _check_value(self, rule_type: str, value: str, isolated_shell: bool = False) -> PermissionResult:
 		"""Check a single value. Order: deny > allow > ask > deny.
 
 		For target rules, URL values are also checked by their host and host:port
@@ -1439,12 +1487,22 @@ class PermissionEngine:
 			# the parsed host(s), and keep the URL itself ONLY when it is a real network target
 			# (so a path-scoped URL entry can still match it); an unparseable URL is dropped.
 			cleaned = _strip_trailing_delims(value)
+			# hostname and port are read SEPARATELY: `.port` raises ValueError on a
+			# non-numeric/out-of-range port (`http://h:8o/`) while `.hostname` is still
+			# well-defined. Reading both in one try dropped the valid host too, so an
+			# in-scope host was denied as "Unparseable target". Keep the host for scoping;
+			# only the malformed port is discarded.
 			host = port = None
 			try:
 				parsed = urlparse(cleaned)
-				host, port = parsed.hostname, parsed.port
+				host = parsed.hostname
 			except ValueError:
-				host = port = None
+				parsed = None
+			if parsed is not None:
+				try:
+					port = parsed.port
+				except ValueError:
+					port = None
 			values_to_check = [cleaned] if target_host(cleaned) else []
 			if host:
 				values_to_check.append(host)
@@ -1481,6 +1539,18 @@ class PermissionEngine:
 					# Structured deny: machine-readable reason + the offending target so a
 					# clients/CLI can render "Target X is not in the allowed scope" and attach an action.
 					return PermissionResult(decision="deny", reason="out_of_scope", targets=[v])
+
+		# Isolated shell loopback — checked AFTER both deny layers (a config deny rule or an
+		# out_of_scope entry on loopback still wins) and BEFORE in_scope / scope_hard_deny /
+		# the interactive ask. An isolated run_shell executes inside its own sandbox
+		# container, whose loopback is that container's, not the worker's: a PoC lab the
+		# agent stood up there is reachable only from inside it, so connecting to it is not
+		# network egress. Restricted to shell actions (task/workflow/subagent run on the
+		# worker, where loopback IS the worker) and to a sandbox with its own network
+		# namespace (`--network host` / `container:<x>` share someone else's loopback).
+		if (rule_type == "target" and isolated_shell and _sandbox_has_private_loopback()
+				and _is_loopback_target(value)):
+			return PermissionResult(decision="allow", reason=f"isolated: sandbox loopback target({value})")
 
 		# Mandate in_scope allow — checked AFTER both deny loops (config deny + the
 		# out_of_scope deny above still win) but before config/runtime allow rules.
@@ -1520,11 +1590,11 @@ class PermissionEngine:
 
 		return PermissionResult(decision="deny", reason=f"No rule for {rule_type}({value})")
 
-	def _check_values(self, rule_type: str, values: List[str]) -> PermissionResult:
+	def _check_values(self, rule_type: str, values: List[str], isolated_shell: bool = False) -> PermissionResult:
 		"""Check multiple values, return the most restrictive result."""
 		ask_targets = []
 		for value in values:
-			result = self._check_value(rule_type, value)
+			result = self._check_value(rule_type, value, isolated_shell=isolated_shell)
 			if result.decision == "deny":
 				# "No rule for" default deny → ask user instead of blocking. The
 				# scope_hard_deny short-circuit lives in _check_value now (it must beat
