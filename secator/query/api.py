@@ -26,8 +26,7 @@ def _auth_error_message(status_code: int, url: str, has_key: bool) -> str:
     if not has_key:
         return (
             f'API request to {url} was rejected ({status_code}): no API key is configured. '
-            'Set one with `secator config set addons.api.key <API_KEY>` '
-            '(or the SECATOR_ADDONS_API_KEY environment variable).'
+            'Export it as SECATOR_ADDONS_API_KEY, or set addons.api.key with `secator config edit`.'
         )
     return (
         f'API request to {url} was rejected ({status_code}): the configured API key '
@@ -147,7 +146,7 @@ class ApiBackend(QueryBackend):
         if not set_fields:
             return 0
         docs = self._search_all(query)
-        written, errors = 0, []
+        written, errors, auth_error = 0, [], None
         for doc in docs:
             finding_id = doc.get("_id") if isinstance(doc, dict) else None
             if not finding_id:
@@ -156,11 +155,15 @@ class ApiBackend(QueryBackend):
                 endpoint = CONFIG.addons.api.finding_update_endpoint.format(finding_id=finding_id)
                 self._make_request("PUT", endpoint, data=_fold_dotted_fields(doc, set_fields))
                 written += 1
-            except ApiAuthError:
-                raise
+            except ApiAuthError as e:
+                # Attempt every remaining write (a per-finding denial must not leave the rest
+                # unwritten), then surface the auth failure once the loop is done.
+                auth_error = e
             except Exception as e:
                 errors.append(e)
                 console.print(Warning(message=f"API finding update failed for {finding_id}: {e}"))
+        if auth_error is not None:
+            raise auth_error
         if errors and not written:
             raise RuntimeError(f"API finding update failed for all {len(errors)} matching finding(s): {errors[-1]}")
         return written

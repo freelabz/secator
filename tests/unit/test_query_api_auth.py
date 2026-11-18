@@ -59,14 +59,49 @@ class TestApiAuthErrors(unittest.TestCase):
 						call()
 
 	def test_other_http_errors_stay_best_effort(self):
-		with mock.patch('secator.query.api.requests.request', return_value=_response(500)):
+		payload = {'items': [{'_id': 'a' * 24, 'name': 'ws'}]}
+		request = mock.patch('secator.query.api.requests.request', return_value=_response(500, payload))
+		with request, mock.patch('secator.query.api.console') as console:
 			self.assertEqual(self._backend('k').list_workspaces(), [])
 			self.assertEqual(self._backend('k').search({}), [])
+		self.assertEqual(console.print.call_count, 2)
+
+	def test_update_attempts_every_write_before_raising_auth_error(self):
+		backend = self._backend('k')
+		docs = [{'_id': 'a' * 24}, {'_id': 'b' * 24}]
+		puts = []
+
+		def fake(method, endpoint, data=None):
+			puts.append(endpoint)
+			if len(puts) == 1:
+				raise ApiAuthError('denied')
+			return {}
+		search_all = mock.patch.object(ApiBackend, '_search_all', return_value=docs)
+		with search_all, mock.patch.object(ApiBackend, '_make_request', side_effect=fake):
+			with self.assertRaises(ApiAuthError):
+				backend._execute_update({}, {'$set': {'status': 'consumed'}})
+		self.assertEqual(len(puts), 2)
 
 	def test_ok_response_is_returned(self):
 		items = [{'_id': 'a' * 24, 'name': 'ws'}]
 		with mock.patch('secator.query.api.requests.request', return_value=_response(200, items)):
 			self.assertEqual(self._backend('k').list_workspaces(), items)
+
+	def test_steer_poll_reports_auth_error_without_raising(self):
+		from secator.ai.interactivity import RemoteBackend
+		engine = mock.Mock()
+		engine.search.side_effect = ApiAuthError('rejected key')
+		with mock.patch('secator.rich.console') as console:
+			self.assertEqual(RemoteBackend(timeout=1, query_engine=engine).poll_steers('s1'), [])
+		console.print.assert_called_once()
+
+	def test_steer_poll_stays_quiet_when_empty(self):
+		from secator.ai.interactivity import RemoteBackend
+		engine = mock.Mock()
+		engine.search.return_value = []
+		with mock.patch('secator.rich.console') as console:
+			self.assertEqual(RemoteBackend(timeout=1, query_engine=engine).poll_steers('s1'), [])
+		console.print.assert_not_called()
 
 
 class TestWorkspaceListAuthError(unittest.TestCase):
@@ -76,8 +111,7 @@ class TestWorkspaceListAuthError(unittest.TestCase):
 		with mock.patch('secator.query.api.requests.request', return_value=_response(401)):
 			with mock.patch('secator.query.api.CONFIG.addons.api.key', ''):
 				result = CliRunner().invoke(cli, ['ws', 'list', '--driver', 'api'])
-		self.assertNotEqual(result.exit_code, 0)
-		self.assertIsInstance(result.exception, SystemExit)
+		self.assertEqual(result.exit_code, 1)
 		self.assertIn('no API key is configured', result.output)
 
 

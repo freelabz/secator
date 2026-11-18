@@ -251,7 +251,13 @@ class RemoteBackend(InteractivityBackend):
 		}
 		try:
 			results = self.query_engine.search(base, limit=50)
-		except Exception:  # noqa: BLE001 - a steer must never crash the run
+		except Exception as e:  # noqa: BLE001 - a steer must never crash the run
+			from secator.query.api import ApiAuthError
+			if isinstance(e, ApiAuthError):
+				# Keep a rejected API key visible instead of silently dropping steers.
+				from secator.output_types import Warning
+				from secator.rich import console
+				console.print(Warning(message=f'Steer poll failed: {e.message}'))
 			return []
 		if not results:
 			return []
