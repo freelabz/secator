@@ -6,8 +6,9 @@ import threading
 
 from time import time
 
-from celery import Celery, chord
+from celery import Celery, chord, states
 from celery.canvas import signature
+from celery.exceptions import Ignore
 from celery.app import trace
 
 from rich.logging import RichHandler
@@ -158,6 +159,11 @@ def revoke_task(task_id, task_name=None):
 	if task_name:
 		message += f' ({task_name})'
 	app.control.revoke(task_id, terminate=True)
+	# The broadcast only reaches workers alive right now. Also record the revoke on the result
+	# backend, so that a still-queued task picked up later by a worker that never saw it (e.g. one
+	# started afterwards) is skipped at start (see run_command). Finished tasks keep their state.
+	if not app.AsyncResult(task_id).ready():
+		app.backend.mark_as_revoked(task_id, reason='revoked')
 	console.print(Info(message=message))
 
 
@@ -313,6 +319,12 @@ def run_command(self, results, name, targets, opts={}):
 	context = opts.get('context', {})
 	context['celery_id'] = self.request.id
 	context['worker_name'] = os.environ.get('WORKER_NAME', 'unknown')
+
+	# Skip a task revoked while it was still queued (see revoke_task): do not run it, do not
+	# touch its state, and do not trigger the rest of its chain / chord.
+	if not self.request.is_eager and self.AsyncResult(self.request.id).state == states.REVOKED:
+		console.print(Info(message=f'Task {name} was revoked before it started, skipping'))
+		raise Ignore()
 
 	# Set routing key in context
 	if IN_WORKER:
