@@ -437,18 +437,22 @@ class ai(PythonRunner):
 			# A frontend that owns the display (the Textual TUI) can't host the plain-console
 			# picker — it drives the terminal directly and collides with Textual. Route the
 			# choice through the backend so that frontend renders the session list instead.
+			from secator.ai.session import list_sessions
+			# Scanning the reports folders can take a moment: say what is happening, so the
+			# wait isn't mistaken for the model answering.
+			with maybe_status("[bold orange3]Loading sessions…[/]", spinner="dots"):
+				sessions = list_sessions()
 			if getattr(self.backend, "owns_display", False):
 				# `show_session_picker` prints its own "no sessions" notice on the console; a
 				# display-owning backend has no console, so surface the same thing as a Warning
 				# (and distinguish "none to resume" from a cancelled pick, both of which the
 				# picker signals as None).
-				from secator.ai.session import list_sessions
-				if not list_sessions():
+				if not sessions:
 					yield Warning(message="No previous AI sessions found.")
 					return
-				session = pick_session_via_backend(self.backend, session_id=self.session_id)
+				session = pick_session_via_backend(self.backend, session_id=self.session_id, sessions=sessions)
 			else:
-				session = show_session_picker()
+				session = show_session_picker(sessions=sessions)
 			if session is None:
 				return
 			self.session_name = session["name"]
@@ -469,9 +473,10 @@ class ai(PythonRunner):
 				# uses — the user's next answer re-detects the real mode and overwrites it.
 				self.mode = self.mode or "chat"
 				self._rebuild_prompt_and_tools()
-				self.history = restore_history_from_db(
-					self.session_id, self._get_query_engine(),
-					model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
+				with maybe_status("[bold orange3]Loading session…[/]", spinner="dots"):
+					self.history = restore_history_from_db(
+						self.session_id, self._get_query_engine(),
+						model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
 				# Placeholders minted by earlier turns must still decrypt in tool calls/display.
 				self._restore_pii_map()
 				# Show the prior conversation + findings on the console (the unified
@@ -485,10 +490,15 @@ class ai(PythonRunner):
 				# Legacy session: its docs carry no `_context.session_id`, so the unified
 				# restore would rebuild empty history. Fall back to the local
 				# history.json replay instead.
-				self.history = replay_session(session)
+				with maybe_status("[bold orange3]Loading session…[/]", spinner="dots"):
+					self.history = replay_session(session)
 				# This run keeps its fresh session id, so seed the placeholder map from the
 				# PRIOR session's stored map (its id is in the session's runner info).
 				self._restore_pii_map(session_id=session.get("store_session_id"))
+				# Re-key the restored map under THIS run's id right away: the next save points
+				# the session file at this id, so a later resume must find the map here even
+				# if this run ends before minting a new placeholder.
+				self._persist_pii_map()
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
 				return
@@ -846,7 +856,7 @@ class ai(PythonRunner):
 		"""
 		if self.interactive == "remote":
 			return
-		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+		save_history(self.history, self.reports_folder, debug_fn=self.debug, session_id=self.session_id)
 
 	# -------------------------------------------------------------------------
 	# Turn-level idempotency (remote/Celery redelivery)

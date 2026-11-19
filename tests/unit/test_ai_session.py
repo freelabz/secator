@@ -1,5 +1,7 @@
 """Tests for secator.ai.session restore_history_from_db + remote resume branch."""
 import contextlib
+import os
+import shutil
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -1090,6 +1092,10 @@ class TestLocalResumeAdoptsSessionId(unittest.TestCase):
 		self.assertIn("No previous AI sessions", warnings[0].message)
 
 
+# A minimal resumable conversation (list_sessions skips histories with no user/assistant turn).
+_ONE_TURN_HISTORY = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+
+
 class TestListSessionsSurfacesSessionId(unittest.TestCase):
 	"""list_sessions() must surface each session's session_id (read from its
 	report.json ai docs' `_context.session_id`, first non-empty) so the local
@@ -1101,7 +1107,8 @@ class TestListSessionsSurfacesSessionId(unittest.TestCase):
 
 		task_dir = Path(tmp_root) / 'ws1' / 'tasks' / 'task1'
 		task_dir.mkdir(parents=True)
-		(task_dir / 'history.json').write_text('[]')
+		# a non-empty conversation: an empty history is not resumable and is skipped
+		(task_dir / 'history.json').write_text(_json.dumps(_ONE_TURN_HISTORY))
 		report = {"info": info or {}, "results": {"ai": ai_items}}
 		(task_dir / 'report.json').write_text(_json.dumps(report))
 		return str(task_dir / 'history.json')
@@ -1160,12 +1167,12 @@ class TestListSessionsLegacyDiscovery(unittest.TestCase):
 	session_id). Regression for resume reporting "No previous AI sessions found"
 	for such sessions. It resumes via the legacy history replay (empty session_id)."""
 
-	def _write(self, tmp_root, *, report_name='report.json', results_ai=None, info=None, history='[]'):
+	def _write(self, tmp_root, *, report_name='report.json', results_ai=None, info=None, history=None):
 		import json as _json
 		from pathlib import Path
 		task_dir = Path(tmp_root) / 'ws1' / 'tasks' / 'task1'
 		task_dir.mkdir(parents=True)
-		(task_dir / 'history.json').write_text(history)
+		(task_dir / 'history.json').write_text(history if history is not None else _json.dumps(_ONE_TURN_HISTORY))
 		if report_name:
 			report = {"info": info or {}, "results": {"ai": results_ai if results_ai is not None else []}}
 			(task_dir / report_name).write_text(_json.dumps(report))
@@ -1541,6 +1548,145 @@ class TestPickSessionViaBackend(unittest.TestCase):
 		with patch("secator.ai.session.list_sessions", return_value=dup):
 			picked = pick_session_via_backend(backend)
 		self.assertIs(picked, dup[1])
+
+
+class TestListSessionsRobustness(unittest.TestCase):
+	"""list_sessions() must never crash on a session folder without a report file (a run
+	with no json driver that was interrupted before the end-of-run export) and must not
+	offer sessions that hold no conversation (a run aborted before the first message)."""
+
+	def setUp(self):
+		self.tmp_root = tempfile.mkdtemp(prefix="secator-test-reports-")
+		self.addCleanup(shutil.rmtree, self.tmp_root, True)
+
+	def _write(self, name, history, report=None, mtime=None):
+		import json as _json
+		from pathlib import Path
+		task_dir = Path(self.tmp_root) / 'ws1' / 'tasks' / name
+		task_dir.mkdir(parents=True)
+		hp = task_dir / 'history.json'
+		hp.write_text(history if isinstance(history, str) else _json.dumps(history))
+		if report is not None:
+			(task_dir / 'report.json').write_text(_json.dumps(report))
+		if mtime is not None:
+			os.utime(hp, (mtime, mtime))
+		return str(hp)
+
+	def test_read_json_tolerates_none_and_missing_path(self):
+		from secator.ai.session import _read_json
+		self.assertIsNone(_read_json(None))
+		self.assertIsNone(_read_json(''))
+		self.assertIsNone(_read_json(os.path.join(self.tmp_root, 'nope.json')))
+		self.assertIsNone(_read_json(self.tmp_root))  # a directory, not a file
+
+	@patch('secator.ai.session.glob.glob')
+	def test_session_without_report_file_is_listed(self, mock_glob):
+		"""No report*.json next to the history (report_path would be None): listed, no crash."""
+		from secator.ai.session import list_sessions
+		mock_glob.return_value = [self._write('t1', _ONE_TURN_HISTORY + [{"role": "assistant", "content": "yo"}])]
+		sessions = list_sessions()
+		self.assertEqual(len(sessions), 1)
+		self.assertEqual(sessions[0]['report_path'], '')
+		self.assertEqual(sessions[0]['session_id'], '')
+		self.assertEqual(sessions[0]['prompt'], 'hi')  # from the history itself
+		self.assertEqual(sessions[0]['targets'], [])
+
+	@patch('secator.ai.session.glob.glob')
+	def test_empty_aborted_session_is_skipped(self, mock_glob):
+		"""A history with no user/assistant turn (aborted before the first message) is not resumable."""
+		from secator.ai.session import list_sessions
+		mock_glob.return_value = [
+			self._write('empty', '[]'),
+			self._write('system_only', [{"role": "system", "content": "sys"}],
+			            report={"info": {}, "results": {"ai": []}}),
+			self._write('real', _ONE_TURN_HISTORY),
+		]
+		sessions = list_sessions()
+		self.assertEqual([os.path.basename(s['folder']) for s in sessions], ['real'])
+
+	@patch('secator.ai.session.glob.glob')
+	def test_unreadable_history_or_report_is_skipped_not_raised(self, mock_glob):
+		from secator.ai.session import list_sessions
+		mock_glob.return_value = [
+			self._write('corrupt_history', '{not json'),
+			self._write('corrupt_report', _ONE_TURN_HISTORY, report=None),
+			os.path.join(self.tmp_root, 'ws1', 'tasks', 'gone', 'history.json'),  # vanished file
+		]
+		# a report that is valid JSON but not an object
+		with open(os.path.join(self.tmp_root, 'ws1', 'tasks', 'corrupt_report', 'report.json'), 'w') as f:
+			f.write('[1, 2]')
+		sessions = list_sessions()
+		self.assertEqual([os.path.basename(s['folder']) for s in sessions], ['corrupt_report'])
+		self.assertTrue(sessions[0]['report_path'].endswith('report.json'))
+
+	@patch('secator.ai.session.glob.glob')
+	def test_most_recent_first_and_capped(self, mock_glob):
+		from secator.ai.session import list_sessions
+		mock_glob.return_value = [
+			self._write('old', _ONE_TURN_HISTORY, mtime=1000),
+			self._write('new', _ONE_TURN_HISTORY, mtime=3000),
+			self._write('mid', _ONE_TURN_HISTORY, mtime=2000),
+		]
+		sessions = list_sessions(max_sessions=2)
+		self.assertEqual([os.path.basename(s['folder']) for s in sessions], ['new', 'mid'])
+
+	def test_pickers_use_pre_listed_sessions(self):
+		"""The task lists sessions once (under a loading status) and hands them to the picker."""
+		from secator.ai.session import pick_session_via_backend
+		s = {'name': '', 'prompt': 'p', 'mtime': 0, 'targets': [], 'folder': '/x/tasks/1'}
+		backend = MagicMock()
+		backend.ask_user.side_effect = lambda q, choices, *a, **k: {'answer': choices[0]}
+		with patch('secator.ai.session.list_sessions', side_effect=AssertionError('relisted')):
+			self.assertIs(pick_session_via_backend(backend, sessions=[s]), s)
+
+	@patch('secator.ai.session.glob.glob')
+	def test_malformed_report_metadata_keeps_the_session(self, mock_glob):
+		"""Non-dict info / run_opts / context / _context fall back to history-derived metadata."""
+		from secator.ai.session import list_sessions
+		report = {
+			"info": {"run_opts": ["bad"], "context": "bad", "targets": "bad"},
+			"results": {"ai": [{"ai_type": "prompt", "content": None, "_context": ["bad"]}, "junk"]},
+		}
+		mock_glob.return_value = [self._write('t1', _ONE_TURN_HISTORY, report=report)]
+		sessions = list_sessions()
+		self.assertEqual(len(sessions), 1)
+		self.assertEqual(sessions[0]['prompt'], 'hi')
+		self.assertEqual(sessions[0]['targets'], [])
+		self.assertEqual(sessions[0]['store_session_id'], '')
+		mock_glob.return_value = [self._write('t3', _ONE_TURN_HISTORY, report={"info": {"targets": ["a", 42]}})]
+		self.assertEqual(list_sessions()[0]['targets'], [])   # non-string target: dropped, picker label safe
+		mock_glob.return_value = [self._write('t2', _ONE_TURN_HISTORY, report={"info": "bad", "results": "bad"})]
+		self.assertEqual([s['prompt'] for s in list_sessions()], ['hi'])
+
+	@patch('secator.ai.session.glob.glob')
+	def test_store_session_id_from_session_file_without_report(self, mock_glob):
+		"""With no local report, the store identity comes from the session file saved with the
+		history, so the resume can restore the session's placeholder map from any store."""
+		from secator.ai.history import ChatHistory
+		from secator.ai.session import SESSION_FILE, list_sessions, save_history
+		folder = os.path.join(self.tmp_root, 'ws1', 'tasks', 't1')
+		h = ChatHistory()
+		h.messages = list(_ONE_TURN_HISTORY)
+		save_history(h, folder, session_id='SID-1')
+		self.assertTrue(os.path.isfile(os.path.join(folder, SESSION_FILE)))
+		mock_glob.return_value = [os.path.join(folder, 'history.json')]
+		sessions = list_sessions()
+		self.assertEqual(sessions[0]['session_id'], '')   # no report: replayed from history
+		self.assertEqual(sessions[0]['store_session_id'], 'SID-1')
+
+	def test_print_session_results_tolerates_malformed_report(self):
+		"""Report display is best-effort: a malformed report never blocks the history replay."""
+		from secator.ai.session import print_session_results, replay_session
+		import json as _json
+		hp = self._write('t1', _ONE_TURN_HISTORY)
+		folder = os.path.dirname(hp)
+		for bad in ('[1, 2]', '{"results": [1]}', '{"results": {"ai": "x", "url": [1, null]}}', '\xff\xfe'):
+			rp = os.path.join(folder, 'report.json')
+			with open(rp, 'w', encoding='latin-1') as f:
+				f.write(bad)
+			print_session_results({'report_path': rp})
+			history = replay_session({'report_path': rp, 'history_path': hp})
+			self.assertEqual(history.messages, _ONE_TURN_HISTORY)
 
 
 if __name__ == "__main__":
