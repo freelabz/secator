@@ -7,8 +7,8 @@ from secator.definitions import ADDONS_ENABLED
 
 if ADDONS_ENABLED['ai']:
 	import requests
-	from secator.ai.tools import fetch_url as fu
-	from secator.ai.tools.fetch_url import fetch_url, is_safe_public_url, _build_session
+	from secator.ai.tools import web as fu
+	from secator.ai.tools.web import fetch_url, is_safe_public_url, _build_session
 
 
 class _Resp:
@@ -192,7 +192,7 @@ class TestWebProxy(unittest.TestCase):
 		self.assertIn("requests[socks]", err)
 
 	def test_web_search_uses_proxy(self):
-		from secator.ai.tools import web_search as ws
+		from secator.ai.tools import web as ws
 		with mock.patch.object(fu, '_ai_web_settings', return_value=(False, 'http://corp-proxy:3128')), \
 			mock.patch.object(ws.requests, 'post') as post:
 			post.return_value.json.return_value = {'exploits': []}
@@ -201,7 +201,7 @@ class TestWebProxy(unittest.TestCase):
 		self.assertEqual(post.call_args.kwargs['proxies'], {'http': proxy, 'https': proxy})
 
 	def test_web_search_no_proxy_by_default(self):
-		from secator.ai.tools import web_search as ws
+		from secator.ai.tools import web as ws
 		with mock.patch.object(fu, '_ai_web_settings', return_value=(False, '')), \
 			mock.patch.object(ws.requests, 'post') as post:
 			post.return_value.json.return_value = {'exploits': []}

@@ -152,7 +152,7 @@ class TestModelFacingPaths(unittest.TestCase):
 
 	def test_query_workspace_tool_never_yields_the_map(self):
 		from secator.ai.actions import ActionContext
-		from secator.ai.tools.query_workspace import QueryWorkspace
+		from secator.ai.tools.findings import QueryWorkspace
 		from secator.query.json import JsonBackend
 		tmp = tempfile.mkdtemp()
 		try:
