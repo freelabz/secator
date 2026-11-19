@@ -102,7 +102,8 @@ class TestKilledSessionResume(unittest.TestCase):
 		with contextlib.ExitStack() as stack:
 			stack.enter_context(mock.patch.object(aimod, "call_llm", _scripted_llm(calls)))
 			stack.enter_context(mock.patch.object(aimod, "create_backend", lambda *a, **k: backend))
-			stack.enter_context(mock.patch.object(aimod, "show_session_picker", lambda: list_sessions()[0]))
+			stack.enter_context(mock.patch.object(
+				aimod, "show_session_picker", lambda sessions=None: (sessions or list_sessions())[0]))
 			stack.enter_context(mock.patch.object(aimod.time, "sleep", lambda *a: None))
 			task = AiTask(
 				[], mode="chat", model="gpt-4o", interactive="local", headless=True, sync=True,
@@ -133,3 +134,38 @@ class TestKilledSessionResume(unittest.TestCase):
 			sent = [_core(m) for m in calls[0] if m["role"] != "system"]
 			expected = [_core(m) for m in saved if m["role"] != "system"]
 			self.assertEqual(sent, expected + [{"role": "user", "content": "after resume"}])
+
+	def test_killed_session_without_report_file_resumes(self):
+		"""Driver parity: the report file is only written live by the json driver; a run on
+		another store driver (api / mongodb / sqlite) that is killed never reaches the
+		end-of-run export, so its folder holds history.json alone. Listing must not crash and
+		the resume must hand the model the same full transcript as with the json driver."""
+		with tempfile.TemporaryDirectory() as tmp, mock.patch.object(CONFIG.dirs, "reports", Path(tmp)):
+			self._run(_Backend(["second question"], kill_when_exhausted=True), [])
+			for report in Path(tmp).glob("*/tasks/*/report*.json"):
+				report.unlink()
+
+			sessions = list_sessions()
+			self.assertEqual(len(sessions), 1)
+			self.assertEqual(sessions[0]["report_path"], "")
+			self.assertEqual(sessions[0]["prompt"], "first question")
+			saved = json.loads(Path(sessions[0]["history_path"]).read_text())
+
+			calls = []
+			self._run(_Backend(["after resume"], kill_when_exhausted=False), calls, resume=True)
+			sent = [_core(m) for m in calls[0] if m["role"] != "system"]
+			expected = [_core(m) for m in saved if m["role"] != "system"]
+			self.assertEqual(sent, expected + [{"role": "user", "content": "after resume"}])
+
+	def test_session_aborted_before_first_message_is_not_resumable(self):
+		"""Quitting at the very first prompt leaves nothing to resume: it must not be listed."""
+		class _Abort(_Backend):
+			def get_initial_prompt(self, inputs, **context):
+				return ""
+		with tempfile.TemporaryDirectory() as tmp, mock.patch.object(CONFIG.dirs, "reports", Path(tmp)):
+			self._run(_Abort([], kill_when_exhausted=True), [])
+			# whatever the run left behind, an empty / system-only history is never offered
+			folder = Path(tmp) / "default" / "tasks" / "99"
+			folder.mkdir(parents=True)
+			(folder / "history.json").write_text(json.dumps([{"role": "system", "content": "sys"}]))
+			self.assertEqual(list_sessions(), [])

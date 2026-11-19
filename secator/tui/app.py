@@ -187,13 +187,20 @@ class TUIApp(App):
 	_MODE_CYCLE = ("auto", "scan", "chat", "exploit")
 
 	def __init__(self, runner_builder=None, title="secator", subtitle="", initial_prompt="",
-	             initial_dangerous=False, initial_mode="auto", session_name=""):
+	             initial_dangerous=False, initial_mode="auto", session_name="", startup_status="starting…",
+	             lock_input=False):
 		super().__init__()
 		self._runner_builder = runner_builder
 		self._title = title
 		self._subtitle = subtitle
 		self._session_name = session_name or ""   # shown on the top delimiter; renamed via /name
 		self._initial_prompt = initial_prompt or ""
+		# Status shown while the runner builds, before it reports its own (e.g. "Loading
+		# sessions…" while resuming, so the wait isn't mistaken for the model answering).
+		self._startup_status = startup_status or ""
+		# Hide + disable the input until the runner first asks the user something (a resume
+		# lists sessions first: there is nothing to type into until one is picked).
+		self._input_locked = bool(lock_input)
 		self._current: RunnerPanel | None = None
 		self._container: RunnerPanel | None = None   # most-recent workflow/scan nesting parent
 		self._containers: dict = {}   # runner_id -> live workflow/scan panel (parallel batch:
@@ -225,7 +232,8 @@ class TUIApp(App):
 		# to the first ask_user instead of being dropped into _steers. `-p` supplies the prompt,
 		# so there's nothing to await.
 		self._prefill: str = ""
-		self._awaiting_first_prompt: bool = not bool(self._initial_prompt)
+		# (a locked input can't be typed into, so there is no prefill to hand over either)
+		self._awaiting_first_prompt: bool = not bool(self._initial_prompt) and not self._input_locked
 		# ---- meta bar (guardrail setting / mode / context %) ----
 		# Live state the runner reports via tui_set_meta each turn; seeded from the CLI opts so
 		# the bar is correct before the first LLM turn reports back.
@@ -300,7 +308,10 @@ class TUIApp(App):
 		self.sub_title = self._subtitle
 		self.query_one("#backbar").display = False
 		self._write = self.query_one("#convo", VerticalScroll)
-		self.query_one("#prompt-input", PromptInput).focus()
+		if self._input_locked:
+			self._set_input_locked(True)
+		else:
+			self.query_one("#prompt-input", PromptInput).focus()
 		self._render_meta()
 		self._set_session_name(self._session_name)
 		self.set_interval(0.1, self._tick_spinner)    # animate the status spinner
@@ -314,7 +325,7 @@ class TUIApp(App):
 			# The runner build (LLM/driver/system-prompt setup) blocks for a few seconds before
 			# it produces anything or asks for the first prompt — show a spinner so the input
 			# doesn't look dead. The runner's own status / first prompt replaces it.
-			self._set_status("starting…")
+			self._set_status(self._startup_status)
 			threading.Thread(target=self._consume, daemon=True).start()
 
 	# worker: build + drive the runner. Items are rendered via the on_item hook the
@@ -328,6 +339,30 @@ class TUIApp(App):
 			self.call_from_thread(self._set_status, f"error: {e}", False)
 		else:
 			self.call_from_thread(self._set_status, "done", False)
+		finally:
+			# the run ended before asking anything (e.g. no session to resume): give the input back
+			if self._input_locked:
+				try:
+					self.call_from_thread(self._set_input_locked, False)
+				except RuntimeError:  # the app already exited
+					pass
+
+	def _set_input_locked(self, locked: bool) -> None:
+		"""Hide + disable the input box (it can't be shown or focused), or bring it back."""
+		self._input_locked = bool(locked)
+		try:
+			inp = self.query_one("#prompt-input", PromptInput)
+			box = self.query_one("#input-box")
+		except Exception:  # noqa: BLE001 - nodes may be gone during teardown
+			return
+		inp.disabled = self._input_locked
+		if self._input_locked:
+			box.display = False
+			if self.focused is inp:
+				self.set_focus(None)
+		elif not self.query_one("#choice-host").display:
+			box.display = True   # unless a choice / permission box holds the input slot
+			inp.focus()
 
 	# ---- thread-safe entries called from the worker thread ----
 	def tui_render(self, item) -> None:
@@ -1210,6 +1245,8 @@ class TUIApp(App):
 
 	def _choice_to_input(self, text) -> None:
 		"""Tab: hand the current selection to the input box so the user can add more details."""
+		if self._input_locked:
+			return   # e.g. the resume session picker: nothing to add free text to
 		try:
 			inp = self.query_one("#prompt-input", PromptInput)
 		except Exception:  # noqa: BLE001
@@ -1231,6 +1268,8 @@ class TUIApp(App):
 	def _restore_input(self) -> None:
 		self.query_one("#choice-host", Vertical).remove_children()
 		self.query_one("#choice-host").display = False
+		if self._input_locked:
+			self._set_input_locked(False)   # first answer given (e.g. a session picked)
 		self.query_one("#input-box").display = True
 		if getattr(self, "_solo_choice", False):
 			for wid in self._SOLO_HIDDEN:
@@ -1393,7 +1432,9 @@ class TUIApp(App):
 			self._show_choices(choices, multiple, solo=solo)
 		else:
 			# a plain end-of-turn follow-up: no "What's next?" / "waiting" noise — the
-			# focused input is enough. Just make sure it's focused.
+			# focused input is enough. Just make sure it's shown and focused.
+			if self._input_locked:
+				self._set_input_locked(False)
 			try:
 				self.query_one("#prompt-input", PromptInput).focus()
 			except Exception:  # noqa: BLE001

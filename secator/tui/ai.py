@@ -43,7 +43,10 @@ _ACTION_VERBS = {
 
 class AITUI(TUIApp):
 	def __init__(self, runner_builder=None, session="ai", mode="chat", initial_prompt="",
-	             initial_dangerous=False, session_name=""):
+	             initial_dangerous=False, session_name="", resume=False):
+		# On --resume the run first lists the saved sessions for the user to pick: say so (not
+		# a generic "starting…" that reads like the model answering), and keep the input
+		# hidden until a session is picked — there is nothing to type into before that.
 		super().__init__(
 			runner_builder,
 			title="secator ai",
@@ -52,6 +55,8 @@ class AITUI(TUIApp):
 			initial_dangerous=initial_dangerous,
 			initial_mode=mode or "auto",
 			session_name=session_name or str(session),
+			startup_status="Loading sessions…" if resume else "starting…",
+			lock_input=bool(resume),
 		)
 		self._in_subagent: str | None = None          # subagent session we're writing into
 		# sid -> SubagentRow for every spawned subagent still running. A dict (not a single
@@ -327,7 +332,7 @@ def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 	app = AITUI(
 		None, session=str(session)[:30], mode=_mode,
 		initial_prompt=opts.get("prompt", ""), initial_dangerous=bool(opts.get("dangerous")),
-		session_name=opts.get("session_name") or "")
+		session_name=opts.get("session_name") or "", resume=bool(opts.get("resume")))
 
 	# Tap the item stream via a module-level on_item hook (see `_tui_feed` — it must not be
 	# a local closure or the runner can't pickle its hooks). It renders onto this `app`
