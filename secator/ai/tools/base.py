@@ -48,7 +48,8 @@ that uses both::
 			yield Info(message="exported")
 
 Activation is unchanged: the tool is only active when named in ``extra_tools`` (per run
-or via ``CONFIG.addons.ai.extra_tools``).
+or via ``CONFIG.addons.ai.extra_tools``), by exact name or by an fnmatch glob such as
+``export_*`` that turns on every loaded tool whose name matches.
 
 Several tools in one file
 -------------------------

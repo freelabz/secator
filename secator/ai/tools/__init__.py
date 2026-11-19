@@ -191,28 +191,63 @@ def register_ai_tool(tool):
 	return tool
 
 
+def _split_tool_names(value):
+	"""Normalize an ``extra_tools`` value to a list of names / patterns.
+
+	Accepts a list or a comma-separated string (``"sysreptor*,foo"``), so the option works the
+	same from the CLI, a template or a library call.
+	"""
+	if not value:
+		return []
+	if isinstance(value, str):
+		value = value.split(",")
+	return [str(v).strip() for v in value if v and str(v).strip()]
+
+
 def resolve_extra_tools(extra_tools=None):
 	"""Resolve the effective extra-tool names: config default ∪ the run's ``extra_tools``.
 
 	``CONFIG.addons.ai.extra_tools`` (a custom installation's always-on tools) is merged
-	with the per-run ``extra_tools`` option, order-preserving and deduplicated. Every name
-	must resolve to a loaded, valid tool (built-in or discovered external); an unknown name
-	raises ``ValueError`` with a clear message so a misconfigured/absent tool fails loudly
-	rather than being silently dropped.
+	with the per-run ``extra_tools`` option, order-preserving and deduplicated. Each entry is
+	an exact tool name or an fnmatch glob (``sysreptor*``, ``mark_vuln_*``), the same glob
+	syntax as a mode's ``tools:`` patterns; a glob expands to every loaded tool (built-in or
+	discovered external) whose name matches, in registry order. An exact name that is not
+	loaded, or a glob that matches no loaded tool, raises ``ValueError`` with a clear message
+	so a misconfigured/absent tool fails loudly rather than being silently dropped.
+
+	A glob may match core tools too, exactly like an exact core name may; a mode's ``!``
+	excludes still win over it in :func:`build_tool_schemas`.
 	"""
+	import fnmatch
 	from secator.config import CONFIG
-	names = []
-	for src in (list(CONFIG.addons.ai.extra_tools or []), list(extra_tools or [])):
-		for n in src:
-			if n and n not in names:
-				names.append(n)
-	unknown = [n for n in names if n not in TOOLS_BY_NAME]
+	names, unknown = [], []
+	for src in (_split_tool_names(CONFIG.addons.ai.extra_tools), _split_tool_names(extra_tools)):
+		for entry in src:
+			if entry in TOOLS_BY_NAME:
+				matched = [entry]
+			elif _is_glob(entry):
+				matched = [n for n in TOOLS_BY_NAME if fnmatch.fnmatchcase(n, entry)]
+			else:
+				matched = []
+			if not matched:
+				if entry not in unknown:
+					unknown.append(entry)
+				continue
+			for n in matched:
+				if n not in names:
+					names.append(n)
 	if unknown:
 		raise ValueError(
 			f"extra_tools refers to unknown AI tool(s): {unknown}. Known tools: "
 			f"{sorted(TOOLS_BY_NAME)}. Check CONFIG.addons.ai.extra_tools / the run's "
-			f"extra_tools, and that the tool dir / bundle is loaded.")
+			f"extra_tools (exact names or globs such as 'prefix*'), and that the tool dir / "
+			f"bundle is loaded.")
 	return names
+
+
+def _is_glob(pattern):
+	"""Whether an ``extra_tools`` entry is an fnmatch glob rather than an exact name."""
+	return any(c in pattern for c in "*?[")
 
 
 def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_is_auto: bool = True,
@@ -236,9 +271,10 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 			a pinned ACTION mode, but a user-PINNED read-only `chat` must stay read-only,
 			so `change_mode` is withheld there (the model can only suggest the user
 			switches). An auto session that happens to resolve to chat KEEPS change_mode.
-		extra_tools: Names of EXTRA (typically external) tools to add on top of the mode's
-			baseline for this run (e.g. ``["add_suggestion"]``). Merged with
-			``CONFIG.addons.ai.extra_tools``; every name must resolve to a loaded tool.
+		extra_tools: Names or fnmatch globs of EXTRA (typically external) tools to add on top
+			of the mode's baseline for this run (e.g. ``["add_suggestion"]`` or
+			``["sysreptor*"]``). Merged with ``CONFIG.addons.ai.extra_tools``; every name must
+			resolve to a loaded tool and every glob must match at least one.
 
 	Returns:
 		List of OpenAI-format tool schema dicts.
