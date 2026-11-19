@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.56.1](https://github.com/freelabz/secator/compare/v0.56.0...v0.56.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **ai:** copy TUI selections to the system clipboard, not just the app ([#1681](https://github.com/freelabz/secator/issues/1681)) ([8c5d53f](https://github.com/freelabz/secator/commit/8c5d53f13acad8da3ea14e80498e2df88684561f))
+* **ai:** subagent usage accounting, model inheritance and per-run cap ([#1696](https://github.com/freelabz/secator/issues/1696)) ([65a4dba](https://github.com/freelabz/secator/commit/65a4dbafe2f3f795ca9ce19e4338611c18eb529d))
+* **celery:** kill-after-task ignores in-process child tasks, targets the right process, stops consuming ([#1697](https://github.com/freelabz/secator/issues/1697)) ([abd1c1c](https://github.com/freelabz/secator/commit/abd1c1ca2a1f239a1f9c97e73badcbd02c35d94b))
+* **cli:** accept `-driver` on workspace, query and report commands ([#1685](https://github.com/freelabz/secator/issues/1685)) ([ac50f04](https://github.com/freelabz/secator/commit/ac50f047246bfad75635b831bf2dae0ea337c4ab))
+* **droopescan:** start on Python 3.12+ and flag crashing tools in health ([#1686](https://github.com/freelabz/secator/issues/1686)) ([a425495](https://github.com/freelabz/secator/commit/a4254954551506cbdff899c1510ea52be0a5e558))
+* **installer:** don't self-symlink source-built binaries; pass musl RUSTFLAGS via env ([#1678](https://github.com/freelabz/secator/issues/1678)) ([9caacdd](https://github.com/freelabz/secator/commit/9caacddd9ac6f88384ff13ac81b1d77dfbddd7ee))
+* **query:** stop the api backend from forcing `_tagged: True` ([#1683](https://github.com/freelabz/secator/issues/1683)) ([09be740](https://github.com/freelabz/secator/commit/09be740c3e0c40518ca02af158b0313e1a3f5c4a))
+* **search_vulns:** drop CVEs matched on the general product only ([#1690](https://github.com/freelabz/secator/issues/1690)) ([bdabf41](https://github.com/freelabz/secator/commit/bdabf4178a812d9b1541d5635b1f335d11c0be9c))
+
+
+### Performance Improvements
+
+* **query:** speed up --group and workspace list on the json backend ([#1682](https://github.com/freelabz/secator/issues/1682)) ([be574ec](https://github.com/freelabz/secator/commit/be574ecddde96bb21a3f3a13fab038570c1da66f))
+
 ## [0.56.0](https://github.com/freelabz/secator/compare/v0.55.0...v0.56.0) (2026-11-16)
 
 
