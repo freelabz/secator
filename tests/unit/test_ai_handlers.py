@@ -226,7 +226,7 @@ class TestChangeModeHandler(unittest.TestCase):
     """ChangeMode.run: model-driven mode switch, with the pinned-chat guard."""
 
     def _run(self, action, ctx):
-        from secator.ai.tools.change_mode import ChangeMode
+        from secator.ai.tools.session import ChangeMode
         return list(ChangeMode().run(action, ctx))
 
     def _ctx(self, mode, mode_is_auto):

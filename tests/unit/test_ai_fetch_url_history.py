@@ -3,7 +3,7 @@ import unittest
 from secator.definitions import ADDONS_ENABLED
 
 if ADDONS_ENABLED['ai']:
-	from secator.ai.tools.fetch_url import is_safe_public_url, _ip_is_public
+	from secator.ai.tools.web import is_safe_public_url, _ip_is_public
 	from secator.ai.runner_history import summarize_runner, filter_runners
 	import ipaddress
 

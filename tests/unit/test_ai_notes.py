@@ -14,7 +14,7 @@ from secator.definitions import ADDONS_ENABLED
 
 if ADDONS_ENABLED['ai']:
 	from secator.ai.actions import ActionContext, dispatch_action
-	from secator.ai.tools.add_note import _NOTE_IDENTITY_FIELDS
+	from secator.ai.tools.findings import _NOTE_IDENTITY_FIELDS
 	from secator.ai.tools import build_tool_schemas, tool_call_to_action
 	from secator.ai.guardrails import PermissionEngine
 	from secator.output_types import Ai, Error

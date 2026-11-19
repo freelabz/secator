@@ -1309,7 +1309,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 				"tool_call_name": action["tool_call_name"],
 			})
 
-		with patch("secator.ai.tools.run_shell.RunShell.run", staticmethod(_shell_ok)):
+		with patch("secator.ai.tools.runners.RunShell.run", staticmethod(_shell_ok)):
 			gen = AiTask._dispatch_and_collect(fake_self, [action], ctx)
 			yielded = list(gen)
 		return yielded
@@ -1367,7 +1367,7 @@ class TestDispatchAndCollectPersistsToolResult(unittest.TestCase):
 				"task_id": "task-xyz",
 			})
 
-		with patch("secator.ai.tools.run_task.RunTask.run", staticmethod(_task_with_id)):
+		with patch("secator.ai.tools.runners.RunTask.run", staticmethod(_task_with_id)):
 			from secator.tasks.ai import ai as AiTask
 			yielded = list(AiTask._dispatch_and_collect(fake_self, [action], ctx))
 
