@@ -169,6 +169,19 @@ class OutputType:
 		return out
 
 	@classmethod
+	def group_keys(cls):
+		"""Fields the CLI `--group` option collapses this type's findings on.
+
+		The type's own `_group_by` when it declares one; otherwise its equality fields
+		(`compare=True`, the same identity `_compare_key()` and duplicate tagging use, minus
+		the constant `_type`), so a type with no group key still collapses the copies of the
+		same finding stored by several runs instead of passing them all through.
+		"""
+		if cls._group_by:
+			return tuple(cls._group_by)
+		return tuple(f.name for f in fields(cls) if f.compare and f.name != '_type')
+
+	@classmethod
 	@lru_cache(maxsize=None)
 	def keys(cls):
 		"""Return the field names of this OutputType as a cached tuple.

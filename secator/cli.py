@@ -916,9 +916,9 @@ def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort
 	count/uniq -> limit) on the fetched findings, so it is backend-agnostic. Row values are
 	rich-escaped so a finding value containing brackets can't corrupt the rendered markup.
 
-	`group=True` first collapses findings by each type's default `_group_by` (aggregating its
-	`_group_aggregate`), so a subsequent count reflects UNIQUE findings — e.g. a vulnerability
-	hitting many targets counts once."""
+	`group=True` first collapses findings by each type's `group_keys()` (its `_group_by`, else its
+	equality fields; aggregating its `_group_aggregate`), so a subsequent count reflects UNIQUE
+	findings — e.g. a vulnerability hitting many targets counts once."""
 	from rich.markup import escape
 	from secator.query.utils import python_expr_to_mongo
 	from secator.query._stream import StreamView
@@ -1590,7 +1590,8 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 		rows = res.get(_type, [])  # _apply_format drops the type when there is nothing to format
 		return rows[:limit] if limit else rows
 
-	if group and cls is not None and getattr(cls, '_group_by', None):
+	group_keys = cls.group_keys() if group and cls is not None and hasattr(cls, 'group_keys') else ()
+	if group_keys:
 		# Use raw-dict streaming to avoid O(N) full OutputType rehydration before grouping.
 		# group_findings() accepts dicts natively and only rehydrates the representative
 		# (one per group), so peak cost drops from O(N * #fields) to O(#groups * #fields).
@@ -1599,7 +1600,7 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 		# (e.g. a tag with no `category`) the same way rehydration would, keeping
 		# group keys/counts identical to the object path.
 		defaults = cls.field_defaults() if hasattr(cls, 'field_defaults') else None
-		reps = group_findings(raw_iter, list(cls._group_by), getattr(cls, '_group_aggregate', None), defaults=defaults)
+		reps = group_findings(raw_iter, list(group_keys), getattr(cls, '_group_aggregate', None), defaults=defaults)
 		return _finish(reps)
 
 	if count or uniq:
@@ -1779,8 +1780,9 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 			cls = type_map.get(type_name)
 			report.data['results'][type_name] = _aggregate_streamed(
 				sv, type_name, cls, fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)
-			if group and cls is not None and getattr(cls, '_group_by', None) and report.data['results'][type_name]:
-				grouped_types.append((type_name, ', '.join(cls._group_by)))
+			group_keys = cls.group_keys() if group and cls is not None else ()
+			if group_keys and report.data['results'][type_name]:
+				grouped_types.append((type_name, ', '.join(group_keys)))
 		if group and not grouped_types:
 			console.print(Warning(message='--group: no groupable finding types in results'))
 	else:
