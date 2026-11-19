@@ -676,6 +676,32 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5, default
     return out
 
 
+def group_findings_by_type(items, output_type, max_display=5):
+    """Group findings of one output type the way `--group` does, wherever it is used.
+
+    The single place that resolves a type's grouping: its group keys (`group_keys()`: the
+    declared `_group_by`, else its equality fields, so every type collapses the copies of a
+    finding stored by several runs), its `_group_aggregate`, and its dataclass defaults (so raw
+    dicts missing a group key group like rehydrated objects). Used by `secator q --group`, the
+    summary templates' `query(group=True)` and the AI `query_workspace(group=True)` tool.
+
+    Args:
+        items (iterable): Findings (dicts or OutputType objects) of `output_type`; may be a stream.
+        output_type (type): The OutputType class of the findings.
+        max_display (int): Max aggregated values shown before '.. and X more'.
+
+    Returns:
+        list: One representative per group (see `group_findings`).
+    """
+    return group_findings(
+        items,
+        list(output_type.group_keys()),
+        getattr(output_type, '_group_aggregate', None),
+        max_display=max_display,
+        defaults=output_type.field_defaults(),
+    )
+
+
 def query_has_type_constraint(query):
     """Check whether a MongoDB-style query contains a '_type' constraint anywhere (recursively).
 

@@ -916,9 +916,9 @@ def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort
 	count/uniq -> limit) on the fetched findings, so it is backend-agnostic. Row values are
 	rich-escaped so a finding value containing brackets can't corrupt the rendered markup.
 
-	`group=True` first collapses findings by each type's default `_group_by` (aggregating its
-	`_group_aggregate`), so a subsequent count reflects UNIQUE findings — e.g. a vulnerability
-	hitting many targets counts once."""
+	`group=True` first collapses findings by each type's `group_keys()` (its `_group_by`, else its
+	equality fields; aggregating its `_group_aggregate`), so a subsequent count reflects UNIQUE
+	findings — e.g. a vulnerability hitting many targets counts once."""
 	from rich.markup import escape
 	from secator.query.utils import python_expr_to_mongo
 	from secator.query._stream import StreamView
@@ -1234,8 +1234,9 @@ def list_aliases(silent):
 @click.option('--group', is_flag=True, default=False, help="Group findings by each output type's default field(s), aggregating a related field (e.g. vulnerabilities by name with their matched_at targets).")  # noqa: E501
 @click.option('--save', 'save', type=str, default=None, help='Save the query expression ARG under this name for later reuse (e.g. --save vuln_high)')  # noqa: E501
 @click.option('--show-all', 'show_all', is_flag=True, default=False, help='Show extra vulnerability fields: epss_score, description, remediation, impact, poc')  # noqa: E501
+@click.option('--include-duplicates', 'include_duplicates', is_flag=True, default=False, help='Also show the findings flagged as workspace duplicates (copies of a finding already reported by another run), hidden by default')  # noqa: E501
 @click.pass_context
-def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, sort, count, uniq, group, save, show_all):  # noqa: E501
+def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_filter, driver, dedupe, limit, sort, count, uniq, group, save, show_all, include_duplicates):  # noqa: E501
 	"""Query"""
 
 	# 0. Save the expression under a name, then exit (reuse later with `secator q <name>`).
@@ -1251,17 +1252,17 @@ def query(ctx, arg, output, output_folder, time_delta, fmt, workspace, report_fi
 	# Empty query: return all results (subject to the enforced base query),
 	# optionally scoped by --report-filter / --workspace.
 	if not arg:
-		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, None, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all, include_duplicates=include_duplicates)  # noqa: E501
 		return
 
 	# 1. Saved query name
 	if arg in CONFIG.queries:
-		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, CONFIG.queries[arg], fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all, include_duplicates=include_duplicates)  # noqa: E501
 		return
 
 	# 2. Raw filter expression
 	if _looks_like_query_expr(arg):
-		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all)  # noqa: E501
+		run_report_show(report_filter, output, time_delta, arg, fmt, workspace, driver, dedupe, limit, output_folder, sort=sort, count=count, uniq=uniq, group=group, show_all=show_all, include_duplicates=include_duplicates)  # noqa: E501
 		return
 
 	# 3. Natural language -> AI chat
@@ -1577,7 +1578,7 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 	- --sort alone: a correct global sort needs the whole set, so it materializes (inherent; combine
 	  with --count/--group to stay bounded, or push down in a future pass).
 	"""
-	from secator.query.utils import group_findings
+	from secator.query.utils import group_findings_by_type
 
 	def _finish(items):
 		res = {_type: items}
@@ -1590,17 +1591,11 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 		rows = res.get(_type, [])  # _apply_format drops the type when there is nothing to format
 		return rows[:limit] if limit else rows
 
-	if group and cls is not None and getattr(cls, '_group_by', None):
-		# Use raw-dict streaming to avoid O(N) full OutputType rehydration before grouping.
-		# group_findings() accepts dicts natively and only rehydrates the representative
-		# (one per group), so peak cost drops from O(N * #fields) to O(#groups * #fields).
+	if group and cls is not None:
+		# Raw-dict streaming: group_findings_by_type() reads only the group keys, the aggregate
+		# field and `_timestamp` per finding, and rehydrates one representative per group.
 		raw_iter = sv.iter_raw() if hasattr(sv, 'iter_raw') else sv
-		# Pass dataclass defaults so raw-dict grouping fills absent group-by fields
-		# (e.g. a tag with no `category`) the same way rehydration would, keeping
-		# group keys/counts identical to the object path.
-		defaults = cls.field_defaults() if hasattr(cls, 'field_defaults') else None
-		reps = group_findings(raw_iter, list(cls._group_by), getattr(cls, '_group_aggregate', None), defaults=defaults)
-		return _finish(reps)
+		return _finish(group_findings_by_type(raw_iter, cls))
 
 	if count or uniq:
 		counter, seen, kept, batch = Counter(), set(), [], []
@@ -1654,10 +1649,42 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 	return _finish(list(iter(sv)))
 
 
-def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None, show_all=False):  # noqa: E501
+# `secator q` hides the copies of a finding that duplicate tagging marked as workspace duplicates.
+WORKSPACE_DUPLICATE_FILTER = {'_context.workspace_duplicate': {'$ne': True}}
+# Backends where the filter above can go in the query: a finding without the flag (never tagged)
+# must still match. sqlite compares a missing JSON field as NULL (`NULL != 1` is not true), so it
+# would drop every untagged finding; there the flagged copies are only filtered out of the results.
+NULL_SAFE_DUPLICATE_FILTER_BACKENDS = ('local', 'mongodb', 'api')
+
+
+def _is_workspace_duplicate(item):
+	"""True for a finding (dict or output type) flagged as a workspace duplicate."""
+	ctx = item.get('_context') if isinstance(item, dict) else getattr(item, '_context', None)
+	return bool(isinstance(ctx, dict) and ctx.get('workspace_duplicate'))
+
+
+class _NonDuplicateView:
+	"""A StreamView without the findings flagged as workspace duplicates (still streamed)."""
+
+	def __init__(self, sv):
+		self._sv = sv
+
+	def __iter__(self):
+		return (item for item in self._sv if not _is_workspace_duplicate(item))
+
+	def iter_raw(self):
+		raw = self._sv.iter_raw() if hasattr(self._sv, 'iter_raw') else self._sv
+		return (item for item in raw if not _is_workspace_duplicate(item))
+
+
+def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None, show_all=False, include_duplicates=True):  # noqa: E501
 	"""Build and send a consolidated report. Shared by `report show` and `query`.
 
 	REPORT_QUERY: comma-separated runner paths (e.g. scans/5,tasks/3).
+
+	``include_duplicates=False`` (the `secator q` default) leaves out the findings flagged as
+	workspace duplicates. It only changes this command's query and results: the backends' enforced
+	base query, which runners use, is untouched.
 	"""
 	from secator.query.utils import (
 		parse_report_paths, python_expr_to_mongo, validate_query_fields,
@@ -1710,6 +1737,12 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 
 			cutoff = datetime.datetime.now(datetime.timezone.utc) - delta
 			full_query['_timestamp'] = {'$gte': cutoff.timestamp()}
+
+	# 4b. Leave out workspace duplicates (`secator q` default). Nested in `$and`: a top-level
+	# `_context.workspace_duplicate` is a backend protected field, stripped from every query.
+	exclude_duplicates = not include_duplicates
+	if exclude_duplicates and effective_driver in NULL_SAFE_DUPLICATE_FILTER_BACKENDS:
+		full_query['$and'] = list(full_query.get('$and') or []) + [dict(WORKSPACE_DUPLICATE_FILTER)]
 
 	# 5. Build runner context for QueryEngine backend selection
 	# Build the context drivers list from the *resolved* backend (not the raw --driver) — otherwise a
@@ -1777,14 +1810,27 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 		type_map = {cls.get_name(): cls for cls in FINDING_TYPES}
 		for type_name, sv in list(report.data['results'].items()):
 			cls = type_map.get(type_name)
+			if exclude_duplicates:
+				sv = _NonDuplicateView(sv)
 			report.data['results'][type_name] = _aggregate_streamed(
 				sv, type_name, cls, fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)
-			if group and cls is not None and getattr(cls, '_group_by', None) and report.data['results'][type_name]:
-				grouped_types.append((type_name, ', '.join(cls._group_by)))
+			group_keys = cls.group_keys() if group and cls is not None else ()
+			if group_keys and report.data['results'][type_name]:
+				grouped_types.append((type_name, ', '.join(group_keys)))
 		if group and not grouped_types:
 			console.print(Warning(message='--group: no groupable finding types in results'))
 	else:
-		report.build(query=full_query, dedupe=dedupe_effective, limit=limit)
+		# Without the flag in the query (sqlite), duplicates are filtered from the results, so fetch
+		# everything first: a raw `limit` page could hold duplicates and come back short.
+		post_filter = exclude_duplicates and effective_driver not in NULL_SAFE_DUPLICATE_FILTER_BACKENDS
+		report.build(query=full_query, dedupe=dedupe_effective, limit=0 if post_filter else limit)
+		if exclude_duplicates:
+			left = limit if post_filter and limit else None
+			for type_name, items in report.data['results'].items():
+				items = [i for i in items if not _is_workspace_duplicate(i)]
+				if left is not None:
+					items, left = items[:left], max(left - len(items), 0)
+				report.data['results'][type_name] = items
 		if fmt:
 			report.data['results'] = _apply_format(report.data['results'], fmt)
 	report.send()

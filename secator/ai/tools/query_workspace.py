@@ -189,7 +189,7 @@ class QueryWorkspace(BaseTool):
 			# Grouped mode: collapse the fetched page to one representative per group so a
 			# compact overview (with _group_count + aggregated targets + each rep's _uuid)
 			# reaches the model instead of every finding. Requires exactly one _type so we
-			# can resolve its _group_by / _group_aggregate.
+			# can resolve its group keys / _group_aggregate (see group_findings_by_type).
 			group_cls = None
 			if group:
 				group_cls = _resolve_single_output_type(query_filter)
@@ -211,8 +211,8 @@ class QueryWorkspace(BaseTool):
 			page_len = len(results)
 
 			if group_cls is not None:
-				from secator.query.utils import group_findings
-				results = group_findings(results, list(group_cls._group_by), group_cls._group_aggregate)
+				from secator.query.utils import group_findings_by_type
+				results = group_findings_by_type(results, group_cls)
 
 			extra = {"results": len(results), "limit": limit, "offset": offset}
 			if group:

@@ -39,6 +39,9 @@ class Domain(OutputType):
 
 	_table_fields = [DOMAIN, ALIVE]
 	_sort_by = (DOMAIN,)
+	# Collapse a domain's copies into one row: `alive` is an equality field (it follows the whois
+	# status), so copies seen alive by one run and not by another would otherwise stay apart.
+	_group_by = (DOMAIN,)
 
 	def __post_init__(self):
 		super().__post_init__()
