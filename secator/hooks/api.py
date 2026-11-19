@@ -76,8 +76,9 @@ def _make_request(method, endpoint, data=None):
 	except requests.exceptions.RequestException as e:
 		# e.g. a truncated response body: the request reached the endpoint.
 		raise ApiRequestError(method, endpoint, reason=f'request error: {type(e).__name__}')
-	# 2xx only: Response.ok also accepts 3xx (e.g. an empty 304)
-	success = response.ok and not (isinstance(response.status_code, int) and response.status_code >= 300)
+	# 2xx only: Response.ok also accepts 1xx and 3xx (e.g. an empty 304)
+	status = response.status_code
+	success = 200 <= status < 300 if isinstance(status, int) else bool(response.ok)
 	try:
 		result = response.json()
 	except ValueError:
@@ -223,8 +224,8 @@ def update_runner(self):
 		# Create new runner (never replayed automatically, see API_RETRY_METHODS)
 		try:
 			result = _make_request('POST', API_RUNNER_CREATE_ENDPOINT, update)
-			if not (isinstance(result, dict) and result.get('id')):
-				raise ApiRequestError('POST', API_RUNNER_CREATE_ENDPOINT, reason='response has no runner id')
+			if not (isinstance(result, dict) and _is_object_id(result.get('id'))):
+				raise ApiRequestError('POST', API_RUNNER_CREATE_ENDPOINT, reason='response has no valid runner id')
 		except ApiRequestError as e:
 			if e.delivered and local_id:
 				self.context['api_unconfirmed_creates'] = [*unconfirmed, local_id]
