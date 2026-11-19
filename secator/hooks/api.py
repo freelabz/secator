@@ -18,7 +18,7 @@ import requests
 from functools import cache
 
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES, Error, Info
+from secator.output_types import FINDING_TYPES, Info
 from secator.runners import Scan, Task, Workflow
 from secator.serializers.dataclass import DataclassEncoder
 from secator.utils import debug
@@ -62,13 +62,40 @@ def _make_request(method, endpoint, data=None):
 		logged = json.dumps({**data, 'extra_data': '<redacted>'}, cls=DataclassEncoder) if internal else json_data
 		debug('API data', sub='hooks.api', verbose=True, obj=logged, obj_after=True)
 	response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)
-	result = response.json()
+	try:
+		result = response.json()
+	except ValueError:
+		# Not JSON: typically an error page from a proxy / load balancer (HTML) or a
+		# plain-text server error. Name the request instead of a bare JSONDecodeError.
+		if response.ok and not (response.text or '').strip():
+			return None
+		raise ApiRequestError(method, endpoint, response.status_code, _body_snippet(response.text), json_body=False)
 	debug('API response', sub='hooks.api', verbose=True,
 	      obj='<redacted>' if internal else result)
-	if not response.ok and result.get('detail'):
-		console.print(Error(message=f'API error: {result["detail"]}'))
-	response.raise_for_status()
+	if not response.ok:
+		detail = result.get('detail') if isinstance(result, dict) else None
+		raise ApiRequestError(method, endpoint, response.status_code, _body_snippet(detail if detail is not None else result))
 	return result
+
+
+class ApiRequestError(Exception):
+	"""An api driver request got a non-2xx or non-JSON response."""
+
+	def __init__(self, method, endpoint, status_code, snippet, json_body=True):
+		self.method = method
+		self.endpoint = endpoint
+		self.status_code = status_code
+		self.snippet = snippet
+		kind = '' if json_body else ', non-JSON body'
+		super().__init__(f'API {method} {endpoint} failed (HTTP {status_code}{kind}): {snippet or "<empty body>"}')
+
+
+def _body_snippet(body, size=200):
+	"""Short single-line snippet of a response body for error messages."""
+	if not isinstance(body, str):
+		body = json.dumps(body, cls=DataclassEncoder)
+	body = ' '.join(body.split())
+	return body if len(body) <= size else body[:size] + '...'
 
 
 def update_runner(self):
