@@ -629,6 +629,8 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 | `addons.api.header_name` | `string` | `Bearer` | Auth header scheme |
 | `addons.api.force_ssl` | `bool` | `true` | Require TLS |
 | `addons.api.timeout` | `int` | `60` | Request timeout (s) |
+| `addons.api.retries` | `int` | `3` | Retries on transient gateway errors (HTTP 502/503/504), connection errors and timeouts. POST (create) is retried only on HTTP 503 and on errors raised before the request was sent |
+| `addons.api.retry_backoff` | `float` | `1.0` | Seconds before the first retry, doubled for each next one |
 | `addons.api.runner_create_endpoint` | `string` | `runners` | Runner creation endpoint |
 | `addons.api.runner_update_endpoint` | `string` | `runner/{runner_id}` | Runner update endpoint |
 | `addons.api.runner_delete_endpoint` | `string` | `{runner_type}/{runner_id}` | Runner delete endpoint |

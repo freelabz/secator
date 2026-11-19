@@ -409,6 +409,8 @@ class ApiAddon(StrictModel):
 	header_name: str = 'Bearer'
 	force_ssl: bool = True
 	timeout: int = 60
+	retries: int = 3  # retries on transient gateway (502/503/504) / connection errors
+	retry_backoff: float = 1.0  # seconds before the 1st retry, doubled for each next one
 	org_id: Optional[int] = None  # Override org to query (admins only); defaults to the user's own org
 	runner_create_endpoint: str = 'runners'
 	runner_get_endpoint: str = 'runner/{runner_id}'

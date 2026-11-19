@@ -9,6 +9,8 @@ Configuration:
 	- addons.api.url: Base URL of the external API
 	- addons.api.api_key: API key for authentication
 	- addons.api.force_ssl: Enable/disable SSL certificate verification
+	- addons.api.retries: Retries on transient gateway / connection errors
+	- addons.api.retry_backoff: Base backoff (s) between retries, doubled each retry
 """
 
 import json
@@ -37,6 +39,27 @@ API_WORKSPACE_CREATE_ENDPOINT = CONFIG.addons.api.workspace_create_endpoint
 API_ORG_ID = CONFIG.addons.api.org_id
 FORCE_SSL = CONFIG.addons.api.force_ssl
 API_TIMEOUT = CONFIG.addons.api.timeout
+API_RETRIES = CONFIG.addons.api.retries
+API_RETRY_BACKOFF = CONFIG.addons.api.retry_backoff
+
+# Transient gateway statuses: a proxy or load balancer in front of the API answered
+# instead of the API itself (backend unreachable, restarting, or too slow).
+TRANSIENT_STATUSES = (502, 503, 504)
+# Retry-safe methods: repeating them leaves the same end state.
+IDEMPOTENT_METHODS = ('GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE')
+# A non-idempotent POST (create) is only retried when the request cannot have been
+# processed: the API does not dedupe creates, so replaying one it already handled
+# would create a duplicate runner / finding / workspace. 503 means the gateway could
+# not hand the request to any backend (none reachable or healthy). 502 and 504 are
+# NOT retried for POST: the backend may have received and processed the request
+# before the connection broke or the gateway gave up waiting.
+POST_RETRY_STATUSES = (503,)
+# Max bytes of a non-JSON response body quoted in the error.
+BODY_SNIPPET_BYTES = 200
+
+
+class ApiResponseError(requests.exceptions.RequestException):
+	"""The API answered with an error status or a body that is not JSON."""
 
 
 def get_runner_dbg(runner):
@@ -45,7 +68,17 @@ def get_runner_dbg(runner):
 
 
 def _make_request(method, endpoint, data=None):
-	"""Make HTTP request to external API endpoint."""
+	"""Make HTTP request to external API endpoint.
+
+	Transient failures (gateway 502/503/504, connection errors, timeouts) are retried
+	`addons.api.retries` times with exponential backoff (`addons.api.retry_backoff`,
+	doubled after each retry). POST is retried only when the request cannot have
+	reached the API (see POST_RETRY_STATUSES and _request_never_sent).
+
+	Raises:
+		ApiResponseError: the final response is an error status or not JSON.
+		requests.exceptions.RequestException: the request could not be completed.
+	"""
 	url = f'{API_URL.rstrip("/")}/{endpoint.lstrip("/")}'
 	headers = {'Content-Type': 'application/json'}
 	if API_KEY:
@@ -61,14 +94,75 @@ def _make_request(method, endpoint, data=None):
 	if json_data:
 		logged = json.dumps({**data, 'extra_data': '<redacted>'}, cls=DataclassEncoder) if internal else json_data
 		debug('API data', sub='hooks.api', verbose=True, obj=logged, obj_after=True)
-	response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)
-	result = response.json()
+	response = _request_with_retries(method, url, data=json_data, headers=headers, verify=verify, timeout=timeout)
+	result = _parse_response(method, url, response)
 	debug('API response', sub='hooks.api', verbose=True,
 	      obj='<redacted>' if internal else result)
-	if not response.ok and result.get('detail'):
-		console.print(Error(message=f'API error: {result["detail"]}'))
-	response.raise_for_status()
+	if not response.ok:
+		detail = result.get('detail') if isinstance(result, dict) else None
+		if detail:
+			console.print(Error(message=f'API error: {detail}'))
+		response.raise_for_status()
 	return result
+
+
+def _request_with_retries(method, url, **kwargs):
+	"""Send the request, retrying transient failures that are safe to repeat."""
+	method = method.upper()
+	idempotent = method in IDEMPOTENT_METHODS
+	retry_statuses = TRANSIENT_STATUSES if idempotent else POST_RETRY_STATUSES
+	retries = max(0, API_RETRIES)
+	for attempt in range(retries + 1):
+		last = attempt == retries
+		try:
+			response = requests.request(method=method, url=url, **kwargs)
+		except requests.exceptions.RequestException as e:
+			retryable = idempotent and isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
+			if last or not (retryable or _request_never_sent(e)):
+				raise
+			reason = f'{type(e).__name__}: {e}'
+		else:
+			if last or response.status_code not in retry_statuses:
+				return response
+			reason = f'HTTP {response.status_code}'
+		delay = API_RETRY_BACKOFF * (2 ** attempt)
+		debug(f'API {method} {url} failed ({reason}), retry {attempt + 1}/{retries} in {delay:.1f}s', sub='hooks.api')
+		time.sleep(delay)
+
+
+def _request_never_sent(exc):
+	"""True if the error happened before any byte of the request reached the server.
+
+	Covers connect timeouts, refused / unreachable connections and DNS failures. A
+	read timeout or a connection dropped after sending is NOT covered: the server may
+	have processed the request.
+	"""
+	if isinstance(exc, requests.exceptions.ConnectTimeout):
+		return True
+	if not isinstance(exc, requests.exceptions.ConnectionError):
+		return False
+	from urllib3.exceptions import NewConnectionError
+	reason = getattr(exc.args[0], 'reason', None) if exc.args else None
+	return isinstance(reason, NewConnectionError)
+
+
+def _parse_response(method, url, response):
+	"""Decode a JSON response body, or raise a clear error for a non-JSON one.
+
+	An empty body decodes to None. A non-JSON body (e.g. an HTML error page from a
+	proxy in front of the API) raises ApiResponseError with the status code and the
+	start of the body, instead of a bare JSON decode error.
+	"""
+	if not response.content:
+		return None
+	try:
+		return response.json()
+	except ValueError:
+		snippet = response.content[:BODY_SNIPPET_BYTES].decode('utf-8', errors='replace').strip()
+		raise ApiResponseError(
+			f'API {method} {url} returned HTTP {response.status_code} with a non-JSON body: {snippet!r}',
+			response=response,
+		) from None
 
 
 def update_runner(self):
