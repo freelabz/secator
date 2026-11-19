@@ -1102,6 +1102,7 @@ class Command(Runner):
 		self.debug(f'return code: {self.return_code}', sub='end')
 
 		if self.killed:
+			self.revoked = True  # stopped on purpose (interrupt / revoke), not a failure
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
 			yield Error(message=error)
 
