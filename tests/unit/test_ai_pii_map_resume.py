@@ -128,6 +128,36 @@ class TestPlaceholderMapSurvivesResume(unittest.TestCase):
 		self.assertIn("unknown sensitive-data placeholder", tool_msgs[0]["content"])
 		self.assertNotIn(HOST, json.dumps(calls[1]))
 
+	def test_placeholder_map_restored_when_session_has_no_report_file(self):
+		"""Driver parity: on a store driver other than json, an interrupted run leaves no local
+		report, so the resume replays history.json and keeps a fresh session id. The prior
+		session's placeholder map must still be found (via the session file saved with the
+		history), or every reused placeholder would be rejected."""
+		placeholder = SensitiveDataEncryptor().encrypt(HOST)
+
+		def llm_a(messages, *a, **k):
+			return {"content": "noted", "tool_calls": [], "usage": {}}
+
+		with tempfile.TemporaryDirectory() as tmp, mock.patch.object(CONFIG.dirs, "reports", Path(tmp)):
+			self._run(_Backend(f"look at {HOST}"), llm_a)
+			for report in Path(tmp).glob("*/tasks/*/report*.json"):
+				report.unlink()
+			self.assertEqual(list_sessions()[0]["report_path"], "")
+
+			calls = []
+
+			def llm_b(messages, *a, **k):
+				calls.append(messages)
+				if len(calls) == 1:
+					return {"content": "", "usage": {}, "tool_calls": [_plan_call("c1", f"probe {placeholder}")]}
+				return {"content": "done", "tool_calls": [], "usage": {}}
+
+			items = self._run(_Backend("", ["continue"]), llm_b, resume=True)
+
+		plans = [i for i in items if isinstance(i, dict) and i.get("ai_type") == "plan"]
+		self.assertEqual(len(plans), 1, "the prior session's placeholder must resolve")
+		self.assertEqual(plans[0]["extra_data"]["items"][0]["text"], f"probe {HOST}")
+
 	def test_same_value_maps_to_same_placeholder_across_runs(self):
 		# deterministic salted hash: a value re-seen after a resume gets the SAME placeholder
 		self.assertEqual(SensitiveDataEncryptor().encrypt(HOST), SensitiveDataEncryptor().encrypt(HOST))

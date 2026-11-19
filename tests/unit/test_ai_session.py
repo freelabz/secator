@@ -1639,6 +1639,53 @@ class TestListSessionsRobustness(unittest.TestCase):
 		with patch('secator.ai.session.list_sessions', side_effect=AssertionError('relisted')):
 			self.assertIs(pick_session_via_backend(backend, sessions=[s]), s)
 
+	@patch('secator.ai.session.glob.glob')
+	def test_malformed_report_metadata_keeps_the_session(self, mock_glob):
+		"""Non-dict info / run_opts / context / _context fall back to history-derived metadata."""
+		from secator.ai.session import list_sessions
+		report = {
+			"info": {"run_opts": ["bad"], "context": "bad", "targets": "bad"},
+			"results": {"ai": [{"ai_type": "prompt", "content": None, "_context": ["bad"]}, "junk"]},
+		}
+		mock_glob.return_value = [self._write('t1', _ONE_TURN_HISTORY, report=report)]
+		sessions = list_sessions()
+		self.assertEqual(len(sessions), 1)
+		self.assertEqual(sessions[0]['prompt'], 'hi')
+		self.assertEqual(sessions[0]['targets'], [])
+		self.assertEqual(sessions[0]['store_session_id'], '')
+		mock_glob.return_value = [self._write('t2', _ONE_TURN_HISTORY, report={"info": "bad", "results": "bad"})]
+		self.assertEqual([s['prompt'] for s in list_sessions()], ['hi'])
+
+	@patch('secator.ai.session.glob.glob')
+	def test_store_session_id_from_session_file_without_report(self, mock_glob):
+		"""With no local report, the store identity comes from the session file saved with the
+		history, so the resume can restore the session's placeholder map from any store."""
+		from secator.ai.history import ChatHistory
+		from secator.ai.session import SESSION_FILE, list_sessions, save_history
+		folder = os.path.join(self.tmp_root, 'ws1', 'tasks', 't1')
+		h = ChatHistory()
+		h.messages = list(_ONE_TURN_HISTORY)
+		save_history(h, folder, session_id='SID-1')
+		self.assertTrue(os.path.isfile(os.path.join(folder, SESSION_FILE)))
+		mock_glob.return_value = [os.path.join(folder, 'history.json')]
+		sessions = list_sessions()
+		self.assertEqual(sessions[0]['session_id'], '')   # no report: replayed from history
+		self.assertEqual(sessions[0]['store_session_id'], 'SID-1')
+
+	def test_print_session_results_tolerates_malformed_report(self):
+		"""Report display is best-effort: a malformed report never blocks the history replay."""
+		from secator.ai.session import print_session_results, replay_session
+		import json as _json
+		hp = self._write('t1', _ONE_TURN_HISTORY)
+		folder = os.path.dirname(hp)
+		for bad in ('[1, 2]', '{"results": [1]}', '{"results": {"ai": "x", "url": [1, null]}}', '\xff\xfe'):
+			rp = os.path.join(folder, 'report.json')
+			with open(rp, 'w', encoding='latin-1') as f:
+				f.write(bad)
+			print_session_results({'report_path': rp})
+			history = replay_session({'report_path': rp, 'history_path': hp})
+			self.assertEqual(history.messages, _ONE_TURN_HISTORY)
+
 
 if __name__ == "__main__":
 	unittest.main()

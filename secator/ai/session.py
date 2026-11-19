@@ -12,7 +12,32 @@ from secator.output_types import Error, Warning
 from secator.rich import console
 
 
-def save_history(history, reports_folder, debug_fn=None):
+# Small sidecar written next to history.json: the session identity the store docs are stamped
+# with. The report file holds it too, but only the json driver writes that report live.
+SESSION_FILE = 'session.json'
+
+
+def _atomic_write_json(path, obj):
+	"""Write ``obj`` as JSON to ``path`` atomically (temp file + fsync + ``os.replace``)."""
+	path = Path(path)
+	path.parent.mkdir(parents=True, exist_ok=True)
+	fd, tmp_path = tempfile.mkstemp(prefix=f'.{path.stem}.', suffix='.json.tmp', dir=str(path.parent))
+	try:
+		with os.fdopen(fd, 'w', encoding='utf-8') as f:
+			json.dump(obj, f, indent=2)
+			f.flush()
+			os.fsync(f.fileno())
+		os.replace(tmp_path, path)
+		tmp_path = None
+	finally:
+		if tmp_path is not None:
+			try:
+				os.unlink(tmp_path)
+			except OSError:
+				pass
+
+
+def save_history(history, reports_folder, debug_fn=None, session_id=None):
 	"""Save chat history to reports folder, atomically.
 
 	Called at every end of turn (not only when the run exits), so it must never leave a
@@ -24,18 +49,17 @@ def save_history(history, reports_folder, debug_fn=None):
 		history: ChatHistory instance.
 		reports_folder: Path to reports folder.
 		debug_fn: Optional debug function for logging.
+		session_id: Optional session id the run's store docs are stamped with. Saved to
+			``session.json`` next to the history so a resume can find the session's store
+			docs (e.g. its placeholder map) whatever drivers wrote them.
 	"""
 	history_path = Path(reports_folder) / 'history.json'
-	tmp_path = None
 	try:
-		history_path.parent.mkdir(parents=True, exist_ok=True)
-		fd, tmp_path = tempfile.mkstemp(prefix='.history.', suffix='.json.tmp', dir=str(history_path.parent))
-		with os.fdopen(fd, 'w', encoding='utf-8') as f:
-			json.dump(history.messages, f, indent=2)
-			f.flush()
-			os.fsync(f.fileno())
-		os.replace(tmp_path, history_path)
-		tmp_path = None
+		_atomic_write_json(history_path, history.messages)
+		if session_id:
+			session_path = history_path.parent / SESSION_FILE
+			if _as_dict(_read_json(session_path)).get('session_id') != session_id:
+				_atomic_write_json(session_path, {'session_id': session_id})
 		if debug_fn:
 			debug_fn(f'Saved history to {history_path}', sub='llm')
 	except (OSError, TypeError, ValueError) as e:
@@ -43,12 +67,6 @@ def save_history(history, reports_folder, debug_fn=None):
 			debug_fn(f'Failed to save history: {e}', sub='llm')
 		else:
 			console.print(Warning(message=f'Failed to save history: {e}'))
-	finally:
-		if tmp_path is not None:
-			try:
-				os.unlink(tmp_path)
-			except OSError:
-				pass
 
 
 def _read_json(path):
@@ -64,6 +82,11 @@ def _read_json(path):
 			return json.load(f)
 	except (ValueError, OSError, TypeError):  # ValueError covers JSONDecodeError + bad encoding
 		return None
+
+
+def _as_dict(value):
+	"""``value`` when it is a dict, else an empty dict (tolerates malformed metadata)."""
+	return value if isinstance(value, dict) else {}
 
 
 def _has_conversation(messages):
@@ -143,12 +166,11 @@ def _load_session(history_path, mtime):
 		(p for p in [folder / 'report.json', *sorted(folder.glob('report*.json'))] if p.is_file()),
 		None,
 	)
-	data = _read_json(report_path)
-	if not isinstance(data, dict):
-		data = {}
-	info = data.get('info') or {}
-	results = data.get('results') or {}
-	ai_items = (results.get('ai') or []) if isinstance(results, dict) else []
+	data = _as_dict(_read_json(report_path))
+	info = _as_dict(data.get('info'))
+	ai_items = _as_dict(data.get('results')).get('ai')
+	if not isinstance(ai_items, list):
+		ai_items = []
 
 	# First user prompt + session name, and the first stamped `_context.session_id`
 	# (a resumed run adopts it) — single pass, stop once both are found.
@@ -158,9 +180,9 @@ def _load_session(history_path, mtime):
 	for item in ai_items:
 		if not isinstance(item, dict):
 			continue
-		ctx = item.get('_context') or {}
+		ctx = _as_dict(item.get('_context'))
 		if not first_prompt and item.get('ai_type') == 'prompt':
-			first_prompt = item.get('content', '')
+			first_prompt = item.get('content') or ''
 			session_name = ctx.get('session_name', '') or ctx.get('name', '')
 		if not session_id:
 			session_id = ctx.get('session_id', '')
@@ -170,7 +192,18 @@ def _load_session(history_path, mtime):
 	# No `ai` results (legacy session, or no local report): take the prompt from the run
 	# opts, else the first user turn recorded in the history itself.
 	if not first_prompt:
-		first_prompt = (info.get('run_opts') or {}).get('prompt') or _first_user_message(messages)
+		first_prompt = _as_dict(info.get('run_opts')).get('prompt') or _first_user_message(messages)
+	if not isinstance(first_prompt, str):
+		first_prompt = ''
+	targets = info.get('targets')
+	# The id the session's store docs (e.g. its placeholder map) are stamped with: from the
+	# report (ai results, else the runner info), else from the session file saved next to the
+	# history on every end of turn — the only source when there is no local report.
+	store_session_id = (
+		session_id
+		or _as_dict(info.get('context')).get('session_id')
+		or _as_dict(_read_json(folder / SESSION_FILE)).get('session_id')
+		or '')
 
 	return {
 		'folder': str(folder),
@@ -179,10 +212,8 @@ def _load_session(history_path, mtime):
 		'name': session_name,
 		'prompt': first_prompt,
 		'session_id': session_id,
-		# The id the session's store docs (e.g. its placeholder map) are stamped with —
-		# from the runner info even when the report carries no ai results.
-		'store_session_id': session_id or (info.get('context') or {}).get('session_id', ''),
-		'targets': info.get('targets') or [],
+		'store_session_id': store_session_id,
+		'targets': targets if isinstance(targets, list) else [],
 		'timestamp': info.get('end_time') or info.get('start_time') or 0,
 		'mtime': mtime,
 	}
@@ -313,22 +344,21 @@ def print_session_results(session):
 	if not report_path:
 		return
 	type_map = {cls.__name__.lower(): cls for cls in OUTPUT_TYPES}
-	try:
-		with open(report_path) as f:
-			data = json.load(f)
-	except (json.JSONDecodeError, OSError):
-		return
+	data = _read_json(report_path)
+	results = data.get('results') if isinstance(data, dict) else None
+	if not isinstance(results, dict):
+		return   # missing / malformed report: nothing to show, the history replay still runs
 	# Flatten all items with their type class, then print in timestamp order
 	all_items = []
-	for type_name, items in data.get('results', {}).items():
+	for type_name, items in results.items():
 		cls = type_map.get(type_name)
-		if not cls:
+		if not cls or not isinstance(items, list):
 			continue
 		for item_data in items:
-			if is_internal_doc(item_data):
-				continue   # bookkeeping (placeholder map), never displayed
+			if not isinstance(item_data, dict) or is_internal_doc(item_data):
+				continue   # malformed, or bookkeeping (placeholder map): never displayed
 			all_items.append((item_data, cls))
-	all_items.sort(key=lambda x: x[0].get('_timestamp', 0))
+	all_items.sort(key=lambda x: x[0].get('_timestamp') or 0)
 	for item_data, cls in all_items:
 		try:
 			console.print(cls.load(item_data), highlight=False)

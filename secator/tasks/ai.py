@@ -852,7 +852,7 @@ class ai(PythonRunner):
 		"""
 		if self.interactive == "remote":
 			return
-		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+		save_history(self.history, self.reports_folder, debug_fn=self.debug, session_id=self.session_id)
 
 	# -------------------------------------------------------------------------
 	# Turn-level idempotency (remote/Celery redelivery)
