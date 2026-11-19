@@ -1189,11 +1189,38 @@ class Runner:
 				self.debug('hook success', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose='item' in sub)  # noqa: E501
 			except Exception as e:
 				self.debug('hook failed', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
-				error = Error.from_exception(e, message=f'Hook "{fun}" execution failed')
 				if self.raise_on_error:
 					raise e
+				if self._is_driver_hook(hook):
+					self._report_driver_hook_failure(fun, hook_type, e)
+					continue
+				error = Error.from_exception(e, message=f'Hook "{fun}" execution failed')
 				self.add_result(error, hooks=False)
 		return result
+
+	@staticmethod
+	def _is_driver_hook(hook):
+		"""Whether ``hook`` belongs to a persistence driver (``secator.hooks.<driver>``)."""
+		return (getattr(hook, '__module__', None) or '').startswith('secator.hooks.')
+
+	def _report_driver_hook_failure(self, fun, hook_type, exc):
+		"""Report a failed driver (persistence) hook as a one-line Warning.
+
+		A driver hook only persists or relays the run (runner state, findings); it never
+		produces the run's results. Its failure must therefore not hide those results:
+		it is reported as a Warning (the run's status still reflects its own execution),
+		without a traceback (which would flood ``self.output``, the command output that
+		callers read), and once per hook and message so lifecycle / per-item retries
+		against an unavailable backend don't repeat it.
+		"""
+		message = f'Driver hook "{fun}" failed ({hook_type}): {type(exc).__name__}: {exc}'
+		reported = self.__dict__.setdefault('_driver_hook_failures', set())
+		key = (fun, f'{type(exc).__name__}: {exc}')
+		if key in reported:
+			self.debug('driver hook failure already reported', obj={'name': hook_type, 'fun': fun}, sub='hooks')
+			return
+		reported.add(key)
+		self.add_result(Warning(message=message), hooks=False)
 
 	def run_validators(self, validator_type, *args, error=True, sub='validators'):
 		"""Run validators of a certain type.

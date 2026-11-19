@@ -51,7 +51,7 @@ def _make_request(method, endpoint, data=None):
 	if API_KEY:
 		headers['Authorization'] = f'{API_HEADER_NAME} {API_KEY}'
 	verify = FORCE_SSL
-	timeout = API_TIMEOUT
+	timeout = _request_timeout()
 	debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
 	debug('API headers', sub='hooks.api', verbose=True, obj=headers)
 	json_data = json.dumps(data, cls=DataclassEncoder) if data else None
@@ -61,7 +61,15 @@ def _make_request(method, endpoint, data=None):
 	if json_data:
 		logged = json.dumps({**data, 'extra_data': '<redacted>'}, cls=DataclassEncoder) if internal else json_data
 		debug('API data', sub='hooks.api', verbose=True, obj=logged, obj_after=True)
-	response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)
+	try:
+		response = _send_with_retries(method, url, json_data, headers, verify, timeout)
+	except requests.exceptions.ConnectTimeout:
+		raise ApiRequestError(method, endpoint, reason=f'could not connect within {timeout[0]}s', delivered=False)
+	except requests.exceptions.Timeout:
+		# The request was sent: the endpoint may still complete it after we gave up.
+		raise ApiRequestError(method, endpoint, reason=f'no response within {timeout[1]}s')
+	except requests.exceptions.ConnectionError as e:
+		raise ApiRequestError(method, endpoint, reason=f'connection error: {type(e).__name__}', delivered=_maybe_delivered(e))
 	try:
 		result = response.json()
 	except ValueError:
@@ -79,15 +87,42 @@ def _make_request(method, endpoint, data=None):
 
 
 class ApiRequestError(Exception):
-	"""An api driver request got a non-2xx or non-JSON response."""
+	"""An api driver request failed: non-2xx or non-JSON response, timeout or connection error.
 
-	def __init__(self, method, endpoint, status_code, snippet, json_body=True):
+	``delivered`` is False only when the request provably never reached the endpoint
+	(connection refused / connect timeout / name resolution); otherwise the endpoint may
+	have processed it (e.g. completed a create after a gateway error or a read timeout).
+	"""
+
+	def __init__(self, method, endpoint, status_code=None, snippet='', json_body=True, reason=None, delivered=True):
 		self.method = method
 		self.endpoint = endpoint
 		self.status_code = status_code
 		self.snippet = snippet
-		kind = '' if json_body else ', non-JSON body'
-		super().__init__(f'API {method} {endpoint} failed (HTTP {status_code}{kind}): {snippet or "<empty body>"}')
+		self.delivered = delivered
+		if reason:
+			message = f'API {method} {endpoint} failed ({reason})'
+		else:
+			kind = '' if json_body else ', non-JSON body'
+			message = f'API {method} {endpoint} failed (HTTP {status_code}{kind}): {snippet or "<empty body>"}'
+		super().__init__(message)
+
+
+API_CONNECT_TIMEOUT = 10  # seconds; the read timeout is addons.api.timeout
+API_DEFAULT_TIMEOUT = 60  # seconds; used when addons.api.timeout is unset or not positive
+
+
+def _request_timeout():
+	"""(connect, read) timeout tuple. Never unbounded: a non-positive setting falls back to the default."""
+	read = API_TIMEOUT if isinstance(API_TIMEOUT, (int, float)) and API_TIMEOUT > 0 else API_DEFAULT_TIMEOUT
+	return (min(API_CONNECT_TIMEOUT, read), read)
+
+
+def _maybe_delivered(exc):
+	"""Whether a ConnectionError may have happened after the request was sent."""
+	from urllib3.exceptions import NewConnectionError  # also covers name resolution failures
+	reason = getattr(exc.args[0], 'reason', None) if exc.args else None
+	return not isinstance(reason, NewConnectionError)
 
 
 def _body_snippet(body, size=200):
@@ -98,13 +133,44 @@ def _body_snippet(body, size=200):
 	return body if len(body) <= size else body[:size] + '...'
 
 
+# Retries for a transiently unavailable endpoint (restarting / not-ready backend behind a
+# gateway, refused connection). Only idempotent methods are retried: replaying a create
+# (POST) whose first attempt reached the backend before the gateway error would create a
+# duplicate runner / finding / workspace (see update_runner for how a failed runner
+# create is handled). Read timeouts are not retried (the request may still be processing,
+# and each wait is already the full read timeout).
+API_RETRY_METHODS = ('GET', 'PUT', 'DELETE', 'HEAD')
+API_RETRY_STATUSES = (502, 503, 504)
+API_RETRY_BACKOFFS = (0.5, 1.0)  # seconds slept before each retry (2 retries, 3 attempts)
+
+
+def _send_with_retries(method, url, json_data, headers, verify, timeout):
+	"""Send the request, retrying idempotent methods on a gateway error or a refused connection."""
+	backoffs = API_RETRY_BACKOFFS if method.upper() in API_RETRY_METHODS else ()
+	for attempt in range(len(backoffs) + 1):
+		last = attempt == len(backoffs)
+		try:
+			response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)  # noqa: E501
+		except requests.exceptions.ConnectionError as e:
+			if last:
+				raise
+			debug(f'API {method} {url} connection error ({type(e).__name__}), retrying', sub='hooks.api')
+		else:
+			if last or response.status_code not in API_RETRY_STATUSES:
+				return response
+			debug(f'API {method} {url} returned HTTP {response.status_code}, retrying', sub='hooks.api')
+		time.sleep(backoffs[attempt])
+
+
 def update_runner(self):
 	if 'api' not in self.context.get('drivers', []):
 		self.context.setdefault('drivers', []).append('api')
 	runner_type = self.config.type
 	update = self.toDict()
 	chunk = update.get('chunk')
-	_id = self.context.get(f'{runner_type}_chunk_id') if chunk else self.context.get(f'{runner_type}_id')
+	id_key = f'{runner_type}_chunk_id' if chunk else f'{runner_type}_id'
+	_id = self.context.get(id_key)
+	local_id = _id
 	# The runner constructor mints a run-scope uuid {type}_id, but API runner ids are
 	# ObjectIds (same rule as the mongodb hook's ensure_mongo_run_id): a non-ObjectId id
 	# was never created remotely, so create it (POST) and adopt the returned id. An
@@ -126,14 +192,23 @@ def update_runner(self):
 		_log_runner_api_time(self, start_time, '[dim gold4]updated in ', 's[/]', _id)
 		self.last_updated_db = start_time
 	else:
-		# Create new runner
-		result = _make_request('POST', API_RUNNER_CREATE_ENDPOINT, update)
+		# A previous create for this runner failed in a way the endpoint may still have
+		# completed (gateway error, read timeout): it may exist remotely under an id we never
+		# received. Creating again would duplicate it, so stop syncing this runner instead.
+		unconfirmed = self.context.get('api_unconfirmed_creates') or []
+		if local_id and local_id in unconfirmed:
+			debug('skipped: earlier create unconfirmed', sub='hooks.api', id=local_id, verbose=True)
+			return
+		# Create new runner (never replayed automatically, see API_RETRY_METHODS)
+		try:
+			result = _make_request('POST', API_RUNNER_CREATE_ENDPOINT, update)
+		except ApiRequestError as e:
+			if e.delivered and local_id:
+				self.context['api_unconfirmed_creates'] = [*unconfirmed, local_id]
+			raise
 		if result and result.get('id'):
 			_id = result.get('id')
-			if chunk:
-				self.context[f'{runner_type}_chunk_id'] = _id
-			else:
-				self.context[f'{runner_type}_id'] = _id
+			self.context[id_key] = _id
 			_log_runner_api_time(self, start_time, 'in ', 's', _id)
 
 

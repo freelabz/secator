@@ -185,3 +185,126 @@ class TestApiRunnerCreateSyncVsWorker(unittest.TestCase):
 			data.pop('sync')
 			data['run_opts'].pop('sync')
 		self.assertEqual(local_data, worker_data)
+
+
+@patch.object(api.time, 'sleep')
+class TestApiMakeRequestRetries(unittest.TestCase):
+	"""Idempotent requests are retried on gateway errors / refused connections; creates never are."""
+
+	def test_update_is_retried_on_gateway_error(self, sleep):
+		responses = [_raw_resp(503, '<html>Service Unavailable</html>'), _resp({'ok': True})]
+		with patch.object(api.requests, 'request', side_effect=responses) as req:
+			self.assertEqual(api._make_request('PUT', 'runner/' + 'b' * 24, {'status': 'RUNNING'}), {'ok': True})
+		self.assertEqual(req.call_count, 2)
+		sleep.assert_called_once_with(api.API_RETRY_BACKOFFS[0])
+
+	def test_read_is_retried_on_connection_error_then_raises(self, sleep):
+		import requests
+		error = requests.exceptions.ConnectionError('connection refused')
+		with patch.object(api.requests, 'request', side_effect=error) as req:
+			with self.assertRaises(api.ApiRequestError) as cm:
+				api._make_request('GET', 'workspaces')
+		self.assertEqual(req.call_count, len(api.API_RETRY_BACKOFFS) + 1)
+		self.assertIn('GET workspaces failed (connection error', str(cm.exception))
+
+	def test_persistent_gateway_error_surfaces_after_retries(self, sleep):
+		with patch.object(api.requests, 'request', return_value=_raw_resp(502, 'Bad Gateway')) as req:
+			with self.assertRaises(api.ApiRequestError) as cm:
+				api._make_request('GET', 'workspaces')
+		self.assertEqual(req.call_count, len(api.API_RETRY_BACKOFFS) + 1)
+		self.assertIn('HTTP 502', str(cm.exception))
+
+	def test_create_is_not_retried(self, sleep):
+		"""A create that reached the backend before the gateway error would be duplicated by a replay."""
+		import requests
+		for failure in (_raw_resp(502, 'Bad Gateway'), requests.exceptions.ConnectionError('reset')):
+			with self.subTest(failure=type(failure).__name__):
+				kwargs = {'side_effect': failure} if isinstance(failure, Exception) else {'return_value': failure}
+				with patch.object(api.requests, 'request', **kwargs) as req:
+					with self.assertRaises(Exception):
+						api._make_request('POST', 'runners', {'name': 'httpx'})
+				self.assertEqual(req.call_count, 1)
+		sleep.assert_not_called()
+
+	def test_client_errors_are_not_retried(self, sleep):
+		resp = _raw_resp(404, '{"detail": "Not found"}', json_body={'detail': 'Not found'})
+		with patch.object(api.requests, 'request', return_value=resp) as req:
+			with self.assertRaises(api.ApiRequestError):
+				api._make_request('GET', 'workspace/' + 'a' * 24)
+		self.assertEqual(req.call_count, 1)
+
+
+class TestApiTimeouts(unittest.TestCase):
+
+	def test_timeout_is_explicit_and_bounded(self):
+		with patch.object(api.requests, 'request', return_value=_resp({})) as req:
+			api._make_request('GET', 'workspaces')
+		self.assertEqual(req.call_args.kwargs['timeout'], api._request_timeout())
+		for setting in (0, -1, None):
+			with self.subTest(setting=setting), patch.object(api, 'API_TIMEOUT', setting):
+				self.assertEqual(api._request_timeout(), (api.API_CONNECT_TIMEOUT, api.API_DEFAULT_TIMEOUT))
+		with patch.object(api, 'API_TIMEOUT', 30):
+			self.assertEqual(api._request_timeout(), (10, 30))
+
+	def test_read_timeout_is_a_clear_error_and_not_retried(self):
+		import requests
+		slow = patch.object(api.requests, 'request', side_effect=requests.exceptions.ReadTimeout('read timed out'))
+		with patch.object(api, 'API_TIMEOUT', 30), slow as req:
+			with self.assertRaises(api.ApiRequestError) as cm:
+				api._make_request('PUT', 'runner/' + 'b' * 24, {'status': 'RUNNING'})
+		self.assertEqual(str(cm.exception), 'API PUT runner/' + 'b' * 24 + ' failed (no response within 30s)')
+		self.assertTrue(cm.exception.delivered)
+		self.assertEqual(req.call_count, 1)
+
+	def test_connect_timeout_is_not_delivered(self):
+		import requests
+		down = patch.object(api.requests, 'request', side_effect=requests.exceptions.ConnectTimeout('connect'))
+		with patch.object(api.time, 'sleep'), down:
+			with self.assertRaises(api.ApiRequestError) as cm:
+				api._make_request('POST', 'runners', {'name': 'httpx'})
+		self.assertIn('could not connect within', str(cm.exception))
+		self.assertFalse(cm.exception.delivered)
+
+
+@patch.object(api, 'resolve_workspace', return_value=('a' * 24, 'ws'))
+class TestApiRunnerCreateNotReplayed(unittest.TestCase):
+	"""A create the endpoint may have completed is never sent again by later lifecycle hooks."""
+
+	def _posts(self, runner, failure, hooks=3):
+		posts = []
+
+		def fake(method, url, **kwargs):
+			if method == 'POST':
+				posts.append(url)
+			if isinstance(failure, Exception):
+				raise failure
+			return failure
+
+		with patch.object(api.requests, 'request', side_effect=fake), patch.object(api.time, 'sleep'):
+			for _ in range(hooks):  # on_init, on_start, on_end
+				try:
+					api.update_runner(runner)
+				except api.ApiRequestError:
+					pass
+		return posts
+
+	def test_create_after_gateway_error_is_not_resent(self, _ws):
+		runner = _FakeRunner({'task_id': str(uuid.uuid4()), 'workspace_id': 'a' * 24})
+		self.assertEqual(len(self._posts(runner, _raw_resp(504, '<html>Gateway Timeout</html>'))), 1)
+
+	def test_create_after_read_timeout_is_not_resent(self, _ws):
+		import requests
+		runner = _FakeRunner({'task_id': str(uuid.uuid4()), 'workspace_id': 'a' * 24})
+		self.assertEqual(len(self._posts(runner, requests.exceptions.ReadTimeout('slow'))), 1)
+
+	def test_create_never_delivered_is_tried_again(self, _ws):
+		import requests
+		runner = _FakeRunner({'task_id': str(uuid.uuid4()), 'workspace_id': 'a' * 24})
+		self.assertEqual(len(self._posts(runner, requests.exceptions.ConnectTimeout('down'))), 3)
+
+	def test_child_with_its_own_id_still_creates(self, _ws):
+		parent_id = str(uuid.uuid4())
+		parent = _FakeRunner({'task_id': parent_id, 'workspace_id': 'a' * 24})
+		self._posts(parent, _raw_resp(502, 'Bad Gateway'), hooks=1)
+		child = _FakeRunner({**parent.context, 'task_chunk_id': str(uuid.uuid4())}, chunk=1)
+		self.assertEqual(len(self._posts(child, _raw_resp(502, 'Bad Gateway'), hooks=1)), 1)
