@@ -262,3 +262,124 @@ class TestQueryGroupParity(unittest.TestCase):
 				results = h.query('--group')
 				for _type, rows in expected.items():
 					self.assertEqual(_rows(results, _type), rows, f'{backend} {_type}')
+
+
+# --------------------------------------------------------------------------------------------------
+# `secator q` hides workspace duplicates by default; `--include-duplicates` shows them.
+# --------------------------------------------------------------------------------------------------
+
+def _flag(doc, duplicate):
+	doc = json.loads(json.dumps(doc))
+	if duplicate is not None:
+		doc['_context']['workspace_duplicate'] = duplicate
+	doc['_tagged'] = duplicate is not None
+	return doc
+
+
+# Tagged copies: one main + two duplicates per finding. The AXFR record was never tagged (no flag)
+# and must always show.
+TAGGED_DOCS = (
+	[_flag(_domain(alive=True, ts=t), dup) for t, dup in ((3, False), (1, True), (2, True))]
+	+ [_flag(_record('SOA', t), dup) for t, dup in ((3, False), (1, True), (2, True))]
+	+ [_flag(_record('AXFR', 1), None)]
+)
+
+
+def _count(results, _type):
+	return len(results.get(_type, []))
+
+
+class TestQueryExcludesWorkspaceDuplicates(unittest.TestCase):
+
+	def _each_backend(self):
+		for backend in BackendHarness.BACKENDS:
+			with self.subTest(backend=backend), BackendHarness(self, backend, TAGGED_DOCS) as h:
+				yield backend, h
+
+	def test_duplicates_hidden_by_default(self):
+		for backend, h in self._each_backend():
+			results = h.query()
+			self.assertEqual(_count(results, 'domain'), 1, backend)
+			self.assertEqual(sorted(r['type'] for r in results['record']), ['AXFR', 'SOA'], backend)
+			for items in results.values():
+				for item in items:
+					self.assertFalse(item['_context'].get('workspace_duplicate'), backend)
+
+	def test_include_duplicates_shows_them(self):
+		for backend, h in self._each_backend():
+			results = h.query('--include-duplicates')
+			self.assertEqual(_count(results, 'domain'), 3, backend)
+			self.assertEqual(_count(results, 'record'), 4, backend)
+
+	def test_group_counts_only_non_duplicates(self):
+		for backend, h in self._each_backend():
+			self.assertEqual(_rows(h.query('--group'), 'domain'), [('example.com', 1)], backend)
+			self.assertEqual(_rows(h.query('--group', '--include-duplicates'), 'domain'), [('example.com', 3)], backend)
+
+	def test_limit_counts_non_duplicates(self):
+		# A raw page of 2 would hold a duplicate; the 2 results returned are both non-duplicates.
+		for backend, h in self._each_backend():
+			results = h.query('record', '--limit', '2')
+			self.assertEqual(sorted(r['type'] for r in results['record']), ['AXFR', 'SOA'], backend)
+
+	def test_filter_reaches_the_store_query_where_null_safe(self):
+		for backend, h in self._each_backend():
+			h.query('domain')
+			if backend in ('mongodb', 'api'):
+				self.assertTrue(h.queries)
+				self.assertTrue(all('workspace_duplicate' in json.dumps(q) for q in h.queries), backend)
+			h.queries.clear()
+			h.query('domain', '--include-duplicates')
+			self.assertFalse(any('workspace_duplicate' in json.dumps(q) for q in h.queries), backend)
+
+	def test_report_show_is_unchanged(self):
+		# Only `secator q` hides duplicates: `secator r show` keeps listing every copy.
+		from secator.cli import cli
+		for backend, h in self._each_backend():
+			captured = {}
+
+			def capture_send(report_self):
+				captured.update({k: list(v) for k, v in report_self.data['results'].items()})
+
+			with mock.patch('secator.report.Report.send', capture_send):
+				CliRunner().invoke(cli, ['r', 'show', '--driver', backend, '-w', WS])
+			self.assertEqual(_count(captured, 'domain'), 3, backend)
+
+
+class TestRunnerQueriesUnchanged(unittest.TestCase):
+	"""The exclusion lives in the `secator q` command only: the backends' enforced base query and
+	the queries a runner's report issues never filter on the workspace duplicate flag."""
+
+	def test_base_query_has_no_duplicate_filter(self):
+		from secator.query.api import ApiBackend
+		from secator.query.json import JsonBackend
+		from secator.query.mongodb import MongoDBBackend
+		from secator.query.sqlite import SqliteBackend
+		expected = {'_context.workspace_id': WS, 'is_false_positive': {'$ne': True}}
+		for cls in (ApiBackend, MongoDBBackend, SqliteBackend):
+			with self.subTest(backend=cls.name):
+				self.assertEqual(cls(workspace_id=WS).get_base_query(), expected)
+				self.assertNotIn('workspace_duplicate', json.dumps(cls(workspace_id=WS)._merge_query({'_type': 'port'})))
+		self.assertEqual(JsonBackend(WS).get_base_query(), {})
+
+	def test_runner_report_queries_have_no_duplicate_filter(self):
+		from dotmap import DotMap
+		from secator.query import QueryEngine
+		from secator.report import Report
+		seen = []
+		runner = DotMap({
+			'config': DotMap({'name': 'host_recon', 'type': 'workflow'}), 'name': 'host_recon',
+			'workspace_name': WS, 'errors': [], 'warnings': [], 'reports_folder': None,
+			'context': {'workspace_id': WS, 'workspace_name': WS, 'workflow_id': 'wf1', 'drivers': ['mongodb']},
+		})
+		runner.toDict = lambda: {'name': 'host_recon', 'status': 'completed', 'targets': [], 'results_count': 0}
+		search = mock.patch.object(QueryEngine, 'search', side_effect=lambda q, **kw: seen.append(q) or [])
+		iterate = mock.patch.object(QueryEngine, 'iterate', side_effect=lambda q, *a: seen.append(q) or iter(()))
+		with search, iterate:
+			Report(runner).build(query={}, dedupe=False)
+			report = Report(runner)
+			report.build(query={}, dedupe=False, stream=True)
+			for sv in report.data['results'].values():
+				list(sv)
+		self.assertTrue(seen)
+		self.assertFalse(any('workspace_duplicate' in json.dumps(q) for q in seen))
