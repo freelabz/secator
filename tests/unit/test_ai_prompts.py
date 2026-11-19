@@ -145,6 +145,15 @@ class TestPrompts(unittest.TestCase):
 			self.assertIn("<mode>", p, f"{mode} missing the <mode> block")
 			self.assertIn("</mode>", p, f"{mode} missing the </mode> close")
 
+	def test_monitor_prompt_scoped_list_and_denials(self):
+		"""Monitor mode honours a named finding list, keeps re-tests on the finding's own host
+		(system resolver) and treats a guardrail denial as inconclusive (no workaround retry),
+		so an autonomous pass neither widens its scope nor loops on a denied action."""
+		p = get_system_prompt("monitor", workspace_path="<ws>", backend=None)
+		self.assertIn("re-verify ONLY those", p)
+		self.assertIn("no `@<server>`", p)
+		self.assertIn("Never retry the same check another way", p)
+
 	def test_get_system_prompt_invalid_mode_falls_back(self):
 		"""Test get_system_prompt falls back to chat for invalid mode (consistent with get_mode_config)."""
 		invalid_prompt = get_system_prompt("invalid_mode")
