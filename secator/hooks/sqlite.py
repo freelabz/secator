@@ -213,17 +213,6 @@ def on_build(self, task_spec):
 	return task_spec
 
 
-def find_duplicates(self):
-	from secator.definitions import IN_WORKER
-	ws_id = self.toDict().get('context', {}).get('workspace_id')
-	if not ws_id:
-		return
-	if not IN_WORKER:
-		tag_duplicates(ws_id)
-	else:
-		tag_duplicates.delay(ws_id)
-
-
 @shared_task
 def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[], max_items=None, log_hook=None):
 	"""Tag duplicate findings in a workspace (SQLite)."""

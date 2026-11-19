@@ -11,7 +11,6 @@ from celery.canvas import signature
 from celery.app import trace
 
 from rich.logging import RichHandler
-from retry import retry
 
 from secator.celery_signals import setup_handlers
 from secator.definitions import IN_WORKER
@@ -20,7 +19,7 @@ from secator.output_types import Error, Info, Target as TargetOutput
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
 from secator.runners._helpers import resolve_task_queue, run_extractors
-from secator.utils import debug, should_update
+from secator.utils import debug, retry, should_update
 
 
 # ---------#

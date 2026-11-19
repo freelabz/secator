@@ -1,4 +1,3 @@
-import logging
 import time
 
 import pymongo
@@ -11,15 +10,9 @@ from secator.output_types import OUTPUT_TYPES, Warning, is_output_type
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
 
-# import gevent.monkey
-# gevent.monkey.patch_all()
-
 MONGODB_URL = CONFIG.addons.mongodb.url
-MONGODB_UPDATE_FREQUENCY = CONFIG.addons.mongodb.update_frequency
 MONGODB_CONNECT_TIMEOUT = CONFIG.addons.mongodb.server_selection_timeout_ms
 MONGODB_MAX_POOL_SIZE = CONFIG.addons.mongodb.max_pool_size
-
-logger = logging.getLogger(__name__)
 
 _mongodb_client = None
 
@@ -218,17 +211,6 @@ def update_finding(self, item):
 	}
 	debug(f'in {elapsed:.4f}s', sub='hooks.mongodb', id=str(item._uuid), obj=debug_obj, obj_after=False)  # noqa: E501
 	return item
-
-
-def find_duplicates(self):
-	from secator.definitions import IN_WORKER
-	ws_id = self.toDict().get('context', {}).get('workspace_id')
-	if not ws_id:
-		return
-	if not IN_WORKER:
-		tag_duplicates(ws_id)
-	else:
-		tag_duplicates.delay(ws_id)
 
 
 def load_finding(obj, exclude_types=[]):

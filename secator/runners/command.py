@@ -1,4 +1,3 @@
-import copy
 import getpass
 import logging
 import os
@@ -378,33 +377,6 @@ class Command(Runner):
 			cls.install_version,
 			bleeding=bleeding,
 		)
-
-	@classmethod
-	def get_supported_opts(cls):
-		# TODO: Replace this with get_command_options called on the command class
-		def convert(d):
-			for k, v in d.items():
-				if hasattr(v, '__name__') and v.__name__ in ['str', 'int', 'float']:
-					d[k] = v.__name__
-			return d
-
-		cls_opts = copy.deepcopy(cls.opts)
-		opts = {k: convert(v) for k, v in cls_opts.items()}
-		for k, v in opts.items():
-			v['meta'] = cls.__name__
-			v['supported'] = True
-
-		cls_meta_opts = copy.deepcopy(cls.meta_opts)
-		meta_opts = {k: convert(v) for k, v in cls_meta_opts.items() if cls.opt_key_map.get(k) is not OPT_NOT_SUPPORTED}
-		for k, v in meta_opts.items():
-			v['meta'] = 'meta'
-			if cls.opt_key_map.get(k) is OPT_NOT_SUPPORTED:
-				v['supported'] = False
-			else:
-				v['supported'] = True
-		opts = dict(opts)
-		opts.update(meta_opts)
-		return opts
 
 	# ---------------#
 	# Class methods #

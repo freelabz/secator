@@ -81,15 +81,6 @@ def _resolve(host):
 	return {info[4][0] for info in infos} or None
 
 
-def _host_is_public(host):
-	"""True iff every address ``host`` resolves to is a global (public) IP.
-
-	A hostname with any private/loopback/link-local/reserved record is rejected (fail-closed):
-	that closes SSRF to internal services, the cloud metadata IP (link-local 169.254.0.0/16),
-	and DNS-rebinding tricks. A host that can't be resolved is rejected too."""
-	return _check_host(host, strict=True) is None
-
-
 def _check_host(host, strict, proxied=False):
 	"""Return None if ``host`` may be fetched, else a reason string for the model."""
 	if not host:

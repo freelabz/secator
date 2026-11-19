@@ -142,10 +142,6 @@ WORDLIST_PARAMS = {
 	WORDLIST: {'type': str, 'short': 'w', 'default': 'http_params', 'process': process_wordlist, 'help': 'Wordlist to use for HTTP requests'},  # noqa: E501
 }
 
-WORDLIST_DNS = {
-	WORDLIST: {'type': str, 'short': 'w', 'default': 'dns', 'process': process_wordlist, 'help': 'Wordlist to use for DNS requests'},  # noqa: E501
-}
-
 OPTS_HTTP_BASE = [
 	HEADER,
 	DELAY,

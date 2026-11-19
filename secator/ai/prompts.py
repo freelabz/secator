@@ -109,7 +109,6 @@ def load_prompt(path: str) -> str:
 
 # Load prompts from files
 COMMON_RULES = load_prompt("constraints/common.md")
-QUERIES = load_prompt("constraints/queries.md")
 
 SYSTEM_SCAN = Template(load_prompt("modes/scan.md"))
 SYSTEM_CHAT = Template(load_prompt("modes/chat.md"))
@@ -643,7 +642,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	system_prompt = mode_config["system_prompt"]
 	ws = workspace_path or "<workspace>"
 
-	# The queries.txt constraint (included by every mode) references $query_types and
+	# The queries.md constraint (included by every mode) references $query_types and
 	# $output_types_reference, so they must be substituted for all modes — derive both
 	# from FINDING_TYPES so they never drift from the registry.
 	subst = dict(query_types=build_query_types(), output_types_reference=build_output_types_reference())

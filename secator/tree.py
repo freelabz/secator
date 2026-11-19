@@ -85,13 +85,6 @@ class RunnerTree:
 				new_prefix = prefix + ("   " if is_last else "│  ")
 				self._render_children(child, new_prefix, lines)
 
-	def get_subtree(self, node: TaskNode) -> 'RunnerTree':
-		"""Get the subtree of this node."""
-		subtree = RunnerTree(node.name, node.type)
-		for child in node.children:
-			subtree.add_root_node(child)
-		return subtree
-
 
 def build_runner_tree(config: DotMap, condition: Optional[str] = None, parent: Optional[TaskNode] = None, ancestor: Optional[TaskNode] = None) -> Union[RunnerTree, str]:  # noqa: E501
 	"""

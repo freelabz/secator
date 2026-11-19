@@ -128,23 +128,3 @@ class Report:
 			data['results'][output_name] = [r for r in results if r.get('_type') == output_name]
 
 		self.data = data
-
-	def is_empty(self):
-		return all(not items for items in self.data['results'].values())
-
-
-def get_table_fields(output_type):
-	"""Get output fields and sort fields based on output type.
-
-	Args:
-		output_type (str): Output type.
-
-	Returns:
-		tuple: Tuple of sort_by (tuple), output_fields (list).
-	"""
-	sort_by = ()
-	output_fields = []
-	if output_type in FINDING_TYPES:
-		sort_by = output_type._sort_by
-		output_fields = output_type._table_fields
-	return sort_by, output_fields
