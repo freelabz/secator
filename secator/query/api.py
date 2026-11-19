@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 import requests
 
 from secator.output_types import Warning
-from secator.query._base import QueryBackend
+from secator.query._base import QueryBackend, sort_runners_chronologically
 from secator.config import CONFIG
 from secator.rich import console
 
@@ -238,12 +238,16 @@ class ApiBackend(QueryBackend):
                 endpoint += '?' + urlencode(params)
             result = self._make_request('GET', endpoint)
             if isinstance(result, list):
-                return result
+                runners = result
             elif isinstance(result, dict) and 'items' in result:
-                return result['items']
+                runners = result['items']
             elif isinstance(result, dict) and 'results' in result:
-                return result['results']
-            return []
+                runners = result['results']
+            else:
+                runners = []
+            # Don't rely on the endpoint's order (it may return newest first): sort
+            # client-side, oldest first and most recent last, like the other backends.
+            return sort_runners_chronologically(runners)
         except Exception as e:
             console.print(Warning(message=f'API list_runners failed: {e}'))
             return []
