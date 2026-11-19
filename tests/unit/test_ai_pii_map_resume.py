@@ -75,7 +75,8 @@ class TestPlaceholderMapSurvivesResume(unittest.TestCase):
 		with contextlib.ExitStack() as stack:
 			stack.enter_context(mock.patch.object(aimod, "call_llm", llm))
 			stack.enter_context(mock.patch.object(aimod, "create_backend", lambda *a, **k: backend))
-			stack.enter_context(mock.patch.object(aimod, "show_session_picker", lambda: list_sessions()[0]))
+			stack.enter_context(mock.patch.object(
+				aimod, "show_session_picker", lambda sessions=None: (sessions or list_sessions())[0]))
 			stack.enter_context(mock.patch.object(aimod.time, "sleep", lambda *a: None))
 			task = AiTask(
 				[], mode="chat", model="gpt-4o", interactive="local", headless=True, sync=True,
