@@ -1189,11 +1189,47 @@ class Runner:
 				self.debug('hook success', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose='item' in sub)  # noqa: E501
 			except Exception as e:
 				self.debug('hook failed', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
-				error = Error.from_exception(e, message=f'Hook "{fun}" execution failed')
 				if self.raise_on_error:
 					raise e
-				self.add_result(error, hooks=False)
+				if self._is_relay_driver_hook(hook):
+					self._report_driver_hook_failure(fun, hook_type, e)
+					continue
+				error = Error.from_exception(e, message=f'Hook "{fun}" execution failed')
+				# Keep the traceback out of self.output (the run's own output, read by callers
+				# such as the ai task): a one-line summary there, the full error in the results.
+				self.add_result(error, hooks=False, output=False)
+				self.output += f'[ERR] {error.message}: {type(e).__name__}: {e}\n'
 		return result
+
+	# Driver hooks that only relay the run to a remote backend. Their failure is contained
+	# (see _report_driver_hook_failure); a failing store driver (json/sqlite/mongodb) still
+	# fails the run, since its findings would otherwise be missing from the results.
+	RELAY_DRIVER_HOOK_MODULES = ('secator.hooks.api',)
+
+	@classmethod
+	def _is_relay_driver_hook(cls, hook):
+		"""Whether ``hook`` belongs to a relay driver (see RELAY_DRIVER_HOOK_MODULES)."""
+		return getattr(hook, '__module__', None) in cls.RELAY_DRIVER_HOOK_MODULES
+
+	def _report_driver_hook_failure(self, fun, hook_type, exc):
+		"""Report a failed relay driver hook as a one-line Warning.
+
+		A relay driver hook only mirrors the run to a remote backend; it never produces the
+		run's results (the local store still holds them). Its failure must therefore not hide those results:
+		it is reported as a Warning (the run's status still reflects its own execution),
+		without a traceback (which would flood ``self.output``, the command output that
+		callers read), and once per hook and message so lifecycle / per-item retries
+		against an unavailable backend don't repeat it.
+		"""
+		from rich.markup import escape
+		message = f'Driver hook "{fun}" failed ({hook_type}): {type(exc).__name__}: {escape(str(exc))}'
+		reported = self.__dict__.setdefault('_driver_hook_failures', set())
+		key = (fun, f'{type(exc).__name__}: {exc}')
+		if key in reported:
+			self.debug('driver hook failure already reported', obj={'name': hook_type, 'fun': fun}, sub='hooks')
+			return
+		reported.add(key)
+		self.add_result(Warning(message=message), hooks=False)
 
 	def run_validators(self, validator_type, *args, error=True, sub='validators'):
 		"""Run validators of a certain type.
