@@ -116,6 +116,60 @@ class TestAggregateStreamedGroup(unittest.TestCase):
 		self.assertEqual(len(rows), 6)
 
 
+class TestSharedGroupHelper(unittest.TestCase):
+	"""`group_findings_by_type` is the one grouping entry point (CLI and AI tool)."""
+
+	def test_matches_declared_group_by_for_existing_types(self):
+		# No behaviour change for types that declare a `_group_by`: same keys, same aggregate.
+		from secator.query.utils import group_findings, group_findings_by_type
+		from secator.output_types import Vulnerability
+		vulns = [
+			{'_type': 'vulnerability', 'name': n, 'matched_at': m, '_timestamp': t}
+			for n, m, t in (('A', 'u1', 1), ('A', 'u2', 2), ('B', 'u3', 3))]
+		got = group_findings_by_type([dict(v) for v in vulns], Vulnerability)
+		want = group_findings([dict(v) for v in vulns], ['name'], 'matched_at')
+		self.assertEqual(
+			[(r.name, r.matched_at, r._group_count) for r in got],
+			[(r.name, r.matched_at, r._group_count) for r in want])
+
+
+class _AiFakeEngine:
+	"""Pages an in-memory list like a store-backed engine (non-local, so no live-results union)."""
+
+	class backend:
+		name = 'mongodb'
+
+	def __init__(self, docs):
+		self.docs = docs
+
+	def search(self, query, limit=0, offset=0, **kwargs):
+		_type = query.get('_type')
+		items = [dict(d) for d in self.docs if d['_type'] == _type][offset:]
+		return items[:limit] if limit else items
+
+	def count(self, query):
+		return len(self.search(query))
+
+
+class TestAiQueryWorkspaceGroup(unittest.TestCase):
+	"""The AI `query_workspace(group=True)` tool collapses per-run copies of every type."""
+
+	def _group(self, _type):
+		from secator.ai.actions import ActionContext
+		from secator.ai.tools.query_workspace import QueryWorkspace
+		ctx = ActionContext(targets=[], model='m', context={'workspace_id': WS}, _query_engine=_AiFakeEngine(DOCS))
+		out = QueryWorkspace().run({'query': {'_type': _type}, 'group': True}, ctx)
+		return [o for o in out if isinstance(o, dict) and o.get('_type') == _type]
+
+	def test_domain_copies_collapse(self):
+		reps = self._group('domain')
+		self.assertEqual([(r['domain'], r['_group_count']) for r in reps], [('example.com', 3)])
+
+	def test_record_copies_collapse(self):
+		reps = self._group('record')
+		self.assertEqual(sorted((r['type'], r['_group_count']) for r in reps), [('AXFR', 3), ('SOA', 3)])
+
+
 # --------------------------------------------------------------------------------------------------
 # End to end: `secator q` on the four backends, seeded with the same documents.
 # --------------------------------------------------------------------------------------------------

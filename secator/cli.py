@@ -1578,7 +1578,7 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 	- --sort alone: a correct global sort needs the whole set, so it materializes (inherent; combine
 	  with --count/--group to stay bounded, or push down in a future pass).
 	"""
-	from secator.query.utils import group_findings
+	from secator.query.utils import group_findings_by_type
 
 	def _finish(items):
 		res = {_type: items}
@@ -1591,18 +1591,11 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 		rows = res.get(_type, [])  # _apply_format drops the type when there is nothing to format
 		return rows[:limit] if limit else rows
 
-	group_keys = cls.group_keys() if group and cls is not None and hasattr(cls, 'group_keys') else ()
-	if group_keys:
-		# Use raw-dict streaming to avoid O(N) full OutputType rehydration before grouping.
-		# group_findings() accepts dicts natively and only rehydrates the representative
-		# (one per group), so peak cost drops from O(N * #fields) to O(#groups * #fields).
+	if group and cls is not None:
+		# Raw-dict streaming: group_findings_by_type() reads only the group keys, the aggregate
+		# field and `_timestamp` per finding, and rehydrates one representative per group.
 		raw_iter = sv.iter_raw() if hasattr(sv, 'iter_raw') else sv
-		# Pass dataclass defaults so raw-dict grouping fills absent group-by fields
-		# (e.g. a tag with no `category`) the same way rehydration would, keeping
-		# group keys/counts identical to the object path.
-		defaults = cls.field_defaults() if hasattr(cls, 'field_defaults') else None
-		reps = group_findings(raw_iter, list(group_keys), getattr(cls, '_group_aggregate', None), defaults=defaults)
-		return _finish(reps)
+		return _finish(group_findings_by_type(raw_iter, cls))
 
 	if count or uniq:
 		counter, seen, kept, batch = Counter(), set(), [], []
