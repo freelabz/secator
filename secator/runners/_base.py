@@ -1191,29 +1191,38 @@ class Runner:
 				self.debug('hook failed', obj={'name': hook_type, 'fun': fun}, sub=sub)  # noqa: E501
 				if self.raise_on_error:
 					raise e
-				if self._is_driver_hook(hook):
+				if self._is_relay_driver_hook(hook):
 					self._report_driver_hook_failure(fun, hook_type, e)
 					continue
 				error = Error.from_exception(e, message=f'Hook "{fun}" execution failed')
-				self.add_result(error, hooks=False)
+				# Keep the traceback out of self.output (the run's own output, read by callers
+				# such as the ai task): a one-line summary there, the full error in the results.
+				self.add_result(error, hooks=False, output=False)
+				self.output += f'[ERR] {error.message}: {type(e).__name__}: {e}\n'
 		return result
 
-	@staticmethod
-	def _is_driver_hook(hook):
-		"""Whether ``hook`` belongs to a persistence driver (``secator.hooks.<driver>``)."""
-		return (getattr(hook, '__module__', None) or '').startswith('secator.hooks.')
+	# Driver hooks that only relay the run to a remote backend. Their failure is contained
+	# (see _report_driver_hook_failure); a failing store driver (json/sqlite/mongodb) still
+	# fails the run, since its findings would otherwise be missing from the results.
+	RELAY_DRIVER_HOOK_MODULES = ('secator.hooks.api',)
+
+	@classmethod
+	def _is_relay_driver_hook(cls, hook):
+		"""Whether ``hook`` belongs to a relay driver (see RELAY_DRIVER_HOOK_MODULES)."""
+		return getattr(hook, '__module__', None) in cls.RELAY_DRIVER_HOOK_MODULES
 
 	def _report_driver_hook_failure(self, fun, hook_type, exc):
-		"""Report a failed driver (persistence) hook as a one-line Warning.
+		"""Report a failed relay driver hook as a one-line Warning.
 
-		A driver hook only persists or relays the run (runner state, findings); it never
-		produces the run's results. Its failure must therefore not hide those results:
+		A relay driver hook only mirrors the run to a remote backend; it never produces the
+		run's results (the local store still holds them). Its failure must therefore not hide those results:
 		it is reported as a Warning (the run's status still reflects its own execution),
 		without a traceback (which would flood ``self.output``, the command output that
 		callers read), and once per hook and message so lifecycle / per-item retries
 		against an unavailable backend don't repeat it.
 		"""
-		message = f'Driver hook "{fun}" failed ({hook_type}): {type(exc).__name__}: {exc}'
+		from rich.markup import escape
+		message = f'Driver hook "{fun}" failed ({hook_type}): {type(exc).__name__}: {escape(str(exc))}'
 		reported = self.__dict__.setdefault('_driver_hook_failures', set())
 		key = (fun, f'{type(exc).__name__}: {exc}')
 		if key in reported:

@@ -221,7 +221,7 @@ class TestApiMakeRequestRetries(unittest.TestCase):
 			with self.subTest(failure=type(failure).__name__):
 				kwargs = {'side_effect': failure} if isinstance(failure, Exception) else {'return_value': failure}
 				with patch.object(api.requests, 'request', **kwargs) as req:
-					with self.assertRaises(Exception):
+					with self.assertRaises(api.ApiRequestError):
 						api._make_request('POST', 'runners', {'name': 'httpx'})
 				self.assertEqual(req.call_count, 1)
 		sleep.assert_not_called()
@@ -308,3 +308,71 @@ class TestApiRunnerCreateNotReplayed(unittest.TestCase):
 		self._posts(parent, _raw_resp(502, 'Bad Gateway'), hooks=1)
 		child = _FakeRunner({**parent.context, 'task_chunk_id': str(uuid.uuid4())}, chunk=1)
 		self.assertEqual(len(self._posts(child, _raw_resp(502, 'Bad Gateway'), hooks=1)), 1)
+
+
+class TestApiReviewFollowups(unittest.TestCase):
+
+	def test_truncated_body_is_a_delivered_request_error(self):
+		import requests
+		with patch.object(api.requests, 'request', side_effect=requests.exceptions.ChunkedEncodingError('truncated')):
+			with self.assertRaises(api.ApiRequestError) as cm:
+				api._make_request('POST', 'runners', {'name': 'httpx'})
+		self.assertTrue(cm.exception.delivered)
+
+	def test_body_read_timeout_wrapped_in_connection_error_is_not_retried(self):
+		import requests
+		from urllib3.exceptions import ReadTimeoutError
+		wrapped = requests.exceptions.ConnectionError(ReadTimeoutError(None, None, 'read timed out'))
+		with patch.object(api.time, 'sleep'), patch.object(api.requests, 'request', side_effect=wrapped) as req:
+			with self.assertRaises(api.ApiRequestError) as cm:
+				api._make_request('GET', 'workspaces')
+		self.assertEqual(req.call_count, 1)
+		self.assertIn('no response within', str(cm.exception))
+
+	def test_empty_redirect_is_not_success(self):
+		with patch.object(api.requests, 'request', return_value=_raw_resp(304, '')):
+			with self.assertRaises(api.ApiRequestError):
+				api._make_request('DELETE', 'workspace/' + 'a' * 24)
+
+	def test_echoed_api_key_is_redacted(self):
+		body = '{"detail": "bad token secret-key-value"}'
+		resp = _raw_resp(401, body, json_body={'detail': 'bad token secret-key-value'})
+		for r in (resp, _raw_resp(401, 'bad token secret-key-value')):
+			key = patch.object(api, 'API_KEY', 'secret-key-value')
+			with self.subTest(json=r is resp), key, patch.object(api.requests, 'request', return_value=r):
+				with self.assertRaises(api.ApiRequestError) as cm:
+					api._make_request('GET', 'workspaces')
+			self.assertNotIn('secret-key-value', str(cm.exception))
+			self.assertIn('<redacted>', str(cm.exception))
+
+	def test_create_workspace_does_not_create_on_lookup_error(self):
+		error = api.ApiRequestError('GET', 'workspaces', 403, 'Organization not found in remote API')
+		lookup = patch.object(api, 'resolve_workspace', side_effect=error)
+		with lookup, patch.object(api, '_make_request') as req:
+			with self.assertRaises(api.ApiRequestError):
+				api.create_workspace('ws')
+		req.assert_not_called()
+
+
+@patch.object(api, 'resolve_workspace', return_value=('a' * 24, 'ws'))
+class TestApiRunnerCreateReviewFollowups(unittest.TestCase):
+
+	def test_create_without_id_is_unconfirmed(self, _ws):
+		runner = _FakeRunner({'task_id': str(uuid.uuid4()), 'workspace_id': 'a' * 24})
+		with patch.object(api.requests, 'request', return_value=_raw_resp(201, '')) as req:
+			with self.assertRaises(api.ApiRequestError):
+				api.update_runner(runner)
+			api.update_runner(runner)
+		self.assertEqual(req.call_count, 1)
+
+	def test_chunk_without_id_gets_a_stable_local_id(self, _ws):
+		runner = _FakeRunner({'task_id': 'c' * 24, 'workspace_id': 'a' * 24}, chunk=1)
+		with patch.object(api.requests, 'request', return_value=_raw_resp(504, 'Gateway Timeout')) as req:
+			for _ in range(3):
+				try:
+					api.update_runner(runner)
+				except api.ApiRequestError:
+					pass
+		self.assertEqual(req.call_count, 1)
+		self.assertTrue(runner.context['task_chunk_id'])
+		self.assertEqual(runner.context['task_id'], 'c' * 24)
