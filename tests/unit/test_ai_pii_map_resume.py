@@ -158,6 +158,42 @@ class TestPlaceholderMapSurvivesResume(unittest.TestCase):
 		self.assertEqual(len(plans), 1, "the prior session's placeholder must resolve")
 		self.assertEqual(plans[0]["extra_data"]["items"][0]["text"], f"probe {HOST}")
 
+	def test_placeholder_map_survives_a_resume_that_exits_without_a_turn(self):
+		"""A report-less resume runs under a fresh id and the session file then points at it.
+		If that resume ends at the first prompt (no new placeholder minted), the NEXT resume
+		must still find the map: it is re-keyed under the new id as soon as it is restored."""
+		placeholder = SensitiveDataEncryptor().encrypt(HOST)
+
+		def llm_a(messages, *a, **k):
+			return {"content": "noted", "tool_calls": [], "usage": {}}
+
+		def drop_reports(tmp):
+			for report in Path(tmp).glob("*/tasks/*/report*.json"):
+				report.unlink()
+
+		with tempfile.TemporaryDirectory() as tmp, mock.patch.object(CONFIG.dirs, "reports", Path(tmp)):
+			self._run(_Backend(f"look at {HOST}"), llm_a)
+			drop_reports(tmp)
+			first_id = list_sessions()[0]["store_session_id"]
+			# resume, then quit at the follow-up prompt without sending anything
+			self._run(_Backend(""), llm_a, resume=True)
+			drop_reports(tmp)
+			self.assertNotEqual(list_sessions()[0]["store_session_id"], first_id)
+
+			calls = []
+
+			def llm_b(messages, *a, **k):
+				calls.append(messages)
+				if len(calls) == 1:
+					return {"content": "", "usage": {}, "tool_calls": [_plan_call("c1", f"probe {placeholder}")]}
+				return {"content": "done", "tool_calls": [], "usage": {}}
+
+			items = self._run(_Backend("", ["continue"]), llm_b, resume=True)
+
+		plans = [i for i in items if isinstance(i, dict) and i.get("ai_type") == "plan"]
+		self.assertEqual(len(plans), 1, "the placeholder must still resolve after an empty resume")
+		self.assertEqual(plans[0]["extra_data"]["items"][0]["text"], f"probe {HOST}")
+
 	def test_same_value_maps_to_same_placeholder_across_runs(self):
 		# deterministic salted hash: a value re-seen after a resume gets the SAME placeholder
 		self.assertEqual(SensitiveDataEncryptor().encrypt(HOST), SensitiveDataEncryptor().encrypt(HOST))

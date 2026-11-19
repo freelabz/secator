@@ -196,6 +196,8 @@ def _load_session(history_path, mtime):
 	if not isinstance(first_prompt, str):
 		first_prompt = ''
 	targets = info.get('targets')
+	if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
+		targets = []
 	# The id the session's store docs (e.g. its placeholder map) are stamped with: from the
 	# report (ai results, else the runner info), else from the session file saved next to the
 	# history on every end of turn — the only source when there is no local report.
@@ -213,7 +215,7 @@ def _load_session(history_path, mtime):
 		'prompt': first_prompt,
 		'session_id': session_id,
 		'store_session_id': store_session_id,
-		'targets': targets if isinstance(targets, list) else [],
+		'targets': targets,
 		'timestamp': info.get('end_time') or info.get('start_time') or 0,
 		'mtime': mtime,
 	}

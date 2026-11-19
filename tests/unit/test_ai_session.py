@@ -1653,6 +1653,8 @@ class TestListSessionsRobustness(unittest.TestCase):
 		self.assertEqual(sessions[0]['prompt'], 'hi')
 		self.assertEqual(sessions[0]['targets'], [])
 		self.assertEqual(sessions[0]['store_session_id'], '')
+		mock_glob.return_value = [self._write('t3', _ONE_TURN_HISTORY, report={"info": {"targets": ["a", 42]}})]
+		self.assertEqual(list_sessions()[0]['targets'], [])   # non-string target: dropped, picker label safe
 		mock_glob.return_value = [self._write('t2', _ONE_TURN_HISTORY, report={"info": "bad", "results": "bad"})]
 		self.assertEqual([s['prompt'] for s in list_sessions()], ['hi'])
 

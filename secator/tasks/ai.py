@@ -495,6 +495,10 @@ class ai(PythonRunner):
 				# This run keeps its fresh session id, so seed the placeholder map from the
 				# PRIOR session's stored map (its id is in the session's runner info).
 				self._restore_pii_map(session_id=session.get("store_session_id"))
+				# Re-key the restored map under THIS run's id right away: the next save points
+				# the session file at this id, so a later resume must find the map here even
+				# if this run ends before minting a new placeholder.
+				self._persist_pii_map()
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
 				return
