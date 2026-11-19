@@ -294,12 +294,12 @@ class ai(PythonRunner):
 		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
 		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
-		# Extra (non-core) tools to add on top of the mode's baseline for this run, by name
-		# (e.g. add_suggestion). Merged with CONFIG.addons.ai.extra_tools; every name must
-		# resolve to a loaded tool (templates dir / SECATOR_AI_TOOLS_DIRS / bundle). Generic
-		# and driver-agnostic — the same option lets any caller (CLI, a chore, the platform)
-		# grant a specific external tool to a run without a core edit.
-		"extra_tools": {"type": "list", "default": None, "help": "Extra AI tool names to add on top of the mode baseline"},  # noqa: E501
+		# Extra (non-core) tools to add on top of the mode's baseline for this run, by name or
+		# fnmatch glob (e.g. add_suggestion, sysreptor*). Merged with CONFIG.addons.ai.extra_tools;
+		# every name must resolve to a loaded tool (templates dir / SECATOR_AI_TOOLS_DIRS / bundle)
+		# and every glob must match one. Generic and driver-agnostic — the same option lets any
+		# caller (CLI, a template, a library call) grant external tools to a run without a core edit.
+		"extra_tools": {"type": "list", "default": None, "help": "Extra AI tools to add on top of the mode baseline: comma-separated names or globs (e.g. 'sysreptor*,add_suggestion')"},  # noqa: E501
 		"max_tokens_total": {
 			"type": int, "default": CONFIG.addons.ai.max_tokens_total,
 			"help": "Hard token limit - truncate oldest messages beyond this",
