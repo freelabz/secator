@@ -7,10 +7,11 @@ Moved verbatim from ``secator/ai/actions.py``.
 import threading
 import uuid
 from collections import Counter
-from typing import Dict, Generator, Optional, Tuple
+from typing import Any, Dict, Generator, Optional, Tuple
 from secator.runners import Task, Workflow
 from secator.runners.task import TaskNotFoundError
 from secator.output_types import Ai, Error, FINDING_TYPES, Info, Warning
+from secator.config import CONFIG
 from secator.template import TemplateLoader
 from secator.ai.utils import _PERSIST_AI_TYPES, _is_heavy_runner, _sanitize_child_opts, build_subagent_prompt
 from secator.ai.actions import ActionContext, _get_result_context
@@ -107,12 +108,13 @@ def _build_child_hooks_or_denial(context: Dict) -> Tuple[Dict, Optional["Warning
 
 
 def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["Warning"]:
-	"""Cap AI-subagent recursion depth + per-turn fan-out.
+	"""Cap AI-subagent recursion depth, per-turn fan-out and per-run total.
 
 	Returns a denial ``Warning`` if a cap is hit (caller yields it and skips the
 	spawn); otherwise stamps the child's depth (+1) into ``context`` and bumps the
-	per-turn counter. Breadth is only counted within a batch (one LLM turn); a
-	lone spawn is inherently breadth-1.
+	counters. Breadth is only counted within a batch (one LLM turn); a lone spawn is
+	inherently breadth-1. The per-run total (``CONFIG.addons.ai.max_subagents``)
+	counts every subagent the run spawned, across all its turns.
 	"""
 	# A subagent is already scoped to one task and no longer has the run_subagent tool;
 	# refuse a nested spawn defensively, before the depth/breadth caps, in case a call
@@ -128,19 +130,62 @@ def _guard_subagent_fanout(ctx: "ActionContext", context: Dict) -> Optional["War
 			message=f"Subagent spawn denied: recursion depth cap ({_MAX_SUBAGENT_DEPTH}) reached",
 			_context=context,
 		)
-	if ctx.in_batch:  # per-turn breadth only bites within a batch
-		with _SUBAGENT_TURN_LOCK:
-			turn = int(ctx.context.get("ai_subagent_turn_count", 0) or 0)
-			over_breadth = turn >= _MAX_SUBAGENTS_PER_TURN
-			if not over_breadth:
+	max_total = CONFIG.addons.ai.max_subagents
+	with _SUBAGENT_TURN_LOCK:  # check + bump both counters atomically (a batch spawns in threads)
+		total = int(ctx.context.get("ai_subagent_count", 0) or 0)
+		turn = int(ctx.context.get("ai_subagent_turn_count", 0) or 0)
+		over_total = total >= max_total
+		over_breadth = ctx.in_batch and turn >= _MAX_SUBAGENTS_PER_TURN  # only bites within a batch
+		if not over_total and not over_breadth:
+			ctx.context["ai_subagent_count"] = total + 1
+			if ctx.in_batch:
 				ctx.context["ai_subagent_turn_count"] = turn + 1
-		if over_breadth:
-			return Warning(
-				message=f"Subagent spawn denied: per-turn fan-out cap ({_MAX_SUBAGENTS_PER_TURN}) reached",
-				_context=context,
-			)
+	if over_total:
+		return Warning(
+			message=(
+				f"Subagent spawn denied: this run already spawned its maximum of {max_total} "
+				f"subagents. Do NOT call run_subagent again; carry out the remaining work yourself."
+			),
+			_context=context,
+		)
+	if over_breadth:
+		return Warning(
+			message=f"Subagent spawn denied: per-turn fan-out cap ({_MAX_SUBAGENTS_PER_TURN}) reached",
+			_context=context,
+		)
 	context["ai_subagent_depth"] = depth + 1  # child inherits depth+1
 	return None
+
+
+def resolves_to_ai_task(name: Any) -> bool:
+	"""Whether a task name runs the `ai` task. ``Task.get_task_class`` drops a ``/suffix``
+	(``ai/example`` runs ``ai``), so every subagent control must key on this, not on the
+	raw name."""
+	return str(name or "").split("/")[0].strip().lower() == "ai"
+
+
+def _release_subagent_slot(ctx: "ActionContext") -> None:
+	"""Give back the slot ``_guard_subagent_fanout`` reserved, for a spawn that was
+	admitted but never started (refused or failed before the child was built). A
+	subagent that started keeps its slot."""
+	with _SUBAGENT_TURN_LOCK:
+		total = int(ctx.context.get("ai_subagent_count", 0) or 0)
+		ctx.context["ai_subagent_count"] = max(0, total - 1)
+		if ctx.in_batch:
+			turn = int(ctx.context.get("ai_subagent_turn_count", 0) or 0)
+			ctx.context["ai_subagent_turn_count"] = max(0, turn - 1)
+
+
+def _add_call_usage(usage: Dict, extra_data: Any) -> None:
+	"""Add one LLM call's usage (a `response` item's ``extra_data``) to ``usage``.
+	Missing / None / malformed values count as 0."""
+	if not isinstance(extra_data, dict):
+		return
+	for key, cast in (("tokens", int), ("prompt_tokens", int), ("completion_tokens", int), ("cost", float)):
+		try:
+			usage[key] += cast(extra_data.get(key) or 0)
+		except (TypeError, ValueError):
+			pass
 
 
 def _gather_subagent_evidence(ctx: "ActionContext", targets: list, limit: int = 40) -> str:
@@ -245,12 +290,30 @@ def _child_preamble(
 
 
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:
+	"""Execute a secator task or workflow (see ``_run_runner_steps``).
+
+	Owns the subagent slot: one admitted by ``_guard_subagent_fanout`` but never turned
+	into a running child (a denial, an error or an exception before the child is built,
+	or the caller closing this generator first) is released, so it doesn't count toward
+	the per-run cap.
+	"""
+	spawn = {"slot_held": False}
+	try:
+		yield from _run_runner_steps(action, ctx, runner_type, spawn)
+	finally:
+		if spawn["slot_held"]:
+			_release_subagent_slot(ctx)
+
+
+def _run_runner_steps(action: Dict, ctx: ActionContext, runner_type: str, spawn: Dict) -> Generator:
 	"""Execute a secator task or workflow.
 
 	Args:
 		action: Action dict with name, targets, opts
 		ctx: Action context
 		runner_type: Either "task" or "workflow"
+		spawn: Shared with ``_run_runner``; ``slot_held`` is True while an admitted
+			subagent slot has no child yet.
 	"""
 	name = action.get("name", "")
 	targets = action.get("targets", ctx.targets)
@@ -262,7 +325,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	# conversation id (below) so its transcript is a separate conversation, surfaced in
 	# the parent as a single "Ran subagent" card rather than folded/duplicated into the
 	# parent's turns.
-	is_ai_subagent = runner_type == "task" and name.lower() == "ai"
+	is_ai_subagent = runner_type == "task" and resolves_to_ai_task(name)
 	parent_session = context.get("session_id")  # the card belongs to THIS (parent) conversation
 	subagent_label = ""
 	sub_session = None
@@ -274,6 +337,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		if denial is not None:
 			yield denial
 			return
+		spawn["slot_held"] = True  # released by _run_runner unless the child gets built
 		opts["subagent"] = True
 		opts["interactive"] = False
 		# `RunSubagent.run` already set the child's mode per the run_subagent policy
@@ -283,11 +347,13 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		if ctx.mode:
 			opts.setdefault("mode", ctx.mode)
 		# Inherit the parent's resolved LLM config (else it falls back to the default
-		# model/provider with no key set -> AuthenticationError). The model may be
-		# LLM-chosen (setdefault), but transport CREDENTIALS are forced from the parent:
-		# a tool-supplied api_base could otherwise redirect the injected parent api_key
-		# to an attacker endpoint (setdefault wouldn't override it). Never trust opts here.
-		opts.setdefault("model", ctx.model)
+		# model/provider with no key set -> AuthenticationError). Model AND transport
+		# credentials are FORCED from the parent, never taken from tool-supplied opts: the
+		# model decides what the run costs, and a tool-supplied api_base could redirect
+		# the injected parent api_key to an attacker endpoint. Never trust opts here.
+		opts.pop("model", None)
+		if ctx.model:
+			opts["model"] = ctx.model
 		opts.pop("api_key", None)
 		opts.pop("api_base", None)
 		if ctx.api_key:
@@ -431,6 +497,7 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 	except TaskNotFoundError as e:
 		yield Error(message=str(e), _context=context)
 		return
+	spawn["slot_held"] = False  # the child exists: it keeps its slot
 
 	# Emit the action Ai item now the runner exists (on_init stamped the runner id) so
 	# clients can render a RunnerCard; always emitted, even when silent. Use the id the
@@ -479,8 +546,14 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		# instead of the raw, fragmented output stream it used to receive.
 		last_response = ""
 		persisted = []
+		usage = {"tokens": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}
 		for out in runner:
 			if isinstance(out, Ai):
+				# Each LLM call of the subagent is one `response` item carrying that call's
+				# usage: their sum is the subagent's usage. (Its runner context can't be read
+				# for this: the task it runs works on a copy of it.)
+				if out.ai_type == "response":
+					_add_call_usage(usage, out.extra_data)
 				# The subagent's conversation lives under its OWN session (its transcript,
 				# shown in the drill-in view and streamed there by its own display hook).
 				# Do NOT bubble those individual messages up to the parent: re-yielding them
@@ -509,17 +582,8 @@ def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator
 		# Stamped for the PARENT conversation (card_context strips the subagent marker) and
 		# with THIS run_task's tool_call_id so it becomes the tool_result the parent reads.
 		# Carries the subagent session id (mark THIS subagent's row done — parallel subagents
-		# hand back independently) and the subagent's billed token/cost totals so a client can
-		# show a usage line under the verdict. The child accumulates usage on ITS OWN
-		# `self.context` (which may be a copy of what we passed), so read from `runner.context`
-		# — the authoritative final totals — not the parent-side `context`.
-		child_ctx = getattr(runner, "context", None) or {}
-		usage = {
-			"tokens": int(child_ctx.get("ai_tokens", 0) or 0),
-			"prompt_tokens": int(child_ctx.get("ai_prompt_tokens", 0) or 0),
-			"completion_tokens": int(child_ctx.get("ai_completion_tokens", 0) or 0),
-			"cost": float(child_ctx.get("ai_cost", 0.0) or 0.0),
-		}
+		# hand back independently) and the subagent's token/cost totals (summed from its
+		# per-call items above) so a client can show a usage line under the verdict.
 		yield Ai(content=handback, ai_type="response",
 		         extra_data={"subagent_session_id": sub_session, "usage": usage},
 		         _context={**card_context, "tool_call_id": action.get("tool_call_id")})

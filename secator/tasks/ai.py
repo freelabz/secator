@@ -16,7 +16,7 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.ai.actions import (
-	ActionContext, check_guardrails, safe_dispatch_action, _run_batch
+	ActionContext, check_guardrails, safe_dispatch_action, _run_batch, USAGE_COUNTERS
 )
 from secator.ai.guardrails import PermissionEngine
 from secator.ai.interactivity import create_backend, DISMISS_ANSWER, RemoteBackend, UserInputTimeout
@@ -1163,6 +1163,8 @@ class ai(PythonRunner):
 						# which makes the whole conversation fail to load for clients.
 						"max_iterations": (-1 if self.max_iterations == float('inf') else self.max_iterations),
 						"tokens": usage.get("tokens") if usage else None,
+						"prompt_tokens": usage.get("prompt_tokens") if usage else None,
+						"completion_tokens": usage.get("completion_tokens") if usage else None,
 						"cost": usage.get("cost") if usage else None,
 					},
 				)
@@ -1448,12 +1450,7 @@ class ai(PythonRunner):
 			if inherited:
 				self.permission_engine.add_runtime_allow(inherited)
 
-		# Per-run billed-token accounting (AI analog of context.scan_hours), read
-		# by the billing chore. Init so it persists even with zero LLM calls.
-		self.context.setdefault("ai_tokens", 0)
-		self.context.setdefault("ai_prompt_tokens", 0)
-		self.context.setdefault("ai_completion_tokens", 0)
-		self.context.setdefault("ai_cost", 0.0)
+		self._init_usage_counters()
 
 		# Record the resolved model id so the metering chore can price tokens against
 		# the model registry. Set unconditionally (not setdefault) — records the
@@ -2077,6 +2074,19 @@ class ai(PythonRunner):
 	# History helpers
 	# -------------------------------------------------------------------------
 
+	def _init_usage_counters(self):
+		"""Seed the per-run usage counters (tokens / cost) on the runner context.
+
+		Seeded so they persist even with zero LLM calls. A subagent ALWAYS starts from
+		zero: its context derives from its parent's, and usage inherited from there
+		would be reported a second time as the subagent's own.
+		"""
+		for _, ctx_key, cast in USAGE_COUNTERS:
+			if self.is_subagent:
+				self.context[ctx_key] = cast(0)
+			else:
+				self.context.setdefault(ctx_key, cast(0))
+
 	def _account_usage(self, usage):
 		"""Accumulate billed token/cost usage from a single LLM call onto the runner context.
 
@@ -2089,12 +2099,7 @@ class ai(PythonRunner):
 		"""
 		if not usage:
 			return
-		for usage_key, ctx_key, cast in (
-			("tokens", "ai_tokens", int),
-			("prompt_tokens", "ai_prompt_tokens", int),
-			("completion_tokens", "ai_completion_tokens", int),
-			("cost", "ai_cost", float),
-		):
+		for usage_key, ctx_key, cast in USAGE_COUNTERS:
 			try:
 				self.context[ctx_key] = cast(self.context.get(ctx_key, 0) or 0) + cast(usage.get(usage_key) or 0)
 			except (TypeError, ValueError):

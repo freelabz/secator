@@ -320,6 +320,23 @@ def safe_dispatch_action(action: Dict, ctx: ActionContext) -> Generator:
 		)
 
 
+# Usage counters, in the order (LLM usage key, runner context key, type). The `ai` task
+# accumulates every LLM call it makes onto these context keys.
+USAGE_COUNTERS = (
+	("tokens", "ai_tokens", int),
+	("prompt_tokens", "ai_prompt_tokens", int),
+	("completion_tokens", "ai_completion_tokens", int),
+	("cost", "ai_cost", float),
+)
+
+# Context keys that account for ONE run and must never flow from a parent to the
+# children it spawns: the usage counters and the subagent budget counters.
+_PER_RUN_CONTEXT_KEYS = tuple(ctx_key for _, ctx_key, _ in USAGE_COUNTERS) + (
+	"ai_subagent_count",
+	"ai_subagent_turn_count",
+)
+
+
 def _get_result_context(action, ctx):
 	"""Build the CHILD runner's context.
 
@@ -333,10 +350,16 @@ def _get_result_context(action, ctx):
 	workspace, linked to the conversation by ``session_id``. ``has_parent`` is NOT set
 	here — it rides on ``run_opts`` (the Runner's single source of truth), see
 	``_child_run_opts``.
+
+	Also STRIPS the parent's per-run accounting keys (``_PER_RUN_CONTEXT_KEYS``): the
+	usage counters and the subagent budget describe the PARENT run, so a child that
+	inherited them would report the parent's usage as its own.
 	"""
 	new_ctx = ctx.context.copy()
 	for identity_key in ("task_id", "workflow_id", "scan_id", "task_chunk_id"):
 		new_ctx.pop(identity_key, None)
+	for per_run_key in _PER_RUN_CONTEXT_KEYS:
+		new_ctx.pop(per_run_key, None)
 	if ctx.session_id and not new_ctx.get("session_id"):
 		new_ctx["session_id"] = ctx.session_id
 	action_context = {}

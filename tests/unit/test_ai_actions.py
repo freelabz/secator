@@ -894,8 +894,8 @@ class TestRunRunner(unittest.TestCase):
 	@patch('secator.ai.tools._runner.TemplateLoader')
 	@patch('secator.ai.tools._runner.Task')
 	@patch('secator.ai.tools._runner._build_hooks_from_context')
-	def test_run_runner_subagent_explicit_model_wins(self, mock_build_hooks, mock_task_cls, _tpl):
-		"""An explicit LLM-supplied model on the subagent opts is preserved (setdefault)."""
+	def test_run_runner_subagent_explicit_model_ignored(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""An LLM-supplied model on the subagent opts is ignored: the parent's model is forced."""
 		mock_build_hooks.return_value = {'fake': ['hook']}
 		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None
 		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner
@@ -906,7 +906,20 @@ class TestRunRunner(unittest.TestCase):
 					  'opts': {'prompt': 'x', 'model': 'explicit/model'}}
 			list(_run_runner(action, ctx, 'task'))
 		ro = mock_task_cls.call_args[1].get('run_opts', {})
-		self.assertEqual(ro.get('model'), 'explicit/model')
+		self.assertEqual(ro.get('model'), 'parent/model')
+
+	def test_run_subagent_tool_does_not_expose_or_forward_model(self):
+		"""`run_subagent` has no `model` parameter, and a model passed anyway is dropped."""
+		from secator.ai.tools.run_subagent import RunSubagent
+		props = RunSubagent.schema['function']['parameters']['properties']
+		self.assertNotIn('model', props)
+		ctx = ActionContext(targets=['t'], model='parent/model', mode='scan', context={})
+		action = {'action': 'subagent', 'objective': 'x', 'targets': ['t'], 'description': 'd',
+				  'model': 'explicit/model'}
+		with patch('secator.ai.tools.run_subagent._run_runner', return_value=iter([])) as mock_run:
+			list(RunSubagent().run(action, ctx))
+		task_action = mock_run.call_args[0][0]
+		self.assertNotIn('model', task_action['opts'])
 
 	@patch('secator.ai.tools._runner.TemplateLoader')
 	@patch('secator.ai.tools._runner.Task')
@@ -936,6 +949,76 @@ class TestRunRunner(unittest.TestCase):
 		# The card is the PARENT's record of the spawn, NOT subagent-internal, so it must
 		# NOT carry the `_context.subagent` marker (else restore/UI filters would drop it).
 		self.assertNotIn('subagent', card._context)
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
+	def test_handback_usage_is_the_subagents_own_calls(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""The handback's usage line sums the subagent's per-call `response` items. The
+		runner's context is not a source: the task it runs works on a copy of it, and
+		parent totals must never show up as the subagent's."""
+		mock_build_hooks.return_value = {}
+		sub_out = [
+			Ai(content="step 1", ai_type="response",
+			   extra_data={"tokens": 300, "prompt_tokens": 250, "completion_tokens": 50, "cost": 0.03}),
+			Ai(content="", ai_type="response", extra_data={"tokens": None, "cost": None}),
+			Ai(content="done", ai_type="response",
+			   extra_data={"tokens": 200, "prompt_tokens": 150, "completion_tokens": 50, "cost": 0.02}),
+		]
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None  # noqa: E702
+		mock_runner.context = {'ai_tokens': 999999, 'ai_cost': 99.0}  # must NOT be read
+		mock_runner.__iter__.return_value = iter(sub_out); mock_task_cls.return_value = mock_runner  # noqa: E702
+		ctx = ActionContext(targets=['t'], model='m', context={'workspace_id': 'ws1'})
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
+			results = list(_run_runner({'action': 'task', 'name': 'ai', 'targets': ['t'],
+										'tool_call_id': 'tc-1'}, ctx, 'task'))
+		handback = [r for r in results if isinstance(r, Ai) and r.ai_type == 'response'][-1]
+		usage = handback.extra_data['usage']
+		self.assertEqual(usage['tokens'], 500)
+		self.assertEqual(usage['prompt_tokens'], 400)
+		self.assertEqual(usage['completion_tokens'], 100)
+		self.assertAlmostEqual(usage['cost'], 0.05)
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
+	def test_ai_alias_name_gets_subagent_controls(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""`ai/<suffix>` runs the `ai` task, so it is a subagent: caps and model apply."""
+		from secator.ai.tools._runner import resolves_to_ai_task
+		self.assertTrue(resolves_to_ai_task('ai/example'))
+		self.assertTrue(resolves_to_ai_task(' AI '))
+		self.assertFalse(resolves_to_ai_task('aiohttp'))
+		self.assertFalse(resolves_to_ai_task('nmap/ai'))
+		mock_build_hooks.return_value = {}
+		mock_runner = MagicMock(); mock_runner.id = 'r1'; mock_runner.reports_folder = None  # noqa: E702
+		mock_runner.__iter__.return_value = iter([]); mock_task_cls.return_value = mock_runner  # noqa: E702
+		ctx = ActionContext(targets=['t'], model='parent/model', context={'workspace_id': 'ws1'})
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
+			list(_run_runner({'action': 'task', 'name': 'ai/example', 'targets': ['t'],
+							  'opts': {'model': 'other/model'}}, ctx, 'task'))
+		ro = mock_task_cls.call_args[1].get('run_opts', {})
+		self.assertTrue(ro.get('subagent'))
+		self.assertEqual(ro.get('model'), 'parent/model')
+		self.assertEqual(ctx.context['ai_subagent_count'], 1)
+		# and a run's subagent cap of 0 refuses it
+		from secator.config import CONFIG
+		self.addCleanup(setattr, CONFIG.addons.ai, 'max_subagents', CONFIG.addons.ai.max_subagents)
+		CONFIG.addons.ai.max_subagents = 0
+		mock_task_cls.reset_mock()
+		results = list(_run_runner({'action': 'task', 'name': 'ai/example', 'targets': ['t']},
+								   ActionContext(targets=['t'], model='m', context={}), 'task'))
+		mock_task_cls.assert_not_called()
+		self.assertIn('maximum of 0 subagents', results[-1].message)
+
+	def test_run_task_refuses_ai_aliases(self):
+		"""run_task points every name that runs the `ai` task at run_subagent."""
+		from secator.ai.tools.run_task import RunTask
+		ctx = ActionContext(targets=['t'], model='m', context={})
+		for name in ('ai', 'ai/example', 'AI/x'):
+			with patch('secator.ai.tools.run_task._run_runner') as mock_run:
+				results = list(RunTask().run({'action': 'task', 'name': name, 'targets': ['t']}, ctx))
+			mock_run.assert_not_called()
+			self.assertIn('run_subagent', results[0].message)
 
 	@patch('secator.ai.tools._runner.TemplateLoader')
 	@patch('secator.ai.tools._runner.Task')
@@ -1815,6 +1898,113 @@ class TestSubagentFanoutCap(unittest.TestCase):
 	@patch('secator.ai.tools._runner.TemplateLoader')
 	@patch('secator.ai.tools._runner.Task')
 	@patch('secator.ai.tools._runner._build_hooks_from_context')
+	def test_per_run_total_cap_refuses_spawn(self, mock_build_hooks, mock_task_cls, _mock_tpl):
+		"""Across turns, a run spawns at most `max_subagents` subagents; the next one is
+		refused with a message telling the model to stop delegating."""
+		mock_build_hooks.return_value = {}
+		self._mock_task(mock_task_cls)
+		run_context = {}  # the parent runner's context, shared by every turn's ActionContext
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+		# Set + restore by hand: `patch` deletes a non-`__dict__` attribute on exit, which
+		# would leave the option unset for the tests that follow.
+		from secator.config import CONFIG
+		default_cap = CONFIG.addons.ai.max_subagents
+		self.addCleanup(setattr, CONFIG.addons.ai, 'max_subagents', default_cap)
+		CONFIG.addons.ai.max_subagents = 2
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
+			for _ in range(2):  # two turns, one lone spawn each
+				ctx = ActionContext(targets=['t.com'], model='m', context=run_context)
+				results = list(_run_runner(action, ctx, 'task'))
+				self.assertFalse([r for r in results if isinstance(r, Warning)])
+			self.assertEqual(mock_task_cls.call_count, 2)
+			ctx = ActionContext(targets=['t.com'], model='m', context=run_context)
+			results = list(_run_runner(action, ctx, 'task'))
+		self.assertEqual(mock_task_cls.call_count, 2)  # third spawn never constructed
+		self.assertEqual(len(results), 1)
+		self.assertIsInstance(results[0], Warning)
+		self.assertIn('maximum of 2 subagents', results[0].message)
+		self.assertEqual(run_context['ai_subagent_count'], 2)
+
+	def _spawn_with_cap(self, run_context, cap=1, **ctx_kwargs):
+		"""Admit one subagent spawn against a per-run cap of `cap`; return the results."""
+		from secator.config import CONFIG
+		default_cap = CONFIG.addons.ai.max_subagents
+		self.addCleanup(setattr, CONFIG.addons.ai, 'max_subagents', default_cap)
+		CONFIG.addons.ai.max_subagents = cap
+		ctx = ActionContext(targets=['t.com'], model='m', context=run_context, **ctx_kwargs)
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+		with patch('secator.ai.tools._runner._gather_subagent_evidence', return_value=""):
+			return list(_run_runner(action, ctx, 'task'))
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
+	def test_spawn_refused_by_child_setup_releases_its_slot(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""Admitted, then refused before the child is built (persistence hooks failed):
+		the slot is given back, so a later spawn still fits a cap of 1."""
+		self._mock_task(mock_task_cls)
+		run_context = {'drivers': ['mongodb'], 'ai_subagent_turn_count': 0}
+		mock_build_hooks.side_effect = RuntimeError('driver down')
+		results = self._spawn_with_cap(run_context, in_batch=True)
+		self.assertIn('hook rebuild failed', results[-1].message)
+		mock_task_cls.assert_not_called()
+		self.assertEqual(run_context['ai_subagent_count'], 0)
+		self.assertEqual(run_context['ai_subagent_turn_count'], 0)
+		# the environment recovers: the next spawn is admitted and runs
+		mock_build_hooks.side_effect = None
+		mock_build_hooks.return_value = {'fake': ['hook']}
+		results = self._spawn_with_cap(run_context)
+		self.assertFalse([r for r in results if isinstance(r, Warning)])
+		mock_task_cls.assert_called_once()
+		self.assertEqual(run_context['ai_subagent_count'], 1)
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
+	def test_spawn_failing_with_an_exception_releases_its_slot(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""An exception before the child exists propagates, and the slot is released."""
+		mock_build_hooks.return_value = {}
+		mock_task_cls.side_effect = ValueError('bad template')
+		run_context = {}
+		with self.assertRaises(ValueError):
+			self._spawn_with_cap(run_context)
+		self.assertEqual(run_context['ai_subagent_count'], 0)
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
+	def test_started_subagent_keeps_its_slot_even_if_it_fails(self, mock_build_hooks, mock_task_cls, _tpl):
+		"""Once the child is built it counts, whatever happens while it runs."""
+		mock_build_hooks.return_value = {}
+		runner = self._mock_task(mock_task_cls)
+		runner.__iter__.side_effect = RuntimeError('crashed mid-run')
+		run_context = {}
+		with self.assertRaises(RuntimeError):
+			self._spawn_with_cap(run_context)
+		self.assertEqual(run_context['ai_subagent_count'], 1)
+
+	def test_dry_run_spawn_releases_its_slot(self):
+		"""A dry run never builds the child, so it does not use up the budget."""
+		run_context = {}
+		with patch('secator.ai.tools._runner.Task') as mock_task_cls:
+			mock_task_cls.get_task_class.return_value = MagicMock(__doc__='ai', input_types=[], tags=[])
+			with patch('secator.ai.tools._runner.TemplateLoader'):
+				results = self._spawn_with_cap(run_context, dry_run=True)
+		self.assertIn('DRY RUN', results[-1].message)
+		self.assertEqual(run_context['ai_subagent_count'], 0)
+
+	def test_refused_spawn_does_not_consume_total_budget(self):
+		"""A spawn refused by the per-turn cap does not count toward the per-run total."""
+		run_context = {'ai_subagent_turn_count': _MAX_SUBAGENTS_PER_TURN, 'ai_subagent_count': 1}
+		ctx = ActionContext(targets=['t.com'], model='m', in_batch=True, context=run_context)
+		action = {'action': 'task', 'name': 'ai', 'targets': ['t.com']}
+		with patch('secator.ai.tools._runner.Task'):
+			list(_run_runner(action, ctx, 'task'))
+		self.assertEqual(run_context['ai_subagent_count'], 1)
+
+	@patch('secator.ai.tools._runner.TemplateLoader')
+	@patch('secator.ai.tools._runner.Task')
+	@patch('secator.ai.tools._runner._build_hooks_from_context')
 	def test_normal_depth1_spawn_succeeds(self, mock_build_hooks, mock_task_cls, _mock_tpl):
 		"""A first-level AI subagent (depth 0 -> 1) still spawns; child inherits depth+1."""
 		mock_build_hooks.return_value = {}
@@ -1865,6 +2055,24 @@ class TestChildContextParenting(unittest.TestCase):
 		self.assertNotIn('task_id', child)
 		self.assertNotIn('workflow_id', child)
 		self.assertNotIn('scan_id', child)
+
+	def test_child_context_strips_parent_usage_and_subagent_counters(self):
+		"""The parent's usage totals and subagent budget counters describe the PARENT
+		run: no child (task, workflow or subagent) may inherit them."""
+		from secator.ai.actions import _get_result_context, ActionContext
+		parent_context = {
+			'workspace_id': 'ws1', 'drivers': ['mongodb'],
+			'ai_tokens': 9000, 'ai_prompt_tokens': 8000, 'ai_completion_tokens': 1000, 'ai_cost': 1.5,
+			'ai_subagent_count': 3, 'ai_subagent_turn_count': 2,
+		}
+		ctx = ActionContext(targets=['t.com'], model='m', context=parent_context)
+		child = _get_result_context({'action': 'task', 'name': 'ai'}, ctx)
+		for key in ('ai_tokens', 'ai_prompt_tokens', 'ai_completion_tokens', 'ai_cost',
+					'ai_subagent_count', 'ai_subagent_turn_count'):
+			self.assertNotIn(key, child)
+		# the parent's own context is untouched
+		self.assertEqual(parent_context['ai_tokens'], 9000)
+		self.assertEqual(parent_context['ai_subagent_count'], 3)
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
