@@ -210,3 +210,28 @@ class QueryBackend(ABC):
 		"""Backend-specific note insert. Default: no notes store on this backend."""
 		debug(f'create_note not supported by {self.name} backend', sub='query')
 		return 0
+
+
+def sort_runners_chronologically(runners, fallback=None):
+	"""Sort runner dicts oldest first, most recent last — the order every backend returns.
+
+	The key is the runner's ``start_time`` (else ``end_time``), parsed whether it is an
+	epoch number or an ISO-8601 string. ``fallback(runner)`` may supply a timestamp for
+	runners that carry neither (e.g. a local report's file mtime). Runners with no known
+	timestamp sort first, so the most recent runs always end the list. The sort is stable,
+	so ties keep the backend's order. Never relies on the store or a remote endpoint's order.
+	"""
+	from datetime import datetime, timezone
+	from secator.ai.runner_history import parse_dt
+	floor = datetime.min.replace(tzinfo=timezone.utc)
+
+	def key(runner):
+		dt = parse_dt(runner.get('start_time')) or parse_dt(runner.get('end_time'))
+		if dt is None and fallback is not None:
+			try:
+				dt = parse_dt(fallback(runner))
+			except Exception:
+				dt = None
+		return (dt is not None, dt or floor)
+
+	return sorted(runners, key=key)

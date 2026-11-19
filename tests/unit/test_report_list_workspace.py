@@ -1,0 +1,261 @@
+# tests/unit/test_report_list_workspace.py
+
+"""`secator r list` lists the current workspace's reports by default, and every workspace's
+reports with --all-workspaces, on every query backend (local, sqlite, mongodb, api)."""
+
+import json
+import re
+import shutil
+import tempfile
+import unittest
+from datetime import datetime
+from pathlib import Path
+from unittest import mock
+
+from click.testing import CliRunner
+
+from secator.config import CONFIG
+
+WS_ID = 'a' * 24
+OTHER_WS_ID = 'b' * 24
+
+
+def _strip_ansi(text):
+	return re.sub(r'\x1b(?:\[[0-9;]*m|\][^\x1b]*\x1b\\)', '', text)
+
+
+def _invoke(args, current='ws1'):
+	from secator.cli import cli
+	with mock.patch.object(CONFIG.workspaces, 'current', current):
+		result = CliRunner().invoke(cli, ['r', 'list'] + args, env={'COLUMNS': '400'})
+	return result, ' '.join(_strip_ansi(result.output).split())
+
+
+class ReportListAssertions:
+	"""Shared CLI assertions: 'alpha' runs in ws1 (the current workspace), 'beta' in ws2.
+
+	Each backend stores 'alpha' first (and in the first workspace) but 'beta' started
+	EARLIER, so the natural store order is newest first and only a chronological sort
+	puts 'beta' before 'alpha'."""
+
+	driver = None
+
+	def test_defaults_to_current_workspace(self):
+		result, out = _invoke(['--driver', self.driver])
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertIn('alpha', out)
+		self.assertNotIn('beta', out)
+		self.assertIn('Current workspace: ws1', out)
+		# One workspace only: no Workspace column
+		self.assertNotIn('Workspace ┃', out)
+
+	def test_workspace_option_targets_another_workspace(self):
+		result, out = _invoke(['--driver', self.driver, '-ws', 'ws2'])
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertIn('beta', out)
+		self.assertNotIn('alpha', out)
+		self.assertIn('Current workspace: ws2', out)
+
+	def test_all_workspaces_lists_every_workspace_with_column(self):
+		result, out = _invoke(['--driver', self.driver, '--all-workspaces'])
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertIn('alpha', out)
+		self.assertIn('beta', out)
+		self.assertIn('Workspace', out)
+		self.assertIn('ws1', out)
+		self.assertIn('ws2', out)
+		self.assertIn('All workspaces selected', out)
+
+	def test_most_recent_last(self):
+		result, out = _invoke(['--driver', self.driver, '--all-workspaces'])
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertLess(out.index('beta'), out.index('alpha'))
+
+
+class TestReportListLocal(ReportListAssertions, unittest.TestCase):
+	"""Local reports live at <reports>/<workspace>/<type>/<id>/report.json."""
+
+	driver = 'local'
+
+	def setUp(self):
+		self.tmp = Path(tempfile.mkdtemp())
+		for ws, name, start in (('ws1', 'alpha', '2026-01-02T00:00:00'), ('ws2', 'beta', '2026-01-01T00:00:00')):
+			d = self.tmp / ws / 'tasks' / '0'
+			d.mkdir(parents=True)
+			info = {'name': name, 'status': 'SUCCESS', 'start_time': start}
+			(d / 'report.json').write_text(json.dumps({'info': info, 'results': {}}))
+		patcher = mock.patch.object(CONFIG.dirs, 'reports', self.tmp)
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
+	def tearDown(self):
+		shutil.rmtree(self.tmp, ignore_errors=True)
+
+	def test_workspace_and_all_workspaces_conflict(self):
+		result, out = _invoke(['--driver', 'local', '-ws', 'ws2', '--all-workspaces'])
+		self.assertEqual(result.exit_code, 1)
+		self.assertIn('not both', out)
+
+	def test_no_current_workspace_uses_default(self):
+		# Runners file reports under 'default' when no workspace is set; list the same one.
+		d = self.tmp / 'default' / 'tasks' / '0'
+		d.mkdir(parents=True)
+		(d / 'report.json').write_text(json.dumps({'info': {'name': 'gamma'}, 'results': {}}))
+		result, out = _invoke(['--driver', 'local'], current='')
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertIn('gamma', out)
+		self.assertNotIn('alpha', out)
+		self.assertIn('Current workspace: default', out)
+
+
+class TestReportListSqlite(ReportListAssertions, unittest.TestCase):
+	"""Sqlite runner rows mirror context.workspace_id into a column; the blob carries the name."""
+
+	driver = 'sqlite'
+
+	def setUp(self):
+		import secator.hooks.sqlite as sqlite_mod
+		self.sqlite_mod = sqlite_mod
+		self.tmp = tempfile.mkdtemp()
+		self._orig_path = CONFIG.addons.sqlite.path
+		CONFIG.addons.sqlite.path = str(Path(self.tmp) / 'test.db')
+		sqlite_mod._conns.clear()
+		conn = sqlite_mod.get_sqlite_conn()
+		rows = [
+			# (table, id, workspace_id column, doc)
+			('tasks', 't1', WS_ID, {'name': 'alpha', 'has_parent': False, 'start_time': '2026-01-02T00:00:00',
+				'context': {'workspace_id': WS_ID, 'workspace_name': 'ws1'}}),
+			('scans', 's1', 'ws2', {'name': 'beta', 'start_time': '2026-01-01T00:00:00',
+				'context': {'workspace_id': 'ws2', 'workspace_name': 'ws2'}}),
+			('tasks', 't2', WS_ID, {'name': 'child', 'has_parent': True, 'start_time': '2026-01-03T00:00:00',
+				'context': {'workspace_id': WS_ID, 'workspace_name': 'ws1'}}),
+		]
+		for table, rid, ws, doc in rows:
+			conn.execute(f'INSERT INTO {table} (id, workspace_id, data) VALUES (?, ?, ?)', (rid, ws, json.dumps(doc)))
+		conn.commit()
+
+	def tearDown(self):
+		for conn in self.sqlite_mod._conns.values():
+			conn.close()
+		self.sqlite_mod._conns.clear()
+		CONFIG.addons.sqlite.path = self._orig_path
+		shutil.rmtree(self.tmp, ignore_errors=True)
+
+	def _backend(self):
+		from secator.query.sqlite import SqliteBackend
+		return SqliteBackend('')
+
+	def test_list_runners_by_name_or_id(self):
+		b = self._backend()
+		by_name = {r['name'] for r in b.list_runners(workspace_id='ws1')}
+		by_id = {r['name'] for r in b.list_runners(workspace_id=WS_ID)}
+		self.assertEqual(by_name, {'alpha', 'child'})
+		self.assertEqual(by_id, {'alpha', 'child'})
+
+	def test_list_runners_all_and_filters(self):
+		b = self._backend()
+		self.assertEqual({r['name'] for r in b.list_runners()}, {'alpha', 'beta', 'child'})
+		self.assertEqual({r['name'] for r in b.list_runners(has_parent=False)}, {'alpha', 'beta'})
+		self.assertEqual({r['name'] for r in b.list_runners(has_parent=True)}, {'child'})
+		scans = b.list_runners(runner_type='scan')
+		self.assertEqual([r['name'] for r in scans], ['beta'])
+		self.assertEqual(scans[0]['_id_str'], 'scans/s1')
+		self.assertEqual(scans[0]['_workspace'], 'ws2')
+		self.assertEqual(b.list_runners(runner_type='bogus'), [])
+
+
+class TestReportListMongoDB(ReportListAssertions, unittest.TestCase):
+	"""Mongo runner docs carry context.workspace_id and context.workspace_name."""
+
+	driver = 'mongodb'
+
+	def setUp(self):
+		import pytest
+		pytest.importorskip('mongomock')
+		import mongomock
+		client = mongomock.MongoClient()
+		client.main.tasks.insert_one({'name': 'alpha', 'has_parent': False, 'status': 'SUCCESS',
+			'start_time': datetime(2026, 1, 2),
+			'context': {'task_id': 't1', 'workspace_id': WS_ID, 'workspace_name': 'ws1'}})
+		client.main.scans.insert_one({'name': 'beta', 'has_parent': False, 'status': 'SUCCESS',
+			'start_time': datetime(2026, 1, 1),
+			'context': {'scan_id': 's1', 'workspace_id': OTHER_WS_ID, 'workspace_name': 'ws2'}})
+		patcher = mock.patch('secator.query.mongodb.MongoDBBackend._get_client', return_value=client)
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
+
+class TestReportListApi(unittest.TestCase):
+	"""The api backend filters by workspace id, so the current workspace name is resolved first."""
+
+	def _invoke(self, args, resolve=None):
+		calls = []
+
+		def fake_request(method, endpoint, *a, **kw):
+			calls.append(endpoint)
+			# Newest first, as a remote endpoint may return them.
+			return [
+				{'name': 'alpha', 'status': 'SUCCESS', '_type': 'task', '_id': 'x1',
+					'start_time': '2026-01-02T00:00:00Z', 'context': {'workspace_name': 'ws1'}},
+				{'name': 'beta', 'status': 'SUCCESS', '_type': 'task', '_id': 'x2',
+					'start_time': '2026-01-01T00:00:00Z', 'context': {'workspace_name': 'ws1'}},
+			]
+
+		resolve = resolve or mock.Mock(return_value=(WS_ID, 'ws1'))
+		request_patch = mock.patch('secator.query.api.ApiBackend._make_request', side_effect=fake_request)
+		resolve_patch = mock.patch('secator.hooks.api.resolve_workspace', resolve)
+		with request_patch, resolve_patch:
+			result, out = _invoke(['--driver', 'api'] + args)
+		return result, out, calls, resolve
+
+	def test_defaults_to_current_workspace_id(self):
+		result, out, calls, resolve = self._invoke([])
+		self.assertEqual(result.exit_code, 0, result.output)
+		resolve.assert_called_once_with('ws1')
+		self.assertEqual(len(calls), 1)
+		self.assertIn(f'workspace_id={WS_ID}', calls[0])
+		self.assertIn('Current workspace: ws1', out)
+
+	def test_all_workspaces_sends_no_workspace_filter(self):
+		result, out, calls, resolve = self._invoke(['--all-workspaces'])
+		self.assertEqual(result.exit_code, 0, result.output)
+		resolve.assert_not_called()
+		self.assertNotIn('workspace_id=', calls[0])
+		self.assertNotIn('workspace_name=', calls[0])
+		self.assertIn('Workspace', out)
+		self.assertIn('ws1', out)
+
+	def test_most_recent_last_regardless_of_endpoint_order(self):
+		result, out, _, _ = self._invoke([])
+		self.assertEqual(result.exit_code, 0, result.output)
+		self.assertLess(out.index('beta'), out.index('alpha'))
+
+	def test_unresolvable_workspace_errors_with_hint(self):
+		resolve = mock.Mock(side_effect=Exception('Workspace "ws1" not found in remote API.'))
+		result, out, calls, _ = self._invoke([], resolve=resolve)
+		self.assertEqual(result.exit_code, 1)
+		self.assertEqual(calls, [])
+		self.assertIn('not found', out)
+		self.assertIn('--all-workspaces', out)
+
+
+class TestSortRunnersChronologically(unittest.TestCase):
+	"""The shared ordering helper every backend's list_runners goes through."""
+
+	def test_mixed_timestamp_types_oldest_first(self):
+		from secator.query._base import sort_runners_chronologically
+		runners = [
+			{'name': 'c', 'start_time': '2026-01-03T00:00:00Z'},
+			{'name': 'a', 'start_time': datetime(2026, 1, 1).timestamp()},
+			{'name': 'b', 'start_time': datetime(2026, 1, 2)},
+			{'name': 'end-only', 'end_time': '2026-01-04T00:00:00'},
+			{'name': 'unknown'},
+		]
+		names = [r['name'] for r in sort_runners_chronologically(runners)]
+		self.assertEqual(names, ['unknown', 'a', 'b', 'c', 'end-only'])
+
+	def test_fallback_used_when_no_timestamp(self):
+		from secator.query._base import sort_runners_chronologically
+		runners = [{'name': 'new', 'm': 20.0}, {'name': 'old', 'm': 10.0}]
+		names = [r['name'] for r in sort_runners_chronologically(runners, fallback=lambda r: r['m'])]
+		self.assertEqual(names, ['old', 'new'])

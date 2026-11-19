@@ -3,7 +3,7 @@
 from typing import List, Dict, Any, Optional
 
 from secator.output_types import Warning
-from secator.query._base import QueryBackend
+from secator.query._base import QueryBackend, sort_runners_chronologically
 from secator.rich import console
 
 RUNNER_COLLECTIONS = ('tasks', 'workflows', 'scans')
@@ -252,7 +252,8 @@ class MongoDBBackend(QueryBackend):
 					doc['_id_str'] = f'{rtype}/{runner_id}' if runner_id else rtype
 					doc['_workspace'] = doc.get('context', {}).get('workspace_name', '')
 					runners.append(doc)
-			return runners
+			# Oldest first, most recent last, across the tasks/workflows/scans collections.
+			return sort_runners_chronologically(runners)
 		except Exception as e:
 			console.print(Warning(message=f'MongoDB list_runners failed: {e}'))
 			return []

@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from secator.query._base import QueryBackend
+from secator.query._base import QueryBackend, sort_runners_chronologically
 from secator.config import CONFIG
 from secator.utils import sanitize_folder_name
 from secator.utils import debug
@@ -509,4 +509,5 @@ class JsonBackend(QueryBackend):
 			except Exception as e:
 				debug(f'failed to load runner report {path}: {e}', sub='query.json')
 				continue
-		return runners
+		# Oldest first, most recent last; a report without timestamps falls back to its file mtime.
+		return sort_runners_chronologically(runners, fallback=lambda r: Path(r['_path']).stat().st_mtime)
