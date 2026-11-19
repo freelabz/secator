@@ -329,10 +329,11 @@ class TestApiReviewFollowups(unittest.TestCase):
 		self.assertEqual(req.call_count, 1)
 		self.assertIn('no response within', str(cm.exception))
 
-	def test_empty_redirect_is_not_success(self):
-		with patch.object(api.requests, 'request', return_value=_raw_resp(304, '')):
-			with self.assertRaises(api.ApiRequestError):
-				api._make_request('DELETE', 'workspace/' + 'a' * 24)
+	def test_empty_non_2xx_is_not_success(self):
+		for status in (101, 304):
+			with self.subTest(status=status), patch.object(api.requests, 'request', return_value=_raw_resp(status, '')):
+				with self.assertRaises(api.ApiRequestError):
+					api._make_request('DELETE', 'workspace/' + 'a' * 24)
 
 	def test_echoed_api_key_is_redacted(self):
 		body = '{"detail": "bad token secret-key-value"}'
@@ -357,13 +358,15 @@ class TestApiReviewFollowups(unittest.TestCase):
 @patch.object(api, 'resolve_workspace', return_value=('a' * 24, 'ws'))
 class TestApiRunnerCreateReviewFollowups(unittest.TestCase):
 
-	def test_create_without_id_is_unconfirmed(self, _ws):
-		runner = _FakeRunner({'task_id': str(uuid.uuid4()), 'workspace_id': 'a' * 24})
-		with patch.object(api.requests, 'request', return_value=_raw_resp(201, '')) as req:
-			with self.assertRaises(api.ApiRequestError):
+	def test_create_without_valid_id_is_unconfirmed(self, _ws):
+		bad = (_raw_resp(201, ''), _raw_resp(201, '{"id": "invalid"}', json_body={'id': 'invalid'}))
+		for resp in bad:
+			runner = _FakeRunner({'task_id': str(uuid.uuid4()), 'workspace_id': 'a' * 24})
+			with self.subTest(body=resp.text), patch.object(api.requests, 'request', return_value=resp) as req:
+				with self.assertRaises(api.ApiRequestError):
+					api.update_runner(runner)
 				api.update_runner(runner)
-			api.update_runner(runner)
-		self.assertEqual(req.call_count, 1)
+			self.assertEqual(req.call_count, 1)
 
 	def test_chunk_without_id_gets_a_stable_local_id(self, _ws):
 		runner = _FakeRunner({'task_id': 'c' * 24, 'workspace_id': 'a' * 24}, chunk=1)
