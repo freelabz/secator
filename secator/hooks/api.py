@@ -13,6 +13,7 @@ Configuration:
 
 import json
 import time
+import uuid
 import requests
 
 from functools import cache
@@ -69,18 +70,25 @@ def _make_request(method, endpoint, data=None):
 		# The request was sent: the endpoint may still complete it after we gave up.
 		raise ApiRequestError(method, endpoint, reason=f'no response within {timeout[1]}s')
 	except requests.exceptions.ConnectionError as e:
+		if _is_read_timeout(e):
+			raise ApiRequestError(method, endpoint, reason=f'no response within {timeout[1]}s')
 		raise ApiRequestError(method, endpoint, reason=f'connection error: {type(e).__name__}', delivered=_maybe_delivered(e))
+	except requests.exceptions.RequestException as e:
+		# e.g. a truncated response body: the request reached the endpoint.
+		raise ApiRequestError(method, endpoint, reason=f'request error: {type(e).__name__}')
+	# 2xx only: Response.ok also accepts 3xx (e.g. an empty 304)
+	success = response.ok and not (isinstance(response.status_code, int) and response.status_code >= 300)
 	try:
 		result = response.json()
 	except ValueError:
 		# Not JSON: typically an error page from a proxy / load balancer (HTML) or a
 		# plain-text server error. Name the request instead of a bare JSONDecodeError.
-		if response.ok and not (response.text or '').strip():
+		if success and not (response.text or '').strip():
 			return None
 		raise ApiRequestError(method, endpoint, response.status_code, _body_snippet(response.text), json_body=False)
 	debug('API response', sub='hooks.api', verbose=True,
 	      obj='<redacted>' if internal else result)
-	if not response.ok:
+	if not success:
 		detail = result.get('detail') if isinstance(result, dict) else None
 		raise ApiRequestError(method, endpoint, response.status_code, _body_snippet(detail if detail is not None else result))
 	return result
@@ -118,6 +126,13 @@ def _request_timeout():
 	return (min(API_CONNECT_TIMEOUT, read), read)
 
 
+def _is_read_timeout(exc):
+	"""Whether a ConnectionError wraps a read timeout (e.g. the body stalled after the headers)."""
+	from urllib3.exceptions import ReadTimeoutError
+	reason = exc.args[0] if exc.args else None
+	return isinstance(reason, ReadTimeoutError) or isinstance(getattr(reason, 'reason', None), ReadTimeoutError)
+
+
 def _maybe_delivered(exc):
 	"""Whether a ConnectionError may have happened after the request was sent."""
 	from urllib3.exceptions import NewConnectionError  # also covers name resolution failures
@@ -129,6 +144,8 @@ def _body_snippet(body, size=200):
 	"""Short single-line snippet of a response body for error messages."""
 	if not isinstance(body, str):
 		body = json.dumps(body, cls=DataclassEncoder)
+	if API_KEY:
+		body = body.replace(API_KEY, '<redacted>')
 	body = ' '.join(body.split())
 	return body if len(body) <= size else body[:size] + '...'
 
@@ -152,7 +169,7 @@ def _send_with_retries(method, url, json_data, headers, verify, timeout):
 		try:
 			response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)  # noqa: E501
 		except requests.exceptions.ConnectionError as e:
-			if last:
+			if last or _is_read_timeout(e):
 				raise
 			debug(f'API {method} {url} connection error ({type(e).__name__}), retrying', sub='hooks.api')
 		else:
@@ -170,6 +187,10 @@ def update_runner(self):
 	chunk = update.get('chunk')
 	id_key = f'{runner_type}_chunk_id' if chunk else f'{runner_type}_id'
 	_id = self.context.get(id_key)
+	if not _id and chunk:
+		# A chunk may arrive without its own id: mint a stable local one so a create that
+		# may have reached the endpoint is not sent again by a later hook (see below).
+		_id = self.context[id_key] = str(uuid.uuid4())
 	local_id = _id
 	# The runner constructor mints a run-scope uuid {type}_id, but API runner ids are
 	# ObjectIds (same rule as the mongodb hook's ensure_mongo_run_id): a non-ObjectId id
@@ -202,14 +223,15 @@ def update_runner(self):
 		# Create new runner (never replayed automatically, see API_RETRY_METHODS)
 		try:
 			result = _make_request('POST', API_RUNNER_CREATE_ENDPOINT, update)
+			if not (isinstance(result, dict) and result.get('id')):
+				raise ApiRequestError('POST', API_RUNNER_CREATE_ENDPOINT, reason='response has no runner id')
 		except ApiRequestError as e:
 			if e.delivered and local_id:
 				self.context['api_unconfirmed_creates'] = [*unconfirmed, local_id]
 			raise
-		if result and result.get('id'):
-			_id = result.get('id')
-			self.context[id_key] = _id
-			_log_runner_api_time(self, start_time, 'in ', 's', _id)
+		_id = result['id']
+		self.context[id_key] = _id
+		_log_runner_api_time(self, start_time, 'in ', 's', _id)
 
 
 def update_finding(self, item):
@@ -308,6 +330,8 @@ def create_workspace(name, description=None):
 	try:
 		existing_id, _ = resolve_workspace(name)
 		return False, existing_id
+	except ApiRequestError:
+		raise
 	except Exception as e:
 		if 'not found in remote API' not in str(e):
 			raise

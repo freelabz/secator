@@ -86,3 +86,27 @@ class TestDriverHookFailureOnAiShell(_Patched):
 		self.assertIn('Driver hook "secator.hooks.api.update_runner" failed', outputs[0].content)
 		self.assertNotIn('Traceback', outputs[0].content)
 		self.assertFalse([i for i in items if isinstance(i, Error)])
+
+
+class TestHookFailureMessages(unittest.TestCase):
+
+	def test_markup_in_exception_text_does_not_break_the_report(self):
+		from secator.runners import Task
+		from secator.tasks.command import command as CommandTask
+		runner = CommandTask(['echo x'], context={'drivers': []}, print_cmd=False)
+		runner._report_driver_hook_failure('secator.hooks.api.update_runner', 'on_end', Exception('bad [/] tag [bold]'))
+		self.assertIn('bad [/] tag [bold]', runner.output)
+		self.assertIsNotNone(Task)
+
+	def test_other_hook_failure_fails_the_run_without_a_traceback_in_output(self):
+		from secator.tasks.command import command as CommandTask
+
+		def broken(self):
+			raise RuntimeError('store write failed')
+		hooks = {'on_end': [broken]}
+		runner = CommandTask(['echo hello-from-command'], hooks=hooks, context={'drivers': []}, print_cmd=False)
+		runner.run()
+		self.assertIn('hello-from-command', runner.output)
+		self.assertIn('store write failed', runner.output)
+		self.assertNotIn('Traceback', runner.output)
+		self.assertEqual(runner.status, 'FAILURE')
