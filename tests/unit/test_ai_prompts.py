@@ -146,13 +146,34 @@ class TestPrompts(unittest.TestCase):
 			self.assertIn("</mode>", p, f"{mode} missing the </mode> close")
 
 	def test_monitor_prompt_scoped_list_and_denials(self):
-		"""Monitor mode honours a named finding list, keeps re-tests on the finding's own host
-		(system resolver) and treats a guardrail denial as inconclusive (no workaround retry),
-		so an autonomous pass neither widens its scope nor loops on a denied action."""
+		"""Monitor mode honours a given finding list (by _uuid and/or a grouped inventory),
+		keeps re-tests on the finding's own host (system resolver) and treats a guardrail
+		denial as inconclusive (no workaround retry), so an autonomous pass neither widens its
+		scope nor loops on a denied action."""
 		p = get_system_prompt("monitor", workspace_path="<ws>", backend=None)
-		self.assertIn("re-verify ONLY those", p)
+		self.assertIn("re-verify ONLY what it lists", p)
 		self.assertIn("no `@<server>`", p)
 		self.assertIn("Never retry the same check another way", p)
+
+	def test_monitor_prompt_excludes_duplicates_and_requires_grouped_checks(self):
+		"""Monitor mode never re-checks duplicates (both the run-level and workspace-level flags
+		are excluded in its query) and re-validates in groups: one port check per host over all
+		its known ports, one DNS lookup over a list, one certificate fetch per host:port, one
+		detection over a URL list — never one finding per command."""
+		p = get_system_prompt("monitor", workspace_path="<ws>", backend=None)
+		self.assertIn('"_duplicate": {"$ne": true}', p)
+		self.assertIn('"_context.workspace_duplicate": {"$ne": true}', p)
+		self.assertIn("never one finding per command", p)
+		rules = (
+			"ONE port check per host over ALL its known ports",
+			"ONE DNS lookup over the whole list",
+			"ONE certificate fetch per host:port",
+			"ONE detection over the URL/host list",
+			"replay the vulnerabilities of the same target together",
+		)
+		for rule in rules:
+			self.assertIn(rule, p)
+		self.assertIn("an UNCHANGED inventory finding needs no note", p)
 
 	def test_get_system_prompt_invalid_mode_falls_back(self):
 		"""Test get_system_prompt falls back to chat for invalid mode (consistent with get_mode_config)."""
