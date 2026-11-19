@@ -65,6 +65,14 @@ class AITUI(TUIApp):
 		# already shown once, as the row.
 		self._pending_finding_sigs: set = set()
 		self._suppressed_finding_sigs: set = set()
+		# _uuids of every item the on_item feed (_tui_feed) delivered. A result the runner adds
+		# WITHOUT hooks (e.g. a driver hook failure) never reaches the feed; after the run the
+		# runner's own errors missing from this set are rendered so a failure is never silent.
+		self._fed_uuids: set = set()
+		# Every runner this TUI drives that started (the Task wrapper runs with hooks off and
+		# builds the real ai runner, which persists through the drivers). Quitting mid-run
+		# finalizes the unfinished ones (see _finalize_interrupted_runner).
+		self._started_runners: list = []
 
 	def _should_skip_finding(self, d: dict) -> bool:
 		# Suppress the standalone card for a finding already shown as an add_finding row.
@@ -289,8 +297,71 @@ def _tui_feed(self, item):
 	if app is None:
 		return item
 	app._parent_source = getattr(self, "unique_name", "") or app._parent_source
+	uid = getattr(item, "_uuid", None)
+	if uid and hasattr(app, "_fed_uuids"):
+		app._fed_uuids.add(uid)
 	app.tui_render(item)
 	return item
+
+
+def _tui_track(self):
+	"""on_start hook: remember each runner the active TUI drives, so quitting can finalize it.
+
+	Module-level for the same pickling reason as ``_tui_feed``; a no-op without a TUI.
+	"""
+	from secator.rich import get_tui
+	app = get_tui()
+	tracked = getattr(app, "_started_runners", None)
+	if tracked is not None and self not in tracked:
+		tracked.append(self)
+
+
+def _surface_unrendered_errors(app, runner):
+	"""Render the runner's own errors that never went through the on_item feed.
+
+	A driver hook that fails (e.g. the api driver cannot create the runner) records its
+	Error with ``hooks=False``, so ``_tui_feed`` never sees it; the runner then stops before
+	the AI loop starts (``__iter__`` exits early on errors). The TUI owns the display and
+	the runner's console printing is off, so without this the user saw a TUI that never
+	answered and no reason why.
+	"""
+	if app is None or runner is None:
+		return
+	fed = getattr(app, "_fed_uuids", set())
+	try:
+		errors = list(runner.self_errors)
+	except Exception:  # noqa: BLE001 - surfacing errors must never crash the TUI
+		return
+	for error in errors:
+		uid = getattr(error, "_uuid", None)
+		if uid and uid in fed:
+			continue
+		if uid:
+			fed.add(uid)
+		app.tui_render(error)
+
+
+def _finalize_interrupted_runner(runner):
+	"""Close a runner the user left by quitting the TUI (Ctrl+C) before it finished.
+
+	The runner is driven on a daemon thread, so quitting the app ends the process without
+	the runner ever leaving its loop: no ``on_end`` hook ran and every driver kept it
+	``RUNNING`` forever. Mirror the core interrupt path in ``Runner.__iter__`` (a
+	``KeyboardInterrupt`` marks the runner revoked, records the error, then completes it):
+	mark it revoked, record the interruption, run ``on_end`` through its drivers, then turn
+	hooks off so the abandoned thread cannot overwrite the final status.
+	"""
+	if runner is None or getattr(runner, "done", True):
+		return
+	from secator.output_types import Error
+	try:
+		runner.revoked = True
+		runner.add_result(Error(message="Interrupted by user", _source=runner.unique_name), print=False)
+		runner.mark_completed()
+	except Exception as e:  # noqa: BLE001 - quitting must never crash
+		runner.debug(f"failed to finalize interrupted runner: {e}", sub="end")
+	finally:
+		runner.enable_hooks = False
 
 
 def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
@@ -335,12 +406,22 @@ def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 	merged = dict(hooks or {})
 	cls_hooks = dict(merged.get(runner_cls, {}))
 	cls_hooks["on_item"] = list(cls_hooks.get("on_item", [])) + [_tui_feed]
+	cls_hooks["on_start"] = list(cls_hooks.get("on_start", [])) + [_tui_track]
 	merged[runner_cls] = cls_hooks
+
+	state = {}
 
 	def build():
 		runner = runner_cls(config, inputs, run_opts=opts, hooks=merged, context=context)
+		state["runner"] = runner
 		for _ in runner:
 			pass
+		# If nothing was fed (the run failed before its first item), the TUI does not know the
+		# parent source yet and would buffer these errors under a card that never renders.
+		app._parent_source = app._parent_source or getattr(runner, "unique_name", "")
+		# the Task wrapper builds the real ai runner, which owns the errors
+		for started in [*app._started_runners, runner]:
+			_surface_unrendered_errors(app, started)
 		if False:  # keep build() a generator (driven by _consume) while yielding nothing
 			yield
 
@@ -350,3 +431,11 @@ def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 		app.run()
 	finally:
 		set_tui(None)
+		# Quitting the TUI (Ctrl+C) while the runner is still going abandons its thread:
+		# finalize every unfinished runner (latest first, the outer wrapper last) so the
+		# drivers record a final (revoked) status instead of RUNNING forever.
+		runners = list(reversed(app._started_runners))
+		if state.get("runner") is not None and state["runner"] not in runners:
+			runners.append(state["runner"])
+		for runner in runners:
+			_finalize_interrupted_runner(runner)
