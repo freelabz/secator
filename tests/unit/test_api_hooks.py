@@ -4,7 +4,7 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 import requests
-from urllib3.exceptions import MaxRetryError, NewConnectionError
+from urllib3.exceptions import MaxRetryError, NewConnectionError, ProxyError
 
 from secator.hooks import api
 
@@ -173,6 +173,31 @@ class TestApiTransientErrors(unittest.TestCase):
 					api._make_request('POST', 'runners', {'a': 1})
 			self.assertEqual(req.call_count, 1, exc)
 		sleep.assert_not_called()
+
+	def test_put_retries_body_read_interrupted(self, sleep):
+		effects = [requests.exceptions.ChunkedEncodingError('connection broken'), _http(200, b'{"ok": 1}')]
+		with patch.object(api.requests, 'request', side_effect=effects) as req:
+			self.assertEqual(api._make_request('PUT', 'runner/x', {'a': 1}), {'ok': 1})
+		self.assertEqual(req.call_count, 2)
+
+	def test_post_does_not_retry_body_read_interrupted(self, sleep):
+		with patch.object(api.requests, 'request', side_effect=requests.exceptions.ChunkedEncodingError('broken')) as req:
+			with self.assertRaises(requests.exceptions.ChunkedEncodingError):
+				api._make_request('POST', 'runners', {'a': 1})
+		self.assertEqual(req.call_count, 1)
+		sleep.assert_not_called()
+
+	def test_post_retries_refused_proxy_connection_only(self, sleep):
+		conn = NewConnectionError(None, 'Connection refused')
+		refused = requests.exceptions.ProxyError(MaxRetryError(None, 'http://x', ProxyError('proxy down', conn)))
+		with patch.object(api.requests, 'request', side_effect=[refused, _http(200, b'{"id": "abc"}')]) as req:
+			self.assertEqual(api._make_request('POST', 'runners', {'a': 1}), {'id': 'abc'})
+		self.assertEqual(req.call_count, 2)
+		other = requests.exceptions.ProxyError(MaxRetryError(None, 'http://x', ProxyError('proxy said no', OSError('x'))))
+		with patch.object(api.requests, 'request', side_effect=other) as req:
+			with self.assertRaises(requests.exceptions.ProxyError):
+				api._make_request('POST', 'runners', {'a': 1})
+		self.assertEqual(req.call_count, 1)
 
 
 if __name__ == '__main__':

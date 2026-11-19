@@ -117,7 +117,11 @@ def _request_with_retries(method, url, **kwargs):
 		try:
 			response = requests.request(method=method, url=url, **kwargs)
 		except requests.exceptions.RequestException as e:
-			retryable = idempotent and isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
+			retryable = idempotent and isinstance(e, (
+				requests.exceptions.ConnectionError,
+				requests.exceptions.Timeout,
+				requests.exceptions.ChunkedEncodingError,  # connection dropped while reading the body
+			))
 			if last or not (retryable or _request_never_sent(e)):
 				raise
 			reason = f'{type(e).__name__}: {e}'
@@ -141,8 +145,11 @@ def _request_never_sent(exc):
 		return True
 	if not isinstance(exc, requests.exceptions.ConnectionError):
 		return False
-	from urllib3.exceptions import NewConnectionError
+	from urllib3.exceptions import NewConnectionError, ProxyError
 	reason = getattr(exc.args[0], 'reason', None) if exc.args else None
+	if isinstance(reason, ProxyError):
+		# Refused connection to the proxy itself: the request never left the client.
+		reason = getattr(reason, 'original_error', None)
 	return isinstance(reason, NewConnectionError)
 
 
