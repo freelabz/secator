@@ -179,7 +179,7 @@ class TestAiCliDriverParity(unittest.TestCase):
 			mock.patch.object(hooks_api, 'resolve_workspace', return_value=('a' * 24, 'ws')), \
 			mock.patch.object(CONFIG.drivers, 'defaults', ['api']), \
 			mock.patch.object(click.testing._NamedTextIOWrapper, 'isatty', return_value=True, create=True):
-			result = CliRunner().invoke(cli, ['x', 'ai', '-p', 'hi', '-ws', 'ws', *args], catch_exceptions=False)
+			result = CliRunner().invoke(cli, ['x', 'ai', 'example.com', '-p', 'hi', '-ws', 'ws', *args], catch_exceptions=False)
 		self.assertEqual(result.exit_code, 0, result.output)
 		self.assertIn('context', captured, 'the TUI was not launched')
 		return captured
