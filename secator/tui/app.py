@@ -349,7 +349,6 @@ class TUIApp(App):
 		# else the main conversation (independent of the live write target)
 		target = await self._ensure_subview(subagent) if subagent else self._convo()
 		await target.mount(BlockPanel(description, reason, command))
-		target.scroll_end(animate=False)
 
 	# ---- runner output routing (by source so a parallel batch doesn't cross-wire) ----
 	def _container_for(self, d: dict) -> "RunnerPanel | None":
@@ -465,9 +464,10 @@ class TUIApp(App):
 		return self.query_one("#convo", VerticalScroll)
 
 	async def _append(self, widget) -> None:
+		# No explicit scroll: ConversationScroll follows the new item while the view is at the
+		# bottom, and leaves it alone if the user scrolled up to read earlier output.
 		target = self._write or self._convo()
 		await target.mount(widget)
-		target.scroll_end(animate=False)
 
 	async def _ensure_subview(self, sid: str) -> VerticalScroll:
 		sv = self._subviews.get(sid)
@@ -1120,7 +1120,7 @@ class TUIApp(App):
 		if text.startswith("/name ") or text == "/name":
 			await self._handle_name_command(text)
 			return
-		await self._append(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
+		self._echo_user(text)
 		pend = self._pending_ask
 		if pend is not None:
 			ev, holder, choices, ptype = pend
@@ -1238,8 +1238,13 @@ class TUIApp(App):
 			self._solo_choice = False
 
 	def _echo_user(self, text) -> None:
-		self._convo().mount(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
-		self._convo().scroll_end(animate=False)
+		"""Show a message the user just sent. It always goes to the main conversation (never
+		the live write target, which may be a hidden subagent view), and always jumps to the
+		bottom: once there, the view follows the reply too, even if the user had scrolled up
+		before sending."""
+		convo = self._convo()
+		convo.mount(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
+		convo.scroll_end(animate=False)
 
 	def tui_replay_history(self, messages, decrypt=None) -> None:
 		"""Render a restored conversation into the convo view on resume (thread-safe).
