@@ -18,7 +18,9 @@ Adding a BUILT-IN tool is one file: drop a ``BaseTool`` subclass in this package
 it in ``_TOOL_CLASSES``, and make sure a mode's ``tools:`` globs reach it. An EXTERNAL
 tool is dropped into the templates dir and auto-registered by
 :func:`secator.loader.discover_ai_tools` via :func:`register_ai_tool` — no core edit —
-and a mode opts it in by its EXACT name. The consistency test (test_ai_tools) fails if
+and a mode opts it in by its EXACT name. One external file may define several tools that
+share module-level helpers or a nameless ``BaseTool`` subclass (a shared base without a
+``name`` is not a tool and is skipped). The consistency test (test_ai_tools) fails if
 a mode's resolved tool exposure and its ``allowed_actions`` drift apart.
 """
 

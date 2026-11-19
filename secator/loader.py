@@ -5,6 +5,7 @@ from secator.config import CONFIG, CONFIGS_FOLDER
 from secator.template import TemplateLoader
 from secator.utils import debug
 from pathlib import Path
+import ast
 import glob
 import importlib
 import inspect
@@ -29,11 +30,38 @@ def _file_has_exporter(path):
 
 
 def _file_has_ai_tool(path):
-	"""Check if a Python file defines an external AI tool (a BaseTool subclass)."""
+	"""Check if a Python file defines an external AI tool (a BaseTool subclass).
+
+	Cheap text gate first (no ``BaseTool`` reference → not a tool file, no parse), then an
+	AST walk over the file's classes: a class is a tool class when any of its bases is
+	``BaseTool`` (bare or dotted, in any position, e.g. ``class X(_Mixin, BaseTool)``) or a
+	class of the same file that is itself a tool class (e.g. ``class X(SharedBase)`` with
+	``class SharedBase(BaseTool)``). Nothing is imported or executed here.
+	"""
 	try:
-		return '(BaseTool)' in path.read_text()
+		text = path.read_text()
+		if 'BaseTool' not in text:
+			return False
+		classes = [node for node in ast.walk(ast.parse(text)) if isinstance(node, ast.ClassDef)]
 	except Exception:
 		return False
+
+	def _base_name(base):
+		if isinstance(base, ast.Name):
+			return base.id
+		if isinstance(base, ast.Attribute):
+			return base.attr
+		return None
+
+	tool_classes = {'BaseTool'}
+	changed = True
+	while changed:  # fixpoint, so class order in the file does not matter
+		changed = False
+		for node in classes:
+			if node.name not in tool_classes and any(_base_name(b) in tool_classes for b in node.bases):
+				tool_classes.add(node.name)
+				changed = True
+	return len(tool_classes) > 1
 
 
 def _ai_tool_dirs():
@@ -393,6 +421,10 @@ def discover_ai_tools():
 	tasks. ``@cache`` → runs once. Fail-safe per file: a bad import, bad spec or invalid
 	tool is skipped with a clear message, never crashing startup.
 
+	One file may define several tools. A ``BaseTool`` subclass with no ``name`` is treated
+	as an abstract helper (a base class sharing methods between the file's tools) and is
+	skipped silently; only named subclasses are registered.
+
 	LOAD ORDER: tasks and external drivers/hooks are discovered FIRST, so a tool file can
 	reference custom tasks (:func:`get_task_class`) and custom hooks
 	(:func:`get_driver_hooks`) that core has already loaded. A tool that references a
@@ -433,6 +465,12 @@ def discover_ai_tools():
 					if inspect.isclass(attr) and issubclass(attr, BaseTool) and attr is not BaseTool:
 						# Only register classes DEFINED in this file (not an imported BaseTool kin).
 						if getattr(attr, '__module__', '') != module_name:
+							continue
+						# A nameless subclass is an abstract helper (a shared base for the
+						# file's tools), not a tool: skip it quietly.
+						name = getattr(attr, 'name', '')
+						if not isinstance(name, str) or not name.strip():
+							debug(f'Skipping nameless BaseTool subclass {attr.__name__} (shared base, not a tool) ({path})', sub='loader')  # noqa: E501
 							continue
 						tool = register_ai_tool(attr)
 						if tool is not None:

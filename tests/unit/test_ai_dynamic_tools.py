@@ -64,6 +64,58 @@ _CLASH_TOOL = textwrap.dedent('''
 ''')
 
 
+def _tool_cls(cls_name, tool_name, bases="BaseTool"):
+	return textwrap.dedent(f'''
+		class {cls_name}({bases}):
+			name = "{tool_name}"
+			schema = {{"type": "function", "function": {{"name": "{tool_name}", "description": "x",
+				"parameters": {{"type": "object", "properties": {{}}}}}}}}
+
+			def run(self, action, ctx):
+				yield Info(message=_helper("{tool_name}"))
+	''')
+
+
+_HEADER = textwrap.dedent('''
+	from secator.ai.tools.base import BaseTool
+	from secator.output_types import Info
+
+
+	def _helper(name):
+		return f"hello from {name}"
+''')
+
+# Several tools in one file, sharing a module-level helper (no shared base).
+_MULTI_TOOL = _HEADER + _tool_cls("MultiA", "multi_a") + _tool_cls("MultiB", "multi_b")
+
+# A nameless BaseTool subclass used as a shared base for the file's tools.
+_SHARED_BASE_TOOL = _HEADER + textwrap.dedent('''
+	class SharedTool(BaseTool):
+		def api_url(self):
+			return "https://reporting.example"
+''') + _tool_cls("SharedFoo", "shared_foo", "SharedTool") + _tool_cls("SharedBar", "shared_bar", "SharedTool")
+
+# Tools that never write `(BaseTool)`: one with a mixin first and a dotted BaseTool, one
+# deriving from a nameless same-file base.
+_MIXIN_FIRST_TOOL = textwrap.dedent('''
+	import secator.ai.tools.base as tb
+	from secator.output_types import Info
+
+
+	def _helper(name):
+		return f"hello from {name}"
+
+
+	class _ApiMixin:
+		pass
+
+
+	class ApiBase(_ApiMixin, tb.BaseTool):
+		pass
+''') + _tool_cls("MixinFirst", "mixin_first", "_ApiMixin, tb.BaseTool") + _tool_cls(
+	"ChildOfBase", "child_of_base", "ApiBase")
+
+
 @unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
 class TestDynamicAITools(unittest.TestCase):
 	def setUp(self):
@@ -193,6 +245,49 @@ class TestDynamicAITools(unittest.TestCase):
 		self._write("ping_pong.py", _GOOD_TOOL)
 		from secator.loader import _file_has_ai_tool
 		self.assertTrue(_file_has_ai_tool(self.dir / "ping_pong.py"))
+
+	def test_several_tools_in_one_file_all_register(self):
+		self._write("multi_tools.py", _MULTI_TOOL)
+		from secator.loader import discover_ai_tools
+		from secator.ai.tools import TOOLS_BY_NAME
+		registered = discover_ai_tools()
+		self.assertEqual(sorted(r for r in registered if r.startswith("multi_")), ["multi_a", "multi_b"])
+		out = list(TOOLS_BY_NAME["multi_b"].run({}, None))
+		self.assertEqual(out[0].message, "hello from multi_b")
+
+	def test_nameless_shared_base_is_skipped_silently(self):
+		"""A nameless BaseTool subclass is a shared base, not a tool: no warning, and the
+		named tools deriving from it register."""
+		self._write("shared_base.py", _SHARED_BASE_TOOL)
+		from unittest import mock
+		from secator.loader import discover_ai_tools
+		from secator.ai.tools import TOOLS_BY_NAME
+		from secator.rich import console
+		with mock.patch.object(console, "print") as printed:
+			registered = discover_ai_tools()
+		self.assertIn("shared_foo", registered)
+		self.assertIn("shared_bar", registered)
+		self.assertNotIn("", TOOLS_BY_NAME)
+		self.assertNotIn("SharedTool", [type(t).__name__ for t in TOOLS_BY_NAME.values()])
+		messages = " ".join(str(c) for c in printed.call_args_list)
+		self.assertNotIn("missing a non-empty string", messages)
+		self.assertNotIn("shared_base.py", messages)
+		self.assertEqual(list(TOOLS_BY_NAME["shared_foo"].run({}, None))[0].message, "hello from shared_foo")
+
+	def test_prefilter_finds_tools_without_literal_basetool_base(self):
+		"""Mixin-first bases, a dotted BaseTool and a nameless same-file base are all
+		detected; a file with no tool class is still skipped."""
+		path = self._write("mixin_first.py", _MIXIN_FIRST_TOOL)
+		from secator.loader import _file_has_ai_tool, discover_ai_tools
+		self.assertTrue(_file_has_ai_tool(path))
+		registered = discover_ai_tools()
+		self.assertIn("mixin_first", registered)
+		self.assertIn("child_of_base", registered)
+		# A file that only mentions BaseTool (no subclass) and a plain module are not tool files.
+		mention = self._write("mention_only.py", "# BaseTool is documented elsewhere\nX = 1\n")
+		plain = self._write("plain_mod.py", "class Foo(object):\n\tpass\n")
+		self.assertFalse(_file_has_ai_tool(mention))
+		self.assertFalse(_file_has_ai_tool(plain))
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
