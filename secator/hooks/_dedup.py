@@ -88,19 +88,30 @@ def compute_duplicate_updates(workspace_findings, untagged_findings, copy_fields
 	copy_fields = copy_fields or []
 	if baseline_index is None:
 		baseline_index = build_baseline_index(workspace_findings, copy_fields)
-	seen = []
+	untagged_findings = list(untagged_findings)
+
+	# Group equal findings once by their equality key (O(n)) instead of rescanning the whole
+	# list for every item (O(n²)). Two findings are equal (dataclass ``__eq__``) exactly when
+	# their ``_compare_key()`` matches — the key covers every ``compare=True`` field, including
+	# ``_type`` — so each group holds, in input order, the findings ``==`` would have matched.
+	keys = [item._compare_key() for item in untagged_findings]
+	groups = {}
+	for item, key in zip(untagged_findings, keys):
+		groups.setdefault(key, []).append(item)
+
+	seen = set()
 	db_updates = {}
 
-	for item in untagged_findings:
+	for item, key in zip(untagged_findings, keys):
 		if item._uuid in seen:
 			continue
 
-		duplicate_ids = [_._uuid for _ in untagged_findings if _ == item and _._uuid != item._uuid]
-		seen.extend(duplicate_ids)
+		duplicate_ids = [_._uuid for _ in groups[key] if _._uuid != item._uuid]
+		seen.update(duplicate_ids)
 
 		copied_fields = {}
 		related_ids = []
-		entry = baseline_index.get(item._compare_key())
+		entry = baseline_index.get(key)
 		if entry:
 			ws_uuids = [uuid_ for uuid_ in entry['uuids'] if uuid_ != item._uuid]
 			if ws_uuids:

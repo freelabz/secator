@@ -931,7 +931,7 @@ class Runner:
 			elif isinstance(item, tuple(FINDING_TYPES)):
 				self._own_findings_count += 1
 		if output and isinstance(item, (Info, Warning, Error)):
-			self.output += repr(item) + '\n'
+			self._append_output(repr(item) + '\n')
 		if print:
 			self._print_item(item)
 		if queue:
@@ -1158,6 +1158,31 @@ class Runner:
 		# value is redacted where it actually lands: run_opts (resolved_opts) and the cmd.
 		return data
 
+	@property
+	def output(self):
+		"""Raw runner output (str).
+
+		Lines are buffered in a list and joined lazily: ``self.output += line`` on an instance
+		attribute copies the whole string on every append (CPython only extends strings in place
+		for local variables), which made collecting a long-running command's output quadratic.
+		"""
+		parts = getattr(self, '_output_parts', None)
+		if not parts:
+			return ''
+		if len(parts) != 1:
+			parts[:] = [''.join(parts)]
+		return parts[0]
+
+	@output.setter
+	def output(self, value):
+		self._output_parts = [value or '']
+
+	def _append_output(self, text):
+		"""Append text to the runner output buffer (amortized O(1))."""
+		if not hasattr(self, '_output_parts'):
+			self._output_parts = []
+		self._output_parts.append(text)
+
 	def run_hooks(self, hook_type, *args, sub='hooks'):
 		""" "Run hooks of a certain type.
 
@@ -1176,12 +1201,19 @@ class Runner:
 		if self.dry_run:
 			self.debug('hook skipped (dry_run)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
 			return result
-		for hook in self.resolved_hooks[hook_type]:
+		hooks = self.resolved_hooks[hook_type]
+		if hook_type == 'on_interval' and hooks:
+			# Throttle periodic runner updates for EVERY driver, not only those that happen to stamp
+			# `last_updated_db` themselves: without this, drivers that don't (json, sqlite) rewrote
+			# the full runner state after every single item.
+			if not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
+				self.debug('hook skipped (backend update frequency)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
+				return
+			if self.enable_hooks:
+				self.last_updated_db = time()
+		for hook in hooks:
 			fun = self.get_func_path(hook)
 			try:
-				if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
-					self.debug('hook skipped (backend update frequency)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
-					return
 				if not self.enable_hooks or self.no_process:
 					self.debug('hook skipped (disabled hooks or no_process)', obj={'name': hook_type, 'fun': fun}, sub=sub, verbose=True)  # noqa: E501
 					continue
@@ -1492,7 +1524,8 @@ class Runner:
 		"""
 		# Item is a string, just print it
 		if isinstance(item, str):
-			self.output += item + '\n' if output else ''
+			if output:
+				self._append_output(item + '\n')
 			self._print_item(item) if item and print else ''
 			return
 

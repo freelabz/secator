@@ -893,3 +893,33 @@ class TestModeToolPatterns(unittest.TestCase):
 				self.assertTrue(
 					any(fnmatch.fnmatchcase(n, pat) for n in names),
 					f"{mode}: include pattern {pat!r} matches no known tool")
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestPromptLoadingCache(unittest.TestCase):
+
+	def test_load_prompt_body_matches_frontmatter_split(self):
+		"""load_prompt strips frontmatter without YAML-parsing it; the body is unchanged."""
+		import re
+		from secator.ai.prompts import PROMPTS_DIR, load_prompt, split_frontmatter
+		for path in sorted(PROMPTS_DIR.glob('**/*.md')):
+			rel = str(path.relative_to(PROMPTS_DIR))
+			_, body = split_frontmatter(path.read_text())
+			if '${' not in body:
+				self.assertEqual(load_prompt(rel), body, rel)
+			else:
+				# includes resolve to other bodies; whatever is left must not start with frontmatter
+				self.assertFalse(re.match(r'^---\s*\n', load_prompt(rel)), rel)
+
+	def test_load_prompt_meta_returns_independent_copies(self):
+		from secator.ai.prompts import load_prompt_meta
+		meta = load_prompt_meta('modes/scan.md')
+		self.assertTrue(meta)
+		meta['tools'] = ['mutated']
+		meta.clear()
+		self.assertNotEqual(load_prompt_meta('modes/scan.md'), {})
+		self.assertNotEqual(load_prompt_meta('modes/scan.md').get('tools'), ['mutated'])
+
+	def test_library_reference_cached(self):
+		from secator.ai.prompts import build_library_reference
+		self.assertIs(build_library_reference(), build_library_reference())

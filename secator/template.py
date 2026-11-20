@@ -9,6 +9,10 @@ from secator.definitions import OPT_NOT_SUPPORTED
 from secator.output_types import Error, Warning
 from secator.rich import console
 
+# libyaml's C SafeLoader parses templates ~10x faster than the pure-Python one (templates are
+# loaded at every CLI start); fall back when PyYAML was built without libyaml.
+_YAML_LOADER = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
+
 
 class TemplateLoader(DotMap):
 
@@ -46,7 +50,7 @@ class TemplateLoader(DotMap):
 		# Templates are declarative config (mappings/lists/scalars); the plain
 		# SafeLoader covers everything they use, so there's no need for the full
 		# loader's arbitrary Python-object construction.
-		return yaml.safe_load(input)
+		return yaml.load(input, Loader=_YAML_LOADER)
 
 	def print(self):
 		"""Print config as highlighted yaml."""
@@ -142,6 +146,22 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		all_opts[k] = v
 		all_opts[k]['prefix'] = f'{config.type}'
 
+	# Memoize task-class resolution for this call: find_same_opts runs for every (node, option)
+	# pair against every other node, so resolving each name once avoids tens of thousands of
+	# linear scans over the discovered task classes at CLI startup.
+	resolved_task_classes = {}
+
+	def get_task_class(name):
+		if name not in resolved_task_classes:
+			try:
+				resolved_task_classes[name] = Task.get_task_class(name)
+			except ValueError as e:
+				resolved_task_classes[name] = e
+		result = resolved_task_classes[name]
+		if isinstance(result, ValueError):
+			raise result
+		return result
+
 	def find_same_opts(node, nodes, opt_name, check_class_opts=False):
 		"""Find options with the same name that are defined in other nodes of the same type."""
 		same_opts = []
@@ -151,7 +171,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 			node_task = None
 			if check_class_opts:
 				try:
-					node_task = Task.get_task_class(_.name)
+					node_task = get_task_class(_.name)
 				except ValueError:
 					continue
 				if opt_name not in node_task.opts:
@@ -197,7 +217,7 @@ def get_config_options(config, exec_opts=None, output_opts=None, type_mapping=No
 		# Process task options
 		# a.k.a task options defined in their respective task classes
 		try:
-			cls = Task.get_task_class(node.name)
+			cls = get_task_class(node.name)
 		except ValueError:
 			console.print(Warning(message=f'Task {node.name!r} not found - skipping it in {config.name!r}. Please update your config.'))  # noqa: E501
 			return

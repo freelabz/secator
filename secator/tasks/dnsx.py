@@ -1,5 +1,4 @@
 import validators
-import dns.resolver
 
 from secator.decorators import task
 from secator.definitions import (HOST, CIDR_RANGE, DELAY, IP, OPT_PIPE_INPUT, PROXY,
@@ -188,6 +187,7 @@ def stream_file_up_to_line(file_path, max_lines=50):
 
 
 def check_dns_response(domain, record_type="A"):
+	import dns.resolver  # lazy: dnspython is a heavy import, every task module loads at startup
 	try:
 		# Query DNS for the specified record type (A, MX, NS, etc.)
 		resolver = dns.resolver.Resolver()
