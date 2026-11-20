@@ -540,6 +540,30 @@ class Command(Runner):
 			self.print_description()
 			self.print_command()
 
+			# Check the command is installed (auto-installing it if enabled) BEFORE any sudo / privilege
+			# check, so a missing executable fails with a clear "not found" error instead of a misleading
+			# sudo / TTY error.
+			if not self.no_process and not self.is_installed():
+				self.debug('command is not installed', sub='start')
+				install_error = None
+				if CONFIG.security.auto_install_commands:
+					from secator.installer import ToolInstaller
+
+					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
+					try:
+						status = ToolInstaller.install(self.__class__)
+						if not status.is_ok():
+							install_error = f'Failed installing {self.cmd_name}'
+					except OSError as e:
+						install_error = f'Failed installing {self.cmd_name}: {type(e).__name__}: {e}'
+				if not self.is_installed():
+					self.return_code = 127
+					yield Error(message=self._missing_executable_message(install_error))
+					return
+				if install_error:
+					yield Error(message=install_error)
+					return
+
 			# Check for sudo requirements and prepare the password if needed
 			sudo_required = re.search(r'\bsudo\b', self.cmd)
 			sudo_password = None
@@ -552,18 +576,6 @@ class Command(Runner):
 
 			# Prepare cmds
 			command = self.cmd if self.shell else shlex.split(self.cmd)
-
-			# Check command is installed and auto-install
-			if not self.no_process and not self.is_installed():
-				self.debug('command is not installed, auto-installing', sub='start')
-				if CONFIG.security.auto_install_commands:
-					from secator.installer import ToolInstaller
-
-					yield Info(message=f'Command {self.name} is missing but auto-installing since security.autoinstall_commands is set')  # noqa: E501
-					status = ToolInstaller.install(self.__class__)
-					if not status.is_ok():
-						yield Error(message=f'Failed installing {self.cmd_name}')
-						return
 
 			# Output and results
 			self.return_code = 0
@@ -627,6 +639,57 @@ class Command(Runner):
 		finally:
 			yield from self._wait_for_end()
 
+	def _missing_executable_message(self, install_error=None):
+		"""Build the error message for a missing executable, with install instructions.
+
+		Args:
+			install_error (str, Optional): Auto-install failure to include in the message.
+
+		Returns:
+			str: Error message naming the missing executable and how to install it.
+		"""
+		message = f'Executable "{self.cmd_name}" not found'
+		if install_error:
+			message += f' ({install_error})'
+		install_tools = f'"secator install tools {self.config.name}"'
+		has_other_install = (
+			self.install_cmd
+			or (self.github_handle and self.install_github_bin)
+			or getattr(self, 'pypi_dependencies', None)
+		)
+		if not self.install_pre or has_other_install:
+			return f'{message}. Install it with {install_tools}.'
+
+		# Tool installed only from OS packages: give the package name(s) per package manager, and say so
+		# when none is configured for this platform's package manager (the installer can't install it here).
+		hints = []
+		for managers, packages in self.install_pre.items():
+			label = 'any package manager' if managers == '*' else managers.replace('|', '/')
+			hints.append(f'{label}: {" ".join(packages)}')
+		hints = '; '.join(hints)
+		pm_name = self._get_package_manager()
+		supported = pm_name is not None and any(
+			managers == '*' or pm_name in managers.split('|') for managers in self.install_pre
+		)
+		if supported:
+			return f'{message}. Install it with {install_tools}, or install the OS package ({hints}).'
+		return (
+			f'{message}. It is installed from an OS package, and none is configured for this platform\'s '
+			f'package manager ({pm_name or "not detected"}). Available packages: {hints}.'
+		)
+
+	@staticmethod
+	def _get_package_manager():
+		"""Return this platform's package manager name, or None if it can't be detected."""
+		from secator.installer import get_distro_config
+		try:
+			distribution = get_distro_config()
+		except Exception:
+			return None
+		if isinstance(distribution, str):  # SECATOR_PACKAGE_MANAGER override
+			return distribution.split(' ')[0] or None
+		return getattr(distribution, 'pm_name', None) or None
+
 	def is_installed(self):
 		"""Check if a command is installed by using `which`.
 
@@ -636,8 +699,13 @@ class Command(Runner):
 		Returns:
 			bool: True if the command is installed, False otherwise.
 		"""
-		cmd = ['which', self.cmd_name]
-		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		# Resolve it like the launch does: with the task's environment (PATH) and working directory.
+		# `which` itself is located on this process' PATH, so the task's PATH needn't contain it.
+		which = shutil.which('which')
+		cmd = [os.path.abspath(which) if which else 'which', self.cmd_name]
+		env = {**self.run_opts.get('env', os.environ), **self.extra_env}
+		cwd = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
+		result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=cwd)
 		result.communicate()
 		return result.returncode == 0
 
