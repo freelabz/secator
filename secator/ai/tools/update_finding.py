@@ -4,7 +4,9 @@ from typing import Dict, Generator
 from secator.output_types import Ai, Error, FINDING_TYPES
 from secator.ai.utils import _coerce_finding_fields, _decrypt_dict
 from secator.ai.actions import ActionContext, _get_result_context
-from secator.ai.tools._findings import _FINDING_IMMUTABLE_FIELDS, _drop_readonly_fields, _lookup_finding
+from secator.ai.tools._findings import (
+	_FINDING_IMMUTABLE_FIELDS, _SERVER_OWNED_EXTRA_DATA, _drop_readonly_fields, _lookup_finding,
+)
 from secator.ai.tools.base import BaseTool
 
 
@@ -188,7 +190,7 @@ class UpdateFinding(BaseTool):
 			update[key] = v
 		for k, v in extra_data.items():
 			key = str(k)
-			if key and "." not in key and not key.startswith("$"):
+			if key and "." not in key and not key.startswith("$") and key not in _SERVER_OWNED_EXTRA_DATA:
 				update[f"extra_data.{key}"] = v
 		# A confidence downgrade must re-prioritize: recompute the derived sort key where the type
 		# carries it (update_finding writes a raw $set, so __post_init__ never runs to derive it).

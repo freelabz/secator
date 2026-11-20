@@ -1,4 +1,5 @@
 """AI tool: `mark_vuln_fixed`."""
+import time
 from typing import Dict, Generator
 from secator.output_types import Ai, Error
 from secator.ai.utils import _decrypt_dict
@@ -71,7 +72,9 @@ class MarkVulnFixed(BaseTool):
 
 		# FIXED is set directly (no is_false_positive change → stays visible). verified=False: it is no
 		# longer a live/exploitable finding.
-		update = {"status": "FIXED", "verified": False}
+		# fixed_at is the remediation boundary the attempt rollup honours: only a success recorded
+		# after it can re-open the vuln as EXPLOITED.
+		update = {"status": "FIXED", "verified": False, "extra_data.fixed_at": time.time()}
 		if reason:
 			update["extra_data.fixed_reason"] = reason
 		_merge_extra_data(update, action.get("extra_data"))
