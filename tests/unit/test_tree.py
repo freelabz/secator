@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 from secator.tree import TaskNode, RunnerTree, prune_runner_tree
 
 
@@ -48,8 +49,35 @@ class TestPruneRunnerTree(unittest.TestCase):
     def test_bad_condition_keeps_node(self):
         """On eval error the node is kept (err on the side of showing more)."""
         tree = make_tree(make_node('nmap', condition='this is not valid python!!!'))
-        prune_runner_tree(tree, {})
+        with mock.patch('secator.rich.console.print'):
+            prune_runner_tree(tree, {})
         self.assertEqual(len(tree.root_nodes), 1)
+
+    def test_bad_condition_emits_warning(self):
+        """A condition that fails to evaluate is reported, not silently ignored."""
+        from secator.output_types import Warning
+        child = make_node('httpx', condition='opts.__class__')
+        parent = make_node('discovery', condition='this is not valid python!!!', children=[child])
+        tree = make_tree(parent)
+        with mock.patch('secator.rich.console.print') as printed:
+            prune_runner_tree(tree, {})
+        warnings = [c.args[0] for c in printed.call_args_list if isinstance(c.args[0], Warning)]
+        self.assertEqual(len(warnings), 2)
+        self.assertIn('httpx', warnings[0].message)
+        self.assertIn('discovery', warnings[1].message)
+        self.assertEqual(len(tree.root_nodes), 1)
+        self.assertEqual(len(tree.root_nodes[0].children), 1)
+
+    def test_bad_condition_with_markup_is_reported_literally(self):
+        """Rich markup-like text in a failing condition must not break the warning."""
+        from secator.output_types import Warning
+        tree = make_tree(make_node('nmap', condition='opts.x == "[/red]" +'))
+        with mock.patch('secator.rich.console.print') as printed:
+            prune_runner_tree(tree, {})
+        self.assertEqual(len(tree.root_nodes), 1)
+        warnings = [c.args[0] for c in printed.call_args_list if isinstance(c.args[0], Warning)]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn('[/red]', warnings[0].message)
 
     def test_child_false_condition_removes_only_child(self):
         """A child with a false condition is removed; parent stays."""

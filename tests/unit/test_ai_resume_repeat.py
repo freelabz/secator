@@ -1,7 +1,7 @@
 """Deterministic simulation of AI chat-message REPEAT on stopped/timed-out resume.
 
-Reproduces (no network / no real LLM) the canary transcript symptom (workspace
-bb_21_arcbbc, session 30c1e268): on resume the initial prompt is re-appended and
+Reproduces (no network / no real LLM) an observed session-transcript symptom: on resume
+the initial prompt is re-appended and
 a prior user message (a follow-up answer / a pasted-CSV steer) is re-served as a
 brand-new `prompt` — NOT one broker message redelivered, but DISTINCT task
 invocations each rebuilding history and re-emitting the same user turn.
@@ -36,7 +36,7 @@ if HAS_AI:
 	from secator.ai.history import ChatHistory
 	from secator.tasks.ai import ai as AiTask
 
-SID = "sess-30c1e268"
+SID = "sess-0000test"
 
 
 def _ctx():
@@ -233,7 +233,7 @@ class TestAiResumeRepeat(unittest.TestCase):
 		# The client re-dispatches every respawn carrying the ORIGINAL initial prompt,
 		# but the conversation has since moved on (later follow-up turns). The initial
 		# prompt is no longer the tail, so the tail guard alone would re-emit it; the
-		# `_prompt_is_initial` guard must suppress it (the observed prod repeat).
+		# `_prompt_is_initial` guard must suppress it (the observed repeat).
 		initial = "Blog PHP2Shell: find the RCE across the in-scope hosts"
 		docs = [
 			{"_type": "ai", "ai_type": "prompt", "content": initial, "_timestamp": 1, "_context": _ctx()},
@@ -312,7 +312,7 @@ class TestAiResumeRepeat(unittest.TestCase):
 #     actionable answer) -> the loop runs unbounded: each answer does
 #     `self.max_iterations += extra_iters` in `_prompt_and_redetect`, cancelling
 #     `iteration += 1`, so the `while iteration < max_iterations` cap NEVER bites.
-# => within-run repeat = (external re-answer, in secator-api/UI) x (secator has no
+# => within-run repeat = (external re-answer, in an API client) x (secator has no
 #    effective iteration cap / no same-answer loop-breaker). NOT the RC1 re-append.
 # =============================================================================
 
@@ -324,7 +324,7 @@ CSV = "identifier,asset_type,instruction,eligible_for_bounty"
 
 
 class _ApiAnswerEngine(FakeQueryEngine):
-	"""FakeQueryEngine that also models secator-api's answer channel: just before
+	"""FakeQueryEngine that also models the client's answer channel: just before
 	the worker polls for an answer, flip the latest pending follow_up to
 	answered=CSV. ``answer_cap`` bounds how many times (so the test terminates)."""
 

@@ -147,6 +147,9 @@ class Runners(StrictModel):
 	skip_exploit_search: bool = False
 	skip_cve_low_confidence: bool = False
 	remove_duplicates: bool = False
+	# Show each remote subtask as its own row in the live Celery progress panel (chunks are shown
+	# regardless). Off by default to keep the panel compact on large workflows.
+	show_subtasks: bool = False
 	threads: int = 50
 	prompt_timeout: int = 20
 	chunk_rate_limit: bool = True

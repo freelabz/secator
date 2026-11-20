@@ -75,7 +75,7 @@ def _distinct_vuln(uuid):
 
 
 class TestBaselineIndexBounded(unittest.TestCase):
-	"""#prod 2026-09-15: the baseline load OOM-killed a 2Gi worker. The baseline is now
+	"""Loading the full baseline could exhaust worker memory on large workspaces. The baseline is now
 	folded into a compact index whose peak size is O(distinct compare-keys), NOT O(docs),
 	while dedup correctness against existing findings is preserved."""
 

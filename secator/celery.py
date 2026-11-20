@@ -171,7 +171,11 @@ def chunker(seq, size):
 
 
 @app.task(bind=True)
-def start_runner(self, config, targets, results=[], run_opts={}, hooks={}, validators={}, context={}):
+def start_runner(self, config, targets, results=None, run_opts=None, hooks=None, validators=None, context=None):
+	results = results or []
+	run_opts = dict(run_opts or {})
+	hooks = hooks or {}
+	validators = validators or {}
 	context = context or {}
 	context['celery_id'] = self.request.id
 	run_opts['sync'] = False
@@ -316,7 +320,7 @@ def run_command(self, results, name, targets, opts={}):
 
 	# Set routing key in context
 	if IN_WORKER:
-		quiet = not CONFIG.cli.worker_command_verbose
+		quiet = not CONFIG.celery.worker_command_verbose
 		opts.update(
 			{
 				'print_item': True,

@@ -1,6 +1,6 @@
 import os
 
-from functools import cache
+from secator.decorators import cache_copy
 
 from cpe import CPE
 
@@ -174,12 +174,13 @@ OPTS_HTTP_FILTERS = [
 
 OPTS_HTTP = OPTS_HTTP_BASE + OPTS_HTTP_FILTERS
 
-OPTS_HTTP_FUZZERS = OPTS_HTTP + [WORDLIST, DATA, REPLAY_PROXY]
+# DATA is already part of OPTS_HTTP_BASE.
+OPTS_HTTP_FUZZERS = OPTS_HTTP + [WORDLIST, REPLAY_PROXY]
 
-OPTS_HTTP_CRAWLERS = OPTS_HTTP_FUZZERS.copy()
-OPTS_HTTP_CRAWLERS.remove(DATA)
-OPTS_HTTP_CRAWLERS.remove(METHOD)
-OPTS_HTTP_CRAWLERS.remove(WORDLIST)
+# Crawlers don't send request bodies, custom methods, wordlists or replay traffic: a
+# category option left in this list is passed through to the tool as a raw flag.
+_CRAWLER_EXCLUDED_OPTS = {DATA, METHOD, WORDLIST, REPLAY_PROXY}
+OPTS_HTTP_CRAWLERS = [opt for opt in OPTS_HTTP_FUZZERS if opt not in _CRAWLER_EXCLUDED_OPTS]
 
 OPTS_RECON = [DELAY, PROXY, RATE_LIMIT, RETRIES, THREADS, TIMEOUT]
 
@@ -352,8 +353,8 @@ class Vuln(Command):
 		except NotImplementedError:
 			return None
 
-	@cache
 	@staticmethod
+	@cache_copy
 	def lookup_cve(cve_id, *cpes):
 		"""Search for a CVE info and return vulnerability data.
 
@@ -365,6 +366,8 @@ class Vuln(Command):
 			Vulnerability: Vulnerability object.
 		"""
 		# Lookup CVE data
+		# lookup_external_cve returns a fresh copy (cache_copy), and lookup_local_cve builds a new
+		# object, so tagging `vuln` below never leaks into a cached provider result.
 		vuln = CVEProvider.lookup_local_cve(cve_id)
 		if not vuln:
 			vuln = CVEProvider.lookup_external_cve(cve_id)
@@ -402,8 +405,8 @@ class Vuln(Command):
 
 		return vuln
 
-	@cache
 	@staticmethod
+	@cache_copy
 	def lookup_cve_from_ghsa(ghsa_id):
 		"""Search for a GHSA and return associated CVE vulnerability data.
 

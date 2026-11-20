@@ -107,7 +107,11 @@ class Runner:
 	# Run duplicate check
 	enable_duplicate_check = True
 
-	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context={}):
+	def __init__(self, config, inputs=[], results=[], run_opts={}, hooks={}, validators={}, context=None):
+		# A shared mutable default would leak run-scope ids (e.g. workflow_id) between runners
+		# built without an explicit context. A caller-supplied context is still updated in place.
+		if context is None:
+			context = {}
 		# Runner config
 		self.serialize_config = run_opts.get('serialize_config', True)
 		# _process_config fails fast (clear ValueError) on an empty/missing template, so by

@@ -157,12 +157,27 @@ def prune_runner_tree(tree: RunnerTree, opts: dict, inputs: list = None) -> Runn
 	"""Remove nodes whose conditions evaluate to False against opts/inputs.
 
 	Walks bottom-up so child removals don't corrupt parent iteration.
-	On eval error the node is kept (err on the side of showing more).
+	On eval error the node is kept (err on the side of showing more) and a Warning is printed:
+	the error would otherwise only surface once the runner reaches that node.
 	When entering a workflow node, strips its name prefix from opts so that
 	scan-level options like domain_recon_passive are visible as opts.passive
 	inside that workflow's tasks (mirroring build_celery_workflow behaviour).
 	"""
 	funcs = {'len': len}
+
+	def condition_holds(node: TaskNode, local_ns: dict) -> bool:
+		try:
+			return bool(safe_eval_condition(node.condition, local_ns, funcs))
+		except Exception as e:
+			from rich.markup import escape
+			from secator.output_types import Warning
+			from secator.rich import console
+			# Escape user-controlled text: Warning strips rich markup, which raises on e.g. '[/red]'.
+			console.print(Warning(
+				message=f'Could not evaluate condition "{escape(str(node.condition))}" of {node.type} '
+				f'{escape(str(node.name))}: {type(e).__name__}: {escape(str(e))}. Keeping it in the tree.'
+			))
+			return True
 
 	def strip_prefix(parent_opts, workflow_name):
 		prefix = workflow_name.split('/')[0] + '_'
@@ -172,30 +187,22 @@ def prune_runner_tree(tree: RunnerTree, opts: dict, inputs: list = None) -> Runn
 				result[k[len(prefix):]] = v
 		return result
 
-	def prune_node(node: TaskNode, current_opts: dict):
+	def keep_node(node: TaskNode, current_opts: dict) -> bool:
+		"""Prune ``node``'s subtree and return whether ``node`` itself should be kept."""
 		child_opts = strip_prefix(current_opts, node.name) if node.type == 'workflow' else current_opts
 		for child in list(node.children):
-			prune_node(child, child_opts)
+			if not keep_node(child, child_opts):
+				child.remove()
 		if node.type == 'group' and not node.children:
-			node.remove()
-			return
+			return False
 		if node.condition:
 			local_ns = {'opts': DotMap(current_opts), 'targets': inputs or []}
-			try:
-				if not safe_eval_condition(node.condition, local_ns, funcs):
-					node.remove()
-			except Exception:
-				pass
+			return condition_holds(node, local_ns)
+		return True
 
 	for root in list(tree.root_nodes):
-		prune_node(root, opts)
-		if root.condition:
-			local_ns = {'opts': DotMap(opts), 'targets': inputs or []}
-			try:
-				if not safe_eval_condition(root.condition, local_ns, funcs):
-					tree.root_nodes.remove(root)
-			except Exception:
-				pass
+		if not keep_node(root, opts):
+			tree.root_nodes.remove(root)
 
 	return tree
 
