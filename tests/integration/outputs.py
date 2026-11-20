@@ -203,7 +203,7 @@ OUTPUTS_TASKS = {
 		Domain(domain='python.org', _source='whois'),
 	],
 	'searchsploit': [
-		Exploit(name='cgi-bin Remote Code Execution', provider='EDB', id='29290', matched_at='apache 2.4.5', confidence='low'),
+		Exploit(name='cgi-bin Remote Code Execution', provider='EDB', id='29290', matched_at='', confidence='low'),
 	],
 	'search_vulns': [
 		Exploit(name='Apache exploit', provider='apache', id='CVE-2019-10081-exploit', matched_at='apache 2.4.39', confidence='high'),

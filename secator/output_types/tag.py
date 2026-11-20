@@ -1,12 +1,12 @@
 import time
 from dataclasses import dataclass, field
 
-from secator.output_types import OutputType
+from secator.output_types import Finding
 from secator.utils import rich_to_ansi, trim_string, rich_escape as _s
 
 
 @dataclass
-class Tag(OutputType):
+class Tag(Finding):
 	name: str
 	value: str
 	match: str
@@ -29,6 +29,7 @@ class Tag(OutputType):
 
 	_table_fields = ['match', 'category', 'name', 'extra_data']
 	_sort_by = ('match', 'name')
+	_target_fields = ['match']
 	_group_by = ('category', 'name')
 	_group_aggregate = 'match'
 

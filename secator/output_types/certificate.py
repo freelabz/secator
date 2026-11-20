@@ -4,12 +4,12 @@ from datetime import datetime, timedelta, timezone
 
 from secator.config import CONFIG
 from secator.definitions import CERTIFICATE_STATUS_UNKNOWN
-from secator.output_types import OutputType, Vulnerability
+from secator.output_types import Finding, Vulnerability
 from secator.utils import rich_to_ansi
 
 
 @dataclass
-class Certificate(OutputType):
+class Certificate(Finding):
 	host: str
 	fingerprint_sha256: str = field(default='')
 	ip: str = field(default='', compare=False)
@@ -41,6 +41,7 @@ class Certificate(OutputType):
 	_related: list = field(default_factory=list, compare=False)
 	_table_fields = ['ip', 'host']
 	_sort_by = ('ip',)
+	_target_fields = ['host']
 
 	def __post_init__(self):
 		super().__post_init__()
@@ -82,6 +83,7 @@ class Certificate(OutputType):
 				name='SSL certificate expired',
 				description='The SSL certificate is expired. This can easily lead to domain takeovers',
 				matched_at=self.host,
+				ip=self.ip,
 				tags=['ssl', 'tls'],
 				severity='high',
 				confidence='high',

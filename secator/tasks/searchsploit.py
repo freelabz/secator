@@ -83,8 +83,8 @@ class searchsploit(Command):
 
 	@staticmethod
 	def on_json_loaded(self, item):
-		matched_ats = self.matched_at.split(',') if self.matched_at else [self.inputs[0] if self.inputs else '']
-		if not self._targets_info_yielded:
+		matched_ats = self.matched_at.split(',') if self.matched_at else ['']
+		if self.matched_at and not self._targets_info_yielded:
 			targets_str = ', '.join(matched_ats)
 			yield Info(message=f'Targets: {targets_str}')
 			self._targets_info_yielded = True
@@ -121,7 +121,7 @@ class searchsploit(Command):
 			# 	self._print(f'[bold red]{item.name} ({item.reference}) did not quite match SEARCHSPLOIT_TITLE_REGEX. Please report this issue.[/]')  # noqa: E501
 		input_tag = '-'.join(self.inputs[0].replace('\'', '').split(' '))
 		item.tags = [input_tag] + item.tags
-		item.matched_at = item.matched_at or (self.matched_at if self.matched_at else self.inputs[0] if self.inputs else '')
+		item.matched_at = item.matched_at or self.matched_at or ''
 		if self.inputs:
 			item.extra_data['service_name'] = self.inputs[0]
 		return item

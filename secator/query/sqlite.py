@@ -2,6 +2,7 @@
 
 import json
 import re
+import sqlite3
 from typing import List, Dict, Any
 
 from secator.output_types import Warning
@@ -101,6 +102,8 @@ def _build_where(query: dict):
 						params.extend(non_null)
 					if sub:
 						clauses.append('(' + ' AND '.join(sub) + ')')
+				elif op == '$exists':
+					clauses.append(f'{expr} IS NOT NULL' if val else f'{expr} IS NULL')
 				elif op == '$contains':
 					clauses.append(f"{expr} LIKE '%' || ? || '%'")
 					params.append(val)
@@ -206,6 +209,42 @@ class SqliteBackend(QueryBackend):
 		# Connection is shared; commit flushes pending writes (best-effort single-host semantics, per design).
 		conn.commit()
 		return cur.rowcount
+
+	def bulk_update(self, query: dict, fn, dry_run: bool = False, batch_size: int = 1000):
+		"""Apply ``fn(doc)`` to matching findings, one transaction per batch (keyset-paginated)."""
+		from secator.hooks.sqlite import _apply_finding_update
+		conn = self._get_conn()
+		where, params = _build_where(query)
+		sql = f"SELECT uuid, data FROM findings WHERE uuid > ? AND ({where or '1=1'}) ORDER BY uuid LIMIT ?"
+		matched = changed = 0
+		last = ''
+		while True:
+			rows = conn.execute(sql, [last, *params, batch_size]).fetchall()
+			if not rows:
+				break
+			last = rows[-1][0]
+			updates = [(uuid, fn(json.loads(data))) for uuid, data in rows]
+			updates = [(uuid, update) for uuid, update in updates if update]
+			matched += len(rows)
+			changed += len(updates)
+			if updates and not dry_run:
+				with conn:
+					for uuid, update in updates:
+						_apply_finding_update(conn, uuid, update)
+		return matched, changed
+
+	def get_migrations(self):
+		try:
+			rows = self._get_conn().execute("SELECT id, data FROM migrations").fetchall()
+		except sqlite3.OperationalError:  # no migration applied yet
+			return {}
+		return {_id: json.loads(data) for _id, data in rows}
+
+	def set_migration(self, migration_id: str, info: dict):
+		with self._get_conn() as conn:
+			conn.execute("CREATE TABLE IF NOT EXISTS migrations (id TEXT PRIMARY KEY, data TEXT)")
+			conn.execute(
+				"INSERT OR REPLACE INTO migrations (id, data) VALUES (?, ?)", (migration_id, json.dumps(info, default=str)))
 
 	def _execute_create_note(self, note: dict) -> int:
 		"""Insert a note into a dedicated ``notes`` table (created on first use).

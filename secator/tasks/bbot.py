@@ -251,6 +251,7 @@ class bbot(Command):
 		Vulnerability: {
 			'name': 'name',
 			'matched_at': lambda x: x['data'].get('url') or x['data'].get('host') or '',
+			'ip': lambda x: next((h for h in x.get('resolved_hosts') or [] if not h.startswith('::')), ''),
 			'extra_data': 'extra_data',
 			'confidence': 'high',
 			'severity': lambda x: x['data']['severity'].lower()
