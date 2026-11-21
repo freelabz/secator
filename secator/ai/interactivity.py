@@ -169,6 +169,10 @@ class RemoteBackend(InteractivityBackend):
 		can match THIS exact prompt, not a stale earlier answer.
 		"""
 		from secator.output_types import Ai
+		from secator.ai.sanitize import clean_model_text
+		# The question is model text (stop reason / content-only reply): never persist a
+		# leaked control block or a copied template line as the prompt the user reads.
+		question = clean_model_text(question) or "What's next?"
 		multiple = bool(context.get("multiple", False))
 		extra_data = {
 			"permission_type": context.get("permission_type", ""),

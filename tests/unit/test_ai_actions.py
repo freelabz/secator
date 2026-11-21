@@ -2510,3 +2510,52 @@ class TestDangerousClearsScope(unittest.TestCase):
 		opts = _child_run_opts(self._ctx(True))
 		self.assertNotIn('in_scope', opts)
 		self.assertNotIn('out_of_scope', opts)
+
+
+class TestCleanModelText(unittest.TestCase):
+	"""Model text that becomes an end-of-turn prompt is cleaned of leaked control
+	blocks and copied template placeholders."""
+
+	def test_drops_control_block_and_placeholder(self):
+		from secator.ai.sanitize import clean_model_text
+		text = ('Summary sentence goes here. <system_warning>Model behaviors described above'
+		        '</system_warning> Should I run the check on the 3 hosts?')
+		self.assertEqual(clean_model_text(text), 'Should I run the check on the 3 hosts?')
+
+	def test_unclosed_block_is_dropped_to_the_end(self):
+		from secator.ai.sanitize import clean_model_text
+		self.assertEqual(clean_model_text('Summary sentence goes here. <system_warning>Model behav'), '')
+
+	def test_plain_text_is_untouched(self):
+		from secator.ai.sanitize import clean_model_text
+		text = 'Found 3 open ports.\n\n- 22/ssh\n- 80/http\n\nScan deeper? Use <b>nuclei</b>.'
+		self.assertEqual(clean_model_text(text), text)
+
+	def test_stop_reason_falls_back_when_nothing_is_left(self):
+		from secator.ai.sanitize import clean_model_text
+		self.assertEqual(clean_model_text('<system-reminder>x</system-reminder>'), '')
+		self.assertEqual(clean_model_text(None), '')
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestStopReasonCleaned(unittest.TestCase):
+
+	def test_stop_reason_is_cleaned(self):
+		ctx = ActionContext(targets=['t.com'], model='m')
+		results = list(_handle_stop({
+			'action': 'stop',
+			'reason': 'Summary sentence goes here. <system_warning>leak</system_warning> Continue?',
+		}, ctx))
+		self.assertEqual(results[0].content, 'Continue?')
+
+	def test_stop_reason_only_leak_falls_back(self):
+		ctx = ActionContext(targets=['t.com'], model='m')
+		results = list(_handle_stop({'action': 'stop', 'reason': '<system_warning>leak'}, ctx))
+		self.assertEqual(results[0].content, 'completed')
+
+	def test_remote_pending_prompt_question_is_cleaned(self):
+		from secator.ai.interactivity import RemoteBackend
+		backend = RemoteBackend(query_engine=None)
+		backend._expire_stale_pending = lambda *a, **k: None
+		item = backend.build_pending_prompt('Summary sentence goes here. <system_warning>x', [], 's1')
+		self.assertEqual(item.content, "What's next?")
