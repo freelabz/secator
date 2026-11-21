@@ -528,7 +528,9 @@ class Command(Runner):
 			if len(self.inputs) == 0 and self.skip_if_no_inputs and self.default_inputs != '':
 				# self.print_description()
 				# self.print_command()
-				self.add_result(Warning(message=f'{self.unique_name} skipped (no inputs)'), print=False)
+				# A skip is not a problem: report it as an Info (still printed) and record it through
+				# the explicit `skipped` flag (status SKIPPED), never as a Warning.
+				self.add_result(Info(message=f'{self.unique_name} skipped (no inputs)'))
 				for item in self.warnings:
 					self._print_item(item)
 				for item in self.errors:
