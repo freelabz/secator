@@ -196,6 +196,26 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		history = restore_history_from_db("s-stop", engine)
 		self.assertEqual(history.messages[-1], {"role": "user", "content": "yes"})
 
+	def test_answered_stop_not_threaded_when_a_later_turn_exists(self):
+		"""Tool results after the `stopped` doc are not a turn, but a later assistant turn is:
+		the stop was answered during the run and its answer is already in the transcript."""
+		from secator.ai.session import restore_history_from_db
+		engine = MagicMock()
+		engine.search.return_value = [
+			{"ai_type": "prompt", "_timestamp": 1, "message": {"role": "user", "content": "plan it"}},
+			{"ai_type": "response", "_timestamp": 2, "message": {
+				"role": "assistant", "content": None, "tool_calls": [
+					{"id": "tc_stop", "type": "function", "function": {"name": "stop", "arguments": "{}"}}]}},
+			{"ai_type": "stopped", "content": "Go?", "status": "answered", "answer": "yes", "_timestamp": 3},
+			{"ai_type": "tool_result", "_timestamp": 4,
+			 "message": {"role": "tool", "tool_call_id": "tc_x", "name": "x", "content": "{}"}},
+			{"ai_type": "prompt", "_timestamp": 5, "message": {"role": "user", "content": "yes"}},
+			{"ai_type": "response", "_timestamp": 6, "message": {"role": "assistant", "content": "On it."}},
+		]
+		history = restore_history_from_db("s-later", engine)
+		self.assertEqual(sum(1 for m in history.messages if m.get("content") == "yes"), 1)
+		self.assertEqual(history.messages[-1], {"role": "assistant", "content": "On it."})
+
 	def test_restore_rebuilds_full_transcript_from_message(self):
 		"""A persisted user->assistant(tool_calls)->tool->assistant round-trip
 		restores byte-identically, with tool_call_id pairing intact."""

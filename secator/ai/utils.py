@@ -626,14 +626,17 @@ TOOL_NOT_RUN_RESULT = json.dumps({
 	"status": "not_run",
 	"error": (
 		"No result was recorded for this call: the run was interrupted before it returned "
-		"(e.g. it ended while waiting for a permission answer), so it most likely did not "
-		"execute. This is not a failure of the command or of running calls in parallel. "
-		"Re-issue the call if it is still needed."),
+		"(e.g. it ended while waiting for a permission answer, or stopped mid-turn). It may "
+		"not have run, or may have run without its result reaching you. This is not an error "
+		"from the command itself, nor from running calls in parallel. Check for its effects "
+		"before re-issuing it (for a task, workflow or scan, query the workspace for its "
+		"findings)."),
 }, separators=(',', ':'))
 
 # Tools whose calls never get a tool_result by design: `stop` ends the turn and the user's
-# answer follows it directly. A missing result for these is expected, not an interruption.
-_RESULTLESS_TOOLS = frozenset({"stop"})
+# answer follows it directly (`follow_up` is its former name, still found in older
+# transcripts). A missing result for these is expected, not an interruption.
+_RESULTLESS_TOOLS = frozenset({"stop", "follow_up"})
 
 
 def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
