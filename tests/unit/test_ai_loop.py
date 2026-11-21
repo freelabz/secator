@@ -1450,9 +1450,65 @@ class TestSubagentOwnToolResults(unittest.TestCase):
 		self.assertEqual(results[0][1], "tc1")
 
 	def test_child_subagent_output_not_fed_to_parent(self):
-		# result session_id != self.session_id -> a dispatched child -> kept out
+		# result session_id != self.session_id -> a dispatched child -> kept out; the call
+		# still gets a plain acknowledged result (every dispatched call has a result)
+		from secator.ai.utils import TOOL_ACK_RESULT
 		results = self._run(result_session_id="other-child-sess")
-		self.assertEqual(len(results), 0)
+		self.assertEqual([(r[1], r[2]) for r in results], [("tc1", TOOL_ACK_RESULT)])
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestEveryDispatchedCallGetsAResult(unittest.TestCase):
+	"""Every call a turn dispatches gets a tool result in history (and a persisted
+	tool_result item), so a restored transcript never mistakes a completed call for an
+	interrupted one. A call whose tool only yields a display item is acknowledged; `stop`
+	gets none (the turn ends on it)."""
+
+	def test_batch_records_a_result_per_call(self):
+		from secator.ai.utils import TOOL_ACK_RESULT
+		from secator.tasks.ai import ai as AiTask
+
+		history = ChatHistory()
+		fake_self = MagicMock()
+		fake_self.backend = CLIBackend()
+		fake_self.session_id = "s"
+		fake_self.model = "test-model"
+		fake_self.encryptor = None
+		fake_self.context = {"session_id": "s"}
+		fake_self.history = history
+		fake_self.add_result = lambda item, **kw: None
+		ctx = _make_ctx(interactive="auto")
+		ctx.results = []
+
+		def _call(tc_id, name, **extra):
+			return {"tool_call_id": tc_id, "tool_call_name": name, **extra}
+		actions = [
+			_call("tc_a", "run_shell", action="shell", command="echo a"),
+			_call("tc_b", "run_shell", action="shell", command="echo b"),
+			_call("tc_plan", "update_plan", action="update_plan", items=[{"text": "x", "status": "pending"}]),
+			_call("tc_stop", "stop", action="stop", reason="done"),
+		]
+
+		def _fake_shell(action, ctx):
+			ctx_ = {"tool_call_id": action["tool_call_id"], "tool_call_name": "run_shell"}
+			yield Ai(content=action["command"].split()[-1], ai_type="shell_output", _context=ctx_)
+
+		def _fake_plan(action, ctx):
+			yield Ai(content="plan", ai_type="plan", _context={"tool_call_id": "tc_plan"})
+
+		with patch("secator.ai.tools.run_shell.RunShell.run", staticmethod(_fake_shell)), \
+				patch("secator.ai.tools.update_plan.UpdatePlan.run", staticmethod(_fake_plan)):
+			items = list(AiTask._dispatch_and_collect(fake_self, actions, ctx))
+
+		results = {m["tool_call_id"]: m["content"] for m in history.messages if m["role"] == "tool"}
+		self.assertEqual(set(results), {"tc_a", "tc_b", "tc_plan"})
+		self.assertIn('"content":"a"', results["tc_a"])
+		self.assertIn('"content":"b"', results["tc_b"])
+		self.assertEqual(results["tc_plan"], TOOL_ACK_RESULT)
+		# the acknowledgment is yielded as a tool_result item too, so a driver persists it
+		persisted = [i.message.get("tool_call_id") for i in items
+		             if isinstance(i, Ai) and i.ai_type == "tool_result"]
+		self.assertEqual(sorted(persisted), ["tc_a", "tc_b", "tc_plan"])
 
 
 # =============================================================================
