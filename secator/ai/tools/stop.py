@@ -2,6 +2,7 @@
 from typing import Dict, Generator
 from secator.output_types import Ai
 from secator.ai.actions import ActionContext, _get_result_context
+from secator.ai.sanitize import clean_model_text
 from secator.ai.tools.base import BaseTool
 
 
@@ -62,7 +63,9 @@ class Stop(BaseTool):
 		render multi-select (checkboxes) vs single-pick.
 		"""
 		context = _get_result_context(action, ctx)
-		reason = action.get("reason", "completed")
+		# A model can echo a leaked control block or a template line into its reason;
+		# it becomes the user-facing prompt text, so clean it (fall back when empty).
+		reason = clean_model_text(action.get("reason")) or "completed"
 		choices = action.get("choices", []) or []
 		multiple = bool(action.get("multiple", False))
 		yield Ai(
