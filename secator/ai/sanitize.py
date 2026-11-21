@@ -32,11 +32,17 @@ def clean_model_text(text):
 	stripped = _CONTROL_TAG.sub(' ', _CONTROL_BLOCK.sub(' ', text))
 	lines, dropped = [], False
 	for line in stripped.splitlines():
-		sentences = [s for s in _SENTENCE_SPLIT.split(line.strip()) if s]
+		body = line.strip()
+		if not body:
+			lines.append('')
+			continue
+		# Keep the line's indentation (code blocks); only whole sentences are dropped.
+		indent = line[:len(line) - len(line.lstrip())]
+		sentences = [s for s in _SENTENCE_SPLIT.split(body) if s]
 		kept = [s for s in sentences if not _PLACEHOLDER_SENTENCE.search(s)]
 		dropped = dropped or len(kept) != len(sentences)
 		if kept:
-			lines.append(re.sub(r'[ \t]+', ' ', ' '.join(kept)))
+			lines.append((indent + ' '.join(kept)).rstrip())
 	if stripped == text and not dropped:
 		return text.strip()  # common case: keep the model's formatting untouched
-	return '\n'.join(lines).strip()
+	return re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()

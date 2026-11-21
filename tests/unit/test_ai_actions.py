@@ -2522,6 +2522,11 @@ class TestCleanModelText(unittest.TestCase):
 		        '</system_warning> Should I run the check on the 3 hosts?')
 		self.assertEqual(clean_model_text(text), 'Should I run the check on the 3 hosts?')
 
+	def test_indentation_kept_on_rewrite(self):
+		from secator.ai.sanitize import clean_model_text
+		text = 'Run this?\n\nif approved:\n    scan()\n<system_warning>leak</system_warning>'
+		self.assertEqual(clean_model_text(text), 'Run this?\n\nif approved:\n    scan()')
+
 	def test_placeholder_without_control_block(self):
 		from secator.ai.sanitize import clean_model_text
 		self.assertEqual(clean_model_text('Summary sentence goes here. Continue?'), 'Continue?')
@@ -2570,3 +2575,11 @@ class TestStopReasonCleaned(unittest.TestCase):
 		backend._expire_stale_pending = lambda *a, **k: None
 		item = backend.build_pending_prompt('Summary sentence goes here. <system_warning>x', [], 's1')
 		self.assertEqual(item.content, "What's next?")
+
+	def test_remote_permission_question_is_kept_whole(self):
+		from secator.ai.interactivity import RemoteBackend
+		backend = RemoteBackend(query_engine=None)
+		backend._expire_stale_pending = lambda *a, **k: None
+		q = 'read access to /tmp/<thinking>/token requires approval'
+		item = backend.build_pending_prompt(q, [], 's1', prompt_type='permission')
+		self.assertEqual(item.content, q)
