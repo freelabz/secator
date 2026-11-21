@@ -76,8 +76,46 @@ def _build_hooks_from_context(context: Dict) -> Dict:
 	return deep_merge_dicts(*hooks_list)
 
 
-def _build_child_hooks_or_denial(context: Dict) -> Tuple[Dict, Optional["Warning"]]:
+def _parent_hooks_by_class(parent_hooks: Optional[Dict]) -> Dict:
+	"""Normalize the parent runner's explicit hooks to a fresh class-keyed dict.
+
+	A runner's ``_hooks`` is either class-keyed (``{Task: {...}, Workflow: {...}}``, as a
+	library caller passes them) or flat (``{'on_item': [...]}``, as a ``Task``/``Workflow``
+	hands its command its ``self._hooks.get(Task)``). Flat event keys are folded under
+	``Task`` (they are command-level hooks). Lists are copied so the child (e.g.
+	``attach_display_hooks``) never mutates the parent's hook lists.
+	"""
+	from secator.runners import Scan
+
+	if not parent_hooks:
+		return {}
+	classes = (Scan, Task, Workflow)
+	out = {}
+	for key, value in parent_hooks.items():
+		if key in classes and isinstance(value, dict):
+			cls_hooks = out.setdefault(key, {})
+			for name, fns in value.items():
+				if isinstance(fns, list):
+					cls_hooks[name] = cls_hooks.get(name, []) + list(fns)
+		elif isinstance(key, str) and isinstance(value, list):
+			task_hooks = out.setdefault(Task, {})
+			task_hooks[key] = task_hooks.get(key, []) + list(value)
+	return out
+
+
+def _build_child_hooks_or_denial(
+	context: Dict, parent_hooks: Optional[Dict] = None
+) -> Tuple[Dict, Optional["Warning"]]:
 	"""Rebuild the child's persistence hooks, refusing a persistence-less child.
+
+	The child gets the hooks of every driver in ``context['drivers']`` PLUS the hooks the
+	parent runner was constructed with (``parent_hooks``). A caller may hand a runner hooks
+	explicitly without naming their driver in ``context['drivers']`` (e.g. a storage addon
+	that uploads ``stored_response_path``/``screenshot_path`` and rewrites them to remote
+	URLs); rebuilding from ``drivers`` alone silently dropped those on every child, so a
+	child workflow chained the LOCAL path to its next task, which runs on another worker.
+	Parent hooks come first so enrichment hooks keep running before the persistence hooks
+	(``register_hooks`` skips the duplicates).
 
 	``context`` carries the parent's ``drivers`` (copied via ``_get_result_context``),
 	so an empty/failed rebuild while the parent HAS drivers means the child would run
@@ -104,6 +142,10 @@ def _build_child_hooks_or_denial(context: Dict) -> Tuple[Dict, Optional["Warning
 				"was empty (would silently drop findings/docs)",  # noqa: E131
 			_context=context,
 		)
+	inherited = _parent_hooks_by_class(parent_hooks)
+	if inherited:
+		from secator.utils import deep_merge_dicts
+		hooks = deep_merge_dicts(inherited, hooks)
 	return hooks, None
 
 
@@ -286,7 +328,7 @@ def _child_preamble(
 	context[id_key] = str(uuid.uuid4())
 	if ctx.subagent:
 		context["subagent"] = ctx.context.get("subagent", True)
-	return _build_child_hooks_or_denial(context)
+	return _build_child_hooks_or_denial(context, ctx.hooks)
 
 
 def _run_runner(action: Dict, ctx: ActionContext, runner_type: str) -> Generator:

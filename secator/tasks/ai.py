@@ -988,6 +988,7 @@ class ai(PythonRunner):
 			backend=self.backend,
 			session_id=self.session_id,
 			permission_engine=self.permission_engine,
+			hooks=getattr(self, "_hooks", None) or {},
 			in_scope=self.in_scope,
 			out_of_scope=self.out_of_scope,
 			isolated=self.isolated,

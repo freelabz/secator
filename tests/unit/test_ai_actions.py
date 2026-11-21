@@ -1298,6 +1298,86 @@ class TestChildHooksOrDenial(unittest.TestCase):
 		self.assertFalse([r for r in results if isinstance(r, Warning)])
 
 
+def _enrich_stored_response_path(self, item):
+	"""Stand-in for a storage addon hook: uploads the file and rewrites the path to a remote URL."""
+	if getattr(item, 'stored_response_path', ''):
+		item.stored_response_path = f'remote://bucket/{item._uuid}'
+	return item
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestChildInheritsParentHooks(unittest.TestCase):
+	"""REGRESSION: a child runner spawned by the ai task must keep the hooks its parent was
+	given explicitly, not only the hooks of the drivers named in context['drivers'].
+
+	A caller can register a storage hook (rewrites url.stored_response_path to a remote URL
+	after upload) through hooks= without listing its driver in context['drivers']. The child
+	hooks were rebuilt from drivers alone, so on a child workflow the url findings kept their
+	LOCAL path, and the next task (trufflehog, fed `stored_response_path` by url_dirsearch)
+	got a path that only exists on the worker that ran httpx.
+	"""
+
+	def test_flat_parent_hooks_inherited_first(self):
+		from secator.hooks.json import update_finding
+		from secator.runners import Workflow
+		parent = {'on_item': [_enrich_stored_response_path]}
+		hooks, denial = _build_child_hooks_or_denial({'drivers': ['json']}, parent)
+		self.assertIsNone(denial)
+		on_item = hooks[Task]['on_item']
+		# enrichment runs BEFORE the store persists the item
+		self.assertIs(on_item[0], _enrich_stored_response_path)
+		self.assertIn(update_finding, on_item)
+		# workflow-level driver hooks still come from context['drivers']
+		self.assertIn(update_finding, hooks[Workflow]['on_item'])
+		# the parent's own hook list is never mutated
+		self.assertEqual(parent, {'on_item': [_enrich_stored_response_path]})
+
+	def test_class_keyed_parent_hooks_inherited(self):
+		parent = {Task: {'on_item': [_enrich_stored_response_path]}}
+		hooks, _ = _build_child_hooks_or_denial({'drivers': ['json']}, parent)
+		self.assertIs(hooks[Task]['on_item'][0], _enrich_stored_response_path)
+		self.assertEqual(parent, {Task: {'on_item': [_enrich_stored_response_path]}})
+
+	def test_no_parent_hooks_unchanged(self):
+		with patch('secator.ai.tools._runner._build_hooks_from_context') as mock_build:
+			sentinel = {'fake': ['hook']}
+			mock_build.return_value = sentinel
+			hooks, denial = _build_child_hooks_or_denial({'drivers': ['mongodb']}, None)
+		self.assertIs(hooks, sentinel)
+		self.assertIsNone(denial)
+
+	@patch('secator.ai.tools._runner.Workflow')
+	def test_run_runner_workflow_child_gets_parent_hooks(self, mock_wf_cls):
+		mock_runner = MagicMock()
+		mock_runner.id = 'wf123'
+		mock_runner.reports_folder = None
+		mock_runner.__iter__.return_value = iter([])
+		mock_wf_cls.return_value = mock_runner
+		ctx = ActionContext(
+			targets=['t.com'], model='m',
+			context={'workspace_id': 'ws1', 'drivers': ['json']},
+			hooks={'on_item': [_enrich_stored_response_path]},
+		)
+		action = {'action': 'workflow', 'name': 'url_dirsearch', 'targets': ['https://t.com']}
+		list(_run_runner(action, ctx, 'workflow'))
+		mock_wf_cls.assert_called_once()
+		hooks = mock_wf_cls.call_args[1]['hooks']
+		self.assertIs(hooks[Task]['on_item'][0], _enrich_stored_response_path)
+
+	def test_child_task_registers_enrichment_before_store(self):
+		"""On a real command runner the inherited hook is registered and runs before the
+		json driver's update_finding, so the store sees the rewritten remote path."""
+		from secator.tasks import httpx
+		from secator.hooks.json import update_finding
+		hooks, _ = _build_child_hooks_or_denial({'drivers': ['json']}, {'on_item': [_enrich_stored_response_path]})
+		runner = httpx(['https://t.com'], hooks=hooks[Task], context={'drivers': ['json']}, sync=True)
+		on_item = runner.resolved_hooks['on_item']
+		self.assertIn(_enrich_stored_response_path, on_item)
+		self.assertLess(on_item.index(_enrich_stored_response_path), on_item.index(update_finding))
+		item = _enrich_stored_response_path(runner, Url(url='https://t.com', stored_response_path='/local/resp.txt'))
+		self.assertTrue(item.stored_response_path.startswith('remote://bucket/'))
+
+
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestGetQueryEngine(unittest.TestCase):
 	"""Tests for ActionContext.get_query_engine caching and backend selection."""

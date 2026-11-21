@@ -67,6 +67,11 @@ class ActionContext:
 	dangerous: bool = False
 	_query_engine: Any = field(default=None, repr=False)
 	permission_engine: Any = field(default=None, repr=False)
+	# Hooks the parent runner was constructed with (``Runner._hooks``: flat or class-keyed).
+	# Spawned child runners inherit them on top of the ``context['drivers']`` hooks, so hooks
+	# handed to the parent explicitly (not named in ``drivers``, e.g. a storage addon that
+	# rewrites ``stored_response_path`` to a remote URL) still run on the child's findings.
+	hooks: Dict = field(default_factory=dict, repr=False)
 
 	def get_query_engine(self):
 		"""Get or create a QueryEngine (cached for reuse across queries).
