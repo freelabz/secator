@@ -4,13 +4,17 @@ import re
 # XML-ish control blocks a model sometimes echoes into its own text (a system or
 # reminder note it was shown). Dropped with their contents, up to the closing tag
 # or the end of the text when it was cut off.
-_CONTROL_NAMES = r'system(?:[_-][\w-]*)?|[\w-]*_(?:warning|reminder)|reminder|thinking'
+# Only the known injected-note names: a generic `<system_id>` or `<host>` in a real
+# question must survive.
+_CONTROL_NAMES = r'system[_-](?:warning|reminder|notice|message|note)|[a-z]+_reminder|thinking'
 _CONTROL_BLOCK = re.compile(rf'<({_CONTROL_NAMES})\b[^>]*>[\s\S]*?(?:</\1\s*>|$)', re.IGNORECASE)
 _CONTROL_TAG = re.compile(rf'</?(?:{_CONTROL_NAMES})\b[^>]*>', re.IGNORECASE)
-# A sentence that is a template placeholder copied verbatim instead of filled in.
+# A sentence that is wholly a template placeholder copied verbatim instead of filled
+# in ("Summary sentence goes here.", "[summary]"). Questions ("Which key goes here?")
+# and sentences that merely contain the words are kept.
 _PLACEHOLDER_SENTENCE = re.compile(
-	r'\b(goes here|lorem ipsum|insert [\w ]+ here|fill (?:this|me) in)\b'
-	r'|^\s*[\[{<]\s*[\w ]+\s*[\]}>]\s*[.!?]?\s*$',
+	r'^\s*(?:[\w ]{0,40}\bgoes here[.!]?|lorem ipsum dolor\b.*'
+	r'|[\[{<]\s*(?:summary|reason|question|text|sentence|answer)\s*[\]}>][.!]?)\s*$',
 	re.IGNORECASE)
 _SENTENCE_SPLIT = re.compile(r'(?<=[.!?])\s+')
 
@@ -26,11 +30,13 @@ def clean_model_text(text):
 	if not isinstance(text, str) or not text:
 		return ''
 	stripped = _CONTROL_TAG.sub(' ', _CONTROL_BLOCK.sub(' ', text))
-	if stripped == text and not _PLACEHOLDER_SENTENCE.search(text):
-		return text.strip()  # common case: keep the model's formatting untouched
-	lines = []
+	lines, dropped = [], False
 	for line in stripped.splitlines():
-		kept = [s for s in _SENTENCE_SPLIT.split(line.strip()) if s and not _PLACEHOLDER_SENTENCE.search(s)]
+		sentences = [s for s in _SENTENCE_SPLIT.split(line.strip()) if s]
+		kept = [s for s in sentences if not _PLACEHOLDER_SENTENCE.search(s)]
+		dropped = dropped or len(kept) != len(sentences)
 		if kept:
 			lines.append(re.sub(r'[ \t]+', ' ', ' '.join(kept)))
+	if stripped == text and not dropped:
+		return text.strip()  # common case: keep the model's formatting untouched
 	return '\n'.join(lines).strip()

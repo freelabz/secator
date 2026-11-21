@@ -2522,6 +2522,10 @@ class TestCleanModelText(unittest.TestCase):
 		        '</system_warning> Should I run the check on the 3 hosts?')
 		self.assertEqual(clean_model_text(text), 'Should I run the check on the 3 hosts?')
 
+	def test_placeholder_without_control_block(self):
+		from secator.ai.sanitize import clean_model_text
+		self.assertEqual(clean_model_text('Summary sentence goes here. Continue?'), 'Continue?')
+
 	def test_unclosed_block_is_dropped_to_the_end(self):
 		from secator.ai.sanitize import clean_model_text
 		self.assertEqual(clean_model_text('Summary sentence goes here. <system_warning>Model behav'), '')
@@ -2530,6 +2534,13 @@ class TestCleanModelText(unittest.TestCase):
 		from secator.ai.sanitize import clean_model_text
 		text = 'Found 3 open ports.\n\n- 22/ssh\n- 80/http\n\nScan deeper? Use <b>nuclei</b>.'
 		self.assertEqual(clean_model_text(text), text)
+
+	def test_real_questions_that_look_like_placeholders_are_kept(self):
+		from secator.ai.sanitize import clean_model_text
+		for q in ('Should I insert the payload here?', 'Which API key goes here? I found two.',
+		          'Can you fill this in for me?', 'Use the <system_id> header? Yes or no.',
+		          'Send it to <host>? Lorem ipsum is in the page title.'):
+			self.assertEqual(clean_model_text(q), q)
 
 	def test_stop_reason_falls_back_when_nothing_is_left(self):
 		from secator.ai.sanitize import clean_model_text
