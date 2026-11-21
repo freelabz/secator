@@ -96,10 +96,45 @@ def _parent_hooks_by_class(parent_hooks: Optional[Dict]) -> Dict:
 			cls_hooks = out.setdefault(key, {})
 			for name, fns in value.items():
 				if isinstance(fns, list):
-					cls_hooks[name] = cls_hooks.get(name, []) + list(fns)
+					cls_hooks[name] = cls_hooks.get(name, []) + [f for f in fns if not _is_display_hook(f)]
 		elif isinstance(key, str) and isinstance(value, list):
 			task_hooks = out.setdefault(Task, {})
-			task_hooks[key] = task_hooks.get(key, []) + list(value)
+			task_hooks[key] = task_hooks.get(key, []) + [f for f in value if not _is_display_hook(f)]
+	return out
+
+
+def _is_display_hook(fn) -> bool:
+	"""Display taps (terminal UI feeds) are per-runner: the child gets its own via
+	``attach_display_hooks``, so never inherit the parent's."""
+	module = getattr(fn, '__module__', '') or ''
+	return module.startswith('secator.tui') or (
+		module == 'secator.rich' and getattr(fn, '__name__', '').startswith('_tui_'))
+
+
+def _merge_parent_hooks(inherited: Dict, driver_hooks: Dict) -> Dict:
+	"""Merge into a FRESH class-keyed dict (never aliasing a driver module's HOOKS).
+
+	Driver hooks keep their canonical order (``order_drivers``). Inherited hooks a driver
+	already supplies are dropped (the parent's list may order them differently); the rest
+	(hooks only the parent was given, e.g. a storage enrichment hook) are prepended so they
+	run before the persistence hooks see the item.
+	"""
+	out = {}
+	for cls in set(inherited) | set(driver_hooks):
+		drv = driver_hooks.get(cls, {}) if isinstance(driver_hooks.get(cls), dict) else {}
+		inh = inherited.get(cls, {})
+		cls_out = out[cls] = {}
+		for name in set(inh) | set(drv):
+			drv_fns = list(drv.get(name, []))
+			extra = []
+			for fn in inh.get(name, []):
+				if fn not in drv_fns and fn not in extra:
+					extra.append(fn)
+			cls_out[name] = extra + drv_fns
+	# Keep any non-class keys (flat event lists) a driver HOOKS dict may carry.
+	for key, value in driver_hooks.items():
+		if key not in out:
+			out[key] = list(value) if isinstance(value, list) else value
 	return out
 
 
@@ -114,8 +149,8 @@ def _build_child_hooks_or_denial(
 	that uploads ``stored_response_path``/``screenshot_path`` and rewrites them to remote
 	URLs); rebuilding from ``drivers`` alone silently dropped those on every child, so a
 	child workflow chained the LOCAL path to its next task, which runs on another worker.
-	Parent hooks come first so enrichment hooks keep running before the persistence hooks
-	(``register_hooks`` skips the duplicates).
+	Driver hooks keep their canonical order; parent-only hooks are prepended so enrichment
+	runs before persistence (see ``_merge_parent_hooks``). Display taps are not inherited.
 
 	``context`` carries the parent's ``drivers`` (copied via ``_get_result_context``),
 	so an empty/failed rebuild while the parent HAS drivers means the child would run
@@ -144,8 +179,7 @@ def _build_child_hooks_or_denial(
 		)
 	inherited = _parent_hooks_by_class(parent_hooks)
 	if inherited:
-		from secator.utils import deep_merge_dicts
-		hooks = deep_merge_dicts(inherited, hooks)
+		hooks = _merge_parent_hooks(inherited, hooks)
 	return hooks, None
 
 

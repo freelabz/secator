@@ -1364,18 +1364,76 @@ class TestChildInheritsParentHooks(unittest.TestCase):
 		hooks = mock_wf_cls.call_args[1]['hooks']
 		self.assertIs(hooks[Task]['on_item'][0], _enrich_stored_response_path)
 
-	def test_child_task_registers_enrichment_before_store(self):
-		"""On a real command runner the inherited hook is registered and runs before the
-		json driver's update_finding, so the store sees the rewritten remote path."""
+	def test_child_task_persists_rewritten_path(self):
+		"""On a real command runner the inherited hook runs before the json store's
+		update_finding, so the item reaching the store carries the remote path."""
 		from secator.tasks import httpx
 		from secator.hooks.json import update_finding
 		hooks, _ = _build_child_hooks_or_denial({'drivers': ['json']}, {'on_item': [_enrich_stored_response_path]})
 		runner = httpx(['https://t.com'], hooks=hooks[Task], context={'drivers': ['json']}, sync=True)
 		on_item = runner.resolved_hooks['on_item']
-		self.assertIn(_enrich_stored_response_path, on_item)
 		self.assertLess(on_item.index(_enrich_stored_response_path), on_item.index(update_finding))
-		item = _enrich_stored_response_path(runner, Url(url='https://t.com', stored_response_path='/local/resp.txt'))
-		self.assertTrue(item.stored_response_path.startswith('remote://bucket/'))
+		# Swap the store write for a capture at the same position and drive add_result.
+		persisted = []
+
+		def _capture(_runner, item):
+			persisted.append(item.stored_response_path)
+			return item
+
+		on_item[on_item.index(update_finding)] = _capture
+		runner.add_result(Url(url='https://t.com', stored_response_path='/local/resp.txt'), print=False)
+		self.assertEqual(len(persisted), 1)
+		self.assertTrue(persisted[0].startswith('remote://bucket/'), persisted)
+
+	def test_parent_order_does_not_override_driver_order(self):
+		"""A parent list ordered [store, enrich] (drivers configured as `json,<storage>`)
+		must not put the store first on the child: driver hooks keep their canonical order
+		and parent-only hooks are prepended."""
+		from secator.hooks.json import update_finding
+		parent = {'on_item': [update_finding, _enrich_stored_response_path]}
+		hooks, _ = _build_child_hooks_or_denial({'drivers': ['json']}, parent)
+		on_item = hooks[Task]['on_item']
+		self.assertEqual(on_item.count(update_finding), 1)
+		self.assertLess(on_item.index(_enrich_stored_response_path), on_item.index(update_finding))
+
+	def test_display_hooks_not_inherited(self):
+		from secator.tui.ai import _tui_feed
+		parent = {'on_item': [_tui_feed, _enrich_stored_response_path]}
+		hooks, _ = _build_child_hooks_or_denial({'drivers': ['json']}, parent)
+		self.assertNotIn(_tui_feed, hooks[Task]['on_item'])
+		self.assertIn(_enrich_stored_response_path, hooks[Task]['on_item'])
+
+	def test_merged_hooks_never_alias_driver_module_dicts(self):
+		from secator.hooks import json as json_hooks
+		from secator.runners import Workflow
+		hooks, _ = _build_child_hooks_or_denial({'drivers': ['json']}, {'on_item': [_enrich_stored_response_path]})
+		self.assertIsNot(hooks[Workflow], json_hooks.HOOKS[Workflow])
+		self.assertIsNot(hooks[Task]['on_item'], json_hooks.HOOKS[Task]['on_item'])
+
+	def test_ai_task_hands_its_hooks_to_action_context(self):
+		"""The ai task passes its own hooks to ActionContext (what children inherit)."""
+		from secator.tasks.ai import ai
+		task = ai.__new__(ai)
+		task._hooks = {'on_item': [_enrich_stored_response_path]}
+		captured = {}
+
+		class _Stop(Exception):
+			pass
+
+		def _fake_ctx(**kwargs):
+			captured.update(kwargs)
+			raise _Stop()
+
+		for attr in ('inputs', 'in_scope', 'out_of_scope'):
+			setattr(task, attr, [])
+		for attr in ('model', 'api_key', 'api_base', 'encryptor', 'context', 'scope', 'max_workers',
+		             'max_iterations', 'is_subagent', 'mode', '_sync', 'interactive', 'backend',
+		             'session_id', 'permission_engine', 'isolated', 'dry_run', 'verbose'):
+			setattr(task, attr, None)
+		with patch('secator.tasks.ai.init_llm'), patch('secator.tasks.ai.ActionContext', side_effect=_fake_ctx):
+			with self.assertRaises(_Stop):
+				next(task._run_loop())
+		self.assertEqual(captured.get('hooks'), {'on_item': [_enrich_stored_response_path]})
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
