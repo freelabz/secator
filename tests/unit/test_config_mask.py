@@ -49,11 +49,17 @@ class TestMaskHelpers(unittest.TestCase):
 		self.assertEqual(mask_secret(''), '')
 
 	def test_mask_url(self):
-		self.assertEqual(mask_url('redis://:pass@host:6379/0'), f'redis://:{SECRET_MASK}@host:6379/0')
-		self.assertEqual(mask_url('https://user:pass@host/x'), f'https://user:{SECRET_MASK}@host/x')
+		self.assertEqual(mask_url('redis://:pass@host:6379/0'), f'redis://{SECRET_MASK}@host:6379/0')
+		self.assertEqual(mask_url('https://user:pass@host/x'), f'https://{SECRET_MASK}@host/x')
+		self.assertEqual(mask_url('https://TOKEN:x-oauth-basic@github.com/x'), f'https://{SECRET_MASK}@github.com/x')
 		self.assertEqual(mask_url('https://tok@github.com/x'), f'https://{SECRET_MASK}@github.com/x')
 		self.assertEqual(mask_url('https://h/x?token=abc&page=1'), f'https://h/x?token={SECRET_MASK}&page=1')
 		self.assertEqual(mask_url('https://app.example.com/api'), 'https://app.example.com/api')
+
+	def test_nested_under_secret_key_masked(self):
+		data = {'tasks': {'overrides': {'probe': {'credentials': {'value': 'hunter2', 'list': ['a-secret'], 'n': 3}}}}}
+		masked = mask_secrets(data)['tasks']['overrides']['probe']['credentials']
+		self.assertEqual(masked, {'value': SECRET_MASK, 'list': [SECRET_MASK], 'n': 3})
 
 	def test_non_secret_fields_untouched(self):
 		data = {'addons': {'ai': {'max_tokens': 30000, 'default_model': 'm'}, 'gdrive': {'credentials_path': '/x.json'}}}

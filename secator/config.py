@@ -116,13 +116,9 @@ def mask_url(value):
 		return value
 	netloc = parts.netloc
 	if '@' in netloc:
-		userinfo, host = netloc.rsplit('@', 1)
-		if ':' in userinfo:
-			user, _ = userinfo.split(':', 1)
-			userinfo = f'{user}:{SECRET_MASK}'
-		else:
-			userinfo = SECRET_MASK
-		netloc = f'{userinfo}@{host}'
+		# Mask the whole userinfo: either component can carry the credential (e.g. `TOKEN:x-oauth-basic@`).
+		_, host = netloc.rsplit('@', 1)
+		netloc = f'{SECRET_MASK}@{host}'
 	query = parts.query
 	if query:
 		pairs = parse_qsl(query, keep_blank_values=True)
@@ -147,7 +143,7 @@ def _schema_secret_paths(model, prefix=()):
 	return paths
 
 
-def mask_secrets(data, path=()):
+def mask_secrets(data, path=(), sensitive=False):
 	"""Return a copy of config data with every secret value masked, for display only.
 
 	A value is masked when its field is marked as Secret in the schema or its key name looks like a
@@ -156,18 +152,18 @@ def mask_secrets(data, path=()):
 	Args:
 		data (Any): Config data (dict / list / scalar).
 		path (tuple): Dotted path of `data` within the config, e.g. ('addons', 'ai').
+		sensitive (bool): `data` sits under a secret key (e.g. `credentials: {...}`): mask all its strings.
 
 	Returns:
 		Any: Masked copy of `data`.
 	"""
+	sensitive = sensitive or bool(path and ('.'.join(path) in SECRET_PATHS or is_secret_key(path[-1])))
 	if isinstance(data, MutableMapping):
-		return {k: mask_secrets(v, path + tuple(str(k).split('.'))) for k, v in data.items()}
+		return {k: mask_secrets(v, path + tuple(str(k).split('.')), sensitive) for k, v in data.items()}
 	if isinstance(data, (list, tuple)):
-		return type(data)(mask_secrets(v, path) for v in data)
+		return type(data)(mask_secrets(v, path, sensitive) for v in data)
 	if isinstance(data, str) and data:
-		if path and ('.'.join(path) in SECRET_PATHS or is_secret_key(path[-1])):
-			return mask_secret(data)
-		return mask_url(data)
+		return mask_secret(data) if sensitive else mask_url(data)
 	return data
 
 
