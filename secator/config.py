@@ -157,7 +157,9 @@ def mask_secrets(data, path=(), sensitive=False):
 	Returns:
 		Any: Masked copy of `data`.
 	"""
-	sensitive = sensitive or bool(path and ('.'.join(path) in SECRET_PATHS or is_secret_key(path[-1])))
+	# Check every segment: a dotted key (`config get a.credentials.value`) arrives as one multi-segment step.
+	sensitive = sensitive or any(
+		is_secret_key(part) or '.'.join(path[:i + 1]) in SECRET_PATHS for i, part in enumerate(path))
 	if isinstance(data, MutableMapping):
 		return {k: mask_secrets(v, path + tuple(str(k).split('.')), sensitive) for k, v in data.items()}
 	if isinstance(data, (list, tuple)):

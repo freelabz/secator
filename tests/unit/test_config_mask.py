@@ -30,7 +30,7 @@ CONFIG_DATA = {
 	'cli': {'github_token': FAKE_GH_TOKEN},
 	'security': {'sudo_password': FAKE_SUDO},
 	'celery': {'broker_url': f'redis://:{FAKE_BROKER_PASS}@localhost:6379/0'},
-	'tasks': {'overrides': {'wpscan': {'api_token': FAKE_OVERRIDE_TOKEN}}},
+	'tasks': {'overrides': {'wpscan': {'api_token': FAKE_OVERRIDE_TOKEN}, 'probe': {'credentials': {'value': FAKE_SUDO}}}},
 	'addons': {
 		'ai': {'api_key': FAKE_AI_KEY, 'web_search': {'tavily_api_key': FAKE_TAVILY_KEY}},
 		'api': {'key': FAKE_API_KEY},
@@ -60,6 +60,9 @@ class TestMaskHelpers(unittest.TestCase):
 		data = {'tasks': {'overrides': {'probe': {'credentials': {'value': 'hunter2', 'list': ['a-secret'], 'n': 3}}}}}
 		masked = mask_secrets(data)['tasks']['overrides']['probe']['credentials']
 		self.assertEqual(masked, {'value': SECRET_MASK, 'list': [SECRET_MASK], 'n': 3})
+		# A dotted key path selecting a descendant of a secret key (as `config get a.credentials.value` does).
+		self.assertEqual(mask_secrets({'tasks.overrides.probe.credentials.value': 'hunter2'}),
+			{'tasks.overrides.probe.credentials.value': SECRET_MASK})
 
 	def test_non_secret_fields_untouched(self):
 		data = {'addons': {'ai': {'max_tokens': 30000, 'default_model': 'm'}, 'gdrive': {'credentials_path': '/x.json'}}}
@@ -107,7 +110,8 @@ class TestConfigMasking(unittest.TestCase):
 
 	def test_single_key_masks(self):
 		for key in ['addons.ai.api_key', 'addons.ai', 'addons', 'cli.github_token', 'addons.discord.webhook_url',
-				'celery.broker_url', 'addons.mongodb.url', 'tasks.overrides', 'security.sudo_password']:
+				'celery.broker_url', 'addons.mongodb.url', 'tasks.overrides', 'security.sudo_password',
+				'tasks.overrides.probe.credentials', 'tasks.overrides.probe.credentials.value']:
 			self.assertNoSecrets(self._capture(lambda: self.config.get(key)))
 			self.assertNoSecrets(self._run(key))
 
