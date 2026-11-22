@@ -1,3 +1,12 @@
+import random
+import re
+import string
+import warnings
+from collections import Counter
+
+import requests
+from urllib3.exceptions import InsecureRequestWarning
+
 from secator.decorators import task
 
 # fmt: off
@@ -11,6 +20,17 @@ from secator.output_types import Info, Progress, Subdomain, Url, Warning
 from secator.serializers import JSONSerializer, RegexSerializer
 from secator.tasks._categories import HttpFuzzer
 from secator.utils import extract_domain_info
+
+# Host-header (virtual host) fuzzing: number of random, valid DNS labels probed before the
+# run to fingerprint how the server answers a name that does not exist. A catch-all or
+# wildcard virtual host answers every name, sometimes with one of several pages (a pool
+# of backends, A/B or cache variants), which ffuf's own calibration does not capture.
+VHOST_BASELINE_PROBES = 8
+VHOST_BASELINE_TIMEOUT = 10
+# Warn when at least this many host-header hits came out and this share of them carry
+# the same response fingerprint: the server most likely answers any virtual host.
+VHOST_DOMINANT_MIN_HITS = 10
+VHOST_DOMINANT_RATIO = 0.8
 
 FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[\d/\d\] :: (?P<rps>\d+) req/sec :: Duration: \[(?P<duration>[\d:]+)\] :: Errors: (?P<errors>\d+) ::'  # noqa: E501
 
@@ -104,9 +124,11 @@ class ffuf(HttpFuzzer):
 	@staticmethod
 	def on_cmd_opts(self, opts):
 		# Fuzz host header
+		self.vhost_base = None
 		if self.get_opt_value('subs') and len(self.inputs) > 0 and not self.has_fuzz_keyword:
 			host = self.inputs[0].split('://')[1].split('/')[0]
 			opts['header']['value']['Host'] = f'FUZZ.{host}'
+			self.vhost_base = host
 			if self.get_opt_value('wordlist') == 'http':
 				self.add_result(Info(message='Changing wordlist to combined_subdomains as the default http wordlist is not suitable for fuzzing host header'))  # noqa: E501
 				opts['wordlist']['value'] = 'combined_subdomains'
@@ -114,21 +136,51 @@ class ffuf(HttpFuzzer):
 		return opts
 
 	@staticmethod
+	def on_start(self):
+		self.vhost_baseline = set()
+		self.vhost_fingerprints = Counter()
+		self.vhost_dropped = 0
+		if getattr(self, 'vhost_base', None):
+			self.vhost_baseline = probe_vhost_baseline(self, self.inputs[0], self.vhost_base)
+			if self.vhost_baseline:
+				fps = ', '.join(sorted(f'status {fp[1]} size {fp[2]}' for fp in self.vhost_baseline if fp[0] == 'size'))
+				self._print(Info(message=f'Virtual host baseline (random names): {fps}. Matching hits are dropped.'), rich=True)  # noqa: E501
+				# ffuf calibrates on two answers per strategy, so a server answering one of
+				# several pages defeats it, and its fallback filters (e.g. on line count) then
+				# hide real virtual hosts too. The baseline replaces it in this mode.
+				if re.search(r'\s-ac(?=\s|$)', self.cmd):
+					self.cmd = re.sub(r'\s-ac(?=\s|$)', '', self.cmd)
+					self._print(Info(message='Auto-calibration replaced by the virtual host baseline'), rich=True)
+
+	@staticmethod
 	def on_json_loaded(self, item):
 		if 'host' in item:
 			self.current_host = item['host']
 		headers = self.headers.copy()
-		if 'FUZZ' in headers.get('Host', ''):
+		host_header_mode = 'FUZZ' in headers.get('Host', '')
+		if host_header_mode:
 			headers['Host'] = self.current_host
 		content_length = item.get('length', 0)
 		status_code = item.get('status', 0)
+		if host_header_mode:
+			# Same answer as for a random, non-existent name: the server answers any
+			# virtual host, so this name proves nothing.
+			if matches_vhost_baseline(getattr(self, 'vhost_baseline', ()), status_code, content_length, item.get('words'), item.get('lines')):  # noqa: E501
+				self.vhost_dropped += 1
+				return
+			fingerprints = getattr(self, 'vhost_fingerprints', None)
+			if fingerprints is not None:
+				fingerprints[(status_code, content_length, item.get('words'), item.get('lines'))] += 1
 		has_status_code_3xx = str(status_code).startswith('3')
-		is_redirect = (self.get_opt_value('follow_redirect') and 'redirectlocation' in item) or has_status_code_3xx
+		# ffuf always sets `redirectlocation` (empty when there is none).
+		is_redirect = bool(item.get('redirectlocation')) or has_status_code_3xx
 		auto_calibration = self.get_opt_value('auto_calibration')
 		yield Url(
 			url=item['url'],
 			host=item['host'],
-			verified=auto_calibration,
+			# A host-header hit is a response from the base URL with another Host: it does
+			# not show that the name resolves or serves anything of its own.
+			verified=bool(auto_calibration) and not host_header_mode,
 			status_code=status_code,
 			content_length=content_length,
 			content_type=item['content-type'],
@@ -136,7 +188,8 @@ class ffuf(HttpFuzzer):
 			time=item['duration'] * 10**-9,
 			method=self.get_opt_value(METHOD) or 'GET',
 			request_headers=headers,
-			confidence='high' if self.get_opt_value('auto_calibration') else 'medium',
+			# 'high' marks a Url verified (see Url.__post_init__): not for host-header hits.
+			confidence='high' if auto_calibration and not host_header_mode else 'medium',
 			tags=['fuzz'],
 		)
 		has_body = content_length != 0
@@ -155,8 +208,83 @@ class ffuf(HttpFuzzer):
 			)
 
 	@staticmethod
+	def on_cmd_done(self):
+		if getattr(self, 'vhost_dropped', 0):
+			yield Info(message=f'Dropped {self.vhost_dropped} host-header hits matching the random-name baseline')
+		warning = dominant_fingerprint_warning(getattr(self, 'vhost_fingerprints', None) or Counter())
+		if warning:
+			yield Warning(message=warning)
+
+	@staticmethod
 	def on_line(self, line):
 		if line.startswith('[ERR]'):
 			message = line.split('[ERR]')[1].strip()
 			yield Warning(message=message)
+		# stderr progress and stdout results share the output stream, so a result often
+		# arrives glued after a progress update on the same line, and the strict JSON
+		# loader would drop it. Split them.
+		start = line.find('{"input"')
+		if start > 0:
+			yield line[:start]
+			line = line[start:]
 		yield line
+
+
+def random_dns_label(length=12):
+	"""A random, valid DNS label (lowercase letters and digits, starting with a letter)."""
+	return random.choice(string.ascii_lowercase) + ''.join(
+		random.choices(string.ascii_lowercase + string.digits, k=length - 1))
+
+
+def response_fingerprints(status, body):
+	"""Fingerprints of an answer, counted the way ffuf counts them: ``('size', status, bytes)``
+	and ``('shape', status, words, lines)`` (words split on spaces, lines on newlines). The shape
+	still matches a catch-all page that echoes the requested name (its size varies with it)."""
+	text = body.decode('utf-8', errors='replace') if isinstance(body, bytes) else body
+	size = len(body.encode() if isinstance(body, str) else body)
+	return {('size', status, size), ('shape', status, len(text.split(' ')), len(text.split('\n')))}
+
+
+def matches_vhost_baseline(baseline, status, size, words, lines):
+	"""True if a hit answers like one of the random, non-existent names did."""
+	return ('size', status, size) in baseline or ('shape', status, words, lines) in baseline
+
+
+def probe_vhost_baseline(self, url, base, probes=VHOST_BASELINE_PROBES):
+	"""Request ``url`` with ``probes`` random, non-existent ``Host: <label>.<base>`` names and
+	return their fingerprints (see response_fingerprints). Uses the task's headers, proxy, timeout
+	and redirect settings. Returns an empty set (no filtering) when no probe gets an answer."""
+	headers = {k: v for k, v in (self.headers or {}).items() if k.lower() != 'host'}
+	proxy = self.get_opt_value(PROXY)
+	proxies = {'http': proxy, 'https': proxy} if proxy and '://' in str(proxy) else None
+	timeout = self.get_opt_value(TIMEOUT) or VHOST_BASELINE_TIMEOUT
+	follow = bool(self.get_opt_value(FOLLOW_REDIRECT))
+	method = self.get_opt_value(METHOD) or 'GET'
+	url = url.replace('FUZZ', '')
+	baseline = set()
+	# A plain session, no retries: a catch-all answering 5xx is an answer to record.
+	with requests.Session() as session, warnings.catch_warnings():
+		warnings.simplefilter('ignore', InsecureRequestWarning)
+		for _ in range(probes):
+			try:
+				resp = session.request(
+					method, url, headers={**headers, 'Host': f'{random_dns_label()}.{base}'},
+					allow_redirects=follow, timeout=float(timeout), proxies=proxies, verify=False)
+			except Exception:  # unreachable / reset: keep going, an empty baseline filters nothing
+				continue
+			baseline |= response_fingerprints(resp.status_code, resp.content)
+	return baseline
+
+
+def dominant_fingerprint_warning(fingerprints, min_hits=VHOST_DOMINANT_MIN_HITS, ratio=VHOST_DOMINANT_RATIO):
+	"""Warning text when most host-header hits share one response fingerprint, else None."""
+	total = sum(fingerprints.values())
+	if total < min_hits:
+		return None
+	(status, size, words, lines), count = fingerprints.most_common(1)[0]
+	if count < ratio * total:
+		return None
+	return (
+		f'{count} of {total} host-header hits share one response (status {status}, size {size}, '
+		f'{words} words, {lines} lines): the server likely answers any virtual host (catch-all), '
+		'so these subdomains are probably false positives')
