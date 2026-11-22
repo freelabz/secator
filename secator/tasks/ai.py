@@ -1564,7 +1564,9 @@ class ai(PythonRunner):
 			try:
 				selection_prompt = load_prompt("modes/_selection.md")
 				# The intent model is a model call like any other: send the prompt encrypted.
-				prompt = maybe_encrypt(self.prompt, self.encryptor)
+				# getattr: a missing encryptor must not raise here (the except below would
+				# silently turn intent detection into "chat").
+				prompt = maybe_encrypt(self.prompt, getattr(self, "encryptor", None))
 				messages = [{"role": "user", "content": f"{selection_prompt}\n{prompt}"}]
 				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
 					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
