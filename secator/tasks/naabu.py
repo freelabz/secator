@@ -4,11 +4,12 @@ from secator.definitions import (DELAY, HOST, IP, OPT_NOT_SUPPORTED, PORTS,
 								 TIMEOUT, TOP_PORTS)
 from secator.output_types import Port, Ip
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import ReconPort
+from secator.tasks._categories import ReconPortMixin
+from secator.runners import Command
 
 
 @task()
-class naabu(ReconPort):
+class naabu(Command, ReconPortMixin):
 	"""Port scanning tool written in Go."""
 	cmd = 'naabu'
 	input_types = [HOST, IP]
