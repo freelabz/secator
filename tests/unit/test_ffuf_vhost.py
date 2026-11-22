@@ -13,9 +13,12 @@ from types import SimpleNamespace
 
 from secator.output_types import Subdomain, Url
 from secator.tasks import ffuf as ffuf_task
+from unittest import mock
+
+from secator.output_types import Warning
 from secator.tasks.ffuf import (
-	dominant_fingerprint_warning, matches_vhost_baseline, probe_vhost_baseline, random_dns_label,
-	response_fingerprints)
+	baseline_fingerprints, dominant_fingerprint_warning, matches_vhost_baseline, probe_vhost_baseline,
+	random_dns_label, response_shape)
 
 ffuf_module = sys.modules['secator.tasks.ffuf']
 
@@ -72,23 +75,26 @@ def _hit(host, status=200, length=10, words=2, lines=1, redirect=''):
 class TestFingerprints(unittest.TestCase):
 
 	def test_counts_like_ffuf(self):
-		self.assertEqual(
-			response_fingerprints(200, PAGE_B),
-			{('size', 200, len(PAGE_B)), ('shape', 200, len(PAGE_B.split(b' ')), 5)})
+		self.assertEqual(response_shape(200, PAGE_B), (200, len(PAGE_B), len(PAGE_B.split(b' ')), 5))
 
-	def test_matches_size_or_shape(self):
-		baseline = response_fingerprints(200, PAGE_A)
-		self.assertTrue(matches_vhost_baseline(baseline, 200, len(PAGE_A), 0, 0))
-		# Same shape, other size (a page echoing the requested name).
+	def test_size_fingerprints_and_shape_only_for_echoing_pages(self):
+		baseline = baseline_fingerprints([response_shape(200, PAGE_A), response_shape(200, PAGE_A)])
+		self.assertEqual(baseline, {('size', 200, len(PAGE_A))})
 		words = len(PAGE_A.split(b' '))
-		self.assertTrue(matches_vhost_baseline(baseline, 200, len(PAGE_A) + 7, words, 1))
+		self.assertTrue(matches_vhost_baseline(baseline, 200, len(PAGE_A), 0, 0))
+		# Same words/lines, other size: a real one-line page must not be dropped.
+		self.assertFalse(matches_vhost_baseline(baseline, 200, len(PAGE_A) + 7, words, 1))
 		self.assertFalse(matches_vhost_baseline(baseline, 404, len(PAGE_A), words, 1))
-		self.assertFalse(matches_vhost_baseline(baseline, 200, 3, 9, 9))
+
+	def test_echoing_catch_all_adds_the_shape(self):
+		shapes = [response_shape(200, f'<p>Welcome to {name}.example.test</p>') for name in ('abcdefgh', 'abcdefghijklmn')]
+		baseline = baseline_fingerprints(shapes)
+		echo = response_shape(200, '<p>Welcome to www.example.test</p>')
+		self.assertTrue(matches_vhost_baseline(baseline, *echo))
 
 	def test_random_label_is_a_valid_dns_label(self):
-		for _ in range(50):
-			label = random_dns_label()
-			self.assertRegex(label, r'^[a-z][a-z0-9]{11}$')
+		for length in (8, 12, 16):
+			self.assertRegex(random_dns_label(length), rf'^[a-z][a-z0-9]{{{length - 1}}}$')
 
 
 class TestBaselineProbe(unittest.TestCase):
@@ -125,7 +131,7 @@ class TestOnJsonLoaded(unittest.TestCase):
 		return list(ffuf_task.on_json_loaded(task, item))
 
 	def test_drops_hits_answering_like_a_random_name(self):
-		task = _fake_task(baseline=response_fingerprints(200, PAGE_A))
+		task = _fake_task(baseline=baseline_fingerprints([response_shape(200, PAGE_A)]))
 		self.assertEqual(self._run(task, _hit('x.example.test', length=len(PAGE_A), words=5)), [])
 		self.assertEqual(task.vhost_dropped, 1)
 
@@ -158,31 +164,54 @@ class TestOnJsonLoaded(unittest.TestCase):
 
 class TestOnStart(unittest.TestCase):
 
-	def _task(self, cmd):
-		return SimpleNamespace(
-			cmd=cmd, inputs=['http://example.test'], vhost_base='example.test', _print=lambda *a, **k: None)
+	def _task(self, cmd, proxy=None, resolved_proxy=None, errors=0, children=False):
+		task = SimpleNamespace(
+			cmd=cmd, cmd_redacted=None, inputs=['http://example.test'], vhost_base='example.test',
+			proxy=proxy, errors_count=errors, has_children=children, results=[],
+			get_opt_value=_opts(proxy=resolved_proxy), _print=lambda *a, **k: None)
+		task.add_result = task.results.append
+		return task
+
+	def _start(self, task, baseline):
+		with mock.patch.object(ffuf_module, 'probe_vhost_baseline', return_value=baseline) as probe:
+			ffuf_task.on_start(task)
+		return probe
 
 	def test_baseline_replaces_auto_calibration(self):
-		task = self._task('ffuf -noninteractive -u http://example.test -json -ac -H Host:FUZZ.example.test -acx')
-		original = ffuf_module.probe_vhost_baseline
-		ffuf_module.probe_vhost_baseline = lambda *a, **k: {('size', 200, 10)}
-		try:
-			ffuf_task.on_start(task)
-		finally:
-			ffuf_module.probe_vhost_baseline = original
+		task = self._task('ffuf -noninteractive -u http://example.test -json -ac -H Host:FUZZ.example.test -acc foo')
+		self._start(task, {('size', 200, 10)})
 		self.assertEqual(task.vhost_baseline, {('size', 200, 10)})
 		self.assertNotIn(' -ac ', task.cmd + ' ')
-		self.assertIn('-acx', task.cmd)
+		self.assertIn('-acc foo', task.cmd)
 
-	def test_empty_baseline_keeps_auto_calibration(self):
+	def test_empty_baseline_keeps_auto_calibration_and_warns(self):
 		task = self._task('ffuf -u http://example.test -ac')
-		original = ffuf_module.probe_vhost_baseline
-		ffuf_module.probe_vhost_baseline = lambda *a, **k: set()
-		try:
-			ffuf_task.on_start(task)
-		finally:
-			ffuf_module.probe_vhost_baseline = original
+		self._start(task, set())
 		self.assertTrue(task.cmd.endswith(' -ac'))
+		self.assertTrue(any(isinstance(r, Warning) for r in task.results))
+
+	def test_no_probe_when_the_run_is_refused(self):
+		"""A requested proxy that did not resolve refuses the run: nothing may go direct."""
+		task = self._task('ffuf -u http://example.test -ac', proxy='socks5', resolved_proxy=False, errors=1)
+		probe = self._start(task, {('size', 200, 10)})
+		probe.assert_not_called()
+		self.assertTrue(task.cmd.endswith(' -ac'))
+
+	def test_unusable_proxy_skips_the_probe_with_a_warning(self):
+		task = self._task('ffuf -u http://example.test -ac', proxy='proxychains', resolved_proxy='proxychains')
+		probe = self._start(task, {('size', 200, 10)})
+		probe.assert_not_called()
+		self.assertIn('skipped', task.results[0].message)
+
+	def test_parent_of_chunked_run_does_not_probe(self):
+		task = self._task('ffuf -u http://example.test -ac', children=True)
+		self._start(task, {('size', 200, 10)}).assert_not_called()
+
+	def test_http_proxy_is_used_by_the_probe(self):
+		task = self._task('ffuf -u http://example.test -ac', proxy='http', resolved_proxy='http://127.0.0.1:8080')
+		probe = self._start(task, {('size', 200, 10)})
+		proxy = 'http://127.0.0.1:8080'
+		self.assertEqual(probe.call_args.kwargs['proxies'], {'http': proxy, 'https': proxy})
 
 
 class TestOutputHandling(unittest.TestCase):

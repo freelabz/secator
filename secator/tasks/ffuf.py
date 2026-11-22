@@ -32,6 +32,9 @@ VHOST_BASELINE_TIMEOUT = 10
 VHOST_DOMINANT_MIN_HITS = 10
 VHOST_DOMINANT_RATIO = 0.8
 
+# The bare auto-calibration flag (not -acc / -ach / -acs).
+AC_FLAG_REGEX = re.compile(r'\s-ac(?=\s|$)')
+
 FFUF_PROGRESS_REGEX = r':: Progress: \[(?P<count>\d+)/(?P<total>\d+)\] :: Job \[\d/\d\] :: (?P<rps>\d+) req/sec :: Duration: \[(?P<duration>[\d:]+)\] :: Errors: (?P<errors>\d+) ::'  # noqa: E501
 
 
@@ -140,17 +143,28 @@ class ffuf(HttpFuzzer):
 		self.vhost_baseline = set()
 		self.vhost_fingerprints = Counter()
 		self.vhost_dropped = 0
-		if getattr(self, 'vhost_base', None):
-			self.vhost_baseline = probe_vhost_baseline(self, self.inputs[0], self.vhost_base)
-			if self.vhost_baseline:
-				fps = ', '.join(sorted(f'status {fp[1]} size {fp[2]}' for fp in self.vhost_baseline if fp[0] == 'size'))
-				self._print(Info(message=f'Virtual host baseline (random names): {fps}. Matching hits are dropped.'), rich=True)  # noqa: E501
-				# ffuf calibrates on two answers per strategy, so a server answering one of
-				# several pages defeats it, and its fallback filters (e.g. on line count) then
-				# hide real virtual hosts too. The baseline replaces it in this mode.
-				if re.search(r'\s-ac(?=\s|$)', self.cmd):
-					self.cmd = re.sub(r'\s-ac(?=\s|$)', '', self.cmd)
-					self._print(Info(message='Auto-calibration replaced by the virtual host baseline'), rich=True)
+		# Only the process that runs ffuf probes (not the parent of chunked runs), and never
+		# when the run is already refused (e.g. a requested proxy that did not resolve).
+		if not getattr(self, 'vhost_base', None) or self.has_children or self.errors_count:
+			return
+		proxies, skip_reason = vhost_probe_proxies(self)
+		if skip_reason:
+			self.add_result(Warning(message=f'Virtual host baseline skipped ({skip_reason}): catch-all hosts are only filtered by auto-calibration'))  # noqa: E501
+			return
+		self.vhost_baseline = probe_vhost_baseline(self, self.inputs[0], self.vhost_base, proxies=proxies)
+		if not self.vhost_baseline:
+			self.add_result(Warning(message='Virtual host baseline got no answer: catch-all hosts are only filtered by auto-calibration'))  # noqa: E501
+			return
+		fps = ', '.join(sorted(f'status {fp[1]} size {fp[2]}' for fp in self.vhost_baseline if fp[0] == 'size'))
+		self._print(Info(message=f'Virtual host baseline (random names): {fps}. Matching hits are dropped.'), rich=True)
+		# ffuf calibrates on two answers per strategy, so a server answering one of several
+		# pages defeats it, and its fallback filters (e.g. on line count) then hide real
+		# virtual hosts too. The baseline replaces it in this mode.
+		if AC_FLAG_REGEX.search(self.cmd):
+			self.cmd = AC_FLAG_REGEX.sub('', self.cmd)
+			if self.cmd_redacted:
+				self.cmd_redacted = AC_FLAG_REGEX.sub('', self.cmd_redacted)
+			self._print(Info(message='Auto-calibration replaced by the virtual host baseline'), rich=True)
 
 	@staticmethod
 	def on_json_loaded(self, item):
@@ -236,13 +250,26 @@ def random_dns_label(length=12):
 		random.choices(string.ascii_lowercase + string.digits, k=length - 1))
 
 
-def response_fingerprints(status, body):
-	"""Fingerprints of an answer, counted the way ffuf counts them: ``('size', status, bytes)``
-	and ``('shape', status, words, lines)`` (words split on spaces, lines on newlines). The shape
-	still matches a catch-all page that echoes the requested name (its size varies with it)."""
-	text = body.decode('utf-8', errors='replace') if isinstance(body, bytes) else body
-	size = len(body.encode() if isinstance(body, str) else body)
-	return {('size', status, size), ('shape', status, len(text.split(' ')), len(text.split('\n')))}
+def response_shape(status, body):
+	"""``(status, size, words, lines)`` of an answer, counted the way ffuf counts them (bytes;
+	words split on spaces; lines split on newlines)."""
+	body = body.encode() if isinstance(body, str) else (body or b'')
+	return status, len(body), len(body.split(b' ')), len(body.split(b'\n'))
+
+
+def baseline_fingerprints(shapes):
+	"""Fingerprints of the probe answers: ``('size', status, size)`` for each, plus
+	``('shape', status, words, lines)`` only for a shape the probes answered with several
+	sizes, i.e. a catch-all page echoing the requested name (probe labels vary in length).
+	A shape alone (e.g. one-line minified pages) is too loose to drop hits on otherwise."""
+	fingerprints = {('size', status, size) for status, size, _, _ in shapes}
+	sizes_by_shape = {}
+	for status, size, words, lines in shapes:
+		sizes_by_shape.setdefault((status, words, lines), set()).add(size)
+	for (status, words, lines), sizes in sizes_by_shape.items():
+		if len(sizes) > 1:
+			fingerprints.add(('shape', status, words, lines))
+	return fingerprints
 
 
 def matches_vhost_baseline(baseline, status, size, words, lines):
@@ -250,30 +277,55 @@ def matches_vhost_baseline(baseline, status, size, words, lines):
 	return ('size', status, size) in baseline or ('shape', status, words, lines) in baseline
 
 
-def probe_vhost_baseline(self, url, base, probes=VHOST_BASELINE_PROBES):
-	"""Request ``url`` with ``probes`` random, non-existent ``Host: <label>.<base>`` names and
-	return their fingerprints (see response_fingerprints). Uses the task's headers, proxy, timeout
-	and redirect settings. Returns an empty set (no filtering) when no probe gets an answer."""
-	headers = {k: v for k, v in (self.headers or {}).items() if k.lower() != 'host'}
+def vhost_probe_proxies(self):
+	"""``(proxies, skip_reason)`` for the baseline probes: they must take the same route as
+	ffuf, so a requested proxy that did not resolve to a URL usable here skips them."""
+	requested = getattr(self, 'proxy', None)
+	if not requested:
+		return None, None
 	proxy = self.get_opt_value(PROXY)
-	proxies = {'http': proxy, 'https': proxy} if proxy and '://' in str(proxy) else None
-	timeout = self.get_opt_value(TIMEOUT) or VHOST_BASELINE_TIMEOUT
+	if not proxy or '://' not in str(proxy):
+		return None, f'proxy "{requested}" not usable for the probes'
+	if str(proxy).startswith('socks'):
+		try:
+			import socks  # noqa: F401  (PySocks, needed by requests for SOCKS)
+		except ImportError:
+			return None, 'SOCKS proxy needs the PySocks package'
+	return {'http': proxy, 'https': proxy}, None
+
+
+def probe_vhost_baseline(self, url, base, probes=VHOST_BASELINE_PROBES, proxies=None):
+	"""Request ``url`` with ``probes`` random, non-existent ``Host: <label>.<base>`` names and
+	return their fingerprints (see baseline_fingerprints). Mirrors ffuf's request: headers (its
+	default User-Agent when none is set), method and body, gzip only, timeout and redirects.
+	Stops at the first connection failure; returns an empty set when no probe got an answer."""
+	headers = {k: v for k, v in (self.headers or {}).items() if k.lower() != 'host'}
+	header_names = {k.lower() for k in headers}
+	if 'user-agent' not in header_names:
+		headers['User-Agent'] = f'Fuzz Faster U Fool {ffuf.install_version}'
+	if 'accept-encoding' not in header_names:
+		headers['Accept-Encoding'] = 'gzip'  # what Go's client sends
+	data = self.get_opt_value(DATA) or None
+	method = self.get_opt_value(METHOD) or ('POST' if data else 'GET')
+	timeout = float(self.get_opt_value(TIMEOUT) or VHOST_BASELINE_TIMEOUT)
 	follow = bool(self.get_opt_value(FOLLOW_REDIRECT))
-	method = self.get_opt_value(METHOD) or 'GET'
 	url = url.replace('FUZZ', '')
-	baseline = set()
+	shapes = []
 	# A plain session, no retries: a catch-all answering 5xx is an answer to record.
 	with requests.Session() as session, warnings.catch_warnings():
 		warnings.simplefilter('ignore', InsecureRequestWarning)
 		for _ in range(probes):
+			label = random_dns_label(random.randint(8, 16))
 			try:
 				resp = session.request(
-					method, url, headers={**headers, 'Host': f'{random_dns_label()}.{base}'},
-					allow_redirects=follow, timeout=float(timeout), proxies=proxies, verify=False)
-			except Exception:  # unreachable / reset: keep going, an empty baseline filters nothing
+					method, url, headers={**headers, 'Host': f'{label}.{base}'}, data=data,
+					allow_redirects=follow, timeout=timeout, proxies=proxies, verify=False)
+			except (requests.ConnectionError, requests.Timeout):
+				break  # unreachable: do not wait out every probe
+			except requests.RequestException:
 				continue
-			baseline |= response_fingerprints(resp.status_code, resp.content)
-	return baseline
+			shapes.append(response_shape(resp.status_code, resp.content))
+	return baseline_fingerprints(shapes)
 
 
 def dominant_fingerprint_warning(fingerprints, min_hits=VHOST_DOMINANT_MIN_HITS, ratio=VHOST_DOMINANT_RATIO):
