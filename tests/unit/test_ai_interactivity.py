@@ -236,16 +236,31 @@ class TestRemoteBackend(unittest.TestCase):
 									 prompt_type="permission", prompt_uuid="u1")
 		mock_engine.update.reset_mock()  # build_pending_prompt expires superseded prompts
 		self.assertEqual(backend.close_raised_prompts("s1"), 2)
-		query, update = mock_engine.update.call_args[0]
-		self.assertEqual(query, {
-			"_type": "ai", "_context.session_id": "s1", "status": "pending",
-			"extra_data.prompt_uuid": {"$in": ["u1", "u2"]},
-		})
-		self.assertEqual(update, {"$set": {"status": "expired"}})
+		# One update per prompt (a driver may update only one doc per call).
+		calls = [c[0] for c in mock_engine.update.call_args_list]
+		self.assertEqual([q["extra_data.prompt_uuid"] for q, _ in calls], ["u1", "u2"])
+		for query, update in calls:
+			self.assertEqual(query["status"], "pending")
+			self.assertEqual(query["_context.session_id"], "s1")
+			self.assertEqual(update, {"$set": {"status": "expired"}})
 		# Idempotent: nothing left to close.
 		mock_engine.update.reset_mock()
 		self.assertEqual(backend.close_raised_prompts("s1"), 0)
 		mock_engine.update.assert_not_called()
+
+	@patch('secator.ai.interactivity.sleep')
+	def test_prompt_persisted_elsewhere_is_closed_after_timeout(self, mock_sleep):
+		"""A prompt whose doc was persisted by the caller (a `stop` with choices) is
+		still recorded by ask_user, so run end closes it after the answer timeout."""
+		from secator.ai.interactivity import RemoteBackend, UserInputTimeout
+		mock_engine = MagicMock()
+		mock_engine.search.return_value = []
+		backend = RemoteBackend(timeout=5, query_engine=mock_engine, poll_interval=5)
+		with self.assertRaises(UserInputTimeout):
+			backend.ask_user("Pick one", ["a", "b"], "s1", prompt_uuid="stop-uuid")
+		self.assertEqual(backend.close_raised_prompts("s1"), 1)
+		query, _ = mock_engine.update.call_args[0]
+		self.assertEqual(query["extra_data.prompt_uuid"], "stop-uuid")
 
 	def test_close_raised_prompts_is_best_effort(self):
 		"""No engine, no prompts or a backend error never raises."""

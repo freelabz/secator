@@ -216,6 +216,10 @@ class RemoteBackend(InteractivityBackend):
 		)
 
 	def ask_user(self, question, choices, session_id, prompt_type="stopped", **context):
+		# Record the prompt as this run's own even when its pending doc was persisted
+		# elsewhere (the `stop` tool persists its own doc), so run end can close it.
+		if context.get("prompt_uuid"):
+			self._raised_prompt_uuids.add(context["prompt_uuid"])
 		answer = self._poll_for_answer(session_id, prompt_type, prompt_uuid=context.get("prompt_uuid"))
 		if answer is None:
 			return None
@@ -366,21 +370,25 @@ class RemoteBackend(InteractivityBackend):
 		"""
 		if self.query_engine is None or not self._raised_prompt_uuids:
 			return 0
-		uuids = sorted(self._raised_prompt_uuids)
-		try:
-			self.query_engine.update(
-				{
-					"_type": "ai",
-					"_context.session_id": session_id,
-					"status": "pending",
-					"extra_data.prompt_uuid": {"$in": uuids},
-				},
-				{"$set": {"status": "expired"}},
-			)
-		except Exception:  # noqa: BLE001 - closing prompts must never fail the run
-			return 0
-		self._raised_prompt_uuids.clear()
-		return len(uuids)
+		closed = 0
+		# One update per prompt: some drivers update a single matching doc per call,
+		# so an `$in` over several prompt_uuids would close only one of them.
+		for prompt_uuid in sorted(self._raised_prompt_uuids):
+			try:
+				self.query_engine.update(
+					{
+						"_type": "ai",
+						"_context.session_id": session_id,
+						"status": "pending",
+						"extra_data.prompt_uuid": prompt_uuid,
+					},
+					{"$set": {"status": "expired"}},
+				)
+			except Exception:  # noqa: BLE001 - closing prompts must never fail the run
+				continue
+			self._raised_prompt_uuids.discard(prompt_uuid)
+			closed += 1
+		return closed
 
 	def _resolve_answer(self, answered_query):
 		"""Return the newest answered doc's answer, or None if none answered.
