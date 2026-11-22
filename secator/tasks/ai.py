@@ -1051,6 +1051,14 @@ class ai(PythonRunner):
 						"context_window": get_context_window(self.model),
 					})
 
+				# Persist the placeholder map BEFORE the call: the prompt (and any steer or
+				# answer drained above) was encrypted into it, and the call can take minutes.
+				# Persisting only after the turn's tool dispatch left the stored map empty
+				# while the first call ran, so a reader of the session's map saw "nothing
+				# encrypted" even though the model only received placeholders. No-op unless
+				# the map grew.
+				self._persist_pii_map()
+
 				# Call LLM
 				messages = self.history.to_messages(max_tokens_total=self.max_tokens_total)
 				by_role = self.history.count_tokens_by_role(self.model)
@@ -1555,7 +1563,9 @@ class ai(PythonRunner):
 		else:
 			try:
 				selection_prompt = load_prompt("modes/_selection.md")
-				messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
+				# The intent model is a model call like any other: send the prompt encrypted.
+				prompt = maybe_encrypt(self.prompt, self.encryptor)
+				messages = [{"role": "user", "content": f"{selection_prompt}\n{prompt}"}]
 				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
 					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
 				self._account_usage(result.get("usage"))
