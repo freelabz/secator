@@ -14,6 +14,9 @@ from secator.tasks._categories import Vuln
 # search_vulns match reason for a CVE whose only link to the query is the general product.
 UNCERTAIN_MATCH = 'general_product_uncertain'
 
+# Extension of the SQLite databases search_vulns bundles in its `resources/` dir.
+DB_EXT = 'db3'
+
 
 @task()
 class search_vulns(Vuln):
@@ -57,7 +60,20 @@ class search_vulns(Vuln):
 	# which raises AttributeError when GitHub returns no Location header (e.g. it rate-
 	# limits CI runners). Keep the refresh best-effort so that flaky external check can't
 	# fail the whole tool install.
-	install_post = {'*': 'search_vulns -u || true'}
+	#
+	# Then drop the write bit on the bundled SQLite databases (~1.1 GB). search_vulns opens
+	# them with a plain read-write `sqlite3.connect()`, and on a copy-on-write root
+	# filesystem (overlayfs container layer) opening a lower-layer file for writing copies
+	# the WHOLE file into the writable layer, even though the query only reads. A container
+	# with a small ephemeral-storage limit gets ~1.1 GB of copy-up on the first query. With
+	# no write permission, SQLite falls back to a read-only open: no copy-up, same results.
+	# Runs in the install step, so it lands in the same image layer as the databases.
+	# The venv is found from the installed entrypoint, so a custom PIPX_HOME also works.
+	install_post = {'*': (
+		'search_vulns -u || true; '
+		'find "$(dirname "$(readlink -f "$(command -v search_vulns)")")/.." '
+		f"-path '*/search_vulns/resources/*.{DB_EXT}' -exec chmod a-w {{}} +"
+	)}
 	github_handle = 'ra1nb0rn/search_vulns'
 	install_github_bin = False
 	proxychains = False
