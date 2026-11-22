@@ -513,6 +513,7 @@ class ai(PythonRunner):
 			try:
 				yield from self._run_loop()
 			finally:
+				self._close_raised_prompts()  # the run is over: nothing waits on its prompts
 				self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 			return
 
@@ -550,6 +551,7 @@ class ai(PythonRunner):
 		try:
 			yield from self._run_loop()
 		finally:
+			self._close_raised_prompts()  # the run is over: nothing waits on its prompts
 			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 
@@ -834,6 +836,7 @@ class ai(PythonRunner):
 		try:
 			yield from self._run_loop()
 		finally:
+			self._close_raised_prompts()  # the run is over: nothing waits on its prompts
 			self._teardown_isolation()  # always reap the sandbox container, even on error/revoke
 		self._mark_turn_completed()  # record this turn as done so a redelivery won't replay it
 		return True
@@ -1302,12 +1305,12 @@ class ai(PythonRunner):
 				self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
 
 			except UserInputTimeout as e:
-				# A remote prompt went unanswered past the timeout. The pending doc
-				# is LEFT pending (not denied) — exit the worker cleanly to save infra
-				# $. Emit the notice to the console/pod-logs ONLY (not a persisted
-				# Warning), so it does NOT surface in the chat: the still-pending
-				# prompt is the user-facing state, and answering it later respawns
-				# the task to continue.
+				# A remote prompt went unanswered past the timeout. It is NOT denied:
+				# exit the worker cleanly to save infra $ (the prompt is closed as
+				# `expired` on the way out, see _close_raised_prompts). Emit the notice
+				# to the console/pod-logs ONLY (not a persisted Warning), so it does
+				# NOT surface in the chat; the user's next message respawns the task
+				# to continue.
 				console.print(Warning(message=str(e)))
 				return
 
@@ -1343,6 +1346,26 @@ class ai(PythonRunner):
 
 		self._save_history()
 		yield Info(message=f"Reached max iterations ({iteration}/{self.max_iterations})")
+
+	def _close_raised_prompts(self):
+		"""Close the prompts this run raised that are still unanswered (best-effort).
+
+		Runs when the loop exits for any reason (answer timeout, stop, failure,
+		iteration cap). A finished run cannot act on an answer, so leaving its
+		prompts ``pending`` would show the session as waiting for the user forever.
+		The next user message in the session starts a new run, which restores the
+		conversation.
+		"""
+		backend = getattr(self, "backend", None)
+		if backend is None:
+			return
+		try:
+			closed = backend.close_raised_prompts(self.session_id)
+		except Exception as e:  # noqa: BLE001 - must never fail the run
+			self.debug(f'close prompts failed: {e}', sub='llm')
+			return
+		if closed:
+			self.debug(f'closed {closed} unanswered prompt(s)', sub='llm')
 
 	def _teardown_isolation(self):
 		"""Remove this run's --isolated sandbox container at turn end (best-effort, idempotent).

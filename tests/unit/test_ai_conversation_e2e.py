@@ -320,6 +320,37 @@ class TestConversationE2E(unittest.TestCase):
 		# (30 << default ceiling 200).
 		self.assertEqual(served, answers)
 
+	# Scenario 7: a run that ends with its end-of-turn pause unanswered (the answer
+	# timeout) closes that prompt: it must not stay `pending` once nothing waits on it.
+	def test_run_end_expires_its_unanswered_prompt(self):
+		e = ChannelEngine(answers=[])
+		e.docs = [
+			{"_type": "ai", "ai_type": "prompt", "content": "scan the target", "_timestamp": 1, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "response", "content": "done", "_timestamp": 2, "_context": _ctx()},
+		]
+		t = _make_task(e, content_only_llm(), seed_user=None, run_prompt="now check SSH")
+		_drive(t, "_maybe_resume_remote")
+		stopped = [d for d in e.docs if d.get("ai_type") == "stopped"]
+		self.assertEqual(len(stopped), 1)
+		self.assertEqual(stopped[0]["status"], "expired")
+		self.assertEqual([d for d in e.docs if d.get("status") == "pending"], [])
+
+	# Scenario 7b: closing is scoped to the run's own prompts — an older run's prompt of
+	# the same session, and an answered one, are left as they are.
+	def test_run_end_leaves_other_prompts_alone(self):
+		e = ChannelEngine(answers=["go on"])
+		e.docs = [
+			{"_type": "ai", "ai_type": "prompt", "content": "scan the target", "_timestamp": 1, "_context": _ctx()},
+			{"_type": "ai", "ai_type": "permission", "content": "allow nmap?", "status": "pending",
+			 "_timestamp": 2, "extra_data": {"prompt_uuid": "other-run"}, "_context": _ctx()},
+		]
+		t = _make_task(e, content_only_llm(), seed_user="scan the target")
+		_drive(t, "_run_loop")
+		t._close_raised_prompts()
+		by_uuid = {_get(d, "extra_data.prompt_uuid"): d["status"] for d in e.docs if d.get("status")}
+		self.assertEqual(by_uuid.pop("other-run"), "pending")
+		self.assertEqual(sorted(by_uuid.values()), ["answered", "expired"])
+
 
 if __name__ == "__main__":
 	unittest.main()

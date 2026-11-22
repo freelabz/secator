@@ -179,13 +179,13 @@ class TestRemoteBackend(unittest.TestCase):
 		backend = RemoteBackend(timeout=10, query_engine=mock_engine, poll_interval=5)
 
 		# On timeout the prompt is NOT auto-denied: it raises so the worker exits
-		# cleanly, and the pending doc is LEFT pending (no timed_out flip).
+		# cleanly. The poll itself does not flip the doc (the run closes it on exit).
 		with self.assertRaises(UserInputTimeout):
 			backend.ask_user("What next?", [], "session1")
 
 		# Should have polled twice (0s, 5s) then timed out at 10s
 		self.assertEqual(mock_sleep.call_count, 2)
-		# Must NOT flip the doc to timed_out — it stays pending for the user to answer.
+		# The poll must NOT flip the doc (run end closes it, see close_raised_prompts).
 		mock_engine.update.assert_not_called()
 
 	def test_poll_scopes_query_to_prompt_uuid(self):
@@ -213,7 +213,7 @@ class TestRemoteBackend(unittest.TestCase):
 
 	@patch('secator.ai.interactivity.sleep')
 	def test_timeout_leaves_prompt_pending_and_raises(self, mock_sleep):
-		"""On timeout the prompt is left pending (not flipped) and the loop unwinds."""
+		"""On timeout the poll does not flip the prompt; it raises so the loop unwinds."""
 		from secator.ai.interactivity import RemoteBackend, UserInputTimeout
 		mock_engine = MagicMock()
 		mock_engine.search.return_value = []  # never answered
@@ -223,8 +223,40 @@ class TestRemoteBackend(unittest.TestCase):
 		with self.assertRaises(UserInputTimeout):
 			backend.ask_user("What next?", [], "session1", prompt_uuid="abc-123")
 
-		# No timed_out flip — the pending doc survives for the user to answer later.
+		# No flip by the poll — closing is the run's job on exit.
 		mock_engine.update.assert_not_called()
+
+	def test_close_raised_prompts_expires_only_own_pending(self):
+		"""Run end closes the prompts this backend raised that are still pending."""
+		from secator.ai.interactivity import RemoteBackend
+		mock_engine = MagicMock()
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+		backend.build_pending_prompt("What next?", [], "s1", prompt_uuid="u2")
+		backend.build_pending_prompt("Allow?", ["allow", "deny"], "s1",
+									 prompt_type="permission", prompt_uuid="u1")
+		mock_engine.update.reset_mock()  # build_pending_prompt expires superseded prompts
+		self.assertEqual(backend.close_raised_prompts("s1"), 2)
+		query, update = mock_engine.update.call_args[0]
+		self.assertEqual(query, {
+			"_type": "ai", "_context.session_id": "s1", "status": "pending",
+			"extra_data.prompt_uuid": {"$in": ["u1", "u2"]},
+		})
+		self.assertEqual(update, {"$set": {"status": "expired"}})
+		# Idempotent: nothing left to close.
+		mock_engine.update.reset_mock()
+		self.assertEqual(backend.close_raised_prompts("s1"), 0)
+		mock_engine.update.assert_not_called()
+
+	def test_close_raised_prompts_is_best_effort(self):
+		"""No engine, no prompts or a backend error never raises."""
+		from secator.ai.interactivity import RemoteBackend, AutoBackend
+		self.assertEqual(RemoteBackend(timeout=60).close_raised_prompts("s1"), 0)
+		self.assertEqual(AutoBackend().close_raised_prompts("s1"), 0)
+		mock_engine = MagicMock()
+		mock_engine.update.side_effect = RuntimeError("db down")
+		backend = RemoteBackend(timeout=60, query_engine=mock_engine)
+		backend._raised_prompt_uuids.add("u1")
+		self.assertEqual(backend.close_raised_prompts("s1"), 0)
 
 	def test_build_pending_prompt_stamps_permission_prompt_uuid(self):
 		"""A permission pending doc carries its prompt_uuid in extra_data."""
