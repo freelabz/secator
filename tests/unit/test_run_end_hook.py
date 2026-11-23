@@ -170,7 +170,7 @@ class TestRunEndHookPhases(unittest.TestCase):
 		task = _build_task(context={'drivers': ['celery_events', 'json']})
 		self.assertEqual(
 			task.resolved_hooks['on_run_end'],
-			[json_driver.announce_report, celery_events.publish_run_end],
+			[json_driver.finalize_store, json_driver.announce_report, celery_events.publish_run_end],
 		)
 
 	def test_publishes_after_the_mongodb_status_write(self):

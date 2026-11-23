@@ -96,7 +96,7 @@ class MarkVulnFalsePositive(BaseTool):
 		_merge_extra_data(update, action.get("extra_data"))
 
 		try:
-			modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update)
+			modified, updated, label, err = _scoped_vuln_update(ctx, uuid, update, doc=vuln)
 		except Exception as e:
 			yield Error(message=f"Failed to mark vulnerability false positive: {e}", _context=context)
 			return

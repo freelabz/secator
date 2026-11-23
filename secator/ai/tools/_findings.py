@@ -85,7 +85,7 @@ def _apply_finding_update(ctx: ActionContext, query: Dict, update: Dict, doc: Op
 	return modified, patched
 
 
-def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
+def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict, doc: Optional[Dict] = None):
 	"""Apply a workspace-scoped ``$set`` to the vulnerability with this ``_uuid``.
 
 	Returns ``(modified, updated, label, error_msg)``: ``modified`` docs count,
@@ -99,9 +99,12 @@ def _scoped_vuln_update(ctx: ActionContext, uuid: str, update: Dict):
 	``_uuid`` to ``_id`` — findings carry ``_uuid = str(_id)``), so these are point operations,
 	not workspace scans. The lookup is ``scope_only``: a false-positive vuln is hidden by the
 	``is_false_positive:{$ne:True}`` display filter but must still be reachable here.
+
+	Pass ``doc`` (the vuln as just read by the caller) to skip that lookup; leave it None when
+	the vuln may have been written since the caller read it (e.g. by the exploit-attempt rollup).
 	"""
 	query = {"_type": "vulnerability", "_uuid": uuid}
-	modified, updated = _apply_finding_update(ctx, query, update)
+	modified, updated = _apply_finding_update(ctx, query, update, doc=doc)
 	if not modified:
 		return 0, None, uuid, (
 			f"No vulnerability found with _uuid={uuid} in this workspace. "

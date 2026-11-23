@@ -629,7 +629,7 @@ class Runner:
 			return
 
 		discover_external_drivers()
-		# Order by hook phase: pre drivers, then persistence drivers, then post drivers (e.g. api).
+		# Order by hook phase: pre drivers, then persistence drivers (api last), then post drivers (e.g. discord).
 		drivers = order_drivers(drivers)
 		hooks_list = []
 		for driver in drivers:
