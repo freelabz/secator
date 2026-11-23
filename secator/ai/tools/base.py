@@ -49,7 +49,8 @@ that uses both::
 
 Activation is unchanged: the tool is only active when named in ``extra_tools`` (per run
 or via ``CONFIG.addons.ai.extra_tools``), by exact name or by an fnmatch glob such as
-``export_*`` that turns on every loaded tool whose name matches.
+``export_*`` that turns on every loaded EXTERNAL tool whose name matches (``*`` = all of
+them; globs never match built-in tools, and a glob matching nothing only warns).
 
 Several tools in one file
 -------------------------

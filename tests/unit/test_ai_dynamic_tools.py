@@ -330,15 +330,23 @@ class TestExtraToolsGlobs(unittest.TestCase):
 		self.assertIn("report_pull", names)
 		self.assertNotIn("ping_pong", names)
 
-	def test_glob_matching_nothing_errors(self):
-		from secator.ai.tools import resolve_extra_tools
+	def test_glob_matching_nothing_warns(self):
+		"""A glob matching no loaded tool only warns (once per pattern) and adds nothing."""
+		from unittest import mock
+		from secator.ai import tools
+		from secator.rich import console
+		tools._WARNED_EMPTY_GLOBS.clear()
+		with mock.patch.object(console, "print") as printed:
+			self.assertEqual(tools.resolve_extra_tools(["nothing_*", "report_push"]), ["report_push"])
+			tools.resolve_extra_tools(["nothing_*"])
+		messages = [str(c) for c in printed.call_args_list]
+		self.assertEqual(len([m for m in messages if "nothing_*" in m]), 1)
+		self.assertIn("matches no loaded external AI tool", messages[0])
+		# An exact unknown name still fails loudly, as before.
 		with self.assertRaises(ValueError) as cm:
-			resolve_extra_tools(["nothing_*"])
-		self.assertIn("nothing_*", str(cm.exception))
+			tools.resolve_extra_tools(["report_pus"])
+		self.assertIn("report_pus", str(cm.exception))
 		self.assertIn("Known tools", str(cm.exception))
-		# An exact unknown name still fails as before.
-		with self.assertRaises(ValueError):
-			resolve_extra_tools(["report_pus"])
 
 	def test_glob_mixed_with_exact_names_keeps_order_and_dedupes(self):
 		from secator.ai.tools import resolve_extra_tools
@@ -365,28 +373,94 @@ class TestExtraToolsGlobs(unittest.TestCase):
 			self.assertIn("report_push", names)
 			self.assertIn("report_pull", names)
 
-	def test_mode_exclude_wins_over_glob(self):
-		"""A glob can pull in core tools like an exact core name can, but a mode's `!`
-		excludes still remove them."""
-		from secator.ai.prompts import MODES
-		from secator.ai.tools import TOOLS_BY_NAME
+	def test_glob_never_matches_builtin_tools(self):
+		"""Globs expand over EXTERNAL tools only; a built-in tool is added by exact name only."""
+		from secator.ai.tools import TOOLS_BY_NAME, resolve_extra_tools
 		mark_vuln = sorted(n for n in TOOLS_BY_NAME if n.startswith("mark_vuln_"))
 		self.assertTrue(mark_vuln)
+		self.assertEqual(resolve_extra_tools(["mark_vuln_*"]), [])
+		self.assertNotIn("run_shell", self._names("chat", extra_tools=["run_*"]))
+		# Exact built-in names keep working as before.
+		self.assertEqual(resolve_extra_tools([mark_vuln[0]]), [mark_vuln[0]])
+
+	def test_star_means_every_external_tool(self):
+		from secator.ai.tools import TOOLS_BY_NAME, resolve_extra_tools
+		external = [n for n, t in TOOLS_BY_NAME.items() if t.external]
+		self.assertEqual(sorted(resolve_extra_tools(["*"])), sorted(external))
+		self.assertEqual(sorted(external), ["ping_pong", "report_pull", "report_push"])
+		chat_names = self._names("chat")
+		names = self._names("chat", extra_tools=["*"])
+		self.assertEqual(sorted(set(names) - set(chat_names)), sorted(external))
+
+	def test_mode_exclude_wins_over_glob(self):
+		"""A mode's `!` excludes remove a tool even when an extra_tools glob matches it."""
+		from secator.ai.prompts import MODES
 		orig = list(MODES["chat"]["tools"])
 		try:
-			MODES["chat"]["tools"] = orig + ["!mark_vuln_*"]
-			names = self._names("chat", extra_tools=["mark_vuln_*"])
-			self.assertFalse([n for n in names if n.startswith("mark_vuln_")])
 			MODES["chat"]["tools"] = orig + ["!report_pull"]
 			names = self._names("chat", extra_tools=["report_*"])
 			self.assertIn("report_push", names)
 			self.assertNotIn("report_pull", names)
 		finally:
 			MODES["chat"]["tools"] = orig
-		# Without the exclude, the core glob is honoured.
-		names = self._names("chat", extra_tools=["mark_vuln_*"])
-		for n in mark_vuln:
-			self.assertIn(n, names)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
+class TestExtraToolsConfigSetEndToEnd(unittest.TestCase):
+	"""`secator config set addons.ai.extra_tools "foo_*"` turns on every matching tool."""
+
+	def setUp(self):
+		import os
+		import tempfile
+		from unittest import mock
+		self.tmp = tempfile.TemporaryDirectory()
+		tools_dir = os.path.join(self.tmp.name, "tools")
+		os.mkdir(tools_dir)
+		with open(os.path.join(tools_dir, "foo_tools.py"), "w") as f:
+			f.write(_HEADER + _tool_cls("FooA", "foo_a") + _tool_cls("FooB", "foo_b"))
+		self.saved = CONFIG.addons.ai.extra_tools
+		patches = [
+			mock.patch.dict(os.environ, {"SECATOR_AI_TOOLS_DIRS": tools_dir}),
+			# Never write the user's config file from a test.
+			mock.patch.object(type(CONFIG), "save", return_value=True),
+		]
+		for patch in patches:
+			patch.start()
+			self.addCleanup(patch.stop)
+		_reset()
+
+	def tearDown(self):
+		CONFIG.set("addons.ai.extra_tools", list(self.saved or []))
+		_reset()
+		self.tmp.cleanup()
+
+	def _config_set(self, *args):
+		from click.testing import CliRunner
+		from secator.cli import cli
+		result = CliRunner().invoke(cli, ["config", "set", "addons.ai.extra_tools", *args])
+		self.assertIsNone(result.exception, result.output)
+		self.assertEqual(result.exit_code, 0, result.output)
+
+	def test_config_set_string_is_stored_as_a_list(self):
+		self._config_set("foo_*")
+		self.assertEqual(list(CONFIG.addons.ai.extra_tools), ["foo_*"])
+		self._config_set("foo_*, bar")
+		self.assertEqual(list(CONFIG.addons.ai.extra_tools), ["foo_*", "bar"])
+		self._config_set("baz", "--append")
+		self.assertEqual(list(CONFIG.addons.ai.extra_tools), ["foo_*", "bar", "baz"])
+
+	def test_config_set_glob_enables_every_matching_tool(self):
+		self._config_set("foo_*")
+		from secator.ai.tools import build_tool_schemas
+		from secator.tasks.ai import ai
+		self.assertIn("extra_tools", ai.opts)
+		names = [s["function"]["name"] for s in build_tool_schemas("chat", extra_tools=None)]
+		self.assertIn("foo_a", names)
+		self.assertIn("foo_b", names)
+		self.assertEqual(len(names), len(set(names)))
+		# The per-run option (CLI-style comma string) merges with the config glob, deduplicated.
+		names = [s["function"]["name"] for s in build_tool_schemas("chat", extra_tools="foo_a,foo_*")]
+		self.assertEqual([n for n in names if n.startswith("foo_")], ["foo_a", "foo_b"])
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")

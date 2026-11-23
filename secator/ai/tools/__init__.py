@@ -194,7 +194,7 @@ def register_ai_tool(tool):
 def _split_tool_names(value):
 	"""Normalize an ``extra_tools`` value to a list of names / patterns.
 
-	Accepts a list or a comma-separated string (``"sysreptor*,foo"``), so the option works the
+	Accepts a list or a comma-separated string (``"sysreptor_*,foo"``), so the option works the
 	same from the CLI, a template or a library call.
 	"""
 	if not value:
@@ -209,30 +209,36 @@ def resolve_extra_tools(extra_tools=None):
 
 	``CONFIG.addons.ai.extra_tools`` (a custom installation's always-on tools) is merged
 	with the per-run ``extra_tools`` option, order-preserving and deduplicated. Each entry is
-	an exact tool name or an fnmatch glob (``sysreptor*``, ``mark_vuln_*``), the same glob
-	syntax as a mode's ``tools:`` patterns; a glob expands to every loaded tool (built-in or
-	discovered external) whose name matches, in registry order. An exact name that is not
-	loaded, or a glob that matches no loaded tool, raises ``ValueError`` with a clear message
-	so a misconfigured/absent tool fails loudly rather than being silently dropped.
+	an exact tool name or an fnmatch glob (``sysreptor_*``, ``report_*``, ``*``):
 
-	A glob may match core tools too, exactly like an exact core name may; a mode's ``!``
-	excludes still win over it in :func:`build_tool_schemas`.
+	* An EXACT name resolves to that loaded tool (built-in or external), as before. An exact
+	  name that is not loaded raises ``ValueError`` with a clear message, so a
+	  misconfigured/absent tool fails loudly rather than being silently dropped.
+	* A GLOB expands to every loaded EXTERNAL tool (templates dir / ``SECATOR_AI_TOOLS_DIRS``
+	  / bundle) whose name matches, in registry order. Globs never match built-in tools —
+	  the mirror of a mode's ``tools:`` globs, which match built-in tools only — so a broad
+	  pattern cannot widen a mode with core tools it hides; a built-in tool is only added by
+	  its exact name. ``*`` therefore means "every loaded external tool". A glob that matches
+	  nothing is not an error (the tool set it names may simply not be installed): it prints
+	  a warning once per pattern and contributes no tool.
+
+	A mode's ``!`` excludes still win over any extra tool in :func:`build_tool_schemas`.
 	"""
 	import fnmatch
 	from secator.config import CONFIG
-	names, unknown = [], []
+	names, unknown, empty_globs = [], [], []
 	for src in (_split_tool_names(CONFIG.addons.ai.extra_tools), _split_tool_names(extra_tools)):
 		for entry in src:
 			if entry in TOOLS_BY_NAME:
 				matched = [entry]
 			elif _is_glob(entry):
-				matched = [n for n in TOOLS_BY_NAME if fnmatch.fnmatchcase(n, entry)]
+				matched = [n for n, t in TOOLS_BY_NAME.items() if t.external and fnmatch.fnmatchcase(n, entry)]
+				if not matched and entry not in empty_globs:
+					empty_globs.append(entry)
 			else:
-				matched = []
-			if not matched:
 				if entry not in unknown:
 					unknown.append(entry)
-				continue
+				matched = []
 			for n in matched:
 				if n not in names:
 					names.append(n)
@@ -240,9 +246,29 @@ def resolve_extra_tools(extra_tools=None):
 		raise ValueError(
 			f"extra_tools refers to unknown AI tool(s): {unknown}. Known tools: "
 			f"{sorted(TOOLS_BY_NAME)}. Check CONFIG.addons.ai.extra_tools / the run's "
-			f"extra_tools (exact names or globs such as 'prefix*'), and that the tool dir / "
+			f"extra_tools (exact names or globs such as 'prefix_*'), and that the tool dir / "
 			f"bundle is loaded.")
+	for pattern in empty_globs:
+		_warn_empty_glob(pattern)
 	return names
+
+
+# extra_tools globs already reported as matching nothing (warn once per pattern).
+_WARNED_EMPTY_GLOBS = set()
+
+
+def _warn_empty_glob(pattern):
+	"""Warn (once per pattern) that an ``extra_tools`` glob matches no loaded external tool."""
+	if pattern in _WARNED_EMPTY_GLOBS:
+		return
+	_WARNED_EMPTY_GLOBS.add(pattern)
+	from secator.output_types import Warning
+	from secator.rich import console
+	external = sorted(n for n, t in TOOLS_BY_NAME.items() if t.external)
+	console.print(Warning(message=(
+		f"extra_tools pattern {pattern!r} matches no loaded external AI tool; it adds nothing. "
+		f"Loaded external tools: {external or 'none'}. Globs match external tools only (templates "
+		f"dir / SECATOR_AI_TOOLS_DIRS); add a built-in tool by its exact name.")))
 
 
 def _is_glob(pattern):
@@ -273,8 +299,9 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 			switches). An auto session that happens to resolve to chat KEEPS change_mode.
 		extra_tools: Names or fnmatch globs of EXTRA (typically external) tools to add on top
 			of the mode's baseline for this run (e.g. ``["add_suggestion"]`` or
-			``["sysreptor*"]``). Merged with ``CONFIG.addons.ai.extra_tools``; every name must
-			resolve to a loaded tool and every glob must match at least one.
+			``["sysreptor_*"]``). Merged with ``CONFIG.addons.ai.extra_tools``; every exact name
+			must resolve to a loaded tool, a glob expands to the matching EXTERNAL tools only
+			(see :func:`resolve_extra_tools`).
 
 	Returns:
 		List of OpenAI-format tool schema dicts.
