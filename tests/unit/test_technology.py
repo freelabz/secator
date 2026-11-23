@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from secator.output_types import Port, Technology
-from secator.technology import catalog, lookup, normalize_technology, split_version
+from secator.technology import catalog, cpe23, lookup, normalize_technology, split_version, version_cpe
 
 # (expected key, expected display name, raw spellings from different tools / advisories)
 CASES = [
@@ -122,6 +122,62 @@ class TestTechnologyCatalog(unittest.TestCase):
 		self.assertEqual((t.product, t.key), ('Some Library', ''))
 
 
+IIS_CPE = 'cpe:2.3:a:microsoft:internet_information_services:8.5:*:*:*:*:*:*:*'
+
+
+class TestTechnologyCpe(unittest.TestCase):
+	"""The CPE a vulnerability lookup uses: the tool's own when it has a version, else key + version."""
+
+	def test_cpe23_from_cpe22(self):
+		self.assertEqual(cpe23('cpe:/a:microsoft:internet_information_services:8.5'), IIS_CPE)
+		self.assertEqual(cpe23('cpe:/a:igor_sysoev:nginx:1.18.0'), 'cpe:2.3:a:igor_sysoev:nginx:1.18.0:*:*:*:*:*:*:*')
+		self.assertEqual(cpe23('cpe:/o:linux:linux_kernel'), 'cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*')
+		self.assertEqual(cpe23('cpe:/a:acme:widget:1.0%2b1'), r'cpe:2.3:a:acme:widget:1.0\+1:*:*:*:*:*:*:*')
+		self.assertEqual(  # packed CPE 2.2 edition
+			cpe23('cpe:/a:acme:widget:1.0::~~pro~linux~x64~'),
+			'cpe:2.3:a:acme:widget:1.0:*:*:*:pro:linux:x64:*')
+
+	def test_cpe23_passthrough_and_garbage(self):
+		self.assertEqual(cpe23(IIS_CPE), IIS_CPE)
+		self.assertEqual(cpe23('cpe:2.3:a:apache:http_server:2.4.7'), 'cpe:2.3:a:apache:http_server:2.4.7:*:*:*:*:*:*:*')
+		for bad in (None, '', 'Microsoft-IIS 8.5', 'cpe:/a', 'cpe:2.3:a'):
+			self.assertIsNone(cpe23(bad))
+
+	def test_tool_cpe_with_version_wins(self):
+		cpes = ['cpe:/a:microsoft:internet_information_services:8.5', 'cpe:/o:microsoft:windows']
+		self.assertEqual(version_cpe('8.5', 'microsoft:internet_information_services', cpes), IIS_CPE)
+		# A legacy CPE vendor the catalog knows the product under still counts as the same product.
+		self.assertEqual(version_cpe('1.18.0', 'f5:nginx', ['cpe:/a:igor_sysoev:nginx:1.18.0']),
+						 'cpe:2.3:a:igor_sysoev:nginx:1.18.0:*:*:*:*:*:*:*')
+
+	def test_built_from_key_when_no_tool_cpe(self):
+		self.assertEqual(version_cpe('8.5', 'microsoft:internet_information_services'), IIS_CPE)
+		# A versionless tool CPE, an OS CPE, or another product's CPE is not used.
+		self.assertEqual(version_cpe('8.5', 'microsoft:internet_information_services',
+									 ['cpe:/a:microsoft:internet_information_services', 'cpe:/o:microsoft:windows',
+									  'cpe:/a:php:php:5.6']), IIS_CPE)
+		self.assertEqual(version_cpe('1.0 beta', 'acme:widget'), r'cpe:2.3:a:acme:widget:1.0\ beta:*:*:*:*:*:*:*')
+
+	def test_no_cpe_without_version_or_identity(self):
+		self.assertEqual(version_cpe(None, 'microsoft:internet_information_services'), '')
+		self.assertEqual(version_cpe('', '', ['cpe:/a:microsoft:internet_information_services:8.5']), '')
+		self.assertEqual(version_cpe('1.0', ''), '')
+
+	def test_technology_cpe(self):
+		# Server header: no CPE from the tool, built from the catalog key.
+		t = Technology(match='http://host', product='Microsoft-IIS/8.5')
+		self.assertEqual((t.product, t.version, t.cpe), ('Microsoft IIS', '8.5', IIS_CPE))
+		# nmap: its CPE 2.2 is used.
+		t = Technology(match='host:80', product='Microsoft IIS httpd', version='8.5',
+					   extra_data={'cpe': ['cpe:/a:microsoft:internet_information_services:8.5', 'cpe:/o:microsoft:windows']})
+		self.assertEqual(t.cpe, IIS_CPE)
+		# Unknown product, no version, or a fuzzy-matched key: no CPE (free-text lookup instead).
+		self.assertEqual(Technology(match='x', product='Some Library', version='1.0').cpe, '')
+		self.assertEqual(Technology(match='x', product='Microsoft-IIS').cpe, '')
+		t = Technology(match='x', product='Synology DiskStation Mgr', version='7.2')
+		self.assertEqual((t.key, t.extra_data.get('key_match'), t.cpe), ('synology:diskstation_manager', 'fuzzy', ''))
+
+
 NMAP_XML = """<?xml version="1.0"?>
 <nmaprun scanner="nmap" args="nmap -sV scanme.nmap.org" start="1700000000" version="7.94">
 <host><status state="up" reason="syn-ack"/>
@@ -163,6 +219,9 @@ class TestNmapTechnology(unittest.TestCase):
 		self.assertIn('cpe:/o:linux:linux_kernel', ssh.extra_data['cpe'])
 		for tech in techs.values():  # the CPE secator builds from the product string is not kept
 			self.assertFalse([c for c in tech.extra_data['cpe'] if ' ' in c])
+		# The vulnerability-lookup CPE is nmap's own (CPE 2.2 -> 2.3), not the banner version string.
+		self.assertEqual(httpd.cpe, 'cpe:2.3:a:apache:http_server:2.4.7:*:*:*:*:*:*:*')
+		self.assertEqual(ssh.cpe, 'cpe:2.3:a:openbsd:openssh:6.6.1p1:*:*:*:*:*:*:*')
 
 
 def _nuclei_item(template_id, tags, matcher_name=None, extracted=None, metadata=None, cpe=None, severity='info'):

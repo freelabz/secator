@@ -384,6 +384,46 @@ class TestExtractorFunctions(unittest.TestCase):
         nginx_input = next(i for i in inputs if 'nginx' in i)
         self.assertEqual(nginx_input, '10.0.0.3:80~nginx 1.21.0')
 
+    def test_search_vulns_workflow_extractors_prefer_cpe(self):
+        """The search_vulns extractors of the recon workflows query by CPE when the Technology has
+        one, by `product version` otherwise, never both, and skip versionless technologies."""
+        import yaml
+        import secator
+        base = os.path.join(os.path.dirname(secator.__file__), 'configs', 'workflows')
+        with open(os.path.join(base, 'host_recon.yaml')) as fh:
+            host_recon = yaml.safe_load(fh)
+        with open(os.path.join(base, 'subdomain_recon.yaml')) as fh:
+            subdomain_recon = yaml.safe_load(fh)
+        iis = 'cpe:2.3:a:microsoft:internet_information_services:8.5:*:*:*:*:*:*:*'
+        nginx = 'cpe:2.3:a:igor_sysoev:nginx:1.18.0:*:*:*:*:*:*:*'
+        results = [
+            # Server header: CPE built from the catalog key.
+            Technology(match='http://10.0.0.1', product='Microsoft-IIS/8.5'),
+            # nmap: same product, its own CPE 2.2 -> grouped with the one above.
+            Technology(match='10.0.0.2:80', product='Microsoft IIS httpd', version='8.5',
+                       extra_data={'cpe': ['cpe:/a:microsoft:internet_information_services:8.5']}),
+            Technology(match='10.0.0.3:80', product='nginx', version='1.18.0',
+                       extra_data={'cpe': ['cpe:/a:igor_sysoev:nginx:1.18.0']}),
+            # Not in the catalog, no CPE: free text.
+            Technology(match='10.0.0.4:80', product='Acme Widget', version='1.0'),
+            # No version: not queried at all.
+            Technology(match='10.0.0.5:80', product='nginx'),
+        ]
+        ctx = self._store_ctx(results)
+        for targets in (
+            host_recon['tasks']['_group/vuln']['search_vulns']['targets_'],
+            subdomain_recon['tasks']['search_vulns']['targets_'],
+        ):
+            techs = [t for t in targets if t['type'] == 'technology']
+            inputs, _opts, errors = run_extractors([], {'targets_': techs}, ctx=ctx)
+            self.assertEqual(errors, [])
+            by_query = {i.split('~', 1)[1]: set(i.split('~', 1)[0].split(',')) for i in inputs}
+            self.assertEqual(by_query, {
+                iis: {'http://10.0.0.1', '10.0.0.2:80'},
+                nginx: {'10.0.0.3:80'},
+                'Acme Widget 1.0': {'10.0.0.4:80'},
+            })
+
     def test_get_task_folder_id(self):
         """Atomic, race-free, back-compatible folder-id allocation."""
         import tempfile

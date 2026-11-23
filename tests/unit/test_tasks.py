@@ -251,6 +251,34 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 		self.assertIsNone(task.matched_at)
 		self.assertEqual(task.inputs[0], 'apache 2.4.39')
 
+	def test_before_init_cpe23_kept_as_is(self):
+		"""A CPE 2.3 query is passed through untouched (no free-text clean-up)."""
+		cpe = 'cpe:2.3:a:microsoft:internet_information_services:8.5:*:*:*:*:*:*:*'
+		task = search_vulns.__new__(search_vulns)
+		task.inputs = [f'10.0.0.1:80,10.0.0.2:80~{cpe}']
+		task.matched_at = None
+		search_vulns.before_init(task)
+		self.assertEqual(task.matched_at, '10.0.0.1:80,10.0.0.2:80')
+		self.assertEqual(task.inputs[0], cpe)
+
+	def test_before_init_cpe22_converted(self):
+		"""An nmap CPE 2.2 URI is queried as CPE 2.3 (search_vulns only recognises 2.3), not mangled
+		into 'cpe: a:...' by the '/' clean-up."""
+		task = search_vulns.__new__(search_vulns)
+		task.inputs = ['10.0.0.1:80~cpe:/a:microsoft:internet_information_services:8.5']
+		task.matched_at = None
+		search_vulns.before_init(task)
+		self.assertEqual(task.matched_at, '10.0.0.1:80')
+		self.assertEqual(task.inputs[0], 'cpe:2.3:a:microsoft:internet_information_services:8.5:*:*:*:*:*:*:*')
+
+	def test_before_init_free_text_still_cleaned(self):
+		"""Free text keeps its existing clean-up ('/' -> ' ')."""
+		task = search_vulns.__new__(search_vulns)
+		task.inputs = ['10.0.0.1:80~Microsoft-IIS/8.5']
+		task.matched_at = None
+		search_vulns.before_init(task)
+		self.assertEqual(task.inputs[0], 'Microsoft-IIS 8.5')
+
 	def test_before_init_multiple_hosts(self):
 		"""before_init correctly captures comma-separated matched_at hosts."""
 		task = search_vulns.__new__(search_vulns)

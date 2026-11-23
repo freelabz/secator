@@ -71,6 +71,73 @@ def cpe_vendor_product(cpe):
 	return vendor, product
 
 
+_CPE23_ESCAPE = re.compile(r'([^A-Za-z0-9._\-])')
+_CPE23_ANY = ('', '*', '-')
+
+
+def _cpe23_value(value):
+	"""One CPE 2.3 attribute value: lowercased, special characters backslash-escaped."""
+	value = str(value or '').strip().lower()
+	if value in _CPE23_ANY:
+		return value or '*'
+	return _CPE23_ESCAPE.sub(r'\\\1', value)
+
+
+def cpe23(cpe):
+	"""A CPE 2.3 formatted string (``cpe:2.3:a:vendor:product:version:*:*:*:*:*:*:*``) for a
+	CPE 2.3 or CPE 2.2 URI (``cpe:/a:vendor:product:version``, as nmap reports them), else ``None``.
+
+	CPE 2.2 values are percent-decoded and their packed ``~`` edition is unpacked.
+	"""
+	if not cpe or not isinstance(cpe, str):
+		return None
+	c = cpe.strip().lower()
+	if c.startswith('cpe:2.3:'):
+		attrs = c[len('cpe:2.3:'):].split(':')
+		if len(attrs) < 3:
+			return None
+		return 'cpe:2.3:' + ':'.join((attrs + ['*'] * 11)[:11])
+	if not c.startswith('cpe:/'):
+		return None
+	from urllib.parse import unquote
+	attrs = [unquote(a) for a in c[len('cpe:/'):].split(':')]
+	if len(attrs) < 3:
+		return None
+	attrs = (attrs + [''] * 7)[:7]  # part, vendor, product, version, update, edition, language
+	edition = attrs[5]
+	extended = ['', '', '', '']  # sw_edition, target_sw, target_hw, other
+	if edition.startswith('~'):  # packed: ~edition~sw_edition~target_sw~target_hw~other
+		packed = (edition[1:].split('~') + [''] * 5)[:5]
+		edition, extended = packed[0], packed[1:]
+	values = attrs[:5] + [edition, attrs[6]] + extended
+	return 'cpe:2.3:' + ':'.join([values[0]] + [_cpe23_value(v) for v in values[1:]])
+
+
+def version_cpe(version, key='', cpes=None):
+	"""CPE 2.3 name of this product at this version, for vulnerability lookups, or ``''``.
+
+	A tool-reported application CPE (``cpes``) for the same product that carries a version
+	wins; else one is built from the ``vendor:product`` key and ``version``. No version, no CPE:
+	a versionless CPE would match every release of the product.
+	"""
+	if not version:
+		return ''
+	key = (key or '').lower()
+	cpes = [cpes] if isinstance(cpes, str) else list(cpes or [])
+	known = catalog()['cpes']
+	for raw in cpes:
+		pair = cpe_vendor_product(raw)
+		c = cpe23(raw)
+		if not pair or not c or c.split(':')[5] in _CPE23_ANY:
+			continue
+		if not key or ':'.join(pair) == key or known.get(pair) == key:
+			return c
+	if ':' not in key:
+		return ''
+	vendor, product = key.split(':', 1)
+	return cpe23(f'cpe:2.3:a:{vendor}:{product}:{_cpe23_value(version)}')
+
+
 @lru_cache(maxsize=1)
 def catalog():
 	"""Load the catalog once: ``{'rules': ..., 'entries': {key: entry}, 'aliases': {alias: key}, 'cpes': {...}}``."""
