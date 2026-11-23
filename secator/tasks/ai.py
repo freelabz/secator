@@ -1431,6 +1431,11 @@ class ai(PythonRunner):
 		self._sync = False if self.async_tasks else self.sync
 		self.history = ChatHistory()
 		self.encryptor = SensitiveDataEncryptor() if self.sensitive else None
+		if self.interactive == "tui":
+			# the TUI's /model-view renders this history read-only (display only)
+			tui = get_tui()
+			if tui is not None and hasattr(tui, "tui_set_model_source"):
+				tui.tui_set_model_source(self._model_view_snapshot)
 		self.has_previous_results = len(self.results) > 0
 		self.scope = "current" if self.has_previous_results else "workspace"
 		self.permission_engine = PermissionEngine(
@@ -1609,6 +1614,17 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# Mid-flight steering
 	# -------------------------------------------------------------------------
+
+	def _model_view_snapshot(self):
+		"""Display-only copy of the model-facing history, for the TUI's model view.
+
+		The history is stored as sent: when the encryptor is on, every message already carries
+		the ``[TYPE:hash]`` placeholders the model received, so the view shows it as is — no
+		re-encryption, no new placeholder, the encryptor's map is never touched. Shallow copies
+		only: the loop keeps mutating the live history on its own thread.
+		"""
+		msgs = [dict(m) for m in list(self.history.messages) if isinstance(m, dict)]
+		return {"messages": msgs, "encrypted": self.encryptor is not None}
 
 	def _report_tui_meta(self, token_count=None, ctx_window=None):
 		"""Report the live guardrail/mode/context state to the TUI meta bar (local only).
