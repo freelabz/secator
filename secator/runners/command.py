@@ -14,7 +14,6 @@ import threading
 from time import time
 
 import psutil
-from fp.fp import FreeProxy
 
 from secator.definitions import OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED
 from secator.config import CONFIG
@@ -486,6 +485,7 @@ class Command(Runner):
 			elif self.proxy in ['auto', 'http'] and self.proxy_http and CONFIG.http.http_proxy:
 				proxy = CONFIG.http.http_proxy
 			elif self.proxy == 'random' and self.proxy_http:
+				from fp.fp import FreeProxy
 				proxy = FreeProxy(timeout=CONFIG.http.freeproxy_timeout, rand=True, anonym=True).get()
 			elif self.proxy.startswith(('http://', 'socks5://')):
 				proxy = self.proxy
