@@ -54,6 +54,11 @@ _PLACEHOLDER_RE = re.compile(
 )
 
 
+# A placeholder exactly as minted by SensitiveDataEncryptor._hash_value. encrypt() never
+# matches into these, so a later pattern cannot rewrite part of an earlier placeholder.
+_MINTED_PLACEHOLDER_RE = re.compile(r"\[(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[0-9a-f]{12}\]")
+
+
 def find_placeholders(value) -> list:
 	"""Return every sensitive-data placeholder left in ``value`` (str / dict / list, recursive).
 
@@ -108,6 +113,7 @@ class SensitiveDataEncryptor:
 		self.pii_map: Dict[str, str] = {}  # placeholder -> original
 		self.hash_map: Dict[str, str] = {}  # bare hash -> original
 		self.custom_patterns: List[re.Pattern] = []
+		self._decrypt_cache = None
 
 		if custom_patterns:
 			for pattern in custom_patterns:
@@ -128,6 +134,30 @@ class SensitiveDataEncryptor:
 		self.hash_map[hash_value] = value
 		return placeholder
 
+	def _sub_outside_placeholders(self, text: str, pattern: re.Pattern, pii_type: str) -> str:
+		"""Replace each whole match of ``pattern`` in ``text`` with its placeholder.
+
+		Replacement is by match span (never a substring replace), so a value is only ever
+		replaced where it matched in full: ``10.10.0.1`` never rewrites part of ``10.10.0.12``.
+		Placeholders already in ``text`` are left untouched and never matched into.
+		"""
+		def _repl(match):
+			original = match.group()
+			if not original:
+				return original
+			if pii_type == "host" and _is_hash_filename(original):
+				return original
+			return self._hash_value(original, pii_type)
+
+		out = []
+		last = 0
+		for ph in _MINTED_PLACEHOLDER_RE.finditer(text):
+			out.append(pattern.sub(_repl, text[last:ph.start()]))
+			out.append(ph.group())
+			last = ph.end()
+		out.append(pattern.sub(_repl, text[last:]))
+		return "".join(out)
+
 	def encrypt(self, text: str) -> str:
 		"""Encrypt all sensitive data in text."""
 		if not text:
@@ -135,35 +165,46 @@ class SensitiveDataEncryptor:
 
 		result = text
 
-		# Custom patterns first
+		# Custom patterns first, then built-ins; later passes skip earlier placeholders.
 		for i, pattern in enumerate(self.custom_patterns):
-			for match in pattern.finditer(result):
-				original = match.group()
-				placeholder = self._hash_value(original, f"custom_{i}")
-				result = result.replace(original, placeholder)
-
-		# Built-in patterns
+			result = self._sub_outside_placeholders(result, pattern, f"custom_{i}")
 		for pii_type, pattern in PII_PATTERNS.items():
-			for match in pattern.finditer(result):
-				original = match.group()
-				if pii_type == "host" and _is_hash_filename(original):
-					continue
-				placeholder = self._hash_value(original, pii_type)
-				result = result.replace(original, placeholder)
+			result = self._sub_outside_placeholders(result, pattern, pii_type)
 
 		return result
+
+	def _decrypt_regex(self):
+		"""Build (and cache) one regex matching every known placeholder / hash, longest first."""
+		key = (id(self.pii_map), len(self.pii_map), id(self.hash_map), len(self.hash_map))
+		if self._decrypt_cache and self._decrypt_cache[0] == key:
+			return self._decrypt_cache[1], self._decrypt_cache[2]
+		lookup: Dict[str, str] = {}
+		for placeholder, original in self.pii_map.items():
+			lookup[placeholder] = original
+			lookup.setdefault(placeholder[1:-1], original)
+		for hash_value, original in self.hash_map.items():
+			lookup.setdefault(hash_value, original)
+		regex = None
+		if lookup:
+			alts = []
+			for token in sorted(lookup, key=len, reverse=True):
+				escaped = re.escape(token)
+				# Bracketed placeholders are self-delimiting; bare forms only match whole words.
+				alts.append(escaped if token.startswith("[") else rf"\b{escaped}\b")
+			regex = re.compile("|".join(alts))
+		self._decrypt_cache = (key, regex, lookup)
+		return regex, lookup
 
 	def decrypt(self, text: str) -> str:
-		"""Restore original sensitive values from placeholders."""
-		result = text
+		"""Restore original sensitive values from placeholders.
 
-		# Full placeholders [TYPE:hash] and their bracket-stripped form TYPE:hash
-		for placeholder, original in self.pii_map.items():
-			result = result.replace(placeholder, original)
-			result = result.replace(placeholder[1:-1], original)
-
-		# Bare hashes
-		for hash_value, original in self.hash_map.items():
-			result = result.replace(hash_value, original)
-
-		return result
+		Handles full placeholders ``[TYPE:hash]``, their bracket-stripped form ``TYPE:hash`` and
+		bare hashes. Done in a single pass (restored values are never re-scanned), longest token
+		first, and bare forms only on word boundaries so a hash inside a longer token is kept.
+		"""
+		if not text:
+			return text
+		regex, lookup = self._decrypt_regex()
+		if regex is None:
+			return text
+		return regex.sub(lambda m: lookup[m.group()], text)
