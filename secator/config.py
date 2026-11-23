@@ -37,6 +37,9 @@ NON_CONFIG_ENV_VARS = frozenset({
 	'SECATOR_AI_SANDBOX_PACKAGES',
 	'SECATOR_AI_SANDBOX_PIDS',
 	'SECATOR_PACKAGE_MANAGER',  # package manager override (secator.installer)
+	'SECATOR_TEMPLATE_GIT_TIMEOUT',  # template-source limits (secator.template_source)
+	'SECATOR_TEMPLATE_SET_MAX_BYTES',
+	'SECATOR_TEMPLATE_SET_MAX_MEMBERS',
 })
 
 USER_AGENTS = {
