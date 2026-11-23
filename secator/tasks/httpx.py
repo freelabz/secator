@@ -11,7 +11,7 @@ from secator.definitions import (
 )  # fmt: off
 from secator.output_types import Certificate, Subdomain, Technology, Url, Vulnerability, Tag
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import Http
+from secator.tasks._categories import CHROMIUM_DEPS_APT, Http, apply_system_browser
 from secator.utils import extract_domain_info, extract_subdomains_from_fqdn, sanitize_url
 
 
@@ -43,7 +43,7 @@ class httpx(Http):
 			'help': 'Save HTTP responses',
 		},  # noqa: E501
 		'screenshot': {'is_flag': True, 'short': 'ss', 'default': False, 'help': 'Screenshot response'},
-		'system_chrome': {'is_flag': True, 'default': False, 'help': 'Use local installed Chrome for screenshot'},
+		'system_chrome': {'is_flag': True, 'default': None, 'help': 'Use local installed Chrome for screenshot'},
 		'headless_options': {
 			'is_flag': False,
 			'short': 'ho',
@@ -95,7 +95,7 @@ class httpx(Http):
 		DELAY: lambda x: str(x) + 's' if x else None,
 	}
 	item_loaders = [JSONSerializer()]
-	install_pre = {'apk': ['chromium']}
+	install_pre = {'apk': ['chromium'], 'apt': CHROMIUM_DEPS_APT}
 	install_version = 'v1.9.0'
 	install_cmd = 'go install -v github.com/projectdiscovery/httpx/cmd/httpx@[install_version]'
 	github_handle = 'projectdiscovery/httpx'
@@ -127,6 +127,7 @@ class httpx(Http):
 			self.cmd += f' -srd {output_folder}'
 		if screenshot:
 			self.cmd += ' -esb -ehb'
+		apply_system_browser(self, screenshot)
 		self.domains = []
 		self._techs = {}
 
