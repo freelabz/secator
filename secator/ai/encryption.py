@@ -5,22 +5,28 @@ import ipaddress
 import re
 from typing import Dict, List, Optional
 
-# Key names whose value is a credential in ``key=value`` / ``"key": "value"`` pairs. The key
-# may carry a prefix (``db_password``, ``client_secret``, ``AWS_SECRET_ACCESS_KEY``) but must
-# END with one of these, so ``token_type`` or ``password_policy`` are not matched. The match
-# starts at the key word itself (no prefix scan), which keeps the pattern linear.
+# Key names whose value is a credential in ``key=value`` / ``key: value`` pairs. The key may
+# carry a prefix (``db_password``, ``client_secret``, ``AWS_SECRET_ACCESS_KEY``, camelCase
+# ``accessToken``) but must END with one of these, so ``token_type`` or ``password_policy`` are
+# not matched. The match starts at the key word itself (no prefix scan), which keeps it linear.
 _KV_PASSWORD_KEYS = r"(?:password|passwd)"
 _KV_SECRET_KEYS = r"(?:secret[_-]?key|secret|token|api[_-]?key|access[_-]?key)"
+# Key start: not inside a word, or a camelCase hump (``dbPassword``, ``clientSecret``).
+_KV_START = r"(?:(?<![A-Za-z0-9])|(?-i:(?<=[a-z])(?=[A-Z])))"
+# A quoted value, honouring backslash escapes; the closing quote must match the opening one.
+_KV_QUOTED = r"(?:\"(?P<{0}>(?:[^\"\\\r\n]|\\.)+)\"|'(?P<{1}>(?:[^'\\\r\n]|\\.)+)')"
 
 
 def _kv_pattern(keys: str) -> re.Pattern:
-	"""Build a ``key=value`` / quoted ``"key": "value"`` pattern whose value is group ``v``."""
+	"""Build a ``key=value`` / ``key: value`` pattern; the value is one of the groups ``v1``..``v6``."""
 	return re.compile(
-		r"(?<![A-Za-z0-9])" + keys + r"(?:"
-		# key=value, unquoted (query strings, env files, CLI flags) or quoted
-		r"\s*=\s*(?:\"(?P<v1>[^\"\r\n]+)\"|'(?P<v2>[^'\r\n]+)'|(?P<v3>[^\s\"'&;,<>]+))"
-		# "key": "value" (JSON / YAML with a quoted key)
-		r"|[\"']\s*:\s*[\"'](?P<v4>[^\"'\r\n]+)[\"']"
+		_KV_START + keys + r"(?:"
+		# key=value (query strings, env files, CLI flags); `==` is a comparison, not a value
+		r"[ \t]*=(?!=)[ \t]*(?:" + _KV_QUOTED.format("v1", "v2") + r"|(?P<v3>[^\s\"'&;,<>=][^\s\"'&;<>]*))"
+		# key: value / "key": "value" (JSON, YAML, headers, tool output like `login: x password: y`).
+		# A bare 12-hex value is a bracket-stripped placeholder hash, never re-encrypted.
+		r"|[\"']?[ \t]*:[ \t]*(?:" + _KV_QUOTED.format("v4", "v5")
+		+ r"|(?![0-9a-f]{12}(?![0-9A-Za-z]))(?P<v6>[^\s\"'&;,<>]+))"
 		r")",
 		re.IGNORECASE,
 	)
@@ -29,21 +35,26 @@ def _kv_pattern(keys: str) -> re.Pattern:
 # PII patterns - order matters (specific before general): each pass skips the placeholders
 # of earlier ones. Secrets and URL credentials run before email/ip/host, so a token holding
 # dots (JWT) or a ``user:pass@host`` URL is never split by the host or email rule.
-# A pattern with named groups ``v``/``v1``... encrypts only that group (the key name or
-# header stays readable); otherwise the whole match is encrypted.
+# A built-in pattern with named groups ``v``/``v1``... encrypts only the group that matched (the
+# key name or header stays readable); otherwise the whole match is encrypted.
 PII_PATTERNS = {
-	# PEM private key blocks: the base64 body is encrypted, the BEGIN/END lines stay readable.
+	# PEM / PGP private key blocks: the body is encrypted, the BEGIN/END lines stay readable. The
+	# body stops at the next `-----` (so a scan can't run past it) and needs no END line, so a
+	# block cut short by truncation is still encrypted.
 	"private_key": re.compile(
-		r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----(?P<v>[\s\S]{16,16384}?)-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----"
+		r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?P<v>(?:[^-]|-(?!----)){16,16384})"
 	),
-	# Authorization / Proxy-Authorization header values (Bearer / Basic / Token / Digest).
+	# Authorization / Proxy-Authorization header values, with or without a scheme (Bearer, Basic,
+	# ...): the rest of the header up to the end of line or closing quote.
 	"auth_header": re.compile(
-		r"\bauthorization[\"']?\s*[:=]\s*[\"']?(?:bearer|basic|token|digest)\s+(?P<v>[A-Za-z0-9._~+/=-]{4,})",
+		r"\bauthorization[\"']?[ \t]*[:=][ \t]*[\"']?(?:(?:bearer|basic|token|negotiate|ntlm)[ \t]+)?"
+		r"(?P<v>[^\s\"'](?:[^\r\n\"']*[^\s\"'])?)",
 		re.IGNORECASE,
 	),
-	# Password in a URL userinfo: scheme://user:PASS@host. The host is left to the host rule.
+	# Password in a URL userinfo: scheme://[user]:PASS@host (an `@` in the password is kept with
+	# it). The user stays readable; the host is left to the host rule.
 	"url_password": re.compile(
-		r"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@?#\"'<>]+:(?P<v>[^\s/@?#\"'<>]+)@"
+		r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@?#\"'<>]*:(?P<v>[^\s/?#\"'<>]+)@"
 	),
 	# Well-known API key / token formats. Fixed prefixes only, so hashes, UUIDs and random
 	# base64 blobs are never matched.
@@ -241,7 +252,8 @@ class SensitiveDataEncryptor:
 		replaced where it matched in full: ``10.10.0.1`` never rewrites part of ``10.10.0.12``.
 		Placeholders already in ``text`` are left untouched and never matched into.
 		"""
-		value_groups = [g for g in pattern.groupindex if g == "v" or (g[:1] == "v" and g[1:].isdigit())]
+		value_groups = [] if pii_type not in PII_PATTERNS else [
+			g for g in pattern.groupindex if g == "v" or (g[:1] == "v" and g[1:].isdigit())]
 
 		def _repl(match):
 			original = match.group()

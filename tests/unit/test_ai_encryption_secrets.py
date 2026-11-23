@@ -85,6 +85,40 @@ class TestEncryptSecrets(unittest.TestCase):
 				key = re.split(r"[\"'\s:=]", text.lstrip('/cb?-{"'))[0]
 				self.assertIn(key, out)
 
+	def test_key_value_forms(self):
+		# The value is fully encrypted (nothing of it left after the placeholder) and the key stays.
+		cases = [
+			("[22][ssh] login: root password: toor", "toor", "password"),
+			('password: "hunter2"', "hunter2", "password"),
+			("secret_key: abcd1234", "abcd1234", "secret"),
+			("X-Api-Key: abc123", "abc123", "secret"),
+			('{"accessToken":"abc123xyz"}', "abc123xyz", "secret"),
+			('{"clientSecret":"s3c"}', "s3c", "secret"),
+			('{"dbPassword":"p4ss"}', "p4ss", "password"),
+			('{"password": "it\'s-secret"}', "it's-secret", "password"),
+			('{"password": "a\\"bcd"}', 'a\\"bcd', "password"),
+			("password=abc,def", "abc,def", "password"),
+		]
+		for text, secret, ph_type in cases:
+			with self.subTest(text=text):
+				out = self.enc.encrypt(text)
+				ph = self.enc._hash_value(secret, ph_type)
+				self.assertIn(ph, out)
+				self.assertEqual(out, text.replace(secret, ph, 1))
+				self.assertEqual(self.enc.decrypt(out), text)
+
+	def test_key_value_not_matched(self):
+		for text in (
+			"if (password == confirm)",
+			"password=\nnext_line",
+			"tokenType=bearer",
+			"mytoken=abc",
+			"the password policy: strict",
+			"SECRET:0123456789ab",
+		):
+			with self.subTest(text=text):
+				self.assertEqual(self.enc.encrypt(text), text)
+
 	def test_url_credentials(self):
 		text = "mongodb://admin:s3cr3t@db.example.com:27017/app"
 		out = self.assertEncrypted(text, "s3cr3t", "password")
@@ -96,6 +130,35 @@ class TestEncryptSecrets(unittest.TestCase):
 		out = self.assertEncrypted(text, "p.a.ss", "password")
 		self.assertNotIn("10.0.0.5", out)
 		self.assertNotIn("[HOST:", out)
+
+	def test_url_credentials_empty_user_and_at_in_password(self):
+		out = self.assertEncrypted("redis://:s3cret@10.0.0.1:6379", "s3cret", "password")
+		self.assertTrue(out.startswith("redis://:[PASSWORD:"))
+		out = self.assertEncrypted("http://u:p@ss@host.example.com/x", "p@ss", "password")
+		self.assertNotIn("[EMAIL:", out)
+
+	def test_private_key_without_end_line(self):
+		# A key body cut off by output truncation must still be encrypted.
+		text = f"-----BEGIN RSA PRIVATE KEY-----{PEM_BODY}(truncated)"
+		out = self.enc.encrypt(text)
+		self.assertNotIn("MIIEpAIBAAKCAQEA", out)
+		self.assertEqual(self.enc.decrypt(out), text)
+
+	def test_auth_header_without_scheme(self):
+		for text, value in (
+			("Authorization: rawtoken123", "rawtoken123"),
+			("Authorization: AWS4-HMAC-SHA256 Credential=AKID/2026, Signature=abc",
+				"AWS4-HMAC-SHA256 Credential=AKID/2026, Signature=abc"),
+		):
+			with self.subTest(text=text):
+				out = self.assertEncrypted(text, value, "secret")
+				self.assertEqual(out, f"Authorization: {self.enc._hash_value(value, 'secret')}")
+		text = "Access-Control-Allow-Headers: Authorization, Content-Type"
+		self.assertEqual(self.enc.encrypt(text), text)
+
+	def test_custom_pattern_named_group_encrypts_whole_match(self):
+		enc = SensitiveDataEncryptor(salt="test", custom_patterns=[r"id-(?P<v>\d+)"])
+		self.assertEqual(enc.encrypt("id-42"), enc._hash_value("id-42", "custom_0"))
 
 	def test_auth_headers(self):
 		for text, value in (
@@ -150,6 +213,18 @@ class TestNoFalsePositives(unittest.TestCase):
 				out = self.enc.encrypt(text)
 				self.assertNotIn("[SECRET:", out)
 				self.assertNotIn("[PASSWORD:", out)
+
+
+class TestLinearTime(unittest.TestCase):
+	"""Long runs with no match must not trigger a per-position rescan (tool outputs can be large)."""
+
+	def test_long_runs(self):
+		import time
+		for text in ("a-" * 200_000, "xoxb-" * 80_000, "-----BEGIN RSA PRIVATE KEY-----\n" * 12_000, "Z" * 400_000):
+			with self.subTest(text=text[:10]):
+				start = time.perf_counter()
+				SensitiveDataEncryptor().encrypt(text)
+				self.assertLess(time.perf_counter() - start, 5)
 
 
 class TestToolArgsDecryptToCommand(unittest.TestCase):
