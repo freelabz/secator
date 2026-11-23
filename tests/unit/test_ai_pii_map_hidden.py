@@ -201,11 +201,11 @@ class TestApiHookNeverLogsTheMap(unittest.TestCase):
 
 	def test_request_debug_redacts_internal_doc_payload(self):
 		from secator.hooks import api as api_hook
-		resp = mock.Mock(ok=True)
+		resp = mock.Mock(ok=True, text="{}")
 		# the api may echo the stored doc back: the response log must be redacted too
 		resp.json.side_effect = [{"id": "x", "echo": PII}, {"id": "y"}]
 		logged = []
-		with mock.patch.object(api_hook.requests, "request", return_value=resp):
+		with mock.patch.object(api_hook._session, "request", return_value=resp):
 			with mock.patch.object(api_hook, "debug", lambda *a, **k: logged.append(json.dumps([a, k], default=str))):
 				api_hook._make_request("POST", "findings", dict(PII))
 				api_hook._make_request("POST", "findings", dict(PORT))
