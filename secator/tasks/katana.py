@@ -39,6 +39,9 @@ class katana(HttpCrawler):
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit raw requests/responses from jsonl output'},  # noqa: E501
 		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'},
 		'no_sandbox': {'is_flag': True, 'short': 'ns', 'default': False, 'help': 'Disable sandboxing'},
+		# katana's own default is 'rdn' (the registrable domain), so crawling scanme.example.com would
+		# also crawl example.com and every subdomain it links to. Stay on the target host by default.
+		'field_scope': {'type': str, 'short': 'fsc', 'default': 'fqdn', 'help': 'Crawl scope: fqdn (target host only), rdn (target registrable domain), dn (domain name keyword), or a regex'},  # noqa: E501
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -62,6 +65,7 @@ class katana(HttpCrawler):
 		USER_AGENT: OPT_NOT_SUPPORTED,
 		'store_responses': 'sr',
 		'form_fill': 'aff',
+		'field_scope': 'field-scope',
 	}
 	opt_value_map = {DELAY: lambda x: int(x) if isinstance(x, float) else x}
 	item_loaders = [JSONSerializer()]
