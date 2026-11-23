@@ -12,7 +12,32 @@ from secator.output_types import Error, Warning
 from secator.rich import console
 
 
-def save_history(history, reports_folder, debug_fn=None):
+# Small sidecar written next to history.json: the session identity the store docs are stamped
+# with. The report file holds it too, but only the json driver writes that report live.
+SESSION_FILE = 'session.json'
+
+
+def _atomic_write_json(path, obj):
+	"""Write ``obj`` as JSON to ``path`` atomically (temp file + fsync + ``os.replace``)."""
+	path = Path(path)
+	path.parent.mkdir(parents=True, exist_ok=True)
+	fd, tmp_path = tempfile.mkstemp(prefix=f'.{path.stem}.', suffix='.json.tmp', dir=str(path.parent))
+	try:
+		with os.fdopen(fd, 'w', encoding='utf-8') as f:
+			json.dump(obj, f, indent=2)
+			f.flush()
+			os.fsync(f.fileno())
+		os.replace(tmp_path, path)
+		tmp_path = None
+	finally:
+		if tmp_path is not None:
+			try:
+				os.unlink(tmp_path)
+			except OSError:
+				pass
+
+
+def save_history(history, reports_folder, debug_fn=None, session_id=None):
 	"""Save chat history to reports folder, atomically.
 
 	Called at every end of turn (not only when the run exits), so it must never leave a
@@ -24,18 +49,17 @@ def save_history(history, reports_folder, debug_fn=None):
 		history: ChatHistory instance.
 		reports_folder: Path to reports folder.
 		debug_fn: Optional debug function for logging.
+		session_id: Optional session id the run's store docs are stamped with. Saved to
+			``session.json`` next to the history so a resume can find the session's store
+			docs (e.g. its placeholder map) whatever drivers wrote them.
 	"""
 	history_path = Path(reports_folder) / 'history.json'
-	tmp_path = None
 	try:
-		history_path.parent.mkdir(parents=True, exist_ok=True)
-		fd, tmp_path = tempfile.mkstemp(prefix='.history.', suffix='.json.tmp', dir=str(history_path.parent))
-		with os.fdopen(fd, 'w', encoding='utf-8') as f:
-			json.dump(history.messages, f, indent=2)
-			f.flush()
-			os.fsync(f.fileno())
-		os.replace(tmp_path, history_path)
-		tmp_path = None
+		_atomic_write_json(history_path, history.messages)
+		if session_id:
+			session_path = history_path.parent / SESSION_FILE
+			if _as_dict(_read_json(session_path)).get('session_id') != session_id:
+				_atomic_write_json(session_path, {'session_id': session_id})
 		if debug_fn:
 			debug_fn(f'Saved history to {history_path}', sub='llm')
 	except (OSError, TypeError, ValueError) as e:
@@ -43,29 +67,44 @@ def save_history(history, reports_folder, debug_fn=None):
 			debug_fn(f'Failed to save history: {e}', sub='llm')
 		else:
 			console.print(Warning(message=f'Failed to save history: {e}'))
-	finally:
-		if tmp_path is not None:
-			try:
-				os.unlink(tmp_path)
-			except OSError:
-				pass
 
 
 def _read_json(path):
-	"""Best-effort JSON load; None on a missing or corrupt file."""
+	"""Best-effort JSON load; None on a missing path, a missing file or a corrupt file.
+
+	``path`` may be None / empty (e.g. a session folder with no report file): that is
+	treated as "no data", never as an error.
+	"""
+	if not path:
+		return None
 	try:
 		with open(path, encoding='utf-8') as f:
 			return json.load(f)
-	except (json.JSONDecodeError, OSError):
+	except (ValueError, OSError, TypeError):  # ValueError covers JSONDecodeError + bad encoding
 		return None
 
 
-def _first_user_prompt(history_path):
-	"""The first `user` message in a saved history.json — the resume-prompt fallback."""
-	data = _read_json(history_path)
-	if not isinstance(data, list):
+def _as_dict(value):
+	"""``value`` when it is a dict, else an empty dict (tolerates malformed metadata)."""
+	return value if isinstance(value, dict) else {}
+
+
+def _has_conversation(messages):
+	"""True when a saved history holds at least one user or assistant turn.
+
+	A run aborted before the first message leaves nothing to resume (at most a system
+	prompt), so such a session is not offered by the pickers.
+	"""
+	if not isinstance(messages, list):
+		return False
+	return any(isinstance(m, dict) and m.get('role') in ('user', 'assistant') for m in messages)
+
+
+def _first_user_message(messages):
+	"""The first `user` message content in a list of history messages."""
+	if not isinstance(messages, list):
 		return ''
-	for msg in data:
+	for msg in messages:
 		if isinstance(msg, dict) and msg.get('role') == 'user':
 			return msg.get('content') or ''
 	return ''
@@ -74,11 +113,16 @@ def _first_user_prompt(history_path):
 def list_sessions(max_sessions=20):
 	"""Scan reports folders for resumable AI sessions.
 
-	A session IS its history.json (that's what a resume replays). The sibling report
-	file is only read for nicer metadata (name / prompt / targets / session_id) and is
-	optional: legacy sessions don't stamp `_context.session_id` and their report has no
-	`ai` results, but they still resume fine via the history replay — so we never drop a
-	session just because its report lacks those.
+	A session IS its history.json (that's what a resume replays). It is written locally by
+	every run whatever drivers are active. The sibling report file is only read for nicer
+	metadata (name / prompt / targets / session_id) and is optional: it is absent when the
+	run had no json driver (e.g. only the api, mongodb or sqlite driver) and was interrupted
+	before the end-of-run export, and legacy sessions don't stamp `_context.session_id` in
+	it. Those sessions still resume fine via the history replay, so a missing or unreadable
+	report never drops (or crashes) the listing.
+
+	Sessions whose history holds no conversation (a run aborted before the first message)
+	or can't be read are skipped: there is nothing to resume.
 
 	Args:
 		max_sessions: Maximum number of sessions to return.
@@ -86,58 +130,95 @@ def list_sessions(max_sessions=20):
 	Returns:
 		list: Session dicts sorted by mtime (most recent first), capped at max_sessions.
 	"""
-	sessions = []
 	pattern = str(Path(CONFIG.dirs.reports) / '*/tasks/*/history.json')
+	candidates = []
 	for history_path_str in glob.glob(pattern):
-		history_path = Path(history_path_str)
-		folder = history_path.parent
-		# The report filename has varied across versions (report.json / report_ai.json);
-		# prefer the generic name, else fall back to any report*.json for metadata.
-		report_path = next(
-			(p for p in [folder / 'report.json', *sorted(folder.glob('report*.json'))] if p.exists()),
-			None,
-		)
-		data = _read_json(report_path) or {}
-		info = data.get('info', {})
-		ai_items = data.get('results', {}).get('ai', []) or []
+		try:
+			candidates.append((os.stat(history_path_str).st_mtime, Path(history_path_str)))
+		except OSError:  # removed between the glob and the stat
+			continue
+	# Most recent first, and stop once enough resumable sessions are found: only the
+	# histories that can make the cut are read.
+	candidates.sort(key=lambda c: c[0], reverse=True)
 
-		# First user prompt + session name, and the first stamped `_context.session_id`
-		# (a resumed run adopts it) — single pass, stop once both are found.
+	sessions = []
+	for mtime, history_path in candidates:
+		if len(sessions) >= max_sessions:
+			break
+		try:
+			session = _load_session(history_path, mtime)
+		except Exception:  # noqa: BLE001 - one odd folder must never break the listing
+			session = None
+		if session is not None:
+			sessions.append(session)
+	return sessions
+
+
+def _load_session(history_path, mtime):
+	"""Build one session dict from a history.json path, or None when not resumable."""
+	messages = _read_json(history_path)
+	if not _has_conversation(messages):
+		return None
+	folder = history_path.parent
+	# The report filename has varied across versions (report.json / report_ai.json);
+	# prefer the generic name, else fall back to any report*.json for metadata.
+	report_path = next(
+		(p for p in [folder / 'report.json', *sorted(folder.glob('report*.json'))] if p.is_file()),
+		None,
+	)
+	data = _as_dict(_read_json(report_path))
+	info = _as_dict(data.get('info'))
+	ai_items = _as_dict(data.get('results')).get('ai')
+	if not isinstance(ai_items, list):
+		ai_items = []
+
+	# First user prompt + session name, and the first stamped `_context.session_id`
+	# (a resumed run adopts it) — single pass, stop once both are found.
+	first_prompt = ''
+	session_name = ''
+	session_id = ''
+	for item in ai_items:
+		if not isinstance(item, dict):
+			continue
+		ctx = _as_dict(item.get('_context'))
+		if not first_prompt and item.get('ai_type') == 'prompt':
+			first_prompt = item.get('content') or ''
+			session_name = ctx.get('session_name', '') or ctx.get('name', '')
+		if not session_id:
+			session_id = ctx.get('session_id', '')
+		if first_prompt and session_id:
+			break
+
+	# No `ai` results (legacy session, or no local report): take the prompt from the run
+	# opts, else the first user turn recorded in the history itself.
+	if not first_prompt:
+		first_prompt = _as_dict(info.get('run_opts')).get('prompt') or _first_user_message(messages)
+	if not isinstance(first_prompt, str):
 		first_prompt = ''
-		session_name = ''
-		session_id = ''
-		for item in ai_items:
-			ctx = item.get('_context') or {}
-			if not first_prompt and item.get('ai_type') == 'prompt':
-				first_prompt = item.get('content', '')
-				session_name = ctx.get('session_name', '') or ctx.get('name', '')
-			if not session_id:
-				session_id = ctx.get('session_id', '')
-			if first_prompt and session_id:
-				break
+	targets = info.get('targets')
+	if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
+		targets = []
+	# The id the session's store docs (e.g. its placeholder map) are stamped with: from the
+	# report (ai results, else the runner info), else from the session file saved next to the
+	# history on every end of turn — the only source when there is no local report.
+	store_session_id = (
+		session_id
+		or _as_dict(info.get('context')).get('session_id')
+		or _as_dict(_read_json(folder / SESSION_FILE)).get('session_id')
+		or '')
 
-		# Legacy sessions have no `ai` results: take the prompt from the run opts, else
-		# the first user turn recorded in the history itself.
-		if not first_prompt:
-			first_prompt = (info.get('run_opts') or {}).get('prompt') or _first_user_prompt(history_path)
-
-		sessions.append({
-			'folder': str(folder),
-			'history_path': str(history_path),
-			'report_path': str(report_path) if report_path else '',
-			'name': session_name,
-			'prompt': first_prompt,
-			'session_id': session_id,
-			# The id the session's store docs (e.g. its placeholder map) are stamped with —
-			# from the runner info even when the report carries no ai results.
-			'store_session_id': session_id or (info.get('context') or {}).get('session_id', ''),
-			'targets': info.get('targets', []),
-			'timestamp': info.get('end_time') or info.get('start_time') or 0,
-			'mtime': history_path.stat().st_mtime,
-		})
-
-	sessions.sort(key=lambda s: s['mtime'], reverse=True)
-	return sessions[:max_sessions]
+	return {
+		'folder': str(folder),
+		'history_path': str(history_path),
+		'report_path': str(report_path) if report_path else '',
+		'name': session_name,
+		'prompt': first_prompt,
+		'session_id': session_id,
+		'store_session_id': store_session_id,
+		'targets': targets,
+		'timestamp': info.get('end_time') or info.get('start_time') or 0,
+		'mtime': mtime,
+	}
 
 
 def _session_label(session, max_label=None):
@@ -167,15 +248,19 @@ def _session_label(session, max_label=None):
 	return label_text, description
 
 
-def show_session_picker():
+def show_session_picker(sessions=None):
 	"""Show interactive menu to pick a session to resume (plain-console / headless path).
+
+	Args:
+		sessions: Pre-listed sessions (from :func:`list_sessions`); listed here when None.
 
 	Returns:
 		dict: Selected session dict, or None if cancelled.
 	"""
 	from secator.rich import InteractiveMenu
 
-	sessions = list_sessions()
+	if sessions is None:
+		sessions = list_sessions()
 	if not sessions:
 		console.print(Warning(message='No previous AI sessions found.'))
 		return None
@@ -200,7 +285,7 @@ def show_session_picker():
 	return sessions[idx]
 
 
-def pick_session_via_backend(backend, session_id=""):
+def pick_session_via_backend(backend, session_id="", sessions=None):
 	"""Pick a session to resume through an interactivity backend that owns the display.
 
 	The plain-console :func:`show_session_picker` drives the terminal directly
@@ -211,11 +296,13 @@ def pick_session_via_backend(backend, session_id=""):
 	Args:
 		backend: An interactivity backend exposing ``ask_user`` (e.g. ``TUIBackend``).
 		session_id: Current runner session id, forwarded to ``ask_user`` for context.
+		sessions: Pre-listed sessions (from :func:`list_sessions`); listed here when None.
 
 	Returns:
 		dict: Selected session dict, or None if cancelled / none available.
 	"""
-	sessions = list_sessions()
+	if sessions is None:
+		sessions = list_sessions()
 	if not sessions:
 		return None
 	import shutil
@@ -259,22 +346,21 @@ def print_session_results(session):
 	if not report_path:
 		return
 	type_map = {cls.__name__.lower(): cls for cls in OUTPUT_TYPES}
-	try:
-		with open(report_path) as f:
-			data = json.load(f)
-	except (json.JSONDecodeError, OSError):
-		return
+	data = _read_json(report_path)
+	results = data.get('results') if isinstance(data, dict) else None
+	if not isinstance(results, dict):
+		return   # missing / malformed report: nothing to show, the history replay still runs
 	# Flatten all items with their type class, then print in timestamp order
 	all_items = []
-	for type_name, items in data.get('results', {}).items():
+	for type_name, items in results.items():
 		cls = type_map.get(type_name)
-		if not cls:
+		if not cls or not isinstance(items, list):
 			continue
 		for item_data in items:
-			if is_internal_doc(item_data):
-				continue   # bookkeeping (placeholder map), never displayed
+			if not isinstance(item_data, dict) or is_internal_doc(item_data):
+				continue   # malformed, or bookkeeping (placeholder map): never displayed
 			all_items.append((item_data, cls))
-	all_items.sort(key=lambda x: x[0].get('_timestamp', 0))
+	all_items.sort(key=lambda x: x[0].get('_timestamp') or 0)
 	for item_data, cls in all_items:
 		try:
 			console.print(cls.load(item_data), highlight=False)
