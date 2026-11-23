@@ -2,6 +2,7 @@
 """AI-powered penetration testing task."""
 import json
 import re
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -101,6 +102,14 @@ def fast_detect_mode(prompt):
 	if has_chat and not has_scan:
 		return "chat"
 	return None
+
+
+def _is_revoked(task_id):
+	"""Whether this Celery task id was revoked on this worker. The revoke control handler adds
+	the id to the worker's in-memory `revoked` set before terminating, and a gevent pool runs
+	the task in that same process. False without a worker (CLI / sync runs) or a task id."""
+	state = sys.modules.get("celery.worker.state")
+	return bool(task_id and state) and task_id in state.revoked
 
 
 def _truncate_label(text, fallback):
@@ -1232,6 +1241,13 @@ class ai(PythonRunner):
 
 					# Dispatch actions, collect results, add to history
 					dispatch_result = yield from self._dispatch_and_collect(actions, ctx)
+					# Revoked while a child runner ran in-process: the runner absorbed the
+					# termination and reported a failed tool. End now (REVOKED): no further LLM
+					# call, no reply wait. A tool that failed for any other reason carries on.
+					if _is_revoked(self._turn_uuid()):
+						self.revoked = True
+						self._save_history()
+						return
 					stop_reason = dispatch_result.get("stop_reason")
 					stop_choices = dispatch_result.get("stop_choices")
 					stop_multiple = dispatch_result.get("stop_multiple", False)
