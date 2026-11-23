@@ -3,8 +3,6 @@ import os
 
 from functools import cache
 
-from cpe import CPE
-
 from secator.definitions import (
 	CIDR_RANGE,
 	DATA,
@@ -42,6 +40,7 @@ from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vul
 from secator.config import CONFIG
 from secator.providers._base import CVEProvider
 from secator.runners import Command
+from secator.technology import cpe23, cpe_attrs
 from secator.utils import debug, find_system_browser, process_wordlist, headers_to_dict, parse_raw_http_request
 
 
@@ -366,11 +365,8 @@ class Vuln(Command):
 		"""
 		if fs1 == fs2:
 			return True
-		split_fs1 = fs1.split(':')
-		split_fs2 = fs2.split(':')
-		tup1 = split_fs1[3], split_fs1[4], split_fs1[5]
-		tup2 = split_fs2[3], split_fs2[4], split_fs2[5]
-		return tup1 == tup2
+		attrs1, attrs2 = cpe_attrs(fs1), cpe_attrs(fs2)  # escape-aware, tolerates a short CPE
+		return bool(attrs1 and attrs2) and attrs1[1:4] == attrs2[1:4]
 
 	@staticmethod
 	def get_cpe_fs(cpe):
@@ -382,10 +378,7 @@ class Vuln(Command):
 		Returns:
 			string: CPE formatted string.
 		"""
-		try:
-			return CPE(cpe).as_fs()
-		except NotImplementedError:
-			return None
+		return cpe23(cpe)
 
 	@cache
 	@staticmethod

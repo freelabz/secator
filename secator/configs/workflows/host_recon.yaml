@@ -119,6 +119,7 @@ tasks:
           field: '{matched_at}~{id}'
           condition: item.id
         # Query by CPE when the technology has one (exact match), else by name + version.
+        # `item.cpe == ''`, not `not item.cpe`: the query layer reads `not item.x` as `x != True`.
         - type: technology
           field: '{match}~{cpe}'
           condition: item.version and item.cpe

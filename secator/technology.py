@@ -53,89 +53,127 @@ def split_version(raw):
 	return re.sub(r'\s*\([^)]*\)\s*$', '', s), None
 
 
-def cpe_vendor_product(cpe):
-	"""``(vendor, product)`` from a CPE 2.2 / 2.3 application string, else ``None``."""
+_CPE_ANY = ('', '*', '-')  # CPE "any" / "not applicable" values: no specific version
+_CPE23_ESCAPE = re.compile(r'([^a-z0-9._\-])')
+_WHITESPACE = re.compile(r'\s')
+
+
+def _split_cpe23(attrs):
+	"""Split CPE 2.3 attributes on ``:``, except an escaped ``\\:``; unescape each value."""
+	values, cur, i = [], '', 0
+	while i < len(attrs):
+		ch = attrs[i]
+		if ch == '\\' and i + 1 < len(attrs):
+			cur += attrs[i + 1]
+			i += 2
+			continue
+		if ch == ':':
+			values.append(cur)
+			cur = ''
+		else:
+			cur += ch
+		i += 1
+	values.append(cur)
+	return values
+
+
+def cpe_attrs(cpe):
+	"""``(part, vendor, product, version)`` of a CPE 2.3 string or CPE 2.2 URI, decoded
+	(2.3 backslash escapes and 2.2 percent-encoding removed, lowercased), else ``None``.
+
+	The version is ``''`` when the CPE has none. One parser for every CPE field read.
+	"""
 	if not cpe or not isinstance(cpe, str):
 		return None
 	c = cpe.strip().lower()
 	if c.startswith('cpe:2.3:'):
-		parts = c.split(':')
-		part, vendor, product = (parts[2], parts[3], parts[4]) if len(parts) >= 5 else ('', '', '')
+		values = _split_cpe23(c[len('cpe:2.3:'):])
 	elif c.startswith('cpe:/'):
-		parts = c[5:].split(':')
-		part, vendor, product = (parts[0], parts[1], parts[2]) if len(parts) >= 3 else ('', '', '')
+		from urllib.parse import unquote
+		values = [unquote(v) for v in c[len('cpe:/'):].split(':')]
 	else:
 		return None
+	if len(values) < 3:
+		return None
+	part, vendor, product, version = (values + [''])[:4]
+	return part, vendor, product, version
+
+
+def cpe_vendor_product(cpe):
+	"""``(vendor, product)`` from a CPE 2.2 / 2.3 application string, else ``None``."""
+	attrs = cpe_attrs(cpe)
+	if not attrs:
+		return None
+	part, vendor, product, _ = attrs
 	if part != 'a' or not vendor or not product or ' ' in vendor or ' ' in product or '*' in (vendor + product):
 		return None
 	return vendor, product
 
 
-_CPE23_ESCAPE = re.compile(r'([^A-Za-z0-9._\-])')
-_CPE23_ANY = ('', '*', '-')
-
-
-def _cpe23_value(value):
-	"""One CPE 2.3 attribute value: lowercased, special characters backslash-escaped."""
-	value = str(value or '').strip().lower()
-	if value in _CPE23_ANY:
-		return value or '*'
-	return _CPE23_ESCAPE.sub(r'\\\1', value)
-
-
 def cpe23(cpe):
-	"""A CPE 2.3 formatted string (``cpe:2.3:a:vendor:product:version:*:*:*:*:*:*:*``) for a
-	CPE 2.3 or CPE 2.2 URI (``cpe:/a:vendor:product:version``, as nmap reports them), else ``None``.
+	"""A CPE 2.3 formatted string for a CPE 2.3 string or a CPE 2.2 URI (``cpe:/a:...``, as nmap
+	reports them), else ``None``.
 
-	CPE 2.2 values are percent-decoded and their packed ``~`` edition is unpacked.
+	A CPE 2.2 URI is converted by the ``cpe`` library; a CPE 2.3 string is returned lowercased as
+	is (consumers pad a short one). A CPE with no vendor / product, or with whitespace (never valid,
+	e.g. one built from a free-text product name), is rejected.
 	"""
-	if not cpe or not isinstance(cpe, str):
+	attrs = cpe_attrs(cpe)
+	if not attrs or not attrs[1] or not attrs[2] or '*' in (attrs[1], attrs[2]) or _WHITESPACE.search(cpe.strip()):
 		return None
-	c = cpe.strip().lower()
-	if c.startswith('cpe:2.3:'):
-		attrs = c[len('cpe:2.3:'):].split(':')
-		if len(attrs) < 3:
-			return None
-		return 'cpe:2.3:' + ':'.join((attrs + ['*'] * 11)[:11])
-	if not c.startswith('cpe:/'):
+	c = cpe.strip()
+	if c.lower().startswith('cpe:2.3:'):
+		return c.lower()
+	from cpe import CPE
+	try:
+		return CPE(c).as_fs()
+	except Exception:  # the cpe library raises NotImplementedError, IndexError, ... on malformed input
 		return None
-	from urllib.parse import unquote
-	attrs = [unquote(a) for a in c[len('cpe:/'):].split(':')]
-	if len(attrs) < 3:
-		return None
-	attrs = (attrs + [''] * 7)[:7]  # part, vendor, product, version, update, edition, language
-	edition = attrs[5]
-	extended = ['', '', '', '']  # sw_edition, target_sw, target_hw, other
-	if edition.startswith('~'):  # packed: ~edition~sw_edition~target_sw~target_hw~other
-		packed = (edition[1:].split('~') + [''] * 5)[:5]
-		edition, extended = packed[0], packed[1:]
-	values = attrs[:5] + [edition, attrs[6]] + extended
-	return 'cpe:2.3:' + ':'.join([values[0]] + [_cpe23_value(v) for v in values[1:]])
+
+
+def _cpe23_escape(value):
+	"""One CPE 2.3 attribute value: lowercased, special characters backslash-escaped."""
+	return _CPE23_ESCAPE.sub(r'\\\1', str(value).strip().lower())
+
+
+def _specific_version(version):
+	"""True if ``version`` names one release and fits in a CPE (not empty / ``*`` / ``-``,
+	no whitespace: ``1.0 beta`` is not a CPE version and would make the lookup find nothing)."""
+	v = str(version or '').strip()
+	return v not in _CPE_ANY and not _WHITESPACE.search(v)
 
 
 def version_cpe(version, key='', cpes=None):
-	"""CPE 2.3 name of this product at this version, for vulnerability lookups, or ``''``.
+	"""CPE 2.3 name of this product at this version, for vulnerability lookups, or ``''``
+	(the caller then falls back to a free-text ``product version`` lookup).
 
-	A tool-reported application CPE (``cpes``) for the same product that carries a version
-	wins; else one is built from the ``vendor:product`` key and ``version``. No version, no CPE:
-	a versionless CPE would match every release of the product.
+	1. A tool-reported application CPE (``cpes``) for the same product that carries a specific
+	   version wins, even when it differs from ``version``: the tool chose that CPE version for
+	   that product, while ``version`` is often the raw banner (nmap: version
+	   ``6.6.1p1 Ubuntu 2ubuntu2.13``, CPE ``cpe:/a:openbsd:openssh:6.6.1p1``).
+	2. Else one is built from the ``vendor:product`` key and ``version``, if the version is
+	   specific (see :func:`_specific_version`).
+
+	No version (empty, ``*``, ``-``), no CPE: a versionless CPE would match every release.
 	"""
-	if not version:
+	if str(version or '').strip() in _CPE_ANY:
 		return ''
 	key = (key or '').lower()
 	cpes = [cpes] if isinstance(cpes, str) else list(cpes or [])
 	known = catalog()['cpes']
 	for raw in cpes:
 		pair = cpe_vendor_product(raw)
-		c = cpe23(raw)
-		if not pair or not c or c.split(':')[5] in _CPE23_ANY:
+		if not pair or not _specific_version(cpe_attrs(raw)[3]):
 			continue
-		if not key or ':'.join(pair) == key or known.get(pair) == key:
+		if key and ':'.join(pair) != key and known.get(pair) != key:
+			continue
+		c = cpe23(raw)
+		if c:
 			return c
-	if ':' not in key:
+	if ':' not in key or not _specific_version(version):
 		return ''
 	vendor, product = key.split(':', 1)
-	return cpe23(f'cpe:2.3:a:{vendor}:{product}:{_cpe23_value(version)}')
+	return cpe23(f'cpe:2.3:a:{_cpe23_escape(vendor)}:{_cpe23_escape(product)}:{_cpe23_escape(version)}:*:*:*:*:*:*:*')
 
 
 @lru_cache(maxsize=1)
