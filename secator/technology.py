@@ -25,7 +25,7 @@ CATALOG_PATH = os.path.join(os.path.dirname(__file__), 'data', 'technologies.yam
 # "Microsoft-IIS/8.5", "OpenSSH_9.9p1" -> (name, version)
 _EMBEDDED_VERSION = re.compile(
 	r'^(?P<name>[A-Za-z][\w .+\-]*?)\s*[/:_ ]\s*v?(?P<version>\d+(?:\.\d+)+[0-9A-Za-z.+~\-]*)'
-	r'(?:\s*\(.*\))?\s*$'
+	r'(?:\s.*)?$'  # trailing "(Debian)" or a second banner component ("OpenSSL/3.0.2")
 )
 _BARE_VERSION = re.compile(r'^v?(\d+(?:\.\d+)+[0-9A-Za-z.+~\-]*)$')
 
@@ -181,8 +181,8 @@ def _vendor_ok(key, vendor):
 	and a CPE vendor the entry is known under (``igor_sysoev`` for nginx) agrees too."""
 	if not vendor:
 		return True
-	tokens = set(vendor.split())
-	return any(k == key and v in tokens for (v, _), k in catalog()['cpes'].items())
+	tokens = set(clean(vendor.replace('_', ' ')).split())
+	return any(k == key and set(clean(v.replace('_', ' ')).split()) <= tokens for (v, _), k in catalog()['cpes'].items())
 
 
 def normalize_technology(product, version=None, vendor=None, cpes=None):

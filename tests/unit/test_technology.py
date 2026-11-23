@@ -94,10 +94,13 @@ class TestTechnologyCatalog(unittest.TestCase):
 		self.assertEqual(split_version('Microsoft-IIS/8.5'), ('Microsoft-IIS', '8.5'))
 		self.assertEqual(split_version('12.2.1.3.0'), ('', '12.2.1.3.0'))
 		self.assertEqual(split_version('Outlook Web App'), ('Outlook Web App', None))
+		self.assertEqual(split_version('Apache/2.4.58 (Unix) OpenSSL/3.0.2'), ('Apache', '2.4.58'))
 
 	def test_cpe_names_the_product(self):
 		norm = normalize_technology('weird banner', cpes=['cpe:/a:igor_sysoev:nginx:1.19.0'])
 		self.assertEqual((norm['key'], norm['method']), ('f5:nginx', 'cpe'))
+		# a CPE vendor given as the vendor agrees with the entry
+		self.assertEqual(normalize_technology('nginx', vendor='igor_sysoev')['key'], 'f5:nginx')
 		norm = normalize_technology('caddy httpd', cpes=['cpe:/a:matt_holt:caddy', 'cpe:/o:linux:linux_kernel'])
 		self.assertEqual(norm['key'], 'matt_holt:caddy')
 
@@ -207,6 +210,12 @@ class TestNucleiTechnology(unittest.TestCase):
 				self.assertIsInstance(tech, Technology)
 				self.assertEqual((tech.product, tech.version, tech.key), (product, version, key))
 
+	def test_product_from_extracted_banner(self):
+		tech = self._convert(_nuclei_item('apache-detect', ['tech', 'apache'], extracted=['Apache-Coyote/1.1']))
+		self.assertEqual((tech.product, tech.version, tech.key), ('Apache Tomcat', None, 'apache:tomcat'))
+		tech = self._convert(_nuclei_item('apache-detect', ['tech', 'apache'], extracted=['Apache/2.4.58 (Unix) OpenSSL/3.0.2']))  # noqa: E501
+		self.assertEqual((tech.product, tech.version, tech.key), ('Apache HTTP Server', '2.4.58', 'apache:http_server'))
+
 	def test_plugin_is_its_own_product(self):
 		tech = self._convert(_nuclei_item('wordpress-wp-file-manager', ['tech', 'wordpress', 'wp-plugin'], extracted=['8.0.4']))  # noqa: E501
 		self.assertEqual((tech.product, tech.version), ('wordpress wp file manager', '8.0.4'))
@@ -229,13 +238,15 @@ class TestUrlTechs(unittest.TestCase):
 
 	def test_wappalyzer_and_server_header_strings(self):
 		from secator.output_types import Url
-		url = Url(url='http://scanme.nmap.org', tech=['Apache HTTP Server:2.4.7', 'Apache/2.4.7 (Ubuntu)', 'jQuery UI:1.10.3', 'Nginx'])  # noqa: E501
+		url = Url(url='http://scanme.nmap.org', tech=[
+			'Apache HTTP Server:2.4.7', 'Apache/2.4.7 (Ubuntu)', 'jQuery UI:1.10.3', 'Nginx', 'Apache-Coyote/1.1'])  # noqa: E501
 		got = [(t.product, t.version, t.key) for t in url.get_techs()]
 		self.assertEqual(got, [
 			('Apache HTTP Server', '2.4.7', 'apache:http_server'),
 			('Apache HTTP Server', '2.4.7', 'apache:http_server'),
 			('jQuery UI', '1.10.3', 'jquery:jquery_ui'),
 			('nginx', None, 'f5:nginx'),
+			('Apache Tomcat', None, 'apache:tomcat'),
 		])
 
 

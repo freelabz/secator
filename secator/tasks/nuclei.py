@@ -247,21 +247,32 @@ class nuclei(VulnMulti):
 	@staticmethod
 	def product_extractor(item):
 		"""Product named by the result: the matcher name of a multi-product template
-		(`tech-detect:nginx`), else the template metadata product, else the template id
-		without its kind suffix (`microsoft-iis-version` -> `microsoft iis`)."""
+		(`tech-detect:nginx`), else the template metadata product, else an extracted value
+		naming the product (`Apache-Coyote/1.1`), else the template id without its kind
+		suffix (`ms-exchange-server` -> `ms exchange server`)."""
 		matcher_name = item.get('matcher-name')
 		if matcher_name:
 			return matcher_name
 		metadata = (item.get('info') or {}).get('metadata') or {}
 		if metadata.get('product'):
 			return str(metadata['product']).replace('_', ' ')
+		for value in item.get('extracted-results') or []:
+			name, _ = split_version(value)
+			if name:  # the result names the product itself ("Apache-Coyote/1.1", "Microsoft-IIS/8.5")
+				return value
 		return TEMPLATE_ID_SUFFIX.sub('', item['template-id']).replace('-', ' ')
 
 	@staticmethod
 	def version_extractor(item):
-		"""First extracted value carrying a version (`Microsoft-IIS/8.5` -> `8.5`, `12.2.1.3.0`)."""
+		"""First extracted value carrying a version (`8.5`, `12.2.1.3.0`), unless the product
+		itself comes from that value: then Technology splits it (and knows when a number in a
+		banner is not a release, e.g. `Apache-Coyote/1.1`)."""
+		metadata = (item.get('info') or {}).get('metadata') or {}
+		product_from_value = not item.get('matcher-name') and not metadata.get('product')
 		for value in item.get('extracted-results') or []:
-			_, version = split_version(value)
+			name, version = split_version(value)
+			if name and product_from_value:
+				return None
 			if version:
 				return version
 		return None

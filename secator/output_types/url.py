@@ -108,15 +108,9 @@ class Url(OutputType):
 
 	def get_techs(self):
 		# Wappalyzer names ("Apache HTTP Server:2.4.56") or a raw Server header
-		# ("Apache/2.4.25 (Debian)"); Technology normalizes the identity.
-		from secator.technology import split_version
+		# ("Apache/2.4.25 (Debian)"): Technology splits and normalizes the identity.
 		for tech in self.tech:
-			product, version = split_version(tech)
-			yield Technology(
-				match=self.url,
-				product=product or tech,
-				version=version,
-			)
+			yield Technology(match=self.url, product=tech)
 
 	def __rich__(self):
 		s = f'🔗 [white]{_s(self.url)}'
