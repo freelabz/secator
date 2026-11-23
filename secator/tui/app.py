@@ -27,7 +27,7 @@ from secator.ai.interactivity import DISMISS_ANSWER
 from secator.tui.render import finding_text, message_text
 from secator.tui.widgets import (
 	BackBar, BlockPanel, ChoicePrompt, ConversationScroll, Grip, PermissionPrompt, PromptInput, RunnerPanel,
-	SelectableStatic)
+	SelectableStatic, SlashCommand, slash_command_help, slash_help)
 
 
 class TUIApp(App):
@@ -183,6 +183,34 @@ class TUIApp(App):
 	ansi_color = True
 	ENABLE_COMMAND_PALETTE = False
 
+	# Client-side slash commands: {"/cmd": (args, description)}. Typed alone (or with their
+	# arguments) they are handled here and never sent to the runner; dispatched to
+	# ``_slash_<cmd>`` (dashes as underscores). Listed by /help, completed with Tab.
+	SLASH_COMMANDS = {
+		"/help": SlashCommand(
+			"[command]", "list the commands and keys, or show one command's details",
+			"Without an argument: every slash command and the keyboard shortcuts. "
+			"With one (e.g. /help name): that command's usage and details."),
+		"/name": SlashCommand(
+			"<name>", "rename the conversation",
+			"Shown on the input box's top rule and saved with the session."),
+	}
+	# Notable key bindings, listed by /help (the bindings themselves live in BINDINGS and
+	# PromptInput._on_key).
+	KEY_HELP = (
+		("enter", "send the message (or answer the pending question)"),
+		("alt+enter / shift+enter / ctrl+j", "new line"),
+		("tab", "complete a /command"),
+		("shift+tab / ctrl+g", "toggle guardrails (enforced / bypass)"),
+		("ctrl+t", "cycle the mode (auto / scan / chat / exploit)"),
+		("ctrl+o", "expand / collapse all cards"),
+		("ctrl+f", "findings panel"),
+		("ctrl+r", "background tasks panel"),
+		("down", "scroll to the latest message"),
+		("esc", "back to the choice list"),
+		("ctrl+c", "copy the selection, else quit"),
+	)
+
 	# AI modes the mode-cycle steps through (auto = let the runner detect/keep its mode).
 	_MODE_CYCLE = ("auto", "scan", "chat", "exploit")
 
@@ -279,7 +307,7 @@ class TUIApp(App):
 				PromptInput(id="prompt-input"),
 				Static(
 					Text.from_markup(
-						"[#5b6070]Message, or steer a running runner…  (Enter to send · Alt+Enter: newline)[/]"),
+						"[#5b6070]Message, or steer a running runner…  (Enter to send · Alt+Enter: newline · /help)[/]"),
 					id="input-placeholder",
 				),
 				id="input-field",
@@ -868,8 +896,14 @@ class TUIApp(App):
 			danger = "[#e0b050]▶▶ guardrails enforced[/] [#5b6070](shift+tab)[/]"
 		mode = m.get("mode") or "auto"
 		mode_seg = f"[#6b7187]mode:[/] [#7fd1e0]{escape(mode)}[/] [#5b6070](ctrl+t)[/]"
-		left.update(Text.from_markup(f"{danger}   [#3a4150]·[/]   {mode_seg}"))
+		extra = self._meta_extra()
+		extra = f"   [#3a4150]·[/]   {extra}" if extra else ""
+		left.update(Text.from_markup(f"{danger}   [#3a4150]·[/]   {mode_seg}{extra}"))
 		right.update(Text.from_markup(self._pct_text(m.get("ctx_pct"))))
+
+	def _meta_extra(self) -> str:
+		"""Extra markup appended to the main meta bar (frontend-specific indicators)."""
+		return ""
 
 	def tui_set_meta(self, dangerous=None, mode=None, mode_is_auto=None, ctx_pct=None,
 	                 is_subagent=False, sid=None) -> None:
@@ -1115,10 +1149,10 @@ class TUIApp(App):
 			pass
 		if not text:
 			return
-		# `/name <name>` renames the conversation (shown on the top delimiter) instead of being
-		# sent to the agent. It's a client command — don't echo it as a prompt or steer.
-		if text.startswith("/name ") or text == "/name":
-			await self._handle_name_command(text)
+		# Client slash commands (/name, /help, ...) are handled here instead of being sent to
+		# the agent — don't echo them as a prompt or steer. Only KNOWN commands are taken, so a
+		# message that merely starts with "/" (e.g. a path) still goes to the agent.
+		if await self._dispatch_slash(text):
 			return
 		await self._append(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
 		pend = self._pending_ask
@@ -1140,6 +1174,28 @@ class TUIApp(App):
 			return
 		with self._steers_lock:
 			self._steers.append(text)
+
+	@staticmethod
+	def slash_handler_name(cmd: str) -> str:
+		"""The method a registered slash command dispatches to: ``/model-view`` -> ``_slash_model_view``."""
+		return "_slash_" + cmd[1:].replace("-", "_")
+
+	async def _dispatch_slash(self, text: str) -> bool:
+		"""Run ``text`` as a client slash command if it is one. Returns True when handled."""
+		cmd = text.split(None, 1)[0] if text.startswith("/") else ""
+		if cmd not in self.SLASH_COMMANDS:
+			return False
+		await getattr(self, self.slash_handler_name(cmd))(text)
+		return True
+
+	async def _slash_help(self, text: str) -> None:
+		"""`/help [command]`: list the slash commands + keys, or one command's details."""
+		arg = text.split(None, 1)[1].strip() if len(text.split(None, 1)) > 1 else ""
+		body = slash_command_help(arg, self.SLASH_COMMANDS) if arg else slash_help(self.SLASH_COMMANDS, self.KEY_HELP)
+		await self._append(Static(body, classes="note"))
+
+	async def _slash_name(self, text: str) -> None:
+		await self._handle_name_command(text)
 
 	async def _handle_name_command(self, text: str) -> None:
 		"""`/name <name>`: rename the conversation. Updates the top-delimiter label now and

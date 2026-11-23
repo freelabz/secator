@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import NamedTuple
 
 from rich.markup import escape
 from rich.text import Text
@@ -80,6 +81,123 @@ class ConversationScroll(VerticalScroll):
 		self.app.stylesheet.update_nodes([self], animate=True)
 
 
+def complete_slash(text: str, commands: dict) -> "tuple[str, list]":
+	"""Complete a slash-command prefix against ``commands`` ({"/cmd": (args, help)}).
+
+	Returns ``(new_text, candidates)``: a unique match is completed (with a trailing space
+	when the command takes arguments), several matches are completed to their common prefix
+	and returned as candidates, no match leaves the text as is.
+	"""
+	candidates = sorted(c for c in commands if c.startswith(text))
+	if len(candidates) == 1:
+		cmd = candidates[0]
+		args = (commands.get(cmd) or ("", ""))[0]
+		return (cmd + " " if args else cmd), candidates
+	if candidates:
+		prefix = candidates[0]
+		for c in candidates[1:]:
+			while not c.startswith(prefix):
+				prefix = prefix[:-1]
+		return (prefix if len(prefix) > len(text) else text), candidates
+	return text, []
+
+
+class SlashCommand(NamedTuple):
+	"""One client slash command in a TUI's ``SLASH_COMMANDS`` registry. The registry is the
+	single source for dispatch (``_slash_<name>``), ``/help`` and Tab completion."""
+	args: str       # argument synopsis, e.g. "<name>" ("" when it takes none)
+	summary: str    # one line, shown by /help
+	details: str = ""   # longer text, shown by /help <command>
+
+
+def _usage(cmd: str, args: str) -> str:
+	return f"{cmd} {args}" if args else cmd
+
+
+def slash_help(commands: dict, keys=()) -> Text:
+	"""The ``/help`` listing: every command (usage + one-line summary), then the key bindings."""
+	out = Text()
+	out.append("Commands", style="bold #c2a0ff")
+	width = max((len(_usage(c, v[0])) for c, v in commands.items()), default=0)
+	for cmd, entry in sorted(commands.items()):
+		out.append("\n")
+		out.append(_usage(cmd, entry[0]).ljust(width), style="#7fd1e0")
+		out.append(f"  {entry[1]}", style="#6b7187")
+	if keys:
+		out.append("\n\nKeys", style="bold #c2a0ff")
+		kwidth = max(len(k) for k, _ in keys)
+		for key, desc in keys:
+			out.append("\n")
+			out.append(key.ljust(kwidth), style="#7fd1e0")
+			out.append(f"  {desc}", style="#6b7187")
+	out.append("\n\n/help <command> for details", style="#5b6070")
+	return out
+
+
+def slash_command_help(cmd: str, commands: dict) -> Text:
+	"""``/help <command>``: usage, summary and details of one command (``/`` optional)."""
+	cmd = cmd if cmd.startswith("/") else f"/{cmd}"
+	entry = commands.get(cmd)
+	if entry is None:
+		return Text(f"unknown command {cmd} · /help lists them", style="#ff6b6b")
+	out = Text()
+	out.append(_usage(cmd, entry[0]), style="bold #7fd1e0")
+	out.append(f"\n{entry[1]}", style="#cdd6e4")
+	details = entry[2] if len(entry) > 2 else ""
+	if details:
+		out.append(f"\n{details}", style="#6b7187")
+	return out
+
+
+class ModelMessageHead(Static):
+	"""Clickable header that folds/unfolds its ``ModelMessagePanel``."""
+	def on_click(self) -> None:
+		panel = self.parent
+		if isinstance(panel, ModelMessagePanel):
+			panel.toggle()
+
+
+class ModelMessagePanel(Vertical):
+	"""One model-facing message in the model view: a role header and the exact text sent or
+	received (placeholders highlighted). Plain ``Text`` (no Markdown, no markup), so what is
+	shown is byte-for-byte the message content."""
+
+	_ROLE_COLORS = {
+		"system": "#c2a0ff", "user": "#7fd1e0", "assistant": "#cdd6e4",
+		"tool_call": "#e0b050", "tool": "#9aa3b8",
+	}
+
+	def __init__(self, role: str, label: str, body: str, collapsed: bool = False):
+		super().__init__(classes="model-msg")
+		self.role = role
+		self.label = label
+		self.body = body or ""
+		self._collapsed = bool(collapsed)
+
+	def _header(self) -> Text:
+		arrow = "▸" if self._collapsed else "▾"
+		color = self._ROLE_COLORS.get(self.role, "#cdd6e4")
+		return Text.assemble((f"{arrow} ", "#5b6070"), (self.label, f"bold {color}"))
+
+	def compose(self) -> ComposeResult:
+		from secator.tui.model_view import highlight_placeholders
+		yield ModelMessageHead(self._header(), classes="model-msg-head")
+		body = Static(highlight_placeholders(self.body or "(empty)", style="#cdd6e4"), classes="model-msg-body")
+		body.display = not self._collapsed
+		yield body
+
+	def set_collapsed(self, collapsed: bool) -> None:
+		self._collapsed = bool(collapsed)
+		try:
+			self.query_one(".model-msg-head", Static).update(self._header())
+			self.query_one(".model-msg-body", Static).display = not self._collapsed
+		except Exception:  # noqa: BLE001 - not mounted yet
+			pass
+
+	def toggle(self) -> None:
+		self.set_collapsed(not self._collapsed)
+
+
 class PromptInput(TextArea):
 	"""Multi-line chat input (grows with content). Enter SENDS the text; Alt+Enter (also
 	Shift+Enter / Ctrl+J, for terminals that don't deliver Alt) inserts a newline.
@@ -141,7 +259,28 @@ class PromptInput(TextArea):
 			event.prevent_default()
 			self.post_message(self.CycleMode())
 			return
+		# Tab on a lone slash-command prefix completes it (see complete_slash); otherwise Tab
+		# keeps its usual focus behaviour.
+		if event.key == "tab" and self._complete_slash():
+			event.stop()
+			event.prevent_default()
+			return
 		await super()._on_key(event)
+
+	def _complete_slash(self) -> bool:
+		"""Complete the typed slash command from the app's ``SLASH_COMMANDS``. Returns True
+		when it matched a command (Tab is consumed); anything else keeps Tab's usual focus move."""
+		commands = getattr(self.app, "SLASH_COMMANDS", None) or {}
+		text = self.text
+		if not commands or not text.startswith("/") or any(c.isspace() for c in text):
+			return False
+		new_text, candidates = complete_slash(text, commands)
+		if new_text != text:
+			self.text = new_text
+			self.move_cursor(self.document.end)
+		if len(candidates) > 1:
+			self.app.notify("  ".join(candidates), timeout=3)
+		return bool(candidates)
 
 
 def _usage_line(usage: dict) -> "Text | None":
