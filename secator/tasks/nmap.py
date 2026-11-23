@@ -283,6 +283,8 @@ class nmapData(dict):
 							match=f'{ip}:{port_number}',
 							product=extra_data['product'],
 							version=extra_data.get('version'),
+							# Keep the service CPEs: they name the product precisely (vendor:product).
+							extra_data={'cpe': list(cpes)} if cpes else {},
 						)
 					)
 

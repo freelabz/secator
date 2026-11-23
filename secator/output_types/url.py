@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 from urllib.parse import urlparse
 
-from secator.cve import extract_software_and_version
 from secator.definitions import CONTENT_LENGTH, CONTENT_TYPE, STATUS_CODE, TECH, TITLE, URL, WEBSERVER, METHOD
 from secator.output_types import OutputType, Technology
 from secator.utils import rich_to_ansi, trim_string, format_object, rich_escape as _s, to_title_case_hyphenated  # noqa: E501
@@ -108,13 +107,14 @@ class Url(OutputType):
 		return self.url
 
 	def get_techs(self):
+		# Wappalyzer names ("Apache HTTP Server:2.4.56") or a raw Server header
+		# ("Apache/2.4.25 (Debian)"); Technology normalizes the identity.
+		from secator.technology import split_version
 		for tech in self.tech:
-			normalized = tech.replace('_', ' ').replace('/', ' ').replace('(', ' ').replace(')', ' ').replace(':', ' ')
-			product, version = extract_software_and_version(normalized)
-			product = product or tech
+			product, version = split_version(tech)
 			yield Technology(
 				match=self.url,
-				product=product,
+				product=product or tech,
 				version=version,
 			)
 

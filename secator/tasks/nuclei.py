@@ -1,7 +1,7 @@
+import re
 import shlex
 
 from secator.config import CONFIG
-from secator.cve import extract_software_and_version
 from secator.decorators import task
 
 # fmt: off
@@ -14,15 +14,32 @@ from secator.definitions import (
 from secator.output_types import Progress, Tag, Technology, Vulnerability, Warning
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import VulnMulti
+from secator.technology import split_version
+
+
+# Template tags that mark a product / version detection (nuclei-templates convention:
+# `http/technologies/*` carry `tech`, network detections `detect`, login panels `panel`).
+DETECTION_TAGS = {'tech', 'detect', 'detection', 'panel', 'wp-plugin', 'wp-theme'}
+# ...unless the template reports a weakness (`vuln`, `misconfig`, `exposure`): those stay tags.
+FINDING_TAGS = {'vuln', 'misconfig', 'exposure'}
+# Suffixes that name the template kind, not the product (`apache-detect` -> `apache`).
+TEMPLATE_ID_SUFFIX = re.compile(r'(-(detect|detection|version|login|panel|server-detect))+$')
+
+
+def _template_tags(item):
+	tags = (item.get('info') or {}).get('tags') or []
+	if isinstance(tags, str):
+		tags = tags.split(',')
+	return {t.strip().lower() for t in tags if t}
 
 
 def output_discriminator(self, item):
-	"""Discriminate between Tag and Vulnerability based on severity."""
+	"""Info-severity detections are Technology, other info results Tag, the rest Vulnerability."""
 	if 'percent' in item:
 		return Progress
 	severity = item.get('info', {}).get('severity', '').lower()
 	if severity == 'info':
-		return Tag
+		return Technology if nuclei.is_detection(item) else Tag
 	return Vulnerability
 
 
@@ -123,8 +140,9 @@ class nuclei(VulnMulti):
 		Technology: {
 			'match': 'matched-at',
 			'product': lambda x: nuclei.product_extractor(x),
+			'vendor': lambda x: ((x.get('info') or {}).get('metadata') or {}).get('vendor') or '',
 			'version': lambda x: nuclei.version_extractor(x),
-			EXTRA_DATA: lambda x: nuclei.extra_data_extractor(x),
+			EXTRA_DATA: lambda x: nuclei.technology_extra_data(x),
 		},
 		Progress: {
 			PERCENT: lambda x: int(x['percent']),
@@ -220,21 +238,41 @@ class nuclei(VulnMulti):
 		return item['template-id']
 
 	@staticmethod
+	def is_detection(item):
+		"""Does this info-severity result identify a product (rather than report a weakness)?"""
+		tags = _template_tags(item)
+		classification = (item.get('info') or {}).get('classification') or {}
+		return bool(tags & DETECTION_TAGS or classification.get('cpe')) and not tags & FINDING_TAGS
+
+	@staticmethod
 	def product_extractor(item):
-		tid = item['template-id']
-		if '-detect' in tid:
-			return tid.replace('-detect', '')
-		val = nuclei.value_extractor(item).replace('_', ' ').replace('/', '').replace('-detect', '').replace('-version', '').replace('generic', '')  # noqa: E501
-		product, _ = extract_software_and_version(val, postfix=True)
-		if product is not None:
-			return product
-		return val
+		"""Product named by the result: the matcher name of a multi-product template
+		(`tech-detect:nginx`), else the template metadata product, else the template id
+		without its kind suffix (`microsoft-iis-version` -> `microsoft iis`)."""
+		matcher_name = item.get('matcher-name')
+		if matcher_name:
+			return matcher_name
+		metadata = (item.get('info') or {}).get('metadata') or {}
+		if metadata.get('product'):
+			return str(metadata['product']).replace('_', ' ')
+		return TEMPLATE_ID_SUFFIX.sub('', item['template-id']).replace('-', ' ')
 
 	@staticmethod
 	def version_extractor(item):
-		val = nuclei.value_extractor(item).replace('_', ' ').replace('/', '').replace('-detect', '').replace('-version', '').replace('generic', '')  # noqa: E501
-		_, version = extract_software_and_version(val, postfix=True)
-		return version
+		"""First extracted value carrying a version (`Microsoft-IIS/8.5` -> `8.5`, `12.2.1.3.0`)."""
+		for value in item.get('extracted-results') or []:
+			_, version = split_version(value)
+			if version:
+				return version
+		return None
+
+	@staticmethod
+	def technology_extra_data(item):
+		data = nuclei.extra_data_extractor(item)
+		cpe = ((item.get('info') or {}).get('classification') or {}).get('cpe')
+		if cpe:
+			data['cpe'] = cpe if isinstance(cpe, list) else [cpe]
+		return data
 
 	@staticmethod
 	def name_extractor(item):

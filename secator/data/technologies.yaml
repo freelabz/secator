@@ -1,0 +1,119 @@
+# Technology catalog: one canonical identity per real product.
+#
+# Read by secator/technology.py. Every task that emits a Technology finding passes it
+# through that normalizer, so the same product reads the same everywhere:
+# `Apache/2.4.25 (Debian)` (Server header), `Apache HTTP Server:2.4.56` (wappalyzer),
+# `apache httpd` (nmap -sV) and `apache-detect` (nuclei) all become
+# key `apache:http_server`, product `Apache HTTP Server`.
+#
+# products:
+#   key:      CPE `vendor:product` (NVD naming). The identity used for matching.
+#   name:     display name stored in Technology.product.
+#   aliases:  raw names seen from tools / advisories. Compared after cleaning
+#             (lowercase, punctuation -> space, version split off), so `Microsoft-IIS`
+#             and `microsoft iis` are one alias. Do not list the key's own words;
+#             `vendor product` forms are tried automatically.
+#   cpes:     extra CPE `vendor:product` pairs that mean this product (legacy vendors).
+#   common:   true for products found almost everywhere. A finding with no version
+#             says little, so consumers should be stricter with name-only matches.
+#   versionless_aliases: spellings whose embedded number is not the product version
+#             (`Apache-Coyote/1.1` is the connector protocol, not the Tomcat release).
+#   requires_version: true for broad platforms (an OS guessed from a header):
+#             a name-only finding must not be matched to advisories at all.
+#
+# To add a product: append an entry with its NVD `key`, a `name`, and the raw
+# spellings you saw as `aliases`. Nothing else to change.
+#
+# rules: generic, product-independent word lists.
+#   vendors:        a bare vendor name is never a product (unless listed as an alias).
+#   generic_words:  words that are not a product on their own (`HTTP Server`, `Core`).
+#   noise_words:    dropped when looking a name up (`OpenSSH server` -> `openssh`).
+#   fuzzy_threshold: minimum similarity to map an unknown spelling INTO an entry.
+
+rules:
+  fuzzy_threshold: 0.9
+  vendors: [apache, microsoft, oracle, f5, cisco, google, ibm, adobe, vmware, citrix, fortinet,
+            ivanti, sap, atlassian, progress, openbsd, synology, ietf, gnu, mozilla, redhat]
+  generic_words: [http, core, server, platform, framework, plugin, web, manager, portal, gateway,
+                  console, client, agent, suite, multiple products, application, http server,
+                  web server, service]
+  noise_words: [server, service, software, edition, community, enterprise, httpd, daemon,
+                detect, detection, version]
+
+products:
+  - key: apache:http_server
+    name: Apache HTTP Server
+    # `Server: Apache[/x.y]` is only sent by httpd (Tomcat sends `Apache-Coyote`).
+    aliases: [apache, httpd, apache httpd, apache http server, apache2, apache web server]
+    common: true
+  - key: apache:tomcat
+    name: Apache Tomcat
+    aliases: [tomcat, apache coyote, apache tomcat coyote jsp engine, apache coyote jsp engine]
+    versionless_aliases: [apache coyote]
+    common: true
+  - key: apache:struts
+    name: Apache Struts
+    aliases: [struts, struts2, struts 2, apache struts 1, apache struts 2]
+  - key: apache:activemq
+    name: Apache ActiveMQ
+    aliases: [activemq]
+  - key: apache:roller
+    name: Apache Roller
+    aliases: [roller]
+  - key: apache:log4j
+    name: Apache Log4j
+    aliases: [log4j, log4j2, apache log4j2]
+  - key: f5:nginx
+    name: nginx
+    aliases: [nginx]
+    cpes: [igor_sysoev:nginx, nginx:nginx]
+    common: true
+  - key: openresty:openresty
+    name: OpenResty
+    aliases: [openresty, openresty web app server, ngx openresty]
+    cpes: [openresty:ngx_openresty]
+  - key: microsoft:internet_information_services
+    name: Microsoft IIS
+    aliases: [iis, ms iis, microsoft iis, microsoft iis httpd, internet information services,
+              internet information services iis]
+    cpes: [microsoft:iis]
+    common: true
+  - key: openbsd:openssh
+    name: OpenSSH
+    aliases: [openssh]
+    cpes: [openssh:openssh]
+    common: true
+  - key: php:php
+    name: PHP
+    # PHP-FPM ships in PHP; NVD files its CVEs (e.g. CVE-2019-11043) under php:php.
+    aliases: [php, php group php, php fastcgi process manager, php fastcgi process manager fpm, php fpm]
+    common: true
+  - key: jquery:jquery
+    name: jQuery
+    aliases: [jquery]
+    common: true
+  - key: jquery:jquery_ui
+    name: jQuery UI
+    aliases: [jquery ui]
+    cpes: [jqueryui:jquery_ui]
+  - key: wordpress:wordpress
+    name: WordPress
+    # Plugins are separate products: they never resolve here.
+    aliases: [wordpress, wordpress core]
+    common: true
+  - key: microsoft:exchange_server
+    name: Microsoft Exchange Server
+    # Outlook Web App is served by Exchange; its version is the Exchange build.
+    aliases: [exchange, exchange server, ms exchange server, ms exchange web service,
+              outlook web app, outlook web access, microsoft outlook web app, owa]
+  - key: oracle:weblogic_server
+    name: Oracle WebLogic Server
+    aliases: [weblogic, weblogic server, oracle weblogic, oracle weblogic admin httpd,
+              oracle weblogic login panel]
+  - key: synology:diskstation_manager
+    name: Synology DiskStation Manager
+    aliases: [synology diskstation, synology dsm, diskstation manager, diskstation manager dsm]
+  - key: microsoft:windows
+    name: Microsoft Windows
+    aliases: [windows, windows server, microsoft windows server]
+    requires_version: true
