@@ -145,6 +145,24 @@ class TestPrompts(unittest.TestCase):
 			self.assertIn("<mode>", p, f"{mode} missing the <mode> block")
 			self.assertIn("</mode>", p, f"{mode} missing the </mode> close")
 
+	def test_monitor_prompt_groups_and_batches_per_host(self):
+		"""Monitor mode queries each type grouped without duplicates, re-checks in batches per host,
+		and records a verdict on every _uuid of an entity."""
+		p = get_system_prompt("monitor", workspace_path="<ws>", backend=None)
+		self.assertIn('"_duplicate": {"$ne": true}, "_context.workspace_duplicate": {"$ne": true}', p)
+		self.assertIn("group=True)", p)
+		self.assertIn("batches per HOST, never one finding per command", p)
+		self.assertIn("EVERY `_uuid` of the entity", p)
+		self.assertIn("do not retry it another way", p)
+
+	def test_query_tool_describes_every_group_key(self):
+		"""The grouping keys live in the query_workspace tool description, not in the mode prompt."""
+		from secator.ai.tools.query_workspace import QueryWorkspace
+		desc = QueryWorkspace().schema["function"]["parameters"]["properties"]["group"]["description"]
+		for name in ('port', 'url', 'ip', 'subdomain', 'domain', 'certificate', 'record', 'user_account',
+		             'technology', 'vulnerability'):
+			self.assertIn(f"{name}->", desc)
+
 	def test_get_system_prompt_invalid_mode_falls_back(self):
 		"""Test get_system_prompt falls back to chat for invalid mode (consistent with get_mode_config)."""
 		invalid_prompt = get_system_prompt("invalid_mode")

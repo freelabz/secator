@@ -86,12 +86,13 @@ class QueryWorkspace(BaseTool):
 					},
 					"group": {
 						"type": "boolean",
-						"description": "Return aggregated group representatives (one per group, with a _group_count "  # noqa: E501
-						               "member count + aggregated targets) instead of every finding — a compact overview "  # noqa: E501
-						               "that saves context. Requires a single _type in the query. Each representative is "  # noqa: E501
-						               "grouped by that type's key field (shown on the row, e.g. vulnerability->name, "  # noqa: E501
-						               "port->host); drill into a group by re-querying that field — NOT the _uuid, which "  # noqa: E501
-						               "identifies only the one representative finding.",
+						"description": "Return one row per entity instead of every finding: the duplicates of a "  # noqa: E501
+						               "finding across runs and tools collapse into one row. Requires a single _type. Keys: "  # noqa: E501
+						               "port->host:port (ip:port), url->url, ip->ip, subdomain->host, domain->domain, "  # noqa: E501
+						               "certificate->host+fingerprint, record->host+type+name, user_account->site_name+username, "  # noqa: E501
+						               "technology->product:version, vulnerability->id (name). Each row has _group_key, "  # noqa: E501
+						               "_group_count, _group_uuids (EVERY member's _uuid) and _group_members ({value: [_uuids]}, "  # noqa: E501
+						               "values: matched_at for vulnerability, match for technology, host for ip, else _source).",  # noqa: E501
 						"default": False
 					}
 				},
@@ -200,6 +201,9 @@ class QueryWorkspace(BaseTool):
 						_context=context,
 					)
 					return
+				if not group_cls._group_by:
+					yield Error(message=f"group=True is not supported for {group_cls.get_name()} (no group key).", _context=context)
+					return
 
 			results = engine.search(search_query, limit=limit, offset=offset)
 			# Local driver only writes to disk at end-of-run, so union this run's live
@@ -212,7 +216,8 @@ class QueryWorkspace(BaseTool):
 
 			if group_cls is not None:
 				from secator.query.utils import group_findings
-				results = group_findings(results, list(group_cls._group_by), group_cls._group_aggregate)
+				results = group_findings(
+					results, list(group_cls._group_by), group_cls._group_aggregate, with_members=True)
 
 			extra = {"results": len(results), "limit": limit, "offset": offset}
 			if group:
