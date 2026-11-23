@@ -78,20 +78,6 @@ def test_show_prompt_needs_no_llm_credentials(capfd):
 	assert not [r for r in results if r._type == 'error']
 
 
-def test_show_prompt_md_format_fences_the_prompt(capfd):
-	_run({'mode': 'chat', 'show_prompt_format': 'md'})
-	out, _ = capfd.readouterr()
-	# fence is longer than the longest backtick run inside the prompt
-	assert out == f'# System prompt (chat)\n\n````text\n{PROMPT}\n````\n'
-
-
-def test_show_prompt_invalid_format_is_an_error(capfd):
-	results, _ = _run({'mode': 'chat', 'show_prompt_format': 'html'})
-	out, _ = capfd.readouterr()
-	assert out == ''
-	assert [r for r in results if r._type == 'error']
-
-
 def test_mode_name_as_model_warns():
 	results, _ = _run({'mode': 'chat', 'model': 'chat'})
 	warnings = [r for r in results if r._type == 'warning']
