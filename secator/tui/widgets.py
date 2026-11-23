@@ -77,8 +77,50 @@ class ConversationScroll(VerticalScroll):
 	conversation. No rule styles a descendant by this container's focus, so restyle only
 	the container itself (and its scrollbars)."""
 
+	# Stick to the bottom unless the user scrolled away: `_follow` is True while the view ends
+	# at the bottom. New content, or a smaller view (e.g. the choice box taking the input
+	# slot), then keeps the bottom in view; scrolling back down, or scroll_end(), follows again.
+	# (Textual's anchor() is not used: it bottom-aligns a conversation shorter than the view.)
+	_follow = True
+	_hold = False
+
 	def watch_has_focus(self, _has_focus: bool) -> None:
 		self.app.stylesheet.update_nodes([self], animate=True)
+
+	def watch_scroll_y(self, old_value: float, new_value: float) -> None:
+		super().watch_scroll_y(old_value, new_value)
+		self._follow = round(new_value) >= self.max_scroll_y
+
+	def watch_virtual_size(self, _size) -> None:
+		# the content grew or shrank (an item was added, a panel resized)
+		self.call_after_refresh(self._after_relayout)
+
+	def on_resize(self, _event) -> None:
+		# the view itself changed size (e.g. the input slot grew)
+		self.call_after_refresh(self._after_relayout)
+
+	def _after_relayout(self) -> None:
+		if self._hold:
+			# a panel expanded/collapsed in place: keep the position, follow only if still at the bottom
+			self._hold = False
+			self._follow = round(self.scroll_y) >= self.max_scroll_y
+		elif self._follow:
+			self.scroll_end(animate=False, immediate=True)
+
+	def hold_position(self) -> None:
+		"""Keep the scroll position through the next relayout instead of following the bottom.
+		Expanding a panel grows the content in place: following would push its header up."""
+		self._hold = True
+
+
+def _hold_scroll(widget) -> None:
+	"""Hold the enclosing conversation's scroll position while ``widget`` resizes in place."""
+	if not widget.region:
+		return   # not laid out (e.g. inside a collapsed panel): toggling it moves nothing
+	for node in widget.ancestors:
+		if isinstance(node, ConversationScroll):
+			node.hold_position()
+			return
 
 
 def complete_slash(text: str, commands: dict) -> "tuple[str, list]":
@@ -416,6 +458,7 @@ class RunnerPanel(Vertical):
 	def toggle_raw(self) -> None:
 		if not self.raw_lines:           # nothing hidden to reveal (e.g. a shell: output is visible)
 			return
+		_hold_scroll(self)
 		self._raw_collapsed = not self._raw_collapsed
 		self.query_one(".runner-raw", Vertical).display = not self._raw_collapsed
 		self._refresh_cmd()
@@ -486,6 +529,7 @@ class RunnerPanel(Vertical):
 		self.query_one(".runner-head", Head).update(self._header(), layout=layout)
 
 	def toggle(self) -> None:
+		_hold_scroll(self)
 		self._collapsed = not self._collapsed
 		self.query_one(".runner-box", Vertical).display = not self._collapsed
 		self._refresh_head()
@@ -725,6 +769,7 @@ class BlockPanel(Vertical):
 		return t
 
 	def toggle(self) -> None:
+		_hold_scroll(self)
 		self._collapsed = not self._collapsed
 		self.query_one(".runner-box", Vertical).display = not self._collapsed
 		self.query_one(".runner-head", _BlockHead).update(self._header())
@@ -770,6 +815,7 @@ class ActionPanel(Vertical):
 	def toggle(self) -> None:
 		if self.finding is None:
 			return
+		_hold_scroll(self)
 		self._collapsed = not self._collapsed
 		self.query_one(".runner-box", Vertical).display = not self._collapsed
 		self.query_one(".runner-head", _ActionHead).update(self._header())
