@@ -1,4 +1,4 @@
-"""Model view for the ``ai`` TUI: the conversation exactly as the model receives it.
+"""Model view for the ``ai`` TUI: the conversation as the model receives it.
 
 The ``ai`` task keeps a model-facing history (``ChatHistory.messages``): the system prompt,
 the user turns, the per-iteration instructions the loop injects under the ``user`` role, the
@@ -7,6 +7,10 @@ encryptor is on, every one of those messages is stored ALREADY encrypted — hos
 emails and custom patterns appear as their ``[TYPE:hash]`` placeholders, the same text that
 was sent. The model view renders that history verbatim, so it never has to re-encrypt
 anything: no new placeholder is minted and the encryptor's map is never touched.
+
+It is the live history the next request is built from. Per-request adjustments made on a
+copy at send time (trimming to the context budget, synthetic acknowledgements for tool
+calls that never got a result) are not shown.
 
 Pure helpers live here (no Textual import) so they can be unit-tested without an app.
 """
@@ -22,8 +26,9 @@ from secator.ai.history import classify_user_message
 
 # Style of a placeholder inside a model-view message (the encrypted value as sent).
 PLACEHOLDER_STYLE = "bold #c2a0ff"
-# Tool results longer than this many lines start collapsed (click the header to expand).
+# Tool results longer than this many lines (or characters) start collapsed (click to expand).
 COLLAPSE_LINES = 20
+COLLAPSE_CHARS = 4000
 
 MODEL_VIEW_ON = "Model view on: showing what the model receives"
 MODEL_VIEW_OFF = "Model view off"
@@ -107,9 +112,9 @@ def model_view_entries(messages) -> list:
 			cid = m.get("tool_call_id") or ""
 			lines = body.count("\n") + 1 if body else 0
 			label = "tool result" + (f" · {name}" if name else "") + (f" · {cid}" if cid else "")
-			collapsed = lines > COLLAPSE_LINES
+			collapsed = lines > COLLAPSE_LINES or len(body) > COLLAPSE_CHARS
 			if collapsed:
-				label += f" · {lines} lines"
+				label += f" · {lines} lines" if lines > COLLAPSE_LINES else f" · {len(body):,} chars"
 			entries.append({"role": "tool", "label": label, "body": body, "collapsed": collapsed})
 		else:
 			entries.append({"role": role or "message", "label": role or "message", "body": body, "collapsed": False})
@@ -132,11 +137,19 @@ def model_view_summary(messages, encrypted: bool) -> str:
 	return f"{head} · {k} encrypted value{'s' if k != 1 else ''} shown as placeholders"
 
 
-def message_signature(m) -> str:
-	"""A stable digest of one message (role, content, tool calls), used to tell an appended
-	history from a rewritten one (compaction, a new system prompt) between refreshes."""
+def message_signature(m) -> tuple:
+	"""A cheap fingerprint of one message, used to tell an appended history from a rewritten
+	one (compaction, a new system prompt, a stubbed tool result) between refreshes. Runs every
+	second over the whole history, so it never serializes large contents: role, ids, content
+	length and its head/tail, plus a digest of the (small) tool calls."""
 	if not isinstance(m, dict):
-		return ""
-	payload = {k: m.get(k) for k in ("role", "content", "tool_calls", "tool_call_id", "name")}
-	raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-	return hashlib.blake2b(raw.encode("utf-8", "replace"), digest_size=16).hexdigest()
+		return ()
+	content = _content_text(m.get("content"))
+	calls = m.get("tool_calls") or []
+	calls_sig = ""
+	if calls:
+		raw = json.dumps(calls, ensure_ascii=False, sort_keys=True, default=str)
+		calls_sig = hashlib.blake2b(raw.encode("utf-8", "replace"), digest_size=8).hexdigest()
+	return (
+		m.get("role"), m.get("tool_call_id"), m.get("name"),
+		len(content), content[:64], content[-64:], calls_sig)

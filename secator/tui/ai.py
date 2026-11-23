@@ -51,7 +51,7 @@ class AITUI(TUIApp):
 	SLASH_COMMANDS = {
 		**TUIApp.SLASH_COMMANDS,
 		"/model-view": SlashCommand(
-			"", "toggle the model view: the conversation exactly as the model receives it",
+			"", "toggle the model view: the conversation as the model receives it",
 			"Shows the model-facing history as sent: the system prompt (folded), user turns and "
 			"the loop's injected instructions, assistant replies with their raw tool calls, and "
 			"every tool result. With sensitive-data encryption on, hosts, IPs and emails appear "
@@ -145,7 +145,10 @@ class AITUI(TUIApp):
 		if messages is None:
 			return
 		view = self._model_view()
-		sigs = [message_signature(m) for m in messages]
+		try:
+			sigs = [message_signature(m) for m in messages]
+		except Exception:  # noqa: BLE001 - a message mutated mid-read: try again next tick
+			return
 		n = len(self._mv_sigs)
 		at_end = view.max_scroll_y <= 0 or view.scroll_y >= view.max_scroll_y - 1
 		if full or sigs[:n] != self._mv_sigs:
@@ -195,7 +198,14 @@ class AITUI(TUIApp):
 				self._convo().display = True
 		self._render_meta()
 		if not self._model_view_on:
-			await self._append(Static(Text(f"◉ {MODEL_VIEW_OFF}", style="#6b7187"), classes="note"))
+			await self._append_note(Text(f"◉ {MODEL_VIEW_OFF}", style="#6b7187"))
+
+	def _show_prompt(self, question, pending, multiple=False, command="", solo=False) -> None:
+		# A choice list or an approval needs the conversation's context (the reply explaining
+		# it renders there): leave the model view so the question isn't answered blind.
+		if self._model_view_on and (pending[3] == "permission" or pending[2]):
+			self.call_later(self._set_model_view, False)
+		super()._show_prompt(question, pending, multiple, command, solo)
 
 	def _meta_extra(self) -> str:
 		return "[b #c2a0ff]◉ model view[/] [#5b6070](/model-view)[/]" if self._model_view_on else ""
@@ -217,7 +227,7 @@ class AITUI(TUIApp):
 
 	def action_expand_all(self) -> None:
 		# ctrl+o in the model view folds/unfolds its messages instead of the (hidden) runner cards
-		if not self._model_view_on:
+		if not self._model_view().display:
 			return super().action_expand_all()
 		panels = list(self._model_view().query(ModelMessagePanel))
 		if panels:

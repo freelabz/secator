@@ -128,6 +128,9 @@ def test_long_tool_result_starts_collapsed():
 	msgs = [{"role": "tool", "name": "x", "tool_call_id": "c", "content": "\n".join(["l"] * 50)}]
 	e = model_view_entries(msgs)[0]
 	assert e["collapsed"] and "50 lines" in e["label"]
+	one_line = [{"role": "tool", "name": "x", "tool_call_id": "c", "content": "x" * 9000}]
+	e = model_view_entries(one_line)[0]
+	assert e["collapsed"] and "9,000 chars" in e["label"]
 
 
 # ---- headless TUI ----
@@ -142,10 +145,26 @@ async def _type(pilot, app, text):
 	await pilot.pause(0.1)
 
 
+class _Guard:
+	"""Snapshot of the history + encryptor maps; ``check()`` asserts the display left them alone."""
+
+	def __init__(self, h, enc):
+		self.h, self.enc = h, enc
+		self.take()
+
+	def take(self):
+		self.msgs = copy.deepcopy(self.h.messages)
+		self.pii, self.hashes = dict(self.enc.pii_map), dict(self.enc.hash_map)
+
+	def check(self):
+		assert self.h.messages == self.msgs
+		assert self.enc.pii_map == self.pii and self.enc.hash_map == self.hashes
+
+
 async def _toggle_body():
 	enc = SensitiveDataEncryptor()
 	h = _history(enc)
-	pii, hashes, hist = dict(enc.pii_map), dict(enc.hash_map), copy.deepcopy(h.messages)
+	guard = _Guard(h, enc)
 	app = AITUI(None, session="ai", mode="chat")
 	app.tui_set_model_source(_source(h, enc))
 	async with app.run_test(size=(120, 50)) as pilot:
@@ -154,6 +173,7 @@ async def _toggle_body():
 		assert "model view" not in str(meta.render())
 
 		await _type(pilot, app, "/model-view")
+		guard.check()
 		assert app._model_view_on
 		assert app._model_view().display and not app._convo().display
 		assert "model view" in str(meta.render())          # visible indicator
@@ -166,29 +186,47 @@ async def _toggle_body():
 
 		# new history is followed (incremental append)
 		h.add_assistant(maybe_encrypt(f"{HOST} looks live.", enc))
-		pii2, hashes2 = dict(enc.pii_map), dict(enc.hash_map)
-		hist2 = copy.deepcopy(h.messages)
+		guard.take()
 		await app._refresh_model_view()
+		await app._tick_model_view()
 		await pilot.pause(0.05)
+		guard.check()
 		bodies = _panel_bodies(app)
 		assert len(bodies) == 7 and bodies[-1].endswith("looks live.") and HOST not in bodies[-1]
+
+		# /help while the view is on shows in the view the user is looking at
+		await _type(pilot, app, "/help")
+		assert list(app._model_view().query(".note")), "help note hidden in the convo"
+
+		# ctrl+o folds/unfolds the model-view messages
+		panels = list(app._model_view().query(ModelMessagePanel))
+		await pilot.press("ctrl+o")
+		assert all(not p._collapsed for p in panels)
+
+		# a drill-in and Back return to the model view
+		sv = await app._ensure_subview("sub1")
+		app._open_subview("sub1")
+		assert sv.display and not app._model_view().display
+		app._show_main()
+		assert app._model_view().display and not app._convo().display
+
 		# a rewritten history (compaction) re-renders from scratch
-		h.messages = [h.messages[0], {"role": "user", "content": "Summary of previous iterations:\n\nall good"}]
+		saved = h.messages
+		h.messages = [saved[0], {"role": "user", "content": "Summary of previous iterations:\n\nall good"}]
+		guard.take()
 		await app._refresh_model_view()
 		await pilot.pause(0.05)
+		guard.check()
 		labels = [p.label for p in app._model_view().query(ModelMessagePanel)]
 		assert labels[1] == "user · summary of earlier turns" and len(labels) == 2
-		h.messages = hist2
 
 		await _type(pilot, app, "/model-view")
+		guard.check()
 		assert not app._model_view_on
 		assert app._convo().display and not app._model_view().display
 		assert "model view" not in str(meta.render())
 		assert not list(app._model_view().query(ModelMessagePanel))
-	# display only: the encryptor's map and the history are untouched by the view
-	assert enc.pii_map == pii2 and enc.hash_map == hashes2 and h.messages == hist2
-	assert set(pii) <= set(pii2) and set(hashes) <= set(hashes2)
-	assert hist == hist2[:len(hist)]
+		assert "Model view off" in str(list(app._convo().query(".note"))[-1].render())
 
 
 def test_model_view_toggle_headless():
@@ -218,9 +256,37 @@ async def _help_and_complete_body():
 		last = str(list(app._convo().query(".note"))[-1].render())
 		assert last.startswith("/model-view") and "Display only" in last
 		assert any("Model view off" in n for n in notes)
-		# a message that only starts with "/" is still a message, not a command
+		# a message that only starts with "/" (or with a command word) is still a message
 		await _type(pilot, app, "/etc/hosts looks odd")
 		assert app.tui_poll_steers() == [] and app._prefill == "/etc/hosts looks odd"
+		for msg in ("/help me scan example.com", "/model-view please explain"):
+			await _type(pilot, app, msg)
+		assert app.tui_poll_steers() == ["/help me scan example.com", "/model-view please explain"]
+		assert not app._model_view_on
+		# Tab on a prefix with no command keeps the text
+		inp = app.query_one("#prompt-input", PromptInput)
+		inp.text = "/zz"
+		await pilot.press("tab")
+		assert inp.text == "/zz"
+
+
+async def _prompt_leaves_view_body():
+	app = AITUI(None, session="ai", mode="chat")
+	async with app.run_test(size=(120, 40)) as pilot:
+		await pilot.pause(0.05)
+		app._awaiting_first_prompt = False
+		await app._set_model_view(True)
+		# a plain follow-up keeps the view; a choice list leaves it so it isn't answered blind
+		app._show_prompt("next?", (None, {}, [], "stopped"))
+		await pilot.pause(0.05)
+		assert app._model_view_on
+		app._show_prompt("pick", (None, {}, ["a", "b"], "stopped"))
+		await pilot.pause(0.1)
+		assert not app._model_view_on and app._convo().display
+
+
+def test_choice_prompt_leaves_model_view():
+	asyncio.run(_prompt_leaves_view_body())
 
 
 def test_help_and_completion_headless():

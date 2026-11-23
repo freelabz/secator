@@ -1182,17 +1182,37 @@ class TUIApp(App):
 
 	async def _dispatch_slash(self, text: str) -> bool:
 		"""Run ``text`` as a client slash command if it is one. Returns True when handled."""
-		cmd = text.split(None, 1)[0] if text.startswith("/") else ""
-		if cmd not in self.SLASH_COMMANDS:
+		parts = text.split(None, 1) if text.startswith("/") else []
+		cmd = parts[0] if parts else ""
+		entry = self.SLASH_COMMANDS.get(cmd)
+		if entry is None:
+			return False
+		arg = parts[1].strip() if len(parts) > 1 else ""
+		# A command that takes no arguments only matches on its own ("/model-view please …"
+		# is a message), and `/help <x>` only when <x> is a command ("/help me scan x" is a
+		# message) — so typing a real prompt that starts with a command word still reaches
+		# the agent.
+		if arg and (not entry[0] or (cmd == "/help" and self._help_target(arg) not in self.SLASH_COMMANDS)):
 			return False
 		await getattr(self, self.slash_handler_name(cmd))(text)
 		return True
+
+	@staticmethod
+	def _help_target(arg: str) -> str:
+		return arg if arg.startswith("/") else f"/{arg}"
+
+	async def _append_note(self, renderable) -> None:
+		"""Mount client-command output (/help, /name, ...) in the view the user is looking at
+		— not the last item's write target, which may be a hidden subview."""
+		view = self._active_view()
+		await view.mount(Static(renderable, classes="note"))
+		view.scroll_end(animate=False)
 
 	async def _slash_help(self, text: str) -> None:
 		"""`/help [command]`: list the slash commands + keys, or one command's details."""
 		arg = text.split(None, 1)[1].strip() if len(text.split(None, 1)) > 1 else ""
 		body = slash_command_help(arg, self.SLASH_COMMANDS) if arg else slash_help(self.SLASH_COMMANDS, self.KEY_HELP)
-		await self._append(Static(body, classes="note"))
+		await self._append_note(body)
 
 	async def _slash_name(self, text: str) -> None:
 		await self._handle_name_command(text)
@@ -1202,14 +1222,12 @@ class TUIApp(App):
 		queues the rename for the runner to persist (it stamps every item with the name)."""
 		name = text[len("/name "):].strip() if text != "/name" else ""
 		if not name:
-			await self._append(Static(
-				Text.from_markup("[#6b7187]usage: /name <conversation name>[/]"), classes="note"))
+			await self._append_note(Text.from_markup("[#6b7187]usage: /name <conversation name>[/]"))
 			return
 		self._set_session_name(name)
 		with self._control_lock:
 			self._control["session_name"] = name
-		await self._append(Static(
-			Text.from_markup(f"[#6b7187]↻ renamed conversation to [b]{escape(name)}[/][/]"), classes="note"))
+		await self._append_note(Text.from_markup(f"[#6b7187]↻ renamed conversation to [b]{escape(name)}[/][/]"))
 
 	# ---- choice box (lives in the input slot while a choice ask is active) ----
 	# Widgets hidden while a "solo" choice (the resume session picker) is shown, so only the
