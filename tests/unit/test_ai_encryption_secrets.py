@@ -39,6 +39,17 @@ class TestEncryptSecrets(unittest.TestCase):
 			"xoxp-" + "1234567890-abcdef",
 			"AIza" + "SyA-1234567890abcdefghijklmnopqrstu",
 			"sk_live_" + "51H8abcdefghijklmnop",
+			"xoxe-" + "1-My0xLTEyMzQ1Njc4OTAxMi0xMjM0NTY3",
+			"xoxe.xoxp-" + "1-Mi0yLTEyMzQ1Njc4OTAxMi0xMjM0",
+			"glpat-" + "aB3dE5fG7hJ9kL1mN3pQ",
+			"glpat-" + "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5bC7dE9.01.0z1a2b3c4",
+			"gldt-" + "Zx9Yw8Vu7Ts6Rq5Po4Nm",
+			"npm_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8",
+			"sk-proj-" + "Ab12Cd34Ef56Gh78Ij90Kl12Mn34_Op56-Qr78",
+			"sk-svcacct-" + "Ab12Cd34Ef56Gh78Ij90Kl12",
+			"sk-" + "Ab12Cd34Ef56Gh78Ij90" + "T3BlbkFJ" + "Kl12Mn34Op56Qr78St90",
+			"sk-" + "aB3dE5fG7h" * 4 + "J9kL1mN3",
+			"sk-ant-api03-" + "Ab12Cd34Ef56Gh78Ij90Kl12Mn34",
 			"rk_live_" + "0123456789abcdef",
 			JWT,
 		]
@@ -118,6 +129,19 @@ class TestEncryptSecrets(unittest.TestCase):
 		):
 			with self.subTest(text=text):
 				self.assertEqual(self.enc.encrypt(text), text)
+
+	def test_short_password_labels(self):
+		for text, pw in (
+			("login?user=admin&pass=Hunter2!", "Hunter2!"),
+			("PASS=Hunter2! ./run.sh", "Hunter2!"),
+			("db_pass=Hunter2!", "Hunter2!"),
+			("mysql -h db --pwd=Hunter2!", "Hunter2!"),
+			("MYSQL_PWD=Hunter2! mysql -u root", "Hunter2!"),
+			("cfg dbPwd='Hunter2!'", "Hunter2!"),
+		):
+			with self.subTest(text=text):
+				out = self.assertEncrypted(text, pw, "password")
+				self.assertIn("[PASSWORD:", out)
 
 	def test_url_credentials(self):
 		text = "mongodb://admin:s3cr3t@db.example.com:27017/app"
@@ -208,6 +232,11 @@ class TestNoFalsePositives(unittest.TestCase):
 			"https://example.test:8443/path?x=1",
 			"ghp_short sk_test_abcdefghijklmnop",
 			"version 1.2.3 and file report.json",
+			"PWD=/home/user OLDPWD=/tmp",
+			"env: HOME=/root PWD=/var/www LOGNAME=root",
+			"bypass=1 compass=north passphrase_len=12 tests pass: 42",
+			"sk-learn sk-test-1234 sk-" + "a" * 47 + " sk-" + "a" * 49,
+			"npm_short glpat-short xoxe-short",
 		):
 			with self.subTest(text=text):
 				out = self.enc.encrypt(text)
@@ -220,11 +249,89 @@ class TestLinearTime(unittest.TestCase):
 
 	def test_long_runs(self):
 		import time
-		for text in ("a-" * 200_000, "xoxb-" * 80_000, "-----BEGIN RSA PRIVATE KEY-----\n" * 12_000, "Z" * 400_000):
+		for text in (
+			"a-" * 200_000, "pass" * 100_000, "_PWD" * 100_000, "sk-" * 100_000, "glpat-" * 60_000,
+			"xoxb-" * 80_000, "-----BEGIN RSA PRIVATE KEY-----\n" * 12_000, "Z" * 400_000,
+		):
 			with self.subTest(text=text[:10]):
 				start = time.perf_counter()
 				SensitiveDataEncryptor().encrypt(text)
 				self.assertLess(time.perf_counter() - start, 5)
+
+
+class TestSecretFindings(unittest.TestCase):
+	"""A secret finding's value is encrypted whatever its format, and round-trips."""
+
+	def setUp(self):
+		self.enc = SensitiveDataEncryptor(salt="test")
+
+	def _finding(self, value, **extra):
+		return {
+			"_type": "tag", "category": "secret", "name": "generic_api_key", "value": value,
+			"match": "src/config.js:12:5", "extra_data": extra, "_uuid": "u1",
+		}
+
+	def test_unprefixed_secret_value_encrypted(self):
+		secret = "9f8e7d6c5b4a39281706f5e4d3c2b1a0"
+		item = self._finding(secret, line=f"const KEY = '{secret}';", entropy=3.9, nested=[{"raw": secret}])
+		out = self.enc.encrypt_finding(item)
+		self.assertEqual(item["value"], secret)  # original untouched
+		ph = self.enc._hash_value(secret, "secret")
+		self.assertEqual(out["value"], ph)
+		self.assertEqual(out["extra_data"]["line"], f"const KEY = '{ph}';")
+		self.assertEqual(out["extra_data"]["nested"][0]["raw"], ph)
+		self.assertEqual(out["extra_data"]["entropy"], 3.9)
+		self.assertEqual(out["_uuid"], "u1")
+		import json
+		text = self.enc.encrypt(json.dumps(out))
+		self.assertNotIn(secret, text)
+		self.assertEqual(json.loads(self.enc.decrypt(text)), item)
+
+	def test_user_pass_value(self):
+		out = self.enc.encrypt_finding(self._finding("admin:tomcat"))
+		self.assertTrue(PH_RE.fullmatch(out["value"]))
+		self.assertEqual(self.enc.decrypt(out["value"]), "admin:tomcat")
+
+	def test_short_value_only_replaced_as_whole_field(self):
+		out = self.enc.encrypt_finding(self._finding("ab1", line="tab1 cab1", other="ab1"))
+		self.assertEqual(out["extra_data"], {"line": "tab1 cab1", "other": out["value"]})
+
+	def test_non_secret_findings_untouched(self):
+		for item in (
+			{"_type": "tag", "category": "general", "value": "x" * 20},
+			{"_type": "vulnerability", "category": "secret", "value": "x" * 20},
+			self._finding(""),
+			"not a dict",
+		):
+			with self.subTest(item=item):
+				self.assertIs(self.enc.encrypt_finding(item), item)
+
+	def test_tool_result_path_encrypts_secret_finding(self):
+		from unittest.mock import MagicMock
+		from secator.tasks.ai import _yield_tool_results
+		secret = "Zk3P9qLm2Xv8Rt6Yw4"
+		stored = []
+
+		class _History:
+			def get_action_budget(self, model):
+				return 1_000_000
+
+			def add_tool_result(self, name, tc_id, content, runner_id="", runner_type=""):
+				stored.append(content)
+
+		runner = MagicMock()
+		runner.model = "test-model"
+		runner.encryptor = self.enc
+		runner.history = _History()
+		runner.context = {}
+		for tool in ("query_workspace", "run_task"):
+			with self.subTest(tool=tool):
+				item = self._finding(secret, line=f"key={secret}")
+				item["_context"] = {"tool_call_id": "t1", "tool_call_name": tool}
+				list(_yield_tool_results(runner, [item]))
+				self.assertNotIn(secret, stored[-1])
+				self.assertIn(self.enc._hash_value(secret, "secret"), stored[-1])
+				self.assertIn(secret, self.enc.decrypt(stored[-1]))
 
 
 class TestToolArgsDecryptToCommand(unittest.TestCase):

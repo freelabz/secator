@@ -17,19 +17,33 @@ _KV_START = r"(?:(?<![A-Za-z0-9])|(?-i:(?<=[a-z])(?=[A-Z])))"
 _KV_QUOTED = r"(?:\"(?P<{0}>(?:[^\"\\\r\n]|\\.)+)\"|'(?P<{1}>(?:[^'\\\r\n]|\\.)+)')"
 
 
-def _kv_pattern(keys: str) -> re.Pattern:
-	"""Build a ``key=value`` / ``key: value`` pattern; the value is one of the groups ``v1``..``v6``."""
-	return re.compile(
-		_KV_START + keys + r"(?:"
+# Short password labels, ``key=value`` form only (``user=x&pass=y``, ``mysql_pwd=x``). The bare
+# upper-case ``PWD`` is the shell's working directory in env dumps (``PWD=/home/user``), so
+# ``PWD`` only counts with a prefix (``MYSQL_PWD``, ``DB_PWD``); ``pwd`` / ``Pwd`` always count.
+_KV_PASSWORD_EQ_KEYS = r"(?:pass|(?-i:pwd|Pwd|(?<=_)PWD))"
+
+
+def _kv_pattern(keys: str, eq_only_keys: Optional[str] = None) -> re.Pattern:
+	"""Build a ``key=value`` / ``key: value`` pattern; the value is one of the groups ``v1``..``v9``.
+
+	``eq_only_keys`` are matched in the ``key=value`` form only (labels too short or common to
+	trust after a colon, e.g. ``pass: 3 tests``).
+	"""
+	def _eq(a, b, c):
 		# key=value (query strings, env files, CLI flags); `==` is a comparison, not a value
-		r"[ \t]*=(?!=)[ \t]*(?:" + _KV_QUOTED.format("v1", "v2") + r"|(?P<v3>[^\s\"'&;,<>=][^\s\"'&;<>]*))"
+		return (r"[ \t]*=(?!=)[ \t]*(?:" + _KV_QUOTED.format(a, b)
+			+ r"|(?P<" + c + r">[^\s\"'&;,<>=][^\s\"'&;<>]*))")
+	body = (
+		keys + r"(?:" + _eq("v1", "v2", "v3")
 		# key: value / "key": "value" (JSON, YAML, headers, tool output like `login: x password: y`).
 		# A bare 12-hex value is a bracket-stripped placeholder hash, never re-encrypted.
-		r"|[\"']?[ \t]*:[ \t]*(?:" + _KV_QUOTED.format("v4", "v5")
+		+ r"|[\"']?[ \t]*:[ \t]*(?:" + _KV_QUOTED.format("v4", "v5")
 		+ r"|(?![0-9a-f]{12}(?![0-9A-Za-z]))(?P<v6>[^\s\"'&;,<>]+))"
-		r")",
-		re.IGNORECASE,
+		r")"
 	)
+	if eq_only_keys:
+		body = r"(?:" + body + r"|" + eq_only_keys + _eq("v7", "v8", "v9") + r")"
+	return re.compile(_KV_START + body, re.IGNORECASE)
 
 
 # PII patterns - order matters (specific before general): each pass skips the placeholders
@@ -63,13 +77,20 @@ PII_PATTERNS = {
 		r"(?:AKIA|ASIA)[0-9A-Z]{16}"                   # AWS access key id
 		r"|gh[opsur]_[A-Za-z0-9]{36,}"                  # GitHub tokens
 		r"|github_pat_[A-Za-z0-9_]{22,}"                # GitHub fine-grained PAT
-		r"|xox[abprs]-[A-Za-z0-9-]{10,}"                # Slack
+		r"|xox[abeprs]-[A-Za-z0-9-]{10,}"               # Slack (incl. xoxe- refresh tokens)
+		r"|xoxe\.xox[bp]-[A-Za-z0-9-]{10,}"             # Slack rotating tokens
+		r"|gl(?:pat|dt|rt|ptt)-[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]+)*"  # GitLab (PAT, deploy, runner, trigger)
+		r"|npm_[A-Za-z0-9]{36}"                         # npm access token
+		r"|sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}"  # OpenAI project / service / admin keys
+		r"|sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}"   # OpenAI legacy key (fixed marker)
+		r"|sk-[A-Za-z0-9]{48}"                          # OpenAI legacy key (exactly 48 chars)
+		r"|sk-ant-[a-z]+[0-9]{2}-[A-Za-z0-9_-]{20,}"    # Anthropic keys
 		r"|AIza[0-9A-Za-z_-]{35}"                       # Google API key
 		r"|(?:sk|rk)_live_[0-9A-Za-z]{10,}"             # Stripe live keys
 		r"|eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*"  # JWT (incl. unsigned)
 		r")(?![A-Za-z0-9_-])"
 	),
-	"kv_password": _kv_pattern(_KV_PASSWORD_KEYS),
+	"kv_password": _kv_pattern(_KV_PASSWORD_KEYS, _KV_PASSWORD_EQ_KEYS),
 	"kv_secret": _kv_pattern(_KV_SECRET_KEYS),
 	# Starts only at the beginning of a run of local-part chars (not at every \b inside it), so a
 	# long run with no ``@`` is scanned once instead of once per word boundary. Leading
@@ -169,6 +190,11 @@ _DECRYPT_TOKEN_RE = re.compile(
 	r"|(?<![0-9A-Za-z])" + _PH_TYPES + r":[0-9a-f]{12}(?![0-9A-Za-z])"
 	r"|(?<![0-9A-Za-z])[0-9a-f]{12}(?![0-9A-Za-z])"
 )
+
+
+# A secret finding's value shorter than this is not replaced inside other fields (too likely
+# to hit unrelated text); it is still replaced where it is the whole field.
+_MIN_INLINE_SECRET_LEN = 4
 
 
 def find_placeholders(value) -> list:
@@ -309,6 +335,40 @@ class SensitiveDataEncryptor:
 			result = self._sub_outside_placeholders(result, pattern, pii_type)
 
 		return result
+
+	def encrypt_finding(self, item):
+		"""Encrypt the secret value of a secret finding, whatever its format; return a new item.
+
+		Secret scanners report many secrets with no recognizable prefix (generic API keys,
+		``user:pass`` pairs, matched lines), which the text patterns can't tell from other
+		data. A ``tag`` finding with ``category`` ``secret`` carries the secret in its ``value``,
+		so that value is always replaced by a ``[SECRET:…]`` placeholder, and so is every other
+		occurrence of it in the finding (e.g. the matched line in ``extra_data``). The item is
+		copied, never modified in place. Anything else is returned as-is; the text patterns
+		still run on the serialized result afterwards.
+		"""
+		if not isinstance(item, dict) or item.get("_type") != "tag" or item.get("category") != "secret":
+			return item
+		secret = item.get("value")
+		if not isinstance(secret, str) or not secret.strip():
+			return item
+		placeholder = self._hash_value(secret, "secret")
+
+		def _replace(obj):
+			# Values too short to be specific are only replaced where they are the whole field.
+			if isinstance(obj, str):
+				if obj == secret:
+					return placeholder
+				return obj.replace(secret, placeholder) if len(secret) >= _MIN_INLINE_SECRET_LEN else obj
+			if isinstance(obj, dict):
+				return {k: _replace(v) for k, v in obj.items()}
+			if isinstance(obj, (list, tuple)):
+				return [_replace(v) for v in obj]
+			return obj
+
+		out = {k: (v if k.startswith("_") else _replace(v)) for k, v in item.items()}
+		out["value"] = placeholder
+		return out
 
 	def decrypt(self, text: str) -> str:
 		"""Restore original sensitive values from placeholders.
