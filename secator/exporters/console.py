@@ -29,10 +29,6 @@ def _print_vuln_extra(item):
 		console_stdout.print(f"  [dim cyan]{label}:[/] {escape(str(value))}", highlight=False)
 
 
-# Label of an aggregated field in the grouped-row suffix (default: the field name, spaced).
-_GROUP_FIELD_LABELS = {"_source": "found by"}
-
-
 def _plain(item):
 	"""Plain text of a finding's one-line rendering."""
 	return Text.from_markup(item.__rich__()).plain
@@ -60,15 +56,16 @@ def _aggregate_shown_inline(item, field, value):
 
 
 def _group_suffix(item, count):
-	"""Suffix of a grouped row: the aggregated values (when the line hides them) and the count."""
-	parts = []
+	"""Suffix of a grouped row: the aggregated values (when the line hides them) and the count.
+
+	The values use the line's own bracketed-value style, e.g. `[naabu, nmap] (count: 2)`.
+	"""
+	suffix = ''
 	field = getattr(type(item), "_group_aggregate", None)
 	value = getattr(item, field, None) if field else None
 	if value and not _aggregate_shown_inline(item, field, value):
-		label = _GROUP_FIELD_LABELS.get(field, field.strip("_").replace("_", " "))
-		parts.append(f"{label}: {escape(str(value))}")
-	parts.append(f"count: {count}")
-	return f"[dim]({' · '.join(parts)})[/]"
+		suffix = rf'\[[cyan]{escape(str(value))}[/]] '
+	return f'{suffix}[dim](count: {count})[/]'
 
 
 class ConsoleExporter(Exporter):

@@ -1,7 +1,8 @@
 """Console exporter rendering of `--group` rows.
 
 A grouped row is suffixed with its count and, when the finding's own line does not print the
-aggregated field (e.g. `_source` for ports, urls, subdomains...), with the aggregated values too.
+aggregated field (e.g. `_source` for ports, urls, subdomains...), with the aggregated values too,
+as a bracketed list: `[naabu, nmap] (count: 2)`.
 Types whose line already prints the aggregate (ip hosts, technology matches, vulnerability
 targets) must not print it twice.
 """
@@ -42,8 +43,8 @@ class TestConsoleExporterGroupedRows(unittest.TestCase):
 		lines = _render(reps)
 		self.assertEqual(len(lines), 2)
 		self.assertIn('192.0.2.10:443', lines[0])
-		self.assertTrue(lines[0].endswith('(found by: naabu, nmap · count: 2)'), lines[0])
-		self.assertTrue(lines[1].endswith('(found by: naabu · count: 1)'), lines[1])
+		self.assertTrue(lines[0].endswith('[naabu, nmap] (count: 2)'), lines[0])
+		self.assertTrue(lines[1].endswith('[naabu] (count: 1)'), lines[1])
 
 	def test_every_source_aggregated_type_shows_its_sources(self):
 		cases = {
@@ -59,7 +60,7 @@ class TestConsoleExporterGroupedRows(unittest.TestCase):
 				reps = _group(_type, [{**record, '_source': 'tool1'}, {**record, '_source': 'tool2'}])
 				lines = _render(reps)
 				self.assertEqual(len(lines), 1, lines)
-				self.assertTrue(lines[0].endswith('(found by: tool1, tool2 · count: 2)'), lines[0])
+				self.assertTrue(lines[0].endswith('[tool1, tool2] (count: 2)'), lines[0])
 
 	def test_inline_aggregate_is_not_repeated(self):
 		cases = {
@@ -88,7 +89,7 @@ class TestConsoleExporterGroupedRows(unittest.TestCase):
 		from secator.output_types import Port
 		lines = _render([Port(port=443, ip='192.0.2.10', _source='naabu')])
 		self.assertNotIn('count:', lines[0])
-		self.assertNotIn('found by', lines[0])
+		self.assertNotIn('[naabu]', lines[0])
 
 
 if __name__ == '__main__':
