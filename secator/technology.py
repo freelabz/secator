@@ -203,10 +203,10 @@ def normalize_technology(product, version=None, vendor=None, cpes=None):
 			embedded = None
 		version = version or embedded
 		return {'product': e['name'], 'version': version, 'vendor': e['vendor'], 'key': key, 'method': method}
+	# Unknown product: keep its name as given ("Acme Widget (Cloud)"), only drop a split-off version.
+	name = (raw_name if embedded else str(product or '').strip()) or str(product or '')
 	version = version or embedded
 	pair = next((cpe_vendor_product(c) for c in cpes if cpe_vendor_product(c)), None)
 	if pair:
-		return {'product': raw_name or str(product or ''), 'version': version, 'vendor': pair[0],
-				'key': f'{pair[0]}:{pair[1]}', 'method': 'cpe'}
-	return {'product': raw_name or str(product or ''), 'version': version, 'vendor': clean(vendor) if vendor else '',
-			'key': '', 'method': ''}
+		return {'product': name, 'version': version, 'vendor': pair[0], 'key': f'{pair[0]}:{pair[1]}', 'method': 'cpe'}
+	return {'product': name, 'version': version, 'vendor': clean(vendor) if vendor else '', 'key': '', 'method': ''}

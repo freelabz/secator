@@ -96,6 +96,11 @@ class TestTechnologyCatalog(unittest.TestCase):
 		self.assertEqual(split_version('Outlook Web App'), ('Outlook Web App', None))
 		self.assertEqual(split_version('Apache/2.4.58 (Unix) OpenSSL/3.0.2'), ('Apache', '2.4.58'))
 
+	def test_unknown_product_keeps_its_suffix(self):
+		self.assertEqual(normalize_technology('Acme Widget (Cloud)')['product'], 'Acme Widget (Cloud)')
+		self.assertEqual(normalize_technology('Acme/1.2 (Debian)')['product'], 'Acme')
+		self.assertEqual(normalize_technology('nginx (Ubuntu)')['key'], 'f5:nginx')  # known: suffix ignored
+
 	def test_cpe_names_the_product(self):
 		norm = normalize_technology('weird banner', cpes=['cpe:/a:igor_sysoev:nginx:1.19.0'])
 		self.assertEqual((norm['key'], norm['method']), ('f5:nginx', 'cpe'))
