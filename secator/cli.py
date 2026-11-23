@@ -2254,7 +2254,7 @@ def _resolve_runner_db_id(report_folder, runner_type_singular):
 
 def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular, runner_number, runner_db_id, driver):
 	"""Perform the actual deletion for a single runner reference."""
-	report_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type_plural / runner_number
+	report_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type_plural / runner_number  # noqa: E501
 
 	# 1. Remove report folder (local driver only; api/mongodb delete from the backend)
 	if driver == 'local':
@@ -2342,7 +2342,7 @@ def report_delete(runner_ids, workspace, driver, yes):
 	resolved = []
 	console.print('[bold]The following actions will be performed:[/]')
 	for runner_type_plural, runner_type_singular, runner_number in refs:
-		report_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type_plural / runner_number
+		report_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type_plural / runner_number  # noqa: E501
 		if runner_number.isdigit():
 			# Local report: resolve the backend id from the report's context.
 			runner_db_id = _resolve_runner_db_id(report_folder, runner_type_singular)
