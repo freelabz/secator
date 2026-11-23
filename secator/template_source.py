@@ -404,6 +404,9 @@ def materialize_template_source(ref: TemplateSourceRef, force: bool = False) -> 
 	# the final rename stays atomic) and only move the vetted tree in at the end.
 	work = Path(tempfile.mkdtemp(prefix=f'.{ref.name}.{ref.sha}.', dir=root.parent))
 	staging = work / 'set'
+	# Set when the previous pinned tree sits in ``work`` and could not be put back:
+	# the cleanup below must then keep ``work`` so that tree is not deleted with it.
+	keep_work = False
 	try:
 		backend(ref, staging)
 		# When a subdir is requested, that subdir IS the template set: promote only
@@ -449,12 +452,22 @@ def materialize_template_source(ref: TemplateSourceRef, force: bool = False) -> 
 			target.rename(backup)
 		try:
 			staging.rename(target)
-		except OSError:
+		except BaseException:
+			# Also covers an interrupt between the two renames.
 			if backup is not None:
-				backup.rename(target)  # restore the previous pin
+				try:
+					backup.rename(target)  # restore the previous pin
+				except OSError:
+					keep_work = True
 			raise
 	finally:
-		shutil.rmtree(work, ignore_errors=True)
+		if keep_work:
+			shutil.rmtree(staging, ignore_errors=True)
+			console.print(
+				f':warning: Could not restore the previous template set {ref.name!r}; '
+				f'it was kept at {work / "previous"}', style='bold yellow')
+		else:
+			shutil.rmtree(work, ignore_errors=True)
 
 	console.print(f':inbox_tray: Materialized template set [bold]{ref.name}[/] @ {ref.sha[:10]}')
 	# The set root now holds the vetted templates directly (subdir already promoted).

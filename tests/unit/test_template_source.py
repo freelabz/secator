@@ -191,6 +191,31 @@ class TestMaterializeLocalFs(unittest.TestCase):
 		self.assertEqual(result2.path, first.path)
 		self.assertEqual((result2.path / 'tpl.yaml').read_text(), 'id: test-template-v1\n')
 
+	def _fail_swap(self, restore_fails):
+		# Make the final ``staging -> target`` rename fail, and optionally the restore too.
+		real_rename = Path.rename
+		target = self.root / 'pinned'
+
+		def rename(src, dst):
+			if Path(dst) == target and (src.name != 'previous' or restore_fails):
+				raise OSError('rename failed')
+			return real_rename(src, dst)
+		return mock.patch.object(Path, 'rename', rename)
+
+	def test_failed_swap_restores_previous_pin(self):
+		materialize_template_source(TemplateSourceRef(name='pinned', url=str(self.src), sha=self.sha1))
+		with self._fail_swap(restore_fails=False), self.assertRaises(OSError):
+			materialize_template_source(TemplateSourceRef(name='pinned', url=str(self.src), sha=self.sha1), force=True)
+		self.assertEqual((self.root / 'pinned' / 'tpl.yaml').read_text(), 'id: test-template-v1\n')
+
+	def test_failed_restore_keeps_previous_pin_on_disk(self):
+		materialize_template_source(TemplateSourceRef(name='pinned', url=str(self.src), sha=self.sha1))
+		with self._fail_swap(restore_fails=True), self.assertRaises(OSError):
+			materialize_template_source(TemplateSourceRef(name='pinned', url=str(self.src), sha=self.sha1), force=True)
+		kept = list(self.tmp.glob('.pinned.*/previous/tpl.yaml'))
+		self.assertEqual(len(kept), 1)
+		self.assertEqual(kept[0].read_text(), 'id: test-template-v1\n')
+
 	def test_subdir_is_promoted_to_set_root(self):
 		# A requested subdir IS the template set: only its contents are promoted to
 		# the set root, so the templates root (scanned for external tasks/drivers at
