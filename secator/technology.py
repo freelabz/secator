@@ -199,8 +199,8 @@ def normalize_technology(product, version=None, vendor=None, cpes=None):
 	key, method = lookup(product, vendor, cpes)
 	if key:
 		e = entry(key)
-		if clean(raw_name) in e['versionless_aliases']:
-			embedded = None
+		if clean(raw_name) in e['versionless_aliases']:  # the number is not the product release
+			version = embedded = None
 		version = version or embedded
 		return {'product': e['name'], 'version': version, 'vendor': e['vendor'], 'key': key, 'method': method}
 	# Unknown product: keep its name as given ("Acme Widget (Cloud)"), only drop a split-off version.

@@ -278,13 +278,15 @@ class nmapData(dict):
 
 				# Technology
 				if service_confidence == 'high' and extra_data.get('product'):
+					# Keep nmap's service CPEs: they name the product precisely (vendor:product).
+					# The CPE built from the product string has spaces and names nothing: skip it.
+					tech_cpes = [c for c in cpes if ' ' not in c]
 					techs.append(
 						Technology(
 							match=f'{ip}:{port_number}',
 							product=extra_data['product'],
 							version=extra_data.get('version'),
-							# Keep the service CPEs: they name the product precisely (vendor:product).
-							extra_data={'cpe': list(cpes)} if cpes else {},
+							extra_data={'cpe': tech_cpes} if tech_cpes else {},
 						)
 					)
 

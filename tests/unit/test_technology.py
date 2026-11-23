@@ -161,6 +161,8 @@ class TestNmapTechnology(unittest.TestCase):
 		self.assertEqual(ssh.product, 'OpenSSH')
 		self.assertIn('cpe:/a:openbsd:openssh:6.6.1p1', ssh.extra_data['cpe'])
 		self.assertIn('cpe:/o:linux:linux_kernel', ssh.extra_data['cpe'])
+		for tech in techs.values():  # the CPE secator builds from the product string is not kept
+			self.assertFalse([c for c in tech.extra_data['cpe'] if ' ' in c])
 
 
 def _nuclei_item(template_id, tags, matcher_name=None, extracted=None, metadata=None, cpe=None, severity='info'):
@@ -215,6 +217,10 @@ class TestNucleiTechnology(unittest.TestCase):
 				self.assertIsInstance(tech, Technology)
 				self.assertEqual((tech.product, tech.version, tech.key), (product, version, key))
 
+	def test_connector_version_is_not_the_tomcat_release(self):
+		tech = Technology(match='127.0.0.1:8080', product='Apache Tomcat/Coyote JSP engine', version='1.1')
+		self.assertEqual((tech.product, tech.version, tech.key), ('Apache Tomcat', None, 'apache:tomcat'))
+
 	def test_product_from_extracted_banner(self):
 		tech = self._convert(_nuclei_item('apache-detect', ['tech', 'apache'], extracted=['Apache-Coyote/1.1']))
 		self.assertEqual((tech.product, tech.version, tech.key), ('Apache Tomcat', None, 'apache:tomcat'))
@@ -236,6 +242,10 @@ class TestNucleiTechnology(unittest.TestCase):
 		self.assertIs(self._convert(_nuclei_item('wordpress-readme-file', ['exposure', 'wordpress', 'vuln'],
 												  metadata={'vendor': 'wordpress', 'product': 'wordpress'})), Tag)
 		self.assertIs(self._convert(_nuclei_item('tls-version', ['ssl', 'tls'])), Tag)
+		# a WAF signature and a stock page are not products
+		self.assertIs(self._convert(_nuclei_item('waf-detect', ['waf', 'tech', 'misc'], matcher_name='nginxgeneric')), Tag)
+		self.assertIs(self._convert(_nuclei_item('default-windows-server-page', ['tech', 'windows', 'iis'],
+												  cpe='cpe:2.3:o:microsoft:windows_server_2003:*:*:*:*:*:*:*:*')), Tag)
 		self.assertIs(self._convert(_nuclei_item('some-cve', ['cve', 'tech'], severity='high')), Vulnerability)
 
 

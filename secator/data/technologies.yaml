@@ -49,7 +49,8 @@ products:
   - key: apache:tomcat
     name: Apache Tomcat
     aliases: [tomcat, apache coyote, apache tomcat coyote jsp engine, apache coyote jsp engine]
-    versionless_aliases: [apache coyote]
+    # nmap reports the Coyote connector version (1.1) with these names, not the Tomcat release.
+    versionless_aliases: [apache coyote, apache tomcat coyote jsp engine, apache coyote jsp engine]
     common: true
   - key: apache:struts
     name: Apache Struts

@@ -42,7 +42,7 @@ class Technology(OutputType):
 		if norm['product'] and norm['product'] != self.product:
 			self.extra_data = {**(self.extra_data or {}), 'raw_product': self.product}
 			self.product = norm['product']
-		self.version = self.version or norm['version']
+		self.version = norm['version']  # the given version, else the embedded one; none for a versionless alias
 		self.vendor = norm['vendor'] or self.vendor
 		self.key = norm['key'] or self.key
 		if norm['method'] == 'fuzzy':  # approximate identity: consumers should not trust it fully

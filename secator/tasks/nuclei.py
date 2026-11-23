@@ -20,8 +20,12 @@ from secator.technology import split_version
 # Template tags that mark a product / version detection (nuclei-templates convention:
 # `http/technologies/*` carry `tech`, network detections `detect`, login panels `panel`).
 DETECTION_TAGS = {'tech', 'detect', 'detection', 'panel', 'wp-plugin', 'wp-theme'}
-# ...unless the template reports a weakness (`vuln`, `misconfig`, `exposure`): those stay tags.
-FINDING_TAGS = {'vuln', 'misconfig', 'exposure'}
+# ...unless the template reports a weakness (`vuln`, `misconfig`, `exposure`) or a WAF
+# (`waf`: its matcher names a WAF signature, not a product): those stay tags.
+FINDING_TAGS = {'vuln', 'misconfig', 'exposure', 'waf'}
+# Default-page templates (`default-nginx-page`) say a stock page is served, not which product
+# runs (`default-windows-server-page` matches IIS 8.5 but carries a Windows Server 2003 CPE).
+DEFAULT_PAGE_ID = re.compile(r'^default-.*-page$')
 # Suffixes that name the template kind, not the product (`apache-detect` -> `apache`).
 TEMPLATE_ID_SUFFIX = re.compile(r'(-(detect|detection|version|login|panel|server-detect))+$')
 
@@ -242,6 +246,8 @@ class nuclei(VulnMulti):
 		"""Does this info-severity result identify a product (rather than report a weakness)?"""
 		tags = _template_tags(item)
 		classification = (item.get('info') or {}).get('classification') or {}
+		if DEFAULT_PAGE_ID.match(item.get('template-id') or ''):
+			return False
 		return bool(tags & DETECTION_TAGS or classification.get('cpe')) and not tags & FINDING_TAGS
 
 	@staticmethod
