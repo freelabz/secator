@@ -262,7 +262,8 @@ def abandon_task(name, targets, opts, delivery_count=None):
 
 	The abandoned task persists a FAILURE Error to the store (via its on_item hooks) and
 	returns topology-only, so the surrounding chord/chain proceeds and the workflow finishes
-	instead of hanging forever on a task whose worker keeps getting killed (OOM / eviction).
+	instead of hanging forever on a task whose worker keeps getting killed (OOM / eviction) or
+	exits before acknowledging it.
 
 	Args:
 		name (str): Task name.
@@ -289,8 +290,8 @@ def abandon_task(name, targets, opts, delivery_count=None):
 	task.add_result(Error(
 		message=(
 			f'Task {name} abandoned after {attempts} '
-			f'(retry cap: {CONFIG.celery.task_max_retries}; worker repeatedly lost — '
-			'likely OOM kill or node eviction).'
+			f'(retry cap: {CONFIG.celery.task_max_retries}; worker repeatedly lost — likely OOM kill, '
+			'eviction, or the worker exiting before the task was acknowledged).'
 		),
 		_source=task.unique_name,
 	))
