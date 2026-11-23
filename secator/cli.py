@@ -40,7 +40,7 @@ from secator.utils import (
 	get_file_timestamp,
 	list_reports,
 	human_to_timedelta,
-	sanitize_folder_name,
+	get_workspace_folder_name,
 	vhs_tap_to_tape,
 	trim_gif,
 	reduce_gif_frames,
@@ -851,7 +851,7 @@ def workspace_use(name, driver):
 	config = CONFIG.validate()
 	if config:
 		CONFIG.save()
-		workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+		workspace_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(name)
 		workspace_folder.mkdir(parents=True, exist_ok=True)
 		console.print(Info(message=f'Now using workspace: [bold]{name}[/]'))
 	else:
@@ -987,7 +987,7 @@ def workspace_summary(workspace_opt, driver, template_path):
 def workspace_delete(name, driver, yes):
 	"""Delete a workspace and all associated reports. NAME: workspace name"""
 	driver = QueryEngine.resolve_backend(driver)
-	workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+	workspace_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(name)
 
 	# The API keys workspaces by id, so resolve the name to its id for the api driver.
 	api_workspace_id = name
@@ -2139,7 +2139,7 @@ def report_info(runner_id, workspace, driver, show_all):
 		info.pop('_id', None)
 		source_label, source_value = '_source', f'{effective_driver}:{runner_type}/{runner_number}'
 	else:
-		report_path = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
+		report_path = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
 		if not report_path.exists():
 			console.print(Error(message=f'Report not found: {report_path}'))
 			return
@@ -2254,7 +2254,7 @@ def _resolve_runner_db_id(report_folder, runner_type_singular):
 
 def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular, runner_number, runner_db_id, driver):
 	"""Perform the actual deletion for a single runner reference."""
-	report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+	report_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type_plural / runner_number  # noqa: E501
 
 	# 1. Remove report folder (local driver only; api/mongodb delete from the backend)
 	if driver == 'local':
@@ -2342,7 +2342,7 @@ def report_delete(runner_ids, workspace, driver, yes):
 	resolved = []
 	console.print('[bold]The following actions will be performed:[/]')
 	for runner_type_plural, runner_type_singular, runner_number in refs:
-		report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+		report_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type_plural / runner_number  # noqa: E501
 		if runner_number.isdigit():
 			# Local report: resolve the backend id from the report's context.
 			runner_db_id = _resolve_runner_db_id(report_folder, runner_type_singular)
