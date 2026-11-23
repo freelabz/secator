@@ -1,9 +1,10 @@
 import json
 import logging
+import shlex
 import unittest
 import unittest.mock
 
-from secator.definitions import (DEBUG, HOST, OPT_NOT_SUPPORTED)
+from secator.definitions import (DEBUG, HOST, OPT_NOT_SUPPORTED, OPT_PIPE_INPUT, OPT_SPACE_SEPARATED)
 from secator.output_types import Url
 from secator.runners import Command
 from secator.tasks import httpx
@@ -360,3 +361,39 @@ class TestCommandConfigOverrides(unittest.TestCase):
 				self.assertEqual(cmd_b.input_chunk_size, 100)
 		finally:
 			CONFIG.tasks.overrides = original_overrides
+
+
+class TestCommandInputFileQuoting(unittest.TestCase):
+	"""The inputs file path embeds the workspace folder name, which may contain shell metacharacters."""
+
+	WORKSPACE = "o'brien (test)"
+
+	def _build(self, file_flag):
+		class QuoteTestCmd(Command):
+			cmd = 'quotetest'
+			input_chunk_size = -1
+		QuoteTestCmd.file_flag = file_flag
+		targets = ['example.com', 'scanme.nmap.org']
+		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=QuoteTestCmd):
+			return QuoteTestCmd(targets, context={'workspace_name': self.WORKSPACE}, sync=True)
+
+	def test_file_flag_path_is_quoted(self):
+		cmd = self._build('-l')
+		self.assertIn("'", cmd.inputs_path)
+		self.assertFalse(cmd.shell)
+		args = shlex.split(cmd.cmd)  # raised "No closing quotation" before the fix
+		self.assertEqual(args[-2:], ['-l', cmd.inputs_path])
+
+	def test_positional_file_path_is_quoted(self):
+		cmd = self._build(None)
+		self.assertEqual(shlex.split(cmd.cmd)[-1], cmd.inputs_path)
+
+	def test_piped_file_path_is_quoted(self):
+		cmd = self._build(OPT_PIPE_INPUT)
+		self.assertTrue(cmd.shell)
+		args = shlex.split(cmd.cmd)
+		self.assertEqual(args[:3], ['cat', cmd.inputs_path, '|'])
+
+	def test_space_separated_inputs_are_quoted(self):
+		cmd = self._build(OPT_SPACE_SEPARATED)
+		self.assertEqual(shlex.split(cmd.cmd)[-2:], ['example.com', 'scanme.nmap.org'])
