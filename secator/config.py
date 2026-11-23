@@ -416,12 +416,14 @@ class AiAddon(StrictModel):
 	default_model: str = 'claude-sonnet-4-6'
 	intent_model: str = 'claude-haiku-4-5'
 	# Extra (non-core) AI tools ALWAYS added on top of a mode's baseline for every AI run,
-	# by tool name. A custom installation uses this to make its own tools (loaded from the
-	# templates dir / `SECATOR_AI_TOOLS_DIRS` / a bundle) part of the default set. Merged
-	# with (and deduplicated against) the run's `extra_tools` option; every name must
-	# resolve to a loaded, valid tool or the run errors. Flat list (not keyed per mode):
-	# a mode still excludes any of them via its `tools: ["!name"]`. Env:
-	# SECATOR_ADDONS_AI_EXTRA_TOOLS.
+	# by tool name or fnmatch glob (e.g. `sysreptor_*`). A custom installation uses this to
+	# make its own tools (loaded from the templates dir / `SECATOR_AI_TOOLS_DIRS` / a bundle)
+	# part of the default set. Merged with (and deduplicated against) the run's `extra_tools`
+	# option. An exact name must resolve to a loaded, valid tool or the run errors; a glob
+	# expands to the matching EXTERNAL tools only (`*` = all of them) and only warns when it
+	# matches none. Flat list (not keyed per mode): a mode still excludes any of them via its
+	# `tools: ["!name"]`. Set with `secator config set addons.ai.extra_tools "sysreptor_*"`
+	# (a comma-separated value sets several). Env: SECATOR_ADDONS_AI_EXTRA_TOOLS.
 	extra_tools: List[str] = []
 	temperature: float = 0.7
 	max_tokens: int = 30000

@@ -64,6 +64,62 @@ _CLASH_TOOL = textwrap.dedent('''
 ''')
 
 
+def _tool_cls(cls_name, tool_name, bases="BaseTool"):
+	return textwrap.dedent(f'''
+		class {cls_name}({bases}):
+			name = "{tool_name}"
+			schema = {{"type": "function", "function": {{"name": "{tool_name}", "description": "x",
+				"parameters": {{"type": "object", "properties": {{}}}}}}}}
+
+			def run(self, action, ctx):
+				yield Info(message=_helper("{tool_name}"))
+	''')
+
+
+_HEADER = textwrap.dedent('''
+	from secator.ai.tools.base import BaseTool
+	from secator.output_types import Info
+
+
+	def _helper(name):
+		return f"hello from {name}"
+''')
+
+# Several tools in one file, sharing a module-level helper (no shared base).
+_MULTI_TOOL = _HEADER + _tool_cls("MultiA", "multi_a") + _tool_cls("MultiB", "multi_b")
+
+# A nameless BaseTool subclass used as a shared base for the file's tools.
+_SHARED_BASE_TOOL = _HEADER + textwrap.dedent('''
+	class SharedTool(BaseTool):
+		def api_url(self):
+			return "https://reporting.example"
+''') + _tool_cls("SharedFoo", "shared_foo", "SharedTool") + _tool_cls("SharedBar", "shared_bar", "SharedTool")
+
+# Tools that never write `(BaseTool)`: one with a mixin first and a dotted BaseTool, one
+# deriving from a nameless same-file base.
+_MIXIN_FIRST_TOOL = textwrap.dedent('''
+	import secator.ai.tools.base as tb
+	from secator.output_types import Info
+
+
+	def _helper(name):
+		return f"hello from {name}"
+
+
+	class _ApiMixin:
+		pass
+
+
+	class ApiBase(_ApiMixin, tb.BaseTool):
+		pass
+''') + _tool_cls("MixinFirst", "mixin_first", "_ApiMixin, tb.BaseTool") + _tool_cls(
+	"ChildOfBase", "child_of_base", "ApiBase")
+
+
+# Two tools sharing a name prefix, for extra_tools glob expansion.
+_PREFIXED_TOOLS = _HEADER + _tool_cls("ReportPush", "report_push") + _tool_cls("ReportPull", "report_pull")
+
+
 @unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
 class TestDynamicAITools(unittest.TestCase):
 	def setUp(self):
@@ -193,6 +249,233 @@ class TestDynamicAITools(unittest.TestCase):
 		self._write("ping_pong.py", _GOOD_TOOL)
 		from secator.loader import _file_has_ai_tool
 		self.assertTrue(_file_has_ai_tool(self.dir / "ping_pong.py"))
+
+	def test_several_tools_in_one_file_all_register(self):
+		self._write("multi_tools.py", _MULTI_TOOL)
+		from secator.loader import discover_ai_tools
+		from secator.ai.tools import TOOLS_BY_NAME
+		registered = discover_ai_tools()
+		self.assertEqual(sorted(r for r in registered if r.startswith("multi_")), ["multi_a", "multi_b"])
+		out = list(TOOLS_BY_NAME["multi_b"].run({}, None))
+		self.assertEqual(out[0].message, "hello from multi_b")
+
+	def test_nameless_shared_base_is_skipped_silently(self):
+		"""A nameless BaseTool subclass is a shared base, not a tool: no warning, and the
+		named tools deriving from it register."""
+		self._write("shared_base.py", _SHARED_BASE_TOOL)
+		from unittest import mock
+		from secator.loader import discover_ai_tools
+		from secator.ai.tools import TOOLS_BY_NAME
+		from secator.rich import console
+		with mock.patch.object(console, "print") as printed:
+			registered = discover_ai_tools()
+		self.assertIn("shared_foo", registered)
+		self.assertIn("shared_bar", registered)
+		self.assertNotIn("", TOOLS_BY_NAME)
+		self.assertNotIn("SharedTool", [type(t).__name__ for t in TOOLS_BY_NAME.values()])
+		messages = " ".join(str(c) for c in printed.call_args_list)
+		self.assertNotIn("missing a non-empty string", messages)
+		self.assertNotIn("shared_base.py", messages)
+		self.assertEqual(list(TOOLS_BY_NAME["shared_foo"].run({}, None))[0].message, "hello from shared_foo")
+
+	def test_prefilter_finds_tools_without_literal_basetool_base(self):
+		"""Mixin-first bases, a dotted BaseTool and a nameless same-file base are all
+		detected; a file with no tool class is still skipped."""
+		path = self._write("mixin_first.py", _MIXIN_FIRST_TOOL)
+		from secator.loader import _file_has_ai_tool, discover_ai_tools
+		self.assertTrue(_file_has_ai_tool(path))
+		registered = discover_ai_tools()
+		self.assertIn("mixin_first", registered)
+		self.assertIn("child_of_base", registered)
+		# A file that only mentions BaseTool (no subclass) and a plain module are not tool files.
+		mention = self._write("mention_only.py", "# BaseTool is documented elsewhere\nX = 1\n")
+		plain = self._write("plain_mod.py", "class Foo(object):\n\tpass\n")
+		self.assertFalse(_file_has_ai_tool(mention))
+		self.assertFalse(_file_has_ai_tool(plain))
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
+class TestExtraToolsGlobs(unittest.TestCase):
+	"""`extra_tools` entries may be fnmatch globs expanded against the loaded tools."""
+
+	def setUp(self):
+		self.dir = CONFIG.dirs.templates
+		self.dir.mkdir(parents=True, exist_ok=True)
+		self.written = []
+		_reset()
+		p = self.dir / "report_tools.py"
+		p.write_text(_PREFIXED_TOOLS)
+		self.written.append(p)
+		p = self.dir / "ping_pong.py"
+		p.write_text(_GOOD_TOOL)
+		self.written.append(p)
+		from secator.loader import discover_ai_tools
+		discover_ai_tools()
+
+	def tearDown(self):
+		for p in self.written:
+			if p.exists():
+				p.unlink()
+		_reset()
+
+	def _names(self, mode, **kwargs):
+		from secator.ai.tools import build_tool_schemas
+		return [s["function"]["name"] for s in build_tool_schemas(mode, **kwargs)]
+
+	def test_glob_expands_to_every_matching_tool(self):
+		from secator.ai.tools import resolve_extra_tools
+		self.assertEqual(resolve_extra_tools(["report_*"]), ["report_pull", "report_push"])
+		names = self._names("chat", extra_tools=["report_*"])
+		self.assertIn("report_push", names)
+		self.assertIn("report_pull", names)
+		self.assertNotIn("ping_pong", names)
+
+	def test_glob_matching_nothing_warns(self):
+		"""A glob matching no loaded tool only warns (once per pattern) and adds nothing."""
+		from unittest import mock
+		from secator.ai import tools
+		from secator.rich import console
+		tools._WARNED_EMPTY_GLOBS.clear()
+		with mock.patch.object(console, "print") as printed:
+			self.assertEqual(tools.resolve_extra_tools(["nothing_*", "report_push"]), ["report_push"])
+			tools.resolve_extra_tools(["nothing_*"])
+		messages = [str(c) for c in printed.call_args_list]
+		self.assertEqual(len([m for m in messages if "nothing_*" in m]), 1)
+		self.assertIn("matches no loaded external AI tool", messages[0])
+		# An exact unknown name still fails loudly, as before.
+		with self.assertRaises(ValueError) as cm:
+			tools.resolve_extra_tools(["report_pus"])
+		self.assertIn("report_pus", str(cm.exception))
+		self.assertIn("Known tools", str(cm.exception))
+
+	def test_glob_mixed_with_exact_names_keeps_order_and_dedupes(self):
+		from secator.ai.tools import resolve_extra_tools
+		self.assertEqual(
+			resolve_extra_tools(["ping_pong", "report_*", "report_push"]),
+			["ping_pong", "report_pull", "report_push"])
+
+	def test_comma_separated_string_is_accepted(self):
+		"""The CLI list type splits on commas; a raw string (template / library call) too."""
+		from secator.click import CLICK_LIST
+		from secator.ai.tools import resolve_extra_tools
+		parsed = CLICK_LIST.convert("report_*, ping_pong", None, None)
+		self.assertEqual(parsed, ["report_*", "ping_pong"])
+		expected = ["report_pull", "report_push", "ping_pong"]
+		self.assertEqual(resolve_extra_tools(parsed), expected)
+		self.assertEqual(resolve_extra_tools("report_*,ping_pong"), expected)
+
+	def test_config_level_glob(self):
+		from unittest import mock
+		from secator.ai.tools import resolve_extra_tools
+		with mock.patch.object(CONFIG.addons.ai, "extra_tools", ["report_*"]):
+			self.assertEqual(resolve_extra_tools(["ping_pong"]), ["report_pull", "report_push", "ping_pong"])
+			names = self._names("chat")
+			self.assertIn("report_push", names)
+			self.assertIn("report_pull", names)
+
+	def test_glob_never_matches_builtin_tools(self):
+		"""Globs expand over EXTERNAL tools only; a built-in tool is added by exact name only."""
+		from secator.ai.tools import TOOLS_BY_NAME, resolve_extra_tools
+		mark_vuln = sorted(n for n in TOOLS_BY_NAME if n.startswith("mark_vuln_"))
+		self.assertTrue(mark_vuln)
+		self.assertEqual(resolve_extra_tools(["mark_vuln_*"]), [])
+		self.assertNotIn("run_shell", self._names("chat", extra_tools=["run_*"]))
+		# Exact built-in names keep working as before.
+		self.assertEqual(resolve_extra_tools([mark_vuln[0]]), [mark_vuln[0]])
+
+	def test_star_means_every_external_tool(self):
+		from secator.ai.tools import TOOLS_BY_NAME, resolve_extra_tools
+		external = [n for n, t in TOOLS_BY_NAME.items() if t.external]
+		self.assertEqual(sorted(resolve_extra_tools(["*"])), sorted(external))
+		self.assertEqual(sorted(external), ["ping_pong", "report_pull", "report_push"])
+		chat_names = self._names("chat")
+		names = self._names("chat", extra_tools=["*"])
+		self.assertEqual(sorted(set(names) - set(chat_names)), sorted(external))
+
+	def test_mode_exclude_wins_over_glob(self):
+		"""A mode's `!` excludes remove a tool even when an extra_tools glob matches it."""
+		from secator.ai.prompts import MODES
+		orig = list(MODES["chat"]["tools"])
+		try:
+			MODES["chat"]["tools"] = orig + ["!report_pull"]
+			names = self._names("chat", extra_tools=["report_*"])
+			self.assertIn("report_push", names)
+			self.assertNotIn("report_pull", names)
+		finally:
+			MODES["chat"]["tools"] = orig
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
+class TestExtraToolsConfigSetEndToEnd(unittest.TestCase):
+	"""`secator config set addons.ai.extra_tools "foo_*"` turns on every matching tool."""
+
+	def setUp(self):
+		import os
+		import tempfile
+		from unittest import mock
+		self.tmp = tempfile.TemporaryDirectory()
+		tools_dir = os.path.join(self.tmp.name, "tools")
+		os.mkdir(tools_dir)
+		with open(os.path.join(tools_dir, "foo_tools.py"), "w") as f:
+			f.write(_HEADER + _tool_cls("FooA", "foo_a") + _tool_cls("FooB", "foo_b"))
+		self.saved = CONFIG.addons.ai.extra_tools
+		patches = [
+			mock.patch.dict(os.environ, {"SECATOR_AI_TOOLS_DIRS": tools_dir}),
+			# Never write the user's config file from a test.
+			mock.patch.object(type(CONFIG), "save", return_value=True),
+		]
+		for patch in patches:
+			patch.start()
+			self.addCleanup(patch.stop)
+		_reset()
+
+	def tearDown(self):
+		CONFIG.set("addons.ai.extra_tools", list(self.saved or []))
+		_reset()
+		self.tmp.cleanup()
+
+	def _config_set(self, *args):
+		from click.testing import CliRunner
+		from secator.cli import cli
+		result = CliRunner().invoke(cli, ["config", "set", "addons.ai.extra_tools", *args])
+		self.assertIsNone(result.exception, result.output)
+		self.assertEqual(result.exit_code, 0, result.output)
+
+	def test_config_set_string_is_stored_as_a_list(self):
+		self._config_set("foo_*")
+		self.assertEqual(list(CONFIG.addons.ai.extra_tools), ["foo_*"])
+		self._config_set("foo_*, bar")
+		self.assertEqual(list(CONFIG.addons.ai.extra_tools), ["foo_*", "bar"])
+		self._config_set("baz", "--append")
+		self.assertEqual(list(CONFIG.addons.ai.extra_tools), ["foo_*", "bar", "baz"])
+
+	def test_config_set_glob_enables_every_matching_tool(self):
+		self._config_set("foo_*")
+		from secator.ai.tools import build_tool_schemas
+		from secator.tasks.ai import ai
+		self.assertIn("extra_tools", ai.opts)
+		names = [s["function"]["name"] for s in build_tool_schemas("chat", extra_tools=None)]
+		self.assertIn("foo_a", names)
+		self.assertIn("foo_b", names)
+		self.assertEqual(len(names), len(set(names)))
+		# The per-run option (CLI-style comma string) merges with the config glob, deduplicated.
+		names = [s["function"]["name"] for s in build_tool_schemas("chat", extra_tools="foo_a,foo_*")]
+		self.assertEqual([n for n in names if n.startswith("foo_")], ["foo_a", "foo_b"])
+
+	def test_ai_task_binds_per_run_extra_tools(self):
+		"""The `ai` task's --extra-tools value reaches the tool list it builds."""
+		import contextlib
+		from unittest import mock
+		from secator.ai.tools import build_tool_schemas
+		from secator.tasks.ai import ai
+		task = ai(["hi"], extra_tools="foo_a,foo_*", sync=True)
+		with contextlib.ExitStack() as stack:
+			for target in ("PermissionEngine", "create_backend", "SensitiveDataEncryptor"):
+				stack.enter_context(mock.patch(f"secator.tasks.ai.{target}"))
+			task._init_options()
+		self.assertEqual(task.extra_tools, "foo_a,foo_*")
+		names = [s["function"]["name"] for s in build_tool_schemas("chat", extra_tools=task.extra_tools)]
+		self.assertEqual([n for n in names if n.startswith("foo_")], ["foo_a", "foo_b"])
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
