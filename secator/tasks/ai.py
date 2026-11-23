@@ -284,6 +284,33 @@ def _ack_resultless_calls(runner, actions, collected):
 		         _context=dict(runner.context))
 
 
+SHOW_PROMPT_FORMATS = ("raw", "md")
+
+
+def format_system_prompt(prompt, mode, fmt="raw"):
+	"""Return the text ``--show-prompt`` writes to stdout for ``prompt``.
+
+	``raw`` is the prompt verbatim. ``md`` wraps it in a fenced code block (fence
+	longer than any backtick run in the prompt) under a ``# System prompt (<mode>)``
+	heading, so a Markdown viewer shows the ``<tag>`` sections instead of hiding them
+	as HTML.
+	"""
+	if fmt != "md":
+		return prompt if prompt.endswith("\n") else prompt + "\n"
+	longest = max((len(m) for m in re.findall(r"`+", prompt)), default=0)
+	fence = "`" * max(3, longest + 1)
+	return f"# System prompt ({mode})\n\n{fence}text\n{prompt.rstrip(chr(10))}\n{fence}\n"
+
+
+def write_system_prompt(prompt, mode, fmt="raw"):
+	"""Write the rendered system prompt to stdout, byte-for-byte (no Rich markup,
+	emoji, highlighting or wrapping), with its header on stderr so piping stdout to
+	a file captures only the prompt."""
+	console.print(f"[bold orange3]System prompt ({mode})[/]")
+	sys.stdout.write(format_system_prompt(prompt, mode, fmt))
+	sys.stdout.flush()
+
+
 def resolve_llm_credentials(
 	caller_api_base, caller_api_key, config_api_base, config_api_key,
 	disallow_config_token=False,
@@ -393,7 +420,13 @@ class ai(PythonRunner):
 		"show_prompt": {
 			"is_flag": True,
 			"default": False,
-			"help": "Render and display the system prompt, then exit"
+			"help": "Write the rendered system prompt to stdout, then exit"
+		},
+		"show_prompt_format": {
+			"type": str,
+			"default": "raw",
+			"help": "Format for --show-prompt: raw (prompt text verbatim) or md (wrapped in a fenced code block "
+			        "so Markdown viewers show the <tags>)"
 		},
 		"dangerous": {
 			"is_flag": True,
@@ -443,17 +476,27 @@ class ai(PythonRunner):
 		# Init all options
 		self._init_options()
 
+		# A mode name passed as the model (`--model chat`) is almost always a typo for
+		# `--mode chat`: say so instead of silently using the wrong mode / model.
+		model = getattr(self, "model", None)
+		if isinstance(model, str) and normalize_mode(model) in MODES:
+			yield Warning(message=f'--model "{model}" is a mode name, not an LLM model: did you mean --mode {model}?')
+
+		# Show prompt mode (diagnostic). Rendering the prompt needs no LLM credentials,
+		# so it runs before the credential check.
+		if self.run_opts.get("show_prompt", False):
+			show_mode = self.mode or "scan"
+			fmt = self.run_opts.get("show_prompt_format") or "raw"
+			if fmt not in SHOW_PROMPT_FORMATS:
+				yield Error(message=f'Invalid --show-prompt-format "{fmt}": choose one of {", ".join(SHOW_PROMPT_FORMATS)}.')
+				return
+			prompt = self._system_prompt_for(show_mode)
+			write_system_prompt(prompt, show_mode, fmt)
+			return
+
 		# SECURITY (LLM CREDS): refuse (yield Error, never raise) if creds can't be safely resolved.
 		if self._credential_error:
 			yield Error(message=self._credential_error)
-			return
-
-		# Show prompt mode (diagnostic)
-		if self.run_opts.get("show_prompt", False):
-			show_mode = self.mode or "scan"
-			prompt = self._system_prompt_for(show_mode)
-			console.print(f"[bold orange3]System prompt ({show_mode})[/]\n")
-			console.print(prompt, highlight=False, soft_wrap=True)
 			return
 
 		# Verify model is configured and reachable
@@ -604,7 +647,7 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 
 	def _resolve_context_includes(self):
-		"""Resolve the forced AI-context filenames (profiles' ``ai_context``) for this run.
+		"""Resolve the forced AI-context files (profiles' ``ai_context``: names or paths relative to ``ai/``).
 
 		Merges filenames declared by any applied profile with any inherited from the
 		run context (``ai_context_includes``) — a subagent does NOT receive the
