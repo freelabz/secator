@@ -1102,6 +1102,7 @@ class Command(Runner):
 		self.debug(f'return code: {self.return_code}', sub='end')
 
 		if self.killed:
+			self.revoked = True  # stopped on purpose (interrupt / revoke), not a failure
 			error = 'Process was killed manually (CTRL+C / CTRL+X)'
 			yield Error(message=error)
 
@@ -1444,14 +1445,17 @@ class Command(Runner):
 				shutil.copy(fpath, sudo_fpath)
 				fpath = sudo_fpath
 
+			# Quote the path: the reports folder embeds the workspace name, which may contain shell
+			# metacharacters (e.g. an apostrophe) that would otherwise break shlex.split / the shell.
+			quoted_fpath = shlex.quote(fpath)
 			if self.file_flag == OPT_PIPE_INPUT:
-				cmd = f'cat {fpath} | {cmd}'
+				cmd = f'cat {quoted_fpath} | {cmd}'
 			elif self.file_flag == OPT_SPACE_SEPARATED:
-				cmd += ' ' + ' '.join(inputs)
+				cmd += ' ' + ' '.join(shlex.quote(i) for i in inputs)
 			elif self.file_flag:
-				cmd += f' {self.file_flag} {fpath}'
+				cmd += f' {self.file_flag} {quoted_fpath}'
 			else:
-				cmd += f' {fpath}'
+				cmd += f' {quoted_fpath}'
 
 			self.inputs_path = fpath
 

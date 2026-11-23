@@ -1,19 +1,19 @@
-from functools import cache
+import json
+import time
 
 import requests
-import json
 
 from secator.config import CONFIG
 from secator.utils import debug
-from secator.providers._base import CVEProvider
+from secator.providers._base import CVEProvider, cache_success
 from secator.output_types import Vulnerability
 
 
 class circl(CVEProvider):
 	"""CVE data from vulnerability.circl.lu."""
 
-	@cache
 	@staticmethod
+	@cache_success
 	def lookup_cve(cve_id, convert=True):
 		"""Get CVE data from vulnerability.circl.lu.
 
@@ -31,7 +31,17 @@ class circl(CVEProvider):
 			debug(f'{cve_id}: skipped remote query since config.offline_mode is set.', sub='cve.circl')
 			return None
 		try:
-			resp = requests.get(f'https://vulnerability.circl.lu/api/cve/{cve_id}', timeout=5)
+			url = f'https://vulnerability.circl.lu/api/cve/{cve_id}'
+			resp = requests.get(url, timeout=5)
+			if resp.status_code == 429:
+				# Rate limited (bursts of lookups): back off once, honouring Retry-After (capped).
+				try:
+					delay = min(float(resp.headers.get('Retry-After', 1)), 5)
+				except ValueError:
+					delay = 1
+				debug(f'{cve_id}: rate limited, retrying in {delay}s', sub='cve.circl')
+				time.sleep(delay)
+				resp = requests.get(url, timeout=5)
 			resp.raise_for_status()
 			cve_info = resp.json()
 			if not cve_info:

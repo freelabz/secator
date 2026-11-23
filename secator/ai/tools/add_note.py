@@ -33,6 +33,29 @@ def _note_stringify(v) -> str:
 	return str(v)
 
 
+def _note_label(target_type: str, target: Dict, uuid: str) -> str:
+	"""A readable name for the annotated finding: an ip by its address, a port as
+	``host:port``, a technology as ``product version``, else its name / url / match.
+	Falls back to a short ``_uuid`` prefix, never the full id."""
+	def get(k):
+		v = target.get(k)
+		return str(v).strip() if v not in (None, "") and not isinstance(v, (dict, list)) else ""
+	if target_type == "port" and get("port") and (get("host") or get("ip")):
+		label = f"{get('host') or get('ip')}:{get('port')}"
+	elif target_type == "technology":
+		label = " ".join(x for x in (get("product"), get("version")) if x)
+	elif target_type == "user_account":
+		label = " @ ".join(x for x in (get("username"), get("site_name")) if x)
+	else:
+		label = ""
+	label = label or next(
+		(get(k) for k in ("name", "url", "ip", "host", "domain", "matched_at", "match") if get(k)), ""
+	)
+	if label:
+		return label
+	return f"{uuid[:8]}…" if len(uuid) > 8 else uuid
+
+
 class AddNote(BaseTool):
 	name = "add_note"
 	action = "add_note"
@@ -156,15 +179,15 @@ class AddNote(BaseTool):
 			yield Error(message="add_note could not persist the note (the active driver has no notes store).", _context=context)  # noqa: E501
 			return
 
-		label = (
-			target.get("name")
-			or target.get("url")
-			or (target.get("matched_at") if isinstance(target.get("matched_at"), str) else None)
-			or uuid
-		)
 		yield Ai(
-			content=f"Note added to {target_type} {label}",
+			content=f"Note added to {target_type} {_note_label(target_type, target, uuid)}",
 			ai_type="add_note",
-			extra_data={"target_type": target_type, "target_key": target_key, "body": body, "changes": changes or []},
+			extra_data={
+				"target_type": target_type,
+				"target_key": target_key,
+				"finding_uuid": uuid,
+				"body": body,
+				"changes": changes or [],
+			},
 			_context=context,
 		)

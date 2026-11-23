@@ -5,14 +5,37 @@ from secator.config import CONFIG
 from secator.output_types import Vulnerability, Exploit
 from secator.utils import debug
 
-from functools import cache
+from functools import cache, wraps
+
+
+def cache_success(func):
+	"""Memoize ``func`` like :func:`functools.cache`, but only non-``None`` results.
+
+	Lookups return ``None`` on a transient failure (timeout, rate limit, network
+	error); caching that would pin the failure for the rest of the process, so every
+	later lookup of the same id silently returns nothing.
+	"""
+	results = {}
+
+	@wraps(func)
+	def wrapper(*args, **kwargs):
+		key = (args, tuple(sorted(kwargs.items())))
+		if key in results:
+			return results[key]
+		result = func(*args, **kwargs)
+		if result is not None:
+			results[key] = result
+		return result
+
+	wrapper.cache_clear = results.clear
+	return wrapper
 
 
 class CVEProvider:
 	"""Base class for CVE providers."""
 
-	@cache
 	@staticmethod
+	@cache_success
 	def lookup_external_cve(cve_id, provider=CONFIG.providers.defaults['cve']):
 		"""Search for a CVE info and return vulnerability data.
 
