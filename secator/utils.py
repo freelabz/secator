@@ -159,9 +159,15 @@ def sanitize_folder_name(
 	replace_hyphens: bool = True,
 	max_length: int = 255,
 	normalize_unicode: bool = True,
+	strict: bool = True,
 ) -> str:
 	"""
 	Sanitizes a string to be used as a folder name across Windows, Linux, and macOS.
+
+	The result is used to build report paths that are passed to external commands, so by default (``strict``) only
+	``[A-Za-z0-9._]`` (plus ``-`` when ``replace_hyphens`` is False) is kept: every other character, including shell
+	metacharacters (quotes, ``$``, backticks, ``;``, ``|``, ``&``, globs, brackets...), is replaced by
+	``replacement_char``, and leading/trailing ``.``, ``-`` and ``replacement_char`` are stripped.
 
 	Args:
 		name: The input string to sanitize.
@@ -170,6 +176,8 @@ def sanitize_folder_name(
 		replace_hyphens: If True, replaces hyphens with `replacement_char`.
 		max_length: Maximum allowed length (default: 255, None to disable).
 		normalize_unicode: If True, normalizes Unicode (e.g., é → e).
+		strict: If True (default), keep only the safe allowlist above. If False, use the legacy rules (only remove
+			OS-invalid characters); kept to locate folders created by older versions (see get_workspace_folder_name).
 
 	Returns:
 		A sanitized folder name.
@@ -187,8 +195,9 @@ def sanitize_folder_name(
 	if replace_hyphens:
 		name = name.replace('-', replacement_char)
 
-	# Remove invalid characters (OS-specific)
-	if platform.system() == 'Windows':
+	if strict:
+		invalid_chars = r'[^A-Za-z0-9._-]' if not replace_hyphens else r'[^A-Za-z0-9._]'
+	elif platform.system() == 'Windows':
 		# Windows: < > : " / \ | ? * and control chars (0-31)
 		invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
 	else:
@@ -208,21 +217,47 @@ def sanitize_folder_name(
 		if upper_name in reserved_names:
 			sanitized = f'{sanitized}{replacement_char}'
 
-	# Remove leading/trailing spaces, dots, and replacement chars
-	sanitized = sanitized.strip().strip(f'.{replacement_char}')
+	# Remove leading/trailing spaces, dots, and replacement chars (and hyphens, so the name never looks like an option)
+	strip_chars = f'.{replacement_char}-' if strict else f'.{replacement_char}'
+	sanitized = sanitized.strip().strip(strip_chars)
 
 	# Replace multiple replacement chars with a single one
 	sanitized = re.sub(f'{re.escape(replacement_char)}+', replacement_char, sanitized)
 
 	# Truncate if too long
 	if max_length and len(sanitized) > max_length:
-		sanitized = sanitized[:max_length].rstrip(f'.{replacement_char}')
+		sanitized = sanitized[:max_length].rstrip(strip_chars)
 
 	# Ensure the name is not empty
 	if not sanitized:
 		return 'unnamed_folder'
 
 	return sanitized
+
+
+def get_workspace_folder_name(name, reports_dir=None):
+	"""Get the reports sub-folder name for a workspace.
+
+	Uses the strict sanitize_folder_name rules. For backwards compatibility, if a folder named with the legacy rules
+	already exists (and the strict one does not), that folder keeps being used so existing reports stay reachable.
+
+	Args:
+		name (str): Workspace name.
+		reports_dir (str | pathlib.Path, optional): Reports directory. Defaults to CONFIG.dirs.reports.
+
+	Returns:
+		str: Folder name (not a path).
+	"""
+	folder = sanitize_folder_name(name)
+	legacy = sanitize_folder_name(name, strict=False)
+	if legacy == folder:
+		return folder
+	if reports_dir is None:
+		reports_dir = CONFIG.dirs.reports
+	base = Path(reports_dir).expanduser()
+	if not (base / folder).exists() and (base / legacy).is_dir():
+		return legacy
+	return folder
 
 
 def deduplicate(array, attr=None):
@@ -764,7 +799,7 @@ def list_reports(workspace=None, type=None, timedelta=None):
 		pathlib.Path: Each matching report.json path.
 	"""
 	if workspace:
-		workspace = sanitize_folder_name(workspace)
+		workspace = get_workspace_folder_name(workspace)
 	if type and not type.endswith('s'):
 		type += 's'
 	# report.json lives at a fixed depth: <reports>/<workspace>/<type>/<id>/report.json.

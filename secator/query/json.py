@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 
 from secator.query._base import QueryBackend
 from secator.config import CONFIG
-from secator.utils import sanitize_folder_name
+from secator.utils import get_workspace_folder_name
 from secator.utils import debug
 
 
@@ -31,7 +31,7 @@ def resolve_local_report_paths(report_query, workspace_name):
 	"""
 	if not report_query:
 		return report_query
-	ws_path = Path(CONFIG.dirs.reports).expanduser() / sanitize_folder_name(workspace_name)
+	ws_path = Path(CONFIG.dirs.reports).expanduser() / get_workspace_folder_name(workspace_name)
 	out = []
 	for part in report_query.split(','):
 		token = part.strip()
@@ -194,7 +194,7 @@ class JsonBackend(QueryBackend):
 	def _get_workspace_path(self) -> Path:
 		"""Get path to workspace reports directory."""
 		# Sanitize workspace name the same way as the runner does
-		workspace_folder = sanitize_folder_name(self.workspace_id)
+		workspace_folder = get_workspace_folder_name(self.workspace_id, self.reports_dir)
 		return self.reports_dir / workspace_folder
 
 	def _iter_report_dir(self, report_dir: Path, runner_type_singular: str, query: dict, needles: list = None):
@@ -478,7 +478,7 @@ class JsonBackend(QueryBackend):
 
 	def get_workspace(self, workspace_id: str):
 		"""Get workspace info from local filesystem."""
-		workspace_path = self.reports_dir / sanitize_folder_name(workspace_id)
+		workspace_path = self.reports_dir / get_workspace_folder_name(workspace_id, self.reports_dir)
 		if workspace_path.exists():
 			return {'workspace_id': workspace_id, 'workspace_name': workspace_id, 'path': str(workspace_path)}
 		return None

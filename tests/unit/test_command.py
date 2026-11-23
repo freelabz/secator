@@ -1,6 +1,9 @@
 import json
 import logging
+import os
 import shlex
+import shutil
+import tempfile
 import unittest
 import unittest.mock
 
@@ -364,9 +367,18 @@ class TestCommandConfigOverrides(unittest.TestCase):
 
 
 class TestCommandInputFileQuoting(unittest.TestCase):
-	"""The inputs file path embeds the workspace folder name, which may contain shell metacharacters."""
+	"""The inputs file path lives in the reports folder, whose name may contain shell metacharacters."""
 
-	WORKSPACE = "o'brien (test)"
+	FOLDER_NAME = "o'brien (test)"
+
+	def setUp(self):
+		self.tmp = tempfile.mkdtemp(prefix='secator-test-reports-')
+		self.folder = os.path.join(self.tmp, self.FOLDER_NAME)
+		os.makedirs(os.path.join(self.folder, '.inputs'))
+		os.makedirs(os.path.join(self.folder, '.outputs'))
+
+	def tearDown(self):
+		shutil.rmtree(self.tmp, ignore_errors=True)
 
 	def _build(self, file_flag):
 		class QuoteTestCmd(Command):
@@ -375,7 +387,7 @@ class TestCommandInputFileQuoting(unittest.TestCase):
 		QuoteTestCmd.file_flag = file_flag
 		targets = ['example.com', 'scanme.nmap.org']
 		with unittest.mock.patch('secator.runners.task.Task.get_task_class', return_value=QuoteTestCmd):
-			return QuoteTestCmd(targets, context={'workspace_name': self.WORKSPACE}, sync=True)
+			return QuoteTestCmd(targets, reports_folder=self.folder, sync=True)
 
 	def test_file_flag_path_is_quoted(self):
 		cmd = self._build('-l')
