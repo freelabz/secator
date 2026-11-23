@@ -1,9 +1,11 @@
 import os
+import re
 from collections.abc import MutableMapping
 from pathlib import Path
 from subprocess import call, DEVNULL
 from typing import Any, Dict, List, Optional
 from typing_extensions import Annotated, Self
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import validators
 import shutil
@@ -53,6 +55,118 @@ def _warn_routes_deprecated():
 	_ROUTES_WARNED = True
 	console.print(
 		'[bold orange1]Config key "workspaces.routes" is deprecated and ignored: pass -ws <workspace> instead.[/]')
+
+
+# Credential fields. Marked at schema level so display paths (`secator config get`, `config default`, ...)
+# mask them; code reading CONFIG still gets the real value. Name-based matching (is_secret_key) is the
+# fallback for free-form dict values such as tasks.overrides.<task>.<attr>.
+Secret = Annotated[str, Field(json_schema_extra={'secret': True})]
+
+SECRET_MASK = '********'
+_SECRET_NAME_REGEX = re.compile(
+	r'(^|_)(key|apikey|token|secret|password|passwd|pwd|credentials?|auth|private_key)(_|$)', re.IGNORECASE)
+_NON_SECRET_NAME_SUFFIXES = ('_path', '_file', '_endpoint', '_name', '_id')
+
+
+def is_secret_key(name):
+	"""Return True if a config key name looks like it holds a credential.
+
+	Args:
+		name (str): Key name (last segment of a dotted path).
+
+	Returns:
+		bool: True if the name matches a secret pattern.
+	"""
+	name = str(name)
+	if name.lower().endswith(_NON_SECRET_NAME_SUFFIXES):
+		return False
+	return bool(_SECRET_NAME_REGEX.search(name))
+
+
+def mask_secret(value):
+	"""Mask a secret value, keeping a short hint for long values (first 5 and last 4 chars).
+
+	Args:
+		value (str): Secret value.
+
+	Returns:
+		str: Masked value ('' stays '').
+	"""
+	if not isinstance(value, str) or not value:
+		return value
+	if len(value) < 20:
+		return SECRET_MASK
+	return f'{value[:5]}...{value[-4:]}'
+
+
+def mask_url(value):
+	"""Mask credentials embedded in a URL (userinfo and secret-named query parameters).
+
+	Args:
+		value (str): URL-like string.
+
+	Returns:
+		str: URL with credentials replaced by a mask, or the input unchanged if it is not a URL.
+	"""
+	if not isinstance(value, str) or '://' not in value:
+		return value
+	try:
+		parts = urlsplit(value)
+	except ValueError:
+		return value
+	netloc = parts.netloc
+	if '@' in netloc:
+		# Mask the whole userinfo: either component can carry the credential (e.g. `TOKEN:x-oauth-basic@`).
+		_, host = netloc.rsplit('@', 1)
+		netloc = f'{SECRET_MASK}@{host}'
+	query = parts.query
+	if query:
+		pairs = parse_qsl(query, keep_blank_values=True)
+		if any(is_secret_key(k) for k, _ in pairs):
+			query = urlencode([(k, SECRET_MASK if is_secret_key(k) and v else v) for k, v in pairs], safe='*')
+	if netloc == parts.netloc and query == parts.query:
+		return value
+	return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+
+
+def _schema_secret_paths(model, prefix=()):
+	"""Collect dotted paths of fields marked as secret in a pydantic model tree."""
+	paths = set()
+	for name, field in model.model_fields.items():
+		path = prefix + (name,)
+		extra = field.json_schema_extra
+		if isinstance(extra, dict) and extra.get('secret'):
+			paths.add('.'.join(path))
+		annotation = field.annotation
+		if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+			paths |= _schema_secret_paths(annotation, path)
+	return paths
+
+
+def mask_secrets(data, path=(), sensitive=False):
+	"""Return a copy of config data with every secret value masked, for display only.
+
+	A value is masked when its field is marked as Secret in the schema or its key name looks like a
+	credential (see is_secret_key). Credentials embedded in URLs are masked in every string value.
+
+	Args:
+		data (Any): Config data (dict / list / scalar).
+		path (tuple): Dotted path of `data` within the config, e.g. ('addons', 'ai').
+		sensitive (bool): `data` sits under a secret key (e.g. `credentials: {...}`): mask all its strings.
+
+	Returns:
+		Any: Masked copy of `data`.
+	"""
+	# Check every segment: a dotted key (`config get a.credentials.value`) arrives as one multi-segment step.
+	sensitive = sensitive or any(
+		is_secret_key(part) or '.'.join(path[:i + 1]) in SECRET_PATHS for i, part in enumerate(path))
+	if isinstance(data, MutableMapping):
+		return {k: mask_secrets(v, path + tuple(str(k).split('.')), sensitive) for k, v in data.items()}
+	if isinstance(data, (list, tuple)):
+		return type(data)(mask_secrets(v, path, sensitive) for v in data)
+	if isinstance(data, str) and data:
+		return mask_secret(data) if sensitive else mask_url(data)
+	return data
 
 
 class StrictModel(BaseModel, extra='forbid'):
@@ -123,7 +237,7 @@ class Celery(StrictModel):
 
 
 class Cli(StrictModel):
-	github_token: str = os.environ.get('GITHUB_TOKEN', '')
+	github_token: Secret = os.environ.get('GITHUB_TOKEN', '')
 	record: bool = False
 	stdin_timeout: int = 1000
 	show_http_response_headers: bool = False
@@ -157,7 +271,7 @@ class Security(StrictModel):
 	auto_install_commands: bool = True
 	force_source_install: bool = False
 	prompt_sudo_password: bool = True
-	sudo_password: str = ''  # non-interactive sudo password (e.g. SECATOR_SECURITY_SUDO_PASSWORD) for headless workers
+	sudo_password: Secret = ''  # non-interactive sudo password (e.g. SECATOR_SECURITY_SUDO_PASSWORD) for headless workers
 	shell_isolated: bool = False  # default for the AI task's --isolated (run_shell in a Docker sandbox); set SECATOR_SECURITY_SHELL_ISOLATED=1 on sandboxed workers  # noqa: E501
 	shell_default_timeout: int = 30  # default timeout (s) for an AI run_shell command, so an interactive user doesn't wait forever; the model may raise its per-command timeout up to celery.task_max_timeout (SECATOR_SECURITY_SHELL_DEFAULT_TIMEOUT)  # noqa: E501
 	scope_hard_deny: bool = False  # when set (SECATOR_SECURITY_SCOPE_HARD_DENY=1) an out-of-scope AI network target is denied outright instead of prompting for approval  # noqa: E501
@@ -281,19 +395,19 @@ class SqliteAddon(StrictModel):
 
 class VulnersAddon(StrictModel):
 	enabled: bool = False
-	api_key: str = ''
+	api_key: Secret = ''
 
 
 class WebSearchConfig(StrictModel):
 	# Optional Tavily API key for the AI `web_search` tool's synthesized-answer engine.
 	# When empty, web_search uses the keyless DuckDuckGo/Sploitus engines only.
 	# Env: SECATOR_ADDONS_AI_WEB_SEARCH_TAVILY_API_KEY.
-	tavily_api_key: str = ''
+	tavily_api_key: Secret = ''
 
 
 class AiAddon(StrictModel):
 	enabled: bool = False
-	api_key: str = ''
+	api_key: Secret = ''
 	api_base: str = ''
 	# SECURITY (LLM CREDS): gate the "custom api_base needs a caller-supplied api_key"
 	# rule; off = configured key is reused for any base.
@@ -389,8 +503,8 @@ class Providers(StrictModel):
 
 class DiscordAddon(StrictModel):
 	enabled: bool = False
-	webhook_url: str = ''
-	bot_token: str = ''
+	webhook_url: Secret = ''
+	bot_token: Secret = ''
 	send_runner_updates: bool = True
 	send_findings: bool = True
 	finding_types: List[str] = ['vulnerability']
@@ -405,7 +519,7 @@ class CeleryEventsAddon(StrictModel):
 class ApiAddon(StrictModel):
 	enabled: bool = False
 	url: str = 'https://app.secator.cloud/api'
-	key: str = ''
+	key: Secret = ''
 	header_name: str = 'Bearer'
 	force_ssl: bool = True
 	timeout: int = 60
@@ -459,6 +573,9 @@ class SecatorConfig(StrictModel):
 	offline_mode: bool = False
 
 
+SECRET_PATHS = frozenset(_schema_secret_paths(SecatorConfig))
+
+
 class Config(DotMap):
 	"""Config class.
 
@@ -474,12 +591,13 @@ class Config(DotMap):
 
 	_error = False
 
-	def get(self, key=None, print=True):
+	def get(self, key=None, print=True, reveal=False):
 		"""Retrieve a value from the configuration using a dotted path.
 
 		Args:
 			key (str | None): Dotted key path.
 			print (bool): Print the resulting value.
+			reveal (bool): Print secret values in clear instead of masking them. The returned value is never masked.
 
 		Returns:
 			Any: value at key.
@@ -493,9 +611,9 @@ class Config(DotMap):
 			return None
 		if print:
 			if key:
-				yaml_str = Config.dump(DotMap({key: value}), partial=False)
+				yaml_str = Config.dump(DotMap({key: value}), partial=False, mask=not reveal)
 			else:
-				yaml_str = Config.dump(self, partial=False)
+				yaml_str = Config.dump(self, partial=False, mask=not reveal)
 			Config.print_yaml(yaml_str)
 		return value
 
@@ -803,13 +921,14 @@ class Config(DotMap):
 			f.write(Config.dump(self, partial=partial))
 		self._path = target_path
 
-	def print(self, partial=True):
+	def print(self, partial=True, reveal=False):
 		"""Print config.
 
 		Args:
 			partial (bool): Print partial config only.
+			reveal (bool): Print secret values in clear instead of masking them.
 		"""
-		yaml_str = self.dump(self, partial=partial)
+		yaml_str = self.dump(self, partial=partial, mask=not reveal)
 		yaml_str = f'# {self._path}\n\n{yaml_str}' if self._path and partial else yaml_str
 		Config.print_yaml(yaml_str)
 
@@ -946,10 +1065,16 @@ class Config(DotMap):
 		console_stdout.print(render_yaml(string))
 
 	@staticmethod
-	def dump(config, partial=True):
+	def dump(config, partial=True, mask=False):
 		"""Safe dump config as yaml:
 		- `Path`, `PosixPath` and `WindowsPath` objects are translated to strings.
 		- Home directory in paths is replaced with the tilde '~'.
+		- Secret values are masked when `mask` is set (for display; never when saving to disk).
+
+		Args:
+			config (Config | DotMap): Config to dump. A DotMap may hold a single dotted key, e.g. {'addons.ai': ...}.
+			partial (bool): Dump the user (partial) config only.
+			mask (bool): Mask secret values.
 
 		Returns:
 			str: YAML dump.
@@ -991,6 +1116,8 @@ class Config(DotMap):
 				del data['_partial']
 
 		data = {k: v for k, v in data.items() if not k.startswith('_')}
+		if mask:
+			data = mask_secrets(data)
 		return yaml.dump(data, Dumper=LineBreakDumper, sort_keys=False)
 
 	@staticmethod

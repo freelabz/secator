@@ -658,14 +658,15 @@ def config():
 
 @config.command('get')
 @click.option('--user/--full', is_flag=True, help='Show config (user/full)')
+@click.option('--reveal', is_flag=True, default=False, help='Show secret values (keys, tokens, passwords) in clear.')
 @click.argument('key', required=False)
-def config_get(user, key=None):
-	"""Get config value"""
+def config_get(user, reveal, key=None):
+	"""Get config value. Secret values are masked unless --reveal is passed."""
 	if key is None:
 		partial = user and default_config != CONFIG
-		CONFIG.print(partial=partial)
+		CONFIG.print(partial=partial, reveal=reveal)
 		return
-	CONFIG.get(key)
+	CONFIG.get(key, reveal=reveal)
 
 
 @config.command('set')

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 from secator.definitions import LLM_SPINNER_MESSAGES
-from secator.config import CONFIG
+from secator.config import CONFIG, mask_secret, mask_url
 from secator.output_types import Warning, Error
 from secator.rich import console, maybe_status
 from secator.runners import Task
@@ -1291,12 +1291,12 @@ def _setup_ai_interactive():
 	# Current config (so the user sees what they're changing).
 	current_key = CONFIG.addons.ai.api_key
 	current_base = CONFIG.addons.ai.api_base
-	masked_key = f"{current_key[:8]}...{current_key[-4:]}" if current_key and len(current_key) > 12 else current_key or ""
+	masked_key = mask_secret(current_key) if current_key else ""
 	console.print()
 	console.print("[bold]  Current config:[/]")
 	console.print(f"    Model:        [bold white]{CONFIG.addons.ai.default_model or 'not set'}[/]")
 	console.print(f"    Intent model: [bold white]{CONFIG.addons.ai.intent_model or 'not set'}[/]")
-	console.print(f"    API base:     [bold white]{current_base or 'default (per-provider)'}[/]")
+	console.print(f"    API base:     [bold white]{mask_url(current_base) or 'default (per-provider)'}[/]")
 	console.print(f"    API key:      [bold white]{masked_key or 'not set'}[/]")
 
 	# Step 1 — pick a PROVIDER. The full LiteLLM provider list (on their default bases),
