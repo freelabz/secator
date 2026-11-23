@@ -134,6 +134,11 @@ def lookup(name, vendor=None, cpes=None, fuzzy=True):
 
 	Returns ``(key, method)`` with method ``alias`` / ``cpe`` / ``fuzzy``, or ``(None, None)``.
 	"""
+	return _lookup(str(name or ''), str(vendor or ''), tuple(cpes or ()), bool(fuzzy))
+
+
+@lru_cache(maxsize=4096)
+def _lookup(name, vendor, cpes, fuzzy):
 	cat = catalog()
 	rules, aliases = cat['rules'], cat['aliases']
 	product, _ = split_version(name)

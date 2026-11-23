@@ -45,6 +45,8 @@ class Technology(OutputType):
 		self.version = self.version or norm['version']
 		self.vendor = norm['vendor'] or self.vendor
 		self.key = norm['key'] or self.key
+		if norm['method'] == 'fuzzy':  # approximate identity: consumers should not trust it fully
+			self.extra_data = {**(self.extra_data or {}), 'key_match': 'fuzzy'}
 
 	def __str__(self) -> str:
 		return self.match
