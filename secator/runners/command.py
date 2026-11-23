@@ -21,7 +21,7 @@ from secator.config import CONFIG
 from secator.output_types import Info, Warning, Error, Stat
 from secator.runners import Runner
 from secator.runners._base import REDACTED_OPT_VALUE
-from secator.runners._helpers import apply_task_overrides
+from secator.runners._helpers import apply_task_overrides, chunking_needed, get_task_overrides
 from secator.template import TemplateLoader
 from secator.utils import debug, rich_escape as _s, signal_to_name
 
@@ -305,12 +305,16 @@ class Command(Runner):
 		return res
 
 	def needs_chunking(self, sync):
-		many_targets = len(self.inputs) > 1
-		targets_over_chunk_size = self.input_chunk_size and self.input_chunk_size != -1 and len(self.inputs) > self.input_chunk_size  # noqa: E501
-		has_file_flag = self.file_flag is not None
-		is_chunk = self.chunk
-		chunk_it = (sync and many_targets and not has_file_flag and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501
-		return chunk_it
+		return chunking_needed(len(self.inputs), sync, self.input_chunk_size, self.file_flag, self.chunk)
+
+	@classmethod
+	def would_chunk(cls, count, sync):
+		"""``needs_chunking`` for a task that is not built yet: ``count`` targets, class attributes
+		with ``tasks.overrides`` applied (as ``Command.__init__`` does)."""
+		overrides = get_task_overrides(cls.__name__)
+		chunk_size = overrides.get('input_chunk_size', cls.input_chunk_size)
+		file_flag = overrides.get('file_flag', cls.file_flag)
+		return chunking_needed(count, sync, chunk_size, file_flag)
 
 	@classmethod
 	def delay(cls, *args, **kwargs):

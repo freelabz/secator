@@ -3,6 +3,7 @@ import logging
 
 from secator.config import CONFIG
 from secator.runners import Runner
+from secator.runners._helpers import chunking_needed
 from secator.template import TemplateLoader
 
 
@@ -135,11 +136,12 @@ class PythonRunner(Runner):
 			self._print(cmd_str, rich=True)
 
 	def needs_chunking(self, sync):
-		many_targets = len(self.inputs) > 1
-		targets_over_chunk_size = self.input_chunk_size and self.input_chunk_size != -1 and len(self.inputs) > self.input_chunk_size  # noqa: E501
-		is_chunk = self.chunk
-		chunk_it = (sync and many_targets and not is_chunk) or (not sync and many_targets and targets_over_chunk_size and not is_chunk)  # noqa: E501
-		return chunk_it
+		return chunking_needed(len(self.inputs), sync, self.input_chunk_size, is_chunk=self.chunk)
+
+	@classmethod
+	def would_chunk(cls, count, sync):
+		"""``needs_chunking`` for a task that is not built yet, on ``count`` targets."""
+		return chunking_needed(count, sync, cls.input_chunk_size)
 
 	def get_opt_value(self, opt_name):
 		"""Get option value with fallback to default from opts definition.

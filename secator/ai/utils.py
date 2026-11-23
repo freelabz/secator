@@ -231,7 +231,12 @@ def _is_heavy_runner(runner_type: str, name: str, opts: dict = None, targets: li
 	except Exception:
 		return False
 	count = len(targets or [])
-	if count > CONFIG.addons.ai.inline_max_targets or _would_chunk(cls, count):
+	if count > CONFIG.addons.ai.inline_max_targets:
+		return True
+	# Same rule as the task's own needs_chunking(), evaluated before the child is built: it would
+	# chunk in-process (sync rule) or once dispatched (async rule, input_chunk_size).
+	would_chunk = getattr(cls, 'would_chunk', None)
+	if would_chunk and (would_chunk(count, sync=True) or would_chunk(count, sync=False)):
 		return True
 	from secator.runners._helpers import resolve_task_queue
 	try:
@@ -239,20 +244,6 @@ def _is_heavy_runner(runner_type: str, name: str, opts: dict = None, targets: li
 	except Exception:
 		return True  # can't resolve — be conservative and dispatch
 	return profile in set(CONFIG.addons.ai.dispatch_profiles or [])
-
-
-def _would_chunk(cls, count: int) -> bool:
-	"""Whether a task class would split ``count`` targets into chunks, run sync or async
-	(mirrors ``needs_chunking``): several targets and either no input-file flag (one run per
-	target) or more targets than its ``input_chunk_size``."""
-	if count <= 1:
-		return False
-	overrides = CONFIG.tasks.overrides.get(cls.__name__, {})
-	if hasattr(overrides, 'toDict'):
-		overrides = overrides.toDict()
-	chunk_size = overrides.get('input_chunk_size', getattr(cls, 'input_chunk_size', None))
-	over_chunk_size = bool(chunk_size) and chunk_size != -1 and count > chunk_size
-	return getattr(cls, 'file_flag', None) is None or over_chunk_size
 
 
 # Framework control/security keys the LLM must never set on a spawned sub-runner

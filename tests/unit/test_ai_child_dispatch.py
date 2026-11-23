@@ -78,6 +78,47 @@ class TestIsHeavyRunner(unittest.TestCase):
 			self.assertFalse(_is_heavy_runner('task', 'not_a_task', {}, ['a']))
 
 
+class TestChunkingRuleShared(unittest.TestCase):
+	"""The ai dispatch rule and the runners' needs_chunking() use one chunking rule."""
+
+	@staticmethod
+	def _legacy(count, sync, chunk_size, file_flag, is_chunk):
+		# The rule needs_chunking() inlined before it was moved to chunking_needed().
+		many = count > 1
+		over = chunk_size and chunk_size != -1 and count > chunk_size
+		return bool((sync and many and file_flag is None and not is_chunk) or (not sync and many and over and not is_chunk))
+
+	def test_chunking_needed_matches_previous_rule(self):
+		from itertools import product
+		from secator.runners._helpers import chunking_needed
+		for count, sync, size, flag, is_chunk in product(
+				(0, 1, 2, 5, 101), (True, False), (None, 0, -1, 1, 2, 100), (None, '-l'), (None, 1)):
+			with self.subTest(count=count, sync=sync, size=size, flag=flag, is_chunk=is_chunk):
+				self.assertEqual(
+					chunking_needed(count, sync, size, flag, is_chunk),
+					self._legacy(count, sync, size, flag, is_chunk))
+
+	def test_would_chunk_matches_needs_chunking_on_built_task(self):
+		from secator.runners import Task
+		for name in ('nmap', 'httpx', 'whois', 'dnsx', 'search_vulns'):
+			cls = Task.get_task_class(name)
+			for targets in (['a.com'], ['a.com', 'b.com'], [f'h{i}.com' for i in range(120)]):
+				task = cls(targets, sync=True, print_line=False, print_item=False, enable_hooks=False)
+				for sync in (True, False):
+					with self.subTest(task=name, n=len(targets), sync=sync):
+						self.assertEqual(cls.would_chunk(len(targets), sync), task.needs_chunking(sync))
+
+	def test_would_chunk_honors_overrides(self):
+		from secator.runners import Task
+		cls = Task.get_task_class('httpx')
+		cfg = SimpleNamespace(tasks=SimpleNamespace(overrides={'httpx': {'file_flag': None, 'input_chunk_size': 2}}))
+		self.assertFalse(cls.would_chunk(2, sync=True))
+		with mock.patch('secator.runners._helpers.CONFIG', cfg):
+			self.assertTrue(cls.would_chunk(2, sync=True))
+			self.assertTrue(cls.would_chunk(3, sync=False))
+			self.assertFalse(cls.would_chunk(2, sync=False))
+
+
 class TestRunRunnerDispatch(unittest.TestCase):
 
 	def _run(self, targets, in_worker=True, fail=False):
