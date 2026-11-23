@@ -72,6 +72,13 @@ class TestEncryptWholeValues(unittest.TestCase):
 		self.assertEqual(len(enc.pii_map), 2)
 		self.assertEqual(enc.decrypt(out), text)
 
+	def test_anchored_custom_pattern_not_matched_after_placeholder(self):
+		enc = SensitiveDataEncryptor(salt="test", custom_patterns=[r"^secret"])
+		out = enc.encrypt("x 10.0.0.1 secret")
+		self.assertTrue(out.endswith(" secret"))
+		out = enc.encrypt("secret on 10.0.0.1")
+		self.assertTrue(out.startswith("[CUSTOM_0:"))
+
 	def test_existing_placeholder_not_reencrypted(self):
 		once = self.enc.encrypt("target 10.0.0.1")
 		self.assertEqual(self.enc.encrypt(once), once)
@@ -101,6 +108,10 @@ class TestDecryptWholeTokens(unittest.TestCase):
 		self.assertEqual(
 			self.enc.decrypt(text),
 			f"sha {self.hash}ff and x{self.hash} stay, 10.0.0.1 restores")
+
+	def test_bare_hash_next_to_underscore_or_punctuation(self):
+		self.assertEqual(self.enc.decrypt(f"out_{self.hash}.txt"), "out_10.0.0.1.txt")
+		self.assertEqual(self.enc.decrypt(f"/{self.hash}/"), "/10.0.0.1/")
 
 	def test_bracket_stripped_and_full_forms(self):
 		stripped = self.ph[1:-1]

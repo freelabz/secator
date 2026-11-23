@@ -59,6 +59,16 @@ _PLACEHOLDER_RE = re.compile(
 _MINTED_PLACEHOLDER_RE = re.compile(r"\[(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[0-9a-f]{12}\]")
 
 
+# Every token shape decrypt() restores, longest first: full placeholder, bracket-stripped form,
+# bare hash. Bare forms must not touch a letter or digit, so a hash inside a longer token is
+# kept. Unknown tokens are left as-is.
+_DECRYPT_TOKEN_RE = re.compile(
+	r"\[(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[0-9a-f]{12}\]"
+	r"|(?<![0-9A-Za-z])(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[0-9a-f]{12}(?![0-9A-Za-z])"
+	r"|(?<![0-9A-Za-z])[0-9a-f]{12}(?![0-9A-Za-z])"
+)
+
+
 def find_placeholders(value) -> list:
 	"""Return every sensitive-data placeholder left in ``value`` (str / dict / list, recursive).
 
@@ -113,7 +123,6 @@ class SensitiveDataEncryptor:
 		self.pii_map: Dict[str, str] = {}  # placeholder -> original
 		self.hash_map: Dict[str, str] = {}  # bare hash -> original
 		self.custom_patterns: List[re.Pattern] = []
-		self._decrypt_cache = None
 
 		if custom_patterns:
 			for pattern in custom_patterns:
@@ -149,13 +158,23 @@ class SensitiveDataEncryptor:
 				return original
 			return self._hash_value(original, pii_type)
 
+		def _sub_range(start, end):
+			# Match on the full string bounded by pos/endpos (not a slice), so anchors and
+			# lookbehinds still see the real surrounding text.
+			last = start
+			for match in pattern.finditer(text, start, end):
+				out.append(text[last:match.start()])
+				out.append(_repl(match))
+				last = match.end()
+			out.append(text[last:end])
+
 		out = []
 		last = 0
 		for ph in _MINTED_PLACEHOLDER_RE.finditer(text):
-			out.append(pattern.sub(_repl, text[last:ph.start()]))
+			_sub_range(last, ph.start())
 			out.append(ph.group())
 			last = ph.end()
-		out.append(pattern.sub(_repl, text[last:]))
+		_sub_range(last, len(text))
 		return "".join(out)
 
 	def encrypt(self, text: str) -> str:
@@ -173,38 +192,23 @@ class SensitiveDataEncryptor:
 
 		return result
 
-	def _decrypt_regex(self):
-		"""Build (and cache) one regex matching every known placeholder / hash, longest first."""
-		key = (id(self.pii_map), len(self.pii_map), id(self.hash_map), len(self.hash_map))
-		if self._decrypt_cache and self._decrypt_cache[0] == key:
-			return self._decrypt_cache[1], self._decrypt_cache[2]
-		lookup: Dict[str, str] = {}
-		for placeholder, original in self.pii_map.items():
-			lookup[placeholder] = original
-			lookup.setdefault(placeholder[1:-1], original)
-		for hash_value, original in self.hash_map.items():
-			lookup.setdefault(hash_value, original)
-		regex = None
-		if lookup:
-			alts = []
-			for token in sorted(lookup, key=len, reverse=True):
-				escaped = re.escape(token)
-				# Bracketed placeholders are self-delimiting; bare forms only match whole words.
-				alts.append(escaped if token.startswith("[") else rf"\b{escaped}\b")
-			regex = re.compile("|".join(alts))
-		self._decrypt_cache = (key, regex, lookup)
-		return regex, lookup
-
 	def decrypt(self, text: str) -> str:
 		"""Restore original sensitive values from placeholders.
 
 		Handles full placeholders ``[TYPE:hash]``, their bracket-stripped form ``TYPE:hash`` and
 		bare hashes. Done in a single pass (restored values are never re-scanned), longest token
-		first, and bare forms only on word boundaries so a hash inside a longer token is kept.
+		first, and bare forms only when not touching a letter or digit, so a hash inside a longer
+		token is kept.
 		"""
 		if not text:
 			return text
-		regex, lookup = self._decrypt_regex()
-		if regex is None:
-			return text
-		return regex.sub(lambda m: lookup[m.group()], text)
+
+		def _restore(match):
+			token = match.group()
+			if token in self.pii_map:
+				return self.pii_map[token]
+			if f"[{token}]" in self.pii_map:
+				return self.pii_map[f"[{token}]"]
+			return self.hash_map.get(token.strip("[]").rsplit(":", 1)[-1], token)
+
+		return _DECRYPT_TOKEN_RE.sub(_restore, text)
