@@ -154,6 +154,68 @@ class TestRestoreHistoryFromDB(unittest.TestCase):
 		self.assertEqual(
 			sum(1 for m in history.messages if m.get("content") == "scanme.nmap.org"), 1)
 
+	def test_interrupted_parallel_calls_restored_as_not_run(self):
+		"""A turn whose run ended before its tool calls returned (e.g. it timed out waiting
+		on a permission answer) persisted the assistant tool calls but no tool results. On
+		resume those calls must read as not run, not as acknowledged with no output."""
+		from secator.ai.session import restore_history_from_db
+		from secator.ai.utils import TOOL_NOT_RUN_RESULT
+
+		def _call(x):
+			return {"id": f"tc_{x}", "type": "function",
+			        "function": {"name": "run_shell", "arguments": f'{{"command": "echo {x}"}}'}}
+		engine = MagicMock()
+		engine.search.return_value = [
+			{"ai_type": "prompt", "_timestamp": 1, "message": {"role": "user", "content": "run three echos"}},
+			{"ai_type": "response", "_timestamp": 2,
+			 "message": {"role": "assistant", "content": None, "tool_calls": [_call(x) for x in "abc"]}},
+			{"ai_type": "permission", "status": "pending", "content": "Allow echo?", "_timestamp": 3},
+		]
+		history = restore_history_from_db("s-int", engine)
+		tools = [m for m in history.messages if m["role"] == "tool"]
+		self.assertEqual([m["tool_call_id"] for m in tools], ["tc_a", "tc_b", "tc_c"])
+		self.assertTrue(all(m["content"] == TOOL_NOT_RUN_RESULT for m in tools))
+
+	def test_answered_stop_threaded_when_batch_result_follows_it(self):
+		"""A batch with a `stop` records its other calls' results AFTER the `stopped` doc.
+		Those tool results are not a later turn: a stop answered after the run ended is
+		still the tail and its answer must be threaded."""
+		from secator.ai.session import restore_history_from_db
+		engine = MagicMock()
+		engine.search.return_value = [
+			{"ai_type": "prompt", "_timestamp": 1, "message": {"role": "user", "content": "plan it"}},
+			{"ai_type": "response", "_timestamp": 2, "message": {
+				"role": "assistant", "content": None, "tool_calls": [
+					{"id": "tc_plan", "type": "function", "function": {"name": "update_plan", "arguments": "{}"}},
+					{"id": "tc_stop", "type": "function", "function": {"name": "stop", "arguments": "{}"}}]}},
+			{"ai_type": "stopped", "content": "Go?", "status": "answered", "answer": "yes", "_timestamp": 3},
+			{"ai_type": "tool_result", "_timestamp": 4,
+			 "message": {"role": "tool", "tool_call_id": "tc_plan", "name": "update_plan",
+			             "content": '{"status":"acknowledged"}'}},
+		]
+		history = restore_history_from_db("s-stop", engine)
+		self.assertEqual(history.messages[-1], {"role": "user", "content": "yes"})
+
+	def test_answered_stop_not_threaded_when_a_later_turn_exists(self):
+		"""Tool results after the `stopped` doc are not a turn, but a later assistant turn is:
+		the stop was answered during the run and its answer is already in the transcript."""
+		from secator.ai.session import restore_history_from_db
+		engine = MagicMock()
+		engine.search.return_value = [
+			{"ai_type": "prompt", "_timestamp": 1, "message": {"role": "user", "content": "plan it"}},
+			{"ai_type": "response", "_timestamp": 2, "message": {
+				"role": "assistant", "content": None, "tool_calls": [
+					{"id": "tc_stop", "type": "function", "function": {"name": "stop", "arguments": "{}"}}]}},
+			{"ai_type": "stopped", "content": "Go?", "status": "answered", "answer": "yes", "_timestamp": 3},
+			{"ai_type": "tool_result", "_timestamp": 4,
+			 "message": {"role": "tool", "tool_call_id": "tc_x", "name": "x", "content": "{}"}},
+			{"ai_type": "prompt", "_timestamp": 5, "message": {"role": "user", "content": "yes"}},
+			{"ai_type": "response", "_timestamp": 6, "message": {"role": "assistant", "content": "On it."}},
+		]
+		history = restore_history_from_db("s-later", engine)
+		self.assertEqual(sum(1 for m in history.messages if m.get("content") == "yes"), 1)
+		self.assertEqual(history.messages[-1], {"role": "assistant", "content": "On it."})
+
 	def test_restore_rebuilds_full_transcript_from_message(self):
 		"""A persisted user->assistant(tool_calls)->tool->assistant round-trip
 		restores byte-identically, with tool_call_id pairing intact."""

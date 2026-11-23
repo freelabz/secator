@@ -32,7 +32,7 @@ from secator.ai.session import (
 	print_session_results)
 from secator.ai.utils import (
 	call_llm, init_llm, setup_ai, format_llm_status, parse_text_tool_calls,
-	_decrypt_dict, _build_action_display,
+	_decrypt_dict, _build_action_display, TOOL_ACK_RESULT,
 )
 
 
@@ -246,6 +246,32 @@ def _yield_tool_results(runner, collected):
 		         ai_type="tool_result",
 		         message=cap_message(_tool_msg),
 		         extra_data={"runner_id": runner_id, "runner_type": runner_type},
+		         _context=dict(runner.context))
+
+
+def _ack_resultless_calls(runner, actions, collected):
+	"""Record an acknowledged tool result for each dispatched call that produced none.
+
+	Some tools finish without an item the agent loop turns into a tool result (their only
+	output is a display item, e.g. ``update_plan``). Give each such call an explicit
+	acknowledged result in history, and yield it so the driver persists it too. Every
+	dispatched call then has a recorded result, so a restored transcript tells a call that
+	ran apart from one that was interrupted before it returned (which the history repair
+	answers with a "not run" result instead). ``stop`` is skipped: it ends the turn and the
+	user's answer follows it directly.
+	"""
+	answered = {(r.get("_context") or {}).get("tool_call_id") for r in collected if isinstance(r, dict)}
+	for action in actions:
+		tc_id = action.get("tool_call_id")
+		tc_name = action.get("tool_call_name") or ""
+		if not tc_id or tc_id in answered or tc_name == "stop":
+			continue
+		answered.add(tc_id)
+		content = maybe_encrypt(TOOL_ACK_RESULT, runner.encryptor)
+		runner.history.add_tool_result(tc_name, tc_id, content)
+		yield Ai(content=f"[{tc_name}] done",
+		         ai_type="tool_result",
+		         message=cap_message({"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": content}),
 		         _context=dict(runner.context))
 
 
@@ -2089,6 +2115,7 @@ class ai(PythonRunner):
 			ctx.results.append(result)
 
 		yield from _yield_tool_results(self, collected)
+		yield from _ack_resultless_calls(self, actions, collected)
 
 		return {
 			"stop_reason": stop_reason,

@@ -427,8 +427,11 @@ def restore_history_from_db(session_id, query_engine, model=None, encryptor=None
 	if answered_fu:
 		latest = answered_fu[-1]  # docs are sorted ascending by _timestamp
 		fu_ts = latest.get('_timestamp', 0)
+		# A later tool result is not a turn: a batch's results are recorded after the
+		# `stopped` doc of a `stop` called in the same batch.
 		has_later_turn = any(
-			(d.get('message') or d.get('ai_type') in ('prompt', 'response', 'steer'))
+			((d.get('message') and not (isinstance(d['message'], dict) and d['message'].get('role') == 'tool'))
+			 or d.get('ai_type') in ('prompt', 'response', 'steer'))
 			and d.get('_timestamp', 0) > fu_ts
 			for d in docs)
 		if not has_later_turn:
