@@ -4,7 +4,8 @@ from unittest import mock
 
 from click.testing import CliRunner
 
-from secator.query.api import ApiAuthError, ApiBackend
+from secator.query._base import QueryBackendError
+from secator.query.api import ApiBackend
 
 
 def _response(status_code, payload=None):
@@ -21,7 +22,7 @@ def _response(status_code, payload=None):
 	return resp
 
 
-class TestApiAuthErrors(unittest.TestCase):
+class TestQueryBackendErrors(unittest.TestCase):
 
 	def _backend(self, key):
 		backend = ApiBackend(workspace_id='ws1')
@@ -30,16 +31,18 @@ class TestApiAuthErrors(unittest.TestCase):
 
 	def test_missing_key_401_explains_how_to_configure_one(self):
 		with mock.patch('secator.query.api.requests.request', return_value=_response(401)):
-			with self.assertRaises(ApiAuthError) as cm:
+			with self.assertRaises(QueryBackendError) as cm:
 				self._backend('')._make_request('GET', 'workspaces')
 		self.assertIn('no API key is configured', cm.exception.message)
 		self.assertIn('addons.api.key', cm.exception.message)
 
 	def test_rejected_key_403_says_the_key_is_invalid(self):
 		with mock.patch('secator.query.api.requests.request', return_value=_response(403)):
-			with self.assertRaises(ApiAuthError) as cm:
+			with self.assertRaises(QueryBackendError) as cm:
 				self._backend('bad')._make_request('GET', 'workspaces')
 		self.assertIn('(403)', cm.exception.message)
+		self.assertEqual(cm.exception.backend, 'api')
+		self.assertEqual(cm.exception.status_code, 403)
 		self.assertIn('invalid', cm.exception.message)
 
 	def test_auth_error_is_not_swallowed_by_reads(self):
@@ -55,7 +58,7 @@ class TestApiAuthErrors(unittest.TestCase):
 		with mock.patch('secator.query.api.requests.request', return_value=_response(401)):
 			for name, call in calls.items():
 				with self.subTest(call=name):
-					with self.assertRaises(ApiAuthError):
+					with self.assertRaises(QueryBackendError):
 						call()
 
 	def test_other_http_errors_stay_best_effort(self):
@@ -74,11 +77,11 @@ class TestApiAuthErrors(unittest.TestCase):
 		def fake(method, endpoint, data=None):
 			puts.append(endpoint)
 			if len(puts) == 1:
-				raise ApiAuthError('denied')
+				raise QueryBackendError('denied')
 			return {}
 		search_all = mock.patch.object(ApiBackend, '_search_all', return_value=docs)
 		with search_all, mock.patch.object(ApiBackend, '_make_request', side_effect=fake):
-			with self.assertRaises(ApiAuthError):
+			with self.assertRaises(QueryBackendError):
 				backend._execute_update({}, {'$set': {'status': 'consumed'}})
 		self.assertEqual(len(puts), 2)
 
@@ -90,7 +93,7 @@ class TestApiAuthErrors(unittest.TestCase):
 	def test_steer_poll_reports_auth_error_without_raising(self):
 		from secator.ai.interactivity import RemoteBackend
 		engine = mock.Mock()
-		engine.search.side_effect = ApiAuthError('rejected key')
+		engine.search.side_effect = QueryBackendError('rejected key')
 		with mock.patch('secator.rich.console') as console:
 			self.assertEqual(RemoteBackend(timeout=1, query_engine=engine).poll_steers('s1'), [])
 		console.print.assert_called_once()
