@@ -416,8 +416,11 @@ class RemoteBackend(InteractivityBackend):
 			engine.add_runtime_allow(rules)
 		elif ptype in ("read", "write"):
 			if all_scope and "/" in value:
-				parent = value.rsplit("/", 1)[0] or "/"
-				engine.add_runtime_allow([f"{ptype}({parent}/*)", f"{ptype}({parent})"])
+				# A top-level path (`/foo`) has parent '' -> grant `/*`, never `//*`
+				# (which matches nothing, so the re-check re-prompted until it denied).
+				parent = value.rsplit("/", 1)[0]
+				rules = [f"{ptype}({parent}/*)"] + ([f"{ptype}({parent})"] if parent else [])
+				engine.add_runtime_allow(rules)
 			else:
 				engine.add_runtime_allow([f"{ptype}({value})"])
 

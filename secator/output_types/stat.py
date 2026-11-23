@@ -17,7 +17,7 @@ class Stat(OutputType):
 	# command itself). Lets a consumer nest per-process stats (show roots, expand children) and sum
 	# a subtree's memory for that subtree's true footprint.
 	parent_pid: int = field(default=None, repr=True)
-	extra_data: dict = field(default_factory=dict)
+	extra_data: dict = field(default_factory=dict, compare=False)
 	_source: str = field(default='', repr=True, compare=False)
 	_type: str = field(default='stat', repr=True)
 	_timestamp: int = field(default_factory=lambda: time.time(), compare=False)

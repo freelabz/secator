@@ -66,7 +66,7 @@ class QueryEngine:
 
     def search(self, query: dict, limit: int = 0, dedupe: bool = False,
                exclude_fields: List[str] = None, scope_only: bool = False,
-               offset: int = 0) -> List[Dict[str, Any]]:
+               offset: int = 0, include_internal: bool = False) -> List[Dict[str, Any]]:
         """Search for findings matching query.
 
         ``scope_only`` keeps only the workspace scope of the base query and drops the
@@ -77,13 +77,29 @@ class QueryEngine:
 
         ``offset`` skips the first N matching results (pagination); pair with ``limit``
         to page through large result sets.
+
+        Internal ai docs (the sensitive-data placeholder map) are never returned unless
+        ``include_internal=True`` (reserved for the run's own restore).
         """
         from secator.utils import debug, remove_duplicates
         debug(f'search via {self.backend.name} backend', sub='query', obj=query)
-        results = self.backend.search(query, limit, exclude_fields, scope_only=scope_only, offset=offset)
-        if dedupe:
-            results = remove_duplicates(results)
-        return results
+        kwargs = dict(scope_only=scope_only, include_internal=include_internal)
+        if not (dedupe and limit):
+            results = self.backend.search(query, limit, exclude_fields, offset=offset, **kwargs)
+            return remove_duplicates(results) if dedupe else results
+        # Deduplicated + limited: `limit` counts unique findings. The store holds raw rows (duplicates
+        # included until a dedup pass tags them), so a single raw `limit` page can come back with fewer
+        # unique findings than exist — keep paging raw rows until `limit` unique ones are collected.
+        raw, unique = [], []
+        page_offset = offset
+        while len(unique) < limit:
+            page = self.backend.search(query, limit, exclude_fields, offset=page_offset, **kwargs)
+            raw.extend(page)
+            unique = remove_duplicates(raw)
+            if len(page) < limit:
+                break
+            page_offset += len(page)
+        return unique[:limit]
 
     def iterate(self, query: dict, batch_size: int = 1000):
         """Stream findings matching query in batches (never materializes all N)."""

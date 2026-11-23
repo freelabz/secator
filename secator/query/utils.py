@@ -1,6 +1,7 @@
 """Utilities for converting CLI query syntax to MongoDB-style queries."""
 
 import json
+import math
 import re
 
 from secator.rich import console
@@ -598,7 +599,44 @@ def _finding_value(item, key, defaults=None):
 
 
 def _finding_ts(item):
-    return _finding_value(item, '_timestamp') or 0
+    """Return a finding's ``_timestamp`` as a float epoch, for ordering.
+
+    Stores do not all hold the same type: findings written by external writers or
+    API clients can carry a numeric string, an ISO 8601 string or a datetime, and
+    some have no timestamp at all. Comparing those raw values raises a TypeError
+    (e.g. ``0 >= '1700000000.5'``), so every value is coerced to a float, and
+    anything missing or unparsable falls back to 0 (sorts oldest).
+    """
+    from datetime import date, datetime, timezone
+    value = _finding_value(item, '_timestamp')
+    if isinstance(value, bool) or value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value) if math.isfinite(value) else 0.0
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.timestamp()
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc).timestamp()
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return 0.0
+        try:
+            ts = float(value)
+            return ts if math.isfinite(ts) else 0.0
+        except ValueError:
+            pass
+        try:
+            # fromisoformat() before 3.11 rejects a trailing 'Z'.
+            dt = datetime.fromisoformat(value[:-1] + '+00:00' if value.endswith(('Z', 'z')) else value)
+        except ValueError:
+            return 0.0
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    return 0.0
 
 
 def _truncate_aggregate(values, max_display=5):
@@ -636,17 +674,23 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5, default
     order = []
     for item in items:
         key = tuple(str(_finding_value(item, f, defaults)) for f in group_by)
+        ts = _finding_ts(item)
         if key not in groups:
-            groups[key] = {'rep': item, 'agg': [], 'count': 0}
+            # 'agg' is an insertion-ordered set of the distinct aggregated values (dict keys):
+            # a list membership test made grouping quadratic in the size of a group.
+            groups[key] = {'rep': item, 'ts': ts, 'agg': {}, 'count': 0}
             order.append(key)
         group = groups[key]
         group['count'] += 1
-        if _finding_ts(item) >= _finding_ts(group['rep']):
-            group['rep'] = item
+        if ts >= group['ts']:
+            group['rep'], group['ts'] = item, ts
         if aggregate_field:
             value = _finding_value(item, aggregate_field)
-            if value and value not in group['agg']:
-                group['agg'].append(value)
+            if value:
+                try:
+                    group['agg'].setdefault(value, value)
+                except TypeError:  # unhashable value (e.g. a list): dedup on its repr
+                    group['agg'].setdefault(repr(value), value)
 
     out = []
     for key in order:
@@ -663,7 +707,7 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5, default
             # When grouping, other fields (extra_data, etc.) keep the newest
             # finding's values; only the aggregate field is replaced by the
             # truncated collected values.
-            setattr(rep, aggregate_field, _truncate_aggregate(group['agg'], max_display))
+            setattr(rep, aggregate_field, _truncate_aggregate(list(group['agg'].values()), max_display))
         if not isinstance(rep, dict):
             rep._group_count = group['count']
         out.append(rep)

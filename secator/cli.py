@@ -17,6 +17,7 @@ from dotmap import DotMap
 from fp.fp import FreeProxy
 from jinja2 import Template
 from rich.live import Live
+from rich.markup import escape
 from secator.rich import CustomMarkdown as Markdown
 from rich.rule import Rule
 from rich.table import Table
@@ -37,9 +38,9 @@ from secator.utils import (
 	detect_host,
 	print_version,
 	get_file_timestamp,
-	get_info_from_report_path,
+	list_reports,
 	human_to_timedelta,
-	sanitize_folder_name,
+	get_workspace_folder_name,
 	vhs_tap_to_tape,
 	trim_gif,
 	reduce_gif_frames,
@@ -657,14 +658,15 @@ def config():
 
 @config.command('get')
 @click.option('--user/--full', is_flag=True, help='Show config (user/full)')
+@click.option('--reveal', is_flag=True, default=False, help='Show secret values (keys, tokens, passwords) in clear.')
 @click.argument('key', required=False)
-def config_get(user, key=None):
-	"""Get config value"""
+def config_get(user, reveal, key=None):
+	"""Get config value. Secret values are masked unless --reveal is passed."""
 	if key is None:
 		partial = user and default_config != CONFIG
-		CONFIG.print(partial=partial)
+		CONFIG.print(partial=partial, reveal=reveal)
 		return
-	CONFIG.get(key)
+	CONFIG.get(key, reveal=reveal)
 
 
 @config.command('set')
@@ -777,7 +779,7 @@ def workspace():
 
 
 @workspace.command('list')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 def workspace_list(driver):
 	"""List workspaces"""
 	effective_driver = QueryEngine.resolve_backend(driver)
@@ -808,22 +810,12 @@ def workspace_list(driver):
 			for child in sorted(reports_dir.iterdir()):
 				if child.is_dir():
 					workspaces_dict[child.name] = {'count': 0, 'path': str(child)}
-		json_reports = []
-		for root, _, files in os.walk(CONFIG.dirs.reports):
-			for file in files:
-				if file.endswith('report.json'):
-					path = Path(root) / file
-					json_reports.append(path)
-		json_reports = sorted(json_reports, key=lambda x: x.stat().st_mtime, reverse=False)
-		for path in json_reports:
-			# Layout: <reports>/<ws>/<runner_type>/<number>/report.json — use the path
-			# helper / Path parts instead of a manual POSIX split.
-			ws = get_info_from_report_path(path).get('workspace')
-			if not ws:
-				continue
-			if ws not in workspaces_dict:
-				workspaces_dict[ws] = {'count': 0, 'path': str(path.parents[2])}
-			workspaces_dict[ws]['count'] += 1
+		# Count runs from the fixed-depth <reports>/<ws>/<type>/<id>/report.json layout (list_reports)
+		# instead of os.walk, which descends into every run's artifact subdirectories.
+		for path in list_reports():
+			ws = path.parts[-4]
+			if ws in workspaces_dict:
+				workspaces_dict[ws]['count'] += 1
 		table.add_column('Name', style='bold gold3')
 		table.add_column('Run count', overflow='fold')
 		table.add_column('Path')
@@ -836,7 +828,7 @@ def workspace_list(driver):
 
 @workspace.command(name='use', aliases=['create'])
 @click.argument('name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 def workspace_use(name, driver):
 	"""Use a workspace (set as default). With the api driver, also creates it remotely."""
 	# When the api driver is active (via --driver or drivers.defaults), make sure the
@@ -860,7 +852,7 @@ def workspace_use(name, driver):
 	config = CONFIG.validate()
 	if config:
 		CONFIG.save()
-		workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+		workspace_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(name)
 		workspace_folder.mkdir(parents=True, exist_ok=True)
 		console.print(Info(message=f'Now using workspace: [bold]{name}[/]'))
 	else:
@@ -965,7 +957,7 @@ def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort
 
 @workspace.command('summary')
 @click.option('-w', '-ws', '--workspace', 'workspace_opt', type=str, default=None, help='Workspace name (default: current)')  # noqa: E501
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--template', 'template_path', type=str, default=None, help='Path to a Jinja2 summary template overriding the built-in one')  # noqa: E501
 def workspace_summary(workspace_opt, driver, template_path):
 	"""Summarize a workspace's findings (top ports/hosts/tech/URLs + vulnerabilities).
@@ -991,12 +983,12 @@ def workspace_summary(workspace_opt, driver, template_path):
 
 @workspace.command(name='rm', aliases=['remove', 'delete'])
 @click.argument('name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def workspace_delete(name, driver, yes):
 	"""Delete a workspace and all associated reports. NAME: workspace name"""
 	driver = QueryEngine.resolve_backend(driver)
-	workspace_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(name)
+	workspace_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(name)
 
 	# The API keys workspaces by id, so resolve the name to its id for the api driver.
 	api_workspace_id = name
@@ -1100,21 +1092,18 @@ def profile_list():
 	table.add_column('Profile name', style='bold gold3')
 	table.add_column('Description', overflow='fold')
 	table.add_column('Enforced', justify='center')
-	table.add_column('Workspace', overflow='fold')
 	table.add_column('Drivers', overflow='fold')
 	table.add_column('Exporters', overflow='fold')
 	table.add_column('Options', overflow='fold')
 	for profile in PROFILES:
 		opts_str = ', '.join(f'[bold yellow3]{k}[/]=[dim yellow3]{v}[/]' for k, v in profile.opts.items())
 		enforced_str = '[bold red]✓[/]' if profile.enforce else ''
-		workspace_str = profile.workspace or ''
 		drivers_str = ','.join(profile.drivers) if profile.drivers else ''
 		exporters_str = ','.join(profile.exporters) if profile.exporters else ''
 		table.add_row(
 			profile.name,
 			profile.description or '',
 			enforced_str,
-			workspace_str,
 			drivers_str,
 			exporters_str,
 			opts_str,
@@ -1237,7 +1226,7 @@ def list_aliases(silent):
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{vulnerability.matched_at}'")  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
 @click.option('-rf', '--report-filter', 'report_filter', type=str, default=None, help='Scope the query to runner paths (e.g. scans/5,tasks/3), like the REPORT_QUERY of `report show`')  # noqa: E501
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -cvss_score')  # noqa: E501
@@ -1661,8 +1650,9 @@ def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=F
 		rows = [f'{str(c).rjust(width)}  {v}' for v, c in items]
 		return rows[:limit] if limit else rows
 
-	# --sort alone: full ordering needs the whole set.
-	return _finish(list(sv))
+	# --sort alone: full ordering needs the whole set. list(iter(sv)), not list(sv): list() asks a
+	# sized object for its len() first, which is a full count query on top of the read.
+	return _finish(list(iter(sv)))
 
 
 def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None, show_all=False):  # noqa: E501
@@ -1832,7 +1822,7 @@ def run_ai_chat(ctx, prompt, workspace):
 @click.option('-q', '--query', type=str, default=None, help='Filter results (Python-like or MongoDB JSON)')
 @click.option('--format', '-f', 'fmt', type=str, default=None, help="Format string for results, e.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'")  # noqa: E501
 @click.option('-w', '-ws', '--workspace', type=str, default=None, help='Filter by workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--dedupe/--no-dedupe', default=None, help='Deduplicate findings (defaults to config value)')
 @click.option('-l', '--limit', type=int, default=0, help='Limit number of results (0 = no limit)')
 @click.option('--sort', 'sort', type=str, default=None, help='Sort results by a field (numeric-aware; prefix with - for descending), e.g. --sort port or --sort -cvss_score')  # noqa: E501
@@ -1964,7 +1954,7 @@ def _format_vuln_counts(counts):
 @click.option('-ws', '-w', '--workspace', type=str)
 @click.option('-r', '--runner-type', type=str, default=None, help='Filter by runner type. Choices: task, workflow, scan')  # noqa: E501
 @click.option('-d', '--time-delta', type=str, default=None, help='Keep results newer than time delta. E.g: 26m, 1d, 1y')  # noqa: E501
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--show-all', is_flag=True, default=False, help='Show all columns including report path')
 @click.option('--interesting', '-i', is_flag=True, default=False, help='Only show reports that have vulnerabilities')
 @click.option('--status', type=str, default=None, help="Filter by runner status (case-insensitive regex, e.g. SUCCESS, FAIL, '(RUNNING|FAILURE)')")  # noqa: E501
@@ -2121,7 +2111,7 @@ def report_list(ctx, workspace, runner_type, time_delta, driver, show_all, inter
 @report.command('info')
 @click.argument('runner_id', type=str)
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('--show-all', is_flag=True, default=False, help='Show all entries (do not truncate lists/dicts or errors)')  # noqa: E501
 def report_info(runner_id, workspace, driver, show_all):
 	"""Show runner info from a report. RUNNER_ID: runner path (e.g. scans/0)"""
@@ -2150,7 +2140,7 @@ def report_info(runner_id, workspace, driver, show_all):
 		info.pop('_id', None)
 		source_label, source_value = '_source', f'{effective_driver}:{runner_type}/{runner_number}'
 	else:
-		report_path = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
+		report_path = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type / runner_number / 'report.json'  # noqa: E501
 		if not report_path.exists():
 			console.print(Error(message=f'Report not found: {report_path}'))
 			return
@@ -2265,7 +2255,7 @@ def _resolve_runner_db_id(report_folder, runner_type_singular):
 
 def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular, runner_number, runner_db_id, driver):
 	"""Perform the actual deletion for a single runner reference."""
-	report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+	report_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type_plural / runner_number  # noqa: E501
 
 	# 1. Remove report folder (local driver only; api/mongodb delete from the backend)
 	if driver == 'local':
@@ -2327,7 +2317,7 @@ def _delete_one_report(workspace_name, runner_type_plural, runner_type_singular,
 @report.command(name='delete', aliases=['rm', 'remove'])
 @click.argument('runner_ids', nargs=-1, required=True)
 @click.option('-ws', '-w', '--workspace', type=str, default=None, help='Workspace name')
-@click.option('--driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'api', 'sqlite']), default=None, help='Query backend driver')  # noqa: E501
 @click.option('-y', '--yes', is_flag=True, default=False, help='Skip confirmation prompt')
 def report_delete(runner_ids, workspace, driver, yes):
 	"""Delete one or more reports.
@@ -2353,7 +2343,7 @@ def report_delete(runner_ids, workspace, driver, yes):
 	resolved = []
 	console.print('[bold]The following actions will be performed:[/]')
 	for runner_type_plural, runner_type_singular, runner_number in refs:
-		report_folder = Path(CONFIG.dirs.reports) / sanitize_folder_name(workspace_name) / runner_type_plural / runner_number
+		report_folder = Path(CONFIG.dirs.reports) / get_workspace_folder_name(workspace_name) / runner_type_plural / runner_number  # noqa: E501
 		if runner_number.isdigit():
 			# Local report: resolve the backend id from the report's context.
 			runner_db_id = _resolve_runner_db_id(report_folder, runner_type_singular)
@@ -2531,6 +2521,15 @@ def health(json_, debug, strict, bleeding):
 					# dublin-traceroute is apt-only), so a missing one must not fail --strict.
 					if not getattr(tool, 'install_optional', False):
 						error = True
+				elif info.get('broken'):
+					# The binary exists but crashes before doing anything (e.g. a dependency
+					# that no longer imports on this interpreter): it is NOT usable.
+					errs = escape('; '.join(info.get('errors') or []))
+					messages.append(f'{tool.__name__} is installed but broken ({errs}).')
+					info['next_version'] = tool.install_version
+					info['reinstall'] = True
+					if not getattr(tool, 'install_optional', False):
+						error = True
 				elif info['outdated']:
 					msg = 'latest' if bleeding else 'supported'
 					message = f'{tool.__name__} is outdated (current:{info["version"]}, {msg}:{info["latest_version"]}).'
@@ -2580,6 +2579,8 @@ def health(json_, debug, strict, bleeding):
 			cmds.append('secator update')
 		elif info['_type'] == 'tool' and info.get('next_version'):
 			tool_cmd += f',{info["_name"]}=={info["next_version"]}'
+		elif info['_type'] == 'tool' and info.get('reinstall'):
+			tool_cmd += f',{info["_name"]}'
 
 	if tool_cmd:
 		tool_cmd = f'secator install tools {tool_cmd.lstrip(",")}'
@@ -2655,7 +2656,6 @@ q [bright_magenta]"port.state == 'open' && port.port in [22,443]"[/]   [grey42]#
 ws list                                             [grey42]# list workspaces[/]
 ws use prod                                         [grey42]# switch to prod workspace (auto-create if missing)[/]
 s host [blue]-ws[/] [bright_magenta]prod[/] example.com                         [grey42]# run in prod workspace explicitely[/]
-c set --append workspaces.routes.prod *example.com* [grey42]# run in prod workspace implicitely (based on target regex)[/]
 
 [grey42]# Use different backends for results[/]
 s host [blue]-driver[/] [bright_magenta]mongodb[/] example.com                  [grey42]# save results using driver mongodb[/]
@@ -3286,8 +3286,9 @@ def update(all):
 			cmd = base_cmd.split(' ')[0]
 			version_flag = cls.get_version_flag()
 			info = get_version_info(cmd, version_flag, cls.github_handle, cls.install_github_version_prefix)
-			if not info['installed'] or info['outdated'] or not info['latest_version']:
+			if not info['installed'] or info.get('broken') or info['outdated'] or not info['latest_version']:
 				# with console.status(f'[bold yellow]Installing {cls.__name__} ...'):
+				apply_install_overrides(cls)
 				status = ToolInstaller.install(cls)
 				if not status.is_ok():
 					return_code = 1
@@ -3532,6 +3533,14 @@ def task(name, verbose, check, system_exit):
 			'Failed to install command. Fix your installation command.',
 			errors,
 		)
+		# Only meaningful when a version probe actually ran (binary present, version flag supported).
+		if version_info.get('version_cmd'):
+			check_test(
+				not version_info.get('broken'),
+				'Check task starts without crashing',
+				f'Task binary crashes on start: {escape("; ".join(version_info.get("errors") or []))}',
+				errors,
+			)
 		check_test(
 			any(cmd for cmd in [task.install_pre, task.install_cmd, task.github_handle]),
 			'Check task installation command is defined',

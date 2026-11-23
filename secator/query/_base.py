@@ -6,6 +6,27 @@ from typing import List, Dict, Any, Optional
 from secator.utils import debug
 
 
+# Internal `ai` docs that hold bookkeeping, not results: the sensitive-data placeholder map
+# (placeholder -> real value). They are stored like any result (so a resumed run can restore
+# them) but must never be read back by a normal query — the AI's query tools feed results to
+# the model, and listings/reports would show raw values. Only an explicit
+# ``include_internal=True`` read (the restore itself) reaches them.
+INTERNAL_AI_TYPES = ('pii_map',)
+
+
+def internal_docs_filter() -> dict:
+	"""A query clause excluding internal ai docs. Expressed as `_type != ai OR ai_type not in
+	(...)` so it stays null-safe on every backend (sqlite's `!=` is NULL for a missing field,
+	which would otherwise drop every non-ai finding)."""
+	return {'$or': [{'_type': {'$ne': 'ai'}}, {'ai_type': {'$nin': list(INTERNAL_AI_TYPES)}}]}
+
+
+def is_internal_doc(doc) -> bool:
+	"""True for an internal ai doc (dict or output type) that must never be surfaced."""
+	get = doc.get if isinstance(doc, dict) else (lambda k, d=None: getattr(doc, k, d))
+	return get('_type') == 'ai' and get('ai_type') in INTERNAL_AI_TYPES
+
+
 class QueryBackend(ABC):
 	"""Abstract base class for query backends."""
 
@@ -58,18 +79,25 @@ class QueryBackend(ABC):
 			# — that returned 0 results for fully-populated workspaces. `$ne: True`
 			# keeps false/null/absent and excludes only explicit false positives.
 			'is_false_positive': {'$ne': True},
+			# No `_tagged` filter: findings are written untagged and only tagged later by
+			# an out-of-band dedup pass, so requiring `_tagged: True` hides every finding of
+			# an in-progress run (a workflow's downstream tasks then extract no inputs).
+			# Callers that want the deduplicated set pass `_tagged` explicitly.
 		}
 
 	# Display/perf filters in the base query that scope READS but must NOT gate a targeted
 	# write: an update by id/uuid has to reach a finding regardless of its display state.
 	_DISPLAY_FILTER_FIELDS = ('is_false_positive', '_tagged')
 
-	def _merge_query(self, query: dict, scope_only: bool = False) -> dict:
+	def _merge_query(self, query: dict, scope_only: bool = False, include_internal: bool = False) -> dict:
 		"""Merge user query with base query. Base query always wins.
 
 		``scope_only`` keeps ONLY the workspace-scope of the base query (drops the display
 		filters) — used for updates so re-writing an already-false-positive/marked finding
 		still matches, instead of matching 0 rows and looking like "not found".
+
+		Internal ai docs (see ``INTERNAL_AI_TYPES``) are excluded unless ``include_internal``.
+		The exclusion is ANDed in (never overwrites the caller's own ``$or``/``$and``/``ai_type``).
 		"""
 		merged = query.copy()
 
@@ -82,10 +110,14 @@ class QueryBackend(ABC):
 			base = {k: v for k, v in base.items() if k not in self._DISPLAY_FILTER_FIELDS}
 		merged.update(base)
 
+		if not include_internal:
+			ands = merged.get('$and')
+			merged['$and'] = (list(ands) if isinstance(ands, list) else []) + [internal_docs_filter()]
+
 		return merged
 
 	def search(self, query: dict, limit: int = 0, exclude_fields: List[str] = None,
-	           scope_only: bool = False, offset: int = 0) -> List[Dict[str, Any]]:
+	           scope_only: bool = False, offset: int = 0, include_internal: bool = False) -> List[Dict[str, Any]]:
 		"""Execute query with enforced base query.
 
 		``scope_only`` drops the display filters (is_false_positive/_tagged), keeping only
@@ -94,10 +126,13 @@ class QueryBackend(ABC):
 
 		``offset`` skips the first N matching results (pagination); combine with ``limit``
 		to page through large result sets. offset=0 preserves the legacy behaviour.
+
+		``include_internal`` also returns internal ai docs (the placeholder map) — only for the
+		run's own restore, never for anything that reaches the model or a listing.
 		"""
 		if exclude_fields is None:
 			exclude_fields = []
-		safe_query = self._merge_query(query, scope_only=scope_only)
+		safe_query = self._merge_query(query, scope_only=scope_only, include_internal=include_internal)
 		debug('context', sub=f'query.{self.name}', obj=self.context)
 		debug('search', sub=f'query.{self.name}', obj=safe_query)
 		results = self._execute_search(safe_query, limit, exclude_fields, offset=offset)
@@ -145,7 +180,8 @@ class QueryBackend(ABC):
 		already a false positive / already in the target state — otherwise a legitimate re-mark
 		matches 0 rows and surfaces a misleading "not found".
 		"""
-		safe_query = self._merge_query(query, scope_only=True)
+		# writes target a specific doc (incl. the run's own placeholder map upsert)
+		safe_query = self._merge_query(query, scope_only=True, include_internal=True)
 		return self._execute_update(safe_query, update)
 
 	@abstractmethod

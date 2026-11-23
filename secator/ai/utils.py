@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 from secator.definitions import LLM_SPINNER_MESSAGES
-from secator.config import CONFIG
+from secator.config import CONFIG, mask_secret, mask_url
 from secator.output_types import Warning, Error
 from secator.rich import console, maybe_status
 from secator.runners import Task
@@ -314,6 +314,9 @@ def _union_live_results(persisted: List[Dict], live_results: List[Dict], query_f
 	respecting ``limit``. Makes query_workspace the single source of truth under the
 	local driver, whose JSON exporter only writes to disk at end-of-run.
 	"""
+	from secator.query._base import is_internal_doc
+	# never surface internal ai docs (the placeholder map) to the model, whatever the query
+	persisted = [r for r in persisted if not is_internal_doc(r)]
 	if not live_results:
 		return persisted
 	# Filter this run's in-memory findings by the SAME query in-process. The JsonBackend
@@ -323,7 +326,7 @@ def _union_live_results(persisted: List[Dict], live_results: List[Dict], query_f
 	from secator.query.json import match_query
 	seen = {r.get("_uuid") for r in persisted if r.get("_uuid")}
 	for r in live_results:
-		if not match_query(r, query_filter):
+		if is_internal_doc(r) or not match_query(r, query_filter):
 			continue
 		u = r.get("_uuid")
 		if u and u in seen:
@@ -610,6 +613,32 @@ def _dedupe_tool_results(messages: List[Dict]) -> int:
 	return removed
 
 
+# Tool result recorded for a call that ran but produced nothing to report (e.g. `stop`, which
+# ends the turn, or a tool whose only output is a display item).
+TOOL_ACK_RESULT = '{"status":"acknowledged"}'
+
+# Placeholder for a tool call that has NO recorded result. Every call the `ai` task dispatches
+# gets a result in history (see `_ack_resultless_calls` in the `ai` task), so a call without one
+# was interrupted before it returned: the run ended while waiting on a permission answer, or the
+# worker stopped mid-turn, and the turn is restored later. Never answer it with TOOL_ACK_RESULT:
+# the model would read "ran, no output" for a call that never executed.
+TOOL_NOT_RUN_RESULT = json.dumps({
+	"status": "not_run",
+	"error": (
+		"No result was recorded for this call: the run was interrupted before it returned "
+		"(e.g. it ended while waiting for a permission answer, or stopped mid-turn). It may "
+		"not have run, or may have run without its result reaching you. This is not an error "
+		"from the command itself, nor from running calls in parallel. Check for its effects "
+		"before re-issuing it (for a task, workflow or scan, query the workspace for its "
+		"findings)."),
+}, separators=(',', ':'))
+
+# Tools whose calls never get a tool_result by design: `stop` ends the turn and the user's
+# answer follows it directly (`follow_up` is its former name, still found in older
+# transcripts). A missing result for these is expected, not an interruption.
+_RESULTLESS_TOOLS = frozenset({"stop", "follow_up"})
+
+
 def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
 	"""Repair orphan tool_use/tool_result pairing for Anthropic/OpenAI.
 
@@ -618,7 +647,9 @@ def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
 	  whose assistant(tool_calls) parent was trimmed away (see
 	  `_strip_leading_orphan_tools`).
 	- FORWARD orphan tool_uses: an assistant tool_use block not immediately
-	  followed by a matching tool_result (synthesize an acknowledged result).
+	  followed by a matching tool_result. A `stop` call gets an acknowledged
+	  result; any other call gets TOOL_NOT_RUN_RESULT, since a dispatched call
+	  always has a recorded result and a missing one means it was interrupted.
 
 	Args:
 		messages: List of message dicts in litellm/OpenAI format.
@@ -663,7 +694,7 @@ def _repair_orphan_tool_uses(messages: List[Dict]) -> int:
 				"role": "tool",
 				"tool_call_id": tc_id,
 				"name": name,
-				"content": '{"status":"acknowledged"}',
+				"content": TOOL_ACK_RESULT if name in _RESULTLESS_TOOLS else TOOL_NOT_RUN_RESULT,
 			})
 
 		if to_insert:
@@ -1260,12 +1291,12 @@ def _setup_ai_interactive():
 	# Current config (so the user sees what they're changing).
 	current_key = CONFIG.addons.ai.api_key
 	current_base = CONFIG.addons.ai.api_base
-	masked_key = f"{current_key[:8]}...{current_key[-4:]}" if current_key and len(current_key) > 12 else current_key or ""
+	masked_key = mask_secret(current_key) if current_key else ""
 	console.print()
 	console.print("[bold]  Current config:[/]")
 	console.print(f"    Model:        [bold white]{CONFIG.addons.ai.default_model or 'not set'}[/]")
 	console.print(f"    Intent model: [bold white]{CONFIG.addons.ai.intent_model or 'not set'}[/]")
-	console.print(f"    API base:     [bold white]{current_base or 'default (per-provider)'}[/]")
+	console.print(f"    API base:     [bold white]{mask_url(current_base) or 'default (per-provider)'}[/]")
 	console.print(f"    API key:      [bold white]{masked_key or 'not set'}[/]")
 
 	# Step 1 — pick a PROVIDER. The full LiteLLM provider list (on their default bases),

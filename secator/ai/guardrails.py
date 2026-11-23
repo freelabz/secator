@@ -1,6 +1,7 @@
 """Permission engine for AI guardrails."""
 import fnmatch
 import ipaddress
+import os
 import re
 import socket
 from dataclasses import dataclass, field
@@ -64,6 +65,49 @@ def _strip_trailing_delims(value: str) -> str:
 		else:
 			break
 	return out
+
+
+def _is_loopback_target(value: str) -> bool:
+	"""True when *value* (host, ``host:port``, ``[v6]:port`` or HTTP(S) URL) names a loopback host:
+	``localhost`` or an address in ``127.0.0.0/8`` / ``::1``.
+
+	Only the exact name ``localhost`` counts — ``*.localhost`` is resolved through DNS in a
+	minimal container and may point anywhere. Anything unparseable is NOT loopback.
+	"""
+	from urllib.parse import urlparse
+	v = _strip_trailing_delims((value or '').strip())
+	if v.lower().startswith(('http://', 'https://')):
+		try:
+			host = urlparse(v).hostname
+		except ValueError:
+			return False
+	else:
+		canon = _canonical_authority(v)
+		if not canon:
+			return False
+		if canon.startswith('['):
+			host = canon[1:canon.index(']')]
+		elif canon.count(':') == 1:
+			host = canon.split(':', 1)[0]
+		else:
+			host = canon
+	if not host:
+		return False
+	host = host.lower().rstrip('.')
+	if host == 'localhost':
+		return True
+	try:
+		return ipaddress.ip_address(host.split('%', 1)[0]).is_loopback
+	except ValueError:
+		return False
+
+
+def _sandbox_has_private_loopback() -> bool:
+	"""True when the isolated run_shell sandbox gets its own network namespace (Docker's default
+	bridge, a named network, or ``none``), i.e. its loopback is not shared with the worker. Mirrors
+	the ``--network`` value the sandbox is started with (``SECATOR_AI_SANDBOX_NETWORK``)."""
+	net = os.environ.get("SECATOR_AI_SANDBOX_NETWORK", "").strip().lower()
+	return not (net == "host" or net.startswith("container:"))
 
 
 # Shell operators that chain commands
@@ -241,7 +285,9 @@ def match_rule(value: str, patterns: List[str]) -> bool:
 	norm_ip = _normalize_ip(value)
 	canon = str(norm_ip) if norm_ip is not None else None
 	for pattern in patterns:
-		if pattern == "*":
+		if pattern == "*" or pattern == value:
+			# Literal equality first: an approved `[::1]:445` must match itself even
+			# though fnmatch reads its brackets as a character class.
 			return True
 		if norm_ip is not None:
 			in_pat = _ip_in_pattern(norm_ip, pattern)
@@ -367,7 +413,170 @@ _NETWORK_CMDS = frozenset({
 	'nikto', 'sqlmap', 'gobuster', 'feroxbuster', 'ffuf', 'dirb', 'dirsearch', 'wfuzz', 'hydra',
 	'medusa', 'wpscan', 'amass', 'subfinder', 'openssl', 'redis-cli', 'mysql', 'psql', 'mongosh',
 	'smbclient', 'crackmapexec', 'nxc', 'impacket-smbclient', 'evil-winrm', 'kubectl', 'aws',
+	'rpcclient', 'smbmap', 'smbget', 'smbcacls', 'nmblookup', 'enum4linux', 'enum4linux-ng',
 })
+
+# SMB / Windows-share tools: for these a ``//host/share`` argument is a UNC share, never a
+# local path. Everywhere else ``//x/y`` is a POSIX path (``rsync //etc/shadow host:``,
+# ``scp //root/.ssh/id_rsa host:``), so it stays subject to the path rules.
+_UNC_CMDS = frozenset({
+	'smbclient', 'impacket-smbclient', 'rpcclient', 'smbmap', 'smbget', 'smbcacls', 'nmblookup',
+	'enum4linux', 'enum4linux-ng', 'crackmapexec', 'nxc', 'mount.cifs',
+})
+
+# Host label shape (RFC 1123-ish, plus '_' seen in NetBIOS/AD names). Used only for the
+# structurally-unambiguous forms below (UNC, scheme://, user@host), where the prefix itself
+# marks the token as a host — so single-label names like `localhost` / `fileserver` count.
+_HOST_LABEL_RE = re.compile(r'^(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?(?:\.[A-Za-z0-9_-]+)*\.?$')
+_SCHEME_RE = re.compile(r'^([A-Za-z][A-Za-z0-9+.-]*)://')
+
+
+def _canonical_authority(authority: str) -> Optional[str]:
+	"""Canonical ``host``/``host:port``/``[v6]``/``[v6]:port`` of a URL/UNC authority, else None.
+
+	Userinfo (``user:pass@``) is dropped. A bare IPv6 literal (``::1``) is kept bare.
+	"""
+	authority = authority.rsplit('@', 1)[-1]
+	if not authority:
+		return None
+	if authority.startswith('['):
+		end = authority.find(']')
+		if end == -1:
+			return None
+		inner, rest = authority[1:end], authority[end + 1:]
+		try:
+			ipaddress.IPv6Address(inner.split('%', 1)[0])
+		except ValueError:
+			return None
+		if rest and not re.fullmatch(r':\d{1,5}', rest):
+			return None
+		return f'[{inner}]{rest}'
+	if authority.count(':') > 1:  # bare IPv6 literal
+		try:
+			ipaddress.IPv6Address(authority.split('%', 1)[0])
+			return authority
+		except ValueError:
+			return None
+	host, sep, port = authority.partition(':')
+	if sep and not re.fullmatch(r'\d{1,5}', port):
+		return None
+	if not _HOST_LABEL_RE.match(host):
+		return None
+	# DNS names are case-insensitive and a trailing dot only marks them fully qualified:
+	# `smb://EXAMPLE.COM.` is the same target as an approved `example.com`.
+	host = host.rstrip('.').lower()
+	if not host:
+		return None
+	return f'{host}{sep}{port}'
+
+
+def _authority_form_host(value: str) -> Optional[str]:
+	"""Host of a UNC / non-HTTP ``scheme://`` token, or None if ``value`` is not one.
+
+	``//host``, ``//host/share``, ``\\\\host\\share``, ``smb://user@host:445/share`` all
+	yield the canonical authority (``host`` / ``host:445``). HTTP(S) URLs are NOT handled
+	here — they keep their own URL handling (path-scoped rules, host/port split). Returns
+	'' for an authority-form token with no valid host (``file:///etc/passwd``).
+	"""
+	v = value.strip()
+	if v.startswith('\\\\'):
+		# Collapse backslash runs: an unquoted `\\\\host\\share` reaches us still shell-escaped.
+		rest = re.sub(r'\\+', '/', v.lstrip('\\'))
+	elif v.startswith('//') and not v.startswith('///'):
+		rest = v[2:]
+	else:
+		m = _SCHEME_RE.match(v)
+		if not m or m.group(1).lower() in ('http', 'https'):
+			return None
+		rest = v[m.end():]
+	authority = re.split(r'[/?#]', rest, maxsplit=1)[0]
+	return _canonical_authority(authority) or ''
+
+
+def normalize_target(value: str) -> str:
+	"""THE canonical form of a target value — shared by extraction, the approval prompt,
+	the rules built from the user's choice, and the permission check, so the value a
+	user approves is byte-for-byte the value that is later checked.
+
+	UNC (``//host/share``, ``\\\\host\\share``) and non-HTTP scheme URLs
+	(``smb://host/share``) collapse to their ``host[:port]``. Everything else (hosts,
+	IPs, ``host:port``, HTTP(S) URLs, CIDRs) is returned stripped but otherwise unchanged.
+	"""
+	v = (value or '').strip()
+	host = _authority_form_host(v)
+	return host if host else v
+
+
+def _is_ip_literal(value: str) -> bool:
+	"""True for an IPv4/IPv6 literal, optionally bracketed and/or with a ``:port``."""
+	v = value
+	if v.startswith('['):
+		v = v[1:].split(']', 1)[0]
+	elif v.count(':') == 1:
+		v = v.split(':', 1)[0]
+	try:
+		ipaddress.ip_address(v.split('%', 1)[0])
+		return True
+	except ValueError:
+		return False
+
+
+def _authority_check_values(value: str) -> List[str]:
+	"""Extra values a ``host`` / ``host:port`` / ``[v6]:port`` target is also checked as.
+
+	The canonical spelling (lowercase, no trailing dot: ``EXAMPLE.COM.:443`` ->
+	``example.com:443``) and, when a port is present, the bare host, so a rule on a host
+	covers every spelling and port of it (and a deny on it wins). A bare IPv6 literal
+	stays whole. Values that are not an authority (URLs, paths, CIDRs) yield nothing.
+	"""
+	canon = _canonical_authority(value)
+	if not canon:
+		return []
+	extra = [canon]
+	if canon.startswith('['):
+		extra.append(canon[:canon.index(']') + 1])
+	elif canon.count(':') == 1:
+		extra.append(canon.split(':', 1)[0])
+	return [v for v in dict.fromkeys(extra) if v != value]
+
+
+def _is_slash_unc(arg: str) -> bool:
+	"""True for a ``//x...`` token: a UNC share to SMB tools, a POSIX path to everything else."""
+	v = arg.strip()
+	return v.startswith('//') and not v.startswith('///')
+
+
+def _structural_target(arg: str, is_network_cmd: bool, cmd_base: str = '') -> Optional[str]:
+	"""Target carried by a UNC / non-HTTP scheme argument, or None.
+
+	For a network command (smbclient, ssh, ...) any valid host counts, single-label
+	included (``smbclient -L //localhost``). For other commands only an unambiguous
+	network host does (an IP, ``localhost``, or a dotted name), so ``cat //etc/passwd``
+	stays a path. A ``//x`` token is a UNC share only for SMB tools (``_UNC_CMDS``); for
+	any other command it gets the unambiguous-host rule too, so ``rsync //etc/shadow``
+	yields no ``etc`` target. See ``_is_path_free_target`` for the path side.
+	"""
+	host = _authority_form_host(arg)
+	if not host:
+		return None
+	if is_network_cmd and (cmd_base in _UNC_CMDS or not _is_slash_unc(arg)):
+		return host
+	bare = _host_of(host) or host
+	if _is_ip_literal(host) or bare.lower() == 'localhost' or '.' in bare.strip('.'):
+		return host
+	return None
+
+
+def _is_path_free_target(arg: str, cmd_base: str) -> bool:
+	"""True when ``arg`` is a target and can never be a local path, so path detection skips it.
+
+	Backslash UNC and ``scheme://`` forms are never paths. A ``//x/y`` token is a UNC share
+	(not a path) only for SMB tools; for every other command it is still checked as a path
+	(the kernel reads ``//etc/shadow`` as ``/etc/shadow``), even when it also names a host.
+	"""
+	if not _structural_target(arg, cmd_base in _NETWORK_CMDS, cmd_base):
+		return False
+	return cmd_base in _UNC_CMDS or not _is_slash_unc(arg)
 
 
 def _cmd_basename(cmd: str) -> str:
@@ -404,7 +613,7 @@ def extract_command_targets(command: str) -> List[str]:
 			seen.add(value)
 			targets.append(value)
 
-	def _check_arg(arg: str, is_network_cmd: bool = False):
+	def _check_arg(arg: str, is_network_cmd: bool = False, cmd_base: str = ''):
 		"""Check a single argument for targets (URLs, IPs, hosts).
 
 		``is_network_cmd`` is True when the owning sub-command actually connects out
@@ -414,6 +623,12 @@ def extract_command_targets(command: str) -> List[str]:
 		"""
 		# Skip flags
 		if arg.startswith('-'):
+			return
+		# UNC / non-HTTP scheme forms (`//host/share`, `\\\\host\\share`, `smb://host`):
+		# the target is the authority, never the leading-'/' path pathlib would make of it.
+		structural = _structural_target(arg, is_network_cmd, cmd_base)
+		if structural:
+			_add_target(structural)
 			return
 		# Check for URLs first (before file path/extension checks — URLs can have .sh etc.)
 		url_match = URL_PATTERN.search(arg)
@@ -449,14 +664,27 @@ def extract_command_targets(command: str) -> List[str]:
 		# `scp f admin@10.0.0.9:/tmp/` are scoped on the host instead of dropped whole.
 		if '@' in arg and '://' not in arg:
 			host_candidate = arg.rsplit('@', 1)[1]
-			if ':' in host_candidate and '/' in host_candidate.split(':', 1)[1]:
-				host_candidate = host_candidate.split(':', 1)[0]
+			if host_candidate.startswith('[') and ']' in host_candidate:
+				# `user@[v6]:/remote/path` -> `[v6]` (keep a numeric `[v6]:port`)
+				end = host_candidate.index(']') + 1
+				if not re.fullmatch(r'(?::\d{1,5})?', host_candidate[end:]):
+					host_candidate = host_candidate[:end]
+			elif host_candidate.count(':') > 1 and _canonical_authority(host_candidate):
+				pass  # bare IPv6 literal (`ssh root@2001:db8::1`): its colons are not a port/path
+			else:
+				head, sep, tail = host_candidate.partition(':')
+				if sep and not re.fullmatch(r'\d{1,5}', tail):
+					host_candidate = head  # `host:/remote/path` (keep a numeric `host:port`)
 			if _is_network_target(host_candidate):
 				arg = host_candidate
+			elif is_network_cmd and _canonical_authority(host_candidate):
+				# `ssh root@localhost`: the '@' marks a host even without a dot.
+				_add_target(_canonical_authority(host_candidate))
+				return
 		# Check if it's a network target (IP, host, host:port)
 		if _is_network_target(arg):
 			# For hosts (not IPs), verify DNS resolution
-			if not PII_PATTERNS["ipv4"].fullmatch(arg.split(':')[0]):
+			if not _is_ip_literal(arg):
 				host_part = arg.rsplit(':', 1)[0] if ':' in arg else arg
 				if not _resolves(host_part):
 					return
@@ -472,9 +700,10 @@ def extract_command_targets(command: str) -> List[str]:
 			# Skip docker/podman sub-commands
 			if args[0] in ('docker', 'podman'):
 				continue
-			is_network_cmd = _cmd_basename(args[0]) in _NETWORK_CMDS
+			cmd_base = _cmd_basename(args[0])
+			is_network_cmd = cmd_base in _NETWORK_CMDS
 			for arg in args[1:]:
-				_check_arg(arg, is_network_cmd)
+				_check_arg(arg, is_network_cmd, cmd_base)
 	except Exception:
 		# Parse failed: the per-arg walk ran nothing, so fall back to the raw-string
 		# host sweep too (the IP/URL sweep below runs unconditionally).
@@ -776,7 +1005,7 @@ def detect_paths_with_access(command: str) -> List[Tuple[str, str]]:
 					_add_path(dest, "write")
 					i += 1
 					continue
-			if not arg.startswith('-') and _is_file_path(arg):
+			if not arg.startswith('-') and _is_file_path(arg) and not _is_path_free_target(arg, cmd_base):
 				_add_path(arg, base_access)
 			i += 1
 
@@ -845,12 +1074,19 @@ def build_target_choices(target: str) -> List[Dict]:
 	"""
 	from urllib.parse import urlparse
 
+	# Build rules from the canonical form the check will look up (see normalize_target).
+	target = normalize_target(target)
 	# Detect if target is a URL and extract components
 	is_url = target.startswith(('http://', 'https://'))
 	if is_url:
 		parsed = urlparse(target)
 		host = parsed.hostname or target
-		port = parsed.port
+		malformed_port = False
+		try:
+			port = parsed.port
+		except ValueError:  # malformed port (`http://h:8o/`): offer host-level choices only
+			port = None
+			malformed_port = True
 		base_path = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.path else f"{parsed.scheme}://{parsed.netloc}"
 		host_port = f"{host}:{port}" if port else host
 
@@ -880,8 +1116,12 @@ def build_target_choices(target: str) -> List[Dict]:
 				"rules": [],
 			},
 		]
+		if malformed_port:
+			# A URL-only rule would be built from the malformed authority and never match
+			# what the check scopes (the host): offer the host-level allow + deny only.
+			choices = [choices[2], choices[4]]
 		# Deduplicate options 2 and 3 when there's no port
-		if not port:
+		elif not port:
 			choices = [choices[0], choices[1], choices[3], choices[4]]
 	else:
 		host_rule = f"target({target})"
@@ -1040,7 +1280,8 @@ class PermissionEngine:
 			# fault here is a deny (never the outer isolated-shell allow), so an exception
 			# on one target can't skip authz for the rest. (CodeRabbit CWE-863.)
 			try:
-				target_result = self._check_values("target", targets_to_check)
+				target_result = self._check_values(
+					"target", targets_to_check, isolated_shell=isolated_shell)
 			except (ValueError, TypeError, re.error) as e:
 				return PermissionResult(
 					decision="deny", reason=f"target check error (fail-closed): {type(e).__name__}")
@@ -1225,14 +1466,23 @@ class PermissionEngine:
 					return pattern
 		return ""
 
-	def _check_value(self, rule_type: str, value: str) -> PermissionResult:
+	def _check_value(self, rule_type: str, value: str, isolated_shell: bool = False) -> PermissionResult:
 		"""Check a single value. Order: deny > allow > ask > deny.
 
 		For target rules, URL values are also checked by their host and host:port
 		components so that approving 'example.com:8080' covers all URLs under it.
 		"""
+		# Targets are checked in the SAME canonical form the prompt showed and the
+		# approval rules were built from (see normalize_target).
+		if rule_type == "target":
+			value = normalize_target(value)
 		# Build list of values to check (original + URL components for targets)
 		values_to_check = [value]
+		if rule_type == "target" and not value.startswith(('http://', 'https://')):
+			# A `host:port` / `[v6]:port` target (e.g. from `redis://10.0.0.5:6379`) is also
+			# checked by its canonical spelling and its host, as URLs are below: a rule on the
+			# host covers its ports and spellings, and a deny on the host still wins.
+			values_to_check.extend(_authority_check_values(value))
 		if rule_type == "target" and value.startswith(('http://', 'https://')):
 			from urllib.parse import urlparse
 			from secator.scope import target_host
@@ -1243,12 +1493,22 @@ class PermissionEngine:
 			# the parsed host(s), and keep the URL itself ONLY when it is a real network target
 			# (so a path-scoped URL entry can still match it); an unparseable URL is dropped.
 			cleaned = _strip_trailing_delims(value)
+			# hostname and port are read SEPARATELY: `.port` raises ValueError on a
+			# non-numeric/out-of-range port (`http://h:8o/`) while `.hostname` is still
+			# well-defined. Reading both in one try dropped the valid host too, so an
+			# in-scope host was denied as "Unparseable target". Keep the host for scoping;
+			# only the malformed port is discarded.
 			host = port = None
 			try:
 				parsed = urlparse(cleaned)
-				host, port = parsed.hostname, parsed.port
+				host = parsed.hostname
 			except ValueError:
-				host = port = None
+				parsed = None
+			if parsed is not None:
+				try:
+					port = parsed.port
+				except ValueError:
+					port = None
 			values_to_check = [cleaned] if target_host(cleaned) else []
 			if host:
 				values_to_check.append(host)
@@ -1285,6 +1545,18 @@ class PermissionEngine:
 					# Structured deny: machine-readable reason + the offending target so a
 					# clients/CLI can render "Target X is not in the allowed scope" and attach an action.
 					return PermissionResult(decision="deny", reason="out_of_scope", targets=[v])
+
+		# Isolated shell loopback — checked AFTER both deny layers (a config deny rule or an
+		# out_of_scope entry on loopback still wins) and BEFORE in_scope / scope_hard_deny /
+		# the interactive ask. An isolated run_shell executes inside its own sandbox
+		# container, whose loopback is that container's, not the worker's: a PoC lab the
+		# agent stood up there is reachable only from inside it, so connecting to it is not
+		# network egress. Restricted to shell actions (task/workflow/subagent run on the
+		# worker, where loopback IS the worker) and to a sandbox with its own network
+		# namespace (`--network host` / `container:<x>` share someone else's loopback).
+		if (rule_type == "target" and isolated_shell and _sandbox_has_private_loopback()
+				and _is_loopback_target(value)):
+			return PermissionResult(decision="allow", reason=f"isolated: sandbox loopback target({value})")
 
 		# Mandate in_scope allow — checked AFTER both deny loops (config deny + the
 		# out_of_scope deny above still win) but before config/runtime allow rules.
@@ -1324,11 +1596,11 @@ class PermissionEngine:
 
 		return PermissionResult(decision="deny", reason=f"No rule for {rule_type}({value})")
 
-	def _check_values(self, rule_type: str, values: List[str]) -> PermissionResult:
+	def _check_values(self, rule_type: str, values: List[str], isolated_shell: bool = False) -> PermissionResult:
 		"""Check multiple values, return the most restrictive result."""
 		ask_targets = []
 		for value in values:
-			result = self._check_value(rule_type, value)
+			result = self._check_value(rule_type, value, isolated_shell=isolated_shell)
 			if result.decision == "deny":
 				# "No rule for" default deny → ask user instead of blocking. The
 				# scope_hard_deny short-circuit lives in _check_value now (it must beat

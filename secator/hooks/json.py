@@ -34,7 +34,7 @@ from pathlib import Path
 from secator.output_types import is_output_type, Info
 from secator.rich import console
 from secator.runners import Scan, Task, Workflow
-from secator.utils import append_ndjson, atomic_json, debug
+from secator.utils import append_ndjson, atomic_json, compact_ndjson, debug, remove_lock_sidecar, remove_lock_sidecars
 
 
 def _empty_report():
@@ -55,12 +55,49 @@ def _ndjson_path(runner):
 	return Path(runner.reports_folder) / 'results.ndjson'
 
 
+def release_report_lock(self):
+	"""Once a runner ended, remove the lock sidecar of its OWN report file.
+
+	Registered on ``on_end`` after ``update_runner``, i.e. after the runner's last write to that
+	file. ``on_end`` fires once per runner in every terminal state (success, failure, stop/revoke,
+	timeout: the runner's ``mark_completed``). Each report file has a single writer, the runner
+	whose ``fqn`` names it: a chunk writes ``report_<task>_<n>.json``, and a chunked task's own
+	``report_<task>.json`` is written by that task alone, whose ``on_end`` runs in the chord
+	callback after all its chunks. Shared files (``results.ndjson``, written by every runner of the
+	run) keep their lock until the end of the top-level run (``finalize_store``).
+
+	Best-effort: a sidecar that is missing here (e.g. on another host) is skipped. A later writer
+	just recreates the sidecar (see ``secator.utils._file_lock``)."""
+	try:
+		remove_lock_sidecar(_report_path(self))
+	except Exception as e:  # noqa: BLE001 — housekeeping must never fail a finished runner
+		debug(f'report lock cleanup failed: {e}', sub='hooks.json')
+
+
+def finalize_store(self):
+	"""At the end of a top-level run, compact its findings store and remove its lock sidecars.
+
+	Registered on ``on_run_end``, which fires once for the whole run, after every runner of it
+	wrote its last record (children complete before their parent). Compaction drops superseded
+	versions of updated findings (see ``secator.utils.compact_ndjson``) and the ``*.lock``
+	sidecars of the run's report dir are removed. Both are safe against a later writer (e.g. a
+	finding updated afterwards): compaction holds the append lock, and a removed sidecar is just
+	recreated (see ``secator.utils._file_lock``). Removing every sidecar of the dir also catches
+	those a runner left behind when its process was killed before its ``on_end``. Best-effort and
+	never fails the run."""
+	folder = Path(self.reports_folder)
+	try:
+		compacted = compact_ndjson(folder / 'results.ndjson')
+		removed = remove_lock_sidecars(folder)
+		debug(f'store finalized: compacted={compacted} lock sidecars removed={removed}', sub='hooks.json')
+	except Exception as e:  # noqa: BLE001 — housekeeping must never fail a finished run
+		debug(f'store finalization failed: {e}', sub='hooks.json')
+
+
 def announce_report(self):
 	"""At run end, announce where the live JSON report was written — mirrors the former JSON
-	exporter's message. Only the top-level runner prints (not every child task), gated by
-	``print_reports_message`` like the exporters."""
-	if self.has_parent:
-		return
+	exporter's message. Registered on ``on_run_end``, so only the top-level runner prints (not every
+	child task), gated by ``print_reports_message`` like the exporters."""
 	if self.print_reports_message:
 		console.print(Info(message=f'JSON report written to {_report_path(self)}'))
 
@@ -102,20 +139,23 @@ HOOKS = {
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner, announce_report],
+		'on_end': [update_runner, release_report_lock],
+		'on_run_end': [finalize_store, announce_report],
 	},
 	Workflow: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner, announce_report],
+		'on_end': [update_runner, release_report_lock],
+		'on_run_end': [finalize_store, announce_report],
 	},
 	Task: {
 		'on_init': [update_runner],
 		'on_start': [update_runner],
 		'on_item': [update_finding],
 		'on_interval': [update_runner],
-		'on_end': [update_runner, announce_report],
+		'on_end': [update_runner, release_report_lock],
+		'on_run_end': [finalize_store, announce_report],
 	},
 }

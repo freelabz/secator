@@ -23,6 +23,30 @@ def markdown_text(content: str):
 	return CustomMarkdown(text)
 
 
+def flatten_renderable(renderable, width: int, console=None) -> "tuple[Text, int]":
+	"""Render any Rich renderable (Markdown, tables, …) at ``width`` into a styled ``Text``.
+
+	Textual can only select / copy text out of ``Text`` / ``Content`` visuals; anything else
+	(e.g. the Markdown AI replies) is drawn as an opaque Rich visual where a mouse selection
+	extracts nothing. Pre-rendering to line-broken ``Text`` keeps the exact look while making
+	it selectable. Returns ``(text, line_count)``.
+	"""
+	from rich.console import Console
+	width = max(int(width or 0), 1)
+	if console is None:
+		console = Console(width=width, force_terminal=True, color_system="truecolor")
+	options = console.options.update(width=width, max_width=width, height=None, highlight=False)
+	lines = console.render_lines(renderable, options, pad=False)
+	text = Text(end="")
+	for i, line in enumerate(lines):
+		if i:
+			text.append("\n")
+		for seg in line:
+			if not seg.control:
+				text.append(seg.text, seg.style)
+	return text, len(lines)
+
+
 def command_text(cmd: str) -> Text:
 	"""Render a '$ <cmd>' line with bash syntax highlighting.
 

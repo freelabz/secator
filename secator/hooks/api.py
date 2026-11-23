@@ -55,11 +55,16 @@ def _make_request(method, endpoint, data=None):
 	debug(f'API request: {method} {url}', sub='hooks.api', verbose=True)
 	debug('API headers', sub='hooks.api', verbose=True, obj=headers)
 	json_data = json.dumps(data, cls=DataclassEncoder) if data else None
+	# never log an internal doc's payload (the placeholder map holds real values)
+	from secator.query._base import is_internal_doc
+	internal = isinstance(data, dict) and is_internal_doc(data)
 	if json_data:
-		debug('API data', sub='hooks.api', verbose=True, obj=json_data, obj_after=True)
+		logged = json.dumps({**data, 'extra_data': '<redacted>'}, cls=DataclassEncoder) if internal else json_data
+		debug('API data', sub='hooks.api', verbose=True, obj=logged, obj_after=True)
 	response = requests.request(method=method, url=url, data=json_data, headers=headers, verify=verify, timeout=timeout)
 	result = response.json()
-	debug('API response', sub='hooks.api', verbose=True, obj=result)
+	debug('API response', sub='hooks.api', verbose=True,
+	      obj='<redacted>' if internal else result)
 	if not response.ok and result.get('detail'):
 		console.print(Error(message=f'API error: {result["detail"]}'))
 	response.raise_for_status()
@@ -158,9 +163,9 @@ def resolve_workspace(value):
 	Accepts a 24-char hex ObjectId (looked up by id) or a workspace name (looked up
 	in the workspace list, scoped to the configured org). Cached per input value.
 
-	The runner's profile / route-based workspace assignment overwrites
-	context['workspace_id'] with a workspace name, so callers re-resolve it here to
-	make sure the id sent to the API is always the real ObjectId.
+	context['workspace_id'] may be a workspace name (runners default it to the
+	workspace name when no id is set), so callers re-resolve it here to make sure
+	the id sent to the API is always the real ObjectId.
 	"""
 	if value == 'default':
 		raise Exception('Workspace `default` cannot be used for API integration: please use a valid workspace using `-ws <workspace>` (CLI) or `context.workspace_id = <workspace>` (Python API).')  # noqa: E501

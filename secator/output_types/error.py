@@ -26,7 +26,9 @@ class Error(OutputType):
 		if str(e):
 			errtype += f': {str(e)}'
 		message = kwargs.pop('message', errtype)
-		traceback = traceback_as_string(e) if errtype not in ['KeyboardInterrupt', 'GreenletExit'] else ''
+		# An interrupt / stop (Ctrl-C, revoked task) is not a crash: no traceback.
+		is_stop = type(e).__name__ in ['KeyboardInterrupt', 'GreenletExit', 'SystemExit']
+		traceback = '' if is_stop else traceback_as_string(e)
 		error = Error(message=_s(message), traceback=traceback, **kwargs)
 		return error
 

@@ -14,7 +14,7 @@ artifacts = [
 
 [project]
 name = 'secator'
-version = "0.54.1"
+version = "0.56.1"
 authors = [{ name = 'FreeLabz', email = 'sales@freelabz.com' }]
 readme = 'README.md'
 description = "The pentester's swiss knife."
@@ -76,6 +76,7 @@ dev = [
   'pytest < 9',
   'watchdog < 3',
   'pillow < 13',
+  'mongomock < 5',
 ]
 build = [
   'hatch < 2',
@@ -89,7 +90,7 @@ worker = [
   'flower < 3',
 ]
 redis = [
-  'redis < 6',
+  'celery[redis] < 6',
 ]
 mongodb = [
   'pymongo < 5',

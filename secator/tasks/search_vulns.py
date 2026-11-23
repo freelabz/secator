@@ -11,6 +11,9 @@ from secator.output_types import Exploit, Info, Vulnerability, Warning
 from secator.serializers import JSONSerializer
 from secator.tasks._categories import Vuln
 
+# search_vulns match reason for a CVE whose only link to the query is the general product.
+UNCERTAIN_MATCH = 'general_product_uncertain'
+
 
 @task()
 class search_vulns(Vuln):
@@ -31,6 +34,7 @@ class search_vulns(Vuln):
 		'ignore_general_product_vulns': {'is_flag': True, 'help': 'Ignore vulnerabilities that only affect a general product'},  # noqa: E501
 		'include_single_version_vulns': {'is_flag': True, 'help': 'Include vulnerabilities that only affect one specific version'},  # noqa: E501
 		'include_patched': {'is_flag': True, 'help': 'Include vulnerabilities reported as patched'},
+		'include_uncertain': {'is_flag': True, 'default': False, 'internal': True, 'help': 'Include vulnerabilities matched on the general product only, with no version evidence (often another product)'},  # noqa: E501
 	}
 	opt_key_map = {
 		'ignore_general_product_vulns': 'ignore-general-product-vulns',
@@ -102,9 +106,18 @@ class search_vulns(Vuln):
 		# if cpes:
 		# 	common_extra_data.update({'cpes': cpes})
 
+		# Matches on the general product (no version range, no product-specific CPE) are guesses from
+		# the vendor or a name fragment: e.g. 'apache httpd' pulls in a Samba auth library CVE because
+		# its description says "as used in Apache::AuthenSmb". Keep them out unless asked for.
+		include_uncertain = self.get_opt_value('include_uncertain')
+		skipped = []
+
 		# Yield each vulnerability
 		for cve_id, vuln_data in vulns.items():
 			match_reason = vuln_data.get('match_reason', '')
+			if match_reason == UNCERTAIN_MATCH and not include_uncertain:
+				skipped.append(cve_id)
+				continue
 			confidence = 'high'
 			tags = search_vulns.extract_tags(vuln_data)
 			exploits = vuln_data.get('exploits', [])
@@ -136,7 +149,7 @@ class search_vulns(Vuln):
 					data['extra_data'].update(extra_data)
 
 			# Add 'exploitable' and 'uncertain' tags
-			if match_reason == 'general_product_uncertain':
+			if match_reason == UNCERTAIN_MATCH:
 				data['confidence'] = 'low'
 				data['tags'].append('uncertain')
 			if len(exploits) > 0:
@@ -181,6 +194,12 @@ class search_vulns(Vuln):
 						tags=tags,
 						extra_data=extra_data,
 					)
+
+		if skipped:
+			yield Info(message=(
+				f'Skipped {len(skipped)} vulnerabilities matched on the general product only '
+				f'(use -include-uncertain to keep them): {", ".join(skipped)}'
+			))
 
 	@staticmethod
 	def extract_id(item):

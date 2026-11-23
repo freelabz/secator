@@ -1,0 +1,59 @@
+---
+name: findings
+type: partial
+description: "How and when to record findings with add_finding."
+---
+<findings>
+Use the add_finding tool to record confirmed or suspected vulnerabilities.
+When summarizing vulnerabilities, always include matched_at targets.
+All list fields (tags, cves, references) MUST be passed as JSON arrays, not strings.
+If you encounter a schema error while adding finding, fix the error and retry using ONLY the fields shown in the error's schema.
+Do NOT add findings that were already reported before, unless you found additional information.
+
+IMPORTANT: Each finding type has different fields. Do NOT use fields from one type on another.
+If a field is not in the schema, put the information in extra_data instead.
+
+<example_vulnerability>
+add_finding(
+  _type="vulnerability",
+  name="SQL Injection in login form",
+  matched_at="http://example.com/login.php",
+  severity="high",
+  confidence="high",
+  tags=["sqli", "owasp-top10", "CWE-89"],
+  description="The login form is vulnerable to SQL injection via the username parameter.",
+  extra_data={"parameter": "username", "payload": "' OR 1=1 --"}
+)
+</example_vulnerability>
+
+When you SUCCESSFULLY EXPLOIT a vulnerability, do NOT create a separate exploit finding.
+Instead mark it exploited with mark_vuln_exploited, identifying it by the `_uuid` from
+query_workspace results. Pass the proof-of-concept as `poc` (required; see the <exploitation_report>
+format) plus `remediation` and `impact` as their OWN args — do not cram them into the poc. If the
+vulnerability is not yet recorded, add_finding(_type="vulnerability") first, then mark_vuln_exploited.
+
+<example_exploit>
+mark_vuln_exploited(
+  _uuid="161e68b6-8cbd-4cc5-b9cc-7b4dadf3c64f",
+  poc="### Description\nSQL injection in the `cat` parameter allows dumping the database.\n\n### Details\n**Request:**\n```sh\ncurl -sk \"http://host/listproducts.php?cat=-1 UNION SELECT 1,concat(@@version,database(),user()),3--\"\n```\n**Response:**\n```\n8.0.32-MySQL / acuart / acuart@localhost\n```",
+  remediation="Use parameterized queries / prepared statements for the `cat` parameter and add strict input validation.",
+  impact="An unauthenticated attacker can read the entire application database, including user credentials.",
+  confidence="high",
+)
+</example_exploit>
+
+Record the OTHER two outcomes with the matching tool — do NOT conflate them:
+- The vuln is REAL but YOU could not exploit it this attempt -> mark_vuln_exploit_failed(_uuid, reason="...").
+  status becomes 'EXPLOIT FAILED' but the vuln stays VISIBLE and retryable (a later attempt, or a
+  different agent, may succeed) and its remediation still applies. Provide `remediation`/`impact` if you
+  assessed them. Do NOT mark it false-positive — that would bury a real vulnerability.
+- The vuln is NOT real (scanner false positive, not actually present, already patched) ->
+  mark_vuln_false_positive(_uuid, reason="..."). It is hidden from reports but KEPT and recoverable.
+
+Use update_finding to change fields on an EXISTING finding (identified by its `_uuid` from
+query_workspace) — fix a wrong severity, add tags/cves, or enrich extra_data. It is workspace-scoped.
+
+Duplicate vulnerabilities (the same issue recorded more than once, possibly under different names)
+are handled by a dedicated marking tool — do not merge-and-delete them by hand.
+
+</findings>

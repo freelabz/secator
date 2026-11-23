@@ -1,3 +1,4 @@
+import glob
 import os
 
 from functools import cache
@@ -37,11 +38,11 @@ from secator.definitions import (
 	WORDLIST,
 	REPLAY_PROXY,
 )
-from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability
+from secator.output_types import Ip, Port, Subdomain, Tag, Url, UserAccount, Vulnerability, Warning
 from secator.config import CONFIG
 from secator.providers._base import CVEProvider
 from secator.runners import Command
-from secator.utils import debug, process_wordlist, headers_to_dict, parse_raw_http_request
+from secator.utils import debug, find_system_browser, process_wordlist, headers_to_dict, parse_raw_http_request
 
 
 def process_headers(headers_dict):
@@ -101,6 +102,40 @@ def apply_raw_request_options(self):
 		# Set data from raw request
 		if raw_request_data.get('data') and not self.get_opt_value(DATA):
 			self.run_opts[DATA] = raw_request_data['data']
+
+
+# Runtime libraries a downloaded Chromium needs on Debian / Ubuntu. Pre-t64 names resolve to their t64 variant on
+# newer releases, except ALSA (ambiguous there): libsndio7.0 pulls it in under the right name on every release.
+CHROMIUM_DEPS_APT = [
+	'libatk-bridge2.0-0', 'libatk1.0-0', 'libcairo2', 'libcups2', 'libdrm2', 'libgbm1', 'libglib2.0-0', 'libnss3',
+	'libpango-1.0-0', 'libsndio7.0', 'libxcomposite1', 'libxdamage1', 'libxfixes3', 'libxkbcommon0', 'libxrandr2',
+]
+
+
+def apply_system_browser(self, enabled):
+	"""Pass `-system-chrome` to a go-rod based task when it should use the system browser.
+
+	When `system_chrome` is unset, the system browser is used if one is found, otherwise the tool downloads its own.
+	The system browser is always used when the tool cannot download one: `offline_mode`,
+	`security.auto_install_commands: false`, or a musl-based system (downloaded builds are glibc-only).
+
+	Args:
+		self: Task instance.
+		enabled (bool): Whether the task will launch a browser.
+	"""
+	if not enabled:
+		return
+	value = self.get_opt_value('system_chrome')
+	browser = find_system_browser()
+	musl = bool(glob.glob('/lib/ld-musl-*'))
+	can_download = CONFIG.security.auto_install_commands and not CONFIG.offline_mode and not musl
+	use_system = (bool(browser) if value is None else value) or not can_download
+	# A tool not installed yet may still get a browser from its install prerequisites.
+	if use_system and not browser and self.is_installed():
+		reason = 'system_chrome is set' if value else 'browser downloads are disabled'
+		self.add_result(Warning(message=f'{reason} but no Chromium-based browser was found on the system: install one (e.g. chromium) for {self.name} to run'))  # noqa: E501
+	if use_system and not value:
+		self.cmd += ' -system-chrome'
 
 
 OPTS = {

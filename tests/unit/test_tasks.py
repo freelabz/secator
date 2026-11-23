@@ -6,7 +6,7 @@ import unittest.mock
 import warnings
 
 from secator.definitions import DEBUG
-from secator.output_types import Vulnerability
+from secator.output_types import Info, Vulnerability
 from secator.rich import console
 from secator.tasks.search_vulns import search_vulns
 from secator.utils import setup_logging
@@ -202,6 +202,37 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 		with open(fixture_path) as f:
 			return json.load(f)
 
+	def _certain_count(self, fixture):
+		vulns = next(iter(fixture.values())).get('vulns', {}).values()
+		return len([v for v in vulns if v.get('match_reason') != 'general_product_uncertain'])
+
+	def _vulns(self, include_uncertain):
+		fixture = self._load_fixture()
+		task = search_vulns.__new__(search_vulns)
+		task.inputs = ['apache httpd 2.4.39']
+		task.matched_at = 'scanme.nmap.org:80'
+		task.run_opts = {}
+		task.get_opt_value = lambda k: include_uncertain if k == 'include_uncertain' else False
+		results = list(search_vulns.on_json_loaded(task, dict([next(iter(fixture.items()))])))
+		return {v.id: v for v in results if isinstance(v, Vulnerability)}, results
+
+	def test_general_product_uncertain_matches_are_dropped(self):
+		"""An Apache query must not report CVE-1999-1237 (Samba smbvalid library, CVSS 10): search_vulns
+		only links it to Apache through the general product (`match_reason: general_product_uncertain`)."""
+		vulns, results = self._vulns(include_uncertain=False)
+		self.assertNotIn('CVE-1999-1237', vulns)
+		self.assertEqual(len(vulns), self._certain_count(self._load_fixture()))
+		self.assertTrue(all(v.extra_data.get('match_reason') != 'general_product_uncertain' for v in vulns.values()))
+		skipped = [r for r in results if isinstance(r, Info) and 'general product' in r.message]
+		self.assertEqual(len(skipped), 1)
+		self.assertIn('CVE-1999-1237', skipped[0].message)
+
+	def test_include_uncertain_keeps_them_low_confidence(self):
+		vulns, _ = self._vulns(include_uncertain=True)
+		self.assertIn('CVE-1999-1237', vulns)
+		self.assertEqual(vulns['CVE-1999-1237'].confidence, 'low')
+		self.assertIn('uncertain', vulns['CVE-1999-1237'].tags)
+
 	def test_before_init_single_host(self):
 		"""before_init parses single host from matched_at~service format."""
 		task = search_vulns.__new__(search_vulns)
@@ -236,6 +267,7 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 		task.inputs = ['apache 2.4.39']
 		task.matched_at = '10.0.0.1:80'
 		task.run_opts = {}
+		task.get_opt_value = lambda k: False
 
 		vulns = []
 		for data in fixture.items():
@@ -245,7 +277,7 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 					vulns.append(result)
 			break  # one fixture entry is enough
 
-		cve_count = len(next(iter(fixture.values())).get('vulns', {}))
+		cve_count = self._certain_count(fixture)
 		self.assertEqual(len(vulns), cve_count)
 		for v in vulns:
 			self.assertEqual(v.matched_at, '10.0.0.1:80')
@@ -257,6 +289,7 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 		task.inputs = ['apache 2.4.39']
 		task.matched_at = '10.0.0.1:80,10.0.0.2:80'
 		task.run_opts = {}
+		task.get_opt_value = lambda k: False
 
 		vulns = []
 		for data in fixture.items():
@@ -266,7 +299,7 @@ class TestSearchVulnsGrouping(unittest.TestCase):
 					vulns.append(result)
 			break
 
-		cve_count = len(next(iter(fixture.values())).get('vulns', {}))
+		cve_count = self._certain_count(fixture)
 		self.assertEqual(len(vulns), cve_count * 2)
 		matched_ats = {v.matched_at for v in vulns}
 		self.assertEqual(matched_ats, {'10.0.0.1:80', '10.0.0.2:80'})
@@ -413,3 +446,20 @@ class TestNucleiHangMonitor(unittest.TestCase):
 		self.assertEqual(len(out), 1)
 		self.assertIsInstance(out[0], Warning)
 		self.assertIn('hang-monitor', out[0].message)
+
+
+class TestKatanaCrawlScope(unittest.TestCase):
+	"""katana defaults to the registrable domain ('rdn'): crawling http://scanme.nmap.org followed links to
+	nmap.org and svn.nmap.org (~1150 URLs off the target in a host scan). Crawls stay on the target host."""
+
+	def _cmd(self, **opts):
+		from secator.tasks.katana import katana
+		return katana('http://scanme.nmap.org', print_cmd=False, sync=True, **opts).cmd
+
+	def test_default_scope_is_target_host(self):
+		cmd = self._cmd()
+		self.assertIn('-field-scope fqdn', cmd)
+		self.assertNotIn('-fs ', cmd)
+
+	def test_scope_can_be_widened(self):
+		self.assertIn('-field-scope rdn', self._cmd(field_scope='rdn'))

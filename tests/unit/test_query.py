@@ -319,13 +319,13 @@ class TestApiBackend(unittest.TestCase):
 		self.assertEqual(backend.workspace_id, 'ws123')
 		self.assertEqual(backend.name, 'api')
 
-	def test_api_backend_base_query_includes_tagged(self):
+	def test_api_backend_base_query_does_not_filter_tagged(self):
 		from secator.query.api import ApiBackend
 
 		backend = ApiBackend(workspace_id='ws123')
 		base = backend.get_base_query()
 
-		# self.assertEqual(base['_tagged'], True)
+		self.assertNotIn('_tagged', base)
 		self.assertEqual(base['_context.workspace_id'], 'ws123')
 
 
@@ -465,6 +465,142 @@ class TestQueryEngineUpdate(unittest.TestCase):
 		engine.backend.update.assert_called_once_with(
 			{'_type': 'ai'}, {'$set': {'status': 'done'}}
 		)
+
+
+class TestFindingUpdatesReadBack(unittest.TestCase):
+	"""A finding updated in the store is read back updated, on the json and api backends."""
+
+	def _ndjson_backend(self, records):
+		import json
+		import tempfile
+		from pathlib import Path
+		from secator.query.json import JsonBackend
+		report_dir = Path(tempfile.mkdtemp())
+		(report_dir / 'results.ndjson').write_text(''.join(json.dumps(r) + '\n' for r in records))
+		return JsonBackend('test', context={'report_dir': str(report_dir)})
+
+	def test_json_point_read_returns_the_latest_record(self):
+		backend = self._ndjson_backend([
+			{'_uuid': 'u1', '_type': 'url', 'url': 'http://a.com', 'tags': []},
+			{'_uuid': 'u2', '_type': 'url', 'url': 'http://b.com', 'tags': []},
+		])
+		self.assertEqual(backend.update({'_uuid': 'u1'}, {'$set': {'tags': ['seen']}}), 1)
+		self.assertEqual(backend.search({'_uuid': 'u1'}, limit=1)[0]['tags'], ['seen'])
+		# The limit still bounds the distinct findings returned.
+		self.assertEqual(len(backend.search({'_type': 'url'}, limit=1)), 1)
+		latest = {r['_uuid']: r for r in backend.search({'_type': 'url'}, limit=10)}
+		self.assertEqual(latest['u1']['tags'], ['seen'])
+
+	def test_json_latest_record_decides_whether_a_finding_matches(self):
+		backend = self._ndjson_backend([
+			{'_uuid': 'u1', '_type': 'vulnerability', 'status': 'OPEN'},
+			{'_uuid': 'u2', '_type': 'vulnerability', 'status': 'OPEN'},
+			{'_uuid': 'u1', '_type': 'vulnerability', 'status': 'FIXED'},  # u1 updated later
+		])
+		self.assertEqual([r['_uuid'] for r in backend.search({'status': 'OPEN'}, limit=1)], ['u2'])
+		self.assertEqual([r['_uuid'] for r in backend.search({'status': 'FIXED'})], ['u1'])
+
+	def test_json_dedup_survives_excluding_uuid(self):
+		backend = self._ndjson_backend([
+			{'_uuid': 'u1', '_type': 'url', 'url': 'http://a.com', 'tags': []},
+			{'_uuid': 'u1', '_type': 'url', 'url': 'http://a.com', 'tags': ['seen']},
+		])
+		results = backend.search({'_type': 'url'}, exclude_fields=['_uuid'])
+		self.assertEqual(len(results), 1)  # both records are one finding
+		self.assertEqual(results[0]['tags'], ['seen'])
+		self.assertNotIn('_uuid', results[0])
+
+	def _api_backend(self, docs, page_cap=None, search_error=None, put=None, ignore_skip=False):
+		"""An ApiBackend whose search returns ``docs`` (with the API's ``_id``) and PUTs succeed.
+
+		page_cap: the API serves at most this many per page; search_error: raised by the search;
+		put: callable(finding_id) -> response (may raise); ignore_skip: always serve the first page."""
+		from unittest.mock import MagicMock
+		from secator.query.api import ApiBackend
+		backend = ApiBackend(workspace_id='ws1')
+
+		def responses(method, endpoint, data=None):
+			if method == 'POST':
+				if search_error:
+					raise search_error
+				query = dict(part.split('=') for part in endpoint.split('?', 1)[1].split('&'))
+				skip, limit = (0 if ignore_skip else int(query['skip'])), int(query['limit'])
+				if page_cap:
+					limit = min(limit or page_cap, page_cap)
+				return {'items': [dict(d) for d in (docs[skip:skip + limit] if limit else docs[skip:])]}
+			if put:
+				return put(endpoint.rsplit('/', 1)[-1])
+			return {'success': True, 'modified_count': 1}
+
+		backend._make_request = MagicMock(side_effect=responses)
+		return backend
+
+	def _puts(self, backend):
+		return [(c.args[1], c.kwargs.get('data')) for c in backend._make_request.call_args_list if c.args[0] == 'PUT']
+
+	def test_api_update_writes_each_match_by_its_api_id(self):
+		# The stored `_uuid` can differ from the API id (`_id`): the write uses the API id.
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'uuid4-a', 'tags': []}, {'_id': 'oid2', '_uuid': 'uuid4-b'}])
+		self.assertEqual(backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}}), 2)
+		self.assertEqual(self._puts(backend), [('finding/oid1', {'tags': ['x']}), ('finding/oid2', {'tags': ['x']})])
+
+	def test_api_update_folds_dotted_paths_into_the_current_value(self):
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'u1', 'extra_data': {'keep': 1, 'nested': {'a': 1}}}])
+		backend.update({'_uuid': 'u1'}, {'$set': {'status': 'FIXED', 'extra_data.synced': True, 'extra_data.nested.b': 2}})
+		self.assertEqual(self._puts(backend), [('finding/oid1', {
+			'status': 'FIXED', 'extra_data': {'keep': 1, 'synced': True, 'nested': {'a': 1, 'b': 2}}})])
+
+	def test_api_update_reaches_every_page(self):
+		docs = [{'_id': f'oid{i}', '_uuid': f'u{i}'} for i in range(1500)]
+		backend = self._api_backend(docs)
+		self.assertEqual(backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}}), 1500)
+		self.assertEqual(len(self._puts(backend)), 1500)
+
+	def test_api_update_reaches_every_page_under_an_api_page_cap(self):
+		docs = [{'_id': f'oid{i}', '_uuid': f'u{i}'} for i in range(700)]
+		backend = self._api_backend(docs, page_cap=300)  # the API serves at most 300 per page
+		self.assertEqual(backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}}), 700)
+
+	def test_api_update_stops_if_the_api_ignores_skip(self):
+		docs = [{'_id': f'oid{i}', '_uuid': f'u{i}'} for i in range(5)]
+		backend = self._api_backend(docs, ignore_skip=True)
+		self.assertEqual(backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}}), 5)
+
+	def test_api_update_raises_on_search_error(self):
+		# An auth / server error must not be reported as "no matching finding".
+		backend = self._api_backend([], search_error=RuntimeError('403 Forbidden'))
+		with self.assertRaises(RuntimeError):
+			backend.update({'_uuid': 'u1'}, {'$set': {'tags': ['x']}})
+		self.assertEqual(backend.search({'_uuid': 'u1'}), [])  # plain reads still degrade to []
+
+	def test_api_update_raises_when_every_write_fails(self):
+		def put(finding_id):
+			raise RuntimeError('500 Server Error')
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'u1'}, {'_id': 'oid2', '_uuid': 'u2'}], put=put)
+		with self.assertRaises(RuntimeError):
+			backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}})
+
+	def test_api_update_counts_successful_writes(self):
+		def put(finding_id):
+			if finding_id == 'oid2':
+				raise RuntimeError('500 Server Error')
+			return {'success': True, 'modified_count': 0}  # already in the requested state
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'u1'}, {'_id': 'oid2', '_uuid': 'u2'}], put=put)
+		self.assertEqual(backend.update({'_type': 'url'}, {'$set': {'tags': ['x']}}), 1)
+
+	def test_api_update_without_dotted_paths_sends_fields_as_is(self):
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'u1', 'extra_data': {'keep': 1}}])
+		backend.update({'_uuid': 'u1'}, {'$set': {'status': 'FIXED'}})
+		self.assertEqual(self._puts(backend), [('finding/oid1', {'status': 'FIXED'})])
+
+	def test_api_update_no_match(self):
+		backend = self._api_backend([])
+		self.assertEqual(backend.update({'_uuid': 'missing'}, {'$set': {'tags': ['x']}}), 0)
+		self.assertEqual(self._puts(backend), [])
+
+	def test_api_search_still_drops_the_api_id(self):
+		backend = self._api_backend([{'_id': 'oid1', '_uuid': 'u1'}])
+		self.assertEqual(backend.search({'_uuid': 'u1'}), [{'_uuid': 'u1'}])
 
 
 class TestSqliteBackend(unittest.TestCase):

@@ -361,7 +361,7 @@ class TestReportShowApiBackend(unittest.TestCase):
 		self.assertEqual(body.get('severity'), 'critical')
 		self.assertEqual(body.get('_context.workspace_id'), WORKSPACE)
 		self.assertEqual(body.get('is_false_positive'), {'$ne': True})
-		self.assertEqual(body.get('_tagged'), True)
+		self.assertNotIn('_tagged', body)
 
 	def test_api_handles_items_format(self):
 		"""API backend handles {'items': [...]} paginated response format."""

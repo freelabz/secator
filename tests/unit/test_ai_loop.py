@@ -1092,7 +1092,7 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 		def _boom(*a, **k):
 			raise TypeError("'str' object is not a mapping")
 
-		with patch("secator.ai.actions._handle_shell", _boom):
+		with patch("secator.ai.tools.run_shell.RunShell.run", staticmethod(_boom)):
 			# Must NOT raise.
 			results = list(safe_dispatch_action(action, ctx))
 
@@ -1119,7 +1119,7 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 			raise KeyboardInterrupt()
 			yield  # pragma: no cover - make it a generator
 
-		with patch("secator.ai.actions._handle_shell", _interrupt):
+		with patch("secator.ai.tools.run_shell.RunShell.run", staticmethod(_interrupt)):
 			with self.assertRaises(KeyboardInterrupt):
 				list(safe_dispatch_action(action, ctx))
 
@@ -1162,7 +1162,7 @@ class TestLoopResilientToActionErrors(unittest.TestCase):
 			raise TypeError("'str' object is not a mapping")
 			yield  # pragma: no cover
 
-		with patch("secator.ai.actions._handle_shell", _boom):
+		with patch("secator.ai.tools.run_shell.RunShell.run", staticmethod(_boom)):
 			# Single action → safe_dispatch_action path. Must not raise.
 			gen = AiTask._dispatch_and_collect(fake_self, [action], ctx)
 			yielded = list(gen)
@@ -1339,8 +1339,9 @@ class TestModeAutoVsPinned(unittest.TestCase):
         self.assertEqual(fake.mode, "scan")
 
     def _run_subagent(self, ctx, action):
-        """Drive _handle_subagent, capturing the dispatched task action (or the Error)."""
-        from secator.ai import actions as A
+        """Drive RunSubagent.run, capturing the dispatched task action (or the Error)."""
+        import secator.ai.tools.run_subagent as subagent_mod
+        from secator.ai.tools.run_subagent import RunSubagent
         from secator.output_types import Error
         captured = {}
 
@@ -1348,8 +1349,8 @@ class TestModeAutoVsPinned(unittest.TestCase):
             captured["action"] = a
             return iter(())
 
-        with patch.object(A, "_run_runner", fake_run_runner):
-            items = list(A._handle_subagent(action, ctx))
+        with patch.object(subagent_mod, "_run_runner", fake_run_runner):
+            items = list(RunSubagent().run(action, ctx))
         errors = [i for i in items if isinstance(i, Error)]
         return captured.get("action"), errors
 
@@ -1384,9 +1385,11 @@ class TestModeAutoVsPinned(unittest.TestCase):
         """run_task(name="ai") is refused — spawning goes through run_subagent."""
         from secator.ai import actions as A
         from secator.output_types import Error
+        import secator.ai.tools.run_task as run_task_mod
+        from secator.ai.tools.run_task import RunTask
         ctx = A.ActionContext(targets=["x"], model="m", mode="scan")
-        with patch.object(A, "_run_runner", lambda *a, **k: iter(())):
-            items = list(A._handle_task({"action": "task", "name": "ai", "targets": ["x"], "description": "d"}, ctx))
+        with patch.object(run_task_mod, "_run_runner", lambda *a, **k: iter(())):
+            items = list(RunTask().run({"action": "task", "name": "ai", "targets": ["x"], "description": "d"}, ctx))
         errs = [i for i in items if isinstance(i, Error)]
         self.assertTrue(errs and "run_subagent" in errs[0].message)
 
@@ -1436,7 +1439,7 @@ class TestSubagentOwnToolResults(unittest.TestCase):
 		def _fake_shell(*a, **k):
 			yield out
 
-		with patch("secator.ai.actions._handle_shell", _fake_shell):
+		with patch("secator.ai.tools.run_shell.RunShell.run", staticmethod(_fake_shell)):
 			list(AiTask._dispatch_and_collect(fake_self, [action], ctx))
 		return tool_results
 
@@ -1447,9 +1450,65 @@ class TestSubagentOwnToolResults(unittest.TestCase):
 		self.assertEqual(results[0][1], "tc1")
 
 	def test_child_subagent_output_not_fed_to_parent(self):
-		# result session_id != self.session_id -> a dispatched child -> kept out
+		# result session_id != self.session_id -> a dispatched child -> kept out; the call
+		# still gets a plain acknowledged result (every dispatched call has a result)
+		from secator.ai.utils import TOOL_ACK_RESULT
 		results = self._run(result_session_id="other-child-sess")
-		self.assertEqual(len(results), 0)
+		self.assertEqual([(r[1], r[2]) for r in results], [("tc1", TOOL_ACK_RESULT)])
+
+
+@unittest.skipUnless(HAS_AI, "ai addon required")
+class TestEveryDispatchedCallGetsAResult(unittest.TestCase):
+	"""Every call a turn dispatches gets a tool result in history (and a persisted
+	tool_result item), so a restored transcript never mistakes a completed call for an
+	interrupted one. A call whose tool only yields a display item is acknowledged; `stop`
+	gets none (the turn ends on it)."""
+
+	def test_batch_records_a_result_per_call(self):
+		from secator.ai.utils import TOOL_ACK_RESULT
+		from secator.tasks.ai import ai as AiTask
+
+		history = ChatHistory()
+		fake_self = MagicMock()
+		fake_self.backend = CLIBackend()
+		fake_self.session_id = "s"
+		fake_self.model = "test-model"
+		fake_self.encryptor = None
+		fake_self.context = {"session_id": "s"}
+		fake_self.history = history
+		fake_self.add_result = lambda item, **kw: None
+		ctx = _make_ctx(interactive="auto")
+		ctx.results = []
+
+		def _call(tc_id, name, **extra):
+			return {"tool_call_id": tc_id, "tool_call_name": name, **extra}
+		actions = [
+			_call("tc_a", "run_shell", action="shell", command="echo a"),
+			_call("tc_b", "run_shell", action="shell", command="echo b"),
+			_call("tc_plan", "update_plan", action="update_plan", items=[{"text": "x", "status": "pending"}]),
+			_call("tc_stop", "stop", action="stop", reason="done"),
+		]
+
+		def _fake_shell(action, ctx):
+			ctx_ = {"tool_call_id": action["tool_call_id"], "tool_call_name": "run_shell"}
+			yield Ai(content=action["command"].split()[-1], ai_type="shell_output", _context=ctx_)
+
+		def _fake_plan(action, ctx):
+			yield Ai(content="plan", ai_type="plan", _context={"tool_call_id": "tc_plan"})
+
+		with patch("secator.ai.tools.run_shell.RunShell.run", staticmethod(_fake_shell)), \
+				patch("secator.ai.tools.update_plan.UpdatePlan.run", staticmethod(_fake_plan)):
+			items = list(AiTask._dispatch_and_collect(fake_self, actions, ctx))
+
+		results = {m["tool_call_id"]: m["content"] for m in history.messages if m["role"] == "tool"}
+		self.assertEqual(set(results), {"tc_a", "tc_b", "tc_plan"})
+		self.assertIn('"content":"a"', results["tc_a"])
+		self.assertIn('"content":"b"', results["tc_b"])
+		self.assertEqual(results["tc_plan"], TOOL_ACK_RESULT)
+		# the acknowledgment is yielded as a tool_result item too, so a driver persists it
+		persisted = [i.message.get("tool_call_id") for i in items
+		             if isinstance(i, Ai) and i.ai_type == "tool_result"]
+		self.assertEqual(sorted(persisted), ["tc_a", "tc_b", "tc_plan"])
 
 
 # =============================================================================

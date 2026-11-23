@@ -25,12 +25,6 @@ class ApiBackend(QueryBackend):
         self.search_endpoint = CONFIG.addons.api.finding_search_endpoint
         self.force_ssl = CONFIG.addons.api.force_ssl
 
-    def get_base_query(self) -> dict:
-        """Base query with _tagged for API."""
-        base = super().get_base_query()
-        base['_tagged'] = True
-        return base
-
     def _make_request(self, method: str, endpoint: str, data: dict = None) -> dict:
         """Make HTTP request to API."""
         url = f"{self.api_url.rstrip('/')}/{endpoint.lstrip('/')}"
@@ -53,6 +47,21 @@ class ApiBackend(QueryBackend):
     def _execute_search(self, query: dict, limit: int = 100, exclude_fields: list = None,
                         offset: int = 0) -> List[Dict[str, Any]]:
         """Search API for findings matching query (``offset`` maps to the endpoint's skip)."""
+        items = self._search_items(query, limit=limit, exclude_fields=exclude_fields, offset=offset)
+        # Drop the backend-only '_id' field so results match the output-type
+        # schema (the CSV exporter rejects unknown fields), matching the
+        # MongoDB backend behaviour.
+        for item in items:
+            if isinstance(item, dict):
+                item.pop('_id', None)
+        return items
+
+    def _search_items(self, query: dict, limit: int = 100, exclude_fields: list = None,
+                      offset: int = 0, raise_errors: bool = False) -> List[Dict[str, Any]]:
+        """Raw search results, with the API's own ``_id`` kept.
+
+        A failed request returns ``[]`` with a warning, unless ``raise_errors`` (writes must not
+        mistake an auth / server error for "no matching finding")."""
         try:
             endpoint = f"{self.search_endpoint}?skip={offset}&limit={limit}"
             if exclude_fields:
@@ -67,15 +76,10 @@ class ApiBackend(QueryBackend):
                 items = result['results']
             else:
                 items = []
-
-            # Drop the backend-only '_id' field so results match the output-type
-            # schema (the CSV exporter rejects unknown fields), matching the
-            # MongoDB backend behaviour.
-            for item in items:
-                if isinstance(item, dict):
-                    item.pop('_id', None)
             return items
         except Exception as e:
+            if raise_errors:
+                raise
             console.print(Warning(message=f"API search failed: {e}"))
             return []
 
@@ -94,10 +98,50 @@ class ApiBackend(QueryBackend):
             return 0
 
     def _execute_update(self, query: dict, update: dict) -> int:
-        """Update records via API PATCH endpoint."""
-        payload = {"query": query, "update": update}
-        result = self._make_request("PATCH", "findings/update", data=payload)
-        return result.get("modified_count", 0)
+        """Apply a ``$set`` to the matching findings through the API's per-finding update endpoint.
+
+        The API has no query-based update route: the matches are resolved with a search (which
+        also returns each finding's API id, ``_id``, and current values), then each one is
+        written with ``finding_update_endpoint``, as the api driver does.
+
+        Returns the number of findings written (a finding already in the requested state counts).
+        Raises when the search fails or when every write fails, so an API error is never reported
+        as "no matching finding".
+        """
+        set_fields = update.get("$set") or {}
+        if not set_fields:
+            return 0
+        docs = self._search_all(query)
+        written, errors = 0, []
+        for doc in docs:
+            finding_id = doc.get("_id") if isinstance(doc, dict) else None
+            if not finding_id:
+                continue
+            try:
+                endpoint = CONFIG.addons.api.finding_update_endpoint.format(finding_id=finding_id)
+                self._make_request("PUT", endpoint, data=_fold_dotted_fields(doc, set_fields))
+                written += 1
+            except Exception as e:
+                errors.append(e)
+                console.print(Warning(message=f"API finding update failed for {finding_id}: {e}"))
+        if errors and not written:
+            raise RuntimeError(f"API finding update failed for all {len(errors)} matching finding(s): {errors[-1]}")
+        return written
+
+    def _search_all(self, query: dict, page_size: int = 1000) -> List[Dict[str, Any]]:
+        """Every finding matching ``query`` (raw, with ``_id``), across all search pages.
+
+        Snapshotting all matches before writing keeps writes that change a finding's eligibility
+        from shifting the pages being read. Pages until an empty one (the API may serve fewer
+        than ``page_size`` per page), and stops if a page brings no new finding."""
+        docs, seen = [], set()
+        while True:
+            page = self._search_items(query, limit=page_size, offset=len(docs), raise_errors=True)
+            new = [d for d in page if isinstance(d, dict) and d.get("_id") not in seen]
+            if not new:
+                return docs
+            seen.update(d.get("_id") for d in new)
+            docs.extend(new)
 
     def _execute_create_note(self, note: dict) -> int:
         """POST the note to the remote notes endpoint.
@@ -203,3 +247,30 @@ class ApiBackend(QueryBackend):
         except Exception as e:
             console.print(Warning(message=f'API list_runners failed: {e}'))
             return []
+
+
+def _fold_dotted_fields(doc: dict, set_fields: dict) -> dict:
+    """Turn ``{"extra_data.key": v}`` into ``{"extra_data": {..doc's extra_data.., "key": v}}``.
+
+    The per-finding endpoint takes top-level fields only, so a dotted path is written by sending
+    the whole parent object, rebuilt from ``doc`` (the search result). Known race: a change made
+    to that parent object between the search and the write (e.g. another key of ``extra_data``)
+    is overwritten. Updates without dotted paths are sent as-is and are not affected.
+    """
+    if not any("." in k for k in set_fields):
+        return dict(set_fields)
+    fields = {k: v for k, v in set_fields.items() if "." not in k}
+    for path, value in set_fields.items():
+        if "." not in path:
+            continue
+        top, rest = path.split(".", 1)
+        base = fields.get(top, doc.get(top))
+        obj = dict(base) if isinstance(base, dict) else {}
+        node = obj
+        keys = rest.split(".")
+        for key in keys[:-1]:
+            node[key] = dict(node[key]) if isinstance(node.get(key), dict) else {}
+            node = node[key]
+        node[keys[-1]] = value
+        fields[top] = obj
+    return fields

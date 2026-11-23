@@ -38,6 +38,43 @@ def cap_message(msg: dict, max_chars: int = MAX_PERSISTED_MESSAGE_CHARS) -> dict
     return out
 
 
+# Prefixes the loop puts on user-role messages that are not typed by the user as-is.
+STEER_PREFIX = "[User interjected]: "
+SUMMARY_PREFIX = "Summary of previous iterations:"
+
+
+def classify_user_message(content) -> Tuple[str, str]:
+    """Classify a ``user``-role history message for display: ``(kind, text)``.
+
+    The model-facing history mixes the user's own turns with messages the loop injects
+    under the ``user`` role, which a display must not show as if the user typed them.
+    Recognised from their (code-generated) shape, so it also works on sessions saved before
+    any marker existed, and the model-facing messages stay byte-identical:
+
+    - ``internal``: a per-iteration control message from ``format_continue`` — exactly
+      ``{"iteration": N, "max": M, "instruction": "..."}`` — never displayed;
+    - ``summary``: a compaction summary (``Summary of previous iterations: ...``);
+    - ``user``: a real user turn (a mid-run steer is shown without its prefix).
+    """
+    text = content if isinstance(content, str) else ""
+    stripped = text.strip()
+    if stripped.startswith("{") and '"instruction"' in stripped:
+        try:
+            data = json.loads(stripped)
+        except ValueError:
+            data = None
+        # the exact shape format_continue produces: {"iteration": int, "max": int|"unlimited",
+        # "instruction": str} — a user pasting JSON with only some of these stays visible
+        if (isinstance(data, dict) and set(data) == {"iteration", "max", "instruction"}
+                and isinstance(data["iteration"], int) and isinstance(data["instruction"], str)):
+            return "internal", ""
+    if stripped.startswith(SUMMARY_PREFIX):
+        return "summary", stripped[len(SUMMARY_PREFIX):].strip()
+    if text.startswith(STEER_PREFIX):
+        return "user", text[len(STEER_PREFIX):]
+    return "user", text
+
+
 def get_context_window(model: str) -> int:
     """Get model's context window size from litellm.
 
@@ -210,11 +247,11 @@ class ChatHistory:
         budget = self._trim_budget(max_tokens_total)
         msgs = self.trim(budget) if budget > 0 else self.messages.copy()
         # Repair FORWARD orphan tool_uses before every LLM call: an assistant
-        # tool_call with no matching tool_result. Some handlers (stop,
-        # mark_vuln_exploited, add_finding, stop) yield only an `Ai` and never append a
-        # tool_result, so their tool_calls pile up unmatched over a turn. Providers
-        # reject/degrade on an unmatched tool_call (the model starts narrating options
-        # as prose instead of calling stop), so synthesize an acknowledgment.
+        # tool_call with no matching tool_result. `stop` never gets one (the turn ends
+        # on it), and a turn interrupted before its results were recorded leaves its
+        # calls unmatched. Providers reject/degrade on an unmatched tool_call, so
+        # synthesize a result: acknowledged for `stop`, "not run" for anything else
+        # (see _repair_orphan_tool_uses).
         # Mutates the returned COPY only — self.messages (live history) is untouched,
         # so the synthetic acks stay ephemeral (rebuilt each turn). trim() already
         # handles LEADING orphans; this covers the forward ones on both paths.

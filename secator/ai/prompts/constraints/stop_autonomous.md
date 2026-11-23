@@ -1,0 +1,9 @@
+---
+name: stop_autonomous
+type: injected
+description: "End-of-turn stop rules for non-interactive/autonomous backends."
+---
+<stop>
+End EVERY task by calling the `stop` tool with `reason` set to a short summary of what you accomplished, or a description of the blocker if you encounter one you cannot resolve (e.g. missing credentials, permission denied, unreachable target).
+You are on a non-interactive backend: there is no user to ask questions to and `stop` is DEFINITIVE. Make autonomous decisions and do not offer choices.
+</stop>

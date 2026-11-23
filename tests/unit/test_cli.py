@@ -440,7 +440,7 @@ class TestCli(unittest.TestCase):
 		result = self.runner.invoke(cli, ['profile', 'list'], env={'COLUMNS': '400'})
 		assert not result.exception
 		assert result.exit_code == 0
-		for column in ['Profile name', 'Description', 'Enforced', 'Workspace', 'Drivers', 'Exporters', 'Options']:
+		for column in ['Profile name', 'Description', 'Enforced', 'Drivers', 'Exporters', 'Options']:
 			assert column in result.output, f'column {column!r} missing from profile list output'
 
 	def test_profile_list_command_aliases(self):
@@ -757,3 +757,48 @@ class TestRunnerHelp(unittest.TestCase):
 
 	def test_scan_help(self):
 		self._assert_help('scan')
+
+
+class TestDriverOptionSpelling(unittest.TestCase):
+	"""`--driver` and the single-dash `-driver` are accepted by every command that takes a driver."""
+
+	def _driver_commands(self, cmd=None, path=()):
+		import click
+		from secator.cli import cli
+		cmd = cmd or cli
+		for param in cmd.params:
+			if param.name == 'driver':
+				yield path, cmd, param
+		if isinstance(cmd, click.Group):
+			for name, sub in cmd.commands.items():
+				yield from self._driver_commands(sub, path + (name,))
+
+	def test_every_driver_option_accepts_both_spellings(self):
+		found = list(self._driver_commands())
+		paths = {path for path, _, _ in found}
+		expected = {
+			('ws', 'list'), ('ws', 'use'), ('ws', 'summary'), ('ws', 'rm'), ('q',),
+			('report', 'show'), ('report', 'list'), ('report', 'info'), ('report', 'delete'),
+		}
+		self.assertTrue(expected <= paths, f'missing driver option on: {sorted(expected - paths)}')
+		for path, _, param in found:
+			with self.subTest(command=' '.join(path)):
+				self.assertIn('--driver', param.opts)
+				self.assertIn('-driver', param.opts)
+
+	def test_workspace_and_query_commands_parse_single_dash_driver(self):
+		from secator.cli import cli
+		commands = {
+			('ws', 'use'): ['myws'],
+			('ws', 'list'): [],
+			('q',): [],
+			('report', 'list'): [],
+		}
+		for path, args in commands.items():
+			cmd = cli
+			for name in path:
+				cmd = cmd.commands[name]
+			for flag in ('-driver', '--driver'):
+				with self.subTest(command=' '.join(path), flag=flag):
+					ctx = cmd.make_context(path[-1], args + [flag, 'api'])
+					self.assertEqual(ctx.params['driver'], 'api')

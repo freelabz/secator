@@ -79,12 +79,44 @@ def worker_init_handler(**kwargs):
 		setup_idle_timer(IDLE_TIMEOUT)
 
 
+def kills_after_task(task_name):
+	"""Whether the worker ends after running a task with this name."""
+	return bool(CONFIG.celery.worker_kill_after_task and task_name and task_name.startswith(('secator.', 'api.')))
+
+
+def in_pool_child():
+	"""Whether this process is a pool child (prefork) rather than the worker's main process."""
+	from billiard import current_process
+	return current_process().name != 'MainProcess'
+
+
+def is_eager(task):
+	"""Whether the task was applied in-process by the worker's own task (a child runner run in
+	sync mode): its prerun / postrun must not touch the worker's running state nor end it."""
+	return task is not None and getattr(task.request, 'is_eager', False)
+
+
+def task_received_handler(sender=None, request=None, **kwargs):
+	"""Stop consuming once the task that will end this worker is received, so nothing else is
+	delivered while it runs nor between its (late) ack and the worker's shutdown."""
+	if sender is None or not kills_after_task(getattr(request, 'name', None)):
+		return
+	for queue in [q.name for q in sender.task_consumer.queues]:
+		sender.cancel_task_queue(queue)
+
+
 def task_prerun_handler(task_id, **kwargs):
+	if is_eager(kwargs.get('task')):
+		return
+
 	# Mark that a task is running
 	set_task_running(task_id)
 
 
 def task_postrun_handler(**kwargs):
+	if is_eager(kwargs.get('task')):
+		return
+
 	# Mark that no task is running
 	clear_task_running()
 
@@ -92,10 +124,10 @@ def task_postrun_handler(**kwargs):
 	sender_name = kwargs['sender'].name
 	# console.print(Info(message=f'Task postrun handler --> Sender name: {sender_name}'))
 
-	if CONFIG.celery.worker_kill_after_task and (sender_name.startswith('secator.') or sender_name.startswith('api.')):
+	if kills_after_task(sender_name):
 		worker_name = os.environ.get('WORKER_NAME', 'unknown')
 		console.print(Info(message=f'Shutdown worker {worker_name} since config celery.worker_kill_after_task is set.'))
-		kill_worker(parent=True)
+		kill_worker(parent=in_pool_child())
 		return
 
 	# Set up a new idle timer
@@ -131,6 +163,8 @@ def setup_handlers():
 		signals.celeryd_after_setup.connect(capture_worker_name)
 		signals.task_postrun.connect(task_postrun_handler)
 		signals.task_prerun.connect(task_prerun_handler)
+		if CONFIG.celery.worker_kill_after_task:
+			signals.task_received.connect(task_received_handler)
 		signals.task_revoked.connect(task_revoked_handler)
 		signals.worker_ready.connect(worker_init_handler)
 		signals.worker_shutdown.connect(worker_shutdown_handler)

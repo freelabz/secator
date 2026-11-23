@@ -78,9 +78,9 @@ class Url(OutputType):
 			self.verified = True
 		if self.title and 'Index of' in self.title:
 			self.is_directory = True
-		root_url = f'https://{self.host}' if self.url.startswith('https://') else f'http://{self.host}'
-		if not self.is_root and self.url.rstrip('/') == root_url:
-			self.is_root = True
+		if not self.is_root:
+			parsed = urlparse(self.url)
+			self.is_root = parsed.path in ('', '/') and not parsed.query and not parsed.fragment
 		if self.response_headers:
 			for k, v in self.response_headers.items():
 				new_k = k.lower().replace('-', '_')

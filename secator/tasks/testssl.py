@@ -153,6 +153,15 @@ class testssl(Command):
 					# TODO: implement this
 					pass
 
+				# 'warn' / 'fatal' report a check testssl could not run or an unexpected
+				# condition (e.g. an unexpected HTTP status), not a vulnerability
+				elif severity in ['warn', 'fatal']:
+					yield Warning(message=f'{host}: {id}: {finding}')
+
+				# 'debug' entries are testssl internals
+				elif severity == 'debug':
+					continue
+
 				# If info or ok, create a tag only if 'verbose' option is set
 				elif severity in ['info', 'ok']:
 					if not verbose:

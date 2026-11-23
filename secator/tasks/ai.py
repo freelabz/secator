@@ -2,6 +2,7 @@
 """AI-powered penetration testing task."""
 import json
 import re
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -16,11 +17,11 @@ from secator.output_types import (
 from secator.runners import PythonRunner
 from secator.rich import console, maybe_status
 from secator.ai.actions import (
-	ActionContext, check_guardrails, safe_dispatch_action, _run_batch
+	ActionContext, check_guardrails, safe_dispatch_action, _run_batch, USAGE_COUNTERS
 )
 from secator.ai.guardrails import PermissionEngine
 from secator.ai.interactivity import create_backend, DISMISS_ANSWER, RemoteBackend, UserInputTimeout
-from secator.ai.encryption import SensitiveDataEncryptor, maybe_encrypt
+from secator.ai.encryption import SensitiveDataEncryptor, find_placeholders, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
 from secator.ai.prompts import (
 	load_prompt, get_system_prompt, get_mode_config, format_tool_result, format_continue, MODES, MODE_ALIASES,
@@ -32,7 +33,7 @@ from secator.ai.session import (
 	print_session_results)
 from secator.ai.utils import (
 	call_llm, init_llm, setup_ai, format_llm_status, parse_text_tool_calls,
-	_decrypt_dict, _build_action_display,
+	_decrypt_dict, _build_action_display, TOOL_ACK_RESULT,
 )
 
 
@@ -101,6 +102,14 @@ def fast_detect_mode(prompt):
 	if has_chat and not has_scan:
 		return "chat"
 	return None
+
+
+def _is_revoked(task_id):
+	"""Whether this Celery task id was revoked on this worker. The revoke control handler adds
+	the id to the worker's in-memory `revoked` set before terminating, and a gevent pool runs
+	the task in that same process. False without a worker (CLI / sync runs) or a task id."""
+	state = sys.modules.get("celery.worker.state")
+	return bool(task_id and state) and task_id in state.revoked
 
 
 def _truncate_label(text, fallback):
@@ -249,6 +258,32 @@ def _yield_tool_results(runner, collected):
 		         _context=dict(runner.context))
 
 
+def _ack_resultless_calls(runner, actions, collected):
+	"""Record an acknowledged tool result for each dispatched call that produced none.
+
+	Some tools finish without an item the agent loop turns into a tool result (their only
+	output is a display item, e.g. ``update_plan``). Give each such call an explicit
+	acknowledged result in history, and yield it so the driver persists it too. Every
+	dispatched call then has a recorded result, so a restored transcript tells a call that
+	ran apart from one that was interrupted before it returned (which the history repair
+	answers with a "not run" result instead). ``stop`` is skipped: it ends the turn and the
+	user's answer follows it directly.
+	"""
+	answered = {(r.get("_context") or {}).get("tool_call_id") for r in collected if isinstance(r, dict)}
+	for action in actions:
+		tc_id = action.get("tool_call_id")
+		tc_name = action.get("tool_call_name") or ""
+		if not tc_id or tc_id in answered or tc_name == "stop":
+			continue
+		answered.add(tc_id)
+		content = maybe_encrypt(TOOL_ACK_RESULT, runner.encryptor)
+		runner.history.add_tool_result(tc_name, tc_id, content)
+		yield Ai(content=f"[{tc_name}] done",
+		         ai_type="tool_result",
+		         message=cap_message({"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": content}),
+		         _context=dict(runner.context))
+
+
 def resolve_llm_credentials(
 	caller_api_base, caller_api_key, config_api_base, config_api_key,
 	disallow_config_token=False,
@@ -294,6 +329,13 @@ class ai(PythonRunner):
 		"temperature": {"type": float, "default": 0.7, "help": "LLM temperature"},
 		"dry_run": {"is_flag": True, "default": False, "help": "Show without executing"},
 		"intent_model": {"type": str, "default": CONFIG.addons.ai.intent_model, "help": "Model for intent detection"},
+		# Extra (non-core) tools to add on top of the mode's baseline for this run, by name or
+		# fnmatch glob (e.g. add_suggestion, sysreptor_*). Merged with CONFIG.addons.ai.extra_tools;
+		# every exact name must resolve to a loaded tool; a glob expands to the matching external
+		# tools (templates dir / SECATOR_AI_TOOLS_DIRS / bundle) and warns if none match. Generic
+		# and driver-agnostic — the same option lets any caller (CLI, a template, a library call)
+		# grant external tools to a run without a core edit.
+		"extra_tools": {"type": "list", "default": None, "help": "Extra AI tools to add on top of the mode baseline: comma-separated names or globs (e.g. 'sysreptor_*,add_suggestion'); globs match external tools only"},  # noqa: E501
 		"max_tokens_total": {
 			"type": int, "default": CONFIG.addons.ai.max_tokens_total,
 			"help": "Hard token limit - truncate oldest messages beyond this",
@@ -431,18 +473,22 @@ class ai(PythonRunner):
 			# A frontend that owns the display (the Textual TUI) can't host the plain-console
 			# picker — it drives the terminal directly and collides with Textual. Route the
 			# choice through the backend so that frontend renders the session list instead.
+			from secator.ai.session import list_sessions
+			# Scanning the reports folders can take a moment: say what is happening, so the
+			# wait isn't mistaken for the model answering.
+			with maybe_status("[bold orange3]Loading sessions…[/]", spinner="dots"):
+				sessions = list_sessions()
 			if getattr(self.backend, "owns_display", False):
 				# `show_session_picker` prints its own "no sessions" notice on the console; a
 				# display-owning backend has no console, so surface the same thing as a Warning
 				# (and distinguish "none to resume" from a cancelled pick, both of which the
 				# picker signals as None).
-				from secator.ai.session import list_sessions
-				if not list_sessions():
+				if not sessions:
 					yield Warning(message="No previous AI sessions found.")
 					return
-				session = pick_session_via_backend(self.backend, session_id=self.session_id)
+				session = pick_session_via_backend(self.backend, session_id=self.session_id, sessions=sessions)
 			else:
-				session = show_session_picker()
+				session = show_session_picker(sessions=sessions)
 			if session is None:
 				return
 			self.session_name = session["name"]
@@ -463,9 +509,12 @@ class ai(PythonRunner):
 				# uses — the user's next answer re-detects the real mode and overwrites it.
 				self.mode = self.mode or "chat"
 				self._rebuild_prompt_and_tools()
-				self.history = restore_history_from_db(
-					self.session_id, self._get_query_engine(),
-					model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
+				with maybe_status("[bold orange3]Loading session…[/]", spinner="dots"):
+					self.history = restore_history_from_db(
+						self.session_id, self._get_query_engine(),
+						model=self.model, encryptor=self.encryptor, system_prompt=self.system_prompt)
+				# Placeholders minted by earlier turns must still decrypt in tool calls/display.
+				self._restore_pii_map()
 				# Show the prior conversation + findings on the console (the unified
 				# restore only rebuilds in-memory history; replay_session did this for
 				# the legacy path, so print it here to keep resume UX consistent). Skip it
@@ -477,7 +526,15 @@ class ai(PythonRunner):
 				# Legacy session: its docs carry no `_context.session_id`, so the unified
 				# restore would rebuild empty history. Fall back to the local
 				# history.json replay instead.
-				self.history = replay_session(session)
+				with maybe_status("[bold orange3]Loading session…[/]", spinner="dots"):
+					self.history = replay_session(session)
+				# This run keeps its fresh session id, so seed the placeholder map from the
+				# PRIOR session's stored map (its id is in the session's runner info).
+				self._restore_pii_map(session_id=session.get("store_session_id"))
+				# Re-key the restored map under THIS run's id right away: the next save points
+				# the session file at this id, so a later resume must find the map here even
+				# if this run ends before minting a new placeholder.
+				self._persist_pii_map()
 			if self.history is None:
 				yield Error(message="Failed to restore session.")
 				return
@@ -489,7 +546,8 @@ class ai(PythonRunner):
 				from secator.rich import get_tui
 				tui = get_tui()
 				if tui is not None:
-					tui.tui_replay_history(self.history.messages)
+					tui.tui_replay_history(
+						self.history.messages, decrypt=self.encryptor.decrypt if self.encryptor else None)
 			self.history.model = self.model
 			result = self._prompt_and_redetect([])
 			if result is None:
@@ -587,7 +645,7 @@ class ai(PythonRunner):
 
 		Returns the ``(system_prompt, tool_schemas)`` pair for callers that want it."""
 		self.system_prompt = self._system_prompt_for(self.mode)
-		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True))  # noqa: E501
+		self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True), extra_tools=getattr(self, "extra_tools", None))  # noqa: E501
 		return self.system_prompt, self.tool_schemas
 
 	def _resolve_prompt(self):
@@ -834,7 +892,7 @@ class ai(PythonRunner):
 		"""
 		if self.interactive == "remote":
 			return
-		save_history(self.history, self.reports_folder, debug_fn=self.debug)
+		save_history(self.history, self.reports_folder, debug_fn=self.debug, session_id=self.session_id)
 
 	# -------------------------------------------------------------------------
 	# Turn-level idempotency (remote/Celery redelivery)
@@ -895,7 +953,17 @@ class ai(PythonRunner):
 		enters the LLM transcript, and clients hide it. The plaintext values already
 		live in the workspace findings, so this adds no LLM-provider exposure.
 		"""
-		if self.interactive != "remote" or not self.encryptor or not self.encryptor.pii_map:
+		if not self.encryptor or not self.encryptor.pii_map:
+			return
+		# A subagent shares its parent's session id but has its own encryptor: an upsert from
+		# it would overwrite the parent's map. Its placeholders reach the parent through the
+		# handback text, which the parent re-encrypts into its own map.
+		if getattr(self, "is_subagent", False) is True:
+			return
+		# Only write when the map grew since the last persist (it never shrinks): avoids a
+		# store write on every turn that minted no new placeholder.
+		size = len(self.encryptor.pii_map) + len(self.encryptor.hash_map)
+		if size == getattr(self, "_pii_map_persisted_size", 0):
 			return
 		payload = {"pii_map": dict(self.encryptor.pii_map), "hash_map": dict(self.encryptor.hash_map)}
 		try:
@@ -909,19 +977,29 @@ class ai(PythonRunner):
 		if not modified:
 			# No existing doc yet — insert one; subsequent turns update it in place.
 			self.add_result(Ai(content="", ai_type="pii_map", extra_data=payload), print=False)
+		self._pii_map_persisted_size = size
 
-	def _restore_pii_map(self):
-		"""Seed the encryptor's map from the persisted session doc (see _persist_pii_map)."""
-		if self.interactive != "remote" or not self.encryptor:
+	def _restore_pii_map(self, session_id=None):
+		"""Seed the encryptor's map from the persisted session doc (see _persist_pii_map).
+
+		Runs on every resume path (remote respawn and local resume alike) through the active
+		store, so it behaves the same on every driver. ``session_id`` names the PRIOR session
+		when the resumed run keeps a fresh id (local resume of a session whose report carries
+		no ai results). Every stored version is merged (the map only grows): the json store is
+		append-only, so an early-break ``limit=1`` read could return a stale first version.
+		"""
+		session_id = session_id or self.session_id
+		if not self.encryptor or not session_id:
 			return
 		try:
+			# the ONLY read allowed to reach this internal doc (normal queries never return it)
 			docs = self._get_query_engine().search(
-				{"_type": "ai", "ai_type": "pii_map", "_context.session_id": self.session_id}, limit=1)
+				{"_type": "ai", "ai_type": "pii_map", "_context.session_id": session_id}, include_internal=True)
 		except Exception as e:  # noqa: BLE001 - restore best-effort; a fresh map still works forward
 			self.debug(f'pii_map restore failed: {e}', sub='llm')
 			return
-		if docs:
-			ed = docs[0].get("extra_data") or {}
+		for doc in sorted(docs or [], key=lambda d: d.get("_timestamp", 0)):
+			ed = doc.get("extra_data") or {}
 			self.encryptor.pii_map.update(ed.get("pii_map") or {})
 			self.encryptor.hash_map.update(ed.get("hash_map") or {})
 
@@ -1019,6 +1097,14 @@ class ai(PythonRunner):
 						"context_window": get_context_window(self.model),
 					})
 
+				# Persist the placeholder map BEFORE the call: the prompt (and any steer or
+				# answer drained above) was encrypted into it, and the call can take minutes.
+				# Persisting only after the turn's tool dispatch left the stored map empty
+				# while the first call ran, so a reader of the session's map saw "nothing
+				# encrypted" even though the model only received placeholders. No-op unless
+				# the map grew.
+				self._persist_pii_map()
+
 				# Call LLM
 				messages = self.history.to_messages(max_tokens_total=self.max_tokens_total)
 				by_role = self.history.count_tokens_by_role(self.model)
@@ -1084,6 +1170,7 @@ class ai(PythonRunner):
 							"(finish_reason=content_filter) — intermittent, route-dependent moderation, "
 							"not a secator or tool-calling issue. Refine your request (or switch model) "
 							"and I'll continue."))
+						self._save_history()   # end of turn: persist before waiting on the user
 						result = self._prompt_and_redetect([])
 						if result is None:
 							self._save_history()
@@ -1130,6 +1217,8 @@ class ai(PythonRunner):
 						# which makes the whole conversation fail to load for clients.
 						"max_iterations": (-1 if self.max_iterations == float('inf') else self.max_iterations),
 						"tokens": usage.get("tokens") if usage else None,
+						"prompt_tokens": usage.get("prompt_tokens") if usage else None,
+						"completion_tokens": usage.get("completion_tokens") if usage else None,
 						"cost": usage.get("cost") if usage else None,
 					},
 				)
@@ -1152,6 +1241,13 @@ class ai(PythonRunner):
 
 					# Dispatch actions, collect results, add to history
 					dispatch_result = yield from self._dispatch_and_collect(actions, ctx)
+					# Revoked while a child runner ran in-process: the runner absorbed the
+					# termination and reported a failed tool. End now (REVOKED): no further LLM
+					# call, no reply wait. A tool that failed for any other reason carries on.
+					if _is_revoked(self._turn_uuid()):
+						self.revoked = True
+						self._save_history()
+						return
 					stop_reason = dispatch_result.get("stop_reason")
 					stop_choices = dispatch_result.get("stop_choices")
 					stop_multiple = dispatch_result.get("stop_multiple", False)
@@ -1239,6 +1335,16 @@ class ai(PythonRunner):
 						self._save_history()
 						return
 
+					# End of turn: persist the placeholder map (no-op unless it grew), so a
+					# turn with no tool call (e.g. a prompt that minted placeholders) is covered.
+					self._persist_pii_map()
+
+					# End of turn: the assistant reply and every tool result are in history
+					# now. Persist BEFORE handing control back to the user — the run may never
+					# exit cleanly from here (the user quits the TUI, the process is killed
+					# while waiting), and a later resume must still see this turn.
+					self._save_history()
+
 					# A remote stop/content-only already persisted its pending `stopped` doc
 					# (stamped + prompt_uuid) in _dispatch_and_collect; a content-only / cap
 					# turn did not, so _prompt_and_redetect builds one from the stop reason.
@@ -1252,7 +1358,7 @@ class ai(PythonRunner):
 					continue
 
 				# Continue prompt (tool results analysed, keep going)
-				stop_or_continue = load_prompt("constraints/tool_result_analysis.txt")
+				stop_or_continue = load_prompt("constraints/tool_result_analysis.md")
 				continue_msg = format_continue(iteration, self.max_iterations, stop_or_continue)
 				self.history.add_user(maybe_encrypt(continue_msg, self.encryptor))
 
@@ -1308,7 +1414,7 @@ class ai(PythonRunner):
 		ctx = getattr(self, "_isolation_ctx", None)
 		if ctx is None:
 			return
-		from secator.ai.actions import _teardown_sandbox_container
+		from secator.ai.tools._sandbox import _teardown_sandbox_container
 		_teardown_sandbox_container(ctx, self.context or {})
 
 	# -------------------------------------------------------------------------
@@ -1349,6 +1455,9 @@ class ai(PythonRunner):
 		self.async_tasks = self.get_opt_value("async_tasks")
 		self.dangerous = self.get_opt_value("dangerous")
 		self.isolated = self.get_opt_value("isolated")
+		# Per-run extra tools (names or globs), merged with CONFIG.addons.ai.extra_tools by
+		# build_tool_schemas.
+		self.extra_tools = self.get_opt_value("extra_tools")
 		self.in_scope = self.get_opt_value("in_scope") or []
 		self.out_of_scope = self.get_opt_value("out_of_scope") or []
 		# Resolve in-scope hostnames to their current IPs so the AI can reach an
@@ -1386,6 +1495,11 @@ class ai(PythonRunner):
 		self._sync = False if self.async_tasks else self.sync
 		self.history = ChatHistory()
 		self.encryptor = SensitiveDataEncryptor() if self.sensitive else None
+		if self.interactive == "tui":
+			# the TUI's /model-view renders this history read-only (display only)
+			tui = get_tui()
+			if tui is not None and hasattr(tui, "tui_set_model_source"):
+				tui.tui_set_model_source(self._model_view_snapshot)
 		self.has_previous_results = len(self.results) > 0
 		self.scope = "current" if self.has_previous_results else "workspace"
 		self.permission_engine = PermissionEngine(
@@ -1405,12 +1519,7 @@ class ai(PythonRunner):
 			if inherited:
 				self.permission_engine.add_runtime_allow(inherited)
 
-		# Per-run billed-token accounting (AI analog of context.scan_hours), read
-		# by the billing chore. Init so it persists even with zero LLM calls.
-		self.context.setdefault("ai_tokens", 0)
-		self.context.setdefault("ai_prompt_tokens", 0)
-		self.context.setdefault("ai_completion_tokens", 0)
-		self.context.setdefault("ai_cost", 0.0)
+		self._init_usage_counters()
 
 		# Record the resolved model id so the metering chore can price tokens against
 		# the model registry. Set unconditionally (not setdefault) — records the
@@ -1514,8 +1623,12 @@ class ai(PythonRunner):
 			self.mode = fast_mode
 		else:
 			try:
-				selection_prompt = load_prompt("modes/_selection.txt")
-				messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
+				selection_prompt = load_prompt("modes/_selection.md")
+				# The intent model is a model call like any other: send the prompt encrypted.
+				# getattr: a missing encryptor must not raise here (the except below would
+				# silently turn intent detection into "chat").
+				prompt = maybe_encrypt(self.prompt, getattr(self, "encryptor", None))
+				messages = [{"role": "user", "content": f"{selection_prompt}\n{prompt}"}]
 				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
 					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
 				self._account_usage(result.get("usage"))
@@ -1560,7 +1673,7 @@ class ai(PythonRunner):
 			self.max_iterations = max(self.max_iterations, mode_max, config_max)
 		self.system_prompt = self._system_prompt_for(self.mode)
 		if not hasattr(self, 'tool_schemas') or not old_mode or old_mode != self.mode:
-			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True))  # noqa: E501
+			self.tool_schemas = build_tool_schemas(self.mode, is_subagent=self.is_subagent, backend=self.backend, mode_is_auto=getattr(self, "mode_is_auto", True), extra_tools=getattr(self, "extra_tools", None))  # noqa: E501
 
 	# -------------------------------------------------------------------------
 	# Workspace helpers
@@ -1569,6 +1682,17 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# Mid-flight steering
 	# -------------------------------------------------------------------------
+
+	def _model_view_snapshot(self):
+		"""Display-only copy of the model-facing history, for the TUI's model view.
+
+		The history is stored as sent: when the encryptor is on, every message already carries
+		the ``[TYPE:hash]`` placeholders the model received, so the view shows it as is — no
+		re-encryption, no new placeholder, the encryptor's map is never touched. Shallow copies
+		only: the loop keeps mutating the live history on its own thread.
+		"""
+		msgs = [dict(m) for m in list(self.history.messages) if isinstance(m, dict)]
+		return {"messages": msgs, "encrypted": self.encryptor is not None}
 
 	def _report_tui_meta(self, token_count=None, ctx_window=None):
 		"""Report the live guardrail/mode/context state to the TUI meta bar (local only).
@@ -1821,12 +1945,31 @@ class ai(PythonRunner):
 			# AttributeError (which would defeat the stop).
 			args = args or {}
 
+			# Log the args as the model sent them (placeholders), never their decrypted values.
+			self.debug(f'[tool_call] {name} id={tc_id} args={args}', sub='llm')
+
 			# Decrypt args
 			if self.encryptor:
 				args = _decrypt_dict(args, self.encryptor)
 
+			# A placeholder that survived decryption can't be resolved (unknown / garbled
+			# token, or minted under a map this run doesn't have). Never run it as-is: the
+			# literal token would reach a shell / HTTP client / scope check.
+			unresolved = find_placeholders(args)
+			if unresolved:
+				self.debug(f'[tool_call] {name}: unresolved placeholders {unresolved}', sub='llm')
+				yield _reject_tool_call(
+					self, name, tc_id,
+					json.dumps({
+						"error": f"Tool call '{tc_id}' rejected: unknown sensitive-data placeholder(s) "
+						         f"{', '.join(unresolved)}.",
+						"hint": "Only use placeholders exactly as they appear in this conversation's data. "
+						        "Re-query the workspace to get a valid reference to the value, then retry.",
+					}),
+					f"unresolved placeholder(s): {', '.join(unresolved)}")
+				continue
+
 			# Convert to action
-			self.debug(f'[tool_call] {name} id={tc_id} args={args}', sub='llm')
 			action = tool_call_to_action(name, args)
 			if not action:
 				reason = "empty arguments" if not args else f"unknown tool '{name}'"
@@ -2002,6 +2145,7 @@ class ai(PythonRunner):
 			ctx.results.append(result)
 
 		yield from _yield_tool_results(self, collected)
+		yield from _ack_resultless_calls(self, actions, collected)
 
 		return {
 			"stop_reason": stop_reason,
@@ -2015,6 +2159,19 @@ class ai(PythonRunner):
 	# History helpers
 	# -------------------------------------------------------------------------
 
+	def _init_usage_counters(self):
+		"""Seed the per-run usage counters (tokens / cost) on the runner context.
+
+		Seeded so they persist even with zero LLM calls. A subagent ALWAYS starts from
+		zero: its context derives from its parent's, and usage inherited from there
+		would be reported a second time as the subagent's own.
+		"""
+		for _, ctx_key, cast in USAGE_COUNTERS:
+			if self.is_subagent:
+				self.context[ctx_key] = cast(0)
+			else:
+				self.context.setdefault(ctx_key, cast(0))
+
 	def _account_usage(self, usage):
 		"""Accumulate billed token/cost usage from a single LLM call onto the runner context.
 
@@ -2027,12 +2184,7 @@ class ai(PythonRunner):
 		"""
 		if not usage:
 			return
-		for usage_key, ctx_key, cast in (
-			("tokens", "ai_tokens", int),
-			("prompt_tokens", "ai_prompt_tokens", int),
-			("completion_tokens", "ai_completion_tokens", int),
-			("cost", "ai_cost", float),
-		):
+		for usage_key, ctx_key, cast in USAGE_COUNTERS:
 			try:
 				self.context[ctx_key] = cast(self.context.get(ctx_key, 0) or 0) + cast(usage.get(usage_key) or 0)
 			except (TypeError, ValueError):

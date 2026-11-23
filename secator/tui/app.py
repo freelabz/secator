@@ -11,11 +11,14 @@ Textual is an OPTIONAL dependency — this module is only imported on the TUI pa
 """
 from __future__ import annotations
 
+import json
 import threading
 
 from rich.markup import escape
 from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
@@ -23,7 +26,8 @@ from textual.widgets.option_list import Option
 from secator.ai.interactivity import DISMISS_ANSWER
 from secator.tui.render import finding_text, message_text
 from secator.tui.widgets import (
-	BackBar, BlockPanel, ChoicePrompt, ConversationScroll, Grip, PermissionPrompt, PromptInput, RunnerPanel)
+	BackBar, BlockPanel, ChoicePrompt, ConversationScroll, Grip, PermissionPrompt, PromptInput, RunnerPanel,
+	SelectableStatic, SlashCommand, slash_command_help, slash_help)
 
 
 class TUIApp(App):
@@ -162,7 +166,11 @@ class TUIApp(App):
 	#meta-right { width: auto; height: 1; content-align: right top; color: #6b7187; }
 	"""
 	BINDINGS = [
-		("ctrl+c", "quit", "Quit"),
+		# Ctrl+C copies when text is selected (never quits/cancels the run then), else quits.
+		# Priority so it is decided here first — a focused input can't swallow it.
+		Binding("ctrl+c", "copy_or_quit", "Copy / Quit", priority=True),
+		# copy-only alias (many terminals keep Ctrl+Shift+C for themselves; harmless if so)
+		Binding("ctrl+shift+c,super+c", "copy_selection", "Copy", show=False, priority=True),
 		# jump to the latest messages (a focused choice/permission list consumes `down`
 		# first for navigation, so this only fires when not selecting)
 		("down", "scroll_latest", "Scroll to latest"),
@@ -175,17 +183,52 @@ class TUIApp(App):
 	ansi_color = True
 	ENABLE_COMMAND_PALETTE = False
 
+	# Client-side slash commands: {"/cmd": (args, description)}. Typed alone (or with their
+	# arguments) they are handled here and never sent to the runner; dispatched to
+	# ``_slash_<cmd>`` (dashes as underscores). Listed by /help, completed with Tab.
+	SLASH_COMMANDS = {
+		"/help": SlashCommand(
+			"[command]", "list the commands and keys, or show one command's details",
+			"Without an argument: every slash command and the keyboard shortcuts. "
+			"With one (e.g. /help name): that command's usage and details."),
+		"/name": SlashCommand(
+			"<name>", "rename the conversation",
+			"Shown on the input box's top rule and saved with the session."),
+	}
+	# Notable key bindings, listed by /help (the bindings themselves live in BINDINGS and
+	# PromptInput._on_key).
+	KEY_HELP = (
+		("enter", "send the message (or answer the pending question)"),
+		("alt+enter / shift+enter / ctrl+j", "new line"),
+		("tab", "complete a /command"),
+		("shift+tab / ctrl+g", "toggle guardrails (enforced / bypass)"),
+		("ctrl+t", "cycle the mode (auto / scan / chat / exploit)"),
+		("ctrl+o", "expand / collapse all cards"),
+		("ctrl+f", "findings panel"),
+		("ctrl+r", "background tasks panel"),
+		("down", "scroll to the latest message"),
+		("esc", "back to the choice list"),
+		("ctrl+c", "copy the selection, else quit"),
+	)
+
 	# AI modes the mode-cycle steps through (auto = let the runner detect/keep its mode).
 	_MODE_CYCLE = ("auto", "scan", "chat", "exploit")
 
 	def __init__(self, runner_builder=None, title="secator", subtitle="", initial_prompt="",
-	             initial_dangerous=False, initial_mode="auto", session_name=""):
+	             initial_dangerous=False, initial_mode="auto", session_name="", startup_status="starting…",
+	             lock_input=False):
 		super().__init__()
 		self._runner_builder = runner_builder
 		self._title = title
 		self._subtitle = subtitle
 		self._session_name = session_name or ""   # shown on the top delimiter; renamed via /name
 		self._initial_prompt = initial_prompt or ""
+		# Status shown while the runner builds, before it reports its own (e.g. "Loading
+		# sessions…" while resuming, so the wait isn't mistaken for the model answering).
+		self._startup_status = startup_status or ""
+		# Hide + disable the input until the runner first asks the user something (a resume
+		# lists sessions first: there is nothing to type into until one is picked).
+		self._input_locked = bool(lock_input)
 		self._current: RunnerPanel | None = None
 		self._container: RunnerPanel | None = None   # most-recent workflow/scan nesting parent
 		self._containers: dict = {}   # runner_id -> live workflow/scan panel (parallel batch:
@@ -217,7 +260,8 @@ class TUIApp(App):
 		# to the first ask_user instead of being dropped into _steers. `-p` supplies the prompt,
 		# so there's nothing to await.
 		self._prefill: str = ""
-		self._awaiting_first_prompt: bool = not bool(self._initial_prompt)
+		# (a locked input can't be typed into, so there is no prefill to hand over either)
+		self._awaiting_first_prompt: bool = not bool(self._initial_prompt) and not self._input_locked
 		# ---- meta bar (guardrail setting / mode / context %) ----
 		# Live state the runner reports via tui_set_meta each turn; seeded from the CLI opts so
 		# the bar is correct before the first LLM turn reports back.
@@ -271,7 +315,7 @@ class TUIApp(App):
 				PromptInput(id="prompt-input"),
 				Static(
 					Text.from_markup(
-						"[#5b6070]Message, or steer a running runner…  (Enter to send · Alt+Enter: newline)[/]"),
+						"[#5b6070]Message, or steer a running runner…  (Enter to send · Alt+Enter: newline · /help)[/]"),
 					id="input-placeholder",
 				),
 				id="input-field",
@@ -292,7 +336,10 @@ class TUIApp(App):
 		self.sub_title = self._subtitle
 		self.query_one("#backbar").display = False
 		self._write = self.query_one("#convo", VerticalScroll)
-		self.query_one("#prompt-input", PromptInput).focus()
+		if self._input_locked:
+			self._set_input_locked(True)
+		else:
+			self.query_one("#prompt-input", PromptInput).focus()
 		self._render_meta()
 		self._set_session_name(self._session_name)
 		self.set_interval(0.1, self._tick_spinner)    # animate the status spinner
@@ -306,7 +353,7 @@ class TUIApp(App):
 			# The runner build (LLM/driver/system-prompt setup) blocks for a few seconds before
 			# it produces anything or asks for the first prompt — show a spinner so the input
 			# doesn't look dead. The runner's own status / first prompt replaces it.
-			self._set_status("starting…")
+			self._set_status(self._startup_status)
 			threading.Thread(target=self._consume, daemon=True).start()
 
 	# worker: build + drive the runner. Items are rendered via the on_item hook the
@@ -320,6 +367,30 @@ class TUIApp(App):
 			self.call_from_thread(self._set_status, f"error: {e}", False)
 		else:
 			self.call_from_thread(self._set_status, "done", False)
+		finally:
+			# the run ended before asking anything (e.g. no session to resume): give the input back
+			if self._input_locked:
+				try:
+					self.call_from_thread(self._set_input_locked, False)
+				except RuntimeError:  # the app already exited
+					pass
+
+	def _set_input_locked(self, locked: bool) -> None:
+		"""Hide + disable the input box (it can't be shown or focused), or bring it back."""
+		self._input_locked = bool(locked)
+		try:
+			inp = self.query_one("#prompt-input", PromptInput)
+			box = self.query_one("#input-box")
+		except Exception:  # noqa: BLE001 - nodes may be gone during teardown
+			return
+		inp.disabled = self._input_locked
+		if self._input_locked:
+			box.display = False
+			if self.focused is inp:
+				self.set_focus(None)
+		elif not self.query_one("#choice-host").display:
+			box.display = True   # unless a choice / permission box holds the input slot
+			inp.focus()
 
 	# ---- thread-safe entries called from the worker thread ----
 	def tui_render(self, item) -> None:
@@ -341,7 +412,6 @@ class TUIApp(App):
 		# else the main conversation (independent of the live write target)
 		target = await self._ensure_subview(subagent) if subagent else self._convo()
 		await target.mount(BlockPanel(description, reason, command))
-		target.scroll_end(animate=False)
 
 	# ---- runner output routing (by source so a parallel batch doesn't cross-wire) ----
 	def _container_for(self, d: dict) -> "RunnerPanel | None":
@@ -457,9 +527,10 @@ class TUIApp(App):
 		return self.query_one("#convo", VerticalScroll)
 
 	async def _append(self, widget) -> None:
+		# No explicit scroll: ConversationScroll follows the new item while the view is at the
+		# bottom, and leaves it alone if the user scrolled up to read earlier output.
 		target = self._write or self._convo()
 		await target.mount(widget)
-		target.scroll_end(animate=False)
 
 	async def _ensure_subview(self, sid: str) -> VerticalScroll:
 		sv = self._subviews.get(sid)
@@ -508,6 +579,111 @@ class TUIApp(App):
 			if sv.display:
 				return sv
 		return self._convo()
+
+	# ---- clipboard: copy-on-select + selection-aware Ctrl+C ----
+	# Textual captures the mouse, so the terminal's own selection only works with Shift held,
+	# and the terminal's Ctrl+C then reaches the app (which used to quit). Instead, the
+	# in-app mouse selection copies itself on release (copy_to_clipboard below: OSC 52, which
+	# also works over SSH, plus a native clipboard command when one is reachable), and Ctrl+C
+	# with a selection copies instead of quitting.
+	def _selected_text(self) -> str:
+		"""The current selection: a mouse selection in the views, else a focused text
+		area's own selection (the prompt input). Empty when nothing is selected."""
+		try:
+			text = self.screen.get_selected_text()
+		except Exception:  # noqa: BLE001 - no screen yet / teardown
+			text = None
+		if text:
+			return text
+		focused = self.focused
+		return (getattr(focused, "selected_text", "") or "") if focused is not None else ""
+
+	def _has_selection(self) -> bool:
+		try:
+			if self.screen.selections:
+				return True
+		except Exception:  # noqa: BLE001
+			pass
+		return bool(getattr(self.focused, "selected_text", "") or "")
+
+	_clipboard_hint_shown = False
+
+	def copy_to_clipboard(self, text: str) -> None:
+		"""Copy to the app clipboard AND, as far as possible, to the system / terminal one.
+
+		Textual's own implementation only sets ``app.clipboard`` (what in-app paste reads)
+		and writes a bare OSC 52, which many terminals, tmux and screen silently drop. Here
+		the OSC 52 is wrapped for tmux / screen, and a native clipboard command (wl-copy,
+		xclip / xsel, pbcopy, clip.exe) is tried in the background as well."""
+		from secator.tui import clipboard
+		self._clipboard = text
+		driver = self._driver
+		if driver is not None:
+			for seq in clipboard.osc52_sequences(text):
+				try:
+					driver.write(seq)
+				except Exception:  # noqa: BLE001 - never let a copy crash the TUI
+					pass
+		# called on the event loop thread only: no lock needed to bump the sequence
+		self._native_copy_seq += 1
+		seq = self._native_copy_seq
+		threading.Thread(target=self._copy_native, args=(text, seq), daemon=True).start()
+
+	_native_copy_lock = threading.Lock()  # serializes native writes (see _copy_native)
+	_native_copy_seq = 0  # bumped per copy; a worker whose seq is stale skips its write
+
+	def _copy_native(self, text: str, seq: int) -> None:
+		from secator.tui import clipboard
+		# One native write at a time, and a request superseded by a newer copy is dropped,
+		# so a slow older write can never land after (and overwrite) the latest selection.
+		with self._native_copy_lock:
+			if seq != self._native_copy_seq:
+				return
+			copied = clipboard.copy_native(text)
+		if copied or TUIApp._clipboard_hint_shown:
+			return
+		# No native clipboard reachable (e.g. in a container / over SSH): the copy now
+		# depends on the terminal honouring OSC 52. Say so once per process, not per copy.
+		TUIApp._clipboard_hint_shown = True
+		install = clipboard.missing_tool_hint()
+		if install:
+			# a display is reachable (e.g. a container sharing the host X11 socket) but no
+			# clipboard command is installed: installing one is the reliable fix
+			msg = f"No system clipboard tool found: {install} so copies reach other apps."
+		else:
+			msg = (
+				"Copied via the terminal (OSC 52) only. If pasting outside fails, enable OSC 52 "
+				"clipboard access in your terminal (tmux: set -g set-clipboard on), or hold "
+				"Shift to select with the terminal itself.")
+		try:
+			self.call_from_thread(self.notify, msg, timeout=8)
+		except Exception:  # noqa: BLE001 - app shutting down
+			pass
+
+	def _copy(self, text: str) -> None:
+		# rendered lines are padded to the view width: drop that trailing padding
+		text = "\n".join(line.rstrip() for line in text.split("\n"))
+		self.copy_to_clipboard(text)
+		n = len(text)
+		self.notify(f"Copied {n} character{'s' if n != 1 else ''} to clipboard", timeout=1.5)
+
+	def on_text_selected(self, event: events.TextSelected) -> None:
+		# fired on every mouse release; a plain click clears the selection (nothing to copy)
+		text = self._selected_text() if self.screen.selections else ""
+		if text:
+			self._copy(text)
+
+	def action_copy_selection(self) -> None:
+		text = self._selected_text()
+		if text:
+			self._copy(text)
+
+	async def action_copy_or_quit(self) -> None:
+		if self._has_selection():
+			# a selection is active: copy (if it has any text) but never quit / cancel the run
+			self.action_copy_selection()
+			return
+		await self.action_quit()
 
 	def action_scroll_latest(self) -> None:
 		self._active_view().scroll_end(animate=False)
@@ -755,8 +931,14 @@ class TUIApp(App):
 			danger = "[#e0b050]▶▶ guardrails enforced[/] [#5b6070](shift+tab)[/]"
 		mode = m.get("mode") or "auto"
 		mode_seg = f"[#6b7187]mode:[/] [#7fd1e0]{escape(mode)}[/] [#5b6070](ctrl+t)[/]"
-		left.update(Text.from_markup(f"{danger}   [#3a4150]·[/]   {mode_seg}"))
+		extra = self._meta_extra()
+		extra = f"   [#3a4150]·[/]   {extra}" if extra else ""
+		left.update(Text.from_markup(f"{danger}   [#3a4150]·[/]   {mode_seg}{extra}"))
 		right.update(Text.from_markup(self._pct_text(m.get("ctx_pct"))))
+
+	def _meta_extra(self) -> str:
+		"""Extra markup appended to the main meta bar (frontend-specific indicators)."""
+		return ""
 
 	def tui_set_meta(self, dangerous=None, mode=None, mode_is_auto=None, ctx_pct=None,
 	                 is_subagent=False, sid=None) -> None:
@@ -1002,12 +1184,12 @@ class TUIApp(App):
 			pass
 		if not text:
 			return
-		# `/name <name>` renames the conversation (shown on the top delimiter) instead of being
-		# sent to the agent. It's a client command — don't echo it as a prompt or steer.
-		if text.startswith("/name ") or text == "/name":
-			await self._handle_name_command(text)
+		# Client slash commands (/name, /help, ...) are handled here instead of being sent to
+		# the agent — don't echo them as a prompt or steer. Only KNOWN commands are taken, so a
+		# message that merely starts with "/" (e.g. a path) still goes to the agent.
+		if await self._dispatch_slash(text):
 			return
-		await self._append(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
+		self._echo_user(text)
 		pend = self._pending_ask
 		if pend is not None:
 			ev, holder, choices, ptype = pend
@@ -1028,19 +1210,59 @@ class TUIApp(App):
 		with self._steers_lock:
 			self._steers.append(text)
 
+	@staticmethod
+	def slash_handler_name(cmd: str) -> str:
+		"""The method a registered slash command dispatches to: ``/model-view`` -> ``_slash_model_view``."""
+		return "_slash_" + cmd[1:].replace("-", "_")
+
+	async def _dispatch_slash(self, text: str) -> bool:
+		"""Run ``text`` as a client slash command if it is one. Returns True when handled."""
+		parts = text.split(None, 1) if text.startswith("/") else []
+		cmd = parts[0] if parts else ""
+		entry = self.SLASH_COMMANDS.get(cmd)
+		if entry is None:
+			return False
+		arg = parts[1].strip() if len(parts) > 1 else ""
+		# A command that takes no arguments only matches on its own ("/model-view please …"
+		# is a message), and `/help <x>` only when <x> is a command ("/help me scan x" is a
+		# message) — so typing a real prompt that starts with a command word still reaches
+		# the agent.
+		if arg and (not entry[0] or (cmd == "/help" and self._help_target(arg) not in self.SLASH_COMMANDS)):
+			return False
+		await getattr(self, self.slash_handler_name(cmd))(text)
+		return True
+
+	@staticmethod
+	def _help_target(arg: str) -> str:
+		return arg if arg.startswith("/") else f"/{arg}"
+
+	async def _append_note(self, renderable) -> None:
+		"""Mount client-command output (/help, /name, ...) in the view the user is looking at
+		— not the last item's write target, which may be a hidden subview."""
+		view = self._active_view()
+		await view.mount(Static(renderable, classes="note"))
+		view.scroll_end(animate=False)
+
+	async def _slash_help(self, text: str) -> None:
+		"""`/help [command]`: list the slash commands + keys, or one command's details."""
+		arg = text.split(None, 1)[1].strip() if len(text.split(None, 1)) > 1 else ""
+		body = slash_command_help(arg, self.SLASH_COMMANDS) if arg else slash_help(self.SLASH_COMMANDS, self.KEY_HELP)
+		await self._append_note(body)
+
+	async def _slash_name(self, text: str) -> None:
+		await self._handle_name_command(text)
+
 	async def _handle_name_command(self, text: str) -> None:
 		"""`/name <name>`: rename the conversation. Updates the top-delimiter label now and
 		queues the rename for the runner to persist (it stamps every item with the name)."""
 		name = text[len("/name "):].strip() if text != "/name" else ""
 		if not name:
-			await self._append(Static(
-				Text.from_markup("[#6b7187]usage: /name <conversation name>[/]"), classes="note"))
+			await self._append_note(Text.from_markup("[#6b7187]usage: /name <conversation name>[/]"))
 			return
 		self._set_session_name(name)
 		with self._control_lock:
 			self._control["session_name"] = name
-		await self._append(Static(
-			Text.from_markup(f"[#6b7187]↻ renamed conversation to [b]{escape(name)}[/][/]"), classes="note"))
+		await self._append_note(Text.from_markup(f"[#6b7187]↻ renamed conversation to [b]{escape(name)}[/][/]"))
 
 	# ---- choice box (lives in the input slot while a choice ask is active) ----
 	# Widgets hidden while a "solo" choice (the resume session picker) is shown, so only the
@@ -1097,6 +1319,8 @@ class TUIApp(App):
 
 	def _choice_to_input(self, text) -> None:
 		"""Tab: hand the current selection to the input box so the user can add more details."""
+		if self._input_locked:
+			return   # e.g. the resume session picker: nothing to add free text to
 		try:
 			inp = self.query_one("#prompt-input", PromptInput)
 		except Exception:  # noqa: BLE001
@@ -1118,6 +1342,8 @@ class TUIApp(App):
 	def _restore_input(self) -> None:
 		self.query_one("#choice-host", Vertical).remove_children()
 		self.query_one("#choice-host").display = False
+		if self._input_locked:
+			self._set_input_locked(False)   # first answer given (e.g. a session picked)
 		self.query_one("#input-box").display = True
 		if getattr(self, "_solo_choice", False):
 			for wid in self._SOLO_HIDDEN:
@@ -1125,33 +1351,79 @@ class TUIApp(App):
 			self._solo_choice = False
 
 	def _echo_user(self, text) -> None:
-		self._convo().mount(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
-		self._convo().scroll_end(animate=False)
+		"""Show a message the user just sent. It always goes to the main conversation (never
+		the live write target, which may be a hidden subagent view), and always jumps to the
+		bottom: once there, the view follows the reply too, even if the user had scrolled up
+		before sending."""
+		convo = self._convo()
+		convo.mount(Static(Text.from_markup(f"[bold cyan]›[/] {escape(text)}"), classes="user"))
+		convo.scroll_end(animate=False)
 
-	def tui_replay_history(self, messages) -> None:
-		"""Render a restored conversation into the convo view on resume (thread-safe)."""
-		self.call_from_thread(self._replay_history, messages or [])
+	def tui_replay_history(self, messages, decrypt=None) -> None:
+		"""Render a restored conversation into the convo view on resume (thread-safe).
+		``decrypt`` (optional) maps sensitive-data placeholders back for display, as live."""
+		self.call_from_thread(self._replay_history, messages or [], decrypt)
 
-	def _replay_history(self, messages) -> None:
-		"""Replay prior LLM turns so the user sees where they left off: user prompts as
-		bubbles, assistant text as Markdown, tool calls as a one-line marker. Tool results
-		are omitted (the live view suppresses them in the main conversation too)."""
+	async def _replay_history(self, messages, decrypt=None) -> None:
+		"""Replay prior turns so the user sees where they left off, rendered like the live
+		view: user prompts as bubbles, assistant text as Markdown, each tool call as a
+		collapsible card holding its arguments and its result (linked by tool_call id).
+		Messages the loop injects under the ``user`` role (per-iteration instructions) are
+		hidden, as they are live; the model-facing history itself is left untouched."""
+		from secator.ai.history import classify_user_message
 		from secator.tui.render import markdown_text
+		from secator.tui.widgets import ToolCallPanel
+
+		def show(text):
+			if not decrypt or not text:
+				return text
+			try:
+				return decrypt(text)
+			except Exception:  # noqa: BLE001 - display only
+				return text
+
+		results = {}
+		for m in messages:
+			if isinstance(m, dict) and m.get("role") == "tool" and m.get("tool_call_id"):
+				results[m["tool_call_id"]] = m.get("content")
 		convo = self._convo()
 		for m in messages:
 			if not isinstance(m, dict):
 				continue
-			role, content = m.get("role"), (m.get("content") or "").strip()
+			role, content = m.get("role"), (m.get("content") or "")
+			content = content.strip() if isinstance(content, str) else ""
 			if role == "user":
-				if content:
-					self._echo_user(content)
+				kind, text = classify_user_message(content)
+				if kind == "internal":
+					continue
+				if kind == "summary":
+					await convo.mount(Static(Text.from_markup(
+						"[dim]↻ earlier conversation summarized[/]"), classes="note"))
+					continue
+				if text.strip():
+					await convo.mount(Static(
+						Text.from_markup(f"[bold cyan]›[/] {escape(show(text.strip()))}"), classes="user"))
 			elif role == "assistant":
 				if content:
-					convo.mount(Static(markdown_text(content), classes="ai"))
+					await convo.mount(SelectableStatic(markdown_text(show(content)), classes="ai"))
 				for tc in (m.get("tool_calls") or []):
-					fn = tc.get("function") or {} if isinstance(tc, dict) else {}
+					fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
 					name = fn.get("name") or "tool"
-					convo.mount(Static(Text.from_markup(f"[#5b6070]⚙ ran [b]{escape(str(name))}[/b][/]"), classes="ai"))
+					args = fn.get("arguments")
+					if isinstance(args, str):
+						try:
+							args = json.loads(args)
+						except ValueError:
+							args = {"arguments": args}
+					if decrypt and isinstance(args, dict):
+						try:
+							args = json.loads(show(json.dumps(args)))
+						except ValueError:
+							pass
+					result = results.get(tc.get("id")) if isinstance(tc, dict) else None
+					if isinstance(result, str):
+						result = show(result)
+					await convo.mount(ToolCallPanel(str(name), args, result))
 		convo.scroll_end(animate=False)
 
 	def on_key(self, event) -> None:
@@ -1239,7 +1511,9 @@ class TUIApp(App):
 			self._show_choices(choices, multiple, solo=solo)
 		else:
 			# a plain end-of-turn follow-up: no "What's next?" / "waiting" noise — the
-			# focused input is enough. Just make sure it's focused.
+			# focused input is enough. Just make sure it's shown and focused.
+			if self._input_locked:
+				self._set_input_locked(False)
 			try:
 				self.query_one("#prompt-input", PromptInput).focus()
 			except Exception:  # noqa: BLE001

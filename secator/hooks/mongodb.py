@@ -6,7 +6,7 @@ from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.hooks._dedup import build_baseline_index, compute_duplicate_updates
+from secator.hooks._dedup import baseline_fields, build_baseline_index, compute_duplicate_updates
 from secator.output_types import OUTPUT_TYPES, Warning, is_output_type
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
@@ -79,7 +79,7 @@ def ensure_mongo_run_id(context):
 
 	`task_chunk_id` is coerced too (a task chunk — real chunking or an AI-spawned task
 	child — keys its doc on it). Workflow/scan children key on `{type}_id` (they are
-	standalone runners, not chunks; see ai.actions._child_preamble)."""
+	standalone runners, not chunks; see ai.tools._runner._child_preamble)."""
 	for key in ('task_id', 'workflow_id', 'scan_id', 'task_chunk_id'):
 		val = context.get(key)
 		if val and not ObjectId.is_valid(val):
@@ -280,11 +280,14 @@ def tag_duplicates(ws_id: str = None, full_scan: bool = False, exclude_types=[],
 	# on large workspaces (observed at scale: 47k+ docs, growing). Instead of materializing every
 	# full finding, stream the cursor and fold it into a compact index (uuids/_related/copy-fields
 	# per equality key) — peak memory is O(distinct keys × tiny payload), independent of full-doc
-	# size. See build_baseline_index. ponytail: streaming folds the peak; add a server-side field
-	# projection to the cursor if the transient per-batch load ever matters.
+	# size. See build_baseline_index.
+	# Project to the fields dedup reads (equality fields, _related, copy fields and what __post_init__
+	# derives them from): the rest of each doc (extra_data, headers, descriptions...) was streamed and
+	# discarded on every pass.
+	baseline_projection = dict.fromkeys(baseline_fields(CONFIG.addons.mongodb.duplicate_main_copy_fields), 1)
 	baseline_stream = (
 		load_finding(doc, exclude_types)
-		for doc in db.findings.find(workspace_query).sort('_timestamp', -1)
+		for doc in db.findings.find(workspace_query, baseline_projection).sort('_timestamp', -1)
 	)
 	baseline_index = build_baseline_index(
 		(f for f in baseline_stream if f is not None),

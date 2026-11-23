@@ -1,10 +1,31 @@
-"""Compact prompt templates for AI task."""
+"""Compact prompt templates for AI task.
+
+Prompt files are Markdown (``*.md``) with an optional YAML frontmatter header that
+describes the prompt (``name``/``type``/``description``/``modes``). The frontmatter is
+metadata only — it is stripped before the body is rendered, so the rendered prompt is
+exactly the body after the closing ``---``. This reuses the frontmatter convention of
+the user-provided AI context files (``secator/ai/context.py``) and extends it to the
+system prompts.
+
+Frontmatter schema (see :data:`PROMPT_TYPES`):
+
+* ``name`` (str, required) — must equal the file stem.
+* ``type`` (str, required) — one of ``mode`` (a full per-mode system prompt),
+  ``partial`` (a fragment pulled into a mode prompt via a ``${name}`` include),
+  ``injected`` (a fragment appended programmatically at build time, e.g. ``stop``),
+  or ``utility`` (a standalone prompt, e.g. the mode ``_selection`` classifier).
+* ``description`` (str, required) — one-line human description.
+* ``modes`` (list[str], ``type: mode`` only) — the mode(s) this system prompt serves.
+"""
 # flake8: noqa: E501
+import fnmatch
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 from string import Template
+
+import yaml
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 SECATOR_DIR = Path(__file__).parent.parent
@@ -26,50 +47,83 @@ wordlist|name_or_path|Use predefined name or file path
 ports|1-1000,8080,8443|Comma-separated ports or ranges"""
 
 
-def load_prompt(path: str) -> str:
-	"""Load a prompt file and resolve ${includes} from common/.
+# Valid `type:` frontmatter values (see module docstring).
+PROMPT_TYPES = ("mode", "partial", "injected", "utility")
 
-	Include syntax: ${common_name} resolves to common/<common_name>.txt content.
-	Standard $variable substitution is handled later by string.Template.
+# Frontmatter delimiter: a file may start with `---\n`, the YAML block, then `---`.
+# Same convention as the user AI context files (secator/ai/context.py).
+_FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*\n?', re.DOTALL)
+
+
+def split_frontmatter(text: str) -> Tuple[Dict[str, Any], str]:
+	"""Split a prompt file's text into (frontmatter_dict, body).
+
+	A file with no frontmatter returns ``({}, text)`` unchanged. The body is returned
+	verbatim (no stripping) so the rendered prompt stays byte-for-byte what follows the
+	closing ``---``.
+	"""
+	match = _FRONTMATTER.match(text)
+	if not match:
+		return {}, text
+	meta = yaml.safe_load(match.group(1)) or {}
+	if not isinstance(meta, dict):
+		meta = {}
+	return meta, text[match.end():]
+
+
+def load_prompt_meta(path: str) -> Dict[str, Any]:
+	"""Return the frontmatter dict of a prompt file (empty dict if none)."""
+	meta, _ = split_frontmatter((PROMPTS_DIR / path).read_text())
+	return meta
+
+
+def load_prompt(path: str) -> str:
+	"""Load a prompt file (body only) and resolve ${includes} from constraints/.
+
+	The optional YAML frontmatter header is stripped first (it is metadata, never part
+	of the rendered prompt). Include syntax: ``${name}`` resolves to the BODY of
+	``constraints/<name>.md`` (its own frontmatter stripped). Standard ``$variable``
+	substitution is handled later by :class:`string.Template`.
 
 	Args:
-		path: Relative path within the prompts directory (e.g. 'modes/scan.txt')
+		path: Relative path within the prompts directory (e.g. 'modes/scan.md').
 
 	Returns:
-		Prompt string with includes resolved.
+		Prompt string (body, includes resolved).
 	"""
-	filepath = PROMPTS_DIR / path
-	content = filepath.read_text()
+	_, content = split_frontmatter((PROMPTS_DIR / path).read_text())
 
 	# Resolve ${include_name} patterns that match constraints/ files
 	common_dir = PROMPTS_DIR / "constraints"
-	available = {f.stem for f in common_dir.glob("*.txt")}
+	available = {f.stem for f in common_dir.glob("*.md")}
 
 	def _resolve(match):
 		name = match.group(1)
 		if name in available:
-			return (common_dir / f"{name}.txt").read_text().rstrip()
+			_, body = split_frontmatter((common_dir / f"{name}.md").read_text())
+			return body.rstrip()
 		return match.group(0)  # Leave unresolved (it's a Template variable)
 
 	return re.sub(r'\$\{(\w+)\}', _resolve, content)
 
 
 # Load prompts from files
-COMMON_RULES = load_prompt("constraints/common.txt")
-QUERIES = load_prompt("constraints/queries.txt")
+COMMON_RULES = load_prompt("constraints/common.md")
+QUERIES = load_prompt("constraints/queries.md")
 
-SYSTEM_SCAN = Template(load_prompt("modes/scan.txt"))
-SYSTEM_CHAT = Template(load_prompt("modes/chat.txt"))
-SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.txt"))
-SYSTEM_CONTRIBUTE = Template(load_prompt("modes/contribute.txt"))
-SYSTEM_RESEARCH = Template(load_prompt("modes/research.txt"))
+SYSTEM_SCAN = Template(load_prompt("modes/scan.md"))
+SYSTEM_CHAT = Template(load_prompt("modes/chat.md"))
+SYSTEM_EXPLOIT = Template(load_prompt("modes/exploit.md"))
+SYSTEM_CONTRIBUTE = Template(load_prompt("modes/contribute.md"))
+SYSTEM_MONITOR = Template(load_prompt("modes/monitor.md"))
+SYSTEM_RESEARCH = Template(load_prompt("modes/research.md"))
 
 # Mode configurations: system prompt, allowed actions, and iteration limits
 MODES = {
 	"scan": {
 		"system_prompt": SYSTEM_SCAN,
 		"description": "actively scan, run tools / shell, exploit, and write or curate findings",
-		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"chat": {
@@ -93,7 +147,7 @@ MODES = {
 		# to exploit — without it query_workspace isn't even built for this mode.
 		# "stop" lets exploit mode end-and-ask (e.g. confirm before a state-changing
 		# action, or hand back after a PoC) instead of only running to its iteration cap.
-		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "change_mode", "stop"],
 		"max_iterations": 5,
 	},
 	"contribute": {
@@ -110,6 +164,22 @@ MODES = {
 		# fixtures, lint) is long, so a higher iteration floor than the one-shot modes.
 		"max_iterations": 20,
 	},
+	"monitor": {
+		"system_prompt": SYSTEM_MONITOR,
+		"description": "re-verify the EXISTING finding set against its targets and record what changed; you cannot scan for or add new findings",  # noqa: E501
+		# Attack-surface monitoring: a recurring re-verification of the EXISTING finding set.
+		# It reads (query), re-probes a finding against its OWN target with `shell`, and records
+		# the outcome: an unchanged finding gets an `add_note`; a changed one `update_finding` +
+		# `add_note` (the delta); a finding that no longer reproduces is retired with
+		# `mark_vuln_false_positive` (reversible) + a note; a previously-exploited vuln that is now
+		# gone is closed with `mark_vuln_fixed` + a note. It deliberately CANNOT run
+		# tasks/workflows (those re-ingest findings through the normal pipeline and would re-add
+		# the very surface it is auditing), add findings, exploit, spawn subagents, or
+		# self-escalate — no add_finding, no mark_vuln_exploited/exploit_failed, no subagent, no
+		# change_mode. No iteration override/cap: like the other modes it relies on the default
+		# budget and the model calling `stop` when the surface has been walked.
+		"allowed_actions": ["query", "shell", "mark_vuln_false_positive", "mark_vuln_fixed", "update_finding", "add_note", "stop"],  # noqa: E501
+	},
 	"research": {
 		"system_prompt": SYSTEM_RESEARCH,
 		"description": "research a vulnerability (CVE/0-day): find or craft a working PoC in a sandbox lab, with adversarial subagents, and record it",
@@ -118,12 +188,64 @@ MODES = {
 		# is nothing to escalate to and it must not de-escalate out. It leans on `subagent`
 		# (adversarial fan-out), `shell` (stand up a sandbox lab), `web_search` (find PoCs) and
 		# `add_finding` (record the validated Exploit, linked by `cves`).
-		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "update_finding", "add_note", "subagent", "stop"],
+		"allowed_actions": ["task", "workflow", "shell", "query", "fetch_url", "update_plan", "web_search", "list_runners", "add_finding", "mark_vuln_exploited", "mark_vuln_false_positive", "mark_vuln_exploit_failed", "mark_vuln_fixed", "update_finding", "add_note", "subagent", "stop"],
 		# Research is long-running (stand up labs, fan out subagents, iterate on PoCs), so it
 		# gets a higher iteration floor than scan/exploit.
 		"max_iterations": 12,
 	},
 }
+
+
+# Per-mode tool exposure is declared in each mode prompt's frontmatter `tools:` key — a
+# list of fnmatch globs over tool NAMES (e.g. "run_*", "*", "!change_mode"). This is the
+# single source of truth for a mode's BASELINE tools, and it resolves against CORE
+# (built-in) tools only. External/bundle tools are NEVER matched by these globs; they are
+# added on top per-invocation as `extra_tools` (a generic option on the `ai` task), so a
+# caller grants a non-core tool (e.g. `add_suggestion`) to a mode only when needed. The
+# patterns are loaded into MODES here so MODES stays the one mode registry, and resolved
+# by tool_matches_mode(). (Phase 2 makes this the operative driver of build_tool_schemas,
+# wires `extra_tools`, and drops the per-tool `modes` list.)
+for _mode, _cfg in MODES.items():
+	_cfg["tools"] = list(load_prompt_meta(f"modes/{_mode}.md").get("tools") or ["*"])
+
+
+def mode_tool_patterns(mode: str) -> List[str]:
+	"""Return the `tools:` fnmatch patterns declared by a mode (default: all tools)."""
+	return MODES.get(normalize_mode(mode), {}).get("tools", ["*"])
+
+
+def mode_excludes_tool(tool_name: str, patterns: List[str]) -> bool:
+	"""Whether a mode's ``!`` exclude patterns remove a tool (by fnmatch over its name).
+
+	Used both for baseline tools and for ``extra_tools`` added on top, so a mode can
+	exclude a specific tool from the effective set regardless of how it was included.
+	"""
+	for pat in patterns:
+		p = str(pat)
+		if p.startswith("!") and fnmatch.fnmatchcase(tool_name, p[1:]):
+			return True
+	return False
+
+
+def tool_matches_mode(tool_name: str, patterns: List[str], external: bool = False) -> bool:
+	"""Whether a CORE tool is in a mode's baseline given the mode's `tools:` patterns.
+
+	Patterns are fnmatch globs over tool names, in any order: a plain pattern INCLUDES,
+	a leading ``!`` EXCLUDES (applied after includes). A tool is in the baseline iff it
+	matches at least one include and no exclude.
+
+	``external=True`` short-circuits to ``False``: a mode's globs match CORE tools only.
+	External/bundle tools are never pulled in by a mode's `tools:` globs (not even by an
+	exact-name entry) — they are added on top via the `ai` task's ``extra_tools`` option,
+	so a broad ``tools: ["*"]`` can never grant a mode a non-core tool (e.g.
+	``add_suggestion``). See build_tool_schemas (Phase 2).
+	"""
+	if external:
+		return False
+	includes = [str(p) for p in patterns if not str(p).startswith("!")]
+	if not any(fnmatch.fnmatchcase(tool_name, p) for p in includes):
+		return False
+	return not mode_excludes_tool(tool_name, patterns)
 
 
 def build_mode_banner(mode: str, mode_config: dict = None) -> str:
@@ -138,7 +260,14 @@ def build_mode_banner(mode: str, mode_config: dict = None) -> str:
 	desc = cfg.get("description")
 	line = f"You are operating in {mode.upper()} mode"
 	line += f": {desc}." if desc else "."
-	if "change_mode" in cfg.get("allowed_actions", []):
+	# change_mode availability is derived from the mode's `tools:` patterns (the single
+	# source of truth). Fall back to allowed_actions only for a synthetic mode_config
+	# passed without a `tools` key (e.g. in tests).
+	if "tools" in cfg:
+		can_change_mode = tool_matches_mode("change_mode", cfg["tools"])
+	else:
+		can_change_mode = "change_mode" in cfg.get("allowed_actions", [])
+	if can_change_mode:
 		line += (" You are ALREADY in this mode — do NOT call change_mode to re-enter it; "
 		         "change_mode only moves UP to a more capable mode and cannot de-escalate.")
 	return f"<current_mode>\n{line}\n</current_mode>"
@@ -518,7 +647,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# $output_types_reference, so they must be substituted for all modes — derive both
 	# from FINDING_TYPES so they never drift from the registry.
 	subst = dict(query_types=build_query_types(), output_types_reference=build_output_types_reference())
-	if mode in ("scan", "exploit", "contribute", "research"):
+	if mode in ("scan", "exploit", "contribute", "monitor", "research"):
 		path_vars = dict(tasks_path=str(TASKS_PATH), workflows_path=str(WORKFLOWS_PATH), profiles_path=str(PROFILES_PATH))
 		subst.update(library_reference=build_library_reference(), **path_vars)
 	if mode == "contribute":
@@ -542,7 +671,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	if is_subagent:
 		result = re.sub(r'\n*<subagents>.*?</subagents>\n*', '\n\n', result, flags=re.DOTALL)
 		result = re.sub(r'\n*<vulnerability_handling>.*?</vulnerability_handling>\n*', '\n\n', result, flags=re.DOTALL)
-		result += "\n\n" + load_prompt("constraints/subagent.txt")
+		result += "\n\n" + load_prompt("constraints/subagent.md")
 
 	# Inject the end-of-turn `stop` rules. `stop` is the single end-of-turn signal in
 	# every mode; which guidance applies depends only on whether the backend has a user
@@ -551,7 +680,7 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	# Spliced in BEFORE the <operating_rules> recap so that recap stays in the
 	# high-attention recency tail (see TestOperatingRulesRecap).
 	interactive = getattr(backend, "interactive", True) if backend is not None else True
-	stop_rules = load_prompt("constraints/stop.txt" if interactive else "constraints/stop_autonomous.txt")
+	stop_rules = load_prompt("constraints/stop.md" if interactive else "constraints/stop_autonomous.md")
 	marker = "<operating_rules>"
 	if marker in result:
 		result = result.replace(marker, stop_rules + "\n\n" + marker, 1)

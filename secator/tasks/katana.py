@@ -11,7 +11,7 @@ from secator.definitions import (
 )  # fmt: off
 from secator.output_types import Tag, Technology, Url
 from secator.serializers import JSONSerializer
-from secator.tasks._categories import HttpCrawler
+from secator.tasks._categories import CHROMIUM_DEPS_APT, HttpCrawler, apply_system_browser
 
 EXCLUDED_PARAMS = ['v']
 
@@ -39,6 +39,9 @@ class katana(HttpCrawler):
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit raw requests/responses from jsonl output'},  # noqa: E501
 		'omit_body': {'is_flag': True, 'short': 'ob', 'default': True, 'help': 'Omit response body from jsonl output'},
 		'no_sandbox': {'is_flag': True, 'short': 'ns', 'default': False, 'help': 'Disable sandboxing'},
+		# katana's own default is 'rdn' (the registrable domain), so crawling scanme.example.com would
+		# also crawl example.com and every subdomain it links to. Stay on the target host by default.
+		'field_scope': {'type': str, 'short': 'fsc', 'default': 'fqdn', 'help': 'Crawl scope: fqdn (target host only), rdn (target registrable domain), dn (domain name keyword), or a regex'},  # noqa: E501
 	}
 	opt_key_map = {
 		HEADER: 'headers',
@@ -62,10 +65,11 @@ class katana(HttpCrawler):
 		USER_AGENT: OPT_NOT_SUPPORTED,
 		'store_responses': 'sr',
 		'form_fill': 'aff',
+		'field_scope': 'field-scope',
 	}
 	opt_value_map = {DELAY: lambda x: int(x) if isinstance(x, float) else x}
 	item_loaders = [JSONSerializer()]
-	install_pre = {'apk': ['libc6-compat']}
+	install_pre = {'apk': ['libc6-compat', 'chromium'], 'apt': CHROMIUM_DEPS_APT}
 	install_version = 'v1.3.0'
 	install_cmd = 'go install -v github.com/projectdiscovery/katana/cmd/katana@[install_version]'
 	github_handle = 'projectdiscovery/katana'
@@ -96,6 +100,7 @@ class katana(HttpCrawler):
 		output_folder = shlex.quote(f'{self.reports_folder}/.outputs')
 		if form_fill or form_extraction or store_responses:
 			self.cmd += f' -srd {output_folder}'
+		apply_system_browser(self, self.get_opt_value('headless'))
 		self._techs = {}
 
 	@staticmethod
