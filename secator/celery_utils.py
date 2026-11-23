@@ -1,11 +1,13 @@
 import gc
+import threading
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from time import sleep
 
 import kombu
 import kombu.exceptions
 
+from celery._state import _set_task_join_will_block, task_join_will_block
 from celery.result import AsyncResult, GroupResult
 from celery.exceptions import TaskRevokedError
 from greenlet import GreenletExit
@@ -18,6 +20,48 @@ from secator.definitions import STATE_COLORS
 from secator.output_types import Error, Info, Progress, State
 from secator.rich import console
 from secator.utils import debug, traceback_as_string
+
+
+_eager_join_lock = threading.Lock()
+_eager_join_depth = 0
+_eager_join_saved = False
+
+
+@contextmanager
+def allow_eager_join():
+	"""Let a runner apply its Celery workflow eagerly from inside a worker task, on any pool.
+
+	A sync runner started from inside a task (a child runner run in-process) executes its
+	workflow with ``workflow.apply()``: every signature runs synchronously in the calling
+	thread and returns an ``EagerResult`` that is already complete. Reading it with ``.get()``
+	(ours, and Celery's own ``chord.apply()`` / ``Task.replace()`` for a chunked task) still
+	goes through ``assert_will_not_block()``, which raises "Never call result.get() within a
+	task!" on the pools that flag task joins as blocking: prefork, solo and threads (gevent
+	and eventlet do not, which is why they were unaffected).
+
+	Lifting the guard here is safe: no result is waited on. Every result read under this
+	context is an eager one, computed in this same process before ``.get()`` is called, so
+	nothing polls the broker or the result backend and nothing waits for a worker slot; the
+	deadlock the guard protects against (a task blocking on a sibling queued behind it)
+	cannot happen. Runners dispatched asynchronously never enter this context: they are
+	tracked by polling their state (``CeleryData.iter_results``), not by ``.get()``.
+
+	The guard is a process-wide flag, so nested and concurrent (threads pool) uses are
+	counted: it is lifted on the first entry and restored by the last exit only.
+	"""
+	global _eager_join_depth, _eager_join_saved
+	with _eager_join_lock:
+		if _eager_join_depth == 0:
+			_eager_join_saved = task_join_will_block()
+			_set_task_join_will_block(False)
+		_eager_join_depth += 1
+	try:
+		yield
+	finally:
+		with _eager_join_lock:
+			_eager_join_depth -= 1
+			if _eager_join_depth == 0:
+				_set_task_join_will_block(_eager_join_saved)
 
 
 class CeleryData(object):

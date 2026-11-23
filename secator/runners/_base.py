@@ -14,7 +14,7 @@ from rich.errors import MarkupError as RichMarkupError
 import humanize
 
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
-from secator.celery_utils import CeleryData
+from secator.celery_utils import CeleryData, allow_eager_join
 from secator.config import CONFIG
 from secator.output_types import (
 	FINDING_TYPES, OutputType, Progress, Info, Warning, Error, Target, State, is_output_type,
@@ -1081,7 +1081,9 @@ class Runner:
 		if self.sync:
 			self.print_item = False
 			self.debug('running workflow in sync mode', sub='start')
-			results = workflow.apply().get()
+			# Eager run in this process: allow reading its results under any worker pool.
+			with allow_eager_join():
+				results = workflow.apply().get()
 		else:
 			self.debug('running workflow in async mode', sub='start')
 			self.celery_result = workflow()
