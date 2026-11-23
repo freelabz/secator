@@ -4,7 +4,7 @@ import unittest
 
 from secator.ai.encryption import SensitiveDataEncryptor
 
-PH_RE = re.compile(r"\[(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[0-9a-f]{12}\]")
+PH_RE = re.compile(r"\[(?:EMAIL|IPV4|IPV6|HOST|CUSTOM_\d+):[0-9a-f]{12}\]")
 
 
 def _strip(text):
@@ -93,6 +93,48 @@ class TestEncryptWholeValues(unittest.TestCase):
 		self.assertNotIn("example", _strip(out))
 		self.assertNotIn("10.10", _strip(out))
 		self.assertIn("d41d8cd98f00b204e9800998ecf8427e.json", out)
+		self.assertEqual(self.enc.decrypt(out), text)
+
+
+class TestEncryptIPv6(unittest.TestCase):
+
+	def setUp(self):
+		self.enc = SensitiveDataEncryptor(salt="test")
+
+	def test_ipv6_forms_encrypted_whole(self):
+		for ip in ("2001:db8::1", "2001:db8:0:0:0:0:0:12", "fe80::1ff:fe23:4567:890a", "::1", "::ffff:10.0.0.1"):
+			with self.subTest(ip=ip):
+				out = self.enc.encrypt(f"target {ip} is up")
+				self.assertEqual(out, f"target {self.enc._hash_value(ip, 'ipv6')} is up")
+				self.assertEqual(self.enc.decrypt(out), f"target {ip} is up")
+
+	def test_ipv6_prefix_of_another(self):
+		out = self.enc.encrypt("2001:db8::1 and 2001:db8::12")
+		ph_short = self.enc._hash_value("2001:db8::1", "ipv6")
+		ph_long = self.enc._hash_value("2001:db8::12", "ipv6")
+		self.assertEqual(out, f"{ph_short} and {ph_long}")
+
+	def test_ipv6_in_brackets_url_and_cidr(self):
+		text = "curl http://[2001:db8::1]:8080/ and scan 2001:db8::/32"
+		out = self.enc.encrypt(text)
+		self.assertNotIn("2001", _strip(out))
+		self.assertIn("http://[[IPV6:", out)
+		self.assertIn("]:8080/", out)
+		self.assertTrue(out.endswith("/32"))
+		self.assertEqual(self.enc.decrypt(out), text)
+
+	def test_not_ipv6_left_alone(self):
+		for text in ("at 12:30:45 today", "mac aa:bb:cc:dd:ee:ff", "std::string", "a :: b", "dead:beef:cafe"):
+			with self.subTest(text=text):
+				self.assertEqual(self.enc.encrypt(text), text)
+				self.assertEqual(self.enc.pii_map, {})
+
+	def test_ipv6_and_ipv4_round_trip(self):
+		text = "dual-stack host 10.0.0.1 / 2001:db8::a and ::ffff:192.168.1.1"
+		out = self.enc.encrypt(text)
+		self.assertNotIn("2001", _strip(out))
+		self.assertNotIn("10.0.0.1", _strip(out))
+		self.assertNotIn("192.168", _strip(out))
 		self.assertEqual(self.enc.decrypt(out), text)
 
 

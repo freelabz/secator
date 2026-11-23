@@ -1,12 +1,21 @@
 # secator/ai/encryption.py
 """Sensitive data encryption for AI prompts."""
 import hashlib
+import ipaddress
 import re
 from typing import Dict, List, Optional
 
 # PII patterns - order matters (specific before general)
 PII_PATTERNS = {
 	"email": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
+	# IPv6 candidates (incl. compressed `::` and IPv4-embedded forms); each match is checked
+	# with ipaddress before it is encrypted, so times, MACs and the like are left alone.
+	# Runs before ipv4 so `::ffff:10.0.0.1` is encrypted whole.
+	"ipv6": re.compile(
+		r"(?<![0-9A-Za-z:.])(?:[0-9A-Fa-f]{0,4}:){2,7}"
+		r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}|[0-9A-Fa-f]{0,4})"
+		r"(?![0-9A-Za-z:])"
+	),
 	"ipv4": re.compile(
 		r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"
 	),
@@ -24,6 +33,17 @@ _FAKE_HOST_EXTENSIONS = frozenset({
 	'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'pdf',
 	'zip', 'tar', 'gz', 'bz2', 'xz', 'mp3', 'mp4',
 })
+
+
+def _is_ipv6(value: str) -> bool:
+	"""Return True if ``value`` is a real IPv6 address with at least one hex digit (not a bare ``::``)."""
+	if not re.search(r"[0-9A-Fa-f]", value):
+		return False
+	try:
+		ipaddress.IPv6Address(value)
+	except ValueError:
+		return False
+	return True
 
 
 def _is_hash_filename(hostname: str) -> bool:
@@ -49,22 +69,22 @@ def _is_hash_filename(hostname: str) -> bool:
 # loosely (any alphanumeric hash) so a model-garbled token like ``[HOST:shhfurirind]`` is caught
 # too; the bracket-stripped form is only matched with the exact 12-hex hash to avoid false hits.
 _PLACEHOLDER_RE = re.compile(
-	r"\[(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[A-Za-z0-9]+\]"
-	r"|\b(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[0-9a-f]{12}\b"
+	r"\[(?:EMAIL|IPV4|IPV6|HOST|CUSTOM_\d+):[A-Za-z0-9]+\]"
+	r"|\b(?:EMAIL|IPV4|IPV6|HOST|CUSTOM_\d+):[0-9a-f]{12}\b"
 )
 
 
 # A placeholder exactly as minted by SensitiveDataEncryptor._hash_value. encrypt() never
 # matches into these, so a later pattern cannot rewrite part of an earlier placeholder.
-_MINTED_PLACEHOLDER_RE = re.compile(r"\[(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[0-9a-f]{12}\]")
+_MINTED_PLACEHOLDER_RE = re.compile(r"\[(?:EMAIL|IPV4|IPV6|HOST|CUSTOM_\d+):[0-9a-f]{12}\]")
 
 
 # Every token shape decrypt() restores, longest first: full placeholder, bracket-stripped form,
 # bare hash. Bare forms must not touch a letter or digit, so a hash inside a longer token is
 # kept. Unknown tokens are left as-is.
 _DECRYPT_TOKEN_RE = re.compile(
-	r"\[(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[0-9a-f]{12}\]"
-	r"|(?<![0-9A-Za-z])(?:EMAIL|IPV4|HOST|CUSTOM_\d+):[0-9a-f]{12}(?![0-9A-Za-z])"
+	r"\[(?:EMAIL|IPV4|IPV6|HOST|CUSTOM_\d+):[0-9a-f]{12}\]"
+	r"|(?<![0-9A-Za-z])(?:EMAIL|IPV4|IPV6|HOST|CUSTOM_\d+):[0-9a-f]{12}(?![0-9A-Za-z])"
 	r"|(?<![0-9A-Za-z])[0-9a-f]{12}(?![0-9A-Za-z])"
 )
 
@@ -155,6 +175,8 @@ class SensitiveDataEncryptor:
 			if not original:
 				return original
 			if pii_type == "host" and _is_hash_filename(original):
+				return original
+			if pii_type == "ipv6" and not _is_ipv6(original):
 				return original
 			return self._hash_value(original, pii_type)
 
