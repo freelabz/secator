@@ -1395,6 +1395,9 @@ class ai(PythonRunner):
 		self.async_tasks = self.get_opt_value("async_tasks")
 		self.dangerous = self.get_opt_value("dangerous")
 		self.isolated = self.get_opt_value("isolated")
+		# Per-run extra tools (names or globs), merged with CONFIG.addons.ai.extra_tools by
+		# build_tool_schemas.
+		self.extra_tools = self.get_opt_value("extra_tools")
 		self.in_scope = self.get_opt_value("in_scope") or []
 		self.out_of_scope = self.get_opt_value("out_of_scope") or []
 		# Resolve in-scope hostnames to their current IPs so the AI can reach an

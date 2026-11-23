@@ -462,6 +462,21 @@ class TestExtraToolsConfigSetEndToEnd(unittest.TestCase):
 		names = [s["function"]["name"] for s in build_tool_schemas("chat", extra_tools="foo_a,foo_*")]
 		self.assertEqual([n for n in names if n.startswith("foo_")], ["foo_a", "foo_b"])
 
+	def test_ai_task_binds_per_run_extra_tools(self):
+		"""The `ai` task's --extra-tools value reaches the tool list it builds."""
+		import contextlib
+		from unittest import mock
+		from secator.ai.tools import build_tool_schemas
+		from secator.tasks.ai import ai
+		task = ai(["hi"], extra_tools="foo_a,foo_*", sync=True)
+		with contextlib.ExitStack() as stack:
+			for target in ("PermissionEngine", "create_backend", "SensitiveDataEncryptor"):
+				stack.enter_context(mock.patch(f"secator.tasks.ai.{target}"))
+			task._init_options()
+		self.assertEqual(task.extra_tools, "foo_a,foo_*")
+		names = [s["function"]["name"] for s in build_tool_schemas("chat", extra_tools=task.extra_tools)]
+		self.assertEqual([n for n in names if n.startswith("foo_")], ["foo_a", "foo_b"])
+
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], "ai addon not installed")
 class TestCustomToolReusesExtensions(unittest.TestCase):
