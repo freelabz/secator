@@ -59,7 +59,11 @@ class _PoolWorker:
 		self.proc = subprocess.Popen(cmd, env=env, cwd=self.tmp, stdout=self.log, stderr=subprocess.STDOUT)
 
 	def client(self):
-		opts = {'data_folder_in': str(self.broker_dir), 'data_folder_out': str(self.broker_dir)}
+		opts = {
+			'data_folder_in': str(self.broker_dir),
+			'data_folder_out': str(self.broker_dir),
+			'control_folder': str(self.broker_dir),
+		}
 		client = Celery(broker='filesystem://', backend=f'file://{self.results_dir}')
 		client.conf.update(
 			broker_transport_options=opts,
