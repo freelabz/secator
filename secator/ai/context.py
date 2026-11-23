@@ -185,7 +185,11 @@ def _iter_context_files(ctx_dir):
 			dirs[:] = []
 			continue
 		seen_dirs.add(real)
-		dirs[:] = [d for d in dirs if not d.startswith('.')]
+		# Sorted (real folders before symlinked ones) so the spelling kept for a folder
+		# reachable through a symlink is deterministic.
+		dirs[:] = sorted(
+			(d for d in dirs if not d.startswith('.')),
+			key=lambda d: (os.path.islink(os.path.join(root, d)), d))
 		for name in files:
 			if name.startswith('.') or not name.endswith('.md'):
 				continue
@@ -196,14 +200,18 @@ def _iter_context_files(ctx_dir):
 	return sorted(found, key=lambda item: item[0])
 
 
-def _resolve_includes(includes, rel_paths, ctx_dir):
+def _resolve_includes(includes, files, ctx_dir):
 	"""Map profile ``ai_context`` entries to relative paths of context files.
 
 	Each entry matches by relative path first (so a bare name picks the top-level
-	file), then by file name when exactly one file has that name. Absolute paths
-	inside the context folder are made relative. Ambiguous or unknown entries are
-	warned about and skipped.
+	file), then by file name when exactly one file has that name. An absolute path
+	is matched against the real path of each discovered file (so it works through
+	symlinked folders). Ambiguous or unknown entries are warned about and skipped.
 	"""
+	rel_paths = {rel for rel, _ in files}
+	by_real = {}
+	for rel, path in files:
+		by_real.setdefault(os.path.realpath(path), rel)
 	resolved = set()
 	by_name = {}
 	for rel in sorted(rel_paths):
@@ -213,11 +221,9 @@ def _resolve_includes(includes, rel_paths, ctx_dir):
 			continue
 		inc = inc.strip().replace('\\', '/')
 		path = Path(inc).expanduser()
-		if path.is_absolute():
-			try:
-				inc = path.resolve().relative_to(Path(ctx_dir).resolve()).as_posix()
-			except (ValueError, OSError):
-				pass
+		if path.is_absolute() and os.path.realpath(path) in by_real:
+			resolved.add(by_real[os.path.realpath(path)])
+			continue
 		rel = PurePosixPath(inc).as_posix()  # also drops a leading './'
 		if rel in rel_paths:
 			resolved.add(rel)
@@ -255,7 +261,7 @@ def load_context_blocks(mode, workspace_name=None, workspace_id=None, includes=N
 	if not ctx_dir.is_dir():
 		return []
 	files = _iter_context_files(ctx_dir)
-	forced_paths = _resolve_includes(includes, {rel for rel, _ in files}, ctx_dir)
+	forced_paths = _resolve_includes(includes, files, ctx_dir)
 	blocks = []
 	for rel, path in files:
 		parsed = _parse(path, rel)

@@ -1,4 +1,5 @@
 """Tests for `ai --show-prompt`: the rendered system prompt goes to stdout verbatim."""
+import re
 from unittest.mock import patch
 
 import pytest
@@ -12,6 +13,11 @@ PROMPT = (
 	'<persona>\n[scan] keep [bold]this[/bold] and [/x] as-is :warning:\n</persona>\n'
 	+ 'x' * 300 + '\n<rule:rules/a.md>\nbody with ```code``` fences\n</rule>'
 )
+
+
+def _plain(text):
+	"""Drop ANSI styling (the stderr header may be colored when color is forced)."""
+	return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
 
 def _run(run_opts, prompt=PROMPT, credential_error=None):
@@ -38,7 +44,7 @@ def test_show_prompt_writes_raw_prompt_to_stdout(capfd):
 	results, seen = _run({'mode': 'chat'})
 	out, err = capfd.readouterr()
 	assert out == PROMPT + '\n'
-	assert 'System prompt (chat)' in err
+	assert 'System prompt (chat)' in _plain(err)
 	assert 'System prompt' not in out
 	assert seen['mode'] == 'chat'
 	assert not [r for r in results if r._type == 'error']
@@ -48,7 +54,7 @@ def test_show_prompt_defaults_to_scan_mode(capfd):
 	_, seen = _run({})
 	out, err = capfd.readouterr()
 	assert seen['mode'] == 'scan'
-	assert 'System prompt (scan)' in err
+	assert 'System prompt (scan)' in _plain(err)
 	assert out == PROMPT + '\n'
 
 
@@ -60,7 +66,7 @@ def test_show_prompt_renders_real_chat_and_scan_prompts(capfd):
 		out, err = capfd.readouterr()
 		assert marker in out
 		assert out.startswith('<current_mode>')
-		assert f'System prompt ({mode})' in err
+		assert f'System prompt ({mode})' in _plain(err)
 
 
 def test_show_prompt_needs_no_llm_credentials(capfd):

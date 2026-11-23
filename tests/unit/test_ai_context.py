@@ -345,3 +345,14 @@ def test_nested_file_warnings_use_relative_path(ctx_dir):
 	with console.capture() as cap:
 		assert _load('scan') == []
 	assert 'rules/bad.md' in cap.get()
+
+
+def test_symlinked_folder_label_and_absolute_include(ctx_dir):
+	_write_at(ctx_dir, 'real/x.md', '---\nmodes: exploit\n---\nreal x')
+	_write_at(ctx_dir, 'other/x.md', '---\nmodes: exploit\n---\nother x')
+	(ctx_dir / 'alias').symlink_to(ctx_dir / 'real', target_is_directory=True)
+	# the real folder wins over the symlinked spelling, and the file loads once
+	assert _raw('exploit')[1].startswith('<context:real/x.md>')
+	assert len(_raw('exploit')) == 2
+	# an absolute include through the symlink resolves to the discovered file
+	assert _load('scan', includes=[str(ctx_dir / 'alias' / 'x.md')]) == ['real x']
