@@ -32,7 +32,7 @@ from secator.ai.session import (
 	print_session_results)
 from secator.ai.utils import (
 	call_llm, init_llm, setup_ai, format_llm_status, parse_text_tool_calls,
-	_decrypt_dict, _build_action_display,
+	_decrypt_dict, _build_action_display, TOOL_ACK_RESULT,
 )
 
 
@@ -246,6 +246,32 @@ def _yield_tool_results(runner, collected):
 		         ai_type="tool_result",
 		         message=cap_message(_tool_msg),
 		         extra_data={"runner_id": runner_id, "runner_type": runner_type},
+		         _context=dict(runner.context))
+
+
+def _ack_resultless_calls(runner, actions, collected):
+	"""Record an acknowledged tool result for each dispatched call that produced none.
+
+	Some tools finish without an item the agent loop turns into a tool result (their only
+	output is a display item, e.g. ``update_plan``). Give each such call an explicit
+	acknowledged result in history, and yield it so the driver persists it too. Every
+	dispatched call then has a recorded result, so a restored transcript tells a call that
+	ran apart from one that was interrupted before it returned (which the history repair
+	answers with a "not run" result instead). ``stop`` is skipped: it ends the turn and the
+	user's answer follows it directly.
+	"""
+	answered = {(r.get("_context") or {}).get("tool_call_id") for r in collected if isinstance(r, dict)}
+	for action in actions:
+		tc_id = action.get("tool_call_id")
+		tc_name = action.get("tool_call_name") or ""
+		if not tc_id or tc_id in answered or tc_name == "stop":
+			continue
+		answered.add(tc_id)
+		content = maybe_encrypt(TOOL_ACK_RESULT, runner.encryptor)
+		runner.history.add_tool_result(tc_name, tc_id, content)
+		yield Ai(content=f"[{tc_name}] done",
+		         ai_type="tool_result",
+		         message=cap_message({"role": "tool", "tool_call_id": tc_id, "name": tc_name, "content": content}),
 		         _context=dict(runner.context))
 
 
@@ -1061,6 +1087,14 @@ class ai(PythonRunner):
 						"context_window": get_context_window(self.model),
 					})
 
+				# Persist the placeholder map BEFORE the call: the prompt (and any steer or
+				# answer drained above) was encrypted into it, and the call can take minutes.
+				# Persisting only after the turn's tool dispatch left the stored map empty
+				# while the first call ran, so a reader of the session's map saw "nothing
+				# encrypted" even though the model only received placeholders. No-op unless
+				# the map grew.
+				self._persist_pii_map()
+
 				# Call LLM
 				messages = self.history.to_messages(max_tokens_total=self.max_tokens_total)
 				by_role = self.history.count_tokens_by_role(self.model)
@@ -1441,6 +1475,11 @@ class ai(PythonRunner):
 		self._sync = False if self.async_tasks else self.sync
 		self.history = ChatHistory()
 		self.encryptor = SensitiveDataEncryptor() if self.sensitive else None
+		if self.interactive == "tui":
+			# the TUI's /model-view renders this history read-only (display only)
+			tui = get_tui()
+			if tui is not None and hasattr(tui, "tui_set_model_source"):
+				tui.tui_set_model_source(self._model_view_snapshot)
 		self.has_previous_results = len(self.results) > 0
 		self.scope = "current" if self.has_previous_results else "workspace"
 		self.permission_engine = PermissionEngine(
@@ -1565,7 +1604,11 @@ class ai(PythonRunner):
 		else:
 			try:
 				selection_prompt = load_prompt("modes/_selection.md")
-				messages = [{"role": "user", "content": f"{selection_prompt}\n{self.prompt}"}]
+				# The intent model is a model call like any other: send the prompt encrypted.
+				# getattr: a missing encryptor must not raise here (the except below would
+				# silently turn intent detection into "chat").
+				prompt = maybe_encrypt(self.prompt, getattr(self, "encryptor", None))
+				messages = [{"role": "user", "content": f"{selection_prompt}\n{prompt}"}]
 				with maybe_status("[bold orange3]Detecting intent...[/]", spinner="dots"):
 					result = call_llm(messages, self.intent_model, temperature=0.3, api_base=self.api_base, api_key=self.api_key)  # noqa: E501
 				self._account_usage(result.get("usage"))
@@ -1619,6 +1662,17 @@ class ai(PythonRunner):
 	# -------------------------------------------------------------------------
 	# Mid-flight steering
 	# -------------------------------------------------------------------------
+
+	def _model_view_snapshot(self):
+		"""Display-only copy of the model-facing history, for the TUI's model view.
+
+		The history is stored as sent: when the encryptor is on, every message already carries
+		the ``[TYPE:hash]`` placeholders the model received, so the view shows it as is — no
+		re-encryption, no new placeholder, the encryptor's map is never touched. Shallow copies
+		only: the loop keeps mutating the live history on its own thread.
+		"""
+		msgs = [dict(m) for m in list(self.history.messages) if isinstance(m, dict)]
+		return {"messages": msgs, "encrypted": self.encryptor is not None}
 
 	def _report_tui_meta(self, token_count=None, ctx_window=None):
 		"""Report the live guardrail/mode/context state to the TUI meta bar (local only).
@@ -2071,6 +2125,7 @@ class ai(PythonRunner):
 			ctx.results.append(result)
 
 		yield from _yield_tool_results(self, collected)
+		yield from _ack_resultless_calls(self, actions, collected)
 
 		return {
 			"stop_reason": stop_reason,

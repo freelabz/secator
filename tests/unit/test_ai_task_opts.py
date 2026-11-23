@@ -52,6 +52,7 @@ class TestDetectMode(unittest.TestCase):
         t.backend = MagicMock()
         t.is_subagent = False
         t.max_iterations = 10
+        t.encryptor = None
         t._account_usage = MagicMock()
         return t
 
@@ -78,6 +79,24 @@ class TestDetectMode(unittest.TestCase):
 
     def test_llm_unknown_classification_falls_back_to_chat(self):
         self.assertEqual(self._run_detect("take a look at this thing", "banana"), "chat")
+
+    def test_intent_call_receives_encrypted_prompt(self):
+        # The intent model is a provider call like the main loop's: hosts, emails and IPs
+        # in the prompt must reach it as placeholders, never in clear.
+        from secator.ai.encryption import SensitiveDataEncryptor
+        from secator.tasks.ai import ai
+        t = self._make_task("take a look at jenkins.example.com, mail ops@example.org about 10.1.2.3")
+        t.encryptor = SensitiveDataEncryptor()
+        llm = MagicMock(return_value={"content": "chat", "usage": {}})
+        with patch("secator.tasks.ai.call_llm", llm), \
+             patch("secator.tasks.ai.get_system_prompt", return_value="sys"), \
+             patch("secator.tasks.ai.build_tool_schemas", return_value=[]), \
+             patch.object(ai, "reports_folder", "/tmp/ws"):
+            t._detect_mode()
+        sent = llm.call_args[0][0][0]["content"]
+        for value in ("jenkins.example.com", "ops@example.org", "10.1.2.3"):
+            self.assertNotIn(value, sent)
+            self.assertIn(value, t.encryptor.pii_map.values())
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')

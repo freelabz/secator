@@ -24,7 +24,7 @@ from secator.rich import console, console_stdout, live_is_active
 from secator.runners._helpers import get_task_folder_id, run_extractors
 from secator.query import QueryEngine
 from secator.query._stream import StreamView
-from secator.utils import debug, import_dynamic, should_update, autodetect_type, sanitize_folder_name
+from secator.utils import debug, import_dynamic, should_update, autodetect_type, get_workspace_folder_name
 from secator.tree import build_runner_tree, prune_runner_tree
 from secator.loader import get_configs_by_type
 
@@ -559,7 +559,7 @@ class Runner:
 	def reports_folder(self):
 		if self._reports_folder and Path(self._reports_folder).exists():
 			return self._reports_folder
-		workspace_folder = sanitize_folder_name(self.workspace_name)
+		workspace_folder = get_workspace_folder_name(self.workspace_name)
 		_base = f'{CONFIG.dirs.reports}/{workspace_folder}/{self.config.type}s'
 		_id = get_task_folder_id(_base)
 		path = Path(f'{_base}/{_id}')

@@ -219,3 +219,33 @@ class TestPlaceholderMapSurvivesResume(unittest.TestCase):
 		tool_logs = [m for m in logged if m.startswith("[tool_call]")]
 		self.assertTrue(tool_logs)
 		self.assertTrue(all(HOST not in m for m in tool_logs), tool_logs)
+
+	def test_prompt_placeholders_persisted_before_first_llm_call(self):
+		# The map used to be persisted only after a turn's tool dispatch, so while the first
+		# call ran the session's stored map was empty although the model had only received
+		# placeholders: a reader of the stored map saw "nothing encrypted".
+		email, ip = "admin@example.org", "10.0.0.12"
+		events = []
+
+		def _persist(runner_self):
+			events.append(("persist", dict(runner_self.encryptor.pii_map)))
+
+		def llm(messages, *a, **k):
+			events.append(("call", json.dumps(messages)))
+			return {"content": "done", "tool_calls": [], "usage": {}}
+
+		prompt = f"Re-check http://{HOST}:8080 and mail {email} about {ip}"
+		with tempfile.TemporaryDirectory() as tmp, mock.patch.object(CONFIG.dirs, "reports", Path(tmp)):
+			with mock.patch.object(AiTask, "_persist_pii_map", _persist):
+				self._run(_Backend(prompt), llm)
+
+		calls = [i for i, e in enumerate(events) if e[0] == "call"]
+		self.assertTrue(calls)
+		first = calls[0]
+		for value in (HOST, email, ip):
+			self.assertNotIn(value, events[first][1])
+		persisted = {}
+		for kind, payload in events[:first]:
+			if kind == "persist":
+				persisted.update(payload)
+		self.assertEqual({HOST, email, ip} - set(persisted.values()), set())
