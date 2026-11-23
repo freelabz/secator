@@ -73,17 +73,29 @@ class TestWorkspaceFolderCompat(unittest.TestCase):
 	def tearDown(self):
 		shutil.rmtree(self.reports, ignore_errors=True)
 
-	def test_new_name_by_default(self):
-		self.assertEqual(get_workspace_folder_name("o'brien", self.reports), 'o_brien')
+	def test_safe_name_unchanged(self):
+		self.assertEqual(get_workspace_folder_name('o_brien', self.reports), 'o_brien')
+
+	def test_unsafe_name_gets_hashed_folder(self):
+		folder = get_workspace_folder_name("o'brien", self.reports)
+		self.assertTrue(SAFE_FOLDER.match(folder), folder)
+		self.assertTrue(folder.startswith('o_brien_'))
+		self.assertEqual(folder, get_workspace_folder_name("o'brien", self.reports))  # stable
+		self.assertNotEqual(folder, get_workspace_folder_name('o"brien', self.reports))
+
+	def test_unsafe_name_never_resolves_to_other_safe_folder(self):
+		(self.reports / 'acme_prod').mkdir()
+		self.assertNotEqual(get_workspace_folder_name('acme+prod', self.reports), 'acme_prod')
 
 	def test_existing_legacy_folder_is_reused(self):
 		(self.reports / "o'brien").mkdir()
+		(self.reports / 'o_brien').mkdir()  # another (safe) workspace
 		self.assertEqual(get_workspace_folder_name("o'brien", self.reports), "o'brien")
+		self.assertEqual(get_workspace_folder_name('o_brien', self.reports), 'o_brien')
 
-	def test_strict_folder_wins_when_both_exist(self):
-		(self.reports / "o'brien").mkdir()
-		(self.reports / 'o_brien').mkdir()
-		self.assertEqual(get_workspace_folder_name("o'brien", self.reports), 'o_brien')
+	def test_legacy_file_is_ignored(self):
+		(self.reports / "o'brien").write_text('')
+		self.assertTrue(get_workspace_folder_name("o'brien", self.reports).startswith('o_brien_'))
 
 
 def _reports_folder(base, name):

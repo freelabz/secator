@@ -1,4 +1,5 @@
 import fcntl
+import hashlib
 import importlib
 import ipaddress
 import itertools
@@ -238,8 +239,12 @@ def sanitize_folder_name(
 def get_workspace_folder_name(name, reports_dir=None):
 	"""Get the reports sub-folder name for a workspace.
 
-	Uses the strict sanitize_folder_name rules. For backwards compatibility, if a folder named with the legacy rules
-	already exists (and the strict one does not), that folder keeps being used so existing reports stay reachable.
+	Names that are already safe map to themselves. A name containing characters outside the sanitize_folder_name
+	allowlist maps to its sanitized form plus a short hash of the original name (e.g. ``o'brien`` -> ``o_brien_<hash>``),
+	so it can never resolve to the folder of another, already-safe name (``o_brien``).
+
+	For backwards compatibility, if the folder created by older versions for this exact name (legacy rules) exists,
+	it keeps being used so existing reports stay reachable; report paths are quoted when passed to commands.
 
 	Args:
 		name (str): Workspace name.
@@ -252,6 +257,12 @@ def get_workspace_folder_name(name, reports_dir=None):
 	legacy = sanitize_folder_name(name, strict=False)
 	if legacy == folder:
 		return folder
+	if reports_dir is None:
+		reports_dir = CONFIG.dirs.reports
+	if (Path(reports_dir).expanduser() / legacy).is_dir():
+		return legacy
+	digest = hashlib.sha256(name.encode('utf-8', 'surrogatepass')).hexdigest()[:8]
+	return f'{folder}_{digest}'
 	if reports_dir is None:
 		reports_dir = CONFIG.dirs.reports
 	base = Path(reports_dir).expanduser()
