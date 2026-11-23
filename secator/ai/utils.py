@@ -209,29 +209,50 @@ def _format_action_error(e: Exception, max_chars: int = 400) -> str:
 	)
 
 
-_HEAVY_PROFILES = {'large', 'extra_large'}
+def _is_heavy_runner(runner_type: str, name: str, opts: dict = None, targets: list = None) -> bool:
+	"""Whether a sub-runner must be dispatched to its own queue instead of running sync
+	in-process inside the ai worker.
 
+	Workflows/scans fan out across multiple pools, so they are always dispatched. An AI
+	subagent stays in-process. A task is dispatched when it is:
 
-def _is_heavy_runner(runner_type: str, name: str, opts: dict = None) -> bool:
-	"""Whether a sub-runner is too heavy to run sync in-process inside the ai worker.
-
-	Workflows/scans fan out across multiple pools, so they should always be
-	dispatched rather than run in-process. A task is heavy if its (possibly
-	opts-dependent) profile maps to a large worker pool (``large``/``extra_large``).
+	- heavy: its queue profile (dynamic profile or ``tasks.overrides.<task>.profile``) is one
+	  of ``addons.ai.dispatch_profiles``;
+	- wide: it would be split into chunks for these targets, or it has more than
+	  ``addons.ai.inline_max_targets`` targets. In-process work then never chunks, and the
+	  chunks run in parallel on the worker pools.
 	"""
 	if runner_type != 'task':
 		return True
+	if name.lower() == 'ai':
+		return False
 	try:
 		cls = Task.get_task_class(name)
 	except Exception:
 		return False
-	profile = getattr(cls, 'profile', 'small')
-	if callable(profile):
-		try:
-			profile = profile(opts or {})  # resolve dynamic profile (mirrors Command.s/si)
-		except Exception:
-			return True  # can't resolve — be conservative and dispatch
-	return profile in _HEAVY_PROFILES
+	count = len(targets or [])
+	if count > CONFIG.addons.ai.inline_max_targets or _would_chunk(cls, count):
+		return True
+	from secator.runners._helpers import resolve_task_queue
+	try:
+		profile = resolve_task_queue(cls, opts or {})
+	except Exception:
+		return True  # can't resolve — be conservative and dispatch
+	return profile in set(CONFIG.addons.ai.dispatch_profiles or [])
+
+
+def _would_chunk(cls, count: int) -> bool:
+	"""Whether a task class would split ``count`` targets into chunks, run sync or async
+	(mirrors ``needs_chunking``): several targets and either no input-file flag (one run per
+	target) or more targets than its ``input_chunk_size``."""
+	if count <= 1:
+		return False
+	overrides = CONFIG.tasks.overrides.get(cls.__name__, {})
+	if hasattr(overrides, 'toDict'):
+		overrides = overrides.toDict()
+	chunk_size = overrides.get('input_chunk_size', getattr(cls, 'input_chunk_size', None))
+	over_chunk_size = bool(chunk_size) and chunk_size != -1 and count > chunk_size
+	return getattr(cls, 'file_flag', None) is None or over_chunk_size
 
 
 # Framework control/security keys the LLM must never set on a spawned sub-runner

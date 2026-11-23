@@ -475,12 +475,15 @@ def _run_runner_steps(action: Dict, ctx: ActionContext, runner_type: str, spawn:
 		run_opts["print_end"] = not ctx.silent and not ctx.subagent
 
 	# A heavy sub-task (e.g. nuclei) must not run sync in the ai task's small worker
-	# pool (OOM risk) — dispatch it async to its own profile's queue when in a worker.
-	if run_opts.get("sync") and _is_heavy_runner(runner_type, name, opts):
+	# pool (OOM risk), and a wide one would chunk in-process — dispatch it async to its own
+	# profile's queue when in a worker (see _is_heavy_runner).
+	dispatched = False
+	if run_opts.get("sync") and _is_heavy_runner(runner_type, name, opts, targets):
 		from secator.celery import IN_WORKER
 		if IN_WORKER:
 			run_opts["sync"] = False
 			run_opts["tty"] = False
+			dispatched = True
 
 	hooks, denial = _child_preamble(ctx, context, runner_type)
 	if denial is not None:
@@ -586,6 +589,16 @@ def _run_runner_steps(action: Dict, ctx: ActionContext, runner_type: str, spawn:
 		yield Ai(content=handback, ai_type="response",
 		         extra_data={"subagent_session_id": sub_session, "usage": usage},
 		         _context={**card_context, "tool_call_id": action.get("tool_call_id")})
+	elif dispatched:
+		# If following the dispatched child ends abnormally (the ai task errors or is stopped
+		# mid-run), revoke the child's Celery tasks so they don't outlive it.
+		completed = False
+		try:
+			yield from runner
+			completed = True
+		finally:
+			if not completed and not runner.done:
+				runner.stop_celery_tasks()
 	else:
 		yield from runner
 
