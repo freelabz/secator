@@ -61,22 +61,35 @@ class QueryBackendError(click.ClickException):
 		self.status_code = status_code
 
 
-def strip_leading_glob(pattern) -> str:
-	"""Drop a leading ``*`` glob from a regex pattern, keeping an inline ``(?i)`` flag in front.
+# Leading inline flag groups (``(?i)``, ``(?is)``, ...), kept in front of a stripped glob.
+_INLINE_FLAGS = re.compile(r'^(?:\(\?[aiLmsux]+\))*')
+
+# ``$options`` flags folded into an inline group: json/sqlite only read the pattern itself.
+_REGEX_OPTION_FLAGS = 'imsx'
+
+
+def strip_leading_glob(pattern):
+	"""Drop a leading ``*`` glob from a regex pattern, keeping leading inline flags (``(?i)``) in front.
 
 	``~= *foo`` is a common shell-glob habit, but a leading ``*`` is an invalid regex ("nothing
 	to repeat"). Since regex matching is unanchored, ``foo`` already means "contains foo".
+	A number becomes its string form; any other non-string pattern (e.g. a compiled regex) is
+	returned unchanged.
 	"""
-	pattern = str(pattern)
-	if pattern.startswith('(?i)'):
-		return '(?i)' + pattern[4:].lstrip('*')
-	return pattern.lstrip('*')
+	if isinstance(pattern, (int, float)):
+		pattern = str(pattern)
+	if not isinstance(pattern, str):
+		return pattern
+	flags = _INLINE_FLAGS.match(pattern).group(0)
+	return flags + pattern[len(flags):].lstrip('*')
 
 
 def normalize_query_operators(query):
 	"""Rewrite query operators into the subset every backend implements identically.
 
 	- ``$regex`` (also under ``$not``): leading glob stripped (see :func:`strip_leading_glob`).
+	- ``$options`` next to a string ``$regex``: folded into an inline flag group (``(?i)``), which
+	  every backend honours (json/sqlite ignore ``$options``).
 	- ``$contains``: rewritten to a case-insensitive ``$regex`` of the escaped value, i.e. a
 	  literal substring match (``%``/``_``/regex metacharacters in the value are literal).
 
@@ -94,6 +107,11 @@ def normalize_query_operators(query):
 			continue
 		else:
 			out[key] = normalize_query_operators(value)
+	if isinstance(out.get('$regex'), str) and isinstance(out.get('$options'), str):
+		flags = ''.join(f for f in _REGEX_OPTION_FLAGS if f in out['$options'])
+		if flags:
+			out['$regex'] = f'(?{flags})' + out['$regex']
+		del out['$options']
 	if '$contains' in query:
 		if '$regex' in query:
 			raise ValueError('Cannot combine $contains and $regex on the same field; use a single $regex.')

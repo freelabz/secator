@@ -6,6 +6,7 @@ simulated by evaluating the forwarded query on a mongomock collection, so the te
 what the driver actually sends.
 """
 import json
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -127,6 +128,9 @@ def _uuids(backend, query):
 	({'_type': 'url', 'url': {'$contains': '100%_'}}, ['u3']),
 	({'_type': 'url', 'url': {'$contains': '.js'}}, ['u2']),
 	({'$or': [{'url': {'$contains': 'app.JS'}}, {'url': {'$regex': '*login'}}]}, ['u1', 'u2']),
+	# $options flags apply on every driver (folded into an inline group).
+	({'_type': 'url', 'url': {'$regex': 'ADMIN', '$options': 'i'}}, ['u1']),
+	({'_type': 'url', 'url': {'$regex': '(?s)*admin', '$options': 'i'}}, ['u1']),
 ])
 def test_search_parity(backends, driver, query, expected):
 	backend = getattr(backends, driver)()
@@ -161,3 +165,16 @@ def test_strip_leading_glob():
 	assert strip_leading_glob('*foo') == 'foo'
 	assert strip_leading_glob('(?i)**foo') == '(?i)foo'
 	assert strip_leading_glob('fo*o') == 'fo*o'
+	assert strip_leading_glob('(?is)*foo') == '(?is)foo'
+	assert strip_leading_glob('(?s)(?i)*foo') == '(?s)(?i)foo'
+	assert strip_leading_glob(404) == '404'
+	pattern = re.compile('x')
+	assert strip_leading_glob(pattern) is pattern
+
+
+def test_normalize_regex_options():
+	assert normalize_query_operators({'a': {'$regex': 'x', '$options': 'si'}}) == {'a': {'$regex': '(?is)x'}}
+	assert normalize_query_operators({'a': {'$not': {'$regex': '*x', '$options': 'i'}}}) == {
+		'a': {'$not': {'$regex': '(?i)x'}}}
+	# Flags no backend reads inline are dropped.
+	assert normalize_query_operators({'a': {'$regex': 'x', '$options': 'u'}}) == {'a': {'$regex': 'x'}}

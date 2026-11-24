@@ -114,3 +114,20 @@ class TestAiToolsRepeatOnMongo(unittest.TestCase):
 	def test_unknown_uuid_is_reported(self):
 		out = self._run('mark_vuln_fixed', {'_uuid': str(ObjectId()), 'reason': 'x'})
 		self.assertTrue(any('No vulnerability found' in m for m in self._errors(out)))
+
+	def test_enrich_failure_still_rolls_up_the_attempt(self):
+		# The attempt is recorded before the enrichment update: a failed enrichment is reported
+		# but must not skip deriving the vuln's status from that attempt.
+		module = 'secator.ai.tools.findings'
+		cases = [
+			('mark_vuln_exploited', {'poc': 'curl -s http://127.0.0.1/', 'remediation': 'patch it'}),
+			('mark_vuln_exploit_failed', {'verdict': 'failed', 'reason': 'blocked', 'remediation': 'patch it'}),
+		]
+		for name, args in cases:
+			with self.subTest(tool=name):
+				uuid = self._insert(_vuln())
+				enrich = mock.patch(f'{module}._scoped_vuln_update', return_value=(None, None, None, 'enrich failed'))
+				with enrich, mock.patch(f'{module}._recompute_vuln_rollup', return_value=None) as rollup:
+					out = self._run(name, {'_uuid': uuid, **args})
+				self.assertIn('enrich failed', self._errors(out))
+				rollup.assert_called_once()

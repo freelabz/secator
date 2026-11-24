@@ -213,7 +213,7 @@ def _recompute_vuln_rollup(ctx: ActionContext, vuln_name: str, vuln_id: str, mat
 		else:
 			return cur or None
 		update = {"status": status, "verified": verified, "poc": poc, "extra_data.exploit_attempts": counts}
-		# engine.update is update_one, so apply the $set to each occurrence by its own _uuid (point ops).
+		# Apply the $set to each occurrence by its own _uuid (point ops), so each one is addressed explicitly.
 		primary = None
 		for v in occurrences:
 			vu = v.get("_uuid")
@@ -1119,11 +1119,11 @@ class MarkVulnExploited(BaseTool):
 			try:
 				_, _, _, err = _scoped_vuln_update(ctx, uuid, vuln_update)
 			except Exception as e:
-				yield Error(message=f"Failed to enrich vulnerability: {e}", _context=context)
-				return
+				err = f"Failed to enrich vulnerability: {e}"
+			# The attempt is already recorded: report the enrichment failure but still derive the
+			# vuln's status from it below.
 			if err:
 				yield Error(message=err, _context=context)
-				return
 
 		# Derive the vuln's status/verified/poc from ALL its attempts (success sticky).
 		try:
@@ -1269,11 +1269,11 @@ class MarkVulnExploitFailed(BaseTool):
 			try:
 				_, _, _, err = _scoped_vuln_update(ctx, uuid, vuln_update)
 			except Exception as e:
-				yield Error(message=f"Failed to enrich vulnerability: {e}", _context=context)
-				return
+				err = f"Failed to enrich vulnerability: {e}"
+			# The attempt is already recorded: report the enrichment failure but still derive the
+			# vuln's status from it below.
 			if err:
 				yield Error(message=err, _context=context)
-				return
 
 		try:
 			updated = _recompute_vuln_rollup(
