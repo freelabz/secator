@@ -12,6 +12,7 @@ from secator.query._base import QueryBackend, sort_runners_chronologically, vali
 from secator.config import CONFIG
 from secator.utils import get_workspace_folder_name
 from secator.utils import debug
+from secator.query._base import strip_leading_glob
 
 
 def resolve_local_report_paths(report_query, workspace_name):
@@ -55,12 +56,7 @@ def resolve_local_report_paths(report_query, workspace_name):
 def _regex_match(field, pattern):
 	if field is None:
 		return False
-	pattern = str(pattern)
-	# Strip the leading-glob convention, honoring an inline (?i) case-insensitivity flag.
-	if pattern.startswith('(?i)'):
-		pattern = '(?i)' + pattern[4:].lstrip('*')
-	else:
-		pattern = pattern.lstrip('*')
+	pattern = strip_leading_glob(pattern)
 	try:
 		return re.search(pattern, str(field)) is not None
 	except re.error:
@@ -69,7 +65,9 @@ def _regex_match(field, pattern):
 
 OPERATORS = {
 	"$regex": _regex_match,
-	"$contains": lambda field, value: value in str(field) if field else False,
+	# Backend queries reach here with $contains already rewritten to an escaped (?i) $regex
+	# (QueryBackend._merge_query); kept, with the same case-insensitive semantics, for direct callers.
+	"$contains": lambda field, value: str(value).lower() in str(field).lower() if field else False,
 	"$in": lambda field, values: field in values if field else False,
 	"$nin": lambda field, values: field not in values if field else False,
 	"$gt": lambda field, value: field > value if field is not None else False,
@@ -259,10 +257,14 @@ class JsonBackend(QueryBackend):
 		self.reports_dir = Path(reports_dir).expanduser()
 
 	def get_base_query(self) -> dict:
-		"""No base query needed for JSON - workspace filtering is done by directory."""
-		# Don't filter by _context fields since local JSON files may not have them
-		# Workspace filtering is implicit (we only load from the workspace directory)
-		return {}
+		"""Base query for JSON: the display filters only.
+
+		Workspace filtering is implicit (we only load from the workspace directory), and local
+		JSON records may not carry ``_context.workspace_id``, so it is not part of the query. The
+		false-positive filter is, like on every other backend (``scope_only`` reads and updates
+		drop it).
+		"""
+		return {'is_false_positive': {'$ne': True}}
 
 	def _get_workspace_path(self) -> Path:
 		"""Get path to workspace reports directory."""

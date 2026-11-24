@@ -7,7 +7,7 @@ from secator.scope import as_scope_list, host_in_scope, resolve_scope_hostnames,
 
 
 class TestScopeMatcher(unittest.TestCase):
-	"""Semantics must mirror the platform (secator-api) mandate scope matcher."""
+	"""Semantics of the core scope matcher."""
 
 	# --- host / wildcard --------------------------------------------------
 
@@ -228,8 +228,7 @@ class TestUnderscoreHostnameScope(unittest.TestCase):
 
 class TestPathScopedCarveOut(unittest.TestCase):
 	"""A path-scoped in-scope entry (host/path) carves a sub-tree out of a broader
-	host-level deny. Deny wins at equal/greater path specificity. Mirrors the
-	secator-api mandate matcher.
+	host-level deny. Deny wins at equal/greater path specificity.
 	"""
 
 	# The launchdarkly repro: docs path allowed, apex denied.
@@ -279,7 +278,7 @@ class TestPathScopedCarveOut(unittest.TestCase):
 class TestUrlVsHostGrant(unittest.TestCase):
 	"""A URL (web-app) grant authorizes only web targets at its host/IP, never a bare
 	host/IP port scan (shared-hosting: the address isn't yours). A host/IP grant is a
-	superset and authorizes both. Mirrors the secator-api mandate matcher.
+	superset and authorizes both.
 	"""
 
 	URL = ['https://xss-game.appspot.com']
@@ -374,7 +373,7 @@ class TestUrlVsHostGrant(unittest.TestCase):
 
 
 class TestCanonicalizeScopeEntry(unittest.TestCase):
-    """The single scope-entry normaliser shared by the worker and the platform gate."""
+    """The single scope-entry normaliser shared by every scope check."""
 
     def test_url_values_become_url_entries(self):
         from secator.scope import canonicalize_scope_entry as c

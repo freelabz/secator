@@ -2,7 +2,7 @@
 
 Locks the DECISION CONTRACT down: for every (mode, isolated, action, scope) cell we
 assert the VERDICT, the PROMPT COUNT and the BACKEND-CALL COUNT — not just "allowed
-or not". Two named regressions reproduce the canary root causes:
+or not". Two named regressions reproduce previously observed root causes:
 
 - test_regression_isolated_compound_command_no_spin — RC1: isolated + an unparseable
 compound shell command must resolve to allow in ONE round with zero prompts (was: a
@@ -263,11 +263,11 @@ class TestFollowUpNotSuppressedByIsolation(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_AI, "ai addon required")
-class TestCanaryRegressions(unittest.TestCase):
+class TestObservedRegressions(unittest.TestCase):
 
 	def test_regression_isolated_compound_command_no_spin(self):
 		"""RC1: a compound `for..do..done` command the shell parser cannot parse (the
-		canary condition — here an unparseable for-loop, so _parse_subcommands -> [] and
+		original condition — here an unparseable for-loop, so _parse_subcommands -> [] and
 		no target is extracted), isolated -> allow, 0 prompts, no 5-round spin-deny."""
 		from secator.ai.guardrails import _parse_subcommands, extract_command_targets
 		cmd = 'for dir in a b c; do curl $dir; done "x'  # unbalanced quote -> unparseable for-loop

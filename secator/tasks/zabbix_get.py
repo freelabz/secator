@@ -58,7 +58,7 @@ class zabbix_get(Command):
 		'apt': ['wget', 'ca-certificates', 'gzip'],
 	}
 	# zabbix-get is not in the Debian/Ubuntu default repos, and registering the Zabbix
-	# apt repo would need `dpkg -i` + `apt-get update` -- neither is in the platform
+	# apt repo would need `dpkg -i` + `apt-get update` -- neither is in the secator
 	# Docker images' NOPASSWD sudoers allowlist (only `apt install *` is). So instead we
 	# resolve the exact zabbix-get .deb from the Zabbix repo's Packages index and
 	# `apt install` it directly: its deps (libc6/libssl3/...) come from the already-updated

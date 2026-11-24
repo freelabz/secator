@@ -14,6 +14,7 @@ from secator.config import CONFIG
 from secator.output_types import OUTPUT_TYPES, is_output_type
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug
+from secator.query._base import strip_leading_glob
 from secator.hooks._dedup import compute_duplicate_updates
 
 _conns = {}
@@ -31,7 +32,7 @@ def _regexp(pattern, value):
 	"""Custom REGEXP function: X REGEXP Y -> regexp(Y, X), so pattern=Y, value=X."""
 	if value is None or pattern is None:
 		return False
-	pattern = str(pattern).lstrip('*')
+	pattern = strip_leading_glob(pattern)
 	try:
 		return re.search(pattern, str(value)) is not None
 	except re.error as exc:

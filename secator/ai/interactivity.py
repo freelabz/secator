@@ -321,7 +321,7 @@ class RemoteBackend(InteractivityBackend):
 		# Consume EXACTLY the docs we fetched (by _uuid), not the broad pending filter: a steer
 		# that arrives between the search and this update would otherwise be flipped to consumed
 		# without ever being injected (lost). Scoping to the fetched uuids also makes every
-		# backend consume the same set (MongoDB update_one vs JSON/SQLite update_many).
+		# backend consume the same set.
 		try:
 			if uuids:
 				self.query_engine.update(

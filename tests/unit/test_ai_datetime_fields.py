@@ -157,12 +157,11 @@ class _FakeFindings:
 	def find(self, query, projection=None):
 		return _FakeCursor(copy.deepcopy(d) for d in self.docs if match_query(d, query))
 
-	def update_one(self, query, update):
-		for d in self.docs:
-			if match_query(d, query):
-				_apply_set(d, update['$set'])
-				return MagicMock(matched_count=1, modified_count=1)
-		return MagicMock(matched_count=0, modified_count=0)
+	def update_many(self, query, update):
+		matched = [d for d in self.docs if match_query(d, query)]
+		for d in matched:
+			_apply_set(d, update['$set'])
+		return MagicMock(matched_count=len(matched))
 
 
 def _task_cert():
