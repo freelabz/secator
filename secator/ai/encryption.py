@@ -5,9 +5,97 @@ import ipaddress
 import re
 from typing import Dict, List, Optional
 
-# PII patterns - order matters (specific before general)
+# Key names whose value is a credential in ``key=value`` / ``key: value`` pairs. The key may
+# carry a prefix (``db_password``, ``client_secret``, ``AWS_SECRET_ACCESS_KEY``, camelCase
+# ``accessToken``) but must END with one of these, so ``token_type`` or ``password_policy`` are
+# not matched. The match starts at the key word itself (no prefix scan), which keeps it linear.
+_KV_PASSWORD_KEYS = r"(?:password|passwd)"
+_KV_SECRET_KEYS = r"(?:secret[_-]?key|secret|token|api[_-]?key|access[_-]?key)"
+# Key start: not inside a word, or a camelCase hump (``dbPassword``, ``clientSecret``).
+_KV_START = r"(?:(?<![A-Za-z0-9])|(?-i:(?<=[a-z])(?=[A-Z])))"
+# A quoted value, honouring backslash escapes; the closing quote must match the opening one.
+_KV_QUOTED = r"(?:\"(?P<{0}>(?:[^\"\\\r\n]|\\.)+)\"|'(?P<{1}>(?:[^'\\\r\n]|\\.)+)')"
+
+
+# Short password labels, ``key=value`` form only (``user=x&pass=y``, ``mysql_pwd=x``). The bare
+# upper-case ``PWD`` is the shell's working directory in env dumps (``PWD=/home/user``), so
+# ``PWD`` only counts with a prefix (``MYSQL_PWD``, ``DB_PWD``); ``pwd`` / ``Pwd`` always count.
+_KV_PASSWORD_EQ_KEYS = r"(?:pass|(?-i:pwd|Pwd|(?<=_)PWD))"
+
+
+def _kv_pattern(keys: str, eq_only_keys: Optional[str] = None) -> re.Pattern:
+	"""Build a ``key=value`` / ``key: value`` pattern; the value is one of the groups ``v1``..``v9``.
+
+	``eq_only_keys`` are matched in the ``key=value`` form only (labels too short or common to
+	trust after a colon, e.g. ``pass: 3 tests``).
+	"""
+	def _eq(a, b, c):
+		# key=value (query strings, env files, CLI flags); `==` is a comparison, not a value
+		return (r"[ \t]*=(?!=)[ \t]*(?:" + _KV_QUOTED.format(a, b)
+			+ r"|(?P<" + c + r">[^\s\"'&;,<>=][^\s\"'&;<>]*))")
+	body = (
+		keys + r"(?:" + _eq("v1", "v2", "v3")
+		# key: value / "key": "value" (JSON, YAML, headers, tool output like `login: x password: y`).
+		# A bare 12-hex value is a bracket-stripped placeholder hash, never re-encrypted.
+		+ r"|[\"']?[ \t]*:[ \t]*(?:" + _KV_QUOTED.format("v4", "v5")
+		+ r"|(?![0-9a-f]{12}(?![0-9A-Za-z]))(?P<v6>[^\s\"'&;,<>]+))"
+		r")"
+	)
+	if eq_only_keys:
+		body = r"(?:" + body + r"|" + eq_only_keys + _eq("v7", "v8", "v9") + r")"
+	return re.compile(_KV_START + body, re.IGNORECASE)
+
+
+# PII patterns - order matters (specific before general): each pass skips the placeholders
+# of earlier ones. Secrets and URL credentials run before email/ip/host, so a token holding
+# dots (JWT) or a ``user:pass@host`` URL is never split by the host or email rule.
+# A built-in pattern with named groups ``v``/``v1``... encrypts only the group that matched (the
+# key name or header stays readable); otherwise the whole match is encrypted.
 PII_PATTERNS = {
-	"email": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
+	# PEM / PGP private key blocks: the body is encrypted, the BEGIN/END lines stay readable. The
+	# body stops at the next `-----` (so a scan can't run past it) and needs no END line, so a
+	# block cut short by truncation is still encrypted.
+	"private_key": re.compile(
+		r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?P<v>(?:[^-]|-(?!----)){16,16384})"
+	),
+	# Authorization / Proxy-Authorization header values, with or without a scheme (Bearer, Basic,
+	# ...): the rest of the header up to the end of line or closing quote.
+	"auth_header": re.compile(
+		r"\bauthorization[\"']?[ \t]*[:=][ \t]*[\"']?(?:(?:bearer|basic|token|negotiate|ntlm)[ \t]+)?"
+		r"(?P<v>[^\s\"'](?:[^\r\n\"']*[^\s\"'])?)",
+		re.IGNORECASE,
+	),
+	# Password in a URL userinfo: scheme://[user]:PASS@host (an `@` in the password is kept with
+	# it). The user stays readable; the host is left to the host rule.
+	"url_password": re.compile(
+		r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@?#\"'<>]*:(?P<v>[^\s/?#\"'<>]+)@"
+	),
+	# Well-known API key / token formats. Fixed prefixes only, so hashes, UUIDs and random
+	# base64 blobs are never matched.
+	"token": re.compile(
+		r"(?<![A-Za-z0-9_-])(?:"
+		r"(?:AKIA|ASIA)[0-9A-Z]{16}"                   # AWS access key id
+		r"|gh[opsur]_[A-Za-z0-9]{36,}"                  # GitHub tokens
+		r"|github_pat_[A-Za-z0-9_]{22,}"                # GitHub fine-grained PAT
+		r"|xox[abeprs]-[A-Za-z0-9-]{10,}"               # Slack (incl. xoxe- refresh tokens)
+		r"|xoxe\.xox[bp]-[A-Za-z0-9-]{10,}"             # Slack rotating tokens
+		r"|gl(?:pat|dt|rt|ptt)-[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]+)*"  # GitLab (PAT, deploy, runner, trigger)
+		r"|npm_[A-Za-z0-9]{36}"                         # npm access token
+		r"|sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}"  # OpenAI project / service / admin keys
+		r"|sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}"   # OpenAI legacy key (fixed marker)
+		r"|sk-[A-Za-z0-9]{48}"                          # OpenAI legacy key (exactly 48 chars)
+		r"|sk-ant-[a-z]+[0-9]{2}-[A-Za-z0-9_-]{20,}"    # Anthropic keys
+		r"|AIza[0-9A-Za-z_-]{35}"                       # Google API key
+		r"|(?:sk|rk)_live_[0-9A-Za-z]{10,}"             # Stripe live keys
+		r"|eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*"  # JWT (incl. unsigned)
+		r")(?![A-Za-z0-9_-])"
+	),
+	"kv_password": _kv_pattern(_KV_PASSWORD_KEYS, _KV_PASSWORD_EQ_KEYS),
+	"kv_secret": _kv_pattern(_KV_SECRET_KEYS),
+	# Starts only at the beginning of a run of local-part chars (not at every \b inside it), so a
+	# long run with no ``@`` is scanned once instead of once per word boundary. Leading
+	# punctuation is trimmed from the match before encryption.
+	"email": re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
 	# IPv6 candidates (incl. compressed `::` and IPv4-embedded forms); each match is checked
 	# with ipaddress before it is encrypted, so times, MACs and the like are left alone.
 	# Runs before ipv4 so `::ffff:10.0.0.1` is encrypted whole.
@@ -22,6 +110,17 @@ PII_PATTERNS = {
 	"host": re.compile(
 		r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b"
 	),
+}
+
+# Placeholder type minted for each pattern (default: the pattern name). Kept to a few types
+# so the model can still tell a password from another secret.
+PII_TYPES = {
+	"private_key": "secret",
+	"auth_header": "secret",
+	"url_password": "password",
+	"token": "secret",
+	"kv_password": "password",
+	"kv_secret": "secret",
 }
 
 # File extensions that are never TLDs — prevents hex hash filenames (e.g. sha1.txt) from
@@ -65,28 +164,37 @@ def _is_hash_filename(hostname: str) -> bool:
 	return False
 
 
+# Placeholder types minted by SensitiveDataEncryptor (built-in PII_TYPES + custom patterns).
+_PH_TYPES = r"(?:EMAIL|IPV4|IPV6|HOST|SECRET|PASSWORD|CUSTOM_\d+)"
+
+
 # A placeholder minted by SensitiveDataEncryptor._hash_value: ``[HOST:1a2b3c4d5e6f]``. Matched
 # loosely (any alphanumeric hash) so a model-garbled token like ``[HOST:shhfurirind]`` is caught
 # too; the bracket-stripped form is only matched with the exact 12-hex hash to avoid false hits.
 _PLACEHOLDER_RE = re.compile(
-	r"\[(?:EMAIL|IPV4|IPV6|HOST|CUSTOM_\d+):[A-Za-z0-9]+\]"
-	r"|\b(?:EMAIL|IPV4|IPV6|HOST|CUSTOM_\d+):[0-9a-f]{12}\b"
+	r"\[" + _PH_TYPES + r":[A-Za-z0-9]+\]"
+	r"|\b" + _PH_TYPES + r":[0-9a-f]{12}\b"
 )
 
 
 # A placeholder exactly as minted by SensitiveDataEncryptor._hash_value. encrypt() never
 # matches into these, so a later pattern cannot rewrite part of an earlier placeholder.
-_MINTED_PLACEHOLDER_RE = re.compile(r"\[(?:EMAIL|IPV4|IPV6|HOST|CUSTOM_\d+):[0-9a-f]{12}\]")
+_MINTED_PLACEHOLDER_RE = re.compile(r"\[" + _PH_TYPES + r":[0-9a-f]{12}\]")
 
 
 # Every token shape decrypt() restores, longest first: full placeholder, bracket-stripped form,
 # bare hash. Bare forms must not touch a letter or digit, so a hash inside a longer token is
 # kept. Unknown tokens are left as-is.
 _DECRYPT_TOKEN_RE = re.compile(
-	r"\[(?:EMAIL|IPV4|IPV6|HOST|CUSTOM_\d+):[0-9a-f]{12}\]"
-	r"|(?<![0-9A-Za-z])(?:EMAIL|IPV4|IPV6|HOST|CUSTOM_\d+):[0-9a-f]{12}(?![0-9A-Za-z])"
+	r"\[" + _PH_TYPES + r":[0-9a-f]{12}\]"
+	r"|(?<![0-9A-Za-z])" + _PH_TYPES + r":[0-9a-f]{12}(?![0-9A-Za-z])"
 	r"|(?<![0-9A-Za-z])[0-9a-f]{12}(?![0-9A-Za-z])"
 )
+
+
+# A secret finding's value shorter than this is not replaced inside other fields (too likely
+# to hit unrelated text); it is still replaced where it is the whole field.
+_MIN_INLINE_SECRET_LEN = 4
 
 
 def find_placeholders(value) -> list:
@@ -170,6 +278,9 @@ class SensitiveDataEncryptor:
 		replaced where it matched in full: ``10.10.0.1`` never rewrites part of ``10.10.0.12``.
 		Placeholders already in ``text`` are left untouched and never matched into.
 		"""
+		value_groups = [] if pii_type not in PII_PATTERNS else [
+			g for g in pattern.groupindex if g == "v" or (g[:1] == "v" and g[1:].isdigit())]
+
 		def _repl(match):
 			original = match.group()
 			if not original:
@@ -178,7 +289,18 @@ class SensitiveDataEncryptor:
 				return original
 			if pii_type == "ipv6" and not _is_ipv6(original):
 				return original
-			return self._hash_value(original, pii_type)
+			if pii_type == "email":
+				value = original.lstrip("._%+-")
+				return original[:len(original) - len(value)] + self._hash_value(value, "email")
+			ph_type = PII_TYPES.get(pii_type, pii_type)
+			if not value_groups:
+				return self._hash_value(original, ph_type)
+			# Encrypt only the value group; the key name / header around it stays readable.
+			group = next((g for g in value_groups if match.group(g)), None)
+			if group is None:
+				return original
+			start, end = match.start(group) - match.start(), match.end(group) - match.start()
+			return original[:start] + self._hash_value(original[start:end], ph_type) + original[end:]
 
 		def _sub_range(start, end):
 			# Match on the full string bounded by pos/endpos (not a slice), so anchors and
@@ -213,6 +335,40 @@ class SensitiveDataEncryptor:
 			result = self._sub_outside_placeholders(result, pattern, pii_type)
 
 		return result
+
+	def encrypt_finding(self, item):
+		"""Encrypt the secret value of a secret finding, whatever its format; return a new item.
+
+		Secret scanners report many secrets with no recognizable prefix (generic API keys,
+		``user:pass`` pairs, matched lines), which the text patterns can't tell from other
+		data. A ``tag`` finding with ``category`` ``secret`` carries the secret in its ``value``,
+		so that value is always replaced by a ``[SECRET:…]`` placeholder, and so is every other
+		occurrence of it in the finding (e.g. the matched line in ``extra_data``). The item is
+		copied, never modified in place. Anything else is returned as-is; the text patterns
+		still run on the serialized result afterwards.
+		"""
+		if not isinstance(item, dict) or item.get("_type") != "tag" or item.get("category") != "secret":
+			return item
+		secret = item.get("value")
+		if not isinstance(secret, str) or not secret.strip():
+			return item
+		placeholder = self._hash_value(secret, "secret")
+
+		def _replace(obj):
+			# Values too short to be specific are only replaced where they are the whole field.
+			if isinstance(obj, str):
+				if obj == secret:
+					return placeholder
+				return obj.replace(secret, placeholder) if len(secret) >= _MIN_INLINE_SECRET_LEN else obj
+			if isinstance(obj, dict):
+				return {k: _replace(v) for k, v in obj.items()}
+			if isinstance(obj, (list, tuple)):
+				return [_replace(v) for v in obj]
+			return obj
+
+		out = {k: (v if k.startswith("_") else _replace(v)) for k, v in item.items()}
+		out["value"] = placeholder
+		return out
 
 	def decrypt(self, text: str) -> str:
 		"""Restore original sensitive values from placeholders.
