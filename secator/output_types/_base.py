@@ -1,7 +1,7 @@
 import logging
 import re
 from functools import lru_cache
-from dataclasses import _MISSING_TYPE, dataclass, fields
+from dataclasses import _MISSING_TYPE, dataclass, field as dataclass_field, fields
 from secator.definitions import DEBUG
 from secator.rich import console
 
@@ -17,7 +17,10 @@ CONFIDENCE_NB = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4, 'un
 class OutputType:
 	_table_fields = []
 	_sort_by = ()
-	_target_fields = []  # fields checked against the run scope (first non-empty wins)
+	# Target rules, a field or a '{host}:{port}' template, first fully-set one wins: gives `target`
+	# (the item's "where", queryable by host/domain/ip) and is checked against the run scope.
+	_target_fields = []
+	target: str = dataclass_field(default='', compare=False, kw_only=True)
 	# Fields to group by (tuple) and the field whose values to aggregate/collect
 	# when the CLI `--group` option is used without an explicit field.
 	_group_by = ()
@@ -26,6 +29,12 @@ class OutputType:
 	@classmethod
 	def fields(cls):
 		return [f.name for f in fields(cls)]
+
+	@classmethod
+	def compute_target(cls, item):
+		"""Target of an item (object or stored dict) from ``_target_fields``, '' when none applies."""
+		from secator.query.utils import group_key_part
+		return group_key_part(item, tuple(cls._target_fields))
 
 	@staticmethod
 	def confidence_to_nb(confidence) -> int:
@@ -45,6 +54,7 @@ class OutputType:
 				setattr(self, k, {**getattr(self, k), **v})
 			else:
 				setattr(self, k, v)
+		self.target = self.compute_target(self)
 
 	def __str__(self):
 		return self.__class__.__name__
@@ -110,6 +120,7 @@ class OutputType:
 		# fields and are skipped. A subclass may still override after super().__post_init__().
 		if hasattr(self, 'confidence') and hasattr(self, 'confidence_nb'):
 			self.confidence_nb = self.confidence_to_nb(getattr(self, 'confidence', None))
+		self.target = self.compute_target(self)
 
 	@classmethod
 	def load(cls, item, output_map={}):
@@ -182,6 +193,8 @@ class OutputType:
 
 	def toDict(self, exclude=[]):
 		data = self.__dict__.copy()
+		if not data.get('target'):
+			data.pop('target', None)
 		if exclude:
 			return {k: v for k, v in data.items() if k not in exclude}
 		return data
@@ -256,7 +269,7 @@ class OutputType:
 		lines = [f"{cls.__name__}("]
 		type_names = {str: 'str', int: 'int', float: 'float', dict: 'dict', list: 'list', bool: 'bool'}
 		for f in fields(cls):
-			if f.name.startswith('_'):
+			if f.name.startswith('_') or f.name == 'target':
 				continue
 			type_name = type_names.get(f.type, str(f.type)) if isinstance(f.type, type) else str(f.type)
 			if not isinstance(f.default, _MISSING_TYPE):

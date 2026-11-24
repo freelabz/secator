@@ -216,6 +216,10 @@ class UpdateFinding(BaseTool):
 			else:
 				yield Error(message="update_finding: nothing to update (pass `fields` and/or `extra_data`).", _context=context)  # noqa: E501
 			return
+		# `target` is derived: recompute it from the updated source fields (e.g. matched_at).
+		target = cls.compute_target({**existing, **update})
+		if target != existing.get("target", ""):
+			update["target"] = target
 
 		engine = ctx.get_query_engine()
 		try:

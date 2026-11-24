@@ -33,7 +33,7 @@ class Port(OutputType):
 
 	_table_fields = [IP, PORT, HOST, CPES, EXTRA_DATA]
 	_sort_by = (PORT, IP)
-	_target_fields = ['ip', 'host']
+	_target_fields = ['{host}:{port}', '{ip}:{port}']
 	# one row per socket, host:port (ip:port when no host is known: an empty host would merge every IP)
 	_group_by = (('{host}:{port}', '{ip}:{port}'),)
 	_group_aggregate = '_source'

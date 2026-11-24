@@ -29,6 +29,7 @@ class UserAccount(OutputType):
 
 	_table_fields = [SITE_NAME, USERNAME, URL]
 	_sort_by = (URL, USERNAME)
+	_target_fields = ['email', 'username']
 	# one row per account: the same username on two sites is two accounts
 	_group_by = (SITE_NAME, (USERNAME, EMAIL))
 	_group_aggregate = '_source'

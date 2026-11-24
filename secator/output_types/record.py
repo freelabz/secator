@@ -28,6 +28,7 @@ class Record(OutputType):
 
 	_table_fields = [NAME, HOST, TYPE]
 	_sort_by = (TYPE, NAME)
+	_target_fields = ['host', 'name']
 	_group_by = (HOST, TYPE, NAME)  # one row per record value (same as its identity)
 	_group_aggregate = '_source'
 
