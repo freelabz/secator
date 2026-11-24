@@ -487,6 +487,21 @@ def render_yaml(data, dump_kwargs=None, **syntax_kwargs):
 	return Syntax(yaml_str, 'yaml', **opts)
 
 
+_ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+
+def strip_ansi(text):
+	"""Remove ANSI escape sequences (colours, cursor moves) from a string.
+
+	Args:
+		text (str): Text.
+
+	Returns:
+		str: Text without ANSI escape sequences.
+	"""
+	return _ANSI_ESCAPE.sub('', text)
+
+
 def rich_to_ansi(text):
 	"""Convert text formatted with rich markup to standard string.
 

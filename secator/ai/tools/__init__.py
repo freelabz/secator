@@ -396,6 +396,25 @@ def coerce_stringified_args(tool_name: str, arguments: dict) -> dict:
 	return arguments
 
 
+def _required_params(tool_name: str) -> list:
+	"""Required parameter names of a tool, from its schema (``stop`` has none)."""
+	schema = STOP_TOOL_SCHEMA if tool_name == "stop" else TOOL_SCHEMAS.get(tool_name, {})
+	return schema.get("function", {}).get("parameters", {}).get("required", [])
+
+
+def tool_call_rejection_reason(tool_name: str, arguments) -> str:
+	"""Say why ``tool_call_to_action`` rejected a call (it returned None), naming the actual problem:
+	an unknown tool, arguments that are not a JSON object, or no arguments for a tool that has
+	required ones."""
+	if tool_name not in TOOL_ACTION_MAP:
+		return f"unknown tool '{tool_name}'"
+	if arguments and not isinstance(arguments, dict):
+		json_type = {list: "array", str: "string", bool: "boolean", int: "number", float: "number"}.get(
+			type(arguments), type(arguments).__name__)
+		return f"arguments must be a JSON object, got a JSON {json_type}"
+	return "empty arguments"
+
+
 def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 	"""Convert a tool call to an action dict compatible with existing action handlers.
 
@@ -413,10 +432,13 @@ def tool_call_to_action(tool_name: str, arguments: dict) -> dict | None:
 		# `stop` ends the turn and carries no required data (its `reason` is optional),
 		# so a bare stop() with empty/no args is VALID and must succeed — otherwise the
 		# empty-args reject below bounces every clean stop as "empty arguments" and the
-		# model falls back into a follow-up nag loop instead of ending. Every other tool
-		# needs arguments, so keep rejecting those. Covers native + text-parsed stop.
+		# model falls back into a follow-up nag loop instead of ending. Covers native +
+		# text-parsed stop.
 		if tool_name == "stop":
 			return {"action": action_type, "description": "stopped"}
+		# Same for any tool whose parameters are all optional (e.g. list_runners()).
+		if not _required_params(tool_name):
+			return {"action": action_type, "description": tool_name}
 		return None
 	# A model may emit non-object arguments (bare JSON int/array/string) -- `.items()`
 	# below would raise and abort the loop, so reject cleanly and let the caller retry.

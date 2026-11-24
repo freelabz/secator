@@ -57,9 +57,6 @@ def test_shell(run_ai, command, expect, status):
 	assert [c['status'] for c in children] == [status]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-	'bug: a failed run_shell command hands the model its console error line with ANSI colour '
-	'codes ("\\x1b[1;31mERR\\x1b[0m ...") appended to the command output'))
 def test_shell_output_has_no_terminal_escapes(run_ai):
 	"""The model reads plain text: no ANSI colour codes in a failed command's output."""
 	run = run_ai('basic_shell_ansi', [
@@ -109,10 +106,6 @@ def test_query_workspace(run_ai, lab):
 	assert all(r.get('_uuid') for r in data['results'])  # the handle mark_vuln_* needs
 
 
-@pytest.mark.xfail(strict=True, reason=(
-	'bug: a query_workspace call that matches nothing is answered with a bare '
-	'{"status":"acknowledged"} (the result-less tool ack), so the model cannot tell "no match" '
-	'from "the tool returned nothing"'))
 def test_query_workspace_no_match(run_ai):
 	run = run_ai('basic_query_none', [
 		tools(call('query_workspace', id='q1', query={'_type': 'url', 'url': 'http://127.0.0.1:1/none'},

@@ -47,7 +47,12 @@ def _report_path(runner):
 	# all write the same report.json and clobber each other's info block. Children write a per-child
 	# report_<fqn>.json instead. (Reading those back for per-task detail — MongoDB parity — is a
 	# parked follow-up; findings still stream to the shared results.ndjson.)
-	if runner.has_parent:
+	# A Task wrapper is the exception: it hands the run (and its on_interval/on_end updates) to the
+	# command it runs, which runs as a top-level runner in the same reports_folder and so writes
+	# report.json. The wrapper writes that same file (its on_init/on_start state, superseded by the
+	# command's), like the other drivers key both on the same runner doc. Writing its own
+	# report_<task>.json would leave a second file at RUNNING forever, with the same task_chunk_id.
+	if runner.has_parent and type(runner) is not Task:
 		return Path(runner.reports_folder) / f'report_{runner.fqn}.json'
 	return Path(runner.reports_folder) / 'report.json'
 
