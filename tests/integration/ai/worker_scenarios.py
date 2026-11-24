@@ -20,9 +20,12 @@ def batch(suffix):
 	"""One turn: an in-process task, a shell and a dispatched workflow, run in parallel."""
 	return [
 		tools(
-			call('run_task', id='inproc', name='httpx', targets=[f'{_lab()}/slow?s=3'], description='In-process'),
-			call('run_shell', id='sh', command='sleep 3; echo worker-shell', description='Shell'),
-			call('run_workflow', id='wf', name=WORKFLOW, targets=[f'{_lab(2)}/slow?s=3'], description='Workflow'),
+			call('run_task', id='inproc', name='httpx', targets=[f'{_lab()}/slow?s=3&id=inproc{suffix}'],
+			     description='In-process'),
+			call('run_shell', id='sh', command=f"curl -s '{_lab()}/slow?s=3&id=sh{suffix}' >/dev/null; echo worker-shell",
+			     description='Shell'),
+			call('run_workflow', id='wf', name=WORKFLOW, targets=[f'{_lab(2)}/slow?s=3&id=wf{suffix}'],
+			     description='Workflow'),
 		),
 		say('done'),
 	]

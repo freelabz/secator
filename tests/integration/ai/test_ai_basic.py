@@ -4,6 +4,9 @@ Every scenario checks what the model was told (the tool result of its call), wha
 persisted (json driver), the child runners' final statuses, and that the run itself ended
 cleanly.
 """
+import json
+from pathlib import Path
+
 import pytest
 
 from tests.integration.ai.conftest import FINAL_STATUSES, install_workflow
@@ -120,6 +123,12 @@ def test_query_workspace_no_match(run_ai):
 	assert data.get('count') == 0, data
 
 
+def _notes():
+	from secator.config import CONFIG
+	return [json.loads(line) for path in Path(CONFIG.dirs.reports).glob('**/notes.ndjson')
+	        for line in path.read_text().splitlines() if line.strip()]
+
+
 def _vuln_uuid(req):
 	"""Pick the vulnerability _uuid out of the last query_workspace result."""
 	for m in reversed(req.tool_messages()):
@@ -139,9 +148,12 @@ MARKS = {
 	              lambda v: v.get('status', '').upper() == 'EXPLOITED'),
 	'exploit_failed': (lambda u: call('mark_vuln_exploit_failed', id='mark', _uuid=u, verdict='inconclusive',
 	                                  reason='bypass did not work'),
-	                   lambda v: True),
+	                   lambda v: ((v.get('extra_data') or {}).get('exploit_failed_reason') == 'bypass did not work'
+	                              and (v['extra_data'].get('exploit_attempts') or {}).get('failed') == 1)),
+	# a note goes to the workspace notes store (keyed by the finding's identity), never on the finding
 	'note': (lambda u: call('add_note', id='mark', _uuid=u, body='Checked by hand.'),
-	         lambda v: True),
+	         lambda v: any(n.get('body') == 'Checked by hand.' and n.get('target_type') == 'vulnerability'
+	                       and v['name'] in json.dumps(n.get('target_key')) for n in _notes())),
 }
 
 
