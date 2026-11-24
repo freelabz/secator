@@ -176,7 +176,7 @@ class TestApiRetries(unittest.TestCase):
 			self._call('PUT', [503])
 		self.assertEqual(len(self.server.calls), 1)
 
-	def test_client_errors_are_not_retried(self):
+	def test_other_server_errors_are_not_retried(self):
 		with self.assertRaises(requests.HTTPError) as cm:
 			self._call('PUT', [500])
 		self.assertEqual(cm.exception.response.status_code, 500)
@@ -208,7 +208,7 @@ class TestApiRetryPolicy(unittest.TestCase):
 
 	def test_policy_comes_from_config(self):
 		retry = api._build_session(retries=5, backoff=2.5).get_adapter('https://x').max_retries
-		self.assertEqual((retry.total, retry.backoff_factor, retry.read), (5, 2.5, 0))
+		self.assertEqual((retry.total, retry.backoff_factor, retry.other), (5, 2.5, 0))
 		session = api._build_session()
 		self.assertIs(session.get_adapter('http://x'), session.get_adapter('https://x'))
 
@@ -218,12 +218,21 @@ class TestApiRetryPolicy(unittest.TestCase):
 		for error in (refused, ConnectTimeoutError('connect timeout'), ProxyError('proxy refused', refused)):
 			self.assertEqual(self.retry.increment('POST', '/runners', error=error).total, 2, error)
 
-	def test_read_errors_are_never_retried(self):
+	def test_read_errors_are_retried_for_idempotent_methods_only(self):
 		from urllib3.exceptions import MaxRetryError, ProtocolError, ReadTimeoutError
+		errors = (ReadTimeoutError(None, '/runners', 'read timeout'), ProtocolError('connection reset'))
+		for error in errors:
+			for method in ('PUT', 'GET'):
+				self.assertEqual(self.retry.increment(method, '/runners', error=error).total, 2, (method, error))
+			with self.assertRaises((MaxRetryError, ReadTimeoutError, ProtocolError)):
+				self.retry.increment('POST', '/runners', error=error)
+
+	def test_tls_errors_are_never_retried(self):
+		import ssl
+		from urllib3.exceptions import MaxRetryError, SSLError
 		for method in ('POST', 'PUT', 'GET'):
-			for error in (ReadTimeoutError(None, '/runners', 'read timeout'), ProtocolError('connection dropped')):
-				with self.assertRaises((MaxRetryError, ReadTimeoutError, ProtocolError)):
-					self.retry.increment(method, '/runners', error=error)
+			with self.assertRaises(MaxRetryError):
+				self.retry.increment(method, '/runners', error=SSLError(ssl.SSLEOFError()))
 
 	def test_post_status_retry_is_503_only(self):
 		self.assertTrue(self.retry.is_retry('POST', 503))

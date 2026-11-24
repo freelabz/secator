@@ -77,12 +77,15 @@ def _build_session(retries=API_RETRIES, backoff=API_RETRY_BACKOFF):
 	- Gateway errors (TRANSIENT_STATUSES) for idempotent methods, HTTP 503 only for POST.
 	- Connections that could not be established (refused, connect timeout, DNS failure,
 	  refused proxy connection) for every method: the request was never sent.
-	- Never a read error (read timeout, connection dropped after sending): the API may
-	  have processed the request, and a read timeout already waited `addons.api.timeout`.
+	- Read errors (read timeout, connection dropped or reset after sending, e.g. a pooled
+	  keep-alive connection the server just closed) for idempotent methods only: a POST
+	  may already have been processed.
+	- Never any other error (TLS failure, proxy tunnel error): it may have happened after
+	  the request was sent, and retrying a certificate error cannot help.
 	"""
 	retry = _ApiRetry(
 		total=max(0, retries),
-		read=0,
+		other=0,  # urllib3 retries "other" errors for every method, POST included
 		backoff_factor=backoff,
 		status_forcelist=TRANSIENT_STATUSES,
 		allowed_methods=IDEMPOTENT_METHODS,

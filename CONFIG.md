@@ -629,7 +629,7 @@ is logged at debug level (`SECATOR_DEBUG=hooks.celery_events`) and never fails t
 | `addons.api.header_name` | `string` | `Bearer` | Auth header scheme |
 | `addons.api.force_ssl` | `bool` | `true` | Require TLS |
 | `addons.api.timeout` | `int` | `60` | Request timeout (s) |
-| `addons.api.retries` | `int` | `3` | Retries on gateway errors (HTTP 502/503/504) and on connections that could not be established (refused, connect timeout, DNS). A POST (create) is retried on HTTP 503 and on connection errors only. Read timeouts are never retried. `0` disables retries |
+| `addons.api.retries` | `int` | `3` | Retries on gateway errors (HTTP 502/503/504) and on connections that could not be established (refused, connect timeout, DNS). Idempotent methods are also retried on read errors (read timeout, dropped connection). A POST (create) is retried on HTTP 503 and on connection errors only. `0` disables retries |
 | `addons.api.retry_backoff` | `float` | `1.0` | Backoff factor (s): the first retry is immediate, retry N waits `retry_backoff * 2^(N-1)` (2s, 4s with the default) |
 | `addons.api.runner_create_endpoint` | `string` | `runners` | Runner creation endpoint |
 | `addons.api.runner_update_endpoint` | `string` | `runner/{runner_id}` | Runner update endpoint |
