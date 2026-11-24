@@ -308,6 +308,7 @@ class nmapData(dict):
 					for data in func(output, cpes=cpes):
 						data.matched_at = f'{hostname}:{port_number}'
 						data.ip = ip
+						data.target = data.compute_target(data)
 						data.extra_data.update(extra_data)
 						confidence = port_confidence
 						if 'cpe-match' in data.tags:

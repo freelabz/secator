@@ -188,7 +188,7 @@ _AGENT_READONLY_FIELDS = frozenset({
 	"workspace_id",                                                 # scope lives on _context, never top-level
 	"verified", "status", "is_false_positive", "is_acknowledged",   # verdict — forging bypasses mark_vuln_* gates
 	"verdict",                                                      # exploit-attempt result — mark_vuln_* + rollup only
-	"confidence_nb", "severity_nb",                                 # server-derived in __post_init__
+	"confidence_nb", "severity_nb", "target",                       # server-derived in __post_init__
 })
 
 

@@ -257,6 +257,20 @@ def target_host(value):
 	return ''
 
 
+def item_in_scope(target, ip='', in_scope=None, out_of_scope=None):
+	"""Scope decision for an output item's target, with the item's IP as an alternate allow path.
+
+	A host-bearing item (``host:port``, a vuln ``matched_at``) can also carry the IP it resolved to:
+	an IP / CIDR grant allows it through that IP, while a deny on either value still wins.
+	"""
+	if not ip or target_host(target) == ip:
+		return host_in_scope(target, in_scope, out_of_scope)
+	if not host_in_scope(ip, None, out_of_scope):
+		return False
+	return host_in_scope(target, in_scope, out_of_scope) or (
+		host_in_scope(ip, in_scope, None) and host_in_scope(target, None, out_of_scope))
+
+
 def canonicalize_scope_entry(value):
 	"""Normalise a raw target value into a canonical scope-entry string, or None if it
 	is not network-addressable. The SINGLE normaliser shared by the worker and the

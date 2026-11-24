@@ -3296,6 +3296,29 @@ def update(all):
 		sys.exit(return_code)
 
 
+# --------#
+# MIGRATE #
+# --------#
+
+
+@cli.command('migrate')
+@click.option('--driver', '-driver', type=click.Choice(['local', 'mongodb', 'sqlite']), default=None, help='Store to migrate (defaults to the query backend driver)')  # noqa: E501
+@click.option('--apply', is_flag=True, help='Write the changes (dry run otherwise)')
+def migrate(driver, apply):
+	"""Migrate stored findings to the current schema (idempotent, dry run by default)."""
+	from secator.migrations import MIGRATIONS
+	name = QueryEngine.resolve_backend(driver)
+	if name == 'api':
+		console.print(Error(message='Run `secator migrate` where the store lives, with its mongodb or sqlite driver.'))
+		sys.exit(1)
+	backend = QueryEngine.BACKENDS[name]('')
+	for migration in MIGRATIONS:
+		matched, changed = migration.run(backend, apply=apply)
+		console.print(f'{migration.DESCRIPTION}: {changed} {"updated" if apply else "to update"} / {matched} matched')
+	if not apply:
+		console.print(Info(message='Dry run: re-run with --apply to write the changes.'))
+
+
 # ------#
 # TEST #
 # ------#
