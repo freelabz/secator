@@ -1483,7 +1483,8 @@ class MarkVulnFixed(BaseTool):
 # SAME per-type identity the notes store keys off (the ``compare=True`` non-underscore dataclass
 # fields = ``OutputType._compare_key``): a url keys off {url}, a port off {port, ip, state}, a
 # vulnerability off {name, id, matched_at}. Those survive a re-scan's _uuid churn, so a note
-# re-attaches to the re-found finding. Every notes store derives the identity the same way.
+# re-attaches to the re-found finding. add_note builds the key from these fields and every notes
+# store persists the key it receives.
 _NOTE_IDENTITY_FIELDS = {
 	cls.get_name(): [f.name for f in fields(cls) if f.compare and not f.name.startswith("_")]
 	for cls in FINDING_TYPES
