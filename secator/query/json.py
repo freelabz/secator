@@ -108,6 +108,28 @@ def _has_datetime_operand(condition) -> bool:
 	return False
 
 
+def _datetime_condition(condition):
+	"""Parse the value operands of ``condition`` to datetimes (unparseable ones are kept)."""
+	def conv(v):
+		if isinstance(v, (str, dict)):
+			dt = to_datetime(v)
+			return v if dt is None else dt
+		return v
+	if isinstance(condition, dict) and any(str(k).startswith('$') for k in condition):
+		out = {}
+		for op, v in condition.items():
+			if op in ('$in', '$nin') and isinstance(v, list):
+				out[op] = [conv(x) for x in v]
+			elif op in ('$eq', '$ne', '$gt', '$gte', '$lt', '$lte'):
+				out[op] = conv(v)
+			elif op == '$not' and isinstance(v, dict):
+				out[op] = _datetime_condition(v)
+			else:
+				out[op] = v
+		return out
+	return conv(condition)
+
+
 def match_query(item: dict, query: dict) -> bool:
 	"""Check if item matches MongoDB-style query."""
 	if '$and' in query:
@@ -128,6 +150,10 @@ def match_query(item: dict, query: dict) -> bool:
 		# parse the stored value (an ISO string in the json store) so it compares by instant.
 		if _has_datetime_operand(condition):
 			value = to_datetime(value)
+		elif isinstance(value, datetime):
+			# The reverse: an in-memory datetime (a live OutputType or its toDict()) matched against a
+			# raw, un-normalized filter (string operands) — parse the operands instead.
+			condition = _datetime_condition(condition)
 
 		if isinstance(condition, dict):
 			for op, op_value in condition.items():
@@ -142,8 +168,11 @@ def match_query(item: dict, query: dict) -> bool:
 					continue
 				if op not in OPERATORS:
 					continue
-				if not OPERATORS[op](value, op_value):
-					return False
+				try:
+					if not OPERATORS[op](value, op_value):
+						return False
+				except TypeError:
+					return False  # incomparable types (e.g. a date vs an unparseable string): no match
 		else:
 			if value != condition:
 				return False

@@ -328,6 +328,20 @@ class TestDatetimeQueryOperands(unittest.TestCase):
 		self.assertEqual(self._norm('api'), self.Q)
 
 
+class TestMatchQueryLiveDatetimes(unittest.TestCase):
+	"""In-memory results (live OutputTypes / toDict) hold datetimes; a raw filter has strings."""
+
+	def test_raw_string_operands_against_live_datetimes(self):
+		cert = Certificate(host='a.com', not_after='2026-06-01T00:00:00Z')
+		for item in (cert, cert.toDict()):
+			with self.subTest(item=type(item).__name__):
+				self.assertTrue(match_query(item, {'not_after': {'$lt': '2027-01-01'}}))
+				self.assertFalse(match_query(item, {'not_after': {'$gt': '2027-01-01'}}))
+				self.assertTrue(match_query(item, {'not_after': '2026-06-01T02:00:00+02:00'}))
+				self.assertTrue(match_query(item, {'not_after': {'$in': ['2026-06-01 00:00:00+00:00']}}))
+				self.assertFalse(match_query(item, {'not_after': {'$lt': 'junk'}}))
+
+
 class TestAddFindingDatetime(unittest.TestCase):
 
 	def _run(self, fields):
