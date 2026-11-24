@@ -2174,6 +2174,10 @@ class ai(PythonRunner):
 						stop_prompt_uuid = str(uuid.uuid4())
 						result.extra_data = {
 							**(result.extra_data or {}), "prompt_uuid": stop_prompt_uuid}
+						# Register it as this run's prompt as soon as it is persisted: a
+						# revoke after this batch returns before ask_user, and run end
+						# must still park it.
+						self.backend.track_prompt(stop_prompt_uuid)
 					self.add_result(result, print=not is_from_subagent)
 					continue
 				self.add_result(result, print=not is_from_subagent)

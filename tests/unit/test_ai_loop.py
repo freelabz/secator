@@ -399,6 +399,9 @@ class TestRemoteStopPersistence(unittest.TestCase):
 		self.assertTrue((doc.extra_data or {}).get("prompt_uuid"))
 		# Same object → single doc by _uuid.
 		self.assertIs(doc, stopped)
+		# Registered as this run's prompt when persisted (not only once ask_user polls),
+		# so a run that ends before polling (e.g. revoked) still parks it.
+		self.assertEqual(backend._raised_prompt_uuids, {doc.extra_data["prompt_uuid"]})
 
 	def test_local_stop_not_stamped_pending(self):
 		"""CLI/local mode must NOT stamp status=pending (drives the TUI menu directly)."""

@@ -222,11 +222,19 @@ class RemoteBackend(InteractivityBackend):
 			_timestamp=time.time(),
 		)
 
+	def track_prompt(self, prompt_uuid):
+		"""Record ``prompt_uuid`` as a prompt this run raised, so run end parks it.
+
+		For a pending doc persisted outside ``build_pending_prompt`` (the `stop` tool
+		persists its own).
+		"""
+		if prompt_uuid:
+			self._raised_prompt_uuids.add(prompt_uuid)
+
 	def ask_user(self, question, choices, session_id, prompt_type="stopped", **context):
 		# Record the prompt as this run's own even when its pending doc was persisted
 		# elsewhere (the `stop` tool persists its own doc), so run end can park it.
-		if context.get("prompt_uuid"):
-			self._raised_prompt_uuids.add(context["prompt_uuid"])
+		self.track_prompt(context.get("prompt_uuid"))
 		answer = self._poll_for_answer(session_id, prompt_type, prompt_uuid=context.get("prompt_uuid"))
 		if answer is None:
 			return None
