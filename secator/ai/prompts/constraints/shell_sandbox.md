@@ -17,8 +17,8 @@ $sandbox_packages
 - Rust / Go tools:   run_shell(command="cargo install <crate>") / run_shell(command="go install <module>@latest")
 
 Clone, build and run PoCs under the run's output directory, which is mounted into the sandbox:
-run_shell(command="git clone https://github.com/author/CVE-XXXX-YYYY $workspace_path/.outputs/poc")
-run_shell(command="cd $workspace_path/.outputs/poc && pip install --user --break-system-packages -r requirements.txt && python3 exploit.py --target TARGET_URL")
+run_shell(command="git clone https://github.com/author/CVE-XXXX-YYYY $runner_dir/.outputs/poc")
+run_shell(command="cd $runner_dir/.outputs/poc && pip install --user --break-system-packages -r requirements.txt && python3 exploit.py --target TARGET_URL")
 
 If run_shell returns "[sandbox error] could not start isolation container", the sandbox is
 unavailable for this run: report it instead of retrying the same command in a loop.

@@ -117,7 +117,7 @@ class TestPrompts(unittest.TestCase):
 		template_vars = [
 			"library_reference", "discovery", "common", "queries", "findings",
 			"arsenal", "guardrails", "shell_environment", "exploitation_report",
-			"workspace_path", "query_types", "output_types_reference",
+			"workspace_path", "runner_dir", "query_types", "output_types_reference",
 		]
 		leftover = [v for v in template_vars if f"${v}" in prompt]
 		self.assertEqual(leftover, [], f"unresolved template vars in exploit prompt: {leftover}")
@@ -518,7 +518,7 @@ class TestIsolationPrompts(unittest.TestCase):
 		self.assertIn("Tasks and workflows do NOT run in the sandbox", blk)
 		self.assertNotIn("$sandbox_loopback", blk)
 		self.assertIn("Tasks and workflows do NOT run in the sandbox", blk)
-		self.assertIn("/tmp/ws/.outputs/poc", blk)  # $workspace_path substituted
+		self.assertIn("/tmp/ws/.outputs/poc", blk)  # $runner_dir substituted
 
 	def test_host_block(self):
 		blk = self._block(self._prompt("contribute", False))
@@ -580,6 +580,13 @@ class TestIsolationPrompts(unittest.TestCase):
 		p = self._prompt("contribute", True, image="registry.local/custom:1")
 		self.assertNotIn("`freelabz/secator:<version>-lite` sandbox", p)
 		self.assertIn("image `registry.local/custom:1`", p)
+
+	def test_runner_dir_token_is_fully_substituted(self):
+		"""Prompt paths use $runner_dir (the runner's reports folder); no stale token remains."""
+		for mode in self.SHELL_MODES:
+			p = self._prompt(mode, True)
+			self.assertNotIn("$runner_dir", p, mode)
+			self.assertNotIn("$workspace_path", p, mode)
 
 	def test_research_has_no_docker_lab_in_sandbox(self):
 		from secator.ai.prompts import load_prompt
@@ -785,12 +792,12 @@ class TestOperatingRulesRecap(unittest.TestCase):
 		self.assertIn("ask in `reason` and omit `choices`", recap)
 
 	def test_user_context_body_is_verbatim_not_token_substituted(self):
-		# $workspace_path in a user note must survive verbatim (substitution happens
+		# $runner_dir in a user note must survive verbatim (substitution happens
 		# on the baked-in prompt before the user block is appended).
-		block = "<context:n.md>\npath is $workspace_path\n</context>"
+		block = "<context:n.md>\npath is $runner_dir\n</context>"
 		with patch("secator.ai.context.load_context_blocks", return_value=[block]):
 			p = get_system_prompt("scan", workspace_path="/tmp/ws", backend=None)
-		self.assertIn("path is $workspace_path", p)
+		self.assertIn("path is $runner_dir", p)
 
 	def test_subagent_inherits_user_context(self):
 		# A subagent runs on the same path and must NOT have the user context

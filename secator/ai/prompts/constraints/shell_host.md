@@ -9,7 +9,7 @@ Shell isolation is OFF for this run: run_shell executes directly on THIS host, n
 
 - Be conservative about changing the host: install only what the task needs, preferably
   user-level (pipx, `pip install --user`, `go install`, `cargo install`), and keep clones, builds
-  and PoCs under $workspace_path/.outputs/.
+  and PoCs under $runner_dir/.outputs/.
 - Java tools: check `java -version` first; install a headless JRE with the host package manager
   only if none is present and the task needs it, then run the tool with `java -jar <tool>.jar`.
 - If the host has a working Docker daemon (`docker info` succeeds), you may use it to stand up a

@@ -580,7 +580,7 @@ _DEFAULT_SANDBOX_REPO = "freelabz/secator"
 def build_sandbox_packages(image: str) -> str:
 	"""Install guidance for the sandbox image: concrete apk commands for the default secator image,
 	a detect-once step (OS, package manager, root or not) for any overridden image."""
-	java_run = 'run_shell(command="java -jar $workspace_path/.outputs/<tool>/<tool>.jar")'
+	java_run = 'run_shell(command="java -jar $runner_dir/.outputs/<tool>/<tool>.jar")'
 	if image.split(":", 1)[0].split("@", 1)[0] == _DEFAULT_SANDBOX_REPO:
 		return (
 			'- System packages / runtimes (Alpine, unprivileged user: apk via sudo):   '
@@ -667,7 +667,8 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 
 	Args:
 		mode: One of "scan", "chat", or "exploit"
-		workspace_path: Path to the workspace/reports directory
+		workspace_path: The runner's reports folder (e.g. <reports>/<workspace>/tasks/<id>), rendered
+			in the prompt as ``$runner_dir``. Not the workspace folder itself.
 		backend: Optional interactivity backend to determine interaction rules
 		in_scope: Optional allow-list of targets to surface in the prompt.
 		out_of_scope: Optional deny-list of targets to surface in the prompt.
@@ -757,9 +758,9 @@ def get_system_prompt(mode: str, workspace_path: str = "", backend=None, in_scop
 	if isolated is not None:
 		result += "\n\n" + build_session_context(isolated=bool(isolated))
 
-	# Substitute $workspace_path in the baked-in prompt BEFORE appending the user
-	# context, so a user note's body is treated verbatim (never token-substituted).
-	result = result.replace("$workspace_path", ws)
+	# Substitute $runner_dir (this runner's reports folder) in the baked-in prompt BEFORE
+	# appending the user context, so a user note's body is treated verbatim (never substituted).
+	result = result.replace("$runner_dir", ws)
 
 	# User-provided engagement context (~/.secator/templates/ai/**/*.md), appended last so
 	# it reads as an authoritative, run-specific overlay on top of the baked-in prompt.
