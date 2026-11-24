@@ -1,5 +1,5 @@
 import unittest
-from secator.output_types import Url, Target, Port, Tag, Vulnerability, Info, Warning, Error
+from secator.output_types import Url, Target, Port, Tag, Technology, Vulnerability, Info, Warning, Error
 from secator.runners import Command
 from secator.serializers import JSONSerializer
 from time import sleep
@@ -38,7 +38,7 @@ class TestWorker(unittest.TestCase):
 			name='secator_w_host_recon',
 			process=True,
 			quiet=True,
-			cls_attributes={'output_types': [Target, Url, Port, Tag, Vulnerability, Info, Warning, Error], 'item_loaders': [JSONSerializer()]},
+			cls_attributes={'output_types': [Target, Url, Port, Tag, Technology, Vulnerability, Info, Warning, Error], 'item_loaders': [JSONSerializer()]},
 		)
 		# self.assertEqual(cmd.return_code, 0)  # TODO: ditto
 		self.assertGreater(len(cmd.results), 0)
@@ -47,21 +47,19 @@ class TestWorker(unittest.TestCase):
 		url = Url('https://secator.cloud', status_code=200, _source='httpx')
 		self.assertIn(port, cmd.findings)
 		self.assertIn(url, cmd.findings)
-		# The nginx patch version drifts as secator.cloud's base image updates (e.g.
-		# 1.30.3 -> 1.30.4), so assert the tag's stable fields instead of pinning the
-		# exact value (which is a compared Tag field and breaks on every bump).
-		nginx_tags = [
-			t for t in cmd.findings
-			if t._type == 'tag' and t.name == 'nginx-version'
-		]
+		# nuclei's nginx-version template is a product detection (`tech` tag), so it yields a
+		# Technology, not a Tag. The nginx patch version drifts as secator.cloud's base image
+		# updates (e.g. 1.30.3 -> 1.30.4), so assert the stable fields instead of the version.
 		self.assertTrue(
 			any(
-				t.category == 'info'
+				t._type == 'technology'
+				and t._source == 'nuclei'
+				and t.product == 'nginx'
 				and t.match == 'https://secator.cloud'
-				and str(t.value).startswith('nginx/')
-				for t in nginx_tags
+				and t.version
+				for t in cmd.findings
 			),
-			'expected an nginx-version info tag @ https://secator.cloud',
+			'expected a versioned nginx technology from nuclei @ https://secator.cloud',
 		)
 		# self.assertEqual(vulns, [])
 
