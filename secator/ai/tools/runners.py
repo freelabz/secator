@@ -551,7 +551,6 @@ class ListRunners(BaseTool):
 # background calls themselves were approved by the guardrails when they were made.
 
 def _ctx_for(action, ctx):
-	from secator.ai.actions import _get_result_context
 	return _get_result_context(action, ctx)
 
 

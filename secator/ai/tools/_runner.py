@@ -513,9 +513,12 @@ def _run_runner_steps(action: Dict, ctx: ActionContext, runner_type: str, spawn:
 	# A subagent keeps its thread: its handback is built from its live output stream. So does
 	# a task that may chunk on its worker: its chunks' Celery ids are only learned by polling
 	# it, and a cancel must be able to revoke them.
+	# Only a job of THIS context's registry: a subagent running in its parent's job thread
+	# sees the parent's job there, and its own foreground calls must stay foreground.
 	from secator.ai.background import current_job
 	job = current_job()
-	if (job is not None and job.can_detach and not is_ai_subagent and not run_opts.get("sync")
+	owned = job is not None and ctx.background is not None and ctx.background.get(job.id) is job
+	if (owned and job.can_detach and not is_ai_subagent and not run_opts.get("sync")
 			and not (runner_type == "task" and _task_may_chunk(name, opts, targets))):
 		run_opts["no_poll"] = True
 		job.detached = True

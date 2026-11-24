@@ -430,8 +430,10 @@ class TestStoreBackedJobs(unittest.TestCase):
 		mock_runner.__iter__.return_value = iter([])
 		mock_task_cls.return_value = mock_runner
 		mock_task_cls.get_task_class.return_value.would_chunk.return_value = False
-		ctx = ActionContext(targets=["example.com"], model="m", sync=False)
 		job = BackgroundJob(id="bg-1", action={}, can_detach=True)
+		mgr = BackgroundJobs(max_jobs=3, max_wait=10)
+		mgr.jobs[job.id] = job
+		ctx = ActionContext(targets=["example.com"], model="m", sync=False, background=mgr)
 		_THREAD_JOBS[threading.get_ident()] = job
 		try:
 			list(_run_runner({"action": "task", "name": "nuclei", "targets": ["example.com"]}, ctx, "task"))
@@ -440,6 +442,17 @@ class TestStoreBackedJobs(unittest.TestCase):
 		run_opts = mock_task_cls.call_args.kwargs["run_opts"]
 		self.assertTrue(run_opts.get("no_poll"))
 		self.assertTrue(job.detached)
+		# A subagent running in this job's thread (its own registry) keeps its calls foreground.
+		job.detached = False
+		sub_ctx = ActionContext(targets=["example.com"], model="m", sync=False,
+		                        background=BackgroundJobs(max_jobs=3, max_wait=10))
+		_THREAD_JOBS[threading.get_ident()] = job
+		try:
+			list(_run_runner({"action": "task", "name": "nuclei", "targets": ["example.com"]}, sub_ctx, "task"))
+		finally:
+			_THREAD_JOBS.pop(threading.get_ident(), None)
+		self.assertFalse(mock_task_cls.call_args.kwargs["run_opts"].get("no_poll"))
+		self.assertFalse(job.detached)
 		# Outside a job (foreground): unchanged.
 		list(_run_runner({"action": "task", "name": "nuclei", "targets": ["example.com"]}, ctx, "task"))
 		self.assertFalse(mock_task_cls.call_args.kwargs["run_opts"].get("no_poll"))
@@ -456,8 +469,10 @@ class TestStoreBackedJobs(unittest.TestCase):
 		mock_runner.__iter__.return_value = iter([])
 		mock_task_cls.return_value = mock_runner
 		mock_task_cls.get_task_class.return_value.would_chunk.return_value = True
-		ctx = ActionContext(targets=["a.com", "b.com"], model="m", sync=False)
 		job = BackgroundJob(id="bg-1", action={}, can_detach=True)
+		mgr = BackgroundJobs(max_jobs=3, max_wait=10)
+		mgr.jobs[job.id] = job
+		ctx = ActionContext(targets=["a.com", "b.com"], model="m", sync=False, background=mgr)
 		_THREAD_JOBS[threading.get_ident()] = job
 		try:
 			list(_run_runner({"action": "task", "name": "nuclei", "targets": ["a.com", "b.com"]}, ctx, "task"))
