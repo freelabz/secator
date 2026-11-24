@@ -1,4 +1,5 @@
 import fcntl
+import hashlib
 import importlib
 import ipaddress
 import itertools
@@ -9,6 +10,7 @@ import operator
 import os
 import re
 import select
+import shutil
 import signal
 import socket
 import sys
@@ -50,6 +52,25 @@ _tasks = []
 
 TIMEDELTA_REGEX = re.compile(r'((?P<years>\d+?)y)?((?P<months>\d+?)M)?((?P<days>\d+?)d)?((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  # noqa: E501
 CAMEL_TO_SNAKE_REGEX = re.compile(r'(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])')
+
+# Browsers looked up by go-rod's launcher.LookPath (Linux and macOS lists), in the same order.
+SYSTEM_BROWSERS = (
+	'chrome',
+	'google-chrome',
+	'/usr/bin/google-chrome',
+	'microsoft-edge',
+	'/usr/bin/microsoft-edge',
+	'chromium',
+	'chromium-browser',
+	'/usr/bin/google-chrome-stable',
+	'/usr/bin/chromium',
+	'/usr/bin/chromium-browser',
+	'/snap/bin/chromium',
+	'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+	'/Applications/Chromium.app/Contents/MacOS/Chromium',
+	'/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+	'/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+)
 
 
 class TaskError(ValueError):
@@ -159,9 +180,15 @@ def sanitize_folder_name(
 	replace_hyphens: bool = True,
 	max_length: int = 255,
 	normalize_unicode: bool = True,
+	strict: bool = True,
 ) -> str:
 	"""
 	Sanitizes a string to be used as a folder name across Windows, Linux, and macOS.
+
+	The result is used to build report paths that are passed to external commands, so by default (``strict``) only
+	``[A-Za-z0-9._]`` (plus ``-`` when ``replace_hyphens`` is False) is kept: every other character, including shell
+	metacharacters (quotes, ``$``, backticks, ``;``, ``|``, ``&``, globs, brackets...), is replaced by
+	``replacement_char``, and leading/trailing ``.``, ``-`` and ``replacement_char`` are stripped.
 
 	Args:
 		name: The input string to sanitize.
@@ -170,6 +197,8 @@ def sanitize_folder_name(
 		replace_hyphens: If True, replaces hyphens with `replacement_char`.
 		max_length: Maximum allowed length (default: 255, None to disable).
 		normalize_unicode: If True, normalizes Unicode (e.g., é → e).
+		strict: If True (default), keep only the safe allowlist above. If False, use the legacy rules (only remove
+			OS-invalid characters); kept to locate folders created by older versions (see get_workspace_folder_name).
 
 	Returns:
 		A sanitized folder name.
@@ -187,8 +216,9 @@ def sanitize_folder_name(
 	if replace_hyphens:
 		name = name.replace('-', replacement_char)
 
-	# Remove invalid characters (OS-specific)
-	if platform.system() == 'Windows':
+	if strict:
+		invalid_chars = r'[^A-Za-z0-9._-]' if not replace_hyphens else r'[^A-Za-z0-9._]'
+	elif platform.system() == 'Windows':
 		# Windows: < > : " / \ | ? * and control chars (0-31)
 		invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
 	else:
@@ -208,21 +238,57 @@ def sanitize_folder_name(
 		if upper_name in reserved_names:
 			sanitized = f'{sanitized}{replacement_char}'
 
-	# Remove leading/trailing spaces, dots, and replacement chars
-	sanitized = sanitized.strip().strip(f'.{replacement_char}')
+	# Remove leading/trailing spaces, dots, and replacement chars (and hyphens, so the name never looks like an option)
+	strip_chars = f'.{replacement_char}-' if strict else f'.{replacement_char}'
+	sanitized = sanitized.strip().strip(strip_chars)
 
 	# Replace multiple replacement chars with a single one
 	sanitized = re.sub(f'{re.escape(replacement_char)}+', replacement_char, sanitized)
 
 	# Truncate if too long
 	if max_length and len(sanitized) > max_length:
-		sanitized = sanitized[:max_length].rstrip(f'.{replacement_char}')
+		sanitized = sanitized[:max_length].rstrip(strip_chars)
 
 	# Ensure the name is not empty
 	if not sanitized:
 		return 'unnamed_folder'
 
 	return sanitized
+
+
+def get_workspace_folder_name(name, reports_dir=None):
+	"""Get the reports sub-folder name for a workspace.
+
+	Names that are already safe map to themselves. A name containing characters outside the sanitize_folder_name
+	allowlist maps to its sanitized form plus a short hash of the original name (e.g. ``o'brien`` -> ``o_brien_<hash>``),
+	so it can never resolve to the folder of another, already-safe name (``o_brien``).
+
+	For backwards compatibility, if the folder created by older versions for this exact name (legacy rules) exists,
+	it keeps being used so existing reports stay reachable; report paths are quoted when passed to commands.
+
+	Args:
+		name (str): Workspace name.
+		reports_dir (str | pathlib.Path, optional): Reports directory. Defaults to CONFIG.dirs.reports.
+
+	Returns:
+		str: Folder name (not a path).
+	"""
+	folder = sanitize_folder_name(name)
+	legacy = sanitize_folder_name(name, strict=False)
+	if legacy == folder:
+		return folder
+	if reports_dir is None:
+		reports_dir = CONFIG.dirs.reports
+	if (Path(reports_dir).expanduser() / legacy).is_dir():
+		return legacy
+	digest = hashlib.sha256(name.encode('utf-8', 'surrogatepass')).hexdigest()[:8]
+	return f'{folder}_{digest}'
+	if reports_dir is None:
+		reports_dir = CONFIG.dirs.reports
+	base = Path(reports_dir).expanduser()
+	if not (base / folder).exists() and (base / legacy).is_dir():
+		return legacy
+	return folder
 
 
 def deduplicate(array, attr=None):
@@ -764,7 +830,7 @@ def list_reports(workspace=None, type=None, timedelta=None):
 		pathlib.Path: Each matching report.json path.
 	"""
 	if workspace:
-		workspace = sanitize_folder_name(workspace)
+		workspace = get_workspace_folder_name(workspace)
 	if type and not type.endswith('s'):
 		type += 's'
 	# report.json lives at a fixed depth: <reports>/<workspace>/<type>/<id>/report.json.
@@ -1964,3 +2030,12 @@ def read_json(path, default=dict):
 	JSONDecodeError (a real anomaly, not silently masked).
 	"""
 	return _read_json(path, default)
+
+
+def find_system_browser():
+	"""Find a Chromium-based browser installed on the system.
+
+	Returns:
+		str | None: Path to the browser binary, or None if none was found.
+	"""
+	return next(filter(None, map(shutil.which, SYSTEM_BROWSERS)), None)

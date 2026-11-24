@@ -446,3 +446,20 @@ class TestNucleiHangMonitor(unittest.TestCase):
 		self.assertEqual(len(out), 1)
 		self.assertIsInstance(out[0], Warning)
 		self.assertIn('hang-monitor', out[0].message)
+
+
+class TestKatanaCrawlScope(unittest.TestCase):
+	"""katana defaults to the registrable domain ('rdn'): crawling http://scanme.nmap.org followed links to
+	nmap.org and svn.nmap.org (~1150 URLs off the target in a host scan). Crawls stay on the target host."""
+
+	def _cmd(self, **opts):
+		from secator.tasks.katana import katana
+		return katana('http://scanme.nmap.org', print_cmd=False, sync=True, **opts).cmd
+
+	def test_default_scope_is_target_host(self):
+		cmd = self._cmd()
+		self.assertIn('-field-scope fqdn', cmd)
+		self.assertNotIn('-fs ', cmd)
+
+	def test_scope_can_be_widened(self):
+		self.assertIn('-field-scope rdn', self._cmd(field_scope='rdn'))

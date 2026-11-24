@@ -18,7 +18,9 @@ Adding a BUILT-IN tool is one file: drop a ``BaseTool`` subclass in this package
 it in ``_TOOL_CLASSES``, and make sure a mode's ``tools:`` globs reach it. An EXTERNAL
 tool is dropped into the templates dir and auto-registered by
 :func:`secator.loader.discover_ai_tools` via :func:`register_ai_tool` — no core edit —
-and a mode opts it in by its EXACT name. The consistency test (test_ai_tools) fails if
+and a mode opts it in by its EXACT name. One external file may define several tools that
+share module-level helpers or a nameless ``BaseTool`` subclass (a shared base without a
+``name`` is not a tool and is skipped). The consistency test (test_ai_tools) fails if
 a mode's resolved tool exposure and its ``allowed_actions`` drift apart.
 """
 
@@ -189,28 +191,89 @@ def register_ai_tool(tool):
 	return tool
 
 
+def _split_tool_names(value):
+	"""Normalize an ``extra_tools`` value to a list of names / patterns.
+
+	Accepts a list or a comma-separated string (``"sysreptor_*,foo"``), so the option works the
+	same from the CLI, a template or a library call.
+	"""
+	if not value:
+		return []
+	if isinstance(value, str):
+		value = value.split(",")
+	return [str(v).strip() for v in value if v and str(v).strip()]
+
+
 def resolve_extra_tools(extra_tools=None):
 	"""Resolve the effective extra-tool names: config default ∪ the run's ``extra_tools``.
 
 	``CONFIG.addons.ai.extra_tools`` (a custom installation's always-on tools) is merged
-	with the per-run ``extra_tools`` option, order-preserving and deduplicated. Every name
-	must resolve to a loaded, valid tool (built-in or discovered external); an unknown name
-	raises ``ValueError`` with a clear message so a misconfigured/absent tool fails loudly
-	rather than being silently dropped.
+	with the per-run ``extra_tools`` option, order-preserving and deduplicated. Each entry is
+	an exact tool name or an fnmatch glob (``sysreptor_*``, ``report_*``, ``*``):
+
+	* An EXACT name resolves to that loaded tool (built-in or external), as before. An exact
+	  name that is not loaded raises ``ValueError`` with a clear message, so a
+	  misconfigured/absent tool fails loudly rather than being silently dropped.
+	* A GLOB expands to every loaded EXTERNAL tool (templates dir / ``SECATOR_AI_TOOLS_DIRS``
+	  / bundle) whose name matches, in registry order. Globs never match built-in tools —
+	  the mirror of a mode's ``tools:`` globs, which match built-in tools only — so a broad
+	  pattern cannot widen a mode with core tools it hides; a built-in tool is only added by
+	  its exact name. ``*`` therefore means "every loaded external tool". A glob that matches
+	  nothing is not an error (the tool set it names may simply not be installed): it prints
+	  a warning once per pattern and contributes no tool.
+
+	A mode's ``!`` excludes still win over any extra tool in :func:`build_tool_schemas`.
 	"""
+	import fnmatch
 	from secator.config import CONFIG
-	names = []
-	for src in (list(CONFIG.addons.ai.extra_tools or []), list(extra_tools or [])):
-		for n in src:
-			if n and n not in names:
-				names.append(n)
-	unknown = [n for n in names if n not in TOOLS_BY_NAME]
+	names, unknown, empty_globs = [], [], []
+	for src in (_split_tool_names(CONFIG.addons.ai.extra_tools), _split_tool_names(extra_tools)):
+		for entry in src:
+			if entry in TOOLS_BY_NAME:
+				matched = [entry]
+			elif _is_glob(entry):
+				matched = [n for n, t in TOOLS_BY_NAME.items() if t.external and fnmatch.fnmatchcase(n, entry)]
+				if not matched and entry not in empty_globs:
+					empty_globs.append(entry)
+			else:
+				if entry not in unknown:
+					unknown.append(entry)
+				matched = []
+			for n in matched:
+				if n not in names:
+					names.append(n)
 	if unknown:
 		raise ValueError(
 			f"extra_tools refers to unknown AI tool(s): {unknown}. Known tools: "
 			f"{sorted(TOOLS_BY_NAME)}. Check CONFIG.addons.ai.extra_tools / the run's "
-			f"extra_tools, and that the tool dir / bundle is loaded.")
+			f"extra_tools (exact names or globs such as 'prefix_*'), and that the tool dir / "
+			f"bundle is loaded.")
+	for pattern in empty_globs:
+		_warn_empty_glob(pattern)
 	return names
+
+
+# extra_tools globs already reported as matching nothing (warn once per pattern).
+_WARNED_EMPTY_GLOBS = set()
+
+
+def _warn_empty_glob(pattern):
+	"""Warn (once per pattern) that an ``extra_tools`` glob matches no loaded external tool."""
+	if pattern in _WARNED_EMPTY_GLOBS:
+		return
+	_WARNED_EMPTY_GLOBS.add(pattern)
+	from secator.output_types import Warning
+	from secator.rich import console
+	external = sorted(n for n, t in TOOLS_BY_NAME.items() if t.external)
+	console.print(Warning(message=(
+		f"extra_tools pattern {pattern!r} matches no loaded external AI tool; it adds nothing. "
+		f"Loaded external tools: {external or 'none'}. Globs match external tools only (templates "
+		f"dir / SECATOR_AI_TOOLS_DIRS); add a built-in tool by its exact name.")))
+
+
+def _is_glob(pattern):
+	"""Whether an ``extra_tools`` entry is an fnmatch glob rather than an exact name."""
+	return any(c in pattern for c in "*?[")
 
 
 def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_is_auto: bool = True,
@@ -234,9 +297,11 @@ def build_tool_schemas(mode: str, is_subagent: bool = False, backend=None, mode_
 			a pinned ACTION mode, but a user-PINNED read-only `chat` must stay read-only,
 			so `change_mode` is withheld there (the model can only suggest the user
 			switches). An auto session that happens to resolve to chat KEEPS change_mode.
-		extra_tools: Names of EXTRA (typically external) tools to add on top of the mode's
-			baseline for this run (e.g. ``["add_suggestion"]``). Merged with
-			``CONFIG.addons.ai.extra_tools``; every name must resolve to a loaded tool.
+		extra_tools: Names or fnmatch globs of EXTRA (typically external) tools to add on top
+			of the mode's baseline for this run (e.g. ``["add_suggestion"]`` or
+			``["sysreptor_*"]``). Merged with ``CONFIG.addons.ai.extra_tools``; every exact name
+			must resolve to a loaded tool, a glob expands to the matching EXTERNAL tools only
+			(see :func:`resolve_extra_tools`).
 
 	Returns:
 		List of OpenAI-format tool schema dicts.

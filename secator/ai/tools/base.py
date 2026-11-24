@@ -48,7 +48,31 @@ that uses both::
 			yield Info(message="exported")
 
 Activation is unchanged: the tool is only active when named in ``extra_tools`` (per run
-or via ``CONFIG.addons.ai.extra_tools``).
+or via ``CONFIG.addons.ai.extra_tools``), by exact name or by an fnmatch glob such as
+``export_*`` that turns on every loaded EXTERNAL tool whose name matches (``*`` = all of
+them; globs never match built-in tools, and a glob matching nothing only warns).
+
+Several tools in one file
+-------------------------
+One external file may define several tools. They can share module-level helpers, or a
+NAMELESS ``BaseTool`` subclass used as a common base: a subclass without ``name`` is an
+abstract helper, never registered, and the loader skips it silently. Mixins are fine in
+any base position::
+
+	class _ReportApi:                      # plain mixin: shared client code
+		def client(self): ...
+
+	class ReportTool(_ReportApi, BaseTool):  # no `name` -> shared base, not a tool
+		def run(self, action, ctx):
+			yield from self.call(action)
+
+	class ReportPush(ReportTool):
+		name = "report_push"
+		schema = {...}
+
+	class ReportPull(ReportTool):
+		name = "report_pull"
+		schema = {...}
 """
 
 _TARGETS_SCHEMA = {

@@ -33,8 +33,10 @@ class Port(OutputType):
 
 	_table_fields = [IP, PORT, HOST, CPES, EXTRA_DATA]
 	_sort_by = (PORT, IP)
-	_group_by = (HOST,)          # collapse a host's ports into one row
-	_group_aggregate = PORT
+	_target_fields = ['ip', 'host']
+	# one row per socket, host:port (ip:port when no host is known: an empty host would merge every IP)
+	_group_by = (('{host}:{port}', '{ip}:{port}'),)
+	_group_aggregate = '_source'
 
 	def __gt__(self, other):
 		# favor nmap over other port detection tools
