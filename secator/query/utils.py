@@ -507,8 +507,8 @@ def _validate_fragment(fragment, type_map, warnings):
     if not isinstance(fragment, dict):
         return fragment
     _type = fragment.get('_type')
-    if not _type:
-        return fragment
+    if not _type or not isinstance(_type, str):
+        return fragment  # no type, or a type operator (`_type != 'url'` -> $nin): nothing to validate against
     cls = type_map.get(_type)
     if cls is None:
         return fragment
@@ -696,68 +696,148 @@ def group_findings(items, group_by, aggregate_field=None, max_display=5, default
         list: One representative finding per group (OutputType objects when the
             input could be loaded, else the raw items), in first-seen order.
     """
-    from secator.output_types import OUTPUT_TYPES
-    type_map = {cls.get_name(): cls for cls in OUTPUT_TYPES}
-
-    groups = {}
-    order = []
+    grouper = FindingGrouper(
+        group_by, aggregate_field, max_display=max_display, defaults=defaults, with_members=with_members)
     for item in items:
-        key = tuple(group_key_part(item, part, defaults) for part in group_by)
+        grouper.add(item)
+    return grouper.results()
+
+
+class FindingGrouper:
+    """Incremental form of ``group_findings``: ``add()`` findings one at a time (memory ~ #groups),
+    then ``results()`` returns the same representatives ``group_findings`` would. Lets a caller
+    feed several groupers from one stream (one per finding type)."""
+
+    def __init__(self, group_by, aggregate_field=None, max_display=5, defaults=None, with_members=False):
+        self.group_by = list(group_by)
+        self.aggregate_field = aggregate_field
+        self.max_display = max_display
+        self.defaults = defaults
+        self.with_members = with_members
+        self.groups = {}
+        self.order = []
+
+    def add(self, item):
+        key = tuple(group_key_part(item, part, self.defaults) for part in self.group_by)
         ts = _finding_ts(item)
-        if key not in groups:
+        group = self.groups.get(key)
+        if group is None:
             # 'agg' is an insertion-ordered set of the distinct aggregated values (dict keys):
             # a list membership test made grouping quadratic in the size of a group.
-            groups[key] = {'rep': item, 'ts': ts, 'agg': {}, 'count': 0, 'uuids': {}, 'members': {}}
-            order.append(key)
-        group = groups[key]
+            group = self.groups[key] = {'rep': item, 'ts': ts, 'agg': {}, 'count': 0, 'uuids': {}, 'members': {}}
+            self.order.append(key)
         group['count'] += 1
         if ts >= group['ts']:
             group['rep'], group['ts'] = item, ts
-        if aggregate_field:
-            value = _finding_value(item, aggregate_field)
+        if self.aggregate_field:
+            value = _finding_value(item, self.aggregate_field)
             if value:
                 try:
                     group['agg'].setdefault(value, value)
                 except TypeError:  # unhashable value (e.g. a list): dedup on its repr
                     group['agg'].setdefault(repr(value), value)
-        uuid = _finding_value(item, '_uuid') if with_members else None
+        uuid = _finding_value(item, '_uuid') if self.with_members else None
         if uuid:
             group['uuids'].setdefault(uuid, None)
-            if aggregate_field:
-                value = _finding_value(item, aggregate_field)
+            if self.aggregate_field:
+                value = _finding_value(item, self.aggregate_field)
                 member_uuids = group['members'].setdefault('' if value is None else str(value), [])
                 if uuid not in member_uuids:
                     member_uuids.append(uuid)
 
-    out = []
-    for key in order:
-        group = groups[key]
-        rep = group['rep']
-        if isinstance(rep, dict):
-            cls = type_map.get(rep.get('_type'))
-            if cls:
-                try:
-                    rep = cls.load(rep)
-                except Exception as e:
-                    debug(f'group_findings: failed to load {rep.get("_type")} representative: {e}', sub='query')
-        if aggregate_field and not isinstance(rep, dict):
-            # When grouping, other fields (extra_data, etc.) keep the newest
-            # finding's values; only the aggregate field is replaced by the
-            # truncated collected values.
-            setattr(rep, aggregate_field, _truncate_aggregate(list(group['agg'].values()), max_display))
-        if not isinstance(rep, dict):
-            rep._group_count = group['count']
-        if with_members:
-            extra = {'_group_key': ' | '.join(key), '_group_uuids': list(group['uuids'])}
-            if aggregate_field:
-                extra['_group_members'] = group['members']
-            for name, val in extra.items():
-                if isinstance(rep, dict):
-                    rep[name] = val
-                else:
-                    setattr(rep, name, val)
-        out.append(rep)
-    return out
+    def results(self):
+        from secator.output_types import OUTPUT_TYPES
+        type_map = {cls.get_name(): cls for cls in OUTPUT_TYPES}
+        aggregate_field = self.aggregate_field
+        out = []
+        for key in self.order:
+            group = self.groups[key]
+            rep = group['rep']
+            if isinstance(rep, dict):
+                cls = type_map.get(rep.get('_type'))
+                if cls:
+                    try:
+                        rep = cls.load(rep)
+                    except Exception as e:
+                        debug(f'group_findings: failed to load {rep.get("_type")} representative: {e}', sub='query')
+            if aggregate_field and not isinstance(rep, dict):
+                # When grouping, other fields (extra_data, etc.) keep the newest
+                # finding's values; only the aggregate field is replaced by the
+                # truncated collected values.
+                setattr(rep, aggregate_field, _truncate_aggregate(list(group['agg'].values()), self.max_display))
+            if not isinstance(rep, dict):
+                rep._group_count = group['count']
+            if self.with_members:
+                extra = {'_group_key': ' | '.join(key), '_group_uuids': list(group['uuids'])}
+                if aggregate_field:
+                    extra['_group_members'] = group['members']
+                for name, val in extra.items():
+                    if isinstance(rep, dict):
+                        rep[name] = val
+                    else:
+                        setattr(rep, name, val)
+            out.append(rep)
+        return out
+
+
+def _type_condition_types(cond, universe):
+    """Type names from ``universe`` a ``_type`` condition can match (see ``query_possible_types``)."""
+    if isinstance(cond, str):
+        return universe & {cond}
+    if not isinstance(cond, dict) or not any(str(op).startswith('$') for op in cond):
+        return set(universe)  # array / literal-subdocument equality: not analysed
+    types = set(universe)
+    for op, value in cond.items():
+        if op == '$eq' and isinstance(value, str):
+            types &= {value}
+        elif op == '$in' and isinstance(value, (list, tuple, set)):
+            types &= {v for v in value if isinstance(v, str)}
+        elif op == '$nin' and isinstance(value, (list, tuple, set)):
+            types -= {v for v in value if isinstance(v, str)}
+        elif op == '$ne' and isinstance(value, str):
+            types -= {value}
+        # any other operator ($regex, $not, $exists, ...): no narrowing
+    return types
+
+
+def query_possible_types(query, universe):
+    """Return the type names from ``universe`` that a record matching ``query`` could have.
+
+    Conservative, so a caller may skip querying every type NOT returned: ``_type`` equality,
+    ``$eq`` / ``$in`` narrow and ``$nin`` / ``$ne`` remove; the keys of one dict and the branches
+    of ``$and`` intersect; the branches of ``$or`` unite. Anything else (other ``_type``
+    operators such as ``$regex`` / ``$not``, other logical operators, non-dict queries) keeps
+    every type, so a type that could match is never dropped.
+
+    Args:
+        query (dict): MongoDB-style query.
+        universe (iterable[str]): Candidate type names.
+
+    Returns:
+        list[str]: The possibly-matching type names, in ``universe`` order.
+    """
+    universe = list(universe)
+    all_types = set(universe)
+
+    def walk(q):
+        if not isinstance(q, dict):
+            return set(all_types)
+        types = set(all_types)
+        for key, value in q.items():
+            if key == '_type':
+                types &= _type_condition_types(value, all_types)
+            elif key == '$and' and isinstance(value, list):
+                for sub in value:
+                    types &= walk(sub)
+            elif key == '$or' and isinstance(value, list) and value:
+                union = set()
+                for sub in value:
+                    union |= walk(sub)
+                types &= union
+        return types
+
+    possible = walk(query)
+    return [t for t in universe if t in possible]
 
 
 def query_has_type_constraint(query):

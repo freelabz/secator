@@ -178,6 +178,7 @@ class JsonBackend(QueryBackend):
 	"""Query backend for JSON files on filesystem."""
 
 	name = "json"
+	scan_per_query = True  # every query reads every report file of the workspace
 
 	def __init__(self, workspace_id: str, config: Optional[dict] = None,
 				 context: Optional[dict] = None):

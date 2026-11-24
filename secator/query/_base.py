@@ -52,6 +52,11 @@ class QueryBackend(ABC):
 
 	name: str = 'base'
 
+	# True when every query costs a full pass over the store (no index), so a caller reading
+	# several finding types should read them in ONE query and split by `_type` rather than issue
+	# one query per type. Indexed backends keep per-type queries (cheap seeks, stable ordering).
+	scan_per_query: bool = False
+
 	PROTECTED_FIELDS = [
 		'_context.workspace_id',
 		'_context.workspace_duplicate',
