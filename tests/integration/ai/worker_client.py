@@ -26,6 +26,9 @@ def _guard():
 	NetworkGuard(on_block=lambda addr: print(f'AI-E2E-NETWORK-BLOCKED {addr}', file=sys.stderr, flush=True)).start()
 
 
+REACHED_RUNNING = threading.Event()
+
+
 def _interrupt_when_running(session_id, names, timeout=120):
 	"""SIGINT this process once a runner of each of ``names`` is RUNNING in the session's
 	reports (json driver), so the revoke lands while those children run."""
@@ -42,6 +45,7 @@ def _interrupt_when_running(session_id, names, timeout=120):
 			if (info.get('context') or {}).get('session_id') == session_id and info.get('status') == 'RUNNING':
 				running.add(info.get('name'))
 		if names <= running:
+			REACHED_RUNNING.set()
 			time.sleep(1)  # let them get going
 			break
 		time.sleep(0.3)
@@ -77,6 +81,7 @@ def main(spec_path):
 		'error': error,
 		'items': [i.toDict() if hasattr(i, 'toDict') else i for i in items],
 		'celery_ids': list(getattr(task, 'celery_ids_map', {}) or {}),
+		'reached_running': REACHED_RUNNING.is_set(),
 	}
 	with open(spec['out'], 'w') as f:
 		json.dump(out, f, default=str)

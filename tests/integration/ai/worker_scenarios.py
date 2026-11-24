@@ -9,6 +9,7 @@ import os
 from tests.integration.ai.scripted import Turn, call, say, tools
 
 WORKFLOW = 'ai_e2e_probe'
+REVOKE_CHILD_S = 20  # how long the children of the revoke scenarios run
 
 
 def _lab(n=1):
@@ -99,8 +100,9 @@ def revoke(suffix):
 	"""Long children the client revokes the ai task under."""
 	return [
 		tools(
-			call('run_shell', id='sh', command='sleep 90', description='Long shell'),
-			call('run_task', id='chunked', name='httpx', targets=[f'{_lab()}/slow?s=90', f'{_lab(2)}/slow?s=90'],
+			call('run_shell', id='sh', command=f'sleep {REVOKE_CHILD_S}', description='Long shell'),
+			call('run_task', id='chunked', name='httpx',
+			     targets=[f'{_lab()}/slow?s={REVOKE_CHILD_S}', f'{_lab(2)}/slow?s={REVOKE_CHILD_S}'],
 			     description='Long chunks'),
 		),
 		say('never reached'),

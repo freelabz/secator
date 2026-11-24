@@ -114,7 +114,7 @@ def test_parallel_mix_of_bad_and_good_calls(run_ai, lab):
 
 @pytest.mark.xfail(strict=True, reason=(
 	'bug: list_runners() with no arguments (all of them are optional) is rejected as "empty '
-	'arguments": tool_call_to_action only exempts stop and check_background_jobs'))
+	'arguments": tool_call_to_action only exempts stop'))
 def test_tool_with_only_optional_args_accepts_no_args(run_ai):
 	run = run_ai('bad_list_runners_noargs', [
 		tools(call('list_runners', id='lr')),
