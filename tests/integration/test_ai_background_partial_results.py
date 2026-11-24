@@ -118,9 +118,16 @@ class TestAiPartialResults(unittest.TestCase):
 		cls.server.shutdown()
 
 	def setUp(self):
+		# Point the reports dir at a temp dir for the test. Set and restore it by hand: a
+		# mock.patch of a pydantic config field does not restore it cleanly.
+		from secator.config import CONFIG
 		self.reports = tempfile.mkdtemp()
+		self._reports_before = CONFIG.dirs.reports
+		CONFIG.dirs.reports = Path(self.reports)
 
 	def tearDown(self):
+		from secator.config import CONFIG
+		CONFIG.dirs.reports = self._reports_before
 		shutil.rmtree(self.reports, ignore_errors=True)
 
 	def _run(self, script, targets):
@@ -130,7 +137,6 @@ class TestAiPartialResults(unittest.TestCase):
 			patch("secator.tasks.ai.call_llm", model),
 			patch("secator.tasks.ai.init_llm", lambda **k: None),
 			patch.object(AiTask, "_verify_model", lambda self: iter(())),
-			patch("secator.config.CONFIG.dirs.reports", Path(self.reports)),
 		]
 		with ExitStack() as stack:
 			for p in patches:
