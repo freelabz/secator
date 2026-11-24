@@ -21,7 +21,7 @@ from secator.ai.actions import (
 	ActionContext, check_guardrails, safe_dispatch_action, _run_batch, USAGE_COUNTERS, _get_result_context
 )
 from secator.ai.guardrails import PermissionEngine
-from secator.ai.interactivity import create_backend, DISMISS_ANSWER, RemoteBackend, UserInputTimeout
+from secator.ai.interactivity import BACKGROUND_WAKE, create_backend, DISMISS_ANSWER, RemoteBackend, UserInputTimeout
 from secator.ai.background import BackgroundJobs, BackgroundLimitError, wants_background
 from secator.ai.encryption import SensitiveDataEncryptor, find_placeholders, maybe_encrypt
 from secator.ai.history import ChatHistory, truncate_to_tokens, get_context_window, cap_message
@@ -138,6 +138,25 @@ def _reject_tool_call(runner, tool_name, tool_call_id, error_msg, reason, blocke
 	          message=cap_message(
 	              {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": _error_content}),
 	          _context=dict(runner.context))
+
+
+def _format_background_reports(runner, reports):
+	"""Format ``BackgroundJobs.poll`` reports like a check_background_jobs tool result: the
+	same item shapes, item cap, untrusted-data fence, token budget and encryption."""
+	from secator.ai.tools.runners import _status_item, _result_item
+	context = {"tool_call_name": "check_background_jobs"}
+	rows = []
+	for job, items in reports:
+		rows.append(_status_item(job, context))
+		rows.extend(_result_item(i, context) for i in items)
+	serialized = [{k: v for k, v in r.items() if k not in INTERNAL_FIELDS} for r in rows]
+	if runner.encryptor:
+		serialized = [runner.encryptor.encrypt_finding(r) for r in serialized]
+	out = format_tool_result("check_background_jobs", "success", len(serialized), serialized, max_items=AI_MAX_RESULTS)
+	out = f"<workspace_data>\n{out}\n</workspace_data>"
+	out = truncate_to_tokens(out, runner.history.get_action_budget(runner.model), runner.model, hint=(
+		"\nRead the rest with query_workspace scoped to the job's runner ids."))
+	return maybe_encrypt(out, runner.encryptor)
 
 
 def _reject_malformed_tool_call(runner, name, tc_id, error, extra_fields, reason):
@@ -1101,8 +1120,18 @@ class ai(PythonRunner):
 			max_wait=getattr(self, "background_max_wait", 1800),
 			store=store)
 		ctx.background = self.background
+		# Event-driven end of turn: a run whose turn ended with jobs running waits for the FIRST
+		# of a job finishing (or the max_wait cap) and the user's next message. An input backend
+		# that can be woken (can_wake) checks wake_when while it waits for the user; one that
+		# cannot (CLI prompt) and non-interactive runs wait on the jobs instead
+		# (_should_wait_background). The idle input timer is frozen while jobs run.
 		if isinstance(self.backend, RemoteBackend):
 			self.backend.hold_while = self.background.should_hold_idle
+		if getattr(self.backend, "can_wake", False) is True:
+			self.backend.wake_when = self._background_wake_due
+		# A user message or a stop request (a parent cancelling this subagent) ends a blocked
+		# check_background_jobs (its no-change guard) and any other wait on the jobs.
+		self.background.interrupt = self._background_interrupt
 
 		# Wire query_engine to remote backend if needed
 		if isinstance(self.backend, RemoteBackend):
@@ -1132,6 +1161,8 @@ class ai(PythonRunner):
 				self._save_history()
 				return
 			iteration += 1
+			# Read by _background_wake (a wake at the iteration cap grants the turn it needs).
+			self._loop_iteration = iteration
 
 			# Cooperative stop (set when a parent cancels this run as a background subagent).
 			if getattr(self, "stop_requested", False) is True:
@@ -1962,6 +1993,9 @@ class ai(PythonRunner):
 		backend = self.backend
 		timeout = getattr(backend, "timeout", 600)
 		poll_interval = max(1, getattr(backend, "poll_interval", 5))
+		mgr = getattr(self, "background", None)
+		if mgr is not None and hasattr(mgr, "reset_hold"):
+			mgr.reset_hold()
 		elapsed = 0
 		while elapsed < timeout:
 			try:
@@ -1972,6 +2006,9 @@ class ai(PythonRunner):
 			if steers:
 				for content in steers:
 					self.history.add_user(maybe_encrypt(content, self.encryptor))
+				return True
+			# A background job finished (or hit the max_wait cap) meanwhile: wake the model.
+			if getattr(backend, "can_wake", False) is True and backend.should_wake() and self._background_wake():
 				return True
 			time.sleep(poll_interval)
 			idle_tick = getattr(backend, "idle_tick", None)
@@ -2377,28 +2414,84 @@ class ai(PythonRunner):
 		return messages
 
 	def _should_wait_background(self):
-		"""Wait at end of turn only for a NON-interactive run (no user to resume it later)."""
+		"""Wait on the jobs at end of turn when no input backend can be woken by them: a
+		NON-interactive run (no user to resume it later), or an interactive backend without
+		``can_wake`` (the CLI prompt blocks on a key press): it then behaves like a
+		non-interactive run while jobs are running."""
 		mgr = getattr(self, "background", None)
-		return (mgr is not None and bool(mgr.running())
-		        and getattr(self.backend, "interactive", True) is False)
+		if mgr is None or not mgr.running():
+			return False
+		return (getattr(self.backend, "interactive", True) is False
+		        or getattr(self.backend, "can_wake", False) is not True)
 
 	def _wait_background_end_of_turn(self):
-		"""Block until a running job finishes (bounded by background_max_wait); on timeout cancel
-		the rest. Then hand the model a turn with the status so it reads, cancels or stops."""
+		"""Block until a running job finishes (bounded by background_max_wait), then wake the
+		model with its results (on the cap: cancel the rest and wake)."""
 		mgr = self.background
 		running = mgr.running()
 		console.print(Info(message=f"Waiting for {len(running)} background job(s) (max {mgr.max_wait}s)"))
 		finished = mgr.wait_any(mgr.max_wait)
-		note = "A background job finished."
-		if not finished:
-			cancelled = mgr.cancel_all()
-			note = (f"No background job finished within {mgr.max_wait}s: cancelled "
-			        f"{', '.join(j.id for j in cancelled)}. Their results so far are kept.")
+		if not self._background_wake(cap=not finished):
+			# Nothing to report (e.g. the wait was interrupted): hand the model the status.
+			self.history.add_user(maybe_encrypt(
+				f"[System note, not a user message] You ended your turn while background jobs were running."
+				f"\n{mgr.status_block()}", self.encryptor))
 		yield from self._drain_background()
-		msg = (f"You ended your turn while background jobs were running. {note}\n{mgr.status_block()}\n"
-		       "Read the results you need with check_background_jobs, cancel jobs you no longer need "
-		       "(e.g. servers), then continue or stop. Jobs still running when the run ends are cancelled.")
-		self.history.add_user(maybe_encrypt(msg, self.encryptor))
+
+	def _background_interrupt(self):
+		if getattr(self, "stop_requested", False) is True:
+			return True
+		return getattr(self.backend, "interactive", False) is True and bool(self.backend.has_pending_input())
+
+	def _background_wake_due(self):
+		"""``wake_when`` of the input backend: True when the run should stop waiting for the
+		user and wake the model (a job finished and was not read yet, or the running jobs hit
+		the background_max_wait cap)."""
+		mgr = getattr(self, "background", None)
+		if mgr is None or not mgr.jobs or getattr(self, "stop_requested", False) is True:
+			return False
+		return mgr.wake_due()
+
+	def _background_wake(self, cap=None):
+		"""Wake the model for background job events: ONE system note listing every job that
+		finished and was not read yet, with its final status and results (the same shape and
+		cap as a check_background_jobs result; they are marked read), so the model analyzes
+		them and continues (more jobs, or ends its turn again). On the max_wait cap (``cap``
+		True, or None = detect it), the still-running jobs are cancelled and reported too.
+		Returns True if a note was added."""
+		mgr = self.background
+		if cap is None:
+			cap = mgr.cap_reached()
+		cancelled = mgr.cancel_all() if cap else []
+		jobs = mgr.finished_unread() + [j for j in cancelled if not j.final_read]
+		if not jobs:
+			return False
+		for job in jobs:
+			job.woken = True
+		reports = mgr.poll([j.id for j in jobs])
+		console.print(Info(message=f"Background job(s) finished: {', '.join(j.id for j in jobs)}"))
+		head = "[System note, not a user message] "
+		if cancelled:
+			head += (f"No background job finished within {mgr.max_wait}s: cancelled "
+			         f"{', '.join(j.id for j in cancelled)} (their results so far are kept). ")
+		head += ("Background job(s) finished:\n" + "\n".join(j.summary() for j in jobs) +
+		         "\nTheir final status and results:")
+		tail = ("Analyze these results and continue: tell the user what each job found (with your "
+		        "analysis and next step), then start more jobs or end your turn. Jobs still running "
+		        "need no comment.")
+		# The formatted results are already encrypted (like a tool result): encrypt only our text.
+		msg = (f"{maybe_encrypt(head, self.encryptor)}\n{_format_background_reports(self, reports)}\n"
+		       f"{maybe_encrypt(tail, self.encryptor)}")
+		self.history.add_user(msg)
+		# A wake is one model turn on the run's iteration budget, like a user message (and
+		# bounded the same way, see _MAX_FOLLOWUP_EXTENSIONS).
+		extends = getattr(self, "_followup_extensions", 0)
+		if not isinstance(extends, int):
+			extends = 0
+		if getattr(self, "_loop_iteration", 0) >= self.max_iterations and extends < _MAX_FOLLOWUP_EXTENSIONS:
+			self.max_iterations = self._loop_iteration + 1
+			self._followup_extensions = extends + 1
+		return True
 
 	def _teardown_background(self):
 		"""Run end (stop, error, max iterations, revoke, input timeout): cancel still-running
@@ -2527,6 +2620,9 @@ class ai(PythonRunner):
 				prompt_uuid=prompt_uuid,
 				multiple=multiple,
 			))
+		mgr = getattr(self, "background", None)
+		if mgr is not None and hasattr(mgr, "reset_hold"):
+			mgr.reset_hold()  # the max_wait cap counts per wait for the user
 		response = self.backend.ask_user(
 			question=reason or "What's next?",
 			choices=choices,
@@ -2539,11 +2635,21 @@ class ai(PythonRunner):
 			mode=self.mode,
 			model=self.model,
 			prompt_uuid=prompt_uuid,
+			background_wake=True,
 		)
 		if response is None:
 			return None
 
 		answer = response["answer"]
+
+		# The backend stopped waiting because a background job finished (or hit the max_wait
+		# cap) while the user had sent nothing. Not a user message: wake the model with the
+		# job results (no loop-breaker accounting). The backend already retired its pending
+		# prompt; the model's reply raises a fresh one.
+		if answer == BACKGROUND_WAKE:
+			if self._background_wake():
+				return []
+			return self._prompt_and_redetect(choices, multiple=multiple, reason=reason)
 
 		# Dismiss: the user declined every offered choice ("none of these work for me")
 		# instead of picking one. The pending prompt is already resolved (remote: the doc

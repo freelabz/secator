@@ -20,6 +20,15 @@ from secator.ai.tools import STOP_TOOL_SCHEMA, STOP_TOOL_SCHEMA_SIMPLE
 # prompts (those stay a mandatory allow/deny). In the TUI the key is ESC.
 DISMISS_ANSWER = "__dismiss__"
 
+# Sentinel answer of an end-of-turn (`stopped`) wait that a backend interrupted because
+# ``wake_when`` returned True (a background job finished, or running jobs hit their max wait,
+# while the user had not sent a message). Never a user message: the ai task wakes the model
+# with the job results instead. Only backends with ``can_wake`` return it: RemoteBackend
+# (between two answer polls) and TUIBackend (while the input box is empty). CLIBackend cannot
+# (its prompt_toolkit menu blocks until a key press), so with jobs running a CLI run waits on
+# them like a non-interactive run; AutoBackend has no user to wait for.
+BACKGROUND_WAKE = "__background_wake__"
+
 
 class UserInputTimeout(Exception):
 	"""Raised by the RemoteBackend when a prompt goes unanswered past the timeout.
@@ -41,6 +50,27 @@ class InteractivityBackend:
 	# (stop pauses and waits/polls), False for AutoBackend (stop ends immediately).
 	# Gates the interactive-vs-autonomous `stop` guidance in the system prompt.
 	interactive = True
+
+	# Whether this backend can interrupt its end-of-turn wait when ``wake_when`` fires.
+	can_wake = False
+	# Optional ``() -> bool`` set by the ai task (background jobs): checked while the backend
+	# waits for the user's next message; True = hand control back (BACKGROUND_WAKE).
+	wake_when = None
+
+	def has_pending_input(self) -> bool:
+		"""Whether the user sent a message not consumed yet (ends a blocked background poll).
+		No channel by default."""
+		return False
+
+	def should_wake(self) -> bool:
+		"""Whether ``wake_when`` asks to interrupt the end-of-turn wait. Never raises."""
+		fn = self.wake_when
+		if fn is None:
+			return False
+		try:
+			return bool(fn())
+		except Exception:  # noqa: BLE001 - a broken wake check must never wedge the wait
+			return False
 
 	def ask_user(self, question: str, choices: List[str], session_id: str,
 				 prompt_type: str = "stopped", **context) -> Optional[Dict]:
@@ -166,6 +196,8 @@ class CLIBackend(InteractivityBackend):
 class RemoteBackend(InteractivityBackend):
 	"""Remote DB-polling interactive backend."""
 
+	can_wake = True
+
 	def __init__(self, timeout: int = 600, query_engine: Any = None, poll_interval: int = 5):
 		self.timeout = timeout
 		self.query_engine = query_engine
@@ -250,7 +282,8 @@ class RemoteBackend(InteractivityBackend):
 		# Record the prompt as this run's own even when its pending doc was persisted
 		# elsewhere (the `stop` tool persists its own doc), so run end can park it.
 		self.track_prompt(context.get("prompt_uuid"))
-		answer = self._poll_for_answer(session_id, prompt_type, prompt_uuid=context.get("prompt_uuid"))
+		wake = bool(context.get("background_wake")) and prompt_type == "stopped"
+		answer = self._poll_for_answer(session_id, prompt_type, prompt_uuid=context.get("prompt_uuid"), wake=wake)
 		if answer is None:
 			return None
 
@@ -273,6 +306,20 @@ class RemoteBackend(InteractivityBackend):
 		# stopped pause: return the answer text
 		return {"answer": answer}
 
+	def on_session(self, workspace_id, context, session_id) -> None:
+		self._session_id = session_id
+
+	def has_pending_input(self) -> bool:
+		"""Whether a steer (a message sent while the agent runs) waits to be consumed. Read-only."""
+		if self.query_engine is None or not getattr(self, "_session_id", None):
+			return False
+		try:
+			return bool(self.query_engine.search({
+				"_type": "ai", "ai_type": "steer", "_context.session_id": self._session_id,
+				"status": "pending"}, limit=1))
+		except Exception:  # noqa: BLE001 - never break a wait
+			return False
+
 	def poll_steers(self, session_id):
 		"""Drain pending steer docs for ``session_id`` and mark them consumed.
 
@@ -287,6 +334,7 @@ class RemoteBackend(InteractivityBackend):
 		flipped to ``status:"consumed"`` so it's injected exactly once. Robust by
 		design: any backend error returns ``[]`` so a steer can never crash the run.
 		"""
+		self._session_id = session_id  # for has_pending_input
 		if self.query_engine is None:
 			return []
 		base = {
@@ -338,7 +386,7 @@ class RemoteBackend(InteractivityBackend):
 			pass
 		return contents
 
-	def _poll_for_answer(self, session_id, prompt_type, prompt_uuid=None):
+	def _poll_for_answer(self, session_id, prompt_type, prompt_uuid=None, wake=False):
 		"""Poll the DB for the answer to THIS specific prompt until timeout.
 
 		The query MUST be scoped to the exact prompt the worker is currently
@@ -357,6 +405,11 @@ class RemoteBackend(InteractivityBackend):
 		content as the "answer" so the loop redirects immediately instead of
 		stalling until the prompt is explicitly answered (or times out). This
 		keeps prompt semantics intact for the no-steer case.
+
+		With ``wake`` (an end-of-turn prompt while background jobs exist), a tick
+		that finds no answer and no steer but ``should_wake()`` expires THIS prompt and
+		returns BACKGROUND_WAKE (unless an answer landed meanwhile, which wins). Needs a
+		``prompt_uuid``, so the expiry never touches another prompt.
 		"""
 		base = {
 			"_type": "ai",
@@ -378,6 +431,8 @@ class RemoteBackend(InteractivityBackend):
 			steers = self.poll_steers(session_id)
 			if steers:
 				return "\n".join(steers)
+			if wake and prompt_uuid and self.should_wake():
+				return self._wake_prompt(session_id, prompt_type, prompt_uuid, answered_query)
 			sleep(self.poll_interval)
 			elapsed = self.idle_tick(elapsed, self.poll_interval)
 		# One final search before giving up: the user may have answered during
@@ -393,6 +448,26 @@ class RemoteBackend(InteractivityBackend):
 		# parks it on its way out (park_raised_prompts), and answering it respawns
 		# the task, which restores the conversation and applies the answer.
 		raise UserInputTimeout(f"No answer for {prompt_type} prompt after {self.timeout}s; worker exiting")
+
+	def _wake_prompt(self, session_id, prompt_type, prompt_uuid, answered_query):
+		"""Expire the pending prompt ``prompt_uuid`` and return BACKGROUND_WAKE, or the
+		user's answer when one landed before the expiry (the user always wins)."""
+		try:
+			self.query_engine.update(
+				{
+					"_type": "ai",
+					"ai_type": prompt_type,
+					"_context.session_id": session_id,
+					"status": "pending",
+					"extra_data.prompt_uuid": prompt_uuid,
+				},
+				{"$set": {"status": "timed_out"}},
+			)
+		except Exception:  # noqa: BLE001 - best-effort: the next prompt supersedes it anyway
+			pass
+		self._raised_prompt_uuids.discard(prompt_uuid)
+		answer = self._resolve_answer(answered_query)
+		return answer if answer is not None else BACKGROUND_WAKE
 
 	def park_raised_prompts(self, session_id):
 		"""Stamp the prompts this backend raised that are still pending as parked.
@@ -576,6 +651,8 @@ class TUIBackend(InteractivityBackend):
 	Steers and user prompts flow through the TUI's thread-safe hooks instead of the
 	rich prompt_toolkit menus (which would collide with Textual's display)."""
 
+	can_wake = True
+
 	def poll_steers(self, session_id=None):
 		from secator.rich import get_tui
 		tui = get_tui()
@@ -589,10 +666,15 @@ class TUIBackend(InteractivityBackend):
 		tui = get_tui()
 		if tui is None:
 			return None
+		kwargs = {}
+		if context.get("background_wake") and prompt_type == "stopped" and self.wake_when is not None:
+			# The TUI checks it while it waits, and answers BACKGROUND_WAKE only while the
+			# input box is empty (never under a user who is typing).
+			kwargs["wake"] = self.should_wake
 		res = tui.tui_ask_user(
 			question, choices or [], prompt_type, multiple=bool(context.get("multiple", False)),
 			command=context.get("command") or context.get("value") or "",
-			solo=bool(context.get("solo", False)))
+			solo=bool(context.get("solo", False)), **kwargs)
 		answer = (res or {}).get("answer")
 		if answer is None:
 			return None
@@ -609,6 +691,14 @@ class TUIBackend(InteractivityBackend):
 				return {"answer": "allow"}
 			return {"answer": "deny"}
 		return {"answer": answer}
+
+	def has_pending_input(self) -> bool:
+		from secator.rich import get_tui
+		tui = get_tui()
+		try:
+			return bool(tui.tui_has_steers()) if tui is not None and hasattr(tui, "tui_has_steers") else False
+		except Exception:  # noqa: BLE001 - never break a wait
+			return False
 
 	@property
 	def owns_display(self) -> bool:

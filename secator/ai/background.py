@@ -120,6 +120,10 @@ class BackgroundJob:
 	last_refresh: float = 0.0
 	# Set once the model polled the job after it finished (its final status was seen).
 	final_read: bool = False
+	# Set once the ai task woke the model to report this finished job (one wake per job).
+	woken: bool = False
+	# Called after each appended item (the registry wakes its waiters on it).
+	notify: Optional[Callable] = field(default=None, repr=False)
 	cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
 	thread: Optional[threading.Thread] = field(default=None, repr=False)
 	_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -145,6 +149,13 @@ class BackgroundJob:
 	def append(self, item):
 		with self._lock:
 			self.items.append(item)
+		if self.notify is not None:
+			self.notify()
+
+	def has_unreported(self) -> bool:
+		"""Whether the job produced a model-visible item since the last poll."""
+		with self._lock:
+			return any(_item_type(i) not in _SKIPPED_TYPES for i in self.items[self.reported:])
 
 	def take_undrained(self) -> List[Any]:
 		with self._lock:
@@ -259,6 +270,9 @@ class BackgroundJobs:
 	Args:
 		max_jobs: Max number of RUNNING jobs at once; a submit beyond it is refused.
 		max_wait: Upper bound (seconds) of any single wait on background jobs.
+	Events: a job ending or producing an item notifies ``_cond``, so every wait here returns
+	on it at once (in-process jobs); a detached job is read from the store between waits.
+	``interrupt`` (set by the ai task to "the user sent a message") ends a wait too.
 	"""
 
 	# Store runner statuses that end a job, and the job status they map to.
@@ -269,6 +283,16 @@ class BackgroundJobs:
 	def __init__(self, max_jobs: int = 3, max_wait: int = 600, store: Any = None):
 		self.max_jobs = max(int(max_jobs or 0), 0)
 		self.max_wait = max(int(max_wait or 0), 0)
+		# Each job's (status, store status) at the last poll, to tell whether a poll has
+		# anything new (see the no-change guard in ``poll``).
+		self._seen_state: Dict[str, tuple] = {}
+		# What the last poll's no-change guard did, for the tool result:
+		# ``{"blocked": bool, "waited": seconds, "changed": bool}``.
+		self.last_poll: Dict[str, Any] = {}
+		# Optional ``() -> bool``: True when the user sent a message that is not consumed yet, or
+		# the run was asked to stop. Ends any wait here, so a blocked poll never keeps the user
+		# waiting and never outlives a cancel.
+		self.interrupt: Optional[Callable[[], bool]] = None
 		# Query engine over the run's drivers (``get_runner_status`` + ``search``), or None when
 		# the run persists nothing. With a store, a job's status and findings are read from it
 		# by runner id, so a job on another worker is polled exactly like an in-process one.
@@ -276,6 +300,9 @@ class BackgroundJobs:
 		self.jobs: Dict[str, BackgroundJob] = {}
 		self._ids = itertools.count(1)
 		self._cond = threading.Condition()
+		# Bumped under ``_cond`` on every job event, so a wait never misses one that lands
+		# between its checks and its ``_cond.wait``.
+		self._events = 0
 		self._hold_since: Optional[float] = None
 
 	def should_hold_idle(self) -> bool:
@@ -327,10 +354,11 @@ class BackgroundJobs:
 					if job.status == RUNNING:
 						job.status = final
 						job.ended = time.time()
+					self._events += 1
 					self._cond.notify_all()
 
-	def store_results(self, job: BackgroundJob) -> List[Dict]:
-		"""Findings of a job's child runner read from the store, not yet reported (by ``_uuid``)."""
+	def _store_unseen(self, job: BackgroundJob) -> List[Dict]:
+		"""Findings of a job's child runner in the store that were not reported yet (by ``_uuid``)."""
 		if self.store is None:
 			return []
 		ref = job.store_ref()
@@ -342,15 +370,43 @@ class BackgroundJobs:
 			found = self.store.search({key: ids[0]}, limit=500) or []
 		except Exception:  # noqa: BLE001 - a store hiccup must not break polling
 			return []
-		out = []
-		for r in found:
+		return [r for r in found
+		        if not (isinstance(r, dict) and r.get("_uuid") and r.get("_uuid") in job.store_seen)]
+
+	def store_results(self, job: BackgroundJob) -> List[Dict]:
+		"""Findings of a job's child runner read from the store, not yet reported (marked seen)."""
+		out = self._store_unseen(job)
+		for r in out:
 			uid = r.get("_uuid") if isinstance(r, dict) else None
-			if uid and uid in job.store_seen:
-				continue
 			if uid:
 				job.store_seen.add(uid)
-			out.append(r)
 		return out
+
+	def finished_unread(self) -> List[BackgroundJob]:
+		"""Jobs that ended on their own (done or failed) that the model has not read yet and was
+		not woken for yet."""
+		return [j for j in self.jobs.values()
+		        if j.finished and j.status != CANCELLED and not j.final_read and not j.woken]
+
+	def reset_hold(self):
+		"""Start a new wait: the ``max_wait`` cap counts from the next hold check."""
+		self._hold_since = None
+
+	def cap_reached(self) -> bool:
+		"""Whether jobs have been running for ``max_wait`` seconds of the current wait (the hold
+		clock of ``should_hold_idle``, started on the first check of the wait)."""
+		if not self.running():
+			self._hold_since = None
+			return False
+		if self._hold_since is None:
+			self._hold_since = time.time()
+		return (time.time() - self._hold_since) >= self.max_wait
+
+	def wake_due(self) -> bool:
+		"""Whether a waiting end of turn should wake the model: a job finished and was not read
+		yet, or the running jobs reached the ``max_wait`` cap."""
+		self.refresh()
+		return bool(self.finished_unread()) or self.cap_reached()
 
 	def unread(self) -> List[BackgroundJob]:
 		"""Jobs still running, or finished with results the model has not read yet."""
@@ -367,14 +423,14 @@ class BackgroundJobs:
 		finished = [j.id for j in jobs if j.finished]
 		note = ""
 		if finished:
-			note = (f"FINISHED since you last read them: {', '.join(finished)}. Read them with "
-			        f"check_background_jobs NOW, then tell the user in your message what each one found, "
-			        f"with your analysis (e.g. 'Subagent <name> finished and exploited <X>: <analysis>'). "
-			        f"Never let a finished job pass silently.\n")
+			note = (f"FINISHED and not read yet: {', '.join(finished)}. Read them with check_background_jobs, "
+			        f"then tell the user in your message what each one found, with your analysis and next "
+			        f"step (e.g. 'Subagent <name> finished and exploited <X>: <analysis>').\n")
 		return (
 			"<background_jobs>\n" + "\n".join(lines) + "\n" + note +
-			"Read results with check_background_jobs (pass wait=<seconds> to block until a job "
-			"finishes); stop one you no longer need with cancel_background_job.\n"
+			"Jobs still running need no comment: proceed normally. Do not poll them in a loop: end your "
+			"turn and you are woken with the results when a job finishes (or when the user writes). "
+			"check_background_jobs reads partial results; cancel_background_job stops a job you no longer need.\n"
 			"</background_jobs>")
 
 	# -- lifecycle ---------------------------------------------------------
@@ -400,6 +456,7 @@ class BackgroundJobs:
 			action=dict(action),
 			description=action.get("description", ""),
 			can_detach=self.store is not None)
+		job.notify = self._notify
 		self.jobs[job.id] = job
 		job_ctx = replace(ctx, silent=True, in_batch=False)
 
@@ -425,6 +482,7 @@ class BackgroundJobs:
 					# failed, it keeps running until the store reports its runner's end.
 					if job.status == RUNNING and (has_error or not job.detached):
 						job.status = FAILED if has_error else DONE
+					self._events += 1
 					self._cond.notify_all()
 
 		job.thread = threading.Thread(target=_run, name=f"secator-ai-{job.id}", daemon=True)
@@ -440,6 +498,7 @@ class BackgroundJobs:
 		with self._cond:
 			job.status = CANCELLED
 			job.ended = time.time()
+			self._events += 1
 			self._cond.notify_all()
 		with job._lock:
 			runners = list(job.runners)
@@ -456,25 +515,52 @@ class BackgroundJobs:
 				job.thread.join(timeout=max(deadline - time.time(), 0))
 		return [j for j in cancelled if j]
 
-	def wait(self, job_ids: List[str], timeout: float = 0) -> bool:
+	def _notify(self):
+		with self._cond:
+			self._events += 1
+			self._cond.notify_all()
+
+	def _has_new_items(self, job: BackgroundJob) -> bool:
+		"""Whether a job produced a model-visible result since the last poll (buffer or store)."""
+		return job.has_unreported() or bool(self._store_unseen(job))
+
+	def _interrupted(self) -> bool:
+		fn = self.interrupt
+		if fn is None:
+			return False
+		try:
+			return bool(fn())
+		except Exception:  # noqa: BLE001 - a broken check must never wedge a wait
+			return False
+
+	def wait(self, job_ids: List[str], timeout: float = 0, until_items: bool = False) -> bool:
 		"""Block until one of ``job_ids`` is finished, bounded by ``min(timeout, max_wait)``.
 
-		Returns True if a watched job is finished (or none of them exists), False on timeout.
+		With ``until_items``, also return as soon as one of them produced a new (partial) result.
+		A pending user message or a stop request (``interrupt``) ends the wait too.
+		Returns True if a watched job is finished / has new results / the user wrote (or none
+		of the jobs exists), False on timeout.
 		"""
 		timeout = min(max(float(timeout or 0), 0), self.max_wait)
 		deadline = time.time() + timeout
 		step = 1.0
 		while True:
+			seen = self._events
 			watched = [self.jobs[i] for i in job_ids if i in self.jobs]
 			self.refresh(watched)
 			if not watched or any(j.finished for j in watched):
+				return True
+			if until_items and any(self._has_new_items(j) for j in watched):
+				return True
+			if self._interrupted():
 				return True
 			remaining = deadline - time.time()
 			if remaining <= 0:
 				return False
 			# Wake on an in-process job's end (notify), else poll the store with backoff.
 			with self._cond:
-				self._cond.wait(timeout=min(remaining, step))
+				if self._events == seen:
+					self._cond.wait(timeout=min(remaining, step))
 			step = min(step * 2, 15.0)
 
 	def wait_any(self, timeout: float) -> bool:
@@ -484,20 +570,41 @@ class BackgroundJobs:
 			return True
 		return self.wait(ids, timeout=timeout)
 
+	def _job_state(self, job: BackgroundJob) -> tuple:
+		return job.status, (job.store_status or {}).get("status", "")
+
 	def poll(self, job_ids: Optional[List[str]] = None, wait: float = 0):
 		"""Return ``[(job, new_items)]`` for the requested jobs (default: all).
 
 		``new_items`` are the job's items produced since the previous poll (partial
 		results while running, the rest once finished). With ``wait`` > 0, first block
 		until one of the requested running jobs finishes (bounded by ``max_wait``).
+
+		No-change guard: a no-``wait`` poll of running jobs that were all polled before and
+		have nothing new since (no item, no status change) blocks until the next event: one
+		of them finishes or produces a result, the user writes (``interrupt``), or
+		``max_wait``. Event-driven (no fixed delay). ``last_poll`` says whether it blocked.
 		"""
 		ids = [i for i in (job_ids or []) if i]
+		running_ids = [i for i in (ids or list(self.jobs)) if i in self.jobs and not self.jobs[i].finished]
+		blocked = False
+		waited = 0.0
 		if wait:
-			running_ids = [i for i in (ids or self.jobs) if i in self.jobs and not self.jobs[i].finished]
 			if running_ids:
 				self.wait(running_ids, timeout=wait)
+		elif running_ids and self._nothing_new(running_ids):
+			blocked = True
+			start = time.time()
+			self.wait(running_ids, timeout=self.max_wait, until_items=True)
+			waited = time.time() - start
 		jobs = [self.jobs[i] for i in ids if i in self.jobs] if ids else list(self.jobs.values())
 		self.refresh(jobs, force=True)
+		changed = False
+		for job in jobs:
+			state = self._job_state(job)
+			if self._seen_state.get(job.id) != state:
+				changed = changed or job.id in self._seen_state
+				self._seen_state[job.id] = state
 		out = []
 		for job in jobs:
 			items = job.take_unreported()
@@ -505,7 +612,21 @@ class BackgroundJobs:
 				uid = i.get("_uuid") if isinstance(i, dict) else getattr(i, "_uuid", None)
 				if uid:
 					job.store_seen.add(uid)
-			out.append((job, items + self.store_results(job)))
+			new = items + self.store_results(job)
+			changed = changed or bool(new)
+			out.append((job, new))
 			if job.finished:
 				job.final_read = True
+		self.last_poll = {"blocked": blocked, "waited": int(round(waited)), "changed": changed}
 		return out
+
+	def _nothing_new(self, job_ids: List[str]) -> bool:
+		"""Whether every job in ``job_ids`` was polled before and has nothing new since."""
+		self.refresh([self.jobs[i] for i in job_ids], force=True)
+		for i in job_ids:
+			job = self.jobs[i]
+			if i not in self._seen_state or self._seen_state[i] != self._job_state(job):
+				return False
+			if self._has_new_items(job):
+				return False
+		return True
