@@ -11,6 +11,8 @@ class Technology(OutputType):
 	product: str
 	match: str
 	version: str = None
+	vendor: str = field(default='', compare=False)
+	key: str = field(default='', compare=False)
 	extra_data: dict = field(default_factory=dict, repr=True, compare=False)
 	tags: list = field(default_factory=list, compare=False)
 	confidence: str = field(default='high', compare=False)
@@ -29,6 +31,22 @@ class Technology(OutputType):
 	_sort_by = ('match', 'product', 'version')
 	_group_by = ('product',)
 	_group_aggregate = 'match'
+
+	def __post_init__(self):
+		super().__post_init__()
+		# One identity whatever tool found it: catalog display name, split-off version,
+		# CPE-style `vendor:product` key (see secator/data/technologies.yaml).
+		from secator.technology import normalize_technology
+		cpes = (self.extra_data or {}).get('cpe')
+		norm = normalize_technology(self.product, self.version, self.vendor, cpes)
+		if norm['product'] and norm['product'] != self.product:
+			self.extra_data = {**(self.extra_data or {}), 'raw_product': self.product}
+			self.product = norm['product']
+		self.version = norm['version']  # the given version, else the embedded one; none for a versionless alias
+		self.vendor = norm['vendor'] or self.vendor
+		self.key = norm['key'] or self.key
+		if norm['method'] == 'fuzzy':  # approximate identity: consumers should not trust it fully
+			self.extra_data = {**(self.extra_data or {}), 'key_match': 'fuzzy'}
 
 	def __str__(self) -> str:
 		return self.match
