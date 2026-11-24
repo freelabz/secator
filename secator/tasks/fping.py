@@ -60,7 +60,7 @@ class fping(ReconIp):
 
 	@staticmethod
 	def before_init(self):
-		attrs = fping.runtime_chunk_attrs(self.inputs, self.run_opts)
+		attrs = self.runtime_chunk_attrs(self.inputs, self.run_opts)
 		if attrs:
 			self.file_flag = attrs['file_flag']
 			self.input_chunk_size = attrs['input_chunk_size']

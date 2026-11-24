@@ -224,27 +224,30 @@ def _is_heavy_runner(runner_type: str, name: str, opts: dict = None, targets: li
 	"""
 	if runner_type != 'task':
 		return True
-	if name.lower() == 'ai':
+	from secator.ai.tools._runner import resolves_to_ai_task  # lazy: _runner imports this module
+	if resolves_to_ai_task(name):  # `ai` and `ai/<suffix>`
 		return False
 	try:
 		cls = Task.get_task_class(name)
 	except Exception:
 		return False
-	count = len(targets or [])
-	if count > CONFIG.addons.ai.inline_max_targets:
+	targets = list(dict.fromkeys(targets or []))
+	if len(targets) > CONFIG.addons.ai.inline_max_targets:
 		return True
-	# Inputs a `targets_` extractor pulls from earlier results are only known once the child is
-	# built: they can make it wide, so dispatch.
-	if any(str(k).endswith('_') and str(k).rstrip('_') == 'targets' for k in (opts or {})):
+	# Inputs the child pulls from earlier results at build time (a `targets_` extractor, or the
+	# targets tagged with a `parent_scope`) are unknown here and can make it wide: dispatch.
+	opts = opts or {}
+	if opts.get('parent_scope') or any(str(k).endswith('_') and str(k).rstrip('_') == 'targets' for k in opts):
 		return True
-	# Same rule as the task's own needs_chunking(), evaluated before the child is built: it would
-	# chunk in-process (sync rule) or once dispatched (async rule, input_chunk_size).
+	# Same rule as the task's own needs_chunking(), evaluated before the child is built. In a
+	# worker the chunk check runs with the async rule (input_chunk_size); the sync rule is checked
+	# too so the decision does not depend on where that check runs (at worst: one more dispatch).
 	would_chunk = getattr(cls, 'would_chunk', None)
-	if would_chunk and (would_chunk(targets or [], True, opts) or would_chunk(targets or [], False, opts)):
+	if would_chunk and (would_chunk(targets, True, opts) or would_chunk(targets, False, opts)):
 		return True
 	from secator.runners._helpers import resolve_task_queue
 	try:
-		profile = resolve_task_queue(cls, opts or {})
+		profile = resolve_task_queue(cls, opts)
 	except Exception:
 		return True  # can't resolve — be conservative and dispatch
 	return profile in set(CONFIG.addons.ai.dispatch_profiles or [])

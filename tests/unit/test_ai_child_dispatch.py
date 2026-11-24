@@ -67,6 +67,7 @@ class TestIsHeavyRunner(unittest.TestCase):
 	def test_task_with_targets_extractor_dispatched(self):
 		with self._cfg():
 			self.assertTrue(_is_heavy_runner('task', 'httpx', {'targets_': [{'type': 'url', 'field': 'url'}]}, ['a']))
+			self.assertTrue(_is_heavy_runner('task', 'httpx', {'parent_scope': 'scan'}, ['a']))
 
 	def test_runtime_chunk_rule_dispatched(self):
 		with self._cfg():
@@ -82,6 +83,11 @@ class TestIsHeavyRunner(unittest.TestCase):
 	def test_subagent_runs_inline(self):
 		with self._cfg(max_targets=1):
 			self.assertFalse(_is_heavy_runner('task', 'ai', {}, ['a', 'b', 'c']))
+			self.assertFalse(_is_heavy_runner('task', 'ai/example', {}, ['a', 'b', 'c']))
+
+	def test_duplicate_targets_counted_once(self):
+		with self._cfg(max_targets=1):
+			self.assertFalse(_is_heavy_runner('task', 'httpx', {}, ['a', 'a']))
 
 	def test_unknown_task_inline(self):
 		with self._cfg():
@@ -250,8 +256,11 @@ class TestWouldChunkParity(unittest.TestCase):
 		for task_cls in discover_tasks():
 			if not issubclass(task_cls, Command) or task_cls.__name__ in unchanged:
 				continue
-			source = inspect.getsource(task_cls)
-			if re.search(r'self\.(file_flag|input_chunk_size)\s*=', source):
+			# the task and the task classes it inherits from, up to Command
+			source = ''.join(
+				inspect.getsource(c) for c in task_cls.__mro__
+				if issubclass(c, Command) and c is not Command and c.__module__.startswith('secator.tasks'))
+			if re.search(r'self\.(file_flag|input_chunk_size)\s*=|setattr\(self\b', source):
 				with self.subTest(task=task_cls.__name__):
 					self.assertIsNot(
 						task_cls.runtime_chunk_attrs.__func__, Command.runtime_chunk_attrs.__func__)
