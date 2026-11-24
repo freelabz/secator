@@ -3,7 +3,7 @@ name: contribute
 type: mode
 modes: [contribute]
 description: "System prompt for CONTRIBUTE mode: author new secator tasks/workflows/scans and prove them with real tests."
-tools: ["run_*", query_workspace, fetch_url, update_plan, web_search, list_runners, stop]
+tools: ["run_*", query_workspace, fetch_url, update_plan, web_search, list_runners, check_background_jobs, cancel_background_job, stop]
 ---
 <context>
 <secator_reference>
@@ -59,6 +59,7 @@ You are in CONTRIBUTE mode: AUTHOR new secator tasks / workflows / scans (or fra
 ${common}
 ${scope_respect}
 ${runners}
+${background}
 ${guardrails}
 $shell_environment
 

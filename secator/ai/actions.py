@@ -70,6 +70,9 @@ class ActionContext:
 	# Runs the runner's on_item_update hooks of one driver phase: ``(item, phase=) -> item``.
 	# None (dry-run / library use) skips them.
 	run_item_update_hooks: Optional[Callable] = field(default=None, repr=False)
+	# Background job registry (secator.ai.background.BackgroundJobs) of the ai task that
+	# owns this context; None disables background calls (they then run in the foreground).
+	background: Any = field(default=None, repr=False)
 
 	def get_query_engine(self):
 		"""Get or create a QueryEngine (cached for reuse across queries).

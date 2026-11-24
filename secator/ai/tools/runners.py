@@ -4,6 +4,7 @@
 * ``run_shell`` — run a shell command (optionally in the sandbox container).
 * ``run_subagent`` — delegate to a child ``ai`` task.
 * ``list_runners`` — list the workspace run history.
+* ``check_background_jobs`` / ``cancel_background_job`` — poll / stop background jobs.
 
 The runner execution machinery they share lives in ``_runner.py`` (and ``_sandbox.py``
 for ``run_shell``).
@@ -13,6 +14,7 @@ from secator.output_types import Error, Ai, Info, Warning
 from secator.ai.actions import ActionContext, _get_result_context
 from secator.ai.tools._runner import _run_runner, resolves_to_ai_task, _child_preamble, _child_run_opts
 from secator.ai.tools.base import BaseTool, _TARGETS_SCHEMA, _DESCRIPTION_SCHEMA
+from secator.ai.tools.base import _BACKGROUND_SCHEMA, _SUBAGENT_BACKGROUND_SCHEMA
 from secator.runners import Task
 from secator.ai.utils import _denied_secret_read, _sanitized_env, _scrub_secrets, _truncate
 from secator.ai.tools._sandbox import _ensure_sandbox_container, _sandbox_container_name, _wrap_docker_exec
@@ -41,6 +43,7 @@ class RunTask(BaseTool):
 					},
 					"targets": _TARGETS_SCHEMA,
 					"description": _DESCRIPTION_SCHEMA,
+					"background": _BACKGROUND_SCHEMA,
 					"opts": {
 						"type": "object",
 						"description": "Optional task-specific options (e.g. ports, rate_limit). Control/security flags are ignored."
@@ -82,6 +85,7 @@ class RunWorkflow(BaseTool):
 					},
 					"targets": _TARGETS_SCHEMA,
 					"description": _DESCRIPTION_SCHEMA,
+					"background": _BACKGROUND_SCHEMA,
 					"opts": {
 						"type": "object",
 						"description": "Optional workflow options (e.g. profiles). Control/security flags are ignored."
@@ -129,6 +133,12 @@ def _resolve_shell_timeout(action: Dict) -> int:
 	from secator.config import CONFIG
 	default = getattr(getattr(CONFIG, "security", None), "shell_default_timeout", _SHELL_TIMEOUT) or _SHELL_TIMEOUT
 	requested = action.get("timeout")
+	ceiling = CONFIG.celery.task_max_timeout
+	# A background command (a server, `docker compose up`, a long fuzz) is not awaited by the
+	# loop, so the interactive 30s default does not apply: with no explicit `timeout` it runs
+	# up to the global task-timeout ceiling (-1 = no cap) and the model cancels it when done.
+	if action.get("background") and requested is None:
+		return ceiling if (ceiling is not None and ceiling > 0) else -1
 	base = default
 	if requested is not None:
 		try:
@@ -136,7 +146,6 @@ def _resolve_shell_timeout(action: Dict) -> int:
 		except (TypeError, ValueError):
 			base = default
 	base = max(base, default)  # floor: never below the per-command default
-	ceiling = CONFIG.celery.task_max_timeout
 	if ceiling is not None and ceiling > 0:
 		base = min(base, ceiling)  # cap: never above the global task-timeout ceiling
 	return base
@@ -165,9 +174,11 @@ class RunShell(BaseTool):
 						"type": "integer",
 						"description": "Optional max run time in seconds for THIS command (default 30). Raise it for a "
 						               "slow command (install, long scan) and re-run after a timeout. Capped at the "
-						               "server's configured maximum task timeout; values below the default are floored."  # noqa: E501
+						               "server's configured maximum task timeout; values below the default are floored. "
+						               "A background command without `timeout` runs up to that maximum."  # noqa: E501
 					},
-					"description": _DESCRIPTION_SCHEMA
+					"description": _DESCRIPTION_SCHEMA,
+					"background": _BACKGROUND_SCHEMA
 				},
 				"required": ["command", "description"]
 			}
@@ -269,7 +280,7 @@ class RunShell(BaseTool):
 			# Check the timeout at least once a second: the default monitor cadence is
 			# stat_update_frequency (tens of seconds), which would let a short shell timeout
 			# lapse unenforced. Stats stay gated to their own frequency (no extra overhead).
-			runner.monitor_poll_interval = min(1.0, effective_timeout)
+			runner.monitor_poll_interval = min(1.0, effective_timeout) if effective_timeout > 0 else 1.0
 
 			# Emit the command Ai now that the runner exists: its on_init hook has
 			# stamped the runner id into context, so clients can link this item to the
@@ -357,6 +368,7 @@ class RunSubagent(BaseTool):
 					},
 					"targets": _TARGETS_SCHEMA,
 					"description": _DESCRIPTION_SCHEMA,
+					"background": _SUBAGENT_BACKGROUND_SCHEMA,
 					"mode": {
 						"type": "string",
 						"enum": ["chat", "scan", "exploit"],
@@ -530,3 +542,129 @@ class ListRunners(BaseTool):
 			row.setdefault("_type", "runner")
 			row["_context"] = {**context, "ai_query_result": True}
 			yield row
+
+
+# ---------- check_background_jobs / cancel_background_job ----------
+# Companions of the ``background`` flag on run_task / run_workflow / run_shell /
+# run_subagent (see :mod:`secator.ai.background`). Both are read/control-only on the
+# ai task's own jobs (no target side effect of their own), hence auto-allowed; the
+# background calls themselves were approved by the guardrails when they were made.
+
+def _ctx_for(action, ctx):
+	from secator.ai.actions import _get_result_context
+	return _get_result_context(action, ctx)
+
+
+def _status_item(job, context):
+	"""Model-facing status entry (a plain dict: reported in the tool result, not persisted)."""
+	return {"_type": "background_job", **job.to_dict(), "_context": dict(context)}
+
+
+def _result_item(item, context):
+	"""A job item re-surfaced for the model under THIS poll's tool call.
+
+	A plain dict tagged ``ai_query_result`` so the loop collects it for the tool result
+	without re-yielding or re-persisting it: the ai task already persisted it when it
+	drained the job.
+	"""
+	d = item.toDict() if hasattr(item, "toDict") else dict(item)
+	d["_context"] = {**(d.get("_context") or {}), **context, "ai_query_result": True}
+	return d
+
+
+class CheckBackgroundJobs(BaseTool):
+	name = "check_background_jobs"
+	action = "check_background_jobs"
+	auto_allow = True
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "check_background_jobs",
+			"description": "Check your background jobs (calls made with background=true, and subagents). Returns "
+			               "each job's status and the results it produced SINCE YOUR LAST CHECK (partial results "
+			               "while running, the rest once finished; a subagent returns its handback). Pass `wait` "
+			               "to block up to that many seconds until one of the jobs finishes, instead of polling "
+			               "in a loop. Example: check_background_jobs(job_ids=['bg-1'], wait=120).",
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"job_ids": {
+						"type": "array",
+						"items": {"type": "string"},
+						"description": "Job ids to check (e.g. ['bg-1']). Omit to check all jobs."
+					},
+					"wait": {
+						"type": "integer",
+						"description": "Optional seconds to wait for one of the jobs to finish before returning "
+						               "(capped by the run's background_max_wait). 0 or omitted = return now."
+					}
+				},
+				"required": []
+			}
+		}
+	}
+
+	def run(self, action, ctx):
+		from secator.output_types import Error
+		context = _ctx_for(action, ctx)
+		mgr = getattr(ctx, "background", None)
+		if mgr is None:
+			yield Error(message="Background jobs are not available in this run.", _context=context)
+			return
+		try:
+			wait = int(action.get("wait") or 0)
+		except (TypeError, ValueError):
+			wait = 0
+		job_ids = action.get("job_ids") or []
+		if isinstance(job_ids, str):
+			job_ids = [job_ids]
+		unknown = [i for i in job_ids if mgr.get(i) is None]
+		if unknown:
+			yield Error(message=(
+				f"Unknown background job(s): {unknown}. Jobs only live as long as the run that started "
+				f"them; their persisted findings can be read with query_workspace."), _context=context)
+		reports = mgr.poll([i for i in job_ids if i not in unknown] or None, wait=wait) \
+			if (not job_ids or len(unknown) < len(job_ids)) else []
+		if not reports and not unknown:
+			yield {"_type": "background_job", "status": "none", "message": "No background jobs.", "_context": dict(context)}
+			return
+		for job, items in reports:
+			yield _status_item(job, context)
+			for item in items:
+				yield _result_item(item, context)
+
+
+class CancelBackgroundJob(BaseTool):
+	name = "cancel_background_job"
+	action = "cancel_background_job"
+	auto_allow = True
+	schema = {
+		"type": "function",
+		"function": {
+			"name": "cancel_background_job",
+			"description": "Cancel a running background job (e.g. a server you no longer need, or a scan that is "
+			               "no longer useful). Results it already produced stay stored. "
+			               "Example: cancel_background_job(job_id='bg-2').",
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"job_id": {"type": "string", "description": "The job id to cancel (e.g. 'bg-2')."}
+				},
+				"required": ["job_id"]
+			}
+		}
+	}
+
+	def run(self, action, ctx):
+		from secator.output_types import Error
+		context = _ctx_for(action, ctx)
+		mgr = getattr(ctx, "background", None)
+		if mgr is None:
+			yield Error(message="Background jobs are not available in this run.", _context=context)
+			return
+		job_id = action.get("job_id", "")
+		job = mgr.cancel(job_id)
+		if job is None:
+			yield Error(message=f"Unknown background job {job_id!r}.", _context=context)
+			return
+		yield _status_item(job, context)

@@ -443,6 +443,11 @@ class AiAddon(StrictModel):
 	# targets, or has more than `inline_max_targets` targets.
 	dispatch_profiles: List[str] = ['large', 'extra_large']
 	inline_max_targets: int = Field(default=10, ge=1)
+	# Background jobs (background tool calls and subagents): max jobs running at once, and
+	# max seconds the AI waits on them at once (explicit wait, end of a non-interactive
+	# turn, idle input timer hold). Per-run overridable via the ai task options.
+	background_max_jobs: int = 3
+	background_max_wait: int = 1800
 	context_window: int = Field(default=128_000, ge=1)
 	user_response_timeout: int = 600
 	encrypt_pii: bool = True

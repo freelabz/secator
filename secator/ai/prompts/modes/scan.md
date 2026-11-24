@@ -36,6 +36,7 @@ ${queries}
 ${findings}
 ${arsenal}
 ${subagents}
+${background}
 ${guardrails}
 $shell_environment
 ${exploitation_report}
