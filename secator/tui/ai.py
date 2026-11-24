@@ -580,7 +580,9 @@ def run_ai_tui(runner_cls, config, inputs, opts, hooks, context):
 	merged = dict(hooks or {})
 	cls_hooks = dict(merged.get(runner_cls, {}))
 	cls_hooks["on_item"] = list(cls_hooks.get("on_item", [])) + [_tui_feed]
-	cls_hooks["on_start"] = list(cls_hooks.get("on_start", [])) + [_tui_track]
+	# Track first: a driver on_start hook can block on a network update, and a quit during it
+	# must still find (and finalize) the runner. The driver's create runs earlier, in on_init.
+	cls_hooks["on_start"] = [_tui_track] + list(cls_hooks.get("on_start", []))
 	merged[runner_cls] = cls_hooks
 
 	state = {}

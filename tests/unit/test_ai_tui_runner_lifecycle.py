@@ -117,6 +117,43 @@ class TestAiTuiRunnerLifecycle(unittest.TestCase):
 			driver.thread.join(5)
 		self.assertEqual(ended, [('FakeAi', 'REVOKED')])
 
+	def test_quit_during_a_blocking_start_hook_finalizes_the_inner_runner(self):
+		# A driver on_start hook (e.g. a network status update) is still running when the
+		# user quits: the inner runner must already be tracked, so it still ends revoked.
+		started, release = threading.Event(), threading.Event()
+		inner_cls = _make_runner_cls(threading.Event(), release)
+
+		@task()
+		class Wrapper(PythonRunner):
+			input_types = None
+			output_types = [Info]
+
+			def __init__(self, config, inputs, run_opts=None, hooks=None, context=None):
+				opts = dict(run_opts or {})
+				opts.pop('sync', None)
+				super().__init__(inputs, hooks=hooks, context=context or {}, sync=True, **opts)
+				self.enable_hooks = False
+
+			def yielder(self):
+				inner = inner_cls(None, self.inputs, run_opts={'print_item': False}, hooks=self._hooks.get(Wrapper, {}))
+				yield from inner
+
+		def slow_update(self):
+			started.set()
+			release.wait(5)
+
+		ended = []
+		hooks = {Wrapper: {
+			'on_start': [slow_update],
+			'on_end': [lambda self: ended.append((self.__class__.__name__, self.status))]}}
+		driver = _AppDriver(wait_for=started)
+		try:
+			_run_tui(Wrapper, hooks, driver)
+		finally:
+			release.set()
+			driver.thread.join(5)
+		self.assertEqual(ended, [('FakeAi', 'REVOKED')])
+
 	def test_quit_does_not_refinalize_a_finished_runner(self):
 		started, release = threading.Event(), threading.Event()
 		release.set()
