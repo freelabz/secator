@@ -7,7 +7,7 @@ into these helpers, so proving the helpers proves every backend. The user's targ
 """
 import unittest
 
-from secator.cli import _aggregate_values, _sort_results_by_field
+from secator.query._aggregate import _aggregate_values, _sort_results_by_field
 
 
 class TestSortResultsByField(unittest.TestCase):
@@ -123,12 +123,12 @@ class TestStreamingAggregation(unittest.TestCase):
 			yield it
 
 	def test_count_streams(self):
-		from secator.cli import _aggregate_streamed
+		from secator.query._aggregate import _aggregate_streamed
 		s = self._stream([{'_type': 'port', 'port': 443}, {'_type': 'port', 'port': 443}, {'_type': 'port', 'port': 80}])
 		self.assertEqual(_aggregate_streamed(s, 'port', None, fmt='port', count=True, limit=15), ['2  443', '1  80'])
 
 	def test_uniq_streams_and_keeps_dicts(self):
-		from secator.cli import _aggregate_streamed
+		from secator.query._aggregate import _aggregate_streamed
 		items = [
 			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},
 			{'_type': 'vulnerability', 'name': 'XSS', 'severity': 'high', 'matched_at': 'a'},
@@ -139,7 +139,7 @@ class TestStreamingAggregation(unittest.TestCase):
 		self.assertTrue(all(isinstance(x, dict) for x in rows))   # kept as findings -> rich render
 
 	def test_group_streams(self):
-		from secator.cli import _aggregate_streamed
+		from secator.query._aggregate import _aggregate_streamed
 		from secator.output_types import Vulnerability
 		items = [
 			{'_type': 'vulnerability', 'name': 'XSS', 'matched_at': 'a', 'severity': 'high'},
@@ -151,7 +151,7 @@ class TestStreamingAggregation(unittest.TestCase):
 
 	def test_group_keeps_every_exploit_attempt(self):
 		# exploit_attempt has no group key: each attempt is distinct, --group lists them all.
-		from secator.cli import _aggregate_streamed
+		from secator.query._aggregate import _aggregate_streamed
 		from secator.output_types import ExploitAttempt
 		items = [
 			{'_type': 'exploit_attempt', 'name': 't', 'vuln_id': 'CVE-1', 'matched_at': 'a', 'verdict': 'failed'},
@@ -163,7 +163,7 @@ class TestStreamingAggregation(unittest.TestCase):
 
 	def test_uniq_sort_orders_the_collapsed_set(self):
 		# --uniq --sort must sort the deduped values (bounded), not return first-seen order.
-		from secator.cli import _aggregate_streamed
+		from secator.query._aggregate import _aggregate_streamed
 		items = [{'_type': 'port', 'port': p} for p in (443, 80, 22, 80, 443)]
 		asc = _aggregate_streamed(self._stream(items), 'port', None, fmt='port', uniq=True, sort='port')
 		self.assertEqual(asc, ['22', '80', '443'])          # not first-seen ['443','80','22']
@@ -172,7 +172,7 @@ class TestStreamingAggregation(unittest.TestCase):
 
 	def test_count_is_bounded_over_a_huge_stream(self):
 		# 200k findings but only 3 distinct ports -> result stays 3 rows (memory ~ #distinct).
-		from secator.cli import _aggregate_streamed
+		from secator.query._aggregate import _aggregate_streamed
 		big = ({'_type': 'port', 'port': (443, 80, 22)[i % 3]} for i in range(200000))
 		rows = _aggregate_streamed(big, 'port', None, fmt='port', count=True)
 		self.assertEqual(len(rows), 3)

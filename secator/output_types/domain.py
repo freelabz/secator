@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from secator.definitions import ALIVE, DOMAIN
 from secator.config import CONFIG
 from secator.output_types import OutputType
-from secator.utils import rich_to_ansi, format_object
+from secator.utils import rich_to_ansi, format_object, to_datetime
 
 
 @dataclass
@@ -59,14 +59,9 @@ class Domain(OutputType):
 
 	@staticmethod
 	def get_datetime(date):
-		if isinstance(date, datetime):
-			return date
-		try:
-			dt = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ")
-			dt = dt.replace(tzinfo=timezone.utc)
-			return dt
-		except (ValueError, TypeError):
-			return None
+		# Shared parser: also reads back what each driver stores (ISO 'T' / space-separated
+		# strings from json/sqlite/api, aware datetimes from mongodb), not just '...Z' strings.
+		return to_datetime(date)
 
 	def is_expired(self, months=0) -> bool:
 		if self.expiration_date:

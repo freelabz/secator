@@ -6,9 +6,6 @@ import subprocess
 import sys
 import time
 
-from collections import Counter
-
-
 from pathlib import Path
 from stat import S_ISFIFO
 
@@ -29,6 +26,8 @@ from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, VERSION, STA
 from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
 from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.query import QueryEngine
+from secator.query._aggregate import _aggregate_streamed, _aggregate_views
+from secator.query._format import _apply_format
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
@@ -921,20 +920,25 @@ def _summary_query(engine, type_or_expr, fmt=None, count=False, uniq=False, sort
 	`_group_aggregate`), so a subsequent count reflects UNIQUE findings — e.g. a vulnerability
 	hitting many targets counts once."""
 	from rich.markup import escape
-	from secator.query.utils import python_expr_to_mongo
+	from secator.query.utils import python_expr_to_mongo, query_possible_types
 	from secator.query._stream import StreamView
 	raw = python_expr_to_mongo(type_or_expr)
 	# Resolve the concrete finding type(s) BEFORE wrapping, so a compound/dedup `$and` never hides
-	# `_type` (a `{'$in': [...]}` type filter or a non-type expr means "span every type").
+	# `_type`: only the types the expression can match (conservative: `||` unites, `&&` intersects,
+	# anything not analysable keeps every type) — each skipped type saves a full read on json.
 	typemap = {c.get_name(): c for c in FINDING_TYPES}
+	# An explicit type list keeps its own order and may name non-finding types (e.g. target).
 	tv = raw.get('_type')
 	if isinstance(tv, str):
-		types = [tv]
-	elif isinstance(tv, dict):
-		types = list(tv.get('$in') or typemap)
+		universe = [tv]
+	elif isinstance(tv, dict) and isinstance(tv.get('$in'), list):
+		universe = [t for t in tv['$in'] if isinstance(t, str)]
 	else:
-		types = list(typemap)
-	base = {k: v for k, v in raw.items() if k != '_type'}
+		universe = list(typemap)
+	types = query_possible_types(raw, universe)
+	# A plain `_type` equality is implied by the per-type clause below; any other type constraint
+	# (e.g. `$nin`, or `_type` inside `$or`) stays in the query.
+	base = {k: v for k, v in raw.items() if not (k == '_type' and isinstance(v, str))}
 	# Store-side dedup (mirrors report.build's stream path). MUST nest in `$and`: a top-level
 	# `_context.workspace_duplicate` is a PROTECTED_FIELD and gets stripped by _merge_query.
 	dup = {'_context.workspace_duplicate': {'$ne': True}} if CONFIG.runners.remove_duplicates else None
@@ -1313,348 +1317,6 @@ def _looks_like_query_expr(value):
 	return value.strip() in {cls.get_name() for cls in OUTPUT_TYPES}
 
 
-def _apply_format(results, fmt):
-	"""Apply a --format string to report results, returning formatted strings grouped by type.
-
-	Args:
-		results (dict): Report results keyed by type name.
-		fmt (str): Format spec(s), optionally pipe-separated per type.
-			E.g. '{tag.match}-{tag.name}' or '{port.host}:{port.port} || vulnerability.matched_at'
-			May also be a file path (< 255 chars, file must exist) to load the template from disk.
-
-	Returns:
-		dict: Results dict with items replaced by formatted strings (only matching types kept).
-	"""
-	fmt = fmt.strip()
-
-	# Auto-detect format file: if fmt looks like a path and the file exists, load it.
-	if len(fmt) < 255:
-		p = Path(fmt)
-		if p.is_file():
-			try:
-				fmt = p.read_text(encoding='utf-8')
-			except (OSError, UnicodeDecodeError) as exc:
-				raise click.UsageError(f'Could not read --format template file "{p}": {exc}') from exc
-
-	# Unescape common escape sequences so CLI users can write \n, \t in their format strings.
-	fmt = fmt.replace('\\n', '\n').replace('\\t', '\t')
-
-	specs = [s.strip() for s in re.split(r'\s*\|\|\s*', fmt) if s.strip()]
-	new_results = {}
-
-	for spec in specs:
-		_field_only = False
-		if '{' in spec and '}' in spec:
-			m = re.search(r'\{(\w+)\.', spec)
-			if m and m.group(1) in results:
-				# Brace-style with type.field dot notation: {url.host} {port.port}
-				_type = m.group(1)
-				_template = spec
-			elif m and m.group(1) in FINDING_TYPES_LOWER:
-				# Known output type referenced but not present in results — skip this spec.
-				continue
-			else:
-				# Brace-style with direct field names or nested field access:
-				# {url} {host} {status_code} or {extra_data.published}
-				_field_only = True
-				_type = None
-				_template = spec
-		else:
-			parts = spec.split('.', 1)
-			_type = parts[0]
-			_field = parts[1] if len(parts) > 1 else None
-			_template = '{' + _field + '}' if _field else None
-
-		if _field_only:
-			nonempty_types = [k for k, v in results.items() if v]
-			if len(nonempty_types) != 1:
-				console.print(f'[yellow]Warning: --format "{spec}" requires a single type in results, got: {nonempty_types}[/yellow]')  # noqa: E501
-				continue
-			_type = nonempty_types[0]
-			items = results[_type]
-			if not items:
-				new_results[_type] = []
-				continue
-			formatted = []
-			for item in items:
-				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
-				# Wrap nested dicts with DotMap to support dotted access (e.g. {extra_data.published})
-				d_dotmaps = {k: DotMap(v) if isinstance(v, dict) else v for k, v in d.items()}
-				try:
-					value = _template.format(**d_dotmaps)
-					if 'DotMap()' in str(value):
-						continue
-					formatted.append(value)
-				except (KeyError, AttributeError):
-					pass
-			new_results[_type] = formatted
-			continue
-
-		if _type not in results:
-			if _template is None:
-				# The spec is a plain field name (no type prefix). If there is exactly one
-				# non-empty type, fall back to field lookup on that type.
-				nonempty_types = [k for k, v in results.items() if v]
-				if len(nonempty_types) == 1:
-					_actual_type = nonempty_types[0]
-					items = results[_actual_type]
-					formatted = []
-					for item in items:
-						d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
-						val = d.get(_type)
-						if val is not None:
-							formatted.append(str(val))
-					new_results[_actual_type] = formatted
-				elif nonempty_types:
-					console.print(f'[yellow]Warning: --format type {_type!r} not found in results[/yellow]')
-			elif _type not in FINDING_TYPES_LOWER:
-				# Dotted field path (e.g. extra_data.published) where the first part is not a
-				# known output type. Treat the whole spec as a nested field path on the single
-				# non-empty result type, using DotMap for traversal.
-				nonempty_types = [k for k, v in results.items() if v]
-				if len(nonempty_types) == 1:
-					_actual_type = nonempty_types[0]
-					items = results[_actual_type]
-					formatted = []
-					path_parts = spec.split('.')
-					for item in items:
-						d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
-						val = DotMap(d)
-						for part in path_parts:
-							val = getattr(val, part, None)
-							if val is None or (isinstance(val, DotMap) and not val):
-								val = None
-								break
-						if val is not None:
-							formatted.append(str(val))
-					new_results[_actual_type] = formatted
-			continue
-
-		items = results[_type]
-		if not items:
-			new_results[_type] = []
-			continue
-
-		if _template:
-			formatted = []
-			is_brace_style = '{' in spec and '}' in spec
-			for item in items:
-				d = item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
-				try:
-					# Brace-style ({type.field}): expose the item as a DotMap under the type key.
-					# Dot-path style (type.field): wrap nested dict values as DotMap so that
-					# templates like {extra_data.ttl} can resolve via attribute access.
-					if is_brace_style:
-						kwargs = {**d, _type: DotMap(d)}
-					else:
-						kwargs = {k: DotMap(v) if isinstance(v, dict) else v for k, v in d.items()}
-					value = _template.format(**kwargs)
-					# DotMap returns an empty DotMap() for missing nested paths; skip such items.
-					if 'DotMap()' in str(value):
-						continue
-					formatted.append(value)
-				except (KeyError, AttributeError):
-					pass
-			new_results[_type] = formatted
-		else:
-			# No field template. `_type` is a bare token that matched a result type name (e.g.
-			# `-f port`). If that token is ALSO a field on the items, the user means the field
-			# column — emit its value (parity with `-f port.port`). Otherwise fall back to each
-			# OutputType's __str__ for a clean primary-field repr. Items from report.data['results']
-			# may be raw dicts; reconstruct via OutputType.load() for the __str__ path.
-			# Detect the field across the WHOLE result set (not just the first item), so a
-			# heterogeneous type whose first item lacks the field still resolves the field values.
-			_dicts = [item if isinstance(item, dict) else (item.toDict() if hasattr(item, 'toDict') else {})
-					  for item in items]
-			formatted = []
-			if any(_type in d for d in _dicts):
-				for d in _dicts:
-					val = d.get(_type)
-					if val is not None:
-						formatted.append(str(val))
-			else:
-				# No matching field — render each finding via its OutputType (primary-field repr).
-				formatted = [_render_finding(item, _type) for item in items]
-			new_results[_type] = formatted
-
-	return new_results
-
-
-def _sort_results_by_field(results, sort):
-	"""Sort each type's findings by a field, in place. Numeric-aware (ints/floats sort naturally);
-	a leading `-` sorts descending. Missing values sort last. Runs before --format, so `--sort port`
-	orders the rows even when --format shows a different field. Backend-agnostic (post-fetch)."""
-	field = sort.strip()
-	reverse = field.startswith('-')
-	if reverse:
-		field = field[1:].strip()
-
-	def _key(item):
-		# Resolve the (dotted) field on dicts OR objects, so `--sort` also reaches attributes like
-		# `_group_count` set by --group on the representative OutputType (dicts don't carry it).
-		val = item
-		for part in field.split('.'):
-			if isinstance(val, dict):
-				val = val.get(part)
-			else:
-				val = getattr(val, part, None)
-			if val is None:
-				break
-		return val
-
-	for _type, items in results.items():
-		keyed = [(_key(it), it) for it in items]
-		try:
-			keyed.sort(key=lambda kv: (kv[0] is None, kv[0]), reverse=reverse)
-		except TypeError:
-			# Mixed/incomparable field types -> stable string ordering.
-			keyed.sort(key=lambda kv: (kv[0] is None, str(kv[0])), reverse=reverse)
-		results[_type] = [it for _, it in keyed]
-
-
-def _render_finding(item, _type):
-	"""Render a finding to its display string — the OutputType's __str__ (what the console shows),
-	falling back to JSON. Used when aggregating WITHOUT --format so raw finding dicts aren't shown
-	as Python-dict / JSON reprs. Already-formatted strings pass through unchanged."""
-	if not isinstance(item, dict):
-		return str(item)
-	otype_cls = {cls.get_name(): cls for cls in FINDING_TYPES}.get(_type)
-	if otype_cls:
-		try:
-			return str(otype_cls.load(item))
-		except Exception:
-			return json.dumps(item)
-	return json.dumps(item)
-
-
-def _aggregate_values(results, count=False, uniq=False, sort_given=False):
-	"""Post-fetch aggregation of results, per type (backend-agnostic). `uniq` drops duplicate rows
-	(first-seen order); `count` groups identical rows into ``"<count>  <value>"`` — most-frequent
-	first by default, or in the sorted order the findings arrived in when --sort was given.
-
-	Rows may be already-formatted strings (from --format) or raw finding dicts (no --format). For
-	`uniq` the ORIGINAL item is kept (so raw findings still render richly via their OutputType, not
-	as str(dict) JSON lines); the dedup key is the finding's display string."""
-	out = {}
-	for _type, values in results.items():
-		if uniq and not count:
-			seen = set()
-			kept = []
-			for v in values:
-				key = v if isinstance(v, str) else _render_finding(v, _type)
-				if key not in seen:
-					seen.add(key)
-					kept.append(v)   # keep original -> dicts render richly, strings stay strings
-			out[_type] = kept
-		elif count:
-			svals = [v if isinstance(v, str) else _render_finding(v, _type) for v in values]
-			items = list(Counter(svals).items())  # (value, count), first-seen insertion order
-			if not sort_given:
-				items.sort(key=lambda kv: kv[1], reverse=True)  # top-N: most frequent first
-			width = max((len(str(c)) for _, c in items), default=1)
-			out[_type] = [f'{str(c).rjust(width)}  {v}' for v, c in items]
-		else:
-			out[_type] = list(values)
-	return out
-
-
-def _num_key(s):
-	"""Numeric-aware sort key for a rendered value string: numbers sort numerically (so '80' <
-	'443'), non-numbers fall back to string order."""
-	try:
-		return (0, float(s))
-	except (TypeError, ValueError):
-		return (1, str(s))
-
-
-def _aggregate_streamed(sv, _type, cls, fmt=None, sort=None, count=False, uniq=False, group=False, limit=0):
-	"""Aggregate a type's StreamView with peak memory bounded by the RESULT size, not the number of
-	findings — safe for 100k+.
-
-	- --group: group_findings() consumes the cursor in a single streaming pass (memory ~ #groups),
-	  then the small rep set is finished with the normal helpers.
-	- --count / --uniq: collapse the stream incrementally (Counter / seen-set), batching through
-	  _apply_format only for the --format path; memory ~ #distinct values / #unique rows.
-	- --sort alone: a correct global sort needs the whole set, so it materializes (inherent; combine
-	  with --count/--group to stay bounded, or push down in a future pass).
-	"""
-	from secator.query.utils import group_findings
-
-	def _finish(items):
-		res = {_type: items}
-		if sort:
-			_sort_results_by_field(res, sort)
-		if fmt:
-			res = _apply_format(res, fmt)
-		if count or uniq:
-			res = _aggregate_values(res, count=count, uniq=uniq, sort_given=bool(sort))
-		rows = res.get(_type, [])  # _apply_format drops the type when there is nothing to format
-		return rows[:limit] if limit else rows
-
-	if group and cls is not None and getattr(cls, '_group_by', None):
-		# Use raw-dict streaming to avoid O(N) full OutputType rehydration before grouping.
-		# group_findings() accepts dicts natively and only rehydrates the representative
-		# (one per group), so peak cost drops from O(N * #fields) to O(#groups * #fields).
-		raw_iter = sv.iter_raw() if hasattr(sv, 'iter_raw') else sv
-		# Pass dataclass defaults so raw-dict grouping fills absent group-by fields
-		# (e.g. a tag with no `category`) the same way rehydration would, keeping
-		# group keys/counts identical to the object path.
-		defaults = cls.field_defaults() if hasattr(cls, 'field_defaults') else None
-		reps = group_findings(raw_iter, list(cls._group_by), getattr(cls, '_group_aggregate', None), defaults=defaults)
-		return _finish(reps)
-
-	if count or uniq:
-		counter, seen, kept, batch = Counter(), set(), [], []
-
-		def _flush():
-			if not batch:
-				return
-			if fmt:
-				for v in _apply_format({_type: list(batch)}, fmt).get(_type, []):
-					if count:
-						counter[v] += 1
-					elif v not in seen:
-						seen.add(v)
-						kept.append(v)
-			else:
-				for it in batch:
-					v = _render_finding(it, _type)
-					if count:
-						counter[v] += 1
-					elif v not in seen:
-						seen.add(v)
-						kept.append(it)   # keep the finding -> renders richly, not str(dict)
-			batch.clear()
-
-		for item in sv:
-			batch.append(item)
-			if len(batch) >= 2000:
-				_flush()
-		_flush()
-
-		if uniq:
-			if sort:  # sort the COLLAPSED set (bounded by #unique), not the raw stream
-				if fmt:
-					kept.sort(key=_num_key, reverse=sort.strip().startswith('-'))
-				else:
-					res = {_type: kept}
-					_sort_results_by_field(res, sort)
-					kept = res[_type]
-			return kept[:limit] if limit else kept
-		items = list(counter.items())
-		if sort:
-			items.sort(key=lambda kv: _num_key(kv[0]), reverse=sort.strip().startswith('-'))
-		else:
-			items.sort(key=lambda kv: kv[1], reverse=True)   # most-frequent-first
-		width = max((len(str(c)) for _, c in items), default=1)
-		rows = [f'{str(c).rjust(width)}  {v}' for v, c in items]
-		return rows[:limit] if limit else rows
-
-	# --sort alone: full ordering needs the whole set. list(iter(sv)), not list(sv): list() asks a
-	# sized object for its len() first, which is a full count query on top of the read.
-	return _finish(list(iter(sv)))
-
-
 def run_report_show(report_query, output, time_delta, query, fmt, workspace, driver, dedupe, limit, output_folder=None, sort=None, count=False, uniq=False, group=None, show_all=False):  # noqa: E501
 	"""Build and send a consolidated report. Shared by `report show` and `query`.
 
@@ -1776,11 +1438,12 @@ def run_report_show(report_query, output, time_delta, query, fmt, workspace, dri
 	if aggregating:
 		report.build(query=full_query, dedupe=dedupe_effective, limit=0, stream=True)
 		type_map = {cls.get_name(): cls for cls in FINDING_TYPES}
-		for type_name, sv in list(report.data['results'].items()):
+		report.data['results'] = _aggregate_views(
+			report.data['results'], getattr(report, 'stream_query', None), type_map,
+			fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)
+		for type_name, rows in report.data['results'].items():
 			cls = type_map.get(type_name)
-			report.data['results'][type_name] = _aggregate_streamed(
-				sv, type_name, cls, fmt=fmt, sort=sort, count=count, uniq=uniq, group=group, limit=limit)
-			if group and cls is not None and getattr(cls, '_group_by', None) and report.data['results'][type_name]:
+			if group and cls is not None and getattr(cls, '_group_by', None) and rows:
 				from secator.query.utils import group_key_label
 				grouped_types.append((type_name, group_key_label(cls._group_by)))
 		if group and not grouped_types:

@@ -36,7 +36,7 @@ ${findings}
 ${arsenal}
 ${subagents}
 ${guardrails}
-${isolation}
+$shell_environment
 ${exploitation_report}
 
 <vulnerability_handling>

@@ -58,7 +58,9 @@ class UpdateFinding(BaseTool):
 						"type": "object",
 						"description": (
 							"Top-level finding fields to set (e.g. {\"severity\": \"high\", \"tags\": [\"xss\"]}). "
-							"Immutable keys (_uuid, _type, _id, _context, id) are ignored. List fields must be JSON arrays."
+							"Immutable keys (_uuid, _type, _id, _context, id) are ignored. List fields must be JSON arrays. "
+							"Datetime fields (e.g. a certificate's not_before/not_after, a domain's expiration_date) "
+							"take an ISO 8601 string, e.g. \"2026-01-31T12:00:00Z\"."
 						),
 						"additionalProperties": True
 					},

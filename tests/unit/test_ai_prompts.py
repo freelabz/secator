@@ -69,7 +69,7 @@ class TestPrompts(unittest.TestCase):
 		"""Test SYSTEM_EXPLOIT template mentions expected concepts."""
 		self.assertIn("exploitation", SYSTEM_EXPLOIT.template)
 		self.assertIn("proof-of-concept", SYSTEM_EXPLOIT.template)
-		self.assertIn("docker", SYSTEM_EXPLOIT.template.lower())
+		self.assertIn("$shell_environment", SYSTEM_EXPLOIT.template)
 
 	def test_system_scan_has_subagents(self):
 		"""Test SYSTEM_SCAN has subagent guidance."""
@@ -116,8 +116,8 @@ class TestPrompts(unittest.TestCase):
 		self.assertEqual(re.findall(r'\$\{\w+\}', prompt), [], "unresolved ${include} in exploit prompt")
 		template_vars = [
 			"library_reference", "discovery", "common", "queries", "findings",
-			"arsenal", "guardrails", "isolation", "exploitation_report",
-			"workspace_path", "query_types", "output_types_reference",
+			"arsenal", "guardrails", "shell_environment", "exploitation_report",
+			"workspace_path", "runner_dir", "query_types", "output_types_reference",
 		]
 		leftover = [v for v in template_vars if f"${v}" in prompt]
 		self.assertEqual(leftover, [], f"unresolved template vars in exploit prompt: {leftover}")
@@ -473,6 +473,136 @@ class TestPrompts(unittest.TestCase):
 
 
 @unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
+class TestIsolationPrompts(unittest.TestCase):
+	"""Isolation is a run setting: with --isolated, run_shell already runs in the per-run
+	sandbox container (secator.ai.tools.run_shell). The <shell_environment> block is picked
+	from that runtime state (sandbox vs host), with the sandbox image from config and its
+	package manager derived from the image name."""
+
+	SHELL_MODES = ("scan", "exploit", "contribute", "monitor", "research")
+
+	def _prompt(self, mode, isolated, image=None):
+		with patch("secator.ai.context.load_context_blocks", return_value=[]):
+			if image is None:
+				return get_system_prompt(mode, workspace_path="/tmp/ws", isolated=isolated)
+			with patch("secator.ai.tools._sandbox._sandbox_image", return_value=image):
+				return get_system_prompt(mode, workspace_path="/tmp/ws", isolated=isolated)
+
+	@staticmethod
+	def _block(prompt):
+		return "Shell isolation" + prompt.split("<shell_environment>\nShell isolation", 1)[1].split("\n</shell_environment>", 1)[0]
+
+	def test_guardrails_has_no_container_retry_hint(self):
+		from secator.ai.prompts import load_prompt
+		g = load_prompt("constraints/guardrails.md")
+		self.assertNotIn("isolated Docker container", g)
+		self.assertNotIn("outside of docker run", g)
+
+	def test_every_shell_mode_renders_one_block_matching_isolation(self):
+		for mode in self.SHELL_MODES:
+			for isolated in (True, False):
+				p = self._prompt(mode, isolated)
+				self.assertEqual(p.count("\n</shell_environment>"), 1, f"{mode}/{isolated}")
+				self.assertNotIn("$shell_environment", p)
+				self.assertNotIn("$sandbox_", p)
+				blk = self._block(p)
+				self.assertIn("Shell isolation is ON" if isolated else "Shell isolation is OFF", blk)
+		self.assertNotIn("\n</shell_environment>", self._prompt("chat", True))  # chat has no shell
+
+	def test_sandbox_block(self):
+		blk = self._block(self._prompt("exploit", True, image="freelabz/secator:1.2.3-lite"))
+		self.assertIn("image `freelabz/secator:1.2.3-lite`", blk)
+		self.assertIn("Docker is not available inside the\nsandbox", blk)
+		self.assertNotIn("docker run", blk)
+		self.assertIn("[sandbox error] could not start isolation container", blk)
+		self.assertIn("Tasks and workflows do NOT run in the sandbox", blk)
+		self.assertNotIn("$sandbox_loopback", blk)
+		self.assertIn("Tasks and workflows do NOT run in the sandbox", blk)
+		self.assertIn("/tmp/ws/.outputs/poc", blk)  # $runner_dir substituted
+
+	def test_host_block(self):
+		blk = self._block(self._prompt("contribute", False))
+		self.assertIn("run_shell executes directly on THIS host", blk)
+		self.assertIn("working Docker daemon", blk)  # the host may have Docker; the sandbox has none
+		self.assertNotIn("sandbox container", blk)
+		self.assertIn("is scoped like any other target", blk)
+		self.assertIn("java -jar", blk)
+
+	def test_isolated_none_follows_config_default(self):
+		from secator.config import CONFIG
+		with patch.object(CONFIG.security, "shell_isolated", True):
+			self.assertIn("Shell isolation is ON", self._prompt("scan", None))
+		with patch.object(CONFIG.security, "shell_isolated", False):
+			self.assertIn("Shell isolation is OFF", self._prompt("scan", None))
+
+	def test_sandbox_error_string_matches_run_shell(self):
+		import inspect
+		from secator.ai.tools import run_shell
+		self.assertIn("could not start isolation container", inspect.getsource(run_shell))
+
+	def test_package_manager_variants(self):
+		"""The default image (Alpine, unprivileged `secator` user with sudo for `apk add`) gets
+		concrete commands; an overridden image gets a detect-once step (OS, manager, root)."""
+		from secator.ai.prompts import build_sandbox_packages
+		for image in ("freelabz/secator:1.0.0-lite", "freelabz/secator:1.0.0-lite@sha256:abc"):
+			out = build_sandbox_packages(image)
+			self.assertIn("sudo apk add --no-cache openjdk17-jre-headless", out, image)
+			self.assertIn("java -jar", out, image)
+		# full flavor drops the apk sudo rule -> detect-once, like any non-default image
+		for image in ("freelabz/secator:1.0.0", "alpine:3.21", "kalilinux/kali-rolling", "myorg/freelabz/secator:1-lite"):
+			out = build_sandbox_packages(image)
+			self.assertIn("cat /etc/os-release; id -u", out, image)
+			self.assertNotIn("sudo apk add --no-cache openjdk17", out, image)
+			self.assertIn("java -jar", out, image)
+
+	def test_sandbox_loopback_follows_network_mode(self):
+		from secator.ai.prompts import build_sandbox_loopback
+		with patch.dict("os.environ", {"SECATOR_AI_SANDBOX_NETWORK": ""}):
+			self.assertIn("its own network namespace", build_sandbox_loopback())
+		with patch.dict("os.environ", {"SECATOR_AI_SANDBOX_NETWORK": "host"}):
+			self.assertIn("scoped like any other target", build_sandbox_loopback())
+
+	def test_subagent_keeps_block(self):
+		with patch("secator.ai.context.load_context_blocks", return_value=[]):
+			p = get_system_prompt("exploit", workspace_path="/tmp/ws", isolated=True, is_subagent=True)
+		self.assertIn("Shell isolation is ON", self._block(p))
+
+	def test_host_docker_is_labs_only(self):
+		blk = self._block(self._prompt("scan", False))
+		self.assertIn("Docker commands are not\n  inspected for targets", blk)
+
+	def test_image_override_reaches_prompt(self):
+		blk = self._block(self._prompt("research", True, image="registry.local/kali:2"))
+		self.assertIn("image `registry.local/kali:2`", blk)
+		self.assertIn("cat /etc/os-release", blk)
+		self.assertNotIn("sudo apk add --no-cache go", blk)
+
+	def test_contribute_does_not_hardcode_image(self):
+		p = self._prompt("contribute", True, image="registry.local/custom:1")
+		self.assertNotIn("`freelabz/secator:<version>-lite` sandbox", p)
+		self.assertIn("image `registry.local/custom:1`", p)
+
+	def test_runner_dir_token_is_fully_substituted(self):
+		"""Prompt paths use $runner_dir (the runner's reports folder); no stale token remains."""
+		for mode in self.SHELL_MODES:
+			p = self._prompt(mode, True)
+			self.assertNotIn("$runner_dir", p, mode)
+			self.assertNotIn("$workspace_path", p, mode)
+
+	def test_research_subagent_ports_when_loopback_shared(self):
+		from secator.ai.prompts import load_prompt
+		r = load_prompt("modes/research.md")
+		self.assertIn("give each subagent a DISTINCT local port", r)
+		self.assertNotIn("it does NOT share your lab or your loopback", r)  # no longer unconditional
+
+	def test_research_has_no_docker_lab_in_sandbox(self):
+		from secator.ai.prompts import load_prompt
+		r = load_prompt("modes/research.md")
+		self.assertNotIn("in your sandbox: `docker run", r)
+		self.assertIn("no Docker daemon", r)
+
+
+@unittest.skipUnless(ADDONS_ENABLED['ai'], 'ai addon not installed')
 class TestScopeInPrompt(unittest.TestCase):
 	"""Authorized scope is surfaced in the system prompt so the model stays in
 	scope up front (fewer guardrail-denied retries), and is omitted when absent."""
@@ -669,12 +799,12 @@ class TestOperatingRulesRecap(unittest.TestCase):
 		self.assertIn("ask in `reason` and omit `choices`", recap)
 
 	def test_user_context_body_is_verbatim_not_token_substituted(self):
-		# $workspace_path in a user note must survive verbatim (substitution happens
+		# $runner_dir in a user note must survive verbatim (substitution happens
 		# on the baked-in prompt before the user block is appended).
-		block = "<context:n.md>\npath is $workspace_path\n</context>"
+		block = "<context:n.md>\npath is $runner_dir\n</context>"
 		with patch("secator.ai.context.load_context_blocks", return_value=[block]):
 			p = get_system_prompt("scan", workspace_path="/tmp/ws", backend=None)
-		self.assertIn("path is $workspace_path", p)
+		self.assertIn("path is $runner_dir", p)
 
 	def test_subagent_inherits_user_context(self):
 		# A subagent runs on the same path and must NOT have the user context
@@ -720,11 +850,11 @@ class TestSessionContext(unittest.TestCase):
 		for iso in (True, False):
 			self.assertEqual(self._build(iso), self._build(iso))
 
-	def test_isolated_describes_alpine_sandbox_root(self):
+	def test_isolated_points_at_shell_environment(self):
 		blk = self._build(True)
-		self.assertIn("apk", blk)
 		self.assertIn("sandbox", blk.lower())
-		self.assertIn("root", blk.lower())
+		self.assertIn("<shell_environment>", blk)
+		self.assertNotIn("running as root", blk)
 		self.assertNotIn("sudo requires a password", blk)
 
 	def test_host_describes_os_pm_and_sudo(self):
@@ -732,7 +862,7 @@ class TestSessionContext(unittest.TestCase):
 		self.assertIn("Package manager:", blk)
 		self.assertIn("Privileges:", blk)
 		# Host block must NOT falsely claim the Alpine sandbox.
-		self.assertNotIn("disposable, network-isolated Alpine sandbox", blk)
+		self.assertNotIn("this run's sandbox container", blk)
 
 	def test_package_manager_override_is_a_bare_string(self):
 		# get_distro_config returns a bare string when SECATOR_PACKAGE_MANAGER is set.

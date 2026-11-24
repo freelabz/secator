@@ -66,3 +66,17 @@ class StreamView:
 		# Scope to this run like the other dunders do (self._query, e.g. `_context.{type}_id`);
 		# item fields win on key overlap (item's scalar `_type` over the run's `$in`).
 		return self._engine.count({**self._query, **q}) > 0
+
+
+def iter_types_raw(engine, query, types, batch_size=1000):
+	"""Stream the raw dicts matching ``query`` for ANY of ``types`` in one backend query.
+
+	The multi-type counterpart of one ``StreamView(engine, {**query, '_type': t}).iter_raw()`` per
+	type: on a backend where every query is a full pass over the store (``scan_per_query``), N
+	per-type views read the store N times, this reads it once. The caller splits by ``_type``;
+	within a type, records keep the order a per-type query returns them in.
+	"""
+	type_filter = {'_type': {'$in': list(types)}}
+	union_q = {'$and': [query, type_filter]} if '_type' in query else {**query, **type_filter}
+	for batch in engine.iterate(union_q, batch_size):
+		yield from batch
