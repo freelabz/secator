@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -135,11 +136,13 @@ def update_runner(self):
 	_id = self.context.get(key)
 	workspace_id = self.context.get('workspace_id')
 	payload = json.dumps(update, default=str)
+	start_time = time.time()
 	conn.execute(
 		f"INSERT INTO {table} (id, workspace_id, data) VALUES (?, ?, ?) "
 		f"ON CONFLICT(id) DO UPDATE SET workspace_id=excluded.workspace_id, data=excluded.data",
 		(_id, workspace_id, payload))
 	conn.commit()
+	self.last_updated_db = start_time
 
 
 def update_finding(self, item):

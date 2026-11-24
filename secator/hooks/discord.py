@@ -308,6 +308,9 @@ def update_runner(self):
 					thread_id = _create_thread(channel_id, msg_id, thread_name)
 					if thread_id:
 						self.context['_discord_thread_id'] = thread_id
+	# Stamp the shared runner-update throttle (Runner.run_hooks on_interval) so a run with only
+	# this driver edits its message once per backend_update_frequency, not once per item.
+	self.last_updated_db = time.time()
 
 
 def update_finding(self, item):

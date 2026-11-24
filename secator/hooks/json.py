@@ -28,6 +28,7 @@
 # if a live "pending children" view is needed.
 
 import orjson
+import time
 import uuid
 from pathlib import Path
 
@@ -107,8 +108,10 @@ def update_runner(self):
 	the runner core (Runner.__init__); json keys its report by reports_folder, not the id."""
 	info = self.toDict()
 	path = _report_path(self)
+	start_time = time.time()
 	with atomic_json(path, default=_empty_report) as data:
 		data['info'] = info
+	self.last_updated_db = start_time
 	debug(f'wrote runner info to {path}', sub='hooks.json', verbose=True)
 
 

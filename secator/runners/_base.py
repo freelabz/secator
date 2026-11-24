@@ -1177,15 +1177,12 @@ class Runner:
 			self.debug('hook skipped (dry_run)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
 			return result
 		hooks = self.resolved_hooks[hook_type]
-		if hook_type == 'on_interval' and hooks:
-			# Throttle periodic runner updates for EVERY driver, not only those that happen to stamp
-			# `last_updated_db` themselves: without this, drivers that don't (json, sqlite) rewrote
-			# the full runner state after every single item.
-			if not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):
-				self.debug('hook skipped (backend update frequency)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
-				return
-			if self.enable_hooks:
-				self.last_updated_db = time()
+		# Periodic runner updates are throttled on `last_updated_db`, which every driver's runner
+		# update hook stamps after a successful write. Checked once per pass, so a hook stamping
+		# it never skips the hooks registered after it.
+		if hook_type == 'on_interval' and not should_update(CONFIG.runners.backend_update_frequency, self.last_updated_db):  # noqa: E501
+			self.debug('hook skipped (backend update frequency)', obj={'name': hook_type}, sub=sub, verbose=True)  # noqa: E501
+			return result
 		for hook in hooks:
 			fun = self.get_func_path(hook)
 			try:

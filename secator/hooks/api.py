@@ -108,6 +108,7 @@ def update_runner(self):
 			else:
 				self.context[f'{runner_type}_id'] = _id
 			_log_runner_api_time(self, start_time, 'in ', 's', _id)
+			self.last_updated_db = start_time
 
 
 def update_finding(self, item):
