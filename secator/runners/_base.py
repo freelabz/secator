@@ -12,7 +12,6 @@ from time import time
 from dotmap import DotMap
 from rich.errors import MarkupError as RichMarkupError
 import humanize
-from celery.result import allow_join_result
 
 from secator.definitions import ADDONS_ENABLED, STATE_COLORS
 from secator.celery_utils import CeleryData
@@ -22,7 +21,7 @@ from secator.output_types import (
 )
 from secator.report import Report
 from secator.rich import console, console_stdout, live_is_active
-from secator.runners._helpers import get_task_folder_id, run_extractors
+from secator.runners._helpers import allow_join_result_shared, get_task_folder_id, run_extractors
 from secator.scope import as_scope_list, host_in_scope
 from secator.query import QueryEngine
 from secator.query._stream import StreamView
@@ -1117,10 +1116,10 @@ class Runner:
 			self.print_item = False
 			self.debug('running workflow in sync mode', sub='start')
 			# Eager run in this process: every result is already computed, so lift Celery's
-			# "never call result.get() within a task" guard (set by prefork/solo/threads).
-			# The guard is a process-wide flag: on a threads pool with concurrency > 1, two
-			# overlapping sync children can restore it under each other.
-			with allow_join_result():
+			# "never call result.get() within a task" guard (set by prefork/solo/threads). The
+			# guard is process-wide and eager children can overlap (background jobs, threads
+			# pool): see allow_join_result_shared.
+			with allow_join_result_shared():
 				results = workflow.apply().get()
 		else:
 			self.debug('running workflow in async mode', sub='start')
