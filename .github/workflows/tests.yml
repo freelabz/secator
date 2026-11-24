@@ -78,6 +78,8 @@ jobs:
         python-version: ["3.x"]
         os: [ubuntu-latest]
     # MongoDB server for the mongodb driver end-to-end test (tests/integration/test_mongodb.py).
+    # Redis broker for the ai worker scenarios (tests/integration/ai/test_ai_worker.py): revoking
+    # a running task needs remote control, which the filesystem broker lacks.
     services:
       mongo:
         image: mongo:7
@@ -85,6 +87,15 @@ jobs:
           - 27017:27017
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ping: 1}).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -158,12 +169,17 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: Install the redis client (ai worker scenarios)
+      run: pipx runpip secator install 'celery[redis] < 6'
+
     - name: Run integration tests
       run: |
-        secator test integration --test test_celery,test_worker,test_tasks,test_mongodb
+        secator test integration --test test_celery,test_worker,test_tasks,test_mongodb,test_ai
       env:
         SECATOR_ADDONS_MONGODB_URL: mongodb://localhost:27017
         SECATOR_TEST_MONGODB: '1'  # fail, rather than skip, if the mongo service is unreachable
+        SECATOR_TEST_REDIS_URL: redis://localhost:6379/1  # its own db: the ai worker scenarios' broker
+        SECATOR_TEST_AI_SLOW: '1'  # also run the slow ai scenarios (real Celery workers, polling loop)
 
     - name: Archive code coverage results
       uses: actions/upload-artifact@v4
